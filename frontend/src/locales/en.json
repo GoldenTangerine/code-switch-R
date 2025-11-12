@@ -50,7 +50,8 @@
         "githubUpdate": "Open GitHub (update available)",
         "theme": "Toggle theme",
         "settings": "Open settings",
-        "mcp": "Open MCP panel"
+        "mcp": "Open MCP panel",
+        "skill": "Open skill catalog"
       },
       "providers": {
         "requests": "Requests",
@@ -254,6 +255,49 @@
         },
         "deleteTitle": "Delete MCP server",
         "deleteMessage": "Are you sure you want to delete {name}? This action cannot be undone."
+      }
+    },
+    "skill": {
+      "hero": {
+        "eyebrow": "Skill Library",
+        "title": "Claude Skill",
+        "lead": "Fetch Claude skills from the managed repositories. Click the top-right button to add more sources."
+      },
+      "actions": {
+        "back": "Back to home",
+        "loading": "Processing...",
+        "refresh": "Refresh list",
+        "view": "View on GitHub",
+        "install": "Install to Claude Code",
+        "uninstall": "Uninstall",
+        "installError": "Failed to install {name}. Please retry",
+        "uninstallError": "Failed to uninstall {name}. Please retry"
+      },
+      "list": {
+        "title": "Available skills",
+        "subtitle": "Metadata is parsed from each SKILL.md front matter.",
+        "loading": "Loading skills...",
+        "empty": "No skills detected in the repository.",
+        "error": "Failed to load skills. Please check your network and retry.",
+        "noDescription": "SKILL.md does not include a description",
+        "missingRepo": "Missing repository information for this skill"
+      },
+      "repos": {
+        "open": "Manage repositories",
+        "title": "Skill sources",
+        "subtitle": "Add GitHub repositories to control where skills are fetched from.",
+        "urlPlaceholder": "https://github.com/owner/repo",
+        "branchPlaceholder": "Branch",
+        "addLabel": "Add repository",
+        "viewLabel": "Open on GitHub",
+        "removeLabel": "Remove repository",
+        "loadError": "Failed to load repositories",
+        "addError": "Failed to add repository",
+        "removeError": "Failed to remove repository",
+        "formError": "Owner and repository are required",
+        "loading": "Loading repositories...",
+        "empty": "No repositories configured.",
+        "branchLabel": "Branch: {branch}"
       }
     },
     "themesetting": {

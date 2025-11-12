@@ -402,8 +402,8 @@ html.dark .mac-sidebar-item:hover {
 }
 
 .contrib-tooltip {
-  position: absolute;
-  transform: translate(-50%, -110%);
+  position: fixed;
+  transform: translateX(-50%);
   background: var(--contrib-tooltip-bg);
   border: 1px solid var(--contrib-tooltip-border);
   border-radius: 12px;
@@ -415,7 +415,7 @@ html.dark .mac-sidebar-item:hover {
 }
 
 .contrib-tooltip.below {
-  transform: translate(-50%, 10%);
+  transform: translateX(-50%);
 }
 
 .tooltip-heading {
@@ -1145,6 +1145,44 @@ html.dark .ghost-icon:hover {
   background: rgba(255, 255, 255, 0.2);
 }
 
+.ghost-icon[data-tooltip] {
+  position: relative;
+}
+
+.ghost-icon[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(15, 23, 42, 0.9);
+  color: #fff;
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  z-index: 10;
+}
+
+.ghost-icon[data-tooltip]:hover::after,
+.ghost-icon[data-tooltip]:focus-visible::after {
+  opacity: 1;
+  transform: translateX(-50%) translateY(-2px);
+}
+
+.global-actions .ghost-icon[data-tooltip]::after {
+  bottom: auto;
+  top: calc(100% + 6px);
+}
+
+.global-actions .ghost-icon[data-tooltip]:hover::after,
+.global-actions .ghost-icon[data-tooltip]:focus-visible::after {
+  transform: translateX(-50%) translateY(2px);
+}
+
 
 .modal-backdrop {
   position: fixed;
@@ -1173,7 +1211,8 @@ html.dark .ghost-icon:hover {
 }
 
 .modal {
-  width: min(520px, 92vw);
+  width: min(720px, 95vw);
+  max-height: 90vh;
   background: var(--mac-surface);
   border-radius: 24px;
   border: 1px solid var(--mac-border);
@@ -1183,7 +1222,7 @@ html.dark .ghost-icon:hover {
   overflow: hidden;
 }
 
-.modal header {
+.modal-header {
   padding: 24px 24px 12px;
   display: flex;
   justify-content: space-between;
@@ -1193,6 +1232,10 @@ html.dark .ghost-icon:hover {
 
 .modal-body {
   padding: 0 24px 24px;
+}
+
+.modal-scrollable {
+  overflow-y: auto;
 }
 
 .modal-title {

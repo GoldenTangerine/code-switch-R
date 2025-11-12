@@ -51,7 +51,8 @@
         "githubUpdate": "打开 GitHub（发现新版本）",
         "theme": "切换主题",
         "settings": "打开设置",
-        "mcp": "打开 MCP 面板"
+        "mcp": "打开 MCP 面板",
+        "skill": "打开 Skill 列表"
       },
       "providers": {
         "requests": "请求数",
@@ -255,6 +256,49 @@
         },
         "deleteTitle": "删除 MCP 服务器",
         "deleteMessage": "确认删除 {name} 吗？操作不可撤销"
+      }
+    },
+    "skill": {
+      "hero": {
+        "eyebrow": "Skill 仓库",
+        "title": "Claude Skill",
+        "lead": "从 Skill 仓库中获取 Claude Skill，点击右上角按钮可添加更多 Skill 仓库。"
+      },
+      "actions": {
+        "back": "返回首页",
+        "loading": "处理中...",
+        "refresh": "刷新列表",
+        "view": "查看 GitHub",
+        "install": "安装到 Claude Code",
+        "uninstall": "卸载",
+        "installError": "安装 {name} 失败，请重试",
+        "uninstallError": "卸载 {name} 失败，请重试"
+      },
+      "list": {
+        "title": "可用技能",
+        "subtitle": "描述信息来源于各目录内 SKILL.md 的 front matter。",
+        "loading": "正在加载技能...",
+        "empty": "仓库中没有可用技能。",
+        "error": "技能列表加载失败，请检查网络后重试。",
+        "noDescription": "SKILL.md 未提供描述",
+        "missingRepo": "缺少对应的仓库信息，无法安装"
+      },
+      "repos": {
+        "open": "管理仓库",
+        "title": "技能仓库",
+        "subtitle": "维护 GitHub 仓库以加载更多技能来源。",
+        "urlPlaceholder": "https://github.com/owner/repo",
+        "branchPlaceholder": "分支",
+        "addLabel": "新增仓库",
+        "viewLabel": "打开 GitHub",
+        "removeLabel": "删除仓库",
+        "loadError": "仓库列表加载失败",
+        "addError": "新增仓库失败",
+        "removeError": "删除仓库失败",
+        "formError": "请填写所有者和仓库名称",
+        "loading": "正在加载仓库...",
+        "empty": "当前没有配置任何仓库。",
+        "branchLabel": "分支：{branch}"
       }
     },
     "themesetting": {

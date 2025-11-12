@@ -5,7 +5,8 @@
       <button
         class="ghost-icon github-icon"
         :class="{ 'github-upgrade': hasUpdateAvailable }"
-        :aria-label="hasUpdateAvailable ? t('components.main.controls.githubUpdate') : t('components.main.controls.github')"
+        :title="hasUpdateAvailable ? t('components.main.controls.githubUpdate') : t('components.main.controls.github')"
+        :data-tooltip="hasUpdateAvailable ? t('components.main.controls.githubUpdate') : t('components.main.controls.github')"
         @click="openGitHub"
       >
         <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -19,7 +20,12 @@
           />
         </svg>
       </button>
-      <button class="ghost-icon" :aria-label="t('components.main.controls.theme')" @click="toggleTheme">
+      <button
+        class="ghost-icon"
+        :title="t('components.main.controls.theme')"
+        :data-tooltip="t('components.main.controls.theme')"
+        @click="toggleTheme"
+      >
         <svg v-if="themeIcon === 'sun'" viewBox="0 0 24 24" aria-hidden="true">
           <circle cx="12" cy="12" r="4" stroke="currentColor" stroke-width="1.5" fill="none" />
           <path
@@ -40,7 +46,12 @@
           />
         </svg>
       </button>
-      <button class="ghost-icon" :aria-label="t('components.main.controls.settings')" @click="goToSettings">
+      <button
+        class="ghost-icon"
+        :title="t('components.main.controls.settings')"
+        :data-tooltip="t('components.main.controls.settings')"
+        @click="goToSettings"
+      >
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path
             d="M12 15a3 3 0 100-6 3 3 0 000 6z"
@@ -100,6 +111,7 @@
         </div>
         <div
           v-if="usageTooltip.visible"
+          ref="tooltipRef"
           class="contrib-tooltip"
           :class="usageTooltip.placement"
           :style="{ left: `${usageTooltip.left}px`, top: `${usageTooltip.top}px` }"
@@ -145,10 +157,51 @@
               <span class="relay-tooltip-content">{{ currentProxyLabel }} · {{ t('components.main.relayToggle.tooltip') }}</span>
             </div>
           </div>
-          <button class="ghost-icon" :aria-label="t('components.main.controls.mcp')" @click="goToMcp">
+          <button
+            class="ghost-icon"
+            :title="t('components.main.controls.mcp')"
+            :data-tooltip="t('components.main.controls.mcp')"
+            @click="goToMcp"
+          >
             <span class="icon-svg" v-html="mcpIcon" aria-hidden="true"></span>
           </button>
-          <button class="ghost-icon" :aria-label="t('components.main.logs.view')" @click="goToLogs">
+          <button
+            class="ghost-icon"
+            :title="t('components.main.controls.skill')"
+            :data-tooltip="t('components.main.controls.skill')"
+            @click="goToSkill"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M6 4h8a4 4 0 014 4v12a3 3 0 00-3-3H6z"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+              <path
+                d="M6 4a2 2 0 00-2 2v13c0 .55.45 1 1 1h11"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+              <path
+                d="M9 8h5"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+              />
+            </svg>
+          </button>
+          <button
+            class="ghost-icon"
+            :title="t('components.main.logs.view')"
+            :data-tooltip="t('components.main.logs.view')"
+            @click="goToLogs"
+          >
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path
                 d="M5 7h14M5 12h14M5 17h9"
@@ -160,7 +213,12 @@
               />
             </svg>
           </button>
-          <button class="ghost-icon" :aria-label="t('components.main.tabs.addCard')" @click="openCreateModal">
+          <button
+            class="ghost-icon"
+            :title="t('components.main.tabs.addCard')"
+            :data-tooltip="t('components.main.tabs.addCard')"
+            @click="openCreateModal"
+          >
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path
                 d="M12 5v14M5 12h14"
@@ -441,6 +499,7 @@ const releaseApiUrl = 'https://api.github.com/repos/daodao97/code-switch/release
 const HEATMAP_DAYS = DEFAULT_HEATMAP_DAYS
 const usageHeatmap = ref<UsageHeatmapWeek[]>(generateFallbackUsageHeatmap(HEATMAP_DAYS))
 const heatmapContainerRef = ref<HTMLElement | null>(null)
+const tooltipRef = ref<HTMLElement | null>(null)
 const proxyStates = reactive<Record<ProviderTab, boolean>>({
   claude: false,
   codex: false,
@@ -455,6 +514,10 @@ const providerStatsMap = reactive<Record<ProviderTab, Record<string, ProviderDai
   codex: {},
 } as Record<ProviderTab, Record<string, ProviderDailyStat>>)
 const providerStatsLoading = reactive<Record<ProviderTab, boolean>>({
+  claude: false,
+  codex: false,
+} as Record<ProviderTab, boolean>)
+const providerStatsLoaded = reactive<Record<ProviderTab, boolean>>({
   claude: false,
   codex: false,
 } as Record<ProviderTab, boolean>)
@@ -550,11 +613,40 @@ const clamp = (value: number, min: number, max: number) => {
   return Math.min(Math.max(value, min), max)
 }
 
+const TOOLTIP_DEFAULT_WIDTH = 220
+const TOOLTIP_DEFAULT_HEIGHT = 120
+const TOOLTIP_VERTICAL_OFFSET = 12
+const TOOLTIP_HORIZONTAL_MARGIN = 20
+const TOOLTIP_VERTICAL_MARGIN = 24
+
+const getTooltipSize = () => {
+  const rect = tooltipRef.value?.getBoundingClientRect()
+  return {
+    width: rect?.width ?? TOOLTIP_DEFAULT_WIDTH,
+    height: rect?.height ?? TOOLTIP_DEFAULT_HEIGHT,
+  }
+}
+
+const viewportSize = () => {
+  if (typeof window !== 'undefined') {
+    return { width: window.innerWidth, height: window.innerHeight }
+  }
+  if (typeof document !== 'undefined' && document.documentElement) {
+    return {
+      width: document.documentElement.clientWidth,
+      height: document.documentElement.clientHeight,
+    }
+  }
+  return {
+    width: heatmapContainerRef.value?.clientWidth ?? 0,
+    height: heatmapContainerRef.value?.clientHeight ?? 0,
+  }
+}
+
 const showUsageTooltip = (day: UsageHeatmapDay, event: MouseEvent) => {
   const target = event.currentTarget as HTMLElement | null
-  const containerRect = heatmapContainerRef.value?.getBoundingClientRect()
   const cellRect = target?.getBoundingClientRect()
-  if (!containerRect || !cellRect) return
+  if (!cellRect) return
   usageTooltip.label = day.label
   usageTooltip.dateKey = day.dateKey
   usageTooltip.requests = day.requests
@@ -562,15 +654,24 @@ const showUsageTooltip = (day: UsageHeatmapDay, event: MouseEvent) => {
   usageTooltip.outputTokens = day.outputTokens
   usageTooltip.reasoningTokens = day.reasoningTokens
   usageTooltip.cost = day.cost
-  const horizontalPadding = 20
-  const relativeLeft = cellRect.left - containerRect.left + cellRect.width / 2
-  usageTooltip.left = clamp(relativeLeft, horizontalPadding, containerRect.width - horizontalPadding)
-  const relativeTop = cellRect.top - containerRect.top
-  const shouldPlaceBelow = relativeTop < 60
+  const { width: tooltipWidth, height: tooltipHeight } = getTooltipSize()
+  const { width: viewportWidth, height: viewportHeight } = viewportSize()
+  const centerX = cellRect.left + cellRect.width / 2
+  const halfWidth = tooltipWidth / 2
+  const minLeft = TOOLTIP_HORIZONTAL_MARGIN + halfWidth
+  const maxLeft = viewportWidth > 0 ? viewportWidth - halfWidth - TOOLTIP_HORIZONTAL_MARGIN : centerX
+  usageTooltip.left = clamp(centerX, minLeft, maxLeft)
+
+  const anchorTop = cellRect.top
+  const anchorBottom = cellRect.bottom
+  const canShowAbove = anchorTop - tooltipHeight - TOOLTIP_VERTICAL_OFFSET >= TOOLTIP_VERTICAL_MARGIN
+  const viewportBottomLimit = viewportHeight > 0 ? viewportHeight - tooltipHeight - TOOLTIP_VERTICAL_MARGIN : anchorBottom
+  const shouldPlaceBelow = !canShowAbove
   usageTooltip.placement = shouldPlaceBelow ? 'below' : 'above'
-  const verticalPadding = 24
-  const baseTop = shouldPlaceBelow ? relativeTop + cellRect.height : relativeTop
-  usageTooltip.top = clamp(baseTop, verticalPadding, containerRect.height - verticalPadding)
+  const desiredTop = shouldPlaceBelow
+    ? anchorBottom + TOOLTIP_VERTICAL_OFFSET
+    : anchorTop - tooltipHeight - TOOLTIP_VERTICAL_OFFSET
+  usageTooltip.top = clamp(desiredTop, TOOLTIP_VERTICAL_MARGIN, viewportBottomLimit)
   usageTooltip.visible = true
 }
 
@@ -742,8 +843,12 @@ const loadProviderStats = async (tab: ProviderTab) => {
       mapped[normalizeProviderKey(stat.provider)] = stat
     })
     providerStatsMap[tab] = mapped
+    providerStatsLoaded[tab] = true
   } catch (error) {
     console.error(`Failed to load provider stats for ${tab}`, error)
+    if (!providerStatsLoaded[tab]) {
+      providerStatsLoaded[tab] = true
+    }
   } finally {
     providerStatsLoading[tab] = false
   }
@@ -784,7 +889,7 @@ const successRateClassName = (value: number) => {
 
 const providerStatDisplay = (providerName: string): ProviderStatDisplay => {
   const tab = activeTab.value
-  if (providerStatsLoading[tab]) {
+  if (!providerStatsLoaded[tab]) {
     return { state: 'loading', message: t('components.main.providers.loading') }
   }
   const stat = providerStatsMap[tab]?.[normalizeProviderKey(providerName)]
@@ -884,6 +989,10 @@ const goToLogs = () => {
 
 const goToMcp = () => {
   router.push('/mcp')
+}
+
+const goToSkill = () => {
+  router.push('/skill')
 }
 
 const goToSettings = () => {

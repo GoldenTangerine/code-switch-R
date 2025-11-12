@@ -74,6 +74,7 @@ func main() {
 	logService := services.NewLogService()
 	appSettings := services.NewAppSettingsService()
 	mcpService := services.NewMCPService()
+	skillService := services.NewSkillService()
 	dockService := dock.New()
 	versionService := NewVersionService()
 
@@ -101,6 +102,7 @@ func main() {
 			application.NewService(logService),
 			application.NewService(appSettings),
 			application.NewService(mcpService),
+			application.NewService(skillService),
 			application.NewService(dockService),
 			application.NewService(versionService),
 		},
@@ -135,11 +137,30 @@ func main() {
 		BackgroundColour: application.NewRGB(27, 38, 54),
 		URL:              "/",
 	})
-	showMainWindow := func(withFocus bool) {
-		mainWindow.Center()
-		mainWindow.Show()
-		if withFocus && mainWindow.IsVisible() {
+	var mainWindowCentered bool
+	focusMainWindow := func() {
+		if runtime.GOOS == "windows" {
+			mainWindow.SetAlwaysOnTop(true)
 			mainWindow.Focus()
+			go func() {
+				time.Sleep(150 * time.Millisecond)
+				mainWindow.SetAlwaysOnTop(false)
+			}()
+			return
+		}
+		mainWindow.Focus()
+	}
+	showMainWindow := func(withFocus bool) {
+		if !mainWindowCentered {
+			mainWindow.Center()
+			mainWindowCentered = true
+		}
+		if mainWindow.IsMinimised() {
+			mainWindow.UnMinimise()
+		}
+		mainWindow.Show()
+		if withFocus {
+			focusMainWindow()
 		}
 		handleDockVisibility(dockService, true)
 	}
@@ -172,7 +193,6 @@ func main() {
 	if darkIcon := loadTrayIcon("assets/icon-dark.png"); len(darkIcon) > 0 {
 		systray.SetDarkModeIcon(darkIcon)
 	}
-	systray.AttachWindow(mainWindow).WindowOffset(8).WindowDebounce(200 * time.Millisecond)
 
 	trayMenu := application.NewMenu()
 	trayMenu.Add("显示主窗口").OnClick(func(ctx *application.Context) {
@@ -182,6 +202,16 @@ func main() {
 		app.Quit()
 	})
 	systray.SetMenu(trayMenu)
+
+	systray.OnClick(func() {
+		if !mainWindow.IsVisible() {
+			showMainWindow(true)
+			return
+		}
+		if !mainWindow.IsFocused() {
+			focusMainWindow()
+		}
+	})
 
 	appservice.SetApp(app)
 

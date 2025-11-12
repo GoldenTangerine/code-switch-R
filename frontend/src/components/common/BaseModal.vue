@@ -13,11 +13,11 @@
           leave-to="opacity-0 translate-y-4"
         >
           <DialogPanel :class="['modal', variantClass]">
-            <header>
+            <header class="modal-header">
               <DialogTitle class="modal-title">{{ title }}</DialogTitle>
               <button class="ghost-icon" aria-label="Close" @click="$emit('close')">✕</button>
             </header>
-            <div class="modal-body">
+            <div class="modal-body modal-scrollable">
               <slot />
             </div>
           </DialogPanel>

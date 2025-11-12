@@ -123,29 +123,7 @@ export const generateFallbackUsageHeatmap = (
 	const normalizedDays = clampDays(days)
 	const startDay = addDays(startOfDay(new Date()), -(normalizedDays - 1))
 	const statsMap = new Map<string, StatBucket>()
-
-	for (let dayIndex = 0; dayIndex < normalizedDays; dayIndex++) {
-		const dayStart = addDays(startDay, dayIndex)
-		for (let bucketIndex = 0; bucketIndex < BUCKETS_PER_DAY; bucketIndex++) {
-			for (let rowIndex = 0; rowIndex < HEATMAP_ROWS; rowIndex++) {
-				const hour = bucketIndex * HEATMAP_ROWS + rowIndex
-				const date = new Date(dayStart)
-				date.setHours(hour, 0, 0, 0)
-				const key = formatHourKey(date)
-				const seed = dayIndex * BUCKETS_PER_DAY * HEATMAP_ROWS + bucketIndex * HEATMAP_ROWS + rowIndex + 1
-				const hash = Math.abs(Math.sin(seed * 12.9898 + date.getHours()) * 1000)
-				statsMap.set(key, {
-					requests: Math.floor(hash % 20),
-					inputTokens: Math.floor(hash % 200) * 10,
-					outputTokens: Math.floor(hash % 150) * 8,
-					reasoningTokens: Math.floor(hash % 50),
-					cost: Number(((hash % 200) * 0.0025).toFixed(4)),
-				})
-			}
-		}
-	}
-
-	return buildColumns(normalizedDays, statsMap, startDay, 20)
+	return buildColumns(normalizedDays, statsMap, startDay, 0)
 }
 
 export const buildUsageHeatmapMatrix = (
