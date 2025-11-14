@@ -148,6 +148,15 @@
         "lower": "较低优先级",
         "veryLow": "很低优先级",
         "lowest": "最低优先级"
+      },
+      "blacklist": {
+        "blocked": "已拉黑",
+        "remaining": "剩余",
+        "minutes": "分",
+        "seconds": "秒",
+        "unblock": "立即解禁",
+        "unblockSuccess": "已解除 {name} 的拉黑",
+        "unblockFailed": "解除拉黑失败，请稍后重试"
       }
     },
     "logs": {

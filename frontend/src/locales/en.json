@@ -147,6 +147,15 @@
         "lower": "Lower Priority",
         "veryLow": "Very Low Priority",
         "lowest": "Lowest Priority"
+      },
+      "blacklist": {
+        "blocked": "Blocked",
+        "remaining": "Remaining",
+        "minutes": "m",
+        "seconds": "s",
+        "unblock": "Unblock",
+        "unblockSuccess": "{name} has been unblocked",
+        "unblockFailed": "Failed to unblock"
       }
     },
     "logs": {

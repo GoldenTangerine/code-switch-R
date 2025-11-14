@@ -351,6 +351,25 @@
                   <span>{{ stats.cost }}</span>
                 </template>
               </p>
+              <!-- 黑名单横幅 -->
+              <div
+                v-if="getProviderBlacklistStatus(card.name)?.isBlacklisted"
+                :class="['blacklist-banner', { dark: resolvedTheme === 'dark' }]"
+              >
+                <span class="blacklist-icon">⛔</span>
+                <span class="blacklist-text">
+                  {{ t('components.main.blacklist.blocked') }} |
+                  {{ t('components.main.blacklist.remaining') }}:
+                  {{ formatBlacklistCountdown(getProviderBlacklistStatus(card.name)!.remainingSeconds) }}
+                </span>
+                <button
+                  class="unblock-btn"
+                  type="button"
+                  @click.stop="handleUnblock(card.name)"
+                >
+                  {{ t('components.main.blacklist.unblock') }}
+                </button>
+              </div>
             </div>
           </div>
           <div class="card-actions">
@@ -585,6 +604,7 @@ import { getCurrentTheme, setTheme, type ThemeMode } from '../../utils/ThemeMana
 import { useRouter } from 'vue-router'
 import { fetchConfigImportStatus, importFromCcSwitch, type ConfigImportStatus } from '../../services/configImport'
 import { showToast } from '../../utils/toast'
+import { getBlacklistStatus, manualUnblock, type BlacklistStatus } from '../../services/blacklist'
 
 const { t, locale } = useI18n()
 const router = useRouter()
@@ -635,6 +655,13 @@ const updateReady = ref(false)
 const downloadProgress = ref(0)
 const importStatus = ref<ConfigImportStatus | null>(null)
 const importBusy = ref(false)
+
+// 黑名单状态
+const blacklistStatusMap = reactive<Record<ProviderTab, Record<string, BlacklistStatus>>>({
+  claude: {},
+  codex: {},
+})
+let blacklistTimer: number | undefined
 
 const showImportButton = computed(() => {
   const status = importStatus.value
@@ -1006,6 +1033,44 @@ const loadProviderStats = async (tab: ProviderTab) => {
   }
 }
 
+// 加载黑名单状态
+const loadBlacklistStatus = async (tab: ProviderTab) => {
+  try {
+    const statuses = await getBlacklistStatus(tab)
+    const map: Record<string, BlacklistStatus> = {}
+    statuses.forEach(status => {
+      map[status.providerName] = status
+    })
+    blacklistStatusMap[tab] = map
+  } catch (err) {
+    console.error(`加载 ${tab} 黑名单状态失败:`, err)
+  }
+}
+
+// 手动解禁
+const handleUnblock = async (providerName: string) => {
+  try {
+    await manualUnblock(activeTab.value, providerName)
+    showToast(t('components.main.blacklist.unblockSuccess', { name: providerName }), 'success')
+    await loadBlacklistStatus(activeTab.value)
+  } catch (err) {
+    console.error('解除拉黑失败:', err)
+    showToast(t('components.main.blacklist.unblockFailed'), 'error')
+  }
+}
+
+// 格式化倒计时
+const formatBlacklistCountdown = (remainingSeconds: number): string => {
+  const minutes = Math.floor(remainingSeconds / 60)
+  const seconds = remainingSeconds % 60
+  return `${minutes}${t('components.main.blacklist.minutes')}${seconds}${t('components.main.blacklist.seconds')}`
+}
+
+// 获取 provider 黑名单状态
+const getProviderBlacklistStatus = (providerName: string): BlacklistStatus | null => {
+  return blacklistStatusMap[activeTab.value][providerName] || null
+}
+
 // 刷新所有数据
 const refreshing = ref(false)
 const refreshAllData = async () => {
@@ -1138,6 +1203,24 @@ onMounted(async () => {
   await refreshImportStatus()
   startProviderStatsTimer()
   startUpdateTimer()
+
+  // 加载初始黑名单状态
+  await Promise.all(providerTabIds.map((tab) => loadBlacklistStatus(tab)))
+
+  // 每秒更新黑名单倒计时
+  blacklistTimer = window.setInterval(() => {
+    const tab = activeTab.value
+    Object.keys(blacklistStatusMap[tab]).forEach(providerName => {
+      const status = blacklistStatusMap[tab][providerName]
+      if (status && status.isBlacklisted && status.remainingSeconds > 0) {
+        status.remainingSeconds--
+        if (status.remainingSeconds <= 0) {
+          loadBlacklistStatus(tab)
+        }
+      }
+    })
+  }, 1000)
+
   window.addEventListener('app-settings-updated', handleAppSettingsUpdated)
 })
 
@@ -1145,6 +1228,9 @@ onUnmounted(() => {
   stopProviderStatsTimer()
   window.removeEventListener('app-settings-updated', handleAppSettingsUpdated)
   stopUpdateTimer()
+  if (blacklistTimer) {
+    window.clearInterval(blacklistTimer)
+  }
 })
 
 const selectedIndex = ref(0)
@@ -1689,5 +1775,54 @@ const handleImportClick = async () => {
 
 .level-option.selected .level-name {
   color: var(--mac-accent);
+}
+
+/* 黑名单横幅 */
+.blacklist-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  margin-top: 8px;
+  background: rgba(239, 68, 68, 0.1);
+  border-left: 3px solid #ef4444;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #dc2626;
+}
+
+.blacklist-banner.dark {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+}
+
+.blacklist-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.blacklist-text {
+  flex: 1;
+  font-weight: 500;
+}
+
+.unblock-btn {
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #fff;
+  background: #ef4444;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.unblock-btn:hover {
+  background: #dc2626;
+}
+
+.unblock-btn:active {
+  transform: scale(0.98);
 }
 </style>

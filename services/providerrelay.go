@@ -22,12 +22,13 @@ import (
 )
 
 type ProviderRelayService struct {
-	providerService *ProviderService
-	server          *http.Server
-	addr            string
+	providerService  *ProviderService
+	blacklistService *BlacklistService
+	server           *http.Server
+	addr             string
 }
 
-func NewProviderRelayService(providerService *ProviderService, addr string) *ProviderRelayService {
+func NewProviderRelayService(providerService *ProviderService, blacklistService *BlacklistService, addr string) *ProviderRelayService {
 	if addr == "" {
 		addr = ":18100"
 	}
@@ -42,13 +43,19 @@ func NewProviderRelayService(providerService *ProviderService, addr string) *Pro
 		},
 	}); err != nil {
 		fmt.Printf("初始化数据库失败: %v\n", err)
-	} else if err := ensureRequestLogTable(); err != nil {
-		fmt.Printf("初始化 request_log 表失败: %v\n", err)
+	} else {
+		if err := ensureRequestLogTable(); err != nil {
+			fmt.Printf("初始化 request_log 表失败: %v\n", err)
+		}
+		if err := ensureBlacklistTables(); err != nil {
+			fmt.Printf("初始化黑名单表失败: %v\n", err)
+		}
 	}
 
 	return &ProviderRelayService{
-		providerService: providerService,
-		addr:            addr,
+		providerService:  providerService,
+		blacklistService: blacklistService,
+		addr:             addr,
 	}
 }
 
@@ -190,6 +197,13 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 				continue
 			}
 
+			// 黑名单检查：跳过已拉黑的 provider
+			if isBlacklisted, until := prs.blacklistService.IsBlacklisted(kind, provider.Name); isBlacklisted {
+				fmt.Printf("⛔ Provider %s 已拉黑，过期时间: %v\n", provider.Name, until.Format("15:04:05"))
+				skippedCount++
+				continue
+			}
+
 			active = append(active, provider)
 		}
 
@@ -282,6 +296,11 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 				fmt.Printf("[WARN]   ✗ Level %d 失败: %s | 错误: %s | 耗时: %.2fs\n",
 					level, provider.Name, errorMsg, duration.Seconds())
 				lastErr = err
+
+				// 记录失败到黑名单系统
+				if err := prs.blacklistService.RecordFailure(kind, provider.Name); err != nil {
+					fmt.Printf("[ERROR] 记录失败到黑名单失败: %v\n", err)
+				}
 			}
 
 			// 当前 Level 所有 provider 都失败

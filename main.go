@@ -68,7 +68,9 @@ func main() {
 		// 处理错误，比如日志或退出
 	}
 	providerService := services.NewProviderService()
-	providerRelay := services.NewProviderRelayService(providerService, ":18100")
+	settingsService := services.NewSettingsService()
+	blacklistService := services.NewBlacklistService(settingsService)
+	providerRelay := services.NewProviderRelayService(providerService, blacklistService, ":18100")
 	claudeSettings := services.NewClaudeSettingsService(providerRelay.Addr())
 	codexSettings := services.NewCodexSettingsService(providerRelay.Addr())
 	logService := services.NewLogService()
@@ -104,6 +106,18 @@ func main() {
 		}
 	}()
 
+	// 启动黑名单自动恢复定时器（每分钟检查一次）
+	go func() {
+		ticker := time.NewTicker(1 * time.Minute)
+		defer ticker.Stop()
+
+		for range ticker.C {
+			if err := blacklistService.AutoRecoverExpired(); err != nil {
+				log.Printf("自动恢复黑名单失败: %v", err)
+			}
+		}
+	}()
+
 	//fmt.Println(clipboardService)
 	// Create a new Wails application by providing the necessary options.
 	// Variables 'Name' and 'Description' are for application metadata.
@@ -117,6 +131,8 @@ func main() {
 			application.NewService(appservice),
 			application.NewService(suiService),
 			application.NewService(providerService),
+			application.NewService(settingsService),
+			application.NewService(blacklistService),
 			application.NewService(claudeSettings),
 			application.NewService(codexSettings),
 			application.NewService(logService),
