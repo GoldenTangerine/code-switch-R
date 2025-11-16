@@ -660,7 +660,7 @@ func (bs *BlacklistService) GetBlacklistStatus(platform string) ([]BlacklistStat
 			forgivenessThreshold := time.Duration(levelConfig.ForgivenessHours * float64(time.Hour))
 
 			if timeSinceRecovery < forgivenessThreshold {
-				s.ForgivenessRemaining = int(forgivenessThreshold.Sub(timeSinceRecovery).Seconds())
+				s.ForgivenessRemaining = int((forgivenessThreshold - timeSinceRecovery).Seconds())
 			} else {
 				s.ForgivenessRemaining = 0 // 已触发宽恕
 			}

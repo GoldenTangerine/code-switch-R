@@ -10,6 +10,11 @@ export interface BlacklistStatus {
   lastFailureAt?: string  // ISO 时间字符串
   isBlacklisted: boolean
   remainingSeconds: number  // 剩余拉黑时间（秒）
+
+  // v0.4.0 新增：等级拉黑相关字段
+  blacklistLevel: number          // 当前黑名单等级 (0-5)
+  lastRecoveredAt?: string        // 最后恢复时间（ISO 时间字符串）
+  forgivenessRemaining: number    // 距离宽恕还剩多少秒（3小时倒计时）
 }
 
 // 黑名单配置接口
