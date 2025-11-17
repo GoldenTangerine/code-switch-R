@@ -62,6 +62,11 @@ func DefaultBlacklistLevelConfig() *BlacklistLevelConfig {
 }
 
 func NewSettingsService() *SettingsService {
+	// 确保数据库表存在
+	if err := ensureBlacklistTables(); err != nil {
+		// 记录错误但不阻止服务创建
+		fmt.Printf("[SettingsService] 初始化数据库表失败: %v\n", err)
+	}
 	return &SettingsService{}
 }
 
