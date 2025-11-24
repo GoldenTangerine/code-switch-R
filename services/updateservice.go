@@ -408,6 +408,10 @@ func (us *UpdateService) applyUpdateWindows(updatePath string) error {
 		return fmt.Errorf("启动安装器失败: %w", err)
 	}
 
+	// **关键修复**：删除 pending 标记文件，防止安装失败时重启循环
+	pendingFile := filepath.Join(filepath.Dir(us.stateFile), ".pending-update")
+	_ = os.Remove(pendingFile)
+
 	// 退出当前应用
 	os.Exit(0)
 	return nil
@@ -448,6 +452,10 @@ func (us *UpdateService) applyPortableUpdate(newExePath string) error {
 		time.Sleep(2 * time.Second)
 		_ = os.Remove(backupPath)
 	}()
+
+	// **关键修复**：删除 pending 标记文件，防止重启后再次触发更新
+	pendingFile := filepath.Join(filepath.Dir(us.stateFile), ".pending-update")
+	_ = os.Remove(pendingFile)
 
 	// 重启应用
 	cmd := exec.Command(currentExe)
