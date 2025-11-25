@@ -399,23 +399,20 @@ html.dark code.detail-value {
 }
 
 .page-actions .refresh-btn {
-  display: inline-flex !important;
-  flex-direction: row !important;
-  align-items: center !important;
-  justify-content: flex-start !important;
-  gap: 8px !important;
-  padding: 12px 24px !important;
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 24px;
   border: 1px solid var(--mac-border);
-  border-radius: 999px !important;
+  border-radius: 999px;
   background: var(--mac-surface);
   color: var(--mac-text);
-  font-size: 0.9rem !important;
+  font-size: 0.9rem;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.15s ease;
-  white-space: nowrap !important;
-  flex-wrap: nowrap !important;
-  min-height: auto !important;
+  white-space: nowrap;
 }
 
 .refresh-btn:hover:not(:disabled) {

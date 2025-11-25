@@ -630,9 +630,9 @@ html.dark .mac-sidebar-item:hover {
   }
 }
 
-/* 更新检查按钮样式 */
-.action-btn,
-.primary-btn {
+/* 更新检查按钮样式 - 仅用于设置页面，不影响其他页面的按钮 */
+.general-page .action-btn,
+.general-page .primary-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;

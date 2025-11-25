@@ -515,54 +515,47 @@ html.dark .action-btn:hover {
 
 .page-actions .primary-btn,
 .page-actions .secondary-btn {
-  display: inline-flex !important;
-  flex-direction: row !important;
-  align-items: center !important;
-  justify-content: flex-start !important;
-  gap: 8px !important;
-  padding: 12px 20px !important;
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 20px;
   border: none;
-  border-radius: 999px !important;
-  font-size: 0.9rem !important;
+  border-radius: 999px;
+  font-size: 0.9rem;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.15s ease;
-  white-space: nowrap !important;
-  flex-wrap: nowrap !important;
-  min-height: auto !important;
+  white-space: nowrap;
 }
 
-.primary-btn {
+.page-actions .primary-btn {
   background: var(--mac-accent);
   color: #fff;
 }
 
-.primary-btn:hover:not(:disabled) {
+.page-actions .primary-btn:hover:not(:disabled) {
   opacity: 0.9;
 }
 
-.primary-btn:disabled {
+.page-actions .primary-btn:disabled,
+.page-actions .secondary-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
-.secondary-btn {
+.page-actions .secondary-btn {
   background: var(--mac-surface);
   color: var(--mac-text);
   border: 1px solid var(--mac-border);
 }
 
-.secondary-btn:hover:not(:disabled) {
+.page-actions .secondary-btn:hover:not(:disabled) {
   border-color: var(--mac-accent);
 }
 
-.secondary-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.primary-btn svg,
-.secondary-btn svg {
+.page-actions .primary-btn svg,
+.page-actions .secondary-btn svg {
   width: 16px;
   height: 16px;
   flex-shrink: 0;
