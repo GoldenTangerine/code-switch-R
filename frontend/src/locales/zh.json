@@ -8,6 +8,75 @@
     "shortcut": "快捷键",
     "about": "关于"
   },
+  "sidebar": {
+    "home": "首页",
+    "prompts": "提示词",
+    "mcp": "MCP",
+    "skill": "技能",
+    "gemini": "Gemini",
+    "speedtest": "测速",
+    "env": "环境",
+    "logs": "日志",
+    "settings": "设置"
+  },
+  "prompts": {
+    "hero": {
+      "eyebrow": "提示词管理",
+      "title": "管理系统提示词",
+      "lead": "为 Claude Code、Codex 和 Gemini 配置自定义系统提示词，增强 AI 编程助手的能力。"
+    },
+    "stats": {
+      "total": "共 {count} 个提示词",
+      "enabled": "已启用"
+    },
+    "empty": "暂无提示词，点击下方按钮创建",
+    "loading": "加载中...",
+    "confirmDelete": "确认删除此提示词？",
+    "actions": {
+      "create": "新增提示词",
+      "import": "从文件导入"
+    },
+    "form": {
+      "createTitle": "新增提示词",
+      "editTitle": "编辑提示词",
+      "name": "名称",
+      "namePlaceholder": "例如：代码审查专家",
+      "description": "描述",
+      "descriptionPlaceholder": "简短描述此提示词的用途",
+      "content": "提示词内容",
+      "cancel": "取消",
+      "save": "保存"
+    }
+  },
+  "speedtest": {
+    "hero": {
+      "eyebrow": "API 速度测试",
+      "title": "测试 API 端点延迟",
+      "lead": "测量各 API 端点的响应速度，帮助选择最优的服务供应商。"
+    },
+    "placeholder": "输入 API 端点 URL",
+    "add": "添加",
+    "endpoints": "端点列表（{count} 个）",
+    "start": "开始测试",
+    "testing": "测试中",
+    "empty": "添加 API 端点开始测试",
+    "failed": "失败"
+  },
+  "envcheck": {
+    "hero": {
+      "eyebrow": "环境变量检测",
+      "title": "检测环境变量冲突",
+      "lead": "扫描系统环境变量和配置文件，发现可能影响 AI 编程工具的变量冲突。"
+    },
+    "checking": "检测中...",
+    "error": "检测失败",
+    "found": "发现 {count} 个冲突的环境变量",
+    "noConflicts": "未发现环境变量冲突",
+    "value": "值",
+    "source": "来源",
+    "source.system": "系统环境变量",
+    "refresh": "重新检测"
+  },
   "components": {
     "home": {},
     "provider": {

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { RouterView } from 'vue-router'
 import { onMounted } from 'vue'
+import Sidebar from './components/Sidebar.vue'
 
 const applyTheme = () => {
   const userTheme = localStorage.getItem('theme')
@@ -22,5 +23,25 @@ onMounted(() => {
 </script>
 
 <template>
-  <RouterView />
+  <div class="app-layout">
+    <Sidebar />
+    <main class="main-content">
+      <RouterView />
+    </main>
+  </div>
 </template>
+
+<style scoped>
+.app-layout {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+}
+
+.main-content {
+  flex: 1;
+  overflow-y: auto;
+  background: var(--mac-bg);
+}
+</style>
