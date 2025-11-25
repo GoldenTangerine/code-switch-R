@@ -1,11 +1,27 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 
 const router = useRouter()
 const route = useRoute()
 const { t } = useI18n()
+
+// 侧边栏收起状态
+const SIDEBAR_COLLAPSED_KEY = 'sidebar-collapsed'
+const isCollapsed = ref(false)
+
+onMounted(() => {
+  const saved = localStorage.getItem(SIDEBAR_COLLAPSED_KEY)
+  if (saved !== null) {
+    isCollapsed.value = saved === 'true'
+  }
+})
+
+const toggleCollapse = () => {
+  isCollapsed.value = !isCollapsed.value
+  localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(isCollapsed.value))
+}
 
 interface NavItem {
   path: string
@@ -19,7 +35,6 @@ const navItems: NavItem[] = [
   { path: '/prompts', icon: 'file-text', labelKey: 'sidebar.prompts', isNew: true },
   { path: '/mcp', icon: 'plug', labelKey: 'sidebar.mcp' },
   { path: '/skill', icon: 'tool', labelKey: 'sidebar.skill' },
-  { path: '/gemini', icon: 'sparkles', labelKey: 'sidebar.gemini' },
   { path: '/speedtest', icon: 'zap', labelKey: 'sidebar.speedtest', isNew: true },
   { path: '/env', icon: 'search', labelKey: 'sidebar.env', isNew: true },
   { path: '/logs', icon: 'bar-chart', labelKey: 'sidebar.logs' },
@@ -34,9 +49,15 @@ const navigate = (path: string) => {
 </script>
 
 <template>
-  <nav class="mac-sidebar">
+  <nav class="mac-sidebar" :class="{ collapsed: isCollapsed }">
     <div class="sidebar-header">
-      <span class="sidebar-title">Code Switch</span>
+      <span class="sidebar-title" v-if="!isCollapsed">Code Switch</span>
+      <button class="collapse-btn" @click="toggleCollapse" :title="isCollapsed ? 'Expand' : 'Collapse'">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline v-if="isCollapsed" points="9 18 15 12 9 6"></polyline>
+          <polyline v-else points="15 18 9 12 15 6"></polyline>
+        </svg>
+      </button>
     </div>
 
     <div class="nav-list">
@@ -45,6 +66,7 @@ const navigate = (path: string) => {
         :key="item.path"
         class="nav-item"
         :class="{ active: currentPath === item.path }"
+        :title="isCollapsed ? t(item.labelKey) : ''"
         @click="navigate(item.path)"
       >
         <!-- Home -->
@@ -75,13 +97,6 @@ const navigate = (path: string) => {
           <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path>
         </svg>
 
-        <!-- Sparkles -->
-        <svg v-else-if="item.icon === 'sparkles'" class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z"></path>
-          <path d="M5 19l.5 1.5L7 21l-1.5.5L5 23l-.5-1.5L3 21l1.5-.5L5 19z"></path>
-          <path d="M19 5l.5 1.5L21 7l-1.5.5L19 9l-.5-1.5L17 7l1.5-.5L19 5z"></path>
-        </svg>
-
         <!-- Zap -->
         <svg v-else-if="item.icon === 'zap'" class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
@@ -106,12 +121,12 @@ const navigate = (path: string) => {
           <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
         </svg>
 
-        <span class="nav-label">{{ t(item.labelKey) }}</span>
-        <span v-if="item.isNew" class="new-badge">NEW</span>
+        <span class="nav-label" v-if="!isCollapsed">{{ t(item.labelKey) }}</span>
+        <span v-if="item.isNew && !isCollapsed" class="new-badge">NEW</span>
       </button>
     </div>
 
-    <div class="sidebar-footer">
+    <div class="sidebar-footer" v-if="!isCollapsed">
       <span class="version">v0.4.0</span>
     </div>
   </nav>
@@ -127,11 +142,26 @@ const navigate = (path: string) => {
   flex-direction: column;
   height: 100%;
   overflow: hidden;
+  transition: width 0.2s ease, min-width 0.2s ease;
+}
+
+.mac-sidebar.collapsed {
+  width: 56px;
+  min-width: 56px;
 }
 
 .sidebar-header {
   padding: 20px 16px 16px;
   border-bottom: 1px solid var(--mac-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.mac-sidebar.collapsed .sidebar-header {
+  padding: 16px 8px;
+  justify-content: center;
 }
 
 .sidebar-title {
@@ -139,6 +169,37 @@ const navigate = (path: string) => {
   font-weight: 700;
   color: var(--mac-text);
   letter-spacing: -0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.collapse-btn {
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  color: var(--mac-text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+.collapse-btn:hover {
+  background: rgba(15, 23, 42, 0.06);
+  color: var(--mac-text);
+}
+
+html.dark .collapse-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.collapse-btn svg {
+  width: 16px;
+  height: 16px;
 }
 
 .nav-list {
@@ -148,6 +209,10 @@ const navigate = (path: string) => {
   flex-direction: column;
   gap: 2px;
   overflow-y: auto;
+}
+
+.mac-sidebar.collapsed .nav-list {
+  padding: 12px 4px;
 }
 
 .nav-item {
@@ -165,6 +230,11 @@ const navigate = (path: string) => {
   transition: all 0.15s ease;
   width: 100%;
   text-align: left;
+}
+
+.mac-sidebar.collapsed .nav-item {
+  padding: 10px;
+  justify-content: center;
 }
 
 .nav-item:hover {
