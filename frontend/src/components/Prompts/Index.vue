@@ -8,9 +8,19 @@ import {
   DeletePrompt,
   EnablePrompt,
   ImportFromFile,
-  GetCurrentFileContent,
-  type Prompt
+  GetCurrentFileContent
 } from '../../../bindings/codeswitch/services/promptservice'
+
+// 本地类型定义（避免依赖 Wails 自动生成的类型导出）
+interface Prompt {
+  id: string
+  name: string
+  content: string
+  description?: string
+  enabled: boolean
+  createdAt?: number
+  updatedAt?: number
+}
 
 const { t } = useI18n()
 

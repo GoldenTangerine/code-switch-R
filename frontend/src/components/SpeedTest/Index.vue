@@ -2,9 +2,16 @@
 import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
-  TestEndpoints,
-  type EndpointLatency
+  TestEndpoints
 } from '../../../bindings/codeswitch/services/speedtestservice'
+
+// 本地类型定义（避免依赖 Wails 自动生成的类型导出）
+interface EndpointLatency {
+  url: string
+  latency: number | null
+  status?: number
+  error?: string
+}
 
 const { t } = useI18n()
 
