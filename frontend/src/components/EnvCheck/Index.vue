@@ -398,22 +398,24 @@ html.dark code.detail-value {
   justify-content: center;
 }
 
-.refresh-btn {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 24px;
+.page-actions .refresh-btn {
+  display: inline-flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  gap: 8px !important;
+  padding: 12px 24px !important;
   border: 1px solid var(--mac-border);
-  border-radius: 999px;
+  border-radius: 999px !important;
   background: var(--mac-surface);
   color: var(--mac-text);
-  font-size: 0.9rem;
+  font-size: 0.9rem !important;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.15s ease;
-  white-space: nowrap;
-  flex-wrap: nowrap;
+  white-space: nowrap !important;
+  flex-wrap: nowrap !important;
+  min-height: auto !important;
 }
 
 .refresh-btn:hover:not(:disabled) {

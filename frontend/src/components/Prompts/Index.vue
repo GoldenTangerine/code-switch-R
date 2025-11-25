@@ -513,21 +513,23 @@ html.dark .action-btn:hover {
   gap: 12px;
 }
 
-.primary-btn,
-.secondary-btn {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 20px;
+.page-actions .primary-btn,
+.page-actions .secondary-btn {
+  display: inline-flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  gap: 8px !important;
+  padding: 12px 20px !important;
   border: none;
-  border-radius: 999px;
-  font-size: 0.9rem;
+  border-radius: 999px !important;
+  font-size: 0.9rem !important;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.15s ease;
-  white-space: nowrap;
-  flex-wrap: nowrap;
+  white-space: nowrap !important;
+  flex-wrap: nowrap !important;
+  min-height: auto !important;
 }
 
 .primary-btn {

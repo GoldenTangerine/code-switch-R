@@ -267,22 +267,24 @@ function getLatencyText(result: EndpointLatency | null): string {
   box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.15);
 }
 
-.add-btn {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 20px;
+.input-section .add-btn {
+  display: inline-flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  gap: 8px !important;
+  padding: 12px 20px !important;
   border: 1px solid var(--mac-border);
-  border-radius: 12px;
+  border-radius: 12px !important;
   background: var(--mac-surface);
   color: var(--mac-text);
-  font-size: 0.9rem;
+  font-size: 0.9rem !important;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.15s ease;
-  white-space: nowrap;
-  flex-wrap: nowrap;
+  white-space: nowrap !important;
+  flex-wrap: nowrap !important;
+  min-height: auto !important;
 }
 
 .add-btn:hover:not(:disabled) {
@@ -312,22 +314,24 @@ function getLatencyText(result: EndpointLatency | null): string {
   color: var(--mac-text-secondary);
 }
 
-.test-btn {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 20px;
+.list-header .test-btn {
+  display: inline-flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  gap: 8px !important;
+  padding: 10px 20px !important;
   border: none;
-  border-radius: 999px;
+  border-radius: 999px !important;
   background: var(--mac-accent);
   color: #fff;
-  font-size: 0.9rem;
+  font-size: 0.9rem !important;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.15s ease;
-  white-space: nowrap;
-  flex-wrap: nowrap;
+  white-space: nowrap !important;
+  flex-wrap: nowrap !important;
+  min-height: auto !important;
 }
 
 .test-btn:hover:not(:disabled) {
