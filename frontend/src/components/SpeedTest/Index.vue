@@ -4,14 +4,7 @@ import { useI18n } from 'vue-i18n'
 import {
   TestEndpoints
 } from '../../../bindings/codeswitch/services/speedtestservice'
-
-// 本地类型定义（避免依赖 Wails 自动生成的类型导出）
-interface EndpointLatency {
-  url: string
-  latency: number | null
-  status?: number
-  error?: string
-}
+import type { EndpointLatency } from '../../../bindings/codeswitch/services/models'
 
 const { t } = useI18n()
 
@@ -90,8 +83,8 @@ async function runTest() {
   }
 }
 
-function getLatencyColor(latency: number | null): string {
-  if (latency === null) return '#ef4444' // red for error
+function getLatencyColor(latency: number | null | undefined): string {
+  if (latency == null) return '#ef4444' // red for error
   if (latency < 300) return '#10b981' // green
   if (latency < 500) return '#f59e0b' // yellow
   if (latency < 800) return '#f97316' // orange
@@ -100,7 +93,7 @@ function getLatencyColor(latency: number | null): string {
 
 function getLatencyText(result: EndpointLatency | null): string {
   if (!result) return '-'
-  if (result.latency === null) {
+  if (result.latency == null) {
     return result.error || t('speedtest.failed')
   }
   return `${result.latency}ms`

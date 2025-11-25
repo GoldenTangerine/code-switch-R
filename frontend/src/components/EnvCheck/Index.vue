@@ -4,14 +4,7 @@ import { useI18n } from 'vue-i18n'
 import {
   CheckEnvConflicts
 } from '../../../bindings/codeswitch/services/envcheckservice'
-
-// 本地类型定义（避免依赖 Wails 自动生成的类型导出）
-interface EnvConflict {
-  varName: string
-  varValue: string
-  sourceType: 'system' | 'file'
-  sourcePath: string
-}
+import type { EnvConflict } from '../../../bindings/codeswitch/services/models'
 
 const { t } = useI18n()
 
