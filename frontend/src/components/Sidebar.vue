@@ -2,10 +2,21 @@
 import { computed, ref, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import { fetchCurrentVersion } from '@/services/version'
 
 const router = useRouter()
 const route = useRoute()
 const { t } = useI18n()
+
+// 动态版本号（从后端获取）
+const appVersion = ref('...')
+onMounted(async () => {
+  try {
+    appVersion.value = await fetchCurrentVersion()
+  } catch {
+    appVersion.value = 'v?.?.?'
+  }
+})
 
 // 侧边栏收起状态
 const SIDEBAR_COLLAPSED_KEY = 'sidebar-collapsed'
@@ -165,7 +176,7 @@ const navigate = (path: string) => {
     </div>
 
     <div class="sidebar-footer" v-if="!isCollapsed">
-      <span class="version">v1.1.17</span>
+      <span class="version">{{ appVersion }}</span>
     </div>
   </nav>
 </template>

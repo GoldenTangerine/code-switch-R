@@ -495,12 +495,13 @@ html.dark .mac-sidebar-item:hover {
 
 .section-header {
   display: flex;
-  justify-content: space-between;
+  justify-content: center;
   align-items: center;
   gap: 12px;
   padding-inline: 0;
   flex-wrap: wrap;
   row-gap: 16px;
+  position: relative;
 }
 
 .tab-group {
@@ -522,7 +523,7 @@ html.dark .mac-sidebar-item:hover {
 }
 
 .section-header > .tab-group {
-  align-self: flex-start;
+  align-self: center;
 }
 
 .section-controls {
@@ -532,7 +533,10 @@ html.dark .mac-sidebar-item:hover {
   flex: 0 0 auto;
   flex-wrap: wrap;
   justify-content: flex-end;
-  margin-left: auto;
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
 }
 
 .section-header.section-header-solo {
