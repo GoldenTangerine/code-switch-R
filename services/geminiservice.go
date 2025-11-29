@@ -230,19 +230,48 @@ func (s *GeminiService) SwitchProvider(id string) error {
 		}
 
 	case GeminiAuthPackycode, GeminiAuthAPIKey, GeminiAuthGeneric:
-		// API Key 认证：写入 .env
-		envConfig := provider.EnvConfig
-		if envConfig == nil {
-			envConfig = make(map[string]string)
+		// 配置验证：API Key 认证需要 API Key 或 BaseURL
+		if provider.APIKey == "" && provider.BaseURL == "" {
+			// 检查 EnvConfig 中是否有配置
+			hasAPIKey := provider.EnvConfig != nil && provider.EnvConfig["GEMINI_API_KEY"] != ""
+			hasBaseURL := provider.EnvConfig != nil && provider.EnvConfig["GOOGLE_GEMINI_BASE_URL"] != ""
+			if !hasAPIKey && !hasBaseURL {
+				return fmt.Errorf("供应商 '%s' 配置不完整：需要 API Key 或 Base URL", provider.Name)
+			}
 		}
-		// 确保必要字段
-		if provider.BaseURL != "" && envConfig["GOOGLE_GEMINI_BASE_URL"] == "" {
+
+		// 构建 envConfig：先从预设获取，再用 provider 字段覆盖
+		envConfig := make(map[string]string)
+
+		// 1. 先查找预设并复制其 EnvConfig
+		for _, preset := range s.presets {
+			if preset.Name == provider.Name || preset.PartnerPromotionKey == provider.PartnerPromotionKey {
+				for k, v := range preset.EnvConfig {
+					if v != "" {
+						envConfig[k] = v
+					}
+				}
+				break
+			}
+		}
+
+		// 2. 再用 provider.EnvConfig 覆盖
+		if provider.EnvConfig != nil {
+			for k, v := range provider.EnvConfig {
+				if v != "" {
+					envConfig[k] = v
+				}
+			}
+		}
+
+		// 3. 最后用 provider 顶级字段覆盖（优先级最高）
+		if provider.BaseURL != "" {
 			envConfig["GOOGLE_GEMINI_BASE_URL"] = provider.BaseURL
 		}
-		if provider.APIKey != "" && envConfig["GEMINI_API_KEY"] == "" {
+		if provider.APIKey != "" {
 			envConfig["GEMINI_API_KEY"] = provider.APIKey
 		}
-		if provider.Model != "" && envConfig["GEMINI_MODEL"] == "" {
+		if provider.Model != "" {
 			envConfig["GEMINI_MODEL"] = provider.Model
 		}
 
@@ -250,11 +279,22 @@ func (s *GeminiService) SwitchProvider(id string) error {
 			return fmt.Errorf("写入 .env 失败: %w", err)
 		}
 
-		// 写入 API Key 认证标志
+		// 按认证类型区分 selectedType 值
+		var selectedType string
+		switch authType {
+		case GeminiAuthPackycode:
+			selectedType = string(GeminiAuthPackycode) // "packycode"
+		case GeminiAuthAPIKey:
+			selectedType = string(GeminiAuthAPIKey) // "gemini-api-key"
+		case GeminiAuthGeneric:
+			selectedType = string(GeminiAuthGeneric) // "generic"
+		}
+
+		// 写入认证标志
 		if err := writeGeminiSettings(map[string]any{
 			"security": map[string]any{
 				"auth": map[string]any{
-					"selectedType": string(GeminiAuthAPIKey),
+					"selectedType": selectedType,
 				},
 			},
 		}); err != nil {
@@ -388,7 +428,10 @@ func readGeminiEnv() (map[string]string, error) {
 // parseEnvFile 解析 .env 文件内容
 func parseEnvFile(content string) map[string]string {
 	result := make(map[string]string)
-	lines := strings.Split(content, "\n")
+	// 统一处理 Windows 和 Unix 行尾
+	normalizedContent := strings.ReplaceAll(content, "\r\n", "\n")
+	normalizedContent = strings.ReplaceAll(normalizedContent, "\r", "\n")
+	lines := strings.Split(normalizedContent, "\n")
 
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
@@ -653,7 +696,7 @@ func (s *GeminiService) EnableProxy() error {
 	}
 
 	envPath := getGeminiEnvPath()
-	backupPath := envPath + ".cc-studio.backup"
+	backupPath := envPath + ".code-switch.backup"
 
 	// 备份现有 .env（如果存在）
 	if _, err := os.Stat(envPath); err == nil {
@@ -686,7 +729,7 @@ func (s *GeminiService) EnableProxy() error {
 // DisableProxy 禁用代理
 func (s *GeminiService) DisableProxy() error {
 	envPath := getGeminiEnvPath()
-	backupPath := envPath + ".cc-studio.backup"
+	backupPath := envPath + ".code-switch.backup"
 
 	// 删除当前 .env
 	if err := os.Remove(envPath); err != nil && !os.IsNotExist(err) {

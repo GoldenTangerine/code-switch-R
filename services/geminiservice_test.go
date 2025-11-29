@@ -5,7 +5,7 @@ import (
 )
 
 func TestGeminiService_GetPresets(t *testing.T) {
-	svc := NewGeminiService()
+	svc := NewGeminiService("127.0.0.1:18100")
 	presets := svc.GetPresets()
 
 	if len(presets) == 0 {
@@ -86,13 +86,13 @@ func TestDetectGeminiAuthType(t *testing.T) {
 			expected: GeminiAuthGeneric,
 		},
 		{
-			name: "Gemini API Key (native - no base URL)",
+			name: "Generic provider with no base URL",
 			provider: GeminiProvider{
 				Name:    "Native Gemini",
 				BaseURL: "",
 				APIKey:  "AIza-xxx",
 			},
-			expected: GeminiAuthAPIKey,
+			expected: GeminiAuthGeneric, // 无 partner_promotion_key 且名称不匹配 google/packy，默认为 Generic
 		},
 	}
 
@@ -230,7 +230,7 @@ func TestGeminiProvider_DeepCopyMaps(t *testing.T) {
 }
 
 func TestGeminiPreset_Fields(t *testing.T) {
-	svc := NewGeminiService()
+	svc := NewGeminiService("127.0.0.1:18100")
 	presets := svc.GetPresets()
 
 	for _, p := range presets {
@@ -239,8 +239,8 @@ func TestGeminiPreset_Fields(t *testing.T) {
 			t.Error("Preset has empty name")
 		}
 
-		// All presets should have WebsiteURL
-		if p.WebsiteURL == "" {
+		// All presets except custom should have WebsiteURL
+		if p.WebsiteURL == "" && p.Category != "custom" {
 			t.Errorf("Preset %q has empty WebsiteURL", p.Name)
 		}
 

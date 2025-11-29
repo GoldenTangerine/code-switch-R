@@ -161,16 +161,16 @@ jobs:
           body: |
             ## 🐛 Bug 修复
 
-            ### 供应商添加后刷新消失问题修复
-            - **核心修复**：修复 Gemini 供应商添加后点击刷新消失的问题
-              - 新添加的 Gemini 供应商现在会正确调用 `AddProvider` 保存到后端
-              - 完善 Gemini 供应商的删除同步逻辑
-            - **Claude/Codex 修复**：修复供应商保存时机问题
-              - 保存操作现在正确等待完成后再继续，避免刷新时读取到旧数据
+            ### Gemini 配置写入问题修复
+            - **备份文件命名**：修正备份文件名从 `.cc-studio.backup` 改为 `.code-switch.backup`
+            - **代理地址格式**：明确使用 `127.0.0.1:18100` 而非模糊的 `:18100`
+            - **配置验证**：SwitchProvider 现在会验证 API Key 或 Base URL 是否存在
+            - **预设配置继承**：修复 envConfig 处理时丢失预设配置的问题
+            - **认证类型区分**：PackyCode 和通用 API Key 现在使用不同的 selectedType 值
+            - **Windows 兼容**：修复 .env 文件在 Windows 下的行尾处理问题
 
-            ### 代码质量改进
-            - 所有供应商操作（添加、删除、排序）现在都使用 `await` 确保操作完成
-            - Gemini 供应商缓存在保存后自动刷新，保持数据一致性
+            ### 测试修复
+            - 修复测试文件中 `NewGeminiService()` 缺少必需参数的问题
 
             ## 📦 安装说明
 
@@ -178,7 +178,7 @@ jobs:
             - **macOS (Apple Silicon)**：下载 `codeswitch-macos-arm64.zip`，解压后拖入 Applications 文件夹
             - **macOS (Intel)**：下载 `codeswitch-macos-amd64.zip`，解压后拖入 Applications 文件夹
 
-            **完整更新日志**: https://github.com/Rogers-F/code-switch-R/compare/v1.1.22...v1.1.23
+            **完整更新日志**: https://github.com/Rogers-F/code-switch-R/compare/v1.1.23...v1.1.24
           draft: false
           prerelease: false
         env:

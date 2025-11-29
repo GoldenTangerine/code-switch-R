@@ -85,7 +85,7 @@ func main() {
 	providerService := services.NewProviderService()
 	settingsService := services.NewSettingsService()
 	blacklistService := services.NewBlacklistService(settingsService)
-	geminiService := services.NewGeminiService(":18100")
+	geminiService := services.NewGeminiService("127.0.0.1:18100")
 	providerRelay := services.NewProviderRelayService(providerService, geminiService, blacklistService, ":18100")
 	claudeSettings := services.NewClaudeSettingsService(providerRelay.Addr())
 	codexSettings := services.NewCodexSettingsService(providerRelay.Addr())
