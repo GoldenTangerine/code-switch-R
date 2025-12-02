@@ -195,8 +195,8 @@ const navigate = (path: string) => {
 }
 
 .mac-sidebar.collapsed {
-  width: 56px;
-  min-width: 56px;
+  width: 48px;
+  min-width: 48px;
 }
 
 .sidebar-header {
@@ -272,7 +272,7 @@ html.dark .collapse-btn:hover {
 
 .nav-list {
   flex: 1;
-  padding: 12px 8px;
+  padding: 12px 4px;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -286,15 +286,15 @@ html.dark .collapse-btn:hover {
 }
 
 .mac-sidebar.collapsed .nav-list {
-  padding: 12px 4px;
+  padding: 12px 0;
   align-items: center;
 }
 
 .nav-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
+  gap: 8px;
+  padding: 10px 10px;
   border-radius: 10px;
   border: none;
   background: transparent;
@@ -308,7 +308,8 @@ html.dark .collapse-btn:hover {
 }
 
 .mac-sidebar.collapsed .nav-item {
-  padding: 10px;
+  width: 100%;
+  padding: 10px 8px;
   justify-content: center;
 }
 

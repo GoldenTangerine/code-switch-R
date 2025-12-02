@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -25,6 +26,9 @@ type ProviderRelayService struct {
 	server           *http.Server
 	addr             string
 }
+
+// errClientAbort 表示客户端中断连接，不应计入 provider 失败次数
+var errClientAbort = errors.New("client aborted, skip failure count")
 
 func NewProviderRelayService(providerService *ProviderService, geminiService *GeminiService, blacklistService *BlacklistService, addr string) *ProviderRelayService {
 	if addr == "" {
@@ -293,7 +297,10 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 			fmt.Printf("[WARN] ✗ 失败: %s | 错误: %s | 耗时: %.2fs（拉黑模式，不降级）\n",
 				firstProvider.Name, errorMsg, duration.Seconds())
 
-			if err := prs.blacklistService.RecordFailure(kind, firstProvider.Name); err != nil {
+			// 客户端中断不计入失败次数
+			if errors.Is(err, errClientAbort) {
+				fmt.Printf("[INFO] 客户端中断，跳过失败计数: %s\n", firstProvider.Name)
+			} else if err := prs.blacklistService.RecordFailure(kind, firstProvider.Name); err != nil {
 				fmt.Printf("[ERROR] 记录失败到黑名单失败: %v\n", err)
 			}
 
@@ -370,8 +377,10 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 				fmt.Printf("[WARN]   ✗ Level %d 失败: %s | 错误: %s | 耗时: %.2fs\n",
 					level, provider.Name, errorMsg, duration.Seconds())
 
-				// 记录失败到黑名单系统
-				if err := prs.blacklistService.RecordFailure(kind, provider.Name); err != nil {
+				// 客户端中断不计入失败次数
+				if errors.Is(err, errClientAbort) {
+					fmt.Printf("[INFO] 客户端中断，跳过失败计数: %s\n", provider.Name)
+				} else if err := prs.blacklistService.RecordFailure(kind, provider.Name); err != nil {
 					fmt.Printf("[ERROR] 记录失败到黑名单失败: %v\n", err)
 				}
 			}
@@ -469,7 +478,18 @@ func (prs *ProviderRelayService) forwardRequest(
 	req = req.SetBody(reqBody)
 
 	resp, err := req.Post(targetURL)
+
+	// 无论成功失败，先尝试记录 HttpCode
+	if resp != nil {
+		requestLog.HttpCode = resp.StatusCode()
+	}
+
 	if err != nil {
+		// resp 存在但 err != nil：可能是客户端中断，不计入失败
+		if resp != nil && requestLog.HttpCode == 0 {
+			fmt.Printf("[INFO] Provider %s 响应存在但状态码为0，判定为客户端中断\n", provider.Name)
+			return false, fmt.Errorf("%w: %v", errClientAbort, err)
+		}
 		return false, err
 	}
 
@@ -477,23 +497,24 @@ func (prs *ProviderRelayService) forwardRequest(
 		return false, fmt.Errorf("empty response")
 	}
 
-	// 先获取状态码，确保即使后续返回错误，也能记录正确的 HTTP 状态码
-	status := resp.StatusCode()
-	requestLog.HttpCode = status
+	status := requestLog.HttpCode
 
 	if resp.Error() != nil {
+		// resp 存在、有错误、但状态码为 0：客户端中断，不计入失败
+		if status == 0 {
+			fmt.Printf("[INFO] Provider %s 响应错误但状态码为0，判定为客户端中断\n", provider.Name)
+			return false, fmt.Errorf("%w: %v", errClientAbort, resp.Error())
+		}
 		return false, resp.Error()
 	}
 
-	// 特殊处理：某些 provider 的非流式请求可能返回状态码 0，但实际上是成功的
-	// 如果状态码为 0 且没有错误，当作成功处理
+	// 状态码为 0 且无错误：当作成功处理
 	if status == 0 {
 		fmt.Printf("[WARN] Provider %s 返回状态码 0，但无错误，当作成功处理\n", provider.Name)
 		_, copyErr := resp.ToHttpResponseWriter(c.Writer, ReqeustLogHook(c, kind, requestLog))
 		if copyErr != nil {
 			fmt.Printf("[WARN] 复制响应到客户端失败（不影响provider成功判定）: %v\n", copyErr)
 		}
-		// 只要provider返回了响应，就算成功（复制失败是客户端问题，不是provider问题）
 		return true, nil
 	}
 
