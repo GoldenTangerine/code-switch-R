@@ -218,7 +218,7 @@ const navigate = (path: string) => {
 }
 
 .mac-sidebar.collapsed .sidebar-header {
-  padding: 52px 8px 16px;
+  padding: 52px 0 16px;
   grid-template-columns: 1fr;
   justify-items: center;
 }
@@ -272,7 +272,7 @@ html.dark .collapse-btn:hover {
 
 .nav-list {
   flex: 1;
-  padding: 12px 4px;
+  padding: 12px 8px;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -294,8 +294,8 @@ html.dark .collapse-btn:hover {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 10px;
-  border-radius: 10px;
+  padding: 8px 6px;
+  border-radius: 8px;
   border: none;
   background: transparent;
   color: var(--mac-text-secondary);
@@ -309,7 +309,7 @@ html.dark .collapse-btn:hover {
 
 .mac-sidebar.collapsed .nav-item {
   width: 100%;
-  padding: 10px 8px;
+  padding: 10px 0;
   justify-content: center;
 }
 
