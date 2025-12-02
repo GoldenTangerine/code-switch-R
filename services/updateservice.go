@@ -405,15 +405,20 @@ func (us *UpdateService) DownloadUpdate(progressCallback func(float64)) error {
 	us.downloadProgress = 100
 	us.mu.Unlock()
 
+	// 下载成功后立即准备更新，写入 pending 标记并持久化 SHA256
+	if err := us.PrepareUpdate(); err != nil {
+		return fmt.Errorf("准备更新失败: %w", err)
+	}
+
 	return nil
 }
 
 // PrepareUpdate 准备更新
 func (us *UpdateService) PrepareUpdate() error {
 	us.mu.Lock()
-	defer us.mu.Unlock()
 
 	if us.updateFilePath == "" {
+		us.mu.Unlock()
 		return fmt.Errorf("更新文件路径为空")
 	}
 
@@ -432,14 +437,18 @@ func (us *UpdateService) PrepareUpdate() error {
 
 	data, err := json.MarshalIndent(metadata, "", "  ")
 	if err != nil {
+		us.mu.Unlock()
 		return fmt.Errorf("序列化元数据失败: %w", err)
 	}
 
 	if err := os.WriteFile(pendingFile, data, 0o644); err != nil {
+		us.mu.Unlock()
 		return fmt.Errorf("写入标记文件失败: %w", err)
 	}
 
 	us.updateReady = true
+	us.mu.Unlock() // 释放锁后再调用 SaveState，避免死锁
+
 	us.SaveState()
 
 	return nil
@@ -668,7 +677,14 @@ func (us *UpdateService) cleanupOldBackups(dir, pattern string, keep int) {
 }
 
 // RestartApp 重启应用
+// 如果有待安装的更新，会先触发更新流程（Windows 安装版会请求 UAC）
 func (us *UpdateService) RestartApp() error {
+	// 有待安装的更新时直接触发安装（Windows 安装版会请求 UAC）
+	if err := us.ApplyUpdate(); err != nil {
+		log.Printf("[UpdateService] 应用更新失败，将执行普通重启: %v", err)
+	}
+
+	// ApplyUpdate 在成功安装更新时会退出进程；走到这里说明没有待安装任务或更新失败
 	executable, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("获取可执行文件路径失败: %w", err)
@@ -792,12 +808,7 @@ func (us *UpdateService) autoDownload() {
 		return
 	}
 
-	// 下载成功，准备更新
-	if err := us.PrepareUpdate(); err != nil {
-		log.Printf("[UpdateService] 准备更新失败: %v", err)
-		return
-	}
-
+	// DownloadUpdate 内部已调用 PrepareUpdate，无需重复调用
 	log.Println("[UpdateService] 更新已下载完成，等待用户重启应用")
 }
 
