@@ -568,6 +568,21 @@
         "model": "模型",
         "notes": "备注"
       }
+    },
+    "cliConfig": {
+      "title": "CLI 配置",
+      "lockedFields": "代理托管字段（只读）",
+      "editableFields": "可编辑字段",
+      "loading": "加载配置中...",
+      "loadError": "加载配置失败",
+      "setAsTemplate": "设为新供应商的默认模板",
+      "restoreDefault": "恢复默认",
+      "restoreConfirm": "确定要恢复默认配置吗？这将覆盖当前设置。",
+      "restoreSuccess": "配置已恢复默认",
+      "restoreError": "恢复默认配置失败",
+      "templateSaved": "模板已保存",
+      "templateSaveError": "保存模板失败",
+      "jsonParseError": "JSON 格式无效，请检查输入"
     }
   }
 }

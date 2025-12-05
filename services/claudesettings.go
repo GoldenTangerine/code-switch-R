@@ -60,26 +60,38 @@ func (css *ClaudeSettingsService) EnableProxy() error {
 	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
 		return err
 	}
-	if _, err := os.Stat(settingsPath); err == nil {
+
+	// 读取现有配置（最小侵入模式：保留用户的其他配置）
+	var existingData map[string]interface{}
+	if _, statErr := os.Stat(settingsPath); statErr == nil {
 		content, readErr := os.ReadFile(settingsPath)
 		if readErr != nil {
 			return readErr
 		}
+		// 创建备份
 		if err := os.WriteFile(backupPath, content, 0o600); err != nil {
 			return err
 		}
+		// 解析现有配置
+		if err := json.Unmarshal(content, &existingData); err != nil {
+			// 解析失败，使用空配置
+			existingData = make(map[string]interface{})
+		}
+	} else {
+		existingData = make(map[string]interface{})
 	}
-	settings := claudeSettingsFile{
-		Env: map[string]string{
-			"ANTHROPIC_AUTH_TOKEN": claudeAuthTokenValue,
-			"ANTHROPIC_BASE_URL":   css.baseURL(),
-		},
+
+	// 仅更新代理相关字段，保留其他配置（如 model, alwaysThinkingEnabled, enabledPlugins）
+	env, ok := existingData["env"].(map[string]interface{})
+	if !ok {
+		env = make(map[string]interface{})
 	}
-	payload, err := json.MarshalIndent(settings, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(settingsPath, payload, 0o600)
+	env["ANTHROPIC_AUTH_TOKEN"] = claudeAuthTokenValue
+	env["ANTHROPIC_BASE_URL"] = css.baseURL()
+	existingData["env"] = env
+
+	// 原子写入
+	return AtomicWriteJSON(settingsPath, existingData)
 }
 
 func (css *ClaudeSettingsService) DisableProxy() error {

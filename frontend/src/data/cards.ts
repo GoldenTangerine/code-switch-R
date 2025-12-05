@@ -14,6 +14,8 @@ export type AutomationCard = {
   modelMapping?: Record<string, string>
   // 优先级分组：数字越小优先级越高（1-10，默认 1）
   level?: number
+  // CLI 配置：存储供应商关联的 CLI 可编辑配置
+  cliConfig?: Record<string, any>
 }
 
 export const automationCardGroups: Record<'claude' | 'codex', AutomationCard[]> = {

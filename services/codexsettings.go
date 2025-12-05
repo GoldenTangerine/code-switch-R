@@ -78,9 +78,15 @@ func (css *CodexSettingsService) EnableProxy() error {
 	if raw == nil {
 		raw = make(map[string]any)
 	}
+
+	// 最小侵入模式：只设置必需的代理相关字段
 	raw["preferred_auth_method"] = codexPreferredAuth
-	raw["model"] = codexDefaultModel
 	raw["model_provider"] = codexProviderKey
+
+	// 保留用户的 model 设置，只在不存在时才使用默认值
+	if _, exists := raw["model"]; !exists {
+		raw["model"] = codexDefaultModel
+	}
 
 	modelProviders := ensureTomlTable(raw, "model_providers")
 	provider := ensureProviderTable(modelProviders, codexProviderKey)
@@ -96,7 +102,9 @@ func (css *CodexSettingsService) EnableProxy() error {
 		return err
 	}
 	cleaned := stripModelProvidersHeader(data)
-	if err := os.WriteFile(settingsPath, cleaned, 0o600); err != nil {
+
+	// 原子写入
+	if err := AtomicWriteBytes(settingsPath, cleaned); err != nil {
 		return err
 	}
 	return css.writeAuthFile()

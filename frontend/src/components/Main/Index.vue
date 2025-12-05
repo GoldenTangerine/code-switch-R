@@ -538,6 +538,13 @@
                   <ModelMappingEditor v-model="modalState.form.modelMapping" />
                 </div>
 
+                <div class="form-field">
+                  <CLIConfigEditor
+                    :platform="activeTab as CLIPlatform"
+                    v-model="modalState.form.cliConfig"
+                  />
+                </div>
+
                 <div class="form-field switch-field">
                   <span>{{ t('components.main.form.labels.enabled') }}</span>
                   <div class="switch-inline">
@@ -605,6 +612,7 @@ import BaseModal from '../common/BaseModal.vue'
 import BaseInput from '../common/BaseInput.vue'
 import ModelWhitelistEditor from '../common/ModelWhitelistEditor.vue'
 import ModelMappingEditor from '../common/ModelMappingEditor.vue'
+import CLIConfigEditor from '../common/CLIConfigEditor.vue'
 import { LoadProviders, SaveProviders, DuplicateProvider } from '../../../bindings/codeswitch/services/providerservice'
 import { GetProviders as GetGeminiProviders, UpdateProvider as UpdateGeminiProvider, AddProvider as AddGeminiProvider, DeleteProvider as DeleteGeminiProvider, ReorderProviders as ReorderGeminiProviders } from '../../../bindings/codeswitch/services/geminiservice'
 import { fetchProxyStatus, enableProxy, disableProxy } from '../../services/claudeSettings'
@@ -618,6 +626,7 @@ import { useRouter } from 'vue-router'
 import { fetchConfigImportStatus, importFromCcSwitch, type ConfigImportStatus } from '../../services/configImport'
 import { showToast } from '../../utils/toast'
 import { getBlacklistStatus, manualUnblock, type BlacklistStatus } from '../../services/blacklist'
+import { saveCLIConfig, type CLIPlatform } from '../../services/cliConfig'
 
 const { t, locale } = useI18n()
 const router = useRouter()
@@ -1488,6 +1497,7 @@ type VendorForm = {
   supportedModels?: Record<string, boolean>
   modelMapping?: Record<string, string>
   level?: number
+  cliConfig?: Record<string, any>
 }
 
 const iconOptions = Object.keys(lobeIcons).sort((a, b) => a.localeCompare(b))
@@ -1503,6 +1513,7 @@ const defaultFormValues = (): VendorForm => ({
   enabled: true,
   supportedModels: {},
   modelMapping: {},
+  cliConfig: {},
 })
 
 // Level 描述文本映射（1-10）
@@ -1558,6 +1569,7 @@ const openEditModal = (card: AutomationCard) => {
     enabled: card.enabled,
     supportedModels: card.supportedModels || {},
     modelMapping: card.modelMapping || {},
+    cliConfig: card.cliConfig || {},
   })
   modalState.errors.apiUrl = ''
   modalState.open = true
@@ -1599,6 +1611,7 @@ const submitModal = async () => {
       enabled: modalState.form.enabled,
       supportedModels: modalState.form.supportedModels || {},
       modelMapping: modalState.form.modelMapping || {},
+      cliConfig: modalState.form.cliConfig || {},
     })
     await persistProviders(modalState.tabId)
   } else {
@@ -1615,9 +1628,20 @@ const submitModal = async () => {
       enabled: modalState.form.enabled,
       supportedModels: modalState.form.supportedModels || {},
       modelMapping: modalState.form.modelMapping || {},
+      cliConfig: modalState.form.cliConfig || {},
     }
     list.push(newCard)
     await persistProviders(modalState.tabId)
+  }
+
+  // 保存 CLI 配置（如果有编辑）
+  const cliConfig = modalState.form.cliConfig
+  if (cliConfig && Object.keys(cliConfig).length > 0) {
+    try {
+      await saveCLIConfig(modalState.tabId as CLIPlatform, cliConfig)
+    } catch (error) {
+      console.error('保存 CLI 配置失败:', error)
+    }
   }
 
   closeModal()

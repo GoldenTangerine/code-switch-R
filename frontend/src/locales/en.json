@@ -567,6 +567,21 @@
         "model": "Model",
         "notes": "Notes"
       }
+    },
+    "cliConfig": {
+      "title": "CLI Configuration",
+      "lockedFields": "Proxy-managed (read-only)",
+      "editableFields": "Editable fields",
+      "loading": "Loading configuration...",
+      "loadError": "Failed to load configuration",
+      "setAsTemplate": "Set as default template for new providers",
+      "restoreDefault": "Restore default",
+      "restoreConfirm": "Are you sure you want to restore the default configuration? This will overwrite current settings.",
+      "restoreSuccess": "Configuration restored to default",
+      "restoreError": "Failed to restore default configuration",
+      "templateSaved": "Template saved successfully",
+      "templateSaveError": "Failed to save template",
+      "jsonParseError": "Invalid JSON format, please check your input"
     }
   }
 }
