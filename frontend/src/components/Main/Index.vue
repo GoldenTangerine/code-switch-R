@@ -1109,10 +1109,12 @@ const loadProvidersFromDisk = async () => {
         const geminiProviders = await GetGeminiProviders()
         geminiProvidersCache.value = geminiProviders
         cards.gemini.splice(0, cards.gemini.length, ...geminiProviders.map(geminiToCard))
+        sortProvidersByLevel(cards.gemini)  // 初始排序：启用优先，Level 升序
       } else {
         const saved = await LoadProviders(tab)
         if (Array.isArray(saved)) {
           replaceProviders(tab, saved as AutomationCard[])
+          sortProvidersByLevel(cards[tab])  // 初始排序：启用优先，Level 升序
         } else {
           await persistProviders(tab)
         }
@@ -1586,10 +1588,17 @@ const normalizeLevel = (level: number | string | undefined): number => {
   return Math.floor(num)  // 确保返回整数
 }
 
-// 按 level 升序排序；同级保持原有顺序（依赖现代 JS 稳定排序，不破坏拖拽顺序）
+// 按 enabled 和 level 排序：启用的排在前面，同启用状态下按 level 升序排序
 const sortProvidersByLevel = (list: AutomationCard[]) => {
   if (!Array.isArray(list)) return
-  list.sort((a, b) => normalizeLevel(a.level) - normalizeLevel(b.level))
+  list.sort((a, b) => {
+    // 第一优先级：启用状态（enabled: true 排在前面）
+    if (a.enabled !== b.enabled) {
+      return a.enabled ? -1 : 1
+    }
+    // 第二优先级：Level 升序（1 -> 10）
+    return normalizeLevel(a.level) - normalizeLevel(b.level)
+  })
 }
 
 const modalState = reactive({

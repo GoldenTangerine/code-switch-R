@@ -3,3 +3,4 @@ frontend/dist
 .DS_Store
 .task
 bin
+CLAUDE.md
