@@ -18,10 +18,11 @@ const (
 )
 
 type AppSettings struct {
-	ShowHeatmap   bool `json:"show_heatmap"`
-	ShowHomeTitle bool `json:"show_home_title"`
-	AutoStart     bool `json:"auto_start"`
-	AutoUpdate    bool `json:"auto_update"`
+	ShowHeatmap          bool `json:"show_heatmap"`
+	ShowHomeTitle        bool `json:"show_home_title"`
+	AutoStart            bool `json:"auto_start"`
+	AutoUpdate           bool `json:"auto_update"`
+	AutoConnectivityTest bool `json:"auto_connectivity_test"`
 }
 
 type AppSettingsService struct {
@@ -134,10 +135,11 @@ func (as *AppSettingsService) defaultSettings() AppSettings {
 	}
 
 	return AppSettings{
-		ShowHeatmap:   true,
-		ShowHomeTitle: true,
-		AutoStart:     autoStartEnabled,
-		AutoUpdate:    true, // 默认开启自动更新
+		ShowHeatmap:          true,
+		ShowHomeTitle:        true,
+		AutoStart:            autoStartEnabled,
+		AutoUpdate:           true,  // 默认开启自动更新
+		AutoConnectivityTest: false, // 默认关闭自动连通性检测
 	}
 }
 
