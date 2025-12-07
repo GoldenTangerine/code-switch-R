@@ -186,7 +186,8 @@
           "officialSite": "Official site",
           "icon": "Icon",
           "enabled": "Enabled",
-          "level": "Priority Level"
+          "level": "Priority Level",
+          "connectivityCheck": "Connectivity Check"
         },
         "placeholders": {
           "name": "e.g. AICoding.sh",
@@ -196,7 +197,8 @@
           "icon": "e.g. aicoding, kimi"
         },
         "hints": {
-          "level": "Lower numbers = higher priority. Level 1 providers are tried first, then Level 2, etc."
+          "level": "Lower numbers = higher priority. Level 1 providers are tried first, then Level 2, etc.",
+          "connectivityCheck": "When enabled, connectivity to this provider will be tested periodically"
         },
         "actions": {
           "cancel": "Cancel",
@@ -224,6 +226,28 @@
         "lower": "Lower Priority",
         "veryLow": "Very Low Priority",
         "lowest": "Lowest Priority"
+      },
+      "connectivity": {
+        "available": "Available",
+        "degraded": "Degraded",
+        "unavailable": "Unavailable",
+        "noData": "No data",
+        "status": {
+          "available": "Available",
+          "degraded": "Degraded",
+          "unavailable": "Unavailable",
+          "missing": "No data"
+        },
+        "subStatus": {
+          "slowLatency": "Slow latency",
+          "rateLimit": "Rate limited",
+          "serverError": "Server error",
+          "clientError": "Client error",
+          "authError": "Auth error",
+          "invalidRequest": "Invalid request",
+          "networkError": "Network error",
+          "contentMismatch": "Content mismatch"
+        }
       },
       "blacklist": {
         "blocked": "Blocked",
@@ -307,7 +331,8 @@
         "power": "Permission settings",
         "update": "Application update",
         "blacklist": "Blacklist Settings",
-        "dataImport": "Data Import"
+        "dataImport": "Data Import",
+        "connectivity": "Connectivity Test"
       },
       "label": {
         "assistant_access": "Accessibility permissions",
@@ -321,6 +346,8 @@
         "homeTitle": "Show home title",
         "autoStart": "Launch at login",
         "autoUpdate": "Automatic update",
+        "autoConnectivityTest": "Auto connectivity test",
+        "autoConnectivityTestHint": "Test enabled providers every minute",
         "lastCheck": "Last check",
         "currentVersion": "Current version",
         "latestVersion": "Latest version",

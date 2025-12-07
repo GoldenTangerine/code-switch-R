@@ -111,6 +111,7 @@ func main() {
 	importService := services.NewImportService(providerService, mcpService)
 	deeplinkService := services.NewDeepLinkService(providerService)
 	speedTestService := services.NewSpeedTestService()
+	connectivityTestService := services.NewConnectivityTestService(providerService, blacklistService, settingsService)
 	dockService := dock.New()
 	versionService := NewVersionService()
 	consoleService := services.NewConsoleService()
@@ -150,6 +151,23 @@ func main() {
 		}
 	}()
 
+	// 根据 AppSettings 配置启动自动连通性检测
+	go func() {
+		time.Sleep(3 * time.Second) // 延迟3秒，等待应用初始化
+		settings, err := appSettings.GetAppSettings()
+		if err != nil {
+			log.Printf("读取应用设置失败: %v", err)
+			return
+		}
+		if settings.AutoConnectivityTest {
+			if err := connectivityTestService.SetAutoTestEnabled(true); err != nil {
+				log.Printf("启动自动连通性检测失败: %v", err)
+			} else {
+				log.Println("✅ 自动连通性检测已启动")
+			}
+		}
+	}()
+
 	//fmt.Println(clipboardService)
 	// Create a new Wails application by providing the necessary options.
 	// Variables 'Name' and 'Description' are for application metadata.
@@ -178,6 +196,7 @@ func main() {
 			application.NewService(importService),
 			application.NewService(deeplinkService),
 			application.NewService(speedTestService),
+			application.NewService(connectivityTestService),
 			application.NewService(dockService),
 			application.NewService(versionService),
 			application.NewService(geminiService),

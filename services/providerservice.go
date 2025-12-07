@@ -32,6 +32,9 @@ type Provider struct {
 	// 使用 omitempty 确保零值不序列化，向后兼容
 	Level int `json:"level,omitempty"`
 
+	// 连通性检测开关 - 是否启用自动连通性检测
+	ConnectivityCheck bool `json:"connectivityCheck,omitempty"`
+
 	// 内部字段：配置验证错误（不持久化）
 	configErrors []string `json:"-"`
 }
@@ -183,16 +186,17 @@ func (ps *ProviderService) DuplicateProvider(kind string, sourceID int64) (*Prov
 
 	// 4. 克隆配置（深拷贝）
 	cloned := &Provider{
-		ID:      newID,
-		Name:    source.Name + " (副本)",
-		APIURL:  source.APIURL,
-		APIKey:  source.APIKey,
-		Site:    source.Site,
-		Icon:    source.Icon,
-		Tint:    source.Tint,
-		Accent:  source.Accent,
-		Enabled: false, // 默认禁用，避免与源供应商冲突
-		Level:   source.Level,
+		ID:                newID,
+		Name:              source.Name + " (副本)",
+		APIURL:            source.APIURL,
+		APIKey:            source.APIKey,
+		Site:              source.Site,
+		Icon:              source.Icon,
+		Tint:              source.Tint,
+		Accent:            source.Accent,
+		Enabled:           false, // 默认禁用，避免与源供应商冲突
+		Level:             source.Level,
+		ConnectivityCheck: source.ConnectivityCheck,
 	}
 
 	// 5. 深拷贝 map（避免共享引用）

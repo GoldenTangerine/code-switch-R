@@ -5,6 +5,7 @@ export type AppSettings = {
   show_home_title: boolean
   auto_start: boolean
   auto_update: boolean
+  auto_connectivity_test: boolean
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -12,6 +13,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   show_home_title: true,
   auto_start: false,
   auto_update: true,
+  auto_connectivity_test: false,
 }
 
 export const fetchAppSettings = async (): Promise<AppSettings> => {

@@ -187,7 +187,8 @@
           "officialSite": "官网地址",
           "icon": "图标",
           "enabled": "启用状态",
-          "level": "优先级分组"
+          "level": "优先级分组",
+          "connectivityCheck": "连通性检测"
         },
         "placeholders": {
           "name": "例如：AICoding.sh",
@@ -197,7 +198,8 @@
           "icon": "例如：aicoding、kimi"
         },
         "hints": {
-          "level": "数字越小优先级越高，Level 1 会被优先尝试，失败后依次尝试 Level 2、Level 3 等"
+          "level": "数字越小优先级越高，Level 1 会被优先尝试，失败后依次尝试 Level 2、Level 3 等",
+          "connectivityCheck": "启用后会定期检测此供应商的连通性"
         },
         "actions": {
           "cancel": "取消",
@@ -225,6 +227,28 @@
         "lower": "较低优先级",
         "veryLow": "很低优先级",
         "lowest": "最低优先级"
+      },
+      "connectivity": {
+        "available": "正常",
+        "degraded": "波动",
+        "unavailable": "不可用",
+        "noData": "无数据",
+        "status": {
+          "available": "可用",
+          "degraded": "波动",
+          "unavailable": "不可用",
+          "missing": "无数据"
+        },
+        "subStatus": {
+          "slowLatency": "延迟过高",
+          "rateLimit": "触发限速",
+          "serverError": "服务器错误",
+          "clientError": "客户端错误",
+          "authError": "认证失败",
+          "invalidRequest": "请求无效",
+          "networkError": "网络异常",
+          "contentMismatch": "响应内容异常"
+        }
       },
       "blacklist": {
         "blocked": "已拉黑",
@@ -308,7 +332,8 @@
         "exterior": "外观设置",
         "update": "应用更新",
         "blacklist": "拉黑配置",
-        "dataImport": "数据导入"
+        "dataImport": "数据导入",
+        "connectivity": "连通性检测"
       },
       "label": {
         "assistant_access": "辅助功能访问权限",
@@ -327,6 +352,8 @@
         "manualUpdate": "手动更新",
         "automatic_up": "自动检查更新",
         "next_up": "下次启动自动检查更新",
+        "autoConnectivityTest": "自动连通性检测",
+        "autoConnectivityTestHint": "每分钟检测已启用检测的供应商连通性",
         "blacklistThreshold": "失败次数阈值",
         "blacklistDuration": "拉黑时长",
         "saveBlacklist": "保存配置",

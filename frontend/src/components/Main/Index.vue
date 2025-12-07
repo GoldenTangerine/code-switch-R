@@ -276,6 +276,13 @@
             <div class="card-text">
               <div class="card-title-row">
                 <p class="card-title">{{ card.name }}</p>
+                <!-- 连通性状态指示器 -->
+                <span
+                  v-if="card.connectivityCheck"
+                  class="connectivity-dot"
+                  :class="getConnectivityIndicatorClass(card.id)"
+                  :title="getConnectivityTooltip(card.id)"
+                ></span>
                 <span v-if="card.level" class="level-badge scheduling-level" :class="`level-${card.level}`">
                   L{{ card.level }}
                 </span>
@@ -573,6 +580,20 @@
                   </div>
                 </div>
 
+                <div class="form-field switch-field">
+                  <span>{{ t('components.main.form.labels.connectivityCheck') }}</span>
+                  <div class="switch-inline">
+                    <label class="mac-switch">
+                      <input type="checkbox" v-model="modalState.form.connectivityCheck" />
+                      <span></span>
+                    </label>
+                    <span class="switch-text">
+                      {{ modalState.form.connectivityCheck ? t('components.main.form.switch.on') : t('components.main.form.switch.off') }}
+                    </span>
+                  </div>
+                  <span class="field-hint">{{ t('components.main.form.hints.connectivityCheck') }}</span>
+                </div>
+
                 <footer class="form-actions">
                   <BaseButton variant="outline" type="button" @click="closeModal">
                     {{ t('components.main.form.actions.cancel') }}
@@ -642,6 +663,15 @@ import { fetchConfigImportStatus, importFromCcSwitch, isFirstRun, markFirstRunDo
 import { showToast } from '../../utils/toast'
 import { getBlacklistStatus, manualUnblock, type BlacklistStatus } from '../../services/blacklist'
 import { saveCLIConfig, type CLIPlatform } from '../../services/cliConfig'
+import {
+  getConnectivityResults,
+  StatusAvailable,
+  StatusDegraded,
+  StatusUnavailable,
+  StatusMissing,
+  getStatusColorClass,
+  type ConnectivityResult,
+} from '../../services/connectivity'
 
 const { t, locale } = useI18n()
 const router = useRouter()
@@ -706,6 +736,13 @@ const blacklistStatusMap = reactive<Record<ProviderTab, Record<string, Blacklist
   gemini: {},
 })
 let blacklistTimer: number | undefined
+
+// 连通性状态
+const connectivityResultsMap = reactive<Record<ProviderTab, Record<number, ConnectivityResult>>>({
+  claude: {},
+  codex: {},
+  gemini: {},
+})
 
 const showImportButton = computed(() => {
   const status = importStatus.value
@@ -1276,6 +1313,49 @@ const getProviderBlacklistStatus = (providerName: string): BlacklistStatus | nul
   return blacklistStatusMap[activeTab.value][providerName] || null
 }
 
+// 加载连通性测试结果
+const loadConnectivityResults = async (tab: ProviderTab) => {
+  try {
+    const results = await getConnectivityResults(tab)
+    const map: Record<number, ConnectivityResult> = {}
+    results.forEach((result) => {
+      map[result.providerId] = result
+    })
+    connectivityResultsMap[tab] = map
+  } catch (err) {
+    console.error(`加载 ${tab} 连通性结果失败:`, err)
+  }
+}
+
+// 获取 provider 连通性状态
+const getProviderConnectivityResult = (providerId: number): ConnectivityResult | null => {
+  return connectivityResultsMap[activeTab.value][providerId] || null
+}
+
+// 获取连通性状态指示器样式
+const getConnectivityIndicatorClass = (providerId: number): string => {
+  const result = getProviderConnectivityResult(providerId)
+  if (!result) return 'connectivity-gray'
+  return getStatusColorClass(result.status)
+}
+
+// 获取连通性状态提示文本
+const getConnectivityTooltip = (providerId: number): string => {
+  const result = getProviderConnectivityResult(providerId)
+  if (!result) return t('components.main.connectivity.noData')
+
+  const statusText = result.status === StatusAvailable
+    ? t('components.main.connectivity.available')
+    : result.status === StatusDegraded
+    ? t('components.main.connectivity.degraded')
+    : result.status === StatusUnavailable
+    ? t('components.main.connectivity.unavailable')
+    : t('components.main.connectivity.noData')
+
+  const latencyText = result.latencyMs > 0 ? ` (${result.latencyMs}ms)` : ''
+  return statusText + latencyText
+}
+
 // 刷新所有数据
 const refreshing = ref(false)
 const refreshAllData = async () => {
@@ -1288,6 +1368,7 @@ const refreshAllData = async () => {
       ...providerTabIds.map(refreshProxyState),
       ...providerTabIds.map((tab) => loadProviderStats(tab)),
       ...providerTabIds.map((tab) => loadBlacklistStatus(tab)), // 同步刷新黑名单状态
+      ...providerTabIds.map((tab) => loadConnectivityResults(tab)), // 同步刷新连通性状态
       refreshImportStatus(),
       pollUpdateState()
     ])
@@ -1387,6 +1468,7 @@ const startProviderStatsTimer = () => {
   providerStatsTimer = window.setInterval(() => {
     providerTabIds.forEach((tab) => {
       void loadProviderStats(tab)
+      void loadConnectivityResults(tab) // 同步刷新连通性状态
     })
   }, 60_000)
 }
@@ -1413,6 +1495,9 @@ onMounted(async () => {
 
   // 加载初始黑名单状态
   await Promise.all(providerTabIds.map((tab) => loadBlacklistStatus(tab)))
+
+  // 加载初始连通性测试结果
+  await Promise.all(providerTabIds.map((tab) => loadConnectivityResults(tab)))
 
   // 每秒更新黑名单倒计时
   blacklistTimer = window.setInterval(() => {
@@ -1467,9 +1552,10 @@ const selectedIndex = ref(0)
 const activeTab = computed<ProviderTab>(() => tabs[selectedIndex.value]?.id ?? tabs[0].id)
 const activeCards = computed(() => cards[activeTab.value] ?? [])
 
-// 监听 tab 切换，立即刷新黑名单状态
+// 监听 tab 切换，立即刷新黑名单和连通性状态
 watch(activeTab, (newTab) => {
   void loadBlacklistStatus(newTab)
+  void loadConnectivityResults(newTab)
 })
 const currentProxyLabel = computed(() =>
   activeTab.value === 'claude'
@@ -1543,6 +1629,7 @@ type VendorForm = {
   modelMapping?: Record<string, string>
   level?: number
   cliConfig?: Record<string, any>
+  connectivityCheck?: boolean
 }
 
 const iconOptions = Object.keys(lobeIcons).sort((a, b) => a.localeCompare(b))
@@ -1559,6 +1646,7 @@ const defaultFormValues = (): VendorForm => ({
   supportedModels: {},
   modelMapping: {},
   cliConfig: {},
+  connectivityCheck: false,
 })
 
 // Level 描述文本映射（1-10）
@@ -1629,6 +1717,7 @@ const openEditModal = (card: AutomationCard) => {
     supportedModels: card.supportedModels || {},
     modelMapping: card.modelMapping || {},
     cliConfig: card.cliConfig || {},
+    connectivityCheck: card.connectivityCheck || false,
   })
   modalState.errors.apiUrl = ''
   modalState.open = true
@@ -1674,6 +1763,7 @@ const submitModal = async () => {
       supportedModels: modalState.form.supportedModels || {},
       modelMapping: modalState.form.modelMapping || {},
       cliConfig: modalState.form.cliConfig || {},
+      connectivityCheck: modalState.form.connectivityCheck || false,
     })
     if (prevLevel !== nextLevel) {
       sortProvidersByLevel(list)
@@ -1694,6 +1784,7 @@ const submitModal = async () => {
       supportedModels: modalState.form.supportedModels || {},
       modelMapping: modalState.form.modelMapping || {},
       cliConfig: modalState.form.cliConfig || {},
+      connectivityCheck: modalState.form.connectivityCheck || false,
     }
     list.push(newCard)
     sortProvidersByLevel(list)
@@ -2422,5 +2513,54 @@ const handleImportClick = async () => {
 
 :global(.dark) .banner-btn.primary {
   background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+}
+
+/* 连通性状态指示器 */
+.connectivity-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-left: 6px;
+  flex-shrink: 0;
+  transition: background-color 0.2s ease;
+}
+
+.connectivity-dot.connectivity-green {
+  background-color: #22c55e;
+  box-shadow: 0 0 4px rgba(34, 197, 94, 0.5);
+}
+
+.connectivity-dot.connectivity-yellow {
+  background-color: #eab308;
+  box-shadow: 0 0 4px rgba(234, 179, 8, 0.5);
+}
+
+.connectivity-dot.connectivity-red {
+  background-color: #ef4444;
+  box-shadow: 0 0 4px rgba(239, 68, 68, 0.5);
+}
+
+.connectivity-dot.connectivity-gray {
+  background-color: #9ca3af;
+}
+
+:global(.dark) .connectivity-dot.connectivity-green {
+  background-color: #4ade80;
+  box-shadow: 0 0 6px rgba(74, 222, 128, 0.6);
+}
+
+:global(.dark) .connectivity-dot.connectivity-yellow {
+  background-color: #facc15;
+  box-shadow: 0 0 6px rgba(250, 204, 21, 0.6);
+}
+
+:global(.dark) .connectivity-dot.connectivity-red {
+  background-color: #f87171;
+  box-shadow: 0 0 6px rgba(248, 113, 113, 0.6);
+}
+
+:global(.dark) .connectivity-dot.connectivity-gray {
+  background-color: #6b7280;
 }
 </style>
