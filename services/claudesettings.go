@@ -76,8 +76,9 @@ func (css *ClaudeSettingsService) EnableProxy() error {
 		// 解析现有配置（仅当文件非空时）
 		if len(content) > 0 {
 			if err := json.Unmarshal(content, &existingData); err != nil {
-				// JSON 解析失败，返回错误让用户修复配置文件
-				return fmt.Errorf("settings.json 格式无效，已备份到 %s: %w", backupPath, err)
+				// JSON 解析失败，使用空配置继续（备份已保存）
+				fmt.Printf("[警告] settings.json 格式无效，已备份到 %s，将使用空配置: %v\n", backupPath, err)
+				existingData = make(map[string]interface{})
 			}
 		}
 		if existingData == nil {

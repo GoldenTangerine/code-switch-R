@@ -1160,6 +1160,7 @@ const persistProviders = async (tabId: ProviderTab) => {
     }
   } catch (error) {
     console.error('Failed to save providers', error)
+    showToast(t('components.main.form.saveFailed'), 'error')
   }
 }
 

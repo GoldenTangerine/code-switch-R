@@ -362,7 +362,8 @@ func (s *CliConfigService) saveClaudeConfig(editable map[string]interface{}) err
 		// 仅当文件非空时解析
 		if len(content) > 0 {
 			if err := json.Unmarshal(content, &data); err != nil {
-				return fmt.Errorf("settings.json 格式无效: %w", err)
+				// JSON 解析失败，使用空配置继续（后续会创建备份）
+				fmt.Printf("[警告] settings.json 格式无效，将使用空配置: %v\n", err)
 			}
 		}
 	}
@@ -532,7 +533,8 @@ func (s *CliConfigService) saveCodexConfig(editable map[string]interface{}) erro
 		// 仅当文件非空时解析
 		if len(content) > 0 {
 			if err := toml.Unmarshal(content, &raw); err != nil {
-				return fmt.Errorf("config.toml 格式无效: %w", err)
+				// TOML 解析失败，使用空配置继续（后续会创建备份）
+				fmt.Printf("[警告] config.toml 格式无效，将使用空配置: %v\n", err)
 			}
 		}
 	}

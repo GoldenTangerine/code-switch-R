@@ -88,6 +88,7 @@ func (ps *ProviderService) saveProvidersLocked(kind string, providers []Provider
 		return err
 	}
 
+	// 加载现有配置，用于检查 name 是否被修改
 	existingProviders, err := ps.LoadProviders(kind)
 	if err != nil {
 		return err
@@ -100,12 +101,12 @@ func (ps *ProviderService) saveProvidersLocked(kind string, providers []Provider
 	// 验证每个 provider 的配置
 	validationErrors := make([]string, 0)
 	for _, p := range providers {
-		// 规则 1：name 不可修改
+		// 规则：name 不可修改（黑名单/统计以 name 为 key，改名会导致数据丢失）
 		if oldName, ok := nameByID[p.ID]; ok && oldName != p.Name {
-			return fmt.Errorf("provider id %d 的 name 不可修改", p.ID)
+			return fmt.Errorf("provider id %d 的 name 不可修改（会导致黑名单和统计数据丢失）", p.ID)
 		}
 
-		// 规则 2：验证模型配置
+		// 验证模型配置
 		if errs := p.ValidateConfiguration(); len(errs) > 0 {
 			for _, errMsg := range errs {
 				validationErrors = append(validationErrors, fmt.Sprintf("[%s] %s", p.Name, errMsg))
@@ -298,7 +299,8 @@ func (p *Provider) ValidateConfiguration() []string {
 	errors := make([]string, 0)
 
 	// 规则 1：ModelMapping 的 value 必须在 SupportedModels 中
-	if p.ModelMapping != nil && p.SupportedModels != nil {
+	// 仅当两者都有实际内容时才校验（空 map 不触发校验）
+	if len(p.ModelMapping) > 0 && len(p.SupportedModels) > 0 {
 		for externalModel, internalModel := range p.ModelMapping {
 			// 检查是否为通配符映射
 			if strings.Contains(internalModel, "*") {
@@ -329,25 +331,10 @@ func (p *Provider) ValidateConfiguration() []string {
 		}
 	}
 
-	// 规则 2：如果配置了 ModelMapping 但未配置 SupportedModels，给出警告
-	if p.ModelMapping != nil && len(p.ModelMapping) > 0 &&
-		(p.SupportedModels == nil || len(p.SupportedModels) == 0) {
-		errors = append(errors,
-			"警告：配置了 modelMapping 但未配置 supportedModels，映射的目标模型无法验证",
-		)
-	}
+	// 允许仅配置 modelMapping（无 supportedModels 时不阻塞保存）
+	// 用户可能只想映射模型名，不需要白名单过滤
 
-	// 规则 3：检测自映射（通常无意义，但不是错误）
-	if p.ModelMapping != nil {
-		for external, internal := range p.ModelMapping {
-			if external == internal {
-				errors = append(errors, fmt.Sprintf(
-					"警告：模型 '%s' 映射到自身，这通常无意义",
-					external,
-				))
-			}
-		}
-	}
+	// 规则 3 移除：自映射不会破坏功能，最多是无效配置，不阻塞保存
 
 	p.configErrors = errors
 	return errors
