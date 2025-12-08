@@ -107,6 +107,13 @@ func (prs *ProviderRelayService) validateConfig() []string {
 					"[%s/%s] 未配置 supportedModels 或 modelMapping，将假设支持所有模型（可能导致降级失败）",
 					kind, p.Name))
 			}
+
+			// 检查是否只配置了映射但没有白名单
+			if len(p.ModelMapping) > 0 && len(p.SupportedModels) == 0 {
+				warnings = append(warnings, fmt.Sprintf(
+					"[%s/%s] 配置了 modelMapping 但未配置 supportedModels，映射目标将不做校验，请确认目标模型在供应商处可用",
+					kind, p.Name))
+			}
 		}
 
 		if enabledCount == 0 {
