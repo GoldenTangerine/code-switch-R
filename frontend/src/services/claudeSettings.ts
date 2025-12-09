@@ -20,10 +20,16 @@ const callByPlatform = async <T = unknown>(platform: Platform, method: string, p
 }
 
 // 归一化代理状态字段（兼容 Wails 返回的 Go 导出字段名 Enabled/BaseURL）
-const normalizeProxyStatus = (raw: any): ClaudeProxyStatus => ({
-  enabled: Boolean(raw?.enabled ?? raw?.Enabled),
-  base_url: raw?.base_url ?? raw?.BaseURL ?? '',
-})
+// 注意：Wails 绑定会给字段赋默认值，所以用 'in' 检查而非 ??
+const normalizeProxyStatus = (raw: any): ClaudeProxyStatus => {
+  const obj = raw ?? {}
+  const enabled = 'Enabled' in obj ? obj.Enabled : obj.enabled
+  const baseURL = 'BaseURL' in obj ? obj.BaseURL : obj.base_url
+  return {
+    enabled: enabled === undefined ? false : Boolean(enabled),
+    base_url: typeof baseURL === 'string' ? baseURL : '',
+  }
+}
 
 export const fetchProxyStatus = async (platform: Platform): Promise<ClaudeProxyStatus> => {
   const raw = await callByPlatform(platform, 'ProxyStatus')
