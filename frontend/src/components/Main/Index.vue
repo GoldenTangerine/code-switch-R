@@ -604,6 +604,71 @@
                   <span class="field-hint">{{ t('components.main.form.hints.connectivityCheck') }}</span>
                 </div>
 
+                <div v-if="modalState.form.connectivityCheck" class="form-field">
+                  <span>{{ t('components.main.form.labels.connectivityTestModel') }}</span>
+                  <div class="model-select-combo">
+                    <select
+                      v-model="modalState.form.connectivityTestModel"
+                      class="model-select"
+                    >
+                      <option value="">{{ t('components.main.form.placeholders.connectivityTestModel') }}</option>
+                      <option v-for="model in connectivityTestModelOptions" :key="model" :value="model">
+                        {{ model }}
+                      </option>
+                    </select>
+                    <BaseInput
+                      v-model="modalState.form.connectivityTestModel"
+                      :placeholder="t('components.main.form.placeholders.customModel')"
+                      class="model-input"
+                    />
+                  </div>
+                  <span class="field-hint">{{ t('components.main.form.hints.connectivityTestModel') }}</span>
+                </div>
+
+                <!-- 测试端点 -->
+                <div v-if="modalState.form.connectivityCheck" class="form-field">
+                  <span>{{ t('components.main.form.labels.connectivityTestEndpoint') }}</span>
+                  <div class="model-select-combo">
+                    <select v-model="modalState.form.connectivityTestEndpoint" class="model-select">
+                      <option v-for="opt in connectivityEndpointOptions" :key="opt.value" :value="opt.value">
+                        {{ opt.label }}
+                      </option>
+                    </select>
+                    <BaseInput
+                      v-model="modalState.form.connectivityTestEndpoint"
+                      :placeholder="t('components.main.form.placeholders.customEndpoint')"
+                      class="model-input"
+                    />
+                  </div>
+                  <span class="field-hint">{{ t('components.main.form.hints.connectivityTestEndpoint') }}</span>
+                </div>
+
+                <!-- 认证方式 -->
+                <div v-if="modalState.form.connectivityCheck" class="form-field">
+                  <span>{{ t('components.main.form.labels.connectivityAuthType') }}</span>
+                  <select v-model="modalState.form.connectivityAuthType" class="model-select">
+                    <option value="x-api-key">x-api-key (Anthropic)</option>
+                    <option value="bearer">Authorization: Bearer (OpenAI)</option>
+                  </select>
+                  <span class="field-hint">{{ t('components.main.form.hints.connectivityAuthType') }}</span>
+                </div>
+
+                <!-- 测试按钮 -->
+                <div v-if="modalState.form.connectivityCheck" class="form-field">
+                  <button
+                    type="button"
+                    class="test-connectivity-btn"
+                    :disabled="testingConnectivity || !modalState.form.apiUrl || !modalState.form.apiKey"
+                    @click="handleTestConnectivity"
+                  >
+                    <span v-if="testingConnectivity" class="btn-spinner"></span>
+                    <span>{{ testingConnectivity ? t('components.main.form.actions.testing') : t('components.main.form.actions.testConnectivity') }}</span>
+                  </button>
+                  <div v-if="connectivityTestResult" class="test-result" :class="connectivityTestResult.success ? 'success' : 'error'">
+                    {{ connectivityTestResult.message }}
+                  </div>
+                </div>
+
                 <footer class="form-actions">
                   <BaseButton variant="outline" type="button" @click="closeModal">
                     {{ t('components.main.form.actions.cancel') }}
@@ -1689,6 +1754,78 @@ const selectedIndex = ref(0)
 const activeTab = computed<ProviderTab>(() => tabs[selectedIndex.value]?.id ?? tabs[0].id)
 const activeCards = computed(() => cards[activeTab.value] ?? [])
 
+// 连通性测试模型选项（根据平台）
+const connectivityTestModelOptions = computed(() => {
+  const options: Record<string, string[]> = {
+    claude: ['claude-haiku-4-5-20251001', 'claude-sonnet-4-5-20250929'],
+    codex: ['gpt-5.1', 'gpt-5.1-codex'],
+    gemini: ['gemini-2.5-flash', 'gemini-2.5-pro'],
+  }
+  return options[modalState.tabId] || options.claude
+})
+
+// 连通性测试端点选项
+const connectivityEndpointOptions = [
+  { value: '/v1/messages', label: '/v1/messages (Anthropic)' },
+  { value: '/v1/chat/completions', label: '/v1/chat/completions (OpenAI)' },
+  { value: '/responses', label: '/responses (Codex)' },
+]
+
+// 连通性测试状态
+const testingConnectivity = ref(false)
+const connectivityTestResult = ref<{ success: boolean; message: string } | null>(null)
+
+// 获取平台默认端点
+const getDefaultEndpoint = (platform: string) => {
+  const defaults: Record<string, string> = {
+    claude: '/v1/messages',
+    codex: '/responses',
+  }
+  return defaults[platform] || '/v1/chat/completions'
+}
+
+// 获取平台默认认证方式
+const getDefaultAuthType = (platform: string) => {
+  const defaults: Record<string, string> = {
+    claude: 'x-api-key',
+    codex: 'bearer',
+  }
+  return defaults[platform] || 'bearer'
+}
+
+// 手动测试连通性
+const handleTestConnectivity = async () => {
+  testingConnectivity.value = true
+  connectivityTestResult.value = null
+
+  try {
+    const platform = modalState.tabId
+    const result = await Call.ByName(
+      'codeswitch/services.ConnectivityTestService.TestProviderManual',
+      platform,
+      modalState.form.apiUrl,
+      modalState.form.apiKey,
+      modalState.form.connectivityTestModel || '',
+      modalState.form.connectivityTestEndpoint || getDefaultEndpoint(platform),
+      modalState.form.connectivityAuthType || getDefaultAuthType(platform)
+    )
+
+    connectivityTestResult.value = {
+      success: result.success,
+      message: result.success
+        ? t('components.main.form.connectivity.success', { latency: result.latencyMs })
+        : result.message || t('components.main.form.connectivity.failed')
+    }
+  } catch (error) {
+    connectivityTestResult.value = {
+      success: false,
+      message: t('components.main.form.connectivity.error', { error: String(error) })
+    }
+  } finally {
+    testingConnectivity.value = false
+  }
+}
+
 // 监听 tab 切换，立即刷新黑名单和连通性状态
 watch(activeTab, (newTab) => {
   void loadBlacklistStatus(newTab)
@@ -1767,12 +1904,15 @@ type VendorForm = {
   level?: number
   cliConfig?: Record<string, any>
   connectivityCheck?: boolean
+  connectivityTestModel?: string
+  connectivityTestEndpoint?: string
+  connectivityAuthType?: string
 }
 
 const iconOptions = Object.keys(lobeIcons).sort((a, b) => a.localeCompare(b))
 const defaultIconKey = iconOptions[0] ?? 'aicoding'
 
-const defaultFormValues = (): VendorForm => ({
+const defaultFormValues = (platform?: string): VendorForm => ({
   name: '',
   apiUrl: '',
   apiKey: '',
@@ -1784,6 +1924,9 @@ const defaultFormValues = (): VendorForm => ({
   modelMapping: {},
   cliConfig: {},
   connectivityCheck: false,
+  connectivityTestModel: '',
+  connectivityTestEndpoint: getDefaultEndpoint(platform || 'claude'),
+  connectivityAuthType: getDefaultAuthType(platform || 'claude'),
 })
 
 // Level 描述文本映射（1-10）
@@ -1841,7 +1984,8 @@ const openCreateModal = () => {
   modalState.tabId = activeTab.value
   modalState.editingId = null
   editingCard.value = null
-  Object.assign(modalState.form, defaultFormValues())
+  Object.assign(modalState.form, defaultFormValues(activeTab.value))
+  connectivityTestResult.value = null
   modalState.errors.apiUrl = ''
   modalState.open = true
 }
@@ -1862,7 +2006,11 @@ const openEditModal = (card: AutomationCard) => {
     modelMapping: card.modelMapping || {},
     cliConfig: card.cliConfig || {},
     connectivityCheck: card.connectivityCheck || false,
+    connectivityTestModel: card.connectivityTestModel || '',
+    connectivityTestEndpoint: card.connectivityTestEndpoint || '/v1/messages',
+    connectivityAuthType: card.connectivityAuthType || 'x-api-key',
   })
+  connectivityTestResult.value = null
   modalState.errors.apiUrl = ''
   modalState.open = true
 }
@@ -1908,6 +2056,9 @@ const submitModal = async () => {
       modelMapping: modalState.form.modelMapping || {},
       cliConfig: modalState.form.cliConfig || {},
       connectivityCheck: modalState.form.connectivityCheck || false,
+      connectivityTestModel: modalState.form.connectivityTestModel || '',
+      connectivityTestEndpoint: modalState.form.connectivityTestEndpoint || '/v1/messages',
+      connectivityAuthType: modalState.form.connectivityAuthType || 'x-api-key',
     })
     if (prevLevel !== nextLevel) {
       sortProvidersByLevel(list)
@@ -1929,6 +2080,9 @@ const submitModal = async () => {
       modelMapping: modalState.form.modelMapping || {},
       cliConfig: modalState.form.cliConfig || {},
       connectivityCheck: modalState.form.connectivityCheck || false,
+      connectivityTestModel: modalState.form.connectivityTestModel || '',
+      connectivityTestEndpoint: modalState.form.connectivityTestEndpoint || '/v1/messages',
+      connectivityAuthType: modalState.form.connectivityAuthType || 'x-api-key',
     }
     list.push(newCard)
     sortProvidersByLevel(list)
@@ -2760,5 +2914,74 @@ const handleImportClick = async () => {
 
 :global(.dark) .connectivity-dot.connectivity-gray {
   background-color: #6b7280;
+}
+
+/* 测试连通性按钮 */
+.test-connectivity-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 16px;
+  background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.test-connectivity-btn:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+
+.test-connectivity-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.test-result {
+  margin-top: 8px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.test-result.success {
+  background: rgba(34, 197, 94, 0.1);
+  color: #16a34a;
+  border-left: 3px solid #22c55e;
+}
+
+.test-result.error {
+  background: rgba(239, 68, 68, 0.1);
+  color: #dc2626;
+  border-left: 3px solid #ef4444;
+}
+
+:global(.dark) .test-result.success {
+  background: rgba(34, 197, 94, 0.15);
+  color: #4ade80;
+}
+
+:global(.dark) .test-result.error {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
 }
 </style>

@@ -1612,6 +1612,21 @@ html.dark .secondary-btn:active:not(:disabled) {
   color: var(--mac-text-secondary);
 }
 
+.model-select-combo {
+  display: flex;
+  gap: 8px;
+}
+
+.model-select-combo .model-select {
+  flex: 1;
+  min-width: 0;
+}
+
+.model-select-combo .model-input {
+  flex: 1;
+  min-width: 0;
+}
+
 .sr-only {
   position: absolute;
   width: 1px;

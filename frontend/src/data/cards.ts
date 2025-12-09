@@ -18,6 +18,12 @@ export type AutomationCard = {
   cliConfig?: Record<string, any>
   // 连通性检测开关：是否启用自动连通性检测
   connectivityCheck?: boolean
+  // 连通性检测模型：用户可选择或自定义测试模型
+  connectivityTestModel?: string
+  // 连通性检测端点：用户可选择或自定义（如 /v1/messages）
+  connectivityTestEndpoint?: string
+  // 连通性检测认证方式：x-api-key 或 bearer
+  connectivityAuthType?: string
 }
 
 export const automationCardGroups: Record<'claude' | 'codex', AutomationCard[]> = {
