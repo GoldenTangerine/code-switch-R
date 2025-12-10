@@ -1292,6 +1292,8 @@ const loadAppSettings = async () => {
     console.error('failed to load app settings', error)
     showHeatmap.value = true
     showHomeTitle.value = true
+    // 加载应用设置失败时提示用户
+    showToast(t('components.main.errors.loadAppSettingsFailed'), 'warning')
   }
 }
 
@@ -1380,6 +1382,8 @@ const loadUsageHeatmap = async () => {
 		usageHeatmap.value = buildUsageHeatmapMatrix(stats, HEATMAP_DAYS)
 	} catch (error) {
 		console.error('Failed to load usage heatmap stats', error)
+		// 加载热力图失败时提示用户
+		showToast(t('components.main.errors.loadHeatmapFailed'), 'warning')
 	}
 }
 
@@ -1546,6 +1550,8 @@ const loadProvidersFromDisk = async () => {
       }
     } catch (error) {
       console.error('Failed to load providers', error)
+      // 加载供应商失败时提示用户
+      showToast(t('components.main.errors.loadProvidersFailed', { tab }), 'error')
     }
   }
 }

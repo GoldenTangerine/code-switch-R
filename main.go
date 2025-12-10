@@ -113,6 +113,7 @@ func main() {
 	deeplinkService := services.NewDeepLinkService(providerService)
 	speedTestService := services.NewSpeedTestService()
 	connectivityTestService := services.NewConnectivityTestService(providerService, blacklistService, settingsService)
+	healthCheckService := services.NewHealthCheckService(providerService, blacklistService, settingsService)
 	dockService := dock.New()
 	versionService := NewVersionService()
 	consoleService := services.NewConsoleService()
@@ -142,13 +143,20 @@ func main() {
 	}()
 
 	// 启动黑名单自动恢复定时器（每分钟检查一次）
+	blacklistStopChan := make(chan struct{})
 	go func() {
 		ticker := time.NewTicker(1 * time.Minute)
 		defer ticker.Stop()
 
-		for range ticker.C {
-			if err := blacklistService.AutoRecoverExpired(); err != nil {
-				log.Printf("自动恢复黑名单失败: %v", err)
+		for {
+			select {
+			case <-ticker.C:
+				if err := blacklistService.AutoRecoverExpired(); err != nil {
+					log.Printf("自动恢复黑名单失败: %v", err)
+				}
+			case <-blacklistStopChan:
+				log.Println("✅ 黑名单定时器已停止")
+				return
 			}
 		}
 	}()
@@ -168,6 +176,13 @@ func main() {
 				log.Println("✅ 自动连通性检测已启动")
 			}
 		}
+	}()
+
+	// 启动后台健康检查（可用性监控）
+	go func() {
+		time.Sleep(5 * time.Second) // 延迟5秒，等待应用完成初始化
+		healthCheckService.StartBackgroundPolling()
+		log.Println("✅ 可用性健康监控已启动")
 	}()
 
 	//fmt.Println(clipboardService)
@@ -199,6 +214,7 @@ func main() {
 			application.NewService(deeplinkService),
 			application.NewService(speedTestService),
 			application.NewService(connectivityTestService),
+			application.NewService(healthCheckService),
 			application.NewService(dockService),
 			application.NewService(versionService),
 			application.NewService(geminiService),
@@ -217,9 +233,23 @@ func main() {
 	notificationService.SetApp(app)
 
 	app.OnShutdown(func() {
+		log.Println("🛑 应用正在关闭，停止后台服务...")
+
+		// 1. 停止黑名单定时器
+		close(blacklistStopChan)
+
+		// 2. 停止健康检查轮询
+		healthCheckService.StopBackgroundPolling()
+		log.Println("✅ 健康检查服务已停止")
+
+		// 3. 停止更新定时器
+		updateService.StopDailyCheck()
+		log.Println("✅ 更新检查服务已停止")
+
+		// 4. 停止代理服务器
 		_ = providerRelay.Stop()
 
-		// 优雅关闭数据库写入队列（10秒超时，双队列架构）
+		// 5. 优雅关闭数据库写入队列（10秒超时，双队列架构）
 		if err := services.ShutdownGlobalDBQueue(10 * time.Second); err != nil {
 			log.Printf("⚠️ 队列关闭超时: %v", err)
 		} else {
@@ -233,6 +263,8 @@ func main() {
 			log.Printf("✅ 批量队列已关闭，统计：成功=%d 失败=%d 平均延迟=%.2fms（批均分） 批次=%d",
 				stats2.SuccessWrites, stats2.FailedWrites, stats2.AvgLatencyMs, stats2.BatchCommits)
 		}
+
+		log.Println("✅ 所有后台服务已停止")
 	})
 
 	// Create a new window with the necessary options.

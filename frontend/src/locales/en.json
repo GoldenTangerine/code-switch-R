@@ -14,11 +14,48 @@
     "mcp": "MCP",
     "skill": "Skills",
     "gemini": "Gemini",
+    "availability": "Availability",
     "speedtest": "Speed Test",
     "env": "Env Check",
     "logs": "Logs",
     "console": "Console",
     "settings": "Settings"
+  },
+  "availability": {
+    "title": "Availability Monitor",
+    "subtitle": "Real-time health monitoring for AI providers",
+    "refreshAll": "Check All",
+    "refreshing": "Checking...",
+    "check": "Check",
+    "providers": "Providers",
+    "lastUpdate": "Last update",
+    "nextRefresh": "Next refresh",
+    "notMonitored": "Not monitored",
+    "noProviders": "No providers yet. Please add provider configuration first.",
+    "stats": {
+      "operational": "Operational",
+      "degraded": "Degraded",
+      "failed": "Failed",
+      "disabled": "Disabled"
+    },
+    "settings": {
+      "title": "Availability Monitor Settings",
+      "failureThreshold": "Auto-blacklist threshold",
+      "failureThresholdHint": "Trigger blacklist after N consecutive failures",
+      "pollInterval": "Poll interval",
+      "pollIntervalHint": "Background check interval",
+      "operationalThreshold": "Operational threshold",
+      "operationalThresholdHint": "Response latency below this is considered operational"
+    },
+    "advancedConfig": {
+      "title": "Advanced Config",
+      "testModel": "Test model",
+      "testModelHint": "Uses low-cost model by default",
+      "testEndpoint": "Test endpoint",
+      "testEndpointHint": "Leave empty for default endpoint",
+      "timeout": "Timeout",
+      "timeoutHint": "Default 15 seconds"
+    }
   },
   "prompts": {
     "hero": {
@@ -320,6 +357,11 @@
         "resetLevelFailed": "Failed to reset level",
         "levelHint": "Has failure record",
         "levelTitle": "Blacklist Level L{level}"
+      },
+      "errors": {
+        "loadAppSettingsFailed": "Failed to load application settings",
+        "loadHeatmapFailed": "Failed to load usage heatmap",
+        "loadProvidersFailed": "Failed to load providers for {tab} tab"
       }
     },
     "logs": {

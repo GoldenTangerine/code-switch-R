@@ -893,7 +893,7 @@ func (us *UpdateService) RestartApp() error {
 
 // StartDailyCheck 启动每日8点定时检查
 func (us *UpdateService) StartDailyCheck() {
-	us.stopDailyCheck()
+	us.StopDailyCheck()
 
 	duration := us.calculateNextCheckDuration()
 	us.dailyCheckTimer = time.AfterFunc(duration, func() {
@@ -904,8 +904,8 @@ func (us *UpdateService) StartDailyCheck() {
 	log.Printf("[UpdateService] 定时检查已启动，下次检查时间: %s", time.Now().Add(duration).Format("2006-01-02 15:04:05"))
 }
 
-// stopDailyCheck 停止定时检查
-func (us *UpdateService) stopDailyCheck() {
+// StopDailyCheck 停止定时检查（公开方法，供外部调用）
+func (us *UpdateService) StopDailyCheck() {
 	if us.dailyCheckTimer != nil {
 		us.dailyCheckTimer.Stop()
 		us.dailyCheckTimer = nil
@@ -1045,7 +1045,7 @@ func (us *UpdateService) SetAutoCheckEnabled(enabled bool) {
 	if enabled {
 		us.StartDailyCheck()
 	} else {
-		us.stopDailyCheck()
+		us.StopDailyCheck()
 	}
 
 	us.SaveState()

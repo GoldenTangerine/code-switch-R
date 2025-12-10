@@ -14,11 +14,48 @@
     "mcp": "MCP",
     "skill": "技能",
     "gemini": "Gemini",
+    "availability": "可用性",
     "speedtest": "测速",
     "env": "环境",
     "logs": "日志",
     "console": "控制台",
     "settings": "设置"
+  },
+  "availability": {
+    "title": "可用性监控",
+    "subtitle": "实时监控 AI 供应商的健康状态",
+    "refreshAll": "全部检测",
+    "refreshing": "检测中...",
+    "check": "检测",
+    "providers": "供应商",
+    "lastUpdate": "最后更新",
+    "nextRefresh": "下次刷新",
+    "notMonitored": "未监控",
+    "noProviders": "暂无供应商，请先添加供应商配置",
+    "stats": {
+      "operational": "正常",
+      "degraded": "延迟",
+      "failed": "故障",
+      "disabled": "未启用"
+    },
+    "settings": {
+      "title": "可用性监控设置",
+      "failureThreshold": "自动拉黑阈值",
+      "failureThresholdHint": "连续检测失败 N 次后触发拉黑",
+      "pollInterval": "检测间隔",
+      "pollIntervalHint": "后台自动检测的时间间隔",
+      "operationalThreshold": "正常状态阈值",
+      "operationalThresholdHint": "响应延迟小于此值判定为正常"
+    },
+    "advancedConfig": {
+      "title": "高级配置",
+      "testModel": "测试模型",
+      "testModelHint": "默认使用低成本模型",
+      "testEndpoint": "测试端点",
+      "testEndpointHint": "留空使用默认端点",
+      "timeout": "超时时间",
+      "timeoutHint": "默认 15 秒"
+    }
   },
   "prompts": {
     "hero": {
@@ -321,6 +358,11 @@
         "resetLevelFailed": "清零等级失败，请稍后重试",
         "levelHint": "有失败记录",
         "levelTitle": "黑名单等级 L{level}"
+      },
+      "errors": {
+        "loadAppSettingsFailed": "加载应用设置失败",
+        "loadHeatmapFailed": "加载使用热力图失败",
+        "loadProvidersFailed": "加载 {tab} 标签页的供应商失败"
       }
     },
     "logs": {
