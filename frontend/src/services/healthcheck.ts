@@ -33,6 +33,7 @@ export interface ProviderTimeline {
   platform: string
   availabilityMonitorEnabled: boolean
   connectivityAutoBlacklist: boolean
+  availabilityConfig?: AvailabilityConfig | null // 高级配置
   items: HealthCheckResult[]
   latest: HealthCheckResult | null
   uptime: number
