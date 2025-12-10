@@ -191,6 +191,10 @@ func (prs *ProviderRelayService) registerRoutes(router gin.IRouter) {
 	router.POST("/v1/messages", prs.proxyHandler("claude", "/v1/messages"))
 	router.POST("/responses", prs.proxyHandler("codex", "/responses"))
 
+	// /v1/models 端点（OpenAI-compatible API）
+	// 支持 Claude 和 Codex 平台
+	router.GET("/v1/models", prs.modelsHandler("claude"))
+
 	// Gemini API 端点（使用专门的路径前缀避免与 Claude 冲突）
 	router.POST("/gemini/v1beta/*any", prs.geminiProxyHandler("/v1beta"))
 	router.POST("/gemini/v1/*any", prs.geminiProxyHandler("/v1"))
@@ -198,6 +202,9 @@ func (prs *ProviderRelayService) registerRoutes(router gin.IRouter) {
 	// 自定义 CLI 工具端点（路由格式: /custom/:toolId/v1/messages）
 	// toolId 用于区分不同的 CLI 工具，对应 provider kind 为 "custom:{toolId}"
 	router.POST("/custom/:toolId/v1/messages", prs.customCliProxyHandler())
+	
+	// 自定义 CLI 工具的 /v1/models 端点
+	router.GET("/custom/:toolId/v1/models", prs.customModelsHandler())
 }
 
 func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.HandlerFunc {
@@ -1559,5 +1566,263 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 			"last_duration":  fmt.Sprintf("%.2fs", lastDuration.Seconds()),
 			"total_attempts": totalAttempts,
 		})
+	}
+}
+
+// modelsHandler 处理 /v1/models 请求（OpenAI-compatible API）
+// 将请求转发到第一个可用的 provider 并注入 API Key
+func (prs *ProviderRelayService) modelsHandler(kind string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		fmt.Printf("[Models] 收到 /v1/models 请求, kind=%s\n", kind)
+
+		// 加载 providers
+		providers, err := prs.providerService.LoadProviders(kind)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load providers"})
+			return
+		}
+
+		// 过滤可用的 providers（启用 + URL + APIKey）
+		var activeProviders []Provider
+		for _, provider := range providers {
+			if !provider.Enabled || provider.APIURL == "" || provider.APIKey == "" {
+				continue
+			}
+
+			// 黑名单检查：跳过已拉黑的 provider
+			if isBlacklisted, until := prs.blacklistService.IsBlacklisted(kind, provider.Name); isBlacklisted {
+				fmt.Printf("[Models] ⛔ Provider %s 已拉黑，过期时间: %v\n", provider.Name, until.Format("15:04:05"))
+				continue
+			}
+
+			activeProviders = append(activeProviders, provider)
+		}
+
+		if len(activeProviders) == 0 {
+			c.JSON(http.StatusNotFound, gin.H{"error": "no providers available"})
+			return
+		}
+
+		// 按 Level 分组并排序
+		levelGroups := make(map[int][]Provider)
+		for _, provider := range activeProviders {
+			level := provider.Level
+			if level <= 0 {
+				level = 1
+			}
+			levelGroups[level] = append(levelGroups[level], provider)
+		}
+
+		levels := make([]int, 0, len(levelGroups))
+		for level := range levelGroups {
+			levels = append(levels, level)
+		}
+		sort.Ints(levels)
+
+		// 尝试第一个可用的 provider（按 Level 升序）
+		var selectedProvider *Provider
+		for _, level := range levels {
+			if len(levelGroups[level]) > 0 {
+				p := levelGroups[level][0]
+				selectedProvider = &p
+				break
+			}
+		}
+
+		if selectedProvider == nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "no providers available"})
+			return
+		}
+
+		fmt.Printf("[Models] 使用 Provider: %s | URL: %s\n", selectedProvider.Name, selectedProvider.APIURL)
+
+		// 构建目标 URL（拼接 provider 的 APIURL 和 /v1/models）
+		targetURL := joinURL(selectedProvider.APIURL, "/v1/models")
+
+		// 创建 HTTP 请求
+		req, err := http.NewRequest("GET", targetURL, nil)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("创建请求失败: %v", err)})
+			return
+		}
+
+		// 复制客户端请求头
+		for key, values := range c.Request.Header {
+			for _, value := range values {
+				req.Header.Add(key, value)
+			}
+		}
+
+		// 注入 API Key（使用 Bearer 认证）
+		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", selectedProvider.APIKey))
+
+		// 设置默认 Accept 头
+		if req.Header.Get("Accept") == "" {
+			req.Header.Set("Accept", "application/json")
+		}
+
+		// 发送请求
+		client := &http.Client{Timeout: 30 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			fmt.Printf("[Models] ✗ 请求失败: %s | 错误: %v\n", selectedProvider.Name, err)
+			c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("请求失败: %v", err)})
+			return
+		}
+		defer resp.Body.Close()
+
+		// 读取响应
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			fmt.Printf("[Models] ✗ 读取响应失败: %s | 错误: %v\n", selectedProvider.Name, err)
+			c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("读取响应失败: %v", err)})
+			return
+		}
+
+		// 复制响应头
+		for key, values := range resp.Header {
+			for _, value := range values {
+				c.Header(key, value)
+			}
+		}
+
+		fmt.Printf("[Models] ✓ 成功: %s | HTTP %d\n", selectedProvider.Name, resp.StatusCode)
+
+		// 返回响应
+		c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), body)
+	}
+}
+
+// customModelsHandler 处理自定义 CLI 工具的 /v1/models 请求
+// 路由格式: /custom/:toolId/v1/models
+func (prs *ProviderRelayService) customModelsHandler() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// 从 URL 参数提取 toolId
+		toolId := c.Param("toolId")
+		if toolId == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "toolId is required"})
+			return
+		}
+
+		// 构建 provider kind（格式: "custom:{toolId}"）
+		kind := "custom:" + toolId
+
+		fmt.Printf("[CustomModels] 收到 /v1/models 请求, toolId=%s, kind=%s\n", toolId, kind)
+
+		// 加载该 CLI 工具的 providers
+		providers, err := prs.providerService.LoadProviders(kind)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to load providers for %s: %v", kind, err)})
+			return
+		}
+
+		// 过滤可用的 providers
+		var activeProviders []Provider
+		for _, provider := range providers {
+			if !provider.Enabled || provider.APIURL == "" || provider.APIKey == "" {
+				continue
+			}
+
+			// 黑名单检查
+			if isBlacklisted, until := prs.blacklistService.IsBlacklisted(kind, provider.Name); isBlacklisted {
+				fmt.Printf("[CustomModels] ⛔ Provider %s 已拉黑，过期时间: %v\n", provider.Name, until.Format("15:04:05"))
+				continue
+			}
+
+			activeProviders = append(activeProviders, provider)
+		}
+
+		if len(activeProviders) == 0 {
+			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("no providers available for %s", kind)})
+			return
+		}
+
+		// 按 Level 分组并排序
+		levelGroups := make(map[int][]Provider)
+		for _, provider := range activeProviders {
+			level := provider.Level
+			if level <= 0 {
+				level = 1
+			}
+			levelGroups[level] = append(levelGroups[level], provider)
+		}
+
+		levels := make([]int, 0, len(levelGroups))
+		for level := range levelGroups {
+			levels = append(levels, level)
+		}
+		sort.Ints(levels)
+
+		// 选择第一个可用的 provider
+		var selectedProvider *Provider
+		for _, level := range levels {
+			if len(levelGroups[level]) > 0 {
+				p := levelGroups[level][0]
+				selectedProvider = &p
+				break
+			}
+		}
+
+		if selectedProvider == nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "no providers available"})
+			return
+		}
+
+		fmt.Printf("[CustomModels] 使用 Provider: %s | URL: %s\n", selectedProvider.Name, selectedProvider.APIURL)
+
+		// 构建目标 URL
+		targetURL := joinURL(selectedProvider.APIURL, "/v1/models")
+
+		// 创建 HTTP 请求
+		req, err := http.NewRequest("GET", targetURL, nil)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("创建请求失败: %v", err)})
+			return
+		}
+
+		// 复制客户端请求头
+		for key, values := range c.Request.Header {
+			for _, value := range values {
+				req.Header.Add(key, value)
+			}
+		}
+
+		// 注入 API Key
+		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", selectedProvider.APIKey))
+
+		// 设置默认 Accept 头
+		if req.Header.Get("Accept") == "" {
+			req.Header.Set("Accept", "application/json")
+		}
+
+		// 发送请求
+		client := &http.Client{Timeout: 30 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			fmt.Printf("[CustomModels] ✗ 请求失败: %s | 错误: %v\n", selectedProvider.Name, err)
+			c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("请求失败: %v", err)})
+			return
+		}
+		defer resp.Body.Close()
+
+		// 读取响应
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			fmt.Printf("[CustomModels] ✗ 读取响应失败: %s | 错误: %v\n", selectedProvider.Name, err)
+			c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("读取响应失败: %v", err)})
+			return
+		}
+
+		// 复制响应头
+		for key, values := range resp.Header {
+			for _, value := range values {
+				c.Header(key, value)
+			}
+		}
+
+		fmt.Printf("[CustomModels] ✓ 成功: %s | HTTP %d\n", selectedProvider.Name, resp.StatusCode)
+
+		// 返回响应
+		c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), body)
 	}
 }
