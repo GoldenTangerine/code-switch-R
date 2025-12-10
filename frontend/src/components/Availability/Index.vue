@@ -121,7 +121,12 @@ async function checkSingle(platform: string, providerId: number) {
 async function toggleMonitor(platform: string, providerId: number, enabled: boolean) {
   try {
     await setAvailabilityMonitorEnabled(platform, providerId, enabled)
-    await loadData()
+    await loadData() // 刷新当前页面
+
+    // 通知主页面刷新供应商列表
+    window.dispatchEvent(new CustomEvent('providers-updated', {
+      detail: { platform, providerId, enabled }
+    }))
   } catch (error) {
     console.error('Failed to toggle monitor:', error)
   }
@@ -218,6 +223,18 @@ function displayConfigValue(value: string | number | undefined, label: string) {
 onMounted(async () => {
   await loadData()
   startRefreshTimer()
+
+  // 监听主页面的 Provider 更新事件
+  const handleProvidersUpdated = () => {
+    void loadData()
+  }
+  window.addEventListener('providers-updated', handleProvidersUpdated)
+
+  // 清理监听器
+  onUnmounted(() => {
+    window.removeEventListener('providers-updated', handleProvidersUpdated)
+    stopTimers()
+  })
 })
 
 onUnmounted(() => {

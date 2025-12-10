@@ -958,6 +958,11 @@ import {
   getStatusColorClass,
   type ConnectivityResult,
 } from '../../services/connectivity'
+import {
+  getLatestResults,
+  HealthStatus,
+  type ProviderTimeline,
+} from '../../services/healthcheck'
 
 const { t, locale } = useI18n()
 const router = useRouter()
@@ -1046,8 +1051,16 @@ const blacklistStatusMap = reactive<Record<ProviderTab, Record<string, Blacklist
 })
 let blacklistTimer: number | undefined
 
-// 连通性状态
+// 连通性状态（已废弃，保留用于兼容）
 const connectivityResultsMap = reactive<Record<ProviderTab, Record<number, ConnectivityResult>>>({
+  claude: {},
+  codex: {},
+  gemini: {},
+  others: {},
+})
+
+// 可用性监控状态（新）
+const availabilityResultsMap = reactive<Record<ProviderTab, Record<number, ProviderTimeline>>>({
   claude: {},
   codex: {},
   gemini: {},
@@ -1773,7 +1786,7 @@ const getProviderBlacklistStatus = (providerName: string): BlacklistStatus | nul
   return blacklistStatusMap[activeTab.value][providerName] || null
 }
 
-// 加载连通性测试结果
+// 加载连通性测试结果（已废弃，保留兼容）
 const loadConnectivityResults = async (tab: ProviderTab) => {
   // 'others' Tab 暂不加载连通性结果
   if (tab === 'others') {
@@ -1792,33 +1805,78 @@ const loadConnectivityResults = async (tab: ProviderTab) => {
   }
 }
 
-// 获取 provider 连通性状态
+// 加载可用性监控结果（新）
+const loadAvailabilityResults = async () => {
+  try {
+    const allResults = await getLatestResults()
+
+    // 转换为按平台和 ID 索引的格式
+    for (const platform of Object.keys(allResults)) {
+      const timelines = allResults[platform] || []
+      const map: Record<number, ProviderTimeline> = {}
+      timelines.forEach((timeline) => {
+        map[timeline.providerId] = timeline
+      })
+      availabilityResultsMap[platform as ProviderTab] = map
+    }
+  } catch (err) {
+    console.error('加载可用性监控结果失败:', err)
+  }
+}
+
+// 获取 provider 连通性状态（已废弃）
 const getProviderConnectivityResult = (providerId: number): ConnectivityResult | null => {
   return connectivityResultsMap[activeTab.value][providerId] || null
 }
 
-// 获取连通性状态指示器样式
-const getConnectivityIndicatorClass = (providerId: number): string => {
-  const result = getProviderConnectivityResult(providerId)
-  if (!result) return 'connectivity-gray'
-  return getStatusColorClass(result.status)
+// 获取 provider 可用性状态（新）
+const getProviderAvailabilityResult = (providerId: number): ProviderTimeline | null => {
+  return availabilityResultsMap[activeTab.value][providerId] || null
 }
 
-// 获取连通性状态提示文本
+// 获取连通性状态指示器样式（改用可用性监控结果）
+const getConnectivityIndicatorClass = (providerId: number): string => {
+  const result = getProviderAvailabilityResult(providerId)
+  if (!result || !result.latest) return 'connectivity-gray'
+
+  // 根据可用性监控状态返回样式
+  switch (result.latest.status) {
+    case HealthStatus.OPERATIONAL:
+      return 'connectivity-green'
+    case HealthStatus.DEGRADED:
+      return 'connectivity-yellow'
+    case HealthStatus.FAILED:
+    case HealthStatus.VALIDATION_ERROR:
+      return 'connectivity-red'
+    default:
+      return 'connectivity-gray'
+  }
+}
+
+// 获取连通性状态提示文本（改用可用性监控结果）
 const getConnectivityTooltip = (providerId: number): string => {
-  const result = getProviderConnectivityResult(providerId)
-  if (!result) return t('components.main.connectivity.noData')
+  const result = getProviderAvailabilityResult(providerId)
+  if (!result || !result.latest) return t('components.main.connectivity.noData')
 
-  const statusText = result.status === StatusAvailable
-    ? t('components.main.connectivity.available')
-    : result.status === StatusDegraded
-    ? t('components.main.connectivity.degraded')
-    : result.status === StatusUnavailable
-    ? t('components.main.connectivity.unavailable')
-    : t('components.main.connectivity.noData')
+  let statusText = ''
+  switch (result.latest.status) {
+    case HealthStatus.OPERATIONAL:
+      statusText = t('components.main.connectivity.available')
+      break
+    case HealthStatus.DEGRADED:
+      statusText = t('components.main.connectivity.degraded')
+      break
+    case HealthStatus.FAILED:
+    case HealthStatus.VALIDATION_ERROR:
+      statusText = t('components.main.connectivity.unavailable')
+      break
+    default:
+      statusText = t('components.main.connectivity.noData')
+  }
 
-  const latencyText = result.latencyMs > 0 ? ` (${result.latencyMs}ms)` : ''
-  return statusText + latencyText
+  const latencyText = result.latest.latencyMs > 0 ? ` (${result.latest.latencyMs}ms)` : ''
+  const uptimeText = result.uptime > 0 ? ` - ${result.uptime.toFixed(1)}%` : ''
+  return statusText + latencyText + uptimeText
 }
 
 // 刷新所有数据
@@ -1833,7 +1891,7 @@ const refreshAllData = async () => {
       ...providerTabIds.map(refreshProxyState),
       ...providerTabIds.map((tab) => loadProviderStats(tab)),
       ...providerTabIds.map((tab) => loadBlacklistStatus(tab)), // 同步刷新黑名单状态
-      ...providerTabIds.map((tab) => loadConnectivityResults(tab)), // 同步刷新连通性状态
+      loadAvailabilityResults(), // 同步刷新可用性监控状态（改用新服务）
       refreshImportStatus(),
       pollUpdateState()
     ])
@@ -1933,8 +1991,8 @@ const startProviderStatsTimer = () => {
   providerStatsTimer = window.setInterval(() => {
     providerTabIds.forEach((tab) => {
       void loadProviderStats(tab)
-      void loadConnectivityResults(tab) // 同步刷新连通性状态
     })
+    void loadAvailabilityResults() // 同步刷新可用性监控状态（改用新服务）
   }, 60_000)
 }
 
@@ -2046,8 +2104,8 @@ onMounted(async () => {
   // 加载初始黑名单状态
   await Promise.all(providerTabIds.map((tab) => loadBlacklistStatus(tab)))
 
-  // 加载初始连通性测试结果
-  await Promise.all(providerTabIds.map((tab) => loadConnectivityResults(tab)))
+  // 加载初始可用性监控结果（改用新服务）
+  await loadAvailabilityResults()
 
   // 每秒更新黑名单倒计时
   blacklistTimer = window.setInterval(() => {
@@ -2080,6 +2138,13 @@ onMounted(async () => {
 
   window.addEventListener('app-settings-updated', handleAppSettingsUpdated)
 
+  // 监听可用性页面的 Provider 更新事件
+  const handleProvidersUpdated = () => {
+    void loadProvidersFromDisk()
+  }
+  window.addEventListener('providers-updated', handleProvidersUpdated)
+  ;(window as any).__handleProvidersUpdated = handleProvidersUpdated
+
   // 加载最后使用的供应商
   await loadLastUsedProviders()
 
@@ -2102,6 +2167,9 @@ onUnmounted(() => {
   }
   if ((window as any).__handleWindowFocus) {
     window.removeEventListener('focus', (window as any).__handleWindowFocus)
+  }
+  if ((window as any).__handleProvidersUpdated) {
+    window.removeEventListener('providers-updated', (window as any).__handleProvidersUpdated)
   }
 
   // 清理高亮计时器
@@ -2194,10 +2262,10 @@ const handleTestConnectivity = async () => {
   }
 }
 
-// 监听 tab 切换，立即刷新黑名单和连通性状态
+// 监听 tab 切换，立即刷新黑名单和可用性状态
 watch(activeTab, (newTab) => {
   void loadBlacklistStatus(newTab)
-  void loadConnectivityResults(newTab)
+  // 可用性结果是全局的，不需要按 tab 刷新
 })
 const currentProxyLabel = computed(() => {
   const tab = activeTab.value
@@ -2536,6 +2604,9 @@ const submitModal = async () => {
   }
 
   closeModal()
+
+  // 通知可用性页面刷新
+  window.dispatchEvent(new CustomEvent('providers-updated'))
 }
 
 const configure = (card: AutomationCard) => {

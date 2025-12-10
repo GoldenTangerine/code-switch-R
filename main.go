@@ -165,7 +165,7 @@ func main() {
 		}
 	}()
 
-	// 根据 AppSettings 配置启动自动连通性检测
+	// 根据应用设置决定是否启动可用性监控（复用旧的 auto_connectivity_test 字段）
 	go func() {
 		time.Sleep(3 * time.Second) // 延迟3秒，等待应用初始化
 		settings, err := appSettings.GetAppSettings()
@@ -173,20 +173,14 @@ func main() {
 			log.Printf("读取应用设置失败: %v", err)
 			return
 		}
-		if settings.AutoConnectivityTest {
-			if err := connectivityTestService.SetAutoTestEnabled(true); err != nil {
-				log.Printf("启动自动连通性检测失败: %v", err)
-			} else {
-				log.Println("✅ 自动连通性检测已启动")
-			}
-		}
-	}()
 
-	// 启动后台健康检查（可用性监控）
-	go func() {
-		time.Sleep(5 * time.Second) // 延迟5秒，等待应用完成初始化
-		healthCheckService.StartBackgroundPolling()
-		log.Println("✅ 可用性健康监控已启动")
+		// 旧的 AutoConnectivityTest 字段现在控制可用性监控
+		if settings.AutoConnectivityTest {
+			healthCheckService.SetAutoAvailabilityPolling(true)
+			log.Println("✅ 自动可用性监控已启动")
+		} else {
+			log.Println("ℹ️  自动可用性监控已禁用（可在设置中开启）")
+		}
 	}()
 
 	//fmt.Println(clipboardService)

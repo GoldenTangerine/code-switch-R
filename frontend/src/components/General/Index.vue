@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { Call } from '@wailsio/runtime'
 import ListItem from '../Setting/ListRow.vue'
 import LanguageSwitcher from '../Setting/LanguageSwitcher.vue'
 import ThemeSetting from '../Setting/ThemeSetting.vue'
@@ -101,8 +102,11 @@ const persistAppSettings = async () => {
     // 同步自动更新设置到 UpdateService
     await setAutoCheckEnabled(autoUpdateEnabled.value)
 
-    // 同步自动连通性检测设置到 ConnectivityTestService
-    await setAutoTestEnabled(autoConnectivityTestEnabled.value)
+    // 同步自动可用性监控设置到 HealthCheckService（复用旧字段名）
+    await Call.ByName(
+      'codeswitch/services.HealthCheckService.SetAutoAvailabilityPolling',
+      autoConnectivityTestEnabled.value
+    )
 
     // 更新缓存
     localStorage.setItem('app-settings-heatmap', String(heatmapEnabled.value))

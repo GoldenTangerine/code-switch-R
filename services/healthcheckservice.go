@@ -901,6 +901,19 @@ func (hcs *HealthCheckService) IsPollingRunning() bool {
 	return hcs.running
 }
 
+// SetAutoAvailabilityPolling 设置是否自动轮询（立即生效）
+func (hcs *HealthCheckService) SetAutoAvailabilityPolling(enabled bool) {
+	if enabled {
+		// 启动轮询（StartBackgroundPolling 内部有锁）
+		hcs.StartBackgroundPolling()
+		log.Println("[HealthCheck] 已启用自动可用性监控")
+	} else {
+		// 停止轮询（StopBackgroundPolling 内部有锁）
+		hcs.StopBackgroundPolling()
+		log.Println("[HealthCheck] 已禁用自动可用性监控")
+	}
+}
+
 // runAllPlatformChecks 执行所有平台的检测
 func (hcs *HealthCheckService) runAllPlatformChecks() {
 	platforms := []string{"claude", "codex"}
