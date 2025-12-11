@@ -299,7 +299,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 		clientHeaders := cloneHeaders(c.Request.Header)
 
 		// 获取拉黑功能开关状态
-		blacklistEnabled := prs.blacklistService.IsLevelBlacklistEnabled()
+		blacklistEnabled := prs.blacklistService.ShouldUseFixedMode()
 
 		// 【拉黑模式】：只尝试第一个 provider，失败直接返回错误（不自动降级）
 		// 只有当 provider 被拉黑后，下次请求才会自动使用下一个
@@ -1049,7 +1049,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 		}()
 
 		// 获取拉黑功能开关状态
-		blacklistEnabled := prs.blacklistService.IsLevelBlacklistEnabled()
+		blacklistEnabled := prs.blacklistService.ShouldUseFixedMode()
 
 		// 【拉黑模式】：只尝试第一个 provider，失败直接返回错误（不自动降级）
 		if blacklistEnabled {
@@ -1386,7 +1386,7 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 		clientHeaders := cloneHeaders(c.Request.Header)
 
 		// 获取拉黑功能开关状态
-		blacklistEnabled := prs.blacklistService.IsLevelBlacklistEnabled()
+		blacklistEnabled := prs.blacklistService.ShouldUseFixedMode()
 
 		// 【拉黑模式】：只尝试第一个 provider，失败直接返回错误
 		if blacklistEnabled {

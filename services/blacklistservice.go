@@ -742,6 +742,37 @@ func (bs *BlacklistService) GetBlacklistStatus(platform string) ([]BlacklistStat
 	return statuses, nil
 }
 
+// ShouldUseFixedMode 返回是否应该使用固定拉黑模式（禁用自动降级）
+// 满足以下任一条件时返回 true：
+// 1. 等级拉黑开启
+// 2. 等级拉黑关闭但 fallbackMode="fixed"
+func (bs *BlacklistService) ShouldUseFixedMode() bool {
+	config, err := bs.settingsService.GetBlacklistLevelConfig()
+	if err != nil {
+		// 读取失败：使用默认配置
+		log.Printf("[BlacklistService] 读取配置失败，使用默认值: %v", err)
+		defaultConfig := DefaultBlacklistLevelConfig()
+		return defaultConfig.FallbackMode == "fixed"
+	}
+
+	// 等级拉黑开启 → 固定模式
+	if config.EnableLevelBlacklist {
+		return true
+	}
+
+	// 等级拉黑关闭 → 根据 fallbackMode 决定
+	switch config.FallbackMode {
+	case "fixed":
+		return true
+	case "none":
+		return false
+	default:
+		// 未知值：记录警告并视为 none（保持降级）
+		log.Printf("[BlacklistService] 未知的 fallbackMode: %s，视为 none", config.FallbackMode)
+		return false
+	}
+}
+
 // IsBlacklistEnabled 返回拉黑总开关状态（用于固定拉黑模式判断）
 func (bs *BlacklistService) IsBlacklistEnabled() bool {
 	return bs.settingsService.IsBlacklistEnabled()
