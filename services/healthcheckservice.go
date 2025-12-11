@@ -669,12 +669,17 @@ func (hcs *HealthCheckService) getEffectiveModel(provider *Provider, platform st
 
 // getEffectiveEndpoint 获取有效的测试端点
 func (hcs *HealthCheckService) getEffectiveEndpoint(provider *Provider, platform string) string {
-	// 优先使用用户配置
+	// 优先级 1：用户配置的健康检查专用端点
 	if provider.AvailabilityConfig != nil && provider.AvailabilityConfig.TestEndpoint != "" {
 		return provider.AvailabilityConfig.TestEndpoint
 	}
 
-	// 平台默认端点
+	// 优先级 2：用户配置的生产端点（如果配置了 apiEndpoint）
+	if provider.APIEndpoint != "" {
+		return provider.GetEffectiveEndpoint("")
+	}
+
+	// 优先级 3：平台默认端点
 	switch strings.ToLower(platform) {
 	case "claude":
 		return "/v1/messages"
