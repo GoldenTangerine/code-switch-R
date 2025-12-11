@@ -514,29 +514,23 @@ func (prs *ProviderRelayService) forwardRequest(
 	targetURL := joinURL(provider.APIURL, endpoint)
 	headers := cloneMap(clientHeaders)
 
-	// 根据认证方式设置请求头
+	// 根据认证方式设置请求头（默认 Bearer，与 v2.2.x 保持一致）
 	authType := strings.ToLower(strings.TrimSpace(provider.ConnectivityAuthType))
-	if authType == "" {
-		// 空值时使用平台默认（claude: x-api-key, codex: bearer）
-		if kind == "claude" {
-			headers["x-api-key"] = provider.APIKey
-		} else {
-			headers["Authorization"] = fmt.Sprintf("Bearer %s", provider.APIKey)
+	switch authType {
+	case "x-api-key":
+		// 仅当用户显式选择 x-api-key 时使用（Anthropic 官方 API）
+		headers["x-api-key"] = provider.APIKey
+		headers["anthropic-version"] = "2023-06-01"
+	case "", "bearer":
+		// 默认使用 Bearer token（兼容所有第三方中转）
+		headers["Authorization"] = fmt.Sprintf("Bearer %s", provider.APIKey)
+	default:
+		// 自定义 Header 名
+		headerName := strings.TrimSpace(provider.ConnectivityAuthType)
+		if headerName == "" || strings.EqualFold(headerName, "custom") {
+			headerName = "Authorization"
 		}
-	} else {
-		switch authType {
-		case "bearer":
-			headers["Authorization"] = fmt.Sprintf("Bearer %s", provider.APIKey)
-		case "x-api-key":
-			headers["x-api-key"] = provider.APIKey
-		default:
-			// 自定义 Header 名
-			headerName := strings.TrimSpace(provider.ConnectivityAuthType)
-			if headerName == "" || strings.EqualFold(headerName, "custom") {
-				headerName = "Authorization"
-			}
-			headers[headerName] = provider.APIKey
-		}
+		headers[headerName] = provider.APIKey
 	}
 
 	if _, ok := headers["Accept"]; !ok {
