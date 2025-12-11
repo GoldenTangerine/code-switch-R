@@ -510,10 +510,18 @@ func (p *Provider) GetEffectiveEndpoint(defaultEndpoint string) string {
 	if ep == "" {
 		return defaultEndpoint
 	}
+
+	// 校验：必须是相对路径，不能是完整 URL
+	if strings.HasPrefix(ep, "http://") || strings.HasPrefix(ep, "https://") {
+		log.Printf("[Provider] 警告: apiEndpoint 应该是相对路径（如 /v1/chat/completions），而非完整 URL: %s，使用默认端点", ep)
+		return defaultEndpoint
+	}
+
 	// 确保以 / 开头
 	if !strings.HasPrefix(ep, "/") {
 		ep = "/" + ep
 	}
+
 	return ep
 }
 
