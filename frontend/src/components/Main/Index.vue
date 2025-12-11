@@ -3067,14 +3067,14 @@ const confirmDeleteCliTool = async () => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 28px;
-  height: 20px;
-  padding: 0 6px;
-  border-radius: 4px;
+  min-width: 32px;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 6px;
   font-size: 11px;
   font-weight: 600;
   line-height: 1;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.03em;
   transition: all 0.2s ease;
 }
 
@@ -3462,14 +3462,18 @@ const confirmDeleteCliTool = async () => {
 
 /* 黑名单等级徽章（卡片标题行） */
 .blacklist-level-badge {
-  display: inline-block;
-  padding: 2px 6px;
-  font-size: 10px;
-  font-weight: 700;
-  border-radius: 3px;
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.03em;
+  transition: all 0.2s ease;
   margin-left: 4px;
 }
 
