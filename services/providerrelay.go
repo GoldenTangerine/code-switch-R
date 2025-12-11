@@ -338,8 +338,10 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 
 			fmt.Printf("[INFO] [拉黑模式] 使用 Provider: %s (Level %d) | Model: %s\n", firstProvider.Name, firstLevel, effectiveModel)
 
+			// 获取有效的端点（用户配置优先）
+			effectiveEndpoint := firstProvider.GetEffectiveEndpoint(endpoint)
 			startTime := time.Now()
-			ok, err := prs.forwardRequest(c, kind, *firstProvider, endpoint, query, clientHeaders, currentBodyBytes, isStream, effectiveModel)
+			ok, err := prs.forwardRequest(c, kind, *firstProvider, effectiveEndpoint, query, clientHeaders, currentBodyBytes, isStream, effectiveModel)
 			duration := time.Since(startTime)
 
 			if ok {
@@ -413,8 +415,10 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 				fmt.Printf("[INFO]   [%d/%d] Provider: %s | Model: %s\n", i+1, len(providersInLevel), provider.Name, effectiveModel)
 
 				// 尝试发送请求
+				// 获取有效的端点（用户配置优先）
+				effectiveEndpoint := provider.GetEffectiveEndpoint(endpoint)
 				startTime := time.Now()
-				ok, err := prs.forwardRequest(c, kind, provider, endpoint, query, clientHeaders, currentBodyBytes, isStream, effectiveModel)
+				ok, err := prs.forwardRequest(c, kind, provider, effectiveEndpoint, query, clientHeaders, currentBodyBytes, isStream, effectiveModel)
 				duration := time.Since(startTime)
 
 				if ok {
@@ -1421,9 +1425,11 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 			}
 
 			fmt.Printf("[CustomCLI][INFO] [拉黑模式] 使用 Provider: %s (Level %d) | Model: %s\n", firstProvider.Name, firstLevel, effectiveModel)
+			// 获取有效的端点（用户配置优先）
+			effectiveEndpoint := firstProvider.GetEffectiveEndpoint(endpoint)
 
 			startTime := time.Now()
-			ok, err := prs.forwardRequest(c, kind, *firstProvider, endpoint, query, clientHeaders, currentBodyBytes, isStream, effectiveModel)
+			ok, err := prs.forwardRequest(c, kind, *firstProvider, effectiveEndpoint, query, clientHeaders, currentBodyBytes, isStream, effectiveModel)
 			duration := time.Since(startTime)
 
 			if ok {
@@ -1487,9 +1493,11 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 				}
 
 				fmt.Printf("[CustomCLI][INFO]   [%d/%d] Provider: %s | Model: %s\n", i+1, len(providersInLevel), provider.Name, effectiveModel)
+				// 获取有效的端点（用户配置优先）
+				effectiveEndpoint := provider.GetEffectiveEndpoint(endpoint)
 
 				startTime := time.Now()
-				ok, err := prs.forwardRequest(c, kind, provider, endpoint, query, clientHeaders, currentBodyBytes, isStream, effectiveModel)
+				ok, err := prs.forwardRequest(c, kind, provider, effectiveEndpoint, query, clientHeaders, currentBodyBytes, isStream, effectiveModel)
 				duration := time.Since(startTime)
 
 				if ok {

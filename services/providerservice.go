@@ -29,6 +29,11 @@ type Provider struct {
 	Accent  string `json:"accent"`
 	Enabled bool   `json:"enabled"`
 
+	// API 端点路径（可选）- 覆盖平台默认端点
+	// 如：GLM 模型需要使用 /v1/chat/completions 而非 /v1/messages
+	// 留空则使用平台默认（claude: /v1/messages, codex: /responses）
+	APIEndpoint string `json:"apiEndpoint,omitempty"`
+
 	// 模型白名单 - Provider 原生支持的模型名
 	// 使用 map 实现 O(1) 查找，向后兼容（omitempty）
 	SupportedModels map[string]bool `json:"supportedModels,omitempty"`
@@ -394,6 +399,7 @@ func (ps *ProviderService) DuplicateProvider(kind string, sourceID int64) (*Prov
 		Accent:  source.Accent,
 		Enabled: false, // 默认禁用，避免与源供应商冲突
 		Level:   source.Level,
+	APIEndpoint: source.APIEndpoint, // 复制端点配置
 		// 可用性监控配置
 		AvailabilityMonitorEnabled: source.AvailabilityMonitorEnabled,
 		ConnectivityAutoBlacklist:  false, // 副本默认关闭自动拉黑
@@ -495,6 +501,20 @@ func (p *Provider) GetEffectiveModel(requestedModel string) string {
 
 	// 无映射，返回原模型名
 	return requestedModel
+}
+
+// GetEffectiveEndpoint 获取有效的 API 端点
+// 优先使用用户配置的端点，否则使用平台默认
+func (p *Provider) GetEffectiveEndpoint(defaultEndpoint string) string {
+	ep := strings.TrimSpace(p.APIEndpoint)
+	if ep == "" {
+		return defaultEndpoint
+	}
+	// 确保以 / 开头
+	if !strings.HasPrefix(ep, "/") {
+		ep = "/" + ep
+	}
+	return ep
 }
 
 // ValidateConfiguration 验证 provider 的模型配置

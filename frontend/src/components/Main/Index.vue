@@ -2348,6 +2348,7 @@ type VendorForm = {
   supportedModels?: Record<string, boolean>
   modelMapping?: Record<string, string>
   level?: number
+  apiEndpoint?: string
   cliConfig?: Record<string, any>
   // === 可用性监控配置（新） ===
   availabilityMonitorEnabled?: boolean
@@ -2382,6 +2383,7 @@ const defaultFormValues = (platform?: string): VendorForm => ({
   supportedModels: {},
   modelMapping: {},
   cliConfig: {},
+  apiEndpoint: '', // API 端点（可选）
   // 可用性监控配置（新）
   availabilityMonitorEnabled: false,
   connectivityAutoBlacklist: false,
@@ -2473,6 +2475,7 @@ const openEditModal = (card: AutomationCard) => {
     supportedModels: card.supportedModels || {},
     modelMapping: card.modelMapping || {},
     cliConfig: card.cliConfig || {},
+    apiEndpoint: card.apiEndpoint || '',
     // 可用性监控配置（新）- 兼容从旧字段迁移
     availabilityMonitorEnabled:
       card.availabilityMonitorEnabled ?? card.connectivityCheck ?? false,
@@ -2537,6 +2540,7 @@ const submitModal = async () => {
       supportedModels: modalState.form.supportedModels || {},
       modelMapping: modalState.form.modelMapping || {},
       cliConfig: modalState.form.cliConfig || {},
+      apiEndpoint: modalState.form.apiEndpoint || '',
       // 可用性监控配置（新）
       availabilityMonitorEnabled: !!modalState.form.availabilityMonitorEnabled,
       connectivityAutoBlacklist: !!modalState.form.connectivityAutoBlacklist,
@@ -2572,6 +2576,7 @@ const submitModal = async () => {
       supportedModels: modalState.form.supportedModels || {},
       modelMapping: modalState.form.modelMapping || {},
       cliConfig: modalState.form.cliConfig || {},
+      apiEndpoint: modalState.form.apiEndpoint || '',
       // 可用性监控配置（新）
       availabilityMonitorEnabled: !!modalState.form.availabilityMonitorEnabled,
       connectivityAutoBlacklist: !!modalState.form.connectivityAutoBlacklist,
