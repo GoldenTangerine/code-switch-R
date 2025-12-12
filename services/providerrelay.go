@@ -1683,8 +1683,21 @@ func (prs *ProviderRelayService) forwardModelsRequest(
 		}
 	}
 
-	// 注入 API Key（使用 Bearer 认证）
-	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", selectedProvider.APIKey))
+	// 根据认证方式设置请求头（默认 Bearer，与 v2.2.x 保持一致）
+	authType := strings.ToLower(strings.TrimSpace(selectedProvider.ConnectivityAuthType))
+	switch authType {
+	case "x-api-key":
+		req.Header.Set("x-api-key", selectedProvider.APIKey)
+		req.Header.Set("anthropic-version", "2023-06-01")
+	case "", "bearer":
+		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", selectedProvider.APIKey))
+	default:
+		headerName := strings.TrimSpace(selectedProvider.ConnectivityAuthType)
+		if headerName == "" || strings.EqualFold(headerName, "custom") {
+			headerName = "Authorization"
+		}
+		req.Header.Set(headerName, selectedProvider.APIKey)
+	}
 
 	// 设置默认 Accept 头
 	if req.Header.Get("Accept") == "" {
