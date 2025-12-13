@@ -11,6 +11,7 @@ import { fetchCurrentVersion } from '../../services/version'
 import { getBlacklistSettings, updateBlacklistSettings, getLevelBlacklistEnabled, setLevelBlacklistEnabled, getBlacklistEnabled, setBlacklistEnabled, type BlacklistSettings } from '../../services/settings'
 import { fetchConfigImportStatus, importFromPath, type ConfigImportStatus } from '../../services/configImport'
 import { useI18n } from 'vue-i18n'
+import { extractErrorMessage } from '../../utils/error'
 
 const { t } = useI18n()
 
@@ -156,7 +157,7 @@ const checkUpdateManually = async () => {
           }
         } catch (downloadError) {
           console.error('download failed', downloadError)
-          alert('下载失败，请稍后重试')
+          alert('下载失败: ' + extractErrorMessage(downloadError))
         } finally {
           downloading.value = false
         }
@@ -183,7 +184,7 @@ const downloadAndInstall = async () => {
     }
   } catch (error) {
     console.error('download failed', error)
-    alert('下载失败，请稍后重试')
+    alert('下载失败: ' + extractErrorMessage(error))
   } finally {
     downloading.value = false
   }

@@ -342,8 +342,11 @@ func (us *UpdateService) findSHA256ForAsset(assets []struct {
 
 // DownloadUpdate 下载更新文件（支持更新锁、重试、断点续传、SHA256校验）
 func (us *UpdateService) DownloadUpdate(progressCallback func(float64)) error {
+	log.Printf("[UpdateService] 开始下载更新...")
+
 	// 获取更新锁，防止并发下载
 	if err := us.acquireUpdateLock(); err != nil {
+		log.Printf("[UpdateService] ❌ 获取更新锁失败: %v", err)
 		return err
 	}
 	defer us.releaseUpdateLock()
@@ -361,8 +364,11 @@ func (us *UpdateService) DownloadUpdate(progressCallback func(float64)) error {
 	us.SaveState()
 
 	if url == "" {
+		log.Printf("[UpdateService] ❌ 下载链接为空")
 		return fmt.Errorf("下载链接为空，请先检查更新")
 	}
+
+	log.Printf("[UpdateService] 下载 URL: %s", url)
 
 	filePath := filepath.Join(us.updateDir, filepath.Base(url))
 
@@ -378,9 +384,12 @@ func (us *UpdateService) DownloadUpdate(progressCallback func(float64)) error {
 		}
 	}
 
+	log.Printf("[UpdateService] 开始下载到: %s", filePath)
+
 	// 三次重试下载
 	var lastErr error
 	for attempt := 1; attempt <= 3; attempt++ {
+		log.Printf("[UpdateService] 下载尝试 %d/3...", attempt)
 		if err := us.downloadWithResume(url, filePath, progressCallback); err != nil {
 			lastErr = err
 			log.Printf("[UpdateService] 下载失败（第%d次）: %v", attempt, err)
@@ -488,12 +497,15 @@ func (us *UpdateService) downloadWithResume(url, dest string, progressCallback f
 			}
 			downloaded += int64(n)
 
-			if total > 0 && progressCallback != nil {
+			if total > 0 {
 				progress := float64(downloaded) / float64(total) * 100
 				us.mu.Lock()
 				us.downloadProgress = progress
 				us.mu.Unlock()
-				progressCallback(progress)
+				// 回调是可选的，但进度始终更新
+				if progressCallback != nil {
+					progressCallback(progress)
+				}
 			}
 		}
 		if readErr == io.EOF {
@@ -508,12 +520,17 @@ func (us *UpdateService) downloadWithResume(url, dest string, progressCallback f
 
 // PrepareUpdate 准备更新
 func (us *UpdateService) PrepareUpdate() error {
+	log.Printf("[UpdateService] 准备更新...")
+
 	us.mu.Lock()
 
 	if us.updateFilePath == "" {
 		us.mu.Unlock()
+		log.Printf("[UpdateService] ❌ 更新文件路径为空")
 		return fmt.Errorf("更新文件路径为空")
 	}
+
+	log.Printf("[UpdateService] 更新文件: %s", us.updateFilePath)
 
 	// 写入待更新标记（包含 SHA256 用于重启后校验）
 	pendingFile := filepath.Join(filepath.Dir(us.stateFile), ".pending-update")
@@ -536,13 +553,18 @@ func (us *UpdateService) PrepareUpdate() error {
 
 	if err := os.WriteFile(pendingFile, data, 0o644); err != nil {
 		us.mu.Unlock()
+		log.Printf("[UpdateService] ❌ 写入 pending 标记失败: %v", err)
 		return fmt.Errorf("写入标记文件失败: %w", err)
 	}
+
+	log.Printf("[UpdateService] ✅ 已写入 pending 标记: %s", pendingFile)
 
 	us.updateReady = true
 	us.mu.Unlock() // 释放锁后再调用 SaveState，避免死锁
 
 	us.SaveState()
+
+	log.Printf("[UpdateService] ✅ 更新已准备就绪，等待重启应用")
 
 	return nil
 }
