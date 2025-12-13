@@ -114,7 +114,7 @@ import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ParseDeepLinkURL, ImportProviderFromDeepLink } from '../../bindings/codeswitch/services/deeplinkservice'
 import type { DeepLinkImportRequest } from '../types/deeplink'
-import { extractErrorMessage } from '../../utils/error'
+import { extractErrorMessage } from '../utils/error'
 
 const { t } = useI18n()
 
