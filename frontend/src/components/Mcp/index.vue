@@ -178,32 +178,31 @@
       </section>
     </div>
 
-    <InlineModal
+    <FullScreenPanel
       :open="modalState.open"
       :title="modalState.editingName ? t('components.mcp.form.editTitle') : t('components.mcp.form.createTitle')"
       @close="closeModal"
     >
       <!-- Tab 切换 -->
-      <div class="modal-tabs">
+      <div class="panel-tabs">
         <button
           type="button"
-          class="modal-tab"
+          class="panel-tab"
           :class="{ active: modalMode === 'form' }"
-          @click.stop.prevent="switchModalMode('form')"
+          @click="switchModalMode('form')"
         >
           {{ t('components.mcp.jsonImport.tabForm') }}
         </button>
         <button
           type="button"
-          class="modal-tab"
+          class="panel-tab"
           :class="{ active: modalMode === 'json' }"
-          @click.stop.prevent="switchModalMode('json')"
+          @click="switchModalMode('json')"
         >
           {{ t('components.mcp.jsonImport.tabJson') }}
         </button>
       </div>
 
-      <div class="modal-scroll">
       <!-- 表单模式 -->
       <form v-if="modalMode === 'form'" class="vendor-form" @submit.prevent="submitModal">
         <div class="form-row">
@@ -287,14 +286,14 @@
 
         <p v-if="modalError" class="alert-error">{{ modalError }}</p>
 
-        <footer class="form-actions">
+        <div class="form-actions">
           <BaseButton variant="outline" type="button" :disabled="saveBusy" @click="closeModal">
             {{ t('components.mcp.form.actions.cancel') }}
           </BaseButton>
           <BaseButton :disabled="saveBusy" type="submit">
             {{ t('components.mcp.form.actions.save') }}
           </BaseButton>
-        </footer>
+        </div>
       </form>
 
       <!-- JSON 导入模式 -->
@@ -335,21 +334,21 @@
           </label>
           <p v-if="jsonError" class="alert-error">{{ jsonError }}</p>
           <p class="json-hint">{{ t('components.mcp.jsonImport.formatHint') }}</p>
-          <footer class="form-actions">
+          <div class="form-actions">
             <BaseButton variant="outline" type="button" :disabled="jsonParsing" @click="closeModal">
               {{ t('components.mcp.form.actions.cancel') }}
             </BaseButton>
             <BaseButton :disabled="jsonParsing || !jsonInput.trim()" @click="handleParseJSON">
               {{ jsonParsing ? t('components.mcp.jsonImport.parsing') : t('components.mcp.jsonImport.parse') }}
             </BaseButton>
-          </footer>
+          </div>
         </div>
 
         <!-- 解析结果预览 -->
         <div v-if="jsonParseResult" class="json-preview-area">
           <div class="preview-header">
             <span class="preview-count">{{ t('components.mcp.jsonImport.serverCount', { count: jsonParseResult?.servers?.length ?? 0 }) }}</span>
-            <button type="button" class="ghost-icon sm" @click="resetJsonImport" :title="t('components.mcp.jsonImport.reset')">
+            <button type="button" class="ghost-icon sm" :title="t('components.mcp.jsonImport.reset')" @click="resetJsonImport">
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M6 6l12 12M6 18L18 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none" />
               </svg>
@@ -385,7 +384,7 @@
             </div>
           </div>
 
-          <footer class="form-actions">
+          <div class="form-actions">
             <BaseButton variant="outline" type="button" @click="closeModal">
               {{ t('components.mcp.form.actions.cancel') }}
             </BaseButton>
@@ -396,16 +395,16 @@
             >
               {{ t('components.mcp.jsonImport.importAll') }}
             </BaseButton>
-          </footer>
+          </div>
         </div>
       </div>
-      </div>
-    </InlineModal>
+    </FullScreenPanel>
 
     <InlineModal
       :open="confirmState.open"
       :title="t('components.mcp.form.deleteTitle')"
       variant="confirm"
+      :close-on-backdrop="false"
       @close="closeConfirm"
     >
       <div class="confirm-body">
@@ -431,6 +430,7 @@ import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import BaseButton from '../common/BaseButton.vue'
 import InlineModal from '../common/InlineModal.vue'
+import FullScreenPanel from '../common/FullScreenPanel.vue'
 import BaseInput from '../common/BaseInput.vue'
 import BaseTextarea from '../common/BaseTextarea.vue'
 import {
@@ -1165,36 +1165,36 @@ onMounted(() => {
   margin-bottom: 1rem;
 }
 
-/* Modal Tab 切换 */
-.modal-tabs {
+/* Panel Tab 切换 */
+.panel-tabs {
   display: flex;
   gap: 0;
-  margin-bottom: 1rem;
+  margin-bottom: 1.5rem;
   border-bottom: 1px solid var(--mac-border);
 }
 
-.modal-tab {
-  padding: 0.75rem 1.25rem;
+.panel-tab {
+  padding: 0.75rem 1.5rem;
   background: none;
   border: none;
   color: var(--mac-text-secondary);
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 500;
   cursor: pointer;
   position: relative;
   transition: color 0.2s;
 }
 
-.modal-tab:hover {
+.panel-tab:hover {
   color: var(--mac-text);
 }
 
-.modal-tab.active {
+.panel-tab.active {
   color: var(--mac-accent);
   font-weight: 600;
 }
 
-.modal-tab.active::after {
+.panel-tab.active::after {
   content: '';
   position: absolute;
   bottom: -1px;

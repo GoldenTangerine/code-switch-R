@@ -47,8 +47,9 @@ const props = withDefaults(
     open: boolean
     title: string
     variant?: Variant
+    closeOnBackdrop?: boolean
   }>(),
-  { variant: 'default' },
+  { variant: 'default', closeOnBackdrop: true },
 )
 
 const emit = defineEmits<{ (e: 'close'): void }>()
@@ -65,6 +66,7 @@ const emitClose = () => emit('close')
 // 统一阻断冒泡；只有点到 wrapper 空白处才关闭（等价于 @click.self）
 const onWrapperClick = (event: MouseEvent) => {
   event.stopPropagation()
+  if (!props.closeOnBackdrop) return
   if (event.target === event.currentTarget) {
     emitClose()
   }
