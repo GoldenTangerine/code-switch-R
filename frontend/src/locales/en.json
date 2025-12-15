@@ -601,6 +601,30 @@
         "website": "Website",
         "tips": "Helper note",
         "tipsHint": "Example: Visit ref.tools to get your API key",
+        "jsonEditor": {
+          "title": "JSON Config",
+          "dirty": "Not applied",
+          "lock": "Lock",
+          "unlock": "Unlock",
+          "apply": "Apply to form",
+          "reset": "Reset",
+          "hint": "This JSON does not include name or platforms. Name, website, tips, and platforms are controlled by the form.",
+          "toast": {
+            "dirtyNotApplied": "JSON changes are not applied. Saving will use the form values."
+          },
+          "errors": {
+            "empty": "Please enter JSON content",
+            "invalidJson": "Invalid JSON: {message}",
+            "mustBeObject": "JSON root must be an object",
+            "typeRequired": "Missing type (must be stdio or http)",
+            "typeInvalid": "type must be stdio or http",
+            "commandRequired": "command is required for stdio servers",
+            "urlRequired": "url is required for http servers",
+            "argsInvalid": "args must be an array of strings",
+            "envInvalid": "env must be an object with string values",
+            "applyFailed": "Failed to apply JSON. Please check the content."
+          }
+        },
         "env": "Environment variables",
         "envKey": "Key",
         "envValue": "Value",

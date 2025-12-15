@@ -602,6 +602,30 @@
         "website": "官网地址",
         "tips": "提示信息",
         "tipsHint": "例如：请前往 ref.tools 获取 API Key",
+        "jsonEditor": {
+          "title": "JSON 配置",
+          "dirty": "未应用",
+          "lock": "锁定",
+          "unlock": "解锁",
+          "apply": "应用到表单",
+          "reset": "重置",
+          "hint": "此 JSON 不包含 name 与平台。名称、官网、提示与目标平台仍以表单为准。",
+          "toast": {
+            "dirtyNotApplied": "JSON 修改未应用，将按表单内容保存"
+          },
+          "errors": {
+            "empty": "请输入 JSON 内容",
+            "invalidJson": "JSON 格式无效：{message}",
+            "mustBeObject": "JSON 顶层必须是对象",
+            "typeRequired": "缺少 type 字段（必须为 stdio 或 http）",
+            "typeInvalid": "type 必须为 stdio 或 http",
+            "commandRequired": "stdio 类型需要 command",
+            "urlRequired": "http 类型需要 url",
+            "argsInvalid": "args 必须是字符串数组",
+            "envInvalid": "env 必须是对象，且所有值为字符串",
+            "applyFailed": "应用失败，请检查 JSON 内容"
+          }
+        },
         "env": "环境变量",
         "envKey": "变量名",
         "envValue": "变量值",
