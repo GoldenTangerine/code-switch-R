@@ -1,6 +1,6 @@
 <template>
   <Teleport to="body">
-    <Transition name="fullscreen-panel-slide">
+    <Transition name="panel-slide">
       <div
         v-if="open"
         v-bind="$attrs"
@@ -10,13 +10,11 @@
         aria-modal="true"
         :aria-labelledby="titleId"
         tabindex="-1"
-        @pointerdown.capture="markUserPointerInteraction"
-        @pointerup.capture="markUserPointerInteraction"
-        @click.capture="markUserClickInteraction"
+        @click="handleBackdropClick"
         @keydown="onKeyDown"
       >
-        <!-- Header -->
-        <header class="panel-header">
+        <!-- Header: @click.stop 防止点击 header 触发 backdrop 逻辑 -->
+        <header class="panel-header" @click.stop>
           <button
             ref="closeButtonRef"
             class="back-button"
@@ -32,13 +30,17 @@
           <div class="header-spacer"></div>
         </header>
 
-        <!-- Main Content -->
-        <main class="panel-content">
+        <!--
+          Main Content: @click.stop 是关键修复
+          创建"事件隔离堡垒"，确保内容区域（Tab按钮、表单等）的点击
+          不会冒泡到 panel-container 触发意外关闭
+        -->
+        <main class="panel-content" @click.stop>
           <slot></slot>
         </main>
 
-        <!-- Footer -->
-        <footer v-if="$slots.footer" class="panel-footer">
+        <!-- Footer: 同样需要 @click.stop -->
+        <footer v-if="$slots.footer" class="panel-footer" @click.stop>
           <slot name="footer"></slot>
         </footer>
       </div>
@@ -54,8 +56,13 @@ const props = withDefaults(
     open: boolean
     title: string
     closeLabel?: string
+    closeOnBackdrop?: boolean
   }>(),
-  { closeLabel: 'Close' },
+  {
+    closeLabel: 'Close',
+    // 全屏面板默认不支持点击背景关闭，防止误操作导致数据丢失
+    closeOnBackdrop: false,
+  },
 )
 
 const emit = defineEmits<{
@@ -67,59 +74,32 @@ const panelRef = ref<HTMLElement | null>(null)
 const closeButtonRef = ref<HTMLButtonElement | null>(null)
 let lastActiveElement: Element | null = null
 
-// 某些 WebView 在点击/聚焦切换后会派发"幽灵 Esc"键盘事件，导致面板误关闭；
-// 用极短时间窗过滤，避免影响正常的 Esc 关闭体验。
-let lastUserInteractionAt = 0
-const PHANTOM_ESCAPE_SUPPRESS_MS = 100
-
-const markUserPointerInteraction = (event: Event) => {
-  if (!event.isTrusted) return
-  lastUserInteractionAt = performance.now()
-}
-
-const markUserClickInteraction = (event: MouseEvent) => {
-  if (!event.isTrusted) return
-  lastUserInteractionAt = performance.now()
-}
-
 const handleClose = () => {
   emit('close')
 }
 
-const isEditableTarget = (target: EventTarget | null) => {
-  if (!(target instanceof HTMLElement)) return false
-  const tagName = target.tagName
-  if (tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT') return true
-  return target.isContentEditable
+// 简化的背景点击处理：仅当 closeOnBackdrop 启用且点击的是容器本身时关闭
+const handleBackdropClick = (event: MouseEvent) => {
+  if (!props.closeOnBackdrop) return
+  // 严格检查：只有点击容器本身才关闭（子元素的 @click.stop 已阻止冒泡）
+  if (event.target === event.currentTarget) {
+    handleClose()
+  }
 }
 
+// 简化的 Escape 键处理
 const onKeyDown = (e: KeyboardEvent) => {
   if (!props.open) return
   if (e.key !== 'Escape') return
+  // 忽略 IME 输入法组合状态
   if (e.isComposing) return
-
-  // Esc 可能来自下拉框/输入法等内部交互；此类情况优先交给控件自身处理，避免误关闭面板
-  if (isEditableTarget(e.target)) return
-
-  // 过滤"紧跟在用户交互之后"的异常 Esc（更像 WebView 误派发，而非用户真实按键）
-  if (performance.now() - lastUserInteractionAt < PHANTOM_ESCAPE_SUPPRESS_MS) {
-    e.preventDefault()
-    e.stopPropagation()
-    return
-  }
-
-  // 只在焦点位于面板内部时才响应 Esc，避免 WebView 异常事件误触发关闭
-  const panelEl = panelRef.value
-  const activeEl = document.activeElement
-  if (!panelEl || !activeEl || !panelEl.contains(activeEl)) {
-    return
-  }
 
   e.preventDefault()
   e.stopPropagation()
   handleClose()
 }
 
+// 焦点管理和 body 滚动锁定
 watch(
   () => props.open,
   (isOpen) => {
@@ -203,6 +183,11 @@ onBeforeUnmount(() => {
   background-color: rgba(128, 128, 128, 0.2);
 }
 
+.back-button:focus-visible {
+  outline: 2px solid var(--mac-accent);
+  outline-offset: 2px;
+}
+
 .header-spacer {
   grid-column: 3;
   width: 36px;
@@ -212,6 +197,7 @@ onBeforeUnmount(() => {
   flex-grow: 1;
   overflow-y: auto;
   padding: 24px;
+  -webkit-overflow-scrolling: touch;
 }
 
 .panel-footer {
@@ -224,18 +210,26 @@ onBeforeUnmount(() => {
   gap: 12px;
 }
 
-.fullscreen-panel-slide-enter-active,
-.fullscreen-panel-slide-leave-active {
-  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+/* Transition 动画 */
+.panel-slide-enter-active,
+.panel-slide-leave-active {
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.fullscreen-panel-slide-enter-from,
-.fullscreen-panel-slide-leave-to {
+.panel-slide-enter-from,
+.panel-slide-leave-to {
   transform: translateY(100%);
 }
 
-.fullscreen-panel-slide-enter-to,
-.fullscreen-panel-slide-leave-from {
+.panel-slide-enter-to,
+.panel-slide-leave-from {
   transform: translateY(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .panel-slide-enter-active,
+  .panel-slide-leave-active {
+    transition: none;
+  }
 }
 </style>

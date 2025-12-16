@@ -184,13 +184,15 @@
       :title="modalState.editingName ? t('components.mcp.form.editTitle') : t('components.mcp.form.createTitle')"
       @close="closeModal"
     >
-      <!-- Tab 切换 -->
-      <div class="panel-tabs">
+      <!-- Tab 切换（FullScreenPanel 已通过 @click.stop 隔离事件，此处无需 .stop） -->
+      <div class="panel-tabs" role="tablist">
         <button
           type="button"
           class="panel-tab"
           :class="{ active: modalMode === 'form' }"
-          @click.stop="switchModalMode('form')"
+          role="tab"
+          :aria-selected="modalMode === 'form'"
+          @click="switchModalMode('form')"
         >
           {{ t('components.mcp.jsonImport.tabForm') }}
         </button>
@@ -198,7 +200,9 @@
           type="button"
           class="panel-tab"
           :class="{ active: modalMode === 'json' }"
-          @click.stop="switchModalMode('json')"
+          role="tab"
+          :aria-selected="modalMode === 'json'"
+          @click="switchModalMode('json')"
         >
           {{ t('components.mcp.jsonImport.tabBulkImport') }}
         </button>
