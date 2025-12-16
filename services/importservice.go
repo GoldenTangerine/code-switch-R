@@ -12,7 +12,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/pelletier/go-toml/v2"
 	_ "modernc.org/sqlite" // SQLite driver

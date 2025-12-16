@@ -471,7 +471,7 @@ const formJsonLocked = ref(true)
 const formJsonSyncedText = ref('')
 const formJsonEditingText = ref('')
 const formJsonError = ref('')
-const formJsonTextareaRef = ref<BaseTextareaHandle | null>(null)
+const formJsonTextareaRef = ref<InstanceType<typeof BaseTextarea> | null>(null)
 
 const formJsonDirty = computed(() => !formJsonLocked.value && formJsonEditingText.value !== formJsonSyncedText.value)
 
