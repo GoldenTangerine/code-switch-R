@@ -1,10 +1,11 @@
 <template>
-  <!-- DEBUG: 临时禁用 Teleport 测试是否传送目标问题 -->
+  <!-- DEBUG: 添加极端可见样式 -->
     <div
       v-if="open"
         v-bind="$attrs"
         ref="panelRef"
         class="panel-container"
+        style="background: red !important; position: fixed !important; inset: 0 !important; z-index: 99999 !important;"
         role="dialog"
         aria-modal="true"
         :aria-labelledby="titleId"
