@@ -5,13 +5,59 @@
     @close="handleClose"
   >
     <div class="import-container">
-      <p>TEST: BaseTextarea 测试</p>
-      <BaseTextarea
-        v-model="jsonInput"
-        placeholder="测试 BaseTextarea"
-        rows="10"
-      />
-      <BaseButton @click="handleClose">关闭</BaseButton>
+      <!-- 区块 1: 纯文本 -->
+      <div style="border: 2px solid red; padding: 10px; margin: 10px 0;">
+        <p>区块1: 纯文本 ✓</p>
+      </div>
+
+      <!-- 区块 2: i18n -->
+      <div style="border: 2px solid orange; padding: 10px; margin: 10px 0;">
+        <p>区块2: i18n = {{ t('components.mcp.import.inputDesc') }}</p>
+      </div>
+
+      <!-- 区块 3: v-if -->
+      <div style="border: 2px solid yellow; padding: 10px; margin: 10px 0;">
+        <p>区块3: v-if test</p>
+        <p v-if="step === 'input'">v-if 条件成立</p>
+      </div>
+
+      <!-- 区块 4: BaseTextarea -->
+      <div style="border: 2px solid green; padding: 10px; margin: 10px 0;">
+        <p>区块4: BaseTextarea</p>
+        <BaseTextarea v-model="jsonInput" placeholder="test" rows="3" />
+      </div>
+
+      <!-- 区块 5: BaseTextarea with ref -->
+      <div style="border: 2px solid blue; padding: 10px; margin: 10px 0;">
+        <p>区块5: BaseTextarea with ref</p>
+        <BaseTextarea ref="textareaRef" v-model="jsonInput" rows="3" />
+      </div>
+
+      <!-- 区块 6: BaseButton -->
+      <div style="border: 2px solid purple; padding: 10px; margin: 10px 0;">
+        <p>区块6: BaseButton</p>
+        <BaseButton @click="handleClose">测试按钮</BaseButton>
+      </div>
+
+      <!-- 区块 7: 完整 Step 1 结构 -->
+      <div style="border: 2px solid white; padding: 10px; margin: 10px 0;">
+        <p>区块7: 完整 Step 1</p>
+        <div v-if="step === 'input'" class="step-input">
+          <p class="step-desc">{{ t('components.mcp.import.inputDesc') }}</p>
+          <BaseTextarea
+            ref="textareaRef"
+            v-model="jsonInput"
+            :placeholder="t('components.mcp.import.placeholder')"
+            class="json-input"
+            rows="5"
+            :disabled="parsing"
+          />
+          <div class="step-actions">
+            <BaseButton variant="outline" @click="handleClose">取消</BaseButton>
+            <BaseButton @click="parseJson">下一步</BaseButton>
+          </div>
+        </div>
+      </div>
     </div>
   </FullScreenPanel>
 </template>
