@@ -1,4 +1,12 @@
 <template>
+  <!-- DEBUG: 直接测试 div，绕过 FullScreenPanel -->
+  <div
+    v-if="open"
+    style="position: fixed; inset: 0; background: blue; z-index: 99999; color: white; font-size: 48px; display: flex; align-items: center; justify-content: center;"
+  >
+    DEBUG: BatchImportModal open=true
+  </div>
+
   <FullScreenPanel
     class="mcp-fullscreen-panel"
     :open="open"
