@@ -363,6 +363,13 @@
             <div class="card-text">
               <div class="card-title-row">
                 <p class="card-title">{{ card.name }}</p>
+                <!-- 当前使用徽章 -->
+                <span
+                  v-if="isDirectApplied(card) && !activeProxyState"
+                  class="current-use-badge"
+                >
+                  {{ t('components.main.directApply.currentBadge') }}
+                </span>
                 <!-- 连通性状态指示器 -->
                 <span
                   v-if="card.availabilityMonitorEnabled"
@@ -485,6 +492,20 @@
               <input type="checkbox" v-model="card.enabled" @change="persistProviders(activeTab)" />
               <span></span>
             </label>
+            <!-- 直连应用按钮 -->
+            <button
+              v-if="activeTab !== 'others'"
+              class="ghost-icon direct-apply-btn"
+              :class="{ 'is-active': isDirectApplied(card) && !activeProxyState }"
+              :disabled="activeProxyState"
+              :title="activeProxyState ? t('components.main.directApply.proxyEnabled') : (isDirectApplied(card) ? t('components.main.directApply.inUse') : t('components.main.directApply.title'))"
+              @click.stop="!isDirectApplied(card) && handleDirectApply(card)"
+            >
+              <span v-if="isDirectApplied(card) && !activeProxyState" class="apply-text">{{ t('components.main.directApply.inUse') }}</span>
+              <svg v-else viewBox="0 0 24 24" aria-hidden="true" class="lightning-icon">
+                <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
             <button class="ghost-icon" @click="configure(card)">
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path
@@ -1045,6 +1066,67 @@ const proxyBusy = reactive<Record<ProviderTab, boolean>>({
   gemini: false,
   others: false,
 })
+
+// 直连应用状态
+const directAppliedIds = reactive<Record<ProviderTab, string | number | null>>({
+  claude: null,
+  codex: null,
+  gemini: null,
+  others: null,
+})
+
+const refreshDirectAppliedStatus = async (tab: ProviderTab = activeTab.value) => {
+  if (tab === 'others') return
+
+  try {
+    let id: string | number | null = null
+    if (tab === 'claude') {
+      id = await Call.ByName('codeswitch/services.ClaudeSettingsService.GetDirectAppliedProviderID')
+    } else if (tab === 'codex') {
+      id = await Call.ByName('codeswitch/services.CodexSettingsService.GetDirectAppliedProviderID')
+    } else if (tab === 'gemini') {
+      id = await Call.ByName('codeswitch/services.GeminiService.GetDirectAppliedProviderID')
+    }
+    directAppliedIds[tab] = id
+  } catch (error) {
+    console.error(`Failed to get direct applied status for ${tab}`, error)
+  }
+}
+
+const handleDirectApply = async (card: AutomationCard) => {
+  if (activeProxyState.value) return
+  const tab = activeTab.value
+  try {
+    if (tab === 'claude') {
+      await Call.ByName('codeswitch/services.ClaudeSettingsService.ApplySingleProvider', card.id)
+    } else if (tab === 'codex') {
+      await Call.ByName('codeswitch/services.CodexSettingsService.ApplySingleProvider', card.id)
+    } else if (tab === 'gemini') {
+      // Gemini 使用字符串 ID，需要从 cache 中找到原始 provider
+      const index = cards.gemini.findIndex(c => c.id === card.id)
+      if (index === -1 || !geminiProvidersCache.value[index]) return
+      const realId = geminiProvidersCache.value[index].id
+      await Call.ByName('codeswitch/services.GeminiService.ApplySingleProvider', realId)
+    }
+    await refreshDirectAppliedStatus(tab)
+    showToast(t('components.main.directApply.success', { name: card.name }), 'success')
+  } catch (error) {
+    console.error('Direct apply failed', error)
+    showToast(t('components.main.directApply.failed'), 'error')
+  }
+}
+
+const isDirectApplied = (card: AutomationCard) => {
+  const appliedId = directAppliedIds[activeTab.value]
+  if (appliedId === null) return false
+
+  if (activeTab.value === 'gemini') {
+    const index = cards.gemini.findIndex(c => c.id === card.id)
+    if (index === -1 || !geminiProvidersCache.value[index]) return false
+    return geminiProvidersCache.value[index].id === appliedId
+  }
+  return card.id === appliedId
+}
 
 const providerStatsMap = reactive<Record<ProviderTab, Record<string, ProviderDailyStat>>>({
   claude: {},
@@ -1942,6 +2024,7 @@ const refreshAllData = async () => {
       loadUsageHeatmap(),
       loadProvidersFromDisk(),
       ...providerTabIds.map(refreshProxyState),
+      ...providerTabIds.map((tab) => refreshDirectAppliedStatus(tab)),
       ...providerTabIds.map((tab) => loadProviderStats(tab)),
       ...providerTabIds.map((tab) => loadBlacklistStatus(tab)), // 同步刷新黑名单状态
       loadAvailabilityResults(), // 同步刷新可用性监控状态（改用新服务）
@@ -2145,6 +2228,7 @@ onMounted(async () => {
   void loadUsageHeatmap()
   await loadProvidersFromDisk()
   await Promise.all(providerTabIds.map(refreshProxyState))
+  await Promise.all(providerTabIds.map((tab) => refreshDirectAppliedStatus(tab)))
   await Promise.all(providerTabIds.map((tab) => loadProviderStats(tab)))
   await loadAppSettings()
   await checkForUpdates()
@@ -2801,6 +2885,7 @@ const onTabChange = (idx: number) => {
   const nextTab = tabs[idx]?.id
   if (nextTab) {
     void refreshProxyState(nextTab as ProviderTab)
+    void refreshDirectAppliedStatus(nextTab as ProviderTab)
     void loadProviderStats(nextTab as ProviderTab)
   }
 }
@@ -4060,5 +4145,72 @@ const confirmDeleteCliTool = async () => {
 :global(.dark) .config-format-select:hover,
 :global(.dark) .target-file-select:hover {
   border-color: rgba(255, 255, 255, 0.2);
+}
+
+/* 直连应用按钮 */
+.direct-apply-btn {
+  position: relative;
+  transition: all 0.2s ease;
+  color: var(--mac-text-secondary);
+  min-width: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.direct-apply-btn .lightning-icon {
+  width: 16px;
+  height: 16px;
+}
+
+.direct-apply-btn:not(:disabled):not(.is-active):hover {
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.1);
+}
+
+.direct-apply-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+  filter: grayscale(100%);
+}
+
+.direct-apply-btn.is-active {
+  border: 1px solid #10b981;
+  background: rgba(16, 185, 129, 0.1);
+  color: #10b981;
+  width: auto;
+  padding: 0 8px;
+  border-radius: 6px;
+  gap: 4px;
+}
+
+.direct-apply-btn .apply-text {
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+:global(.dark) .direct-apply-btn.is-active {
+  border-color: #34d399;
+  background: rgba(52, 211, 153, 0.15);
+  color: #34d399;
+}
+
+/* 当前使用徽章 */
+.current-use-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  margin-left: 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: white;
+  box-shadow: 0 2px 4px rgba(16, 185, 129, 0.2);
+}
+
+:global(.dark) .current-use-badge {
+  background: linear-gradient(135deg, #059669 0%, #047857 100%);
 }
 </style>

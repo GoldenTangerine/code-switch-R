@@ -280,6 +280,14 @@
         "noData": "今日暂无数据",
         "lastUsed": "正在使用"
       },
+      "directApply": {
+        "title": "直接应用",
+        "inUse": "使用中",
+        "currentBadge": "当前使用",
+        "success": "{name} 已应用",
+        "failed": "应用失败",
+        "proxyEnabled": "请先关闭代理"
+      },
       "form": {
         "createTitle": "新增供应商",
         "editTitle": "编辑供应商",
