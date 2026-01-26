@@ -441,6 +441,7 @@ onUnmounted(() => {
 <style scoped>
 .tray-root {
   padding: 10px;
+  color: var(--mac-text);
 }
 
 .tray-list {
@@ -450,11 +451,11 @@ onUnmounted(() => {
 }
 
 .tray-panel {
-  background: #f1f2f4;
+  background: var(--mac-surface);
   border-radius: 16px;
   padding: 12px 14px;
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
-  border: 1px solid rgba(0, 0, 0, 0.05);
+  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.12);
+  border: 1px solid var(--mac-border);
 }
 
 .tray-item {
@@ -470,7 +471,7 @@ onUnmounted(() => {
   gap: 12px;
   padding-bottom: 8px;
   margin-bottom: 10px;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  border-bottom: 1px solid var(--mac-divider);
 }
 
 .tray-brand {
@@ -483,21 +484,21 @@ onUnmounted(() => {
   width: 28px;
   height: 28px;
   border-radius: 8px;
-  background: #ffffff;
-  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: var(--mac-surface-strong);
+  border: 1px solid var(--mac-border);
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 13px;
   font-weight: 700;
-  color: #2f2f2f;
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.08);
+  color: var(--mac-text);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
 .tray-brand__name {
   font-size: 13px;
   font-weight: 600;
-  color: #2f2f2f;
+  color: var(--mac-text);
 }
 
 .tray-status {
@@ -505,19 +506,19 @@ onUnmounted(() => {
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  color: #7a7f86;
+  color: var(--mac-text-secondary);
 }
 
 .tray-status__dot {
   width: 8px;
   height: 8px;
   border-radius: 999px;
-  background: #cbd5e1;
-  box-shadow: 0 0 0 2px rgba(203, 213, 225, 0.4);
+  background: color-mix(in srgb, var(--mac-text-secondary) 55%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--mac-text-secondary) 25%, transparent);
 }
 
 .tray-status.active {
-  color: #2f2f2f;
+  color: var(--mac-text);
 }
 
 .tray-status.active .tray-status__dot {
@@ -544,7 +545,7 @@ onUnmounted(() => {
   gap: 8px;
   font-size: 13px;
   font-weight: 600;
-  color: #2f2f2f;
+  color: var(--mac-text);
 }
 
 .tray-dot {
@@ -560,7 +561,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  color: #5b5f66;
+  color: var(--mac-text-secondary);
 }
 
 .tray-item__value.loading {
@@ -583,7 +584,7 @@ onUnmounted(() => {
   width: 100%;
   height: 8px;
   border-radius: 999px;
-  background: #e1e4e8;
+  background: var(--mac-divider);
   overflow: hidden;
 }
 
@@ -598,41 +599,36 @@ onUnmounted(() => {
   display: flex;
   justify-content: space-between;
   font-size: 11px;
-  color: #7a7f86;
+  color: var(--mac-text-secondary);
 }
 
 :global(.dark) .tray-panel {
-  background: #2c2f35;
-  border-color: rgba(255, 255, 255, 0.06);
-  box-shadow: 0 12px 26px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.45);
 }
 
 :global(.dark) .tray-header {
-  border-bottom-color: rgba(255, 255, 255, 0.08);
+  border-bottom-color: var(--mac-divider);
 }
 
 :global(.dark) .tray-brand__icon {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.12);
-  color: #f1f5f9;
-  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.35);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
 :global(.dark) .tray-brand__name {
-  color: #f1f5f9;
+  color: var(--mac-text);
 }
 
 :global(.dark) .tray-status {
-  color: rgba(241, 245, 249, 0.6);
+  color: var(--mac-text-secondary);
 }
 
 :global(.dark) .tray-status__dot {
-  background: rgba(148, 163, 184, 0.6);
-  box-shadow: 0 0 0 2px rgba(148, 163, 184, 0.3);
+  background: color-mix(in srgb, var(--mac-text-secondary) 55%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--mac-text-secondary) 25%, transparent);
 }
 
 :global(.dark) .tray-status.active {
-  color: #f1f5f9;
+  color: var(--mac-text);
 }
 
 :global(.dark) .tray-status.active .tray-status__dot {
@@ -641,11 +637,11 @@ onUnmounted(() => {
 }
 
 :global(.dark) .tray-item__title {
-  color: #f1f5f9;
+  color: var(--mac-text);
 }
 
 :global(.dark) .tray-item__value {
-  color: rgba(241, 245, 249, 0.7);
+  color: var(--mac-text-secondary);
 }
 
 :global(.dark) .tray-item__percent {
@@ -653,7 +649,7 @@ onUnmounted(() => {
 }
 
 :global(.dark) .tray-progress {
-  background: rgba(255, 255, 255, 0.12);
+  background: var(--mac-divider);
 }
 
 :global(.dark) .tray-progress__bar {
@@ -661,6 +657,6 @@ onUnmounted(() => {
 }
 
 :global(.dark) .tray-meta {
-  color: rgba(241, 245, 249, 0.6);
+  color: var(--mac-text-secondary);
 }
 </style>
