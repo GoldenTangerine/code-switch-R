@@ -29,6 +29,7 @@ type AppSettings struct {
 	BudgetShowCountdown  bool   `json:"budget_show_countdown"`
 	BudgetShowForecast   bool   `json:"budget_show_forecast"`
 	BudgetForecastMethod string `json:"budget_forecast_method"`
+	BudgetForecastDisplay string `json:"budget_forecast_display"`
 	BudgetTotalCodex          float64 `json:"budget_total_codex"`
 	BudgetUsedAdjustmentCodex float64 `json:"budget_used_adjustment_codex"`
 	BudgetCycleEnabledCodex   bool   `json:"budget_cycle_enabled_codex"`
@@ -38,6 +39,7 @@ type AppSettings struct {
 	BudgetShowCountdownCodex  bool   `json:"budget_show_countdown_codex"`
 	BudgetShowForecastCodex   bool   `json:"budget_show_forecast_codex"`
 	BudgetForecastMethodCodex string `json:"budget_forecast_method_codex"`
+	BudgetForecastDisplayCodex string `json:"budget_forecast_display_codex"`
 	AutoStart            bool `json:"auto_start"`
 	AutoUpdate           bool `json:"auto_update"`
 	AutoConnectivityTest bool `json:"auto_connectivity_test"`
@@ -166,6 +168,7 @@ func (as *AppSettingsService) defaultSettings() AppSettings {
 		BudgetShowCountdown:  false,
 		BudgetShowForecast:   false,
 		BudgetForecastMethod: "cycle",
+		BudgetForecastDisplay: "datetime",
 		BudgetTotalCodex:          0,
 		BudgetUsedAdjustmentCodex: 0,
 		BudgetCycleEnabledCodex:   false,
@@ -175,6 +178,7 @@ func (as *AppSettingsService) defaultSettings() AppSettings {
 		BudgetShowCountdownCodex:  false,
 		BudgetShowForecastCodex:   false,
 		BudgetForecastMethodCodex: "cycle",
+		BudgetForecastDisplayCodex: "datetime",
 		AutoStart:            autoStartEnabled,
 		AutoUpdate:           true,  // 默认开启自动更新
 		AutoConnectivityTest: true,  // 默认开启自动可用性监控（开箱即用）

@@ -12,6 +12,7 @@ export type AppSettings = {
   budget_show_countdown: boolean
   budget_show_forecast: boolean
   budget_forecast_method: string
+  budget_forecast_display: string
   budget_total_codex: number
   budget_used_adjustment_codex: number
   budget_cycle_enabled_codex: boolean
@@ -21,6 +22,7 @@ export type AppSettings = {
   budget_show_countdown_codex: boolean
   budget_show_forecast_codex: boolean
   budget_forecast_method_codex: string
+  budget_forecast_display_codex: string
   auto_start: boolean
   auto_update: boolean
   auto_connectivity_test: boolean
@@ -40,6 +42,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   budget_show_countdown: false,
   budget_show_forecast: false,
   budget_forecast_method: 'cycle',
+  budget_forecast_display: 'datetime',
   budget_total_codex: 0,
   budget_used_adjustment_codex: 0,
   budget_cycle_enabled_codex: false,
@@ -49,6 +52,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   budget_show_countdown_codex: false,
   budget_show_forecast_codex: false,
   budget_forecast_method_codex: 'cycle',
+  budget_forecast_display_codex: 'datetime',
   auto_start: false,
   auto_update: true,
   auto_connectivity_test: false,

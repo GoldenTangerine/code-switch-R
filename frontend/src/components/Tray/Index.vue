@@ -7,6 +7,7 @@ import { fetchProxyStatus } from '../../services/claudeSettings'
 
 type Platform = 'claude' | 'codex'
 type ForecastMethod = 'cycle' | '10m' | '1h' | 'yesterday' | 'last24h'
+type ForecastDisplay = 'datetime' | 'remaining'
 type CycleMode = 'daily' | 'weekly'
 
 const rootRef = ref<HTMLElement | null>(null)
@@ -78,6 +79,14 @@ const normalizeForecastMethod = (value: unknown): ForecastMethod => {
   return 'cycle'
 }
 
+const normalizeForecastDisplay = (value: unknown): ForecastDisplay => {
+  const raw = String(value ?? '').trim()
+  if (raw === 'datetime' || raw === 'remaining') {
+    return raw
+  }
+  return 'datetime'
+}
+
 const createTrayCard = (platform: Platform, brandName: string, brandIcon: string) => {
   const used = ref(0)
   const usedRaw = ref(0)
@@ -91,6 +100,7 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
   const showCountdown = ref(false)
   const showForecast = ref(false)
   const forecastMethod = ref<ForecastMethod>('cycle')
+  const forecastDisplay = ref<ForecastDisplay>('datetime')
   const forecastRate = ref(0)
   const countdownLabel = ref('')
   const forecastLabel = ref('')
@@ -99,12 +109,14 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
   let nextReset: Date | null = null
 
   const usedLabel = computed(() => formatCurrency(used.value))
-  const totalLabel = computed(() => (total.value > 0 ? formatCurrency(total.value) : '未设置'))
+  const hasBudget = computed(() => total.value > 0)
+  const totalLabel = computed(() => (hasBudget.value ? formatCurrency(total.value) : ''))
   const progressRatio = computed(() => {
     if (total.value <= 0) return 0
     return Math.min(Math.max(used.value / total.value, 0), 1)
   })
   const progressPercentLabel = computed(() => {
+    if (!hasBudget.value) return ''
     const percent = Math.round(progressRatio.value * 100)
     return `${percent}%`
   })
@@ -211,8 +223,15 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
       const rate = forecastRate.value
       if (rate > 0 && used.value < total.value) {
         const secondsToBudget = (total.value - used.value) / rate
-        const forecastTime = new Date(now.getTime() + secondsToBudget * 1000)
-        forecastLabel.value = `预计耗尽 ${formatLocalDateTimeLabel(forecastTime)}`
+        if (!Number.isFinite(secondsToBudget)) {
+          forecastLabel.value = '预计耗尽 —'
+        } else if (forecastDisplay.value === 'remaining') {
+          const remainingMs = secondsToBudget * 1000
+          forecastLabel.value = `预计耗尽 ${formatCountdown(remainingMs)}`
+        } else {
+          const forecastTime = new Date(now.getTime() + secondsToBudget * 1000)
+          forecastLabel.value = `预计耗尽 ${formatLocalDateTimeLabel(forecastTime)}`
+        }
       } else if (used.value >= total.value && total.value > 0) {
         forecastLabel.value = '已达预算'
       } else {
@@ -244,6 +263,7 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
       showCountdown.value = settings?.budget_show_countdown_codex ?? false
       showForecast.value = settings?.budget_show_forecast_codex ?? false
       forecastMethod.value = normalizeForecastMethod(settings?.budget_forecast_method_codex ?? 'cycle')
+      forecastDisplay.value = normalizeForecastDisplay(settings?.budget_forecast_display_codex ?? 'datetime')
       const rawAdjustment = Number(settings?.budget_used_adjustment_codex ?? 0)
       usedAdjustment.value = Number.isFinite(rawAdjustment) ? rawAdjustment : 0
       return
@@ -256,6 +276,7 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
     showCountdown.value = settings?.budget_show_countdown ?? false
     showForecast.value = settings?.budget_show_forecast ?? false
     forecastMethod.value = normalizeForecastMethod(settings?.budget_forecast_method ?? 'cycle')
+    forecastDisplay.value = normalizeForecastDisplay(settings?.budget_forecast_display ?? 'datetime')
     const rawAdjustment = Number(settings?.budget_used_adjustment ?? 0)
     usedAdjustment.value = Number.isFinite(rawAdjustment) ? rawAdjustment : 0
   }
@@ -290,6 +311,7 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
     brandName,
     brandIcon,
     usedLabel,
+    hasBudget,
     totalLabel,
     progressRatio,
     progressPercentLabel,
@@ -395,10 +417,12 @@ onUnmounted(() => {
             <div class="tray-item__summary">
               <div class="tray-item__value" :class="{ loading: card.loading }">
                 <span>已用 {{ card.usedLabel }}</span>
-                <span class="tray-divider">/</span>
-                <span>{{ card.totalLabel }}</span>
+                <template v-if="card.hasBudget">
+                  <span class="tray-divider">/</span>
+                  <span>{{ card.totalLabel }}</span>
+                </template>
               </div>
-              <span class="tray-item__percent">{{ card.progressPercentLabel }}</span>
+              <span v-if="card.hasBudget" class="tray-item__percent">{{ card.progressPercentLabel }}</span>
             </div>
           </div>
           <div class="tray-progress">

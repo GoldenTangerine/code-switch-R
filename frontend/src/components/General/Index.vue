@@ -42,6 +42,7 @@ const roundRobinEnabled = ref(getCachedValue('roundRobin', false))    // 同 Lev
 const budgetTotal = ref(getCachedNumber('budgetTotal', 0))
 const budgetUsedAdjustment = ref(getCachedNumber('budgetUsedAdjustment', 0))
 const budgetForecastMethod = ref(getCachedString('budgetForecastMethod', 'cycle'))
+const budgetForecastDisplay = ref(getCachedString('budgetForecastDisplay', 'datetime'))
 const budgetCycleEnabled = ref(getCachedValue('budgetCycleEnabled', false))
 const budgetCycleMode = ref(getCachedString('budgetCycleMode', 'daily'))
 const budgetRefreshTime = ref(getCachedString('budgetRefreshTime', '00:00'))
@@ -51,6 +52,7 @@ const budgetShowForecast = ref(getCachedValue('budgetShowForecast', false))
 const budgetTotalCodex = ref(getCachedNumber('budgetTotalCodex', 0))
 const budgetUsedAdjustmentCodex = ref(getCachedNumber('budgetUsedAdjustmentCodex', 0))
 const budgetForecastMethodCodex = ref(getCachedString('budgetForecastMethodCodex', 'cycle'))
+const budgetForecastDisplayCodex = ref(getCachedString('budgetForecastDisplayCodex', 'datetime'))
 const budgetCycleEnabledCodex = ref(getCachedValue('budgetCycleEnabledCodex', false))
 const budgetCycleModeCodex = ref(getCachedString('budgetCycleModeCodex', 'daily'))
 const budgetRefreshTimeCodex = ref(getCachedString('budgetRefreshTimeCodex', '00:00'))
@@ -92,6 +94,14 @@ const normalizeBudgetForecastMethod = (value: string) => {
   return 'cycle'
 }
 
+const normalizeBudgetForecastDisplay = (value: string) => {
+  const trimmed = value?.trim()
+  if (trimmed === 'datetime' || trimmed === 'remaining') {
+    return trimmed
+  }
+  return 'datetime'
+}
+
 const loadAppSettings = async () => {
   settingsLoading.value = true
   try {
@@ -101,6 +111,7 @@ const loadAppSettings = async () => {
     budgetTotal.value = Number(data?.budget_total ?? 0)
     budgetUsedAdjustment.value = Number(data?.budget_used_adjustment ?? 0)
     budgetForecastMethod.value = normalizeBudgetForecastMethod(data?.budget_forecast_method ?? 'cycle')
+    budgetForecastDisplay.value = normalizeBudgetForecastDisplay(data?.budget_forecast_display ?? 'datetime')
     budgetCycleEnabled.value = data?.budget_cycle_enabled ?? false
     budgetCycleMode.value = data?.budget_cycle_mode === 'weekly' ? 'weekly' : 'daily'
     budgetRefreshTime.value = data?.budget_refresh_time || '00:00'
@@ -110,6 +121,7 @@ const loadAppSettings = async () => {
     budgetTotalCodex.value = Number(data?.budget_total_codex ?? 0)
     budgetUsedAdjustmentCodex.value = Number(data?.budget_used_adjustment_codex ?? 0)
     budgetForecastMethodCodex.value = normalizeBudgetForecastMethod(data?.budget_forecast_method_codex ?? 'cycle')
+    budgetForecastDisplayCodex.value = normalizeBudgetForecastDisplay(data?.budget_forecast_display_codex ?? 'datetime')
     budgetCycleEnabledCodex.value = data?.budget_cycle_enabled_codex ?? false
     budgetCycleModeCodex.value = data?.budget_cycle_mode_codex === 'weekly' ? 'weekly' : 'daily'
     budgetRefreshTimeCodex.value = data?.budget_refresh_time_codex || '00:00'
@@ -128,6 +140,7 @@ const loadAppSettings = async () => {
     localStorage.setItem('app-settings-budgetTotal', String(budgetTotal.value))
     localStorage.setItem('app-settings-budgetUsedAdjustment', String(budgetUsedAdjustment.value))
     localStorage.setItem('app-settings-budgetForecastMethod', budgetForecastMethod.value)
+    localStorage.setItem('app-settings-budgetForecastDisplay', budgetForecastDisplay.value)
     localStorage.setItem('app-settings-budgetCycleEnabled', String(budgetCycleEnabled.value))
     localStorage.setItem('app-settings-budgetCycleMode', budgetCycleMode.value)
     localStorage.setItem('app-settings-budgetRefreshTime', budgetRefreshTime.value)
@@ -137,6 +150,7 @@ const loadAppSettings = async () => {
     localStorage.setItem('app-settings-budgetTotalCodex', String(budgetTotalCodex.value))
     localStorage.setItem('app-settings-budgetUsedAdjustmentCodex', String(budgetUsedAdjustmentCodex.value))
     localStorage.setItem('app-settings-budgetForecastMethodCodex', budgetForecastMethodCodex.value)
+    localStorage.setItem('app-settings-budgetForecastDisplayCodex', budgetForecastDisplayCodex.value)
     localStorage.setItem('app-settings-budgetCycleEnabledCodex', String(budgetCycleEnabledCodex.value))
     localStorage.setItem('app-settings-budgetCycleModeCodex', budgetCycleModeCodex.value)
     localStorage.setItem('app-settings-budgetRefreshTimeCodex', budgetRefreshTimeCodex.value)
@@ -155,6 +169,7 @@ const loadAppSettings = async () => {
     budgetTotal.value = 0
     budgetUsedAdjustment.value = 0
     budgetForecastMethod.value = 'cycle'
+    budgetForecastDisplay.value = 'datetime'
     budgetCycleEnabled.value = false
     budgetCycleMode.value = 'daily'
     budgetRefreshTime.value = '00:00'
@@ -164,6 +179,7 @@ const loadAppSettings = async () => {
     budgetTotalCodex.value = 0
     budgetUsedAdjustmentCodex.value = 0
     budgetForecastMethodCodex.value = 'cycle'
+    budgetForecastDisplayCodex.value = 'datetime'
     budgetCycleEnabledCodex.value = false
     budgetCycleModeCodex.value = 'daily'
     budgetRefreshTimeCodex.value = '00:00'
@@ -192,6 +208,8 @@ const persistAppSettings = async () => {
     budgetUsedAdjustment.value = normalizedBudgetUsedAdjustment
     const normalizedBudgetForecastMethod = normalizeBudgetForecastMethod(budgetForecastMethod.value)
     budgetForecastMethod.value = normalizedBudgetForecastMethod
+    const normalizedBudgetForecastDisplay = normalizeBudgetForecastDisplay(budgetForecastDisplay.value)
+    budgetForecastDisplay.value = normalizedBudgetForecastDisplay
     const normalizedBudgetTotalCodex = Number.isFinite(budgetTotalCodex.value)
       ? Math.max(0, budgetTotalCodex.value)
       : 0
@@ -202,6 +220,8 @@ const persistAppSettings = async () => {
     budgetUsedAdjustmentCodex.value = normalizedBudgetUsedAdjustmentCodex
     const normalizedBudgetForecastMethodCodex = normalizeBudgetForecastMethod(budgetForecastMethodCodex.value)
     budgetForecastMethodCodex.value = normalizedBudgetForecastMethodCodex
+    const normalizedBudgetForecastDisplayCodex = normalizeBudgetForecastDisplay(budgetForecastDisplayCodex.value)
+    budgetForecastDisplayCodex.value = normalizedBudgetForecastDisplayCodex
     const normalizedBudgetRefreshDay = Number.isFinite(budgetRefreshDay.value)
       ? Math.min(Math.max(Math.floor(budgetRefreshDay.value), 0), 6)
       : 1
@@ -220,6 +240,7 @@ const persistAppSettings = async () => {
       budget_total: normalizedBudgetTotal,
       budget_used_adjustment: normalizedBudgetUsedAdjustment,
       budget_forecast_method: normalizedBudgetForecastMethod,
+      budget_forecast_display: normalizedBudgetForecastDisplay,
       budget_cycle_enabled: budgetCycleEnabled.value,
       budget_cycle_mode: normalizedBudgetCycleMode,
       budget_refresh_time: budgetRefreshTime.value || '00:00',
@@ -229,6 +250,7 @@ const persistAppSettings = async () => {
       budget_total_codex: normalizedBudgetTotalCodex,
       budget_used_adjustment_codex: normalizedBudgetUsedAdjustmentCodex,
       budget_forecast_method_codex: normalizedBudgetForecastMethodCodex,
+      budget_forecast_display_codex: normalizedBudgetForecastDisplayCodex,
       budget_cycle_enabled_codex: budgetCycleEnabledCodex.value,
       budget_cycle_mode_codex: normalizedBudgetCycleModeCodex,
       budget_refresh_time_codex: budgetRefreshTimeCodex.value || '00:00',
@@ -258,6 +280,7 @@ const persistAppSettings = async () => {
     localStorage.setItem('app-settings-budgetTotal', String(budgetTotal.value))
     localStorage.setItem('app-settings-budgetUsedAdjustment', String(budgetUsedAdjustment.value))
     localStorage.setItem('app-settings-budgetForecastMethod', budgetForecastMethod.value)
+    localStorage.setItem('app-settings-budgetForecastDisplay', budgetForecastDisplay.value)
     localStorage.setItem('app-settings-budgetCycleEnabled', String(budgetCycleEnabled.value))
     localStorage.setItem('app-settings-budgetCycleMode', budgetCycleMode.value)
     localStorage.setItem('app-settings-budgetRefreshTime', budgetRefreshTime.value)
@@ -267,6 +290,7 @@ const persistAppSettings = async () => {
     localStorage.setItem('app-settings-budgetTotalCodex', String(budgetTotalCodex.value))
     localStorage.setItem('app-settings-budgetUsedAdjustmentCodex', String(budgetUsedAdjustmentCodex.value))
     localStorage.setItem('app-settings-budgetForecastMethodCodex', budgetForecastMethodCodex.value)
+    localStorage.setItem('app-settings-budgetForecastDisplayCodex', budgetForecastDisplayCodex.value)
     localStorage.setItem('app-settings-budgetCycleEnabledCodex', String(budgetCycleEnabledCodex.value))
     localStorage.setItem('app-settings-budgetCycleModeCodex', budgetCycleModeCodex.value)
     localStorage.setItem('app-settings-budgetRefreshTimeCodex', budgetRefreshTimeCodex.value)
@@ -725,6 +749,19 @@ onMounted(async () => {
               <span></span>
             </label>
           </ListItem>
+          <ListItem :label="$t('components.general.label.budgetForecastDisplay')">
+            <div class="toggle-with-hint">
+              <select
+                v-model="budgetForecastDisplay"
+                :disabled="settingsLoading || saveBusy || !budgetShowForecast"
+                class="mac-select budget-select"
+                @change="persistAppSettings">
+                <option value="datetime">{{ $t('components.general.label.budgetForecastDisplayDatetime') }}</option>
+                <option value="remaining">{{ $t('components.general.label.budgetForecastDisplayRemaining') }}</option>
+              </select>
+              <span class="hint-text">{{ $t('components.general.label.budgetForecastDisplayHint') }}</span>
+            </div>
+          </ListItem>
           <ListItem :label="$t('components.general.label.budgetForecastMethod')">
             <div class="toggle-with-hint">
               <select
@@ -850,6 +887,19 @@ onMounted(async () => {
               />
               <span></span>
             </label>
+          </ListItem>
+          <ListItem :label="$t('components.general.label.budgetForecastDisplay')">
+            <div class="toggle-with-hint">
+              <select
+                v-model="budgetForecastDisplayCodex"
+                :disabled="settingsLoading || saveBusy || !budgetShowForecastCodex"
+                class="mac-select budget-select"
+                @change="persistAppSettings">
+                <option value="datetime">{{ $t('components.general.label.budgetForecastDisplayDatetime') }}</option>
+                <option value="remaining">{{ $t('components.general.label.budgetForecastDisplayRemaining') }}</option>
+              </select>
+              <span class="hint-text">{{ $t('components.general.label.budgetForecastDisplayHint') }}</span>
+            </div>
           </ListItem>
           <ListItem :label="$t('components.general.label.budgetForecastMethod')">
             <div class="toggle-with-hint">
