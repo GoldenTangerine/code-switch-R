@@ -3,6 +3,13 @@ const THEME_KEY = 'theme'
 
 export type ThemeMode = 'light' | 'dark' | 'systemdefault'
 
+const normalizeThemeMode = (value: string | null): ThemeMode => {
+  if (value === 'light' || value === 'dark' || value === 'systemdefault') {
+    return value
+  }
+  return 'systemdefault'
+}
+
 export function applyTheme(mode: ThemeMode) {
   let resolvedTheme = mode
   if (mode === 'systemdefault') {
@@ -14,7 +21,7 @@ export function applyTheme(mode: ThemeMode) {
 }
 
 export function initTheme() {
-  const savedTheme = (localStorage.getItem(THEME_KEY) || 'systemdefault') as ThemeMode
+  const savedTheme = normalizeThemeMode(localStorage.getItem(THEME_KEY))
   applyTheme(savedTheme)
 
   // 监听系统变化，仅在 systemdefault 时响应
@@ -24,6 +31,12 @@ export function initTheme() {
       applyTheme('systemdefault')
     }
   })
+
+  // 同步其他窗口主题变化（托盘弹窗等）
+  window.addEventListener('storage', (event) => {
+    if (event.key && event.key !== THEME_KEY) return
+    applyTheme(normalizeThemeMode(event.newValue))
+  })
 }
 
 export function setTheme(mode: ThemeMode) {
@@ -32,5 +45,5 @@ export function setTheme(mode: ThemeMode) {
 }
 
 export function getCurrentTheme(): ThemeMode {
-  return (localStorage.getItem(THEME_KEY) || 'systemdefault') as ThemeMode
+  return normalizeThemeMode(localStorage.getItem(THEME_KEY))
 }
