@@ -603,7 +603,10 @@ onUnmounted(() => {
 }
 
 :global(.dark) .tray-panel {
-  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.45);
+  background: rgba(28, 30, 36, 0.94);
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(10px);
 }
 
 :global(.dark) .tray-header {
