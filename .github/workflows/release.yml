@@ -489,7 +489,7 @@ jobs:
             lines.append(f"[完整对比](https://github.com/{repo}/compare/{prev_tag}...{current_tag})")
 
           with open("/tmp/auto_highlights.md", "w", encoding="utf-8", newline="\n") as f:
-            f.write("\\n".join(lines).rstrip() + "\\n")
+            f.write("\n".join(lines).rstrip() + "\n")
           print("Generated /tmp/auto_highlights.md:")
           print(open("/tmp/auto_highlights.md", "r", encoding="utf-8").read())
           PY
