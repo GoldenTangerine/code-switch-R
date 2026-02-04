@@ -321,6 +321,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -402,14 +405,106 @@ jobs:
           VERSION=${GITHUB_REF#refs/tags/v}
           echo "Generating release body for v$VERSION"
 
+          # 自动汇总上一个 tag 到当前 tag 的提交记录，生成「更新亮点」
+          git fetch --tags --force
+          CURRENT_TAG="${{ github.ref_name }}"
+          PREV_TAG=$(git tag --sort=-v:refname | awk -v cur="$CURRENT_TAG" '$0==cur{found=1;next}found{print;exit}')
+          echo "Current tag: $CURRENT_TAG"
+          echo "Previous tag: ${PREV_TAG:-<none>}"
+
+          export CURRENT_TAG PREV_TAG
+          python3 - <<'PY'
+          import os
+          import re
+          import subprocess
+
+          current_tag = os.environ.get("CURRENT_TAG", "").strip()
+          prev_tag = os.environ.get("PREV_TAG", "").strip()
+          repo = os.environ.get("GITHUB_REPOSITORY", "").strip()
+
+          def git(*args: str) -> str:
+            return subprocess.check_output(["git", *args], text=True)
+
+          commit_range = f"{prev_tag}..{current_tag}" if prev_tag else current_tag
+
+          try:
+            raw = git("log", "--no-merges", "--pretty=format:%s", commit_range)
+          except Exception:
+            raw = ""
+
+          subjects = [s.strip() for s in raw.splitlines() if s.strip()]
+          subjects = subjects[:80]
+
+          type_re = re.compile(r"(feat|fix|perf|refactor|docs|style|test|build|ci|chore)(?:\\([^)]*\\))?:", re.IGNORECASE)
+
+          def group_key(subject: str) -> str:
+            m = type_re.search(subject)
+            if not m:
+              return "other"
+            t = m.group(1).lower()
+            if t in {"build", "ci", "chore"}:
+              return "engineering"
+            return t
+
+          group_title = {
+            "feat": "新功能",
+            "fix": "修复",
+            "perf": "性能/优化",
+            "refactor": "重构",
+            "style": "UI/样式",
+            "docs": "文档",
+            "test": "测试",
+            "engineering": "工程",
+            "other": "其他",
+          }
+          group_order = ["feat", "fix", "perf", "refactor", "style", "docs", "test", "engineering", "other"]
+
+          groups: dict[str, list[str]] = {k: [] for k in group_title.keys()}
+          for s in subjects:
+            groups[group_key(s)].append(s)
+
+          lines: list[str] = []
+          lines.append("## 更新亮点（自动汇总）")
+          if prev_tag:
+            lines.append(f"> 范围：{prev_tag}..{current_tag}（共 {len(subjects)} 个提交）")
+          else:
+            lines.append(f"> 范围：{current_tag}（共 {len(subjects)} 个提交）")
+
+          if not subjects:
+            lines.append("- 本次没有可汇总的提交记录（可能都是 merge commit）")
+          else:
+            for k in group_order:
+              items = groups.get(k) or []
+              if not items:
+                continue
+              lines.append("")
+              lines.append(f"### {group_title[k]}")
+              for item in items[:12]:
+                lines.append(f"- {item}")
+              if len(items) > 12:
+                lines.append(f"- … 以及另外 {len(items) - 12} 条提交")
+
+          if repo and prev_tag:
+            lines.append("")
+            lines.append(f"[完整对比](https://github.com/{repo}/compare/{prev_tag}...{current_tag})")
+
+          with open("/tmp/auto_highlights.md", "w", encoding="utf-8", newline="\\n") as f:
+            f.write("\\n".join(lines).rstrip() + "\\n")
+          print("Generated /tmp/auto_highlights.md:")
+          print(open("/tmp/auto_highlights.md", "r", encoding="utf-8").read())
+          PY
+
           # 提取当前版本的更新内容（从标题到下一个版本标题之前）
           # 注意：先用 tr 去除 Windows CRLF 换行符，否则 awk 匹配失败
           tr -d '\r' < RELEASE_NOTES.md | awk "/^# Code Switch v$VERSION/,/^# Code Switch v[0-9]/" | head -n -1 > /tmp/version_notes.md
 
           # 如果没找到版本说明，使用默认内容
           if [ ! -s /tmp/version_notes.md ]; then
-            echo "## 更新亮点" > /tmp/version_notes.md
-            echo "- 请查看提交历史了解详细更新" >> /tmp/version_notes.md
+            cp /tmp/auto_highlights.md /tmp/version_notes.md
+          else
+            # 如果找到了版本说明，也把自动汇总的「更新亮点」追加进去，方便快速回顾
+            echo "" >> /tmp/version_notes.md
+            cat /tmp/auto_highlights.md >> /tmp/version_notes.md
           fi
 
           # 组合完整的 release body
