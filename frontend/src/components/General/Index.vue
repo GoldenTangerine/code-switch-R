@@ -13,6 +13,7 @@ import { getBlacklistSettings, updateBlacklistSettings, getLevelBlacklistEnabled
 import { fetchConfigImportStatus, importFromPath, type ConfigImportStatus } from '../../services/configImport'
 import { useI18n } from 'vue-i18n'
 import { extractErrorMessage } from '../../utils/error'
+import { showToast } from '../../utils/toast'
 
 const { t } = useI18n()
 
@@ -441,10 +442,13 @@ const saveBlacklistSettings = async () => {
   blacklistSaving.value = true
   try {
     await updateBlacklistSettings(blacklistThreshold.value, blacklistDurationSeconds.value)
-    alert('拉黑配置已保存')
+    showToast(t('components.general.toast.blacklistSaveSuccess'), 'success')
   } catch (error) {
     console.error('failed to save blacklist settings', error)
-    alert('保存失败：' + (error as Error).message)
+    showToast(
+      t('components.general.toast.blacklistSaveFailed', { error: extractErrorMessage(error) }),
+      'error'
+    )
   } finally {
     blacklistSaving.value = false
   }

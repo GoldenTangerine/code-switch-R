@@ -495,7 +495,11 @@
         "cache": "Cache reads",
         "cacheHint": "Read hits across responses",
         "costHint": "24h total cost",
-        "todayScope": "Today · {date}"
+        "todayScope": "Today · {date}",
+        "yearScope": "Year · {year}",
+        "monthScope": "Month · {month}",
+        "dayScope": "Day · {date}",
+        "rangeScope": "Range · {start} ~ {end}"
       },
       "table": {
         "time": "Time",
@@ -521,12 +525,30 @@
       "back": "Back to home",
       "nextRefresh": "Next refresh in {seconds}s",
       "query": "Query",
+      "storage": {
+        "title": "Log storage",
+        "refresh": "Refresh",
+        "db": "Database",
+        "used": "Used",
+        "free": "Reclaimable",
+        "wal": "WAL",
+        "rows": "{count} rows",
+        "requestLog": "Request details",
+        "stats": "Aggregated stats",
+        "clearRequestLog": "Clear details",
+        "clearStats": "Clear stats",
+        "clearing": "Clearing...",
+        "confirmClearRequestLog": "Clear all request detail logs? (Aggregated stats will be kept)",
+        "confirmClearStats": "Clear all aggregated stats? (Request detail logs will be kept)",
+        "success": "Cleared",
+        "failed": "Failed to clear: {error}"
+      },
       "costDetail": {
-        "title": "Today's Cost Breakdown",
-        "empty": "No cost records today"
+        "title": "Cost breakdown",
+        "empty": "No cost records"
       },
       "tokenDetail": {
-        "title": "Today's Token Breakdown"
+        "title": "Token breakdown"
       }
     },
     "general": {
@@ -617,6 +639,10 @@
         "authorized": "Auth",
         "go_authorized": "Auth now",
         "back": "Back to home"
+      },
+      "toast": {
+        "blacklistSaveSuccess": "Blacklist settings saved",
+        "blacklistSaveFailed": "Failed to save blacklist settings: {error}"
       },
       "update": {
         "checkFailed": "Check failed {count} times in a row",

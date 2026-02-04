@@ -69,6 +69,69 @@
       </div>
     </form>
 
+    <section class="logs-storage" v-if="storageStats">
+      <div class="logs-storage-header">
+        <div class="logs-storage-title">{{ t('components.logs.storage.title') }}</div>
+        <BaseButton variant="outline" size="sm" :disabled="storageLoading" @click="loadStorageStats">
+          {{ t('components.logs.storage.refresh') }}
+        </BaseButton>
+      </div>
+
+      <div class="mac-panel logs-storage-panel">
+        <div class="logs-storage-db">
+          <div class="logs-storage-db-line">
+            {{ t('components.logs.storage.db') }}：
+            {{ t('components.logs.storage.used') }} {{ formatBytes(storageStats.database.used_bytes) }}
+            /
+            {{ formatBytes(storageStats.database.total_bytes || storageStats.database.file_bytes) }}
+            <span v-if="storageStats.database.free_bytes">
+              （{{ t('components.logs.storage.free') }} {{ formatBytes(storageStats.database.free_bytes) }}）
+            </span>
+            <span v-if="storageStats.database.wal_bytes">
+              · {{ t('components.logs.storage.wal') }} {{ formatBytes(storageStats.database.wal_bytes) }}
+            </span>
+          </div>
+        </div>
+
+        <div class="logs-storage-rows">
+          <div class="logs-storage-row">
+            <div class="logs-storage-name">{{ t('components.logs.storage.requestLog') }}</div>
+            <div class="logs-storage-meta">
+              {{ t('components.logs.storage.rows', { count: storageStats.request_log.rows }) }}
+              · {{ formatBytes(storageStats.request_log.bytes, storageStats.request_log.rows) }}
+            </div>
+            <BaseButton
+              variant="outline"
+              size="sm"
+              :disabled="storageClearing"
+              @click="handleClearRequestLogs"
+            >
+              {{ storageClearing ? t('components.logs.storage.clearing') : t('components.logs.storage.clearRequestLog') }}
+            </BaseButton>
+          </div>
+
+          <div class="logs-storage-row">
+            <div class="logs-storage-name">{{ t('components.logs.storage.stats') }}</div>
+            <div class="logs-storage-meta">
+              {{ t('components.logs.storage.rows', { count: storageStats.stats_hour.rows + storageStats.stats_day.rows }) }}
+              · {{ formatBytes(
+                storageStats.stats_hour.bytes + storageStats.stats_day.bytes,
+                storageStats.stats_hour.rows + storageStats.stats_day.rows,
+              ) }}
+            </div>
+            <BaseButton
+              variant="outline"
+              size="sm"
+              :disabled="storageClearing"
+              @click="handleClearStats"
+            >
+              {{ storageClearing ? t('components.logs.storage.clearing') : t('components.logs.storage.clearStats') }}
+            </BaseButton>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <section class="logs-summary" v-if="statsCards.length">
       <article
         v-for="card in statsCards"
@@ -210,13 +273,17 @@ import BaseModal from '../common/BaseModal.vue'
 import {
   fetchRequestLogs,
   fetchLogProviders,
-  fetchLogStats,
-  fetchProviderDailyStats,
+  fetchLogStatsV2,
+  fetchProviderStatsV2,
+  fetchLogStorageStats,
+  clearRequestLogs,
+  clearLogStats,
   type RequestLog,
   type LogStats,
   type LogStatsSeries,
   type LogPlatform,
   type ProviderDailyStat,
+  type LogStorageStats,
 } from '../../services/logs'
 import {
   Chart,
@@ -229,6 +296,8 @@ import {
 } from 'chart.js'
 import type { ChartOptions } from 'chart.js'
 import { Line } from 'vue-chartjs'
+import { showToast } from '../../utils/toast'
+import { extractErrorMessage } from '../../utils/error'
 
 Chart.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend)
 
@@ -240,6 +309,9 @@ type LogDateFilterType = 'all' | 'year' | 'month' | 'day' | 'range'
 const logs = ref<RequestLog[]>([])
 const stats = ref<LogStats | null>(null)
 const loading = ref(false)
+const storageStats = ref<LogStorageStats | null>(null)
+const storageLoading = ref(false)
+const storageClearing = ref(false)
 const filters = reactive<{
   platform: LogPlatform | ''
   provider: string
@@ -263,6 +335,23 @@ const page = ref(1)
 const PAGE_SIZE = 15
 const providerOptions = ref<string[]>([])
 const statsSeries = computed<LogStatsSeries[]>(() => stats.value?.series ?? [])
+
+const formatBytes = (bytes?: number, rows?: number) => {
+  const value = Number(bytes ?? 0)
+  const count = Number(rows ?? 0)
+  if (!Number.isFinite(value) || value < 0) return '—'
+  if (value === 0 && Number.isFinite(count) && count > 0) return '—'
+  if (value === 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB']
+  let current = value
+  let idx = 0
+  while (current >= 1024 && idx < units.length - 1) {
+    current /= 1024
+    idx++
+  }
+  const digits = idx === 0 ? 0 : current >= 10 ? 1 : 2
+  return `${current.toFixed(digits)} ${units[idx]}`
+}
 
 const toTimeLayout = (date: Date) => {
   const pad = (num: number) => num.toString().padStart(2, '0')
@@ -351,7 +440,14 @@ const openCostDetailModal = async () => {
   costDetailModal.data = []
 
   try {
-    const stats = await fetchProviderDailyStats(filters.platform)
+    const range = computeDateRange()
+    if (range == null) return
+    const stats = await fetchProviderStatsV2({
+      platform: filters.platform,
+      provider: filters.provider,
+      startAt: range.startAt,
+      endAt: range.endAt,
+    })
     // 按金额降序排序，过滤掉金额为 0 的
     costDetailModal.data = (stats ?? [])
       .filter(item => item.cost_total > 0)
@@ -511,10 +607,28 @@ const chartOptions: ChartOptions<'line'> = {
     },
   },
 }
+
+const seriesGranularity = computed<'hour' | 'day'>(() => {
+  const range = computeDateRange()
+  if (!range || (!range.startAt && !range.endAt)) {
+    return 'hour'
+  }
+  const start = parseLogDate(range.startAt)
+  const end = parseLogDate(range.endAt)
+  if (!start || !end) {
+    return filters.dateType === 'day' ? 'hour' : 'day'
+  }
+  const duration = end.getTime() - start.getTime()
+  return duration > 48 * 60 * 60 * 1000 ? 'day' : 'hour'
+})
+
 const formatSeriesLabel = (value?: string) => {
   if (!value) return ''
   const parsed = parseLogDate(value)
   if (parsed) {
+    if (seriesGranularity.value === 'day') {
+      return `${padHour(parsed.getMonth() + 1)}-${padHour(parsed.getDate())}`
+    }
     return `${padHour(parsed.getHours())}:00`
   }
   const match = value.match(/(\d{2}):(\d{2})/)
@@ -592,7 +706,14 @@ const loadLogs = async () => {
 
 const loadStats = async () => {
   try {
-    const data = await fetchLogStats(filters.platform)
+    const range = computeDateRange()
+    if (range == null) return
+    const data = await fetchLogStatsV2({
+      platform: filters.platform,
+      provider: filters.provider,
+      startAt: range.startAt,
+      endAt: range.endAt,
+    })
     stats.value = data ?? null
   } catch (error) {
     console.error('failed to load log stats', error)
@@ -602,6 +723,51 @@ const loadStats = async () => {
 const loadDashboard = async () => {
   await Promise.all([loadLogs(), loadStats(), loadProviderOptions()])
   syncProviderOptionsFromLogs(logs.value)
+}
+
+const loadStorageStats = async () => {
+  storageLoading.value = true
+  try {
+    storageStats.value = await fetchLogStorageStats()
+  } catch (error) {
+    console.error('failed to load log storage stats', error)
+  } finally {
+    storageLoading.value = false
+  }
+}
+
+const handleClearRequestLogs = async () => {
+  if (storageClearing.value) return
+  const ok = confirm(t('components.logs.storage.confirmClearRequestLog'))
+  if (!ok) return
+  storageClearing.value = true
+  try {
+    await clearRequestLogs()
+    showToast(t('components.logs.storage.success'), 'success')
+    await Promise.all([loadStorageStats(), loadDashboard()])
+  } catch (error) {
+    console.error('failed to clear request logs', error)
+    showToast(t('components.logs.storage.failed', { error: extractErrorMessage(error) }), 'error')
+  } finally {
+    storageClearing.value = false
+  }
+}
+
+const handleClearStats = async () => {
+  if (storageClearing.value) return
+  const ok = confirm(t('components.logs.storage.confirmClearStats'))
+  if (!ok) return
+  storageClearing.value = true
+  try {
+    await clearLogStats()
+    showToast(t('components.logs.storage.success'), 'success')
+    await Promise.all([loadStorageStats(), loadDashboard()])
+  } catch (error) {
+    console.error('failed to clear log stats', error)
+    showToast(t('components.logs.storage.failed', { error: extractErrorMessage(error) }), 'error')
+  } finally {
+    storageClearing.value = false
+  }
 }
 
 const pagedLogs = computed(() => {
@@ -742,7 +908,7 @@ const startOfTodayLocal = () => {
 
 const statsCards = computed(() => {
   const data = stats.value
-  const summaryDate = summaryDateLabel.value
+  const scopeHint = summaryScopeHint.value
   const totalTokens =
     (data?.input_tokens ?? 0) + (data?.output_tokens ?? 0) + (data?.reasoning_tokens ?? 0)
   return [
@@ -768,17 +934,40 @@ const statsCards = computed(() => {
     {
       key: 'cost',
       label: t('components.logs.tokenLabels.cost'),
-      hint: summaryDate ? t('components.logs.summary.todayScope', { date: summaryDate }) : '',
+      hint: scopeHint,
       value: formatCurrency(data?.cost_total ?? 0),
     },
   ]
 })
 
-const summaryDateLabel = computed(() => {
-  const firstBucket = statsSeries.value.find((item) => item.day)
-  const parsed = parseLogDate(firstBucket?.day ?? '')
-  const date = parsed ?? startOfTodayLocal()
-  return `${date.getFullYear()}-${padHour(date.getMonth() + 1)}-${padHour(date.getDate())}`
+const summaryScopeHint = computed(() => {
+  switch (filters.dateType) {
+    case 'all': {
+      const today = startOfTodayLocal()
+      const date = `${today.getFullYear()}-${padHour(today.getMonth() + 1)}-${padHour(today.getDate())}`
+      return t('components.logs.summary.todayScope', { date })
+    }
+    case 'year': {
+      const year = filters.year?.trim()
+      return year ? t('components.logs.summary.yearScope', { year }) : ''
+    }
+    case 'month': {
+      const month = filters.month?.trim()
+      return month ? t('components.logs.summary.monthScope', { month }) : ''
+    }
+    case 'day': {
+      const day = filters.day?.trim()
+      return day ? t('components.logs.summary.dayScope', { date: day }) : ''
+    }
+    case 'range': {
+      const start = filters.rangeStart?.trim()
+      const end = filters.rangeEnd?.trim()
+      if (!start || !end) return ''
+      return t('components.logs.summary.rangeScope', { start, end })
+    }
+    default:
+      return ''
+  }
 })
 
 const loadProviderOptions = async () => {
@@ -803,6 +992,7 @@ watch(
 
 onMounted(async () => {
   await loadDashboard()
+  await loadStorageStats()
   startCountdown()
 })
 

@@ -77,8 +77,57 @@ export const fetchLogStats = async (platform: LogPlatform | '' = ''): Promise<Lo
   return Call.ByName('codeswitch/services.LogService.StatsSince', platform)
 }
 
+type LogStatsQuery = {
+  platform?: LogPlatform | ''
+  provider?: string
+  startAt?: string
+  endAt?: string
+}
+
+export const fetchLogStatsV2 = async (query: LogStatsQuery = {}): Promise<LogStats> => {
+  const platform = query.platform ?? ''
+  const provider = query.provider ?? ''
+  const startAt = query.startAt ?? ''
+  const endAt = query.endAt ?? ''
+  return Call.ByName('codeswitch/services.LogService.StatsRangeV2', platform, provider, startAt, endAt)
+}
+
 export const fetchCostSince = async (start: string, platform: LogPlatform | '' = ''): Promise<number> => {
   return Call.ByName('codeswitch/services.LogService.CostSince', start, platform)
+}
+
+export type LogTableStorageStat = {
+  name: string
+  rows: number
+  bytes: number
+}
+
+export type LogDatabaseStorageStat = {
+  file_bytes: number
+  wal_bytes: number
+  shm_bytes: number
+  total_bytes: number
+  used_bytes: number
+  free_bytes: number
+}
+
+export type LogStorageStats = {
+  database: LogDatabaseStorageStat
+  request_log: LogTableStorageStat
+  stats_hour: LogTableStorageStat
+  stats_day: LogTableStorageStat
+}
+
+export const fetchLogStorageStats = async (): Promise<LogStorageStats> => {
+  return Call.ByName('codeswitch/services.LogService.GetLogStorageStats')
+}
+
+export const clearRequestLogs = async (): Promise<void> => {
+  await Call.ByName('codeswitch/services.LogService.ClearRequestLogs')
+}
+
+export const clearLogStats = async (): Promise<void> => {
+  await Call.ByName('codeswitch/services.LogService.ClearLogStats')
 }
 
 export type ProviderDailyStat = {
@@ -99,6 +148,23 @@ export const fetchProviderDailyStats = async (
   platform: LogPlatform | '' = '',
 ): Promise<ProviderDailyStat[]> => {
   return Call.ByName('codeswitch/services.LogService.ProviderDailyStats', platform)
+}
+
+type ProviderStatsQuery = {
+  platform?: LogPlatform | ''
+  provider?: string
+  startAt?: string
+  endAt?: string
+}
+
+export const fetchProviderStatsV2 = async (
+  query: ProviderStatsQuery = {},
+): Promise<ProviderDailyStat[]> => {
+  const platform = query.platform ?? ''
+  const provider = query.provider ?? ''
+  const startAt = query.startAt ?? ''
+  const endAt = query.endAt ?? ''
+  return Call.ByName('codeswitch/services.LogService.ProviderStatsRangeV2', platform, provider, startAt, endAt)
 }
 
 export type HeatmapStat = {

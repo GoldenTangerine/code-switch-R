@@ -496,7 +496,11 @@
         "cache": "缓存命中",
         "cacheHint": "响应中的读取命中数",
         "costHint": "近 24 小时总花费",
-        "todayScope": "今日 · {date}"
+        "todayScope": "今日 · {date}",
+        "yearScope": "年份 · {year}",
+        "monthScope": "月份 · {month}",
+        "dayScope": "日期 · {date}",
+        "rangeScope": "时间段 · {start} ~ {end}"
       },
       "table": {
         "time": "时间",
@@ -522,12 +526,30 @@
       "back": "返回主页",
       "nextRefresh": "距离下次刷新 {seconds}s",
       "query": "查询",
+      "storage": {
+        "title": "日志存储",
+        "refresh": "刷新",
+        "db": "数据库",
+        "used": "已占用",
+        "free": "可回收",
+        "wal": "WAL",
+        "rows": "{count} 条",
+        "requestLog": "请求明细",
+        "stats": "统计汇总",
+        "clearRequestLog": "清除明细",
+        "clearStats": "清除统计",
+        "clearing": "清理中...",
+        "confirmClearRequestLog": "确认清除所有请求明细日志？（统计汇总不会被清除）",
+        "confirmClearStats": "确认清除所有统计汇总数据？（请求明细不会被清除）",
+        "success": "清理完成",
+        "failed": "清理失败：{error}"
+      },
       "costDetail": {
-        "title": "今日消费明细",
-        "empty": "今日暂无消费记录"
+        "title": "消费明细",
+        "empty": "暂无消费记录"
       },
       "tokenDetail": {
-        "title": "今日 Token 明细"
+        "title": "Token 明细"
       }
     },
     "general": {
@@ -618,6 +640,10 @@
         "authorized": "已授权",
         "go_authorized": "去授权",
         "back": "返回首页"
+      },
+      "toast": {
+        "blacklistSaveSuccess": "拉黑配置保存成功",
+        "blacklistSaveFailed": "拉黑配置保存失败：{error}"
       },
       "update": {
         "checkFailed": "连续 {count} 次检查失败",

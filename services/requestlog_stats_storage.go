@@ -1,0 +1,466 @@
+package services
+
+import (
+	"database/sql"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	modelpricing "codeswitch/resources/model-pricing"
+
+	"github.com/daodao97/xgo/xdb"
+)
+
+const (
+	requestLogStatsHourlyTable = "request_log_stats_hourly"
+	requestLogStatsDailyTable  = "request_log_stats_daily"
+
+	requestLogStatsMigrationKey = "request_log_stats_v1_backfill"
+)
+
+type requestLogStatsAgg struct {
+	BucketStart        string
+	Platform           string
+	Provider           string
+	TotalRequests      int64
+	SuccessfulRequests int64
+	FailedRequests     int64
+	InputTokens        int64
+	OutputTokens       int64
+	ReasoningTokens    int64
+	CacheCreateTokens  int64
+	CacheReadTokens    int64
+	TotalCost          float64
+}
+
+func ensureRequestLogStatsStorageWithDB(db *sql.DB) error {
+	if db == nil {
+		return fmt.Errorf("nil db")
+	}
+
+	if err := ensureRequestLogStatsTablesWithDB(db); err != nil {
+		return err
+	}
+	if err := ensureRequestLogStatsTriggersWithDB(db); err != nil {
+		return err
+	}
+
+	// 仅首次升级时做一次 backfill，避免用户清空统计后重启又被“自动复活”
+	if err := ensureSchemaMigrationsTable(db); err != nil {
+		return err
+	}
+	applied, err := isSchemaMigrationApplied(db, requestLogStatsMigrationKey)
+	if err != nil {
+		return err
+	}
+	if applied {
+		return nil
+	}
+
+	if err := backfillRequestLogStatsWithDB(db); err != nil {
+		return err
+	}
+	if err := markSchemaMigrationApplied(db, requestLogStatsMigrationKey, time.Now().Format(timeLayout)); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func ensureRequestLogStatsTablesWithDB(db *sql.DB) error {
+	createHourly := fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (
+		bucket_start TEXT NOT NULL,
+		platform TEXT NOT NULL DEFAULT '',
+		provider TEXT NOT NULL DEFAULT '',
+		total_requests INTEGER NOT NULL DEFAULT 0,
+		successful_requests INTEGER NOT NULL DEFAULT 0,
+		failed_requests INTEGER NOT NULL DEFAULT 0,
+		input_tokens INTEGER NOT NULL DEFAULT 0,
+		output_tokens INTEGER NOT NULL DEFAULT 0,
+		reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+		cache_create_tokens INTEGER NOT NULL DEFAULT 0,
+		cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+		total_cost REAL NOT NULL DEFAULT 0,
+		PRIMARY KEY (bucket_start, platform, provider)
+	) WITHOUT ROWID`, requestLogStatsHourlyTable)
+
+	if _, err := db.Exec(createHourly); err != nil {
+		return err
+	}
+
+	createDaily := fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (
+		bucket_start TEXT NOT NULL,
+		platform TEXT NOT NULL DEFAULT '',
+		provider TEXT NOT NULL DEFAULT '',
+		total_requests INTEGER NOT NULL DEFAULT 0,
+		successful_requests INTEGER NOT NULL DEFAULT 0,
+		failed_requests INTEGER NOT NULL DEFAULT 0,
+		input_tokens INTEGER NOT NULL DEFAULT 0,
+		output_tokens INTEGER NOT NULL DEFAULT 0,
+		reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+		cache_create_tokens INTEGER NOT NULL DEFAULT 0,
+		cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+		total_cost REAL NOT NULL DEFAULT 0,
+		PRIMARY KEY (bucket_start, platform, provider)
+	) WITHOUT ROWID`, requestLogStatsDailyTable)
+
+	if _, err := db.Exec(createDaily); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func ensureRequestLogStatsTriggersWithDB(db *sql.DB) error {
+	// 说明：
+	// - request_log.created_at 使用 SQLite CURRENT_TIMESTAMP（UTC），这里用 localtime 转成本地日历桶
+	// - 统计表的 bucket_start 统一存储本地时间字符串（timeLayout），便于按本地日期范围直接筛选
+	createHourlyTrigger := fmt.Sprintf(`
+CREATE TRIGGER IF NOT EXISTS request_log_stats_hourly_ai
+AFTER INSERT ON request_log
+BEGIN
+  INSERT INTO %s (
+    bucket_start, platform, provider,
+    total_requests, successful_requests, failed_requests,
+    input_tokens, output_tokens, reasoning_tokens, cache_create_tokens, cache_read_tokens,
+    total_cost
+  ) VALUES (
+    strftime('%%Y-%%m-%%d %%H:00:00', datetime(NEW.created_at, 'localtime')),
+    COALESCE(NEW.platform, ''),
+    COALESCE(NEW.provider, ''),
+    1,
+    CASE WHEN COALESCE(NEW.http_code, 0) >= 200 AND COALESCE(NEW.http_code, 0) < 300 THEN 1 ELSE 0 END,
+    CASE WHEN COALESCE(NEW.http_code, 0) >= 200 AND COALESCE(NEW.http_code, 0) < 300 THEN 0 ELSE 1 END,
+    COALESCE(NEW.input_tokens, 0),
+    COALESCE(NEW.output_tokens, 0),
+    COALESCE(NEW.reasoning_tokens, 0),
+    COALESCE(NEW.cache_create_tokens, 0),
+    COALESCE(NEW.cache_read_tokens, 0),
+    COALESCE(NEW.total_cost, 0)
+  )
+  ON CONFLICT(bucket_start, platform, provider) DO UPDATE SET
+    total_requests = total_requests + 1,
+    successful_requests = successful_requests + excluded.successful_requests,
+    failed_requests = failed_requests + excluded.failed_requests,
+    input_tokens = input_tokens + excluded.input_tokens,
+    output_tokens = output_tokens + excluded.output_tokens,
+    reasoning_tokens = reasoning_tokens + excluded.reasoning_tokens,
+    cache_create_tokens = cache_create_tokens + excluded.cache_create_tokens,
+    cache_read_tokens = cache_read_tokens + excluded.cache_read_tokens,
+    total_cost = total_cost + excluded.total_cost;
+END;`, requestLogStatsHourlyTable)
+
+	if _, err := db.Exec(createHourlyTrigger); err != nil {
+		return err
+	}
+
+	createDailyTrigger := fmt.Sprintf(`
+CREATE TRIGGER IF NOT EXISTS request_log_stats_daily_ai
+AFTER INSERT ON request_log
+BEGIN
+  INSERT INTO %s (
+    bucket_start, platform, provider,
+    total_requests, successful_requests, failed_requests,
+    input_tokens, output_tokens, reasoning_tokens, cache_create_tokens, cache_read_tokens,
+    total_cost
+  ) VALUES (
+    strftime('%%Y-%%m-%%d 00:00:00', datetime(NEW.created_at, 'localtime')),
+    COALESCE(NEW.platform, ''),
+    COALESCE(NEW.provider, ''),
+    1,
+    CASE WHEN COALESCE(NEW.http_code, 0) >= 200 AND COALESCE(NEW.http_code, 0) < 300 THEN 1 ELSE 0 END,
+    CASE WHEN COALESCE(NEW.http_code, 0) >= 200 AND COALESCE(NEW.http_code, 0) < 300 THEN 0 ELSE 1 END,
+    COALESCE(NEW.input_tokens, 0),
+    COALESCE(NEW.output_tokens, 0),
+    COALESCE(NEW.reasoning_tokens, 0),
+    COALESCE(NEW.cache_create_tokens, 0),
+    COALESCE(NEW.cache_read_tokens, 0),
+    COALESCE(NEW.total_cost, 0)
+  )
+  ON CONFLICT(bucket_start, platform, provider) DO UPDATE SET
+    total_requests = total_requests + 1,
+    successful_requests = successful_requests + excluded.successful_requests,
+    failed_requests = failed_requests + excluded.failed_requests,
+    input_tokens = input_tokens + excluded.input_tokens,
+    output_tokens = output_tokens + excluded.output_tokens,
+    reasoning_tokens = reasoning_tokens + excluded.reasoning_tokens,
+    cache_create_tokens = cache_create_tokens + excluded.cache_create_tokens,
+    cache_read_tokens = cache_read_tokens + excluded.cache_read_tokens,
+    total_cost = total_cost + excluded.total_cost;
+END;`, requestLogStatsDailyTable)
+
+	if _, err := db.Exec(createDailyTrigger); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func ensureSchemaMigrationsTable(db *sql.DB) error {
+	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
+		key TEXT PRIMARY KEY,
+		value TEXT
+	)`)
+	return err
+}
+
+func isSchemaMigrationApplied(db *sql.DB, key string) (bool, error) {
+	var value string
+	err := db.QueryRow("SELECT value FROM schema_migrations WHERE key = ? LIMIT 1", key).Scan(&value)
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return false, err
+}
+
+func markSchemaMigrationApplied(db *sql.DB, key string, value string) error {
+	_, err := db.Exec("INSERT OR REPLACE INTO schema_migrations (key, value) VALUES (?, ?)", key, value)
+	return err
+}
+
+func backfillRequestLogStatsWithDB(db *sql.DB) error {
+	if db == nil {
+		return fmt.Errorf("nil db")
+	}
+
+	pricing, err := modelpricing.DefaultService()
+	if err != nil {
+		// 定价服务失败不应阻塞启动：继续 backfill，但费用将为 0
+		pricing = nil
+	}
+
+	model := xdb.New("request_log")
+
+	const batchSize = 5000
+	lastID := int64(0)
+
+	hourlyUpsert := fmt.Sprintf(`
+INSERT INTO %s (
+  bucket_start, platform, provider,
+  total_requests, successful_requests, failed_requests,
+  input_tokens, output_tokens, reasoning_tokens, cache_create_tokens, cache_read_tokens,
+  total_cost
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(bucket_start, platform, provider) DO UPDATE SET
+  total_requests = total_requests + excluded.total_requests,
+  successful_requests = successful_requests + excluded.successful_requests,
+  failed_requests = failed_requests + excluded.failed_requests,
+  input_tokens = input_tokens + excluded.input_tokens,
+  output_tokens = output_tokens + excluded.output_tokens,
+  reasoning_tokens = reasoning_tokens + excluded.reasoning_tokens,
+  cache_create_tokens = cache_create_tokens + excluded.cache_create_tokens,
+  cache_read_tokens = cache_read_tokens + excluded.cache_read_tokens,
+  total_cost = total_cost + excluded.total_cost
+`, requestLogStatsHourlyTable)
+
+	dailyUpsert := fmt.Sprintf(`
+INSERT INTO %s (
+  bucket_start, platform, provider,
+  total_requests, successful_requests, failed_requests,
+  input_tokens, output_tokens, reasoning_tokens, cache_create_tokens, cache_read_tokens,
+  total_cost
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(bucket_start, platform, provider) DO UPDATE SET
+  total_requests = total_requests + excluded.total_requests,
+  successful_requests = successful_requests + excluded.successful_requests,
+  failed_requests = failed_requests + excluded.failed_requests,
+  input_tokens = input_tokens + excluded.input_tokens,
+  output_tokens = output_tokens + excluded.output_tokens,
+  reasoning_tokens = reasoning_tokens + excluded.reasoning_tokens,
+  cache_create_tokens = cache_create_tokens + excluded.cache_create_tokens,
+  cache_read_tokens = cache_read_tokens + excluded.cache_read_tokens,
+  total_cost = total_cost + excluded.total_cost
+`, requestLogStatsDailyTable)
+
+	for {
+		records, err := model.Selects(
+			xdb.WhereGt("id", lastID),
+			xdb.OrderByAsc("id"),
+			xdb.Limit(batchSize),
+			xdb.Field(
+				"id",
+				"platform",
+				"provider",
+				"model",
+				"http_code",
+				"input_tokens",
+				"output_tokens",
+				"reasoning_tokens",
+				"cache_create_tokens",
+				"cache_read_tokens",
+				"created_at",
+			),
+		)
+		if err != nil {
+			if errors.Is(err, xdb.ErrNotFound) || isNoSuchTableErr(err) {
+				return nil
+			}
+			return err
+		}
+		if len(records) == 0 {
+			return nil
+		}
+
+		hourly := map[string]*requestLogStatsAgg{}
+		daily := map[string]*requestLogStatsAgg{}
+
+		for _, record := range records {
+			id := record.GetInt64("id")
+			if id > lastID {
+				lastID = id
+			}
+
+			platform := strings.TrimSpace(record.GetString("platform"))
+			provider := strings.TrimSpace(record.GetString("provider"))
+
+			createdAtLocal, _ := parseCreatedAt(record)
+			if createdAtLocal.IsZero() {
+				continue
+			}
+			hourBucket := startOfHour(createdAtLocal).Format(timeLayout)
+			dayBucket := startOfDay(createdAtLocal).Format(timeLayout)
+
+			input := record.GetInt("input_tokens")
+			output := record.GetInt("output_tokens")
+			reasoning := record.GetInt("reasoning_tokens")
+			cacheCreate := record.GetInt("cache_create_tokens")
+			cacheRead := record.GetInt("cache_read_tokens")
+
+			totalCost := 0.0
+			if pricing != nil {
+				usage := modelpricing.UsageSnapshot{
+					InputTokens:       input,
+					OutputTokens:      output,
+					ReasoningTokens:   reasoning,
+					CacheCreateTokens: cacheCreate,
+					CacheReadTokens:   cacheRead,
+				}
+				cost := pricing.CalculateCost(record.GetString("model"), usage)
+				totalCost = cost.TotalCost
+			}
+
+			httpCode := record.GetInt("http_code")
+			success := int64(0)
+			fail := int64(1)
+			if httpCode >= 200 && httpCode < 300 {
+				success = 1
+				fail = 0
+			}
+
+			hourKey := fmt.Sprintf("%s|%s|%s", hourBucket, platform, provider)
+			if agg := hourly[hourKey]; agg != nil {
+				agg.TotalRequests++
+				agg.SuccessfulRequests += success
+				agg.FailedRequests += fail
+				agg.InputTokens += int64(input)
+				agg.OutputTokens += int64(output)
+				agg.ReasoningTokens += int64(reasoning)
+				agg.CacheCreateTokens += int64(cacheCreate)
+				agg.CacheReadTokens += int64(cacheRead)
+				agg.TotalCost += totalCost
+			} else {
+				hourly[hourKey] = &requestLogStatsAgg{
+					BucketStart:        hourBucket,
+					Platform:           platform,
+					Provider:           provider,
+					TotalRequests:      1,
+					SuccessfulRequests: success,
+					FailedRequests:     fail,
+					InputTokens:        int64(input),
+					OutputTokens:       int64(output),
+					ReasoningTokens:    int64(reasoning),
+					CacheCreateTokens:  int64(cacheCreate),
+					CacheReadTokens:    int64(cacheRead),
+					TotalCost:          totalCost,
+				}
+			}
+
+			dayKey := fmt.Sprintf("%s|%s|%s", dayBucket, platform, provider)
+			if agg := daily[dayKey]; agg != nil {
+				agg.TotalRequests++
+				agg.SuccessfulRequests += success
+				agg.FailedRequests += fail
+				agg.InputTokens += int64(input)
+				agg.OutputTokens += int64(output)
+				agg.ReasoningTokens += int64(reasoning)
+				agg.CacheCreateTokens += int64(cacheCreate)
+				agg.CacheReadTokens += int64(cacheRead)
+				agg.TotalCost += totalCost
+			} else {
+				daily[dayKey] = &requestLogStatsAgg{
+					BucketStart:        dayBucket,
+					Platform:           platform,
+					Provider:           provider,
+					TotalRequests:      1,
+					SuccessfulRequests: success,
+					FailedRequests:     fail,
+					InputTokens:        int64(input),
+					OutputTokens:       int64(output),
+					ReasoningTokens:    int64(reasoning),
+					CacheCreateTokens:  int64(cacheCreate),
+					CacheReadTokens:    int64(cacheRead),
+					TotalCost:          totalCost,
+				}
+			}
+		}
+
+		tx, err := db.Begin()
+		if err != nil {
+			return err
+		}
+		rollback := true
+		defer func() {
+			if rollback {
+				_ = tx.Rollback()
+			}
+		}()
+
+		for _, agg := range hourly {
+			if _, err := tx.Exec(
+				hourlyUpsert,
+				agg.BucketStart,
+				agg.Platform,
+				agg.Provider,
+				agg.TotalRequests,
+				agg.SuccessfulRequests,
+				agg.FailedRequests,
+				agg.InputTokens,
+				agg.OutputTokens,
+				agg.ReasoningTokens,
+				agg.CacheCreateTokens,
+				agg.CacheReadTokens,
+				agg.TotalCost,
+			); err != nil {
+				return err
+			}
+		}
+		for _, agg := range daily {
+			if _, err := tx.Exec(
+				dailyUpsert,
+				agg.BucketStart,
+				agg.Platform,
+				agg.Provider,
+				agg.TotalRequests,
+				agg.SuccessfulRequests,
+				agg.FailedRequests,
+				agg.InputTokens,
+				agg.OutputTokens,
+				agg.ReasoningTokens,
+				agg.CacheCreateTokens,
+				agg.CacheReadTokens,
+				agg.TotalCost,
+			); err != nil {
+				return err
+			}
+		}
+
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+		rollback = false
+	}
+}

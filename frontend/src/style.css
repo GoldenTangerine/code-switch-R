@@ -860,16 +860,16 @@ html.dark .mac-sidebar-item:hover {
 
 .logs-filter-row {
   display: flex;
-  gap: 20px;
-  align-items: flex-end;
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: 14px;
+  align-items: stretch;
 }
 
 .logs-filter-row .filter-fields {
   flex: 1;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 16px;
 }
 
 .logs-filter-row .filter-field {
@@ -905,6 +905,71 @@ html.dark .mac-sidebar-item:hover {
   padding-inline: 18px;
   display: inline-flex;
   align-items: center;
+}
+
+.logs-storage {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.logs-storage-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.logs-storage-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--mac-text);
+}
+
+.logs-storage-panel {
+  padding: 14px 16px;
+}
+
+.logs-storage-db-line {
+  font-size: 0.9rem;
+  color: var(--mac-text-secondary);
+}
+
+.logs-storage-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.logs-storage-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.logs-storage-name {
+  font-weight: 500;
+  color: var(--mac-text);
+}
+
+.logs-storage-meta {
+  flex: 1;
+  text-align: right;
+  color: var(--mac-text-secondary);
+  font-size: 0.9rem;
+}
+
+.logs-storage-row button {
+  white-space: nowrap;
+}
+
+@media (max-width: 768px) {
+  .logs-filter-row .filter-fields {
+    grid-template-columns: 1fr;
+  }
 }
 
 .logs-table-wrapper {
