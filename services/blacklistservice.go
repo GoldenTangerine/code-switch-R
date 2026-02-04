@@ -189,13 +189,13 @@ func (bs *BlacklistService) RecordFailure(platform string, providerName string) 
 	// 如果功能关闭，使用旧的固定拉黑模式
 	if !levelConfig.EnableLevelBlacklist {
 		// 从数据库读取配置（优先使用数据库配置而非默认值）
-		threshold, duration, err := bs.settingsService.GetBlacklistSettings()
+		threshold, durationSeconds, err := bs.settingsService.GetBlacklistSettings()
 		if err != nil {
 			log.Printf("⚠️  获取数据库拉黑配置失败: %v，使用默认值", err)
 			threshold = levelConfig.FailureThreshold
-			duration = levelConfig.FallbackDurationMinutes
+			durationSeconds = levelConfig.FallbackDurationMinutes * 60
 		}
-		return bs.recordFailureFixedMode(platform, providerName, levelConfig.FallbackMode, duration, threshold)
+		return bs.recordFailureFixedMode(platform, providerName, levelConfig.FallbackMode, durationSeconds, threshold)
 	}
 
 	now := time.Now()
@@ -331,7 +331,7 @@ func (bs *BlacklistService) RecordFailure(platform string, providerName string) 
 }
 
 // recordFailureFixedMode 固定拉黑模式（向后兼容）
-func (bs *BlacklistService) recordFailureFixedMode(platform string, providerName string, fallbackMode string, fallbackDuration int, failureThreshold int) error {
+func (bs *BlacklistService) recordFailureFixedMode(platform string, providerName string, fallbackMode string, fallbackDurationSeconds int, failureThreshold int) error {
 	if fallbackMode == "none" {
 		log.Printf("🚫 Provider %s/%s 失败，但等级拉黑已关闭且 fallbackMode=none，不拉黑", platform, providerName)
 		return nil
@@ -386,7 +386,7 @@ func (bs *BlacklistService) recordFailureFixedMode(platform string, providerName
 	// 检查是否达到拉黑阈值
 	if failureCount >= failureThreshold {
 		blacklistedAt := now
-		blacklistedUntil := now.Add(time.Duration(fallbackDuration) * time.Minute)
+		blacklistedUntil := now.Add(time.Duration(fallbackDurationSeconds) * time.Second)
 
 		err = GlobalDBQueue.Exec(`
 			UPDATE provider_blacklist
@@ -402,8 +402,13 @@ func (bs *BlacklistService) recordFailureFixedMode(platform string, providerName
 			return fmt.Errorf("更新拉黑状态失败: %w", err)
 		}
 
-		log.Printf("⛔ Provider %s/%s 已拉黑 %d 分钟（固定模式，失败 %d 次），过期时间: %s",
-			platform, providerName, fallbackDuration, failureCount, blacklistedUntil.Format("15:04:05"))
+		if fallbackDurationSeconds < 60 {
+			log.Printf("⛔ Provider %s/%s 已拉黑 %d 秒（固定模式，失败 %d 次），过期时间: %s",
+				platform, providerName, fallbackDurationSeconds, failureCount, blacklistedUntil.Format("15:04:05"))
+		} else {
+			log.Printf("⛔ Provider %s/%s 已拉黑 %d 分钟（固定模式，失败 %d 次），过期时间: %s",
+				platform, providerName, (fallbackDurationSeconds+59)/60, failureCount, blacklistedUntil.Format("15:04:05"))
+		}
 
 	} else {
 		// 更新失败计数

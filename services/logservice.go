@@ -26,7 +26,7 @@ func (ls *LogService) CostSince(start string, platform string) (float64, error) 
 	}
 	model := xdb.New("request_log")
 	options := []xdb.Option{
-		xdb.WhereGte("created_at", startTime.Format(timeLayout)),
+		xdb.WhereGte("created_at", startTime.UTC().Format(timeLayout)),
 		xdb.Field(
 			"model",
 			"input_tokens",
@@ -70,6 +70,10 @@ func NewLogService() *LogService {
 }
 
 func (ls *LogService) ListRequestLogs(platform string, provider string, limit int) ([]ReqeustLog, error) {
+	return ls.ListRequestLogsV2(platform, provider, limit, "", "")
+}
+
+func (ls *LogService) ListRequestLogsV2(platform string, provider string, limit int, startAt string, endAt string) ([]ReqeustLog, error) {
 	if limit <= 0 {
 		limit = 100
 	}
@@ -78,6 +82,7 @@ func (ls *LogService) ListRequestLogs(platform string, provider string, limit in
 	}
 	model := xdb.New("request_log")
 	options := []xdb.Option{
+		xdb.OrderByDesc("created_at"),
 		xdb.OrderByDesc("id"),
 		xdb.Limit(limit),
 	}
@@ -87,12 +92,31 @@ func (ls *LogService) ListRequestLogs(platform string, provider string, limit in
 	if provider != "" {
 		options = append(options, xdb.WhereEq("provider", provider))
 	}
+	if strings.TrimSpace(startAt) != "" {
+		parsed, err := parseTimeInput(startAt)
+		if err != nil {
+			return nil, err
+		}
+		options = append(options, xdb.WhereGte("created_at", parsed.UTC().Format(timeLayout)))
+	}
+	if strings.TrimSpace(endAt) != "" {
+		parsed, err := parseTimeInput(endAt)
+		if err != nil {
+			return nil, err
+		}
+		options = append(options, xdb.WhereLt("created_at", parsed.UTC().Format(timeLayout)))
+	}
 	records, err := model.Selects(options...)
 	if err != nil {
 		return nil, err
 	}
 	logs := make([]ReqeustLog, 0, len(records))
 	for _, record := range records {
+		createdAtLocal, _ := parseCreatedAt(record)
+		createdAtValue := record.GetString("created_at")
+		if !createdAtLocal.IsZero() {
+			createdAtValue = createdAtLocal.Format(timeLayout)
+		}
 		logEntry := ReqeustLog{
 			ID:                record.GetInt64("id"),
 			Platform:          record.GetString("platform"),
@@ -104,7 +128,7 @@ func (ls *LogService) ListRequestLogs(platform string, provider string, limit in
 			CacheCreateTokens: record.GetInt("cache_create_tokens"),
 			CacheReadTokens:   record.GetInt("cache_read_tokens"),
 			ReasoningTokens:   record.GetInt("reasoning_tokens"),
-			CreatedAt:         record.GetString("created_at"),
+			CreatedAt:         createdAtValue,
 			IsStream:          record.GetBool("is_stream"),
 			DurationSec:       record.GetFloat64("duration_sec"),
 		}
@@ -152,7 +176,7 @@ func (ls *LogService) HeatmapStats(days int) ([]HeatmapStat, error) {
 	}
 	model := xdb.New("request_log")
 	options := []xdb.Option{
-		xdb.WhereGe("created_at", rangeStart.Format(timeLayout)),
+		xdb.WhereGe("created_at", rangeStart.UTC().Format(timeLayout)),
 		xdb.Field(
 			"model",
 			"input_tokens",
@@ -233,7 +257,7 @@ func (ls *LogService) StatsSince(platform string) (LogStats, error) {
 	queryStart := seriesStart.Add(-24 * time.Hour)
 	summaryStart := seriesStart
 	options := []xdb.Option{
-		xdb.WhereGte("created_at", queryStart.Format(timeLayout)),
+		xdb.WhereGte("created_at", queryStart.UTC().Format(timeLayout)),
 		xdb.Field(
 			"model",
 			"input_tokens",
@@ -349,7 +373,7 @@ func (ls *LogService) ProviderDailyStats(platform string) ([]ProviderDailyStat, 
 	queryStart := start.Add(-24 * time.Hour)
 	model := xdb.New("request_log")
 	options := []xdb.Option{
-		xdb.WhereGte("created_at", queryStart.Format(timeLayout)),
+		xdb.WhereGte("created_at", queryStart.UTC().Format(timeLayout)),
 		xdb.Field(
 			"provider",
 			"model",
@@ -515,16 +539,31 @@ func parseTimeInput(value string) (time.Time, error) {
 	if raw == "" {
 		return startOfDay(time.Now()), nil
 	}
-	layouts := []string{
-		time.RFC3339,
-		timeLayout,
-		"2006-01-02T15:04:05",
+
+	if parsed, err := time.Parse(time.RFC3339Nano, raw); err == nil {
+		return parsed.In(time.Local), nil
+	}
+	if parsed, err := time.Parse(time.RFC3339, raw); err == nil {
+		return parsed.In(time.Local), nil
+	}
+
+	localLayouts := []string{
+		timeLayout,           // "2006-01-02 15:04:05" (前端本地时间，无时区)
+		"2006-01-02T15:04:05", // ISO-like，无时区
+	}
+	for _, layout := range localLayouts {
+		if parsed, err := time.ParseInLocation(layout, raw, time.Local); err == nil {
+			return parsed, nil
+		}
+	}
+
+	zoneLayouts := []string{
 		"2006-01-02 15:04:05 -0700",
 		"2006-01-02 15:04:05 -0700 MST",
 		"2006-01-02 15:04:05 MST",
 		"2006-01-02T15:04:05-0700",
 	}
-	for _, layout := range layouts {
+	for _, layout := range zoneLayouts {
 		if parsed, err := time.Parse(layout, raw); err == nil {
 			return parsed.In(time.Local), nil
 		}
@@ -532,16 +571,13 @@ func parseTimeInput(value string) (time.Time, error) {
 			return parsed.In(time.Local), nil
 		}
 	}
-	if normalized := strings.Replace(raw, " ", "T", 1); normalized != raw {
-		if parsed, err := time.Parse(time.RFC3339, normalized); err == nil {
-			return parsed.In(time.Local), nil
-		}
-	}
+
 	if len(raw) >= len("2006-01-02") {
 		if parsed, err := time.ParseInLocation("2006-01-02", raw[:10], time.Local); err == nil {
 			return parsed, nil
 		}
 	}
+
 	return time.Time{}, fmt.Errorf("invalid time format: %s", raw)
 }
 

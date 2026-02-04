@@ -894,6 +894,12 @@ func ensureRequestLogColumn(db *sql.DB, column string, definition string) error 
 	return nil
 }
 
+func ensureRequestLogIndex(db *sql.DB, name string, columns string) error {
+	stmt := fmt.Sprintf("CREATE INDEX IF NOT EXISTS %s ON request_log(%s)", name, columns)
+	_, err := db.Exec(stmt)
+	return err
+}
+
 func ensureRequestLogTable() error {
 	db, err := xdb.DB("default")
 	if err != nil {
@@ -930,6 +936,15 @@ func ensureRequestLogTableWithDB(db *sql.DB) error {
 		return err
 	}
 	if err := ensureRequestLogColumn(db, "duration_sec", "REAL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogIndex(db, "idx_request_log_created_at", "created_at"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogIndex(db, "idx_request_log_platform_created_at", "platform, created_at"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogIndex(db, "idx_request_log_platform_provider_created_at", "platform, provider, created_at"); err != nil {
 		return err
 	}
 

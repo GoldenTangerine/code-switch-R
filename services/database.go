@@ -134,5 +134,23 @@ func ensureBlacklistTables() error {
 		}
 	}
 
+	// 4. 迁移/补齐 blacklist_duration_seconds（优先从旧 minutes 值推导，避免覆盖用户已有配置）
+	// 如果 seconds 不存在，则用 minutes * 60 初始化
+	if _, err := db.Exec(`
+		INSERT OR IGNORE INTO app_settings (key, value)
+		SELECT 'blacklist_duration_seconds', CAST(value AS INTEGER) * 60
+		FROM app_settings
+		WHERE key = 'blacklist_duration_minutes'
+		LIMIT 1
+	`); err != nil {
+		return fmt.Errorf("初始化 blacklist_duration_seconds 失败: %w", err)
+	}
+	// 万一 minutes 也不存在，兜底写默认 30 分钟
+	if _, err := db.Exec(`
+		INSERT OR IGNORE INTO app_settings (key, value) VALUES ('blacklist_duration_seconds', '1800')
+	`); err != nil {
+		return fmt.Errorf("初始化 blacklist_duration_seconds 失败: %w", err)
+	}
+
 	return nil
 }

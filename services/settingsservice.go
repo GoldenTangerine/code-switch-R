@@ -1,6 +1,7 @@
 package services
 
 import (
+	"database/sql"
 	"fmt"
 	"log"
 	"strconv"
@@ -14,7 +15,7 @@ type SettingsService struct{}
 // BlacklistSettings 黑名单配置（基础配置，向后兼容）
 type BlacklistSettings struct {
 	FailureThreshold int `json:"failureThreshold"` // 失败次数阈值
-	DurationMinutes  int `json:"durationMinutes"`  // 拉黑时长（分钟）
+	DurationSeconds  int `json:"durationSeconds"`  // 拉黑时长（秒）
 }
 
 // BlacklistLevelConfig 等级拉黑配置（v0.4.0 新增）
@@ -95,20 +96,35 @@ func (ss *SettingsService) GetBlacklistSettings() (threshold int, duration int, 
 		return 0, 0, fmt.Errorf("失败阈值格式错误: %w", err)
 	}
 
-	// 获取拉黑时长
-	var durationStr string
+	// 获取拉黑时长（秒）
+	var durationSecondsStr string
 	err = db.QueryRow(`
-		SELECT value FROM app_settings WHERE key = 'blacklist_duration_minutes'
-	`).Scan(&durationStr)
-
+		SELECT value FROM app_settings WHERE key = 'blacklist_duration_seconds'
+	`).Scan(&durationSecondsStr)
 	if err != nil {
-		return 0, 0, fmt.Errorf("获取拉黑时长失败: %w", err)
+		if err != sql.ErrNoRows {
+			return 0, 0, fmt.Errorf("获取拉黑时长失败: %w", err)
+		}
+		// 向后兼容：旧版存的是分钟
+		var durationMinutesStr string
+		err = db.QueryRow(`
+			SELECT value FROM app_settings WHERE key = 'blacklist_duration_minutes'
+		`).Scan(&durationMinutesStr)
+		if err != nil {
+			return 0, 0, fmt.Errorf("获取拉黑时长失败: %w", err)
+		}
+		minutes, err := strconv.Atoi(durationMinutesStr)
+		if err != nil {
+			return 0, 0, fmt.Errorf("拉黑时长格式错误: %w", err)
+		}
+		return threshold, minutes * 60, nil
 	}
 
-	duration, err = strconv.Atoi(durationStr)
+	durationSeconds, err := strconv.Atoi(durationSecondsStr)
 	if err != nil {
 		return 0, 0, fmt.Errorf("拉黑时长格式错误: %w", err)
 	}
+	duration = durationSeconds
 
 	return threshold, duration, nil
 }
@@ -155,14 +171,21 @@ func (ss *SettingsService) UpdateBlacklistEnabled(enabled bool) error {
 
 // UpdateBlacklistSettings 更新黑名单配置
 // 使用 Saga 模式保证数据一致性（因队列无法使用事务）
-func (ss *SettingsService) UpdateBlacklistSettings(threshold int, duration int) error {
+func (ss *SettingsService) UpdateBlacklistSettings(threshold int, durationSeconds int) error {
 	// 验证参数
 	if threshold < 1 || threshold > 9 {
 		return fmt.Errorf("失败阈值必须在 1-9 之间")
 	}
 
-	if duration != 5 && duration != 15 && duration != 30 && duration != 60 {
-		return fmt.Errorf("拉黑时长只支持 5/15/30/60 分钟")
+	switch durationSeconds {
+	case 30, 60, 180, 300, 900, 1800, 3600:
+	default:
+		return fmt.Errorf("拉黑时长只支持 30秒/1/3/5/15/30/60 分钟")
+	}
+
+	durationMinutes := (durationSeconds + 59) / 60
+	if durationMinutes < 1 {
+		durationMinutes = 1
 	}
 
 	// Saga 步骤 1：读取旧值（用于回滚）
@@ -177,31 +200,63 @@ func (ss *SettingsService) UpdateBlacklistSettings(threshold int, duration int) 
 		return fmt.Errorf("读取旧失败阈值失败: %w", err)
 	}
 
-	// Saga 步骤 2：尝试第一次写入
-	err = GlobalDBQueue.Exec(`
-		UPDATE app_settings SET value = ? WHERE key = 'blacklist_failure_threshold'
-	`, strconv.Itoa(threshold))
+	var oldDurationSecondsStr string
+	durationSecondsErr := db.QueryRow(`SELECT value FROM app_settings WHERE key = 'blacklist_duration_seconds'`).Scan(&oldDurationSecondsStr)
+	if durationSecondsErr != nil && durationSecondsErr != sql.ErrNoRows {
+		return fmt.Errorf("读取旧拉黑时长失败: %w", durationSecondsErr)
+	}
+	var oldDurationMinutesStr string
+	durationMinutesErr := db.QueryRow(`SELECT value FROM app_settings WHERE key = 'blacklist_duration_minutes'`).Scan(&oldDurationMinutesStr)
+	if durationMinutesErr != nil && durationMinutesErr != sql.ErrNoRows {
+		return fmt.Errorf("读取旧拉黑时长失败: %w", durationMinutesErr)
+	}
 
-	if err != nil {
+	if durationSecondsErr == sql.ErrNoRows {
+		// 旧版没有 seconds，尽量从 minutes 补
+		minutes, err := strconv.Atoi(oldDurationMinutesStr)
+		if err != nil {
+			minutes = 30
+			oldDurationMinutesStr = "30"
+		}
+		oldDurationSecondsStr = strconv.Itoa(minutes * 60)
+	}
+	if durationMinutesErr == sql.ErrNoRows {
+		// 旧版没有 minutes，尽量从 seconds 补
+		seconds, err := strconv.Atoi(oldDurationSecondsStr)
+		if err != nil {
+			seconds = 1800
+			oldDurationSecondsStr = "1800"
+		}
+		minutes := (seconds + 59) / 60
+		if minutes < 1 {
+			minutes = 1
+		}
+		oldDurationMinutesStr = strconv.Itoa(minutes)
+	}
+
+	upsert := func(key string, value string) error {
+		return GlobalDBQueue.Exec(`
+			INSERT INTO app_settings (key, value) VALUES (?, ?)
+			ON CONFLICT(key) DO UPDATE SET value = excluded.value
+		`, key, value)
+	}
+
+	// Saga 步骤 2：写入失败阈值
+	if err := upsert("blacklist_failure_threshold", strconv.Itoa(threshold)); err != nil {
 		return fmt.Errorf("更新失败阈值失败: %w", err)
 	}
 
-	// Saga 步骤 3：尝试第二次写入
-	err = GlobalDBQueue.Exec(`
-		UPDATE app_settings SET value = ? WHERE key = 'blacklist_duration_minutes'
-	`, strconv.Itoa(duration))
-
-	if err != nil {
-		// 第二次失败，回滚第一次（补偿逻辑）
-		rollbackErr := GlobalDBQueue.Exec(`
-			UPDATE app_settings SET value = ? WHERE key = 'blacklist_failure_threshold'
-		`, oldThresholdStr)
-
-		if rollbackErr != nil {
-			return fmt.Errorf("更新拉黑时长失败且回滚失败: %w (原始错误: %v)", rollbackErr, err)
-		}
-
+	// Saga 步骤 3：写入拉黑时长（秒）
+	if err := upsert("blacklist_duration_seconds", strconv.Itoa(durationSeconds)); err != nil {
+		_ = upsert("blacklist_failure_threshold", oldThresholdStr)
 		return fmt.Errorf("更新拉黑时长失败，已回滚失败阈值: %w", err)
+	}
+
+	// Saga 步骤 4：写入拉黑时长（分钟，向后兼容）
+	if err := upsert("blacklist_duration_minutes", strconv.Itoa(durationMinutes)); err != nil {
+		_ = upsert("blacklist_duration_seconds", oldDurationSecondsStr)
+		_ = upsert("blacklist_failure_threshold", oldThresholdStr)
+		return fmt.Errorf("更新拉黑时长失败，已回滚: %w", err)
 	}
 
 	return nil
@@ -216,7 +271,7 @@ func (ss *SettingsService) GetBlacklistSettingsStruct() (*BlacklistSettings, err
 
 	return &BlacklistSettings{
 		FailureThreshold: threshold,
-		DurationMinutes:  duration,
+		DurationSeconds:  duration,
 	}, nil
 }
 

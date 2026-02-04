@@ -12,26 +12,6 @@
       </div>
     </div>
 
-    <section class="logs-summary" v-if="statsCards.length">
-      <article
-        v-for="card in statsCards"
-        :key="card.key"
-        :class="['summary-card', { 'summary-card--clickable': card.key === 'cost' || card.key === 'tokens' }]"
-        @click="handleCardClick(card.key)"
-      >
-        <div class="summary-card__label">{{ card.label }}</div>
-        <div class="summary-card__value">
-          {{ card.value }}
-          <span v-if="card.subValue" class="summary-card__sub-value">({{ card.subValue }})</span>
-        </div>
-        <div class="summary-card__hint">{{ card.hint }}</div>
-      </article>
-    </section>
-
-    <section class="logs-chart">
-      <Line :data="chartData" :options="chartOptions" />
-    </section>
-
     <form class="logs-filter-row" @submit.prevent="applyFilters">
       <div class="filter-fields">
         <label class="filter-field">
@@ -52,13 +32,62 @@
             </option>
           </select>
         </label>
+        <label class="filter-field">
+          <span>{{ t('components.logs.filters.dateType') }}</span>
+          <select v-model="filters.dateType" class="mac-select">
+            <option value="all">{{ t('components.logs.filters.dateTypeAll') }}</option>
+            <option value="year">{{ t('components.logs.filters.dateTypeYear') }}</option>
+            <option value="month">{{ t('components.logs.filters.dateTypeMonth') }}</option>
+            <option value="day">{{ t('components.logs.filters.dateTypeDay') }}</option>
+            <option value="range">{{ t('components.logs.filters.dateTypeRange') }}</option>
+          </select>
+        </label>
+
+        <label v-if="filters.dateType === 'year'" class="filter-field">
+          <span>{{ t('components.logs.filters.year') }}</span>
+          <input v-model="filters.year" type="number" class="mac-input" placeholder="YYYY" />
+        </label>
+        <label v-else-if="filters.dateType === 'month'" class="filter-field">
+          <span>{{ t('components.logs.filters.month') }}</span>
+          <input v-model="filters.month" type="month" class="mac-input" />
+        </label>
+        <label v-else-if="filters.dateType === 'day'" class="filter-field">
+          <span>{{ t('components.logs.filters.day') }}</span>
+          <input v-model="filters.day" type="date" class="mac-input" />
+        </label>
+        <label v-else-if="filters.dateType === 'range'" class="filter-field">
+          <span>{{ t('components.logs.filters.range') }}</span>
+          <input v-model="filters.rangeStart" type="date" class="mac-input" />
+          <span class="range-separator">至</span>
+          <input v-model="filters.rangeEnd" type="date" class="mac-input" />
+        </label>
       </div>
       <div class="filter-actions">
-        <BaseButton type="submit" :disabled="loading">
+        <BaseButton type="submit" :disabled="loading || !isFilterValid">
           {{ t('components.logs.query') }}
         </BaseButton>
       </div>
     </form>
+
+    <section class="logs-summary" v-if="statsCards.length">
+      <article
+        v-for="card in statsCards"
+        :key="card.key"
+        :class="['summary-card', { 'summary-card--clickable': card.key === 'cost' || card.key === 'tokens' }]"
+        @click="handleCardClick(card.key)"
+      >
+        <div class="summary-card__label">{{ card.label }}</div>
+        <div class="summary-card__value">
+          {{ card.value }}
+          <span v-if="card.subValue" class="summary-card__sub-value">({{ card.subValue }})</span>
+        </div>
+        <div class="summary-card__hint">{{ card.hint }}</div>
+      </article>
+    </section>
+
+    <section class="logs-chart">
+      <Line :data="chartData" :options="chartOptions" />
+    </section>
 
     <section class="logs-table-wrapper">
       <table class="logs-table">
@@ -206,14 +235,96 @@ Chart.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, L
 const { t } = useI18n()
 const router = useRouter()
 
+type LogDateFilterType = 'all' | 'year' | 'month' | 'day' | 'range'
+
 const logs = ref<RequestLog[]>([])
 const stats = ref<LogStats | null>(null)
 const loading = ref(false)
-const filters = reactive<{ platform: LogPlatform | ''; provider: string }>({ platform: '', provider: '' })
+const filters = reactive<{
+  platform: LogPlatform | ''
+  provider: string
+  dateType: LogDateFilterType
+  year: string
+  month: string
+  day: string
+  rangeStart: string
+  rangeEnd: string
+}>({
+  platform: '',
+  provider: '',
+  dateType: 'all',
+  year: '',
+  month: '',
+  day: '',
+  rangeStart: '',
+  rangeEnd: '',
+})
 const page = ref(1)
 const PAGE_SIZE = 15
 const providerOptions = ref<string[]>([])
 const statsSeries = computed<LogStatsSeries[]>(() => stats.value?.series ?? [])
+
+const toTimeLayout = (date: Date) => {
+  const pad = (num: number) => num.toString().padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+}
+
+const toDateParts = (value: string) => {
+  const [y, m, d] = value.split('-').map((item) => Number(item))
+  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return null
+  if (y <= 0 || m <= 0 || d <= 0) return null
+  return { y, m, d }
+}
+
+const computeDateRange = () => {
+  switch (filters.dateType) {
+    case 'all':
+      return { startAt: '', endAt: '' }
+    case 'year': {
+      const year = Number(filters.year)
+      if (!Number.isFinite(year) || year < 1970 || year > 9999) return null
+      const start = new Date(year, 0, 1, 0, 0, 0, 0)
+      const end = new Date(year + 1, 0, 1, 0, 0, 0, 0)
+      return { startAt: toTimeLayout(start), endAt: toTimeLayout(end) }
+    }
+    case 'month': {
+      const match = String(filters.month || '').match(/^(\d{4})-(\d{2})$/)
+      if (!match) return null
+      const year = Number(match[1])
+      const month = Number(match[2])
+      if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) return null
+      const start = new Date(year, month - 1, 1, 0, 0, 0, 0)
+      const end = new Date(year, month, 1, 0, 0, 0, 0)
+      return { startAt: toTimeLayout(start), endAt: toTimeLayout(end) }
+    }
+    case 'day': {
+      if (!filters.day) return null
+      const parts = toDateParts(filters.day)
+      if (!parts) return null
+      const start = new Date(parts.y, parts.m - 1, parts.d, 0, 0, 0, 0)
+      const end = new Date(parts.y, parts.m - 1, parts.d + 1, 0, 0, 0, 0)
+      return { startAt: toTimeLayout(start), endAt: toTimeLayout(end) }
+    }
+    case 'range': {
+      if (!filters.rangeStart || !filters.rangeEnd) return null
+      const startParts = toDateParts(filters.rangeStart)
+      const endParts = toDateParts(filters.rangeEnd)
+      if (!startParts || !endParts) return null
+      const start = new Date(startParts.y, startParts.m - 1, startParts.d, 0, 0, 0, 0)
+      const inclusiveEnd = new Date(endParts.y, endParts.m - 1, endParts.d, 0, 0, 0, 0)
+      if (start.getTime() > inclusiveEnd.getTime()) return null
+      const endExclusive = new Date(endParts.y, endParts.m - 1, endParts.d + 1, 0, 0, 0, 0)
+      return { startAt: toTimeLayout(start), endAt: toTimeLayout(endExclusive) }
+    }
+    default:
+      return null
+  }
+}
+
+const isFilterValid = computed(() => {
+  if (filters.dateType === 'all') return true
+  return computeDateRange() != null
+})
 
 // 金额明细弹窗状态
 const costDetailModal = reactive<{
@@ -457,12 +568,18 @@ const syncProviderOptionsFromLogs = (items: RequestLog[]) => {
 }
 
 const loadLogs = async () => {
+  const range = computeDateRange()
+  if (range == null) {
+    return
+  }
   loading.value = true
   try {
     const data = await fetchRequestLogs({
       platform: filters.platform,
       provider: filters.provider,
       limit: 200,
+      startAt: range.startAt,
+      endAt: range.endAt,
     })
     logs.value = data ?? []
     page.value = Math.min(page.value, totalPages.value)
@@ -495,6 +612,9 @@ const pagedLogs = computed(() => {
 const totalPages = computed(() => Math.max(1, Math.ceil(logs.value.length / PAGE_SIZE)))
 
 const applyFilters = async () => {
+  if (!isFilterValid.value) {
+    return
+  }
   page.value = 1
   await loadDashboard()
   resetTimer()
@@ -692,6 +812,12 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+.range-separator {
+  color: var(--mac-text-secondary);
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
 .logs-summary {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));

@@ -191,6 +191,24 @@ html.dark .mac-sidebar-item:hover {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--mac-accent) 25%, transparent);
 }
 
+.mac-input {
+  min-width: 150px;
+  border-radius: 12px;
+  border: 1px solid var(--mac-border);
+  background: var(--mac-surface-strong);
+  padding: 10px 14px;
+  font-size: 0.9rem;
+  color: var(--mac-text);
+  transition: border-color 0.2s ease;
+}
+
+.mac-input:focus {
+  outline: none;
+  border-color: var(--mac-accent);
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.25); /* fallback for old WebKit */
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--mac-accent) 25%, transparent);
+}
+
 .mac-switch {
   width: 44px;
   height: 24px;

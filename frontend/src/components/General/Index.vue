@@ -71,7 +71,7 @@ const appVersion = ref('')
 // 拉黑配置相关状态
 const blacklistEnabled = ref(true)  // 拉黑功能总开关
 const blacklistThreshold = ref(3)
-const blacklistDuration = ref(30)
+const blacklistDurationSeconds = ref(1800)
 const levelBlacklistEnabled = ref(false)
 const blacklistLoading = ref(false)
 const blacklistSaving = ref(false)
@@ -414,7 +414,7 @@ const loadBlacklistSettings = async () => {
   try {
     const settings = await getBlacklistSettings()
     blacklistThreshold.value = settings.failureThreshold
-    blacklistDuration.value = settings.durationMinutes
+    blacklistDurationSeconds.value = settings.durationSeconds
 
     // 加载拉黑功能总开关
     const enabled = await getBlacklistEnabled()
@@ -428,7 +428,7 @@ const loadBlacklistSettings = async () => {
     // 使用默认值
     blacklistEnabled.value = true
     blacklistThreshold.value = 3
-    blacklistDuration.value = 30
+    blacklistDurationSeconds.value = 1800
     levelBlacklistEnabled.value = false
   } finally {
     blacklistLoading.value = false
@@ -440,7 +440,7 @@ const saveBlacklistSettings = async () => {
   if (blacklistLoading.value || blacklistSaving.value) return
   blacklistSaving.value = true
   try {
-    await updateBlacklistSettings(blacklistThreshold.value, blacklistDuration.value)
+    await updateBlacklistSettings(blacklistThreshold.value, blacklistDurationSeconds.value)
     alert('拉黑配置已保存')
   } catch (error) {
     console.error('failed to save blacklist settings', error)
@@ -992,13 +992,16 @@ onMounted(async () => {
           </ListItem>
           <ListItem :label="$t('components.general.label.blacklistDuration')">
             <select
-              v-model.number="blacklistDuration"
+              v-model.number="blacklistDurationSeconds"
               :disabled="blacklistLoading || blacklistSaving"
               class="mac-select">
-              <option :value="5">5 {{ $t('components.general.label.minutes') }}</option>
-              <option :value="15">15 {{ $t('components.general.label.minutes') }}</option>
-              <option :value="30">30 {{ $t('components.general.label.minutes') }}</option>
-              <option :value="60">60 {{ $t('components.general.label.minutes') }}</option>
+              <option :value="30">30 {{ $t('components.general.label.seconds') }}</option>
+              <option :value="60">1 {{ $t('components.general.label.minutes') }}</option>
+              <option :value="180">3 {{ $t('components.general.label.minutes') }}</option>
+              <option :value="300">5 {{ $t('components.general.label.minutes') }}</option>
+              <option :value="900">15 {{ $t('components.general.label.minutes') }}</option>
+              <option :value="1800">30 {{ $t('components.general.label.minutes') }}</option>
+              <option :value="3600">60 {{ $t('components.general.label.minutes') }}</option>
             </select>
           </ListItem>
           <ListItem :label="$t('components.general.label.saveBlacklist')">

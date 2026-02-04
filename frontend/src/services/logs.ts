@@ -30,13 +30,17 @@ type RequestLogQuery = {
   platform?: LogPlatform | ''
   provider?: string
   limit?: number
+  startAt?: string
+  endAt?: string
 }
 
 export const fetchRequestLogs = async (query: RequestLogQuery = {}): Promise<RequestLog[]> => {
   const platform = query.platform ?? ''
   const provider = query.provider ?? ''
   const limit = query.limit ?? 100
-  return Call.ByName('codeswitch/services.LogService.ListRequestLogs', platform, provider, limit)
+  const startAt = query.startAt ?? ''
+  const endAt = query.endAt ?? ''
+  return Call.ByName('codeswitch/services.LogService.ListRequestLogsV2', platform, provider, limit, startAt, endAt)
 }
 
 export const fetchLogProviders = async (platform: LogPlatform | '' = ''): Promise<string[]> => {

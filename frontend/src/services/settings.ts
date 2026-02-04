@@ -7,7 +7,7 @@ const SETTINGS_SERVICE = 'codeswitch/services.SettingsService'
 
 export interface BlacklistSettings {
   failureThreshold: number // 失败次数阈值（1-10）
-  durationMinutes: number  // 拉黑时长（分钟：15/30/60）
+  durationSeconds: number  // 拉黑时长（秒：30/60/180/300/900/1800/3600）
 }
 
 /**
@@ -21,13 +21,13 @@ export const getBlacklistSettings = async (): Promise<BlacklistSettings> => {
 /**
  * 更新拉黑配置
  * @param threshold 失败阈值（1-10）
- * @param duration 拉黑时长（15/30/60 分钟）
+ * @param durationSeconds 拉黑时长（30 秒 / 1 分钟 / 3 分钟 / 5/15/30/60 分钟）
  */
 export const updateBlacklistSettings = async (
   threshold: number,
-  duration: number
+  durationSeconds: number
 ): Promise<void> => {
-  await Call.ByName(`${SETTINGS_SERVICE}.UpdateBlacklistSettings`, threshold, duration)
+  await Call.ByName(`${SETTINGS_SERVICE}.UpdateBlacklistSettings`, threshold, durationSeconds)
 }
 
 /**
