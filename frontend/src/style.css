@@ -908,27 +908,29 @@ html.dark .mac-sidebar-item:hover {
 }
 
 .logs-filter-row .filter-field {
-  display: flex;
-  flex-direction: row;
+  --logs-filter-label-width: 120px;
+  display: grid;
+  grid-template-columns: var(--logs-filter-label-width) minmax(0, 1fr);
   align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
+  column-gap: 12px;
+  row-gap: 8px;
   font-size: 0.9rem;
   color: var(--mac-text-secondary);
 }
 
 .logs-filter-row .filter-field span {
   white-space: nowrap;
+  text-align: right;
 }
 
 .logs-filter-row .filter-field select,
 .logs-filter-row .filter-field input {
-  flex: 1;
+  width: 100%;
 }
 
 .logs-filter-row .logs-date-picker {
-  flex: 1;
-  min-width: 150px;
+  width: 100%;
+  min-width: 0;
 }
 
 .logs-filter-row .logs-date-picker-input {
@@ -1025,6 +1027,14 @@ html.dark .logs-date-picker-menu {
 @media (max-width: 768px) {
   .logs-filter-row .filter-fields {
     grid-template-columns: 1fr;
+  }
+
+  .logs-filter-row .filter-field {
+    grid-template-columns: 1fr;
+  }
+
+  .logs-filter-row .filter-field span {
+    text-align: left;
   }
 }
 

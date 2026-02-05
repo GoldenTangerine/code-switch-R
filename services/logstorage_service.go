@@ -82,8 +82,16 @@ func (ls *LogService) ClearRequestLogs() error {
 	if err != nil {
 		return err
 	}
+	// 防止历史遗留的 request_log DELETE 触发器误伤统计表
+	if err := cleanupRequestLogStatsTriggersWithDB(db); err != nil {
+		return err
+	}
 	if _, err := db.Exec("DELETE FROM request_log"); err != nil {
 		return err
+	}
+	// 确保统计触发器仍然存在（有些环境可能被用户手动删过）
+	if err := ensureRequestLogStatsTriggersWithDB(db); err != nil {
+		fmt.Printf("[WARN] ensureRequestLogStatsTriggersWithDB failed after clearing request_log: %v\n", err)
 	}
 	_, _ = db.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
 	return nil

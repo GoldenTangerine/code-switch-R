@@ -2,6 +2,10 @@
 import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { Call } from '@wailsio/runtime'
+import BaseButton from '../common/BaseButton.vue'
+import BaseModal from '../common/BaseModal.vue'
+import { showToast } from '../../utils/toast'
+import { extractErrorMessage } from '../../utils/error'
 
 interface ConsoleLog {
   timestamp: string
@@ -14,6 +18,8 @@ const logs = ref<ConsoleLog[]>([])
 const autoScroll = ref(true)
 const loading = ref(false)
 const logsContainer = ref<HTMLElement>()
+const clearConfirmOpen = ref(false)
+const clearing = ref(false)
 let refreshInterval: number | null = null
 
 const goBack = () => {
@@ -34,17 +40,29 @@ const loadLogs = async () => {
   }
 }
 
-const clearLogs = async () => {
-  if (!confirm('确定要清空所有控制台日志吗？')) {
-    return
-  }
+const openClearConfirm = () => {
+  if (clearing.value) return
+  clearConfirmOpen.value = true
+}
 
+const closeClearConfirm = () => {
+  if (clearing.value) return
+  clearConfirmOpen.value = false
+}
+
+const confirmClearLogs = async () => {
+  if (clearing.value) return
+  clearing.value = true
   try {
     await Call.ByName('codeswitch/services.ConsoleService.ClearLogs')
     logs.value = []
+    showToast('清空成功', 'success')
+    closeClearConfirm()
   } catch (error) {
     console.error('清空日志失败:', error)
-    alert('清空失败：' + (error as Error).message)
+    showToast(`清空失败：${extractErrorMessage(error)}`, 'error')
+  } finally {
+    clearing.value = false
   }
 }
 
@@ -91,7 +109,7 @@ onUnmounted(() => {
     <div class="global-actions">
       <p class="global-eyebrow">控制台</p>
       <div class="actions-group">
-        <button class="secondary-btn" @click="clearLogs">清空日志</button>
+        <button class="secondary-btn" :disabled="clearing" @click="openClearConfirm">清空日志</button>
         <label class="auto-scroll-toggle">
           <input type="checkbox" v-model="autoScroll" />
           <span>自动滚动</span>
@@ -134,6 +152,20 @@ onUnmounted(() => {
         </div>
       </div>
     </div>
+
+    <BaseModal :open="clearConfirmOpen" title="确认清空" variant="confirm" @close="closeClearConfirm">
+      <div class="confirm-body">
+        <p>确认清空所有控制台日志？</p>
+      </div>
+      <footer class="form-actions confirm-actions">
+        <BaseButton variant="outline" type="button" :disabled="clearing" @click="closeClearConfirm">
+          取消
+        </BaseButton>
+        <BaseButton variant="danger" type="button" :disabled="clearing" @click="confirmClearLogs">
+          {{ clearing ? '清理中...' : '确认清空' }}
+        </BaseButton>
+      </footer>
+    </BaseModal>
   </div>
 </template>
 

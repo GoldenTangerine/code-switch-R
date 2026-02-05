@@ -113,6 +113,10 @@ func ensureRequestLogStatsTablesWithDB(db *sql.DB) error {
 }
 
 func ensureRequestLogStatsTriggersWithDB(db *sql.DB) error {
+	if err := cleanupRequestLogStatsTriggersWithDB(db); err != nil {
+		return err
+	}
+
 	// 说明：
 	// - request_log.created_at 使用 SQLite CURRENT_TIMESTAMP（UTC），这里用 localtime 转成本地日历桶
 	// - 统计表的 bucket_start 统一存储本地时间字符串（timeLayout），便于按本地日期范围直接筛选
@@ -191,6 +195,56 @@ BEGIN
 END;`, requestLogStatsDailyTable)
 
 	if _, err := db.Exec(createDailyTrigger); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func cleanupRequestLogStatsTriggersWithDB(db *sql.DB) error {
+	if db == nil {
+		return fmt.Errorf("nil db")
+	}
+
+	// 历史版本可能创建了 DELETE/UPDATE 触发器，导致用户“清空请求明细”时误伤统计表。
+	// 这里统一清理除当前插入触发器以外的 request_log_stats_* 触发器。
+	rows, err := db.Query("SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'request_log'")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	keep := map[string]bool{
+		"request_log_stats_hourly_ai": true,
+		"request_log_stats_daily_ai":  true,
+	}
+
+	for rows.Next() {
+		var name string
+		var sqlText sql.NullString
+		if err := rows.Scan(&name, &sqlText); err != nil {
+			return err
+		}
+		name = strings.TrimSpace(name)
+		if name == "" || keep[name] {
+			continue
+		}
+
+		sqlValue := sqlText.String
+		shouldDrop := strings.HasPrefix(name, "request_log_stats_") ||
+			strings.Contains(sqlValue, requestLogStatsHourlyTable) ||
+			strings.Contains(sqlValue, requestLogStatsDailyTable)
+		if !shouldDrop {
+			continue
+		}
+
+		escaped := strings.ReplaceAll(name, `"`, `""`)
+		if _, err := db.Exec(fmt.Sprintf(`DROP TRIGGER IF EXISTS "%s"`, escaped)); err != nil {
+			return err
+		}
+	}
+
+	if err := rows.Err(); err != nil {
 		return err
 	}
 

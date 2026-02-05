@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/daodao97/xgo/xdb"
 	"github.com/daodao97/xgo/xrequest"
@@ -816,15 +817,6 @@ func (prs *ProviderRelayService) forwardRequest(
 
 	status := requestLog.HttpCode
 
-	if resp.Error() != nil {
-		// resp 存在、有错误、但状态码为 0：客户端中断，不计入失败
-		if status == 0 {
-			fmt.Printf("[INFO] Provider %s 响应错误但状态码为0，判定为客户端中断\n", provider.Name)
-			return false, fmt.Errorf("%w: %v", errClientAbort, resp.Error())
-		}
-		return false, resp.Error()
-	}
-
 	// 状态码为 0 且无错误：当作成功处理
 	if status == 0 {
 		fmt.Printf("[WARN] Provider %s 返回状态码 0，但无错误，当作成功处理\n", provider.Name)
@@ -844,6 +836,39 @@ func (prs *ProviderRelayService) forwardRequest(
 		return true, nil
 	}
 
+	// 非 2xx：打印上游错误信息，便于在控制台追踪原因
+	contentType := ""
+	if resp.RawResponse != nil {
+		contentType = resp.RawResponse.Header.Get("Content-Type")
+	}
+	body := strings.TrimSpace(resp.String())
+	if body != "" {
+		level := "ERROR"
+		if status >= http.StatusMultipleChoices && status < http.StatusBadRequest {
+			level = "WARN"
+		}
+		fmt.Printf("[%s] Upstream %s provider=%s status=%d url=%s content_type=%s\n%s\n",
+			level,
+			kind,
+			provider.Name,
+			status,
+			targetURL,
+			contentType,
+			truncateText(body, 12*1024),
+		)
+	} else {
+		fmt.Printf("[ERROR] Upstream %s provider=%s status=%d url=%s content_type=%s (empty body)\n",
+			kind,
+			provider.Name,
+			status,
+			targetURL,
+			contentType,
+		)
+	}
+
+	if body != "" {
+		return false, fmt.Errorf("upstream status %d: %s", status, truncateText(body, 2048))
+	}
 	return false, fmt.Errorf("upstream status %d", status)
 }
 
@@ -886,6 +911,21 @@ func boolToInt(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+func truncateText(value string, maxBytes int) string {
+	if maxBytes <= 0 {
+		return ""
+	}
+	if len(value) <= maxBytes {
+		return value
+	}
+	truncated := value[:maxBytes]
+	// 避免把 UTF-8 字符截断成乱码（最多回退 3 字节，成本很小）
+	for len(truncated) > 0 && !utf8.ValidString(truncated) {
+		truncated = truncated[:len(truncated)-1]
+	}
+	return truncated + "\n...(truncated)"
 }
 
 func ensureRequestLogColumn(db *sql.DB, column string, definition string) error {

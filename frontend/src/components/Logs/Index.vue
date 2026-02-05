@@ -341,6 +341,8 @@ import { VueDatePicker, type MonthModel } from '@vuepic/vue-datepicker'
 import { enUS, zhCN } from 'date-fns/locale'
 import BaseButton from '../common/BaseButton.vue'
 import BaseModal from '../common/BaseModal.vue'
+import { LoadProviders } from '../../../bindings/codeswitch/services/providerservice'
+import { GetProviders as GetGeminiProviders } from '../../../bindings/codeswitch/services/geminiservice'
 import {
   fetchRequestLogs,
   fetchLogProviders,
@@ -445,6 +447,8 @@ const filters = reactive<{
 const page = ref(1)
 const PAGE_SIZE = 15
 const providerOptions = ref<string[]>([])
+const PROVIDER_CONFIG_CACHE_TTL_MS = 60_000
+const providerConfigCache = new Map<string, { loadedAt: number; names: string[] }>()
 const statsSeries = computed<LogStatsSeries[]>(() => stats.value?.series ?? [])
 
 const formatBytes = (bytes?: number, rows?: number) => {
@@ -852,6 +856,61 @@ const stopCountdown = () => {
 
 const normalizeProviderName = (value: string) => value.trim()
 
+const loadProviderNamesFromConfig = async (platform: LogPlatform | ''): Promise<string[]> => {
+  const cacheKey = platform
+  const now = Date.now()
+  const cached = providerConfigCache.get(cacheKey)
+  if (cached && now - cached.loadedAt < PROVIDER_CONFIG_CACHE_TTL_MS) {
+    return cached.names
+  }
+
+  const names = new Set<string>()
+
+  const includeClaude = platform === '' || platform === 'claude'
+  const includeCodex = platform === '' || platform === 'codex'
+  const includeGemini = platform === '' || platform === 'gemini'
+
+  if (includeClaude) {
+    try {
+      const providers = await LoadProviders('claude')
+      for (const provider of providers ?? []) {
+        const name = normalizeProviderName(provider?.name ?? '')
+        if (name) names.add(name)
+      }
+    } catch (error) {
+      console.error('failed to load claude providers from config', error)
+    }
+  }
+
+  if (includeCodex) {
+    try {
+      const providers = await LoadProviders('codex')
+      for (const provider of providers ?? []) {
+        const name = normalizeProviderName(provider?.name ?? '')
+        if (name) names.add(name)
+      }
+    } catch (error) {
+      console.error('failed to load codex providers from config', error)
+    }
+  }
+
+  if (includeGemini) {
+    try {
+      const providers = await GetGeminiProviders()
+      for (const provider of providers ?? []) {
+        const name = normalizeProviderName(provider?.name ?? '')
+        if (name) names.add(name)
+      }
+    } catch (error) {
+      console.error('failed to load gemini providers from config', error)
+    }
+  }
+
+  const result = Array.from(names)
+  providerConfigCache.set(cacheKey, { loadedAt: now, names: result })
+  return result
+}
+
 const syncProviderOptionsFromLogs = (items: RequestLog[]) => {
   if (!items.length) return
   const merged = new Set(providerOptions.value.map(normalizeProviderName).filter(Boolean))
@@ -1203,13 +1262,24 @@ const summaryScopeHint = computed(() => {
 })
 
 const loadProviderOptions = async () => {
-  try {
-    const list = await fetchLogProviders(filters.platform)
-    providerOptions.value = (list ?? []).map(normalizeProviderName).filter(Boolean)
-    providerOptions.value.sort((a, b) => a.localeCompare(b))
-  } catch (error) {
-    console.error('failed to load provider options', error)
+  const [fromLogs, fromConfig] = await Promise.all([
+    fetchLogProviders(filters.platform).catch((error) => {
+      console.error('failed to load providers from request logs', error)
+      return [] as string[]
+    }),
+    loadProviderNamesFromConfig(filters.platform).catch((error) => {
+      console.error('failed to load providers from config', error)
+      return [] as string[]
+    }),
+  ])
+
+  const merged = new Set<string>()
+  for (const name of [...(fromLogs ?? []), ...(fromConfig ?? [])]) {
+    const normalized = normalizeProviderName(name ?? '')
+    if (normalized) merged.add(normalized)
   }
+  providerOptions.value = Array.from(merged)
+  providerOptions.value.sort((a, b) => a.localeCompare(b))
 }
 
 watch(
