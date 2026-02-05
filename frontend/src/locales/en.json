@@ -117,7 +117,8 @@
   "common": {
     "save": "Save",
     "saving": "Saving...",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "close": "Close"
   },
   "prompts": {
     "hero": {
@@ -666,6 +667,8 @@
         "actions": "Actions",
         "includes": "Includes",
         "includesHint": "Providers, app settings, MCP, request logs, blacklist, availability history, etc. (excludes update cache and WebDAV password)",
+        "progress": "Progress",
+        "remoteUrl": "Remote URL",
         "save": "Save",
         "test": "Test",
         "testing": "Testing…",

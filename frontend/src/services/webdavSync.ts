@@ -21,6 +21,7 @@ export type WebDAVSyncResult = {
   remote_url?: string
   bytes?: number
   backup_path?: string
+  includes?: string[]
 }
 
 const DEFAULT_CONFIG: WebDAVSyncConfig = {
@@ -49,6 +50,11 @@ export const testWebDAVConfig = async (cfg: WebDAVSyncConfig): Promise<WebDAVTes
   return data as WebDAVTestResult
 }
 
+export const previewWebDAVContent = async (): Promise<WebDAVSyncResult> => {
+  const data = await Call.ByName(`${SERVICE}.PreviewLocalContent`)
+  return data as WebDAVSyncResult
+}
+
 export const syncToWebDAV = async (cfg: WebDAVSyncConfig): Promise<WebDAVSyncResult> => {
   const data = await Call.ByName(`${SERVICE}.SyncToWebDAV`, cfg)
   return data as WebDAVSyncResult
@@ -58,4 +64,3 @@ export const loadFromWebDAV = async (cfg: WebDAVSyncConfig): Promise<WebDAVSyncR
   const data = await Call.ByName(`${SERVICE}.LoadFromWebDAV`, cfg)
   return data as WebDAVSyncResult
 }
-

@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/daodao97/xgo/xdb"
+	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
 const (
@@ -46,11 +47,12 @@ type WebDAVTestResult struct {
 }
 
 type WebDAVSyncResult struct {
-	OK         bool   `json:"ok"`
-	Message    string `json:"message"`
-	RemoteURL  string `json:"remote_url,omitempty"`
-	Bytes      int64  `json:"bytes,omitempty"`
-	BackupPath string `json:"backup_path,omitempty"`
+	OK         bool     `json:"ok"`
+	Message    string   `json:"message"`
+	RemoteURL  string   `json:"remote_url,omitempty"`
+	Bytes      int64    `json:"bytes,omitempty"`
+	BackupPath string   `json:"backup_path,omitempty"`
+	Includes   []string `json:"includes,omitempty"`
 }
 
 type webdavBackupManifest struct {
@@ -63,6 +65,7 @@ type webdavBackupManifest struct {
 type WebDAVSyncService struct {
 	mu         sync.Mutex
 	configPath string
+	app        *application.App
 }
 
 func NewWebDAVSyncService() *WebDAVSyncService {
@@ -77,6 +80,20 @@ func NewWebDAVSyncService() *WebDAVSyncService {
 
 func (s *WebDAVSyncService) Start() error { return nil }
 func (s *WebDAVSyncService) Stop() error  { return nil }
+
+func (s *WebDAVSyncService) SetApp(app *application.App) {
+	s.app = app
+}
+
+func (s *WebDAVSyncService) emitSyncEvent(payload map[string]interface{}) {
+	if s.app == nil || payload == nil {
+		return
+	}
+	if _, ok := payload["timestamp"]; !ok {
+		payload["timestamp"] = time.Now().UnixMilli()
+	}
+	s.app.Event.Emit("webdav:sync", payload)
+}
 
 func (s *WebDAVSyncService) GetConfig() (WebDAVSyncConfig, error) {
 	s.mu.Lock()
@@ -109,54 +126,179 @@ func (s *WebDAVSyncService) TestConfig(cfg WebDAVSyncConfig) (WebDAVTestResult, 
 	return s.testConfigLocked(cfg)
 }
 
+func (s *WebDAVSyncService) PreviewLocalContent() (WebDAVSyncResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	codeDir, err := codeSwitchConfigDir()
+	if err != nil {
+		return WebDAVSyncResult{}, err
+	}
+	files, err := collectConfigFiles(codeDir)
+	if err != nil {
+		return WebDAVSyncResult{}, err
+	}
+
+	includes := make([]string, 0, len(files))
+	for _, f := range files {
+		rel, err := filepath.Rel(codeDir, f)
+		if err != nil {
+			return WebDAVSyncResult{}, err
+		}
+		if strings.TrimSpace(rel) == "" || strings.HasPrefix(rel, "..") {
+			continue
+		}
+		includes = append(includes, zipPathJoin(webdavZipRootDir, filepath.ToSlash(rel)))
+	}
+	sort.Strings(includes)
+
+	return WebDAVSyncResult{
+		OK:       true,
+		Message:  "同步内容预览",
+		Includes: includes,
+	}, nil
+}
+
 func (s *WebDAVSyncService) SyncToWebDAV(cfg WebDAVSyncConfig) (WebDAVSyncResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	s.emitSyncEvent(map[string]interface{}{
+		"type":    "upload",
+		"stage":   "start",
+		"message": "开始同步到 WebDAV",
+	})
+
 	cfg, err := normalizeWebDAVSyncConfig(cfg)
 	if err != nil {
+		s.emitSyncEvent(map[string]interface{}{
+			"type":    "upload",
+			"stage":   "error",
+			"message": err.Error(),
+		})
 		return WebDAVSyncResult{}, err
 	}
 
 	dirURL, fileURL, err := webdavResolveTargetURLs(cfg)
 	if err != nil {
+		s.emitSyncEvent(map[string]interface{}{
+			"type":    "upload",
+			"stage":   "error",
+			"message": err.Error(),
+		})
 		return WebDAVSyncResult{}, err
 	}
 
 	client := newWebDAVClient(cfg.Username, cfg.Password, time.Duration(cfg.TimeoutSeconds)*time.Second)
 
 	// timeout_seconds 主要约束网络请求，不要把本地打包时间也算进去（大配置/大 DB 会被误判超时）
+	s.emitSyncEvent(map[string]interface{}{
+		"type":       "upload",
+		"stage":      "ensure_dir",
+		"remote_url": dirURL,
+		"message":    "检查/创建远程目录",
+	})
 	ensureCtx, ensureCancel := context.WithTimeout(context.Background(), time.Duration(cfg.TimeoutSeconds)*time.Second)
 	ensureErr := ensureWebDAVDir(ensureCtx, client, cfg.Endpoint, cfg.RemoteDir, dirURL)
 	ensureCancel()
 	if ensureErr != nil {
+		s.emitSyncEvent(map[string]interface{}{
+			"type":       "upload",
+			"stage":      "error",
+			"remote_url": dirURL,
+			"message":    ensureErr.Error(),
+		})
 		return WebDAVSyncResult{}, ensureErr
 	}
 
-	zipPath, _, bytesWritten, err := exportLocalConfigZip()
+	s.emitSyncEvent(map[string]interface{}{
+		"type":    "upload",
+		"stage":   "exporting",
+		"message": "正在打包本地配置",
+	})
+	zipPath, includes, bytesWritten, err := exportLocalConfigZip()
 	if err != nil {
+		s.emitSyncEvent(map[string]interface{}{
+			"type":    "upload",
+			"stage":   "error",
+			"message": err.Error(),
+		})
 		return WebDAVSyncResult{}, err
 	}
 	defer os.Remove(zipPath)
 
+	s.emitSyncEvent(map[string]interface{}{
+		"type":           "upload",
+		"stage":          "exported",
+		"bytes":          bytesWritten,
+		"includes_count": len(includes),
+		"includes":       includes,
+		"message":        "本地配置已打包，准备上传",
+	})
+
 	file, err := os.Open(zipPath)
 	if err != nil {
+		s.emitSyncEvent(map[string]interface{}{
+			"type":    "upload",
+			"stage":   "error",
+			"message": err.Error(),
+		})
 		return WebDAVSyncResult{}, err
 	}
 	defer file.Close()
 
+	s.emitSyncEvent(map[string]interface{}{
+		"type":       "upload",
+		"stage":      "uploading",
+		"remote_url": fileURL,
+		"sent":       int64(0),
+		"total":      bytesWritten,
+		"message":    "正在上传到 WebDAV",
+	})
+
+	var lastProgressEmit time.Time
 	putCtx, putCancel := context.WithTimeout(context.Background(), time.Duration(cfg.TimeoutSeconds)*time.Second)
-	putErr := client.put(putCtx, fileURL, "application/zip", file)
+	putErr := client.putWithProgress(putCtx, fileURL, "application/zip", file, func(sent int64, total int64) {
+		now := time.Now()
+		if sent == 0 || (total > 0 && sent >= total) || now.Sub(lastProgressEmit) >= 200*time.Millisecond {
+			lastProgressEmit = now
+			if total <= 0 {
+				total = bytesWritten
+			}
+			s.emitSyncEvent(map[string]interface{}{
+				"type":       "upload",
+				"stage":      "uploading",
+				"remote_url": fileURL,
+				"sent":       sent,
+				"total":      total,
+			})
+		}
+	})
 	putCancel()
 	if putErr != nil {
+		s.emitSyncEvent(map[string]interface{}{
+			"type":       "upload",
+			"stage":      "error",
+			"remote_url": fileURL,
+			"message":    putErr.Error(),
+		})
 		return WebDAVSyncResult{}, putErr
 	}
+
+	s.emitSyncEvent(map[string]interface{}{
+		"type":       "upload",
+		"stage":      "done",
+		"remote_url": fileURL,
+		"bytes":      bytesWritten,
+		"message":    "同步完成",
+	})
 
 	return WebDAVSyncResult{
 		OK:        true,
 		Message:   "已同步到 WebDAV",
 		RemoteURL: fileURL,
 		Bytes:     bytesWritten,
+		Includes:  includes,
 	}, nil
 }
 

@@ -258,6 +258,8 @@ func main() {
 
 	// 设置 NotificationService 的 App 引用，用于发送事件到前端
 	notificationService.SetApp(app)
+	// WebDAV 同步进度事件
+	webdavSyncService.SetApp(app)
 
 	app.OnShutdown(func() {
 		log.Println("🛑 应用正在关闭，停止后台服务...")

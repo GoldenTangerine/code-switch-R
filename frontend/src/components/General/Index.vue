@@ -1,17 +1,18 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Call } from '@wailsio/runtime'
+import { Call, Events } from '@wailsio/runtime'
 import ListItem from '../Setting/ListRow.vue'
 import LanguageSwitcher from '../Setting/LanguageSwitcher.vue'
 import ThemeSetting from '../Setting/ThemeSetting.vue'
 import NetworkWslSettings from '../Setting/NetworkWslSettings.vue'
+import InlineModal from '../common/InlineModal.vue'
 import { fetchAppSettings, saveAppSettings, type AppSettings } from '../../services/appSettings'
 import { checkUpdate, downloadUpdate, restartApp, getUpdateState, setAutoCheckEnabled, type UpdateState } from '../../services/update'
 import { fetchCurrentVersion } from '../../services/version'
 import { getBlacklistSettings, updateBlacklistSettings, getLevelBlacklistEnabled, setLevelBlacklistEnabled, getBlacklistEnabled, setBlacklistEnabled, type BlacklistSettings } from '../../services/settings'
 import { fetchConfigImportStatus, importFromPath, type ConfigImportStatus } from '../../services/configImport'
-import { fetchWebDAVConfig, saveWebDAVConfig, testWebDAVConfig, syncToWebDAV, loadFromWebDAV, type WebDAVSyncConfig } from '../../services/webdavSync'
+import { fetchWebDAVConfig, previewWebDAVContent, saveWebDAVConfig, testWebDAVConfig, syncToWebDAV, loadFromWebDAV, type WebDAVSyncConfig } from '../../services/webdavSync'
 import { useI18n } from 'vue-i18n'
 import { extractErrorMessage } from '../../utils/error'
 import { showToast } from '../../utils/toast'
@@ -96,6 +97,161 @@ const webdavPassword = ref('')
 const webdavRemoteDir = ref('')
 const webdavRemoteFile = ref('codeswitch-config.zip')
 const webdavTimeoutSeconds = ref(20)
+
+type WebDAVUploadStage =
+  | 'idle'
+  | 'ready'
+  | 'start'
+  | 'ensure_dir'
+  | 'exporting'
+  | 'exported'
+  | 'uploading'
+  | 'done'
+  | 'error'
+
+const webdavUploadModalOpen = ref(false)
+const webdavUploadPreviewLoading = ref(false)
+const webdavUploadIncludes = ref<string[]>([])
+const webdavUploadStage = ref<WebDAVUploadStage>('idle')
+const webdavUploadMessage = ref('')
+const webdavUploadRemoteURL = ref('')
+const webdavUploadSent = ref(0)
+const webdavUploadTotal = ref(0)
+const webdavUploadBytes = ref(0)
+const webdavUploadError = ref('')
+
+let unsubscribeWebdavSync: (() => void) | null = null
+
+const formatBytes = (bytes?: number) => {
+  const value = Number(bytes ?? 0)
+  if (!Number.isFinite(value) || value < 0) return '—'
+  if (value === 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB']
+  let current = value
+  let idx = 0
+  while (current >= 1024 && idx < units.length - 1) {
+    current /= 1024
+    idx++
+  }
+  const digits = idx === 0 ? 0 : current >= 10 ? 1 : 2
+  return `${current.toFixed(digits)} ${units[idx]}`
+}
+
+const webdavUploadPercent = computed(() => {
+  const stage = webdavUploadStage.value
+  if (stage === 'done') return 100
+  if (stage === 'error') return Math.max(0, Math.min(100, 100))
+  if (stage === 'ensure_dir') return 10
+  if (stage === 'exporting') return 25
+  if (stage === 'exported') return 35
+  if (stage === 'uploading') {
+    const total = Number(webdavUploadTotal.value || 0)
+    const sent = Number(webdavUploadSent.value || 0)
+    if (total > 0) {
+      const ratio = Math.max(0, Math.min(1, sent / total))
+      return 35 + Math.round(ratio * 60)
+    }
+    return 60
+  }
+  if (stage === 'start') return 5
+  if (stage === 'ready') return 0
+  return 0
+})
+
+const resetWebdavUploadModal = () => {
+  webdavUploadPreviewLoading.value = false
+  webdavUploadIncludes.value = []
+  webdavUploadStage.value = 'ready'
+  webdavUploadMessage.value = ''
+  webdavUploadRemoteURL.value = ''
+  webdavUploadSent.value = 0
+  webdavUploadTotal.value = 0
+  webdavUploadBytes.value = 0
+  webdavUploadError.value = ''
+}
+
+const loadWebdavUploadPreview = async () => {
+  webdavUploadPreviewLoading.value = true
+  try {
+    const preview = await previewWebDAVContent()
+    webdavUploadIncludes.value = preview?.includes ?? []
+  } catch (error) {
+    console.error('failed to preview webdav content', error)
+    webdavUploadIncludes.value = []
+  } finally {
+    webdavUploadPreviewLoading.value = false
+  }
+}
+
+const openWebdavUploadModal = async () => {
+  if (webdavLoading.value || webdavUploading.value || webdavDownloading.value) return
+  webdavUploadModalOpen.value = true
+  resetWebdavUploadModal()
+  await loadWebdavUploadPreview()
+}
+
+const closeWebdavUploadModal = () => {
+  if (webdavUploading.value) {
+    showToast(t('components.general.webdav.uploading'), 'warning')
+    return
+  }
+  webdavUploadModalOpen.value = false
+}
+
+const startWebdavUpload = async () => {
+  if (webdavLoading.value || webdavUploading.value || webdavDownloading.value) return
+  webdavUploading.value = true
+  webdavUploadError.value = ''
+  webdavUploadStage.value = 'start'
+  webdavUploadMessage.value = t('components.general.webdav.uploading')
+  try {
+    const result = await syncToWebDAV(buildWebDAVConfig())
+    webdavUploadBytes.value = Number(result?.bytes ?? webdavUploadBytes.value)
+    webdavUploadRemoteURL.value = result?.remote_url ?? webdavUploadRemoteURL.value
+    if (Array.isArray(result?.includes) && result.includes.length > 0) {
+      webdavUploadIncludes.value = result.includes
+    }
+    showToast(t('components.general.webdav.uploadOk'), 'success')
+  } catch (error) {
+    console.error('webdav upload failed', error)
+    webdavUploadStage.value = 'error'
+    webdavUploadError.value = extractErrorMessage(error)
+    showToast(t('components.general.webdav.uploadFailed') + ': ' + webdavUploadError.value, 'error')
+  } finally {
+    webdavUploading.value = false
+  }
+}
+
+const handleWebdavSyncEvent = (event: { data: Record<string, any> }) => {
+  const data = event?.data ?? {}
+  if (data?.type !== 'upload') return
+
+  const stage = String(data?.stage || '').trim()
+  if (stage) {
+    webdavUploadStage.value = stage as WebDAVUploadStage
+  }
+  if (typeof data?.message === 'string' && data.message.trim()) {
+    webdavUploadMessage.value = data.message.trim()
+  }
+  if (typeof data?.remote_url === 'string' && data.remote_url.trim()) {
+    webdavUploadRemoteURL.value = data.remote_url.trim()
+  }
+  if (typeof data?.sent === 'number') {
+    webdavUploadSent.value = data.sent
+  }
+  if (typeof data?.total === 'number') {
+    webdavUploadTotal.value = data.total
+  }
+  if (typeof data?.bytes === 'number') {
+    webdavUploadBytes.value = data.bytes
+  }
+  if (Array.isArray(data?.includes)) {
+    webdavUploadIncludes.value = data.includes
+  }
+  if (stage === 'error') {
+    webdavUploadError.value = String(data?.message || webdavUploadError.value || '同步失败')
+  }
+}
 
 const goBack = () => {
   router.push('/')
@@ -631,19 +787,7 @@ const testWebDAV = async () => {
 }
 
 const uploadToWebDAV = async () => {
-  if (webdavLoading.value || webdavUploading.value || webdavDownloading.value) return
-  const confirmed = confirm(t('components.general.webdav.confirmUpload'))
-  if (!confirmed) return
-  webdavUploading.value = true
-  try {
-    await syncToWebDAV(buildWebDAVConfig())
-    showToast(t('components.general.webdav.uploadOk'), 'success')
-  } catch (error) {
-    console.error('webdav upload failed', error)
-    showToast(t('components.general.webdav.uploadFailed') + ': ' + extractErrorMessage(error), 'error')
-  } finally {
-    webdavUploading.value = false
-  }
+  await openWebdavUploadModal()
 }
 
 const downloadFromWebDAV = async () => {
@@ -687,6 +831,16 @@ onMounted(async () => {
 
   // 加载 WebDAV 配置
   await loadWebDAV()
+
+  // WebDAV 同步进度事件
+  unsubscribeWebdavSync = Events.On('webdav:sync', handleWebdavSyncEvent as Events.Callback)
+})
+
+onBeforeUnmount(() => {
+  if (unsubscribeWebdavSync) {
+    unsubscribeWebdavSync()
+    unsubscribeWebdavSync = null
+  }
 })
 </script>
 
@@ -1354,6 +1508,92 @@ onMounted(async () => {
           </ListItem>
         </div>
       </section>
+
+      <InlineModal
+        :open="webdavUploadModalOpen"
+        :title="$t('components.general.webdav.upload')"
+        :close-on-backdrop="false"
+        @close="closeWebdavUploadModal"
+      >
+        <div class="webdav-sync-modal">
+          <p class="webdav-sync-hint">{{ $t('components.general.webdav.confirmUpload') }}</p>
+
+          <div class="webdav-sync-block">
+            <div class="webdav-sync-block-title">
+              {{ $t('components.general.webdav.includes') }}
+              <span v-if="webdavUploadIncludes.length" class="webdav-sync-count">
+                ({{ webdavUploadIncludes.length }})
+              </span>
+            </div>
+            <div v-if="webdavUploadPreviewLoading" class="info-text">
+              {{ $t('components.general.import.loading') }}
+            </div>
+            <div v-else-if="!webdavUploadIncludes.length" class="info-text">
+              —
+            </div>
+            <ul v-else class="webdav-sync-includes">
+              <li v-for="item in webdavUploadIncludes" :key="item">{{ item }}</li>
+            </ul>
+          </div>
+
+          <div class="webdav-sync-block">
+            <div class="webdav-sync-block-title">{{ $t('components.general.webdav.progress') }}</div>
+
+            <div class="webdav-sync-progress-row">
+              <span class="webdav-sync-stage">{{ webdavUploadMessage || webdavUploadStage }}</span>
+              <span class="webdav-sync-percent">{{ webdavUploadPercent }}%</span>
+            </div>
+            <div
+              class="webdav-progress-bar"
+              role="progressbar"
+              :aria-valuenow="webdavUploadPercent"
+              aria-valuemin="0"
+              aria-valuemax="100"
+            >
+              <div class="webdav-progress-fill" :style="{ width: webdavUploadPercent + '%' }"></div>
+            </div>
+            <div v-if="webdavUploadStage === 'uploading' && webdavUploadTotal > 0" class="webdav-sync-meta">
+              {{ formatBytes(webdavUploadSent) }} / {{ formatBytes(webdavUploadTotal) }}
+            </div>
+            <div v-else-if="webdavUploadStage === 'done' && webdavUploadBytes > 0" class="webdav-sync-meta">
+              {{ formatBytes(webdavUploadBytes) }}
+            </div>
+
+            <p v-if="webdavUploadRemoteURL" class="webdav-sync-remote">
+              {{ $t('components.general.webdav.remoteUrl') }}：<span class="webdav-sync-remote-url">{{ webdavUploadRemoteURL }}</span>
+            </p>
+            <p v-if="webdavUploadError" class="alert-error">{{ webdavUploadError }}</p>
+          </div>
+        </div>
+
+        <footer class="webdav-sync-actions">
+          <button
+            v-if="!webdavUploading && (webdavUploadStage === 'ready' || webdavUploadStage === 'idle')"
+            class="action-btn"
+            type="button"
+            @click="closeWebdavUploadModal"
+          >
+            {{ $t('common.cancel') }}
+          </button>
+
+          <button
+            v-if="!webdavUploading && (webdavUploadStage === 'ready' || webdavUploadStage === 'idle')"
+            class="primary-btn"
+            type="button"
+            @click="startWebdavUpload"
+          >
+            {{ $t('components.general.webdav.upload') }}
+          </button>
+
+          <button v-else-if="webdavUploading" class="primary-btn" type="button" disabled>
+            {{ $t('components.general.webdav.uploading') }}
+          </button>
+
+          <button v-else class="action-btn" type="button" @click="closeWebdavUploadModal">
+            {{ $t('common.close') }}
+          </button>
+        </footer>
+      </InlineModal>
     </div>
   </div>
 </template>
@@ -1403,7 +1643,8 @@ onMounted(async () => {
   line-height: 1.4;
   max-width: 320px;
   text-align: right;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 :global(.dark) .hint-text {
@@ -1453,6 +1694,107 @@ onMounted(async () => {
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.webdav-sync-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.webdav-sync-hint {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--mac-text-secondary);
+  line-height: 1.5;
+}
+
+.webdav-sync-block-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--mac-text);
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.webdav-sync-count {
+  font-size: 0.8rem;
+  color: var(--mac-text-secondary);
+  font-weight: 500;
+}
+
+.webdav-sync-includes {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 12px;
+  color: var(--mac-text-secondary);
+  line-height: 1.5;
+}
+
+.webdav-sync-progress-row {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.webdav-sync-stage {
+  font-size: 0.875rem;
+  color: var(--mac-text-secondary);
+}
+
+.webdav-sync-percent {
+  font-size: 0.85rem;
+  color: var(--mac-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.webdav-progress-bar {
+  margin-top: 8px;
+  width: 100%;
+  height: 10px;
+  background: var(--mac-surface-strong);
+  border: 1px solid var(--mac-border);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.webdav-progress-fill {
+  height: 100%;
+  background: #0ea5e9;
+  transition: width 0.2s ease;
+}
+
+.webdav-sync-meta {
+  margin-top: 8px;
+  text-align: right;
+  font-size: 12px;
+  color: var(--mac-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.webdav-sync-remote {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--mac-text-secondary);
+  line-height: 1.4;
+}
+
+.webdav-sync-remote-url {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  color: var(--mac-text);
+  overflow-wrap: anywhere;
+}
+
+.webdav-sync-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 16px;
+  border-top: 1px solid var(--mac-divider);
 }
 
 .info-text.warning {

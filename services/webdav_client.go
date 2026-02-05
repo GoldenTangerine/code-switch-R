@@ -18,6 +18,39 @@ type webdavClient struct {
 	password   string
 }
 
+type progressReadSeeker struct {
+	rs         io.ReadSeeker
+	total      int64
+	sent       int64
+	onProgress func(sent int64, total int64)
+}
+
+func (p *progressReadSeeker) Read(b []byte) (int, error) {
+	n, err := p.rs.Read(b)
+	if n > 0 {
+		p.sent += int64(n)
+		if p.onProgress != nil {
+			p.onProgress(p.sent, p.total)
+		}
+	}
+	return n, err
+}
+
+func (p *progressReadSeeker) Seek(offset int64, whence int) (int64, error) {
+	pos, err := p.rs.Seek(offset, whence)
+	if err != nil {
+		return pos, err
+	}
+	// 重置进度（用于重试/重定向时重新上传）
+	if whence == io.SeekStart && offset == 0 {
+		p.sent = 0
+		if p.onProgress != nil {
+			p.onProgress(p.sent, p.total)
+		}
+	}
+	return pos, nil
+}
+
 func newWebDAVClient(username, password string, timeout time.Duration) *webdavClient {
 	if timeout <= 0 {
 		timeout = 20 * time.Second
@@ -76,16 +109,37 @@ func (c *webdavClient) mkcol(ctx context.Context, targetURL string) error {
 }
 
 func (c *webdavClient) put(ctx context.Context, targetURL string, contentType string, body io.ReadSeeker) error {
+	return c.putWithProgress(ctx, targetURL, contentType, body, nil)
+}
+
+func (c *webdavClient) putWithProgress(ctx context.Context, targetURL string, contentType string, body io.ReadSeeker, onProgress func(sent int64, total int64)) error {
+	if body == nil {
+		return fmt.Errorf("nil body")
+	}
+
+	// 尽量补齐 Content-Length：部分 WebDAV/网盘网关不接受 chunked PUT
+	total := int64(-1)
+	if cur, err := body.Seek(0, io.SeekCurrent); err == nil {
+		if end, err := body.Seek(0, io.SeekEnd); err == nil {
+			total = end
+		}
+		_, _ = body.Seek(cur, io.SeekStart)
+	}
+
+	prs := &progressReadSeeker{rs: body, total: total, onProgress: onProgress}
 	makeReq := func(u string) (*http.Request, error) {
-		if _, err := body.Seek(0, io.SeekStart); err != nil {
+		if _, err := prs.Seek(0, io.SeekStart); err != nil {
 			return nil, err
 		}
-		req, err := http.NewRequestWithContext(ctx, http.MethodPut, u, io.NopCloser(body))
+		req, err := http.NewRequestWithContext(ctx, http.MethodPut, u, io.NopCloser(prs))
 		if err != nil {
 			return nil, err
 		}
 		if contentType != "" {
 			req.Header.Set("Content-Type", contentType)
+		}
+		if total >= 0 {
+			req.ContentLength = total
 		}
 		return req, nil
 	}
