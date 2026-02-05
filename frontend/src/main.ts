@@ -1,5 +1,6 @@
 import { createApp } from 'vue'
 import App from './App.vue'
+import '@vuepic/vue-datepicker/dist/main.css'
 import './style.css'
 import { i18n, setupI18n } from './utils/i18n'
 import { initTheme } from './utils/ThemeManager'

@@ -16,6 +16,7 @@
     "@codemirror/view": "^6.38.8",
     "@headlessui/vue": "^1.7.23",
     "@lobehub/icons-static-svg": "^1.73.0",
+    "@vuepic/vue-datepicker": "^12.1.0",
     "@wailsio/runtime": "^3.0.0-alpha.72",
     "chart.js": "^4.5.1",
     "codemirror": "^6.0.2",

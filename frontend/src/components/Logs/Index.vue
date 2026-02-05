@@ -36,6 +36,7 @@
           <span>{{ t('components.logs.filters.dateType') }}</span>
           <select v-model="filters.dateType" class="mac-select">
             <option value="all">{{ t('components.logs.filters.dateTypeAll') }}</option>
+            <option value="today">{{ t('components.logs.filters.dateTypeToday') }}</option>
             <option value="year">{{ t('components.logs.filters.dateTypeYear') }}</option>
             <option value="month">{{ t('components.logs.filters.dateTypeMonth') }}</option>
             <option value="day">{{ t('components.logs.filters.dateTypeDay') }}</option>
@@ -45,21 +46,69 @@
 
         <label v-if="filters.dateType === 'year'" class="filter-field">
           <span>{{ t('components.logs.filters.year') }}</span>
-          <input v-model="filters.year" type="number" class="mac-input" placeholder="YYYY" />
+          <VueDatePicker
+            v-model="yearPickerValue"
+            class="logs-date-picker"
+            :dark="isDarkTheme"
+            :locale="dateFnsLocale"
+            year-picker
+            auto-apply
+            :text-input="false"
+            :year-range="yearPickerRange"
+            :input-attrs="{ hideInputIcon: true }"
+            :ui="datePickerUi"
+            :formats="{ input: 'yyyy' }"
+            placeholder="YYYY"
+          />
         </label>
         <label v-else-if="filters.dateType === 'month'" class="filter-field">
           <span>{{ t('components.logs.filters.month') }}</span>
-          <input v-model="filters.month" type="month" class="mac-input" />
+          <VueDatePicker
+            v-model="monthPickerValue"
+            class="logs-date-picker"
+            :dark="isDarkTheme"
+            :locale="dateFnsLocale"
+            month-picker
+            auto-apply
+            :text-input="false"
+            :year-range="yearPickerRange"
+            :input-attrs="{ hideInputIcon: true }"
+            :ui="datePickerUi"
+            :formats="{ input: 'yyyy-MM' }"
+            placeholder="YYYY-MM"
+          />
         </label>
         <label v-else-if="filters.dateType === 'day'" class="filter-field">
           <span>{{ t('components.logs.filters.day') }}</span>
-          <input v-model="filters.day" type="date" class="mac-input" />
+          <VueDatePicker
+            v-model="dayPickerValue"
+            class="logs-date-picker"
+            :dark="isDarkTheme"
+            :locale="dateFnsLocale"
+            auto-apply
+            :text-input="false"
+            :input-attrs="{ hideInputIcon: true }"
+            :ui="datePickerUi"
+            :formats="{ input: 'yyyy-MM-dd' }"
+            placeholder="YYYY-MM-DD"
+          />
         </label>
         <label v-else-if="filters.dateType === 'range'" class="filter-field">
           <span>{{ t('components.logs.filters.range') }}</span>
-          <input v-model="filters.rangeStart" type="date" class="mac-input" />
-          <span class="range-separator">至</span>
-          <input v-model="filters.rangeEnd" type="date" class="mac-input" />
+          <VueDatePicker
+            v-model="rangePickerValue"
+            class="logs-date-picker"
+            :dark="isDarkTheme"
+            :locale="dateFnsLocale"
+            :range="rangePickerConfig"
+            :multi-calendars="2"
+            auto-apply
+            :text-input="false"
+            :input-attrs="{ hideInputIcon: true }"
+            :ui="datePickerUi"
+            :formats="{ input: formatRangeInput }"
+            :placeholder="t('components.logs.filters.range')"
+          />
         </label>
       </div>
       <div class="filter-actions">
@@ -220,6 +269,26 @@
       </div>
     </div>
 
+    <!-- 清理确认弹窗 -->
+    <BaseModal
+      :open="storageClearConfirm.open"
+      :title="t('components.logs.storage.confirmTitle')"
+      variant="confirm"
+      @close="closeStorageClearConfirm"
+    >
+      <div class="confirm-body">
+        <p>{{ storageClearConfirmMessage }}</p>
+      </div>
+      <footer class="form-actions confirm-actions">
+        <BaseButton variant="outline" type="button" :disabled="storageClearing" @click="closeStorageClearConfirm">
+          {{ t('common.cancel') }}
+        </BaseButton>
+        <BaseButton variant="danger" type="button" :disabled="storageClearing" @click="confirmStorageClear">
+          {{ storageClearing ? t('components.logs.storage.clearing') : storageClearConfirmActionLabel }}
+        </BaseButton>
+      </footer>
+    </BaseModal>
+
     <!-- 金额明细弹窗 -->
     <BaseModal
       :open="costDetailModal.open"
@@ -268,6 +337,8 @@
 import { computed, reactive, ref, onMounted, watch, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import { VueDatePicker, type MonthModel } from '@vuepic/vue-datepicker'
+import { enUS, zhCN } from 'date-fns/locale'
 import BaseButton from '../common/BaseButton.vue'
 import BaseModal from '../common/BaseModal.vue'
 import {
@@ -301,10 +372,50 @@ import { extractErrorMessage } from '../../utils/error'
 
 Chart.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend)
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const router = useRouter()
 
-type LogDateFilterType = 'all' | 'year' | 'month' | 'day' | 'range'
+const dateFnsLocale = computed(() => (locale.value === 'zh' ? zhCN : enUS))
+
+const isDarkTheme = ref(document.documentElement.classList.contains('dark'))
+let themeObserver: MutationObserver | null = null
+
+const startThemeObserver = () => {
+  themeObserver?.disconnect()
+  themeObserver = new MutationObserver(() => {
+    isDarkTheme.value = document.documentElement.classList.contains('dark')
+  })
+  themeObserver.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ['class'],
+  })
+}
+
+const datePickerUi = {
+  input: 'mac-input logs-date-picker-input',
+  menu: 'mac-panel logs-date-picker-menu',
+}
+
+const yearPickerRange = computed<[number, number]>(() => {
+  const currentYear = new Date().getFullYear()
+  return [1970, Math.max(currentYear + 1, 1971)]
+})
+
+const rangePickerConfig = { partialRange: false } as const
+
+const pad2 = (num: number) => num.toString().padStart(2, '0')
+
+const formatDateYmd = (date: Date) =>
+  `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`
+
+const formatRangeInput = (dates: Array<Date | null>) => {
+  const [start, end] = dates ?? []
+  if (!start) return ''
+  if (!end) return formatDateYmd(start)
+  return `${formatDateYmd(start)} ~ ${formatDateYmd(end)}`
+}
+
+type LogDateFilterType = 'all' | 'today' | 'year' | 'month' | 'day' | 'range'
 
 const logs = ref<RequestLog[]>([])
 const stats = ref<LogStats | null>(null)
@@ -365,10 +476,84 @@ const toDateParts = (value: string) => {
   return { y, m, d }
 }
 
+const yearPickerValue = computed<number | null>({
+  get() {
+    const year = Number(filters.year)
+    if (!Number.isFinite(year) || year < 1970 || year > 9999) return null
+    return year
+  },
+  set(value) {
+    filters.year = value == null ? '' : String(value)
+  },
+})
+
+const monthPickerValue = computed<MonthModel | null>({
+  get() {
+    const match = String(filters.month || '').match(/^(\d{4})-(\d{2})$/)
+    if (!match) return null
+    const year = Number(match[1])
+    const month = Number(match[2])
+    if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) return null
+    return { year, month: month - 1 }
+  },
+  set(value) {
+    if (!value) {
+      filters.month = ''
+      return
+    }
+    const year = Number(value.year)
+    const monthIndex = Number(value.month)
+    if (!Number.isFinite(year) || !Number.isFinite(monthIndex) || monthIndex < 0 || monthIndex > 11) {
+      filters.month = ''
+      return
+    }
+    filters.month = `${year}-${pad2(monthIndex + 1)}`
+  },
+})
+
+const dayPickerValue = computed<Date | null>({
+  get() {
+    if (!filters.day) return null
+    const parts = toDateParts(filters.day)
+    if (!parts) return null
+    return new Date(parts.y, parts.m - 1, parts.d, 0, 0, 0, 0)
+  },
+  set(value) {
+    filters.day = value ? formatDateYmd(value) : ''
+  },
+})
+
+const rangePickerValue = computed<Date[] | null>({
+  get() {
+    if (!filters.rangeStart || !filters.rangeEnd) return null
+    const startParts = toDateParts(filters.rangeStart)
+    const endParts = toDateParts(filters.rangeEnd)
+    if (!startParts || !endParts) return null
+    const start = new Date(startParts.y, startParts.m - 1, startParts.d, 0, 0, 0, 0)
+    const end = new Date(endParts.y, endParts.m - 1, endParts.d, 0, 0, 0, 0)
+    return [start, end]
+  },
+  set(value) {
+    if (!value || value.length < 2 || !value[0] || !value[1]) {
+      filters.rangeStart = ''
+      filters.rangeEnd = ''
+      return
+    }
+    filters.rangeStart = formatDateYmd(value[0])
+    filters.rangeEnd = formatDateYmd(value[1])
+  },
+})
+
 const computeDateRange = () => {
   switch (filters.dateType) {
     case 'all':
       return { startAt: '', endAt: '' }
+    case 'today': {
+      const start = startOfTodayLocal()
+      const end = new Date(start.getTime())
+      end.setDate(end.getDate() + 1)
+      return { startAt: toTimeLayout(start), endAt: toTimeLayout(end) }
+    }
     case 'year': {
       const year = Number(filters.year)
       if (!Number.isFinite(year) || year < 1970 || year > 9999) return null
@@ -736,35 +921,77 @@ const loadStorageStats = async () => {
   }
 }
 
-const handleClearRequestLogs = async () => {
-  if (storageClearing.value) return
-  const ok = confirm(t('components.logs.storage.confirmClearRequestLog'))
-  if (!ok) return
-  storageClearing.value = true
-  try {
-    await clearRequestLogs()
-    showToast(t('components.logs.storage.success'), 'success')
-    await Promise.all([loadStorageStats(), loadDashboard()])
-  } catch (error) {
-    console.error('failed to clear request logs', error)
-    showToast(t('components.logs.storage.failed', { error: extractErrorMessage(error) }), 'error')
-  } finally {
-    storageClearing.value = false
-  }
+type StorageClearTarget = 'requestLogs' | 'stats'
+
+const storageClearConfirm = reactive<{
+  open: boolean
+  target: StorageClearTarget | null
+}>({
+  open: false,
+  target: null,
+})
+
+const resetStorageClearConfirm = () => {
+  storageClearConfirm.open = false
+  storageClearConfirm.target = null
 }
 
-const handleClearStats = async () => {
+const closeStorageClearConfirm = () => {
   if (storageClearing.value) return
-  const ok = confirm(t('components.logs.storage.confirmClearStats'))
-  if (!ok) return
+  resetStorageClearConfirm()
+}
+
+const storageClearConfirmMessage = computed(() => {
+  switch (storageClearConfirm.target) {
+    case 'requestLogs':
+      return t('components.logs.storage.confirmClearRequestLog')
+    case 'stats':
+      return t('components.logs.storage.confirmClearStats')
+    default:
+      return ''
+  }
+})
+
+const storageClearConfirmActionLabel = computed(() => {
+  switch (storageClearConfirm.target) {
+    case 'requestLogs':
+      return t('components.logs.storage.clearRequestLog')
+    case 'stats':
+      return t('components.logs.storage.clearStats')
+    default:
+      return t('components.logs.storage.clearRequestLog')
+  }
+})
+
+const handleClearRequestLogs = () => {
+  if (storageClearing.value) return
+  storageClearConfirm.target = 'requestLogs'
+  storageClearConfirm.open = true
+}
+
+const handleClearStats = () => {
+  if (storageClearing.value) return
+  storageClearConfirm.target = 'stats'
+  storageClearConfirm.open = true
+}
+
+const confirmStorageClear = async () => {
+  if (storageClearing.value || !storageClearConfirm.target) return
+  const target = storageClearConfirm.target
   storageClearing.value = true
   try {
-    await clearLogStats()
+    if (target === 'requestLogs') {
+      await clearRequestLogs()
+    } else {
+      await clearLogStats()
+    }
     showToast(t('components.logs.storage.success'), 'success')
     await Promise.all([loadStorageStats(), loadDashboard()])
+    resetStorageClearConfirm()
   } catch (error) {
-    console.error('failed to clear log stats', error)
+    console.error('failed to clear log storage', error)
     showToast(t('components.logs.storage.failed', { error: extractErrorMessage(error) }), 'error')
+    resetStorageClearConfirm()
   } finally {
     storageClearing.value = false
   }
@@ -947,6 +1174,11 @@ const summaryScopeHint = computed(() => {
       const date = `${today.getFullYear()}-${padHour(today.getMonth() + 1)}-${padHour(today.getDate())}`
       return t('components.logs.summary.todayScope', { date })
     }
+    case 'today': {
+      const today = startOfTodayLocal()
+      const date = `${today.getFullYear()}-${padHour(today.getMonth() + 1)}-${padHour(today.getDate())}`
+      return t('components.logs.summary.todayScope', { date })
+    }
     case 'year': {
       const year = filters.year?.trim()
       return year ? t('components.logs.summary.yearScope', { year }) : ''
@@ -991,6 +1223,7 @@ watch(
 )
 
 onMounted(async () => {
+  startThemeObserver()
   await loadDashboard()
   await loadStorageStats()
   startCountdown()
@@ -998,16 +1231,12 @@ onMounted(async () => {
 
 onUnmounted(() => {
   stopCountdown()
+  themeObserver?.disconnect()
+  themeObserver = null
 })
 </script>
 
 <style scoped>
-.range-separator {
-  color: var(--mac-text-secondary);
-  font-size: 0.85rem;
-  white-space: nowrap;
-}
-
 .logs-summary {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
