@@ -109,6 +109,9 @@ type WebDAVUploadStage =
   | 'done'
   | 'error'
 
+type WebDAVUploadLogLevel = 'info' | 'warn' | 'error'
+type WebDAVUploadLog = { ts: number; level: WebDAVUploadLogLevel; text: string }
+
 const webdavUploadModalOpen = ref(false)
 const webdavUploadPreviewLoading = ref(false)
 const webdavUploadIncludes = ref<string[]>([])
@@ -119,6 +122,7 @@ const webdavUploadSent = ref(0)
 const webdavUploadTotal = ref(0)
 const webdavUploadBytes = ref(0)
 const webdavUploadError = ref('')
+const webdavUploadLogs = ref<WebDAVUploadLog[]>([])
 
 let unsubscribeWebdavSync: (() => void) | null = null
 
@@ -168,6 +172,16 @@ const resetWebdavUploadModal = () => {
   webdavUploadTotal.value = 0
   webdavUploadBytes.value = 0
   webdavUploadError.value = ''
+  webdavUploadLogs.value = []
+}
+
+const appendWebdavUploadLog = (text: string, level: WebDAVUploadLogLevel = 'info', ts?: number) => {
+  const trimmed = String(text ?? '').trim()
+  if (!trimmed) return
+  webdavUploadLogs.value.push({ ts: Number(ts ?? Date.now()), level, text: trimmed })
+  if (webdavUploadLogs.value.length > 200) {
+    webdavUploadLogs.value = webdavUploadLogs.value.slice(-200)
+  }
 }
 
 const loadWebdavUploadPreview = async () => {
@@ -204,18 +218,25 @@ const startWebdavUpload = async () => {
   webdavUploadError.value = ''
   webdavUploadStage.value = 'start'
   webdavUploadMessage.value = t('components.general.webdav.uploading')
-  try {
-    const result = await syncToWebDAV(buildWebDAVConfig())
-    webdavUploadBytes.value = Number(result?.bytes ?? webdavUploadBytes.value)
-    webdavUploadRemoteURL.value = result?.remote_url ?? webdavUploadRemoteURL.value
-    if (Array.isArray(result?.includes) && result.includes.length > 0) {
-      webdavUploadIncludes.value = result.includes
-    }
-    showToast(t('components.general.webdav.uploadOk'), 'success')
-  } catch (error) {
-    console.error('webdav upload failed', error)
-    webdavUploadStage.value = 'error'
+	  try {
+	    const result = await syncToWebDAV(buildWebDAVConfig())
+	    webdavUploadBytes.value = Number(result?.bytes ?? webdavUploadBytes.value)
+	    webdavUploadRemoteURL.value = result?.remote_url ?? webdavUploadRemoteURL.value
+	    if (Array.isArray(result?.includes) && result.includes.length > 0) {
+	      webdavUploadIncludes.value = result.includes
+	    }
+	    if (result?.ok) {
+	      webdavUploadStage.value = 'done'
+	      if (typeof result?.message === 'string' && result.message.trim()) {
+	        webdavUploadMessage.value = result.message.trim()
+	      }
+	    }
+	    showToast(t('components.general.webdav.uploadOk'), 'success')
+	  } catch (error) {
+	    console.error('webdav upload failed', error)
+	    webdavUploadStage.value = 'error'
     webdavUploadError.value = extractErrorMessage(error)
+    appendWebdavUploadLog(webdavUploadError.value, 'error')
     showToast(t('components.general.webdav.uploadFailed') + ': ' + webdavUploadError.value, 'error')
   } finally {
     webdavUploading.value = false
@@ -229,6 +250,13 @@ const handleWebdavSyncEvent = (event: { data: Record<string, any> }) => {
   const stage = String(data?.stage || '').trim()
   if (stage) {
     webdavUploadStage.value = stage as WebDAVUploadStage
+  }
+  const logText = typeof data?.log === 'string' ? data.log.trim() : ''
+  if (logText) {
+    const rawLevel = typeof data?.log_level === 'string' ? data.log_level.trim().toLowerCase() : ''
+    const level: WebDAVUploadLogLevel = rawLevel === 'error' ? 'error' : rawLevel === 'warn' ? 'warn' : 'info'
+    const ts = typeof data?.timestamp === 'number' ? data.timestamp : Date.now()
+    appendWebdavUploadLog(logText, level, ts)
   }
   if (typeof data?.message === 'string' && data.message.trim()) {
     webdavUploadMessage.value = data.message.trim()
@@ -250,6 +278,7 @@ const handleWebdavSyncEvent = (event: { data: Record<string, any> }) => {
   }
   if (stage === 'error') {
     webdavUploadError.value = String(data?.message || webdavUploadError.value || '同步失败')
+    appendWebdavUploadLog(webdavUploadError.value, 'error')
   }
 }
 
@@ -1563,6 +1592,16 @@ onBeforeUnmount(() => {
               {{ $t('components.general.webdav.remoteUrl') }}：<span class="webdav-sync-remote-url">{{ webdavUploadRemoteURL }}</span>
             </p>
             <p v-if="webdavUploadError" class="alert-error">{{ webdavUploadError }}</p>
+            <div v-if="webdavUploadLogs.length" class="webdav-sync-logs">
+              <p
+                v-for="(item, idx) in webdavUploadLogs"
+                :key="`${item.ts}-${idx}`"
+                class="webdav-sync-log"
+                :class="{ 'is-error': item.level === 'error' }"
+              >
+                {{ item.text }}
+              </p>
+            </div>
           </div>
         </div>
 
@@ -1787,6 +1826,56 @@ onBeforeUnmount(() => {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   color: var(--mac-text);
   overflow-wrap: anywhere;
+}
+
+.alert-error {
+  margin: 10px 0 0;
+  padding: 0.65rem 0.85rem;
+  border-radius: 12px;
+  background: rgba(244, 67, 54, 0.12);
+  color: #d93025;
+  border: 1px solid rgba(244, 67, 54, 0.2);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+:global(.dark) .alert-error {
+  background: rgba(244, 67, 54, 0.15);
+  color: #ff9b9b;
+  border-color: rgba(244, 67, 54, 0.2);
+}
+
+.webdav-sync-logs {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--mac-surface-strong);
+  border: 1px solid var(--mac-border);
+  max-height: 160px;
+  overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--mac-text-secondary);
+}
+
+.webdav-sync-log {
+  margin: 0;
+  color: var(--mac-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.webdav-sync-log + .webdav-sync-log {
+  margin-top: 4px;
+}
+
+.webdav-sync-log.is-error {
+  color: #d93025;
+}
+
+:global(.dark) .webdav-sync-log.is-error {
+  color: #ff9b9b;
 }
 
 .webdav-sync-actions {
