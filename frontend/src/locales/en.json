@@ -562,6 +562,7 @@
         "update": "Application update",
         "blacklist": "Blacklist Settings",
         "dataImport": "Data Import",
+        "webdavSync": "WebDAV Sync",
         "connectivity": "Connectivity Test"
       },
       "label": {
@@ -644,7 +645,43 @@
       },
       "toast": {
         "blacklistSaveSuccess": "Blacklist settings saved",
-        "blacklistSaveFailed": "Failed to save blacklist settings: {error}"
+        "blacklistSaveFailed": "Failed to save blacklist settings: {error}",
+        "webdavSaveSuccess": "WebDAV settings saved",
+        "webdavSaveFailed": "Failed to save WebDAV settings: {error}"
+      },
+      "webdav": {
+        "endpoint": "WebDAV endpoint",
+        "endpointPlaceholder": "e.g. https://example.com/remote.php/dav/files/user/",
+        "username": "Username",
+        "usernamePlaceholder": "WebDAV username",
+        "password": "Password",
+        "passwordPlaceholder": "WebDAV password",
+        "remoteDir": "Remote directory (optional)",
+        "remoteDirPlaceholder": "e.g. code-switch-r",
+        "remoteFile": "Backup filename",
+        "remoteFilePlaceholder": "e.g. codeswitch-config.zip",
+        "timeoutSeconds": "Timeout (seconds)",
+        "timeoutPlaceholder": "e.g. 20",
+        "timeoutHint": "1–120, default 20",
+        "actions": "Actions",
+        "includes": "Includes",
+        "includesHint": "Providers, app settings, MCP, request logs, blacklist, availability history, etc. (excludes update cache and WebDAV password)",
+        "save": "Save",
+        "test": "Test",
+        "testing": "Testing…",
+        "upload": "Sync to WebDAV",
+        "uploading": "Syncing…",
+        "download": "Load from WebDAV",
+        "downloading": "Loading…",
+        "testOk": "WebDAV is OK",
+        "testFailed": "WebDAV test failed",
+        "uploadOk": "Synced to WebDAV",
+        "uploadFailed": "Failed to sync to WebDAV",
+        "downloadOk": "Loaded from WebDAV",
+        "downloadFailed": "Failed to load from WebDAV",
+        "confirmUpload": "This will upload local config (including providers and logs) to WebDAV. Continue?",
+        "confirmDownload": "This will download and overwrite local config (a local backup will be created). Continue?",
+        "downloadPostHint": "Loaded. Consider refreshing the home list / restarting if needed.\\nLocal backup: {backup}"
       },
       "update": {
         "checkFailed": "Check failed {count} times in a row",

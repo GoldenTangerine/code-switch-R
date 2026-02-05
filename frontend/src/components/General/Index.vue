@@ -11,6 +11,7 @@ import { checkUpdate, downloadUpdate, restartApp, getUpdateState, setAutoCheckEn
 import { fetchCurrentVersion } from '../../services/version'
 import { getBlacklistSettings, updateBlacklistSettings, getLevelBlacklistEnabled, setLevelBlacklistEnabled, getBlacklistEnabled, setBlacklistEnabled, type BlacklistSettings } from '../../services/settings'
 import { fetchConfigImportStatus, importFromPath, type ConfigImportStatus } from '../../services/configImport'
+import { fetchWebDAVConfig, saveWebDAVConfig, testWebDAVConfig, syncToWebDAV, loadFromWebDAV, type WebDAVSyncConfig } from '../../services/webdavSync'
 import { useI18n } from 'vue-i18n'
 import { extractErrorMessage } from '../../utils/error'
 import { showToast } from '../../utils/toast'
@@ -82,6 +83,19 @@ const importStatus = ref<ConfigImportStatus | null>(null)
 const importPath = ref('')
 const importing = ref(false)
 const importLoading = ref(true)
+
+// WebDAV 同步相关状态
+const webdavLoading = ref(true)
+const webdavSaving = ref(false)
+const webdavTesting = ref(false)
+const webdavUploading = ref(false)
+const webdavDownloading = ref(false)
+const webdavEndpoint = ref('')
+const webdavUsername = ref('')
+const webdavPassword = ref('')
+const webdavRemoteDir = ref('')
+const webdavRemoteFile = ref('codeswitch-config.zip')
+const webdavTimeoutSeconds = ref(20)
 
 const goBack = () => {
   router.push('/')
@@ -535,6 +549,123 @@ const handleImport = async () => {
   }
 }
 
+const normalizeWebDAVTimeoutSeconds = (value: unknown): number => {
+  const n = Number(value)
+  if (!Number.isFinite(n) || n <= 0) return 20
+  const rounded = Math.round(n)
+  if (rounded < 1) return 1
+  if (rounded > 120) return 120
+  return rounded
+}
+
+const buildWebDAVConfig = (): WebDAVSyncConfig => {
+  return {
+    endpoint: webdavEndpoint.value?.trim() ?? '',
+    username: webdavUsername.value?.trim() ?? '',
+    password: webdavPassword.value ?? '',
+    remote_dir: webdavRemoteDir.value?.trim() ?? '',
+    remote_file: (webdavRemoteFile.value?.trim() || 'codeswitch-config.zip'),
+    timeout_seconds: normalizeWebDAVTimeoutSeconds(webdavTimeoutSeconds.value),
+  }
+}
+
+const loadWebDAV = async () => {
+  webdavLoading.value = true
+  try {
+    const cfg = await fetchWebDAVConfig()
+    webdavEndpoint.value = cfg?.endpoint ?? ''
+    webdavUsername.value = cfg?.username ?? ''
+    webdavPassword.value = cfg?.password ?? ''
+    webdavRemoteDir.value = cfg?.remote_dir ?? ''
+    webdavRemoteFile.value = cfg?.remote_file ?? 'codeswitch-config.zip'
+    webdavTimeoutSeconds.value = normalizeWebDAVTimeoutSeconds(cfg?.timeout_seconds ?? 20)
+  } catch (error) {
+    console.error('failed to load webdav config', error)
+    webdavEndpoint.value = ''
+    webdavUsername.value = ''
+    webdavPassword.value = ''
+    webdavRemoteDir.value = ''
+    webdavRemoteFile.value = 'codeswitch-config.zip'
+    webdavTimeoutSeconds.value = 20
+  } finally {
+    webdavLoading.value = false
+  }
+}
+
+const saveWebDAV = async () => {
+  if (webdavLoading.value || webdavSaving.value) return
+  webdavSaving.value = true
+  try {
+    const saved = await saveWebDAVConfig(buildWebDAVConfig())
+    webdavEndpoint.value = saved?.endpoint ?? webdavEndpoint.value
+    webdavUsername.value = saved?.username ?? webdavUsername.value
+    webdavPassword.value = saved?.password ?? webdavPassword.value
+    webdavRemoteDir.value = saved?.remote_dir ?? webdavRemoteDir.value
+    webdavRemoteFile.value = saved?.remote_file ?? webdavRemoteFile.value
+    webdavTimeoutSeconds.value = normalizeWebDAVTimeoutSeconds(saved?.timeout_seconds ?? webdavTimeoutSeconds.value)
+    showToast(t('components.general.toast.webdavSaveSuccess'), 'success')
+  } catch (error) {
+    console.error('failed to save webdav config', error)
+    showToast(t('components.general.toast.webdavSaveFailed', { error: extractErrorMessage(error) }), 'error')
+  } finally {
+    webdavSaving.value = false
+  }
+}
+
+const testWebDAV = async () => {
+  if (webdavLoading.value || webdavTesting.value) return
+  webdavTesting.value = true
+  try {
+    const result = await testWebDAVConfig(buildWebDAVConfig())
+    if (result?.ok) {
+      showToast(t('components.general.webdav.testOk'), 'success')
+    } else {
+      showToast(result?.message || t('components.general.webdav.testFailed'), 'error')
+    }
+  } catch (error) {
+    console.error('webdav test failed', error)
+    showToast(t('components.general.webdav.testFailed') + ': ' + extractErrorMessage(error), 'error')
+  } finally {
+    webdavTesting.value = false
+  }
+}
+
+const uploadToWebDAV = async () => {
+  if (webdavLoading.value || webdavUploading.value || webdavDownloading.value) return
+  const confirmed = confirm(t('components.general.webdav.confirmUpload'))
+  if (!confirmed) return
+  webdavUploading.value = true
+  try {
+    await syncToWebDAV(buildWebDAVConfig())
+    showToast(t('components.general.webdav.uploadOk'), 'success')
+  } catch (error) {
+    console.error('webdav upload failed', error)
+    showToast(t('components.general.webdav.uploadFailed') + ': ' + extractErrorMessage(error), 'error')
+  } finally {
+    webdavUploading.value = false
+  }
+}
+
+const downloadFromWebDAV = async () => {
+  if (webdavLoading.value || webdavDownloading.value || webdavUploading.value) return
+  const confirmed = confirm(t('components.general.webdav.confirmDownload'))
+  if (!confirmed) return
+  webdavDownloading.value = true
+  try {
+    const result = await loadFromWebDAV(buildWebDAVConfig())
+    showToast(t('components.general.webdav.downloadOk'), 'success')
+    await loadAppSettings()
+    await loadBlacklistSettings()
+    await loadImportStatus()
+    alert(t('components.general.webdav.downloadPostHint', { backup: result?.backup_path || '' }))
+  } catch (error) {
+    console.error('webdav download failed', error)
+    showToast(t('components.general.webdav.downloadFailed') + ': ' + extractErrorMessage(error), 'error')
+  } finally {
+    webdavDownloading.value = false
+  }
+}
+
 onMounted(async () => {
   await loadAppSettings()
 
@@ -553,6 +684,9 @@ onMounted(async () => {
 
   // 加载导入状态
   await loadImportStatus()
+
+  // 加载 WebDAV 配置
+  await loadWebDAV()
 })
 </script>
 
@@ -1059,6 +1193,104 @@ onMounted(async () => {
       </section>
 
       <section>
+        <h2 class="mac-section-title">{{ $t('components.general.title.webdavSync') }}</h2>
+        <div class="mac-panel">
+          <ListItem :label="$t('components.general.webdav.endpoint')">
+            <input
+              type="text"
+              v-model="webdavEndpoint"
+              :disabled="webdavLoading"
+              :placeholder="$t('components.general.webdav.endpointPlaceholder')"
+              class="mac-input webdav-input"
+            />
+          </ListItem>
+          <ListItem :label="$t('components.general.webdav.username')">
+            <input
+              type="text"
+              v-model="webdavUsername"
+              :disabled="webdavLoading"
+              :placeholder="$t('components.general.webdav.usernamePlaceholder')"
+              class="mac-input webdav-input"
+            />
+          </ListItem>
+          <ListItem :label="$t('components.general.webdav.password')">
+            <input
+              type="password"
+              v-model="webdavPassword"
+              :disabled="webdavLoading"
+              :placeholder="$t('components.general.webdav.passwordPlaceholder')"
+              class="mac-input webdav-input"
+            />
+          </ListItem>
+          <ListItem :label="$t('components.general.webdav.remoteDir')">
+            <input
+              type="text"
+              v-model="webdavRemoteDir"
+              :disabled="webdavLoading"
+              :placeholder="$t('components.general.webdav.remoteDirPlaceholder')"
+              class="mac-input webdav-input"
+            />
+          </ListItem>
+          <ListItem :label="$t('components.general.webdav.remoteFile')">
+            <input
+              type="text"
+              v-model="webdavRemoteFile"
+              :disabled="webdavLoading"
+              :placeholder="$t('components.general.webdav.remoteFilePlaceholder')"
+              class="mac-input webdav-input"
+            />
+          </ListItem>
+          <ListItem :label="$t('components.general.webdav.timeoutSeconds')">
+            <div class="toggle-with-hint">
+              <input
+                type="number"
+                inputmode="numeric"
+                min="1"
+                max="120"
+                step="1"
+                v-model.number="webdavTimeoutSeconds"
+                :disabled="webdavLoading"
+                :placeholder="$t('components.general.webdav.timeoutPlaceholder')"
+                class="mac-input webdav-timeout-input"
+              />
+              <span class="hint-text">{{ $t('components.general.webdav.timeoutHint') }}</span>
+            </div>
+          </ListItem>
+          <ListItem :label="$t('components.general.webdav.actions')">
+            <div class="webdav-actions">
+              <button
+                @click="saveWebDAV"
+                :disabled="webdavLoading || webdavSaving"
+                class="action-btn">
+                {{ webdavSaving ? $t('components.general.label.saving') : $t('components.general.webdav.save') }}
+              </button>
+              <button
+                @click="testWebDAV"
+                :disabled="webdavLoading || webdavTesting || webdavUploading || webdavDownloading"
+                class="action-btn">
+                {{ webdavTesting ? $t('components.general.webdav.testing') : $t('components.general.webdav.test') }}
+              </button>
+              <button
+                @click="uploadToWebDAV"
+                :disabled="webdavLoading || webdavUploading || webdavDownloading"
+                class="primary-btn">
+                {{ webdavUploading ? $t('components.general.webdav.uploading') : $t('components.general.webdav.upload') }}
+              </button>
+              <button
+                @click="downloadFromWebDAV"
+                :disabled="webdavLoading || webdavDownloading || webdavUploading"
+                class="action-btn">
+                {{ webdavDownloading ? $t('components.general.webdav.downloading') : $t('components.general.webdav.download') }}
+              </button>
+            </div>
+          </ListItem>
+          <ListItem :label="$t('components.general.webdav.includes')">
+            <span class="hint-text">{{ $t('components.general.webdav.includesHint') }}</span>
+          </ListItem>
+        </div>
+      </section>
+
+      <section>
         <h2 class="mac-section-title">{{ $t('components.general.title.exterior') }}</h2>
         <div class="mac-panel">
           <ListItem :label="$t('components.general.label.language')">
@@ -1204,6 +1436,23 @@ onMounted(async () => {
 .import-path-input {
   width: 280px;
   font-size: 12px;
+}
+
+.webdav-input {
+  width: 280px;
+  font-size: 12px;
+}
+
+.webdav-timeout-input {
+  width: 120px;
+  font-size: 12px;
+}
+
+.webdav-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .info-text.warning {

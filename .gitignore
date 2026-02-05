@@ -5,3 +5,5 @@ frontend/dist
 bin
 CLAUDE.md
 .ace-tool/
+/.cache/
+/codeswitch

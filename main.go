@@ -143,6 +143,7 @@ func main() {
 	consoleService := services.NewConsoleService()
 	customCliService := services.NewCustomCliService(providerRelay.Addr())
 	networkService := services.NewNetworkService(providerRelay.Addr(), claudeSettings, codexSettings, geminiService)
+	webdavSyncService := services.NewWebDAVSyncService()
 
 	// 应用待处理的更新
 	go func() {
@@ -155,7 +156,7 @@ func main() {
 	// 启动定时检查（如果启用）
 	if updateService.IsAutoCheckEnabled() {
 		go func() {
-			time.Sleep(10 * time.Second) // 延迟10秒，等待应用完成初始化
+			time.Sleep(10 * time.Second)     // 延迟10秒，等待应用完成初始化
 			updateService.CheckUpdateAsync() // 启动时检查一次
 			updateService.StartDailyCheck()  // 启动每日8点定时检查
 		}()
@@ -245,6 +246,7 @@ func main() {
 			application.NewService(consoleService),
 			application.NewService(customCliService),
 			application.NewService(networkService),
+			application.NewService(webdavSyncService),
 		},
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),
@@ -367,25 +369,25 @@ func main() {
 
 	if runtime.GOOS == "darwin" {
 		trayWindow = app.Window.NewWithOptions(application.WebviewWindowOptions{
-			Title:       "Code Switch Tray",
-			Name:        "tray",
-			Width:       trayWindowWidth,
-			Height:      trayWindowMinHeight,
-			MinWidth:    trayWindowWidth,
-			MaxWidth:    trayWindowWidth,
-			MinHeight:   trayWindowMinHeight,
-			MaxHeight:   trayWindowMaxHeight,
-			AlwaysOnTop: true,
-			DisableResize: true,
-			Frameless:     true,
-			Hidden:        true,
-			BackgroundType: application.BackgroundTypeTransparent,
+			Title:            "Code Switch Tray",
+			Name:             "tray",
+			Width:            trayWindowWidth,
+			Height:           trayWindowMinHeight,
+			MinWidth:         trayWindowWidth,
+			MaxWidth:         trayWindowWidth,
+			MinHeight:        trayWindowMinHeight,
+			MaxHeight:        trayWindowMaxHeight,
+			AlwaysOnTop:      true,
+			DisableResize:    true,
+			Frameless:        true,
+			Hidden:           true,
+			BackgroundType:   application.BackgroundTypeTransparent,
 			BackgroundColour: application.NewRGBA(0, 0, 0, 0),
 			Mac: application.MacWindow{
-				Backdrop:     application.MacBackdropTransparent,
-				TitleBar:     application.MacTitleBarHidden,
+				Backdrop:      application.MacBackdropTransparent,
+				TitleBar:      application.MacTitleBarHidden,
 				DisableShadow: true,
-				WindowLevel:  application.MacWindowLevelPopUpMenu,
+				WindowLevel:   application.MacWindowLevelPopUpMenu,
 			},
 			URL: "/#/tray",
 		})
@@ -487,9 +489,9 @@ func handleDockVisibility(service *dock.DockService, show bool) {
 }
 
 const (
-	trayWindowWidth     = 360
-	trayWindowMinHeight = 120
-	trayWindowMaxHeight = 420
+	trayWindowWidth      = 360
+	trayWindowMinHeight  = 120
+	trayWindowMaxHeight  = 420
 	trayProgressBarWidth = 28
 )
 

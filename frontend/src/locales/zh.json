@@ -563,6 +563,7 @@
         "update": "应用更新",
         "blacklist": "拉黑配置",
         "dataImport": "数据导入",
+        "webdavSync": "WebDAV 同步",
         "connectivity": "连通性检测"
       },
       "label": {
@@ -645,7 +646,43 @@
       },
       "toast": {
         "blacklistSaveSuccess": "拉黑配置保存成功",
-        "blacklistSaveFailed": "拉黑配置保存失败：{error}"
+        "blacklistSaveFailed": "拉黑配置保存失败：{error}",
+        "webdavSaveSuccess": "WebDAV 配置已保存",
+        "webdavSaveFailed": "WebDAV 配置保存失败：{error}"
+      },
+      "webdav": {
+        "endpoint": "WebDAV 地址",
+        "endpointPlaceholder": "例如：https://example.com/remote.php/dav/files/user/",
+        "username": "用户名",
+        "usernamePlaceholder": "WebDAV 用户名",
+        "password": "密码",
+        "passwordPlaceholder": "WebDAV 密码",
+        "remoteDir": "远程目录（可选）",
+        "remoteDirPlaceholder": "例如：code-switch-r",
+        "remoteFile": "备份文件名",
+        "remoteFilePlaceholder": "例如：codeswitch-config.zip",
+        "timeoutSeconds": "超时时间（秒）",
+        "timeoutPlaceholder": "例如：20",
+        "timeoutHint": "范围 1–120，默认 20",
+        "actions": "操作",
+        "includes": "同步内容",
+        "includesHint": "供应商、应用设置、MCP、请求日志、黑名单、可用性历史等（不包含更新缓存与 WebDAV 密码）",
+        "save": "保存配置",
+        "test": "测试连接",
+        "testing": "测试中…",
+        "upload": "同步到 WebDAV",
+        "uploading": "同步中…",
+        "download": "从 WebDAV 加载",
+        "downloading": "加载中…",
+        "testOk": "WebDAV 配置正常",
+        "testFailed": "WebDAV 测试失败",
+        "uploadOk": "已同步到 WebDAV",
+        "uploadFailed": "同步到 WebDAV 失败",
+        "downloadOk": "已从 WebDAV 加载到本地",
+        "downloadFailed": "从 WebDAV 加载失败",
+        "confirmUpload": "将把本地配置（含供应商与日志等）上传到 WebDAV，确定继续？",
+        "confirmDownload": "将从 WebDAV 下载并覆盖本地配置（会自动备份一份本地配置），确定继续？",
+        "downloadPostHint": "已加载完成。建议返回首页刷新列表/必要时重启应用。\\n本地备份：{backup}"
       },
       "update": {
         "checkFailed": "连续 {count} 次检查失败",
