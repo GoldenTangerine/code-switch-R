@@ -19,6 +19,7 @@ export type RequestLog = {
   total_cost?: number
   input_cost?: number
   output_cost?: number
+  reasoning_cost?: number
   cache_create_cost?: number
   cache_read_cost?: number
   ephemeral_5m_cost?: number

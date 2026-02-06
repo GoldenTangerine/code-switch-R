@@ -156,6 +156,13 @@ func applyLogPricing(pricing *modelpricing.Service, logEntry *ReqeustLog) {
 	}
 
 	breakdown := pricing.CalculateCost(logEntry.Model, usage)
+	logEntry.InputCost = breakdown.InputCost
+	logEntry.OutputCost = breakdown.OutputCost
+	logEntry.ReasoningCost = breakdown.ReasoningCost
+	logEntry.CacheCreateCost = breakdown.CacheCreateCost
+	logEntry.CacheReadCost = breakdown.CacheReadCost
+	logEntry.Ephemeral5mCost = breakdown.Ephemeral5mCost
+	logEntry.Ephemeral1hCost = breakdown.Ephemeral1hCost
 	if breakdown.HasPricing {
 		logEntry.HasPricing = true
 	}

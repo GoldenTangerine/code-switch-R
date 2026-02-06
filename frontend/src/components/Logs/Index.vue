@@ -233,7 +233,20 @@
             <td :class="['code', httpCodeClass(item.http_code)]">{{ item.http_code }}</td>
             <td><span :class="['stream-tag', item.is_stream ? 'on' : 'off']">{{ formatStream(item.is_stream) }}</span></td>
             <td><span :class="['duration-tag', durationColor(item.duration_sec)]">{{ formatDuration(item.duration_sec) }}</span></td>
-            <td class="cost-cell">{{ formatCurrency(item.total_cost) }}</td>
+            <td class="cost-cell">
+              <span
+                class="cost-cell__value"
+                tabindex="0"
+                @mouseenter="showCostTooltip(item, $event)"
+                @mousemove="moveCostTooltip($event)"
+                @mouseleave="hideCostTooltip"
+                @focus="showCostTooltip(item, $event)"
+                @blur="hideCostTooltip"
+                @keydown.esc="hideCostTooltipImmediately"
+              >
+                {{ formatCurrency(item.total_cost) }}
+              </span>
+            </td>
             <td class="token-cell">
               <div>
                 <span class="token-label">{{ t('components.logs.tokenLabels.input') }}</span>
@@ -264,6 +277,43 @@
       </table>
       <p v-if="loading" class="empty">{{ t('components.logs.loading') }}</p>
     </section>
+
+    <Teleport to="body">
+      <div
+        v-if="costTooltip.visible && costTooltip.detail"
+        ref="costTooltipRef"
+        class="cost-breakdown-tooltip"
+        :class="`is-${costTooltip.placement}`"
+        :style="{ left: `${costTooltip.left}px`, top: `${costTooltip.top}px` }"
+        role="tooltip"
+        @mouseenter="handleCostTooltipMouseEnter"
+        @mouseleave="handleCostTooltipMouseLeave"
+      >
+        <p class="cost-breakdown-tooltip__model">
+          {{ t('components.logs.costTooltip.pricingModel', { model: costTooltip.detail.pricingModel || '—' }) }}
+        </p>
+
+        <div v-if="costTooltip.detail.hasPricing" class="cost-breakdown-tooltip__prices">
+          <div
+            v-for="line in costTooltip.detail.priceLines"
+            :key="line.key"
+            class="cost-breakdown-tooltip__price-row"
+          >
+            <span class="cost-breakdown-tooltip__price-label">{{ line.label }}</span>
+            <span class="cost-breakdown-tooltip__price-value">{{ line.value }}</span>
+          </div>
+        </div>
+
+        <p class="cost-breakdown-tooltip__formula">{{ costTooltip.detail.formula }}</p>
+
+        <p v-if="costTooltip.detail.note" class="cost-breakdown-tooltip__note">
+          {{ costTooltip.detail.note }}
+        </p>
+        <p v-if="costTooltip.detail.recordedCostHint" class="cost-breakdown-tooltip__note">
+          {{ costTooltip.detail.recordedCostHint }}
+        </p>
+      </div>
+    </Teleport>
 
     <div class="logs-pagination">
       <span>{{ page }} / {{ totalPages }}</span>
@@ -342,7 +392,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref, onMounted, watch, onUnmounted } from 'vue'
+import { computed, reactive, ref, onMounted, watch, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { VueDatePicker, type MonthModel } from '@vuepic/vue-datepicker'
@@ -366,6 +416,7 @@ import {
   type ProviderDailyStat,
   type LogStorageStats,
 } from '../../services/logs'
+import { listModelPricing, type ModelPricingRow } from '../../services/modelPricing'
 import {
   Chart,
   CategoryScale,
@@ -458,6 +509,53 @@ const providerOptions = ref<string[]>([])
 const PROVIDER_CONFIG_CACHE_TTL_MS = 60_000
 const providerConfigCache = new Map<string, { loadedAt: number; names: string[] }>()
 const statsSeries = computed<LogStatsSeries[]>(() => stats.value?.series ?? [])
+
+type CostTooltipPlacement = 'above' | 'below'
+
+type CostTooltipPriceLine = {
+  key: string
+  label: string
+  value: string
+}
+
+type CostTooltipDetail = {
+  pricingModel: string
+  hasPricing: boolean
+  priceLines: CostTooltipPriceLine[]
+  formula: string
+  note: string
+  recordedCostHint: string
+}
+
+const modelPricingRows = ref<ModelPricingRow[]>([])
+const modelPricingLoading = ref(false)
+const modelPricingLoaded = ref(false)
+
+const costTooltipRef = ref<HTMLElement | null>(null)
+const costTooltipAnchorRef = ref<HTMLElement | null>(null)
+const costTooltipRequestId = ref(0)
+let costTooltipHideTimer: number | null = null
+const costTooltip = reactive<{
+  visible: boolean
+  left: number
+  top: number
+  placement: CostTooltipPlacement
+  detail: CostTooltipDetail | null
+}>({
+  visible: false,
+  left: 0,
+  top: 0,
+  placement: 'above',
+  detail: null,
+})
+
+const PER_MILLION_TOKENS = 1_000_000
+const COST_TOOLTIP_DEFAULT_WIDTH = 460
+const COST_TOOLTIP_DEFAULT_HEIGHT = 236
+const COST_TOOLTIP_VERTICAL_OFFSET = 12
+const COST_TOOLTIP_HORIZONTAL_MARGIN = 14
+const COST_TOOLTIP_VERTICAL_MARGIN = 20
+const COST_TOOLTIP_DIFF_EPSILON = 0.000001
 
 const formatBytes = (bytes?: number, rows?: number) => {
   const value = Number(bytes ?? 0)
@@ -1138,6 +1236,460 @@ const durationColor = (value?: number) => {
   return 'slow'
 }
 
+const clampToRange = (value: number, min: number, max: number) => {
+  if (max <= min) return min
+  return Math.min(Math.max(value, min), max)
+}
+
+const normalizePricingModelKey = (value: string) =>
+  value
+    .trim()
+    .toLowerCase()
+    .replace(/[-_.:/\s]/g, '')
+
+const commonPrefixLength = (a: string, b: string) => {
+  const limit = Math.min(a.length, b.length)
+  let cursor = 0
+  while (cursor < limit && a[cursor] === b[cursor]) {
+    cursor += 1
+  }
+  return cursor
+}
+
+const stripPricingRegionPrefix = (value: string) => {
+  const trimmed = value.trim()
+  const lowered = trimmed.toLowerCase()
+  for (const prefix of ['us.', 'eu.', 'apac.']) {
+    if (lowered.startsWith(prefix)) {
+      return trimmed.slice(prefix.length)
+    }
+  }
+  return trimmed
+}
+
+const stripPricingProviderPrefix = (value: string) => {
+  const trimmed = value.trim()
+  const lowered = trimmed.toLowerCase()
+  if (lowered.startsWith('anthropic.')) {
+    return trimmed.slice('anthropic.'.length)
+  }
+  return trimmed
+}
+
+const pricingAliasCandidates = (value: string) => {
+  const lowered = value.trim().toLowerCase()
+  if (lowered === 'gpt-5-codex') {
+    return ['gpt-5']
+  }
+  return [] as string[]
+}
+
+const buildPricingModelCandidates = (value: string) => {
+  const base = value.trim()
+  if (!base) return [] as string[]
+  const result = new Set<string>()
+  const collect = (candidate: string) => {
+    const normalized = candidate.trim()
+    if (normalized) {
+      result.add(normalized)
+    }
+  }
+  const collectWithVariants = (candidate: string) => {
+    const trimmed = candidate.trim()
+    if (!trimmed) return
+    collect(trimmed)
+    collect(stripPricingRegionPrefix(trimmed))
+    collect(stripPricingProviderPrefix(trimmed))
+    collect(stripPricingProviderPrefix(stripPricingRegionPrefix(trimmed)))
+    for (const alias of pricingAliasCandidates(trimmed)) {
+      collect(alias)
+      collect(stripPricingRegionPrefix(alias))
+      collect(stripPricingProviderPrefix(alias))
+      collect(stripPricingProviderPrefix(stripPricingRegionPrefix(alias)))
+    }
+  }
+  collectWithVariants(base)
+
+  const noLongContextSuffix = base.replace(/\[1m\]/gi, '').trim()
+  if (noLongContextSuffix && noLongContextSuffix !== base) {
+    collectWithVariants(noLongContextSuffix)
+  }
+  return Array.from(result)
+}
+
+const modelPricingIndex = computed(() => {
+  const byExact = new Map<string, ModelPricingRow>()
+  const byLower = new Map<string, ModelPricingRow>()
+  const byNormalized = new Map<string, ModelPricingRow>()
+  for (const row of modelPricingRows.value) {
+    const model = String(row.model ?? '').trim()
+    if (!model) continue
+    byExact.set(model, row)
+    byLower.set(model.toLowerCase(), row)
+    byNormalized.set(normalizePricingModelKey(model), row)
+  }
+  return { byExact, byLower, byNormalized }
+})
+
+const safeNumber = (value?: number) => {
+  const numeric = Number(value ?? 0)
+  return Number.isFinite(numeric) ? numeric : 0
+}
+
+const formatUsdPrecise = (value: number) => `$${safeNumber(value).toFixed(6)}`
+
+const formatUsdPerMillion = (perTokenPrice: number) =>
+  formatUsdPrecise(safeNumber(perTokenPrice) * PER_MILLION_TOKENS)
+
+const formatMultiplierValue = (value: number) => {
+  const numeric = safeNumber(value)
+  if (numeric <= 0) return '1'
+  const rounded = Number(numeric.toFixed(4))
+  if (Number.isInteger(rounded)) return String(rounded)
+  return rounded.toString()
+}
+
+const loadModelPricingRows = async () => {
+  if (modelPricingLoaded.value || modelPricingLoading.value) return
+  modelPricingLoading.value = true
+  try {
+    modelPricingRows.value = (await listModelPricing()) ?? []
+    modelPricingLoaded.value = true
+  } catch (error) {
+    console.error('failed to load model pricing rows', error)
+  } finally {
+    modelPricingLoading.value = false
+  }
+}
+
+const resolvePricingRow = (item: RequestLog) => {
+  const lookup = modelPricingIndex.value
+  const candidates = [item.matched_pricing_model, item.model]
+  for (const modelName of candidates) {
+    const name = String(modelName ?? '').trim()
+    if (!name) continue
+    for (const candidate of buildPricingModelCandidates(name)) {
+      const exact = lookup.byExact.get(candidate)
+      if (exact) return exact
+      const lower = lookup.byLower.get(candidate.toLowerCase())
+      if (lower) return lower
+      const normalized = lookup.byNormalized.get(normalizePricingModelKey(candidate))
+      if (normalized) return normalized
+    }
+  }
+
+  const rows = modelPricingRows.value
+  for (const modelName of candidates) {
+    const name = String(modelName ?? '').trim()
+    if (!name) continue
+    const targetNorm = normalizePricingModelKey(name)
+    if (!targetNorm) continue
+    let bestRow: ModelPricingRow | null = null
+    let bestScore = -1
+    for (const row of rows) {
+      const rowNorm = normalizePricingModelKey(String(row.model ?? ''))
+      if (!rowNorm) continue
+      if (!(rowNorm.includes(targetNorm) || targetNorm.includes(rowNorm))) continue
+      const maxLen = Math.max(rowNorm.length, targetNorm.length)
+      if (maxLen <= 0) continue
+      const prefixScore = commonPrefixLength(rowNorm, targetNorm) / maxLen
+      const overlapScore = Math.min(rowNorm.length, targetNorm.length) / maxLen
+      const score = overlapScore * 0.8 + prefixScore * 0.2
+      if (score > bestScore) {
+        bestScore = score
+        bestRow = row
+      }
+    }
+    if (bestRow) return bestRow
+  }
+  return null
+}
+
+const resolveGroupMultiplier = (item: RequestLog) => {
+  const candidate = safeNumber((item as RequestLog & { group_multiplier?: number }).group_multiplier)
+  if (candidate <= 0) return 1
+  return candidate
+}
+
+const hasBreakdownCostPayload = (item: RequestLog) =>
+  [item.input_cost, item.output_cost, item.reasoning_cost, item.cache_create_cost, item.cache_read_cost]
+    .some(value => value !== undefined && value !== null)
+
+const buildCostTooltipDetail = (item: RequestLog): CostTooltipDetail => {
+  const pricingRow = resolvePricingRow(item)
+  const modelName = String(pricingRow?.model ?? item.matched_pricing_model ?? item.model ?? '').trim() || '—'
+  const recordedCost = safeNumber(item.total_cost)
+
+  if (!pricingRow) {
+    return {
+      pricingModel: modelName,
+      hasPricing: false,
+      priceLines: [],
+      formula: t('components.logs.costTooltip.noPricingFormula'),
+      note: t('components.logs.costTooltip.noPricingHint'),
+      recordedCostHint: t('components.logs.costTooltip.recordedCostHint', {
+        cost: formatUsdPrecise(recordedCost),
+      }),
+    }
+  }
+
+  const inputTokens = Math.max(0, Math.round(safeNumber(item.input_tokens)))
+  const outputTokens = Math.max(0, Math.round(safeNumber(item.output_tokens)))
+  const reasoningTokens = Math.max(0, Math.round(safeNumber(item.reasoning_tokens)))
+  const cacheCreateTokens = Math.max(0, Math.round(safeNumber(item.cache_create_tokens)))
+  const cacheReadTokens = Math.max(0, Math.round(safeNumber(item.cache_read_tokens)))
+
+  const inputPerTokenBase = Math.max(0, safeNumber(pricingRow.input_cost_per_token))
+  const outputPerTokenBase = Math.max(0, safeNumber(pricingRow.output_cost_per_token))
+  const reasoningPerTokenBase = Math.max(0, safeNumber(pricingRow.output_cost_per_reasoning_token))
+  const cacheCreateRaw = Math.max(0, safeNumber(pricingRow.cache_creation_input_token_cost))
+  const cacheReadRaw = Math.max(0, safeNumber(pricingRow.cache_read_input_token_cost))
+
+  const cacheCreatePerTokenBase = cacheCreateRaw > 0 ? cacheCreateRaw : inputPerTokenBase * 1.25
+  const cacheReadPerTokenBase = cacheReadRaw > 0 ? cacheReadRaw : inputPerTokenBase * 0.1
+
+  const breakdownPayload = hasBreakdownCostPayload(item)
+  const breakdownInputCost = Math.max(0, safeNumber(item.input_cost))
+  const breakdownOutputCost = Math.max(0, safeNumber(item.output_cost))
+  const breakdownReasoningCost = Math.max(0, safeNumber(item.reasoning_cost))
+  const breakdownCacheCreateCost = Math.max(0, safeNumber(item.cache_create_cost))
+  const breakdownCacheReadCost = Math.max(0, safeNumber(item.cache_read_cost))
+
+  const inputCost = breakdownPayload ? breakdownInputCost : inputTokens * inputPerTokenBase
+  const outputCost = breakdownPayload ? breakdownOutputCost : outputTokens * outputPerTokenBase
+  const reasoningCost = breakdownPayload ? breakdownReasoningCost : reasoningTokens * reasoningPerTokenBase
+  const cacheCreateCost = breakdownPayload ? breakdownCacheCreateCost : cacheCreateTokens * cacheCreatePerTokenBase
+  const cacheReadCost = breakdownPayload ? breakdownCacheReadCost : cacheReadTokens * cacheReadPerTokenBase
+
+  const inputPerToken = inputTokens > 0 ? inputCost / inputTokens : inputPerTokenBase
+  const outputPerToken = outputTokens > 0 ? outputCost / outputTokens : outputPerTokenBase
+  const reasoningPerToken = reasoningTokens > 0 ? reasoningCost / reasoningTokens : reasoningPerTokenBase
+  const cacheCreatePerToken = cacheCreateTokens > 0 ? cacheCreateCost / cacheCreateTokens : cacheCreatePerTokenBase
+  const cacheReadPerToken = cacheReadTokens > 0 ? cacheReadCost / cacheReadTokens : cacheReadPerTokenBase
+
+  const completionMultiplier = inputPerToken > 0 ? outputPerToken / inputPerToken : 0
+  const cacheCreateMultiplier = inputPerToken > 0 ? cacheCreatePerToken / inputPerToken : 0
+  const cacheReadMultiplier = inputPerToken > 0 ? cacheReadPerToken / inputPerToken : 0
+  const groupMultiplier = resolveGroupMultiplier(item)
+  const calculatedTotal = inputCost + cacheCreateCost + cacheReadCost + outputCost + reasoningCost
+
+  const tokensUnit = '/ 1M tokens'
+  const priceLines: CostTooltipPriceLine[] = [
+    {
+      key: 'prompt',
+      label: t('components.logs.costTooltip.promptPrice'),
+      value: `${formatUsdPerMillion(inputPerToken)} ${tokensUnit}`,
+    },
+  ]
+
+  const completionValue =
+    completionMultiplier > 0 && inputPerToken > 0
+      ? `${formatUsdPerMillion(inputPerToken)} * ${formatMultiplierValue(completionMultiplier)} = ${formatUsdPerMillion(outputPerToken)} ${tokensUnit}`
+      : `${formatUsdPerMillion(outputPerToken)} ${tokensUnit}`
+  priceLines.push({
+    key: 'completion',
+    label: t('components.logs.costTooltip.completionPrice'),
+    value: completionValue,
+  })
+
+  const cacheCreateValue =
+    cacheCreateMultiplier > 0 && inputPerToken > 0
+      ? `${formatUsdPerMillion(inputPerToken)} * ${formatMultiplierValue(cacheCreateMultiplier)} = ${formatUsdPerMillion(cacheCreatePerToken)} ${tokensUnit} (${t('components.logs.costTooltip.cacheCreateMultiplierLabel', { multiplier: formatMultiplierValue(cacheCreateMultiplier) })})`
+      : `${formatUsdPerMillion(cacheCreatePerToken)} ${tokensUnit}`
+  priceLines.push({
+    key: 'cacheCreate',
+    label: t('components.logs.costTooltip.cacheCreatePrice'),
+    value: cacheCreateValue,
+  })
+
+  if (cacheReadTokens > 0) {
+    const cacheReadValue =
+      cacheReadMultiplier > 0 && inputPerToken > 0
+        ? `${formatUsdPerMillion(inputPerToken)} * ${formatMultiplierValue(cacheReadMultiplier)} = ${formatUsdPerMillion(cacheReadPerToken)} ${tokensUnit} (${t('components.logs.costTooltip.cacheReadMultiplierLabel', { multiplier: formatMultiplierValue(cacheReadMultiplier) })})`
+        : `${formatUsdPerMillion(cacheReadPerToken)} ${tokensUnit}`
+    priceLines.push({
+      key: 'cacheRead',
+      label: t('components.logs.costTooltip.cacheReadPrice'),
+      value: cacheReadValue,
+    })
+  }
+
+  if (reasoningTokens > 0) {
+    priceLines.push({
+      key: 'reasoning',
+      label: t('components.logs.costTooltip.reasoningPrice'),
+      value: `${formatUsdPerMillion(reasoningPerToken)} ${tokensUnit}`,
+    })
+  }
+
+  const formulaParts: string[] = []
+  if (inputTokens > 0 && inputPerToken > 0) {
+    formulaParts.push(
+      `${t('components.logs.costTooltip.usagePrompt')} ${inputTokens.toLocaleString()} tokens / 1M tokens * ${formatUsdPerMillion(inputPerToken)}`
+    )
+  }
+  if (cacheCreateTokens > 0 && cacheCreatePerToken > 0) {
+    formulaParts.push(
+      `${t('components.logs.costTooltip.usageCacheCreate')} ${cacheCreateTokens.toLocaleString()} tokens / 1M tokens * ${formatUsdPerMillion(cacheCreatePerToken)} (${t('components.logs.costTooltip.cacheCreateMultiplierLabel', { multiplier: formatMultiplierValue(cacheCreateMultiplier) })})`
+    )
+  }
+  if (cacheReadTokens > 0 && cacheReadPerToken > 0) {
+    formulaParts.push(
+      `${t('components.logs.costTooltip.usageCacheRead')} ${cacheReadTokens.toLocaleString()} tokens / 1M tokens * ${formatUsdPerMillion(cacheReadPerToken)} (${t('components.logs.costTooltip.cacheReadMultiplierLabel', { multiplier: formatMultiplierValue(cacheReadMultiplier) })})`
+    )
+  }
+  if (outputTokens > 0 && outputPerToken > 0) {
+    formulaParts.push(
+      `${t('components.logs.costTooltip.usageCompletion')} ${outputTokens.toLocaleString()} tokens / 1M tokens * ${formatUsdPerMillion(outputPerToken)} * ${t('components.logs.costTooltip.groupMultiplierLabel', { multiplier: formatMultiplierValue(groupMultiplier) })}`
+    )
+  }
+  if (reasoningTokens > 0 && reasoningPerToken > 0) {
+    formulaParts.push(
+      `${t('components.logs.costTooltip.usageReasoning')} ${reasoningTokens.toLocaleString()} tokens / 1M tokens * ${formatUsdPerMillion(reasoningPerToken)} * ${t('components.logs.costTooltip.groupMultiplierLabel', { multiplier: formatMultiplierValue(groupMultiplier) })}`
+    )
+  }
+
+  const formula =
+    formulaParts.length > 0
+      ? `${formulaParts.join(' + ')} = ${formatUsdPrecise(calculatedTotal)}`
+      : t('components.logs.costTooltip.formulaEmpty')
+
+  const rowModel = String(pricingRow.model ?? '').trim().toLowerCase()
+  const logModel = String(item.model ?? '').trim().toLowerCase()
+  const note = rowModel && logModel && rowModel !== logModel
+    ? t('components.logs.costTooltip.matchedModelHint', { model: pricingRow.model })
+    : ''
+
+  const recordedCostHint =
+    Math.abs(calculatedTotal - recordedCost) > COST_TOOLTIP_DIFF_EPSILON
+      ? t('components.logs.costTooltip.recordedCostHint', {
+        cost: formatUsdPrecise(recordedCost),
+      })
+      : ''
+
+  return {
+    pricingModel: modelName,
+    hasPricing: true,
+    priceLines,
+    formula,
+    note,
+    recordedCostHint,
+  }
+}
+
+const getCostTooltipSize = () => {
+  const rect = costTooltipRef.value?.getBoundingClientRect()
+  return {
+    width: rect?.width ?? COST_TOOLTIP_DEFAULT_WIDTH,
+    height: rect?.height ?? COST_TOOLTIP_DEFAULT_HEIGHT,
+  }
+}
+
+const getViewportSize = () => {
+  if (typeof window !== 'undefined') {
+    return { width: window.innerWidth, height: window.innerHeight }
+  }
+  if (typeof document !== 'undefined' && document.documentElement) {
+    return {
+      width: document.documentElement.clientWidth,
+      height: document.documentElement.clientHeight,
+    }
+  }
+  return { width: 0, height: 0 }
+}
+
+const clearCostTooltipHideTimer = () => {
+  if (costTooltipHideTimer != null) {
+    window.clearTimeout(costTooltipHideTimer)
+    costTooltipHideTimer = null
+  }
+}
+
+const hideCostTooltipImmediately = () => {
+  clearCostTooltipHideTimer()
+  costTooltipRequestId.value += 1
+  costTooltipAnchorRef.value = null
+  costTooltip.visible = false
+  costTooltip.detail = null
+}
+
+const scheduleHideCostTooltip = () => {
+  clearCostTooltipHideTimer()
+  costTooltipHideTimer = window.setTimeout(() => {
+    hideCostTooltipImmediately()
+  }, 80)
+}
+
+const updateCostTooltipPosition = (anchor: HTMLElement | null) => {
+  if (!anchor) return
+  const anchorRect = anchor.getBoundingClientRect()
+  const { width: tooltipWidth, height: tooltipHeight } = getCostTooltipSize()
+  const { width: viewportWidth, height: viewportHeight } = getViewportSize()
+
+  const centerX = anchorRect.left + anchorRect.width / 2
+  const minLeft = COST_TOOLTIP_HORIZONTAL_MARGIN + tooltipWidth / 2
+  const maxLeft =
+    viewportWidth > 0 ? viewportWidth - tooltipWidth / 2 - COST_TOOLTIP_HORIZONTAL_MARGIN : centerX
+  costTooltip.left = clampToRange(centerX, minLeft, maxLeft)
+
+  const canShowAbove =
+    anchorRect.top - tooltipHeight - COST_TOOLTIP_VERTICAL_OFFSET >= COST_TOOLTIP_VERTICAL_MARGIN
+  const shouldPlaceBelow = !canShowAbove
+  costTooltip.placement = shouldPlaceBelow ? 'below' : 'above'
+
+  const desiredTop = shouldPlaceBelow
+    ? anchorRect.bottom + COST_TOOLTIP_VERTICAL_OFFSET
+    : anchorRect.top - tooltipHeight - COST_TOOLTIP_VERTICAL_OFFSET
+  const maxTop =
+    viewportHeight > 0 ? viewportHeight - tooltipHeight - COST_TOOLTIP_VERTICAL_MARGIN : desiredTop
+  costTooltip.top = clampToRange(desiredTop, COST_TOOLTIP_VERTICAL_MARGIN, maxTop)
+}
+
+const showCostTooltip = async (item: RequestLog, event: MouseEvent | FocusEvent) => {
+  const target = event.currentTarget as HTMLElement | null
+  if (!target) return
+  clearCostTooltipHideTimer()
+  costTooltipAnchorRef.value = target
+  const requestId = ++costTooltipRequestId.value
+  await loadModelPricingRows()
+  if (requestId !== costTooltipRequestId.value) return
+  if (costTooltipAnchorRef.value !== target) return
+  costTooltip.detail = buildCostTooltipDetail(item)
+  costTooltip.visible = true
+  updateCostTooltipPosition(target)
+  await nextTick()
+  if (requestId !== costTooltipRequestId.value) return
+  if (costTooltipAnchorRef.value !== target) return
+  updateCostTooltipPosition(target)
+}
+
+const moveCostTooltip = (event: MouseEvent) => {
+  if (!costTooltip.visible) return
+  clearCostTooltipHideTimer()
+  const target = event.currentTarget as HTMLElement | null
+  if (!target) return
+  costTooltipAnchorRef.value = target
+  updateCostTooltipPosition(target)
+}
+
+const hideCostTooltip = () => {
+  scheduleHideCostTooltip()
+}
+
+const handleCostTooltipMouseEnter = () => {
+  clearCostTooltipHideTimer()
+}
+
+const handleCostTooltipMouseLeave = () => {
+  scheduleHideCostTooltip()
+}
+
+const handleViewportChange = () => {
+  if (costTooltip.visible) {
+    hideCostTooltipImmediately()
+  }
+}
+
 const formatNumber = (value?: number) => {
   if (value === undefined || value === null) return '—'
   return value.toLocaleString()
@@ -1300,14 +1852,27 @@ watch(
   },
 )
 
+watch(
+  [page, () => logs.value.length],
+  () => {
+    if (costTooltip.visible) {
+      hideCostTooltipImmediately()
+    }
+  },
+)
+
 onMounted(async () => {
   startThemeObserver()
-  await loadDashboard()
-  await loadStorageStats()
+  window.addEventListener('scroll', handleViewportChange, true)
+  window.addEventListener('resize', handleViewportChange)
+  await Promise.all([loadDashboard(), loadStorageStats(), loadModelPricingRows()])
   startCountdown()
 })
 
 onUnmounted(() => {
+  hideCostTooltipImmediately()
+  window.removeEventListener('scroll', handleViewportChange, true)
+  window.removeEventListener('resize', handleViewportChange)
   stopCountdown()
   themeObserver?.disconnect()
   themeObserver = null
@@ -1507,9 +2072,168 @@ html.dark .token-detail-item__name {
   width: 80px;
 }
 .cost-cell {
+  position: relative;
   color: #f97316;
   font-weight: 500;
   font-variant-numeric: tabular-nums;
+}
+
+.cost-cell__value {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 8px;
+  padding: 2px 6px;
+  margin: -2px -6px;
+  cursor: help;
+  transition: background 0.18s ease, color 0.18s ease;
+}
+
+.cost-cell__value:hover {
+  background: rgba(249, 115, 22, 0.14);
+  color: #ea580c;
+}
+
+.cost-cell__value:focus-visible {
+  outline: 2px solid rgba(249, 115, 22, 0.55);
+  outline-offset: 1px;
+  background: rgba(249, 115, 22, 0.16);
+}
+
+html.dark .cost-cell__value:hover {
+  background: rgba(251, 146, 60, 0.22);
+  color: #fdba74;
+}
+
+html.dark .cost-cell__value:focus-visible {
+  outline-color: rgba(251, 146, 60, 0.7);
+  background: rgba(251, 146, 60, 0.24);
+}
+
+.cost-breakdown-tooltip {
+  position: fixed;
+  transform: translateX(-50%);
+  width: min(560px, calc(100vw - 20px));
+  max-height: min(72vh, 460px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  border-radius: 14px;
+  padding: 0.9rem 1rem;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  background: rgba(255, 255, 255, 0.97);
+  box-shadow: 0 18px 42px rgba(15, 23, 42, 0.24);
+  backdrop-filter: blur(8px);
+  z-index: 2600;
+  pointer-events: auto;
+  overscroll-behavior: contain;
+}
+
+.cost-breakdown-tooltip::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 8px solid transparent;
+  border-right: 8px solid transparent;
+}
+
+.cost-breakdown-tooltip.is-above::after {
+  top: 100%;
+  border-top: 8px solid rgba(255, 255, 255, 0.97);
+}
+
+.cost-breakdown-tooltip.is-below::after {
+  bottom: 100%;
+  border-bottom: 8px solid rgba(255, 255, 255, 0.97);
+}
+
+.cost-breakdown-tooltip__model {
+  margin: 0;
+  font-size: 0.78rem;
+  letter-spacing: 0.02em;
+  color: #64748b;
+}
+
+.cost-breakdown-tooltip__prices {
+  margin-top: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.cost-breakdown-tooltip__price-row {
+  display: grid;
+  grid-template-columns: minmax(88px, 0.9fr) minmax(0, 2fr);
+  gap: 0.5rem;
+  align-items: start;
+}
+
+.cost-breakdown-tooltip__price-label {
+  font-size: 0.76rem;
+  color: #475569;
+  line-height: 1.35;
+}
+
+.cost-breakdown-tooltip__price-value {
+  font-family: 'SFMono-Regular', Menlo, Consolas, monospace;
+  font-size: 0.76rem;
+  line-height: 1.35;
+  color: #0f172a;
+  word-break: break-word;
+}
+
+.cost-breakdown-tooltip__formula {
+  margin: 0.7rem 0 0;
+  padding-top: 0.62rem;
+  border-top: 1px dashed rgba(148, 163, 184, 0.5);
+  font-family: 'SFMono-Regular', Menlo, Consolas, monospace;
+  font-size: 0.76rem;
+  line-height: 1.45;
+  color: #1e293b;
+  word-break: break-word;
+}
+
+.cost-breakdown-tooltip__note {
+  margin: 0.45rem 0 0;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: #64748b;
+}
+
+html.dark .cost-breakdown-tooltip {
+  border-color: rgba(148, 163, 184, 0.36);
+  background: rgba(15, 23, 42, 0.95);
+  box-shadow: 0 18px 42px rgba(2, 6, 23, 0.55);
+}
+
+html.dark .cost-breakdown-tooltip.is-above::after {
+  border-top-color: rgba(15, 23, 42, 0.95);
+}
+
+html.dark .cost-breakdown-tooltip.is-below::after {
+  border-bottom-color: rgba(15, 23, 42, 0.95);
+}
+
+html.dark .cost-breakdown-tooltip__model {
+  color: #94a3b8;
+}
+
+html.dark .cost-breakdown-tooltip__price-label {
+  color: #cbd5e1;
+}
+
+html.dark .cost-breakdown-tooltip__price-value {
+  color: #f8fafc;
+}
+
+html.dark .cost-breakdown-tooltip__formula {
+  border-top-color: rgba(148, 163, 184, 0.45);
+  color: #e2e8f0;
+}
+
+html.dark .cost-breakdown-tooltip__note {
+  color: #aebcd1;
 }
 
 .model-cell {
