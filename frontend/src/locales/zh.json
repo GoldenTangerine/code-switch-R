@@ -509,6 +509,7 @@
         "platform": "平台",
         "provider": "供应商",
         "model": "模型",
+        "matchedPricingModel": "≈ 计价匹配：{model}",
         "httpCode": "HTTP",
         "stream": "传输",
         "duration": "耗时",

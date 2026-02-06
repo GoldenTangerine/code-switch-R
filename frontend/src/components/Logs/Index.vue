@@ -221,7 +221,15 @@
             <td>{{ formatTime(item.created_at) }}</td>
             <td>{{ item.platform || '—' }}</td>
             <td>{{ item.provider || '—' }}</td>
-            <td>{{ item.model || '—' }}</td>
+            <td class="model-cell">
+              <div class="model-name">{{ item.model || '—' }}</div>
+              <div
+                v-if="item.matched_pricing_model && item.matched_pricing_model !== item.model"
+                class="model-pricing-match"
+              >
+                {{ t('components.logs.table.matchedPricingModel', { model: item.matched_pricing_model }) }}
+              </div>
+            </td>
             <td :class="['code', httpCodeClass(item.http_code)]">{{ item.http_code }}</td>
             <td><span :class="['stream-tag', item.is_stream ? 'on' : 'off']">{{ formatStream(item.is_stream) }}</span></td>
             <td><span :class="['duration-tag', durationColor(item.duration_sec)]">{{ formatDuration(item.duration_sec) }}</span></td>
@@ -1502,5 +1510,25 @@ html.dark .token-detail-item__name {
   color: #f97316;
   font-weight: 500;
   font-variant-numeric: tabular-nums;
+}
+
+.model-cell {
+  white-space: normal;
+}
+
+.model-name {
+  word-break: break-word;
+}
+
+.model-pricing-match {
+  margin-top: 0.2rem;
+  font-size: 0.75rem;
+  color: #64748b;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+html.dark .model-pricing-match {
+  color: #94a3b8;
 }
 </style>

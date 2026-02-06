@@ -1053,8 +1053,10 @@ func parseTokenUsageChunk(
 
 	payload := string(chunk)
 	if usage.IsStream {
-		parseEventPayload(payload, parser, usage, sseRemainder)
-		return
+		if sseRemainder != nil && (sseRemainder.Len() > 0 || looksLikeSSEPayload(payload)) {
+			parseEventPayload(payload, parser, usage, sseRemainder)
+			return
+		}
 	}
 
 	parseRawJSONPayload(payload, parser, usage, rawJSONBuffer)
@@ -1067,33 +1069,33 @@ func parseEventPayload(payload string, parser func(string, *ReqeustLog), usage *
 
 	remainder.WriteString(payload)
 	combined := remainder.String()
-	lines := strings.Split(combined, "\n")
-	if len(lines) == 0 {
+	if combined == "" {
 		return
 	}
 
-	completeLines := lines[:len(lines)-1]
-	for _, line := range completeLines {
-		parseSSEDataLine(line, parser, usage)
-	}
-
-	tail := lines[len(lines)-1]
-	remainder.Reset()
-	if tail == "" {
-		return
-	}
-
-	trimmedTail := strings.TrimSpace(tail)
-	if strings.HasPrefix(trimmedTail, "data:") {
-		dataLine := strings.TrimSpace(strings.TrimPrefix(trimmedTail, "data:"))
-		switch {
-		case dataLine == "", dataLine == "[DONE]":
-			return
-		case gjson.Valid(dataLine):
-			parser(dataLine, usage)
-			return
+	offset := 0
+	for {
+		newlineIdx := strings.IndexByte(combined[offset:], '\n')
+		if newlineIdx < 0 {
+			break
 		}
+		lineEnd := offset + newlineIdx
+		line := combined[offset:lineEnd]
+		parseSSEDataLine(line, parser, usage)
+		offset = lineEnd + 1
 	}
+
+	tail := combined[offset:]
+	remainder.Reset()
+	if strings.TrimSpace(tail) == "" {
+		return
+	}
+
+	if shouldProcessStandaloneSSELine(tail) {
+		parseSSEDataLine(tail, parser, usage)
+		return
+	}
+
 	remainder.WriteString(tail)
 }
 
@@ -1107,6 +1109,32 @@ func parseSSEDataLine(line string, parser func(string, *ReqeustLog), usage *Reqe
 		return
 	}
 	parser(dataLine, usage)
+}
+
+func looksLikeSSEPayload(payload string) bool {
+	trimmed := strings.TrimLeft(payload, " \t\r\n")
+	return strings.HasPrefix(trimmed, "data:") ||
+		strings.HasPrefix(trimmed, "event:") ||
+		strings.HasPrefix(trimmed, "id:") ||
+		strings.HasPrefix(trimmed, "retry:") ||
+		strings.HasPrefix(trimmed, ":")
+}
+
+func shouldProcessStandaloneSSELine(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" {
+		return true
+	}
+
+	if strings.HasPrefix(trimmed, "data:") {
+		dataLine := strings.TrimSpace(strings.TrimPrefix(trimmed, "data:"))
+		return dataLine == "" || dataLine == "[DONE]" || gjson.Valid(dataLine)
+	}
+
+	return strings.HasPrefix(trimmed, "event:") ||
+		strings.HasPrefix(trimmed, "id:") ||
+		strings.HasPrefix(trimmed, "retry:") ||
+		strings.HasPrefix(trimmed, ":")
 }
 
 func parseRawJSONPayload(payload string, parser func(string, *ReqeustLog), usage *ReqeustLog, rawJSONBuffer *strings.Builder) {
@@ -1123,28 +1151,29 @@ func parseRawJSONPayload(payload string, parser func(string, *ReqeustLog), usage
 }
 
 type ReqeustLog struct {
-	ID                int64   `json:"id"`
-	Platform          string  `json:"platform"` // claude、codex 或 gemini
-	Model             string  `json:"model"`
-	Provider          string  `json:"provider"` // provider name
-	HttpCode          int     `json:"http_code"`
-	InputTokens       int     `json:"input_tokens"`
-	OutputTokens      int     `json:"output_tokens"`
-	CacheCreateTokens int     `json:"cache_create_tokens"`
-	CacheReadTokens   int     `json:"cache_read_tokens"`
-	ReasoningTokens   int     `json:"reasoning_tokens"`
-	IsStream          bool    `json:"is_stream"`
-	DurationSec       float64 `json:"duration_sec"`
-	CreatedAt         string  `json:"created_at"`
-	InputCost         float64 `json:"input_cost"`
-	OutputCost        float64 `json:"output_cost"`
-	ReasoningCost     float64 `json:"reasoning_cost"`
-	CacheCreateCost   float64 `json:"cache_create_cost"`
-	CacheReadCost     float64 `json:"cache_read_cost"`
-	Ephemeral5mCost   float64 `json:"ephemeral_5m_cost"`
-	Ephemeral1hCost   float64 `json:"ephemeral_1h_cost"`
-	TotalCost         float64 `json:"total_cost"`
-	HasPricing        bool    `json:"has_pricing"`
+	ID                  int64   `json:"id"`
+	Platform            string  `json:"platform"` // claude、codex 或 gemini
+	Model               string  `json:"model"`
+	Provider            string  `json:"provider"` // provider name
+	HttpCode            int     `json:"http_code"`
+	InputTokens         int     `json:"input_tokens"`
+	OutputTokens        int     `json:"output_tokens"`
+	CacheCreateTokens   int     `json:"cache_create_tokens"`
+	CacheReadTokens     int     `json:"cache_read_tokens"`
+	ReasoningTokens     int     `json:"reasoning_tokens"`
+	IsStream            bool    `json:"is_stream"`
+	DurationSec         float64 `json:"duration_sec"`
+	CreatedAt           string  `json:"created_at"`
+	InputCost           float64 `json:"input_cost"`
+	OutputCost          float64 `json:"output_cost"`
+	ReasoningCost       float64 `json:"reasoning_cost"`
+	CacheCreateCost     float64 `json:"cache_create_cost"`
+	CacheReadCost       float64 `json:"cache_read_cost"`
+	Ephemeral5mCost     float64 `json:"ephemeral_5m_cost"`
+	Ephemeral1hCost     float64 `json:"ephemeral_1h_cost"`
+	TotalCost           float64 `json:"total_cost"`
+	HasPricing          bool    `json:"has_pricing"`
+	MatchedPricingModel string  `json:"matched_pricing_model,omitempty"`
 }
 
 // claude code usage parser

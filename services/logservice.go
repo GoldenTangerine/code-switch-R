@@ -115,7 +115,7 @@ func (ls *LogService) ListRequestLogsV2(platform string, provider string, limit 
 			DurationSec:       record.GetFloat64("duration_sec"),
 			TotalCost:         record.GetFloat64("total_cost"),
 		}
-		logEntry.HasPricing = resolveLogHasPricing(pricingSnapshot, logEntry)
+		applyLogPricing(pricingSnapshot, &logEntry)
 		logs = append(logs, logEntry)
 	}
 	return logs, nil
@@ -134,13 +134,19 @@ func (ls *LogService) resolvePricingSnapshot() *modelpricing.Service {
 	return svc
 }
 
-func resolveLogHasPricing(pricing *modelpricing.Service, logEntry ReqeustLog) bool {
+func applyLogPricing(pricing *modelpricing.Service, logEntry *ReqeustLog) {
+	if logEntry == nil {
+		return
+	}
+
 	if logEntry.TotalCost > 0 {
-		return true
+		logEntry.HasPricing = true
 	}
+
 	if pricing == nil || strings.TrimSpace(logEntry.Model) == "" {
-		return false
+		return
 	}
+
 	usage := modelpricing.UsageSnapshot{
 		InputTokens:       logEntry.InputTokens,
 		OutputTokens:      logEntry.OutputTokens,
@@ -148,7 +154,19 @@ func resolveLogHasPricing(pricing *modelpricing.Service, logEntry ReqeustLog) bo
 		CacheCreateTokens: logEntry.CacheCreateTokens,
 		CacheReadTokens:   logEntry.CacheReadTokens,
 	}
-	return pricing.CalculateCost(logEntry.Model, usage).HasPricing
+
+	breakdown := pricing.CalculateCost(logEntry.Model, usage)
+	if breakdown.HasPricing {
+		logEntry.HasPricing = true
+	}
+	if logEntry.TotalCost <= 0 && breakdown.TotalCost > 0 {
+		logEntry.TotalCost = breakdown.TotalCost
+	}
+	if breakdown.FuzzyMatched &&
+		strings.TrimSpace(breakdown.PricingModel) != "" &&
+		!strings.EqualFold(strings.TrimSpace(logEntry.Model), strings.TrimSpace(breakdown.PricingModel)) {
+		logEntry.MatchedPricingModel = breakdown.PricingModel
+	}
 }
 
 func (ls *LogService) ListProviders(platform string) ([]string, error) {

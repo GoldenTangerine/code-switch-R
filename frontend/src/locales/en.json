@@ -508,6 +508,7 @@
         "platform": "Platform",
         "provider": "Provider",
         "model": "Model",
+        "matchedPricingModel": "≈ Pricing match: {model}",
         "httpCode": "HTTP",
         "stream": "Stream",
         "duration": "Duration",

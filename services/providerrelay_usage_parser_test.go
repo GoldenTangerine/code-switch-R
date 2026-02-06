@@ -36,6 +36,32 @@ func TestParseEventPayloadSupportsChunkedSSEWithoutSpaceAfterDataPrefix(t *testi
 	}
 }
 
+func TestParseEventPayloadHandlesLineByLineSSEWithoutTrailingNewline(t *testing.T) {
+	reqLog := &ReqeustLog{IsStream: true}
+	var remainder strings.Builder
+
+	parseEventPayload("event: message_start", ClaudeCodeParseTokenUsageFromResponse, reqLog, &remainder)
+	if remainder.Len() != 0 {
+		t.Fatalf("event 行应被立即消费，remainder=%q", remainder.String())
+	}
+
+	parseEventPayload(
+		"data: {\"message\":{\"usage\":{\"input_tokens\":77,\"cache_creation_input_tokens\":5}}}",
+		ClaudeCodeParseTokenUsageFromResponse,
+		reqLog,
+		&remainder,
+	)
+	if reqLog.InputTokens != 77 {
+		t.Fatalf("InputTokens = %d, 期望 77", reqLog.InputTokens)
+	}
+	if reqLog.CacheCreateTokens != 5 {
+		t.Fatalf("CacheCreateTokens = %d, 期望 5", reqLog.CacheCreateTokens)
+	}
+	if remainder.Len() != 0 {
+		t.Fatalf("data 行解析后不应残留数据，remainder=%q", remainder.String())
+	}
+}
+
 func TestReqeustLogHookParsesNonStreamClaudeUsageWithPromptCompletionTokens(t *testing.T) {
 	reqLog := &ReqeustLog{IsStream: false}
 	hook := ReqeustLogHook(nil, "claude", reqLog)
@@ -58,6 +84,20 @@ func TestReqeustLogHookParsesNonStreamClaudeUsageWithPromptCompletionTokens(t *t
 	}
 	if reqLog.CacheReadTokens != 7 {
 		t.Fatalf("CacheReadTokens = %d, 期望 7", reqLog.CacheReadTokens)
+	}
+}
+
+func TestReqeustLogHookStreamRequestFallsBackToRawJSONUsage(t *testing.T) {
+	reqLog := &ReqeustLog{IsStream: true}
+	hook := ReqeustLogHook(nil, "claude", reqLog)
+
+	_, _ = hook([]byte(`{"usage":{"input_tokens":66,"output_tokens":8}}`))
+
+	if reqLog.InputTokens != 66 {
+		t.Fatalf("InputTokens = %d, 期望 66", reqLog.InputTokens)
+	}
+	if reqLog.OutputTokens != 8 {
+		t.Fatalf("OutputTokens = %d, 期望 8", reqLog.OutputTokens)
 	}
 }
 

@@ -4,8 +4,10 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 	"sync"
+	"unicode"
 )
 
 //go:embed model_prices_and_context_window.json
@@ -68,6 +70,8 @@ type CostBreakdown struct {
 	TotalCost       float64 `json:"total_cost"`
 	HasPricing      bool    `json:"has_pricing"`
 	IsLongContext   bool    `json:"is_long_context"`
+	PricingModel    string  `json:"pricing_model"`
+	FuzzyMatched    bool    `json:"fuzzy_matched"`
 }
 
 // LongContextPricing 描述 1M 上下文模型的单价。
@@ -114,8 +118,12 @@ func (s *Service) CalculateCost(model string, usage UsageSnapshot) CostBreakdown
 	if s == nil || model == "" {
 		return CostBreakdown{}
 	}
-	entry, hasPricing := s.getPricing(model)
-	breakdown := CostBreakdown{HasPricing: hasPricing}
+	entry, pricingModel, hasPricing, fuzzyMatched := s.getPricingWithKey(model)
+	breakdown := CostBreakdown{
+		HasPricing:   hasPricing,
+		PricingModel: pricingModel,
+		FuzzyMatched: fuzzyMatched,
+	}
 	if entry == nil && !strings.Contains(strings.ToLower(model), "[1m]") {
 		return breakdown
 	}
@@ -136,8 +144,12 @@ func (s *Service) CalculateCost(model string, usage UsageSnapshot) CostBreakdown
 		breakdown.ReasoningCost = float64(usage.ReasoningTokens) * entry.OutputCostPerReasoningToken
 	}
 	cacheCreateTokens, cache1hTokens := resolveCacheTokens(usage)
+	cachePricingModel := model
+	if strings.TrimSpace(pricingModel) != "" {
+		cachePricingModel = pricingModel
+	}
 	cache5mCost := float64(cacheCreateTokens) * entry.CacheCreationInputTokenCost
-	cache1hCost := float64(cache1hTokens) * s.getEphemeral1hPricing(model)
+	cache1hCost := float64(cache1hTokens) * s.getEphemeral1hPricing(cachePricingModel)
 	breakdown.Ephemeral5mCost = cache5mCost
 	breakdown.Ephemeral1hCost = cache1hCost
 	breakdown.CacheCreateCost = cache5mCost + cache1hCost
@@ -150,36 +162,309 @@ func (s *Service) CalculateCost(model string, usage UsageSnapshot) CostBreakdown
 }
 
 func (s *Service) getPricing(model string) (*PricingEntry, bool) {
+	entry, _, hasPricing, _ := s.getPricingWithKey(model)
+	return entry, hasPricing
+}
+
+func (s *Service) getPricingWithKey(model string) (*PricingEntry, string, bool, bool) {
 	if model == "" {
-		return nil, false
+		return nil, "", false, false
 	}
 	if entry, ok := s.pricingMap[model]; ok {
-		return entry, true
+		return entry, model, true, false
 	}
 	if model == "gpt-5-codex" {
 		if entry, ok := s.pricingMap["gpt-5"]; ok {
-			return entry, true
+			return entry, "gpt-5", true, false
 		}
 	}
 	withoutRegion := stripRegionPrefix(model)
 	if entry, ok := s.pricingMap[withoutRegion]; ok {
-		return entry, true
+		return entry, withoutRegion, true, false
 	}
 	withoutProvider := strings.TrimPrefix(withoutRegion, "anthropic.")
 	if entry, ok := s.pricingMap[withoutProvider]; ok {
-		return entry, true
+		return entry, withoutProvider, true, false
 	}
 	normalizedTarget := normalizeName(model)
 	if key, ok := s.normalized[normalizedTarget]; ok {
-		return s.pricingMap[key], true
+		return s.pricingMap[key], key, true, false
 	}
-	for key, entry := range s.pricingMap {
-		normKey := normalizeName(key)
-		if strings.Contains(normKey, normalizedTarget) || strings.Contains(normalizedTarget, normKey) {
-			return entry, true
+	if key, ok := s.pickBestPricingMatch(model, true); ok {
+		if entry, exists := s.pricingMap[key]; exists {
+			return entry, key, true, true
 		}
 	}
-	return nil, false
+	if key, ok := s.pickBestPricingMatch(model, false); ok {
+		if entry, exists := s.pricingMap[key]; exists {
+			return entry, key, true, true
+		}
+	}
+	return nil, "", false, false
+}
+
+func (s *Service) pickBestPricingMatch(model string, containOnly bool) (string, bool) {
+	if s == nil || strings.TrimSpace(model) == "" {
+		return "", false
+	}
+
+	targetNorm := normalizeName(model)
+	if targetNorm == "" {
+		return "", false
+	}
+	targetTokens := tokenizeModelName(model)
+	familyHint := selectFamilyHint(targetTokens)
+
+	bestKey := ""
+	bestScore := -1.0
+	for key := range s.pricingMap {
+		normKey := normalizeName(key)
+		if normKey == "" {
+			continue
+		}
+
+		if containOnly && !(strings.Contains(normKey, targetNorm) || strings.Contains(targetNorm, normKey)) {
+			continue
+		}
+
+		if familyHint != "" && !hasFamilyHint(normKey, key, familyHint) {
+			continue
+		}
+
+		keyTokens := tokenizeModelName(key)
+		score := pricingSimilarityScore(targetNorm, normKey, targetTokens, keyTokens)
+		if score > bestScore || (math.Abs(score-bestScore) < 1e-9 && bestKey != "" && key < bestKey) {
+			bestScore = score
+			bestKey = key
+		}
+	}
+
+	if bestKey == "" {
+		return "", false
+	}
+
+	minScore := 0.62
+	if containOnly {
+		minScore = 0.55
+	}
+	if bestScore < minScore {
+		return "", false
+	}
+	return bestKey, true
+}
+
+func pricingSimilarityScore(targetNorm string, keyNorm string, targetTokens []string, keyTokens []string) float64 {
+	if targetNorm == "" || keyNorm == "" {
+		return 0
+	}
+
+	maxLen := max(len(targetNorm), len(keyNorm))
+	if maxLen == 0 {
+		return 0
+	}
+
+	editDistance := levenshteinDistance(targetNorm, keyNorm)
+	editSimilarity := 1 - float64(editDistance)/float64(maxLen)
+	if editSimilarity < 0 {
+		editSimilarity = 0
+	}
+
+	prefixSimilarity := float64(commonPrefixLength(targetNorm, keyNorm)) / float64(maxLen)
+	tokenSimilarity := tokenJaccardSimilarity(targetTokens, keyTokens)
+
+	return editSimilarity*0.65 + tokenSimilarity*0.25 + prefixSimilarity*0.10
+}
+
+func tokenizeModelName(name string) []string {
+	normalized := strings.ToLower(strings.TrimSpace(name))
+	if normalized == "" {
+		return nil
+	}
+
+	tokens := make([]string, 0, 8)
+	var builder strings.Builder
+	flush := func() {
+		if builder.Len() == 0 {
+			return
+		}
+		token := builder.String()
+		builder.Reset()
+		if token != "" {
+			tokens = append(tokens, token)
+		}
+	}
+
+	for _, r := range normalized {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			builder.WriteRune(r)
+			continue
+		}
+		flush()
+	}
+	flush()
+	return tokens
+}
+
+func selectFamilyHint(tokens []string) string {
+	for _, token := range tokens {
+		token = strings.TrimSpace(token)
+		if token == "" || isProviderToken(token) || isPureNumberToken(token) {
+			continue
+		}
+		if len(token) >= 3 {
+			return token
+		}
+	}
+	for _, token := range tokens {
+		token = strings.TrimSpace(token)
+		if token == "" || isProviderToken(token) || isPureNumberToken(token) {
+			continue
+		}
+		if len(token) >= 2 {
+			return token
+		}
+	}
+	return ""
+}
+
+func hasFamilyHint(normKey string, rawKey string, familyHint string) bool {
+	if familyHint == "" {
+		return true
+	}
+	if strings.Contains(normKey, familyHint) || strings.Contains(strings.ToLower(rawKey), familyHint) {
+		return true
+	}
+	for _, token := range tokenizeModelName(rawKey) {
+		if token == familyHint {
+			return true
+		}
+	}
+	return false
+}
+
+func isProviderToken(token string) bool {
+	switch token {
+	case "anthropic", "openai", "google", "meta", "vertex", "vertexai", "azure", "xai", "mistral", "deepseek", "qwen", "alibaba", "moonshot", "kimi":
+		return true
+	default:
+		return false
+	}
+}
+
+func isPureNumberToken(token string) bool {
+	if token == "" {
+		return false
+	}
+	for _, r := range token {
+		if !unicode.IsDigit(r) {
+			return false
+		}
+	}
+	return true
+}
+
+func commonPrefixLength(a string, b string) int {
+	maxPrefix := min(len(a), len(b))
+	for idx := 0; idx < maxPrefix; idx++ {
+		if a[idx] != b[idx] {
+			return idx
+		}
+	}
+	return maxPrefix
+}
+
+func tokenJaccardSimilarity(a []string, b []string) float64 {
+	if len(a) == 0 || len(b) == 0 {
+		return 0
+	}
+
+	setA := make(map[string]struct{}, len(a))
+	for _, token := range a {
+		if token == "" {
+			continue
+		}
+		setA[token] = struct{}{}
+	}
+	if len(setA) == 0 {
+		return 0
+	}
+
+	setB := make(map[string]struct{}, len(b))
+	for _, token := range b {
+		if token == "" {
+			continue
+		}
+		setB[token] = struct{}{}
+	}
+	if len(setB) == 0 {
+		return 0
+	}
+
+	intersection := 0
+	for token := range setA {
+		if _, ok := setB[token]; ok {
+			intersection++
+		}
+	}
+	union := len(setA) + len(setB) - intersection
+	if union <= 0 {
+		return 0
+	}
+	return float64(intersection) / float64(union)
+}
+
+func levenshteinDistance(a string, b string) int {
+	if a == b {
+		return 0
+	}
+	if len(a) == 0 {
+		return len(b)
+	}
+	if len(b) == 0 {
+		return len(a)
+	}
+
+	prev := make([]int, len(b)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(a); i++ {
+		current := make([]int, len(b)+1)
+		current[0] = i
+		for j := 1; j <= len(b); j++ {
+			cost := 0
+			if a[i-1] != b[j-1] {
+				cost = 1
+			}
+			current[j] = min(
+				current[j-1]+1,
+				prev[j]+1,
+				prev[j-1]+cost,
+			)
+		}
+		prev = current
+	}
+	return prev[len(b)]
+}
+
+func min(values ...int) int {
+	if len(values) == 0 {
+		return 0
+	}
+	result := values[0]
+	for _, value := range values[1:] {
+		if value < result {
+			result = value
+		}
+	}
+	return result
+}
+
+func max(a int, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func (s *Service) longContextTier(model string, usage UsageSnapshot) (LongContextPricing, bool) {
