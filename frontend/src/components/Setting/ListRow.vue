@@ -50,6 +50,7 @@ defineProps<{
   display: inline-flex;
   align-items: center;
   justify-content: flex-end;
+  flex-shrink: 0;
   max-width: 100%;
   min-width: 0;
   margin-left: auto;

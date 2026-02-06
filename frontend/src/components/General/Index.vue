@@ -125,6 +125,35 @@ const webdavUploadBytes = ref(0)
 const webdavUploadError = ref('')
 const webdavUploadLogs = ref<WebDAVUploadLog[]>([])
 
+type WebDAVDownloadStage =
+  | 'idle'
+  | 'ready'
+  | 'start'
+  | 'backup'
+  | 'fetch_manifest'
+  | 'downloading'
+  | 'importing'
+  | 'done'
+  | 'error'
+
+type WebDAVDownloadLogLevel = 'info' | 'warn' | 'error'
+type WebDAVDownloadLog = { ts: number; level: WebDAVDownloadLogLevel; text: string }
+
+const webdavDownloadModalOpen = ref(false)
+const webdavDownloadStage = ref<WebDAVDownloadStage>('idle')
+const webdavDownloadMessage = ref('')
+const webdavDownloadRemoteURL = ref('')
+const webdavDownloadCurrentFile = ref('')
+const webdavDownloadDoneCount = ref(0)
+const webdavDownloadTotalCount = ref(0)
+const webdavDownloadSent = ref(0)
+const webdavDownloadTotal = ref(0)
+const webdavDownloadBytes = ref(0)
+const webdavDownloadBackupPath = ref('')
+const webdavDownloadErrorFile = ref('')
+const webdavDownloadError = ref('')
+const webdavDownloadLogs = ref<WebDAVDownloadLog[]>([])
+
 let unsubscribeWebdavSync: (() => void) | null = null
 
 // 模型价格弹窗
@@ -166,6 +195,40 @@ const webdavUploadPercent = computed(() => {
   return 0
 })
 
+const webdavDownloadPercent = computed(() => {
+  const stage = webdavDownloadStage.value
+  if (stage === 'done') return 100
+  if (stage === 'error') return Math.max(0, Math.min(100, 100))
+  if (stage === 'backup') return 10
+  if (stage === 'fetch_manifest') return 20
+  if (stage === 'importing') return 95
+  if (stage === 'downloading') {
+    const totalCount = Number(webdavDownloadTotalCount.value || 0)
+    const doneCount = Number(webdavDownloadDoneCount.value || 0)
+    if (totalCount > 0) {
+      const ratio = Math.max(0, Math.min(1, doneCount / totalCount))
+      return 20 + Math.round(ratio * 70)
+    }
+
+    const total = Number(webdavDownloadTotal.value || 0)
+    const sent = Number(webdavDownloadSent.value || 0)
+    if (total > 0) {
+      const ratio = Math.max(0, Math.min(1, sent / total))
+      return 20 + Math.round(ratio * 70)
+    }
+    if (sent > 0) {
+      // total 不可得时给一个“伪进度”，避免进度条完全不动
+      const scale = 50 * 1024 * 1024 // 50MB
+      const ratio = Math.max(0, Math.min(1, sent / scale))
+      return 20 + Math.round(ratio * 70)
+    }
+    return 60
+  }
+  if (stage === 'start') return 5
+  if (stage === 'ready') return 0
+  return 0
+})
+
 const resetWebdavUploadModal = () => {
   webdavUploadPreviewLoading.value = false
   webdavUploadIncludes.value = []
@@ -185,6 +248,31 @@ const appendWebdavUploadLog = (text: string, level: WebDAVUploadLogLevel = 'info
   webdavUploadLogs.value.push({ ts: Number(ts ?? Date.now()), level, text: trimmed })
   if (webdavUploadLogs.value.length > 200) {
     webdavUploadLogs.value = webdavUploadLogs.value.slice(-200)
+  }
+}
+
+const resetWebdavDownloadModal = () => {
+  webdavDownloadStage.value = 'ready'
+  webdavDownloadMessage.value = ''
+  webdavDownloadRemoteURL.value = ''
+  webdavDownloadCurrentFile.value = ''
+  webdavDownloadDoneCount.value = 0
+  webdavDownloadTotalCount.value = 0
+  webdavDownloadSent.value = 0
+  webdavDownloadTotal.value = 0
+  webdavDownloadBytes.value = 0
+  webdavDownloadBackupPath.value = ''
+  webdavDownloadErrorFile.value = ''
+  webdavDownloadError.value = ''
+  webdavDownloadLogs.value = []
+}
+
+const appendWebdavDownloadLog = (text: string, level: WebDAVDownloadLogLevel = 'info', ts?: number) => {
+  const trimmed = String(text ?? '').trim()
+  if (!trimmed) return
+  webdavDownloadLogs.value.push({ ts: Number(ts ?? Date.now()), level, text: trimmed })
+  if (webdavDownloadLogs.value.length > 200) {
+    webdavDownloadLogs.value = webdavDownloadLogs.value.slice(-200)
   }
 }
 
@@ -214,6 +302,20 @@ const closeWebdavUploadModal = () => {
     return
   }
   webdavUploadModalOpen.value = false
+}
+
+const openWebdavDownloadModal = () => {
+  if (webdavLoading.value || webdavUploading.value || webdavDownloading.value) return
+  webdavDownloadModalOpen.value = true
+  resetWebdavDownloadModal()
+}
+
+const closeWebdavDownloadModal = () => {
+  if (webdavDownloading.value) {
+    showToast(t('components.general.webdav.downloading'), 'warning')
+    return
+  }
+  webdavDownloadModalOpen.value = false
 }
 
 const startWebdavUpload = async () => {
@@ -247,42 +349,133 @@ const startWebdavUpload = async () => {
   }
 }
 
+const startWebdavDownload = async () => {
+  if (webdavLoading.value || webdavDownloading.value || webdavUploading.value) return
+  webdavDownloading.value = true
+  webdavDownloadErrorFile.value = ''
+  webdavDownloadError.value = ''
+  webdavDownloadStage.value = 'start'
+  webdavDownloadMessage.value = t('components.general.webdav.downloading')
+  try {
+    const result = await loadFromWebDAV(buildWebDAVConfig())
+    webdavDownloadBytes.value = Number(result?.bytes ?? webdavDownloadBytes.value)
+    webdavDownloadRemoteURL.value = result?.remote_url ?? webdavDownloadRemoteURL.value
+    webdavDownloadBackupPath.value = result?.backup_path ?? webdavDownloadBackupPath.value
+
+    if (result?.ok) {
+      webdavDownloadStage.value = 'done'
+      if (typeof result?.message === 'string' && result.message.trim()) {
+        webdavDownloadMessage.value = result.message.trim()
+      }
+      showToast(t('components.general.webdav.downloadOk'), 'success')
+      await loadAppSettings()
+      await loadBlacklistSettings()
+      await loadImportStatus()
+    } else {
+      webdavDownloadStage.value = 'error'
+      webdavDownloadError.value = String(result?.message || t('components.general.webdav.downloadFailed'))
+      appendWebdavDownloadLog(webdavDownloadError.value, 'error')
+      showToast(t('components.general.webdav.downloadFailed') + ': ' + webdavDownloadError.value, 'error')
+    }
+  } catch (error) {
+    console.error('webdav download failed', error)
+    webdavDownloadStage.value = 'error'
+    webdavDownloadError.value = extractErrorMessage(error)
+    appendWebdavDownloadLog(webdavDownloadError.value, 'error')
+    showToast(t('components.general.webdav.downloadFailed') + ': ' + webdavDownloadError.value, 'error')
+  } finally {
+    webdavDownloading.value = false
+  }
+}
+
 const handleWebdavSyncEvent = (event: { data: Record<string, any> }) => {
   const data = event?.data ?? {}
-  if (data?.type !== 'upload') return
+  const type = String(data?.type || '').trim()
+  if (!type) return
+
+  if (type === 'upload') {
+    const stage = String(data?.stage || '').trim()
+    if (stage) {
+      webdavUploadStage.value = stage as WebDAVUploadStage
+    }
+    const logText = typeof data?.log === 'string' ? data.log.trim() : ''
+    if (logText) {
+      const rawLevel = typeof data?.log_level === 'string' ? data.log_level.trim().toLowerCase() : ''
+      const level: WebDAVUploadLogLevel = rawLevel === 'error' ? 'error' : rawLevel === 'warn' ? 'warn' : 'info'
+      const ts = typeof data?.timestamp === 'number' ? data.timestamp : Date.now()
+      appendWebdavUploadLog(logText, level, ts)
+    }
+    if (typeof data?.message === 'string' && data.message.trim()) {
+      webdavUploadMessage.value = data.message.trim()
+    }
+    if (typeof data?.remote_url === 'string' && data.remote_url.trim()) {
+      webdavUploadRemoteURL.value = data.remote_url.trim()
+    }
+    if (typeof data?.sent === 'number') {
+      webdavUploadSent.value = data.sent
+    }
+    if (typeof data?.total === 'number') {
+      webdavUploadTotal.value = data.total
+    }
+    if (typeof data?.bytes === 'number') {
+      webdavUploadBytes.value = data.bytes
+    }
+    if (Array.isArray(data?.includes)) {
+      webdavUploadIncludes.value = data.includes
+    }
+    if (stage === 'error') {
+      webdavUploadError.value = String(data?.message || webdavUploadError.value || '同步失败')
+      appendWebdavUploadLog(webdavUploadError.value, 'error')
+    }
+    return
+  }
+
+  if (type !== 'download') return
 
   const stage = String(data?.stage || '').trim()
   if (stage) {
-    webdavUploadStage.value = stage as WebDAVUploadStage
+    webdavDownloadStage.value = stage as WebDAVDownloadStage
   }
+
   const logText = typeof data?.log === 'string' ? data.log.trim() : ''
   if (logText) {
     const rawLevel = typeof data?.log_level === 'string' ? data.log_level.trim().toLowerCase() : ''
-    const level: WebDAVUploadLogLevel = rawLevel === 'error' ? 'error' : rawLevel === 'warn' ? 'warn' : 'info'
+    const level: WebDAVDownloadLogLevel = rawLevel === 'error' ? 'error' : rawLevel === 'warn' ? 'warn' : 'info'
     const ts = typeof data?.timestamp === 'number' ? data.timestamp : Date.now()
-    appendWebdavUploadLog(logText, level, ts)
+    appendWebdavDownloadLog(logText, level, ts)
   }
   if (typeof data?.message === 'string' && data.message.trim()) {
-    webdavUploadMessage.value = data.message.trim()
+    webdavDownloadMessage.value = data.message.trim()
   }
   if (typeof data?.remote_url === 'string' && data.remote_url.trim()) {
-    webdavUploadRemoteURL.value = data.remote_url.trim()
+    webdavDownloadRemoteURL.value = data.remote_url.trim()
+  }
+  if (typeof data?.backup_path === 'string' && data.backup_path.trim()) {
+    webdavDownloadBackupPath.value = data.backup_path.trim()
+  }
+  if (typeof data?.file === 'string' && data.file.trim()) {
+    webdavDownloadCurrentFile.value = data.file.trim()
+  }
+  if (typeof data?.count_done === 'number') {
+    webdavDownloadDoneCount.value = data.count_done
+  }
+  if (typeof data?.count_total === 'number') {
+    webdavDownloadTotalCount.value = data.count_total
   }
   if (typeof data?.sent === 'number') {
-    webdavUploadSent.value = data.sent
+    webdavDownloadSent.value = data.sent
   }
   if (typeof data?.total === 'number') {
-    webdavUploadTotal.value = data.total
+    webdavDownloadTotal.value = data.total
   }
   if (typeof data?.bytes === 'number') {
-    webdavUploadBytes.value = data.bytes
+    webdavDownloadBytes.value = data.bytes
   }
-  if (Array.isArray(data?.includes)) {
-    webdavUploadIncludes.value = data.includes
-  }
+
   if (stage === 'error') {
-    webdavUploadError.value = String(data?.message || webdavUploadError.value || '同步失败')
-    appendWebdavUploadLog(webdavUploadError.value, 'error')
+    webdavDownloadErrorFile.value = String(data?.file || webdavDownloadCurrentFile.value || '').trim()
+    webdavDownloadError.value = String(data?.message || webdavDownloadError.value || '同步失败')
+    appendWebdavDownloadLog(webdavDownloadError.value, 'error')
   }
 }
 
@@ -824,23 +1017,7 @@ const uploadToWebDAV = async () => {
 }
 
 const downloadFromWebDAV = async () => {
-  if (webdavLoading.value || webdavDownloading.value || webdavUploading.value) return
-  const confirmed = confirm(t('components.general.webdav.confirmDownload'))
-  if (!confirmed) return
-  webdavDownloading.value = true
-  try {
-    const result = await loadFromWebDAV(buildWebDAVConfig())
-    showToast(t('components.general.webdav.downloadOk'), 'success')
-    await loadAppSettings()
-    await loadBlacklistSettings()
-    await loadImportStatus()
-    alert(t('components.general.webdav.downloadPostHint', { backup: result?.backup_path || '' }))
-  } catch (error) {
-    console.error('webdav download failed', error)
-    showToast(t('components.general.webdav.downloadFailed') + ': ' + extractErrorMessage(error), 'error')
-  } finally {
-    webdavDownloading.value = false
-  }
+  openWebdavDownloadModal()
 }
 
 onMounted(async () => {
@@ -1649,6 +1826,102 @@ onBeforeUnmount(() => {
         </footer>
       </InlineModal>
 
+      <InlineModal
+        :open="webdavDownloadModalOpen"
+        :title="$t('components.general.webdav.download')"
+        :close-on-backdrop="false"
+        @close="closeWebdavDownloadModal"
+      >
+        <div class="webdav-sync-modal">
+          <p class="webdav-sync-hint">{{ $t('components.general.webdav.confirmDownload') }}</p>
+
+          <div class="webdav-sync-block">
+            <div class="webdav-sync-block-title">{{ $t('components.general.webdav.progress') }}</div>
+
+            <div class="webdav-sync-progress-row">
+              <span class="webdav-sync-stage">{{ webdavDownloadMessage || webdavDownloadStage }}</span>
+              <span class="webdav-sync-percent">{{ webdavDownloadPercent }}%</span>
+            </div>
+            <div
+              class="webdav-progress-bar"
+              role="progressbar"
+              :aria-valuenow="webdavDownloadPercent"
+              aria-valuemin="0"
+              aria-valuemax="100"
+            >
+              <div class="webdav-progress-fill" :style="{ width: webdavDownloadPercent + '%' }"></div>
+            </div>
+
+            <div v-if="webdavDownloadStage === 'downloading' && webdavDownloadTotalCount > 0" class="webdav-sync-meta">
+              {{ webdavDownloadDoneCount }} / {{ webdavDownloadTotalCount }}
+            </div>
+            <div v-else-if="webdavDownloadStage === 'downloading' && webdavDownloadTotal > 0" class="webdav-sync-meta">
+              {{ formatBytes(webdavDownloadSent) }} / {{ formatBytes(webdavDownloadTotal) }}
+            </div>
+            <div v-else-if="webdavDownloadStage === 'downloading' && webdavDownloadSent > 0" class="webdav-sync-meta">
+              {{ formatBytes(webdavDownloadSent) }}
+            </div>
+            <div v-else-if="webdavDownloadStage === 'done' && webdavDownloadBytes > 0" class="webdav-sync-meta">
+              {{ formatBytes(webdavDownloadBytes) }}
+            </div>
+
+            <p v-if="webdavDownloadCurrentFile" class="webdav-sync-remote">
+              {{ $t('components.general.webdav.currentFile') }}：<span class="webdav-sync-remote-url">{{ webdavDownloadCurrentFile }}</span>
+            </p>
+            <p v-if="webdavDownloadRemoteURL" class="webdav-sync-remote">
+              {{ $t('components.general.webdav.remoteUrl') }}：<span class="webdav-sync-remote-url">{{ webdavDownloadRemoteURL }}</span>
+            </p>
+            <p v-if="webdavDownloadBackupPath" class="webdav-sync-remote">
+              {{ $t('components.general.webdav.backupPath') }}：<span class="webdav-sync-remote-url">{{ webdavDownloadBackupPath }}</span>
+            </p>
+            <p v-if="webdavDownloadError" class="alert-error">
+              <span v-if="webdavDownloadErrorFile">
+                {{ $t('components.general.webdav.errorFile') }}：{{ webdavDownloadErrorFile }}<br />
+              </span>
+              {{ webdavDownloadError }}
+            </p>
+            <div v-if="webdavDownloadLogs.length" class="webdav-sync-logs">
+              <p
+                v-for="(item, idx) in webdavDownloadLogs"
+                :key="`${item.ts}-${idx}`"
+                class="webdav-sync-log"
+                :class="{ 'is-error': item.level === 'error' }"
+              >
+                {{ item.text }}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <footer class="webdav-sync-actions">
+          <button
+            v-if="!webdavDownloading && (webdavDownloadStage === 'ready' || webdavDownloadStage === 'idle')"
+            class="action-btn"
+            type="button"
+            @click="closeWebdavDownloadModal"
+          >
+            {{ $t('common.cancel') }}
+          </button>
+
+          <button
+            v-if="!webdavDownloading && (webdavDownloadStage === 'ready' || webdavDownloadStage === 'idle')"
+            class="primary-btn"
+            type="button"
+            @click="startWebdavDownload"
+          >
+            {{ $t('components.general.webdav.download') }}
+          </button>
+
+          <button v-else-if="webdavDownloading" class="primary-btn" type="button" disabled>
+            {{ $t('components.general.webdav.downloading') }}
+          </button>
+
+          <button v-else class="action-btn" type="button" @click="closeWebdavDownloadModal">
+            {{ $t('common.close') }}
+          </button>
+        </footer>
+      </InlineModal>
+
       <ModelPricingModal :open="modelPricingModalOpen" @close="modelPricingModalOpen = false" />
     </div>
   </div>
@@ -1747,9 +2020,12 @@ onBeforeUnmount(() => {
 
 .webdav-actions {
   display: flex;
+  flex: 1 1 auto;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .webdav-sync-modal {

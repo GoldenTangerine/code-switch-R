@@ -25,6 +25,30 @@ type progressReadSeeker struct {
 	onProgress func(sent int64, total int64)
 }
 
+type progressWriter struct {
+	w          io.Writer
+	total      int64
+	written    int64
+	lastEmit   time.Time
+	onProgress func(written int64, total int64)
+}
+
+func (p *progressWriter) Write(b []byte) (int, error) {
+	n, err := p.w.Write(b)
+	if n > 0 {
+		p.written += int64(n)
+		if p.onProgress != nil {
+			now := time.Now()
+			shouldEmit := p.written == int64(n) || (p.total > 0 && p.written >= p.total) || now.Sub(p.lastEmit) >= 200*time.Millisecond
+			if shouldEmit {
+				p.lastEmit = now
+				p.onProgress(p.written, p.total)
+			}
+		}
+	}
+	return n, err
+}
+
 func (p *progressReadSeeker) Read(b []byte) (int, error) {
 	n, err := p.rs.Read(b)
 	if n > 0 {
@@ -188,6 +212,32 @@ func (c *webdavClient) getToWriter(ctx context.Context, targetURL string, w io.W
 		return 0, fmt.Errorf("GET 失败: HTTP %d", resp.StatusCode)
 	}
 	return io.Copy(w, resp.Body)
+}
+
+func (c *webdavClient) getToWriterWithProgress(ctx context.Context, targetURL string, w io.Writer, onProgress func(written int64, total int64)) (written int64, total int64, err error) {
+	if w == nil {
+		return 0, 0, fmt.Errorf("nil writer")
+	}
+	makeReq := func(u string) (*http.Request, error) {
+		return http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	}
+	resp, err := c.doWithRedirects(makeReq, targetURL)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		return 0, 0, fmt.Errorf("GET 失败: HTTP %d", resp.StatusCode)
+	}
+
+	total = resp.ContentLength
+	if onProgress != nil {
+		onProgress(0, total)
+	}
+	pw := &progressWriter{w: w, total: total, onProgress: onProgress}
+	written, err = io.Copy(pw, resp.Body)
+	return written, total, err
 }
 
 func (c *webdavClient) delete(ctx context.Context, targetURL string) error {

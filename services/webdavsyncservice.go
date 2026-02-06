@@ -451,23 +451,64 @@ func (s *WebDAVSyncService) LoadFromWebDAV(cfg WebDAVSyncConfig) (WebDAVSyncResu
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	s.emitSyncEvent(map[string]interface{}{
+		"type":    "download",
+		"stage":   "start",
+		"message": "开始从 WebDAV 加载",
+		"log":     "开始从 WebDAV 加载",
+	})
+
 	cfg, err := normalizeWebDAVSyncConfig(cfg)
 	if err != nil {
+		s.emitSyncEvent(map[string]interface{}{
+			"type":      "download",
+			"stage":     "error",
+			"message":   err.Error(),
+			"log":       err.Error(),
+			"log_level": "error",
+		})
 		return WebDAVSyncResult{}, err
 	}
 
 	dirURL, fileURL, err := webdavResolveTargetURLs(cfg)
 	if err != nil {
+		s.emitSyncEvent(map[string]interface{}{
+			"type":      "download",
+			"stage":     "error",
+			"message":   err.Error(),
+			"log":       err.Error(),
+			"log_level": "error",
+		})
 		return WebDAVSyncResult{}, err
 	}
 
 	client := newWebDAVClient(cfg.Username, cfg.Password, time.Duration(cfg.TimeoutSeconds)*time.Second)
 
 	// 导入前先做一份本地备份，避免用户把自己坑死
+	s.emitSyncEvent(map[string]interface{}{
+		"type":    "download",
+		"stage":   "backup",
+		"message": "正在备份本地配置",
+		"log":     "正在备份本地配置",
+	})
 	backupPath, _, _, err := exportLocalConfigZipToBackupDir()
 	if err != nil {
+		s.emitSyncEvent(map[string]interface{}{
+			"type":      "download",
+			"stage":     "error",
+			"message":   "本地备份失败: " + err.Error(),
+			"log":       "本地备份失败: " + err.Error(),
+			"log_level": "error",
+		})
 		return WebDAVSyncResult{}, fmt.Errorf("本地备份失败: %w", err)
 	}
+	s.emitSyncEvent(map[string]interface{}{
+		"type":        "download",
+		"stage":       "backup",
+		"backup_path": backupPath,
+		"message":     "本地备份完成",
+		"log":         fmt.Sprintf("本地备份完成: %s", backupPath),
+	})
 
 	// 优先尝试“逐文件同步”模式：remote_dir/<bundle>/manifest.json
 	remoteBundleName := webdavBundleDirName(cfg.RemoteFile)
@@ -479,55 +520,66 @@ func (s *WebDAVSyncService) LoadFromWebDAV(cfg WebDAVSyncConfig) (WebDAVSyncResu
 	manifestURL := strings.TrimSuffix(mustJoinWebDAVURL(bundleURL, "manifest.json"), "/")
 
 	var bytesDownloaded int64
+	s.emitSyncEvent(map[string]interface{}{
+		"type":       "download",
+		"stage":      "fetch_manifest",
+		"remote_url": manifestURL,
+		"message":    "读取远程 manifest.json",
+		"log":        fmt.Sprintf("读取远程 manifest.json: %s", manifestURL),
+	})
 	manifestCtx, manifestCancel := context.WithTimeout(context.Background(), time.Duration(cfg.TimeoutSeconds)*time.Second)
 	manifestBytes, manifestErr := client.get(manifestCtx, manifestURL)
 	manifestCancel()
 	if manifestErr == nil && len(manifestBytes) > 0 {
 		var manifest webdavBackupManifest
 		if err := json.Unmarshal(manifestBytes, &manifest); err != nil {
+			s.emitSyncEvent(map[string]interface{}{
+				"type":       "download",
+				"stage":      "error",
+				"remote_url": manifestURL,
+				"message":    err.Error(),
+				"log":        err.Error(),
+				"log_level":  "error",
+			})
 			return WebDAVSyncResult{}, fmt.Errorf("解析 manifest.json 失败: %w", err)
 		}
 		if len(manifest.Includes) == 0 {
-			return WebDAVSyncResult{}, fmt.Errorf("manifest.json includes 为空")
+			err := fmt.Errorf("manifest.json includes 为空")
+			s.emitSyncEvent(map[string]interface{}{
+				"type":       "download",
+				"stage":      "error",
+				"remote_url": manifestURL,
+				"message":    err.Error(),
+				"log":        err.Error(),
+				"log_level":  "error",
+			})
+			return WebDAVSyncResult{}, err
 		}
 
 		codeDir, err := codeSwitchConfigDir()
 		if err != nil {
+			s.emitSyncEvent(map[string]interface{}{
+				"type":      "download",
+				"stage":     "error",
+				"message":   err.Error(),
+				"log":       err.Error(),
+				"log_level": "error",
+			})
 			return WebDAVSyncResult{}, err
 		}
 
-		// 先下载 DB（如存在）到临时文件，后续用 ATTACH 导入
-		var dbTemp string
-		for _, name := range manifest.Includes {
-			name = strings.TrimSpace(strings.ReplaceAll(name, "\\", "/"))
-			if name == zipPathJoin(webdavZipRootDir, "app.db") {
-				dbTempFile, err := os.CreateTemp("", "codeswitch-webdav-import-db-*.db")
-				if err != nil {
-					return WebDAVSyncResult{}, err
-				}
-				dbTemp = dbTempFile.Name()
-				getCtx, getCancel := context.WithTimeout(context.Background(), time.Duration(cfg.TimeoutSeconds)*time.Second)
-				n, err := client.getToWriter(getCtx, strings.TrimSuffix(mustJoinWebDAVURL(bundleURL, name), "/"), dbTempFile)
-				getCancel()
-				_ = dbTempFile.Close()
-				if err != nil {
-					_ = os.Remove(dbTemp)
-					return WebDAVSyncResult{}, err
-				}
-				bytesDownloaded += n
-				break
-			}
-		}
-		if dbTemp != "" {
-			defer os.Remove(dbTemp)
-		}
-
-		for _, name := range manifest.Includes {
-			name = strings.TrimSpace(strings.ReplaceAll(name, "\\", "/"))
+		hasDB := false
+		importList := make([]string, 0, len(manifest.Includes))
+		for _, raw := range manifest.Includes {
+			name := strings.TrimSpace(strings.ReplaceAll(raw, "\\", "/"))
 			if name == "" || name == "manifest.json" {
 				continue
 			}
 			if strings.HasSuffix(name, "/") {
+				continue
+			}
+			if name == zipPathJoin(webdavZipRootDir, "app.db") {
+				hasDB = true
 				continue
 			}
 			if !strings.HasPrefix(name, webdavZipRootDir+"/") {
@@ -540,35 +592,199 @@ func (s *WebDAVSyncService) LoadFromWebDAV(cfg WebDAVSyncConfig) (WebDAVSyncResu
 				continue
 			}
 			if strings.Contains(rel, "..") {
-				return WebDAVSyncResult{}, fmt.Errorf("远程路径不安全: %s", name)
-			}
-			// DB 走专门导入
-			if rel == "app.db" {
-				continue
+				err := fmt.Errorf("远程路径不安全: %s", name)
+				s.emitSyncEvent(map[string]interface{}{
+					"type":      "download",
+					"stage":     "error",
+					"file":      name,
+					"message":   err.Error(),
+					"log":       err.Error(),
+					"log_level": "error",
+				})
+				return WebDAVSyncResult{}, err
 			}
 			if rel == webdavConfigFileName {
 				continue
 			}
+			importList = append(importList, name)
+		}
+
+		totalCount := len(importList)
+		if hasDB {
+			totalCount++
+		}
+		doneCount := 0
+
+		s.emitSyncEvent(map[string]interface{}{
+			"type":        "download",
+			"stage":       "downloading",
+			"remote_url":  bundleURL,
+			"bytes":       bytesDownloaded,
+			"count_done":  doneCount,
+			"count_total": totalCount,
+			"message":     fmt.Sprintf("开始下载（共 %d 项）", totalCount),
+			"log":         fmt.Sprintf("开始下载（共 %d 项）", totalCount),
+		})
+
+		// 先下载 DB（如存在）到临时文件，后续用 ATTACH 导入
+		var dbTemp string
+		if hasDB {
+			dbName := zipPathJoin(webdavZipRootDir, "app.db")
+			s.emitSyncEvent(map[string]interface{}{
+				"type":        "download",
+				"stage":       "downloading",
+				"remote_url":  bundleURL,
+				"file":        dbName,
+				"bytes":       bytesDownloaded,
+				"count_done":  doneCount,
+				"count_total": totalCount,
+				"message":     fmt.Sprintf("正在下载 (%d/%d)：%s", doneCount+1, totalCount, dbName),
+				"log":         fmt.Sprintf("下载: %s", dbName),
+			})
+
+			dbTempFile, err := os.CreateTemp("", "codeswitch-webdav-import-db-*.db")
+			if err != nil {
+				s.emitSyncEvent(map[string]interface{}{
+					"type":      "download",
+					"stage":     "error",
+					"file":      dbName,
+					"message":   err.Error(),
+					"log":       err.Error(),
+					"log_level": "error",
+				})
+				return WebDAVSyncResult{}, err
+			}
+			dbTemp = dbTempFile.Name()
+			getCtx, getCancel := context.WithTimeout(context.Background(), time.Duration(cfg.TimeoutSeconds)*time.Second)
+			n, err := client.getToWriter(getCtx, strings.TrimSuffix(mustJoinWebDAVURL(bundleURL, dbName), "/"), dbTempFile)
+			getCancel()
+			_ = dbTempFile.Close()
+			if err != nil {
+				_ = os.Remove(dbTemp)
+				s.emitSyncEvent(map[string]interface{}{
+					"type":      "download",
+					"stage":     "error",
+					"file":      dbName,
+					"message":   err.Error(),
+					"log":       err.Error(),
+					"log_level": "error",
+				})
+				return WebDAVSyncResult{}, err
+			}
+			bytesDownloaded += n
+			doneCount++
+			s.emitSyncEvent(map[string]interface{}{
+				"type":        "download",
+				"stage":       "downloading",
+				"remote_url":  bundleURL,
+				"bytes":       bytesDownloaded,
+				"count_done":  doneCount,
+				"count_total": totalCount,
+			})
+		}
+		if dbTemp != "" {
+			defer os.Remove(dbTemp)
+		}
+
+		for _, name := range importList {
+			name = strings.TrimSpace(strings.ReplaceAll(name, "\\", "/"))
+			if name == "" || strings.HasSuffix(name, "/") {
+				continue
+			}
+
+			rel := strings.TrimPrefix(name, webdavZipRootDir+"/")
+			rel = strings.TrimSpace(rel)
+			if rel == "" || rel == "." {
+				continue
+			}
+
+			s.emitSyncEvent(map[string]interface{}{
+				"type":        "download",
+				"stage":       "downloading",
+				"remote_url":  bundleURL,
+				"file":        name,
+				"bytes":       bytesDownloaded,
+				"count_done":  doneCount,
+				"count_total": totalCount,
+				"message":     fmt.Sprintf("正在下载 (%d/%d)：%s", doneCount+1, totalCount, rel),
+				"log":         fmt.Sprintf("下载: %s", rel),
+			})
 
 			targetURL := strings.TrimSuffix(mustJoinWebDAVURL(bundleURL, name), "/")
 			getCtx, getCancel := context.WithTimeout(context.Background(), time.Duration(cfg.TimeoutSeconds)*time.Second)
 			data, err := client.get(getCtx, targetURL)
 			getCancel()
 			if err != nil {
+				s.emitSyncEvent(map[string]interface{}{
+					"type":       "download",
+					"stage":      "error",
+					"remote_url": targetURL,
+					"file":       name,
+					"message":    err.Error(),
+					"log":        err.Error(),
+					"log_level":  "error",
+				})
 				return WebDAVSyncResult{}, err
 			}
 			bytesDownloaded += int64(len(data))
 			dst := filepath.Join(codeDir, filepath.FromSlash(rel))
 			if err := atomicWriteFile(dst, data, 0o644); err != nil {
+				s.emitSyncEvent(map[string]interface{}{
+					"type":      "download",
+					"stage":     "error",
+					"file":      rel,
+					"message":   err.Error(),
+					"log":       err.Error(),
+					"log_level": "error",
+				})
+				return WebDAVSyncResult{}, err
+			}
+			doneCount++
+			s.emitSyncEvent(map[string]interface{}{
+				"type":        "download",
+				"stage":       "downloading",
+				"remote_url":  bundleURL,
+				"bytes":       bytesDownloaded,
+				"count_done":  doneCount,
+				"count_total": totalCount,
+			})
+		}
+
+		if dbTemp != "" {
+			dbName := zipPathJoin(webdavZipRootDir, "app.db")
+			s.emitSyncEvent(map[string]interface{}{
+				"type":        "download",
+				"stage":       "importing",
+				"remote_url":  bundleURL,
+				"file":        dbName,
+				"bytes":       bytesDownloaded,
+				"count_done":  doneCount,
+				"count_total": totalCount,
+				"message":     "正在导入数据库",
+				"log":         "正在导入数据库",
+			})
+			if err := importSQLiteFromSnapshot(dbTemp); err != nil {
+				s.emitSyncEvent(map[string]interface{}{
+					"type":      "download",
+					"stage":     "error",
+					"file":      dbName,
+					"message":   err.Error(),
+					"log":       err.Error(),
+					"log_level": "error",
+				})
 				return WebDAVSyncResult{}, err
 			}
 		}
 
-		if dbTemp != "" {
-			if err := importSQLiteFromSnapshot(dbTemp); err != nil {
-				return WebDAVSyncResult{}, err
-			}
-		}
+		s.emitSyncEvent(map[string]interface{}{
+			"type":        "download",
+			"stage":       "done",
+			"remote_url":  bundleURL,
+			"bytes":       bytesDownloaded,
+			"backup_path": backupPath,
+			"message":     "加载完成",
+			"log":         "加载完成",
+		})
 
 		return WebDAVSyncResult{
 			OK:         true,
@@ -579,6 +795,22 @@ func (s *WebDAVSyncService) LoadFromWebDAV(cfg WebDAVSyncConfig) (WebDAVSyncResu
 		}, nil
 	}
 
+	// manifest.json 不存在或读取失败时，回退到 zip 模式
+	{
+		msg := "未发现逐文件备份，回退到 zip 模式"
+		if manifestErr != nil {
+			msg = "读取 manifest.json 失败，回退到 zip 模式: " + manifestErr.Error()
+		}
+		s.emitSyncEvent(map[string]interface{}{
+			"type":       "download",
+			"stage":      "fetch_manifest",
+			"remote_url": manifestURL,
+			"message":    msg,
+			"log":        msg,
+			"log_level":  "warn",
+		})
+	}
+
 	// 回退到旧的 zip 模式
 	tmpFile, err := os.CreateTemp("", "codeswitch-webdav-import-*.zip")
 	if err != nil {
@@ -586,23 +818,88 @@ func (s *WebDAVSyncService) LoadFromWebDAV(cfg WebDAVSyncConfig) (WebDAVSyncResu
 	}
 	tmpPath := tmpFile.Name()
 	getCtx, getCancel := context.WithTimeout(context.Background(), time.Duration(cfg.TimeoutSeconds)*time.Second)
-	bytesDownloaded, err = client.getToWriter(getCtx, fileURL, tmpFile)
+	s.emitSyncEvent(map[string]interface{}{
+		"type":       "download",
+		"stage":      "downloading",
+		"remote_url": fileURL,
+		"file":       cfg.RemoteFile,
+		"sent":       int64(0),
+		"total":      int64(0),
+		"message":    "正在下载备份文件",
+		"log":        fmt.Sprintf("下载: %s", fileURL),
+	})
+	bytesDownloaded, _, err = client.getToWriterWithProgress(getCtx, fileURL, tmpFile, func(written int64, total int64) {
+		s.emitSyncEvent(map[string]interface{}{
+			"type":       "download",
+			"stage":      "downloading",
+			"remote_url": fileURL,
+			"file":       cfg.RemoteFile,
+			"sent":       written,
+			"total":      total,
+			"bytes":      written,
+		})
+	})
 	getCancel()
 	if err != nil {
 		tmpFile.Close()
 		os.Remove(tmpPath)
+		s.emitSyncEvent(map[string]interface{}{
+			"type":       "download",
+			"stage":      "error",
+			"remote_url": fileURL,
+			"file":       cfg.RemoteFile,
+			"message":    err.Error(),
+			"log":        err.Error(),
+			"log_level":  "error",
+		})
 		return WebDAVSyncResult{}, err
 	}
 	if err := tmpFile.Close(); err != nil {
 		os.Remove(tmpPath)
+		s.emitSyncEvent(map[string]interface{}{
+			"type":       "download",
+			"stage":      "error",
+			"remote_url": fileURL,
+			"file":       cfg.RemoteFile,
+			"message":    err.Error(),
+			"log":        err.Error(),
+			"log_level":  "error",
+		})
 		return WebDAVSyncResult{}, err
 	}
 	defer os.Remove(tmpPath)
 
+	s.emitSyncEvent(map[string]interface{}{
+		"type":       "download",
+		"stage":      "importing",
+		"remote_url": fileURL,
+		"file":       cfg.RemoteFile,
+		"bytes":      bytesDownloaded,
+		"message":    "正在导入配置",
+		"log":        "正在导入配置",
+	})
 	if err := importConfigZip(tmpPath); err != nil {
+		s.emitSyncEvent(map[string]interface{}{
+			"type":       "download",
+			"stage":      "error",
+			"remote_url": fileURL,
+			"file":       cfg.RemoteFile,
+			"message":    err.Error(),
+			"log":        err.Error(),
+			"log_level":  "error",
+		})
 		return WebDAVSyncResult{}, err
 	}
 
+	s.emitSyncEvent(map[string]interface{}{
+		"type":        "download",
+		"stage":       "done",
+		"remote_url":  fileURL,
+		"bytes":       bytesDownloaded,
+		"backup_path": backupPath,
+		"message":     "加载完成",
+		"log":         "加载完成",
+	})
 	return WebDAVSyncResult{
 		OK:         true,
 		Message:    "已从 WebDAV 加载到本地（已自动备份原配置）",
