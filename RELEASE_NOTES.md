@@ -1,3 +1,16 @@
+# Code Switch v2.6.34
+
+## 修复
+- **Claude 日志 token 归零**：修复模型价格配置改造后，部分 Claude 请求在日志中 `input/output` 显示为 `0` 的问题
+- **SSE 分片兼容**：修复 `data:{...}`（无空格）和跨 chunk 分片场景下的 usage 解析丢失
+- **非流式 usage 兼容**：补齐非流式 JSON 响应的 usage 解析，避免只依赖 SSE 行格式导致漏记
+
+## 技术改进
+- Claude usage 解析新增多字段兼容：`input_tokens/output_tokens`、`prompt_tokens/completion_tokens` 及缓存字段别名
+- 新增回归测试，覆盖 SSE 分片、非流式 JSON 分片与字段优先级，防止 token 统计回退
+
+---
+
 # Code Switch v2.6.33
 
 ## 体验优化

@@ -1023,9 +1023,10 @@ func ensureRequestLogTableWithDB(db *sql.DB) error {
 }
 
 func ReqeustLogHook(c *gin.Context, kind string, usage *ReqeustLog) func(data []byte) (bool, []byte) { // SSE 钩子：累计字节和解析 token 用量
-	return func(data []byte) (bool, []byte) {
-		payload := strings.TrimSpace(string(data))
+	var sseRemainder strings.Builder
+	var rawJSONBuffer strings.Builder
 
+	return func(data []byte) (bool, []byte) {
 		parserFn := ClaudeCodeParseTokenUsageFromResponse
 		switch kind {
 		case "codex":
@@ -1033,20 +1034,92 @@ func ReqeustLogHook(c *gin.Context, kind string, usage *ReqeustLog) func(data []
 		case "gemini":
 			parserFn = GeminiParseTokenUsageFromResponse
 		}
-		parseEventPayload(payload, parserFn, usage)
+		parseTokenUsageChunk(data, usage, parserFn, &sseRemainder, &rawJSONBuffer)
 
 		return true, data
 	}
 }
 
-func parseEventPayload(payload string, parser func(string, *ReqeustLog), usage *ReqeustLog) {
-	lines := strings.Split(payload, "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "data:") {
-			parser(strings.TrimPrefix(line, "data: "), usage)
+func parseTokenUsageChunk(
+	chunk []byte,
+	usage *ReqeustLog,
+	parser func(string, *ReqeustLog),
+	sseRemainder *strings.Builder,
+	rawJSONBuffer *strings.Builder,
+) {
+	if usage == nil || parser == nil || len(chunk) == 0 {
+		return
+	}
+
+	payload := string(chunk)
+	if usage.IsStream {
+		parseEventPayload(payload, parser, usage, sseRemainder)
+		return
+	}
+
+	parseRawJSONPayload(payload, parser, usage, rawJSONBuffer)
+}
+
+func parseEventPayload(payload string, parser func(string, *ReqeustLog), usage *ReqeustLog, remainder *strings.Builder) {
+	if strings.TrimSpace(payload) == "" || parser == nil || usage == nil || remainder == nil {
+		return
+	}
+
+	remainder.WriteString(payload)
+	combined := remainder.String()
+	lines := strings.Split(combined, "\n")
+	if len(lines) == 0 {
+		return
+	}
+
+	completeLines := lines[:len(lines)-1]
+	for _, line := range completeLines {
+		parseSSEDataLine(line, parser, usage)
+	}
+
+	tail := lines[len(lines)-1]
+	remainder.Reset()
+	if tail == "" {
+		return
+	}
+
+	trimmedTail := strings.TrimSpace(tail)
+	if strings.HasPrefix(trimmedTail, "data:") {
+		dataLine := strings.TrimSpace(strings.TrimPrefix(trimmedTail, "data:"))
+		switch {
+		case dataLine == "", dataLine == "[DONE]":
+			return
+		case gjson.Valid(dataLine):
+			parser(dataLine, usage)
+			return
 		}
 	}
+	remainder.WriteString(tail)
+}
+
+func parseSSEDataLine(line string, parser func(string, *ReqeustLog), usage *ReqeustLog) {
+	line = strings.TrimSpace(line)
+	if !strings.HasPrefix(line, "data:") {
+		return
+	}
+	dataLine := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+	if dataLine == "" || dataLine == "[DONE]" || !gjson.Valid(dataLine) {
+		return
+	}
+	parser(dataLine, usage)
+}
+
+func parseRawJSONPayload(payload string, parser func(string, *ReqeustLog), usage *ReqeustLog, rawJSONBuffer *strings.Builder) {
+	if parser == nil || usage == nil || rawJSONBuffer == nil || payload == "" {
+		return
+	}
+	rawJSONBuffer.WriteString(payload)
+	buffered := strings.TrimSpace(rawJSONBuffer.String())
+	if buffered == "" || !gjson.Valid(buffered) {
+		return
+	}
+	parser(buffered, usage)
+	rawJSONBuffer.Reset()
 }
 
 type ReqeustLog struct {
@@ -1076,13 +1149,61 @@ type ReqeustLog struct {
 
 // claude code usage parser
 func ClaudeCodeParseTokenUsageFromResponse(data string, usage *ReqeustLog) {
-	usage.InputTokens += int(gjson.Get(data, "message.usage.input_tokens").Int())
-	usage.OutputTokens += int(gjson.Get(data, "message.usage.output_tokens").Int())
-	usage.CacheCreateTokens += int(gjson.Get(data, "message.usage.cache_creation_input_tokens").Int())
-	usage.CacheReadTokens += int(gjson.Get(data, "message.usage.cache_read_input_tokens").Int())
+	if usage == nil || strings.TrimSpace(data) == "" {
+		return
+	}
 
-	usage.InputTokens += int(gjson.Get(data, "usage.input_tokens").Int())
-	usage.OutputTokens += int(gjson.Get(data, "usage.output_tokens").Int())
+	usage.InputTokens += firstPositiveIntFromPaths(
+		data,
+		"message.usage.input_tokens",
+		"usage.input_tokens",
+		"message.usage.prompt_tokens",
+		"usage.prompt_tokens",
+		"message.usage.prompt_token_count",
+		"usage.prompt_token_count",
+		"message.usage.inputTokens",
+		"usage.inputTokens",
+		"input_tokens",
+		"prompt_tokens",
+	)
+	usage.OutputTokens += firstPositiveIntFromPaths(
+		data,
+		"message.usage.output_tokens",
+		"usage.output_tokens",
+		"message.usage.completion_tokens",
+		"usage.completion_tokens",
+		"message.usage.output_token_count",
+		"usage.output_token_count",
+		"message.usage.outputTokens",
+		"usage.outputTokens",
+		"output_tokens",
+		"completion_tokens",
+	)
+	usage.CacheCreateTokens += firstPositiveIntFromPaths(
+		data,
+		"message.usage.cache_creation_input_tokens",
+		"usage.cache_creation_input_tokens",
+		"usage.cache_create_tokens",
+		"cache_creation_input_tokens",
+		"cache_create_tokens",
+	)
+	usage.CacheReadTokens += firstPositiveIntFromPaths(
+		data,
+		"message.usage.cache_read_input_tokens",
+		"usage.cache_read_input_tokens",
+		"usage.input_tokens_details.cached_tokens",
+		"cache_read_input_tokens",
+	)
+}
+
+func firstPositiveIntFromPaths(data string, paths ...string) int {
+	for _, path := range paths {
+		value := int(gjson.Get(data, path).Int())
+		if value > 0 {
+			return value
+		}
+	}
+	return 0
 }
 
 // codex usage parser
