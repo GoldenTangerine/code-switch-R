@@ -14,6 +14,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	modelpricing "codeswitch/resources/model-pricing"
+
 	"github.com/daodao97/xgo/xdb"
 	"github.com/daodao97/xgo/xrequest"
 	"github.com/gin-gonic/gin"
@@ -35,6 +37,7 @@ type ProviderRelayService struct {
 	blacklistService    *BlacklistService
 	notificationService *NotificationService
 	appSettings         *AppSettingsService // 应用设置服务（用于获取轮询开关状态）
+	modelPricing        *ModelPricingService
 	server              *http.Server
 	addr                string
 	lastUsed            map[string]*LastUsedProvider // 各平台最后使用的供应商
@@ -46,7 +49,7 @@ type ProviderRelayService struct {
 // errClientAbort 表示客户端中断连接，不应计入 provider 失败次数
 var errClientAbort = errors.New("client aborted, skip failure count")
 
-func NewProviderRelayService(providerService *ProviderService, geminiService *GeminiService, blacklistService *BlacklistService, notificationService *NotificationService, appSettings *AppSettingsService, addr string) *ProviderRelayService {
+func NewProviderRelayService(providerService *ProviderService, geminiService *GeminiService, blacklistService *BlacklistService, notificationService *NotificationService, appSettings *AppSettingsService, modelPricing *ModelPricingService, addr string) *ProviderRelayService {
 	if addr == "" {
 		addr = "127.0.0.1:18100" // 【安全修复】仅监听本地回环地址，防止 API Key 暴露到局域网
 	}
@@ -60,6 +63,7 @@ func NewProviderRelayService(providerService *ProviderService, geminiService *Ge
 		blacklistService:    blacklistService,
 		notificationService: notificationService,
 		appSettings:         appSettings,
+		modelPricing:        modelPricing,
 		addr:                addr,
 		lastUsed: map[string]*LastUsedProvider{
 			"claude": nil,
@@ -738,10 +742,20 @@ func (prs *ProviderRelayService) forwardRequest(
 		Model:    model,
 		IsStream: isStream,
 	}
+	pricingSnapshot := (*modelpricing.Service)(nil)
+	if prs != nil && prs.modelPricing != nil {
+		pricingSnapshot = prs.modelPricing.Service()
+	}
+	if pricingSnapshot == nil {
+		if svc, err := modelpricing.DefaultService(); err == nil {
+			pricingSnapshot = svc
+		}
+	}
 	start := time.Now()
 	defer func() {
 		requestLog.DurationSec = time.Since(start).Seconds()
 		requestLog.TotalCost = calculateRequestLogTotalCost(
+			pricingSnapshot,
 			requestLog.Model,
 			requestLog.InputTokens,
 			requestLog.OutputTokens,
@@ -1312,12 +1326,22 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 			InputTokens:  0,
 			OutputTokens: 0,
 		}
+		pricingSnapshot := (*modelpricing.Service)(nil)
+		if prs != nil && prs.modelPricing != nil {
+			pricingSnapshot = prs.modelPricing.Service()
+		}
+		if pricingSnapshot == nil {
+			if svc, err := modelpricing.DefaultService(); err == nil {
+				pricingSnapshot = svc
+			}
+		}
 		start := time.Now()
 
 		// 保存日志的 defer
 		defer func() {
 			requestLog.DurationSec = time.Since(start).Seconds()
 			requestLog.TotalCost = calculateRequestLogTotalCost(
+				pricingSnapshot,
 				requestLog.Model,
 				requestLog.InputTokens,
 				requestLog.OutputTokens,

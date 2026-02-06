@@ -608,6 +608,9 @@
         "budgetForecastMethod24h": "近 24 小时速度",
         "trayPanelClaude": "Claude Code",
         "trayPanelCodex": "Codex",
+        "modelPricingPanel": "费用定价",
+        "modelPricing": "模型价格",
+        "modelPricingHint": "用于消费统计，支持自定义 input/output/cache 单价",
         "autoStart": "开机自启动",
         "switchNotify": "切换通知",
         "switchNotifyHint": "供应商切换或拉黑时发送系统通知",
@@ -650,6 +653,52 @@
         "blacklistSaveFailed": "拉黑配置保存失败：{error}",
         "webdavSaveSuccess": "WebDAV 配置已保存",
         "webdavSaveFailed": "WebDAV 配置保存失败：{error}"
+      },
+      "modelPricing": {
+        "title": "模型价格",
+        "manage": "管理",
+        "searchPlaceholder": "搜索模型（支持模糊匹配）",
+        "onlyOverrides": "仅自定义/覆盖",
+        "add": "新增模型",
+        "refresh": "刷新",
+        "loading": "加载中...",
+        "removing": "处理中...",
+        "delete": "删除模型",
+        "reset": "恢复默认",
+        "unitHint": "单位：USD / 1M tokens（内部会换算成 per-token）",
+        "columns": {
+          "model": "模型",
+          "input": "Input",
+          "output": "Output",
+          "flags": "标记"
+        },
+        "badge": {
+          "custom": "Custom",
+          "override": "Override"
+        },
+        "editor": {
+          "create": "新增",
+          "edit": "编辑"
+        },
+        "fields": {
+          "model": "模型名",
+          "input": "Input",
+          "output": "Output",
+          "reasoning": "Reasoning（可选）",
+          "cacheCreate": "Cache Create（5m）",
+          "cacheRead": "Cache Read",
+          "ephemeral1h": "Cache Create（1h）"
+        },
+        "toast": {
+          "loadFailed": "加载模型价格失败：{error}",
+          "saveSuccess": "模型价格已保存",
+          "saveFailed": "保存失败：{error}",
+          "removeFailed": "操作失败：{error}",
+          "resetSuccess": "已恢复默认价格",
+          "deleteSuccess": "已删除模型价格",
+          "modelRequired": "请先填写模型名",
+          "invalidNumber": "字段 {field} 不是合法数字"
+        }
       },
       "webdav": {
         "endpoint": "WebDAV 地址",

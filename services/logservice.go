@@ -3,7 +3,6 @@ package services
 import (
 	"errors"
 	"fmt"
-	"log"
 	"sort"
 	"strings"
 	"time"
@@ -16,7 +15,7 @@ import (
 const timeLayout = "2006-01-02 15:04:05"
 
 type LogService struct {
-	pricing *modelpricing.Service
+	modelPricing *ModelPricingService
 }
 
 func (ls *LogService) CostSince(start string, platform string) (float64, error) {
@@ -24,49 +23,31 @@ func (ls *LogService) CostSince(start string, platform string) (float64, error) 
 	if err != nil {
 		return 0, err
 	}
-	model := xdb.New("request_log")
-	options := []xdb.Option{
-		xdb.WhereGte("created_at", startTime.UTC().Format(timeLayout)),
-		xdb.Field(
-			"model",
-			"input_tokens",
-			"output_tokens",
-			"reasoning_tokens",
-			"cache_create_tokens",
-			"cache_read_tokens",
-		),
-	}
-	if platform != "" {
-		options = append(options, xdb.WhereEq("platform", platform))
-	}
-	records, err := model.Selects(options...)
+
+	db, err := xdb.DB("default")
 	if err != nil {
-		if errors.Is(err, xdb.ErrNotFound) || isNoSuchTableErr(err) {
+		return 0, err
+	}
+
+	query := `SELECT COALESCE(SUM(total_cost), 0) FROM request_log WHERE created_at >= ?`
+	args := []interface{}{startTime.UTC().Format(timeLayout)}
+	if platform != "" {
+		query += ` AND platform = ?`
+		args = append(args, platform)
+	}
+
+	total := 0.0
+	if err := db.QueryRow(query, args...).Scan(&total); err != nil {
+		if isNoSuchTableErr(err) {
 			return 0, nil
 		}
 		return 0, err
 	}
-	total := 0.0
-	for _, record := range records {
-		usage := modelpricing.UsageSnapshot{
-			InputTokens:       record.GetInt("input_tokens"),
-			OutputTokens:      record.GetInt("output_tokens"),
-			ReasoningTokens:   record.GetInt("reasoning_tokens"),
-			CacheCreateTokens: record.GetInt("cache_create_tokens"),
-			CacheReadTokens:   record.GetInt("cache_read_tokens"),
-		}
-		cost := ls.calculateCost(record.GetString("model"), usage)
-		total += cost.TotalCost
-	}
 	return total, nil
 }
 
-func NewLogService() *LogService {
-	svc, err := modelpricing.DefaultService()
-	if err != nil {
-		log.Printf("pricing service init failed: %v", err)
-	}
-	return &LogService{pricing: svc}
+func NewLogService(modelPricing *ModelPricingService) *LogService {
+	return &LogService{modelPricing: modelPricing}
 }
 
 func (ls *LogService) ListRequestLogs(platform string, provider string, limit int) ([]ReqeustLog, error) {
@@ -110,6 +91,7 @@ func (ls *LogService) ListRequestLogsV2(platform string, provider string, limit 
 	if err != nil {
 		return nil, err
 	}
+	pricingSnapshot := ls.resolvePricingSnapshot()
 	logs := make([]ReqeustLog, 0, len(records))
 	for _, record := range records {
 		createdAtLocal, _ := parseCreatedAt(record)
@@ -131,11 +113,42 @@ func (ls *LogService) ListRequestLogsV2(platform string, provider string, limit 
 			CreatedAt:         createdAtValue,
 			IsStream:          record.GetBool("is_stream"),
 			DurationSec:       record.GetFloat64("duration_sec"),
+			TotalCost:         record.GetFloat64("total_cost"),
 		}
-		ls.decorateCost(&logEntry)
+		logEntry.HasPricing = resolveLogHasPricing(pricingSnapshot, logEntry)
 		logs = append(logs, logEntry)
 	}
 	return logs, nil
+}
+
+func (ls *LogService) resolvePricingSnapshot() *modelpricing.Service {
+	if ls != nil && ls.modelPricing != nil {
+		if svc := ls.modelPricing.Service(); svc != nil {
+			return svc
+		}
+	}
+	svc, err := modelpricing.DefaultService()
+	if err != nil {
+		return nil
+	}
+	return svc
+}
+
+func resolveLogHasPricing(pricing *modelpricing.Service, logEntry ReqeustLog) bool {
+	if logEntry.TotalCost > 0 {
+		return true
+	}
+	if pricing == nil || strings.TrimSpace(logEntry.Model) == "" {
+		return false
+	}
+	usage := modelpricing.UsageSnapshot{
+		InputTokens:       logEntry.InputTokens,
+		OutputTokens:      logEntry.OutputTokens,
+		ReasoningTokens:   logEntry.ReasoningTokens,
+		CacheCreateTokens: logEntry.CacheCreateTokens,
+		CacheReadTokens:   logEntry.CacheReadTokens,
+	}
+	return pricing.CalculateCost(logEntry.Model, usage).HasPricing
 }
 
 func (ls *LogService) ListProviders(platform string) ([]string, error) {
@@ -178,12 +191,10 @@ func (ls *LogService) HeatmapStats(days int) ([]HeatmapStat, error) {
 	options := []xdb.Option{
 		xdb.WhereGe("created_at", rangeStart.UTC().Format(timeLayout)),
 		xdb.Field(
-			"model",
 			"input_tokens",
 			"output_tokens",
 			"reasoning_tokens",
-			"cache_create_tokens",
-			"cache_read_tokens",
+			"total_cost",
 			"created_at",
 		),
 		xdb.OrderByDesc("created_at"),
@@ -212,20 +223,10 @@ func (ls *LogService) HeatmapStats(days int) ([]HeatmapStat, error) {
 		input := record.GetInt("input_tokens")
 		output := record.GetInt("output_tokens")
 		reasoning := record.GetInt("reasoning_tokens")
-		cacheCreate := record.GetInt("cache_create_tokens")
-		cacheRead := record.GetInt("cache_read_tokens")
 		bucket.InputTokens += int64(input)
 		bucket.OutputTokens += int64(output)
 		bucket.ReasoningTokens += int64(reasoning)
-		usage := modelpricing.UsageSnapshot{
-			InputTokens:       input,
-			OutputTokens:      output,
-			ReasoningTokens:   reasoning,
-			CacheCreateTokens: cacheCreate,
-			CacheReadTokens:   cacheRead,
-		}
-		cost := ls.calculateCost(record.GetString("model"), usage)
-		bucket.TotalCost += cost.TotalCost
+		bucket.TotalCost += record.GetFloat64("total_cost")
 	}
 	if len(hourBuckets) == 0 {
 		return []HeatmapStat{}, nil
@@ -511,36 +512,6 @@ func (ls *LogService) ProviderStatsRangeV2(platform string, provider string, sta
 	})
 
 	return stats, nil
-}
-
-func (ls *LogService) decorateCost(logEntry *ReqeustLog) {
-	if ls == nil || ls.pricing == nil || logEntry == nil {
-		return
-	}
-	usage := modelpricing.UsageSnapshot{
-		InputTokens:       logEntry.InputTokens,
-		OutputTokens:      logEntry.OutputTokens,
-		ReasoningTokens:   logEntry.ReasoningTokens,
-		CacheCreateTokens: logEntry.CacheCreateTokens,
-		CacheReadTokens:   logEntry.CacheReadTokens,
-	}
-	cost := ls.pricing.CalculateCost(logEntry.Model, usage)
-	logEntry.HasPricing = cost.HasPricing
-	logEntry.InputCost = cost.InputCost
-	logEntry.OutputCost = cost.OutputCost
-	logEntry.ReasoningCost = cost.ReasoningCost
-	logEntry.CacheCreateCost = cost.CacheCreateCost
-	logEntry.CacheReadCost = cost.CacheReadCost
-	logEntry.Ephemeral5mCost = cost.Ephemeral5mCost
-	logEntry.Ephemeral1hCost = cost.Ephemeral1hCost
-	logEntry.TotalCost = cost.TotalCost
-}
-
-func (ls *LogService) calculateCost(model string, usage modelpricing.UsageSnapshot) modelpricing.CostBreakdown {
-	if ls == nil || ls.pricing == nil {
-		return modelpricing.CostBreakdown{}
-	}
-	return ls.pricing.CalculateCost(model, usage)
 }
 
 func parseCreatedAt(record xdb.Record) (time.Time, bool) {

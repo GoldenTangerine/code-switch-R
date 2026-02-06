@@ -6,6 +6,7 @@ import ListItem from '../Setting/ListRow.vue'
 import LanguageSwitcher from '../Setting/LanguageSwitcher.vue'
 import ThemeSetting from '../Setting/ThemeSetting.vue'
 import NetworkWslSettings from '../Setting/NetworkWslSettings.vue'
+import ModelPricingModal from '../Setting/ModelPricingModal.vue'
 import InlineModal from '../common/InlineModal.vue'
 import { fetchAppSettings, saveAppSettings, type AppSettings } from '../../services/appSettings'
 import { checkUpdate, downloadUpdate, restartApp, getUpdateState, setAutoCheckEnabled, type UpdateState } from '../../services/update'
@@ -125,6 +126,9 @@ const webdavUploadError = ref('')
 const webdavUploadLogs = ref<WebDAVUploadLog[]>([])
 
 let unsubscribeWebdavSync: (() => void) | null = null
+
+// 模型价格弹窗
+const modelPricingModalOpen = ref(false)
 
 const formatBytes = (bytes?: number) => {
   const value = Number(bytes ?? 0)
@@ -1239,6 +1243,17 @@ onBeforeUnmount(() => {
             </div>
           </ListItem>
         </div>
+        <div class="mac-panel">
+          <p class="panel-title">{{ $t('components.general.label.modelPricingPanel') }}</p>
+          <ListItem :label="$t('components.general.label.modelPricing')">
+            <div class="toggle-with-hint">
+              <button type="button" class="action-btn" @click="modelPricingModalOpen = true">
+                {{ $t('components.general.modelPricing.manage') }}
+              </button>
+              <span class="hint-text">{{ $t('components.general.label.modelPricingHint') }}</span>
+            </div>
+          </ListItem>
+        </div>
       </section>
 
       <section>
@@ -1633,6 +1648,8 @@ onBeforeUnmount(() => {
           </button>
         </footer>
       </InlineModal>
+
+      <ModelPricingModal :open="modelPricingModalOpen" @close="modelPricingModalOpen = false" />
     </div>
   </div>
 </template>

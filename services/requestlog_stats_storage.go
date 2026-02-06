@@ -280,10 +280,8 @@ func backfillRequestLogStatsWithDB(db *sql.DB) error {
 	if db == nil {
 		return fmt.Errorf("nil db")
 	}
-
-	pricing, err := modelpricing.DefaultService()
-	if err != nil {
-		// 定价服务失败不应阻塞启动：继续 backfill，但费用将为 0
+	pricing, pricingErr := modelpricing.DefaultService()
+	if pricingErr != nil {
 		pricing = nil
 	}
 
@@ -346,6 +344,7 @@ ON CONFLICT(bucket_start, platform, provider) DO UPDATE SET
 				"reasoning_tokens",
 				"cache_create_tokens",
 				"cache_read_tokens",
+				"total_cost",
 				"created_at",
 			),
 		)
@@ -383,19 +382,17 @@ ON CONFLICT(bucket_start, platform, provider) DO UPDATE SET
 			reasoning := record.GetInt("reasoning_tokens")
 			cacheCreate := record.GetInt("cache_create_tokens")
 			cacheRead := record.GetInt("cache_read_tokens")
-
-			totalCost := 0.0
-			if pricing != nil {
-				usage := modelpricing.UsageSnapshot{
-					InputTokens:       input,
-					OutputTokens:      output,
-					ReasoningTokens:   reasoning,
-					CacheCreateTokens: cacheCreate,
-					CacheReadTokens:   cacheRead,
-				}
-				cost := pricing.CalculateCost(record.GetString("model"), usage)
-				totalCost = cost.TotalCost
-			}
+			totalCost := record.GetFloat64("total_cost")
+			totalCost = estimateBackfillTotalCost(
+				pricing,
+				record.GetString("model"),
+				input,
+				output,
+				reasoning,
+				cacheCreate,
+				cacheRead,
+				totalCost,
+			)
 
 			httpCode := record.GetInt("http_code")
 			success := int64(0)
@@ -517,4 +514,41 @@ ON CONFLICT(bucket_start, platform, provider) DO UPDATE SET
 		}
 		rollback = false
 	}
+}
+
+func estimateBackfillTotalCost(
+	pricing *modelpricing.Service,
+	model string,
+	inputTokens int,
+	outputTokens int,
+	reasoningTokens int,
+	cacheCreateTokens int,
+	cacheReadTokens int,
+	storedTotalCost float64,
+) float64 {
+	if storedTotalCost > 0 || pricing == nil {
+		return storedTotalCost
+	}
+
+	if strings.TrimSpace(model) == "" {
+		return storedTotalCost
+	}
+
+	if inputTokens <= 0 && outputTokens <= 0 && reasoningTokens <= 0 && cacheCreateTokens <= 0 && cacheReadTokens <= 0 {
+		return storedTotalCost
+	}
+
+	usage := modelpricing.UsageSnapshot{
+		InputTokens:       inputTokens,
+		OutputTokens:      outputTokens,
+		ReasoningTokens:   reasoningTokens,
+		CacheCreateTokens: cacheCreateTokens,
+		CacheReadTokens:   cacheReadTokens,
+	}
+
+	cost := pricing.CalculateCost(model, usage)
+	if cost.TotalCost > 0 {
+		return cost.TotalCost
+	}
+	return storedTotalCost
 }

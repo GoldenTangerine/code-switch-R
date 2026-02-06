@@ -299,3 +299,99 @@ func buildLongContextPricing() map[string]LongContextPricing {
 		},
 	}
 }
+
+// Clone 深拷贝 Service（用于在默认价格表基础上叠加自定义覆盖层）。
+// 注意：Service 在构建完成后应视为只读；自定义覆盖应通过 Clone 后的新实例来应用。
+func (s *Service) Clone() *Service {
+	if s == nil {
+		return nil
+	}
+
+	pricing := make(map[string]*PricingEntry, len(s.pricingMap))
+	for key, entry := range s.pricingMap {
+		if entry == nil {
+			continue
+		}
+		copied := *entry
+		pricing[key] = &copied
+	}
+
+	normalized := make(map[string]string, len(s.normalized))
+	for key, value := range s.normalized {
+		normalized[key] = value
+	}
+
+	ephemeral1h := make(map[string]float64, len(s.ephemeral1h))
+	for key, value := range s.ephemeral1h {
+		ephemeral1h[key] = value
+	}
+
+	longContexts := make(map[string]LongContextPricing, len(s.longContexts))
+	for key, value := range s.longContexts {
+		longContexts[key] = value
+	}
+
+	return &Service{
+		pricingMap:   pricing,
+		normalized:   normalized,
+		ephemeral1h:  ephemeral1h,
+		longContexts: longContexts,
+	}
+}
+
+// Models 返回当前 Service 的所有模型 key（未排序）。
+func (s *Service) Models() []string {
+	if s == nil {
+		return nil
+	}
+	keys := make([]string, 0, len(s.pricingMap))
+	for key := range s.pricingMap {
+		keys = append(keys, key)
+	}
+	return keys
+}
+
+// PricingEntryExact 返回指定模型 key 的价格条目（仅精确匹配）。
+func (s *Service) PricingEntryExact(model string) (PricingEntry, bool) {
+	if s == nil || model == "" {
+		return PricingEntry{}, false
+	}
+	entry, ok := s.pricingMap[model]
+	if !ok || entry == nil {
+		return PricingEntry{}, false
+	}
+	return *entry, true
+}
+
+// Ephemeral1hCostPerToken 返回 1h cache 创建的单价（美元/Token），包含 fallback 逻辑。
+func (s *Service) Ephemeral1hCostPerToken(model string) float64 {
+	if s == nil || model == "" {
+		return 0
+	}
+	return s.getEphemeral1hPricing(model)
+}
+
+// ApplyOverrides 将覆盖层应用到 Service（会覆盖同名 model key）。
+// 输入为完整条目（per-token），用于“自定义价目表”场景；调用方应在 Clone 后的新实例上使用。
+func (s *Service) ApplyOverrides(pricingOverrides map[string]PricingEntry, ephemeral1hOverrides map[string]float64) {
+	if s == nil {
+		return
+	}
+
+	for model, entry := range pricingOverrides {
+		item := entry
+		// 兼容：用户只填了 input/output 时，自动补齐 cache 定价（与默认行为一致）。
+		ensureCachePricing(&item)
+		s.pricingMap[model] = &item
+
+		normalized := normalizeName(model)
+		s.normalized[normalized] = model
+	}
+
+	for model, cost := range ephemeral1hOverrides {
+		if s.ephemeral1h == nil {
+			s.ephemeral1h = make(map[string]float64)
+		}
+		s.ephemeral1h[model] = cost
+	}
+}

@@ -116,14 +116,15 @@ func main() {
 	settingsService := services.NewSettingsService()
 	autoStartService := services.NewAutoStartService()
 	appSettings := services.NewAppSettingsService(autoStartService)
+	modelPricingService := services.NewModelPricingService()
 	notificationService := services.NewNotificationService(appSettings) // 通知服务
 	blacklistService := services.NewBlacklistService(settingsService, notificationService)
 	geminiService := services.NewGeminiService("127.0.0.1:18100")
-	providerRelay := services.NewProviderRelayService(providerService, geminiService, blacklistService, notificationService, appSettings, ":18100")
+	providerRelay := services.NewProviderRelayService(providerService, geminiService, blacklistService, notificationService, appSettings, modelPricingService, ":18100")
 	claudeSettings := services.NewClaudeSettingsService(providerRelay.Addr())
 	codexSettings := services.NewCodexSettingsService(providerRelay.Addr())
 	cliConfigService := services.NewCliConfigService(providerRelay.Addr())
-	logService := services.NewLogService()
+	logService := services.NewLogService(modelPricingService)
 	updateService := services.NewUpdateService(AppVersion)
 	mcpService := services.NewMCPService()
 	skillService := services.NewSkillService()
@@ -230,6 +231,7 @@ func main() {
 			application.NewService(cliConfigService),
 			application.NewService(logService),
 			application.NewService(appSettings),
+			application.NewService(modelPricingService),
 			application.NewService(updateService),
 			application.NewService(mcpService),
 			application.NewService(skillService),

@@ -609,6 +609,9 @@
         "budgetForecastMethod24h": "Last 24 hours rate",
         "trayPanelClaude": "Claude Code",
         "trayPanelCodex": "Codex",
+        "modelPricingPanel": "Pricing",
+        "modelPricing": "Model pricing",
+        "modelPricingHint": "Used for cost stats; supports custom input/output/cache rates",
         "autoStart": "Launch at login",
         "switchNotify": "Switch Notification",
         "switchNotifyHint": "Send system notification when provider switches or gets blacklisted",
@@ -649,6 +652,52 @@
         "blacklistSaveFailed": "Failed to save blacklist settings: {error}",
         "webdavSaveSuccess": "WebDAV settings saved",
         "webdavSaveFailed": "Failed to save WebDAV settings: {error}"
+      },
+      "modelPricing": {
+        "title": "Model pricing",
+        "manage": "Manage",
+        "searchPlaceholder": "Search models (fuzzy match)",
+        "onlyOverrides": "Overrides only",
+        "add": "Add model",
+        "refresh": "Refresh",
+        "loading": "Loading...",
+        "removing": "Working...",
+        "delete": "Delete model",
+        "reset": "Reset to default",
+        "unitHint": "Unit: USD / 1M tokens (converted to per-token internally)",
+        "columns": {
+          "model": "Model",
+          "input": "Input",
+          "output": "Output",
+          "flags": "Flags"
+        },
+        "badge": {
+          "custom": "Custom",
+          "override": "Override"
+        },
+        "editor": {
+          "create": "Create",
+          "edit": "Edit"
+        },
+        "fields": {
+          "model": "Model",
+          "input": "Input",
+          "output": "Output",
+          "reasoning": "Reasoning (optional)",
+          "cacheCreate": "Cache Create (5m)",
+          "cacheRead": "Cache Read",
+          "ephemeral1h": "Cache Create (1h)"
+        },
+        "toast": {
+          "loadFailed": "Failed to load model pricing: {error}",
+          "saveSuccess": "Model pricing saved",
+          "saveFailed": "Failed to save: {error}",
+          "removeFailed": "Operation failed: {error}",
+          "resetSuccess": "Reset to default pricing",
+          "deleteSuccess": "Model pricing deleted",
+          "modelRequired": "Please enter a model name first",
+          "invalidNumber": "Field {field} is not a valid number"
+        }
       },
       "webdav": {
         "endpoint": "WebDAV endpoint",
