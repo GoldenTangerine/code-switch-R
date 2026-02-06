@@ -10,6 +10,7 @@
           <div
             ref="panelRef"
             :class="['modal', variantClass]"
+            :style="panelStyle"
             role="dialog"
             aria-modal="true"
             :aria-labelledby="titleId"
@@ -38,7 +39,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch, type CSSProperties } from 'vue'
+import { lockScroll, unlockScroll } from '../../utils/scrollLock'
 
 type Variant = 'default' | 'confirm'
 
@@ -48,14 +50,18 @@ const props = withDefaults(
     title: string
     variant?: Variant
     closeOnBackdrop?: boolean
+    panelWidth?: string
   }>(),
-  { variant: 'default', closeOnBackdrop: true },
+  { variant: 'default', closeOnBackdrop: true, panelWidth: '' },
 )
 
 const emit = defineEmits<{ (e: 'close'): void }>()
 
 const variantClass = computed(() => (props.variant === 'confirm' ? 'confirm-modal' : ''))
 const titleId = `modal-title-${Math.random().toString(36).slice(2, 9)}`
+const panelStyle = computed<CSSProperties | undefined>(() =>
+  props.panelWidth ? { width: props.panelWidth } : undefined,
+)
 
 const panelRef = ref<HTMLElement | null>(null)
 const closeButtonRef = ref<HTMLButtonElement | null>(null)
@@ -123,18 +129,6 @@ const onKeyDown = (e: KeyboardEvent) => {
       first.focus()
     }
   }
-}
-
-const lockScroll = () => {
-  document.body.style.overflow = 'hidden'
-  const mainContent = document.querySelector('.main-content') as HTMLElement | null
-  if (mainContent) mainContent.style.overflow = 'hidden'
-}
-
-const unlockScroll = () => {
-  document.body.style.overflow = ''
-  const mainContent = document.querySelector('.main-content') as HTMLElement | null
-  if (mainContent) mainContent.style.overflow = ''
 }
 
 watch(

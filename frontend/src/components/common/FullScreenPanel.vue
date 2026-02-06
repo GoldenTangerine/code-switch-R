@@ -43,6 +43,7 @@
 
 <script setup lang="ts">
 import { ref, watch, onBeforeUnmount, nextTick } from 'vue'
+import { lockScroll, unlockScroll } from '../../utils/scrollLock'
 
 const props = withDefaults(
   defineProps<{
@@ -92,10 +93,10 @@ watch(
   (isOpen) => {
     if (isOpen) {
       lastActiveElement = document.activeElement
-      document.body.style.overflow = 'hidden'
+      lockScroll()
       nextTick(() => closeButtonRef.value?.focus())
     } else {
-      document.body.style.overflow = ''
+      unlockScroll()
       if (lastActiveElement instanceof HTMLElement) {
         try {
           lastActiveElement.focus()
@@ -110,7 +111,7 @@ watch(
 )
 
 onBeforeUnmount(() => {
-  document.body.style.overflow = ''
+  unlockScroll()
 })
 </script>
 
