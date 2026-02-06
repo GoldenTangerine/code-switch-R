@@ -1,3 +1,14 @@
+# Code Switch v2.6.38
+
+## 修复
+- **测试污染用户配置**：修复 `providerrelay_models_test` 在运行时写入真实 `~/.code-switch` 目录的问题，避免测试把首页 Claude/Codex 供应商配置覆盖掉。
+
+## 技术改进
+- 新增测试隔离工具：统一将 `HOME` / `USERPROFILE` 指向 `t.TempDir()`，并清理 `HOMEDRIVE` / `HOMEPATH`，确保跨平台路径解析稳定。
+- 新增测试文件落盘断言：明确校验配置仅写入临时目录，防止后续改动回退到真实用户目录。
+
+---
+
 # Code Switch v2.6.36
 
 ## 修复

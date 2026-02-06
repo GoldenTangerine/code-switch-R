@@ -4,13 +4,35 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/gin-gonic/gin"
 )
 
+func useIsolatedHomeDir(t *testing.T) string {
+	t.Helper()
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	t.Setenv("USERPROFILE", homeDir)
+	t.Setenv("HOMEDRIVE", "")
+	t.Setenv("HOMEPATH", "")
+	return homeDir
+}
+
+func assertProviderConfigExists(t *testing.T, homeDir string, filename string) {
+	t.Helper()
+	configPath := filepath.Join(homeDir, ".code-switch", filename)
+	if _, err := os.Stat(configPath); err != nil {
+		t.Fatalf("期望测试配置文件存在: %s, err=%v", configPath, err)
+	}
+}
+
 // TestModelsHandler 测试 /v1/models 端点处理器
 func TestModelsHandler(t *testing.T) {
+	homeDir := useIsolatedHomeDir(t)
+
 	// 设置测试环境
 	gin.SetMode(gin.TestMode)
 
@@ -80,6 +102,7 @@ func TestModelsHandler(t *testing.T) {
 	if err != nil {
 		t.Fatalf("保存 provider 配置失败: %v", err)
 	}
+	assertProviderConfigExists(t, homeDir, "claude-code.json")
 
 	// 创建 ProviderRelayService
 	relayService := NewProviderRelayService(providerService, nil, blacklistService, nil, nil, nil, "")
@@ -123,6 +146,8 @@ func TestModelsHandler(t *testing.T) {
 
 // TestCustomModelsHandler 测试自定义 CLI 工具的 /v1/models 端点
 func TestCustomModelsHandler(t *testing.T) {
+	homeDir := useIsolatedHomeDir(t)
+
 	// 设置测试环境
 	gin.SetMode(gin.TestMode)
 
@@ -184,6 +209,7 @@ func TestCustomModelsHandler(t *testing.T) {
 	if err != nil {
 		t.Fatalf("保存 provider 配置失败: %v", err)
 	}
+	assertProviderConfigExists(t, homeDir, filepath.Join("providers", "mytool.json"))
 
 	// 创建 ProviderRelayService
 	relayService := NewProviderRelayService(providerService, nil, blacklistService, nil, nil, nil, "")
@@ -227,6 +253,8 @@ func TestCustomModelsHandler(t *testing.T) {
 
 // TestModelsHandler_NoProviders 测试没有可用 provider 的情况
 func TestModelsHandler_NoProviders(t *testing.T) {
+	useIsolatedHomeDir(t)
+
 	gin.SetMode(gin.TestMode)
 
 	// 创建空的 ProviderService
