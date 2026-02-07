@@ -49,6 +49,106 @@ type ProviderRelayService struct {
 // errClientAbort 表示客户端中断连接，不应计入 provider 失败次数
 var errClientAbort = errors.New("client aborted, skip failure count")
 
+// upstreamErrorResponse 保存上游非 2xx 响应，供“最终失败”场景透传给客户端
+type upstreamErrorResponse struct {
+	statusCode  int
+	contentType string
+	headers     http.Header
+	body        []byte
+}
+
+func newUpstreamErrorResponse(statusCode int, contentType string, headers http.Header, body []byte) *upstreamErrorResponse {
+	bodyCopy := make([]byte, len(body))
+	copy(bodyCopy, body)
+
+	headerCopy := make(http.Header, len(headers))
+	for key, values := range headers {
+		copied := make([]string, len(values))
+		copy(copied, values)
+		headerCopy[key] = copied
+	}
+
+	return &upstreamErrorResponse{
+		statusCode:  statusCode,
+		contentType: contentType,
+		headers:     headerCopy,
+		body:        bodyCopy,
+	}
+}
+
+func (e *upstreamErrorResponse) Error() string {
+	if e == nil {
+		return "upstream error: <nil>"
+	}
+	trimmed := strings.TrimSpace(string(e.body))
+	if trimmed != "" {
+		return fmt.Sprintf("upstream status %d: %s", e.statusCode, truncateText(trimmed, 2048))
+	}
+	return fmt.Sprintf("upstream status %d", e.statusCode)
+}
+
+func isHopByHopHeader(headerName string) bool {
+	switch strings.ToLower(strings.TrimSpace(headerName)) {
+	case "connection",
+		"keep-alive",
+		"proxy-authenticate",
+		"proxy-authorization",
+		"te",
+		"trailer",
+		"transfer-encoding",
+		"upgrade",
+		"content-length":
+		return true
+	default:
+		return false
+	}
+}
+
+func (e *upstreamErrorResponse) WriteTo(c *gin.Context) {
+	if e == nil || c == nil {
+		return
+	}
+
+	// 复制上游响应头（过滤 hop-by-hop 头），尽量保持原样透传
+	dstHeaders := c.Writer.Header()
+	for key, values := range e.headers {
+		if isHopByHopHeader(key) {
+			continue
+		}
+		dstHeaders.Del(key)
+		for _, value := range values {
+			dstHeaders.Add(key, value)
+		}
+	}
+
+	// 若上游 Header 缺失 Content-Type，尝试使用记录值补全；否则保持原样
+	if strings.TrimSpace(dstHeaders.Get("Content-Type")) == "" {
+		contentType := strings.TrimSpace(e.contentType)
+		if contentType != "" {
+			dstHeaders.Set("Content-Type", contentType)
+		}
+	}
+
+	c.Status(e.statusCode)
+	if len(e.body) == 0 {
+		return
+	}
+	_, _ = c.Writer.Write(e.body)
+}
+
+// writeLastUpstreamErrorIfAny 在“所有重试与降级均失败”时透传最后一次上游错误
+func writeLastUpstreamErrorIfAny(c *gin.Context, err error) bool {
+	if err == nil {
+		return false
+	}
+	var upstreamErr *upstreamErrorResponse
+	if !errors.As(err, &upstreamErr) {
+		return false
+	}
+	upstreamErr.WriteTo(c)
+	return true
+}
+
 func NewProviderRelayService(providerService *ProviderService, geminiService *GeminiService, blacklistService *BlacklistService, notificationService *NotificationService, appSettings *AppSettingsService, modelPricing *ModelPricingService, addr string) *ProviderRelayService {
 	if addr == "" {
 		addr = "127.0.0.1:18100" // 【安全修复】仅监听本地回环地址，防止 API Key 暴露到局域网
@@ -554,6 +654,11 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 			// 所有 Provider 都失败或被拉黑
 			fmt.Printf("[ERROR] 💥 拉黑模式：所有 Provider 都失败或被拉黑（共尝试 %d 次）\n", totalAttempts)
 
+			// 按用户要求：仅在所有重试/降级都失败后，透传最后一次上游错误
+			if writeLastUpstreamErrorIfAny(c, lastError) {
+				return
+			}
+
 			errorMsg := "未知错误"
 			if lastError != nil {
 				errorMsg = lastError.Error()
@@ -682,7 +787,11 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 			fmt.Printf("[WARN] Level %d 的所有 %d 个 provider 均失败，尝试下一 Level\n", level, len(providersInLevel))
 		}
 
-		// 所有 provider 都失败，返回 502
+		// 所有 provider 都失败：优先透传最后一次上游错误，否则返回 502 聚合信息
+		if writeLastUpstreamErrorIfAny(c, lastError) {
+			return
+		}
+
 		errorMsg := "未知错误"
 		if lastError != nil {
 			errorMsg = lastError.Error()
@@ -855,7 +964,8 @@ func (prs *ProviderRelayService) forwardRequest(
 	if resp.RawResponse != nil {
 		contentType = resp.RawResponse.Header.Get("Content-Type")
 	}
-	body := strings.TrimSpace(resp.String())
+	bodyBytes := resp.Bytes()
+	body := strings.TrimSpace(string(bodyBytes))
 	if body != "" {
 		level := "ERROR"
 		if status >= http.StatusMultipleChoices && status < http.StatusBadRequest {
@@ -880,10 +990,11 @@ func (prs *ProviderRelayService) forwardRequest(
 		)
 	}
 
-	if body != "" {
-		return false, fmt.Errorf("upstream status %d: %s", status, truncateText(body, 2048))
+	var headers http.Header
+	if resp.RawResponse != nil && resp.RawResponse.Header != nil {
+		headers = resp.RawResponse.Header
 	}
-	return false, fmt.Errorf("upstream status %d", status)
+	return false, newUpstreamErrorResponse(status, contentType, headers, bodyBytes)
 }
 
 func cloneHeaders(header http.Header) map[string]string {
@@ -1532,7 +1643,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 			fmt.Printf("[Gemini] 重试配置: 每 Provider 最多 %d 次重试，间隔 %d 秒\n",
 				maxRetryPerProvider, retryWaitSeconds)
 
-			var lastError string
+			var lastError error
 			var lastProvider string
 			totalAttempts := 0
 
@@ -1565,7 +1676,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 						fmt.Printf("[Gemini] [拉黑模式] Provider: %s (Level %d) | 重试 %d/%d\n",
 							provider.Name, level, retryCount+1, maxRetryPerProvider)
 
-						ok, errMsg, responseWritten := prs.forwardGeminiRequest(c, &provider, endpoint, bodyBytes, isStream, requestLog)
+						ok, err, responseWritten := prs.forwardGeminiRequest(c, &provider, endpoint, bodyBytes, isStream, requestLog)
 						if ok {
 							fmt.Printf("[Gemini] ✓ 成功: %s | 重试 %d 次\n", provider.Name, retryCount+1)
 							_ = prs.blacklistService.RecordSuccess("gemini", provider.Name)
@@ -1574,18 +1685,22 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 						}
 
 						// 【关键修复】如果响应已写入客户端，不能重试或降级，直接返回
+						errorMsg := "未知错误"
+						if err != nil {
+							errorMsg = err.Error()
+						}
 						if responseWritten {
-							fmt.Printf("[Gemini] ⚠️ 响应已部分写入，无法重试: %s | 错误: %s\n", provider.Name, errMsg)
+							fmt.Printf("[Gemini] ⚠️ 响应已部分写入，无法重试: %s | 错误: %s\n", provider.Name, errorMsg)
 							_ = prs.blacklistService.RecordFailure("gemini", provider.Name)
 							return
 						}
 
 						// 失败处理
-						lastError = errMsg
+						lastError = err
 						lastProvider = provider.Name
 
 						fmt.Printf("[Gemini] ✗ 失败: %s | 重试 %d/%d | 错误: %s\n",
-							provider.Name, retryCount+1, maxRetryPerProvider, errMsg)
+							provider.Name, retryCount+1, maxRetryPerProvider, errorMsg)
 
 						// 记录失败次数（可能触发拉黑）
 						_ = prs.blacklistService.RecordFailure("gemini", provider.Name)
@@ -1608,11 +1723,21 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 			// 所有 Provider 都失败或被拉黑
 			fmt.Printf("[Gemini] 💥 拉黑模式：所有 Provider 都失败或被拉黑（共尝试 %d 次）\n", totalAttempts)
 
+			// 按用户要求：仅在所有重试/降级都失败后，透传最后一次上游错误
+			if writeLastUpstreamErrorIfAny(c, lastError) {
+				return
+			}
+
+			errorMsg := "未知错误"
+			if lastError != nil {
+				errorMsg = lastError.Error()
+			}
+
 			if requestLog.HttpCode == 0 {
 				requestLog.HttpCode = http.StatusBadGateway
 			}
 			c.JSON(http.StatusBadGateway, gin.H{
-				"error":         fmt.Sprintf("所有 Provider 都失败或被拉黑，最后尝试: %s - %s", lastProvider, lastError),
+				"error":         fmt.Sprintf("所有 Provider 都失败或被拉黑，最后尝试: %s - %s", lastProvider, errorMsg),
 				"lastProvider":  lastProvider,
 				"totalAttempts": totalAttempts,
 				"mode":          "blacklist_retry",
@@ -1629,7 +1754,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 			fmt.Printf("[Gemini] 🔄 降级模式（顺序降级）\n")
 		}
 
-		var lastError string
+		var lastError error
 		for _, level := range sortedLevels {
 			providersInLevel := levelGroups[level]
 
@@ -1647,7 +1772,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 				requestLog.Provider = provider.Name
 				requestLog.Model = provider.Model
 
-				ok, errMsg, responseWritten := prs.forwardGeminiRequest(c, &provider, endpoint, bodyBytes, isStream, requestLog)
+				ok, err, responseWritten := prs.forwardGeminiRequest(c, &provider, endpoint, bodyBytes, isStream, requestLog)
 				if ok {
 					_ = prs.blacklistService.RecordSuccess("gemini", provider.Name)
 					// 记录最后使用的供应商
@@ -1657,29 +1782,43 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 				}
 
 				// 【关键修复】如果响应已写入客户端，不能降级到其他 provider，直接返回
-				if responseWritten {
-					fmt.Printf("[Gemini] ⚠️ 响应已部分写入，无法降级: %s | 错误: %s\n", provider.Name, errMsg)
-					_ = prs.blacklistService.RecordFailure("gemini", provider.Name)
-					return
-				}
+				errorMsg := "未知错误"
+					if err != nil {
+						errorMsg = err.Error()
+					}
+					if responseWritten {
+						fmt.Printf("[Gemini] ⚠️ 响应已部分写入，无法降级: %s | 错误: %s\n", provider.Name, errorMsg)
+						_ = prs.blacklistService.RecordFailure("gemini", provider.Name)
+						return
+					}
 
 				// 失败，记录并继续
-				lastError = errMsg
+				lastError = err
+				fmt.Printf("[Gemini] ✗ 失败: %s | 错误: %s\n", provider.Name, errorMsg)
 				_ = prs.blacklistService.RecordFailure("gemini", provider.Name)
 			}
 
 			fmt.Printf("[Gemini] Level %d 的所有 %d 个 provider 均失败，尝试下一 Level\n", level, len(providersInLevel))
 		}
 
-		// 所有 Level 都失败
+		// 所有 Level 都失败：优先透传最后一次上游错误，否则返回 502 聚合信息
+		if writeLastUpstreamErrorIfAny(c, lastError) {
+			return
+		}
+
+		errorMsg := "未知错误"
+		if lastError != nil {
+			errorMsg = lastError.Error()
+		}
+
 		if requestLog.HttpCode == 0 {
 			requestLog.HttpCode = http.StatusBadGateway
 		}
 		c.JSON(http.StatusBadGateway, gin.H{
 			"error":   "all gemini providers failed",
-			"details": lastError,
+			"details": errorMsg,
 		})
-		fmt.Printf("[Gemini] ✗ 所有 provider 均失败 | 最后错误: %s\n", lastError)
+		fmt.Printf("[Gemini] ✗ 所有 provider 均失败 | 最后错误: %s\n", errorMsg)
 	}
 }
 
@@ -1710,7 +1849,7 @@ func extractGeminiModelFromEndpoint(endpoint string) string {
 }
 
 // forwardGeminiRequest 转发 Gemini 请求到指定 provider
-// 返回 (成功, 错误信息, 是否已写入响应)
+// 返回 (成功, 错误对象, 是否已写入响应)
 // 【重要】当 responseWritten=true 时，调用方不得重试或降级，因为响应头/数据已发送给客户端
 func (prs *ProviderRelayService) forwardGeminiRequest(
 	c *gin.Context,
@@ -1719,7 +1858,7 @@ func (prs *ProviderRelayService) forwardGeminiRequest(
 	bodyBytes []byte,
 	isStream bool,
 	requestLog *ReqeustLog,
-) (success bool, errMsg string, responseWritten bool) {
+) (success bool, err error, responseWritten bool) {
 	providerStart := time.Now()
 
 	// 构建目标 URL
@@ -1739,7 +1878,7 @@ func (prs *ProviderRelayService) forwardGeminiRequest(
 	// 创建 HTTP 请求
 	req, err := http.NewRequest("POST", targetURL, bytes.NewReader(bodyBytes))
 	if err != nil {
-		return false, fmt.Sprintf("创建请求失败: %v", err), false
+		return false, fmt.Errorf("创建请求失败: %w", err), false
 	}
 
 	// 复制请求头
@@ -1761,7 +1900,7 @@ func (prs *ProviderRelayService) forwardGeminiRequest(
 
 	if err != nil {
 		fmt.Printf("[Gemini]   ✗ 失败: %s | 错误: %v | 耗时: %.2fs\n", provider.Name, err, providerDuration)
-		return false, fmt.Sprintf("请求失败: %v", err), false
+		return false, fmt.Errorf("请求失败: %w", err), false
 	}
 	defer resp.Body.Close()
 
@@ -1772,7 +1911,7 @@ func (prs *ProviderRelayService) forwardGeminiRequest(
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		errorBody, _ := io.ReadAll(resp.Body)
 		fmt.Printf("[Gemini]   ✗ 失败: %s | HTTP %d | 耗时: %.2fs\n", provider.Name, resp.StatusCode, providerDuration)
-		return false, fmt.Sprintf("HTTP %d: %s", resp.StatusCode, string(errorBody)), false
+		return false, newUpstreamErrorResponse(resp.StatusCode, resp.Header.Get("Content-Type"), resp.Header, errorBody), false
 	}
 
 	fmt.Printf("[Gemini]   ✓ 连接成功: %s | HTTP %d | 耗时: %.2fs\n", provider.Name, resp.StatusCode, providerDuration)
@@ -1792,7 +1931,7 @@ func (prs *ProviderRelayService) forwardGeminiRequest(
 		if copyErr != nil {
 			fmt.Printf("[Gemini]   ⚠️ 流式传输中断: %s | 错误: %v\n", provider.Name, copyErr)
 			// 流式传输中断：已写入部分响应，客户端会收到不完整数据
-			return false, fmt.Sprintf("流式传输中断: %v", copyErr), true
+			return false, fmt.Errorf("流式传输中断: %w", copyErr), true
 		}
 	} else {
 		// 非流式模式：先读完 body 再写 header（允许读取失败时重试）
@@ -1800,7 +1939,7 @@ func (prs *ProviderRelayService) forwardGeminiRequest(
 		if readErr != nil {
 			fmt.Printf("[Gemini]   ⚠️ 读取响应失败: %s | 错误: %v\n", provider.Name, readErr)
 			// 【修复】此时 header 尚未写入客户端，可以重试/降级
-			return false, fmt.Sprintf("读取响应失败: %v", readErr), false
+			return false, fmt.Errorf("读取响应失败: %w", readErr), false
 		}
 		// 解析 Gemini 用量数据
 		parseGeminiUsageMetadata(body, requestLog)
@@ -1813,7 +1952,7 @@ func (prs *ProviderRelayService) forwardGeminiRequest(
 		c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), body)
 	}
 
-	return true, "", true
+	return true, nil, true
 }
 
 // parseGeminiUsageMetadata 从 Gemini 非流式响应中提取用量，填充 request_log
@@ -2054,6 +2193,11 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 			// 所有 Provider 都失败或被拉黑
 			fmt.Printf("[CustomCLI][ERROR] 💥 拉黑模式：所有 Provider 都失败或被拉黑（共尝试 %d 次）\n", totalAttempts)
 
+			// 按用户要求：仅在所有重试/降级都失败后，透传最后一次上游错误
+			if writeLastUpstreamErrorIfAny(c, lastError) {
+				return
+			}
+
 			errorMsg := "未知错误"
 			if lastError != nil {
 				errorMsg = lastError.Error()
@@ -2167,7 +2311,11 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 			fmt.Printf("[CustomCLI][WARN] Level %d 的所有 %d 个 provider 均失败，尝试下一 Level\n", level, len(providersInLevel))
 		}
 
-		// 所有 provider 都失败
+		// 所有 provider 都失败：优先透传最后一次上游错误，否则返回 502 聚合信息
+		if writeLastUpstreamErrorIfAny(c, lastError) {
+			return
+		}
+
 		errorMsg := "未知错误"
 		if lastError != nil {
 			errorMsg = lastError.Error()
