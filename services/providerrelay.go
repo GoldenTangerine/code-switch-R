@@ -964,8 +964,8 @@ func (prs *ProviderRelayService) forwardRequest(
 	if resp.RawResponse != nil {
 		contentType = resp.RawResponse.Header.Get("Content-Type")
 	}
-	bodyBytes := resp.Bytes()
-	body := strings.TrimSpace(string(bodyBytes))
+	upstreamBody := resp.Bytes()
+	body := strings.TrimSpace(string(upstreamBody))
 	if body != "" {
 		level := "ERROR"
 		if status >= http.StatusMultipleChoices && status < http.StatusBadRequest {
@@ -990,11 +990,11 @@ func (prs *ProviderRelayService) forwardRequest(
 		)
 	}
 
-	var headers http.Header
+	var upstreamHeaders http.Header
 	if resp.RawResponse != nil && resp.RawResponse.Header != nil {
-		headers = resp.RawResponse.Header
+		upstreamHeaders = resp.RawResponse.Header
 	}
-	return false, newUpstreamErrorResponse(status, contentType, headers, bodyBytes)
+	return false, newUpstreamErrorResponse(status, contentType, upstreamHeaders, upstreamBody)
 }
 
 func cloneHeaders(header http.Header) map[string]string {
