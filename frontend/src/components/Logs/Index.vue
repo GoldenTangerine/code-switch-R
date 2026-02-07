@@ -1,187 +1,197 @@
 <template>
   <div class="logs-page">
-    <div class="logs-header">
-      <BaseButton variant="outline" type="button" @click="backToHome">
-        {{ t('components.logs.back') }}
-      </BaseButton>
-      <div class="refresh-indicator">
-        <span>{{ t('components.logs.nextRefresh', { seconds: countdown }) }}</span>
-        <BaseButton size="sm" :disabled="loading" @click="manualRefresh">
-          {{ t('components.logs.refresh') }}
+    <div class="logs-header-bar">
+      <div class="logs-header">
+        <BaseButton variant="outline" type="button" @click="backToHome">
+          {{ t('components.logs.back') }}
         </BaseButton>
+        <div class="refresh-indicator">
+          <span>{{ t('components.logs.nextRefresh', { seconds: countdown }) }}</span>
+          <BaseButton size="sm" :disabled="loading" @click="manualRefresh">
+            {{ t('components.logs.refresh') }}
+          </BaseButton>
+        </div>
       </div>
     </div>
 
-    <form class="logs-filter-row" @submit.prevent="applyFilters">
-      <div class="filter-fields">
-        <label class="filter-field">
-          <span>{{ t('components.logs.filters.platform') }}</span>
-          <select v-model="filters.platform" class="mac-select">
-            <option value="">{{ t('components.logs.filters.allPlatforms') }}</option>
-            <option value="claude">Claude</option>
-            <option value="codex">Codex</option>
-            <option value="gemini">Gemini</option>
-          </select>
-        </label>
-        <label class="filter-field">
-          <span>{{ t('components.logs.filters.provider') }}</span>
-          <select v-model="filters.provider" class="mac-select">
-            <option value="">{{ t('components.logs.filters.allProviders') }}</option>
-            <option v-for="provider in providerOptions" :key="provider" :value="provider">
-              {{ provider }}
-            </option>
-          </select>
-        </label>
-        <label class="filter-field">
-          <span>{{ t('components.logs.filters.dateType') }}</span>
-          <select v-model="filters.dateType" class="mac-select">
-            <option value="all">{{ t('components.logs.filters.dateTypeAll') }}</option>
-            <option value="today">{{ t('components.logs.filters.dateTypeToday') }}</option>
-            <option value="year">{{ t('components.logs.filters.dateTypeYear') }}</option>
-            <option value="month">{{ t('components.logs.filters.dateTypeMonth') }}</option>
-            <option value="day">{{ t('components.logs.filters.dateTypeDay') }}</option>
-            <option value="range">{{ t('components.logs.filters.dateTypeRange') }}</option>
-          </select>
-        </label>
+    <div class="logs-content">
+      <div class="logs-controls">
+        <form class="logs-filter-row" @submit.prevent="applyFilters">
+            <div class="filter-fields">
+              <label class="filter-field">
+                <span>{{ t('components.logs.filters.platform') }}</span>
+                <select v-model="filters.platform" class="mac-select">
+                  <option value="">{{ t('components.logs.filters.allPlatforms') }}</option>
+                  <option value="claude">Claude</option>
+                  <option value="codex">Codex</option>
+                  <option value="gemini">Gemini</option>
+                </select>
+              </label>
+              <label class="filter-field">
+                <span>{{ t('components.logs.filters.provider') }}</span>
+                <select v-model="filters.provider" class="mac-select">
+                  <option value="">{{ t('components.logs.filters.allProviders') }}</option>
+                  <option v-for="provider in providerOptions" :key="provider" :value="provider">
+                    {{ provider }}
+                  </option>
+                </select>
+              </label>
+              <label class="filter-field">
+                <span>{{ t('components.logs.filters.dateType') }}</span>
+                <select v-model="filters.dateType" class="mac-select">
+                  <option value="all">{{ t('components.logs.filters.dateTypeAll') }}</option>
+                  <option value="today">{{ t('components.logs.filters.dateTypeToday') }}</option>
+                  <option value="year">{{ t('components.logs.filters.dateTypeYear') }}</option>
+                  <option value="month">{{ t('components.logs.filters.dateTypeMonth') }}</option>
+                  <option value="day">{{ t('components.logs.filters.dateTypeDay') }}</option>
+                  <option value="range">{{ t('components.logs.filters.dateTypeRange') }}</option>
+                </select>
+              </label>
 
-        <label v-if="filters.dateType === 'year'" class="filter-field">
-          <span>{{ t('components.logs.filters.year') }}</span>
-          <VueDatePicker
-            v-model="yearPickerValue"
-            class="logs-date-picker"
-            :dark="isDarkTheme"
-            :locale="dateFnsLocale"
-            year-picker
-            auto-apply
-            :text-input="false"
-            :year-range="yearPickerRange"
-            :input-attrs="{ hideInputIcon: true }"
-            :ui="datePickerUi"
-            :formats="{ input: 'yyyy' }"
-            placeholder="YYYY"
-          />
-        </label>
-        <label v-else-if="filters.dateType === 'month'" class="filter-field">
-          <span>{{ t('components.logs.filters.month') }}</span>
-          <VueDatePicker
-            v-model="monthPickerValue"
-            class="logs-date-picker"
-            :dark="isDarkTheme"
-            :locale="dateFnsLocale"
-            month-picker
-            auto-apply
-            :text-input="false"
-            :year-range="yearPickerRange"
-            :input-attrs="{ hideInputIcon: true }"
-            :ui="datePickerUi"
-            :formats="{ input: 'yyyy-MM' }"
-            placeholder="YYYY-MM"
-          />
-        </label>
-        <label v-else-if="filters.dateType === 'day'" class="filter-field">
-          <span>{{ t('components.logs.filters.day') }}</span>
-          <VueDatePicker
-            v-model="dayPickerValue"
-            class="logs-date-picker"
-            :dark="isDarkTheme"
-            :locale="dateFnsLocale"
-            auto-apply
-            :text-input="false"
-            :input-attrs="{ hideInputIcon: true }"
-            :ui="datePickerUi"
-            :formats="{ input: 'yyyy-MM-dd' }"
-            placeholder="YYYY-MM-DD"
-          />
-        </label>
-        <label v-else-if="filters.dateType === 'range'" class="filter-field">
-          <span>{{ t('components.logs.filters.range') }}</span>
-          <VueDatePicker
-            v-model="rangePickerValue"
-            class="logs-date-picker"
-            :dark="isDarkTheme"
-            :locale="dateFnsLocale"
-            :range="rangePickerConfig"
-            :multi-calendars="2"
-            auto-apply
-            :text-input="false"
-            :input-attrs="{ hideInputIcon: true }"
-            :ui="datePickerUi"
-            :formats="{ input: formatRangeInput }"
-            :placeholder="t('components.logs.filters.range')"
-          />
-        </label>
-      </div>
-      <div class="filter-actions">
-        <BaseButton type="submit" :disabled="loading || !isFilterValid">
-          {{ t('components.logs.query') }}
-        </BaseButton>
-      </div>
-    </form>
+              <label v-if="filters.dateType === 'year'" class="filter-field">
+                <span>{{ t('components.logs.filters.year') }}</span>
+                <VueDatePicker
+                  v-model="yearPickerValue"
+                  class="logs-date-picker"
+                  :dark="isDarkTheme"
+                  :locale="dateFnsLocale"
+                  year-picker
+                  auto-apply
+                  :text-input="false"
+                  :year-range="yearPickerRange"
+                  :input-attrs="{ hideInputIcon: true }"
+                  :ui="datePickerUi"
+                  :formats="{ input: 'yyyy' }"
+                  placeholder="YYYY"
+                />
+              </label>
+              <label v-else-if="filters.dateType === 'month'" class="filter-field">
+                <span>{{ t('components.logs.filters.month') }}</span>
+                <VueDatePicker
+                  v-model="monthPickerValue"
+                  class="logs-date-picker"
+                  :dark="isDarkTheme"
+                  :locale="dateFnsLocale"
+                  month-picker
+                  auto-apply
+                  :text-input="false"
+                  :year-range="yearPickerRange"
+                  :input-attrs="{ hideInputIcon: true }"
+                  :ui="datePickerUi"
+                  :formats="{ input: 'yyyy-MM' }"
+                  placeholder="YYYY-MM"
+                />
+              </label>
+              <label v-else-if="filters.dateType === 'day'" class="filter-field">
+                <span>{{ t('components.logs.filters.day') }}</span>
+                <VueDatePicker
+                  v-model="dayPickerValue"
+                  class="logs-date-picker"
+                  :dark="isDarkTheme"
+                  :locale="dateFnsLocale"
+                  auto-apply
+                  :text-input="false"
+                  :input-attrs="{ hideInputIcon: true }"
+                  :ui="datePickerUi"
+                  :formats="{ input: 'yyyy-MM-dd' }"
+                  placeholder="YYYY-MM-DD"
+                />
+              </label>
+              <label v-else-if="filters.dateType === 'range'" class="filter-field">
+                <span>{{ t('components.logs.filters.range') }}</span>
+                <VueDatePicker
+                  v-model="rangePickerValue"
+                  class="logs-date-picker"
+                  :dark="isDarkTheme"
+                  :locale="dateFnsLocale"
+                  :range="rangePickerConfig"
+                  :multi-calendars="2"
+                  auto-apply
+                  :text-input="false"
+                  :input-attrs="{ hideInputIcon: true }"
+                  :ui="datePickerUi"
+                  :formats="{ input: formatRangeInput }"
+                  :placeholder="t('components.logs.filters.range')"
+                />
+              </label>
+            </div>
+          </form>
 
-    <section class="logs-storage" v-if="storageStats">
-      <div class="logs-storage-header">
-        <div class="logs-storage-title">{{ t('components.logs.storage.title') }}</div>
-        <BaseButton variant="outline" size="sm" :disabled="storageLoading" @click="loadStorageStats">
-          {{ t('components.logs.storage.refresh') }}
-        </BaseButton>
-      </div>
+          <section class="logs-storage">
+            <div class="logs-storage-header">
+              <div class="logs-storage-title">{{ t('components.logs.storage.title') }}</div>
+              <div class="logs-storage-actions">
+                <BaseButton variant="outline" size="sm" :disabled="storageLoading" @click="loadStorageStats">
+                  {{ t('components.logs.storage.refresh') }}
+                </BaseButton>
+                <BaseButton
+                  size="sm"
+                  type="button"
+                  :disabled="loading || !isFilterValid"
+                  @click="applyFilters"
+                >
+                  {{ t('components.logs.query') }}
+                </BaseButton>
+              </div>
+            </div>
 
-      <div class="mac-panel logs-storage-panel">
-        <div class="logs-storage-db">
-          <div class="logs-storage-db-line">
-            {{ t('components.logs.storage.db') }}：
-            {{ t('components.logs.storage.used') }} {{ formatBytes(storageStats.database.used_bytes) }}
-            /
-            {{ formatBytes(storageStats.database.total_bytes || storageStats.database.file_bytes) }}
-            <span v-if="storageStats.database.free_bytes">
-              （{{ t('components.logs.storage.free') }} {{ formatBytes(storageStats.database.free_bytes) }}）
-            </span>
-            <span v-if="storageStats.database.wal_bytes">
-              · {{ t('components.logs.storage.wal') }} {{ formatBytes(storageStats.database.wal_bytes) }}
-            </span>
-          </div>
+            <div v-if="storageStats" class="mac-panel logs-storage-panel">
+              <div class="logs-storage-db">
+                <div class="logs-storage-db-line">
+                  {{ t('components.logs.storage.db') }}：
+                  {{ t('components.logs.storage.used') }} {{ formatBytes(storageStats.database.used_bytes) }}
+                  /
+                  {{ formatBytes(storageStats.database.total_bytes || storageStats.database.file_bytes) }}
+                  <span v-if="storageStats.database.free_bytes">
+                    （{{ t('components.logs.storage.free') }} {{ formatBytes(storageStats.database.free_bytes) }}）
+                  </span>
+                  <span v-if="storageStats.database.wal_bytes">
+                    · {{ t('components.logs.storage.wal') }} {{ formatBytes(storageStats.database.wal_bytes) }}
+                  </span>
+                </div>
+              </div>
+
+              <div class="logs-storage-rows">
+                <div class="logs-storage-row">
+                  <div class="logs-storage-name">{{ t('components.logs.storage.requestLog') }}</div>
+                  <div class="logs-storage-meta">
+                    {{ t('components.logs.storage.rows', { count: storageStats.request_log.rows }) }}
+                    · {{ formatBytes(storageStats.request_log.bytes, storageStats.request_log.rows) }}
+                  </div>
+                  <BaseButton
+                    variant="outline"
+                    size="sm"
+                    :disabled="storageClearing"
+                    @click="handleClearRequestLogs"
+                  >
+                    {{ storageClearing ? t('components.logs.storage.clearing') : t('components.logs.storage.clearRequestLog') }}
+                  </BaseButton>
+                </div>
+
+                <div class="logs-storage-row">
+                  <div class="logs-storage-name">{{ t('components.logs.storage.stats') }}</div>
+                  <div class="logs-storage-meta">
+                    {{ t('components.logs.storage.rows', { count: storageStats.stats_hour.rows + storageStats.stats_day.rows }) }}
+                    · {{ formatBytes(
+                      storageStats.stats_hour.bytes + storageStats.stats_day.bytes,
+                      storageStats.stats_hour.rows + storageStats.stats_day.rows,
+                    ) }}
+                  </div>
+                  <BaseButton
+                    variant="outline"
+                    size="sm"
+                    :disabled="storageClearing"
+                    @click="handleClearStats"
+                  >
+                    {{ storageClearing ? t('components.logs.storage.clearing') : t('components.logs.storage.clearStats') }}
+                  </BaseButton>
+                </div>
+              </div>
+            </div>
+          </section>
         </div>
 
-        <div class="logs-storage-rows">
-          <div class="logs-storage-row">
-            <div class="logs-storage-name">{{ t('components.logs.storage.requestLog') }}</div>
-            <div class="logs-storage-meta">
-              {{ t('components.logs.storage.rows', { count: storageStats.request_log.rows }) }}
-              · {{ formatBytes(storageStats.request_log.bytes, storageStats.request_log.rows) }}
-            </div>
-            <BaseButton
-              variant="outline"
-              size="sm"
-              :disabled="storageClearing"
-              @click="handleClearRequestLogs"
-            >
-              {{ storageClearing ? t('components.logs.storage.clearing') : t('components.logs.storage.clearRequestLog') }}
-            </BaseButton>
-          </div>
-
-          <div class="logs-storage-row">
-            <div class="logs-storage-name">{{ t('components.logs.storage.stats') }}</div>
-            <div class="logs-storage-meta">
-              {{ t('components.logs.storage.rows', { count: storageStats.stats_hour.rows + storageStats.stats_day.rows }) }}
-              · {{ formatBytes(
-                storageStats.stats_hour.bytes + storageStats.stats_day.bytes,
-                storageStats.stats_hour.rows + storageStats.stats_day.rows,
-              ) }}
-            </div>
-            <BaseButton
-              variant="outline"
-              size="sm"
-              :disabled="storageClearing"
-              @click="handleClearStats"
-            >
-              {{ storageClearing ? t('components.logs.storage.clearing') : t('components.logs.storage.clearStats') }}
-            </BaseButton>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section class="logs-summary" v-if="statsCards.length">
+        <section class="logs-summary" v-if="statsCards.length">
       <article
         v-for="card in statsCards"
         :key="card.key"
@@ -197,86 +207,86 @@
       </article>
     </section>
 
-    <section class="logs-chart">
-      <Line :data="chartData" :options="chartOptions" />
-    </section>
+        <section class="logs-chart">
+          <Line :data="chartData" :options="chartOptions" />
+        </section>
 
-    <section class="logs-table-wrapper">
-      <table class="logs-table">
-        <thead>
-          <tr>
-            <th class="col-time">{{ t('components.logs.table.time') }}</th>
-            <th class="col-platform">{{ t('components.logs.table.platform') }}</th>
-            <th class="col-provider">{{ t('components.logs.table.provider') }}</th>
-            <th class="col-model">{{ t('components.logs.table.model') }}</th>
-            <th class="col-http">{{ t('components.logs.table.httpCode') }}</th>
-            <th class="col-stream">{{ t('components.logs.table.stream') }}</th>
-            <th class="col-duration">{{ t('components.logs.table.duration') }}</th>
-            <th class="col-cost">{{ t('components.logs.table.cost') }}</th>
-            <th class="col-tokens">{{ t('components.logs.table.tokens') }}</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="item in pagedLogs" :key="item.id">
-            <td>{{ formatTime(item.created_at) }}</td>
-            <td>{{ item.platform || '—' }}</td>
-            <td>{{ item.provider || '—' }}</td>
-            <td class="model-cell">
-              <div class="model-name">{{ item.model || '—' }}</div>
-              <div
-                v-if="item.matched_pricing_model && item.matched_pricing_model !== item.model"
-                class="model-pricing-match"
-              >
-                {{ t('components.logs.table.matchedPricingModel', { model: item.matched_pricing_model }) }}
-              </div>
-            </td>
-            <td :class="['code', httpCodeClass(item.http_code)]">{{ item.http_code }}</td>
-            <td><span :class="['stream-tag', item.is_stream ? 'on' : 'off']">{{ formatStream(item.is_stream) }}</span></td>
-            <td><span :class="['duration-tag', durationColor(item.duration_sec)]">{{ formatDuration(item.duration_sec) }}</span></td>
-            <td class="cost-cell">
-              <span
-                class="cost-cell__value"
-                tabindex="0"
-                @mouseenter="showCostTooltip(item, $event)"
-                @mousemove="moveCostTooltip($event)"
-                @mouseleave="hideCostTooltip"
-                @focus="showCostTooltip(item, $event)"
-                @blur="hideCostTooltip"
-                @keydown.esc="hideCostTooltipImmediately"
-              >
-                {{ formatCurrency(item.total_cost) }}
-              </span>
-            </td>
-            <td class="token-cell">
-              <div>
-                <span class="token-label">{{ t('components.logs.tokenLabels.input') }}</span>
-                <span class="token-value">{{ formatTokenNumber(item.input_tokens) }}</span>
-              </div>
-              <div>
-                <span class="token-label">{{ t('components.logs.tokenLabels.output') }}</span>
-                <span class="token-value">{{ formatTokenNumber(item.output_tokens) }}</span>
-              </div>
-              <div>
-                <span class="token-label">{{ t('components.logs.tokenLabels.reasoning') }}</span>
-                <span class="token-value">{{ formatTokenNumber(item.reasoning_tokens) }}</span>
-              </div>
-              <div>
-                <span class="token-label">{{ t('components.logs.tokenLabels.cacheWrite') }}</span>
-                <span class="token-value">{{ formatTokenNumber(item.cache_create_tokens) }}</span>
-              </div>
-              <div>
-                <span class="token-label">{{ t('components.logs.tokenLabels.cacheRead') }}</span>
-                <span class="token-value">{{ formatTokenNumber(item.cache_read_tokens) }}</span>
-              </div>
-            </td>
-          </tr>
-          <tr v-if="!pagedLogs.length && !loading">
-            <td colspan="9" class="empty">{{ t('components.logs.empty') }}</td>
-          </tr>
-        </tbody>
-      </table>
-      <p v-if="loading" class="empty">{{ t('components.logs.loading') }}</p>
-    </section>
+        <section class="logs-table-wrapper">
+          <table class="logs-table">
+            <thead>
+              <tr>
+                <th class="col-time">{{ t('components.logs.table.time') }}</th>
+                <th class="col-platform">{{ t('components.logs.table.platform') }}</th>
+                <th class="col-provider">{{ t('components.logs.table.provider') }}</th>
+                <th class="col-model">{{ t('components.logs.table.model') }}</th>
+                <th class="col-http">{{ t('components.logs.table.httpCode') }}</th>
+                <th class="col-stream">{{ t('components.logs.table.stream') }}</th>
+                <th class="col-duration">{{ t('components.logs.table.duration') }}</th>
+                <th class="col-cost">{{ t('components.logs.table.cost') }}</th>
+                <th class="col-tokens">{{ t('components.logs.table.tokens') }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="item in pagedLogs" :key="item.id">
+                <td>{{ formatTime(item.created_at) }}</td>
+                <td>{{ item.platform || '—' }}</td>
+                <td>{{ item.provider || '—' }}</td>
+                <td class="model-cell">
+                  <div class="model-name">{{ item.model || '—' }}</div>
+                  <div
+                    v-if="item.matched_pricing_model && item.matched_pricing_model !== item.model"
+                    class="model-pricing-match"
+                  >
+                    {{ t('components.logs.table.matchedPricingModel', { model: item.matched_pricing_model }) }}
+                  </div>
+                </td>
+                <td :class="['code', httpCodeClass(item.http_code)]">{{ item.http_code }}</td>
+                <td><span :class="['stream-tag', item.is_stream ? 'on' : 'off']">{{ formatStream(item.is_stream) }}</span></td>
+                <td><span :class="['duration-tag', durationColor(item.duration_sec)]">{{ formatDuration(item.duration_sec) }}</span></td>
+                <td class="cost-cell">
+                  <span
+                    class="cost-cell__value"
+                    tabindex="0"
+                    @mouseenter="showCostTooltip(item, $event)"
+                    @mousemove="moveCostTooltip($event)"
+                    @mouseleave="hideCostTooltip"
+                    @focus="showCostTooltip(item, $event)"
+                    @blur="hideCostTooltip"
+                    @keydown.esc="hideCostTooltipImmediately"
+                  >
+                    {{ formatCurrency(item.total_cost) }}
+                  </span>
+                </td>
+                <td class="token-cell">
+                  <div>
+                    <span class="token-label">{{ t('components.logs.tokenLabels.input') }}</span>
+                    <span class="token-value">{{ formatTokenNumber(item.input_tokens) }}</span>
+                  </div>
+                  <div>
+                    <span class="token-label">{{ t('components.logs.tokenLabels.output') }}</span>
+                    <span class="token-value">{{ formatTokenNumber(item.output_tokens) }}</span>
+                  </div>
+                  <div>
+                    <span class="token-label">{{ t('components.logs.tokenLabels.reasoning') }}</span>
+                    <span class="token-value">{{ formatTokenNumber(item.reasoning_tokens) }}</span>
+                  </div>
+                  <div>
+                    <span class="token-label">{{ t('components.logs.tokenLabels.cacheWrite') }}</span>
+                    <span class="token-value">{{ formatTokenNumber(item.cache_create_tokens) }}</span>
+                  </div>
+                  <div>
+                    <span class="token-label">{{ t('components.logs.tokenLabels.cacheRead') }}</span>
+                    <span class="token-value">{{ formatTokenNumber(item.cache_read_tokens) }}</span>
+                  </div>
+                </td>
+              </tr>
+              <tr v-if="!pagedLogs.length && !loading">
+                <td colspan="9" class="empty">{{ t('components.logs.empty') }}</td>
+              </tr>
+            </tbody>
+          </table>
+          <p v-if="loading" class="empty">{{ t('components.logs.loading') }}</p>
+        </section>
 
     <Teleport to="body">
       <div
@@ -315,79 +325,80 @@
       </div>
     </Teleport>
 
-    <div class="logs-pagination">
-      <span>{{ page }} / {{ totalPages }}</span>
-      <div class="pagination-actions">
-        <BaseButton variant="outline" size="sm" :disabled="page === 1 || loading" @click="prevPage">
-          ‹
-        </BaseButton>
-        <BaseButton variant="outline" size="sm" :disabled="page >= totalPages || loading" @click="nextPage">
-          ›
-        </BaseButton>
-      </div>
+        <div class="logs-pagination">
+          <span>{{ page }} / {{ totalPages }}</span>
+          <div class="pagination-actions">
+            <BaseButton variant="outline" size="sm" :disabled="page === 1 || loading" @click="prevPage">
+              ‹
+            </BaseButton>
+            <BaseButton variant="outline" size="sm" :disabled="page >= totalPages || loading" @click="nextPage">
+              ›
+            </BaseButton>
+          </div>
+        </div>
+
+        <!-- 清理确认弹窗 -->
+        <BaseModal
+          :open="storageClearConfirm.open"
+          :title="t('components.logs.storage.confirmTitle')"
+          variant="confirm"
+          @close="closeStorageClearConfirm"
+        >
+          <div class="confirm-body">
+            <p>{{ storageClearConfirmMessage }}</p>
+          </div>
+          <footer class="form-actions confirm-actions">
+            <BaseButton variant="outline" type="button" :disabled="storageClearing" @click="closeStorageClearConfirm">
+              {{ t('common.cancel') }}
+            </BaseButton>
+            <BaseButton variant="danger" type="button" :disabled="storageClearing" @click="confirmStorageClear">
+              {{ storageClearing ? t('components.logs.storage.clearing') : storageClearConfirmActionLabel }}
+            </BaseButton>
+          </footer>
+        </BaseModal>
+
+        <!-- 金额明细弹窗 -->
+        <BaseModal
+          :open="costDetailModal.open"
+          :title="t('components.logs.costDetail.title')"
+          @close="closeCostDetailModal"
+        >
+          <div class="cost-detail-modal">
+            <p v-if="costDetailModal.loading" class="cost-detail-loading">
+              {{ t('components.logs.loading') }}
+            </p>
+            <div v-else-if="costDetailModal.data.length === 0" class="cost-detail-empty">
+              {{ t('components.logs.costDetail.empty') }}
+            </div>
+            <ul v-else class="cost-detail-list">
+              <li v-for="item in costDetailModal.data" :key="item.provider" class="cost-detail-item">
+                <span class="cost-detail-item__name">{{ item.provider }}</span>
+                <span class="cost-detail-item__value">{{ formatCurrency(item.cost_total) }}</span>
+              </li>
+            </ul>
+          </div>
+        </BaseModal>
+
+        <!-- Token 明细弹窗 -->
+        <BaseModal
+          :open="tokenDetailModal.open"
+          :title="t('components.logs.tokenDetail.title')"
+          @close="closeTokenDetailModal"
+        >
+          <div class="token-detail-modal">
+            <div class="token-detail-list">
+              <div class="token-detail-item">
+                <span class="token-detail-item__name">{{ t('components.logs.tokenLabels.input') }}</span>
+                <span class="token-detail-item__value">{{ formatTokenNumber(stats?.input_tokens) }}</span>
+              </div>
+              <div class="token-detail-item">
+                <span class="token-detail-item__name">{{ t('components.logs.tokenLabels.output') }}</span>
+                <span class="token-detail-item__value">{{ formatTokenNumber(stats?.output_tokens) }}</span>
+              </div>
+            </div>
+          </div>
+        </BaseModal>
     </div>
-
-    <!-- 清理确认弹窗 -->
-    <BaseModal
-      :open="storageClearConfirm.open"
-      :title="t('components.logs.storage.confirmTitle')"
-      variant="confirm"
-      @close="closeStorageClearConfirm"
-    >
-      <div class="confirm-body">
-        <p>{{ storageClearConfirmMessage }}</p>
-      </div>
-      <footer class="form-actions confirm-actions">
-        <BaseButton variant="outline" type="button" :disabled="storageClearing" @click="closeStorageClearConfirm">
-          {{ t('common.cancel') }}
-        </BaseButton>
-        <BaseButton variant="danger" type="button" :disabled="storageClearing" @click="confirmStorageClear">
-          {{ storageClearing ? t('components.logs.storage.clearing') : storageClearConfirmActionLabel }}
-        </BaseButton>
-      </footer>
-    </BaseModal>
-
-    <!-- 金额明细弹窗 -->
-    <BaseModal
-      :open="costDetailModal.open"
-      :title="t('components.logs.costDetail.title')"
-      @close="closeCostDetailModal"
-    >
-      <div class="cost-detail-modal">
-        <p v-if="costDetailModal.loading" class="cost-detail-loading">
-          {{ t('components.logs.loading') }}
-        </p>
-        <div v-else-if="costDetailModal.data.length === 0" class="cost-detail-empty">
-          {{ t('components.logs.costDetail.empty') }}
-        </div>
-        <ul v-else class="cost-detail-list">
-          <li v-for="item in costDetailModal.data" :key="item.provider" class="cost-detail-item">
-            <span class="cost-detail-item__name">{{ item.provider }}</span>
-            <span class="cost-detail-item__value">{{ formatCurrency(item.cost_total) }}</span>
-          </li>
-        </ul>
-      </div>
-    </BaseModal>
-
-    <!-- Token 明细弹窗 -->
-    <BaseModal
-      :open="tokenDetailModal.open"
-      :title="t('components.logs.tokenDetail.title')"
-      @close="closeTokenDetailModal"
-    >
-      <div class="token-detail-modal">
-        <div class="token-detail-list">
-          <div class="token-detail-item">
-            <span class="token-detail-item__name">{{ t('components.logs.tokenLabels.input') }}</span>
-            <span class="token-detail-item__value">{{ formatTokenNumber(stats?.input_tokens) }}</span>
-          </div>
-          <div class="token-detail-item">
-            <span class="token-detail-item__name">{{ t('components.logs.tokenLabels.output') }}</span>
-            <span class="token-detail-item__value">{{ formatTokenNumber(stats?.output_tokens) }}</span>
-          </div>
-        </div>
-      </div>
-    </BaseModal>
   </div>
 </template>
 

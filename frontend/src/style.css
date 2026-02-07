@@ -859,21 +859,52 @@ html.dark .mac-sidebar-item:hover {
 }
 
 .logs-page {
-  padding: 40px 48px;
+  height: 100%;
+  width: 100%;
   color: var(--mac-text);
   display: flex;
   flex-direction: column;
-  gap: 24px;
-  max-width: 1280px;
-  margin: 0 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.logs-header-bar {
+  flex: 0 0 auto;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: color-mix(in srgb, var(--mac-surface-strong) 85%, transparent);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--mac-divider);
 }
 
 .logs-header {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 40px 48px 16px;
+  box-sizing: border-box;
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
   gap: 16px;
   flex-wrap: wrap;
+}
+
+.logs-content {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 16px 48px 40px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.logs-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .logs-chart {
@@ -979,6 +1010,13 @@ html.dark .logs-date-picker-menu {
   flex-wrap: wrap;
 }
 
+.logs-storage-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .logs-storage-title {
   font-size: 0.95rem;
   font-weight: 600;
@@ -1025,6 +1063,14 @@ html.dark .logs-date-picker-menu {
 }
 
 @media (max-width: 768px) {
+  .logs-header {
+    padding: 24px 20px 12px;
+  }
+
+  .logs-content {
+    padding: 12px 20px 24px;
+  }
+
   .logs-filter-row .filter-fields {
     grid-template-columns: 1fr;
   }
