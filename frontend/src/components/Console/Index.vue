@@ -719,15 +719,15 @@ html.dark .console-content {
   align-items: flex-start;
   column-gap: 12px;
   row-gap: 6px;
-  padding: 4px 8px;
+  padding: 6px 8px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
   border-left: 3px solid transparent;
   border-radius: 8px;
   transition: background-color 0.15s ease, border-color 0.15s ease;
 }
 
-.log-entry:last-child {
-  border-bottom: none;
+.log-entry + .log-entry {
+  margin-top: 6px;
 }
 
 .log-timestamp {
