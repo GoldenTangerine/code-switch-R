@@ -80,23 +80,55 @@ func (cs *ConsoleService) captureStdout() {
 // readPipe 读取管道内容
 func (cs *ConsoleService) readPipe(reader *os.File, level string, output *os.File) {
 	buf := make([]byte, 1024)
+	var pendingBuffer string
+
 	for {
 		n, err := reader.Read(buf)
+		if n > 0 {
+			chunk := buf[:n]
+			// 写入原始输出
+			if _, writeErr := output.Write(chunk); writeErr != nil {
+				fmt.Fprintf(output, "写入原始输出失败: %v\n", writeErr)
+			}
+
+			// 按行切分，避免多个级别混在同一条日志里
+			pendingBuffer = cs.captureLogLines(level, pendingBuffer, string(chunk), false)
+		}
+
 		if err != nil {
 			if err != io.EOF {
 				fmt.Fprintf(output, "读取管道失败: %v\n", err)
 			}
+			cs.captureLogLines(level, pendingBuffer, "", true)
 			return
 		}
-
-		if n > 0 {
-			msg := string(buf[:n])
-			// 写入原始输出
-			output.Write(buf[:n])
-			// 添加到日志缓存
-			cs.addLog(level, msg)
-		}
 	}
+}
+
+func (cs *ConsoleService) captureLogLines(level, pending, chunk string, flushRemainder bool) string {
+	buffer := pending + chunk
+	for {
+		newLineIndex := strings.IndexByte(buffer, '\n')
+		if newLineIndex == -1 {
+			break
+		}
+
+		line := strings.TrimSuffix(buffer[:newLineIndex], "\r")
+		if strings.TrimSpace(line) != "" {
+			cs.addLog(level, line)
+		}
+		buffer = buffer[newLineIndex+1:]
+	}
+
+	if flushRemainder {
+		rest := strings.TrimSuffix(buffer, "\r")
+		if strings.TrimSpace(rest) != "" {
+			cs.addLog(level, rest)
+		}
+		return ""
+	}
+
+	return buffer
 }
 
 // addLog 添加日志到缓存
@@ -114,9 +146,11 @@ func (cs *ConsoleService) addLog(level, message string) {
 	cs.mutex.Lock()
 	defer cs.mutex.Unlock()
 
+	resolvedLevel := resolveLogLevel(level, message)
+
 	log := ConsoleLog{
 		Timestamp: time.Now(),
-		Level:     level,
+		Level:     resolvedLevel,
 		Message:   message,
 	}
 
@@ -129,6 +163,43 @@ func (cs *ConsoleService) addLog(level, message string) {
 
 	// 清理3天前的日志
 	cs.cleanOldLogs()
+}
+
+// resolveLogLevel 综合默认级别和日志内容推断真实日志级别
+func resolveLogLevel(level, message string) string {
+	baseLevel := normalizeLogLevel(level)
+	normalizedMessage := strings.ToUpper(message)
+
+	if strings.Contains(normalizedMessage, "[ERROR]") || strings.Contains(normalizedMessage, " ERROR:") || strings.Contains(normalizedMessage, " LEVEL=ERROR") {
+		return "ERROR"
+	}
+
+	if strings.Contains(normalizedMessage, "[WARN]") || strings.Contains(normalizedMessage, "[WARNING]") || strings.Contains(normalizedMessage, " WARN:") || strings.Contains(normalizedMessage, " LEVEL=WARN") || strings.Contains(normalizedMessage, " LEVEL=WARNING") {
+		return "WARN"
+	}
+
+	if strings.Contains(normalizedMessage, "[DEBUG]") || strings.Contains(normalizedMessage, " DEBUG:") || strings.Contains(normalizedMessage, " LEVEL=DEBUG") {
+		return "DEBUG"
+	}
+
+	if strings.Contains(normalizedMessage, "[INFO]") || strings.Contains(normalizedMessage, " INFO:") || strings.Contains(normalizedMessage, " LEVEL=INFO") {
+		return "INFO"
+	}
+
+	return baseLevel
+}
+
+func normalizeLogLevel(level string) string {
+	switch strings.ToUpper(strings.TrimSpace(level)) {
+	case "ERROR", "ERR":
+		return "ERROR"
+	case "WARN", "WARNING":
+		return "WARN"
+	case "DEBUG":
+		return "DEBUG"
+	default:
+		return "INFO"
+	}
 }
 
 // cleanOldLogs 清理3天前的日志
@@ -214,8 +285,8 @@ func shouldFilterLog(message string) bool {
 	// 2. 过滤掉包含 JSON 结构的日志（GetLogs 的返回值被序列化）
 	// 检测是否包含日志的 JSON 结构特征
 	if strings.Contains(message, `"timestamp":`) &&
-	   strings.Contains(message, `"level":`) &&
-	   strings.Contains(message, `"message":`) {
+		strings.Contains(message, `"level":`) &&
+		strings.Contains(message, `"message":`) {
 		return true
 	}
 
