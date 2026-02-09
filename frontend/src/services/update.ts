@@ -14,17 +14,18 @@ export interface UpdateState {
   last_check_success: boolean
   consecutive_failures: number
   latest_known_version: string
+  latest_release_notes?: string
   download_progress: number
   update_ready: boolean
   auto_check_enabled?: boolean
 }
 
-export const checkUpdate = async (): Promise<UpdateInfo> => {
+export const checkUpdate = async (): Promise<UpdateInfo | null> => {
   return Call.ByName('codeswitch/services.UpdateService.CheckUpdate')
 }
 
-export const downloadUpdate = async (): Promise<void> => {
-  return Call.ByName('codeswitch/services.UpdateService.DownloadUpdate', null)
+export const downloadUpdate = async (progressCallback?: ((progress: number) => void) | null): Promise<void> => {
+  return Call.ByName('codeswitch/services.UpdateService.DownloadUpdate', progressCallback ?? null)
 }
 
 export const restartApp = async (): Promise<void> => {

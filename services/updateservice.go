@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	neturl "net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -49,6 +50,7 @@ type UpdateState struct {
 	LastCheckSuccess    bool      `json:"last_check_success"`
 	ConsecutiveFailures int       `json:"consecutive_failures"`
 	LatestKnownVersion  string    `json:"latest_known_version"`
+	LatestReleaseNotes  string    `json:"latest_release_notes"`
 	DownloadProgress    float64   `json:"download_progress"`
 	UpdateReady         bool      `json:"update_ready"`
 	AutoCheckEnabled    bool      `json:"auto_check_enabled"` // 新增：持久化自动检查开关
@@ -58,6 +60,7 @@ type UpdateState struct {
 type UpdateService struct {
 	currentVersion   string
 	latestVersion    string
+	latestNotes      string
 	downloadURL      string
 	updateFilePath   string
 	autoCheckEnabled bool
@@ -89,9 +92,12 @@ type GitHubRelease struct {
 
 // LatestRelease 静态元数据文件结构（latest.json）
 type LatestRelease struct {
-	Version     string                   `json:"version"`
-	ReleaseDate string                   `json:"release_date"`
-	Files       map[string]PlatformAsset `json:"files"`
+	Version      string                   `json:"version"`
+	ReleaseDate  string                   `json:"release_date"`
+	ReleaseNotes string                   `json:"release_notes"`
+	Body         string                   `json:"body"`
+	Changelog    string                   `json:"changelog"`
+	Files        map[string]PlatformAsset `json:"files"`
 }
 
 // PlatformAsset 平台资产信息
@@ -237,15 +243,29 @@ func (us *UpdateService) checkUpdateViaStaticFile() (*UpdateInfo, error) {
 		log.Printf("[UpdateService] SHA256: %s", asset.SHA256)
 	}
 
+	releaseNotes := strings.TrimSpace(release.ReleaseNotes)
+	if releaseNotes == "" {
+		releaseNotes = strings.TrimSpace(release.Body)
+	}
+	if releaseNotes == "" {
+		releaseNotes = strings.TrimSpace(release.Changelog)
+	}
+	// latest.json 里没有日志时，按需从 API 拉一份，保证前端弹窗可展示更新日志
+	if releaseNotes == "" && needUpdate {
+		releaseNotes = us.fetchReleaseNotesByVersion(release.Version)
+	}
+
 	updateInfo := &UpdateInfo{
-		Available:   needUpdate,
-		Version:     release.Version,
-		DownloadURL: asset.URL,
-		SHA256:      asset.SHA256,
+		Available:    needUpdate,
+		Version:      release.Version,
+		DownloadURL:  asset.URL,
+		ReleaseNotes: releaseNotes,
+		SHA256:       asset.SHA256,
 	}
 
 	us.mu.Lock()
 	us.latestVersion = release.Version
+	us.latestNotes = releaseNotes
 	us.downloadURL = asset.URL
 	us.latestUpdateInfo = updateInfo
 	us.mu.Unlock()
@@ -347,6 +367,7 @@ func (us *UpdateService) checkUpdateViaAPI() (*UpdateInfo, error) {
 
 	us.mu.Lock()
 	us.latestVersion = release.TagName
+	us.latestNotes = strings.TrimSpace(release.Body)
 	us.downloadURL = downloadURL
 	us.latestUpdateInfo = updateInfo // 保存更新信息
 	us.mu.Unlock()
@@ -476,6 +497,96 @@ func (us *UpdateService) findSHA256ForAsset(assets []struct {
 	}
 
 	return ""
+}
+
+func normalizeReleaseVersionTag(version string) string {
+	normalized := strings.TrimSpace(version)
+	if normalized == "" {
+		return ""
+	}
+	return strings.TrimPrefix(strings.ToLower(normalized), "v")
+}
+
+func (us *UpdateService) fetchReleaseMeta(releaseURL string) (*GitHubRelease, error) {
+	client := &http.Client{Timeout: 10 * time.Second}
+
+	req, err := http.NewRequest("GET", releaseURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("创建 release 请求失败: %w", err)
+	}
+
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("User-Agent", "CodeSwitch/"+us.currentVersion)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("请求 release 失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("release API 状态码异常: %d", resp.StatusCode)
+	}
+
+	var release GitHubRelease
+	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+		return nil, fmt.Errorf("解析 release 响应失败: %w", err)
+	}
+
+	return &release, nil
+}
+
+// fetchReleaseNotesByVersion 按指定版本拉取更新日志（失败时返回空字符串）
+func (us *UpdateService) fetchReleaseNotesByVersion(version string) string {
+	trimmedVersion := strings.TrimSpace(version)
+	if trimmedVersion == "" {
+		return ""
+	}
+
+	expected := normalizeReleaseVersionTag(trimmedVersion)
+	tagCandidates := []string{trimmedVersion}
+	if strings.HasPrefix(strings.ToLower(trimmedVersion), "v") {
+		tagCandidates = append(tagCandidates, strings.TrimPrefix(trimmedVersion, "v"))
+	} else {
+		tagCandidates = append(tagCandidates, "v"+trimmedVersion)
+	}
+
+	visited := make(map[string]struct{}, len(tagCandidates))
+	for _, tag := range tagCandidates {
+		tag = strings.TrimSpace(tag)
+		if tag == "" {
+			continue
+		}
+		if _, exists := visited[tag]; exists {
+			continue
+		}
+		visited[tag] = struct{}{}
+
+		releaseURL := "https://api.github.com/repos/" + updateRepoOwner + "/" + updateRepoName + "/releases/tags/" + neturl.PathEscape(tag)
+		release, err := us.fetchReleaseMeta(releaseURL)
+		if err != nil {
+			log.Printf("[UpdateService] 拉取 tag=%s 的 release notes 失败: %v", tag, err)
+			continue
+		}
+		if normalizeReleaseVersionTag(release.TagName) != expected {
+			log.Printf("[UpdateService] release tag 不匹配，期望=%s，返回=%s", trimmedVersion, release.TagName)
+			continue
+		}
+		return strings.TrimSpace(release.Body)
+	}
+
+	// 兜底 latest，但必须校验版本一致，避免日志错配
+	release, err := us.fetchReleaseMeta(updateLatestAPIURL)
+	if err != nil {
+		log.Printf("[UpdateService] 拉取 latest release notes 失败: %v", err)
+		return ""
+	}
+	if normalizeReleaseVersionTag(release.TagName) != expected {
+		log.Printf("[UpdateService] latest release tag 与目标版本不一致，期望=%s，返回=%s", trimmedVersion, release.TagName)
+		return ""
+	}
+
+	return strings.TrimSpace(release.Body)
 }
 
 // DownloadUpdate 下载更新文件（支持更新锁、重试、断点续传、SHA256校验）
@@ -1919,6 +2030,7 @@ func (us *UpdateService) GetUpdateState() *UpdateState {
 		LastCheckSuccess:    us.checkFailures == 0,
 		ConsecutiveFailures: us.checkFailures,
 		LatestKnownVersion:  us.latestVersion,
+		LatestReleaseNotes:  us.latestNotes,
 		DownloadProgress:    us.downloadProgress,
 		UpdateReady:         us.updateReady,
 		AutoCheckEnabled:    us.autoCheckEnabled, // 返回自动检查状态
@@ -1957,6 +2069,7 @@ func (us *UpdateService) SaveState() error {
 		LastCheckSuccess:    us.checkFailures == 0,
 		ConsecutiveFailures: us.checkFailures,
 		LatestKnownVersion:  us.latestVersion,
+		LatestReleaseNotes:  us.latestNotes,
 		DownloadProgress:    us.downloadProgress,
 		UpdateReady:         us.updateReady,
 		AutoCheckEnabled:    us.autoCheckEnabled, // 持久化自动检查开关
@@ -2004,6 +2117,7 @@ func (us *UpdateService) LoadState() error {
 	us.lastCheckTime = state.LastCheckTime
 	us.checkFailures = state.ConsecutiveFailures
 	us.latestVersion = state.LatestKnownVersion
+	us.latestNotes = strings.TrimSpace(state.LatestReleaseNotes)
 	us.downloadProgress = state.DownloadProgress
 
 	// 验证 updateReady 状态：pending 文件才是权威来源

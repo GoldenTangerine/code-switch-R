@@ -763,9 +763,22 @@
         "downloadPostHint": "已加载完成。建议返回首页刷新列表/必要时重启应用。\\n本地备份：{backup}"
       },
       "update": {
+        "modalTitle": "在线更新",
         "checkFailed": "连续 {count} 次检查失败",
         "checking": "检查中...",
         "checkNow": "立即检查",
+        "releaseNotes": "更新日志",
+        "releaseNotesEmpty": "暂无更新日志",
+        "alreadyLatest": "已是最新版本（{version}）",
+        "updateFound": "发现新版本 {version}，可点击下方按钮下载更新",
+        "recheck": "重新检查",
+        "installing": "安装中...",
+        "checkEmptyResponse": "检查更新失败：服务返回了空结果，请稍后重试",
+        "checkFailedWithError": "检查更新失败：{error}",
+        "downloadFailedWithError": "下载更新失败：{error}",
+        "downloadReady": "更新包已下载完成，可点击“安装并重启”完成更新",
+        "noUpdateToInstall": "当前没有可下载的更新，请先检查更新",
+        "updateNow": "更新",
         "downloading": "下载中 {progress}%",
         "downloadAndInstall": "下载并安装",
         "installAndRestart": "安装并重启"

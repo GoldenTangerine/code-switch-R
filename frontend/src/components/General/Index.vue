@@ -9,7 +9,7 @@ import NetworkWslSettings from '../Setting/NetworkWslSettings.vue'
 import ModelPricingModal from '../Setting/ModelPricingModal.vue'
 import InlineModal from '../common/InlineModal.vue'
 import { fetchAppSettings, saveAppSettings, type AppSettings } from '../../services/appSettings'
-import { checkUpdate, downloadUpdate, restartApp, getUpdateState, setAutoCheckEnabled, type UpdateState } from '../../services/update'
+import { checkUpdate, downloadUpdate, restartApp, getUpdateState, setAutoCheckEnabled, type UpdateInfo, type UpdateState } from '../../services/update'
 import { fetchCurrentVersion } from '../../services/version'
 import { getBlacklistSettings, updateBlacklistSettings, getLevelBlacklistEnabled, setLevelBlacklistEnabled, getBlacklistEnabled, setBlacklistEnabled, type BlacklistSettings } from '../../services/settings'
 import { fetchConfigImportStatus, importFromPath, type ConfigImportStatus } from '../../services/configImport'
@@ -70,7 +70,42 @@ const saveBusy = ref(false)
 const updateState = ref<UpdateState | null>(null)
 const checking = ref(false)
 const downloading = ref(false)
+const installing = ref(false)
+const downloadProgress = ref<number | null>(null)
 const appVersion = ref('')
+const updateModalOpen = ref(false)
+const updateCheckInfo = ref<UpdateInfo | null>(null)
+const updateModalMessage = ref('')
+const updateModalError = ref('')
+
+const updateModalLatestVersion = computed(() => {
+  if (updateCheckInfo.value?.version) return updateCheckInfo.value.version
+  if (updateState.value?.latest_known_version) return updateState.value.latest_known_version
+  return appVersion.value || '—'
+})
+
+const updateModalReleaseNotes = computed(() => {
+  const notes = updateCheckInfo.value?.release_notes?.trim()
+  if (notes) return notes
+  const cachedNotes = updateState.value?.latest_release_notes?.trim()
+  if (cachedNotes) return cachedNotes
+  return t('components.general.update.releaseNotesEmpty')
+})
+
+const canTriggerUpdateFromModal = computed(() => {
+  if (updateState.value?.update_ready) return true
+  return Boolean(updateCheckInfo.value?.available)
+})
+
+const updateModalActionText = computed(() => {
+  if (installing.value) return t('components.general.update.installing')
+  if (updateState.value?.update_ready) return t('components.general.update.installAndRestart')
+  if (downloading.value) {
+    const progress = Math.round(downloadProgress.value ?? updateState.value?.download_progress ?? 0)
+    return t('components.general.update.downloading', { progress })
+  }
+  return t('components.general.update.updateNow')
+})
 
 // 拉黑配置相关状态
 const blacklistEnabled = ref(true)  // 拉黑功能总开关
@@ -716,6 +751,18 @@ const loadUpdateState = async () => {
   }
 }
 
+const updateLocalDownloadProgress = (progress: number) => {
+  if (!Number.isFinite(progress)) return
+  const normalized = Math.max(0, Math.min(100, progress))
+  downloadProgress.value = normalized
+  if (updateState.value) {
+    updateState.value = {
+      ...updateState.value,
+      download_progress: normalized,
+    }
+  }
+}
+
 const updateErrorLogPath = '.code-switch/updates/update-errors.log'
 
 const isUacCancelledError = (message: string) => {
@@ -743,86 +790,89 @@ const buildRestartInstallErrorMessage = (error: unknown) => {
 
 const alertRestartInstallError = (error: unknown) => {
   console.error('restart/install update failed', error)
-  alert(buildRestartInstallErrorMessage(error))
+  updateModalError.value = buildRestartInstallErrorMessage(error)
 }
 
 const checkUpdateManually = async () => {
+  if (checking.value || downloading.value || installing.value) return
+
+  updateModalOpen.value = true
+  updateModalError.value = ''
+  updateModalMessage.value = t('components.general.update.checking')
+  updateCheckInfo.value = null
+
   checking.value = true
   try {
     const info = await checkUpdate()
     await loadUpdateState()
 
-    if (!info.available) {
-      alert('已是最新版本')
-    } else {
-      // 发现新版本，提示用户并开始下载
-      const confirmed = confirm(`发现新版本 ${info.version}，是否立即下载？`)
-      if (confirmed) {
-        downloading.value = true
-        checking.value = false
-        try {
-          await downloadUpdate()
-          await loadUpdateState()
-        } catch (downloadError) {
-          console.error('download failed', downloadError)
-          alert('下载失败: ' + extractErrorMessage(downloadError))
-          return
-        } finally {
-          downloading.value = false
-        }
+    if (!info) {
+      updateModalError.value = t('components.general.update.checkEmptyResponse')
+      return
+    }
 
-        // 下载完成，提示重启
-        const restart = confirm('新版本已下载完成，是否立即重启应用？')
-        if (restart) {
-          try {
-            await restartApp()
-          } catch (restartError) {
-            alertRestartInstallError(restartError)
-          }
-        }
-      }
+    updateCheckInfo.value = info
+
+    if (!info.available) {
+      updateModalMessage.value = t('components.general.update.alreadyLatest', {
+        version: info.version || appVersion.value || '—',
+      })
+    } else {
+      updateModalMessage.value = t('components.general.update.updateFound', { version: info.version })
     }
   } catch (error) {
     console.error('check update failed', error)
-    alert('检查更新失败，请检查网络连接')
+    updateModalError.value = t('components.general.update.checkFailedWithError', {
+      error: extractErrorMessage(error),
+    })
+    await loadUpdateState()
   } finally {
     checking.value = false
   }
 }
 
 const downloadAndInstall = async () => {
-  downloading.value = true
-  try {
-    await downloadUpdate()
-    await loadUpdateState()
-  } catch (error) {
-    console.error('download failed', error)
-    alert('下载失败: ' + extractErrorMessage(error))
-    return
-  } finally {
-    downloading.value = false
-  }
+  if (downloading.value || installing.value || checking.value) return
 
-  // 弹窗确认重启
-  const confirmed = confirm('新版本已下载完成，是否立即重启应用？')
-  if (confirmed) {
+  updateModalError.value = ''
+  updateModalMessage.value = ''
+
+  if (updateState.value?.update_ready) {
+    installing.value = true
     try {
       await restartApp()
     } catch (restartError) {
       alertRestartInstallError(restartError)
+    } finally {
+      installing.value = false
     }
+    return
   }
-}
 
-// 当更新已下载完成时，直接安装并重启（无需再次下载）
-const installAndRestart = async () => {
-  const confirmed = confirm('是否立即安装更新并重启应用？')
-  if (confirmed) {
-    try {
-      await restartApp()
-    } catch (error) {
-      alertRestartInstallError(error)
-    }
+  if (!updateCheckInfo.value?.available) {
+    updateModalMessage.value = t('components.general.update.noUpdateToInstall')
+    return
+  }
+
+  downloading.value = true
+  downloadProgress.value = 0
+  updateLocalDownloadProgress(0)
+  try {
+    await downloadUpdate((progress: number) => {
+      updateLocalDownloadProgress(progress)
+    })
+    await loadUpdateState()
+    updateLocalDownloadProgress(100)
+    updateModalMessage.value = t('components.general.update.downloadReady')
+  } catch (error) {
+    console.error('download failed', error)
+    updateModalError.value = t('components.general.update.downloadFailedWithError', {
+      error: extractErrorMessage(error),
+    })
+    return
+  } finally {
+    downloading.value = false
+    downloadProgress.value = null
   }
 }
 
@@ -1742,32 +1792,72 @@ onBeforeUnmount(() => {
             <span class="version-text">{{ appVersion }}</span>
           </ListItem>
 
-          <ListItem
-            v-if="updateState?.latest_known_version && updateState.latest_known_version !== appVersion"
-            :label="$t('components.general.label.latestVersion')">
-            <span class="version-text highlight">{{ updateState.latest_known_version }} 🆕</span>
-          </ListItem>
-
           <ListItem :label="$t('components.general.label.checkNow')">
             <button
               @click="checkUpdateManually"
-              :disabled="checking"
+              :disabled="checking || downloading || installing"
               class="action-btn">
               {{ checking ? $t('components.general.update.checking') : $t('components.general.update.checkNow') }}
             </button>
           </ListItem>
-
-          <ListItem
-            v-if="updateState?.update_ready"
-            :label="$t('components.general.label.manualUpdate')">
-            <button
-              @click="installAndRestart"
-              class="primary-btn">
-              {{ $t('components.general.update.installAndRestart') }}
-            </button>
-          </ListItem>
         </div>
       </section>
+
+      <InlineModal
+        :open="updateModalOpen"
+        :title="$t('components.general.update.modalTitle')"
+        @close="updateModalOpen = false"
+      >
+        <div class="update-modal">
+          <div class="update-modal-row">
+            <span class="update-modal-label">{{ $t('components.general.label.currentVersion') }}</span>
+            <span class="version-text">{{ appVersion || '—' }}</span>
+          </div>
+          <div class="update-modal-row">
+            <span class="update-modal-label">{{ $t('components.general.label.latestVersion') }}</span>
+            <span class="version-text highlight">{{ updateModalLatestVersion }}</span>
+          </div>
+
+          <div v-if="updateModalMessage" class="info-text update-modal-message">
+            {{ updateModalMessage }}
+          </div>
+          <div v-if="updateModalError" class="alert-error">
+            {{ updateModalError }}
+          </div>
+
+          <div class="update-modal-block">
+            <div class="update-modal-block-title">{{ $t('components.general.update.releaseNotes') }}</div>
+            <pre class="update-modal-release-notes">{{ updateModalReleaseNotes }}</pre>
+          </div>
+
+          <footer class="update-modal-actions">
+            <button
+              class="action-btn"
+              type="button"
+              :disabled="downloading || checking || installing"
+              @click="checkUpdateManually"
+            >
+              {{ $t('components.general.update.recheck') }}
+            </button>
+            <button
+              class="action-btn"
+              type="button"
+              :disabled="downloading || checking || installing"
+              @click="updateModalOpen = false"
+            >
+              {{ $t('common.cancel') }}
+            </button>
+            <button
+              class="primary-btn"
+              type="button"
+              :disabled="checking || downloading || installing || !canTriggerUpdateFromModal"
+              @click="downloadAndInstall"
+            >
+              {{ updateModalActionText }}
+            </button>
+          </footer>
+        </div>
+      </InlineModal>
 
       <InlineModal
         :open="webdavUploadModalOpen"
@@ -2065,6 +2155,64 @@ onBeforeUnmount(() => {
   gap: 8px;
   max-width: 100%;
   min-width: 0;
+}
+
+.update-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.update-modal-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.update-modal-label {
+  font-size: 12px;
+  color: var(--mac-text-secondary);
+}
+
+.update-modal-message {
+  margin: 2px 0 0;
+}
+
+.update-modal-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.update-modal-block-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--mac-text);
+}
+
+.update-modal-release-notes {
+  margin: 0;
+  max-height: 220px;
+  overflow: auto;
+  border-radius: 12px;
+  border: 1px solid var(--mac-border);
+  background: var(--mac-surface-strong);
+  color: var(--mac-text-secondary);
+  padding: 10px 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.update-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--mac-divider);
 }
 
 .webdav-sync-modal {

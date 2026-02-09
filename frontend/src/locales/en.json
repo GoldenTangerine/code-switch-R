@@ -762,9 +762,22 @@
         "downloadPostHint": "Loaded. Consider refreshing the home list / restarting if needed.\\nLocal backup: {backup}"
       },
       "update": {
+        "modalTitle": "Online Update",
         "checkFailed": "Check failed {count} times in a row",
         "checking": "Checking...",
         "checkNow": "Check now",
+        "releaseNotes": "Release notes",
+        "releaseNotesEmpty": "No release notes available",
+        "alreadyLatest": "You're already on the latest version ({version})",
+        "updateFound": "New version {version} found. Click the button below to download the update.",
+        "recheck": "Check again",
+        "installing": "Installing...",
+        "checkEmptyResponse": "Failed to check updates: empty response from service, please try again.",
+        "checkFailedWithError": "Failed to check updates: {error}",
+        "downloadFailedWithError": "Failed to download update: {error}",
+        "downloadReady": "Update package downloaded. Click \"Install and restart\" to finish updating.",
+        "noUpdateToInstall": "No downloadable update right now. Please check for updates first.",
+        "updateNow": "Update",
         "downloading": "Downloading {progress}%",
         "downloadAndInstall": "Download and install",
         "installAndRestart": "Install and restart"
