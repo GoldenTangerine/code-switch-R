@@ -863,6 +863,7 @@ func (prs *ProviderRelayService) forwardRequest(
 	start := time.Now()
 	defer func() {
 		requestLog.DurationSec = time.Since(start).Seconds()
+		normalizeRequestLogInputTokens(requestLog)
 		requestLog.TotalCost = calculateRequestLogTotalCost(
 			pricingSnapshot,
 			requestLog.Model,
@@ -1261,6 +1262,56 @@ func parseRawJSONPayload(payload string, parser func(string, *ReqeustLog), usage
 	rawJSONBuffer.Reset()
 }
 
+// normalizeRequestLogInputTokens 将 input_tokens 规范化为“非缓存输入”。
+//
+// 口径说明：
+// - Codex(OpenAI) 与 Gemini 的 usage 会把「缓存 tokens」计入 input_tokens，因此需要减去 cache_* tokens。
+// - Claude(Anthropic) 的 input_tokens 本身就是“非缓存输入”，cache_* tokens 另给字段，无需减法。
+//
+// 本项目统一约定：
+// - request_log.input_tokens 存“非缓存输入”（用于 input cost 与 UI「输入」展示）
+// - request_log.cache_create_tokens / cache_read_tokens 单独存储（用于成本拆分与命中率）
+//
+// 不做这一步的话，会导致：
+// 1) UI 看起来像“输入一直在累加历史对话”；
+// 2) 成本计算把缓存 tokens 按 input + cache 两次计费。
+func normalizeRequestLogInputTokens(reqLog *ReqeustLog) {
+	if reqLog == nil {
+		return
+	}
+
+	platform := strings.ToLower(strings.TrimSpace(reqLog.Platform))
+	if platform != "codex" && platform != "gemini" {
+		return
+	}
+
+	totalInput := reqLog.InputTokens
+	if totalInput <= 0 {
+		return
+	}
+
+	cacheCreate := reqLog.CacheCreateTokens
+	cacheRead := reqLog.CacheReadTokens
+	if cacheCreate < 0 {
+		cacheCreate = 0
+	}
+	if cacheRead < 0 {
+		cacheRead = 0
+	}
+	cacheTotal := cacheCreate + cacheRead
+	if cacheTotal <= 0 {
+		return
+	}
+
+	// 兜底：如果缓存 tokens 反而比 input_tokens 还大，说明上游口径不一致或解析异常，
+	// 这里不做减法，避免记录成负数。
+	if cacheTotal > totalInput {
+		return
+	}
+
+	reqLog.InputTokens = totalInput - cacheTotal
+}
+
 type ReqeustLog struct {
 	ID                  int64   `json:"id"`
 	Platform            string  `json:"platform"` // claude、codex 或 gemini
@@ -1293,7 +1344,7 @@ func ClaudeCodeParseTokenUsageFromResponse(data string, usage *ReqeustLog) {
 		return
 	}
 
-	usage.InputTokens += firstPositiveIntFromPaths(
+	input := firstPositiveIntFromPaths(
 		data,
 		"message.usage.input_tokens",
 		"usage.input_tokens",
@@ -1306,7 +1357,15 @@ func ClaudeCodeParseTokenUsageFromResponse(data string, usage *ReqeustLog) {
 		"input_tokens",
 		"prompt_tokens",
 	)
-	usage.OutputTokens += firstPositiveIntFromPaths(
+	if usage.IsStream {
+		if input > usage.InputTokens {
+			usage.InputTokens = input
+		}
+	} else if input > 0 {
+		usage.InputTokens = input
+	}
+
+	output := firstPositiveIntFromPaths(
 		data,
 		"message.usage.output_tokens",
 		"usage.output_tokens",
@@ -1319,7 +1378,15 @@ func ClaudeCodeParseTokenUsageFromResponse(data string, usage *ReqeustLog) {
 		"output_tokens",
 		"completion_tokens",
 	)
-	usage.CacheCreateTokens += firstPositiveIntFromPaths(
+	if usage.IsStream {
+		if output > usage.OutputTokens {
+			usage.OutputTokens = output
+		}
+	} else if output > 0 {
+		usage.OutputTokens = output
+	}
+
+	cacheCreate := firstPositiveIntFromPaths(
 		data,
 		"message.usage.cache_creation_input_tokens",
 		"usage.cache_creation_input_tokens",
@@ -1327,13 +1394,28 @@ func ClaudeCodeParseTokenUsageFromResponse(data string, usage *ReqeustLog) {
 		"cache_creation_input_tokens",
 		"cache_create_tokens",
 	)
-	usage.CacheReadTokens += firstPositiveIntFromPaths(
+	if usage.IsStream {
+		if cacheCreate > usage.CacheCreateTokens {
+			usage.CacheCreateTokens = cacheCreate
+		}
+	} else if cacheCreate > 0 {
+		usage.CacheCreateTokens = cacheCreate
+	}
+
+	cacheRead := firstPositiveIntFromPaths(
 		data,
 		"message.usage.cache_read_input_tokens",
 		"usage.cache_read_input_tokens",
 		"usage.input_tokens_details.cached_tokens",
 		"cache_read_input_tokens",
 	)
+	if usage.IsStream {
+		if cacheRead > usage.CacheReadTokens {
+			usage.CacheReadTokens = cacheRead
+		}
+	} else if cacheRead > 0 {
+		usage.CacheReadTokens = cacheRead
+	}
 }
 
 func firstPositiveIntFromPaths(data string, paths ...string) int {
@@ -1348,10 +1430,43 @@ func firstPositiveIntFromPaths(data string, paths ...string) int {
 
 // codex usage parser
 func CodexParseTokenUsageFromResponse(data string, usage *ReqeustLog) {
-	usage.InputTokens += int(gjson.Get(data, "response.usage.input_tokens").Int())
-	usage.OutputTokens += int(gjson.Get(data, "response.usage.output_tokens").Int())
-	usage.CacheReadTokens += int(gjson.Get(data, "response.usage.input_tokens_details.cached_tokens").Int())
-	usage.ReasoningTokens += int(gjson.Get(data, "response.usage.output_tokens_details.reasoning_tokens").Int())
+	if usage == nil {
+		return
+	}
+
+	input := int(gjson.Get(data, "response.usage.input_tokens").Int())
+	output := int(gjson.Get(data, "response.usage.output_tokens").Int())
+	cacheRead := int(gjson.Get(data, "response.usage.input_tokens_details.cached_tokens").Int())
+	reasoning := int(gjson.Get(data, "response.usage.output_tokens_details.reasoning_tokens").Int())
+
+	if usage.IsStream {
+		if input > usage.InputTokens {
+			usage.InputTokens = input
+		}
+		if output > usage.OutputTokens {
+			usage.OutputTokens = output
+		}
+		if cacheRead > usage.CacheReadTokens {
+			usage.CacheReadTokens = cacheRead
+		}
+		if reasoning > usage.ReasoningTokens {
+			usage.ReasoningTokens = reasoning
+		}
+		return
+	}
+
+	if input > 0 {
+		usage.InputTokens = input
+	}
+	if output > 0 {
+		usage.OutputTokens = output
+	}
+	if cacheRead > 0 {
+		usage.CacheReadTokens = cacheRead
+	}
+	if reasoning > 0 {
+		usage.ReasoningTokens = reasoning
+	}
 }
 
 // gemini usage parser (流式响应专用)
@@ -1601,6 +1716,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 		// 保存日志的 defer
 		defer func() {
 			requestLog.DurationSec = time.Since(start).Seconds()
+			normalizeRequestLogInputTokens(requestLog)
 			requestLog.TotalCost = calculateRequestLogTotalCost(
 				pricingSnapshot,
 				requestLog.Model,
@@ -1783,14 +1899,14 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 
 				// 【关键修复】如果响应已写入客户端，不能降级到其他 provider，直接返回
 				errorMsg := "未知错误"
-					if err != nil {
-						errorMsg = err.Error()
-					}
-					if responseWritten {
-						fmt.Printf("[Gemini] ⚠️ 响应已部分写入，无法降级: %s | 错误: %s\n", provider.Name, errorMsg)
-						_ = prs.blacklistService.RecordFailure("gemini", provider.Name)
-						return
-					}
+				if err != nil {
+					errorMsg = err.Error()
+				}
+				if responseWritten {
+					fmt.Printf("[Gemini] ⚠️ 响应已部分写入，无法降级: %s | 错误: %s\n", provider.Name, errorMsg)
+					_ = prs.blacklistService.RecordFailure("gemini", provider.Name)
+					return
+				}
 
 				// 失败，记录并继续
 				lastError = err

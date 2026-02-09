@@ -114,3 +114,72 @@ func TestClaudeCodeParseTokenUsageFromResponsePrefersStandardTokenKeys(t *testin
 		t.Fatalf("OutputTokens = %d, 期望 40（优先 output_tokens）", reqLog.OutputTokens)
 	}
 }
+
+func TestClaudeCodeParseTokenUsageFromResponseStreamUsesMaxInsteadOfSum(t *testing.T) {
+	reqLog := &ReqeustLog{IsStream: true}
+	data := `{"message":{"usage":{"input_tokens":128,"output_tokens":9,"cache_read_input_tokens":4}}}`
+
+	ClaudeCodeParseTokenUsageFromResponse(data, reqLog)
+	ClaudeCodeParseTokenUsageFromResponse(data, reqLog)
+
+	if reqLog.InputTokens != 128 {
+		t.Fatalf("InputTokens = %d, 期望 128（重复解析不应累加）", reqLog.InputTokens)
+	}
+	if reqLog.OutputTokens != 9 {
+		t.Fatalf("OutputTokens = %d, 期望 9（重复解析不应累加）", reqLog.OutputTokens)
+	}
+	if reqLog.CacheReadTokens != 4 {
+		t.Fatalf("CacheReadTokens = %d, 期望 4（重复解析不应累加）", reqLog.CacheReadTokens)
+	}
+}
+
+func TestCodexParseTokenUsageFromResponseStreamUsesMaxInsteadOfSum(t *testing.T) {
+	reqLog := &ReqeustLog{IsStream: true}
+	data := `{"response":{"usage":{"input_tokens":1110,"output_tokens":266,"input_tokens_details":{"cached_tokens":1097},"output_tokens_details":{"reasoning_tokens":104}}}}`
+
+	CodexParseTokenUsageFromResponse(data, reqLog)
+	CodexParseTokenUsageFromResponse(data, reqLog)
+
+	if reqLog.InputTokens != 1110 {
+		t.Fatalf("InputTokens = %d, 期望 1110（重复解析不应累加）", reqLog.InputTokens)
+	}
+	if reqLog.OutputTokens != 266 {
+		t.Fatalf("OutputTokens = %d, 期望 266（重复解析不应累加）", reqLog.OutputTokens)
+	}
+	if reqLog.CacheReadTokens != 1097 {
+		t.Fatalf("CacheReadTokens = %d, 期望 1097（重复解析不应累加）", reqLog.CacheReadTokens)
+	}
+	if reqLog.ReasoningTokens != 104 {
+		t.Fatalf("ReasoningTokens = %d, 期望 104（重复解析不应累加）", reqLog.ReasoningTokens)
+	}
+}
+
+func TestNormalizeRequestLogInputTokensSubtractsCacheTokens(t *testing.T) {
+	reqLog := &ReqeustLog{
+		Platform:          "codex",
+		InputTokens:       111_040,
+		CacheReadTokens:   109_700,
+		CacheCreateTokens: 0,
+	}
+
+	normalizeRequestLogInputTokens(reqLog)
+
+	if reqLog.InputTokens != 1_340 {
+		t.Fatalf("InputTokens = %d, 期望 1340（111040 - 109700）", reqLog.InputTokens)
+	}
+}
+
+func TestNormalizeRequestLogInputTokensDoesNothingForClaude(t *testing.T) {
+	reqLog := &ReqeustLog{
+		Platform:          "claude",
+		InputTokens:       5_000,
+		CacheReadTokens:   100,
+		CacheCreateTokens: 50,
+	}
+
+	normalizeRequestLogInputTokens(reqLog)
+
+	if reqLog.InputTokens != 5_000 {
+		t.Fatalf("Claude InputTokens = %d, 期望保持 5000（不应对 cache tokens 做减法）", reqLog.InputTokens)
+	}
+}
