@@ -13,6 +13,7 @@ type CycleMode = 'daily' | 'weekly'
 const rootRef = ref<HTMLElement | null>(null)
 let ticker: number | undefined
 let refreshBusy = false
+let storageRefreshTimer: number | undefined
 
 const formatCurrency = (value?: number) => {
   if (value === undefined || value === null || Number.isNaN(value)) {
@@ -379,18 +380,43 @@ const handleFocus = () => {
   void refreshAll()
 }
 
+const scheduleRefreshAll = () => {
+  if (storageRefreshTimer) {
+    window.clearTimeout(storageRefreshTimer)
+  }
+  storageRefreshTimer = window.setTimeout(() => {
+    storageRefreshTimer = undefined
+    if (refreshBusy) {
+      scheduleRefreshAll()
+      return
+    }
+    void refreshAll()
+  }, 80)
+}
+
+const handleStorageChange = (event: StorageEvent) => {
+  const key = event?.key
+  if (!key || !key.startsWith('app-settings-')) return
+  scheduleRefreshAll()
+}
+
 onMounted(() => {
   void refreshAll()
   window.addEventListener('focus', handleFocus)
   window.addEventListener('app-settings-updated', handleFocus)
+  window.addEventListener('storage', handleStorageChange)
 })
 
 onUnmounted(() => {
   if (ticker) {
     window.clearInterval(ticker)
   }
+  if (storageRefreshTimer) {
+    window.clearTimeout(storageRefreshTimer)
+  }
   window.removeEventListener('focus', handleFocus)
   window.removeEventListener('app-settings-updated', handleFocus)
+  window.removeEventListener('storage', handleStorageChange)
 })
 </script>
 
