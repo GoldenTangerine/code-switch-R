@@ -1215,7 +1215,7 @@ onBeforeUnmount(() => {
                 />
                 <span class="budget-unit">USD</span>
               </div>
-              <span class="hint-text">{{ $t('components.general.label.budgetUsedAdjustmentHint') }}</span>
+              <span class="hint-text">{{ $t('components.general.label.budgetUsedAdjustmentHintClaude') }}</span>
             </div>
           </ListItem>
           <ListItem :label="$t('components.general.label.budgetCycle')">
@@ -1354,7 +1354,7 @@ onBeforeUnmount(() => {
                 />
                 <span class="budget-unit">USD</span>
               </div>
-              <span class="hint-text">{{ $t('components.general.label.budgetUsedAdjustmentHint') }}</span>
+              <span class="hint-text">{{ $t('components.general.label.budgetUsedAdjustmentHintCodex') }}</span>
             </div>
           </ListItem>
           <ListItem :label="$t('components.general.label.budgetCycle')">

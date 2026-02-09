@@ -125,6 +125,10 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
   const hostingLabel = computed(() => (hostingEnabled.value ? '托管中' : '未托管'))
 
   const applyUsedAdjustment = (rawUsed: number) => {
+    if (platform === 'claude') {
+      if (!Number.isFinite(usedAdjustment.value)) return 0
+      return Math.max(usedAdjustment.value, 0)
+    }
     const adjusted = rawUsed + usedAdjustment.value
     if (!Number.isFinite(adjusted)) return 0
     return Math.max(adjusted, 0)
@@ -181,7 +185,8 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
     if (method === 'cycle') {
       const start = cycleStart ?? startOfDay(now)
       const elapsedSeconds = Math.max((now.getTime() - start.getTime()) / 1000, 1)
-      return calculateRate(usedRaw.value, elapsedSeconds)
+      const cycleUsed = platform === 'claude' ? used.value : usedRaw.value
+      return calculateRate(cycleUsed, elapsedSeconds)
     }
     if (method === '10m') {
       const windowStart = new Date(now.getTime() - 10 * 60 * 1000)
