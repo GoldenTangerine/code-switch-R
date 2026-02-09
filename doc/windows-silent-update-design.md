@@ -341,7 +341,7 @@ func (us *UpdateService) applyInstalledUpdate(newExePath string) error {
 
 // downloadUpdater 从 GitHub Release 下载 updater.exe
 func (us *UpdateService) downloadUpdater(targetPath string) error {
-    url := fmt.Sprintf("https://github.com/Rogers-F/code-switch-R/releases/download/%s/updater.exe", us.latestVersion)
+    url := fmt.Sprintf("https://github.com/GoldenTangerine/code-switch-R/releases/download/%s/updater.exe", us.latestVersion)
 
     log.Printf("[UpdateService] 下载更新器: %s", url)
 

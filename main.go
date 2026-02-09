@@ -892,7 +892,8 @@ func cleanupOldFiles() {
 	case "linux":
 		cleanupByCount(updateDir, "CodeSwitch*.AppImage", 1)
 	case "darwin":
-		cleanupByCount(updateDir, "codeswitch-macos-*.zip", 1)
+		cleanupByCount(updateDir, "CodeSwitch-*-macos-*.zip", 1)
+		cleanupByCount(updateDir, "codeswitch-macos-*.zip", 1) // 兼容旧命名
 	}
 
 	// 3. 清理旧日志（保留最近 5 个，或总大小 < 5MB）- 所有平台通用

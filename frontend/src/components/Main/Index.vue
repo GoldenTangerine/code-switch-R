@@ -1063,8 +1063,8 @@ const resolvedTheme = computed(() => {
   return themeMode.value
 })
 const themeIcon = computed(() => (resolvedTheme.value === 'dark' ? 'moon' : 'sun'))
-const releasePageUrl = 'https://github.com/Rogers-F/code-switch-R/releases'
-const releaseApiUrl = 'https://api.github.com/repos/Rogers-F/code-switch-R/releases/latest'
+const releasePageUrl = 'https://github.com/GoldenTangerine/code-switch-R/releases'
+const releaseApiUrl = 'https://api.github.com/repos/GoldenTangerine/code-switch-R/releases/latest'
 
 const heatmapContainerRef = ref<HTMLElement | null>(null)
 // 使用自适应热力图 composable
@@ -1176,6 +1176,9 @@ const appVersion = ref('')
 const hasUpdateAvailable = ref(false)
 const updateReady = ref(false)
 const downloadProgress = ref(0)
+const autoCheckEnabled = ref(true)
+const releaseApiPollIntervalMs = 30 * 60 * 1000
+let lastReleaseApiCheckAt = 0
 const importStatus = ref<ConfigImportStatus | null>(null)
 const importBusy = ref(false)
 const showFirstRunPrompt = ref(false)
@@ -1440,12 +1443,22 @@ const loadAppSettings = async () => {
   }
 }
 
-const checkForUpdates = async () => {
+const checkForUpdates = async (force = false) => {
   try {
     const version = await fetchCurrentVersion()
     appVersion.value = version || ''
   } catch (error) {
     console.error('failed to load app version', error)
+  }
+
+  if (!force) {
+    if (!autoCheckEnabled.value) {
+      return
+    }
+    const now = Date.now()
+    if (now - lastReleaseApiCheckAt < releaseApiPollIntervalMs) {
+      return
+    }
   }
 
   try {
@@ -1457,10 +1470,11 @@ const checkForUpdates = async () => {
     if (!resp.ok) {
       return
     }
+    lastReleaseApiCheckAt = Date.now()
     const data = await resp.json()
     const latestTag = data?.tag_name ?? ''
-    if (latestTag && compareVersions(appVersion.value || '0.0.0', latestTag) < 0) {
-      hasUpdateAvailable.value = true
+    if (latestTag) {
+      hasUpdateAvailable.value = compareVersions(appVersion.value || '0.0.0', latestTag) < 0
     }
   } catch (error) {
     console.error('failed to fetch release info', error)
@@ -1471,11 +1485,11 @@ const checkForUpdates = async () => {
 const pollUpdateState = async () => {
   try {
     const state = await getUpdateState()
+    autoCheckEnabled.value = state.auto_check_enabled ?? true
     updateReady.value = state.update_ready
     downloadProgress.value = state.download_progress
-    // 更新 hasUpdateAvailable（如果有新版本且不同于当前版本）
-    if (state.latest_known_version && state.latest_known_version !== appVersion.value) {
-      hasUpdateAvailable.value = true
+    if (state.latest_known_version) {
+      hasUpdateAvailable.value = compareVersions(appVersion.value || '0.0.0', state.latest_known_version) < 0
     }
   } catch (error) {
     console.error('failed to poll update state', error)
@@ -1484,13 +1498,14 @@ const pollUpdateState = async () => {
 
 const handleAppSettingsUpdated = () => {
   void loadAppSettings()
+  void pollUpdateState()
 }
 
 const startUpdateTimer = () => {
   stopUpdateTimer()
   updateTimer = window.setInterval(() => {
-    void checkForUpdates()
     void pollUpdateState()
+    void checkForUpdates()
   }, 30 * 1000) // 每30秒检查一次更新状态
 }
 
@@ -2257,8 +2272,8 @@ onMounted(async () => {
   await Promise.all(providerTabIds.map((tab) => refreshDirectAppliedStatus(tab)))
   await Promise.all(providerTabIds.map((tab) => loadProviderStats(tab)))
   await loadAppSettings()
-  await checkForUpdates()
   await pollUpdateState() // 首次加载更新状态
+  await checkForUpdates(false)
   await refreshImportStatus()
   await checkFirstRun()  // 检查是否首次使用
   startProviderStatsTimer()

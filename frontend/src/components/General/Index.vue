@@ -716,6 +716,36 @@ const loadUpdateState = async () => {
   }
 }
 
+const updateErrorLogPath = '.code-switch/updates/update-errors.log'
+
+const isUacCancelledError = (message: string) => {
+  const normalized = message.toLowerCase()
+  return normalized.includes('err_uac_denied') ||
+    normalized.includes('uac') && (normalized.includes('cancel') || normalized.includes('deny')) ||
+    message.includes('用户取消') ||
+    message.includes('取消 UAC') ||
+    message.includes('拒绝 UAC')
+}
+
+const buildRestartInstallErrorMessage = (error: unknown) => {
+  const message = extractErrorMessage(error)
+
+  if (isUacCancelledError(message)) {
+    return `你刚才把管理员权限确认（UAC）取消了，本次更新没安装。\n想更新的话，再点一次“安装并重启”就行。`
+  }
+
+  if (message.includes('应用更新失败') || message.includes('更新') || message.includes('安装')) {
+    return `安装更新失败：${message}\n详细日志在 ${updateErrorLogPath}`
+  }
+
+  return `重启失败：${message}\n详细日志在 ${updateErrorLogPath}`
+}
+
+const alertRestartInstallError = (error: unknown) => {
+  console.error('restart/install update failed', error)
+  alert(buildRestartInstallErrorMessage(error))
+}
+
 const checkUpdateManually = async () => {
   checking.value = true
   try {
@@ -733,17 +763,22 @@ const checkUpdateManually = async () => {
         try {
           await downloadUpdate()
           await loadUpdateState()
-
-          // 下载完成，提示重启
-          const restart = confirm('新版本已下载完成，是否立即重启应用？')
-          if (restart) {
-            await restartApp()
-          }
         } catch (downloadError) {
           console.error('download failed', downloadError)
           alert('下载失败: ' + extractErrorMessage(downloadError))
+          return
         } finally {
           downloading.value = false
+        }
+
+        // 下载完成，提示重启
+        const restart = confirm('新版本已下载完成，是否立即重启应用？')
+        if (restart) {
+          try {
+            await restartApp()
+          } catch (restartError) {
+            alertRestartInstallError(restartError)
+          }
         }
       }
     }
@@ -760,17 +795,22 @@ const downloadAndInstall = async () => {
   try {
     await downloadUpdate()
     await loadUpdateState()
-
-    // 弹窗确认重启
-    const confirmed = confirm('新版本已下载完成，是否立即重启应用？')
-    if (confirmed) {
-      await restartApp()
-    }
   } catch (error) {
     console.error('download failed', error)
     alert('下载失败: ' + extractErrorMessage(error))
+    return
   } finally {
     downloading.value = false
+  }
+
+  // 弹窗确认重启
+  const confirmed = confirm('新版本已下载完成，是否立即重启应用？')
+  if (confirmed) {
+    try {
+      await restartApp()
+    } catch (restartError) {
+      alertRestartInstallError(restartError)
+    }
   }
 }
 
@@ -781,8 +821,7 @@ const installAndRestart = async () => {
     try {
       await restartApp()
     } catch (error) {
-      console.error('restart failed', error)
-      alert('重启失败，请手动重启应用')
+      alertRestartInstallError(error)
     }
   }
 }

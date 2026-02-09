@@ -16,6 +16,7 @@ export interface UpdateState {
   latest_known_version: string
   download_progress: number
   update_ready: boolean
+  auto_check_enabled?: boolean
 }
 
 export const checkUpdate = async (): Promise<UpdateInfo> => {

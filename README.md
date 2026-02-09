@@ -17,7 +17,7 @@
 
 ### 1. 下载安装
 
-前往 [Releases](https://github.com/Rogers-F/code-switch-R/releases) 下载对应系统的安装包：
+前往 [Releases](https://github.com/GoldenTangerine/code-switch-R/releases) 下载对应系统的安装包：
 
 | 系统 | 推荐下载 |
 |------|---------|
@@ -256,4 +256,4 @@ MIT License
 
 ---
 
-**有问题？** 欢迎在 [Issues](https://github.com/Rogers-F/code-switch-R/issues) 反馈
+**有问题？** 欢迎在 [Issues](https://github.com/GoldenTangerine/code-switch-R/issues) 反馈

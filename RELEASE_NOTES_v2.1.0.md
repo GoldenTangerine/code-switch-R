@@ -295,9 +295,9 @@ Half open flowers
 
 ## 🔗 相关链接
 
-- **GitHub Repository**: [Rogers-F/code-switch-R](https://github.com/Rogers-F/code-switch-R)
-- **完整更新日志**: [v2.0.0...v2.1.0](https://github.com/Rogers-F/code-switch-R/compare/v2.0.0...v2.1.0)
-- **问题反馈**: [GitHub Issues](https://github.com/Rogers-F/code-switch-R/issues)
+- **GitHub Repository**: [GoldenTangerine/code-switch-R](https://github.com/GoldenTangerine/code-switch-R)
+- **完整更新日志**: [v2.0.0...v2.1.0](https://github.com/GoldenTangerine/code-switch-R/compare/v2.0.0...v2.1.0)
+- **问题反馈**: [GitHub Issues](https://github.com/GoldenTangerine/code-switch-R/issues)
 
 ---
 

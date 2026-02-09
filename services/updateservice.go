@@ -24,6 +24,15 @@ import (
 // ErrUACDenied 表示用户取消或拒绝 UAC 提权
 var ErrUACDenied = errors.New("ERR_UAC_DENIED")
 
+const (
+	updateRepoOwner       = "GoldenTangerine"
+	updateRepoName        = "code-switch-R"
+	updateReleaseBaseURL  = "https://github.com/" + updateRepoOwner + "/" + updateRepoName + "/releases"
+	updateStaticLatestURL = updateReleaseBaseURL + "/latest/download/latest.json"
+	updateLatestAPIURL    = "https://api.github.com/repos/" + updateRepoOwner + "/" + updateRepoName + "/releases/latest"
+	updateErrorLogName    = "update-errors.log"
+)
+
 // UpdateInfo 更新信息
 type UpdateInfo struct {
 	Available    bool   `json:"available"`
@@ -171,7 +180,11 @@ func (us *UpdateService) CheckUpdate() (*UpdateInfo, error) {
 	log.Printf("[UpdateService] 静态文件检查失败: %v，尝试 API fallback", err)
 
 	// 2. Fallback 到 GitHub API（保留兼容性）
-	return us.checkUpdateViaAPI()
+	info, apiErr := us.checkUpdateViaAPI()
+	if apiErr != nil {
+		us.appendUpdateErrorLog("check_update", apiErr)
+	}
+	return info, apiErr
 }
 
 // checkUpdateViaStaticFile 通过静态文件检查更新（无限流）
@@ -179,7 +192,7 @@ func (us *UpdateService) checkUpdateViaStaticFile() (*UpdateInfo, error) {
 	client := &http.Client{Timeout: 15 * time.Second}
 
 	// 直接下载静态文件，不调用 API，无限流风险
-	staticURL := "https://github.com/Rogers-F/code-switch-R/releases/latest/download/latest.json"
+	staticURL := updateStaticLatestURL
 
 	log.Printf("[UpdateService] 请求静态文件: %s", staticURL)
 
@@ -263,7 +276,7 @@ func (us *UpdateService) checkUpdateViaAPI() (*UpdateInfo, error) {
 		Timeout: 15 * time.Second,
 	}
 
-	releaseURL := "https://api.github.com/repos/Rogers-F/code-switch-R/releases/latest"
+	releaseURL := updateLatestAPIURL
 
 	req, err := http.NewRequest("GET", releaseURL, nil)
 	if err != nil {
@@ -362,28 +375,22 @@ func (us *UpdateService) findPlatformAsset(assets []struct {
 	BrowserDownloadURL string `json:"browser_download_url"`
 	Size               int64  `json:"size"`
 }) string {
-	var targetName string
-	switch runtime.GOOS {
-	case "windows":
-		// 统一下载核心 exe（无论便携版还是安装版）
-		// 安装版通过 updater.exe 提权替换
-		targetName = "CodeSwitch.exe"
-	case "darwin":
-		if runtime.GOARCH == "arm64" {
-			targetName = "codeswitch-macos-arm64.zip"
-		} else {
-			targetName = "codeswitch-macos-amd64.zip"
-		}
-	case "linux":
-		targetName = "CodeSwitch.AppImage"
-	default:
-		return ""
-	}
-
-	// 精确匹配文件名
+	// 新旧命名兼容：支持 CodeSwitch.exe 与 CodeSwitch-vX.Y.Z.exe 等格式
 	for _, asset := range assets {
-		if asset.Name == targetName {
-			log.Printf("[UpdateService] 找到更新文件: %s (模式: %s)", targetName, func() string {
+		if !us.isPlatformAssetMatch(asset.Name) {
+			continue
+		}
+
+		if strings.HasSuffix(strings.ToLower(asset.Name), ".sha256") {
+			continue
+		}
+
+		if strings.Contains(strings.ToLower(asset.Name), "installer") || strings.Contains(strings.ToLower(asset.Name), "updater") {
+			continue
+		}
+
+		if asset.BrowserDownloadURL != "" {
+			log.Printf("[UpdateService] 找到更新文件: %s (模式: %s)", asset.Name, func() string {
 				if us.isPortable {
 					return "便携版"
 				}
@@ -393,8 +400,26 @@ func (us *UpdateService) findPlatformAsset(assets []struct {
 		}
 	}
 
-	log.Printf("[UpdateService] 未找到适配文件 %s", targetName)
+	log.Printf("[UpdateService] 未找到适配文件（平台=%s, 架构=%s）", runtime.GOOS, runtime.GOARCH)
 	return ""
+}
+
+func (us *UpdateService) isPlatformAssetMatch(assetName string) bool {
+	name := strings.ToLower(strings.TrimSpace(assetName))
+
+	switch runtime.GOOS {
+	case "windows":
+		return strings.HasSuffix(name, ".exe") && strings.Contains(name, "codeswitch")
+	case "darwin":
+		if runtime.GOARCH == "arm64" {
+			return strings.HasSuffix(name, ".zip") && strings.Contains(name, "macos-arm64")
+		}
+		return strings.HasSuffix(name, ".zip") && strings.Contains(name, "macos-amd64")
+	case "linux":
+		return strings.HasSuffix(name, ".appimage") && strings.Contains(name, "codeswitch")
+	default:
+		return false
+	}
 }
 
 // findSHA256ForAsset 查找资产对应的 SHA256 哈希
@@ -455,11 +480,19 @@ func (us *UpdateService) findSHA256ForAsset(assets []struct {
 
 // DownloadUpdate 下载更新文件（支持更新锁、重试、断点续传、SHA256校验）
 func (us *UpdateService) DownloadUpdate(progressCallback func(float64)) error {
+	defer func() {
+		if recoverErr := recover(); recoverErr != nil {
+			us.appendUpdateErrorLog("download_update", fmt.Errorf("panic: %v", recoverErr))
+			panic(recoverErr)
+		}
+	}()
+
 	log.Printf("[UpdateService] 开始下载更新...")
 
 	// 获取更新锁，防止并发下载
 	if err := us.acquireUpdateLock(); err != nil {
 		log.Printf("[UpdateService] ❌ 获取更新锁失败: %v", err)
+		us.appendUpdateErrorLog("download_update", err)
 		return err
 	}
 	defer us.releaseUpdateLock()
@@ -480,7 +513,9 @@ func (us *UpdateService) DownloadUpdate(progressCallback func(float64)) error {
 
 	if url == "" {
 		log.Printf("[UpdateService] ❌ 下载链接为空")
-		return fmt.Errorf("下载链接为空，请先检查更新")
+		err := fmt.Errorf("下载链接为空，请先检查更新")
+		us.appendUpdateErrorLog("download_update", err)
+		return err
 	}
 
 	log.Printf("[UpdateService] 下载 URL: %s", url)
@@ -516,13 +551,16 @@ func (us *UpdateService) DownloadUpdate(progressCallback func(float64)) error {
 	}
 	if lastErr != nil {
 		_ = os.Remove(filePath) // 清理残留文件
-		return fmt.Errorf("下载失败: %w", lastErr)
+		err := fmt.Errorf("下载失败: %w", lastErr)
+		us.appendUpdateErrorLog("download_update", err)
+		return err
 	}
 
 	// SHA256 校验
 	if snapshotSHA != "" {
 		if err := us.verifyDownload(filePath, snapshotSHA); err != nil {
 			_ = os.Remove(filePath)
+			us.appendUpdateErrorLog("download_update", err)
 			return err
 		}
 	}
@@ -534,7 +572,9 @@ func (us *UpdateService) DownloadUpdate(progressCallback func(float64)) error {
 
 	// 下载成功后立即准备更新，使用快照值写入 pending 标记
 	if err := us.prepareUpdateInternal(snapshotVersion, snapshotSHA, filePath); err != nil {
-		return fmt.Errorf("准备更新失败: %w", err)
+		prepareErr := fmt.Errorf("准备更新失败: %w", err)
+		us.appendUpdateErrorLog("download_update", prepareErr)
+		return prepareErr
 	}
 
 	return nil
@@ -546,12 +586,14 @@ func (us *UpdateService) downloadWithResume(url, dest string, progressCallback f
 
 	var start int64
 	var total int64
+	resumeRequested := false
 	if info, err := os.Stat(dest); err == nil {
 		start = info.Size()
+		resumeRequested = start > 0
 	}
 
 	// HEAD 请求检查是否支持 Range
-	if start > 0 {
+	if resumeRequested {
 		head, err := client.Head(url)
 		if head != nil {
 			_ = head.Body.Close()
@@ -563,10 +605,12 @@ func (us *UpdateService) downloadWithResume(url, dest string, progressCallback f
 				log.Printf("[UpdateService] 断点续传: 从 %d 字节继续下载", start)
 			} else {
 				start = 0
+				resumeRequested = false
 				_ = os.Remove(dest)
 			}
 		} else {
 			start = 0
+			resumeRequested = false
 			_ = os.Remove(dest)
 		}
 	}
@@ -575,7 +619,7 @@ func (us *UpdateService) downloadWithResume(url, dest string, progressCallback f
 	if err != nil {
 		return err
 	}
-	if start > 0 {
+	if resumeRequested {
 		req.Header.Set("Range", fmt.Sprintf("bytes=%d-", start))
 	}
 
@@ -589,15 +633,21 @@ func (us *UpdateService) downloadWithResume(url, dest string, progressCallback f
 		return fmt.Errorf("下载失败，HTTP 状态码: %d", resp.StatusCode)
 	}
 
+	canResume := resumeRequested && resp.StatusCode == http.StatusPartialContent
+	if resumeRequested && !canResume {
+		log.Printf("[UpdateService] 服务端未接受 Range 请求（HTTP %d），回退全量下载", resp.StatusCode)
+		start = 0
+	}
+
 	if total == 0 {
 		total = resp.ContentLength
-		if total > 0 && start > 0 {
+		if total > 0 && canResume {
 			total += start
 		}
 	}
 
 	var out *os.File
-	if start > 0 {
+	if canResume {
 		out, err = os.OpenFile(dest, os.O_WRONLY|os.O_APPEND, 0o644)
 	} else {
 		out, err = os.Create(dest)
@@ -607,7 +657,10 @@ func (us *UpdateService) downloadWithResume(url, dest string, progressCallback f
 	}
 	defer out.Close()
 
-	downloaded := start
+	downloaded := int64(0)
+	if canResume {
+		downloaded = start
+	}
 	buf := make([]byte, 32*1024)
 	for {
 		n, readErr := resp.Body.Read(buf)
@@ -636,6 +689,22 @@ func (us *UpdateService) downloadWithResume(url, dest string, progressCallback f
 		}
 	}
 	return nil
+}
+
+// resolveMacAppBundlePath 根据可执行文件路径向上定位 .app 包
+func resolveMacAppBundlePath(exePath string) string {
+	appPath := exePath
+	for i := 0; i < 6; i++ {
+		if strings.HasSuffix(strings.ToLower(appPath), ".app") {
+			return appPath
+		}
+		parent := filepath.Dir(appPath)
+		if parent == appPath {
+			break
+		}
+		appPath = parent
+	}
+	return ""
 }
 
 // prepareUpdateInternal 内部方法：使用明确的 version/sha256/filePath 写入 pending 标记
@@ -723,25 +792,33 @@ func (us *UpdateService) ApplyUpdate() error {
 	data, err := os.ReadFile(pendingFile)
 	if err != nil {
 		us.clearPendingState()
-		return fmt.Errorf("读取标记文件失败: %w", err)
+		readErr := fmt.Errorf("读取标记文件失败: %w", err)
+		us.appendUpdateErrorLog("apply_update", readErr)
+		return readErr
 	}
 
 	var metadata map[string]interface{}
 	if err := json.Unmarshal(data, &metadata); err != nil {
 		us.clearPendingState()
-		return fmt.Errorf("解析元数据失败: %w", err)
+		parseErr := fmt.Errorf("解析元数据失败: %w", err)
+		us.appendUpdateErrorLog("apply_update", parseErr)
+		return parseErr
 	}
 
 	downloadPath, ok := metadata["download_path"].(string)
 	if !ok || downloadPath == "" {
 		us.clearPendingState()
-		return fmt.Errorf("元数据中缺少下载路径")
+		metaErr := fmt.Errorf("元数据中缺少下载路径")
+		us.appendUpdateErrorLog("apply_update", metaErr)
+		return metaErr
 	}
 
 	// 检查下载文件是否存在
 	if _, err := os.Stat(downloadPath); os.IsNotExist(err) {
 		us.clearPendingState()
-		return fmt.Errorf("更新文件不存在: %s", downloadPath)
+		fileErr := fmt.Errorf("更新文件不存在: %s", downloadPath)
+		us.appendUpdateErrorLog("apply_update", fileErr)
+		return fileErr
 	}
 
 	// 从元数据恢复 version 和 SHA256（供 downloadAndVerify 等方法使用）
@@ -766,7 +843,9 @@ func (us *UpdateService) ApplyUpdate() error {
 			log.Printf("[UpdateService] SHA256 校验失败: %v", err)
 			us.clearPendingState()
 			_ = os.Remove(downloadPath) // 删除损坏的文件
-			return fmt.Errorf("更新文件校验失败: %w", err)
+			hashErr := fmt.Errorf("更新文件校验失败: %w", err)
+			us.appendUpdateErrorLog("apply_update", hashErr)
+			return hashErr
 		}
 		log.Println("[UpdateService] SHA256 校验通过")
 	}
@@ -788,10 +867,12 @@ func (us *UpdateService) ApplyUpdate() error {
 		// UAC 取消：不清理 pending，允许用户重试
 		if errors.Is(installErr, ErrUACDenied) {
 			log.Printf("[UpdateService] 用户取消 UAC，保留待更新状态: %v", installErr)
+			us.appendUpdateErrorLog("apply_update", installErr)
 			return installErr
 		}
 		// 其他安装失败：清理状态但保留下载文件（可能需要重试）
 		us.clearPendingState()
+		us.appendUpdateErrorLog("apply_update", installErr)
 		return installErr
 	}
 
@@ -991,18 +1072,8 @@ func (us *UpdateService) applyUpdateDarwin(zipPath string) error {
 	pid := os.Getpid()
 
 	// 定位当前运行的 .app 包路径（支持安装版和便携版）
-	appPath := currentExe
-	for i := 0; i < 6; i++ {
-		if strings.HasSuffix(strings.ToLower(appPath), ".app") {
-			break
-		}
-		parent := filepath.Dir(appPath)
-		if parent == appPath {
-			break
-		}
-		appPath = parent
-	}
-	if !strings.HasSuffix(strings.ToLower(appPath), ".app") {
+	appPath := resolveMacAppBundlePath(currentExe)
+	if appPath == "" {
 		return fmt.Errorf("无法定位当前应用包(.app)路径: %s", currentExe)
 	}
 	targetAppPath := appPath
@@ -1579,41 +1650,112 @@ func (us *UpdateService) cleanupOldBackups(dir, pattern string, keep int) {
 // RestartApp 重启应用
 // 如果有待安装的更新，会先触发更新流程（Windows 安装版会请求 UAC）
 func (us *UpdateService) RestartApp() error {
-	// 有待安装的更新时直接触发安装（Windows 安装版会请求 UAC）
-	if err := us.ApplyUpdate(); err != nil {
-		log.Printf("[UpdateService] 应用更新失败，将执行普通重启: %v", err)
+	pendingFile := filepath.Join(filepath.Dir(us.stateFile), ".pending-update")
+	_, pendingErr := os.Stat(pendingFile)
+	hasPending := pendingErr == nil
+	if pendingErr != nil && !os.IsNotExist(pendingErr) {
+		err := fmt.Errorf("检查待更新状态失败: %w", pendingErr)
+		us.appendUpdateErrorLog("restart_app", err)
+		return err
 	}
 
-	// ApplyUpdate 在成功安装更新时会退出进程；走到这里说明没有待安装任务或更新失败
+	// 有待安装更新时，安装失败应直接返回错误，避免“失败后普通重启”掩盖问题
+	if hasPending {
+		if err := us.ApplyUpdate(); err != nil {
+			wrappedErr := fmt.Errorf("应用更新失败: %w", err)
+			us.appendUpdateErrorLog("restart_app", wrappedErr)
+			return wrappedErr
+		}
+		// ApplyUpdate 成功路径通常会在平台脚本/子进程中退出当前进程
+		return nil
+	}
+
+	// 没有待安装更新时执行普通重启
 	executable, err := os.Executable()
 	if err != nil {
-		return fmt.Errorf("获取可执行文件路径失败: %w", err)
+		exeErr := fmt.Errorf("获取可执行文件路径失败: %w", err)
+		us.appendUpdateErrorLog("restart_app", exeErr)
+		return exeErr
+	}
+	if resolved, resolveErr := filepath.EvalSymlinks(executable); resolveErr == nil {
+		executable = resolved
 	}
 
 	switch runtime.GOOS {
 	case "windows":
 		cmd := hideWindowCmd(executable)
 		if err := cmd.Start(); err != nil {
-			return fmt.Errorf("启动新进程失败: %w", err)
+			startErr := fmt.Errorf("启动新进程失败: %w", err)
+			us.appendUpdateErrorLog("restart_app", startErr)
+			return startErr
 		}
 		os.Exit(0)
 
 	case "darwin":
-		cmd := exec.Command("open", "-n", executable)
+		appBundlePath := resolveMacAppBundlePath(executable)
+		var cmd *exec.Cmd
+		if appBundlePath != "" {
+			cmd = exec.Command("open", "-n", appBundlePath)
+		} else {
+			cmd = exec.Command(executable)
+		}
 		if err := cmd.Start(); err != nil {
-			return fmt.Errorf("启动新进程失败: %w", err)
+			startErr := fmt.Errorf("启动新进程失败: %w", err)
+			us.appendUpdateErrorLog("restart_app", startErr)
+			return startErr
 		}
 		os.Exit(0)
 
 	case "linux":
 		cmd := exec.Command(executable)
 		if err := cmd.Start(); err != nil {
-			return fmt.Errorf("启动新进程失败: %w", err)
+			startErr := fmt.Errorf("启动新进程失败: %w", err)
+			us.appendUpdateErrorLog("restart_app", startErr)
+			return startErr
 		}
 		os.Exit(0)
 	}
 
 	return nil
+}
+
+func (us *UpdateService) appendUpdateErrorLog(scope string, err error) {
+	if err == nil {
+		return
+	}
+
+	if scope == "" {
+		scope = "unknown"
+	}
+
+	if mkdirErr := os.MkdirAll(us.updateDir, 0o755); mkdirErr != nil {
+		log.Printf("[UpdateService] 创建错误日志目录失败: %v", mkdirErr)
+		return
+	}
+
+	logPath := filepath.Join(us.updateDir, updateErrorLogName)
+	level := "ERROR"
+	if errors.Is(err, ErrUACDenied) {
+		level = "WARN"
+	}
+
+	entry := fmt.Sprintf("[%s] [%s] [%s] %v\n",
+		time.Now().Format("2006-01-02 15:04:05"),
+		level,
+		scope,
+		err,
+	)
+
+	file, openErr := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if openErr != nil {
+		log.Printf("[UpdateService] 打开错误日志失败: %v", openErr)
+		return
+	}
+	defer file.Close()
+
+	if _, writeErr := file.WriteString(entry); writeErr != nil {
+		log.Printf("[UpdateService] 写入错误日志失败: %v", writeErr)
+	}
 }
 
 // StartDailyCheck 启动每日8点定时检查
@@ -2015,7 +2157,7 @@ func (us *UpdateService) releaseUpdateLock() {
 
 // downloadAndVerify 下载文件并验证 SHA256
 func (us *UpdateService) downloadAndVerify(assetName string) (string, error) {
-	releaseBaseURL := "https://github.com/Rogers-F/code-switch-R/releases/download"
+	releaseBaseURL := updateReleaseBaseURL + "/download"
 
 	// 检查版本是否已设置
 	us.mu.Lock()
@@ -2123,32 +2265,53 @@ func (us *UpdateService) verifyDownload(filePath, expectedHash string) error {
 // downloadUpdater 从 GitHub Release 下载 updater.exe
 // P1-4 修复：移除无校验降级，强制要求 SHA256 校验
 func (us *UpdateService) downloadUpdater(targetPath string) error {
-	// 下载带 SHA256 校验的 updater.exe
-	updaterPath, err := us.downloadAndVerify("updater.exe")
-	if err != nil {
-		// 不再降级，直接返回错误
-		return fmt.Errorf("下载 updater.exe 失败（需要 SHA256 校验）: %w", err)
-	}
+	us.mu.Lock()
+	version := strings.TrimSpace(us.latestVersion)
+	us.mu.Unlock()
 
-	// 如果下载路径不同，移动文件
-	if updaterPath != targetPath {
-		if err := os.Rename(updaterPath, targetPath); err != nil {
-			// 重命名失败，尝试复制
-			if err := copyUpdateFile(updaterPath, targetPath); err != nil {
-				return fmt.Errorf("移动 updater.exe 失败: %w", err)
-			}
-			os.Remove(updaterPath)
+	candidates := make([]string, 0, 3)
+	if version != "" {
+		candidates = append(candidates, fmt.Sprintf("updater-%s.exe", version))
+		if !strings.HasPrefix(strings.ToLower(version), "v") {
+			candidates = append(candidates, fmt.Sprintf("updater-v%s.exe", version))
 		}
 	}
+	candidates = append(candidates, "updater.exe")
 
-	return nil
+	var lastErr error
+	for _, candidate := range candidates {
+		updaterPath, err := us.downloadAndVerify(candidate)
+		if err != nil {
+			lastErr = err
+			log.Printf("[UpdateService] 下载 %s 失败: %v", candidate, err)
+			continue
+		}
+
+		// 如果下载路径不同，移动文件
+		if updaterPath != targetPath {
+			if err := os.Rename(updaterPath, targetPath); err != nil {
+				// 重命名失败，尝试复制
+				if err := copyUpdateFile(updaterPath, targetPath); err != nil {
+					return fmt.Errorf("移动 updater.exe 失败: %w", err)
+				}
+				os.Remove(updaterPath)
+			}
+		}
+
+		return nil
+	}
+
+	if lastErr == nil {
+		lastErr = fmt.Errorf("未找到可用 updater 资产")
+	}
+	return fmt.Errorf("下载 updater.exe 失败（需要 SHA256 校验）: %w", lastErr)
 }
 
 // calculateTimeout 根据文件大小动态计算超时时间
 func calculateTimeout(fileSize int64) int {
 	base := 30 // 基础 30 秒
 	// 每 100MB 增加 10 秒
-	extra := int(fileSize / (100 * 1024 * 1024)) * 10
+	extra := int(fileSize/(100*1024*1024)) * 10
 	return base + extra
 }
 
@@ -2161,13 +2324,11 @@ func (us *UpdateService) applyInstalledUpdate(newExePath string) error {
 	}
 	currentExe, _ = filepath.EvalSymlinks(currentExe)
 
-	// 1. 获取或下载 updater.exe
+	// 1. 获取并校验 updater.exe（始终校验，避免复用过期/损坏文件）
 	updaterPath := filepath.Join(us.updateDir, "updater.exe")
-	if _, err := os.Stat(updaterPath); os.IsNotExist(err) {
-		log.Printf("[UpdateService] updater.exe 不存在，开始下载...")
-		if err := us.downloadUpdater(updaterPath); err != nil {
-			return fmt.Errorf("下载更新器失败: %w", err)
-		}
+	log.Printf("[UpdateService] 校验并准备更新器: %s", updaterPath)
+	if err := us.downloadUpdater(updaterPath); err != nil {
+		return fmt.Errorf("下载更新器失败: %w", err)
 	}
 
 	// 2. 计算超时时间
