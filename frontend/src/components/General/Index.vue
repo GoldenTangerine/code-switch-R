@@ -9,6 +9,7 @@ import NetworkWslSettings from '../Setting/NetworkWslSettings.vue'
 import ModelPricingModal from '../Setting/ModelPricingModal.vue'
 import InlineModal from '../common/InlineModal.vue'
 import { fetchAppSettings, saveAppSettings, type AppSettings } from '../../services/appSettings'
+import { fetchCostSince, fetchLogStats } from '../../services/logs'
 import { checkUpdate, downloadUpdate, restartApp, getUpdateState, setAutoCheckEnabled, type UpdateInfo, type UpdateState } from '../../services/update'
 import { fetchCurrentVersion } from '../../services/version'
 import { getBlacklistSettings, updateBlacklistSettings, getLevelBlacklistEnabled, setLevelBlacklistEnabled, getBlacklistEnabled, setBlacklistEnabled, type BlacklistSettings } from '../../services/settings'
@@ -17,6 +18,17 @@ import { fetchWebDAVConfig, previewWebDAVContent, saveWebDAVConfig, testWebDAVCo
 import { useI18n } from 'vue-i18n'
 import { extractErrorMessage } from '../../utils/error'
 import { showToast } from '../../utils/toast'
+import {
+  buildBudgetUsageConfig,
+  formatLocalDateTime,
+  getBudgetUsageConfigKey,
+  normalizeBudgetCycleMode,
+  normalizeBudgetRefreshDay,
+  normalizeBudgetRefreshTime,
+  normalizeBudgetUsedDisplay,
+  resolveCycleStart,
+  type BudgetUsageConfig,
+} from '../../utils/budgetUsage'
 
 const { t } = useI18n()
 
@@ -49,6 +61,8 @@ const switchNotifyEnabled = ref(getCachedValue('switchNotify', true)) // 切换�
 const roundRobinEnabled = ref(getCachedValue('roundRobin', false))    // 同 Level 轮询开关
 const budgetTotal = ref(getCachedNumber('budgetTotal', 0))
 const budgetUsedAdjustment = ref(getCachedNumber('budgetUsedAdjustment', 0))
+const budgetUsedDelta = ref(0)
+const budgetUsedRaw = ref(0)
 const budgetForecastMethod = ref(getCachedString('budgetForecastMethod', 'cycle'))
 const budgetForecastDisplay = ref(getCachedString('budgetForecastDisplay', 'datetime'))
 const budgetCycleEnabled = ref(getCachedValue('budgetCycleEnabled', false))
@@ -59,6 +73,8 @@ const budgetShowCountdown = ref(getCachedValue('budgetShowCountdown', false))
 const budgetShowForecast = ref(getCachedValue('budgetShowForecast', false))
 const budgetTotalCodex = ref(getCachedNumber('budgetTotalCodex', 0))
 const budgetUsedAdjustmentCodex = ref(getCachedNumber('budgetUsedAdjustmentCodex', 0))
+const budgetUsedDeltaCodex = ref(0)
+const budgetUsedRawCodex = ref(0)
 const budgetForecastMethodCodex = ref(getCachedString('budgetForecastMethodCodex', 'cycle'))
 const budgetForecastDisplayCodex = ref(getCachedString('budgetForecastDisplayCodex', 'datetime'))
 const budgetCycleEnabledCodex = ref(getCachedValue('budgetCycleEnabledCodex', false))
@@ -71,9 +87,17 @@ const settingsLoading = ref(true)
 const saveBusy = ref(false)
 let saveQueued = false
 let persistTimer: number | undefined
+let budgetUsageTicker: number | undefined
+let budgetUsedInputFocused = false
+let budgetUsedInputFocusedCodex = false
+let budgetUsedEdited = false
+let budgetUsedEditedCodex = false
+let lastBudgetUsageConfigKey = ''
+let lastBudgetUsageConfigKeyCodex = ''
 const defaultPersistDebounceMs = 150
 const minPersistDebounceMs = 0
 const maxPersistDebounceMs = 2000
+const budgetUsageRefreshIntervalMs = 60_000
 const rawPersistDebounceMs = import.meta.env.VITE_SETTINGS_PERSIST_DEBOUNCE_MS
 const envPersistDebounceMs =
   typeof rawPersistDebounceMs === 'string' && rawPersistDebounceMs.trim() !== ''
@@ -82,6 +106,128 @@ const envPersistDebounceMs =
 const persistDebounceMs = Number.isFinite(envPersistDebounceMs)
   ? Math.min(Math.max(Math.round(envPersistDebounceMs), minPersistDebounceMs), maxPersistDebounceMs)
   : defaultPersistDebounceMs
+
+type BudgetPlatform = 'claude' | 'codex'
+type BudgetUsageConfigs = {
+  claude: BudgetUsageConfig
+  codex: BudgetUsageConfig
+}
+type ApplyBudgetUsedDisplayOptions = {
+  skipFocused?: boolean
+  skipEdited?: boolean
+}
+
+const getCurrentBudgetUsageConfigs = () => {
+  return {
+    claude: buildBudgetUsageConfig(
+      budgetCycleEnabled.value,
+      budgetCycleMode.value,
+      budgetRefreshTime.value,
+      budgetRefreshDay.value,
+    ),
+    codex: buildBudgetUsageConfig(
+      budgetCycleEnabledCodex.value,
+      budgetCycleModeCodex.value,
+      budgetRefreshTimeCodex.value,
+      budgetRefreshDayCodex.value,
+    ),
+  }
+}
+
+const syncBudgetUsageConfigKeys = (configs: BudgetUsageConfigs) => {
+  lastBudgetUsageConfigKey = getBudgetUsageConfigKey(configs.claude)
+  lastBudgetUsageConfigKeyCodex = getBudgetUsageConfigKey(configs.codex)
+}
+
+const fetchBudgetRawUsed = async (
+  platform: BudgetPlatform,
+  config: BudgetUsageConfig,
+  fallback: number,
+) => {
+  try {
+    let rawUsed = 0
+    if (config.cycleEnabled) {
+      const cycleStart = resolveCycleStart(config, new Date())
+      rawUsed = Number(await fetchCostSince(formatLocalDateTime(cycleStart), platform))
+    } else {
+      const stats = await fetchLogStats(platform)
+      rawUsed = Number(stats?.cost_total ?? 0)
+    }
+    if (!Number.isFinite(rawUsed)) {
+      return normalizeBudgetUsedDisplay(fallback)
+    }
+    return normalizeBudgetUsedDisplay(rawUsed)
+  } catch (error) {
+    console.error(`failed to fetch ${platform} budget raw usage`, error)
+    return normalizeBudgetUsedDisplay(fallback)
+  }
+}
+
+const fetchBudgetRawSnapshot = async (configs: BudgetUsageConfigs) => {
+  const [claudeRaw, codexRaw] = await Promise.all([
+    fetchBudgetRawUsed('claude', configs.claude, budgetUsedRaw.value),
+    fetchBudgetRawUsed('codex', configs.codex, budgetUsedRawCodex.value),
+  ])
+  return { claudeRaw, codexRaw }
+}
+
+const shouldSkipBudgetUsedDisplay = (
+  platform: BudgetPlatform,
+  options: ApplyBudgetUsedDisplayOptions,
+) => {
+  const { skipFocused = false, skipEdited = false } = options
+  if (platform === 'codex') {
+    return (skipFocused && budgetUsedInputFocusedCodex) || (skipEdited && budgetUsedEditedCodex)
+  }
+  return (skipFocused && budgetUsedInputFocused) || (skipEdited && budgetUsedEdited)
+}
+
+const applyBudgetUsedDisplay = (options: ApplyBudgetUsedDisplayOptions = {}) => {
+  if (!shouldSkipBudgetUsedDisplay('claude', options)) {
+    budgetUsedAdjustment.value = normalizeBudgetUsedDisplay(budgetUsedRaw.value + budgetUsedDelta.value)
+  }
+  if (!shouldSkipBudgetUsedDisplay('codex', options)) {
+    budgetUsedAdjustmentCodex.value = normalizeBudgetUsedDisplay(budgetUsedRawCodex.value + budgetUsedDeltaCodex.value)
+  }
+}
+
+const refreshBudgetUsedDisplay = async (skipFocused = false) => {
+  const snapshot = await fetchBudgetRawSnapshot(getCurrentBudgetUsageConfigs())
+  budgetUsedRaw.value = snapshot.claudeRaw
+  budgetUsedRawCodex.value = snapshot.codexRaw
+  applyBudgetUsedDisplay({ skipFocused, skipEdited: true })
+}
+
+const handleBudgetUsedFocus = (platform: BudgetPlatform, focused: boolean) => {
+  if (platform === 'codex') {
+    budgetUsedInputFocusedCodex = focused
+    return
+  }
+  budgetUsedInputFocused = focused
+}
+
+const handleBudgetUsedChange = (platform: BudgetPlatform) => {
+  if (platform === 'codex') {
+    budgetUsedEditedCodex = true
+  } else {
+    budgetUsedEdited = true
+  }
+  persistAppSettings()
+}
+
+const refreshBudgetUsedWhenActive = () => {
+  if (document.hidden || settingsLoading.value || saveBusy.value) return
+  void refreshBudgetUsedDisplay(true)
+}
+
+const setupBudgetUsageTicker = () => {
+  if (budgetUsageTicker) {
+    window.clearInterval(budgetUsageTicker)
+  }
+  budgetUsageTicker = window.setInterval(() => {
+    refreshBudgetUsedWhenActive()
+  }, budgetUsageRefreshIntervalMs)
+}
 
 const syncAppSettingsCache = () => {
   localStorage.setItem('app-settings-heatmap', String(heatmapEnabled.value))
@@ -603,23 +749,25 @@ const loadAppSettings = async () => {
     heatmapEnabled.value = data?.show_heatmap ?? true
     homeTitleVisible.value = data?.show_home_title ?? true
     budgetTotal.value = Number(data?.budget_total ?? 0)
-    budgetUsedAdjustment.value = Number(data?.budget_used_adjustment ?? 0)
+    const rawBudgetUsedDelta = Number(data?.budget_used_adjustment ?? 0)
+    budgetUsedDelta.value = Number.isFinite(rawBudgetUsedDelta) ? rawBudgetUsedDelta : 0
     budgetForecastMethod.value = normalizeBudgetForecastMethod(data?.budget_forecast_method ?? 'cycle')
     budgetForecastDisplay.value = normalizeBudgetForecastDisplay(data?.budget_forecast_display ?? 'datetime')
     budgetCycleEnabled.value = data?.budget_cycle_enabled ?? false
-    budgetCycleMode.value = data?.budget_cycle_mode === 'weekly' ? 'weekly' : 'daily'
-    budgetRefreshTime.value = data?.budget_refresh_time || '00:00'
-    budgetRefreshDay.value = Number.isFinite(data?.budget_refresh_day) ? data?.budget_refresh_day : 1
+    budgetCycleMode.value = normalizeBudgetCycleMode(data?.budget_cycle_mode)
+    budgetRefreshTime.value = normalizeBudgetRefreshTime(data?.budget_refresh_time)
+    budgetRefreshDay.value = normalizeBudgetRefreshDay(data?.budget_refresh_day)
     budgetShowCountdown.value = data?.budget_show_countdown ?? false
     budgetShowForecast.value = data?.budget_show_forecast ?? false
     budgetTotalCodex.value = Number(data?.budget_total_codex ?? 0)
-    budgetUsedAdjustmentCodex.value = Number(data?.budget_used_adjustment_codex ?? 0)
+    const rawBudgetUsedDeltaCodex = Number(data?.budget_used_adjustment_codex ?? 0)
+    budgetUsedDeltaCodex.value = Number.isFinite(rawBudgetUsedDeltaCodex) ? rawBudgetUsedDeltaCodex : 0
     budgetForecastMethodCodex.value = normalizeBudgetForecastMethod(data?.budget_forecast_method_codex ?? 'cycle')
     budgetForecastDisplayCodex.value = normalizeBudgetForecastDisplay(data?.budget_forecast_display_codex ?? 'datetime')
     budgetCycleEnabledCodex.value = data?.budget_cycle_enabled_codex ?? false
-    budgetCycleModeCodex.value = data?.budget_cycle_mode_codex === 'weekly' ? 'weekly' : 'daily'
-    budgetRefreshTimeCodex.value = data?.budget_refresh_time_codex || '00:00'
-    budgetRefreshDayCodex.value = Number.isFinite(data?.budget_refresh_day_codex) ? data?.budget_refresh_day_codex : 1
+    budgetCycleModeCodex.value = normalizeBudgetCycleMode(data?.budget_cycle_mode_codex)
+    budgetRefreshTimeCodex.value = normalizeBudgetRefreshTime(data?.budget_refresh_time_codex)
+    budgetRefreshDayCodex.value = normalizeBudgetRefreshDay(data?.budget_refresh_day_codex)
     budgetShowCountdownCodex.value = data?.budget_show_countdown_codex ?? false
     budgetShowForecastCodex.value = data?.budget_show_forecast_codex ?? false
     autoStartEnabled.value = data?.auto_start ?? false
@@ -630,15 +778,22 @@ const loadAppSettings = async () => {
     autoConnectivityTestEnabled.value = data?.auto_connectivity_test ?? false
     switchNotifyEnabled.value = data?.enable_switch_notify ?? true
     roundRobinEnabled.value = data?.enable_round_robin ?? false
+    const currentUsageConfigs = getCurrentBudgetUsageConfigs()
+    syncBudgetUsageConfigKeys(currentUsageConfigs)
 
     // 缓存到 localStorage，下次打开时直接显示正确状态
     syncAppSettingsCache()
+    void refreshBudgetUsedDisplay(true).then(() => {
+      syncAppSettingsCache()
+    })
   } catch (error) {
     console.error('failed to load app settings', error)
     heatmapEnabled.value = true
     homeTitleVisible.value = true
     budgetTotal.value = 0
     budgetUsedAdjustment.value = 0
+    budgetUsedDelta.value = 0
+    budgetUsedRaw.value = 0
     budgetForecastMethod.value = 'cycle'
     budgetForecastDisplay.value = 'datetime'
     budgetCycleEnabled.value = false
@@ -649,6 +804,8 @@ const loadAppSettings = async () => {
     budgetShowForecast.value = false
     budgetTotalCodex.value = 0
     budgetUsedAdjustmentCodex.value = 0
+    budgetUsedDeltaCodex.value = 0
+    budgetUsedRawCodex.value = 0
     budgetForecastMethodCodex.value = 'cycle'
     budgetForecastDisplayCodex.value = 'datetime'
     budgetCycleEnabledCodex.value = false
@@ -663,6 +820,7 @@ const loadAppSettings = async () => {
     autoConnectivityTestEnabled.value = false
     switchNotifyEnabled.value = true
     roundRobinEnabled.value = false
+    syncBudgetUsageConfigKeys(getCurrentBudgetUsageConfigs())
   } finally {
     settingsLoading.value = false
   }
@@ -682,61 +840,100 @@ const persistAppSettingsNow = async () => {
   try {
     const normalizedBudgetTotal = Number.isFinite(budgetTotal.value) ? Math.max(0, budgetTotal.value) : 0
     budgetTotal.value = normalizedBudgetTotal
-    const normalizedBudgetUsedAdjustment = Number.isFinite(budgetUsedAdjustment.value)
-      ? budgetUsedAdjustment.value
-      : 0
-    budgetUsedAdjustment.value = normalizedBudgetUsedAdjustment
+    const normalizedBudgetUsedDisplay = normalizeBudgetUsedDisplay(Number(budgetUsedAdjustment.value))
+    budgetUsedAdjustment.value = normalizedBudgetUsedDisplay
     const normalizedBudgetForecastMethod = normalizeBudgetForecastMethod(budgetForecastMethod.value)
     budgetForecastMethod.value = normalizedBudgetForecastMethod
     const normalizedBudgetForecastDisplay = normalizeBudgetForecastDisplay(budgetForecastDisplay.value)
     budgetForecastDisplay.value = normalizedBudgetForecastDisplay
+    const normalizedBudgetRefreshTime = normalizeBudgetRefreshTime(budgetRefreshTime.value)
+    budgetRefreshTime.value = normalizedBudgetRefreshTime
     const normalizedBudgetTotalCodex = Number.isFinite(budgetTotalCodex.value)
       ? Math.max(0, budgetTotalCodex.value)
       : 0
     budgetTotalCodex.value = normalizedBudgetTotalCodex
-    const normalizedBudgetUsedAdjustmentCodex = Number.isFinite(budgetUsedAdjustmentCodex.value)
-      ? budgetUsedAdjustmentCodex.value
-      : 0
-    budgetUsedAdjustmentCodex.value = normalizedBudgetUsedAdjustmentCodex
+    const normalizedBudgetUsedDisplayCodex = normalizeBudgetUsedDisplay(Number(budgetUsedAdjustmentCodex.value))
+    budgetUsedAdjustmentCodex.value = normalizedBudgetUsedDisplayCodex
     const normalizedBudgetForecastMethodCodex = normalizeBudgetForecastMethod(budgetForecastMethodCodex.value)
     budgetForecastMethodCodex.value = normalizedBudgetForecastMethodCodex
     const normalizedBudgetForecastDisplayCodex = normalizeBudgetForecastDisplay(budgetForecastDisplayCodex.value)
     budgetForecastDisplayCodex.value = normalizedBudgetForecastDisplayCodex
-    const normalizedBudgetRefreshDay = Number.isFinite(budgetRefreshDay.value)
-      ? Math.min(Math.max(Math.floor(budgetRefreshDay.value), 0), 6)
-      : 1
-    budgetRefreshDay.value = normalizedBudgetRefreshDay
-    const normalizedBudgetCycleMode = budgetCycleMode.value === 'weekly' ? 'weekly' : 'daily'
+    const normalizedBudgetRefreshTimeCodex = normalizeBudgetRefreshTime(budgetRefreshTimeCodex.value)
+    budgetRefreshTimeCodex.value = normalizedBudgetRefreshTimeCodex
+    const normalizedBudgetRefreshDayValue = normalizeBudgetRefreshDay(budgetRefreshDay.value)
+    budgetRefreshDay.value = normalizedBudgetRefreshDayValue
+    const normalizedBudgetCycleMode = normalizeBudgetCycleMode(budgetCycleMode.value)
     budgetCycleMode.value = normalizedBudgetCycleMode
-    const normalizedBudgetRefreshDayCodex = Number.isFinite(budgetRefreshDayCodex.value)
-      ? Math.min(Math.max(Math.floor(budgetRefreshDayCodex.value), 0), 6)
-      : 1
-    budgetRefreshDayCodex.value = normalizedBudgetRefreshDayCodex
-    const normalizedBudgetCycleModeCodex = budgetCycleModeCodex.value === 'weekly' ? 'weekly' : 'daily'
+    const normalizedBudgetRefreshDayCodexValue = normalizeBudgetRefreshDay(budgetRefreshDayCodex.value)
+    budgetRefreshDayCodex.value = normalizedBudgetRefreshDayCodexValue
+    const normalizedBudgetCycleModeCodex = normalizeBudgetCycleMode(budgetCycleModeCodex.value)
     budgetCycleModeCodex.value = normalizedBudgetCycleModeCodex
     const normalizedUpdateHistoryKeepCount = normalizeUpdateHistoryKeepCount(updateHistoryKeepCount.value)
     updateHistoryKeepCount.value = normalizedUpdateHistoryKeepCount
+    const nextUsageConfigs: BudgetUsageConfigs = {
+      claude: buildBudgetUsageConfig(
+        budgetCycleEnabled.value,
+        normalizedBudgetCycleMode,
+        normalizedBudgetRefreshTime,
+        normalizedBudgetRefreshDayValue,
+      ),
+      codex: buildBudgetUsageConfig(
+        budgetCycleEnabledCodex.value,
+        normalizedBudgetCycleModeCodex,
+        normalizedBudgetRefreshTimeCodex,
+        normalizedBudgetRefreshDayCodexValue,
+      ),
+    }
+    const nextBudgetUsageConfigKey = getBudgetUsageConfigKey(nextUsageConfigs.claude)
+    const nextBudgetUsageConfigKeyCodex = getBudgetUsageConfigKey(nextUsageConfigs.codex)
+    const budgetUsageConfigChanged = nextBudgetUsageConfigKey !== lastBudgetUsageConfigKey
+    const budgetUsageConfigChangedCodex = nextBudgetUsageConfigKeyCodex !== lastBudgetUsageConfigKeyCodex
+    const shouldRefreshBudgetRaw = budgetUsedEdited || budgetUsedEditedCodex || budgetUsageConfigChanged || budgetUsageConfigChangedCodex
+
+    if (shouldRefreshBudgetRaw) {
+      const snapshot = await fetchBudgetRawSnapshot(nextUsageConfigs)
+      budgetUsedRaw.value = snapshot.claudeRaw
+      budgetUsedRawCodex.value = snapshot.codexRaw
+
+      if (budgetUsedEdited) {
+        const nextDelta = normalizedBudgetUsedDisplay - budgetUsedRaw.value
+        budgetUsedDelta.value = Number.isFinite(nextDelta) ? nextDelta : 0
+      }
+      if (budgetUsedEditedCodex) {
+        const nextDeltaCodex = normalizedBudgetUsedDisplayCodex - budgetUsedRawCodex.value
+        budgetUsedDeltaCodex.value = Number.isFinite(nextDeltaCodex) ? nextDeltaCodex : 0
+      }
+      applyBudgetUsedDisplay({ skipFocused: true })
+    }
+
+    if (!Number.isFinite(budgetUsedDelta.value)) {
+      budgetUsedDelta.value = 0
+    }
+    if (!Number.isFinite(budgetUsedDeltaCodex.value)) {
+      budgetUsedDeltaCodex.value = 0
+    }
+
     const payload: AppSettings = {
       show_heatmap: heatmapEnabled.value,
       show_home_title: homeTitleVisible.value,
       budget_total: normalizedBudgetTotal,
-      budget_used_adjustment: normalizedBudgetUsedAdjustment,
+      budget_used_adjustment: budgetUsedDelta.value,
       budget_forecast_method: normalizedBudgetForecastMethod,
       budget_forecast_display: normalizedBudgetForecastDisplay,
       budget_cycle_enabled: budgetCycleEnabled.value,
       budget_cycle_mode: normalizedBudgetCycleMode,
-      budget_refresh_time: budgetRefreshTime.value || '00:00',
-      budget_refresh_day: normalizedBudgetRefreshDay,
+      budget_refresh_time: normalizedBudgetRefreshTime,
+      budget_refresh_day: normalizedBudgetRefreshDayValue,
       budget_show_countdown: budgetShowCountdown.value,
       budget_show_forecast: budgetShowForecast.value,
       budget_total_codex: normalizedBudgetTotalCodex,
-      budget_used_adjustment_codex: normalizedBudgetUsedAdjustmentCodex,
+      budget_used_adjustment_codex: budgetUsedDeltaCodex.value,
       budget_forecast_method_codex: normalizedBudgetForecastMethodCodex,
       budget_forecast_display_codex: normalizedBudgetForecastDisplayCodex,
       budget_cycle_enabled_codex: budgetCycleEnabledCodex.value,
       budget_cycle_mode_codex: normalizedBudgetCycleModeCodex,
-      budget_refresh_time_codex: budgetRefreshTimeCodex.value || '00:00',
-      budget_refresh_day_codex: normalizedBudgetRefreshDayCodex,
+      budget_refresh_time_codex: normalizedBudgetRefreshTimeCodex,
+      budget_refresh_day_codex: normalizedBudgetRefreshDayCodexValue,
       budget_show_countdown_codex: budgetShowCountdownCodex.value,
       budget_show_forecast_codex: budgetShowForecastCodex.value,
       auto_start: autoStartEnabled.value,
@@ -747,6 +944,9 @@ const persistAppSettingsNow = async () => {
       enable_round_robin: roundRobinEnabled.value,
     }
     await saveAppSettings(payload)
+    syncBudgetUsageConfigKeys(nextUsageConfigs)
+    budgetUsedEdited = false
+    budgetUsedEditedCodex = false
 
     try {
       await setAutoCheckEnabled(autoUpdateEnabled.value)
@@ -1163,6 +1363,9 @@ const downloadFromWebDAV = async () => {
 
 onMounted(async () => {
   await loadAppSettings()
+  setupBudgetUsageTicker()
+  window.addEventListener('focus', refreshBudgetUsedWhenActive)
+  window.addEventListener('visibilitychange', refreshBudgetUsedWhenActive)
 
   // 加载当前版本号
   try {
@@ -1188,6 +1391,12 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  if (budgetUsageTicker) {
+    window.clearInterval(budgetUsageTicker)
+    budgetUsageTicker = undefined
+  }
+  window.removeEventListener('focus', refreshBudgetUsedWhenActive)
+  window.removeEventListener('visibilitychange', refreshBudgetUsedWhenActive)
   flushPendingPersist()
   if (unsubscribeWebdavSync) {
     unsubscribeWebdavSync()
@@ -1313,7 +1522,9 @@ onBeforeUnmount(() => {
                   step="0.01"
                   :disabled="settingsLoading || saveBusy"
                   v-model.number="budgetUsedAdjustment"
-                  @change="persistAppSettings"
+                  @focus="handleBudgetUsedFocus('claude', true)"
+                  @blur="handleBudgetUsedFocus('claude', false)"
+                  @change="handleBudgetUsedChange('claude')"
                   class="mac-input budget-input-field"
                 />
                 <span class="budget-unit">USD</span>
@@ -1452,7 +1663,9 @@ onBeforeUnmount(() => {
                   step="0.01"
                   :disabled="settingsLoading || saveBusy"
                   v-model.number="budgetUsedAdjustmentCodex"
-                  @change="persistAppSettings"
+                  @focus="handleBudgetUsedFocus('codex', true)"
+                  @blur="handleBudgetUsedFocus('codex', false)"
+                  @change="handleBudgetUsedChange('codex')"
                   class="mac-input budget-input-field"
                 />
                 <span class="budget-unit">USD</span>

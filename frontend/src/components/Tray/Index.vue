@@ -4,11 +4,21 @@ import { Call } from '@wailsio/runtime'
 import { fetchCostSince, fetchLogStats } from '../../services/logs'
 import { fetchAppSettings, type AppSettings } from '../../services/appSettings'
 import { fetchProxyStatus } from '../../services/claudeSettings'
+import {
+  buildBudgetUsageConfig,
+  formatLocalDateTime,
+  normalizeBudgetCycleMode,
+  normalizeBudgetRefreshDay,
+  normalizeBudgetRefreshTime,
+  pad2,
+  resolveCycleStart,
+  startOfDay,
+  type BudgetCycleMode,
+} from '../../utils/budgetUsage'
 
 type Platform = 'claude' | 'codex'
 type ForecastMethod = 'cycle' | '10m' | '1h' | 'yesterday' | 'last24h'
 type ForecastDisplay = 'datetime' | 'remaining'
-type CycleMode = 'daily' | 'weekly'
 
 const rootRef = ref<HTMLElement | null>(null)
 let ticker: number | undefined
@@ -29,35 +39,8 @@ const formatCurrency = (value?: number) => {
   return `$${value.toFixed(4)}`
 }
 
-const pad2 = (value: number) => String(value).padStart(2, '0')
-
-const formatLocalDateTime = (date: Date) => {
-  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())} ${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}`
-}
-
 const formatLocalDateTimeLabel = (date: Date) => {
   return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())} ${pad2(date.getHours())}:${pad2(date.getMinutes())}`
-}
-
-const startOfDay = (date: Date) => {
-  const base = new Date(date)
-  base.setHours(0, 0, 0, 0)
-  return base
-}
-
-const parseRefreshTime = (value: string) => {
-  const [rawHour, rawMinute] = value.split(':')
-  const hour = Number(rawHour)
-  const minute = Number(rawMinute)
-  return {
-    hour: Number.isFinite(hour) ? Math.min(Math.max(hour, 0), 23) : 0,
-    minute: Number.isFinite(minute) ? Math.min(Math.max(minute, 0), 59) : 0,
-  }
-}
-
-const normalizeRefreshDay = (value: number) => {
-  if (!Number.isFinite(value)) return 1
-  return Math.min(Math.max(Math.floor(value), 0), 6)
 }
 
 const formatCountdown = (remainingMs: number) => {
@@ -102,7 +85,7 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
   const usedAdjustment = ref(0)
   const loading = ref(false)
   const cycleEnabled = ref(false)
-  const cycleMode = ref<CycleMode>('daily')
+  const cycleMode = ref<BudgetCycleMode>('daily')
   const refreshTime = ref('00:00')
   const refreshDay = ref(1)
   const showCountdown = ref(false)
@@ -151,34 +134,19 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
       nextReset = null
       return
     }
-    const { hour, minute } = parseRefreshTime(refreshTime.value)
-    if (cycleMode.value === 'weekly') {
-      const desiredDay = normalizeRefreshDay(refreshDay.value)
-      const target = new Date(now)
-      const currentDay = target.getDay()
-      const diff = desiredDay - currentDay
-      target.setDate(target.getDate() + diff)
-      target.setHours(hour, minute, 0, 0)
-      if (now < target) {
-        const start = new Date(target)
-        start.setDate(start.getDate() - 7)
-        cycleStart = start
-        nextReset = target
-        return
-      }
-      cycleStart = target
-      const next = new Date(target)
-      next.setDate(next.getDate() + 7)
-      nextReset = next
-      return
-    }
-    const start = new Date(now)
-    start.setHours(hour, minute, 0, 0)
-    if (now < start) {
-      start.setDate(start.getDate() - 1)
-    }
+    const config = buildBudgetUsageConfig(
+      cycleEnabled.value,
+      cycleMode.value,
+      refreshTime.value,
+      refreshDay.value,
+    )
+    const start = resolveCycleStart(config, now)
     const next = new Date(start)
-    next.setDate(next.getDate() + 1)
+    if (config.cycleMode === 'weekly') {
+      next.setDate(next.getDate() + 7)
+    } else {
+      next.setDate(next.getDate() + 1)
+    }
     cycleStart = start
     nextReset = next
   }
@@ -265,9 +233,9 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
     if (platform === 'codex') {
       total.value = normalizeBudgetTotal(settings?.budget_total_codex)
       cycleEnabled.value = settings?.budget_cycle_enabled_codex ?? false
-      cycleMode.value = settings?.budget_cycle_mode_codex === 'weekly' ? 'weekly' : 'daily'
-      refreshTime.value = settings?.budget_refresh_time_codex || '00:00'
-      refreshDay.value = normalizeRefreshDay(Number(settings?.budget_refresh_day_codex ?? 1))
+      cycleMode.value = normalizeBudgetCycleMode(settings?.budget_cycle_mode_codex)
+      refreshTime.value = normalizeBudgetRefreshTime(settings?.budget_refresh_time_codex)
+      refreshDay.value = normalizeBudgetRefreshDay(settings?.budget_refresh_day_codex)
       showCountdown.value = settings?.budget_show_countdown_codex ?? false
       showForecast.value = settings?.budget_show_forecast_codex ?? false
       forecastMethod.value = normalizeForecastMethod(settings?.budget_forecast_method_codex ?? 'cycle')
@@ -278,9 +246,9 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
     }
     total.value = normalizeBudgetTotal(settings?.budget_total)
     cycleEnabled.value = settings?.budget_cycle_enabled ?? false
-    cycleMode.value = settings?.budget_cycle_mode === 'weekly' ? 'weekly' : 'daily'
-    refreshTime.value = settings?.budget_refresh_time || '00:00'
-    refreshDay.value = normalizeRefreshDay(Number(settings?.budget_refresh_day ?? 1))
+    cycleMode.value = normalizeBudgetCycleMode(settings?.budget_cycle_mode)
+    refreshTime.value = normalizeBudgetRefreshTime(settings?.budget_refresh_time)
+    refreshDay.value = normalizeBudgetRefreshDay(settings?.budget_refresh_day)
     showCountdown.value = settings?.budget_show_countdown ?? false
     showForecast.value = settings?.budget_show_forecast ?? false
     forecastMethod.value = normalizeForecastMethod(settings?.budget_forecast_method ?? 'cycle')

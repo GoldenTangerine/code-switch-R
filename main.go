@@ -499,18 +499,36 @@ const (
 	trayProgressBarWidth = 28
 )
 
-func getTrayUsage(_ *services.LogService, appSettings *services.AppSettingsService) (float64, float64) {
+func getTrayUsage(logService *services.LogService, appSettings *services.AppSettingsService) (float64, float64) {
 	used := 0.0
 	total := 0.0
 	if appSettings != nil {
 		settings, err := appSettings.GetAppSettings()
 		if err == nil {
 			total = settings.BudgetTotal
-			used = settings.BudgetUsedAdjustment
+			config := services.BuildBudgetUsageConfig(
+				settings.BudgetCycleEnabled,
+				settings.BudgetCycleMode,
+				settings.BudgetRefreshTime,
+				settings.BudgetRefreshDay,
+			)
+			used = services.ResolveBudgetUsed(
+				logService,
+				"claude",
+				config,
+				settings.BudgetUsedAdjustment,
+				time.Now(),
+			)
 		}
+	}
+	if math.IsNaN(used) || math.IsInf(used, 0) {
+		used = 0
 	}
 	if used < 0 {
 		used = 0
+	}
+	if math.IsNaN(total) || math.IsInf(total, 0) {
+		total = 0
 	}
 	if total < 0 {
 		total = 0
