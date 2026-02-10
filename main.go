@@ -91,7 +91,7 @@ func main() {
 	cleanupStalePendingUpdate()
 
 	// 【残留清理】全平台：清理更新过程中的临时文件（Windows/Linux/macOS）
-	cleanupOldFiles()
+	cleanupOldFiles(services.LoadUpdateHistoryKeepCount())
 
 	// 【修复】第一步：初始化数据库（必须最先执行）
 	// 解决问题：InitGlobalDBQueue 依赖 xdb.DB("default")，但 xdb.Inits() 在 NewProviderRelayService 中
@@ -860,7 +860,7 @@ func versionGreaterOrEqual(current, target string) bool {
 
 // cleanupOldFiles 清理更新过程中的残留文件
 // 在主程序启动时调用 - 支持所有平台
-func cleanupOldFiles() {
+func cleanupOldFiles(packageKeepCount int) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return
@@ -876,22 +876,55 @@ func cleanupOldFiles() {
 	// 1. 清理超过 7 天的 .old 备份文件（所有平台通用）
 	cleanupByAge(updateDir, ".old", 7*24*time.Hour)
 
-	// 2. 按平台清理旧版本下载文件
-	switch runtime.GOOS {
-	case "windows":
-		cleanupByCount(updateDir, "CodeSwitch*.exe", 1)
+	if packageKeepCount <= 0 {
+		packageKeepCount = 1
+	}
+
+	// 2. 全局清理旧版本更新包（最多保留 N 个）
+	pendingDownloadPath := loadPendingUpdateDownloadPath()
+	if err := services.CleanupUpdatePackageHistory(updateDir, packageKeepCount, pendingDownloadPath); err != nil {
+		log.Printf("[Cleanup] 清理历史更新包失败: %v", err)
+	}
+
+	// 额外清理 updater 历史文件（Windows）
+	if runtime.GOOS == "windows" {
 		cleanupByCount(updateDir, "updater*.exe", 1)
-	case "linux":
-		cleanupByCount(updateDir, "CodeSwitch*.AppImage", 1)
-	case "darwin":
-		cleanupByCount(updateDir, "CodeSwitch-*-macos-*.zip", 1)
-		cleanupByCount(updateDir, "codeswitch-macos-*.zip", 1) // 兼容旧命名
 	}
 
 	// 3. 清理旧日志（保留最近 5 个，或总大小 < 5MB）- 所有平台通用
 	cleanupLogs(updateDir, 5, 5*1024*1024)
 
 	log.Println("[Cleanup] 清理完成")
+}
+
+func loadPendingUpdateDownloadPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+
+	pendingFile := filepath.Join(home, ".code-switch", ".pending-update")
+	data, err := os.ReadFile(pendingFile)
+	if err != nil || len(data) == 0 {
+		return ""
+	}
+
+	metadata := struct {
+		DownloadPath string `json:"download_path"`
+	}{}
+	if err := json.Unmarshal(data, &metadata); err != nil {
+		log.Printf("[Cleanup] pending 文件解析失败（跳过保护）: %v", err)
+		return ""
+	}
+
+	downloadPath := strings.TrimSpace(metadata.DownloadPath)
+	if downloadPath == "" {
+		return ""
+	}
+	if !filepath.IsAbs(downloadPath) {
+		downloadPath = filepath.Join(home, ".code-switch", "updates", downloadPath)
+	}
+	return filepath.Clean(downloadPath)
 }
 
 // cleanupByAge 按时间清理文件

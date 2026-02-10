@@ -426,21 +426,7 @@ func (us *UpdateService) findPlatformAsset(assets []struct {
 }
 
 func (us *UpdateService) isPlatformAssetMatch(assetName string) bool {
-	name := strings.ToLower(strings.TrimSpace(assetName))
-
-	switch runtime.GOOS {
-	case "windows":
-		return strings.HasSuffix(name, ".exe") && strings.Contains(name, "codeswitch")
-	case "darwin":
-		if runtime.GOARCH == "arm64" {
-			return strings.HasSuffix(name, ".zip") && strings.Contains(name, "macos-arm64")
-		}
-		return strings.HasSuffix(name, ".zip") && strings.Contains(name, "macos-amd64")
-	case "linux":
-		return strings.HasSuffix(name, ".appimage") && strings.Contains(name, "codeswitch")
-	default:
-		return false
-	}
+	return isPlatformUpdateAssetName(assetName)
 }
 
 // findSHA256ForAsset 查找资产对应的 SHA256 哈希
@@ -641,7 +627,11 @@ func (us *UpdateService) DownloadUpdate(progressCallback func(float64)) error {
 			us.updateFilePath = filePath
 			us.downloadProgress = 100
 			us.mu.Unlock()
-			return us.prepareUpdateInternal(snapshotVersion, snapshotSHA, filePath)
+			if err := us.prepareUpdateInternal(snapshotVersion, snapshotSHA, filePath); err != nil {
+				return err
+			}
+			us.cleanupDownloadedPackageHistory(filePath)
+			return nil
 		}
 	}
 
@@ -687,8 +677,133 @@ func (us *UpdateService) DownloadUpdate(progressCallback func(float64)) error {
 		us.appendUpdateErrorLog("download_update", prepareErr)
 		return prepareErr
 	}
+	us.cleanupDownloadedPackageHistory(filePath)
 
 	return nil
+}
+
+type updatePackageEntry struct {
+	path      string
+	modTime   time.Time
+	protected bool
+}
+
+func (us *UpdateService) cleanupDownloadedPackageHistory(protectedPath string) {
+	keepCount := LoadUpdateHistoryKeepCount()
+	if err := CleanupUpdatePackageHistory(us.updateDir, keepCount, protectedPath); err != nil {
+		log.Printf("[UpdateService] ⚠️ 清理历史更新包失败: %v", err)
+	}
+}
+
+// CleanupUpdatePackageHistory 清理历史更新包（全局最多保留 keepCount 个，支持保护文件）
+func CleanupUpdatePackageHistory(updateDir string, keepCount int, protectedPaths ...string) error {
+	keepCount = normalizeUpdateHistoryKeepCount(keepCount)
+
+	entries, err := os.ReadDir(updateDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("读取更新目录失败: %w", err)
+	}
+
+	protected := make(map[string]struct{}, len(protectedPaths))
+	for _, path := range protectedPaths {
+		trimmed := strings.TrimSpace(path)
+		if trimmed == "" {
+			continue
+		}
+		protected[filepath.Clean(trimmed)] = struct{}{}
+	}
+
+	packages := make([]updatePackageEntry, 0, len(entries))
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+
+		name := strings.TrimSpace(entry.Name())
+		if !isUpdateHistoryPackageFile(name) {
+			continue
+		}
+
+		info, infoErr := entry.Info()
+		if infoErr != nil {
+			log.Printf("[UpdateService] ⚠️ 读取文件信息失败，跳过: %s (%v)", name, infoErr)
+			continue
+		}
+
+		path := filepath.Join(updateDir, name)
+		cleanedPath := filepath.Clean(path)
+		_, isProtected := protected[cleanedPath]
+		packages = append(packages, updatePackageEntry{
+			path:      cleanedPath,
+			modTime:   info.ModTime(),
+			protected: isProtected,
+		})
+	}
+
+	if len(packages) <= keepCount {
+		return nil
+	}
+
+	sort.Slice(packages, func(i, j int) bool {
+		if packages[i].protected != packages[j].protected {
+			return packages[i].protected
+		}
+		if !packages[i].modTime.Equal(packages[j].modTime) {
+			return packages[i].modTime.After(packages[j].modTime)
+		}
+		return packages[i].path < packages[j].path
+	})
+
+	for index, pkg := range packages {
+		if index < keepCount {
+			continue
+		}
+		if pkg.protected {
+			continue
+		}
+		if removeErr := os.Remove(pkg.path); removeErr != nil && !os.IsNotExist(removeErr) {
+			log.Printf("[UpdateService] ⚠️ 删除历史更新包失败: %s (%v)", pkg.path, removeErr)
+			continue
+		}
+		log.Printf("[UpdateService] 清理历史更新包: %s", pkg.path)
+	}
+
+	return nil
+}
+
+func isUpdateHistoryPackageFile(fileName string) bool {
+	name := strings.ToLower(strings.TrimSpace(fileName))
+	if name == "" {
+		return false
+	}
+	if strings.HasSuffix(name, ".sha256") {
+		return false
+	}
+	if strings.Contains(name, "installer") || strings.Contains(name, "updater") {
+		return false
+	}
+	return isPlatformUpdateAssetName(name)
+}
+
+func isPlatformUpdateAssetName(assetName string) bool {
+	name := strings.ToLower(strings.TrimSpace(assetName))
+	switch runtime.GOOS {
+	case "windows":
+		return strings.HasSuffix(name, ".exe") && strings.Contains(name, "codeswitch")
+	case "darwin":
+		if runtime.GOARCH == "arm64" {
+			return strings.HasSuffix(name, ".zip") && strings.Contains(name, "macos-arm64")
+		}
+		return strings.HasSuffix(name, ".zip") && strings.Contains(name, "macos-amd64")
+	case "linux":
+		return strings.HasSuffix(name, ".appimage") && strings.Contains(name, "codeswitch")
+	default:
+		return false
+	}
 }
 
 // downloadWithResume 支持断点续传的下载

@@ -36,10 +36,14 @@ const getCachedString = (key: string, defaultValue: string): string => {
   const cached = localStorage.getItem(`app-settings-${key}`)
   return cached !== null ? cached : defaultValue
 }
+const defaultUpdateHistoryKeepCount = 3
+const minUpdateHistoryKeepCount = 1
+const maxUpdateHistoryKeepCount = 20
 const heatmapEnabled = ref(getCachedValue('heatmap', true))
 const homeTitleVisible = ref(getCachedValue('homeTitle', true))
 const autoStartEnabled = ref(getCachedValue('autoStart', false))
 const autoUpdateEnabled = ref(getCachedValue('autoUpdate', true))
+const updateHistoryKeepCount = ref(getCachedNumber('updateHistoryKeepCount', defaultUpdateHistoryKeepCount))
 const autoConnectivityTestEnabled = ref(getCachedValue('autoConnectivityTest', false))
 const switchNotifyEnabled = ref(getCachedValue('switchNotify', true)) // 切换通知开关
 const roundRobinEnabled = ref(getCachedValue('roundRobin', false))    // 同 Level 轮询开关
@@ -104,6 +108,7 @@ const syncAppSettingsCache = () => {
   localStorage.setItem('app-settings-budgetShowForecastCodex', String(budgetShowForecastCodex.value))
   localStorage.setItem('app-settings-autoStart', String(autoStartEnabled.value))
   localStorage.setItem('app-settings-autoUpdate', String(autoUpdateEnabled.value))
+  localStorage.setItem('app-settings-updateHistoryKeepCount', String(updateHistoryKeepCount.value))
   localStorage.setItem('app-settings-autoConnectivityTest', String(autoConnectivityTestEnabled.value))
   localStorage.setItem('app-settings-switchNotify', String(switchNotifyEnabled.value))
   localStorage.setItem('app-settings-roundRobin', String(roundRobinEnabled.value))
@@ -577,6 +582,20 @@ const normalizeBudgetForecastDisplay = (value: string) => {
   return 'datetime'
 }
 
+const normalizeUpdateHistoryKeepCount = (value: number) => {
+  if (!Number.isFinite(value)) {
+    return defaultUpdateHistoryKeepCount
+  }
+  const normalized = Math.floor(value)
+  if (normalized < minUpdateHistoryKeepCount) {
+    return minUpdateHistoryKeepCount
+  }
+  if (normalized > maxUpdateHistoryKeepCount) {
+    return maxUpdateHistoryKeepCount
+  }
+  return normalized
+}
+
 const loadAppSettings = async () => {
   settingsLoading.value = true
   try {
@@ -605,6 +624,9 @@ const loadAppSettings = async () => {
     budgetShowForecastCodex.value = data?.budget_show_forecast_codex ?? false
     autoStartEnabled.value = data?.auto_start ?? false
     autoUpdateEnabled.value = data?.auto_update ?? true
+    updateHistoryKeepCount.value = normalizeUpdateHistoryKeepCount(
+      Number(data?.update_history_keep_count ?? defaultUpdateHistoryKeepCount)
+    )
     autoConnectivityTestEnabled.value = data?.auto_connectivity_test ?? false
     switchNotifyEnabled.value = data?.enable_switch_notify ?? true
     roundRobinEnabled.value = data?.enable_round_robin ?? false
@@ -637,6 +659,7 @@ const loadAppSettings = async () => {
     budgetShowForecastCodex.value = false
     autoStartEnabled.value = false
     autoUpdateEnabled.value = true
+    updateHistoryKeepCount.value = defaultUpdateHistoryKeepCount
     autoConnectivityTestEnabled.value = false
     switchNotifyEnabled.value = true
     roundRobinEnabled.value = false
@@ -691,6 +714,8 @@ const persistAppSettingsNow = async () => {
     budgetRefreshDayCodex.value = normalizedBudgetRefreshDayCodex
     const normalizedBudgetCycleModeCodex = budgetCycleModeCodex.value === 'weekly' ? 'weekly' : 'daily'
     budgetCycleModeCodex.value = normalizedBudgetCycleModeCodex
+    const normalizedUpdateHistoryKeepCount = normalizeUpdateHistoryKeepCount(updateHistoryKeepCount.value)
+    updateHistoryKeepCount.value = normalizedUpdateHistoryKeepCount
     const payload: AppSettings = {
       show_heatmap: heatmapEnabled.value,
       show_home_title: homeTitleVisible.value,
@@ -716,6 +741,7 @@ const persistAppSettingsNow = async () => {
       budget_show_forecast_codex: budgetShowForecastCodex.value,
       auto_start: autoStartEnabled.value,
       auto_update: autoUpdateEnabled.value,
+      update_history_keep_count: normalizedUpdateHistoryKeepCount,
       auto_connectivity_test: autoConnectivityTestEnabled.value,
       enable_switch_notify: switchNotifyEnabled.value,
       enable_round_robin: roundRobinEnabled.value,
@@ -1806,6 +1832,25 @@ onBeforeUnmount(() => {
               />
               <span></span>
             </label>
+          </ListItem>
+
+          <ListItem :label="$t('components.general.label.updateHistoryKeepCount')">
+            <div class="toggle-with-hint">
+              <div class="budget-input">
+                <input
+                  type="number"
+                  inputmode="numeric"
+                  min="1"
+                  max="20"
+                  step="1"
+                  :disabled="settingsLoading || saveBusy"
+                  v-model.number="updateHistoryKeepCount"
+                  @change="persistAppSettings"
+                  class="mac-input budget-input-field"
+                />
+              </div>
+              <span class="hint-text">{{ $t('components.general.label.updateHistoryKeepCountHint') }}</span>
+            </div>
           </ListItem>
 
           <ListItem :label="$t('components.general.label.lastCheck')">

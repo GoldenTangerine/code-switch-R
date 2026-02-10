@@ -14,6 +14,7 @@ export class AppSettings {
     "show_home_title": boolean;
     "auto_start": boolean;
     "auto_update": boolean;
+    "update_history_keep_count": number;
     "auto_connectivity_test": boolean;
 
     /**
@@ -34,6 +35,9 @@ export class AppSettings {
         }
         if (!("auto_update" in $$source)) {
             this["auto_update"] = false;
+        }
+        if (!("update_history_keep_count" in $$source)) {
+            this["update_history_keep_count"] = 3;
         }
         if (!("auto_connectivity_test" in $$source)) {
             this["auto_connectivity_test"] = false;

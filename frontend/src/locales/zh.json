@@ -671,6 +671,8 @@
         "roundRobin": "同 Level 轮询",
         "roundRobinHint": "启用后同 Level 的供应商轮流处理请求，关闭则始终从第一个开始",
         "autoUpdate": "自动更新",
+        "updateHistoryKeepCount": "历史更新包保留数",
+        "updateHistoryKeepCountHint": "仅保留最近的历史更新包，范围 1 - 20",
         "lastCheck": "上次检查",
         "currentVersion": "当前版本",
         "latestVersion": "最新版本",
