@@ -61,6 +61,13 @@ const badgeText = computed(() => {
   return ''
 })
 
+const badgeClass = computed(() => {
+  if (!props.row) return 'tag-neutral'
+  if (props.row.is_custom) return 'tag-custom'
+  if (props.row.is_override) return 'tag-override'
+  return 'tag-neutral'
+})
+
 const canRemove = computed(() => props.mode === 'edit')
 
 const resetForm = () => {
@@ -215,12 +222,12 @@ const removeOverride = async () => {
     <div class="model-pricing-editor-modal">
       <div class="editor-title">
         <span>{{ mode === 'new' ? $t('components.general.modelPricing.editor.create') : $t('components.general.modelPricing.editor.edit') }}</span>
-        <span v-if="badgeText" class="editor-badge">{{ badgeText }}</span>
+        <span v-if="badgeText" class="tag" :class="badgeClass">{{ badgeText }}</span>
       </div>
 
-      <div class="editor-hint">
+      <p class="pricing-hint">
         {{ $t('components.general.modelPricing.unitHint') }}
-      </div>
+      </p>
 
       <div class="editor-form">
         <label class="editor-label">{{ $t('components.general.modelPricing.fields.model') }}</label>
@@ -290,15 +297,43 @@ const removeOverride = async () => {
   color: var(--mac-text);
 }
 
-.editor-badge {
-  font-size: 12px;
-  font-weight: 600;
+.pricing-hint {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px dashed rgba(148, 163, 184, 0.35);
   color: var(--mac-text-secondary);
+  background: rgba(148, 163, 184, 0.08);
+  font-size: 0.85rem;
+  line-height: 1.5;
 }
 
-.editor-hint {
-  font-size: 12px;
+.tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.tag-custom {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+  border-color: rgba(16, 185, 129, 0.3);
+}
+
+.tag-override {
+  background: rgba(245, 158, 11, 0.12);
+  color: #f59e0b;
+  border-color: rgba(245, 158, 11, 0.25);
+}
+
+.tag-neutral {
   color: var(--mac-text-secondary);
+  background: rgba(148, 163, 184, 0.12);
+  border-color: rgba(148, 163, 184, 0.18);
 }
 
 .editor-form {
@@ -324,4 +359,3 @@ const removeOverride = async () => {
   padding-top: 4px;
 }
 </style>
-

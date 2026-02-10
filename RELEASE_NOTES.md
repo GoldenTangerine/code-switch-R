@@ -1,9 +1,16 @@
+# Code Switch v2.6.52
+
+## 体验优化
+- **定价弹窗统一风格**：设置页「模型价格」弹窗对齐首页「模型列表」弹窗的展示风格（搜索 + pill 筛选 + 卡片列表），更一致也更好读。
+
+---
+
 # Code Switch v2.6.51
 
 ## 修复
 - **CI 打包 TypeScript 报错**：主页 `GeminiProvider` 类型改为从 Wails bindings 推导，避免 `envConfig` 类型漂移导致 `vue-tsc` 失败。
 
----
+--- 
 
 # Code Switch v2.6.50
 
