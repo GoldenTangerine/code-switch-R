@@ -107,6 +107,14 @@ type openAIModelList struct {
 
 const doneHubTokenToCallRatio = 0.002
 
+var providerPricingModelNameReplacer = strings.NewReplacer("-", "", "_", "", ".", "", ":", "", "/", "", " ", "")
+
+type providerModelPricingCacheEntry struct {
+	Response           *ProviderModelPricingResponse
+	ModelsByNormalized map[string]ProviderModelPricingItem
+	UpdatedAt          time.Time
+}
+
 type upstreamHTTPError struct {
 	Endpoint   string
 	StatusCode int
@@ -162,6 +170,140 @@ func buildAuthCandidates(configured string) []string {
 	return candidates
 }
 
+func providerPricingCacheKey(apiURL, apiKey, authType string) string {
+	url := strings.TrimSpace(strings.ToLower(apiURL))
+	key := strings.TrimSpace(apiKey)
+	auth := strings.TrimSpace(strings.ToLower(authType))
+	if url == "" || key == "" {
+		return ""
+	}
+	return url + "|" + key + "|" + auth
+}
+
+func normalizeProviderPricingModelName(name string) string {
+	return providerPricingModelNameReplacer.Replace(strings.ToLower(strings.TrimSpace(name)))
+}
+
+func buildProviderModelPricingIndex(models []ProviderModelPricingItem) map[string]ProviderModelPricingItem {
+	index := make(map[string]ProviderModelPricingItem, len(models))
+	for _, item := range models {
+		modelName := strings.TrimSpace(item.Model)
+		if modelName == "" {
+			continue
+		}
+		normalized := normalizeProviderPricingModelName(modelName)
+		if normalized == "" {
+			continue
+		}
+		if _, exists := index[normalized]; exists {
+			continue
+		}
+		index[normalized] = item
+	}
+	return index
+}
+
+func providerPricingMin(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func providerPricingMax(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func (ps *ProviderService) cacheProviderModelPricing(apiURL, apiKey, authType string, response *ProviderModelPricingResponse) {
+	if ps == nil || response == nil {
+		return
+	}
+	key := providerPricingCacheKey(apiURL, apiKey, authType)
+	if key == "" {
+		return
+	}
+
+	ps.pricingCacheMu.Lock()
+	defer ps.pricingCacheMu.Unlock()
+	ps.pricingCache[key] = providerModelPricingCacheEntry{
+		Response:           response,
+		ModelsByNormalized: buildProviderModelPricingIndex(response.Models),
+		UpdatedAt:          time.Now(),
+	}
+}
+
+func (ps *ProviderService) clearProviderModelPricingCache(apiURL, apiKey, authType string) {
+	if ps == nil {
+		return
+	}
+	key := providerPricingCacheKey(apiURL, apiKey, authType)
+	if key == "" {
+		return
+	}
+
+	ps.pricingCacheMu.Lock()
+	defer ps.pricingCacheMu.Unlock()
+	delete(ps.pricingCache, key)
+}
+
+// ResolveCachedProviderModelPricing 尝试从本地缓存里按模型名获取供应商接口价格条目。
+// 匹配顺序：精确归一化匹配 -> 包含关系的相似匹配。
+func (ps *ProviderService) ResolveCachedProviderModelPricing(apiURL, apiKey, authType, model string) (ProviderModelPricingItem, bool) {
+	if ps == nil {
+		return ProviderModelPricingItem{}, false
+	}
+
+	key := providerPricingCacheKey(apiURL, apiKey, authType)
+	if key == "" {
+		return ProviderModelPricingItem{}, false
+	}
+
+	modelNorm := normalizeProviderPricingModelName(model)
+	if modelNorm == "" {
+		return ProviderModelPricingItem{}, false
+	}
+
+	ps.pricingCacheMu.RLock()
+	entry, ok := ps.pricingCache[key]
+	ps.pricingCacheMu.RUnlock()
+	if !ok || len(entry.ModelsByNormalized) == 0 {
+		return ProviderModelPricingItem{}, false
+	}
+
+	if item, exists := entry.ModelsByNormalized[modelNorm]; exists {
+		return item, true
+	}
+
+	bestScore := -1.0
+	bestItem := ProviderModelPricingItem{}
+	for cachedNorm, item := range entry.ModelsByNormalized {
+		if cachedNorm == "" {
+			continue
+		}
+		if !(strings.Contains(cachedNorm, modelNorm) || strings.Contains(modelNorm, cachedNorm)) {
+			continue
+		}
+
+		maxLen := providerPricingMax(len(cachedNorm), len(modelNorm))
+		if maxLen <= 0 {
+			continue
+		}
+		score := float64(providerPricingMin(len(cachedNorm), len(modelNorm))) / float64(maxLen)
+		if score > bestScore {
+			bestScore = score
+			bestItem = item
+		}
+	}
+
+	if bestScore < 0 {
+		return ProviderModelPricingItem{}, false
+	}
+	return bestItem, true
+}
+
 // FetchProviderModelPricing 获取单个供应商的模型列表与价格信息。
 // 该实现参考 all-api-hub 的站点适配逻辑：
 // - 默认：GET /api/pricing
@@ -170,11 +312,13 @@ func buildAuthCandidates(configured string) []string {
 func (ps *ProviderService) FetchProviderModelPricing(apiURL, apiKey, platform, authType string) (*ProviderModelPricingResponse, error) {
 	apiURL = strings.TrimSpace(apiURL)
 	if apiURL == "" {
+		ps.clearProviderModelPricingCache(apiURL, apiKey, authType)
 		return nil, fmt.Errorf("apiUrl 不能为空")
 	}
 
 	apiKey = strings.TrimSpace(apiKey)
 	if apiKey == "" {
+		ps.clearProviderModelPricingCache(apiURL, apiKey, authType)
 		return nil, fmt.Errorf("apiKey 不能为空")
 	}
 
@@ -190,6 +334,7 @@ func (ps *ProviderService) FetchProviderModelPricing(apiURL, apiKey, platform, a
 		commonPricing, err := fetchCommonPricing(client, apiURL, apiKey, candidate)
 		if err == nil {
 			response := buildProviderModelPricingResponse(SiteTypeUnknown, "api/pricing", commonPricing)
+			ps.cacheProviderModelPricing(apiURL, apiKey, authType, response)
 			return response, nil
 		}
 		commonErr = err
@@ -197,6 +342,7 @@ func (ps *ProviderService) FetchProviderModelPricing(apiURL, apiKey, platform, a
 		oneHubPricing, err := fetchOneHubPricing(client, apiURL, apiKey, candidate)
 		if err == nil {
 			response := buildProviderModelPricingResponse(SiteTypeOneHub, "one-hub", oneHubPricing)
+			ps.cacheProviderModelPricing(apiURL, apiKey, authType, response)
 			return response, nil
 		}
 		oneHubErr = err
@@ -228,11 +374,13 @@ func (ps *ProviderService) FetchProviderModelPricing(apiURL, apiKey, platform, a
 				return items[i].Model < items[j].Model
 			})
 
-			return &ProviderModelPricingResponse{
+			response := &ProviderModelPricingResponse{
 				SiteType:      SiteTypeUnknown,
 				PricingSource: "v1/models",
 				Models:        items,
-			}, nil
+			}
+			ps.cacheProviderModelPricing(apiURL, apiKey, authType, response)
+			return response, nil
 		}
 
 		modelErr = err
@@ -243,8 +391,10 @@ func (ps *ProviderService) FetchProviderModelPricing(apiURL, apiKey, platform, a
 	}
 
 	if commonErr != nil || oneHubErr != nil {
+		ps.clearProviderModelPricingCache(apiURL, apiKey, authType)
 		return nil, fmt.Errorf("获取模型定价失败：%v；%v", commonErr, oneHubErr)
 	}
+	ps.clearProviderModelPricingCache(apiURL, apiKey, authType)
 	return nil, modelErr
 }
 

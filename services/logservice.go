@@ -104,6 +104,7 @@ func (ls *LogService) ListRequestLogsV2(platform string, provider string, limit 
 			Platform:          record.GetString("platform"),
 			Model:             record.GetString("model"),
 			Provider:          record.GetString("provider"),
+			PriceSource:       record.GetString("price_source"),
 			HttpCode:          record.GetInt("http_code"),
 			InputTokens:       record.GetInt("input_tokens"),
 			OutputTokens:      record.GetInt("output_tokens"),
@@ -134,13 +135,35 @@ func (ls *LogService) resolvePricingSnapshot() *modelpricing.Service {
 	return svc
 }
 
+func normalizeRequestLogPriceSource(source string, totalCost float64) string {
+	switch strings.ToLower(strings.TrimSpace(source)) {
+	case requestLogPriceSourceProviderAPI:
+		return requestLogPriceSourceProviderAPI
+	case requestLogPriceSourceBuiltin:
+		return requestLogPriceSourceBuiltin
+	case requestLogPriceSourceNone:
+		return requestLogPriceSourceNone
+	default:
+		if totalCost > 0 {
+			return requestLogPriceSourceBuiltin
+		}
+		return requestLogPriceSourceNone
+	}
+}
+
 func applyLogPricing(pricing *modelpricing.Service, logEntry *ReqeustLog) {
 	if logEntry == nil {
 		return
 	}
 
+	logEntry.PriceSource = normalizeRequestLogPriceSource(logEntry.PriceSource, logEntry.TotalCost)
+
 	if logEntry.TotalCost > 0 {
 		logEntry.HasPricing = true
+	}
+	if logEntry.PriceSource == requestLogPriceSourceProviderAPI {
+		logEntry.HasPricing = true
+		return
 	}
 
 	if pricing == nil || strings.TrimSpace(logEntry.Model) == "" {
@@ -165,9 +188,13 @@ func applyLogPricing(pricing *modelpricing.Service, logEntry *ReqeustLog) {
 	logEntry.Ephemeral1hCost = breakdown.Ephemeral1hCost
 	if breakdown.HasPricing {
 		logEntry.HasPricing = true
+		if logEntry.PriceSource == requestLogPriceSourceNone {
+			logEntry.PriceSource = requestLogPriceSourceBuiltin
+		}
 	}
 	if logEntry.TotalCost <= 0 && breakdown.TotalCost > 0 {
 		logEntry.TotalCost = breakdown.TotalCost
+		logEntry.PriceSource = requestLogPriceSourceBuiltin
 	}
 	if breakdown.FuzzyMatched &&
 		strings.TrimSpace(breakdown.PricingModel) != "" &&

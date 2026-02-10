@@ -239,6 +239,12 @@
                   >
                     {{ t('components.logs.table.matchedPricingModel', { model: item.matched_pricing_model }) }}
                   </div>
+                  <div
+                    class="model-pricing-source"
+                    :class="`source-${priceSourceClass(item)}`"
+                  >
+                    {{ t('components.logs.table.priceSource', { source: formatPriceSource(item) }) }}
+                  </div>
                 </td>
                 <td :class="['code', httpCodeClass(item.http_code)]">{{ item.http_code }}</td>
                 <td><span :class="['stream-tag', item.is_stream ? 'on' : 'off']">{{ formatStream(item.is_stream) }}</span></td>
@@ -1347,6 +1353,30 @@ const safeNumber = (value?: number) => {
   return Number.isFinite(numeric) ? numeric : 0
 }
 
+type LogPriceSource = 'provider_api' | 'builtin' | 'none'
+
+const resolvePriceSource = (item: RequestLog): LogPriceSource => {
+  const source = String(item.price_source ?? '').trim().toLowerCase()
+  if (source === 'provider_api') return 'provider_api'
+  if (source === 'builtin') return 'builtin'
+  if (source === 'none') return 'none'
+  if (safeNumber(item.total_cost) > 0) return 'builtin'
+  return 'none'
+}
+
+const formatPriceSource = (item: RequestLog) => {
+  const source = resolvePriceSource(item)
+  if (source === 'provider_api') return t('components.logs.table.priceSourceValues.providerApi')
+  if (source === 'builtin') return t('components.logs.table.priceSourceValues.builtin')
+  return t('components.logs.table.priceSourceValues.none')
+}
+
+const priceSourceClass = (item: RequestLog) => {
+  const source = resolvePriceSource(item)
+  if (source === 'provider_api') return 'provider-api'
+  return source
+}
+
 const formatUsdPrecise = (value: number) => `$${safeNumber(value).toFixed(6)}`
 
 const formatUsdPerMillion = (perTokenPrice: number) =>
@@ -1427,9 +1457,25 @@ const hasBreakdownCostPayload = (item: RequestLog) =>
     .some(value => value !== undefined && value !== null)
 
 const buildCostTooltipDetail = (item: RequestLog): CostTooltipDetail => {
-  const pricingRow = resolvePricingRow(item)
-  const modelName = String(pricingRow?.model ?? item.matched_pricing_model ?? item.model ?? '').trim() || '—'
+  const source = resolvePriceSource(item)
+  const fallbackModelName = String(item.matched_pricing_model ?? item.model ?? '').trim() || '—'
   const recordedCost = safeNumber(item.total_cost)
+
+  if (source === 'provider_api') {
+    return {
+      pricingModel: fallbackModelName,
+      hasPricing: true,
+      priceLines: [],
+      formula: t('components.logs.costTooltip.providerApiFormula'),
+      note: t('components.logs.costTooltip.providerApiHint'),
+      recordedCostHint: t('components.logs.costTooltip.recordedCostHint', {
+        cost: formatUsdPrecise(recordedCost),
+      }),
+    }
+  }
+
+  const pricingRow = resolvePricingRow(item)
+  const modelName = String(pricingRow?.model ?? fallbackModelName).trim() || '—'
 
   if (!pricingRow) {
     return {
@@ -1662,7 +1708,9 @@ const showCostTooltip = async (item: RequestLog, event: MouseEvent | FocusEvent)
   clearCostTooltipHideTimer()
   costTooltipAnchorRef.value = target
   const requestId = ++costTooltipRequestId.value
-  await loadModelPricingRows()
+  if (resolvePriceSource(item) !== 'provider_api') {
+    await loadModelPricingRows()
+  }
   if (requestId !== costTooltipRequestId.value) return
   if (costTooltipAnchorRef.value !== target) return
   costTooltip.detail = buildCostTooltipDetail(item)
@@ -2264,6 +2312,37 @@ html.dark .cost-breakdown-tooltip__note {
 }
 
 html.dark .model-pricing-match {
+  color: #94a3b8;
+}
+
+.model-pricing-source {
+  margin-top: 0.2rem;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.model-pricing-source.source-provider-api {
+  color: #0369a1;
+}
+
+.model-pricing-source.source-builtin {
+  color: #0f766e;
+}
+
+.model-pricing-source.source-none {
+  color: #94a3b8;
+}
+
+html.dark .model-pricing-source.source-provider-api {
+  color: #7dd3fc;
+}
+
+html.dark .model-pricing-source.source-builtin {
+  color: #5eead4;
+}
+
+html.dark .model-pricing-source.source-none {
   color: #94a3b8;
 }
 </style>

@@ -846,10 +846,13 @@ func (prs *ProviderRelayService) forwardRequest(
 	}
 
 	requestLog := &ReqeustLog{
-		Platform: kind,
-		Provider: provider.Name,
-		Model:    model,
-		IsStream: isStream,
+		Platform:         kind,
+		Provider:         provider.Name,
+		Model:            model,
+		IsStream:         isStream,
+		ProviderAPIURL:   provider.APIURL,
+		ProviderAPIKey:   provider.APIKey,
+		ProviderAuthType: provider.ConnectivityAuthType,
 	}
 	pricingSnapshot := (*modelpricing.Service)(nil)
 	if prs != nil && prs.modelPricing != nil {
@@ -864,8 +867,12 @@ func (prs *ProviderRelayService) forwardRequest(
 	defer func() {
 		requestLog.DurationSec = time.Since(start).Seconds()
 		normalizeRequestLogInputTokens(requestLog)
-		requestLog.TotalCost = calculateRequestLogTotalCost(
+		costResult := calculateRequestLogCost(
+			prs.providerService,
 			pricingSnapshot,
+			requestLog.ProviderAPIURL,
+			requestLog.ProviderAPIKey,
+			requestLog.ProviderAuthType,
 			requestLog.Model,
 			requestLog.InputTokens,
 			requestLog.OutputTokens,
@@ -873,6 +880,8 @@ func (prs *ProviderRelayService) forwardRequest(
 			requestLog.CacheCreateTokens,
 			requestLog.CacheReadTokens,
 		)
+		requestLog.TotalCost = costResult.TotalCost
+		requestLog.PriceSource = costResult.PriceSource
 
 		// 【修复】判空保护：避免队列未初始化时 panic
 		if GlobalDBQueueLogs == nil {
@@ -888,8 +897,8 @@ func (prs *ProviderRelayService) forwardRequest(
 			INSERT INTO request_log (
 				platform, model, provider, http_code,
 				input_tokens, output_tokens, cache_create_tokens, cache_read_tokens,
-				reasoning_tokens, is_stream, duration_sec, total_cost
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				reasoning_tokens, is_stream, duration_sec, total_cost, price_source
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`,
 			requestLog.Platform,
 			requestLog.Model,
@@ -903,6 +912,7 @@ func (prs *ProviderRelayService) forwardRequest(
 			boolToInt(requestLog.IsStream),
 			requestLog.DurationSec,
 			requestLog.TotalCost,
+			requestLog.PriceSource,
 		)
 
 		if err != nil {
@@ -1098,6 +1108,7 @@ func ensureRequestLogTableWithDB(db *sql.DB) error {
 		is_stream INTEGER DEFAULT 0,
 		duration_sec REAL DEFAULT 0,
 		total_cost REAL DEFAULT 0,
+		price_source TEXT DEFAULT '',
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	)`
 
@@ -1115,6 +1126,9 @@ func ensureRequestLogTableWithDB(db *sql.DB) error {
 		return err
 	}
 	if err := ensureRequestLogColumn(db, "total_cost", "REAL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "price_source", "TEXT DEFAULT ''"); err != nil {
 		return err
 	}
 	if err := ensureRequestLogIndex(db, "idx_request_log_created_at", "created_at"); err != nil {
@@ -1317,6 +1331,7 @@ type ReqeustLog struct {
 	Platform            string  `json:"platform"` // claude、codex 或 gemini
 	Model               string  `json:"model"`
 	Provider            string  `json:"provider"` // provider name
+	PriceSource         string  `json:"price_source,omitempty"`
 	HttpCode            int     `json:"http_code"`
 	InputTokens         int     `json:"input_tokens"`
 	OutputTokens        int     `json:"output_tokens"`
@@ -1336,6 +1351,10 @@ type ReqeustLog struct {
 	TotalCost           float64 `json:"total_cost"`
 	HasPricing          bool    `json:"has_pricing"`
 	MatchedPricingModel string  `json:"matched_pricing_model,omitempty"`
+
+	ProviderAPIURL   string `json:"-"`
+	ProviderAPIKey   string `json:"-"`
+	ProviderAuthType string `json:"-"`
 }
 
 // claude code usage parser
@@ -1697,10 +1716,11 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 
 		// 请求日志
 		requestLog := &ReqeustLog{
-			Platform:     "gemini",
-			IsStream:     isStream,
-			InputTokens:  0,
-			OutputTokens: 0,
+			Platform:         "gemini",
+			IsStream:         isStream,
+			InputTokens:      0,
+			OutputTokens:     0,
+			ProviderAuthType: "",
 		}
 		pricingSnapshot := (*modelpricing.Service)(nil)
 		if prs != nil && prs.modelPricing != nil {
@@ -1717,8 +1737,12 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 		defer func() {
 			requestLog.DurationSec = time.Since(start).Seconds()
 			normalizeRequestLogInputTokens(requestLog)
-			requestLog.TotalCost = calculateRequestLogTotalCost(
+			costResult := calculateRequestLogCost(
+				prs.providerService,
 				pricingSnapshot,
+				requestLog.ProviderAPIURL,
+				requestLog.ProviderAPIKey,
+				requestLog.ProviderAuthType,
 				requestLog.Model,
 				requestLog.InputTokens,
 				requestLog.OutputTokens,
@@ -1726,6 +1750,8 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 				requestLog.CacheCreateTokens,
 				requestLog.CacheReadTokens,
 			)
+			requestLog.TotalCost = costResult.TotalCost
+			requestLog.PriceSource = costResult.PriceSource
 			if GlobalDBQueueLogs == nil {
 				return
 			}
@@ -1735,13 +1761,13 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 				INSERT INTO request_log (
 					platform, model, provider, http_code,
 					input_tokens, output_tokens, cache_create_tokens, cache_read_tokens,
-					reasoning_tokens, is_stream, duration_sec, total_cost
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+					reasoning_tokens, is_stream, duration_sec, total_cost, price_source
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			`,
 				requestLog.Platform, requestLog.Model, requestLog.Provider, requestLog.HttpCode,
 				requestLog.InputTokens, requestLog.OutputTokens, requestLog.CacheCreateTokens,
 				requestLog.CacheReadTokens, requestLog.ReasoningTokens,
-				boolToInt(requestLog.IsStream), requestLog.DurationSec, requestLog.TotalCost,
+				boolToInt(requestLog.IsStream), requestLog.DurationSec, requestLog.TotalCost, requestLog.PriceSource,
 			)
 		}()
 
@@ -1778,6 +1804,8 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 					// 预填日志
 					requestLog.Provider = provider.Name
 					requestLog.Model = provider.Model
+					requestLog.ProviderAPIURL = provider.BaseURL
+					requestLog.ProviderAPIKey = provider.APIKey
 
 					// 同 Provider 内重试循环
 					for retryCount := 0; retryCount < maxRetryPerProvider; retryCount++ {
@@ -1887,6 +1915,8 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 				// 预填日志，失败也能落库
 				requestLog.Provider = provider.Name
 				requestLog.Model = provider.Model
+				requestLog.ProviderAPIURL = provider.BaseURL
+				requestLog.ProviderAPIKey = provider.APIKey
 
 				ok, err, responseWritten := prs.forwardGeminiRequest(c, &provider, endpoint, bodyBytes, isStream, requestLog)
 				if ok {

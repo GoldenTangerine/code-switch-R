@@ -26,6 +26,7 @@ export type RequestLog = {
   ephemeral_1h_cost?: number
   has_pricing?: boolean
   matched_pricing_model?: string
+  price_source?: string
 }
 
 type RequestLogQuery = {

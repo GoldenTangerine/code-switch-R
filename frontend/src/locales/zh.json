@@ -533,6 +533,12 @@
         "provider": "供应商",
         "model": "模型",
         "matchedPricingModel": "≈ 计价匹配：{model}",
+        "priceSource": "计价来源：{source}",
+        "priceSourceValues": {
+          "providerApi": "接口模型价格",
+          "builtin": "内置价格表",
+          "none": "无可用价格"
+        },
         "httpCode": "HTTP",
         "stream": "传输",
         "duration": "耗时",
@@ -562,6 +568,8 @@
         "usageCacheCreate": "5m 缓存创建",
         "usageCacheRead": "缓存读取",
         "usageReasoning": "推理",
+        "providerApiFormula": "该请求按供应商接口返回的模型价格计算。",
+        "providerApiHint": "接口价格可能包含供应商专有倍率，此处不使用内置价格表拆解。",
         "noPricingFormula": "未命中可用价格表，无法按价格表拆解计算。",
         "noPricingHint": "当前仅展示日志记录金额。",
         "matchedModelHint": "本条日志按模型 {model} 的价格计算。",

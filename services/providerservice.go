@@ -86,10 +86,15 @@ type providerEnvelope struct {
 
 type ProviderService struct {
 	mu sync.Mutex
+
+	pricingCacheMu sync.RWMutex
+	pricingCache   map[string]providerModelPricingCacheEntry
 }
 
 func NewProviderService() *ProviderService {
-	return &ProviderService{}
+	return &ProviderService{
+		pricingCache: make(map[string]providerModelPricingCacheEntry),
+	}
 }
 
 func (ps *ProviderService) Start() error { return nil }
@@ -390,17 +395,17 @@ func (ps *ProviderService) DuplicateProvider(kind string, sourceID int64) (*Prov
 
 	// 5. 克隆配置（深拷贝）
 	cloned := &Provider{
-		ID:      newID,
-		Name:    source.Name + " (副本)",
-		APIURL:  source.APIURL,
-		APIKey:  source.APIKey,
-		Site:    source.Site,
-		Icon:    source.Icon,
-		Tint:    source.Tint,
-		Accent:  source.Accent,
-		Enabled: false, // 默认禁用，避免与源供应商冲突
-		Level:   source.Level,
-	APIEndpoint: source.APIEndpoint, // 复制端点配置
+		ID:          newID,
+		Name:        source.Name + " (副本)",
+		APIURL:      source.APIURL,
+		APIKey:      source.APIKey,
+		Site:        source.Site,
+		Icon:        source.Icon,
+		Tint:        source.Tint,
+		Accent:      source.Accent,
+		Enabled:     false, // 默认禁用，避免与源供应商冲突
+		Level:       source.Level,
+		APIEndpoint: source.APIEndpoint, // 复制端点配置
 		// 可用性监控配置
 		AvailabilityMonitorEnabled: source.AvailabilityMonitorEnabled,
 		ConnectivityAutoBlacklist:  false, // 副本默认关闭自动拉黑
@@ -441,7 +446,7 @@ func (ps *ProviderService) DuplicateProvider(kind string, sourceID int64) (*Prov
 
 // IsModelSupported 检查 provider 是否支持指定的模型
 // 支持条件：1) 模型在 SupportedModels 中（精确或通配符匹配）
-//          2) 模型在 ModelMapping 的 key 中（精确或通配符匹配）
+//  2. 模型在 ModelMapping 的 key 中（精确或通配符匹配）
 func (p *Provider) IsModelSupported(modelName string) bool {
 	// 向后兼容：如果未配置白名单和映射，假设支持所有模型
 	if (p.SupportedModels == nil || len(p.SupportedModels) == 0) &&
@@ -596,7 +601,8 @@ func matchWildcard(pattern, text string) bool {
 // applyWildcardMapping 应用通配符映射
 // 将 pattern 中的 * 匹配部分替换到 replacement 的 * 位置
 // 示例: pattern="claude-*", replacement="anthropic/claude-*", input="claude-sonnet-4"
-//      输出: "anthropic/claude-sonnet-4"
+//
+//	输出: "anthropic/claude-sonnet-4"
 func applyWildcardMapping(pattern, replacement, input string) string {
 	// 如果 pattern 或 replacement 没有通配符，直接返回 replacement
 	if !strings.Contains(pattern, "*") || !strings.Contains(replacement, "*") {

@@ -337,6 +337,7 @@
             { 'is-highlighted': highlightedProvider === card.name }
           ]"
           draggable="true"
+          @click="handleProviderCardClick(card)"
           @dragstart="onDragStart(card.id)"
           @dragend="onDragEnd"
           @drop="onDrop(card.id)"
@@ -487,7 +488,7 @@
               </div>
             </div>
           </div>
-          <div class="card-actions">
+          <div class="card-actions" @click.stop>
             <label class="mac-switch sm">
               <input type="checkbox" v-model="card.enabled" @change="persistProviders(activeTab)" />
               <span></span>
@@ -1045,6 +1046,7 @@ import { GetProviders as GetGeminiProviders, UpdateProvider as UpdateGeminiProvi
 import { fetchProxyStatus, enableProxy, disableProxy } from '../../services/claudeSettings'
 import { fetchGeminiProxyStatus, enableGeminiProxy, disableGeminiProxy } from '../../services/geminiSettings'
 import { fetchProviderDailyStats, type ProviderDailyStat } from '../../services/logs'
+import { fetchProviderModelPricing } from '../../services/providerModelPricing'
 import { fetchCurrentVersion } from '../../services/version'
 import { fetchAppSettings, type AppSettings } from '../../services/appSettings'
 import { getUpdateState, restartApp, type UpdateState } from '../../services/update'
@@ -1757,6 +1759,112 @@ const loadProvidersFromDisk = async () => {
   }
 }
 
+const buildProviderPricingRefreshTargets = () => {
+  const seen = new Set<string>()
+  const targets: Array<{ card: AutomationCard; tab: ProviderTab }> = []
+
+  for (const tab of providerTabIds) {
+    for (const card of cards[tab]) {
+      const apiUrl = String(card.apiUrl ?? '').trim()
+      const apiKey = String(card.apiKey ?? '').trim()
+      if (!apiUrl || !apiKey) continue
+
+      const dedupeKey = getProviderPricingRefreshKey(card)
+      if (!dedupeKey) continue
+      if (seen.has(dedupeKey)) continue
+
+      seen.add(dedupeKey)
+      targets.push({ card, tab })
+    }
+  }
+
+  return targets
+}
+
+const PROVIDER_PRICING_CLICK_THROTTLE_MS = 2_000
+const PROVIDER_PRICING_STARTUP_CONCURRENCY = 4
+const providerPricingRefreshLastRunAt = new Map<string, number>()
+const providerPricingRefreshInFlight = new Map<string, Promise<void>>()
+
+type ProviderPricingRefreshOptions = {
+  force?: boolean
+  silent?: boolean
+}
+
+const getProviderPricingRefreshKey = (card: AutomationCard) => {
+  const apiUrl = String(card.apiUrl ?? '').trim().toLowerCase()
+  const apiKey = String(card.apiKey ?? '').trim()
+  if (!apiUrl || !apiKey) return ''
+  const authType = String(card.connectivityAuthType ?? '').trim().toLowerCase()
+  return `${apiUrl}|${apiKey}|${authType}`
+}
+
+const refreshProviderPricingForCard = (
+  card: AutomationCard,
+  tab: ProviderTab,
+  options: ProviderPricingRefreshOptions = {},
+) => {
+  const refreshKey = getProviderPricingRefreshKey(card)
+  if (!refreshKey) return Promise.resolve()
+
+  const inFlight = providerPricingRefreshInFlight.get(refreshKey)
+  if (inFlight) return inFlight
+
+  if (!options.force) {
+    const lastRunAt = providerPricingRefreshLastRunAt.get(refreshKey) ?? 0
+    if (Date.now() - lastRunAt < PROVIDER_PRICING_CLICK_THROTTLE_MS) {
+      return Promise.resolve()
+    }
+  }
+
+  providerPricingRefreshLastRunAt.set(refreshKey, Date.now())
+  const task = fetchProviderModelPricing(card, tab)
+    .then(() => undefined)
+    .catch((error) => {
+      if (!options.silent) {
+        console.warn('[ProviderPricing] refresh failed:', card.name, error)
+      }
+    })
+    .finally(() => {
+      providerPricingRefreshInFlight.delete(refreshKey)
+    })
+
+  providerPricingRefreshInFlight.set(refreshKey, task)
+  return task
+}
+
+const runTasksWithConcurrencyLimit = async (tasks: Array<() => Promise<void>>, limit: number) => {
+  if (tasks.length === 0) return
+  const safeLimit = Math.max(1, Math.min(limit, tasks.length))
+  let index = 0
+
+  const workers = Array.from({ length: safeLimit }, async () => {
+    while (index < tasks.length) {
+      const current = index
+      index++
+      await tasks[current]()
+    }
+  })
+
+  await Promise.all(workers)
+}
+
+const refreshProviderPricingCachesOnStartup = async () => {
+  const targets = buildProviderPricingRefreshTargets()
+  if (targets.length === 0) return
+
+  const tasks = targets.map(({ card, tab }) =>
+    () => refreshProviderPricingForCard(card, tab, { force: true, silent: true }))
+  await runTasksWithConcurrencyLimit(tasks, PROVIDER_PRICING_STARTUP_CONCURRENCY)
+}
+
+const handleProviderCardClick = (card: AutomationCard) => {
+  const apiUrl = String(card.apiUrl ?? '').trim()
+  const apiKey = String(card.apiKey ?? '').trim()
+  if (!apiUrl || !apiKey) return
+  void refreshProviderPricingForCard(card, activeTab.value, { silent: true })
+}
+
 // 加载自定义 CLI 工具列表
 const loadCustomCliTools = async () => {
   try {
@@ -2299,6 +2407,7 @@ let unsubscribeBlacklisted: (() => void) | undefined
 onMounted(async () => {
   void initHeatmap()
   await loadProvidersFromDisk()
+  void refreshProviderPricingCachesOnStartup()
   await Promise.all(providerTabIds.map(refreshProxyState))
   await Promise.all(providerTabIds.map((tab) => refreshDirectAppliedStatus(tab)))
   await Promise.all(providerTabIds.map((tab) => loadProviderStats(tab)))

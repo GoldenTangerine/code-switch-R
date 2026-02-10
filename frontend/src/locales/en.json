@@ -532,6 +532,12 @@
         "provider": "Provider",
         "model": "Model",
         "matchedPricingModel": "≈ Pricing match: {model}",
+        "priceSource": "Pricing source: {source}",
+        "priceSourceValues": {
+          "providerApi": "Provider API pricing",
+          "builtin": "Built-in pricing table",
+          "none": "No pricing available"
+        },
         "httpCode": "HTTP",
         "stream": "Stream",
         "duration": "Duration",
@@ -561,6 +567,8 @@
         "usageCacheCreate": "5m cache creation",
         "usageCacheRead": "Cache read",
         "usageReasoning": "Reasoning",
+        "providerApiFormula": "This request is calculated using provider API pricing.",
+        "providerApiHint": "Provider-side multipliers may apply, so built-in pricing breakdown is skipped.",
         "noPricingFormula": "No matched pricing row. Unable to build formula from pricing table.",
         "noPricingHint": "Only recorded log amount is shown.",
         "matchedModelHint": "This log uses pricing from model {model}.",
