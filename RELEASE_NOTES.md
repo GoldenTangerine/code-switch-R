@@ -1,3 +1,10 @@
+# Code Switch v2.6.51
+
+## 修复
+- **CI 打包 TypeScript 报错**：主页 `GeminiProvider` 类型改为从 Wails bindings 推导，避免 `envConfig` 类型漂移导致 `vue-tsc` 失败。
+
+---
+
 # Code Switch v2.6.50
 
 ## 新功能

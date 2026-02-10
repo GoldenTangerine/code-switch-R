@@ -1579,23 +1579,8 @@ const compareVersions = (current: string, remote: string) => {
   return 0
 }
 
-// 本地 GeminiProvider 类型定义（避免依赖 CI 生成的 bindings）
-interface GeminiProvider {
-  id: string
-  name: string
-  websiteUrl?: string
-  apiKeyUrl?: string
-  baseUrl?: string
-  apiKey?: string
-  model?: string
-  description?: string
-  category?: string
-  partnerPromotionKey?: string
-  enabled: boolean
-  level?: number // 优先级分组 (1-10, 默认 1)
-  envConfig?: Record<string, string>
-  settingsConfig?: Record<string, any>
-}
+// 从 Wails bindings 推导 GeminiProvider 类型，避免手写类型漂移导致 CI 编译失败
+type GeminiProvider = Awaited<ReturnType<typeof GetGeminiProviders>> extends (infer P)[] ? P : any
 
 const tabs = [
   { id: 'claude', label: 'Claude Code' },
