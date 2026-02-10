@@ -519,6 +519,27 @@
                 <path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
               </svg>
             </button>
+            <button
+              class="ghost-icon"
+              :disabled="!card.apiUrl || !card.apiKey"
+              :data-tooltip="(!card.apiUrl || !card.apiKey) ? t('components.main.modelList.buttonDisabledTooltip') : t('components.main.modelList.buttonTooltip')"
+              @click.stop="openModelList(card)"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M8 6h13M8 12h13M8 18h13"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.5"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+                <path
+                  d="M3.5 6.5h1v-1h-1v1zm0 6h1v-1h-1v1zm0 6h1v-1h-1v1z"
+                  fill="currentColor"
+                />
+              </svg>
+            </button>
             <button class="ghost-icon" :data-tooltip="t('components.main.controls.duplicate')" @click="handleDuplicate(card)">
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path
@@ -556,6 +577,13 @@
         @saved="onConfigFileSaved"
       />
       </section>
+
+      <ProviderModelListModal
+        :open="modelListModalOpen"
+        :provider="modelListModalProvider"
+        :platform="activeTab"
+        @close="closeModelListModal"
+      />
 
       <BaseModal
       :open="modalState.open"
@@ -1011,6 +1039,7 @@ import ModelWhitelistEditor from '../common/ModelWhitelistEditor.vue'
 import ModelMappingEditor from '../common/ModelMappingEditor.vue'
 import CLIConfigEditor from '../common/CLIConfigEditor.vue'
 import CustomCliConfigEditor from '../common/CustomCliConfigEditor.vue'
+import ProviderModelListModal from './ProviderModelListModal.vue'
 import { LoadProviders, SaveProviders, DuplicateProvider } from '../../../bindings/codeswitch/services/providerservice'
 import { GetProviders as GetGeminiProviders, UpdateProvider as UpdateGeminiProvider, AddProvider as AddGeminiProvider, DeleteProvider as DeleteGeminiProvider, ReorderProviders as ReorderGeminiProviders } from '../../../bindings/codeswitch/services/geminiservice'
 import { fetchProxyStatus, enableProxy, disableProxy } from '../../services/claudeSettings'
@@ -1183,6 +1212,9 @@ const importStatus = ref<ConfigImportStatus | null>(null)
 const importBusy = ref(false)
 const showFirstRunPrompt = ref(false)
 
+const modelListModalOpen = ref(false)
+const modelListModalProvider = ref<AutomationCard | null>(null)
+
 // 自定义 CLI 工具状态
 const customCliTools = ref<CustomCliTool[]>([])
 const selectedToolId = ref<string | null>(null)
@@ -1198,6 +1230,20 @@ const selectedCustomCliTool = computed(() => {
 const onConfigFileSaved = () => {
   // 配置文件保存成功，可以在这里添加额外逻辑（如刷新状态）
   console.log('[CustomCliConfigEditor] Config file saved')
+}
+
+const openModelList = (card: AutomationCard) => {
+  if (!card.apiUrl || !card.apiKey) {
+    showToast(t('components.main.modelList.apiKeyRequired'), 'error')
+    return
+  }
+  modelListModalProvider.value = card
+  modelListModalOpen.value = true
+}
+
+const closeModelListModal = () => {
+  modelListModalOpen.value = false
+  modelListModalProvider.value = null
 }
 
 // 黑名单状态
@@ -1547,8 +1593,8 @@ interface GeminiProvider {
   partnerPromotionKey?: string
   enabled: boolean
   level?: number // 优先级分组 (1-10, 默认 1)
-  envConfig?: Record<string, string | undefined>
-  settingsConfig?: Record<string, any | undefined>
+  envConfig?: Record<string, string>
+  settingsConfig?: Record<string, any>
 }
 
 const tabs = [
