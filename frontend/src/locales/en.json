@@ -632,7 +632,7 @@
         "budgetTotal": "Budget total",
         "budgetTotalHint": "Used for tray menu progress (USD)",
         "budgetUsedAdjustment": "Manual used adjustment",
-        "budgetUsedAdjustmentHintClaude": "Used directly as Claude tray used amount (USD)",
+        "budgetUsedAdjustmentHintClaude": "Adds to actual used spend for Claude (USD)",
         "budgetUsedAdjustmentHintCodex": "Adds to actual used spend for Codex (USD)",
         "budgetCycle": "Enable refresh cycle",
         "budgetCycleHint": "Reset budget stats at the refresh time",

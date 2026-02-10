@@ -65,6 +65,49 @@ const budgetShowCountdownCodex = ref(getCachedValue('budgetShowCountdownCodex', 
 const budgetShowForecastCodex = ref(getCachedValue('budgetShowForecastCodex', false))
 const settingsLoading = ref(true)
 const saveBusy = ref(false)
+let saveQueued = false
+let persistTimer: number | undefined
+const defaultPersistDebounceMs = 150
+const minPersistDebounceMs = 0
+const maxPersistDebounceMs = 2000
+const rawPersistDebounceMs = import.meta.env.VITE_SETTINGS_PERSIST_DEBOUNCE_MS
+const envPersistDebounceMs =
+  typeof rawPersistDebounceMs === 'string' && rawPersistDebounceMs.trim() !== ''
+    ? Number(rawPersistDebounceMs)
+    : defaultPersistDebounceMs
+const persistDebounceMs = Number.isFinite(envPersistDebounceMs)
+  ? Math.min(Math.max(Math.round(envPersistDebounceMs), minPersistDebounceMs), maxPersistDebounceMs)
+  : defaultPersistDebounceMs
+
+const syncAppSettingsCache = () => {
+  localStorage.setItem('app-settings-heatmap', String(heatmapEnabled.value))
+  localStorage.setItem('app-settings-homeTitle', String(homeTitleVisible.value))
+  localStorage.setItem('app-settings-budgetTotal', String(budgetTotal.value))
+  localStorage.setItem('app-settings-budgetUsedAdjustment', String(budgetUsedAdjustment.value))
+  localStorage.setItem('app-settings-budgetForecastMethod', budgetForecastMethod.value)
+  localStorage.setItem('app-settings-budgetForecastDisplay', budgetForecastDisplay.value)
+  localStorage.setItem('app-settings-budgetCycleEnabled', String(budgetCycleEnabled.value))
+  localStorage.setItem('app-settings-budgetCycleMode', budgetCycleMode.value)
+  localStorage.setItem('app-settings-budgetRefreshTime', budgetRefreshTime.value)
+  localStorage.setItem('app-settings-budgetRefreshDay', String(budgetRefreshDay.value))
+  localStorage.setItem('app-settings-budgetShowCountdown', String(budgetShowCountdown.value))
+  localStorage.setItem('app-settings-budgetShowForecast', String(budgetShowForecast.value))
+  localStorage.setItem('app-settings-budgetTotalCodex', String(budgetTotalCodex.value))
+  localStorage.setItem('app-settings-budgetUsedAdjustmentCodex', String(budgetUsedAdjustmentCodex.value))
+  localStorage.setItem('app-settings-budgetForecastMethodCodex', budgetForecastMethodCodex.value)
+  localStorage.setItem('app-settings-budgetForecastDisplayCodex', budgetForecastDisplayCodex.value)
+  localStorage.setItem('app-settings-budgetCycleEnabledCodex', String(budgetCycleEnabledCodex.value))
+  localStorage.setItem('app-settings-budgetCycleModeCodex', budgetCycleModeCodex.value)
+  localStorage.setItem('app-settings-budgetRefreshTimeCodex', budgetRefreshTimeCodex.value)
+  localStorage.setItem('app-settings-budgetRefreshDayCodex', String(budgetRefreshDayCodex.value))
+  localStorage.setItem('app-settings-budgetShowCountdownCodex', String(budgetShowCountdownCodex.value))
+  localStorage.setItem('app-settings-budgetShowForecastCodex', String(budgetShowForecastCodex.value))
+  localStorage.setItem('app-settings-autoStart', String(autoStartEnabled.value))
+  localStorage.setItem('app-settings-autoUpdate', String(autoUpdateEnabled.value))
+  localStorage.setItem('app-settings-autoConnectivityTest', String(autoConnectivityTestEnabled.value))
+  localStorage.setItem('app-settings-switchNotify', String(switchNotifyEnabled.value))
+  localStorage.setItem('app-settings-roundRobin', String(roundRobinEnabled.value))
+}
 
 // 更新相关状态
 const updateState = ref<UpdateState | null>(null)
@@ -567,33 +610,7 @@ const loadAppSettings = async () => {
     roundRobinEnabled.value = data?.enable_round_robin ?? false
 
     // 缓存到 localStorage，下次打开时直接显示正确状态
-    localStorage.setItem('app-settings-heatmap', String(heatmapEnabled.value))
-    localStorage.setItem('app-settings-homeTitle', String(homeTitleVisible.value))
-    localStorage.setItem('app-settings-budgetTotal', String(budgetTotal.value))
-    localStorage.setItem('app-settings-budgetUsedAdjustment', String(budgetUsedAdjustment.value))
-    localStorage.setItem('app-settings-budgetForecastMethod', budgetForecastMethod.value)
-    localStorage.setItem('app-settings-budgetForecastDisplay', budgetForecastDisplay.value)
-    localStorage.setItem('app-settings-budgetCycleEnabled', String(budgetCycleEnabled.value))
-    localStorage.setItem('app-settings-budgetCycleMode', budgetCycleMode.value)
-    localStorage.setItem('app-settings-budgetRefreshTime', budgetRefreshTime.value)
-    localStorage.setItem('app-settings-budgetRefreshDay', String(budgetRefreshDay.value))
-    localStorage.setItem('app-settings-budgetShowCountdown', String(budgetShowCountdown.value))
-    localStorage.setItem('app-settings-budgetShowForecast', String(budgetShowForecast.value))
-    localStorage.setItem('app-settings-budgetTotalCodex', String(budgetTotalCodex.value))
-    localStorage.setItem('app-settings-budgetUsedAdjustmentCodex', String(budgetUsedAdjustmentCodex.value))
-    localStorage.setItem('app-settings-budgetForecastMethodCodex', budgetForecastMethodCodex.value)
-    localStorage.setItem('app-settings-budgetForecastDisplayCodex', budgetForecastDisplayCodex.value)
-    localStorage.setItem('app-settings-budgetCycleEnabledCodex', String(budgetCycleEnabledCodex.value))
-    localStorage.setItem('app-settings-budgetCycleModeCodex', budgetCycleModeCodex.value)
-    localStorage.setItem('app-settings-budgetRefreshTimeCodex', budgetRefreshTimeCodex.value)
-    localStorage.setItem('app-settings-budgetRefreshDayCodex', String(budgetRefreshDayCodex.value))
-    localStorage.setItem('app-settings-budgetShowCountdownCodex', String(budgetShowCountdownCodex.value))
-    localStorage.setItem('app-settings-budgetShowForecastCodex', String(budgetShowForecastCodex.value))
-    localStorage.setItem('app-settings-autoStart', String(autoStartEnabled.value))
-    localStorage.setItem('app-settings-autoUpdate', String(autoUpdateEnabled.value))
-    localStorage.setItem('app-settings-autoConnectivityTest', String(autoConnectivityTestEnabled.value))
-    localStorage.setItem('app-settings-switchNotify', String(switchNotifyEnabled.value))
-    localStorage.setItem('app-settings-roundRobin', String(roundRobinEnabled.value))
+    syncAppSettingsCache()
   } catch (error) {
     console.error('failed to load app settings', error)
     heatmapEnabled.value = true
@@ -628,8 +645,16 @@ const loadAppSettings = async () => {
   }
 }
 
-const persistAppSettings = async () => {
-  if (settingsLoading.value || saveBusy.value) return
+const persistAppSettingsNow = async () => {
+  if (persistTimer) {
+    window.clearTimeout(persistTimer)
+    persistTimer = undefined
+  }
+  if (settingsLoading.value) return
+  if (saveBusy.value) {
+    saveQueued = true
+    return
+  }
   saveBusy.value = true
   try {
     const normalizedBudgetTotal = Number.isFinite(budgetTotal.value) ? Math.max(0, budgetTotal.value) : 0
@@ -697,50 +722,51 @@ const persistAppSettings = async () => {
     }
     await saveAppSettings(payload)
 
-    // 同步自动更新设置到 UpdateService
-    await setAutoCheckEnabled(autoUpdateEnabled.value)
+    try {
+      await setAutoCheckEnabled(autoUpdateEnabled.value)
+    } catch (error) {
+      console.error('failed to sync auto update setting', error)
+    }
 
-    // 同步自动可用性监控设置到 HealthCheckService（复用旧字段名）
-    await Call.ByName(
-      'codeswitch/services.HealthCheckService.SetAutoAvailabilityPolling',
-      autoConnectivityTestEnabled.value
-    )
+    try {
+      await Call.ByName(
+        'codeswitch/services.HealthCheckService.SetAutoAvailabilityPolling',
+        autoConnectivityTestEnabled.value
+      )
+    } catch (error) {
+      console.error('failed to sync auto connectivity setting', error)
+    }
 
-    // 更新缓存
-    localStorage.setItem('app-settings-heatmap', String(heatmapEnabled.value))
-    localStorage.setItem('app-settings-homeTitle', String(homeTitleVisible.value))
-    localStorage.setItem('app-settings-budgetTotal', String(budgetTotal.value))
-    localStorage.setItem('app-settings-budgetUsedAdjustment', String(budgetUsedAdjustment.value))
-    localStorage.setItem('app-settings-budgetForecastMethod', budgetForecastMethod.value)
-    localStorage.setItem('app-settings-budgetForecastDisplay', budgetForecastDisplay.value)
-    localStorage.setItem('app-settings-budgetCycleEnabled', String(budgetCycleEnabled.value))
-    localStorage.setItem('app-settings-budgetCycleMode', budgetCycleMode.value)
-    localStorage.setItem('app-settings-budgetRefreshTime', budgetRefreshTime.value)
-    localStorage.setItem('app-settings-budgetRefreshDay', String(budgetRefreshDay.value))
-    localStorage.setItem('app-settings-budgetShowCountdown', String(budgetShowCountdown.value))
-    localStorage.setItem('app-settings-budgetShowForecast', String(budgetShowForecast.value))
-    localStorage.setItem('app-settings-budgetTotalCodex', String(budgetTotalCodex.value))
-    localStorage.setItem('app-settings-budgetUsedAdjustmentCodex', String(budgetUsedAdjustmentCodex.value))
-    localStorage.setItem('app-settings-budgetForecastMethodCodex', budgetForecastMethodCodex.value)
-    localStorage.setItem('app-settings-budgetForecastDisplayCodex', budgetForecastDisplayCodex.value)
-    localStorage.setItem('app-settings-budgetCycleEnabledCodex', String(budgetCycleEnabledCodex.value))
-    localStorage.setItem('app-settings-budgetCycleModeCodex', budgetCycleModeCodex.value)
-    localStorage.setItem('app-settings-budgetRefreshTimeCodex', budgetRefreshTimeCodex.value)
-    localStorage.setItem('app-settings-budgetRefreshDayCodex', String(budgetRefreshDayCodex.value))
-    localStorage.setItem('app-settings-budgetShowCountdownCodex', String(budgetShowCountdownCodex.value))
-    localStorage.setItem('app-settings-budgetShowForecastCodex', String(budgetShowForecastCodex.value))
-    localStorage.setItem('app-settings-autoStart', String(autoStartEnabled.value))
-    localStorage.setItem('app-settings-autoUpdate', String(autoUpdateEnabled.value))
-    localStorage.setItem('app-settings-autoConnectivityTest', String(autoConnectivityTestEnabled.value))
-    localStorage.setItem('app-settings-switchNotify', String(switchNotifyEnabled.value))
-    localStorage.setItem('app-settings-roundRobin', String(roundRobinEnabled.value))
+    syncAppSettingsCache()
 
     window.dispatchEvent(new CustomEvent('app-settings-updated'))
   } catch (error) {
     console.error('failed to save app settings', error)
   } finally {
     saveBusy.value = false
+    if (saveQueued) {
+      saveQueued = false
+      void persistAppSettingsNow()
+    }
   }
+}
+
+const persistAppSettings = () => {
+  if (settingsLoading.value) return
+  if (persistTimer) {
+    window.clearTimeout(persistTimer)
+  }
+  persistTimer = window.setTimeout(() => {
+    persistTimer = undefined
+    void persistAppSettingsNow()
+  }, persistDebounceMs)
+}
+
+const flushPendingPersist = () => {
+  if (!persistTimer) return
+  window.clearTimeout(persistTimer)
+  persistTimer = undefined
+  void persistAppSettingsNow()
 }
 
 const loadUpdateState = async () => {
@@ -1136,6 +1162,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  flushPendingPersist()
   if (unsubscribeWebdavSync) {
     unsubscribeWebdavSync()
     unsubscribeWebdavSync = null

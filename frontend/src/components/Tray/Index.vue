@@ -14,6 +14,7 @@ const rootRef = ref<HTMLElement | null>(null)
 let ticker: number | undefined
 let refreshBusy = false
 let storageRefreshTimer: number | undefined
+let lastWindowHeight = 0
 
 const formatCurrency = (value?: number) => {
   if (value === undefined || value === null || Number.isNaN(value)) {
@@ -88,6 +89,12 @@ const normalizeForecastDisplay = (value: unknown): ForecastDisplay => {
   return 'datetime'
 }
 
+const normalizeBudgetTotal = (value: unknown) => {
+  const normalized = Number(value ?? 0)
+  if (!Number.isFinite(normalized)) return 0
+  return Math.max(normalized, 0)
+}
+
 const createTrayCard = (platform: Platform, brandName: string, brandIcon: string) => {
   const used = ref(0)
   const usedRaw = ref(0)
@@ -125,10 +132,6 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
   const hostingLabel = computed(() => (hostingEnabled.value ? '托管中' : '未托管'))
 
   const applyUsedAdjustment = (rawUsed: number) => {
-    if (platform === 'claude') {
-      if (!Number.isFinite(usedAdjustment.value)) return 0
-      return Math.max(usedAdjustment.value, 0)
-    }
     const adjusted = rawUsed + usedAdjustment.value
     if (!Number.isFinite(adjusted)) return 0
     return Math.max(adjusted, 0)
@@ -185,8 +188,7 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
     if (method === 'cycle') {
       const start = cycleStart ?? startOfDay(now)
       const elapsedSeconds = Math.max((now.getTime() - start.getTime()) / 1000, 1)
-      const cycleUsed = platform === 'claude' ? used.value : usedRaw.value
-      return calculateRate(cycleUsed, elapsedSeconds)
+      return calculateRate(usedRaw.value, elapsedSeconds)
     }
     if (method === '10m') {
       const windowStart = new Date(now.getTime() - 10 * 60 * 1000)
@@ -261,11 +263,11 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
 
   const applySettings = (settings: AppSettings) => {
     if (platform === 'codex') {
-      total.value = Number(settings?.budget_total_codex ?? 0)
+      total.value = normalizeBudgetTotal(settings?.budget_total_codex)
       cycleEnabled.value = settings?.budget_cycle_enabled_codex ?? false
       cycleMode.value = settings?.budget_cycle_mode_codex === 'weekly' ? 'weekly' : 'daily'
       refreshTime.value = settings?.budget_refresh_time_codex || '00:00'
-      refreshDay.value = Number.isFinite(settings?.budget_refresh_day_codex) ? settings?.budget_refresh_day_codex : 1
+      refreshDay.value = normalizeRefreshDay(Number(settings?.budget_refresh_day_codex ?? 1))
       showCountdown.value = settings?.budget_show_countdown_codex ?? false
       showForecast.value = settings?.budget_show_forecast_codex ?? false
       forecastMethod.value = normalizeForecastMethod(settings?.budget_forecast_method_codex ?? 'cycle')
@@ -274,11 +276,11 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
       usedAdjustment.value = Number.isFinite(rawAdjustment) ? rawAdjustment : 0
       return
     }
-    total.value = Number(settings?.budget_total ?? 0)
+    total.value = normalizeBudgetTotal(settings?.budget_total)
     cycleEnabled.value = settings?.budget_cycle_enabled ?? false
     cycleMode.value = settings?.budget_cycle_mode === 'weekly' ? 'weekly' : 'daily'
     refreshTime.value = settings?.budget_refresh_time || '00:00'
-    refreshDay.value = Number.isFinite(settings?.budget_refresh_day) ? settings?.budget_refresh_day : 1
+    refreshDay.value = normalizeRefreshDay(Number(settings?.budget_refresh_day ?? 1))
     showCountdown.value = settings?.budget_show_countdown ?? false
     showForecast.value = settings?.budget_show_forecast ?? false
     forecastMethod.value = normalizeForecastMethod(settings?.budget_forecast_method ?? 'cycle')
@@ -350,9 +352,14 @@ const setupTicker = () => {
   if (ticker) {
     window.clearInterval(ticker)
   }
-  if (cards.some((card) => card.showCountdown || card.showForecast)) {
-    ticker = window.setInterval(updateAllDerivedLabels, 60_000)
-  }
+  ticker = window.setInterval(() => {
+    if (document.hidden) return
+    if (refreshBusy) {
+      updateAllDerivedLabels()
+      return
+    }
+    void refreshAll()
+  }, 60_000)
 }
 
 const resizeToContent = async () => {
@@ -360,8 +367,10 @@ const resizeToContent = async () => {
   if (!rootRef.value) return
   const height = Math.ceil(rootRef.value.getBoundingClientRect().height)
   if (height <= 0) return
+  if (height === lastWindowHeight) return
   try {
     await Call.ByName('main.AppService.SetTrayWindowHeight', height)
+    lastWindowHeight = height
   } catch (error) {
     console.error('failed to resize tray window', error)
   }
@@ -373,6 +382,8 @@ const refreshAll = async () => {
   try {
     const settings = await fetchAppSettings()
     await Promise.all(cards.map((card) => card.refresh(settings)))
+  } catch (error) {
+    console.error('failed to refresh tray cards', error)
   } finally {
     refreshBusy = false
     updateAllDerivedLabels()
@@ -382,6 +393,11 @@ const refreshAll = async () => {
 }
 
 const handleFocus = () => {
+  void refreshAll()
+}
+
+const handleVisibilityChange = () => {
+  if (document.hidden || refreshBusy) return
   void refreshAll()
 }
 
@@ -406,8 +422,10 @@ const handleStorageChange = (event: StorageEvent) => {
 }
 
 onMounted(() => {
+  lastWindowHeight = 0
   void refreshAll()
   window.addEventListener('focus', handleFocus)
+  window.addEventListener('visibilitychange', handleVisibilityChange)
   window.addEventListener('app-settings-updated', handleFocus)
   window.addEventListener('storage', handleStorageChange)
 })
@@ -415,11 +433,15 @@ onMounted(() => {
 onUnmounted(() => {
   if (ticker) {
     window.clearInterval(ticker)
+    ticker = undefined
   }
   if (storageRefreshTimer) {
     window.clearTimeout(storageRefreshTimer)
+    storageRefreshTimer = undefined
   }
+  lastWindowHeight = 0
   window.removeEventListener('focus', handleFocus)
+  window.removeEventListener('visibilitychange', handleVisibilityChange)
   window.removeEventListener('app-settings-updated', handleFocus)
   window.removeEventListener('storage', handleStorageChange)
 })

@@ -219,7 +219,7 @@ sudo rpm -i codeswitch-*.rpm
 
 ```bash
 # 安装 Go 1.24+
-# 安装 Node.js 18+
+# 安装 Node.js 20.19+（或 22.12+）
 
 # 安装 Wails CLI
 go install github.com/wailsapp/wails/v3/cmd/wails3@latest
@@ -230,6 +230,22 @@ go install github.com/wailsapp/wails/v3/cmd/wails3@latest
 ```bash
 wails3 task dev
 ```
+
+### 前端可选环境变量
+
+`persistAppSettings` 的防抖间隔支持通过 Vite 环境变量配置：
+
+| 变量名 | 默认值 | 可选范围 | 说明 |
+|------|------|------|------|
+| `VITE_SETTINGS_PERSIST_DEBOUNCE_MS` | `150` | `0 - 2000` | 设置页保存防抖间隔（毫秒） |
+
+配置示例（`frontend/.env.local`）：
+
+```bash
+VITE_SETTINGS_PERSIST_DEBOUNCE_MS=300
+```
+
+修改后重启前端开发进程或重新构建即可生效。
 
 ### 构建发布
 

@@ -631,7 +631,7 @@
         "budgetTotal": "预算总额",
         "budgetTotalHint": "用于托盘菜单进度条（USD）",
         "budgetUsedAdjustment": "已用额度调整",
-        "budgetUsedAdjustmentHintClaude": "直接作为 Claude 托盘已用金额显示值（USD）",
+        "budgetUsedAdjustmentHintClaude": "在实际已用金额基础上做调整（USD）",
         "budgetUsedAdjustmentHintCodex": "在实际已用金额基础上做调整（USD）",
         "budgetCycle": "启用刷新周期",
         "budgetCycleHint": "开启后按刷新时间重置预算统计",
