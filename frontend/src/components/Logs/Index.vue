@@ -323,7 +323,7 @@
         ref="logInfoTooltipRef"
         id="logs-table-info-tooltip"
         class="log-info-tooltip"
-        :class="`is-${logInfoTooltip.placement}`"
+        :class="[`is-${logInfoTooltip.placement}`, `log-info-tooltip--${logInfoTooltip.detail.variant}`]"
         :style="{ left: `${logInfoTooltip.left}px`, top: `${logInfoTooltip.top}px` }"
         role="tooltip"
         @mouseenter="handleLogInfoTooltipMouseEnter"
@@ -585,6 +585,7 @@ const statsSeries = computed<LogStatsSeries[]>(() => stats.value?.series ?? [])
 type CostTooltipPlacement = 'above' | 'below'
 
 type LogInfoTooltipTone = 'muted' | 'source-provider-api' | 'source-builtin' | 'source-none'
+type LogInfoTooltipVariant = 'model' | 'verify'
 
 type LogInfoTooltipRow = {
   key: string
@@ -595,6 +596,7 @@ type LogInfoTooltipRow = {
 
 type LogInfoTooltipDetail = {
   title: string
+  variant: LogInfoTooltipVariant
   rows: LogInfoTooltipRow[]
 }
 
@@ -602,6 +604,18 @@ type CostTooltipPriceLine = {
   key: string
   label: string
   value: string
+}
+
+type TokenRatePriceLineOptions = {
+  inputPerToken: number
+  outputPerToken: number
+  reasoningPerToken: number
+  cacheCreatePerToken: number
+  cacheReadPerToken: number
+  includeCacheRead: boolean
+  includeReasoning: boolean
+  suffix?: string
+  includeCacheMultiplierHint?: boolean
 }
 
 type CostTooltipDetail = {
@@ -616,9 +630,11 @@ type CostTooltipDetail = {
 const modelPricingRows = ref<ModelPricingRow[]>([])
 const modelPricingLoading = ref(false)
 const modelPricingLoaded = ref(false)
+let modelPricingLoadingTask: Promise<void> | null = null
 
 const logInfoTooltipRef = ref<HTMLElement | null>(null)
 const logInfoTooltipAnchorRef = ref<HTMLElement | null>(null)
+const logInfoTooltipRequestId = ref(0)
 let logInfoTooltipHideTimer: number | null = null
 let logInfoTooltipShowTimer: number | null = null
 const logInfoTooltip = reactive<{
@@ -1509,7 +1525,8 @@ const buildModelInfoTooltipDetail = (item: RequestLog): LogInfoTooltipDetail => 
       tone: `source-${priceSourceClass(item)}` as LogInfoTooltipTone,
     },
   ]
-  const matchedModel = String(item.matched_pricing_model ?? '').trim()
+  const costDetail = buildCostTooltipDetail(item)
+  const matchedModel = String(costDetail.pricingModel ?? item.matched_pricing_model ?? '').trim()
   const currentModel = String(item.model ?? '').trim()
   if (
     matchedModel &&
@@ -1521,8 +1538,49 @@ const buildModelInfoTooltipDetail = (item: RequestLog): LogInfoTooltipDetail => 
       value: matchedModel,
     })
   }
+
+  if (costDetail.priceLines.length > 0) {
+    rows.push(
+      ...costDetail.priceLines.map((line) => ({
+        key: `pricing-line-${line.key}`,
+        label: line.label,
+        value: line.value,
+      }))
+    )
+  } else {
+    rows.push({
+      key: 'pricing-line-empty',
+      label: t('components.logs.table.tooltipLabels.pricingDetail'),
+      value: t('components.logs.table.tooltipValues.pricingUnavailable'),
+      tone: 'muted',
+    })
+  }
+
+  rows.push({
+    key: 'pricing-formula',
+    label: t('components.logs.table.tooltipLabels.pricingFormula'),
+    value: costDetail.formula,
+    tone: costDetail.priceLines.length > 0 ? undefined : 'muted',
+  })
+
+  if (costDetail.note) {
+    rows.push({
+      key: 'pricing-note',
+      label: t('components.logs.table.tooltipLabels.pricingHint'),
+      value: costDetail.note,
+      tone: 'muted',
+    })
+  }
+
+  rows.push({
+    key: 'pricing-recorded-cost',
+    label: t('components.logs.table.tooltipLabels.recordedCost'),
+    value: formatUsdPrecise(safeNumber(item.total_cost)),
+  })
+
   return {
     title: t('components.logs.table.model'),
+    variant: 'model',
     rows,
   }
 }
@@ -1532,6 +1590,7 @@ const buildVerifyInfoTooltipDetail = (item: RequestLog): LogInfoTooltipDetail =>
   const response = resolveTooltipModelValue(item.response_model)
   return {
     title: t('components.logs.table.verify'),
+    variant: 'verify',
     rows: [
       {
         key: 'requested-model',
@@ -1563,16 +1622,26 @@ const formatMultiplierValue = (value: number) => {
 }
 
 const loadModelPricingRows = async () => {
-  if (modelPricingLoaded.value || modelPricingLoading.value) return
-  modelPricingLoading.value = true
-  try {
-    modelPricingRows.value = (await listModelPricing()) ?? []
-    modelPricingLoaded.value = true
-  } catch (error) {
-    console.error('failed to load model pricing rows', error)
-  } finally {
-    modelPricingLoading.value = false
+  if (modelPricingLoaded.value) return
+  if (modelPricingLoadingTask) {
+    await modelPricingLoadingTask
+    return
   }
+
+  modelPricingLoading.value = true
+  modelPricingLoadingTask = (async () => {
+    try {
+      modelPricingRows.value = (await listModelPricing()) ?? []
+      modelPricingLoaded.value = true
+    } catch (error) {
+      console.error('failed to load model pricing rows', error)
+    } finally {
+      modelPricingLoading.value = false
+      modelPricingLoadingTask = null
+    }
+  })()
+
+  await modelPricingLoadingTask
 }
 
 const resolvePricingRow = (item: RequestLog) => {
@@ -1626,26 +1695,193 @@ const resolveGroupMultiplier = (item: RequestLog) => {
 
 const hasBreakdownCostPayload = (item: RequestLog) =>
   [item.input_cost, item.output_cost, item.reasoning_cost, item.cache_create_cost, item.cache_read_cost]
-    .some(value => value !== undefined && value !== null)
+    .some(value => safeNumber(value) > 0)
 
-const buildCostTooltipDetail = (item: RequestLog): CostTooltipDetail => {
-  const source = resolvePriceSource(item)
-  const fallbackModelName = String(item.matched_pricing_model ?? item.model ?? '').trim() || '—'
-  const recordedCost = safeNumber(item.total_cost)
+const isTrueFlag = (value: unknown) => value === true || value === 1
 
-  if (source === 'provider_api') {
-    return {
-      pricingModel: fallbackModelName,
-      hasPricing: true,
-      priceLines: [],
-      formula: t('components.logs.costTooltip.providerApiFormula'),
-      note: t('components.logs.costTooltip.providerApiHint'),
-      recordedCostHint: t('components.logs.costTooltip.recordedCostHint', {
-        cost: formatUsdPrecise(recordedCost),
-      }),
-    }
+const hasProviderPricingSnapshot = (item: RequestLog) =>
+  isTrueFlag(item.provider_pricing_available)
+
+const isProviderPerCallValueSet = (value?: number, setFlag?: boolean) => {
+  if (isTrueFlag(setFlag)) return true
+  if (setFlag === false) return false
+  return safeNumber(value) > 0
+}
+
+const withPriceSuffix = (value: string, suffix?: string) => {
+  const normalized = String(suffix ?? '').trim()
+  return normalized ? `${value} ${normalized}` : value
+}
+
+const buildTokenRatePriceLines = ({
+  inputPerToken,
+  outputPerToken,
+  reasoningPerToken,
+  cacheCreatePerToken,
+  cacheReadPerToken,
+  includeCacheRead,
+  includeReasoning,
+  suffix = '',
+  includeCacheMultiplierHint = false,
+}: TokenRatePriceLineOptions): CostTooltipPriceLine[] => {
+  const completionMultiplier = inputPerToken > 0 ? outputPerToken / inputPerToken : 0
+  const cacheCreateMultiplier = inputPerToken > 0 ? cacheCreatePerToken / inputPerToken : 0
+  const cacheReadMultiplier = inputPerToken > 0 ? cacheReadPerToken / inputPerToken : 0
+  const tokensUnit = '/ 1M tokens'
+  const priceLines: CostTooltipPriceLine[] = [
+    {
+      key: 'prompt',
+      label: t('components.logs.costTooltip.promptPrice'),
+      value: withPriceSuffix(`${formatUsdPerMillion(inputPerToken)} ${tokensUnit}`, suffix),
+    },
+  ]
+
+  const completionValue =
+    completionMultiplier > 0 && inputPerToken > 0
+      ? `${formatUsdPerMillion(inputPerToken)} * ${formatMultiplierValue(completionMultiplier)} = ${formatUsdPerMillion(outputPerToken)} ${tokensUnit}`
+      : `${formatUsdPerMillion(outputPerToken)} ${tokensUnit}`
+  priceLines.push({
+    key: 'completion',
+    label: t('components.logs.costTooltip.completionPrice'),
+    value: withPriceSuffix(completionValue, suffix),
+  })
+
+  const cacheCreateHint = includeCacheMultiplierHint
+    ? ` (${t('components.logs.costTooltip.cacheCreateMultiplierLabel', { multiplier: formatMultiplierValue(cacheCreateMultiplier) })})`
+    : ''
+  const cacheCreateValue =
+    cacheCreateMultiplier > 0 && inputPerToken > 0
+      ? `${formatUsdPerMillion(inputPerToken)} * ${formatMultiplierValue(cacheCreateMultiplier)} = ${formatUsdPerMillion(cacheCreatePerToken)} ${tokensUnit}${cacheCreateHint}`
+      : `${formatUsdPerMillion(cacheCreatePerToken)} ${tokensUnit}`
+  priceLines.push({
+    key: 'cacheCreate',
+    label: t('components.logs.costTooltip.cacheCreatePrice'),
+    value: withPriceSuffix(cacheCreateValue, suffix),
+  })
+
+  if (includeCacheRead) {
+    const cacheReadHint = includeCacheMultiplierHint
+      ? ` (${t('components.logs.costTooltip.cacheReadMultiplierLabel', { multiplier: formatMultiplierValue(cacheReadMultiplier) })})`
+      : ''
+    const cacheReadValue =
+      cacheReadMultiplier > 0 && inputPerToken > 0
+        ? `${formatUsdPerMillion(inputPerToken)} * ${formatMultiplierValue(cacheReadMultiplier)} = ${formatUsdPerMillion(cacheReadPerToken)} ${tokensUnit}${cacheReadHint}`
+        : `${formatUsdPerMillion(cacheReadPerToken)} ${tokensUnit}`
+    priceLines.push({
+      key: 'cacheRead',
+      label: t('components.logs.costTooltip.cacheReadPrice'),
+      value: withPriceSuffix(cacheReadValue, suffix),
+    })
   }
 
+  if (includeReasoning) {
+    priceLines.push({
+      key: 'reasoning',
+      label: t('components.logs.costTooltip.reasoningPrice'),
+      value: withPriceSuffix(`${formatUsdPerMillion(reasoningPerToken)} ${tokensUnit}`, suffix),
+    })
+  }
+
+  return priceLines
+}
+
+const buildObservedCostPriceLines = (item: RequestLog): CostTooltipPriceLine[] => {
+  if (!hasBreakdownCostPayload(item)) return []
+
+  const inputTokens = Math.max(0, Math.round(safeNumber(item.input_tokens)))
+  const outputTokens = Math.max(0, Math.round(safeNumber(item.output_tokens)))
+  const reasoningTokens = Math.max(0, Math.round(safeNumber(item.reasoning_tokens)))
+  const cacheCreateTokens = Math.max(0, Math.round(safeNumber(item.cache_create_tokens)))
+  const cacheReadTokens = Math.max(0, Math.round(safeNumber(item.cache_read_tokens)))
+
+  const inputCost = Math.max(0, safeNumber(item.input_cost))
+  const outputCost = Math.max(0, safeNumber(item.output_cost))
+  const reasoningCost = Math.max(0, safeNumber(item.reasoning_cost))
+  const cacheCreateCost = Math.max(0, safeNumber(item.cache_create_cost))
+  const cacheReadCost = Math.max(0, safeNumber(item.cache_read_cost))
+
+  const inputPerToken = inputTokens > 0 ? inputCost / inputTokens : 0
+  const outputPerToken = outputTokens > 0 ? outputCost / outputTokens : 0
+  const reasoningPerToken = reasoningTokens > 0 ? reasoningCost / reasoningTokens : 0
+  const cacheCreatePerToken = cacheCreateTokens > 0 ? cacheCreateCost / cacheCreateTokens : 0
+  const cacheReadPerToken = cacheReadTokens > 0 ? cacheReadCost / cacheReadTokens : 0
+
+  return buildTokenRatePriceLines({
+    inputPerToken,
+    outputPerToken,
+    reasoningPerToken,
+    cacheCreatePerToken,
+    cacheReadPerToken,
+    includeCacheRead: cacheReadTokens > 0,
+    includeReasoning: reasoningTokens > 0,
+    suffix: t('components.logs.costTooltip.observedPriceSuffix'),
+  })
+}
+
+const buildProviderAPITokenPriceLines = (item: RequestLog): CostTooltipPriceLine[] => {
+  if (!hasProviderPricingSnapshot(item)) return []
+  if (safeNumber(item.provider_quota_type) !== 0) return []
+
+  const inputPerToken = Math.max(0, safeNumber(item.provider_input_usd_per_m)) / PER_MILLION_TOKENS
+  const outputPerToken = Math.max(0, safeNumber(item.provider_output_usd_per_m)) / PER_MILLION_TOKENS
+  return buildTokenRatePriceLines({
+    inputPerToken,
+    outputPerToken,
+    reasoningPerToken: outputPerToken,
+    cacheCreatePerToken: inputPerToken,
+    cacheReadPerToken: inputPerToken,
+    includeCacheRead: true,
+    includeReasoning: Math.max(0, Math.round(safeNumber(item.reasoning_tokens))) > 0,
+  })
+}
+
+const buildProviderAPIPerCallPriceLines = (item: RequestLog): CostTooltipPriceLine[] => {
+  if (!hasProviderPricingSnapshot(item)) return []
+  if (safeNumber(item.provider_quota_type) !== 1) return []
+
+  const hasUnified = isProviderPerCallValueSet(item.provider_per_call_unified, item.provider_per_call_unified_set)
+  const hasInput = isProviderPerCallValueSet(item.provider_per_call_input, item.provider_per_call_input_set)
+  const hasOutput = isProviderPerCallValueSet(item.provider_per_call_output, item.provider_per_call_output_set)
+  const lines: CostTooltipPriceLine[] = []
+
+  if (hasUnified) {
+    lines.push({
+      key: 'per-call-unified',
+      label: t('components.logs.costTooltip.perCallUnifiedPrice'),
+      value: `${formatUsdPrecise(safeNumber(item.provider_per_call_unified))} ${t('components.logs.costTooltip.perRequestSuffix')}`,
+    })
+  }
+
+  if (hasInput) {
+    lines.push({
+      key: 'per-call-input',
+      label: t('components.logs.costTooltip.perCallInputPrice'),
+      value: `${formatUsdPrecise(safeNumber(item.provider_per_call_input))} ${t('components.logs.costTooltip.perRequestSuffix')}`,
+    })
+  }
+
+  if (hasOutput) {
+    lines.push({
+      key: 'per-call-output',
+      label: t('components.logs.costTooltip.perCallOutputPrice'),
+      value: `${formatUsdPrecise(safeNumber(item.provider_per_call_output))} ${t('components.logs.costTooltip.perRequestSuffix')}`,
+    })
+  }
+
+  return lines
+}
+
+const mergeCostTooltipNotes = (...notes: Array<string | undefined>) =>
+  notes
+    .map(note => String(note ?? '').trim())
+    .filter(note => note.length > 0)
+    .join(' ')
+
+const buildBuiltinCostTooltipDetail = (
+  item: RequestLog,
+  fallbackModelName: string,
+  recordedCost: number,
+): CostTooltipDetail => {
   const pricingRow = resolvePricingRow(item)
   const modelName = String(pricingRow?.model ?? fallbackModelName).trim() || '—'
 
@@ -1702,54 +1938,16 @@ const buildCostTooltipDetail = (item: RequestLog): CostTooltipDetail => {
   const groupMultiplier = resolveGroupMultiplier(item)
   const calculatedTotal = inputCost + cacheCreateCost + cacheReadCost + outputCost + reasoningCost
 
-  const tokensUnit = '/ 1M tokens'
-  const priceLines: CostTooltipPriceLine[] = [
-    {
-      key: 'prompt',
-      label: t('components.logs.costTooltip.promptPrice'),
-      value: `${formatUsdPerMillion(inputPerToken)} ${tokensUnit}`,
-    },
-  ]
-
-  const completionValue =
-    completionMultiplier > 0 && inputPerToken > 0
-      ? `${formatUsdPerMillion(inputPerToken)} * ${formatMultiplierValue(completionMultiplier)} = ${formatUsdPerMillion(outputPerToken)} ${tokensUnit}`
-      : `${formatUsdPerMillion(outputPerToken)} ${tokensUnit}`
-  priceLines.push({
-    key: 'completion',
-    label: t('components.logs.costTooltip.completionPrice'),
-    value: completionValue,
+  const priceLines = buildTokenRatePriceLines({
+    inputPerToken,
+    outputPerToken,
+    reasoningPerToken,
+    cacheCreatePerToken,
+    cacheReadPerToken,
+    includeCacheRead: cacheReadTokens > 0,
+    includeReasoning: reasoningTokens > 0,
+    includeCacheMultiplierHint: true,
   })
-
-  const cacheCreateValue =
-    cacheCreateMultiplier > 0 && inputPerToken > 0
-      ? `${formatUsdPerMillion(inputPerToken)} * ${formatMultiplierValue(cacheCreateMultiplier)} = ${formatUsdPerMillion(cacheCreatePerToken)} ${tokensUnit} (${t('components.logs.costTooltip.cacheCreateMultiplierLabel', { multiplier: formatMultiplierValue(cacheCreateMultiplier) })})`
-      : `${formatUsdPerMillion(cacheCreatePerToken)} ${tokensUnit}`
-  priceLines.push({
-    key: 'cacheCreate',
-    label: t('components.logs.costTooltip.cacheCreatePrice'),
-    value: cacheCreateValue,
-  })
-
-  if (cacheReadTokens > 0) {
-    const cacheReadValue =
-      cacheReadMultiplier > 0 && inputPerToken > 0
-        ? `${formatUsdPerMillion(inputPerToken)} * ${formatMultiplierValue(cacheReadMultiplier)} = ${formatUsdPerMillion(cacheReadPerToken)} ${tokensUnit} (${t('components.logs.costTooltip.cacheReadMultiplierLabel', { multiplier: formatMultiplierValue(cacheReadMultiplier) })})`
-        : `${formatUsdPerMillion(cacheReadPerToken)} ${tokensUnit}`
-    priceLines.push({
-      key: 'cacheRead',
-      label: t('components.logs.costTooltip.cacheReadPrice'),
-      value: cacheReadValue,
-    })
-  }
-
-  if (reasoningTokens > 0) {
-    priceLines.push({
-      key: 'reasoning',
-      label: t('components.logs.costTooltip.reasoningPrice'),
-      value: `${formatUsdPerMillion(reasoningPerToken)} ${tokensUnit}`,
-    })
-  }
 
   const formulaParts: string[] = []
   if (inputTokens > 0 && inputPerToken > 0) {
@@ -1806,6 +2004,98 @@ const buildCostTooltipDetail = (item: RequestLog): CostTooltipDetail => {
   }
 }
 
+const buildCostTooltipDetail = (item: RequestLog): CostTooltipDetail => {
+  const source = resolvePriceSource(item)
+  const fallbackModelName = String(item.matched_pricing_model ?? item.model ?? '').trim() || '—'
+  const recordedCost = safeNumber(item.total_cost)
+  const providerSnapshotAvailable = hasProviderPricingSnapshot(item)
+  const shouldAvoidFallbackEstimate =
+    !providerSnapshotAvailable && recordedCost <= COST_TOOLTIP_DIFF_EPSILON
+  const recordedCostHint = t('components.logs.costTooltip.recordedCostHint', {
+    cost: formatUsdPrecise(recordedCost),
+  })
+
+  if (source === 'provider_api') {
+    const providerTokenLines = buildProviderAPITokenPriceLines(item)
+    if (providerTokenLines.length > 0) {
+      return {
+        pricingModel: fallbackModelName,
+        hasPricing: true,
+        priceLines: providerTokenLines,
+        formula: t('components.logs.costTooltip.providerApiFormula'),
+        note: t('components.logs.costTooltip.providerApiHint'),
+        recordedCostHint,
+      }
+    }
+
+    const providerPerCallLines = buildProviderAPIPerCallPriceLines(item)
+    if (providerPerCallLines.length > 0) {
+      return {
+        pricingModel: fallbackModelName,
+        hasPricing: true,
+        priceLines: providerPerCallLines,
+        formula: t('components.logs.costTooltip.providerApiPerCallFormula'),
+        note: t('components.logs.costTooltip.providerApiHint'),
+        recordedCostHint,
+      }
+    }
+
+    if (shouldAvoidFallbackEstimate) {
+      return {
+        pricingModel: fallbackModelName,
+        hasPricing: false,
+        priceLines: [],
+        formula: t('components.logs.costTooltip.providerApiFormula'),
+        note: mergeCostTooltipNotes(
+          t('components.logs.costTooltip.providerApiHint'),
+          t('components.logs.costTooltip.providerApiZeroCostHint'),
+        ),
+        recordedCostHint,
+      }
+    }
+
+    const observedPriceLines = buildObservedCostPriceLines(item)
+    if (observedPriceLines.length > 0) {
+      return {
+        pricingModel: fallbackModelName,
+        hasPricing: true,
+        priceLines: observedPriceLines,
+        formula: t('components.logs.costTooltip.providerApiFormula'),
+        note: providerSnapshotAvailable
+          ? t('components.logs.costTooltip.providerApiHint')
+          : mergeCostTooltipNotes(
+            t('components.logs.costTooltip.providerApiHint'),
+            t('components.logs.costTooltip.providerApiFallbackHint'),
+          ),
+        recordedCostHint,
+      }
+    }
+
+    const builtinFallbackDetail = buildBuiltinCostTooltipDetail(item, fallbackModelName, recordedCost)
+    if (builtinFallbackDetail.hasPricing) {
+      return {
+        ...builtinFallbackDetail,
+        note: mergeCostTooltipNotes(
+          t('components.logs.costTooltip.providerApiFallbackHint'),
+          builtinFallbackDetail.note,
+        ),
+        recordedCostHint,
+      }
+    }
+
+    return {
+      pricingModel: fallbackModelName,
+      hasPricing: false,
+      priceLines: [],
+      formula: t('components.logs.costTooltip.providerApiFormula'),
+      note: t('components.logs.costTooltip.providerApiHint'),
+      recordedCostHint,
+    }
+  }
+
+  return buildBuiltinCostTooltipDetail(item, fallbackModelName, recordedCost)
+}
+
 const getCostTooltipSize = () => {
   const rect = costTooltipRef.value?.getBoundingClientRect()
   return {
@@ -1855,6 +2145,7 @@ const clearLogInfoTooltipHideTimer = () => {
 const hideLogInfoTooltipImmediately = () => {
   clearLogInfoTooltipShowTimer()
   clearLogInfoTooltipHideTimer()
+  logInfoTooltipRequestId.value += 1
   logInfoTooltipAnchorRef.value = null
   logInfoTooltip.visible = false
   logInfoTooltip.detail = null
@@ -1912,13 +2203,38 @@ const showLogInfoTooltip = async (
   updateLogInfoTooltipPosition(target)
 }
 
+const refreshModelInfoTooltipAfterPricingLoad = async (
+  item: RequestLog,
+  target: HTMLElement,
+  requestId: number,
+) => {
+  if (modelPricingLoaded.value) return
+  await loadModelPricingRows()
+  if (requestId !== logInfoTooltipRequestId.value) return
+  if (!logInfoTooltip.visible) return
+  if (logInfoTooltipAnchorRef.value !== target) return
+  logInfoTooltip.detail = buildModelInfoTooltipDetail(item)
+  updateLogInfoTooltipPosition(target)
+  await nextTick()
+  if (requestId !== logInfoTooltipRequestId.value) return
+  if (logInfoTooltipAnchorRef.value !== target) return
+  updateLogInfoTooltipPosition(target)
+}
+
 const showModelInfoTooltip = (item: RequestLog, event: MouseEvent | FocusEvent) => {
   const target = resolveTooltipAnchor(event)
-  void showLogInfoTooltip(buildModelInfoTooltipDetail(item), target)
+  if (!target) return
+  const requestId = ++logInfoTooltipRequestId.value
+  void (async () => {
+    await showLogInfoTooltip(buildModelInfoTooltipDetail(item), target)
+    if (requestId !== logInfoTooltipRequestId.value) return
+    await refreshModelInfoTooltipAfterPricingLoad(item, target, requestId)
+  })()
 }
 
 const showVerifyInfoTooltip = (item: RequestLog, event: MouseEvent | FocusEvent) => {
   const target = resolveTooltipAnchor(event)
+  logInfoTooltipRequestId.value += 1
   void showLogInfoTooltip(buildVerifyInfoTooltipDetail(item), target)
 }
 
@@ -1929,7 +2245,12 @@ const scheduleShowModelInfoTooltip = (item: RequestLog, event: MouseEvent) => {
   clearLogInfoTooltipShowTimer()
   logInfoTooltipShowTimer = window.setTimeout(() => {
     logInfoTooltipShowTimer = null
-    void showLogInfoTooltip(buildModelInfoTooltipDetail(item), target)
+    const requestId = ++logInfoTooltipRequestId.value
+    void (async () => {
+      await showLogInfoTooltip(buildModelInfoTooltipDetail(item), target)
+      if (requestId !== logInfoTooltipRequestId.value) return
+      await refreshModelInfoTooltipAfterPricingLoad(item, target, requestId)
+    })()
   }, LOG_TOOLTIP_SHOW_DELAY_MS)
 }
 
@@ -1940,6 +2261,7 @@ const scheduleShowVerifyInfoTooltip = (item: RequestLog, event: MouseEvent) => {
   clearLogInfoTooltipShowTimer()
   logInfoTooltipShowTimer = window.setTimeout(() => {
     logInfoTooltipShowTimer = null
+    logInfoTooltipRequestId.value += 1
     void showLogInfoTooltip(buildVerifyInfoTooltipDetail(item), target)
   }, LOG_TOOLTIP_SHOW_DELAY_MS)
 }
@@ -2030,13 +2352,18 @@ const showCostTooltipByAnchor = async (item: RequestLog, target: HTMLElement | n
   clearCostTooltipHideTimer()
   costTooltipAnchorRef.value = target
   const requestId = ++costTooltipRequestId.value
-  if (resolvePriceSource(item) !== 'provider_api') {
-    await loadModelPricingRows()
-  }
+  costTooltip.detail = buildCostTooltipDetail(item)
+  costTooltip.visible = true
+  updateCostTooltipPosition(target)
+  await nextTick()
+  if (requestId !== costTooltipRequestId.value) return
+  if (costTooltipAnchorRef.value !== target) return
+  updateCostTooltipPosition(target)
+  if (modelPricingLoaded.value) return
+  await loadModelPricingRows()
   if (requestId !== costTooltipRequestId.value) return
   if (costTooltipAnchorRef.value !== target) return
   costTooltip.detail = buildCostTooltipDetail(item)
-  costTooltip.visible = true
   updateCostTooltipPosition(target)
   await nextTick()
   if (requestId !== costTooltipRequestId.value) return
@@ -2664,6 +2991,15 @@ html.dark .cost-breakdown-tooltip__note {
   pointer-events: auto;
 }
 
+.log-info-tooltip--model {
+  width: min(560px, calc(100vw - 20px));
+  max-width: 560px;
+  max-height: min(72vh, 460px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0.82rem 0.95rem;
+}
+
 .log-info-tooltip::after {
   content: '';
   position: absolute;
@@ -2701,11 +3037,21 @@ html.dark .cost-breakdown-tooltip__note {
   gap: 0.36rem;
 }
 
+.log-info-tooltip--model .log-info-tooltip__rows {
+  margin-top: 0.56rem;
+  gap: 0.42rem;
+}
+
 .log-info-tooltip__row {
   display: grid;
   grid-template-columns: minmax(74px, max-content) minmax(0, 1fr);
   gap: 0.62rem;
   align-items: start;
+}
+
+.log-info-tooltip--model .log-info-tooltip__row {
+  grid-template-columns: minmax(110px, max-content) minmax(0, 1fr);
+  gap: 0.7rem;
 }
 
 .log-info-tooltip__label {

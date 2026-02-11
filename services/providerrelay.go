@@ -888,8 +888,7 @@ func (prs *ProviderRelayService) forwardRequest(
 			requestLog.CacheCreateTokens,
 			requestLog.CacheReadTokens,
 		)
-		requestLog.TotalCost = costResult.TotalCost
-		requestLog.PriceSource = costResult.PriceSource
+		applyRequestLogCostResult(requestLog, costResult)
 
 		// 【修复】判空保护：避免队列未初始化时 panic
 		if GlobalDBQueueLogs == nil {
@@ -905,8 +904,13 @@ func (prs *ProviderRelayService) forwardRequest(
 			INSERT INTO request_log (
 				platform, model, requested_model, response_model, provider, http_code,
 				input_tokens, output_tokens, cache_create_tokens, cache_read_tokens,
-				reasoning_tokens, is_stream, duration_sec, total_cost, price_source
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				reasoning_tokens, is_stream, duration_sec, total_cost, price_source,
+				input_cost, output_cost, reasoning_cost, cache_create_cost, cache_read_cost,
+				ephemeral_5m_cost, ephemeral_1h_cost, has_pricing, matched_pricing_model,
+				provider_pricing_available, provider_quota_type, provider_input_usd_per_m, provider_output_usd_per_m,
+				provider_per_call_unified, provider_per_call_input, provider_per_call_output,
+				provider_per_call_unified_set, provider_per_call_input_set, provider_per_call_output_set
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`,
 			requestLog.Platform,
 			requestLog.Model,
@@ -923,6 +927,25 @@ func (prs *ProviderRelayService) forwardRequest(
 			requestLog.DurationSec,
 			requestLog.TotalCost,
 			requestLog.PriceSource,
+			requestLog.InputCost,
+			requestLog.OutputCost,
+			requestLog.ReasoningCost,
+			requestLog.CacheCreateCost,
+			requestLog.CacheReadCost,
+			requestLog.Ephemeral5mCost,
+			requestLog.Ephemeral1hCost,
+			boolToInt(requestLog.HasPricing),
+			requestLog.MatchedPricingModel,
+			boolToInt(requestLog.ProviderPricingAvailable),
+			requestLog.ProviderQuotaType,
+			requestLog.ProviderInputUSDPerM,
+			requestLog.ProviderOutputUSDPerM,
+			requestLog.ProviderPerCallUnified,
+			requestLog.ProviderPerCallInput,
+			requestLog.ProviderPerCallOutput,
+			boolToInt(requestLog.ProviderPerCallUnifiedSet),
+			boolToInt(requestLog.ProviderPerCallInputSet),
+			boolToInt(requestLog.ProviderPerCallOutputSet),
 		)
 
 		if err != nil {
@@ -1121,6 +1144,25 @@ func ensureRequestLogTableWithDB(db *sql.DB) error {
 		duration_sec REAL DEFAULT 0,
 		total_cost REAL DEFAULT 0,
 		price_source TEXT DEFAULT '',
+		input_cost REAL DEFAULT 0,
+		output_cost REAL DEFAULT 0,
+		reasoning_cost REAL DEFAULT 0,
+		cache_create_cost REAL DEFAULT 0,
+		cache_read_cost REAL DEFAULT 0,
+		ephemeral_5m_cost REAL DEFAULT 0,
+		ephemeral_1h_cost REAL DEFAULT 0,
+		has_pricing INTEGER DEFAULT 0,
+		matched_pricing_model TEXT DEFAULT '',
+		provider_pricing_available INTEGER DEFAULT 0,
+		provider_quota_type INTEGER DEFAULT -1,
+		provider_input_usd_per_m REAL DEFAULT 0,
+		provider_output_usd_per_m REAL DEFAULT 0,
+		provider_per_call_unified REAL DEFAULT 0,
+		provider_per_call_input REAL DEFAULT 0,
+		provider_per_call_output REAL DEFAULT 0,
+		provider_per_call_unified_set INTEGER DEFAULT 0,
+		provider_per_call_input_set INTEGER DEFAULT 0,
+		provider_per_call_output_set INTEGER DEFAULT 0,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	)`
 
@@ -1147,6 +1189,63 @@ func ensureRequestLogTableWithDB(db *sql.DB) error {
 		return err
 	}
 	if err := ensureRequestLogColumn(db, "response_model", "TEXT DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "input_cost", "REAL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "output_cost", "REAL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "reasoning_cost", "REAL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "cache_create_cost", "REAL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "cache_read_cost", "REAL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "ephemeral_5m_cost", "REAL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "ephemeral_1h_cost", "REAL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "has_pricing", "INTEGER DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "matched_pricing_model", "TEXT DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "provider_pricing_available", "INTEGER DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "provider_quota_type", "INTEGER DEFAULT -1"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "provider_input_usd_per_m", "REAL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "provider_output_usd_per_m", "REAL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "provider_per_call_unified", "REAL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "provider_per_call_input", "REAL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "provider_per_call_output", "REAL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "provider_per_call_unified_set", "INTEGER DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "provider_per_call_input_set", "INTEGER DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "provider_per_call_output_set", "INTEGER DEFAULT 0"); err != nil {
 		return err
 	}
 	if err := ensureRequestLogIndex(db, "idx_request_log_created_at", "created_at"); err != nil {
@@ -1382,33 +1481,70 @@ func normalizeRequestLogInputTokens(reqLog *ReqeustLog) {
 	reqLog.InputTokens = totalInput - cacheTotal
 }
 
+func applyRequestLogCostResult(reqLog *ReqeustLog, result requestLogCostResult) {
+	if reqLog == nil {
+		return
+	}
+	reqLog.InputCost = result.InputCost
+	reqLog.OutputCost = result.OutputCost
+	reqLog.ReasoningCost = result.ReasoningCost
+	reqLog.CacheCreateCost = result.CacheCreateCost
+	reqLog.CacheReadCost = result.CacheReadCost
+	reqLog.Ephemeral5mCost = result.Ephemeral5mCost
+	reqLog.Ephemeral1hCost = result.Ephemeral1hCost
+	reqLog.TotalCost = result.TotalCost
+	reqLog.HasPricing = result.HasPricing
+	reqLog.MatchedPricingModel = result.MatchedPricingModel
+	reqLog.PriceSource = result.PriceSource
+	reqLog.ProviderPricingAvailable = result.ProviderPricingAvailable
+	reqLog.ProviderQuotaType = result.ProviderQuotaType
+	reqLog.ProviderInputUSDPerM = result.ProviderInputUSDPerM
+	reqLog.ProviderOutputUSDPerM = result.ProviderOutputUSDPerM
+	reqLog.ProviderPerCallUnified = result.ProviderPerCallUnified
+	reqLog.ProviderPerCallInput = result.ProviderPerCallInput
+	reqLog.ProviderPerCallOutput = result.ProviderPerCallOutput
+	reqLog.ProviderPerCallUnifiedSet = result.ProviderPerCallUnifiedSet
+	reqLog.ProviderPerCallInputSet = result.ProviderPerCallInputSet
+	reqLog.ProviderPerCallOutputSet = result.ProviderPerCallOutputSet
+}
+
 type ReqeustLog struct {
-	ID                  int64   `json:"id"`
-	Platform            string  `json:"platform"` // claude、codex 或 gemini
-	Model               string  `json:"model"`
-	RequestedModel      string  `json:"requested_model,omitempty"`
-	ResponseModel       string  `json:"response_model,omitempty"`
-	Provider            string  `json:"provider"` // provider name
-	PriceSource         string  `json:"price_source,omitempty"`
-	HttpCode            int     `json:"http_code"`
-	InputTokens         int     `json:"input_tokens"`
-	OutputTokens        int     `json:"output_tokens"`
-	CacheCreateTokens   int     `json:"cache_create_tokens"`
-	CacheReadTokens     int     `json:"cache_read_tokens"`
-	ReasoningTokens     int     `json:"reasoning_tokens"`
-	IsStream            bool    `json:"is_stream"`
-	DurationSec         float64 `json:"duration_sec"`
-	CreatedAt           string  `json:"created_at"`
-	InputCost           float64 `json:"input_cost"`
-	OutputCost          float64 `json:"output_cost"`
-	ReasoningCost       float64 `json:"reasoning_cost"`
-	CacheCreateCost     float64 `json:"cache_create_cost"`
-	CacheReadCost       float64 `json:"cache_read_cost"`
-	Ephemeral5mCost     float64 `json:"ephemeral_5m_cost"`
-	Ephemeral1hCost     float64 `json:"ephemeral_1h_cost"`
-	TotalCost           float64 `json:"total_cost"`
-	HasPricing          bool    `json:"has_pricing"`
-	MatchedPricingModel string  `json:"matched_pricing_model,omitempty"`
+	ID                        int64   `json:"id"`
+	Platform                  string  `json:"platform"` // claude、codex 或 gemini
+	Model                     string  `json:"model"`
+	RequestedModel            string  `json:"requested_model,omitempty"`
+	ResponseModel             string  `json:"response_model,omitempty"`
+	Provider                  string  `json:"provider"` // provider name
+	PriceSource               string  `json:"price_source,omitempty"`
+	HttpCode                  int     `json:"http_code"`
+	InputTokens               int     `json:"input_tokens"`
+	OutputTokens              int     `json:"output_tokens"`
+	CacheCreateTokens         int     `json:"cache_create_tokens"`
+	CacheReadTokens           int     `json:"cache_read_tokens"`
+	ReasoningTokens           int     `json:"reasoning_tokens"`
+	IsStream                  bool    `json:"is_stream"`
+	DurationSec               float64 `json:"duration_sec"`
+	CreatedAt                 string  `json:"created_at"`
+	InputCost                 float64 `json:"input_cost"`
+	OutputCost                float64 `json:"output_cost"`
+	ReasoningCost             float64 `json:"reasoning_cost"`
+	CacheCreateCost           float64 `json:"cache_create_cost"`
+	CacheReadCost             float64 `json:"cache_read_cost"`
+	Ephemeral5mCost           float64 `json:"ephemeral_5m_cost"`
+	Ephemeral1hCost           float64 `json:"ephemeral_1h_cost"`
+	TotalCost                 float64 `json:"total_cost"`
+	HasPricing                bool    `json:"has_pricing"`
+	MatchedPricingModel       string  `json:"matched_pricing_model,omitempty"`
+	ProviderPricingAvailable  bool    `json:"provider_pricing_available"`
+	ProviderQuotaType         int     `json:"provider_quota_type"`
+	ProviderInputUSDPerM      float64 `json:"provider_input_usd_per_m"`
+	ProviderOutputUSDPerM     float64 `json:"provider_output_usd_per_m"`
+	ProviderPerCallUnified    float64 `json:"provider_per_call_unified"`
+	ProviderPerCallInput      float64 `json:"provider_per_call_input"`
+	ProviderPerCallOutput     float64 `json:"provider_per_call_output"`
+	ProviderPerCallUnifiedSet bool    `json:"provider_per_call_unified_set"`
+	ProviderPerCallInputSet   bool    `json:"provider_per_call_input_set"`
+	ProviderPerCallOutputSet  bool    `json:"provider_per_call_output_set"`
 
 	ProviderAPIURL   string `json:"-"`
 	ProviderAPIKey   string `json:"-"`
@@ -1811,8 +1947,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 				requestLog.CacheCreateTokens,
 				requestLog.CacheReadTokens,
 			)
-			requestLog.TotalCost = costResult.TotalCost
-			requestLog.PriceSource = costResult.PriceSource
+			applyRequestLogCostResult(requestLog, costResult)
 			if GlobalDBQueueLogs == nil {
 				return
 			}
@@ -1822,13 +1957,23 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 				INSERT INTO request_log (
 					platform, model, requested_model, response_model, provider, http_code,
 					input_tokens, output_tokens, cache_create_tokens, cache_read_tokens,
-					reasoning_tokens, is_stream, duration_sec, total_cost, price_source
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+					reasoning_tokens, is_stream, duration_sec, total_cost, price_source,
+					input_cost, output_cost, reasoning_cost, cache_create_cost, cache_read_cost,
+					ephemeral_5m_cost, ephemeral_1h_cost, has_pricing, matched_pricing_model,
+					provider_pricing_available, provider_quota_type, provider_input_usd_per_m, provider_output_usd_per_m,
+					provider_per_call_unified, provider_per_call_input, provider_per_call_output,
+					provider_per_call_unified_set, provider_per_call_input_set, provider_per_call_output_set
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			`,
 				requestLog.Platform, requestLog.Model, requestLog.RequestedModel, requestLog.ResponseModel, requestLog.Provider, requestLog.HttpCode,
 				requestLog.InputTokens, requestLog.OutputTokens, requestLog.CacheCreateTokens,
 				requestLog.CacheReadTokens, requestLog.ReasoningTokens,
 				boolToInt(requestLog.IsStream), requestLog.DurationSec, requestLog.TotalCost, requestLog.PriceSource,
+				requestLog.InputCost, requestLog.OutputCost, requestLog.ReasoningCost, requestLog.CacheCreateCost, requestLog.CacheReadCost,
+				requestLog.Ephemeral5mCost, requestLog.Ephemeral1hCost, boolToInt(requestLog.HasPricing), requestLog.MatchedPricingModel,
+				boolToInt(requestLog.ProviderPricingAvailable), requestLog.ProviderQuotaType, requestLog.ProviderInputUSDPerM, requestLog.ProviderOutputUSDPerM,
+				requestLog.ProviderPerCallUnified, requestLog.ProviderPerCallInput, requestLog.ProviderPerCallOutput,
+				boolToInt(requestLog.ProviderPerCallUnifiedSet), boolToInt(requestLog.ProviderPerCallInputSet), boolToInt(requestLog.ProviderPerCallOutputSet),
 			)
 		}()
 

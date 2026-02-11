@@ -29,6 +29,16 @@ export type RequestLog = {
   has_pricing?: boolean
   matched_pricing_model?: string
   price_source?: string
+  provider_pricing_available?: boolean
+  provider_quota_type?: number
+  provider_input_usd_per_m?: number
+  provider_output_usd_per_m?: number
+  provider_per_call_unified?: number
+  provider_per_call_input?: number
+  provider_per_call_output?: number
+  provider_per_call_unified_set?: boolean
+  provider_per_call_input_set?: boolean
+  provider_per_call_output_set?: boolean
 }
 
 type RequestLogQuery = {

@@ -100,23 +100,42 @@ func (ls *LogService) ListRequestLogsV2(platform string, provider string, limit 
 			createdAtValue = createdAtLocal.Format(timeLayout)
 		}
 		logEntry := ReqeustLog{
-			ID:                record.GetInt64("id"),
-			Platform:          record.GetString("platform"),
-			Model:             record.GetString("model"),
-			RequestedModel:    record.GetString("requested_model"),
-			ResponseModel:     record.GetString("response_model"),
-			Provider:          record.GetString("provider"),
-			PriceSource:       record.GetString("price_source"),
-			HttpCode:          record.GetInt("http_code"),
-			InputTokens:       record.GetInt("input_tokens"),
-			OutputTokens:      record.GetInt("output_tokens"),
-			CacheCreateTokens: record.GetInt("cache_create_tokens"),
-			CacheReadTokens:   record.GetInt("cache_read_tokens"),
-			ReasoningTokens:   record.GetInt("reasoning_tokens"),
-			CreatedAt:         createdAtValue,
-			IsStream:          record.GetBool("is_stream"),
-			DurationSec:       record.GetFloat64("duration_sec"),
-			TotalCost:         record.GetFloat64("total_cost"),
+			ID:                        record.GetInt64("id"),
+			Platform:                  record.GetString("platform"),
+			Model:                     record.GetString("model"),
+			RequestedModel:            record.GetString("requested_model"),
+			ResponseModel:             record.GetString("response_model"),
+			Provider:                  record.GetString("provider"),
+			PriceSource:               record.GetString("price_source"),
+			HttpCode:                  record.GetInt("http_code"),
+			InputTokens:               record.GetInt("input_tokens"),
+			OutputTokens:              record.GetInt("output_tokens"),
+			CacheCreateTokens:         record.GetInt("cache_create_tokens"),
+			CacheReadTokens:           record.GetInt("cache_read_tokens"),
+			ReasoningTokens:           record.GetInt("reasoning_tokens"),
+			CreatedAt:                 createdAtValue,
+			IsStream:                  record.GetBool("is_stream"),
+			DurationSec:               record.GetFloat64("duration_sec"),
+			InputCost:                 record.GetFloat64("input_cost"),
+			OutputCost:                record.GetFloat64("output_cost"),
+			ReasoningCost:             record.GetFloat64("reasoning_cost"),
+			CacheCreateCost:           record.GetFloat64("cache_create_cost"),
+			CacheReadCost:             record.GetFloat64("cache_read_cost"),
+			Ephemeral5mCost:           record.GetFloat64("ephemeral_5m_cost"),
+			Ephemeral1hCost:           record.GetFloat64("ephemeral_1h_cost"),
+			TotalCost:                 record.GetFloat64("total_cost"),
+			HasPricing:                record.GetBool("has_pricing"),
+			MatchedPricingModel:       record.GetString("matched_pricing_model"),
+			ProviderPricingAvailable:  record.GetBool("provider_pricing_available"),
+			ProviderQuotaType:         record.GetInt("provider_quota_type"),
+			ProviderInputUSDPerM:      record.GetFloat64("provider_input_usd_per_m"),
+			ProviderOutputUSDPerM:     record.GetFloat64("provider_output_usd_per_m"),
+			ProviderPerCallUnified:    record.GetFloat64("provider_per_call_unified"),
+			ProviderPerCallInput:      record.GetFloat64("provider_per_call_input"),
+			ProviderPerCallOutput:     record.GetFloat64("provider_per_call_output"),
+			ProviderPerCallUnifiedSet: record.GetBool("provider_per_call_unified_set"),
+			ProviderPerCallInputSet:   record.GetBool("provider_per_call_input_set"),
+			ProviderPerCallOutputSet:  record.GetBool("provider_per_call_output_set"),
 		}
 		applyLogPricing(pricingSnapshot, &logEntry)
 		logs = append(logs, logEntry)
@@ -153,6 +172,19 @@ func normalizeRequestLogPriceSource(source string, totalCost float64) string {
 	}
 }
 
+func hasStoredBreakdownCost(logEntry *ReqeustLog) bool {
+	if logEntry == nil {
+		return false
+	}
+	return logEntry.InputCost != 0 ||
+		logEntry.OutputCost != 0 ||
+		logEntry.ReasoningCost != 0 ||
+		logEntry.CacheCreateCost != 0 ||
+		logEntry.CacheReadCost != 0 ||
+		logEntry.Ephemeral5mCost != 0 ||
+		logEntry.Ephemeral1hCost != 0
+}
+
 func applyLogPricing(pricing *modelpricing.Service, logEntry *ReqeustLog) {
 	if logEntry == nil {
 		return
@@ -164,11 +196,15 @@ func applyLogPricing(pricing *modelpricing.Service, logEntry *ReqeustLog) {
 		logEntry.HasPricing = true
 	}
 	if logEntry.PriceSource == requestLogPriceSourceProviderAPI {
-		logEntry.HasPricing = true
-		return
-	}
-
-	if pricing == nil || strings.TrimSpace(logEntry.Model) == "" {
+		if logEntry.ProviderPricingAvailable || hasStoredBreakdownCost(logEntry) {
+			logEntry.HasPricing = true
+			return
+		}
+		if pricing == nil || strings.TrimSpace(logEntry.Model) == "" {
+			logEntry.HasPricing = true
+			return
+		}
+	} else if pricing == nil || strings.TrimSpace(logEntry.Model) == "" {
 		return
 	}
 
@@ -181,6 +217,13 @@ func applyLogPricing(pricing *modelpricing.Service, logEntry *ReqeustLog) {
 	}
 
 	breakdown := pricing.CalculateCost(logEntry.Model, usage)
+	if !breakdown.HasPricing {
+		if logEntry.PriceSource == requestLogPriceSourceProviderAPI {
+			logEntry.HasPricing = true
+		}
+		return
+	}
+
 	logEntry.InputCost = breakdown.InputCost
 	logEntry.OutputCost = breakdown.OutputCost
 	logEntry.ReasoningCost = breakdown.ReasoningCost
@@ -188,18 +231,17 @@ func applyLogPricing(pricing *modelpricing.Service, logEntry *ReqeustLog) {
 	logEntry.CacheReadCost = breakdown.CacheReadCost
 	logEntry.Ephemeral5mCost = breakdown.Ephemeral5mCost
 	logEntry.Ephemeral1hCost = breakdown.Ephemeral1hCost
-	if breakdown.HasPricing {
-		logEntry.HasPricing = true
-		if logEntry.PriceSource == requestLogPriceSourceNone {
-			logEntry.PriceSource = requestLogPriceSourceBuiltin
-		}
+	logEntry.HasPricing = true
+	if logEntry.PriceSource == requestLogPriceSourceNone {
+		logEntry.PriceSource = requestLogPriceSourceBuiltin
 	}
-	if logEntry.TotalCost <= 0 && breakdown.TotalCost > 0 {
+	if logEntry.TotalCost <= 0 && breakdown.TotalCost > 0 && logEntry.PriceSource != requestLogPriceSourceProviderAPI {
 		logEntry.TotalCost = breakdown.TotalCost
 		logEntry.PriceSource = requestLogPriceSourceBuiltin
 	}
 	if breakdown.FuzzyMatched &&
 		strings.TrimSpace(breakdown.PricingModel) != "" &&
+		logEntry.PriceSource != requestLogPriceSourceProviderAPI &&
 		!strings.EqualFold(strings.TrimSpace(logEntry.Model), strings.TrimSpace(breakdown.PricingModel)) {
 		logEntry.MatchedPricingModel = breakdown.PricingModel
 	}
