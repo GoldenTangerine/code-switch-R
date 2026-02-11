@@ -538,14 +538,19 @@
           "mismatch": "不一致",
           "unknown": "未知"
         },
-        "verifyDetail": "选中：{requested} · 返回：{response}",
-        "verifyDetailUnknown": "选中或返回模型缺失",
-        "matchedPricingModel": "≈ 计价匹配：{model}",
-        "priceSource": "计价来源：{source}",
         "priceSourceValues": {
           "providerApi": "接口模型价格",
           "builtin": "内置价格表",
           "none": "无可用价格"
+        },
+        "tooltipLabels": {
+          "pricingSource": "计价来源",
+          "pricingModel": "计价模型",
+          "requestedModel": "选中模型",
+          "responseModel": "返回模型"
+        },
+        "tooltipValues": {
+          "missing": "未记录"
         },
         "httpCode": "HTTP",
         "stream": "传输",

@@ -233,27 +233,38 @@
                 <td>{{ item.platform || '—' }}</td>
                 <td>{{ item.provider || '—' }}</td>
                 <td class="model-cell">
-                  <div class="model-name">{{ item.model || '—' }}</div>
-                  <div
-                    v-if="item.matched_pricing_model && item.matched_pricing_model !== item.model"
-                    class="model-pricing-match"
+                  <span
+                    class="model-name model-meta-trigger"
+                    tabindex="0"
+                    aria-haspopup="true"
+                    :aria-label="formatModelInfoAriaLabel(item)"
+                    :aria-describedby="logInfoTooltip.visible ? 'logs-table-info-tooltip' : undefined"
+                    @mouseenter="scheduleShowModelInfoTooltip(item, $event)"
+                    @mousemove="moveLogInfoTooltip($event)"
+                    @mouseleave="hideLogInfoTooltip"
+                    @focus="showModelInfoTooltip(item, $event)"
+                    @blur="hideLogInfoTooltip"
+                    @keydown.esc="hideLogInfoTooltipImmediately"
                   >
-                    {{ t('components.logs.table.matchedPricingModel', { model: item.matched_pricing_model }) }}
-                  </div>
-                  <div
-                    class="model-pricing-source"
-                    :class="`source-${priceSourceClass(item)}`"
-                  >
-                    {{ t('components.logs.table.priceSource', { source: formatPriceSource(item) }) }}
-                  </div>
+                    {{ item.model || '—' }}
+                  </span>
                 </td>
                 <td class="verify-cell">
-                  <span :class="['verify-tag', `verify-${resolveModelVerifyStatus(item)}`]">
+                  <span
+                    :class="['verify-tag', `verify-${resolveModelVerifyStatus(item)}`, 'verify-meta-trigger']"
+                    tabindex="0"
+                    aria-haspopup="true"
+                    :aria-label="formatVerifyInfoAriaLabel(item)"
+                    :aria-describedby="logInfoTooltip.visible ? 'logs-table-info-tooltip' : undefined"
+                    @mouseenter="scheduleShowVerifyInfoTooltip(item, $event)"
+                    @mousemove="moveLogInfoTooltip($event)"
+                    @mouseleave="hideLogInfoTooltip"
+                    @focus="showVerifyInfoTooltip(item, $event)"
+                    @blur="hideLogInfoTooltip"
+                    @keydown.esc="hideLogInfoTooltipImmediately"
+                  >
                     {{ formatModelVerifyStatus(item) }}
                   </span>
-                  <div class="verify-detail">
-                    {{ formatModelVerifyDetail(item) }}
-                  </div>
                 </td>
                 <td :class="['code', httpCodeClass(item.http_code)]">{{ item.http_code }}</td>
                 <td><span :class="['stream-tag', item.is_stream ? 'on' : 'off']">{{ formatStream(item.is_stream) }}</span></td>
@@ -262,7 +273,10 @@
                   <span
                     class="cost-cell__value"
                     tabindex="0"
-                    @mouseenter="showCostTooltip(item, $event)"
+                    aria-haspopup="true"
+                    :aria-label="formatCostAriaLabel(item)"
+                    :aria-describedby="costTooltip.visible ? 'logs-table-cost-tooltip' : undefined"
+                    @mouseenter="scheduleShowCostTooltip(item, $event)"
                     @mousemove="moveCostTooltip($event)"
                     @mouseleave="hideCostTooltip"
                     @focus="showCostTooltip(item, $event)"
@@ -305,8 +319,40 @@
 
     <Teleport to="body">
       <div
+        v-if="logInfoTooltip.visible && logInfoTooltip.detail"
+        ref="logInfoTooltipRef"
+        id="logs-table-info-tooltip"
+        class="log-info-tooltip"
+        :class="`is-${logInfoTooltip.placement}`"
+        :style="{ left: `${logInfoTooltip.left}px`, top: `${logInfoTooltip.top}px` }"
+        role="tooltip"
+        @mouseenter="handleLogInfoTooltipMouseEnter"
+        @mouseleave="handleLogInfoTooltipMouseLeave"
+      >
+        <p class="log-info-tooltip__title">{{ logInfoTooltip.detail.title }}</p>
+        <div class="log-info-tooltip__rows">
+          <div
+            v-for="row in logInfoTooltip.detail.rows"
+            :key="row.key"
+            class="log-info-tooltip__row"
+          >
+            <span class="log-info-tooltip__label">{{ row.label }}</span>
+            <span
+              class="log-info-tooltip__value"
+              :class="row.tone ? `tone-${row.tone}` : ''"
+            >
+              {{ row.value }}
+            </span>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <Teleport to="body">
+      <div
         v-if="costTooltip.visible && costTooltip.detail"
         ref="costTooltipRef"
+        id="logs-table-cost-tooltip"
         class="cost-breakdown-tooltip"
         :class="`is-${costTooltip.placement}`"
         :style="{ left: `${costTooltip.left}px`, top: `${costTooltip.top}px` }"
@@ -538,6 +584,20 @@ const statsSeries = computed<LogStatsSeries[]>(() => stats.value?.series ?? [])
 
 type CostTooltipPlacement = 'above' | 'below'
 
+type LogInfoTooltipTone = 'muted' | 'source-provider-api' | 'source-builtin' | 'source-none'
+
+type LogInfoTooltipRow = {
+  key: string
+  label: string
+  value: string
+  tone?: LogInfoTooltipTone
+}
+
+type LogInfoTooltipDetail = {
+  title: string
+  rows: LogInfoTooltipRow[]
+}
+
 type CostTooltipPriceLine = {
   key: string
   label: string
@@ -557,10 +617,29 @@ const modelPricingRows = ref<ModelPricingRow[]>([])
 const modelPricingLoading = ref(false)
 const modelPricingLoaded = ref(false)
 
+const logInfoTooltipRef = ref<HTMLElement | null>(null)
+const logInfoTooltipAnchorRef = ref<HTMLElement | null>(null)
+let logInfoTooltipHideTimer: number | null = null
+let logInfoTooltipShowTimer: number | null = null
+const logInfoTooltip = reactive<{
+  visible: boolean
+  left: number
+  top: number
+  placement: CostTooltipPlacement
+  detail: LogInfoTooltipDetail | null
+}>({
+  visible: false,
+  left: 0,
+  top: 0,
+  placement: 'above',
+  detail: null,
+})
+
 const costTooltipRef = ref<HTMLElement | null>(null)
 const costTooltipAnchorRef = ref<HTMLElement | null>(null)
 const costTooltipRequestId = ref(0)
 let costTooltipHideTimer: number | null = null
+let costTooltipShowTimer: number | null = null
 const costTooltip = reactive<{
   visible: boolean
   left: number
@@ -582,6 +661,10 @@ const COST_TOOLTIP_VERTICAL_OFFSET = 12
 const COST_TOOLTIP_HORIZONTAL_MARGIN = 14
 const COST_TOOLTIP_VERTICAL_MARGIN = 20
 const COST_TOOLTIP_DIFF_EPSILON = 0.000001
+const LOG_INFO_TOOLTIP_DEFAULT_WIDTH = 340
+const LOG_INFO_TOOLTIP_DEFAULT_HEIGHT = 136
+const LOG_INFO_TOOLTIP_VERTICAL_OFFSET = 10
+const LOG_TOOLTIP_SHOW_DELAY_MS = 100
 
 const formatBytes = (bytes?: number, rows?: number) => {
   const value = Number(bytes ?? 0)
@@ -1261,16 +1344,21 @@ const resolveModelVerifyStatus = (item: RequestLog): ModelVerifyStatus => {
 const formatModelVerifyStatus = (item: RequestLog) =>
   t(`components.logs.table.verifyValues.${resolveModelVerifyStatus(item)}`)
 
-const formatModelVerifyDetail = (item: RequestLog) => {
-  const requestedModel = String(item.requested_model ?? '').trim()
-  const responseModel = String(item.response_model ?? '').trim()
-  if (!requestedModel || !responseModel) {
-    return t('components.logs.table.verifyDetailUnknown')
+const formatModelInfoAriaLabel = (item: RequestLog) =>
+  `${t('components.logs.table.model')}: ${item.model || '—'}`
+
+const formatVerifyInfoAriaLabel = (item: RequestLog) =>
+  `${t('components.logs.table.verify')}: ${formatModelVerifyStatus(item)}`
+
+const resolveTooltipModelValue = (value?: string): { value: string; tone?: LogInfoTooltipTone } => {
+  const normalized = String(value ?? '').trim()
+  if (!normalized) {
+    return {
+      value: t('components.logs.table.tooltipValues.missing'),
+      tone: 'muted',
+    }
   }
-  return t('components.logs.table.verifyDetail', {
-    requested: requestedModel,
-    response: responseModel,
-  })
+  return { value: normalized }
 }
 
 const httpCodeClass = (code: number) => {
@@ -1410,6 +1498,55 @@ const priceSourceClass = (item: RequestLog) => {
   const source = resolvePriceSource(item)
   if (source === 'provider_api') return 'provider-api'
   return source
+}
+
+const buildModelInfoTooltipDetail = (item: RequestLog): LogInfoTooltipDetail => {
+  const rows: LogInfoTooltipRow[] = [
+    {
+      key: 'price-source',
+      label: t('components.logs.table.tooltipLabels.pricingSource'),
+      value: formatPriceSource(item),
+      tone: `source-${priceSourceClass(item)}` as LogInfoTooltipTone,
+    },
+  ]
+  const matchedModel = String(item.matched_pricing_model ?? '').trim()
+  const currentModel = String(item.model ?? '').trim()
+  if (
+    matchedModel &&
+    normalizeModelName(matchedModel) !== normalizeModelName(currentModel)
+  ) {
+    rows.push({
+      key: 'pricing-model',
+      label: t('components.logs.table.tooltipLabels.pricingModel'),
+      value: matchedModel,
+    })
+  }
+  return {
+    title: t('components.logs.table.model'),
+    rows,
+  }
+}
+
+const buildVerifyInfoTooltipDetail = (item: RequestLog): LogInfoTooltipDetail => {
+  const requested = resolveTooltipModelValue(item.requested_model)
+  const response = resolveTooltipModelValue(item.response_model)
+  return {
+    title: t('components.logs.table.verify'),
+    rows: [
+      {
+        key: 'requested-model',
+        label: t('components.logs.table.tooltipLabels.requestedModel'),
+        value: requested.value,
+        tone: requested.tone,
+      },
+      {
+        key: 'response-model',
+        label: t('components.logs.table.tooltipLabels.responseModel'),
+        value: response.value,
+        tone: response.tone,
+      },
+    ],
+  }
 }
 
 const formatUsdPrecise = (value: number) => `$${safeNumber(value).toFixed(6)}`
@@ -1690,6 +1827,151 @@ const getViewportSize = () => {
   return { width: 0, height: 0 }
 }
 
+const getLogInfoTooltipSize = () => {
+  const rect = logInfoTooltipRef.value?.getBoundingClientRect()
+  return {
+    width: rect?.width ?? LOG_INFO_TOOLTIP_DEFAULT_WIDTH,
+    height: rect?.height ?? LOG_INFO_TOOLTIP_DEFAULT_HEIGHT,
+  }
+}
+
+const resolveTooltipAnchor = (event: MouseEvent | FocusEvent) =>
+  event.currentTarget as HTMLElement | null
+
+const clearLogInfoTooltipShowTimer = () => {
+  if (logInfoTooltipShowTimer != null) {
+    window.clearTimeout(logInfoTooltipShowTimer)
+    logInfoTooltipShowTimer = null
+  }
+}
+
+const clearLogInfoTooltipHideTimer = () => {
+  if (logInfoTooltipHideTimer != null) {
+    window.clearTimeout(logInfoTooltipHideTimer)
+    logInfoTooltipHideTimer = null
+  }
+}
+
+const hideLogInfoTooltipImmediately = () => {
+  clearLogInfoTooltipShowTimer()
+  clearLogInfoTooltipHideTimer()
+  logInfoTooltipAnchorRef.value = null
+  logInfoTooltip.visible = false
+  logInfoTooltip.detail = null
+}
+
+const scheduleHideLogInfoTooltip = () => {
+  clearLogInfoTooltipShowTimer()
+  clearLogInfoTooltipHideTimer()
+  logInfoTooltipHideTimer = window.setTimeout(() => {
+    hideLogInfoTooltipImmediately()
+  }, 90)
+}
+
+const updateLogInfoTooltipPosition = (anchor: HTMLElement | null) => {
+  if (!anchor) return
+  const anchorRect = anchor.getBoundingClientRect()
+  const { width: tooltipWidth, height: tooltipHeight } = getLogInfoTooltipSize()
+  const { width: viewportWidth, height: viewportHeight } = getViewportSize()
+
+  const centerX = anchorRect.left + anchorRect.width / 2
+  const minLeft = COST_TOOLTIP_HORIZONTAL_MARGIN + tooltipWidth / 2
+  const maxLeft =
+    viewportWidth > 0 ? viewportWidth - tooltipWidth / 2 - COST_TOOLTIP_HORIZONTAL_MARGIN : centerX
+  logInfoTooltip.left = clampToRange(centerX, minLeft, maxLeft)
+
+  const canShowAbove =
+    anchorRect.top - tooltipHeight - LOG_INFO_TOOLTIP_VERTICAL_OFFSET >= COST_TOOLTIP_VERTICAL_MARGIN
+  const shouldPlaceBelow = !canShowAbove
+  logInfoTooltip.placement = shouldPlaceBelow ? 'below' : 'above'
+
+  const desiredTop = shouldPlaceBelow
+    ? anchorRect.bottom + LOG_INFO_TOOLTIP_VERTICAL_OFFSET
+    : anchorRect.top - tooltipHeight - LOG_INFO_TOOLTIP_VERTICAL_OFFSET
+  const maxTop =
+    viewportHeight > 0 ? viewportHeight - tooltipHeight - COST_TOOLTIP_VERTICAL_MARGIN : desiredTop
+  logInfoTooltip.top = clampToRange(desiredTop, COST_TOOLTIP_VERTICAL_MARGIN, maxTop)
+}
+
+const showLogInfoTooltip = async (
+  detail: LogInfoTooltipDetail,
+  target: HTMLElement | null,
+) => {
+  if (!target) return
+  if (costTooltip.visible) {
+    hideCostTooltipImmediately()
+  }
+  clearLogInfoTooltipShowTimer()
+  clearLogInfoTooltipHideTimer()
+  logInfoTooltipAnchorRef.value = target
+  logInfoTooltip.detail = detail
+  logInfoTooltip.visible = true
+  updateLogInfoTooltipPosition(target)
+  await nextTick()
+  if (logInfoTooltipAnchorRef.value !== target) return
+  updateLogInfoTooltipPosition(target)
+}
+
+const showModelInfoTooltip = (item: RequestLog, event: MouseEvent | FocusEvent) => {
+  const target = resolveTooltipAnchor(event)
+  void showLogInfoTooltip(buildModelInfoTooltipDetail(item), target)
+}
+
+const showVerifyInfoTooltip = (item: RequestLog, event: MouseEvent | FocusEvent) => {
+  const target = resolveTooltipAnchor(event)
+  void showLogInfoTooltip(buildVerifyInfoTooltipDetail(item), target)
+}
+
+const scheduleShowModelInfoTooltip = (item: RequestLog, event: MouseEvent) => {
+  const target = resolveTooltipAnchor(event)
+  if (!target) return
+  clearLogInfoTooltipHideTimer()
+  clearLogInfoTooltipShowTimer()
+  logInfoTooltipShowTimer = window.setTimeout(() => {
+    logInfoTooltipShowTimer = null
+    void showLogInfoTooltip(buildModelInfoTooltipDetail(item), target)
+  }, LOG_TOOLTIP_SHOW_DELAY_MS)
+}
+
+const scheduleShowVerifyInfoTooltip = (item: RequestLog, event: MouseEvent) => {
+  const target = resolveTooltipAnchor(event)
+  if (!target) return
+  clearLogInfoTooltipHideTimer()
+  clearLogInfoTooltipShowTimer()
+  logInfoTooltipShowTimer = window.setTimeout(() => {
+    logInfoTooltipShowTimer = null
+    void showLogInfoTooltip(buildVerifyInfoTooltipDetail(item), target)
+  }, LOG_TOOLTIP_SHOW_DELAY_MS)
+}
+
+const moveLogInfoTooltip = (event: MouseEvent) => {
+  if (!logInfoTooltip.visible) return
+  clearLogInfoTooltipHideTimer()
+  const target = event.currentTarget as HTMLElement | null
+  if (!target) return
+  logInfoTooltipAnchorRef.value = target
+  updateLogInfoTooltipPosition(target)
+}
+
+const hideLogInfoTooltip = () => {
+  scheduleHideLogInfoTooltip()
+}
+
+const handleLogInfoTooltipMouseEnter = () => {
+  clearLogInfoTooltipHideTimer()
+}
+
+const handleLogInfoTooltipMouseLeave = () => {
+  scheduleHideLogInfoTooltip()
+}
+
+const clearCostTooltipShowTimer = () => {
+  if (costTooltipShowTimer != null) {
+    window.clearTimeout(costTooltipShowTimer)
+    costTooltipShowTimer = null
+  }
+}
+
 const clearCostTooltipHideTimer = () => {
   if (costTooltipHideTimer != null) {
     window.clearTimeout(costTooltipHideTimer)
@@ -1698,6 +1980,7 @@ const clearCostTooltipHideTimer = () => {
 }
 
 const hideCostTooltipImmediately = () => {
+  clearCostTooltipShowTimer()
   clearCostTooltipHideTimer()
   costTooltipRequestId.value += 1
   costTooltipAnchorRef.value = null
@@ -1706,6 +1989,7 @@ const hideCostTooltipImmediately = () => {
 }
 
 const scheduleHideCostTooltip = () => {
+  clearCostTooltipShowTimer()
   clearCostTooltipHideTimer()
   costTooltipHideTimer = window.setTimeout(() => {
     hideCostTooltipImmediately()
@@ -1737,9 +2021,12 @@ const updateCostTooltipPosition = (anchor: HTMLElement | null) => {
   costTooltip.top = clampToRange(desiredTop, COST_TOOLTIP_VERTICAL_MARGIN, maxTop)
 }
 
-const showCostTooltip = async (item: RequestLog, event: MouseEvent | FocusEvent) => {
-  const target = event.currentTarget as HTMLElement | null
+const showCostTooltipByAnchor = async (item: RequestLog, target: HTMLElement | null) => {
   if (!target) return
+  if (logInfoTooltip.visible) {
+    hideLogInfoTooltipImmediately()
+  }
+  clearCostTooltipShowTimer()
   clearCostTooltipHideTimer()
   costTooltipAnchorRef.value = target
   const requestId = ++costTooltipRequestId.value
@@ -1755,6 +2042,22 @@ const showCostTooltip = async (item: RequestLog, event: MouseEvent | FocusEvent)
   if (requestId !== costTooltipRequestId.value) return
   if (costTooltipAnchorRef.value !== target) return
   updateCostTooltipPosition(target)
+}
+
+const showCostTooltip = (item: RequestLog, event: MouseEvent | FocusEvent) => {
+  const target = resolveTooltipAnchor(event)
+  void showCostTooltipByAnchor(item, target)
+}
+
+const scheduleShowCostTooltip = (item: RequestLog, event: MouseEvent) => {
+  const target = resolveTooltipAnchor(event)
+  if (!target) return
+  clearCostTooltipHideTimer()
+  clearCostTooltipShowTimer()
+  costTooltipShowTimer = window.setTimeout(() => {
+    costTooltipShowTimer = null
+    void showCostTooltipByAnchor(item, target)
+  }, LOG_TOOLTIP_SHOW_DELAY_MS)
 }
 
 const moveCostTooltip = (event: MouseEvent) => {
@@ -1779,6 +2082,9 @@ const handleCostTooltipMouseLeave = () => {
 }
 
 const handleViewportChange = () => {
+  if (logInfoTooltip.visible) {
+    hideLogInfoTooltipImmediately()
+  }
   if (costTooltip.visible) {
     hideCostTooltipImmediately()
   }
@@ -1839,6 +2145,9 @@ const formatCurrency = (value?: number) => {
   }
   return `$${value.toFixed(4)}`
 }
+
+const formatCostAriaLabel = (item: RequestLog) =>
+  `${t('components.logs.table.cost')}: ${formatCurrency(item.total_cost)}`
 
 const startOfTodayLocal = () => {
   const now = new Date()
@@ -1949,6 +2258,9 @@ watch(
 watch(
   [page, () => logs.value.length],
   () => {
+    if (logInfoTooltip.visible) {
+      hideLogInfoTooltipImmediately()
+    }
     if (costTooltip.visible) {
       hideCostTooltipImmediately()
     }
@@ -1964,6 +2276,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  hideLogInfoTooltipImmediately()
   hideCostTooltipImmediately()
   window.removeEventListener('scroll', handleViewportChange, true)
   window.removeEventListener('resize', handleViewportChange)
@@ -2161,9 +2474,12 @@ html.dark .token-detail-item__name {
   font-variant-numeric: tabular-nums;
 }
 
-/* 金额列 */
+/* 表格列 */
+.col-model {
+  width: 230px;
+}
 .col-verify {
-  width: 190px;
+  width: 132px;
 }
 .col-cost {
   width: 80px;
@@ -2333,47 +2649,187 @@ html.dark .cost-breakdown-tooltip__note {
   color: #aebcd1;
 }
 
+.log-info-tooltip {
+  position: fixed;
+  transform: translateX(-50%);
+  width: min(360px, calc(100vw - 24px));
+  max-width: 360px;
+  border-radius: 12px;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  background: rgba(255, 255, 255, 0.97);
+  box-shadow: 0 16px 34px rgba(15, 23, 42, 0.2);
+  backdrop-filter: blur(8px);
+  z-index: 2550;
+  pointer-events: auto;
+}
+
+.log-info-tooltip::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+}
+
+.log-info-tooltip.is-above::after {
+  top: 100%;
+  border-top: 7px solid rgba(255, 255, 255, 0.97);
+}
+
+.log-info-tooltip.is-below::after {
+  bottom: 100%;
+  border-bottom: 7px solid rgba(255, 255, 255, 0.97);
+}
+
+.log-info-tooltip__title {
+  margin: 0;
+  font-size: 0.74rem;
+  line-height: 1.3;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+.log-info-tooltip__rows {
+  margin-top: 0.48rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.36rem;
+}
+
+.log-info-tooltip__row {
+  display: grid;
+  grid-template-columns: minmax(74px, max-content) minmax(0, 1fr);
+  gap: 0.62rem;
+  align-items: start;
+}
+
+.log-info-tooltip__label {
+  font-size: 0.74rem;
+  line-height: 1.35;
+  color: #475569;
+}
+
+.log-info-tooltip__value {
+  font-size: 0.74rem;
+  line-height: 1.38;
+  color: #0f172a;
+  font-family: 'SFMono-Regular', Menlo, Consolas, monospace;
+  word-break: break-word;
+}
+
+.log-info-tooltip__value.tone-muted {
+  color: #64748b;
+  font-style: italic;
+}
+
+.log-info-tooltip__value.tone-source-provider-api {
+  color: #0369a1;
+  font-style: normal;
+}
+
+.log-info-tooltip__value.tone-source-builtin {
+  color: #0f766e;
+  font-style: normal;
+}
+
+.log-info-tooltip__value.tone-source-none {
+  color: #64748b;
+  font-style: normal;
+}
+
+html.dark .log-info-tooltip {
+  border-color: rgba(148, 163, 184, 0.36);
+  background: rgba(15, 23, 42, 0.95);
+  box-shadow: 0 16px 34px rgba(2, 6, 23, 0.5);
+}
+
+html.dark .log-info-tooltip.is-above::after {
+  border-top-color: rgba(15, 23, 42, 0.95);
+}
+
+html.dark .log-info-tooltip.is-below::after {
+  border-bottom-color: rgba(15, 23, 42, 0.95);
+}
+
+html.dark .log-info-tooltip__title {
+  color: #94a3b8;
+}
+
+html.dark .log-info-tooltip__label {
+  color: #cbd5e1;
+}
+
+html.dark .log-info-tooltip__value {
+  color: #f8fafc;
+}
+
+html.dark .log-info-tooltip__value.tone-muted,
+html.dark .log-info-tooltip__value.tone-source-none {
+  color: #94a3b8;
+}
+
+html.dark .log-info-tooltip__value.tone-source-provider-api {
+  color: #7dd3fc;
+}
+
+html.dark .log-info-tooltip__value.tone-source-builtin {
+  color: #5eead4;
+}
+
 .model-cell {
-  white-space: normal;
+  max-width: 230px;
+  white-space: nowrap;
 }
 
 .model-name {
-  word-break: break-word;
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.model-pricing-match {
-  margin-top: 0.2rem;
-  font-size: 0.75rem;
-  color: #64748b;
-  line-height: 1.35;
-  word-break: break-word;
+.model-meta-trigger,
+.verify-meta-trigger {
+  cursor: help;
+  border-radius: 8px;
+  transition: background 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
 }
 
-html.dark .model-pricing-match {
-  color: #94a3b8;
+.model-meta-trigger {
+  padding: 2px 6px;
+  margin: -2px -6px;
 }
 
-.model-pricing-source {
-  margin-top: 0.2rem;
-  font-size: 0.72rem;
-  line-height: 1.35;
-  word-break: break-word;
+.model-meta-trigger:hover {
+  background: rgba(59, 130, 246, 0.12);
 }
 
-.model-pricing-source.source-provider-api {
-  color: #0369a1;
+.model-meta-trigger:focus-visible {
+  outline: 2px solid rgba(59, 130, 246, 0.52);
+  outline-offset: 1px;
+  background: rgba(59, 130, 246, 0.16);
 }
 
-.model-pricing-source.source-builtin {
-  color: #0f766e;
+.verify-meta-trigger:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 3px 10px rgba(15, 23, 42, 0.12);
 }
 
-.model-pricing-source.source-none {
-  color: #94a3b8;
+.verify-meta-trigger:focus-visible {
+  outline: 2px solid rgba(99, 102, 241, 0.45);
+  outline-offset: 1px;
 }
 
 .verify-cell {
-  min-width: 180px;
+  min-width: 120px;
+  white-space: nowrap;
 }
 
 .verify-tag {
@@ -2384,6 +2840,7 @@ html.dark .model-pricing-match {
   font-size: 0.72rem;
   font-weight: 600;
   line-height: 1.35;
+  user-select: none;
 }
 
 .verify-tag.verify-match {
@@ -2401,24 +2858,21 @@ html.dark .model-pricing-match {
   background: rgba(100, 116, 139, 0.12);
 }
 
-.verify-detail {
-  margin-top: 0.22rem;
-  font-size: 0.7rem;
-  line-height: 1.35;
-  color: #64748b;
-  word-break: break-word;
+html.dark .model-meta-trigger:hover {
+  background: rgba(59, 130, 246, 0.24);
 }
 
-html.dark .model-pricing-source.source-provider-api {
-  color: #7dd3fc;
+html.dark .model-meta-trigger:focus-visible {
+  outline-color: rgba(96, 165, 250, 0.7);
+  background: rgba(59, 130, 246, 0.28);
 }
 
-html.dark .model-pricing-source.source-builtin {
-  color: #5eead4;
+html.dark .verify-meta-trigger:hover {
+  box-shadow: 0 3px 10px rgba(15, 23, 42, 0.45);
 }
 
-html.dark .model-pricing-source.source-none {
-  color: #94a3b8;
+html.dark .verify-meta-trigger:focus-visible {
+  outline-color: rgba(129, 140, 248, 0.72);
 }
 
 html.dark .verify-tag.verify-match {
@@ -2434,9 +2888,5 @@ html.dark .verify-tag.verify-mismatch {
 html.dark .verify-tag.verify-unknown {
   color: #cbd5e1;
   background: rgba(148, 163, 184, 0.22);
-}
-
-html.dark .verify-detail {
-  color: #94a3b8;
 }
 </style>

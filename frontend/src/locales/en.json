@@ -537,14 +537,19 @@
           "mismatch": "Mismatch",
           "unknown": "Unknown"
         },
-        "verifyDetail": "Requested: {requested} · Returned: {response}",
-        "verifyDetailUnknown": "Requested or returned model missing",
-        "matchedPricingModel": "≈ Pricing match: {model}",
-        "priceSource": "Pricing source: {source}",
         "priceSourceValues": {
           "providerApi": "Provider API pricing",
           "builtin": "Built-in pricing table",
           "none": "No pricing available"
+        },
+        "tooltipLabels": {
+          "pricingSource": "Pricing source",
+          "pricingModel": "Pricing model",
+          "requestedModel": "Requested model",
+          "responseModel": "Returned model"
+        },
+        "tooltipValues": {
+          "missing": "Not recorded"
         },
         "httpCode": "HTTP",
         "stream": "Stream",
