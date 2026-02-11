@@ -41,6 +41,8 @@ type ProviderModelPricingItem struct {
 	QuotaType              int                        `json:"quotaType"` // 0=按量，1=按次
 	ModelRatio             float64                    `json:"modelRatio"`
 	CompletionRatio        float64                    `json:"completionRatio"`
+	CacheCreateMultiplier  float64                    `json:"cacheCreateMultiplier,omitempty"`
+	CacheReadMultiplier    float64                    `json:"cacheReadMultiplier,omitempty"`
 	OwnerBy                string                     `json:"ownerBy,omitempty"`
 	EnableGroups           []string                   `json:"enableGroups,omitempty"`
 	SupportedEndpointTypes []string                   `json:"supportedEndpointTypes,omitempty"`
@@ -70,6 +72,12 @@ type providerModelPricing struct {
 	QuotaType              int             `json:"quota_type"`
 	ModelRatio             float64         `json:"model_ratio"`
 	ModelPrice             json.RawMessage `json:"model_price"`
+	CacheCreationRatio     float64         `json:"cache_creation_ratio"`
+	CacheCreateRatio       float64         `json:"cache_create_ratio"`
+	CacheCreateMultiplier  float64         `json:"cache_create_multiplier"`
+	CacheRatio             float64         `json:"cache_ratio"`
+	CacheReadRatio         float64         `json:"cache_read_ratio"`
+	CacheReadMultiplier    float64         `json:"cache_read_multiplier"`
 	OwnerBy                string          `json:"owner_by,omitempty"`
 	CompletionRatio        float64         `json:"completion_ratio"`
 	EnableGroups           []string        `json:"enable_groups"`
@@ -215,6 +223,15 @@ func providerPricingMax(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func firstPositiveFloat(values ...float64) float64 {
+	for _, value := range values {
+		if value > 0 {
+			return value
+		}
+	}
+	return 0
 }
 
 func (ps *ProviderService) cacheProviderModelPricing(apiURL, apiKey, authType string, response *ProviderModelPricingResponse) {
@@ -599,11 +616,21 @@ func buildProviderModelPricingResponse(siteType SiteType, pricingSource string, 
 	items := make([]ProviderModelPricingItem, 0, len(pricing.Data))
 	for _, model := range pricing.Data {
 		item := ProviderModelPricingItem{
-			Model:                  model.ModelName,
-			Description:            model.ModelDescription,
-			QuotaType:              model.QuotaType,
-			ModelRatio:             model.ModelRatio,
-			CompletionRatio:        model.CompletionRatio,
+			Model:           model.ModelName,
+			Description:     model.ModelDescription,
+			QuotaType:       model.QuotaType,
+			ModelRatio:      model.ModelRatio,
+			CompletionRatio: model.CompletionRatio,
+			CacheCreateMultiplier: firstPositiveFloat(
+				model.CacheCreateMultiplier,
+				model.CacheCreationRatio,
+				model.CacheCreateRatio,
+			),
+			CacheReadMultiplier: firstPositiveFloat(
+				model.CacheReadMultiplier,
+				model.CacheReadRatio,
+				model.CacheRatio,
+			),
 			OwnerBy:                model.OwnerBy,
 			EnableGroups:           model.EnableGroups,
 			SupportedEndpointTypes: model.SupportedEndpointTypes,

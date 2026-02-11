@@ -1818,21 +1818,141 @@ const buildObservedCostPriceLines = (item: RequestLog): CostTooltipPriceLine[] =
   })
 }
 
-const buildProviderAPITokenPriceLines = (item: RequestLog): CostTooltipPriceLine[] => {
-  if (!hasProviderPricingSnapshot(item)) return []
-  if (safeNumber(item.provider_quota_type) !== 0) return []
+const buildProviderAPITokenTooltipDetail = (
+  item: RequestLog,
+  fallbackModelName: string,
+  recordedCost: number,
+): CostTooltipDetail | null => {
+  if (!hasProviderPricingSnapshot(item)) return null
+  if (safeNumber(item.provider_quota_type) !== 0) return null
 
-  const inputPerToken = Math.max(0, safeNumber(item.provider_input_usd_per_m)) / PER_MILLION_TOKENS
-  const outputPerToken = Math.max(0, safeNumber(item.provider_output_usd_per_m)) / PER_MILLION_TOKENS
-  return buildTokenRatePriceLines({
+  const inputTokens = Math.max(0, Math.round(safeNumber(item.input_tokens)))
+  const outputTokens = Math.max(0, Math.round(safeNumber(item.output_tokens)))
+  const reasoningTokens = Math.max(0, Math.round(safeNumber(item.reasoning_tokens)))
+  const cacheCreateTokens = Math.max(0, Math.round(safeNumber(item.cache_create_tokens)))
+  const cacheReadTokens = Math.max(0, Math.round(safeNumber(item.cache_read_tokens)))
+
+  const breakdownInputCost = Math.max(0, safeNumber(item.input_cost))
+  const breakdownOutputCost = Math.max(0, safeNumber(item.output_cost))
+  const breakdownReasoningCost = Math.max(0, safeNumber(item.reasoning_cost))
+  const breakdownCacheCreateCost = Math.max(0, safeNumber(item.cache_create_cost))
+  const breakdownCacheReadCost = Math.max(0, safeNumber(item.cache_read_cost))
+
+  const inputPerTokenSnapshot = Math.max(0, safeNumber(item.provider_input_usd_per_m)) / PER_MILLION_TOKENS
+  const outputPerTokenSnapshot = Math.max(0, safeNumber(item.provider_output_usd_per_m)) / PER_MILLION_TOKENS
+
+  const inputPerToken =
+    inputPerTokenSnapshot > 0
+      ? inputPerTokenSnapshot
+      : inputTokens > 0 && breakdownInputCost > 0
+        ? breakdownInputCost / inputTokens
+        : 0
+  const outputPerToken =
+    outputPerTokenSnapshot > 0
+      ? outputPerTokenSnapshot
+      : outputTokens > 0 && breakdownOutputCost > 0
+        ? breakdownOutputCost / outputTokens
+        : 0
+  const reasoningPerToken =
+    reasoningTokens > 0 && breakdownReasoningCost > 0
+      ? breakdownReasoningCost / reasoningTokens
+      : outputPerToken
+  const cacheCreatePerToken =
+    cacheCreateTokens > 0 && breakdownCacheCreateCost > 0
+      ? breakdownCacheCreateCost / cacheCreateTokens
+      : inputPerToken
+  const cacheReadPerToken =
+    cacheReadTokens > 0 && breakdownCacheReadCost > 0
+      ? breakdownCacheReadCost / cacheReadTokens
+      : inputPerToken
+
+  const hasAnyTokenRate =
+    inputPerToken > 0 ||
+    outputPerToken > 0 ||
+    reasoningPerToken > 0 ||
+    cacheCreatePerToken > 0 ||
+    (cacheReadTokens > 0 && cacheReadPerToken > 0)
+  if (!hasAnyTokenRate) return null
+
+  const inputCost = inputTokens > 0 && breakdownInputCost > 0 ? breakdownInputCost : inputTokens * inputPerToken
+  const outputCost = outputTokens > 0 && breakdownOutputCost > 0 ? breakdownOutputCost : outputTokens * outputPerToken
+  const reasoningCost = reasoningTokens > 0 && breakdownReasoningCost > 0
+    ? breakdownReasoningCost
+    : reasoningTokens * reasoningPerToken
+  const cacheCreateCost = cacheCreateTokens > 0 && breakdownCacheCreateCost > 0
+    ? breakdownCacheCreateCost
+    : cacheCreateTokens * cacheCreatePerToken
+  const cacheReadCost = cacheReadTokens > 0 && breakdownCacheReadCost > 0
+    ? breakdownCacheReadCost
+    : cacheReadTokens * cacheReadPerToken
+
+  const calculatedTotal = inputCost + outputCost + reasoningCost + cacheCreateCost + cacheReadCost
+  const cacheCreateMultiplier = inputPerToken > 0 ? cacheCreatePerToken / inputPerToken : 0
+  const cacheReadMultiplier = inputPerToken > 0 ? cacheReadPerToken / inputPerToken : 0
+
+  const priceLines = buildTokenRatePriceLines({
     inputPerToken,
     outputPerToken,
-    reasoningPerToken: outputPerToken,
-    cacheCreatePerToken: inputPerToken,
-    cacheReadPerToken: inputPerToken,
-    includeCacheRead: true,
-    includeReasoning: Math.max(0, Math.round(safeNumber(item.reasoning_tokens))) > 0,
+    reasoningPerToken,
+    cacheCreatePerToken,
+    cacheReadPerToken,
+    includeCacheRead: cacheReadTokens > 0,
+    includeReasoning: reasoningTokens > 0,
+    includeCacheMultiplierHint: true,
   })
+
+  const formulaParts: string[] = []
+  if (inputTokens > 0 && inputPerToken > 0) {
+    formulaParts.push(
+      `${t('components.logs.costTooltip.usagePrompt')} ${inputTokens.toLocaleString()} tokens / 1M tokens * ${formatUsdPerMillion(inputPerToken)}`
+    )
+  }
+  if (cacheCreateTokens > 0 && cacheCreatePerToken > 0) {
+    const multiplierSuffix = cacheCreateMultiplier > 0
+      ? ` (${t('components.logs.costTooltip.cacheCreateMultiplierLabel', { multiplier: formatMultiplierValue(cacheCreateMultiplier) })})`
+      : ''
+    formulaParts.push(
+      `${t('components.logs.costTooltip.usageCacheCreate')} ${cacheCreateTokens.toLocaleString()} tokens / 1M tokens * ${formatUsdPerMillion(cacheCreatePerToken)}${multiplierSuffix}`
+    )
+  }
+  if (cacheReadTokens > 0 && cacheReadPerToken > 0) {
+    const multiplierSuffix = cacheReadMultiplier > 0
+      ? ` (${t('components.logs.costTooltip.cacheReadMultiplierLabel', { multiplier: formatMultiplierValue(cacheReadMultiplier) })})`
+      : ''
+    formulaParts.push(
+      `${t('components.logs.costTooltip.usageCacheRead')} ${cacheReadTokens.toLocaleString()} tokens / 1M tokens * ${formatUsdPerMillion(cacheReadPerToken)}${multiplierSuffix}`
+    )
+  }
+  if (outputTokens > 0 && outputPerToken > 0) {
+    formulaParts.push(
+      `${t('components.logs.costTooltip.usageCompletion')} ${outputTokens.toLocaleString()} tokens / 1M tokens * ${formatUsdPerMillion(outputPerToken)}`
+    )
+  }
+  if (reasoningTokens > 0 && reasoningPerToken > 0) {
+    formulaParts.push(
+      `${t('components.logs.costTooltip.usageReasoning')} ${reasoningTokens.toLocaleString()} tokens / 1M tokens * ${formatUsdPerMillion(reasoningPerToken)}`
+    )
+  }
+
+  const formula = formulaParts.length > 0
+    ? `${formulaParts.join(' + ')} = ${formatUsdPrecise(calculatedTotal)}`
+    : t('components.logs.costTooltip.providerApiFormula')
+
+  const recordedCostHint =
+    Math.abs(calculatedTotal - recordedCost) > COST_TOOLTIP_DIFF_EPSILON
+      ? t('components.logs.costTooltip.recordedCostHint', {
+        cost: formatUsdPrecise(recordedCost),
+      })
+      : ''
+
+  return {
+    pricingModel: fallbackModelName,
+    hasPricing: true,
+    priceLines,
+    formula,
+    note: t('components.logs.costTooltip.providerApiHint'),
+    recordedCostHint,
+  }
 }
 
 const buildProviderAPIPerCallPriceLines = (item: RequestLog): CostTooltipPriceLine[] => {
@@ -2016,16 +2136,9 @@ const buildCostTooltipDetail = (item: RequestLog): CostTooltipDetail => {
   })
 
   if (source === 'provider_api') {
-    const providerTokenLines = buildProviderAPITokenPriceLines(item)
-    if (providerTokenLines.length > 0) {
-      return {
-        pricingModel: fallbackModelName,
-        hasPricing: true,
-        priceLines: providerTokenLines,
-        formula: t('components.logs.costTooltip.providerApiFormula'),
-        note: t('components.logs.costTooltip.providerApiHint'),
-        recordedCostHint,
-      }
+    const providerTokenDetail = buildProviderAPITokenTooltipDetail(item, fallbackModelName, recordedCost)
+    if (providerTokenDetail) {
+      return providerTokenDetail
     }
 
     const providerPerCallLines = buildProviderAPIPerCallPriceLines(item)
