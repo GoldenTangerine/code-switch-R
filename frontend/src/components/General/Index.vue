@@ -327,6 +327,7 @@ const webdavPassword = ref('')
 const webdavRemoteDir = ref('')
 const webdavRemoteFile = ref('codeswitch-config.zip')
 const webdavTimeoutSeconds = ref(20)
+const webdavManageModalOpen = ref(false)
 
 type WebDAVUploadStage =
   | 'idle'
@@ -1353,11 +1354,17 @@ const testWebDAV = async () => {
   }
 }
 
+const openWebdavManageModal = () => {
+  webdavManageModalOpen.value = true
+}
+
 const uploadToWebDAV = async () => {
+  webdavManageModalOpen.value = false
   await openWebdavUploadModal()
 }
 
 const downloadFromWebDAV = async () => {
+  webdavManageModalOpen.value = false
   openWebdavDownloadModal()
 }
 
@@ -1487,6 +1494,16 @@ onBeforeUnmount(() => {
               </label>
               <span class="hint-text">{{ $t('components.general.label.roundRobinHint') }}</span>
             </div>
+          </ListItem>
+          <ListItem :label="$t('components.general.title.webdavSync')">
+            <button
+              type="button"
+              class="action-btn"
+              :disabled="webdavLoading || webdavUploading || webdavDownloading"
+              @click="openWebdavManageModal"
+            >
+              {{ $t('components.general.webdav.manage') }}
+            </button>
           </ListItem>
         </div>
       </section>
@@ -1923,104 +1940,6 @@ onBeforeUnmount(() => {
       </section>
 
       <section>
-        <h2 class="mac-section-title">{{ $t('components.general.title.webdavSync') }}</h2>
-        <div class="mac-panel">
-          <ListItem :label="$t('components.general.webdav.endpoint')">
-            <input
-              type="text"
-              v-model="webdavEndpoint"
-              :disabled="webdavLoading"
-              :placeholder="$t('components.general.webdav.endpointPlaceholder')"
-              class="mac-input webdav-input"
-            />
-          </ListItem>
-          <ListItem :label="$t('components.general.webdav.username')">
-            <input
-              type="text"
-              v-model="webdavUsername"
-              :disabled="webdavLoading"
-              :placeholder="$t('components.general.webdav.usernamePlaceholder')"
-              class="mac-input webdav-input"
-            />
-          </ListItem>
-          <ListItem :label="$t('components.general.webdav.password')">
-            <input
-              type="password"
-              v-model="webdavPassword"
-              :disabled="webdavLoading"
-              :placeholder="$t('components.general.webdav.passwordPlaceholder')"
-              class="mac-input webdav-input"
-            />
-          </ListItem>
-          <ListItem :label="$t('components.general.webdav.remoteDir')">
-            <input
-              type="text"
-              v-model="webdavRemoteDir"
-              :disabled="webdavLoading"
-              :placeholder="$t('components.general.webdav.remoteDirPlaceholder')"
-              class="mac-input webdav-input"
-            />
-          </ListItem>
-          <ListItem :label="$t('components.general.webdav.remoteFile')">
-            <input
-              type="text"
-              v-model="webdavRemoteFile"
-              :disabled="webdavLoading"
-              :placeholder="$t('components.general.webdav.remoteFilePlaceholder')"
-              class="mac-input webdav-input"
-            />
-          </ListItem>
-          <ListItem :label="$t('components.general.webdav.timeoutSeconds')">
-            <div class="toggle-with-hint">
-              <input
-                type="number"
-                inputmode="numeric"
-                min="1"
-                max="120"
-                step="1"
-                v-model.number="webdavTimeoutSeconds"
-                :disabled="webdavLoading"
-                :placeholder="$t('components.general.webdav.timeoutPlaceholder')"
-                class="mac-input webdav-timeout-input"
-              />
-              <span class="hint-text">{{ $t('components.general.webdav.timeoutHint') }}</span>
-            </div>
-          </ListItem>
-          <ListItem :label="$t('components.general.webdav.actions')">
-            <div class="webdav-actions">
-              <button
-                @click="saveWebDAV"
-                :disabled="webdavLoading || webdavSaving"
-                class="action-btn">
-                {{ webdavSaving ? $t('components.general.label.saving') : $t('components.general.webdav.save') }}
-              </button>
-              <button
-                @click="testWebDAV"
-                :disabled="webdavLoading || webdavTesting || webdavUploading || webdavDownloading"
-                class="action-btn">
-                {{ webdavTesting ? $t('components.general.webdav.testing') : $t('components.general.webdav.test') }}
-              </button>
-              <button
-                @click="uploadToWebDAV"
-                :disabled="webdavLoading || webdavUploading || webdavDownloading"
-                class="primary-btn">
-                {{ webdavUploading ? $t('components.general.webdav.uploading') : $t('components.general.webdav.upload') }}
-              </button>
-              <button
-                @click="downloadFromWebDAV"
-                :disabled="webdavLoading || webdavDownloading || webdavUploading"
-                class="action-btn">
-                {{ webdavDownloading ? $t('components.general.webdav.downloading') : $t('components.general.webdav.download') }}
-              </button>
-            </div>
-          </ListItem>
-          <ListItem :label="$t('components.general.webdav.includes')">
-            <span class="hint-text">{{ $t('components.general.webdav.includesHint') }}</span>
-          </ListItem>
-        </div>
-      </section>
-
-      <section>
         <h2 class="mac-section-title">{{ $t('components.general.title.exterior') }}</h2>
         <div class="mac-panel">
           <ListItem :label="$t('components.general.label.language')">
@@ -2141,6 +2060,108 @@ onBeforeUnmount(() => {
               {{ updateModalActionText }}
             </button>
           </footer>
+        </div>
+      </InlineModal>
+
+      <InlineModal
+        :open="webdavManageModalOpen"
+        :title="$t('components.general.title.webdavSync')"
+        panel-width="min(860px, calc(100vw - 48px))"
+        @close="webdavManageModalOpen = false"
+      >
+        <div class="mac-panel webdav-manage-modal">
+          <ListItem :label="$t('components.general.webdav.endpoint')">
+            <input
+              type="text"
+              v-model="webdavEndpoint"
+              :disabled="webdavLoading"
+              :placeholder="$t('components.general.webdav.endpointPlaceholder')"
+              class="mac-input webdav-input"
+            />
+          </ListItem>
+          <ListItem :label="$t('components.general.webdav.username')">
+            <input
+              type="text"
+              v-model="webdavUsername"
+              :disabled="webdavLoading"
+              :placeholder="$t('components.general.webdav.usernamePlaceholder')"
+              class="mac-input webdav-input"
+            />
+          </ListItem>
+          <ListItem :label="$t('components.general.webdav.password')">
+            <input
+              type="password"
+              v-model="webdavPassword"
+              :disabled="webdavLoading"
+              :placeholder="$t('components.general.webdav.passwordPlaceholder')"
+              class="mac-input webdav-input"
+            />
+          </ListItem>
+          <ListItem :label="$t('components.general.webdav.remoteDir')">
+            <input
+              type="text"
+              v-model="webdavRemoteDir"
+              :disabled="webdavLoading"
+              :placeholder="$t('components.general.webdav.remoteDirPlaceholder')"
+              class="mac-input webdav-input"
+            />
+          </ListItem>
+          <ListItem :label="$t('components.general.webdav.remoteFile')">
+            <input
+              type="text"
+              v-model="webdavRemoteFile"
+              :disabled="webdavLoading"
+              :placeholder="$t('components.general.webdav.remoteFilePlaceholder')"
+              class="mac-input webdav-input"
+            />
+          </ListItem>
+          <ListItem :label="$t('components.general.webdav.timeoutSeconds')">
+            <div class="toggle-with-hint">
+              <input
+                type="number"
+                inputmode="numeric"
+                min="1"
+                max="120"
+                step="1"
+                v-model.number="webdavTimeoutSeconds"
+                :disabled="webdavLoading"
+                :placeholder="$t('components.general.webdav.timeoutPlaceholder')"
+                class="mac-input webdav-timeout-input"
+              />
+              <span class="hint-text">{{ $t('components.general.webdav.timeoutHint') }}</span>
+            </div>
+          </ListItem>
+          <ListItem :label="$t('components.general.webdav.actions')">
+            <div class="webdav-actions">
+              <button
+                @click="saveWebDAV"
+                :disabled="webdavLoading || webdavSaving"
+                class="action-btn">
+                {{ webdavSaving ? $t('components.general.label.saving') : $t('components.general.webdav.save') }}
+              </button>
+              <button
+                @click="testWebDAV"
+                :disabled="webdavLoading || webdavTesting || webdavUploading || webdavDownloading"
+                class="action-btn">
+                {{ webdavTesting ? $t('components.general.webdav.testing') : $t('components.general.webdav.test') }}
+              </button>
+              <button
+                @click="uploadToWebDAV"
+                :disabled="webdavLoading || webdavUploading || webdavDownloading"
+                class="primary-btn">
+                {{ webdavUploading ? $t('components.general.webdav.uploading') : $t('components.general.webdav.upload') }}
+              </button>
+              <button
+                @click="downloadFromWebDAV"
+                :disabled="webdavLoading || webdavDownloading || webdavUploading"
+                class="action-btn">
+                {{ webdavDownloading ? $t('components.general.webdav.downloading') : $t('components.general.webdav.download') }}
+              </button>
+            </div>
+          </ListItem>
+          <ListItem :label="$t('components.general.webdav.includes')">
+            <span class="hint-text">{{ $t('components.general.webdav.includesHint') }}</span>
+          </ListItem>
         </div>
       </InlineModal>
 
@@ -2440,6 +2461,10 @@ onBeforeUnmount(() => {
   gap: 8px;
   max-width: 100%;
   min-width: 0;
+}
+
+.webdav-manage-modal {
+  width: 100%;
 }
 
 .update-modal {

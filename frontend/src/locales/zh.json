@@ -780,6 +780,7 @@
         "currentFile": "当前文件",
         "backupPath": "本地备份",
         "errorFile": "报错文件",
+        "manage": "配置与同步",
         "save": "保存配置",
         "test": "测试连接",
         "testing": "测试中…",

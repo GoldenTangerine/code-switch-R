@@ -62,48 +62,37 @@ onUnmounted(() => {
 
 <template>
   <Teleport to="body">
-    <Transition
-      enter-active-class="transition duration-300 ease-out"
-      enter-from-class="translate-y-full opacity-0"
-      enter-to-class="translate-y-0 opacity-100"
-      leave-active-class="transition duration-200 ease-in"
-      leave-from-class="translate-y-0 opacity-100"
-      leave-to-class="translate-y-full opacity-0"
-    >
+    <Transition name="update-notification-slide">
       <div
         v-if="visible"
-        class="fixed bottom-4 right-4 z-[9999] max-w-sm"
+        class="update-notification"
       >
-        <div
-          class="flex items-center gap-3 rounded-lg bg-white p-4 shadow-lg ring-1 ring-black/5 dark:bg-zinc-800 dark:ring-white/10"
-        >
+        <div class="update-notification-card">
           <!-- 图标 -->
-          <div
-            class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-xl dark:bg-emerald-900/30"
-          >
+          <div class="update-notification-icon" aria-hidden="true">
             🎉
           </div>
 
           <!-- 文本内容 -->
-          <div class="min-w-0 flex-1">
-            <div class="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+          <div class="update-notification-content">
+            <div class="update-notification-title">
               {{ t('update.newVersionReady') }}
             </div>
-            <div class="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+            <div class="update-notification-version">
               {{ version }}
             </div>
           </div>
 
           <!-- 操作按钮 -->
-          <div class="flex shrink-0 gap-2">
+          <div class="update-notification-actions">
             <button
               type="button"
               :disabled="isRestarting"
-              class="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white shadow-sm transition-colors hover:bg-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:focus:ring-offset-zinc-800"
+              class="update-notification-btn update-notification-btn-primary"
               @click="installNow"
             >
-              <span v-if="isRestarting" class="flex items-center gap-1">
-                <svg class="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none">
+              <span v-if="isRestarting" class="update-notification-loading">
+                <svg class="update-notification-spinner" viewBox="0 0 24 24" fill="none">
                   <circle
                     class="opacity-25"
                     cx="12"
@@ -125,7 +114,7 @@ onUnmounted(() => {
             <button
               type="button"
               :disabled="isRestarting"
-              class="rounded-md bg-zinc-100 px-3 py-1.5 text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-200 focus:outline-none focus:ring-2 focus:ring-zinc-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-600 dark:focus:ring-offset-zinc-800"
+              class="update-notification-btn update-notification-btn-secondary"
               @click="dismiss"
             >
               {{ t('update.later') }}
@@ -136,3 +125,171 @@ onUnmounted(() => {
     </Transition>
   </Teleport>
 </template>
+
+<style scoped>
+.update-notification {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 9999;
+  max-width: min(420px, calc(100vw - 32px));
+}
+
+.update-notification-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  background: rgba(255, 255, 255, 0.92);
+  padding: 14px;
+  box-shadow: 0 18px 44px rgba(15, 23, 42, 0.2);
+  backdrop-filter: blur(10px);
+}
+
+.update-notification-icon {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  background: rgba(16, 185, 129, 0.18);
+}
+
+.update-notification-content {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.update-notification-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #111827;
+}
+
+.update-notification-version {
+  margin-top: 2px;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.update-notification-actions {
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 8px;
+}
+
+.update-notification-btn {
+  min-height: 32px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  padding: 0 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  appearance: none;
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, opacity 0.2s ease;
+}
+
+.update-notification-btn:focus-visible {
+  outline: 2px solid rgba(14, 165, 233, 0.45);
+  outline-offset: 2px;
+}
+
+.update-notification-btn-primary {
+  background: #0ea5e9;
+  color: #f8fafc;
+}
+
+.update-notification-btn-primary:hover:not(:disabled) {
+  background: #0284c7;
+}
+
+.update-notification-btn-secondary {
+  border-color: rgba(15, 23, 42, 0.14);
+  background: #f3f4f6;
+  color: #374151;
+}
+
+.update-notification-btn-secondary:hover:not(:disabled) {
+  background: #e5e7eb;
+}
+
+.update-notification-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.update-notification-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.update-notification-spinner {
+  width: 12px;
+  height: 12px;
+  animation: update-notification-spin 0.8s linear infinite;
+}
+
+@keyframes update-notification-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.update-notification-slide-enter-active,
+.update-notification-slide-leave-active {
+  transition: transform 0.24s ease, opacity 0.24s ease;
+}
+
+.update-notification-slide-enter-from,
+.update-notification-slide-leave-to {
+  transform: translateY(18px);
+  opacity: 0;
+}
+
+.update-notification-slide-enter-to,
+.update-notification-slide-leave-from {
+  transform: translateY(0);
+  opacity: 1;
+}
+
+:global(.dark) .update-notification-card {
+  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(28, 30, 36, 0.94);
+  background: color-mix(in srgb, var(--mac-surface) 88%, rgba(0, 0, 0, 0.65));
+  box-shadow: 0 22px 54px rgba(0, 0, 0, 0.5);
+}
+
+:global(.dark) .update-notification-icon {
+  background: rgba(16, 185, 129, 0.24);
+}
+
+:global(.dark) .update-notification-title {
+  color: #f8fafc;
+}
+
+:global(.dark) .update-notification-version {
+  color: #b7bac7;
+}
+
+:global(.dark) .update-notification-btn-secondary {
+  border-color: rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.1);
+  color: #e5e7eb;
+}
+
+:global(.dark) .update-notification-btn-secondary:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.16);
+}
+</style>

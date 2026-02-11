@@ -1988,7 +1988,7 @@ html.dark .secondary-btn:active:not(:disabled) {
 }
 
 /* 全局按钮样式修复 - 防止 Tailwind Preflight 导致的布局问题 */
-button:where(:not(.ghost-icon):not(.mac-switch):not(.nav-item):not(.platform-tab):not(.tab-pill):not(.collapse-btn):not(.toggle-switch):not(.action-btn):not(.remove-btn):not(.icon-select-button):not(.level-select-button)) {
+button:where(:not(.ghost-icon):not(.mac-switch):not(.nav-item):not(.platform-tab):not(.tab-pill):not(.collapse-btn):not(.toggle-switch):not(.action-btn):not(.remove-btn):not(.icon-select-button):not(.level-select-button):not(.update-notification-btn)) {
   display: inline-flex !important;
   flex-direction: row !important;
   align-items: center !important;
@@ -2003,7 +2003,7 @@ button:where(:not(.ghost-icon):not(.mac-switch):not(.nav-item):not(.platform-tab
 }
 
 /* 修复按钮内 SVG 被 Tailwind preflight 设置为 display:block 导致的布局问题 */
-button svg {
+button svg:not(.update-notification-spinner) {
   width: 16px !important;
   height: 16px !important;
   flex-shrink: 0 !important;

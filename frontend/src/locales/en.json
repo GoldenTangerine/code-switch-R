@@ -779,6 +779,7 @@
         "currentFile": "Current file",
         "backupPath": "Local backup",
         "errorFile": "Failed file",
+        "manage": "Configure & sync",
         "save": "Save",
         "test": "Test",
         "testing": "Testing…",
