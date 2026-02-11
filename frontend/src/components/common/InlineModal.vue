@@ -43,6 +43,7 @@ import { computed, nextTick, onBeforeUnmount, ref, watch, type CSSProperties } f
 import { lockScroll, unlockScroll } from '../../utils/scrollLock'
 
 type Variant = 'default' | 'confirm'
+const openedModalStack: string[] = []
 
 const props = withDefaults(
   defineProps<{
@@ -65,12 +66,34 @@ const panelStyle = computed<CSSProperties | undefined>(() =>
 
 const panelRef = ref<HTMLElement | null>(null)
 const closeButtonRef = ref<HTMLButtonElement | null>(null)
+const modalId = `inline-modal-${Math.random().toString(36).slice(2, 10)}`
 let lastActiveElement: Element | null = null
 
-const emitClose = () => emit('close')
+const pushModalToTop = () => {
+  const existingIndex = openedModalStack.indexOf(modalId)
+  if (existingIndex !== -1) {
+    openedModalStack.splice(existingIndex, 1)
+  }
+  openedModalStack.push(modalId)
+}
+
+const removeModalFromStack = () => {
+  const existingIndex = openedModalStack.indexOf(modalId)
+  if (existingIndex !== -1) {
+    openedModalStack.splice(existingIndex, 1)
+  }
+}
+
+const isTopMostModal = () => openedModalStack[openedModalStack.length - 1] === modalId
+
+const emitClose = () => {
+  if (!isTopMostModal()) return
+  emit('close')
+}
 
 // 统一阻断冒泡；只有点到 wrapper 空白处才关闭（等价于 @click.self）
 const onWrapperClick = (event: MouseEvent) => {
+  if (!isTopMostModal()) return
   event.stopPropagation()
   if (!props.closeOnBackdrop) return
   if (event.target === event.currentTarget) {
@@ -95,11 +118,11 @@ const getFocusableElements = (): HTMLElement[] => {
 }
 
 const onKeyDown = (e: KeyboardEvent) => {
-  if (!props.open) return
+  if (!props.open || !isTopMostModal()) return
 
   if (e.key === 'Escape') {
     e.preventDefault()
-    e.stopPropagation()
+    e.stopImmediatePropagation()
     emitClose()
     return
   }
@@ -135,12 +158,14 @@ watch(
   () => props.open,
   (open) => {
     if (open) {
+      pushModalToTop()
       lastActiveElement = document.activeElement
       window.addEventListener('keydown', onKeyDown, true)
       lockScroll()
       nextTick(() => closeButtonRef.value?.focus())
     } else {
       window.removeEventListener('keydown', onKeyDown, true)
+      removeModalFromStack()
       unlockScroll()
       if (lastActiveElement instanceof HTMLElement) {
         try {
@@ -157,6 +182,7 @@ watch(
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeyDown, true)
+  removeModalFromStack()
   unlockScroll()
 })
 </script>

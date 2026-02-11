@@ -328,6 +328,9 @@ const webdavRemoteDir = ref('')
 const webdavRemoteFile = ref('codeswitch-config.zip')
 const webdavTimeoutSeconds = ref(20)
 const webdavManageModalOpen = ref(false)
+const modalViewportPaddingX = 24
+const webdavManageModalPanelMaxWidthPx = 980
+const webdavManageModalPanelWidth = `min(${webdavManageModalPanelMaxWidthPx}px, calc(100vw - ${modalViewportPaddingX * 2}px))`
 
 type WebDAVUploadStage =
   | 'idle'
@@ -1358,13 +1361,16 @@ const openWebdavManageModal = () => {
   webdavManageModalOpen.value = true
 }
 
-const uploadToWebDAV = async () => {
+const closeWebdavManageModal = () => {
+  if (webdavUploadModalOpen.value || webdavDownloadModalOpen.value) return
   webdavManageModalOpen.value = false
+}
+
+const uploadToWebDAV = async () => {
   await openWebdavUploadModal()
 }
 
-const downloadFromWebDAV = async () => {
-  webdavManageModalOpen.value = false
+const downloadFromWebDAV = () => {
   openWebdavDownloadModal()
 }
 
@@ -2066,8 +2072,8 @@ onBeforeUnmount(() => {
       <InlineModal
         :open="webdavManageModalOpen"
         :title="$t('components.general.title.webdavSync')"
-        panel-width="min(860px, calc(100vw - 48px))"
-        @close="webdavManageModalOpen = false"
+        :panel-width="webdavManageModalPanelWidth"
+        @close="closeWebdavManageModal"
       >
         <div class="mac-panel webdav-manage-modal">
           <ListItem :label="$t('components.general.webdav.endpoint')">
@@ -2131,7 +2137,7 @@ onBeforeUnmount(() => {
               <span class="hint-text">{{ $t('components.general.webdav.timeoutHint') }}</span>
             </div>
           </ListItem>
-          <ListItem :label="$t('components.general.webdav.actions')">
+          <ListItem :label="$t('components.general.webdav.actions')" class="webdav-actions-row">
             <div class="webdav-actions">
               <button
                 @click="saveWebDAV"
@@ -2454,17 +2460,45 @@ onBeforeUnmount(() => {
 }
 
 .webdav-actions {
-  display: flex;
-  flex: 1 1 auto;
-  flex-wrap: wrap;
-  justify-content: flex-end;
+  display: grid;
+  width: 100%;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: 8px;
   max-width: 100%;
   min-width: 0;
 }
 
+:deep(.webdav-actions-row) {
+  align-items: stretch;
+}
+
+:deep(.webdav-actions-row .mac-list-text) {
+  flex: 1 1 100%;
+  min-width: 0;
+}
+
+:deep(.webdav-actions-row .mac-list-control) {
+  display: flex;
+  flex: 1 1 100%;
+  width: 100%;
+  justify-content: flex-start;
+  margin-left: 0;
+}
+
+.webdav-actions :is(.action-btn, .primary-btn) {
+  width: 100%;
+  min-width: 0;
+}
+
+@media (max-width: 760px) {
+  .webdav-actions {
+    grid-template-columns: 1fr;
+  }
+}
+
 .webdav-manage-modal {
   width: 100%;
+  max-width: 100%;
 }
 
 .update-modal {
