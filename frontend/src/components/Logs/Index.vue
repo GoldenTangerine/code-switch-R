@@ -219,6 +219,7 @@
                 <th class="col-platform">{{ t('components.logs.table.platform') }}</th>
                 <th class="col-provider">{{ t('components.logs.table.provider') }}</th>
                 <th class="col-model">{{ t('components.logs.table.model') }}</th>
+                <th class="col-verify">{{ t('components.logs.table.verify') }}</th>
                 <th class="col-http">{{ t('components.logs.table.httpCode') }}</th>
                 <th class="col-stream">{{ t('components.logs.table.stream') }}</th>
                 <th class="col-duration">{{ t('components.logs.table.duration') }}</th>
@@ -244,6 +245,14 @@
                     :class="`source-${priceSourceClass(item)}`"
                   >
                     {{ t('components.logs.table.priceSource', { source: formatPriceSource(item) }) }}
+                  </div>
+                </td>
+                <td class="verify-cell">
+                  <span :class="['verify-tag', `verify-${resolveModelVerifyStatus(item)}`]">
+                    {{ formatModelVerifyStatus(item) }}
+                  </span>
+                  <div class="verify-detail">
+                    {{ formatModelVerifyDetail(item) }}
                   </div>
                 </td>
                 <td :class="['code', httpCodeClass(item.http_code)]">{{ item.http_code }}</td>
@@ -287,7 +296,7 @@
                 </td>
               </tr>
               <tr v-if="!pagedLogs.length && !loading">
-                <td colspan="9" class="empty">{{ t('components.logs.empty') }}</td>
+                <td colspan="10" class="empty">{{ t('components.logs.empty') }}</td>
               </tr>
             </tbody>
           </table>
@@ -1238,6 +1247,32 @@ const formatDuration = (value?: number) => {
   return `${value.toFixed(2)}s`
 }
 
+type ModelVerifyStatus = 'match' | 'mismatch' | 'unknown'
+
+const normalizeModelName = (value?: string) => String(value ?? '').trim().toLowerCase()
+
+const resolveModelVerifyStatus = (item: RequestLog): ModelVerifyStatus => {
+  const requestedModel = normalizeModelName(item.requested_model)
+  const responseModel = normalizeModelName(item.response_model)
+  if (!requestedModel || !responseModel) return 'unknown'
+  return requestedModel === responseModel ? 'match' : 'mismatch'
+}
+
+const formatModelVerifyStatus = (item: RequestLog) =>
+  t(`components.logs.table.verifyValues.${resolveModelVerifyStatus(item)}`)
+
+const formatModelVerifyDetail = (item: RequestLog) => {
+  const requestedModel = String(item.requested_model ?? '').trim()
+  const responseModel = String(item.response_model ?? '').trim()
+  if (!requestedModel || !responseModel) {
+    return t('components.logs.table.verifyDetailUnknown')
+  }
+  return t('components.logs.table.verifyDetail', {
+    requested: requestedModel,
+    response: responseModel,
+  })
+}
+
 const httpCodeClass = (code: number) => {
   if (code >= 500) return 'http-server-error'
   if (code >= 400) return 'http-client-error'
@@ -2127,6 +2162,9 @@ html.dark .token-detail-item__name {
 }
 
 /* 金额列 */
+.col-verify {
+  width: 190px;
+}
 .col-cost {
   width: 80px;
 }
@@ -2334,6 +2372,43 @@ html.dark .model-pricing-match {
   color: #94a3b8;
 }
 
+.verify-cell {
+  min-width: 180px;
+}
+
+.verify-tag {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.1rem 0.45rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.verify-tag.verify-match {
+  color: #0f766e;
+  background: rgba(15, 118, 110, 0.12);
+}
+
+.verify-tag.verify-mismatch {
+  color: #b42318;
+  background: rgba(180, 35, 24, 0.12);
+}
+
+.verify-tag.verify-unknown {
+  color: #64748b;
+  background: rgba(100, 116, 139, 0.12);
+}
+
+.verify-detail {
+  margin-top: 0.22rem;
+  font-size: 0.7rem;
+  line-height: 1.35;
+  color: #64748b;
+  word-break: break-word;
+}
+
 html.dark .model-pricing-source.source-provider-api {
   color: #7dd3fc;
 }
@@ -2343,6 +2418,25 @@ html.dark .model-pricing-source.source-builtin {
 }
 
 html.dark .model-pricing-source.source-none {
+  color: #94a3b8;
+}
+
+html.dark .verify-tag.verify-match {
+  color: #5eead4;
+  background: rgba(45, 212, 191, 0.2);
+}
+
+html.dark .verify-tag.verify-mismatch {
+  color: #fda4af;
+  background: rgba(244, 63, 94, 0.2);
+}
+
+html.dark .verify-tag.verify-unknown {
+  color: #cbd5e1;
+  background: rgba(148, 163, 184, 0.22);
+}
+
+html.dark .verify-detail {
   color: #94a3b8;
 }
 </style>

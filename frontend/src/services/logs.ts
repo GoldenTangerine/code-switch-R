@@ -6,6 +6,8 @@ export type RequestLog = {
   id: number
   platform: LogPlatform | ''
   model: string
+  requested_model?: string
+  response_model?: string
   provider: string
   http_code: number
   input_tokens: number

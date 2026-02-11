@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -48,6 +49,11 @@ type ProviderRelayService struct {
 
 // errClientAbort 表示客户端中断连接，不应计入 provider 失败次数
 var errClientAbort = errors.New("client aborted, skip failure count")
+
+var (
+	responseModelRegex        = regexp.MustCompile(`"model"\s*:\s*"([^"]+)"`)
+	responseModelVersionRegex = regexp.MustCompile(`"modelVersion"\s*:\s*"([^"]+)"`)
+)
 
 // upstreamErrorResponse 保存上游非 2xx 响应，供“最终失败”场景透传给客户端
 type upstreamErrorResponse struct {
@@ -601,7 +607,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 							provider.Name, level, retryCount+1, maxRetryPerProvider, effectiveModel)
 
 						startTime := time.Now()
-						ok, err := prs.forwardRequest(c, kind, provider, effectiveEndpoint, query, clientHeaders, currentBodyBytes, isStream, effectiveModel)
+						ok, err := prs.forwardRequest(c, kind, provider, effectiveEndpoint, query, clientHeaders, currentBodyBytes, isStream, effectiveModel, requestedModel)
 						duration := time.Since(startTime)
 
 						if ok {
@@ -722,7 +728,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 				// 获取有效的端点（用户配置优先）
 				effectiveEndpoint := provider.GetEffectiveEndpoint(endpoint)
 				startTime := time.Now()
-				ok, err := prs.forwardRequest(c, kind, provider, effectiveEndpoint, query, clientHeaders, currentBodyBytes, isStream, effectiveModel)
+				ok, err := prs.forwardRequest(c, kind, provider, effectiveEndpoint, query, clientHeaders, currentBodyBytes, isStream, effectiveModel, requestedModel)
 				duration := time.Since(startTime)
 
 				if ok {
@@ -818,6 +824,7 @@ func (prs *ProviderRelayService) forwardRequest(
 	bodyBytes []byte,
 	isStream bool,
 	model string,
+	requestedModel string,
 ) (bool, error) {
 	targetURL := joinURL(provider.APIURL, endpoint)
 	headers := cloneMap(clientHeaders)
@@ -849,6 +856,7 @@ func (prs *ProviderRelayService) forwardRequest(
 		Platform:         kind,
 		Provider:         provider.Name,
 		Model:            model,
+		RequestedModel:   strings.TrimSpace(requestedModel),
 		IsStream:         isStream,
 		ProviderAPIURL:   provider.APIURL,
 		ProviderAPIKey:   provider.APIKey,
@@ -895,13 +903,15 @@ func (prs *ProviderRelayService) forwardRequest(
 
 		err := GlobalDBQueueLogs.ExecBatchCtx(ctx, `
 			INSERT INTO request_log (
-				platform, model, provider, http_code,
+				platform, model, requested_model, response_model, provider, http_code,
 				input_tokens, output_tokens, cache_create_tokens, cache_read_tokens,
 				reasoning_tokens, is_stream, duration_sec, total_cost, price_source
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`,
 			requestLog.Platform,
 			requestLog.Model,
+			requestLog.RequestedModel,
+			requestLog.ResponseModel,
 			requestLog.Provider,
 			requestLog.HttpCode,
 			requestLog.InputTokens,
@@ -1098,6 +1108,8 @@ func ensureRequestLogTableWithDB(db *sql.DB) error {
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		platform TEXT,
 		model TEXT,
+		requested_model TEXT DEFAULT '',
+		response_model TEXT DEFAULT '',
 		provider TEXT,
 		http_code INTEGER,
 		input_tokens INTEGER,
@@ -1129,6 +1141,12 @@ func ensureRequestLogTableWithDB(db *sql.DB) error {
 		return err
 	}
 	if err := ensureRequestLogColumn(db, "price_source", "TEXT DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "requested_model", "TEXT DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "response_model", "TEXT DEFAULT ''"); err != nil {
 		return err
 	}
 	if err := ensureRequestLogIndex(db, "idx_request_log_created_at", "created_at"); err != nil {
@@ -1235,6 +1253,7 @@ func parseSSEDataLine(line string, parser func(string, *ReqeustLog), usage *Reqe
 		return
 	}
 	parser(dataLine, usage)
+	updateResponseModelFromPayload(dataLine, usage)
 }
 
 func looksLikeSSEPayload(payload string) bool {
@@ -1263,6 +1282,42 @@ func shouldProcessStandaloneSSELine(line string) bool {
 		strings.HasPrefix(trimmed, ":")
 }
 
+func updateResponseModelFromPayload(payload string, reqLog *ReqeustLog) {
+	if reqLog == nil || strings.TrimSpace(reqLog.ResponseModel) != "" {
+		return
+	}
+	if model := extractResponseModelFromPayload(payload); model != "" {
+		reqLog.ResponseModel = model
+	}
+}
+
+func extractResponseModelFromPayload(payload string) string {
+	trimmed := strings.TrimSpace(payload)
+	if trimmed == "" {
+		return ""
+	}
+
+	for _, path := range []string{
+		"model",
+		"response.model",
+		"message.model",
+		"data.model",
+		"modelVersion",
+	} {
+		if value := strings.TrimSpace(gjson.Get(trimmed, path).String()); value != "" {
+			return value
+		}
+	}
+
+	if matches := responseModelRegex.FindStringSubmatch(trimmed); len(matches) > 1 {
+		return strings.TrimSpace(matches[1])
+	}
+	if matches := responseModelVersionRegex.FindStringSubmatch(trimmed); len(matches) > 1 {
+		return strings.TrimSpace(matches[1])
+	}
+	return ""
+}
+
 func parseRawJSONPayload(payload string, parser func(string, *ReqeustLog), usage *ReqeustLog, rawJSONBuffer *strings.Builder) {
 	if parser == nil || usage == nil || rawJSONBuffer == nil || payload == "" {
 		return
@@ -1273,6 +1328,7 @@ func parseRawJSONPayload(payload string, parser func(string, *ReqeustLog), usage
 		return
 	}
 	parser(buffered, usage)
+	updateResponseModelFromPayload(buffered, usage)
 	rawJSONBuffer.Reset()
 }
 
@@ -1330,6 +1386,8 @@ type ReqeustLog struct {
 	ID                  int64   `json:"id"`
 	Platform            string  `json:"platform"` // claude、codex 或 gemini
 	Model               string  `json:"model"`
+	RequestedModel      string  `json:"requested_model,omitempty"`
+	ResponseModel       string  `json:"response_model,omitempty"`
 	Provider            string  `json:"provider"` // provider name
 	PriceSource         string  `json:"price_source,omitempty"`
 	HttpCode            int     `json:"http_code"`
@@ -1613,6 +1671,7 @@ func parseGeminiSSELine(event string, requestLog *ReqeustLog) {
 		if data == "[DONE]" || data == "" {
 			continue
 		}
+		updateResponseModelFromPayload(data, requestLog)
 		// 【优化】快速检查是否包含 usageMetadata，避免无效解析
 		if !strings.Contains(data, "usageMetadata") {
 			continue
@@ -1668,6 +1727,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 
 		// 判断是否为流式请求
 		isStream := strings.Contains(endpoint, ":streamGenerateContent") || strings.Contains(query, "alt=sse")
+		requestedModel := extractGeminiModelFromEndpoint(endpoint)
 
 		// 加载 Gemini providers
 		providers := prs.geminiService.GetProviders()
@@ -1717,6 +1777,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 		// 请求日志
 		requestLog := &ReqeustLog{
 			Platform:         "gemini",
+			RequestedModel:   requestedModel,
 			IsStream:         isStream,
 			InputTokens:      0,
 			OutputTokens:     0,
@@ -1759,12 +1820,12 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 			defer cancel()
 			_ = GlobalDBQueueLogs.ExecBatchCtx(ctx, `
 				INSERT INTO request_log (
-					platform, model, provider, http_code,
+					platform, model, requested_model, response_model, provider, http_code,
 					input_tokens, output_tokens, cache_create_tokens, cache_read_tokens,
 					reasoning_tokens, is_stream, duration_sec, total_cost, price_source
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			`,
-				requestLog.Platform, requestLog.Model, requestLog.Provider, requestLog.HttpCode,
+				requestLog.Platform, requestLog.Model, requestLog.RequestedModel, requestLog.ResponseModel, requestLog.Provider, requestLog.HttpCode,
 				requestLog.InputTokens, requestLog.OutputTokens, requestLog.CacheCreateTokens,
 				requestLog.CacheReadTokens, requestLog.ReasoningTokens,
 				boolToInt(requestLog.IsStream), requestLog.DurationSec, requestLog.TotalCost, requestLog.PriceSource,
@@ -2017,6 +2078,9 @@ func (prs *ProviderRelayService) forwardGeminiRequest(
 	// 优先从 endpoint 提取模型名（如 gemini-2.5-pro），否则回退到 provider.Model
 	if extractedModel := extractGeminiModelFromEndpoint(endpoint); extractedModel != "" {
 		requestLog.Model = extractedModel
+		if strings.TrimSpace(requestLog.RequestedModel) == "" {
+			requestLog.RequestedModel = extractedModel
+		}
 	} else {
 		requestLog.Model = provider.Model
 	}
@@ -2107,6 +2171,7 @@ func parseGeminiUsageMetadata(body []byte, reqLog *ReqeustLog) {
 	if len(body) == 0 || reqLog == nil {
 		return
 	}
+	updateResponseModelFromPayload(string(body), reqLog)
 	usage := gjson.GetBytes(body, "usageMetadata")
 	if !usage.Exists() {
 		return
@@ -2286,7 +2351,7 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 							provider.Name, level, retryCount+1, maxRetryPerProvider, effectiveModel)
 
 						startTime := time.Now()
-						ok, err := prs.forwardRequest(c, kind, provider, effectiveEndpoint, query, clientHeaders, currentBodyBytes, isStream, effectiveModel)
+						ok, err := prs.forwardRequest(c, kind, provider, effectiveEndpoint, query, clientHeaders, currentBodyBytes, isStream, effectiveModel, requestedModel)
 						duration := time.Since(startTime)
 
 						if ok {
@@ -2401,7 +2466,7 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 				effectiveEndpoint := provider.GetEffectiveEndpoint(endpoint)
 
 				startTime := time.Now()
-				ok, err := prs.forwardRequest(c, kind, provider, effectiveEndpoint, query, clientHeaders, currentBodyBytes, isStream, effectiveModel)
+				ok, err := prs.forwardRequest(c, kind, provider, effectiveEndpoint, query, clientHeaders, currentBodyBytes, isStream, effectiveModel, requestedModel)
 				duration := time.Since(startTime)
 
 				if ok {

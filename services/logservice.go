@@ -103,6 +103,8 @@ func (ls *LogService) ListRequestLogsV2(platform string, provider string, limit 
 			ID:                record.GetInt64("id"),
 			Platform:          record.GetString("platform"),
 			Model:             record.GetString("model"),
+			RequestedModel:    record.GetString("requested_model"),
+			ResponseModel:     record.GetString("response_model"),
 			Provider:          record.GetString("provider"),
 			PriceSource:       record.GetString("price_source"),
 			HttpCode:          record.GetInt("http_code"),

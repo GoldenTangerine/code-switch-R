@@ -532,6 +532,14 @@
         "platform": "平台",
         "provider": "供应商",
         "model": "模型",
+        "verify": "验证",
+        "verifyValues": {
+          "match": "一致",
+          "mismatch": "不一致",
+          "unknown": "未知"
+        },
+        "verifyDetail": "选中：{requested} · 返回：{response}",
+        "verifyDetailUnknown": "选中或返回模型缺失",
         "matchedPricingModel": "≈ 计价匹配：{model}",
         "priceSource": "计价来源：{source}",
         "priceSourceValues": {

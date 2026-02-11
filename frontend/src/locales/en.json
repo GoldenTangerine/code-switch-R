@@ -531,6 +531,14 @@
         "platform": "Platform",
         "provider": "Provider",
         "model": "Model",
+        "verify": "Verify",
+        "verifyValues": {
+          "match": "Match",
+          "mismatch": "Mismatch",
+          "unknown": "Unknown"
+        },
+        "verifyDetail": "Requested: {requested} · Returned: {response}",
+        "verifyDetailUnknown": "Requested or returned model missing",
         "matchedPricingModel": "≈ Pricing match: {model}",
         "priceSource": "Pricing source: {source}",
         "priceSourceValues": {
