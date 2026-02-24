@@ -874,6 +874,7 @@ func (prs *ProviderRelayService) forwardRequest(
 	start := time.Now()
 	defer func() {
 		requestLog.DurationSec = time.Since(start).Seconds()
+		normalizeRequestLogCacheCreateTokens(requestLog)
 		normalizeRequestLogInputTokens(requestLog)
 		costResult := calculateRequestLogCost(
 			prs.providerService,
@@ -886,6 +887,8 @@ func (prs *ProviderRelayService) forwardRequest(
 			requestLog.OutputTokens,
 			requestLog.ReasoningTokens,
 			requestLog.CacheCreateTokens,
+			requestLog.Ephemeral5mTokens,
+			requestLog.Ephemeral1hTokens,
 			requestLog.CacheReadTokens,
 		)
 		applyRequestLogCostResult(requestLog, costResult)
@@ -903,14 +906,14 @@ func (prs *ProviderRelayService) forwardRequest(
 		err := GlobalDBQueueLogs.ExecBatchCtx(ctx, `
 			INSERT INTO request_log (
 				platform, model, requested_model, response_model, provider, http_code,
-				input_tokens, output_tokens, cache_create_tokens, cache_read_tokens,
+				input_tokens, output_tokens, cache_create_tokens, ephemeral_5m_tokens, ephemeral_1h_tokens, cache_read_tokens,
 				reasoning_tokens, is_stream, duration_sec, total_cost, price_source,
 				input_cost, output_cost, reasoning_cost, cache_create_cost, cache_read_cost,
 				ephemeral_5m_cost, ephemeral_1h_cost, has_pricing, matched_pricing_model,
 				provider_pricing_available, provider_quota_type, provider_input_usd_per_m, provider_output_usd_per_m,
 				provider_per_call_unified, provider_per_call_input, provider_per_call_output,
 				provider_per_call_unified_set, provider_per_call_input_set, provider_per_call_output_set
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`,
 			requestLog.Platform,
 			requestLog.Model,
@@ -921,6 +924,8 @@ func (prs *ProviderRelayService) forwardRequest(
 			requestLog.InputTokens,
 			requestLog.OutputTokens,
 			requestLog.CacheCreateTokens,
+			requestLog.Ephemeral5mTokens,
+			requestLog.Ephemeral1hTokens,
 			requestLog.CacheReadTokens,
 			requestLog.ReasoningTokens,
 			boolToInt(requestLog.IsStream),
@@ -1138,6 +1143,8 @@ func ensureRequestLogTableWithDB(db *sql.DB) error {
 		input_tokens INTEGER,
 		output_tokens INTEGER,
 		cache_create_tokens INTEGER,
+		ephemeral_5m_tokens INTEGER DEFAULT 0,
+		ephemeral_1h_tokens INTEGER DEFAULT 0,
 		cache_read_tokens INTEGER,
 		reasoning_tokens INTEGER,
 		is_stream INTEGER DEFAULT 0,
@@ -1204,6 +1211,12 @@ func ensureRequestLogTableWithDB(db *sql.DB) error {
 		return err
 	}
 	if err := ensureRequestLogColumn(db, "cache_read_cost", "REAL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "ephemeral_5m_tokens", "INTEGER DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "ephemeral_1h_tokens", "INTEGER DEFAULT 0"); err != nil {
 		return err
 	}
 	if err := ensureRequestLogColumn(db, "ephemeral_5m_cost", "REAL DEFAULT 0"); err != nil {
@@ -1481,6 +1494,26 @@ func normalizeRequestLogInputTokens(reqLog *ReqeustLog) {
 	reqLog.InputTokens = totalInput - cacheTotal
 }
 
+func normalizeRequestLogCacheCreateTokens(reqLog *ReqeustLog) {
+	if reqLog == nil {
+		return
+	}
+	hasExplicitSplit := reqLog.Ephemeral5mTokens > 0 || reqLog.Ephemeral1hTokens > 0
+	isClaudeLog := strings.EqualFold(strings.TrimSpace(reqLog.Platform), "claude") ||
+		strings.Contains(strings.ToLower(strings.TrimSpace(reqLog.Model)), "claude")
+	if !hasExplicitSplit && !isClaudeLog {
+		return
+	}
+	normalizedTotal, normalized5m, normalized1h := normalizeCacheCreationTokenSplit(
+		reqLog.CacheCreateTokens,
+		reqLog.Ephemeral5mTokens,
+		reqLog.Ephemeral1hTokens,
+	)
+	reqLog.CacheCreateTokens = normalizedTotal
+	reqLog.Ephemeral5mTokens = normalized5m
+	reqLog.Ephemeral1hTokens = normalized1h
+}
+
 func applyRequestLogCostResult(reqLog *ReqeustLog, result requestLogCostResult) {
 	if reqLog == nil {
 		return
@@ -1520,6 +1553,8 @@ type ReqeustLog struct {
 	InputTokens               int     `json:"input_tokens"`
 	OutputTokens              int     `json:"output_tokens"`
 	CacheCreateTokens         int     `json:"cache_create_tokens"`
+	Ephemeral5mTokens         int     `json:"ephemeral_5m_tokens"`
+	Ephemeral1hTokens         int     `json:"ephemeral_1h_tokens"`
 	CacheReadTokens           int     `json:"cache_read_tokens"`
 	ReasoningTokens           int     `json:"reasoning_tokens"`
 	IsStream                  bool    `json:"is_stream"`
@@ -1607,13 +1642,25 @@ func ClaudeCodeParseTokenUsageFromResponse(data string, usage *ReqeustLog) {
 		"cache_creation_input_tokens",
 		"cache_create_tokens",
 	)
-	if usage.IsStream {
-		if cacheCreate > usage.CacheCreateTokens {
-			usage.CacheCreateTokens = cacheCreate
-		}
-	} else if cacheCreate > 0 {
-		usage.CacheCreateTokens = cacheCreate
-	}
+	cacheCreateEphemeral5m := firstPositiveIntFromPaths(
+		data,
+		"message.usage.cache_creation.ephemeral_5m_input_tokens",
+		"usage.cache_creation.ephemeral_5m_input_tokens",
+		"message.usage.cache_creation.ephemeral_5m_tokens",
+		"usage.cache_creation.ephemeral_5m_tokens",
+		"message.usage.cache_creation_input_tokens_details.ephemeral_5m_input_tokens",
+		"usage.cache_creation_input_tokens_details.ephemeral_5m_input_tokens",
+	)
+	cacheCreateEphemeral1h := firstPositiveIntFromPaths(
+		data,
+		"message.usage.cache_creation.ephemeral_1h_input_tokens",
+		"usage.cache_creation.ephemeral_1h_input_tokens",
+		"message.usage.cache_creation.ephemeral_1h_tokens",
+		"usage.cache_creation.ephemeral_1h_tokens",
+		"message.usage.cache_creation_input_tokens_details.ephemeral_1h_input_tokens",
+		"usage.cache_creation_input_tokens_details.ephemeral_1h_input_tokens",
+	)
+	applyCacheCreateTokenBreakdown(usage, cacheCreate, cacheCreateEphemeral5m, cacheCreateEphemeral1h)
 
 	cacheRead := firstPositiveIntFromPaths(
 		data,
@@ -1629,6 +1676,46 @@ func ClaudeCodeParseTokenUsageFromResponse(data string, usage *ReqeustLog) {
 	} else if cacheRead > 0 {
 		usage.CacheReadTokens = cacheRead
 	}
+}
+
+func applyCacheCreateTokenBreakdown(usage *ReqeustLog, cacheCreateTokens int, ephemeral5mTokens int, ephemeral1hTokens int) {
+	if usage == nil {
+		return
+	}
+	normalizedTotal, normalized5m, normalized1h := normalizeCacheCreationTokenSplit(
+		cacheCreateTokens,
+		ephemeral5mTokens,
+		ephemeral1hTokens,
+	)
+	if normalizedTotal == 0 && normalized5m == 0 && normalized1h == 0 {
+		return
+	}
+
+	if usage.IsStream {
+		currentTotal, current5m, current1h := normalizeCacheCreationTokenSplit(
+			usage.CacheCreateTokens,
+			usage.Ephemeral5mTokens,
+			usage.Ephemeral1hTokens,
+		)
+		if normalizedTotal > currentTotal {
+			currentTotal = normalizedTotal
+		}
+		if normalized5m > current5m {
+			current5m = normalized5m
+		}
+		if normalized1h > current1h {
+			current1h = normalized1h
+		}
+		currentTotal, current5m, current1h = normalizeCacheCreationTokenSplit(currentTotal, current5m, current1h)
+		usage.CacheCreateTokens = currentTotal
+		usage.Ephemeral5mTokens = current5m
+		usage.Ephemeral1hTokens = current1h
+		return
+	}
+
+	usage.CacheCreateTokens = normalizedTotal
+	usage.Ephemeral5mTokens = normalized5m
+	usage.Ephemeral1hTokens = normalized1h
 }
 
 func firstPositiveIntFromPaths(data string, paths ...string) int {
@@ -1933,6 +2020,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 		// 保存日志的 defer
 		defer func() {
 			requestLog.DurationSec = time.Since(start).Seconds()
+			normalizeRequestLogCacheCreateTokens(requestLog)
 			normalizeRequestLogInputTokens(requestLog)
 			costResult := calculateRequestLogCost(
 				prs.providerService,
@@ -1945,6 +2033,8 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 				requestLog.OutputTokens,
 				requestLog.ReasoningTokens,
 				requestLog.CacheCreateTokens,
+				requestLog.Ephemeral5mTokens,
+				requestLog.Ephemeral1hTokens,
 				requestLog.CacheReadTokens,
 			)
 			applyRequestLogCostResult(requestLog, costResult)
@@ -1956,17 +2046,17 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 			_ = GlobalDBQueueLogs.ExecBatchCtx(ctx, `
 				INSERT INTO request_log (
 					platform, model, requested_model, response_model, provider, http_code,
-					input_tokens, output_tokens, cache_create_tokens, cache_read_tokens,
+					input_tokens, output_tokens, cache_create_tokens, ephemeral_5m_tokens, ephemeral_1h_tokens, cache_read_tokens,
 					reasoning_tokens, is_stream, duration_sec, total_cost, price_source,
 					input_cost, output_cost, reasoning_cost, cache_create_cost, cache_read_cost,
 					ephemeral_5m_cost, ephemeral_1h_cost, has_pricing, matched_pricing_model,
 					provider_pricing_available, provider_quota_type, provider_input_usd_per_m, provider_output_usd_per_m,
 					provider_per_call_unified, provider_per_call_input, provider_per_call_output,
 					provider_per_call_unified_set, provider_per_call_input_set, provider_per_call_output_set
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			`,
 				requestLog.Platform, requestLog.Model, requestLog.RequestedModel, requestLog.ResponseModel, requestLog.Provider, requestLog.HttpCode,
-				requestLog.InputTokens, requestLog.OutputTokens, requestLog.CacheCreateTokens,
+				requestLog.InputTokens, requestLog.OutputTokens, requestLog.CacheCreateTokens, requestLog.Ephemeral5mTokens, requestLog.Ephemeral1hTokens,
 				requestLog.CacheReadTokens, requestLog.ReasoningTokens,
 				boolToInt(requestLog.IsStream), requestLog.DurationSec, requestLog.TotalCost, requestLog.PriceSource,
 				requestLog.InputCost, requestLog.OutputCost, requestLog.ReasoningCost, requestLog.CacheCreateCost, requestLog.CacheReadCost,

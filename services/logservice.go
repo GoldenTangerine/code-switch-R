@@ -111,6 +111,8 @@ func (ls *LogService) ListRequestLogsV2(platform string, provider string, limit 
 			InputTokens:               record.GetInt("input_tokens"),
 			OutputTokens:              record.GetInt("output_tokens"),
 			CacheCreateTokens:         record.GetInt("cache_create_tokens"),
+			Ephemeral5mTokens:         record.GetInt("ephemeral_5m_tokens"),
+			Ephemeral1hTokens:         record.GetInt("ephemeral_1h_tokens"),
 			CacheReadTokens:           record.GetInt("cache_read_tokens"),
 			ReasoningTokens:           record.GetInt("reasoning_tokens"),
 			CreatedAt:                 createdAtValue,
@@ -208,13 +210,15 @@ func applyLogPricing(pricing *modelpricing.Service, logEntry *ReqeustLog) {
 		return
 	}
 
-	usage := modelpricing.UsageSnapshot{
-		InputTokens:       logEntry.InputTokens,
-		OutputTokens:      logEntry.OutputTokens,
-		ReasoningTokens:   logEntry.ReasoningTokens,
-		CacheCreateTokens: logEntry.CacheCreateTokens,
-		CacheReadTokens:   logEntry.CacheReadTokens,
-	}
+	usage := buildRequestLogUsageSnapshot(
+		logEntry.InputTokens,
+		logEntry.OutputTokens,
+		logEntry.ReasoningTokens,
+		logEntry.CacheCreateTokens,
+		logEntry.Ephemeral5mTokens,
+		logEntry.Ephemeral1hTokens,
+		logEntry.CacheReadTokens,
+	)
 
 	breakdown := pricing.CalculateCost(logEntry.Model, usage)
 	if !breakdown.HasPricing {

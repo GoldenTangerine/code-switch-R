@@ -13,6 +13,8 @@ export type RequestLog = {
   input_tokens: number
   output_tokens: number
   cache_create_tokens: number
+  ephemeral_5m_tokens?: number
+  ephemeral_1h_tokens?: number
   cache_read_tokens: number
   reasoning_tokens: number
   is_stream?: boolean | number

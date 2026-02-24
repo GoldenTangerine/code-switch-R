@@ -568,6 +568,8 @@
         "output": "输出",
         "reasoning": "推理",
         "cacheWrite": "缓存写入",
+        "cacheWrite5m": "5m",
+        "cacheWrite1h": "1h",
         "cacheRead": "缓存读取",
         "cost": "金额"
       },

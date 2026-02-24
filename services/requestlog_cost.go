@@ -51,15 +51,19 @@ func calculateRequestLogCost(
 	outputTokens int,
 	reasoningTokens int,
 	cacheCreateTokens int,
+	ephemeral5mTokens int,
+	ephemeral1hTokens int,
 	cacheReadTokens int,
 ) requestLogCostResult {
-	usage := modelpricing.UsageSnapshot{
-		InputTokens:       inputTokens,
-		OutputTokens:      outputTokens,
-		ReasoningTokens:   reasoningTokens,
-		CacheCreateTokens: cacheCreateTokens,
-		CacheReadTokens:   cacheReadTokens,
-	}
+	usage := buildRequestLogUsageSnapshot(
+		inputTokens,
+		outputTokens,
+		reasoningTokens,
+		cacheCreateTokens,
+		ephemeral5mTokens,
+		ephemeral1hTokens,
+		cacheReadTokens,
+	)
 
 	if providerService != nil {
 		if item, ok := providerService.ResolveCachedProviderModelPricing(providerAPIURL, providerAPIKey, providerAuthType, model); ok {
@@ -121,15 +125,33 @@ func calculateProviderAPICost(
 		inputPerToken := item.InputUSDPerM / 1_000_000
 		outputPerToken := item.OutputUSDPerM / 1_000_000
 		cacheCreateMultiplier, cacheReadMultiplier := resolveProviderCacheMultipliers(item, pricing, model)
-		cacheCreatePerToken := inputPerToken * cacheCreateMultiplier
+		cacheCreate5mPerToken := inputPerToken * cacheCreateMultiplier
 		cacheReadPerToken := inputPerToken * cacheReadMultiplier
+		cacheCreate5mRaw := 0
+		cacheCreate1hRaw := 0
+		if usage.CacheCreation != nil {
+			cacheCreate5mRaw = usage.CacheCreation.Ephemeral5mTokens
+			cacheCreate1hRaw = usage.CacheCreation.Ephemeral1hTokens
+		}
+		cacheCreateTokens, cacheCreate5mTokens, cacheCreate1hTokens := completeCacheCreationTokenSplit(
+			usage.CacheCreateTokens,
+			cacheCreate5mRaw,
+			cacheCreate1hRaw,
+		)
 
 		result.ProviderInputUSDPerM = item.InputUSDPerM
 		result.ProviderOutputUSDPerM = item.OutputUSDPerM
 		result.InputCost = float64(usage.InputTokens) * inputPerToken
 		result.OutputCost = float64(usage.OutputTokens) * outputPerToken
 		result.ReasoningCost = float64(usage.ReasoningTokens) * outputPerToken
-		result.CacheCreateCost = float64(usage.CacheCreateTokens) * cacheCreatePerToken
+		if cacheCreateTokens > 0 {
+			result.Ephemeral5mCost = float64(cacheCreate5mTokens) * cacheCreate5mPerToken
+			if cacheCreate1hTokens > 0 {
+				cacheCreate1hPerToken := resolveProviderEphemeral1hPerToken(pricing, model, cacheCreate5mPerToken)
+				result.Ephemeral1hCost = float64(cacheCreate1hTokens) * cacheCreate1hPerToken
+			}
+			result.CacheCreateCost = result.Ephemeral5mCost + result.Ephemeral1hCost
+		}
 		result.CacheReadCost = float64(usage.CacheReadTokens) * cacheReadPerToken
 		result.TotalCost = result.InputCost + result.OutputCost + result.ReasoningCost + result.CacheCreateCost + result.CacheReadCost
 		return result, true
@@ -211,6 +233,101 @@ func resolveProviderCacheMultipliers(
 	}
 
 	return cacheCreateMultiplier, cacheReadMultiplier
+}
+
+func buildRequestLogUsageSnapshot(
+	inputTokens int,
+	outputTokens int,
+	reasoningTokens int,
+	cacheCreateTokens int,
+	ephemeral5mTokens int,
+	ephemeral1hTokens int,
+	cacheReadTokens int,
+) modelpricing.UsageSnapshot {
+	normalizedTotal, normalized5m, normalized1h := completeCacheCreationTokenSplit(
+		cacheCreateTokens,
+		ephemeral5mTokens,
+		ephemeral1hTokens,
+	)
+	usage := modelpricing.UsageSnapshot{
+		InputTokens:       inputTokens,
+		OutputTokens:      outputTokens,
+		ReasoningTokens:   reasoningTokens,
+		CacheCreateTokens: normalizedTotal,
+		CacheReadTokens:   cacheReadTokens,
+	}
+	if normalized5m > 0 || normalized1h > 0 {
+		usage.CacheCreation = &modelpricing.CacheCreationDetail{
+			Ephemeral5mTokens: normalized5m,
+			Ephemeral1hTokens: normalized1h,
+		}
+	}
+	return usage
+}
+
+func normalizeCacheCreationTokenSplit(totalTokens int, ephemeral5mTokens int, ephemeral1hTokens int) (int, int, int) {
+	total := totalTokens
+	five := ephemeral5mTokens
+	one := ephemeral1hTokens
+
+	if total < 0 {
+		total = 0
+	}
+	if five < 0 {
+		five = 0
+	}
+	if one < 0 {
+		one = 0
+	}
+
+	if total == 0 && (five > 0 || one > 0) {
+		total = five + one
+	}
+	if total <= 0 {
+		return 0, 0, 0
+	}
+
+	if one > total {
+		one = total
+	}
+	remaining := total - one
+	if remaining < 0 {
+		remaining = 0
+	}
+	if five > remaining {
+		five = remaining
+	}
+
+	return total, five, one
+}
+
+func completeCacheCreationTokenSplit(totalTokens int, ephemeral5mTokens int, ephemeral1hTokens int) (int, int, int) {
+	total, five, one := normalizeCacheCreationTokenSplit(totalTokens, ephemeral5mTokens, ephemeral1hTokens)
+	if total <= 0 {
+		return 0, 0, 0
+	}
+
+	assigned := five + one
+	if assigned < total {
+		five += total - assigned
+	}
+
+	return total, five, one
+}
+
+func resolveProviderEphemeral1hPerToken(pricing *modelpricing.Service, model string, fallbackPerToken float64) float64 {
+	if pricing != nil && strings.TrimSpace(model) != "" {
+		breakdown := pricing.CalculateCost(model, modelpricing.UsageSnapshot{
+			CacheCreateTokens: 1,
+			CacheCreation: &modelpricing.CacheCreationDetail{
+				Ephemeral1hTokens: 1,
+			},
+		})
+		if breakdown.Ephemeral1hCost > 0 {
+			return breakdown.Ephemeral1hCost
+		}
+	}
+	return fallbackPerToken
 }
 
 func deriveCacheMultipliersFromBuiltinPricing(pricing *modelpricing.Service, model string) (float64, float64, bool) {

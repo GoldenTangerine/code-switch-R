@@ -299,9 +299,17 @@
                     <span class="token-label">{{ t('components.logs.tokenLabels.reasoning') }}</span>
                     <span class="token-value">{{ formatTokenNumber(item.reasoning_tokens) }}</span>
                   </div>
-                  <div>
+                  <div class="token-breakdown-row">
                     <span class="token-label">{{ t('components.logs.tokenLabels.cacheWrite') }}</span>
                     <span class="token-value">{{ formatTokenNumber(item.cache_create_tokens) }}</span>
+                    <span v-if="hasCacheCreateDetail(item)" class="cache-create-badges">
+                      <span v-if="resolveEphemeral5mTokens(item) > 0" class="cache-create-badge cache-create-badge--5m">
+                        {{ t('components.logs.tokenLabels.cacheWrite5m') }} {{ formatTokenNumber(resolveEphemeral5mTokens(item)) }}
+                      </span>
+                      <span v-if="resolveEphemeral1hTokens(item) > 0" class="cache-create-badge cache-create-badge--1h">
+                        {{ t('components.logs.tokenLabels.cacheWrite1h') }} {{ formatTokenNumber(resolveEphemeral1hTokens(item)) }}
+                      </span>
+                    </span>
                   </div>
                   <div>
                     <span class="token-label">{{ t('components.logs.tokenLabels.cacheRead') }}</span>
@@ -2555,6 +2563,31 @@ const formatTokenNumber = (value?: number) => {
   return value.toLocaleString()
 }
 
+const normalizeTokenCount = (value?: number) => {
+  const normalized = Number(value ?? 0)
+  if (!Number.isFinite(normalized)) return 0
+  return Math.max(0, Math.round(normalized))
+}
+
+const resolveEphemeral1hTokens = (item: RequestLog) =>
+  normalizeTokenCount(item.ephemeral_1h_tokens)
+
+const resolveEphemeral5mTokens = (item: RequestLog) => {
+  const total = normalizeTokenCount(item.cache_create_tokens)
+  const explicit5m = normalizeTokenCount(item.ephemeral_5m_tokens)
+  const ephemeral1h = resolveEphemeral1hTokens(item)
+  if (explicit5m > 0) return explicit5m
+  if (total <= 0) return 0
+  const fallback5m = total - ephemeral1h
+  return fallback5m > 0 ? fallback5m : 0
+}
+
+const hasCacheCreateDetail = (item: RequestLog) => {
+  const total = normalizeTokenCount(item.cache_create_tokens)
+  if (total <= 0) return false
+  return resolveEphemeral5mTokens(item) > 0 || resolveEphemeral1hTokens(item) > 0
+}
+
 /**
  * 计算缓存命中率
  * @param cacheRead 缓存读取 token 数
@@ -2912,6 +2945,56 @@ html.dark .token-detail-item__name {
   font-weight: 600;
   color: #34d399;
   font-variant-numeric: tabular-nums;
+}
+
+.token-breakdown-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.45rem;
+}
+
+.cache-create-badges {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.cache-create-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.08rem 0.45rem;
+  font-size: 0.67rem;
+  font-weight: 600;
+  line-height: 1.35;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.cache-create-badge--5m {
+  color: #92400e;
+  background: rgba(251, 191, 36, 0.2);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+}
+
+.cache-create-badge--1h {
+  color: #0e7490;
+  background: rgba(125, 211, 252, 0.2);
+  border: 1px solid rgba(14, 165, 233, 0.3);
+}
+
+html.dark .cache-create-badge--5m {
+  color: #fcd34d;
+  background: rgba(161, 98, 7, 0.32);
+  border-color: rgba(251, 191, 36, 0.42);
+}
+
+html.dark .cache-create-badge--1h {
+  color: #7dd3fc;
+  background: rgba(12, 74, 110, 0.34);
+  border-color: rgba(56, 189, 248, 0.42);
 }
 
 /* 表格列 */

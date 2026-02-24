@@ -567,6 +567,8 @@
         "output": "Output",
         "reasoning": "Reasoning",
         "cacheWrite": "Cache write",
+        "cacheWrite5m": "5m",
+        "cacheWrite1h": "1h",
         "cacheRead": "Cache read",
         "cost": "Cost"
       },

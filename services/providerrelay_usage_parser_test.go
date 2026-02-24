@@ -133,6 +133,71 @@ func TestClaudeCodeParseTokenUsageFromResponseStreamUsesMaxInsteadOfSum(t *testi
 	}
 }
 
+func TestClaudeCodeParseTokenUsageFromResponseParsesCacheCreateSplit(t *testing.T) {
+	reqLog := &ReqeustLog{}
+	data := `{"usage":{"cache_creation_input_tokens":30,"cache_creation":{"ephemeral_5m_input_tokens":10,"ephemeral_1h_input_tokens":20}}}`
+
+	ClaudeCodeParseTokenUsageFromResponse(data, reqLog)
+
+	if reqLog.CacheCreateTokens != 30 {
+		t.Fatalf("CacheCreateTokens = %d, 期望 30", reqLog.CacheCreateTokens)
+	}
+	if reqLog.Ephemeral5mTokens != 10 {
+		t.Fatalf("Ephemeral5mTokens = %d, 期望 10", reqLog.Ephemeral5mTokens)
+	}
+	if reqLog.Ephemeral1hTokens != 20 {
+		t.Fatalf("Ephemeral1hTokens = %d, 期望 20", reqLog.Ephemeral1hTokens)
+	}
+}
+
+func TestClaudeCodeParseTokenUsageFromResponseDerivesCacheCreateTotalFromSplit(t *testing.T) {
+	reqLog := &ReqeustLog{}
+	data := `{"usage":{"cache_creation":{"ephemeral_5m_input_tokens":6,"ephemeral_1h_input_tokens":4}}}`
+
+	ClaudeCodeParseTokenUsageFromResponse(data, reqLog)
+
+	if reqLog.CacheCreateTokens != 10 {
+		t.Fatalf("CacheCreateTokens = %d, 期望 10（由 5m/1h 明细推导）", reqLog.CacheCreateTokens)
+	}
+	if reqLog.Ephemeral5mTokens != 6 {
+		t.Fatalf("Ephemeral5mTokens = %d, 期望 6", reqLog.Ephemeral5mTokens)
+	}
+	if reqLog.Ephemeral1hTokens != 4 {
+		t.Fatalf("Ephemeral1hTokens = %d, 期望 4", reqLog.Ephemeral1hTokens)
+	}
+}
+
+func TestClaudeCodeParseTokenUsageFromResponseStreamKeepsCacheCreateSplitConsistent(t *testing.T) {
+	reqLog := &ReqeustLog{IsStream: true, Platform: "claude"}
+
+	// 首包仅包含 cache_create 总量，尚无 5m/1h 明细。
+	ClaudeCodeParseTokenUsageFromResponse(`{"usage":{"cache_creation_input_tokens":30}}`, reqLog)
+	// 后续包补充 1h 明细，若按字段独立取 max 容易出现 five+one > total。
+	ClaudeCodeParseTokenUsageFromResponse(
+		`{"usage":{"cache_creation_input_tokens":30,"cache_creation":{"ephemeral_1h_input_tokens":20}}}`,
+		reqLog,
+	)
+	normalizeRequestLogCacheCreateTokens(reqLog)
+
+	if reqLog.CacheCreateTokens != 30 {
+		t.Fatalf("CacheCreateTokens = %d, 期望 30（流式合并后不应膨胀）", reqLog.CacheCreateTokens)
+	}
+	if reqLog.Ephemeral1hTokens != 20 {
+		t.Fatalf("Ephemeral1hTokens = %d, 期望 20", reqLog.Ephemeral1hTokens)
+	}
+	if reqLog.Ephemeral5mTokens != 0 {
+		t.Fatalf("Ephemeral5mTokens = %d, 期望 0（未显式提供 5m 明细）", reqLog.Ephemeral5mTokens)
+	}
+	if reqLog.Ephemeral5mTokens+reqLog.Ephemeral1hTokens > reqLog.CacheCreateTokens {
+		t.Fatalf(
+			"split 明细非法：five(%d)+one(%d) > total(%d)",
+			reqLog.Ephemeral5mTokens,
+			reqLog.Ephemeral1hTokens,
+			reqLog.CacheCreateTokens,
+		)
+	}
+}
+
 func TestCodexParseTokenUsageFromResponseStreamUsesMaxInsteadOfSum(t *testing.T) {
 	reqLog := &ReqeustLog{IsStream: true}
 	data := `{"response":{"usage":{"input_tokens":1110,"output_tokens":266,"input_tokens_details":{"cached_tokens":1097},"output_tokens_details":{"reasoning_tokens":104}}}}`
