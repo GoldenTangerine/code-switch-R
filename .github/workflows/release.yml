@@ -157,63 +157,96 @@ jobs:
           }
 
       - name: Create NSIS Installer
+        shell: pwsh
         run: |
-          Push-Location build\windows\nsis
-          wails3 generate webview2bootstrapper
-          $binaryPath = (Resolve-Path "..\..\..\bin\CodeSwitch.exe").Path
-          Write-Host "Binary path: $binaryPath"
+          function Resolve-MakeNsis {
+            param(
+              [string]$HintPath = ""
+            )
 
-          $makensisExe = $env:MAKENSIS_EXE
-          if ([string]::IsNullOrWhiteSpace($makensisExe) -or !(Test-Path $makensisExe)) {
-            $makensisCmd = Get-Command makensis -ErrorAction SilentlyContinue
-            if ($null -ne $makensisCmd) {
-              $makensisExe = $makensisCmd.Source
-            } else {
-              $candidatePaths = @(
-                "C:\Program Files (x86)\NSIS\makensis.exe",
-                "C:\Program Files (x86)\NSIS\Bin\makensis.exe",
-                "C:\Program Files\NSIS\makensis.exe",
-                "C:\Program Files\NSIS\Bin\makensis.exe",
-                "$env:ChocolateyInstall\bin\makensis.exe",
-                "C:\ProgramData\chocolatey\bin\makensis.exe"
-              ) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -Unique
+            $candidatePaths = @(
+              $HintPath
+            )
 
-              if ($candidatePaths.Count -eq 0) {
-                $searchRoots = @(
-                  "C:\Program Files (x86)\NSIS",
-                  "C:\Program Files\NSIS",
-                  "C:\ProgramData\chocolatey\bin",
-                  "C:\ProgramData\chocolatey\lib\nsis",
-                  "$env:ChocolateyInstall"
-                ) | Where-Object { $_ -and (Test-Path $_) }
+            $cmd = Get-Command makensis -ErrorAction SilentlyContinue
+            if ($null -ne $cmd -and -not [string]::IsNullOrWhiteSpace($cmd.Source)) {
+              $candidatePaths += $cmd.Source
+            }
 
-                foreach ($root in $searchRoots) {
-                  $found = Get-ChildItem -Path $root -Recurse -Filter "makensis.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
-                  if ($null -ne $found) {
-                    $makensisExe = $found.FullName
-                    break
-                  }
-                }
-              } else {
-                $makensisExe = $candidatePaths[0]
+            $candidatePaths += @(
+              "C:\Program Files (x86)\NSIS\makensis.exe",
+              "C:\Program Files (x86)\NSIS\Bin\makensis.exe",
+              "C:\Program Files\NSIS\makensis.exe",
+              "C:\Program Files\NSIS\Bin\makensis.exe",
+              "C:\ProgramData\chocolatey\bin\makensis.exe",
+              "C:\ProgramData\chocolatey\bin\makensis.bat",
+              "C:\ProgramData\chocolatey\bin\makensis.cmd",
+              "$env:ChocolateyInstall\bin\makensis.exe",
+              "$env:ChocolateyInstall\bin\makensis.bat",
+              "$env:ChocolateyInstall\bin\makensis.cmd"
+            )
+
+            foreach ($path in ($candidatePaths | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)) {
+              if (Test-Path $path) {
+                return (Resolve-Path $path).Path
               }
             }
+
+            $searchRoots = @(
+              "C:\Program Files (x86)\NSIS",
+              "C:\Program Files\NSIS",
+              "C:\ProgramData\chocolatey\bin",
+              "C:\ProgramData\chocolatey\lib\nsis",
+              "C:\ProgramData\chocolatey\lib\nsis.install",
+              "C:\ProgramData\chocolatey\lib\nsis.portable",
+              "$env:ChocolateyInstall"
+            ) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -Unique
+
+            foreach ($root in $searchRoots) {
+              foreach ($pattern in @("makensis.exe", "makensis.cmd", "makensis.bat")) {
+                $found = Get-ChildItem -Path $root -Recurse -Filter $pattern -ErrorAction SilentlyContinue | Select-Object -First 1
+                if ($null -ne $found) {
+                  return $found.FullName
+                }
+              }
+            }
+
+            return $null
           }
 
-          if ([string]::IsNullOrWhiteSpace($makensisExe) -or !(Test-Path $makensisExe)) {
-            Write-Host "makensis.exe not found. Debug info:"
-            Write-Host "ProgramFiles(x86): ${env:ProgramFiles(x86)}"
-            Write-Host "ProgramFiles: $env:ProgramFiles"
-            Write-Host "ChocolateyInstall: $env:ChocolateyInstall"
-            choco list --local-only nsis
-            if (Test-Path "C:\Program Files (x86)\NSIS") { Get-ChildItem "C:\Program Files (x86)\NSIS" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 40 }
-            if (Test-Path "C:\Program Files\NSIS") { Get-ChildItem "C:\Program Files\NSIS" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 40 }
-            exit 1
-          }
+          Push-Location build\windows\nsis
+          try {
+            wails3 generate webview2bootstrapper
+            $binaryPath = (Resolve-Path "..\..\..\bin\CodeSwitch.exe").Path
+            Write-Host "Binary path: $binaryPath"
 
-          Write-Host "Using makensis: $makensisExe"
-          & $makensisExe -DARG_WAILS_AMD64_BINARY="$binaryPath" project.nsi
-          Pop-Location
+            $makensisExe = Resolve-MakeNsis -HintPath $env:MAKENSIS_EXE
+            if ([string]::IsNullOrWhiteSpace($makensisExe)) {
+              Write-Host "makensis not found after NSIS install, trying nsis.portable fallback..."
+              choco install nsis.portable -y --no-progress
+              $makensisExe = Resolve-MakeNsis -HintPath $env:MAKENSIS_EXE
+            }
+
+            if ([string]::IsNullOrWhiteSpace($makensisExe) -or !(Test-Path $makensisExe)) {
+              Write-Host "makensis.exe not found. Debug info:"
+              Write-Host "ProgramFiles(x86): ${env:ProgramFiles(x86)}"
+              Write-Host "ProgramFiles: $env:ProgramFiles"
+              Write-Host "ChocolateyInstall: $env:ChocolateyInstall"
+              Write-Host "Installed packages (filtered):"
+              choco list --limit-output nsis
+              choco list --limit-output nsis.install
+              choco list --limit-output nsis.portable
+              if (Test-Path "C:\Program Files (x86)\NSIS") { Get-ChildItem "C:\Program Files (x86)\NSIS" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 40 }
+              if (Test-Path "C:\Program Files\NSIS") { Get-ChildItem "C:\Program Files\NSIS" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 40 }
+              if (Test-Path "C:\ProgramData\chocolatey\lib") { Get-ChildItem "C:\ProgramData\chocolatey\lib" -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.Name -match "makensis" } | Select-Object -First 40 }
+              exit 1
+            }
+
+            Write-Host "Using makensis: $makensisExe"
+            & $makensisExe -DARG_WAILS_AMD64_BINARY="$binaryPath" project.nsi
+          } finally {
+            Pop-Location
+          }
 
       - name: Build Updater
         run: |
