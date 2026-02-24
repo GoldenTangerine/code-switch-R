@@ -121,12 +121,30 @@ jobs:
         shell: pwsh
         run: |
           choco install nsis -y --no-progress
-          $nsisInstalled = choco list --local-only nsis | Select-String -Pattern "^nsis "
-          if ($null -eq $nsisInstalled) {
-            throw "NSIS installation verification failed."
+          $makensisCmd = Get-Command makensis -ErrorAction SilentlyContinue
+          $candidatePaths = @(
+            if ($null -ne $makensisCmd) { $makensisCmd.Source }
+            "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
+            "${env:ProgramFiles(x86)}\NSIS\Bin\makensis.exe"
+            "$env:ProgramFiles\NSIS\makensis.exe"
+            "$env:ProgramFiles\NSIS\Bin\makensis.exe"
+            "$env:ChocolateyInstall\bin\makensis.exe"
+          ) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -Unique
+
+          if ($candidatePaths.Count -eq 0) {
+            Write-Host "NSIS installed but makensis.exe is not discoverable. Debug info:"
+            Write-Host "ProgramFiles(x86): ${env:ProgramFiles(x86)}"
+            Write-Host "ProgramFiles: $env:ProgramFiles"
+            Write-Host "ChocolateyInstall: $env:ChocolateyInstall"
+            if (Test-Path "${env:ProgramFiles(x86)}\NSIS") { Get-ChildItem "${env:ProgramFiles(x86)}\NSIS" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 40 }
+            if (Test-Path "$env:ProgramFiles\NSIS") { Get-ChildItem "$env:ProgramFiles\NSIS" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 40 }
+            throw "NSIS installation verification failed: makensis.exe not found."
           }
-          Write-Host "NSIS installed:"
-          choco list --local-only nsis
+
+          $makensisExe = $candidatePaths[0]
+          Write-Host "Using makensis from install step: $makensisExe"
+          "MAKENSIS_EXE=$makensisExe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          (Split-Path $makensisExe -Parent) | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Update build assets
         run: wails3 task common:update:build-assets
@@ -160,10 +178,12 @@ jobs:
           $binaryPath = (Resolve-Path "..\..\..\bin\CodeSwitch.exe").Path
           Write-Host "Binary path: $binaryPath"
 
-          $makensisCmd = Get-Command makensis -ErrorAction SilentlyContinue
-          if ($null -ne $makensisCmd) {
-            $makensisExe = $makensisCmd.Source
-          } else {
+          $makensisExe = $env:MAKENSIS_EXE
+          if ([string]::IsNullOrWhiteSpace($makensisExe) -or !(Test-Path $makensisExe)) {
+            $makensisCmd = Get-Command makensis -ErrorAction SilentlyContinue
+            if ($null -ne $makensisCmd) {
+              $makensisExe = $makensisCmd.Source
+            } else {
             $candidatePaths = @(
               "${env:ProgramFiles(x86)}\NSIS\makensis.exe",
               "${env:ProgramFiles(x86)}\NSIS\Bin\makensis.exe",
@@ -183,6 +203,7 @@ jobs:
             }
 
             $makensisExe = $candidatePaths[0]
+            }
           }
 
           Write-Host "Using makensis: $makensisExe"
