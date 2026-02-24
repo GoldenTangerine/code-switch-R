@@ -880,9 +880,10 @@ html.dark .mac-sidebar-item:hover {
 }
 
 .logs-header {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 40px 48px 16px;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 40px clamp(20px, 4vw, 48px) 16px;
   box-sizing: border-box;
   display: flex;
   justify-content: space-between;
@@ -892,9 +893,10 @@ html.dark .mac-sidebar-item:hover {
 }
 
 .logs-content {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 16px 48px 40px;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 16px clamp(20px, 4vw, 48px) 40px;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
