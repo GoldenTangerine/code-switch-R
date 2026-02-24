@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import InlineModal from '../common/InlineModal.vue'
 import BaseInput from '../common/BaseInput.vue'
 import ModelPricingEditorModal from './ModelPricingEditorModal.vue'
 import { useI18n } from 'vue-i18n'
-import { listModelPricing, type ModelPricingRow } from '../../services/modelPricing'
+import { listModelPricing, syncClaudeOfficialPricing, type ModelPricingRow } from '../../services/modelPricing'
 import { extractErrorMessage } from '../../utils/error'
 import { showToast } from '../../utils/toast'
 
@@ -25,6 +25,11 @@ const rows = ref<ModelPricingRow[]>([])
 const search = ref('')
 const onlyOverrides = ref(false)
 const selectedModel = ref<string>('')
+const syncTask = ref<Promise<void> | null>(null)
+const syncing = computed(() => syncTask.value !== null)
+const syncMenuOpen = ref(false)
+const syncMenuRef = ref<HTMLElement | null>(null)
+const syncTriggerRef = ref<HTMLElement | null>(null)
 
 type EditMode = 'edit' | 'new'
 
@@ -78,6 +83,7 @@ const openEditModal = (row: ModelPricingRow) => {
   editorMode.value = 'edit'
   editorRow.value = row
   editorOpen.value = true
+  syncMenuOpen.value = false
 }
 
 const resetUIState = () => {
@@ -85,10 +91,12 @@ const resetUIState = () => {
   onlyOverrides.value = false
   selectedModel.value = ''
   error.value = ''
+  syncMenuOpen.value = false
 }
 
 const closeModal = () => {
   editorOpen.value = false
+  syncMenuOpen.value = false
   emit('close')
 }
 
@@ -103,6 +111,97 @@ const onRemoved = async (model: string) => {
   editorOpen.value = false
   await loadRows()
 }
+
+const resolvePricingSource = (row: ModelPricingRow) => {
+  if (row.source === 'claude_sync') return 'claude_sync'
+  if (row.source === 'manual') return 'manual'
+  if (row.source === 'builtin') return 'builtin'
+  return row.is_override || row.is_custom ? 'manual' : 'builtin'
+}
+
+const resolvePricingSourceLabel = (row: ModelPricingRow) => {
+  const source = resolvePricingSource(row)
+  if (source === 'claude_sync') return t('components.general.modelPricing.badge.synced')
+  if (source === 'builtin') return t('components.general.modelPricing.badge.builtin')
+  return t('components.general.modelPricing.badge.manual')
+}
+
+const resolvePricingSourceClass = (row: ModelPricingRow) => {
+  const source = resolvePricingSource(row)
+  if (source === 'claude_sync') return 'tag-synced'
+  if (source === 'builtin') return 'tag-builtin'
+  return 'tag-manual'
+}
+
+const toggleSyncMenu = () => {
+  if (syncing.value) return
+  syncMenuOpen.value = !syncMenuOpen.value
+}
+
+const syncFromClaude = async () => {
+  if (syncing.value) return
+
+  syncMenuOpen.value = false
+  let task: Promise<void>
+  task = (async () => {
+    try {
+      const result = await syncClaudeOfficialPricing()
+      showToast(
+        t('components.general.modelPricing.toast.syncSummary', {
+          changed: result.changed_models,
+          unchanged: result.unchanged_models,
+        }),
+      )
+      if ((result.unrecognized_models ?? []).length > 0) {
+        showToast(
+          t('components.general.modelPricing.toast.syncUnrecognized', {
+            models: (result.unrecognized_models ?? []).join(', '),
+          }),
+          'warning',
+        )
+      }
+      await loadRows()
+    } catch (err) {
+      showToast(
+        t('components.general.modelPricing.toast.syncFailed', {
+          error: extractErrorMessage(err),
+        }),
+        'error',
+      )
+    } finally {
+      if (syncTask.value === task) {
+        syncTask.value = null
+      }
+    }
+  })()
+
+  syncTask.value = task
+  try {
+    await task
+  } catch {
+    // 已在 task 内部统一 toast，这里吞掉避免重复报错链
+  }
+}
+
+const onGlobalPointerDown = (event: PointerEvent) => {
+  if (!syncMenuOpen.value) return
+  const target = event.target as Node | null
+  if (!target) {
+    syncMenuOpen.value = false
+    return
+  }
+  if (syncMenuRef.value?.contains(target)) return
+  if (syncTriggerRef.value?.contains(target)) return
+  syncMenuOpen.value = false
+}
+
+onMounted(() => {
+  document.addEventListener('pointerdown', onGlobalPointerDown)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('pointerdown', onGlobalPointerDown)
+})
 
 watch(
   () => props.open,
@@ -136,6 +235,27 @@ watch(
             <button type="button" class="action-btn" :disabled="loading" @click="loadRows">
               {{ loading ? $t('components.general.modelPricing.loading') : $t('components.general.modelPricing.refresh') }}
             </button>
+            <div class="sync-menu-anchor">
+              <button
+                ref="syncTriggerRef"
+                type="button"
+                class="action-btn"
+                :disabled="syncing"
+                @click.stop="toggleSyncMenu"
+              >
+                {{ syncing ? $t('components.general.modelPricing.syncing') : $t('components.general.modelPricing.sync') }}
+              </button>
+              <div v-if="syncMenuOpen" ref="syncMenuRef" class="sync-menu-card" @click.stop>
+                <button
+                  type="button"
+                  class="sync-menu-btn"
+                  :disabled="syncing"
+                  @click="syncFromClaude"
+                >
+                  Claude
+                </button>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -191,11 +311,8 @@ watch(
           <div class="model-main">
             <div class="model-name">{{ item.model }}</div>
             <div class="model-tags">
-              <span v-if="item.is_custom" class="tag tag-custom">
-                {{ $t('components.general.modelPricing.badge.custom') }}
-              </span>
-              <span v-else-if="item.is_override" class="tag tag-override">
-                {{ $t('components.general.modelPricing.badge.override') }}
+              <span class="tag" :class="resolvePricingSourceClass(item)">
+                {{ resolvePricingSourceLabel(item) }}
               </span>
             </div>
           </div>
@@ -248,6 +365,45 @@ watch(
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+}
+
+.sync-menu-anchor {
+  position: relative;
+}
+
+.sync-menu-card {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  min-width: 150px;
+  border: 1px solid var(--mac-border);
+  border-radius: 10px;
+  background: var(--mac-surface);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.2);
+  padding: 8px;
+  z-index: 5;
+}
+
+.sync-menu-btn {
+  width: 100%;
+  border: 1px solid rgba(148, 163, 184, 0.32);
+  border-radius: 8px;
+  padding: 7px 10px;
+  background: rgba(59, 130, 246, 0.1);
+  color: var(--mac-text);
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.sync-menu-btn:hover:not(:disabled) {
+  border-color: rgba(59, 130, 246, 0.35);
+  background: rgba(59, 130, 246, 0.16);
+}
+
+.sync-menu-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .model-pricing-filters {
@@ -357,16 +513,22 @@ watch(
   white-space: nowrap;
 }
 
-.tag-custom {
-  background: rgba(16, 185, 129, 0.15);
-  color: #10b981;
-  border-color: rgba(16, 185, 129, 0.3);
+.tag-builtin {
+  background: rgba(148, 163, 184, 0.15);
+  color: var(--mac-text-secondary);
+  border-color: rgba(148, 163, 184, 0.32);
 }
 
-.tag-override {
+.tag-manual {
   background: rgba(245, 158, 11, 0.12);
   color: #f59e0b;
   border-color: rgba(245, 158, 11, 0.25);
+}
+
+.tag-synced {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+  border-color: rgba(16, 185, 129, 0.3);
 }
 
 .model-pricing {

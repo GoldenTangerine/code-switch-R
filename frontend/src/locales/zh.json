@@ -746,6 +746,8 @@
         "onlyOverrides": "仅自定义/覆盖",
         "add": "新增模型",
         "refresh": "刷新",
+        "sync": "同步",
+        "syncing": "同步中...",
         "loading": "加载中...",
         "empty": "暂无模型价格数据",
         "removing": "处理中...",
@@ -760,7 +762,10 @@
         },
         "badge": {
           "custom": "Custom",
-          "override": "Override"
+          "override": "Override",
+          "builtin": "内置价格",
+          "manual": "手动修改",
+          "synced": "网络同步"
         },
         "editor": {
           "create": "新增",
@@ -782,6 +787,10 @@
           "removeFailed": "操作失败：{error}",
           "resetSuccess": "已恢复默认价格",
           "deleteSuccess": "已删除模型价格",
+          "syncSuccess": "已完成同步，更新 {count} 个模型价格",
+          "syncSummary": "同步完成：更新 {changed} 个，未变化 {unchanged} 个",
+          "syncUnrecognized": "以下官方模型名尚未映射，已跳过：{models}",
+          "syncFailed": "同步失败：{error}",
           "modelRequired": "请先填写模型名",
           "invalidNumber": "字段 {field} 不是合法数字"
         }

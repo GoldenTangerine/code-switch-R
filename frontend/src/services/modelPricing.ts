@@ -15,6 +15,18 @@ export interface ModelPricingRow {
   ephemeral_1h_cost_per_token: number
   is_override: boolean
   is_custom: boolean
+  source?: 'builtin' | 'manual' | 'claude_sync' | string
+}
+
+export interface ModelPricingSyncResult {
+  provider: string
+  synced_at: string
+  total_models: number
+  created_models: number
+  updated_models: number
+  changed_models: number
+  unchanged_models: number
+  unrecognized_models?: string[]
 }
 
 export const listModelPricing = async (): Promise<ModelPricingRow[]> => {
@@ -30,3 +42,6 @@ export const deleteModelPricing = async (model: string): Promise<void> => {
   await Call.ByName(`${MODEL_PRICING_SERVICE}.DeleteModelPricing`, model)
 }
 
+export const syncClaudeOfficialPricing = async (): Promise<ModelPricingSyncResult> => {
+  return Call.ByName(`${MODEL_PRICING_SERVICE}.SyncClaudeOfficialPricing`)
+}

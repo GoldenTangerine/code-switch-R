@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	modelpricing "codeswitch/resources/model-pricing"
 
@@ -17,9 +18,21 @@ import (
 
 const modelPricingOverridesSettingKey = "model_pricing_overrides_v1"
 
+const (
+	modelPricingSourceBuiltin    = "builtin"
+	modelPricingSourceManual     = "manual"
+	modelPricingSourceClaudeSync = "claude_sync"
+)
+
 type modelPricingOverrides struct {
 	Pricing     map[string]modelpricing.PricingEntry `json:"pricing"`
 	Ephemeral1h map[string]float64                   `json:"ephemeral_1h"`
+	Meta        map[string]modelPricingMeta          `json:"meta,omitempty"`
+}
+
+type modelPricingMeta struct {
+	Source    string `json:"source,omitempty"`
+	UpdatedAt string `json:"updated_at,omitempty"`
 }
 
 type ModelPricingRow struct {
@@ -32,6 +45,7 @@ type ModelPricingRow struct {
 	Ephemeral1hCostPerToken     float64 `json:"ephemeral_1h_cost_per_token"`
 	IsOverride                  bool    `json:"is_override"`
 	IsCustom                    bool    `json:"is_custom"`
+	Source                      string  `json:"source"`
 }
 
 type ModelPricingService struct {
@@ -52,6 +66,7 @@ func NewModelPricingService() *ModelPricingService {
 		overrides: modelPricingOverrides{
 			Pricing:     make(map[string]modelpricing.PricingEntry),
 			Ephemeral1h: make(map[string]float64),
+			Meta:        make(map[string]modelPricingMeta),
 		},
 	}
 	svc.mu.Lock()
@@ -132,6 +147,7 @@ func (mps *ModelPricingService) ListModelPricing() ([]ModelPricingRow, error) {
 			Ephemeral1hCostPerToken:     svc.Ephemeral1hCostPerToken(model),
 			IsOverride:                  isOverride,
 			IsCustom:                    isCustom,
+			Source:                      resolveModelPricingSource(mps.overrides.Meta[model], isOverride || isCustom),
 		})
 	}
 
@@ -188,6 +204,10 @@ func (mps *ModelPricingService) UpsertModelPricing(row ModelPricingRow) error {
 	newOverrides.Pricing[model] = existing
 
 	newOverrides.Ephemeral1h[model] = row.Ephemeral1hCostPerToken
+	newOverrides.Meta[model] = modelPricingMeta{
+		Source:    modelPricingSourceManual,
+		UpdatedAt: time.Now().UTC().Format(time.RFC3339),
+	}
 
 	if err := saveModelPricingOverridesToDB(newOverrides); err != nil {
 		return err
@@ -213,6 +233,7 @@ func (mps *ModelPricingService) DeleteModelPricing(model string) error {
 	newOverrides := cloneModelPricingOverrides(mps.overrides)
 	delete(newOverrides.Pricing, key)
 	delete(newOverrides.Ephemeral1h, key)
+	delete(newOverrides.Meta, key)
 
 	if err := saveModelPricingOverridesToDB(newOverrides); err != nil {
 		return err
@@ -266,12 +287,16 @@ func cloneModelPricingOverrides(src modelPricingOverrides) modelPricingOverrides
 	dst := modelPricingOverrides{
 		Pricing:     make(map[string]modelpricing.PricingEntry, len(src.Pricing)),
 		Ephemeral1h: make(map[string]float64, len(src.Ephemeral1h)),
+		Meta:        make(map[string]modelPricingMeta, len(src.Meta)),
 	}
 	for key, value := range src.Pricing {
 		dst.Pricing[key] = value
 	}
 	for key, value := range src.Ephemeral1h {
 		dst.Ephemeral1h[key] = value
+	}
+	for key, value := range src.Meta {
+		dst.Meta[key] = value
 	}
 	return dst
 }
@@ -280,6 +305,7 @@ func loadModelPricingOverridesFromDB() (modelPricingOverrides, error) {
 	overrides := modelPricingOverrides{
 		Pricing:     make(map[string]modelpricing.PricingEntry),
 		Ephemeral1h: make(map[string]float64),
+		Meta:        make(map[string]modelPricingMeta),
 	}
 
 	db, err := xdb.DB("default")
@@ -311,6 +337,9 @@ func loadModelPricingOverridesFromDB() (modelPricingOverrides, error) {
 	if overrides.Ephemeral1h == nil {
 		overrides.Ephemeral1h = make(map[string]float64)
 	}
+	if overrides.Meta == nil {
+		overrides.Meta = make(map[string]modelPricingMeta)
+	}
 
 	return overrides, nil
 }
@@ -329,4 +358,28 @@ func saveModelPricingOverridesToDB(overrides modelPricingOverrides) error {
 		INSERT INTO app_settings (key, value) VALUES (?, ?)
 		ON CONFLICT(key) DO UPDATE SET value = excluded.value
 	`, modelPricingOverridesSettingKey, string(payload))
+}
+
+func resolveModelPricingSource(meta modelPricingMeta, fallbackManual bool) string {
+	source := normalizeModelPricingSource(meta.Source)
+	if source != "" {
+		return source
+	}
+	if fallbackManual {
+		return modelPricingSourceManual
+	}
+	return modelPricingSourceBuiltin
+}
+
+func normalizeModelPricingSource(source string) string {
+	switch strings.ToLower(strings.TrimSpace(source)) {
+	case modelPricingSourceBuiltin:
+		return modelPricingSourceBuiltin
+	case modelPricingSourceManual:
+		return modelPricingSourceManual
+	case modelPricingSourceClaudeSync:
+		return modelPricingSourceClaudeSync
+	default:
+		return ""
+	}
 }

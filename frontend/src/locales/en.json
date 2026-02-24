@@ -745,6 +745,8 @@
         "onlyOverrides": "Overrides only",
         "add": "Add model",
         "refresh": "Refresh",
+        "sync": "Sync",
+        "syncing": "Syncing...",
         "loading": "Loading...",
         "empty": "No model pricing data",
         "removing": "Working...",
@@ -759,7 +761,10 @@
         },
         "badge": {
           "custom": "Custom",
-          "override": "Override"
+          "override": "Override",
+          "builtin": "Built-in",
+          "manual": "Manual",
+          "synced": "Synced"
         },
         "editor": {
           "create": "Create",
@@ -781,6 +786,10 @@
           "removeFailed": "Operation failed: {error}",
           "resetSuccess": "Reset to default pricing",
           "deleteSuccess": "Model pricing deleted",
+          "syncSuccess": "Sync completed, updated {count} model prices",
+          "syncSummary": "Sync completed: {changed} updated, {unchanged} unchanged",
+          "syncUnrecognized": "Skipped unmapped official model names: {models}",
+          "syncFailed": "Sync failed: {error}",
           "modelRequired": "Please enter a model name first",
           "invalidNumber": "Field {field} is not a valid number"
         }
