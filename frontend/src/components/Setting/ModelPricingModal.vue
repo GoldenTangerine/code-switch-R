@@ -142,7 +142,7 @@ const syncFromClaude = async () => {
   if (syncing.value) return
 
   syncMenuOpen.value = false
-  let task: Promise<void>
+  let task: Promise<void> | null = null
   task = (async () => {
     try {
       const result = await syncClaudeOfficialPricing()
