@@ -234,18 +234,33 @@ watch(
 }
 
 .preview-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 10px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--mac-border);
+  background: var(--mac-surface);
 }
 
 .action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: 1px solid rgba(59, 130, 246, 0.35);
   background: rgba(59, 130, 246, 0.12);
   color: var(--mac-text);
   border-radius: 10px;
-  padding: 8px 12px;
+  padding: 8px 14px;
+  min-height: 34px;
   font-size: 0.85rem;
+  line-height: 1.2;
+  white-space: nowrap;
+  flex-shrink: 0;
   cursor: pointer;
   transition: background 0.15s ease, border-color 0.15s ease;
 }
@@ -275,7 +290,9 @@ watch(
   }
 
   .preview-actions .action-btn {
-    flex: 1;
+    flex: 1 1 170px;
+    min-width: 0;
+    white-space: normal;
   }
 }
 </style>

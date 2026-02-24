@@ -152,6 +152,29 @@ const resolvePricingSourceClass = (row: ModelPricingRow) => {
   return 'tag-manual'
 }
 
+const formatDateTimeForTooltip = (raw: string | undefined) => {
+  const value = (raw ?? '').trim()
+  if (!value) return ''
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return ''
+
+  const pad = (num: number) => String(num).padStart(2, '0')
+  const year = parsed.getFullYear()
+  const month = pad(parsed.getMonth() + 1)
+  const day = pad(parsed.getDate())
+  const hour = pad(parsed.getHours())
+  const minute = pad(parsed.getMinutes())
+  const second = pad(parsed.getSeconds())
+  return `${year}-${month}-${day} ${hour}:${minute}:${second}`
+}
+
+const resolvePricingSourceTooltip = (row: ModelPricingRow) => {
+  if (resolvePricingSource(row) !== 'claude_sync') return ''
+  const formatted = formatDateTimeForTooltip(row.source_updated_at)
+  if (!formatted) return ''
+  return t('components.general.modelPricing.badge.syncedAtTooltip', { time: formatted })
+}
+
 const toggleSyncMenu = () => {
   if (syncing.value) return
   syncMenuOpen.value = !syncMenuOpen.value
@@ -370,7 +393,11 @@ watch(
           <div class="model-main">
             <div class="model-name">{{ item.model }}</div>
             <div class="model-tags">
-              <span class="tag" :class="resolvePricingSourceClass(item)">
+              <span
+                class="tag"
+                :class="resolvePricingSourceClass(item)"
+                :title="resolvePricingSourceTooltip(item) || undefined"
+              >
                 {{ resolvePricingSourceLabel(item) }}
               </span>
             </div>

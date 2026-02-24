@@ -46,6 +46,7 @@ type ModelPricingRow struct {
 	IsOverride                  bool    `json:"is_override"`
 	IsCustom                    bool    `json:"is_custom"`
 	Source                      string  `json:"source"`
+	SourceUpdatedAt             string  `json:"source_updated_at,omitempty"`
 }
 
 type ModelPricingService struct {
@@ -138,6 +139,7 @@ func (mps *ModelPricingService) ListModelPricing() ([]ModelPricingRow, error) {
 			isCustom = true
 		}
 
+		meta := mps.overrides.Meta[model]
 		rows = append(rows, ModelPricingRow{
 			Model:                       model,
 			InputCostPerToken:           entry.InputCostPerToken,
@@ -148,7 +150,8 @@ func (mps *ModelPricingService) ListModelPricing() ([]ModelPricingRow, error) {
 			Ephemeral1hCostPerToken:     svc.Ephemeral1hCostPerToken(model),
 			IsOverride:                  isOverride,
 			IsCustom:                    isCustom,
-			Source:                      resolveModelPricingSource(mps.overrides.Meta[model], isOverride || isCustom),
+			Source:                      resolveModelPricingSource(meta, isOverride || isCustom),
+			SourceUpdatedAt:             strings.TrimSpace(meta.UpdatedAt),
 		})
 	}
 

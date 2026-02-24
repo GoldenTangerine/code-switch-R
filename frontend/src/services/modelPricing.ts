@@ -16,6 +16,7 @@ export interface ModelPricingRow {
   is_override: boolean
   is_custom: boolean
   source?: 'builtin' | 'manual' | 'claude_sync' | string
+  source_updated_at?: string
 }
 
 export interface ModelPricingSyncResult {

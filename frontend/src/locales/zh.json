@@ -765,7 +765,8 @@
           "override": "Override",
           "builtin": "内置价格",
           "manual": "手动修改",
-          "synced": "网络同步"
+          "synced": "网络同步",
+          "syncedAtTooltip": "网络同步时间：{time}"
         },
         "editor": {
           "create": "新增",

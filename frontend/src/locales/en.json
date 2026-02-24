@@ -764,7 +764,8 @@
           "override": "Override",
           "builtin": "Built-in",
           "manual": "Manual",
-          "synced": "Synced"
+          "synced": "Synced",
+          "syncedAtTooltip": "Synced from network at {time}"
         },
         "editor": {
           "create": "Create",
