@@ -1,96 +1,99 @@
 <template>
   <InlineModal
     :open="open"
+    :body-scrollable="false"
     :title="t('components.general.modelPricing.preview.title')"
     @close="emit('close')"
   >
     <div class="provider-model-modal">
-      <div class="provider-model-toolbar">
-        <div class="provider-model-meta">
-          <span class="meta-pill">
-            {{ t('components.general.modelPricing.preview.fetchedAt') }}：{{ formattedFetchedAt }}
-          </span>
-          <span class="meta-pill">
-            {{ t('components.general.modelPricing.preview.total') }}：{{ rows.length }}
-          </span>
-          <span class="meta-pill">
-            {{ t('components.general.modelPricing.preview.mapped') }}：{{ mappedCount }}
-          </span>
-          <span v-if="unmappedCount > 0" class="meta-pill">
-            {{ t('components.general.modelPricing.preview.unmapped') }}：{{ unmappedCount }}
-          </span>
-        </div>
-
-        <div class="provider-model-search">
-          <BaseInput
-            v-model="searchTerm"
-            type="text"
-            :placeholder="t('components.general.modelPricing.preview.searchPlaceholder')"
-          />
-        </div>
-
-        <div class="provider-model-vendors">
-          <button
-            v-for="tab in previewTabs"
-            :key="tab.key"
-            type="button"
-            class="vendor-pill"
-            :class="{ active: selectedFilter === tab.key }"
-            @click="selectedFilter = tab.key"
-          >
-            {{ tab.label }} ({{ tab.count }})
-          </button>
-        </div>
-      </div>
-
-      <div v-if="filteredRows.length === 0" class="provider-model-state">
-        {{ t('components.general.modelPricing.preview.empty') }}
-      </div>
-      <div v-else class="provider-model-list">
-        <p class="pricing-hint">
-          {{ t('components.general.modelPricing.preview.hint') }}
-        </p>
-
-        <div
-          v-for="(model, index) in filteredRows"
-          :key="`${model.display_name}::${(model.target_models ?? []).join('|')}::${index}`"
-          class="provider-model-item"
-        >
-          <div class="model-main">
-            <div class="model-name">{{ model.display_name }}</div>
-            <div class="model-tags">
-              <span class="tag" :class="model.is_recognized ? 'tag-token' : 'tag-neutral'">
-                {{ model.is_recognized ? t('components.general.modelPricing.preview.mapped') : t('components.general.modelPricing.preview.unmapped') }}
-              </span>
-              <span v-if="(model.target_models ?? []).length > 0" class="tag tag-neutral tag-wrap">
-                {{ t('components.general.modelPricing.preview.mappingHint', { models: summarizeTargetModels(model) }) }}
-              </span>
-              <span v-else class="tag tag-neutral">
-                {{ t('components.general.modelPricing.preview.mappingMissing') }}
-              </span>
-            </div>
+      <div class="preview-scroll">
+        <div class="provider-model-toolbar">
+          <div class="provider-model-meta">
+            <span class="meta-pill">
+              {{ t('components.general.modelPricing.preview.fetchedAt') }}：{{ formattedFetchedAt }}
+            </span>
+            <span class="meta-pill">
+              {{ t('components.general.modelPricing.preview.total') }}：{{ rows.length }}
+            </span>
+            <span class="meta-pill">
+              {{ t('components.general.modelPricing.preview.mapped') }}：{{ mappedCount }}
+            </span>
+            <span v-if="unmappedCount > 0" class="meta-pill">
+              {{ t('components.general.modelPricing.preview.unmapped') }}：{{ unmappedCount }}
+            </span>
           </div>
 
-          <div class="model-pricing">
-            <div class="price-block">
-              <span class="price-label">{{ t('components.general.modelPricing.preview.input') }}</span>
-              <span class="price-value input">{{ formatUsdPer1M(model.input_cost_per_token) }}/M</span>
+          <div class="provider-model-search">
+            <BaseInput
+              v-model="searchTerm"
+              type="text"
+              :placeholder="t('components.general.modelPricing.preview.searchPlaceholder')"
+            />
+          </div>
+
+          <div class="provider-model-vendors">
+            <button
+              v-for="tab in previewTabs"
+              :key="tab.key"
+              type="button"
+              class="vendor-pill"
+              :class="{ active: selectedFilter === tab.key }"
+              @click="selectedFilter = tab.key"
+            >
+              {{ tab.label }} ({{ tab.count }})
+            </button>
+          </div>
+        </div>
+
+        <div v-if="filteredRows.length === 0" class="provider-model-state">
+          {{ t('components.general.modelPricing.preview.empty') }}
+        </div>
+        <div v-else class="provider-model-list">
+          <p class="pricing-hint">
+            {{ t('components.general.modelPricing.preview.hint') }}
+          </p>
+
+          <div
+            v-for="(model, index) in filteredRows"
+            :key="`${model.display_name}::${(model.target_models ?? []).join('|')}::${index}`"
+            class="provider-model-item"
+          >
+            <div class="model-main">
+              <div class="model-name">{{ model.display_name }}</div>
+              <div class="model-tags">
+                <span class="tag" :class="model.is_recognized ? 'tag-token' : 'tag-neutral'">
+                  {{ model.is_recognized ? t('components.general.modelPricing.preview.mapped') : t('components.general.modelPricing.preview.unmapped') }}
+                </span>
+                <span v-if="(model.target_models ?? []).length > 0" class="tag tag-neutral tag-wrap">
+                  {{ t('components.general.modelPricing.preview.mappingHint', { models: summarizeTargetModels(model) }) }}
+                </span>
+                <span v-else class="tag tag-neutral">
+                  {{ t('components.general.modelPricing.preview.mappingMissing') }}
+                </span>
+              </div>
             </div>
-            <div class="price-block">
-              <span class="price-label">{{ t('components.general.modelPricing.preview.output') }}</span>
-              <span class="price-value output">{{ formatUsdPer1M(model.output_cost_per_token) }}/M</span>
-            </div>
-            <div class="price-block">
-              <span class="price-label">{{ t('components.general.modelPricing.preview.cacheHit') }}</span>
-              <span class="price-value cache-hit">{{ formatUsdPer1M(model.cache_read_input_token_cost) }}/M</span>
-            </div>
-            <div class="price-block">
-              <span class="price-label">{{ t('components.general.modelPricing.preview.cacheWrite5m') }}</span>
-              <span class="price-value cache-write">{{ formatUsdPer1M(model.cache_creation_input_token_cost) }}/M</span>
-            </div>
-            <div class="price-block">
-              <span class="price-label">{{ t('components.general.modelPricing.preview.cacheWrite1h') }}</span>
-              <span class="price-value cache-write-1h">{{ formatUsdPer1M(model.ephemeral_1h_cost_per_token) }}/M</span>
+
+            <div class="model-pricing">
+              <div class="price-block">
+                <span class="price-label">{{ t('components.general.modelPricing.preview.input') }}</span>
+                <span class="price-value input">{{ formatUsdPer1M(model.input_cost_per_token) }}/M</span>
+              </div>
+              <div class="price-block">
+                <span class="price-label">{{ t('components.general.modelPricing.preview.output') }}</span>
+                <span class="price-value output">{{ formatUsdPer1M(model.output_cost_per_token) }}/M</span>
+              </div>
+              <div class="price-block">
+                <span class="price-label">{{ t('components.general.modelPricing.preview.cacheHit') }}</span>
+                <span class="price-value cache-hit">{{ formatUsdPer1M(model.cache_read_input_token_cost) }}/M</span>
+              </div>
+              <div class="price-block">
+                <span class="price-label">{{ t('components.general.modelPricing.preview.cacheWrite5m') }}</span>
+                <span class="price-value cache-write">{{ formatUsdPer1M(model.cache_creation_input_token_cost) }}/M</span>
+              </div>
+              <div class="price-block">
+                <span class="price-label">{{ t('components.general.modelPricing.preview.cacheWrite1h') }}</span>
+                <span class="price-value cache-write-1h">{{ formatUsdPer1M(model.ephemeral_1h_cost_per_token) }}/M</span>
+              </div>
             </div>
           </div>
         </div>
@@ -107,7 +110,7 @@
         </button>
         <button
           type="button"
-          class="action-btn"
+          class="action-btn sync-btn"
           :disabled="syncing || rows.length === 0"
           @click="emit('confirm-sync')"
         >
@@ -216,6 +219,19 @@ watch(
 <style scoped>
 @import '../common/provider-model-list-shared.css';
 
+.provider-model-modal {
+  height: 100%;
+  min-height: 0;
+  gap: 12px;
+}
+
+.preview-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
 .tag-wrap {
   white-space: normal;
   line-height: 1.4;
@@ -234,14 +250,11 @@ watch(
 }
 
 .preview-actions {
-  position: sticky;
-  bottom: 0;
-  z-index: 3;
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 10px;
-  margin-top: 12px;
+  margin-top: auto;
   padding-top: 12px;
   border-top: 1px solid var(--mac-border);
   background: var(--mac-surface);
@@ -251,6 +264,9 @@ watch(
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  width: auto;
+  max-width: 100%;
+  min-width: 88px;
   border: 1px solid rgba(59, 130, 246, 0.35);
   background: rgba(59, 130, 246, 0.12);
   color: var(--mac-text);
@@ -260,9 +276,15 @@ watch(
   font-size: 0.85rem;
   line-height: 1.2;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   flex-shrink: 0;
   cursor: pointer;
   transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.sync-btn {
+  min-width: 182px;
 }
 
 .action-btn:hover:not(:disabled) {
@@ -286,13 +308,15 @@ watch(
 
 @media (max-width: 640px) {
   .preview-actions {
-    justify-content: stretch;
+    justify-content: flex-end;
   }
 
   .preview-actions .action-btn {
-    flex: 1 1 170px;
-    min-width: 0;
-    white-space: normal;
+    flex: 0 0 auto;
+  }
+
+  .preview-actions .sync-btn {
+    min-width: 168px;
   }
 }
 </style>

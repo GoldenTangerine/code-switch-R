@@ -28,7 +28,7 @@
                 ✕
               </button>
             </header>
-            <div class="modal-body modal-scrollable">
+            <div :class="['modal-body', { 'modal-scrollable': bodyScrollable }]" :style="bodyStyle">
               <slot />
             </div>
           </div>
@@ -52,8 +52,9 @@ const props = withDefaults(
     variant?: Variant
     closeOnBackdrop?: boolean
     panelWidth?: string
+    bodyScrollable?: boolean
   }>(),
-  { variant: 'default', closeOnBackdrop: true, panelWidth: '' },
+  { variant: 'default', closeOnBackdrop: true, panelWidth: '', bodyScrollable: true },
 )
 
 const emit = defineEmits<{ (e: 'close'): void }>()
@@ -63,6 +64,15 @@ const titleId = `modal-title-${Math.random().toString(36).slice(2, 9)}`
 const panelStyle = computed<CSSProperties | undefined>(() =>
   props.panelWidth ? { width: props.panelWidth } : undefined,
 )
+const bodyStyle = computed<CSSProperties | undefined>(() => {
+  if (props.bodyScrollable) return undefined
+  return {
+    display: 'flex',
+    flexDirection: 'column',
+    minHeight: '0',
+    flex: '1 1 auto',
+  }
+})
 
 const panelRef = ref<HTMLElement | null>(null)
 const closeButtonRef = ref<HTMLButtonElement | null>(null)
