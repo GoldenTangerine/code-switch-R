@@ -118,7 +118,15 @@ jobs:
         run: cd frontend && npm install
 
       - name: Install NSIS
-        run: choco install nsis -y
+        shell: pwsh
+        run: |
+          choco install nsis -y --no-progress
+          $nsisInstalled = choco list --local-only nsis | Select-String -Pattern "^nsis "
+          if ($null -eq $nsisInstalled) {
+            throw "NSIS installation verification failed."
+          }
+          Write-Host "NSIS installed:"
+          choco list --local-only nsis
 
       - name: Update build assets
         run: wails3 task common:update:build-assets
@@ -147,12 +155,38 @@ jobs:
 
       - name: Create NSIS Installer
         run: |
-          $env:PATH += ";C:\Program Files (x86)\NSIS"
           Push-Location build\windows\nsis
           wails3 generate webview2bootstrapper
           $binaryPath = (Resolve-Path "..\..\..\bin\CodeSwitch.exe").Path
           Write-Host "Binary path: $binaryPath"
-          makensis -DARG_WAILS_AMD64_BINARY="$binaryPath" project.nsi
+
+          $makensisCmd = Get-Command makensis -ErrorAction SilentlyContinue
+          if ($null -ne $makensisCmd) {
+            $makensisExe = $makensisCmd.Source
+          } else {
+            $candidatePaths = @(
+              "${env:ProgramFiles(x86)}\NSIS\makensis.exe",
+              "${env:ProgramFiles(x86)}\NSIS\Bin\makensis.exe",
+              "$env:ProgramFiles\NSIS\makensis.exe",
+              "$env:ProgramFiles\NSIS\Bin\makensis.exe",
+              "$env:ChocolateyInstall\bin\makensis.exe"
+            ) | Where-Object { Test-Path $_ }
+
+            if ($candidatePaths.Count -eq 0) {
+              Write-Host "makensis.exe not found. Debug info:"
+              Write-Host "ProgramFiles(x86): ${env:ProgramFiles(x86)}"
+              Write-Host "ProgramFiles: $env:ProgramFiles"
+              Write-Host "ChocolateyInstall: $env:ChocolateyInstall"
+              if (Test-Path "${env:ProgramFiles(x86)}\NSIS") { Get-ChildItem "${env:ProgramFiles(x86)}\NSIS" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 20 }
+              if (Test-Path "$env:ProgramFiles\NSIS") { Get-ChildItem "$env:ProgramFiles\NSIS" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 20 }
+              exit 1
+            }
+
+            $makensisExe = $candidatePaths[0]
+          }
+
+          Write-Host "Using makensis: $makensisExe"
+          & $makensisExe -DARG_WAILS_AMD64_BINARY="$binaryPath" project.nsi
           Pop-Location
 
       - name: Build Updater
