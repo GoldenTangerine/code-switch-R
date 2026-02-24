@@ -20,6 +20,7 @@ import (
 const (
 	claudePricingPageURL      = "https://platform.claude.com/docs/en/about-claude/pricing"
 	claudePricingPageMaxBytes = 8 * 1024 * 1024
+	claudePreviewCacheTTL     = 30 * time.Minute
 )
 
 const (
@@ -41,6 +42,15 @@ var claudePricingRequiredHeaders = []string{
 	claudeHeaderCacheWrite1h,
 	claudeHeaderCacheHits,
 	claudeHeaderOutput,
+}
+
+var claudePricingHeaderAliases = map[string][]string{
+	claudeHeaderModel:        {"model"},
+	claudeHeaderBaseInput:    {"baseinput", "baseinputtokens"},
+	claudeHeaderCacheWrite5m: {"5mcachewrites", "5mcachewrite"},
+	claudeHeaderCacheWrite1h: {"1hcachewrites", "1hcachewrite"},
+	claudeHeaderCacheHits:    {"cachehitsrefreshes", "cachehits"},
+	claudeHeaderOutput:       {"output", "outputtokens"},
 }
 
 var claudeOfficialDisplayNameToModels = map[string][]string{
@@ -69,6 +79,24 @@ type ModelPricingSyncResult struct {
 	UnrecognizedModels []string `json:"unrecognized_models,omitempty"`
 }
 
+type ClaudeOfficialPricingPreviewResult struct {
+	Provider           string                            `json:"provider"`
+	FetchedAt          string                            `json:"fetched_at"`
+	Rows               []ClaudeOfficialPricingPreviewRow `json:"rows"`
+	UnrecognizedModels []string                          `json:"unrecognized_models,omitempty"`
+}
+
+type ClaudeOfficialPricingPreviewRow struct {
+	DisplayName                 string   `json:"display_name"`
+	TargetModels                []string `json:"target_models,omitempty"`
+	InputCostPerToken           float64  `json:"input_cost_per_token"`
+	OutputCostPerToken          float64  `json:"output_cost_per_token"`
+	CacheCreationInputTokenCost float64  `json:"cache_creation_input_token_cost"`
+	CacheReadInputTokenCost     float64  `json:"cache_read_input_token_cost"`
+	Ephemeral1hCostPerToken     float64  `json:"ephemeral_1h_cost_per_token"`
+	IsRecognized                bool     `json:"is_recognized"`
+}
+
 type claudeOfficialModelPricing struct {
 	DisplayName           string
 	InputPerToken         float64
@@ -76,6 +104,33 @@ type claudeOfficialModelPricing struct {
 	CacheCreate1hPerToken float64
 	CacheReadPerToken     float64
 	OutputPerToken        float64
+}
+
+type claudePricingPreviewCache struct {
+	rows      []claudeOfficialModelPricing
+	fetchedAt time.Time
+}
+
+func (mps *ModelPricingService) PreviewClaudeOfficialPricing() (ClaudeOfficialPricingPreviewResult, error) {
+	result := ClaudeOfficialPricingPreviewResult{
+		Provider:  "claude",
+		FetchedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	if mps == nil {
+		return result, fmt.Errorf("nil pricing service")
+	}
+
+	rows, err := loadClaudeOfficialPricingRows()
+	if err != nil {
+		return result, err
+	}
+
+	mps.storeClaudePricingPreviewCache(rows, time.Now().UTC())
+
+	previewRows, unrecognized := buildClaudePricingPreviewRows(rows)
+	result.Rows = previewRows
+	result.UnrecognizedModels = unrecognized
+	return result, nil
 }
 
 func (mps *ModelPricingService) SyncClaudeOfficialPricing() (ModelPricingSyncResult, error) {
@@ -87,17 +142,9 @@ func (mps *ModelPricingService) SyncClaudeOfficialPricing() (ModelPricingSyncRes
 		return result, fmt.Errorf("nil pricing service")
 	}
 
-	pageHTML, err := fetchClaudePricingPageHTML()
+	rows, err := mps.loadClaudeOfficialPricingRowsForSync()
 	if err != nil {
 		return result, err
-	}
-
-	rows, err := parseClaudeModelPricingTable(pageHTML)
-	if err != nil {
-		return result, err
-	}
-	if len(rows) == 0 {
-		return result, fmt.Errorf("未解析到 Claude 模型价格表")
 	}
 
 	syncMap, unrecognized := buildClaudeSyncPricingMap(rows)
@@ -181,6 +228,62 @@ func (mps *ModelPricingService) SyncClaudeOfficialPricing() (ModelPricingSyncRes
 	mps.overrides = newOverrides
 	mps.rebuildLocked()
 	return result, nil
+}
+
+func loadClaudeOfficialPricingRows() ([]claudeOfficialModelPricing, error) {
+	pageHTML, err := fetchClaudePricingPageHTML()
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := parseClaudeModelPricingTable(pageHTML)
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return nil, fmt.Errorf("未解析到 Claude 模型价格表")
+	}
+	return rows, nil
+}
+
+func (mps *ModelPricingService) loadClaudeOfficialPricingRowsForSync() ([]claudeOfficialModelPricing, error) {
+	if cachedRows, ok := mps.consumeClaudePricingPreviewCache(time.Now().UTC()); ok {
+		return cachedRows, nil
+	}
+	return loadClaudeOfficialPricingRows()
+}
+
+func (mps *ModelPricingService) storeClaudePricingPreviewCache(rows []claudeOfficialModelPricing, fetchedAt time.Time) {
+	if mps == nil {
+		return
+	}
+	mps.mu.Lock()
+	mps.claudePricingPreview = claudePricingPreviewCache{
+		rows:      cloneClaudeOfficialModelPricings(rows),
+		fetchedAt: fetchedAt,
+	}
+	mps.mu.Unlock()
+}
+
+func (mps *ModelPricingService) consumeClaudePricingPreviewCache(now time.Time) ([]claudeOfficialModelPricing, bool) {
+	if mps == nil {
+		return nil, false
+	}
+
+	mps.mu.Lock()
+	defer mps.mu.Unlock()
+
+	cache := mps.claudePricingPreview
+	if len(cache.rows) == 0 {
+		return nil, false
+	}
+	if !cache.fetchedAt.IsZero() && now.Sub(cache.fetchedAt) > claudePreviewCacheTTL {
+		mps.claudePricingPreview = claudePricingPreviewCache{}
+		return nil, false
+	}
+
+	mps.claudePricingPreview = claudePricingPreviewCache{}
+	return cloneClaudeOfficialModelPricings(cache.rows), true
 }
 
 func fetchClaudePricingPageHTML() (string, error) {
@@ -334,23 +437,35 @@ func resolveClaudePricingHeaderIndex(table *xhtml.Node) (map[string]int, error) 
 		return nil, fmt.Errorf("thead/th 为空")
 	}
 
-	index := make(map[string]int, len(headerCells))
+	normalizedHeaderIndex := make(map[string]int, len(headerCells))
 	for cellIndex, cell := range headerCells {
 		key := normalizeHeader(nodeText(cell))
 		if key == "" {
 			continue
 		}
-		if _, exists := index[key]; !exists {
-			index[key] = cellIndex
+		if _, exists := normalizedHeaderIndex[key]; !exists {
+			normalizedHeaderIndex[key] = cellIndex
 		}
 	}
 
+	index := make(map[string]int, len(claudePricingRequiredHeaders))
 	for _, required := range claudePricingRequiredHeaders {
-		if _, ok := index[required]; !ok {
+		resolvedIndex, ok := resolveHeaderIndexByAliases(normalizedHeaderIndex, claudePricingHeaderAliases[required])
+		if !ok {
 			return nil, fmt.Errorf("缺少表头列: %s", required)
 		}
+		index[required] = resolvedIndex
 	}
 	return index, nil
+}
+
+func resolveHeaderIndexByAliases(headerIndex map[string]int, aliases []string) (int, bool) {
+	for _, alias := range aliases {
+		if idx, ok := headerIndex[alias]; ok {
+			return idx, true
+		}
+	}
+	return 0, false
 }
 
 func extractHeaderCells(table *xhtml.Node) []*xhtml.Node {
@@ -468,6 +583,43 @@ func buildClaudeSyncPricingMap(rows []claudeOfficialModelPricing) (map[string]cl
 	return result, unrecognized
 }
 
+func buildClaudePricingPreviewRows(rows []claudeOfficialModelPricing) ([]ClaudeOfficialPricingPreviewRow, []string) {
+	previewRows := make([]ClaudeOfficialPricingPreviewRow, 0, len(rows))
+	unrecognizedSet := make(map[string]struct{})
+
+	for _, row := range rows {
+		targetModels, recognized := resolveClaudePricingTargetModels(row.DisplayName)
+		if !recognized && strings.TrimSpace(row.DisplayName) != "" {
+			unrecognizedSet[row.DisplayName] = struct{}{}
+		}
+
+		targets := append([]string(nil), targetModels...)
+		sort.Strings(targets)
+
+		previewRows = append(previewRows, ClaudeOfficialPricingPreviewRow{
+			DisplayName:                 row.DisplayName,
+			TargetModels:                targets,
+			InputCostPerToken:           row.InputPerToken,
+			OutputCostPerToken:          row.OutputPerToken,
+			CacheCreationInputTokenCost: row.CacheCreate5mPerToken,
+			CacheReadInputTokenCost:     row.CacheReadPerToken,
+			Ephemeral1hCostPerToken:     row.CacheCreate1hPerToken,
+			IsRecognized:                recognized,
+		})
+	}
+
+	sort.Slice(previewRows, func(i, j int) bool {
+		return strings.ToLower(previewRows[i].DisplayName) < strings.ToLower(previewRows[j].DisplayName)
+	})
+
+	unrecognized := make([]string, 0, len(unrecognizedSet))
+	for model := range unrecognizedSet {
+		unrecognized = append(unrecognized, model)
+	}
+	sort.Strings(unrecognized)
+	return previewRows, unrecognized
+}
+
 func resolveClaudePricingTargetModels(displayName string) ([]string, bool) {
 	normalized := strings.ToLower(strings.TrimSpace(displayName))
 	targetModels, ok := claudeOfficialDisplayNameToModels[normalized]
@@ -492,6 +644,15 @@ func uniqueNonEmptyModels(models ...string) []string {
 		result = append(result, value)
 	}
 	return result
+}
+
+func cloneClaudeOfficialModelPricings(rows []claudeOfficialModelPricing) []claudeOfficialModelPricing {
+	if len(rows) == 0 {
+		return nil
+	}
+	cloned := make([]claudeOfficialModelPricing, len(rows))
+	copy(cloned, rows)
+	return cloned
 }
 
 func pricingEntriesAlmostEqual(a modelpricing.PricingEntry, b modelpricing.PricingEntry) bool {

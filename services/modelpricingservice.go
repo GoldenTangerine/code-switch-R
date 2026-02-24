@@ -49,10 +49,11 @@ type ModelPricingRow struct {
 }
 
 type ModelPricingService struct {
-	mu        sync.RWMutex
-	defaults  *modelpricing.Service
-	effective *modelpricing.Service
-	overrides modelPricingOverrides
+	mu                   sync.RWMutex
+	defaults             *modelpricing.Service
+	effective            *modelpricing.Service
+	overrides            modelPricingOverrides
+	claudePricingPreview claudePricingPreviewCache
 }
 
 func NewModelPricingService() *ModelPricingService {

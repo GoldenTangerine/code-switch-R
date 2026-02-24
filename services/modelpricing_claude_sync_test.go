@@ -1,6 +1,9 @@
 package services
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestParseClaudeModelPricingTable(t *testing.T) {
 	pageHTML := `
@@ -162,6 +165,51 @@ func TestParseClaudeModelPricingTable_UsesHeaderIndexInsteadOfFixedColumnPositio
 	}
 }
 
+func TestParseClaudeModelPricingTable_SupportsTokenSuffixedHeaders(t *testing.T) {
+	pageHTML := `
+<html><body>
+  <table>
+    <thead>
+      <tr>
+        <th>Model</th>
+        <th>Base Input Tokens</th>
+        <th>5m Cache Writes</th>
+        <th>1h Cache Writes</th>
+        <th>Cache Hits &amp; Refreshes</th>
+        <th>Output Tokens</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Claude Opus 4.6</td>
+        <td>$5 / MTok</td>
+        <td>$6.25 / MTok</td>
+        <td>$10 / MTok</td>
+        <td>$0.50 / MTok</td>
+        <td>$25 / MTok</td>
+      </tr>
+    </tbody>
+  </table>
+</body></html>`
+
+	rows, err := parseClaudeModelPricingTable(pageHTML)
+	if err != nil {
+		t.Fatalf("parseClaudeModelPricingTable 返回错误: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("len(rows) = %d, 期望 1", len(rows))
+	}
+	if rows[0].DisplayName != "Claude Opus 4.6" {
+		t.Fatalf("rows[0].DisplayName = %q, 期望 %q", rows[0].DisplayName, "Claude Opus 4.6")
+	}
+	if rows[0].InputPerToken != 0.000005 {
+		t.Fatalf("rows[0].InputPerToken = %f, 期望 %f", rows[0].InputPerToken, 0.000005)
+	}
+	if rows[0].OutputPerToken != 0.000025 {
+		t.Fatalf("rows[0].OutputPerToken = %f, 期望 %f", rows[0].OutputPerToken, 0.000025)
+	}
+}
+
 func TestResolveClaudePricingTargetModels_AllOfficialNamesMapped(t *testing.T) {
 	for displayName, expectedTargets := range claudeOfficialDisplayNameToModels {
 		targets, recognized := resolveClaudePricingTargetModels(displayName)
@@ -197,5 +245,103 @@ func TestBuildClaudeSyncPricingMap_ReturnsUnrecognizedDisplayNames(t *testing.T)
 	}
 	if len(unrecognized) != 1 || unrecognized[0] != "Claude Unknown 9.9" {
 		t.Fatalf("unrecognized = %v, 期望 [Claude Unknown 9.9]", unrecognized)
+	}
+}
+
+func TestBuildClaudePricingPreviewRows_ReturnsMappedTargetsAndPrices(t *testing.T) {
+	rows := []claudeOfficialModelPricing{
+		{
+			DisplayName:           "Claude Opus 4.6",
+			InputPerToken:         0.000005,
+			CacheCreate5mPerToken: 0.00000625,
+			CacheCreate1hPerToken: 0.00001,
+			CacheReadPerToken:     0.0000005,
+			OutputPerToken:        0.000025,
+		},
+	}
+
+	previewRows, unrecognized := buildClaudePricingPreviewRows(rows)
+	if len(unrecognized) != 0 {
+		t.Fatalf("unrecognized = %v, 期望空", unrecognized)
+	}
+	if len(previewRows) != 1 {
+		t.Fatalf("len(previewRows) = %d, 期望 1", len(previewRows))
+	}
+
+	row := previewRows[0]
+	if row.DisplayName != "Claude Opus 4.6" {
+		t.Fatalf("DisplayName = %q, 期望 %q", row.DisplayName, "Claude Opus 4.6")
+	}
+	if !row.IsRecognized {
+		t.Fatalf("IsRecognized = false, 期望 true")
+	}
+	if len(row.TargetModels) == 0 || row.TargetModels[0] != "claude-opus-4-6" {
+		t.Fatalf("TargetModels = %v, 期望包含 claude-opus-4-6", row.TargetModels)
+	}
+	if row.InputCostPerToken != 0.000005 {
+		t.Fatalf("InputCostPerToken = %f, 期望 %f", row.InputCostPerToken, 0.000005)
+	}
+	if row.OutputCostPerToken != 0.000025 {
+		t.Fatalf("OutputCostPerToken = %f, 期望 %f", row.OutputCostPerToken, 0.000025)
+	}
+	if row.CacheCreationInputTokenCost != 0.00000625 {
+		t.Fatalf("CacheCreationInputTokenCost = %f, 期望 %f", row.CacheCreationInputTokenCost, 0.00000625)
+	}
+	if row.CacheReadInputTokenCost != 0.0000005 {
+		t.Fatalf("CacheReadInputTokenCost = %f, 期望 %f", row.CacheReadInputTokenCost, 0.0000005)
+	}
+	if row.Ephemeral1hCostPerToken != 0.00001 {
+		t.Fatalf("Ephemeral1hCostPerToken = %f, 期望 %f", row.Ephemeral1hCostPerToken, 0.00001)
+	}
+}
+
+func TestBuildClaudePricingPreviewRows_ReturnsUnrecognizedDisplayNames(t *testing.T) {
+	rows := []claudeOfficialModelPricing{
+		{DisplayName: "Claude Unknown 9.9"},
+		{DisplayName: "Claude Opus 4.6"},
+	}
+
+	previewRows, unrecognized := buildClaudePricingPreviewRows(rows)
+	if len(previewRows) != 2 {
+		t.Fatalf("len(previewRows) = %d, 期望 2", len(previewRows))
+	}
+	if len(unrecognized) != 1 || unrecognized[0] != "Claude Unknown 9.9" {
+		t.Fatalf("unrecognized = %v, 期望 [Claude Unknown 9.9]", unrecognized)
+	}
+}
+
+func TestConsumeClaudePricingPreviewCache_FreshAndOneShot(t *testing.T) {
+	mps := &ModelPricingService{}
+	now := time.Now().UTC()
+	sourceRows := []claudeOfficialModelPricing{
+		{DisplayName: "Claude Opus 4.6", InputPerToken: 0.000005},
+	}
+	mps.storeClaudePricingPreviewCache(sourceRows, now)
+
+	cachedRows, ok := mps.consumeClaudePricingPreviewCache(now.Add(5 * time.Minute))
+	if !ok {
+		t.Fatalf("首次 consume 期望命中缓存")
+	}
+	if len(cachedRows) != 1 || cachedRows[0].DisplayName != "Claude Opus 4.6" {
+		t.Fatalf("cachedRows = %v, 期望包含 Claude Opus 4.6", cachedRows)
+	}
+
+	// 验证只消费一次，避免后续同步误复用旧预览
+	if secondRows, secondOk := mps.consumeClaudePricingPreviewCache(now.Add(6 * time.Minute)); secondOk || len(secondRows) != 0 {
+		t.Fatalf("二次 consume 应为空，实际 secondOk=%v secondRows=%v", secondOk, secondRows)
+	}
+}
+
+func TestConsumeClaudePricingPreviewCache_Expired(t *testing.T) {
+	mps := &ModelPricingService{}
+	now := time.Now().UTC()
+	mps.storeClaudePricingPreviewCache(
+		[]claudeOfficialModelPricing{{DisplayName: "Claude Opus 4.6"}},
+		now.Add(-claudePreviewCacheTTL-time.Second),
+	)
+
+	cachedRows, ok := mps.consumeClaudePricingPreviewCache(now)
+	if ok || len(cachedRows) != 0 {
+		t.Fatalf("过期缓存应不可用，实际 ok=%v rows=%v", ok, cachedRows)
 	}
 }

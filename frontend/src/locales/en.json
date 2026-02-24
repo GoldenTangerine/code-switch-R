@@ -779,6 +779,28 @@
           "cacheRead": "Cache Read",
           "ephemeral1h": "Cache Create (1h)"
         },
+        "preview": {
+          "title": "Claude Official Pricing Preview",
+          "fetchedAt": "Fetched at",
+          "total": "Models",
+          "mapped": "Mapped",
+          "unmapped": "Unmapped",
+          "all": "All",
+          "onlyMapped": "Mapped only",
+          "onlyUnmapped": "Unmapped only",
+          "searchPlaceholder": "Search official names or built-in model keys",
+          "empty": "No matching models",
+          "hint": "The prices below are fetched in real time from Claude official Model pricing page, in USD / 1M tokens.",
+          "mappingHint": "Built-in mapping: {models}",
+          "mappingMissing": "No built-in mapping",
+          "input": "Input",
+          "output": "Output",
+          "cacheHit": "Cache Hit",
+          "cacheWrite5m": "Cache 5m",
+          "cacheWrite1h": "Cache 1h",
+          "close": "Close",
+          "applySync": "Sync to built-in pricing"
+        },
         "toast": {
           "loadFailed": "Failed to load model pricing: {error}",
           "saveSuccess": "Model pricing saved",
@@ -789,6 +811,7 @@
           "syncSuccess": "Sync completed, updated {count} model prices",
           "syncSummary": "Sync completed: {changed} updated, {unchanged} unchanged",
           "syncUnrecognized": "Skipped unmapped official model names: {models}",
+          "previewFailed": "Failed to fetch official pricing: {error}",
           "syncFailed": "Sync failed: {error}",
           "modelRequired": "Please enter a model name first",
           "invalidNumber": "Field {field} is not a valid number"

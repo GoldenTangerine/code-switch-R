@@ -3,8 +3,15 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import InlineModal from '../common/InlineModal.vue'
 import BaseInput from '../common/BaseInput.vue'
 import ModelPricingEditorModal from './ModelPricingEditorModal.vue'
+import ClaudePricingPreviewModal from './ClaudePricingPreviewModal.vue'
 import { useI18n } from 'vue-i18n'
-import { listModelPricing, syncClaudeOfficialPricing, type ModelPricingRow } from '../../services/modelPricing'
+import {
+  listModelPricing,
+  previewClaudeOfficialPricing,
+  syncClaudeOfficialPricing,
+  type ClaudeOfficialPricingPreviewRow,
+  type ModelPricingRow,
+} from '../../services/modelPricing'
 import { extractErrorMessage } from '../../utils/error'
 import { showToast } from '../../utils/toast'
 
@@ -30,6 +37,10 @@ const syncing = computed(() => syncTask.value !== null)
 const syncMenuOpen = ref(false)
 const syncMenuRef = ref<HTMLElement | null>(null)
 const syncTriggerRef = ref<HTMLElement | null>(null)
+const claudePreviewOpen = ref(false)
+const claudePreviewRows = ref<ClaudeOfficialPricingPreviewRow[]>([])
+const claudePreviewFetchedAt = ref('')
+const previewRequestSeq = ref(0)
 
 type EditMode = 'edit' | 'new'
 
@@ -86,12 +97,20 @@ const openEditModal = (row: ModelPricingRow) => {
   syncMenuOpen.value = false
 }
 
+const resetClaudePreviewState = () => {
+  previewRequestSeq.value += 1
+  claudePreviewOpen.value = false
+  claudePreviewRows.value = []
+  claudePreviewFetchedAt.value = ''
+}
+
 const resetUIState = () => {
   search.value = ''
   onlyOverrides.value = false
   selectedModel.value = ''
   error.value = ''
   syncMenuOpen.value = false
+  resetClaudePreviewState()
 }
 
 const closeModal = () => {
@@ -138,12 +157,57 @@ const toggleSyncMenu = () => {
   syncMenuOpen.value = !syncMenuOpen.value
 }
 
-const syncFromClaude = async () => {
+const runSyncTask = async (operation: () => Promise<void>) => {
   if (syncing.value) return
 
-  syncMenuOpen.value = false
   let task: Promise<void> | null = null
   task = (async () => {
+    try {
+      await operation()
+    } finally {
+      if (syncTask.value === task) {
+        syncTask.value = null
+      }
+    }
+  })()
+
+  syncTask.value = task
+  try {
+    await task
+  } catch {
+    // 已在 task 内部统一 toast，这里吞掉避免重复报错链
+  }
+}
+
+const openClaudePreview = async () => {
+  if (syncing.value) return
+  syncMenuOpen.value = false
+  const requestSeq = previewRequestSeq.value + 1
+  previewRequestSeq.value = requestSeq
+
+  await runSyncTask(async () => {
+    try {
+      const result = await previewClaudeOfficialPricing()
+      if (!props.open || requestSeq !== previewRequestSeq.value) return
+      claudePreviewRows.value = result.rows ?? []
+      claudePreviewFetchedAt.value = result.fetched_at ?? ''
+      claudePreviewOpen.value = true
+    } catch (err) {
+      if (!props.open || requestSeq !== previewRequestSeq.value) return
+      showToast(
+        t('components.general.modelPricing.toast.previewFailed', {
+          error: extractErrorMessage(err),
+        }),
+        'error',
+      )
+    }
+  })
+}
+
+const confirmClaudeSync = async () => {
+  if (syncing.value) return
+
+  await runSyncTask(async () => {
     try {
       const result = await syncClaudeOfficialPricing()
       showToast(
@@ -160,6 +224,7 @@ const syncFromClaude = async () => {
           'warning',
         )
       }
+      claudePreviewOpen.value = false
       await loadRows()
     } catch (err) {
       showToast(
@@ -168,19 +233,13 @@ const syncFromClaude = async () => {
         }),
         'error',
       )
-    } finally {
-      if (syncTask.value === task) {
-        syncTask.value = null
-      }
     }
-  })()
+  })
+}
 
-  syncTask.value = task
-  try {
-    await task
-  } catch {
-    // 已在 task 内部统一 toast，这里吞掉避免重复报错链
-  }
+const closeClaudePreview = () => {
+  if (syncing.value) return
+  claudePreviewOpen.value = false
 }
 
 const onGlobalPointerDown = (event: PointerEvent) => {
@@ -250,7 +309,7 @@ watch(
                   type="button"
                   class="sync-menu-btn"
                   :disabled="syncing"
-                  @click="syncFromClaude"
+                  @click="openClaudePreview"
                 >
                   Claude
                 </button>
@@ -338,6 +397,15 @@ watch(
       @close="editorOpen = false"
       @saved="onSaved"
       @removed="onRemoved"
+    />
+
+    <ClaudePricingPreviewModal
+      :open="claudePreviewOpen"
+      :rows="claudePreviewRows"
+      :fetched-at="claudePreviewFetchedAt"
+      :syncing="syncing"
+      @close="closeClaudePreview"
+      @confirm-sync="confirmClaudeSync"
     />
   </InlineModal>
 </template>

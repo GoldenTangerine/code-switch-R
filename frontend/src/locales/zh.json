@@ -780,6 +780,28 @@
           "cacheRead": "Cache Read",
           "ephemeral1h": "Cache Create（1h）"
         },
+        "preview": {
+          "title": "Claude 官方价格预览",
+          "fetchedAt": "抓取时间",
+          "total": "模型数",
+          "mapped": "已映射",
+          "unmapped": "未映射",
+          "all": "全部",
+          "onlyMapped": "仅已映射",
+          "onlyUnmapped": "仅未映射",
+          "searchPlaceholder": "搜索官方模型名或内置模型 key",
+          "empty": "没有匹配的模型",
+          "hint": "以下价格实时抓取自 Claude 官方 Model pricing 页面，单位为 USD / 1M tokens。",
+          "mappingHint": "内置映射：{models}",
+          "mappingMissing": "暂无内置映射",
+          "input": "Input",
+          "output": "Output",
+          "cacheHit": "Cache Hit",
+          "cacheWrite5m": "Cache 5m",
+          "cacheWrite1h": "Cache 1h",
+          "close": "关闭",
+          "applySync": "同步到内置价格表"
+        },
         "toast": {
           "loadFailed": "加载模型价格失败：{error}",
           "saveSuccess": "模型价格已保存",
@@ -790,6 +812,7 @@
           "syncSuccess": "已完成同步，更新 {count} 个模型价格",
           "syncSummary": "同步完成：更新 {changed} 个，未变化 {unchanged} 个",
           "syncUnrecognized": "以下官方模型名尚未映射，已跳过：{models}",
+          "previewFailed": "抓取官方价格失败：{error}",
           "syncFailed": "同步失败：{error}",
           "modelRequired": "请先填写模型名",
           "invalidNumber": "字段 {field} 不是合法数字"
