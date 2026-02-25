@@ -464,6 +464,10 @@
                 <span class="token-detail-item__name">{{ t('components.logs.tokenLabels.output') }}</span>
                 <span class="token-detail-item__value">{{ formatTokenNumber(stats?.output_tokens) }}</span>
               </div>
+              <div class="token-detail-item">
+                <span class="token-detail-item__name">{{ t('components.logs.tokenLabels.cacheRead') }}</span>
+                <span class="token-detail-item__value">{{ formatTokenNumber(stats?.cache_read_tokens) }}</span>
+              </div>
             </div>
           </div>
         </BaseModal>
