@@ -2730,7 +2730,7 @@ const statsCards = computed(() => {
   const data = stats.value
   const scopeHint = summaryScopeHint.value
   const totalTokens =
-    (data?.input_tokens ?? 0) + (data?.output_tokens ?? 0) + (data?.reasoning_tokens ?? 0)
+    (data?.input_tokens ?? 0) + (data?.output_tokens ?? 0) + (data?.cache_read_tokens ?? 0)
   return [
     {
       key: 'requests',

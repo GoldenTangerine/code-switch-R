@@ -1,3 +1,13 @@
+# Code Switch v2.6.77
+
+## 修复
+- **日志 Token 流量口径调整**：日志页顶部「Token 流量」卡片改为 `输入 + 输出 + 缓存读取` 三项汇总，不再将 `reasoning` 计入该卡片，与当前统计口径保持一致。
+
+## 技术改进
+- 前端 `statsCards` 汇总公式调整为 `input_tokens + output_tokens + cache_read_tokens`，其余卡片与明细展示逻辑保持不变。
+
+---
+
 # Code Switch v2.6.76
 
 ## 修复
