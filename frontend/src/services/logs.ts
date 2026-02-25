@@ -8,6 +8,7 @@ export type RequestLog = {
   model: string
   requested_model?: string
   response_model?: string
+  provider_id?: string
   provider: string
   http_code: number
   input_tokens: number
@@ -58,6 +59,15 @@ export const fetchRequestLogs = async (query: RequestLogQuery = {}): Promise<Req
   const startAt = query.startAt ?? ''
   const endAt = query.endAt ?? ''
   return Call.ByName('codeswitch/services.LogService.ListRequestLogsV2', platform, provider, limit, startAt, endAt)
+}
+
+export type LogProviderRef = {
+  provider_id?: string
+  provider: string
+}
+
+export const fetchLogProviderRefs = async (platform: LogPlatform | '' = ''): Promise<LogProviderRef[]> => {
+  return Call.ByName('codeswitch/services.LogService.ListProviderRefs', platform)
 }
 
 export const fetchLogProviders = async (platform: LogPlatform | '' = ''): Promise<string[]> => {
@@ -148,6 +158,7 @@ export const clearLogStats = async (): Promise<void> => {
 }
 
 export type ProviderDailyStat = {
+  provider_id?: string
   provider: string
   total_requests: number
   successful_requests: number

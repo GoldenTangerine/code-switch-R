@@ -1,6 +1,7 @@
 package services
 
 import (
+	"database/sql"
 	"errors"
 	"fmt"
 	"sort"
@@ -16,6 +17,10 @@ const timeLayout = "2006-01-02 15:04:05"
 
 type LogService struct {
 	modelPricing *ModelPricingService
+}
+
+type requestLogSelecter interface {
+	Selects(...xdb.Option) ([]xdb.Record, error)
 }
 
 func (ls *LogService) CostSince(start string, platform string) (float64, error) {
@@ -50,6 +55,38 @@ func NewLogService(modelPricing *ModelPricingService) *LogService {
 	return &LogService{modelPricing: modelPricing}
 }
 
+func selectRecordsByProviderRef(selecter requestLogSelecter, baseOptions []xdb.Option, providerRef string) ([]xdb.Record, error) {
+	if selecter == nil {
+		return nil, fmt.Errorf("nil selecter")
+	}
+	providerRef = strings.TrimSpace(providerRef)
+	if providerRef == "" {
+		records, err := selecter.Selects(baseOptions...)
+		if errors.Is(err, xdb.ErrNotFound) {
+			return []xdb.Record{}, nil
+		}
+		return records, err
+	}
+
+	byIDOptions := append([]xdb.Option{}, baseOptions...)
+	byIDOptions = append(byIDOptions, xdb.WhereEq("provider_id", providerRef))
+	records, err := selecter.Selects(byIDOptions...)
+	if err == nil && len(records) > 0 {
+		return records, nil
+	}
+	if err != nil && !errors.Is(err, xdb.ErrNotFound) && !isNoSuchTableErr(err) {
+		return nil, err
+	}
+
+	byNameOptions := append([]xdb.Option{}, baseOptions...)
+	byNameOptions = append(byNameOptions, xdb.WhereEq("provider", providerRef))
+	records, err = selecter.Selects(byNameOptions...)
+	if errors.Is(err, xdb.ErrNotFound) {
+		return []xdb.Record{}, nil
+	}
+	return records, err
+}
+
 func (ls *LogService) ListRequestLogs(platform string, provider string, limit int) ([]ReqeustLog, error) {
 	return ls.ListRequestLogsV2(platform, provider, limit, "", "")
 }
@@ -70,9 +107,6 @@ func (ls *LogService) ListRequestLogsV2(platform string, provider string, limit 
 	if platform != "" {
 		options = append(options, xdb.WhereEq("platform", platform))
 	}
-	if provider != "" {
-		options = append(options, xdb.WhereEq("provider", provider))
-	}
 	if strings.TrimSpace(startAt) != "" {
 		parsed, err := parseTimeInput(startAt)
 		if err != nil {
@@ -87,7 +121,7 @@ func (ls *LogService) ListRequestLogsV2(platform string, provider string, limit 
 		}
 		options = append(options, xdb.WhereLt("created_at", parsed.UTC().Format(timeLayout)))
 	}
-	records, err := model.Selects(options...)
+	records, err := selectRecordsByProviderRef(model, options, provider)
 	if err != nil {
 		return nil, err
 	}
@@ -105,6 +139,7 @@ func (ls *LogService) ListRequestLogsV2(platform string, provider string, limit 
 			Model:                     record.GetString("model"),
 			RequestedModel:            record.GetString("requested_model"),
 			ResponseModel:             record.GetString("response_model"),
+			ProviderID:                record.GetString("provider_id"),
 			Provider:                  record.GetString("provider"),
 			PriceSource:               record.GetString("price_source"),
 			HttpCode:                  record.GetInt("http_code"),
@@ -252,27 +287,183 @@ func applyLogPricing(pricing *modelpricing.Service, logEntry *ReqeustLog) {
 }
 
 func (ls *LogService) ListProviders(platform string) ([]string, error) {
-	model := xdb.New("request_log")
-	options := []xdb.Option{
-		xdb.Field("DISTINCT provider as provider"),
-		xdb.WhereNotEq("provider", ""),
-		xdb.OrderByAsc("provider"),
-	}
-	if platform != "" {
-		options = append(options, xdb.WhereEq("platform", platform))
-	}
-	records, err := model.Selects(options...)
+	refs, err := ls.ListProviderRefs(platform)
 	if err != nil {
 		return nil, err
 	}
-	providers := make([]string, 0, len(records))
-	for _, record := range records {
-		name := strings.TrimSpace(record.GetString("provider"))
-		if name != "" {
-			providers = append(providers, name)
+	nameSet := make(map[string]struct{})
+	providers := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		name := strings.TrimSpace(ref.Provider)
+		if name == "" {
+			continue
 		}
+		if _, exists := nameSet[name]; exists {
+			continue
+		}
+		nameSet[name] = struct{}{}
+		providers = append(providers, name)
 	}
+	sort.Slice(providers, func(i, j int) bool {
+		return providers[i] < providers[j]
+	})
 	return providers, nil
+}
+
+type LogProviderRef struct {
+	ProviderID string `json:"provider_id,omitempty"`
+	Provider   string `json:"provider"`
+}
+
+type logProviderRefCandidate struct {
+	ProviderID string
+	Provider   string
+	LatestAt   string
+}
+
+func (ls *LogService) ListProviderRefs(platform string) ([]LogProviderRef, error) {
+	db, err := xdb.DB("default")
+	if err != nil {
+		return nil, err
+	}
+
+	query := `
+		SELECT provider_id, provider, MAX(created_at) AS latest_at
+		FROM request_log
+		WHERE TRIM(COALESCE(provider, '')) <> ''
+	`
+	args := make([]interface{}, 0, 1)
+	if strings.TrimSpace(platform) != "" {
+		query += " AND platform = ?"
+		args = append(args, platform)
+	}
+	query += " GROUP BY provider_id, provider"
+
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		if isNoSuchTableErr(err) {
+			return []LogProviderRef{}, nil
+		}
+		return nil, err
+	}
+	defer rows.Close()
+
+	candidates := make([]logProviderRefCandidate, 0, 64)
+	for rows.Next() {
+		var providerID sql.NullString
+		var providerName sql.NullString
+		var latestAt sql.NullString
+		if err := rows.Scan(&providerID, &providerName, &latestAt); err != nil {
+			return nil, err
+		}
+		candidates = append(candidates, logProviderRefCandidate{
+			ProviderID: strings.TrimSpace(providerID.String),
+			Provider:   strings.TrimSpace(providerName.String),
+			LatestAt:   strings.TrimSpace(latestAt.String),
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return mergeProviderRefsFromCandidates(candidates), nil
+}
+
+func mergeProviderRefsFromCandidates(candidates []logProviderRefCandidate) []LogProviderRef {
+	nameToIDs := make(map[string]map[string]struct{})
+	for _, candidate := range candidates {
+		if candidate.ProviderID == "" || candidate.Provider == "" {
+			continue
+		}
+		nameKey := strings.ToLower(candidate.Provider)
+		idSet := nameToIDs[nameKey]
+		if idSet == nil {
+			idSet = make(map[string]struct{})
+			nameToIDs[nameKey] = idSet
+		}
+		idSet[candidate.ProviderID] = struct{}{}
+	}
+
+	type refSnapshot struct {
+		Ref      LogProviderRef
+		LatestAt string
+	}
+	providerByRef := make(map[string]refSnapshot)
+	for _, candidate := range candidates {
+		providerID := candidate.ProviderID
+		name := candidate.Provider
+		latestAt := candidate.LatestAt
+		if providerID == "" && name == "" {
+			continue
+		}
+
+		refKey := providerID
+		if refKey == "" {
+			nameKey := strings.ToLower(name)
+			if idSet := nameToIDs[nameKey]; len(idSet) == 1 {
+				for onlyID := range idSet {
+					refKey = onlyID
+				}
+				providerID = refKey
+			} else {
+				refKey = "name:" + nameKey
+			}
+		}
+
+		current := providerByRef[refKey]
+		if current.Ref.ProviderID == "" && providerID != "" {
+			current.Ref.ProviderID = providerID
+		}
+		if shouldReplaceProviderDisplayName(current.LatestAt, latestAt, current.Ref.Provider, name) {
+			current.Ref.Provider = name
+			current.LatestAt = latestAt
+		}
+		if current.LatestAt == "" && latestAt != "" {
+			current.LatestAt = latestAt
+		}
+		providerByRef[refKey] = current
+	}
+
+	refs := make([]LogProviderRef, 0, len(providerByRef))
+	for _, snapshot := range providerByRef {
+		ref := snapshot.Ref
+		if strings.TrimSpace(ref.Provider) == "" {
+			ref.Provider = strings.TrimSpace(ref.ProviderID)
+		}
+		if strings.TrimSpace(ref.Provider) == "" {
+			continue
+		}
+		refs = append(refs, ref)
+	}
+
+	sort.Slice(refs, func(i, j int) bool {
+		leftName := strings.TrimSpace(refs[i].Provider)
+		rightName := strings.TrimSpace(refs[j].Provider)
+		if leftName == rightName {
+			return strings.TrimSpace(refs[i].ProviderID) < strings.TrimSpace(refs[j].ProviderID)
+		}
+		return leftName < rightName
+	})
+	return refs
+}
+
+func shouldReplaceProviderDisplayName(currentLatestAt, candidateLatestAt, currentName, candidateName string) bool {
+	candidateName = strings.TrimSpace(candidateName)
+	if candidateName == "" {
+		return false
+	}
+	currentName = strings.TrimSpace(currentName)
+	if currentName == "" {
+		return true
+	}
+	currentLatestAt = strings.TrimSpace(currentLatestAt)
+	candidateLatestAt = strings.TrimSpace(candidateLatestAt)
+	if candidateLatestAt != "" && (currentLatestAt == "" || candidateLatestAt > currentLatestAt) {
+		return true
+	}
+	if candidateLatestAt == currentLatestAt && len(candidateName) > len(currentName) {
+		return true
+	}
+	return false
 }
 
 func (ls *LogService) HeatmapStats(days int) ([]HeatmapStat, error) {
@@ -439,10 +630,7 @@ func (ls *LogService) StatsRangeV2(platform string, provider string, startAt str
 	if platform != "" {
 		options = append(options, xdb.WhereEq("platform", platform))
 	}
-	if provider != "" {
-		options = append(options, xdb.WhereEq("provider", provider))
-	}
-	records, err := model.Selects(options...)
+	records, err := selectRecordsByProviderRef(model, options, provider)
 	if err != nil {
 		if errors.Is(err, xdb.ErrNotFound) || isNoSuchTableErr(err) {
 			return stats, nil
@@ -543,6 +731,7 @@ func (ls *LogService) ProviderStatsRangeV2(platform string, provider string, sta
 		xdb.WhereGte("bucket_start", startKey),
 		xdb.WhereLt("bucket_start", endKey),
 		xdb.Field(
+			"provider_id",
 			"provider",
 			"total_requests",
 			"successful_requests",
@@ -558,10 +747,7 @@ func (ls *LogService) ProviderStatsRangeV2(platform string, provider string, sta
 	if platform != "" {
 		options = append(options, xdb.WhereEq("platform", platform))
 	}
-	if provider != "" {
-		options = append(options, xdb.WhereEq("provider", provider))
-	}
-	records, err := model.Selects(options...)
+	records, err := selectRecordsByProviderRef(model, options, provider)
 	if err != nil {
 		if errors.Is(err, xdb.ErrNotFound) || isNoSuchTableErr(err) {
 			return []ProviderDailyStat{}, nil
@@ -571,15 +757,29 @@ func (ls *LogService) ProviderStatsRangeV2(platform string, provider string, sta
 
 	statMap := map[string]*ProviderDailyStat{}
 	for _, record := range records {
+		providerID := strings.TrimSpace(record.GetString("provider_id"))
 		providerName := strings.TrimSpace(record.GetString("provider"))
 		if providerName == "" {
 			providerName = "(unknown)"
 		}
+		statKey := providerID
+		if statKey == "" {
+			statKey = providerName
+		}
 
-		stat := statMap[providerName]
+		stat := statMap[statKey]
 		if stat == nil {
-			stat = &ProviderDailyStat{Provider: providerName}
-			statMap[providerName] = stat
+			stat = &ProviderDailyStat{
+				ProviderID: providerID,
+				Provider:   providerName,
+			}
+			statMap[statKey] = stat
+		}
+		if stat.ProviderID == "" {
+			stat.ProviderID = providerID
+		}
+		if stat.Provider == "" || stat.Provider == "(unknown)" {
+			stat.Provider = providerName
 		}
 
 		total := record.GetInt64("total_requests")
@@ -762,6 +962,7 @@ type LogStats struct {
 }
 
 type ProviderDailyStat struct {
+	ProviderID         string  `json:"provider_id,omitempty"`
 	Provider           string  `json:"provider"`
 	TotalRequests      int64   `json:"total_requests"`
 	SuccessfulRequests int64   `json:"successful_requests"`

@@ -1,9 +1,11 @@
 package services
 
 import (
+	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/daodao97/xgo/xdb"
 	_ "modernc.org/sqlite"
@@ -99,6 +101,7 @@ func ensureBlacklistTables() error {
 	const createBlacklistSQL = `CREATE TABLE IF NOT EXISTS provider_blacklist (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		platform TEXT NOT NULL,
+		provider_id TEXT NOT NULL DEFAULT '',
 		provider_name TEXT NOT NULL,
 		failure_count INTEGER DEFAULT 0,
 		blacklisted_at DATETIME,
@@ -109,10 +112,37 @@ func ensureBlacklistTables() error {
 		last_degrade_hour INTEGER DEFAULT 0,
 		last_failure_window_start DATETIME,
 		auto_recovered INTEGER DEFAULT 0,
-		UNIQUE(platform, provider_name)
+		UNIQUE(platform, provider_id)
 	)`
 	if _, err := db.Exec(createBlacklistSQL); err != nil {
 		return fmt.Errorf("创建 provider_blacklist 表失败: %w", err)
+	}
+	var providerIDColCount int
+	if err := db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('provider_blacklist') WHERE name = 'provider_id'").Scan(&providerIDColCount); err != nil {
+		return fmt.Errorf("检查 provider_blacklist.provider_id 字段失败: %w", err)
+	}
+	if providerIDColCount == 0 {
+		if _, err := db.Exec("ALTER TABLE provider_blacklist ADD COLUMN provider_id TEXT NOT NULL DEFAULT ''"); err != nil {
+			return fmt.Errorf("新增 provider_blacklist.provider_id 字段失败: %w", err)
+		}
+	}
+
+	// 迁移旧结构（UNIQUE(platform, provider_name)）到 id 作为唯一标识
+	if err := migrateBlacklistIdentityKeyWithDB(db); err != nil {
+		return fmt.Errorf("迁移 provider_blacklist 标识结构失败: %w", err)
+	}
+
+	if _, err := db.Exec("UPDATE provider_blacklist SET provider_id = CASE WHEN TRIM(COALESCE(provider_name,'')) <> '' THEN TRIM(provider_name) ELSE printf('legacy-%d', id) END WHERE TRIM(COALESCE(provider_id,'')) = ''"); err != nil {
+		return fmt.Errorf("回填 provider_blacklist.provider_id 失败: %w", err)
+	}
+	if _, err := db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_provider_blacklist_platform_provider_id_unique ON provider_blacklist(platform, provider_id)"); err != nil {
+		return fmt.Errorf("创建 provider_blacklist provider_id 唯一索引失败: %w", err)
+	}
+	if _, err := db.Exec("CREATE INDEX IF NOT EXISTS idx_provider_blacklist_platform_provider_name ON provider_blacklist(platform, provider_name)"); err != nil {
+		return fmt.Errorf("创建 provider_blacklist provider_name 索引失败: %w", err)
+	}
+	if _, err := db.Exec("CREATE INDEX IF NOT EXISTS idx_provider_blacklist_platform_provider_id ON provider_blacklist(platform, provider_id)"); err != nil {
+		return fmt.Errorf("创建 provider_blacklist provider_id 索引失败: %w", err)
 	}
 
 	// 3. 确保 app_settings 中有默认的黑名单配置
@@ -152,5 +182,147 @@ func ensureBlacklistTables() error {
 		return fmt.Errorf("初始化 blacklist_duration_seconds 失败: %w", err)
 	}
 
+	return nil
+}
+
+func migrateBlacklistIdentityKeyWithDB(db *sql.DB) error {
+	if db == nil {
+		return fmt.Errorf("nil db")
+	}
+
+	var createSQL sql.NullString
+	if err := db.QueryRow(`
+		SELECT sql
+		FROM sqlite_master
+		WHERE type = 'table' AND name = 'provider_blacklist'
+		LIMIT 1
+	`).Scan(&createSQL); err != nil {
+		return err
+	}
+
+	definition := strings.ToLower(strings.TrimSpace(createSQL.String))
+	if definition == "" {
+		return nil
+	}
+	normalizedDefinition := strings.NewReplacer(
+		" ", "",
+		"\n", "",
+		"\r", "",
+		"\t", "",
+	).Replace(definition)
+	if !strings.Contains(normalizedDefinition, "unique(platform,provider_name)") {
+		return nil
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	if _, err := tx.Exec(`DROP TABLE IF EXISTS provider_blacklist_v2`); err != nil {
+		return err
+	}
+
+	if _, err := tx.Exec(`
+		CREATE TABLE provider_blacklist_v2 (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			platform TEXT NOT NULL,
+			provider_id TEXT NOT NULL,
+			provider_name TEXT NOT NULL,
+			failure_count INTEGER DEFAULT 0,
+			blacklisted_at DATETIME,
+			blacklisted_until DATETIME,
+			last_failure_at DATETIME,
+			blacklist_level INTEGER DEFAULT 0,
+			last_recovered_at DATETIME,
+			last_degrade_hour INTEGER DEFAULT 0,
+			last_failure_window_start DATETIME,
+			auto_recovered INTEGER DEFAULT 0
+		)
+	`); err != nil {
+		return err
+	}
+
+	if _, err := tx.Exec(`
+		INSERT INTO provider_blacklist_v2 (
+			id,
+			platform,
+			provider_id,
+			provider_name,
+			failure_count,
+			blacklisted_at,
+			blacklisted_until,
+			last_failure_at,
+			blacklist_level,
+			last_recovered_at,
+			last_degrade_hour,
+			last_failure_window_start,
+			auto_recovered
+		)
+		SELECT
+			id,
+			platform,
+			CASE
+				WHEN TRIM(COALESCE(provider_id, '')) <> '' THEN TRIM(provider_id)
+				WHEN TRIM(COALESCE(provider_name, '')) <> '' THEN TRIM(provider_name)
+				ELSE printf('legacy-%d', id)
+			END AS provider_id,
+			CASE
+				WHEN TRIM(COALESCE(provider_name, '')) <> '' THEN provider_name
+				WHEN TRIM(COALESCE(provider_id, '')) <> '' THEN provider_id
+				ELSE printf('provider-%d', id)
+			END AS provider_name,
+			failure_count,
+			blacklisted_at,
+			blacklisted_until,
+			last_failure_at,
+			blacklist_level,
+			last_recovered_at,
+			last_degrade_hour,
+			last_failure_window_start,
+			auto_recovered
+		FROM provider_blacklist
+	`); err != nil {
+		return err
+	}
+
+	if _, err := tx.Exec(`
+		DELETE FROM provider_blacklist_v2
+		WHERE id NOT IN (
+			SELECT MAX(id)
+			FROM provider_blacklist_v2
+			GROUP BY platform, provider_id
+		)
+	`); err != nil {
+		return err
+	}
+
+	if _, err := tx.Exec(`DROP TABLE provider_blacklist`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`ALTER TABLE provider_blacklist_v2 RENAME TO provider_blacklist`); err != nil {
+		return err
+	}
+
+	if _, err := tx.Exec(`CREATE UNIQUE INDEX idx_provider_blacklist_platform_provider_id_unique ON provider_blacklist(platform, provider_id)`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`CREATE INDEX idx_provider_blacklist_platform_provider_name ON provider_blacklist(platform, provider_name)`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`CREATE INDEX idx_provider_blacklist_platform_provider_id ON provider_blacklist(platform, provider_id)`); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	committed = true
 	return nil
 }

@@ -69,6 +69,7 @@ func (ls *LogService) GetLogStorageStats() (LogStorageStats, error) {
 			"idx_request_log_created_at",
 			"idx_request_log_platform_created_at",
 			"idx_request_log_platform_provider_created_at",
+			"idx_request_log_platform_provider_id_created_at",
 		)
 		stats.StatsHour.Bytes = tableBytes[requestLogStatsHourlyTable]
 		stats.StatsDay.Bytes = tableBytes[requestLogStatsDailyTable]

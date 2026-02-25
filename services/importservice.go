@@ -472,7 +472,7 @@ func ccSwitchConfigPath() (string, error) {
 	}
 	// 优先检查 SQLite 数据库（新版 cc-switch），然后是 JSON 配置文件
 	candidates := []string{
-		filepath.Join(home, ".cc-switch", "cc-switch.db"),       // 新版 SQLite
+		filepath.Join(home, ".cc-switch", "cc-switch.db"),         // 新版 SQLite
 		filepath.Join(home, ".cc-switch", "config.json.migrated"), // 旧版迁移后的 JSON
 		filepath.Join(home, ".cc-switch", "config.json"),          // 旧版 JSON
 	}
@@ -574,14 +574,10 @@ func diffProviderCandidates(kind string, entries map[string]ccProviderEntry, exi
 	if len(entries) == 0 {
 		return []providerCandidate{}
 	}
-	existingURL := make(map[string]struct{})
-	existingNames := make(map[string]struct{})
+	existingIdentity := make(map[string]struct{})
 	for _, provider := range existing {
-		if url := normalizeURL(provider.APIURL); url != "" {
-			existingURL[url] = struct{}{}
-		}
-		if name := normalizeName(provider.Name); name != "" {
-			existingNames[name] = struct{}{}
+		if identity := normalizeProviderIdentity(provider.APIURL, provider.APIKey); identity != "" {
+			existingIdentity[identity] = struct{}{}
 		}
 	}
 	seen := make(map[string]struct{})
@@ -591,24 +587,14 @@ func diffProviderCandidates(kind string, entries map[string]ccProviderEntry, exi
 		if !ok {
 			continue
 		}
-		if url := normalizeURL(candidate.APIURL); url != "" {
-			if _, exists := existingURL[url]; exists {
-				continue
-			}
-			if _, dup := seen[url]; dup {
-				continue
-			}
-		}
-		if name := normalizeName(candidate.Name); name != "" {
-			if _, exists := existingNames[name]; exists {
-				continue
-			}
-		}
-		dedupKey := normalizeURL(candidate.APIURL)
-		if dedupKey == "" {
-			dedupKey = normalizeName(candidate.Name)
-		}
+		dedupKey := normalizeProviderIdentity(candidate.APIURL, candidate.APIKey)
 		if dedupKey != "" {
+			if _, exists := existingIdentity[dedupKey]; exists {
+				continue
+			}
+			if _, dup := seen[dedupKey]; dup {
+				continue
+			}
 			seen[dedupKey] = struct{}{}
 		}
 		candidates = append(candidates, candidate)
@@ -718,6 +704,15 @@ func normalizeURL(value string) string {
 	trimmed := strings.TrimSpace(value)
 	trimmed = strings.TrimRight(trimmed, "/")
 	return strings.ToLower(trimmed)
+}
+
+func normalizeProviderIdentity(apiURL, apiKey string) string {
+	normalizedURL := normalizeURL(apiURL)
+	normalizedKey := strings.TrimSpace(apiKey)
+	if normalizedURL == "" && normalizedKey == "" {
+		return ""
+	}
+	return normalizedURL + "|" + normalizedKey
 }
 
 func normalizeName(value string) string {

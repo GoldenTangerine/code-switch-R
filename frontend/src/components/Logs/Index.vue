@@ -31,8 +31,8 @@
                 <span>{{ t('components.logs.filters.provider') }}</span>
                 <select v-model="filters.provider" class="mac-select">
                   <option value="">{{ t('components.logs.filters.allProviders') }}</option>
-                  <option v-for="provider in providerOptions" :key="provider" :value="provider">
-                    {{ provider }}
+                  <option v-for="provider in providerOptions" :key="provider.value" :value="provider.value">
+                    {{ provider.label }}
                   </option>
                 </select>
               </label>
@@ -483,7 +483,7 @@ import { LoadProviders } from '../../../bindings/codeswitch/services/providerser
 import { GetProviders as GetGeminiProviders } from '../../../bindings/codeswitch/services/geminiservice'
 import {
   fetchRequestLogs,
-  fetchLogProviders,
+  fetchLogProviderRefs,
   fetchLogStatsV2,
   fetchProviderStatsV2,
   fetchLogStorageStats,
@@ -495,6 +495,7 @@ import {
   type LogPlatform,
   type ProviderDailyStat,
   type LogStorageStats,
+  type LogProviderRef,
 } from '../../services/logs'
 import { listModelPricing, type ModelPricingRow } from '../../services/modelPricing'
 import {
@@ -585,9 +586,15 @@ const filters = reactive<{
 })
 const page = ref(1)
 const PAGE_SIZE = 15
-const providerOptions = ref<string[]>([])
+type LogProviderOption = {
+  value: string
+  label: string
+  providerId?: string
+  providerName: string
+}
+const providerOptions = ref<LogProviderOption[]>([])
 const PROVIDER_CONFIG_CACHE_TTL_MS = 60_000
-const providerConfigCache = new Map<string, { loadedAt: number; names: string[] }>()
+const providerConfigCache = new Map<string, { loadedAt: number; options: LogProviderOption[] }>()
 const statsSeries = computed<LogStatsSeries[]>(() => stats.value?.series ?? [])
 
 type CostTooltipPlacement = 'above' | 'below'
@@ -1094,16 +1101,101 @@ const stopCountdown = () => {
 }
 
 const normalizeProviderName = (value: string) => value.trim()
+const normalizeProviderRef = (value: string | number | null | undefined) => `${value ?? ''}`.trim()
+const providerNameKey = (value: string | null | undefined) => normalizeProviderName(value ?? '').toLowerCase()
 
-const loadProviderNamesFromConfig = async (platform: LogPlatform | ''): Promise<string[]> => {
+const buildProviderOption = (
+  providerIdRaw: string | number | null | undefined,
+  providerNameRaw: string | null | undefined,
+): LogProviderOption | null => {
+  const providerName = normalizeProviderName(providerNameRaw ?? '')
+  const providerId = normalizeProviderRef(providerIdRaw)
+  if (!providerName && !providerId) return null
+  const value = providerId || providerName
+  if (!value) return null
+  const displayName = providerName || providerId
+  const label = providerId && providerName ? `${displayName} (${providerId})` : displayName
+  return {
+    value,
+    label,
+    providerId: providerId || undefined,
+    providerName: displayName,
+  }
+}
+
+const mergeProviderOptions = (options: LogProviderOption[]): LogProviderOption[] => {
+  const idRefsByName = new Map<string, Set<string>>()
+  for (const option of options) {
+    const nameKey = providerNameKey(option.providerName || option.label || option.value)
+    const providerId = normalizeProviderRef(option.providerId)
+    if (!nameKey || !providerId) continue
+    const refs = idRefsByName.get(nameKey) ?? new Set<string>()
+    refs.add(providerId)
+    idRefsByName.set(nameKey, refs)
+  }
+
+  const merged = new Map<string, LogProviderOption>()
+  for (const option of options) {
+    let value = normalizeProviderRef(option.value)
+    let providerId = normalizeProviderRef(option.providerId)
+    const nameKey = providerNameKey(option.providerName || option.label || option.value)
+    if (!providerId && nameKey) {
+      const refs = idRefsByName.get(nameKey)
+      if (refs && refs.size === 1) {
+        const [resolvedId] = Array.from(refs)
+        if (resolvedId) {
+          providerId = resolvedId
+          value = resolvedId
+        }
+      }
+    }
+    if (!value) continue
+    const normalized: LogProviderOption = {
+      ...option,
+      value,
+      providerId: providerId || undefined,
+    }
+    const current = merged.get(value)
+    if (!current) {
+      merged.set(value, normalized)
+      continue
+    }
+    const currentHasId = normalizeProviderRef(current.providerId) !== ''
+    const normalizedHasId = normalizeProviderRef(normalized.providerId) !== ''
+    if (
+      (normalizedHasId && !currentHasId) ||
+      (normalizedHasId === currentHasId && normalized.label.length >= current.label.length)
+    ) {
+      merged.set(value, normalized)
+    }
+  }
+  const result = Array.from(merged.values())
+  result.sort((a, b) => {
+    const left = normalizeProviderName(a.providerName || a.label || a.value)
+    const right = normalizeProviderName(b.providerName || b.label || b.value)
+    if (left === right) {
+      return normalizeProviderRef(a.value).localeCompare(normalizeProviderRef(b.value))
+    }
+    return left.localeCompare(right)
+  })
+  return result
+}
+
+const loadProviderNamesFromConfig = async (platform: LogPlatform | ''): Promise<LogProviderOption[]> => {
   const cacheKey = platform
   const now = Date.now()
   const cached = providerConfigCache.get(cacheKey)
   if (cached && now - cached.loadedAt < PROVIDER_CONFIG_CACHE_TTL_MS) {
-    return cached.names
+    return cached.options
   }
 
-  const names = new Set<string>()
+  const options: LogProviderOption[] = []
+  const pushProvider = (providerIdRaw: string | number | null | undefined, providerNameRaw: string | null | undefined) => {
+    const option = buildProviderOption(providerIdRaw, providerNameRaw)
+    if (option) {
+      options.push(option)
+    }
+  }
 
   const includeClaude = platform === '' || platform === 'claude'
   const includeCodex = platform === '' || platform === 'codex'
@@ -1113,8 +1205,7 @@ const loadProviderNamesFromConfig = async (platform: LogPlatform | ''): Promise<
     try {
       const providers = await LoadProviders('claude')
       for (const provider of providers ?? []) {
-        const name = normalizeProviderName(provider?.name ?? '')
-        if (name) names.add(name)
+        pushProvider(provider?.id, provider?.name)
       }
     } catch (error) {
       console.error('failed to load claude providers from config', error)
@@ -1125,8 +1216,7 @@ const loadProviderNamesFromConfig = async (platform: LogPlatform | ''): Promise<
     try {
       const providers = await LoadProviders('codex')
       for (const provider of providers ?? []) {
-        const name = normalizeProviderName(provider?.name ?? '')
-        if (name) names.add(name)
+        pushProvider(provider?.id, provider?.name)
       }
     } catch (error) {
       console.error('failed to load codex providers from config', error)
@@ -1137,31 +1227,39 @@ const loadProviderNamesFromConfig = async (platform: LogPlatform | ''): Promise<
     try {
       const providers = await GetGeminiProviders()
       for (const provider of providers ?? []) {
-        const name = normalizeProviderName(provider?.name ?? '')
-        if (name) names.add(name)
+        pushProvider(provider?.id, provider?.name)
       }
     } catch (error) {
       console.error('failed to load gemini providers from config', error)
     }
   }
 
-  const result = Array.from(names)
-  providerConfigCache.set(cacheKey, { loadedAt: now, names: result })
+  const result = mergeProviderOptions(options)
+  providerConfigCache.set(cacheKey, { loadedAt: now, options: result })
   return result
+}
+
+const buildProviderOptionsFromRefs = (refs: LogProviderRef[]): LogProviderOption[] => {
+  const options: LogProviderOption[] = []
+  for (const ref of refs ?? []) {
+    const option = buildProviderOption(ref.provider_id, ref.provider)
+    if (option) {
+      options.push(option)
+    }
+  }
+  return mergeProviderOptions(options)
 }
 
 const syncProviderOptionsFromLogs = (items: RequestLog[]) => {
   if (!items.length) return
-  const merged = new Set(providerOptions.value.map(normalizeProviderName).filter(Boolean))
+  const nextOptions = [...providerOptions.value]
   for (const item of items) {
-    const name = normalizeProviderName(item.provider ?? '')
-    if (name) {
-      merged.add(name)
+    const option = buildProviderOption(item.provider_id, item.provider)
+    if (option) {
+      nextOptions.push(option)
     }
   }
-  const next = Array.from(merged)
-  next.sort((a, b) => a.localeCompare(b))
-  providerOptions.value = next
+  providerOptions.value = mergeProviderOptions(nextOptions)
 }
 
 const loadLogs = async () => {
@@ -2699,30 +2797,27 @@ const summaryScopeHint = computed(() => {
 
 const loadProviderOptions = async () => {
   const [fromLogs, fromConfig] = await Promise.all([
-    fetchLogProviders(filters.platform).catch((error) => {
-      console.error('failed to load providers from request logs', error)
-      return [] as string[]
+    fetchLogProviderRefs(filters.platform).catch((error) => {
+      console.error('failed to load provider refs from request logs', error)
+      return [] as LogProviderRef[]
     }),
     loadProviderNamesFromConfig(filters.platform).catch((error) => {
       console.error('failed to load providers from config', error)
-      return [] as string[]
+      return [] as LogProviderOption[]
     }),
   ])
 
-  const merged = new Set<string>()
-  for (const name of [...(fromLogs ?? []), ...(fromConfig ?? [])]) {
-    const normalized = normalizeProviderName(name ?? '')
-    if (normalized) merged.add(normalized)
-  }
-  providerOptions.value = Array.from(merged)
-  providerOptions.value.sort((a, b) => a.localeCompare(b))
+  providerOptions.value = mergeProviderOptions([
+    ...buildProviderOptionsFromRefs(fromLogs ?? []),
+    ...(fromConfig ?? []),
+  ])
 }
 
 watch(
   () => filters.platform,
   async () => {
     await loadProviderOptions()
-    if (filters.provider && !providerOptions.value.includes(filters.provider)) {
+    if (filters.provider && !providerOptions.value.some((option) => option.value === filters.provider)) {
       filters.provider = ''
     }
   },

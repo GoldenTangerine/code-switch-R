@@ -329,12 +329,12 @@
         <article
           v-for="card in activeCards"
           :key="card.id"
-          :ref="el => { if (card.name === highlightedProvider) scrollToCard(el as HTMLElement) }"
+          :ref="el => { if (isHighlightedCard(card)) scrollToCard(el as HTMLElement) }"
           :class="[
             'automation-card',
             { dragging: draggingId === card.id },
-            { 'is-last-used': isLastUsedProvider(card.name) },
-            { 'is-highlighted': highlightedProvider === card.name }
+            { 'is-last-used': isLastUsedProvider(card) },
+            { 'is-highlighted': isHighlightedCard(card) }
           ]"
           draggable="true"
           @click="handleProviderCardClick(card)"
@@ -343,7 +343,7 @@
           @drop="onDrop(card.id)"
         >
           <!-- 正在使用标签 -->
-          <span v-if="isLastUsedProvider(card.name)" class="last-used-badge">
+          <span v-if="isLastUsedProvider(card)" class="last-used-badge">
             ✓ {{ t('components.main.providers.lastUsed') }}
           </span>
           <div class="card-leading">
@@ -383,15 +383,15 @@
                 </span>
                 <!-- 黑名单等级徽章（始终显示，包括 L0） -->
                 <span
-                  v-if="getProviderBlacklistStatus(card.name)"
+                  v-if="getProviderBlacklistStatus(card)"
                   :class="[
                     'blacklist-level-badge',
-                    `bl-level-${getProviderBlacklistStatus(card.name)!.blacklistLevel}`,
+                    `bl-level-${getProviderBlacklistStatus(card)!.blacklistLevel}`,
                     { dark: resolvedTheme === 'dark' }
                   ]"
-                  :title="t('components.main.blacklist.levelTitle', { level: getProviderBlacklistStatus(card.name)!.blacklistLevel })"
+                  :title="t('components.main.blacklist.levelTitle', { level: getProviderBlacklistStatus(card)!.blacklistLevel })"
                 >
-                  BL{{ getProviderBlacklistStatus(card.name)!.blacklistLevel }}
+                  BL{{ getProviderBlacklistStatus(card)!.blacklistLevel }}
                 </span>
                 <button
                   v-if="card.officialSite"
@@ -404,7 +404,7 @@
               </div>
               <!-- <p class="card-subtitle">{{ card.apiUrl }}</p> -->
               <p
-                v-for="stats in [providerStatDisplay(card.name)]"
+                v-for="stats in [providerStatDisplay(card)]"
                 :key="`metrics-${card.id}`"
                 class="card-metrics"
               >
@@ -429,29 +429,29 @@
               </p>
               <!-- 黑名单横幅 -->
               <div
-                v-if="getProviderBlacklistStatus(card.name)?.isBlacklisted"
+                v-if="getProviderBlacklistStatus(card)?.isBlacklisted"
                 :class="['blacklist-banner', { dark: resolvedTheme === 'dark' }]"
               >
                 <div class="blacklist-info">
                   <span class="blacklist-icon">⛔</span>
                   <!-- 等级徽章（L1-L5，黑色/红色） -->
                   <span
-                    v-if="getProviderBlacklistStatus(card.name)!.blacklistLevel > 0"
-                    :class="['level-badge', `level-${getProviderBlacklistStatus(card.name)!.blacklistLevel}`, { dark: resolvedTheme === 'dark' }]"
+                    v-if="getProviderBlacklistStatus(card)!.blacklistLevel > 0"
+                    :class="['level-badge', `level-${getProviderBlacklistStatus(card)!.blacklistLevel}`, { dark: resolvedTheme === 'dark' }]"
                   >
-                    L{{ getProviderBlacklistStatus(card.name)!.blacklistLevel }}
+                    L{{ getProviderBlacklistStatus(card)!.blacklistLevel }}
                   </span>
                   <span class="blacklist-text">
                     {{ t('components.main.blacklist.blocked') }} |
                     {{ t('components.main.blacklist.remaining') }}:
-                    {{ formatBlacklistCountdown(getProviderBlacklistStatus(card.name)!.remainingSeconds) }}
+                    {{ formatBlacklistCountdown(getProviderBlacklistStatus(card)!.remainingSeconds) }}
                   </span>
                 </div>
                 <div class="blacklist-actions">
                   <button
                     class="unblock-btn primary"
                     type="button"
-                    @click.stop="handleUnblockAndReset(card.name)"
+                    @click.stop="handleUnblockAndReset(card)"
                     :title="t('components.main.blacklist.unblockAndResetHint')"
                   >
                     {{ t('components.main.blacklist.unblockAndReset') }}
@@ -459,7 +459,7 @@
                   <button
                     class="unblock-btn secondary"
                     type="button"
-                    @click.stop="handleResetLevel(card.name)"
+                    @click.stop="handleResetLevel(card)"
                     :title="t('components.main.blacklist.resetLevelHint')"
                   >
                     {{ t('components.main.blacklist.resetLevel') }}
@@ -468,19 +468,19 @@
               </div>
               <!-- 等级徽章（未拉黑但有等级） -->
               <div
-                v-else-if="getProviderBlacklistStatus(card.name) && getProviderBlacklistStatus(card.name)!.blacklistLevel > 0"
+                v-else-if="getProviderBlacklistStatus(card) && getProviderBlacklistStatus(card)!.blacklistLevel > 0"
                 class="level-badge-standalone"
               >
                 <span
-                  :class="['level-badge', `level-${getProviderBlacklistStatus(card.name)!.blacklistLevel}`, { dark: resolvedTheme === 'dark' }]"
+                  :class="['level-badge', `level-${getProviderBlacklistStatus(card)!.blacklistLevel}`, { dark: resolvedTheme === 'dark' }]"
                 >
-                  L{{ getProviderBlacklistStatus(card.name)!.blacklistLevel }}
+                  L{{ getProviderBlacklistStatus(card)!.blacklistLevel }}
                 </span>
                 <span class="level-hint">{{ t('components.main.blacklist.levelHint') }}</span>
                 <button
                   class="reset-level-mini"
                   type="button"
-                  @click.stop="handleResetLevel(card.name)"
+                  @click.stop="handleResetLevel(card)"
                   :title="t('components.main.blacklist.resetLevelHint')"
                 >
                   ✕
@@ -599,7 +599,6 @@
                     type="text"
                     :placeholder="t('components.main.form.placeholders.name')"
                     required
-                    :disabled="Boolean(modalState.editingId)"
                   />
                 </label>
 
@@ -1154,11 +1153,9 @@ const handleDirectApply = async (card: AutomationCard) => {
     } else if (tab === 'codex') {
       await Call.ByName('codeswitch/services.CodexSettingsService.ApplySingleProvider', card.id)
     } else if (tab === 'gemini') {
-      // Gemini 使用字符串 ID，需要从 cache 中找到原始 provider
-      const index = cards.gemini.findIndex(c => c.id === card.id)
-      if (index === -1 || !geminiProvidersCache.value[index]) return
-      const realId = geminiProvidersCache.value[index].id
-      await Call.ByName('codeswitch/services.GeminiService.ApplySingleProvider', realId)
+      const providerRef = normalizeProviderRef(card.providerRef)
+      if (!providerRef) return
+      await Call.ByName('codeswitch/services.GeminiService.ApplySingleProvider', providerRef)
     }
     await refreshDirectAppliedStatus(tab)
     showToast(t('components.main.directApply.success', { name: card.name }), 'success')
@@ -1173,9 +1170,9 @@ const isDirectApplied = (card: AutomationCard) => {
   if (appliedId === null) return false
 
   if (activeTab.value === 'gemini') {
-    const index = cards.gemini.findIndex(c => c.id === card.id)
-    if (index === -1 || !geminiProvidersCache.value[index]) return false
-    return geminiProvidersCache.value[index].id === appliedId
+    const providerRef = normalizeProviderRef(card.providerRef)
+    if (!providerRef) return false
+    return providerRef === appliedId
   }
   return card.id === appliedId
 }
@@ -1277,6 +1274,7 @@ const availabilityResultsMap = reactive<Record<ProviderTab, Record<number, Provi
 // @author sm
 interface LastUsedProvider {
   platform: string
+  provider_id?: string
   provider_name: string
   updated_at: number
 }
@@ -1286,8 +1284,9 @@ const lastUsedProviders = reactive<Record<string, LastUsedProvider | null>>({
   gemini: null,
   others: null,
 })
-// 高亮闪烁的供应商名称
-const highlightedProvider = ref<string | null>(null)
+// 高亮闪烁的供应商（优先按 provider_id 匹配）
+const highlightedProviderRef = ref<string | null>(null)
+const highlightedProviderName = ref<string | null>(null)
 let highlightTimer: number | undefined
 
 const showImportButton = computed(() => {
@@ -1565,6 +1564,34 @@ const stopUpdateTimer = () => {
 }
 
 const normalizeProviderKey = (value: string) => value?.trim().toLowerCase() ?? ''
+const normalizeProviderRef = (value: string | number | null | undefined) => `${value ?? ''}`.trim()
+
+const cardProviderRef = (card: AutomationCard): string => {
+  const ref = normalizeProviderRef(card.providerRef)
+  if (ref) return ref
+  if (Number.isFinite(card.id)) return `${card.id}`
+  return ''
+}
+
+const providerStatsKeyFromStat = (stat: ProviderDailyStat): string => {
+  const ref = normalizeProviderRef(stat.provider_id)
+  if (ref) return ref
+  return normalizeProviderKey(stat.provider)
+}
+
+const blacklistStatusKeyFromStatus = (status: BlacklistStatus): string => {
+  const ref = normalizeProviderRef(status.providerId)
+  if (ref) return ref
+  return normalizeProviderKey(status.providerName)
+}
+
+const blacklistStatusKeyFromCard = (card: AutomationCard): string => {
+  const ref = cardProviderRef(card)
+  if (ref) return ref
+  return normalizeProviderKey(card.name)
+}
+
+const createGeminiProviderRef = () => `gemini-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 
 const normalizeVersion = (value: string) => value.replace(/^v/i, '').trim()
 
@@ -1604,6 +1631,7 @@ const draggingId = ref<number | null>(null)
 // Gemini Provider 到 AutomationCard 的转换
 const geminiToCard = (provider: GeminiProvider, index: number): AutomationCard => ({
   id: 300 + index, // Gemini 使用 300+ 的 ID 范围
+  providerRef: normalizeProviderRef(provider.id),
   name: provider.name,
   apiUrl: provider.baseUrl || '',
   apiKey: provider.apiKey || '',
@@ -1632,8 +1660,10 @@ const cardToGemini = (card: AutomationCard, original: GeminiProvider): GeminiPro
 })
 
 const serializeProviders = (providers: AutomationCard[]) =>
-  providers.map((provider) => ({
-    ...provider,
+  providers.map((provider) => {
+    const { providerRef, ...persistable } = provider
+    return {
+      ...persistable,
     // 确保可用性配置正确序列化
     availabilityMonitorEnabled: !!provider.availabilityMonitorEnabled,
     connectivityAutoBlacklist: !!provider.connectivityAutoBlacklist,
@@ -1650,7 +1680,8 @@ const serializeProviders = (providers: AutomationCard[]) =>
     connectivityTestEndpoint: '',
     // 保留认证方式配置（已从废弃字段升级为活跃字段）
     connectivityAuthType: provider.connectivityAuthType || '',
-  }))
+    }
+  })
 
 // 生成 custom CLI 工具的 provider kind（后端需要 "custom:{toolId}" 格式）
 const getCustomProviderKind = (toolId: string): string => `custom:${toolId}`
@@ -1669,27 +1700,32 @@ const persistProviders = async (tabId: ProviderTab) => {
       await SaveProviders(getCustomProviderKind(selectedToolId.value), serializeProviders(cards.others))
     } else if (tabId === 'gemini') {
       // Gemini 使用独立的保存逻辑
-      // 1. 收集当前卡片的 name 集合
-      const currentNames = new Set(cards.gemini.map(c => c.name))
+      // 1. 收集当前卡片的 providerRef 集合
+      const currentRefs = new Set(cards.gemini.map(c => normalizeProviderRef(c.providerRef)).filter(Boolean))
 
       // 2. 删除不在当前卡片中的 provider
       for (const cached of geminiProvidersCache.value) {
-        if (!currentNames.has(cached.name)) {
+        if (!currentRefs.has(normalizeProviderRef(cached.id))) {
           await DeleteGeminiProvider(cached.id)
         }
       }
 
       // 3. 添加或更新 provider
       for (const card of cards.gemini) {
-        const original = geminiProvidersCache.value.find(p => p.name === card.name)
+        const providerRef = normalizeProviderRef(card.providerRef)
+        const original = providerRef
+          ? geminiProvidersCache.value.find(p => normalizeProviderRef(p.id) === providerRef)
+          : undefined
 
         if (original) {
           // 已存在的 provider，更新
           await UpdateGeminiProvider(cardToGemini(card, original))
         } else {
           // 新添加的 provider，调用 AddProvider
+          const newProviderID = providerRef || createGeminiProviderRef()
+          card.providerRef = newProviderID
           const newProvider: GeminiProvider = {
-            id: `gemini-${Date.now()}`,
+            id: newProviderID,
             name: card.name,
             baseUrl: card.apiUrl,
             apiKey: card.apiKey,
@@ -1707,7 +1743,10 @@ const persistProviders = async (tabId: ProviderTab) => {
       // 5. 保存排序：按 cards.gemini 的顺序构建 ID 列表
       const orderedIds: string[] = []
       for (const card of cards.gemini) {
-        const provider = updatedProviders.find(p => p.name === card.name)
+        const providerRef = normalizeProviderRef(card.providerRef)
+        const provider = providerRef
+          ? updatedProviders.find(p => normalizeProviderRef(p.id) === providerRef)
+          : undefined
         if (provider) {
           orderedIds.push(provider.id)
         }
@@ -1727,7 +1766,11 @@ const persistProviders = async (tabId: ProviderTab) => {
 }
 
 const replaceProviders = (tabId: ProviderTab, data: AutomationCard[]) => {
-  cards[tabId].splice(0, cards[tabId].length, ...createAutomationCards(data))
+  const withRefs = createAutomationCards(data).map((card) => ({
+    ...card,
+    providerRef: normalizeProviderRef(card.providerRef) || `${card.id}`,
+  }))
+  cards[tabId].splice(0, cards[tabId].length, ...withRefs)
 }
 
 const loadProvidersFromDisk = async () => {
@@ -2029,7 +2072,7 @@ const loadProviderStats = async (tab: ProviderTab) => {
     const stats = await fetchProviderDailyStats(tab as 'claude' | 'codex' | 'gemini')
     const mapped: Record<string, ProviderDailyStat> = {}
     ;(stats ?? []).forEach((stat) => {
-      mapped[normalizeProviderKey(stat.provider)] = stat
+      mapped[providerStatsKeyFromStat(stat)] = stat
     })
     providerStatsMap[tab] = mapped
     providerStatsLoaded[tab] = true
@@ -2054,7 +2097,7 @@ const loadBlacklistStatus = async (tab: ProviderTab) => {
     const statuses = await getBlacklistStatus(tab)
     const map: Record<string, BlacklistStatus> = {}
     statuses.forEach(status => {
-      map[status.providerName] = status
+      map[blacklistStatusKeyFromStatus(status)] = status
     })
     blacklistStatusMap[tab] = map
   } catch (err) {
@@ -2063,10 +2106,15 @@ const loadBlacklistStatus = async (tab: ProviderTab) => {
 }
 
 // 手动解禁并重置（完全重置）
-const handleUnblockAndReset = async (providerName: string) => {
+const handleUnblockAndReset = async (card: AutomationCard) => {
+  const providerRef = cardProviderRef(card)
   try {
-    await Call.ByName('codeswitch/services.BlacklistService.ManualUnblockAndReset', activeTab.value, providerName)
-    showToast(t('components.main.blacklist.unblockSuccess', { name: providerName }), 'success')
+    if (providerRef) {
+      await Call.ByName('codeswitch/services.BlacklistService.ManualUnblockAndResetByID', activeTab.value, providerRef, card.name)
+    } else {
+      await Call.ByName('codeswitch/services.BlacklistService.ManualUnblockAndReset', activeTab.value, card.name)
+    }
+    showToast(t('components.main.blacklist.unblockSuccess', { name: card.name }), 'success')
     await loadBlacklistStatus(activeTab.value)
   } catch (err) {
     console.error('解除拉黑失败:', err)
@@ -2075,10 +2123,15 @@ const handleUnblockAndReset = async (providerName: string) => {
 }
 
 // 手动清零等级（仅重置等级）
-const handleResetLevel = async (providerName: string) => {
+const handleResetLevel = async (card: AutomationCard) => {
+  const providerRef = cardProviderRef(card)
   try {
-    await Call.ByName('codeswitch/services.BlacklistService.ManualResetLevel', activeTab.value, providerName)
-    showToast(t('components.main.blacklist.resetLevelSuccess', { name: providerName }), 'success')
+    if (providerRef) {
+      await Call.ByName('codeswitch/services.BlacklistService.ManualResetLevelByID', activeTab.value, providerRef, card.name)
+    } else {
+      await Call.ByName('codeswitch/services.BlacklistService.ManualResetLevel', activeTab.value, card.name)
+    }
+    showToast(t('components.main.blacklist.resetLevelSuccess', { name: card.name }), 'success')
     await loadBlacklistStatus(activeTab.value)
   } catch (err) {
     console.error('清零等级失败:', err)
@@ -2097,8 +2150,9 @@ const formatBlacklistCountdown = (remainingSeconds: number): string => {
 }
 
 // 获取 provider 黑名单状态
-const getProviderBlacklistStatus = (providerName: string): BlacklistStatus | null => {
-  return blacklistStatusMap[activeTab.value][providerName] || null
+const getProviderBlacklistStatus = (card: AutomationCard): BlacklistStatus | null => {
+  const key = blacklistStatusKeyFromCard(card)
+  return blacklistStatusMap[activeTab.value][key] || blacklistStatusMap[activeTab.value][normalizeProviderKey(card.name)] || null
 }
 
 // 加载连通性测试结果（已废弃，保留兼容）
@@ -2251,12 +2305,13 @@ const successRateClassName = (value: number) => {
   return 'success-bad'
 }
 
-const providerStatDisplay = (providerName: string): ProviderStatDisplay => {
+const providerStatDisplay = (card: AutomationCard): ProviderStatDisplay => {
   const tab = activeTab.value
   if (!providerStatsLoaded[tab]) {
     return { state: 'loading', message: t('components.main.providers.loading') }
   }
-  const stat = providerStatsMap[tab]?.[normalizeProviderKey(providerName)]
+  const statKey = cardProviderRef(card) || normalizeProviderKey(card.name)
+  const stat = providerStatsMap[tab]?.[statKey] ?? providerStatsMap[tab]?.[normalizeProviderKey(card.name)]
   if (!stat) {
     return { state: 'empty', message: t('components.main.providers.noData') }
   }
@@ -2338,22 +2393,25 @@ const loadLastUsedProviders = async () => {
 
 // 切换到指定平台的 Tab 并高亮供应商
 // @author sm
-const switchToTabAndHighlight = (platform: string, providerName: string) => {
+const switchToTabAndHighlight = (platform: string, providerName: string, providerId?: string) => {
   // 切换到对应的 Tab
   const tabIndex = tabs.findIndex(tab => tab.id === platform)
   if (tabIndex >= 0 && selectedIndex.value !== tabIndex) {
     selectedIndex.value = tabIndex
   }
+  const normalizedProviderId = normalizeProviderRef(providerId)
 
   // 更新最后使用的供应商
   lastUsedProviders[platform] = {
     platform,
+    provider_id: normalizedProviderId,
     provider_name: providerName,
     updated_at: Date.now(),
   }
 
   // 高亮闪烁供应商卡片
-  highlightedProvider.value = providerName
+  highlightedProviderRef.value = normalizedProviderId || null
+  highlightedProviderName.value = providerName
 
   // 清除之前的高亮计时器
   if (highlightTimer) {
@@ -2362,7 +2420,8 @@ const switchToTabAndHighlight = (platform: string, providerName: string) => {
 
   // 3 秒后取消高亮
   highlightTimer = window.setTimeout(() => {
-    highlightedProvider.value = null
+    highlightedProviderRef.value = null
+    highlightedProviderName.value = null
   }, 3000)
 
   // 刷新黑名单状态
@@ -2371,25 +2430,39 @@ const switchToTabAndHighlight = (platform: string, providerName: string) => {
 
 // 处理供应商切换事件
 // @author sm
-const handleProviderSwitched = (event: { data: { platform: string; toProvider: string } }) => {
-  const { platform, toProvider } = event.data
-  console.log('[Event] provider:switched', platform, toProvider)
-  switchToTabAndHighlight(platform, toProvider)
+const handleProviderSwitched = (event: { data: { platform: string; toProvider: string; toProviderId?: string } }) => {
+  const { platform, toProvider, toProviderId } = event.data
+  console.log('[Event] provider:switched', platform, toProvider, toProviderId)
+  switchToTabAndHighlight(platform, toProvider, toProviderId)
 }
 
 // 处理供应商拉黑事件
 // @author sm
-const handleProviderBlacklisted = (event: { data: { platform: string; providerName: string } }) => {
-  const { platform, providerName } = event.data
-  console.log('[Event] provider:blacklisted', platform, providerName)
-  switchToTabAndHighlight(platform, providerName)
+const handleProviderBlacklisted = (event: { data: { platform: string; providerName: string; providerId?: string } }) => {
+  const { platform, providerName, providerId } = event.data
+  console.log('[Event] provider:blacklisted', platform, providerName, providerId)
+  switchToTabAndHighlight(platform, providerName, providerId)
 }
 
 // 判断供应商是否是最后使用的
 // @author sm
-const isLastUsedProvider = (providerName: string): boolean => {
+const isLastUsedProvider = (card: AutomationCard): boolean => {
   const lastUsed = lastUsedProviders[activeTab.value]
-  return lastUsed?.provider_name === providerName
+  if (!lastUsed) return false
+  const cardRef = cardProviderRef(card)
+  if (cardRef && normalizeProviderRef(lastUsed.provider_id) !== '') {
+    return normalizeProviderRef(lastUsed.provider_id) === cardRef
+  }
+  return lastUsed.provider_name === card.name
+}
+
+const isHighlightedCard = (card: AutomationCard): boolean => {
+  const highlightedRef = normalizeProviderRef(highlightedProviderRef.value)
+  const cardRef = cardProviderRef(card)
+  if (cardRef && highlightedRef) {
+    return highlightedRef === cardRef
+  }
+  return highlightedProviderName.value === card.name
 }
 
 // 滚动到指定卡片
@@ -2879,6 +2952,7 @@ const submitModal = async () => {
     const prevLevel = normalizeLevel(editingCard.value.level)
     const nextLevel = normalizeLevel(modalState.form.level)
     Object.assign(editingCard.value, {
+      name: name || editingCard.value.name,
       apiUrl: apiUrl || editingCard.value.apiUrl,
       apiKey,
       officialSite,
@@ -2910,8 +2984,11 @@ const submitModal = async () => {
     }
     await persistProviders(modalState.tabId)
   } else {
+    const newCardID = Date.now()
+    const providerRef = modalState.tabId === 'gemini' ? createGeminiProviderRef() : `${newCardID}`
     const newCard: AutomationCard = {
-      id: Date.now(),
+      id: newCardID,
+      providerRef,
       name: name || 'Untitled vendor',
       apiUrl,
       apiKey,
@@ -2984,11 +3061,9 @@ const submitAndApplyModal = async () => {
     } else if (tabId === 'codex') {
       await Call.ByName('codeswitch/services.CodexSettingsService.ApplySingleProvider', editingId)
     } else if (tabId === 'gemini') {
-      // Gemini 使用字符串 ID，需要从 cache 中找到原始 provider
-      const index = cards.gemini.findIndex(c => c.id === editingId)
-      if (index !== -1 && geminiProvidersCache.value[index]) {
-        const realId = geminiProvidersCache.value[index].id
-        await Call.ByName('codeswitch/services.GeminiService.ApplySingleProvider', realId)
+      const providerRef = normalizeProviderRef(editingCard.providerRef)
+      if (providerRef) {
+        await Call.ByName('codeswitch/services.GeminiService.ApplySingleProvider', providerRef)
       }
     }
     await refreshDirectAppliedStatus(tabId)
@@ -3025,18 +3100,15 @@ const handleDuplicate = async (card: AutomationCard) => {
     const tab = activeTab.value
 
     if (tab === 'gemini') {
-      // Gemini 使用字符串 ID，需要从 cache 中找到原始 provider
-      const index = cards.gemini.findIndex(c => c.id === card.id)
-      if (index === -1 || !geminiProvidersCache.value[index]) {
+      const providerRef = normalizeProviderRef(card.providerRef)
+      if (!providerRef) {
         console.error('[Duplicate] 未找到 Gemini provider')
         return
       }
-
-      const originalProvider = geminiProvidersCache.value[index]
       // 调用 Gemini 的 DuplicateProvider API（字符串 ID）
       const newProvider = await Call.ByName(
         'codeswitch/services.GeminiService.DuplicateProvider',
-        originalProvider.id
+        providerRef
       )
 
       if (!newProvider) {

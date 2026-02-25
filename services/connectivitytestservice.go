@@ -432,7 +432,7 @@ func (cts *ConnectivityTestService) TestAll(platform string) []ConnectivityResul
 			cts.mu.Unlock()
 
 			// 与拉黑服务联动
-			cts.handleBlacklistIntegration(platform, p.Name, result)
+			cts.handleBlacklistIntegration(platform, p.ID, p.Name, result)
 
 			mu.Lock()
 			results = append(results, *result)
@@ -448,20 +448,21 @@ func (cts *ConnectivityTestService) TestAll(platform string) []ConnectivityResul
 }
 
 // handleBlacklistIntegration 处理与拉黑服务的联动
-func (cts *ConnectivityTestService) handleBlacklistIntegration(platform, providerName string, result *ConnectivityResult) {
+func (cts *ConnectivityTestService) handleBlacklistIntegration(platform string, providerID int64, providerName string, result *ConnectivityResult) {
 	if cts.blacklistService == nil {
 		return
 	}
+	providerRef := providerRefFromNumericID(providerID, providerName)
 
 	switch result.Status {
 	case StatusAvailable:
 		// 绿色：调用 RecordSuccess 清零失败计数
-		if err := cts.blacklistService.RecordSuccess(platform, providerName); err != nil {
+		if err := cts.blacklistService.RecordSuccessByID(platform, providerRef, providerName); err != nil {
 			log.Printf("[ConnectivityTest] RecordSuccess 失败: %v", err)
 		}
 	case StatusUnavailable:
 		// 红色：调用 RecordFailure 累计失败
-		if err := cts.blacklistService.RecordFailure(platform, providerName); err != nil {
+		if err := cts.blacklistService.RecordFailureByID(platform, providerRef, providerName); err != nil {
 			log.Printf("[ConnectivityTest] RecordFailure 失败: %v", err)
 		}
 	case StatusDegraded:
@@ -532,7 +533,7 @@ func (cts *ConnectivityTestService) RunSingleTest(platform string, providerID in
 	cts.mu.Unlock()
 
 	// 与拉黑服务联动
-	cts.handleBlacklistIntegration(platform, targetProvider.Name, result)
+	cts.handleBlacklistIntegration(platform, targetProvider.ID, targetProvider.Name, result)
 
 	return result, nil
 }

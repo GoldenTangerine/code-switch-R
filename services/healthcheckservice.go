@@ -66,16 +66,16 @@ type HealthCheckHistory struct {
 
 // ProviderTimeline Provider 时间线（用于前端展示）
 type ProviderTimeline struct {
-	ProviderID                 int64                `json:"providerId"`
-	ProviderName               string               `json:"providerName"`
-	Platform                   string               `json:"platform"`
-	AvailabilityMonitorEnabled bool                 `json:"availabilityMonitorEnabled"`
-	ConnectivityAutoBlacklist  bool                 `json:"connectivityAutoBlacklist"`
-	AvailabilityConfig         *AvailabilityConfig  `json:"availabilityConfig,omitempty"` // 高级配置
-	Items                      []HealthCheckResult  `json:"items"`                        // 历史记录
-	Latest                     *HealthCheckResult   `json:"latest"`                       // 最新一条
-	Uptime                     float64              `json:"uptime"`                       // 可用率
-	AvgLatencyMs               int                  `json:"avgLatencyMs"`                 // 平均延迟
+	ProviderID                 int64               `json:"providerId"`
+	ProviderName               string              `json:"providerName"`
+	Platform                   string              `json:"platform"`
+	AvailabilityMonitorEnabled bool                `json:"availabilityMonitorEnabled"`
+	ConnectivityAutoBlacklist  bool                `json:"connectivityAutoBlacklist"`
+	AvailabilityConfig         *AvailabilityConfig `json:"availabilityConfig,omitempty"` // 高级配置
+	Items                      []HealthCheckResult `json:"items"`                        // 历史记录
+	Latest                     *HealthCheckResult  `json:"latest"`                       // 最新一条
+	Uptime                     float64             `json:"uptime"`                       // 可用率
+	AvgLatencyMs               int                 `json:"avgLatencyMs"`                 // 平均延迟
 }
 
 // AvailabilityFailureCounter 可用性失败计数器（独立于真实请求）
@@ -93,7 +93,7 @@ type HealthCheckService struct {
 	settingsService  *SettingsService
 
 	mu            sync.RWMutex
-	failCounters  map[string]*AvailabilityFailureCounter // key: platform:providerName
+	failCounters  map[string]*AvailabilityFailureCounter  // key: platform:providerRef
 	latestResults map[string]map[int64]*HealthCheckResult // platform -> providerID -> result
 
 	// 后台轮询
@@ -176,6 +176,7 @@ func (hcs *HealthCheckService) ensureTable() error {
 	// 创建索引
 	const createIndexSQL = `
 		CREATE INDEX IF NOT EXISTS idx_health_provider ON health_check_history(platform, provider_name);
+		CREATE INDEX IF NOT EXISTS idx_health_provider_id ON health_check_history(platform, provider_id);
 		CREATE INDEX IF NOT EXISTS idx_health_checked_at ON health_check_history(checked_at);
 	`
 	if _, err := db.Exec(createIndexSQL); err != nil {
@@ -216,8 +217,8 @@ func (hcs *HealthCheckService) GetLatestResults() (map[string][]ProviderTimeline
 				AvailabilityConfig:         p.AvailabilityConfig,
 			}
 
-			// 从批量查询结果中获取该 provider 的历史记录
-			if history, ok := historiesMap[p.Name]; ok {
+			// 从批量查询结果中获取该 provider 的历史记录（优先按 provider ID 关联）
+			if history, ok := historiesMap[healthCheckHistoryKey(p.ID, p.Name)]; ok {
 				timeline.Items = history.Items
 				timeline.Latest = history.Latest
 				timeline.Uptime = history.Uptime
@@ -256,7 +257,7 @@ func (hcs *HealthCheckService) batchGetHistories(platform string) (map[string]*H
 	}
 	defer rows.Close()
 
-	// 分组收集：按 provider_name 分组，每个 provider 最多保留 MaxHistoryPerProvider 条
+	// 分组收集：按 provider_id（回退 provider_name）分组，每个 provider 最多保留 MaxHistoryPerProvider 条
 	historiesMap := make(map[string]*HealthCheckHistory)
 
 	for rows.Next() {
@@ -286,7 +287,8 @@ func (hcs *HealthCheckService) batchGetHistories(platform string) (map[string]*H
 		}
 
 		// 获取或创建该 provider 的 history
-		history, ok := historiesMap[r.ProviderName]
+		key := healthCheckHistoryKey(r.ProviderID, r.ProviderName)
+		history, ok := historiesMap[key]
 		if !ok {
 			history = &HealthCheckHistory{
 				ProviderID:   r.ProviderID,
@@ -294,7 +296,7 @@ func (hcs *HealthCheckService) batchGetHistories(platform string) (map[string]*H
 				Platform:     platform,
 				Items:        make([]HealthCheckResult, 0, MaxHistoryPerProvider),
 			}
-			historiesMap[r.ProviderName] = history
+			historiesMap[key] = history
 		}
 
 		// 限制每个 provider 最多保留 MaxHistoryPerProvider 条
@@ -329,8 +331,24 @@ func (hcs *HealthCheckService) batchGetHistories(platform string) (map[string]*H
 	return historiesMap, nil
 }
 
+func healthCheckHistoryKey(providerID int64, providerName string) string {
+	if providerID > 0 {
+		return fmt.Sprintf("id:%d", providerID)
+	}
+	return "name:" + strings.ToLower(strings.TrimSpace(providerName))
+}
+
 // GetHistory 获取单个 Provider 的历史记录
 func (hcs *HealthCheckService) GetHistory(platform, providerName string, limit int) (*HealthCheckHistory, error) {
+	return hcs.getHistoryInternal(platform, 0, strings.TrimSpace(providerName), limit)
+}
+
+// GetHistoryByID 获取单个 Provider 的历史记录（按 provider_id 精确匹配）
+func (hcs *HealthCheckService) GetHistoryByID(platform string, providerID int64, providerName string, limit int) (*HealthCheckHistory, error) {
+	return hcs.getHistoryInternal(platform, providerID, strings.TrimSpace(providerName), limit)
+}
+
+func (hcs *HealthCheckService) getHistoryInternal(platform string, providerID int64, providerName string, limit int) (*HealthCheckHistory, error) {
 	db, err := xdb.DB("default")
 	if err != nil {
 		return nil, fmt.Errorf("获取数据库连接失败: %w", err)
@@ -343,18 +361,30 @@ func (hcs *HealthCheckService) GetHistory(platform, providerName string, limit i
 	query := `
 		SELECT id, provider_id, provider_name, platform, model, endpoint, status, latency_ms, error_message, checked_at
 		FROM health_check_history
-		WHERE platform = ? AND provider_name = ?
+		WHERE platform = ?
+	`
+	args := []interface{}{platform}
+	if providerID > 0 {
+		query += ` AND provider_id = ?`
+		args = append(args, providerID)
+	} else {
+		query += ` AND provider_name = ?`
+		args = append(args, providerName)
+	}
+	query += `
 		ORDER BY checked_at DESC
 		LIMIT ?
 	`
+	args = append(args, limit)
 
-	rows, err := db.Query(query, platform, providerName, limit)
+	rows, err := db.Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("查询历史记录失败: %w", err)
 	}
 	defer rows.Close()
 
 	history := &HealthCheckHistory{
+		ProviderID:   providerID,
 		ProviderName: providerName,
 		Platform:     platform,
 		Items:        make([]HealthCheckResult, 0),
@@ -794,8 +824,9 @@ func (hcs *HealthCheckService) handleBlacklistIntegration(provider *Provider, re
 		}
 	}
 
-	// 获取或创建失败计数器
-	counterKey := fmt.Sprintf("%s:%s", result.Platform, provider.Name)
+	// 获取或创建失败计数器（统一与黑名单相同的 providerRef 规则）
+	providerRef := providerRefFromNumericID(provider.ID, provider.Name)
+	counterKey := fmt.Sprintf("%s:%s", result.Platform, providerRef)
 	hcs.mu.Lock()
 	counter, exists := hcs.failCounters[counterKey]
 	if !exists {
@@ -842,7 +873,7 @@ func (hcs *HealthCheckService) handleBlacklistIntegration(provider *Provider, re
 
 	// 在锁外执行耗时的 RPC 调用，避免阻塞其他检测
 	if shouldTriggerBlacklist {
-		if err := hcs.blacklistService.RecordFailure(result.Platform, provider.Name); err != nil {
+		if err := hcs.blacklistService.RecordFailureByID(result.Platform, providerRef, provider.Name); err != nil {
 			log.Printf("[HealthCheck] 触发拉黑失败: %v", err)
 		} else {
 			log.Printf("[HealthCheck] Provider %s 连续失败 %d 次，已触发拉黑！", provider.Name, failureThreshold)
@@ -850,7 +881,7 @@ func (hcs *HealthCheckService) handleBlacklistIntegration(provider *Provider, re
 	}
 
 	if shouldRecordSuccess {
-		if err := hcs.blacklistService.RecordSuccess(result.Platform, provider.Name); err != nil {
+		if err := hcs.blacklistService.RecordSuccessByID(result.Platform, providerRef, provider.Name); err != nil {
 			log.Printf("[HealthCheck] RecordSuccess 失败: %v", err)
 		}
 	}

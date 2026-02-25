@@ -1,6 +1,7 @@
 package services
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -8,16 +9,18 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/daodao97/xgo/xdb"
 )
 
 // GeminiAuthType 认证类型
 type GeminiAuthType string
 
 const (
-	GeminiAuthOAuth      GeminiAuthType = "oauth-personal"   // Google 官方 OAuth
-	GeminiAuthAPIKey     GeminiAuthType = "gemini-api-key"   // API Key 认证
-	GeminiAuthPackycode  GeminiAuthType = "packycode"        // PackyCode 合作方
-	GeminiAuthGeneric    GeminiAuthType = "generic"          // 通用第三方
+	GeminiAuthOAuth     GeminiAuthType = "oauth-personal" // Google 官方 OAuth
+	GeminiAuthAPIKey    GeminiAuthType = "gemini-api-key" // API Key 认证
+	GeminiAuthPackycode GeminiAuthType = "packycode"      // PackyCode 合作方
+	GeminiAuthGeneric   GeminiAuthType = "generic"        // 通用第三方
 )
 
 // GeminiProvider Gemini 供应商配置
@@ -33,9 +36,9 @@ type GeminiProvider struct {
 	Category            string            `json:"category,omitempty"`            // official, third_party, custom
 	PartnerPromotionKey string            `json:"partnerPromotionKey,omitempty"` // 用于识别供应商类型
 	Enabled             bool              `json:"enabled"`
-	Level               int               `json:"level,omitempty"`               // 优先级分组 (1-10, 默认 1)
-	EnvConfig           map[string]string `json:"envConfig,omitempty"`           // .env 配置
-	SettingsConfig      map[string]any    `json:"settingsConfig,omitempty"`      // settings.json 配置
+	Level               int               `json:"level,omitempty"`          // 优先级分组 (1-10, 默认 1)
+	EnvConfig           map[string]string `json:"envConfig,omitempty"`      // .env 配置
+	SettingsConfig      map[string]any    `json:"settingsConfig,omitempty"` // settings.json 配置
 }
 
 // GeminiPreset 预设供应商
@@ -53,12 +56,12 @@ type GeminiPreset struct {
 
 // GeminiStatus Gemini 配置状态
 type GeminiStatus struct {
-	Enabled        bool           `json:"enabled"`
+	Enabled         bool           `json:"enabled"`
 	CurrentProvider string         `json:"currentProvider,omitempty"`
-	AuthType       GeminiAuthType `json:"authType"`
-	HasAPIKey      bool           `json:"hasApiKey"`
-	HasBaseURL     bool           `json:"hasBaseUrl"`
-	Model          string         `json:"model,omitempty"`
+	AuthType        GeminiAuthType `json:"authType"`
+	HasAPIKey       bool           `json:"hasApiKey"`
+	HasBaseURL      bool           `json:"hasBaseUrl"`
+	Model           string         `json:"model,omitempty"`
 }
 
 // GeminiService Gemini 配置管理服务
@@ -162,7 +165,11 @@ func (s *GeminiService) AddProvider(provider GeminiProvider) error {
 	}
 
 	s.providers = append(s.providers, provider)
-	return s.saveProviders()
+	if err := s.saveProvidersWithIdentitySync(nil); err != nil {
+		s.providers = s.providers[:len(s.providers)-1]
+		return err
+	}
+	return nil
 }
 
 // UpdateProvider 更新供应商
@@ -176,8 +183,23 @@ func (s *GeminiService) UpdateProvider(provider GeminiProvider) error {
 			if strings.TrimSpace(provider.APIKey) == "" {
 				provider.APIKey = p.APIKey
 			}
+			oldName := p.Name
+			oldProvider := p
 			s.providers[i] = provider
-			return s.saveProviders()
+			var renames []providerIdentityRename
+			if strings.TrimSpace(oldName) != strings.TrimSpace(provider.Name) {
+				renames = append(renames, providerIdentityRename{
+					Kind:       "gemini",
+					ProviderID: provider.ID,
+					OldName:    oldName,
+					NewName:    provider.Name,
+				})
+			}
+			if err := s.saveProvidersWithIdentitySync(renames); err != nil {
+				s.providers[i] = oldProvider
+				return err
+			}
+			return nil
 		}
 	}
 	return fmt.Errorf("未找到 ID 为 '%s' 的供应商", provider.ID)
@@ -650,6 +672,60 @@ func (s *GeminiService) saveProviders() error {
 		return err
 	}
 	return os.Rename(tmpPath, path)
+}
+
+type providerIdentityRename struct {
+	Kind       string
+	ProviderID string
+	OldName    string
+	NewName    string
+}
+
+func (s *GeminiService) saveProvidersWithIdentitySync(renames []providerIdentityRename) error {
+	path := getGeminiProvidersPath()
+	originalFileData, originalFileExists, err := snapshotProviderFile(path)
+	if err != nil {
+		return err
+	}
+
+	var renameTx *sql.Tx
+	if len(renames) > 0 {
+		db, err := xdb.DB("default")
+		if err != nil {
+			return fmt.Errorf("获取数据库连接失败: %w", err)
+		}
+		tx, beginErr := db.Begin()
+		if beginErr != nil {
+			return beginErr
+		}
+		renameTx = tx
+		for _, rename := range renames {
+			if err := syncProviderIdentityRenameTx(renameTx, rename.Kind, rename.ProviderID, rename.OldName, rename.NewName); err != nil {
+				_ = renameTx.Rollback()
+				return fmt.Errorf("同步供应商改名关联数据失败 (kind=%s,id=%s,%q->%q): %w",
+					rename.Kind, rename.ProviderID, rename.OldName, rename.NewName, err)
+			}
+		}
+	}
+
+	if err := s.saveProviders(); err != nil {
+		if renameTx != nil {
+			_ = renameTx.Rollback()
+		}
+		return err
+	}
+
+	if renameTx != nil {
+		if err := renameTx.Commit(); err != nil {
+			restoreErr := restoreProviderFile(path, originalFileExists, originalFileData)
+			if restoreErr != nil {
+				return fmt.Errorf("提交供应商改名事务失败: %w；且回滚配置文件失败: %v", err, restoreErr)
+			}
+			return fmt.Errorf("提交供应商改名事务失败: %w", err)
+		}
+	}
+
+	return nil
 }
 
 // CreateProviderFromPreset 从预设创建供应商

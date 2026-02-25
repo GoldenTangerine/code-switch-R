@@ -1,6 +1,7 @@
 package services
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -8,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"github.com/daodao97/xgo/xdb"
 )
 
 // AvailabilityConfig 可用性监控高级配置
@@ -89,6 +92,31 @@ type ProviderService struct {
 
 	pricingCacheMu sync.RWMutex
 	pricingCache   map[string]providerModelPricingCacheEntry
+}
+
+func snapshotProviderFile(path string) ([]byte, bool, error) {
+	data, err := os.ReadFile(path)
+	if err == nil {
+		return data, true, nil
+	}
+	if os.IsNotExist(err) {
+		return nil, false, nil
+	}
+	return nil, false, err
+}
+
+func restoreProviderFile(path string, existed bool, data []byte) error {
+	if !existed {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		return nil
+	}
+	restoreTmp := path + ".restore.tmp"
+	if err := os.WriteFile(restoreTmp, data, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(restoreTmp, path)
 }
 
 func NewProviderService() *ProviderService {
@@ -174,6 +202,10 @@ func (ps *ProviderService) saveProvidersLocked(kind string, providers []Provider
 	if err != nil {
 		return err
 	}
+	originalFileData, originalFileExists, err := snapshotProviderFile(path)
+	if err != nil {
+		return err
+	}
 
 	// 加载现有配置，用于检查 name 是否被修改
 	// 使用原样读取，避免触发迁移导致死锁
@@ -185,15 +217,24 @@ func (ps *ProviderService) saveProvidersLocked(kind string, providers []Provider
 	for _, p := range existingProviders {
 		nameByID[p.ID] = p.Name
 	}
+	type providerRename struct {
+		ProviderID string
+		OldName    string
+		NewName    string
+	}
+	renames := make([]providerRename, 0)
 
 	// 验证每个 provider 的配置，并清除旧字段
 	validationErrors := make([]string, 0)
 	for i := range providers {
 		p := &providers[i]
 
-		// 规则：name 不可修改（黑名单/统计以 name 为 key，改名会导致数据丢失）
-		if oldName, ok := nameByID[p.ID]; ok && oldName != p.Name {
-			return fmt.Errorf("provider id %d 的 name 不可修改（会导致黑名单和统计数据丢失）", p.ID)
+		if oldName, ok := nameByID[p.ID]; ok && strings.TrimSpace(oldName) != strings.TrimSpace(p.Name) {
+			renames = append(renames, providerRename{
+				ProviderID: fmt.Sprintf("%d", p.ID),
+				OldName:    oldName,
+				NewName:    p.Name,
+			})
 		}
 
 		// 验证模型配置
@@ -217,11 +258,50 @@ func (ps *ProviderService) saveProvidersLocked(kind string, providers []Provider
 		return err
 	}
 
+	var renameTx *sql.Tx
+	if len(renames) > 0 {
+		db, err := xdb.DB("default")
+		if err != nil {
+			return fmt.Errorf("获取数据库连接失败: %w", err)
+		}
+		tx, beginErr := db.Begin()
+		if beginErr != nil {
+			return beginErr
+		}
+		renameTx = tx
+		for _, rename := range renames {
+			if err := syncProviderIdentityRenameTx(renameTx, kind, rename.ProviderID, rename.OldName, rename.NewName); err != nil {
+				_ = renameTx.Rollback()
+				return fmt.Errorf("同步供应商改名关联数据失败 (kind=%s,id=%s,%q->%q): %w",
+					kind, rename.ProviderID, rename.OldName, rename.NewName, err)
+			}
+		}
+	}
+
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		if renameTx != nil {
+			_ = renameTx.Rollback()
+		}
 		return err
 	}
-	return os.Rename(tmp, path)
+	if err := os.Rename(tmp, path); err != nil {
+		if renameTx != nil {
+			_ = renameTx.Rollback()
+		}
+		return err
+	}
+	if renameTx != nil {
+		if err := renameTx.Commit(); err != nil {
+			restoreErr := restoreProviderFile(path, originalFileExists, originalFileData)
+			if restoreErr != nil {
+				return fmt.Errorf("提交供应商改名事务失败: %w；且回滚配置文件失败: %v", err, restoreErr)
+			}
+			return fmt.Errorf("提交供应商改名事务失败: %w", err)
+		}
+	}
+
+	return nil
 }
 
 func (ps *ProviderService) LoadProviders(kind string) ([]Provider, error) {

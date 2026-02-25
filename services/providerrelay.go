@@ -28,6 +28,7 @@ import (
 // @author sm
 type LastUsedProvider struct {
 	Platform     string `json:"platform"`      // claude/codex/gemini
+	ProviderID   string `json:"provider_id"`   // 供应商 ID（字符串，兼容 int64/string）
 	ProviderName string `json:"provider_name"` // 供应商名称
 	UpdatedAt    int64  `json:"updated_at"`    // 更新时间（毫秒）
 }
@@ -44,7 +45,7 @@ type ProviderRelayService struct {
 	lastUsed            map[string]*LastUsedProvider // 各平台最后使用的供应商
 	lastUsedMu          sync.RWMutex                 // 保护 lastUsed 的锁
 	rrMu                sync.Mutex                   // 轮询状态锁
-	rrLastStart         map[string]string            // 轮询状态：key="platform:level" → value=上次起始 Provider Name
+	rrLastStart         map[string]string            // 轮询状态：key="platform:level" → value=上次起始 Provider ID（回退为 Name）
 }
 
 // errClientAbort 表示客户端中断连接，不应计入 provider 失败次数
@@ -180,13 +181,22 @@ func NewProviderRelayService(providerService *ProviderService, geminiService *Ge
 	}
 }
 
+func providerRefFromProvider(provider Provider) string {
+	return providerRefFromNumericID(provider.ID, provider.Name)
+}
+
+func providerRefFromGeminiProvider(provider GeminiProvider) string {
+	return providerRefFromStringID(provider.ID, provider.Name)
+}
+
 // setLastUsedProvider 记录最后使用的供应商
 // @author sm
-func (prs *ProviderRelayService) setLastUsedProvider(platform, providerName string) {
+func (prs *ProviderRelayService) setLastUsedProvider(platform, providerID, providerName string) {
 	prs.lastUsedMu.Lock()
 	defer prs.lastUsedMu.Unlock()
 	prs.lastUsed[platform] = &LastUsedProvider{
 		Platform:     platform,
+		ProviderID:   providerID,
 		ProviderName: providerName,
 		UpdatedAt:    time.Now().UnixMilli(),
 	}
@@ -232,7 +242,7 @@ func (prs *ProviderRelayService) isRoundRobinEnabled() bool {
 }
 
 // roundRobinOrder 对同 Level 的 providers 进行轮询排序
-// 算法：基于 name 追踪，将上次起始 provider 移到末尾，实现轮询效果
+// 算法：基于 provider ID（回退 name）追踪，将上次起始 provider 移到末尾，实现轮询效果
 // 参数：
 //   - platform: 平台标识（claude/codex/gemini/custom:xxx）
 //   - level: 当前 Level
@@ -252,8 +262,8 @@ func (prs *ProviderRelayService) roundRobinOrder(platform string, level int, pro
 
 	lastStart := prs.rrLastStart[key]
 
-	// 记录本次起始 provider 名称（更新状态）
-	prs.rrLastStart[key] = providers[0].Name
+	// 记录本次起始 provider 标识（更新状态）
+	prs.rrLastStart[key] = providerRefFromProvider(providers[0])
 
 	// 如果没有历史记录，返回原顺序
 	if lastStart == "" {
@@ -263,7 +273,7 @@ func (prs *ProviderRelayService) roundRobinOrder(platform string, level int, pro
 	// 查找上次起始 provider 在当前列表中的位置
 	lastIdx := -1
 	for i, p := range providers {
-		if p.Name == lastStart {
+		if providerRefFromProvider(p) == lastStart {
 			lastIdx = i
 			break
 		}
@@ -281,8 +291,8 @@ func (prs *ProviderRelayService) roundRobinOrder(platform string, level int, pro
 		result[i] = providers[idx]
 	}
 
-	// 更新本次起始 provider 名称
-	prs.rrLastStart[key] = result[0].Name
+	// 更新本次起始 provider 标识
+	prs.rrLastStart[key] = providerRefFromProvider(result[0])
 
 	return result
 }
@@ -301,8 +311,8 @@ func (prs *ProviderRelayService) roundRobinOrderGemini(level int, providers []Ge
 
 	lastStart := prs.rrLastStart[key]
 
-	// 记录本次起始 provider 名称
-	prs.rrLastStart[key] = providers[0].Name
+	// 记录本次起始 provider 标识
+	prs.rrLastStart[key] = providerRefFromGeminiProvider(providers[0])
 
 	// 如果没有历史记录，返回原顺序
 	if lastStart == "" {
@@ -312,7 +322,7 @@ func (prs *ProviderRelayService) roundRobinOrderGemini(level int, providers []Ge
 	// 查找上次起始 provider 在当前列表中的位置
 	lastIdx := -1
 	for i, p := range providers {
-		if p.Name == lastStart {
+		if providerRefFromGeminiProvider(p) == lastStart {
 			lastIdx = i
 			break
 		}
@@ -330,8 +340,8 @@ func (prs *ProviderRelayService) roundRobinOrderGemini(level int, providers []Ge
 		result[i] = providers[idx]
 	}
 
-	// 更新本次起始 provider 名称
-	prs.rrLastStart[key] = result[0].Name
+	// 更新本次起始 provider 标识
+	prs.rrLastStart[key] = providerRefFromGeminiProvider(result[0])
 
 	return result
 }
@@ -497,7 +507,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 			}
 
 			// 黑名单检查：跳过已拉黑的 provider
-			if isBlacklisted, until := prs.blacklistService.IsBlacklisted(kind, provider.Name); isBlacklisted {
+			if isBlacklisted, until := prs.blacklistService.IsBlacklistedByID(kind, providerRefFromProvider(provider), provider.Name); isBlacklisted {
 				fmt.Printf("⛔ Provider %s 已拉黑，过期时间: %v\n", provider.Name, until.Format("15:04:05"))
 				skippedCount++
 				continue
@@ -572,7 +582,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 
 				for _, provider := range providersInLevel {
 					// 检查是否已被拉黑（跳过已拉黑的 provider）
-					if blacklisted, until := prs.blacklistService.IsBlacklisted(kind, provider.Name); blacklisted {
+					if blacklisted, until := prs.blacklistService.IsBlacklistedByID(kind, providerRefFromProvider(provider), provider.Name); blacklisted {
 						fmt.Printf("[INFO] ⏭️ 跳过已拉黑的 Provider: %s (解禁时间: %v)\n", provider.Name, until)
 						continue
 					}
@@ -598,7 +608,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 						totalAttempts++
 
 						// 再次检查是否已被拉黑（重试过程中可能被拉黑）
-						if blacklisted, _ := prs.blacklistService.IsBlacklisted(kind, provider.Name); blacklisted {
+						if blacklisted, _ := prs.blacklistService.IsBlacklistedByID(kind, providerRefFromProvider(provider), provider.Name); blacklisted {
 							fmt.Printf("[INFO] 🚫 Provider %s 已被拉黑，切换到下一个\n", provider.Name)
 							break
 						}
@@ -613,10 +623,10 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 						if ok {
 							fmt.Printf("[INFO] ✓ 成功: %s | 重试 %d 次 | 耗时: %.2fs\n",
 								provider.Name, retryCount+1, duration.Seconds())
-							if err := prs.blacklistService.RecordSuccess(kind, provider.Name); err != nil {
+							if err := prs.blacklistService.RecordSuccessByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
 								fmt.Printf("[WARN] 清零失败计数失败: %v\n", err)
 							}
-							prs.setLastUsedProvider(kind, provider.Name)
+							prs.setLastUsedProvider(kind, providerRefFromProvider(provider), provider.Name)
 							return
 						}
 
@@ -638,12 +648,12 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 						}
 
 						// 记录失败次数（可能触发拉黑）
-						if err := prs.blacklistService.RecordFailure(kind, provider.Name); err != nil {
+						if err := prs.blacklistService.RecordFailureByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
 							fmt.Printf("[ERROR] 记录失败到黑名单失败: %v\n", err)
 						}
 
 						// 检查是否刚被拉黑
-						if blacklisted, _ := prs.blacklistService.IsBlacklisted(kind, provider.Name); blacklisted {
+						if blacklisted, _ := prs.blacklistService.IsBlacklistedByID(kind, providerRefFromProvider(provider), provider.Name); blacklisted {
 							fmt.Printf("[INFO] 🚫 Provider %s 达到失败阈值，已被拉黑，切换到下一个\n", provider.Name)
 							break
 						}
@@ -735,12 +745,12 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 					fmt.Printf("[INFO]   ✓ Level %d 成功: %s | 耗时: %.2fs\n", level, provider.Name, duration.Seconds())
 
 					// 成功：清零连续失败计数
-					if err := prs.blacklistService.RecordSuccess(kind, provider.Name); err != nil {
+					if err := prs.blacklistService.RecordSuccessByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
 						fmt.Printf("[WARN] 清零失败计数失败: %v\n", err)
 					}
 
 					// 记录最后使用的供应商
-					prs.setLastUsedProvider(kind, provider.Name)
+					prs.setLastUsedProvider(kind, providerRefFromProvider(provider), provider.Name)
 
 					return // 成功，立即返回
 				}
@@ -760,31 +770,38 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 				// 客户端中断不计入失败次数
 				if errors.Is(err, errClientAbort) {
 					fmt.Printf("[INFO] 客户端中断，跳过失败计数: %s\n", provider.Name)
-				} else if err := prs.blacklistService.RecordFailure(kind, provider.Name); err != nil {
+				} else if err := prs.blacklistService.RecordFailureByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
 					fmt.Printf("[ERROR] 记录失败到黑名单失败: %v\n", err)
 				}
 
 				// 发送切换通知：检查是否有下一个可用的 provider
 				if prs.notificationService != nil {
-					nextProvider := ""
+					nextProviderName := ""
+					nextProviderID := ""
 					// 先查找同级别的下一个
 					if i+1 < len(providersInLevel) {
-						nextProvider = providersInLevel[i+1].Name
+						nextProvider := providersInLevel[i+1]
+						nextProviderName = nextProvider.Name
+						nextProviderID = providerRefFromProvider(nextProvider)
 					} else {
 						// 查找下一个 level 的第一个 provider
 						for _, nextLevel := range levels {
 							if nextLevel > level && len(levelGroups[nextLevel]) > 0 {
-								nextProvider = levelGroups[nextLevel][0].Name
+								nextProvider := levelGroups[nextLevel][0]
+								nextProviderName = nextProvider.Name
+								nextProviderID = providerRefFromProvider(nextProvider)
 								break
 							}
 						}
 					}
-					if nextProvider != "" {
+					if nextProviderName != "" {
 						prs.notificationService.NotifyProviderSwitch(SwitchNotification{
-							FromProvider: provider.Name,
-							ToProvider:   nextProvider,
-							Reason:       errorMsg,
-							Platform:     kind,
+							FromProviderID: providerRefFromProvider(provider),
+							FromProvider:   provider.Name,
+							ToProviderID:   nextProviderID,
+							ToProvider:     nextProviderName,
+							Reason:         errorMsg,
+							Platform:       kind,
 						})
 					}
 				}
@@ -854,6 +871,7 @@ func (prs *ProviderRelayService) forwardRequest(
 
 	requestLog := &ReqeustLog{
 		Platform:         kind,
+		ProviderID:       providerRefFromProvider(provider),
 		Provider:         provider.Name,
 		Model:            model,
 		RequestedModel:   strings.TrimSpace(requestedModel),
@@ -904,21 +922,22 @@ func (prs *ProviderRelayService) forwardRequest(
 		defer cancel()
 
 		err := GlobalDBQueueLogs.ExecBatchCtx(ctx, `
-			INSERT INTO request_log (
-				platform, model, requested_model, response_model, provider, http_code,
-				input_tokens, output_tokens, cache_create_tokens, ephemeral_5m_tokens, ephemeral_1h_tokens, cache_read_tokens,
-				reasoning_tokens, is_stream, duration_sec, total_cost, price_source,
-				input_cost, output_cost, reasoning_cost, cache_create_cost, cache_read_cost,
-				ephemeral_5m_cost, ephemeral_1h_cost, has_pricing, matched_pricing_model,
-				provider_pricing_available, provider_quota_type, provider_input_usd_per_m, provider_output_usd_per_m,
-				provider_per_call_unified, provider_per_call_input, provider_per_call_output,
-				provider_per_call_unified_set, provider_per_call_input_set, provider_per_call_output_set
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`,
+				INSERT INTO request_log (
+					platform, model, requested_model, response_model, provider_id, provider, http_code,
+					input_tokens, output_tokens, cache_create_tokens, ephemeral_5m_tokens, ephemeral_1h_tokens, cache_read_tokens,
+					reasoning_tokens, is_stream, duration_sec, total_cost, price_source,
+					input_cost, output_cost, reasoning_cost, cache_create_cost, cache_read_cost,
+					ephemeral_5m_cost, ephemeral_1h_cost, has_pricing, matched_pricing_model,
+					provider_pricing_available, provider_quota_type, provider_input_usd_per_m, provider_output_usd_per_m,
+					provider_per_call_unified, provider_per_call_input, provider_per_call_output,
+					provider_per_call_unified_set, provider_per_call_input_set, provider_per_call_output_set
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			`,
 			requestLog.Platform,
 			requestLog.Model,
 			requestLog.RequestedModel,
 			requestLog.ResponseModel,
+			requestLog.ProviderID,
 			requestLog.Provider,
 			requestLog.HttpCode,
 			requestLog.InputTokens,
@@ -1138,6 +1157,7 @@ func ensureRequestLogTableWithDB(db *sql.DB) error {
 		model TEXT,
 		requested_model TEXT DEFAULT '',
 		response_model TEXT DEFAULT '',
+		provider_id TEXT DEFAULT '',
 		provider TEXT,
 		http_code INTEGER,
 		input_tokens INTEGER,
@@ -1196,6 +1216,9 @@ func ensureRequestLogTableWithDB(db *sql.DB) error {
 		return err
 	}
 	if err := ensureRequestLogColumn(db, "response_model", "TEXT DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "provider_id", "TEXT DEFAULT ''"); err != nil {
 		return err
 	}
 	if err := ensureRequestLogColumn(db, "input_cost", "REAL DEFAULT 0"); err != nil {
@@ -1268,6 +1291,9 @@ func ensureRequestLogTableWithDB(db *sql.DB) error {
 		return err
 	}
 	if err := ensureRequestLogIndex(db, "idx_request_log_platform_provider_created_at", "platform, provider, created_at"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogIndex(db, "idx_request_log_platform_provider_id_created_at", "platform, provider_id, created_at"); err != nil {
 		return err
 	}
 
@@ -1547,6 +1573,7 @@ type ReqeustLog struct {
 	Model                     string  `json:"model"`
 	RequestedModel            string  `json:"requested_model,omitempty"`
 	ResponseModel             string  `json:"response_model,omitempty"`
+	ProviderID                string  `json:"provider_id,omitempty"`
 	Provider                  string  `json:"provider"` // provider name
 	PriceSource               string  `json:"price_source,omitempty"`
 	HttpCode                  int     `json:"http_code"`
@@ -1966,7 +1993,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 				continue
 			}
 			// 检查黑名单
-			if isBlacklisted, until := prs.blacklistService.IsBlacklisted("gemini", p.Name); isBlacklisted {
+			if isBlacklisted, until := prs.blacklistService.IsBlacklistedByID("gemini", providerRefFromGeminiProvider(p), p.Name); isBlacklisted {
 				fmt.Printf("[Gemini] ⛔ Provider %s 已拉黑，过期时间: %v\n", p.Name, until.Format("15:04:05"))
 				continue
 			}
@@ -2044,18 +2071,18 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			_ = GlobalDBQueueLogs.ExecBatchCtx(ctx, `
-				INSERT INTO request_log (
-					platform, model, requested_model, response_model, provider, http_code,
-					input_tokens, output_tokens, cache_create_tokens, ephemeral_5m_tokens, ephemeral_1h_tokens, cache_read_tokens,
-					reasoning_tokens, is_stream, duration_sec, total_cost, price_source,
-					input_cost, output_cost, reasoning_cost, cache_create_cost, cache_read_cost,
-					ephemeral_5m_cost, ephemeral_1h_cost, has_pricing, matched_pricing_model,
-					provider_pricing_available, provider_quota_type, provider_input_usd_per_m, provider_output_usd_per_m,
-					provider_per_call_unified, provider_per_call_input, provider_per_call_output,
-					provider_per_call_unified_set, provider_per_call_input_set, provider_per_call_output_set
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-			`,
-				requestLog.Platform, requestLog.Model, requestLog.RequestedModel, requestLog.ResponseModel, requestLog.Provider, requestLog.HttpCode,
+					INSERT INTO request_log (
+						platform, model, requested_model, response_model, provider_id, provider, http_code,
+						input_tokens, output_tokens, cache_create_tokens, ephemeral_5m_tokens, ephemeral_1h_tokens, cache_read_tokens,
+						reasoning_tokens, is_stream, duration_sec, total_cost, price_source,
+						input_cost, output_cost, reasoning_cost, cache_create_cost, cache_read_cost,
+						ephemeral_5m_cost, ephemeral_1h_cost, has_pricing, matched_pricing_model,
+						provider_pricing_available, provider_quota_type, provider_input_usd_per_m, provider_output_usd_per_m,
+						provider_per_call_unified, provider_per_call_input, provider_per_call_output,
+						provider_per_call_unified_set, provider_per_call_input_set, provider_per_call_output_set
+					) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				`,
+				requestLog.Platform, requestLog.Model, requestLog.RequestedModel, requestLog.ResponseModel, requestLog.ProviderID, requestLog.Provider, requestLog.HttpCode,
 				requestLog.InputTokens, requestLog.OutputTokens, requestLog.CacheCreateTokens, requestLog.Ephemeral5mTokens, requestLog.Ephemeral1hTokens,
 				requestLog.CacheReadTokens, requestLog.ReasoningTokens,
 				boolToInt(requestLog.IsStream), requestLog.DurationSec, requestLog.TotalCost, requestLog.PriceSource,
@@ -2092,12 +2119,13 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 
 				for _, provider := range providersInLevel {
 					// 检查是否已被拉黑（跳过已拉黑的 provider）
-					if blacklisted, until := prs.blacklistService.IsBlacklisted("gemini", provider.Name); blacklisted {
+					if blacklisted, until := prs.blacklistService.IsBlacklistedByID("gemini", providerRefFromGeminiProvider(provider), provider.Name); blacklisted {
 						fmt.Printf("[Gemini] ⏭️ 跳过已拉黑的 Provider: %s (解禁时间: %v)\n", provider.Name, until)
 						continue
 					}
 
 					// 预填日志
+					requestLog.ProviderID = providerRefFromGeminiProvider(provider)
 					requestLog.Provider = provider.Name
 					requestLog.Model = provider.Model
 					requestLog.ProviderAPIURL = provider.BaseURL
@@ -2108,7 +2136,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 						totalAttempts++
 
 						// 再次检查是否已被拉黑（重试过程中可能被拉黑）
-						if blacklisted, _ := prs.blacklistService.IsBlacklisted("gemini", provider.Name); blacklisted {
+						if blacklisted, _ := prs.blacklistService.IsBlacklistedByID("gemini", providerRefFromGeminiProvider(provider), provider.Name); blacklisted {
 							fmt.Printf("[Gemini] 🚫 Provider %s 已被拉黑，切换到下一个\n", provider.Name)
 							break
 						}
@@ -2119,8 +2147,8 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 						ok, err, responseWritten := prs.forwardGeminiRequest(c, &provider, endpoint, bodyBytes, isStream, requestLog)
 						if ok {
 							fmt.Printf("[Gemini] ✓ 成功: %s | 重试 %d 次\n", provider.Name, retryCount+1)
-							_ = prs.blacklistService.RecordSuccess("gemini", provider.Name)
-							prs.setLastUsedProvider("gemini", provider.Name)
+							_ = prs.blacklistService.RecordSuccessByID("gemini", providerRefFromGeminiProvider(provider), provider.Name)
+							prs.setLastUsedProvider("gemini", providerRefFromGeminiProvider(provider), provider.Name)
 							return
 						}
 
@@ -2131,7 +2159,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 						}
 						if responseWritten {
 							fmt.Printf("[Gemini] ⚠️ 响应已部分写入，无法重试: %s | 错误: %s\n", provider.Name, errorMsg)
-							_ = prs.blacklistService.RecordFailure("gemini", provider.Name)
+							_ = prs.blacklistService.RecordFailureByID("gemini", providerRefFromGeminiProvider(provider), provider.Name)
 							return
 						}
 
@@ -2143,10 +2171,10 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 							provider.Name, retryCount+1, maxRetryPerProvider, errorMsg)
 
 						// 记录失败次数（可能触发拉黑）
-						_ = prs.blacklistService.RecordFailure("gemini", provider.Name)
+						_ = prs.blacklistService.RecordFailureByID("gemini", providerRefFromGeminiProvider(provider), provider.Name)
 
 						// 检查是否刚被拉黑
-						if blacklisted, _ := prs.blacklistService.IsBlacklisted("gemini", provider.Name); blacklisted {
+						if blacklisted, _ := prs.blacklistService.IsBlacklistedByID("gemini", providerRefFromGeminiProvider(provider), provider.Name); blacklisted {
 							fmt.Printf("[Gemini] 🚫 Provider %s 达到失败阈值，已被拉黑，切换到下一个\n", provider.Name)
 							break
 						}
@@ -2209,6 +2237,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 				fmt.Printf("[Gemini]   [%d/%d] Provider: %s\n", idx+1, len(providersInLevel), provider.Name)
 
 				// 预填日志，失败也能落库
+				requestLog.ProviderID = providerRefFromGeminiProvider(provider)
 				requestLog.Provider = provider.Name
 				requestLog.Model = provider.Model
 				requestLog.ProviderAPIURL = provider.BaseURL
@@ -2216,9 +2245,9 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 
 				ok, err, responseWritten := prs.forwardGeminiRequest(c, &provider, endpoint, bodyBytes, isStream, requestLog)
 				if ok {
-					_ = prs.blacklistService.RecordSuccess("gemini", provider.Name)
+					_ = prs.blacklistService.RecordSuccessByID("gemini", providerRefFromGeminiProvider(provider), provider.Name)
 					// 记录最后使用的供应商
-					prs.setLastUsedProvider("gemini", provider.Name)
+					prs.setLastUsedProvider("gemini", providerRefFromGeminiProvider(provider), provider.Name)
 					fmt.Printf("[Gemini] ✓ 请求完成 | Provider: %s | 总耗时: %.2fs\n", provider.Name, time.Since(start).Seconds())
 					return // 成功，退出
 				}
@@ -2230,14 +2259,14 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 				}
 				if responseWritten {
 					fmt.Printf("[Gemini] ⚠️ 响应已部分写入，无法降级: %s | 错误: %s\n", provider.Name, errorMsg)
-					_ = prs.blacklistService.RecordFailure("gemini", provider.Name)
+					_ = prs.blacklistService.RecordFailureByID("gemini", providerRefFromGeminiProvider(provider), provider.Name)
 					return
 				}
 
 				// 失败，记录并继续
 				lastError = err
 				fmt.Printf("[Gemini] ✗ 失败: %s | 错误: %s\n", provider.Name, errorMsg)
-				_ = prs.blacklistService.RecordFailure("gemini", provider.Name)
+				_ = prs.blacklistService.RecordFailureByID("gemini", providerRefFromGeminiProvider(provider), provider.Name)
 			}
 
 			fmt.Printf("[Gemini] Level %d 的所有 %d 个 provider 均失败，尝试下一 Level\n", level, len(providersInLevel))
@@ -2307,6 +2336,7 @@ func (prs *ProviderRelayService) forwardGeminiRequest(
 	targetURL := strings.TrimSuffix(provider.BaseURL, "/") + endpoint
 
 	// 预先填充日志，保证失败也能记录 provider 和模型
+	requestLog.ProviderID = providerRefFromGeminiProvider(*provider)
 	requestLog.Provider = provider.Name
 	// 【修复】每次尝试开始前重置 HttpCode，避免重试时沿用上一次的状态码
 	requestLog.HttpCode = 0
@@ -2479,7 +2509,7 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 			}
 
 			// 黑名单检查
-			if isBlacklisted, until := prs.blacklistService.IsBlacklisted(kind, provider.Name); isBlacklisted {
+			if isBlacklisted, until := prs.blacklistService.IsBlacklistedByID(kind, providerRefFromProvider(provider), provider.Name); isBlacklisted {
 				fmt.Printf("[CustomCLI] ⛔ Provider %s 已拉黑，过期时间: %v\n", provider.Name, until.Format("15:04:05"))
 				skippedCount++
 				continue
@@ -2551,7 +2581,7 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 
 				for _, provider := range providersInLevel {
 					// 检查是否已被拉黑（跳过已拉黑的 provider）
-					if blacklisted, until := prs.blacklistService.IsBlacklisted(kind, provider.Name); blacklisted {
+					if blacklisted, until := prs.blacklistService.IsBlacklistedByID(kind, providerRefFromProvider(provider), provider.Name); blacklisted {
 						fmt.Printf("[CustomCLI][INFO] ⏭️ 跳过已拉黑的 Provider: %s (解禁时间: %v)\n", provider.Name, until)
 						continue
 					}
@@ -2577,7 +2607,7 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 						totalAttempts++
 
 						// 再次检查是否已被拉黑（重试过程中可能被拉黑）
-						if blacklisted, _ := prs.blacklistService.IsBlacklisted(kind, provider.Name); blacklisted {
+						if blacklisted, _ := prs.blacklistService.IsBlacklistedByID(kind, providerRefFromProvider(provider), provider.Name); blacklisted {
 							fmt.Printf("[CustomCLI][INFO] 🚫 Provider %s 已被拉黑，切换到下一个\n", provider.Name)
 							break
 						}
@@ -2592,10 +2622,10 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 						if ok {
 							fmt.Printf("[CustomCLI][INFO] ✓ 成功: %s | 重试 %d 次 | 耗时: %.2fs\n",
 								provider.Name, retryCount+1, duration.Seconds())
-							if err := prs.blacklistService.RecordSuccess(kind, provider.Name); err != nil {
+							if err := prs.blacklistService.RecordSuccessByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
 								fmt.Printf("[CustomCLI][WARN] 清零失败计数失败: %v\n", err)
 							}
-							prs.setLastUsedProvider(kind, provider.Name)
+							prs.setLastUsedProvider(kind, providerRefFromProvider(provider), provider.Name)
 							return
 						}
 
@@ -2617,12 +2647,12 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 						}
 
 						// 记录失败次数（可能触发拉黑）
-						if err := prs.blacklistService.RecordFailure(kind, provider.Name); err != nil {
+						if err := prs.blacklistService.RecordFailureByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
 							fmt.Printf("[CustomCLI][ERROR] 记录失败到黑名单失败: %v\n", err)
 						}
 
 						// 检查是否刚被拉黑
-						if blacklisted, _ := prs.blacklistService.IsBlacklisted(kind, provider.Name); blacklisted {
+						if blacklisted, _ := prs.blacklistService.IsBlacklistedByID(kind, providerRefFromProvider(provider), provider.Name); blacklisted {
 							fmt.Printf("[CustomCLI][INFO] 🚫 Provider %s 达到失败阈值，已被拉黑，切换到下一个\n", provider.Name)
 							break
 						}
@@ -2706,10 +2736,10 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 
 				if ok {
 					fmt.Printf("[CustomCLI][INFO]   ✓ Level %d 成功: %s | 耗时: %.2fs\n", level, provider.Name, duration.Seconds())
-					if err := prs.blacklistService.RecordSuccess(kind, provider.Name); err != nil {
+					if err := prs.blacklistService.RecordSuccessByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
 						fmt.Printf("[CustomCLI][WARN] 清零失败计数失败: %v\n", err)
 					}
-					prs.setLastUsedProvider(kind, provider.Name)
+					prs.setLastUsedProvider(kind, providerRefFromProvider(provider), provider.Name)
 					return
 				}
 
@@ -2726,29 +2756,36 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 
 				if errors.Is(err, errClientAbort) {
 					fmt.Printf("[CustomCLI][INFO] 客户端中断，跳过失败计数: %s\n", provider.Name)
-				} else if err := prs.blacklistService.RecordFailure(kind, provider.Name); err != nil {
+				} else if err := prs.blacklistService.RecordFailureByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
 					fmt.Printf("[CustomCLI][ERROR] 记录失败到黑名单失败: %v\n", err)
 				}
 
 				// 发送切换通知
 				if prs.notificationService != nil {
-					nextProvider := ""
+					nextProviderName := ""
+					nextProviderID := ""
 					if i+1 < len(providersInLevel) {
-						nextProvider = providersInLevel[i+1].Name
+						nextProvider := providersInLevel[i+1]
+						nextProviderName = nextProvider.Name
+						nextProviderID = providerRefFromProvider(nextProvider)
 					} else {
 						for _, nextLevel := range levels {
 							if nextLevel > level && len(levelGroups[nextLevel]) > 0 {
-								nextProvider = levelGroups[nextLevel][0].Name
+								nextProvider := levelGroups[nextLevel][0]
+								nextProviderName = nextProvider.Name
+								nextProviderID = providerRefFromProvider(nextProvider)
 								break
 							}
 						}
 					}
-					if nextProvider != "" {
+					if nextProviderName != "" {
 						prs.notificationService.NotifyProviderSwitch(SwitchNotification{
-							FromProvider: provider.Name,
-							ToProvider:   nextProvider,
-							Reason:       errorMsg,
-							Platform:     kind,
+							FromProviderID: providerRefFromProvider(provider),
+							FromProvider:   provider.Name,
+							ToProviderID:   nextProviderID,
+							ToProvider:     nextProviderName,
+							Reason:         errorMsg,
+							Platform:       kind,
 						})
 					}
 				}
@@ -2802,7 +2839,7 @@ func (prs *ProviderRelayService) forwardModelsRequest(
 		}
 
 		// 黑名单检查：跳过已拉黑的 provider
-		if isBlacklisted, until := prs.blacklistService.IsBlacklisted(kind, provider.Name); isBlacklisted {
+		if isBlacklisted, until := prs.blacklistService.IsBlacklistedByID(kind, providerRefFromProvider(provider), provider.Name); isBlacklisted {
 			fmt.Printf("[%s] ⛔ Provider %s 已拉黑，过期时间: %v\n", logPrefix, provider.Name, until.Format("15:04:05"))
 			continue
 		}

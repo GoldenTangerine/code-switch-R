@@ -3,6 +3,7 @@ import { Call } from '@wailsio/runtime'
 // 黑名单状态接口
 export interface BlacklistStatus {
   platform: string
+  providerId?: string
   providerName: string
   failureCount: number
   blacklistedAt?: string  // ISO 时间字符串

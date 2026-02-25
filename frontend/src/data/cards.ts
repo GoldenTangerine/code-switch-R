@@ -1,5 +1,6 @@
 export type AutomationCard = {
   id: number
+  providerRef?: string
   name: string
   apiUrl: string
   apiKey: string
