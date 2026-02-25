@@ -1197,6 +1197,13 @@ func ensureRequestLogTableWithDB(db *sql.DB) error {
 		return err
 	}
 
+	// 兼容旧库：历史版本可能残留了 request_log_stats_* 触发器，
+	// 但统计表被删除/未创建，后续 ALTER TABLE request_log 会报
+	// "error in trigger ... no such table"。先移除，最后统一重建。
+	if err := dropRequestLogStatsInsertTriggersWithDB(db); err != nil {
+		return err
+	}
+
 	if err := ensureRequestLogColumn(db, "created_at", "DATETIME DEFAULT CURRENT_TIMESTAMP"); err != nil {
 		return err
 	}

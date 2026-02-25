@@ -1,3 +1,14 @@
+# Code Switch v2.6.76
+
+## 修复
+- **老库升级启动失败**：修复历史数据库残留 `request_log_stats_hourly_ai` / `request_log_stats_daily_ai` 触发器、但统计表缺失时，启动阶段执行 `request_log` 补列迁移触发 `no such table` 并导致应用退出的问题。升级流程现改为先清理旧统计插入触发器，再执行补列与统计存储重建，保证旧库可平滑升级。
+
+## 技术改进
+- 新增 `dropRequestLogStatsInsertTriggersWithDB` 兼容函数，统一处理历史版本残留统计触发器。
+- 新增回归测试 `TestEnsureRequestLogTableWithDB_RepairsDanglingStatsTrigger`，覆盖“悬挂触发器 + 缺失统计表”的历史脏库场景，防止后续回归。
+
+---
+
 # Code Switch v2.6.75
 
 ## 新功能

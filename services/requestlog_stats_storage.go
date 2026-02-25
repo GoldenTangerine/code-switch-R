@@ -354,6 +354,25 @@ END;`, requestLogStatsDailyTable)
 	return nil
 }
 
+func dropRequestLogStatsInsertTriggersWithDB(db *sql.DB) error {
+	if db == nil {
+		return fmt.Errorf("nil db")
+	}
+
+	triggerNames := []string{
+		"request_log_stats_hourly_ai",
+		"request_log_stats_daily_ai",
+	}
+	for _, name := range triggerNames {
+		escaped := strings.ReplaceAll(name, `"`, `""`)
+		if _, err := db.Exec(fmt.Sprintf(`DROP TRIGGER IF EXISTS "%s"`, escaped)); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 func cleanupRequestLogStatsTriggersWithDB(db *sql.DB) error {
 	if db == nil {
 		return fmt.Errorf("nil db")
