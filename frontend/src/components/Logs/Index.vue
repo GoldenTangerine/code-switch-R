@@ -207,6 +207,38 @@
       </article>
     </section>
 
+        <section class="logs-model-share">
+          <div class="logs-model-share__title">{{ t('components.logs.modelShare.title') }}</div>
+          <div v-if="modelShareRows.length" class="logs-model-share__body">
+            <div class="logs-model-share__chart-wrap">
+              <Doughnut :data="modelShareChartData" :options="modelShareChartOptions" />
+            </div>
+
+            <div class="logs-model-share__table">
+              <div class="logs-model-share__table-head">
+                <span>{{ t('components.logs.modelShare.model') }}</span>
+                <span>{{ t('components.logs.modelShare.requests') }}</span>
+                <span>{{ t('components.logs.modelShare.tokens') }}</span>
+                <span>{{ t('components.logs.modelShare.cost') }}</span>
+              </div>
+              <div class="logs-model-share__table-body">
+                <div v-for="item in modelShareRows" :key="item.model" class="logs-model-share__table-row">
+                  <span class="logs-model-share__model">
+                    <span class="logs-model-share__dot" :style="{ backgroundColor: item.color }"></span>
+                    <span class="logs-model-share__model-name">{{ item.model }}</span>
+                  </span>
+                  <span>{{ formatNumber(item.requests) }}</span>
+                  <span>{{ formatTokenNumber(item.tokens) }}</span>
+                  <span class="logs-model-share__cost">{{ formatCurrency(item.cost) }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div v-else class="logs-model-share__empty">
+            {{ t('components.logs.modelShare.empty') }}
+          </div>
+        </section>
+
         <section class="logs-chart">
           <Line :data="chartData" :options="chartOptions" />
         </section>
@@ -489,6 +521,7 @@ import {
   fetchRequestLogs,
   fetchLogProviderRefs,
   fetchLogStatsV2,
+  fetchModelStatsV2,
   fetchProviderStatsV2,
   fetchLogStorageStats,
   clearRequestLogs,
@@ -498,6 +531,7 @@ import {
   type LogStatsSeries,
   type LogPlatform,
   type ProviderDailyStat,
+  type ModelUsageStat,
   type LogStorageStats,
   type LogProviderRef,
 } from '../../services/logs'
@@ -506,17 +540,18 @@ import {
   Chart,
   CategoryScale,
   LinearScale,
+  ArcElement,
   PointElement,
   LineElement,
   Tooltip,
   Legend,
 } from 'chart.js'
 import type { ChartOptions } from 'chart.js'
-import { Line } from 'vue-chartjs'
+import { Doughnut, Line } from 'vue-chartjs'
 import { showToast } from '../../utils/toast'
 import { extractErrorMessage } from '../../utils/error'
 
-Chart.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend)
+Chart.register(CategoryScale, LinearScale, ArcElement, PointElement, LineElement, Tooltip, Legend)
 
 const { t, locale } = useI18n()
 const router = useRouter()
@@ -565,6 +600,7 @@ type LogDateFilterType = 'all' | 'today' | 'year' | 'month' | 'day' | 'range'
 
 const logs = ref<RequestLog[]>([])
 const stats = ref<LogStats | null>(null)
+const modelStats = ref<ModelUsageStat[]>([])
 const loading = ref(false)
 const storageStats = ref<LogStorageStats | null>(null)
 const storageLoading = ref(false)
@@ -922,6 +958,98 @@ const closeTokenDetailModal = () => {
   tokenDetailModal.open = false
 }
 
+type ModelShareRow = {
+  model: string
+  requests: number
+  tokens: number
+  cost: number
+  color: string
+}
+
+const MODEL_SHARE_COLORS = [
+  '#4f7ee3',
+  '#6990e8',
+  '#7fb2ff',
+  '#22c55e',
+  '#38bdf8',
+  '#f59e0b',
+  '#a78bfa',
+  '#f472b6',
+  '#fb7185',
+  '#94a3b8',
+]
+
+const normalizeModelShareKey = (value?: string) => String(value ?? '').trim().toLowerCase()
+
+const modelShareRows = computed<ModelShareRow[]>(() => {
+  const grouped = new Map<string, { model: string; requests: number; tokens: number; cost: number }>()
+  for (const item of modelStats.value) {
+    const model = String(item.model ?? '').trim() || '—'
+    const normalizedKey = normalizeModelShareKey(model) || '—'
+    const requests = Math.max(0, Math.round(safeNumber(item.total_requests)))
+    const fallbackTokens = safeNumber(item.input_tokens) + safeNumber(item.output_tokens) + safeNumber(item.cache_read_tokens)
+    const tokens = Math.max(0, Math.round(safeNumber(item.total_tokens) || fallbackTokens))
+    const cost = safeNumber(item.cost_total)
+
+    const current = grouped.get(normalizedKey) ?? { model, requests: 0, tokens: 0, cost: 0 }
+    if (current.model === '—' && model !== '—') {
+      current.model = model
+    }
+    current.requests += requests
+    current.tokens += tokens
+    current.cost += cost
+    grouped.set(normalizedKey, current)
+  }
+
+  const rows = Array.from(grouped.values()).sort((a, b) => {
+    if (b.tokens !== a.tokens) return b.tokens - a.tokens
+    if (b.requests !== a.requests) return b.requests - a.requests
+    return b.cost - a.cost
+  })
+
+  return rows.map((item, index) => ({
+    ...item,
+    color: MODEL_SHARE_COLORS[index % MODEL_SHARE_COLORS.length],
+  }))
+})
+
+const modelShareTotalTokens = computed(() =>
+  modelShareRows.value.reduce((sum, item) => sum + item.tokens, 0)
+)
+
+const modelShareChartData = computed(() => ({
+  labels: modelShareRows.value.map(item => item.model),
+  datasets: [
+    {
+      data: modelShareRows.value.map(item => item.tokens),
+      backgroundColor: modelShareRows.value.map(item => item.color),
+      borderWidth: 0,
+      hoverOffset: 6,
+    },
+  ],
+}))
+
+const modelShareChartOptions: ChartOptions<'doughnut'> = {
+  responsive: true,
+  maintainAspectRatio: false,
+  cutout: '50%',
+  plugins: {
+    legend: {
+      display: false,
+    },
+    tooltip: {
+      callbacks: {
+        label: (context) => {
+          const tokenValue = Number(context.raw ?? 0)
+          const total = modelShareTotalTokens.value
+          const ratio = total > 0 ? (tokenValue / total) * 100 : 0
+          return `${context.label}: ${formatTokenNumber(tokenValue)} (${ratio.toFixed(1)}%)`
+        },
+      },
+    },
+  },
+}
+
 const parseLogDate = (value?: string) => {
   if (!value) return null
   const normalize = value.replace(' ', 'T')
@@ -944,6 +1072,34 @@ const parseLogDate = (value?: string) => {
   return null
 }
 
+const hexToRgb = (hexColor: string) => {
+  const normalized = String(hexColor ?? '').trim().replace('#', '')
+  if (normalized.length !== 6) return null
+  const red = Number.parseInt(normalized.slice(0, 2), 16)
+  const green = Number.parseInt(normalized.slice(2, 4), 16)
+  const blue = Number.parseInt(normalized.slice(4, 6), 16)
+  if ([red, green, blue].some(channel => Number.isNaN(channel))) return null
+  return { red, green, blue }
+}
+
+const buildAlphaColor = (hexColor: string, alpha: number) => {
+  const normalizedAlpha = Number.isFinite(alpha)
+    ? Math.max(0, Math.min(0.5, alpha))
+    : 0
+  const rgb = hexToRgb(hexColor)
+  if (!rgb) return `rgba(148, 163, 184, ${normalizedAlpha})`
+  return `rgba(${rgb.red}, ${rgb.green}, ${rgb.blue}, ${normalizedAlpha})`
+}
+
+const buildLineAreaGradient = (chart: Chart<'line'>, hexColor: string, alpha = 0.28) => {
+  const area = chart.chartArea
+  if (!area) return buildAlphaColor(hexColor, alpha)
+  const gradient = chart.ctx.createLinearGradient(0, area.top, 0, area.bottom)
+  gradient.addColorStop(0, buildAlphaColor(hexColor, alpha))
+  gradient.addColorStop(1, buildAlphaColor(hexColor, 0))
+  return gradient
+}
+
 const chartData = computed(() => {
   const series = statsSeries.value
   return {
@@ -953,56 +1109,59 @@ const chartData = computed(() => {
         label: t('components.logs.tokenLabels.cost'),
         data: series.map((item) => Number(((item.total_cost ?? 0)).toFixed(4))),
         borderColor: '#f97316',
-        backgroundColor: 'rgba(249, 115, 22, 0.2)',
+        backgroundColor: (context) => buildLineAreaGradient(context.chart, '#f97316', 0.22),
         tension: 0.3,
-        fill: false,
+        fill: 'origin',
         yAxisID: 'yCost',
       },
       {
         label: t('components.logs.tokenLabels.input'),
         data: series.map((item) => item.input_tokens ?? 0),
         borderColor: '#34d399',
-        backgroundColor: 'rgba(52, 211, 153, 0.25)',
+        backgroundColor: (context) => buildLineAreaGradient(context.chart, '#34d399', 0.34),
         tension: 0.35,
-        fill: true,
+        fill: 'origin',
       },
       {
         label: t('components.logs.tokenLabels.output'),
         data: series.map((item) => item.output_tokens ?? 0),
         borderColor: '#60a5fa',
-        backgroundColor: 'rgba(96, 165, 250, 0.2)',
+        backgroundColor: (context) => buildLineAreaGradient(context.chart, '#60a5fa', 0.3),
         tension: 0.35,
-        fill: true,
+        fill: 'origin',
       },
       {
         label: t('components.logs.tokenLabels.reasoning'),
         data: series.map((item) => item.reasoning_tokens ?? 0),
         borderColor: '#f472b6',
-        backgroundColor: 'rgba(244, 114, 182, 0.2)',
+        backgroundColor: (context) => buildLineAreaGradient(context.chart, '#f472b6', 0.3),
         tension: 0.35,
-        fill: true,
+        fill: 'origin',
       },
       {
         label: t('components.logs.tokenLabels.cacheWrite'),
         data: series.map((item) => item.cache_create_tokens ?? 0),
         borderColor: '#fbbf24',
-        backgroundColor: 'rgba(251, 191, 36, 0.2)',
+        backgroundColor: (context) => buildLineAreaGradient(context.chart, '#fbbf24', 0.28),
         tension: 0.35,
-        fill: false,
+        fill: 'origin',
       },
       {
         label: t('components.logs.tokenLabels.cacheRead'),
         data: series.map((item) => item.cache_read_tokens ?? 0),
         borderColor: '#38bdf8',
-        backgroundColor: 'rgba(56, 189, 248, 0.15)',
+        backgroundColor: (context) => buildLineAreaGradient(context.chart, '#38bdf8', 0.26),
         tension: 0.35,
-        fill: false,
+        fill: 'origin',
       },
     ],
   }
 })
 
-const chartOptions: ChartOptions<'line'> = {
+const resolveChartLegendColor = () => (isDarkTheme.value ? '#e2e8f0' : '#0f172a')
+const resolveChartTickColor = () => (isDarkTheme.value ? '#94a3b8' : '#64748b')
+
+const chartOptions = computed<ChartOptions<'line'>>(() => ({
   responsive: true,
   maintainAspectRatio: false,
   interaction: {
@@ -1011,23 +1170,90 @@ const chartOptions: ChartOptions<'line'> = {
   },
   plugins: {
     legend: {
+      position: 'top',
+      align: 'start',
       labels: {
-        color: '#0f172a',
+        color: resolveChartLegendColor(),
+        usePointStyle: true,
+        pointStyle: 'circle',
+        boxWidth: 8,
+        boxHeight: 8,
+        padding: 14,
         font: {
           size: 12,
           weight: 500,
         },
+        generateLabels: (chart) => {
+          const base = Chart.defaults.plugins.legend.labels.generateLabels(chart)
+          return base.map((item) => {
+            const datasetIndex = typeof item.datasetIndex === 'number' ? item.datasetIndex : -1
+            const dataset =
+              datasetIndex >= 0
+                ? (chart.data.datasets[datasetIndex] as { borderColor?: unknown } | undefined)
+                : undefined
+            const borderColorValue = dataset?.borderColor
+            const color = Array.isArray(borderColorValue)
+              ? String(borderColorValue[0] ?? '#94a3b8')
+              : String(borderColorValue ?? '#94a3b8')
+            return {
+              ...item,
+              fillStyle: color,
+              strokeStyle: color,
+              lineWidth: 0,
+              hidden: datasetIndex >= 0 ? !chart.isDatasetVisible(datasetIndex) : true,
+            }
+          })
+        },
       },
+    },
+    tooltip: {
+      callbacks: {
+        labelColor: (context) => {
+          const borderColorValue = context.dataset?.borderColor
+          const color = Array.isArray(borderColorValue)
+            ? String(borderColorValue[0] ?? '#94a3b8')
+            : String(borderColorValue ?? '#94a3b8')
+          return {
+            borderColor: color,
+            backgroundColor: color,
+            borderWidth: 0,
+          }
+        },
+        label: (context) => {
+          const labelPrefix = context.dataset.label ? `${context.dataset.label}: ` : ''
+          const rawValue = Number(context.parsed?.y ?? context.raw ?? 0)
+          if (context.dataset.yAxisID === 'yCost') {
+            if (!Number.isFinite(rawValue)) return `${labelPrefix}$0`
+            return `${labelPrefix}${rawValue >= 1 ? `$${rawValue.toFixed(2)}` : `$${rawValue.toFixed(4)}`}`
+          }
+          return `${labelPrefix}${formatTokenNumber(rawValue)}`
+        },
+      },
+    },
+  },
+  elements: {
+    point: {
+      radius: 0,
+      hoverRadius: 0,
+      hitRadius: 10,
+      borderWidth: 0,
     },
   },
   scales: {
     x: {
       grid: { display: false },
-      ticks: { color: '#94a3b8' },
+      ticks: { color: resolveChartTickColor() },
     },
     y: {
       beginAtZero: true,
-      ticks: { color: '#94a3b8' },
+      ticks: {
+        color: resolveChartTickColor(),
+        callback: (value: string | number) => {
+          const numeric = typeof value === 'number' ? value : Number(value)
+          if (!Number.isFinite(numeric)) return '0'
+          return formatTokenNumber(numeric)
+        },
+      },
       grid: { color: 'rgba(148, 163, 184, 0.2)' },
     },
     yCost: {
@@ -1035,7 +1261,7 @@ const chartOptions: ChartOptions<'line'> = {
       beginAtZero: true,
       grid: { drawOnChartArea: false },
       ticks: {
-        color: '#475569',
+        color: resolveChartTickColor(),
         callback: (value: string | number) => {
           const numeric = typeof value === 'number' ? value : Number(value)
           if (Number.isNaN(numeric)) return '$0'
@@ -1045,7 +1271,7 @@ const chartOptions: ChartOptions<'line'> = {
       },
     },
   },
-}
+}))
 
 const seriesGranularity = computed<'hour' | 'day'>(() => {
   const range = computeDateRange()
@@ -1305,8 +1531,25 @@ const loadStats = async () => {
   }
 }
 
+const loadModelStats = async () => {
+  try {
+    const range = computeDateRange()
+    if (range == null) return
+    const data = await fetchModelStatsV2({
+      platform: filters.platform,
+      provider: filters.provider,
+      startAt: range.startAt,
+      endAt: range.endAt,
+    })
+    modelStats.value = data ?? []
+  } catch (error) {
+    console.error('failed to load model stats', error)
+    modelStats.value = []
+  }
+}
+
 const loadDashboard = async () => {
-  await Promise.all([loadLogs(), loadStats(), loadProviderOptions()])
+  await Promise.all([loadLogs(), loadStats(), loadModelStats(), loadProviderOptions()])
   syncProviderOptionsFromLogs(logs.value)
 }
 
@@ -2014,7 +2257,7 @@ const buildProviderAPITokenTooltipDetail = (
   const formulaParts: string[] = []
   if (inputTokens > 0 && inputPerToken > 0) {
     formulaParts.push(
-      `${t('components.logs.costTooltip.usagePrompt')} ${inputTokens.toLocaleString()} tokens / 1M tokens * ${formatUsdPerMillion(inputPerToken)}`
+      `${t('components.logs.costTooltip.usagePrompt')} ${formatTokenFormulaValue(inputTokens)} tokens / 1M tokens * ${formatUsdPerMillion(inputPerToken)}`
     )
   }
   if (cacheCreateTokens > 0 && cacheCreatePerToken > 0) {
@@ -2022,7 +2265,7 @@ const buildProviderAPITokenTooltipDetail = (
       ? ` (${t('components.logs.costTooltip.cacheCreateMultiplierLabel', { multiplier: formatMultiplierValue(cacheCreateMultiplier) })})`
       : ''
     formulaParts.push(
-      `${t('components.logs.costTooltip.usageCacheCreate')} ${cacheCreateTokens.toLocaleString()} tokens / 1M tokens * ${formatUsdPerMillion(cacheCreatePerToken)}${multiplierSuffix}`
+      `${t('components.logs.costTooltip.usageCacheCreate')} ${formatTokenFormulaValue(cacheCreateTokens)} tokens / 1M tokens * ${formatUsdPerMillion(cacheCreatePerToken)}${multiplierSuffix}`
     )
   }
   if (cacheReadTokens > 0 && cacheReadPerToken > 0) {
@@ -2030,17 +2273,17 @@ const buildProviderAPITokenTooltipDetail = (
       ? ` (${t('components.logs.costTooltip.cacheReadMultiplierLabel', { multiplier: formatMultiplierValue(cacheReadMultiplier) })})`
       : ''
     formulaParts.push(
-      `${t('components.logs.costTooltip.usageCacheRead')} ${cacheReadTokens.toLocaleString()} tokens / 1M tokens * ${formatUsdPerMillion(cacheReadPerToken)}${multiplierSuffix}`
+      `${t('components.logs.costTooltip.usageCacheRead')} ${formatTokenFormulaValue(cacheReadTokens)} tokens / 1M tokens * ${formatUsdPerMillion(cacheReadPerToken)}${multiplierSuffix}`
     )
   }
   if (outputTokens > 0 && outputPerToken > 0) {
     formulaParts.push(
-      `${t('components.logs.costTooltip.usageCompletion')} ${outputTokens.toLocaleString()} tokens / 1M tokens * ${formatUsdPerMillion(outputPerToken)}`
+      `${t('components.logs.costTooltip.usageCompletion')} ${formatTokenFormulaValue(outputTokens)} tokens / 1M tokens * ${formatUsdPerMillion(outputPerToken)}`
     )
   }
   if (reasoningTokens > 0 && reasoningPerToken > 0) {
     formulaParts.push(
-      `${t('components.logs.costTooltip.usageReasoning')} ${reasoningTokens.toLocaleString()} tokens / 1M tokens * ${formatUsdPerMillion(reasoningPerToken)}`
+      `${t('components.logs.costTooltip.usageReasoning')} ${formatTokenFormulaValue(reasoningTokens)} tokens / 1M tokens * ${formatUsdPerMillion(reasoningPerToken)}`
     )
   }
 
@@ -2162,7 +2405,6 @@ const buildBuiltinCostTooltipDetail = (
   const cacheCreatePerToken = cacheCreateTokens > 0 ? cacheCreateCost / cacheCreateTokens : cacheCreatePerTokenBase
   const cacheReadPerToken = cacheReadTokens > 0 ? cacheReadCost / cacheReadTokens : cacheReadPerTokenBase
 
-  const completionMultiplier = inputPerToken > 0 ? outputPerToken / inputPerToken : 0
   const cacheCreateMultiplier = inputPerToken > 0 ? cacheCreatePerToken / inputPerToken : 0
   const cacheReadMultiplier = inputPerToken > 0 ? cacheReadPerToken / inputPerToken : 0
   const groupMultiplier = resolveGroupMultiplier(item)
@@ -2182,27 +2424,27 @@ const buildBuiltinCostTooltipDetail = (
   const formulaParts: string[] = []
   if (inputTokens > 0 && inputPerToken > 0) {
     formulaParts.push(
-      `${t('components.logs.costTooltip.usagePrompt')} ${inputTokens.toLocaleString()} tokens / 1M tokens * ${formatUsdPerMillion(inputPerToken)}`
+      `${t('components.logs.costTooltip.usagePrompt')} ${formatTokenFormulaValue(inputTokens)} tokens / 1M tokens * ${formatUsdPerMillion(inputPerToken)}`
     )
   }
   if (cacheCreateTokens > 0 && cacheCreatePerToken > 0) {
     formulaParts.push(
-      `${t('components.logs.costTooltip.usageCacheCreate')} ${cacheCreateTokens.toLocaleString()} tokens / 1M tokens * ${formatUsdPerMillion(cacheCreatePerToken)} (${t('components.logs.costTooltip.cacheCreateMultiplierLabel', { multiplier: formatMultiplierValue(cacheCreateMultiplier) })})`
+      `${t('components.logs.costTooltip.usageCacheCreate')} ${formatTokenFormulaValue(cacheCreateTokens)} tokens / 1M tokens * ${formatUsdPerMillion(cacheCreatePerToken)} (${t('components.logs.costTooltip.cacheCreateMultiplierLabel', { multiplier: formatMultiplierValue(cacheCreateMultiplier) })})`
     )
   }
   if (cacheReadTokens > 0 && cacheReadPerToken > 0) {
     formulaParts.push(
-      `${t('components.logs.costTooltip.usageCacheRead')} ${cacheReadTokens.toLocaleString()} tokens / 1M tokens * ${formatUsdPerMillion(cacheReadPerToken)} (${t('components.logs.costTooltip.cacheReadMultiplierLabel', { multiplier: formatMultiplierValue(cacheReadMultiplier) })})`
+      `${t('components.logs.costTooltip.usageCacheRead')} ${formatTokenFormulaValue(cacheReadTokens)} tokens / 1M tokens * ${formatUsdPerMillion(cacheReadPerToken)} (${t('components.logs.costTooltip.cacheReadMultiplierLabel', { multiplier: formatMultiplierValue(cacheReadMultiplier) })})`
     )
   }
   if (outputTokens > 0 && outputPerToken > 0) {
     formulaParts.push(
-      `${t('components.logs.costTooltip.usageCompletion')} ${outputTokens.toLocaleString()} tokens / 1M tokens * ${formatUsdPerMillion(outputPerToken)} * ${t('components.logs.costTooltip.groupMultiplierLabel', { multiplier: formatMultiplierValue(groupMultiplier) })}`
+      `${t('components.logs.costTooltip.usageCompletion')} ${formatTokenFormulaValue(outputTokens)} tokens / 1M tokens * ${formatUsdPerMillion(outputPerToken)} * ${t('components.logs.costTooltip.groupMultiplierLabel', { multiplier: formatMultiplierValue(groupMultiplier) })}`
     )
   }
   if (reasoningTokens > 0 && reasoningPerToken > 0) {
     formulaParts.push(
-      `${t('components.logs.costTooltip.usageReasoning')} ${reasoningTokens.toLocaleString()} tokens / 1M tokens * ${formatUsdPerMillion(reasoningPerToken)} * ${t('components.logs.costTooltip.groupMultiplierLabel', { multiplier: formatMultiplierValue(groupMultiplier) })}`
+      `${t('components.logs.costTooltip.usageReasoning')} ${formatTokenFormulaValue(reasoningTokens)} tokens / 1M tokens * ${formatUsdPerMillion(reasoningPerToken)} * ${t('components.logs.costTooltip.groupMultiplierLabel', { multiplier: formatMultiplierValue(groupMultiplier) })}`
     )
   }
 
@@ -2665,6 +2907,17 @@ const formatTokenNumber = (value?: number) => {
   return value.toLocaleString()
 }
 
+const formatTokenFormulaValue = (value?: number) => {
+  const compact = formatTokenNumber(value)
+  if (compact === '—') return '0'
+  const numeric = Number(value ?? 0)
+  if (!Number.isFinite(numeric) || Math.abs(numeric) < 1_000) return compact
+  const exact = Number.isInteger(numeric)
+    ? numeric.toLocaleString()
+    : numeric.toLocaleString(undefined, { maximumFractionDigits: 2 })
+  return `${compact} (${exact})`
+}
+
 const normalizeTokenCount = (value?: number) => {
   const normalized = Number(value ?? 0)
   if (!Number.isFinite(normalized)) return 0
@@ -2866,6 +3119,97 @@ onUnmounted(() => {
   margin-bottom: 0.75rem;
 }
 
+.logs-model-share {
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 16px;
+  padding: 1rem 1.2rem;
+  background: radial-gradient(circle at top left, rgba(79, 126, 227, 0.08), rgba(15, 23, 42, 0));
+}
+
+.logs-model-share__title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #0f172a;
+  margin-bottom: 0.9rem;
+}
+
+.logs-model-share__body {
+  display: grid;
+  grid-template-columns: minmax(170px, 220px) minmax(0, 1fr);
+  gap: 1.25rem;
+  align-items: center;
+}
+
+.logs-model-share__chart-wrap {
+  width: min(100%, 190px);
+  height: 190px;
+  margin: 0 auto;
+}
+
+.logs-model-share__table {
+  min-width: 0;
+}
+
+.logs-model-share__table-head,
+.logs-model-share__table-row {
+  display: grid;
+  grid-template-columns: minmax(0, 2.2fr) minmax(70px, 0.8fr) minmax(90px, 1fr) minmax(90px, 0.9fr);
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.logs-model-share__table-head {
+  padding: 0.35rem 0.25rem 0.55rem;
+  font-size: 0.83rem;
+  font-weight: 600;
+  color: #64748b;
+}
+
+.logs-model-share__table-body {
+  max-height: 210px;
+  overflow-y: auto;
+}
+
+.logs-model-share__table-row {
+  padding: 0.7rem 0.25rem;
+  border-top: 1px solid rgba(148, 163, 184, 0.2);
+  font-size: 0.92rem;
+  color: #334155;
+  font-variant-numeric: tabular-nums;
+}
+
+.logs-model-share__model {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.logs-model-share__dot {
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.logs-model-share__model-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.logs-model-share__cost {
+  color: #0f766e;
+  font-weight: 600;
+}
+
+.logs-model-share__empty {
+  font-size: 0.9rem;
+  color: #64748b;
+  padding: 0.35rem 0.1rem;
+}
+
 .summary-meta {
   grid-column: 1 / -1;
   font-size: 0.85rem;
@@ -2915,6 +3259,32 @@ html.dark .summary-card {
   background: radial-gradient(circle at top, rgba(148, 163, 184, 0.2), rgba(15, 23, 42, 0.35));
 }
 
+html.dark .logs-model-share {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: radial-gradient(circle at top left, rgba(96, 165, 250, 0.16), rgba(15, 23, 42, 0.36));
+}
+
+html.dark .logs-model-share__title {
+  color: rgba(248, 250, 252, 0.95);
+}
+
+html.dark .logs-model-share__table-head {
+  color: rgba(186, 194, 210, 0.86);
+}
+
+html.dark .logs-model-share__table-row {
+  border-top-color: rgba(148, 163, 184, 0.24);
+  color: rgba(226, 232, 240, 0.92);
+}
+
+html.dark .logs-model-share__cost {
+  color: #6ee7b7;
+}
+
+html.dark .logs-model-share__empty {
+  color: #94a3b8;
+}
+
 html.dark .summary-card__label {
   color: rgba(248, 250, 252, 0.75);
 }
@@ -2934,6 +3304,30 @@ html.dark .summary-card__sub-value {
 @media (max-width: 768px) {
   .logs-summary {
     grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  }
+
+  .logs-model-share {
+    padding: 0.9rem 1rem;
+  }
+
+  .logs-model-share__body {
+    grid-template-columns: 1fr;
+    gap: 0.9rem;
+  }
+
+  .logs-model-share__chart-wrap {
+    height: 170px;
+  }
+
+  .logs-model-share__table-head,
+  .logs-model-share__table-row {
+    grid-template-columns: minmax(0, 1.9fr) minmax(0, 0.8fr) minmax(0, 0.95fr) minmax(0, 0.85fr);
+    gap: 0.55rem;
+    font-size: 0.82rem;
+  }
+
+  .logs-model-share__table-body {
+    max-height: 230px;
   }
 }
 

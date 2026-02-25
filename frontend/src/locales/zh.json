@@ -517,7 +517,7 @@
         "errors": "失败次数",
         "errorHint": "数量与失败率",
         "tokens": "Token 流量",
-        "tokenHint": "输入 + 输出 Tokens",
+        "tokenHint": "输入 + 输出 + 缓存读取 Tokens",
         "cache": "缓存命中",
         "cacheHint": "响应中的读取命中数",
         "costHint": "近 24 小时总花费",
@@ -634,6 +634,14 @@
       },
       "tokenDetail": {
         "title": "Token 明细"
+      },
+      "modelShare": {
+        "title": "模型分布",
+        "model": "模型",
+        "requests": "请求",
+        "tokens": "Token",
+        "cost": "金额",
+        "empty": "当前筛选范围暂无模型数据"
       }
     },
     "general": {

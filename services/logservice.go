@@ -814,6 +814,114 @@ func (ls *LogService) ProviderStatsRangeV2(platform string, provider string, sta
 	return stats, nil
 }
 
+func (ls *LogService) ModelStatsRangeV2(platform string, provider string, startAt string, endAt string) ([]ModelUsageStat, error) {
+	start, err := parseTimeInput(startAt)
+	if err != nil {
+		return nil, err
+	}
+
+	end := time.Time{}
+	if strings.TrimSpace(endAt) != "" {
+		end, err = parseTimeInput(endAt)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		end = start.Add(24 * time.Hour)
+	}
+
+	if !start.Before(end) {
+		return []ModelUsageStat{}, nil
+	}
+
+	db, err := xdb.DB("default")
+	if err != nil {
+		return nil, err
+	}
+
+	startKey := start.UTC().Format(timeLayout)
+	endKey := end.UTC().Format(timeLayout)
+	platformKey := strings.TrimSpace(platform)
+
+	queryModelStats := func(providerColumn string, providerValue string) ([]ModelUsageStat, error) {
+		query := `
+			SELECT
+				CASE
+					WHEN TRIM(COALESCE(model, '')) = '' THEN '—'
+					ELSE TRIM(model)
+				END AS model_name,
+				COUNT(*) AS total_requests,
+				COALESCE(SUM(CASE WHEN input_tokens > 0 THEN input_tokens ELSE 0 END), 0) AS input_tokens,
+				COALESCE(SUM(CASE WHEN output_tokens > 0 THEN output_tokens ELSE 0 END), 0) AS output_tokens,
+				COALESCE(SUM(CASE WHEN cache_read_tokens > 0 THEN cache_read_tokens ELSE 0 END), 0) AS cache_read_tokens,
+				COALESCE(SUM(CASE WHEN input_tokens > 0 THEN input_tokens ELSE 0 END), 0)
+				  + COALESCE(SUM(CASE WHEN output_tokens > 0 THEN output_tokens ELSE 0 END), 0)
+				  + COALESCE(SUM(CASE WHEN cache_read_tokens > 0 THEN cache_read_tokens ELSE 0 END), 0) AS total_tokens,
+				COALESCE(SUM(total_cost), 0) AS total_cost
+			FROM request_log
+			WHERE created_at >= ? AND created_at < ?
+		`
+		args := make([]interface{}, 0, 4)
+		args = append(args, startKey, endKey)
+		if platformKey != "" {
+			query += " AND platform = ?"
+			args = append(args, platformKey)
+		}
+		if providerColumn != "" {
+			query += " AND " + providerColumn + " = ?"
+			args = append(args, providerValue)
+		}
+		query += `
+			GROUP BY model_name
+			ORDER BY total_tokens DESC, total_requests DESC, total_cost DESC, model_name ASC
+		`
+
+		rows, err := db.Query(query, args...)
+		if err != nil {
+			if isNoSuchTableErr(err) {
+				return []ModelUsageStat{}, nil
+			}
+			return nil, err
+		}
+		defer rows.Close()
+
+		stats := make([]ModelUsageStat, 0, 16)
+		for rows.Next() {
+			stat := ModelUsageStat{}
+			if err := rows.Scan(
+				&stat.Model,
+				&stat.TotalRequests,
+				&stat.InputTokens,
+				&stat.OutputTokens,
+				&stat.CacheReadTokens,
+				&stat.TotalTokens,
+				&stat.CostTotal,
+			); err != nil {
+				return nil, err
+			}
+			stats = append(stats, stat)
+		}
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+		return stats, nil
+	}
+
+	providerRef := strings.TrimSpace(provider)
+	if providerRef == "" {
+		return queryModelStats("", "")
+	}
+
+	stats, err := queryModelStats("provider_id", providerRef)
+	if err != nil {
+		return nil, err
+	}
+	if len(stats) > 0 {
+		return stats, nil
+	}
+	return queryModelStats("provider", providerRef)
+}
+
 func parseCreatedAt(record xdb.Record) (time.Time, bool) {
 	if t := record.GetTime("created_at"); t != nil {
 		return t.In(time.Local), true
@@ -974,6 +1082,16 @@ type ProviderDailyStat struct {
 	CacheCreateTokens  int64   `json:"cache_create_tokens"`
 	CacheReadTokens    int64   `json:"cache_read_tokens"`
 	CostTotal          float64 `json:"cost_total"`
+}
+
+type ModelUsageStat struct {
+	Model           string  `json:"model"`
+	TotalRequests   int64   `json:"total_requests"`
+	InputTokens     int64   `json:"input_tokens"`
+	OutputTokens    int64   `json:"output_tokens"`
+	CacheReadTokens int64   `json:"cache_read_tokens"`
+	TotalTokens     int64   `json:"total_tokens"`
+	CostTotal       float64 `json:"cost_total"`
 }
 
 type LogStatsSeries struct {

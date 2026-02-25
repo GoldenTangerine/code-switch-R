@@ -195,6 +195,33 @@ export const fetchProviderStatsV2 = async (
   return Call.ByName('codeswitch/services.LogService.ProviderStatsRangeV2', platform, provider, startAt, endAt)
 }
 
+export type ModelUsageStat = {
+  model: string
+  total_requests: number
+  input_tokens: number
+  output_tokens: number
+  cache_read_tokens: number
+  total_tokens: number
+  cost_total: number
+}
+
+type ModelStatsQuery = {
+  platform?: LogPlatform | ''
+  provider?: string
+  startAt?: string
+  endAt?: string
+}
+
+export const fetchModelStatsV2 = async (
+  query: ModelStatsQuery = {},
+): Promise<ModelUsageStat[]> => {
+  const platform = query.platform ?? ''
+  const provider = query.provider ?? ''
+  const startAt = query.startAt ?? ''
+  const endAt = query.endAt ?? ''
+  return Call.ByName('codeswitch/services.LogService.ModelStatsRangeV2', platform, provider, startAt, endAt)
+}
+
 export type HeatmapStat = {
   day: string
   total_requests: number

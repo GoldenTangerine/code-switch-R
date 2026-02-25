@@ -516,7 +516,7 @@
         "errors": "Failures",
         "errorHint": "Count & failure rate",
         "tokens": "Tokens moved",
-        "tokenHint": "Input + output tokens",
+        "tokenHint": "Input + output + cache-read tokens",
         "cache": "Cache reads",
         "cacheHint": "Read hits across responses",
         "costHint": "24h total cost",
@@ -633,6 +633,14 @@
       },
       "tokenDetail": {
         "title": "Token breakdown"
+      },
+      "modelShare": {
+        "title": "Model Distribution",
+        "model": "Model",
+        "requests": "Requests",
+        "tokens": "Token",
+        "cost": "Cost",
+        "empty": "No model data in the current filter range"
       }
     },
     "general": {
