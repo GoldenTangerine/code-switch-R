@@ -12,7 +12,7 @@
           leave-from="opacity-100 translate-y-0"
           leave-to="opacity-0 translate-y-4"
         >
-          <DialogPanel :class="['modal', variantClass]">
+          <DialogPanel :class="['modal', variantClass]" :style="panelStyle">
             <header class="modal-header">
               <DialogTitle class="modal-title">{{ title }}</DialogTitle>
               <button class="ghost-icon" aria-label="Close" @click="$emit('close')">✕</button>
@@ -42,13 +42,18 @@ const props = withDefaults(
     title: string
     variant?: Variant
     bodyScrollable?: boolean
+    panelWidth?: string
   }>(),
-  { variant: 'default', bodyScrollable: true },
+  { variant: 'default', bodyScrollable: true, panelWidth: '' },
 )
 
 defineEmits<{ (e: 'close'): void }>()
 
 const variantClass = computed(() => (props.variant === 'confirm' ? 'confirm-modal' : ''))
+const panelStyle = computed<CSSProperties | undefined>(() => {
+  if (!props.panelWidth) return undefined
+  return { width: props.panelWidth }
+})
 const bodyStyle = computed<CSSProperties | undefined>(() => {
   if (props.bodyScrollable) return undefined
   return {

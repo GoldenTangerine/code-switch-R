@@ -590,6 +590,7 @@
       :open="modalState.open"
       :title="modalState.editingId ? t('components.main.form.editTitle') : t('components.main.form.createTitle')"
       :body-scrollable="false"
+      :panel-width="'min(980px, 96vw)'"
       @close="closeModal"
     >
       <form class="vendor-form vendor-form--provider-modal" @submit.prevent="submitModal">
@@ -3581,7 +3582,9 @@ const confirmDeleteCliTool = async () => {
 .vendor-form--provider-modal {
   display: flex;
   flex-direction: column;
+  width: 100%;
   min-height: 0;
+  min-width: 0;
   height: 100%;
   gap: 0;
 }
@@ -3591,8 +3594,14 @@ const confirmDeleteCliTool = async () => {
   flex-direction: column;
   gap: 18px;
   min-height: 0;
+  min-width: 0;
+  overflow-x: hidden;
   overflow-y: auto;
   padding: 0 0 12px;
+}
+
+.vendor-form__scroll-body > * {
+  min-width: 0;
 }
 
 .form-actions--provider-modal {
