@@ -625,6 +625,7 @@
         "clearing": "清理中...",
         "confirmClearRequestLog": "确认清除所有请求明细日志？（统计汇总不会被清除）",
         "confirmClearStats": "确认清除所有统计汇总数据？（请求明细不会被清除）",
+        "empty": "暂无日志存储统计",
         "success": "清理完成",
         "failed": "清理失败：{error}"
       },

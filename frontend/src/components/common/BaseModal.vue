@@ -17,7 +17,10 @@
               <DialogTitle class="modal-title">{{ title }}</DialogTitle>
               <button class="ghost-icon" aria-label="Close" @click="$emit('close')">✕</button>
             </header>
-            <div class="modal-body modal-scrollable">
+            <div
+              :class="['modal-body', { 'modal-scrollable': bodyScrollable }]"
+              :style="bodyStyle"
+            >
               <slot />
             </div>
           </DialogPanel>
@@ -28,7 +31,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, type CSSProperties } from 'vue'
 import { Dialog, DialogPanel, DialogTitle, TransitionChild, TransitionRoot } from '@headlessui/vue'
 
 type Variant = 'default' | 'confirm'
@@ -38,11 +41,21 @@ const props = withDefaults(
     open: boolean
     title: string
     variant?: Variant
+    bodyScrollable?: boolean
   }>(),
-  { variant: 'default' },
+  { variant: 'default', bodyScrollable: true },
 )
 
 defineEmits<{ (e: 'close'): void }>()
 
 const variantClass = computed(() => (props.variant === 'confirm' ? 'confirm-modal' : ''))
+const bodyStyle = computed<CSSProperties | undefined>(() => {
+  if (props.bodyScrollable) return undefined
+  return {
+    display: 'flex',
+    flexDirection: 'column' as const,
+    minHeight: '0',
+    flex: '1 1 auto',
+  }
+})
 </script>

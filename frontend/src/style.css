@@ -934,6 +934,7 @@ html.dark .mac-sidebar-item:hover {
 }
 
 .logs-filter-row .filter-fields {
+  --logs-filter-label-width: 120px;
   flex: 1;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -970,6 +971,18 @@ html.dark .mac-sidebar-item:hover {
   padding-inline-end: 44px;
 }
 
+.logs-filter-row .filter-query-cell {
+  display: flex;
+  align-items: center;
+  padding-left: calc(var(--logs-filter-label-width) + 12px);
+}
+
+.logs-filter-row .filter-query-cell button {
+  height: 40px;
+  min-height: 40px;
+  padding-inline: 18px;
+}
+
 .logs-date-picker-menu {
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.1),
@@ -982,34 +995,10 @@ html.dark .logs-date-picker-menu {
     0 25px 50px rgba(0, 0, 0, 0.55);
 }
 
-.logs-filter-row .filter-actions {
-  display: inline-flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  align-items: center;
-}
-
-.logs-filter-row .filter-actions button {
-  height: 40px;
-  min-height: 40px;
-  padding-inline: 18px;
-  display: inline-flex;
-  align-items: center;
-}
-
-.logs-storage {
+.logs-storage-modal {
   display: flex;
   flex-direction: column;
   gap: 12px;
-}
-
-.logs-storage-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
 }
 
 .logs-storage-actions {
@@ -1019,10 +1008,8 @@ html.dark .logs-date-picker-menu {
   flex-wrap: wrap;
 }
 
-.logs-storage-title {
-  font-size: 0.95rem;
-  font-weight: 600;
-  color: var(--mac-text);
+.logs-storage-actions--modal {
+  justify-content: flex-end;
 }
 
 .logs-storage-panel {
@@ -1083,6 +1070,10 @@ html.dark .logs-date-picker-menu {
 
   .logs-filter-row .filter-field span {
     text-align: left;
+  }
+
+  .logs-filter-row .filter-query-cell {
+    padding-left: 0;
   }
 }
 

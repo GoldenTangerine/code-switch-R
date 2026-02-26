@@ -6,6 +6,9 @@
           {{ t('components.logs.back') }}
         </BaseButton>
         <div class="refresh-indicator">
+          <BaseButton variant="outline" size="sm" :disabled="storageLoading" @click="openStorageModal">
+            {{ t('components.logs.storage.title') }}
+          </BaseButton>
           <span>{{ t('components.logs.nextRefresh', { seconds: countdown }) }}</span>
           <BaseButton size="sm" :disabled="loading" @click="manualRefresh">
             {{ t('components.logs.refresh') }}
@@ -47,6 +50,15 @@
                   <option value="range">{{ t('components.logs.filters.dateTypeRange') }}</option>
                 </select>
               </label>
+              <div class="filter-query-cell">
+                <BaseButton
+                  size="sm"
+                  type="submit"
+                  :disabled="loading || !isFilterValid"
+                >
+                  {{ t('components.logs.query') }}
+                </BaseButton>
+              </div>
 
               <label v-if="filters.dateType === 'year'" class="filter-field">
                 <span>{{ t('components.logs.filters.year') }}</span>
@@ -116,80 +128,7 @@
               </label>
             </div>
           </form>
-
-          <section class="logs-storage">
-            <div class="logs-storage-header">
-              <div class="logs-storage-title">{{ t('components.logs.storage.title') }}</div>
-              <div class="logs-storage-actions">
-                <BaseButton variant="outline" size="sm" :disabled="storageLoading" @click="loadStorageStats">
-                  {{ t('components.logs.storage.refresh') }}
-                </BaseButton>
-                <BaseButton
-                  size="sm"
-                  type="button"
-                  :disabled="loading || !isFilterValid"
-                  @click="applyFilters"
-                >
-                  {{ t('components.logs.query') }}
-                </BaseButton>
-              </div>
-            </div>
-
-            <div v-if="storageStats" class="mac-panel logs-storage-panel">
-              <div class="logs-storage-db">
-                <div class="logs-storage-db-line">
-                  {{ t('components.logs.storage.db') }}：
-                  {{ t('components.logs.storage.used') }} {{ formatBytes(storageStats.database.used_bytes) }}
-                  /
-                  {{ formatBytes(storageStats.database.total_bytes || storageStats.database.file_bytes) }}
-                  <span v-if="storageStats.database.free_bytes">
-                    （{{ t('components.logs.storage.free') }} {{ formatBytes(storageStats.database.free_bytes) }}）
-                  </span>
-                  <span v-if="storageStats.database.wal_bytes">
-                    · {{ t('components.logs.storage.wal') }} {{ formatBytes(storageStats.database.wal_bytes) }}
-                  </span>
-                </div>
-              </div>
-
-              <div class="logs-storage-rows">
-                <div class="logs-storage-row">
-                  <div class="logs-storage-name">{{ t('components.logs.storage.requestLog') }}</div>
-                  <div class="logs-storage-meta">
-                    {{ t('components.logs.storage.rows', { count: storageStats.request_log.rows }) }}
-                    · {{ formatBytes(storageStats.request_log.bytes, storageStats.request_log.rows) }}
-                  </div>
-                  <BaseButton
-                    variant="outline"
-                    size="sm"
-                    :disabled="storageClearing"
-                    @click="handleClearRequestLogs"
-                  >
-                    {{ storageClearing ? t('components.logs.storage.clearing') : t('components.logs.storage.clearRequestLog') }}
-                  </BaseButton>
-                </div>
-
-                <div class="logs-storage-row">
-                  <div class="logs-storage-name">{{ t('components.logs.storage.stats') }}</div>
-                  <div class="logs-storage-meta">
-                    {{ t('components.logs.storage.rows', { count: storageStats.stats_hour.rows + storageStats.stats_day.rows }) }}
-                    · {{ formatBytes(
-                      storageStats.stats_hour.bytes + storageStats.stats_day.bytes,
-                      storageStats.stats_hour.rows + storageStats.stats_day.rows,
-                    ) }}
-                  </div>
-                  <BaseButton
-                    variant="outline"
-                    size="sm"
-                    :disabled="storageClearing"
-                    @click="handleClearStats"
-                  >
-                    {{ storageClearing ? t('components.logs.storage.clearing') : t('components.logs.storage.clearStats') }}
-                  </BaseButton>
-                </div>
-              </div>
-            </div>
-          </section>
-        </div>
+      </div>
 
         <section class="logs-summary" v-if="statsCards.length">
       <article
@@ -458,6 +397,80 @@
           </footer>
         </BaseModal>
 
+        <!-- 日志存储弹窗 -->
+        <BaseModal
+          :open="storageModal.open"
+          :title="t('components.logs.storage.title')"
+          @close="closeStorageModal"
+        >
+          <div class="logs-storage-modal">
+            <div class="logs-storage-actions logs-storage-actions--modal">
+              <BaseButton variant="outline" size="sm" :disabled="storageLoading" @click="loadStorageStats">
+                {{ t('components.logs.storage.refresh') }}
+              </BaseButton>
+            </div>
+            <p v-if="storageLoading && !storageStats" class="cost-detail-loading">
+              {{ t('components.logs.loading') }}
+            </p>
+            <div v-else-if="storageStats" class="mac-panel logs-storage-panel">
+              <div class="logs-storage-db">
+                <div class="logs-storage-db-line">
+                  {{ t('components.logs.storage.db') }}：
+                  {{ t('components.logs.storage.used') }} {{ formatBytes(storageStats.database.used_bytes) }}
+                  /
+                  {{ formatBytes(storageStats.database.total_bytes || storageStats.database.file_bytes) }}
+                  <span v-if="storageStats.database.free_bytes">
+                    （{{ t('components.logs.storage.free') }} {{ formatBytes(storageStats.database.free_bytes) }}）
+                  </span>
+                  <span v-if="storageStats.database.wal_bytes">
+                    · {{ t('components.logs.storage.wal') }} {{ formatBytes(storageStats.database.wal_bytes) }}
+                  </span>
+                </div>
+              </div>
+
+              <div class="logs-storage-rows">
+                <div class="logs-storage-row">
+                  <div class="logs-storage-name">{{ t('components.logs.storage.requestLog') }}</div>
+                  <div class="logs-storage-meta">
+                    {{ t('components.logs.storage.rows', { count: storageStats.request_log.rows }) }}
+                    · {{ formatBytes(storageStats.request_log.bytes, storageStats.request_log.rows) }}
+                  </div>
+                  <BaseButton
+                    variant="outline"
+                    size="sm"
+                    :disabled="storageClearing"
+                    @click="handleClearRequestLogs"
+                  >
+                    {{ storageClearing ? t('components.logs.storage.clearing') : t('components.logs.storage.clearRequestLog') }}
+                  </BaseButton>
+                </div>
+
+                <div class="logs-storage-row">
+                  <div class="logs-storage-name">{{ t('components.logs.storage.stats') }}</div>
+                  <div class="logs-storage-meta">
+                    {{ t('components.logs.storage.rows', { count: storageStats.stats_hour.rows + storageStats.stats_day.rows }) }}
+                    · {{ formatBytes(
+                      storageStats.stats_hour.bytes + storageStats.stats_day.bytes,
+                      storageStats.stats_hour.rows + storageStats.stats_day.rows,
+                    ) }}
+                  </div>
+                  <BaseButton
+                    variant="outline"
+                    size="sm"
+                    :disabled="storageClearing"
+                    @click="handleClearStats"
+                  >
+                    {{ storageClearing ? t('components.logs.storage.clearing') : t('components.logs.storage.clearStats') }}
+                  </BaseButton>
+                </div>
+              </div>
+            </div>
+            <p v-else class="cost-detail-empty">
+              {{ t('components.logs.storage.empty') }}
+            </p>
+          </div>
+        </BaseModal>
+
         <!-- 金额明细弹窗 -->
         <BaseModal
           :open="costDetailModal.open"
@@ -605,6 +618,9 @@ const loading = ref(false)
 const storageStats = ref<LogStorageStats | null>(null)
 const storageLoading = ref(false)
 const storageClearing = ref(false)
+const storageModal = reactive({
+  open: false,
+})
 const filters = reactive<{
   platform: LogPlatform | ''
   provider: string
@@ -1562,6 +1578,16 @@ const loadStorageStats = async () => {
   } finally {
     storageLoading.value = false
   }
+}
+
+const openStorageModal = () => {
+  storageModal.open = true
+  void loadStorageStats()
+}
+
+const closeStorageModal = () => {
+  if (storageClearing.value) return
+  storageModal.open = false
 }
 
 type StorageClearTarget = 'requestLogs' | 'stats'
@@ -3096,7 +3122,7 @@ onMounted(async () => {
   startThemeObserver()
   window.addEventListener('scroll', handleViewportChange, true)
   window.addEventListener('resize', handleViewportChange)
-  await Promise.all([loadDashboard(), loadStorageStats(), loadModelPricingRows()])
+  await Promise.all([loadDashboard(), loadModelPricingRows()])
   startCountdown()
 })
 

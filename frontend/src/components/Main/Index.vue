@@ -589,9 +589,11 @@
       <BaseModal
       :open="modalState.open"
       :title="modalState.editingId ? t('components.main.form.editTitle') : t('components.main.form.createTitle')"
+      :body-scrollable="false"
       @close="closeModal"
     >
-      <form class="vendor-form" @submit.prevent="submitModal">
+      <form class="vendor-form vendor-form--provider-modal" @submit.prevent="submitModal">
+                <div class="vendor-form__scroll-body">
                 <label class="form-field">
                   <span>{{ t('components.main.form.labels.name') }}</span>
                   <BaseInput
@@ -825,8 +827,9 @@
                     💡 {{ t('components.main.form.hints.availabilityAdvancedConfig') }}
                   </span>
                 </div>
+                </div>
 
-                <footer class="form-actions">
+                <footer class="form-actions form-actions--provider-modal">
                   <BaseButton variant="outline" type="button" @click="closeModal">
                     {{ t('components.main.form.actions.cancel') }}
                   </BaseButton>
@@ -2315,7 +2318,10 @@ const providerStatDisplay = (card: AutomationCard): ProviderStatDisplay => {
   if (!stat) {
     return { state: 'empty', message: t('components.main.providers.noData') }
   }
-  const totalTokens = stat.input_tokens + stat.output_tokens
+  const inputTokens = Number.isFinite(Number(stat.input_tokens)) ? Number(stat.input_tokens) : 0
+  const outputTokens = Number.isFinite(Number(stat.output_tokens)) ? Number(stat.output_tokens) : 0
+  const cacheReadTokens = Number.isFinite(Number(stat.cache_read_tokens)) ? Number(stat.cache_read_tokens) : 0
+  const totalTokens = Math.max(0, inputTokens + outputTokens + cacheReadTokens)
   const successRateValue = Number.isFinite(stat.success_rate) ? clamp(stat.success_rate, 0, 1) : null
   const successRateLabel = successRateValue !== null ? formatSuccessRateLabel(successRateValue) : ''
   const successRateClass = successRateValue !== null ? successRateClassName(successRateValue) : ''
@@ -3569,6 +3575,33 @@ const confirmDeleteCliTool = async () => {
   to {
     transform: rotate(360deg);
   }
+}
+
+/* 首页供应商编辑弹窗：表单区滚动，底部操作区固定可见 */
+.vendor-form--provider-modal {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  gap: 0;
+}
+
+.vendor-form__scroll-body {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 0 12px;
+}
+
+.form-actions--provider-modal {
+  flex-shrink: 0;
+  margin-top: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--mac-border);
+  background: color-mix(in srgb, var(--mac-surface) 94%, transparent);
+  backdrop-filter: blur(6px);
 }
 
 /* Level Badge 样式 */

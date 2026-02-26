@@ -624,6 +624,7 @@
         "clearing": "Clearing...",
         "confirmClearRequestLog": "Clear all request detail logs? (Aggregated stats will be kept)",
         "confirmClearStats": "Clear all aggregated stats? (Request detail logs will be kept)",
+        "empty": "No log storage stats available",
         "success": "Cleared",
         "failed": "Failed to clear: {error}"
       },
