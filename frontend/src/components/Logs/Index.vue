@@ -243,11 +243,11 @@
                 <td><span :class="['duration-tag', durationColor(item.duration_sec)]">{{ formatDuration(item.duration_sec) }}</span></td>
                 <td class="performance-cell">
                   <div>
-                    <span class="token-label">{{ t('components.logs.table.ttft') }}</span>
+                    <span class="performance-badge performance-badge--ttft">首</span>
                     <span class="token-value">{{ formatFirstTokenMs(item) }}</span>
                   </div>
                   <div>
-                    <span class="token-label">{{ t('components.logs.table.tps') }}</span>
+                    <span class="performance-badge performance-badge--tps">速</span>
                     <span class="token-value">{{ formatTokensPerSecond(item) }}</span>
                   </div>
                 </td>
@@ -1763,7 +1763,7 @@ const formatTokensPerSecond = (item: RequestLog) => {
   const tokensPerSecond = outputTokens / generationWindow
   if (!Number.isFinite(tokensPerSecond) || tokensPerSecond <= 0) return '—'
   const precision = tokensPerSecond >= 100 ? 1 : 2
-  return `${tokensPerSecond.toFixed(precision)} tok/s`
+  return `${tokensPerSecond.toFixed(precision)} tokens/s`
 }
 
 type ModelVerifyStatus = 'match' | 'mismatch' | 'unknown'

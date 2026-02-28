@@ -1154,6 +1154,30 @@ html.dark .logs-date-picker-menu {
   gap: 6px;
 }
 
+.performance-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.15rem;
+  height: 1.15rem;
+  border-radius: 6px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.performance-badge--ttft {
+  color: #bfdbfe;
+  background: rgba(37, 99, 235, 0.28);
+  border: 1px solid rgba(147, 197, 253, 0.4);
+}
+
+.performance-badge--tps {
+  color: #bbf7d0;
+  background: rgba(22, 163, 74, 0.28);
+  border: 1px solid rgba(134, 239, 172, 0.38);
+}
+
 .token-label {
   font-size: 0.7rem;
   font-weight: 600;
