@@ -86,6 +86,7 @@ const autoConnectivityTestEnabled = ref(getCachedValue('autoConnectivityTest', f
 const switchNotifyEnabled = ref(getCachedValue('switchNotify', true)) // 切换通知开关
 const roundRobinEnabled = ref(getCachedValue('roundRobin', false))    // 同 Level 轮询开关
 const captureRequestLogPayloadEnabled = ref(getCachedValue('captureRequestLogPayload', false))
+const sanitizeRequestLogPayloadEnabled = ref(getCachedValue('sanitizeRequestLogPayload', true))
 const budgetTotal = ref(getCachedNumber('budgetTotal', 0))
 const budgetUsedAdjustment = ref(getCachedNumber('budgetUsedAdjustment', 0))
 const budgetUsedDelta = ref(0)
@@ -292,6 +293,7 @@ const syncAppSettingsCache = () => {
   localStorage.setItem('app-settings-switchNotify', String(switchNotifyEnabled.value))
   localStorage.setItem('app-settings-roundRobin', String(roundRobinEnabled.value))
   localStorage.setItem('app-settings-captureRequestLogPayload', String(captureRequestLogPayloadEnabled.value))
+  localStorage.setItem('app-settings-sanitizeRequestLogPayload', String(sanitizeRequestLogPayloadEnabled.value))
 }
 
 // 更新相关状态
@@ -889,6 +891,7 @@ const loadAppSettings = async () => {
     switchNotifyEnabled.value = data?.enable_switch_notify ?? true
     roundRobinEnabled.value = data?.enable_round_robin ?? false
     captureRequestLogPayloadEnabled.value = data?.capture_request_log_payload ?? false
+    sanitizeRequestLogPayloadEnabled.value = data?.sanitize_request_log_payload ?? true
     const currentUsageConfigs = getCurrentBudgetUsageConfigs()
     syncBudgetUsageConfigKeys(currentUsageConfigs)
 
@@ -934,6 +937,7 @@ const loadAppSettings = async () => {
     switchNotifyEnabled.value = true
     roundRobinEnabled.value = false
     captureRequestLogPayloadEnabled.value = false
+    sanitizeRequestLogPayloadEnabled.value = true
     syncBudgetUsageConfigKeys(getCurrentBudgetUsageConfigs())
   } finally {
     settingsLoading.value = false
@@ -1069,6 +1073,7 @@ const persistAppSettingsNow = async () => {
       enable_switch_notify: switchNotifyEnabled.value,
       enable_round_robin: roundRobinEnabled.value,
       capture_request_log_payload: captureRequestLogPayloadEnabled.value,
+      sanitize_request_log_payload: sanitizeRequestLogPayloadEnabled.value,
     }
     await saveAppSettings(payload)
     syncBudgetUsageConfigKeys(nextUsageConfigs)
@@ -1594,7 +1599,7 @@ onBeforeUnmount(() => {
               >
                 {{ $t('components.general.heatmapDisplay.manage') }}
               </button>
-              <span class="hint-text">{{ heatmapDisplaySummary }}</span>
+              <span class="hint-text hint-text--single-line">{{ heatmapDisplaySummary }}</span>
             </div>
           </ListItem>
           <ListItem :label="$t('components.general.label.homeTitle')">
@@ -1659,6 +1664,26 @@ onBeforeUnmount(() => {
                 <span></span>
               </label>
               <span class="hint-text">{{ $t('components.general.label.captureRequestLogPayloadHint') }}</span>
+            </div>
+          </ListItem>
+          <ListItem :label="$t('components.general.label.sanitizeRequestLogPayload')">
+            <div class="toggle-with-hint">
+              <label class="mac-switch">
+                <input
+                  type="checkbox"
+                  :disabled="settingsLoading || saveBusy || !captureRequestLogPayloadEnabled"
+                  v-model="sanitizeRequestLogPayloadEnabled"
+                  @change="persistAppSettings"
+                />
+                <span></span>
+              </label>
+              <span class="hint-text">
+                {{
+                  captureRequestLogPayloadEnabled
+                    ? $t('components.general.label.sanitizeRequestLogPayloadHint')
+                    : $t('components.general.label.sanitizeRequestLogPayloadDisabledHint')
+                }}
+              </span>
             </div>
           </ListItem>
           <ListItem :label="$t('components.general.title.webdavSync')">
@@ -2681,6 +2706,12 @@ onBeforeUnmount(() => {
   text-align: right;
   white-space: normal;
   overflow-wrap: anywhere;
+}
+
+.hint-text--single-line {
+  max-width: none;
+  white-space: nowrap;
+  overflow-wrap: normal;
 }
 
 :global(.dark) .hint-text {

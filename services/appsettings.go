@@ -69,6 +69,7 @@ type AppSettings struct {
 	EnableSwitchNotify         bool    `json:"enable_switch_notify"` // 供应商切换通知开关
 	EnableRoundRobin           bool    `json:"enable_round_robin"`   // 同 Level 轮询负载均衡开关（默认关闭）
 	CaptureRequestLogPayload   bool    `json:"capture_request_log_payload"`
+	SanitizeRequestLogPayload  bool    `json:"sanitize_request_log_payload"`
 }
 
 type AppSettingsService struct {
@@ -216,6 +217,7 @@ func (as *AppSettingsService) defaultSettings() AppSettings {
 		EnableSwitchNotify:         true,  // 默认开启切换通知
 		EnableRoundRobin:           false, // 默认关闭轮询（使用顺序降级）
 		CaptureRequestLogPayload:   false, // 默认关闭 payload 采集，降低隐私与存储风险
+		SanitizeRequestLogPayload:  true,  // 默认开启 payload 脱敏，避免敏感信息明文落库
 	}
 }
 

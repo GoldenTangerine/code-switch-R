@@ -53,11 +53,12 @@ type ProviderRelayService struct {
 var errClientAbort = errors.New("client aborted, skip failure count")
 
 var (
-	responseModelRegex                   = regexp.MustCompile(`"model"\s*:\s*"([^"]+)"`)
-	responseModelVersionRegex            = regexp.MustCompile(`"modelVersion"\s*:\s*"([^"]+)"`)
-	requestLogSensitiveJSONValuePattern  = regexp.MustCompile(`(?i)("(?:api[_-]?key|x-api-key|x-goog-api-key|authorization|auth[_-]?token|access[_-]?token|refresh[_-]?token|password|secret)"\s*:\s*)"[^"]*"`)
-	requestLogAuthorizationBearerPattern = regexp.MustCompile(`(?i)(authorization\s*[:=]\s*bearer\s+)[^\s",]+`)
-	requestLogSensitiveQueryValuePattern = regexp.MustCompile(`(?i)((?:api[_-]?key|x-api-key|x-goog-api-key|auth[_-]?token|access[_-]?token)=)[^&\s]+`)
+	responseModelRegex                     = regexp.MustCompile(`"model"\s*:\s*"([^"]+)"`)
+	responseModelVersionRegex              = regexp.MustCompile(`"modelVersion"\s*:\s*"([^"]+)"`)
+	requestLogSensitiveJSONValuePattern    = regexp.MustCompile(`(?i)("(?:api[_-]?key|x-api-key|x-goog-api-key|authorization|auth[_-]?token|access[_-]?token|refresh[_-]?token|password|secret)"\s*:\s*)"[^"]*"`)
+	requestLogAuthorizationBearerPattern   = regexp.MustCompile(`(?i)(authorization\s*[:=]\s*bearer\s+)[^\s",]+`)
+	requestLogSensitiveQueryValuePattern   = regexp.MustCompile(`(?i)((?:api[_-]?key|x-api-key|x-goog-api-key|auth[_-]?token|access[_-]?token)=)[^&\s]+`)
+	requestLogSensitiveKeywordQuickPattern = regexp.MustCompile(`(?i)(api[_-]?key|x-api-key|x-goog-api-key|authorization|auth[_-]?token|access[_-]?token|refresh[_-]?token|password|secret)`)
 )
 
 const requestLogPayloadMaxBytes = 8 * 1024 * 1024
@@ -248,17 +249,28 @@ func (prs *ProviderRelayService) isRoundRobinEnabled() bool {
 	return settings.EnableRoundRobin
 }
 
-// isRequestLogPayloadCaptureEnabled 检查是否启用 request_log payload 采集。
-// 默认关闭，减少敏感信息落库与存储压力。
-func (prs *ProviderRelayService) isRequestLogPayloadCaptureEnabled() bool {
+// isRequestLogPayloadSanitizationEnabled 检查 request_log payload 脱敏是否启用。
+// 默认开启，优先保证敏感信息不明文落库。
+func (prs *ProviderRelayService) isRequestLogPayloadSanitizationEnabled() bool {
+	_, sanitizeEnabled := prs.resolveRequestLogPayloadCaptureAndSanitization()
+	return sanitizeEnabled
+}
+
+// resolveRequestLogPayloadCaptureAndSanitization 一次性读取 payload 相关配置，
+// 避免在单次请求里重复读取 app settings 文件。
+func (prs *ProviderRelayService) resolveRequestLogPayloadCaptureAndSanitization() (captureEnabled bool, sanitizeEnabled bool) {
+	captureEnabled = false
+	sanitizeEnabled = true
 	if prs.appSettings == nil {
-		return false
+		return
 	}
 	settings, err := prs.appSettings.GetAppSettings()
 	if err != nil {
-		return false
+		return
 	}
-	return settings.CaptureRequestLogPayload
+	captureEnabled = settings.CaptureRequestLogPayload
+	sanitizeEnabled = settings.SanitizeRequestLogPayload
+	return
 }
 
 // roundRobinOrder 对同 Level 的 providers 进行轮询排序
@@ -890,6 +902,7 @@ func (prs *ProviderRelayService) forwardRequest(
 	}
 
 	start := time.Now()
+	capturePayloadEnabled, sanitizePayloadEnabled := prs.resolveRequestLogPayloadCaptureAndSanitization()
 	requestLog := &ReqeustLog{
 		Platform:         kind,
 		ProviderID:       providerRefFromProvider(provider),
@@ -897,7 +910,8 @@ func (prs *ProviderRelayService) forwardRequest(
 		Model:            model,
 		RequestedModel:   strings.TrimSpace(requestedModel),
 		IsStream:         isStream,
-		CapturePayload:   prs.isRequestLogPayloadCaptureEnabled(),
+		CapturePayload:   capturePayloadEnabled,
+		SanitizePayload:  sanitizePayloadEnabled,
 		RequestStartedAt: start,
 		ProviderAPIURL:   provider.APIURL,
 		ProviderAPIKey:   provider.APIKey,
@@ -1170,10 +1184,21 @@ func sanitizeRequestLogPayload(payload string) string {
 	if strings.TrimSpace(payload) == "" {
 		return payload
 	}
+	// 快速短路：多数 payload 不含敏感键，避免每次都跑重正则。
+	if !requestLogSensitiveKeywordQuickPattern.MatchString(payload) {
+		return payload
+	}
 	sanitized := requestLogSensitiveJSONValuePattern.ReplaceAllString(payload, `${1}"`+requestLogPayloadRedactedValue+`"`)
 	sanitized = requestLogAuthorizationBearerPattern.ReplaceAllString(sanitized, `${1}`+requestLogPayloadRedactedValue)
 	sanitized = requestLogSensitiveQueryValuePattern.ReplaceAllString(sanitized, `${1}`+requestLogPayloadRedactedValue)
 	return sanitized
+}
+
+func maybeSanitizeRequestLogPayload(reqLog *ReqeustLog, payload string) string {
+	if reqLog == nil || !reqLog.SanitizePayload {
+		return payload
+	}
+	return sanitizeRequestLogPayload(payload)
 }
 
 func trimInvalidUTF8Suffix(value []byte) []byte {
@@ -1189,7 +1214,7 @@ func captureRequestLogRequestBody(reqLog *ReqeustLog, bodyBytes []byte) {
 		return
 	}
 	payload, truncated := truncateRequestLogPayload(string(bodyBytes), requestLogPayloadMaxBytes)
-	reqLog.RequestBody = sanitizeRequestLogPayload(payload)
+	reqLog.RequestBody = maybeSanitizeRequestLogPayload(reqLog, payload)
 	reqLog.RequestBodyTruncated = truncated
 }
 
@@ -1198,7 +1223,7 @@ func setRequestLogResponseBody(reqLog *ReqeustLog, bodyBytes []byte) {
 		return
 	}
 	payload, truncated := truncateRequestLogPayload(string(bodyBytes), requestLogPayloadMaxBytes)
-	reqLog.ResponseBody = sanitizeRequestLogPayload(payload)
+	reqLog.ResponseBody = maybeSanitizeRequestLogPayload(reqLog, payload)
 	reqLog.ResponseBodyTruncated = truncated
 	reqLog.responseBodyBuffer = nil
 }
@@ -1251,7 +1276,7 @@ func materializeRequestLogResponseBody(reqLog *ReqeustLog) {
 	if reqLog.ResponseBodyTruncated {
 		buffer = trimInvalidUTF8Suffix(buffer)
 	}
-	reqLog.ResponseBody = sanitizeRequestLogPayload(string(buffer))
+	reqLog.ResponseBody = maybeSanitizeRequestLogPayload(reqLog, string(buffer))
 	reqLog.responseBodyBuffer = nil
 }
 
@@ -1267,7 +1292,7 @@ func prepareRequestLogPayloadForPersistence(reqLog *ReqeustLog) {
 		reqLog.responseBodyBuffer = nil
 		return
 	}
-	reqLog.RequestBody = sanitizeRequestLogPayload(reqLog.RequestBody)
+	reqLog.RequestBody = maybeSanitizeRequestLogPayload(reqLog, reqLog.RequestBody)
 	materializeRequestLogResponseBody(reqLog)
 }
 
@@ -1883,7 +1908,8 @@ type ReqeustLog struct {
 	RequestBodyTruncated      bool    `json:"request_body_truncated"`
 	ResponseBodyTruncated     bool    `json:"response_body_truncated"`
 
-	CapturePayload bool `json:"-"`
+	CapturePayload  bool `json:"-"`
+	SanitizePayload bool `json:"-"`
 
 	ProviderAPIURL   string    `json:"-"`
 	ProviderAPIKey   string    `json:"-"`
@@ -2308,11 +2334,13 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 
 		// 请求日志
 		start := time.Now()
+		capturePayloadEnabled, sanitizePayloadEnabled := prs.resolveRequestLogPayloadCaptureAndSanitization()
 		requestLog := &ReqeustLog{
 			Platform:         "gemini",
 			RequestedModel:   requestedModel,
 			IsStream:         isStream,
-			CapturePayload:   prs.isRequestLogPayloadCaptureEnabled(),
+			CapturePayload:   capturePayloadEnabled,
+			SanitizePayload:  sanitizePayloadEnabled,
 			InputTokens:      0,
 			OutputTokens:     0,
 			ProviderAuthType: "",
