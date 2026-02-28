@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	modelpricing "codeswitch/resources/model-pricing"
@@ -15,8 +16,23 @@ import (
 
 const timeLayout = "2006-01-02 15:04:05"
 
+const providerPerformanceCacheTTL = 20 * time.Second
+
 type LogService struct {
 	modelPricing *ModelPricingService
+
+	providerPerformanceCacheMu sync.Mutex
+	providerPerformanceCache   map[string]providerPerformanceCacheEntry
+}
+
+type providerPerformanceStat struct {
+	AvgFirstTokenSec float64
+	AvgTokensPerSec  float64
+}
+
+type providerPerformanceCacheEntry struct {
+	ExpiresAt time.Time
+	Stats     map[string]providerPerformanceStat
 }
 
 type requestLogSelecter interface {
@@ -52,7 +68,10 @@ func (ls *LogService) CostSince(start string, platform string) (float64, error) 
 }
 
 func NewLogService(modelPricing *ModelPricingService) *LogService {
-	return &LogService{modelPricing: modelPricing}
+	return &LogService{
+		modelPricing:             modelPricing,
+		providerPerformanceCache: make(map[string]providerPerformanceCacheEntry),
+	}
 }
 
 func selectRecordsByProviderRef(selecter requestLogSelecter, baseOptions []xdb.Option, providerRef string) ([]xdb.Record, error) {
@@ -85,6 +104,79 @@ func selectRecordsByProviderRef(selecter requestLogSelecter, baseOptions []xdb.O
 		return []xdb.Record{}, nil
 	}
 	return records, err
+}
+
+func normalizedProviderDisplayName(providerName string) string {
+	trimmed := strings.TrimSpace(providerName)
+	if trimmed == "" {
+		return "(unknown)"
+	}
+	return trimmed
+}
+
+func providerStatMapKey(providerID string, providerName string) string {
+	normalizedID := strings.TrimSpace(providerID)
+	if normalizedID != "" {
+		return "id:" + normalizedID
+	}
+	normalizedName := strings.ToLower(normalizedProviderDisplayName(providerName))
+	return "name:" + normalizedName
+}
+
+func cloneProviderPerformanceMap(source map[string]providerPerformanceStat) map[string]providerPerformanceStat {
+	if len(source) == 0 {
+		return map[string]providerPerformanceStat{}
+	}
+	cloned := make(map[string]providerPerformanceStat, len(source))
+	for key, stat := range source {
+		cloned[key] = stat
+	}
+	return cloned
+}
+
+func buildProviderPerformanceCacheKey(platformKey string, providerRef string, startUTCKey string, endUTCKey string) string {
+	return strings.Join([]string{
+		platformKey,
+		strings.TrimSpace(providerRef),
+		startUTCKey,
+		endUTCKey,
+	}, "|")
+}
+
+func (ls *LogService) getProviderPerformanceCache(cacheKey string, now time.Time) (map[string]providerPerformanceStat, bool) {
+	if ls == nil {
+		return nil, false
+	}
+
+	ls.providerPerformanceCacheMu.Lock()
+	defer ls.providerPerformanceCacheMu.Unlock()
+
+	cached, ok := ls.providerPerformanceCache[cacheKey]
+	if !ok {
+		return nil, false
+	}
+	if !now.Before(cached.ExpiresAt) {
+		delete(ls.providerPerformanceCache, cacheKey)
+		return nil, false
+	}
+	return cloneProviderPerformanceMap(cached.Stats), true
+}
+
+func (ls *LogService) setProviderPerformanceCache(cacheKey string, stats map[string]providerPerformanceStat, now time.Time) {
+	if ls == nil {
+		return
+	}
+
+	ls.providerPerformanceCacheMu.Lock()
+	defer ls.providerPerformanceCacheMu.Unlock()
+
+	if ls.providerPerformanceCache == nil {
+		ls.providerPerformanceCache = make(map[string]providerPerformanceCacheEntry)
+	}
+	ls.providerPerformanceCache[cacheKey] = providerPerformanceCacheEntry{
+		ExpiresAt: now.Add(providerPerformanceCacheTTL),
+		Stats:     cloneProviderPerformanceMap(stats),
+	}
 }
 
 func (ls *LogService) ListRequestLogs(platform string, provider string, limit int) ([]ReqeustLog, error) {
@@ -803,6 +895,9 @@ func (ls *LogService) ProviderStatsRangeV2(platform string, provider string, sta
 	}
 
 	duration := end.Sub(start)
+	startUTCKey := start.UTC().Format(timeLayout)
+	endUTCKey := end.UTC().Format(timeLayout)
+	platformKey := strings.TrimSpace(platform)
 	startKey := start.Format(timeLayout)
 	endKey := end.Format(timeLayout)
 	tableName := requestLogStatsHourlyTable
@@ -829,8 +924,8 @@ func (ls *LogService) ProviderStatsRangeV2(platform string, provider string, sta
 			"total_cost",
 		),
 	}
-	if platform != "" {
-		options = append(options, xdb.WhereEq("platform", platform))
+	if platformKey != "" {
+		options = append(options, xdb.WhereEq("platform", platformKey))
 	}
 	records, err := selectRecordsByProviderRef(model, options, provider)
 	if err != nil {
@@ -843,14 +938,8 @@ func (ls *LogService) ProviderStatsRangeV2(platform string, provider string, sta
 	statMap := map[string]*ProviderDailyStat{}
 	for _, record := range records {
 		providerID := strings.TrimSpace(record.GetString("provider_id"))
-		providerName := strings.TrimSpace(record.GetString("provider"))
-		if providerName == "" {
-			providerName = "(unknown)"
-		}
-		statKey := providerID
-		if statKey == "" {
-			statKey = providerName
-		}
+		providerName := normalizedProviderDisplayName(record.GetString("provider"))
+		statKey := providerStatMapKey(providerID, providerName)
 
 		stat := statMap[statKey]
 		if stat == nil {
@@ -879,6 +968,131 @@ func (ls *LogService) ProviderStatsRangeV2(platform string, provider string, sta
 		stat.CacheCreateTokens += record.GetInt64("cache_create_tokens")
 		stat.CacheReadTokens += record.GetInt64("cache_read_tokens")
 		stat.CostTotal += record.GetFloat64("total_cost")
+	}
+
+	if duration <= 48*time.Hour {
+		providerRef := strings.TrimSpace(provider)
+		cacheKey := buildProviderPerformanceCacheKey(platformKey, providerRef, startUTCKey, endUTCKey)
+		now := time.Now()
+		performanceMap, cached := ls.getProviderPerformanceCache(cacheKey, now)
+		if !cached {
+			db, err := xdb.DB("default")
+			if err != nil {
+				return nil, err
+			}
+
+			queryProviderPerformance := func(providerColumn string, providerValue string) (map[string]providerPerformanceStat, error) {
+				query := `
+					SELECT
+						CASE
+							WHEN TRIM(COALESCE(provider_id, '')) <> '' THEN 'id:' || TRIM(provider_id)
+							ELSE 'name:' || LOWER(CASE
+								WHEN TRIM(COALESCE(provider, '')) = '' THEN '(unknown)'
+								ELSE TRIM(provider)
+							END)
+						END AS provider_stat_key,
+						COALESCE(AVG(
+							CASE
+								WHEN COALESCE(is_stream, 0) = 1 AND first_token_sec > 0 THEN first_token_sec
+								ELSE NULL
+							END
+						), 0) AS avg_first_token_sec,
+						COALESCE(AVG(
+							CASE
+								WHEN COALESCE(is_stream, 0) = 1
+									AND output_tokens > 0
+									AND first_token_sec > 0
+									AND duration_sec > first_token_sec
+								THEN output_tokens / (duration_sec - first_token_sec)
+								ELSE NULL
+							END
+						), 0) AS avg_tokens_per_sec
+					FROM request_log
+					WHERE created_at >= ? AND created_at < ?
+				`
+				args := make([]interface{}, 0, 4)
+				args = append(args, startUTCKey, endUTCKey)
+				if platformKey != "" {
+					query += " AND platform = ?"
+					args = append(args, platformKey)
+				}
+				if providerColumn != "" {
+					query += " AND " + providerColumn + " = ?"
+					args = append(args, providerValue)
+				}
+				query += " GROUP BY provider_stat_key"
+
+				rows, err := db.Query(query, args...)
+				if err != nil {
+					if isNoSuchTableErr(err) || strings.Contains(err.Error(), "no such column") {
+						return map[string]providerPerformanceStat{}, nil
+					}
+					return nil, err
+				}
+				defer rows.Close()
+
+				statsByProvider := make(map[string]providerPerformanceStat, 16)
+				for rows.Next() {
+					var providerStatKey sql.NullString
+					var avgFirstTokenSec sql.NullFloat64
+					var avgTokensPerSec sql.NullFloat64
+					if err := rows.Scan(&providerStatKey, &avgFirstTokenSec, &avgTokensPerSec); err != nil {
+						return nil, err
+					}
+
+					statKey := strings.TrimSpace(providerStatKey.String)
+					if statKey == "" {
+						continue
+					}
+
+					firstTokenSec := 0.0
+					if avgFirstTokenSec.Valid && avgFirstTokenSec.Float64 > 0 {
+						firstTokenSec = avgFirstTokenSec.Float64
+					}
+					tokensPerSec := 0.0
+					if avgTokensPerSec.Valid && avgTokensPerSec.Float64 > 0 {
+						tokensPerSec = avgTokensPerSec.Float64
+					}
+
+					statsByProvider[statKey] = providerPerformanceStat{
+						AvgFirstTokenSec: firstTokenSec,
+						AvgTokensPerSec:  tokensPerSec,
+					}
+				}
+				if err := rows.Err(); err != nil {
+					return nil, err
+				}
+				return statsByProvider, nil
+			}
+
+			if providerRef == "" {
+				performanceMap, err = queryProviderPerformance("", "")
+				if err != nil {
+					return nil, err
+				}
+			} else {
+				performanceMap, err = queryProviderPerformance("provider_id", providerRef)
+				if err != nil {
+					return nil, err
+				}
+				if len(performanceMap) == 0 {
+					performanceMap, err = queryProviderPerformance("provider", providerRef)
+					if err != nil {
+						return nil, err
+					}
+				}
+			}
+			ls.setProviderPerformanceCache(cacheKey, performanceMap, now)
+		}
+
+		for statKey, performance := range performanceMap {
+			stat := statMap[statKey]
+			if stat == nil {
+				continue
+			}
+			stat.AvgFirstTokenSec = performance.AvgFirstTokenSec
+			stat.AvgTokensPerSec = performance.AvgTokensPerSec
+		}
 	}
 
 	stats := make([]ProviderDailyStat, 0, len(statMap))
@@ -1167,6 +1381,8 @@ type ProviderDailyStat struct {
 	CacheCreateTokens  int64   `json:"cache_create_tokens"`
 	CacheReadTokens    int64   `json:"cache_read_tokens"`
 	CostTotal          float64 `json:"cost_total"`
+	AvgFirstTokenSec   float64 `json:"avg_first_token_sec"`
+	AvgTokensPerSec    float64 `json:"avg_tokens_per_sec"`
 }
 
 type ModelUsageStat struct {

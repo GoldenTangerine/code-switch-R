@@ -403,7 +403,7 @@
                 </button>
               </div>
               <!-- <p class="card-subtitle">{{ card.apiUrl }}</p> -->
-              <p
+              <div
                 v-for="stats in [providerStatDisplay(card)]"
                 :key="`metrics-${card.id}`"
                 class="card-metrics"
@@ -412,21 +412,42 @@
                   {{ stats.message }}
                 </template>
                 <template v-else>
-                  <span
-                    v-if="stats.successRateLabel"
-                    class="card-success-rate"
-                    :class="stats.successRateClass"
+                  <div class="card-metrics-line">
+                    <span
+                      v-if="stats.successRateLabel"
+                      class="card-success-rate"
+                      :class="stats.successRateClass"
+                    >
+                      {{ stats.successRateLabel }}
+                    </span>
+                    <span
+                      v-if="stats.successRateLabel"
+                      class="card-metric-separator"
+                      aria-hidden="true"
+                    >
+                      ·
+                    </span>
+                    <span>{{ stats.requests }}</span>
+                    <span class="card-metric-separator" aria-hidden="true">·</span>
+                    <span>{{ stats.tokens }}</span>
+                    <span class="card-metric-separator" aria-hidden="true">·</span>
+                    <span>{{ stats.cost }}</span>
+                  </div>
+                  <div
+                    class="card-metrics-line card-metrics-line-performance"
+                    :title="t('components.main.providers.performanceHint')"
                   >
-                    {{ stats.successRateLabel }}
-                  </span>
-                  <span class="card-metric-separator" aria-hidden="true">·</span>
-                  <span >{{ stats.requests }}</span>
-                  <span class="card-metric-separator" aria-hidden="true">·</span>
-                  <span>{{ stats.tokens }}</span>
-                  <span class="card-metric-separator" aria-hidden="true">·</span>
-                  <span>{{ stats.cost }}</span>
+                    <span class="card-performance-item">
+                      <span class="performance-badge performance-badge--ttft">首</span>
+                      <span>{{ stats.ttft }}</span>
+                    </span>
+                    <span class="card-performance-item">
+                      <span class="performance-badge performance-badge--tps">速</span>
+                      <span>{{ stats.tps }}</span>
+                    </span>
+                  </div>
                 </template>
-              </p>
+              </div>
               <!-- 黑名单横幅 -->
               <div
                 v-if="getProviderBlacklistStatus(card)?.isBlacklisted"
@@ -1363,6 +1384,27 @@ const formatTokenNumber = (value: number) => {
     return `${(value / 1_000).toFixed(2)}k`
   }
   return value.toLocaleString()
+}
+
+const toPositiveFiniteNumber = (value: unknown) => {
+  const numeric = Number(value ?? 0)
+  if (!Number.isFinite(numeric) || numeric <= 0) return 0
+  return numeric
+}
+
+const formatAverageFirstTokenMs = (value: unknown) => {
+  const seconds = toPositiveFiniteNumber(value)
+  if (seconds <= 0) return '—'
+  const milliseconds = seconds * 1000
+  const precision = milliseconds >= 100 ? 0 : milliseconds >= 10 ? 1 : 2
+  return `${milliseconds.toFixed(precision)} ms`
+}
+
+const formatAverageTokensPerSecond = (value: unknown) => {
+  const tokensPerSecond = toPositiveFiniteNumber(value)
+  if (tokensPerSecond <= 0) return '—'
+  const precision = tokensPerSecond >= 100 ? 1 : 2
+  return `${tokensPerSecond.toFixed(precision)} tokens/s`
 }
 
 const tooltipDateFormatter = computed(() =>
@@ -2322,6 +2364,8 @@ type ProviderStatDisplay =
       requests: string
       tokens: string
       cost: string
+      ttft: string
+      tps: string
       successRateLabel: string
       successRateClass: string
     }
@@ -2370,6 +2414,8 @@ const providerStatDisplay = (card: AutomationCard): ProviderStatDisplay => {
     requests: `${t('components.main.providers.requests')}: ${formatMetric(stat.total_requests)}`,
     tokens: `${t('components.main.providers.tokens')}: ${formatTokenNumber(totalTokens)}`,
     cost: `${t('components.main.providers.cost')}: ${currencyFormatter.value.format(Math.max(stat.cost_total, 0))}`,
+    ttft: formatAverageFirstTokenMs(stat.avg_first_token_sec),
+    tps: formatAverageTokensPerSecond(stat.avg_tokens_per_sec),
     successRateLabel,
     successRateClass,
   }
@@ -3650,6 +3696,23 @@ const confirmDeleteCliTool = async () => {
   border-top: 1px solid var(--mac-border);
   background: color-mix(in srgb, var(--mac-surface) 94%, transparent);
   backdrop-filter: blur(6px);
+}
+
+.card-metrics-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.card-metrics-line-performance {
+  margin-top: 6px;
+  gap: 10px;
+}
+
+.card-performance-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 /* Level Badge 样式 */

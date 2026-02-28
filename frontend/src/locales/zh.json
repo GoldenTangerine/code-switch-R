@@ -334,6 +334,7 @@
         "tokens": "Tokens",
         "cost": "花费",
         "successRate": "成功率",
+        "performanceHint": "口径：仅统计今日流式请求中的有效样本；首 = 首 Token 平均耗时，速 = 平均输出速率",
         "loading": "刷新中...",
         "noData": "今日暂无数据",
         "lastUsed": "正在使用"

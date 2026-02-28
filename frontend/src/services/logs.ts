@@ -171,6 +171,8 @@ export type ProviderDailyStat = {
   cache_create_tokens: number
   cache_read_tokens: number
   cost_total: number
+  avg_first_token_sec?: number
+  avg_tokens_per_sec?: number
 }
 
 export const fetchProviderDailyStats = async (

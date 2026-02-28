@@ -333,6 +333,7 @@
         "tokens": "Tokens",
         "cost": "Cost",
         "successRate": "Success rate",
+        "performanceHint": "Scope: only valid streaming samples from today are counted; TTFT = avg first-token latency, TPS = avg output rate.",
         "loading": "Refreshing...",
         "noData": "No data yet today",
         "lastUsed": "In Use"

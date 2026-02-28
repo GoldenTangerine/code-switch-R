@@ -305,7 +305,7 @@ func main() {
 	// 'URL' is the URL that will be loaded into the webview.
 	mainWindow := app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title:     "Code Switch R",
-		Width:     1400,
+		Width:     1700,
 		Height:    1040,
 		MinWidth:  600,
 		MinHeight: 300,
