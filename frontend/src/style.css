@@ -1207,18 +1207,32 @@ html.dark .logs-date-picker-menu {
   text-transform: uppercase;
   font-weight: 600;
   letter-spacing: 0.04em;
-  border: 1px solid rgba(255, 255, 255, 0.35);
+  border: 1px solid rgba(148, 163, 184, 0.38);
   box-shadow: none;
 }
 
 .stream-tag.on {
-  background: rgba(56, 189, 248, 0.3);
-  color: #071827;
+  background: rgba(14, 165, 233, 0.18);
+  border-color: rgba(14, 165, 233, 0.42);
+  color: #075985;
 }
 
 .stream-tag.off {
-  background: rgba(148, 163, 184, 0.35);
-  color: #0f172a;
+  background: rgba(148, 163, 184, 0.2);
+  border-color: rgba(100, 116, 139, 0.38);
+  color: #334155;
+}
+
+html.dark .stream-tag.on {
+  background: rgba(56, 189, 248, 0.28);
+  border-color: rgba(56, 189, 248, 0.55);
+  color: #e0f2fe;
+}
+
+html.dark .stream-tag.off {
+  background: rgba(100, 116, 139, 0.34);
+  border-color: rgba(148, 163, 184, 0.5);
+  color: #e2e8f0;
 }
 
 .duration-tag {
