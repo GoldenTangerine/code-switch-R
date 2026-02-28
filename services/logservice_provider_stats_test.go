@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"math"
 	"testing"
+	"time"
 
 	"github.com/daodao97/xgo/xdb"
 )
@@ -82,10 +83,72 @@ func TestProviderStatsRangeV2_PerformanceAggregatesByStableProviderKey(t *testin
 	if !almostEqualFloatProviderStat(stat.AvgFirstTokenSec, expectedTTFT) {
 		t.Fatalf("期望 avg_first_token_sec=%f，实际 %f", expectedTTFT, stat.AvgFirstTokenSec)
 	}
+	if stat.TTFTSampleCount != 2 {
+		t.Fatalf("期望 ttft_sample_count=2，实际 %d", stat.TTFTSampleCount)
+	}
 
-	expectedTPS := (100.0/(2.0-0.2) + 60.0/(1.4-0.4)) / 2.0
+	expectedTPS := (100.0 + 60.0) / ((2.0 - 0.2) + (1.4 - 0.4))
 	if !almostEqualFloatProviderStat(stat.AvgTokensPerSec, expectedTPS) {
 		t.Fatalf("期望 avg_tokens_per_sec=%f，实际 %f", expectedTPS, stat.AvgTokensPerSec)
+	}
+	if stat.TPSSampleCount != 2 {
+		t.Fatalf("期望 tps_sample_count=2，实际 %d", stat.TPSSampleCount)
+	}
+}
+
+func TestProviderStatsRangeV2_PerformanceIgnoresTinyGenerationWindowOutlier(t *testing.T) {
+	useIsolatedHomeDir(t)
+
+	if err := InitDatabase(); err != nil {
+		t.Fatalf("初始化数据库失败: %v", err)
+	}
+
+	db, err := xdb.DB("default")
+	if err != nil {
+		t.Fatalf("获取数据库连接失败: %v", err)
+	}
+
+	insertRequestLogForProviderStats(t, db, providerStatsLogEntry{
+		Platform:      "codex",
+		ProviderID:    "pid-3",
+		Provider:      "OutlierGuard",
+		IsStream:      1,
+		DurationSec:   2.2,
+		FirstTokenSec: 0.2,
+		OutputTokens:  200,
+		CreatedAt:     "2026-02-25 16:00:00",
+	})
+	// 极小生成窗口（1ms）理论速率会非常夸张，应被过滤掉。
+	insertRequestLogForProviderStats(t, db, providerStatsLogEntry{
+		Platform:      "codex",
+		ProviderID:    "pid-3",
+		Provider:      "OutlierGuard",
+		IsStream:      1,
+		DurationSec:   0.401,
+		FirstTokenSec: 0.4,
+		OutputTokens:  5000,
+		CreatedAt:     "2026-02-25 16:30:00",
+	})
+
+	ls := NewLogService(nil)
+	stats, err := ls.ProviderStatsRangeV2("codex", "", "2026-02-25 00:00:00", "2026-02-26 00:00:00")
+	if err != nil {
+		t.Fatalf("ProviderStatsRangeV2 调用失败: %v", err)
+	}
+
+	stat := findProviderStatByID(stats, "pid-3")
+	if stat == nil {
+		t.Fatalf("未找到 provider_id=pid-3 的统计")
+	}
+	expectedTPS := 200.0 / (2.2 - 0.2)
+	if !almostEqualFloatProviderStat(stat.AvgTokensPerSec, expectedTPS) {
+		t.Fatalf("期望 avg_tokens_per_sec=%f，实际 %f", expectedTPS, stat.AvgTokensPerSec)
+	}
+	if stat.TTFTSampleCount != 2 {
+		t.Fatalf("期望 ttft_sample_count=2，实际 %d", stat.TTFTSampleCount)
+	}
+	if stat.TPSSampleCount != 1 {
+		t.Fatalf("期望 tps_sample_count=1，实际 %d", stat.TPSSampleCount)
 	}
 }
 
@@ -138,6 +201,12 @@ func TestProviderStatsRangeV2_PerformanceReturnsZeroWhenNoValidStreamingSamples(
 	if stat.AvgTokensPerSec != 0 {
 		t.Fatalf("无有效样本时 avg_tokens_per_sec 应为 0，实际 %f", stat.AvgTokensPerSec)
 	}
+	if stat.TTFTSampleCount != 0 {
+		t.Fatalf("无有效样本时 ttft_sample_count 应为 0，实际 %d", stat.TTFTSampleCount)
+	}
+	if stat.TPSSampleCount != 0 {
+		t.Fatalf("无有效样本时 tps_sample_count 应为 0，实际 %d", stat.TPSSampleCount)
+	}
 }
 
 func TestProviderStatsRangeV2_FallbackToProviderNameWhenProviderIDNotFound(t *testing.T) {
@@ -179,6 +248,26 @@ func TestProviderStatsRangeV2_FallbackToProviderNameWhenProviderIDNotFound(t *te
 	}
 	if !almostEqualFloatProviderStat(stats[0].AvgTokensPerSec, 50.0) {
 		t.Fatalf("期望 avg_tokens_per_sec=50，实际 %f", stats[0].AvgTokensPerSec)
+	}
+	if stats[0].TTFTSampleCount != 1 {
+		t.Fatalf("期望 ttft_sample_count=1，实际 %d", stats[0].TTFTSampleCount)
+	}
+	if stats[0].TPSSampleCount != 1 {
+		t.Fatalf("期望 tps_sample_count=1，实际 %d", stats[0].TPSSampleCount)
+	}
+}
+
+func TestDefaultRangeEnd_DayBoundaryUsesNextLocalMidnight(t *testing.T) {
+	start := time.Date(2026, 2, 28, 0, 0, 0, 0, time.Local)
+	expected := start.AddDate(0, 0, 1)
+	if end := defaultRangeEnd(start); !end.Equal(expected) {
+		t.Fatalf("期望日边界默认结束时间为次日零点 %s，实际 %s", expected.Format(timeLayout), end.Format(timeLayout))
+	}
+
+	nonBoundary := time.Date(2026, 2, 28, 9, 30, 0, 0, time.Local)
+	expectedNonBoundary := nonBoundary.Add(24 * time.Hour)
+	if end := defaultRangeEnd(nonBoundary); !end.Equal(expectedNonBoundary) {
+		t.Fatalf("期望非日边界默认结束时间为 +24h %s，实际 %s", expectedNonBoundary.Format(timeLayout), end.Format(timeLayout))
 	}
 }
 

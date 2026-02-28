@@ -17,6 +17,8 @@ import (
 const timeLayout = "2006-01-02 15:04:05"
 
 const providerPerformanceCacheTTL = 20 * time.Second
+const providerPerformanceCacheMaxEntries = 512
+const providerTokensPerSecondMinWindowSec = 0.05
 
 type LogService struct {
 	modelPricing *ModelPricingService
@@ -28,6 +30,8 @@ type LogService struct {
 type providerPerformanceStat struct {
 	AvgFirstTokenSec float64
 	AvgTokensPerSec  float64
+	TTFTSampleCount  int64
+	TPSSampleCount   int64
 }
 
 type providerPerformanceCacheEntry struct {
@@ -134,6 +138,13 @@ func cloneProviderPerformanceMap(source map[string]providerPerformanceStat) map[
 	return cloned
 }
 
+func defaultRangeEnd(start time.Time) time.Time {
+	if start.Equal(startOfDay(start)) {
+		return startOfDay(start).AddDate(0, 0, 1)
+	}
+	return start.Add(24 * time.Hour)
+}
+
 func buildProviderPerformanceCacheKey(platformKey string, providerRef string, startUTCKey string, endUTCKey string) string {
 	return strings.Join([]string{
 		platformKey,
@@ -173,9 +184,58 @@ func (ls *LogService) setProviderPerformanceCache(cacheKey string, stats map[str
 	if ls.providerPerformanceCache == nil {
 		ls.providerPerformanceCache = make(map[string]providerPerformanceCacheEntry)
 	}
+	reserveSlots := 0
+	if _, exists := ls.providerPerformanceCache[cacheKey]; !exists {
+		reserveSlots = 1
+	}
+	ls.compactProviderPerformanceCacheLocked(now, reserveSlots)
 	ls.providerPerformanceCache[cacheKey] = providerPerformanceCacheEntry{
 		ExpiresAt: now.Add(providerPerformanceCacheTTL),
 		Stats:     cloneProviderPerformanceMap(stats),
+	}
+}
+
+func (ls *LogService) compactProviderPerformanceCacheLocked(now time.Time, reserveSlots int) {
+	if ls == nil || ls.providerPerformanceCache == nil {
+		return
+	}
+
+	for key, entry := range ls.providerPerformanceCache {
+		if !now.Before(entry.ExpiresAt) {
+			delete(ls.providerPerformanceCache, key)
+		}
+	}
+
+	maxEntries := providerPerformanceCacheMaxEntries - reserveSlots
+	if maxEntries < 1 {
+		maxEntries = 1
+	}
+	if len(ls.providerPerformanceCache) <= maxEntries {
+		return
+	}
+
+	type cacheSnapshot struct {
+		Key       string
+		ExpiresAt time.Time
+	}
+
+	snapshots := make([]cacheSnapshot, 0, len(ls.providerPerformanceCache))
+	for key, entry := range ls.providerPerformanceCache {
+		snapshots = append(snapshots, cacheSnapshot{
+			Key:       key,
+			ExpiresAt: entry.ExpiresAt,
+		})
+	}
+	sort.Slice(snapshots, func(i, j int) bool {
+		return snapshots[i].ExpiresAt.Before(snapshots[j].ExpiresAt)
+	})
+
+	overflow := len(ls.providerPerformanceCache) - maxEntries
+	if overflow <= 0 {
+		return
+	}
+	for i := 0; i < overflow && i < len(snapshots); i++ {
+		delete(ls.providerPerformanceCache, snapshots[i].Key)
 	}
 }
 
@@ -715,7 +775,7 @@ func (ls *LogService) heatmapStatsFromRequestLog(
 
 func (ls *LogService) StatsSince(platform string) (LogStats, error) {
 	seriesStart := startOfDay(time.Now())
-	seriesEnd := seriesStart.Add(24 * time.Hour)
+	seriesEnd := seriesStart.AddDate(0, 0, 1)
 	return ls.StatsRangeV2(platform, "", seriesStart.Format(timeLayout), seriesEnd.Format(timeLayout))
 }
 
@@ -736,7 +796,7 @@ func (ls *LogService) StatsRangeV2(platform string, provider string, startAt str
 			return stats, err
 		}
 	} else {
-		end = start.Add(24 * time.Hour)
+		end = defaultRangeEnd(start)
 	}
 
 	if !start.Before(end) {
@@ -870,7 +930,7 @@ func (ls *LogService) StatsRangeV2(platform string, provider string, startAt str
 
 func (ls *LogService) ProviderDailyStats(platform string) ([]ProviderDailyStat, error) {
 	start := startOfDay(time.Now())
-	end := start.Add(24 * time.Hour)
+	end := start.AddDate(0, 0, 1)
 	return ls.ProviderStatsRangeV2(platform, "", start.Format(timeLayout), end.Format(timeLayout))
 }
 
@@ -887,7 +947,7 @@ func (ls *LogService) ProviderStatsRangeV2(platform string, provider string, sta
 			return nil, err
 		}
 	} else {
-		end = start.Add(24 * time.Hour)
+		end = defaultRangeEnd(start)
 	}
 
 	if !start.Before(end) {
@@ -982,7 +1042,7 @@ func (ls *LogService) ProviderStatsRangeV2(platform string, provider string, sta
 			}
 
 			queryProviderPerformance := func(providerColumn string, providerValue string) (map[string]providerPerformanceStat, error) {
-				query := `
+				query := fmt.Sprintf(`
 					SELECT
 						CASE
 							WHEN TRIM(COALESCE(provider_id, '')) <> '' THEN 'id:' || TRIM(provider_id)
@@ -991,25 +1051,70 @@ func (ls *LogService) ProviderStatsRangeV2(platform string, provider string, sta
 								ELSE TRIM(provider)
 							END)
 						END AS provider_stat_key,
-						COALESCE(AVG(
+							COALESCE(AVG(
+								CASE
+									WHEN COALESCE(is_stream, 0) = 1 AND first_token_sec > 0 THEN first_token_sec
+									ELSE NULL
+								END
+							), 0) AS avg_first_token_sec,
+							COALESCE(SUM(
+								CASE
+									WHEN COALESCE(is_stream, 0) = 1 AND first_token_sec > 0 THEN 1
+									ELSE 0
+								END
+							), 0) AS ttft_sample_count,
 							CASE
-								WHEN COALESCE(is_stream, 0) = 1 AND first_token_sec > 0 THEN first_token_sec
-								ELSE NULL
-							END
-						), 0) AS avg_first_token_sec,
-						COALESCE(AVG(
-							CASE
-								WHEN COALESCE(is_stream, 0) = 1
-									AND output_tokens > 0
-									AND first_token_sec > 0
-									AND duration_sec > first_token_sec
-								THEN output_tokens / (duration_sec - first_token_sec)
-								ELSE NULL
-							END
-						), 0) AS avg_tokens_per_sec
+								WHEN COALESCE(SUM(
+									CASE
+										WHEN COALESCE(is_stream, 0) = 1
+											AND output_tokens > 0
+											AND first_token_sec > 0
+											AND duration_sec > first_token_sec
+											AND (duration_sec - first_token_sec) >= %.6f
+										THEN (duration_sec - first_token_sec)
+										ELSE 0
+									END
+								), 0) > 0
+								THEN
+									COALESCE(SUM(
+										CASE
+											WHEN COALESCE(is_stream, 0) = 1
+												AND output_tokens > 0
+												AND first_token_sec > 0
+												AND duration_sec > first_token_sec
+												AND (duration_sec - first_token_sec) >= %.6f
+											THEN output_tokens
+											ELSE 0
+										END
+									), 0)
+									/
+									SUM(
+										CASE
+											WHEN COALESCE(is_stream, 0) = 1
+												AND output_tokens > 0
+												AND first_token_sec > 0
+												AND duration_sec > first_token_sec
+												AND (duration_sec - first_token_sec) >= %.6f
+											THEN (duration_sec - first_token_sec)
+											ELSE 0
+										END
+									)
+								ELSE 0
+							END AS avg_tokens_per_sec,
+							COALESCE(SUM(
+								CASE
+									WHEN COALESCE(is_stream, 0) = 1
+										AND output_tokens > 0
+										AND first_token_sec > 0
+										AND duration_sec > first_token_sec
+										AND (duration_sec - first_token_sec) >= %.6f
+									THEN 1
+									ELSE 0
+								END
+							), 0) AS tps_sample_count
 					FROM request_log
 					WHERE created_at >= ? AND created_at < ?
-				`
+				`, providerTokensPerSecondMinWindowSec, providerTokensPerSecondMinWindowSec, providerTokensPerSecondMinWindowSec, providerTokensPerSecondMinWindowSec)
 				args := make([]interface{}, 0, 4)
 				args = append(args, startUTCKey, endUTCKey)
 				if platformKey != "" {
@@ -1035,8 +1140,16 @@ func (ls *LogService) ProviderStatsRangeV2(platform string, provider string, sta
 				for rows.Next() {
 					var providerStatKey sql.NullString
 					var avgFirstTokenSec sql.NullFloat64
+					var ttftSampleCount sql.NullInt64
 					var avgTokensPerSec sql.NullFloat64
-					if err := rows.Scan(&providerStatKey, &avgFirstTokenSec, &avgTokensPerSec); err != nil {
+					var tpsSampleCount sql.NullInt64
+					if err := rows.Scan(
+						&providerStatKey,
+						&avgFirstTokenSec,
+						&ttftSampleCount,
+						&avgTokensPerSec,
+						&tpsSampleCount,
+					); err != nil {
 						return nil, err
 					}
 
@@ -1057,6 +1170,8 @@ func (ls *LogService) ProviderStatsRangeV2(platform string, provider string, sta
 					statsByProvider[statKey] = providerPerformanceStat{
 						AvgFirstTokenSec: firstTokenSec,
 						AvgTokensPerSec:  tokensPerSec,
+						TTFTSampleCount:  ttftSampleCount.Int64,
+						TPSSampleCount:   tpsSampleCount.Int64,
 					}
 				}
 				if err := rows.Err(); err != nil {
@@ -1092,6 +1207,8 @@ func (ls *LogService) ProviderStatsRangeV2(platform string, provider string, sta
 			}
 			stat.AvgFirstTokenSec = performance.AvgFirstTokenSec
 			stat.AvgTokensPerSec = performance.AvgTokensPerSec
+			stat.TTFTSampleCount = performance.TTFTSampleCount
+			stat.TPSSampleCount = performance.TPSSampleCount
 		}
 	}
 
@@ -1126,7 +1243,7 @@ func (ls *LogService) ModelStatsRangeV2(platform string, provider string, startA
 			return nil, err
 		}
 	} else {
-		end = start.Add(24 * time.Hour)
+		end = defaultRangeEnd(start)
 	}
 
 	if !start.Before(end) {
@@ -1383,6 +1500,8 @@ type ProviderDailyStat struct {
 	CostTotal          float64 `json:"cost_total"`
 	AvgFirstTokenSec   float64 `json:"avg_first_token_sec"`
 	AvgTokensPerSec    float64 `json:"avg_tokens_per_sec"`
+	TTFTSampleCount    int64   `json:"ttft_sample_count"`
+	TPSSampleCount     int64   `json:"tps_sample_count"`
 }
 
 type ModelUsageStat struct {

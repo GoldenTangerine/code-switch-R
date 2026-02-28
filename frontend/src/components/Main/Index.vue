@@ -435,7 +435,7 @@
                   </div>
                   <div
                     class="card-metrics-line card-metrics-line-performance"
-                    :title="t('components.main.providers.performanceHint')"
+                    :title="stats.performanceHint"
                   >
                     <span class="card-performance-item">
                       <span class="performance-badge performance-badge--ttft">首</span>
@@ -2366,6 +2366,7 @@ type ProviderStatDisplay =
       cost: string
       ttft: string
       tps: string
+      performanceHint: string
       successRateLabel: string
       successRateClass: string
     }
@@ -2409,6 +2410,15 @@ const providerStatDisplay = (card: AutomationCard): ProviderStatDisplay => {
   const successRateValue = Number.isFinite(stat.success_rate) ? clamp(stat.success_rate, 0, 1) : null
   const successRateLabel = successRateValue !== null ? formatSuccessRateLabel(successRateValue) : ''
   const successRateClass = successRateValue !== null ? successRateClassName(successRateValue) : ''
+  const ttftSampleCountRaw = Number(stat.ttft_sample_count ?? 0)
+  const tpsSampleCountRaw = Number(stat.tps_sample_count ?? 0)
+  const ttftSampleCount = Number.isFinite(ttftSampleCountRaw) ? Math.max(0, Math.floor(ttftSampleCountRaw)) : 0
+  const tpsSampleCount = Number.isFinite(tpsSampleCountRaw) ? Math.max(0, Math.floor(tpsSampleCountRaw)) : 0
+  const performanceHint = t('components.main.providers.performanceHint', {
+    ttftSamples: formatMetric(ttftSampleCount),
+    tpsSamples: formatMetric(tpsSampleCount),
+    minWindowMs: 50,
+  })
   return {
     state: 'ready',
     requests: `${t('components.main.providers.requests')}: ${formatMetric(stat.total_requests)}`,
@@ -2416,6 +2426,7 @@ const providerStatDisplay = (card: AutomationCard): ProviderStatDisplay => {
     cost: `${t('components.main.providers.cost')}: ${currencyFormatter.value.format(Math.max(stat.cost_total, 0))}`,
     ttft: formatAverageFirstTokenMs(stat.avg_first_token_sec),
     tps: formatAverageTokensPerSecond(stat.avg_tokens_per_sec),
+    performanceHint,
     successRateLabel,
     successRateClass,
   }

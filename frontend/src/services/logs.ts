@@ -173,6 +173,8 @@ export type ProviderDailyStat = {
   cost_total: number
   avg_first_token_sec?: number
   avg_tokens_per_sec?: number
+  ttft_sample_count?: number
+  tps_sample_count?: number
 }
 
 export const fetchProviderDailyStats = async (
