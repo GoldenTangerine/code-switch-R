@@ -507,7 +507,7 @@ func (ls *LogService) HeatmapStats(days int) ([]HeatmapStat, error) {
 		hourKey := hourStart.Unix()
 		bucket := hourBuckets[hourKey]
 		if bucket == nil {
-			bucket = &HeatmapStat{Day: hourStart.Format("01-02 15")}
+			bucket = &HeatmapStat{Day: hourStart.Format("2006-01-02 15")}
 			hourBuckets[hourKey] = bucket
 		}
 		bucket.TotalRequests++

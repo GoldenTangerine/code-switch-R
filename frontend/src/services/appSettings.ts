@@ -1,7 +1,14 @@
 import { Call } from '@wailsio/runtime'
 
+export type HeatmapGranularity = 'hourly' | 'daily'
+
+export const normalizeHeatmapGranularity = (
+  value?: string | null,
+): HeatmapGranularity => (value === 'daily' ? 'daily' : 'hourly')
+
 export type AppSettings = {
   show_heatmap: boolean
+  heatmap_granularity: HeatmapGranularity
   show_home_title: boolean
   budget_total: number
   budget_used_adjustment: number
@@ -33,6 +40,7 @@ export type AppSettings = {
 
 const DEFAULT_SETTINGS: AppSettings = {
   show_heatmap: true,
+  heatmap_granularity: 'hourly',
   show_home_title: true,
   budget_total: 0,
   budget_used_adjustment: 0,
@@ -64,7 +72,11 @@ const DEFAULT_SETTINGS: AppSettings = {
 
 export const fetchAppSettings = async (): Promise<AppSettings> => {
   const data = await Call.ByName('codeswitch/services.AppSettingsService.GetAppSettings')
-  return data ?? DEFAULT_SETTINGS
+  return {
+    ...DEFAULT_SETTINGS,
+    ...data,
+    heatmap_granularity: normalizeHeatmapGranularity(data?.heatmap_granularity),
+  }
 }
 
 export const saveAppSettings = async (settings: AppSettings): Promise<AppSettings> => {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -18,10 +19,13 @@ const (
 	defaultUpdateHistoryKeepCount = 3
 	minUpdateHistoryKeepCount     = 1
 	maxUpdateHistoryKeepCount     = 20
+	heatmapGranularityHourly      = "hourly"
+	heatmapGranularityDaily       = "daily"
 )
 
 type AppSettings struct {
 	ShowHeatmap                bool    `json:"show_heatmap"`
+	HeatmapGranularity         string  `json:"heatmap_granularity"`
 	ShowHomeTitle              bool    `json:"show_home_title"`
 	BudgetTotal                float64 `json:"budget_total"`
 	BudgetUsedAdjustment       float64 `json:"budget_used_adjustment"`
@@ -162,6 +166,7 @@ func (as *AppSettingsService) defaultSettings() AppSettings {
 
 	return AppSettings{
 		ShowHeatmap:                true,
+		HeatmapGranularity:         heatmapGranularityHourly,
 		ShowHomeTitle:              true,
 		BudgetTotal:                0,
 		BudgetUsedAdjustment:       0,
@@ -203,6 +208,7 @@ func (as *AppSettingsService) GetAppSettings() (AppSettings, error) {
 func (as *AppSettingsService) SaveAppSettings(settings AppSettings) (AppSettings, error) {
 	as.mu.Lock()
 	defer as.mu.Unlock()
+	settings.HeatmapGranularity = normalizeHeatmapGranularity(settings.HeatmapGranularity)
 	settings.UpdateHistoryKeepCount = normalizeUpdateHistoryKeepCount(settings.UpdateHistoryKeepCount)
 
 	// 同步开机自启动状态
@@ -239,6 +245,7 @@ func (as *AppSettingsService) loadLocked() (AppSettings, error) {
 	if err := json.Unmarshal(data, &settings); err != nil {
 		return settings, err
 	}
+	settings.HeatmapGranularity = normalizeHeatmapGranularity(settings.HeatmapGranularity)
 	settings.UpdateHistoryKeepCount = normalizeUpdateHistoryKeepCount(settings.UpdateHistoryKeepCount)
 	return settings, nil
 }
@@ -248,6 +255,7 @@ func (as *AppSettingsService) saveLocked(settings AppSettings) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
+	settings.HeatmapGranularity = normalizeHeatmapGranularity(settings.HeatmapGranularity)
 	settings.UpdateHistoryKeepCount = normalizeUpdateHistoryKeepCount(settings.UpdateHistoryKeepCount)
 	data, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
@@ -264,6 +272,15 @@ func normalizeUpdateHistoryKeepCount(count int) int {
 		return maxUpdateHistoryKeepCount
 	}
 	return count
+}
+
+func normalizeHeatmapGranularity(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case heatmapGranularityDaily:
+		return heatmapGranularityDaily
+	default:
+		return heatmapGranularityHourly
+	}
 }
 
 // LoadUpdateHistoryKeepCount 从应用设置读取更新包历史保留数量（读取失败时返回默认值）

@@ -8,7 +8,12 @@ import ThemeSetting from '../Setting/ThemeSetting.vue'
 import NetworkWslSettings from '../Setting/NetworkWslSettings.vue'
 import ModelPricingModal from '../Setting/ModelPricingModal.vue'
 import InlineModal from '../common/InlineModal.vue'
-import { fetchAppSettings, saveAppSettings, type AppSettings } from '../../services/appSettings'
+import {
+  fetchAppSettings,
+  saveAppSettings,
+  normalizeHeatmapGranularity,
+  type AppSettings,
+} from '../../services/appSettings'
 import { fetchCostSince, fetchLogStats } from '../../services/logs'
 import { checkUpdate, downloadUpdate, restartApp, getUpdateState, setAutoCheckEnabled, type UpdateInfo, type UpdateState } from '../../services/update'
 import { fetchCurrentVersion } from '../../services/version'
@@ -52,6 +57,7 @@ const defaultUpdateHistoryKeepCount = 3
 const minUpdateHistoryKeepCount = 1
 const maxUpdateHistoryKeepCount = 20
 const heatmapEnabled = ref(getCachedValue('heatmap', true))
+const heatmapGranularity = ref(normalizeHeatmapGranularity(getCachedString('heatmapGranularity', 'hourly')))
 const homeTitleVisible = ref(getCachedValue('homeTitle', true))
 const autoStartEnabled = ref(getCachedValue('autoStart', false))
 const autoUpdateEnabled = ref(getCachedValue('autoUpdate', true))
@@ -231,6 +237,7 @@ const setupBudgetUsageTicker = () => {
 
 const syncAppSettingsCache = () => {
   localStorage.setItem('app-settings-heatmap', String(heatmapEnabled.value))
+  localStorage.setItem('app-settings-heatmapGranularity', heatmapGranularity.value)
   localStorage.setItem('app-settings-homeTitle', String(homeTitleVisible.value))
   localStorage.setItem('app-settings-budgetTotal', String(budgetTotal.value))
   localStorage.setItem('app-settings-budgetUsedAdjustment', String(budgetUsedAdjustment.value))
@@ -751,6 +758,7 @@ const loadAppSettings = async () => {
   try {
     const data = await fetchAppSettings()
     heatmapEnabled.value = data?.show_heatmap ?? true
+    heatmapGranularity.value = normalizeHeatmapGranularity(data?.heatmap_granularity)
     homeTitleVisible.value = data?.show_home_title ?? true
     budgetTotal.value = Number(data?.budget_total ?? 0)
     const rawBudgetUsedDelta = Number(data?.budget_used_adjustment ?? 0)
@@ -793,6 +801,7 @@ const loadAppSettings = async () => {
   } catch (error) {
     console.error('failed to load app settings', error)
     heatmapEnabled.value = true
+    heatmapGranularity.value = 'hourly'
     homeTitleVisible.value = true
     budgetTotal.value = 0
     budgetUsedAdjustment.value = 0
@@ -919,6 +928,7 @@ const persistAppSettingsNow = async () => {
 
     const payload: AppSettings = {
       show_heatmap: heatmapEnabled.value,
+      heatmap_granularity: heatmapGranularity.value,
       show_home_title: homeTitleVisible.value,
       budget_total: normalizedBudgetTotal,
       budget_used_adjustment: budgetUsedDelta.value,
@@ -1450,6 +1460,16 @@ onBeforeUnmount(() => {
               />
               <span></span>
             </label>
+          </ListItem>
+          <ListItem :label="$t('components.general.label.heatmapGranularity')">
+            <select
+              v-model="heatmapGranularity"
+              :disabled="settingsLoading || saveBusy || !heatmapEnabled"
+              class="mac-select"
+              @change="persistAppSettings">
+              <option value="hourly">{{ $t('components.general.label.heatmapGranularityHourly') }}</option>
+              <option value="daily">{{ $t('components.general.label.heatmapGranularityDaily') }}</option>
+            </select>
           </ListItem>
           <ListItem :label="$t('components.general.label.homeTitle')">
             <label class="mac-switch">

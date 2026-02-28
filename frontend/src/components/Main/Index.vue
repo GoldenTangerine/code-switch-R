@@ -1051,7 +1051,12 @@ import { fetchGeminiProxyStatus, enableGeminiProxy, disableGeminiProxy } from '.
 import { fetchProviderDailyStats, type ProviderDailyStat } from '../../services/logs'
 import { fetchProviderModelPricing } from '../../services/providerModelPricing'
 import { fetchCurrentVersion } from '../../services/version'
-import { fetchAppSettings, type AppSettings } from '../../services/appSettings'
+import {
+  fetchAppSettings,
+  normalizeHeatmapGranularity,
+  type AppSettings,
+  type HeatmapGranularity,
+} from '../../services/appSettings'
 import { getUpdateState, restartApp, type UpdateState } from '../../services/update'
 import { getCurrentTheme, setTheme, type ThemeMode } from '../../utils/ThemeManager'
 import { useRouter } from 'vue-router'
@@ -1101,13 +1106,14 @@ const releasePageUrl = 'https://github.com/GoldenTangerine/code-switch-R/release
 const releaseApiUrl = 'https://api.github.com/repos/GoldenTangerine/code-switch-R/releases/latest'
 
 const heatmapContainerRef = ref<HTMLElement | null>(null)
+const heatmapGranularity = ref<HeatmapGranularity>('hourly')
 // 使用自适应热力图 composable
 const {
   displayData: usageHeatmap,
   init: initHeatmap,
   cleanup: cleanupHeatmap,
   reload: reloadHeatmap,
-} = useAdaptiveHeatmap(heatmapContainerRef)
+} = useAdaptiveHeatmap(heatmapContainerRef, heatmapGranularity)
 const tooltipRef = ref<HTMLElement | null>(null)
 const proxyStates = reactive<Record<ProviderTab, boolean>>({
   claude: false,
@@ -1354,8 +1360,12 @@ const tooltipDateFormatter = computed(() =>
   new Intl.DateTimeFormat(locale.value || 'en', {
     month: 'short',
     day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
+    ...(heatmapGranularity.value === 'daily'
+      ? {}
+      : {
+        hour: '2-digit',
+        minute: '2-digit',
+      }),
   })
 )
 
@@ -1484,10 +1494,12 @@ const loadAppSettings = async () => {
   try {
     const data: AppSettings = await fetchAppSettings()
     showHeatmap.value = data?.show_heatmap ?? true
+    heatmapGranularity.value = normalizeHeatmapGranularity(data?.heatmap_granularity)
     showHomeTitle.value = data?.show_home_title ?? true
   } catch (error) {
     console.error('failed to load app settings', error)
     showHeatmap.value = true
+    heatmapGranularity.value = 'hourly'
     showHomeTitle.value = true
     // 加载应用设置失败时提示用户
     showToast(t('components.main.errors.loadAppSettingsFailed'), 'warning')
@@ -2485,13 +2497,13 @@ let unsubscribeSwitched: (() => void) | undefined
 let unsubscribeBlacklisted: (() => void) | undefined
 
 onMounted(async () => {
+  await loadAppSettings()
   void initHeatmap()
   await loadProvidersFromDisk()
   void refreshProviderPricingCachesOnStartup()
   await Promise.all(providerTabIds.map(refreshProxyState))
   await Promise.all(providerTabIds.map((tab) => refreshDirectAppliedStatus(tab)))
   await Promise.all(providerTabIds.map((tab) => loadProviderStats(tab)))
-  await loadAppSettings()
   await pollUpdateState() // 首次加载更新状态
   await checkForUpdates(false)
   await refreshImportStatus()

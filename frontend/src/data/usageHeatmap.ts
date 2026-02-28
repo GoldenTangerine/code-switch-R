@@ -1,5 +1,7 @@
 import type { HeatmapStat } from '../services/logs'
 
+export type HeatmapGranularity = 'hourly' | 'daily'
+
 export type UsageHeatmapDay = {
 	label: string
 	dateKey: string
@@ -16,10 +18,13 @@ export type UsageHeatmapWeek = UsageHeatmapDay[]
 export const HEATMAP_ROWS = 8
 export const BUCKETS_PER_DAY = 3
 export const DEFAULT_HEATMAP_DAYS = 21
+const DAILY_SCALE_FACTOR = 24
 const HOURS_PER_BUCKET = 8
 const LEVELS = 4
 
 const clampDays = (days?: number) => (days && days > 0 ? Math.floor(days) : DEFAULT_HEATMAP_DAYS)
+const normalizeGranularity = (granularity?: HeatmapGranularity): HeatmapGranularity =>
+	granularity === 'daily' ? 'daily' : 'hourly'
 
 const intensityForCount = (count: number, maxCount: number) => {
 	if (count <= 0 || maxCount <= 0) return 0
@@ -47,6 +52,13 @@ const formatHourKey = (date: Date) => {
 	return `${year}-${month}-${day} ${hour}`
 }
 
+const formatDayKey = (date: Date) => {
+	const year = date.getFullYear()
+	const month = `${date.getMonth() + 1}`.padStart(2, '0')
+	const day = `${date.getDate()}`.padStart(2, '0')
+	return `${year}-${month}-${day}`
+}
+
 const labelForCell = (date: Date) => {
 	const month = `${date.getMonth() + 1}`.padStart(2, '0')
 	const day = `${date.getDate()}`.padStart(2, '0')
@@ -54,9 +66,20 @@ const labelForCell = (date: Date) => {
 	return `${month}-${day} ${hour}`
 }
 
+const labelForDay = (date: Date) => {
+	const month = `${date.getMonth() + 1}`.padStart(2, '0')
+	const day = `${date.getDate()}`.padStart(2, '0')
+	return `${month}-${day}`
+}
+
 const normalizeStatKey = (value?: string | null) => {
 	const trimmed = value?.trim()
 	if (!trimmed) return null
+	const fullMatch = trimmed.match(/^(\d{4})-(\d{2})-(\d{2}) (\d{2})$/)
+	if (fullMatch) {
+		const [, yearStr, monthStr, dayStr, hourStr] = fullMatch
+		return `${yearStr}-${monthStr}-${dayStr} ${hourStr}`
+	}
 	const match = trimmed.match(/^(\d{2})-(\d{2}) (\d{2})$/)
 	if (!match) {
 		return null
@@ -83,7 +106,7 @@ const emptyBucket = (): StatBucket => ({
 	cost: 0,
 })
 
-const buildColumns = (
+const buildHourlyColumns = (
 	days: number,
 	statsMap: Map<string, StatBucket>,
 	startDay: Date,
@@ -117,28 +140,65 @@ const buildColumns = (
 	return columns
 }
 
+const buildDailyColumns = (
+	days: number,
+	dailyStatsMap: Map<string, StatBucket>,
+	startDay: Date,
+	maxCount: number,
+) => {
+	const columns: UsageHeatmapWeek[] = []
+	for (let dayIndex = 0; dayIndex < days; dayIndex++) {
+		const dayStart = addDays(startDay, dayIndex)
+		const key = formatDayKey(dayStart)
+		const bucket = dailyStatsMap.get(key) ?? emptyBucket()
+		const cell: UsageHeatmapDay = {
+			label: labelForDay(dayStart),
+			dateKey: dayStart.toISOString(),
+			requests: bucket.requests,
+			inputTokens: bucket.inputTokens,
+			outputTokens: bucket.outputTokens,
+			reasoningTokens: bucket.reasoningTokens,
+			cost: bucket.cost,
+			intensity: intensityForCount(bucket.requests, maxCount),
+		}
+		const column: UsageHeatmapWeek = []
+		for (let rowIndex = 0; rowIndex < HEATMAP_ROWS; rowIndex++) {
+			column.push({ ...cell })
+		}
+		columns.push(column)
+	}
+	return columns
+}
+
 export const generateFallbackUsageHeatmap = (
 	days = DEFAULT_HEATMAP_DAYS,
+	granularity: HeatmapGranularity = 'hourly',
 ): UsageHeatmapWeek[] => {
 	const normalizedDays = clampDays(days)
 	const startDay = addDays(startOfDay(new Date()), -(normalizedDays - 1))
-	const statsMap = new Map<string, StatBucket>()
-	return buildColumns(normalizedDays, statsMap, startDay, 0)
+	const normalizedGranularity = normalizeGranularity(granularity)
+	if (normalizedGranularity === 'daily') {
+		const dailyStatsMap = new Map<string, StatBucket>()
+		return buildDailyColumns(normalizedDays, dailyStatsMap, startDay, 0)
+	}
+	const hourlyStatsMap = new Map<string, StatBucket>()
+	return buildHourlyColumns(normalizedDays, hourlyStatsMap, startDay, 0)
 }
 
 export const buildUsageHeatmapMatrix = (
 	stats: HeatmapStat[] = [],
 	days = DEFAULT_HEATMAP_DAYS,
+	granularity: HeatmapGranularity = 'hourly',
 ): UsageHeatmapWeek[] => {
 	const normalizedDays = clampDays(days)
 	const startDay = addDays(startOfDay(new Date()), -(normalizedDays - 1))
-	const statsMap = new Map<string, StatBucket>()
+	const normalizedGranularity = normalizeGranularity(granularity)
+	const hourlyStatsMap = new Map<string, StatBucket>()
+	const dailyStatsMap = new Map<string, StatBucket>()
+	let maxHourlyCount = 0
 
 	stats.forEach((stat) => {
 		if (!stat) return
-		const key = normalizeStatKey(stat.day)
-		if (!key) return
-		const bucket = statsMap.get(key)
 		const update: StatBucket = {
 			requests: Number(stat.total_requests) || 0,
 			inputTokens: Number(stat.input_tokens) || 0,
@@ -146,25 +206,51 @@ export const buildUsageHeatmapMatrix = (
 			reasoningTokens: Number(stat.reasoning_tokens) || 0,
 			cost: Number(stat.total_cost) || 0,
 		}
-		if (bucket) {
-			bucket.requests += update.requests
-			bucket.inputTokens += update.inputTokens
-			bucket.outputTokens += update.outputTokens
-			bucket.reasoningTokens += update.reasoningTokens
-			bucket.cost += update.cost
+		const hourKey = normalizeStatKey(stat.day)
+		if (!hourKey) return
+		const hourBucket = hourlyStatsMap.get(hourKey)
+		if (hourBucket) {
+			hourBucket.requests += update.requests
+			hourBucket.inputTokens += update.inputTokens
+			hourBucket.outputTokens += update.outputTokens
+			hourBucket.reasoningTokens += update.reasoningTokens
+			hourBucket.cost += update.cost
+			if (hourBucket.requests > maxHourlyCount) {
+				maxHourlyCount = hourBucket.requests
+			}
 		} else {
-			statsMap.set(key, { ...update })
+			hourlyStatsMap.set(hourKey, { ...update })
+			if (update.requests > maxHourlyCount) {
+				maxHourlyCount = update.requests
+			}
+		}
+
+		const dayKey = hourKey.slice(0, 10)
+		const dayBucket = dailyStatsMap.get(dayKey)
+		if (dayBucket) {
+			dayBucket.requests += update.requests
+			dayBucket.inputTokens += update.inputTokens
+			dayBucket.outputTokens += update.outputTokens
+			dayBucket.reasoningTokens += update.reasoningTokens
+			dayBucket.cost += update.cost
+		} else {
+			dailyStatsMap.set(dayKey, { ...update })
 		}
 	})
 
+	if (normalizedGranularity === 'daily') {
+		const scaledDayMax = Math.max(maxHourlyCount * DAILY_SCALE_FACTOR, 0)
+		return buildDailyColumns(normalizedDays, dailyStatsMap, startDay, scaledDayMax)
+	}
+
 	let maxCount = 0
-	statsMap.forEach((bucket) => {
+	hourlyStatsMap.forEach((bucket) => {
 		if (bucket.requests > maxCount) {
 			maxCount = bucket.requests
 		}
 	})
 
-	return buildColumns(normalizedDays, statsMap, startDay, maxCount)
+	return buildHourlyColumns(normalizedDays, hourlyStatsMap, startDay, maxCount)
 }
 
 export const calculateHeatmapDayRange = (days = DEFAULT_HEATMAP_DAYS) => {
