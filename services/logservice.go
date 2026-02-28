@@ -474,10 +474,94 @@ func (ls *LogService) HeatmapStats(days int) ([]HeatmapStat, error) {
 	if totalHours <= 0 {
 		totalHours = 24
 	}
-	rangeStart := startOfHour(time.Now())
+	rangeEnd := startOfHour(time.Now())
+	rangeStart := rangeEnd
 	if totalHours > 1 {
-		rangeStart = rangeStart.Add(-time.Duration(totalHours-1) * time.Hour)
+		rangeStart = rangeEnd.Add(-time.Duration(totalHours-1) * time.Hour)
 	}
+
+	stats, err := ls.heatmapStatsFromHourlyTable(rangeStart, rangeEnd, totalHours)
+	if err == nil {
+		return stats, nil
+	}
+	if !isNoSuchTableErr(err) {
+		return nil, err
+	}
+	return ls.heatmapStatsFromRequestLog(rangeStart, totalHours)
+}
+
+func (ls *LogService) heatmapStatsFromHourlyTable(
+	rangeStart time.Time,
+	rangeEnd time.Time,
+	totalHours int,
+) ([]HeatmapStat, error) {
+	db, err := xdb.DB("default")
+	if err != nil {
+		return nil, err
+	}
+
+	query := fmt.Sprintf(`
+		SELECT
+			bucket_start,
+			COALESCE(SUM(total_requests), 0) AS total_requests,
+			COALESCE(SUM(input_tokens), 0) AS input_tokens,
+			COALESCE(SUM(output_tokens), 0) AS output_tokens,
+			COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens,
+			COALESCE(SUM(total_cost), 0) AS total_cost
+		FROM %s
+		WHERE bucket_start >= ? AND bucket_start <= ?
+		GROUP BY bucket_start
+		ORDER BY bucket_start DESC
+		LIMIT ?
+	`, requestLogStatsHourlyTable)
+	rows, err := db.Query(
+		query,
+		rangeStart.Format(timeLayout),
+		rangeEnd.Format(timeLayout),
+		totalHours,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	stats := make([]HeatmapStat, 0, totalHours)
+	for rows.Next() {
+		var bucketStart string
+		stat := HeatmapStat{}
+		if err := rows.Scan(
+			&bucketStart,
+			&stat.TotalRequests,
+			&stat.InputTokens,
+			&stat.OutputTokens,
+			&stat.ReasoningTokens,
+			&stat.TotalCost,
+		); err != nil {
+			return nil, err
+		}
+		bucketStart = strings.TrimSpace(bucketStart)
+		if bucketStart == "" {
+			continue
+		}
+		if parsed, parseErr := time.ParseInLocation(timeLayout, bucketStart, time.Local); parseErr == nil {
+			stat.Day = parsed.Format("2006-01-02 15")
+		} else if len(bucketStart) >= len("2006-01-02 15") {
+			stat.Day = bucketStart[:len("2006-01-02 15")]
+		} else {
+			stat.Day = bucketStart
+		}
+		stats = append(stats, stat)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return stats, nil
+}
+
+func (ls *LogService) heatmapStatsFromRequestLog(
+	rangeStart time.Time,
+	totalHours int,
+) ([]HeatmapStat, error) {
 	model := xdb.New("request_log")
 	options := []xdb.Option{
 		xdb.WhereGe("created_at", rangeStart.UTC().Format(timeLayout)),

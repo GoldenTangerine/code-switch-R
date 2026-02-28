@@ -11,6 +11,20 @@ const makeStat = (day: string, requests: number): HeatmapStat => ({
 	total_cost: 0,
 })
 
+const withTimezone = (timezone: string, run: () => void) => {
+	const previousTimezone = process.env.TZ
+	process.env.TZ = timezone
+	try {
+		run()
+	} finally {
+		if (previousTimezone === undefined) {
+			delete process.env.TZ
+			return
+		}
+		process.env.TZ = previousTimezone
+	}
+}
+
 describe('usageHeatmap', () => {
 	afterEach(() => {
 		vi.useRealTimers()
@@ -46,7 +60,10 @@ describe('usageHeatmap', () => {
 		}
 
 		const matrix = buildUsageHeatmapMatrix(stats, 3, 'daily')
-		const dailyCells = matrix.map((column) => column[0])
+		expect(matrix).toHaveLength(1)
+		expect(matrix.every((column) => column.length === 7)).toBe(true)
+		expect(new Date(matrix[0][0].dateKey).getDay()).toBe(1)
+		const dailyCells = matrix.flat()
 		const jan1 = dailyCells.find((cell) => cell.label === '01-01')
 		const jan2 = dailyCells.find((cell) => cell.label === '01-02')
 
@@ -54,5 +71,34 @@ describe('usageHeatmap', () => {
 		expect(jan1?.intensity).toBe(1)
 		expect(jan2?.requests).toBe(240)
 		expect(jan2?.intensity).toBe(4)
+		expect(dailyCells.filter((cell) => cell.label === '01-01')).toHaveLength(1)
+	})
+
+	it('groups daily data into monday-first weekly columns', () => {
+		vi.useFakeTimers()
+		vi.setSystemTime(new Date(2026, 0, 8, 12, 0, 0))
+
+		const matrix = buildUsageHeatmapMatrix([], 10, 'daily')
+
+		expect(matrix).toHaveLength(2)
+		expect(matrix.every((column) => column.length === 7)).toBe(true)
+		expect(new Date(matrix[0][0].dateKey).getDay()).toBe(1)
+		expect(new Date(matrix[1][0].dateKey).getDay()).toBe(1)
+		expect(matrix[0][0].label).toBe('12-29')
+		expect(matrix[1][0].label).toBe('01-05')
+	})
+
+	it('keeps weekly grouping correct across DST transition weeks', () => {
+		withTimezone('America/New_York', () => {
+			vi.useFakeTimers()
+			vi.setSystemTime(new Date('2026-03-14T12:00:00-04:00'))
+
+			const matrix = buildUsageHeatmapMatrix([], 10, 'daily')
+
+			expect(matrix).toHaveLength(2)
+			expect(matrix.every((column) => column.length === 7)).toBe(true)
+			expect(new Date(matrix[0][0].dateKey).getDay()).toBe(1)
+			expect(new Date(matrix[1][0].dateKey).getDay()).toBe(1)
+		})
 	})
 })

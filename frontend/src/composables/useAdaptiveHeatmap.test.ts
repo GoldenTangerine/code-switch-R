@@ -9,9 +9,10 @@ vi.mock('../services/logs', () => ({
 import { fetchHeatmapStats } from '../services/logs'
 import { useAdaptiveHeatmap } from './useAdaptiveHeatmap'
 
-const flushPromises = () => new Promise((resolve) => {
-	setTimeout(resolve, 0)
-})
+const flushPromises = async () => {
+	await Promise.resolve()
+	await Promise.resolve()
+}
 
 const makeStat = (day: string, requests: number): HeatmapStat => ({
 	day,
@@ -38,8 +39,13 @@ describe('useAdaptiveHeatmap', () => {
 	})
 
 	it('keeps latest granularity data when previous request resolves later', async () => {
+		vi.useFakeTimers()
+		const now = new Date(2026, 1, 11, 12, 0, 0)
+		vi.setSystemTime(now)
+		const nowKey = '2026-02-11 10'
+
 		const mockedFetch = vi.mocked(fetchHeatmapStats)
-		mockedFetch.mockResolvedValueOnce([makeStat('2026-01-02 10', 1)])
+		mockedFetch.mockResolvedValueOnce([makeStat(nowKey, 1)])
 
 		const containerRef = ref({ clientWidth: 900 } as HTMLElement)
 		const granularity = ref<'hourly' | 'daily'>('hourly')
@@ -63,14 +69,48 @@ describe('useAdaptiveHeatmap', () => {
 		granularity.value = 'daily'
 		await nextTick()
 
-		resolveDaily([makeStat('2026-01-02 10', 24)])
+		resolveDaily([makeStat(nowKey, 24)])
 		await flushPromises()
 		const dailyPeak = Math.max(...displayData.value.flat().map((cell) => cell.requests))
 		expect(dailyPeak).toBe(24)
 
-		resolveHourly([makeStat('2026-01-02 10', 1)])
+		resolveHourly([makeStat(nowKey, 1)])
 		await flushPromises()
 		const finalPeak = Math.max(...displayData.value.flat().map((cell) => cell.requests))
 		expect(finalPeak).toBe(24)
+	})
+
+	it('loads week-based day range in daily granularity', async () => {
+		vi.useFakeTimers()
+		vi.setSystemTime(new Date(2026, 1, 11, 12, 0, 0))
+		const mockedFetch = vi.mocked(fetchHeatmapStats)
+		mockedFetch.mockResolvedValueOnce([])
+
+		const containerRef = ref({ clientWidth: 900 } as HTMLElement)
+		const granularity = ref<'hourly' | 'daily'>('daily')
+		const { init, visibleColumns } = useAdaptiveHeatmap(containerRef, granularity)
+
+		await init()
+
+		expect(mockedFetch).toHaveBeenCalledTimes(1)
+		expect(mockedFetch.mock.calls[0]?.[0]).toBe(365)
+		expect(visibleColumns.value).toBe(53)
+	})
+
+	it('keeps daily mode request range as one year on narrow screens', async () => {
+		vi.useFakeTimers()
+		vi.setSystemTime(new Date(2026, 1, 11, 12, 0, 0))
+		const mockedFetch = vi.mocked(fetchHeatmapStats)
+		mockedFetch.mockResolvedValueOnce([])
+
+		const containerRef = ref({ clientWidth: 360 } as HTMLElement)
+		const granularity = ref<'hourly' | 'daily'>('daily')
+		const { init, visibleColumns } = useAdaptiveHeatmap(containerRef, granularity)
+
+		await init()
+
+		expect(mockedFetch).toHaveBeenCalledTimes(1)
+		expect(mockedFetch.mock.calls[0]?.[0]).toBe(365)
+		expect(visibleColumns.value).toBe(27)
 	})
 })

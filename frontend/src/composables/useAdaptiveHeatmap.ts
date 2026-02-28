@@ -21,14 +21,15 @@ const CELL_SIZES = {
 } as const
 
 // 边界限制
-const MIN_COLUMNS = 9 // 最少显示 3 天 (3×3)
-const MAX_COLUMNS = 63 // 最多显示 21 天 (21×3)
+const MIN_COLUMNS = 9
+const MAX_COLUMNS_HOURLY = 63
+const DAYS_PER_DAILY_COLUMN = 7
 const MAX_DAYS_HOURLY = 21
-const MAX_DAYS_DAILY = 63
+const MAX_DAYS_DAILY = 365
 const DEFAULT_DAYS_HOURLY = 14
-const DEFAULT_DAYS_DAILY = 21
+const DEFAULT_DAYS_DAILY = 365
 
-const bucketsPerDayByGranularity = (granularity: HeatmapGranularity) =>
+const columnGroupSizeByGranularity = (granularity: HeatmapGranularity) =>
 	granularity === 'daily' ? 1 : BUCKETS_PER_DAY
 
 const maxDaysByGranularity = (granularity: HeatmapGranularity) =>
@@ -36,6 +37,19 @@ const maxDaysByGranularity = (granularity: HeatmapGranularity) =>
 
 const defaultDaysByGranularity = (granularity: HeatmapGranularity) =>
 	granularity === 'daily' ? DEFAULT_DAYS_DAILY : DEFAULT_DAYS_HOURLY
+
+const maxColumnsByGranularity = (granularity: HeatmapGranularity) =>
+	granularity === 'daily'
+		? Math.ceil(MAX_DAYS_DAILY / DAYS_PER_DAILY_COLUMN)
+		: MAX_COLUMNS_HOURLY
+
+const columnsFromDays = (days: number, granularity: HeatmapGranularity) => {
+	const normalizedDays = Math.max(1, Math.floor(days))
+	if (granularity === 'daily') {
+		return Math.max(1, Math.ceil(normalizedDays / DAYS_PER_DAILY_COLUMN))
+	}
+	return Math.max(BUCKETS_PER_DAY, normalizedDays * BUCKETS_PER_DAY)
+}
 
 /**
  * 自适应热力图 Composable
@@ -47,7 +61,7 @@ export function useAdaptiveHeatmap(
 ) {
 	// 响应式状态
 	const containerWidth = ref(0)
-	const visibleColumns = ref(defaultDaysByGranularity(granularity.value) * bucketsPerDayByGranularity(granularity.value))
+	const visibleColumns = ref(columnsFromDays(defaultDaysByGranularity(granularity.value), granularity.value))
 	const heatmapData = ref<UsageHeatmapWeek[]>(
 		generateFallbackUsageHeatmap(defaultDaysByGranularity(granularity.value), granularity.value),
 	)
@@ -71,7 +85,11 @@ export function useAdaptiveHeatmap(
 	 * 计算可显示的列数
 	 * @param containerWidth 容器宽度
 	 */
-	const calculateColumns = (containerWidth: number, bucketsPerDay: number): number => {
+	const calculateColumns = (
+		containerWidth: number,
+		columnGroupSize: number,
+		maxColumns: number,
+	): number => {
 		const { cell, gap, padding } = cellConfig.value
 		const availableWidth = containerWidth - padding * 2
 		const cellUnit = cell + gap
@@ -80,17 +98,24 @@ export function useAdaptiveHeatmap(
 		const cols = Math.floor((availableWidth + gap) / cellUnit)
 
 		// 应用边界限制
-		const bounded = Math.max(MIN_COLUMNS, Math.min(MAX_COLUMNS, cols))
+		const bounded = Math.max(MIN_COLUMNS, Math.min(maxColumns, cols))
 
-		// 向下取整到 bucketsPerDay 的倍数，确保天数完整
+		// 向下取整到分组倍数，确保小时模式下按整天显示
 		return Math.max(
-			bucketsPerDay,
-			Math.floor(bounded / bucketsPerDay) * bucketsPerDay,
+			columnGroupSize,
+			Math.floor(bounded / columnGroupSize) * columnGroupSize,
 		)
 	}
 
-	const calculateDaysFromColumns = (columns: number, bucketsPerDay: number, maxDays: number) => {
-		return Math.max(1, Math.min(maxDays, Math.floor(columns / bucketsPerDay)))
+	const calculateDaysFromColumns = (
+		columns: number,
+		currentGranularity: HeatmapGranularity,
+		maxDays: number,
+	) => {
+		if (currentGranularity === 'daily') {
+			return maxDays
+		}
+		return Math.max(1, Math.min(maxDays, Math.floor(columns / BUCKETS_PER_DAY)))
 	}
 
 	/**
@@ -161,17 +186,19 @@ export function useAdaptiveHeatmap(
 	 */
 	const handleResize = throttle((width: number) => {
 		containerWidth.value = width
-		const bucketsPerDay = bucketsPerDayByGranularity(granularity.value)
-		const maxDays = maxDaysByGranularity(granularity.value)
-		const newColumns = calculateColumns(width, bucketsPerDay)
+		const currentGranularity = granularity.value
+		const columnGroupSize = columnGroupSizeByGranularity(currentGranularity)
+		const maxColumns = maxColumnsByGranularity(currentGranularity)
+		const maxDays = maxDaysByGranularity(currentGranularity)
+		const newColumns = calculateColumns(width, columnGroupSize, maxColumns)
 
 		// 只有列数变化时才更新
 		if (newColumns !== visibleColumns.value) {
-			const newDays = calculateDaysFromColumns(newColumns, bucketsPerDay, maxDays)
+			const newDays = calculateDaysFromColumns(newColumns, currentGranularity, maxDays)
 			visibleColumns.value = newColumns
 
 			// 只在需要更多数据时重新请求
-			if (newDays > loadedDays.value || loadedGranularity.value !== granularity.value) {
+			if (newDays > loadedDays.value || loadedGranularity.value !== currentGranularity) {
 				void loadHeatmapData(newDays)
 			}
 		}
@@ -200,17 +227,18 @@ export function useAdaptiveHeatmap(
 		if (!container) return
 
 		const currentGranularity = granularity.value
-		const bucketsPerDay = bucketsPerDayByGranularity(currentGranularity)
+		const columnGroupSize = columnGroupSizeByGranularity(currentGranularity)
+		const maxColumns = maxColumnsByGranularity(currentGranularity)
 		const maxDays = maxDaysByGranularity(currentGranularity)
 
 		// 初始宽度计算
 		const initialWidth = container.clientWidth
 		containerWidth.value = initialWidth
-		const initialColumns = calculateColumns(initialWidth, bucketsPerDay)
+		const initialColumns = calculateColumns(initialWidth, columnGroupSize, maxColumns)
 		visibleColumns.value = initialColumns
 
 		// 加载初始数据
-		const initialDays = calculateDaysFromColumns(initialColumns, bucketsPerDay, maxDays)
+		const initialDays = calculateDaysFromColumns(initialColumns, currentGranularity, maxDays)
 		await loadHeatmapData(initialDays)
 
 		// 设置 ResizeObserver
@@ -240,32 +268,33 @@ export function useAdaptiveHeatmap(
 	const reload = async () => {
 		loadedDays.value = 0 // 重置已加载天数，强制重新请求
 		loadedGranularity.value = null
-		const bucketsPerDay = bucketsPerDayByGranularity(granularity.value)
-		const maxDays = maxDaysByGranularity(granularity.value)
-		const days = calculateDaysFromColumns(visibleColumns.value, bucketsPerDay, maxDays)
+		const currentGranularity = granularity.value
+		const maxDays = maxDaysByGranularity(currentGranularity)
+		const days = calculateDaysFromColumns(visibleColumns.value, currentGranularity, maxDays)
 		await loadHeatmapData(days)
 	}
 
 	watch(granularity, (nextGranularity) => {
 		loadedDays.value = 0
 		loadedGranularity.value = null
-		const bucketsPerDay = bucketsPerDayByGranularity(nextGranularity)
+		const columnGroupSize = columnGroupSizeByGranularity(nextGranularity)
+		const maxColumns = maxColumnsByGranularity(nextGranularity)
 		const maxDays = maxDaysByGranularity(nextGranularity)
 		const defaultDays = defaultDaysByGranularity(nextGranularity)
 		if (!initialized.value) {
-			visibleColumns.value = defaultDays * bucketsPerDay
+			visibleColumns.value = columnsFromDays(defaultDays, nextGranularity)
 			heatmapData.value = generateFallbackUsageHeatmap(defaultDays, nextGranularity)
 			return
 		}
 		const width = containerRef.value?.clientWidth ?? containerWidth.value
 		if (width > 0) {
-			const columns = calculateColumns(width, bucketsPerDay)
+			const columns = calculateColumns(width, columnGroupSize, maxColumns)
 			visibleColumns.value = columns
-			const days = calculateDaysFromColumns(columns, bucketsPerDay, maxDays)
+			const days = calculateDaysFromColumns(columns, nextGranularity, maxDays)
 			void loadHeatmapData(days)
 			return
 		}
-		visibleColumns.value = defaultDays * bucketsPerDay
+		visibleColumns.value = columnsFromDays(defaultDays, nextGranularity)
 		heatmapData.value = generateFallbackUsageHeatmap(defaultDays, nextGranularity)
 	})
 
