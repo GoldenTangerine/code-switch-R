@@ -640,6 +640,18 @@
       "tokenDetail": {
         "title": "Token 明细"
       },
+      "payloadDetail": {
+        "title": "请求与响应详情",
+        "openHint": "点击查看请求体和返回体",
+        "openAria": "查看该条日志详情，当前速率 {value}",
+        "logId": "日志 ID：{id}",
+        "requestBody": "请求体",
+        "responseBody": "返回体",
+        "emptyRequest": "该条日志未记录请求体",
+        "emptyResponse": "该条日志未记录返回体",
+        "truncated": "内容过长，已截断",
+        "loadFailed": "加载请求详情失败：{error}"
+      },
       "modelShare": {
         "title": "模型分布",
         "model": "模型",
@@ -715,6 +727,8 @@
         "switchNotifyHint": "供应商切换或拉黑时发送系统通知",
         "roundRobin": "同 Level 轮询",
         "roundRobinHint": "启用后同 Level 的供应商轮流处理请求，关闭则始终从第一个开始",
+        "captureRequestLogPayload": "记录请求/响应内容",
+        "captureRequestLogPayloadHint": "默认关闭。启用后可在日志页查看请求体和返回体，内容会自动做敏感信息脱敏。",
         "autoUpdate": "自动更新",
         "updateHistoryKeepCount": "历史更新包保留数",
         "updateHistoryKeepCountHint": "仅保留最近的历史更新包，范围 1 - 20",

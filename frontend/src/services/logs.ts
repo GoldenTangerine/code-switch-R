@@ -62,6 +62,19 @@ export const fetchRequestLogs = async (query: RequestLogQuery = {}): Promise<Req
   return Call.ByName('codeswitch/services.LogService.ListRequestLogsV2', platform, provider, limit, startAt, endAt)
 }
 
+export type RequestLogPayloadDetail = {
+  id: number
+  request_body: string
+  response_body: string
+  request_body_truncated?: boolean
+  response_body_truncated?: boolean
+}
+
+export const fetchRequestLogPayload = async (id: number): Promise<RequestLogPayloadDetail> => {
+  const normalized = Number.isFinite(id) ? Math.floor(id) : 0
+  return Call.ByName('codeswitch/services.LogService.GetRequestLogPayload', normalized)
+}
+
 export type LogProviderRef = {
   provider_id?: string
   provider: string

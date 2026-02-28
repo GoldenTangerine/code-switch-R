@@ -639,6 +639,18 @@
       "tokenDetail": {
         "title": "Token breakdown"
       },
+      "payloadDetail": {
+        "title": "Request & response details",
+        "openHint": "Click to inspect request and response payloads",
+        "openAria": "View request details for this row, current rate {value}",
+        "logId": "Log ID: {id}",
+        "requestBody": "Request body",
+        "responseBody": "Response body",
+        "emptyRequest": "No request body recorded for this log",
+        "emptyResponse": "No response body recorded for this log",
+        "truncated": "Content truncated",
+        "loadFailed": "Failed to load request details: {error}"
+      },
       "modelShare": {
         "title": "Model Distribution",
         "model": "Model",
@@ -716,6 +728,8 @@
         "switchNotifyHint": "Send system notification when provider switches or gets blacklisted",
         "roundRobin": "Same-Level Round Robin",
         "roundRobinHint": "When enabled, providers at the same Level take turns handling requests; when disabled, always starts from the first",
+        "captureRequestLogPayload": "Record Request/Response Payload",
+        "captureRequestLogPayloadHint": "Disabled by default. When enabled, request and response bodies are viewable in logs and sensitive fields are redacted automatically.",
         "autoUpdate": "Automatic update",
         "updateHistoryKeepCount": "History packages to keep",
         "updateHistoryKeepCountHint": "Keep only the most recent update packages (range 1 - 20)",

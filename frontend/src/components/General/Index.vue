@@ -85,6 +85,7 @@ const updateHistoryKeepCount = ref(getCachedNumber('updateHistoryKeepCount', def
 const autoConnectivityTestEnabled = ref(getCachedValue('autoConnectivityTest', false))
 const switchNotifyEnabled = ref(getCachedValue('switchNotify', true)) // 切换通知开关
 const roundRobinEnabled = ref(getCachedValue('roundRobin', false))    // 同 Level 轮询开关
+const captureRequestLogPayloadEnabled = ref(getCachedValue('captureRequestLogPayload', false))
 const budgetTotal = ref(getCachedNumber('budgetTotal', 0))
 const budgetUsedAdjustment = ref(getCachedNumber('budgetUsedAdjustment', 0))
 const budgetUsedDelta = ref(0)
@@ -290,6 +291,7 @@ const syncAppSettingsCache = () => {
   localStorage.setItem('app-settings-autoConnectivityTest', String(autoConnectivityTestEnabled.value))
   localStorage.setItem('app-settings-switchNotify', String(switchNotifyEnabled.value))
   localStorage.setItem('app-settings-roundRobin', String(roundRobinEnabled.value))
+  localStorage.setItem('app-settings-captureRequestLogPayload', String(captureRequestLogPayloadEnabled.value))
 }
 
 // 更新相关状态
@@ -886,6 +888,7 @@ const loadAppSettings = async () => {
     autoConnectivityTestEnabled.value = data?.auto_connectivity_test ?? false
     switchNotifyEnabled.value = data?.enable_switch_notify ?? true
     roundRobinEnabled.value = data?.enable_round_robin ?? false
+    captureRequestLogPayloadEnabled.value = data?.capture_request_log_payload ?? false
     const currentUsageConfigs = getCurrentBudgetUsageConfigs()
     syncBudgetUsageConfigKeys(currentUsageConfigs)
 
@@ -930,6 +933,7 @@ const loadAppSettings = async () => {
     autoConnectivityTestEnabled.value = false
     switchNotifyEnabled.value = true
     roundRobinEnabled.value = false
+    captureRequestLogPayloadEnabled.value = false
     syncBudgetUsageConfigKeys(getCurrentBudgetUsageConfigs())
   } finally {
     settingsLoading.value = false
@@ -1064,6 +1068,7 @@ const persistAppSettingsNow = async () => {
       auto_connectivity_test: autoConnectivityTestEnabled.value,
       enable_switch_notify: switchNotifyEnabled.value,
       enable_round_robin: roundRobinEnabled.value,
+      capture_request_log_payload: captureRequestLogPayloadEnabled.value,
     }
     await saveAppSettings(payload)
     syncBudgetUsageConfigKeys(nextUsageConfigs)
@@ -1640,6 +1645,20 @@ onBeforeUnmount(() => {
                 <span></span>
               </label>
               <span class="hint-text">{{ $t('components.general.label.roundRobinHint') }}</span>
+            </div>
+          </ListItem>
+          <ListItem :label="$t('components.general.label.captureRequestLogPayload')">
+            <div class="toggle-with-hint">
+              <label class="mac-switch">
+                <input
+                  type="checkbox"
+                  :disabled="settingsLoading || saveBusy"
+                  v-model="captureRequestLogPayloadEnabled"
+                  @change="persistAppSettings"
+                />
+                <span></span>
+              </label>
+              <span class="hint-text">{{ $t('components.general.label.captureRequestLogPayloadHint') }}</span>
             </div>
           </ListItem>
           <ListItem :label="$t('components.general.title.webdavSync')">

@@ -53,9 +53,15 @@ type ProviderRelayService struct {
 var errClientAbort = errors.New("client aborted, skip failure count")
 
 var (
-	responseModelRegex        = regexp.MustCompile(`"model"\s*:\s*"([^"]+)"`)
-	responseModelVersionRegex = regexp.MustCompile(`"modelVersion"\s*:\s*"([^"]+)"`)
+	responseModelRegex                   = regexp.MustCompile(`"model"\s*:\s*"([^"]+)"`)
+	responseModelVersionRegex            = regexp.MustCompile(`"modelVersion"\s*:\s*"([^"]+)"`)
+	requestLogSensitiveJSONValuePattern  = regexp.MustCompile(`(?i)("(?:api[_-]?key|x-api-key|x-goog-api-key|authorization|auth[_-]?token|access[_-]?token|refresh[_-]?token|password|secret)"\s*:\s*)"[^"]*"`)
+	requestLogAuthorizationBearerPattern = regexp.MustCompile(`(?i)(authorization\s*[:=]\s*bearer\s+)[^\s",]+`)
+	requestLogSensitiveQueryValuePattern = regexp.MustCompile(`(?i)((?:api[_-]?key|x-api-key|x-goog-api-key|auth[_-]?token|access[_-]?token)=)[^&\s]+`)
 )
+
+const requestLogPayloadMaxBytes = 8 * 1024 * 1024
+const requestLogPayloadRedactedValue = "[REDACTED]"
 
 // upstreamErrorResponse 保存上游非 2xx 响应，供“最终失败”场景透传给客户端
 type upstreamErrorResponse struct {
@@ -240,6 +246,19 @@ func (prs *ProviderRelayService) isRoundRobinEnabled() bool {
 		return false
 	}
 	return settings.EnableRoundRobin
+}
+
+// isRequestLogPayloadCaptureEnabled 检查是否启用 request_log payload 采集。
+// 默认关闭，减少敏感信息落库与存储压力。
+func (prs *ProviderRelayService) isRequestLogPayloadCaptureEnabled() bool {
+	if prs.appSettings == nil {
+		return false
+	}
+	settings, err := prs.appSettings.GetAppSettings()
+	if err != nil {
+		return false
+	}
+	return settings.CaptureRequestLogPayload
 }
 
 // roundRobinOrder 对同 Level 的 providers 进行轮询排序
@@ -878,11 +897,13 @@ func (prs *ProviderRelayService) forwardRequest(
 		Model:            model,
 		RequestedModel:   strings.TrimSpace(requestedModel),
 		IsStream:         isStream,
+		CapturePayload:   prs.isRequestLogPayloadCaptureEnabled(),
 		RequestStartedAt: start,
 		ProviderAPIURL:   provider.APIURL,
 		ProviderAPIKey:   provider.APIKey,
 		ProviderAuthType: provider.ConnectivityAuthType,
 	}
+	captureRequestLogRequestBody(requestLog, bodyBytes)
 	pricingSnapshot := (*modelpricing.Service)(nil)
 	if prs != nil && prs.modelPricing != nil {
 		pricingSnapshot = prs.modelPricing.Service()
@@ -912,6 +933,7 @@ func (prs *ProviderRelayService) forwardRequest(
 			requestLog.CacheReadTokens,
 		)
 		applyRequestLogCostResult(requestLog, costResult)
+		prepareRequestLogPayloadForPersistence(requestLog)
 
 		// 【修复】判空保护：避免队列未初始化时 panic
 		if GlobalDBQueueLogs == nil {
@@ -932,8 +954,9 @@ func (prs *ProviderRelayService) forwardRequest(
 					ephemeral_5m_cost, ephemeral_1h_cost, has_pricing, matched_pricing_model,
 					provider_pricing_available, provider_quota_type, provider_input_usd_per_m, provider_output_usd_per_m,
 					provider_per_call_unified, provider_per_call_input, provider_per_call_output,
-					provider_per_call_unified_set, provider_per_call_input_set, provider_per_call_output_set
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+					provider_per_call_unified_set, provider_per_call_input_set, provider_per_call_output_set,
+					request_body, response_body, request_body_truncated, response_body_truncated
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			`,
 			requestLog.Platform,
 			requestLog.Model,
@@ -973,6 +996,10 @@ func (prs *ProviderRelayService) forwardRequest(
 			boolToInt(requestLog.ProviderPerCallUnifiedSet),
 			boolToInt(requestLog.ProviderPerCallInputSet),
 			boolToInt(requestLog.ProviderPerCallOutputSet),
+			requestLog.RequestBody,
+			requestLog.ResponseBody,
+			boolToInt(requestLog.RequestBodyTruncated),
+			boolToInt(requestLog.ResponseBodyTruncated),
 		)
 
 		if err != nil {
@@ -1036,6 +1063,7 @@ func (prs *ProviderRelayService) forwardRequest(
 		contentType = resp.RawResponse.Header.Get("Content-Type")
 	}
 	upstreamBody := resp.Bytes()
+	setRequestLogResponseBody(requestLog, upstreamBody)
 	body := strings.TrimSpace(string(upstreamBody))
 	if body != "" {
 		level := "ERROR"
@@ -1124,6 +1152,125 @@ func truncateText(value string, maxBytes int) string {
 	return truncated + "\n...(truncated)"
 }
 
+func truncateRequestLogPayload(payload string, maxBytes int) (string, bool) {
+	if maxBytes <= 0 {
+		return "", len(payload) > 0
+	}
+	if len(payload) <= maxBytes {
+		return payload, false
+	}
+	clipped := payload[:maxBytes]
+	for len(clipped) > 0 && !utf8.ValidString(clipped) {
+		clipped = clipped[:len(clipped)-1]
+	}
+	return clipped, true
+}
+
+func sanitizeRequestLogPayload(payload string) string {
+	if strings.TrimSpace(payload) == "" {
+		return payload
+	}
+	sanitized := requestLogSensitiveJSONValuePattern.ReplaceAllString(payload, `${1}"`+requestLogPayloadRedactedValue+`"`)
+	sanitized = requestLogAuthorizationBearerPattern.ReplaceAllString(sanitized, `${1}`+requestLogPayloadRedactedValue)
+	sanitized = requestLogSensitiveQueryValuePattern.ReplaceAllString(sanitized, `${1}`+requestLogPayloadRedactedValue)
+	return sanitized
+}
+
+func trimInvalidUTF8Suffix(value []byte) []byte {
+	trimmed := value
+	for len(trimmed) > 0 && !utf8.Valid(trimmed) {
+		trimmed = trimmed[:len(trimmed)-1]
+	}
+	return trimmed
+}
+
+func captureRequestLogRequestBody(reqLog *ReqeustLog, bodyBytes []byte) {
+	if reqLog == nil || !reqLog.CapturePayload {
+		return
+	}
+	payload, truncated := truncateRequestLogPayload(string(bodyBytes), requestLogPayloadMaxBytes)
+	reqLog.RequestBody = sanitizeRequestLogPayload(payload)
+	reqLog.RequestBodyTruncated = truncated
+}
+
+func setRequestLogResponseBody(reqLog *ReqeustLog, bodyBytes []byte) {
+	if reqLog == nil || !reqLog.CapturePayload {
+		return
+	}
+	payload, truncated := truncateRequestLogPayload(string(bodyBytes), requestLogPayloadMaxBytes)
+	reqLog.ResponseBody = sanitizeRequestLogPayload(payload)
+	reqLog.ResponseBodyTruncated = truncated
+	reqLog.responseBodyBuffer = nil
+}
+
+func appendRequestLogResponseBody(reqLog *ReqeustLog, chunk []byte) {
+	if reqLog == nil || !reqLog.CapturePayload || len(chunk) == 0 || reqLog.ResponseBodyTruncated {
+		return
+	}
+	if reqLog.responseBodyBuffer == nil {
+		initialCap := len(chunk)
+		if initialCap < 1024 {
+			initialCap = 1024
+		}
+		if initialCap > requestLogPayloadMaxBytes {
+			initialCap = requestLogPayloadMaxBytes
+		}
+		reqLog.responseBodyBuffer = make([]byte, 0, initialCap)
+	}
+	remaining := requestLogPayloadMaxBytes - len(reqLog.responseBodyBuffer)
+	if remaining <= 0 {
+		reqLog.ResponseBodyTruncated = true
+		return
+	}
+	if len(chunk) <= remaining {
+		reqLog.responseBodyBuffer = append(reqLog.responseBodyBuffer, chunk...)
+		return
+	}
+	reqLog.responseBodyBuffer = append(reqLog.responseBodyBuffer, chunk[:remaining]...)
+	reqLog.ResponseBodyTruncated = true
+}
+
+func resetRequestLogResponseBody(reqLog *ReqeustLog) {
+	if reqLog == nil {
+		return
+	}
+	reqLog.ResponseBody = ""
+	reqLog.ResponseBodyTruncated = false
+	reqLog.responseBodyBuffer = nil
+}
+
+func materializeRequestLogResponseBody(reqLog *ReqeustLog) {
+	if reqLog == nil {
+		return
+	}
+	if len(reqLog.responseBodyBuffer) == 0 {
+		reqLog.responseBodyBuffer = nil
+		return
+	}
+	buffer := reqLog.responseBodyBuffer
+	if reqLog.ResponseBodyTruncated {
+		buffer = trimInvalidUTF8Suffix(buffer)
+	}
+	reqLog.ResponseBody = sanitizeRequestLogPayload(string(buffer))
+	reqLog.responseBodyBuffer = nil
+}
+
+func prepareRequestLogPayloadForPersistence(reqLog *ReqeustLog) {
+	if reqLog == nil {
+		return
+	}
+	if !reqLog.CapturePayload {
+		reqLog.RequestBody = ""
+		reqLog.ResponseBody = ""
+		reqLog.RequestBodyTruncated = false
+		reqLog.ResponseBodyTruncated = false
+		reqLog.responseBodyBuffer = nil
+		return
+	}
+	reqLog.RequestBody = sanitizeRequestLogPayload(reqLog.RequestBody)
+	materializeRequestLogResponseBody(reqLog)
+}
+
 func ensureRequestLogColumn(db *sql.DB, column string, definition string) error {
 	query := fmt.Sprintf("SELECT COUNT(*) FROM pragma_table_info('request_log') WHERE name = '%s'", column)
 	var count int
@@ -1188,14 +1335,18 @@ func ensureRequestLogTableWithDB(db *sql.DB) error {
 		provider_quota_type INTEGER DEFAULT -1,
 		provider_input_usd_per_m REAL DEFAULT 0,
 		provider_output_usd_per_m REAL DEFAULT 0,
-		provider_per_call_unified REAL DEFAULT 0,
-		provider_per_call_input REAL DEFAULT 0,
-		provider_per_call_output REAL DEFAULT 0,
-		provider_per_call_unified_set INTEGER DEFAULT 0,
-		provider_per_call_input_set INTEGER DEFAULT 0,
-		provider_per_call_output_set INTEGER DEFAULT 0,
-		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-	)`
+			provider_per_call_unified REAL DEFAULT 0,
+			provider_per_call_input REAL DEFAULT 0,
+			provider_per_call_output REAL DEFAULT 0,
+			provider_per_call_unified_set INTEGER DEFAULT 0,
+			provider_per_call_input_set INTEGER DEFAULT 0,
+			provider_per_call_output_set INTEGER DEFAULT 0,
+			request_body TEXT DEFAULT '',
+			response_body TEXT DEFAULT '',
+			request_body_truncated INTEGER DEFAULT 0,
+			response_body_truncated INTEGER DEFAULT 0,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`
 
 	if _, err := db.Exec(createTableSQL); err != nil {
 		return err
@@ -1298,6 +1449,18 @@ func ensureRequestLogTableWithDB(db *sql.DB) error {
 	if err := ensureRequestLogColumn(db, "provider_per_call_output_set", "INTEGER DEFAULT 0"); err != nil {
 		return err
 	}
+	if err := ensureRequestLogColumn(db, "request_body", "TEXT DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "response_body", "TEXT DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "request_body_truncated", "INTEGER DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "response_body_truncated", "INTEGER DEFAULT 0"); err != nil {
+		return err
+	}
 	if err := ensureRequestLogIndex(db, "idx_request_log_created_at", "created_at"); err != nil {
 		return err
 	}
@@ -1330,6 +1493,7 @@ func ReqeustLogHook(c *gin.Context, kind string, usage *ReqeustLog) func(data []
 		case "gemini":
 			parserFn = GeminiParseTokenUsageFromResponse
 		}
+		appendRequestLogResponseBody(usage, data)
 		parseTokenUsageChunk(data, usage, parserFn, &sseRemainder, &rawJSONBuffer)
 
 		return true, data
@@ -1490,7 +1654,7 @@ func updateFirstTokenFromPayload(payload string, reqLog *ReqeustLog) {
 	if reqLog == nil || !reqLog.IsStream || reqLog.FirstTokenSec > 0 {
 		return
 	}
-	if reqLog.OutputTokens > 0 || payloadHasGeneratedToken(payload) {
+	if payloadHasGeneratedToken(payload) {
 		markFirstTokenTimestamp(reqLog)
 	}
 }
@@ -1714,11 +1878,19 @@ type ReqeustLog struct {
 	ProviderPerCallUnifiedSet bool    `json:"provider_per_call_unified_set"`
 	ProviderPerCallInputSet   bool    `json:"provider_per_call_input_set"`
 	ProviderPerCallOutputSet  bool    `json:"provider_per_call_output_set"`
+	RequestBody               string  `json:"request_body,omitempty"`
+	ResponseBody              string  `json:"response_body,omitempty"`
+	RequestBodyTruncated      bool    `json:"request_body_truncated"`
+	ResponseBodyTruncated     bool    `json:"response_body_truncated"`
+
+	CapturePayload bool `json:"-"`
 
 	ProviderAPIURL   string    `json:"-"`
 	ProviderAPIKey   string    `json:"-"`
 	ProviderAuthType string    `json:"-"`
 	RequestStartedAt time.Time `json:"-"`
+
+	responseBodyBuffer []byte
 }
 
 // claude code usage parser
@@ -1955,6 +2127,7 @@ func streamGeminiResponseWithHook(body io.Reader, writer io.Writer, requestLog *
 		n, err := body.Read(buf)
 		if n > 0 {
 			chunk := buf[:n]
+			appendRequestLogResponseBody(requestLog, chunk)
 			// 写入客户端（优先保证数据传输）
 			if _, writeErr := writer.Write(chunk); writeErr != nil {
 				return writeErr
@@ -2139,11 +2312,13 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 			Platform:         "gemini",
 			RequestedModel:   requestedModel,
 			IsStream:         isStream,
+			CapturePayload:   prs.isRequestLogPayloadCaptureEnabled(),
 			InputTokens:      0,
 			OutputTokens:     0,
 			ProviderAuthType: "",
 			RequestStartedAt: start,
 		}
+		captureRequestLogRequestBody(requestLog, bodyBytes)
 		pricingSnapshot := (*modelpricing.Service)(nil)
 		if prs != nil && prs.modelPricing != nil {
 			pricingSnapshot = prs.modelPricing.Service()
@@ -2175,6 +2350,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 				requestLog.CacheReadTokens,
 			)
 			applyRequestLogCostResult(requestLog, costResult)
+			prepareRequestLogPayloadForPersistence(requestLog)
 			if GlobalDBQueueLogs == nil {
 				return
 			}
@@ -2189,8 +2365,9 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 						ephemeral_5m_cost, ephemeral_1h_cost, has_pricing, matched_pricing_model,
 						provider_pricing_available, provider_quota_type, provider_input_usd_per_m, provider_output_usd_per_m,
 						provider_per_call_unified, provider_per_call_input, provider_per_call_output,
-						provider_per_call_unified_set, provider_per_call_input_set, provider_per_call_output_set
-					) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+						provider_per_call_unified_set, provider_per_call_input_set, provider_per_call_output_set,
+						request_body, response_body, request_body_truncated, response_body_truncated
+					) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 				`,
 				requestLog.Platform, requestLog.Model, requestLog.RequestedModel, requestLog.ResponseModel, requestLog.ProviderID, requestLog.Provider, requestLog.HttpCode,
 				requestLog.InputTokens, requestLog.OutputTokens, requestLog.CacheCreateTokens, requestLog.Ephemeral5mTokens, requestLog.Ephemeral1hTokens,
@@ -2201,6 +2378,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 				boolToInt(requestLog.ProviderPricingAvailable), requestLog.ProviderQuotaType, requestLog.ProviderInputUSDPerM, requestLog.ProviderOutputUSDPerM,
 				requestLog.ProviderPerCallUnified, requestLog.ProviderPerCallInput, requestLog.ProviderPerCallOutput,
 				boolToInt(requestLog.ProviderPerCallUnifiedSet), boolToInt(requestLog.ProviderPerCallInputSet), boolToInt(requestLog.ProviderPerCallOutputSet),
+				requestLog.RequestBody, requestLog.ResponseBody, boolToInt(requestLog.RequestBodyTruncated), boolToInt(requestLog.ResponseBodyTruncated),
 			)
 		}()
 
@@ -2448,6 +2626,8 @@ func (prs *ProviderRelayService) forwardGeminiRequest(
 	// 预先填充日志，保证失败也能记录 provider 和模型
 	requestLog.ProviderID = providerRefFromGeminiProvider(*provider)
 	requestLog.Provider = provider.Name
+	captureRequestLogRequestBody(requestLog, bodyBytes)
+	resetRequestLogResponseBody(requestLog)
 	// 【修复】每次尝试开始前重置 HttpCode，避免重试时沿用上一次的状态码
 	requestLog.HttpCode = 0
 	// 优先从 endpoint 提取模型名（如 gemini-2.5-pro），否则回退到 provider.Model
@@ -2495,6 +2675,7 @@ func (prs *ProviderRelayService) forwardGeminiRequest(
 	// 检查响应状态
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		errorBody, _ := io.ReadAll(resp.Body)
+		setRequestLogResponseBody(requestLog, errorBody)
 		fmt.Printf("[Gemini]   ✗ 失败: %s | HTTP %d | 耗时: %.2fs\n", provider.Name, resp.StatusCode, providerDuration)
 		return false, newUpstreamErrorResponse(resp.StatusCode, resp.Header.Get("Content-Type"), resp.Header, errorBody), false
 	}
@@ -2526,6 +2707,7 @@ func (prs *ProviderRelayService) forwardGeminiRequest(
 			// 【修复】此时 header 尚未写入客户端，可以重试/降级
 			return false, fmt.Errorf("读取响应失败: %w", readErr), false
 		}
+		setRequestLogResponseBody(requestLog, body)
 		// 解析 Gemini 用量数据
 		parseGeminiUsageMetadata(body, requestLog)
 		// 读取成功后再写 header 和 body

@@ -85,6 +85,10 @@ func TestEnsureRequestLogTableWithDB_RepairsDanglingStatsTrigger(t *testing.T) {
 	assertRequestLogColumnExists(t, db, "requested_model")
 	assertRequestLogColumnExists(t, db, "first_token_sec")
 	assertRequestLogColumnExists(t, db, "provider_per_call_output_set")
+	assertRequestLogColumnExists(t, db, "request_body")
+	assertRequestLogColumnExists(t, db, "response_body")
+	assertRequestLogColumnExists(t, db, "request_body_truncated")
+	assertRequestLogColumnExists(t, db, "response_body_truncated")
 
 	assertSQLiteObjectExists(t, db, "table", requestLogStatsHourlyTable)
 	assertSQLiteObjectExists(t, db, "table", requestLogStatsDailyTable)

@@ -247,8 +247,16 @@
                     <span class="token-value">{{ formatFirstTokenMs(item) }}</span>
                   </div>
                   <div>
-                    <span class="performance-badge performance-badge--tps">速</span>
-                    <span class="token-value">{{ formatTokensPerSecond(item) }}</span>
+                    <button
+                      type="button"
+                      class="performance-trigger"
+                      :title="t('components.logs.payloadDetail.openHint')"
+                      :aria-label="formatPayloadDetailAriaLabel(item)"
+                      @click="openPayloadDetailModal(item)"
+                    >
+                      <span class="performance-badge performance-badge--tps">速</span>
+                      <span class="token-value">{{ formatTokensPerSecond(item) }}</span>
+                    </button>
                   </div>
                 </td>
                 <td class="cost-cell">
@@ -527,6 +535,61 @@
             </div>
           </div>
         </BaseModal>
+
+        <!-- 请求体 / 返回体弹窗 -->
+        <BaseModal
+          :open="payloadDetailModal.open"
+          :title="t('components.logs.payloadDetail.title')"
+          panel-width="min(1080px, 96vw)"
+          :body-scrollable="false"
+          @close="closePayloadDetailModal"
+        >
+          <div class="payload-detail-modal">
+            <p v-if="payloadDetailModal.loading" class="cost-detail-loading">
+              {{ t('components.logs.loading') }}
+            </p>
+            <template v-else>
+              <div class="payload-detail-meta">
+                {{ t('components.logs.payloadDetail.logId', { id: payloadDetailModal.logId || '—' }) }}
+              </div>
+              <div class="payload-detail-grid">
+                <section class="payload-detail-panel">
+                  <header class="payload-detail-panel__header">
+                    <span>{{ t('components.logs.payloadDetail.requestBody') }}</span>
+                    <span
+                      v-if="payloadDetailModal.detail?.request_body_truncated"
+                      class="payload-detail-truncated"
+                    >
+                      {{ t('components.logs.payloadDetail.truncated') }}
+                    </span>
+                  </header>
+                  <pre
+                    v-if="payloadDetailModal.detail?.request_body"
+                    class="payload-detail-pre"
+                  >{{ payloadDetailModal.detail.request_body }}</pre>
+                  <p v-else class="cost-detail-empty">{{ t('components.logs.payloadDetail.emptyRequest') }}</p>
+                </section>
+
+                <section class="payload-detail-panel">
+                  <header class="payload-detail-panel__header">
+                    <span>{{ t('components.logs.payloadDetail.responseBody') }}</span>
+                    <span
+                      v-if="payloadDetailModal.detail?.response_body_truncated"
+                      class="payload-detail-truncated"
+                    >
+                      {{ t('components.logs.payloadDetail.truncated') }}
+                    </span>
+                  </header>
+                  <pre
+                    v-if="payloadDetailModal.detail?.response_body"
+                    class="payload-detail-pre"
+                  >{{ payloadDetailModal.detail.response_body }}</pre>
+                  <p v-else class="cost-detail-empty">{{ t('components.logs.payloadDetail.emptyResponse') }}</p>
+                </section>
+              </div>
+            </template>
+          </div>
+        </BaseModal>
     </div>
   </div>
 </template>
@@ -543,6 +606,7 @@ import { LoadProviders } from '../../../bindings/codeswitch/services/providerser
 import { GetProviders as GetGeminiProviders } from '../../../bindings/codeswitch/services/geminiservice'
 import {
   fetchRequestLogs,
+  fetchRequestLogPayload,
   fetchLogProviderRefs,
   fetchLogStatsV2,
   fetchModelStatsV2,
@@ -551,6 +615,7 @@ import {
   clearRequestLogs,
   clearLogStats,
   type RequestLog,
+  type RequestLogPayloadDetail,
   type LogStats,
   type LogStatsSeries,
   type LogPlatform,
@@ -983,6 +1048,53 @@ const openTokenDetailModal = () => {
 // 关闭 Token 明细弹窗
 const closeTokenDetailModal = () => {
   tokenDetailModal.open = false
+}
+
+const payloadDetailModal = reactive<{
+  open: boolean
+  loading: boolean
+  logId: number
+  detail: RequestLogPayloadDetail | null
+}>({
+  open: false,
+  loading: false,
+  logId: 0,
+  detail: null,
+})
+const payloadDetailRequestSeq = ref(0)
+
+const openPayloadDetailModal = async (item: RequestLog) => {
+  const logId = Number(item.id ?? 0)
+  if (!Number.isFinite(logId) || logId <= 0) return
+  payloadDetailModal.open = true
+  payloadDetailModal.loading = true
+  payloadDetailModal.logId = logId
+  payloadDetailModal.detail = null
+
+  const requestSeq = ++payloadDetailRequestSeq.value
+  try {
+    const detail = await fetchRequestLogPayload(logId)
+    if (requestSeq !== payloadDetailRequestSeq.value) return
+    payloadDetailModal.detail = detail
+  } catch (error) {
+    if (requestSeq !== payloadDetailRequestSeq.value) return
+    showToast(
+      t('components.logs.payloadDetail.loadFailed', {
+        error: extractErrorMessage(error),
+      }),
+      'error',
+    )
+  } finally {
+    if (requestSeq === payloadDetailRequestSeq.value) {
+      payloadDetailModal.loading = false
+    }
+  }
+}
+
+const closePayloadDetailModal = () => {
+  payloadDetailRequestSeq.value += 1
+  payloadDetailModal.open = false
+  payloadDetailModal.loading = false
 }
 
 type ModelShareRow = {
@@ -1737,6 +1849,8 @@ const formatDuration = (value?: number) => {
   return `${value.toFixed(2)}s`
 }
 
+const TOKENS_PER_SECOND_MIN_WINDOW_SEC = 0.05
+
 const toPositiveFinite = (value?: number) => {
   const numeric = Number(value ?? 0)
   if (!Number.isFinite(numeric) || numeric <= 0) return 0
@@ -1758,13 +1872,19 @@ const formatTokensPerSecond = (item: RequestLog) => {
   if (!Number.isFinite(outputTokens) || outputTokens <= 0) return '—'
   const totalDuration = toPositiveFinite(item.duration_sec)
   const firstToken = toPositiveFinite(item.first_token_sec)
+  if (firstToken <= 0) return '—'
   const generationWindow = totalDuration - firstToken
-  if (generationWindow <= 0) return '—'
+  if (generationWindow < TOKENS_PER_SECOND_MIN_WINDOW_SEC) return '—'
   const tokensPerSecond = outputTokens / generationWindow
   if (!Number.isFinite(tokensPerSecond) || tokensPerSecond <= 0) return '—'
   const precision = tokensPerSecond >= 100 ? 1 : 2
   return `${tokensPerSecond.toFixed(precision)} tokens/s`
 }
+
+const formatPayloadDetailAriaLabel = (item: RequestLog) =>
+  t('components.logs.payloadDetail.openAria', {
+    value: formatTokensPerSecond(item),
+  })
 
 type ModelVerifyStatus = 'match' | 'mismatch' | 'unknown'
 
@@ -3368,6 +3488,16 @@ html.dark .summary-card__sub-value {
   color: #94a3b8;
 }
 
+@media (max-width: 960px) {
+  .payload-detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .payload-detail-pre {
+    max-height: 34vh;
+  }
+}
+
 @media (max-width: 768px) {
   .logs-summary {
     grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
@@ -3505,6 +3635,89 @@ html.dark .token-detail-item__name {
   font-weight: 600;
   color: #34d399;
   font-variant-numeric: tabular-nums;
+}
+
+.payload-detail-modal {
+  min-height: 280px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.payload-detail-meta {
+  font-size: 0.78rem;
+  color: #64748b;
+}
+
+.payload-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  min-height: 0;
+}
+
+.payload-detail-panel {
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 10px;
+  background: rgba(148, 163, 184, 0.08);
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.payload-detail-panel__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.26);
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #334155;
+}
+
+.payload-detail-truncated {
+  font-size: 0.7rem;
+  color: #b45309;
+  font-weight: 600;
+}
+
+.payload-detail-pre {
+  flex: 1 1 auto;
+  min-height: 220px;
+  max-height: 52vh;
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: 'SFMono-Regular', Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: #0f172a;
+}
+
+html.dark .payload-detail-meta {
+  color: #94a3b8;
+}
+
+html.dark .payload-detail-panel {
+  border-color: rgba(148, 163, 184, 0.32);
+  background: rgba(15, 23, 42, 0.4);
+}
+
+html.dark .payload-detail-panel__header {
+  border-bottom-color: rgba(148, 163, 184, 0.24);
+  color: #e2e8f0;
+}
+
+html.dark .payload-detail-truncated {
+  color: #fbbf24;
+}
+
+html.dark .payload-detail-pre {
+  color: #e2e8f0;
 }
 
 .token-breakdown-row {

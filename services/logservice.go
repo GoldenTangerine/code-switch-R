@@ -20,6 +20,57 @@ const providerPerformanceCacheTTL = 20 * time.Second
 const providerPerformanceCacheMaxEntries = 512
 const providerTokensPerSecondMinWindowSec = 0.05
 
+var requestLogListSelectFields = []string{
+	"id",
+	"platform",
+	"model",
+	"requested_model",
+	"response_model",
+	"provider_id",
+	"provider",
+	"price_source",
+	"http_code",
+	"input_tokens",
+	"output_tokens",
+	"cache_create_tokens",
+	"ephemeral_5m_tokens",
+	"ephemeral_1h_tokens",
+	"cache_read_tokens",
+	"reasoning_tokens",
+	"is_stream",
+	"duration_sec",
+	"first_token_sec",
+	"input_cost",
+	"output_cost",
+	"reasoning_cost",
+	"cache_create_cost",
+	"cache_read_cost",
+	"ephemeral_5m_cost",
+	"ephemeral_1h_cost",
+	"total_cost",
+	"has_pricing",
+	"matched_pricing_model",
+	"provider_pricing_available",
+	"provider_quota_type",
+	"provider_input_usd_per_m",
+	"provider_output_usd_per_m",
+	"provider_per_call_unified",
+	"provider_per_call_input",
+	"provider_per_call_output",
+	"provider_per_call_unified_set",
+	"provider_per_call_input_set",
+	"provider_per_call_output_set",
+	"created_at",
+}
+
+var requestLogPayloadDetailSelectFields = []string{
+	"id",
+	"request_body",
+	"response_body",
+	"request_body_truncated",
+	"response_body_truncated",
+}
+
 type LogService struct {
 	modelPricing *ModelPricingService
 
@@ -41,6 +92,14 @@ type providerPerformanceCacheEntry struct {
 
 type requestLogSelecter interface {
 	Selects(...xdb.Option) ([]xdb.Record, error)
+}
+
+type RequestLogPayloadDetail struct {
+	ID                    int64  `json:"id"`
+	RequestBody           string `json:"request_body"`
+	ResponseBody          string `json:"response_body"`
+	RequestBodyTruncated  bool   `json:"request_body_truncated"`
+	ResponseBodyTruncated bool   `json:"response_body_truncated"`
 }
 
 func (ls *LogService) CostSince(start string, platform string) (float64, error) {
@@ -76,6 +135,35 @@ func NewLogService(modelPricing *ModelPricingService) *LogService {
 		modelPricing:             modelPricing,
 		providerPerformanceCache: make(map[string]providerPerformanceCacheEntry),
 	}
+}
+
+func (ls *LogService) GetRequestLogPayload(id int64) (RequestLogPayloadDetail, error) {
+	if id <= 0 {
+		return RequestLogPayloadDetail{}, fmt.Errorf("invalid log id")
+	}
+	model := xdb.New("request_log")
+	records, err := model.Selects(
+		xdb.Field(requestLogPayloadDetailSelectFields...),
+		xdb.WhereEq("id", id),
+		xdb.Limit(1),
+	)
+	if err != nil {
+		if errors.Is(err, xdb.ErrNotFound) || isNoSuchTableErr(err) {
+			return RequestLogPayloadDetail{}, nil
+		}
+		return RequestLogPayloadDetail{}, err
+	}
+	if len(records) == 0 {
+		return RequestLogPayloadDetail{}, nil
+	}
+	record := records[0]
+	return RequestLogPayloadDetail{
+		ID:                    record.GetInt64("id"),
+		RequestBody:           record.GetString("request_body"),
+		ResponseBody:          record.GetString("response_body"),
+		RequestBodyTruncated:  record.GetBool("request_body_truncated"),
+		ResponseBodyTruncated: record.GetBool("response_body_truncated"),
+	}, nil
 }
 
 func selectRecordsByProviderRef(selecter requestLogSelecter, baseOptions []xdb.Option, providerRef string) ([]xdb.Record, error) {
@@ -252,6 +340,7 @@ func (ls *LogService) ListRequestLogsV2(platform string, provider string, limit 
 	}
 	model := xdb.New("request_log")
 	options := []xdb.Option{
+		xdb.Field(requestLogListSelectFields...),
 		xdb.OrderByDesc("created_at"),
 		xdb.OrderByDesc("id"),
 		xdb.Limit(limit),
