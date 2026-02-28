@@ -3,6 +3,7 @@ package services
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseEventPayloadSupportsChunkedSSEWithoutSpaceAfterDataPrefix(t *testing.T) {
@@ -98,6 +99,61 @@ func TestReqeustLogHookStreamRequestFallsBackToRawJSONUsage(t *testing.T) {
 	}
 	if reqLog.OutputTokens != 8 {
 		t.Fatalf("OutputTokens = %d, 期望 8", reqLog.OutputTokens)
+	}
+}
+
+func TestUpdateFirstTokenFromPayloadSkipsNonStreamRequest(t *testing.T) {
+	reqLog := &ReqeustLog{
+		IsStream:         false,
+		RequestStartedAt: time.Now().Add(-1 * time.Second),
+	}
+
+	updateFirstTokenFromPayload(`{"choices":[{"delta":{"content":"hello"}}]}`, reqLog)
+
+	if reqLog.FirstTokenSec != 0 {
+		t.Fatalf("非流式请求不应记录 TTFT，当前 first_token_sec=%.6f", reqLog.FirstTokenSec)
+	}
+}
+
+func TestUpdateFirstTokenFromPayloadDetectsCodexRootDeltaEvent(t *testing.T) {
+	reqLog := &ReqeustLog{
+		IsStream:         true,
+		RequestStartedAt: time.Now().Add(-1200 * time.Millisecond),
+	}
+
+	updateFirstTokenFromPayload(`{"type":"response.output_text.delta","delta":"hello"}`, reqLog)
+
+	if reqLog.FirstTokenSec <= 0 {
+		t.Fatalf("Codex root delta 事件应触发 TTFT 记录，当前 first_token_sec=%.6f", reqLog.FirstTokenSec)
+	}
+	if reqLog.FirstTokenSec > 10 {
+		t.Fatalf("TTFT 数值异常，当前 first_token_sec=%.6f", reqLog.FirstTokenSec)
+	}
+}
+
+func TestUpdateFirstTokenFromPayloadDetectsClaudeTextDelta(t *testing.T) {
+	reqLog := &ReqeustLog{
+		IsStream:         true,
+		RequestStartedAt: time.Now().Add(-900 * time.Millisecond),
+	}
+
+	updateFirstTokenFromPayload(`{"type":"content_block_delta","delta":{"text":"hi"}}`, reqLog)
+
+	if reqLog.FirstTokenSec <= 0 {
+		t.Fatalf("Claude delta 文本应触发 TTFT 记录，当前 first_token_sec=%.6f", reqLog.FirstTokenSec)
+	}
+}
+
+func TestUpdateFirstTokenFromPayloadDetectsGeminiCandidateText(t *testing.T) {
+	reqLog := &ReqeustLog{
+		IsStream:         true,
+		RequestStartedAt: time.Now().Add(-900 * time.Millisecond),
+	}
+
+	updateFirstTokenFromPayload(`{"candidates":[{"content":{"parts":[{"text":"hello"}]}}]}`, reqLog)
+
+	if reqLog.FirstTokenSec <= 0 {
+		t.Fatalf("Gemini candidates 文本应触发 TTFT 记录，当前 first_token_sec=%.6f", reqLog.FirstTokenSec)
 	}
 }
 

@@ -194,6 +194,7 @@
                 <th class="col-http">{{ t('components.logs.table.httpCode') }}</th>
                 <th class="col-stream">{{ t('components.logs.table.stream') }}</th>
                 <th class="col-duration">{{ t('components.logs.table.duration') }}</th>
+                <th class="col-performance">{{ t('components.logs.table.performance') }}</th>
                 <th class="col-cost">{{ t('components.logs.table.cost') }}</th>
                 <th class="col-tokens">{{ t('components.logs.table.tokens') }}</th>
               </tr>
@@ -240,6 +241,16 @@
                 <td :class="['code', httpCodeClass(item.http_code)]">{{ item.http_code }}</td>
                 <td><span :class="['stream-tag', item.is_stream ? 'on' : 'off']">{{ formatStream(item.is_stream) }}</span></td>
                 <td><span :class="['duration-tag', durationColor(item.duration_sec)]">{{ formatDuration(item.duration_sec) }}</span></td>
+                <td class="performance-cell">
+                  <div>
+                    <span class="token-label">{{ t('components.logs.table.ttft') }}</span>
+                    <span class="token-value">{{ formatFirstTokenMs(item) }}</span>
+                  </div>
+                  <div>
+                    <span class="token-label">{{ t('components.logs.table.tps') }}</span>
+                    <span class="token-value">{{ formatTokensPerSecond(item) }}</span>
+                  </div>
+                </td>
                 <td class="cost-cell">
                   <span
                     class="cost-cell__value"
@@ -289,7 +300,7 @@
                 </td>
               </tr>
               <tr v-if="!pagedLogs.length && !loading">
-                <td colspan="10" class="empty">{{ t('components.logs.empty') }}</td>
+                <td colspan="11" class="empty">{{ t('components.logs.empty') }}</td>
               </tr>
             </tbody>
           </table>
@@ -1715,14 +1726,44 @@ const formatTime = (value?: string) => {
   return `${date.getFullYear()}-${padHour(date.getMonth() + 1)}-${padHour(date.getDate())} ${padHour(date.getHours())}:${padHour(date.getMinutes())}:${padHour(date.getSeconds())}`
 }
 
+const isStreamingLog = (value?: boolean | number) => value === true || value === 1
+
 const formatStream = (value?: boolean | number) => {
-  const isOn = value === true || value === 1
-  return isOn ? t('components.logs.streamOn') : t('components.logs.streamOff')
+  return isStreamingLog(value) ? t('components.logs.streamOn') : t('components.logs.streamOff')
 }
 
 const formatDuration = (value?: number) => {
   if (!value || Number.isNaN(value)) return '—'
   return `${value.toFixed(2)}s`
+}
+
+const toPositiveFinite = (value?: number) => {
+  const numeric = Number(value ?? 0)
+  if (!Number.isFinite(numeric) || numeric <= 0) return 0
+  return numeric
+}
+
+const formatFirstTokenMs = (item: RequestLog) => {
+  if (!isStreamingLog(item.is_stream)) return '—'
+  const seconds = toPositiveFinite(item.first_token_sec)
+  if (seconds <= 0) return '—'
+  const milliseconds = seconds * 1000
+  const precision = milliseconds >= 100 ? 0 : milliseconds >= 10 ? 1 : 2
+  return `${milliseconds.toFixed(precision)} ms`
+}
+
+const formatTokensPerSecond = (item: RequestLog) => {
+  if (!isStreamingLog(item.is_stream)) return '—'
+  const outputTokens = Number(item.output_tokens ?? 0)
+  if (!Number.isFinite(outputTokens) || outputTokens <= 0) return '—'
+  const totalDuration = toPositiveFinite(item.duration_sec)
+  const firstToken = toPositiveFinite(item.first_token_sec)
+  const generationWindow = totalDuration - firstToken
+  if (generationWindow <= 0) return '—'
+  const tokensPerSecond = outputTokens / generationWindow
+  if (!Number.isFinite(tokensPerSecond) || tokensPerSecond <= 0) return '—'
+  const precision = tokensPerSecond >= 100 ? 1 : 2
+  return `${tokensPerSecond.toFixed(precision)} tok/s`
 }
 
 type ModelVerifyStatus = 'match' | 'mismatch' | 'unknown'

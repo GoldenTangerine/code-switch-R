@@ -560,6 +560,9 @@
         "httpCode": "HTTP",
         "stream": "传输",
         "duration": "耗时",
+        "performance": "性能",
+        "ttft": "首 Token",
+        "tps": "输出速率",
         "cost": "金额",
         "tokens": "Token 汇总"
       },

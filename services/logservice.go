@@ -153,6 +153,7 @@ func (ls *LogService) ListRequestLogsV2(platform string, provider string, limit 
 			CreatedAt:                 createdAtValue,
 			IsStream:                  record.GetBool("is_stream"),
 			DurationSec:               record.GetFloat64("duration_sec"),
+			FirstTokenSec:             record.GetFloat64("first_token_sec"),
 			InputCost:                 record.GetFloat64("input_cost"),
 			OutputCost:                record.GetFloat64("output_cost"),
 			ReasoningCost:             record.GetFloat64("reasoning_cost"),

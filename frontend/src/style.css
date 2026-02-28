@@ -1107,6 +1107,7 @@ html.dark .logs-date-picker-menu {
 .logs-table .col-http { width: 90px; }
 .logs-table .col-stream { width: 120px; }
 .logs-table .col-duration { width: 120px; }
+.logs-table .col-performance { width: 180px; white-space: normal; }
 .logs-table .col-tokens { width: 340px; white-space: normal; }
 
 .logs-table td.http-success {
@@ -1136,6 +1137,18 @@ html.dark .logs-date-picker-menu {
 }
 
 .token-cell div {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.performance-cell {
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: var(--mac-text);
+}
+
+.performance-cell div {
   display: flex;
   align-items: center;
   gap: 6px;

@@ -1,3 +1,19 @@
+# Code Switch v2.6.84
+
+## 新功能
+- **日志性能列（TTFT / TPS）**：日志表格新增性能列，展示首个 token 返回时间（TTFT, ms）与输出速率（tok/s）。
+- **后端真实打点落库**：`request_log` 新增 `first_token_sec` 字段并完成兼容迁移，日志查询接口同步透出该字段。
+
+## 修复
+- **非流式 TTFT 误计**：修复非流式请求误记录 TTFT 的问题，非流式场景统一显示 `—`，避免伪精度指标误导。
+- **Codex 首 token 识别滞后**：补齐 `response.output_text.delta` 事件识别，修复部分流式请求 TTFT 记录偏晚的问题。
+
+## 技术改进
+- 新增 TTFT 回归测试，覆盖非流式跳过记录、Codex root delta、Claude/Gemini 文本事件检测等关键路径。
+- 前端性能列计算边界增强：仅在流式且生成窗口有效时展示 TPS，异常与无效值自动降级为 `—`。
+
+---
+
 # Code Switch v2.6.82
 
 ## 修复

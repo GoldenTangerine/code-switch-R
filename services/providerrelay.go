@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"regexp"
 	"sort"
@@ -869,6 +870,7 @@ func (prs *ProviderRelayService) forwardRequest(
 		headers["Accept"] = "application/json"
 	}
 
+	start := time.Now()
 	requestLog := &ReqeustLog{
 		Platform:         kind,
 		ProviderID:       providerRefFromProvider(provider),
@@ -876,6 +878,7 @@ func (prs *ProviderRelayService) forwardRequest(
 		Model:            model,
 		RequestedModel:   strings.TrimSpace(requestedModel),
 		IsStream:         isStream,
+		RequestStartedAt: start,
 		ProviderAPIURL:   provider.APIURL,
 		ProviderAPIKey:   provider.APIKey,
 		ProviderAuthType: provider.ConnectivityAuthType,
@@ -889,7 +892,6 @@ func (prs *ProviderRelayService) forwardRequest(
 			pricingSnapshot = svc
 		}
 	}
-	start := time.Now()
 	defer func() {
 		requestLog.DurationSec = time.Since(start).Seconds()
 		normalizeRequestLogCacheCreateTokens(requestLog)
@@ -925,13 +927,13 @@ func (prs *ProviderRelayService) forwardRequest(
 				INSERT INTO request_log (
 					platform, model, requested_model, response_model, provider_id, provider, http_code,
 					input_tokens, output_tokens, cache_create_tokens, ephemeral_5m_tokens, ephemeral_1h_tokens, cache_read_tokens,
-					reasoning_tokens, is_stream, duration_sec, total_cost, price_source,
+					reasoning_tokens, is_stream, duration_sec, first_token_sec, total_cost, price_source,
 					input_cost, output_cost, reasoning_cost, cache_create_cost, cache_read_cost,
 					ephemeral_5m_cost, ephemeral_1h_cost, has_pricing, matched_pricing_model,
 					provider_pricing_available, provider_quota_type, provider_input_usd_per_m, provider_output_usd_per_m,
 					provider_per_call_unified, provider_per_call_input, provider_per_call_output,
 					provider_per_call_unified_set, provider_per_call_input_set, provider_per_call_output_set
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			`,
 			requestLog.Platform,
 			requestLog.Model,
@@ -949,6 +951,7 @@ func (prs *ProviderRelayService) forwardRequest(
 			requestLog.ReasoningTokens,
 			boolToInt(requestLog.IsStream),
 			requestLog.DurationSec,
+			requestLog.FirstTokenSec,
 			requestLog.TotalCost,
 			requestLog.PriceSource,
 			requestLog.InputCost,
@@ -1169,6 +1172,7 @@ func ensureRequestLogTableWithDB(db *sql.DB) error {
 		reasoning_tokens INTEGER,
 		is_stream INTEGER DEFAULT 0,
 		duration_sec REAL DEFAULT 0,
+		first_token_sec REAL DEFAULT 0,
 		total_cost REAL DEFAULT 0,
 		price_source TEXT DEFAULT '',
 		input_cost REAL DEFAULT 0,
@@ -1211,6 +1215,9 @@ func ensureRequestLogTableWithDB(db *sql.DB) error {
 		return err
 	}
 	if err := ensureRequestLogColumn(db, "duration_sec", "REAL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "first_token_sec", "REAL DEFAULT 0"); err != nil {
 		return err
 	}
 	if err := ensureRequestLogColumn(db, "total_cost", "REAL DEFAULT 0"); err != nil {
@@ -1399,6 +1406,7 @@ func parseSSEDataLine(line string, parser func(string, *ReqeustLog), usage *Reqe
 	}
 	parser(dataLine, usage)
 	updateResponseModelFromPayload(dataLine, usage)
+	updateFirstTokenFromPayload(dataLine, usage)
 }
 
 func looksLikeSSEPayload(payload string) bool {
@@ -1474,7 +1482,98 @@ func parseRawJSONPayload(payload string, parser func(string, *ReqeustLog), usage
 	}
 	parser(buffered, usage)
 	updateResponseModelFromPayload(buffered, usage)
+	updateFirstTokenFromPayload(buffered, usage)
 	rawJSONBuffer.Reset()
+}
+
+func updateFirstTokenFromPayload(payload string, reqLog *ReqeustLog) {
+	if reqLog == nil || !reqLog.IsStream || reqLog.FirstTokenSec > 0 {
+		return
+	}
+	if reqLog.OutputTokens > 0 || payloadHasGeneratedToken(payload) {
+		markFirstTokenTimestamp(reqLog)
+	}
+}
+
+func markFirstTokenTimestamp(reqLog *ReqeustLog) {
+	if reqLog == nil || reqLog.FirstTokenSec > 0 || reqLog.RequestStartedAt.IsZero() {
+		return
+	}
+	elapsed := time.Since(reqLog.RequestStartedAt).Seconds()
+	if elapsed <= 0 || math.IsNaN(elapsed) || math.IsInf(elapsed, 0) {
+		return
+	}
+	reqLog.FirstTokenSec = elapsed
+}
+
+func payloadHasGeneratedToken(payload string) bool {
+	trimmed := strings.TrimSpace(payload)
+	if trimmed == "" || !gjson.Valid(trimmed) {
+		return false
+	}
+
+	eventType := strings.TrimSpace(gjson.Get(trimmed, "type").String())
+	if strings.EqualFold(eventType, "response.output_text.delta") {
+		if delta := strings.TrimSpace(gjson.Get(trimmed, "delta").String()); delta != "" {
+			return true
+		}
+	}
+
+	for _, path := range []string{
+		"delta.text",
+		"delta.content",
+		"content_block.delta.text",
+		"content_block.text",
+		"response.output_text",
+		"response.output_text.delta",
+		"output_text",
+	} {
+		if value := strings.TrimSpace(gjson.Get(trimmed, path).String()); value != "" {
+			return true
+		}
+	}
+
+	for _, choice := range gjson.Get(trimmed, "choices").Array() {
+		if value := strings.TrimSpace(choice.Get("delta.content").String()); value != "" {
+			return true
+		}
+		if value := strings.TrimSpace(choice.Get("text").String()); value != "" {
+			return true
+		}
+	}
+
+	for _, output := range gjson.Get(trimmed, "response.output").Array() {
+		for _, content := range output.Get("content").Array() {
+			if value := strings.TrimSpace(content.Get("text").String()); value != "" {
+				return true
+			}
+			if value := strings.TrimSpace(content.Get("delta").String()); value != "" {
+				return true
+			}
+		}
+	}
+
+	for _, block := range gjson.Get(trimmed, "content").Array() {
+		if value := strings.TrimSpace(block.Get("text").String()); value != "" {
+			return true
+		}
+	}
+
+	for _, block := range gjson.Get(trimmed, "message.content").Array() {
+		if value := strings.TrimSpace(block.Get("text").String()); value != "" {
+			return true
+		}
+	}
+
+	for _, candidate := range gjson.Get(trimmed, "candidates").Array() {
+		for _, part := range candidate.Get("content.parts").Array() {
+			if value := strings.TrimSpace(part.Get("text").String()); value != "" {
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 // normalizeRequestLogInputTokens 将 input_tokens 规范化为“非缓存输入”。
@@ -1593,6 +1692,7 @@ type ReqeustLog struct {
 	ReasoningTokens           int     `json:"reasoning_tokens"`
 	IsStream                  bool    `json:"is_stream"`
 	DurationSec               float64 `json:"duration_sec"`
+	FirstTokenSec             float64 `json:"first_token_sec"`
 	CreatedAt                 string  `json:"created_at"`
 	InputCost                 float64 `json:"input_cost"`
 	OutputCost                float64 `json:"output_cost"`
@@ -1615,9 +1715,10 @@ type ReqeustLog struct {
 	ProviderPerCallInputSet   bool    `json:"provider_per_call_input_set"`
 	ProviderPerCallOutputSet  bool    `json:"provider_per_call_output_set"`
 
-	ProviderAPIURL   string `json:"-"`
-	ProviderAPIKey   string `json:"-"`
-	ProviderAuthType string `json:"-"`
+	ProviderAPIURL   string    `json:"-"`
+	ProviderAPIKey   string    `json:"-"`
+	ProviderAuthType string    `json:"-"`
+	RequestStartedAt time.Time `json:"-"`
 }
 
 // claude code usage parser
@@ -1929,6 +2030,7 @@ func parseGeminiSSELine(event string, requestLog *ReqeustLog) {
 			continue
 		}
 		updateResponseModelFromPayload(data, requestLog)
+		updateFirstTokenFromPayload(data, requestLog)
 		// 【优化】快速检查是否包含 usageMetadata，避免无效解析
 		if !strings.Contains(data, "usageMetadata") {
 			continue
@@ -2032,6 +2134,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 		fmt.Printf("[Gemini] 共 %d 个 Level 分组: %v\n", len(sortedLevels), sortedLevels)
 
 		// 请求日志
+		start := time.Now()
 		requestLog := &ReqeustLog{
 			Platform:         "gemini",
 			RequestedModel:   requestedModel,
@@ -2039,6 +2142,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 			InputTokens:      0,
 			OutputTokens:     0,
 			ProviderAuthType: "",
+			RequestStartedAt: start,
 		}
 		pricingSnapshot := (*modelpricing.Service)(nil)
 		if prs != nil && prs.modelPricing != nil {
@@ -2049,7 +2153,6 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 				pricingSnapshot = svc
 			}
 		}
-		start := time.Now()
 
 		// 保存日志的 defer
 		defer func() {
@@ -2081,18 +2184,18 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 					INSERT INTO request_log (
 						platform, model, requested_model, response_model, provider_id, provider, http_code,
 						input_tokens, output_tokens, cache_create_tokens, ephemeral_5m_tokens, ephemeral_1h_tokens, cache_read_tokens,
-						reasoning_tokens, is_stream, duration_sec, total_cost, price_source,
+						reasoning_tokens, is_stream, duration_sec, first_token_sec, total_cost, price_source,
 						input_cost, output_cost, reasoning_cost, cache_create_cost, cache_read_cost,
 						ephemeral_5m_cost, ephemeral_1h_cost, has_pricing, matched_pricing_model,
 						provider_pricing_available, provider_quota_type, provider_input_usd_per_m, provider_output_usd_per_m,
 						provider_per_call_unified, provider_per_call_input, provider_per_call_output,
 						provider_per_call_unified_set, provider_per_call_input_set, provider_per_call_output_set
-					) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+					) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 				`,
 				requestLog.Platform, requestLog.Model, requestLog.RequestedModel, requestLog.ResponseModel, requestLog.ProviderID, requestLog.Provider, requestLog.HttpCode,
 				requestLog.InputTokens, requestLog.OutputTokens, requestLog.CacheCreateTokens, requestLog.Ephemeral5mTokens, requestLog.Ephemeral1hTokens,
 				requestLog.CacheReadTokens, requestLog.ReasoningTokens,
-				boolToInt(requestLog.IsStream), requestLog.DurationSec, requestLog.TotalCost, requestLog.PriceSource,
+				boolToInt(requestLog.IsStream), requestLog.DurationSec, requestLog.FirstTokenSec, requestLog.TotalCost, requestLog.PriceSource,
 				requestLog.InputCost, requestLog.OutputCost, requestLog.ReasoningCost, requestLog.CacheCreateCost, requestLog.CacheReadCost,
 				requestLog.Ephemeral5mCost, requestLog.Ephemeral1hCost, boolToInt(requestLog.HasPricing), requestLog.MatchedPricingModel,
 				boolToInt(requestLog.ProviderPricingAvailable), requestLog.ProviderQuotaType, requestLog.ProviderInputUSDPerM, requestLog.ProviderOutputUSDPerM,
@@ -2444,6 +2547,7 @@ func parseGeminiUsageMetadata(body []byte, reqLog *ReqeustLog) {
 		return
 	}
 	updateResponseModelFromPayload(string(body), reqLog)
+	updateFirstTokenFromPayload(string(body), reqLog)
 	usage := gjson.GetBytes(body, "usageMetadata")
 	if !usage.Exists() {
 		return

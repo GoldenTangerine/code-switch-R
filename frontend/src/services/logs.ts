@@ -20,6 +20,7 @@ export type RequestLog = {
   reasoning_tokens: number
   is_stream?: boolean | number
   duration_sec?: number
+  first_token_sec?: number
   created_at: string
   total_cost?: number
   input_cost?: number

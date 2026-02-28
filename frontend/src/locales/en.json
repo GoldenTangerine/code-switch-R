@@ -559,6 +559,9 @@
         "httpCode": "HTTP",
         "stream": "Stream",
         "duration": "Duration",
+        "performance": "Performance",
+        "ttft": "TTFT",
+        "tps": "Output rate",
         "cost": "Cost",
         "tokens": "Tokens"
       },
