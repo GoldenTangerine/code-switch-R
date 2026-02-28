@@ -11,6 +11,10 @@ import {
 	type HeatmapGranularity,
 	type UsageHeatmapWeek,
 } from '../data/usageHeatmap'
+import {
+	heatmapDisplaySettingsSignature,
+	type HeatmapDisplaySettings,
+} from '../data/heatmapDisplaySettings'
 import { fetchHeatmapStats } from '../services/logs'
 
 // 格子尺寸配置（与 CSS 媒体查询保持一致）
@@ -58,17 +62,23 @@ const columnsFromDays = (days: number, granularity: HeatmapGranularity) => {
 export function useAdaptiveHeatmap(
 	containerRef: Ref<HTMLElement | null>,
 	granularity: Ref<HeatmapGranularity>,
+	displaySettings: Ref<HeatmapDisplaySettings>,
 ) {
 	// 响应式状态
 	const containerWidth = ref(0)
 	const visibleColumns = ref(columnsFromDays(defaultDaysByGranularity(granularity.value), granularity.value))
 	const heatmapData = ref<UsageHeatmapWeek[]>(
-		generateFallbackUsageHeatmap(defaultDaysByGranularity(granularity.value), granularity.value),
+		generateFallbackUsageHeatmap(
+			defaultDaysByGranularity(granularity.value),
+			granularity.value,
+			displaySettings.value,
+		),
 	)
 	const isLoading = ref(false)
 	const loadedDays = ref(0) // 已加载的天数
 	const loadedGranularity = ref<HeatmapGranularity | null>(null)
 	const initialized = ref(false)
+	const displaySettingsKey = computed(() => heatmapDisplaySettingsSignature(displaySettings.value))
 	let latestRequestToken = 0
 
 	/**
@@ -143,7 +153,12 @@ export function useAdaptiveHeatmap(
 			if (granularity.value !== currentGranularity) {
 				return
 			}
-			heatmapData.value = buildUsageHeatmapMatrix(stats, days, currentGranularity)
+			heatmapData.value = buildUsageHeatmapMatrix(
+				stats,
+				days,
+				currentGranularity,
+				displaySettings.value,
+			)
 			loadedDays.value = days
 			loadedGranularity.value = currentGranularity
 		} catch (error) {
@@ -274,18 +289,40 @@ export function useAdaptiveHeatmap(
 		await loadHeatmapData(days)
 	}
 
-	watch(granularity, (nextGranularity) => {
+	watch([granularity, displaySettingsKey], ([nextGranularity, nextDisplaySettingsKey], previous) => {
+		const [prevGranularity, prevDisplaySettingsKey] = previous ?? []
+		const granularityChanged = prevGranularity !== undefined && nextGranularity !== prevGranularity
+		const displaySettingsChanged =
+			prevDisplaySettingsKey !== undefined && nextDisplaySettingsKey !== prevDisplaySettingsKey
+
+		if (!granularityChanged && !displaySettingsChanged) {
+			return
+		}
+
 		loadedDays.value = 0
 		loadedGranularity.value = null
+		const defaultDays = defaultDaysByGranularity(nextGranularity)
+
+		if (!initialized.value) {
+			if (granularityChanged) {
+				visibleColumns.value = columnsFromDays(defaultDays, nextGranularity)
+			}
+			heatmapData.value = generateFallbackUsageHeatmap(
+				defaultDays,
+				nextGranularity,
+				displaySettings.value,
+			)
+			return
+		}
+
+		if (!granularityChanged) {
+			void reload()
+			return
+		}
+
 		const columnGroupSize = columnGroupSizeByGranularity(nextGranularity)
 		const maxColumns = maxColumnsByGranularity(nextGranularity)
 		const maxDays = maxDaysByGranularity(nextGranularity)
-		const defaultDays = defaultDaysByGranularity(nextGranularity)
-		if (!initialized.value) {
-			visibleColumns.value = columnsFromDays(defaultDays, nextGranularity)
-			heatmapData.value = generateFallbackUsageHeatmap(defaultDays, nextGranularity)
-			return
-		}
 		const width = containerRef.value?.clientWidth ?? containerWidth.value
 		if (width > 0) {
 			const columns = calculateColumns(width, columnGroupSize, maxColumns)
@@ -294,8 +331,13 @@ export function useAdaptiveHeatmap(
 			void loadHeatmapData(days)
 			return
 		}
+
 		visibleColumns.value = columnsFromDays(defaultDays, nextGranularity)
-		heatmapData.value = generateFallbackUsageHeatmap(defaultDays, nextGranularity)
+		heatmapData.value = generateFallbackUsageHeatmap(
+			defaultDays,
+			nextGranularity,
+			displaySettings.value,
+		)
 	})
 
 	return {

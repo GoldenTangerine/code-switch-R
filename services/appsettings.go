@@ -21,11 +21,26 @@ const (
 	maxUpdateHistoryKeepCount     = 20
 	heatmapGranularityHourly      = "hourly"
 	heatmapGranularityDaily       = "daily"
+	heatmapDailyModeHourlyScaled  = "hourly_scaled"
+	heatmapDailyModeDailyPeak     = "daily_peak"
+	defaultHeatmapDailyScale      = 24
+	minHeatmapDailyScale          = 1
+	maxHeatmapDailyScale          = 72
+	defaultHeatmapIntensityL1     = 25
+	defaultHeatmapIntensityL2     = 50
+	defaultHeatmapIntensityL3     = 75
+	minHeatmapIntensityStop       = 1
+	maxHeatmapIntensityStop       = 99
 )
 
 type AppSettings struct {
 	ShowHeatmap                bool    `json:"show_heatmap"`
 	HeatmapGranularity         string  `json:"heatmap_granularity"`
+	HeatmapDailyScaleFactor    int     `json:"heatmap_daily_scale_factor"`
+	HeatmapDailyIntensityMode  string  `json:"heatmap_daily_intensity_mode"`
+	HeatmapIntensityStopL1     int     `json:"heatmap_intensity_stop_l1"`
+	HeatmapIntensityStopL2     int     `json:"heatmap_intensity_stop_l2"`
+	HeatmapIntensityStopL3     int     `json:"heatmap_intensity_stop_l3"`
 	ShowHomeTitle              bool    `json:"show_home_title"`
 	BudgetTotal                float64 `json:"budget_total"`
 	BudgetUsedAdjustment       float64 `json:"budget_used_adjustment"`
@@ -167,6 +182,11 @@ func (as *AppSettingsService) defaultSettings() AppSettings {
 	return AppSettings{
 		ShowHeatmap:                true,
 		HeatmapGranularity:         heatmapGranularityHourly,
+		HeatmapDailyScaleFactor:    defaultHeatmapDailyScale,
+		HeatmapDailyIntensityMode:  heatmapDailyModeHourlyScaled,
+		HeatmapIntensityStopL1:     defaultHeatmapIntensityL1,
+		HeatmapIntensityStopL2:     defaultHeatmapIntensityL2,
+		HeatmapIntensityStopL3:     defaultHeatmapIntensityL3,
 		ShowHomeTitle:              true,
 		BudgetTotal:                0,
 		BudgetUsedAdjustment:       0,
@@ -209,6 +229,7 @@ func (as *AppSettingsService) SaveAppSettings(settings AppSettings) (AppSettings
 	as.mu.Lock()
 	defer as.mu.Unlock()
 	settings.HeatmapGranularity = normalizeHeatmapGranularity(settings.HeatmapGranularity)
+	normalizeHeatmapDisplaySettings(&settings)
 	settings.UpdateHistoryKeepCount = normalizeUpdateHistoryKeepCount(settings.UpdateHistoryKeepCount)
 
 	// 同步开机自启动状态
@@ -246,6 +267,7 @@ func (as *AppSettingsService) loadLocked() (AppSettings, error) {
 		return settings, err
 	}
 	settings.HeatmapGranularity = normalizeHeatmapGranularity(settings.HeatmapGranularity)
+	normalizeHeatmapDisplaySettings(&settings)
 	settings.UpdateHistoryKeepCount = normalizeUpdateHistoryKeepCount(settings.UpdateHistoryKeepCount)
 	return settings, nil
 }
@@ -256,6 +278,7 @@ func (as *AppSettingsService) saveLocked(settings AppSettings) error {
 		return err
 	}
 	settings.HeatmapGranularity = normalizeHeatmapGranularity(settings.HeatmapGranularity)
+	normalizeHeatmapDisplaySettings(&settings)
 	settings.UpdateHistoryKeepCount = normalizeUpdateHistoryKeepCount(settings.UpdateHistoryKeepCount)
 	data, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
@@ -281,6 +304,89 @@ func normalizeHeatmapGranularity(value string) string {
 	default:
 		return heatmapGranularityHourly
 	}
+}
+
+func normalizeHeatmapDailyIntensityMode(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case heatmapDailyModeDailyPeak:
+		return heatmapDailyModeDailyPeak
+	default:
+		return heatmapDailyModeHourlyScaled
+	}
+}
+
+func clampHeatmapInt(value int, min int, max int, fallback int) int {
+	if value == 0 {
+		return fallback
+	}
+	if value < min {
+		return min
+	}
+	if value > max {
+		return max
+	}
+	return value
+}
+
+func normalizeHeatmapDisplaySettings(settings *AppSettings) {
+	if settings == nil {
+		return
+	}
+	settings.HeatmapDailyScaleFactor = clampHeatmapInt(
+		settings.HeatmapDailyScaleFactor,
+		minHeatmapDailyScale,
+		maxHeatmapDailyScale,
+		defaultHeatmapDailyScale,
+	)
+	settings.HeatmapDailyIntensityMode = normalizeHeatmapDailyIntensityMode(settings.HeatmapDailyIntensityMode)
+
+	l1 := clampHeatmapInt(
+		settings.HeatmapIntensityStopL1,
+		minHeatmapIntensityStop,
+		maxHeatmapIntensityStop,
+		defaultHeatmapIntensityL1,
+	)
+	l2 := clampHeatmapInt(
+		settings.HeatmapIntensityStopL2,
+		minHeatmapIntensityStop,
+		maxHeatmapIntensityStop,
+		defaultHeatmapIntensityL2,
+	)
+	l3 := clampHeatmapInt(
+		settings.HeatmapIntensityStopL3,
+		minHeatmapIntensityStop,
+		maxHeatmapIntensityStop,
+		defaultHeatmapIntensityL3,
+	)
+
+	if l2 <= l1 {
+		l2 = l1 + 1
+		if l2 > maxHeatmapIntensityStop {
+			l2 = maxHeatmapIntensityStop
+		}
+	}
+	if l3 <= l2 {
+		l3 = l2 + 1
+		if l3 > maxHeatmapIntensityStop {
+			l3 = maxHeatmapIntensityStop
+		}
+	}
+	if l3 <= l2 {
+		l2 = l3 - 1
+		if l2 < minHeatmapIntensityStop {
+			l2 = minHeatmapIntensityStop
+		}
+	}
+	if l2 <= l1 {
+		l1 = l2 - 1
+		if l1 < minHeatmapIntensityStop {
+			l1 = minHeatmapIntensityStop
+		}
+	}
+
+	settings.HeatmapIntensityStopL1 = l1
+	settings.HeatmapIntensityStopL2 = l2
+	settings.HeatmapIntensityStopL3 = l3
 }
 
 // LoadUpdateHistoryKeepCount 从应用设置读取更新包历史保留数量（读取失败时返回默认值）

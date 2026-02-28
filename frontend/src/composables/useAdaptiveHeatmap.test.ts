@@ -8,6 +8,7 @@ vi.mock('../services/logs', () => ({
 
 import { fetchHeatmapStats } from '../services/logs'
 import { useAdaptiveHeatmap } from './useAdaptiveHeatmap'
+import { DEFAULT_HEATMAP_DISPLAY_SETTINGS } from '../data/heatmapDisplaySettings'
 
 const flushPromises = async () => {
 	await Promise.resolve()
@@ -49,7 +50,8 @@ describe('useAdaptiveHeatmap', () => {
 
 		const containerRef = ref({ clientWidth: 900 } as HTMLElement)
 		const granularity = ref<'hourly' | 'daily'>('hourly')
-		const { init, reload, displayData } = useAdaptiveHeatmap(containerRef, granularity)
+		const displaySettings = ref({ ...DEFAULT_HEATMAP_DISPLAY_SETTINGS })
+		const { init, reload, displayData } = useAdaptiveHeatmap(containerRef, granularity, displaySettings)
 
 		await init()
 
@@ -88,7 +90,8 @@ describe('useAdaptiveHeatmap', () => {
 
 		const containerRef = ref({ clientWidth: 900 } as HTMLElement)
 		const granularity = ref<'hourly' | 'daily'>('daily')
-		const { init, visibleColumns } = useAdaptiveHeatmap(containerRef, granularity)
+		const displaySettings = ref({ ...DEFAULT_HEATMAP_DISPLAY_SETTINGS })
+		const { init, visibleColumns } = useAdaptiveHeatmap(containerRef, granularity, displaySettings)
 
 		await init()
 
@@ -105,12 +108,95 @@ describe('useAdaptiveHeatmap', () => {
 
 		const containerRef = ref({ clientWidth: 360 } as HTMLElement)
 		const granularity = ref<'hourly' | 'daily'>('daily')
-		const { init, visibleColumns } = useAdaptiveHeatmap(containerRef, granularity)
+		const displaySettings = ref({ ...DEFAULT_HEATMAP_DISPLAY_SETTINGS })
+		const { init, visibleColumns } = useAdaptiveHeatmap(containerRef, granularity, displaySettings)
 
 		await init()
 
 		expect(mockedFetch).toHaveBeenCalledTimes(1)
 		expect(mockedFetch.mock.calls[0]?.[0]).toBe(365)
 		expect(visibleColumns.value).toBe(27)
+	})
+
+	it('reloads data when display settings change', async () => {
+		vi.useFakeTimers()
+		vi.setSystemTime(new Date(2026, 1, 11, 12, 0, 0))
+		const nowKey = '2026-02-11 10'
+		const mockedFetch = vi.mocked(fetchHeatmapStats)
+		mockedFetch.mockResolvedValueOnce([makeStat(nowKey, 1)])
+		mockedFetch.mockResolvedValueOnce([makeStat(nowKey, 9)])
+
+		const containerRef = ref({ clientWidth: 900 } as HTMLElement)
+		const granularity = ref<'hourly' | 'daily'>('hourly')
+		const displaySettings = ref({ ...DEFAULT_HEATMAP_DISPLAY_SETTINGS })
+		const { init, displayData } = useAdaptiveHeatmap(containerRef, granularity, displaySettings)
+
+		await init()
+		expect(mockedFetch).toHaveBeenCalledTimes(1)
+
+		displaySettings.value = {
+			...displaySettings.value,
+			intensityStopL1: 10,
+		}
+		await nextTick()
+		await flushPromises()
+
+		expect(mockedFetch).toHaveBeenCalledTimes(2)
+		const peak = Math.max(...displayData.value.flat().map((cell) => cell.requests))
+		expect(peak).toBe(9)
+	})
+
+	it('does not reload when display settings signature is unchanged', async () => {
+		vi.useFakeTimers()
+		vi.setSystemTime(new Date(2026, 1, 11, 12, 0, 0))
+		const nowKey = '2026-02-11 10'
+		const mockedFetch = vi.mocked(fetchHeatmapStats)
+		mockedFetch.mockResolvedValueOnce([makeStat(nowKey, 1)])
+
+		const containerRef = ref({ clientWidth: 900 } as HTMLElement)
+		const granularity = ref<'hourly' | 'daily'>('hourly')
+		const displaySettings = ref({ ...DEFAULT_HEATMAP_DISPLAY_SETTINGS })
+		const { init } = useAdaptiveHeatmap(containerRef, granularity, displaySettings)
+
+		await init()
+		expect(mockedFetch).toHaveBeenCalledTimes(1)
+
+		displaySettings.value = {
+			...displaySettings.value,
+		}
+		await nextTick()
+		await flushPromises()
+
+		expect(mockedFetch).toHaveBeenCalledTimes(1)
+	})
+
+	it('requests once when granularity and display settings change together', async () => {
+		vi.useFakeTimers()
+		vi.setSystemTime(new Date(2026, 1, 11, 12, 0, 0))
+		const nowKey = '2026-02-11 10'
+		const mockedFetch = vi.mocked(fetchHeatmapStats)
+		mockedFetch.mockResolvedValueOnce([makeStat(nowKey, 1)])
+		mockedFetch.mockResolvedValueOnce([makeStat(nowKey, 24)])
+
+		const containerRef = ref({ clientWidth: 900 } as HTMLElement)
+		const granularity = ref<'hourly' | 'daily'>('hourly')
+		const displaySettings = ref({ ...DEFAULT_HEATMAP_DISPLAY_SETTINGS })
+		const { init, displayData } = useAdaptiveHeatmap(containerRef, granularity, displaySettings)
+
+		await init()
+		expect(mockedFetch).toHaveBeenCalledTimes(1)
+
+		granularity.value = 'daily'
+		displaySettings.value = {
+			...displaySettings.value,
+			intensityStopL1: 10,
+		}
+		await nextTick()
+		await flushPromises()
+
+		expect(mockedFetch).toHaveBeenCalledTimes(2)
+		expect(mockedFetch.mock.calls[1]?.[0]).toBe(365)
+		const peak = Math.max(...displayData.value.flat().map((cell) => cell.requests))
+		expect(peak).toBe(24)
 	})
 })

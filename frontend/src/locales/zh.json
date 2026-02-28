@@ -667,6 +667,7 @@
         "heatmapGranularity": "热力墙统计粒度",
         "heatmapGranularityHourly": "按小时",
         "heatmapGranularityDaily": "按天",
+        "heatmapDisplayConfig": "热力墙显示配置",
         "homeTitle": "显示首页标题",
         "budgetTotal": "预算总额",
         "budgetTotalHint": "用于托盘菜单进度条（USD）",
@@ -749,6 +750,24 @@
         "blacklistSaveFailed": "拉黑配置保存失败：{error}",
         "webdavSaveSuccess": "WebDAV 配置已保存",
         "webdavSaveFailed": "WebDAV 配置保存失败：{error}"
+      },
+      "heatmapDisplay": {
+        "title": "热力墙显示配置",
+        "manage": "配置",
+        "hint": "按天模式下可切换强度计算方式，并自定义颜色分级阈值（百分比）。",
+        "summary": "模式：{mode}｜倍率：{scale}｜阈值：{l1}% / {l2}% / {l3}%",
+        "dailyIntensityMode": "按天强度基准",
+        "dailyIntensityModeHourlyScaled": "按小时峰值 × 倍率",
+        "dailyIntensityModeDailyPeak": "按天峰值（自动归一）",
+        "dailyScaleFactor": "按天倍率（1 - 72）",
+        "dailyScaleFactorHint": "仅在“按小时峰值 × 倍率”模式生效。",
+        "dailyScaleFactorDisabledHint": "当前模式已改为“按天峰值”，该倍率暂不生效。",
+        "intensityStopL1": "颜色阈值 L1（%）",
+        "intensityStopL2": "颜色阈值 L2（%）",
+        "intensityStopL3": "颜色阈值 L3（%）",
+        "intensityStopsHint": "阈值会自动约束在 1 - 99，并确保 L1 < L2 < L3。",
+        "reset": "恢复默认",
+        "apply": "应用配置"
       },
       "modelPricing": {
         "title": "模型价格",

@@ -1,4 +1,8 @@
 import { Call } from '@wailsio/runtime'
+import {
+  DEFAULT_HEATMAP_DISPLAY_SETTINGS,
+  normalizeHeatmapDisplaySettings,
+} from '../data/heatmapDisplaySettings'
 
 export type HeatmapGranularity = 'hourly' | 'daily'
 
@@ -9,6 +13,11 @@ export const normalizeHeatmapGranularity = (
 export type AppSettings = {
   show_heatmap: boolean
   heatmap_granularity: HeatmapGranularity
+  heatmap_daily_scale_factor: number
+  heatmap_daily_intensity_mode: 'hourly_scaled' | 'daily_peak'
+  heatmap_intensity_stop_l1: number
+  heatmap_intensity_stop_l2: number
+  heatmap_intensity_stop_l3: number
   show_home_title: boolean
   budget_total: number
   budget_used_adjustment: number
@@ -41,6 +50,11 @@ export type AppSettings = {
 const DEFAULT_SETTINGS: AppSettings = {
   show_heatmap: true,
   heatmap_granularity: 'hourly',
+  heatmap_daily_scale_factor: DEFAULT_HEATMAP_DISPLAY_SETTINGS.dailyScaleFactor,
+  heatmap_daily_intensity_mode: DEFAULT_HEATMAP_DISPLAY_SETTINGS.dailyIntensityMode,
+  heatmap_intensity_stop_l1: DEFAULT_HEATMAP_DISPLAY_SETTINGS.intensityStopL1,
+  heatmap_intensity_stop_l2: DEFAULT_HEATMAP_DISPLAY_SETTINGS.intensityStopL2,
+  heatmap_intensity_stop_l3: DEFAULT_HEATMAP_DISPLAY_SETTINGS.intensityStopL3,
   show_home_title: true,
   budget_total: 0,
   budget_used_adjustment: 0,
@@ -72,10 +86,22 @@ const DEFAULT_SETTINGS: AppSettings = {
 
 export const fetchAppSettings = async (): Promise<AppSettings> => {
   const data = await Call.ByName('codeswitch/services.AppSettingsService.GetAppSettings')
+  const normalizedHeatmapDisplay = normalizeHeatmapDisplaySettings({
+    dailyScaleFactor: data?.heatmap_daily_scale_factor,
+    dailyIntensityMode: data?.heatmap_daily_intensity_mode,
+    intensityStopL1: data?.heatmap_intensity_stop_l1,
+    intensityStopL2: data?.heatmap_intensity_stop_l2,
+    intensityStopL3: data?.heatmap_intensity_stop_l3,
+  })
   return {
     ...DEFAULT_SETTINGS,
     ...data,
     heatmap_granularity: normalizeHeatmapGranularity(data?.heatmap_granularity),
+    heatmap_daily_scale_factor: normalizedHeatmapDisplay.dailyScaleFactor,
+    heatmap_daily_intensity_mode: normalizedHeatmapDisplay.dailyIntensityMode,
+    heatmap_intensity_stop_l1: normalizedHeatmapDisplay.intensityStopL1,
+    heatmap_intensity_stop_l2: normalizedHeatmapDisplay.intensityStopL2,
+    heatmap_intensity_stop_l3: normalizedHeatmapDisplay.intensityStopL3,
   }
 }
 

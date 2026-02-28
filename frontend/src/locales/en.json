@@ -668,6 +668,7 @@
         "heatmapGranularity": "Heatmap granularity",
         "heatmapGranularityHourly": "Hourly",
         "heatmapGranularityDaily": "Daily",
+        "heatmapDisplayConfig": "Heatmap display config",
         "homeTitle": "Show home title",
         "budgetTotal": "Budget total",
         "budgetTotalHint": "Used for tray menu progress (USD)",
@@ -748,6 +749,24 @@
         "blacklistSaveFailed": "Failed to save blacklist settings: {error}",
         "webdavSaveSuccess": "WebDAV settings saved",
         "webdavSaveFailed": "Failed to save WebDAV settings: {error}"
+      },
+      "heatmapDisplay": {
+        "title": "Heatmap Display Config",
+        "manage": "Configure",
+        "hint": "In daily mode, you can change intensity baseline strategy and custom color threshold stops (percent).",
+        "summary": "Mode: {mode} | Scale: {scale} | Stops: {l1}% / {l2}% / {l3}%",
+        "dailyIntensityMode": "Daily intensity baseline",
+        "dailyIntensityModeHourlyScaled": "Hourly peak × scale",
+        "dailyIntensityModeDailyPeak": "Daily peak (auto normalized)",
+        "dailyScaleFactor": "Daily scale factor (1 - 72)",
+        "dailyScaleFactorHint": "Only used in \"Hourly peak × scale\" mode.",
+        "dailyScaleFactorDisabledHint": "Current mode is \"Daily peak\", so this scale factor is ignored.",
+        "intensityStopL1": "Intensity stop L1 (%)",
+        "intensityStopL2": "Intensity stop L2 (%)",
+        "intensityStopL3": "Intensity stop L3 (%)",
+        "intensityStopsHint": "Stops are clamped to 1 - 99 and enforced as L1 < L2 < L3.",
+        "reset": "Reset defaults",
+        "apply": "Apply"
       },
       "modelPricing": {
         "title": "Model pricing",

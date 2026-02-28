@@ -1057,6 +1057,12 @@ import {
   type AppSettings,
   type HeatmapGranularity,
 } from '../../services/appSettings'
+import {
+  areHeatmapDisplaySettingsEqual,
+  DEFAULT_HEATMAP_DISPLAY_SETTINGS,
+  normalizeHeatmapDisplaySettings,
+  type HeatmapDisplaySettings,
+} from '../../data/heatmapDisplaySettings'
 import { getUpdateState, restartApp, type UpdateState } from '../../services/update'
 import { getCurrentTheme, setTheme, type ThemeMode } from '../../utils/ThemeManager'
 import { useRouter } from 'vue-router'
@@ -1107,13 +1113,16 @@ const releaseApiUrl = 'https://api.github.com/repos/GoldenTangerine/code-switch-
 
 const heatmapContainerRef = ref<HTMLElement | null>(null)
 const heatmapGranularity = ref<HeatmapGranularity>('hourly')
+const heatmapDisplaySettings = ref<HeatmapDisplaySettings>({
+  ...DEFAULT_HEATMAP_DISPLAY_SETTINGS,
+})
 // 使用自适应热力图 composable
 const {
   displayData: usageHeatmap,
   init: initHeatmap,
   cleanup: cleanupHeatmap,
   reload: reloadHeatmap,
-} = useAdaptiveHeatmap(heatmapContainerRef, heatmapGranularity)
+} = useAdaptiveHeatmap(heatmapContainerRef, heatmapGranularity, heatmapDisplaySettings)
 const tooltipRef = ref<HTMLElement | null>(null)
 const proxyStates = reactive<Record<ProviderTab, boolean>>({
   claude: false,
@@ -1494,12 +1503,30 @@ const loadAppSettings = async () => {
   try {
     const data: AppSettings = await fetchAppSettings()
     showHeatmap.value = data?.show_heatmap ?? true
-    heatmapGranularity.value = normalizeHeatmapGranularity(data?.heatmap_granularity)
+    const nextGranularity = normalizeHeatmapGranularity(data?.heatmap_granularity)
+    if (heatmapGranularity.value !== nextGranularity) {
+      heatmapGranularity.value = nextGranularity
+    }
+    const nextDisplaySettings = normalizeHeatmapDisplaySettings({
+      dailyScaleFactor: data?.heatmap_daily_scale_factor,
+      dailyIntensityMode: data?.heatmap_daily_intensity_mode,
+      intensityStopL1: data?.heatmap_intensity_stop_l1,
+      intensityStopL2: data?.heatmap_intensity_stop_l2,
+      intensityStopL3: data?.heatmap_intensity_stop_l3,
+    })
+    if (!areHeatmapDisplaySettingsEqual(heatmapDisplaySettings.value, nextDisplaySettings)) {
+      heatmapDisplaySettings.value = nextDisplaySettings
+    }
     showHomeTitle.value = data?.show_home_title ?? true
   } catch (error) {
     console.error('failed to load app settings', error)
     showHeatmap.value = true
-    heatmapGranularity.value = 'hourly'
+    if (heatmapGranularity.value !== 'hourly') {
+      heatmapGranularity.value = 'hourly'
+    }
+    if (!areHeatmapDisplaySettingsEqual(heatmapDisplaySettings.value, DEFAULT_HEATMAP_DISPLAY_SETTINGS)) {
+      heatmapDisplaySettings.value = { ...DEFAULT_HEATMAP_DISPLAY_SETTINGS }
+    }
     showHomeTitle.value = true
     // 加载应用设置失败时提示用户
     showToast(t('components.main.errors.loadAppSettingsFailed'), 'warning')

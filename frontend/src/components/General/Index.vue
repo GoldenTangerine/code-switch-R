@@ -14,6 +14,12 @@ import {
   normalizeHeatmapGranularity,
   type AppSettings,
 } from '../../services/appSettings'
+import {
+  DEFAULT_HEATMAP_DISPLAY_SETTINGS,
+  normalizeHeatmapDailyIntensityMode,
+  normalizeHeatmapDisplaySettings,
+  type HeatmapDisplaySettings,
+} from '../../data/heatmapDisplaySettings'
 import { fetchCostSince, fetchLogStats } from '../../services/logs'
 import { checkUpdate, downloadUpdate, restartApp, getUpdateState, setAutoCheckEnabled, type UpdateInfo, type UpdateState } from '../../services/update'
 import { fetchCurrentVersion } from '../../services/version'
@@ -58,6 +64,20 @@ const minUpdateHistoryKeepCount = 1
 const maxUpdateHistoryKeepCount = 20
 const heatmapEnabled = ref(getCachedValue('heatmap', true))
 const heatmapGranularity = ref(normalizeHeatmapGranularity(getCachedString('heatmapGranularity', 'hourly')))
+const initialHeatmapDisplaySettings = normalizeHeatmapDisplaySettings({
+  dailyScaleFactor: getCachedNumber('heatmapDailyScaleFactor', DEFAULT_HEATMAP_DISPLAY_SETTINGS.dailyScaleFactor),
+  dailyIntensityMode: normalizeHeatmapDailyIntensityMode(
+    getCachedString('heatmapDailyIntensityMode', DEFAULT_HEATMAP_DISPLAY_SETTINGS.dailyIntensityMode),
+  ),
+  intensityStopL1: getCachedNumber('heatmapIntensityStopL1', DEFAULT_HEATMAP_DISPLAY_SETTINGS.intensityStopL1),
+  intensityStopL2: getCachedNumber('heatmapIntensityStopL2', DEFAULT_HEATMAP_DISPLAY_SETTINGS.intensityStopL2),
+  intensityStopL3: getCachedNumber('heatmapIntensityStopL3', DEFAULT_HEATMAP_DISPLAY_SETTINGS.intensityStopL3),
+})
+const heatmapDailyScaleFactor = ref(initialHeatmapDisplaySettings.dailyScaleFactor)
+const heatmapDailyIntensityMode = ref(initialHeatmapDisplaySettings.dailyIntensityMode)
+const heatmapIntensityStopL1 = ref(initialHeatmapDisplaySettings.intensityStopL1)
+const heatmapIntensityStopL2 = ref(initialHeatmapDisplaySettings.intensityStopL2)
+const heatmapIntensityStopL3 = ref(initialHeatmapDisplaySettings.intensityStopL3)
 const homeTitleVisible = ref(getCachedValue('homeTitle', true))
 const autoStartEnabled = ref(getCachedValue('autoStart', false))
 const autoUpdateEnabled = ref(getCachedValue('autoUpdate', true))
@@ -238,6 +258,11 @@ const setupBudgetUsageTicker = () => {
 const syncAppSettingsCache = () => {
   localStorage.setItem('app-settings-heatmap', String(heatmapEnabled.value))
   localStorage.setItem('app-settings-heatmapGranularity', heatmapGranularity.value)
+  localStorage.setItem('app-settings-heatmapDailyScaleFactor', String(heatmapDailyScaleFactor.value))
+  localStorage.setItem('app-settings-heatmapDailyIntensityMode', heatmapDailyIntensityMode.value)
+  localStorage.setItem('app-settings-heatmapIntensityStopL1', String(heatmapIntensityStopL1.value))
+  localStorage.setItem('app-settings-heatmapIntensityStopL2', String(heatmapIntensityStopL2.value))
+  localStorage.setItem('app-settings-heatmapIntensityStopL3', String(heatmapIntensityStopL3.value))
   localStorage.setItem('app-settings-homeTitle', String(homeTitleVisible.value))
   localStorage.setItem('app-settings-budgetTotal', String(budgetTotal.value))
   localStorage.setItem('app-settings-budgetUsedAdjustment', String(budgetUsedAdjustment.value))
@@ -398,6 +423,70 @@ let unsubscribeWebdavSync: (() => void) | null = null
 
 // 模型价格弹窗
 const modelPricingModalOpen = ref(false)
+const heatmapDisplayModalOpen = ref(false)
+const heatmapGranularityDraft = ref(heatmapGranularity.value)
+const heatmapDisplayDraft = ref<HeatmapDisplaySettings>({
+  ...initialHeatmapDisplaySettings,
+})
+
+const getHeatmapDisplaySettingsFromState = (): HeatmapDisplaySettings =>
+  normalizeHeatmapDisplaySettings({
+    dailyScaleFactor: heatmapDailyScaleFactor.value,
+    dailyIntensityMode: heatmapDailyIntensityMode.value,
+    intensityStopL1: heatmapIntensityStopL1.value,
+    intensityStopL2: heatmapIntensityStopL2.value,
+    intensityStopL3: heatmapIntensityStopL3.value,
+  })
+
+const applyHeatmapDisplaySettingsToState = (settings: Partial<HeatmapDisplaySettings> | HeatmapDisplaySettings) => {
+  const normalized = normalizeHeatmapDisplaySettings(settings)
+  heatmapDailyScaleFactor.value = normalized.dailyScaleFactor
+  heatmapDailyIntensityMode.value = normalized.dailyIntensityMode
+  heatmapIntensityStopL1.value = normalized.intensityStopL1
+  heatmapIntensityStopL2.value = normalized.intensityStopL2
+  heatmapIntensityStopL3.value = normalized.intensityStopL3
+}
+
+const heatmapDisplayModeLabel = computed(() =>
+  heatmapDailyIntensityMode.value === 'daily_peak'
+    ? t('components.general.heatmapDisplay.dailyIntensityModeDailyPeak')
+    : t('components.general.heatmapDisplay.dailyIntensityModeHourlyScaled')
+)
+
+const heatmapDisplaySummary = computed(() =>
+  t('components.general.heatmapDisplay.summary', {
+    mode: heatmapDisplayModeLabel.value,
+    scale: heatmapDailyScaleFactor.value,
+    l1: heatmapIntensityStopL1.value,
+    l2: heatmapIntensityStopL2.value,
+    l3: heatmapIntensityStopL3.value,
+  })
+)
+
+const openHeatmapDisplayModal = () => {
+  heatmapGranularityDraft.value = heatmapGranularity.value
+  heatmapDisplayDraft.value = {
+    ...getHeatmapDisplaySettingsFromState(),
+  }
+  heatmapDisplayModalOpen.value = true
+}
+
+const closeHeatmapDisplayModal = () => {
+  heatmapDisplayModalOpen.value = false
+}
+
+const resetHeatmapDisplayDraft = () => {
+  heatmapDisplayDraft.value = {
+    ...DEFAULT_HEATMAP_DISPLAY_SETTINGS,
+  }
+}
+
+const applyHeatmapDisplayDraft = () => {
+  heatmapGranularity.value = normalizeHeatmapGranularity(heatmapGranularityDraft.value)
+  applyHeatmapDisplaySettingsToState(heatmapDisplayDraft.value)
+  heatmapDisplayModalOpen.value = false
+  void persistAppSettingsNow()
+}
 
 const formatBytes = (bytes?: number) => {
   const value = Number(bytes ?? 0)
@@ -759,6 +848,13 @@ const loadAppSettings = async () => {
     const data = await fetchAppSettings()
     heatmapEnabled.value = data?.show_heatmap ?? true
     heatmapGranularity.value = normalizeHeatmapGranularity(data?.heatmap_granularity)
+    applyHeatmapDisplaySettingsToState({
+      dailyScaleFactor: data?.heatmap_daily_scale_factor,
+      dailyIntensityMode: data?.heatmap_daily_intensity_mode,
+      intensityStopL1: data?.heatmap_intensity_stop_l1,
+      intensityStopL2: data?.heatmap_intensity_stop_l2,
+      intensityStopL3: data?.heatmap_intensity_stop_l3,
+    })
     homeTitleVisible.value = data?.show_home_title ?? true
     budgetTotal.value = Number(data?.budget_total ?? 0)
     const rawBudgetUsedDelta = Number(data?.budget_used_adjustment ?? 0)
@@ -802,6 +898,7 @@ const loadAppSettings = async () => {
     console.error('failed to load app settings', error)
     heatmapEnabled.value = true
     heatmapGranularity.value = 'hourly'
+    applyHeatmapDisplaySettingsToState(DEFAULT_HEATMAP_DISPLAY_SETTINGS)
     homeTitleVisible.value = true
     budgetTotal.value = 0
     budgetUsedAdjustment.value = 0
@@ -883,6 +980,12 @@ const persistAppSettingsNow = async () => {
     budgetCycleModeCodex.value = normalizedBudgetCycleModeCodex
     const normalizedUpdateHistoryKeepCount = normalizeUpdateHistoryKeepCount(updateHistoryKeepCount.value)
     updateHistoryKeepCount.value = normalizedUpdateHistoryKeepCount
+    const normalizedHeatmapDisplay = getHeatmapDisplaySettingsFromState()
+    heatmapDailyScaleFactor.value = normalizedHeatmapDisplay.dailyScaleFactor
+    heatmapDailyIntensityMode.value = normalizedHeatmapDisplay.dailyIntensityMode
+    heatmapIntensityStopL1.value = normalizedHeatmapDisplay.intensityStopL1
+    heatmapIntensityStopL2.value = normalizedHeatmapDisplay.intensityStopL2
+    heatmapIntensityStopL3.value = normalizedHeatmapDisplay.intensityStopL3
     const nextUsageConfigs: BudgetUsageConfigs = {
       claude: buildBudgetUsageConfig(
         budgetCycleEnabled.value,
@@ -929,6 +1032,11 @@ const persistAppSettingsNow = async () => {
     const payload: AppSettings = {
       show_heatmap: heatmapEnabled.value,
       heatmap_granularity: heatmapGranularity.value,
+      heatmap_daily_scale_factor: normalizedHeatmapDisplay.dailyScaleFactor,
+      heatmap_daily_intensity_mode: normalizedHeatmapDisplay.dailyIntensityMode,
+      heatmap_intensity_stop_l1: normalizedHeatmapDisplay.intensityStopL1,
+      heatmap_intensity_stop_l2: normalizedHeatmapDisplay.intensityStopL2,
+      heatmap_intensity_stop_l3: normalizedHeatmapDisplay.intensityStopL3,
       show_home_title: homeTitleVisible.value,
       budget_total: normalizedBudgetTotal,
       budget_used_adjustment: budgetUsedDelta.value,
@@ -1470,6 +1578,19 @@ onBeforeUnmount(() => {
               <option value="hourly">{{ $t('components.general.label.heatmapGranularityHourly') }}</option>
               <option value="daily">{{ $t('components.general.label.heatmapGranularityDaily') }}</option>
             </select>
+          </ListItem>
+          <ListItem :label="$t('components.general.label.heatmapDisplayConfig')">
+            <div class="toggle-with-hint">
+              <button
+                type="button"
+                class="action-btn"
+                :disabled="settingsLoading || saveBusy || !heatmapEnabled"
+                @click="openHeatmapDisplayModal"
+              >
+                {{ $t('components.general.heatmapDisplay.manage') }}
+              </button>
+              <span class="hint-text">{{ heatmapDisplaySummary }}</span>
+            </div>
           </ListItem>
           <ListItem :label="$t('components.general.label.homeTitle')">
             <label class="mac-switch">
@@ -2034,6 +2155,112 @@ onBeforeUnmount(() => {
       </section>
 
       <InlineModal
+        :open="heatmapDisplayModalOpen"
+        :title="$t('components.general.heatmapDisplay.title')"
+        @close="closeHeatmapDisplayModal"
+      >
+        <div class="heatmap-display-modal">
+          <p class="heatmap-display-hint">
+            {{ $t('components.general.heatmapDisplay.hint') }}
+          </p>
+
+          <div class="heatmap-display-fields">
+            <label class="heatmap-display-field">
+              <span class="heatmap-display-label">{{ $t('components.general.label.heatmapGranularity') }}</span>
+              <select v-model="heatmapGranularityDraft" class="mac-select heatmap-display-input">
+                <option value="hourly">{{ $t('components.general.label.heatmapGranularityHourly') }}</option>
+                <option value="daily">{{ $t('components.general.label.heatmapGranularityDaily') }}</option>
+              </select>
+            </label>
+
+            <label class="heatmap-display-field">
+              <span class="heatmap-display-label">{{ $t('components.general.heatmapDisplay.dailyIntensityMode') }}</span>
+              <select v-model="heatmapDisplayDraft.dailyIntensityMode" class="mac-select heatmap-display-input">
+                <option value="hourly_scaled">
+                  {{ $t('components.general.heatmapDisplay.dailyIntensityModeHourlyScaled') }}
+                </option>
+                <option value="daily_peak">
+                  {{ $t('components.general.heatmapDisplay.dailyIntensityModeDailyPeak') }}
+                </option>
+              </select>
+            </label>
+
+            <label class="heatmap-display-field">
+              <span class="heatmap-display-label">{{ $t('components.general.heatmapDisplay.dailyScaleFactor') }}</span>
+              <input
+                v-model.number="heatmapDisplayDraft.dailyScaleFactor"
+                type="number"
+                min="1"
+                max="72"
+                step="1"
+                class="mac-input heatmap-display-input"
+                :disabled="heatmapDisplayDraft.dailyIntensityMode !== 'hourly_scaled'"
+              />
+              <span class="heatmap-display-note">
+                {{
+                  heatmapDisplayDraft.dailyIntensityMode === 'hourly_scaled'
+                    ? $t('components.general.heatmapDisplay.dailyScaleFactorHint')
+                    : $t('components.general.heatmapDisplay.dailyScaleFactorDisabledHint')
+                }}
+              </span>
+            </label>
+
+            <label class="heatmap-display-field">
+              <span class="heatmap-display-label">{{ $t('components.general.heatmapDisplay.intensityStopL1') }}</span>
+              <input
+                v-model.number="heatmapDisplayDraft.intensityStopL1"
+                type="number"
+                min="1"
+                max="99"
+                step="1"
+                class="mac-input heatmap-display-input"
+              />
+            </label>
+
+            <label class="heatmap-display-field">
+              <span class="heatmap-display-label">{{ $t('components.general.heatmapDisplay.intensityStopL2') }}</span>
+              <input
+                v-model.number="heatmapDisplayDraft.intensityStopL2"
+                type="number"
+                min="1"
+                max="99"
+                step="1"
+                class="mac-input heatmap-display-input"
+              />
+            </label>
+
+            <label class="heatmap-display-field">
+              <span class="heatmap-display-label">{{ $t('components.general.heatmapDisplay.intensityStopL3') }}</span>
+              <input
+                v-model.number="heatmapDisplayDraft.intensityStopL3"
+                type="number"
+                min="1"
+                max="99"
+                step="1"
+                class="mac-input heatmap-display-input"
+              />
+            </label>
+          </div>
+
+          <p class="heatmap-display-note">
+            {{ $t('components.general.heatmapDisplay.intensityStopsHint') }}
+          </p>
+
+          <footer class="heatmap-display-actions">
+            <button class="action-btn" type="button" @click="resetHeatmapDisplayDraft">
+              {{ $t('components.general.heatmapDisplay.reset') }}
+            </button>
+            <button class="action-btn" type="button" @click="closeHeatmapDisplayModal">
+              {{ $t('common.cancel') }}
+            </button>
+            <button class="primary-btn" type="button" @click="applyHeatmapDisplayDraft">
+              {{ $t('components.general.heatmapDisplay.apply') }}
+            </button>
+          </footer>
+        </div>
+      </InlineModal>
+
+      <InlineModal
         :open="updateModalOpen"
         :title="$t('components.general.update.modalTitle')"
         @close="updateModalOpen = false"
@@ -2519,6 +2746,56 @@ onBeforeUnmount(() => {
 .webdav-manage-modal {
   width: 100%;
   max-width: 100%;
+}
+
+.heatmap-display-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.heatmap-display-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--mac-text-secondary);
+  line-height: 1.5;
+}
+
+.heatmap-display-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.heatmap-display-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.heatmap-display-label {
+  font-size: 12px;
+  color: var(--mac-text-secondary);
+}
+
+.heatmap-display-input {
+  width: 100%;
+  min-width: 0;
+}
+
+.heatmap-display-note {
+  margin: 0;
+  font-size: 11px;
+  color: var(--mac-text-secondary);
+  line-height: 1.4;
+}
+
+.heatmap-display-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--mac-divider);
 }
 
 .update-modal {

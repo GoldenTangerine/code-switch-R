@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { buildUsageHeatmapMatrix } from './usageHeatmap'
 import type { HeatmapStat } from '../services/logs'
+import { DEFAULT_HEATMAP_DISPLAY_SETTINGS } from './heatmapDisplaySettings'
 
 const makeStat = (day: string, requests: number): HeatmapStat => ({
 	day,
@@ -100,5 +101,73 @@ describe('usageHeatmap', () => {
 			expect(new Date(matrix[0][0].dateKey).getDay()).toBe(1)
 			expect(new Date(matrix[1][0].dateKey).getDay()).toBe(1)
 		})
+	})
+
+	it('supports daily peak intensity mode for daily granularity', () => {
+		vi.useFakeTimers()
+		vi.setSystemTime(new Date(2026, 0, 3, 12, 0, 0))
+
+		const stats: HeatmapStat[] = [makeStat('2026-01-01 10', 10)]
+		for (let hour = 0; hour < 10; hour++) {
+			stats.push(makeStat(`2026-01-02 ${String(hour).padStart(2, '0')}`, 10))
+		}
+
+		const scaled = buildUsageHeatmapMatrix(
+			stats,
+			3,
+			'daily',
+			{
+				...DEFAULT_HEATMAP_DISPLAY_SETTINGS,
+				dailyIntensityMode: 'hourly_scaled',
+				dailyScaleFactor: 24,
+			},
+		)
+		const dailyPeak = buildUsageHeatmapMatrix(
+			stats,
+			3,
+			'daily',
+			{
+				...DEFAULT_HEATMAP_DISPLAY_SETTINGS,
+				dailyIntensityMode: 'daily_peak',
+			},
+		)
+
+		const jan2Scaled = scaled.flat().find((cell) => cell.label === '01-02')
+		const jan2DailyPeak = dailyPeak.flat().find((cell) => cell.label === '01-02')
+		expect(jan2Scaled?.requests).toBe(100)
+		expect(jan2Scaled?.intensity).toBe(2)
+		expect(jan2DailyPeak?.requests).toBe(100)
+		expect(jan2DailyPeak?.intensity).toBe(4)
+	})
+
+	it('applies custom intensity stops for hourly granularity', () => {
+		vi.useFakeTimers()
+		vi.setSystemTime(new Date(2026, 0, 3, 12, 0, 0))
+
+		const stats: HeatmapStat[] = [
+			makeStat('2026-01-03 00', 100),
+			makeStat('2026-01-03 01', 30),
+		]
+
+		const matrixDefault = buildUsageHeatmapMatrix(stats, 1, 'hourly')
+		const matrixCustom = buildUsageHeatmapMatrix(
+			stats,
+			1,
+			'hourly',
+			{
+				...DEFAULT_HEATMAP_DISPLAY_SETTINGS,
+				intensityStopL1: 40,
+				intensityStopL2: 70,
+				intensityStopL3: 90,
+			},
+		)
+
+		const hour01Default = matrixDefault.flat().find((cell) => cell.label === '01-03 01')
+		const hour01Custom = matrixCustom.flat().find((cell) => cell.label === '01-03 01')
+		const hour00Custom = matrixCustom.flat().find((cell) => cell.label === '01-03 00')
+
+		expect(hour01Default?.intensity).toBe(2)
+		expect(hour01Custom?.intensity).toBe(1)
+		expect(hour00Custom?.intensity).toBe(4)
 	})
 })
