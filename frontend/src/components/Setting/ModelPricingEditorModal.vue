@@ -136,12 +136,12 @@ const buildRowFromForm = (): ModelPricingRow | null => {
   const eph1m = parseNumber(form.ephemeral1hUsdPer1M)
 
   const numbers = [
-    ['input', input1m],
-    ['output', output1m],
-    ['reasoning', reasoning1m],
-    ['cacheCreate', cacheCreate1m],
-    ['cacheRead', cacheRead1m],
-    ['ephemeral1h', eph1m],
+    [t('components.general.modelPricing.fields.input'), input1m],
+    [t('components.general.modelPricing.fields.output'), output1m],
+    [t('components.general.modelPricing.fields.reasoning'), reasoning1m],
+    [t('components.general.modelPricing.fields.cacheCreate'), cacheCreate1m],
+    [t('components.general.modelPricing.fields.cacheRead'), cacheRead1m],
+    [t('components.general.modelPricing.fields.ephemeral1h'), eph1m],
   ] as const
   for (const [name, value] of numbers) {
     if (Number.isNaN(value) || value < 0) {

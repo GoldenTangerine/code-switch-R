@@ -85,6 +85,24 @@
                   {{ formatUSD(model.outputUsdPerM) }}/M
                 </span>
               </div>
+              <div class="price-block">
+                <span class="price-label">{{ t('components.main.modelList.cacheCreate') }}</span>
+                <span class="price-value cache-create">
+                  {{ formatUSD(resolveCachePrice(model.inputUsdPerM, resolveCacheCreateMultiplier(model))) }}/M
+                </span>
+                <span v-if="resolveCacheCreateHint(model)" class="price-note" :class="cacheHintClass(model.cacheCreateMultiplierSource)">
+                  {{ resolveCacheCreateHint(model) }}
+                </span>
+              </div>
+              <div class="price-block">
+                <span class="price-label">{{ t('components.main.modelList.cacheRead') }}</span>
+                <span class="price-value cache-read">
+                  {{ formatUSD(resolveCachePrice(model.inputUsdPerM, resolveCacheReadMultiplier(model))) }}/M
+                </span>
+                <span v-if="resolveCacheReadHint(model)" class="price-note" :class="cacheHintClass(model.cacheReadMultiplierSource)">
+                  {{ resolveCacheReadHint(model) }}
+                </span>
+              </div>
               <div v-if="model.modelRatio > 0" class="price-block ratio">
                 <span class="price-label">{{ t('components.main.modelList.ratio') }}</span>
                 <span class="price-value">
@@ -243,6 +261,59 @@ const formatRatio = (value: number) => {
   return `${value.toFixed(2)}x`
 }
 
+const formatMultiplier = (value?: number) => {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return '—'
+  if (Math.abs(value - Math.round(value)) < 1e-9) return `${Math.round(value)}x`
+  if (value < 0.01) return `${value.toFixed(4)}x`
+  return `${value.toFixed(2)}x`
+}
+
+const formatMultiplierHint = (value?: number) => {
+  const formatted = formatMultiplier(value)
+  if (formatted === '—') return ''
+  return `${t('components.main.modelList.multiplier')} ${formatted}`
+}
+
+const resolveCachePrice = (inputUsdPerM?: number, multiplier?: number) => {
+  if (typeof inputUsdPerM !== 'number' || !Number.isFinite(inputUsdPerM) || inputUsdPerM < 0) return undefined
+  if (typeof multiplier !== 'number' || !Number.isFinite(multiplier) || multiplier < 0) return undefined
+  return inputUsdPerM * multiplier
+}
+
+const resolveCacheCreateMultiplier = (model: ProviderModelPricingItem) => {
+  if (typeof model.resolvedCacheCreateMultiplier === 'number') return model.resolvedCacheCreateMultiplier
+  return model.cacheCreateMultiplier
+}
+
+const resolveCacheReadMultiplier = (model: ProviderModelPricingItem) => {
+  if (typeof model.resolvedCacheReadMultiplier === 'number') return model.resolvedCacheReadMultiplier
+  return model.cacheReadMultiplier
+}
+
+const formatCacheMultiplierSource = (source?: string) => {
+  if (source === 'provider') return t('components.main.modelList.cacheSourceProvider')
+  if (source === 'builtin') return t('components.main.modelList.cacheSourceBuiltin')
+  if (source === 'fallback') return t('components.main.modelList.cacheSourceFallback')
+  return ''
+}
+
+const buildCacheHint = (multiplier?: number, source?: string) => {
+  const multiplierHint = formatMultiplierHint(multiplier)
+  const sourceHint = formatCacheMultiplierSource(source)
+  if (multiplierHint && sourceHint) return `${multiplierHint} · ${sourceHint}`
+  return multiplierHint || sourceHint || ''
+}
+
+const resolveCacheCreateHint = (model: ProviderModelPricingItem) =>
+  buildCacheHint(resolveCacheCreateMultiplier(model), model.cacheCreateMultiplierSource)
+
+const resolveCacheReadHint = (model: ProviderModelPricingItem) =>
+  buildCacheHint(resolveCacheReadMultiplier(model), model.cacheReadMultiplierSource)
+
+const cacheHintClass = (source?: string) => ({
+  'is-estimated': source === 'builtin' || source === 'fallback',
+})
+
 const formatPerCall = (value?: ProviderModelPerCallPrice) => {
   if (!value) return '—'
   if (typeof value.unified === 'number' && Number.isFinite(value.unified)) {
@@ -316,5 +387,35 @@ watch(
 
 .provider-model-item.no-pricing {
   grid-template-columns: 1fr;
+}
+
+.provider-model-item .model-pricing {
+  gap: 10px 18px;
+  align-items: stretch;
+}
+
+.provider-model-item .price-block {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 110px;
+}
+
+.provider-model-item .price-value.cache-create {
+  color: #d97706;
+}
+
+.provider-model-item .price-value.cache-read {
+  color: #0f766e;
+}
+
+.provider-model-item .price-note {
+  font-size: 0.74rem;
+  color: var(--mac-text-secondary);
+  white-space: nowrap;
+}
+
+.provider-model-item .price-note.is-estimated {
+  color: #b45309;
 }
 </style>

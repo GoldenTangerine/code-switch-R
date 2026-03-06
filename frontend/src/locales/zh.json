@@ -315,6 +315,12 @@
         "billingUnknown": "未知定价",
         "input": "输入",
         "output": "输出",
+        "cacheCreate": "缓存创建（5m）",
+        "cacheRead": "缓存读取",
+        "multiplier": "倍率",
+        "cacheSourceProvider": "供应商提供",
+        "cacheSourceBuiltin": "内置推导",
+        "cacheSourceFallback": "兜底估算",
         "ratio": "倍率",
         "perCall": "按次价格"
       },
@@ -821,6 +827,9 @@
           "model": "模型",
           "input": "Input",
           "output": "Output",
+          "cacheCreate": "缓存创建（5m）",
+          "cacheRead": "缓存读取",
+          "multiplier": "倍率",
           "flags": "标记"
         },
         "badge": {
@@ -836,13 +845,13 @@
           "edit": "编辑"
         },
         "fields": {
-          "model": "模型名",
-          "input": "Input",
-          "output": "Output",
-          "reasoning": "Reasoning（可选）",
-          "cacheCreate": "Cache Create（5m）",
-          "cacheRead": "Cache Read",
-          "ephemeral1h": "Cache Create（1h）"
+          "model": "模型名（Model）",
+          "input": "输入价格（Input）",
+          "output": "输出价格（Output）",
+          "reasoning": "推理价格（Reasoning，可选）",
+          "cacheCreate": "缓存创建价格（Cache Create 5m）",
+          "cacheRead": "缓存读取价格（Cache Read）",
+          "ephemeral1h": "缓存创建价格（Cache Create 1h）"
         },
         "preview": {
           "title": "Claude 官方价格预览",

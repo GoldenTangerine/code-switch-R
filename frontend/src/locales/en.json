@@ -314,6 +314,12 @@
         "billingUnknown": "Pricing unknown",
         "input": "Input",
         "output": "Output",
+        "cacheCreate": "Cache Create (5m)",
+        "cacheRead": "Cache Read",
+        "multiplier": "Multiplier",
+        "cacheSourceProvider": "Provider supplied",
+        "cacheSourceBuiltin": "Built-in derived",
+        "cacheSourceFallback": "Fallback estimate",
         "ratio": "Ratio",
         "perCall": "Per-call price"
       },
@@ -820,6 +826,9 @@
           "model": "Model",
           "input": "Input",
           "output": "Output",
+          "cacheCreate": "Cache Create (5m)",
+          "cacheRead": "Cache Read",
+          "multiplier": "Multiplier",
           "flags": "Flags"
         },
         "badge": {

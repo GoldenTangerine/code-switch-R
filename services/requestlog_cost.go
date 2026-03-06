@@ -10,6 +10,12 @@ const (
 	providerAPIDefaultCacheReadMultiplier   = 0.1
 )
 
+const (
+	providerCacheMultiplierSourceProvider = "provider"
+	providerCacheMultiplierSourceBuiltin  = "builtin"
+	providerCacheMultiplierSourceFallback = "fallback"
+)
+
 type requestLogCostResult struct {
 	InputCost                 float64
 	OutputCost                float64
@@ -201,17 +207,36 @@ func resolveProviderCacheMultipliers(
 	pricing *modelpricing.Service,
 	model string,
 ) (float64, float64) {
+	cacheCreateMultiplier, _, cacheReadMultiplier, _ := resolveProviderCacheMultiplierDetails(item, pricing, model)
+	return cacheCreateMultiplier, cacheReadMultiplier
+}
+
+func resolveProviderCacheMultiplierDetails(
+	item ProviderModelPricingItem,
+	pricing *modelpricing.Service,
+	model string,
+) (float64, string, float64, string) {
 	cacheCreateMultiplier := item.CacheCreateMultiplier
 	cacheReadMultiplier := item.CacheReadMultiplier
+	cacheCreateSource := ""
+	cacheReadSource := ""
+	if cacheCreateMultiplier > 0 {
+		cacheCreateSource = providerCacheMultiplierSourceProvider
+	}
+	if cacheReadMultiplier > 0 {
+		cacheReadSource = providerCacheMultiplierSourceProvider
+	}
 
 	if cacheCreateMultiplier <= 0 || cacheReadMultiplier <= 0 {
 		derivedCreate, derivedRead, ok := deriveCacheMultipliersFromBuiltinPricing(pricing, model)
 		if ok {
-			if cacheCreateMultiplier <= 0 {
+			if cacheCreateMultiplier <= 0 && derivedCreate > 0 {
 				cacheCreateMultiplier = derivedCreate
+				cacheCreateSource = providerCacheMultiplierSourceBuiltin
 			}
-			if cacheReadMultiplier <= 0 {
+			if cacheReadMultiplier <= 0 && derivedRead > 0 {
 				cacheReadMultiplier = derivedRead
+				cacheReadSource = providerCacheMultiplierSourceBuiltin
 			}
 		}
 	}
@@ -223,6 +248,7 @@ func resolveProviderCacheMultipliers(
 		} else {
 			cacheCreateMultiplier = 1
 		}
+		cacheCreateSource = providerCacheMultiplierSourceFallback
 	}
 	if cacheReadMultiplier <= 0 {
 		if strings.Contains(lowerModel, "claude") {
@@ -230,9 +256,10 @@ func resolveProviderCacheMultipliers(
 		} else {
 			cacheReadMultiplier = 1
 		}
+		cacheReadSource = providerCacheMultiplierSourceFallback
 	}
 
-	return cacheCreateMultiplier, cacheReadMultiplier
+	return cacheCreateMultiplier, cacheCreateSource, cacheReadMultiplier, cacheReadSource
 }
 
 func buildRequestLogUsageSnapshot(

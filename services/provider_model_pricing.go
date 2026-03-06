@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	modelpricing "codeswitch/resources/model-pricing"
 )
 
 type SiteType string
@@ -36,19 +38,23 @@ type ProviderModelPerCallPrice struct {
 }
 
 type ProviderModelPricingItem struct {
-	Model                  string                     `json:"model"`
-	Description            string                     `json:"description,omitempty"`
-	QuotaType              int                        `json:"quotaType"` // 0=按量，1=按次
-	ModelRatio             float64                    `json:"modelRatio"`
-	CompletionRatio        float64                    `json:"completionRatio"`
-	CacheCreateMultiplier  float64                    `json:"cacheCreateMultiplier,omitempty"`
-	CacheReadMultiplier    float64                    `json:"cacheReadMultiplier,omitempty"`
-	OwnerBy                string                     `json:"ownerBy,omitempty"`
-	EnableGroups           []string                   `json:"enableGroups,omitempty"`
-	SupportedEndpointTypes []string                   `json:"supportedEndpointTypes,omitempty"`
-	InputUSDPerM           float64                    `json:"inputUsdPerM,omitempty"`
-	OutputUSDPerM          float64                    `json:"outputUsdPerM,omitempty"`
-	PerCallPrice           *ProviderModelPerCallPrice `json:"perCallPrice,omitempty"`
+	Model                         string                     `json:"model"`
+	Description                   string                     `json:"description,omitempty"`
+	QuotaType                     int                        `json:"quotaType"` // 0=按量，1=按次
+	ModelRatio                    float64                    `json:"modelRatio"`
+	CompletionRatio               float64                    `json:"completionRatio"`
+	CacheCreateMultiplier         float64                    `json:"cacheCreateMultiplier,omitempty"`
+	CacheReadMultiplier           float64                    `json:"cacheReadMultiplier,omitempty"`
+	ResolvedCacheCreateMultiplier float64                    `json:"resolvedCacheCreateMultiplier,omitempty"`
+	ResolvedCacheReadMultiplier   float64                    `json:"resolvedCacheReadMultiplier,omitempty"`
+	CacheCreateMultiplierSource   string                     `json:"cacheCreateMultiplierSource,omitempty"`
+	CacheReadMultiplierSource     string                     `json:"cacheReadMultiplierSource,omitempty"`
+	OwnerBy                       string                     `json:"ownerBy,omitempty"`
+	EnableGroups                  []string                   `json:"enableGroups,omitempty"`
+	SupportedEndpointTypes        []string                   `json:"supportedEndpointTypes,omitempty"`
+	InputUSDPerM                  float64                    `json:"inputUsdPerM,omitempty"`
+	OutputUSDPerM                 float64                    `json:"outputUsdPerM,omitempty"`
+	PerCallPrice                  *ProviderModelPerCallPrice `json:"perCallPrice,omitempty"`
 }
 
 type ProviderModelPricingResponse struct {
@@ -266,6 +272,31 @@ func (ps *ProviderService) clearProviderModelPricingCache(apiURL, apiKey, authTy
 	delete(ps.pricingCache, key)
 }
 
+func (ps *ProviderService) enrichProviderModelPricingResponse(response *ProviderModelPricingResponse) {
+	if ps == nil || response == nil || len(response.Models) == 0 {
+		return
+	}
+
+	var pricing *modelpricing.Service
+	ps.mu.Lock()
+	if ps.modelPricing != nil {
+		pricing = ps.modelPricing.Service()
+	}
+	ps.mu.Unlock()
+
+	for index := range response.Models {
+		item := &response.Models[index]
+		if item.QuotaType != 0 {
+			continue
+		}
+		cacheCreateMultiplier, cacheCreateSource, cacheReadMultiplier, cacheReadSource := resolveProviderCacheMultiplierDetails(*item, pricing, item.Model)
+		item.ResolvedCacheCreateMultiplier = cacheCreateMultiplier
+		item.ResolvedCacheReadMultiplier = cacheReadMultiplier
+		item.CacheCreateMultiplierSource = cacheCreateSource
+		item.CacheReadMultiplierSource = cacheReadSource
+	}
+}
+
 // ResolveCachedProviderModelPricing 尝试从本地缓存里按模型名获取供应商接口价格条目。
 // 匹配顺序：精确归一化匹配 -> 包含关系的相似匹配。
 func (ps *ProviderService) ResolveCachedProviderModelPricing(apiURL, apiKey, authType, model string) (ProviderModelPricingItem, bool) {
@@ -351,6 +382,7 @@ func (ps *ProviderService) FetchProviderModelPricing(apiURL, apiKey, platform, a
 		commonPricing, err := fetchCommonPricing(client, apiURL, apiKey, candidate)
 		if err == nil {
 			response := buildProviderModelPricingResponse(SiteTypeUnknown, "api/pricing", commonPricing)
+			ps.enrichProviderModelPricingResponse(response)
 			ps.cacheProviderModelPricing(apiURL, apiKey, authType, response)
 			return response, nil
 		}
@@ -359,6 +391,7 @@ func (ps *ProviderService) FetchProviderModelPricing(apiURL, apiKey, platform, a
 		oneHubPricing, err := fetchOneHubPricing(client, apiURL, apiKey, candidate)
 		if err == nil {
 			response := buildProviderModelPricingResponse(SiteTypeOneHub, "one-hub", oneHubPricing)
+			ps.enrichProviderModelPricingResponse(response)
 			ps.cacheProviderModelPricing(apiURL, apiKey, authType, response)
 			return response, nil
 		}
@@ -396,6 +429,7 @@ func (ps *ProviderService) FetchProviderModelPricing(apiURL, apiKey, platform, a
 				PricingSource: "v1/models",
 				Models:        items,
 			}
+			ps.enrichProviderModelPricingResponse(response)
 			ps.cacheProviderModelPricing(apiURL, apiKey, authType, response)
 			return response, nil
 		}

@@ -14,6 +14,12 @@ export type ProviderModelPricingItem = {
   quotaType: number
   modelRatio: number
   completionRatio: number
+  cacheCreateMultiplier?: number
+  cacheReadMultiplier?: number
+  resolvedCacheCreateMultiplier?: number
+  resolvedCacheReadMultiplier?: number
+  cacheCreateMultiplierSource?: 'provider' | 'builtin' | 'fallback' | string
+  cacheReadMultiplierSource?: 'provider' | 'builtin' | 'fallback' | string
   ownerBy?: string
   inputUsdPerM?: number
   outputUsdPerM?: number
@@ -38,4 +44,3 @@ export async function fetchProviderModelPricing(
     provider.connectivityAuthType || '',
   )
 }
-

@@ -92,6 +92,7 @@ type ProviderService struct {
 
 	pricingCacheMu sync.RWMutex
 	pricingCache   map[string]providerModelPricingCacheEntry
+	modelPricing   *ModelPricingService
 }
 
 func snapshotProviderFile(path string) ([]byte, bool, error) {
@@ -123,6 +124,15 @@ func NewProviderService() *ProviderService {
 	return &ProviderService{
 		pricingCache: make(map[string]providerModelPricingCacheEntry),
 	}
+}
+
+func (ps *ProviderService) BindModelPricingService(modelPricing *ModelPricingService) {
+	if ps == nil {
+		return
+	}
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	ps.modelPricing = modelPricing
 }
 
 func (ps *ProviderService) Start() error { return nil }

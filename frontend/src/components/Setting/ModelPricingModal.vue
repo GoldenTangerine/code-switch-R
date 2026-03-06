@@ -60,6 +60,38 @@ const formatUsdPer1M = (value: number) => {
   return `$${per1m.toFixed(2)}`
 }
 
+const calculateMultiplier = (value: number, input: number) => {
+  if (!Number.isFinite(value) || value < 0) return null
+  if (!Number.isFinite(input) || input < 0) return null
+  if (input === 0) return value === 0 ? 0 : null
+  return value / input
+}
+
+const formatMultiplier = (value: number | null | undefined) => {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return '—'
+  if (Math.abs(value - Math.round(value)) < 1e-9) return `${Math.round(value)}x`
+  if (value < 0.01) return `${value.toFixed(4)}x`
+  return `${value.toFixed(2)}x`
+}
+
+const formatMultiplierHint = (value: number | null | undefined) => {
+  const formatted = formatMultiplier(value)
+  if (formatted === '—') return ''
+  return `${t('components.general.modelPricing.columns.multiplier')} ${formatted}`
+}
+
+const resolveCacheCreateMultiplier = (row: ModelPricingRow) =>
+  calculateMultiplier(row.cache_creation_input_token_cost, row.input_cost_per_token)
+
+const resolveCacheReadMultiplier = (row: ModelPricingRow) =>
+  calculateMultiplier(row.cache_read_input_token_cost, row.input_cost_per_token)
+
+const resolveCacheCreateHint = (row: ModelPricingRow) =>
+  formatMultiplierHint(resolveCacheCreateMultiplier(row))
+
+const resolveCacheReadHint = (row: ModelPricingRow) =>
+  formatMultiplierHint(resolveCacheReadMultiplier(row))
+
 const overrideCount = computed(() => rows.value.filter((item) => item.is_override || item.is_custom).length)
 
 const filteredRows = computed(() => {
@@ -412,6 +444,20 @@ watch(
               <span class="price-label">{{ $t('components.general.modelPricing.columns.output') }}</span>
               <span class="price-value output">{{ formatUsdPer1M(item.output_cost_per_token) }}/M</span>
             </div>
+            <div class="price-block">
+              <span class="price-label">{{ $t('components.general.modelPricing.columns.cacheCreate') }}</span>
+              <span class="price-value cache-create">{{ formatUsdPer1M(item.cache_creation_input_token_cost) }}/M</span>
+              <span v-if="resolveCacheCreateHint(item)" class="price-note">
+                {{ resolveCacheCreateHint(item) }}
+              </span>
+            </div>
+            <div class="price-block">
+              <span class="price-label">{{ $t('components.general.modelPricing.columns.cacheRead') }}</span>
+              <span class="price-value cache-read">{{ formatUsdPer1M(item.cache_read_input_token_cost) }}/M</span>
+              <span v-if="resolveCacheReadHint(item)" class="price-note">
+                {{ resolveCacheReadHint(item) }}
+              </span>
+            </div>
           </div>
         </div>
       </div>
@@ -629,15 +675,16 @@ watch(
 .model-pricing {
   display: flex;
   flex-wrap: wrap;
-  gap: 14px;
+  gap: 10px 18px;
   justify-content: flex-end;
-  align-items: center;
+  align-items: stretch;
 }
 
 .price-block {
   display: flex;
-  align-items: baseline;
-  gap: 6px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
   min-width: 0;
 }
 
@@ -659,6 +706,20 @@ watch(
 
 .price-value.output {
   color: #16a34a;
+}
+
+.price-value.cache-create {
+  color: #d97706;
+}
+
+.price-value.cache-read {
+  color: #0f766e;
+}
+
+.price-note {
+  font-size: 0.74rem;
+  color: var(--mac-text-secondary);
+  white-space: nowrap;
 }
 
 @media (max-width: 640px) {
