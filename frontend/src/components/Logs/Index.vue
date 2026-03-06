@@ -810,16 +810,36 @@ type CostTooltipPriceLine = {
   value: string
 }
 
+type CacheCreateTier = '5m' | '1h'
+
+type CacheCreatePriceRate = {
+  tier?: CacheCreateTier
+  perToken: number
+}
+
 type TokenRatePriceLineOptions = {
   inputPerToken: number
   outputPerToken: number
   reasoningPerToken: number
-  cacheCreatePerToken: number
+  cacheCreateRates: CacheCreatePriceRate[]
   cacheReadPerToken: number
   includeCacheRead: boolean
   includeReasoning: boolean
   suffix?: string
   includeCacheMultiplierHint?: boolean
+}
+
+type CacheCreateTokenSplit = {
+  totalTokens: number
+  tokens5m: number
+  tokens1h: number
+}
+
+type CacheCreateCostDetail = {
+  tier: CacheCreateTier
+  tokens: number
+  perToken: number
+  cost: number
 }
 
 type CostTooltipDetail = {
@@ -2347,7 +2367,15 @@ const resolveGroupMultiplier = (item: RequestLog) => {
 }
 
 const hasBreakdownCostPayload = (item: RequestLog) =>
-  [item.input_cost, item.output_cost, item.reasoning_cost, item.cache_create_cost, item.cache_read_cost]
+  [
+    item.input_cost,
+    item.output_cost,
+    item.reasoning_cost,
+    item.cache_create_cost,
+    item.cache_read_cost,
+    item.ephemeral_5m_cost,
+    item.ephemeral_1h_cost,
+  ]
     .some(value => safeNumber(value) > 0)
 
 const isTrueFlag = (value: unknown) => value === true || value === 1
@@ -2366,11 +2394,206 @@ const withPriceSuffix = (value: string, suffix?: string) => {
   return normalized ? `${value} ${normalized}` : value
 }
 
+const normalizeTokenInteger = (value?: number) => {
+  const normalized = Number(value ?? 0)
+  if (!Number.isFinite(normalized)) return 0
+  return Math.max(0, Math.round(normalized))
+}
+
+const normalizeCacheCreateTokenSplit = (
+  totalTokens: number | undefined,
+  ephemeral5mTokens: number | undefined,
+  ephemeral1hTokens: number | undefined,
+): CacheCreateTokenSplit => {
+  let total = normalizeTokenInteger(totalTokens)
+  let tokens5m = normalizeTokenInteger(ephemeral5mTokens)
+  let tokens1h = normalizeTokenInteger(ephemeral1hTokens)
+
+  if (total === 0 && (tokens5m > 0 || tokens1h > 0)) {
+    total = tokens5m + tokens1h
+  }
+  if (total <= 0) {
+    return {
+      totalTokens: 0,
+      tokens5m: 0,
+      tokens1h: 0,
+    }
+  }
+
+  if (tokens1h > total) {
+    tokens1h = total
+  }
+  const max5m = Math.max(0, total - tokens1h)
+  if (tokens5m > max5m) {
+    tokens5m = max5m
+  }
+
+  const assigned = tokens5m + tokens1h
+  if (assigned < total) {
+    tokens5m += total - assigned
+  }
+
+  return {
+    totalTokens: total,
+    tokens5m,
+    tokens1h,
+  }
+}
+
+const cacheCreateTokenSplitCache = new WeakMap<RequestLog, CacheCreateTokenSplit>()
+
+const resolveCacheCreateTokenSplit = (item: RequestLog): CacheCreateTokenSplit => {
+  const cached = cacheCreateTokenSplitCache.get(item)
+  if (cached) return cached
+  const split = normalizeCacheCreateTokenSplit(
+    item.cache_create_tokens,
+    item.ephemeral_5m_tokens,
+    item.ephemeral_1h_tokens,
+  )
+  cacheCreateTokenSplitCache.set(item, split)
+  return split
+}
+
+const formatCacheCreateTierLabel = (tier: CacheCreateTier) => tier
+
+const formatCacheCreatePriceLabel = (tier?: CacheCreateTier) =>
+  tier
+    ? t('components.logs.costTooltip.cacheCreatePriceWithTtl', {
+      ttl: formatCacheCreateTierLabel(tier),
+    })
+    : t('components.logs.costTooltip.cacheCreatePrice')
+
+const formatCacheCreateUsageLabel = (tier?: CacheCreateTier) =>
+  tier
+    ? t('components.logs.costTooltip.usageCacheCreateWithTtl', {
+      ttl: formatCacheCreateTierLabel(tier),
+    })
+    : t('components.logs.costTooltip.usageCacheCreate')
+
+const formatCacheCreateMultiplierLabel = (
+  multiplier: number,
+  tier?: CacheCreateTier,
+) =>
+  tier
+    ? t('components.logs.costTooltip.cacheCreateMultiplierLabelWithTtl', {
+      ttl: formatCacheCreateTierLabel(tier),
+      multiplier: formatMultiplierValue(multiplier),
+    })
+    : t('components.logs.costTooltip.cacheCreateMultiplierLabel', {
+      multiplier: formatMultiplierValue(multiplier),
+    })
+
+const buildCacheCreateCostDetails = ({
+  split,
+  totalCost,
+  ephemeral5mCost,
+  ephemeral1hCost,
+  fallback5mPerToken,
+  fallback1hPerToken,
+  fallbackCombinedPerToken,
+}: {
+  split: CacheCreateTokenSplit
+  totalCost: number
+  ephemeral5mCost: number
+  ephemeral1hCost: number
+  fallback5mPerToken: number
+  fallback1hPerToken: number
+  fallbackCombinedPerToken: number
+}): CacheCreateCostDetail[] => {
+  const tokens5m = split.tokens5m
+  const tokens1h = split.tokens1h
+  if (tokens5m <= 0 && tokens1h <= 0) return []
+
+  const normalizedTotalCost = Math.max(0, safeNumber(totalCost))
+  const normalized5mCost = tokens5m > 0 ? Math.max(0, safeNumber(ephemeral5mCost)) : 0
+  const normalized1hCost = tokens1h > 0 ? Math.max(0, safeNumber(ephemeral1hCost)) : 0
+  const fallbackCombined = Math.max(0, safeNumber(fallbackCombinedPerToken))
+  const fallback5m = Math.max(0, safeNumber(fallback5mPerToken)) || fallbackCombined
+  const fallback1h = Math.max(0, safeNumber(fallback1hPerToken)) || fallbackCombined
+
+  let perToken5m = tokens5m > 0 && normalized5mCost > 0 ? normalized5mCost / tokens5m : 0
+  let perToken1h = tokens1h > 0 && normalized1hCost > 0 ? normalized1hCost / tokens1h : 0
+
+  if (tokens5m > 0 && tokens1h <= 0 && perToken5m <= 0) {
+    perToken5m = normalizedTotalCost > 0 ? normalizedTotalCost / tokens5m : fallback5m
+  }
+  if (tokens1h > 0 && tokens5m <= 0 && perToken1h <= 0) {
+    perToken1h = normalizedTotalCost > 0 ? normalizedTotalCost / tokens1h : fallback1h
+  }
+
+  if (tokens5m > 0 && tokens1h > 0) {
+    if (normalizedTotalCost > 0) {
+      const has5mCost = perToken5m > 0
+      const has1hCost = perToken1h > 0
+      if (has5mCost && !has1hCost) {
+        const remaining = normalizedTotalCost - normalized5mCost
+        if (remaining > 0) perToken1h = remaining / tokens1h
+      } else if (!has5mCost && has1hCost) {
+        const remaining = normalizedTotalCost - normalized1hCost
+        if (remaining > 0) perToken5m = remaining / tokens5m
+      } else if (!has5mCost && !has1hCost) {
+        const base5mCost = tokens5m * fallback5m
+        const base1hCost = tokens1h * fallback1h
+        const baseTotalCost = base5mCost + base1hCost
+        if (baseTotalCost > 0) {
+          const scale = normalizedTotalCost / baseTotalCost
+          perToken5m = fallback5m * scale
+          perToken1h = fallback1h * scale
+        } else {
+          const averagePerToken = normalizedTotalCost / (tokens5m + tokens1h)
+          perToken5m = averagePerToken
+          perToken1h = averagePerToken
+        }
+      }
+    }
+    if (perToken5m <= 0) perToken5m = fallback5m
+    if (perToken1h <= 0) perToken1h = fallback1h
+  }
+
+  const details: CacheCreateCostDetail[] = []
+  if (tokens5m > 0 && perToken5m > 0) {
+    details.push({
+      tier: '5m',
+      tokens: tokens5m,
+      perToken: perToken5m,
+      cost: tokens5m * perToken5m,
+    })
+  }
+  if (tokens1h > 0 && perToken1h > 0) {
+    details.push({
+      tier: '1h',
+      tokens: tokens1h,
+      perToken: perToken1h,
+      cost: tokens1h * perToken1h,
+    })
+  }
+
+  if (details.length > 0) return details
+
+  if (tokens5m > 0) {
+    details.push({
+      tier: '5m',
+      tokens: tokens5m,
+      perToken: fallback5m,
+      cost: tokens5m * fallback5m,
+    })
+  }
+  if (tokens1h > 0) {
+    details.push({
+      tier: '1h',
+      tokens: tokens1h,
+      perToken: fallback1h,
+      cost: tokens1h * fallback1h,
+    })
+  }
+  return details
+}
+
 const buildTokenRatePriceLines = ({
   inputPerToken,
   outputPerToken,
   reasoningPerToken,
-  cacheCreatePerToken,
+  cacheCreateRates,
   cacheReadPerToken,
   includeCacheRead,
   includeReasoning,
@@ -2378,7 +2601,6 @@ const buildTokenRatePriceLines = ({
   includeCacheMultiplierHint = false,
 }: TokenRatePriceLineOptions): CostTooltipPriceLine[] => {
   const completionMultiplier = inputPerToken > 0 ? outputPerToken / inputPerToken : 0
-  const cacheCreateMultiplier = inputPerToken > 0 ? cacheCreatePerToken / inputPerToken : 0
   const cacheReadMultiplier = inputPerToken > 0 ? cacheReadPerToken / inputPerToken : 0
   const tokensUnit = '/ 1M tokens'
   const priceLines: CostTooltipPriceLine[] = [
@@ -2399,17 +2621,25 @@ const buildTokenRatePriceLines = ({
     value: withPriceSuffix(completionValue, suffix),
   })
 
-  const cacheCreateHint = includeCacheMultiplierHint
-    ? ` (${t('components.logs.costTooltip.cacheCreateMultiplierLabel', { multiplier: formatMultiplierValue(cacheCreateMultiplier) })})`
-    : ''
-  const cacheCreateValue =
-    cacheCreateMultiplier > 0 && inputPerToken > 0
-      ? `${formatUsdPerMillion(inputPerToken)} * ${formatMultiplierValue(cacheCreateMultiplier)} = ${formatUsdPerMillion(cacheCreatePerToken)} ${tokensUnit}${cacheCreateHint}`
-      : `${formatUsdPerMillion(cacheCreatePerToken)} ${tokensUnit}`
-  priceLines.push({
-    key: 'cacheCreate',
-    label: t('components.logs.costTooltip.cacheCreatePrice'),
-    value: withPriceSuffix(cacheCreateValue, suffix),
+  const cacheCreateRatesToRender = cacheCreateRates.length > 0
+    ? cacheCreateRates
+    : [{ perToken: 0 }]
+  cacheCreateRatesToRender.forEach((entry, index) => {
+    const cacheCreatePerToken = Math.max(0, safeNumber(entry.perToken))
+    const cacheCreateMultiplier = inputPerToken > 0 ? cacheCreatePerToken / inputPerToken : 0
+    const cacheCreateHint = includeCacheMultiplierHint && cacheCreateMultiplier > 0
+      ? ` (${formatCacheCreateMultiplierLabel(cacheCreateMultiplier, entry.tier)})`
+      : ''
+    const cacheCreateValue =
+      cacheCreateMultiplier > 0 && inputPerToken > 0
+        ? `${formatUsdPerMillion(inputPerToken)} * ${formatMultiplierValue(cacheCreateMultiplier)} = ${formatUsdPerMillion(cacheCreatePerToken)} ${tokensUnit}${cacheCreateHint}`
+        : `${formatUsdPerMillion(cacheCreatePerToken)} ${tokensUnit}`
+    const keySuffix = entry.tier ?? String(index)
+    priceLines.push({
+      key: `cacheCreate-${keySuffix}`,
+      label: formatCacheCreatePriceLabel(entry.tier),
+      value: withPriceSuffix(cacheCreateValue, suffix),
+    })
   })
 
   if (includeCacheRead) {
@@ -2441,10 +2671,11 @@ const buildTokenRatePriceLines = ({
 const buildObservedCostPriceLines = (item: RequestLog): CostTooltipPriceLine[] => {
   if (!hasBreakdownCostPayload(item)) return []
 
+  const cacheCreateSplit = resolveCacheCreateTokenSplit(item)
   const inputTokens = Math.max(0, Math.round(safeNumber(item.input_tokens)))
   const outputTokens = Math.max(0, Math.round(safeNumber(item.output_tokens)))
   const reasoningTokens = Math.max(0, Math.round(safeNumber(item.reasoning_tokens)))
-  const cacheCreateTokens = Math.max(0, Math.round(safeNumber(item.cache_create_tokens)))
+  const cacheCreateTokens = cacheCreateSplit.totalTokens
   const cacheReadTokens = Math.max(0, Math.round(safeNumber(item.cache_read_tokens)))
 
   const inputCost = Math.max(0, safeNumber(item.input_cost))
@@ -2452,18 +2683,35 @@ const buildObservedCostPriceLines = (item: RequestLog): CostTooltipPriceLine[] =
   const reasoningCost = Math.max(0, safeNumber(item.reasoning_cost))
   const cacheCreateCost = Math.max(0, safeNumber(item.cache_create_cost))
   const cacheReadCost = Math.max(0, safeNumber(item.cache_read_cost))
+  const ephemeral5mCost = Math.max(0, safeNumber(item.ephemeral_5m_cost))
+  const ephemeral1hCost = Math.max(0, safeNumber(item.ephemeral_1h_cost))
 
   const inputPerToken = inputTokens > 0 ? inputCost / inputTokens : 0
   const outputPerToken = outputTokens > 0 ? outputCost / outputTokens : 0
   const reasoningPerToken = reasoningTokens > 0 ? reasoningCost / reasoningTokens : 0
-  const cacheCreatePerToken = cacheCreateTokens > 0 ? cacheCreateCost / cacheCreateTokens : 0
   const cacheReadPerToken = cacheReadTokens > 0 ? cacheReadCost / cacheReadTokens : 0
+  const cacheCreatePerToken = cacheCreateTokens > 0 ? cacheCreateCost / cacheCreateTokens : 0
+  const cacheCreateDetails = buildCacheCreateCostDetails({
+    split: cacheCreateSplit,
+    totalCost: cacheCreateCost,
+    ephemeral5mCost,
+    ephemeral1hCost,
+    fallback5mPerToken: cacheCreatePerToken,
+    fallback1hPerToken: cacheCreatePerToken,
+    fallbackCombinedPerToken: cacheCreatePerToken,
+  })
+  const cacheCreateRates = cacheCreateDetails.length > 0
+    ? cacheCreateDetails.map(detail => ({
+      tier: detail.tier,
+      perToken: detail.perToken,
+    }))
+    : [{ perToken: cacheCreatePerToken }]
 
   return buildTokenRatePriceLines({
     inputPerToken,
     outputPerToken,
     reasoningPerToken,
-    cacheCreatePerToken,
+    cacheCreateRates,
     cacheReadPerToken,
     includeCacheRead: cacheReadTokens > 0,
     includeReasoning: reasoningTokens > 0,
@@ -2479,10 +2727,11 @@ const buildProviderAPITokenTooltipDetail = (
   if (!hasProviderPricingSnapshot(item)) return null
   if (safeNumber(item.provider_quota_type) !== 0) return null
 
+  const cacheCreateSplit = resolveCacheCreateTokenSplit(item)
   const inputTokens = Math.max(0, Math.round(safeNumber(item.input_tokens)))
   const outputTokens = Math.max(0, Math.round(safeNumber(item.output_tokens)))
   const reasoningTokens = Math.max(0, Math.round(safeNumber(item.reasoning_tokens)))
-  const cacheCreateTokens = Math.max(0, Math.round(safeNumber(item.cache_create_tokens)))
+  const cacheCreateTokens = cacheCreateSplit.totalTokens
   const cacheReadTokens = Math.max(0, Math.round(safeNumber(item.cache_read_tokens)))
 
   const breakdownInputCost = Math.max(0, safeNumber(item.input_cost))
@@ -2490,6 +2739,8 @@ const buildProviderAPITokenTooltipDetail = (
   const breakdownReasoningCost = Math.max(0, safeNumber(item.reasoning_cost))
   const breakdownCacheCreateCost = Math.max(0, safeNumber(item.cache_create_cost))
   const breakdownCacheReadCost = Math.max(0, safeNumber(item.cache_read_cost))
+  const breakdownEphemeral5mCost = Math.max(0, safeNumber(item.ephemeral_5m_cost))
+  const breakdownEphemeral1hCost = Math.max(0, safeNumber(item.ephemeral_1h_cost))
 
   const inputPerTokenSnapshot = Math.max(0, safeNumber(item.provider_input_usd_per_m)) / PER_MILLION_TOKENS
   const outputPerTokenSnapshot = Math.max(0, safeNumber(item.provider_output_usd_per_m)) / PER_MILLION_TOKENS
@@ -2510,7 +2761,7 @@ const buildProviderAPITokenTooltipDetail = (
     reasoningTokens > 0 && breakdownReasoningCost > 0
       ? breakdownReasoningCost / reasoningTokens
       : outputPerToken
-  const cacheCreatePerToken =
+  const cacheCreateCombinedPerToken =
     cacheCreateTokens > 0 && breakdownCacheCreateCost > 0
       ? breakdownCacheCreateCost / cacheCreateTokens
       : inputPerToken
@@ -2518,12 +2769,27 @@ const buildProviderAPITokenTooltipDetail = (
     cacheReadTokens > 0 && breakdownCacheReadCost > 0
       ? breakdownCacheReadCost / cacheReadTokens
       : inputPerToken
+  const cacheCreateDetails = buildCacheCreateCostDetails({
+    split: cacheCreateSplit,
+    totalCost: breakdownCacheCreateCost,
+    ephemeral5mCost: breakdownEphemeral5mCost,
+    ephemeral1hCost: breakdownEphemeral1hCost,
+    fallback5mPerToken: inputPerToken > 0 ? inputPerToken : cacheCreateCombinedPerToken,
+    fallback1hPerToken: cacheCreateCombinedPerToken > 0 ? cacheCreateCombinedPerToken : inputPerToken,
+    fallbackCombinedPerToken: cacheCreateCombinedPerToken,
+  })
+  const cacheCreateRates = cacheCreateDetails.length > 0
+    ? cacheCreateDetails.map(detail => ({
+      tier: detail.tier,
+      perToken: detail.perToken,
+    }))
+    : [{ perToken: cacheCreateCombinedPerToken }]
 
   const hasAnyTokenRate =
     inputPerToken > 0 ||
     outputPerToken > 0 ||
     reasoningPerToken > 0 ||
-    cacheCreatePerToken > 0 ||
+    cacheCreateRates.some(rate => safeNumber(rate.perToken) > 0) ||
     (cacheReadTokens > 0 && cacheReadPerToken > 0)
   if (!hasAnyTokenRate) return null
 
@@ -2532,22 +2798,23 @@ const buildProviderAPITokenTooltipDetail = (
   const reasoningCost = reasoningTokens > 0 && breakdownReasoningCost > 0
     ? breakdownReasoningCost
     : reasoningTokens * reasoningPerToken
-  const cacheCreateCost = cacheCreateTokens > 0 && breakdownCacheCreateCost > 0
-    ? breakdownCacheCreateCost
-    : cacheCreateTokens * cacheCreatePerToken
+  const cacheCreateCost = cacheCreateDetails.length > 0
+    ? cacheCreateDetails.reduce((sum, detail) => sum + detail.cost, 0)
+    : cacheCreateTokens > 0 && breakdownCacheCreateCost > 0
+      ? breakdownCacheCreateCost
+      : cacheCreateTokens * cacheCreateCombinedPerToken
   const cacheReadCost = cacheReadTokens > 0 && breakdownCacheReadCost > 0
     ? breakdownCacheReadCost
     : cacheReadTokens * cacheReadPerToken
 
   const calculatedTotal = inputCost + outputCost + reasoningCost + cacheCreateCost + cacheReadCost
-  const cacheCreateMultiplier = inputPerToken > 0 ? cacheCreatePerToken / inputPerToken : 0
   const cacheReadMultiplier = inputPerToken > 0 ? cacheReadPerToken / inputPerToken : 0
 
   const priceLines = buildTokenRatePriceLines({
     inputPerToken,
     outputPerToken,
     reasoningPerToken,
-    cacheCreatePerToken,
+    cacheCreateRates,
     cacheReadPerToken,
     includeCacheRead: cacheReadTokens > 0,
     includeReasoning: reasoningTokens > 0,
@@ -2560,14 +2827,17 @@ const buildProviderAPITokenTooltipDetail = (
       `${t('components.logs.costTooltip.usagePrompt')} ${formatTokenFormulaValue(inputTokens)} tokens / 1M tokens * ${formatUsdPerMillion(inputPerToken)}`
     )
   }
-  if (cacheCreateTokens > 0 && cacheCreatePerToken > 0) {
-    const multiplierSuffix = cacheCreateMultiplier > 0
-      ? ` (${t('components.logs.costTooltip.cacheCreateMultiplierLabel', { multiplier: formatMultiplierValue(cacheCreateMultiplier) })})`
-      : ''
-    formulaParts.push(
-      `${t('components.logs.costTooltip.usageCacheCreate')} ${formatTokenFormulaValue(cacheCreateTokens)} tokens / 1M tokens * ${formatUsdPerMillion(cacheCreatePerToken)}${multiplierSuffix}`
-    )
-  }
+  cacheCreateDetails
+    .filter(detail => detail.tokens > 0 && detail.perToken > 0)
+    .forEach((detail) => {
+      const multiplier = inputPerToken > 0 ? detail.perToken / inputPerToken : 0
+      const multiplierSuffix = multiplier > 0
+        ? ` (${formatCacheCreateMultiplierLabel(multiplier, detail.tier)})`
+        : ''
+      formulaParts.push(
+        `${formatCacheCreateUsageLabel(detail.tier)} ${formatTokenFormulaValue(detail.tokens)} tokens / 1M tokens * ${formatUsdPerMillion(detail.perToken)}${multiplierSuffix}`
+      )
+    })
   if (cacheReadTokens > 0 && cacheReadPerToken > 0) {
     const multiplierSuffix = cacheReadMultiplier > 0
       ? ` (${t('components.logs.costTooltip.cacheReadMultiplierLabel', { multiplier: formatMultiplierValue(cacheReadMultiplier) })})`
@@ -2671,19 +2941,22 @@ const buildBuiltinCostTooltipDetail = (
     }
   }
 
+  const cacheCreateSplit = resolveCacheCreateTokenSplit(item)
   const inputTokens = Math.max(0, Math.round(safeNumber(item.input_tokens)))
   const outputTokens = Math.max(0, Math.round(safeNumber(item.output_tokens)))
   const reasoningTokens = Math.max(0, Math.round(safeNumber(item.reasoning_tokens)))
-  const cacheCreateTokens = Math.max(0, Math.round(safeNumber(item.cache_create_tokens)))
+  const cacheCreateTokens = cacheCreateSplit.totalTokens
   const cacheReadTokens = Math.max(0, Math.round(safeNumber(item.cache_read_tokens)))
 
   const inputPerTokenBase = Math.max(0, safeNumber(pricingRow.input_cost_per_token))
   const outputPerTokenBase = Math.max(0, safeNumber(pricingRow.output_cost_per_token))
   const reasoningPerTokenBase = Math.max(0, safeNumber(pricingRow.output_cost_per_reasoning_token))
-  const cacheCreateRaw = Math.max(0, safeNumber(pricingRow.cache_creation_input_token_cost))
+  const cacheCreate5mRaw = Math.max(0, safeNumber(pricingRow.cache_creation_input_token_cost))
+  const cacheCreate1hRaw = Math.max(0, safeNumber(pricingRow.ephemeral_1h_cost_per_token))
   const cacheReadRaw = Math.max(0, safeNumber(pricingRow.cache_read_input_token_cost))
 
-  const cacheCreatePerTokenBase = cacheCreateRaw > 0 ? cacheCreateRaw : inputPerTokenBase * 1.25
+  const cacheCreate5mPerTokenBase = cacheCreate5mRaw > 0 ? cacheCreate5mRaw : inputPerTokenBase * 1.25
+  const cacheCreate1hPerTokenBase = cacheCreate1hRaw > 0 ? cacheCreate1hRaw : cacheCreate5mPerTokenBase
   const cacheReadPerTokenBase = cacheReadRaw > 0 ? cacheReadRaw : inputPerTokenBase * 0.1
 
   const breakdownPayload = hasBreakdownCostPayload(item)
@@ -2692,20 +2965,42 @@ const buildBuiltinCostTooltipDetail = (
   const breakdownReasoningCost = Math.max(0, safeNumber(item.reasoning_cost))
   const breakdownCacheCreateCost = Math.max(0, safeNumber(item.cache_create_cost))
   const breakdownCacheReadCost = Math.max(0, safeNumber(item.cache_read_cost))
+  const breakdownEphemeral5mCost = Math.max(0, safeNumber(item.ephemeral_5m_cost))
+  const breakdownEphemeral1hCost = Math.max(0, safeNumber(item.ephemeral_1h_cost))
+  const cacheCreateFallback5mPerToken = breakdownPayload ? 0 : cacheCreate5mPerTokenBase
+  const cacheCreateFallback1hPerToken = breakdownPayload ? 0 : cacheCreate1hPerTokenBase
+  const cacheCreateFallbackCombinedPerToken = breakdownPayload ? 0 : cacheCreate5mPerTokenBase
 
   const inputCost = breakdownPayload ? breakdownInputCost : inputTokens * inputPerTokenBase
   const outputCost = breakdownPayload ? breakdownOutputCost : outputTokens * outputPerTokenBase
   const reasoningCost = breakdownPayload ? breakdownReasoningCost : reasoningTokens * reasoningPerTokenBase
-  const cacheCreateCost = breakdownPayload ? breakdownCacheCreateCost : cacheCreateTokens * cacheCreatePerTokenBase
+  const cacheCreateDetails = buildCacheCreateCostDetails({
+    split: cacheCreateSplit,
+    totalCost: breakdownPayload ? breakdownCacheCreateCost : 0,
+    ephemeral5mCost: breakdownPayload ? breakdownEphemeral5mCost : 0,
+    ephemeral1hCost: breakdownPayload ? breakdownEphemeral1hCost : 0,
+    fallback5mPerToken: cacheCreateFallback5mPerToken,
+    fallback1hPerToken: cacheCreateFallback1hPerToken,
+    fallbackCombinedPerToken: cacheCreateFallbackCombinedPerToken,
+  })
+  const cacheCreateRates = cacheCreateDetails.length > 0
+    ? cacheCreateDetails.map(detail => ({
+      tier: detail.tier,
+      perToken: detail.perToken,
+    }))
+    : [{ perToken: cacheCreateFallbackCombinedPerToken }]
+  const cacheCreateCost = cacheCreateDetails.length > 0
+    ? cacheCreateDetails.reduce((sum, detail) => sum + detail.cost, 0)
+    : breakdownPayload
+      ? breakdownCacheCreateCost
+      : cacheCreateTokens * cacheCreate5mPerTokenBase
   const cacheReadCost = breakdownPayload ? breakdownCacheReadCost : cacheReadTokens * cacheReadPerTokenBase
 
   const inputPerToken = inputTokens > 0 ? inputCost / inputTokens : inputPerTokenBase
   const outputPerToken = outputTokens > 0 ? outputCost / outputTokens : outputPerTokenBase
   const reasoningPerToken = reasoningTokens > 0 ? reasoningCost / reasoningTokens : reasoningPerTokenBase
-  const cacheCreatePerToken = cacheCreateTokens > 0 ? cacheCreateCost / cacheCreateTokens : cacheCreatePerTokenBase
   const cacheReadPerToken = cacheReadTokens > 0 ? cacheReadCost / cacheReadTokens : cacheReadPerTokenBase
 
-  const cacheCreateMultiplier = inputPerToken > 0 ? cacheCreatePerToken / inputPerToken : 0
   const cacheReadMultiplier = inputPerToken > 0 ? cacheReadPerToken / inputPerToken : 0
   const groupMultiplier = resolveGroupMultiplier(item)
   const calculatedTotal = inputCost + cacheCreateCost + cacheReadCost + outputCost + reasoningCost
@@ -2714,7 +3009,7 @@ const buildBuiltinCostTooltipDetail = (
     inputPerToken,
     outputPerToken,
     reasoningPerToken,
-    cacheCreatePerToken,
+    cacheCreateRates,
     cacheReadPerToken,
     includeCacheRead: cacheReadTokens > 0,
     includeReasoning: reasoningTokens > 0,
@@ -2727,11 +3022,17 @@ const buildBuiltinCostTooltipDetail = (
       `${t('components.logs.costTooltip.usagePrompt')} ${formatTokenFormulaValue(inputTokens)} tokens / 1M tokens * ${formatUsdPerMillion(inputPerToken)}`
     )
   }
-  if (cacheCreateTokens > 0 && cacheCreatePerToken > 0) {
-    formulaParts.push(
-      `${t('components.logs.costTooltip.usageCacheCreate')} ${formatTokenFormulaValue(cacheCreateTokens)} tokens / 1M tokens * ${formatUsdPerMillion(cacheCreatePerToken)} (${t('components.logs.costTooltip.cacheCreateMultiplierLabel', { multiplier: formatMultiplierValue(cacheCreateMultiplier) })})`
-    )
-  }
+  cacheCreateDetails
+    .filter(detail => detail.tokens > 0 && detail.perToken > 0)
+    .forEach((detail) => {
+      const multiplier = inputPerToken > 0 ? detail.perToken / inputPerToken : 0
+      const multiplierSuffix = multiplier > 0
+        ? ` (${formatCacheCreateMultiplierLabel(multiplier, detail.tier)})`
+        : ''
+      formulaParts.push(
+        `${formatCacheCreateUsageLabel(detail.tier)} ${formatTokenFormulaValue(detail.tokens)} tokens / 1M tokens * ${formatUsdPerMillion(detail.perToken)}${multiplierSuffix}`
+      )
+    })
   if (cacheReadTokens > 0 && cacheReadPerToken > 0) {
     formulaParts.push(
       `${t('components.logs.costTooltip.usageCacheRead')} ${formatTokenFormulaValue(cacheReadTokens)} tokens / 1M tokens * ${formatUsdPerMillion(cacheReadPerToken)} (${t('components.logs.costTooltip.cacheReadMultiplierLabel', { multiplier: formatMultiplierValue(cacheReadMultiplier) })})`
@@ -3218,29 +3519,16 @@ const formatTokenFormulaValue = (value?: number) => {
   return `${compact} (${exact})`
 }
 
-const normalizeTokenCount = (value?: number) => {
-  const normalized = Number(value ?? 0)
-  if (!Number.isFinite(normalized)) return 0
-  return Math.max(0, Math.round(normalized))
-}
-
 const resolveEphemeral1hTokens = (item: RequestLog) =>
-  normalizeTokenCount(item.ephemeral_1h_tokens)
+  resolveCacheCreateTokenSplit(item).tokens1h
 
-const resolveEphemeral5mTokens = (item: RequestLog) => {
-  const total = normalizeTokenCount(item.cache_create_tokens)
-  const explicit5m = normalizeTokenCount(item.ephemeral_5m_tokens)
-  const ephemeral1h = resolveEphemeral1hTokens(item)
-  if (explicit5m > 0) return explicit5m
-  if (total <= 0) return 0
-  const fallback5m = total - ephemeral1h
-  return fallback5m > 0 ? fallback5m : 0
-}
+const resolveEphemeral5mTokens = (item: RequestLog) =>
+  resolveCacheCreateTokenSplit(item).tokens5m
 
 const hasCacheCreateDetail = (item: RequestLog) => {
-  const total = normalizeTokenCount(item.cache_create_tokens)
-  if (total <= 0) return false
-  return resolveEphemeral5mTokens(item) > 0 || resolveEphemeral1hTokens(item) > 0
+  const split = resolveCacheCreateTokenSplit(item)
+  if (split.totalTokens <= 0) return false
+  return split.tokens5m > 0 || split.tokens1h > 0
 }
 
 /**
