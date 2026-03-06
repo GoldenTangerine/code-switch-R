@@ -36,6 +36,7 @@ type modelPricingMeta struct {
 }
 
 type ModelPricingRow struct {
+	OriginalModel               string  `json:"original_model,omitempty"`
 	Model                       string  `json:"model"`
 	InputCostPerToken           float64 `json:"input_cost_per_token"`
 	OutputCostPerToken          float64 `json:"output_cost_per_token"`
@@ -167,6 +168,7 @@ func (mps *ModelPricingService) UpsertModelPricing(row ModelPricingRow) error {
 		return fmt.Errorf("nil pricing service")
 	}
 
+	originalModel := strings.TrimSpace(row.OriginalModel)
 	model := strings.TrimSpace(row.Model)
 	if model == "" {
 		return fmt.Errorf("model 不能为空")
@@ -195,6 +197,14 @@ func (mps *ModelPricingService) UpsertModelPricing(row ModelPricingRow) error {
 	defer mps.mu.Unlock()
 
 	newOverrides := cloneModelPricingOverrides(mps.overrides)
+	if mps.hasRenameConflictLocked(originalModel, model) {
+		return fmt.Errorf("模型 %s 已存在，不能重命名覆盖", model)
+	}
+	if originalModel != "" && originalModel != model {
+		delete(newOverrides.Pricing, originalModel)
+		delete(newOverrides.Ephemeral1h, originalModel)
+		delete(newOverrides.Meta, originalModel)
+	}
 
 	existing := modelpricing.PricingEntry{}
 	if v, ok := newOverrides.Pricing[model]; ok {
@@ -270,6 +280,19 @@ func (mps *ModelPricingService) rebuildLocked() {
 	merged := mps.defaults.Clone()
 	merged.ApplyOverrides(mps.overrides.Pricing, mps.overrides.Ephemeral1h)
 	mps.effective = merged
+}
+
+func (mps *ModelPricingService) hasRenameConflictLocked(originalModel, targetModel string) bool {
+	if mps == nil || mps.effective == nil {
+		return false
+	}
+	original := strings.TrimSpace(originalModel)
+	target := strings.TrimSpace(targetModel)
+	if original == "" || target == "" || original == target {
+		return false
+	}
+	_, exists := mps.effective.PricingEntryExact(target)
+	return exists
 }
 
 func validateNonNegative(value float64, name string) error {

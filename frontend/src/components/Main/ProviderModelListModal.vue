@@ -59,15 +59,34 @@
           <div class="model-main">
             <div class="model-name">{{ model.model }}</div>
             <div class="model-tags">
-              <span
-                class="tag"
-                :class="billingTagClass(model.quotaType)"
-              >
+              <span class="tag" :class="billingTagClass(model.quotaType)">
                 {{ billingLabel(model.quotaType) }}
               </span>
               <span v-if="model.ownerBy" class="tag tag-neutral">
                 {{ model.ownerBy }}
               </span>
+              <span v-if="hasManualCacheOverride(model)" class="tag tag-manual">
+                {{ t('components.main.modelList.manualOverride') }}
+              </span>
+            </div>
+            <div v-if="pricingAvailable && model.quotaType === 0" class="model-actions">
+              <button
+                type="button"
+                class="action-btn"
+                :disabled="isWorkingModel(model.model)"
+                @click="isEditingModel(model.model) ? cancelOverrideEditor() : openOverrideEditor(model)"
+              >
+                {{ isEditingModel(model.model) ? t('common.cancel') : t('components.main.modelList.adjustCache') }}
+              </button>
+              <button
+                v-if="hasManualCacheOverride(model)"
+                type="button"
+                class="action-btn"
+                :disabled="isWorkingModel(model.model)"
+                @click="resetOverride(model)"
+              >
+                {{ resettingModel === model.model ? t('components.general.modelPricing.removing') : t('components.main.modelList.resetCache') }}
+              </button>
             </div>
           </div>
 
@@ -119,6 +138,54 @@
               </div>
             </template>
           </div>
+
+          <div
+            v-if="pricingAvailable && model.quotaType === 0 && isEditingModel(model.model)"
+            class="provider-override-editor"
+          >
+            <div class="override-field">
+              <label class="override-label">{{ t('components.main.modelList.cacheCreateMultiplier') }}</label>
+              <input
+                v-model="overrideForm.cacheCreateMultiplier"
+                type="number"
+                step="0.0001"
+                min="0"
+                class="mac-input override-input"
+                :placeholder="resolveOverridePlaceholder(model, 'create')"
+              />
+              <span class="override-field-hint">{{ resolveOverrideHint(model, 'create') }}</span>
+            </div>
+            <div class="override-field">
+              <label class="override-label">{{ t('components.main.modelList.cacheReadMultiplier') }}</label>
+              <input
+                v-model="overrideForm.cacheReadMultiplier"
+                type="number"
+                step="0.0001"
+                min="0"
+                class="mac-input override-input"
+                :placeholder="resolveOverridePlaceholder(model, 'read')"
+              />
+              <span class="override-field-hint">{{ resolveOverrideHint(model, 'read') }}</span>
+            </div>
+
+            <div class="override-actions">
+              <button type="button" class="action-btn" :disabled="isWorkingModel(model.model)" @click="cancelOverrideEditor">
+                {{ t('common.cancel') }}
+              </button>
+              <button
+                v-if="hasManualCacheOverride(model)"
+                type="button"
+                class="action-btn"
+                :disabled="isWorkingModel(model.model)"
+                @click="resetOverride(model)"
+              >
+                {{ resettingModel === model.model ? t('components.general.modelPricing.removing') : t('components.main.modelList.resetCache') }}
+              </button>
+              <button type="button" class="primary-btn" :disabled="isWorkingModel(model.model)" @click="saveOverride(model)">
+                {{ savingModel === model.model ? t('common.saving') : t('common.save') }}
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -126,17 +193,20 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseModal from '../common/BaseModal.vue'
 import BaseInput from '../common/BaseInput.vue'
 import type { AutomationCard } from '../../data/cards'
 import { extractErrorMessage } from '../../utils/error'
+import { showToast } from '../../utils/toast'
 import {
+  deleteProviderModelPricingOverride,
   fetchProviderModelPricing,
-  type ProviderModelPricingResponse,
-  type ProviderModelPricingItem,
   type ProviderModelPerCallPrice,
+  type ProviderModelPricingItem,
+  type ProviderModelPricingResponse,
+  upsertProviderModelPricingOverride,
 } from '../../services/providerModelPricing'
 
 type ProviderVendorKey = 'all' | 'OpenAI' | 'Claude' | 'Gemini' | 'Moonshot' | 'Grok' | 'DeepSeek' | 'Qwen' | 'Mistral' | 'Unknown'
@@ -165,6 +235,14 @@ const response = ref<ProviderModelPricingResponse | null>(null)
 
 const searchTerm = ref('')
 const selectedVendor = ref<ProviderVendorKey>('all')
+const editingModel = ref('')
+const savingModel = ref('')
+const resettingModel = ref('')
+
+const overrideForm = reactive({
+  cacheCreateMultiplier: '',
+  cacheReadMultiplier: '',
+})
 
 const modalTitle = computed(() => {
   if (!props.provider) return t('components.main.modelList.modalTitleFallback')
@@ -209,24 +287,17 @@ const vendorTabs = computed<ProviderVendorTab[]>(() => {
     counts.set(vendor, (counts.get(vendor) || 0) + 1)
   }
 
-  const allCount = models.value.length
-  const labels = vendorLabelMap.value
-  const tabs: ProviderVendorTab[] = [{ key: 'all', label: labels.all, count: allCount }]
-
-  const entries = [...counts.entries()]
-    .filter(([key]) => key !== 'Unknown')
-    .sort((a, b) => b[1] - a[1])
-
+  const tabs: ProviderVendorTab[] = [{ key: 'all', label: vendorLabelMap.value.all, count: models.value.length }]
+  const entries = [...counts.entries()].filter(([key]) => key !== 'Unknown').sort((a, b) => b[1] - a[1])
   for (const [key, count] of entries) {
     if (count <= 0) continue
-    tabs.push({ key, label: labels[key], count })
+    tabs.push({ key, label: vendorLabelMap.value[key], count })
   }
 
   const unknownCount = counts.get('Unknown') || 0
   if (unknownCount > 0) {
-    tabs.push({ key: 'Unknown', label: labels.Unknown, count: unknownCount })
+    tabs.push({ key: 'Unknown', label: vendorLabelMap.value.Unknown, count: unknownCount })
   }
-
   return tabs
 })
 
@@ -268,6 +339,13 @@ const formatMultiplier = (value?: number) => {
   return `${value.toFixed(2)}x`
 }
 
+const formatEditableMultiplier = (value?: number) => {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return ''
+  if (value === 0) return '0'
+  const digits = value >= 10 ? 2 : value >= 1 ? 3 : value >= 0.1 ? 4 : 6
+  return value.toFixed(digits).replace(/\.?0+$/, '')
+}
+
 const formatMultiplierHint = (value?: number) => {
   const formatted = formatMultiplier(value)
   if (formatted === '—') return ''
@@ -291,6 +369,7 @@ const resolveCacheReadMultiplier = (model: ProviderModelPricingItem) => {
 }
 
 const formatCacheMultiplierSource = (source?: string) => {
+  if (source === 'manual') return t('components.main.modelList.cacheSourceManual')
   if (source === 'provider') return t('components.main.modelList.cacheSourceProvider')
   if (source === 'builtin') return t('components.main.modelList.cacheSourceBuiltin')
   if (source === 'fallback') return t('components.main.modelList.cacheSourceFallback')
@@ -312,6 +391,7 @@ const resolveCacheReadHint = (model: ProviderModelPricingItem) =>
 
 const cacheHintClass = (source?: string) => ({
   'is-estimated': source === 'builtin' || source === 'fallback',
+  'is-manual': source === 'manual',
 })
 
 const formatPerCall = (value?: ProviderModelPerCallPrice) => {
@@ -339,6 +419,66 @@ const billingTagClass = (quotaType: number) => {
   return 'tag-neutral'
 }
 
+const clearOverrideForm = () => {
+  overrideForm.cacheCreateMultiplier = ''
+  overrideForm.cacheReadMultiplier = ''
+}
+
+const isEditingModel = (modelName: string) => editingModel.value === modelName
+
+const isWorkingModel = (modelName: string) => savingModel.value === modelName || resettingModel.value === modelName
+
+const hasManualCacheOverride = (model: ProviderModelPricingItem) =>
+  model.cacheCreateMultiplierSource === 'manual' || model.cacheReadMultiplierSource === 'manual'
+
+const openOverrideEditor = (model: ProviderModelPricingItem) => {
+  editingModel.value = model.model
+  overrideForm.cacheCreateMultiplier =
+    model.cacheCreateMultiplierSource === 'manual' ? formatEditableMultiplier(resolveCacheCreateMultiplier(model)) : ''
+  overrideForm.cacheReadMultiplier =
+    model.cacheReadMultiplierSource === 'manual' ? formatEditableMultiplier(resolveCacheReadMultiplier(model)) : ''
+}
+
+const cancelOverrideEditor = () => {
+  editingModel.value = ''
+  clearOverrideForm()
+}
+
+const parseOverrideMultiplier = (raw: string, fieldLabel: string) => {
+  const trimmed = String(raw ?? '').trim()
+  if (!trimmed) {
+    return { isSet: false, value: 0 }
+  }
+  const value = Number(trimmed)
+  if (!Number.isFinite(value) || value < 0) {
+    showToast(t('components.main.modelList.toast.invalidMultiplier', { field: fieldLabel }), 'warning')
+    return null
+  }
+  return { isSet: true, value }
+}
+
+const buildOverrideAutoHint = (multiplier?: number, source?: string) => {
+  const formatted = formatMultiplier(multiplier)
+  const sourceLabel = formatCacheMultiplierSource(source)
+  if (formatted === '—') return t('components.main.modelList.followAutoEmpty')
+  if (!sourceLabel) return t('components.main.modelList.followAuto', { value: formatted })
+  return t('components.main.modelList.followAutoWithSource', { value: formatted, source: sourceLabel })
+}
+
+const resolveOverridePlaceholder = (model: ProviderModelPricingItem, kind: 'create' | 'read') => {
+  const multiplier = kind === 'create' ? resolveCacheCreateMultiplier(model) : resolveCacheReadMultiplier(model)
+  return formatEditableMultiplier(multiplier)
+}
+
+const resolveOverrideHint = (model: ProviderModelPricingItem, kind: 'create' | 'read') => {
+  const source = kind === 'create' ? model.cacheCreateMultiplierSource : model.cacheReadMultiplierSource
+  const multiplier = kind === 'create' ? resolveCacheCreateMultiplier(model) : resolveCacheReadMultiplier(model)
+  if (source === 'manual') {
+    return t('components.main.modelList.manualFieldHint', { value: formatMultiplier(multiplier) })
+  }
+  return buildOverrideAutoHint(multiplier, source)
+}
+
 const loadModels = async () => {
   if (!props.provider) return
   loading.value = true
@@ -354,11 +494,81 @@ const loadModels = async () => {
   }
 }
 
+const saveOverride = async (model: ProviderModelPricingItem) => {
+  if (!props.provider || isWorkingModel(model.model)) return
+  const cacheCreateMultiplier = parseOverrideMultiplier(
+    overrideForm.cacheCreateMultiplier,
+    t('components.main.modelList.cacheCreateMultiplier'),
+  )
+  if (cacheCreateMultiplier === null) return
+
+  const cacheReadMultiplier = parseOverrideMultiplier(
+    overrideForm.cacheReadMultiplier,
+    t('components.main.modelList.cacheReadMultiplier'),
+  )
+  if (cacheReadMultiplier === null) return
+
+  const hadManualOverride = hasManualCacheOverride(model)
+  if (!hadManualOverride && !cacheCreateMultiplier.isSet && !cacheReadMultiplier.isSet) {
+    showToast(t('components.main.modelList.toast.overrideRequired'), 'warning')
+    return
+  }
+
+  savingModel.value = model.model
+  try {
+    await upsertProviderModelPricingOverride(
+      props.provider,
+      model.model,
+      cacheCreateMultiplier.value,
+      cacheCreateMultiplier.isSet,
+      cacheReadMultiplier.value,
+      cacheReadMultiplier.isSet,
+    )
+    showToast(
+      !cacheCreateMultiplier.isSet && !cacheReadMultiplier.isSet
+        ? t('components.main.modelList.toast.resetSuccess')
+        : t('components.main.modelList.toast.saveSuccess'),
+    )
+    cancelOverrideEditor()
+    await loadModels()
+  } catch (err) {
+    showToast(
+      t('components.main.modelList.toast.saveFailed', { error: extractErrorMessage(err) }),
+      'error',
+    )
+  } finally {
+    savingModel.value = ''
+  }
+}
+
+const resetOverride = async (model: ProviderModelPricingItem) => {
+  if (!props.provider || isWorkingModel(model.model)) return
+  resettingModel.value = model.model
+  try {
+    await deleteProviderModelPricingOverride(props.provider, model.model)
+    showToast(t('components.main.modelList.toast.resetSuccess'))
+    if (editingModel.value === model.model) {
+      cancelOverrideEditor()
+    }
+    await loadModels()
+  } catch (err) {
+    showToast(
+      t('components.main.modelList.toast.resetFailed', { error: extractErrorMessage(err) }),
+      'error',
+    )
+  } finally {
+    resettingModel.value = ''
+  }
+}
+
 const resetUIState = () => {
   searchTerm.value = ''
   selectedVendor.value = 'all'
   error.value = ''
   response.value = null
+  cancelOverrideEditor()
+  savingModel.value = ''
+  resettingModel.value = ''
 }
 
 const handleClose = () => {
@@ -389,16 +599,59 @@ watch(
   grid-template-columns: 1fr;
 }
 
+.provider-model-item {
+  grid-template-columns: minmax(150px, 1fr) minmax(0, 1.8fr);
+  align-items: start;
+  gap: 16px;
+}
+
+.tag-manual {
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.12);
+  border-color: rgba(245, 158, 11, 0.25);
+}
+
+.model-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .provider-model-item .model-pricing {
-  gap: 10px 18px;
-  align-items: stretch;
+  width: 100%;
+  gap: 12px;
+  justify-content: flex-start;
+  align-items: flex-start;
 }
 
 .provider-model-item .price-block {
+  display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 2px;
-  min-width: 110px;
+  justify-content: flex-start;
+  gap: 6px;
+  flex: 0 0 96px;
+  min-height: 86px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: rgba(15, 23, 42, 0.18);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
+}
+
+.provider-model-item .price-block.ratio {
+  flex-basis: 88px;
+}
+
+.provider-model-item .price-label {
+  font-size: 0.76rem;
+  line-height: 1.2;
+}
+
+.provider-model-item .price-value {
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1.25;
 }
 
 .provider-model-item .price-value.cache-create {
@@ -411,11 +664,69 @@ watch(
 
 .provider-model-item .price-note {
   font-size: 0.74rem;
+  line-height: 1.35;
   color: var(--mac-text-secondary);
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .provider-model-item .price-note.is-estimated {
   color: #b45309;
+}
+
+.provider-model-item .price-note.is-manual {
+  color: #0f766e;
+}
+
+.provider-override-editor {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding: 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(15, 118, 110, 0.18);
+  background: rgba(15, 118, 110, 0.08);
+}
+
+.override-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.override-field-hint {
+  font-size: 0.74rem;
+  line-height: 1.35;
+  color: var(--mac-text-secondary);
+}
+
+.override-label {
+  font-size: 12px;
+  color: var(--mac-text-secondary);
+}
+
+.override-input {
+  width: 100%;
+  min-width: 0;
+}
+
+.override-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+@media (max-width: 860px) {
+  .provider-model-item .price-block {
+    flex-basis: 92px;
+    min-height: 82px;
+  }
+}
+
+@media (max-width: 720px) {
+  .provider-override-editor {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

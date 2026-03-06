@@ -467,6 +467,7 @@ watch(
       :open="editorOpen"
       :mode="editorMode"
       :row="editorRow"
+      :rows="rows"
       @close="editorOpen = false"
       @saved="onSaved"
       @removed="onRemoved"
@@ -608,9 +609,9 @@ watch(
   border-radius: 16px;
   padding: 14px 14px;
   display: grid;
-  grid-template-columns: 1.6fr 1fr;
-  gap: 12px;
-  align-items: center;
+  grid-template-columns: minmax(150px, 1fr) minmax(0, 1.8fr);
+  gap: 16px;
+  align-items: start;
   cursor: pointer;
   transition: background 0.15s ease, border-color 0.15s ease;
 }
@@ -675,27 +676,38 @@ watch(
 .model-pricing {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px 18px;
-  justify-content: flex-end;
-  align-items: stretch;
+  width: 100%;
+  gap: 12px;
+  justify-content: flex-start;
+  align-items: flex-start;
 }
 
 .price-block {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 2px;
-  min-width: 0;
+  justify-content: flex-start;
+  gap: 6px;
+  flex: 0 0 96px;
+  min-height: 86px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: rgba(15, 23, 42, 0.18);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
 }
 
 .price-label {
-  font-size: 0.82rem;
+  font-size: 0.76rem;
   color: var(--mac-text-secondary);
-  white-space: nowrap;
+  line-height: 1.2;
+  white-space: normal;
 }
 
 .price-value {
-  font-size: 0.86rem;
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1.25;
   color: var(--mac-text);
   white-space: nowrap;
 }
@@ -718,8 +730,16 @@ watch(
 
 .price-note {
   font-size: 0.74rem;
+  line-height: 1.35;
   color: var(--mac-text-secondary);
-  white-space: nowrap;
+  white-space: normal;
+}
+
+@media (max-width: 860px) {
+  .price-block {
+    flex-basis: 92px;
+    min-height: 82px;
+  }
 }
 
 @media (max-width: 640px) {

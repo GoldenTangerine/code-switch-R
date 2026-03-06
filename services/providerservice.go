@@ -93,6 +93,9 @@ type ProviderService struct {
 	pricingCacheMu sync.RWMutex
 	pricingCache   map[string]providerModelPricingCacheEntry
 	modelPricing   *ModelPricingService
+
+	providerPricingOverridesMu sync.RWMutex
+	providerPricingOverrides   providerPricingOverrideStore
 }
 
 func snapshotProviderFile(path string) ([]byte, bool, error) {
@@ -121,9 +124,18 @@ func restoreProviderFile(path string, existed bool, data []byte) error {
 }
 
 func NewProviderService() *ProviderService {
-	return &ProviderService{
-		pricingCache: make(map[string]providerModelPricingCacheEntry),
+	svc := &ProviderService{
+		pricingCache:             make(map[string]providerModelPricingCacheEntry),
+		providerPricingOverrides: newProviderPricingOverrideStore(),
 	}
+
+	overrides, err := loadProviderPricingOverridesFromDB()
+	if err != nil {
+		log.Printf("provider pricing overrides load failed: %v", err)
+		return svc
+	}
+	svc.providerPricingOverrides = overrides
+	return svc
 }
 
 func (ps *ProviderService) BindModelPricingService(modelPricing *ModelPricingService) {

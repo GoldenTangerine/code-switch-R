@@ -6,6 +6,7 @@ import { Call } from '@wailsio/runtime'
 const MODEL_PRICING_SERVICE = 'codeswitch/services.ModelPricingService'
 
 export interface ModelPricingRow {
+  original_model?: string
   model: string
   input_cost_per_token: number
   output_cost_per_token: number

@@ -320,8 +320,27 @@
         "cacheSourceProvider": "Provider supplied",
         "cacheSourceBuiltin": "Built-in derived",
         "cacheSourceFallback": "Fallback estimate",
+        "cacheSourceManual": "Manual override",
         "ratio": "Ratio",
-        "perCall": "Per-call price"
+        "perCall": "Per-call price",
+        "manualOverride": "Manual override",
+        "adjustCache": "Adjust cache multipliers",
+        "resetCache": "Reset manual multipliers",
+        "cacheCreateMultiplier": "Cache Create Multiplier",
+        "cacheReadMultiplier": "Cache Read Multiplier",
+        "followAuto": "Leave empty to follow the automatic multiplier: {value}",
+        "followAutoWithSource": "Leave empty to follow the automatic multiplier: {value} · {source}",
+        "followAutoEmpty": "Leave empty to follow the automatic multiplier",
+        "manualFieldHint": "Currently using a manual override: {value}. Clear it to follow the automatic multiplier again",
+        "toast": {
+          "saveSuccess": "Cache multiplier override saved",
+          "saveFailed": "Failed to save cache multipliers: {error}",
+          "resetSuccess": "Cache multiplier override reset",
+          "resetFailed": "Failed to reset cache multipliers: {error}",
+          "multiplierRequired": "Please enter {field}",
+          "overrideRequired": "Enter at least one cache multiplier, or reset the override directly",
+          "invalidMultiplier": "{field} must not be negative"
+        }
       },
       "importConfig": {
         "tooltip": "Import {providers} providers · {servers} MCP servers",
@@ -821,7 +840,8 @@
         "removing": "Working...",
         "delete": "Delete model",
         "reset": "Reset to default",
-        "unitHint": "Unit: USD / 1M tokens (converted to per-token internally)",
+        "unitHint": "Unit: USD / 1M tokens; editing cache multipliers automatically updates cache prices.",
+        "templateEmpty": "Fill from an existing model (keep current Model)",
         "columns": {
           "model": "Model",
           "input": "Input",
@@ -843,13 +863,18 @@
           "create": "Create",
           "edit": "Edit"
         },
+        "renameHintBuiltin": "Renaming creates a new custom model from the current pricing. The built-in model stays untouched.",
+        "renameHintCustom": "Renaming migrates the current custom pricing to the new model name, so watch out for name conflicts.",
         "fields": {
+          "template": "Template",
           "model": "Model",
           "input": "Input",
           "output": "Output",
-          "reasoning": "Reasoning (optional)",
+          "reasoning": "Reasoning",
           "cacheCreate": "Cache Create (5m)",
+          "cacheCreateMultiplier": "Cache Create Multiplier",
           "cacheRead": "Cache Read",
+          "cacheReadMultiplier": "Cache Read Multiplier",
           "ephemeral1h": "Cache Create (1h)"
         },
         "preview": {
@@ -887,7 +912,9 @@
           "previewFailed": "Failed to fetch official pricing: {error}",
           "syncFailed": "Sync failed: {error}",
           "modelRequired": "Please enter a model name first",
-          "invalidNumber": "Field {field} is not a valid number"
+          "invalidNumber": "Field {field} is not a valid number",
+          "multiplierRequiresInput": "Set Input first before editing cache multipliers",
+          "modelConflict": "Model {model} already exists and cannot be overwritten by renaming"
         }
       },
       "webdav": {

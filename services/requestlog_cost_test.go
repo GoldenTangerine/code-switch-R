@@ -23,7 +23,7 @@ func TestCalculateProviderAPICost_AppliesClaudeCacheFallbackMultiplier(t *testin
 		CacheCreateTokens: 28544,
 	}
 
-	result, ok := calculateProviderAPICost(item, usage, nil, "claude-opus-4-5")
+	result, ok := calculateProviderAPICost(nil, "", "", "", item, usage, nil, "claude-opus-4-5")
 	if !ok {
 		t.Fatalf("calculateProviderAPICost 返回 hasPricing=false")
 	}
@@ -62,7 +62,7 @@ func TestCalculateProviderAPICost_UsesProviderCacheMultipliersWhenProvided(t *te
 		CacheReadTokens:   30,
 	}
 
-	result, ok := calculateProviderAPICost(item, usage, nil, "any-model")
+	result, ok := calculateProviderAPICost(nil, "", "", "", item, usage, nil, "any-model")
 	if !ok {
 		t.Fatalf("calculateProviderAPICost 返回 hasPricing=false")
 	}
@@ -105,7 +105,7 @@ func TestCalculateProviderAPICost_SplitsClaudeCacheCreateBy5mAnd1h(t *testing.T)
 		t.Fatalf("初始化价格服务失败: %v", err)
 	}
 
-	result, ok := calculateProviderAPICost(item, usage, pricing, "claude-opus-4-5")
+	result, ok := calculateProviderAPICost(nil, "", "", "", item, usage, pricing, "claude-opus-4-5")
 	if !ok {
 		t.Fatalf("calculateProviderAPICost 返回 hasPricing=false")
 	}
@@ -143,7 +143,7 @@ func TestCalculateProviderAPICost_FillsMissing5mFromTotalWhenOnly1hProvided(t *t
 		t.Fatalf("初始化价格服务失败: %v", err)
 	}
 
-	result, ok := calculateProviderAPICost(item, usage, pricing, "claude-opus-4-5")
+	result, ok := calculateProviderAPICost(nil, "", "", "", item, usage, pricing, "claude-opus-4-5")
 	if !ok {
 		t.Fatalf("calculateProviderAPICost 返回 hasPricing=false")
 	}
@@ -188,5 +188,83 @@ func TestNormalizeCacheCreationTokenSplitDoesNotExpandTotal(t *testing.T) {
 	}
 	if one != 20 {
 		t.Fatalf("one = %d, 期望 20", one)
+	}
+}
+
+func TestResolveProviderCacheMultiplierDetails_ManualZeroOverrideSkipsFallback(t *testing.T) {
+	providerService := &ProviderService{
+		providerPricingOverrides: newProviderPricingOverrideStore(),
+	}
+	scopeKey := providerPricingOverrideScopeKey("https://example.com/v1", "secret-key", "")
+	providerService.providerPricingOverrides.Providers[scopeKey] = map[string]providerPricingOverrideItem{
+		normalizeProviderPricingModelName("gpt-4.1"): {
+			CacheCreateMultiplier:    0,
+			HasCacheCreateMultiplier: true,
+			CacheReadMultiplier:      0,
+			HasCacheReadMultiplier:   true,
+		},
+	}
+
+	create, createSource, read, readSource := resolveProviderCacheMultiplierDetails(
+		providerService,
+		"https://example.com/v1",
+		"secret-key",
+		"",
+		ProviderModelPricingItem{Model: "gpt-4.1", QuotaType: 0},
+		nil,
+		"gpt-4.1",
+	)
+
+	if !floatEquals(create, 0) {
+		t.Fatalf("create multiplier = %.12f, 期望 0", create)
+	}
+	if !floatEquals(read, 0) {
+		t.Fatalf("read multiplier = %.12f, 期望 0", read)
+	}
+	if createSource != providerCacheMultiplierSourceManual {
+		t.Fatalf("create source = %q, 期望 %q", createSource, providerCacheMultiplierSourceManual)
+	}
+	if readSource != providerCacheMultiplierSourceManual {
+		t.Fatalf("read source = %q, 期望 %q", readSource, providerCacheMultiplierSourceManual)
+	}
+}
+
+func TestResolveProviderCacheMultiplierDetails_PartialManualOverrideKeepsProviderValue(t *testing.T) {
+	providerService := &ProviderService{
+		providerPricingOverrides: newProviderPricingOverrideStore(),
+	}
+	scopeKey := providerPricingOverrideScopeKey("https://example.com/v1", "secret-key", "")
+	providerService.providerPricingOverrides.Providers[scopeKey] = map[string]providerPricingOverrideItem{
+		normalizeProviderPricingModelName("custom-model"): {
+			CacheCreateMultiplier:    2.5,
+			HasCacheCreateMultiplier: true,
+		},
+	}
+
+	create, createSource, read, readSource := resolveProviderCacheMultiplierDetails(
+		providerService,
+		"https://example.com/v1",
+		"secret-key",
+		"",
+		ProviderModelPricingItem{
+			Model:               "custom-model",
+			QuotaType:           0,
+			CacheReadMultiplier: 0.2,
+		},
+		nil,
+		"custom-model",
+	)
+
+	if !floatEquals(create, 2.5) {
+		t.Fatalf("create multiplier = %.12f, 期望 2.5", create)
+	}
+	if !floatEquals(read, 0.2) {
+		t.Fatalf("read multiplier = %.12f, 期望 0.2", read)
+	}
+	if createSource != providerCacheMultiplierSourceManual {
+		t.Fatalf("create source = %q, 期望 %q", createSource, providerCacheMultiplierSourceManual)
+	}
+	if readSource != providerCacheMultiplierSourceProvider {
+		t.Fatalf("read source = %q, 期望 %q", readSource, providerCacheMultiplierSourceProvider)
 	}
 }

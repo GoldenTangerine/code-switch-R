@@ -272,7 +272,7 @@ func (ps *ProviderService) clearProviderModelPricingCache(apiURL, apiKey, authTy
 	delete(ps.pricingCache, key)
 }
 
-func (ps *ProviderService) enrichProviderModelPricingResponse(response *ProviderModelPricingResponse) {
+func (ps *ProviderService) enrichProviderModelPricingResponse(response *ProviderModelPricingResponse, apiURL, apiKey, authType string) {
 	if ps == nil || response == nil || len(response.Models) == 0 {
 		return
 	}
@@ -289,7 +289,15 @@ func (ps *ProviderService) enrichProviderModelPricingResponse(response *Provider
 		if item.QuotaType != 0 {
 			continue
 		}
-		cacheCreateMultiplier, cacheCreateSource, cacheReadMultiplier, cacheReadSource := resolveProviderCacheMultiplierDetails(*item, pricing, item.Model)
+		cacheCreateMultiplier, cacheCreateSource, cacheReadMultiplier, cacheReadSource := resolveProviderCacheMultiplierDetails(
+			ps,
+			apiURL,
+			apiKey,
+			authType,
+			*item,
+			pricing,
+			item.Model,
+		)
 		item.ResolvedCacheCreateMultiplier = cacheCreateMultiplier
 		item.ResolvedCacheReadMultiplier = cacheReadMultiplier
 		item.CacheCreateMultiplierSource = cacheCreateSource
@@ -382,7 +390,7 @@ func (ps *ProviderService) FetchProviderModelPricing(apiURL, apiKey, platform, a
 		commonPricing, err := fetchCommonPricing(client, apiURL, apiKey, candidate)
 		if err == nil {
 			response := buildProviderModelPricingResponse(SiteTypeUnknown, "api/pricing", commonPricing)
-			ps.enrichProviderModelPricingResponse(response)
+			ps.enrichProviderModelPricingResponse(response, apiURL, apiKey, authType)
 			ps.cacheProviderModelPricing(apiURL, apiKey, authType, response)
 			return response, nil
 		}
@@ -391,7 +399,7 @@ func (ps *ProviderService) FetchProviderModelPricing(apiURL, apiKey, platform, a
 		oneHubPricing, err := fetchOneHubPricing(client, apiURL, apiKey, candidate)
 		if err == nil {
 			response := buildProviderModelPricingResponse(SiteTypeOneHub, "one-hub", oneHubPricing)
-			ps.enrichProviderModelPricingResponse(response)
+			ps.enrichProviderModelPricingResponse(response, apiURL, apiKey, authType)
 			ps.cacheProviderModelPricing(apiURL, apiKey, authType, response)
 			return response, nil
 		}
@@ -429,7 +437,7 @@ func (ps *ProviderService) FetchProviderModelPricing(apiURL, apiKey, platform, a
 				PricingSource: "v1/models",
 				Models:        items,
 			}
-			ps.enrichProviderModelPricingResponse(response)
+			ps.enrichProviderModelPricingResponse(response, apiURL, apiKey, authType)
 			ps.cacheProviderModelPricing(apiURL, apiKey, authType, response)
 			return response, nil
 		}

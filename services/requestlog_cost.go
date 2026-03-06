@@ -11,6 +11,7 @@ const (
 )
 
 const (
+	providerCacheMultiplierSourceManual   = "manual"
 	providerCacheMultiplierSourceProvider = "provider"
 	providerCacheMultiplierSourceBuiltin  = "builtin"
 	providerCacheMultiplierSourceFallback = "fallback"
@@ -73,7 +74,7 @@ func calculateRequestLogCost(
 
 	if providerService != nil {
 		if item, ok := providerService.ResolveCachedProviderModelPricing(providerAPIURL, providerAPIKey, providerAuthType, model); ok {
-			if result, hasPricing := calculateProviderAPICost(item, usage, pricing, model); hasPricing {
+			if result, hasPricing := calculateProviderAPICost(providerService, providerAPIURL, providerAPIKey, providerAuthType, item, usage, pricing, model); hasPricing {
 				result.PriceSource = requestLogPriceSourceProviderAPI
 				result.HasPricing = true
 				return result
@@ -113,6 +114,10 @@ func calculateRequestLogCost(
 }
 
 func calculateProviderAPICost(
+	providerService *ProviderService,
+	providerAPIURL string,
+	providerAPIKey string,
+	providerAuthType string,
 	item ProviderModelPricingItem,
 	usage modelpricing.UsageSnapshot,
 	pricing *modelpricing.Service,
@@ -130,7 +135,15 @@ func calculateProviderAPICost(
 		}
 		inputPerToken := item.InputUSDPerM / 1_000_000
 		outputPerToken := item.OutputUSDPerM / 1_000_000
-		cacheCreateMultiplier, cacheReadMultiplier := resolveProviderCacheMultipliers(item, pricing, model)
+		cacheCreateMultiplier, cacheReadMultiplier := resolveProviderCacheMultipliers(
+			providerService,
+			providerAPIURL,
+			providerAPIKey,
+			providerAuthType,
+			item,
+			pricing,
+			model,
+		)
 		cacheCreate5mPerToken := inputPerToken * cacheCreateMultiplier
 		cacheReadPerToken := inputPerToken * cacheReadMultiplier
 		cacheCreate5mRaw := 0
@@ -203,38 +216,74 @@ func calculateProviderAPICost(
 }
 
 func resolveProviderCacheMultipliers(
+	providerService *ProviderService,
+	providerAPIURL string,
+	providerAPIKey string,
+	providerAuthType string,
 	item ProviderModelPricingItem,
 	pricing *modelpricing.Service,
 	model string,
 ) (float64, float64) {
-	cacheCreateMultiplier, _, cacheReadMultiplier, _ := resolveProviderCacheMultiplierDetails(item, pricing, model)
+	cacheCreateMultiplier, _, cacheReadMultiplier, _ := resolveProviderCacheMultiplierDetails(
+		providerService,
+		providerAPIURL,
+		providerAPIKey,
+		providerAuthType,
+		item,
+		pricing,
+		model,
+	)
 	return cacheCreateMultiplier, cacheReadMultiplier
 }
 
 func resolveProviderCacheMultiplierDetails(
+	providerService *ProviderService,
+	providerAPIURL string,
+	providerAPIKey string,
+	providerAuthType string,
 	item ProviderModelPricingItem,
 	pricing *modelpricing.Service,
 	model string,
 ) (float64, string, float64, string) {
-	cacheCreateMultiplier := item.CacheCreateMultiplier
-	cacheReadMultiplier := item.CacheReadMultiplier
+	cacheCreateMultiplier := 0.0
+	cacheReadMultiplier := 0.0
 	cacheCreateSource := ""
 	cacheReadSource := ""
-	if cacheCreateMultiplier > 0 {
+
+	if providerService != nil {
+		if override, ok := providerService.resolveProviderModelPricingOverride(providerAPIURL, providerAPIKey, providerAuthType, model); ok {
+			if override.HasCacheCreateMultiplier {
+				cacheCreateMultiplier = override.CacheCreateMultiplier
+				cacheCreateSource = providerCacheMultiplierSourceManual
+			}
+			if override.HasCacheReadMultiplier {
+				cacheReadMultiplier = override.CacheReadMultiplier
+				cacheReadSource = providerCacheMultiplierSourceManual
+			}
+		}
+	}
+
+	if cacheCreateSource == "" && item.CacheCreateMultiplier > 0 {
+		cacheCreateMultiplier = item.CacheCreateMultiplier
+	}
+	if cacheReadSource == "" && item.CacheReadMultiplier > 0 {
+		cacheReadMultiplier = item.CacheReadMultiplier
+	}
+	if cacheCreateSource == "" && item.CacheCreateMultiplier > 0 {
 		cacheCreateSource = providerCacheMultiplierSourceProvider
 	}
-	if cacheReadMultiplier > 0 {
+	if cacheReadSource == "" && item.CacheReadMultiplier > 0 {
 		cacheReadSource = providerCacheMultiplierSourceProvider
 	}
 
-	if cacheCreateMultiplier <= 0 || cacheReadMultiplier <= 0 {
+	if cacheCreateSource == "" || cacheReadSource == "" {
 		derivedCreate, derivedRead, ok := deriveCacheMultipliersFromBuiltinPricing(pricing, model)
 		if ok {
-			if cacheCreateMultiplier <= 0 && derivedCreate > 0 {
+			if cacheCreateSource == "" && derivedCreate >= 0 {
 				cacheCreateMultiplier = derivedCreate
 				cacheCreateSource = providerCacheMultiplierSourceBuiltin
 			}
-			if cacheReadMultiplier <= 0 && derivedRead > 0 {
+			if cacheReadSource == "" && derivedRead >= 0 {
 				cacheReadMultiplier = derivedRead
 				cacheReadSource = providerCacheMultiplierSourceBuiltin
 			}
@@ -242,7 +291,7 @@ func resolveProviderCacheMultiplierDetails(
 	}
 
 	lowerModel := strings.ToLower(strings.TrimSpace(model))
-	if cacheCreateMultiplier <= 0 {
+	if cacheCreateSource == "" {
 		if strings.Contains(lowerModel, "claude") {
 			cacheCreateMultiplier = providerAPIDefaultCacheCreateMultiplier
 		} else {
@@ -250,7 +299,7 @@ func resolveProviderCacheMultiplierDetails(
 		}
 		cacheCreateSource = providerCacheMultiplierSourceFallback
 	}
-	if cacheReadMultiplier <= 0 {
+	if cacheReadSource == "" {
 		if strings.Contains(lowerModel, "claude") {
 			cacheReadMultiplier = providerAPIDefaultCacheReadMultiplier
 		} else {

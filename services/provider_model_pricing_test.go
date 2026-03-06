@@ -53,7 +53,7 @@ func TestEnrichProviderModelPricingResponse_PreservesProviderMultipliers(t *test
 		},
 	}
 
-	providerService.enrichProviderModelPricingResponse(response)
+	providerService.enrichProviderModelPricingResponse(response, "", "", "")
 
 	item := response.Models[0]
 	if item.CacheCreateMultiplier != 1.25 || item.CacheReadMultiplier != 0.1 {
@@ -86,7 +86,7 @@ func TestEnrichProviderModelPricingResponse_DefaultsForGPT(t *testing.T) {
 		},
 	}
 
-	providerService.enrichProviderModelPricingResponse(response)
+	providerService.enrichProviderModelPricingResponse(response, "", "", "")
 
 	item := response.Models[0]
 	if item.CacheCreateMultiplier != 0 {
@@ -123,7 +123,7 @@ func TestEnrichProviderModelPricingResponse_DefaultsForClaude(t *testing.T) {
 		},
 	}
 
-	providerService.enrichProviderModelPricingResponse(response)
+	providerService.enrichProviderModelPricingResponse(response, "", "", "")
 
 	item := response.Models[0]
 	if item.CacheCreateMultiplier != 0 {

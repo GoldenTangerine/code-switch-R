@@ -321,8 +321,27 @@
         "cacheSourceProvider": "供应商提供",
         "cacheSourceBuiltin": "内置推导",
         "cacheSourceFallback": "兜底估算",
+        "cacheSourceManual": "手动覆盖",
         "ratio": "倍率",
-        "perCall": "按次价格"
+        "perCall": "按次价格",
+        "manualOverride": "手动覆盖",
+        "adjustCache": "调整缓存倍率",
+        "resetCache": "重置手动倍率",
+        "cacheCreateMultiplier": "Cache Create Multiplier",
+        "cacheReadMultiplier": "Cache Read Multiplier",
+        "followAuto": "留空则跟随自动倍率：{value}",
+        "followAutoWithSource": "留空则跟随自动倍率：{value} · {source}",
+        "followAutoEmpty": "留空则跟随自动倍率",
+        "manualFieldHint": "当前为手动覆盖：{value}，清空后将恢复自动倍率",
+        "toast": {
+          "saveSuccess": "已保存缓存倍率覆盖",
+          "saveFailed": "保存缓存倍率失败：{error}",
+          "resetSuccess": "已重置缓存倍率覆盖",
+          "resetFailed": "重置缓存倍率失败：{error}",
+          "multiplierRequired": "请填写 {field}",
+          "overrideRequired": "请至少填写一个缓存倍率，或者直接点重置",
+          "invalidMultiplier": "{field} 不能小于 0"
+        }
       },
       "importConfig": {
         "tooltip": "导入 {providers} 个供应商 · {servers} 个 MCP 服务器",
@@ -822,7 +841,8 @@
         "removing": "处理中...",
         "delete": "删除模型",
         "reset": "恢复默认",
-        "unitHint": "单位：USD / 1M tokens（内部会换算成 per-token）",
+        "unitHint": "单位：USD / 1M tokens；编辑 Cache Multiplier 会自动换算缓存价格。",
+        "templateEmpty": "从现有模型填充（保留 Model）",
         "columns": {
           "model": "模型",
           "input": "Input",
@@ -844,14 +864,19 @@
           "create": "新增",
           "edit": "编辑"
         },
+        "renameHintBuiltin": "改名后会基于当前价格创建一个新的自定义模型，原内置模型不会消失。",
+        "renameHintCustom": "改名会把当前自定义配置迁移到新模型名上，保存前注意别撞名。",
         "fields": {
-          "model": "模型名（Model）",
-          "input": "输入价格（Input）",
-          "output": "输出价格（Output）",
-          "reasoning": "推理价格（Reasoning，可选）",
-          "cacheCreate": "缓存创建价格（Cache Create 5m）",
-          "cacheRead": "缓存读取价格（Cache Read）",
-          "ephemeral1h": "缓存创建价格（Cache Create 1h）"
+          "template": "Template",
+          "model": "Model",
+          "input": "Input",
+          "output": "Output",
+          "reasoning": "Reasoning",
+          "cacheCreate": "Cache Create (5m)",
+          "cacheCreateMultiplier": "Cache Create Multiplier",
+          "cacheRead": "Cache Read",
+          "cacheReadMultiplier": "Cache Read Multiplier",
+          "ephemeral1h": "Cache Create (1h)"
         },
         "preview": {
           "title": "Claude 官方价格预览",
@@ -888,7 +913,9 @@
           "previewFailed": "抓取官方价格失败：{error}",
           "syncFailed": "同步失败：{error}",
           "modelRequired": "请先填写模型名",
-          "invalidNumber": "字段 {field} 不是合法数字"
+          "invalidNumber": "字段 {field} 不是合法数字",
+          "multiplierRequiresInput": "请先填写 Input，再调整 Cache Multiplier",
+          "modelConflict": "模型 {model} 已存在，不能直接重命名覆盖"
         }
       },
       "webdav": {
