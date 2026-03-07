@@ -50,6 +50,9 @@
         <p v-if="!pricingAvailable" class="pricing-hint">
           {{ t('components.main.modelList.pricingUnavailable') }}
         </p>
+        <p v-else class="pricing-scroll-hint">
+          {{ t('components.main.modelList.scrollHint') }}
+        </p>
         <div
           v-for="model in filteredModels"
           :key="model.model"
@@ -57,7 +60,7 @@
           :class="{ 'no-pricing': !pricingAvailable }"
         >
           <div class="model-main">
-            <div class="model-name">{{ model.model }}</div>
+            <div class="model-name pricing-name-inline" :title="model.model">{{ model.model }}</div>
             <div class="model-tags">
               <span class="tag" :class="billingTagClass(model.quotaType)">
                 {{ billingLabel(model.quotaType) }}
@@ -90,53 +93,55 @@
             </div>
           </div>
 
-          <div v-if="pricingAvailable" class="model-pricing">
-            <template v-if="model.quotaType === 0">
-              <div class="price-block">
-                <span class="price-label">{{ t('components.main.modelList.input') }}</span>
-                <span class="price-value input">
-                  {{ formatUSD(model.inputUsdPerM) }}/M
-                </span>
-              </div>
-              <div class="price-block">
-                <span class="price-label">{{ t('components.main.modelList.output') }}</span>
-                <span class="price-value output">
-                  {{ formatUSD(model.outputUsdPerM) }}/M
-                </span>
-              </div>
-              <div class="price-block">
-                <span class="price-label">{{ t('components.main.modelList.cacheCreate') }}</span>
-                <span class="price-value cache-create">
-                  {{ formatUSD(resolveCachePrice(model.inputUsdPerM, resolveCacheCreateMultiplier(model))) }}/M
-                </span>
-                <span v-if="resolveCacheCreateHint(model)" class="price-note" :class="cacheHintClass(model.cacheCreateMultiplierSource)">
-                  {{ resolveCacheCreateHint(model) }}
-                </span>
-              </div>
-              <div class="price-block">
-                <span class="price-label">{{ t('components.main.modelList.cacheRead') }}</span>
-                <span class="price-value cache-read">
-                  {{ formatUSD(resolveCachePrice(model.inputUsdPerM, resolveCacheReadMultiplier(model))) }}/M
-                </span>
-                <span v-if="resolveCacheReadHint(model)" class="price-note" :class="cacheHintClass(model.cacheReadMultiplierSource)">
-                  {{ resolveCacheReadHint(model) }}
-                </span>
-              </div>
-              <div v-if="model.modelRatio > 0" class="price-block ratio">
-                <span class="price-label">{{ t('components.main.modelList.ratio') }}</span>
-                <span class="price-value">
-                  {{ formatRatio(model.modelRatio) }}
-                </span>
-              </div>
-            </template>
-            <template v-else>
-              <div class="price-block">
-                <span class="price-label">{{ t('components.main.modelList.perCall') }}</span>
-                <span class="price-value">
-                  {{ formatPerCall(model.perCallPrice) }}
-                </span>
-              </div>
-            </template>
+          <div v-if="pricingAvailable" class="pricing-inline-container">
+            <div class="model-pricing">
+              <template v-if="model.quotaType === 0">
+                <div class="price-block">
+                  <span class="price-label">{{ t('components.main.modelList.input') }}</span>
+                  <span class="price-value input">
+                    {{ formatUSD(model.inputUsdPerM) }}/M
+                  </span>
+                </div>
+                <div class="price-block">
+                  <span class="price-label">{{ t('components.main.modelList.output') }}</span>
+                  <span class="price-value output">
+                    {{ formatUSD(model.outputUsdPerM) }}/M
+                  </span>
+                </div>
+                <div class="price-block">
+                  <span class="price-label">{{ t('components.main.modelList.cacheCreate') }}</span>
+                  <span class="price-value cache-create">
+                    {{ formatUSD(resolveCachePrice(model.inputUsdPerM, resolveCacheCreateMultiplier(model))) }}/M
+                  </span>
+                  <span v-if="resolveCacheCreateHint(model)" class="price-note" :class="cacheHintClass(model.cacheCreateMultiplierSource)">
+                    {{ resolveCacheCreateHint(model) }}
+                  </span>
+                </div>
+                <div class="price-block">
+                  <span class="price-label">{{ t('components.main.modelList.cacheRead') }}</span>
+                  <span class="price-value cache-read">
+                    {{ formatUSD(resolveCachePrice(model.inputUsdPerM, resolveCacheReadMultiplier(model))) }}/M
+                  </span>
+                  <span v-if="resolveCacheReadHint(model)" class="price-note" :class="cacheHintClass(model.cacheReadMultiplierSource)">
+                    {{ resolveCacheReadHint(model) }}
+                  </span>
+                </div>
+                <div v-if="model.modelRatio > 0" class="price-block ratio">
+                  <span class="price-label">{{ t('components.main.modelList.ratio') }}</span>
+                  <span class="price-value">
+                    {{ formatRatio(model.modelRatio) }}
+                  </span>
+                </div>
+              </template>
+              <template v-else>
+                <div class="price-block">
+                  <span class="price-label">{{ t('components.main.modelList.perCall') }}</span>
+                  <span class="price-value">
+                    {{ formatPerCall(model.perCallPrice) }}
+                  </span>
+                </div>
+              </template>
+            </div>
           </div>
 
           <div
@@ -600,6 +605,7 @@ watch(
 }
 
 .provider-model-item {
+  --pricing-scroll-fade: var(--mac-surface-strong);
   grid-template-columns: minmax(150px, 1fr) minmax(0, 1.8fr);
   align-items: start;
   gap: 16px;
@@ -617,43 +623,6 @@ watch(
   gap: 8px;
 }
 
-.provider-model-item .model-pricing {
-  width: 100%;
-  gap: 12px;
-  justify-content: flex-start;
-  align-items: flex-start;
-}
-
-.provider-model-item .price-block {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  justify-content: flex-start;
-  gap: 6px;
-  flex: 0 0 96px;
-  min-height: 86px;
-  padding: 10px 12px;
-  border-radius: 14px;
-  border: 1px solid rgba(148, 163, 184, 0.16);
-  background: rgba(15, 23, 42, 0.18);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
-}
-
-.provider-model-item .price-block.ratio {
-  flex-basis: 88px;
-}
-
-.provider-model-item .price-label {
-  font-size: 0.76rem;
-  line-height: 1.2;
-}
-
-.provider-model-item .price-value {
-  font-size: 1rem;
-  font-weight: 700;
-  line-height: 1.25;
-}
-
 .provider-model-item .price-value.cache-create {
   color: #d97706;
 }
@@ -663,10 +632,7 @@ watch(
 }
 
 .provider-model-item .price-note {
-  font-size: 0.74rem;
-  line-height: 1.35;
   color: var(--mac-text-secondary);
-  white-space: normal;
 }
 
 .provider-model-item .price-note.is-estimated {
@@ -715,13 +681,6 @@ watch(
   display: flex;
   justify-content: flex-end;
   gap: 10px;
-}
-
-@media (max-width: 860px) {
-  .provider-model-item .price-block {
-    flex-basis: 92px;
-    min-height: 82px;
-  }
 }
 
 @media (max-width: 720px) {

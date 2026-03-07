@@ -412,7 +412,7 @@ watch(
       </div>
       <div v-else class="model-pricing-list">
         <p class="pricing-hint">
-          {{ $t('components.general.modelPricing.unitHint') }}
+          {{ $t('components.general.modelPricing.unitHint') }} · {{ $t('components.general.modelPricing.scrollHint') }}
         </p>
 
         <div
@@ -423,7 +423,7 @@ watch(
           @click="openEditModal(item)"
         >
           <div class="model-main">
-            <div class="model-name">{{ item.model }}</div>
+            <div class="model-name pricing-name-inline" :title="item.model">{{ item.model }}</div>
             <div class="model-tags">
               <span
                 class="tag"
@@ -435,28 +435,30 @@ watch(
             </div>
           </div>
 
-          <div class="model-pricing">
-            <div class="price-block">
-              <span class="price-label">{{ $t('components.general.modelPricing.columns.input') }}</span>
-              <span class="price-value input">{{ formatUsdPer1M(item.input_cost_per_token) }}/M</span>
-            </div>
-            <div class="price-block">
-              <span class="price-label">{{ $t('components.general.modelPricing.columns.output') }}</span>
-              <span class="price-value output">{{ formatUsdPer1M(item.output_cost_per_token) }}/M</span>
-            </div>
-            <div class="price-block">
-              <span class="price-label">{{ $t('components.general.modelPricing.columns.cacheCreate') }}</span>
-              <span class="price-value cache-create">{{ formatUsdPer1M(item.cache_creation_input_token_cost) }}/M</span>
-              <span v-if="resolveCacheCreateHint(item)" class="price-note">
-                {{ resolveCacheCreateHint(item) }}
-              </span>
-            </div>
-            <div class="price-block">
-              <span class="price-label">{{ $t('components.general.modelPricing.columns.cacheRead') }}</span>
-              <span class="price-value cache-read">{{ formatUsdPer1M(item.cache_read_input_token_cost) }}/M</span>
-              <span v-if="resolveCacheReadHint(item)" class="price-note">
-                {{ resolveCacheReadHint(item) }}
-              </span>
+          <div class="pricing-inline-container" @pointerdown.stop @click.stop>
+            <div class="model-pricing">
+              <div class="price-block">
+                <span class="price-label">{{ $t('components.general.modelPricing.columns.input') }}</span>
+                <span class="price-value input">{{ formatUsdPer1M(item.input_cost_per_token) }}/M</span>
+              </div>
+              <div class="price-block">
+                <span class="price-label">{{ $t('components.general.modelPricing.columns.output') }}</span>
+                <span class="price-value output">{{ formatUsdPer1M(item.output_cost_per_token) }}/M</span>
+              </div>
+              <div class="price-block">
+                <span class="price-label">{{ $t('components.general.modelPricing.columns.cacheCreate') }}</span>
+                <span class="price-value cache-create">{{ formatUsdPer1M(item.cache_creation_input_token_cost) }}/M</span>
+                <span v-if="resolveCacheCreateHint(item)" class="price-note">
+                  {{ resolveCacheCreateHint(item) }}
+                </span>
+              </div>
+              <div class="price-block">
+                <span class="price-label">{{ $t('components.general.modelPricing.columns.cacheRead') }}</span>
+                <span class="price-value cache-read">{{ formatUsdPer1M(item.cache_read_input_token_cost) }}/M</span>
+                <span v-if="resolveCacheReadHint(item)" class="price-note">
+                  {{ resolveCacheReadHint(item) }}
+                </span>
+              </div>
             </div>
           </div>
         </div>
@@ -485,6 +487,8 @@ watch(
 </template>
 
 <style scoped>
+@import '../common/provider-model-list-shared.css';
+
 .model-pricing-modal {
   display: flex;
   flex-direction: column;
@@ -604,6 +608,7 @@ watch(
 }
 
 .model-pricing-item {
+  --pricing-scroll-fade: var(--mac-surface-strong);
   border: 1px solid var(--mac-border);
   background: var(--mac-surface-strong);
   border-radius: 16px;
@@ -617,10 +622,12 @@ watch(
 }
 
 .model-pricing-item:hover {
+  --pricing-scroll-fade: var(--mac-surface-hover);
   background: var(--mac-surface-hover);
 }
 
 .model-pricing-item.selected {
+  --pricing-scroll-fade: rgba(59, 130, 246, 0.12);
   border-color: rgba(59, 130, 246, 0.35);
   background: rgba(59, 130, 246, 0.12);
 }
@@ -636,7 +643,6 @@ watch(
   font-weight: 600;
   color: var(--mac-text);
   font-size: 0.95rem;
-  word-break: break-all;
 }
 
 .model-tags {
@@ -673,45 +679,6 @@ watch(
   border-color: rgba(16, 185, 129, 0.3);
 }
 
-.model-pricing {
-  display: flex;
-  flex-wrap: wrap;
-  width: 100%;
-  gap: 12px;
-  justify-content: flex-start;
-  align-items: flex-start;
-}
-
-.price-block {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  justify-content: flex-start;
-  gap: 6px;
-  flex: 0 0 96px;
-  min-height: 86px;
-  padding: 10px 12px;
-  border-radius: 14px;
-  border: 1px solid rgba(148, 163, 184, 0.16);
-  background: rgba(15, 23, 42, 0.18);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
-}
-
-.price-label {
-  font-size: 0.76rem;
-  color: var(--mac-text-secondary);
-  line-height: 1.2;
-  white-space: normal;
-}
-
-.price-value {
-  font-size: 1rem;
-  font-weight: 700;
-  line-height: 1.25;
-  color: var(--mac-text);
-  white-space: nowrap;
-}
-
 .price-value.input {
   color: #2563eb;
 }
@@ -726,20 +693,6 @@ watch(
 
 .price-value.cache-read {
   color: #0f766e;
-}
-
-.price-note {
-  font-size: 0.74rem;
-  line-height: 1.35;
-  color: var(--mac-text-secondary);
-  white-space: normal;
-}
-
-@media (max-width: 860px) {
-  .price-block {
-    flex-basis: 92px;
-    min-height: 82px;
-  }
 }
 
 @media (max-width: 640px) {

@@ -308,6 +308,7 @@
         "loadFailed": "加载模型列表失败",
         "apiKeyRequired": "请先配置 API 地址与 Key",
         "pricingUnavailable": "该站点未提供定价接口，仅展示模型名称",
+        "scrollHint": "价格区域支持左右滑动查看完整字段。",
         "vendorAll": "所有厂商",
         "vendorUnknown": "未知厂商",
         "billingToken": "按量计费",
@@ -841,7 +842,8 @@
         "removing": "处理中...",
         "delete": "删除模型",
         "reset": "恢复默认",
-        "unitHint": "单位：USD / 1M tokens；编辑 Cache Multiplier 会自动换算缓存价格。",
+        "unitHint": "单位：USD / 1M tokens；编辑缓存倍率（Cache Multiplier）会自动换算缓存价格。",
+        "scrollHint": "价格区域支持左右滑动查看完整字段。",
         "templateEmpty": "从现有模型填充（保留 Model）",
         "columns": {
           "model": "模型",
@@ -853,11 +855,11 @@
           "flags": "标记"
         },
         "badge": {
-          "custom": "Custom",
-          "override": "Override",
-          "builtin": "内置价格",
-          "manual": "手动修改",
-          "synced": "网络同步",
+          "custom": "自定义（Custom）",
+          "override": "覆盖（Override）",
+          "builtin": "内置价格（Built-in）",
+          "manual": "手动修改（Manual）",
+          "synced": "网络同步（Synced）",
           "syncedAtTooltip": "网络同步时间：{time}"
         },
         "editor": {
@@ -867,16 +869,16 @@
         "renameHintBuiltin": "改名后会基于当前价格创建一个新的自定义模型，原内置模型不会消失。",
         "renameHintCustom": "改名会把当前自定义配置迁移到新模型名上，保存前注意别撞名。",
         "fields": {
-          "template": "Template",
-          "model": "Model",
-          "input": "Input",
-          "output": "Output",
-          "reasoning": "Reasoning",
-          "cacheCreate": "Cache Create (5m)",
-          "cacheCreateMultiplier": "Cache Create Multiplier",
-          "cacheRead": "Cache Read",
-          "cacheReadMultiplier": "Cache Read Multiplier",
-          "ephemeral1h": "Cache Create (1h)"
+          "template": "模板（Template）",
+          "model": "模型（Model）",
+          "input": "输入（Input）",
+          "output": "输出（Output）",
+          "reasoning": "推理（Reasoning）",
+          "cacheCreate": "缓存创建（5m）（Cache Create）",
+          "cacheCreateMultiplier": "缓存创建倍率（Cache Create Multiplier）",
+          "cacheRead": "缓存读取（Cache Read）",
+          "cacheReadMultiplier": "缓存读取倍率（Cache Read Multiplier）",
+          "ephemeral1h": "缓存创建（1h）（Cache Create）"
         },
         "preview": {
           "title": "Claude 官方价格预览",

@@ -307,6 +307,7 @@
         "loadFailed": "Failed to load model list",
         "apiKeyRequired": "Configure API URL and key first",
         "pricingUnavailable": "Upstream does not provide pricing; showing model IDs only",
+        "scrollHint": "The price section supports horizontal scrolling to reveal all fields.",
         "vendorAll": "All vendors",
         "vendorUnknown": "Unknown",
         "billingToken": "Token billing",
@@ -841,6 +842,7 @@
         "delete": "Delete model",
         "reset": "Reset to default",
         "unitHint": "Unit: USD / 1M tokens; editing cache multipliers automatically updates cache prices.",
+        "scrollHint": "The price section supports horizontal scrolling to reveal all fields.",
         "templateEmpty": "Fill from an existing model (keep current Model)",
         "columns": {
           "model": "Model",

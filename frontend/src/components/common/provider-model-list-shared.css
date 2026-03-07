@@ -172,6 +172,118 @@
   color: #16a34a;
 }
 
+.pricing-name-inline {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  word-break: normal;
+}
+
+.pricing-inline-container {
+  position: relative;
+  min-width: 0;
+  --pricing-scroll-fade: var(--mac-surface-strong);
+}
+
+.pricing-inline-container::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 2px;
+  width: 24px;
+  pointer-events: none;
+  background: linear-gradient(90deg, rgba(15, 23, 42, 0), var(--pricing-scroll-fade));
+}
+
+.pricing-inline-container .model-pricing {
+  width: 100%;
+  min-width: 0;
+  flex-wrap: nowrap;
+  gap: 12px;
+  justify-content: flex-start;
+  align-items: flex-start;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0 18px 4px 0;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.45) transparent;
+  cursor: grab;
+}
+
+.pricing-inline-container .model-pricing:active {
+  cursor: grabbing;
+}
+
+.pricing-inline-container .model-pricing::-webkit-scrollbar {
+  height: 6px;
+}
+
+.pricing-inline-container .model-pricing::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.32);
+}
+
+.pricing-inline-container .model-pricing::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.pricing-inline-container .price-block {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 4px;
+  flex: 0 0 auto;
+  min-height: auto;
+  padding: 0;
+  border-radius: 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+}
+
+.pricing-inline-container .price-block.ratio {
+  flex-basis: auto;
+}
+
+.pricing-inline-container .price-label {
+  font-size: 0.76rem;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.pricing-inline-container .price-value {
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+.pricing-inline-container .price-note {
+  font-size: 0.74rem;
+  line-height: 1.35;
+  color: var(--mac-text-secondary);
+  white-space: nowrap;
+}
+
+.pricing-scroll-hint {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--mac-text-secondary);
+}
+
+@media (max-width: 860px) {
+  .pricing-inline-container::after {
+    width: 18px;
+  }
+
+  .pricing-inline-container .model-pricing {
+    gap: 10px;
+  }
+}
+
 @media (max-width: 640px) {
   .provider-model-item {
     grid-template-columns: 1fr;
