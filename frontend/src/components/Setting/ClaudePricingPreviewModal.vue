@@ -3,6 +3,7 @@
     :open="open"
     :body-scrollable="false"
     :title="t('components.general.modelPricing.preview.title')"
+    :panel-width="'min(1280px, 98vw)'"
     @close="emit('close')"
   >
     <div class="provider-model-modal">
@@ -59,7 +60,7 @@
             class="provider-model-item"
           >
             <div class="model-main">
-              <div class="model-name">{{ model.display_name }}</div>
+              <div class="model-name" :title="model.display_name">{{ model.display_name }}</div>
               <div class="model-tags">
                 <span class="tag" :class="model.is_recognized ? 'tag-token' : 'tag-neutral'">
                   {{ model.is_recognized ? t('components.general.modelPricing.preview.mapped') : t('components.general.modelPricing.preview.unmapped') }}
@@ -225,6 +226,21 @@ watch(
   gap: 12px;
 }
 
+.provider-model-item {
+  grid-template-columns: minmax(320px, 1.35fr) minmax(0, 1.65fr);
+  align-items: start;
+  gap: 16px;
+}
+
+.provider-model-item .model-name {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  line-height: 1.4;
+}
+
 .preview-scroll {
   flex: 1 1 auto;
   min-height: 0;
@@ -258,6 +274,12 @@ watch(
   padding-top: 12px;
   border-top: 1px solid var(--mac-border);
   background: var(--mac-surface);
+}
+
+@media (max-width: 720px) {
+  .provider-model-item {
+    grid-template-columns: minmax(240px, 1fr) minmax(0, 1.4fr);
+  }
 }
 
 .action-btn {

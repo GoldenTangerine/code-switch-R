@@ -382,7 +382,7 @@ const removeOverride = async () => {
   <InlineModal
     :open="open"
     :title="modalTitle"
-    panel-width="min(760px, 96vw)"
+    panel-width="min(920px, 96vw)"
     :close-on-backdrop="false"
     @close="emit('close')"
   >

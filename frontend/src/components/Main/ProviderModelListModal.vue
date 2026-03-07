@@ -2,6 +2,7 @@
   <BaseModal
     :open="open"
     :title="modalTitle"
+    :panel-width="'min(1240px, 98vw)'"
     @close="handleClose"
   >
     <div class="provider-model-modal">
@@ -60,7 +61,7 @@
           :class="{ 'no-pricing': !pricingAvailable }"
         >
           <div class="model-main">
-            <div class="model-name pricing-name-inline" :title="model.model">{{ model.model }}</div>
+            <div class="model-name" :title="model.model">{{ model.model }}</div>
             <div class="model-tags">
               <span class="tag" :class="billingTagClass(model.quotaType)">
                 {{ billingLabel(model.quotaType) }}
@@ -77,18 +78,9 @@
                 type="button"
                 class="action-btn"
                 :disabled="isWorkingModel(model.model)"
-                @click="isEditingModel(model.model) ? cancelOverrideEditor() : openOverrideEditor(model)"
+                @click="openOverrideEditor(model)"
               >
-                {{ isEditingModel(model.model) ? t('common.cancel') : t('components.main.modelList.adjustCache') }}
-              </button>
-              <button
-                v-if="hasManualCacheOverride(model)"
-                type="button"
-                class="action-btn"
-                :disabled="isWorkingModel(model.model)"
-                @click="resetOverride(model)"
-              >
-                {{ resettingModel === model.model ? t('components.general.modelPricing.removing') : t('components.main.modelList.resetCache') }}
+                {{ t('components.main.modelList.adjustCache') }}
               </button>
             </div>
           </div>
@@ -144,57 +136,78 @@
             </div>
           </div>
 
-          <div
-            v-if="pricingAvailable && model.quotaType === 0 && isEditingModel(model.model)"
-            class="provider-override-editor"
-          >
-            <div class="override-field">
-              <label class="override-label">{{ t('components.main.modelList.cacheCreateMultiplier') }}</label>
-              <input
-                v-model="overrideForm.cacheCreateMultiplier"
-                type="number"
-                step="0.0001"
-                min="0"
-                class="mac-input override-input"
-                :placeholder="resolveOverridePlaceholder(model, 'create')"
-              />
-              <span class="override-field-hint">{{ resolveOverrideHint(model, 'create') }}</span>
-            </div>
-            <div class="override-field">
-              <label class="override-label">{{ t('components.main.modelList.cacheReadMultiplier') }}</label>
-              <input
-                v-model="overrideForm.cacheReadMultiplier"
-                type="number"
-                step="0.0001"
-                min="0"
-                class="mac-input override-input"
-                :placeholder="resolveOverridePlaceholder(model, 'read')"
-              />
-              <span class="override-field-hint">{{ resolveOverrideHint(model, 'read') }}</span>
-            </div>
-
-            <div class="override-actions">
-              <button type="button" class="action-btn" :disabled="isWorkingModel(model.model)" @click="cancelOverrideEditor">
-                {{ t('common.cancel') }}
-              </button>
-              <button
-                v-if="hasManualCacheOverride(model)"
-                type="button"
-                class="action-btn"
-                :disabled="isWorkingModel(model.model)"
-                @click="resetOverride(model)"
-              >
-                {{ resettingModel === model.model ? t('components.general.modelPricing.removing') : t('components.main.modelList.resetCache') }}
-              </button>
-              <button type="button" class="primary-btn" :disabled="isWorkingModel(model.model)" @click="saveOverride(model)">
-                {{ savingModel === model.model ? t('common.saving') : t('common.save') }}
-              </button>
-            </div>
-          </div>
         </div>
       </div>
     </div>
   </BaseModal>
+
+  <InlineModal
+    :open="Boolean(editingTargetModel)"
+    :title="overrideModalTitle"
+    :panel-width="'min(560px, 92vw)'"
+    :body-scrollable="false"
+    @close="cancelOverrideEditor"
+  >
+    <div v-if="editingTargetModel" class="override-editor-modal">
+      <p class="override-editor-model" :title="editingTargetModel.model">
+        {{ editingTargetModel.model }}
+      </p>
+      <p class="pricing-hint override-editor-hint">
+        {{ t('components.main.modelList.overrideModalHint') }}
+      </p>
+
+      <div class="override-editor-grid">
+        <div class="override-field">
+          <label class="override-label">{{ t('components.main.modelList.cacheCreateMultiplier') }}</label>
+          <input
+            v-model="overrideForm.cacheCreateMultiplier"
+            type="number"
+            step="0.0001"
+            min="0"
+            class="mac-input override-input"
+            :placeholder="resolveOverridePlaceholder(editingTargetModel, 'create')"
+          />
+          <span class="override-field-hint">{{ resolveOverrideHint(editingTargetModel, 'create') }}</span>
+        </div>
+
+        <div class="override-field">
+          <label class="override-label">{{ t('components.main.modelList.cacheReadMultiplier') }}</label>
+          <input
+            v-model="overrideForm.cacheReadMultiplier"
+            type="number"
+            step="0.0001"
+            min="0"
+            class="mac-input override-input"
+            :placeholder="resolveOverridePlaceholder(editingTargetModel, 'read')"
+          />
+          <span class="override-field-hint">{{ resolveOverrideHint(editingTargetModel, 'read') }}</span>
+        </div>
+      </div>
+
+      <div class="override-actions">
+        <button type="button" class="action-btn" :disabled="isWorkingModel(editingTargetModel.model)" @click="cancelOverrideEditor">
+          {{ t('common.cancel') }}
+        </button>
+        <button
+          v-if="hasManualCacheOverride(editingTargetModel)"
+          type="button"
+          class="action-btn"
+          :disabled="isWorkingModel(editingTargetModel.model)"
+          @click="resetOverride(editingTargetModel)"
+        >
+          {{ resettingModel === editingTargetModel.model ? t('components.general.modelPricing.removing') : t('components.main.modelList.resetCache') }}
+        </button>
+        <button
+          type="button"
+          class="primary-btn"
+          :disabled="isWorkingModel(editingTargetModel.model)"
+          @click="saveOverride(editingTargetModel)"
+        >
+          {{ savingModel === editingTargetModel.model ? t('common.saving') : t('common.save') }}
+        </button>
+      </div>
+    </div>
+  </InlineModal>
 </template>
 
 <script setup lang="ts">
@@ -202,6 +215,7 @@ import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseModal from '../common/BaseModal.vue'
 import BaseInput from '../common/BaseInput.vue'
+import InlineModal from '../common/InlineModal.vue'
 import type { AutomationCard } from '../../data/cards'
 import { extractErrorMessage } from '../../utils/error'
 import { showToast } from '../../utils/toast'
@@ -322,6 +336,13 @@ const filteredModels = computed(() => {
   return [...filtered].sort((a, b) => (a.model || '').localeCompare(b.model || ''))
 })
 
+const editingTargetModel = computed(() => models.value.find((item) => item.model === editingModel.value) ?? null)
+
+const overrideModalTitle = computed(() => {
+  if (!editingTargetModel.value?.model) return t('components.main.modelList.adjustCache')
+  return `${t('components.main.modelList.adjustCache')} · ${editingTargetModel.value.model}`
+})
+
 const formatUSD = (value?: number) => {
   if (typeof value !== 'number' || !Number.isFinite(value)) return '—'
   if (value === 0) return '$0'
@@ -428,8 +449,6 @@ const clearOverrideForm = () => {
   overrideForm.cacheCreateMultiplier = ''
   overrideForm.cacheReadMultiplier = ''
 }
-
-const isEditingModel = (modelName: string) => editingModel.value === modelName
 
 const isWorkingModel = (modelName: string) => savingModel.value === modelName || resettingModel.value === modelName
 
@@ -606,9 +625,18 @@ watch(
 
 .provider-model-item {
   --pricing-scroll-fade: var(--mac-surface-strong);
-  grid-template-columns: minmax(150px, 1fr) minmax(0, 1.8fr);
+  grid-template-columns: minmax(320px, 1.35fr) minmax(0, 1.65fr);
   align-items: start;
   gap: 16px;
+}
+
+.provider-model-item .model-name {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  line-height: 1.4;
 }
 
 .tag-manual {
@@ -643,15 +671,30 @@ watch(
   color: #0f766e;
 }
 
-.provider-override-editor {
-  grid-column: 1 / -1;
+.override-editor-modal {
+  display: grid;
+  gap: 14px;
+}
+
+.override-editor-model {
+  margin: 0;
+  font-size: 0.96rem;
+  font-weight: 600;
+  color: var(--mac-text);
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  line-height: 1.45;
+}
+
+.override-editor-hint {
+  margin: 0;
+}
+
+.override-editor-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
-  padding: 14px;
-  border-radius: 14px;
-  border: 1px solid rgba(15, 118, 110, 0.18);
-  background: rgba(15, 118, 110, 0.08);
 }
 
 .override-field {
@@ -684,7 +727,17 @@ watch(
 }
 
 @media (max-width: 720px) {
-  .provider-override-editor {
+  .provider-model-item {
+    grid-template-columns: minmax(240px, 1fr) minmax(0, 1.4fr);
+  }
+
+  .override-editor-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .provider-model-item {
     grid-template-columns: 1fr;
   }
 }

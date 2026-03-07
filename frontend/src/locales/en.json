@@ -326,6 +326,7 @@
         "perCall": "Per-call price",
         "manualOverride": "Manual override",
         "adjustCache": "Adjust cache multipliers",
+        "overrideModalHint": "Leave fields empty to follow the automatic multiplier; saving recalculates cache prices automatically.",
         "resetCache": "Reset manual multipliers",
         "cacheCreateMultiplier": "Cache Create Multiplier",
         "cacheReadMultiplier": "Cache Read Multiplier",

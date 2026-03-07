@@ -327,6 +327,7 @@
         "perCall": "按次价格",
         "manualOverride": "手动覆盖",
         "adjustCache": "调整缓存倍率",
+        "overrideModalHint": "留空则跟随自动倍率；保存后会自动按倍率换算缓存价格。",
         "resetCache": "重置手动倍率",
         "cacheCreateMultiplier": "Cache Create Multiplier",
         "cacheReadMultiplier": "Cache Read Multiplier",

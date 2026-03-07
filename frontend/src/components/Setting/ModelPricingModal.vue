@@ -337,6 +337,7 @@ watch(
   <InlineModal
     :open="open"
     :title="$t('components.general.modelPricing.title')"
+    :panel-width="'min(1280px, 98vw)'"
     @close="closeModal"
   >
     <div class="model-pricing-modal">
@@ -423,7 +424,7 @@ watch(
           @click="openEditModal(item)"
         >
           <div class="model-main">
-            <div class="model-name pricing-name-inline" :title="item.model">{{ item.model }}</div>
+            <div class="model-name" :title="item.model">{{ item.model }}</div>
             <div class="model-tags">
               <span
                 class="tag"
@@ -614,7 +615,7 @@ watch(
   border-radius: 16px;
   padding: 14px 14px;
   display: grid;
-  grid-template-columns: minmax(150px, 1fr) minmax(0, 1.8fr);
+  grid-template-columns: minmax(320px, 1.35fr) minmax(0, 1.65fr);
   gap: 16px;
   align-items: start;
   cursor: pointer;
@@ -643,6 +644,12 @@ watch(
   font-weight: 600;
   color: var(--mac-text);
   font-size: 0.95rem;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  line-height: 1.4;
 }
 
 .model-tags {
@@ -693,6 +700,12 @@ watch(
 
 .price-value.cache-read {
   color: #0f766e;
+}
+
+@media (max-width: 720px) {
+  .model-pricing-item {
+    grid-template-columns: minmax(240px, 1fr) minmax(0, 1.4fr);
+  }
 }
 
 @media (max-width: 640px) {
