@@ -81,6 +81,18 @@ func TestCalculateCostAliasMatchNotMarkedFuzzy(t *testing.T) {
 	}
 }
 
+func TestExplicitEphemeral1hCostPerToken_DoesNotUseFamilyFallback(t *testing.T) {
+	service := newUnitTestPricingService()
+
+	if explicit, ok := service.ExplicitEphemeral1hCostPerToken("claude-sonnet-proxy"); ok || explicit != 0 {
+		t.Fatalf("ExplicitEphemeral1hCostPerToken = (%f, %v), 期望 (0, false)", explicit, ok)
+	}
+
+	if fallback := service.Ephemeral1hCostPerToken("claude-sonnet-proxy"); fallback <= 0 {
+		t.Fatalf("Ephemeral1hCostPerToken = %f, 期望 > 0", fallback)
+	}
+}
+
 func newUnitTestPricingService() *Service {
 	pricing := map[string]*PricingEntry{
 		"claude-opus-4-1": {

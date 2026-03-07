@@ -92,6 +92,49 @@ const resolveCacheCreateHint = (row: ModelPricingRow) =>
 const resolveCacheReadHint = (row: ModelPricingRow) =>
   formatMultiplierHint(resolveCacheReadMultiplier(row))
 
+type CacheCreatePriceEntry = {
+  key: string
+  label: string
+  value: number
+  hint: string
+}
+
+const resolveCacheCreatePriceEntries = (row: ModelPricingRow): CacheCreatePriceEntry[] => {
+  const entries: CacheCreatePriceEntry[] = []
+  const hasGenericCache = Number.isFinite(row.cache_creation_input_token_cost) && row.cache_creation_input_token_cost >= 0
+  const has1hCache = Number.isFinite(row.ephemeral_1h_cost_per_token) && row.ephemeral_1h_cost_per_token > 0
+  const shouldShowBaseCache = hasGenericCache && (row.cache_creation_input_token_cost > 0 || !has1hCache)
+
+  if (shouldShowBaseCache) {
+    if (has1hCache) {
+      entries.push({
+        key: 'cache-create-5m',
+        label: t('components.general.modelPricing.columns.cacheCreate5m'),
+        value: row.cache_creation_input_token_cost,
+        hint: resolveCacheCreateHint(row),
+      })
+    } else {
+      entries.push({
+        key: 'cache-create',
+        label: t('components.general.modelPricing.columns.cacheCreate'),
+        value: row.cache_creation_input_token_cost,
+        hint: resolveCacheCreateHint(row),
+      })
+    }
+  }
+
+  if (has1hCache) {
+    entries.push({
+      key: 'cache-create-1h',
+      label: t('components.general.modelPricing.columns.cacheCreate1h'),
+      value: row.ephemeral_1h_cost_per_token,
+      hint: formatMultiplierHint(calculateMultiplier(row.ephemeral_1h_cost_per_token, row.input_cost_per_token)),
+    })
+  }
+
+  return entries
+}
+
 const overrideCount = computed(() => rows.value.filter((item) => item.is_override || item.is_custom).length)
 
 const filteredRows = computed(() => {
@@ -446,11 +489,15 @@ watch(
                 <span class="price-label">{{ $t('components.general.modelPricing.columns.output') }}</span>
                 <span class="price-value output">{{ formatUsdPer1M(item.output_cost_per_token) }}/M</span>
               </div>
-              <div class="price-block">
-                <span class="price-label">{{ $t('components.general.modelPricing.columns.cacheCreate') }}</span>
-                <span class="price-value cache-create">{{ formatUsdPer1M(item.cache_creation_input_token_cost) }}/M</span>
-                <span v-if="resolveCacheCreateHint(item)" class="price-note">
-                  {{ resolveCacheCreateHint(item) }}
+              <div
+                v-for="cacheItem in resolveCacheCreatePriceEntries(item)"
+                :key="`${item.model}-${cacheItem.key}`"
+                class="price-block"
+              >
+                <span class="price-label">{{ cacheItem.label }}</span>
+                <span class="price-value cache-create">{{ formatUsdPer1M(cacheItem.value) }}/M</span>
+                <span v-if="cacheItem.hint" class="price-note">
+                  {{ cacheItem.hint }}
                 </span>
               </div>
               <div class="price-block">
@@ -615,7 +662,7 @@ watch(
   border-radius: 16px;
   padding: 14px 14px;
   display: grid;
-  grid-template-columns: minmax(320px, 1.35fr) minmax(0, 1.65fr);
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 16px;
   align-items: start;
   cursor: pointer;
@@ -702,9 +749,35 @@ watch(
   color: #0f766e;
 }
 
+.model-pricing-item .pricing-inline-container {
+  justify-self: end;
+  width: fit-content;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.model-pricing-item .pricing-inline-container::after {
+  display: none;
+}
+
+.model-pricing-item .pricing-inline-container .model-pricing {
+  width: fit-content;
+  max-width: 100%;
+  min-width: 0;
+  justify-content: flex-end;
+  overflow-x: auto;
+  padding-right: 0;
+  gap: 10px;
+  overscroll-behavior-x: contain;
+}
+
+.model-pricing-item .pricing-inline-container .price-block {
+  min-width: 88px;
+}
+
 @media (max-width: 720px) {
   .model-pricing-item {
-    grid-template-columns: minmax(240px, 1fr) minmax(0, 1.4fr);
+    grid-template-columns: minmax(0, 1fr) auto;
   }
 }
 

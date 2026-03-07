@@ -25,6 +25,7 @@ export type ProviderModelPricingItem = {
   ownerBy?: string
   inputUsdPerM?: number
   outputUsdPerM?: number
+  cacheCreate1hUsdPerM?: number
   perCallPrice?: ProviderModelPerCallPrice
 }
 

@@ -105,10 +105,26 @@
                     {{ formatUSD(model.outputUsdPerM) }}/M
                   </span>
                 </div>
-                <div v-if="model.modelRatio > 0" class="price-block ratio">
-                  <span class="price-label">{{ t('components.main.modelList.ratio') }}</span>
-                  <span class="price-value">
-                    {{ formatRatio(model.modelRatio) }}
+                <div
+                  v-for="cacheItem in resolveCacheCreatePriceEntries(model)"
+                  :key="`${model.model}-${cacheItem.key}`"
+                  class="price-block"
+                >
+                  <span class="price-label">{{ cacheItem.label }}</span>
+                  <span class="price-value cache-create">
+                    {{ formatUSD(cacheItem.value) }}/M
+                  </span>
+                  <span v-if="cacheItem.hint" class="price-note" :class="cacheItem.hintClass">
+                    {{ cacheItem.hint }}
+                  </span>
+                </div>
+                <div class="price-block">
+                  <span class="price-label">{{ t('components.main.modelList.cacheRead') }}</span>
+                  <span class="price-value cache-read">
+                    {{ formatUSD(resolveCachePrice(model.inputUsdPerM, resolveCacheReadMultiplier(model))) }}/M
+                  </span>
+                  <span v-if="resolveCacheReadHint(model)" class="price-note" :class="cacheHintClass(model.cacheReadMultiplierSource)">
+                    {{ resolveCacheReadHint(model) }}
                   </span>
                 </div>
               </template>
@@ -168,13 +184,15 @@
               <span class="detail-value output">{{ formatUSD(editingTargetModel.outputUsdPerM) }}/M</span>
             </div>
 
-            <div class="detail-item">
-              <span class="detail-label">{{ t('components.main.modelList.detailCacheCreate') }}</span>
-              <span class="detail-value cache-create">
-                {{ formatUSD(resolveCachePrice(editingTargetModel.inputUsdPerM, resolveCacheCreateMultiplier(editingTargetModel))) }}/M
-              </span>
-              <span v-if="resolveCacheCreateHint(editingTargetModel)" class="detail-note" :class="cacheHintClass(editingTargetModel.cacheCreateMultiplierSource)">
-                {{ resolveCacheCreateHint(editingTargetModel) }}
+            <div
+              v-for="cacheItem in resolveCacheCreatePriceEntries(editingTargetModel)"
+              :key="`detail-${editingTargetModel.model}-${cacheItem.key}`"
+              class="detail-item"
+            >
+              <span class="detail-label">{{ cacheItem.detailLabel }}</span>
+              <span class="detail-value cache-create">{{ formatUSD(cacheItem.value) }}/M</span>
+              <span v-if="cacheItem.hint" class="detail-note" :class="cacheItem.hintClass">
+                {{ cacheItem.hint }}
               </span>
             </div>
 
@@ -194,7 +212,7 @@
             </div>
 
             <div class="detail-item">
-              <span class="detail-label">{{ t('components.main.modelList.detailCacheCreateMultiplier') }}</span>
+              <span class="detail-label">{{ resolveCacheCreateMultiplierLabel(editingTargetModel, 'detail') }}</span>
               <span class="detail-value">{{ formatMultiplier(resolveCacheCreateMultiplier(editingTargetModel)) }}</span>
               <span v-if="formatCacheMultiplierSource(editingTargetModel.cacheCreateMultiplierSource)" class="detail-note" :class="cacheHintClass(editingTargetModel.cacheCreateMultiplierSource)">
                 {{ formatCacheMultiplierSource(editingTargetModel.cacheCreateMultiplierSource) }}
@@ -223,7 +241,7 @@
 
           <div class="override-editor-grid">
             <div class="override-field">
-              <label class="override-label">{{ t('components.main.modelList.cacheCreateMultiplier') }}</label>
+              <label class="override-label">{{ resolveCacheCreateMultiplierLabel(editingTargetModel, 'input') }}</label>
               <input
                 v-model="overrideForm.cacheCreateMultiplier"
                 type="number"
@@ -454,6 +472,22 @@ const formatMultiplierHint = (value?: number) => {
   return `${t('components.main.modelList.multiplier')} ${formatted}`
 }
 
+type CacheCreatePriceEntry = {
+  key: string
+  label: string
+  detailLabel: string
+  value: number
+  hint: string
+  hintClass?: Record<string, boolean>
+}
+
+const calculatePriceMultiplier = (value?: number, inputUsdPerM?: number) => {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return undefined
+  if (typeof inputUsdPerM !== 'number' || !Number.isFinite(inputUsdPerM) || inputUsdPerM < 0) return undefined
+  if (inputUsdPerM === 0) return value === 0 ? 0 : undefined
+  return value / inputUsdPerM
+}
+
 const resolveCachePrice = (inputUsdPerM?: number, multiplier?: number) => {
   if (typeof inputUsdPerM !== 'number' || !Number.isFinite(inputUsdPerM) || inputUsdPerM < 0) return undefined
   if (typeof multiplier !== 'number' || !Number.isFinite(multiplier) || multiplier < 0) return undefined
@@ -495,6 +529,68 @@ const cacheHintClass = (source?: string) => ({
   'is-estimated': source === 'builtin' || source === 'fallback',
   'is-manual': source === 'manual',
 })
+
+const hasExplicit1hCacheCreate = (model: ProviderModelPricingItem) =>
+  typeof model.cacheCreate1hUsdPerM === 'number' && Number.isFinite(model.cacheCreate1hUsdPerM) && model.cacheCreate1hUsdPerM > 0
+
+const resolveCacheCreateMultiplierLabel = (
+  model: ProviderModelPricingItem,
+  kind: 'detail' | 'input',
+) => {
+  if (!hasExplicit1hCacheCreate(model)) {
+    return kind === 'detail'
+      ? t('components.main.modelList.detailCacheCreateMultiplier')
+      : t('components.main.modelList.cacheCreateMultiplier')
+  }
+  return kind === 'detail'
+    ? t('components.main.modelList.detailCacheCreate5mMultiplier')
+    : t('components.main.modelList.cacheCreate5mMultiplier')
+}
+
+const resolveCacheCreatePriceEntries = (model: ProviderModelPricingItem): CacheCreatePriceEntry[] => {
+  const entries: CacheCreatePriceEntry[] = []
+  const cacheCreatePrice = resolveCachePrice(model.inputUsdPerM, resolveCacheCreateMultiplier(model))
+  const cacheCreate1hPrice = hasExplicit1hCacheCreate(model) ? model.cacheCreate1hUsdPerM : undefined
+  const createHint = resolveCacheCreateHint(model)
+  const createHintClass = cacheHintClass(model.cacheCreateMultiplierSource)
+
+  const has1hCache = typeof cacheCreate1hPrice === 'number' && cacheCreate1hPrice > 0
+  const shouldShowBaseCache = typeof cacheCreatePrice === 'number' && (cacheCreatePrice > 0 || !has1hCache)
+
+  if (shouldShowBaseCache) {
+    if (has1hCache) {
+      entries.push({
+        key: 'cache-create-5m',
+        label: t('components.main.modelList.cacheCreate5m'),
+        detailLabel: t('components.main.modelList.detailCacheCreate5m'),
+        value: cacheCreatePrice,
+        hint: createHint,
+        hintClass: createHintClass,
+      })
+    } else {
+      entries.push({
+        key: 'cache-create',
+        label: t('components.main.modelList.cacheCreate'),
+        detailLabel: t('components.main.modelList.detailCacheCreate'),
+        value: cacheCreatePrice,
+        hint: createHint,
+        hintClass: createHintClass,
+      })
+    }
+  }
+
+  if (has1hCache) {
+    entries.push({
+      key: 'cache-create-1h',
+      label: t('components.main.modelList.cacheCreate1h'),
+      detailLabel: t('components.main.modelList.detailCacheCreate1h'),
+      value: cacheCreate1hPrice,
+      hint: formatMultiplierHint(calculatePriceMultiplier(cacheCreate1hPrice, model.inputUsdPerM)),
+    })
+  }
+
+  return entries
+}
 
 const formatPerCall = (value?: ProviderModelPerCallPrice) => {
   if (!value) return '—'
@@ -646,7 +742,7 @@ const saveOverride = async (model: ProviderModelPricingItem) => {
   if (!props.provider || isWorkingModel(model.model)) return
   const cacheCreateMultiplier = parseOverrideMultiplier(
     overrideForm.cacheCreateMultiplier,
-    t('components.main.modelList.cacheCreateMultiplier'),
+    resolveCacheCreateMultiplierLabel(model, 'input'),
   )
   if (cacheCreateMultiplier === null) return
 
@@ -810,11 +906,23 @@ watch(
 }
 
 .provider-model-item .pricing-inline-container .price-block {
-  min-width: 84px;
+  min-width: 88px;
 }
 
-.provider-model-item .pricing-inline-container .price-block.ratio {
-  min-width: 64px;
+.provider-model-item .price-value.cache-create {
+  color: #d97706;
+}
+
+.provider-model-item .price-value.cache-read {
+  color: #0f766e;
+}
+
+.provider-model-item .price-note.is-estimated {
+  color: #b45309;
+}
+
+.provider-model-item .price-note.is-manual {
+  color: #0f766e;
 }
 
 .model-detail-modal {

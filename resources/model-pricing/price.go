@@ -480,11 +480,30 @@ func (s *Service) longContextTier(model string, usage UsageSnapshot) (LongContex
 	return LongContextPricing{}, false
 }
 
-func (s *Service) getEphemeral1hPricing(model string) float64 {
-	if price, ok := s.ephemeral1h[model]; ok {
-		return price
+func (s *Service) explicitEphemeral1hPricing(model string) (float64, bool) {
+	if s == nil || strings.TrimSpace(model) == "" {
+		return 0, false
 	}
-	name := strings.ToLower(model)
+	if price, ok := s.ephemeral1h[model]; ok && price > 0 {
+		return price, true
+	}
+	entry, pricingModel, hasPricing, _ := s.getPricingWithKey(model)
+	if !hasPricing {
+		return 0, false
+	}
+	if strings.TrimSpace(pricingModel) != "" {
+		if price, ok := s.ephemeral1h[pricingModel]; ok && price > 0 {
+			return price, true
+		}
+	}
+	if entry != nil && entry.CacheCreationInputTokenCostAbove1Hr > 0 {
+		return entry.CacheCreationInputTokenCostAbove1Hr, true
+	}
+	return 0, false
+}
+
+func fallbackEphemeral1hPricing(model string) float64 {
+	name := strings.ToLower(strings.TrimSpace(model))
 	switch {
 	case strings.Contains(name, "opus"):
 		return 0.00003
@@ -495,6 +514,13 @@ func (s *Service) getEphemeral1hPricing(model string) float64 {
 	default:
 		return 0
 	}
+}
+
+func (s *Service) getEphemeral1hPricing(model string) float64 {
+	if price, ok := s.explicitEphemeral1hPricing(model); ok {
+		return price
+	}
+	return fallbackEphemeral1hPricing(model)
 }
 
 func ensureCachePricing(entry *PricingEntry) {
@@ -654,6 +680,12 @@ func (s *Service) Ephemeral1hCostPerToken(model string) float64 {
 		return 0
 	}
 	return s.getEphemeral1hPricing(model)
+}
+
+// ExplicitEphemeral1hCostPerToken 返回显式声明的 1h cache 创建单价（美元/Token），
+// 不使用 family fallback，只返回明确存在的 1h 价格。
+func (s *Service) ExplicitEphemeral1hCostPerToken(model string) (float64, bool) {
+	return s.explicitEphemeral1hPricing(model)
 }
 
 // ApplyOverrides 将覆盖层应用到 Service（会覆盖同名 model key）。

@@ -1,6 +1,10 @@
 package services
 
-import "testing"
+import (
+	"testing"
+
+	modelpricing "codeswitch/resources/model-pricing"
+)
 
 func TestBuildProviderModelPricingResponse_MapsCacheMultipliers(t *testing.T) {
 	response := buildProviderModelPricingResponse(
@@ -143,5 +147,60 @@ func TestEnrichProviderModelPricingResponse_DefaultsForClaude(t *testing.T) {
 	}
 	if item.CacheReadMultiplierSource != providerCacheMultiplierSourceFallback {
 		t.Fatalf("Claude CacheReadMultiplierSource = %q, 期望 %q", item.CacheReadMultiplierSource, providerCacheMultiplierSourceFallback)
+	}
+}
+
+func TestEnrichProviderModelPricingResponse_SetsExplicit1hCachePrice(t *testing.T) {
+	pricingService, err := modelpricing.NewService()
+	if err != nil {
+		t.Fatalf("初始化模型价格服务失败: %v", err)
+	}
+
+	providerService := NewProviderService()
+	providerService.BindModelPricingService(&ModelPricingService{effective: pricingService})
+	response := &ProviderModelPricingResponse{
+		Models: []ProviderModelPricingItem{
+			{
+				Model:           "claude-sonnet-4",
+				QuotaType:       0,
+				InputUSDPerM:    3,
+				OutputUSDPerM:   15,
+				CompletionRatio: 5,
+			},
+		},
+	}
+
+	providerService.enrichProviderModelPricingResponse(response, "", "", "")
+
+	item := response.Models[0]
+	if diff := item.CacheCreate1hUSDPerM - 6; diff < -1e-9 || diff > 1e-9 {
+		t.Fatalf("CacheCreate1hUSDPerM = %.4f, 期望 6.0000", item.CacheCreate1hUSDPerM)
+	}
+}
+
+func TestEnrichProviderModelPricingResponse_DoesNotUseFamilyFallbackAsExplicit1h(t *testing.T) {
+	pricingService, err := modelpricing.NewService()
+	if err != nil {
+		t.Fatalf("初始化模型价格服务失败: %v", err)
+	}
+
+	providerService := NewProviderService()
+	providerService.BindModelPricingService(&ModelPricingService{effective: pricingService})
+	response := &ProviderModelPricingResponse{
+		Models: []ProviderModelPricingItem{
+			{
+				Model:           "claude-sonnet-proxy",
+				QuotaType:       0,
+				InputUSDPerM:    3,
+				OutputUSDPerM:   15,
+				CompletionRatio: 5,
+			},
+		},
+	}
+
+	providerService.enrichProviderModelPricingResponse(response, "", "", "")
+
+	if response.Models[0].CacheCreate1hUSDPerM != 0 {
+		t.Fatalf("CacheCreate1hUSDPerM = %.4f, 期望 0.0000", response.Models[0].CacheCreate1hUSDPerM)
 	}
 }

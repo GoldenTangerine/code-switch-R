@@ -392,18 +392,21 @@ func completeCacheCreationTokenSplit(totalTokens int, ephemeral5mTokens int, eph
 }
 
 func resolveProviderEphemeral1hPerToken(pricing *modelpricing.Service, model string, fallbackPerToken float64) float64 {
-	if pricing != nil && strings.TrimSpace(model) != "" {
-		breakdown := pricing.CalculateCost(model, modelpricing.UsageSnapshot{
-			CacheCreateTokens: 1,
-			CacheCreation: &modelpricing.CacheCreationDetail{
-				Ephemeral1hTokens: 1,
-			},
-		})
-		if breakdown.Ephemeral1hCost > 0 {
-			return breakdown.Ephemeral1hCost
-		}
+	if explicit := resolveExplicitProviderEphemeral1hPerToken(pricing, model); explicit > 0 {
+		return explicit
 	}
 	return fallbackPerToken
+}
+
+func resolveExplicitProviderEphemeral1hPerToken(pricing *modelpricing.Service, model string) float64 {
+	if pricing == nil || strings.TrimSpace(model) == "" {
+		return 0
+	}
+	price, ok := pricing.ExplicitEphemeral1hCostPerToken(model)
+	if !ok || price <= 0 {
+		return 0
+	}
+	return price
 }
 
 func deriveCacheMultipliersFromBuiltinPricing(pricing *modelpricing.Service, model string) (float64, float64, bool) {

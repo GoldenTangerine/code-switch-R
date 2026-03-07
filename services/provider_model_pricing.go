@@ -54,6 +54,7 @@ type ProviderModelPricingItem struct {
 	SupportedEndpointTypes        []string                   `json:"supportedEndpointTypes,omitempty"`
 	InputUSDPerM                  float64                    `json:"inputUsdPerM,omitempty"`
 	OutputUSDPerM                 float64                    `json:"outputUsdPerM,omitempty"`
+	CacheCreate1hUSDPerM          float64                    `json:"cacheCreate1hUsdPerM,omitempty"`
 	PerCallPrice                  *ProviderModelPerCallPrice `json:"perCallPrice,omitempty"`
 }
 
@@ -302,6 +303,11 @@ func (ps *ProviderService) enrichProviderModelPricingResponse(response *Provider
 		item.ResolvedCacheReadMultiplier = cacheReadMultiplier
 		item.CacheCreateMultiplierSource = cacheCreateSource
 		item.CacheReadMultiplierSource = cacheReadSource
+
+		cacheCreate1hPerToken := resolveExplicitProviderEphemeral1hPerToken(pricing, item.Model)
+		if cacheCreate1hPerToken > 0 {
+			item.CacheCreate1hUSDPerM = cacheCreate1hPerToken * 1_000_000
+		}
 	}
 }
 

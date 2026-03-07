@@ -141,6 +141,8 @@ func (mps *ModelPricingService) ListModelPricing() ([]ModelPricingRow, error) {
 		}
 
 		meta := mps.overrides.Meta[model]
+		ephemeral1hCostPerToken, _ := svc.ExplicitEphemeral1hCostPerToken(model)
+
 		rows = append(rows, ModelPricingRow{
 			Model:                       model,
 			InputCostPerToken:           entry.InputCostPerToken,
@@ -148,7 +150,7 @@ func (mps *ModelPricingService) ListModelPricing() ([]ModelPricingRow, error) {
 			OutputCostPerReasoningToken: entry.OutputCostPerReasoningToken,
 			CacheCreationInputTokenCost: entry.CacheCreationInputTokenCost,
 			CacheReadInputTokenCost:     entry.CacheReadInputTokenCost,
-			Ephemeral1hCostPerToken:     svc.Ephemeral1hCostPerToken(model),
+			Ephemeral1hCostPerToken:     ephemeral1hCostPerToken,
 			IsOverride:                  isOverride,
 			IsCustom:                    isCustom,
 			Source:                      resolveModelPricingSource(meta, isOverride || isCustom),
