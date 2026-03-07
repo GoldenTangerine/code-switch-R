@@ -4707,6 +4707,10 @@ html.dark .summary-card--clickable:hover {
 }
 
 .logs-storage-heatmap-cell {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
   border: 1px solid rgba(255, 255, 255, 0.04);
   padding: 0;
   appearance: none;
