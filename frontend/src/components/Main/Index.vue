@@ -170,14 +170,48 @@
           class="contrib-tooltip"
           :class="usageTooltip.placement"
           :style="{ left: `${usageTooltip.left}px`, top: `${usageTooltip.top}px` }"
+          role="tooltip"
         >
           <p class="tooltip-heading">{{ formattedTooltipLabel }}</p>
-          <ul class="tooltip-metrics">
-            <li v-for="metric in usageTooltipMetrics" :key="metric.key">
-              <span class="metric-label">{{ metric.label }}</span>
-              <span class="metric-value">{{ metric.value }}</span>
-            </li>
-          </ul>
+          <div class="tooltip-summary-grid">
+            <div
+              v-for="card in usageTooltipSummaryCards"
+              :key="card.key"
+              :class="['tooltip-summary-card', `is-${card.tone}`, { 'is-full': card.fullWidth }]"
+            >
+              <span class="tooltip-summary-label">{{ card.label }}</span>
+              <span class="tooltip-summary-value">{{ card.value }}</span>
+            </div>
+          </div>
+          <div class="tooltip-sections">
+            <section
+              v-for="section in usageTooltipSections"
+              :key="section.key"
+              class="tooltip-section"
+            >
+              <div class="tooltip-section-heading" :class="`is-${section.tone}`">
+                {{ section.title }}
+              </div>
+              <div class="tooltip-section-body">
+                <div
+                  v-for="row in section.rows"
+                  :key="row.key"
+                  :class="['tooltip-row', `is-${row.tone}`, { 'is-active': row.active }]"
+                >
+                  <span class="tooltip-row-label">{{ row.label }}</span>
+                  <span
+                    :class="[
+                      'tooltip-row-value',
+                      `is-${row.tone}`,
+                      { 'is-emphasis': row.emphasis || row.active },
+                    ]"
+                  >
+                    {{ row.value }}
+                  </span>
+                </div>
+              </div>
+            </section>
+          </div>
         </div>
       </section>
 
@@ -1353,6 +1387,36 @@ const importButtonTooltip = computed(() => {
 const intensityClass = (value: number) => `gh-level-${value}`
 
 type TooltipPlacement = 'above' | 'below'
+type UsageTooltipTone = 'neutral' | 'info' | 'warning' | 'success' | 'violet' | 'rose'
+type UsageTooltipSummaryCard = {
+  key: string
+  label: string
+  value: string
+  tone: UsageTooltipTone
+  fullWidth?: boolean
+}
+type UsageTooltipRow = {
+  key: string
+  label: string
+  value: string
+  tone: UsageTooltipTone
+  emphasis?: boolean
+  active?: boolean
+}
+type UsageTooltipSection = {
+  key: string
+  title: string
+  tone: UsageTooltipTone
+  rows: UsageTooltipRow[]
+}
+type UsageTooltipSectionKey = 'activity' | 'tokens' | 'cost'
+type UsageTooltipMetricRowDefinition = {
+  key: string
+  metric: HeatmapIntensityMetric
+  section: UsageTooltipSectionKey
+  label: string
+  emphasis?: boolean
+}
 
 const usageTooltip = reactive({
   visible: false,
@@ -1548,61 +1612,144 @@ const heatmapIntensityLevelRatioValue = computed(() => {
   })
 })
 
-const usageTooltipMetrics = computed(() => [
+const HEATMAP_TOOLTIP_SECTION_ORDER: UsageTooltipSectionKey[] = ['activity', 'tokens', 'cost']
+
+const getHeatmapMetricTone = (metric: HeatmapIntensityMetric): UsageTooltipTone => {
+  switch (metric) {
+    case 'cost':
+      return 'success'
+    case 'total_tokens':
+      return 'warning'
+    case 'input_tokens':
+      return 'info'
+    case 'output_tokens':
+      return 'violet'
+    case 'reasoning_tokens':
+      return 'rose'
+    case 'requests':
+    default:
+      return 'info'
+  }
+}
+
+const getHeatmapIntensityTone = (intensity: number): UsageTooltipTone => {
+  if (intensity >= 4) return 'success'
+  if (intensity >= 2) return 'warning'
+  if (intensity >= 1) return 'info'
+  return 'neutral'
+}
+
+const isActiveHeatmapMetric = (metric: HeatmapIntensityMetric) => heatmapIntensityMetric.value === metric
+
+const usageTooltipSectionMeta = computed<Record<UsageTooltipSectionKey, { title: string; tone: UsageTooltipTone }>>(() => ({
+  activity: {
+    title: t('components.main.heatmap.sections.activity'),
+    tone: 'info',
+  },
+  tokens: {
+    title: t('components.main.heatmap.sections.tokens'),
+    tone: 'warning',
+  },
+  cost: {
+    title: t('components.main.heatmap.sections.cost'),
+    tone: 'success',
+  },
+}))
+
+const usageTooltipMetricRowDefinitions = computed<UsageTooltipMetricRowDefinition[]>(() => [
+  {
+    key: 'requests',
+    metric: 'requests',
+    section: 'activity',
+    label: t('components.main.heatmap.metrics.requests'),
+    emphasis: true,
+  },
+  {
+    key: 'totalTokens',
+    metric: 'total_tokens',
+    section: 'tokens',
+    label: t('components.main.heatmap.metrics.totalTokens'),
+    emphasis: true,
+  },
+  {
+    key: 'inputTokens',
+    metric: 'input_tokens',
+    section: 'tokens',
+    label: t('components.main.heatmap.metrics.inputTokens'),
+  },
+  {
+    key: 'outputTokens',
+    metric: 'output_tokens',
+    section: 'tokens',
+    label: t('components.main.heatmap.metrics.outputTokens'),
+  },
+  {
+    key: 'reasoningTokens',
+    metric: 'reasoning_tokens',
+    section: 'tokens',
+    label: t('components.main.heatmap.metrics.reasoningTokens'),
+  },
+  {
+    key: 'cost',
+    metric: 'cost',
+    section: 'cost',
+    label: t('components.main.heatmap.metrics.cost'),
+    emphasis: true,
+  },
+])
+
+const usageTooltipSummaryCards = computed<UsageTooltipSummaryCard[]>(() => [
   {
     key: 'brightnessMetric',
     label: t('components.main.heatmap.metrics.brightnessMetric'),
     value: heatmapIntensityMetricLabel.value,
+    tone: 'neutral',
   },
   {
     key: 'brightnessValue',
     label: t('components.main.heatmap.metrics.brightnessValue'),
     value: heatmapIntensityMetricValue.value,
+    tone: getHeatmapMetricTone(heatmapIntensityMetric.value),
   },
   {
     key: 'brightnessLevelRatio',
     label: t('components.main.heatmap.metrics.brightnessLevelRatio'),
     value: heatmapIntensityLevelRatioValue.value,
-  },
-  {
-    key: 'requests',
-    label: t('components.main.heatmap.metrics.requests'),
-    value: formatHeatmapMetricValue('requests', usageTooltip.requests),
-  },
-  {
-    key: 'totalTokens',
-    label: t('components.main.heatmap.metrics.totalTokens'),
-    value: formatHeatmapMetricValue('total_tokens', usageTooltip.totalTokens),
-  },
-  {
-    key: 'inputTokens',
-    label: t('components.main.heatmap.metrics.inputTokens'),
-    value: formatHeatmapMetricValue('input_tokens', usageTooltip.inputTokens),
-  },
-  {
-    key: 'outputTokens',
-    label: t('components.main.heatmap.metrics.outputTokens'),
-    value: formatHeatmapMetricValue('output_tokens', usageTooltip.outputTokens),
-  },
-  {
-    key: 'reasoningTokens',
-    label: t('components.main.heatmap.metrics.reasoningTokens'),
-    value: formatHeatmapMetricValue('reasoning_tokens', usageTooltip.reasoningTokens),
-  },
-  {
-    key: 'cost',
-    label: t('components.main.heatmap.metrics.cost'),
-    value: formatHeatmapMetricValue('cost', usageTooltip.cost),
+    tone: getHeatmapIntensityTone(usageTooltip.intensity),
+    fullWidth: true,
   },
 ])
+
+const usageTooltipSections = computed<UsageTooltipSection[]>(() =>
+  HEATMAP_TOOLTIP_SECTION_ORDER.map((sectionKey) => {
+    const sectionMeta = usageTooltipSectionMeta.value[sectionKey]
+    const rows = usageTooltipMetricRowDefinitions.value
+      .filter((item) => item.section === sectionKey)
+      .map<UsageTooltipRow>((item) => ({
+        key: item.key,
+        label: item.label,
+        value: formatHeatmapMetricValue(item.metric, getUsageTooltipMetricRawValue(item.metric)),
+        tone: getHeatmapMetricTone(item.metric),
+        emphasis: item.emphasis,
+        active: isActiveHeatmapMetric(item.metric),
+      }))
+    const activeRow = rows.find((row) => row.active)
+    return {
+      key: sectionKey,
+      title: sectionMeta.title,
+      tone: activeRow?.tone ?? sectionMeta.tone,
+      rows,
+    }
+  })
+)
 
 const clamp = (value: number, min: number, max: number) => {
   if (max <= min) return min
   return Math.min(Math.max(value, min), max)
 }
 
-const TOOLTIP_DEFAULT_WIDTH = 220
-const TOOLTIP_DEFAULT_HEIGHT = 168
+const TOOLTIP_DEFAULT_WIDTH = 336
+const TOOLTIP_DEFAULT_HEIGHT = 340
 const TOOLTIP_VERTICAL_OFFSET = 12
 const TOOLTIP_HORIZONTAL_MARGIN = 20
 const TOOLTIP_VERTICAL_MARGIN = 24

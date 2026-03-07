@@ -224,6 +224,11 @@
         "legendLow": "低",
         "legendHigh": "高",
         "cellTitle": "{label}：{count} 次请求",
+        "sections": {
+          "activity": "请求概览",
+          "tokens": "Token 统计",
+          "cost": "金额信息"
+        },
         "metrics": {
           "brightnessMetric": "亮度参考",
           "brightnessValue": "当前亮度值",

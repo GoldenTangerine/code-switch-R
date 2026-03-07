@@ -223,6 +223,11 @@
         "legendLow": "Low",
         "legendHigh": "High",
         "cellTitle": "{label}: {count} requests",
+        "sections": {
+          "activity": "Request overview",
+          "tokens": "Token breakdown",
+          "cost": "Cost details"
+        },
         "metrics": {
           "brightnessMetric": "Brightness metric",
           "brightnessValue": "Current brightness value",
