@@ -1,8 +1,8 @@
 <template>
-  <BaseModal
+  <InlineModal
     :open="open"
     :title="modalTitle"
-    :panel-width="'min(1240px, 98vw)'"
+    :panel-width="'min(1280px, 98vw)'"
     @close="handleClose"
   >
     <div class="provider-model-modal">
@@ -52,13 +52,20 @@
           {{ t('components.main.modelList.pricingUnavailable') }}
         </p>
         <p v-else class="pricing-scroll-hint">
-          {{ t('components.main.modelList.scrollHint') }}
+          {{ t('components.main.modelList.detailEntryHint') }}
         </p>
         <div
           v-for="model in filteredModels"
           :key="model.model"
           class="provider-model-item"
-          :class="{ 'no-pricing': !pricingAvailable }"
+          :class="{ 'no-pricing': !pricingAvailable, clickable: pricingAvailable }"
+          :role="pricingAvailable ? 'button' : undefined"
+          :aria-haspopup="pricingAvailable ? 'dialog' : undefined"
+          :aria-label="pricingAvailable ? t('components.main.modelList.openDetailAria', { model: model.model }) : undefined"
+          :tabindex="pricingAvailable ? 0 : -1"
+          @click="handleModelClick(model)"
+          @keydown.enter.prevent="handleModelClick(model)"
+          @keydown.space.prevent="handleModelClick(model)"
         >
           <div class="model-main">
             <div class="model-name" :title="model.model">{{ model.model }}</div>
@@ -73,19 +80,17 @@
                 {{ t('components.main.modelList.manualOverride') }}
               </span>
             </div>
-            <div v-if="pricingAvailable && model.quotaType === 0" class="model-actions">
-              <button
-                type="button"
-                class="action-btn"
-                :disabled="isWorkingModel(model.model)"
-                @click="openOverrideEditor(model)"
-              >
-                {{ t('components.main.modelList.adjustCache') }}
-              </button>
-            </div>
           </div>
 
-          <div v-if="pricingAvailable" class="pricing-inline-container">
+          <div
+            v-if="pricingAvailable"
+            class="pricing-inline-container"
+            @pointerdown="onPricingPointerDown($event, model.model)"
+            @pointermove="onPricingPointerMove"
+            @pointerup="onPricingPointerEnd"
+            @pointercancel="clearPricingInteraction"
+            @click.stop="handlePricingAreaClick($event, model)"
+          >
             <div class="model-pricing">
               <template v-if="model.quotaType === 0">
                 <div class="price-block">
@@ -98,24 +103,6 @@
                   <span class="price-label">{{ t('components.main.modelList.output') }}</span>
                   <span class="price-value output">
                     {{ formatUSD(model.outputUsdPerM) }}/M
-                  </span>
-                </div>
-                <div class="price-block">
-                  <span class="price-label">{{ t('components.main.modelList.cacheCreate') }}</span>
-                  <span class="price-value cache-create">
-                    {{ formatUSD(resolveCachePrice(model.inputUsdPerM, resolveCacheCreateMultiplier(model))) }}/M
-                  </span>
-                  <span v-if="resolveCacheCreateHint(model)" class="price-note" :class="cacheHintClass(model.cacheCreateMultiplierSource)">
-                    {{ resolveCacheCreateHint(model) }}
-                  </span>
-                </div>
-                <div class="price-block">
-                  <span class="price-label">{{ t('components.main.modelList.cacheRead') }}</span>
-                  <span class="price-value cache-read">
-                    {{ formatUSD(resolveCachePrice(model.inputUsdPerM, resolveCacheReadMultiplier(model))) }}/M
-                  </span>
-                  <span v-if="resolveCacheReadHint(model)" class="price-note" :class="cacheHintClass(model.cacheReadMultiplierSource)">
-                    {{ resolveCacheReadHint(model) }}
                   </span>
                 </div>
                 <div v-if="model.modelRatio > 0" class="price-block ratio">
@@ -139,81 +126,161 @@
         </div>
       </div>
     </div>
-  </BaseModal>
 
-  <InlineModal
-    :open="Boolean(editingTargetModel)"
-    :title="overrideModalTitle"
-    :panel-width="'min(560px, 92vw)'"
-    :body-scrollable="false"
-    @close="cancelOverrideEditor"
-  >
-    <div v-if="editingTargetModel" class="override-editor-modal">
-      <p class="override-editor-model" :title="editingTargetModel.model">
-        {{ editingTargetModel.model }}
-      </p>
-      <p class="pricing-hint override-editor-hint">
-        {{ t('components.main.modelList.overrideModalHint') }}
-      </p>
+    <InlineModal
+      :open="Boolean(editingTargetModel)"
+      :title="detailModalTitle"
+      :panel-width="'min(980px, 96vw)'"
+      :body-scrollable="false"
+      @close="closeModelDetail"
+    >
+      <div v-if="editingTargetModel" class="model-detail-modal">
+        <p class="pricing-hint detail-hint">
+          {{ t('components.main.modelList.detailHint') }}
+        </p>
 
-      <div class="override-editor-grid">
-        <div class="override-field">
-          <label class="override-label">{{ t('components.main.modelList.cacheCreateMultiplier') }}</label>
-          <input
-            v-model="overrideForm.cacheCreateMultiplier"
-            type="number"
-            step="0.0001"
-            min="0"
-            class="mac-input override-input"
-            :placeholder="resolveOverridePlaceholder(editingTargetModel, 'create')"
-          />
-          <span class="override-field-hint">{{ resolveOverrideHint(editingTargetModel, 'create') }}</span>
+        <div class="detail-grid">
+          <div class="detail-item detail-item--full">
+            <span class="detail-label">{{ t('components.main.modelList.detailModel') }}</span>
+            <span class="detail-value detail-value--wrap" :title="editingTargetModel.model">
+              {{ editingTargetModel.model }}
+            </span>
+          </div>
+
+          <div class="detail-item">
+            <span class="detail-label">{{ t('components.main.modelList.detailBilling') }}</span>
+            <span class="detail-value">{{ billingLabel(editingTargetModel.quotaType) }}</span>
+          </div>
+
+          <div v-if="editingTargetModel.ownerBy" class="detail-item">
+            <span class="detail-label">{{ t('components.main.modelList.detailOwner') }}</span>
+            <span class="detail-value detail-value--wrap">{{ editingTargetModel.ownerBy }}</span>
+          </div>
+
+          <template v-if="editingTargetModel.quotaType === 0">
+            <div class="detail-item">
+              <span class="detail-label">{{ t('components.main.modelList.detailInput') }}</span>
+              <span class="detail-value input">{{ formatUSD(editingTargetModel.inputUsdPerM) }}/M</span>
+            </div>
+
+            <div class="detail-item">
+              <span class="detail-label">{{ t('components.main.modelList.detailOutput') }}</span>
+              <span class="detail-value output">{{ formatUSD(editingTargetModel.outputUsdPerM) }}/M</span>
+            </div>
+
+            <div class="detail-item">
+              <span class="detail-label">{{ t('components.main.modelList.detailCacheCreate') }}</span>
+              <span class="detail-value cache-create">
+                {{ formatUSD(resolveCachePrice(editingTargetModel.inputUsdPerM, resolveCacheCreateMultiplier(editingTargetModel))) }}/M
+              </span>
+              <span v-if="resolveCacheCreateHint(editingTargetModel)" class="detail-note" :class="cacheHintClass(editingTargetModel.cacheCreateMultiplierSource)">
+                {{ resolveCacheCreateHint(editingTargetModel) }}
+              </span>
+            </div>
+
+            <div class="detail-item">
+              <span class="detail-label">{{ t('components.main.modelList.detailCacheRead') }}</span>
+              <span class="detail-value cache-read">
+                {{ formatUSD(resolveCachePrice(editingTargetModel.inputUsdPerM, resolveCacheReadMultiplier(editingTargetModel))) }}/M
+              </span>
+              <span v-if="resolveCacheReadHint(editingTargetModel)" class="detail-note" :class="cacheHintClass(editingTargetModel.cacheReadMultiplierSource)">
+                {{ resolveCacheReadHint(editingTargetModel) }}
+              </span>
+            </div>
+
+            <div v-if="editingTargetModel.modelRatio > 0" class="detail-item">
+              <span class="detail-label">{{ t('components.main.modelList.detailRatio') }}</span>
+              <span class="detail-value">{{ formatRatio(editingTargetModel.modelRatio) }}</span>
+            </div>
+
+            <div class="detail-item">
+              <span class="detail-label">{{ t('components.main.modelList.detailCacheCreateMultiplier') }}</span>
+              <span class="detail-value">{{ formatMultiplier(resolveCacheCreateMultiplier(editingTargetModel)) }}</span>
+              <span v-if="formatCacheMultiplierSource(editingTargetModel.cacheCreateMultiplierSource)" class="detail-note" :class="cacheHintClass(editingTargetModel.cacheCreateMultiplierSource)">
+                {{ formatCacheMultiplierSource(editingTargetModel.cacheCreateMultiplierSource) }}
+              </span>
+            </div>
+
+            <div class="detail-item">
+              <span class="detail-label">{{ t('components.main.modelList.detailCacheReadMultiplier') }}</span>
+              <span class="detail-value">{{ formatMultiplier(resolveCacheReadMultiplier(editingTargetModel)) }}</span>
+              <span v-if="formatCacheMultiplierSource(editingTargetModel.cacheReadMultiplierSource)" class="detail-note" :class="cacheHintClass(editingTargetModel.cacheReadMultiplierSource)">
+                {{ formatCacheMultiplierSource(editingTargetModel.cacheReadMultiplierSource) }}
+              </span>
+            </div>
+          </template>
+
+          <div v-else class="detail-item detail-item--full">
+            <span class="detail-label">{{ t('components.main.modelList.detailPerCall') }}</span>
+            <span class="detail-value detail-value--wrap">{{ formatPerCall(editingTargetModel.perCallPrice) }}</span>
+          </div>
         </div>
 
-        <div class="override-field">
-          <label class="override-label">{{ t('components.main.modelList.cacheReadMultiplier') }}</label>
-          <input
-            v-model="overrideForm.cacheReadMultiplier"
-            type="number"
-            step="0.0001"
-            min="0"
-            class="mac-input override-input"
-            :placeholder="resolveOverridePlaceholder(editingTargetModel, 'read')"
-          />
-          <span class="override-field-hint">{{ resolveOverrideHint(editingTargetModel, 'read') }}</span>
+        <template v-if="editingTargetModel.quotaType === 0">
+          <div class="detail-divider"></div>
+
+          <div class="detail-section-title">{{ t('components.main.modelList.detailOverrideSection') }}</div>
+
+          <div class="override-editor-grid">
+            <div class="override-field">
+              <label class="override-label">{{ t('components.main.modelList.cacheCreateMultiplier') }}</label>
+              <input
+                v-model="overrideForm.cacheCreateMultiplier"
+                type="number"
+                step="0.0001"
+                min="0"
+                class="mac-input override-input"
+                :placeholder="resolveOverridePlaceholder(editingTargetModel, 'create')"
+              />
+              <span class="override-field-hint">{{ resolveOverrideHint(editingTargetModel, 'create') }}</span>
+            </div>
+
+            <div class="override-field">
+              <label class="override-label">{{ t('components.main.modelList.cacheReadMultiplier') }}</label>
+              <input
+                v-model="overrideForm.cacheReadMultiplier"
+                type="number"
+                step="0.0001"
+                min="0"
+                class="mac-input override-input"
+                :placeholder="resolveOverridePlaceholder(editingTargetModel, 'read')"
+              />
+              <span class="override-field-hint">{{ resolveOverrideHint(editingTargetModel, 'read') }}</span>
+            </div>
+          </div>
+        </template>
+
+        <div class="override-actions">
+          <button type="button" class="action-btn" @click="closeModelDetail">
+            {{ t('common.cancel') }}
+          </button>
+          <button
+            v-if="editingTargetModel.quotaType === 0 && hasManualCacheOverride(editingTargetModel)"
+            type="button"
+            class="action-btn"
+            :disabled="isWorkingModel(editingTargetModel.model)"
+            @click="resetOverride(editingTargetModel)"
+          >
+            {{ resettingModel === editingTargetModel.model ? t('components.general.modelPricing.removing') : t('components.main.modelList.resetCache') }}
+          </button>
+          <button
+            v-if="editingTargetModel.quotaType === 0"
+            type="button"
+            class="primary-btn"
+            :disabled="isWorkingModel(editingTargetModel.model)"
+            @click="saveOverride(editingTargetModel)"
+          >
+            {{ savingModel === editingTargetModel.model ? t('common.saving') : t('common.save') }}
+          </button>
         </div>
       </div>
-
-      <div class="override-actions">
-        <button type="button" class="action-btn" :disabled="isWorkingModel(editingTargetModel.model)" @click="cancelOverrideEditor">
-          {{ t('common.cancel') }}
-        </button>
-        <button
-          v-if="hasManualCacheOverride(editingTargetModel)"
-          type="button"
-          class="action-btn"
-          :disabled="isWorkingModel(editingTargetModel.model)"
-          @click="resetOverride(editingTargetModel)"
-        >
-          {{ resettingModel === editingTargetModel.model ? t('components.general.modelPricing.removing') : t('components.main.modelList.resetCache') }}
-        </button>
-        <button
-          type="button"
-          class="primary-btn"
-          :disabled="isWorkingModel(editingTargetModel.model)"
-          @click="saveOverride(editingTargetModel)"
-        >
-          {{ savingModel === editingTargetModel.model ? t('common.saving') : t('common.save') }}
-        </button>
-      </div>
-    </div>
+    </InlineModal>
   </InlineModal>
 </template>
 
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import BaseModal from '../common/BaseModal.vue'
 import BaseInput from '../common/BaseInput.vue'
 import InlineModal from '../common/InlineModal.vue'
 import type { AutomationCard } from '../../data/cards'
@@ -257,6 +324,14 @@ const selectedVendor = ref<ProviderVendorKey>('all')
 const editingModel = ref('')
 const savingModel = ref('')
 const resettingModel = ref('')
+
+const pricingInteraction = reactive({
+  model: '',
+  startX: 0,
+  startY: 0,
+  dragged: false,
+  pointerId: null as number | null,
+})
 
 const overrideForm = reactive({
   cacheCreateMultiplier: '',
@@ -338,9 +413,10 @@ const filteredModels = computed(() => {
 
 const editingTargetModel = computed(() => models.value.find((item) => item.model === editingModel.value) ?? null)
 
-const overrideModalTitle = computed(() => {
-  if (!editingTargetModel.value?.model) return t('components.main.modelList.adjustCache')
-  return `${t('components.main.modelList.adjustCache')} · ${editingTargetModel.value.model}`
+const detailModalTitle = computed(() => {
+  const baseTitle = t('components.main.modelList.detailTitle')
+  if (!editingTargetModel.value?.model) return baseTitle
+  return `${baseTitle} · ${editingTargetModel.value.model}`
 })
 
 const formatUSD = (value?: number) => {
@@ -455,17 +531,65 @@ const isWorkingModel = (modelName: string) => savingModel.value === modelName ||
 const hasManualCacheOverride = (model: ProviderModelPricingItem) =>
   model.cacheCreateMultiplierSource === 'manual' || model.cacheReadMultiplierSource === 'manual'
 
-const openOverrideEditor = (model: ProviderModelPricingItem) => {
+const openModelDetail = (model: ProviderModelPricingItem) => {
   editingModel.value = model.model
+  if (model.quotaType !== 0) {
+    clearOverrideForm()
+    return
+  }
   overrideForm.cacheCreateMultiplier =
     model.cacheCreateMultiplierSource === 'manual' ? formatEditableMultiplier(resolveCacheCreateMultiplier(model)) : ''
   overrideForm.cacheReadMultiplier =
     model.cacheReadMultiplierSource === 'manual' ? formatEditableMultiplier(resolveCacheReadMultiplier(model)) : ''
 }
 
-const cancelOverrideEditor = () => {
+const closeModelDetail = () => {
   editingModel.value = ''
   clearOverrideForm()
+}
+
+const clearPricingInteraction = () => {
+  pricingInteraction.model = ''
+  pricingInteraction.startX = 0
+  pricingInteraction.startY = 0
+  pricingInteraction.dragged = false
+  pricingInteraction.pointerId = null
+}
+
+const onPricingPointerDown = (event: PointerEvent, modelName: string) => {
+  if (!pricingAvailable.value || !event.isPrimary) return
+  if (event.pointerType === 'mouse' && event.button !== 0) return
+  pricingInteraction.model = modelName
+  pricingInteraction.startX = event.clientX
+  pricingInteraction.startY = event.clientY
+  pricingInteraction.dragged = false
+  pricingInteraction.pointerId = event.pointerId
+}
+
+const onPricingPointerMove = (event: PointerEvent) => {
+  if (pricingInteraction.pointerId !== event.pointerId || pricingInteraction.dragged) return
+  const deltaX = Math.abs(event.clientX - pricingInteraction.startX)
+  const deltaY = Math.abs(event.clientY - pricingInteraction.startY)
+  if (deltaX > 6 || deltaY > 6) {
+    pricingInteraction.dragged = true
+  }
+}
+
+const onPricingPointerEnd = (event: PointerEvent) => {
+  if (pricingInteraction.pointerId !== event.pointerId) return
+  pricingInteraction.pointerId = null
+}
+
+const handleModelClick = (model: ProviderModelPricingItem) => {
+  if (!pricingAvailable.value) return
+  openModelDetail(model)
+}
+
+const handlePricingAreaClick = (event: MouseEvent, model: ProviderModelPricingItem) => {
+  const suppressOpen = pricingInteraction.model === model.model && pricingInteraction.dragged
+  clearPricingInteraction()
+  if (suppressOpen) return
+  handleModelClick(model)
 }
 
 const parseOverrideMultiplier = (raw: string, fieldLabel: string) => {
@@ -553,7 +677,7 @@ const saveOverride = async (model: ProviderModelPricingItem) => {
         ? t('components.main.modelList.toast.resetSuccess')
         : t('components.main.modelList.toast.saveSuccess'),
     )
-    cancelOverrideEditor()
+    closeModelDetail()
     await loadModels()
   } catch (err) {
     showToast(
@@ -572,7 +696,7 @@ const resetOverride = async (model: ProviderModelPricingItem) => {
     await deleteProviderModelPricingOverride(props.provider, model.model)
     showToast(t('components.main.modelList.toast.resetSuccess'))
     if (editingModel.value === model.model) {
-      cancelOverrideEditor()
+      closeModelDetail()
     }
     await loadModels()
   } catch (err) {
@@ -590,7 +714,8 @@ const resetUIState = () => {
   selectedVendor.value = 'all'
   error.value = ''
   response.value = null
-  cancelOverrideEditor()
+  closeModelDetail()
+  clearPricingInteraction()
   savingModel.value = ''
   resettingModel.value = ''
 }
@@ -625,9 +750,25 @@ watch(
 
 .provider-model-item {
   --pricing-scroll-fade: var(--mac-surface-strong);
-  grid-template-columns: minmax(320px, 1.35fr) minmax(0, 1.65fr);
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: start;
   gap: 16px;
+}
+
+.provider-model-item.clickable {
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.provider-model-item.clickable:focus-visible {
+  outline: 2px solid rgba(59, 130, 246, 0.42);
+  outline-offset: 2px;
+  border-color: rgba(59, 130, 246, 0.35);
+}
+
+.provider-model-item.clickable:hover {
+  --pricing-scroll-fade: var(--mac-surface-hover);
+  background: var(--mac-surface-hover);
 }
 
 .provider-model-item .model-name {
@@ -645,50 +786,102 @@ watch(
   border-color: rgba(245, 158, 11, 0.25);
 }
 
-.model-actions {
+.provider-model-item .pricing-inline-container {
+  justify-self: end;
+  width: fit-content;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.provider-model-item .pricing-inline-container::after {
+  display: none;
+}
+
+.provider-model-item .pricing-inline-container .model-pricing {
+  width: fit-content;
+  max-width: 100%;
+  min-width: 0;
+  justify-content: flex-end;
+  overflow-x: auto;
+  padding-right: 0;
+  gap: 10px;
+  cursor: pointer;
+  overscroll-behavior-x: contain;
+}
+
+.provider-model-item .pricing-inline-container .price-block {
+  min-width: 84px;
+}
+
+.provider-model-item .pricing-inline-container .price-block.ratio {
+  min-width: 64px;
+}
+
+.model-detail-modal {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  flex-direction: column;
+  gap: 16px;
 }
 
-.provider-model-item .price-value.cache-create {
-  color: #d97706;
+.detail-hint {
+  margin: 0;
 }
 
-.provider-model-item .price-value.cache-read {
-  color: #0f766e;
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
 }
 
-.provider-model-item .price-note {
+.detail-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(148, 163, 184, 0.08);
+  min-width: 0;
+}
+
+.detail-item--full {
+  grid-column: 1 / -1;
+}
+
+.detail-label {
+  font-size: 0.78rem;
+  line-height: 1.35;
   color: var(--mac-text-secondary);
 }
 
-.provider-model-item .price-note.is-estimated {
-  color: #b45309;
-}
-
-.provider-model-item .price-note.is-manual {
-  color: #0f766e;
-}
-
-.override-editor-modal {
-  display: grid;
-  gap: 14px;
-}
-
-.override-editor-model {
-  margin: 0;
-  font-size: 0.96rem;
-  font-weight: 600;
+.detail-value {
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1.35;
   color: var(--mac-text);
+}
+
+.detail-value--wrap {
   white-space: normal;
   word-break: break-word;
   overflow-wrap: anywhere;
-  line-height: 1.45;
 }
 
-.override-editor-hint {
-  margin: 0;
+.detail-note {
+  font-size: 0.74rem;
+  line-height: 1.35;
+  color: var(--mac-text-secondary);
+}
+
+.detail-divider {
+  height: 1px;
+  background: var(--mac-border);
+}
+
+.detail-section-title {
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: var(--mac-text);
 }
 
 .override-editor-grid {
@@ -728,7 +921,11 @@ watch(
 
 @media (max-width: 720px) {
   .provider-model-item {
-    grid-template-columns: minmax(240px, 1fr) minmax(0, 1.4fr);
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .detail-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .override-editor-grid {
@@ -738,6 +935,10 @@ watch(
 
 @media (max-width: 640px) {
   .provider-model-item {
+    grid-template-columns: 1fr;
+  }
+
+  .detail-grid {
     grid-template-columns: 1fr;
   }
 }
