@@ -748,6 +748,7 @@ func (ls *LogService) heatmapStatsFromHourlyTable(
 			COALESCE(SUM(total_requests), 0) AS total_requests,
 			COALESCE(SUM(input_tokens), 0) AS input_tokens,
 			COALESCE(SUM(output_tokens), 0) AS output_tokens,
+			COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
 			COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens,
 			COALESCE(SUM(total_cost), 0) AS total_cost
 		FROM %s
@@ -776,11 +777,13 @@ func (ls *LogService) heatmapStatsFromHourlyTable(
 			&stat.TotalRequests,
 			&stat.InputTokens,
 			&stat.OutputTokens,
+			&stat.CacheReadTokens,
 			&stat.ReasoningTokens,
 			&stat.TotalCost,
 		); err != nil {
 			return nil, err
 		}
+		populateHeatmapTotalTokens(&stat)
 		bucketStart = strings.TrimSpace(bucketStart)
 		if bucketStart == "" {
 			continue
@@ -810,6 +813,7 @@ func (ls *LogService) heatmapStatsFromRequestLog(
 		xdb.Field(
 			"input_tokens",
 			"output_tokens",
+			"cache_read_tokens",
 			"reasoning_tokens",
 			"total_cost",
 			"created_at",
@@ -839,10 +843,13 @@ func (ls *LogService) heatmapStatsFromRequestLog(
 		bucket.TotalRequests++
 		input := record.GetInt("input_tokens")
 		output := record.GetInt("output_tokens")
+		cacheRead := record.GetInt("cache_read_tokens")
 		reasoning := record.GetInt("reasoning_tokens")
 		bucket.InputTokens += int64(input)
 		bucket.OutputTokens += int64(output)
+		bucket.CacheReadTokens += int64(cacheRead)
 		bucket.ReasoningTokens += int64(reasoning)
+		populateHeatmapTotalTokens(bucket)
 		bucket.TotalCost += record.GetFloat64("total_cost")
 	}
 	if len(hourBuckets) == 0 {
@@ -1555,8 +1562,17 @@ type HeatmapStat struct {
 	TotalRequests   int64   `json:"total_requests"`
 	InputTokens     int64   `json:"input_tokens"`
 	OutputTokens    int64   `json:"output_tokens"`
+	CacheReadTokens int64   `json:"cache_read_tokens"`
 	ReasoningTokens int64   `json:"reasoning_tokens"`
+	TotalTokens     int64   `json:"total_tokens"`
 	TotalCost       float64 `json:"total_cost"`
+}
+
+func populateHeatmapTotalTokens(stat *HeatmapStat) {
+	if stat == nil {
+		return
+	}
+	stat.TotalTokens = stat.InputTokens + stat.OutputTokens + stat.CacheReadTokens
 }
 
 type LogStats struct {

@@ -18,6 +18,7 @@ import {
   DEFAULT_HEATMAP_DISPLAY_SETTINGS,
   normalizeHeatmapDailyIntensityMode,
   normalizeHeatmapDisplaySettings,
+  normalizeHeatmapIntensityMetric,
   type HeatmapDisplaySettings,
 } from '../../data/heatmapDisplaySettings'
 import { fetchCostSince, fetchLogStats } from '../../services/logs'
@@ -69,12 +70,16 @@ const initialHeatmapDisplaySettings = normalizeHeatmapDisplaySettings({
   dailyIntensityMode: normalizeHeatmapDailyIntensityMode(
     getCachedString('heatmapDailyIntensityMode', DEFAULT_HEATMAP_DISPLAY_SETTINGS.dailyIntensityMode),
   ),
+  intensityMetric: normalizeHeatmapIntensityMetric(
+    getCachedString('heatmapIntensityMetric', DEFAULT_HEATMAP_DISPLAY_SETTINGS.intensityMetric),
+  ),
   intensityStopL1: getCachedNumber('heatmapIntensityStopL1', DEFAULT_HEATMAP_DISPLAY_SETTINGS.intensityStopL1),
   intensityStopL2: getCachedNumber('heatmapIntensityStopL2', DEFAULT_HEATMAP_DISPLAY_SETTINGS.intensityStopL2),
   intensityStopL3: getCachedNumber('heatmapIntensityStopL3', DEFAULT_HEATMAP_DISPLAY_SETTINGS.intensityStopL3),
 })
 const heatmapDailyScaleFactor = ref(initialHeatmapDisplaySettings.dailyScaleFactor)
 const heatmapDailyIntensityMode = ref(initialHeatmapDisplaySettings.dailyIntensityMode)
+const heatmapIntensityMetric = ref(initialHeatmapDisplaySettings.intensityMetric)
 const heatmapIntensityStopL1 = ref(initialHeatmapDisplaySettings.intensityStopL1)
 const heatmapIntensityStopL2 = ref(initialHeatmapDisplaySettings.intensityStopL2)
 const heatmapIntensityStopL3 = ref(initialHeatmapDisplaySettings.intensityStopL3)
@@ -262,6 +267,7 @@ const syncAppSettingsCache = () => {
   localStorage.setItem('app-settings-heatmapGranularity', heatmapGranularity.value)
   localStorage.setItem('app-settings-heatmapDailyScaleFactor', String(heatmapDailyScaleFactor.value))
   localStorage.setItem('app-settings-heatmapDailyIntensityMode', heatmapDailyIntensityMode.value)
+  localStorage.setItem('app-settings-heatmapIntensityMetric', heatmapIntensityMetric.value)
   localStorage.setItem('app-settings-heatmapIntensityStopL1', String(heatmapIntensityStopL1.value))
   localStorage.setItem('app-settings-heatmapIntensityStopL2', String(heatmapIntensityStopL2.value))
   localStorage.setItem('app-settings-heatmapIntensityStopL3', String(heatmapIntensityStopL3.value))
@@ -437,6 +443,7 @@ const getHeatmapDisplaySettingsFromState = (): HeatmapDisplaySettings =>
   normalizeHeatmapDisplaySettings({
     dailyScaleFactor: heatmapDailyScaleFactor.value,
     dailyIntensityMode: heatmapDailyIntensityMode.value,
+    intensityMetric: heatmapIntensityMetric.value,
     intensityStopL1: heatmapIntensityStopL1.value,
     intensityStopL2: heatmapIntensityStopL2.value,
     intensityStopL3: heatmapIntensityStopL3.value,
@@ -446,10 +453,29 @@ const applyHeatmapDisplaySettingsToState = (settings: Partial<HeatmapDisplaySett
   const normalized = normalizeHeatmapDisplaySettings(settings)
   heatmapDailyScaleFactor.value = normalized.dailyScaleFactor
   heatmapDailyIntensityMode.value = normalized.dailyIntensityMode
+  heatmapIntensityMetric.value = normalized.intensityMetric
   heatmapIntensityStopL1.value = normalized.intensityStopL1
   heatmapIntensityStopL2.value = normalized.intensityStopL2
   heatmapIntensityStopL3.value = normalized.intensityStopL3
 }
+
+const heatmapIntensityMetricLabel = computed(() => {
+  switch (heatmapIntensityMetric.value) {
+    case 'cost':
+      return t('components.general.heatmapDisplay.intensityMetricCost')
+    case 'total_tokens':
+      return t('components.general.heatmapDisplay.intensityMetricTotalTokens')
+    case 'input_tokens':
+      return t('components.general.heatmapDisplay.intensityMetricInputTokens')
+    case 'output_tokens':
+      return t('components.general.heatmapDisplay.intensityMetricOutputTokens')
+    case 'reasoning_tokens':
+      return t('components.general.heatmapDisplay.intensityMetricReasoningTokens')
+    case 'requests':
+    default:
+      return t('components.general.heatmapDisplay.intensityMetricRequests')
+  }
+})
 
 const heatmapDisplayModeLabel = computed(() =>
   heatmapDailyIntensityMode.value === 'daily_peak'
@@ -459,6 +485,7 @@ const heatmapDisplayModeLabel = computed(() =>
 
 const heatmapDisplaySummary = computed(() =>
   t('components.general.heatmapDisplay.summary', {
+    metric: heatmapIntensityMetricLabel.value,
     mode: heatmapDisplayModeLabel.value,
     scale: heatmapDailyScaleFactor.value,
     l1: heatmapIntensityStopL1.value,
@@ -855,6 +882,7 @@ const loadAppSettings = async () => {
     applyHeatmapDisplaySettingsToState({
       dailyScaleFactor: data?.heatmap_daily_scale_factor,
       dailyIntensityMode: data?.heatmap_daily_intensity_mode,
+      intensityMetric: data?.heatmap_intensity_metric,
       intensityStopL1: data?.heatmap_intensity_stop_l1,
       intensityStopL2: data?.heatmap_intensity_stop_l2,
       intensityStopL3: data?.heatmap_intensity_stop_l3,
@@ -991,6 +1019,7 @@ const persistAppSettingsNow = async () => {
     const normalizedHeatmapDisplay = getHeatmapDisplaySettingsFromState()
     heatmapDailyScaleFactor.value = normalizedHeatmapDisplay.dailyScaleFactor
     heatmapDailyIntensityMode.value = normalizedHeatmapDisplay.dailyIntensityMode
+    heatmapIntensityMetric.value = normalizedHeatmapDisplay.intensityMetric
     heatmapIntensityStopL1.value = normalizedHeatmapDisplay.intensityStopL1
     heatmapIntensityStopL2.value = normalizedHeatmapDisplay.intensityStopL2
     heatmapIntensityStopL3.value = normalizedHeatmapDisplay.intensityStopL3
@@ -1042,6 +1071,7 @@ const persistAppSettingsNow = async () => {
       heatmap_granularity: heatmapGranularity.value,
       heatmap_daily_scale_factor: normalizedHeatmapDisplay.dailyScaleFactor,
       heatmap_daily_intensity_mode: normalizedHeatmapDisplay.dailyIntensityMode,
+      heatmap_intensity_metric: normalizedHeatmapDisplay.intensityMetric,
       heatmap_intensity_stop_l1: normalizedHeatmapDisplay.intensityStopL1,
       heatmap_intensity_stop_l2: normalizedHeatmapDisplay.intensityStopL2,
       heatmap_intensity_stop_l3: normalizedHeatmapDisplay.intensityStopL3,
@@ -2227,6 +2257,21 @@ onBeforeUnmount(() => {
                   {{ $t('components.general.heatmapDisplay.dailyIntensityModeDailyPeak') }}
                 </option>
               </select>
+            </label>
+
+            <label class="heatmap-display-field">
+              <span class="heatmap-display-label">{{ $t('components.general.heatmapDisplay.intensityMetric') }}</span>
+              <select v-model="heatmapDisplayDraft.intensityMetric" class="mac-select heatmap-display-input">
+                <option value="requests">{{ $t('components.general.heatmapDisplay.intensityMetricRequests') }}</option>
+                <option value="cost">{{ $t('components.general.heatmapDisplay.intensityMetricCost') }}</option>
+                <option value="total_tokens">{{ $t('components.general.heatmapDisplay.intensityMetricTotalTokens') }}</option>
+                <option value="input_tokens">{{ $t('components.general.heatmapDisplay.intensityMetricInputTokens') }}</option>
+                <option value="output_tokens">{{ $t('components.general.heatmapDisplay.intensityMetricOutputTokens') }}</option>
+                <option value="reasoning_tokens">{{ $t('components.general.heatmapDisplay.intensityMetricReasoningTokens') }}</option>
+              </select>
+              <span class="heatmap-display-note">
+                {{ $t('components.general.heatmapDisplay.intensityMetricHint') }}
+              </span>
             </label>
 
             <label class="heatmap-display-field">

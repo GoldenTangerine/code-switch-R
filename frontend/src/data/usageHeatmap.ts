@@ -3,6 +3,7 @@ import {
 	DEFAULT_HEATMAP_DISPLAY_SETTINGS,
 	normalizeHeatmapDisplaySettings,
 	type HeatmapDisplaySettings,
+	type HeatmapIntensityMetric,
 } from './heatmapDisplaySettings'
 
 export type HeatmapGranularity = 'hourly' | 'daily'
@@ -13,9 +14,12 @@ export type UsageHeatmapDay = {
 	requests: number
 	inputTokens: number
 	outputTokens: number
+	totalTokens: number
 	reasoningTokens: number
 	cost: number
 	intensity: number
+	intensityValue: number
+	intensityPeakValue: number
 }
 
 export type UsageHeatmapWeek = UsageHeatmapDay[]
@@ -30,13 +34,13 @@ const clampDays = (days?: number) => (days && days > 0 ? Math.floor(days) : DEFA
 const normalizeGranularity = (granularity?: HeatmapGranularity): HeatmapGranularity =>
 	granularity === 'daily' ? 'daily' : 'hourly'
 
-const intensityForCount = (
-	count: number,
-	maxCount: number,
+const intensityForValue = (
+	value: number,
+	maxValue: number,
 	displaySettings: HeatmapDisplaySettings,
 ) => {
-	if (count <= 0 || maxCount <= 0) return 0
-	const ratioPercent = (count / maxCount) * 100
+	if (value <= 0 || maxValue <= 0) return 0
+	const ratioPercent = (value / maxValue) * 100
 	if (ratioPercent <= displaySettings.intensityStopL1) return 1
 	if (ratioPercent <= displaySettings.intensityStopL2) return 2
 	if (ratioPercent <= displaySettings.intensityStopL3) return 3
@@ -112,7 +116,9 @@ type StatBucket = {
 	requests: number
 	inputTokens: number
 	outputTokens: number
+	cacheReadTokens: number
 	reasoningTokens: number
+	totalTokens: number
 	cost: number
 }
 
@@ -120,18 +126,81 @@ const emptyBucket = (): StatBucket => ({
 	requests: 0,
 	inputTokens: 0,
 	outputTokens: 0,
+	cacheReadTokens: 0,
 	reasoningTokens: 0,
+	totalTokens: 0,
 	cost: 0,
 })
+
+const totalTokensForStat = (stat: HeatmapStat) => {
+	if (stat?.total_tokens !== undefined && stat?.total_tokens !== null) {
+		const explicitTotal = Number(stat.total_tokens)
+		if (Number.isFinite(explicitTotal)) {
+			return Math.max(0, explicitTotal)
+		}
+	}
+	const inputTokens = Number(stat?.input_tokens) || 0
+	const outputTokens = Number(stat?.output_tokens) || 0
+	const cacheReadTokens = Number(stat?.cache_read_tokens) || 0
+	return inputTokens + outputTokens + cacheReadTokens
+}
+
+const totalTokensForBucket = (bucket: StatBucket) => bucket.totalTokens
+
+const intensityMetricValueForBucket = (
+	bucket: StatBucket,
+	metric: HeatmapIntensityMetric,
+) => {
+	switch (metric) {
+		case 'cost':
+			return bucket.cost
+		case 'total_tokens':
+			return totalTokensForBucket(bucket)
+		case 'input_tokens':
+			return bucket.inputTokens
+		case 'output_tokens':
+			return bucket.outputTokens
+		case 'reasoning_tokens':
+			return bucket.reasoningTokens
+		case 'requests':
+		default:
+			return bucket.requests
+	}
+}
+
+const buildUsageHeatmapDay = (
+	label: string,
+	dateKey: string,
+	bucket: StatBucket,
+	intensityMetric: HeatmapIntensityMetric,
+	maxValue: number,
+	displaySettings: HeatmapDisplaySettings,
+): UsageHeatmapDay => {
+	const intensityValue = intensityMetricValueForBucket(bucket, intensityMetric)
+	return {
+		label,
+		dateKey,
+		requests: bucket.requests,
+		inputTokens: bucket.inputTokens,
+		outputTokens: bucket.outputTokens,
+		totalTokens: bucket.totalTokens,
+		reasoningTokens: bucket.reasoningTokens,
+		cost: bucket.cost,
+		intensity: intensityForValue(intensityValue, maxValue, displaySettings),
+		intensityValue,
+		intensityPeakValue: maxValue,
+	}
+}
 
 const buildHourlyColumns = (
 	days: number,
 	statsMap: Map<string, StatBucket>,
 	startDay: Date,
-	maxCount: number,
+	maxValue: number,
 	displaySettings: HeatmapDisplaySettings,
 ) => {
 	const columns: UsageHeatmapWeek[] = []
+	const intensityMetric = displaySettings.intensityMetric
 	for (let dayIndex = 0; dayIndex < days; dayIndex++) {
 		const dayStart = addDays(startDay, dayIndex)
 		for (let bucketIndex = 0; bucketIndex < BUCKETS_PER_DAY; bucketIndex++) {
@@ -142,16 +211,16 @@ const buildHourlyColumns = (
 				cellTime.setHours(hour, 0, 0, 0)
 				const key = formatHourKey(cellTime)
 				const bucket = statsMap.get(key) ?? emptyBucket()
-				column.push({
-					label: labelForCell(cellTime),
-					dateKey: cellTime.toISOString(),
-					requests: bucket.requests,
-					inputTokens: bucket.inputTokens,
-					outputTokens: bucket.outputTokens,
-					reasoningTokens: bucket.reasoningTokens,
-					cost: bucket.cost,
-					intensity: intensityForCount(bucket.requests, maxCount, displaySettings),
-				})
+				column.push(
+					buildUsageHeatmapDay(
+						labelForCell(cellTime),
+						cellTime.toISOString(),
+						bucket,
+						intensityMetric,
+						maxValue,
+						displaySettings,
+					),
+				)
 			}
 			columns.push(column)
 		}
@@ -163,7 +232,7 @@ const buildDailyColumns = (
 	days: number,
 	dailyStatsMap: Map<string, StatBucket>,
 	startDay: Date,
-	maxCount: number,
+	maxValue: number,
 	displaySettings: HeatmapDisplaySettings,
 ) => {
 	const columns: UsageHeatmapWeek[] = []
@@ -171,6 +240,7 @@ const buildDailyColumns = (
 	const rangeEnd = addDays(rangeStart, days - 1)
 	const firstWeekStart = startOfWeekMonday(rangeStart)
 	const lastWeekStart = startOfWeekMonday(rangeEnd)
+	const intensityMetric = displaySettings.intensityMetric
 
 	for (
 		let weekStart = firstWeekStart;
@@ -183,16 +253,16 @@ const buildDailyColumns = (
 			const inRange = dayStart >= rangeStart && dayStart <= rangeEnd
 			const key = formatDayKey(dayStart)
 			const bucket = inRange ? (dailyStatsMap.get(key) ?? emptyBucket()) : emptyBucket()
-			column.push({
-				label: labelForDay(dayStart),
-				dateKey: dayStart.toISOString(),
-				requests: bucket.requests,
-					inputTokens: bucket.inputTokens,
-					outputTokens: bucket.outputTokens,
-					reasoningTokens: bucket.reasoningTokens,
-					cost: bucket.cost,
-					intensity: intensityForCount(bucket.requests, maxCount, displaySettings),
-				})
+			column.push(
+				buildUsageHeatmapDay(
+					labelForDay(dayStart),
+					dayStart.toISOString(),
+					bucket,
+					intensityMetric,
+					maxValue,
+					displaySettings,
+				),
+			)
 		}
 		columns.push(column)
 	}
@@ -226,11 +296,12 @@ export const buildUsageHeatmapMatrix = (
 	const startDay = addDays(startOfDay(new Date()), -(normalizedDays - 1))
 	const normalizedGranularity = normalizeGranularity(granularity)
 	const normalizedDisplaySettings = normalizeHeatmapDisplaySettings(displaySettings)
+	const intensityMetric = normalizedDisplaySettings.intensityMetric
 	if (normalizedGranularity === 'daily') {
 		const dailyStatsMap = new Map<string, StatBucket>()
-		const hourlyCounts = new Map<string, number>()
-		let maxHourlyCount = 0
-		let maxDailyCount = 0
+		const hourlyMetricValues = new Map<string, number>()
+		let maxHourlyValue = 0
+		let maxDailyValue = 0
 
 		stats.forEach((stat) => {
 			if (!stat) return
@@ -238,16 +309,19 @@ export const buildUsageHeatmapMatrix = (
 				requests: Number(stat.total_requests) || 0,
 				inputTokens: Number(stat.input_tokens) || 0,
 				outputTokens: Number(stat.output_tokens) || 0,
+				cacheReadTokens: Number(stat.cache_read_tokens) || 0,
 				reasoningTokens: Number(stat.reasoning_tokens) || 0,
+				totalTokens: totalTokensForStat(stat),
 				cost: Number(stat.total_cost) || 0,
 			}
 			const hourKey = normalizeStatKey(stat.day)
 			if (!hourKey) return
 
-			const nextHourlyCount = (hourlyCounts.get(hourKey) ?? 0) + update.requests
-			hourlyCounts.set(hourKey, nextHourlyCount)
-			if (nextHourlyCount > maxHourlyCount) {
-				maxHourlyCount = nextHourlyCount
+			const nextHourlyValue =
+				(hourlyMetricValues.get(hourKey) ?? 0) + intensityMetricValueForBucket(update, intensityMetric)
+			hourlyMetricValues.set(hourKey, nextHourlyValue)
+			if (nextHourlyValue > maxHourlyValue) {
+				maxHourlyValue = nextHourlyValue
 			}
 
 			const dayKey = hourKey.slice(0, 10)
@@ -256,23 +330,27 @@ export const buildUsageHeatmapMatrix = (
 				dayBucket.requests += update.requests
 				dayBucket.inputTokens += update.inputTokens
 				dayBucket.outputTokens += update.outputTokens
+				dayBucket.cacheReadTokens += update.cacheReadTokens
 				dayBucket.reasoningTokens += update.reasoningTokens
+				dayBucket.totalTokens += update.totalTokens
 				dayBucket.cost += update.cost
-				if (dayBucket.requests > maxDailyCount) {
-					maxDailyCount = dayBucket.requests
+				const nextDailyValue = intensityMetricValueForBucket(dayBucket, intensityMetric)
+				if (nextDailyValue > maxDailyValue) {
+					maxDailyValue = nextDailyValue
 				}
 			} else {
 				dailyStatsMap.set(dayKey, { ...update })
-				if (update.requests > maxDailyCount) {
-					maxDailyCount = update.requests
+				const nextDailyValue = intensityMetricValueForBucket(update, intensityMetric)
+				if (nextDailyValue > maxDailyValue) {
+					maxDailyValue = nextDailyValue
 				}
 			}
 		})
 
-		const dailyScaleMax = Math.max(maxHourlyCount * normalizedDisplaySettings.dailyScaleFactor, 0)
+		const dailyScaleMax = Math.max(maxHourlyValue * normalizedDisplaySettings.dailyScaleFactor, 0)
 		const intensityMax =
 			normalizedDisplaySettings.dailyIntensityMode === 'daily_peak'
-				? maxDailyCount
+				? maxDailyValue
 				: dailyScaleMax
 		return buildDailyColumns(
 			normalizedDays,
@@ -284,14 +362,16 @@ export const buildUsageHeatmapMatrix = (
 	}
 
 	const hourlyStatsMap = new Map<string, StatBucket>()
-	let maxHourlyCount = 0
+	let maxHourlyValue = 0
 	stats.forEach((stat) => {
 		if (!stat) return
 		const update: StatBucket = {
 			requests: Number(stat.total_requests) || 0,
 			inputTokens: Number(stat.input_tokens) || 0,
 			outputTokens: Number(stat.output_tokens) || 0,
+			cacheReadTokens: Number(stat.cache_read_tokens) || 0,
 			reasoningTokens: Number(stat.reasoning_tokens) || 0,
+			totalTokens: totalTokensForStat(stat),
 			cost: Number(stat.total_cost) || 0,
 		}
 		const hourKey = normalizeStatKey(stat.day)
@@ -302,16 +382,20 @@ export const buildUsageHeatmapMatrix = (
 			hourBucket.requests += update.requests
 			hourBucket.inputTokens += update.inputTokens
 			hourBucket.outputTokens += update.outputTokens
+			hourBucket.cacheReadTokens += update.cacheReadTokens
 			hourBucket.reasoningTokens += update.reasoningTokens
+			hourBucket.totalTokens += update.totalTokens
 			hourBucket.cost += update.cost
-			if (hourBucket.requests > maxHourlyCount) {
-				maxHourlyCount = hourBucket.requests
+			const nextHourlyValue = intensityMetricValueForBucket(hourBucket, intensityMetric)
+			if (nextHourlyValue > maxHourlyValue) {
+				maxHourlyValue = nextHourlyValue
 			}
 			return
 		}
 		hourlyStatsMap.set(hourKey, { ...update })
-		if (update.requests > maxHourlyCount) {
-			maxHourlyCount = update.requests
+		const nextHourlyValue = intensityMetricValueForBucket(update, intensityMetric)
+		if (nextHourlyValue > maxHourlyValue) {
+			maxHourlyValue = nextHourlyValue
 		}
 	})
 
@@ -319,7 +403,7 @@ export const buildUsageHeatmapMatrix = (
 		normalizedDays,
 		hourlyStatsMap,
 		startDay,
-		maxHourlyCount,
+		maxHourlyValue,
 		normalizedDisplaySettings,
 	)
 }

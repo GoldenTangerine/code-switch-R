@@ -1049,7 +1049,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref, onMounted, onUnmounted, watch } from 'vue'
+import { computed, nextTick, reactive, ref, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Listbox, ListboxButton, ListboxOptions, ListboxOption } from '@headlessui/vue'
 import { Browser, Call, Events } from '@wailsio/runtime'
@@ -1083,6 +1083,7 @@ import {
   DEFAULT_HEATMAP_DISPLAY_SETTINGS,
   normalizeHeatmapDisplaySettings,
   type HeatmapDisplaySettings,
+  type HeatmapIntensityMetric,
 } from '../../data/heatmapDisplaySettings'
 import { getUpdateState, restartApp, type UpdateState } from '../../services/update'
 import { getCurrentTheme, setTheme, type ThemeMode } from '../../utils/ThemeManager'
@@ -1363,8 +1364,12 @@ const usageTooltip = reactive({
   requests: 0,
   inputTokens: 0,
   outputTokens: 0,
+  totalTokens: 0,
   reasoningTokens: 0,
   cost: 0,
+  intensity: 0,
+  intensityValue: 0,
+  intensityPeakValue: 0,
 })
 
 const formatMetric = (value: number) => value.toLocaleString()
@@ -1438,35 +1443,156 @@ const formattedTooltipLabel = computed(() => {
   return tooltipDateFormatter.value.format(date)
 })
 
-const formattedTooltipAmount = computed(() =>
-  currencyFormatter.value.format(Math.max(usageTooltip.cost, 0))
+const formatTooltipTokenMetricValue = (value: number) => {
+  const normalized = Math.max(0, Math.round(value || 0))
+  const compact = formatTokenNumber(normalized)
+  if (normalized < 1_000) return compact
+  return `${compact} (${normalized.toLocaleString()})`
+}
+
+const formatTooltipCostMetricValue = (value: number) => {
+  const normalized = Math.max(0, Number(value || 0))
+  if (!Number.isFinite(normalized)) return '$0.00'
+  const maximumFractionDigits =
+    normalized >= 100 ? 2 : normalized >= 1 ? 4 : normalized >= 0.01 ? 4 : 6
+  return new Intl.NumberFormat(locale.value || 'en', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 2,
+    maximumFractionDigits,
+  }).format(normalized)
+}
+
+const formatTooltipPercentValue = (value: number) => {
+  const normalized = Number.isFinite(value) ? Math.min(Math.max(value, 0), 1) : 0
+  const percentValue = normalized * 100
+  const maximumFractionDigits = percentValue > 0 && percentValue < 10 ? 1 : Number.isInteger(percentValue) ? 0 : 1
+  return new Intl.NumberFormat(locale.value || 'en', {
+    style: 'percent',
+    minimumFractionDigits: 0,
+    maximumFractionDigits,
+  }).format(normalized)
+}
+
+const getHeatmapMetricLabel = (metric: HeatmapIntensityMetric) => {
+  switch (metric) {
+    case 'cost':
+      return t('components.general.heatmapDisplay.intensityMetricCost')
+    case 'total_tokens':
+      return t('components.general.heatmapDisplay.intensityMetricTotalTokens')
+    case 'input_tokens':
+      return t('components.general.heatmapDisplay.intensityMetricInputTokens')
+    case 'output_tokens':
+      return t('components.general.heatmapDisplay.intensityMetricOutputTokens')
+    case 'reasoning_tokens':
+      return t('components.general.heatmapDisplay.intensityMetricReasoningTokens')
+    case 'requests':
+    default:
+      return t('components.general.heatmapDisplay.intensityMetricRequests')
+  }
+}
+
+const getUsageTooltipMetricRawValue = (metric: HeatmapIntensityMetric) => {
+  switch (metric) {
+    case 'cost':
+      return usageTooltip.cost
+    case 'total_tokens':
+      return usageTooltip.totalTokens
+    case 'input_tokens':
+      return usageTooltip.inputTokens
+    case 'output_tokens':
+      return usageTooltip.outputTokens
+    case 'reasoning_tokens':
+      return usageTooltip.reasoningTokens
+    case 'requests':
+    default:
+      return usageTooltip.requests
+  }
+}
+
+const formatHeatmapMetricValue = (metric: HeatmapIntensityMetric, value: number) => {
+  switch (metric) {
+    case 'cost':
+      return formatTooltipCostMetricValue(value)
+    case 'total_tokens':
+    case 'input_tokens':
+    case 'output_tokens':
+    case 'reasoning_tokens':
+      return formatTooltipTokenMetricValue(value)
+    case 'requests':
+    default:
+      return formatMetric(Math.max(0, Math.round(value || 0)))
+  }
+}
+
+const heatmapIntensityMetric = computed<HeatmapIntensityMetric>(() => heatmapDisplaySettings.value.intensityMetric)
+
+const heatmapIntensityMetricLabel = computed(() => getHeatmapMetricLabel(heatmapIntensityMetric.value))
+
+const heatmapIntensityMetricValue = computed(() =>
+  formatHeatmapMetricValue(
+    heatmapIntensityMetric.value,
+    getUsageTooltipMetricRawValue(heatmapIntensityMetric.value),
+  )
 )
+
+const heatmapIntensityLevelRatioValue = computed(() => {
+  const normalizedLevel = Math.max(0, Math.round(usageTooltip.intensity || 0))
+  const peakRatio =
+    usageTooltip.intensityPeakValue > 0
+      ? usageTooltip.intensityValue / usageTooltip.intensityPeakValue
+      : 0
+  return t('components.main.heatmap.metrics.brightnessLevelRatioValue', {
+    level: normalizedLevel,
+    ratio: formatTooltipPercentValue(peakRatio),
+  })
+})
 
 const usageTooltipMetrics = computed(() => [
   {
-    key: 'cost',
-    label: t('components.main.heatmap.metrics.cost'),
-    value: formattedTooltipAmount.value,
+    key: 'brightnessMetric',
+    label: t('components.main.heatmap.metrics.brightnessMetric'),
+    value: heatmapIntensityMetricLabel.value,
+  },
+  {
+    key: 'brightnessValue',
+    label: t('components.main.heatmap.metrics.brightnessValue'),
+    value: heatmapIntensityMetricValue.value,
+  },
+  {
+    key: 'brightnessLevelRatio',
+    label: t('components.main.heatmap.metrics.brightnessLevelRatio'),
+    value: heatmapIntensityLevelRatioValue.value,
   },
   {
     key: 'requests',
     label: t('components.main.heatmap.metrics.requests'),
-    value: formatMetric(usageTooltip.requests),
+    value: formatHeatmapMetricValue('requests', usageTooltip.requests),
+  },
+  {
+    key: 'totalTokens',
+    label: t('components.main.heatmap.metrics.totalTokens'),
+    value: formatHeatmapMetricValue('total_tokens', usageTooltip.totalTokens),
   },
   {
     key: 'inputTokens',
     label: t('components.main.heatmap.metrics.inputTokens'),
-    value: formatTokenNumber(usageTooltip.inputTokens),
+    value: formatHeatmapMetricValue('input_tokens', usageTooltip.inputTokens),
   },
   {
     key: 'outputTokens',
     label: t('components.main.heatmap.metrics.outputTokens'),
-    value: formatTokenNumber(usageTooltip.outputTokens),
+    value: formatHeatmapMetricValue('output_tokens', usageTooltip.outputTokens),
   },
   {
     key: 'reasoningTokens',
     label: t('components.main.heatmap.metrics.reasoningTokens'),
-    value: formatTokenNumber(usageTooltip.reasoningTokens),
+    value: formatHeatmapMetricValue('reasoning_tokens', usageTooltip.reasoningTokens),
+  },
+  {
+    key: 'cost',
+    label: t('components.main.heatmap.metrics.cost'),
+    value: formatHeatmapMetricValue('cost', usageTooltip.cost),
   },
 ])
 
@@ -1476,7 +1602,7 @@ const clamp = (value: number, min: number, max: number) => {
 }
 
 const TOOLTIP_DEFAULT_WIDTH = 220
-const TOOLTIP_DEFAULT_HEIGHT = 120
+const TOOLTIP_DEFAULT_HEIGHT = 168
 const TOOLTIP_VERTICAL_OFFSET = 12
 const TOOLTIP_HORIZONTAL_MARGIN = 20
 const TOOLTIP_VERTICAL_MARGIN = 24
@@ -1505,17 +1631,21 @@ const viewportSize = () => {
   }
 }
 
-const showUsageTooltip = (day: UsageHeatmapDay, event: MouseEvent) => {
-  const target = event.currentTarget as HTMLElement | null
-  const cellRect = target?.getBoundingClientRect()
-  if (!cellRect) return
+const applyUsageTooltipMetrics = (day: UsageHeatmapDay) => {
   usageTooltip.label = day.label
   usageTooltip.dateKey = day.dateKey
   usageTooltip.requests = day.requests
   usageTooltip.inputTokens = day.inputTokens
   usageTooltip.outputTokens = day.outputTokens
+  usageTooltip.totalTokens = day.totalTokens
   usageTooltip.reasoningTokens = day.reasoningTokens
   usageTooltip.cost = day.cost
+  usageTooltip.intensity = day.intensity
+  usageTooltip.intensityValue = day.intensityValue
+  usageTooltip.intensityPeakValue = day.intensityPeakValue
+}
+
+const updateUsageTooltipPosition = (cellRect: DOMRect | ReturnType<HTMLElement['getBoundingClientRect']>) => {
   const { width: tooltipWidth, height: tooltipHeight } = getTooltipSize()
   const { width: viewportWidth, height: viewportHeight } = viewportSize()
   const centerX = cellRect.left + cellRect.width / 2
@@ -1534,10 +1664,27 @@ const showUsageTooltip = (day: UsageHeatmapDay, event: MouseEvent) => {
     ? anchorBottom + TOOLTIP_VERTICAL_OFFSET
     : anchorTop - tooltipHeight - TOOLTIP_VERTICAL_OFFSET
   usageTooltip.top = clamp(desiredTop, TOOLTIP_VERTICAL_MARGIN, viewportBottomLimit)
+}
+
+let usageTooltipPositionRequestId = 0
+
+const showUsageTooltip = (day: UsageHeatmapDay, event: MouseEvent) => {
+  const target = event.currentTarget as HTMLElement | null
+  if (!target) return
+
+  const positionRequestId = ++usageTooltipPositionRequestId
+  applyUsageTooltipMetrics(day)
   usageTooltip.visible = true
+  updateUsageTooltipPosition(target.getBoundingClientRect())
+
+  void nextTick(() => {
+    if (!usageTooltip.visible || positionRequestId !== usageTooltipPositionRequestId) return
+    updateUsageTooltipPosition(target.getBoundingClientRect())
+  })
 }
 
 const hideUsageTooltip = () => {
+  usageTooltipPositionRequestId += 1
   usageTooltip.visible = false
 }
 
@@ -1552,6 +1699,7 @@ const loadAppSettings = async () => {
     const nextDisplaySettings = normalizeHeatmapDisplaySettings({
       dailyScaleFactor: data?.heatmap_daily_scale_factor,
       dailyIntensityMode: data?.heatmap_daily_intensity_mode,
+      intensityMetric: data?.heatmap_intensity_metric,
       intensityStopL1: data?.heatmap_intensity_stop_l1,
       intensityStopL2: data?.heatmap_intensity_stop_l2,
       intensityStopL3: data?.heatmap_intensity_stop_l3,

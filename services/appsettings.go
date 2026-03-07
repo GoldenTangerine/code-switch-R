@@ -12,25 +12,32 @@ import (
 )
 
 const (
-	appSettingsDir                = ".code-switch" // 【修复】修正拼写错误（原为 .codex-swtich）
-	appSettingsFile               = "app.json"
-	oldSettingsDir                = ".codex-swtich"               // 旧的错误拼写
-	migrationMarkerFile           = ".migrated-from-codex-swtich" // 迁移标记文件
-	defaultUpdateHistoryKeepCount = 3
-	minUpdateHistoryKeepCount     = 1
-	maxUpdateHistoryKeepCount     = 20
-	heatmapGranularityHourly      = "hourly"
-	heatmapGranularityDaily       = "daily"
-	heatmapDailyModeHourlyScaled  = "hourly_scaled"
-	heatmapDailyModeDailyPeak     = "daily_peak"
-	defaultHeatmapDailyScale      = 24
-	minHeatmapDailyScale          = 1
-	maxHeatmapDailyScale          = 72
-	defaultHeatmapIntensityL1     = 25
-	defaultHeatmapIntensityL2     = 50
-	defaultHeatmapIntensityL3     = 75
-	minHeatmapIntensityStop       = 1
-	maxHeatmapIntensityStop       = 99
+	appSettingsDir                        = ".code-switch" // 【修复】修正拼写错误（原为 .codex-swtich）
+	appSettingsFile                       = "app.json"
+	oldSettingsDir                        = ".codex-swtich"               // 旧的错误拼写
+	migrationMarkerFile                   = ".migrated-from-codex-swtich" // 迁移标记文件
+	defaultUpdateHistoryKeepCount         = 3
+	minUpdateHistoryKeepCount             = 1
+	maxUpdateHistoryKeepCount             = 20
+	heatmapGranularityHourly              = "hourly"
+	heatmapGranularityDaily               = "daily"
+	heatmapDailyModeHourlyScaled          = "hourly_scaled"
+	heatmapDailyModeDailyPeak             = "daily_peak"
+	heatmapIntensityMetricRequests        = "requests"
+	heatmapIntensityMetricCost            = "cost"
+	heatmapIntensityMetricTotalTokens     = "total_tokens"
+	heatmapIntensityMetricInputTokens     = "input_tokens"
+	heatmapIntensityMetricOutputTokens    = "output_tokens"
+	heatmapIntensityMetricReasoningTokens = "reasoning_tokens"
+	defaultHeatmapDailyScale              = 24
+	defaultHeatmapIntensityMetric         = heatmapIntensityMetricRequests
+	minHeatmapDailyScale                  = 1
+	maxHeatmapDailyScale                  = 72
+	defaultHeatmapIntensityL1             = 25
+	defaultHeatmapIntensityL2             = 50
+	defaultHeatmapIntensityL3             = 75
+	minHeatmapIntensityStop               = 1
+	maxHeatmapIntensityStop               = 99
 )
 
 type AppSettings struct {
@@ -38,6 +45,7 @@ type AppSettings struct {
 	HeatmapGranularity         string  `json:"heatmap_granularity"`
 	HeatmapDailyScaleFactor    int     `json:"heatmap_daily_scale_factor"`
 	HeatmapDailyIntensityMode  string  `json:"heatmap_daily_intensity_mode"`
+	HeatmapIntensityMetric     string  `json:"heatmap_intensity_metric"`
 	HeatmapIntensityStopL1     int     `json:"heatmap_intensity_stop_l1"`
 	HeatmapIntensityStopL2     int     `json:"heatmap_intensity_stop_l2"`
 	HeatmapIntensityStopL3     int     `json:"heatmap_intensity_stop_l3"`
@@ -186,6 +194,7 @@ func (as *AppSettingsService) defaultSettings() AppSettings {
 		HeatmapGranularity:         heatmapGranularityHourly,
 		HeatmapDailyScaleFactor:    defaultHeatmapDailyScale,
 		HeatmapDailyIntensityMode:  heatmapDailyModeHourlyScaled,
+		HeatmapIntensityMetric:     defaultHeatmapIntensityMetric,
 		HeatmapIntensityStopL1:     defaultHeatmapIntensityL1,
 		HeatmapIntensityStopL2:     defaultHeatmapIntensityL2,
 		HeatmapIntensityStopL3:     defaultHeatmapIntensityL3,
@@ -319,6 +328,23 @@ func normalizeHeatmapDailyIntensityMode(value string) string {
 	}
 }
 
+func normalizeHeatmapIntensityMetric(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case heatmapIntensityMetricCost:
+		return heatmapIntensityMetricCost
+	case heatmapIntensityMetricTotalTokens:
+		return heatmapIntensityMetricTotalTokens
+	case heatmapIntensityMetricInputTokens:
+		return heatmapIntensityMetricInputTokens
+	case heatmapIntensityMetricOutputTokens:
+		return heatmapIntensityMetricOutputTokens
+	case heatmapIntensityMetricReasoningTokens:
+		return heatmapIntensityMetricReasoningTokens
+	default:
+		return heatmapIntensityMetricRequests
+	}
+}
+
 func clampHeatmapInt(value int, min int, max int, fallback int) int {
 	if value == 0 {
 		return fallback
@@ -343,6 +369,7 @@ func normalizeHeatmapDisplaySettings(settings *AppSettings) {
 		defaultHeatmapDailyScale,
 	)
 	settings.HeatmapDailyIntensityMode = normalizeHeatmapDailyIntensityMode(settings.HeatmapDailyIntensityMode)
+	settings.HeatmapIntensityMetric = normalizeHeatmapIntensityMetric(settings.HeatmapIntensityMetric)
 
 	l1 := clampHeatmapInt(
 		settings.HeatmapIntensityStopL1,

@@ -1,3 +1,25 @@
+# Code Switch v2.6.98
+
+## 新功能
+- **热力墙亮度指标可切换**：在「设置 > 应用设置」新增热力墙亮度参考指标，支持按 `请求次数 / 金额 / 总 Token / 输入 Token / 输出 Token / 推理 Token` 驱动首页热力墙亮度变化。
+- **热力墙 Tooltip 可解释性增强**：首页热力墙 Tooltip 新增“亮度参考 / 当前亮度值 / 当前亮度等级 / 占峰值比例”，并补充 `Total Tokens` 展示，切换指标后能直接看清颜色依据。
+
+## 修复
+- **热力墙亮度计算口径统一**：修复热力墙切换到 `cost / total_tokens / input_tokens / output_tokens / reasoning_tokens` 后仍可能沿用请求数思路理解颜色深浅的问题；按小时与按天模式现统一基于当前亮度指标做归一化。
+- **总 Token 聚合口径修复**：热力统计补充 `cache_read_tokens` 聚合并输出 `total_tokens`，前端优先使用后端透出的 `total_tokens`，缺失时再回退 `input + output + cache_read`，不再把 `reasoning_tokens` 混进总量。
+- **Tooltip 首次定位边界修复**：修复热力墙 Tooltip 在内容增多后首次悬浮可能贴边或上下位置不准的问题，改为渲染后按真实尺寸二次定位。
+
+## 体验优化
+- **热力墙显示配置摘要更清晰**：设置页热力墙显示配置摘要新增当前亮度参考指标展示，双语文案与本地缓存同步补齐。
+- **亮度数值展示更直观**：Tooltip 中的金额指标支持更细粒度的小额 USD 精度展示，Token 指标在较大数值时同时展示 compact 值与精确值，阅读更顺手。
+
+## 技术改进
+- 前后端 `AppSettings` 新增 `heatmap_intensity_metric` 配置项，并完成归一化、持久化与首页初始化联动，避免“设置存了但首页没吃到”的状态分叉。
+- 热力墙矩阵单元格新增 `totalTokens / intensityValue / intensityPeakValue` 透传字段，前端 Tooltip 与真实着色逻辑复用同一套数据来源。
+- 新增前后端回归测试，覆盖亮度指标归一化、`total_tokens` 聚合、`cache_read_tokens` 回退与按天峰值基线等关键路径。
+
+---
+
 # Code Switch v2.6.97
 
 ## 修复

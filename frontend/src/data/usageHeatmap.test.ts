@@ -3,13 +3,19 @@ import { buildUsageHeatmapMatrix } from './usageHeatmap'
 import type { HeatmapStat } from '../services/logs'
 import { DEFAULT_HEATMAP_DISPLAY_SETTINGS } from './heatmapDisplaySettings'
 
-const makeStat = (day: string, requests: number): HeatmapStat => ({
+const makeStat = (
+	day: string,
+	requests: number,
+	overrides: Partial<Omit<HeatmapStat, 'day' | 'total_requests'>> = {},
+): HeatmapStat => ({
 	day,
 	total_requests: requests,
 	input_tokens: 0,
 	output_tokens: 0,
+	cache_read_tokens: 0,
 	reasoning_tokens: 0,
 	total_cost: 0,
+	...overrides,
 })
 
 const withTimezone = (timezone: string, run: () => void) => {
@@ -136,8 +142,12 @@ describe('usageHeatmap', () => {
 		const jan2DailyPeak = dailyPeak.flat().find((cell) => cell.label === '01-02')
 		expect(jan2Scaled?.requests).toBe(100)
 		expect(jan2Scaled?.intensity).toBe(2)
+		expect(jan2Scaled?.intensityValue).toBe(100)
+		expect(jan2Scaled?.intensityPeakValue).toBe(240)
 		expect(jan2DailyPeak?.requests).toBe(100)
 		expect(jan2DailyPeak?.intensity).toBe(4)
+		expect(jan2DailyPeak?.intensityValue).toBe(100)
+		expect(jan2DailyPeak?.intensityPeakValue).toBe(100)
 	})
 
 	it('applies custom intensity stops for hourly granularity', () => {
@@ -169,5 +179,145 @@ describe('usageHeatmap', () => {
 		expect(hour01Default?.intensity).toBe(2)
 		expect(hour01Custom?.intensity).toBe(1)
 		expect(hour00Custom?.intensity).toBe(4)
+	})
+
+	it('uses total tokens as intensity metric when configured', () => {
+		vi.useFakeTimers()
+		vi.setSystemTime(new Date(2026, 0, 3, 12, 0, 0))
+
+		const stats: HeatmapStat[] = [
+			makeStat('2026-01-03 00', 100, {
+				input_tokens: 5,
+				output_tokens: 5,
+				cache_read_tokens: 0,
+				reasoning_tokens: 90,
+				total_tokens: 10,
+			}),
+			makeStat('2026-01-03 01', 1, {
+				input_tokens: 30,
+				output_tokens: 30,
+				cache_read_tokens: 10,
+				reasoning_tokens: 0,
+				total_tokens: 70,
+			}),
+		]
+
+		const matrix = buildUsageHeatmapMatrix(
+			stats,
+			1,
+			'hourly',
+			{
+				...DEFAULT_HEATMAP_DISPLAY_SETTINGS,
+				intensityMetric: 'total_tokens',
+			},
+		)
+
+		const hour00 = matrix.flat().find((cell) => cell.label === '01-03 00')
+		const hour01 = matrix.flat().find((cell) => cell.label === '01-03 01')
+
+		expect(hour00?.requests).toBe(100)
+		expect(hour00?.intensity).toBe(1)
+		expect(hour00?.intensityValue).toBe(10)
+		expect(hour00?.intensityPeakValue).toBe(70)
+		expect(hour01?.requests).toBe(1)
+		expect(hour01?.intensity).toBe(4)
+		expect(hour01?.intensityValue).toBe(70)
+		expect(hour01?.intensityPeakValue).toBe(70)
+	})
+
+	it('falls back to input + output + cache read when total tokens field is absent', () => {
+		vi.useFakeTimers()
+		vi.setSystemTime(new Date(2026, 0, 3, 12, 0, 0))
+
+		const stats: HeatmapStat[] = [
+			makeStat('2026-01-03 00', 5, {
+				input_tokens: 5,
+				output_tokens: 5,
+				cache_read_tokens: 0,
+				reasoning_tokens: 100,
+				total_tokens: undefined,
+			}),
+			makeStat('2026-01-03 01', 5, {
+				input_tokens: 20,
+				output_tokens: 20,
+				cache_read_tokens: 10,
+				reasoning_tokens: 0,
+				total_tokens: undefined,
+			}),
+		]
+
+		const matrix = buildUsageHeatmapMatrix(
+			stats,
+			1,
+			'hourly',
+			{
+				...DEFAULT_HEATMAP_DISPLAY_SETTINGS,
+				intensityMetric: 'total_tokens',
+			},
+		)
+
+		const hour00 = matrix.flat().find((cell) => cell.label === '01-03 00')
+		const hour01 = matrix.flat().find((cell) => cell.label === '01-03 01')
+
+		expect(hour00?.intensity).toBe(1)
+		expect(hour01?.intensity).toBe(4)
+	})
+
+
+	it('tracks scaled peak values for daily cost intensity mode', () => {
+		vi.useFakeTimers()
+		vi.setSystemTime(new Date(2026, 0, 3, 12, 0, 0))
+
+		const stats: HeatmapStat[] = [
+			makeStat('2026-01-01 10', 1, { total_cost: 1 }),
+		]
+		for (let hour = 0; hour < 24; hour++) {
+			stats.push(makeStat(`2026-01-02 ${String(hour).padStart(2, '0')}`, 1, { total_cost: 1 }))
+		}
+
+		const matrix = buildUsageHeatmapMatrix(
+			stats,
+			3,
+			'daily',
+			{
+				...DEFAULT_HEATMAP_DISPLAY_SETTINGS,
+				intensityMetric: 'cost',
+			},
+		)
+		const dailyCells = matrix.flat()
+		const jan2 = dailyCells.find((cell) => cell.label === '01-02')
+
+		expect(jan2?.cost).toBe(24)
+		expect(jan2?.intensityValue).toBe(24)
+		expect(jan2?.intensityPeakValue).toBe(24)
+	})
+	it('uses cost as scaled baseline metric for daily granularity', () => {
+		vi.useFakeTimers()
+		vi.setSystemTime(new Date(2026, 0, 3, 12, 0, 0))
+
+		const stats: HeatmapStat[] = [
+			makeStat('2026-01-01 10', 1, { total_cost: 1 }),
+		]
+		for (let hour = 0; hour < 24; hour++) {
+			stats.push(makeStat(`2026-01-02 ${String(hour).padStart(2, '0')}`, 1, { total_cost: 1 }))
+		}
+
+		const matrix = buildUsageHeatmapMatrix(
+			stats,
+			3,
+			'daily',
+			{
+				...DEFAULT_HEATMAP_DISPLAY_SETTINGS,
+				intensityMetric: 'cost',
+			},
+		)
+		const dailyCells = matrix.flat()
+		const jan1 = dailyCells.find((cell) => cell.label === '01-01')
+		const jan2 = dailyCells.find((cell) => cell.label === '01-02')
+
+		expect(jan1?.cost).toBe(1)
+		expect(jan1?.intensity).toBe(1)
+		expect(jan2?.cost).toBe(24)
+		expect(jan2?.intensity).toBe(4)
 	})
 })

@@ -15,6 +15,7 @@ export type AppSettings = {
   heatmap_granularity: HeatmapGranularity
   heatmap_daily_scale_factor: number
   heatmap_daily_intensity_mode: 'hourly_scaled' | 'daily_peak'
+  heatmap_intensity_metric: 'requests' | 'cost' | 'total_tokens' | 'input_tokens' | 'output_tokens' | 'reasoning_tokens'
   heatmap_intensity_stop_l1: number
   heatmap_intensity_stop_l2: number
   heatmap_intensity_stop_l3: number
@@ -54,6 +55,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   heatmap_granularity: 'hourly',
   heatmap_daily_scale_factor: DEFAULT_HEATMAP_DISPLAY_SETTINGS.dailyScaleFactor,
   heatmap_daily_intensity_mode: DEFAULT_HEATMAP_DISPLAY_SETTINGS.dailyIntensityMode,
+  heatmap_intensity_metric: DEFAULT_HEATMAP_DISPLAY_SETTINGS.intensityMetric,
   heatmap_intensity_stop_l1: DEFAULT_HEATMAP_DISPLAY_SETTINGS.intensityStopL1,
   heatmap_intensity_stop_l2: DEFAULT_HEATMAP_DISPLAY_SETTINGS.intensityStopL2,
   heatmap_intensity_stop_l3: DEFAULT_HEATMAP_DISPLAY_SETTINGS.intensityStopL3,
@@ -93,6 +95,7 @@ export const fetchAppSettings = async (): Promise<AppSettings> => {
   const normalizedHeatmapDisplay = normalizeHeatmapDisplaySettings({
     dailyScaleFactor: data?.heatmap_daily_scale_factor,
     dailyIntensityMode: data?.heatmap_daily_intensity_mode,
+    intensityMetric: data?.heatmap_intensity_metric,
     intensityStopL1: data?.heatmap_intensity_stop_l1,
     intensityStopL2: data?.heatmap_intensity_stop_l2,
     intensityStopL3: data?.heatmap_intensity_stop_l3,
@@ -103,6 +106,7 @@ export const fetchAppSettings = async (): Promise<AppSettings> => {
     heatmap_granularity: normalizeHeatmapGranularity(data?.heatmap_granularity),
     heatmap_daily_scale_factor: normalizedHeatmapDisplay.dailyScaleFactor,
     heatmap_daily_intensity_mode: normalizedHeatmapDisplay.dailyIntensityMode,
+    heatmap_intensity_metric: normalizedHeatmapDisplay.intensityMetric,
     heatmap_intensity_stop_l1: normalizedHeatmapDisplay.intensityStopL1,
     heatmap_intensity_stop_l2: normalizedHeatmapDisplay.intensityStopL2,
     heatmap_intensity_stop_l3: normalizedHeatmapDisplay.intensityStopL3,

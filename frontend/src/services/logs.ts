@@ -245,7 +245,9 @@ export type HeatmapStat = {
   total_requests: number
   input_tokens: number
   output_tokens: number
+  cache_read_tokens?: number
   reasoning_tokens: number
+  total_tokens?: number
   total_cost: number
 }
 

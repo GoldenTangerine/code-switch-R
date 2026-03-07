@@ -24,9 +24,9 @@ func TestHeatmapStats_AggregatesFromHourlyStatsTable(t *testing.T) {
 	nowBucket := nowHour.Format(timeLayout)
 	prevBucket := nowHour.Add(-time.Hour).Format(timeLayout)
 
-	insertHeatmapStatsBucketRow(t, db, nowBucket, "pid-a", 3, 30, 40, 5, 1.5)
-	insertHeatmapStatsBucketRow(t, db, nowBucket, "pid-b", 2, 12, 18, 2, 0.5)
-	insertHeatmapStatsBucketRow(t, db, prevBucket, "pid-c", 7, 70, 80, 9, 2.0)
+	insertHeatmapStatsBucketRow(t, db, nowBucket, "pid-a", 3, 30, 40, 6, 5, 1.5)
+	insertHeatmapStatsBucketRow(t, db, nowBucket, "pid-b", 2, 12, 18, 4, 2, 0.5)
+	insertHeatmapStatsBucketRow(t, db, prevBucket, "pid-c", 7, 70, 80, 11, 9, 2.0)
 
 	ls := NewLogService(nil)
 	stats, err := ls.HeatmapStats(1)
@@ -54,6 +54,12 @@ func TestHeatmapStats_AggregatesFromHourlyStatsTable(t *testing.T) {
 	if current.ReasoningTokens != 7 {
 		t.Fatalf("期望当前小时 reasoning_tokens 为 7，实际 %d", current.ReasoningTokens)
 	}
+	if current.CacheReadTokens != 10 {
+		t.Fatalf("期望当前小时 cache_read_tokens 为 10，实际 %d", current.CacheReadTokens)
+	}
+	if current.TotalTokens != 110 {
+		t.Fatalf("期望当前小时 total_tokens 为 110，实际 %d", current.TotalTokens)
+	}
 	if !almostEqualFloat(current.TotalCost, 2.0) {
 		t.Fatalf("期望当前小时 total_cost 为 2.0，实际 %f", current.TotalCost)
 	}
@@ -79,7 +85,7 @@ func TestHeatmapStats_FallsBackToRequestLogWhenHourlyStatsTableMissing(t *testin
 	}
 
 	createdAtUTC := time.Now().UTC().Format(timeLayout)
-	insertRequestLogForHeatmap(t, db, createdAtUTC, 13, 21, 3, 0.9)
+	insertRequestLogForHeatmap(t, db, createdAtUTC, 13, 21, 11, 3, 0.9)
 
 	parsedUTC, parseErr := time.Parse(timeLayout, createdAtUTC)
 	if parseErr != nil {
@@ -102,6 +108,12 @@ func TestHeatmapStats_FallsBackToRequestLogWhenHourlyStatsTableMissing(t *testin
 	if target.InputTokens != 13 || target.OutputTokens != 21 || target.ReasoningTokens != 3 {
 		t.Fatalf("fallback token 聚合异常: input=%d output=%d reasoning=%d", target.InputTokens, target.OutputTokens, target.ReasoningTokens)
 	}
+	if target.CacheReadTokens != 11 {
+		t.Fatalf("fallback cache_read_tokens 异常，期望 11，实际 %d", target.CacheReadTokens)
+	}
+	if target.TotalTokens != 45 {
+		t.Fatalf("fallback total_tokens 异常，期望 45，实际 %d", target.TotalTokens)
+	}
 	if !almostEqualFloat(target.TotalCost, 0.9) {
 		t.Fatalf("fallback total_cost 异常，期望 0.9，实际 %f", target.TotalCost)
 	}
@@ -115,6 +127,7 @@ func insertHeatmapStatsBucketRow(
 	requests int64,
 	input int64,
 	output int64,
+	cacheRead int64,
 	reasoning int64,
 	totalCost float64,
 ) {
@@ -147,7 +160,7 @@ func insertHeatmapStatsBucketRow(
 		output,
 		reasoning,
 		int64(0),
-		int64(0),
+		cacheRead,
 		totalCost,
 	)
 	if err != nil {
@@ -161,6 +174,7 @@ func insertRequestLogForHeatmap(
 	createdAt string,
 	inputTokens int,
 	outputTokens int,
+	cacheReadTokens int,
 	reasoningTokens int,
 	totalCost float64,
 ) {
@@ -189,7 +203,7 @@ func insertRequestLogForHeatmap(
 		inputTokens,
 		outputTokens,
 		0,
-		0,
+		cacheReadTokens,
 		reasoningTokens,
 		totalCost,
 		createdAt,
