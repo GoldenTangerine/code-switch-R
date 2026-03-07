@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/daodao97/xgo/xdb"
 )
@@ -30,6 +31,12 @@ type LogStorageStats struct {
 	RequestLog LogTableStorageStat    `json:"request_log"`
 	StatsHour  LogTableStorageStat    `json:"stats_hour"`
 	StatsDay   LogTableStorageStat    `json:"stats_day"`
+}
+
+type DeleteRequestLogsByDateResult struct {
+	DeletedRequestLogs int64 `json:"deleted_request_logs"`
+	DeletedStatsHour   int64 `json:"deleted_stats_hour"`
+	DeletedStatsDay    int64 `json:"deleted_stats_day"`
 }
 
 func (ls *LogService) GetLogStorageStats() (LogStorageStats, error) {
@@ -83,16 +90,22 @@ func (ls *LogService) ClearRequestLogs() error {
 	if err != nil {
 		return err
 	}
+	triggersCleaned := false
+	defer func() {
+		if !triggersCleaned {
+			return
+		}
+		if err := ensureRequestLogStatsTriggersWithDB(db); err != nil {
+			fmt.Printf("[WARN] ensureRequestLogStatsTriggersWithDB failed after clearing request_log: %v\n", err)
+		}
+	}()
 	// 防止历史遗留的 request_log DELETE 触发器误伤统计表
 	if err := cleanupRequestLogStatsTriggersWithDB(db); err != nil {
 		return err
 	}
+	triggersCleaned = true
 	if _, err := db.Exec("DELETE FROM request_log"); err != nil {
 		return err
-	}
-	// 确保统计触发器仍然存在（有些环境可能被用户手动删过）
-	if err := ensureRequestLogStatsTriggersWithDB(db); err != nil {
-		fmt.Printf("[WARN] ensureRequestLogStatsTriggersWithDB failed after clearing request_log: %v\n", err)
 	}
 	_, _ = db.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
 	return nil
@@ -111,6 +124,166 @@ func (ls *LogService) ClearLogStats() error {
 	}
 	_, _ = db.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
 	return nil
+}
+
+func (ls *LogService) RequestLogDailyHeatmapStats(days int) ([]HeatmapStat, error) {
+	if days <= 0 {
+		days = 365
+	}
+	startDay := startOfDay(time.Now()).AddDate(0, 0, -(days - 1))
+	endDay := startOfDay(time.Now()).AddDate(0, 0, 1)
+
+	db, err := xdb.DB("default")
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := db.Query(`
+		SELECT
+			strftime('%Y-%m-%d', datetime(created_at, 'localtime')) AS day,
+			COUNT(*) AS total_requests
+		FROM request_log
+		WHERE created_at >= ? AND created_at < ?
+		GROUP BY day
+		ORDER BY day DESC
+	`, startDay.UTC().Format(timeLayout), endDay.UTC().Format(timeLayout))
+	if err != nil {
+		if isNoSuchTableErr(err) {
+			return []HeatmapStat{}, nil
+		}
+		return nil, err
+	}
+	defer rows.Close()
+
+	stats := make([]HeatmapStat, 0, days)
+	for rows.Next() {
+		stat := HeatmapStat{}
+		if err := rows.Scan(&stat.Day, &stat.TotalRequests); err != nil {
+			return nil, err
+		}
+		stats = append(stats, stat)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return stats, nil
+}
+
+func (ls *LogService) DeleteRequestLogsByDate(day string) (DeleteRequestLogsByDateResult, error) {
+	result := DeleteRequestLogsByDateResult{}
+	dayStart, err := parseLogStorageDay(day)
+	if err != nil {
+		return result, err
+	}
+	dayEnd := dayStart.AddDate(0, 0, 1)
+
+	db, err := xdb.DB("default")
+	if err != nil {
+		return result, err
+	}
+	triggersCleaned := false
+	defer func() {
+		if !triggersCleaned {
+			return
+		}
+		if err := ensureRequestLogStatsTriggersWithDB(db); err != nil {
+			fmt.Printf("[WARN] ensureRequestLogStatsTriggersWithDB failed after deleting request_log by date: %v\n", err)
+		}
+	}()
+	if err := cleanupRequestLogStatsTriggersWithDB(db); err != nil {
+		return result, err
+	}
+	triggersCleaned = true
+
+	tx, err := db.Begin()
+	if err != nil {
+		return result, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	requestLogExec, err := tx.Exec(
+		"DELETE FROM request_log WHERE created_at >= ? AND created_at < ?",
+		dayStart.UTC().Format(timeLayout),
+		dayEnd.UTC().Format(timeLayout),
+	)
+	if err != nil {
+		return result, err
+	}
+	result.DeletedRequestLogs = rowsAffected(requestLogExec)
+
+	dayStartKey := dayStart.Format(timeLayout)
+	dayEndKey := dayEnd.Format(timeLayout)
+	deletedHourly, err := deleteRequestLogStatsRangeTx(tx, requestLogStatsHourlyTable, dayStartKey, dayEndKey)
+	if err != nil {
+		return result, err
+	}
+	result.DeletedStatsHour = deletedHourly
+
+	deletedDaily, err := deleteRequestLogStatsRangeTx(tx, requestLogStatsDailyTable, dayStartKey, dayEndKey)
+	if err != nil {
+		return result, err
+	}
+	result.DeletedStatsDay = deletedDaily
+
+	if err := tx.Commit(); err != nil {
+		return result, err
+	}
+	committed = true
+
+	_, _ = db.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
+	return result, nil
+}
+
+func parseLogStorageDay(value string) (time.Time, error) {
+	raw := strings.TrimSpace(value)
+	if raw == "" {
+		return time.Time{}, fmt.Errorf("invalid date")
+	}
+	if len(raw) > len("2006-01-02") {
+		raw = raw[:len("2006-01-02")]
+	}
+	parsed, err := time.ParseInLocation("2006-01-02", raw, time.Local)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("invalid date: %s", value)
+	}
+	return startOfDay(parsed), nil
+}
+
+func deleteRequestLogStatsRangeTx(tx *sql.Tx, table string, startKey string, endKey string) (int64, error) {
+	if tx == nil {
+		return 0, fmt.Errorf("nil tx")
+	}
+	if strings.TrimSpace(table) == "" {
+		return 0, fmt.Errorf("empty table")
+	}
+	execResult, err := tx.Exec(
+		fmt.Sprintf("DELETE FROM %s WHERE bucket_start >= ? AND bucket_start < ?", table),
+		startKey,
+		endKey,
+	)
+	if err != nil && !isNoSuchTableErr(err) {
+		return 0, err
+	}
+	if err != nil {
+		return 0, nil
+	}
+	return rowsAffected(execResult), nil
+}
+
+func rowsAffected(result sql.Result) int64 {
+	if result == nil {
+		return 0
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return 0
+	}
+	return count
 }
 
 func resolveSQLiteMainDBFile(db *sql.DB) (string, error) {

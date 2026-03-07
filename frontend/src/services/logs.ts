@@ -167,6 +167,17 @@ export const clearRequestLogs = async (): Promise<void> => {
   await Call.ByName('codeswitch/services.LogService.ClearRequestLogs')
 }
 
+export type DeleteRequestLogsByDateResult = {
+  deleted_request_logs: number
+  deleted_stats_hour: number
+  deleted_stats_day: number
+}
+
+export const deleteRequestLogsByDate = async (date: string): Promise<DeleteRequestLogsByDateResult> => {
+  const normalized = String(date ?? '').trim()
+  return Call.ByName('codeswitch/services.LogService.DeleteRequestLogsByDate', normalized)
+}
+
 export const clearLogStats = async (): Promise<void> => {
   await Call.ByName('codeswitch/services.LogService.ClearLogStats')
 }
@@ -254,4 +265,9 @@ export type HeatmapStat = {
 export const fetchHeatmapStats = async (days: number): Promise<HeatmapStat[]> => {
   const range = Number.isFinite(days) && days > 0 ? Math.floor(days) : 30
   return Call.ByName('codeswitch/services.LogService.HeatmapStats', range)
+}
+
+export const fetchRequestLogDailyHeatmapStats = async (days: number): Promise<HeatmapStat[]> => {
+  const range = Number.isFinite(days) && days > 0 ? Math.floor(days) : 365
+  return Call.ByName('codeswitch/services.LogService.RequestLogDailyHeatmapStats', range)
 }

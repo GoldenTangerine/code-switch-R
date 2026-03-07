@@ -95,6 +95,18 @@ describe('usageHeatmap', () => {
 		expect(matrix[1][0].label).toBe('01-05')
 	})
 
+	it('supports day-only stat keys for daily granularity', () => {
+		vi.useFakeTimers()
+		vi.setSystemTime(new Date(2026, 0, 8, 12, 0, 0))
+
+		const matrix = buildUsageHeatmapMatrix([makeStat('2026-01-07', 5)], 10, 'daily')
+		const targetCell = matrix.flat().find((cell) => cell.requests === 5)
+
+		expect(targetCell?.label).toBe('01-07')
+		expect(targetCell?.requests).toBe(5)
+		expect(targetCell?.intensity).toBe(1)
+	})
+
 	it('keeps weekly grouping correct across DST transition weeks', () => {
 		withTimezone('America/New_York', () => {
 			vi.useFakeTimers()

@@ -724,7 +724,10 @@ func (ls *LogService) HeatmapStats(days int) ([]HeatmapStat, error) {
 
 	stats, err := ls.heatmapStatsFromHourlyTable(rangeStart, rangeEnd, totalHours)
 	if err == nil {
-		return stats, nil
+		if len(stats) > 0 {
+			return stats, nil
+		}
+		return ls.heatmapStatsFromRequestLog(rangeStart, totalHours)
 	}
 	if !isNoSuchTableErr(err) {
 		return nil, err

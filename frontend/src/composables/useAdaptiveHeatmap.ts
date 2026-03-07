@@ -15,7 +15,7 @@ import {
 	heatmapDisplaySettingsSignature,
 	type HeatmapDisplaySettings,
 } from '../data/heatmapDisplaySettings'
-import { fetchHeatmapStats } from '../services/logs'
+import { fetchHeatmapStats, type HeatmapStat } from '../services/logs'
 
 // 格子尺寸配置（与 CSS 媒体查询保持一致）
 const CELL_SIZES = {
@@ -55,6 +55,12 @@ const columnsFromDays = (days: number, granularity: HeatmapGranularity) => {
 	return Math.max(BUCKETS_PER_DAY, normalizedDays * BUCKETS_PER_DAY)
 }
 
+export type HeatmapStatsFetcher = (days: number) => Promise<HeatmapStat[]>
+
+type UseAdaptiveHeatmapOptions = {
+	fetcher?: HeatmapStatsFetcher
+}
+
 /**
  * 自适应热力图 Composable
  * @param containerRef 热力图容器的 ref 引用
@@ -63,7 +69,9 @@ export function useAdaptiveHeatmap(
 	containerRef: Ref<HTMLElement | null>,
 	granularity: Ref<HeatmapGranularity>,
 	displaySettings: Ref<HeatmapDisplaySettings>,
+	options: UseAdaptiveHeatmapOptions = {},
 ) {
+	const heatmapStatsFetcher = options.fetcher ?? fetchHeatmapStats
 	// 响应式状态
 	const containerWidth = ref(0)
 	const visibleColumns = ref(columnsFromDays(defaultDaysByGranularity(granularity.value), granularity.value))
@@ -146,7 +154,7 @@ export function useAdaptiveHeatmap(
 		const requestToken = ++latestRequestToken
 		isLoading.value = true
 		try {
-			const stats = await fetchHeatmapStats(days)
+			const stats = await heatmapStatsFetcher(days)
 			if (requestToken !== latestRequestToken) {
 				return
 			}

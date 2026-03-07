@@ -199,4 +199,22 @@ describe('useAdaptiveHeatmap', () => {
 		const peak = Math.max(...displayData.value.flat().map((cell) => cell.requests))
 		expect(peak).toBe(24)
 	})
+
+	it('supports custom heatmap fetchers', async () => {
+		vi.useFakeTimers()
+		vi.setSystemTime(new Date(2026, 0, 3, 12, 0, 0))
+		const fetcher = vi.fn().mockResolvedValue([makeStat('2026-01-03', 6)])
+
+		const containerRef = ref({ clientWidth: 900 } as HTMLElement)
+		const granularity = ref<'hourly' | 'daily'>('daily')
+		const displaySettings = ref({ ...DEFAULT_HEATMAP_DISPLAY_SETTINGS })
+		const { init, displayData } = useAdaptiveHeatmap(containerRef, granularity, displaySettings, { fetcher })
+
+		await init()
+		await flushPromises()
+
+		expect(fetcher).toHaveBeenCalledTimes(1)
+		expect(vi.mocked(fetchHeatmapStats)).not.toHaveBeenCalled()
+		expect(displayData.value.flat().find((cell) => cell.requests === 6)?.label).toBe('01-03')
+	})
 })

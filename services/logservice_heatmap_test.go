@@ -2,6 +2,7 @@ package services
 
 import (
 	"database/sql"
+	"fmt"
 	"testing"
 	"time"
 
@@ -116,6 +117,57 @@ func TestHeatmapStats_FallsBackToRequestLogWhenHourlyStatsTableMissing(t *testin
 	}
 	if !almostEqualFloat(target.TotalCost, 0.9) {
 		t.Fatalf("fallback total_cost 异常，期望 0.9，实际 %f", target.TotalCost)
+	}
+}
+
+func TestHeatmapStats_FallsBackToRequestLogWhenHourlyStatsTableEmpty(t *testing.T) {
+	useIsolatedHomeDir(t)
+
+	if err := InitDatabase(); err != nil {
+		t.Fatalf("初始化数据库失败: %v", err)
+	}
+
+	db, err := xdb.DB("default")
+	if err != nil {
+		t.Fatalf("获取数据库连接失败: %v", err)
+	}
+
+	createdAtUTC := time.Now().UTC().Format(timeLayout)
+	insertRequestLogForHeatmap(t, db, createdAtUTC, 8, 13, 5, 2, 0.4)
+
+	parsedUTC, parseErr := time.Parse(timeLayout, createdAtUTC)
+	if parseErr != nil {
+		t.Fatalf("解析 createdAtUTC 失败: %v", parseErr)
+	}
+	expectedDay := parsedUTC.In(time.Local).Format("2006-01-02 15")
+
+	if _, err := db.Exec(fmt.Sprintf("DELETE FROM %s", requestLogStatsHourlyTable)); err != nil {
+		t.Fatalf("清空 hourly stats table 失败: %v", err)
+	}
+
+	ls := NewLogService(nil)
+	stats, err := ls.HeatmapStats(1)
+	if err != nil {
+		t.Fatalf("HeatmapStats 调用失败: %v", err)
+	}
+	target := findHeatmapStatByDay(stats, expectedDay)
+	if target == nil {
+		t.Fatalf("empty hourly table fallback 未返回预期小时桶: %s", expectedDay)
+	}
+	if target.TotalRequests != 1 {
+		t.Fatalf("期望 empty table fallback 请求数为 1，实际 %d", target.TotalRequests)
+	}
+	if target.InputTokens != 8 || target.OutputTokens != 13 || target.ReasoningTokens != 2 {
+		t.Fatalf("empty table fallback token 聚合异常: input=%d output=%d reasoning=%d", target.InputTokens, target.OutputTokens, target.ReasoningTokens)
+	}
+	if target.CacheReadTokens != 5 {
+		t.Fatalf("empty table fallback cache_read_tokens 异常，期望 5，实际 %d", target.CacheReadTokens)
+	}
+	if target.TotalTokens != 26 {
+		t.Fatalf("empty table fallback total_tokens 异常，期望 26，实际 %d", target.TotalTokens)
+	}
+	if !almostEqualFloat(target.TotalCost, 0.4) {
+		t.Fatalf("empty table fallback total_cost 异常，期望 0.4，实际 %f", target.TotalCost)
 	}
 }
 

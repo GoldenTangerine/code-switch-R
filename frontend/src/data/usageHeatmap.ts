@@ -97,6 +97,11 @@ const labelForDay = (date: Date) => {
 const normalizeStatKey = (value?: string | null) => {
 	const trimmed = value?.trim()
 	if (!trimmed) return null
+	const dayOnlyMatch = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+	if (dayOnlyMatch) {
+		const [, yearStr, monthStr, dayStr] = dayOnlyMatch
+		return `${yearStr}-${monthStr}-${dayStr} 00`
+	}
 	const fullMatch = trimmed.match(/^(\d{4})-(\d{2})-(\d{2}) (\d{2})$/)
 	if (fullMatch) {
 		const [, yearStr, monthStr, dayStr, hourStr] = fullMatch
