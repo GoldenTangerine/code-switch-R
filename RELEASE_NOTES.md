@@ -1,3 +1,15 @@
+# Code Switch v2.7.0
+
+## 修复
+- **Windows 安装包构建恢复**：修复 GitHub Actions 在 Windows 打包阶段依赖 `Chocolatey + nsis.portable` 单一路径时，遇到源超时会直接导致 `makensis.exe` 缺失、安装包构建失败的问题；现在会优先复用现有 `makensis`，并在安装阶段自动切换 `nsis / nsis.install / winget` 多级兜底来源。
+- **NSIS 安装网络抖动容错增强**：为 Windows 发布流程中的 `NSIS` 安装补充重试机制，降低 `Chocolatey` 偶发 `504 Gateway Time-out` 导致整条 release 流水线失败的概率。
+
+## 技术改进
+- **makensis 解析链路增强**：发布流程会在多个常见安装路径与 `Chocolatey` 目录中递归查找 `makensis.exe / .cmd / .bat`，并将解析到的可执行路径显式导出到后续步骤，减少“装上了但 PATH 没吃到”的隐性失败。
+- **Windows 打包兜底顺序优化**：在真正执行 `NSIS` 打包前，再次执行跨源 fallback 校验，优先尝试 `winget`，再补 `nsis.install / nsis.portable / nsis`，将失败定位从“神秘丢失 makensis”收敛为更明确的依赖安装问题。
+
+---
+
 # Code Switch v2.6.99
 
 ## 新功能

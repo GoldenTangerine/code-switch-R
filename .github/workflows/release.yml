@@ -120,15 +120,131 @@ jobs:
       - name: Install NSIS
         shell: pwsh
         run: |
-          choco install nsis -y --no-progress
-          $makensisCmd = Get-Command makensis -ErrorAction SilentlyContinue
-          if ($null -ne $makensisCmd -and (Test-Path $makensisCmd.Source)) {
-            $makensisExe = $makensisCmd.Source
-            Write-Host "makensis discovered after install: $makensisExe"
-            "MAKENSIS_EXE=$makensisExe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-            (Split-Path $makensisExe -Parent) | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          function Resolve-MakeNsis {
+            param(
+              [string]$HintPath = ""
+            )
+
+            $candidatePaths = @(
+              $HintPath
+            )
+
+            $cmd = Get-Command makensis -ErrorAction SilentlyContinue
+            if ($null -ne $cmd -and -not [string]::IsNullOrWhiteSpace($cmd.Source)) {
+              $candidatePaths += $cmd.Source
+            }
+
+            $candidatePaths += @(
+              "C:\Program Files (x86)\NSIS\makensis.exe",
+              "C:\Program Files (x86)\NSIS\Bin\makensis.exe",
+              "C:\Program Files\NSIS\makensis.exe",
+              "C:\Program Files\NSIS\Bin\makensis.exe",
+              "C:\ProgramData\chocolatey\bin\makensis.exe",
+              "C:\ProgramData\chocolatey\bin\makensis.bat",
+              "C:\ProgramData\chocolatey\bin\makensis.cmd",
+              "$env:ChocolateyInstall\bin\makensis.exe",
+              "$env:ChocolateyInstall\bin\makensis.bat",
+              "$env:ChocolateyInstall\bin\makensis.cmd"
+            )
+
+            foreach ($path in ($candidatePaths | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)) {
+              if (Test-Path $path) {
+                return (Resolve-Path $path).Path
+              }
+            }
+
+            $searchRoots = @(
+              "C:\Program Files (x86)\NSIS",
+              "C:\Program Files\NSIS",
+              "C:\ProgramData\chocolatey\bin",
+              "C:\ProgramData\chocolatey\lib\nsis",
+              "C:\ProgramData\chocolatey\lib\nsis.install",
+              "C:\ProgramData\chocolatey\lib\nsis.portable",
+              "$env:ChocolateyInstall"
+            ) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -Unique
+
+            foreach ($root in $searchRoots) {
+              foreach ($pattern in @("makensis.exe", "makensis.cmd", "makensis.bat")) {
+                $found = Get-ChildItem -Path $root -Recurse -Filter $pattern -ErrorAction SilentlyContinue | Select-Object -First 1
+                if ($null -ne $found) {
+                  return $found.FullName
+                }
+              }
+            }
+
+            return $null
+          }
+
+          function Invoke-WithRetry {
+            param(
+              [scriptblock]$Script,
+              [string]$Description,
+              [int]$Attempts = 3,
+              [int]$DelaySeconds = 15
+            )
+
+            for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+              Write-Host "[$attempt/$Attempts] $Description"
+              $global:LASTEXITCODE = 0
+              try {
+                & $Script
+              } catch {
+                Write-Warning "$Description threw an exception: $_"
+              }
+
+              if ($LASTEXITCODE -eq 0) {
+                return $true
+              }
+
+              Write-Warning "$Description failed with exit code $LASTEXITCODE"
+              if ($attempt -lt $Attempts) {
+                Start-Sleep -Seconds $DelaySeconds
+              }
+            }
+
+            return $false
+          }
+
+          function Export-MakeNsis {
+            param(
+              [string]$MakensisPath
+            )
+
+            if ([string]::IsNullOrWhiteSpace($MakensisPath) -or !(Test-Path $MakensisPath)) {
+              return
+            }
+
+            $resolved = (Resolve-Path $MakensisPath).Path
+            Write-Host "makensis discovered: $resolved"
+            "MAKENSIS_EXE=$resolved" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            (Split-Path $resolved -Parent) | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          }
+
+          $makensisExe = Resolve-MakeNsis
+          if ([string]::IsNullOrWhiteSpace($makensisExe)) {
+            Write-Host "Installing NSIS via Chocolatey..."
+            $null = Invoke-WithRetry -Description "choco install nsis" -Script { choco install nsis -y --no-progress }
+            $makensisExe = Resolve-MakeNsis
+          }
+
+          if ([string]::IsNullOrWhiteSpace($makensisExe) -and $null -ne (Get-Command winget -ErrorAction SilentlyContinue)) {
+            Write-Host "Chocolatey install did not expose makensis, trying WinGet fallback..."
+            $null = Invoke-WithRetry -Description "winget install NSIS.NSIS" -Script {
+              winget install --exact --id NSIS.NSIS --silent --accept-package-agreements --accept-source-agreements --disable-interactivity
+            }
+            $makensisExe = Resolve-MakeNsis
+          }
+
+          if ([string]::IsNullOrWhiteSpace($makensisExe)) {
+            Write-Host "Trying Chocolatey fallback package nsis.install..."
+            $null = Invoke-WithRetry -Description "choco install nsis.install" -Script { choco install nsis.install -y --no-progress }
+            $makensisExe = Resolve-MakeNsis
+          }
+
+          if ([string]::IsNullOrWhiteSpace($makensisExe)) {
+            Write-Warning "makensis not discoverable in Install NSIS step, will retry during Create NSIS Installer step."
           } else {
-            Write-Host "makensis not discoverable in Install NSIS step, will resolve in Create NSIS Installer step."
+            Export-MakeNsis -MakensisPath $makensisExe
           }
 
       - name: Update build assets
@@ -220,11 +336,79 @@ jobs:
             $binaryPath = (Resolve-Path "..\..\..\bin\CodeSwitch.exe").Path
             Write-Host "Binary path: $binaryPath"
 
+            function Invoke-WithRetry {
+              param(
+                [scriptblock]$Script,
+                [string]$Description,
+                [int]$Attempts = 2,
+                [int]$DelaySeconds = 20
+              )
+
+              for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+                Write-Host "[$attempt/$Attempts] $Description"
+                $global:LASTEXITCODE = 0
+                try {
+                  & $Script
+                } catch {
+                  Write-Warning "$Description threw an exception: $_"
+                }
+
+                if ($LASTEXITCODE -eq 0) {
+                  return $true
+                }
+
+                Write-Warning "$Description failed with exit code $LASTEXITCODE"
+                if ($attempt -lt $Attempts) {
+                  Start-Sleep -Seconds $DelaySeconds
+                }
+              }
+
+              return $false
+            }
+
+            function Install-NsisFallbacks {
+              $installers = @()
+
+              if ($null -ne (Get-Command winget -ErrorAction SilentlyContinue)) {
+                $installers += @{
+                  Name = "winget install NSIS.NSIS"
+                  Action = {
+                    winget install --exact --id NSIS.NSIS --silent --accept-package-agreements --accept-source-agreements --disable-interactivity
+                  }
+                }
+              }
+
+              $installers += @(
+                @{
+                  Name = "choco install nsis.install"
+                  Action = { choco install nsis.install -y --no-progress }
+                },
+                @{
+                  Name = "choco install nsis.portable"
+                  Action = { choco install nsis.portable -y --no-progress }
+                },
+                @{
+                  Name = "choco install nsis"
+                  Action = { choco install nsis -y --no-progress }
+                }
+              )
+
+              foreach ($installer in $installers) {
+                Write-Host "Trying fallback installer: $($installer.Name)"
+                $null = Invoke-WithRetry -Description $installer.Name -Script $installer.Action
+                $resolved = Resolve-MakeNsis -HintPath $env:MAKENSIS_EXE
+                if (-not [string]::IsNullOrWhiteSpace($resolved) -and (Test-Path $resolved)) {
+                  return $resolved
+                }
+              }
+
+              return $null
+            }
+
             $makensisExe = Resolve-MakeNsis -HintPath $env:MAKENSIS_EXE
             if ([string]::IsNullOrWhiteSpace($makensisExe)) {
-              Write-Host "makensis not found after NSIS install, trying nsis.portable fallback..."
-              choco install nsis.portable -y --no-progress
-              $makensisExe = Resolve-MakeNsis -HintPath $env:MAKENSIS_EXE
+              Write-Warning "makensis not found after NSIS dependency install, trying fallback installers..."
+              $makensisExe = Install-NsisFallbacks
             }
 
             if ([string]::IsNullOrWhiteSpace($makensisExe) -or !(Test-Path $makensisExe)) {
