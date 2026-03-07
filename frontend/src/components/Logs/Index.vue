@@ -528,20 +528,19 @@
                     :key="`storage-week-${weekIndex}`"
                     class="contrib-column"
                   >
-                    <component
-                      :is="day.requests > 0 ? 'button' : 'div'"
+                    <div
                       v-for="(day, dayIndex) in week"
                       :key="`storage-day-${weekIndex}-${dayIndex}`"
                       :class="[
                         'contrib-cell',
-                        'logs-storage-heatmap-cell',
+                        'logs-storage-heatmap-day',
                         intensityClass(day.intensity),
                         {
-                          'logs-storage-heatmap-cell--interactive': day.requests > 0,
-                          'logs-storage-heatmap-cell--selected': isSelectedStorageHeatmapDay(day),
+                          'logs-storage-heatmap-day--interactive': day.requests > 0,
+                          'logs-storage-heatmap-day--selected': isSelectedStorageHeatmapDay(day),
                         },
                       ]"
-                      :type="day.requests > 0 ? 'button' : undefined"
+                      :role="day.requests > 0 ? 'button' : undefined"
                       :aria-hidden="day.requests > 0 ? undefined : true"
                       :aria-label="day.requests > 0 ? formatStorageHeatmapAriaLabel(day) : undefined"
                       :aria-pressed="day.requests > 0 ? isSelectedStorageHeatmapDay(day) : undefined"
@@ -552,6 +551,8 @@
                       @focus="day.requests > 0 ? showStorageHeatmapTooltip(day, $event) : undefined"
                       @blur="day.requests > 0 ? hideStorageHeatmapTooltip() : undefined"
                       @keydown.esc="day.requests > 0 ? hideStorageHeatmapTooltip() : undefined"
+                      @keydown.enter.prevent="day.requests > 0 ? selectStorageHeatmapDay(day) : undefined"
+                      @keydown.space.prevent="day.requests > 0 ? selectStorageHeatmapDay(day) : undefined"
                       @click="day.requests > 0 ? selectStorageHeatmapDay(day) : undefined"
                     />
                   </div>
@@ -4706,14 +4707,13 @@ html.dark .summary-card--clickable:hover {
   border-radius: 999px;
 }
 
-.logs-storage-heatmap-cell {
+.logs-storage-heatmap-day {
   display: block;
   width: 100%;
   min-width: 0;
   margin: 0;
   border: 1px solid rgba(255, 255, 255, 0.04);
   padding: 0;
-  appearance: none;
   cursor: default;
   transition:
     transform 0.14s ease,
@@ -4722,35 +4722,35 @@ html.dark .summary-card--clickable:hover {
     opacity 0.14s ease;
 }
 
-.logs-storage-heatmap-cell:hover {
+.logs-storage-heatmap-day:hover {
   transform: translateY(-1px) scale(1.06);
   box-shadow: 0 0 0 1px rgba(148, 163, 184, 0.22);
 }
 
-.logs-storage-heatmap-cell--interactive {
+.logs-storage-heatmap-day--interactive {
   cursor: pointer;
 }
 
-.logs-storage-heatmap-cell:not(.logs-storage-heatmap-cell--interactive):hover {
+.logs-storage-heatmap-day:not(.logs-storage-heatmap-day--interactive):hover {
   transform: none;
   box-shadow: none;
 }
 
-.logs-storage-heatmap-cell--selected {
+.logs-storage-heatmap-day--selected {
   box-shadow:
     0 0 0 2px rgba(255, 255, 255, 0.9),
     0 0 0 4px rgba(34, 197, 94, 0.36),
     0 0 18px rgba(34, 197, 94, 0.28);
 }
 
-html.dark .logs-storage-heatmap-cell--selected {
+html.dark .logs-storage-heatmap-day--selected {
   box-shadow:
     0 0 0 2px rgba(15, 23, 42, 0.92),
     0 0 0 4px rgba(52, 211, 153, 0.44),
     0 0 18px rgba(16, 185, 129, 0.32);
 }
 
-.logs-storage-heatmap-cell:focus-visible {
+.logs-storage-heatmap-day:focus-visible {
   outline: 2px solid rgba(56, 189, 248, 0.76);
   outline-offset: 2px;
 }
