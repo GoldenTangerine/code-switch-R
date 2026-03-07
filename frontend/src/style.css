@@ -32,6 +32,8 @@
   --contrib-tooltip-divider: rgba(15, 23, 42, 0.08);
   --contrib-tooltip-card-bg: rgba(255, 255, 255, 0.78);
   --contrib-tooltip-card-border: rgba(15, 23, 42, 0.08);
+  --contrib-tooltip-value-chip-bg: rgba(255, 255, 255, 0.92);
+  --contrib-tooltip-value-chip-border: rgba(15, 23, 42, 0.08);
   --contrib-tooltip-tone-neutral: #475569;
   --contrib-tooltip-tone-neutral-bg: rgba(71, 85, 105, 0.08);
   --contrib-tooltip-tone-info: #0284c7;
@@ -75,6 +77,8 @@ html.dark {
   --contrib-tooltip-divider: rgba(255, 255, 255, 0.08);
   --contrib-tooltip-card-bg: rgba(255, 255, 255, 0.04);
   --contrib-tooltip-card-border: rgba(255, 255, 255, 0.08);
+  --contrib-tooltip-value-chip-bg: rgba(15, 23, 42, 0.56);
+  --contrib-tooltip-value-chip-border: rgba(255, 255, 255, 0.1);
   --contrib-tooltip-tone-neutral: #cbd5e1;
   --contrib-tooltip-tone-neutral-bg: rgba(148, 163, 184, 0.14);
   --contrib-tooltip-tone-info: #67e8f9;
@@ -498,10 +502,19 @@ html.dark .mac-sidebar-item:hover {
   pointer-events: none;
   z-index: 10;
   backdrop-filter: blur(18px);
+  opacity: 0;
+  visibility: hidden;
+  will-change: left, top, opacity;
+  transition: opacity 0.14s ease;
 }
 
 .contrib-tooltip.below {
   transform: translateX(-50%);
+}
+
+.contrib-tooltip.is-positioned {
+  opacity: 1;
+  visibility: visible;
 }
 
 .tooltip-heading {
@@ -514,23 +527,31 @@ html.dark .mac-sidebar-item:hover {
 .tooltip-summary-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-  margin-bottom: 12px;
+  gap: 10px;
+  margin-bottom: 14px;
 }
 
 .tooltip-summary-card {
+  --tooltip-summary-value-color: var(--contrib-tooltip-value);
+  --tooltip-summary-value-bg: var(--contrib-tooltip-value-chip-bg);
+  --tooltip-summary-value-border: var(--contrib-tooltip-value-chip-border);
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 10px 11px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 84px;
+  padding: 12px 14px;
   border-radius: 12px;
   border: 1px solid var(--contrib-tooltip-card-border);
   background: var(--contrib-tooltip-card-bg);
+  text-align: center;
 }
 
 .tooltip-summary-card.is-full {
   grid-column: 1 / -1;
+  min-height: 72px;
 }
 
 .tooltip-summary-label {
@@ -538,14 +559,26 @@ html.dark .mac-sidebar-item:hover {
   font-weight: 600;
   line-height: 1.3;
   color: var(--contrib-tooltip-text);
+  text-align: center;
 }
 
 .tooltip-summary-value {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  width: fit-content;
   font-size: 0.88rem;
   font-weight: 700;
   line-height: 1.35;
-  color: var(--contrib-tooltip-value);
+  color: var(--tooltip-summary-value-color);
   font-variant-numeric: tabular-nums;
+  text-align: center;
+  padding: 4px 12px;
+  min-height: 30px;
+  border-radius: 999px;
+  background: var(--tooltip-summary-value-bg);
+  box-shadow: inset 0 0 0 1px var(--tooltip-summary-value-border);
   max-width: 100%;
   white-space: normal;
   overflow-wrap: break-word;
@@ -645,7 +678,10 @@ html.dark .mac-sidebar-item:hover {
 .tooltip-row-value.is-emphasis {
   font-size: 0.88rem;
   font-weight: 700;
-  padding: 3px 8px;
+  justify-content: center;
+  text-align: center;
+  min-height: 30px;
+  padding: 4px 12px;
   border-radius: 999px;
 }
 
@@ -711,70 +747,64 @@ html.dark .mac-sidebar-item:hover {
 
 .tooltip-summary-card.is-neutral {
   background: var(--contrib-tooltip-tone-neutral-bg);
+  --tooltip-summary-value-color: var(--contrib-tooltip-tone-neutral);
+  --tooltip-summary-value-bg: color-mix(in srgb, var(--contrib-tooltip-tone-neutral-bg) 72%, var(--contrib-tooltip-value-chip-bg));
+  --tooltip-summary-value-border: color-mix(in srgb, var(--contrib-tooltip-tone-neutral) 18%, var(--contrib-tooltip-value-chip-border));
 }
 
 .tooltip-summary-card.is-info {
   background: var(--contrib-tooltip-tone-info-bg);
+  --tooltip-summary-value-color: var(--contrib-tooltip-tone-info);
+  --tooltip-summary-value-bg: color-mix(in srgb, var(--contrib-tooltip-tone-info-bg) 72%, var(--contrib-tooltip-value-chip-bg));
+  --tooltip-summary-value-border: color-mix(in srgb, var(--contrib-tooltip-tone-info) 18%, var(--contrib-tooltip-value-chip-border));
 }
 
 .tooltip-summary-card.is-warning {
   background: var(--contrib-tooltip-tone-warning-bg);
+  --tooltip-summary-value-color: var(--contrib-tooltip-tone-warning);
+  --tooltip-summary-value-bg: color-mix(in srgb, var(--contrib-tooltip-tone-warning-bg) 72%, var(--contrib-tooltip-value-chip-bg));
+  --tooltip-summary-value-border: color-mix(in srgb, var(--contrib-tooltip-tone-warning) 18%, var(--contrib-tooltip-value-chip-border));
 }
 
 .tooltip-summary-card.is-success {
   background: var(--contrib-tooltip-tone-success-bg);
+  --tooltip-summary-value-color: var(--contrib-tooltip-tone-success);
+  --tooltip-summary-value-bg: color-mix(in srgb, var(--contrib-tooltip-tone-success-bg) 72%, var(--contrib-tooltip-value-chip-bg));
+  --tooltip-summary-value-border: color-mix(in srgb, var(--contrib-tooltip-tone-success) 18%, var(--contrib-tooltip-value-chip-border));
 }
 
 .tooltip-summary-card.is-violet {
   background: var(--contrib-tooltip-tone-violet-bg);
+  --tooltip-summary-value-color: var(--contrib-tooltip-tone-violet);
+  --tooltip-summary-value-bg: color-mix(in srgb, var(--contrib-tooltip-tone-violet-bg) 72%, var(--contrib-tooltip-value-chip-bg));
+  --tooltip-summary-value-border: color-mix(in srgb, var(--contrib-tooltip-tone-violet) 18%, var(--contrib-tooltip-value-chip-border));
 }
 
 .tooltip-summary-card.is-rose {
   background: var(--contrib-tooltip-tone-rose-bg);
-}
-
-.tooltip-summary-card.is-neutral .tooltip-summary-value {
-  color: var(--contrib-tooltip-tone-neutral);
+  --tooltip-summary-value-color: var(--contrib-tooltip-tone-rose);
+  --tooltip-summary-value-bg: color-mix(in srgb, var(--contrib-tooltip-tone-rose-bg) 72%, var(--contrib-tooltip-value-chip-bg));
+  --tooltip-summary-value-border: color-mix(in srgb, var(--contrib-tooltip-tone-rose) 18%, var(--contrib-tooltip-value-chip-border));
 }
 
 .tooltip-row-value.is-neutral.is-emphasis {
   background: var(--contrib-tooltip-tone-neutral-bg);
 }
 
-.tooltip-summary-card.is-info .tooltip-summary-value {
-  color: var(--contrib-tooltip-tone-info);
-}
-
 .tooltip-row-value.is-info.is-emphasis {
   background: var(--contrib-tooltip-tone-info-bg);
-}
-
-.tooltip-summary-card.is-warning .tooltip-summary-value {
-  color: var(--contrib-tooltip-tone-warning);
 }
 
 .tooltip-row-value.is-warning.is-emphasis {
   background: var(--contrib-tooltip-tone-warning-bg);
 }
 
-.tooltip-summary-card.is-success .tooltip-summary-value {
-  color: var(--contrib-tooltip-tone-success);
-}
-
 .tooltip-row-value.is-success.is-emphasis {
   background: var(--contrib-tooltip-tone-success-bg);
 }
 
-.tooltip-summary-card.is-violet .tooltip-summary-value {
-  color: var(--contrib-tooltip-tone-violet);
-}
-
 .tooltip-row-value.is-violet.is-emphasis {
   background: var(--contrib-tooltip-tone-violet-bg);
-}
-
-.tooltip-summary-card.is-rose .tooltip-summary-value {
-  color: var(--contrib-tooltip-tone-rose);
 }
 
 .tooltip-row-value.is-rose.is-emphasis {
@@ -823,6 +853,48 @@ html.dark .mac-sidebar-item:hover {
 @media (max-width: 640px) {
 	.contrib-wall {
 		padding: 16px;
+	}
+
+	.contrib-tooltip {
+		width: min(320px, calc(100vw - 24px));
+		padding: 12px;
+	}
+
+	.tooltip-summary-grid {
+		grid-template-columns: minmax(0, 1fr);
+		gap: 8px;
+		margin-bottom: 12px;
+	}
+
+	.tooltip-summary-card,
+	.tooltip-summary-card.is-full {
+		min-height: 68px;
+		padding: 10px 12px;
+	}
+
+	.tooltip-sections {
+		gap: 8px;
+	}
+
+	.tooltip-section {
+		padding: 9px 10px;
+	}
+
+	.tooltip-row {
+		grid-template-columns: minmax(0, 1fr);
+		gap: 6px;
+	}
+
+	.tooltip-row-value {
+		justify-self: start;
+		justify-content: flex-start;
+		text-align: left;
+		max-width: 100%;
+	}
+
+	.tooltip-row-value.is-emphasis {
+		min-height: 28px;
+		padding: 4px 10px;
 	}
 
 	.contrib-grid {

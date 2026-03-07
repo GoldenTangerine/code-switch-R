@@ -168,7 +168,7 @@
           v-if="usageTooltip.visible"
           ref="tooltipRef"
           class="contrib-tooltip"
-          :class="usageTooltip.placement"
+          :class="[usageTooltip.placement, { 'is-positioned': usageTooltip.positioned }]"
           :style="{ left: `${usageTooltip.left}px`, top: `${usageTooltip.top}px` }"
           role="tooltip"
         >
@@ -1420,6 +1420,7 @@ type UsageTooltipMetricRowDefinition = {
 
 const usageTooltip = reactive({
   visible: false,
+  positioned: false,
   label: '',
   dateKey: '',
   left: 0,
@@ -1749,7 +1750,7 @@ const clamp = (value: number, min: number, max: number) => {
 }
 
 const TOOLTIP_DEFAULT_WIDTH = 336
-const TOOLTIP_DEFAULT_HEIGHT = 340
+const TOOLTIP_DEFAULT_HEIGHT = 384
 const TOOLTIP_VERTICAL_OFFSET = 12
 const TOOLTIP_HORIZONTAL_MARGIN = 20
 const TOOLTIP_VERTICAL_MARGIN = 24
@@ -1815,23 +1816,40 @@ const updateUsageTooltipPosition = (cellRect: DOMRect | ReturnType<HTMLElement['
 
 let usageTooltipPositionRequestId = 0
 
+const finalizeUsageTooltipPosition = async (
+  cellRect: DOMRect | ReturnType<HTMLElement['getBoundingClientRect']>,
+  positionRequestId: number,
+) => {
+  await nextTick()
+  if (!usageTooltip.visible || positionRequestId !== usageTooltipPositionRequestId) return
+  updateUsageTooltipPosition(cellRect)
+  usageTooltip.positioned = true
+}
+
 const showUsageTooltip = (day: UsageHeatmapDay, event: MouseEvent) => {
   const target = event.currentTarget as HTMLElement | null
   if (!target) return
 
+  const cellRect = target.getBoundingClientRect()
+  const isInitialRender = !usageTooltip.visible
   const positionRequestId = ++usageTooltipPositionRequestId
   applyUsageTooltipMetrics(day)
-  usageTooltip.visible = true
-  updateUsageTooltipPosition(target.getBoundingClientRect())
 
-  void nextTick(() => {
-    if (!usageTooltip.visible || positionRequestId !== usageTooltipPositionRequestId) return
-    updateUsageTooltipPosition(target.getBoundingClientRect())
-  })
+  if (isInitialRender || !usageTooltip.positioned) {
+    usageTooltip.visible = true
+    usageTooltip.positioned = false
+    void finalizeUsageTooltipPosition(cellRect, positionRequestId)
+    return
+  }
+
+  updateUsageTooltipPosition(cellRect)
+  usageTooltip.positioned = true
+  void finalizeUsageTooltipPosition(cellRect, positionRequestId)
 }
 
 const hideUsageTooltip = () => {
   usageTooltipPositionRequestId += 1
+  usageTooltip.positioned = false
   usageTooltip.visible = false
 }
 
