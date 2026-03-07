@@ -1,3 +1,13 @@
+# Code Switch v2.7.8
+
+## 技术改进
+- **日志页完成模块化解耦重构**：完成 `Logs/Index.vue` 拆分收口，页面头部、筛选区、汇总卡片、图表区、表格、分页与 `存储 / 金额 / Token / Payload` 四类弹窗均已独立，后续继续扩展日志页时不再需要在单个超大文件里来回翻锅。
+- **页面根组件瘦身为顶层 orchestrator**：`frontend/src/components/Logs/Index.vue` 已由 `1843` 行收敛到 `508` 行，状态装配与副作用边界更清晰，自动刷新、筛选联动、tooltip、Payload 详情、定价明细与存储弹窗控制器均已沉到独立 `composables`。
+- **样式与结构稳定性补强**：日志页原有样式整体迁移到 `frontend/src/components/Logs/Index.css`，模板结构与 class 命名保持一致，拆分过程中尽量保证界面视觉与交互行为不漂移。
+- **迁移文档与校验同步收口**：`qianyi/logs-index-migration.md` 与 `qianyi/README.md` 已同步标记完成，并补充最终落地结果；前端类型检查 `vue-tsc --noEmit` 已通过，降低后续继续演进时的回归风险。
+
+---
+
 # Code Switch v2.7.6
 
 ## 修复

@@ -1,9 +1,20 @@
 # `Logs/Index.vue` 详细迁移文档
 
 - 源文件：`frontend/src/components/Logs/Index.vue`
-- 当前行数：`5828`
+- 原始行数：`1843`
+- 当前行数：`508`
 - 当前路由：`/logs`
 - 优先级：`P0`
+- 当前状态：`已完成（Index.vue 已收敛为 508 行页面 orchestrator，2026-03-08）`
+
+---
+
+## 0. 当前进度
+
+- [x] `Phase 1`：抽页面区块（已完成，`2026-03-08`）
+- [x] `Phase 2`：抽弹窗（已完成，`2026-03-08`）
+- [x] `Phase 3`：抽状态逻辑（已完成，`2026-03-08`）
+- [x] `Phase 4`：抽纯工具（已完成，`2026-03-08`）
 
 ---
 
@@ -40,6 +51,7 @@
 ```text
 frontend/src/components/Logs/
   Index.vue
+  Index.css
   components/
     LogsHeaderBar.vue
     LogsFilterBar.vue
@@ -53,14 +65,19 @@ frontend/src/components/Logs/
     LogsTokenDetailModal.vue
     LogsPayloadDetailModal.vue
   composables/
-    useLogsPageData.ts
-    useLogsFilters.ts
     useLogsAutoRefresh.ts
+    useLogsChartsPresentation.ts
+    useLogsCostTooltip.ts
+    useLogsDetailModals.ts
+    useLogsFilters.ts
+    useLogsInfoTooltip.ts
+    useLogsPageData.ts
+    useLogsPayloadDetail.ts
+    useLogsPricingDetails.ts
     useLogsStorageHeatmap.ts
-    useLogInfoTooltip.ts
-    useLogCostDetail.ts
-  types.ts
+    useLogsStorageModalController.ts
   constants.ts
+  types.ts
   utils.ts
 ```
 
@@ -102,12 +119,16 @@ frontend/src/components/Logs/
 
 ### 4.4 composable 拆分建议
 
-- `useLogsPageData.ts`：页面数据请求、分页、刷新、初始加载。
-- `useLogsFilters.ts`：筛选状态、日期联动、参数归一化。
+- `useLogsPageData.ts`：页面数据请求、Provider 选项加载、分页与 dashboard 刷新。
+- `useLogsFilters.ts`：筛选状态、日期联动、查询范围归一化与汇总提示。
 - `useLogsAutoRefresh.ts`：倒计时、轮询、手动刷新收口。
-- `useLogsStorageHeatmap.ts`：热力图数据、日期选择、按日明细分页。
-- `useLogInfoTooltip.ts`：模型 / 校验 tooltip 的显隐和位置。
-- `useLogCostDetail.ts`：金额明细拆解、tooltip 数据组装。
+- `useLogsStorageHeatmap.ts`：热力图数据、日期选择、按日明细分页与请求竞态控制。
+- `useLogsStorageModalController.ts`：存储弹窗开关、清理确认、热力图 controller 与 modal formatters / handlers 装配。
+- `useLogsInfoTooltip.ts` / `useLogsCostTooltip.ts`：模型 / 校验 / 金额 tooltip 的显隐、延时、定位与异步补全。
+- `useLogsDetailModals.ts`：汇总卡片点击、金额 / Token 明细弹窗控制。
+- `useLogsPayloadDetail.ts`：Payload 详情加载、复制与请求竞态收口。
+- `useLogsChartsPresentation.ts`：`statsCards`、model share、趋势图配置与 `logsTableFormatters` 装配。
+- `useLogsPricingDetails.ts`：模型定价快照加载、tooltip detail builder 与 price source 细节装配。
 
 ---
 
@@ -115,11 +136,15 @@ frontend/src/components/Logs/
 
 ### Phase 1：抽页面区块
 
+状态：`已完成（2026-03-08）`
+
 - 先抽 `HeaderBar / FilterBar / SummaryCards / ChartsPanel / Table`。
 - 暂时允许顶层 `Index.vue` 继续持有状态，只做模板瘦身。
 - 这一阶段不先碰接口逻辑，先把模板边界拉开。
 
 ### Phase 2：抽弹窗
+
+状态：`已完成（2026-03-08）`
 
 - 把存储、金额、Token、Payload 四类弹窗拆出去。
 - 由根文件通过 `props + emits` 控制显隐和数据传递。
@@ -127,14 +152,34 @@ frontend/src/components/Logs/
 
 ### Phase 3：抽状态逻辑
 
-- 把自动刷新、日期筛选、热力图、tooltip 定位提到 composable。
-- 把复杂 computed 和 watcher 从 `Index.vue` 削掉。
-- 统一处理请求竞态和 loading 状态。
+状态：`已完成（2026-03-08）`
+
+- [x] 新增 `useLogsAutoRefresh.ts`，收口倒计时、轮询、手动刷新。
+- [x] 新增 `useLogsStorageHeatmap.ts`，收口热力图日期选择、按日明细分页、tooltip 定位与请求竞态。
+- [x] 新增 `useLogsInfoTooltip.ts`、`useLogsCostTooltip.ts`，收口表格 tooltip 的显隐、延时、定位与异步补全。
+- [x] 新增 `useLogsFilters.ts`，收口筛选状态、日期联动、查询范围归一化与汇总提示。
+- [x] 新增 `useLogsPageData.ts`，收口页面数据请求、Provider 选项加载、分页与顶层 dashboard 刷新。
 
 ### Phase 4：抽纯工具
 
-- 把金额格式化、时间格式化、模型价格明细构建、热力图 key 计算等搬到 `utils.ts`。
-- 把阈值、tooltip 默认尺寸、分页常量搬到 `constants.ts`。
+状态：`已完成（2026-03-08）`
+
+- [x] 新增 `constants.ts`，收口 `PER_MILLION_TOKENS`、`COST_TOOLTIP_DIFF_EPSILON`、`TOKENS_PER_SECOND_MIN_WINDOW_SEC`。
+- [x] 新增并补齐 `utils.ts`，收口时间、流式、token、currency、pricing、cache create 等纯工具函数。
+- [x] 第二批继续收口 `normalizeModelShareKey`、`buildAlphaColor`、`resolveModelVerifyStatus`、`resolvePriceSource`、`resolveGroupMultiplier`、`mergeCostTooltipNotes` 等低风险纯 helper。
+- [x] 第三批继续收口 `MODEL_SHARE_COLORS`、`buildModelShareRows`、`buildLineAreaGradient`、`formatSeriesLabel`、`resolveChartLegendColor`、`resolveChartTickColor`、`formatNumber`、`intensityClass` 等图表 / model share 纯工具。
+- [x] 第四批继续收口 `buildModelPricingLookup`、`resolvePricingRow` 等定价匹配纯逻辑，缩小 `Index.vue` 的价格索引与匹配职责。
+- [x] 第五批继续收口 `CacheCreateTier`、`buildCacheCreateCostDetails`、`buildTokenRatePriceLines`、`buildObservedCostPriceLines`、`buildProviderApiPerCallPriceLines` 等 cache / cost 纯 helper，并在页面内保留翻译文案薄包装。
+- [x] 第六批继续收口 `buildProviderApiTokenPricingContext`、`buildBuiltinTokenPricingContext` 等 pricing context 纯计算，把 Provider API / builtin tooltip 里的数字归一化与费率推导从页面层剥离。
+- [x] 第七批继续收口 `buildLogsCostTooltipLabels`、`buildProviderApiTokenFormula`、`buildBuiltinTokenFormula` 等 tooltip labels / 公式 builder，把页面内 `t()` 文案装配和公式拼装进一步下沉到 `utils.ts`，`Index.vue` 已压到 `1957` 行。
+- [x] 第八批继续收口 `buildLogsInfoTooltipLabels`、`resolveTooltipModelDisplayValue`、`buildModelInfoTooltipDetailData`、`buildVerifyInfoTooltipDetailData` 等 info tooltip builder，把 model / verify tooltip 的缺省值解析、price source 显示与 rows 装配继续下沉到 `utils.ts`，`Index.vue` 已压到 `1866` 行。
+- [x] 第九批评估后确认 `1000` 行附近这组轻量文案包装虽然单个函数很薄，但它们共同挂在 `logsTableFormatters / storageModalFormatters` 契约面上，适合成组收口为 `buildLogsTableTextFormatters`，因此继续下沉到 `utils.ts`，`Index.vue` 已压到 `1843` 行。
+- [x] `Index.vue` 已切换为从 `constants.ts / utils.ts` 导入，页面内仅保留页面级 orchestrator 与少量高耦合 tooltip 细节装配，避免翻译文本和公式逻辑继续堆在根文件。
+- [x] `useLogsFilters.ts`、`useLogsStorageHeatmap.ts` 已复用公共日期工具，避免重复实现。
+- [x] 最终收口新增 `useLogsDetailModals.ts`、`useLogsPayloadDetail.ts`、`useLogsChartsPresentation.ts`、`useLogsPricingDetails.ts`、`useLogsStorageModalController.ts`，并把根组件样式整体迁到 `Index.css`，模板结构与 class 命名保持不变。
+- [x] `Index.vue` 已由 `1843` 行收敛到 `508` 行，符合“页面壳子 + 顶层 orchestrator”目标。
+- [x] 评估 `statsCards`、`storageModalFormatters`、`logsTableFormatters` 后，确认不再继续做额外工厂化：前两者已分别沉到 presentation / storage controller，`logsTableHandlers` 保留在页面层作为顶层接线，能避免过度抽象造成理解成本反弹。
+- [x] 最终执行 `cd frontend && npx vue-tsc --noEmit` 通过。
 
 ---
 
@@ -179,7 +224,18 @@ frontend/src/components/Logs/
 
 ## 9. 完成定义
 
-- `Index.vue` 控制在 `600` 行左右。
-- 四类弹窗均已独立。
-- 热力图、tooltip、自动刷新逻辑已从根文件迁出。
-- 后续新增日志展示需求时，不需要再改 3 个以上无关区域。
+- [x] `Index.vue` 控制在 `600` 行左右（当前 `508` 行）。
+- [x] 四类弹窗均已独立。
+- [x] 热力图、tooltip、自动刷新逻辑已从根文件迁出。
+- [x] 后续新增日志展示需求时，不需要再改 `3` 个以上无关区域。
+
+---
+
+## 10. 最终落地结果
+
+- `Index.vue`：只保留页面壳子、路由返回、生命周期、顶层 tooltip 接线与页面级 orchestrator。
+- `Index.css`：承接原根组件样式，拆分后界面结构、class 命名与视觉表现保持一致。
+- `components/`：页面头部、筛选区、汇总卡片、图表区、表格、分页均已独立。
+- `modals/`：存储、金额、Token、Payload 四类弹窗均已独立。
+- `composables/`：自动刷新、筛选、页面数据、tooltip、图表展示、定价明细、Payload 明细、存储弹窗 controller 等状态逻辑均已拆出。
+- 验证结果：`cd frontend && npx vue-tsc --noEmit` 已通过。

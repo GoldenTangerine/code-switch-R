@@ -16,16 +16,16 @@
 
 ## 2. 迁移文档清单
 
-| 优先级 | 源文件 | 行数 | 迁移文档 |
-|---|---|---:|---|
-| P0 | `frontend/src/components/Logs/Index.vue` | 5828 | `qianyi/logs-index-migration.md` |
-| P0 | `frontend/src/components/Main/Index.vue` | 5047 | `qianyi/main-index-migration.md` |
-| P0 | `frontend/src/components/General/Index.vue` | 3116 | `qianyi/general-index-migration.md` |
-| P1 | `frontend/src/components/Mcp/index.vue` | 1336 | `qianyi/mcp-index-migration.md` |
-| P1 | `frontend/src/components/Skill/Index.vue` | 1090 | `qianyi/skill-index-migration.md` |
-| P1 | `frontend/src/components/Console/Index.vue` | 947 | `qianyi/console-index-migration.md` |
-| P1 | `frontend/src/components/common/CLIConfigEditor.vue` | 1854 | `qianyi/cli-config-editor-migration.md` |
-| P1 | `frontend/src/components/Setting/ModelPricingModal.vue` | 793 | `qianyi/model-pricing-modal-migration.md` |
+| 优先级 | 源文件 | 行数 | 迁移文档 | 状态 |
+|---|---|---:|---|---|
+| P0 | `frontend/src/components/Logs/Index.vue` | 508 | `qianyi/logs-index-migration.md` | 已完成（由 `1843` 行收敛到 `508` 行，`2026-03-08`） |
+| P0 | `frontend/src/components/Main/Index.vue` | 5047 | `qianyi/main-index-migration.md` | 未开始 |
+| P0 | `frontend/src/components/General/Index.vue` | 3116 | `qianyi/general-index-migration.md` | 未开始 |
+| P1 | `frontend/src/components/Mcp/index.vue` | 1336 | `qianyi/mcp-index-migration.md` | 未开始 |
+| P1 | `frontend/src/components/Skill/Index.vue` | 1090 | `qianyi/skill-index-migration.md` | 未开始 |
+| P1 | `frontend/src/components/Console/Index.vue` | 947 | `qianyi/console-index-migration.md` | 未开始 |
+| P1 | `frontend/src/components/common/CLIConfigEditor.vue` | 1854 | `qianyi/cli-config-editor-migration.md` | 未开始 |
+| P1 | `frontend/src/components/Setting/ModelPricingModal.vue` | 793 | `qianyi/model-pricing-modal-migration.md` | 未开始 |
 
 ---
 
