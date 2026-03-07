@@ -697,6 +697,8 @@
         "heatmapAriaLabel": "请求明细热力墙",
         "heatmapCellAria": "{date}，{count} 条日志",
         "heatmapTooltipRequests": "请求明细",
+        "heatmapTooltipPayload": "Payload 占用",
+        "heatmapTooltipPayloadUnavailable": "未采集",
         "heatmapTooltipLevel": "热度等级",
         "selectedDate": "已选日期",
         "selectedDateEmpty": "最近一年暂无可删除的请求明细。",

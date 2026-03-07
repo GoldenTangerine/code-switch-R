@@ -708,6 +708,16 @@
                   {{ t('components.logs.storage.rows', { count: storageHeatmapTooltip.requests }) }}
                 </span>
               </div>
+              <div class="tooltip-summary-card is-violet">
+                <span class="tooltip-summary-label">{{ t('components.logs.storage.heatmapTooltipPayload') }}</span>
+                <span class="tooltip-summary-value">
+                  {{ formatStorageHeatmapPayloadValue(
+                    storageHeatmapTooltip.payloadBytes,
+                    storageHeatmapTooltip.payloadCapturedRequests,
+                    storageHeatmapTooltip.requests,
+                  ) }}
+                </span>
+              </div>
               <div class="tooltip-summary-card" :class="storageHeatmapTooltip.intensity > 0 ? 'is-success' : 'is-neutral'">
                 <span class="tooltip-summary-label">{{ t('components.logs.storage.heatmapTooltipLevel') }}</span>
                 <span class="tooltip-summary-value">L{{ storageHeatmapTooltip.intensity }}</span>
@@ -1162,8 +1172,8 @@ const LOG_INFO_TOOLTIP_DEFAULT_HEIGHT = 136
 const LOG_INFO_TOOLTIP_VERTICAL_OFFSET = 10
 const LOG_TOOLTIP_SHOW_DELAY_MS = 100
 const STORAGE_DAY_LOGS_PAGE_SIZE = 20
-const STORAGE_HEATMAP_TOOLTIP_DEFAULT_WIDTH = 320
-const STORAGE_HEATMAP_TOOLTIP_DEFAULT_HEIGHT = 168
+const STORAGE_HEATMAP_TOOLTIP_DEFAULT_WIDTH = 420
+const STORAGE_HEATMAP_TOOLTIP_DEFAULT_HEIGHT = 196
 const STORAGE_HEATMAP_TOOLTIP_VERTICAL_OFFSET = 10
 
 const formatBytes = (bytes?: number, rows?: number) => {
@@ -1181,6 +1191,22 @@ const formatBytes = (bytes?: number, rows?: number) => {
   }
   const digits = idx === 0 ? 0 : current >= 10 ? 1 : 2
   return `${current.toFixed(digits)} ${units[idx]}`
+}
+
+const formatStorageHeatmapPayloadValue = (
+  bytes?: number,
+  capturedRequests?: number,
+  requests?: number,
+) => {
+  const totalRequests = Number(requests ?? 0)
+  if (!Number.isFinite(totalRequests) || totalRequests <= 0) {
+    return '0 B'
+  }
+  const capturedCount = Number(capturedRequests ?? 0)
+  if (!Number.isFinite(capturedCount) || capturedCount <= 0) {
+    return t('components.logs.storage.heatmapTooltipPayloadUnavailable')
+  }
+  return formatBytes(bytes)
 }
 
 const toTimeLayout = (date: Date) => {
@@ -1205,6 +1231,8 @@ const storageHeatmapTooltip = reactive<{
   placement: StorageHeatmapTooltipPlacement
   label: string
   requests: number
+  payloadBytes: number
+  payloadCapturedRequests: number
   intensity: number
 }>({
   visible: false,
@@ -1214,6 +1242,8 @@ const storageHeatmapTooltip = reactive<{
   placement: 'above',
   label: '',
   requests: 0,
+  payloadBytes: 0,
+  payloadCapturedRequests: 0,
   intensity: 0,
 })
 
@@ -1493,6 +1523,8 @@ const applyStorageHeatmapTooltipMetrics = (day: UsageHeatmapDay) => {
   const key = storageHeatmapDayKey(day)
   storageHeatmapTooltip.label = key ? formatStorageHeatmapDateLabel(key) : day.label
   storageHeatmapTooltip.requests = day.requests
+  storageHeatmapTooltip.payloadBytes = day.payloadBytes
+  storageHeatmapTooltip.payloadCapturedRequests = day.payloadCapturedRequests
   storageHeatmapTooltip.intensity = day.intensity
 }
 
@@ -5011,10 +5043,12 @@ html.dark .logs-storage-heatmap-day--selected {
 }
 
 .logs-storage-heatmap-tooltip__summary-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   margin-bottom: 10px;
 }
 
 .logs-storage-heatmap-tooltip {
+  width: min(420px, calc(100vw - 32px));
   z-index: 2105;
 }
 
@@ -5023,6 +5057,12 @@ html.dark .logs-storage-heatmap-day--selected {
   font-size: 0.82rem;
   line-height: 1.5;
   color: var(--contrib-tooltip-text);
+}
+
+@media (max-width: 640px) {
+  .logs-storage-heatmap-tooltip__summary-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 html.dark .logs-storage-day-item {

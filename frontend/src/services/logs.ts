@@ -278,6 +278,8 @@ export type HeatmapStat = {
   reasoning_tokens: number
   total_tokens?: number
   total_cost: number
+  payload_bytes?: number
+  payload_captured_requests?: number
 }
 
 export const fetchHeatmapStats = async (days: number): Promise<HeatmapStat[]> => {

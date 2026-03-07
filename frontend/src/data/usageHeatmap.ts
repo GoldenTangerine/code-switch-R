@@ -12,6 +12,8 @@ export type UsageHeatmapDay = {
 	label: string
 	dateKey: string
 	requests: number
+	payloadBytes: number
+	payloadCapturedRequests: number
 	inputTokens: number
 	outputTokens: number
 	totalTokens: number
@@ -119,6 +121,8 @@ const normalizeStatKey = (value?: string | null) => {
 
 type StatBucket = {
 	requests: number
+	payloadBytes: number
+	payloadCapturedRequests: number
 	inputTokens: number
 	outputTokens: number
 	cacheReadTokens: number
@@ -129,6 +133,8 @@ type StatBucket = {
 
 const emptyBucket = (): StatBucket => ({
 	requests: 0,
+	payloadBytes: 0,
+	payloadCapturedRequests: 0,
 	inputTokens: 0,
 	outputTokens: 0,
 	cacheReadTokens: 0,
@@ -186,6 +192,8 @@ const buildUsageHeatmapDay = (
 		label,
 		dateKey,
 		requests: bucket.requests,
+		payloadBytes: bucket.payloadBytes,
+		payloadCapturedRequests: bucket.payloadCapturedRequests,
 		inputTokens: bucket.inputTokens,
 		outputTokens: bucket.outputTokens,
 		totalTokens: bucket.totalTokens,
@@ -312,6 +320,8 @@ export const buildUsageHeatmapMatrix = (
 			if (!stat) return
 			const update: StatBucket = {
 				requests: Number(stat.total_requests) || 0,
+				payloadBytes: Number(stat.payload_bytes) || 0,
+				payloadCapturedRequests: Number(stat.payload_captured_requests) || 0,
 				inputTokens: Number(stat.input_tokens) || 0,
 				outputTokens: Number(stat.output_tokens) || 0,
 				cacheReadTokens: Number(stat.cache_read_tokens) || 0,
@@ -331,10 +341,12 @@ export const buildUsageHeatmapMatrix = (
 
 			const dayKey = hourKey.slice(0, 10)
 			const dayBucket = dailyStatsMap.get(dayKey)
-			if (dayBucket) {
-				dayBucket.requests += update.requests
-				dayBucket.inputTokens += update.inputTokens
-				dayBucket.outputTokens += update.outputTokens
+				if (dayBucket) {
+					dayBucket.requests += update.requests
+					dayBucket.payloadBytes += update.payloadBytes
+					dayBucket.payloadCapturedRequests += update.payloadCapturedRequests
+					dayBucket.inputTokens += update.inputTokens
+					dayBucket.outputTokens += update.outputTokens
 				dayBucket.cacheReadTokens += update.cacheReadTokens
 				dayBucket.reasoningTokens += update.reasoningTokens
 				dayBucket.totalTokens += update.totalTokens
@@ -372,6 +384,8 @@ export const buildUsageHeatmapMatrix = (
 		if (!stat) return
 		const update: StatBucket = {
 			requests: Number(stat.total_requests) || 0,
+			payloadBytes: Number(stat.payload_bytes) || 0,
+			payloadCapturedRequests: Number(stat.payload_captured_requests) || 0,
 			inputTokens: Number(stat.input_tokens) || 0,
 			outputTokens: Number(stat.output_tokens) || 0,
 			cacheReadTokens: Number(stat.cache_read_tokens) || 0,
@@ -385,6 +399,8 @@ export const buildUsageHeatmapMatrix = (
 		const hourBucket = hourlyStatsMap.get(hourKey)
 		if (hourBucket) {
 			hourBucket.requests += update.requests
+			hourBucket.payloadBytes += update.payloadBytes
+			hourBucket.payloadCapturedRequests += update.payloadCapturedRequests
 			hourBucket.inputTokens += update.inputTokens
 			hourBucket.outputTokens += update.outputTokens
 			hourBucket.cacheReadTokens += update.cacheReadTokens

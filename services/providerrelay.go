@@ -969,8 +969,8 @@ func (prs *ProviderRelayService) forwardRequest(
 					provider_pricing_available, provider_quota_type, provider_input_usd_per_m, provider_output_usd_per_m,
 					provider_per_call_unified, provider_per_call_input, provider_per_call_output,
 					provider_per_call_unified_set, provider_per_call_input_set, provider_per_call_output_set,
-					request_body, response_body, request_body_truncated, response_body_truncated
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+					request_body, response_body, request_body_truncated, response_body_truncated, payload_bytes, payload_captured
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			`,
 			requestLog.Platform,
 			requestLog.Model,
@@ -1014,6 +1014,8 @@ func (prs *ProviderRelayService) forwardRequest(
 			requestLog.ResponseBody,
 			boolToInt(requestLog.RequestBodyTruncated),
 			boolToInt(requestLog.ResponseBodyTruncated),
+			requestLog.PayloadBytes,
+			boolToInt(requestLog.PayloadCaptured),
 		)
 
 		if err != nil {
@@ -1289,11 +1291,34 @@ func prepareRequestLogPayloadForPersistence(reqLog *ReqeustLog) {
 		reqLog.ResponseBody = ""
 		reqLog.RequestBodyTruncated = false
 		reqLog.ResponseBodyTruncated = false
+		reqLog.PayloadBytes = 0
+		reqLog.PayloadCaptured = false
 		reqLog.responseBodyBuffer = nil
 		return
 	}
 	reqLog.RequestBody = maybeSanitizeRequestLogPayload(reqLog, reqLog.RequestBody)
 	materializeRequestLogResponseBody(reqLog)
+	reqLog.PayloadBytes = int64(len([]byte(reqLog.RequestBody)) + len([]byte(reqLog.ResponseBody)))
+	reqLog.PayloadCaptured = reqLog.RequestBody != "" || reqLog.ResponseBody != "" || reqLog.RequestBodyTruncated || reqLog.ResponseBodyTruncated
+}
+
+func backfillRequestLogPayloadMetricsWithDB(db *sql.DB) error {
+	if db == nil {
+		return nil
+	}
+	_, err := db.Exec(`
+		UPDATE request_log
+		SET
+			payload_bytes = COALESCE(LENGTH(CAST(request_body AS BLOB)), 0) + COALESCE(LENGTH(CAST(response_body AS BLOB)), 0),
+			payload_captured = CASE
+				WHEN request_body != '' OR response_body != '' OR request_body_truncated != 0 OR response_body_truncated != 0 THEN 1
+				ELSE 0
+			END
+		WHERE
+			(request_body != '' OR response_body != '' OR request_body_truncated != 0 OR response_body_truncated != 0)
+			AND (payload_bytes = 0 OR payload_captured = 0)
+	`)
+	return err
 }
 
 func ensureRequestLogColumn(db *sql.DB, column string, definition string) error {
@@ -1370,6 +1395,8 @@ func ensureRequestLogTableWithDB(db *sql.DB) error {
 			response_body TEXT DEFAULT '',
 			request_body_truncated INTEGER DEFAULT 0,
 			response_body_truncated INTEGER DEFAULT 0,
+			payload_bytes INTEGER DEFAULT 0,
+			payload_captured INTEGER DEFAULT 0,
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		)`
 
@@ -1484,6 +1511,15 @@ func ensureRequestLogTableWithDB(db *sql.DB) error {
 		return err
 	}
 	if err := ensureRequestLogColumn(db, "response_body_truncated", "INTEGER DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "payload_bytes", "INTEGER DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "payload_captured", "INTEGER DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := backfillRequestLogPayloadMetricsWithDB(db); err != nil {
 		return err
 	}
 	if err := ensureRequestLogIndex(db, "idx_request_log_created_at", "created_at"); err != nil {
@@ -1907,6 +1943,8 @@ type ReqeustLog struct {
 	ResponseBody              string  `json:"response_body,omitempty"`
 	RequestBodyTruncated      bool    `json:"request_body_truncated"`
 	ResponseBodyTruncated     bool    `json:"response_body_truncated"`
+	PayloadBytes              int64   `json:"payload_bytes"`
+	PayloadCaptured           bool    `json:"payload_captured"`
 
 	CapturePayload  bool `json:"-"`
 	SanitizePayload bool `json:"-"`
@@ -2394,8 +2432,8 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 						provider_pricing_available, provider_quota_type, provider_input_usd_per_m, provider_output_usd_per_m,
 						provider_per_call_unified, provider_per_call_input, provider_per_call_output,
 						provider_per_call_unified_set, provider_per_call_input_set, provider_per_call_output_set,
-						request_body, response_body, request_body_truncated, response_body_truncated
-					) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+						request_body, response_body, request_body_truncated, response_body_truncated, payload_bytes, payload_captured
+					) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 				`,
 				requestLog.Platform, requestLog.Model, requestLog.RequestedModel, requestLog.ResponseModel, requestLog.ProviderID, requestLog.Provider, requestLog.HttpCode,
 				requestLog.InputTokens, requestLog.OutputTokens, requestLog.CacheCreateTokens, requestLog.Ephemeral5mTokens, requestLog.Ephemeral1hTokens,
@@ -2406,7 +2444,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 				boolToInt(requestLog.ProviderPricingAvailable), requestLog.ProviderQuotaType, requestLog.ProviderInputUSDPerM, requestLog.ProviderOutputUSDPerM,
 				requestLog.ProviderPerCallUnified, requestLog.ProviderPerCallInput, requestLog.ProviderPerCallOutput,
 				boolToInt(requestLog.ProviderPerCallUnifiedSet), boolToInt(requestLog.ProviderPerCallInputSet), boolToInt(requestLog.ProviderPerCallOutputSet),
-				requestLog.RequestBody, requestLog.ResponseBody, boolToInt(requestLog.RequestBodyTruncated), boolToInt(requestLog.ResponseBodyTruncated),
+				requestLog.RequestBody, requestLog.ResponseBody, boolToInt(requestLog.RequestBodyTruncated), boolToInt(requestLog.ResponseBodyTruncated), requestLog.PayloadBytes, boolToInt(requestLog.PayloadCaptured),
 			)
 		}()
 

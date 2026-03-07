@@ -696,6 +696,8 @@
         "heatmapAriaLabel": "Request detail heatmap",
         "heatmapCellAria": "{date}, {count} logs",
         "heatmapTooltipRequests": "Request details",
+        "heatmapTooltipPayload": "Payload size",
+        "heatmapTooltipPayloadUnavailable": "Not captured",
         "heatmapTooltipLevel": "Heat level",
         "selectedDate": "Selected date",
         "selectedDateEmpty": "No request detail logs are available to delete in the past year.",

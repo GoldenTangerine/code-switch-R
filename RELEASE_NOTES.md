@@ -1,3 +1,16 @@
+# Code Switch v2.7.6
+
+## 修复
+- **热力墙 Tooltip 指标语义纠正**：修复「日志 → 日志存储」弹窗中把日志正文占用误写成“内存占用”的问题；现在 Tooltip 会明确展示为 `Payload 占用`，避免把日志明细大小和进程内存概念混到一起。
+- **Payload 未采集状态更清晰**：修复有请求明细但未开启 Payload 采集时 Tooltip 数值语义模糊的问题；现在会明确显示“未采集 / Not captured”，不再拿空值或占位符糊弄过去。
+
+## 技术改进
+- **Payload 指标改为写入时持久化**：新增 `request_log.payload_bytes` 与 `request_log.payload_captured` 字段，日志写入时即完成 Payload 字节数与采集状态计算，避免热力墙 Tooltip 每次悬浮都重新扫描大文本列，降低日志量较大时的聚合开销。
+- **老库兼容与历史数据回填**：启动时会为旧版 `request_log` 表自动补齐 Payload 指标列，并对已有明细做一次回填；热力墙查询在新列不存在时也会自动回退到旧算法，避免升级后直接查崩。
+- **Payload 聚合链路补强**：热力墙日统计新增 `payload_captured_requests`，前端 Tooltip 会区分“真实 0 B”与“当天没有采集到 Payload”，展示语义更稳当。
+
+---
+
 # Code Switch v2.7.5
 
 ## 修复

@@ -1677,14 +1677,16 @@ func isNoSuchTableErr(err error) bool {
 }
 
 type HeatmapStat struct {
-	Day             string  `json:"day"`
-	TotalRequests   int64   `json:"total_requests"`
-	InputTokens     int64   `json:"input_tokens"`
-	OutputTokens    int64   `json:"output_tokens"`
-	CacheReadTokens int64   `json:"cache_read_tokens"`
-	ReasoningTokens int64   `json:"reasoning_tokens"`
-	TotalTokens     int64   `json:"total_tokens"`
-	TotalCost       float64 `json:"total_cost"`
+	Day                     string  `json:"day"`
+	TotalRequests           int64   `json:"total_requests"`
+	InputTokens             int64   `json:"input_tokens"`
+	OutputTokens            int64   `json:"output_tokens"`
+	CacheReadTokens         int64   `json:"cache_read_tokens"`
+	ReasoningTokens         int64   `json:"reasoning_tokens"`
+	TotalTokens             int64   `json:"total_tokens"`
+	TotalCost               float64 `json:"total_cost"`
+	PayloadBytes            int64   `json:"payload_bytes"`
+	PayloadCapturedRequests int64   `json:"payload_captured_requests"`
 }
 
 func populateHeatmapTotalTokens(stat *HeatmapStat) {

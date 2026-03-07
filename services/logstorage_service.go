@@ -138,15 +138,40 @@ func (ls *LogService) RequestLogDailyHeatmapStats(days int) ([]HeatmapStat, erro
 		return nil, err
 	}
 
-	rows, err := db.Query(`
-		SELECT
-			strftime('%Y-%m-%d', datetime(created_at, 'localtime')) AS day,
-			COUNT(*) AS total_requests
-		FROM request_log
-		WHERE created_at >= ? AND created_at < ?
-		GROUP BY day
-		ORDER BY day DESC
-	`, startDay.UTC().Format(timeLayout), endDay.UTC().Format(timeLayout))
+	queryWithStoredPayloadColumns := `
+			SELECT
+				strftime('%Y-%m-%d', datetime(created_at, 'localtime')) AS day,
+				COUNT(*) AS total_requests,
+				SUM(COALESCE(payload_bytes, 0)) AS payload_bytes,
+				SUM(CASE WHEN payload_captured != 0 THEN 1 ELSE 0 END) AS payload_captured_requests
+			FROM request_log
+			WHERE created_at >= ? AND created_at < ?
+			GROUP BY day
+			ORDER BY day DESC
+	`
+	queryLegacyPayloadColumns := `
+			SELECT
+				strftime('%Y-%m-%d', datetime(created_at, 'localtime')) AS day,
+				COUNT(*) AS total_requests,
+				SUM(
+					COALESCE(LENGTH(CAST(request_body AS BLOB)), 0)
+					+ COALESCE(LENGTH(CAST(response_body AS BLOB)), 0)
+				) AS payload_bytes,
+				SUM(
+					CASE
+						WHEN request_body != '' OR response_body != '' OR request_body_truncated != 0 OR response_body_truncated != 0 THEN 1
+						ELSE 0
+					END
+				) AS payload_captured_requests
+			FROM request_log
+			WHERE created_at >= ? AND created_at < ?
+			GROUP BY day
+			ORDER BY day DESC
+	`
+	rows, err := db.Query(queryWithStoredPayloadColumns, startDay.UTC().Format(timeLayout), endDay.UTC().Format(timeLayout))
+	if err != nil && strings.Contains(err.Error(), "no such column") {
+		rows, err = db.Query(queryLegacyPayloadColumns, startDay.UTC().Format(timeLayout), endDay.UTC().Format(timeLayout))
+	}
 	if err != nil {
 		if isNoSuchTableErr(err) {
 			return []HeatmapStat{}, nil
@@ -158,7 +183,7 @@ func (ls *LogService) RequestLogDailyHeatmapStats(days int) ([]HeatmapStat, erro
 	stats := make([]HeatmapStat, 0, days)
 	for rows.Next() {
 		stat := HeatmapStat{}
-		if err := rows.Scan(&stat.Day, &stat.TotalRequests); err != nil {
+		if err := rows.Scan(&stat.Day, &stat.TotalRequests, &stat.PayloadBytes, &stat.PayloadCapturedRequests); err != nil {
 			return nil, err
 		}
 		stats = append(stats, stat)
