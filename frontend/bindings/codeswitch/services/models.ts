@@ -14,6 +14,8 @@ export class AppSettings {
     "show_home_title": boolean;
     "auto_start": boolean;
     "auto_update": boolean;
+    "update_history_keep_count": number;
+    "auto_connectivity_test": boolean;
 
     /**
      * 供应商切换通知开关
@@ -33,6 +35,12 @@ export class AppSettings {
         }
         if (!("auto_update" in $$source)) {
             this["auto_update"] = false;
+        }
+        if (!("update_history_keep_count" in $$source)) {
+            this["update_history_keep_count"] = 3;
+        }
+        if (!("auto_connectivity_test" in $$source)) {
+            this["auto_connectivity_test"] = false;
         }
         if (!("enable_switch_notify" in $$source)) {
             this["enable_switch_notify"] = false;
@@ -582,6 +590,56 @@ export class ConfigImportStatus {
     static createFrom($$source: any = {}): ConfigImportStatus {
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         return new ConfigImportStatus($$parsedSource as Partial<ConfigImportStatus>);
+    }
+}
+
+/**
+ * ConnectivityResult 连通性测试结果
+ */
+export class ConnectivityResult {
+    "providerId": number;
+    "providerName": string;
+    "platform": string;
+    "status": number;
+    "subStatus": string;
+    "latencyMs": number;
+    "lastChecked": time$0.Time;
+    "message"?: string;
+    "httpCode"?: number;
+
+    /** Creates a new ConnectivityResult instance. */
+    constructor($$source: Partial<ConnectivityResult> = {}) {
+        if (!("providerId" in $$source)) {
+            this["providerId"] = 0;
+        }
+        if (!("providerName" in $$source)) {
+            this["providerName"] = "";
+        }
+        if (!("platform" in $$source)) {
+            this["platform"] = "";
+        }
+        if (!("status" in $$source)) {
+            this["status"] = 0;
+        }
+        if (!("subStatus" in $$source)) {
+            this["subStatus"] = "";
+        }
+        if (!("latencyMs" in $$source)) {
+            this["latencyMs"] = 0;
+        }
+        if (!("lastChecked" in $$source)) {
+            this["lastChecked"] = null;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ConnectivityResult instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ConnectivityResult {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new ConnectivityResult($$parsedSource as Partial<ConnectivityResult>);
     }
 }
 
@@ -1425,6 +1483,11 @@ export class Provider {
      */
     "level"?: number;
 
+    /**
+     * 连通性检测开关 - 是否启用自动连通性检测
+     */
+    "connectivityCheck"?: boolean;
+
     /** Creates a new Provider instance. */
     constructor($$source: Partial<Provider> = {}) {
         if (!("id" in $$source)) {
@@ -1560,6 +1623,7 @@ export class ReqeustLog {
     "created_at": string;
     "input_cost": number;
     "output_cost": number;
+    "reasoning_cost": number;
     "cache_create_cost": number;
     "cache_read_cost": number;
     "ephemeral_5m_cost": number;
@@ -1613,6 +1677,9 @@ export class ReqeustLog {
         }
         if (!("output_cost" in $$source)) {
             this["output_cost"] = 0;
+        }
+        if (!("reasoning_cost" in $$source)) {
+            this["reasoning_cost"] = 0;
         }
         if (!("cache_create_cost" in $$source)) {
             this["cache_create_cost"] = 0;

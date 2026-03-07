@@ -148,15 +148,16 @@
           <div v-else class="cli-fields">
             <div
               v-for="(field, index) in customFields"
-              :key="index"
+              :key="field.id"
               class="cli-custom-field"
             >
               <input
                 type="text"
-                :value="field.key"
+                :value="field.keyDraft"
                 class="cli-field-input cli-key-input"
                 :placeholder="t('components.cliConfig.keyPlaceholder')"
                 @input="updateCustomFieldKey(index, ($event.target as HTMLInputElement).value)"
+                @blur="commitCustomFieldKey(index)"
               />
               <input
                 type="text"
@@ -197,7 +198,7 @@
         </div>
 
         <!-- 配置预览（可折叠） -->
-        <div v-if="previewFiles.length" class="cli-preview-section">
+        <div v-if="previewFiles.length || currentFiles.length" class="cli-preview-section">
           <div class="cli-preview-header" @click="togglePreview">
             <svg
               class="expand-icon"
@@ -217,15 +218,135 @@
             <span class="preview-icon">👁️</span>
             <span>{{ t('components.cliConfig.previewTitle') }}</span>
             <span class="cli-preview-count">{{ previewFiles.length }}</span>
+            <button
+              v-if="previewExpanded && selectedPreviewTab === 0"
+              type="button"
+              class="cli-action-btn cli-preview-lock"
+              @click.stop="togglePreviewEditable"
+            >
+              <span v-if="previewEditable">🔓 {{ t('components.cliConfig.previewEditUnlocked') }}</span>
+              <span v-else>🔒 {{ t('components.cliConfig.previewEditLocked') }}</span>
+            </button>
+            <!-- Current 标签页解锁按钮 -->
+            <button
+              v-if="previewExpanded && selectedPreviewTab === 1"
+              type="button"
+              class="cli-action-btn cli-preview-lock"
+              @click.stop="toggleCurrentEditable"
+            >
+              <span v-if="currentEditable">🔓 {{ t('components.cliConfig.previewEditUnlocked') }}</span>
+              <span v-else>🔒 {{ t('components.cliConfig.previewEditLocked') }}</span>
+            </button>
           </div>
-          <div v-if="previewExpanded" class="cli-preview-list">
-            <div v-for="file in previewFiles" :key="file.path || file.format" class="cli-preview-card">
-              <div class="cli-preview-meta">
-                <span class="cli-preview-name">{{ file.path || t('components.cliConfig.previewUnknownPath') }}</span>
-                <span class="cli-preview-format">{{ (file.format || config?.configFormat || '').toUpperCase() }}</span>
-              </div>
-              <pre class="cli-preview-content">{{ file.content }}</pre>
-            </div>
+          <div v-if="previewExpanded" class="cli-preview-tabs-wrapper">
+            <TabGroup :selectedIndex="selectedPreviewTab" @change="selectedPreviewTab = $event">
+              <TabList class="cli-tabs-list">
+                <Tab as="template" v-slot="{ selected }">
+                  <button :class="['cli-tab-btn', { selected }]">
+                    {{ t('components.cliConfig.tabPreview') }}
+                  </button>
+                </Tab>
+                <Tab as="template" v-slot="{ selected }">
+                  <button :class="['cli-tab-btn', { selected }]">
+                    {{ t('components.cliConfig.tabCurrent') }}
+                  </button>
+                </Tab>
+              </TabList>
+              <TabPanels>
+                <!-- Preview Tab: 激活后的配置 -->
+                <TabPanel class="cli-preview-list">
+                  <div
+                    v-for="(file, index) in previewFiles"
+                    :key="getPreviewKey(file, index)"
+                    class="cli-preview-card"
+                  >
+                    <div class="cli-preview-meta">
+                      <span class="cli-preview-name">{{ file.path || t('components.cliConfig.previewUnknownPath') }}</span>
+                      <span class="cli-preview-format">{{ (file.format || config?.configFormat || '').toUpperCase() }}</span>
+                    </div>
+                    <template v-if="previewEditable">
+                      <textarea
+                        :ref="index === 0 ? (el) => firstTextareaRef = el as HTMLTextAreaElement : undefined"
+                        v-model="editingContent[getPreviewKey(file, index)]"
+                        class="cli-preview-textarea"
+                        rows="8"
+                      />
+                      <div class="cli-preview-actions">
+                        <button
+                          type="button"
+                          class="cli-action-btn cli-primary-btn"
+                          :disabled="previewSaving"
+                          @click="handleApplyPreviewEdit(file, index)"
+                        >
+                          {{ t('components.cliConfig.previewApply') }}
+                        </button>
+                        <button
+                          type="button"
+                          class="cli-action-btn"
+                          :disabled="previewSaving"
+                          @click="handleResetPreviewEdit(file, index)"
+                        >
+                          {{ t('components.cliConfig.previewReset') }}
+                        </button>
+                      </div>
+                      <div
+                        v-if="previewErrors[getPreviewKey(file, index)]"
+                        class="cli-preview-error"
+                      >
+                        {{ previewErrors[getPreviewKey(file, index)] }}
+                      </div>
+                    </template>
+                    <pre v-else class="cli-preview-content">{{ file.content }}</pre>
+                  </div>
+                </TabPanel>
+                <!-- Current Tab: 当前磁盘配置 -->
+                <TabPanel class="cli-preview-list">
+                  <div
+                    v-for="(file, index) in currentFiles"
+                    :key="'current-' + getCurrentKey(file, index)"
+                    class="cli-preview-card"
+                  >
+                    <div class="cli-preview-meta">
+                      <span class="cli-preview-name">{{ file.path || t('components.cliConfig.previewUnknownPath') }}</span>
+                      <span class="cli-preview-format">{{ (file.format || config?.configFormat || '').toUpperCase() }}</span>
+                    </div>
+                    <template v-if="currentEditable">
+                      <textarea
+                        :ref="index === 0 ? (el) => currentTextareaRef = el as HTMLTextAreaElement : undefined"
+                        v-model="currentEditingContent[getCurrentKey(file, index)]"
+                        class="cli-preview-textarea"
+                        rows="8"
+                      />
+                      <div class="cli-preview-actions">
+                        <button
+                          type="button"
+                          class="cli-action-btn cli-primary-btn"
+                          :disabled="currentSaving"
+                          @click="handleApplyCurrentEdit(file, index)"
+                        >
+                          {{ t('components.cliConfig.previewApply') }}
+                        </button>
+                        <button
+                          type="button"
+                          class="cli-action-btn"
+                          :disabled="currentSaving"
+                          @click="handleResetCurrentEdit(file, index)"
+                        >
+                          {{ t('components.cliConfig.previewReset') }}
+                        </button>
+                      </div>
+                      <div
+                        v-if="currentErrors[getCurrentKey(file, index)]"
+                        class="cli-preview-error"
+                      >
+                        {{ currentErrors[getCurrentKey(file, index)] }}
+                      </div>
+                    </template>
+                    <pre v-else class="cli-preview-content">{{ file.content }}</pre>
+                  </div>
+                </TabPanel>
+              </TabPanels>
+            </TabGroup>
           </div>
         </div>
       </template>
@@ -238,10 +359,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { TabGroup, TabList, Tab, TabPanels, TabPanel } from '@headlessui/vue'
 import {
   fetchCLIConfig,
+  fetchCLIConfigSnapshots,
+  saveCLIConfigFileContent,
   fetchCLITemplate,
   setCLITemplate,
   restoreDefaultConfig,
@@ -249,12 +373,19 @@ import {
   type CLIConfig,
   type CLIConfigField,
   type CLIConfigFile,
+  type CLIConfigSnapshots,
 } from '../../services/cliConfig'
 import { showToast } from '../../utils/toast'
+import { extractErrorMessage } from '../../utils/error'
 
 const props = defineProps<{
   platform: CLIPlatform
   modelValue?: Record<string, any>
+  // Gemini 供应商配置（用于预览"激活后"的 .env 内容）
+  providerConfig?: {
+    apiKey?: string
+    baseUrl?: string
+  }
 }>()
 
 const emit = defineEmits<{
@@ -268,8 +399,31 @@ const loading = ref(false)
 const config = ref<CLIConfig | null>(null)
 const editableValues = ref<Record<string, any>>({})
 const isGlobalTemplate = ref(false)
-const customFields = ref<Array<{ key: string; value: string }>>([])
+type CustomField = { id: string; key: string; keyDraft: string; value: string }
+const customFields = ref<CustomField[]>([])
+let customFieldIdSeed = 0
+const newCustomFieldId = () => `custom-field-${Date.now()}-${customFieldIdSeed++}`
 const previewExpanded = ref(false)
+const previewEditable = ref(false)
+const previewSaving = ref(false)
+const editingContent = ref<Record<string, string>>({})
+const previewErrors = ref<Record<string, string>>({})
+const firstTextareaRef = ref<HTMLTextAreaElement | null>(null)
+const selectedPreviewTab = ref(0) // 0: Preview, 1: Current
+
+// Current 标签页编辑状态
+const currentEditable = ref(false)
+const currentSaving = ref(false)
+const currentEditingContent = ref<Record<string, string>>({})
+const currentErrors = ref<Record<string, string>>({})
+const currentTextareaRef = ref<HTMLTextAreaElement | null>(null)
+
+// 配置快照数据（来自后端 GetConfigSnapshots API）
+const snapshotsData = ref<CLIConfigSnapshots | null>(null)
+
+// 防抖和请求序号保护（防止竞态条件）
+let snapshotDebounceTimer: ReturnType<typeof setTimeout> | null = null
+let snapshotRequestSeq = 0
 
 // 获取所有预置字段的 key（包括锁定和可编辑）
 const presetFieldKeys = computed(() => {
@@ -293,29 +447,82 @@ const platformLabels: Record<CLIPlatform, string> = {
 
 const platformLabel = computed(() => platformLabels[props.platform] || props.platform)
 
+// 检查是否有有效的供应商输入（用于决定 previewMode）
+// - Claude/Codex: 需要同时有 apiKey 和 baseUrl 才视为有效（与真实 ApplySingleProvider 一致）
+// - Gemini: 任一非空即可（Gemini 允许只配置其中一个）
+const hasProviderInput = computed(() => {
+  const apiKey = props.providerConfig?.apiKey?.trim() || ''
+  const baseUrl = props.providerConfig?.baseUrl?.trim() || ''
+
+  if (props.platform === 'gemini') {
+    // Gemini 允许只配置 apiKey 或只配置 baseUrl
+    return !!(apiKey || baseUrl)
+  }
+  // Claude/Codex 需要同时有 apiKey 和 baseUrl
+  return !!(apiKey && baseUrl)
+})
+
 const lockedFields = computed(() => {
-  return config.value?.fields.filter(f => f.locked) || []
+  const fields = config.value?.fields.filter(f => f.locked) || []
+
+  // 仅当有有效输入时，用供应商配置值覆盖显示
+  if (hasProviderInput.value) {
+    // 提取并 trim 供应商配置值（避免 TS 窄化问题和显示不一致）
+    const apiKey = props.providerConfig?.apiKey?.trim() || ''
+    const baseUrl = props.providerConfig?.baseUrl?.trim() || ''
+
+    return fields.map(field => {
+      const newField = { ...field }
+
+      if (props.platform === 'gemini') {
+        if (field.key === 'GEMINI_API_KEY' && apiKey) {
+          newField.value = apiKey
+        }
+        if (field.key === 'GOOGLE_GEMINI_BASE_URL' && baseUrl) {
+          newField.value = baseUrl
+        }
+      }
+
+      if (props.platform === 'claude') {
+        if (field.key === 'env.ANTHROPIC_BASE_URL' && baseUrl) {
+          newField.value = baseUrl
+        }
+        if (field.key === 'env.ANTHROPIC_AUTH_TOKEN' && apiKey) {
+          newField.value = apiKey
+        }
+      }
+
+      // Codex 平台：注入 base_url（config.toml）和 OPENAI_API_KEY（auth.json）
+      if (props.platform === 'codex') {
+        // config.toml 中的 base_url 字段（支持任意 providerKey）
+        if (field.key.includes('.base_url') && baseUrl) {
+          newField.value = baseUrl
+        }
+        // auth.json 中的 OPENAI_API_KEY 字段
+        if (field.key === 'OPENAI_API_KEY' && apiKey) {
+          newField.value = apiKey
+        }
+      }
+
+      return newField
+    })
+  }
+
+  return fields
 })
 
 const editableFields = computed(() => {
   return config.value?.fields.filter(f => !f.locked) || []
 })
 
-// 配置文件预览列表
+// 配置文件预览列表（来自后端 GetConfigSnapshots API）
 const previewFiles = computed((): CLIConfigFile[] => {
-  if (!config.value) return []
-  if (config.value.rawFiles && config.value.rawFiles.length > 0) {
-    return config.value.rawFiles
-  }
-  // 回退兼容：使用 rawContent
-  if (config.value.rawContent) {
-    return [{
-      path: config.value.filePath || '',
-      format: config.value.configFormat,
-      content: config.value.rawContent,
-    }]
-  }
-  return []
+  return snapshotsData.value?.previewFiles || []
+})
+
+// 当前磁盘状态（来自后端 GetConfigSnapshots API）
+const currentFiles = computed((): CLIConfigFile[] => {
+  return snapshotsData.value?.currentFiles || []
 })
 
 // 获取字段值，支持嵌套的 env.* 字段
@@ -333,6 +540,52 @@ const toggleExpanded = () => {
   if (expanded.value && !config.value) {
     loadConfig()
   }
+}
+
+// 加载配置快照（用于 Preview/Current 对比）
+const loadSnapshots = async () => {
+  // 递增请求序号，用于忽略过期响应
+  const currentSeq = ++snapshotRequestSeq
+
+  try {
+    // 确定 previewMode：
+    // - 有有效供应商输入 => "direct"（模拟直连应用）
+    // - 无有效输入 => "current"（Preview = Current，不做任何注入）
+    const previewMode = hasProviderInput.value ? 'direct' : 'current'
+    const apiUrl = props.providerConfig?.baseUrl?.trim() || ''
+    const apiKey = props.providerConfig?.apiKey?.trim() || ''
+
+    const result = await fetchCLIConfigSnapshots(
+      props.platform,
+      apiUrl,
+      apiKey,
+      previewMode
+    )
+
+    // 忽略过期响应（有更新的请求已发出）
+    if (currentSeq !== snapshotRequestSeq) {
+      return
+    }
+
+    snapshotsData.value = result
+  } catch (error) {
+    // 忽略过期请求的错误
+    if (currentSeq !== snapshotRequestSeq) {
+      return
+    }
+    console.error('Failed to load CLI config snapshots:', error)
+    snapshotsData.value = null
+  }
+}
+
+// 防抖加载快照（用于 watch 触发，避免频繁请求）
+const loadSnapshotsDebounced = () => {
+  if (snapshotDebounceTimer) {
+    clearTimeout(snapshotDebounceTimer)
+  }
+  snapshotDebounceTimer = setTimeout(() => {
+    loadSnapshots()
+  }, 300)
 }
 
 const loadConfig = async () => {
@@ -361,6 +614,16 @@ const loadConfig = async () => {
 
     // 提取自定义字段（在预置字段列表加载后）
     extractCustomFields()
+
+    // 加载配置快照（用于 Preview/Current 标签页）
+    await loadSnapshots()
+
+    // 初始化预览可编辑内容
+    initPreviewEditing()
+    // 重置 Current 编辑状态（切换平台/恢复默认时丢弃未保存编辑）
+    currentEditable.value = false
+    currentEditingContent.value = {}
+    currentErrors.value = {}
   } catch (error) {
     console.error('Failed to load CLI config:', error)
     config.value = null
@@ -396,6 +659,22 @@ const updateFieldJSON = (key: string, jsonStr: string) => {
 const emitChanges = () => {
   // 合并自定义字段到 editableValues
   const merged = { ...editableValues.value }
+
+  // 清理 merged 中残留的旧自定义字段
+  const activeCustomKeys = new Set(customFields.value.map(f => f.key.trim()).filter(k => k))
+
+  Object.keys(merged).forEach(key => {
+    // 如果该 key 不是预置/锁定字段，也不是对象，则视为自定义字段
+    const isPotentialCustom = !presetFieldKeys.value.has(key) &&
+                              !lockedFieldKeys.value.has(key) &&
+                              typeof merged[key] !== 'object'
+
+    // 如果它不在当前有效的自定义字段列表中，说明是残留的旧 key，应当清除
+    if (isPotentialCustom && !activeCustomKeys.has(key)) {
+      delete merged[key]
+    }
+  })
+
   customFields.value.forEach(field => {
     const key = field.key.trim()
     if (key) {
@@ -408,7 +687,7 @@ const emitChanges = () => {
 // ========== 自定义字段管理 ==========
 
 const addCustomField = () => {
-  customFields.value.push({ key: '', value: '' })
+  customFields.value.push({ id: newCustomFieldId(), key: '', keyDraft: '', value: '' })
 }
 
 const removeCustomField = (index: number) => {
@@ -422,59 +701,134 @@ const removeCustomField = (index: number) => {
 }
 
 const updateCustomFieldKey = (index: number, newKey: string) => {
+  customFields.value[index].keyDraft = newKey
+}
+
+const commitCustomFieldKey = (index: number) => {
   const field = customFields.value[index]
   const oldKey = field.key
-  const normalizedKey = newKey.trim()
+  const normalizedKey = field.keyDraft.trim()
 
-  // 空 key 直接清空并同步
+  // 未变化：只做 trim 同步
+  if (normalizedKey === oldKey) {
+    if (field.keyDraft !== normalizedKey) {
+      field.keyDraft = normalizedKey
+    }
+    return
+  }
+
+  // 空 key：删除旧 key，但保留该行
   if (!normalizedKey) {
+    if (oldKey && editableValues.value[oldKey] !== undefined) {
+      delete editableValues.value[oldKey]
+    }
     field.key = ''
+    field.keyDraft = ''
     emitChanges()
     return
   }
 
-  // 检查是否与锁定字段冲突
+  // 只在提交时校验
   if (lockedFieldKeys.value.has(normalizedKey)) {
     showToast(t('components.cliConfig.keyConflictLocked'), 'error')
+    field.keyDraft = oldKey
     return
   }
-
-  // 检查是否与预置字段冲突
   if (presetFieldKeys.value.has(normalizedKey)) {
     showToast(t('components.cliConfig.keyConflictPreset'), 'error')
+    field.keyDraft = oldKey
     return
   }
-
-  // 检查是否与其他自定义字段重复
   const duplicate = customFields.value.some((f, i) => i !== index && f.key === normalizedKey)
   if (duplicate) {
     showToast(t('components.cliConfig.keyDuplicate'), 'error')
+    field.keyDraft = oldKey
     return
   }
 
-  // 如果旧 key 存在，从 editableValues 中删除
   if (oldKey && editableValues.value[oldKey] !== undefined) {
     delete editableValues.value[oldKey]
   }
 
   field.key = normalizedKey
+  field.keyDraft = normalizedKey
   emitChanges()
 }
 
 const updateCustomFieldValue = (index: number, value: string) => {
-  customFields.value[index].value = value
+  const field = customFields.value[index]
+  field.value = value
+  // key 为空表示仍是未提交的草稿行：不向上游同步，避免触发 watch→extract 导致行丢失
+  if (!field.key.trim()) {
+    return
+  }
   emitChanges()
 }
 
 // 从 editableValues 中提取自定义字段（不在预置列表中的）
 const extractCustomFields = () => {
-  const custom: Array<{ key: string; value: string }> = []
+  const existing = customFields.value.slice()
+
+  // 1) 复用已存在字段的 id（按已提交 key 映射）
+  const existingByKey = new Map<string, CustomField>()
+  existing.forEach((field) => {
+    const key = field.key.trim()
+    if (key && !existingByKey.has(key)) {
+      existingByKey.set(key, field)
+    }
+  })
+
+  // 2) 保留空 key 的草稿行（避免 blur 清空后被 watch→extract 吃掉）
+  const draftRows = existing.filter((field) => !field.key.trim())
+
+  // 3) 从 editableValues 中提取自定义字段 key
+  const extractedKeys: string[] = []
   for (const key in editableValues.value) {
-    // 跳过预置字段和嵌套对象（如 env）
-    if (!presetFieldKeys.value.has(key) && typeof editableValues.value[key] !== 'object') {
-      custom.push({ key, value: String(editableValues.value[key]) })
+    if (!key) continue
+    const val = editableValues.value[key]
+    // 跳过预置/锁定字段和嵌套对象（如 env）；允许 null 值作为普通值
+    const isObjectLike = typeof val === 'object' && val !== null
+    if (!presetFieldKeys.value.has(key) && !lockedFieldKeys.value.has(key) && !isObjectLike) {
+      extractedKeys.push(key)
     }
   }
+
+  const remaining = new Set(extractedKeys)
+  const custom: CustomField[] = []
+
+  // 4) 先按现有顺序保留仍存在的字段，确保顺序与 id 稳定
+  existing.forEach((field) => {
+    const key = field.key.trim()
+    if (!key) return
+    if (!remaining.has(key)) return
+    custom.push({
+      ...field,
+      value: String(editableValues.value[key]),
+    })
+    remaining.delete(key)
+  })
+
+  // 5) 再追加新增字段
+  remaining.forEach((key) => {
+    const reused = existingByKey.get(key)
+    if (reused) {
+      custom.push({
+        ...reused,
+        value: String(editableValues.value[key]),
+      })
+      return
+    }
+    custom.push({
+      id: newCustomFieldId(),
+      key,
+      keyDraft: key,
+      value: String(editableValues.value[key]),
+    })
+  })
+
+  // 6) 最后追加空 key 草稿行
+  draftRows.forEach((row) => custom.push(row))
+
   customFields.value = custom
 }
 
@@ -704,6 +1058,209 @@ const togglePreview = () => {
   previewExpanded.value = !previewExpanded.value
 }
 
+// 切换预览区编辑模式
+const togglePreviewEditable = () => {
+  previewEditable.value = !previewEditable.value
+  if (!previewEditable.value) {
+    // 关闭编辑模式时清理错误
+    previewErrors.value = {}
+  } else {
+    // 解锁编辑模式时
+    if (Object.keys(editingContent.value).length === 0) {
+      // 首次解锁时，如果还没初始化，补一次
+      initPreviewEditing()
+    }
+    // 等待 DOM 更新后聚焦第一个 textarea（修复 macOS WebView 键盘输入问题）
+    nextTick(() => {
+      firstTextareaRef.value?.focus()
+    })
+  }
+}
+
+// 生成预览文件的唯一 key
+const getPreviewKey = (file: CLIConfigFile, index: number): string => {
+  // 优先使用 path，否则使用 format-index 组合确保唯一性
+  return file.path || `${file.format || 'file'}-${index}`
+}
+
+// 初始化预览编辑内容
+const initPreviewEditing = () => {
+  const nextContent: Record<string, string> = {}
+  previewFiles.value.forEach((file, index) => {
+    const key = getPreviewKey(file, index)
+    nextContent[key] = file.content || ''
+  })
+  editingContent.value = nextContent
+  previewErrors.value = {}
+}
+
+// 应用预览编辑
+const handleApplyPreviewEdit = async (file: CLIConfigFile, index: number) => {
+  const key = getPreviewKey(file, index)
+  const text = editingContent.value[key] ?? file.content ?? ''
+  // 缓存当前平台，防止保存/刷新过程中切换平台导致竞态
+  const platform = props.platform
+
+  if (!file.path) {
+    previewErrors.value[key] = t('components.cliConfig.previewUnknownPath')
+    showToast(t('components.cliConfig.previewUnknownPath'), 'error')
+    return
+  }
+
+  // 防御：避免极端情况下的重复触发（双击/连点）
+  if (previewSaving.value) return
+
+  previewSaving.value = true
+  try {
+    await saveCLIConfigFileContent(platform, file.path, text)
+    // 校验平台是否在保存过程中发生变化
+    if (platform !== props.platform) {
+      console.warn('[CLIConfigEditor] Platform changed during save, skipping state update')
+      return
+    }
+    // 重新拉取，让预览展示真实落盘内容（含后端强制写入的锁定字段）
+    const nextConfig = await fetchCLIConfig(platform)
+    // 校验平台是否在刷新过程中发生变化（避免旧平台结果覆盖新平台界面状态）
+    if (platform !== props.platform) {
+      console.warn('[CLIConfigEditor] Platform changed during fetch, skipping state update')
+      return
+    }
+    config.value = nextConfig
+    // 同步 editableValues 到新配置，避免表单状态不一致
+    editableValues.value = { ...(nextConfig.editable || {}) }
+    // 提取自定义字段（防止预览保存覆盖了自定义字段后表单丢失）
+    extractCustomFields()
+    // 通知父组件（避免后续表单提交覆盖预览保存的内容）
+    emitChanges()
+    // 刷新快照数据以更新 Preview/Current 标签页
+    await loadSnapshots()
+    // 再次校验平台（loadSnapshots 是异步操作）
+    if (platform !== props.platform) {
+      console.warn('[CLIConfigEditor] Platform changed during snapshot refresh, skipping state update')
+      return
+    }
+    // 仅重置当前文件的预览内容，保留其他文件的未保存编辑
+    editingContent.value[key] = previewFiles.value.find((f, i) => getPreviewKey(f, i) === key)?.content || ''
+    delete previewErrors.value[key]
+    showToast(t('components.cliConfig.previewApplySuccess'), 'success')
+  } catch (error) {
+    console.error('Failed to save preview content:', error)
+    const errorMsg = extractErrorMessage(error, t('components.cliConfig.loadError'))
+    previewErrors.value[key] = errorMsg
+    showToast(errorMsg, 'error')
+  } finally {
+    previewSaving.value = false
+  }
+}
+
+// 还原预览编辑
+const handleResetPreviewEdit = (file: CLIConfigFile, index: number) => {
+  const key = getPreviewKey(file, index)
+  editingContent.value[key] = file.content || ''
+  delete previewErrors.value[key]
+}
+
+// ========== Current 标签页编辑函数 ==========
+
+// 生成 Current 文件的唯一 key（与 getPreviewKey 保持一致，前缀在 DOM :key 处添加）
+const getCurrentKey = (file: CLIConfigFile, index: number): string => {
+  return file.path || `${file.format || 'file'}-${index}`
+}
+
+// 切换 Current 区编辑模式
+const toggleCurrentEditable = () => {
+  currentEditable.value = !currentEditable.value
+  if (!currentEditable.value) {
+    // 锁定时清空编辑缓冲，避免旧数据意外复用
+    currentEditingContent.value = {}
+    currentErrors.value = {}
+  } else {
+    // 解锁时总是从最新磁盘内容初始化（Current 语义是实时磁盘状态）
+    initCurrentEditing()
+    nextTick(() => {
+      currentTextareaRef.value?.focus()
+    })
+  }
+}
+
+// 初始化 Current 编辑内容
+const initCurrentEditing = () => {
+  const nextContent: Record<string, string> = {}
+  currentFiles.value.forEach((file, index) => {
+    const key = getCurrentKey(file, index)
+    nextContent[key] = file.content || ''
+  })
+  currentEditingContent.value = nextContent
+  currentErrors.value = {}
+}
+
+// 应用 Current 编辑（保存到磁盘）
+const handleApplyCurrentEdit = async (file: CLIConfigFile, index: number) => {
+  const key = getCurrentKey(file, index)
+  const text = currentEditingContent.value[key] ?? file.content ?? ''
+  // 缓存当前平台，防止保存过程中切换平台导致竞态
+  const platform = props.platform
+  // 保存文件路径，用于后续从 nextConfig 中精确查找最新内容
+  const targetPath = file.path
+
+  if (!targetPath) {
+    currentErrors.value[key] = t('components.cliConfig.previewUnknownPath')
+    showToast(t('components.cliConfig.previewUnknownPath'), 'error')
+    return
+  }
+
+  // 防御：避免极端情况下的重复触发（双击/连点）
+  if (currentSaving.value) return
+
+  currentSaving.value = true
+  try {
+    await saveCLIConfigFileContent(platform, targetPath, text)
+    // 校验平台是否在保存过程中发生变化
+    if (platform !== props.platform) {
+      console.warn('[CLIConfigEditor] Platform changed during save, skipping state update')
+      return
+    }
+    // 重新拉取配置以同步状态
+    const nextConfig = await fetchCLIConfig(platform)
+    // 校验平台是否在刷新过程中发生变化（避免旧平台结果覆盖新平台界面状态）
+    if (platform !== props.platform) {
+      console.warn('[CLIConfigEditor] Platform changed during fetch, skipping state update')
+      return
+    }
+    config.value = nextConfig
+    editableValues.value = { ...(nextConfig.editable || {}) }
+    extractCustomFields()
+    emitChanges()
+    // 刷新快照数据以更新 Preview/Current 标签页
+    await loadSnapshots()
+    // 再次校验平台（loadSnapshots 是异步操作）
+    if (platform !== props.platform) {
+      console.warn('[CLIConfigEditor] Platform changed during snapshot refresh, skipping state update')
+      return
+    }
+
+    // 从刷新后的 currentFiles 获取最新内容
+    const refreshedFile = currentFiles.value.find((f, i) => getCurrentKey(f, i) === key)
+    currentEditingContent.value[key] = refreshedFile?.content || ''
+    delete currentErrors.value[key]
+    showToast(t('components.cliConfig.previewApplySuccess'), 'success')
+  } catch (error) {
+    console.error('Failed to save current file content:', error)
+    const errorMsg = extractErrorMessage(error, t('components.cliConfig.loadError'))
+    currentErrors.value[key] = errorMsg
+    showToast(errorMsg, 'error')
+  } finally {
+    currentSaving.value = false
+  }
+}
+
+// 还原 Current 编辑
+const handleResetCurrentEdit = (file: CLIConfigFile, index: number) => {
+  const key = getCurrentKey(file, index)
+  currentEditingContent.value[key] = file.content || ''
+  delete currentErrors.value[key]
+}
+
 // 监听 modelValue 变化
 watch(() => props.modelValue, (newVal) => {
   if (newVal && Object.keys(newVal).length > 0) {
@@ -726,11 +1283,32 @@ watch(() => props.platform, () => {
   }
 })
 
+// 监听供应商配置变化，重新加载快照（用于实时更新预览）
+// 使用防抖避免频繁请求，使用请求序号避免竞态条件
+watch(
+  () => [props.providerConfig?.apiKey, props.providerConfig?.baseUrl],
+  () => {
+    // 仅在组件展开且配置已加载时重新加载快照
+    if (expanded.value && config.value) {
+      loadSnapshotsDebounced()
+    }
+  },
+  { deep: true }
+)
+
 onMounted(() => {
   // 如果有初始值，自动展开
   if (props.modelValue && Object.keys(props.modelValue).length > 0) {
     expanded.value = true
     loadConfig()
+  }
+})
+
+onUnmounted(() => {
+  // 清理防抖定时器，避免组件卸载后仍有请求发出
+  if (snapshotDebounceTimer) {
+    clearTimeout(snapshotDebounceTimer)
+    snapshotDebounceTimer = null
   }
 })
 </script>
@@ -1090,6 +1668,48 @@ onMounted(() => {
   font-size: 14px;
 }
 
+/* Tabs 样式 */
+.cli-preview-tabs-wrapper {
+  margin-top: 12px;
+}
+
+.cli-tabs-list {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  background: var(--mac-surface-strong);
+  border-radius: 8px;
+  margin-bottom: 12px;
+}
+
+.cli-tab-btn {
+  flex: 1;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--mac-text-secondary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.cli-tab-btn:hover:not(.selected) {
+  background: var(--mac-surface);
+  color: var(--mac-text);
+}
+
+.cli-tab-btn.selected {
+  background: var(--mac-accent);
+  color: white;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+:global(.dark) .cli-tab-btn.selected {
+  background: var(--mac-accent);
+}
+
 .cli-preview-count {
   margin-left: auto;
   font-size: 11px;
@@ -1156,6 +1776,65 @@ onMounted(() => {
   background: var(--mac-bg);
 }
 
+/* 预览区解锁编辑样式 */
+.cli-preview-lock {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--mac-text-secondary);
+  padding: 4px 8px;
+}
+
+.cli-preview-lock:hover {
+  color: var(--mac-text);
+}
+
+.cli-preview-textarea {
+  width: 100%;
+  min-height: 160px;
+  padding: 12px;
+  border: 1px solid var(--mac-border);
+  border-radius: 6px;
+  font-size: 11px;
+  line-height: 1.5;
+  font-family: monospace;
+  background: var(--mac-bg);
+  color: var(--mac-text);
+  resize: vertical;
+}
+
+.cli-preview-textarea:focus {
+  outline: none;
+  border-color: var(--mac-accent);
+}
+
+.cli-preview-actions {
+  display: flex;
+  gap: 8px;
+  margin: 8px 12px 4px;
+}
+
+.cli-primary-btn {
+  background: var(--mac-accent);
+  color: white;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.cli-primary-btn:hover {
+  opacity: 0.9;
+}
+
+.cli-preview-error {
+  font-size: 12px;
+  color: var(--mac-error, #ff3b30);
+  margin: 4px 12px 8px;
+}
+
 /* 深色模式适配 */
 :global(.dark) .cli-field-input {
   background: var(--mac-surface-strong);
@@ -1167,5 +1846,9 @@ onMounted(() => {
 
 :global(.dark) .cli-field-input.disabled {
   background: var(--mac-bg);
+}
+
+:global(.dark) .cli-preview-textarea {
+  background: var(--mac-surface-strong);
 }
 </style>

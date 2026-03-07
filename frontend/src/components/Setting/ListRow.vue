@@ -20,7 +20,8 @@ defineProps<{
 <style scoped>
 .mac-list-row {
   display: flex;
-  align-items: center;
+  flex-wrap: wrap;
+  align-items: flex-start;
   justify-content: space-between;
   padding: 14px 18px;
   gap: 16px;
@@ -28,12 +29,15 @@ defineProps<{
 
 .mac-list-text {
   text-align: left;
+  flex: 1 1 auto;
+  min-width: 160px;
 }
 
 .mac-list-label {
   font-size: 0.95rem;
   font-weight: 600;
   color: var(--mac-text);
+  overflow-wrap: anywhere;
 }
 
 .mac-list-sublabel {
@@ -46,5 +50,9 @@ defineProps<{
   display: inline-flex;
   align-items: center;
   justify-content: flex-end;
+  flex-shrink: 0;
+  max-width: 100%;
+  min-width: 0;
+  margin-left: auto;
 }
 </style>

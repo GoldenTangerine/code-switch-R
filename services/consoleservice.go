@@ -5,6 +5,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -18,12 +19,13 @@ type ConsoleLog struct {
 
 // ConsoleService 控制台日志服务
 type ConsoleService struct {
-	logs      []ConsoleLog
-	mutex     sync.RWMutex
-	maxLogs   int
-	writer    *consoleWriter
-	oldStdout *os.File
-	oldStderr *os.File
+	logs         []ConsoleLog
+	mutex        sync.RWMutex
+	maxLogs      int
+	writer       *consoleWriter
+	oldStdout    *os.File
+	oldStderr    *os.File
+	pauseLogging bool // 暂停日志捕获标志
 }
 
 // consoleWriter 自定义 writer，同时写入控制台和缓存
@@ -78,33 +80,77 @@ func (cs *ConsoleService) captureStdout() {
 // readPipe 读取管道内容
 func (cs *ConsoleService) readPipe(reader *os.File, level string, output *os.File) {
 	buf := make([]byte, 1024)
+	var pendingBuffer string
+
 	for {
 		n, err := reader.Read(buf)
+		if n > 0 {
+			chunk := buf[:n]
+			// 写入原始输出
+			if _, writeErr := output.Write(chunk); writeErr != nil {
+				fmt.Fprintf(output, "写入原始输出失败: %v\n", writeErr)
+			}
+
+			// 按行切分，避免多个级别混在同一条日志里
+			pendingBuffer = cs.captureLogLines(level, pendingBuffer, string(chunk), false)
+		}
+
 		if err != nil {
 			if err != io.EOF {
 				fmt.Fprintf(output, "读取管道失败: %v\n", err)
 			}
+			cs.captureLogLines(level, pendingBuffer, "", true)
 			return
-		}
-
-		if n > 0 {
-			msg := string(buf[:n])
-			// 写入原始输出
-			output.Write(buf[:n])
-			// 添加到日志缓存
-			cs.addLog(level, msg)
 		}
 	}
 }
 
+func (cs *ConsoleService) captureLogLines(level, pending, chunk string, flushRemainder bool) string {
+	buffer := pending + chunk
+	for {
+		newLineIndex := strings.IndexByte(buffer, '\n')
+		if newLineIndex == -1 {
+			break
+		}
+
+		line := strings.TrimSuffix(buffer[:newLineIndex], "\r")
+		if strings.TrimSpace(line) != "" {
+			cs.addLog(level, line)
+		}
+		buffer = buffer[newLineIndex+1:]
+	}
+
+	if flushRemainder {
+		rest := strings.TrimSuffix(buffer, "\r")
+		if strings.TrimSpace(rest) != "" {
+			cs.addLog(level, rest)
+		}
+		return ""
+	}
+
+	return buffer
+}
+
 // addLog 添加日志到缓存
 func (cs *ConsoleService) addLog(level, message string) {
+	// 如果暂停日志捕获，直接返回
+	if cs.pauseLogging {
+		return
+	}
+
+	// 过滤 Wails 框架的调试日志，避免日志递归
+	if shouldFilterLog(message) {
+		return
+	}
+
 	cs.mutex.Lock()
 	defer cs.mutex.Unlock()
 
+	resolvedLevel := resolveLogLevel(level, message)
+
 	log := ConsoleLog{
 		Timestamp: time.Now(),
-		Level:     level,
+		Level:     resolvedLevel,
 		Message:   message,
 	}
 
@@ -117,6 +163,43 @@ func (cs *ConsoleService) addLog(level, message string) {
 
 	// 清理3天前的日志
 	cs.cleanOldLogs()
+}
+
+// resolveLogLevel 综合默认级别和日志内容推断真实日志级别
+func resolveLogLevel(level, message string) string {
+	baseLevel := normalizeLogLevel(level)
+	normalizedMessage := strings.ToUpper(message)
+
+	if strings.Contains(normalizedMessage, "[ERROR]") || strings.Contains(normalizedMessage, " ERROR:") || strings.Contains(normalizedMessage, " LEVEL=ERROR") {
+		return "ERROR"
+	}
+
+	if strings.Contains(normalizedMessage, "[WARN]") || strings.Contains(normalizedMessage, "[WARNING]") || strings.Contains(normalizedMessage, " WARN:") || strings.Contains(normalizedMessage, " LEVEL=WARN") || strings.Contains(normalizedMessage, " LEVEL=WARNING") {
+		return "WARN"
+	}
+
+	if strings.Contains(normalizedMessage, "[DEBUG]") || strings.Contains(normalizedMessage, " DEBUG:") || strings.Contains(normalizedMessage, " LEVEL=DEBUG") {
+		return "DEBUG"
+	}
+
+	if strings.Contains(normalizedMessage, "[INFO]") || strings.Contains(normalizedMessage, " INFO:") || strings.Contains(normalizedMessage, " LEVEL=INFO") {
+		return "INFO"
+	}
+
+	return baseLevel
+}
+
+func normalizeLogLevel(level string) string {
+	switch strings.ToUpper(strings.TrimSpace(level)) {
+	case "ERROR", "ERR":
+		return "ERROR"
+	case "WARN", "WARNING":
+		return "WARN"
+	case "DEBUG":
+		return "DEBUG"
+	default:
+		return "INFO"
+	}
 }
 
 // cleanOldLogs 清理3天前的日志
@@ -142,6 +225,10 @@ func (cs *ConsoleService) cleanOldLogs() {
 
 // GetLogs 获取所有日志
 func (cs *ConsoleService) GetLogs() []ConsoleLog {
+	// 暂停日志捕获，避免 GetLogs 本身产生的日志被记录（导致递归）
+	cs.pauseLogging = true
+	defer func() { cs.pauseLogging = false }()
+
 	cs.mutex.RLock()
 	defer cs.mutex.RUnlock()
 
@@ -153,6 +240,10 @@ func (cs *ConsoleService) GetLogs() []ConsoleLog {
 
 // GetRecentLogs 获取最近 N 条日志
 func (cs *ConsoleService) GetRecentLogs(count int) []ConsoleLog {
+	// 暂停日志捕获，避免递归
+	cs.pauseLogging = true
+	defer func() { cs.pauseLogging = false }()
+
 	cs.mutex.RLock()
 	defer cs.mutex.RUnlock()
 
@@ -172,8 +263,51 @@ func (cs *ConsoleService) GetRecentLogs(count int) []ConsoleLog {
 
 // ClearLogs 清空日志
 func (cs *ConsoleService) ClearLogs() {
+	// 暂停日志捕获，避免递归
+	cs.pauseLogging = true
+	defer func() { cs.pauseLogging = false }()
+
 	cs.mutex.Lock()
 	defer cs.mutex.Unlock()
 
 	cs.logs = make([]ConsoleLog, 0, 1000)
+}
+
+// shouldFilterLog 判断是否应该过滤这条日志
+// 过滤掉 Wails 框架的调试日志和 JSON 序列化日志，避免日志递归爆炸
+func shouldFilterLog(message string) bool {
+	// 1. 过滤掉包含大量反斜杠的日志（JSON 序列化递归）
+	// 正常日志不应该有超过 10 个连续的反斜杠
+	if strings.Contains(message, "\\\\\\\\\\\\\\\\\\\\") {
+		return true
+	}
+
+	// 2. 过滤掉包含 JSON 结构的日志（GetLogs 的返回值被序列化）
+	// 检测是否包含日志的 JSON 结构特征
+	if strings.Contains(message, `"timestamp":`) &&
+		strings.Contains(message, `"level":`) &&
+		strings.Contains(message, `"message":`) {
+		return true
+	}
+
+	// 3. 过滤 Wails 框架的内部日志
+	filterKeywords := []string{
+		"Binding call started",
+		"Binding call complete",
+		"Asset Request",
+		"INF Binding call",
+		"INF Asset Request",
+		"/wails/runtime",
+		"ConsoleService.GetLogs",
+		"ConsoleService.GetRecentLogs",
+		"ConsoleService.ClearLogs",
+	}
+
+	for _, keyword := range filterKeywords {
+		if strings.Contains(message, keyword) {
+			return true
+		}
+	}
+
+	return false
 }

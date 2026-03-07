@@ -7,11 +7,16 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
+
+	modelpricing "codeswitch/resources/model-pricing"
 
 	"github.com/daodao97/xgo/xdb"
 	"github.com/daodao97/xgo/xrequest"
@@ -24,6 +29,7 @@ import (
 // @author sm
 type LastUsedProvider struct {
 	Platform     string `json:"platform"`      // claude/codex/gemini
+	ProviderID   string `json:"provider_id"`   // 供应商 ID（字符串，兼容 int64/string）
 	ProviderName string `json:"provider_name"` // 供应商名称
 	UpdatedAt    int64  `json:"updated_at"`    // 更新时间（毫秒）
 }
@@ -33,16 +39,132 @@ type ProviderRelayService struct {
 	geminiService       *GeminiService
 	blacklistService    *BlacklistService
 	notificationService *NotificationService
+	appSettings         *AppSettingsService // 应用设置服务（用于获取轮询开关状态）
+	modelPricing        *ModelPricingService
 	server              *http.Server
 	addr                string
 	lastUsed            map[string]*LastUsedProvider // 各平台最后使用的供应商
 	lastUsedMu          sync.RWMutex                 // 保护 lastUsed 的锁
+	rrMu                sync.Mutex                   // 轮询状态锁
+	rrLastStart         map[string]string            // 轮询状态：key="platform:level" → value=上次起始 Provider ID（回退为 Name）
 }
 
 // errClientAbort 表示客户端中断连接，不应计入 provider 失败次数
 var errClientAbort = errors.New("client aborted, skip failure count")
 
-func NewProviderRelayService(providerService *ProviderService, geminiService *GeminiService, blacklistService *BlacklistService, notificationService *NotificationService, addr string) *ProviderRelayService {
+var (
+	responseModelRegex                     = regexp.MustCompile(`"model"\s*:\s*"([^"]+)"`)
+	responseModelVersionRegex              = regexp.MustCompile(`"modelVersion"\s*:\s*"([^"]+)"`)
+	requestLogSensitiveJSONValuePattern    = regexp.MustCompile(`(?i)("(?:api[_-]?key|x-api-key|x-goog-api-key|authorization|auth[_-]?token|access[_-]?token|refresh[_-]?token|password|secret)"\s*:\s*)"[^"]*"`)
+	requestLogAuthorizationBearerPattern   = regexp.MustCompile(`(?i)(authorization\s*[:=]\s*bearer\s+)[^\s",]+`)
+	requestLogSensitiveQueryValuePattern   = regexp.MustCompile(`(?i)((?:api[_-]?key|x-api-key|x-goog-api-key|auth[_-]?token|access[_-]?token)=)[^&\s]+`)
+	requestLogSensitiveKeywordQuickPattern = regexp.MustCompile(`(?i)(api[_-]?key|x-api-key|x-goog-api-key|authorization|auth[_-]?token|access[_-]?token|refresh[_-]?token|password|secret)`)
+)
+
+const requestLogPayloadMaxBytes = 8 * 1024 * 1024
+const requestLogPayloadRedactedValue = "[REDACTED]"
+
+// upstreamErrorResponse 保存上游非 2xx 响应，供“最终失败”场景透传给客户端
+type upstreamErrorResponse struct {
+	statusCode  int
+	contentType string
+	headers     http.Header
+	body        []byte
+}
+
+func newUpstreamErrorResponse(statusCode int, contentType string, headers http.Header, body []byte) *upstreamErrorResponse {
+	bodyCopy := make([]byte, len(body))
+	copy(bodyCopy, body)
+
+	headerCopy := make(http.Header, len(headers))
+	for key, values := range headers {
+		copied := make([]string, len(values))
+		copy(copied, values)
+		headerCopy[key] = copied
+	}
+
+	return &upstreamErrorResponse{
+		statusCode:  statusCode,
+		contentType: contentType,
+		headers:     headerCopy,
+		body:        bodyCopy,
+	}
+}
+
+func (e *upstreamErrorResponse) Error() string {
+	if e == nil {
+		return "upstream error: <nil>"
+	}
+	trimmed := strings.TrimSpace(string(e.body))
+	if trimmed != "" {
+		return fmt.Sprintf("upstream status %d: %s", e.statusCode, truncateText(trimmed, 2048))
+	}
+	return fmt.Sprintf("upstream status %d", e.statusCode)
+}
+
+func isHopByHopHeader(headerName string) bool {
+	switch strings.ToLower(strings.TrimSpace(headerName)) {
+	case "connection",
+		"keep-alive",
+		"proxy-authenticate",
+		"proxy-authorization",
+		"te",
+		"trailer",
+		"transfer-encoding",
+		"upgrade",
+		"content-length":
+		return true
+	default:
+		return false
+	}
+}
+
+func (e *upstreamErrorResponse) WriteTo(c *gin.Context) {
+	if e == nil || c == nil {
+		return
+	}
+
+	// 复制上游响应头（过滤 hop-by-hop 头），尽量保持原样透传
+	dstHeaders := c.Writer.Header()
+	for key, values := range e.headers {
+		if isHopByHopHeader(key) {
+			continue
+		}
+		dstHeaders.Del(key)
+		for _, value := range values {
+			dstHeaders.Add(key, value)
+		}
+	}
+
+	// 若上游 Header 缺失 Content-Type，尝试使用记录值补全；否则保持原样
+	if strings.TrimSpace(dstHeaders.Get("Content-Type")) == "" {
+		contentType := strings.TrimSpace(e.contentType)
+		if contentType != "" {
+			dstHeaders.Set("Content-Type", contentType)
+		}
+	}
+
+	c.Status(e.statusCode)
+	if len(e.body) == 0 {
+		return
+	}
+	_, _ = c.Writer.Write(e.body)
+}
+
+// writeLastUpstreamErrorIfAny 在“所有重试与降级均失败”时透传最后一次上游错误
+func writeLastUpstreamErrorIfAny(c *gin.Context, err error) bool {
+	if err == nil {
+		return false
+	}
+	var upstreamErr *upstreamErrorResponse
+	if !errors.As(err, &upstreamErr) {
+		return false
+	}
+	upstreamErr.WriteTo(c)
+	return true
+}
+
+func NewProviderRelayService(providerService *ProviderService, geminiService *GeminiService, blacklistService *BlacklistService, notificationService *NotificationService, appSettings *AppSettingsService, modelPricing *ModelPricingService, addr string) *ProviderRelayService {
 	if addr == "" {
 		addr = "127.0.0.1:18100" // 【安全修复】仅监听本地回环地址，防止 API Key 暴露到局域网
 	}
@@ -55,22 +177,34 @@ func NewProviderRelayService(providerService *ProviderService, geminiService *Ge
 		geminiService:       geminiService,
 		blacklistService:    blacklistService,
 		notificationService: notificationService,
+		appSettings:         appSettings,
+		modelPricing:        modelPricing,
 		addr:                addr,
 		lastUsed: map[string]*LastUsedProvider{
 			"claude": nil,
 			"codex":  nil,
 			"gemini": nil,
 		},
+		rrLastStart: make(map[string]string),
 	}
+}
+
+func providerRefFromProvider(provider Provider) string {
+	return providerRefFromNumericID(provider.ID, provider.Name)
+}
+
+func providerRefFromGeminiProvider(provider GeminiProvider) string {
+	return providerRefFromStringID(provider.ID, provider.Name)
 }
 
 // setLastUsedProvider 记录最后使用的供应商
 // @author sm
-func (prs *ProviderRelayService) setLastUsedProvider(platform, providerName string) {
+func (prs *ProviderRelayService) setLastUsedProvider(platform, providerID, providerName string) {
 	prs.lastUsedMu.Lock()
 	defer prs.lastUsedMu.Unlock()
 	prs.lastUsed[platform] = &LastUsedProvider{
 		Platform:     platform,
+		ProviderID:   providerID,
 		ProviderName: providerName,
 		UpdatedAt:    time.Now().UnixMilli(),
 	}
@@ -93,6 +227,154 @@ func (prs *ProviderRelayService) GetAllLastUsedProviders() map[string]*LastUsedP
 	for k, v := range prs.lastUsed {
 		result[k] = v
 	}
+	return result
+}
+
+// isRoundRobinEnabled 检查轮询功能是否启用
+// 条件：1. 应用设置开关启用 2. 拉黑模式关闭（Fixed Mode 跳过轮询）
+func (prs *ProviderRelayService) isRoundRobinEnabled() bool {
+	// 检查拉黑模式是否启用（Fixed Mode 优先级高于轮询）
+	if prs.blacklistService.ShouldUseFixedMode() {
+		return false
+	}
+
+	// 检查应用设置开关
+	if prs.appSettings == nil {
+		return false
+	}
+	settings, err := prs.appSettings.GetAppSettings()
+	if err != nil {
+		return false
+	}
+	return settings.EnableRoundRobin
+}
+
+// isRequestLogPayloadSanitizationEnabled 检查 request_log payload 脱敏是否启用。
+// 默认开启，优先保证敏感信息不明文落库。
+func (prs *ProviderRelayService) isRequestLogPayloadSanitizationEnabled() bool {
+	_, sanitizeEnabled := prs.resolveRequestLogPayloadCaptureAndSanitization()
+	return sanitizeEnabled
+}
+
+// resolveRequestLogPayloadCaptureAndSanitization 一次性读取 payload 相关配置，
+// 避免在单次请求里重复读取 app settings 文件。
+func (prs *ProviderRelayService) resolveRequestLogPayloadCaptureAndSanitization() (captureEnabled bool, sanitizeEnabled bool) {
+	captureEnabled = false
+	sanitizeEnabled = true
+	if prs.appSettings == nil {
+		return
+	}
+	settings, err := prs.appSettings.GetAppSettings()
+	if err != nil {
+		return
+	}
+	captureEnabled = settings.CaptureRequestLogPayload
+	sanitizeEnabled = settings.SanitizeRequestLogPayload
+	return
+}
+
+// roundRobinOrder 对同 Level 的 providers 进行轮询排序
+// 算法：基于 provider ID（回退 name）追踪，将上次起始 provider 移到末尾，实现轮询效果
+// 参数：
+//   - platform: 平台标识（claude/codex/gemini/custom:xxx）
+//   - level: 当前 Level
+//   - providers: 同 Level 的 providers 列表（已过滤、按用户排序）
+//
+// 返回：轮询排序后的 providers 列表（新切片，不修改原切片）
+func (prs *ProviderRelayService) roundRobinOrder(platform string, level int, providers []Provider) []Provider {
+	if len(providers) <= 1 {
+		return providers
+	}
+
+	// 构建 key: "platform:level"
+	key := fmt.Sprintf("%s:%d", platform, level)
+
+	prs.rrMu.Lock()
+	defer prs.rrMu.Unlock()
+
+	lastStart := prs.rrLastStart[key]
+
+	// 记录本次起始 provider 标识（更新状态）
+	prs.rrLastStart[key] = providerRefFromProvider(providers[0])
+
+	// 如果没有历史记录，返回原顺序
+	if lastStart == "" {
+		return providers
+	}
+
+	// 查找上次起始 provider 在当前列表中的位置
+	lastIdx := -1
+	for i, p := range providers {
+		if providerRefFromProvider(p) == lastStart {
+			lastIdx = i
+			break
+		}
+	}
+
+	// 上次起始 provider 不在当前列表（可能被禁用/黑名单），返回原顺序
+	if lastIdx == -1 {
+		return providers
+	}
+
+	// 构建轮询顺序：从 lastIdx+1 开始，环形遍历
+	result := make([]Provider, len(providers))
+	for i := 0; i < len(providers); i++ {
+		idx := (lastIdx + 1 + i) % len(providers)
+		result[i] = providers[idx]
+	}
+
+	// 更新本次起始 provider 标识
+	prs.rrLastStart[key] = providerRefFromProvider(result[0])
+
+	return result
+}
+
+// roundRobinOrderGemini 对 Gemini providers 进行轮询排序（复用相同逻辑）
+func (prs *ProviderRelayService) roundRobinOrderGemini(level int, providers []GeminiProvider) []GeminiProvider {
+	if len(providers) <= 1 {
+		return providers
+	}
+
+	// 构建 key: "gemini:level"
+	key := fmt.Sprintf("gemini:%d", level)
+
+	prs.rrMu.Lock()
+	defer prs.rrMu.Unlock()
+
+	lastStart := prs.rrLastStart[key]
+
+	// 记录本次起始 provider 标识
+	prs.rrLastStart[key] = providerRefFromGeminiProvider(providers[0])
+
+	// 如果没有历史记录，返回原顺序
+	if lastStart == "" {
+		return providers
+	}
+
+	// 查找上次起始 provider 在当前列表中的位置
+	lastIdx := -1
+	for i, p := range providers {
+		if providerRefFromGeminiProvider(p) == lastStart {
+			lastIdx = i
+			break
+		}
+	}
+
+	// 上次起始 provider 不在当前列表，返回原顺序
+	if lastIdx == -1 {
+		return providers
+	}
+
+	// 构建轮询顺序
+	result := make([]GeminiProvider, len(providers))
+	for i := 0; i < len(providers); i++ {
+		idx := (lastIdx + 1 + i) % len(providers)
+		result[i] = providers[idx]
+	}
+
+	// 更新本次起始 provider 标识
+	prs.rrLastStart[key] = providerRefFromGeminiProvider(result[0])
+
 	return result
 }
 
@@ -157,6 +439,13 @@ func (prs *ProviderRelayService) validateConfig() []string {
 					"[%s/%s] 未配置 supportedModels 或 modelMapping，将假设支持所有模型（可能导致降级失败）",
 					kind, p.Name))
 			}
+
+			// 检查是否只配置了映射但没有白名单
+			if len(p.ModelMapping) > 0 && len(p.SupportedModels) == 0 {
+				warnings = append(warnings, fmt.Sprintf(
+					"[%s/%s] 配置了 modelMapping 但未配置 supportedModels，映射目标将不做校验，请确认目标模型在供应商处可用",
+					kind, p.Name))
+			}
 		}
 
 		if enabledCount == 0 {
@@ -184,9 +473,20 @@ func (prs *ProviderRelayService) registerRoutes(router gin.IRouter) {
 	router.POST("/v1/messages", prs.proxyHandler("claude", "/v1/messages"))
 	router.POST("/responses", prs.proxyHandler("codex", "/responses"))
 
+	// /v1/models 端点（OpenAI-compatible API）
+	// 支持 Claude 和 Codex 平台
+	router.GET("/v1/models", prs.modelsHandler("claude"))
+
 	// Gemini API 端点（使用专门的路径前缀避免与 Claude 冲突）
 	router.POST("/gemini/v1beta/*any", prs.geminiProxyHandler("/v1beta"))
 	router.POST("/gemini/v1/*any", prs.geminiProxyHandler("/v1"))
+
+	// 自定义 CLI 工具端点（路由格式: /custom/:toolId/v1/messages）
+	// toolId 用于区分不同的 CLI 工具，对应 provider kind 为 "custom:{toolId}"
+	router.POST("/custom/:toolId/v1/messages", prs.customCliProxyHandler())
+
+	// 自定义 CLI 工具的 /v1/models 端点
+	router.GET("/custom/:toolId/v1/models", prs.customModelsHandler())
 }
 
 func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.HandlerFunc {
@@ -239,7 +539,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 			}
 
 			// 黑名单检查：跳过已拉黑的 provider
-			if isBlacklisted, until := prs.blacklistService.IsBlacklisted(kind, provider.Name); isBlacklisted {
+			if isBlacklisted, until := prs.blacklistService.IsBlacklistedByID(kind, providerRefFromProvider(provider), provider.Name); isBlacklisted {
 				fmt.Printf("⛔ Provider %s 已拉黑，过期时间: %v\n", provider.Name, until.Format("15:04:05"))
 				skippedCount++
 				continue
@@ -288,87 +588,146 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 		clientHeaders := cloneHeaders(c.Request.Header)
 
 		// 获取拉黑功能开关状态
-		blacklistEnabled := prs.blacklistService.IsLevelBlacklistEnabled()
+		blacklistEnabled := prs.blacklistService.ShouldUseFixedMode()
 
-		// 【拉黑模式】：只尝试第一个 provider，失败直接返回错误（不自动降级）
-		// 只有当 provider 被拉黑后，下次请求才会自动使用下一个
+		// 【拉黑模式】：同 Provider 重试直到被拉黑，然后切换到下一个 Provider
+		// 设计目标：Claude Code 单次请求最多重试 3 次，但拉黑阈值可能是 5
+		// 通过内部重试机制，在单次请求中累积足够失败次数触发拉黑
 		if blacklistEnabled {
-			fmt.Printf("[INFO] 🔒 拉黑模式已开启，禁用自动降级\n")
+			fmt.Printf("[INFO] 🔒 拉黑模式已开启（同 Provider 重试到拉黑再切换）\n")
 
-			// 找到第一个 provider（按 Level 升序）
-			var firstProvider *Provider
-			var firstLevel int
+			// 获取重试配置
+			retryConfig := prs.blacklistService.GetRetryConfig()
+			maxRetryPerProvider := retryConfig.FailureThreshold
+			retryWaitSeconds := retryConfig.RetryWaitSeconds
+			fmt.Printf("[INFO] 重试配置: 每 Provider 最多 %d 次重试，间隔 %d 秒\n",
+				maxRetryPerProvider, retryWaitSeconds)
+
+			var lastError error
+			var lastProvider string
+			totalAttempts := 0
+
+			// 遍历所有 Level 和 Provider
 			for _, level := range levels {
-				if len(levelGroups[level]) > 0 {
-					p := levelGroups[level][0]
-					firstProvider = &p
-					firstLevel = level
-					break
+				providersInLevel := levelGroups[level]
+				fmt.Printf("[INFO] === 尝试 Level %d（%d 个 provider）===\n", level, len(providersInLevel))
+
+				for _, provider := range providersInLevel {
+					// 检查是否已被拉黑（跳过已拉黑的 provider）
+					if blacklisted, until := prs.blacklistService.IsBlacklistedByID(kind, providerRefFromProvider(provider), provider.Name); blacklisted {
+						fmt.Printf("[INFO] ⏭️ 跳过已拉黑的 Provider: %s (解禁时间: %v)\n", provider.Name, until)
+						continue
+					}
+
+					// 获取实际模型名
+					effectiveModel := provider.GetEffectiveModel(requestedModel)
+					currentBodyBytes := bodyBytes
+					if effectiveModel != requestedModel && requestedModel != "" {
+						fmt.Printf("[INFO] Provider %s 映射模型: %s -> %s\n", provider.Name, requestedModel, effectiveModel)
+						modifiedBody, err := ReplaceModelInRequestBody(bodyBytes, effectiveModel)
+						if err != nil {
+							fmt.Printf("[ERROR] 模型映射失败: %v，跳过此 Provider\n", err)
+							continue
+						}
+						currentBodyBytes = modifiedBody
+					}
+
+					// 获取有效端点
+					effectiveEndpoint := provider.GetEffectiveEndpoint(endpoint)
+
+					// 同 Provider 内重试循环
+					for retryCount := 0; retryCount < maxRetryPerProvider; retryCount++ {
+						totalAttempts++
+
+						// 再次检查是否已被拉黑（重试过程中可能被拉黑）
+						if blacklisted, _ := prs.blacklistService.IsBlacklistedByID(kind, providerRefFromProvider(provider), provider.Name); blacklisted {
+							fmt.Printf("[INFO] 🚫 Provider %s 已被拉黑，切换到下一个\n", provider.Name)
+							break
+						}
+
+						fmt.Printf("[INFO] [拉黑模式] Provider: %s (Level %d) | 重试 %d/%d | Model: %s\n",
+							provider.Name, level, retryCount+1, maxRetryPerProvider, effectiveModel)
+
+						startTime := time.Now()
+						ok, err := prs.forwardRequest(c, kind, provider, effectiveEndpoint, query, clientHeaders, currentBodyBytes, isStream, effectiveModel, requestedModel)
+						duration := time.Since(startTime)
+
+						if ok {
+							fmt.Printf("[INFO] ✓ 成功: %s | 重试 %d 次 | 耗时: %.2fs\n",
+								provider.Name, retryCount+1, duration.Seconds())
+							if err := prs.blacklistService.RecordSuccessByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
+								fmt.Printf("[WARN] 清零失败计数失败: %v\n", err)
+							}
+							prs.setLastUsedProvider(kind, providerRefFromProvider(provider), provider.Name)
+							return
+						}
+
+						// 失败处理
+						lastError = err
+						lastProvider = provider.Name
+
+						errorMsg := "未知错误"
+						if err != nil {
+							errorMsg = err.Error()
+						}
+						fmt.Printf("[WARN] ✗ 失败: %s | 重试 %d/%d | 错误: %s | 耗时: %.2fs\n",
+							provider.Name, retryCount+1, maxRetryPerProvider, errorMsg, duration.Seconds())
+
+						// 客户端中断不计入失败次数，直接返回
+						if errors.Is(err, errClientAbort) {
+							fmt.Printf("[INFO] 客户端中断，停止重试\n")
+							return
+						}
+
+						// 记录失败次数（可能触发拉黑）
+						if err := prs.blacklistService.RecordFailureByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
+							fmt.Printf("[ERROR] 记录失败到黑名单失败: %v\n", err)
+						}
+
+						// 检查是否刚被拉黑
+						if blacklisted, _ := prs.blacklistService.IsBlacklistedByID(kind, providerRefFromProvider(provider), provider.Name); blacklisted {
+							fmt.Printf("[INFO] 🚫 Provider %s 达到失败阈值，已被拉黑，切换到下一个\n", provider.Name)
+							break
+						}
+
+						// 等待后重试（除非是最后一次）
+						if retryCount < maxRetryPerProvider-1 {
+							fmt.Printf("[INFO] ⏳ 等待 %d 秒后重试...\n", retryWaitSeconds)
+							time.Sleep(time.Duration(retryWaitSeconds) * time.Second)
+						}
+					}
 				}
 			}
 
-			if firstProvider == nil {
-				c.JSON(http.StatusNotFound, gin.H{"error": "no providers available"})
+			// 所有 Provider 都失败或被拉黑
+			fmt.Printf("[ERROR] 💥 拉黑模式：所有 Provider 都失败或被拉黑（共尝试 %d 次）\n", totalAttempts)
+
+			// 按用户要求：仅在所有重试/降级都失败后，透传最后一次上游错误
+			if writeLastUpstreamErrorIfAny(c, lastError) {
 				return
 			}
 
-			// 获取实际模型名
-			effectiveModel := firstProvider.GetEffectiveModel(requestedModel)
-			currentBodyBytes := bodyBytes
-			if effectiveModel != requestedModel && requestedModel != "" {
-				fmt.Printf("[INFO] Provider %s 映射模型: %s -> %s\n", firstProvider.Name, requestedModel, effectiveModel)
-				modifiedBody, err := ReplaceModelInRequestBody(bodyBytes, effectiveModel)
-				if err != nil {
-					c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("模型映射失败: %v", err)})
-					return
-				}
-				currentBodyBytes = modifiedBody
-			}
-
-			fmt.Printf("[INFO] [拉黑模式] 使用 Provider: %s (Level %d) | Model: %s\n", firstProvider.Name, firstLevel, effectiveModel)
-
-			startTime := time.Now()
-			ok, err := prs.forwardRequest(c, kind, *firstProvider, endpoint, query, clientHeaders, currentBodyBytes, isStream, effectiveModel)
-			duration := time.Since(startTime)
-
-			if ok {
-				fmt.Printf("[INFO] ✓ 成功: %s | 耗时: %.2fs\n", firstProvider.Name, duration.Seconds())
-				if err := prs.blacklistService.RecordSuccess(kind, firstProvider.Name); err != nil {
-					fmt.Printf("[WARN] 清零失败计数失败: %v\n", err)
-				}
-				// 记录最后使用的供应商
-				prs.setLastUsedProvider(kind, firstProvider.Name)
-				return
-			}
-
-			// 失败：记录失败次数并返回错误（不降级到下一个 provider）
 			errorMsg := "未知错误"
-			if err != nil {
-				errorMsg = err.Error()
+			if lastError != nil {
+				errorMsg = lastError.Error()
 			}
-			fmt.Printf("[WARN] ✗ 失败: %s | 错误: %s | 耗时: %.2fs（拉黑模式，不降级）\n",
-				firstProvider.Name, errorMsg, duration.Seconds())
-
-			// 客户端中断不计入失败次数
-			if errors.Is(err, errClientAbort) {
-				fmt.Printf("[INFO] 客户端中断，跳过失败计数: %s\n", firstProvider.Name)
-			} else if err := prs.blacklistService.RecordFailure(kind, firstProvider.Name); err != nil {
-				fmt.Printf("[ERROR] 记录失败到黑名单失败: %v\n", err)
-			}
-
 			c.JSON(http.StatusBadGateway, gin.H{
-				"error":    fmt.Sprintf("Provider %s 请求失败: %s", firstProvider.Name, errorMsg),
-				"provider": firstProvider.Name,
-				"level":    firstLevel,
-				"duration": fmt.Sprintf("%.2fs", duration.Seconds()),
-				"mode":     "blacklist",
-				"hint":     "拉黑模式已开启，不自动降级。如需自动降级请关闭拉黑功能",
+				"error":         fmt.Sprintf("所有 Provider 都失败或被拉黑，最后尝试: %s - %s", lastProvider, errorMsg),
+				"lastProvider":  lastProvider,
+				"totalAttempts": totalAttempts,
+				"mode":          "blacklist_retry",
+				"hint":          "拉黑模式已开启，同 Provider 重试到拉黑再切换。如需立即降级请关闭拉黑功能",
 			})
 			return
 		}
 
 		// 【降级模式】：拉黑功能关闭，失败自动尝试下一个 provider
-		fmt.Printf("[INFO] 🔄 降级模式（拉黑功能已关闭）\n")
+		roundRobinEnabled := prs.isRoundRobinEnabled()
+		if roundRobinEnabled {
+			fmt.Printf("[INFO] 🔄 降级模式 + 轮询负载均衡\n")
+		} else {
+			fmt.Printf("[INFO] 🔄 降级模式（顺序降级）\n")
+		}
 
 		var lastError error
 		var lastProvider string
@@ -377,6 +736,12 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 
 		for _, level := range levels {
 			providersInLevel := levelGroups[level]
+
+			// 如果启用轮询，对同 Level 的 providers 进行轮询排序
+			if roundRobinEnabled {
+				providersInLevel = prs.roundRobinOrder(kind, level, providersInLevel)
+			}
+
 			fmt.Printf("[INFO] === 尝试 Level %d（%d 个 provider）===\n", level, len(providersInLevel))
 
 			for i, provider := range providersInLevel {
@@ -402,20 +767,22 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 				fmt.Printf("[INFO]   [%d/%d] Provider: %s | Model: %s\n", i+1, len(providersInLevel), provider.Name, effectiveModel)
 
 				// 尝试发送请求
+				// 获取有效的端点（用户配置优先）
+				effectiveEndpoint := provider.GetEffectiveEndpoint(endpoint)
 				startTime := time.Now()
-				ok, err := prs.forwardRequest(c, kind, provider, endpoint, query, clientHeaders, currentBodyBytes, isStream, effectiveModel)
+				ok, err := prs.forwardRequest(c, kind, provider, effectiveEndpoint, query, clientHeaders, currentBodyBytes, isStream, effectiveModel, requestedModel)
 				duration := time.Since(startTime)
 
 				if ok {
 					fmt.Printf("[INFO]   ✓ Level %d 成功: %s | 耗时: %.2fs\n", level, provider.Name, duration.Seconds())
 
 					// 成功：清零连续失败计数
-					if err := prs.blacklistService.RecordSuccess(kind, provider.Name); err != nil {
+					if err := prs.blacklistService.RecordSuccessByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
 						fmt.Printf("[WARN] 清零失败计数失败: %v\n", err)
 					}
 
 					// 记录最后使用的供应商
-					prs.setLastUsedProvider(kind, provider.Name)
+					prs.setLastUsedProvider(kind, providerRefFromProvider(provider), provider.Name)
 
 					return // 成功，立即返回
 				}
@@ -435,31 +802,38 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 				// 客户端中断不计入失败次数
 				if errors.Is(err, errClientAbort) {
 					fmt.Printf("[INFO] 客户端中断，跳过失败计数: %s\n", provider.Name)
-				} else if err := prs.blacklistService.RecordFailure(kind, provider.Name); err != nil {
+				} else if err := prs.blacklistService.RecordFailureByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
 					fmt.Printf("[ERROR] 记录失败到黑名单失败: %v\n", err)
 				}
 
 				// 发送切换通知：检查是否有下一个可用的 provider
 				if prs.notificationService != nil {
-					nextProvider := ""
+					nextProviderName := ""
+					nextProviderID := ""
 					// 先查找同级别的下一个
 					if i+1 < len(providersInLevel) {
-						nextProvider = providersInLevel[i+1].Name
+						nextProvider := providersInLevel[i+1]
+						nextProviderName = nextProvider.Name
+						nextProviderID = providerRefFromProvider(nextProvider)
 					} else {
 						// 查找下一个 level 的第一个 provider
 						for _, nextLevel := range levels {
 							if nextLevel > level && len(levelGroups[nextLevel]) > 0 {
-								nextProvider = levelGroups[nextLevel][0].Name
+								nextProvider := levelGroups[nextLevel][0]
+								nextProviderName = nextProvider.Name
+								nextProviderID = providerRefFromProvider(nextProvider)
 								break
 							}
 						}
 					}
-					if nextProvider != "" {
+					if nextProviderName != "" {
 						prs.notificationService.NotifyProviderSwitch(SwitchNotification{
-							FromProvider: provider.Name,
-							ToProvider:   nextProvider,
-							Reason:       errorMsg,
-							Platform:     kind,
+							FromProviderID: providerRefFromProvider(provider),
+							FromProvider:   provider.Name,
+							ToProviderID:   nextProviderID,
+							ToProvider:     nextProviderName,
+							Reason:         errorMsg,
+							Platform:       kind,
 						})
 					}
 				}
@@ -468,7 +842,11 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 			fmt.Printf("[WARN] Level %d 的所有 %d 个 provider 均失败，尝试下一 Level\n", level, len(providersInLevel))
 		}
 
-		// 所有 provider 都失败，返回 502
+		// 所有 provider 都失败：优先透传最后一次上游错误，否则返回 502 聚合信息
+		if writeLastUpstreamErrorIfAny(c, lastError) {
+			return
+		}
+
 		errorMsg := "未知错误"
 		if lastError != nil {
 			errorMsg = lastError.Error()
@@ -477,9 +855,9 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 			totalAttempts, lastProvider, errorMsg)
 
 		c.JSON(http.StatusBadGateway, gin.H{
-			"error":         fmt.Sprintf("所有 %d 个 provider 均失败，最后错误: %s", totalAttempts, errorMsg),
-			"last_provider": lastProvider,
-			"last_duration": fmt.Sprintf("%.2fs", lastDuration.Seconds()),
+			"error":          fmt.Sprintf("所有 %d 个 provider 均失败，最后错误: %s", totalAttempts, errorMsg),
+			"last_provider":  lastProvider,
+			"last_duration":  fmt.Sprintf("%.2fs", lastDuration.Seconds()),
 			"total_attempts": totalAttempts,
 		})
 	}
@@ -495,23 +873,81 @@ func (prs *ProviderRelayService) forwardRequest(
 	bodyBytes []byte,
 	isStream bool,
 	model string,
+	requestedModel string,
 ) (bool, error) {
 	targetURL := joinURL(provider.APIURL, endpoint)
 	headers := cloneMap(clientHeaders)
-	headers["Authorization"] = fmt.Sprintf("Bearer %s", provider.APIKey)
+
+	// 根据认证方式设置请求头（默认 Bearer，与 v2.2.x 保持一致）
+	authType := strings.ToLower(strings.TrimSpace(provider.ConnectivityAuthType))
+	switch authType {
+	case "x-api-key":
+		// 仅当用户显式选择 x-api-key 时使用（Anthropic 官方 API）
+		headers["x-api-key"] = provider.APIKey
+		headers["anthropic-version"] = "2023-06-01"
+	case "", "bearer":
+		// 默认使用 Bearer token（兼容所有第三方中转）
+		headers["Authorization"] = fmt.Sprintf("Bearer %s", provider.APIKey)
+	default:
+		// 自定义 Header 名
+		headerName := strings.TrimSpace(provider.ConnectivityAuthType)
+		if headerName == "" || strings.EqualFold(headerName, "custom") {
+			headerName = "Authorization"
+		}
+		headers[headerName] = provider.APIKey
+	}
+
 	if _, ok := headers["Accept"]; !ok {
 		headers["Accept"] = "application/json"
 	}
 
-	requestLog := &ReqeustLog{
-		Platform: kind,
-		Provider: provider.Name,
-		Model:    model,
-		IsStream: isStream,
-	}
 	start := time.Now()
+	capturePayloadEnabled, sanitizePayloadEnabled := prs.resolveRequestLogPayloadCaptureAndSanitization()
+	requestLog := &ReqeustLog{
+		Platform:         kind,
+		ProviderID:       providerRefFromProvider(provider),
+		Provider:         provider.Name,
+		Model:            model,
+		RequestedModel:   strings.TrimSpace(requestedModel),
+		IsStream:         isStream,
+		CapturePayload:   capturePayloadEnabled,
+		SanitizePayload:  sanitizePayloadEnabled,
+		RequestStartedAt: start,
+		ProviderAPIURL:   provider.APIURL,
+		ProviderAPIKey:   provider.APIKey,
+		ProviderAuthType: provider.ConnectivityAuthType,
+	}
+	captureRequestLogRequestBody(requestLog, bodyBytes)
+	pricingSnapshot := (*modelpricing.Service)(nil)
+	if prs != nil && prs.modelPricing != nil {
+		pricingSnapshot = prs.modelPricing.Service()
+	}
+	if pricingSnapshot == nil {
+		if svc, err := modelpricing.DefaultService(); err == nil {
+			pricingSnapshot = svc
+		}
+	}
 	defer func() {
 		requestLog.DurationSec = time.Since(start).Seconds()
+		normalizeRequestLogCacheCreateTokens(requestLog)
+		normalizeRequestLogInputTokens(requestLog)
+		costResult := calculateRequestLogCost(
+			prs.providerService,
+			pricingSnapshot,
+			requestLog.ProviderAPIURL,
+			requestLog.ProviderAPIKey,
+			requestLog.ProviderAuthType,
+			requestLog.Model,
+			requestLog.InputTokens,
+			requestLog.OutputTokens,
+			requestLog.ReasoningTokens,
+			requestLog.CacheCreateTokens,
+			requestLog.Ephemeral5mTokens,
+			requestLog.Ephemeral1hTokens,
+			requestLog.CacheReadTokens,
+		)
+		applyRequestLogCostResult(requestLog, costResult)
+		prepareRequestLogPayloadForPersistence(requestLog)
 
 		// 【修复】判空保护：避免队列未初始化时 panic
 		if GlobalDBQueueLogs == nil {
@@ -524,23 +960,62 @@ func (prs *ProviderRelayService) forwardRequest(
 		defer cancel()
 
 		err := GlobalDBQueueLogs.ExecBatchCtx(ctx, `
-			INSERT INTO request_log (
-				platform, model, provider, http_code,
-				input_tokens, output_tokens, cache_create_tokens, cache_read_tokens,
-				reasoning_tokens, is_stream, duration_sec
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`,
+				INSERT INTO request_log (
+					platform, model, requested_model, response_model, provider_id, provider, http_code,
+					input_tokens, output_tokens, cache_create_tokens, ephemeral_5m_tokens, ephemeral_1h_tokens, cache_read_tokens,
+					reasoning_tokens, is_stream, duration_sec, first_token_sec, total_cost, price_source,
+					input_cost, output_cost, reasoning_cost, cache_create_cost, cache_read_cost,
+					ephemeral_5m_cost, ephemeral_1h_cost, has_pricing, matched_pricing_model,
+					provider_pricing_available, provider_quota_type, provider_input_usd_per_m, provider_output_usd_per_m,
+					provider_per_call_unified, provider_per_call_input, provider_per_call_output,
+					provider_per_call_unified_set, provider_per_call_input_set, provider_per_call_output_set,
+					request_body, response_body, request_body_truncated, response_body_truncated, payload_bytes, payload_captured
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			`,
 			requestLog.Platform,
 			requestLog.Model,
+			requestLog.RequestedModel,
+			requestLog.ResponseModel,
+			requestLog.ProviderID,
 			requestLog.Provider,
 			requestLog.HttpCode,
 			requestLog.InputTokens,
 			requestLog.OutputTokens,
 			requestLog.CacheCreateTokens,
+			requestLog.Ephemeral5mTokens,
+			requestLog.Ephemeral1hTokens,
 			requestLog.CacheReadTokens,
 			requestLog.ReasoningTokens,
 			boolToInt(requestLog.IsStream),
 			requestLog.DurationSec,
+			requestLog.FirstTokenSec,
+			requestLog.TotalCost,
+			requestLog.PriceSource,
+			requestLog.InputCost,
+			requestLog.OutputCost,
+			requestLog.ReasoningCost,
+			requestLog.CacheCreateCost,
+			requestLog.CacheReadCost,
+			requestLog.Ephemeral5mCost,
+			requestLog.Ephemeral1hCost,
+			boolToInt(requestLog.HasPricing),
+			requestLog.MatchedPricingModel,
+			boolToInt(requestLog.ProviderPricingAvailable),
+			requestLog.ProviderQuotaType,
+			requestLog.ProviderInputUSDPerM,
+			requestLog.ProviderOutputUSDPerM,
+			requestLog.ProviderPerCallUnified,
+			requestLog.ProviderPerCallInput,
+			requestLog.ProviderPerCallOutput,
+			boolToInt(requestLog.ProviderPerCallUnifiedSet),
+			boolToInt(requestLog.ProviderPerCallInputSet),
+			boolToInt(requestLog.ProviderPerCallOutputSet),
+			requestLog.RequestBody,
+			requestLog.ResponseBody,
+			boolToInt(requestLog.RequestBodyTruncated),
+			boolToInt(requestLog.ResponseBodyTruncated),
+			requestLog.PayloadBytes,
+			boolToInt(requestLog.PayloadCaptured),
 		)
 
 		if err != nil {
@@ -552,7 +1027,7 @@ func (prs *ProviderRelayService) forwardRequest(
 		SetHeaders(headers).
 		SetQueryParams(query).
 		SetRetry(1, 500*time.Millisecond).
-		SetTimeout(3 * time.Hour) // 3小时超时，适配大型项目分析
+		SetTimeout(32 * time.Hour) // 32小时超时，适配超大型项目分析
 
 	reqBody := bytes.NewReader(bodyBytes)
 	req = req.SetBody(reqBody)
@@ -579,15 +1054,6 @@ func (prs *ProviderRelayService) forwardRequest(
 
 	status := requestLog.HttpCode
 
-	if resp.Error() != nil {
-		// resp 存在、有错误、但状态码为 0：客户端中断，不计入失败
-		if status == 0 {
-			fmt.Printf("[INFO] Provider %s 响应错误但状态码为0，判定为客户端中断\n", provider.Name)
-			return false, fmt.Errorf("%w: %v", errClientAbort, resp.Error())
-		}
-		return false, resp.Error()
-	}
-
 	// 状态码为 0 且无错误：当作成功处理
 	if status == 0 {
 		fmt.Printf("[WARN] Provider %s 返回状态码 0，但无错误，当作成功处理\n", provider.Name)
@@ -607,7 +1073,43 @@ func (prs *ProviderRelayService) forwardRequest(
 		return true, nil
 	}
 
-	return false, fmt.Errorf("upstream status %d", status)
+	// 非 2xx：打印上游错误信息，便于在控制台追踪原因
+	contentType := ""
+	if resp.RawResponse != nil {
+		contentType = resp.RawResponse.Header.Get("Content-Type")
+	}
+	upstreamBody := resp.Bytes()
+	setRequestLogResponseBody(requestLog, upstreamBody)
+	body := strings.TrimSpace(string(upstreamBody))
+	if body != "" {
+		level := "ERROR"
+		if status >= http.StatusMultipleChoices && status < http.StatusBadRequest {
+			level = "WARN"
+		}
+		fmt.Printf("[%s] Upstream %s provider=%s status=%d url=%s content_type=%s\n%s\n",
+			level,
+			kind,
+			provider.Name,
+			status,
+			targetURL,
+			contentType,
+			truncateText(body, 12*1024),
+		)
+	} else {
+		fmt.Printf("[ERROR] Upstream %s provider=%s status=%d url=%s content_type=%s (empty body)\n",
+			kind,
+			provider.Name,
+			status,
+			targetURL,
+			contentType,
+		)
+	}
+
+	var upstreamHeaders http.Header
+	if resp.RawResponse != nil && resp.RawResponse.Header != nil {
+		upstreamHeaders = resp.RawResponse.Header
+	}
+	return false, newUpstreamErrorResponse(status, contentType, upstreamHeaders, upstreamBody)
 }
 
 func cloneHeaders(header http.Header) map[string]string {
@@ -651,6 +1153,174 @@ func boolToInt(b bool) int {
 	return 0
 }
 
+func truncateText(value string, maxBytes int) string {
+	if maxBytes <= 0 {
+		return ""
+	}
+	if len(value) <= maxBytes {
+		return value
+	}
+	truncated := value[:maxBytes]
+	// 避免把 UTF-8 字符截断成乱码（最多回退 3 字节，成本很小）
+	for len(truncated) > 0 && !utf8.ValidString(truncated) {
+		truncated = truncated[:len(truncated)-1]
+	}
+	return truncated + "\n...(truncated)"
+}
+
+func truncateRequestLogPayload(payload string, maxBytes int) (string, bool) {
+	if maxBytes <= 0 {
+		return "", len(payload) > 0
+	}
+	if len(payload) <= maxBytes {
+		return payload, false
+	}
+	clipped := payload[:maxBytes]
+	for len(clipped) > 0 && !utf8.ValidString(clipped) {
+		clipped = clipped[:len(clipped)-1]
+	}
+	return clipped, true
+}
+
+func sanitizeRequestLogPayload(payload string) string {
+	if strings.TrimSpace(payload) == "" {
+		return payload
+	}
+	// 快速短路：多数 payload 不含敏感键，避免每次都跑重正则。
+	if !requestLogSensitiveKeywordQuickPattern.MatchString(payload) {
+		return payload
+	}
+	sanitized := requestLogSensitiveJSONValuePattern.ReplaceAllString(payload, `${1}"`+requestLogPayloadRedactedValue+`"`)
+	sanitized = requestLogAuthorizationBearerPattern.ReplaceAllString(sanitized, `${1}`+requestLogPayloadRedactedValue)
+	sanitized = requestLogSensitiveQueryValuePattern.ReplaceAllString(sanitized, `${1}`+requestLogPayloadRedactedValue)
+	return sanitized
+}
+
+func maybeSanitizeRequestLogPayload(reqLog *ReqeustLog, payload string) string {
+	if reqLog == nil || !reqLog.SanitizePayload {
+		return payload
+	}
+	return sanitizeRequestLogPayload(payload)
+}
+
+func trimInvalidUTF8Suffix(value []byte) []byte {
+	trimmed := value
+	for len(trimmed) > 0 && !utf8.Valid(trimmed) {
+		trimmed = trimmed[:len(trimmed)-1]
+	}
+	return trimmed
+}
+
+func captureRequestLogRequestBody(reqLog *ReqeustLog, bodyBytes []byte) {
+	if reqLog == nil || !reqLog.CapturePayload {
+		return
+	}
+	payload, truncated := truncateRequestLogPayload(string(bodyBytes), requestLogPayloadMaxBytes)
+	reqLog.RequestBody = maybeSanitizeRequestLogPayload(reqLog, payload)
+	reqLog.RequestBodyTruncated = truncated
+}
+
+func setRequestLogResponseBody(reqLog *ReqeustLog, bodyBytes []byte) {
+	if reqLog == nil || !reqLog.CapturePayload {
+		return
+	}
+	payload, truncated := truncateRequestLogPayload(string(bodyBytes), requestLogPayloadMaxBytes)
+	reqLog.ResponseBody = maybeSanitizeRequestLogPayload(reqLog, payload)
+	reqLog.ResponseBodyTruncated = truncated
+	reqLog.responseBodyBuffer = nil
+}
+
+func appendRequestLogResponseBody(reqLog *ReqeustLog, chunk []byte) {
+	if reqLog == nil || !reqLog.CapturePayload || len(chunk) == 0 || reqLog.ResponseBodyTruncated {
+		return
+	}
+	if reqLog.responseBodyBuffer == nil {
+		initialCap := len(chunk)
+		if initialCap < 1024 {
+			initialCap = 1024
+		}
+		if initialCap > requestLogPayloadMaxBytes {
+			initialCap = requestLogPayloadMaxBytes
+		}
+		reqLog.responseBodyBuffer = make([]byte, 0, initialCap)
+	}
+	remaining := requestLogPayloadMaxBytes - len(reqLog.responseBodyBuffer)
+	if remaining <= 0 {
+		reqLog.ResponseBodyTruncated = true
+		return
+	}
+	if len(chunk) <= remaining {
+		reqLog.responseBodyBuffer = append(reqLog.responseBodyBuffer, chunk...)
+		return
+	}
+	reqLog.responseBodyBuffer = append(reqLog.responseBodyBuffer, chunk[:remaining]...)
+	reqLog.ResponseBodyTruncated = true
+}
+
+func resetRequestLogResponseBody(reqLog *ReqeustLog) {
+	if reqLog == nil {
+		return
+	}
+	reqLog.ResponseBody = ""
+	reqLog.ResponseBodyTruncated = false
+	reqLog.responseBodyBuffer = nil
+}
+
+func materializeRequestLogResponseBody(reqLog *ReqeustLog) {
+	if reqLog == nil {
+		return
+	}
+	if len(reqLog.responseBodyBuffer) == 0 {
+		reqLog.responseBodyBuffer = nil
+		return
+	}
+	buffer := reqLog.responseBodyBuffer
+	if reqLog.ResponseBodyTruncated {
+		buffer = trimInvalidUTF8Suffix(buffer)
+	}
+	reqLog.ResponseBody = maybeSanitizeRequestLogPayload(reqLog, string(buffer))
+	reqLog.responseBodyBuffer = nil
+}
+
+func prepareRequestLogPayloadForPersistence(reqLog *ReqeustLog) {
+	if reqLog == nil {
+		return
+	}
+	if !reqLog.CapturePayload {
+		reqLog.RequestBody = ""
+		reqLog.ResponseBody = ""
+		reqLog.RequestBodyTruncated = false
+		reqLog.ResponseBodyTruncated = false
+		reqLog.PayloadBytes = 0
+		reqLog.PayloadCaptured = false
+		reqLog.responseBodyBuffer = nil
+		return
+	}
+	reqLog.RequestBody = maybeSanitizeRequestLogPayload(reqLog, reqLog.RequestBody)
+	materializeRequestLogResponseBody(reqLog)
+	reqLog.PayloadBytes = int64(len([]byte(reqLog.RequestBody)) + len([]byte(reqLog.ResponseBody)))
+	reqLog.PayloadCaptured = reqLog.RequestBody != "" || reqLog.ResponseBody != "" || reqLog.RequestBodyTruncated || reqLog.ResponseBodyTruncated
+}
+
+func backfillRequestLogPayloadMetricsWithDB(db *sql.DB) error {
+	if db == nil {
+		return nil
+	}
+	_, err := db.Exec(`
+		UPDATE request_log
+		SET
+			payload_bytes = COALESCE(LENGTH(CAST(request_body AS BLOB)), 0) + COALESCE(LENGTH(CAST(response_body AS BLOB)), 0),
+			payload_captured = CASE
+				WHEN request_body != '' OR response_body != '' OR request_body_truncated != 0 OR response_body_truncated != 0 THEN 1
+				ELSE 0
+			END
+		WHERE
+			(request_body != '' OR response_body != '' OR request_body_truncated != 0 OR response_body_truncated != 0)
+			AND (payload_bytes = 0 OR payload_captured = 0)
+	`)
+	return err
+}
+
 func ensureRequestLogColumn(db *sql.DB, column string, definition string) error {
 	query := fmt.Sprintf("SELECT COUNT(*) FROM pragma_table_info('request_log') WHERE name = '%s'", column)
 	var count int
@@ -666,6 +1336,12 @@ func ensureRequestLogColumn(db *sql.DB, column string, definition string) error 
 	return nil
 }
 
+func ensureRequestLogIndex(db *sql.DB, name string, columns string) error {
+	stmt := fmt.Sprintf("CREATE INDEX IF NOT EXISTS %s ON request_log(%s)", name, columns)
+	_, err := db.Exec(stmt)
+	return err
+}
+
 func ensureRequestLogTable() error {
 	db, err := xdb.DB("default")
 	if err != nil {
@@ -679,19 +1355,59 @@ func ensureRequestLogTableWithDB(db *sql.DB) error {
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		platform TEXT,
 		model TEXT,
+		requested_model TEXT DEFAULT '',
+		response_model TEXT DEFAULT '',
+		provider_id TEXT DEFAULT '',
 		provider TEXT,
 		http_code INTEGER,
 		input_tokens INTEGER,
 		output_tokens INTEGER,
 		cache_create_tokens INTEGER,
+		ephemeral_5m_tokens INTEGER DEFAULT 0,
+		ephemeral_1h_tokens INTEGER DEFAULT 0,
 		cache_read_tokens INTEGER,
 		reasoning_tokens INTEGER,
 		is_stream INTEGER DEFAULT 0,
 		duration_sec REAL DEFAULT 0,
-		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-	)`
+		first_token_sec REAL DEFAULT 0,
+		total_cost REAL DEFAULT 0,
+		price_source TEXT DEFAULT '',
+		input_cost REAL DEFAULT 0,
+		output_cost REAL DEFAULT 0,
+		reasoning_cost REAL DEFAULT 0,
+		cache_create_cost REAL DEFAULT 0,
+		cache_read_cost REAL DEFAULT 0,
+		ephemeral_5m_cost REAL DEFAULT 0,
+		ephemeral_1h_cost REAL DEFAULT 0,
+		has_pricing INTEGER DEFAULT 0,
+		matched_pricing_model TEXT DEFAULT '',
+		provider_pricing_available INTEGER DEFAULT 0,
+		provider_quota_type INTEGER DEFAULT -1,
+		provider_input_usd_per_m REAL DEFAULT 0,
+		provider_output_usd_per_m REAL DEFAULT 0,
+			provider_per_call_unified REAL DEFAULT 0,
+			provider_per_call_input REAL DEFAULT 0,
+			provider_per_call_output REAL DEFAULT 0,
+			provider_per_call_unified_set INTEGER DEFAULT 0,
+			provider_per_call_input_set INTEGER DEFAULT 0,
+			provider_per_call_output_set INTEGER DEFAULT 0,
+			request_body TEXT DEFAULT '',
+			response_body TEXT DEFAULT '',
+			request_body_truncated INTEGER DEFAULT 0,
+			response_body_truncated INTEGER DEFAULT 0,
+			payload_bytes INTEGER DEFAULT 0,
+			payload_captured INTEGER DEFAULT 0,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`
 
 	if _, err := db.Exec(createTableSQL); err != nil {
+		return err
+	}
+
+	// 兼容旧库：历史版本可能残留了 request_log_stats_* 触发器，
+	// 但统计表被删除/未创建，后续 ALTER TABLE request_log 会报
+	// "error in trigger ... no such table"。先移除，最后统一重建。
+	if err := dropRequestLogStatsInsertTriggersWithDB(db); err != nil {
 		return err
 	}
 
@@ -704,14 +1420,133 @@ func ensureRequestLogTableWithDB(db *sql.DB) error {
 	if err := ensureRequestLogColumn(db, "duration_sec", "REAL DEFAULT 0"); err != nil {
 		return err
 	}
+	if err := ensureRequestLogColumn(db, "first_token_sec", "REAL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "total_cost", "REAL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "price_source", "TEXT DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "requested_model", "TEXT DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "response_model", "TEXT DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "provider_id", "TEXT DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "input_cost", "REAL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "output_cost", "REAL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "reasoning_cost", "REAL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "cache_create_cost", "REAL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "cache_read_cost", "REAL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "ephemeral_5m_tokens", "INTEGER DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "ephemeral_1h_tokens", "INTEGER DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "ephemeral_5m_cost", "REAL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "ephemeral_1h_cost", "REAL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "has_pricing", "INTEGER DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "matched_pricing_model", "TEXT DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "provider_pricing_available", "INTEGER DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "provider_quota_type", "INTEGER DEFAULT -1"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "provider_input_usd_per_m", "REAL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "provider_output_usd_per_m", "REAL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "provider_per_call_unified", "REAL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "provider_per_call_input", "REAL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "provider_per_call_output", "REAL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "provider_per_call_unified_set", "INTEGER DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "provider_per_call_input_set", "INTEGER DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "provider_per_call_output_set", "INTEGER DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "request_body", "TEXT DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "response_body", "TEXT DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "request_body_truncated", "INTEGER DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "response_body_truncated", "INTEGER DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "payload_bytes", "INTEGER DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "payload_captured", "INTEGER DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := backfillRequestLogPayloadMetricsWithDB(db); err != nil {
+		return err
+	}
+	if err := ensureRequestLogIndex(db, "idx_request_log_created_at", "created_at"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogIndex(db, "idx_request_log_platform_created_at", "platform, created_at"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogIndex(db, "idx_request_log_platform_provider_created_at", "platform, provider, created_at"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogIndex(db, "idx_request_log_platform_provider_id_created_at", "platform, provider_id, created_at"); err != nil {
+		return err
+	}
+
+	if err := ensureRequestLogStatsStorageWithDB(db); err != nil {
+		return err
+	}
 
 	return nil
 }
 
 func ReqeustLogHook(c *gin.Context, kind string, usage *ReqeustLog) func(data []byte) (bool, []byte) { // SSE 钩子：累计字节和解析 token 用量
-	return func(data []byte) (bool, []byte) {
-		payload := strings.TrimSpace(string(data))
+	var sseRemainder strings.Builder
+	var rawJSONBuffer strings.Builder
 
+	return func(data []byte) (bool, []byte) {
 		parserFn := ClaudeCodeParseTokenUsageFromResponse
 		switch kind {
 		case "codex":
@@ -719,64 +1554,590 @@ func ReqeustLogHook(c *gin.Context, kind string, usage *ReqeustLog) func(data []
 		case "gemini":
 			parserFn = GeminiParseTokenUsageFromResponse
 		}
-		parseEventPayload(payload, parserFn, usage)
+		appendRequestLogResponseBody(usage, data)
+		parseTokenUsageChunk(data, usage, parserFn, &sseRemainder, &rawJSONBuffer)
 
 		return true, data
 	}
 }
 
-func parseEventPayload(payload string, parser func(string, *ReqeustLog), usage *ReqeustLog) {
-	lines := strings.Split(payload, "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "data:") {
-			parser(strings.TrimPrefix(line, "data: "), usage)
+func parseTokenUsageChunk(
+	chunk []byte,
+	usage *ReqeustLog,
+	parser func(string, *ReqeustLog),
+	sseRemainder *strings.Builder,
+	rawJSONBuffer *strings.Builder,
+) {
+	if usage == nil || parser == nil || len(chunk) == 0 {
+		return
+	}
+
+	payload := string(chunk)
+	if usage.IsStream {
+		if sseRemainder != nil && (sseRemainder.Len() > 0 || looksLikeSSEPayload(payload)) {
+			parseEventPayload(payload, parser, usage, sseRemainder)
+			return
 		}
+	}
+
+	parseRawJSONPayload(payload, parser, usage, rawJSONBuffer)
+}
+
+func parseEventPayload(payload string, parser func(string, *ReqeustLog), usage *ReqeustLog, remainder *strings.Builder) {
+	if strings.TrimSpace(payload) == "" || parser == nil || usage == nil || remainder == nil {
+		return
+	}
+
+	remainder.WriteString(payload)
+	combined := remainder.String()
+	if combined == "" {
+		return
+	}
+
+	offset := 0
+	for {
+		newlineIdx := strings.IndexByte(combined[offset:], '\n')
+		if newlineIdx < 0 {
+			break
+		}
+		lineEnd := offset + newlineIdx
+		line := combined[offset:lineEnd]
+		parseSSEDataLine(line, parser, usage)
+		offset = lineEnd + 1
+	}
+
+	tail := combined[offset:]
+	remainder.Reset()
+	if strings.TrimSpace(tail) == "" {
+		return
+	}
+
+	if shouldProcessStandaloneSSELine(tail) {
+		parseSSEDataLine(tail, parser, usage)
+		return
+	}
+
+	remainder.WriteString(tail)
+}
+
+func parseSSEDataLine(line string, parser func(string, *ReqeustLog), usage *ReqeustLog) {
+	line = strings.TrimSpace(line)
+	if !strings.HasPrefix(line, "data:") {
+		return
+	}
+	dataLine := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+	if dataLine == "" || dataLine == "[DONE]" || !gjson.Valid(dataLine) {
+		return
+	}
+	parser(dataLine, usage)
+	updateResponseModelFromPayload(dataLine, usage)
+	updateFirstTokenFromPayload(dataLine, usage)
+}
+
+func looksLikeSSEPayload(payload string) bool {
+	trimmed := strings.TrimLeft(payload, " \t\r\n")
+	return strings.HasPrefix(trimmed, "data:") ||
+		strings.HasPrefix(trimmed, "event:") ||
+		strings.HasPrefix(trimmed, "id:") ||
+		strings.HasPrefix(trimmed, "retry:") ||
+		strings.HasPrefix(trimmed, ":")
+}
+
+func shouldProcessStandaloneSSELine(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" {
+		return true
+	}
+
+	if strings.HasPrefix(trimmed, "data:") {
+		dataLine := strings.TrimSpace(strings.TrimPrefix(trimmed, "data:"))
+		return dataLine == "" || dataLine == "[DONE]" || gjson.Valid(dataLine)
+	}
+
+	return strings.HasPrefix(trimmed, "event:") ||
+		strings.HasPrefix(trimmed, "id:") ||
+		strings.HasPrefix(trimmed, "retry:") ||
+		strings.HasPrefix(trimmed, ":")
+}
+
+func updateResponseModelFromPayload(payload string, reqLog *ReqeustLog) {
+	if reqLog == nil || strings.TrimSpace(reqLog.ResponseModel) != "" {
+		return
+	}
+	if model := extractResponseModelFromPayload(payload); model != "" {
+		reqLog.ResponseModel = model
 	}
 }
 
+func extractResponseModelFromPayload(payload string) string {
+	trimmed := strings.TrimSpace(payload)
+	if trimmed == "" {
+		return ""
+	}
+
+	for _, path := range []string{
+		"model",
+		"response.model",
+		"message.model",
+		"data.model",
+		"modelVersion",
+	} {
+		if value := strings.TrimSpace(gjson.Get(trimmed, path).String()); value != "" {
+			return value
+		}
+	}
+
+	if matches := responseModelRegex.FindStringSubmatch(trimmed); len(matches) > 1 {
+		return strings.TrimSpace(matches[1])
+	}
+	if matches := responseModelVersionRegex.FindStringSubmatch(trimmed); len(matches) > 1 {
+		return strings.TrimSpace(matches[1])
+	}
+	return ""
+}
+
+func parseRawJSONPayload(payload string, parser func(string, *ReqeustLog), usage *ReqeustLog, rawJSONBuffer *strings.Builder) {
+	if parser == nil || usage == nil || rawJSONBuffer == nil || payload == "" {
+		return
+	}
+	rawJSONBuffer.WriteString(payload)
+	buffered := strings.TrimSpace(rawJSONBuffer.String())
+	if buffered == "" || !gjson.Valid(buffered) {
+		return
+	}
+	parser(buffered, usage)
+	updateResponseModelFromPayload(buffered, usage)
+	updateFirstTokenFromPayload(buffered, usage)
+	rawJSONBuffer.Reset()
+}
+
+func updateFirstTokenFromPayload(payload string, reqLog *ReqeustLog) {
+	if reqLog == nil || !reqLog.IsStream || reqLog.FirstTokenSec > 0 {
+		return
+	}
+	if payloadHasGeneratedToken(payload) {
+		markFirstTokenTimestamp(reqLog)
+	}
+}
+
+func markFirstTokenTimestamp(reqLog *ReqeustLog) {
+	if reqLog == nil || reqLog.FirstTokenSec > 0 || reqLog.RequestStartedAt.IsZero() {
+		return
+	}
+	elapsed := time.Since(reqLog.RequestStartedAt).Seconds()
+	if elapsed <= 0 || math.IsNaN(elapsed) || math.IsInf(elapsed, 0) {
+		return
+	}
+	reqLog.FirstTokenSec = elapsed
+}
+
+func payloadHasGeneratedToken(payload string) bool {
+	trimmed := strings.TrimSpace(payload)
+	if trimmed == "" || !gjson.Valid(trimmed) {
+		return false
+	}
+
+	eventType := strings.TrimSpace(gjson.Get(trimmed, "type").String())
+	if strings.EqualFold(eventType, "response.output_text.delta") {
+		if delta := strings.TrimSpace(gjson.Get(trimmed, "delta").String()); delta != "" {
+			return true
+		}
+	}
+
+	for _, path := range []string{
+		"delta.text",
+		"delta.content",
+		"content_block.delta.text",
+		"content_block.text",
+		"response.output_text",
+		"response.output_text.delta",
+		"output_text",
+	} {
+		if value := strings.TrimSpace(gjson.Get(trimmed, path).String()); value != "" {
+			return true
+		}
+	}
+
+	for _, choice := range gjson.Get(trimmed, "choices").Array() {
+		if value := strings.TrimSpace(choice.Get("delta.content").String()); value != "" {
+			return true
+		}
+		if value := strings.TrimSpace(choice.Get("text").String()); value != "" {
+			return true
+		}
+	}
+
+	for _, output := range gjson.Get(trimmed, "response.output").Array() {
+		for _, content := range output.Get("content").Array() {
+			if value := strings.TrimSpace(content.Get("text").String()); value != "" {
+				return true
+			}
+			if value := strings.TrimSpace(content.Get("delta").String()); value != "" {
+				return true
+			}
+		}
+	}
+
+	for _, block := range gjson.Get(trimmed, "content").Array() {
+		if value := strings.TrimSpace(block.Get("text").String()); value != "" {
+			return true
+		}
+	}
+
+	for _, block := range gjson.Get(trimmed, "message.content").Array() {
+		if value := strings.TrimSpace(block.Get("text").String()); value != "" {
+			return true
+		}
+	}
+
+	for _, candidate := range gjson.Get(trimmed, "candidates").Array() {
+		for _, part := range candidate.Get("content.parts").Array() {
+			if value := strings.TrimSpace(part.Get("text").String()); value != "" {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// normalizeRequestLogInputTokens 将 input_tokens 规范化为“非缓存输入”。
+//
+// 口径说明：
+// - Codex(OpenAI) 与 Gemini 的 usage 会把「缓存 tokens」计入 input_tokens，因此需要减去 cache_* tokens。
+// - Claude(Anthropic) 的 input_tokens 本身就是“非缓存输入”，cache_* tokens 另给字段，无需减法。
+//
+// 本项目统一约定：
+// - request_log.input_tokens 存“非缓存输入”（用于 input cost 与 UI「输入」展示）
+// - request_log.cache_create_tokens / cache_read_tokens 单独存储（用于成本拆分与命中率）
+//
+// 不做这一步的话，会导致：
+// 1) UI 看起来像“输入一直在累加历史对话”；
+// 2) 成本计算把缓存 tokens 按 input + cache 两次计费。
+func normalizeRequestLogInputTokens(reqLog *ReqeustLog) {
+	if reqLog == nil {
+		return
+	}
+
+	platform := strings.ToLower(strings.TrimSpace(reqLog.Platform))
+	if platform != "codex" && platform != "gemini" {
+		return
+	}
+
+	totalInput := reqLog.InputTokens
+	if totalInput <= 0 {
+		return
+	}
+
+	cacheCreate := reqLog.CacheCreateTokens
+	cacheRead := reqLog.CacheReadTokens
+	if cacheCreate < 0 {
+		cacheCreate = 0
+	}
+	if cacheRead < 0 {
+		cacheRead = 0
+	}
+	cacheTotal := cacheCreate + cacheRead
+	if cacheTotal <= 0 {
+		return
+	}
+
+	// 兜底：如果缓存 tokens 反而比 input_tokens 还大，说明上游口径不一致或解析异常，
+	// 这里不做减法，避免记录成负数。
+	if cacheTotal > totalInput {
+		return
+	}
+
+	reqLog.InputTokens = totalInput - cacheTotal
+}
+
+func normalizeRequestLogCacheCreateTokens(reqLog *ReqeustLog) {
+	if reqLog == nil {
+		return
+	}
+	hasExplicitSplit := reqLog.Ephemeral5mTokens > 0 || reqLog.Ephemeral1hTokens > 0
+	isClaudeLog := strings.EqualFold(strings.TrimSpace(reqLog.Platform), "claude") ||
+		strings.Contains(strings.ToLower(strings.TrimSpace(reqLog.Model)), "claude")
+	if !hasExplicitSplit && !isClaudeLog {
+		return
+	}
+	normalizedTotal, normalized5m, normalized1h := normalizeCacheCreationTokenSplit(
+		reqLog.CacheCreateTokens,
+		reqLog.Ephemeral5mTokens,
+		reqLog.Ephemeral1hTokens,
+	)
+	reqLog.CacheCreateTokens = normalizedTotal
+	reqLog.Ephemeral5mTokens = normalized5m
+	reqLog.Ephemeral1hTokens = normalized1h
+}
+
+func applyRequestLogCostResult(reqLog *ReqeustLog, result requestLogCostResult) {
+	if reqLog == nil {
+		return
+	}
+	reqLog.InputCost = result.InputCost
+	reqLog.OutputCost = result.OutputCost
+	reqLog.ReasoningCost = result.ReasoningCost
+	reqLog.CacheCreateCost = result.CacheCreateCost
+	reqLog.CacheReadCost = result.CacheReadCost
+	reqLog.Ephemeral5mCost = result.Ephemeral5mCost
+	reqLog.Ephemeral1hCost = result.Ephemeral1hCost
+	reqLog.TotalCost = result.TotalCost
+	reqLog.HasPricing = result.HasPricing
+	reqLog.MatchedPricingModel = result.MatchedPricingModel
+	reqLog.PriceSource = result.PriceSource
+	reqLog.ProviderPricingAvailable = result.ProviderPricingAvailable
+	reqLog.ProviderQuotaType = result.ProviderQuotaType
+	reqLog.ProviderInputUSDPerM = result.ProviderInputUSDPerM
+	reqLog.ProviderOutputUSDPerM = result.ProviderOutputUSDPerM
+	reqLog.ProviderPerCallUnified = result.ProviderPerCallUnified
+	reqLog.ProviderPerCallInput = result.ProviderPerCallInput
+	reqLog.ProviderPerCallOutput = result.ProviderPerCallOutput
+	reqLog.ProviderPerCallUnifiedSet = result.ProviderPerCallUnifiedSet
+	reqLog.ProviderPerCallInputSet = result.ProviderPerCallInputSet
+	reqLog.ProviderPerCallOutputSet = result.ProviderPerCallOutputSet
+}
+
 type ReqeustLog struct {
-	ID                int64   `json:"id"`
-	Platform          string  `json:"platform"` // claude、codex 或 gemini
-	Model             string  `json:"model"`
-	Provider          string  `json:"provider"` // provider name
-	HttpCode          int     `json:"http_code"`
-	InputTokens       int     `json:"input_tokens"`
-	OutputTokens      int     `json:"output_tokens"`
-	CacheCreateTokens int     `json:"cache_create_tokens"`
-	CacheReadTokens   int     `json:"cache_read_tokens"`
-	ReasoningTokens   int     `json:"reasoning_tokens"`
-	IsStream          bool    `json:"is_stream"`
-	DurationSec       float64 `json:"duration_sec"`
-	CreatedAt         string  `json:"created_at"`
-	InputCost         float64 `json:"input_cost"`
-	OutputCost        float64 `json:"output_cost"`
-	CacheCreateCost   float64 `json:"cache_create_cost"`
-	CacheReadCost     float64 `json:"cache_read_cost"`
-	Ephemeral5mCost   float64 `json:"ephemeral_5m_cost"`
-	Ephemeral1hCost   float64 `json:"ephemeral_1h_cost"`
-	TotalCost         float64 `json:"total_cost"`
-	HasPricing        bool    `json:"has_pricing"`
+	ID                        int64   `json:"id"`
+	Platform                  string  `json:"platform"` // claude、codex 或 gemini
+	Model                     string  `json:"model"`
+	RequestedModel            string  `json:"requested_model,omitempty"`
+	ResponseModel             string  `json:"response_model,omitempty"`
+	ProviderID                string  `json:"provider_id,omitempty"`
+	Provider                  string  `json:"provider"` // provider name
+	PriceSource               string  `json:"price_source,omitempty"`
+	HttpCode                  int     `json:"http_code"`
+	InputTokens               int     `json:"input_tokens"`
+	OutputTokens              int     `json:"output_tokens"`
+	CacheCreateTokens         int     `json:"cache_create_tokens"`
+	Ephemeral5mTokens         int     `json:"ephemeral_5m_tokens"`
+	Ephemeral1hTokens         int     `json:"ephemeral_1h_tokens"`
+	CacheReadTokens           int     `json:"cache_read_tokens"`
+	ReasoningTokens           int     `json:"reasoning_tokens"`
+	IsStream                  bool    `json:"is_stream"`
+	DurationSec               float64 `json:"duration_sec"`
+	FirstTokenSec             float64 `json:"first_token_sec"`
+	CreatedAt                 string  `json:"created_at"`
+	InputCost                 float64 `json:"input_cost"`
+	OutputCost                float64 `json:"output_cost"`
+	ReasoningCost             float64 `json:"reasoning_cost"`
+	CacheCreateCost           float64 `json:"cache_create_cost"`
+	CacheReadCost             float64 `json:"cache_read_cost"`
+	Ephemeral5mCost           float64 `json:"ephemeral_5m_cost"`
+	Ephemeral1hCost           float64 `json:"ephemeral_1h_cost"`
+	TotalCost                 float64 `json:"total_cost"`
+	HasPricing                bool    `json:"has_pricing"`
+	MatchedPricingModel       string  `json:"matched_pricing_model,omitempty"`
+	ProviderPricingAvailable  bool    `json:"provider_pricing_available"`
+	ProviderQuotaType         int     `json:"provider_quota_type"`
+	ProviderInputUSDPerM      float64 `json:"provider_input_usd_per_m"`
+	ProviderOutputUSDPerM     float64 `json:"provider_output_usd_per_m"`
+	ProviderPerCallUnified    float64 `json:"provider_per_call_unified"`
+	ProviderPerCallInput      float64 `json:"provider_per_call_input"`
+	ProviderPerCallOutput     float64 `json:"provider_per_call_output"`
+	ProviderPerCallUnifiedSet bool    `json:"provider_per_call_unified_set"`
+	ProviderPerCallInputSet   bool    `json:"provider_per_call_input_set"`
+	ProviderPerCallOutputSet  bool    `json:"provider_per_call_output_set"`
+	RequestBody               string  `json:"request_body,omitempty"`
+	ResponseBody              string  `json:"response_body,omitempty"`
+	RequestBodyTruncated      bool    `json:"request_body_truncated"`
+	ResponseBodyTruncated     bool    `json:"response_body_truncated"`
+	PayloadBytes              int64   `json:"payload_bytes"`
+	PayloadCaptured           bool    `json:"payload_captured"`
+
+	CapturePayload  bool `json:"-"`
+	SanitizePayload bool `json:"-"`
+
+	ProviderAPIURL   string    `json:"-"`
+	ProviderAPIKey   string    `json:"-"`
+	ProviderAuthType string    `json:"-"`
+	RequestStartedAt time.Time `json:"-"`
+
+	responseBodyBuffer []byte
 }
 
 // claude code usage parser
 func ClaudeCodeParseTokenUsageFromResponse(data string, usage *ReqeustLog) {
-	usage.InputTokens += int(gjson.Get(data, "message.usage.input_tokens").Int())
-	usage.OutputTokens += int(gjson.Get(data, "message.usage.output_tokens").Int())
-	usage.CacheCreateTokens += int(gjson.Get(data, "message.usage.cache_creation_input_tokens").Int())
-	usage.CacheReadTokens += int(gjson.Get(data, "message.usage.cache_read_input_tokens").Int())
+	if usage == nil || strings.TrimSpace(data) == "" {
+		return
+	}
 
-	usage.InputTokens += int(gjson.Get(data, "usage.input_tokens").Int())
-	usage.OutputTokens += int(gjson.Get(data, "usage.output_tokens").Int())
+	input := firstPositiveIntFromPaths(
+		data,
+		"message.usage.input_tokens",
+		"usage.input_tokens",
+		"message.usage.prompt_tokens",
+		"usage.prompt_tokens",
+		"message.usage.prompt_token_count",
+		"usage.prompt_token_count",
+		"message.usage.inputTokens",
+		"usage.inputTokens",
+		"input_tokens",
+		"prompt_tokens",
+	)
+	if usage.IsStream {
+		if input > usage.InputTokens {
+			usage.InputTokens = input
+		}
+	} else if input > 0 {
+		usage.InputTokens = input
+	}
+
+	output := firstPositiveIntFromPaths(
+		data,
+		"message.usage.output_tokens",
+		"usage.output_tokens",
+		"message.usage.completion_tokens",
+		"usage.completion_tokens",
+		"message.usage.output_token_count",
+		"usage.output_token_count",
+		"message.usage.outputTokens",
+		"usage.outputTokens",
+		"output_tokens",
+		"completion_tokens",
+	)
+	if usage.IsStream {
+		if output > usage.OutputTokens {
+			usage.OutputTokens = output
+		}
+	} else if output > 0 {
+		usage.OutputTokens = output
+	}
+
+	cacheCreate := firstPositiveIntFromPaths(
+		data,
+		"message.usage.cache_creation_input_tokens",
+		"usage.cache_creation_input_tokens",
+		"usage.cache_create_tokens",
+		"cache_creation_input_tokens",
+		"cache_create_tokens",
+	)
+	cacheCreateEphemeral5m := firstPositiveIntFromPaths(
+		data,
+		"message.usage.cache_creation.ephemeral_5m_input_tokens",
+		"usage.cache_creation.ephemeral_5m_input_tokens",
+		"message.usage.cache_creation.ephemeral_5m_tokens",
+		"usage.cache_creation.ephemeral_5m_tokens",
+		"message.usage.cache_creation_input_tokens_details.ephemeral_5m_input_tokens",
+		"usage.cache_creation_input_tokens_details.ephemeral_5m_input_tokens",
+	)
+	cacheCreateEphemeral1h := firstPositiveIntFromPaths(
+		data,
+		"message.usage.cache_creation.ephemeral_1h_input_tokens",
+		"usage.cache_creation.ephemeral_1h_input_tokens",
+		"message.usage.cache_creation.ephemeral_1h_tokens",
+		"usage.cache_creation.ephemeral_1h_tokens",
+		"message.usage.cache_creation_input_tokens_details.ephemeral_1h_input_tokens",
+		"usage.cache_creation_input_tokens_details.ephemeral_1h_input_tokens",
+	)
+	applyCacheCreateTokenBreakdown(usage, cacheCreate, cacheCreateEphemeral5m, cacheCreateEphemeral1h)
+
+	cacheRead := firstPositiveIntFromPaths(
+		data,
+		"message.usage.cache_read_input_tokens",
+		"usage.cache_read_input_tokens",
+		"usage.input_tokens_details.cached_tokens",
+		"cache_read_input_tokens",
+	)
+	if usage.IsStream {
+		if cacheRead > usage.CacheReadTokens {
+			usage.CacheReadTokens = cacheRead
+		}
+	} else if cacheRead > 0 {
+		usage.CacheReadTokens = cacheRead
+	}
+}
+
+func applyCacheCreateTokenBreakdown(usage *ReqeustLog, cacheCreateTokens int, ephemeral5mTokens int, ephemeral1hTokens int) {
+	if usage == nil {
+		return
+	}
+	normalizedTotal, normalized5m, normalized1h := normalizeCacheCreationTokenSplit(
+		cacheCreateTokens,
+		ephemeral5mTokens,
+		ephemeral1hTokens,
+	)
+	if normalizedTotal == 0 && normalized5m == 0 && normalized1h == 0 {
+		return
+	}
+
+	if usage.IsStream {
+		currentTotal, current5m, current1h := normalizeCacheCreationTokenSplit(
+			usage.CacheCreateTokens,
+			usage.Ephemeral5mTokens,
+			usage.Ephemeral1hTokens,
+		)
+		if normalizedTotal > currentTotal {
+			currentTotal = normalizedTotal
+		}
+		if normalized5m > current5m {
+			current5m = normalized5m
+		}
+		if normalized1h > current1h {
+			current1h = normalized1h
+		}
+		currentTotal, current5m, current1h = normalizeCacheCreationTokenSplit(currentTotal, current5m, current1h)
+		usage.CacheCreateTokens = currentTotal
+		usage.Ephemeral5mTokens = current5m
+		usage.Ephemeral1hTokens = current1h
+		return
+	}
+
+	usage.CacheCreateTokens = normalizedTotal
+	usage.Ephemeral5mTokens = normalized5m
+	usage.Ephemeral1hTokens = normalized1h
+}
+
+func firstPositiveIntFromPaths(data string, paths ...string) int {
+	for _, path := range paths {
+		value := int(gjson.Get(data, path).Int())
+		if value > 0 {
+			return value
+		}
+	}
+	return 0
 }
 
 // codex usage parser
 func CodexParseTokenUsageFromResponse(data string, usage *ReqeustLog) {
-	usage.InputTokens += int(gjson.Get(data, "response.usage.input_tokens").Int())
-	usage.OutputTokens += int(gjson.Get(data, "response.usage.output_tokens").Int())
-	usage.CacheReadTokens += int(gjson.Get(data, "response.usage.input_tokens_details.cached_tokens").Int())
-	usage.ReasoningTokens += int(gjson.Get(data, "response.usage.output_tokens_details.reasoning_tokens").Int())
-	fmt.Println("data ---->", data, fmt.Sprintf("%v", usage))
+	if usage == nil {
+		return
+	}
+
+	input := int(gjson.Get(data, "response.usage.input_tokens").Int())
+	output := int(gjson.Get(data, "response.usage.output_tokens").Int())
+	cacheRead := int(gjson.Get(data, "response.usage.input_tokens_details.cached_tokens").Int())
+	reasoning := int(gjson.Get(data, "response.usage.output_tokens_details.reasoning_tokens").Int())
+
+	if usage.IsStream {
+		if input > usage.InputTokens {
+			usage.InputTokens = input
+		}
+		if output > usage.OutputTokens {
+			usage.OutputTokens = output
+		}
+		if cacheRead > usage.CacheReadTokens {
+			usage.CacheReadTokens = cacheRead
+		}
+		if reasoning > usage.ReasoningTokens {
+			usage.ReasoningTokens = reasoning
+		}
+		return
+	}
+
+	if input > 0 {
+		usage.InputTokens = input
+	}
+	if output > 0 {
+		usage.OutputTokens = output
+	}
+	if cacheRead > 0 {
+		usage.CacheReadTokens = cacheRead
+	}
+	if reasoning > 0 {
+		usage.ReasoningTokens = reasoning
+	}
 }
 
 // gemini usage parser (流式响应专用)
@@ -806,6 +2167,11 @@ func mergeGeminiUsageMetadata(usage gjson.Result, reqLog *ReqeustLog) {
 	if v := int(usage.Get("cachedContentTokenCount").Int()); v > reqLog.CacheReadTokens {
 		reqLog.CacheReadTokens = v
 	}
+	// Gemini thinking/reasoning tokens (thoughtsTokenCount)
+	// 参考: https://ai.google.dev/gemini-api/docs/thinking
+	if v := int(usage.Get("thoughtsTokenCount").Int()); v > reqLog.ReasoningTokens {
+		reqLog.ReasoningTokens = v
+	}
 
 	// 若仅提供 totalTokenCount，按 total - input 估算输出 token
 	total := usage.Get("totalTokenCount").Int()
@@ -818,13 +2184,14 @@ func mergeGeminiUsageMetadata(usage gjson.Result, reqLog *ReqeustLog) {
 // 【修复】维护跨 chunk 缓冲，确保完整 SSE 事件解析
 // Gemini SSE 格式: "data: {json}\n\n" 或 "data: [DONE]\n\n"
 func streamGeminiResponseWithHook(body io.Reader, writer io.Writer, requestLog *ReqeustLog) error {
-	buf := make([]byte, 8192) // 增大缓冲区减少系统调用
+	buf := make([]byte, 8192)   // 增大缓冲区减少系统调用
 	var lineBuf strings.Builder // 跨 chunk 行缓冲
 
 	for {
 		n, err := body.Read(buf)
 		if n > 0 {
 			chunk := buf[:n]
+			appendRequestLogResponseBody(requestLog, chunk)
 			// 写入客户端（优先保证数据传输）
 			if _, writeErr := writer.Write(chunk); writeErr != nil {
 				return writeErr
@@ -899,6 +2266,8 @@ func parseGeminiSSELine(event string, requestLog *ReqeustLog) {
 		if data == "[DONE]" || data == "" {
 			continue
 		}
+		updateResponseModelFromPayload(data, requestLog)
+		updateFirstTokenFromPayload(data, requestLog)
 		// 【优化】快速检查是否包含 usageMetadata，避免无效解析
 		if !strings.Contains(data, "usageMetadata") {
 			continue
@@ -954,6 +2323,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 
 		// 判断是否为流式请求
 		isStream := strings.Contains(endpoint, ":streamGenerateContent") || strings.Contains(query, "alt=sse")
+		requestedModel := extractGeminiModelFromEndpoint(endpoint)
 
 		// 加载 Gemini providers
 		providers := prs.geminiService.GetProviders()
@@ -969,7 +2339,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 				continue
 			}
 			// 检查黑名单
-			if isBlacklisted, until := prs.blacklistService.IsBlacklisted("gemini", p.Name); isBlacklisted {
+			if isBlacklisted, until := prs.blacklistService.IsBlacklistedByID("gemini", providerRefFromGeminiProvider(p), p.Name); isBlacklisted {
 				fmt.Printf("[Gemini] ⛔ Provider %s 已拉黑，过期时间: %v\n", p.Name, until.Format("15:04:05"))
 				continue
 			}
@@ -1001,121 +2371,279 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 		fmt.Printf("[Gemini] 共 %d 个 Level 分组: %v\n", len(sortedLevels), sortedLevels)
 
 		// 请求日志
-		requestLog := &ReqeustLog{
-			Platform:     "gemini",
-			IsStream:     isStream,
-			InputTokens:  0,
-			OutputTokens: 0,
-		}
 		start := time.Now()
+		capturePayloadEnabled, sanitizePayloadEnabled := prs.resolveRequestLogPayloadCaptureAndSanitization()
+		requestLog := &ReqeustLog{
+			Platform:         "gemini",
+			RequestedModel:   requestedModel,
+			IsStream:         isStream,
+			CapturePayload:   capturePayloadEnabled,
+			SanitizePayload:  sanitizePayloadEnabled,
+			InputTokens:      0,
+			OutputTokens:     0,
+			ProviderAuthType: "",
+			RequestStartedAt: start,
+		}
+		captureRequestLogRequestBody(requestLog, bodyBytes)
+		pricingSnapshot := (*modelpricing.Service)(nil)
+		if prs != nil && prs.modelPricing != nil {
+			pricingSnapshot = prs.modelPricing.Service()
+		}
+		if pricingSnapshot == nil {
+			if svc, err := modelpricing.DefaultService(); err == nil {
+				pricingSnapshot = svc
+			}
+		}
 
 		// 保存日志的 defer
 		defer func() {
 			requestLog.DurationSec = time.Since(start).Seconds()
+			normalizeRequestLogCacheCreateTokens(requestLog)
+			normalizeRequestLogInputTokens(requestLog)
+			costResult := calculateRequestLogCost(
+				prs.providerService,
+				pricingSnapshot,
+				requestLog.ProviderAPIURL,
+				requestLog.ProviderAPIKey,
+				requestLog.ProviderAuthType,
+				requestLog.Model,
+				requestLog.InputTokens,
+				requestLog.OutputTokens,
+				requestLog.ReasoningTokens,
+				requestLog.CacheCreateTokens,
+				requestLog.Ephemeral5mTokens,
+				requestLog.Ephemeral1hTokens,
+				requestLog.CacheReadTokens,
+			)
+			applyRequestLogCostResult(requestLog, costResult)
+			prepareRequestLogPayloadForPersistence(requestLog)
 			if GlobalDBQueueLogs == nil {
 				return
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			_ = GlobalDBQueueLogs.ExecBatchCtx(ctx, `
-				INSERT INTO request_log (
-					platform, model, provider, http_code,
-					input_tokens, output_tokens, cache_create_tokens, cache_read_tokens,
-					reasoning_tokens, is_stream, duration_sec
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-			`,
-				requestLog.Platform, requestLog.Model, requestLog.Provider, requestLog.HttpCode,
-				requestLog.InputTokens, requestLog.OutputTokens, requestLog.CacheCreateTokens,
+					INSERT INTO request_log (
+						platform, model, requested_model, response_model, provider_id, provider, http_code,
+						input_tokens, output_tokens, cache_create_tokens, ephemeral_5m_tokens, ephemeral_1h_tokens, cache_read_tokens,
+						reasoning_tokens, is_stream, duration_sec, first_token_sec, total_cost, price_source,
+						input_cost, output_cost, reasoning_cost, cache_create_cost, cache_read_cost,
+						ephemeral_5m_cost, ephemeral_1h_cost, has_pricing, matched_pricing_model,
+						provider_pricing_available, provider_quota_type, provider_input_usd_per_m, provider_output_usd_per_m,
+						provider_per_call_unified, provider_per_call_input, provider_per_call_output,
+						provider_per_call_unified_set, provider_per_call_input_set, provider_per_call_output_set,
+						request_body, response_body, request_body_truncated, response_body_truncated, payload_bytes, payload_captured
+					) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				`,
+				requestLog.Platform, requestLog.Model, requestLog.RequestedModel, requestLog.ResponseModel, requestLog.ProviderID, requestLog.Provider, requestLog.HttpCode,
+				requestLog.InputTokens, requestLog.OutputTokens, requestLog.CacheCreateTokens, requestLog.Ephemeral5mTokens, requestLog.Ephemeral1hTokens,
 				requestLog.CacheReadTokens, requestLog.ReasoningTokens,
-				boolToInt(requestLog.IsStream), requestLog.DurationSec,
+				boolToInt(requestLog.IsStream), requestLog.DurationSec, requestLog.FirstTokenSec, requestLog.TotalCost, requestLog.PriceSource,
+				requestLog.InputCost, requestLog.OutputCost, requestLog.ReasoningCost, requestLog.CacheCreateCost, requestLog.CacheReadCost,
+				requestLog.Ephemeral5mCost, requestLog.Ephemeral1hCost, boolToInt(requestLog.HasPricing), requestLog.MatchedPricingModel,
+				boolToInt(requestLog.ProviderPricingAvailable), requestLog.ProviderQuotaType, requestLog.ProviderInputUSDPerM, requestLog.ProviderOutputUSDPerM,
+				requestLog.ProviderPerCallUnified, requestLog.ProviderPerCallInput, requestLog.ProviderPerCallOutput,
+				boolToInt(requestLog.ProviderPerCallUnifiedSet), boolToInt(requestLog.ProviderPerCallInputSet), boolToInt(requestLog.ProviderPerCallOutputSet),
+				requestLog.RequestBody, requestLog.ResponseBody, boolToInt(requestLog.RequestBodyTruncated), boolToInt(requestLog.ResponseBodyTruncated), requestLog.PayloadBytes, boolToInt(requestLog.PayloadCaptured),
 			)
 		}()
 
 		// 获取拉黑功能开关状态
-		blacklistEnabled := prs.blacklistService.IsLevelBlacklistEnabled()
+		blacklistEnabled := prs.blacklistService.ShouldUseFixedMode()
 
-		// 【拉黑模式】：只尝试第一个 provider，失败直接返回错误（不自动降级）
+		// 【拉黑模式】：同 Provider 重试直到被拉黑，然后切换到下一个 Provider
 		if blacklistEnabled {
-			fmt.Printf("[Gemini] 🔒 拉黑模式已开启，禁用自动降级\n")
+			fmt.Printf("[Gemini] 🔒 拉黑模式已开启（同 Provider 重试到拉黑再切换）\n")
 
-			// 找到第一个 provider（按 Level 升序）
-			var firstProvider *GeminiProvider
+			// 获取重试配置
+			retryConfig := prs.blacklistService.GetRetryConfig()
+			maxRetryPerProvider := retryConfig.FailureThreshold
+			retryWaitSeconds := retryConfig.RetryWaitSeconds
+			fmt.Printf("[Gemini] 重试配置: 每 Provider 最多 %d 次重试，间隔 %d 秒\n",
+				maxRetryPerProvider, retryWaitSeconds)
+
+			var lastError error
+			var lastProvider string
+			totalAttempts := 0
+
+			// 遍历所有 Level 和 Provider
 			for _, level := range sortedLevels {
-				if len(levelGroups[level]) > 0 {
-					p := levelGroups[level][0]
-					firstProvider = &p
-					break
+				providersInLevel := levelGroups[level]
+				fmt.Printf("[Gemini] === 尝试 Level %d（%d 个 provider）===\n", level, len(providersInLevel))
+
+				for _, provider := range providersInLevel {
+					// 检查是否已被拉黑（跳过已拉黑的 provider）
+					if blacklisted, until := prs.blacklistService.IsBlacklistedByID("gemini", providerRefFromGeminiProvider(provider), provider.Name); blacklisted {
+						fmt.Printf("[Gemini] ⏭️ 跳过已拉黑的 Provider: %s (解禁时间: %v)\n", provider.Name, until)
+						continue
+					}
+
+					// 预填日志
+					requestLog.ProviderID = providerRefFromGeminiProvider(provider)
+					requestLog.Provider = provider.Name
+					requestLog.Model = provider.Model
+					requestLog.ProviderAPIURL = provider.BaseURL
+					requestLog.ProviderAPIKey = provider.APIKey
+
+					// 同 Provider 内重试循环
+					for retryCount := 0; retryCount < maxRetryPerProvider; retryCount++ {
+						totalAttempts++
+
+						// 再次检查是否已被拉黑（重试过程中可能被拉黑）
+						if blacklisted, _ := prs.blacklistService.IsBlacklistedByID("gemini", providerRefFromGeminiProvider(provider), provider.Name); blacklisted {
+							fmt.Printf("[Gemini] 🚫 Provider %s 已被拉黑，切换到下一个\n", provider.Name)
+							break
+						}
+
+						fmt.Printf("[Gemini] [拉黑模式] Provider: %s (Level %d) | 重试 %d/%d\n",
+							provider.Name, level, retryCount+1, maxRetryPerProvider)
+
+						ok, err, responseWritten := prs.forwardGeminiRequest(c, &provider, endpoint, bodyBytes, isStream, requestLog)
+						if ok {
+							fmt.Printf("[Gemini] ✓ 成功: %s | 重试 %d 次\n", provider.Name, retryCount+1)
+							_ = prs.blacklistService.RecordSuccessByID("gemini", providerRefFromGeminiProvider(provider), provider.Name)
+							prs.setLastUsedProvider("gemini", providerRefFromGeminiProvider(provider), provider.Name)
+							return
+						}
+
+						// 【关键修复】如果响应已写入客户端，不能重试或降级，直接返回
+						errorMsg := "未知错误"
+						if err != nil {
+							errorMsg = err.Error()
+						}
+						if responseWritten {
+							fmt.Printf("[Gemini] ⚠️ 响应已部分写入，无法重试: %s | 错误: %s\n", provider.Name, errorMsg)
+							_ = prs.blacklistService.RecordFailureByID("gemini", providerRefFromGeminiProvider(provider), provider.Name)
+							return
+						}
+
+						// 失败处理
+						lastError = err
+						lastProvider = provider.Name
+
+						fmt.Printf("[Gemini] ✗ 失败: %s | 重试 %d/%d | 错误: %s\n",
+							provider.Name, retryCount+1, maxRetryPerProvider, errorMsg)
+
+						// 记录失败次数（可能触发拉黑）
+						_ = prs.blacklistService.RecordFailureByID("gemini", providerRefFromGeminiProvider(provider), provider.Name)
+
+						// 检查是否刚被拉黑
+						if blacklisted, _ := prs.blacklistService.IsBlacklistedByID("gemini", providerRefFromGeminiProvider(provider), provider.Name); blacklisted {
+							fmt.Printf("[Gemini] 🚫 Provider %s 达到失败阈值，已被拉黑，切换到下一个\n", provider.Name)
+							break
+						}
+
+						// 等待后重试（除非是最后一次）
+						if retryCount < maxRetryPerProvider-1 {
+							fmt.Printf("[Gemini] ⏳ 等待 %d 秒后重试...\n", retryWaitSeconds)
+							time.Sleep(time.Duration(retryWaitSeconds) * time.Second)
+						}
+					}
 				}
 			}
 
-			if firstProvider == nil {
-				c.JSON(http.StatusNotFound, gin.H{"error": "no providers available"})
+			// 所有 Provider 都失败或被拉黑
+			fmt.Printf("[Gemini] 💥 拉黑模式：所有 Provider 都失败或被拉黑（共尝试 %d 次）\n", totalAttempts)
+
+			// 按用户要求：仅在所有重试/降级都失败后，透传最后一次上游错误
+			if writeLastUpstreamErrorIfAny(c, lastError) {
 				return
 			}
 
-			// 预填日志（失败也能记录尝试的 provider 与模型）
-			requestLog.Provider = firstProvider.Name
-			requestLog.Model = firstProvider.Model
-
-			// 尝试第一个 provider
-			ok, err := prs.forwardGeminiRequest(c, firstProvider, endpoint, bodyBytes, isStream, requestLog)
-			if ok {
-				_ = prs.blacklistService.RecordSuccess("gemini", firstProvider.Name)
-				// 记录最后使用的供应商
-				prs.setLastUsedProvider("gemini", firstProvider.Name)
-			} else {
-				_ = prs.blacklistService.RecordFailure("gemini", firstProvider.Name)
-				if requestLog.HttpCode == 0 {
-					requestLog.HttpCode = http.StatusBadGateway
-				}
-				c.JSON(http.StatusBadGateway, gin.H{
-					"error":   fmt.Sprintf("provider %s failed", firstProvider.Name),
-					"details": err,
-					"hint":    "拉黑模式已开启，不会自动降级。请等待 provider 恢复或手动切换。",
-				})
+			errorMsg := "未知错误"
+			if lastError != nil {
+				errorMsg = lastError.Error()
 			}
+
+			if requestLog.HttpCode == 0 {
+				requestLog.HttpCode = http.StatusBadGateway
+			}
+			c.JSON(http.StatusBadGateway, gin.H{
+				"error":         fmt.Sprintf("所有 Provider 都失败或被拉黑，最后尝试: %s - %s", lastProvider, errorMsg),
+				"lastProvider":  lastProvider,
+				"totalAttempts": totalAttempts,
+				"mode":          "blacklist_retry",
+				"hint":          "拉黑模式已开启，同 Provider 重试到拉黑再切换。如需立即降级请关闭拉黑功能",
+			})
 			return
 		}
 
 		// 【降级模式】：按 Level 顺序尝试所有 provider
-		var lastError string
+		roundRobinEnabled := prs.isRoundRobinEnabled()
+		if roundRobinEnabled {
+			fmt.Printf("[Gemini] 🔄 降级模式 + 轮询负载均衡\n")
+		} else {
+			fmt.Printf("[Gemini] 🔄 降级模式（顺序降级）\n")
+		}
+
+		var lastError error
 		for _, level := range sortedLevels {
 			providersInLevel := levelGroups[level]
+
+			// 如果启用轮询，对同 Level 的 providers 进行轮询排序
+			if roundRobinEnabled {
+				providersInLevel = prs.roundRobinOrderGemini(level, providersInLevel)
+			}
+
 			fmt.Printf("[Gemini] === 尝试 Level %d（%d 个 provider）===\n", level, len(providersInLevel))
 
 			for idx, provider := range providersInLevel {
 				fmt.Printf("[Gemini]   [%d/%d] Provider: %s\n", idx+1, len(providersInLevel), provider.Name)
 
 				// 预填日志，失败也能落库
+				requestLog.ProviderID = providerRefFromGeminiProvider(provider)
 				requestLog.Provider = provider.Name
 				requestLog.Model = provider.Model
+				requestLog.ProviderAPIURL = provider.BaseURL
+				requestLog.ProviderAPIKey = provider.APIKey
 
-				ok, errMsg := prs.forwardGeminiRequest(c, &provider, endpoint, bodyBytes, isStream, requestLog)
+				ok, err, responseWritten := prs.forwardGeminiRequest(c, &provider, endpoint, bodyBytes, isStream, requestLog)
 				if ok {
-					_ = prs.blacklistService.RecordSuccess("gemini", provider.Name)
+					_ = prs.blacklistService.RecordSuccessByID("gemini", providerRefFromGeminiProvider(provider), provider.Name)
 					// 记录最后使用的供应商
-					prs.setLastUsedProvider("gemini", provider.Name)
+					prs.setLastUsedProvider("gemini", providerRefFromGeminiProvider(provider), provider.Name)
 					fmt.Printf("[Gemini] ✓ 请求完成 | Provider: %s | 总耗时: %.2fs\n", provider.Name, time.Since(start).Seconds())
 					return // 成功，退出
 				}
 
+				// 【关键修复】如果响应已写入客户端，不能降级到其他 provider，直接返回
+				errorMsg := "未知错误"
+				if err != nil {
+					errorMsg = err.Error()
+				}
+				if responseWritten {
+					fmt.Printf("[Gemini] ⚠️ 响应已部分写入，无法降级: %s | 错误: %s\n", provider.Name, errorMsg)
+					_ = prs.blacklistService.RecordFailureByID("gemini", providerRefFromGeminiProvider(provider), provider.Name)
+					return
+				}
+
 				// 失败，记录并继续
-				lastError = errMsg
-				_ = prs.blacklistService.RecordFailure("gemini", provider.Name)
+				lastError = err
+				fmt.Printf("[Gemini] ✗ 失败: %s | 错误: %s\n", provider.Name, errorMsg)
+				_ = prs.blacklistService.RecordFailureByID("gemini", providerRefFromGeminiProvider(provider), provider.Name)
 			}
 
 			fmt.Printf("[Gemini] Level %d 的所有 %d 个 provider 均失败，尝试下一 Level\n", level, len(providersInLevel))
 		}
 
-		// 所有 Level 都失败
+		// 所有 Level 都失败：优先透传最后一次上游错误，否则返回 502 聚合信息
+		if writeLastUpstreamErrorIfAny(c, lastError) {
+			return
+		}
+
+		errorMsg := "未知错误"
+		if lastError != nil {
+			errorMsg = lastError.Error()
+		}
+
 		if requestLog.HttpCode == 0 {
 			requestLog.HttpCode = http.StatusBadGateway
 		}
 		c.JSON(http.StatusBadGateway, gin.H{
 			"error":   "all gemini providers failed",
-			"details": lastError,
+			"details": errorMsg,
 		})
-		fmt.Printf("[Gemini] ✗ 所有 provider 均失败 | 最后错误: %s\n", lastError)
+		fmt.Printf("[Gemini] ✗ 所有 provider 均失败 | 最后错误: %s\n", errorMsg)
 	}
 }
 
@@ -1146,7 +2674,8 @@ func extractGeminiModelFromEndpoint(endpoint string) string {
 }
 
 // forwardGeminiRequest 转发 Gemini 请求到指定 provider
-// 返回 (成功, 错误信息)
+// 返回 (成功, 错误对象, 是否已写入响应)
+// 【重要】当 responseWritten=true 时，调用方不得重试或降级，因为响应头/数据已发送给客户端
 func (prs *ProviderRelayService) forwardGeminiRequest(
 	c *gin.Context,
 	provider *GeminiProvider,
@@ -1154,17 +2683,25 @@ func (prs *ProviderRelayService) forwardGeminiRequest(
 	bodyBytes []byte,
 	isStream bool,
 	requestLog *ReqeustLog,
-) (bool, string) {
+) (success bool, err error, responseWritten bool) {
 	providerStart := time.Now()
 
 	// 构建目标 URL
 	targetURL := strings.TrimSuffix(provider.BaseURL, "/") + endpoint
 
 	// 预先填充日志，保证失败也能记录 provider 和模型
+	requestLog.ProviderID = providerRefFromGeminiProvider(*provider)
 	requestLog.Provider = provider.Name
+	captureRequestLogRequestBody(requestLog, bodyBytes)
+	resetRequestLogResponseBody(requestLog)
+	// 【修复】每次尝试开始前重置 HttpCode，避免重试时沿用上一次的状态码
+	requestLog.HttpCode = 0
 	// 优先从 endpoint 提取模型名（如 gemini-2.5-pro），否则回退到 provider.Model
 	if extractedModel := extractGeminiModelFromEndpoint(endpoint); extractedModel != "" {
 		requestLog.Model = extractedModel
+		if strings.TrimSpace(requestLog.RequestedModel) == "" {
+			requestLog.RequestedModel = extractedModel
+		}
 	} else {
 		requestLog.Model = provider.Model
 	}
@@ -1172,7 +2709,7 @@ func (prs *ProviderRelayService) forwardGeminiRequest(
 	// 创建 HTTP 请求
 	req, err := http.NewRequest("POST", targetURL, bytes.NewReader(bodyBytes))
 	if err != nil {
-		return false, fmt.Sprintf("创建请求失败: %v", err)
+		return false, fmt.Errorf("创建请求失败: %w", err), false
 	}
 
 	// 复制请求头
@@ -1194,7 +2731,7 @@ func (prs *ProviderRelayService) forwardGeminiRequest(
 
 	if err != nil {
 		fmt.Printf("[Gemini]   ✗ 失败: %s | 错误: %v | 耗时: %.2fs\n", provider.Name, err, providerDuration)
-		return false, fmt.Sprintf("请求失败: %v", err)
+		return false, fmt.Errorf("请求失败: %w", err), false
 	}
 	defer resp.Body.Close()
 
@@ -1204,43 +2741,51 @@ func (prs *ProviderRelayService) forwardGeminiRequest(
 	// 检查响应状态
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		errorBody, _ := io.ReadAll(resp.Body)
+		setRequestLogResponseBody(requestLog, errorBody)
 		fmt.Printf("[Gemini]   ✗ 失败: %s | HTTP %d | 耗时: %.2fs\n", provider.Name, resp.StatusCode, providerDuration)
-		return false, fmt.Sprintf("HTTP %d: %s", resp.StatusCode, string(errorBody))
+		return false, newUpstreamErrorResponse(resp.StatusCode, resp.Header.Get("Content-Type"), resp.Header, errorBody), false
 	}
 
 	fmt.Printf("[Gemini]   ✓ 连接成功: %s | HTTP %d | 耗时: %.2fs\n", provider.Name, resp.StatusCode, providerDuration)
 
-	// 复制响应头
-	for key, values := range resp.Header {
-		for _, value := range values {
-			c.Header(key, value)
-		}
-	}
-	c.Status(resp.StatusCode)
-
 	// 处理响应
 	if isStream {
+		// 流式模式：先写 header 再流式传输
+		for key, values := range resp.Header {
+			for _, value := range values {
+				c.Header(key, value)
+			}
+		}
+		c.Status(resp.StatusCode)
 		c.Writer.Flush()
-		// 使用 SSE 解析器提取 token 用量
+		// 【重要】从 Flush() 开始，响应头已写入客户端，任何失败都不能重试
 		copyErr := streamGeminiResponseWithHook(resp.Body, c.Writer, requestLog)
 		if copyErr != nil {
 			fmt.Printf("[Gemini]   ⚠️ 流式传输中断: %s | 错误: %v\n", provider.Name, copyErr)
-			// 【修复】流式传输中断应标记为失败（虽然无法重试，但需记录健康度）
-			// 注意：已写入部分响应，客户端会收到不完整数据
-			return false, fmt.Sprintf("流式传输中断: %v", copyErr)
+			// 流式传输中断：已写入部分响应，客户端会收到不完整数据
+			return false, fmt.Errorf("流式传输中断: %w", copyErr), true
 		}
 	} else {
+		// 非流式模式：先读完 body 再写 header（允许读取失败时重试）
 		body, readErr := io.ReadAll(resp.Body)
 		if readErr != nil {
 			fmt.Printf("[Gemini]   ⚠️ 读取响应失败: %s | 错误: %v\n", provider.Name, readErr)
-			return false, fmt.Sprintf("读取响应失败: %v", readErr)
+			// 【修复】此时 header 尚未写入客户端，可以重试/降级
+			return false, fmt.Errorf("读取响应失败: %w", readErr), false
 		}
+		setRequestLogResponseBody(requestLog, body)
 		// 解析 Gemini 用量数据
 		parseGeminiUsageMetadata(body, requestLog)
+		// 读取成功后再写 header 和 body
+		for key, values := range resp.Header {
+			for _, value := range values {
+				c.Header(key, value)
+			}
+		}
 		c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), body)
 	}
 
-	return true, ""
+	return true, nil, true
 }
 
 // parseGeminiUsageMetadata 从 Gemini 非流式响应中提取用量，填充 request_log
@@ -1249,9 +2794,548 @@ func parseGeminiUsageMetadata(body []byte, reqLog *ReqeustLog) {
 	if len(body) == 0 || reqLog == nil {
 		return
 	}
+	updateResponseModelFromPayload(string(body), reqLog)
+	updateFirstTokenFromPayload(string(body), reqLog)
 	usage := gjson.GetBytes(body, "usageMetadata")
 	if !usage.Exists() {
 		return
 	}
 	mergeGeminiUsageMetadata(usage, reqLog)
+}
+
+// customCliProxyHandler 处理自定义 CLI 工具的 API 请求
+// 路由格式: /custom/:toolId/v1/messages
+// toolId 用于区分不同的 CLI 工具，对应 provider kind 为 "custom:{toolId}"
+func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// 从 URL 参数提取 toolId
+		toolId := c.Param("toolId")
+		if toolId == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "toolId is required"})
+			return
+		}
+
+		// 构建 provider kind（格式: "custom:{toolId}"）
+		kind := "custom:" + toolId
+		endpoint := "/v1/messages"
+
+		fmt.Printf("[CustomCLI] 收到请求: toolId=%s, kind=%s\n", toolId, kind)
+
+		// 读取请求体
+		var bodyBytes []byte
+		if c.Request.Body != nil {
+			data, err := io.ReadAll(c.Request.Body)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+				return
+			}
+			bodyBytes = data
+			c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+		}
+
+		isStream := gjson.GetBytes(bodyBytes, "stream").Bool()
+		requestedModel := gjson.GetBytes(bodyBytes, "model").String()
+
+		if requestedModel == "" {
+			fmt.Printf("[CustomCLI][WARN] 请求未指定模型名，无法执行模型智能降级\n")
+		}
+
+		// 加载该 CLI 工具的 providers
+		providers, err := prs.providerService.LoadProviders(kind)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to load providers for %s: %v", kind, err)})
+			return
+		}
+
+		// 过滤可用的 providers
+		active := make([]Provider, 0, len(providers))
+		skippedCount := 0
+		for _, provider := range providers {
+			if !provider.Enabled || provider.APIURL == "" || provider.APIKey == "" {
+				continue
+			}
+
+			if errs := provider.ValidateConfiguration(); len(errs) > 0 {
+				fmt.Printf("[CustomCLI][WARN] Provider %s 配置验证失败，已自动跳过: %v\n", provider.Name, errs)
+				skippedCount++
+				continue
+			}
+
+			if requestedModel != "" && !provider.IsModelSupported(requestedModel) {
+				fmt.Printf("[CustomCLI][INFO] Provider %s 不支持模型 %s，已跳过\n", provider.Name, requestedModel)
+				skippedCount++
+				continue
+			}
+
+			// 黑名单检查
+			if isBlacklisted, until := prs.blacklistService.IsBlacklistedByID(kind, providerRefFromProvider(provider), provider.Name); isBlacklisted {
+				fmt.Printf("[CustomCLI] ⛔ Provider %s 已拉黑，过期时间: %v\n", provider.Name, until.Format("15:04:05"))
+				skippedCount++
+				continue
+			}
+
+			active = append(active, provider)
+		}
+
+		if len(active) == 0 {
+			if requestedModel != "" {
+				c.JSON(http.StatusNotFound, gin.H{
+					"error": fmt.Sprintf("没有可用的 provider 支持模型 '%s'（已跳过 %d 个不兼容的 provider）", requestedModel, skippedCount),
+				})
+			} else {
+				c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("no providers available for %s", kind)})
+			}
+			return
+		}
+
+		fmt.Printf("[CustomCLI][INFO] 找到 %d 个可用的 provider（已过滤 %d 个）：", len(active), skippedCount)
+		for _, p := range active {
+			fmt.Printf("%s ", p.Name)
+		}
+		fmt.Println()
+
+		// 按 Level 分组
+		levelGroups := make(map[int][]Provider)
+		for _, provider := range active {
+			level := provider.Level
+			if level <= 0 {
+				level = 1
+			}
+			levelGroups[level] = append(levelGroups[level], provider)
+		}
+
+		levels := make([]int, 0, len(levelGroups))
+		for level := range levelGroups {
+			levels = append(levels, level)
+		}
+		sort.Ints(levels)
+
+		fmt.Printf("[CustomCLI][INFO] 共 %d 个 Level 分组：%v\n", len(levels), levels)
+
+		query := flattenQuery(c.Request.URL.Query())
+		clientHeaders := cloneHeaders(c.Request.Header)
+
+		// 获取拉黑功能开关状态
+		blacklistEnabled := prs.blacklistService.ShouldUseFixedMode()
+
+		// 【拉黑模式】：同 Provider 重试直到被拉黑，然后切换到下一个 Provider
+		if blacklistEnabled {
+			fmt.Printf("[CustomCLI][INFO] 🔒 拉黑模式已开启（同 Provider 重试到拉黑再切换）\n")
+
+			// 获取重试配置
+			retryConfig := prs.blacklistService.GetRetryConfig()
+			maxRetryPerProvider := retryConfig.FailureThreshold
+			retryWaitSeconds := retryConfig.RetryWaitSeconds
+			fmt.Printf("[CustomCLI][INFO] 重试配置: 每 Provider 最多 %d 次重试，间隔 %d 秒\n",
+				maxRetryPerProvider, retryWaitSeconds)
+
+			var lastError error
+			var lastProvider string
+			totalAttempts := 0
+
+			// 遍历所有 Level 和 Provider
+			for _, level := range levels {
+				providersInLevel := levelGroups[level]
+				fmt.Printf("[CustomCLI][INFO] === 尝试 Level %d（%d 个 provider）===\n", level, len(providersInLevel))
+
+				for _, provider := range providersInLevel {
+					// 检查是否已被拉黑（跳过已拉黑的 provider）
+					if blacklisted, until := prs.blacklistService.IsBlacklistedByID(kind, providerRefFromProvider(provider), provider.Name); blacklisted {
+						fmt.Printf("[CustomCLI][INFO] ⏭️ 跳过已拉黑的 Provider: %s (解禁时间: %v)\n", provider.Name, until)
+						continue
+					}
+
+					// 获取实际模型名
+					effectiveModel := provider.GetEffectiveModel(requestedModel)
+					currentBodyBytes := bodyBytes
+					if effectiveModel != requestedModel && requestedModel != "" {
+						fmt.Printf("[CustomCLI][INFO] Provider %s 映射模型: %s -> %s\n", provider.Name, requestedModel, effectiveModel)
+						modifiedBody, err := ReplaceModelInRequestBody(bodyBytes, effectiveModel)
+						if err != nil {
+							fmt.Printf("[CustomCLI][ERROR] 模型映射失败: %v，跳过此 Provider\n", err)
+							continue
+						}
+						currentBodyBytes = modifiedBody
+					}
+
+					// 获取有效端点
+					effectiveEndpoint := provider.GetEffectiveEndpoint(endpoint)
+
+					// 同 Provider 内重试循环
+					for retryCount := 0; retryCount < maxRetryPerProvider; retryCount++ {
+						totalAttempts++
+
+						// 再次检查是否已被拉黑（重试过程中可能被拉黑）
+						if blacklisted, _ := prs.blacklistService.IsBlacklistedByID(kind, providerRefFromProvider(provider), provider.Name); blacklisted {
+							fmt.Printf("[CustomCLI][INFO] 🚫 Provider %s 已被拉黑，切换到下一个\n", provider.Name)
+							break
+						}
+
+						fmt.Printf("[CustomCLI][INFO] [拉黑模式] Provider: %s (Level %d) | 重试 %d/%d | Model: %s\n",
+							provider.Name, level, retryCount+1, maxRetryPerProvider, effectiveModel)
+
+						startTime := time.Now()
+						ok, err := prs.forwardRequest(c, kind, provider, effectiveEndpoint, query, clientHeaders, currentBodyBytes, isStream, effectiveModel, requestedModel)
+						duration := time.Since(startTime)
+
+						if ok {
+							fmt.Printf("[CustomCLI][INFO] ✓ 成功: %s | 重试 %d 次 | 耗时: %.2fs\n",
+								provider.Name, retryCount+1, duration.Seconds())
+							if err := prs.blacklistService.RecordSuccessByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
+								fmt.Printf("[CustomCLI][WARN] 清零失败计数失败: %v\n", err)
+							}
+							prs.setLastUsedProvider(kind, providerRefFromProvider(provider), provider.Name)
+							return
+						}
+
+						// 失败处理
+						lastError = err
+						lastProvider = provider.Name
+
+						errorMsg := "未知错误"
+						if err != nil {
+							errorMsg = err.Error()
+						}
+						fmt.Printf("[CustomCLI][WARN] ✗ 失败: %s | 重试 %d/%d | 错误: %s | 耗时: %.2fs\n",
+							provider.Name, retryCount+1, maxRetryPerProvider, errorMsg, duration.Seconds())
+
+						// 客户端中断不计入失败次数，直接返回
+						if errors.Is(err, errClientAbort) {
+							fmt.Printf("[CustomCLI][INFO] 客户端中断，停止重试\n")
+							return
+						}
+
+						// 记录失败次数（可能触发拉黑）
+						if err := prs.blacklistService.RecordFailureByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
+							fmt.Printf("[CustomCLI][ERROR] 记录失败到黑名单失败: %v\n", err)
+						}
+
+						// 检查是否刚被拉黑
+						if blacklisted, _ := prs.blacklistService.IsBlacklistedByID(kind, providerRefFromProvider(provider), provider.Name); blacklisted {
+							fmt.Printf("[CustomCLI][INFO] 🚫 Provider %s 达到失败阈值，已被拉黑，切换到下一个\n", provider.Name)
+							break
+						}
+
+						// 等待后重试（除非是最后一次）
+						if retryCount < maxRetryPerProvider-1 {
+							fmt.Printf("[CustomCLI][INFO] ⏳ 等待 %d 秒后重试...\n", retryWaitSeconds)
+							time.Sleep(time.Duration(retryWaitSeconds) * time.Second)
+						}
+					}
+				}
+			}
+
+			// 所有 Provider 都失败或被拉黑
+			fmt.Printf("[CustomCLI][ERROR] 💥 拉黑模式：所有 Provider 都失败或被拉黑（共尝试 %d 次）\n", totalAttempts)
+
+			// 按用户要求：仅在所有重试/降级都失败后，透传最后一次上游错误
+			if writeLastUpstreamErrorIfAny(c, lastError) {
+				return
+			}
+
+			errorMsg := "未知错误"
+			if lastError != nil {
+				errorMsg = lastError.Error()
+			}
+			c.JSON(http.StatusBadGateway, gin.H{
+				"error":         fmt.Sprintf("所有 Provider 都失败或被拉黑，最后尝试: %s - %s", lastProvider, errorMsg),
+				"lastProvider":  lastProvider,
+				"totalAttempts": totalAttempts,
+				"mode":          "blacklist_retry",
+				"hint":          "拉黑模式已开启，同 Provider 重试到拉黑再切换。如需立即降级请关闭拉黑功能",
+			})
+			return
+		}
+
+		// 【降级模式】：失败自动尝试下一个 provider
+		roundRobinEnabled := prs.isRoundRobinEnabled()
+		if roundRobinEnabled {
+			fmt.Printf("[CustomCLI][INFO] 🔄 降级模式 + 轮询负载均衡\n")
+		} else {
+			fmt.Printf("[CustomCLI][INFO] 🔄 降级模式（顺序降级）\n")
+		}
+
+		var lastError error
+		var lastProvider string
+		var lastDuration time.Duration
+		totalAttempts := 0
+
+		for _, level := range levels {
+			providersInLevel := levelGroups[level]
+
+			// 如果启用轮询，对同 Level 的 providers 进行轮询排序
+			if roundRobinEnabled {
+				providersInLevel = prs.roundRobinOrder(kind, level, providersInLevel)
+			}
+
+			fmt.Printf("[CustomCLI][INFO] === 尝试 Level %d（%d 个 provider）===\n", level, len(providersInLevel))
+
+			for i, provider := range providersInLevel {
+				totalAttempts++
+
+				effectiveModel := provider.GetEffectiveModel(requestedModel)
+				currentBodyBytes := bodyBytes
+				if effectiveModel != requestedModel && requestedModel != "" {
+					fmt.Printf("[CustomCLI][INFO] Provider %s 映射模型: %s -> %s\n", provider.Name, requestedModel, effectiveModel)
+					modifiedBody, err := ReplaceModelInRequestBody(bodyBytes, effectiveModel)
+					if err != nil {
+						fmt.Printf("[CustomCLI][ERROR] 替换模型名失败: %v\n", err)
+						continue
+					}
+					currentBodyBytes = modifiedBody
+				}
+
+				fmt.Printf("[CustomCLI][INFO]   [%d/%d] Provider: %s | Model: %s\n", i+1, len(providersInLevel), provider.Name, effectiveModel)
+				// 获取有效的端点（用户配置优先）
+				effectiveEndpoint := provider.GetEffectiveEndpoint(endpoint)
+
+				startTime := time.Now()
+				ok, err := prs.forwardRequest(c, kind, provider, effectiveEndpoint, query, clientHeaders, currentBodyBytes, isStream, effectiveModel, requestedModel)
+				duration := time.Since(startTime)
+
+				if ok {
+					fmt.Printf("[CustomCLI][INFO]   ✓ Level %d 成功: %s | 耗时: %.2fs\n", level, provider.Name, duration.Seconds())
+					if err := prs.blacklistService.RecordSuccessByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
+						fmt.Printf("[CustomCLI][WARN] 清零失败计数失败: %v\n", err)
+					}
+					prs.setLastUsedProvider(kind, providerRefFromProvider(provider), provider.Name)
+					return
+				}
+
+				lastError = err
+				lastProvider = provider.Name
+				lastDuration = duration
+
+				errorMsg := "未知错误"
+				if err != nil {
+					errorMsg = err.Error()
+				}
+				fmt.Printf("[CustomCLI][WARN]   ✗ Level %d 失败: %s | 错误: %s | 耗时: %.2fs\n",
+					level, provider.Name, errorMsg, duration.Seconds())
+
+				if errors.Is(err, errClientAbort) {
+					fmt.Printf("[CustomCLI][INFO] 客户端中断，跳过失败计数: %s\n", provider.Name)
+				} else if err := prs.blacklistService.RecordFailureByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
+					fmt.Printf("[CustomCLI][ERROR] 记录失败到黑名单失败: %v\n", err)
+				}
+
+				// 发送切换通知
+				if prs.notificationService != nil {
+					nextProviderName := ""
+					nextProviderID := ""
+					if i+1 < len(providersInLevel) {
+						nextProvider := providersInLevel[i+1]
+						nextProviderName = nextProvider.Name
+						nextProviderID = providerRefFromProvider(nextProvider)
+					} else {
+						for _, nextLevel := range levels {
+							if nextLevel > level && len(levelGroups[nextLevel]) > 0 {
+								nextProvider := levelGroups[nextLevel][0]
+								nextProviderName = nextProvider.Name
+								nextProviderID = providerRefFromProvider(nextProvider)
+								break
+							}
+						}
+					}
+					if nextProviderName != "" {
+						prs.notificationService.NotifyProviderSwitch(SwitchNotification{
+							FromProviderID: providerRefFromProvider(provider),
+							FromProvider:   provider.Name,
+							ToProviderID:   nextProviderID,
+							ToProvider:     nextProviderName,
+							Reason:         errorMsg,
+							Platform:       kind,
+						})
+					}
+				}
+			}
+
+			fmt.Printf("[CustomCLI][WARN] Level %d 的所有 %d 个 provider 均失败，尝试下一 Level\n", level, len(providersInLevel))
+		}
+
+		// 所有 provider 都失败：优先透传最后一次上游错误，否则返回 502 聚合信息
+		if writeLastUpstreamErrorIfAny(c, lastError) {
+			return
+		}
+
+		errorMsg := "未知错误"
+		if lastError != nil {
+			errorMsg = lastError.Error()
+		}
+		fmt.Printf("[CustomCLI][ERROR] 所有 %d 个 provider 均失败，最后尝试: %s | 错误: %s\n",
+			totalAttempts, lastProvider, errorMsg)
+
+		c.JSON(http.StatusBadGateway, gin.H{
+			"error":          fmt.Sprintf("所有 %d 个 provider 均失败，最后错误: %s", totalAttempts, errorMsg),
+			"last_provider":  lastProvider,
+			"last_duration":  fmt.Sprintf("%.2fs", lastDuration.Seconds()),
+			"total_attempts": totalAttempts,
+		})
+	}
+}
+
+// forwardModelsRequest 共享的 /v1/models 请求转发逻辑
+// 返回 (selectedProvider, error)
+func (prs *ProviderRelayService) forwardModelsRequest(
+	c *gin.Context,
+	kind string,
+	logPrefix string,
+) error {
+	fmt.Printf("[%s] 收到 /v1/models 请求, kind=%s\n", logPrefix, kind)
+
+	// 加载 providers
+	providers, err := prs.providerService.LoadProviders(kind)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load providers"})
+		return fmt.Errorf("failed to load providers: %w", err)
+	}
+
+	// 过滤可用的 providers（启用 + URL + APIKey）
+	var activeProviders []Provider
+	for _, provider := range providers {
+		if !provider.Enabled || provider.APIURL == "" || provider.APIKey == "" {
+			continue
+		}
+
+		// 黑名单检查：跳过已拉黑的 provider
+		if isBlacklisted, until := prs.blacklistService.IsBlacklistedByID(kind, providerRefFromProvider(provider), provider.Name); isBlacklisted {
+			fmt.Printf("[%s] ⛔ Provider %s 已拉黑，过期时间: %v\n", logPrefix, provider.Name, until.Format("15:04:05"))
+			continue
+		}
+
+		activeProviders = append(activeProviders, provider)
+	}
+
+	if len(activeProviders) == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "no providers available"})
+		return fmt.Errorf("no providers available")
+	}
+
+	// 按 Level 分组并排序
+	levelGroups := make(map[int][]Provider)
+	for _, provider := range activeProviders {
+		level := provider.Level
+		if level <= 0 {
+			level = 1
+		}
+		levelGroups[level] = append(levelGroups[level], provider)
+	}
+
+	levels := make([]int, 0, len(levelGroups))
+	for level := range levelGroups {
+		levels = append(levels, level)
+	}
+	sort.Ints(levels)
+
+	// 尝试第一个可用的 provider（按 Level 升序）
+	var selectedProvider *Provider
+	for _, level := range levels {
+		if len(levelGroups[level]) > 0 {
+			p := levelGroups[level][0]
+			selectedProvider = &p
+			break
+		}
+	}
+
+	if selectedProvider == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "no providers available"})
+		return fmt.Errorf("no providers available after filtering")
+	}
+
+	fmt.Printf("[%s] 使用 Provider: %s | URL: %s\n", logPrefix, selectedProvider.Name, selectedProvider.APIURL)
+
+	// 构建目标 URL（拼接 provider 的 APIURL 和 /v1/models）
+	targetURL := joinURL(selectedProvider.APIURL, "/v1/models")
+
+	// 创建 HTTP 请求
+	req, err := http.NewRequest("GET", targetURL, nil)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("创建请求失败: %v", err)})
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// 复制客户端请求头
+	for key, values := range c.Request.Header {
+		for _, value := range values {
+			req.Header.Add(key, value)
+		}
+	}
+
+	// 根据认证方式设置请求头（默认 Bearer，与 v2.2.x 保持一致）
+	authType := strings.ToLower(strings.TrimSpace(selectedProvider.ConnectivityAuthType))
+	switch authType {
+	case "x-api-key":
+		req.Header.Set("x-api-key", selectedProvider.APIKey)
+		req.Header.Set("anthropic-version", "2023-06-01")
+	case "", "bearer":
+		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", selectedProvider.APIKey))
+	default:
+		headerName := strings.TrimSpace(selectedProvider.ConnectivityAuthType)
+		if headerName == "" || strings.EqualFold(headerName, "custom") {
+			headerName = "Authorization"
+		}
+		req.Header.Set(headerName, selectedProvider.APIKey)
+	}
+
+	// 设置默认 Accept 头
+	if req.Header.Get("Accept") == "" {
+		req.Header.Set("Accept", "application/json")
+	}
+
+	// 发送请求
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		fmt.Printf("[%s] ✗ 请求失败: %s | 错误: %v\n", logPrefix, selectedProvider.Name, err)
+		c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("请求失败: %v", err)})
+		return fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// 读取响应
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		fmt.Printf("[%s] ✗ 读取响应失败: %s | 错误: %v\n", logPrefix, selectedProvider.Name, err)
+		c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("读取响应失败: %v", err)})
+		return fmt.Errorf("failed to read response: %w", err)
+	}
+
+	// 复制响应头
+	for key, values := range resp.Header {
+		for _, value := range values {
+			c.Header(key, value)
+		}
+	}
+
+	fmt.Printf("[%s] ✓ 成功: %s | HTTP %d\n", logPrefix, selectedProvider.Name, resp.StatusCode)
+
+	// 返回响应
+	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), body)
+	return nil
+}
+
+// modelsHandler 处理 /v1/models 请求（OpenAI-compatible API）
+// 将请求转发到第一个可用的 provider 并注入 API Key
+func (prs *ProviderRelayService) modelsHandler(kind string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		_ = prs.forwardModelsRequest(c, kind, "Models")
+	}
+}
+
+// customModelsHandler 处理自定义 CLI 工具的 /v1/models 请求
+// 路由格式: /custom/:toolId/v1/models
+func (prs *ProviderRelayService) customModelsHandler() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// 从 URL 参数提取 toolId
+		toolId := c.Param("toolId")
+		if toolId == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "toolId is required"})
+			return
+		}
+
+		// 构建 provider kind（格式: "custom:{toolId}"）
+		kind := "custom:" + toolId
+
+		_ = prs.forwardModelsRequest(c, kind, "CustomModels")
+	}
 }

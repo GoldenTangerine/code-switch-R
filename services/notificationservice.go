@@ -29,10 +29,12 @@ type NotificationService struct {
 
 // SwitchNotification 切换通知的详细信息
 type SwitchNotification struct {
-	FromProvider string // 原供应商
-	ToProvider   string // 新供应商
-	Reason       string // 切换原因
-	Platform     string // 平台：claude/codex/gemini
+	FromProviderID string // 原供应商 ID
+	FromProvider   string // 原供应商
+	ToProviderID   string // 新供应商 ID
+	ToProvider     string // 新供应商
+	Reason         string // 切换原因
+	Platform       string // 平台：claude/codex/gemini
 }
 
 // NewNotificationService 创建通知服务
@@ -152,16 +154,18 @@ func (ns *NotificationService) emitSwitchEvent(info SwitchNotification) {
 		return
 	}
 	ns.app.Event.Emit("provider:switched", map[string]interface{}{
-		"platform":     info.Platform,
-		"fromProvider": info.FromProvider,
-		"toProvider":   info.ToProvider,
-		"reason":       info.Reason,
-		"timestamp":    time.Now().UnixMilli(),
+		"platform":       info.Platform,
+		"fromProviderId": info.FromProviderID,
+		"fromProvider":   info.FromProvider,
+		"toProviderId":   info.ToProviderID,
+		"toProvider":     info.ToProvider,
+		"reason":         info.Reason,
+		"timestamp":      time.Now().UnixMilli(),
 	})
 }
 
 // NotifyProviderBlacklisted 发送供应商被拉黑通知
-func (ns *NotificationService) NotifyProviderBlacklisted(platform, providerName string, level int, durationMinutes int) {
+func (ns *NotificationService) NotifyProviderBlacklisted(platform, providerID, providerName string, level int, durationMinutes int) {
 	if !ns.isEnabled() {
 		return
 	}
@@ -172,7 +176,7 @@ func (ns *NotificationService) NotifyProviderBlacklisted(platform, providerName 
 		body := fmt.Sprintf("%s 已拉黑 %d 分钟", providerName, durationMinutes)
 
 		// 发送 Wails 事件到前端
-		ns.emitBlacklistEvent(platform, providerName, level, durationMinutes)
+		ns.emitBlacklistEvent(platform, providerID, providerName, level, durationMinutes)
 
 		// 使用 beeep 发送系统通知，带应用图标
 		if err := beeep.Notify(title, body, ns.iconPath); err != nil {
@@ -185,12 +189,13 @@ func (ns *NotificationService) NotifyProviderBlacklisted(platform, providerName 
 
 // emitBlacklistEvent 发送拉黑事件到前端
 // @author sm
-func (ns *NotificationService) emitBlacklistEvent(platform, providerName string, level, durationMinutes int) {
+func (ns *NotificationService) emitBlacklistEvent(platform, providerID, providerName string, level, durationMinutes int) {
 	if ns.app == nil {
 		return
 	}
 	ns.app.Event.Emit("provider:blacklisted", map[string]interface{}{
 		"platform":        platform,
+		"providerId":      providerID,
 		"providerName":    providerName,
 		"level":           level,
 		"durationMinutes": durationMinutes,

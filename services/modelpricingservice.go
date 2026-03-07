@@ -1,0 +1,414 @@
+package services
+
+import (
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+
+	modelpricing "codeswitch/resources/model-pricing"
+
+	"github.com/daodao97/xgo/xdb"
+)
+
+const modelPricingOverridesSettingKey = "model_pricing_overrides_v1"
+
+const (
+	modelPricingSourceBuiltin    = "builtin"
+	modelPricingSourceManual     = "manual"
+	modelPricingSourceClaudeSync = "claude_sync"
+)
+
+type modelPricingOverrides struct {
+	Pricing     map[string]modelpricing.PricingEntry `json:"pricing"`
+	Ephemeral1h map[string]float64                   `json:"ephemeral_1h"`
+	Meta        map[string]modelPricingMeta          `json:"meta,omitempty"`
+}
+
+type modelPricingMeta struct {
+	Source    string `json:"source,omitempty"`
+	UpdatedAt string `json:"updated_at,omitempty"`
+}
+
+type ModelPricingRow struct {
+	OriginalModel               string  `json:"original_model,omitempty"`
+	Model                       string  `json:"model"`
+	InputCostPerToken           float64 `json:"input_cost_per_token"`
+	OutputCostPerToken          float64 `json:"output_cost_per_token"`
+	OutputCostPerReasoningToken float64 `json:"output_cost_per_reasoning_token"`
+	CacheCreationInputTokenCost float64 `json:"cache_creation_input_token_cost"`
+	CacheReadInputTokenCost     float64 `json:"cache_read_input_token_cost"`
+	Ephemeral1hCostPerToken     float64 `json:"ephemeral_1h_cost_per_token"`
+	IsOverride                  bool    `json:"is_override"`
+	IsCustom                    bool    `json:"is_custom"`
+	Source                      string  `json:"source"`
+	SourceUpdatedAt             string  `json:"source_updated_at,omitempty"`
+}
+
+type ModelPricingService struct {
+	mu                   sync.RWMutex
+	defaults             *modelpricing.Service
+	effective            *modelpricing.Service
+	overrides            modelPricingOverrides
+	claudePricingPreview claudePricingPreviewCache
+}
+
+func NewModelPricingService() *ModelPricingService {
+	defaults, err := modelpricing.NewService()
+	if err != nil {
+		log.Printf("pricing defaults init failed: %v", err)
+	}
+
+	svc := &ModelPricingService{
+		defaults: defaults,
+		overrides: modelPricingOverrides{
+			Pricing:     make(map[string]modelpricing.PricingEntry),
+			Ephemeral1h: make(map[string]float64),
+			Meta:        make(map[string]modelPricingMeta),
+		},
+	}
+	svc.mu.Lock()
+	svc.rebuildLocked()
+	svc.mu.Unlock()
+
+	if err := svc.reloadFromDB(); err != nil {
+		log.Printf("pricing overrides load failed: %v", err)
+	}
+
+	return svc
+}
+
+func (mps *ModelPricingService) Service() *modelpricing.Service {
+	if mps == nil {
+		return nil
+	}
+	mps.mu.RLock()
+	svc := mps.effective
+	mps.mu.RUnlock()
+	return svc
+}
+
+func (mps *ModelPricingService) ListModelPricing() ([]ModelPricingRow, error) {
+	if mps == nil {
+		return nil, nil
+	}
+
+	mps.mu.RLock()
+	defer mps.mu.RUnlock()
+
+	svc := mps.effective
+	defaults := mps.defaults
+	overridePricing := mps.overrides.Pricing
+	overrideEphemeral := mps.overrides.Ephemeral1h
+
+	if svc == nil {
+		return nil, nil
+	}
+
+	models := svc.Models()
+	rows := make([]ModelPricingRow, 0, len(models))
+	for _, model := range models {
+		entry, ok := svc.PricingEntryExact(model)
+		if !ok {
+			continue
+		}
+
+		isOverride := false
+		if _, ok := overridePricing[model]; ok {
+			isOverride = true
+		}
+		if _, ok := overrideEphemeral[model]; ok {
+			isOverride = true
+		}
+
+		// 默认过滤：只展示 token 定价模型，避免把图像模型（只有 per-image/per-pixel）塞进来刷屏。
+		if !isOverride && !hasTokenPricing(entry) {
+			continue
+		}
+
+		isCustom := false
+		if defaults != nil {
+			if _, ok := defaults.PricingEntryExact(model); !ok {
+				isCustom = true
+			}
+		} else if isOverride {
+			isCustom = true
+		}
+
+		meta := mps.overrides.Meta[model]
+		ephemeral1hCostPerToken, _ := svc.ExplicitEphemeral1hCostPerToken(model)
+
+		rows = append(rows, ModelPricingRow{
+			Model:                       model,
+			InputCostPerToken:           entry.InputCostPerToken,
+			OutputCostPerToken:          entry.OutputCostPerToken,
+			OutputCostPerReasoningToken: entry.OutputCostPerReasoningToken,
+			CacheCreationInputTokenCost: entry.CacheCreationInputTokenCost,
+			CacheReadInputTokenCost:     entry.CacheReadInputTokenCost,
+			Ephemeral1hCostPerToken:     ephemeral1hCostPerToken,
+			IsOverride:                  isOverride,
+			IsCustom:                    isCustom,
+			Source:                      resolveModelPricingSource(meta, isOverride || isCustom),
+			SourceUpdatedAt:             strings.TrimSpace(meta.UpdatedAt),
+		})
+	}
+
+	sort.Slice(rows, func(i, j int) bool {
+		return rows[i].Model < rows[j].Model
+	})
+
+	return rows, nil
+}
+
+func (mps *ModelPricingService) UpsertModelPricing(row ModelPricingRow) error {
+	if mps == nil {
+		return fmt.Errorf("nil pricing service")
+	}
+
+	originalModel := strings.TrimSpace(row.OriginalModel)
+	model := strings.TrimSpace(row.Model)
+	if model == "" {
+		return fmt.Errorf("model 不能为空")
+	}
+
+	if err := validateNonNegative(row.InputCostPerToken, "input_cost_per_token"); err != nil {
+		return err
+	}
+	if err := validateNonNegative(row.OutputCostPerToken, "output_cost_per_token"); err != nil {
+		return err
+	}
+	if err := validateNonNegative(row.OutputCostPerReasoningToken, "output_cost_per_reasoning_token"); err != nil {
+		return err
+	}
+	if err := validateNonNegative(row.CacheCreationInputTokenCost, "cache_creation_input_token_cost"); err != nil {
+		return err
+	}
+	if err := validateNonNegative(row.CacheReadInputTokenCost, "cache_read_input_token_cost"); err != nil {
+		return err
+	}
+	if err := validateNonNegative(row.Ephemeral1hCostPerToken, "ephemeral_1h_cost_per_token"); err != nil {
+		return err
+	}
+
+	mps.mu.Lock()
+	defer mps.mu.Unlock()
+
+	newOverrides := cloneModelPricingOverrides(mps.overrides)
+	if mps.hasRenameConflictLocked(originalModel, model) {
+		return fmt.Errorf("模型 %s 已存在，不能重命名覆盖", model)
+	}
+	if originalModel != "" && originalModel != model {
+		delete(newOverrides.Pricing, originalModel)
+		delete(newOverrides.Ephemeral1h, originalModel)
+		delete(newOverrides.Meta, originalModel)
+	}
+
+	existing := modelpricing.PricingEntry{}
+	if v, ok := newOverrides.Pricing[model]; ok {
+		existing = v
+	}
+	existing.InputCostPerToken = row.InputCostPerToken
+	existing.OutputCostPerToken = row.OutputCostPerToken
+	existing.OutputCostPerReasoningToken = row.OutputCostPerReasoningToken
+	existing.CacheCreationInputTokenCost = row.CacheCreationInputTokenCost
+	existing.CacheReadInputTokenCost = row.CacheReadInputTokenCost
+	newOverrides.Pricing[model] = existing
+
+	newOverrides.Ephemeral1h[model] = row.Ephemeral1hCostPerToken
+	newOverrides.Meta[model] = modelPricingMeta{
+		Source:    modelPricingSourceManual,
+		UpdatedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+
+	if err := saveModelPricingOverridesToDB(newOverrides); err != nil {
+		return err
+	}
+
+	mps.overrides = newOverrides
+	mps.rebuildLocked()
+	return nil
+}
+
+func (mps *ModelPricingService) DeleteModelPricing(model string) error {
+	if mps == nil {
+		return fmt.Errorf("nil pricing service")
+	}
+	key := strings.TrimSpace(model)
+	if key == "" {
+		return nil
+	}
+
+	mps.mu.Lock()
+	defer mps.mu.Unlock()
+
+	newOverrides := cloneModelPricingOverrides(mps.overrides)
+	delete(newOverrides.Pricing, key)
+	delete(newOverrides.Ephemeral1h, key)
+	delete(newOverrides.Meta, key)
+
+	if err := saveModelPricingOverridesToDB(newOverrides); err != nil {
+		return err
+	}
+
+	mps.overrides = newOverrides
+	mps.rebuildLocked()
+	return nil
+}
+
+func (mps *ModelPricingService) reloadFromDB() error {
+	mps.mu.Lock()
+	defer mps.mu.Unlock()
+
+	overrides, err := loadModelPricingOverridesFromDB()
+	if err != nil {
+		mps.rebuildLocked()
+		return err
+	}
+	mps.overrides = overrides
+	mps.rebuildLocked()
+	return nil
+}
+
+func (mps *ModelPricingService) rebuildLocked() {
+	if mps.defaults == nil {
+		mps.effective = nil
+		return
+	}
+	merged := mps.defaults.Clone()
+	merged.ApplyOverrides(mps.overrides.Pricing, mps.overrides.Ephemeral1h)
+	mps.effective = merged
+}
+
+func (mps *ModelPricingService) hasRenameConflictLocked(originalModel, targetModel string) bool {
+	if mps == nil || mps.effective == nil {
+		return false
+	}
+	original := strings.TrimSpace(originalModel)
+	target := strings.TrimSpace(targetModel)
+	if original == "" || target == "" || original == target {
+		return false
+	}
+	_, exists := mps.effective.PricingEntryExact(target)
+	return exists
+}
+
+func validateNonNegative(value float64, name string) error {
+	if value < 0 {
+		return fmt.Errorf("%s 不能为负数", name)
+	}
+	return nil
+}
+
+func hasTokenPricing(entry modelpricing.PricingEntry) bool {
+	return entry.InputCostPerToken != 0 ||
+		entry.OutputCostPerToken != 0 ||
+		entry.OutputCostPerReasoningToken != 0 ||
+		entry.CacheCreationInputTokenCost != 0 ||
+		entry.CacheReadInputTokenCost != 0
+}
+
+func cloneModelPricingOverrides(src modelPricingOverrides) modelPricingOverrides {
+	dst := modelPricingOverrides{
+		Pricing:     make(map[string]modelpricing.PricingEntry, len(src.Pricing)),
+		Ephemeral1h: make(map[string]float64, len(src.Ephemeral1h)),
+		Meta:        make(map[string]modelPricingMeta, len(src.Meta)),
+	}
+	for key, value := range src.Pricing {
+		dst.Pricing[key] = value
+	}
+	for key, value := range src.Ephemeral1h {
+		dst.Ephemeral1h[key] = value
+	}
+	for key, value := range src.Meta {
+		dst.Meta[key] = value
+	}
+	return dst
+}
+
+func loadModelPricingOverridesFromDB() (modelPricingOverrides, error) {
+	overrides := modelPricingOverrides{
+		Pricing:     make(map[string]modelpricing.PricingEntry),
+		Ephemeral1h: make(map[string]float64),
+		Meta:        make(map[string]modelPricingMeta),
+	}
+
+	db, err := xdb.DB("default")
+	if err != nil {
+		return overrides, fmt.Errorf("获取数据库连接失败: %w", err)
+	}
+
+	var raw string
+	err = db.QueryRow(`SELECT value FROM app_settings WHERE key = ?`, modelPricingOverridesSettingKey).Scan(&raw)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return overrides, nil
+		}
+		return overrides, err
+	}
+
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return overrides, nil
+	}
+
+	if err := json.Unmarshal([]byte(raw), &overrides); err != nil {
+		return overrides, fmt.Errorf("解析自定义价格表失败: %w", err)
+	}
+
+	if overrides.Pricing == nil {
+		overrides.Pricing = make(map[string]modelpricing.PricingEntry)
+	}
+	if overrides.Ephemeral1h == nil {
+		overrides.Ephemeral1h = make(map[string]float64)
+	}
+	if overrides.Meta == nil {
+		overrides.Meta = make(map[string]modelPricingMeta)
+	}
+
+	return overrides, nil
+}
+
+func saveModelPricingOverridesToDB(overrides modelPricingOverrides) error {
+	if GlobalDBQueue == nil {
+		return fmt.Errorf("db queue not initialized")
+	}
+
+	payload, err := json.Marshal(overrides)
+	if err != nil {
+		return err
+	}
+
+	return GlobalDBQueue.Exec(`
+		INSERT INTO app_settings (key, value) VALUES (?, ?)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value
+	`, modelPricingOverridesSettingKey, string(payload))
+}
+
+func resolveModelPricingSource(meta modelPricingMeta, fallbackManual bool) string {
+	source := normalizeModelPricingSource(meta.Source)
+	if source != "" {
+		return source
+	}
+	if fallbackManual {
+		return modelPricingSourceManual
+	}
+	return modelPricingSourceBuiltin
+}
+
+func normalizeModelPricingSource(source string) string {
+	switch strings.ToLower(strings.TrimSpace(source)) {
+	case modelPricingSourceBuiltin:
+		return modelPricingSourceBuiltin
+	case modelPricingSourceManual:
+		return modelPricingSourceManual
+	case modelPricingSourceClaudeSync:
+		return modelPricingSourceClaudeSync
+	default:
+		return ""
+	}
+}

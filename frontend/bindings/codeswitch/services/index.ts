@@ -6,6 +6,7 @@ import * as BlacklistService from "./blacklistservice.js";
 import * as ClaudeSettingsService from "./claudesettingsservice.js";
 import * as CliConfigService from "./cliconfigservice.js";
 import * as CodexSettingsService from "./codexsettingsservice.js";
+import * as ConnectivityTestService from "./connectivitytestservice.js";
 import * as ConsoleService from "./consoleservice.js";
 import * as DeepLinkService from "./deeplinkservice.js";
 import * as EnvCheckService from "./envcheckservice.js";
@@ -26,6 +27,7 @@ export {
     ClaudeSettingsService,
     CliConfigService,
     CodexSettingsService,
+    ConnectivityTestService,
     ConsoleService,
     DeepLinkService,
     EnvCheckService,
@@ -55,6 +57,7 @@ export {
     ClaudeProxyStatus,
     ConfigImportResult,
     ConfigImportStatus,
+    ConnectivityResult,
     ConsoleLog,
     DeepLinkImportRequest,
     EndpointLatency,

@@ -6,23 +6,78 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
 
 const (
-	appSettingsDir      = ".code-switch" // 【修复】修正拼写错误（原为 .codex-swtich）
-	appSettingsFile     = "app.json"
-	oldSettingsDir      = ".codex-swtich"           // 旧的错误拼写
-	migrationMarkerFile = ".migrated-from-codex-swtich" // 迁移标记文件
+	appSettingsDir                        = ".code-switch" // 【修复】修正拼写错误（原为 .codex-swtich）
+	appSettingsFile                       = "app.json"
+	oldSettingsDir                        = ".codex-swtich"               // 旧的错误拼写
+	migrationMarkerFile                   = ".migrated-from-codex-swtich" // 迁移标记文件
+	defaultUpdateHistoryKeepCount         = 3
+	minUpdateHistoryKeepCount             = 1
+	maxUpdateHistoryKeepCount             = 20
+	heatmapGranularityHourly              = "hourly"
+	heatmapGranularityDaily               = "daily"
+	heatmapDailyModeHourlyScaled          = "hourly_scaled"
+	heatmapDailyModeDailyPeak             = "daily_peak"
+	heatmapIntensityMetricRequests        = "requests"
+	heatmapIntensityMetricCost            = "cost"
+	heatmapIntensityMetricTotalTokens     = "total_tokens"
+	heatmapIntensityMetricInputTokens     = "input_tokens"
+	heatmapIntensityMetricOutputTokens    = "output_tokens"
+	heatmapIntensityMetricReasoningTokens = "reasoning_tokens"
+	defaultHeatmapDailyScale              = 24
+	defaultHeatmapIntensityMetric         = heatmapIntensityMetricRequests
+	minHeatmapDailyScale                  = 1
+	maxHeatmapDailyScale                  = 72
+	defaultHeatmapIntensityL1             = 25
+	defaultHeatmapIntensityL2             = 50
+	defaultHeatmapIntensityL3             = 75
+	minHeatmapIntensityStop               = 1
+	maxHeatmapIntensityStop               = 99
 )
 
 type AppSettings struct {
-	ShowHeatmap        bool `json:"show_heatmap"`
-	ShowHomeTitle      bool `json:"show_home_title"`
-	AutoStart          bool `json:"auto_start"`
-	AutoUpdate         bool `json:"auto_update"`
-	EnableSwitchNotify bool `json:"enable_switch_notify"` // 供应商切换通知开关
+	ShowHeatmap                bool    `json:"show_heatmap"`
+	HeatmapGranularity         string  `json:"heatmap_granularity"`
+	HeatmapDailyScaleFactor    int     `json:"heatmap_daily_scale_factor"`
+	HeatmapDailyIntensityMode  string  `json:"heatmap_daily_intensity_mode"`
+	HeatmapIntensityMetric     string  `json:"heatmap_intensity_metric"`
+	HeatmapIntensityStopL1     int     `json:"heatmap_intensity_stop_l1"`
+	HeatmapIntensityStopL2     int     `json:"heatmap_intensity_stop_l2"`
+	HeatmapIntensityStopL3     int     `json:"heatmap_intensity_stop_l3"`
+	ShowHomeTitle              bool    `json:"show_home_title"`
+	BudgetTotal                float64 `json:"budget_total"`
+	BudgetUsedAdjustment       float64 `json:"budget_used_adjustment"`
+	BudgetCycleEnabled         bool    `json:"budget_cycle_enabled"`
+	BudgetCycleMode            string  `json:"budget_cycle_mode"`
+	BudgetRefreshTime          string  `json:"budget_refresh_time"`
+	BudgetRefreshDay           int     `json:"budget_refresh_day"`
+	BudgetShowCountdown        bool    `json:"budget_show_countdown"`
+	BudgetShowForecast         bool    `json:"budget_show_forecast"`
+	BudgetForecastMethod       string  `json:"budget_forecast_method"`
+	BudgetForecastDisplay      string  `json:"budget_forecast_display"`
+	BudgetTotalCodex           float64 `json:"budget_total_codex"`
+	BudgetUsedAdjustmentCodex  float64 `json:"budget_used_adjustment_codex"`
+	BudgetCycleEnabledCodex    bool    `json:"budget_cycle_enabled_codex"`
+	BudgetCycleModeCodex       string  `json:"budget_cycle_mode_codex"`
+	BudgetRefreshTimeCodex     string  `json:"budget_refresh_time_codex"`
+	BudgetRefreshDayCodex      int     `json:"budget_refresh_day_codex"`
+	BudgetShowCountdownCodex   bool    `json:"budget_show_countdown_codex"`
+	BudgetShowForecastCodex    bool    `json:"budget_show_forecast_codex"`
+	BudgetForecastMethodCodex  string  `json:"budget_forecast_method_codex"`
+	BudgetForecastDisplayCodex string  `json:"budget_forecast_display_codex"`
+	AutoStart                  bool    `json:"auto_start"`
+	AutoUpdate                 bool    `json:"auto_update"`
+	UpdateHistoryKeepCount     int     `json:"update_history_keep_count"` // 更新包历史保留数量
+	AutoConnectivityTest       bool    `json:"auto_connectivity_test"`
+	EnableSwitchNotify         bool    `json:"enable_switch_notify"` // 供应商切换通知开关
+	EnableRoundRobin           bool    `json:"enable_round_robin"`   // 同 Level 轮询负载均衡开关（默认关闭）
+	CaptureRequestLogPayload   bool    `json:"capture_request_log_payload"`
+	SanitizeRequestLogPayload  bool    `json:"sanitize_request_log_payload"`
 }
 
 type AppSettingsService struct {
@@ -135,11 +190,43 @@ func (as *AppSettingsService) defaultSettings() AppSettings {
 	}
 
 	return AppSettings{
-		ShowHeatmap:        true,
-		ShowHomeTitle:      true,
-		AutoStart:          autoStartEnabled,
-		AutoUpdate:         true,  // 默认开启自动更新
-		EnableSwitchNotify: true,  // 默认开启切换通知
+		ShowHeatmap:                true,
+		HeatmapGranularity:         heatmapGranularityHourly,
+		HeatmapDailyScaleFactor:    defaultHeatmapDailyScale,
+		HeatmapDailyIntensityMode:  heatmapDailyModeHourlyScaled,
+		HeatmapIntensityMetric:     defaultHeatmapIntensityMetric,
+		HeatmapIntensityStopL1:     defaultHeatmapIntensityL1,
+		HeatmapIntensityStopL2:     defaultHeatmapIntensityL2,
+		HeatmapIntensityStopL3:     defaultHeatmapIntensityL3,
+		ShowHomeTitle:              true,
+		BudgetTotal:                0,
+		BudgetUsedAdjustment:       0,
+		BudgetCycleEnabled:         false,
+		BudgetCycleMode:            "daily",
+		BudgetRefreshTime:          "00:00",
+		BudgetRefreshDay:           1,
+		BudgetShowCountdown:        false,
+		BudgetShowForecast:         false,
+		BudgetForecastMethod:       "cycle",
+		BudgetForecastDisplay:      "datetime",
+		BudgetTotalCodex:           0,
+		BudgetUsedAdjustmentCodex:  0,
+		BudgetCycleEnabledCodex:    false,
+		BudgetCycleModeCodex:       "daily",
+		BudgetRefreshTimeCodex:     "00:00",
+		BudgetRefreshDayCodex:      1,
+		BudgetShowCountdownCodex:   false,
+		BudgetShowForecastCodex:    false,
+		BudgetForecastMethodCodex:  "cycle",
+		BudgetForecastDisplayCodex: "datetime",
+		AutoStart:                  autoStartEnabled,
+		AutoUpdate:                 true, // 默认开启自动更新
+		UpdateHistoryKeepCount:     defaultUpdateHistoryKeepCount,
+		AutoConnectivityTest:       true,  // 默认开启自动可用性监控（开箱即用）
+		EnableSwitchNotify:         true,  // 默认开启切换通知
+		EnableRoundRobin:           false, // 默认关闭轮询（使用顺序降级）
+		CaptureRequestLogPayload:   false, // 默认关闭 payload 采集，降低隐私与存储风险
+		SanitizeRequestLogPayload:  true,  // 默认开启 payload 脱敏，避免敏感信息明文落库
 	}
 }
 
@@ -154,6 +241,9 @@ func (as *AppSettingsService) GetAppSettings() (AppSettings, error) {
 func (as *AppSettingsService) SaveAppSettings(settings AppSettings) (AppSettings, error) {
 	as.mu.Lock()
 	defer as.mu.Unlock()
+	settings.HeatmapGranularity = normalizeHeatmapGranularity(settings.HeatmapGranularity)
+	normalizeHeatmapDisplaySettings(&settings)
+	settings.UpdateHistoryKeepCount = normalizeUpdateHistoryKeepCount(settings.UpdateHistoryKeepCount)
 
 	// 同步开机自启动状态
 	if as.autoStartService != nil {
@@ -189,6 +279,9 @@ func (as *AppSettingsService) loadLocked() (AppSettings, error) {
 	if err := json.Unmarshal(data, &settings); err != nil {
 		return settings, err
 	}
+	settings.HeatmapGranularity = normalizeHeatmapGranularity(settings.HeatmapGranularity)
+	normalizeHeatmapDisplaySettings(&settings)
+	settings.UpdateHistoryKeepCount = normalizeUpdateHistoryKeepCount(settings.UpdateHistoryKeepCount)
 	return settings, nil
 }
 
@@ -197,9 +290,157 @@ func (as *AppSettingsService) saveLocked(settings AppSettings) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
+	settings.HeatmapGranularity = normalizeHeatmapGranularity(settings.HeatmapGranularity)
+	normalizeHeatmapDisplaySettings(&settings)
+	settings.UpdateHistoryKeepCount = normalizeUpdateHistoryKeepCount(settings.UpdateHistoryKeepCount)
 	data, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(as.path, data, 0o644)
+	return atomicWriteFile(as.path, data, 0o644)
+}
+
+func normalizeUpdateHistoryKeepCount(count int) int {
+	if count < minUpdateHistoryKeepCount {
+		return minUpdateHistoryKeepCount
+	}
+	if count > maxUpdateHistoryKeepCount {
+		return maxUpdateHistoryKeepCount
+	}
+	return count
+}
+
+func normalizeHeatmapGranularity(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case heatmapGranularityDaily:
+		return heatmapGranularityDaily
+	default:
+		return heatmapGranularityHourly
+	}
+}
+
+func normalizeHeatmapDailyIntensityMode(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case heatmapDailyModeDailyPeak:
+		return heatmapDailyModeDailyPeak
+	default:
+		return heatmapDailyModeHourlyScaled
+	}
+}
+
+func normalizeHeatmapIntensityMetric(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case heatmapIntensityMetricCost:
+		return heatmapIntensityMetricCost
+	case heatmapIntensityMetricTotalTokens:
+		return heatmapIntensityMetricTotalTokens
+	case heatmapIntensityMetricInputTokens:
+		return heatmapIntensityMetricInputTokens
+	case heatmapIntensityMetricOutputTokens:
+		return heatmapIntensityMetricOutputTokens
+	case heatmapIntensityMetricReasoningTokens:
+		return heatmapIntensityMetricReasoningTokens
+	default:
+		return heatmapIntensityMetricRequests
+	}
+}
+
+func clampHeatmapInt(value int, min int, max int, fallback int) int {
+	if value == 0 {
+		return fallback
+	}
+	if value < min {
+		return min
+	}
+	if value > max {
+		return max
+	}
+	return value
+}
+
+func normalizeHeatmapDisplaySettings(settings *AppSettings) {
+	if settings == nil {
+		return
+	}
+	settings.HeatmapDailyScaleFactor = clampHeatmapInt(
+		settings.HeatmapDailyScaleFactor,
+		minHeatmapDailyScale,
+		maxHeatmapDailyScale,
+		defaultHeatmapDailyScale,
+	)
+	settings.HeatmapDailyIntensityMode = normalizeHeatmapDailyIntensityMode(settings.HeatmapDailyIntensityMode)
+	settings.HeatmapIntensityMetric = normalizeHeatmapIntensityMetric(settings.HeatmapIntensityMetric)
+
+	l1 := clampHeatmapInt(
+		settings.HeatmapIntensityStopL1,
+		minHeatmapIntensityStop,
+		maxHeatmapIntensityStop,
+		defaultHeatmapIntensityL1,
+	)
+	l2 := clampHeatmapInt(
+		settings.HeatmapIntensityStopL2,
+		minHeatmapIntensityStop,
+		maxHeatmapIntensityStop,
+		defaultHeatmapIntensityL2,
+	)
+	l3 := clampHeatmapInt(
+		settings.HeatmapIntensityStopL3,
+		minHeatmapIntensityStop,
+		maxHeatmapIntensityStop,
+		defaultHeatmapIntensityL3,
+	)
+
+	if l2 <= l1 {
+		l2 = l1 + 1
+		if l2 > maxHeatmapIntensityStop {
+			l2 = maxHeatmapIntensityStop
+		}
+	}
+	if l3 <= l2 {
+		l3 = l2 + 1
+		if l3 > maxHeatmapIntensityStop {
+			l3 = maxHeatmapIntensityStop
+		}
+	}
+	if l3 <= l2 {
+		l2 = l3 - 1
+		if l2 < minHeatmapIntensityStop {
+			l2 = minHeatmapIntensityStop
+		}
+	}
+	if l2 <= l1 {
+		l1 = l2 - 1
+		if l1 < minHeatmapIntensityStop {
+			l1 = minHeatmapIntensityStop
+		}
+	}
+
+	settings.HeatmapIntensityStopL1 = l1
+	settings.HeatmapIntensityStopL2 = l2
+	settings.HeatmapIntensityStopL3 = l3
+}
+
+// LoadUpdateHistoryKeepCount 从应用设置读取更新包历史保留数量（读取失败时返回默认值）
+func LoadUpdateHistoryKeepCount() int {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return defaultUpdateHistoryKeepCount
+	}
+
+	path := filepath.Join(home, appSettingsDir, appSettingsFile)
+	data, err := os.ReadFile(path)
+	if err != nil || len(data) == 0 {
+		return defaultUpdateHistoryKeepCount
+	}
+
+	raw := struct {
+		UpdateHistoryKeepCount int `json:"update_history_keep_count"`
+	}{
+		UpdateHistoryKeepCount: defaultUpdateHistoryKeepCount,
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return defaultUpdateHistoryKeepCount
+	}
+
+	return normalizeUpdateHistoryKeepCount(raw.UpdateHistoryKeepCount)
 }

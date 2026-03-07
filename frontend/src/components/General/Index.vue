@@ -1,15 +1,46 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { Call, Events } from '@wailsio/runtime'
 import ListItem from '../Setting/ListRow.vue'
 import LanguageSwitcher from '../Setting/LanguageSwitcher.vue'
 import ThemeSetting from '../Setting/ThemeSetting.vue'
-import { fetchAppSettings, saveAppSettings, type AppSettings } from '../../services/appSettings'
-import { checkUpdate, downloadUpdate, restartApp, getUpdateState, setAutoCheckEnabled, type UpdateState } from '../../services/update'
+import NetworkWslSettings from '../Setting/NetworkWslSettings.vue'
+import ModelPricingModal from '../Setting/ModelPricingModal.vue'
+import InlineModal from '../common/InlineModal.vue'
+import {
+  fetchAppSettings,
+  saveAppSettings,
+  normalizeHeatmapGranularity,
+  type AppSettings,
+} from '../../services/appSettings'
+import {
+  DEFAULT_HEATMAP_DISPLAY_SETTINGS,
+  normalizeHeatmapDailyIntensityMode,
+  normalizeHeatmapDisplaySettings,
+  normalizeHeatmapIntensityMetric,
+  type HeatmapDisplaySettings,
+} from '../../data/heatmapDisplaySettings'
+import { fetchCostSince, fetchLogStats } from '../../services/logs'
+import { checkUpdate, downloadUpdate, restartApp, getUpdateState, setAutoCheckEnabled, type UpdateInfo, type UpdateState } from '../../services/update'
 import { fetchCurrentVersion } from '../../services/version'
 import { getBlacklistSettings, updateBlacklistSettings, getLevelBlacklistEnabled, setLevelBlacklistEnabled, getBlacklistEnabled, setBlacklistEnabled, type BlacklistSettings } from '../../services/settings'
 import { fetchConfigImportStatus, importFromPath, type ConfigImportStatus } from '../../services/configImport'
+import { fetchWebDAVConfig, previewWebDAVContent, saveWebDAVConfig, testWebDAVConfig, syncToWebDAV, loadFromWebDAV, type WebDAVSyncConfig } from '../../services/webdavSync'
 import { useI18n } from 'vue-i18n'
+import { extractErrorMessage } from '../../utils/error'
+import { showToast } from '../../utils/toast'
+import {
+  buildBudgetUsageConfig,
+  formatLocalDateTime,
+  getBudgetUsageConfigKey,
+  normalizeBudgetCycleMode,
+  normalizeBudgetRefreshDay,
+  normalizeBudgetRefreshTime,
+  normalizeBudgetUsedDisplay,
+  resolveCycleStart,
+  type BudgetUsageConfig,
+} from '../../utils/budgetUsage'
 
 const { t } = useI18n()
 
@@ -19,24 +50,303 @@ const getCachedValue = (key: string, defaultValue: boolean): boolean => {
   const cached = localStorage.getItem(`app-settings-${key}`)
   return cached !== null ? cached === 'true' : defaultValue
 }
+const getCachedNumber = (key: string, defaultValue: number): number => {
+  const cached = localStorage.getItem(`app-settings-${key}`)
+  if (cached === null) return defaultValue
+  const parsed = Number(cached)
+  return Number.isFinite(parsed) ? parsed : defaultValue
+}
+const getCachedString = (key: string, defaultValue: string): string => {
+  const cached = localStorage.getItem(`app-settings-${key}`)
+  return cached !== null ? cached : defaultValue
+}
+const defaultUpdateHistoryKeepCount = 3
+const minUpdateHistoryKeepCount = 1
+const maxUpdateHistoryKeepCount = 20
 const heatmapEnabled = ref(getCachedValue('heatmap', true))
+const heatmapGranularity = ref(normalizeHeatmapGranularity(getCachedString('heatmapGranularity', 'hourly')))
+const initialHeatmapDisplaySettings = normalizeHeatmapDisplaySettings({
+  dailyScaleFactor: getCachedNumber('heatmapDailyScaleFactor', DEFAULT_HEATMAP_DISPLAY_SETTINGS.dailyScaleFactor),
+  dailyIntensityMode: normalizeHeatmapDailyIntensityMode(
+    getCachedString('heatmapDailyIntensityMode', DEFAULT_HEATMAP_DISPLAY_SETTINGS.dailyIntensityMode),
+  ),
+  intensityMetric: normalizeHeatmapIntensityMetric(
+    getCachedString('heatmapIntensityMetric', DEFAULT_HEATMAP_DISPLAY_SETTINGS.intensityMetric),
+  ),
+  intensityStopL1: getCachedNumber('heatmapIntensityStopL1', DEFAULT_HEATMAP_DISPLAY_SETTINGS.intensityStopL1),
+  intensityStopL2: getCachedNumber('heatmapIntensityStopL2', DEFAULT_HEATMAP_DISPLAY_SETTINGS.intensityStopL2),
+  intensityStopL3: getCachedNumber('heatmapIntensityStopL3', DEFAULT_HEATMAP_DISPLAY_SETTINGS.intensityStopL3),
+})
+const heatmapDailyScaleFactor = ref(initialHeatmapDisplaySettings.dailyScaleFactor)
+const heatmapDailyIntensityMode = ref(initialHeatmapDisplaySettings.dailyIntensityMode)
+const heatmapIntensityMetric = ref(initialHeatmapDisplaySettings.intensityMetric)
+const heatmapIntensityStopL1 = ref(initialHeatmapDisplaySettings.intensityStopL1)
+const heatmapIntensityStopL2 = ref(initialHeatmapDisplaySettings.intensityStopL2)
+const heatmapIntensityStopL3 = ref(initialHeatmapDisplaySettings.intensityStopL3)
 const homeTitleVisible = ref(getCachedValue('homeTitle', true))
 const autoStartEnabled = ref(getCachedValue('autoStart', false))
 const autoUpdateEnabled = ref(getCachedValue('autoUpdate', true))
+const updateHistoryKeepCount = ref(getCachedNumber('updateHistoryKeepCount', defaultUpdateHistoryKeepCount))
+const autoConnectivityTestEnabled = ref(getCachedValue('autoConnectivityTest', false))
 const switchNotifyEnabled = ref(getCachedValue('switchNotify', true)) // 切换通知开关
+const roundRobinEnabled = ref(getCachedValue('roundRobin', false))    // 同 Level 轮询开关
+const captureRequestLogPayloadEnabled = ref(getCachedValue('captureRequestLogPayload', false))
+const sanitizeRequestLogPayloadEnabled = ref(getCachedValue('sanitizeRequestLogPayload', true))
+const budgetTotal = ref(getCachedNumber('budgetTotal', 0))
+const budgetUsedAdjustment = ref(getCachedNumber('budgetUsedAdjustment', 0))
+const budgetUsedDelta = ref(0)
+const budgetUsedRaw = ref(0)
+const budgetForecastMethod = ref(getCachedString('budgetForecastMethod', 'cycle'))
+const budgetForecastDisplay = ref(getCachedString('budgetForecastDisplay', 'datetime'))
+const budgetCycleEnabled = ref(getCachedValue('budgetCycleEnabled', false))
+const budgetCycleMode = ref(getCachedString('budgetCycleMode', 'daily'))
+const budgetRefreshTime = ref(getCachedString('budgetRefreshTime', '00:00'))
+const budgetRefreshDay = ref(getCachedNumber('budgetRefreshDay', 1))
+const budgetShowCountdown = ref(getCachedValue('budgetShowCountdown', false))
+const budgetShowForecast = ref(getCachedValue('budgetShowForecast', false))
+const budgetTotalCodex = ref(getCachedNumber('budgetTotalCodex', 0))
+const budgetUsedAdjustmentCodex = ref(getCachedNumber('budgetUsedAdjustmentCodex', 0))
+const budgetUsedDeltaCodex = ref(0)
+const budgetUsedRawCodex = ref(0)
+const budgetForecastMethodCodex = ref(getCachedString('budgetForecastMethodCodex', 'cycle'))
+const budgetForecastDisplayCodex = ref(getCachedString('budgetForecastDisplayCodex', 'datetime'))
+const budgetCycleEnabledCodex = ref(getCachedValue('budgetCycleEnabledCodex', false))
+const budgetCycleModeCodex = ref(getCachedString('budgetCycleModeCodex', 'daily'))
+const budgetRefreshTimeCodex = ref(getCachedString('budgetRefreshTimeCodex', '00:00'))
+const budgetRefreshDayCodex = ref(getCachedNumber('budgetRefreshDayCodex', 1))
+const budgetShowCountdownCodex = ref(getCachedValue('budgetShowCountdownCodex', false))
+const budgetShowForecastCodex = ref(getCachedValue('budgetShowForecastCodex', false))
 const settingsLoading = ref(true)
 const saveBusy = ref(false)
+let saveQueued = false
+let persistTimer: number | undefined
+let budgetUsageTicker: number | undefined
+let budgetUsedInputFocused = false
+let budgetUsedInputFocusedCodex = false
+let budgetUsedEdited = false
+let budgetUsedEditedCodex = false
+let lastBudgetUsageConfigKey = ''
+let lastBudgetUsageConfigKeyCodex = ''
+const defaultPersistDebounceMs = 150
+const minPersistDebounceMs = 0
+const maxPersistDebounceMs = 2000
+const budgetUsageRefreshIntervalMs = 60_000
+const rawPersistDebounceMs = import.meta.env.VITE_SETTINGS_PERSIST_DEBOUNCE_MS
+const envPersistDebounceMs =
+  typeof rawPersistDebounceMs === 'string' && rawPersistDebounceMs.trim() !== ''
+    ? Number(rawPersistDebounceMs)
+    : defaultPersistDebounceMs
+const persistDebounceMs = Number.isFinite(envPersistDebounceMs)
+  ? Math.min(Math.max(Math.round(envPersistDebounceMs), minPersistDebounceMs), maxPersistDebounceMs)
+  : defaultPersistDebounceMs
+
+type BudgetPlatform = 'claude' | 'codex'
+type BudgetUsageConfigs = {
+  claude: BudgetUsageConfig
+  codex: BudgetUsageConfig
+}
+type ApplyBudgetUsedDisplayOptions = {
+  skipFocused?: boolean
+  skipEdited?: boolean
+}
+
+const getCurrentBudgetUsageConfigs = () => {
+  return {
+    claude: buildBudgetUsageConfig(
+      budgetCycleEnabled.value,
+      budgetCycleMode.value,
+      budgetRefreshTime.value,
+      budgetRefreshDay.value,
+    ),
+    codex: buildBudgetUsageConfig(
+      budgetCycleEnabledCodex.value,
+      budgetCycleModeCodex.value,
+      budgetRefreshTimeCodex.value,
+      budgetRefreshDayCodex.value,
+    ),
+  }
+}
+
+const syncBudgetUsageConfigKeys = (configs: BudgetUsageConfigs) => {
+  lastBudgetUsageConfigKey = getBudgetUsageConfigKey(configs.claude)
+  lastBudgetUsageConfigKeyCodex = getBudgetUsageConfigKey(configs.codex)
+}
+
+const fetchBudgetRawUsed = async (
+  platform: BudgetPlatform,
+  config: BudgetUsageConfig,
+  fallback: number,
+) => {
+  try {
+    let rawUsed = 0
+    if (config.cycleEnabled) {
+      const cycleStart = resolveCycleStart(config, new Date())
+      rawUsed = Number(await fetchCostSince(formatLocalDateTime(cycleStart), platform))
+    } else {
+      const stats = await fetchLogStats(platform)
+      rawUsed = Number(stats?.cost_total ?? 0)
+    }
+    if (!Number.isFinite(rawUsed)) {
+      return normalizeBudgetUsedDisplay(fallback)
+    }
+    return normalizeBudgetUsedDisplay(rawUsed)
+  } catch (error) {
+    console.error(`failed to fetch ${platform} budget raw usage`, error)
+    return normalizeBudgetUsedDisplay(fallback)
+  }
+}
+
+const fetchBudgetRawSnapshot = async (configs: BudgetUsageConfigs) => {
+  const [claudeRaw, codexRaw] = await Promise.all([
+    fetchBudgetRawUsed('claude', configs.claude, budgetUsedRaw.value),
+    fetchBudgetRawUsed('codex', configs.codex, budgetUsedRawCodex.value),
+  ])
+  return { claudeRaw, codexRaw }
+}
+
+const shouldSkipBudgetUsedDisplay = (
+  platform: BudgetPlatform,
+  options: ApplyBudgetUsedDisplayOptions,
+) => {
+  const { skipFocused = false, skipEdited = false } = options
+  if (platform === 'codex') {
+    return (skipFocused && budgetUsedInputFocusedCodex) || (skipEdited && budgetUsedEditedCodex)
+  }
+  return (skipFocused && budgetUsedInputFocused) || (skipEdited && budgetUsedEdited)
+}
+
+const applyBudgetUsedDisplay = (options: ApplyBudgetUsedDisplayOptions = {}) => {
+  if (!shouldSkipBudgetUsedDisplay('claude', options)) {
+    budgetUsedAdjustment.value = normalizeBudgetUsedDisplay(budgetUsedRaw.value + budgetUsedDelta.value)
+  }
+  if (!shouldSkipBudgetUsedDisplay('codex', options)) {
+    budgetUsedAdjustmentCodex.value = normalizeBudgetUsedDisplay(budgetUsedRawCodex.value + budgetUsedDeltaCodex.value)
+  }
+}
+
+const refreshBudgetUsedDisplay = async (skipFocused = false) => {
+  const snapshot = await fetchBudgetRawSnapshot(getCurrentBudgetUsageConfigs())
+  budgetUsedRaw.value = snapshot.claudeRaw
+  budgetUsedRawCodex.value = snapshot.codexRaw
+  applyBudgetUsedDisplay({ skipFocused, skipEdited: true })
+}
+
+const handleBudgetUsedFocus = (platform: BudgetPlatform, focused: boolean) => {
+  if (platform === 'codex') {
+    budgetUsedInputFocusedCodex = focused
+    return
+  }
+  budgetUsedInputFocused = focused
+}
+
+const handleBudgetUsedChange = (platform: BudgetPlatform) => {
+  if (platform === 'codex') {
+    budgetUsedEditedCodex = true
+  } else {
+    budgetUsedEdited = true
+  }
+  persistAppSettings()
+}
+
+const refreshBudgetUsedWhenActive = () => {
+  if (document.hidden || settingsLoading.value || saveBusy.value) return
+  void refreshBudgetUsedDisplay(true)
+}
+
+const setupBudgetUsageTicker = () => {
+  if (budgetUsageTicker) {
+    window.clearInterval(budgetUsageTicker)
+  }
+  budgetUsageTicker = window.setInterval(() => {
+    refreshBudgetUsedWhenActive()
+  }, budgetUsageRefreshIntervalMs)
+}
+
+const syncAppSettingsCache = () => {
+  localStorage.setItem('app-settings-heatmap', String(heatmapEnabled.value))
+  localStorage.setItem('app-settings-heatmapGranularity', heatmapGranularity.value)
+  localStorage.setItem('app-settings-heatmapDailyScaleFactor', String(heatmapDailyScaleFactor.value))
+  localStorage.setItem('app-settings-heatmapDailyIntensityMode', heatmapDailyIntensityMode.value)
+  localStorage.setItem('app-settings-heatmapIntensityMetric', heatmapIntensityMetric.value)
+  localStorage.setItem('app-settings-heatmapIntensityStopL1', String(heatmapIntensityStopL1.value))
+  localStorage.setItem('app-settings-heatmapIntensityStopL2', String(heatmapIntensityStopL2.value))
+  localStorage.setItem('app-settings-heatmapIntensityStopL3', String(heatmapIntensityStopL3.value))
+  localStorage.setItem('app-settings-homeTitle', String(homeTitleVisible.value))
+  localStorage.setItem('app-settings-budgetTotal', String(budgetTotal.value))
+  localStorage.setItem('app-settings-budgetUsedAdjustment', String(budgetUsedAdjustment.value))
+  localStorage.setItem('app-settings-budgetForecastMethod', budgetForecastMethod.value)
+  localStorage.setItem('app-settings-budgetForecastDisplay', budgetForecastDisplay.value)
+  localStorage.setItem('app-settings-budgetCycleEnabled', String(budgetCycleEnabled.value))
+  localStorage.setItem('app-settings-budgetCycleMode', budgetCycleMode.value)
+  localStorage.setItem('app-settings-budgetRefreshTime', budgetRefreshTime.value)
+  localStorage.setItem('app-settings-budgetRefreshDay', String(budgetRefreshDay.value))
+  localStorage.setItem('app-settings-budgetShowCountdown', String(budgetShowCountdown.value))
+  localStorage.setItem('app-settings-budgetShowForecast', String(budgetShowForecast.value))
+  localStorage.setItem('app-settings-budgetTotalCodex', String(budgetTotalCodex.value))
+  localStorage.setItem('app-settings-budgetUsedAdjustmentCodex', String(budgetUsedAdjustmentCodex.value))
+  localStorage.setItem('app-settings-budgetForecastMethodCodex', budgetForecastMethodCodex.value)
+  localStorage.setItem('app-settings-budgetForecastDisplayCodex', budgetForecastDisplayCodex.value)
+  localStorage.setItem('app-settings-budgetCycleEnabledCodex', String(budgetCycleEnabledCodex.value))
+  localStorage.setItem('app-settings-budgetCycleModeCodex', budgetCycleModeCodex.value)
+  localStorage.setItem('app-settings-budgetRefreshTimeCodex', budgetRefreshTimeCodex.value)
+  localStorage.setItem('app-settings-budgetRefreshDayCodex', String(budgetRefreshDayCodex.value))
+  localStorage.setItem('app-settings-budgetShowCountdownCodex', String(budgetShowCountdownCodex.value))
+  localStorage.setItem('app-settings-budgetShowForecastCodex', String(budgetShowForecastCodex.value))
+  localStorage.setItem('app-settings-autoStart', String(autoStartEnabled.value))
+  localStorage.setItem('app-settings-autoUpdate', String(autoUpdateEnabled.value))
+  localStorage.setItem('app-settings-updateHistoryKeepCount', String(updateHistoryKeepCount.value))
+  localStorage.setItem('app-settings-autoConnectivityTest', String(autoConnectivityTestEnabled.value))
+  localStorage.setItem('app-settings-switchNotify', String(switchNotifyEnabled.value))
+  localStorage.setItem('app-settings-roundRobin', String(roundRobinEnabled.value))
+  localStorage.setItem('app-settings-captureRequestLogPayload', String(captureRequestLogPayloadEnabled.value))
+  localStorage.setItem('app-settings-sanitizeRequestLogPayload', String(sanitizeRequestLogPayloadEnabled.value))
+}
 
 // 更新相关状态
 const updateState = ref<UpdateState | null>(null)
 const checking = ref(false)
 const downloading = ref(false)
+const installing = ref(false)
+const downloadProgress = ref<number | null>(null)
 const appVersion = ref('')
+const updateModalOpen = ref(false)
+const updateCheckInfo = ref<UpdateInfo | null>(null)
+const updateModalMessage = ref('')
+const updateModalError = ref('')
+
+const updateModalLatestVersion = computed(() => {
+  if (updateCheckInfo.value?.version) return updateCheckInfo.value.version
+  if (updateState.value?.latest_known_version) return updateState.value.latest_known_version
+  return appVersion.value || '—'
+})
+
+const updateModalReleaseNotes = computed(() => {
+  const notes = updateCheckInfo.value?.release_notes?.trim()
+  if (notes) return notes
+  const cachedNotes = updateState.value?.latest_release_notes?.trim()
+  if (cachedNotes) return cachedNotes
+  return t('components.general.update.releaseNotesEmpty')
+})
+
+const canTriggerUpdateFromModal = computed(() => {
+  if (updateState.value?.update_ready) return true
+  return Boolean(updateCheckInfo.value?.available)
+})
+
+const updateModalActionText = computed(() => {
+  if (installing.value) return t('components.general.update.installing')
+  if (updateState.value?.update_ready) return t('components.general.update.installAndRestart')
+  if (downloading.value) {
+    const progress = Math.round(downloadProgress.value ?? updateState.value?.download_progress ?? 0)
+    return t('components.general.update.downloading', { progress })
+  }
+  return t('components.general.update.updateNow')
+})
 
 // 拉黑配置相关状态
 const blacklistEnabled = ref(true)  // 拉黑功能总开关
 const blacklistThreshold = ref(3)
-const blacklistDuration = ref(30)
+const blacklistDurationSeconds = ref(1800)
 const levelBlacklistEnabled = ref(false)
 const blacklistLoading = ref(false)
 const blacklistSaving = ref(false)
@@ -47,8 +357,520 @@ const importPath = ref('')
 const importing = ref(false)
 const importLoading = ref(true)
 
+// WebDAV 同步相关状态
+const webdavLoading = ref(true)
+const webdavSaving = ref(false)
+const webdavTesting = ref(false)
+const webdavUploading = ref(false)
+const webdavDownloading = ref(false)
+const webdavEndpoint = ref('')
+const webdavUsername = ref('')
+const webdavPassword = ref('')
+const webdavRemoteDir = ref('')
+const webdavRemoteFile = ref('codeswitch-config.zip')
+const webdavTimeoutSeconds = ref(20)
+const webdavManageModalOpen = ref(false)
+const modalViewportPaddingX = 24
+const webdavManageModalPanelMaxWidthPx = 980
+const webdavManageModalPanelWidth = `min(${webdavManageModalPanelMaxWidthPx}px, calc(100vw - ${modalViewportPaddingX * 2}px))`
+
+type WebDAVUploadStage =
+  | 'idle'
+  | 'ready'
+  | 'start'
+  | 'ensure_dir'
+  | 'exporting'
+  | 'exported'
+  | 'uploading'
+  | 'done'
+  | 'error'
+
+type WebDAVUploadLogLevel = 'info' | 'warn' | 'error'
+type WebDAVUploadLog = { ts: number; level: WebDAVUploadLogLevel; text: string }
+
+const webdavUploadModalOpen = ref(false)
+const webdavUploadPreviewLoading = ref(false)
+const webdavUploadIncludes = ref<string[]>([])
+const webdavUploadStage = ref<WebDAVUploadStage>('idle')
+const webdavUploadMessage = ref('')
+const webdavUploadRemoteURL = ref('')
+const webdavUploadSent = ref(0)
+const webdavUploadTotal = ref(0)
+const webdavUploadBytes = ref(0)
+const webdavUploadError = ref('')
+const webdavUploadLogs = ref<WebDAVUploadLog[]>([])
+
+type WebDAVDownloadStage =
+  | 'idle'
+  | 'ready'
+  | 'start'
+  | 'backup'
+  | 'fetch_manifest'
+  | 'downloading'
+  | 'importing'
+  | 'done'
+  | 'error'
+
+type WebDAVDownloadLogLevel = 'info' | 'warn' | 'error'
+type WebDAVDownloadLog = { ts: number; level: WebDAVDownloadLogLevel; text: string }
+
+const webdavDownloadModalOpen = ref(false)
+const webdavDownloadStage = ref<WebDAVDownloadStage>('idle')
+const webdavDownloadMessage = ref('')
+const webdavDownloadRemoteURL = ref('')
+const webdavDownloadCurrentFile = ref('')
+const webdavDownloadDoneCount = ref(0)
+const webdavDownloadTotalCount = ref(0)
+const webdavDownloadSent = ref(0)
+const webdavDownloadTotal = ref(0)
+const webdavDownloadBytes = ref(0)
+const webdavDownloadBackupPath = ref('')
+const webdavDownloadErrorFile = ref('')
+const webdavDownloadError = ref('')
+const webdavDownloadLogs = ref<WebDAVDownloadLog[]>([])
+
+let unsubscribeWebdavSync: (() => void) | null = null
+
+// 模型价格弹窗
+const modelPricingModalOpen = ref(false)
+const heatmapDisplayModalOpen = ref(false)
+const heatmapGranularityDraft = ref(heatmapGranularity.value)
+const heatmapDisplayDraft = ref<HeatmapDisplaySettings>({
+  ...initialHeatmapDisplaySettings,
+})
+
+const getHeatmapDisplaySettingsFromState = (): HeatmapDisplaySettings =>
+  normalizeHeatmapDisplaySettings({
+    dailyScaleFactor: heatmapDailyScaleFactor.value,
+    dailyIntensityMode: heatmapDailyIntensityMode.value,
+    intensityMetric: heatmapIntensityMetric.value,
+    intensityStopL1: heatmapIntensityStopL1.value,
+    intensityStopL2: heatmapIntensityStopL2.value,
+    intensityStopL3: heatmapIntensityStopL3.value,
+  })
+
+const applyHeatmapDisplaySettingsToState = (settings: Partial<HeatmapDisplaySettings> | HeatmapDisplaySettings) => {
+  const normalized = normalizeHeatmapDisplaySettings(settings)
+  heatmapDailyScaleFactor.value = normalized.dailyScaleFactor
+  heatmapDailyIntensityMode.value = normalized.dailyIntensityMode
+  heatmapIntensityMetric.value = normalized.intensityMetric
+  heatmapIntensityStopL1.value = normalized.intensityStopL1
+  heatmapIntensityStopL2.value = normalized.intensityStopL2
+  heatmapIntensityStopL3.value = normalized.intensityStopL3
+}
+
+const heatmapIntensityMetricLabel = computed(() => {
+  switch (heatmapIntensityMetric.value) {
+    case 'cost':
+      return t('components.general.heatmapDisplay.intensityMetricCost')
+    case 'total_tokens':
+      return t('components.general.heatmapDisplay.intensityMetricTotalTokens')
+    case 'input_tokens':
+      return t('components.general.heatmapDisplay.intensityMetricInputTokens')
+    case 'output_tokens':
+      return t('components.general.heatmapDisplay.intensityMetricOutputTokens')
+    case 'reasoning_tokens':
+      return t('components.general.heatmapDisplay.intensityMetricReasoningTokens')
+    case 'requests':
+    default:
+      return t('components.general.heatmapDisplay.intensityMetricRequests')
+  }
+})
+
+const heatmapDisplayModeLabel = computed(() =>
+  heatmapDailyIntensityMode.value === 'daily_peak'
+    ? t('components.general.heatmapDisplay.dailyIntensityModeDailyPeak')
+    : t('components.general.heatmapDisplay.dailyIntensityModeHourlyScaled')
+)
+
+const heatmapDisplaySummary = computed(() =>
+  t('components.general.heatmapDisplay.summary', {
+    metric: heatmapIntensityMetricLabel.value,
+    mode: heatmapDisplayModeLabel.value,
+    scale: heatmapDailyScaleFactor.value,
+    l1: heatmapIntensityStopL1.value,
+    l2: heatmapIntensityStopL2.value,
+    l3: heatmapIntensityStopL3.value,
+  })
+)
+
+const openHeatmapDisplayModal = () => {
+  heatmapGranularityDraft.value = heatmapGranularity.value
+  heatmapDisplayDraft.value = {
+    ...getHeatmapDisplaySettingsFromState(),
+  }
+  heatmapDisplayModalOpen.value = true
+}
+
+const closeHeatmapDisplayModal = () => {
+  heatmapDisplayModalOpen.value = false
+}
+
+const resetHeatmapDisplayDraft = () => {
+  heatmapDisplayDraft.value = {
+    ...DEFAULT_HEATMAP_DISPLAY_SETTINGS,
+  }
+}
+
+const applyHeatmapDisplayDraft = () => {
+  heatmapGranularity.value = normalizeHeatmapGranularity(heatmapGranularityDraft.value)
+  applyHeatmapDisplaySettingsToState(heatmapDisplayDraft.value)
+  heatmapDisplayModalOpen.value = false
+  void persistAppSettingsNow()
+}
+
+const formatBytes = (bytes?: number) => {
+  const value = Number(bytes ?? 0)
+  if (!Number.isFinite(value) || value < 0) return '—'
+  if (value === 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB']
+  let current = value
+  let idx = 0
+  while (current >= 1024 && idx < units.length - 1) {
+    current /= 1024
+    idx++
+  }
+  const digits = idx === 0 ? 0 : current >= 10 ? 1 : 2
+  return `${current.toFixed(digits)} ${units[idx]}`
+}
+
+const webdavUploadPercent = computed(() => {
+  const stage = webdavUploadStage.value
+  if (stage === 'done') return 100
+  if (stage === 'error') return Math.max(0, Math.min(100, 100))
+  if (stage === 'ensure_dir') return 10
+  if (stage === 'exporting') return 25
+  if (stage === 'exported') return 35
+  if (stage === 'uploading') {
+    const total = Number(webdavUploadTotal.value || 0)
+    const sent = Number(webdavUploadSent.value || 0)
+    if (total > 0) {
+      const ratio = Math.max(0, Math.min(1, sent / total))
+      return 35 + Math.round(ratio * 60)
+    }
+    return 60
+  }
+  if (stage === 'start') return 5
+  if (stage === 'ready') return 0
+  return 0
+})
+
+const webdavDownloadPercent = computed(() => {
+  const stage = webdavDownloadStage.value
+  if (stage === 'done') return 100
+  if (stage === 'error') return Math.max(0, Math.min(100, 100))
+  if (stage === 'backup') return 10
+  if (stage === 'fetch_manifest') return 20
+  if (stage === 'importing') return 95
+  if (stage === 'downloading') {
+    const totalCount = Number(webdavDownloadTotalCount.value || 0)
+    const doneCount = Number(webdavDownloadDoneCount.value || 0)
+    if (totalCount > 0) {
+      const ratio = Math.max(0, Math.min(1, doneCount / totalCount))
+      return 20 + Math.round(ratio * 70)
+    }
+
+    const total = Number(webdavDownloadTotal.value || 0)
+    const sent = Number(webdavDownloadSent.value || 0)
+    if (total > 0) {
+      const ratio = Math.max(0, Math.min(1, sent / total))
+      return 20 + Math.round(ratio * 70)
+    }
+    if (sent > 0) {
+      // total 不可得时给一个“伪进度”，避免进度条完全不动
+      const scale = 50 * 1024 * 1024 // 50MB
+      const ratio = Math.max(0, Math.min(1, sent / scale))
+      return 20 + Math.round(ratio * 70)
+    }
+    return 60
+  }
+  if (stage === 'start') return 5
+  if (stage === 'ready') return 0
+  return 0
+})
+
+const resetWebdavUploadModal = () => {
+  webdavUploadPreviewLoading.value = false
+  webdavUploadIncludes.value = []
+  webdavUploadStage.value = 'ready'
+  webdavUploadMessage.value = ''
+  webdavUploadRemoteURL.value = ''
+  webdavUploadSent.value = 0
+  webdavUploadTotal.value = 0
+  webdavUploadBytes.value = 0
+  webdavUploadError.value = ''
+  webdavUploadLogs.value = []
+}
+
+const appendWebdavUploadLog = (text: string, level: WebDAVUploadLogLevel = 'info', ts?: number) => {
+  const trimmed = String(text ?? '').trim()
+  if (!trimmed) return
+  webdavUploadLogs.value.push({ ts: Number(ts ?? Date.now()), level, text: trimmed })
+  if (webdavUploadLogs.value.length > 200) {
+    webdavUploadLogs.value = webdavUploadLogs.value.slice(-200)
+  }
+}
+
+const resetWebdavDownloadModal = () => {
+  webdavDownloadStage.value = 'ready'
+  webdavDownloadMessage.value = ''
+  webdavDownloadRemoteURL.value = ''
+  webdavDownloadCurrentFile.value = ''
+  webdavDownloadDoneCount.value = 0
+  webdavDownloadTotalCount.value = 0
+  webdavDownloadSent.value = 0
+  webdavDownloadTotal.value = 0
+  webdavDownloadBytes.value = 0
+  webdavDownloadBackupPath.value = ''
+  webdavDownloadErrorFile.value = ''
+  webdavDownloadError.value = ''
+  webdavDownloadLogs.value = []
+}
+
+const appendWebdavDownloadLog = (text: string, level: WebDAVDownloadLogLevel = 'info', ts?: number) => {
+  const trimmed = String(text ?? '').trim()
+  if (!trimmed) return
+  webdavDownloadLogs.value.push({ ts: Number(ts ?? Date.now()), level, text: trimmed })
+  if (webdavDownloadLogs.value.length > 200) {
+    webdavDownloadLogs.value = webdavDownloadLogs.value.slice(-200)
+  }
+}
+
+const loadWebdavUploadPreview = async () => {
+  webdavUploadPreviewLoading.value = true
+  try {
+    const preview = await previewWebDAVContent()
+    webdavUploadIncludes.value = preview?.includes ?? []
+  } catch (error) {
+    console.error('failed to preview webdav content', error)
+    webdavUploadIncludes.value = []
+  } finally {
+    webdavUploadPreviewLoading.value = false
+  }
+}
+
+const openWebdavUploadModal = async () => {
+  if (webdavLoading.value || webdavUploading.value || webdavDownloading.value) return
+  webdavUploadModalOpen.value = true
+  resetWebdavUploadModal()
+  await loadWebdavUploadPreview()
+}
+
+const closeWebdavUploadModal = () => {
+  if (webdavUploading.value) {
+    showToast(t('components.general.webdav.uploading'), 'warning')
+    return
+  }
+  webdavUploadModalOpen.value = false
+}
+
+const openWebdavDownloadModal = () => {
+  if (webdavLoading.value || webdavUploading.value || webdavDownloading.value) return
+  webdavDownloadModalOpen.value = true
+  resetWebdavDownloadModal()
+}
+
+const closeWebdavDownloadModal = () => {
+  if (webdavDownloading.value) {
+    showToast(t('components.general.webdav.downloading'), 'warning')
+    return
+  }
+  webdavDownloadModalOpen.value = false
+}
+
+const startWebdavUpload = async () => {
+  if (webdavLoading.value || webdavUploading.value || webdavDownloading.value) return
+  webdavUploading.value = true
+  webdavUploadError.value = ''
+  webdavUploadStage.value = 'start'
+  webdavUploadMessage.value = t('components.general.webdav.uploading')
+	  try {
+	    const result = await syncToWebDAV(buildWebDAVConfig())
+	    webdavUploadBytes.value = Number(result?.bytes ?? webdavUploadBytes.value)
+	    webdavUploadRemoteURL.value = result?.remote_url ?? webdavUploadRemoteURL.value
+	    if (Array.isArray(result?.includes) && result.includes.length > 0) {
+	      webdavUploadIncludes.value = result.includes
+	    }
+	    if (result?.ok) {
+	      webdavUploadStage.value = 'done'
+	      if (typeof result?.message === 'string' && result.message.trim()) {
+	        webdavUploadMessage.value = result.message.trim()
+	      }
+	    }
+	    showToast(t('components.general.webdav.uploadOk'), 'success')
+	  } catch (error) {
+	    console.error('webdav upload failed', error)
+	    webdavUploadStage.value = 'error'
+    webdavUploadError.value = extractErrorMessage(error)
+    appendWebdavUploadLog(webdavUploadError.value, 'error')
+    showToast(t('components.general.webdav.uploadFailed') + ': ' + webdavUploadError.value, 'error')
+  } finally {
+    webdavUploading.value = false
+  }
+}
+
+const startWebdavDownload = async () => {
+  if (webdavLoading.value || webdavDownloading.value || webdavUploading.value) return
+  webdavDownloading.value = true
+  webdavDownloadErrorFile.value = ''
+  webdavDownloadError.value = ''
+  webdavDownloadStage.value = 'start'
+  webdavDownloadMessage.value = t('components.general.webdav.downloading')
+  try {
+    const result = await loadFromWebDAV(buildWebDAVConfig())
+    webdavDownloadBytes.value = Number(result?.bytes ?? webdavDownloadBytes.value)
+    webdavDownloadRemoteURL.value = result?.remote_url ?? webdavDownloadRemoteURL.value
+    webdavDownloadBackupPath.value = result?.backup_path ?? webdavDownloadBackupPath.value
+
+    if (result?.ok) {
+      webdavDownloadStage.value = 'done'
+      if (typeof result?.message === 'string' && result.message.trim()) {
+        webdavDownloadMessage.value = result.message.trim()
+      }
+      showToast(t('components.general.webdav.downloadOk'), 'success')
+      await loadAppSettings()
+      await loadBlacklistSettings()
+      await loadImportStatus()
+    } else {
+      webdavDownloadStage.value = 'error'
+      webdavDownloadError.value = String(result?.message || t('components.general.webdav.downloadFailed'))
+      appendWebdavDownloadLog(webdavDownloadError.value, 'error')
+      showToast(t('components.general.webdav.downloadFailed') + ': ' + webdavDownloadError.value, 'error')
+    }
+  } catch (error) {
+    console.error('webdav download failed', error)
+    webdavDownloadStage.value = 'error'
+    webdavDownloadError.value = extractErrorMessage(error)
+    appendWebdavDownloadLog(webdavDownloadError.value, 'error')
+    showToast(t('components.general.webdav.downloadFailed') + ': ' + webdavDownloadError.value, 'error')
+  } finally {
+    webdavDownloading.value = false
+  }
+}
+
+const handleWebdavSyncEvent = (event: { data: Record<string, any> }) => {
+  const data = event?.data ?? {}
+  const type = String(data?.type || '').trim()
+  if (!type) return
+
+  if (type === 'upload') {
+    const stage = String(data?.stage || '').trim()
+    if (stage) {
+      webdavUploadStage.value = stage as WebDAVUploadStage
+    }
+    const logText = typeof data?.log === 'string' ? data.log.trim() : ''
+    if (logText) {
+      const rawLevel = typeof data?.log_level === 'string' ? data.log_level.trim().toLowerCase() : ''
+      const level: WebDAVUploadLogLevel = rawLevel === 'error' ? 'error' : rawLevel === 'warn' ? 'warn' : 'info'
+      const ts = typeof data?.timestamp === 'number' ? data.timestamp : Date.now()
+      appendWebdavUploadLog(logText, level, ts)
+    }
+    if (typeof data?.message === 'string' && data.message.trim()) {
+      webdavUploadMessage.value = data.message.trim()
+    }
+    if (typeof data?.remote_url === 'string' && data.remote_url.trim()) {
+      webdavUploadRemoteURL.value = data.remote_url.trim()
+    }
+    if (typeof data?.sent === 'number') {
+      webdavUploadSent.value = data.sent
+    }
+    if (typeof data?.total === 'number') {
+      webdavUploadTotal.value = data.total
+    }
+    if (typeof data?.bytes === 'number') {
+      webdavUploadBytes.value = data.bytes
+    }
+    if (Array.isArray(data?.includes)) {
+      webdavUploadIncludes.value = data.includes
+    }
+    if (stage === 'error') {
+      webdavUploadError.value = String(data?.message || webdavUploadError.value || '同步失败')
+      appendWebdavUploadLog(webdavUploadError.value, 'error')
+    }
+    return
+  }
+
+  if (type !== 'download') return
+
+  const stage = String(data?.stage || '').trim()
+  if (stage) {
+    webdavDownloadStage.value = stage as WebDAVDownloadStage
+  }
+
+  const logText = typeof data?.log === 'string' ? data.log.trim() : ''
+  if (logText) {
+    const rawLevel = typeof data?.log_level === 'string' ? data.log_level.trim().toLowerCase() : ''
+    const level: WebDAVDownloadLogLevel = rawLevel === 'error' ? 'error' : rawLevel === 'warn' ? 'warn' : 'info'
+    const ts = typeof data?.timestamp === 'number' ? data.timestamp : Date.now()
+    appendWebdavDownloadLog(logText, level, ts)
+  }
+  if (typeof data?.message === 'string' && data.message.trim()) {
+    webdavDownloadMessage.value = data.message.trim()
+  }
+  if (typeof data?.remote_url === 'string' && data.remote_url.trim()) {
+    webdavDownloadRemoteURL.value = data.remote_url.trim()
+  }
+  if (typeof data?.backup_path === 'string' && data.backup_path.trim()) {
+    webdavDownloadBackupPath.value = data.backup_path.trim()
+  }
+  if (typeof data?.file === 'string' && data.file.trim()) {
+    webdavDownloadCurrentFile.value = data.file.trim()
+  }
+  if (typeof data?.count_done === 'number') {
+    webdavDownloadDoneCount.value = data.count_done
+  }
+  if (typeof data?.count_total === 'number') {
+    webdavDownloadTotalCount.value = data.count_total
+  }
+  if (typeof data?.sent === 'number') {
+    webdavDownloadSent.value = data.sent
+  }
+  if (typeof data?.total === 'number') {
+    webdavDownloadTotal.value = data.total
+  }
+  if (typeof data?.bytes === 'number') {
+    webdavDownloadBytes.value = data.bytes
+  }
+
+  if (stage === 'error') {
+    webdavDownloadErrorFile.value = String(data?.file || webdavDownloadCurrentFile.value || '').trim()
+    webdavDownloadError.value = String(data?.message || webdavDownloadError.value || '同步失败')
+    appendWebdavDownloadLog(webdavDownloadError.value, 'error')
+  }
+}
+
 const goBack = () => {
   router.push('/')
+}
+
+const normalizeBudgetForecastMethod = (value: string) => {
+  const trimmed = value?.trim()
+  if (trimmed === 'cycle' || trimmed === '10m' || trimmed === '1h' || trimmed === 'yesterday' || trimmed === 'last24h') {
+    return trimmed
+  }
+  return 'cycle'
+}
+
+const normalizeBudgetForecastDisplay = (value: string) => {
+  const trimmed = value?.trim()
+  if (trimmed === 'datetime' || trimmed === 'remaining') {
+    return trimmed
+  }
+  return 'datetime'
+}
+
+const normalizeUpdateHistoryKeepCount = (value: number) => {
+  if (!Number.isFinite(value)) {
+    return defaultUpdateHistoryKeepCount
+  }
+  const normalized = Math.floor(value)
+  if (normalized < minUpdateHistoryKeepCount) {
+    return minUpdateHistoryKeepCount
+  }
+  if (normalized > maxUpdateHistoryKeepCount) {
+    return maxUpdateHistoryKeepCount
+  }
+  return normalized
 }
 
 const loadAppSettings = async () => {
@@ -56,58 +878,283 @@ const loadAppSettings = async () => {
   try {
     const data = await fetchAppSettings()
     heatmapEnabled.value = data?.show_heatmap ?? true
+    heatmapGranularity.value = normalizeHeatmapGranularity(data?.heatmap_granularity)
+    applyHeatmapDisplaySettingsToState({
+      dailyScaleFactor: data?.heatmap_daily_scale_factor,
+      dailyIntensityMode: data?.heatmap_daily_intensity_mode,
+      intensityMetric: data?.heatmap_intensity_metric,
+      intensityStopL1: data?.heatmap_intensity_stop_l1,
+      intensityStopL2: data?.heatmap_intensity_stop_l2,
+      intensityStopL3: data?.heatmap_intensity_stop_l3,
+    })
     homeTitleVisible.value = data?.show_home_title ?? true
+    budgetTotal.value = Number(data?.budget_total ?? 0)
+    const rawBudgetUsedDelta = Number(data?.budget_used_adjustment ?? 0)
+    budgetUsedDelta.value = Number.isFinite(rawBudgetUsedDelta) ? rawBudgetUsedDelta : 0
+    budgetForecastMethod.value = normalizeBudgetForecastMethod(data?.budget_forecast_method ?? 'cycle')
+    budgetForecastDisplay.value = normalizeBudgetForecastDisplay(data?.budget_forecast_display ?? 'datetime')
+    budgetCycleEnabled.value = data?.budget_cycle_enabled ?? false
+    budgetCycleMode.value = normalizeBudgetCycleMode(data?.budget_cycle_mode)
+    budgetRefreshTime.value = normalizeBudgetRefreshTime(data?.budget_refresh_time)
+    budgetRefreshDay.value = normalizeBudgetRefreshDay(data?.budget_refresh_day)
+    budgetShowCountdown.value = data?.budget_show_countdown ?? false
+    budgetShowForecast.value = data?.budget_show_forecast ?? false
+    budgetTotalCodex.value = Number(data?.budget_total_codex ?? 0)
+    const rawBudgetUsedDeltaCodex = Number(data?.budget_used_adjustment_codex ?? 0)
+    budgetUsedDeltaCodex.value = Number.isFinite(rawBudgetUsedDeltaCodex) ? rawBudgetUsedDeltaCodex : 0
+    budgetForecastMethodCodex.value = normalizeBudgetForecastMethod(data?.budget_forecast_method_codex ?? 'cycle')
+    budgetForecastDisplayCodex.value = normalizeBudgetForecastDisplay(data?.budget_forecast_display_codex ?? 'datetime')
+    budgetCycleEnabledCodex.value = data?.budget_cycle_enabled_codex ?? false
+    budgetCycleModeCodex.value = normalizeBudgetCycleMode(data?.budget_cycle_mode_codex)
+    budgetRefreshTimeCodex.value = normalizeBudgetRefreshTime(data?.budget_refresh_time_codex)
+    budgetRefreshDayCodex.value = normalizeBudgetRefreshDay(data?.budget_refresh_day_codex)
+    budgetShowCountdownCodex.value = data?.budget_show_countdown_codex ?? false
+    budgetShowForecastCodex.value = data?.budget_show_forecast_codex ?? false
     autoStartEnabled.value = data?.auto_start ?? false
     autoUpdateEnabled.value = data?.auto_update ?? true
+    updateHistoryKeepCount.value = normalizeUpdateHistoryKeepCount(
+      Number(data?.update_history_keep_count ?? defaultUpdateHistoryKeepCount)
+    )
+    autoConnectivityTestEnabled.value = data?.auto_connectivity_test ?? false
     switchNotifyEnabled.value = data?.enable_switch_notify ?? true
+    roundRobinEnabled.value = data?.enable_round_robin ?? false
+    captureRequestLogPayloadEnabled.value = data?.capture_request_log_payload ?? false
+    sanitizeRequestLogPayloadEnabled.value = data?.sanitize_request_log_payload ?? true
+    const currentUsageConfigs = getCurrentBudgetUsageConfigs()
+    syncBudgetUsageConfigKeys(currentUsageConfigs)
 
     // 缓存到 localStorage，下次打开时直接显示正确状态
-    localStorage.setItem('app-settings-heatmap', String(heatmapEnabled.value))
-    localStorage.setItem('app-settings-homeTitle', String(homeTitleVisible.value))
-    localStorage.setItem('app-settings-autoStart', String(autoStartEnabled.value))
-    localStorage.setItem('app-settings-autoUpdate', String(autoUpdateEnabled.value))
-    localStorage.setItem('app-settings-switchNotify', String(switchNotifyEnabled.value))
+    syncAppSettingsCache()
+    void refreshBudgetUsedDisplay(true).then(() => {
+      syncAppSettingsCache()
+    })
   } catch (error) {
     console.error('failed to load app settings', error)
     heatmapEnabled.value = true
+    heatmapGranularity.value = 'hourly'
+    applyHeatmapDisplaySettingsToState(DEFAULT_HEATMAP_DISPLAY_SETTINGS)
     homeTitleVisible.value = true
+    budgetTotal.value = 0
+    budgetUsedAdjustment.value = 0
+    budgetUsedDelta.value = 0
+    budgetUsedRaw.value = 0
+    budgetForecastMethod.value = 'cycle'
+    budgetForecastDisplay.value = 'datetime'
+    budgetCycleEnabled.value = false
+    budgetCycleMode.value = 'daily'
+    budgetRefreshTime.value = '00:00'
+    budgetRefreshDay.value = 1
+    budgetShowCountdown.value = false
+    budgetShowForecast.value = false
+    budgetTotalCodex.value = 0
+    budgetUsedAdjustmentCodex.value = 0
+    budgetUsedDeltaCodex.value = 0
+    budgetUsedRawCodex.value = 0
+    budgetForecastMethodCodex.value = 'cycle'
+    budgetForecastDisplayCodex.value = 'datetime'
+    budgetCycleEnabledCodex.value = false
+    budgetCycleModeCodex.value = 'daily'
+    budgetRefreshTimeCodex.value = '00:00'
+    budgetRefreshDayCodex.value = 1
+    budgetShowCountdownCodex.value = false
+    budgetShowForecastCodex.value = false
     autoStartEnabled.value = false
     autoUpdateEnabled.value = true
+    updateHistoryKeepCount.value = defaultUpdateHistoryKeepCount
+    autoConnectivityTestEnabled.value = false
     switchNotifyEnabled.value = true
+    roundRobinEnabled.value = false
+    captureRequestLogPayloadEnabled.value = false
+    sanitizeRequestLogPayloadEnabled.value = true
+    syncBudgetUsageConfigKeys(getCurrentBudgetUsageConfigs())
   } finally {
     settingsLoading.value = false
   }
 }
 
-const persistAppSettings = async () => {
-  if (settingsLoading.value || saveBusy.value) return
+const persistAppSettingsNow = async () => {
+  if (persistTimer) {
+    window.clearTimeout(persistTimer)
+    persistTimer = undefined
+  }
+  if (settingsLoading.value) return
+  if (saveBusy.value) {
+    saveQueued = true
+    return
+  }
   saveBusy.value = true
   try {
+    const normalizedBudgetTotal = Number.isFinite(budgetTotal.value) ? Math.max(0, budgetTotal.value) : 0
+    budgetTotal.value = normalizedBudgetTotal
+    const normalizedBudgetUsedDisplay = normalizeBudgetUsedDisplay(Number(budgetUsedAdjustment.value))
+    budgetUsedAdjustment.value = normalizedBudgetUsedDisplay
+    const normalizedBudgetForecastMethod = normalizeBudgetForecastMethod(budgetForecastMethod.value)
+    budgetForecastMethod.value = normalizedBudgetForecastMethod
+    const normalizedBudgetForecastDisplay = normalizeBudgetForecastDisplay(budgetForecastDisplay.value)
+    budgetForecastDisplay.value = normalizedBudgetForecastDisplay
+    const normalizedBudgetRefreshTime = normalizeBudgetRefreshTime(budgetRefreshTime.value)
+    budgetRefreshTime.value = normalizedBudgetRefreshTime
+    const normalizedBudgetTotalCodex = Number.isFinite(budgetTotalCodex.value)
+      ? Math.max(0, budgetTotalCodex.value)
+      : 0
+    budgetTotalCodex.value = normalizedBudgetTotalCodex
+    const normalizedBudgetUsedDisplayCodex = normalizeBudgetUsedDisplay(Number(budgetUsedAdjustmentCodex.value))
+    budgetUsedAdjustmentCodex.value = normalizedBudgetUsedDisplayCodex
+    const normalizedBudgetForecastMethodCodex = normalizeBudgetForecastMethod(budgetForecastMethodCodex.value)
+    budgetForecastMethodCodex.value = normalizedBudgetForecastMethodCodex
+    const normalizedBudgetForecastDisplayCodex = normalizeBudgetForecastDisplay(budgetForecastDisplayCodex.value)
+    budgetForecastDisplayCodex.value = normalizedBudgetForecastDisplayCodex
+    const normalizedBudgetRefreshTimeCodex = normalizeBudgetRefreshTime(budgetRefreshTimeCodex.value)
+    budgetRefreshTimeCodex.value = normalizedBudgetRefreshTimeCodex
+    const normalizedBudgetRefreshDayValue = normalizeBudgetRefreshDay(budgetRefreshDay.value)
+    budgetRefreshDay.value = normalizedBudgetRefreshDayValue
+    const normalizedBudgetCycleMode = normalizeBudgetCycleMode(budgetCycleMode.value)
+    budgetCycleMode.value = normalizedBudgetCycleMode
+    const normalizedBudgetRefreshDayCodexValue = normalizeBudgetRefreshDay(budgetRefreshDayCodex.value)
+    budgetRefreshDayCodex.value = normalizedBudgetRefreshDayCodexValue
+    const normalizedBudgetCycleModeCodex = normalizeBudgetCycleMode(budgetCycleModeCodex.value)
+    budgetCycleModeCodex.value = normalizedBudgetCycleModeCodex
+    const normalizedUpdateHistoryKeepCount = normalizeUpdateHistoryKeepCount(updateHistoryKeepCount.value)
+    updateHistoryKeepCount.value = normalizedUpdateHistoryKeepCount
+    const normalizedHeatmapDisplay = getHeatmapDisplaySettingsFromState()
+    heatmapDailyScaleFactor.value = normalizedHeatmapDisplay.dailyScaleFactor
+    heatmapDailyIntensityMode.value = normalizedHeatmapDisplay.dailyIntensityMode
+    heatmapIntensityMetric.value = normalizedHeatmapDisplay.intensityMetric
+    heatmapIntensityStopL1.value = normalizedHeatmapDisplay.intensityStopL1
+    heatmapIntensityStopL2.value = normalizedHeatmapDisplay.intensityStopL2
+    heatmapIntensityStopL3.value = normalizedHeatmapDisplay.intensityStopL3
+    const nextUsageConfigs: BudgetUsageConfigs = {
+      claude: buildBudgetUsageConfig(
+        budgetCycleEnabled.value,
+        normalizedBudgetCycleMode,
+        normalizedBudgetRefreshTime,
+        normalizedBudgetRefreshDayValue,
+      ),
+      codex: buildBudgetUsageConfig(
+        budgetCycleEnabledCodex.value,
+        normalizedBudgetCycleModeCodex,
+        normalizedBudgetRefreshTimeCodex,
+        normalizedBudgetRefreshDayCodexValue,
+      ),
+    }
+    const nextBudgetUsageConfigKey = getBudgetUsageConfigKey(nextUsageConfigs.claude)
+    const nextBudgetUsageConfigKeyCodex = getBudgetUsageConfigKey(nextUsageConfigs.codex)
+    const budgetUsageConfigChanged = nextBudgetUsageConfigKey !== lastBudgetUsageConfigKey
+    const budgetUsageConfigChangedCodex = nextBudgetUsageConfigKeyCodex !== lastBudgetUsageConfigKeyCodex
+    const shouldRefreshBudgetRaw = budgetUsedEdited || budgetUsedEditedCodex || budgetUsageConfigChanged || budgetUsageConfigChangedCodex
+
+    if (shouldRefreshBudgetRaw) {
+      const snapshot = await fetchBudgetRawSnapshot(nextUsageConfigs)
+      budgetUsedRaw.value = snapshot.claudeRaw
+      budgetUsedRawCodex.value = snapshot.codexRaw
+
+      if (budgetUsedEdited) {
+        const nextDelta = normalizedBudgetUsedDisplay - budgetUsedRaw.value
+        budgetUsedDelta.value = Number.isFinite(nextDelta) ? nextDelta : 0
+      }
+      if (budgetUsedEditedCodex) {
+        const nextDeltaCodex = normalizedBudgetUsedDisplayCodex - budgetUsedRawCodex.value
+        budgetUsedDeltaCodex.value = Number.isFinite(nextDeltaCodex) ? nextDeltaCodex : 0
+      }
+      applyBudgetUsedDisplay({ skipFocused: true })
+    }
+
+    if (!Number.isFinite(budgetUsedDelta.value)) {
+      budgetUsedDelta.value = 0
+    }
+    if (!Number.isFinite(budgetUsedDeltaCodex.value)) {
+      budgetUsedDeltaCodex.value = 0
+    }
+
     const payload: AppSettings = {
       show_heatmap: heatmapEnabled.value,
+      heatmap_granularity: heatmapGranularity.value,
+      heatmap_daily_scale_factor: normalizedHeatmapDisplay.dailyScaleFactor,
+      heatmap_daily_intensity_mode: normalizedHeatmapDisplay.dailyIntensityMode,
+      heatmap_intensity_metric: normalizedHeatmapDisplay.intensityMetric,
+      heatmap_intensity_stop_l1: normalizedHeatmapDisplay.intensityStopL1,
+      heatmap_intensity_stop_l2: normalizedHeatmapDisplay.intensityStopL2,
+      heatmap_intensity_stop_l3: normalizedHeatmapDisplay.intensityStopL3,
       show_home_title: homeTitleVisible.value,
+      budget_total: normalizedBudgetTotal,
+      budget_used_adjustment: budgetUsedDelta.value,
+      budget_forecast_method: normalizedBudgetForecastMethod,
+      budget_forecast_display: normalizedBudgetForecastDisplay,
+      budget_cycle_enabled: budgetCycleEnabled.value,
+      budget_cycle_mode: normalizedBudgetCycleMode,
+      budget_refresh_time: normalizedBudgetRefreshTime,
+      budget_refresh_day: normalizedBudgetRefreshDayValue,
+      budget_show_countdown: budgetShowCountdown.value,
+      budget_show_forecast: budgetShowForecast.value,
+      budget_total_codex: normalizedBudgetTotalCodex,
+      budget_used_adjustment_codex: budgetUsedDeltaCodex.value,
+      budget_forecast_method_codex: normalizedBudgetForecastMethodCodex,
+      budget_forecast_display_codex: normalizedBudgetForecastDisplayCodex,
+      budget_cycle_enabled_codex: budgetCycleEnabledCodex.value,
+      budget_cycle_mode_codex: normalizedBudgetCycleModeCodex,
+      budget_refresh_time_codex: normalizedBudgetRefreshTimeCodex,
+      budget_refresh_day_codex: normalizedBudgetRefreshDayCodexValue,
+      budget_show_countdown_codex: budgetShowCountdownCodex.value,
+      budget_show_forecast_codex: budgetShowForecastCodex.value,
       auto_start: autoStartEnabled.value,
       auto_update: autoUpdateEnabled.value,
+      update_history_keep_count: normalizedUpdateHistoryKeepCount,
+      auto_connectivity_test: autoConnectivityTestEnabled.value,
       enable_switch_notify: switchNotifyEnabled.value,
+      enable_round_robin: roundRobinEnabled.value,
+      capture_request_log_payload: captureRequestLogPayloadEnabled.value,
+      sanitize_request_log_payload: sanitizeRequestLogPayloadEnabled.value,
     }
     await saveAppSettings(payload)
+    syncBudgetUsageConfigKeys(nextUsageConfigs)
+    budgetUsedEdited = false
+    budgetUsedEditedCodex = false
 
-    // 同步自动更新设置到 UpdateService
-    await setAutoCheckEnabled(autoUpdateEnabled.value)
+    try {
+      await setAutoCheckEnabled(autoUpdateEnabled.value)
+    } catch (error) {
+      console.error('failed to sync auto update setting', error)
+    }
 
-    // 更新缓存
-    localStorage.setItem('app-settings-heatmap', String(heatmapEnabled.value))
-    localStorage.setItem('app-settings-homeTitle', String(homeTitleVisible.value))
-    localStorage.setItem('app-settings-autoStart', String(autoStartEnabled.value))
-    localStorage.setItem('app-settings-autoUpdate', String(autoUpdateEnabled.value))
-    localStorage.setItem('app-settings-switchNotify', String(switchNotifyEnabled.value))
+    try {
+      await Call.ByName(
+        'codeswitch/services.HealthCheckService.SetAutoAvailabilityPolling',
+        autoConnectivityTestEnabled.value
+      )
+    } catch (error) {
+      console.error('failed to sync auto connectivity setting', error)
+    }
+
+    syncAppSettingsCache()
 
     window.dispatchEvent(new CustomEvent('app-settings-updated'))
   } catch (error) {
     console.error('failed to save app settings', error)
   } finally {
     saveBusy.value = false
+    if (saveQueued) {
+      saveQueued = false
+      void persistAppSettingsNow()
+    }
   }
+}
+
+const persistAppSettings = () => {
+  if (settingsLoading.value) return
+  if (persistTimer) {
+    window.clearTimeout(persistTimer)
+  }
+  persistTimer = window.setTimeout(() => {
+    persistTimer = undefined
+    void persistAppSettingsNow()
+  }, persistDebounceMs)
+}
+
+const flushPendingPersist = () => {
+  if (!persistTimer) return
+  window.clearTimeout(persistTimer)
+  persistTimer = undefined
+  void persistAppSettingsNow()
 }
 
 const loadUpdateState = async () => {
@@ -118,74 +1165,128 @@ const loadUpdateState = async () => {
   }
 }
 
+const updateLocalDownloadProgress = (progress: number) => {
+  if (!Number.isFinite(progress)) return
+  const normalized = Math.max(0, Math.min(100, progress))
+  downloadProgress.value = normalized
+  if (updateState.value) {
+    updateState.value = {
+      ...updateState.value,
+      download_progress: normalized,
+    }
+  }
+}
+
+const updateErrorLogPath = '.code-switch/updates/update-errors.log'
+
+const isUacCancelledError = (message: string) => {
+  const normalized = message.toLowerCase()
+  return normalized.includes('err_uac_denied') ||
+    normalized.includes('uac') && (normalized.includes('cancel') || normalized.includes('deny')) ||
+    message.includes('用户取消') ||
+    message.includes('取消 UAC') ||
+    message.includes('拒绝 UAC')
+}
+
+const buildRestartInstallErrorMessage = (error: unknown) => {
+  const message = extractErrorMessage(error)
+
+  if (isUacCancelledError(message)) {
+    return `你刚才把管理员权限确认（UAC）取消了，本次更新没安装。\n想更新的话，再点一次“安装并重启”就行。`
+  }
+
+  if (message.includes('应用更新失败') || message.includes('更新') || message.includes('安装')) {
+    return `安装更新失败：${message}\n详细日志在 ${updateErrorLogPath}`
+  }
+
+  return `重启失败：${message}\n详细日志在 ${updateErrorLogPath}`
+}
+
+const alertRestartInstallError = (error: unknown) => {
+  console.error('restart/install update failed', error)
+  updateModalError.value = buildRestartInstallErrorMessage(error)
+}
+
 const checkUpdateManually = async () => {
+  if (checking.value || downloading.value || installing.value) return
+
+  updateModalOpen.value = true
+  updateModalError.value = ''
+  updateModalMessage.value = t('components.general.update.checking')
+  updateCheckInfo.value = null
+
   checking.value = true
   try {
     const info = await checkUpdate()
     await loadUpdateState()
 
-    if (!info.available) {
-      alert('已是最新版本')
-    } else {
-      // 发现新版本，提示用户并开始下载
-      const confirmed = confirm(`发现新版本 ${info.version}，是否立即下载？`)
-      if (confirmed) {
-        downloading.value = true
-        checking.value = false
-        try {
-          await downloadUpdate()
-          await loadUpdateState()
+    if (!info) {
+      updateModalError.value = t('components.general.update.checkEmptyResponse')
+      return
+    }
 
-          // 下载完成，提示重启
-          const restart = confirm('新版本已下载完成，是否立即重启应用？')
-          if (restart) {
-            await restartApp()
-          }
-        } catch (downloadError) {
-          console.error('download failed', downloadError)
-          alert('下载失败，请稍后重试')
-        } finally {
-          downloading.value = false
-        }
-      }
+    updateCheckInfo.value = info
+
+    if (!info.available) {
+      updateModalMessage.value = t('components.general.update.alreadyLatest', {
+        version: info.version || appVersion.value || '—',
+      })
+    } else {
+      updateModalMessage.value = t('components.general.update.updateFound', { version: info.version })
     }
   } catch (error) {
     console.error('check update failed', error)
-    alert('检查更新失败，请检查网络连接')
+    updateModalError.value = t('components.general.update.checkFailedWithError', {
+      error: extractErrorMessage(error),
+    })
+    await loadUpdateState()
   } finally {
     checking.value = false
   }
 }
 
 const downloadAndInstall = async () => {
-  downloading.value = true
-  try {
-    await downloadUpdate()
-    await loadUpdateState()
+  if (downloading.value || installing.value || checking.value) return
 
-    // 弹窗确认重启
-    const confirmed = confirm('新版本已下载完成，是否立即重启应用？')
-    if (confirmed) {
-      await restartApp()
-    }
-  } catch (error) {
-    console.error('download failed', error)
-    alert('下载失败，请稍后重试')
-  } finally {
-    downloading.value = false
-  }
-}
+  updateModalError.value = ''
+  updateModalMessage.value = ''
 
-// 当更新已下载完成时，直接安装并重启（无需再次下载）
-const installAndRestart = async () => {
-  const confirmed = confirm('是否立即安装更新并重启应用？')
-  if (confirmed) {
+  if (updateState.value?.update_ready) {
+    installing.value = true
     try {
       await restartApp()
-    } catch (error) {
-      console.error('restart failed', error)
-      alert('重启失败，请手动重启应用')
+    } catch (restartError) {
+      alertRestartInstallError(restartError)
+    } finally {
+      installing.value = false
     }
+    return
+  }
+
+  if (!updateCheckInfo.value?.available) {
+    updateModalMessage.value = t('components.general.update.noUpdateToInstall')
+    return
+  }
+
+  downloading.value = true
+  downloadProgress.value = 0
+  updateLocalDownloadProgress(0)
+  try {
+    await downloadUpdate((progress: number) => {
+      updateLocalDownloadProgress(progress)
+    })
+    await loadUpdateState()
+    updateLocalDownloadProgress(100)
+    updateModalMessage.value = t('components.general.update.downloadReady')
+  } catch (error) {
+    console.error('download failed', error)
+    updateModalError.value = t('components.general.update.downloadFailedWithError', {
+      error: extractErrorMessage(error),
+    })
+    return
+  } finally {
+    downloading.value = false
+    downloadProgress.value = null
   }
 }
 
@@ -213,7 +1314,7 @@ const loadBlacklistSettings = async () => {
   try {
     const settings = await getBlacklistSettings()
     blacklistThreshold.value = settings.failureThreshold
-    blacklistDuration.value = settings.durationMinutes
+    blacklistDurationSeconds.value = settings.durationSeconds
 
     // 加载拉黑功能总开关
     const enabled = await getBlacklistEnabled()
@@ -227,7 +1328,7 @@ const loadBlacklistSettings = async () => {
     // 使用默认值
     blacklistEnabled.value = true
     blacklistThreshold.value = 3
-    blacklistDuration.value = 30
+    blacklistDurationSeconds.value = 1800
     levelBlacklistEnabled.value = false
   } finally {
     blacklistLoading.value = false
@@ -239,11 +1340,14 @@ const saveBlacklistSettings = async () => {
   if (blacklistLoading.value || blacklistSaving.value) return
   blacklistSaving.value = true
   try {
-    await updateBlacklistSettings(blacklistThreshold.value, blacklistDuration.value)
-    alert('拉黑配置已保存')
+    await updateBlacklistSettings(blacklistThreshold.value, blacklistDurationSeconds.value)
+    showToast(t('components.general.toast.blacklistSaveSuccess'), 'success')
   } catch (error) {
     console.error('failed to save blacklist settings', error)
-    alert('保存失败：' + (error as Error).message)
+    showToast(
+      t('components.general.toast.blacklistSaveFailed', { error: extractErrorMessage(error) }),
+      'error'
+    )
   } finally {
     blacklistSaving.value = false
   }
@@ -330,8 +1434,109 @@ const handleImport = async () => {
   }
 }
 
+const normalizeWebDAVTimeoutSeconds = (value: unknown): number => {
+  const n = Number(value)
+  if (!Number.isFinite(n) || n <= 0) return 20
+  const rounded = Math.round(n)
+  if (rounded < 1) return 1
+  if (rounded > 120) return 120
+  return rounded
+}
+
+const buildWebDAVConfig = (): WebDAVSyncConfig => {
+  return {
+    endpoint: webdavEndpoint.value?.trim() ?? '',
+    username: webdavUsername.value?.trim() ?? '',
+    password: webdavPassword.value ?? '',
+    remote_dir: webdavRemoteDir.value?.trim() ?? '',
+    remote_file: (webdavRemoteFile.value?.trim() || 'codeswitch-config.zip'),
+    timeout_seconds: normalizeWebDAVTimeoutSeconds(webdavTimeoutSeconds.value),
+  }
+}
+
+const loadWebDAV = async () => {
+  webdavLoading.value = true
+  try {
+    const cfg = await fetchWebDAVConfig()
+    webdavEndpoint.value = cfg?.endpoint ?? ''
+    webdavUsername.value = cfg?.username ?? ''
+    webdavPassword.value = cfg?.password ?? ''
+    webdavRemoteDir.value = cfg?.remote_dir ?? ''
+    webdavRemoteFile.value = cfg?.remote_file ?? 'codeswitch-config.zip'
+    webdavTimeoutSeconds.value = normalizeWebDAVTimeoutSeconds(cfg?.timeout_seconds ?? 20)
+  } catch (error) {
+    console.error('failed to load webdav config', error)
+    webdavEndpoint.value = ''
+    webdavUsername.value = ''
+    webdavPassword.value = ''
+    webdavRemoteDir.value = ''
+    webdavRemoteFile.value = 'codeswitch-config.zip'
+    webdavTimeoutSeconds.value = 20
+  } finally {
+    webdavLoading.value = false
+  }
+}
+
+const saveWebDAV = async () => {
+  if (webdavLoading.value || webdavSaving.value) return
+  webdavSaving.value = true
+  try {
+    const saved = await saveWebDAVConfig(buildWebDAVConfig())
+    webdavEndpoint.value = saved?.endpoint ?? webdavEndpoint.value
+    webdavUsername.value = saved?.username ?? webdavUsername.value
+    webdavPassword.value = saved?.password ?? webdavPassword.value
+    webdavRemoteDir.value = saved?.remote_dir ?? webdavRemoteDir.value
+    webdavRemoteFile.value = saved?.remote_file ?? webdavRemoteFile.value
+    webdavTimeoutSeconds.value = normalizeWebDAVTimeoutSeconds(saved?.timeout_seconds ?? webdavTimeoutSeconds.value)
+    showToast(t('components.general.toast.webdavSaveSuccess'), 'success')
+  } catch (error) {
+    console.error('failed to save webdav config', error)
+    showToast(t('components.general.toast.webdavSaveFailed', { error: extractErrorMessage(error) }), 'error')
+  } finally {
+    webdavSaving.value = false
+  }
+}
+
+const testWebDAV = async () => {
+  if (webdavLoading.value || webdavTesting.value) return
+  webdavTesting.value = true
+  try {
+    const result = await testWebDAVConfig(buildWebDAVConfig())
+    if (result?.ok) {
+      showToast(t('components.general.webdav.testOk'), 'success')
+    } else {
+      showToast(result?.message || t('components.general.webdav.testFailed'), 'error')
+    }
+  } catch (error) {
+    console.error('webdav test failed', error)
+    showToast(t('components.general.webdav.testFailed') + ': ' + extractErrorMessage(error), 'error')
+  } finally {
+    webdavTesting.value = false
+  }
+}
+
+const openWebdavManageModal = () => {
+  webdavManageModalOpen.value = true
+}
+
+const closeWebdavManageModal = () => {
+  if (webdavUploadModalOpen.value || webdavDownloadModalOpen.value) return
+  webdavManageModalOpen.value = false
+}
+
+const uploadToWebDAV = async () => {
+  await openWebdavUploadModal()
+}
+
+const downloadFromWebDAV = () => {
+  openWebdavDownloadModal()
+}
+
 onMounted(async () => {
   await loadAppSettings()
+  setupBudgetUsageTicker()
+  window.addEventListener('focus', refreshBudgetUsedWhenActive)
+  window.addEventListener('visibilitychange', refreshBudgetUsedWhenActive)
 
   // 加载当前版本号
   try {
@@ -348,6 +1553,26 @@ onMounted(async () => {
 
   // 加载导入状态
   await loadImportStatus()
+
+  // 加载 WebDAV 配置
+  await loadWebDAV()
+
+  // WebDAV 同步进度事件
+  unsubscribeWebdavSync = Events.On('webdav:sync', handleWebdavSyncEvent as Events.Callback)
+})
+
+onBeforeUnmount(() => {
+  if (budgetUsageTicker) {
+    window.clearInterval(budgetUsageTicker)
+    budgetUsageTicker = undefined
+  }
+  window.removeEventListener('focus', refreshBudgetUsedWhenActive)
+  window.removeEventListener('visibilitychange', refreshBudgetUsedWhenActive)
+  flushPendingPersist()
+  if (unsubscribeWebdavSync) {
+    unsubscribeWebdavSync()
+    unsubscribeWebdavSync = null
+  }
 })
 </script>
 
@@ -383,6 +1608,29 @@ onMounted(async () => {
               />
               <span></span>
             </label>
+          </ListItem>
+          <ListItem :label="$t('components.general.label.heatmapGranularity')">
+            <select
+              v-model="heatmapGranularity"
+              :disabled="settingsLoading || saveBusy || !heatmapEnabled"
+              class="mac-select"
+              @change="persistAppSettings">
+              <option value="hourly">{{ $t('components.general.label.heatmapGranularityHourly') }}</option>
+              <option value="daily">{{ $t('components.general.label.heatmapGranularityDaily') }}</option>
+            </select>
+          </ListItem>
+          <ListItem :label="$t('components.general.label.heatmapDisplayConfig')">
+            <div class="toggle-with-hint">
+              <button
+                type="button"
+                class="action-btn"
+                :disabled="settingsLoading || saveBusy || !heatmapEnabled"
+                @click="openHeatmapDisplayModal"
+              >
+                {{ $t('components.general.heatmapDisplay.manage') }}
+              </button>
+              <span class="hint-text hint-text--single-line">{{ heatmapDisplaySummary }}</span>
+            </div>
           </ListItem>
           <ListItem :label="$t('components.general.label.homeTitle')">
             <label class="mac-switch">
@@ -420,8 +1668,386 @@ onMounted(async () => {
               <span class="hint-text">{{ $t('components.general.label.switchNotifyHint') }}</span>
             </div>
           </ListItem>
+          <ListItem :label="$t('components.general.label.roundRobin')">
+            <div class="toggle-with-hint">
+              <label class="mac-switch">
+                <input
+                  type="checkbox"
+                  :disabled="settingsLoading || saveBusy"
+                  v-model="roundRobinEnabled"
+                  @change="persistAppSettings"
+                />
+                <span></span>
+              </label>
+              <span class="hint-text">{{ $t('components.general.label.roundRobinHint') }}</span>
+            </div>
+          </ListItem>
+          <ListItem :label="$t('components.general.label.captureRequestLogPayload')">
+            <div class="toggle-with-hint">
+              <label class="mac-switch">
+                <input
+                  type="checkbox"
+                  :disabled="settingsLoading || saveBusy"
+                  v-model="captureRequestLogPayloadEnabled"
+                  @change="persistAppSettings"
+                />
+                <span></span>
+              </label>
+              <span class="hint-text">{{ $t('components.general.label.captureRequestLogPayloadHint') }}</span>
+            </div>
+          </ListItem>
+          <ListItem :label="$t('components.general.label.sanitizeRequestLogPayload')">
+            <div class="toggle-with-hint">
+              <label class="mac-switch">
+                <input
+                  type="checkbox"
+                  :disabled="settingsLoading || saveBusy || !captureRequestLogPayloadEnabled"
+                  v-model="sanitizeRequestLogPayloadEnabled"
+                  @change="persistAppSettings"
+                />
+                <span></span>
+              </label>
+              <span class="hint-text">
+                {{
+                  captureRequestLogPayloadEnabled
+                    ? $t('components.general.label.sanitizeRequestLogPayloadHint')
+                    : $t('components.general.label.sanitizeRequestLogPayloadDisabledHint')
+                }}
+              </span>
+            </div>
+          </ListItem>
+          <ListItem :label="$t('components.general.title.webdavSync')">
+            <button
+              type="button"
+              class="action-btn"
+              :disabled="webdavLoading || webdavUploading || webdavDownloading"
+              @click="openWebdavManageModal"
+            >
+              {{ $t('components.general.webdav.manage') }}
+            </button>
+          </ListItem>
         </div>
       </section>
+
+      <section>
+        <h2 class="mac-section-title">{{ $t('components.general.title.trayPanel') }}</h2>
+        <div class="mac-panel">
+          <p class="panel-title">{{ $t('components.general.label.trayPanelClaude') }}</p>
+          <ListItem :label="$t('components.general.label.budgetTotal')">
+            <div class="toggle-with-hint">
+              <div class="budget-input">
+                <input
+                  type="number"
+                  inputmode="decimal"
+                  min="0"
+                  step="0.01"
+                  :disabled="settingsLoading || saveBusy"
+                  v-model.number="budgetTotal"
+                  @change="persistAppSettings"
+                  class="mac-input budget-input-field"
+                />
+                <span class="budget-unit">USD</span>
+              </div>
+              <span class="hint-text">{{ $t('components.general.label.budgetTotalHint') }}</span>
+            </div>
+          </ListItem>
+          <ListItem :label="$t('components.general.label.budgetUsedAdjustment')">
+            <div class="toggle-with-hint">
+              <div class="budget-input">
+                <input
+                  type="number"
+                  inputmode="decimal"
+                  step="0.01"
+                  :disabled="settingsLoading || saveBusy"
+                  v-model.number="budgetUsedAdjustment"
+                  @focus="handleBudgetUsedFocus('claude', true)"
+                  @blur="handleBudgetUsedFocus('claude', false)"
+                  @change="handleBudgetUsedChange('claude')"
+                  class="mac-input budget-input-field"
+                />
+                <span class="budget-unit">USD</span>
+              </div>
+              <span class="hint-text">{{ $t('components.general.label.budgetUsedAdjustmentHintClaude') }}</span>
+            </div>
+          </ListItem>
+          <ListItem :label="$t('components.general.label.budgetCycle')">
+            <div class="toggle-with-hint">
+              <label class="mac-switch">
+                <input
+                  type="checkbox"
+                  :disabled="settingsLoading || saveBusy"
+                  v-model="budgetCycleEnabled"
+                  @change="persistAppSettings"
+                />
+                <span></span>
+              </label>
+              <span class="hint-text">{{ $t('components.general.label.budgetCycleHint') }}</span>
+            </div>
+          </ListItem>
+          <ListItem :label="$t('components.general.label.budgetCycleMode')">
+            <select
+              v-model="budgetCycleMode"
+              :disabled="settingsLoading || saveBusy || !budgetCycleEnabled"
+              class="mac-select budget-select"
+              @change="persistAppSettings">
+              <option value="daily">{{ $t('components.general.label.budgetCycleModeDaily') }}</option>
+              <option value="weekly">{{ $t('components.general.label.budgetCycleModeWeekly') }}</option>
+            </select>
+          </ListItem>
+          <ListItem
+            v-if="budgetCycleMode === 'weekly'"
+            :label="$t('components.general.label.budgetRefreshDay')">
+            <select
+              v-model.number="budgetRefreshDay"
+              :disabled="settingsLoading || saveBusy || !budgetCycleEnabled"
+              class="mac-select budget-select"
+              @change="persistAppSettings">
+              <option :value="1">{{ $t('components.general.label.weekdayMon') }}</option>
+              <option :value="2">{{ $t('components.general.label.weekdayTue') }}</option>
+              <option :value="3">{{ $t('components.general.label.weekdayWed') }}</option>
+              <option :value="4">{{ $t('components.general.label.weekdayThu') }}</option>
+              <option :value="5">{{ $t('components.general.label.weekdayFri') }}</option>
+              <option :value="6">{{ $t('components.general.label.weekdaySat') }}</option>
+              <option :value="0">{{ $t('components.general.label.weekdaySun') }}</option>
+            </select>
+          </ListItem>
+          <ListItem :label="$t('components.general.label.budgetRefreshTime')">
+            <input
+              type="time"
+              :disabled="settingsLoading || saveBusy || !budgetCycleEnabled"
+              v-model="budgetRefreshTime"
+              @change="persistAppSettings"
+              class="mac-input budget-time-input"
+            />
+          </ListItem>
+          <ListItem :label="$t('components.general.label.budgetShowCountdown')">
+            <label class="mac-switch">
+              <input
+                type="checkbox"
+                :disabled="settingsLoading || saveBusy"
+                v-model="budgetShowCountdown"
+                @change="persistAppSettings"
+              />
+              <span></span>
+            </label>
+          </ListItem>
+          <ListItem :label="$t('components.general.label.budgetShowForecast')">
+            <label class="mac-switch">
+              <input
+                type="checkbox"
+                :disabled="settingsLoading || saveBusy"
+                v-model="budgetShowForecast"
+                @change="persistAppSettings"
+              />
+              <span></span>
+            </label>
+          </ListItem>
+          <ListItem :label="$t('components.general.label.budgetForecastDisplay')">
+            <div class="toggle-with-hint">
+              <select
+                v-model="budgetForecastDisplay"
+                :disabled="settingsLoading || saveBusy || !budgetShowForecast"
+                class="mac-select budget-select"
+                @change="persistAppSettings">
+                <option value="datetime">{{ $t('components.general.label.budgetForecastDisplayDatetime') }}</option>
+                <option value="remaining">{{ $t('components.general.label.budgetForecastDisplayRemaining') }}</option>
+              </select>
+              <span class="hint-text">{{ $t('components.general.label.budgetForecastDisplayHint') }}</span>
+            </div>
+          </ListItem>
+          <ListItem :label="$t('components.general.label.budgetForecastMethod')">
+            <div class="toggle-with-hint">
+              <select
+                v-model="budgetForecastMethod"
+                :disabled="settingsLoading || saveBusy || !budgetShowForecast"
+                class="mac-select budget-select"
+                @change="persistAppSettings">
+                <option value="cycle">{{ $t('components.general.label.budgetForecastMethodCycle') }}</option>
+                <option value="10m">{{ $t('components.general.label.budgetForecastMethod10m') }}</option>
+                <option value="1h">{{ $t('components.general.label.budgetForecastMethod1h') }}</option>
+                <option value="yesterday">{{ $t('components.general.label.budgetForecastMethodYesterday') }}</option>
+                <option value="last24h">{{ $t('components.general.label.budgetForecastMethod24h') }}</option>
+              </select>
+              <span class="hint-text">{{ $t('components.general.label.budgetForecastMethodHint') }}</span>
+            </div>
+          </ListItem>
+        </div>
+        <div class="mac-panel">
+          <p class="panel-title">{{ $t('components.general.label.trayPanelCodex') }}</p>
+          <ListItem :label="$t('components.general.label.budgetTotal')">
+            <div class="toggle-with-hint">
+              <div class="budget-input">
+                <input
+                  type="number"
+                  inputmode="decimal"
+                  min="0"
+                  step="0.01"
+                  :disabled="settingsLoading || saveBusy"
+                  v-model.number="budgetTotalCodex"
+                  @change="persistAppSettings"
+                  class="mac-input budget-input-field"
+                />
+                <span class="budget-unit">USD</span>
+              </div>
+              <span class="hint-text">{{ $t('components.general.label.budgetTotalHint') }}</span>
+            </div>
+          </ListItem>
+          <ListItem :label="$t('components.general.label.budgetUsedAdjustment')">
+            <div class="toggle-with-hint">
+              <div class="budget-input">
+                <input
+                  type="number"
+                  inputmode="decimal"
+                  step="0.01"
+                  :disabled="settingsLoading || saveBusy"
+                  v-model.number="budgetUsedAdjustmentCodex"
+                  @focus="handleBudgetUsedFocus('codex', true)"
+                  @blur="handleBudgetUsedFocus('codex', false)"
+                  @change="handleBudgetUsedChange('codex')"
+                  class="mac-input budget-input-field"
+                />
+                <span class="budget-unit">USD</span>
+              </div>
+              <span class="hint-text">{{ $t('components.general.label.budgetUsedAdjustmentHintCodex') }}</span>
+            </div>
+          </ListItem>
+          <ListItem :label="$t('components.general.label.budgetCycle')">
+            <div class="toggle-with-hint">
+              <label class="mac-switch">
+                <input
+                  type="checkbox"
+                  :disabled="settingsLoading || saveBusy"
+                  v-model="budgetCycleEnabledCodex"
+                  @change="persistAppSettings"
+                />
+                <span></span>
+              </label>
+              <span class="hint-text">{{ $t('components.general.label.budgetCycleHint') }}</span>
+            </div>
+          </ListItem>
+          <ListItem :label="$t('components.general.label.budgetCycleMode')">
+            <select
+              v-model="budgetCycleModeCodex"
+              :disabled="settingsLoading || saveBusy || !budgetCycleEnabledCodex"
+              class="mac-select budget-select"
+              @change="persistAppSettings">
+              <option value="daily">{{ $t('components.general.label.budgetCycleModeDaily') }}</option>
+              <option value="weekly">{{ $t('components.general.label.budgetCycleModeWeekly') }}</option>
+            </select>
+          </ListItem>
+          <ListItem
+            v-if="budgetCycleModeCodex === 'weekly'"
+            :label="$t('components.general.label.budgetRefreshDay')">
+            <select
+              v-model.number="budgetRefreshDayCodex"
+              :disabled="settingsLoading || saveBusy || !budgetCycleEnabledCodex"
+              class="mac-select budget-select"
+              @change="persistAppSettings">
+              <option :value="1">{{ $t('components.general.label.weekdayMon') }}</option>
+              <option :value="2">{{ $t('components.general.label.weekdayTue') }}</option>
+              <option :value="3">{{ $t('components.general.label.weekdayWed') }}</option>
+              <option :value="4">{{ $t('components.general.label.weekdayThu') }}</option>
+              <option :value="5">{{ $t('components.general.label.weekdayFri') }}</option>
+              <option :value="6">{{ $t('components.general.label.weekdaySat') }}</option>
+              <option :value="0">{{ $t('components.general.label.weekdaySun') }}</option>
+            </select>
+          </ListItem>
+          <ListItem :label="$t('components.general.label.budgetRefreshTime')">
+            <input
+              type="time"
+              :disabled="settingsLoading || saveBusy || !budgetCycleEnabledCodex"
+              v-model="budgetRefreshTimeCodex"
+              @change="persistAppSettings"
+              class="mac-input budget-time-input"
+            />
+          </ListItem>
+          <ListItem :label="$t('components.general.label.budgetShowCountdown')">
+            <label class="mac-switch">
+              <input
+                type="checkbox"
+                :disabled="settingsLoading || saveBusy"
+                v-model="budgetShowCountdownCodex"
+                @change="persistAppSettings"
+              />
+              <span></span>
+            </label>
+          </ListItem>
+          <ListItem :label="$t('components.general.label.budgetShowForecast')">
+            <label class="mac-switch">
+              <input
+                type="checkbox"
+                :disabled="settingsLoading || saveBusy"
+                v-model="budgetShowForecastCodex"
+                @change="persistAppSettings"
+              />
+              <span></span>
+            </label>
+          </ListItem>
+          <ListItem :label="$t('components.general.label.budgetForecastDisplay')">
+            <div class="toggle-with-hint">
+              <select
+                v-model="budgetForecastDisplayCodex"
+                :disabled="settingsLoading || saveBusy || !budgetShowForecastCodex"
+                class="mac-select budget-select"
+                @change="persistAppSettings">
+                <option value="datetime">{{ $t('components.general.label.budgetForecastDisplayDatetime') }}</option>
+                <option value="remaining">{{ $t('components.general.label.budgetForecastDisplayRemaining') }}</option>
+              </select>
+              <span class="hint-text">{{ $t('components.general.label.budgetForecastDisplayHint') }}</span>
+            </div>
+          </ListItem>
+          <ListItem :label="$t('components.general.label.budgetForecastMethod')">
+            <div class="toggle-with-hint">
+              <select
+                v-model="budgetForecastMethodCodex"
+                :disabled="settingsLoading || saveBusy || !budgetShowForecastCodex"
+                class="mac-select budget-select"
+                @change="persistAppSettings">
+                <option value="cycle">{{ $t('components.general.label.budgetForecastMethodCycle') }}</option>
+                <option value="10m">{{ $t('components.general.label.budgetForecastMethod10m') }}</option>
+                <option value="1h">{{ $t('components.general.label.budgetForecastMethod1h') }}</option>
+                <option value="yesterday">{{ $t('components.general.label.budgetForecastMethodYesterday') }}</option>
+                <option value="last24h">{{ $t('components.general.label.budgetForecastMethod24h') }}</option>
+              </select>
+              <span class="hint-text">{{ $t('components.general.label.budgetForecastMethodHint') }}</span>
+            </div>
+          </ListItem>
+        </div>
+        <div class="mac-panel">
+          <p class="panel-title">{{ $t('components.general.label.modelPricingPanel') }}</p>
+          <ListItem :label="$t('components.general.label.modelPricing')">
+            <div class="toggle-with-hint">
+              <button type="button" class="action-btn" @click="modelPricingModalOpen = true">
+                {{ $t('components.general.modelPricing.manage') }}
+              </button>
+              <span class="hint-text">{{ $t('components.general.label.modelPricingHint') }}</span>
+            </div>
+          </ListItem>
+        </div>
+      </section>
+
+      <section>
+        <h2 class="mac-section-title">{{ $t('components.general.title.connectivity') }}</h2>
+        <div class="mac-panel">
+          <ListItem :label="$t('components.general.label.autoConnectivityTest')">
+            <div class="toggle-with-hint">
+              <label class="mac-switch">
+                <input
+                  type="checkbox"
+                  :disabled="settingsLoading || saveBusy"
+                  v-model="autoConnectivityTestEnabled"
+                  @change="persistAppSettings"
+                />
+                <span></span>
+              </label>
+              <span class="hint-text">{{ $t('components.general.label.autoConnectivityTestHint') }}</span>
+            </div>
+          </ListItem>
+        </div>
+      </section>
+
+      <!-- Network & WSL Settings -->
+      <NetworkWslSettings />
 
       <section>
         <h2 class="mac-section-title">{{ $t('components.general.title.blacklist') }}</h2>
@@ -472,13 +2098,16 @@ onMounted(async () => {
           </ListItem>
           <ListItem :label="$t('components.general.label.blacklistDuration')">
             <select
-              v-model.number="blacklistDuration"
+              v-model.number="blacklistDurationSeconds"
               :disabled="blacklistLoading || blacklistSaving"
               class="mac-select">
-              <option :value="5">5 {{ $t('components.general.label.minutes') }}</option>
-              <option :value="15">15 {{ $t('components.general.label.minutes') }}</option>
-              <option :value="30">30 {{ $t('components.general.label.minutes') }}</option>
-              <option :value="60">60 {{ $t('components.general.label.minutes') }}</option>
+              <option :value="30">30 {{ $t('components.general.label.seconds') }}</option>
+              <option :value="60">1 {{ $t('components.general.label.minutes') }}</option>
+              <option :value="180">3 {{ $t('components.general.label.minutes') }}</option>
+              <option :value="300">5 {{ $t('components.general.label.minutes') }}</option>
+              <option :value="900">15 {{ $t('components.general.label.minutes') }}</option>
+              <option :value="1800">30 {{ $t('components.general.label.minutes') }}</option>
+              <option :value="3600">60 {{ $t('components.general.label.minutes') }}</option>
             </select>
           </ListItem>
           <ListItem :label="$t('components.general.label.saveBlacklist')">
@@ -558,6 +2187,25 @@ onMounted(async () => {
             </label>
           </ListItem>
 
+          <ListItem :label="$t('components.general.label.updateHistoryKeepCount')">
+            <div class="toggle-with-hint">
+              <div class="budget-input">
+                <input
+                  type="number"
+                  inputmode="numeric"
+                  min="1"
+                  max="20"
+                  step="1"
+                  :disabled="settingsLoading || saveBusy"
+                  v-model.number="updateHistoryKeepCount"
+                  @change="persistAppSettings"
+                  class="mac-input budget-input-field"
+                />
+              </div>
+              <span class="hint-text">{{ $t('components.general.label.updateHistoryKeepCountHint') }}</span>
+            </div>
+          </ListItem>
+
           <ListItem :label="$t('components.general.label.lastCheck')">
             <span class="info-text">{{ formatLastCheckTime(updateState?.last_check_time) }}</span>
             <span v-if="updateState && updateState.consecutive_failures > 0" class="warning-badge">
@@ -569,37 +2217,525 @@ onMounted(async () => {
             <span class="version-text">{{ appVersion }}</span>
           </ListItem>
 
-          <ListItem
-            v-if="updateState?.latest_known_version && updateState.latest_known_version !== appVersion"
-            :label="$t('components.general.label.latestVersion')">
-            <span class="version-text highlight">{{ updateState.latest_known_version }} 🆕</span>
-          </ListItem>
-
           <ListItem :label="$t('components.general.label.checkNow')">
             <button
               @click="checkUpdateManually"
-              :disabled="checking"
+              :disabled="checking || downloading || installing"
               class="action-btn">
               {{ checking ? $t('components.general.update.checking') : $t('components.general.update.checkNow') }}
             </button>
           </ListItem>
-
-          <ListItem
-            v-if="updateState?.update_ready"
-            :label="$t('components.general.label.manualUpdate')">
-            <button
-              @click="installAndRestart"
-              class="primary-btn">
-              {{ $t('components.general.update.installAndRestart') }}
-            </button>
-          </ListItem>
         </div>
       </section>
+
+      <InlineModal
+        :open="heatmapDisplayModalOpen"
+        :title="$t('components.general.heatmapDisplay.title')"
+        @close="closeHeatmapDisplayModal"
+      >
+        <div class="heatmap-display-modal">
+          <p class="heatmap-display-hint">
+            {{ $t('components.general.heatmapDisplay.hint') }}
+          </p>
+
+          <div class="heatmap-display-fields">
+            <label class="heatmap-display-field">
+              <span class="heatmap-display-label">{{ $t('components.general.label.heatmapGranularity') }}</span>
+              <select v-model="heatmapGranularityDraft" class="mac-select heatmap-display-input">
+                <option value="hourly">{{ $t('components.general.label.heatmapGranularityHourly') }}</option>
+                <option value="daily">{{ $t('components.general.label.heatmapGranularityDaily') }}</option>
+              </select>
+            </label>
+
+            <label class="heatmap-display-field">
+              <span class="heatmap-display-label">{{ $t('components.general.heatmapDisplay.dailyIntensityMode') }}</span>
+              <select v-model="heatmapDisplayDraft.dailyIntensityMode" class="mac-select heatmap-display-input">
+                <option value="hourly_scaled">
+                  {{ $t('components.general.heatmapDisplay.dailyIntensityModeHourlyScaled') }}
+                </option>
+                <option value="daily_peak">
+                  {{ $t('components.general.heatmapDisplay.dailyIntensityModeDailyPeak') }}
+                </option>
+              </select>
+            </label>
+
+            <label class="heatmap-display-field">
+              <span class="heatmap-display-label">{{ $t('components.general.heatmapDisplay.intensityMetric') }}</span>
+              <select v-model="heatmapDisplayDraft.intensityMetric" class="mac-select heatmap-display-input">
+                <option value="requests">{{ $t('components.general.heatmapDisplay.intensityMetricRequests') }}</option>
+                <option value="cost">{{ $t('components.general.heatmapDisplay.intensityMetricCost') }}</option>
+                <option value="total_tokens">{{ $t('components.general.heatmapDisplay.intensityMetricTotalTokens') }}</option>
+                <option value="input_tokens">{{ $t('components.general.heatmapDisplay.intensityMetricInputTokens') }}</option>
+                <option value="output_tokens">{{ $t('components.general.heatmapDisplay.intensityMetricOutputTokens') }}</option>
+                <option value="reasoning_tokens">{{ $t('components.general.heatmapDisplay.intensityMetricReasoningTokens') }}</option>
+              </select>
+              <span class="heatmap-display-note">
+                {{ $t('components.general.heatmapDisplay.intensityMetricHint') }}
+              </span>
+            </label>
+
+            <label class="heatmap-display-field">
+              <span class="heatmap-display-label">{{ $t('components.general.heatmapDisplay.dailyScaleFactor') }}</span>
+              <input
+                v-model.number="heatmapDisplayDraft.dailyScaleFactor"
+                type="number"
+                min="1"
+                max="72"
+                step="1"
+                class="mac-input heatmap-display-input"
+                :disabled="heatmapDisplayDraft.dailyIntensityMode !== 'hourly_scaled'"
+              />
+              <span class="heatmap-display-note">
+                {{
+                  heatmapDisplayDraft.dailyIntensityMode === 'hourly_scaled'
+                    ? $t('components.general.heatmapDisplay.dailyScaleFactorHint')
+                    : $t('components.general.heatmapDisplay.dailyScaleFactorDisabledHint')
+                }}
+              </span>
+            </label>
+
+            <label class="heatmap-display-field">
+              <span class="heatmap-display-label">{{ $t('components.general.heatmapDisplay.intensityStopL1') }}</span>
+              <input
+                v-model.number="heatmapDisplayDraft.intensityStopL1"
+                type="number"
+                min="1"
+                max="99"
+                step="1"
+                class="mac-input heatmap-display-input"
+              />
+            </label>
+
+            <label class="heatmap-display-field">
+              <span class="heatmap-display-label">{{ $t('components.general.heatmapDisplay.intensityStopL2') }}</span>
+              <input
+                v-model.number="heatmapDisplayDraft.intensityStopL2"
+                type="number"
+                min="1"
+                max="99"
+                step="1"
+                class="mac-input heatmap-display-input"
+              />
+            </label>
+
+            <label class="heatmap-display-field">
+              <span class="heatmap-display-label">{{ $t('components.general.heatmapDisplay.intensityStopL3') }}</span>
+              <input
+                v-model.number="heatmapDisplayDraft.intensityStopL3"
+                type="number"
+                min="1"
+                max="99"
+                step="1"
+                class="mac-input heatmap-display-input"
+              />
+            </label>
+          </div>
+
+          <p class="heatmap-display-note">
+            {{ $t('components.general.heatmapDisplay.intensityStopsHint') }}
+          </p>
+
+          <footer class="heatmap-display-actions">
+            <button class="action-btn" type="button" @click="resetHeatmapDisplayDraft">
+              {{ $t('components.general.heatmapDisplay.reset') }}
+            </button>
+            <button class="action-btn" type="button" @click="closeHeatmapDisplayModal">
+              {{ $t('common.cancel') }}
+            </button>
+            <button class="primary-btn" type="button" @click="applyHeatmapDisplayDraft">
+              {{ $t('components.general.heatmapDisplay.apply') }}
+            </button>
+          </footer>
+        </div>
+      </InlineModal>
+
+      <InlineModal
+        :open="updateModalOpen"
+        :title="$t('components.general.update.modalTitle')"
+        @close="updateModalOpen = false"
+      >
+        <div class="update-modal">
+          <div class="update-modal-row">
+            <span class="update-modal-label">{{ $t('components.general.label.currentVersion') }}</span>
+            <span class="version-text">{{ appVersion || '—' }}</span>
+          </div>
+          <div class="update-modal-row">
+            <span class="update-modal-label">{{ $t('components.general.label.latestVersion') }}</span>
+            <span class="version-text highlight">{{ updateModalLatestVersion }}</span>
+          </div>
+
+          <div v-if="updateModalMessage" class="info-text update-modal-message">
+            {{ updateModalMessage }}
+          </div>
+          <div v-if="updateModalError" class="alert-error">
+            {{ updateModalError }}
+          </div>
+
+          <div class="update-modal-block">
+            <div class="update-modal-block-title">{{ $t('components.general.update.releaseNotes') }}</div>
+            <pre class="update-modal-release-notes">{{ updateModalReleaseNotes }}</pre>
+          </div>
+
+          <footer class="update-modal-actions">
+            <button
+              class="action-btn"
+              type="button"
+              :disabled="downloading || checking || installing"
+              @click="checkUpdateManually"
+            >
+              {{ $t('components.general.update.recheck') }}
+            </button>
+            <button
+              class="action-btn"
+              type="button"
+              :disabled="downloading || checking || installing"
+              @click="updateModalOpen = false"
+            >
+              {{ $t('common.cancel') }}
+            </button>
+            <button
+              class="primary-btn"
+              type="button"
+              :disabled="checking || downloading || installing || !canTriggerUpdateFromModal"
+              @click="downloadAndInstall"
+            >
+              {{ updateModalActionText }}
+            </button>
+          </footer>
+        </div>
+      </InlineModal>
+
+      <InlineModal
+        :open="webdavManageModalOpen"
+        :title="$t('components.general.title.webdavSync')"
+        :panel-width="webdavManageModalPanelWidth"
+        @close="closeWebdavManageModal"
+      >
+        <div class="mac-panel webdav-manage-modal">
+          <ListItem :label="$t('components.general.webdav.endpoint')">
+            <input
+              type="text"
+              v-model="webdavEndpoint"
+              :disabled="webdavLoading"
+              :placeholder="$t('components.general.webdav.endpointPlaceholder')"
+              class="mac-input webdav-input"
+            />
+          </ListItem>
+          <ListItem :label="$t('components.general.webdav.username')">
+            <input
+              type="text"
+              v-model="webdavUsername"
+              :disabled="webdavLoading"
+              :placeholder="$t('components.general.webdav.usernamePlaceholder')"
+              class="mac-input webdav-input"
+            />
+          </ListItem>
+          <ListItem :label="$t('components.general.webdav.password')">
+            <input
+              type="password"
+              v-model="webdavPassword"
+              :disabled="webdavLoading"
+              :placeholder="$t('components.general.webdav.passwordPlaceholder')"
+              class="mac-input webdav-input"
+            />
+          </ListItem>
+          <ListItem :label="$t('components.general.webdav.remoteDir')">
+            <input
+              type="text"
+              v-model="webdavRemoteDir"
+              :disabled="webdavLoading"
+              :placeholder="$t('components.general.webdav.remoteDirPlaceholder')"
+              class="mac-input webdav-input"
+            />
+          </ListItem>
+          <ListItem :label="$t('components.general.webdav.remoteFile')">
+            <input
+              type="text"
+              v-model="webdavRemoteFile"
+              :disabled="webdavLoading"
+              :placeholder="$t('components.general.webdav.remoteFilePlaceholder')"
+              class="mac-input webdav-input"
+            />
+          </ListItem>
+          <ListItem :label="$t('components.general.webdav.timeoutSeconds')">
+            <div class="toggle-with-hint">
+              <input
+                type="number"
+                inputmode="numeric"
+                min="1"
+                max="120"
+                step="1"
+                v-model.number="webdavTimeoutSeconds"
+                :disabled="webdavLoading"
+                :placeholder="$t('components.general.webdav.timeoutPlaceholder')"
+                class="mac-input webdav-timeout-input"
+              />
+              <span class="hint-text">{{ $t('components.general.webdav.timeoutHint') }}</span>
+            </div>
+          </ListItem>
+          <ListItem :label="$t('components.general.webdav.actions')" class="webdav-actions-row">
+            <div class="webdav-actions">
+              <button
+                @click="saveWebDAV"
+                :disabled="webdavLoading || webdavSaving"
+                class="action-btn">
+                {{ webdavSaving ? $t('components.general.label.saving') : $t('components.general.webdav.save') }}
+              </button>
+              <button
+                @click="testWebDAV"
+                :disabled="webdavLoading || webdavTesting || webdavUploading || webdavDownloading"
+                class="action-btn">
+                {{ webdavTesting ? $t('components.general.webdav.testing') : $t('components.general.webdav.test') }}
+              </button>
+              <button
+                @click="uploadToWebDAV"
+                :disabled="webdavLoading || webdavUploading || webdavDownloading"
+                class="primary-btn">
+                {{ webdavUploading ? $t('components.general.webdav.uploading') : $t('components.general.webdav.upload') }}
+              </button>
+              <button
+                @click="downloadFromWebDAV"
+                :disabled="webdavLoading || webdavDownloading || webdavUploading"
+                class="action-btn">
+                {{ webdavDownloading ? $t('components.general.webdav.downloading') : $t('components.general.webdav.download') }}
+              </button>
+            </div>
+          </ListItem>
+          <ListItem :label="$t('components.general.webdav.includes')">
+            <span class="hint-text">{{ $t('components.general.webdav.includesHint') }}</span>
+          </ListItem>
+        </div>
+      </InlineModal>
+
+      <InlineModal
+        :open="webdavUploadModalOpen"
+        :title="$t('components.general.webdav.upload')"
+        :close-on-backdrop="false"
+        @close="closeWebdavUploadModal"
+      >
+        <div class="webdav-sync-modal">
+          <p class="webdav-sync-hint">{{ $t('components.general.webdav.confirmUpload') }}</p>
+
+          <div class="webdav-sync-block">
+            <div class="webdav-sync-block-title">
+              {{ $t('components.general.webdav.includes') }}
+              <span v-if="webdavUploadIncludes.length" class="webdav-sync-count">
+                ({{ webdavUploadIncludes.length }})
+              </span>
+            </div>
+            <div v-if="webdavUploadPreviewLoading" class="info-text">
+              {{ $t('components.general.import.loading') }}
+            </div>
+            <div v-else-if="!webdavUploadIncludes.length" class="info-text">
+              —
+            </div>
+            <ul v-else class="webdav-sync-includes">
+              <li v-for="item in webdavUploadIncludes" :key="item">{{ item }}</li>
+            </ul>
+          </div>
+
+          <div class="webdav-sync-block">
+            <div class="webdav-sync-block-title">{{ $t('components.general.webdav.progress') }}</div>
+
+            <div class="webdav-sync-progress-row">
+              <span class="webdav-sync-stage">{{ webdavUploadMessage || webdavUploadStage }}</span>
+              <span class="webdav-sync-percent">{{ webdavUploadPercent }}%</span>
+            </div>
+            <div
+              class="webdav-progress-bar"
+              role="progressbar"
+              :aria-valuenow="webdavUploadPercent"
+              aria-valuemin="0"
+              aria-valuemax="100"
+            >
+              <div class="webdav-progress-fill" :style="{ width: webdavUploadPercent + '%' }"></div>
+            </div>
+            <div v-if="webdavUploadStage === 'uploading' && webdavUploadTotal > 0" class="webdav-sync-meta">
+              {{ formatBytes(webdavUploadSent) }} / {{ formatBytes(webdavUploadTotal) }}
+            </div>
+            <div v-else-if="webdavUploadStage === 'done' && webdavUploadBytes > 0" class="webdav-sync-meta">
+              {{ formatBytes(webdavUploadBytes) }}
+            </div>
+
+            <p v-if="webdavUploadRemoteURL" class="webdav-sync-remote">
+              {{ $t('components.general.webdav.remoteUrl') }}：<span class="webdav-sync-remote-url">{{ webdavUploadRemoteURL }}</span>
+            </p>
+            <p v-if="webdavUploadError" class="alert-error">{{ webdavUploadError }}</p>
+            <div v-if="webdavUploadLogs.length" class="webdav-sync-logs">
+              <p
+                v-for="(item, idx) in webdavUploadLogs"
+                :key="`${item.ts}-${idx}`"
+                class="webdav-sync-log"
+                :class="{ 'is-error': item.level === 'error' }"
+              >
+                {{ item.text }}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <footer class="webdav-sync-actions">
+          <button
+            v-if="!webdavUploading && (webdavUploadStage === 'ready' || webdavUploadStage === 'idle')"
+            class="action-btn"
+            type="button"
+            @click="closeWebdavUploadModal"
+          >
+            {{ $t('common.cancel') }}
+          </button>
+
+          <button
+            v-if="!webdavUploading && (webdavUploadStage === 'ready' || webdavUploadStage === 'idle')"
+            class="primary-btn"
+            type="button"
+            @click="startWebdavUpload"
+          >
+            {{ $t('components.general.webdav.upload') }}
+          </button>
+
+          <button v-else-if="webdavUploading" class="primary-btn" type="button" disabled>
+            {{ $t('components.general.webdav.uploading') }}
+          </button>
+
+          <button v-else class="action-btn" type="button" @click="closeWebdavUploadModal">
+            {{ $t('common.close') }}
+          </button>
+        </footer>
+      </InlineModal>
+
+      <InlineModal
+        :open="webdavDownloadModalOpen"
+        :title="$t('components.general.webdav.download')"
+        :close-on-backdrop="false"
+        @close="closeWebdavDownloadModal"
+      >
+        <div class="webdav-sync-modal">
+          <p class="webdav-sync-hint">{{ $t('components.general.webdav.confirmDownload') }}</p>
+
+          <div class="webdav-sync-block">
+            <div class="webdav-sync-block-title">{{ $t('components.general.webdav.progress') }}</div>
+
+            <div class="webdav-sync-progress-row">
+              <span class="webdav-sync-stage">{{ webdavDownloadMessage || webdavDownloadStage }}</span>
+              <span class="webdav-sync-percent">{{ webdavDownloadPercent }}%</span>
+            </div>
+            <div
+              class="webdav-progress-bar"
+              role="progressbar"
+              :aria-valuenow="webdavDownloadPercent"
+              aria-valuemin="0"
+              aria-valuemax="100"
+            >
+              <div class="webdav-progress-fill" :style="{ width: webdavDownloadPercent + '%' }"></div>
+            </div>
+
+            <div v-if="webdavDownloadStage === 'downloading' && webdavDownloadTotalCount > 0" class="webdav-sync-meta">
+              {{ webdavDownloadDoneCount }} / {{ webdavDownloadTotalCount }}
+            </div>
+            <div v-else-if="webdavDownloadStage === 'downloading' && webdavDownloadTotal > 0" class="webdav-sync-meta">
+              {{ formatBytes(webdavDownloadSent) }} / {{ formatBytes(webdavDownloadTotal) }}
+            </div>
+            <div v-else-if="webdavDownloadStage === 'downloading' && webdavDownloadSent > 0" class="webdav-sync-meta">
+              {{ formatBytes(webdavDownloadSent) }}
+            </div>
+            <div v-else-if="webdavDownloadStage === 'done' && webdavDownloadBytes > 0" class="webdav-sync-meta">
+              {{ formatBytes(webdavDownloadBytes) }}
+            </div>
+
+            <p v-if="webdavDownloadCurrentFile" class="webdav-sync-remote">
+              {{ $t('components.general.webdav.currentFile') }}：<span class="webdav-sync-remote-url">{{ webdavDownloadCurrentFile }}</span>
+            </p>
+            <p v-if="webdavDownloadRemoteURL" class="webdav-sync-remote">
+              {{ $t('components.general.webdav.remoteUrl') }}：<span class="webdav-sync-remote-url">{{ webdavDownloadRemoteURL }}</span>
+            </p>
+            <p v-if="webdavDownloadBackupPath" class="webdav-sync-remote">
+              {{ $t('components.general.webdav.backupPath') }}：<span class="webdav-sync-remote-url">{{ webdavDownloadBackupPath }}</span>
+            </p>
+            <p v-if="webdavDownloadError" class="alert-error">
+              <span v-if="webdavDownloadErrorFile">
+                {{ $t('components.general.webdav.errorFile') }}：{{ webdavDownloadErrorFile }}<br />
+              </span>
+              {{ webdavDownloadError }}
+            </p>
+            <div v-if="webdavDownloadLogs.length" class="webdav-sync-logs">
+              <p
+                v-for="(item, idx) in webdavDownloadLogs"
+                :key="`${item.ts}-${idx}`"
+                class="webdav-sync-log"
+                :class="{ 'is-error': item.level === 'error' }"
+              >
+                {{ item.text }}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <footer class="webdav-sync-actions">
+          <button
+            v-if="!webdavDownloading && (webdavDownloadStage === 'ready' || webdavDownloadStage === 'idle')"
+            class="action-btn"
+            type="button"
+            @click="closeWebdavDownloadModal"
+          >
+            {{ $t('common.cancel') }}
+          </button>
+
+          <button
+            v-if="!webdavDownloading && (webdavDownloadStage === 'ready' || webdavDownloadStage === 'idle')"
+            class="primary-btn"
+            type="button"
+            @click="startWebdavDownload"
+          >
+            {{ $t('components.general.webdav.download') }}
+          </button>
+
+          <button v-else-if="webdavDownloading" class="primary-btn" type="button" disabled>
+            {{ $t('components.general.webdav.downloading') }}
+          </button>
+
+          <button v-else class="action-btn" type="button" @click="closeWebdavDownloadModal">
+            {{ $t('common.close') }}
+          </button>
+        </footer>
+      </InlineModal>
+
+      <ModelPricingModal :open="modelPricingModalOpen" @close="modelPricingModalOpen = false" />
     </div>
   </div>
 </template>
 
 <style scoped>
+.mac-input {
+  padding: 6px 12px;
+  border: 1px solid var(--mac-border);
+  border-radius: 6px;
+  background: var(--mac-surface);
+  color: var(--mac-text);
+  font-size: 13px;
+  font-family: monospace;
+  min-width: 160px;
+  transition: border-color 0.2s;
+}
+
+.mac-input:focus {
+  outline: none;
+  border-color: var(--mac-accent);
+}
+
+.panel-title {
+  margin: 0;
+  padding: 12px 18px 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--mac-text-secondary);
+  letter-spacing: 0.02em;
+  border-bottom: 1px solid var(--mac-divider);
+}
+
+.mac-panel + .mac-panel {
+  margin-top: 12px;
+}
+
 .toggle-with-hint {
   display: flex;
   flex-direction: column;
@@ -613,16 +2749,357 @@ onMounted(async () => {
   line-height: 1.4;
   max-width: 320px;
   text-align: right;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.hint-text--single-line {
+  max-width: none;
   white-space: nowrap;
+  overflow-wrap: normal;
 }
 
 :global(.dark) .hint-text {
   color: rgba(255, 255, 255, 0.5);
 }
 
+.budget-input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.budget-input-field {
+  width: 140px;
+}
+
+.budget-time-input {
+  width: 140px;
+}
+
+.budget-select {
+  width: 160px;
+}
+
+.budget-unit {
+  font-size: 12px;
+  color: var(--mac-text-secondary);
+}
+
 .import-path-input {
   width: 280px;
   font-size: 12px;
+}
+
+.webdav-input {
+  width: 280px;
+  font-size: 12px;
+}
+
+.webdav-timeout-input {
+  width: 120px;
+  font-size: 12px;
+}
+
+.webdav-actions {
+  display: grid;
+  width: 100%;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+  max-width: 100%;
+  min-width: 0;
+}
+
+:deep(.webdav-actions-row) {
+  align-items: stretch;
+}
+
+:deep(.webdav-actions-row .mac-list-text) {
+  flex: 1 1 100%;
+  min-width: 0;
+}
+
+:deep(.webdav-actions-row .mac-list-control) {
+  display: flex;
+  flex: 1 1 100%;
+  width: 100%;
+  justify-content: flex-start;
+  margin-left: 0;
+}
+
+.webdav-actions :is(.action-btn, .primary-btn) {
+  width: 100%;
+  min-width: 0;
+}
+
+@media (max-width: 760px) {
+  .webdav-actions {
+    grid-template-columns: 1fr;
+  }
+}
+
+.webdav-manage-modal {
+  width: 100%;
+  max-width: 100%;
+}
+
+.heatmap-display-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.heatmap-display-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--mac-text-secondary);
+  line-height: 1.5;
+}
+
+.heatmap-display-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.heatmap-display-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.heatmap-display-label {
+  font-size: 12px;
+  color: var(--mac-text-secondary);
+}
+
+.heatmap-display-input {
+  width: 100%;
+  min-width: 0;
+}
+
+.heatmap-display-note {
+  margin: 0;
+  font-size: 11px;
+  color: var(--mac-text-secondary);
+  line-height: 1.4;
+}
+
+.heatmap-display-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--mac-divider);
+}
+
+.update-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.update-modal-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.update-modal-label {
+  font-size: 12px;
+  color: var(--mac-text-secondary);
+}
+
+.update-modal-message {
+  margin: 2px 0 0;
+}
+
+.update-modal-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.update-modal-block-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--mac-text);
+}
+
+.update-modal-release-notes {
+  margin: 0;
+  max-height: 220px;
+  overflow: auto;
+  border-radius: 12px;
+  border: 1px solid var(--mac-border);
+  background: var(--mac-surface-strong);
+  color: var(--mac-text-secondary);
+  padding: 10px 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.update-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--mac-divider);
+}
+
+.webdav-sync-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.webdav-sync-hint {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--mac-text-secondary);
+  line-height: 1.5;
+}
+
+.webdav-sync-block-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--mac-text);
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.webdav-sync-count {
+  font-size: 0.8rem;
+  color: var(--mac-text-secondary);
+  font-weight: 500;
+}
+
+.webdav-sync-includes {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 12px;
+  color: var(--mac-text-secondary);
+  line-height: 1.5;
+}
+
+.webdav-sync-progress-row {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.webdav-sync-stage {
+  font-size: 0.875rem;
+  color: var(--mac-text-secondary);
+}
+
+.webdav-sync-percent {
+  font-size: 0.85rem;
+  color: var(--mac-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.webdav-progress-bar {
+  margin-top: 8px;
+  width: 100%;
+  height: 10px;
+  background: var(--mac-surface-strong);
+  border: 1px solid var(--mac-border);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.webdav-progress-fill {
+  height: 100%;
+  background: #0ea5e9;
+  transition: width 0.2s ease;
+}
+
+.webdav-sync-meta {
+  margin-top: 8px;
+  text-align: right;
+  font-size: 12px;
+  color: var(--mac-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.webdav-sync-remote {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--mac-text-secondary);
+  line-height: 1.4;
+}
+
+.webdav-sync-remote-url {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  color: var(--mac-text);
+  overflow-wrap: anywhere;
+}
+
+.alert-error {
+  margin: 10px 0 0;
+  padding: 0.65rem 0.85rem;
+  border-radius: 12px;
+  background: rgba(244, 67, 54, 0.12);
+  color: #d93025;
+  border: 1px solid rgba(244, 67, 54, 0.2);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+:global(.dark) .alert-error {
+  background: rgba(244, 67, 54, 0.15);
+  color: #ff9b9b;
+  border-color: rgba(244, 67, 54, 0.2);
+}
+
+.webdav-sync-logs {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--mac-surface-strong);
+  border: 1px solid var(--mac-border);
+  max-height: 160px;
+  overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--mac-text-secondary);
+}
+
+.webdav-sync-log {
+  margin: 0;
+  color: var(--mac-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.webdav-sync-log + .webdav-sync-log {
+  margin-top: 4px;
+}
+
+.webdav-sync-log.is-error {
+  color: #d93025;
+}
+
+:global(.dark) .webdav-sync-log.is-error {
+  color: #ff9b9b;
+}
+
+.webdav-sync-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 16px;
+  border-top: 1px solid var(--mac-divider);
 }
 
 .info-text.warning {
@@ -631,5 +3108,9 @@ onMounted(async () => {
 
 :global(.dark) .info-text.warning {
   color: #f39c12;
+}
+
+:global(.dark) .mac-input {
+  background: var(--mac-surface-strong);
 }
 </style>

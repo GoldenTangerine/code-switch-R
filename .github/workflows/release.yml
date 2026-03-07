@@ -18,6 +18,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Update version from tag
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "Updating version to: $VERSION"
+          sed -i '' "s/const AppVersion = \"v[^\"]*\"/const AppVersion = \"v$VERSION\"/" version_service.go
+          echo "Updated version_service.go:"
+          grep "AppVersion" version_service.go
+
       - uses: actions/setup-go@v5
         with:
           go-version: '1.24'
@@ -56,19 +66,42 @@ jobs:
       - name: Archive macOS app
         run: |
           cd bin
-          ditto -c -k --sequesterRsrc --keepParent "$(basename ${{ steps.find-app.outputs.app_path }})" codeswitch-macos-${{ matrix.arch }}.zip
+          ditto -c -k --sequesterRsrc --keepParent "$(basename ${{ steps.find-app.outputs.app_path }})" CodeSwitch-v${{ steps.version.outputs.VERSION }}-macos-${{ matrix.arch }}.zip
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: macos-${{ matrix.arch }}
-          path: bin/codeswitch-macos-${{ matrix.arch }}.zip
+          path: bin/CodeSwitch-v${{ steps.version.outputs.VERSION }}-macos-${{ matrix.arch }}.zip
 
   build-windows:
     name: Build Windows
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Update version from tag
+        id: version
+        shell: pwsh
+        run: |
+          $VERSION = "${{ github.ref_name }}".TrimStart('v')
+          "VERSION=$VERSION" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Updating version to: $VERSION"
+
+          # Update version_service.go
+          $content = Get-Content version_service.go -Raw
+          $content = $content -replace 'const AppVersion = "v[^"]*"', "const AppVersion = `"v$VERSION`""
+          Set-Content version_service.go $content
+          Write-Host "Updated version_service.go:"
+          Select-String "AppVersion" version_service.go
+
+          # Update build/windows/info.json
+          $json = Get-Content build/windows/info.json -Raw | ConvertFrom-Json
+          $json.fixed.file_version = $VERSION
+          $json.info.'0000'.ProductVersion = $VERSION
+          $json | ConvertTo-Json -Depth 10 | Set-Content build/windows/info.json
+          Write-Host "Updated build/windows/info.json:"
+          Get-Content build/windows/info.json
 
       - uses: actions/setup-go@v5
         with:
@@ -85,7 +118,134 @@ jobs:
         run: cd frontend && npm install
 
       - name: Install NSIS
-        run: choco install nsis -y
+        shell: pwsh
+        run: |
+          function Resolve-MakeNsis {
+            param(
+              [string]$HintPath = ""
+            )
+
+            $candidatePaths = @(
+              $HintPath
+            )
+
+            $cmd = Get-Command makensis -ErrorAction SilentlyContinue
+            if ($null -ne $cmd -and -not [string]::IsNullOrWhiteSpace($cmd.Source)) {
+              $candidatePaths += $cmd.Source
+            }
+
+            $candidatePaths += @(
+              "C:\Program Files (x86)\NSIS\makensis.exe",
+              "C:\Program Files (x86)\NSIS\Bin\makensis.exe",
+              "C:\Program Files\NSIS\makensis.exe",
+              "C:\Program Files\NSIS\Bin\makensis.exe",
+              "C:\ProgramData\chocolatey\bin\makensis.exe",
+              "C:\ProgramData\chocolatey\bin\makensis.bat",
+              "C:\ProgramData\chocolatey\bin\makensis.cmd",
+              "$env:ChocolateyInstall\bin\makensis.exe",
+              "$env:ChocolateyInstall\bin\makensis.bat",
+              "$env:ChocolateyInstall\bin\makensis.cmd"
+            )
+
+            foreach ($path in ($candidatePaths | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)) {
+              if (Test-Path $path) {
+                return (Resolve-Path $path).Path
+              }
+            }
+
+            $searchRoots = @(
+              "C:\Program Files (x86)\NSIS",
+              "C:\Program Files\NSIS",
+              "C:\ProgramData\chocolatey\bin",
+              "C:\ProgramData\chocolatey\lib\nsis",
+              "C:\ProgramData\chocolatey\lib\nsis.install",
+              "C:\ProgramData\chocolatey\lib\nsis.portable",
+              "$env:ChocolateyInstall"
+            ) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -Unique
+
+            foreach ($root in $searchRoots) {
+              foreach ($pattern in @("makensis.exe", "makensis.cmd", "makensis.bat")) {
+                $found = Get-ChildItem -Path $root -Recurse -Filter $pattern -ErrorAction SilentlyContinue | Select-Object -First 1
+                if ($null -ne $found) {
+                  return $found.FullName
+                }
+              }
+            }
+
+            return $null
+          }
+
+          function Invoke-WithRetry {
+            param(
+              [scriptblock]$Script,
+              [string]$Description,
+              [int]$Attempts = 3,
+              [int]$DelaySeconds = 15
+            )
+
+            for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+              Write-Host "[$attempt/$Attempts] $Description"
+              $global:LASTEXITCODE = 0
+              try {
+                & $Script
+              } catch {
+                Write-Warning "$Description threw an exception: $_"
+              }
+
+              if ($LASTEXITCODE -eq 0) {
+                return $true
+              }
+
+              Write-Warning "$Description failed with exit code $LASTEXITCODE"
+              if ($attempt -lt $Attempts) {
+                Start-Sleep -Seconds $DelaySeconds
+              }
+            }
+
+            return $false
+          }
+
+          function Export-MakeNsis {
+            param(
+              [string]$MakensisPath
+            )
+
+            if ([string]::IsNullOrWhiteSpace($MakensisPath) -or !(Test-Path $MakensisPath)) {
+              return
+            }
+
+            $resolved = (Resolve-Path $MakensisPath).Path
+            Write-Host "makensis discovered: $resolved"
+            "MAKENSIS_EXE=$resolved" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            (Split-Path $resolved -Parent) | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          }
+
+          $makensisExe = Resolve-MakeNsis
+          if ([string]::IsNullOrWhiteSpace($makensisExe)) {
+            Write-Host "Installing NSIS via Chocolatey..."
+            $null = Invoke-WithRetry -Description "choco install nsis" -Script { choco install nsis -y --no-progress }
+            $makensisExe = Resolve-MakeNsis
+          }
+
+          if ([string]::IsNullOrWhiteSpace($makensisExe) -and $null -ne (Get-Command winget -ErrorAction SilentlyContinue)) {
+            Write-Host "Chocolatey install did not expose makensis, trying WinGet fallback..."
+            $null = Invoke-WithRetry -Description "winget install NSIS.NSIS" -Script {
+              winget install --exact --id NSIS.NSIS --silent --accept-package-agreements --accept-source-agreements --disable-interactivity
+            }
+            $makensisExe = Resolve-MakeNsis
+          }
+
+          if ([string]::IsNullOrWhiteSpace($makensisExe)) {
+            Write-Host "Trying Chocolatey fallback package nsis.install..."
+            $null = Invoke-WithRetry -Description "choco install nsis.install" -Script { choco install nsis.install -y --no-progress }
+            $makensisExe = Resolve-MakeNsis
+          }
+
+          if ([string]::IsNullOrWhiteSpace($makensisExe)) {
+            Write-Warning "makensis not discoverable in Install NSIS step, will retry during Create NSIS Installer step."
+          } else {
+            Export-MakeNsis -MakensisPath $makensisExe
+          }
 
       - name: Update build assets
         run: wails3 task common:update:build-assets
@@ -113,14 +273,164 @@ jobs:
           }
 
       - name: Create NSIS Installer
+        shell: pwsh
         run: |
-          $env:PATH += ";C:\Program Files (x86)\NSIS"
+          function Resolve-MakeNsis {
+            param(
+              [string]$HintPath = ""
+            )
+
+            $candidatePaths = @(
+              $HintPath
+            )
+
+            $cmd = Get-Command makensis -ErrorAction SilentlyContinue
+            if ($null -ne $cmd -and -not [string]::IsNullOrWhiteSpace($cmd.Source)) {
+              $candidatePaths += $cmd.Source
+            }
+
+            $candidatePaths += @(
+              "C:\Program Files (x86)\NSIS\makensis.exe",
+              "C:\Program Files (x86)\NSIS\Bin\makensis.exe",
+              "C:\Program Files\NSIS\makensis.exe",
+              "C:\Program Files\NSIS\Bin\makensis.exe",
+              "C:\ProgramData\chocolatey\bin\makensis.exe",
+              "C:\ProgramData\chocolatey\bin\makensis.bat",
+              "C:\ProgramData\chocolatey\bin\makensis.cmd",
+              "$env:ChocolateyInstall\bin\makensis.exe",
+              "$env:ChocolateyInstall\bin\makensis.bat",
+              "$env:ChocolateyInstall\bin\makensis.cmd"
+            )
+
+            foreach ($path in ($candidatePaths | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)) {
+              if (Test-Path $path) {
+                return (Resolve-Path $path).Path
+              }
+            }
+
+            $searchRoots = @(
+              "C:\Program Files (x86)\NSIS",
+              "C:\Program Files\NSIS",
+              "C:\ProgramData\chocolatey\bin",
+              "C:\ProgramData\chocolatey\lib\nsis",
+              "C:\ProgramData\chocolatey\lib\nsis.install",
+              "C:\ProgramData\chocolatey\lib\nsis.portable",
+              "$env:ChocolateyInstall"
+            ) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -Unique
+
+            foreach ($root in $searchRoots) {
+              foreach ($pattern in @("makensis.exe", "makensis.cmd", "makensis.bat")) {
+                $found = Get-ChildItem -Path $root -Recurse -Filter $pattern -ErrorAction SilentlyContinue | Select-Object -First 1
+                if ($null -ne $found) {
+                  return $found.FullName
+                }
+              }
+            }
+
+            return $null
+          }
+
           Push-Location build\windows\nsis
-          wails3 generate webview2bootstrapper
-          $binaryPath = (Resolve-Path "..\..\..\bin\CodeSwitch.exe").Path
-          Write-Host "Binary path: $binaryPath"
-          makensis -DARG_WAILS_AMD64_BINARY="$binaryPath" project.nsi
-          Pop-Location
+          try {
+            wails3 generate webview2bootstrapper
+            $binaryPath = (Resolve-Path "..\..\..\bin\CodeSwitch.exe").Path
+            Write-Host "Binary path: $binaryPath"
+
+            function Invoke-WithRetry {
+              param(
+                [scriptblock]$Script,
+                [string]$Description,
+                [int]$Attempts = 2,
+                [int]$DelaySeconds = 20
+              )
+
+              for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+                Write-Host "[$attempt/$Attempts] $Description"
+                $global:LASTEXITCODE = 0
+                try {
+                  & $Script
+                } catch {
+                  Write-Warning "$Description threw an exception: $_"
+                }
+
+                if ($LASTEXITCODE -eq 0) {
+                  return $true
+                }
+
+                Write-Warning "$Description failed with exit code $LASTEXITCODE"
+                if ($attempt -lt $Attempts) {
+                  Start-Sleep -Seconds $DelaySeconds
+                }
+              }
+
+              return $false
+            }
+
+            function Install-NsisFallbacks {
+              $installers = @()
+
+              if ($null -ne (Get-Command winget -ErrorAction SilentlyContinue)) {
+                $installers += @{
+                  Name = "winget install NSIS.NSIS"
+                  Action = {
+                    winget install --exact --id NSIS.NSIS --silent --accept-package-agreements --accept-source-agreements --disable-interactivity
+                  }
+                }
+              }
+
+              $installers += @(
+                @{
+                  Name = "choco install nsis.install"
+                  Action = { choco install nsis.install -y --no-progress }
+                },
+                @{
+                  Name = "choco install nsis.portable"
+                  Action = { choco install nsis.portable -y --no-progress }
+                },
+                @{
+                  Name = "choco install nsis"
+                  Action = { choco install nsis -y --no-progress }
+                }
+              )
+
+              foreach ($installer in $installers) {
+                Write-Host "Trying fallback installer: $($installer.Name)"
+                $null = Invoke-WithRetry -Description $installer.Name -Script $installer.Action
+                $resolved = Resolve-MakeNsis -HintPath $env:MAKENSIS_EXE
+                if (-not [string]::IsNullOrWhiteSpace($resolved) -and (Test-Path $resolved)) {
+                  return $resolved
+                }
+              }
+
+              return $null
+            }
+
+            $makensisExe = Resolve-MakeNsis -HintPath $env:MAKENSIS_EXE
+            if ([string]::IsNullOrWhiteSpace($makensisExe)) {
+              Write-Warning "makensis not found after NSIS dependency install, trying fallback installers..."
+              $makensisExe = Install-NsisFallbacks
+            }
+
+            if ([string]::IsNullOrWhiteSpace($makensisExe) -or !(Test-Path $makensisExe)) {
+              Write-Host "makensis.exe not found. Debug info:"
+              Write-Host "ProgramFiles(x86): ${env:ProgramFiles(x86)}"
+              Write-Host "ProgramFiles: $env:ProgramFiles"
+              Write-Host "ChocolateyInstall: $env:ChocolateyInstall"
+              Write-Host "Installed packages (filtered):"
+              choco list --limit-output nsis
+              choco list --limit-output nsis.install
+              choco list --limit-output nsis.portable
+              if (Test-Path "C:\Program Files (x86)\NSIS") { Get-ChildItem "C:\Program Files (x86)\NSIS" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 40 }
+              if (Test-Path "C:\Program Files\NSIS") { Get-ChildItem "C:\Program Files\NSIS" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 40 }
+              if (Test-Path "C:\ProgramData\chocolatey\lib") { Get-ChildItem "C:\ProgramData\chocolatey\lib" -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.Name -match "makensis" } | Select-Object -First 40 }
+              exit 1
+            }
+
+            Write-Host "Using makensis: $makensisExe"
+            & $makensisExe -DARG_WAILS_AMD64_BINARY="$binaryPath" project.nsi
+          } finally {
+            Pop-Location
+          }
 
       - name: Build Updater
         run: |
@@ -132,11 +442,30 @@ jobs:
           go build -ldflags="-w -s -H windowsgui" -o bin/updater.exe ./cmd/updater
           Remove-Item cmd/updater/*.syso -ErrorAction SilentlyContinue
 
-      - name: Generate SHA256 Checksums
+      - name: Rename files with version
+        shell: pwsh
         run: |
+          $VERSION = "${{ steps.version.outputs.VERSION }}"
           Push-Location bin
-          Get-FileHash -Algorithm SHA256 CodeSwitch.exe | ForEach-Object { "$($_.Hash.ToLower())  CodeSwitch.exe" } | Out-File -Encoding ascii CodeSwitch.exe.sha256
-          Get-FileHash -Algorithm SHA256 updater.exe | ForEach-Object { "$($_.Hash.ToLower())  updater.exe" } | Out-File -Encoding ascii updater.exe.sha256
+          Rename-Item "CodeSwitch.exe" "CodeSwitch-v$VERSION.exe"
+          Rename-Item "updater.exe" "updater-v$VERSION.exe"
+          Pop-Location
+          # Rename installer (generated by NSIS)
+          if (Test-Path "build/windows/nsis/CodeSwitch-amd64-installer.exe") {
+            Move-Item "build/windows/nsis/CodeSwitch-amd64-installer.exe" "bin/CodeSwitch-v$VERSION-amd64-installer.exe"
+          } elseif (Test-Path "bin/CodeSwitch-amd64-installer.exe") {
+            Rename-Item "bin/CodeSwitch-amd64-installer.exe" "CodeSwitch-v$VERSION-amd64-installer.exe"
+          }
+          Write-Host "Files renamed:"
+          Get-ChildItem bin
+
+      - name: Generate SHA256 Checksums
+        shell: pwsh
+        run: |
+          $VERSION = "${{ steps.version.outputs.VERSION }}"
+          Push-Location bin
+          Get-FileHash -Algorithm SHA256 "CodeSwitch-v$VERSION.exe" | ForEach-Object { "$($_.Hash.ToLower())  CodeSwitch-v$VERSION.exe" } | Out-File -Encoding ascii "CodeSwitch-v$VERSION.exe.sha256"
+          Get-FileHash -Algorithm SHA256 "updater-v$VERSION.exe" | ForEach-Object { "$($_.Hash.ToLower())  updater-v$VERSION.exe" } | Out-File -Encoding ascii "updater-v$VERSION.exe.sha256"
           Write-Host "SHA256 checksums generated:"
           Get-Content *.sha256
           Pop-Location
@@ -146,17 +475,27 @@ jobs:
         with:
           name: windows-amd64
           path: |
-            bin/CodeSwitch-amd64-installer.exe
-            bin/CodeSwitch.exe
-            bin/CodeSwitch.exe.sha256
-            bin/updater.exe
-            bin/updater.exe.sha256
+            bin/CodeSwitch-v${{ steps.version.outputs.VERSION }}-amd64-installer.exe
+            bin/CodeSwitch-v${{ steps.version.outputs.VERSION }}.exe
+            bin/CodeSwitch-v${{ steps.version.outputs.VERSION }}.exe.sha256
+            bin/updater-v${{ steps.version.outputs.VERSION }}.exe
+            bin/updater-v${{ steps.version.outputs.VERSION }}.exe.sha256
 
   build-linux:
     name: Build Linux
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+
+      - name: Update version from tag
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "Updating version to: $VERSION"
+          sed -i "s/const AppVersion = \"v[^\"]*\"/const AppVersion = \"v$VERSION\"/" version_service.go
+          echo "Updated version_service.go:"
+          grep "AppVersion" version_service.go
 
       - uses: actions/setup-go@v5
         with:
@@ -200,18 +539,19 @@ jobs:
 
       - name: Rename AppImage
         run: |
+          VERSION=${{ steps.version.outputs.VERSION }}
           cd bin
           echo "Files in bin/:"
           ls -la
           # linuxdeploy creates AppImage with lowercase name and arch suffix
           for f in *-x86_64.AppImage *-aarch64.AppImage; do
             if [ -f "$f" ]; then
-              mv "$f" CodeSwitch.AppImage
-              echo "Renamed $f -> CodeSwitch.AppImage"
+              mv "$f" "CodeSwitch-v${VERSION}.AppImage"
+              echo "Renamed $f -> CodeSwitch-v${VERSION}.AppImage"
               break
             fi
           done
-          ls -la CodeSwitch.AppImage
+          ls -la "CodeSwitch-v${VERSION}.AppImage"
 
       - name: Set nfpm script permissions
         run: |
@@ -232,8 +572,9 @@ jobs:
 
       - name: Generate SHA256 Checksums
         run: |
+          VERSION=${{ steps.version.outputs.VERSION }}
           cd bin
-          sha256sum CodeSwitch.AppImage > CodeSwitch.AppImage.sha256
+          sha256sum "CodeSwitch-v${VERSION}.AppImage" > "CodeSwitch-v${VERSION}.AppImage.sha256"
           for f in codeswitch_*.deb; do [ -f "$f" ] && sha256sum "$f" > "${f}.sha256"; done
           for f in codeswitch-*.rpm; do [ -f "$f" ] && sha256sum "$f" > "${f}.sha256"; done
           echo "SHA256 checksums:"
@@ -244,8 +585,8 @@ jobs:
         with:
           name: linux-amd64
           path: |
-            bin/CodeSwitch.AppImage
-            bin/CodeSwitch.AppImage.sha256
+            bin/CodeSwitch-v${{ steps.version.outputs.VERSION }}.AppImage
+            bin/CodeSwitch-v${{ steps.version.outputs.VERSION }}.AppImage.sha256
             bin/codeswitch_*.deb
             bin/codeswitch_*.deb.sha256
             bin/codeswitch-*.rpm
@@ -257,6 +598,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -268,91 +612,239 @@ jobs:
 
       - name: Prepare release assets
         run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
           mkdir -p release-assets
 
           # macOS
-          cp artifacts/macos-arm64/codeswitch-macos-arm64.zip release-assets/
-          cp artifacts/macos-amd64/codeswitch-macos-amd64.zip release-assets/
+          cp artifacts/macos-arm64/CodeSwitch-v${VERSION}-macos-arm64.zip release-assets/
+          cp artifacts/macos-amd64/CodeSwitch-v${VERSION}-macos-amd64.zip release-assets/
 
           # Windows
-          cp artifacts/windows-amd64/CodeSwitch-amd64-installer.exe release-assets/
-          cp artifacts/windows-amd64/CodeSwitch.exe release-assets/
-          cp artifacts/windows-amd64/CodeSwitch.exe.sha256 release-assets/
-          cp artifacts/windows-amd64/updater.exe release-assets/
-          cp artifacts/windows-amd64/updater.exe.sha256 release-assets/
+          cp artifacts/windows-amd64/CodeSwitch-v${VERSION}-amd64-installer.exe release-assets/
+          cp artifacts/windows-amd64/CodeSwitch-v${VERSION}.exe release-assets/
+          cp artifacts/windows-amd64/CodeSwitch-v${VERSION}.exe.sha256 release-assets/
+          cp artifacts/windows-amd64/updater-v${VERSION}.exe release-assets/
+          cp artifacts/windows-amd64/updater-v${VERSION}.exe.sha256 release-assets/
 
           # Linux
-          cp artifacts/linux-amd64/CodeSwitch.AppImage release-assets/
-          cp artifacts/linux-amd64/CodeSwitch.AppImage.sha256 release-assets/
+          cp artifacts/linux-amd64/CodeSwitch-v${VERSION}.AppImage release-assets/
+          cp artifacts/linux-amd64/CodeSwitch-v${VERSION}.AppImage.sha256 release-assets/
           cp artifacts/linux-amd64/codeswitch_*.deb release-assets/ 2>/dev/null || true
           cp artifacts/linux-amd64/codeswitch_*.deb.sha256 release-assets/ 2>/dev/null || true
           cp artifacts/linux-amd64/codeswitch-*.rpm release-assets/ 2>/dev/null || true
           cp artifacts/linux-amd64/codeswitch-*.rpm.sha256 release-assets/ 2>/dev/null || true
 
           ls -lh release-assets/
+      - name: Generate latest.json
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          VERSION_NUM=${GITHUB_REF#refs/tags/v}
+          REPO="${{ github.repository }}"
+          BASE_URL="https://github.com/${REPO}/releases/download/${VERSION}"
+
+          # Read SHA256 checksums from existing .sha256 files
+          WIN_SHA=$(cut -d' ' -f1 release-assets/CodeSwitch-${VERSION}.exe.sha256)
+          LINUX_SHA=$(cut -d' ' -f1 release-assets/CodeSwitch-${VERSION}.AppImage.sha256)
+
+          cat > release-assets/latest.json << EOF
+          {
+            "version": "${VERSION}",
+            "release_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "files": {
+              "windows": {
+                "name": "CodeSwitch-${VERSION}.exe",
+                "url": "${BASE_URL}/CodeSwitch-${VERSION}.exe",
+                "sha256": "${WIN_SHA}"
+              },
+              "darwin-arm64": {
+                "name": "CodeSwitch-${VERSION}-macos-arm64.zip",
+                "url": "${BASE_URL}/CodeSwitch-${VERSION}-macos-arm64.zip"
+              },
+              "darwin-amd64": {
+                "name": "CodeSwitch-${VERSION}-macos-amd64.zip",
+                "url": "${BASE_URL}/CodeSwitch-${VERSION}-macos-amd64.zip"
+              },
+              "linux": {
+                "name": "CodeSwitch-${VERSION}.AppImage",
+                "url": "${BASE_URL}/CodeSwitch-${VERSION}.AppImage",
+                "sha256": "${LINUX_SHA}"
+              }
+            }
+          }
+          EOF
+
+          echo "Generated latest.json:"
+          cat release-assets/latest.json
+
+
+      - name: Generate release body
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "Generating release body for v$VERSION"
+
+          # 自动汇总上一个 tag 到当前 tag 的提交记录，生成「更新亮点」
+          git fetch --tags --force
+          CURRENT_TAG="${{ github.ref_name }}"
+          PREV_TAG=$(git tag --sort=-v:refname | awk -v cur="$CURRENT_TAG" '$0==cur{found=1;next}found{print;exit}')
+          echo "Current tag: $CURRENT_TAG"
+          echo "Previous tag: ${PREV_TAG:-<none>}"
+
+          export CURRENT_TAG PREV_TAG
+          python3 - <<'PY'
+          import os
+          import re
+          import subprocess
+
+          current_tag = os.environ.get("CURRENT_TAG", "").strip()
+          prev_tag = os.environ.get("PREV_TAG", "").strip()
+          repo = os.environ.get("GITHUB_REPOSITORY", "").strip()
+
+          def git(*args: str) -> str:
+            return subprocess.check_output(["git", *args], text=True)
+
+          commit_range = f"{prev_tag}..{current_tag}" if prev_tag else current_tag
+
+          try:
+            raw = git("log", "--no-merges", "--pretty=format:%s", commit_range)
+          except Exception:
+            raw = ""
+
+          subjects = [s.strip() for s in raw.splitlines() if s.strip()]
+          subjects = subjects[:80]
+
+          type_re = re.compile(r"(feat|fix|perf|refactor|docs|style|test|build|ci|chore)(?:\\([^)]*\\))?:", re.IGNORECASE)
+
+          def group_key(subject: str) -> str:
+            m = type_re.search(subject)
+            if not m:
+              return "other"
+            t = m.group(1).lower()
+            if t in {"build", "ci", "chore"}:
+              return "engineering"
+            return t
+
+          group_title = {
+            "feat": "新功能",
+            "fix": "修复",
+            "perf": "性能/优化",
+            "refactor": "重构",
+            "style": "UI/样式",
+            "docs": "文档",
+            "test": "测试",
+            "engineering": "工程",
+            "other": "其他",
+          }
+          group_order = ["feat", "fix", "perf", "refactor", "style", "docs", "test", "engineering", "other"]
+
+          groups: dict[str, list[str]] = {k: [] for k in group_title.keys()}
+          for s in subjects:
+            groups[group_key(s)].append(s)
+
+          lines: list[str] = []
+          lines.append("## 更新亮点（自动汇总）")
+          if prev_tag:
+            lines.append(f"> 范围：{prev_tag}..{current_tag}（共 {len(subjects)} 个提交）")
+          else:
+            lines.append(f"> 范围：{current_tag}（共 {len(subjects)} 个提交）")
+
+          if not subjects:
+            lines.append("- 本次没有可汇总的提交记录（可能都是 merge commit）")
+          else:
+            for k in group_order:
+              items = groups.get(k) or []
+              if not items:
+                continue
+              lines.append("")
+              lines.append(f"### {group_title[k]}")
+              for item in items[:12]:
+                lines.append(f"- {item}")
+              if len(items) > 12:
+                lines.append(f"- … 以及另外 {len(items) - 12} 条提交")
+
+          if repo and prev_tag:
+            lines.append("")
+            lines.append(f"[完整对比](https://github.com/{repo}/compare/{prev_tag}...{current_tag})")
+
+          with open("/tmp/auto_highlights.md", "w", encoding="utf-8", newline="\n") as f:
+            f.write("\n".join(lines).rstrip() + "\n")
+          print("Generated /tmp/auto_highlights.md:")
+          print(open("/tmp/auto_highlights.md", "r", encoding="utf-8").read())
+          PY
+
+          # 提取当前版本的更新内容（从标题到下一个版本标题之前）
+          # 注意：先用 tr 去除 Windows CRLF 换行符，否则 awk 匹配失败
+          tr -d '\r' < RELEASE_NOTES.md | awk "/^# Code Switch v$VERSION/,/^# Code Switch v[0-9]/" | head -n -1 > /tmp/version_notes.md
+
+          # 如果没找到版本说明，使用默认内容
+          if [ ! -s /tmp/version_notes.md ]; then
+            cp /tmp/auto_highlights.md /tmp/version_notes.md
+          else
+            # 如果找到了版本说明，也把自动汇总的「更新亮点」追加进去，方便快速回顾
+            echo "" >> /tmp/version_notes.md
+            cat /tmp/auto_highlights.md >> /tmp/version_notes.md
+          fi
+
+          # 组合完整的 release body
+          cat /tmp/version_notes.md > /tmp/release_body.md
+
+          cat >> /tmp/release_body.md << EOF
+
+          ---
+
+          ## 下载说明
+
+          | 平台 | 文件 | 说明 |
+          |------|------|------|
+          | **Windows (首次)** | \`CodeSwitch-v${VERSION}-amd64-installer.exe\` | NSIS 安装器 |
+          | **Windows (便携)** | \`CodeSwitch-v${VERSION}.exe\` | 直接运行 |
+          | **Windows (更新)** | \`updater-v${VERSION}.exe\` | 静默更新辅助 |
+          | **macOS (ARM)** | \`CodeSwitch-v${VERSION}-macos-arm64.zip\` | Apple Silicon |
+          | **macOS (Intel)** | \`CodeSwitch-v${VERSION}-macos-amd64.zip\` | Intel 芯片 |
+          | **Linux (通用)** | \`CodeSwitch-v${VERSION}.AppImage\` | 跨发行版便携 |
+          | **Linux (Debian/Ubuntu)** | \`codeswitch_*.deb\` | apt 安装 |
+          | **Linux (RHEL/Fedora)** | \`codeswitch-*.rpm\` | dnf/yum 安装 |
+
+          ## Linux 安装
+
+          ### AppImage (推荐)
+          \`\`\`bash
+          chmod +x CodeSwitch-v${VERSION}.AppImage
+          ./CodeSwitch-v${VERSION}.AppImage
+          \`\`\`
+          如遇 FUSE 问题：\`./CodeSwitch-v${VERSION}.AppImage --appimage-extract-and-run\`
+
+          ### Debian/Ubuntu
+          \`\`\`bash
+          sudo dpkg -i codeswitch_*.deb
+          sudo apt-get install -f  # 安装依赖
+          \`\`\`
+
+          ### RHEL/Fedora
+          \`\`\`bash
+          sudo rpm -i codeswitch-*.rpm
+          # 或
+          sudo dnf install codeswitch-*.rpm
+          \`\`\`
+
+          ## 文件校验
+          所有平台均提供 SHA256 校验文件（\`.sha256\`），下载后可验证完整性：
+          \`\`\`bash
+          # Linux/macOS
+          sha256sum -c CodeSwitch-v${VERSION}.AppImage.sha256
+
+          # Windows PowerShell
+          Get-FileHash CodeSwitch-v${VERSION}.exe | Format-List
+          \`\`\`
+          EOF
+
+          echo "Generated release body:"
+          cat /tmp/release_body.md
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
           files: release-assets/*
-          body: |
-            ## 下载说明
-
-            | 平台 | 文件 | 说明 |
-            |------|------|------|
-            | **Windows (首次)** | `CodeSwitch-amd64-installer.exe` | NSIS 安装器 |
-            | **Windows (便携)** | `CodeSwitch.exe` | 直接运行 |
-            | **Windows (更新)** | `updater.exe` | 静默更新辅助 |
-            | **macOS (ARM)** | `codeswitch-macos-arm64.zip` | Apple Silicon |
-            | **macOS (Intel)** | `codeswitch-macos-amd64.zip` | Intel 芯片 |
-            | **Linux (通用)** | `CodeSwitch.AppImage` | 跨发行版便携 |
-            | **Linux (Debian/Ubuntu)** | `codeswitch_*.deb` | apt 安装 |
-            | **Linux (RHEL/Fedora)** | `codeswitch-*.rpm` | dnf/yum 安装 |
-
-            ## Linux 安装
-
-            ### AppImage (推荐)
-            ```bash
-            chmod +x CodeSwitch.AppImage
-            ./CodeSwitch.AppImage
-            ```
-            如遇 FUSE 问题：`./CodeSwitch.AppImage --appimage-extract-and-run`
-
-            ### Debian/Ubuntu
-            ```bash
-            sudo dpkg -i codeswitch_*.deb
-            sudo apt-get install -f  # 安装依赖
-            ```
-
-            ### RHEL/Fedora
-            ```bash
-            sudo rpm -i codeswitch-*.rpm
-            # 或
-            sudo dnf install codeswitch-*.rpm
-            ```
-
-            ## 支持的 Linux 发行版
-
-            | 发行版 | 版本 | 推荐格式 |
-            |--------|------|----------|
-            | Ubuntu | 24.04 LTS | DEB |
-            | Ubuntu | 22.04 LTS | AppImage |
-            | Debian | 12 (Bookworm) | DEB |
-            | Fedora | 39/40 | RPM |
-            | Arch Linux | Rolling | AppImage |
-
-            > Ubuntu 22.04 因 WebKit 版本限制，建议使用 AppImage。
-
-            ## 文件校验
-
-            所有平台均提供 SHA256 校验文件（`.sha256`），下载后可验证完整性：
-            ```bash
-            # Linux/macOS
-            sha256sum -c CodeSwitch.AppImage.sha256
-
-            # Windows PowerShell
-            Get-FileHash CodeSwitch.exe | Format-List
-            ```
+          body_path: /tmp/release_body.md
           draft: false
           prerelease: false
         env:

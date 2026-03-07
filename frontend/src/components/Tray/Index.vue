@@ -1,0 +1,686 @@
+<script setup lang="ts">
+import { computed, nextTick, onMounted, onUnmounted, proxyRefs, ref } from 'vue'
+import { Call } from '@wailsio/runtime'
+import { fetchCostSince, fetchLogStats } from '../../services/logs'
+import { fetchAppSettings, type AppSettings } from '../../services/appSettings'
+import { fetchProxyStatus } from '../../services/claudeSettings'
+import {
+  buildBudgetUsageConfig,
+  formatLocalDateTime,
+  normalizeBudgetCycleMode,
+  normalizeBudgetRefreshDay,
+  normalizeBudgetRefreshTime,
+  pad2,
+  resolveCycleStart,
+  startOfDay,
+  type BudgetCycleMode,
+} from '../../utils/budgetUsage'
+
+type Platform = 'claude' | 'codex'
+type ForecastMethod = 'cycle' | '10m' | '1h' | 'yesterday' | 'last24h'
+type ForecastDisplay = 'datetime' | 'remaining'
+
+const rootRef = ref<HTMLElement | null>(null)
+let ticker: number | undefined
+let refreshBusy = false
+let storageRefreshTimer: number | undefined
+let lastWindowHeight = 0
+
+const formatCurrency = (value?: number) => {
+  if (value === undefined || value === null || Number.isNaN(value)) {
+    return '$0.0000'
+  }
+  if (value >= 1) {
+    return `$${value.toFixed(2)}`
+  }
+  if (value >= 0.01) {
+    return `$${value.toFixed(3)}`
+  }
+  return `$${value.toFixed(4)}`
+}
+
+const formatLocalDateTimeLabel = (date: Date) => {
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())} ${pad2(date.getHours())}:${pad2(date.getMinutes())}`
+}
+
+const formatCountdown = (remainingMs: number) => {
+  const totalMinutes = Math.max(Math.floor(remainingMs / 60000), 0)
+  const days = Math.floor(totalMinutes / (24 * 60))
+  const hours = Math.floor((totalMinutes % (24 * 60)) / 60)
+  const minutes = totalMinutes % 60
+  return `${pad2(days)}天 ${pad2(hours)}:${pad2(minutes)}`
+}
+
+const calculateRate = (cost: number, seconds: number) => {
+  if (!Number.isFinite(cost) || !Number.isFinite(seconds) || seconds <= 0) return 0
+  return Math.max(cost, 0) / seconds
+}
+
+const normalizeForecastMethod = (value: unknown): ForecastMethod => {
+  const raw = String(value ?? '').trim()
+  if (raw === 'cycle' || raw === '10m' || raw === '1h' || raw === 'yesterday' || raw === 'last24h') {
+    return raw
+  }
+  return 'cycle'
+}
+
+const normalizeForecastDisplay = (value: unknown): ForecastDisplay => {
+  const raw = String(value ?? '').trim()
+  if (raw === 'datetime' || raw === 'remaining') {
+    return raw
+  }
+  return 'datetime'
+}
+
+const normalizeBudgetTotal = (value: unknown) => {
+  const normalized = Number(value ?? 0)
+  if (!Number.isFinite(normalized)) return 0
+  return Math.max(normalized, 0)
+}
+
+const createTrayCard = (platform: Platform, brandName: string, brandIcon: string) => {
+  const used = ref(0)
+  const usedRaw = ref(0)
+  const total = ref(0)
+  const usedAdjustment = ref(0)
+  const loading = ref(false)
+  const cycleEnabled = ref(false)
+  const cycleMode = ref<BudgetCycleMode>('daily')
+  const refreshTime = ref('00:00')
+  const refreshDay = ref(1)
+  const showCountdown = ref(false)
+  const showForecast = ref(false)
+  const forecastMethod = ref<ForecastMethod>('cycle')
+  const forecastDisplay = ref<ForecastDisplay>('datetime')
+  const forecastRate = ref(0)
+  const countdownLabel = ref('')
+  const forecastLabel = ref('')
+  const hostingEnabled = ref(false)
+  let cycleStart: Date | null = null
+  let nextReset: Date | null = null
+
+  const usedLabel = computed(() => formatCurrency(used.value))
+  const hasBudget = computed(() => total.value > 0)
+  const totalLabel = computed(() => (hasBudget.value ? formatCurrency(total.value) : ''))
+  const progressRatio = computed(() => {
+    if (total.value <= 0) return 0
+    return Math.min(Math.max(used.value / total.value, 0), 1)
+  })
+  const progressPercentLabel = computed(() => {
+    if (!hasBudget.value) return ''
+    const percent = Math.round(progressRatio.value * 100)
+    return `${percent}%`
+  })
+  const budgetTitle = computed(() => (cycleEnabled.value && cycleMode.value === 'weekly' ? '本周预算' : '今日预算'))
+  const hostingLabel = computed(() => (hostingEnabled.value ? '托管中' : '未托管'))
+
+  const applyUsedAdjustment = (rawUsed: number) => {
+    const adjusted = rawUsed + usedAdjustment.value
+    if (!Number.isFinite(adjusted)) return 0
+    return Math.max(adjusted, 0)
+  }
+
+  const clampStartToCycle = (start: Date) => {
+    if (cycleEnabled.value && cycleStart && start < cycleStart) {
+      return cycleStart
+    }
+    return start
+  }
+
+  const updateCycleTimes = () => {
+    const now = new Date()
+    if (!cycleEnabled.value) {
+      cycleStart = startOfDay(now)
+      nextReset = null
+      return
+    }
+    const config = buildBudgetUsageConfig(
+      cycleEnabled.value,
+      cycleMode.value,
+      refreshTime.value,
+      refreshDay.value,
+    )
+    const start = resolveCycleStart(config, now)
+    const next = new Date(start)
+    if (config.cycleMode === 'weekly') {
+      next.setDate(next.getDate() + 7)
+    } else {
+      next.setDate(next.getDate() + 1)
+    }
+    cycleStart = start
+    nextReset = next
+  }
+
+  const computeForecastRate = async (now: Date) => {
+    const method = forecastMethod.value
+    if (method === 'cycle') {
+      const start = cycleStart ?? startOfDay(now)
+      const elapsedSeconds = Math.max((now.getTime() - start.getTime()) / 1000, 1)
+      return calculateRate(usedRaw.value, elapsedSeconds)
+    }
+    if (method === '10m') {
+      const windowStart = new Date(now.getTime() - 10 * 60 * 1000)
+      const start = clampStartToCycle(windowStart)
+      const cost = Number(await fetchCostSince(formatLocalDateTime(start), platform))
+      const seconds = (now.getTime() - start.getTime()) / 1000
+      return calculateRate(cost, seconds)
+    }
+    if (method === '1h') {
+      const windowStart = new Date(now.getTime() - 60 * 60 * 1000)
+      const start = clampStartToCycle(windowStart)
+      const cost = Number(await fetchCostSince(formatLocalDateTime(start), platform))
+      const seconds = (now.getTime() - start.getTime()) / 1000
+      return calculateRate(cost, seconds)
+    }
+    if (method === 'yesterday') {
+      const todayStart = startOfDay(now)
+      const yesterdayStart = new Date(todayStart)
+      yesterdayStart.setDate(yesterdayStart.getDate() - 1)
+      const costSinceYesterday = Number(await fetchCostSince(formatLocalDateTime(yesterdayStart), platform))
+      const costSinceToday = Number(await fetchCostSince(formatLocalDateTime(todayStart), platform))
+      const yesterdayCost = Math.max(costSinceYesterday - costSinceToday, 0)
+      return calculateRate(yesterdayCost, 24 * 60 * 60)
+    }
+    const windowStart = new Date(now.getTime() - 24 * 60 * 60 * 1000)
+    const cost = Number(await fetchCostSince(formatLocalDateTime(windowStart), platform))
+    const seconds = (now.getTime() - windowStart.getTime()) / 1000
+    return calculateRate(cost, seconds)
+  }
+
+  const updateDerivedLabels = (now: Date) => {
+    if (showCountdown.value && cycleEnabled.value && nextReset) {
+      const remaining = nextReset.getTime() - now.getTime()
+      countdownLabel.value = remaining > 0 ? `重置倒计时 ${formatCountdown(remaining)}` : '即将重置'
+    } else {
+      countdownLabel.value = ''
+    }
+
+    if (showForecast.value && total.value > 0) {
+      const rate = forecastRate.value
+      if (rate > 0 && used.value < total.value) {
+        const secondsToBudget = (total.value - used.value) / rate
+        if (!Number.isFinite(secondsToBudget)) {
+          forecastLabel.value = '预计耗尽 —'
+        } else if (forecastDisplay.value === 'remaining') {
+          const remainingMs = secondsToBudget * 1000
+          forecastLabel.value = `预计耗尽 ${formatCountdown(remainingMs)}`
+        } else {
+          const forecastTime = new Date(now.getTime() + secondsToBudget * 1000)
+          forecastLabel.value = `预计耗尽 ${formatLocalDateTimeLabel(forecastTime)}`
+        }
+      } else if (used.value >= total.value && total.value > 0) {
+        forecastLabel.value = '已达预算'
+      } else {
+        forecastLabel.value = '预计耗尽 —'
+      }
+    } else {
+      forecastLabel.value = ''
+    }
+
+    return Boolean(cycleEnabled.value && nextReset && now >= nextReset && !loading.value)
+  }
+
+  const updateHostingState = async () => {
+    try {
+      const status = await fetchProxyStatus(platform)
+      hostingEnabled.value = Boolean(status?.enabled)
+    } catch (error) {
+      console.error(`failed to load ${platform} proxy status`, error)
+    }
+  }
+
+  const applySettings = (settings: AppSettings) => {
+    if (platform === 'codex') {
+      total.value = normalizeBudgetTotal(settings?.budget_total_codex)
+      cycleEnabled.value = settings?.budget_cycle_enabled_codex ?? false
+      cycleMode.value = normalizeBudgetCycleMode(settings?.budget_cycle_mode_codex)
+      refreshTime.value = normalizeBudgetRefreshTime(settings?.budget_refresh_time_codex)
+      refreshDay.value = normalizeBudgetRefreshDay(settings?.budget_refresh_day_codex)
+      showCountdown.value = settings?.budget_show_countdown_codex ?? false
+      showForecast.value = settings?.budget_show_forecast_codex ?? false
+      forecastMethod.value = normalizeForecastMethod(settings?.budget_forecast_method_codex ?? 'cycle')
+      forecastDisplay.value = normalizeForecastDisplay(settings?.budget_forecast_display_codex ?? 'datetime')
+      const rawAdjustment = Number(settings?.budget_used_adjustment_codex ?? 0)
+      usedAdjustment.value = Number.isFinite(rawAdjustment) ? rawAdjustment : 0
+      return
+    }
+    total.value = normalizeBudgetTotal(settings?.budget_total)
+    cycleEnabled.value = settings?.budget_cycle_enabled ?? false
+    cycleMode.value = normalizeBudgetCycleMode(settings?.budget_cycle_mode)
+    refreshTime.value = normalizeBudgetRefreshTime(settings?.budget_refresh_time)
+    refreshDay.value = normalizeBudgetRefreshDay(settings?.budget_refresh_day)
+    showCountdown.value = settings?.budget_show_countdown ?? false
+    showForecast.value = settings?.budget_show_forecast ?? false
+    forecastMethod.value = normalizeForecastMethod(settings?.budget_forecast_method ?? 'cycle')
+    forecastDisplay.value = normalizeForecastDisplay(settings?.budget_forecast_display ?? 'datetime')
+    const rawAdjustment = Number(settings?.budget_used_adjustment ?? 0)
+    usedAdjustment.value = Number.isFinite(rawAdjustment) ? rawAdjustment : 0
+  }
+
+  const refresh = async (settings: AppSettings) => {
+    loading.value = true
+    try {
+      applySettings(settings)
+      updateCycleTimes()
+      await updateHostingState()
+
+      let rawUsed = 0
+      if (cycleEnabled.value && cycleStart) {
+        const startValue = formatLocalDateTime(cycleStart)
+        rawUsed = Number(await fetchCostSince(startValue, platform))
+      } else {
+        const stats = await fetchLogStats(platform)
+        rawUsed = Number(stats?.cost_total ?? 0)
+      }
+      usedRaw.value = Number.isFinite(rawUsed) ? rawUsed : 0
+      used.value = applyUsedAdjustment(usedRaw.value)
+      forecastRate.value = showForecast.value ? await computeForecastRate(new Date()) : 0
+    } catch (error) {
+      console.error(`failed to load ${platform} tray stats`, error)
+    } finally {
+      loading.value = false
+    }
+  }
+
+  return proxyRefs({
+    platform,
+    brandName,
+    brandIcon,
+    usedLabel,
+    hasBudget,
+    totalLabel,
+    progressRatio,
+    progressPercentLabel,
+    budgetTitle,
+    hostingEnabled,
+    hostingLabel,
+    loading,
+    countdownLabel,
+    forecastLabel,
+    showCountdown,
+    showForecast,
+    refresh,
+    updateDerivedLabels,
+  })
+}
+
+const claudeCard = createTrayCard('claude', 'Claude Code', 'C')
+const codexCard = createTrayCard('codex', 'Codex', 'X')
+const cards = [claudeCard, codexCard]
+
+const updateAllDerivedLabels = () => {
+  const now = new Date()
+  const shouldRefresh = cards.some((card) => card.updateDerivedLabels(now))
+  if (shouldRefresh && !refreshBusy) {
+    void refreshAll()
+  }
+}
+
+const setupTicker = () => {
+  if (ticker) {
+    window.clearInterval(ticker)
+  }
+  ticker = window.setInterval(() => {
+    if (document.hidden) return
+    if (refreshBusy) {
+      updateAllDerivedLabels()
+      return
+    }
+    void refreshAll()
+  }, 60_000)
+}
+
+const resizeToContent = async () => {
+  await nextTick()
+  if (!rootRef.value) return
+  const height = Math.ceil(rootRef.value.getBoundingClientRect().height)
+  if (height <= 0) return
+  if (height === lastWindowHeight) return
+  try {
+    await Call.ByName('main.AppService.SetTrayWindowHeight', height)
+    lastWindowHeight = height
+  } catch (error) {
+    console.error('failed to resize tray window', error)
+  }
+}
+
+const refreshAll = async () => {
+  if (refreshBusy) return
+  refreshBusy = true
+  try {
+    const settings = await fetchAppSettings()
+    await Promise.all(cards.map((card) => card.refresh(settings)))
+  } catch (error) {
+    console.error('failed to refresh tray cards', error)
+  } finally {
+    refreshBusy = false
+    updateAllDerivedLabels()
+    setupTicker()
+    await resizeToContent()
+  }
+}
+
+const handleFocus = () => {
+  void refreshAll()
+}
+
+const handleVisibilityChange = () => {
+  if (document.hidden || refreshBusy) return
+  void refreshAll()
+}
+
+const scheduleRefreshAll = () => {
+  if (storageRefreshTimer) {
+    window.clearTimeout(storageRefreshTimer)
+  }
+  storageRefreshTimer = window.setTimeout(() => {
+    storageRefreshTimer = undefined
+    if (refreshBusy) {
+      scheduleRefreshAll()
+      return
+    }
+    void refreshAll()
+  }, 80)
+}
+
+const handleStorageChange = (event: StorageEvent) => {
+  const key = event?.key
+  if (!key || !key.startsWith('app-settings-')) return
+  scheduleRefreshAll()
+}
+
+onMounted(() => {
+  lastWindowHeight = 0
+  void refreshAll()
+  window.addEventListener('focus', handleFocus)
+  window.addEventListener('visibilitychange', handleVisibilityChange)
+  window.addEventListener('app-settings-updated', handleFocus)
+  window.addEventListener('storage', handleStorageChange)
+})
+
+onUnmounted(() => {
+  if (ticker) {
+    window.clearInterval(ticker)
+    ticker = undefined
+  }
+  if (storageRefreshTimer) {
+    window.clearTimeout(storageRefreshTimer)
+    storageRefreshTimer = undefined
+  }
+  lastWindowHeight = 0
+  window.removeEventListener('focus', handleFocus)
+  window.removeEventListener('visibilitychange', handleVisibilityChange)
+  window.removeEventListener('app-settings-updated', handleFocus)
+  window.removeEventListener('storage', handleStorageChange)
+})
+</script>
+
+<template>
+  <div ref="rootRef" class="tray-root">
+    <div class="tray-list">
+      <div v-for="card in cards" :key="card.platform" class="tray-panel">
+        <div class="tray-header">
+          <div class="tray-brand">
+            <div class="tray-brand__icon" aria-hidden="true">{{ card.brandIcon }}</div>
+            <span class="tray-brand__name">{{ card.brandName }}</span>
+          </div>
+          <div class="tray-status" :class="{ active: card.hostingEnabled }">
+            <span class="tray-status__dot"></span>
+            <span class="tray-status__text">{{ card.hostingLabel }}</span>
+          </div>
+        </div>
+        <div class="tray-item">
+          <div class="tray-item__header">
+            <div class="tray-item__title">
+              <span class="tray-dot"></span>
+              <span>{{ card.budgetTitle }}</span>
+            </div>
+            <div class="tray-item__summary">
+              <div class="tray-item__value" :class="{ loading: card.loading }">
+                <span>已用 {{ card.usedLabel }}</span>
+                <template v-if="card.hasBudget">
+                  <span class="tray-divider">/</span>
+                  <span>{{ card.totalLabel }}</span>
+                </template>
+              </div>
+              <span v-if="card.hasBudget" class="tray-item__percent">{{ card.progressPercentLabel }}</span>
+            </div>
+          </div>
+          <div class="tray-progress">
+            <div class="tray-progress__bar" :style="{ width: `${card.progressRatio * 100}%` }"></div>
+          </div>
+          <div v-if="card.countdownLabel || card.forecastLabel" class="tray-meta">
+            <span v-if="card.countdownLabel">{{ card.countdownLabel }}</span>
+            <span v-if="card.forecastLabel">{{ card.forecastLabel }}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.tray-root {
+  padding: 10px;
+  color: var(--mac-text);
+}
+
+.tray-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.tray-panel {
+  background: var(--mac-surface);
+  border-radius: 16px;
+  padding: 12px 14px;
+  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.12);
+  border: 1px solid var(--mac-border);
+}
+
+.tray-item {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tray-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 8px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--mac-divider);
+}
+
+.tray-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.tray-brand__icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: var(--mac-surface-strong);
+  border: 1px solid var(--mac-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--mac-text);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.tray-brand__name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--mac-text);
+}
+
+.tray-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--mac-text-secondary);
+}
+
+.tray-status__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--mac-text-secondary) 55%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--mac-text-secondary) 25%, transparent);
+}
+
+.tray-status.active {
+  color: var(--mac-text);
+}
+
+.tray-status.active .tray-status__dot {
+  background: #5dbb63;
+  box-shadow: 0 0 0 2px rgba(93, 187, 99, 0.25);
+}
+
+.tray-item__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.tray-item__summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.tray-item__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--mac-text);
+}
+
+.tray-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #5dbb63;
+  box-shadow: 0 0 0 2px rgba(93, 187, 99, 0.2);
+}
+
+.tray-item__value {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--mac-text-secondary);
+}
+
+.tray-item__value.loading {
+  opacity: 0.6;
+}
+
+.tray-divider {
+  opacity: 0.5;
+}
+
+.tray-item__percent {
+  font-size: 12px;
+  font-weight: 600;
+  color: #5dbb63;
+  min-width: 36px;
+  text-align: right;
+}
+
+.tray-progress {
+  width: 100%;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--mac-divider);
+  overflow: hidden;
+}
+
+.tray-progress__bar {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #5dbb63 0%, #6bd36f 100%);
+  transition: width 0.2s ease;
+}
+
+.tray-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--mac-text-secondary);
+}
+
+:global(.dark) .tray-panel {
+  background: rgba(28, 30, 36, 0.94);
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(10px);
+}
+
+:global(.dark) .tray-header {
+  border-bottom-color: var(--mac-divider);
+}
+
+:global(.dark) .tray-brand__icon {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+:global(.dark) .tray-brand__name {
+  color: var(--mac-text);
+}
+
+:global(.dark) .tray-status {
+  color: var(--mac-text-secondary);
+}
+
+:global(.dark) .tray-status__dot {
+  background: color-mix(in srgb, var(--mac-text-secondary) 55%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--mac-text-secondary) 25%, transparent);
+}
+
+:global(.dark) .tray-status.active {
+  color: var(--mac-text);
+}
+
+:global(.dark) .tray-status.active .tray-status__dot {
+  background: #7ce07f;
+  box-shadow: 0 0 0 2px rgba(124, 224, 127, 0.3);
+}
+
+:global(.dark) .tray-item__title {
+  color: var(--mac-text);
+}
+
+:global(.dark) .tray-item__value {
+  color: var(--mac-text-secondary);
+}
+
+:global(.dark) .tray-item__percent {
+  color: #7ce07f;
+}
+
+:global(.dark) .tray-progress {
+  background: var(--mac-divider);
+}
+
+:global(.dark) .tray-progress__bar {
+  background: linear-gradient(90deg, #5dbb63 0%, #7ce07f 100%);
+}
+
+:global(.dark) .tray-meta {
+  color: var(--mac-text-secondary);
+}
+</style>

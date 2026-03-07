@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/daodao97/xgo/xdb"
@@ -18,6 +19,7 @@ type BlacklistService struct {
 // BlacklistStatus 黑名单状态（用于前端展示）
 type BlacklistStatus struct {
 	Platform         string     `json:"platform"`
+	ProviderID       string     `json:"providerId"`
 	ProviderName     string     `json:"providerName"`
 	FailureCount     int        `json:"failureCount"`
 	BlacklistedAt    *time.Time `json:"blacklistedAt"`
@@ -39,8 +41,137 @@ func NewBlacklistService(settingsService *SettingsService, notificationService *
 	}
 }
 
+func normalizeBlacklistIdentity(providerID, providerName string) (string, string) {
+	providerID = strings.TrimSpace(providerID)
+	providerName = strings.TrimSpace(providerName)
+	if providerID == "" {
+		providerID = providerName
+	}
+	if providerName == "" {
+		providerName = providerID
+	}
+	return providerID, providerName
+}
+
+func (bs *BlacklistService) bindProviderIdentity(platform, providerID, providerName string) {
+	providerID, providerName = normalizeBlacklistIdentity(providerID, providerName)
+	if providerID == "" {
+		return
+	}
+	execSQL := func(statement string, args ...interface{}) error {
+		if GlobalDBQueue != nil {
+			return GlobalDBQueue.Exec(statement, args...)
+		}
+		db, err := xdb.DB("default")
+		if err != nil {
+			return err
+		}
+		_, err = db.Exec(statement, args...)
+		return err
+	}
+	// 先尝试按 provider_id 更新名称（改名后可保持同一条记录）
+	if err := execSQL(`
+		UPDATE provider_blacklist
+		SET provider_name = ?
+		WHERE platform = ? AND provider_id = ?
+	`, providerName, platform, providerID); err != nil {
+		log.Printf("⚠️  绑定 provider_id（按 id 更新名称）失败: %v", err)
+	}
+	// 再补齐当前名称对应记录的 provider_id（历史数据兼容）
+	if providerName != "" {
+		if err := execSQL(`
+			UPDATE provider_blacklist
+			SET provider_id = ?
+			WHERE platform = ? AND provider_name = ? AND (provider_id IS NULL OR provider_id = '')
+		`, providerID, platform, providerName); err != nil {
+			log.Printf("⚠️  绑定 provider_id（按名称回填 id）失败: %v", err)
+		}
+	}
+}
+
+func (bs *BlacklistService) RecordSuccessByID(platform, providerID, providerName string) error {
+	providerID, providerName = normalizeBlacklistIdentity(providerID, providerName)
+	bs.bindProviderIdentity(platform, providerID, providerName)
+	if err := bs.recordSuccessByIdentity(platform, providerID, providerName); err != nil {
+		return err
+	}
+	bs.bindProviderIdentity(platform, providerID, providerName)
+	return nil
+}
+
+func (bs *BlacklistService) RecordFailureByID(platform, providerID, providerName string) error {
+	providerID, providerName = normalizeBlacklistIdentity(providerID, providerName)
+	bs.bindProviderIdentity(platform, providerID, providerName)
+	if err := bs.recordFailureByIdentity(platform, providerID, providerName); err != nil {
+		return err
+	}
+	bs.bindProviderIdentity(platform, providerID, providerName)
+	return nil
+}
+
+func (bs *BlacklistService) IsBlacklistedByID(platform, providerID, providerName string) (bool, *time.Time) {
+	if !bs.settingsService.IsBlacklistEnabled() {
+		return false, nil
+	}
+
+	providerID, _ = normalizeBlacklistIdentity(providerID, providerName)
+	if providerID == "" {
+		return false, nil
+	}
+
+	db, err := xdb.DB("default")
+	if err != nil {
+		log.Printf("⚠️  获取数据库连接失败: %v", err)
+		return false, nil
+	}
+
+	var blacklistedUntil sql.NullTime
+	err = db.QueryRow(`
+		SELECT blacklisted_until
+		FROM provider_blacklist
+		WHERE platform = ? AND provider_id = ? AND blacklisted_until IS NOT NULL
+	`, platform, providerID).Scan(&blacklistedUntil)
+
+	if err == sql.ErrNoRows {
+		return false, nil
+	} else if err != nil {
+		log.Printf("⚠️  查询黑名单状态失败: %v", err)
+		return false, nil
+	}
+	if blacklistedUntil.Valid && blacklistedUntil.Time.After(time.Now()) {
+		return true, &blacklistedUntil.Time
+	}
+	return false, nil
+}
+
+func (bs *BlacklistService) ManualUnblockAndResetByID(platform, providerID, providerName string) error {
+	providerID, providerName = normalizeBlacklistIdentity(providerID, providerName)
+	bs.bindProviderIdentity(platform, providerID, providerName)
+	if err := bs.manualUnblockAndResetByIdentity(platform, providerID, providerName); err != nil {
+		return err
+	}
+	bs.bindProviderIdentity(platform, providerID, providerName)
+	return nil
+}
+
+func (bs *BlacklistService) ManualResetLevelByID(platform, providerID, providerName string) error {
+	providerID, providerName = normalizeBlacklistIdentity(providerID, providerName)
+	bs.bindProviderIdentity(platform, providerID, providerName)
+	if err := bs.manualResetLevelByIdentity(platform, providerID, providerName); err != nil {
+		return err
+	}
+	bs.bindProviderIdentity(platform, providerID, providerName)
+	return nil
+}
+
 // RecordSuccess 记录 provider 成功，清零连续失败计数，执行降级和宽恕逻辑
 func (bs *BlacklistService) RecordSuccess(platform string, providerName string) error {
+	providerID, resolvedName := normalizeBlacklistIdentity(providerName, providerName)
+	bs.bindProviderIdentity(platform, providerID, resolvedName)
+	return bs.recordSuccessByIdentity(platform, providerID, resolvedName)
+}
+
+func (bs *BlacklistService) recordSuccessByIdentity(platform, providerID, providerName string) error {
 	db, err := xdb.DB("default")
 	if err != nil {
 		return fmt.Errorf("获取数据库连接失败: %w", err)
@@ -63,8 +194,8 @@ func (bs *BlacklistService) RecordSuccess(platform string, providerName string) 
 	err = db.QueryRow(`
 		SELECT id, blacklist_level, last_recovered_at, last_degrade_hour, blacklisted_until
 		FROM provider_blacklist
-		WHERE platform = ? AND provider_name = ?
-	`, platform, providerName).Scan(&id, &blacklistLevel, &lastRecoveredAt, &lastDegradeHour, &blacklistedUntil)
+		WHERE platform = ? AND provider_id = ?
+	`, platform, providerID).Scan(&id, &blacklistLevel, &lastRecoveredAt, &lastDegradeHour, &blacklistedUntil)
 
 	if err == sql.ErrNoRows {
 		// 没有失败记录，无需操作
@@ -136,6 +267,7 @@ func (bs *BlacklistService) RecordSuccess(platform string, providerName string) 
 	updateSQL := `
 		UPDATE provider_blacklist
 		SET failure_count = 0,
+			provider_name = ?,
 			blacklist_level = ?,
 			last_recovered_at = ?,
 			last_degrade_hour = ?
@@ -149,7 +281,7 @@ func (bs *BlacklistService) RecordSuccess(platform string, providerName string) 
 		lastRecoveredTime = nil
 	}
 
-	err = GlobalDBQueue.Exec(updateSQL, newLevel, lastRecoveredTime, newLastDegradeHour, id)
+	err = GlobalDBQueue.Exec(updateSQL, providerName, newLevel, lastRecoveredTime, newLastDegradeHour, id)
 
 	if err != nil {
 		return fmt.Errorf("更新成功记录失败: %w", err)
@@ -168,6 +300,12 @@ func (bs *BlacklistService) RecordSuccess(platform string, providerName string) 
 
 // RecordFailure 记录 provider 失败，连续失败次数达到阈值时自动拉黑（支持等级拉黑）
 func (bs *BlacklistService) RecordFailure(platform string, providerName string) error {
+	providerID, resolvedName := normalizeBlacklistIdentity(providerName, providerName)
+	bs.bindProviderIdentity(platform, providerID, resolvedName)
+	return bs.recordFailureByIdentity(platform, providerID, resolvedName)
+}
+
+func (bs *BlacklistService) recordFailureByIdentity(platform, providerID, providerName string) error {
 	// 检查拉黑功能是否启用
 	if !bs.settingsService.IsBlacklistEnabled() {
 		log.Printf("🚫 拉黑功能已关闭，跳过 provider %s/%s 的失败记录", platform, providerName)
@@ -189,13 +327,13 @@ func (bs *BlacklistService) RecordFailure(platform string, providerName string) 
 	// 如果功能关闭，使用旧的固定拉黑模式
 	if !levelConfig.EnableLevelBlacklist {
 		// 从数据库读取配置（优先使用数据库配置而非默认值）
-		threshold, duration, err := bs.settingsService.GetBlacklistSettings()
+		threshold, durationSeconds, err := bs.settingsService.GetBlacklistSettings()
 		if err != nil {
 			log.Printf("⚠️  获取数据库拉黑配置失败: %v，使用默认值", err)
 			threshold = levelConfig.FailureThreshold
-			duration = levelConfig.FallbackDurationMinutes
+			durationSeconds = levelConfig.FallbackDurationMinutes * 60
 		}
-		return bs.recordFailureFixedMode(platform, providerName, levelConfig.FallbackMode, duration, threshold)
+		return bs.recordFailureFixedModeByIdentity(platform, providerID, providerName, levelConfig.FallbackMode, durationSeconds, threshold)
 	}
 
 	now := time.Now()
@@ -209,18 +347,18 @@ func (bs *BlacklistService) RecordFailure(platform string, providerName string) 
 	var lastFailureWindowStart sql.NullTime
 
 	err = db.QueryRow(`
-		SELECT id, failure_count, blacklisted_until, blacklist_level, last_recovered_at, last_failure_window_start
-		FROM provider_blacklist
-		WHERE platform = ? AND provider_name = ?
-	`, platform, providerName).Scan(&id, &failureCount, &blacklistedUntil, &blacklistLevel, &lastRecoveredAt, &lastFailureWindowStart)
+			SELECT id, failure_count, blacklisted_until, blacklist_level, last_recovered_at, last_failure_window_start
+			FROM provider_blacklist
+			WHERE platform = ? AND provider_id = ?
+		`, platform, providerID).Scan(&id, &failureCount, &blacklistedUntil, &blacklistLevel, &lastRecoveredAt, &lastFailureWindowStart)
 
 	if err == sql.ErrNoRows {
 		// 首次失败，插入新记录
 		err = GlobalDBQueue.Exec(`
-			INSERT INTO provider_blacklist
-				(platform, provider_name, failure_count, last_failure_at, last_failure_window_start, blacklist_level)
-			VALUES (?, ?, 1, ?, ?, 0)
-		`, platform, providerName, now, now)
+				INSERT INTO provider_blacklist
+					(platform, provider_name, provider_id, failure_count, last_failure_at, last_failure_window_start, blacklist_level)
+				VALUES (?, ?, ?, 1, ?, ?, 0)
+			`, platform, providerName, providerID, now, now)
 
 		if err != nil {
 			return fmt.Errorf("插入失败记录失败: %w", err)
@@ -288,16 +426,17 @@ func (bs *BlacklistService) RecordFailure(platform string, providerName string) 
 		blacklistedUntil := now.Add(time.Duration(duration) * time.Minute)
 
 		err = GlobalDBQueue.Exec(`
-			UPDATE provider_blacklist
-			SET failure_count = 0,
-				last_failure_at = ?,
-				blacklisted_at = ?,
-				blacklisted_until = ?,
-				blacklist_level = ?,
-				auto_recovered = 0,
-				last_failure_window_start = ?
-			WHERE id = ?
-		`, now, blacklistedAt, blacklistedUntil, newLevel, now, id)
+				UPDATE provider_blacklist
+				SET failure_count = 0,
+					provider_name = ?,
+					last_failure_at = ?,
+					blacklisted_at = ?,
+					blacklisted_until = ?,
+					blacklist_level = ?,
+					auto_recovered = 0,
+					last_failure_window_start = ?
+				WHERE id = ?
+			`, providerName, now, blacklistedAt, blacklistedUntil, newLevel, now, id)
 
 		if err != nil {
 			return fmt.Errorf("更新拉黑状态失败: %w", err)
@@ -308,16 +447,16 @@ func (bs *BlacklistService) RecordFailure(platform string, providerName string) 
 
 		// 发送拉黑通知
 		if bs.notificationService != nil {
-			bs.notificationService.NotifyProviderBlacklisted(platform, providerName, newLevel, duration)
+			bs.notificationService.NotifyProviderBlacklisted(platform, providerID, providerName, newLevel, duration)
 		}
 
 	} else {
 		// 未达到阈值，仅更新失败计数和窗口起始时间
 		err = GlobalDBQueue.Exec(`
-			UPDATE provider_blacklist
-			SET failure_count = ?, last_failure_at = ?, last_failure_window_start = ?
-			WHERE id = ?
-		`, failureCount, now, now, id)
+				UPDATE provider_blacklist
+				SET failure_count = ?, provider_name = ?, last_failure_at = ?, last_failure_window_start = ?
+				WHERE id = ?
+			`, failureCount, providerName, now, now, id)
 
 		if err != nil {
 			return fmt.Errorf("更新失败计数失败: %w", err)
@@ -331,7 +470,13 @@ func (bs *BlacklistService) RecordFailure(platform string, providerName string) 
 }
 
 // recordFailureFixedMode 固定拉黑模式（向后兼容）
-func (bs *BlacklistService) recordFailureFixedMode(platform string, providerName string, fallbackMode string, fallbackDuration int, failureThreshold int) error {
+func (bs *BlacklistService) recordFailureFixedMode(platform string, providerName string, fallbackMode string, fallbackDurationSeconds int, failureThreshold int) error {
+	providerID, resolvedName := normalizeBlacklistIdentity(providerName, providerName)
+	bs.bindProviderIdentity(platform, providerID, resolvedName)
+	return bs.recordFailureFixedModeByIdentity(platform, providerID, resolvedName, fallbackMode, fallbackDurationSeconds, failureThreshold)
+}
+
+func (bs *BlacklistService) recordFailureFixedModeByIdentity(platform, providerID, providerName string, fallbackMode string, fallbackDurationSeconds int, failureThreshold int) error {
 	if fallbackMode == "none" {
 		log.Printf("🚫 Provider %s/%s 失败，但等级拉黑已关闭且 fallbackMode=none，不拉黑", platform, providerName)
 		return nil
@@ -353,16 +498,16 @@ func (bs *BlacklistService) recordFailureFixedMode(platform string, providerName
 	err = db.QueryRow(`
 		SELECT id, failure_count, blacklisted_until
 		FROM provider_blacklist
-		WHERE platform = ? AND provider_name = ?
-	`, platform, providerName).Scan(&id, &failureCount, &blacklistedUntil)
+		WHERE platform = ? AND provider_id = ?
+	`, platform, providerID).Scan(&id, &failureCount, &blacklistedUntil)
 
 	if err == sql.ErrNoRows {
 		// 首次失败，插入新记录
 		err = GlobalDBQueue.Exec(`
 			INSERT INTO provider_blacklist
-				(platform, provider_name, failure_count, last_failure_at)
-			VALUES (?, ?, 1, ?)
-		`, platform, providerName, now)
+				(platform, provider_id, provider_name, failure_count, last_failure_at)
+			VALUES (?, ?, ?, 1, ?)
+		`, platform, providerID, providerName, now)
 
 		if err != nil {
 			return fmt.Errorf("插入失败记录失败: %w", err)
@@ -386,32 +531,38 @@ func (bs *BlacklistService) recordFailureFixedMode(platform string, providerName
 	// 检查是否达到拉黑阈值
 	if failureCount >= failureThreshold {
 		blacklistedAt := now
-		blacklistedUntil := now.Add(time.Duration(fallbackDuration) * time.Minute)
+		blacklistedUntil := now.Add(time.Duration(fallbackDurationSeconds) * time.Second)
 
 		err = GlobalDBQueue.Exec(`
 			UPDATE provider_blacklist
 			SET failure_count = ?,
+				provider_name = ?,
 				last_failure_at = ?,
 				blacklisted_at = ?,
 				blacklisted_until = ?,
 				auto_recovered = 0
 			WHERE id = ?
-		`, failureCount, now, blacklistedAt, blacklistedUntil, id)
+		`, failureCount, providerName, now, blacklistedAt, blacklistedUntil, id)
 
 		if err != nil {
 			return fmt.Errorf("更新拉黑状态失败: %w", err)
 		}
 
-		log.Printf("⛔ Provider %s/%s 已拉黑 %d 分钟（固定模式，失败 %d 次），过期时间: %s",
-			platform, providerName, fallbackDuration, failureCount, blacklistedUntil.Format("15:04:05"))
+		if fallbackDurationSeconds < 60 {
+			log.Printf("⛔ Provider %s/%s 已拉黑 %d 秒（固定模式，失败 %d 次），过期时间: %s",
+				platform, providerName, fallbackDurationSeconds, failureCount, blacklistedUntil.Format("15:04:05"))
+		} else {
+			log.Printf("⛔ Provider %s/%s 已拉黑 %d 分钟（固定模式，失败 %d 次），过期时间: %s",
+				platform, providerName, (fallbackDurationSeconds+59)/60, failureCount, blacklistedUntil.Format("15:04:05"))
+		}
 
 	} else {
 		// 更新失败计数
 		err = GlobalDBQueue.Exec(`
 			UPDATE provider_blacklist
-			SET failure_count = ?, last_failure_at = ?
+			SET failure_count = ?, provider_name = ?, last_failure_at = ?
 			WHERE id = ?
-		`, failureCount, now, id)
+		`, failureCount, providerName, now, id)
 
 		if err != nil {
 			return fmt.Errorf("更新失败计数失败: %w", err)
@@ -443,45 +594,18 @@ func (bs *BlacklistService) getLevelDuration(level int, config *BlacklistLevelCo
 
 // IsBlacklisted 检查 provider 是否在黑名单中
 func (bs *BlacklistService) IsBlacklisted(platform string, providerName string) (bool, *time.Time) {
-	// 如果拉黑功能已关闭，始终返回未拉黑
-	if !bs.settingsService.IsBlacklistEnabled() {
-		return false, nil
-	}
-
-	db, err := xdb.DB("default")
-	if err != nil {
-		log.Printf("⚠️  获取数据库连接失败: %v", err)
-		return false, nil
-	}
-
-	var blacklistedUntil sql.NullTime
-
-	// 移除 SQL 时间比较，改为 Go 代码判断（修复时区 bug）
-	err = db.QueryRow(`
-		SELECT blacklisted_until
-		FROM provider_blacklist
-		WHERE platform = ? AND provider_name = ? AND blacklisted_until IS NOT NULL
-	`, platform, providerName).Scan(&blacklistedUntil)
-
-	if err == sql.ErrNoRows {
-		return false, nil
-	} else if err != nil {
-		log.Printf("⚠️  查询黑名单状态失败: %v", err)
-		return false, nil
-	}
-
-	if blacklistedUntil.Valid {
-		// 使用 Go 代码比较时间（正确处理时区）
-		if blacklistedUntil.Time.After(time.Now()) {
-			return true, &blacklistedUntil.Time
-		}
-	}
-
-	return false, nil
+	providerID, resolvedName := normalizeBlacklistIdentity(providerName, providerName)
+	return bs.IsBlacklistedByID(platform, providerID, resolvedName)
 }
 
 // ManualUnblockAndReset 手动解除拉黑（保留等级，如需清零请调用 ManualResetLevel）
 func (bs *BlacklistService) ManualUnblockAndReset(platform string, providerName string) error {
+	providerID, resolvedName := normalizeBlacklistIdentity(providerName, providerName)
+	bs.bindProviderIdentity(platform, providerID, resolvedName)
+	return bs.manualUnblockAndResetByIdentity(platform, providerID, resolvedName)
+}
+
+func (bs *BlacklistService) manualUnblockAndResetByIdentity(platform, providerID, providerName string) error {
 	db, err := xdb.DB("default")
 	if err != nil {
 		return fmt.Errorf("获取数据库连接失败: %w", err)
@@ -493,8 +617,8 @@ func (bs *BlacklistService) ManualUnblockAndReset(platform string, providerName 
 	var exists int
 	err = db.QueryRow(`
 		SELECT 1 FROM provider_blacklist
-		WHERE platform = ? AND provider_name = ?
-	`, platform, providerName).Scan(&exists)
+		WHERE platform = ? AND provider_id = ?
+	`, platform, providerID).Scan(&exists)
 
 	if err == sql.ErrNoRows {
 		return fmt.Errorf("provider %s/%s 不在黑名单中", platform, providerName)
@@ -508,11 +632,12 @@ func (bs *BlacklistService) ManualUnblockAndReset(platform string, providerName 
 		SET blacklisted_at = NULL,
 			blacklisted_until = NULL,
 			failure_count = 0,
+			provider_name = ?,
 			last_recovered_at = ?,
 			last_degrade_hour = 0,
 			auto_recovered = 0
-		WHERE platform = ? AND provider_name = ?
-	`, now, platform, providerName)
+		WHERE platform = ? AND provider_id = ?
+	`, providerName, now, platform, providerID)
 
 	if err != nil {
 		return fmt.Errorf("手动解除拉黑失败: %w", err)
@@ -529,6 +654,12 @@ func (bs *BlacklistService) ManualUnblock(platform string, providerName string) 
 
 // ManualResetLevel 手动清零等级（不解除拉黑，仅重置等级）
 func (bs *BlacklistService) ManualResetLevel(platform string, providerName string) error {
+	providerID, resolvedName := normalizeBlacklistIdentity(providerName, providerName)
+	bs.bindProviderIdentity(platform, providerID, resolvedName)
+	return bs.manualResetLevelByIdentity(platform, providerID, resolvedName)
+}
+
+func (bs *BlacklistService) manualResetLevelByIdentity(platform, providerID, providerName string) error {
 	db, err := xdb.DB("default")
 	if err != nil {
 		return fmt.Errorf("获取数据库连接失败: %w", err)
@@ -538,8 +669,8 @@ func (bs *BlacklistService) ManualResetLevel(platform string, providerName strin
 	var exists int
 	err = db.QueryRow(`
 		SELECT 1 FROM provider_blacklist
-		WHERE platform = ? AND provider_name = ?
-	`, platform, providerName).Scan(&exists)
+		WHERE platform = ? AND provider_id = ?
+	`, platform, providerID).Scan(&exists)
 
 	if err == sql.ErrNoRows {
 		return fmt.Errorf("provider %s/%s 不存在", platform, providerName)
@@ -550,9 +681,10 @@ func (bs *BlacklistService) ManualResetLevel(platform string, providerName strin
 	err = GlobalDBQueue.Exec(`
 		UPDATE provider_blacklist
 		SET blacklist_level = 0,
+			provider_name = ?,
 			last_degrade_hour = 0
-		WHERE platform = ? AND provider_name = ?
-	`, platform, providerName)
+		WHERE platform = ? AND provider_id = ?
+	`, providerName, platform, providerID)
 
 	if err != nil {
 		return fmt.Errorf("手动清零等级失败: %w", err)
@@ -572,7 +704,7 @@ func (bs *BlacklistService) AutoRecoverExpired() error {
 
 	// 查询需要恢复的 provider（移除 SQL 时间比较，改为 Go 代码判断）
 	rows, err := db.Query(`
-		SELECT platform, provider_name, blacklisted_until
+		SELECT platform, provider_id, provider_name, blacklisted_until
 		FROM provider_blacklist
 		WHERE blacklisted_until IS NOT NULL
 			AND auto_recovered = 0
@@ -586,17 +718,22 @@ func (bs *BlacklistService) AutoRecoverExpired() error {
 	now := time.Now()
 	type RecoverItem struct {
 		Platform     string
+		ProviderID   string
 		ProviderName string
 	}
 	var toRecover []RecoverItem
 
 	// 收集所有需要恢复的 provider
 	for rows.Next() {
-		var platform, providerName string
+		var platform, providerID, providerName string
 		var blacklistedUntil sql.NullTime
 
-		if err := rows.Scan(&platform, &providerName, &blacklistedUntil); err != nil {
+		if err := rows.Scan(&platform, &providerID, &providerName, &blacklistedUntil); err != nil {
 			log.Printf("⚠️  读取恢复记录失败: %v", err)
+			continue
+		}
+		providerID, providerName = normalizeBlacklistIdentity(providerID, providerName)
+		if providerID == "" {
 			continue
 		}
 
@@ -607,6 +744,7 @@ func (bs *BlacklistService) AutoRecoverExpired() error {
 
 		toRecover = append(toRecover, RecoverItem{
 			Platform:     platform,
+			ProviderID:   providerID,
 			ProviderName: providerName,
 		})
 	}
@@ -626,16 +764,17 @@ func (bs *BlacklistService) AutoRecoverExpired() error {
 			UPDATE provider_blacklist
 			SET auto_recovered = 1,
 				failure_count = 0,
+				provider_name = ?,
 				last_recovered_at = ?,
 				last_degrade_hour = 0
-			WHERE platform = ? AND provider_name = ?
-		`, now, item.Platform, item.ProviderName)
+			WHERE platform = ? AND provider_id = ?
+		`, item.ProviderName, now, item.Platform, item.ProviderID)
 
 		if err != nil {
-			failed = append(failed, fmt.Sprintf("%s/%s", item.Platform, item.ProviderName))
-			log.Printf("⚠️  标记恢复状态失败: %s/%s - %v", item.Platform, item.ProviderName, err)
+			failed = append(failed, fmt.Sprintf("%s/%s", item.Platform, item.ProviderID))
+			log.Printf("⚠️  标记恢复状态失败: %s/%s - %v", item.Platform, item.ProviderID, err)
 		} else {
-			recovered = append(recovered, fmt.Sprintf("%s/%s", item.Platform, item.ProviderName))
+			recovered = append(recovered, fmt.Sprintf("%s/%s", item.Platform, item.ProviderID))
 		}
 	}
 
@@ -666,6 +805,7 @@ func (bs *BlacklistService) GetBlacklistStatus(platform string) ([]BlacklistStat
 	rows, err := db.Query(`
 		SELECT
 			platform,
+			provider_id,
 			provider_name,
 			failure_count,
 			blacklisted_at,
@@ -692,6 +832,7 @@ func (bs *BlacklistService) GetBlacklistStatus(platform string) ([]BlacklistStat
 
 		err := rows.Scan(
 			&s.Platform,
+			&s.ProviderID,
 			&s.ProviderName,
 			&s.FailureCount,
 			&blacklistedAt,
@@ -742,6 +883,49 @@ func (bs *BlacklistService) GetBlacklistStatus(platform string) ([]BlacklistStat
 	return statuses, nil
 }
 
+// ShouldUseFixedMode 返回是否应该使用固定拉黑模式（禁用自动降级）
+// 满足以下所有条件时返回 true：
+// 1. 黑名单总开关已启用
+// 2. 且满足以下任一：
+//   - 等级拉黑开启
+//   - 等级拉黑关闭但 fallbackMode="fixed"
+func (bs *BlacklistService) ShouldUseFixedMode() bool {
+	// 首先检查全局开关
+	if !bs.settingsService.IsBlacklistEnabled() {
+		return false // 全局拉黑关闭 → 始终降级
+	}
+
+	config, err := bs.settingsService.GetBlacklistLevelConfig()
+	if err != nil {
+		// 读取失败：使用默认配置
+		log.Printf("[BlacklistService] 读取配置失败，使用默认值: %v", err)
+		defaultConfig := DefaultBlacklistLevelConfig()
+		return defaultConfig.FallbackMode == "fixed"
+	}
+
+	// 等级拉黑开启 → 固定模式
+	if config.EnableLevelBlacklist {
+		return true
+	}
+
+	// 等级拉黑关闭 → 根据 fallbackMode 决定
+	switch config.FallbackMode {
+	case "fixed":
+		return true
+	case "none":
+		return false
+	default:
+		// 未知值：记录警告并视为 none（保持降级）
+		log.Printf("[BlacklistService] 未知的 fallbackMode: %s，视为 none", config.FallbackMode)
+		return false
+	}
+}
+
+// IsBlacklistEnabled 返回拉黑总开关状态（用于固定拉黑模式判断）
+func (bs *BlacklistService) IsBlacklistEnabled() bool {
+	return bs.settingsService.IsBlacklistEnabled()
+}
+
 // IsLevelBlacklistEnabled 返回等级拉黑功能是否开启
 // 用于 proxyHandler 判断是否启用自动降级
 func (bs *BlacklistService) IsLevelBlacklistEnabled() bool {
@@ -750,4 +934,37 @@ func (bs *BlacklistService) IsLevelBlacklistEnabled() bool {
 		return false // 出错时默认关闭（保持降级行为）
 	}
 	return config.EnableLevelBlacklist
+}
+
+// RetryConfig 重试配置（供 proxyHandler 使用）
+type RetryConfig struct {
+	FailureThreshold    int // 失败阈值（达到后触发拉黑）
+	RetryWaitSeconds    int // 重试等待时间（秒）
+	DedupeWindowSeconds int // 去重窗口（秒）
+}
+
+// GetRetryConfig 获取重试相关配置
+// 用于 proxyHandler 实现同 Provider 重试机制
+func (bs *BlacklistService) GetRetryConfig() *RetryConfig {
+	config, err := bs.settingsService.GetBlacklistLevelConfig()
+	if err != nil {
+		// 【修复】读取配置失败时，也尝试从数据库读取阈值
+		// 确保内层重试次数与实际拉黑阈值一致
+		defaultConfig := DefaultBlacklistLevelConfig()
+		result := &RetryConfig{
+			FailureThreshold:    defaultConfig.FailureThreshold,
+			RetryWaitSeconds:    defaultConfig.RetryWaitSeconds,
+			DedupeWindowSeconds: defaultConfig.DedupeWindowSeconds,
+		}
+		// 尝试从数据库读取阈值
+		if dbThreshold, _, dbErr := bs.settingsService.GetBlacklistSettings(); dbErr == nil && dbThreshold > 0 {
+			result.FailureThreshold = dbThreshold
+		}
+		return result
+	}
+	return &RetryConfig{
+		FailureThreshold:    config.FailureThreshold,
+		RetryWaitSeconds:    config.RetryWaitSeconds,
+		DedupeWindowSeconds: config.DedupeWindowSeconds,
+	}
 }

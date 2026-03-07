@@ -7,7 +7,8 @@
     "dev": "vite",
     "build:dev": "vue-tsc && vite build --minify false --mode development",
     "build": "vue-tsc && vite build --mode production",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:unit": "vitest run"
   },
   "dependencies": {
     "@codemirror/lang-markdown": "^6.5.0",
@@ -16,6 +17,7 @@
     "@codemirror/view": "^6.38.8",
     "@headlessui/vue": "^1.7.23",
     "@lobehub/icons-static-svg": "^1.73.0",
+    "@vuepic/vue-datepicker": "^12.1.0",
     "@wailsio/runtime": "^3.0.0-alpha.72",
     "chart.js": "^4.5.1",
     "codemirror": "^6.0.2",
@@ -31,6 +33,7 @@
     "tailwindcss": "^4.1.17",
     "typescript": "^5.9.3",
     "vite": "^7.2.1",
+    "vitest": "^0.34.6",
     "vue-tsc": "^3.1.3"
   }
 }
