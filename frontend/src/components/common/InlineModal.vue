@@ -1,6 +1,6 @@
 <template>
   <Transition name="modal-fade">
-    <div v-if="open" class="modal-backdrop" role="presentation">
+    <div v-if="open" class="modal-backdrop" :style="backdropStyle" role="presentation">
       <!-- 遮罩层：仅负责视觉，不接收点击（避免 WebView 命中测试/层合成导致误触关闭） -->
       <div class="modal-overlay-noevent" aria-hidden="true"></div>
 
@@ -41,9 +41,11 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch, type CSSProperties } from 'vue'
 import { lockScroll, unlockScroll } from '../../utils/scrollLock'
+import { getModalStackIndex, isTopMostModal, pushModalToTop, removeModalFromStack } from '../../utils/modalStack'
 
 type Variant = 'default' | 'confirm'
-const openedModalStack: string[] = []
+const BASE_MODAL_Z_INDEX = 2000
+const MODAL_STACK_STEP = 20
 
 const props = withDefaults(
   defineProps<{
@@ -61,6 +63,10 @@ const emit = defineEmits<{ (e: 'close'): void }>()
 
 const variantClass = computed(() => (props.variant === 'confirm' ? 'confirm-modal' : ''))
 const titleId = `modal-title-${Math.random().toString(36).slice(2, 9)}`
+const modalId = `inline-modal-${Math.random().toString(36).slice(2, 10)}`
+const backdropStyle = computed<CSSProperties>(() => ({
+  zIndex: BASE_MODAL_Z_INDEX + getModalStackIndex(modalId) * MODAL_STACK_STEP,
+}))
 const panelStyle = computed<CSSProperties | undefined>(() =>
   props.panelWidth ? { width: props.panelWidth } : undefined,
 )
@@ -76,34 +82,16 @@ const bodyStyle = computed<CSSProperties | undefined>(() => {
 
 const panelRef = ref<HTMLElement | null>(null)
 const closeButtonRef = ref<HTMLButtonElement | null>(null)
-const modalId = `inline-modal-${Math.random().toString(36).slice(2, 10)}`
 let lastActiveElement: Element | null = null
 
-const pushModalToTop = () => {
-  const existingIndex = openedModalStack.indexOf(modalId)
-  if (existingIndex !== -1) {
-    openedModalStack.splice(existingIndex, 1)
-  }
-  openedModalStack.push(modalId)
-}
-
-const removeModalFromStack = () => {
-  const existingIndex = openedModalStack.indexOf(modalId)
-  if (existingIndex !== -1) {
-    openedModalStack.splice(existingIndex, 1)
-  }
-}
-
-const isTopMostModal = () => openedModalStack[openedModalStack.length - 1] === modalId
-
 const emitClose = () => {
-  if (!isTopMostModal()) return
+  if (!isTopMostModal(modalId)) return
   emit('close')
 }
 
 // 统一阻断冒泡；只有点到 wrapper 空白处才关闭（等价于 @click.self）
 const onWrapperClick = (event: MouseEvent) => {
-  if (!isTopMostModal()) return
+  if (!isTopMostModal(modalId)) return
   event.stopPropagation()
   if (!props.closeOnBackdrop) return
   if (event.target === event.currentTarget) {
@@ -128,7 +116,7 @@ const getFocusableElements = (): HTMLElement[] => {
 }
 
 const onKeyDown = (e: KeyboardEvent) => {
-  if (!props.open || !isTopMostModal()) return
+  if (!props.open || !isTopMostModal(modalId)) return
 
   if (e.key === 'Escape') {
     e.preventDefault()
@@ -168,14 +156,14 @@ watch(
   () => props.open,
   (open) => {
     if (open) {
-      pushModalToTop()
+      pushModalToTop(modalId)
       lastActiveElement = document.activeElement
       window.addEventListener('keydown', onKeyDown, true)
       lockScroll()
       nextTick(() => closeButtonRef.value?.focus())
     } else {
       window.removeEventListener('keydown', onKeyDown, true)
-      removeModalFromStack()
+      removeModalFromStack(modalId)
       unlockScroll()
       if (lastActiveElement instanceof HTMLElement) {
         try {
@@ -192,7 +180,7 @@ watch(
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeyDown, true)
-  removeModalFromStack()
+  removeModalFromStack(modalId)
   unlockScroll()
 })
 </script>

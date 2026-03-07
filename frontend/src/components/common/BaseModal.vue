@@ -1,6 +1,6 @@
 <template>
   <TransitionRoot as="template" :show="open">
-    <Dialog as="div" class="modal-backdrop" :open="open" @close="$emit('close')">
+    <Dialog as="div" class="modal-backdrop" :style="backdropStyle" :open="open" @close="emitClose">
       <div class="modal-overlay" aria-hidden="true"></div>
       <div class="modal-wrapper">
         <TransitionChild
@@ -15,7 +15,7 @@
           <DialogPanel :class="['modal', variantClass]" :style="panelStyle">
             <header class="modal-header">
               <DialogTitle class="modal-title">{{ title }}</DialogTitle>
-              <button class="ghost-icon" aria-label="Close" @click="$emit('close')">✕</button>
+              <button class="ghost-icon" type="button" aria-label="Close" @click="emitClose">✕</button>
             </header>
             <div
               :class="['modal-body', { 'modal-scrollable': bodyScrollable }]"
@@ -31,10 +31,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, type CSSProperties } from 'vue'
+import { computed, onBeforeUnmount, watch, type CSSProperties } from 'vue'
 import { Dialog, DialogPanel, DialogTitle, TransitionChild, TransitionRoot } from '@headlessui/vue'
+import { getModalStackIndex, isTopMostModal, pushModalToTop, removeModalFromStack } from '../../utils/modalStack'
 
 type Variant = 'default' | 'confirm'
+const BASE_MODAL_Z_INDEX = 2000
+const MODAL_STACK_STEP = 20
 
 const props = withDefaults(
   defineProps<{
@@ -47,9 +50,20 @@ const props = withDefaults(
   { variant: 'default', bodyScrollable: true, panelWidth: '' },
 )
 
-defineEmits<{ (e: 'close'): void }>()
+const emit = defineEmits<{ (e: 'close'): void }>()
+const modalId = `base-modal-${Math.random().toString(36).slice(2, 10)}`
+
+const modalStackIndex = computed(() => getModalStackIndex(modalId))
+
+const emitClose = () => {
+  if (!isTopMostModal(modalId)) return
+  emit('close')
+}
 
 const variantClass = computed(() => (props.variant === 'confirm' ? 'confirm-modal' : ''))
+const backdropStyle = computed<CSSProperties>(() => ({
+  zIndex: BASE_MODAL_Z_INDEX + modalStackIndex.value * MODAL_STACK_STEP,
+}))
 const panelStyle = computed<CSSProperties | undefined>(() => {
   if (!props.panelWidth) return undefined
   return { width: props.panelWidth }
@@ -62,5 +76,21 @@ const bodyStyle = computed<CSSProperties | undefined>(() => {
     minHeight: '0',
     flex: '1 1 auto',
   }
+})
+
+watch(
+  () => props.open,
+  (open) => {
+    if (open) {
+      pushModalToTop(modalId)
+      return
+    }
+    removeModalFromStack(modalId)
+  },
+  { immediate: true },
+)
+
+onBeforeUnmount(() => {
+  removeModalFromStack(modalId)
 })
 </script>
