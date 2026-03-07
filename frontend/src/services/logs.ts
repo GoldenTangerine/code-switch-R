@@ -49,6 +49,7 @@ type RequestLogQuery = {
   platform?: LogPlatform | ''
   provider?: string
   limit?: number
+  offset?: number
   startAt?: string
   endAt?: string
 }
@@ -60,6 +61,23 @@ export const fetchRequestLogs = async (query: RequestLogQuery = {}): Promise<Req
   const startAt = query.startAt ?? ''
   const endAt = query.endAt ?? ''
   return Call.ByName('codeswitch/services.LogService.ListRequestLogsV2', platform, provider, limit, startAt, endAt)
+}
+
+export type RequestLogPageResult = {
+  items: RequestLog[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export const fetchRequestLogsPage = async (query: RequestLogQuery = {}): Promise<RequestLogPageResult> => {
+  const platform = query.platform ?? ''
+  const provider = query.provider ?? ''
+  const limit = query.limit ?? 100
+  const offset = query.offset ?? 0
+  const startAt = query.startAt ?? ''
+  const endAt = query.endAt ?? ''
+  return Call.ByName('codeswitch/services.LogService.ListRequestLogsPageV2', platform, provider, limit, offset, startAt, endAt)
 }
 
 export type RequestLogPayloadDetail = {

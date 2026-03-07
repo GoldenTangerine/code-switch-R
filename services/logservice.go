@@ -94,6 +94,22 @@ type requestLogSelecter interface {
 	Selects(...xdb.Option) ([]xdb.Record, error)
 }
 
+type requestLogCounter interface {
+	Count(...xdb.Option) (int64, error)
+}
+
+type requestLogSelectCounter interface {
+	requestLogSelecter
+	requestLogCounter
+}
+
+type RequestLogPageResult struct {
+	Items  []ReqeustLog `json:"items"`
+	Total  int64        `json:"total"`
+	Limit  int          `json:"limit"`
+	Offset int          `json:"offset"`
+}
+
 type RequestLogPayloadDetail struct {
 	ID                    int64  `json:"id"`
 	RequestBody           string `json:"request_body"`
@@ -196,6 +212,133 @@ func selectRecordsByProviderRef(selecter requestLogSelecter, baseOptions []xdb.O
 		return []xdb.Record{}, nil
 	}
 	return records, err
+}
+
+func countRecordsByProviderRef(counter requestLogCounter, baseOptions []xdb.Option, providerRef string) (int64, error) {
+	if counter == nil {
+		return 0, fmt.Errorf("nil counter")
+	}
+	providerRef = strings.TrimSpace(providerRef)
+	if providerRef == "" {
+		total, err := counter.Count(baseOptions...)
+		if errors.Is(err, xdb.ErrNotFound) {
+			return 0, nil
+		}
+		return total, err
+	}
+
+	byIDOptions := append([]xdb.Option{}, baseOptions...)
+	byIDOptions = append(byIDOptions, xdb.WhereEq("provider_id", providerRef))
+	total, err := counter.Count(byIDOptions...)
+	if err == nil && total > 0 {
+		return total, nil
+	}
+	if err != nil && !errors.Is(err, xdb.ErrNotFound) && !isNoSuchTableErr(err) {
+		return 0, err
+	}
+
+	byNameOptions := append([]xdb.Option{}, baseOptions...)
+	byNameOptions = append(byNameOptions, xdb.WhereEq("provider", providerRef))
+	total, err = counter.Count(byNameOptions...)
+	if errors.Is(err, xdb.ErrNotFound) {
+		return 0, nil
+	}
+	return total, err
+}
+
+func normalizeRequestLogListLimit(limit int) int {
+	if limit <= 0 {
+		return 100
+	}
+	if limit > 1000 {
+		return 1000
+	}
+	return limit
+}
+
+func normalizeRequestLogListOffset(offset int) int {
+	if offset < 0 {
+		return 0
+	}
+	return offset
+}
+
+func buildRequestLogFilterOptions(platform string, startAt string, endAt string) ([]xdb.Option, error) {
+	options := make([]xdb.Option, 0, 3)
+	if platform != "" {
+		options = append(options, xdb.WhereEq("platform", platform))
+	}
+	if strings.TrimSpace(startAt) != "" {
+		parsed, err := parseTimeInput(startAt)
+		if err != nil {
+			return nil, err
+		}
+		options = append(options, xdb.WhereGte("created_at", parsed.UTC().Format(timeLayout)))
+	}
+	if strings.TrimSpace(endAt) != "" {
+		parsed, err := parseTimeInput(endAt)
+		if err != nil {
+			return nil, err
+		}
+		options = append(options, xdb.WhereLt("created_at", parsed.UTC().Format(timeLayout)))
+	}
+	return options, nil
+}
+
+func buildRequestLogList(records []xdb.Record, pricingSnapshot *modelpricing.Service) []ReqeustLog {
+	logs := make([]ReqeustLog, 0, len(records))
+	for _, record := range records {
+		createdAtLocal, _ := parseCreatedAt(record)
+		createdAtValue := record.GetString("created_at")
+		if !createdAtLocal.IsZero() {
+			createdAtValue = createdAtLocal.Format(timeLayout)
+		}
+		logEntry := ReqeustLog{
+			ID:                        record.GetInt64("id"),
+			Platform:                  record.GetString("platform"),
+			Model:                     record.GetString("model"),
+			RequestedModel:            record.GetString("requested_model"),
+			ResponseModel:             record.GetString("response_model"),
+			ProviderID:                record.GetString("provider_id"),
+			Provider:                  record.GetString("provider"),
+			PriceSource:               record.GetString("price_source"),
+			HttpCode:                  record.GetInt("http_code"),
+			InputTokens:               record.GetInt("input_tokens"),
+			OutputTokens:              record.GetInt("output_tokens"),
+			CacheCreateTokens:         record.GetInt("cache_create_tokens"),
+			Ephemeral5mTokens:         record.GetInt("ephemeral_5m_tokens"),
+			Ephemeral1hTokens:         record.GetInt("ephemeral_1h_tokens"),
+			CacheReadTokens:           record.GetInt("cache_read_tokens"),
+			ReasoningTokens:           record.GetInt("reasoning_tokens"),
+			CreatedAt:                 createdAtValue,
+			IsStream:                  record.GetBool("is_stream"),
+			DurationSec:               record.GetFloat64("duration_sec"),
+			FirstTokenSec:             record.GetFloat64("first_token_sec"),
+			InputCost:                 record.GetFloat64("input_cost"),
+			OutputCost:                record.GetFloat64("output_cost"),
+			ReasoningCost:             record.GetFloat64("reasoning_cost"),
+			CacheCreateCost:           record.GetFloat64("cache_create_cost"),
+			CacheReadCost:             record.GetFloat64("cache_read_cost"),
+			Ephemeral5mCost:           record.GetFloat64("ephemeral_5m_cost"),
+			Ephemeral1hCost:           record.GetFloat64("ephemeral_1h_cost"),
+			TotalCost:                 record.GetFloat64("total_cost"),
+			HasPricing:                record.GetBool("has_pricing"),
+			MatchedPricingModel:       record.GetString("matched_pricing_model"),
+			ProviderPricingAvailable:  record.GetBool("provider_pricing_available"),
+			ProviderQuotaType:         record.GetInt("provider_quota_type"),
+			ProviderInputUSDPerM:      record.GetFloat64("provider_input_usd_per_m"),
+			ProviderOutputUSDPerM:     record.GetFloat64("provider_output_usd_per_m"),
+			ProviderPerCallUnified:    record.GetFloat64("provider_per_call_unified"),
+			ProviderPerCallInput:      record.GetFloat64("provider_per_call_input"),
+			ProviderPerCallOutput:     record.GetFloat64("provider_per_call_output"),
+			ProviderPerCallUnifiedSet: record.GetBool("provider_per_call_unified_set"),
+			ProviderPerCallInputSet:   record.GetBool("provider_per_call_input_set"),
+			ProviderPerCallOutputSet:  record.GetBool("provider_per_call_output_set"),
+		}
+		applyLogPricing(pricingSnapshot, &logEntry)
+		logs = append(logs, logEntry)
+	}
+	return logs
 }
 
 func normalizedProviderDisplayName(providerName string) string {
@@ -332,94 +475,67 @@ func (ls *LogService) ListRequestLogs(platform string, provider string, limit in
 }
 
 func (ls *LogService) ListRequestLogsV2(platform string, provider string, limit int, startAt string, endAt string) ([]ReqeustLog, error) {
-	if limit <= 0 {
-		limit = 100
-	}
-	if limit > 1000 {
-		limit = 1000
-	}
+	limit = normalizeRequestLogListLimit(limit)
 	model := xdb.New("request_log")
-	options := []xdb.Option{
+	filterOptions, err := buildRequestLogFilterOptions(platform, startAt, endAt)
+	if err != nil {
+		return nil, err
+	}
+	options := append([]xdb.Option{
 		xdb.Field(requestLogListSelectFields...),
 		xdb.OrderByDesc("created_at"),
 		xdb.OrderByDesc("id"),
 		xdb.Limit(limit),
-	}
-	if platform != "" {
-		options = append(options, xdb.WhereEq("platform", platform))
-	}
-	if strings.TrimSpace(startAt) != "" {
-		parsed, err := parseTimeInput(startAt)
-		if err != nil {
-			return nil, err
-		}
-		options = append(options, xdb.WhereGte("created_at", parsed.UTC().Format(timeLayout)))
-	}
-	if strings.TrimSpace(endAt) != "" {
-		parsed, err := parseTimeInput(endAt)
-		if err != nil {
-			return nil, err
-		}
-		options = append(options, xdb.WhereLt("created_at", parsed.UTC().Format(timeLayout)))
-	}
+	}, filterOptions...)
 	records, err := selectRecordsByProviderRef(model, options, provider)
 	if err != nil {
 		return nil, err
 	}
 	pricingSnapshot := ls.resolvePricingSnapshot()
-	logs := make([]ReqeustLog, 0, len(records))
-	for _, record := range records {
-		createdAtLocal, _ := parseCreatedAt(record)
-		createdAtValue := record.GetString("created_at")
-		if !createdAtLocal.IsZero() {
-			createdAtValue = createdAtLocal.Format(timeLayout)
-		}
-		logEntry := ReqeustLog{
-			ID:                        record.GetInt64("id"),
-			Platform:                  record.GetString("platform"),
-			Model:                     record.GetString("model"),
-			RequestedModel:            record.GetString("requested_model"),
-			ResponseModel:             record.GetString("response_model"),
-			ProviderID:                record.GetString("provider_id"),
-			Provider:                  record.GetString("provider"),
-			PriceSource:               record.GetString("price_source"),
-			HttpCode:                  record.GetInt("http_code"),
-			InputTokens:               record.GetInt("input_tokens"),
-			OutputTokens:              record.GetInt("output_tokens"),
-			CacheCreateTokens:         record.GetInt("cache_create_tokens"),
-			Ephemeral5mTokens:         record.GetInt("ephemeral_5m_tokens"),
-			Ephemeral1hTokens:         record.GetInt("ephemeral_1h_tokens"),
-			CacheReadTokens:           record.GetInt("cache_read_tokens"),
-			ReasoningTokens:           record.GetInt("reasoning_tokens"),
-			CreatedAt:                 createdAtValue,
-			IsStream:                  record.GetBool("is_stream"),
-			DurationSec:               record.GetFloat64("duration_sec"),
-			FirstTokenSec:             record.GetFloat64("first_token_sec"),
-			InputCost:                 record.GetFloat64("input_cost"),
-			OutputCost:                record.GetFloat64("output_cost"),
-			ReasoningCost:             record.GetFloat64("reasoning_cost"),
-			CacheCreateCost:           record.GetFloat64("cache_create_cost"),
-			CacheReadCost:             record.GetFloat64("cache_read_cost"),
-			Ephemeral5mCost:           record.GetFloat64("ephemeral_5m_cost"),
-			Ephemeral1hCost:           record.GetFloat64("ephemeral_1h_cost"),
-			TotalCost:                 record.GetFloat64("total_cost"),
-			HasPricing:                record.GetBool("has_pricing"),
-			MatchedPricingModel:       record.GetString("matched_pricing_model"),
-			ProviderPricingAvailable:  record.GetBool("provider_pricing_available"),
-			ProviderQuotaType:         record.GetInt("provider_quota_type"),
-			ProviderInputUSDPerM:      record.GetFloat64("provider_input_usd_per_m"),
-			ProviderOutputUSDPerM:     record.GetFloat64("provider_output_usd_per_m"),
-			ProviderPerCallUnified:    record.GetFloat64("provider_per_call_unified"),
-			ProviderPerCallInput:      record.GetFloat64("provider_per_call_input"),
-			ProviderPerCallOutput:     record.GetFloat64("provider_per_call_output"),
-			ProviderPerCallUnifiedSet: record.GetBool("provider_per_call_unified_set"),
-			ProviderPerCallInputSet:   record.GetBool("provider_per_call_input_set"),
-			ProviderPerCallOutputSet:  record.GetBool("provider_per_call_output_set"),
-		}
-		applyLogPricing(pricingSnapshot, &logEntry)
-		logs = append(logs, logEntry)
+	return buildRequestLogList(records, pricingSnapshot), nil
+}
+
+func (ls *LogService) ListRequestLogsPageV2(platform string, provider string, limit int, offset int, startAt string, endAt string) (RequestLogPageResult, error) {
+	result := RequestLogPageResult{
+		Items:  []ReqeustLog{},
+		Limit:  normalizeRequestLogListLimit(limit),
+		Offset: normalizeRequestLogListOffset(offset),
 	}
-	return logs, nil
+
+	model := xdb.New("request_log")
+	filterOptions, err := buildRequestLogFilterOptions(platform, startAt, endAt)
+	if err != nil {
+		return result, err
+	}
+
+	total, err := countRecordsByProviderRef(model, filterOptions, provider)
+	if err != nil {
+		if isNoSuchTableErr(err) {
+			return result, nil
+		}
+		return result, err
+	}
+	result.Total = total
+	if total == 0 {
+		return result, nil
+	}
+
+	selectOptions := append([]xdb.Option{
+		xdb.Field(requestLogListSelectFields...),
+		xdb.OrderByDesc("created_at"),
+		xdb.OrderByDesc("id"),
+		xdb.Limit(result.Limit),
+		xdb.Offset(result.Offset),
+	}, filterOptions...)
+	records, err := selectRecordsByProviderRef(model, selectOptions, provider)
+	if err != nil {
+		if isNoSuchTableErr(err) {
+			return result, nil
+		}
+		return result, err
+	}
+	result.Items = buildRequestLogList(records, ls.resolvePricingSnapshot())
+	return result, nil
 }
 
 func (ls *LogService) resolvePricingSnapshot() *modelpricing.Service {

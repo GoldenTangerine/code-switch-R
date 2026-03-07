@@ -420,7 +420,7 @@
         <BaseModal
           :open="storageModal.open"
           :title="t('components.logs.storage.title')"
-          :panel-width="'min(1100px, 96vw)'"
+          :panel-width="'min(1320px, 98vw)'"
           @close="closeStorageModal"
         >
           <div class="logs-storage-modal logs-storage-modal--wide">
@@ -521,61 +521,204 @@
                 <span>{{ t('components.main.heatmap.legendHigh') }}</span>
               </div>
 
-              <div class="contrib-grid">
-                <div
-                  v-for="(week, weekIndex) in storageHeatmap"
-                  :key="`storage-week-${weekIndex}`"
-                  class="contrib-column"
-                >
-                  <button
-                    v-for="(day, dayIndex) in week"
-                    :key="`storage-day-${weekIndex}-${dayIndex}`"
-                    type="button"
-                    :class="[
-                      'contrib-cell',
-                      'logs-storage-heatmap-cell',
-                      intensityClass(day.intensity),
-                      {
-                        'logs-storage-heatmap-cell--interactive': day.requests > 0,
-                        'logs-storage-heatmap-cell--selected': isSelectedStorageHeatmapDay(day),
-                      },
-                    ]"
-                    :aria-label="formatStorageHeatmapAriaLabel(day)"
-                    :aria-pressed="isSelectedStorageHeatmapDay(day)"
-                    :disabled="day.requests <= 0"
-                    :title="formatStorageHeatmapTitle(day)"
-                    @click="selectStorageHeatmapDay(day)"
-                  />
+              <div class="logs-storage-heatmap-grid-shell">
+                <div class="contrib-grid logs-storage-heatmap-grid">
+                  <div
+                    v-for="(week, weekIndex) in storageHeatmap"
+                    :key="`storage-week-${weekIndex}`"
+                    class="contrib-column"
+                  >
+                    <component
+                      :is="day.requests > 0 ? 'button' : 'span'"
+                      v-for="(day, dayIndex) in week"
+                      :key="`storage-day-${weekIndex}-${dayIndex}`"
+                      :class="[
+                        'contrib-cell',
+                        'logs-storage-heatmap-cell',
+                        intensityClass(day.intensity),
+                        {
+                          'logs-storage-heatmap-cell--interactive': day.requests > 0,
+                          'logs-storage-heatmap-cell--selected': isSelectedStorageHeatmapDay(day),
+                        },
+                      ]"
+                      :type="day.requests > 0 ? 'button' : undefined"
+                      :role="day.requests > 0 ? undefined : 'img'"
+                      :aria-label="formatStorageHeatmapAriaLabel(day)"
+                      :aria-pressed="day.requests > 0 ? isSelectedStorageHeatmapDay(day) : undefined"
+                      :tabindex="day.requests > 0 ? 0 : undefined"
+                      @mouseenter="showStorageHeatmapTooltip(day, $event)"
+                      @mousemove="showStorageHeatmapTooltip(day, $event)"
+                      @mouseleave="hideStorageHeatmapTooltip"
+                      @focus="day.requests > 0 ? showStorageHeatmapTooltip(day, $event) : undefined"
+                      @blur="day.requests > 0 ? hideStorageHeatmapTooltip() : undefined"
+                      @keydown.esc="day.requests > 0 ? hideStorageHeatmapTooltip() : undefined"
+                      @click="day.requests > 0 ? selectStorageHeatmapDay(day) : undefined"
+                    />
+                  </div>
                 </div>
               </div>
 
               <div class="mac-panel logs-storage-heatmap-detail">
                 <template v-if="selectedStorageHeatmapDay">
-                  <div class="logs-storage-heatmap-detail__summary">
-                    <div class="logs-storage-heatmap-detail__eyebrow">
-                      {{ t('components.logs.storage.selectedDate') }}
+                  <div class="logs-storage-heatmap-detail__header">
+                    <div class="logs-storage-heatmap-detail__summary">
+                      <div class="logs-storage-heatmap-detail__eyebrow">
+                        {{ t('components.logs.storage.selectedDate') }}
+                      </div>
+                      <div class="logs-storage-heatmap-detail__date">{{ selectedStorageHeatmapDateLabel }}</div>
+                      <div class="logs-storage-heatmap-detail__meta-wrap">
+                        <span class="logs-storage-heatmap-detail__meta">
+                          {{ t('components.logs.storage.rows', { count: selectedStorageHeatmapDay.requests }) }}
+                        </span>
+                        <span v-if="storageDayLogsShowingText" class="logs-storage-heatmap-detail__meta">
+                          {{ storageDayLogsShowingText }}
+                        </span>
+                      </div>
                     </div>
-                    <div class="logs-storage-heatmap-detail__date">{{ selectedStorageHeatmapDateLabel }}</div>
-                    <div class="logs-storage-heatmap-detail__meta">
-                      {{ t('components.logs.storage.rows', { count: selectedStorageHeatmapDay.requests }) }}
-                    </div>
+                    <BaseButton
+                      variant="danger"
+                      size="sm"
+                      :disabled="storageClearing"
+                      @click="handleClearRequestLogsByDate"
+                    >
+                      {{ storageClearing ? t('components.logs.storage.clearing') : t('components.logs.storage.clearByDate') }}
+                    </BaseButton>
                   </div>
-                  <BaseButton
-                    variant="danger"
-                    size="sm"
-                    :disabled="storageClearing"
-                    @click="handleClearRequestLogsByDate"
-                  >
-                    {{ storageClearing ? t('components.logs.storage.clearing') : t('components.logs.storage.clearByDate') }}
-                  </BaseButton>
+                  <p class="logs-storage-heatmap-detail__hint">
+                    {{ t('components.logs.storage.dayLogsHint') }}
+                  </p>
+
+                  <p v-if="storageDayLogsLoading" class="logs-storage-day-list__state">
+                    {{ t('components.logs.loading') }}
+                  </p>
+                  <p v-else-if="!storageDayLogs.length" class="logs-storage-day-list__state">
+                    {{ t('components.logs.storage.dayLogsEmpty', { date: selectedStorageHeatmapDateLabel }) }}
+                  </p>
+                  <template v-else>
+                    <div class="logs-storage-day-list">
+                      <article
+                        v-for="item in pagedStorageDayLogs"
+                        :key="`storage-day-log-${item.id}`"
+                        class="logs-storage-day-item"
+                      >
+                        <div class="logs-storage-day-item__top">
+                          <span class="logs-storage-day-item__time">{{ formatTime(item.created_at) }}</span>
+                          <button
+                            type="button"
+                            class="logs-storage-day-item__detail-btn"
+                            @click="openPayloadDetailModal(item)"
+                          >
+                            {{ t('components.logs.payloadDetail.openButton') }}
+                          </button>
+                        </div>
+
+                        <div class="logs-storage-day-item__main">
+                          <div class="logs-storage-day-item__provider">{{ item.provider || '—' }}</div>
+                          <div class="logs-storage-day-item__model">{{ item.model || '—' }}</div>
+                        </div>
+
+                        <div class="logs-storage-day-item__meta">
+                          <span class="logs-storage-day-item__badge logs-storage-day-item__badge--platform">
+                            {{ item.platform || '—' }}
+                          </span>
+                          <span
+                            :class="[
+                              'logs-storage-day-item__badge',
+                              'logs-storage-day-item__badge--code',
+                              httpCodeClass(item.http_code),
+                            ]"
+                          >
+                            HTTP {{ item.http_code }}
+                          </span>
+                          <span :class="['stream-tag', item.is_stream ? 'on' : 'off']">
+                            {{ formatStream(item.is_stream) }}
+                          </span>
+                          <span :class="['duration-tag', durationColor(item.duration_sec)]">
+                            {{ formatDuration(item.duration_sec) }}
+                          </span>
+                        </div>
+
+                        <div class="logs-storage-day-item__stats">
+                          <div class="logs-storage-day-item__stat">
+                            <span class="logs-storage-day-item__stat-label">{{ t('components.logs.table.tokens') }}</span>
+                            <span class="logs-storage-day-item__stat-value">{{ formatTokenNumber(resolveStorageDayLogTotalTokens(item)) }}</span>
+                          </div>
+                          <div class="logs-storage-day-item__stat">
+                            <span class="logs-storage-day-item__stat-label">{{ t('components.logs.table.cost') }}</span>
+                            <span class="logs-storage-day-item__stat-value logs-storage-day-item__stat-value--success">{{ formatCurrency(item.total_cost) }}</span>
+                          </div>
+                        </div>
+                      </article>
+                    </div>
+
+                    <div
+                      v-if="storageDayLogsTotalPages > 1"
+                      class="logs-storage-day-pagination"
+                    >
+                      <span>{{ storageDayLogsPage }} / {{ storageDayLogsTotalPages }}</span>
+                      <div class="pagination-actions">
+                        <BaseButton
+                          variant="outline"
+                          size="sm"
+                          :disabled="storageDayLogsPage === 1 || storageDayLogsLoading"
+                          @click="prevStorageDayLogsPage"
+                        >
+                          ‹
+                        </BaseButton>
+                        <BaseButton
+                          variant="outline"
+                          size="sm"
+                          :disabled="storageDayLogsPage >= storageDayLogsTotalPages || storageDayLogsLoading"
+                          @click="nextStorageDayLogsPage"
+                        >
+                          ›
+                        </BaseButton>
+                      </div>
+                    </div>
+                  </template>
                 </template>
                 <p v-else class="logs-storage-heatmap-detail__empty">
-                  {{ t('components.logs.storage.selectedDateEmpty') }}
+                  {{ storageHeatmapHasData
+                    ? t('components.logs.storage.dayLogsPlaceholder')
+                    : t('components.logs.storage.selectedDateEmpty') }}
                 </p>
               </div>
             </section>
           </div>
         </BaseModal>
+
+        <Teleport to="body">
+          <div
+            v-if="storageHeatmapTooltip.visible"
+            ref="storageHeatmapTooltipRef"
+            class="contrib-tooltip logs-storage-heatmap-tooltip"
+            :class="[
+              storageHeatmapTooltip.placement,
+              { 'is-positioned': storageHeatmapTooltip.positioned },
+            ]"
+            :style="{ left: `${storageHeatmapTooltip.left}px`, top: `${storageHeatmapTooltip.top}px` }"
+            role="tooltip"
+          >
+            <p class="tooltip-heading">{{ storageHeatmapTooltip.label }}</p>
+            <div class="tooltip-summary-grid logs-storage-heatmap-tooltip__summary-grid">
+              <div class="tooltip-summary-card is-info">
+                <span class="tooltip-summary-label">{{ t('components.logs.storage.heatmapTooltipRequests') }}</span>
+                <span class="tooltip-summary-value">
+                  {{ t('components.logs.storage.rows', { count: storageHeatmapTooltip.requests }) }}
+                </span>
+              </div>
+              <div class="tooltip-summary-card" :class="storageHeatmapTooltip.intensity > 0 ? 'is-success' : 'is-neutral'">
+                <span class="tooltip-summary-label">{{ t('components.logs.storage.heatmapTooltipLevel') }}</span>
+                <span class="tooltip-summary-value">L{{ storageHeatmapTooltip.intensity }}</span>
+              </div>
+            </div>
+            <p class="logs-storage-heatmap-tooltip__hint">
+              {{ storageHeatmapTooltip.requests > 0
+                ? t('components.logs.storage.heatmapHoverHint')
+                : t('components.logs.storage.heatmapZeroHint') }}
+            </p>
+          </div>
+        </Teleport>
 
         <!-- 金额明细弹窗 -->
         <BaseModal
@@ -752,6 +895,7 @@ import { DEFAULT_HEATMAP_DISPLAY_SETTINGS, type HeatmapDisplaySettings } from '.
 import { type HeatmapGranularity, type UsageHeatmapDay } from '../../data/usageHeatmap'
 import {
   fetchRequestLogs,
+  fetchRequestLogsPage,
   fetchRequestLogPayload,
   fetchRequestLogDailyHeatmapStats,
   fetchLogProviderRefs,
@@ -897,6 +1041,7 @@ const providerConfigCache = new Map<string, { loadedAt: number; options: LogProv
 const statsSeries = computed<LogStatsSeries[]>(() => stats.value?.series ?? [])
 
 type CostTooltipPlacement = 'above' | 'below'
+type StorageHeatmapTooltipPlacement = 'above' | 'below'
 
 type LogInfoTooltipTone = 'muted' | 'source-provider-api' | 'source-builtin' | 'source-none'
 type LogInfoTooltipVariant = 'model' | 'verify'
@@ -1015,6 +1160,10 @@ const LOG_INFO_TOOLTIP_DEFAULT_WIDTH = 340
 const LOG_INFO_TOOLTIP_DEFAULT_HEIGHT = 136
 const LOG_INFO_TOOLTIP_VERTICAL_OFFSET = 10
 const LOG_TOOLTIP_SHOW_DELAY_MS = 100
+const STORAGE_DAY_LOGS_PAGE_SIZE = 20
+const STORAGE_HEATMAP_TOOLTIP_DEFAULT_WIDTH = 320
+const STORAGE_HEATMAP_TOOLTIP_DEFAULT_HEIGHT = 168
+const STORAGE_HEATMAP_TOOLTIP_VERTICAL_OFFSET = 10
 
 const formatBytes = (bytes?: number, rows?: number) => {
   const value = Number(bytes ?? 0)
@@ -1037,6 +1186,35 @@ const toTimeLayout = (date: Date) => {
   const pad = (num: number) => num.toString().padStart(2, '0')
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
 }
+
+const storageDayLogs = ref<RequestLog[]>([])
+const storageDayLogsTotalCount = ref(0)
+const storageDayLogsLoading = ref(false)
+const storageDayLogsPage = ref(1)
+const storageDayLogsRequestId = ref(0)
+const storageHeatmapTooltipRef = ref<HTMLElement | null>(null)
+const storageHeatmapTooltipRequestId = ref(0)
+let storageHeatmapTooltipAnimationFrame = 0
+let storageHeatmapTooltipPendingRect: DOMRect | null = null
+const storageHeatmapTooltip = reactive<{
+  visible: boolean
+  positioned: boolean
+  left: number
+  top: number
+  placement: StorageHeatmapTooltipPlacement
+  label: string
+  requests: number
+  intensity: number
+}>({
+  visible: false,
+  positioned: false,
+  left: 0,
+  top: 0,
+  placement: 'above',
+  label: '',
+  requests: 0,
+  intensity: 0,
+})
 
 const toDateParts = (value: string) => {
   const [y, m, d] = value.split('-').map((item) => Number(item))
@@ -1150,10 +1328,112 @@ const selectedStorageHeatmapDateLabel = computed(() =>
   selectedStorageHeatmapDate.value ? formatStorageHeatmapDateLabel(selectedStorageHeatmapDate.value) : '',
 )
 
-const formatStorageHeatmapTitle = (day: UsageHeatmapDay) => {
-  const key = storageHeatmapDayKey(day)
-  const label = key ? formatStorageHeatmapDateLabel(key) : day.label
-  return `${label} · ${t('components.logs.storage.rows', { count: day.requests })}`
+const storageHeatmapHasData = computed(() => storageHeatmapDays.value.some((day) => day.requests > 0))
+
+const storageDayLogsTotalPages = computed(() => {
+  const total = Math.ceil(storageDayLogsTotalCount.value / STORAGE_DAY_LOGS_PAGE_SIZE)
+  return Math.max(total, 1)
+})
+
+const pagedStorageDayLogs = computed(() => storageDayLogs.value)
+
+const storageDayLogsRangeStart = computed(() =>
+  storageDayLogsTotalCount.value > 0 ? (storageDayLogsPage.value - 1) * STORAGE_DAY_LOGS_PAGE_SIZE + 1 : 0,
+)
+
+const storageDayLogsRangeEnd = computed(() =>
+  storageDayLogsTotalCount.value > 0
+    ? storageDayLogsRangeStart.value + Math.max(storageDayLogs.value.length - 1, 0)
+    : 0,
+)
+
+const storageDayLogsShowingText = computed(() => {
+  const total = storageDayLogsTotalCount.value
+  if (!Number.isFinite(total) || total <= 0 || storageDayLogs.value.length <= 0) return ''
+  return t('components.logs.storage.dayLogsShowingRange', {
+    start: formatNumber(storageDayLogsRangeStart.value),
+    end: formatNumber(storageDayLogsRangeEnd.value),
+    total: formatNumber(total),
+  })
+})
+
+const buildStorageDayRange = (value: string) => {
+  const parts = toDateParts(value)
+  if (!parts) return null
+  const start = new Date(parts.y, parts.m - 1, parts.d, 0, 0, 0, 0)
+  const end = new Date(start.getTime())
+  end.setDate(end.getDate() + 1)
+  return {
+    startAt: toTimeLayout(start),
+    endAt: toTimeLayout(end),
+  }
+}
+
+const resetStorageDayLogs = () => {
+  storageDayLogsRequestId.value += 1
+  storageDayLogsLoading.value = false
+  storageDayLogsPage.value = 1
+  storageDayLogsTotalCount.value = 0
+  storageDayLogs.value = []
+}
+
+const loadSelectedStorageDayLogs = async (page = storageDayLogsPage.value) => {
+  if (!storageModal.open || !selectedStorageHeatmapDate.value) {
+    resetStorageDayLogs()
+    return
+  }
+  const range = buildStorageDayRange(selectedStorageHeatmapDate.value)
+  if (!range) {
+    resetStorageDayLogs()
+    return
+  }
+
+  const requestId = ++storageDayLogsRequestId.value
+  const normalizedPage = Math.max(1, Math.floor(page || 1))
+  storageDayLogsLoading.value = true
+  try {
+    const result = await fetchRequestLogsPage({
+      limit: STORAGE_DAY_LOGS_PAGE_SIZE,
+      offset: (normalizedPage - 1) * STORAGE_DAY_LOGS_PAGE_SIZE,
+      startAt: range.startAt,
+      endAt: range.endAt,
+    })
+    if (requestId !== storageDayLogsRequestId.value) return
+    const total = Math.max(0, Number(result?.total ?? 0))
+    const items = result?.items ?? []
+    const totalPages = Math.max(1, Math.ceil(total / STORAGE_DAY_LOGS_PAGE_SIZE))
+    if (total > 0 && normalizedPage > totalPages) {
+      storageDayLogsPage.value = totalPages
+      storageDayLogsTotalCount.value = total
+      void loadSelectedStorageDayLogs(totalPages)
+      return
+    }
+    storageDayLogsPage.value = normalizedPage
+    storageDayLogsTotalCount.value = total
+    storageDayLogs.value = items
+  } catch (error) {
+    if (requestId !== storageDayLogsRequestId.value) return
+    storageDayLogsTotalCount.value = 0
+    storageDayLogs.value = []
+    showToast(
+      t('components.logs.storage.dayLogsLoadFailed', {
+        error: extractErrorMessage(error),
+      }),
+      'warning',
+    )
+  } finally {
+    if (requestId === storageDayLogsRequestId.value) {
+      storageDayLogsLoading.value = false
+    }
+  }
+}
+
+const resolveStorageDayLogTotalTokens = (item: RequestLog) => {
+  const inputTokens = Number(item.input_tokens ?? 0)
+  const outputTokens = Number(item.output_tokens ?? 0)
+  const cacheReadTokens = Number(item.cache_read_tokens ?? 0)
+  const total = inputTokens + outputTokens + cacheReadTokens
+  return Number.isFinite(total) && total > 0 ? total : 0
 }
 
 const formatStorageHeatmapAriaLabel = (day: UsageHeatmapDay) => {
@@ -1167,7 +1447,16 @@ const formatStorageHeatmapAriaLabel = (day: UsageHeatmapDay) => {
 
 const selectStorageHeatmapDay = (day: UsageHeatmapDay) => {
   if (day.requests <= 0) return
-  selectedStorageHeatmapDate.value = storageHeatmapDayKey(day)
+  const nextDate = storageHeatmapDayKey(day)
+  if (!nextDate) return
+  if (nextDate === selectedStorageHeatmapDate.value) {
+    void loadSelectedStorageDayLogs(storageDayLogsPage.value)
+    return
+  }
+  selectedStorageHeatmapDate.value = nextDate
+  storageDayLogsPage.value = 1
+  hideStorageHeatmapTooltip()
+  void loadSelectedStorageDayLogs(1)
 }
 
 const isSelectedStorageHeatmapDay = (day: UsageHeatmapDay) => {
@@ -1182,10 +1471,114 @@ const normalizeStorageHeatmapSelection = () => {
       (day) => day.requests > 0 && storageHeatmapDayKey(day) === selectedStorageHeatmapDate.value,
     )
   ) {
-    return
+    return false
   }
   const nextDay = [...storageHeatmapDays.value].reverse().find((day) => day.requests > 0)
-  selectedStorageHeatmapDate.value = nextDay ? storageHeatmapDayKey(nextDay) : ''
+  const nextDate = nextDay ? storageHeatmapDayKey(nextDay) : ''
+  if (selectedStorageHeatmapDate.value === nextDate) {
+    if (!nextDate) {
+      resetStorageDayLogs()
+    }
+    return false
+  }
+  selectedStorageHeatmapDate.value = nextDate
+  storageDayLogsPage.value = 1
+  hideStorageHeatmapTooltip()
+  void loadSelectedStorageDayLogs(1)
+  return true
+}
+
+const applyStorageHeatmapTooltipMetrics = (day: UsageHeatmapDay) => {
+  const key = storageHeatmapDayKey(day)
+  storageHeatmapTooltip.label = key ? formatStorageHeatmapDateLabel(key) : day.label
+  storageHeatmapTooltip.requests = day.requests
+  storageHeatmapTooltip.intensity = day.intensity
+}
+
+const getStorageHeatmapTooltipSize = () => {
+  const rect = storageHeatmapTooltipRef.value?.getBoundingClientRect()
+  return {
+    width: rect?.width ?? STORAGE_HEATMAP_TOOLTIP_DEFAULT_WIDTH,
+    height: rect?.height ?? STORAGE_HEATMAP_TOOLTIP_DEFAULT_HEIGHT,
+  }
+}
+
+const updateStorageHeatmapTooltipPosition = (anchorRect: DOMRect) => {
+  const { width: tooltipWidth, height: tooltipHeight } = getStorageHeatmapTooltipSize()
+  const { width: viewportWidth, height: viewportHeight } = getViewportSize()
+  const centerX = anchorRect.left + anchorRect.width / 2
+  const minLeft = COST_TOOLTIP_HORIZONTAL_MARGIN + tooltipWidth / 2
+  const maxLeft =
+    viewportWidth > 0 ? viewportWidth - tooltipWidth / 2 - COST_TOOLTIP_HORIZONTAL_MARGIN : centerX
+  storageHeatmapTooltip.left = clampToRange(centerX, minLeft, maxLeft)
+
+  const canShowAbove =
+    anchorRect.top - tooltipHeight - STORAGE_HEATMAP_TOOLTIP_VERTICAL_OFFSET >= COST_TOOLTIP_VERTICAL_MARGIN
+  storageHeatmapTooltip.placement = canShowAbove ? 'above' : 'below'
+  const desiredTop = canShowAbove
+    ? anchorRect.top - tooltipHeight - STORAGE_HEATMAP_TOOLTIP_VERTICAL_OFFSET
+    : anchorRect.bottom + STORAGE_HEATMAP_TOOLTIP_VERTICAL_OFFSET
+  const maxTop =
+    viewportHeight > 0 ? viewportHeight - tooltipHeight - COST_TOOLTIP_VERTICAL_MARGIN : desiredTop
+  storageHeatmapTooltip.top = clampToRange(desiredTop, COST_TOOLTIP_VERTICAL_MARGIN, maxTop)
+}
+
+const cancelStorageHeatmapTooltipAnimation = () => {
+  storageHeatmapTooltipPendingRect = null
+  if (storageHeatmapTooltipAnimationFrame && typeof window !== 'undefined') {
+    window.cancelAnimationFrame(storageHeatmapTooltipAnimationFrame)
+  }
+  storageHeatmapTooltipAnimationFrame = 0
+}
+
+const scheduleStorageHeatmapTooltipPosition = (anchorRect: DOMRect) => {
+  storageHeatmapTooltipPendingRect = anchorRect
+  if (typeof window === 'undefined') {
+    updateStorageHeatmapTooltipPosition(anchorRect)
+    storageHeatmapTooltip.positioned = true
+    return
+  }
+  if (storageHeatmapTooltipAnimationFrame) return
+  storageHeatmapTooltipAnimationFrame = window.requestAnimationFrame(() => {
+    storageHeatmapTooltipAnimationFrame = 0
+    const pendingRect = storageHeatmapTooltipPendingRect
+    storageHeatmapTooltipPendingRect = null
+    if (!storageHeatmapTooltip.visible || !pendingRect) return
+    updateStorageHeatmapTooltipPosition(pendingRect)
+    storageHeatmapTooltip.positioned = true
+  })
+}
+
+const hideStorageHeatmapTooltip = () => {
+  storageHeatmapTooltipRequestId.value += 1
+  cancelStorageHeatmapTooltipAnimation()
+  storageHeatmapTooltip.visible = false
+  storageHeatmapTooltip.positioned = false
+}
+
+const finalizeStorageHeatmapTooltipPosition = async (anchorRect: DOMRect, requestId: number) => {
+  await nextTick()
+  if (!storageHeatmapTooltip.visible || requestId !== storageHeatmapTooltipRequestId.value) return
+  scheduleStorageHeatmapTooltipPosition(anchorRect)
+}
+
+const showStorageHeatmapTooltip = (day: UsageHeatmapDay, event: MouseEvent | FocusEvent) => {
+  const target = event.currentTarget as HTMLElement | null
+  if (!target) return
+  const anchorRect = target.getBoundingClientRect()
+  const isInitialRender = !storageHeatmapTooltip.visible
+  const requestId = ++storageHeatmapTooltipRequestId.value
+  applyStorageHeatmapTooltipMetrics(day)
+
+  if (isInitialRender || !storageHeatmapTooltip.positioned) {
+    storageHeatmapTooltip.visible = true
+    storageHeatmapTooltip.positioned = false
+    void finalizeStorageHeatmapTooltipPosition(anchorRect, requestId)
+    return
+  }
+
+  scheduleStorageHeatmapTooltipPosition(anchorRect)
+  void finalizeStorageHeatmapTooltipPosition(anchorRect, requestId)
 }
 
 watch(
@@ -2045,7 +2438,7 @@ const reloadStorageHeatmapIfReady = async () => {
 }
 
 const refreshStorageOverview = async () => {
-  await Promise.all([loadStorageStats(), reloadStorageHeatmapIfReady()])
+  await Promise.all([loadStorageStats(), reloadStorageHeatmapIfReady(), loadSelectedStorageDayLogs()])
 }
 
 const openStorageModal = async () => {
@@ -2058,6 +2451,9 @@ const closeStorageModal = () => {
   storageModal.open = false
   storageHeatmapReady = false
   selectedStorageHeatmapDate.value = ''
+  resetStorageClearConfirm()
+  hideStorageHeatmapTooltip()
+  resetStorageDayLogs()
   cleanupStorageHeatmap()
 }
 
@@ -2161,6 +2557,7 @@ const confirmStorageClear = async () => {
     }
     showToast(successMessage, successTone)
     await Promise.all([loadStorageStats(), loadDashboard(), reloadStorageHeatmapIfReady()])
+    await loadSelectedStorageDayLogs()
     resetStorageClearConfirm()
   } catch (error) {
     console.error('failed to clear log storage', error)
@@ -2205,6 +2602,18 @@ const nextPage = () => {
 const prevPage = () => {
   if (page.value > 1) {
     page.value -= 1
+  }
+}
+
+const nextStorageDayLogsPage = () => {
+  if (storageDayLogsPage.value < storageDayLogsTotalPages.value) {
+    void loadSelectedStorageDayLogs(storageDayLogsPage.value + 1)
+  }
+}
+
+const prevStorageDayLogsPage = () => {
+  if (storageDayLogsPage.value > 1) {
+    void loadSelectedStorageDayLogs(storageDayLogsPage.value - 1)
   }
 }
 
@@ -3940,6 +4349,7 @@ onMounted(async () => {
 onUnmounted(() => {
   hideLogInfoTooltipImmediately()
   hideCostTooltipImmediately()
+  hideStorageHeatmapTooltip()
   cleanupStorageHeatmap()
   window.removeEventListener('scroll', handleViewportChange, true)
   window.removeEventListener('resize', handleViewportChange)
@@ -4155,13 +4565,34 @@ html.dark .summary-card__sub-value {
   }
 
   .logs-storage-heatmap-header,
-  .logs-storage-heatmap-detail {
+  .logs-storage-heatmap-detail__header {
     flex-direction: column;
     align-items: stretch;
   }
 
   .logs-storage-heatmap-status {
     align-self: flex-start;
+  }
+
+  .logs-storage-day-list {
+    grid-template-columns: 1fr;
+  }
+
+  .logs-storage-day-item__top,
+  .logs-storage-day-item__stats {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .logs-storage-day-pagination {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .logs-storage-heatmap-grid .contrib-column {
+    flex-basis: 12px;
+    min-width: 12px;
+    max-width: 12px;
   }
 
   .logs-model-share {
@@ -4206,14 +4637,14 @@ html.dark .summary-card--clickable:hover {
 }
 
 .logs-storage-modal--wide {
-  gap: 16px;
-  min-height: min(62vh, 760px);
+  gap: 18px;
+  min-height: min(78vh, 920px);
 }
 
 .logs-storage-heatmap-panel {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 18px;
 }
 
 .logs-storage-heatmap-header {
@@ -4244,19 +4675,61 @@ html.dark .summary-card--clickable:hover {
   color: var(--contrib-muted);
 }
 
+.logs-storage-heatmap-grid-shell {
+  border-radius: 18px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.14), rgba(15, 23, 42, 0.04));
+  padding: 14px;
+  overflow: hidden;
+}
+
+.logs-storage-heatmap-grid {
+  justify-content: flex-start;
+  gap: 4px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 4px 2px 8px;
+}
+
+.logs-storage-heatmap-grid .contrib-column {
+  flex: 0 0 14px;
+  min-width: 14px;
+  max-width: 14px;
+}
+
+.logs-storage-heatmap-grid::-webkit-scrollbar {
+  height: 8px;
+}
+
+.logs-storage-heatmap-grid::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.28);
+  border-radius: 999px;
+}
+
 .logs-storage-heatmap-cell {
-  border: none;
+  border: 1px solid rgba(255, 255, 255, 0.04);
   padding: 0;
   appearance: none;
   cursor: default;
+  transition:
+    transform 0.14s ease,
+    box-shadow 0.14s ease,
+    border-color 0.14s ease,
+    opacity 0.14s ease;
 }
 
-.logs-storage-heatmap-cell:disabled {
-  cursor: default;
+.logs-storage-heatmap-cell:hover {
+  transform: translateY(-1px) scale(1.06);
+  box-shadow: 0 0 0 1px rgba(148, 163, 184, 0.22);
 }
 
 .logs-storage-heatmap-cell--interactive {
   cursor: pointer;
+}
+
+.logs-storage-heatmap-cell:not(.logs-storage-heatmap-cell--interactive):hover {
+  transform: none;
+  box-shadow: none;
 }
 
 .logs-storage-heatmap-cell--selected {
@@ -4280,16 +4753,23 @@ html.dark .logs-storage-heatmap-cell--selected {
 
 .logs-storage-heatmap-detail {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 16px;
+  padding: 18px;
+}
+
+.logs-storage-heatmap-detail__header {
+  display: flex;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-  padding: 14px 16px;
 }
 
 .logs-storage-heatmap-detail__summary {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
 
 .logs-storage-heatmap-detail__eyebrow {
@@ -4301,19 +4781,263 @@ html.dark .logs-storage-heatmap-cell--selected {
 }
 
 .logs-storage-heatmap-detail__date {
-  font-size: 1rem;
+  font-size: 1.08rem;
   font-weight: 700;
   color: var(--mac-text);
 }
 
+.logs-storage-heatmap-detail__meta-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .logs-storage-heatmap-detail__meta,
+.logs-storage-heatmap-detail__hint,
 .logs-storage-heatmap-detail__empty {
   font-size: 0.88rem;
   color: var(--mac-text-secondary);
 }
 
+.logs-storage-heatmap-detail__meta {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(148, 163, 184, 0.08);
+}
+
+.logs-storage-heatmap-detail__meta--warning {
+  color: #f59e0b;
+  border-color: rgba(245, 158, 11, 0.24);
+  background: rgba(245, 158, 11, 0.12);
+}
+
+.logs-storage-heatmap-detail__hint {
+  margin: -6px 0 0;
+  line-height: 1.5;
+}
+
 .logs-storage-heatmap-detail__empty {
   margin: 0;
+}
+
+.logs-storage-day-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.logs-storage-day-list__state {
+  margin: 0;
+  padding: 18px;
+  border-radius: 16px;
+  border: 1px dashed rgba(148, 163, 184, 0.22);
+  background: rgba(148, 163, 184, 0.05);
+  color: var(--mac-text-secondary);
+  text-align: center;
+}
+
+.logs-storage-day-item {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(148, 163, 184, 0.04));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  transition:
+    transform 0.16s ease,
+    border-color 0.16s ease,
+    box-shadow 0.16s ease,
+    background 0.16s ease;
+}
+
+.logs-storage-day-item:hover,
+.logs-storage-day-item:focus-within {
+  transform: translateY(-1px);
+  border-color: rgba(96, 165, 250, 0.24);
+  box-shadow:
+    0 12px 24px rgba(15, 23, 42, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(96, 165, 250, 0.05));
+}
+
+.logs-storage-day-item__top,
+.logs-storage-day-item__stats {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.logs-storage-day-item__time {
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: var(--mac-text-secondary);
+}
+
+.logs-storage-day-item__detail-btn {
+  border: 1px solid rgba(96, 165, 250, 0.24);
+  background: rgba(59, 130, 246, 0.08);
+  color: #60a5fa;
+  border-radius: 999px;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.14s ease, border-color 0.14s ease, color 0.14s ease;
+}
+
+.logs-storage-day-item__detail-btn:hover {
+  background: rgba(59, 130, 246, 0.14);
+  border-color: rgba(96, 165, 250, 0.36);
+}
+
+.logs-storage-day-item__detail-btn:focus-visible {
+  outline: 2px solid rgba(96, 165, 250, 0.56);
+  outline-offset: 2px;
+}
+
+.logs-storage-day-item__main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.logs-storage-day-item__provider,
+.logs-storage-day-item__model {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.logs-storage-day-item__provider {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: var(--mac-text);
+}
+
+.logs-storage-day-item__model {
+  font-size: 0.84rem;
+  color: var(--mac-text-secondary);
+}
+
+.logs-storage-day-item__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.logs-storage-day-item__badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(148, 163, 184, 0.08);
+  color: var(--mac-text-secondary);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.logs-storage-day-item__badge--platform {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.logs-storage-day-item__badge--code.http-success {
+  color: #16a34a;
+  border-color: rgba(34, 197, 94, 0.24);
+  background: rgba(34, 197, 94, 0.12);
+}
+
+.logs-storage-day-item__badge--code.http-client-error,
+.logs-storage-day-item__badge--code.http-server-error {
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.24);
+  background: rgba(239, 68, 68, 0.12);
+}
+
+.logs-storage-day-item__badge--code.http-redirect,
+.logs-storage-day-item__badge--code.http-info {
+  color: #f59e0b;
+  border-color: rgba(245, 158, 11, 0.24);
+  background: rgba(245, 158, 11, 0.12);
+}
+
+.logs-storage-day-item__stats {
+  padding-top: 4px;
+  border-top: 1px solid rgba(148, 163, 184, 0.14);
+}
+
+.logs-storage-day-item__stat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.logs-storage-day-item__stat-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--mac-text-secondary);
+}
+
+.logs-storage-day-item__stat-value {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: var(--mac-text);
+}
+
+.logs-storage-day-item__stat-value--success {
+  color: #22c55e;
+}
+
+.logs-storage-day-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 4px;
+}
+
+.logs-storage-heatmap-tooltip__summary-grid {
+  margin-bottom: 10px;
+}
+
+.logs-storage-heatmap-tooltip {
+  z-index: 2105;
+}
+
+.logs-storage-heatmap-tooltip__hint {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: var(--contrib-tooltip-text);
+}
+
+html.dark .logs-storage-day-item {
+  border-color: rgba(148, 163, 184, 0.18);
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.74), rgba(15, 23, 42, 0.5));
+}
+
+html.dark .logs-storage-day-item:hover,
+html.dark .logs-storage-day-item:focus-within {
+  border-color: rgba(96, 165, 250, 0.38);
+  box-shadow:
+    0 14px 28px rgba(2, 6, 23, 0.32),
+    inset 0 1px 0 rgba(148, 163, 184, 0.06);
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.82), rgba(30, 41, 59, 0.7));
+}
+
+html.dark .logs-storage-heatmap-grid-shell {
+  border-color: rgba(148, 163, 184, 0.16);
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.55), rgba(15, 23, 42, 0.3));
 }
 
 /* 弹窗内容 */
