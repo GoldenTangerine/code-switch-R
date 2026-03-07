@@ -529,7 +529,7 @@
                     class="contrib-column"
                   >
                     <component
-                      :is="day.requests > 0 ? 'button' : 'span'"
+                      :is="day.requests > 0 ? 'button' : 'div'"
                       v-for="(day, dayIndex) in week"
                       :key="`storage-day-${weekIndex}-${dayIndex}`"
                       :class="[
@@ -542,8 +542,8 @@
                         },
                       ]"
                       :type="day.requests > 0 ? 'button' : undefined"
-                      :role="day.requests > 0 ? undefined : 'img'"
-                      :aria-label="formatStorageHeatmapAriaLabel(day)"
+                      :aria-hidden="day.requests > 0 ? undefined : true"
+                      :aria-label="day.requests > 0 ? formatStorageHeatmapAriaLabel(day) : undefined"
                       :aria-pressed="day.requests > 0 ? isSelectedStorageHeatmapDay(day) : undefined"
                       :tabindex="day.requests > 0 ? 0 : undefined"
                       @mouseenter="showStorageHeatmapTooltip(day, $event)"
