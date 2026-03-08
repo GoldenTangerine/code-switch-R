@@ -121,12 +121,16 @@
         </div>
       </Teleport>
 
-      <LogsPagination
+      <BasePagination
+        v-if="logs.length > 0"
+        class="logs-pagination-bar"
         :page="page"
         :total-pages="totalPages"
+        :page-size="pageSize"
+        :page-size-options="pageSizeOptions"
         :loading="loading"
-        @prev="prevPage"
-        @next="nextPage"
+        @update:page="setPage"
+        @update:page-size="setPageSize"
       />
 
         <!-- 清理确认弹窗 -->
@@ -166,6 +170,8 @@
           :storage-day-logs="storageDayLogs"
           :paged-storage-day-logs="pagedStorageDayLogs"
           :storage-day-logs-page="storageDayLogsPage"
+          :storage-day-logs-page-size="storageDayLogsPageSize"
+          :storage-day-logs-page-size-options="storageDayLogsPageSizeOptions"
           :storage-day-logs-total-pages="storageDayLogsTotalPages"
           :storage-heatmap-has-data="storageHeatmapHasData"
           :storage-heatmap-tooltip="storageHeatmapTooltip"
@@ -223,10 +229,10 @@ import {
 } from 'chart.js'
 import BaseButton from '../common/BaseButton.vue'
 import BaseModal from '../common/BaseModal.vue'
+import BasePagination from '../common/BasePagination.vue'
 import LogsChartsPanel from './components/LogsChartsPanel.vue'
 import LogsFilterBar from './components/LogsFilterBar.vue'
 import LogsHeaderBar from './components/LogsHeaderBar.vue'
-import LogsPagination from './components/LogsPagination.vue'
 import LogsSummaryCards from './components/LogsSummaryCards.vue'
 import LogsTable from './components/LogsTable.vue'
 import LogsCostDetailModal from './modals/LogsCostDetailModal.vue'
@@ -288,12 +294,14 @@ const {
   modelStats,
   loading,
   page,
+  pageSize,
+  pageSizeOptions,
   providerOptions,
   pagedLogs,
   totalPages,
   loadDashboard,
-  nextPage,
-  prevPage,
+  setPage,
+  setPageSize,
   resetPage,
 } = useLogsPageData({
   filters,
@@ -362,6 +370,8 @@ const {
   storageDayLogs,
   pagedStorageDayLogs,
   storageDayLogsPage,
+  storageDayLogsPageSize,
+  storageDayLogsPageSizeOptions,
   storageDayLogsTotalPages,
   storageHeatmapHasData,
   storageHeatmapTooltip,

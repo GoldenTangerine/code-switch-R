@@ -2,7 +2,7 @@ import { computed, ref, watch } from 'vue'
 import { LoadProviders } from '../../../../bindings/codeswitch/services/providerservice'
 import { GetProviders as GetGeminiProviders } from '../../../../bindings/codeswitch/services/geminiservice'
 import {
-  fetchRequestLogs,
+  fetchRequestLogsPage,
   fetchLogProviderRefs,
   fetchLogStatsV2,
   fetchModelStatsV2,
@@ -24,7 +24,8 @@ type UseLogsPageDataOptions = {
   computeDateRange: () => LogsDateRange | null
 }
 
-const PAGE_SIZE = 15
+const DEFAULT_PAGE_SIZE = 15
+const PAGE_SIZE_OPTIONS = [10, 15, 30, 50]
 const PROVIDER_CONFIG_CACHE_TTL_MS = 60_000
 
 const normalizeProviderName = (value: string) => value.trim()
@@ -116,14 +117,14 @@ export function useLogsPageData(options: UseLogsPageDataOptions) {
   const modelStats = ref<ModelUsageStat[]>([])
   const loading = ref(false)
   const page = ref(1)
+  const pageSize = ref(DEFAULT_PAGE_SIZE)
+  const logsTotalCount = ref(0)
+  const logsRequestId = ref(0)
   const providerOptions = ref<LogProviderOption[]>([])
   const providerConfigCache = new Map<string, { loadedAt: number; options: LogProviderOption[] }>()
 
-  const totalPages = computed(() => Math.max(1, Math.ceil(logs.value.length / PAGE_SIZE)))
-  const pagedLogs = computed(() => {
-    const start = (page.value - 1) * PAGE_SIZE
-    return logs.value.slice(start, start + PAGE_SIZE)
-  })
+  const totalPages = computed(() => Math.max(1, Math.ceil(logsTotalCount.value / pageSize.value)))
+  const pagedLogs = computed(() => logs.value)
 
   const loadProviderNamesFromConfig = async (platform: LogPlatform | ''): Promise<LogProviderOption[]> => {
     const cacheKey = platform
@@ -224,26 +225,47 @@ export function useLogsPageData(options: UseLogsPageDataOptions) {
     ])
   }
 
-  const loadLogs = async () => {
+  const loadLogs = async (targetPage = page.value) => {
     const range = computeDateRange()
     if (range == null) {
       return
     }
+    const requestId = ++logsRequestId.value
+    const normalizedPage = Math.max(1, Math.floor(Number(targetPage) || 1))
+    const limit = pageSize.value
     loading.value = true
     try {
-      const data = await fetchRequestLogs({
+      const result = await fetchRequestLogsPage({
         platform: filters.platform,
         provider: filters.provider,
-        limit: 200,
+        limit,
+        offset: (normalizedPage - 1) * limit,
         startAt: range.startAt,
         endAt: range.endAt,
       })
-      logs.value = data ?? []
-      page.value = Math.min(page.value, totalPages.value)
+      if (requestId !== logsRequestId.value) return
+      const total = Math.max(0, Number(result?.total ?? 0))
+      const items = result?.items ?? []
+      const nextTotalPages = Math.max(1, Math.ceil(total / limit))
+      if (total > 0 && normalizedPage > nextTotalPages) {
+        page.value = nextTotalPages
+        logsTotalCount.value = total
+        void loadLogs(nextTotalPages)
+        return
+      }
+      logsTotalCount.value = total
+      page.value = total > 0 ? normalizedPage : 1
+      logs.value = items
     } catch (error) {
+      if (requestId !== logsRequestId.value) return
+      logs.value = []
+      logsTotalCount.value = 0
+      page.value = 1
       console.error('failed to load request logs', error)
     } finally {
-      loading.value = false
+      if (requestId === logsRequestId.value) {
+        loading.value = false
+      }
     }
   }
 
@@ -289,16 +311,20 @@ export function useLogsPageData(options: UseLogsPageDataOptions) {
     page.value = 1
   }
 
-  const nextPage = () => {
-    if (page.value < totalPages.value) {
-      page.value += 1
-    }
+  const setPage = async (value: number) => {
+    const normalized = Math.max(1, Math.floor(Number(value) || 1))
+    const nextPage = Math.min(normalized, totalPages.value)
+    if (nextPage === page.value) return
+    await loadLogs(nextPage)
   }
 
-  const prevPage = () => {
-    if (page.value > 1) {
-      page.value -= 1
-    }
+  const setPageSize = async (value: number) => {
+    const normalized = Math.max(1, Math.floor(Number(value) || DEFAULT_PAGE_SIZE))
+    const nextPageSize = PAGE_SIZE_OPTIONS.includes(normalized) ? normalized : DEFAULT_PAGE_SIZE
+    if (nextPageSize === pageSize.value) return
+    pageSize.value = nextPageSize
+    page.value = 1
+    await loadLogs(1)
   }
 
   watch(
@@ -317,12 +343,14 @@ export function useLogsPageData(options: UseLogsPageDataOptions) {
     modelStats,
     loading,
     page,
+    pageSize,
+    pageSizeOptions: PAGE_SIZE_OPTIONS,
     providerOptions,
     pagedLogs,
     totalPages,
     loadDashboard,
-    nextPage,
-    prevPage,
+    setPage,
+    setPageSize,
     resetPage,
   }
 }

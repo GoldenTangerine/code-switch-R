@@ -118,6 +118,16 @@
     "save": "Save",
     "saving": "Saving...",
     "cancel": "Cancel",
+    "pagination": {
+      "navigation": "Pagination",
+      "previous": "Previous page",
+      "next": "Next page",
+      "page": "Page {page}",
+      "pageSize": "{size} / page",
+      "jumpPrefix": "Jump to",
+      "jumpSuffix": "page",
+      "jumpPlaceholder": "Page"
+    },
     "close": "Close"
   },
   "prompts": {

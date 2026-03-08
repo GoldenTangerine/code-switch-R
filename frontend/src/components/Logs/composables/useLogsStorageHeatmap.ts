@@ -17,7 +17,8 @@ type UseLogsStorageHeatmapOptions = {
   formatNumber: (value?: number) => string
 }
 
-const STORAGE_DAY_LOGS_PAGE_SIZE = 20
+const STORAGE_DAY_LOGS_PAGE_SIZE = 10
+const STORAGE_DAY_LOGS_PAGE_SIZE_OPTIONS = [10, 20, 50]
 const STORAGE_HEATMAP_TOOLTIP_DEFAULT_WIDTH = 420
 const STORAGE_HEATMAP_TOOLTIP_DEFAULT_HEIGHT = 196
 const STORAGE_HEATMAP_TOOLTIP_VERTICAL_OFFSET = 10
@@ -54,6 +55,7 @@ export function useLogsStorageHeatmap(options: UseLogsStorageHeatmapOptions) {
   const storageDayLogsTotalCount = ref(0)
   const storageDayLogsLoading = ref(false)
   const storageDayLogsPage = ref(1)
+  const storageDayLogsPageSize = ref(STORAGE_DAY_LOGS_PAGE_SIZE)
   const storageDayLogsRequestId = ref(0)
   const storageHeatmapTooltipRef = ref<HTMLElement | null>(null)
   const storageHeatmapTooltipRequestId = ref(0)
@@ -91,6 +93,13 @@ export function useLogsStorageHeatmap(options: UseLogsStorageHeatmapOptions) {
         ? (element as ComponentPublicInstance).$el
         : null)
   }
+
+  const normalizedStorageDayLogsPageSize = computed(() => {
+    const raw = Number(storageDayLogsPageSize.value)
+    if (!Number.isFinite(raw) || raw <= 0) return STORAGE_DAY_LOGS_PAGE_SIZE
+    const normalized = Math.max(1, Math.floor(raw))
+    return STORAGE_DAY_LOGS_PAGE_SIZE_OPTIONS.includes(normalized) ? normalized : STORAGE_DAY_LOGS_PAGE_SIZE
+  })
 
   const storageHeatmapDays = computed(() => storageHeatmap.value.flat())
 
@@ -130,14 +139,14 @@ export function useLogsStorageHeatmap(options: UseLogsStorageHeatmapOptions) {
   const storageHeatmapHasData = computed(() => storageHeatmapDays.value.some((day) => day.requests > 0))
 
   const storageDayLogsTotalPages = computed(() => {
-    const total = Math.ceil(storageDayLogsTotalCount.value / STORAGE_DAY_LOGS_PAGE_SIZE)
+    const total = Math.ceil(storageDayLogsTotalCount.value / normalizedStorageDayLogsPageSize.value)
     return Math.max(total, 1)
   })
 
   const pagedStorageDayLogs = computed(() => storageDayLogs.value)
 
   const storageDayLogsRangeStart = computed(() =>
-    storageDayLogsTotalCount.value > 0 ? (storageDayLogsPage.value - 1) * STORAGE_DAY_LOGS_PAGE_SIZE + 1 : 0,
+    storageDayLogsTotalCount.value > 0 ? (storageDayLogsPage.value - 1) * normalizedStorageDayLogsPageSize.value + 1 : 0,
   )
 
   const storageDayLogsRangeEnd = computed(() =>
@@ -189,18 +198,19 @@ export function useLogsStorageHeatmap(options: UseLogsStorageHeatmapOptions) {
 
     const requestId = ++storageDayLogsRequestId.value
     const normalizedPage = Math.max(1, Math.floor(page || 1))
+    const pageSize = normalizedStorageDayLogsPageSize.value
     storageDayLogsLoading.value = true
     try {
       const result = await fetchRequestLogsPage({
-        limit: STORAGE_DAY_LOGS_PAGE_SIZE,
-        offset: (normalizedPage - 1) * STORAGE_DAY_LOGS_PAGE_SIZE,
+        limit: pageSize,
+        offset: (normalizedPage - 1) * pageSize,
         startAt: range.startAt,
         endAt: range.endAt,
       })
       if (requestId !== storageDayLogsRequestId.value) return
       const total = Math.max(0, Number(result?.total ?? 0))
       const items = result?.items ?? []
-      const totalPages = Math.max(1, Math.ceil(total / STORAGE_DAY_LOGS_PAGE_SIZE))
+      const totalPages = Math.max(1, Math.ceil(total / pageSize))
       if (total > 0 && normalizedPage > totalPages) {
         storageDayLogsPage.value = totalPages
         storageDayLogsTotalCount.value = total
@@ -385,16 +395,30 @@ export function useLogsStorageHeatmap(options: UseLogsStorageHeatmapOptions) {
     void finalizeStorageHeatmapTooltipPosition(anchorRect, requestId)
   }
 
-  const nextStorageDayLogsPage = () => {
-    if (storageDayLogsPage.value < storageDayLogsTotalPages.value) {
-      void loadSelectedStorageDayLogs(storageDayLogsPage.value + 1)
+  const goToStorageDayLogsPage = (page: number) => {
+    const normalizedPage = Math.max(1, Math.floor(Number(page) || 1))
+    if (normalizedPage === storageDayLogsPage.value) {
+      if (!storageDayLogsLoading.value) {
+        void loadSelectedStorageDayLogs(normalizedPage)
+      }
+      return
     }
+    void loadSelectedStorageDayLogs(normalizedPage)
   }
 
-  const prevStorageDayLogsPage = () => {
-    if (storageDayLogsPage.value > 1) {
-      void loadSelectedStorageDayLogs(storageDayLogsPage.value - 1)
+  const updateStorageDayLogsPageSize = (pageSize: number) => {
+    const normalized = Number(pageSize)
+    if (!Number.isFinite(normalized) || normalized <= 0) return
+    const nextPageSize = Math.max(1, Math.floor(normalized))
+    if (!STORAGE_DAY_LOGS_PAGE_SIZE_OPTIONS.includes(nextPageSize)) return
+    if (nextPageSize === normalizedStorageDayLogsPageSize.value) return
+    storageDayLogsPageSize.value = nextPageSize
+    storageDayLogsPage.value = 1
+    if (!unref(storageModalOpen) || !selectedStorageHeatmapDate.value) {
+      resetStorageDayLogs()
+      return
     }
+    void loadSelectedStorageDayLogs(1)
   }
 
   watch(
@@ -411,6 +435,8 @@ export function useLogsStorageHeatmap(options: UseLogsStorageHeatmapOptions) {
     storageDayLogs,
     storageDayLogsLoading,
     storageDayLogsPage,
+    storageDayLogsPageSize: normalizedStorageDayLogsPageSize,
+    storageDayLogsPageSizeOptions: STORAGE_DAY_LOGS_PAGE_SIZE_OPTIONS,
     storageHeatmapTooltip,
     bindStorageHeatmapTooltipRef,
     storageHeatmapDays,
@@ -430,7 +456,7 @@ export function useLogsStorageHeatmap(options: UseLogsStorageHeatmapOptions) {
     normalizeStorageHeatmapSelection,
     showStorageHeatmapTooltip,
     hideStorageHeatmapTooltip,
-    nextStorageDayLogsPage,
-    prevStorageDayLogsPage,
+    goToStorageDayLogsPage,
+    updateStorageDayLogsPageSize,
   }
 }

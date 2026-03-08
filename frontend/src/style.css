@@ -1666,16 +1666,8 @@ html.dark .stream-tag.off {
   color: var(--mac-text-secondary);
 }
 
-.logs-pagination {
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 12px;
-}
-
-.logs-pagination .pagination-actions {
-  display: inline-flex;
-  gap: 8px;
+.logs-pagination-bar {
+  margin-top: 4px;
 }
 
 

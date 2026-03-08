@@ -251,27 +251,17 @@
                 </article>
               </div>
 
-              <div v-if="storageDayLogsTotalPages > 1" class="logs-storage-day-pagination">
-                <span>{{ storageDayLogsPage }} / {{ storageDayLogsTotalPages }}</span>
-                <div class="pagination-actions">
-                  <BaseButton
-                    variant="outline"
-                    size="sm"
-                    :disabled="storageDayLogsPage === 1 || storageDayLogsLoading"
-                    @click="handlers.prevStorageDayLogsPage"
-                  >
-                    ‹
-                  </BaseButton>
-                  <BaseButton
-                    variant="outline"
-                    size="sm"
-                    :disabled="storageDayLogsPage >= storageDayLogsTotalPages || storageDayLogsLoading"
-                    @click="handlers.nextStorageDayLogsPage"
-                  >
-                    ›
-                  </BaseButton>
-                </div>
-              </div>
+              <BasePagination
+                v-if="pagedStorageDayLogs.length > 0"
+                class="logs-storage-day-pagination"
+                :page="storageDayLogsPage"
+                :total-pages="storageDayLogsTotalPages"
+                :page-size="storageDayLogsPageSize"
+                :page-size-options="storageDayLogsPageSizeOptions"
+                :loading="storageDayLogsLoading"
+                @update:page="handlers.goToStorageDayLogsPage"
+                @update:page-size="handlers.updateStorageDayLogsPageSize"
+              />
             </template>
           </template>
           <p v-else class="logs-storage-heatmap-detail__empty">
@@ -333,6 +323,7 @@ import { Teleport, type ComponentPublicInstance } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseButton from '../../common/BaseButton.vue'
 import BaseModal from '../../common/BaseModal.vue'
+import BasePagination from '../../common/BasePagination.vue'
 import type { RequestLog, LogStorageStats } from '../../../services/logs'
 import type { UsageHeatmapDay } from '../../../data/usageHeatmap'
 
@@ -377,8 +368,8 @@ type StorageModalHandlers = {
   showStorageHeatmapTooltip: (day: UsageHeatmapDay, event: MouseEvent | FocusEvent) => void
   hideStorageHeatmapTooltip: () => void
   selectStorageHeatmapDay: (day: UsageHeatmapDay) => void
-  prevStorageDayLogsPage: () => void
-  nextStorageDayLogsPage: () => void
+  goToStorageDayLogsPage: (page: number) => void
+  updateStorageDayLogsPageSize: (pageSize: number) => void
   openPayloadDetailModal: (item: RequestLog) => void | Promise<void>
 }
 
@@ -398,6 +389,8 @@ defineProps<{
   storageDayLogs: RequestLog[]
   pagedStorageDayLogs: RequestLog[]
   storageDayLogsPage: number
+  storageDayLogsPageSize: number
+  storageDayLogsPageSizeOptions: number[]
   storageDayLogsTotalPages: number
   storageHeatmapHasData: boolean
   storageHeatmapTooltip: StorageHeatmapTooltipState
@@ -832,11 +825,9 @@ html.dark .logs-storage-heatmap-day--selected {
 }
 
 .logs-storage-day-pagination {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding-top: 4px;
+  margin-top: 2px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(148, 163, 184, 0.12);
 }
 
 .logs-storage-heatmap-tooltip__summary-grid {
@@ -932,8 +923,7 @@ html.dark .logs-storage-heatmap-year-select {
   }
 
   .logs-storage-day-pagination {
-    flex-direction: column;
-    align-items: stretch;
+    padding-top: 10px;
   }
 
   .logs-storage-heatmap-grid .contrib-column {
