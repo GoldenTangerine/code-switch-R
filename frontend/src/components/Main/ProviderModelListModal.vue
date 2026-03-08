@@ -203,343 +203,343 @@
         </div>
       </div>
     </div>
+  </InlineModal>
 
-    <InlineModal
-      :open="importModalOpen"
-      :title="importModalTitle"
-      :panel-width="'min(860px, 94vw)'"
-      :close-disabled="importingJson"
-      @close="requestImportModalClose"
-    >
-      <div class="provider-import-modal">
-        <p class="pricing-hint import-hint">
-          {{ t('components.main.modelList.importHint') }}
-        </p>
-        <BaseTextarea
-          ref="importTextareaRef"
-          v-model="importJsonInput"
-          rows="14"
-          class="provider-import-textarea"
-          :placeholder="t('components.main.modelList.importPlaceholder')"
-        />
-        <p v-if="importError" class="provider-import-error">
-          {{ importError }}
-        </p>
-        <div class="override-actions debug-actions">
-          <button type="button" class="action-btn" :disabled="importingJson" @click="requestImportModalClose">
-            {{ t('common.close') }}
-          </button>
-          <button
-            type="button"
-            class="action-btn"
-            :disabled="importingJson || !hasImportDebugDetails"
-            @click="openDebugModal('import')"
-          >
-            {{ t('components.main.modelList.debugButton') }}
-          </button>
-          <button
-            type="button"
-            class="primary-btn"
-            :disabled="importingJson || !importJsonInput.trim()"
-            @click="submitImportJson"
-          >
-            {{ importingJson ? t('components.main.modelList.importSubmitting') : t('components.main.modelList.importSubmit') }}
-          </button>
+  <InlineModal
+    :open="importModalOpen"
+    :title="importModalTitle"
+    :panel-width="'min(860px, 94vw)'"
+    :close-disabled="importingJson"
+    @close="requestImportModalClose"
+  >
+    <div class="provider-import-modal">
+      <p class="pricing-hint import-hint">
+        {{ t('components.main.modelList.importHint') }}
+      </p>
+      <BaseTextarea
+        ref="importTextareaRef"
+        v-model="importJsonInput"
+        rows="14"
+        class="provider-import-textarea"
+        :placeholder="t('components.main.modelList.importPlaceholder')"
+      />
+      <p v-if="importError" class="provider-import-error">
+        {{ importError }}
+      </p>
+      <div class="override-actions debug-actions">
+        <button type="button" class="action-btn" :disabled="importingJson" @click="requestImportModalClose">
+          {{ t('common.close') }}
+        </button>
+        <button
+          type="button"
+          class="action-btn"
+          :disabled="importingJson || !hasImportDebugDetails"
+          @click="openDebugModal('import')"
+        >
+          {{ t('components.main.modelList.debugButton') }}
+        </button>
+        <button
+          type="button"
+          class="primary-btn"
+          :disabled="importingJson || !importJsonInput.trim()"
+          @click="submitImportJson"
+        >
+          {{ importingJson ? t('components.main.modelList.importSubmitting') : t('components.main.modelList.importSubmit') }}
+        </button>
+      </div>
+    </div>
+  </InlineModal>
+
+  <InlineModal
+    :open="debugModalOpen"
+    :title="debugModalTitle"
+    :panel-width="'min(1120px, 96vw)'"
+    @close="closeDebugModal"
+  >
+    <div class="provider-debug-modal">
+      <p class="pricing-hint debug-hint">
+        {{ t('components.main.modelList.debugHint') }}
+      </p>
+
+      <div class="detail-section-title">{{ t('components.main.modelList.debugSummaryTitle') }}</div>
+
+      <div class="debug-summary-grid">
+        <div class="debug-summary-card">
+          <span class="detail-label">{{ t('components.main.modelList.debugSummaryRequestedSource') }}</span>
+          <span class="detail-value detail-value--wrap">{{ debugRequestedSourceLabel }}</span>
+        </div>
+        <div class="debug-summary-card">
+          <span class="detail-label">{{ t('components.main.modelList.debugSummaryResolvedSource') }}</span>
+          <span class="detail-value detail-value--wrap">{{ debugResolvedSourceLabel }}</span>
+        </div>
+        <div class="debug-summary-card">
+          <span class="detail-label">{{ t('components.main.modelList.debugSummaryConfiguredAuth') }}</span>
+          <span class="detail-value detail-value--wrap">{{ debugConfiguredAuthLabel }}</span>
+        </div>
+        <div class="debug-summary-card">
+          <span class="detail-label">{{ t('components.main.modelList.debugSummaryAuthCandidates') }}</span>
+          <span class="detail-value detail-value--wrap">{{ debugAuthCandidatesLabel }}</span>
+        </div>
+        <div class="debug-summary-card">
+          <span class="detail-label">{{ t('components.main.modelList.debugSummaryBaseUrl') }}</span>
+          <span class="detail-value detail-value--wrap">{{ debugBaseUrl }}</span>
+        </div>
+        <div v-if="debugPlatformLabel" class="debug-summary-card">
+          <span class="detail-label">{{ t('components.main.modelList.debugSummaryPlatform') }}</span>
+          <span class="detail-value detail-value--wrap">{{ debugPlatformLabel }}</span>
+        </div>
+        <div v-if="debugFetchError" class="debug-summary-card debug-summary-card--error">
+          <span class="detail-label">{{ t('components.main.modelList.debugSummaryFetchError') }}</span>
+          <span class="detail-value detail-value--wrap">{{ debugFetchError }}</span>
         </div>
       </div>
-    </InlineModal>
 
-    <InlineModal
-      :open="debugModalOpen"
-      :title="debugModalTitle"
-      :panel-width="'min(1120px, 96vw)'"
-      @close="closeDebugModal"
-    >
-      <div class="provider-debug-modal">
-        <p class="pricing-hint debug-hint">
-          {{ t('components.main.modelList.debugHint') }}
-        </p>
+      <p class="debug-summary-note">
+        {{ t('components.main.modelList.debugSummaryMasked') }}
+      </p>
 
-        <div class="detail-section-title">{{ t('components.main.modelList.debugSummaryTitle') }}</div>
+      <div class="detail-section-title">{{ t('components.main.modelList.debugAttemptsTitle') }}</div>
 
-        <div class="debug-summary-grid">
-          <div class="debug-summary-card">
-            <span class="detail-label">{{ t('components.main.modelList.debugSummaryRequestedSource') }}</span>
-            <span class="detail-value detail-value--wrap">{{ debugRequestedSourceLabel }}</span>
-          </div>
-          <div class="debug-summary-card">
-            <span class="detail-label">{{ t('components.main.modelList.debugSummaryResolvedSource') }}</span>
-            <span class="detail-value detail-value--wrap">{{ debugResolvedSourceLabel }}</span>
-          </div>
-          <div class="debug-summary-card">
-            <span class="detail-label">{{ t('components.main.modelList.debugSummaryConfiguredAuth') }}</span>
-            <span class="detail-value detail-value--wrap">{{ debugConfiguredAuthLabel }}</span>
-          </div>
-          <div class="debug-summary-card">
-            <span class="detail-label">{{ t('components.main.modelList.debugSummaryAuthCandidates') }}</span>
-            <span class="detail-value detail-value--wrap">{{ debugAuthCandidatesLabel }}</span>
-          </div>
-          <div class="debug-summary-card">
-            <span class="detail-label">{{ t('components.main.modelList.debugSummaryBaseUrl') }}</span>
-            <span class="detail-value detail-value--wrap">{{ debugBaseUrl }}</span>
-          </div>
-          <div v-if="debugPlatformLabel" class="debug-summary-card">
-            <span class="detail-label">{{ t('components.main.modelList.debugSummaryPlatform') }}</span>
-            <span class="detail-value detail-value--wrap">{{ debugPlatformLabel }}</span>
-          </div>
-          <div v-if="debugFetchError" class="debug-summary-card debug-summary-card--error">
-            <span class="detail-label">{{ t('components.main.modelList.debugSummaryFetchError') }}</span>
-            <span class="detail-value detail-value--wrap">{{ debugFetchError }}</span>
-          </div>
-        </div>
-
-        <p class="debug-summary-note">
-          {{ t('components.main.modelList.debugSummaryMasked') }}
-        </p>
-
-        <div class="detail-section-title">{{ t('components.main.modelList.debugAttemptsTitle') }}</div>
-
-        <div v-if="debugAttempts.length === 0" class="provider-model-state">
-          {{ t('components.main.modelList.debugUnavailable') }}
-        </div>
-        <div v-else class="debug-attempts">
-          <article
-            v-for="(attempt, index) in debugAttempts"
-            :key="`${attempt.source}-${attempt.endpoint}-${attempt.authType}-${index}`"
-            class="debug-attempt-card"
-          >
-            <div class="debug-attempt-header">
-              <div class="debug-attempt-title-wrap">
-                <div class="debug-attempt-title">
-                  {{ t('components.main.modelList.debugAttemptLabel', { index: index + 1 }) }}
-                </div>
-                <div class="debug-attempt-meta">
-                  <span class="debug-pill">
-                    {{ formatSourceLabel(attempt.source) }}
-                  </span>
-                  <span class="debug-pill">
-                    {{ attempt.endpoint || '—' }}
-                  </span>
-                  <span class="debug-pill" :class="debugStatusClass(attempt)">
-                    {{ formatDebugStatus(attempt) }}
-                  </span>
-                </div>
+      <div v-if="debugAttempts.length === 0" class="provider-model-state">
+        {{ t('components.main.modelList.debugUnavailable') }}
+      </div>
+      <div v-else class="debug-attempts">
+        <article
+          v-for="(attempt, index) in debugAttempts"
+          :key="`${attempt.source}-${attempt.endpoint}-${attempt.authType}-${index}`"
+          class="debug-attempt-card"
+        >
+          <div class="debug-attempt-header">
+            <div class="debug-attempt-title-wrap">
+              <div class="debug-attempt-title">
+                {{ t('components.main.modelList.debugAttemptLabel', { index: index + 1 }) }}
               </div>
-
-              <div class="debug-attempt-side">
-                <span class="debug-attempt-side-item">
-                  {{ t('components.main.modelList.debugAttemptAuth') }}：{{ formatDebugAuthType(attempt.authType) }}
+              <div class="debug-attempt-meta">
+                <span class="debug-pill">
+                  {{ formatSourceLabel(attempt.source) }}
                 </span>
-                <span v-if="typeof attempt.durationMs === 'number'" class="debug-attempt-side-item">
-                  {{ t('components.main.modelList.debugAttemptDuration') }}：{{ formatDebugDuration(attempt.durationMs) }}
+                <span class="debug-pill">
+                  {{ attempt.endpoint || '—' }}
+                </span>
+                <span class="debug-pill" :class="debugStatusClass(attempt)">
+                  {{ formatDebugStatus(attempt) }}
                 </span>
               </div>
             </div>
 
-            <div class="debug-attempt-grid">
-              <section class="debug-block">
-                <div class="debug-block-title">{{ t('components.main.modelList.debugRequestTitle') }}</div>
-                <div class="debug-kv">
-                  <span class="debug-kv-label">{{ t('components.main.modelList.debugRequestUrl') }}</span>
-                  <code class="debug-inline-code">{{ `${attempt.method} ${attempt.url}`.trim() }}</code>
-                </div>
-                <div class="debug-kv">
-                  <span class="debug-kv-label">{{ t('components.main.modelList.debugRequestHeaders') }}</span>
-                  <pre class="debug-code-block">{{ formatDebugMap(attempt.requestHeaders) }}</pre>
-                </div>
-              </section>
-
-              <section class="debug-block">
-                <div class="debug-block-title">{{ t('components.main.modelList.debugResponseTitle') }}</div>
-                <div class="debug-response-meta">
-                  <span>{{ t('components.main.modelList.debugAttemptStatus') }}：{{ formatDebugStatus(attempt) }}</span>
-                  <span v-if="attempt.contentType">content-type：{{ attempt.contentType }}</span>
-                  <span v-if="attempt.responseBodyBytes">
-                    {{ t('components.main.modelList.debugResponseBodyMeta', { bytes: attempt.responseBodyBytes, truncated: attempt.responseBodyTruncated ? t('components.main.modelList.debugResponseBodyTruncated') : '' }) }}
-                  </span>
-                </div>
-                <div class="debug-kv">
-                  <span class="debug-kv-label">{{ t('components.main.modelList.debugResponseHeaders') }}</span>
-                  <pre class="debug-code-block">{{ formatDebugMap(attempt.responseHeaders) }}</pre>
-                </div>
-                <div class="debug-kv">
-                  <span class="debug-kv-label">{{ t('components.main.modelList.debugResponseBody') }}</span>
-                  <pre class="debug-code-block debug-code-block--body">{{ formatDebugBody(attempt.responseBody) }}</pre>
-                </div>
-                <p v-if="attempt.error" class="debug-attempt-error">
-                  {{ attempt.error }}
-                </p>
-              </section>
+            <div class="debug-attempt-side">
+              <span class="debug-attempt-side-item">
+                {{ t('components.main.modelList.debugAttemptAuth') }}：{{ formatDebugAuthType(attempt.authType) }}
+              </span>
+              <span v-if="typeof attempt.durationMs === 'number'" class="debug-attempt-side-item">
+                {{ t('components.main.modelList.debugAttemptDuration') }}：{{ formatDebugDuration(attempt.durationMs) }}
+              </span>
             </div>
-          </article>
-        </div>
+          </div>
 
-        <div class="override-actions debug-actions">
-          <button type="button" class="action-btn" @click="closeDebugModal">
-            {{ t('common.close') }}
-          </button>
-          <button
-            type="button"
-            class="primary-btn"
-            :disabled="!hasDebugDetails"
-            @click="copyDebugDetails"
-          >
-            {{ t('components.main.modelList.debugCopy') }}
-          </button>
-        </div>
+          <div class="debug-attempt-grid">
+            <section class="debug-block">
+              <div class="debug-block-title">{{ t('components.main.modelList.debugRequestTitle') }}</div>
+              <div class="debug-kv">
+                <span class="debug-kv-label">{{ t('components.main.modelList.debugRequestUrl') }}</span>
+                <code class="debug-inline-code">{{ `${attempt.method} ${attempt.url}`.trim() }}</code>
+              </div>
+              <div class="debug-kv">
+                <span class="debug-kv-label">{{ t('components.main.modelList.debugRequestHeaders') }}</span>
+                <pre class="debug-code-block">{{ formatDebugMap(attempt.requestHeaders) }}</pre>
+              </div>
+            </section>
+
+            <section class="debug-block">
+              <div class="debug-block-title">{{ t('components.main.modelList.debugResponseTitle') }}</div>
+              <div class="debug-response-meta">
+                <span>{{ t('components.main.modelList.debugAttemptStatus') }}：{{ formatDebugStatus(attempt) }}</span>
+                <span v-if="attempt.contentType">content-type：{{ attempt.contentType }}</span>
+                <span v-if="attempt.responseBodyBytes">
+                  {{ t('components.main.modelList.debugResponseBodyMeta', { bytes: attempt.responseBodyBytes, truncated: attempt.responseBodyTruncated ? t('components.main.modelList.debugResponseBodyTruncated') : '' }) }}
+                </span>
+              </div>
+              <div class="debug-kv">
+                <span class="debug-kv-label">{{ t('components.main.modelList.debugResponseHeaders') }}</span>
+                <pre class="debug-code-block">{{ formatDebugMap(attempt.responseHeaders) }}</pre>
+              </div>
+              <div class="debug-kv">
+                <span class="debug-kv-label">{{ t('components.main.modelList.debugResponseBody') }}</span>
+                <pre class="debug-code-block debug-code-block--body">{{ formatDebugBody(attempt.responseBody) }}</pre>
+              </div>
+              <p v-if="attempt.error" class="debug-attempt-error">
+                {{ attempt.error }}
+              </p>
+            </section>
+          </div>
+        </article>
       </div>
-    </InlineModal>
 
-    <InlineModal
-      :open="Boolean(editingTargetModel)"
-      :title="detailModalTitle"
-      :panel-width="'min(980px, 96vw)'"
-      :body-scrollable="false"
-      @close="closeModelDetail"
-    >
-      <div v-if="editingTargetModel" class="model-detail-modal">
-        <p class="pricing-hint detail-hint">
-          {{ t('components.main.modelList.detailHint') }}
-        </p>
+      <div class="override-actions debug-actions">
+        <button type="button" class="action-btn" @click="closeDebugModal">
+          {{ t('common.close') }}
+        </button>
+        <button
+          type="button"
+          class="primary-btn"
+          :disabled="debugAttempts.length === 0"
+          @click="copyDebugDetails"
+        >
+          {{ t('components.main.modelList.debugCopy') }}
+        </button>
+      </div>
+    </div>
+  </InlineModal>
 
-        <div class="detail-grid">
-          <div class="detail-item detail-item--full">
-            <span class="detail-label">{{ t('components.main.modelList.detailModel') }}</span>
-            <span class="detail-value detail-value--wrap" :title="editingTargetModel.model">
-              {{ editingTargetModel.model }}
+  <InlineModal
+    :open="Boolean(editingTargetModel)"
+    :title="detailModalTitle"
+    :panel-width="'min(980px, 96vw)'"
+    :body-scrollable="false"
+    @close="closeModelDetail"
+  >
+    <div v-if="editingTargetModel" class="model-detail-modal">
+      <p class="pricing-hint detail-hint">
+        {{ t('components.main.modelList.detailHint') }}
+      </p>
+
+      <div class="detail-grid">
+        <div class="detail-item detail-item--full">
+          <span class="detail-label">{{ t('components.main.modelList.detailModel') }}</span>
+          <span class="detail-value detail-value--wrap" :title="editingTargetModel.model">
+            {{ editingTargetModel.model }}
+          </span>
+        </div>
+
+        <div class="detail-item">
+          <span class="detail-label">{{ t('components.main.modelList.detailBilling') }}</span>
+          <span class="detail-value">{{ billingLabel(editingTargetModel.quotaType) }}</span>
+        </div>
+
+        <div v-if="editingTargetModel.ownerBy" class="detail-item">
+          <span class="detail-label">{{ t('components.main.modelList.detailOwner') }}</span>
+          <span class="detail-value detail-value--wrap">{{ editingTargetModel.ownerBy }}</span>
+        </div>
+
+        <template v-if="editingTargetModel.quotaType === 0">
+          <div class="detail-item">
+            <span class="detail-label">{{ t('components.main.modelList.detailInput') }}</span>
+            <span class="detail-value input">{{ formatUSD(editingTargetModel.inputUsdPerM) }}/M</span>
+          </div>
+
+          <div class="detail-item">
+            <span class="detail-label">{{ t('components.main.modelList.detailOutput') }}</span>
+            <span class="detail-value output">{{ formatUSD(editingTargetModel.outputUsdPerM) }}/M</span>
+          </div>
+
+          <div
+            v-for="cacheItem in resolveCacheCreatePriceEntries(editingTargetModel)"
+            :key="`detail-${editingTargetModel.model}-${cacheItem.key}`"
+            class="detail-item"
+          >
+            <span class="detail-label">{{ cacheItem.detailLabel }}</span>
+            <span class="detail-value cache-create">{{ formatUSD(cacheItem.value) }}/M</span>
+            <span v-if="cacheItem.hint" class="detail-note" :class="cacheItem.hintClass">
+              {{ cacheItem.hint }}
             </span>
           </div>
 
           <div class="detail-item">
-            <span class="detail-label">{{ t('components.main.modelList.detailBilling') }}</span>
-            <span class="detail-value">{{ billingLabel(editingTargetModel.quotaType) }}</span>
+            <span class="detail-label">{{ t('components.main.modelList.detailCacheRead') }}</span>
+            <span class="detail-value cache-read">
+              {{ formatUSD(resolveCachePrice(editingTargetModel.inputUsdPerM, resolveCacheReadMultiplier(editingTargetModel))) }}/M
+            </span>
+            <span v-if="resolveCacheReadHint(editingTargetModel)" class="detail-note" :class="cacheHintClass(editingTargetModel.cacheReadMultiplierSource)">
+              {{ resolveCacheReadHint(editingTargetModel) }}
+            </span>
           </div>
 
-          <div v-if="editingTargetModel.ownerBy" class="detail-item">
-            <span class="detail-label">{{ t('components.main.modelList.detailOwner') }}</span>
-            <span class="detail-value detail-value--wrap">{{ editingTargetModel.ownerBy }}</span>
+          <div v-if="editingTargetModel.modelRatio > 0" class="detail-item">
+            <span class="detail-label">{{ t('components.main.modelList.detailRatio') }}</span>
+            <span class="detail-value">{{ formatRatio(editingTargetModel.modelRatio) }}</span>
           </div>
 
-          <template v-if="editingTargetModel.quotaType === 0">
-            <div class="detail-item">
-              <span class="detail-label">{{ t('components.main.modelList.detailInput') }}</span>
-              <span class="detail-value input">{{ formatUSD(editingTargetModel.inputUsdPerM) }}/M</span>
-            </div>
-
-            <div class="detail-item">
-              <span class="detail-label">{{ t('components.main.modelList.detailOutput') }}</span>
-              <span class="detail-value output">{{ formatUSD(editingTargetModel.outputUsdPerM) }}/M</span>
-            </div>
-
-            <div
-              v-for="cacheItem in resolveCacheCreatePriceEntries(editingTargetModel)"
-              :key="`detail-${editingTargetModel.model}-${cacheItem.key}`"
-              class="detail-item"
-            >
-              <span class="detail-label">{{ cacheItem.detailLabel }}</span>
-              <span class="detail-value cache-create">{{ formatUSD(cacheItem.value) }}/M</span>
-              <span v-if="cacheItem.hint" class="detail-note" :class="cacheItem.hintClass">
-                {{ cacheItem.hint }}
-              </span>
-            </div>
-
-            <div class="detail-item">
-              <span class="detail-label">{{ t('components.main.modelList.detailCacheRead') }}</span>
-              <span class="detail-value cache-read">
-                {{ formatUSD(resolveCachePrice(editingTargetModel.inputUsdPerM, resolveCacheReadMultiplier(editingTargetModel))) }}/M
-              </span>
-              <span v-if="resolveCacheReadHint(editingTargetModel)" class="detail-note" :class="cacheHintClass(editingTargetModel.cacheReadMultiplierSource)">
-                {{ resolveCacheReadHint(editingTargetModel) }}
-              </span>
-            </div>
-
-            <div v-if="editingTargetModel.modelRatio > 0" class="detail-item">
-              <span class="detail-label">{{ t('components.main.modelList.detailRatio') }}</span>
-              <span class="detail-value">{{ formatRatio(editingTargetModel.modelRatio) }}</span>
-            </div>
-
-            <div class="detail-item">
-              <span class="detail-label">{{ resolveCacheCreateMultiplierLabel(editingTargetModel, 'detail') }}</span>
-              <span class="detail-value">{{ formatMultiplier(resolveCacheCreateMultiplier(editingTargetModel)) }}</span>
-              <span v-if="formatCacheMultiplierSource(editingTargetModel.cacheCreateMultiplierSource)" class="detail-note" :class="cacheHintClass(editingTargetModel.cacheCreateMultiplierSource)">
-                {{ formatCacheMultiplierSource(editingTargetModel.cacheCreateMultiplierSource) }}
-              </span>
-            </div>
-
-            <div class="detail-item">
-              <span class="detail-label">{{ t('components.main.modelList.detailCacheReadMultiplier') }}</span>
-              <span class="detail-value">{{ formatMultiplier(resolveCacheReadMultiplier(editingTargetModel)) }}</span>
-              <span v-if="formatCacheMultiplierSource(editingTargetModel.cacheReadMultiplierSource)" class="detail-note" :class="cacheHintClass(editingTargetModel.cacheReadMultiplierSource)">
-                {{ formatCacheMultiplierSource(editingTargetModel.cacheReadMultiplierSource) }}
-              </span>
-            </div>
-          </template>
-
-          <div v-else class="detail-item detail-item--full">
-            <span class="detail-label">{{ t('components.main.modelList.detailPerCall') }}</span>
-            <span class="detail-value detail-value--wrap">{{ formatPerCall(editingTargetModel.perCallPrice) }}</span>
+          <div class="detail-item">
+            <span class="detail-label">{{ resolveCacheCreateMultiplierLabel(editingTargetModel, 'detail') }}</span>
+            <span class="detail-value">{{ formatMultiplier(resolveCacheCreateMultiplier(editingTargetModel)) }}</span>
+            <span v-if="formatCacheMultiplierSource(editingTargetModel.cacheCreateMultiplierSource)" class="detail-note" :class="cacheHintClass(editingTargetModel.cacheCreateMultiplierSource)">
+              {{ formatCacheMultiplierSource(editingTargetModel.cacheCreateMultiplierSource) }}
+            </span>
           </div>
-        </div>
 
-        <template v-if="editingTargetModel.quotaType === 0">
-          <div class="detail-divider"></div>
-
-          <div class="detail-section-title">{{ t('components.main.modelList.detailOverrideSection') }}</div>
-
-          <div class="override-editor-grid">
-            <div class="override-field">
-              <label class="override-label">{{ resolveCacheCreateMultiplierLabel(editingTargetModel, 'input') }}</label>
-              <input
-                v-model="overrideForm.cacheCreateMultiplier"
-                type="number"
-                step="0.0001"
-                min="0"
-                class="mac-input override-input"
-                :placeholder="resolveOverridePlaceholder(editingTargetModel, 'create')"
-              />
-              <span class="override-field-hint">{{ resolveOverrideHint(editingTargetModel, 'create') }}</span>
-            </div>
-
-            <div class="override-field">
-              <label class="override-label">{{ t('components.main.modelList.cacheReadMultiplier') }}</label>
-              <input
-                v-model="overrideForm.cacheReadMultiplier"
-                type="number"
-                step="0.0001"
-                min="0"
-                class="mac-input override-input"
-                :placeholder="resolveOverridePlaceholder(editingTargetModel, 'read')"
-              />
-              <span class="override-field-hint">{{ resolveOverrideHint(editingTargetModel, 'read') }}</span>
-            </div>
+          <div class="detail-item">
+            <span class="detail-label">{{ t('components.main.modelList.detailCacheReadMultiplier') }}</span>
+            <span class="detail-value">{{ formatMultiplier(resolveCacheReadMultiplier(editingTargetModel)) }}</span>
+            <span v-if="formatCacheMultiplierSource(editingTargetModel.cacheReadMultiplierSource)" class="detail-note" :class="cacheHintClass(editingTargetModel.cacheReadMultiplierSource)">
+              {{ formatCacheMultiplierSource(editingTargetModel.cacheReadMultiplierSource) }}
+            </span>
           </div>
         </template>
 
-        <div class="override-actions">
-          <button type="button" class="action-btn" @click="closeModelDetail">
-            {{ t('common.cancel') }}
-          </button>
-          <button
-            v-if="editingTargetModel.quotaType === 0 && hasManualCacheOverride(editingTargetModel)"
-            type="button"
-            class="action-btn"
-            :disabled="isWorkingModel(editingTargetModel.model)"
-            @click="resetOverride(editingTargetModel)"
-          >
-            {{ resettingModel === editingTargetModel.model ? t('components.general.modelPricing.removing') : t('components.main.modelList.resetCache') }}
-          </button>
-          <button
-            v-if="editingTargetModel.quotaType === 0"
-            type="button"
-            class="primary-btn"
-            :disabled="isWorkingModel(editingTargetModel.model)"
-            @click="saveOverride(editingTargetModel)"
-          >
-            {{ savingModel === editingTargetModel.model ? t('common.saving') : t('common.save') }}
-          </button>
+        <div v-else class="detail-item detail-item--full">
+          <span class="detail-label">{{ t('components.main.modelList.detailPerCall') }}</span>
+          <span class="detail-value detail-value--wrap">{{ formatPerCall(editingTargetModel.perCallPrice) }}</span>
         </div>
       </div>
-    </InlineModal>
+
+      <template v-if="editingTargetModel.quotaType === 0">
+        <div class="detail-divider"></div>
+
+        <div class="detail-section-title">{{ t('components.main.modelList.detailOverrideSection') }}</div>
+
+        <div class="override-editor-grid">
+          <div class="override-field">
+            <label class="override-label">{{ resolveCacheCreateMultiplierLabel(editingTargetModel, 'input') }}</label>
+            <input
+              v-model="overrideForm.cacheCreateMultiplier"
+              type="number"
+              step="0.0001"
+              min="0"
+              class="mac-input override-input"
+              :placeholder="resolveOverridePlaceholder(editingTargetModel, 'create')"
+            />
+            <span class="override-field-hint">{{ resolveOverrideHint(editingTargetModel, 'create') }}</span>
+          </div>
+
+          <div class="override-field">
+            <label class="override-label">{{ t('components.main.modelList.cacheReadMultiplier') }}</label>
+            <input
+              v-model="overrideForm.cacheReadMultiplier"
+              type="number"
+              step="0.0001"
+              min="0"
+              class="mac-input override-input"
+              :placeholder="resolveOverridePlaceholder(editingTargetModel, 'read')"
+            />
+            <span class="override-field-hint">{{ resolveOverrideHint(editingTargetModel, 'read') }}</span>
+          </div>
+        </div>
+      </template>
+
+      <div class="override-actions">
+        <button type="button" class="action-btn" @click="closeModelDetail">
+          {{ t('common.cancel') }}
+        </button>
+        <button
+          v-if="editingTargetModel.quotaType === 0 && hasManualCacheOverride(editingTargetModel)"
+          type="button"
+          class="action-btn"
+          :disabled="isWorkingModel(editingTargetModel.model)"
+          @click="resetOverride(editingTargetModel)"
+        >
+          {{ resettingModel === editingTargetModel.model ? t('components.general.modelPricing.removing') : t('components.main.modelList.resetCache') }}
+        </button>
+        <button
+          v-if="editingTargetModel.quotaType === 0"
+          type="button"
+          class="primary-btn"
+          :disabled="isWorkingModel(editingTargetModel.model)"
+          @click="saveOverride(editingTargetModel)"
+        >
+          {{ savingModel === editingTargetModel.model ? t('common.saving') : t('common.save') }}
+        </button>
+      </div>
+    </div>
   </InlineModal>
 </template>
 
