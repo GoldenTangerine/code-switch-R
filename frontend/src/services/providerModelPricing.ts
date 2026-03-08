@@ -63,6 +63,9 @@ export type ProviderModelPricingResponse = {
   pricingSource: ProviderModelPricingSource
   models: ProviderModelPricingItem[]
   fetchError?: string
+  imported?: boolean
+  challengeDetected?: boolean
+  challengeMessage?: string
   debug?: ProviderModelPricingDebug
 }
 
@@ -78,6 +81,21 @@ export async function fetchProviderModelPricing(
     platform,
     provider.connectivityAuthType || '',
     source,
+  )
+}
+
+export async function importProviderModelPricingJSON(
+  provider: AutomationCard,
+  platform: string,
+  raw: string,
+): Promise<ProviderModelPricingResponse> {
+  return await Call.ByName(
+    `${PROVIDER_SERVICE}.ImportProviderModelPricingJSON`,
+    provider.apiUrl,
+    provider.apiKey,
+    platform,
+    provider.connectivityAuthType || '',
+    raw,
   )
 }
 

@@ -23,6 +23,7 @@
                 class="ghost-icon"
                 type="button"
                 aria-label="Close"
+                :disabled="closeDisabled"
                 @click="emitClose"
               >
                 ✕
@@ -53,10 +54,11 @@ const props = withDefaults(
     title: string
     variant?: Variant
     closeOnBackdrop?: boolean
+    closeDisabled?: boolean
     panelWidth?: string
     bodyScrollable?: boolean
   }>(),
-  { variant: 'default', closeOnBackdrop: true, panelWidth: '', bodyScrollable: true },
+  { variant: 'default', closeOnBackdrop: true, closeDisabled: false, panelWidth: '', bodyScrollable: true },
 )
 
 const emit = defineEmits<{ (e: 'close'): void }>()
@@ -86,6 +88,7 @@ let lastActiveElement: Element | null = null
 
 const emitClose = () => {
   if (!isTopMostModal(modalId)) return
+  if (props.closeDisabled) return
   emit('close')
 }
 
@@ -93,6 +96,7 @@ const emitClose = () => {
 const onWrapperClick = (event: MouseEvent) => {
   if (!isTopMostModal(modalId)) return
   event.stopPropagation()
+  if (props.closeDisabled) return
   if (!props.closeOnBackdrop) return
   if (event.target === event.currentTarget) {
     emitClose()
@@ -121,6 +125,7 @@ const onKeyDown = (e: KeyboardEvent) => {
   if (e.key === 'Escape') {
     e.preventDefault()
     e.stopImmediatePropagation()
+    if (props.closeDisabled) return
     emitClose()
     return
   }

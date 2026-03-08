@@ -67,13 +67,16 @@ type ProviderModelPricingItem struct {
 }
 
 type ProviderModelPricingResponse struct {
-	SiteType      SiteType                   `json:"siteType"`
-	PricingSource string                     `json:"pricingSource"`
-	GroupRatio    map[string]float64         `json:"groupRatio,omitempty"`
-	UsableGroup   map[string]string          `json:"usableGroup,omitempty"`
-	Models        []ProviderModelPricingItem `json:"models"`
-	FetchError    string                     `json:"fetchError,omitempty"`
-	Debug         *ProviderModelPricingDebug `json:"debug,omitempty"`
+	SiteType          SiteType                   `json:"siteType"`
+	PricingSource     string                     `json:"pricingSource"`
+	GroupRatio        map[string]float64         `json:"groupRatio,omitempty"`
+	UsableGroup       map[string]string          `json:"usableGroup,omitempty"`
+	Models            []ProviderModelPricingItem `json:"models"`
+	FetchError        string                     `json:"fetchError,omitempty"`
+	Imported          bool                       `json:"imported,omitempty"`
+	ChallengeDetected bool                       `json:"challengeDetected,omitempty"`
+	ChallengeMessage  string                     `json:"challengeMessage,omitempty"`
+	Debug             *ProviderModelPricingDebug `json:"debug,omitempty"`
 }
 
 type ProviderModelPricingDebug struct {
@@ -178,12 +181,21 @@ type providerPricingParseError struct {
 	StatusCode  int
 	ContentType string
 	Body        string
+	Challenge   *providerPricingChallengeInfo
 	Err         error
+}
+
+type providerPricingChallengeInfo struct {
+	Type    string
+	Message string
 }
 
 func (e *providerPricingParseError) Error() string {
 	if e == nil {
 		return "provider pricing parse error: <nil>"
+	}
+	if e.Challenge != nil && strings.TrimSpace(e.Challenge.Message) != "" {
+		return fmt.Sprintf("%s（原始解析错误: %v）", e.Challenge.Message, e.Err)
 	}
 	message := fmt.Sprintf("解析 %s 失败: %v", e.Endpoint, e.Err)
 	contentType := strings.TrimSpace(e.ContentType)
@@ -206,6 +218,9 @@ func (e *providerPricingParseError) Unwrap() error {
 func (e *upstreamHTTPError) Error() string {
 	if e == nil {
 		return "upstream http error: <nil>"
+	}
+	if challenge := detectProviderPricingChallenge(e.Endpoint, "", e.Body); challenge != nil && strings.TrimSpace(challenge.Message) != "" {
+		return fmt.Sprintf("%s（HTTP %d）", challenge.Message, e.StatusCode)
 	}
 	body := strings.TrimSpace(e.Body)
 	if body != "" {
@@ -403,6 +418,71 @@ func isLikelyHTMLResponse(contentType, body string) bool {
 		strings.HasPrefix(trimmed, "<")
 }
 
+func normalizeProviderPricingChallengeEndpoint(endpoint string) string {
+	endpoint = strings.TrimSpace(endpoint)
+	if endpoint == "" {
+		return "当前接口"
+	}
+	return endpoint
+}
+
+func buildProviderPricingChallengeFollowup(endpoint string) string {
+	endpoint = strings.TrimSpace(endpoint)
+	if endpoint == "" || endpoint == "/api/pricing" {
+		return "请先在浏览器中打开 /api/pricing 完成验证，再使用“粘贴 JSON 导入”导入返回结果。"
+	}
+	return fmt.Sprintf("请先在浏览器中打开 %s 完成验证，确认它返回的是 JSON 而不是挑战页。", endpoint)
+}
+
+func buildProviderPricingChallengeMessage(endpoint, challengeType string) string {
+	endpointLabel := normalizeProviderPricingChallengeEndpoint(endpoint)
+	followup := buildProviderPricingChallengeFollowup(endpoint)
+	switch strings.TrimSpace(challengeType) {
+	case "acw_sc__v2":
+		return fmt.Sprintf("检测到浏览器挑战页：%s 要求先在浏览器中执行脚本并写入 acw_sc__v2 Cookie，当前项目和 Postman 不会自动完成这一步。%s", endpointLabel, followup)
+	default:
+		return fmt.Sprintf("检测到浏览器挑战页：%s 要求客户端先执行页面脚本并回写挑战 Cookie，非浏览器请求无法直接拿到 JSON。%s", endpointLabel, followup)
+	}
+}
+
+func detectProviderPricingChallenge(endpoint, contentType, body string) *providerPricingChallengeInfo {
+	normalizedBody := strings.ToLower(strings.TrimSpace(body))
+	if normalizedBody == "" {
+		return nil
+	}
+
+	looksLikeMarkupOrScript := isLikelyHTMLResponse(contentType, body) ||
+		strings.Contains(normalizedBody, "<script") ||
+		strings.Contains(normalizedBody, "var arg1=")
+
+	if strings.Contains(normalizedBody, "acw_sc__v2") && looksLikeMarkupOrScript {
+		return &providerPricingChallengeInfo{
+			Type:    "acw_sc__v2",
+			Message: buildProviderPricingChallengeMessage(endpoint, "acw_sc__v2"),
+		}
+	}
+
+	if strings.Contains(normalizedBody, "acw_sc__v2") &&
+		strings.Contains(normalizedBody, "document.cookie") &&
+		strings.Contains(normalizedBody, "location.reload") {
+		return &providerPricingChallengeInfo{
+			Type:    "acw_sc__v2",
+			Message: buildProviderPricingChallengeMessage(endpoint, "acw_sc__v2"),
+		}
+	}
+
+	if isLikelyHTMLResponse(contentType, body) &&
+		strings.Contains(normalizedBody, "document.cookie") &&
+		strings.Contains(normalizedBody, "location.reload") {
+		return &providerPricingChallengeInfo{
+			Type:    "browser-js-cookie",
+			Message: buildProviderPricingChallengeMessage(endpoint, "browser-js-cookie"),
+		}
+	}
+
+	return nil
+}
+
 func shouldRetryWithNextAuthCandidate(err error) bool {
 	if err == nil {
 		return false
@@ -436,6 +516,45 @@ func buildProviderModelPricingFailureResponse(source, message string, debug *Pro
 		FetchError:    strings.TrimSpace(message),
 	}
 	return attachProviderModelPricingDebug(response, debug)
+}
+
+func applyProviderModelPricingFailureHints(response *ProviderModelPricingResponse, cause error) *ProviderModelPricingResponse {
+	if response == nil || cause == nil {
+		return response
+	}
+
+	var parseErr *providerPricingParseError
+	if errors.As(cause, &parseErr) && parseErr != nil && parseErr.Challenge != nil {
+		return applyProviderModelPricingChallenge(response, parseErr.Challenge)
+	}
+
+	var httpErr *upstreamHTTPError
+	if errors.As(cause, &httpErr) && httpErr != nil {
+		if challenge := detectProviderPricingChallenge(httpErr.Endpoint, "", httpErr.Body); challenge != nil {
+			return applyProviderModelPricingChallenge(response, challenge)
+		}
+	}
+
+	return response
+}
+
+func buildProviderModelPricingFailureResponseWithCause(source, message string, debug *ProviderModelPricingDebug, cause error) *ProviderModelPricingResponse {
+	return applyProviderModelPricingFailureHints(
+		buildProviderModelPricingFailureResponse(source, message, debug),
+		cause,
+	)
+}
+
+func applyProviderModelPricingChallenge(response *ProviderModelPricingResponse, challenge *providerPricingChallengeInfo) *ProviderModelPricingResponse {
+	if response == nil || challenge == nil {
+		return response
+	}
+	response.ChallengeDetected = true
+	response.ChallengeMessage = strings.TrimSpace(challenge.Message)
+	if response.ChallengeMessage != "" {
+		response.FetchError = response.ChallengeMessage
+	}
+	return response
 }
 
 func providerPricingCacheKey(apiURL, apiKey, authType string) string {
@@ -781,10 +900,11 @@ func (ps *ProviderService) FetchProviderModelPricingWithSource(apiURL, apiKey, p
 			if shouldClearProviderModelPricingCacheOnFailure(source) {
 				ps.clearProviderModelPricingCache(apiURL, apiKey, authType)
 			}
-			return buildProviderModelPricingFailureResponse(
+			return buildProviderModelPricingFailureResponseWithCause(
 				source,
 				fmt.Sprintf("通过 %s 获取模型定价失败: %v", providerModelPricingSourceCommon, err),
 				debug,
+				err,
 			), nil
 		}
 		return response, nil
@@ -794,10 +914,11 @@ func (ps *ProviderService) FetchProviderModelPricingWithSource(apiURL, apiKey, p
 			if shouldClearProviderModelPricingCacheOnFailure(source) {
 				ps.clearProviderModelPricingCache(apiURL, apiKey, authType)
 			}
-			return buildProviderModelPricingFailureResponse(
+			return buildProviderModelPricingFailureResponseWithCause(
 				source,
 				fmt.Sprintf("通过 %s 获取模型定价失败: %v", providerModelPricingSourceOneHub, err),
 				debug,
+				err,
 			), nil
 		}
 		return response, nil
@@ -807,10 +928,11 @@ func (ps *ProviderService) FetchProviderModelPricingWithSource(apiURL, apiKey, p
 			if shouldClearProviderModelPricingCacheOnFailure(source) {
 				ps.clearProviderModelPricingCache(apiURL, apiKey, authType)
 			}
-			return buildProviderModelPricingFailureResponse(
+			return buildProviderModelPricingFailureResponseWithCause(
 				source,
 				fmt.Sprintf("通过 %s 获取模型列表失败: %v", providerModelPricingSourceOpenAIList, err),
 				debug,
+				err,
 			), nil
 		}
 		return response, nil
@@ -855,20 +977,97 @@ func (ps *ProviderService) FetchProviderModelPricingWithSource(apiURL, apiKey, p
 		if shouldClearProviderModelPricingCacheOnFailure(source) {
 			ps.clearProviderModelPricingCache(apiURL, apiKey, authType)
 		}
-		return buildProviderModelPricingFailureResponse(
+		return buildProviderModelPricingFailureResponseWithCause(
 			source,
 			fmt.Sprintf("获取模型定价失败：%v；%v", commonErr, oneHubErr),
 			debug,
+			errors.Join(commonErr, oneHubErr),
 		), nil
 	}
 	if shouldClearProviderModelPricingCacheOnFailure(source) {
 		ps.clearProviderModelPricingCache(apiURL, apiKey, authType)
 	}
-	return buildProviderModelPricingFailureResponse(
+	return buildProviderModelPricingFailureResponseWithCause(
 		source,
 		fmt.Sprintf("通过 %s 获取模型列表失败: %v", providerModelPricingSourceOpenAIList, modelErr),
 		debug,
+		modelErr,
 	), nil
+}
+
+func (ps *ProviderService) ImportProviderModelPricingJSON(apiURL, apiKey, platform, authType, raw string) (*ProviderModelPricingResponse, error) {
+	apiURL = strings.TrimSpace(apiURL)
+	apiKey = strings.TrimSpace(apiKey)
+	platform = strings.TrimSpace(platform)
+	raw = strings.TrimSpace(raw)
+	authCandidates := buildAuthCandidates(authType, platform)
+	debug := newProviderModelPricingDebug(apiURL, platform, providerModelPricingSourceCommon, authType, authCandidates)
+	if raw == "" {
+		return buildProviderModelPricingFailureResponse(
+			providerModelPricingSourceCommon,
+			"请先粘贴 /api/pricing 返回的 JSON 内容",
+			debug,
+		), nil
+	}
+
+	targetURL := "/api/pricing"
+	if apiURL != "" {
+		targetURL = joinURL(apiURL, "/api/pricing")
+	}
+	attempt := newProviderModelPricingDebugAttempt(providerModelPricingSourceCommon, "/api/pricing", "PASTE", targetURL, authType)
+	attempt.ContentType = "application/json (manual import)"
+	attempt.ResponseBodyBytes = len(raw)
+	attempt.ResponseBodyTruncated = len(raw) > providerPricingDebugBodyLimit
+	attempt.ResponseBody = truncateText(strings.ToValidUTF8(raw, "?"), providerPricingDebugBodyLimit)
+
+	if challenge := detectProviderPricingChallenge("/api/pricing", attempt.ContentType, raw); challenge != nil {
+		attempt.Error = challenge.Message
+		appendProviderModelPricingDebugAttempt(debug, attempt)
+		return applyProviderModelPricingChallenge(
+			buildProviderModelPricingFailureResponse(providerModelPricingSourceCommon, challenge.Message, debug),
+			challenge,
+		), nil
+	}
+
+	var pricing providerPricingResponse
+	if err := json.Unmarshal([]byte(raw), &pricing); err != nil {
+		parseErr := &providerPricingParseError{
+			Endpoint:    "/api/pricing",
+			ContentType: attempt.ContentType,
+			Body:        raw,
+			Challenge:   detectProviderPricingChallenge("/api/pricing", attempt.ContentType, raw),
+			Err:         err,
+		}
+		attempt.Error = parseErr.Error()
+		appendProviderModelPricingDebugAttempt(debug, attempt)
+		return buildProviderModelPricingFailureResponseWithCause(
+			providerModelPricingSourceCommon,
+			fmt.Sprintf("导入 /api/pricing JSON 失败: %v", parseErr),
+			debug,
+			parseErr,
+		), nil
+	}
+	if !pricing.Success {
+		attempt.Error = "/api/pricing 返回 success=false"
+		appendProviderModelPricingDebugAttempt(debug, attempt)
+		return buildProviderModelPricingFailureResponse(
+			providerModelPricingSourceCommon,
+			"/api/pricing 返回 success=false",
+			debug,
+		), nil
+	}
+
+	attempt.StatusCode = http.StatusOK
+	appendProviderModelPricingDebugAttempt(debug, attempt)
+
+	response := buildProviderModelPricingResponse(
+		SiteTypeUnknown,
+		providerModelPricingSourceCommon,
+		&pricing,
+	)
+	ps.enrichProviderModelPricingResponse(response, apiURL, apiKey, authType)
+	response.Imported = true
+	return attachProviderModelPricingDebug(response, debug), nil
 }
 
 func fetchCommonPricing(client *http.Client, apiURL, apiKey, authType string, debug *ProviderModelPricingDebug) (*providerPricingResponse, error) {
@@ -919,6 +1118,7 @@ func fetchCommonPricing(client *http.Client, apiURL, apiKey, authType string, de
 			StatusCode:  resp.StatusCode,
 			ContentType: attempt.ContentType,
 			Body:        string(body),
+			Challenge:   detectProviderPricingChallenge("/api/pricing", attempt.ContentType, string(body)),
 			Err:         err,
 		}
 		attempt.Error = parseErr.Error()
@@ -996,6 +1196,7 @@ func fetchOneHubPricing(client *http.Client, apiURL, apiKey, authType string, de
 			StatusCode:  availableResp.StatusCode,
 			ContentType: availableAttempt.ContentType,
 			Body:        string(availableBody),
+			Challenge:   detectProviderPricingChallenge("/api/available_model", availableAttempt.ContentType, string(availableBody)),
 			Err:         err,
 		}
 		availableAttempt.Error = parseErr.Error()
@@ -1045,6 +1246,7 @@ func fetchOneHubPricing(client *http.Client, apiURL, apiKey, authType string, de
 			StatusCode:  groupResp.StatusCode,
 			ContentType: groupAttempt.ContentType,
 			Body:        string(groupBody),
+			Challenge:   detectProviderPricingChallenge("/api/user_group_map", groupAttempt.ContentType, string(groupBody)),
 			Err:         err,
 		}
 		groupAttempt.Error = parseErr.Error()
@@ -1273,6 +1475,7 @@ func fetchOpenAIModels(client *http.Client, apiURL, apiKey, authType string, deb
 			StatusCode:  resp.StatusCode,
 			ContentType: attempt.ContentType,
 			Body:        string(body),
+			Challenge:   detectProviderPricingChallenge("/v1/models", attempt.ContentType, string(body)),
 			Err:         err,
 		}
 		attempt.Error = parseErr.Error()

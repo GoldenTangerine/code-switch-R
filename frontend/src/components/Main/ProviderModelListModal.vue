@@ -14,6 +14,9 @@
           <span v-if="pricingSourceLabel" class="meta-pill">
             {{ t('components.main.modelList.source') }}：{{ pricingSourceLabel }}
           </span>
+          <span v-if="importedData" class="meta-pill meta-pill-accent">
+            {{ t('components.main.modelList.importedBadge') }}
+          </span>
         </div>
 
         <div class="provider-model-toolbar-main">
@@ -41,14 +44,24 @@
               <span v-if="pricingSourceLabel" class="provider-model-source-current">
                 {{ t('components.main.modelList.sourceResolved', { source: pricingSourceLabel }) }}
               </span>
-              <button
-                type="button"
-                class="provider-model-debug-button"
-                :disabled="loading || !hasDebugDetails"
-                @click="openDebugModal"
-              >
-                {{ t('components.main.modelList.debugButton') }}
-              </button>
+              <span class="provider-model-source-actions">
+                <button
+                  type="button"
+                  class="provider-model-debug-button"
+                  :disabled="loading || !hasDebugDetails"
+                  @click="openDebugModal()"
+                >
+                  {{ t('components.main.modelList.debugButton') }}
+                </button>
+                <button
+                  type="button"
+                  class="provider-model-import-button"
+                  :disabled="loading"
+                  @click="openImportModal"
+                >
+                  {{ t('components.main.modelList.importButton') }}
+                </button>
+              </span>
             </span>
           </div>
         </div>
@@ -80,11 +93,14 @@
       </div>
       <div v-else-if="error" class="provider-model-state provider-model-state-stack error">
         <span>{{ error }}</span>
+        <p v-if="showChallengeHint" class="provider-model-challenge-hint">
+          {{ challengeMessage }}
+        </p>
         <button
           v-if="hasDebugDetails"
           type="button"
           class="provider-model-inline-debug-btn"
-          @click="openDebugModal"
+          @click="openDebugModal()"
         >
           {{ t('components.main.modelList.debugOpenInline') }}
         </button>
@@ -187,6 +203,51 @@
         </div>
       </div>
     </div>
+
+    <InlineModal
+      :open="importModalOpen"
+      :title="importModalTitle"
+      :panel-width="'min(860px, 94vw)'"
+      :close-disabled="importingJson"
+      @close="requestImportModalClose"
+    >
+      <div class="provider-import-modal">
+        <p class="pricing-hint import-hint">
+          {{ t('components.main.modelList.importHint') }}
+        </p>
+        <BaseTextarea
+          ref="importTextareaRef"
+          v-model="importJsonInput"
+          rows="14"
+          class="provider-import-textarea"
+          :placeholder="t('components.main.modelList.importPlaceholder')"
+        />
+        <p v-if="importError" class="provider-import-error">
+          {{ importError }}
+        </p>
+        <div class="override-actions debug-actions">
+          <button type="button" class="action-btn" :disabled="importingJson" @click="requestImportModalClose">
+            {{ t('common.close') }}
+          </button>
+          <button
+            type="button"
+            class="action-btn"
+            :disabled="importingJson || !hasImportDebugDetails"
+            @click="openDebugModal('import')"
+          >
+            {{ t('components.main.modelList.debugButton') }}
+          </button>
+          <button
+            type="button"
+            class="primary-btn"
+            :disabled="importingJson || !importJsonInput.trim()"
+            @click="submitImportJson"
+          >
+            {{ importingJson ? t('components.main.modelList.importSubmitting') : t('components.main.modelList.importSubmit') }}
+          </button>
+        </div>
+      </div>
+    </InlineModal>
 
     <InlineModal
       :open="debugModalOpen"
@@ -483,9 +544,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseInput from '../common/BaseInput.vue'
+import BaseTextarea from '../common/BaseTextarea.vue'
 import InlineModal from '../common/InlineModal.vue'
 import type { AutomationCard } from '../../data/cards'
 import { extractErrorMessage } from '../../utils/error'
@@ -493,6 +555,7 @@ import { showToast } from '../../utils/toast'
 import {
   deleteProviderModelPricingOverride,
   fetchProviderModelPricing,
+  importProviderModelPricingJSON,
   type ProviderModelPricingDebug,
   type ProviderModelPricingDebugAttempt,
   type ProviderModelPerCallPrice,
@@ -531,6 +594,7 @@ const loading = ref(false)
 const error = ref('')
 const response = ref<ProviderModelPricingResponse | null>(null)
 const loadRequestSeq = ref(0)
+const importRequestSeq = ref(0)
 
 const searchTerm = ref('')
 const selectedVendor = ref<ProviderVendorKey>('all')
@@ -539,6 +603,13 @@ const editingModel = ref('')
 const savingModel = ref('')
 const resettingModel = ref('')
 const debugModalOpen = ref(false)
+const importModalOpen = ref(false)
+const importingJson = ref(false)
+const importJsonInput = ref('')
+const importError = ref('')
+const importDebugResponse = ref<ProviderModelPricingResponse | null>(null)
+const importTextareaRef = ref<InstanceType<typeof BaseTextarea> | null>(null)
+const debugContext = ref<'main' | 'import'>('main')
 
 const pricingInteraction = reactive({
   model: '',
@@ -562,6 +633,14 @@ const siteType = computed(() => response.value?.siteType ?? '')
 const pricingSource = computed<ProviderModelPricingSource | ''>(() => response.value?.pricingSource ?? '')
 const models = computed(() => response.value?.models ?? [])
 const pricingAvailable = computed(() => response.value?.pricingSource !== 'v1/models')
+const importedData = computed(() => Boolean(response.value?.imported))
+const challengeDetected = computed(() => Boolean(response.value?.challengeDetected))
+const challengeMessage = computed(() => response.value?.challengeMessage?.trim() || '')
+const showChallengeHint = computed(() => Boolean(
+  challengeDetected.value &&
+  challengeMessage.value &&
+  challengeMessage.value !== error.value.trim(),
+))
 const sourceLabelMap = computed<Record<ProviderModelPricingSource, string>>(() => ({
   auto: t('components.main.modelList.sourceAuto'),
   'api/pricing': t('components.main.modelList.sourceApiPricing'),
@@ -587,17 +666,25 @@ const sourceOptions = computed<ProviderModelSourceOption[]>(() => [
   { value: 'v1/models', label: sourceLabelMap.value['v1/models'] },
 ])
 
-const debugInfo = computed<ProviderModelPricingDebug | null>(() => response.value?.debug ?? null)
+const activeDebugResponse = computed<ProviderModelPricingResponse | null>(() => (
+  debugContext.value === 'import' ? importDebugResponse.value : response.value
+))
+const debugInfo = computed<ProviderModelPricingDebug | null>(() => activeDebugResponse.value?.debug ?? null)
 const debugAttempts = computed<ProviderModelPricingDebugAttempt[]>(() => debugInfo.value?.attempts ?? [])
-const hasDebugDetails = computed(() => debugAttempts.value.length > 0)
-const debugFetchError = computed(() => response.value?.fetchError?.trim() || '')
+const hasDebugDetails = computed(() => Boolean(response.value?.debug?.attempts?.length))
+const hasImportDebugDetails = computed(() => Boolean(importDebugResponse.value?.debug?.attempts?.length))
+const debugFetchError = computed(() => activeDebugResponse.value?.fetchError?.trim() || '')
 const debugBaseUrl = computed(() => debugInfo.value?.baseUrl || props.provider?.apiUrl || '—')
 const debugPlatformLabel = computed(() => debugInfo.value?.platform?.trim() || props.platform || '')
 const debugRequestedSourceLabel = computed(() => (
-  formatSourceLabel(debugInfo.value?.requestedSource) || formatSourceLabel(selectedSource.value) || '—'
+  formatSourceLabel(debugInfo.value?.requestedSource) ||
+  (debugContext.value === 'import' ? formatSourceLabel('api/pricing') : formatSourceLabel(selectedSource.value)) ||
+  '—'
 ))
 const debugResolvedSourceLabel = computed(() => (
-  formatSourceLabel(debugInfo.value?.resolvedSource) || pricingSourceLabel.value || '—'
+  formatSourceLabel(debugInfo.value?.resolvedSource) ||
+  formatSourceLabel(activeDebugResponse.value?.pricingSource) ||
+  '—'
 ))
 
 const identifyVendor = (modelName: string, ownerBy?: string): ProviderVendorKey => {
@@ -671,10 +758,25 @@ const detailModalTitle = computed(() => {
   return `${baseTitle} · ${editingTargetModel.value.model}`
 })
 
+const importModalTitle = computed(() => {
+  if (!props.provider) return t('components.main.modelList.importTitleFallback')
+  return t('components.main.modelList.importTitle', { name: props.provider.name })
+})
+
 const debugModalTitle = computed(() => {
+  if (debugContext.value === 'import') {
+    if (!props.provider) return t('components.main.modelList.importDebugTitleFallback')
+    return t('components.main.modelList.importDebugTitle', { name: props.provider.name })
+  }
   if (!props.provider) return t('components.main.modelList.debugTitleFallback')
   return t('components.main.modelList.debugTitle', { name: props.provider.name })
 })
+
+const isLikelyChallengeScript = (value: string) => {
+  const raw = String(value ?? '').toLowerCase()
+  return raw.includes('acw_sc__v2') ||
+    (raw.includes('document.cookie') && raw.includes('location.reload'))
+}
 
 const formatDebugAuthType = (authType?: string, kind: 'configured' | 'attempt' = 'attempt') => {
   const trimmed = String(authType ?? '').trim()
@@ -798,16 +900,19 @@ const buildDebugCopyPayload = () => {
   return lines.join('\n')
 }
 
-const openDebugModal = () => {
-  if (!hasDebugDetails.value) {
+const openDebugModal = (context: 'main' | 'import' = 'main') => {
+  const targetResponse = context === 'import' ? importDebugResponse.value : response.value
+  if ((targetResponse?.debug?.attempts ?? []).length === 0) {
     showToast(t('components.main.modelList.debugUnavailable'), 'warning')
     return
   }
+  debugContext.value = context
   debugModalOpen.value = true
 }
 
 const closeDebugModal = () => {
   debugModalOpen.value = false
+  debugContext.value = 'main'
 }
 
 const copyDebugDetails = async () => {
@@ -828,6 +933,75 @@ const copyDebugDetails = async () => {
       t('components.main.modelList.toast.debugCopyFailed', { error: extractErrorMessage(err) }),
       'error',
     )
+  }
+}
+
+const resetImportState = () => {
+  importJsonInput.value = ''
+  importError.value = ''
+  importingJson.value = false
+  importDebugResponse.value = null
+}
+
+const openImportModal = () => {
+  importModalOpen.value = true
+  importError.value = ''
+  importDebugResponse.value = null
+  nextTick(() => importTextareaRef.value?.focus())
+}
+
+const closeImportModal = (force = false) => {
+  if (importingJson.value && !force) return
+  importRequestSeq.value += 1
+  importModalOpen.value = false
+  resetImportState()
+}
+
+const requestImportModalClose = () => {
+  closeImportModal()
+}
+
+const submitImportJson = async () => {
+  if (!props.provider || importingJson.value) return
+  const raw = importJsonInput.value.trim()
+  if (!raw) {
+    importError.value = t('components.main.modelList.importEmpty')
+    return
+  }
+  if (isLikelyChallengeScript(raw)) {
+    importError.value = t('components.main.modelList.importChallengeScript')
+    return
+  }
+
+  const requestSeq = importRequestSeq.value + 1
+  importRequestSeq.value = requestSeq
+  importError.value = ''
+  importDebugResponse.value = null
+  importingJson.value = true
+  try {
+    const data = await importProviderModelPricingJSON(props.provider, props.platform, raw)
+    if (requestSeq !== importRequestSeq.value) return
+    if (data.fetchError?.trim()) {
+      importDebugResponse.value = data
+      importError.value = data.fetchError.trim()
+      return
+    }
+    response.value = data
+    error.value = data.fetchError?.trim() || ''
+    searchTerm.value = ''
+    selectedSource.value = 'api/pricing'
+    selectedVendor.value = 'all'
+    closeDebugModal()
+    closeModelDetail()
+    clearPricingInteraction()
+    closeImportModal(true)
+    showToast(t('components.main.modelList.toast.importSuccess'))
+  } catch (err) {
+    if (requestSeq !== importRequestSeq.value) return
+    importError.value = extractErrorMessage(err)
+  } finally {
+    if (requestSeq !== importRequestSeq.value) return
+    importingJson.value = false
   }
 }
 
@@ -1125,6 +1299,7 @@ const loadModels = async () => {
   error.value = ''
   response.value = null
   closeDebugModal()
+  closeImportModal(true)
 
   try {
     const data = await fetchProviderModelPricing(props.provider, props.platform, selectedSource.value)
@@ -1144,6 +1319,7 @@ const handleSourceChange = () => {
   selectedVendor.value = 'all'
   closeModelDetail()
   closeDebugModal()
+  closeImportModal(true)
   clearPricingInteraction()
   void loadModels()
 }
@@ -1224,6 +1400,7 @@ const resetUIState = () => {
   response.value = null
   loadRequestSeq.value += 1
   closeDebugModal()
+  closeImportModal(true)
   closeModelDetail()
   clearPricingInteraction()
   savingModel.value = ''
@@ -1233,6 +1410,19 @@ const resetUIState = () => {
 const handleClose = () => {
   emit('close')
 }
+
+watch(
+  importJsonInput,
+  (value, previousValue) => {
+    if (value === previousValue || importingJson.value) return
+    if (importError.value) {
+      importError.value = ''
+    }
+    if (importDebugResponse.value) {
+      importDebugResponse.value = null
+    }
+  },
+)
 
 watch(
   () => [props.open, props.provider?.id],
@@ -1302,10 +1492,25 @@ watch(
 
 .provider-model-source-footer {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
+}
+
+.provider-model-source-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+}
+
+.meta-pill-accent {
+  border-color: rgba(16, 185, 129, 0.26);
+  background: rgba(16, 185, 129, 0.12);
+  color: #047857;
 }
 
 .provider-model-search {
@@ -1314,6 +1519,7 @@ watch(
 }
 
 .provider-model-debug-button,
+.provider-model-import-button,
 .provider-model-inline-debug-btn {
   display: inline-flex;
   align-items: center;
@@ -1332,12 +1538,14 @@ watch(
 }
 
 .provider-model-debug-button:hover,
+.provider-model-import-button:hover,
 .provider-model-inline-debug-btn:hover {
   background: rgba(59, 130, 246, 0.14);
   border-color: rgba(59, 130, 246, 0.3);
 }
 
-.provider-model-debug-button:disabled {
+.provider-model-debug-button:disabled,
+.provider-model-import-button:disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }
@@ -1347,6 +1555,18 @@ watch(
   flex-direction: column;
   align-items: center;
   gap: 10px;
+}
+
+.provider-model-challenge-hint {
+  margin: 0;
+  padding: 10px 12px;
+  max-width: min(780px, 100%);
+  border-radius: 14px;
+  border: 1px solid rgba(245, 158, 11, 0.26);
+  background: rgba(245, 158, 11, 0.12);
+  color: #b45309;
+  font-size: 0.82rem;
+  line-height: 1.55;
 }
 
 .provider-model-item.no-pricing {
@@ -1438,6 +1658,35 @@ watch(
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+.provider-import-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.import-hint {
+  margin: 0;
+}
+
+.provider-import-textarea {
+  width: 100%;
+  min-height: 320px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  font-size: 0.8rem;
+  line-height: 1.65;
+}
+
+.provider-import-error {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(239, 68, 68, 0.22);
+  background: rgba(239, 68, 68, 0.08);
+  color: #b91c1c;
+  font-size: 0.82rem;
+  line-height: 1.5;
 }
 
 .provider-debug-modal {
@@ -1786,7 +2035,12 @@ watch(
     align-items: stretch;
   }
 
+  .provider-model-source-actions {
+    width: 100%;
+  }
+
   .provider-model-debug-button,
+  .provider-model-import-button,
   .provider-model-inline-debug-btn {
     width: 100%;
   }
