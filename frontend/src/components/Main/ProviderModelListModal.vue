@@ -210,7 +210,6 @@
     :title="importModalTitle"
     :panel-width="'min(860px, 94vw)'"
     :close-disabled="importingJson"
-    :initial-focus-selector="'.base-textarea'"
     @close="requestImportModalClose"
   >
     <div class="provider-import-modal">
@@ -606,6 +605,7 @@ const resettingModel = ref('')
 const debugModalOpen = ref(false)
 const importModalOpen = ref(false)
 const importingJson = ref(false)
+let importFocusTimer: ReturnType<typeof setTimeout> | null = null
 const importJsonInput = ref('')
 const importError = ref('')
 const importDebugResponse = ref<ProviderModelPricingResponse | null>(null)
@@ -944,14 +944,29 @@ const resetImportState = () => {
   importDebugResponse.value = null
 }
 
+const clearImportFocusTimer = () => {
+  if (importFocusTimer !== null) {
+    clearTimeout(importFocusTimer)
+    importFocusTimer = null
+  }
+}
+
 const openImportModal = () => {
   importModalOpen.value = true
   importError.value = ''
   importDebugResponse.value = null
+  // 延迟聚焦 textarea，避免在 CSS 动画期间调用 focus() 触发 WebKit 渲染 bug
+  // 400ms > InlineModal MODAL_FOCUS_FALLBACK_MS(380ms)，确保动画及内部聚焦逻辑全部完成
+  clearImportFocusTimer()
+  importFocusTimer = setTimeout(() => {
+    importFocusTimer = null
+    importTextareaRef.value?.focus()
+  }, 400)
 }
 
 const closeImportModal = (force = false) => {
   if (importingJson.value && !force) return
+  clearImportFocusTimer()
   importRequestSeq.value += 1
   importModalOpen.value = false
   resetImportState()
