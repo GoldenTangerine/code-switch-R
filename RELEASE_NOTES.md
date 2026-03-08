@@ -1,3 +1,19 @@
+# Code Switch v2.7.20
+
+## 新功能
+- **acw_sc__v2 WAF 挑战自动绕过**：当供应商 `/api/pricing` 接口返回 acw_sc__v2 WAF 挑战页时，程序会使用内嵌 JS 引擎（goja）自动求解挑战脚本、计算 cookie 并重试请求，大多数情况下无需用户手动在浏览器中完成验证即可拉取模型价格。
+
+## 修复
+- **WAF 绕过安全边界加固**：为挑战脚本执行添加 5 秒超时保护，防止恶意或异常脚本导致 goroutine 阻塞；`setTimeout` 同步模拟添加递归深度限制（最大 10 层），防止混淆脚本递归调用导致栈溢出。
+- **调试信息完整性修复**：修复 WAF 绕过成功时原始请求的 debug attempt 缺少错误描述的问题，现在会完整记录"JSON 解析失败 → 检测到挑战 → 自动绕过成功"的完整链路。
+- **DOM 模拟兼容性增强**：修复 `getElementsByTagName` 返回 `nil` 可能导致 JS 运行时 TypeError 的问题，改为返回空数组；重试请求补充 `Referer` 头，提升 WAF 变种场景的通过率。
+
+## 技术改进
+- 新增 `services/waf_acw_bypass.go`，封装 acw_sc__v2 挑战求解与带 cookie 重试的完整流程，与原有错误处理链路解耦，绕过失败时无缝降级到手动导入提示。
+- 引入 `github.com/dop251/goja` 纯 Go JS 引擎，无 CGO 依赖，跨平台构建无额外配置。
+
+---
+
 # Code Switch v2.7.19
 
 ## 修复
