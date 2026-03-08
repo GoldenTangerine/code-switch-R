@@ -255,6 +255,94 @@ func TestRequestLogDailyHeatmapStats_IncludesPayloadBytes(t *testing.T) {
 	}
 }
 
+func TestRequestLogDailyHeatmapStatsByYear_ReturnsSelectedYearOnly(t *testing.T) {
+	useIsolatedHomeDir(t)
+
+	if err := InitDatabase(); err != nil {
+		t.Fatalf("初始化数据库失败: %v", err)
+	}
+
+	db, err := xdb.DB("default")
+	if err != nil {
+		t.Fatalf("获取数据库连接失败: %v", err)
+	}
+
+	year2024Day := time.Date(2024, time.January, 15, 12, 0, 0, 0, time.Local)
+	year2025Day := time.Date(2025, time.June, 20, 12, 0, 0, 0, time.Local)
+	insertRequestLogForHeatmap(t, db, year2024Day.UTC().Format(timeLayout), 8, 16, 2, 1, 0.1)
+	insertRequestLogForHeatmap(t, db, year2025Day.UTC().Format(timeLayout), 10, 20, 3, 1, 0.2)
+
+	ls := NewLogService(nil)
+	stats, err := ls.RequestLogDailyHeatmapStatsByYear(2025)
+	if err != nil {
+		t.Fatalf("RequestLogDailyHeatmapStatsByYear 调用失败: %v", err)
+	}
+
+	if findHeatmapStatByDay(stats, "2024-01-15") != nil {
+		t.Fatalf("期望 2025 年热力墙不包含 2024 年数据，实际 %+v", stats)
+	}
+	target := findHeatmapStatByDay(stats, "2025-06-20")
+	if target == nil || target.TotalRequests != 1 {
+		t.Fatalf("期望 2025-06-20 返回 1 条聚合，实际 %+v", target)
+	}
+}
+
+func TestListRequestLogHeatmapYears_ReturnsDistinctYearsDescending(t *testing.T) {
+	useIsolatedHomeDir(t)
+
+	if err := InitDatabase(); err != nil {
+		t.Fatalf("初始化数据库失败: %v", err)
+	}
+
+	db, err := xdb.DB("default")
+	if err != nil {
+		t.Fatalf("获取数据库连接失败: %v", err)
+	}
+
+	insertRequestLogForHeatmap(
+		t,
+		db,
+		time.Date(2024, time.January, 15, 12, 0, 0, 0, time.Local).UTC().Format(timeLayout),
+		8,
+		16,
+		2,
+		1,
+		0.1,
+	)
+	insertRequestLogForHeatmap(
+		t,
+		db,
+		time.Date(2025, time.June, 20, 12, 0, 0, 0, time.Local).UTC().Format(timeLayout),
+		10,
+		20,
+		3,
+		1,
+		0.2,
+	)
+	insertRequestLogForHeatmap(
+		t,
+		db,
+		time.Date(2025, time.December, 31, 12, 0, 0, 0, time.Local).UTC().Format(timeLayout),
+		12,
+		24,
+		5,
+		2,
+		0.4,
+	)
+
+	ls := NewLogService(nil)
+	years, err := ls.ListRequestLogHeatmapYears()
+	if err != nil {
+		t.Fatalf("ListRequestLogHeatmapYears 调用失败: %v", err)
+	}
+	if len(years) != 2 {
+		t.Fatalf("期望返回 2 个年份，实际 %v", years)
+	}
+	if years[0] != 2025 || years[1] != 2024 {
+		t.Fatalf("期望按降序返回 [2025 2024]，实际 %v", years)
+	}
+}
+
 func assertTableCount(t *testing.T, db *sql.DB, query string, expected int64, args ...any) {
 	t.Helper()
 	var count int64

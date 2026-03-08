@@ -32,6 +32,11 @@ export const DEFAULT_HEATMAP_DAYS = 21
 const DAYS_PER_WEEK = 7
 const LEVELS = 4
 
+export type HeatmapMatrixRange = {
+	startDay?: Date
+	days?: number
+}
+
 const clampDays = (days?: number) => (days && days > 0 ? Math.floor(days) : DEFAULT_HEATMAP_DAYS)
 const normalizeGranularity = (granularity?: HeatmapGranularity): HeatmapGranularity =>
 	granularity === 'daily' ? 'daily' : 'hourly'
@@ -59,6 +64,17 @@ const addDays = (date: Date, days: number) => {
 	const result = new Date(date)
 	result.setDate(result.getDate() + days)
 	return result
+}
+
+const normalizeHeatmapRange = (range: HeatmapMatrixRange = {}) => {
+	const normalizedDays = clampDays(range.days)
+	const startDay = range.startDay
+		? startOfDay(range.startDay)
+		: addDays(startOfDay(new Date()), -(normalizedDays - 1))
+	return {
+		startDay,
+		days: normalizedDays,
+	}
 }
 
 const startOfWeekMonday = (date: Date) => {
@@ -282,31 +298,36 @@ const buildDailyColumns = (
 	return columns
 }
 
-export const generateFallbackUsageHeatmap = (
-	days = DEFAULT_HEATMAP_DAYS,
+export const generateFallbackUsageHeatmapForRange = (
+	range: HeatmapMatrixRange = {},
 	granularity: HeatmapGranularity = 'hourly',
 	displaySettings: HeatmapDisplaySettings = DEFAULT_HEATMAP_DISPLAY_SETTINGS,
 ): UsageHeatmapWeek[] => {
-	const normalizedDays = clampDays(days)
-	const startDay = addDays(startOfDay(new Date()), -(normalizedDays - 1))
+	const { startDay, days } = normalizeHeatmapRange(range)
 	const normalizedGranularity = normalizeGranularity(granularity)
 	const normalizedDisplaySettings = normalizeHeatmapDisplaySettings(displaySettings)
 	if (normalizedGranularity === 'daily') {
 		const dailyStatsMap = new Map<string, StatBucket>()
-		return buildDailyColumns(normalizedDays, dailyStatsMap, startDay, 0, normalizedDisplaySettings)
+		return buildDailyColumns(days, dailyStatsMap, startDay, 0, normalizedDisplaySettings)
 	}
 	const hourlyStatsMap = new Map<string, StatBucket>()
-	return buildHourlyColumns(normalizedDays, hourlyStatsMap, startDay, 0, normalizedDisplaySettings)
+	return buildHourlyColumns(days, hourlyStatsMap, startDay, 0, normalizedDisplaySettings)
 }
 
-export const buildUsageHeatmapMatrix = (
-	stats: HeatmapStat[] = [],
+export const generateFallbackUsageHeatmap = (
 	days = DEFAULT_HEATMAP_DAYS,
 	granularity: HeatmapGranularity = 'hourly',
 	displaySettings: HeatmapDisplaySettings = DEFAULT_HEATMAP_DISPLAY_SETTINGS,
+): UsageHeatmapWeek[] =>
+	generateFallbackUsageHeatmapForRange({ days }, granularity, displaySettings)
+
+export const buildUsageHeatmapMatrixForRange = (
+	stats: HeatmapStat[] = [],
+	range: HeatmapMatrixRange = {},
+	granularity: HeatmapGranularity = 'hourly',
+	displaySettings: HeatmapDisplaySettings = DEFAULT_HEATMAP_DISPLAY_SETTINGS,
 ): UsageHeatmapWeek[] => {
-	const normalizedDays = clampDays(days)
-	const startDay = addDays(startOfDay(new Date()), -(normalizedDays - 1))
+	const { startDay, days } = normalizeHeatmapRange(range)
 	const normalizedGranularity = normalizeGranularity(granularity)
 	const normalizedDisplaySettings = normalizeHeatmapDisplaySettings(displaySettings)
 	const intensityMetric = normalizedDisplaySettings.intensityMetric
@@ -341,12 +362,12 @@ export const buildUsageHeatmapMatrix = (
 
 			const dayKey = hourKey.slice(0, 10)
 			const dayBucket = dailyStatsMap.get(dayKey)
-				if (dayBucket) {
-					dayBucket.requests += update.requests
-					dayBucket.payloadBytes += update.payloadBytes
-					dayBucket.payloadCapturedRequests += update.payloadCapturedRequests
-					dayBucket.inputTokens += update.inputTokens
-					dayBucket.outputTokens += update.outputTokens
+			if (dayBucket) {
+				dayBucket.requests += update.requests
+				dayBucket.payloadBytes += update.payloadBytes
+				dayBucket.payloadCapturedRequests += update.payloadCapturedRequests
+				dayBucket.inputTokens += update.inputTokens
+				dayBucket.outputTokens += update.outputTokens
 				dayBucket.cacheReadTokens += update.cacheReadTokens
 				dayBucket.reasoningTokens += update.reasoningTokens
 				dayBucket.totalTokens += update.totalTokens
@@ -370,7 +391,7 @@ export const buildUsageHeatmapMatrix = (
 				? maxDailyValue
 				: dailyScaleMax
 		return buildDailyColumns(
-			normalizedDays,
+			days,
 			dailyStatsMap,
 			startDay,
 			Math.max(intensityMax, 0),
@@ -421,13 +442,21 @@ export const buildUsageHeatmapMatrix = (
 	})
 
 	return buildHourlyColumns(
-		normalizedDays,
+		days,
 		hourlyStatsMap,
 		startDay,
 		maxHourlyValue,
 		normalizedDisplaySettings,
 	)
 }
+
+export const buildUsageHeatmapMatrix = (
+	stats: HeatmapStat[] = [],
+	days = DEFAULT_HEATMAP_DAYS,
+	granularity: HeatmapGranularity = 'hourly',
+	displaySettings: HeatmapDisplaySettings = DEFAULT_HEATMAP_DISPLAY_SETTINGS,
+): UsageHeatmapWeek[] =>
+	buildUsageHeatmapMatrixForRange(stats, { days }, granularity, displaySettings)
 
 export const calculateHeatmapDayRange = (days = DEFAULT_HEATMAP_DAYS) => {
 	return clampDays(days)

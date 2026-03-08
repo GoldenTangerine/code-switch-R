@@ -1,9 +1,22 @@
-import { computed, nextTick, reactive, ref, type ComponentPublicInstance, type Ref } from 'vue'
-import { useAdaptiveHeatmap } from '../../../composables/useAdaptiveHeatmap'
+import { computed, reactive, ref, type Ref } from 'vue'
 import { DEFAULT_HEATMAP_DISPLAY_SETTINGS, type HeatmapDisplaySettings } from '../../../data/heatmapDisplaySettings'
-import { fetchRequestLogDailyHeatmapStats, fetchLogStorageStats, clearRequestLogs, deleteRequestLogsByDate, clearLogStats, type RequestLog, type LogStorageStats } from '../../../services/logs'
-import { showToast } from '../../../utils/toast'
+import {
+  buildUsageHeatmapMatrixForRange,
+  generateFallbackUsageHeatmapForRange,
+  type UsageHeatmapDay,
+} from '../../../data/usageHeatmap'
+import {
+  clearLogStats,
+  clearRequestLogs,
+  deleteRequestLogsByDate,
+  fetchLogStorageStats,
+  fetchRequestLogDailyHeatmapStatsByYear,
+  fetchRequestLogHeatmapYears,
+  type LogStorageStats,
+  type RequestLog,
+} from '../../../services/logs'
 import { extractErrorMessage } from '../../../utils/error'
+import { showToast } from '../../../utils/toast'
 import { useLogsStorageHeatmap } from './useLogsStorageHeatmap'
 import {
   buildLogsTableTextFormatters,
@@ -18,7 +31,6 @@ import {
   httpCodeClass,
   intensityClass,
 } from '../utils'
-import { type HeatmapGranularity } from '../../../data/usageHeatmap'
 
 type TranslateFn = (key: string, params?: Record<string, unknown>) => string
 
@@ -31,6 +43,25 @@ type UseLogsStorageModalControllerOptions = {
 
 type StorageClearTarget = 'requestLogs' | 'requestLogsByDate' | 'stats'
 
+const STORAGE_HEATMAP_GRANULARITY = 'daily'
+
+const getCurrentYear = () => new Date().getFullYear()
+
+const isLeapYear = (year: number) => year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)
+
+const normalizeStorageHeatmapYear = (value: number | string) => {
+  const parsed = typeof value === 'number' ? value : Number.parseInt(String(value ?? '').trim(), 10)
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : getCurrentYear()
+}
+
+const buildStorageHeatmapYearRange = (year: number) => {
+  const startDay = new Date(year, 0, 1, 0, 0, 0, 0)
+  return {
+    startDay,
+    days: isLeapYear(year) ? 366 : 365,
+  }
+}
+
 export function useLogsStorageModalController(options: UseLogsStorageModalControllerOptions) {
   const { locale, t, loadDashboard, openPayloadDetailModal } = options
 
@@ -40,23 +71,35 @@ export function useLogsStorageModalController(options: UseLogsStorageModalContro
   const storageModal = reactive({
     open: false,
   })
-  const storageHeatmapContainerRef = ref<HTMLElement | null>(null)
-  const storageHeatmapGranularity = ref<HeatmapGranularity>('daily')
-  const storageHeatmapDisplaySettings = ref<HeatmapDisplaySettings>({
+
+  const storageHeatmapDisplaySettings: HeatmapDisplaySettings = {
     ...DEFAULT_HEATMAP_DISPLAY_SETTINGS,
     intensityMetric: 'requests',
     dailyIntensityMode: 'daily_peak',
-  })
-  const {
-    displayData: storageHeatmap,
-    isLoading: storageHeatmapLoading,
-    init: initStorageHeatmap,
-    cleanup: cleanupStorageHeatmap,
-    reload: reloadStorageHeatmap,
-  } = useAdaptiveHeatmap(storageHeatmapContainerRef, storageHeatmapGranularity, storageHeatmapDisplaySettings, {
-    fetcher: fetchRequestLogDailyHeatmapStats,
-  })
+  }
+
+  const storageHeatmapYear = ref(getCurrentYear())
+  const storageHeatmapFetchedYears = ref<number[]>([])
+  const storageHeatmap = ref<UsageHeatmapDay[][]>(
+    generateFallbackUsageHeatmapForRange(
+      buildStorageHeatmapYearRange(storageHeatmapYear.value),
+      STORAGE_HEATMAP_GRANULARITY,
+      storageHeatmapDisplaySettings,
+    ),
+  )
+  const storageHeatmapLoading = ref(false)
+  const storageHeatmapRequestId = ref(0)
+  const storageHeatmapYearsRequestId = ref(0)
   let storageHeatmapReady = false
+
+  const storageHeatmapYears = computed(() => {
+    const years = new Set<number>([
+      getCurrentYear(),
+      storageHeatmapYear.value,
+      ...storageHeatmapFetchedYears.value.map((year) => normalizeStorageHeatmapYear(year)),
+    ])
+    return [...years].sort((left, right) => right - left)
+  })
 
   const storageModalOpen = computed(() => storageModal.open)
   const {
@@ -92,12 +135,25 @@ export function useLogsStorageModalController(options: UseLogsStorageModalContro
     formatNumber,
   })
 
-  const bindStorageHeatmapContainerRef = (element: Element | ComponentPublicInstance | null) => {
-    storageHeatmapContainerRef.value = (element instanceof HTMLElement
-      ? element
-      : (element as ComponentPublicInstance | null)?.$el instanceof HTMLElement
-        ? (element as ComponentPublicInstance).$el
-        : null)
+  const buildStorageHeatmapFallback = (year = storageHeatmapYear.value) =>
+    generateFallbackUsageHeatmapForRange(
+      buildStorageHeatmapYearRange(normalizeStorageHeatmapYear(year)),
+      STORAGE_HEATMAP_GRANULARITY,
+      storageHeatmapDisplaySettings,
+    )
+
+  const primeStorageHeatmapState = (year = getCurrentYear()) => {
+    const normalizedYear = normalizeStorageHeatmapYear(year)
+    storageHeatmapYear.value = normalizedYear
+    storageHeatmapFetchedYears.value = []
+    storageHeatmap.value = buildStorageHeatmapFallback(normalizedYear)
+    storageHeatmapLoading.value = false
+  }
+
+  const invalidateStorageHeatmapRequests = () => {
+    storageHeatmapRequestId.value += 1
+    storageHeatmapYearsRequestId.value += 1
+    storageHeatmapLoading.value = false
   }
 
   const formatStorageHeatmapPayloadValue = (
@@ -122,26 +178,88 @@ export function useLogsStorageModalController(options: UseLogsStorageModalContro
     }
   }
 
+  const loadStorageHeatmapYears = async () => {
+    const requestId = ++storageHeatmapYearsRequestId.value
+    try {
+      const years = await fetchRequestLogHeatmapYears()
+      if (requestId !== storageHeatmapYearsRequestId.value) return
+      storageHeatmapFetchedYears.value = (Array.isArray(years) ? years : [])
+        .map((year) => normalizeStorageHeatmapYear(year))
+        .filter((year, index, items) => year > 0 && items.indexOf(year) === index)
+        .sort((left, right) => right - left)
+    } catch (error) {
+      if (requestId !== storageHeatmapYearsRequestId.value) return
+      console.error('failed to load request log heatmap years', error)
+    }
+  }
+
+  const loadStorageHeatmap = async (year = storageHeatmapYear.value) => {
+    const normalizedYear = normalizeStorageHeatmapYear(year)
+    const range = buildStorageHeatmapYearRange(normalizedYear)
+    const requestId = ++storageHeatmapRequestId.value
+    storageHeatmapLoading.value = true
+    storageHeatmap.value = generateFallbackUsageHeatmapForRange(
+      range,
+      STORAGE_HEATMAP_GRANULARITY,
+      storageHeatmapDisplaySettings,
+    )
+    try {
+      const stats = await fetchRequestLogDailyHeatmapStatsByYear(normalizedYear)
+      if (requestId !== storageHeatmapRequestId.value || storageHeatmapYear.value !== normalizedYear) {
+        return
+      }
+      storageHeatmap.value = buildUsageHeatmapMatrixForRange(
+        stats,
+        range,
+        STORAGE_HEATMAP_GRANULARITY,
+        storageHeatmapDisplaySettings,
+      )
+    } catch (error) {
+      if (requestId !== storageHeatmapRequestId.value) return
+      console.error('failed to load request log heatmap', error)
+    } finally {
+      if (requestId === storageHeatmapRequestId.value) {
+        storageHeatmapLoading.value = false
+      }
+    }
+  }
+
+  const syncStorageHeatmapSelectionAndLogs = async () => {
+    const selectionChanged = normalizeStorageHeatmapSelection({ autoLoad: false })
+    await loadSelectedStorageDayLogs(selectionChanged ? 1 : storageDayLogsPage.value)
+  }
+
   const ensureStorageHeatmapInitialized = async () => {
-    await nextTick()
-    cleanupStorageHeatmap()
-    await initStorageHeatmap()
+    await Promise.all([loadStorageHeatmapYears(), loadStorageHeatmap(storageHeatmapYear.value)])
     storageHeatmapReady = true
-    normalizeStorageHeatmapSelection()
+    await syncStorageHeatmapSelectionAndLogs()
   }
 
   const reloadStorageHeatmapIfReady = async () => {
     if (!storageHeatmapReady) return
-    await reloadStorageHeatmap()
-    normalizeStorageHeatmapSelection()
+    await Promise.all([loadStorageHeatmapYears(), loadStorageHeatmap(storageHeatmapYear.value)])
+    await syncStorageHeatmapSelectionAndLogs()
   }
 
   const refreshStorageOverview = async () => {
-    await Promise.all([loadStorageStats(), reloadStorageHeatmapIfReady(), loadSelectedStorageDayLogs()])
+    await Promise.all([loadStorageStats(), reloadStorageHeatmapIfReady()])
+  }
+
+  const updateStorageHeatmapYear = async (value: number | string) => {
+    const nextYear = normalizeStorageHeatmapYear(value)
+    if (nextYear === storageHeatmapYear.value) return
+    storageHeatmapYear.value = nextYear
+    selectedStorageHeatmapDate.value = ''
+    hideStorageHeatmapTooltip()
+    resetStorageDayLogs()
+    if (!storageHeatmapReady) return
+    await loadStorageHeatmap(nextYear)
+    await syncStorageHeatmapSelectionAndLogs()
   }
 
   const openStorageModal = async () => {
     storageModal.open = true
+    primeStorageHeatmapState(getCurrentYear())
     await Promise.all([loadStorageStats(), ensureStorageHeatmapInitialized()])
   }
 
@@ -169,7 +287,8 @@ export function useLogsStorageModalController(options: UseLogsStorageModalContro
     resetStorageClearConfirm()
     hideStorageHeatmapTooltip()
     resetStorageDayLogs()
-    cleanupStorageHeatmap()
+    invalidateStorageHeatmapRequests()
+    primeStorageHeatmapState(getCurrentYear())
   }
 
   const closeStorageClearConfirm = () => {
@@ -254,7 +373,6 @@ export function useLogsStorageModalController(options: UseLogsStorageModalContro
       }
       showToast(successMessage, successTone)
       await Promise.all([loadStorageStats(), loadDashboard(), reloadStorageHeatmapIfReady()])
-      await loadSelectedStorageDayLogs()
       resetStorageClearConfirm()
     } catch (error) {
       console.error('failed to clear log storage', error)
@@ -288,6 +406,7 @@ export function useLogsStorageModalController(options: UseLogsStorageModalContro
     handleClearRequestLogs,
     handleClearRequestLogsByDate,
     handleClearStats,
+    updateStorageHeatmapYear,
     showStorageHeatmapTooltip,
     hideStorageHeatmapTooltip,
     selectStorageHeatmapDay,
@@ -300,8 +419,9 @@ export function useLogsStorageModalController(options: UseLogsStorageModalContro
     storageHeatmapReady = false
     hideStorageHeatmapTooltip()
     resetStorageDayLogs()
-    cleanupStorageHeatmap()
     resetStorageClearConfirm()
+    invalidateStorageHeatmapRequests()
+    primeStorageHeatmapState(getCurrentYear())
   }
 
   return {
@@ -316,6 +436,8 @@ export function useLogsStorageModalController(options: UseLogsStorageModalContro
     storageClearConfirmActionLabel,
     closeStorageClearConfirm,
     confirmStorageClear,
+    storageHeatmapYear,
+    storageHeatmapYears,
     storageHeatmapLoading,
     storageHeatmap,
     selectedStorageHeatmapDay,
@@ -328,7 +450,6 @@ export function useLogsStorageModalController(options: UseLogsStorageModalContro
     storageDayLogsTotalPages,
     storageHeatmapHasData,
     storageHeatmapTooltip,
-    bindStorageHeatmapContainerRef,
     bindStorageHeatmapTooltipRef,
     storageModalFormatters,
     storageModalHandlers,

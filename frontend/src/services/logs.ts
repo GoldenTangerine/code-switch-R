@@ -291,3 +291,12 @@ export const fetchRequestLogDailyHeatmapStats = async (days: number): Promise<He
   const range = Number.isFinite(days) && days > 0 ? Math.floor(days) : 365
   return Call.ByName('codeswitch/services.LogService.RequestLogDailyHeatmapStats', range)
 }
+
+export const fetchRequestLogDailyHeatmapStatsByYear = async (year: number): Promise<HeatmapStat[]> => {
+  const normalized = Number.isFinite(year) && year > 0 ? Math.floor(year) : new Date().getFullYear()
+  return Call.ByName('codeswitch/services.LogService.RequestLogDailyHeatmapStatsByYear', normalized)
+}
+
+export const fetchRequestLogHeatmapYears = async (): Promise<number[]> => {
+  return Call.ByName('codeswitch/services.LogService.ListRequestLogHeatmapYears')
+}

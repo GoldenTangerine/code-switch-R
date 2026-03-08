@@ -24,6 +24,10 @@ const STORAGE_HEATMAP_TOOLTIP_VERTICAL_OFFSET = 10
 const TOOLTIP_HORIZONTAL_MARGIN = 14
 const TOOLTIP_VERTICAL_MARGIN = 20
 
+type NormalizeStorageHeatmapSelectionOptions = {
+  autoLoad?: boolean
+}
+
 const clampToRange = (value: number, min: number, max: number) => {
   if (max <= min) return min
   return Math.min(Math.max(value, min), max)
@@ -266,7 +270,8 @@ export function useLogsStorageHeatmap(options: UseLogsStorageHeatmapOptions) {
     return key !== '' && key === selectedStorageHeatmapDate.value
   }
 
-  const normalizeStorageHeatmapSelection = () => {
+  const normalizeStorageHeatmapSelection = (options: NormalizeStorageHeatmapSelectionOptions = {}) => {
+    const autoLoad = options.autoLoad !== false
     if (
       selectedStorageHeatmapDate.value &&
       storageHeatmapDays.value.some(
@@ -286,7 +291,9 @@ export function useLogsStorageHeatmap(options: UseLogsStorageHeatmapOptions) {
     selectedStorageHeatmapDate.value = nextDate
     storageDayLogsPage.value = 1
     hideStorageHeatmapTooltip()
-    void loadSelectedStorageDayLogs(1)
+    if (autoLoad) {
+      void loadSelectedStorageDayLogs(1)
+    }
     return true
   }
 

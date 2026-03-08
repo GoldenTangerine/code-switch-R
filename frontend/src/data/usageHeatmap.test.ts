@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { buildUsageHeatmapMatrix } from './usageHeatmap'
+import { buildUsageHeatmapMatrix, buildUsageHeatmapMatrixForRange } from './usageHeatmap'
 import type { HeatmapStat } from '../services/logs'
 import { DEFAULT_HEATMAP_DISPLAY_SETTINGS } from './heatmapDisplaySettings'
 
@@ -93,6 +93,47 @@ describe('usageHeatmap', () => {
 		expect(new Date(matrix[1][0].dateKey).getDay()).toBe(1)
 		expect(matrix[0][0].label).toBe('12-29')
 		expect(matrix[1][0].label).toBe('01-05')
+	})
+
+	it('builds a full selected-year daily matrix instead of trailing days only', () => {
+		vi.useFakeTimers()
+		vi.setSystemTime(new Date(2026, 2, 8, 12, 0, 0))
+
+		const matrix = buildUsageHeatmapMatrixForRange(
+			[
+				makeStat('2026-01-15', 5),
+				makeStat('2026-12-31', 7),
+			],
+			{
+				startDay: new Date(2026, 0, 1),
+				days: 365,
+			},
+			'daily',
+		)
+
+		expect(matrix).toHaveLength(53)
+		expect(matrix[0][0].label).toBe('12-29')
+		expect(matrix.flat().find((cell) => cell.label === '01-15')?.requests).toBe(5)
+		expect(matrix.flat().find((cell) => cell.label === '12-31' && cell.requests > 0)?.requests).toBe(7)
+	})
+
+	it('keeps february 29 in leap-year daily ranges', () => {
+		vi.useFakeTimers()
+		vi.setSystemTime(new Date(2024, 2, 1, 12, 0, 0))
+
+		const matrix = buildUsageHeatmapMatrixForRange(
+			[
+				makeStat('2024-02-29', 4),
+			],
+			{
+				startDay: new Date(2024, 0, 1),
+				days: 366,
+			},
+			'daily',
+		)
+
+		expect(matrix).toHaveLength(53)
+		expect(matrix.flat().find((cell) => cell.label === '02-29')?.requests).toBe(4)
 	})
 
 	it('supports day-only stat keys for daily granularity', () => {

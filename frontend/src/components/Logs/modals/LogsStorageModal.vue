@@ -77,20 +77,35 @@
       </p>
 
       <section
-        :ref="bindStorageHeatmapContainerRef"
         class="contrib-wall logs-storage-heatmap-panel"
-        :aria-label="t('components.logs.storage.heatmapAriaLabel')"
+        :aria-label="t('components.logs.storage.heatmapAriaLabel', { year: storageHeatmapYear })"
       >
         <div class="logs-storage-heatmap-header">
-          <div>
+          <div class="logs-storage-heatmap-header__content">
             <h3 class="logs-storage-heatmap-title">{{ t('components.logs.storage.heatmapTitle') }}</h3>
             <p class="logs-storage-heatmap-subtitle">
-              {{ t('components.logs.storage.heatmapHint') }}
+              {{ t('components.logs.storage.heatmapHint', { year: storageHeatmapYear }) }}
             </p>
           </div>
-          <span v-if="storageHeatmapLoading" class="logs-storage-heatmap-status">
-            {{ t('components.logs.loading') }}
-          </span>
+          <div class="logs-storage-heatmap-header__meta">
+            <label class="logs-storage-heatmap-year-field">
+              <span class="logs-storage-heatmap-year-label">{{ t('components.logs.storage.heatmapYearLabel') }}</span>
+              <select
+                :value="storageHeatmapYear"
+                class="mac-select logs-storage-heatmap-year-select"
+                :aria-label="t('components.logs.storage.heatmapYearAria')"
+                :disabled="storageClearing || storageHeatmapLoading"
+                @change="handlers.updateStorageHeatmapYear(($event.target as HTMLSelectElement).value)"
+              >
+                <option v-for="year in storageHeatmapYears" :key="`storage-heatmap-year-${year}`" :value="year">
+                  {{ year }}
+                </option>
+              </select>
+            </label>
+            <span v-if="storageHeatmapLoading" class="logs-storage-heatmap-status">
+              {{ t('components.logs.loading') }}
+            </span>
+          </div>
         </div>
 
         <div class="contrib-legend">
@@ -104,39 +119,41 @@
         </div>
 
         <div class="logs-storage-heatmap-grid-shell">
-          <div class="contrib-grid logs-storage-heatmap-grid">
-            <div
-              v-for="(week, weekIndex) in storageHeatmap"
-              :key="`storage-week-${weekIndex}`"
-              class="contrib-column"
-            >
+          <div class="logs-storage-heatmap-grid-scroll">
+            <div class="contrib-grid logs-storage-heatmap-grid">
               <div
-                v-for="(day, dayIndex) in week"
-                :key="`storage-day-${weekIndex}-${dayIndex}`"
-                :class="[
-                  'contrib-cell',
-                  'logs-storage-heatmap-day',
-                  formatters.intensityClass(day.intensity),
-                  {
-                    'logs-storage-heatmap-day--interactive': day.requests > 0,
-                    'logs-storage-heatmap-day--selected': formatters.isSelectedStorageHeatmapDay(day),
-                  },
-                ]"
-                :role="day.requests > 0 ? 'button' : undefined"
-                :aria-hidden="day.requests > 0 ? undefined : true"
-                :aria-label="day.requests > 0 ? formatters.formatStorageHeatmapAriaLabel(day) : undefined"
-                :aria-pressed="day.requests > 0 ? formatters.isSelectedStorageHeatmapDay(day) : undefined"
-                :tabindex="day.requests > 0 ? 0 : undefined"
-                @mouseenter="handlers.showStorageHeatmapTooltip(day, $event)"
-                @mousemove="handlers.showStorageHeatmapTooltip(day, $event)"
-                @mouseleave="handlers.hideStorageHeatmapTooltip"
-                @focus="day.requests > 0 ? handlers.showStorageHeatmapTooltip(day, $event) : undefined"
-                @blur="day.requests > 0 ? handlers.hideStorageHeatmapTooltip() : undefined"
-                @keydown.esc="day.requests > 0 ? handlers.hideStorageHeatmapTooltip() : undefined"
-                @keydown.enter.prevent="day.requests > 0 ? handlers.selectStorageHeatmapDay(day) : undefined"
-                @keydown.space.prevent="day.requests > 0 ? handlers.selectStorageHeatmapDay(day) : undefined"
-                @click="day.requests > 0 ? handlers.selectStorageHeatmapDay(day) : undefined"
-              />
+                v-for="(week, weekIndex) in storageHeatmap"
+                :key="`storage-week-${weekIndex}`"
+                class="contrib-column"
+              >
+                <div
+                  v-for="(day, dayIndex) in week"
+                  :key="`storage-day-${weekIndex}-${dayIndex}`"
+                  :class="[
+                    'contrib-cell',
+                    'logs-storage-heatmap-day',
+                    formatters.intensityClass(day.intensity),
+                    {
+                      'logs-storage-heatmap-day--interactive': day.requests > 0,
+                      'logs-storage-heatmap-day--selected': formatters.isSelectedStorageHeatmapDay(day),
+                    },
+                  ]"
+                  :role="day.requests > 0 ? 'button' : undefined"
+                  :aria-hidden="day.requests > 0 ? undefined : true"
+                  :aria-label="day.requests > 0 ? formatters.formatStorageHeatmapAriaLabel(day) : undefined"
+                  :aria-pressed="day.requests > 0 ? formatters.isSelectedStorageHeatmapDay(day) : undefined"
+                  :tabindex="day.requests > 0 ? 0 : undefined"
+                  @mouseenter="handlers.showStorageHeatmapTooltip(day, $event)"
+                  @mousemove="handlers.showStorageHeatmapTooltip(day, $event)"
+                  @mouseleave="handlers.hideStorageHeatmapTooltip"
+                  @focus="day.requests > 0 ? handlers.showStorageHeatmapTooltip(day, $event) : undefined"
+                  @blur="day.requests > 0 ? handlers.hideStorageHeatmapTooltip() : undefined"
+                  @keydown.esc="day.requests > 0 ? handlers.hideStorageHeatmapTooltip() : undefined"
+                  @keydown.enter.prevent="day.requests > 0 ? handlers.selectStorageHeatmapDay(day) : undefined"
+                  @keydown.space.prevent="day.requests > 0 ? handlers.selectStorageHeatmapDay(day) : undefined"
+                  @click="day.requests > 0 ? handlers.selectStorageHeatmapDay(day) : undefined"
+                />
+              </div>
             </div>
           </div>
         </div>
@@ -260,7 +277,7 @@
           <p v-else class="logs-storage-heatmap-detail__empty">
             {{ storageHeatmapHasData
               ? t('components.logs.storage.dayLogsPlaceholder')
-              : t('components.logs.storage.selectedDateEmpty') }}
+              : t('components.logs.storage.selectedDateEmpty', { year: storageHeatmapYear }) }}
           </p>
         </div>
       </section>
@@ -356,6 +373,7 @@ type StorageModalHandlers = {
   handleClearRequestLogs: () => void
   handleClearRequestLogsByDate: () => void
   handleClearStats: () => void
+  updateStorageHeatmapYear: (year: number | string) => void | Promise<void>
   showStorageHeatmapTooltip: (day: UsageHeatmapDay, event: MouseEvent | FocusEvent) => void
   hideStorageHeatmapTooltip: () => void
   selectStorageHeatmapDay: (day: UsageHeatmapDay) => void
@@ -369,6 +387,8 @@ defineProps<{
   storageLoading: boolean
   storageClearing: boolean
   storageStats: LogStorageStats | null
+  storageHeatmapYear: number
+  storageHeatmapYears: number[]
   storageHeatmapLoading: boolean
   storageHeatmap: UsageHeatmapDay[][]
   selectedStorageHeatmapDay: UsageHeatmapDay | null
@@ -381,7 +401,6 @@ defineProps<{
   storageDayLogsTotalPages: number
   storageHeatmapHasData: boolean
   storageHeatmapTooltip: StorageHeatmapTooltipState
-  bindStorageHeatmapContainerRef: RefBinder
   bindStorageHeatmapTooltipRef: RefBinder
   formatters: StorageModalFormatters
   handlers: StorageModalHandlers
@@ -413,6 +432,20 @@ const { t } = useI18n()
   gap: 16px;
 }
 
+.logs-storage-heatmap-header__content {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.logs-storage-heatmap-header__meta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px 12px;
+  flex: 0 0 auto;
+}
+
 .logs-storage-heatmap-title {
   margin: 0;
   font-size: 1rem;
@@ -425,6 +458,36 @@ const { t } = useI18n()
   font-size: 0.84rem;
   line-height: 1.45;
   color: var(--contrib-muted);
+}
+
+.logs-storage-heatmap-year-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  padding: 6px 10px 6px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(15, 23, 42, 0.08);
+}
+
+.logs-storage-heatmap-year-label {
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--contrib-muted);
+}
+
+.logs-storage-heatmap-year-select {
+  width: auto;
+  min-width: 104px;
+  min-height: 32px;
+  padding: 0.35rem 1.95rem 0.35rem 0.8rem;
+  border-radius: 999px;
+  background-color: rgba(255, 255, 255, 0.08);
+  font-size: 0.85rem;
+  font-weight: 600;
 }
 
 .logs-storage-heatmap-status {
@@ -442,12 +505,20 @@ const { t } = useI18n()
   overflow: hidden;
 }
 
-.logs-storage-heatmap-grid {
-  justify-content: flex-start;
-  gap: 4px;
+.logs-storage-heatmap-grid-scroll {
+  display: flex;
+  justify-content: center;
   overflow-x: auto;
   overflow-y: hidden;
   padding: 4px 2px 8px;
+}
+
+.logs-storage-heatmap-grid {
+  flex: 0 0 auto;
+  width: max-content;
+  min-width: 100%;
+  justify-content: center;
+  gap: 4px;
 }
 
 .logs-storage-heatmap-grid .contrib-column {
@@ -456,11 +527,11 @@ const { t } = useI18n()
   max-width: 14px;
 }
 
-.logs-storage-heatmap-grid::-webkit-scrollbar {
+.logs-storage-heatmap-grid-scroll::-webkit-scrollbar {
   height: 8px;
 }
 
-.logs-storage-heatmap-grid::-webkit-scrollbar-thumb {
+.logs-storage-heatmap-grid-scroll::-webkit-scrollbar-thumb {
   background: rgba(148, 163, 184, 0.28);
   border-radius: 999px;
 }
@@ -816,11 +887,34 @@ html.dark .logs-storage-heatmap-grid-shell {
   background: linear-gradient(180deg, rgba(15, 23, 42, 0.55), rgba(15, 23, 42, 0.3));
 }
 
+html.dark .logs-storage-heatmap-year-field {
+  background: rgba(15, 23, 42, 0.54);
+  border-color: rgba(148, 163, 184, 0.22);
+}
+
+html.dark .logs-storage-heatmap-year-select {
+  background-color: rgba(15, 23, 42, 0.82);
+}
+
 @media (max-width: 768px) {
   .logs-storage-heatmap-header,
   .logs-storage-heatmap-detail__header {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .logs-storage-heatmap-header__meta {
+    justify-content: space-between;
+  }
+
+  .logs-storage-heatmap-year-field {
+    justify-content: space-between;
+    width: 100%;
+  }
+
+  .logs-storage-heatmap-year-select {
+    min-width: 0;
+    flex: 1 1 auto;
   }
 
   .logs-storage-heatmap-status {

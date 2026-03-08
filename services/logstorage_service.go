@@ -132,7 +132,55 @@ func (ls *LogService) RequestLogDailyHeatmapStats(days int) ([]HeatmapStat, erro
 	}
 	startDay := startOfDay(time.Now()).AddDate(0, 0, -(days - 1))
 	endDay := startOfDay(time.Now()).AddDate(0, 0, 1)
+	return ls.requestLogDailyHeatmapStatsBetween(startDay, endDay)
+}
 
+func (ls *LogService) RequestLogDailyHeatmapStatsByYear(year int) ([]HeatmapStat, error) {
+	if year <= 0 {
+		year = time.Now().Year()
+	}
+	startDay := time.Date(year, time.January, 1, 0, 0, 0, 0, time.Local)
+	endDay := startDay.AddDate(1, 0, 0)
+	return ls.requestLogDailyHeatmapStatsBetween(startDay, endDay)
+}
+
+func (ls *LogService) ListRequestLogHeatmapYears() ([]int, error) {
+	db, err := xdb.DB("default")
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := db.Query(`
+		SELECT DISTINCT CAST(strftime('%Y', datetime(created_at, 'localtime')) AS INTEGER) AS year
+		FROM request_log
+		WHERE TRIM(COALESCE(created_at, '')) != ''
+		ORDER BY year DESC
+	`)
+	if err != nil {
+		if isNoSuchTableErr(err) {
+			return []int{}, nil
+		}
+		return nil, err
+	}
+	defer rows.Close()
+
+	years := make([]int, 0, 8)
+	for rows.Next() {
+		var year int
+		if err := rows.Scan(&year); err != nil {
+			return nil, err
+		}
+		if year > 0 {
+			years = append(years, year)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return years, nil
+}
+
+func (ls *LogService) requestLogDailyHeatmapStatsBetween(startDay time.Time, endDay time.Time) ([]HeatmapStat, error) {
 	db, err := xdb.DB("default")
 	if err != nil {
 		return nil, err
@@ -180,7 +228,7 @@ func (ls *LogService) RequestLogDailyHeatmapStats(days int) ([]HeatmapStat, erro
 	}
 	defer rows.Close()
 
-	stats := make([]HeatmapStat, 0, days)
+	stats := make([]HeatmapStat, 0, 64)
 	for rows.Next() {
 		stat := HeatmapStat{}
 		if err := rows.Scan(&stat.Day, &stat.TotalRequests, &stat.PayloadBytes, &stat.PayloadCapturedRequests); err != nil {

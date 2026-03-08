@@ -155,6 +155,8 @@
           :storage-loading="storageLoading"
           :storage-clearing="storageClearing"
           :storage-stats="storageStats"
+          :storage-heatmap-year="storageHeatmapYear"
+          :storage-heatmap-years="storageHeatmapYears"
           :storage-heatmap-loading="storageHeatmapLoading"
           :storage-heatmap="storageHeatmap"
           :selected-storage-heatmap-day="selectedStorageHeatmapDay"
@@ -167,7 +169,6 @@
           :storage-day-logs-total-pages="storageDayLogsTotalPages"
           :storage-heatmap-has-data="storageHeatmapHasData"
           :storage-heatmap-tooltip="storageHeatmapTooltip"
-          :bind-storage-heatmap-container-ref="bindStorageHeatmapContainerRef"
           :bind-storage-heatmap-tooltip-ref="bindStorageHeatmapTooltipRef"
           :formatters="storageModalFormatters"
           :handlers="storageModalHandlers"
@@ -350,6 +351,8 @@ const {
   storageClearConfirmActionLabel,
   closeStorageClearConfirm,
   confirmStorageClear,
+  storageHeatmapYear,
+  storageHeatmapYears,
   storageHeatmapLoading,
   storageHeatmap,
   selectedStorageHeatmapDay,
@@ -362,7 +365,6 @@ const {
   storageDayLogsTotalPages,
   storageHeatmapHasData,
   storageHeatmapTooltip,
-  bindStorageHeatmapContainerRef,
   bindStorageHeatmapTooltipRef,
   storageModalFormatters,
   storageModalHandlers,
