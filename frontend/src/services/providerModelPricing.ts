@@ -31,10 +31,39 @@ export type ProviderModelPricingItem = {
   perCallPrice?: ProviderModelPerCallPrice
 }
 
+export type ProviderModelPricingDebugAttempt = {
+  source: string
+  endpoint: string
+  method: string
+  url: string
+  authType: string
+  requestHeaders?: Record<string, string>
+  statusCode?: number
+  responseHeaders?: Record<string, string>
+  contentType?: string
+  responseBody?: string
+  responseBodyBytes?: number
+  responseBodyTruncated?: boolean
+  durationMs?: number
+  error?: string
+}
+
+export type ProviderModelPricingDebug = {
+  baseUrl: string
+  platform?: string
+  requestedSource: string
+  resolvedSource?: string
+  configuredAuthType: string
+  authCandidates?: string[]
+  attempts?: ProviderModelPricingDebugAttempt[]
+}
+
 export type ProviderModelPricingResponse = {
   siteType: string
   pricingSource: ProviderModelPricingSource
   models: ProviderModelPricingItem[]
+  fetchError?: string
+  debug?: ProviderModelPricingDebug
 }
 
 export async function fetchProviderModelPricing(

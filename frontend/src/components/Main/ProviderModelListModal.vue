@@ -17,36 +17,48 @@
         </div>
 
         <div class="provider-model-toolbar-main">
-          <label class="provider-model-source-field">
-            <span class="provider-model-source-label">{{ t('components.main.modelList.sourcePicker') }}</span>
-            <select
-              v-model="selectedSource"
-              class="mac-select provider-model-source-select"
-              @change="handleSourceChange"
-            >
-              <option
-                v-for="option in sourceOptions"
-                :key="option.value"
-                :value="option.value"
+          <div class="provider-model-source-field">
+            <span class="provider-model-source-row">
+              <span class="provider-model-source-label">{{ t('components.main.modelList.sourcePicker') }}</span>
+              <select
+                v-model="selectedSource"
+                class="mac-select provider-model-source-select"
+                @change="handleSourceChange"
               >
-                {{ option.label }}
-              </option>
-            </select>
+                <option
+                  v-for="option in sourceOptions"
+                  :key="option.value"
+                  :value="option.value"
+                >
+                  {{ option.label }}
+                </option>
+              </select>
+            </span>
             <span class="provider-model-source-hint">
               {{ sourcePickerHintText }}
             </span>
-            <span v-if="pricingSourceLabel" class="provider-model-source-current">
-              {{ t('components.main.modelList.sourceResolved', { source: pricingSourceLabel }) }}
+            <span class="provider-model-source-footer">
+              <span v-if="pricingSourceLabel" class="provider-model-source-current">
+                {{ t('components.main.modelList.sourceResolved', { source: pricingSourceLabel }) }}
+              </span>
+              <button
+                type="button"
+                class="provider-model-debug-button"
+                :disabled="loading || !hasDebugDetails"
+                @click="openDebugModal"
+              >
+                {{ t('components.main.modelList.debugButton') }}
+              </button>
             </span>
-          </label>
-
-          <div class="provider-model-search">
-            <BaseInput
-              v-model="searchTerm"
-              type="text"
-              :placeholder="t('components.main.modelList.searchPlaceholder')"
-            />
           </div>
+        </div>
+
+        <div class="provider-model-search">
+          <BaseInput
+            v-model="searchTerm"
+            type="text"
+            :placeholder="t('components.main.modelList.searchPlaceholder')"
+          />
         </div>
 
         <div v-if="vendorTabs.length > 1" class="provider-model-vendors">
@@ -66,8 +78,16 @@
       <div v-if="loading" class="provider-model-state">
         {{ t('components.main.modelList.loading') }}
       </div>
-      <div v-else-if="error" class="provider-model-state error">
-        {{ error }}
+      <div v-else-if="error" class="provider-model-state provider-model-state-stack error">
+        <span>{{ error }}</span>
+        <button
+          v-if="hasDebugDetails"
+          type="button"
+          class="provider-model-inline-debug-btn"
+          @click="openDebugModal"
+        >
+          {{ t('components.main.modelList.debugOpenInline') }}
+        </button>
       </div>
       <div v-else-if="filteredModels.length === 0" class="provider-model-state">
         {{ t('components.main.modelList.empty') }}
@@ -167,6 +187,147 @@
         </div>
       </div>
     </div>
+
+    <InlineModal
+      :open="debugModalOpen"
+      :title="debugModalTitle"
+      :panel-width="'min(1120px, 96vw)'"
+      @close="closeDebugModal"
+    >
+      <div class="provider-debug-modal">
+        <p class="pricing-hint debug-hint">
+          {{ t('components.main.modelList.debugHint') }}
+        </p>
+
+        <div class="detail-section-title">{{ t('components.main.modelList.debugSummaryTitle') }}</div>
+
+        <div class="debug-summary-grid">
+          <div class="debug-summary-card">
+            <span class="detail-label">{{ t('components.main.modelList.debugSummaryRequestedSource') }}</span>
+            <span class="detail-value detail-value--wrap">{{ debugRequestedSourceLabel }}</span>
+          </div>
+          <div class="debug-summary-card">
+            <span class="detail-label">{{ t('components.main.modelList.debugSummaryResolvedSource') }}</span>
+            <span class="detail-value detail-value--wrap">{{ debugResolvedSourceLabel }}</span>
+          </div>
+          <div class="debug-summary-card">
+            <span class="detail-label">{{ t('components.main.modelList.debugSummaryConfiguredAuth') }}</span>
+            <span class="detail-value detail-value--wrap">{{ debugConfiguredAuthLabel }}</span>
+          </div>
+          <div class="debug-summary-card">
+            <span class="detail-label">{{ t('components.main.modelList.debugSummaryAuthCandidates') }}</span>
+            <span class="detail-value detail-value--wrap">{{ debugAuthCandidatesLabel }}</span>
+          </div>
+          <div class="debug-summary-card">
+            <span class="detail-label">{{ t('components.main.modelList.debugSummaryBaseUrl') }}</span>
+            <span class="detail-value detail-value--wrap">{{ debugBaseUrl }}</span>
+          </div>
+          <div v-if="debugPlatformLabel" class="debug-summary-card">
+            <span class="detail-label">{{ t('components.main.modelList.debugSummaryPlatform') }}</span>
+            <span class="detail-value detail-value--wrap">{{ debugPlatformLabel }}</span>
+          </div>
+          <div v-if="debugFetchError" class="debug-summary-card debug-summary-card--error">
+            <span class="detail-label">{{ t('components.main.modelList.debugSummaryFetchError') }}</span>
+            <span class="detail-value detail-value--wrap">{{ debugFetchError }}</span>
+          </div>
+        </div>
+
+        <p class="debug-summary-note">
+          {{ t('components.main.modelList.debugSummaryMasked') }}
+        </p>
+
+        <div class="detail-section-title">{{ t('components.main.modelList.debugAttemptsTitle') }}</div>
+
+        <div v-if="debugAttempts.length === 0" class="provider-model-state">
+          {{ t('components.main.modelList.debugUnavailable') }}
+        </div>
+        <div v-else class="debug-attempts">
+          <article
+            v-for="(attempt, index) in debugAttempts"
+            :key="`${attempt.source}-${attempt.endpoint}-${attempt.authType}-${index}`"
+            class="debug-attempt-card"
+          >
+            <div class="debug-attempt-header">
+              <div class="debug-attempt-title-wrap">
+                <div class="debug-attempt-title">
+                  {{ t('components.main.modelList.debugAttemptLabel', { index: index + 1 }) }}
+                </div>
+                <div class="debug-attempt-meta">
+                  <span class="debug-pill">
+                    {{ formatSourceLabel(attempt.source) }}
+                  </span>
+                  <span class="debug-pill">
+                    {{ attempt.endpoint || '—' }}
+                  </span>
+                  <span class="debug-pill" :class="debugStatusClass(attempt)">
+                    {{ formatDebugStatus(attempt) }}
+                  </span>
+                </div>
+              </div>
+
+              <div class="debug-attempt-side">
+                <span class="debug-attempt-side-item">
+                  {{ t('components.main.modelList.debugAttemptAuth') }}：{{ formatDebugAuthType(attempt.authType) }}
+                </span>
+                <span v-if="typeof attempt.durationMs === 'number'" class="debug-attempt-side-item">
+                  {{ t('components.main.modelList.debugAttemptDuration') }}：{{ formatDebugDuration(attempt.durationMs) }}
+                </span>
+              </div>
+            </div>
+
+            <div class="debug-attempt-grid">
+              <section class="debug-block">
+                <div class="debug-block-title">{{ t('components.main.modelList.debugRequestTitle') }}</div>
+                <div class="debug-kv">
+                  <span class="debug-kv-label">{{ t('components.main.modelList.debugRequestUrl') }}</span>
+                  <code class="debug-inline-code">{{ `${attempt.method} ${attempt.url}`.trim() }}</code>
+                </div>
+                <div class="debug-kv">
+                  <span class="debug-kv-label">{{ t('components.main.modelList.debugRequestHeaders') }}</span>
+                  <pre class="debug-code-block">{{ formatDebugMap(attempt.requestHeaders) }}</pre>
+                </div>
+              </section>
+
+              <section class="debug-block">
+                <div class="debug-block-title">{{ t('components.main.modelList.debugResponseTitle') }}</div>
+                <div class="debug-response-meta">
+                  <span>{{ t('components.main.modelList.debugAttemptStatus') }}：{{ formatDebugStatus(attempt) }}</span>
+                  <span v-if="attempt.contentType">content-type：{{ attempt.contentType }}</span>
+                  <span v-if="attempt.responseBodyBytes">
+                    {{ t('components.main.modelList.debugResponseBodyMeta', { bytes: attempt.responseBodyBytes, truncated: attempt.responseBodyTruncated ? t('components.main.modelList.debugResponseBodyTruncated') : '' }) }}
+                  </span>
+                </div>
+                <div class="debug-kv">
+                  <span class="debug-kv-label">{{ t('components.main.modelList.debugResponseHeaders') }}</span>
+                  <pre class="debug-code-block">{{ formatDebugMap(attempt.responseHeaders) }}</pre>
+                </div>
+                <div class="debug-kv">
+                  <span class="debug-kv-label">{{ t('components.main.modelList.debugResponseBody') }}</span>
+                  <pre class="debug-code-block debug-code-block--body">{{ formatDebugBody(attempt.responseBody) }}</pre>
+                </div>
+                <p v-if="attempt.error" class="debug-attempt-error">
+                  {{ attempt.error }}
+                </p>
+              </section>
+            </div>
+          </article>
+        </div>
+
+        <div class="override-actions debug-actions">
+          <button type="button" class="action-btn" @click="closeDebugModal">
+            {{ t('common.close') }}
+          </button>
+          <button
+            type="button"
+            class="primary-btn"
+            :disabled="!hasDebugDetails"
+            @click="copyDebugDetails"
+          >
+            {{ t('components.main.modelList.debugCopy') }}
+          </button>
+        </div>
+      </div>
+    </InlineModal>
 
     <InlineModal
       :open="Boolean(editingTargetModel)"
@@ -332,6 +493,8 @@ import { showToast } from '../../utils/toast'
 import {
   deleteProviderModelPricingOverride,
   fetchProviderModelPricing,
+  type ProviderModelPricingDebug,
+  type ProviderModelPricingDebugAttempt,
   type ProviderModelPerCallPrice,
   type ProviderModelPricingItem,
   type ProviderModelPricingResponse,
@@ -375,6 +538,7 @@ const selectedSource = ref<ProviderModelPricingSource>('auto')
 const editingModel = ref('')
 const savingModel = ref('')
 const resettingModel = ref('')
+const debugModalOpen = ref(false)
 
 const pricingInteraction = reactive({
   model: '',
@@ -405,12 +569,12 @@ const sourceLabelMap = computed<Record<ProviderModelPricingSource, string>>(() =
   'v1/models': t('components.main.modelList.sourceModels'),
 }))
 
-const formatPricingSourceLabel = (source?: ProviderModelPricingSource | '') => {
+const formatSourceLabel = (source?: ProviderModelPricingSource | string) => {
   if (!source) return ''
-  return sourceLabelMap.value[source] || source
+  return sourceLabelMap.value[source as ProviderModelPricingSource] || source
 }
 
-const pricingSourceLabel = computed(() => formatPricingSourceLabel(pricingSource.value))
+const pricingSourceLabel = computed(() => formatSourceLabel(pricingSource.value))
 const sourcePickerHintText = computed(() => (
   selectedSource.value === 'auto'
     ? t('components.main.modelList.sourcePickerAutoHint')
@@ -422,6 +586,19 @@ const sourceOptions = computed<ProviderModelSourceOption[]>(() => [
   { value: 'one-hub', label: sourceLabelMap.value['one-hub'] },
   { value: 'v1/models', label: sourceLabelMap.value['v1/models'] },
 ])
+
+const debugInfo = computed<ProviderModelPricingDebug | null>(() => response.value?.debug ?? null)
+const debugAttempts = computed<ProviderModelPricingDebugAttempt[]>(() => debugInfo.value?.attempts ?? [])
+const hasDebugDetails = computed(() => debugAttempts.value.length > 0)
+const debugFetchError = computed(() => response.value?.fetchError?.trim() || '')
+const debugBaseUrl = computed(() => debugInfo.value?.baseUrl || props.provider?.apiUrl || '—')
+const debugPlatformLabel = computed(() => debugInfo.value?.platform?.trim() || props.platform || '')
+const debugRequestedSourceLabel = computed(() => (
+  formatSourceLabel(debugInfo.value?.requestedSource) || formatSourceLabel(selectedSource.value) || '—'
+))
+const debugResolvedSourceLabel = computed(() => (
+  formatSourceLabel(debugInfo.value?.resolvedSource) || pricingSourceLabel.value || '—'
+))
 
 const identifyVendor = (modelName: string, ownerBy?: string): ProviderVendorKey => {
   const raw = `${ownerBy || ''} ${modelName || ''}`.toLowerCase()
@@ -493,6 +670,166 @@ const detailModalTitle = computed(() => {
   if (!editingTargetModel.value?.model) return baseTitle
   return `${baseTitle} · ${editingTargetModel.value.model}`
 })
+
+const debugModalTitle = computed(() => {
+  if (!props.provider) return t('components.main.modelList.debugTitleFallback')
+  return t('components.main.modelList.debugTitle', { name: props.provider.name })
+})
+
+const formatDebugAuthType = (authType?: string, kind: 'configured' | 'attempt' = 'attempt') => {
+  const trimmed = String(authType ?? '').trim()
+  if (!trimmed) {
+    return kind === 'configured'
+      ? t('components.main.modelList.debugAuthAuto')
+      : t('components.main.modelList.debugAuthEmpty')
+  }
+  const normalized = trimmed.toLowerCase()
+  if (normalized === 'bearer') return 'Authorization: Bearer'
+  if (normalized === 'x-api-key') return 'x-api-key'
+  return trimmed
+}
+
+const debugConfiguredAuthLabel = computed(() => formatDebugAuthType(debugInfo.value?.configuredAuthType, 'configured'))
+
+const debugAuthCandidatesLabel = computed(() => {
+  const candidates = (debugInfo.value?.authCandidates ?? [])
+    .map((candidate) => formatDebugAuthType(candidate))
+    .filter(Boolean)
+  return candidates.length > 0 ? candidates.join(' / ') : t('components.main.modelList.debugAuthEmpty')
+})
+
+const formatDebugMap = (value?: Record<string, string>) => {
+  if (!value || Object.keys(value).length === 0) {
+    return t('components.main.modelList.debugEmptyBlock')
+  }
+  return JSON.stringify(value, null, 2)
+}
+
+const formatDebugBody = (body?: string) => {
+  const raw = String(body ?? '')
+  const trimmed = raw.trim()
+  if (!trimmed) return t('components.main.modelList.debugEmptyBlock')
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    try {
+      return JSON.stringify(JSON.parse(trimmed), null, 2)
+    } catch {
+      return raw
+    }
+  }
+  return raw
+}
+
+const formatDebugStatus = (attempt: ProviderModelPricingDebugAttempt) => {
+  if (typeof attempt.statusCode === 'number' && attempt.statusCode > 0) {
+    return `HTTP ${attempt.statusCode}`
+  }
+  if (attempt.error) {
+    return t('common.failed')
+  }
+  return '—'
+}
+
+const debugStatusClass = (attempt: ProviderModelPricingDebugAttempt) => {
+  const statusCode = typeof attempt.statusCode === 'number' ? attempt.statusCode : 0
+  return {
+    'is-success': statusCode >= 200 && statusCode < 300 && !attempt.error,
+    'is-error': Boolean(attempt.error) || statusCode >= 400,
+    'is-warning': statusCode >= 300 && statusCode < 400,
+  }
+}
+
+const formatDebugDuration = (durationMs?: number) => {
+  if (typeof durationMs !== 'number' || !Number.isFinite(durationMs) || durationMs < 0) return '—'
+  return `${Math.round(durationMs)} ms`
+}
+
+const copyTextFallback = (text: string) => {
+  if (typeof document === 'undefined') return false
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.setAttribute('readonly', 'true')
+  textarea.style.position = 'fixed'
+  textarea.style.opacity = '0'
+  textarea.style.pointerEvents = 'none'
+  document.body.appendChild(textarea)
+  textarea.select()
+  textarea.setSelectionRange(0, textarea.value.length)
+  const copied = document.execCommand('copy')
+  document.body.removeChild(textarea)
+  return copied
+}
+
+const buildDebugCopyPayload = () => {
+  if (!debugInfo.value) return ''
+
+  const lines: string[] = [
+    `[${t('components.main.modelList.debugSummaryTitle')}]`,
+    `${t('components.main.modelList.debugSummaryRequestedSource')}: ${debugRequestedSourceLabel.value}`,
+    `${t('components.main.modelList.debugSummaryResolvedSource')}: ${debugResolvedSourceLabel.value}`,
+    `${t('components.main.modelList.debugSummaryConfiguredAuth')}: ${debugConfiguredAuthLabel.value}`,
+    `${t('components.main.modelList.debugSummaryAuthCandidates')}: ${debugAuthCandidatesLabel.value}`,
+    `${t('components.main.modelList.debugSummaryBaseUrl')}: ${debugBaseUrl.value}`,
+  ]
+
+  if (debugPlatformLabel.value) {
+    lines.push(`${t('components.main.modelList.debugSummaryPlatform')}: ${debugPlatformLabel.value}`)
+  }
+  if (debugFetchError.value) {
+    lines.push(`${t('components.main.modelList.debugSummaryFetchError')}: ${debugFetchError.value}`)
+  }
+
+  for (const [index, attempt] of debugAttempts.value.entries()) {
+    lines.push('')
+    lines.push(`[${t('components.main.modelList.debugAttemptLabel', { index: index + 1 })}]`)
+    lines.push(`${t('components.main.modelList.debugAttemptSource')}: ${formatSourceLabel(attempt.source) || '—'}`)
+    lines.push(`${t('components.main.modelList.debugAttemptEndpoint')}: ${attempt.endpoint || '—'}`)
+    lines.push(`${t('components.main.modelList.debugAttemptAuth')}: ${formatDebugAuthType(attempt.authType)}`)
+    lines.push(`${t('components.main.modelList.debugAttemptStatus')}: ${formatDebugStatus(attempt)}`)
+    lines.push(`${t('components.main.modelList.debugAttemptDuration')}: ${formatDebugDuration(attempt.durationMs)}`)
+    lines.push(`${t('components.main.modelList.debugRequestUrl')}: ${`${attempt.method} ${attempt.url}`.trim()}`)
+    lines.push(`${t('components.main.modelList.debugRequestHeaders')}:\n${formatDebugMap(attempt.requestHeaders)}`)
+    lines.push(`${t('components.main.modelList.debugResponseHeaders')}:\n${formatDebugMap(attempt.responseHeaders)}`)
+    lines.push(`${t('components.main.modelList.debugResponseBody')}:\n${formatDebugBody(attempt.responseBody)}`)
+    if (attempt.error) {
+      lines.push(`Error: ${attempt.error}`)
+    }
+  }
+
+  return lines.join('\n')
+}
+
+const openDebugModal = () => {
+  if (!hasDebugDetails.value) {
+    showToast(t('components.main.modelList.debugUnavailable'), 'warning')
+    return
+  }
+  debugModalOpen.value = true
+}
+
+const closeDebugModal = () => {
+  debugModalOpen.value = false
+}
+
+const copyDebugDetails = async () => {
+  const payload = buildDebugCopyPayload()
+  if (!payload) {
+    showToast(t('components.main.modelList.debugUnavailable'), 'warning')
+    return
+  }
+  try {
+    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(payload)
+    } else if (!copyTextFallback(payload)) {
+      throw new Error(t('components.main.modelList.debugCopyUnavailable'))
+    }
+    showToast(t('components.main.modelList.toast.debugCopied'))
+  } catch (err) {
+    showToast(
+      t('components.main.modelList.toast.debugCopyFailed', { error: extractErrorMessage(err) }),
+      'error',
+    )
+  }
+}
 
 const formatUSD = (value?: number) => {
   if (typeof value !== 'number' || !Number.isFinite(value)) return '—'
@@ -787,11 +1124,13 @@ const loadModels = async () => {
   loading.value = true
   error.value = ''
   response.value = null
+  closeDebugModal()
 
   try {
     const data = await fetchProviderModelPricing(props.provider, props.platform, selectedSource.value)
     if (requestSeq !== loadRequestSeq.value) return
     response.value = data
+    error.value = data.fetchError?.trim() || ''
   } catch (err) {
     if (requestSeq !== loadRequestSeq.value) return
     error.value = extractErrorMessage(err) || t('components.main.modelList.loadFailed')
@@ -804,6 +1143,7 @@ const loadModels = async () => {
 const handleSourceChange = () => {
   selectedVendor.value = 'all'
   closeModelDetail()
+  closeDebugModal()
   clearPricingInteraction()
   void loadModels()
 }
@@ -883,6 +1223,7 @@ const resetUIState = () => {
   error.value = ''
   response.value = null
   loadRequestSeq.value += 1
+  closeDebugModal()
   closeModelDetail()
   clearPricingInteraction()
   savingModel.value = ''
@@ -915,29 +1256,36 @@ watch(
 
 .provider-model-toolbar-main {
   display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  align-items: flex-start;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .provider-model-source-field {
   display: flex;
-  flex: 0 0 260px;
-  min-width: 220px;
-  max-width: 320px;
   flex-direction: column;
   gap: 6px;
+  width: min(100%, 420px);
+}
+
+.provider-model-source-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
 }
 
 .provider-model-source-label {
   font-size: 0.78rem;
   font-weight: 600;
   color: var(--mac-text-secondary);
+  white-space: nowrap;
+  flex: 0 0 auto;
 }
 
 .provider-model-source-select {
+  flex: 1 1 260px;
   min-width: 0;
-  width: 100%;
+  width: auto;
 }
 
 .provider-model-source-hint {
@@ -952,9 +1300,53 @@ watch(
   color: var(--mac-text);
 }
 
+.provider-model-source-footer {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 .provider-model-search {
-  flex: 1 1 320px;
-  min-width: min(100%, 260px);
+  width: 100%;
+  min-width: 0;
+}
+
+.provider-model-debug-button,
+.provider-model-inline-debug-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: 999px;
+  border: 1px solid rgba(59, 130, 246, 0.22);
+  background: rgba(59, 130, 246, 0.08);
+  color: var(--mac-text);
+  padding: 6px 12px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.provider-model-debug-button:hover,
+.provider-model-inline-debug-btn:hover {
+  background: rgba(59, 130, 246, 0.14);
+  border-color: rgba(59, 130, 246, 0.3);
+}
+
+.provider-model-debug-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.provider-model-state-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
 }
 
 .provider-model-item.no-pricing {
@@ -1046,6 +1438,215 @@ watch(
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+.provider-debug-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+}
+
+.debug-hint {
+  margin: 0;
+}
+
+.debug-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.debug-summary-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(148, 163, 184, 0.08);
+  min-width: 0;
+}
+
+.debug-summary-card--error {
+  grid-column: 1 / -1;
+  border-color: rgba(239, 68, 68, 0.22);
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.debug-summary-note {
+  margin: 0;
+  font-size: 0.74rem;
+  line-height: 1.45;
+  color: var(--mac-text-secondary);
+}
+
+.debug-attempts {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.debug-attempt-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: linear-gradient(180deg, rgba(248, 250, 252, 0.86), rgba(241, 245, 249, 0.72));
+}
+
+.debug-attempt-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.debug-attempt-title-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.debug-attempt-title {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: var(--mac-text);
+}
+
+.debug-attempt-meta,
+.debug-attempt-side {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.debug-attempt-side-item {
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: var(--mac-text-secondary);
+}
+
+.debug-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(255, 255, 255, 0.72);
+  font-size: 0.76rem;
+  line-height: 1;
+  color: var(--mac-text-secondary);
+}
+
+.debug-pill.is-success {
+  color: #047857;
+  border-color: rgba(16, 185, 129, 0.26);
+  background: rgba(16, 185, 129, 0.12);
+}
+
+.debug-pill.is-warning {
+  color: #b45309;
+  border-color: rgba(245, 158, 11, 0.26);
+  background: rgba(245, 158, 11, 0.12);
+}
+
+.debug-pill.is-error {
+  color: #b91c1c;
+  border-color: rgba(239, 68, 68, 0.26);
+  background: rgba(239, 68, 68, 0.12);
+}
+
+.debug-attempt-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.debug-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  padding: 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.debug-block-title {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--mac-text);
+}
+
+.debug-kv {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.debug-kv-label {
+  font-size: 0.74rem;
+  line-height: 1.35;
+  color: var(--mac-text-secondary);
+}
+
+.debug-inline-code {
+  display: block;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.06);
+  color: var(--mac-text);
+  font-size: 0.78rem;
+  line-height: 1.55;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.debug-response-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  font-size: 0.75rem;
+  line-height: 1.45;
+  color: var(--mac-text-secondary);
+}
+
+.debug-code-block {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: #0f172a;
+  color: #e2e8f0;
+  font-size: 0.76rem;
+  line-height: 1.6;
+  font-family: ui-monospace, SFMono-Regular, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow: auto;
+  max-height: 220px;
+}
+
+.debug-code-block--body {
+  max-height: 320px;
+}
+
+.debug-attempt-error {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: #b91c1c;
+}
+
+.debug-actions {
+  margin-top: 4px;
 }
 
 .detail-hint {
@@ -1149,6 +1750,14 @@ watch(
     grid-template-columns: minmax(0, 1fr) auto;
   }
 
+  .debug-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .debug-attempt-grid {
+    grid-template-columns: 1fr;
+  }
+
   .detail-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1159,13 +1768,34 @@ watch(
 }
 
 @media (max-width: 640px) {
-  .provider-model-source-field,
-  .provider-model-search {
-    flex-basis: 100%;
-    max-width: none;
+  .provider-model-source-field {
+    width: 100%;
+  }
+
+  .provider-model-source-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .provider-model-source-select {
+    width: 100%;
+  }
+
+  .provider-model-source-footer {
+    align-items: stretch;
+  }
+
+  .provider-model-debug-button,
+  .provider-model-inline-debug-btn {
+    width: 100%;
   }
 
   .provider-model-item {
+    grid-template-columns: 1fr;
+  }
+
+  .debug-summary-grid {
     grid-template-columns: 1fr;
   }
 
