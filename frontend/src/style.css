@@ -1579,6 +1579,109 @@ html.dark .logs-date-picker-menu {
   color: var(--mac-text-secondary);
 }
 
+/* ---- 金额列金色凸显 ---- */
+.cost-cell__value {
+  font-family: 'SFMono-Regular', Menlo, Consolas, monospace;
+  font-weight: 600;
+  color: #b45309;
+  cursor: help;
+  border-radius: 6px;
+  padding: 1px 5px;
+  margin: -1px -5px;
+  transition: background 0.18s ease;
+}
+
+.cost-cell__value:hover {
+  background: rgba(180, 83, 9, 0.1);
+}
+
+.cost-cell__value:focus-visible {
+  outline: 2px solid rgba(180, 83, 9, 0.5);
+  outline-offset: 1px;
+  background: rgba(180, 83, 9, 0.1);
+}
+
+.cost-cell__value--zero {
+  color: var(--mac-text-secondary);
+  font-weight: 400;
+}
+
+html.dark .cost-cell__value {
+  color: #fbbf24;
+}
+
+html.dark .cost-cell__value:hover {
+  background: rgba(251, 191, 36, 0.14);
+}
+
+html.dark .cost-cell__value:focus-visible {
+  outline-color: rgba(251, 191, 36, 0.6);
+  background: rgba(251, 191, 36, 0.14);
+}
+
+html.dark .cost-cell__value--zero {
+  color: var(--mac-text-secondary);
+}
+
+.token-breakdown-row {
+  flex-wrap: wrap;
+  row-gap: 3px;
+}
+
+/* ---- 缓存写入标签样式 ---- */
+.cache-create-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 2px;
+}
+
+.cache-create-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-family: 'SFMono-Regular', Menlo, Consolas, monospace;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  border: 1px solid;
+}
+
+.cache-create-badge__type {
+  font-weight: 700;
+}
+
+.cache-create-badge__num {
+  opacity: 0.78;
+}
+
+.cache-create-badge--5m {
+  color: #9333ea;
+  background: rgba(147, 51, 234, 0.1);
+  border-color: rgba(147, 51, 234, 0.32);
+}
+
+.cache-create-badge--1h {
+  color: #0369a1;
+  background: rgba(3, 105, 161, 0.1);
+  border-color: rgba(3, 105, 161, 0.32);
+}
+
+html.dark .cache-create-badge--5m {
+  color: #d8b4fe;
+  background: rgba(192, 132, 252, 0.18);
+  border-color: rgba(192, 132, 252, 0.4);
+}
+
+html.dark .cache-create-badge--1h {
+  color: #7dd3fc;
+  background: rgba(56, 189, 248, 0.18);
+  border-color: rgba(56, 189, 248, 0.4);
+}
+
 .stream-tag {
   display: inline-flex;
   align-items: center;

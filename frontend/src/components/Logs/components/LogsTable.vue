@@ -78,7 +78,7 @@
           </td>
           <td class="cost-cell">
             <span
-              class="cost-cell__value"
+              :class="['cost-cell__value', { 'cost-cell__value--zero': !item.total_cost }]"
               tabindex="0"
               aria-haspopup="true"
               :aria-label="formatters.formatCostAriaLabel(item)"
@@ -111,10 +111,12 @@
               <span class="token-value">{{ formatters.formatTokenNumber(item.cache_create_tokens) }}</span>
               <span v-if="formatters.hasCacheCreateDetail(item)" class="cache-create-badges">
                 <span v-if="formatters.resolveEphemeral5mTokens(item) > 0" class="cache-create-badge cache-create-badge--5m">
-                  {{ t('components.logs.tokenLabels.cacheWrite5m') }} {{ formatters.formatTokenNumber(formatters.resolveEphemeral5mTokens(item)) }}
+                  <span class="cache-create-badge__type">{{ t('components.logs.tokenLabels.cacheWrite5m') }}</span>
+                  <span class="cache-create-badge__num">{{ formatters.formatTokenNumber(formatters.resolveEphemeral5mTokens(item)) }}</span>
                 </span>
                 <span v-if="formatters.resolveEphemeral1hTokens(item) > 0" class="cache-create-badge cache-create-badge--1h">
-                  {{ t('components.logs.tokenLabels.cacheWrite1h') }} {{ formatters.formatTokenNumber(formatters.resolveEphemeral1hTokens(item)) }}
+                  <span class="cache-create-badge__type">{{ t('components.logs.tokenLabels.cacheWrite1h') }}</span>
+                  <span class="cache-create-badge__num">{{ formatters.formatTokenNumber(formatters.resolveEphemeral1hTokens(item)) }}</span>
                 </span>
               </span>
             </div>
