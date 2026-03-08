@@ -1,42 +1,44 @@
 <template>
-  <Transition name="modal-fade">
-    <div v-if="open" class="modal-backdrop" :style="backdropStyle" role="presentation">
-      <!-- 遮罩层：仅负责视觉，不接收点击（避免 WebView 命中测试/层合成导致误触关闭） -->
-      <div class="modal-overlay-noevent" aria-hidden="true"></div>
+  <Teleport to="body">
+    <Transition name="modal-fade">
+      <div v-if="open" class="modal-backdrop" :style="backdropStyle" role="presentation">
+        <!-- 遮罩层：仅负责视觉，不接收点击（避免 WebView 命中测试/层合成导致误触关闭） -->
+        <div class="modal-overlay-noevent" aria-hidden="true"></div>
 
-      <!-- 点击空白处关闭：只有点到 wrapper 自身时才触发 -->
-      <div class="modal-wrapper" @click="onWrapperClick">
-        <Transition name="modal-slide" appear>
-          <div
-            ref="panelRef"
-            :class="['modal', variantClass]"
-            :style="panelStyle"
-            role="dialog"
-            aria-modal="true"
-            :aria-labelledby="titleId"
-            tabindex="-1"
-          >
-            <header class="modal-header">
-              <h2 :id="titleId" class="modal-title">{{ title }}</h2>
-              <button
-                ref="closeButtonRef"
-                class="ghost-icon"
-                type="button"
-                aria-label="Close"
-                :disabled="closeDisabled"
-                @click="emitClose"
-              >
-                ✕
-              </button>
-            </header>
-            <div :class="['modal-body', { 'modal-scrollable': bodyScrollable }]" :style="bodyStyle">
-              <slot />
+        <!-- 点击空白处关闭：只有点到 wrapper 自身时才触发 -->
+        <div class="modal-wrapper" @click="onWrapperClick">
+          <Transition name="modal-slide" appear>
+            <div
+              ref="panelRef"
+              :class="['modal', variantClass]"
+              :style="panelStyle"
+              role="dialog"
+              aria-modal="true"
+              :aria-labelledby="titleId"
+              tabindex="-1"
+            >
+              <header class="modal-header">
+                <h2 :id="titleId" class="modal-title">{{ title }}</h2>
+                <button
+                  ref="closeButtonRef"
+                  class="ghost-icon"
+                  type="button"
+                  aria-label="Close"
+                  :disabled="closeDisabled"
+                  @click="emitClose"
+                >
+                  ✕
+                </button>
+              </header>
+              <div :class="['modal-body', { 'modal-scrollable': bodyScrollable }]" :style="bodyStyle">
+                <slot />
+              </div>
             </div>
-          </div>
-        </Transition>
+          </Transition>
+        </div>
       </div>
-    </div>
-  </Transition>
+    </Transition>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
@@ -69,9 +71,10 @@ const modalId = `inline-modal-${Math.random().toString(36).slice(2, 10)}`
 const backdropStyle = computed<CSSProperties>(() => ({
   zIndex: BASE_MODAL_Z_INDEX + getModalStackIndex(modalId) * MODAL_STACK_STEP,
 }))
-const panelStyle = computed<CSSProperties | undefined>(() =>
-  props.panelWidth ? { width: props.panelWidth } : undefined,
-)
+const panelStyle = computed<CSSProperties>(() => ({
+  maxWidth: 'calc(100vw - 48px)',
+  ...(props.panelWidth ? { width: props.panelWidth } : {}),
+}))
 const bodyStyle = computed<CSSProperties | undefined>(() => {
   if (props.bodyScrollable) return undefined
   return {
