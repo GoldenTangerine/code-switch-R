@@ -110,14 +110,14 @@
               <span class="token-label">{{ t('components.logs.tokenLabels.cacheWrite') }}</span>
               <span class="token-value">{{ formatters.formatTokenNumber(item.cache_create_tokens) }}</span>
               <span v-if="formatters.hasCacheCreateDetail(item)" class="cache-create-badges">
-                <span v-if="formatters.resolveEphemeral5mTokens(item) > 0" class="cache-create-badge cache-create-badge--5m">
-                  <span class="cache-create-badge__type">{{ t('components.logs.tokenLabels.cacheWrite5m') }}</span>
-                  <span class="cache-create-badge__num">{{ formatters.formatTokenNumber(formatters.resolveEphemeral5mTokens(item)) }}</span>
-                </span>
-                <span v-if="formatters.resolveEphemeral1hTokens(item) > 0" class="cache-create-badge cache-create-badge--1h">
-                  <span class="cache-create-badge__type">{{ t('components.logs.tokenLabels.cacheWrite1h') }}</span>
-                  <span class="cache-create-badge__num">{{ formatters.formatTokenNumber(formatters.resolveEphemeral1hTokens(item)) }}</span>
-                </span>
+                <template v-if="formatters.resolveEphemeral5mTokens(item) > 0">
+                  <span class="cache-create-badge cache-create-badge--5m">{{ t('components.logs.tokenLabels.cacheWrite5m') }}</span>
+                  <span class="cache-create-num cache-create-num--5m">{{ formatters.formatTokenNumber(formatters.resolveEphemeral5mTokens(item)) }}</span>
+                </template>
+                <template v-if="formatters.resolveEphemeral1hTokens(item) > 0">
+                  <span class="cache-create-badge cache-create-badge--1h">{{ t('components.logs.tokenLabels.cacheWrite1h') }}</span>
+                  <span class="cache-create-num cache-create-num--1h">{{ formatters.formatTokenNumber(formatters.resolveEphemeral1hTokens(item)) }}</span>
+                </template>
               </span>
             </div>
             <div>

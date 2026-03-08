@@ -1639,23 +1639,13 @@ html.dark .cost-cell__value--zero {
 .cache-create-badge {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  padding: 1px 7px;
+  padding: 1px 6px;
   border-radius: 999px;
-  font-family: 'SFMono-Regular', Menlo, Consolas, monospace;
-  font-size: 0.68rem;
-  font-weight: 600;
+  font-size: 0.65rem;
+  font-weight: 700;
   letter-spacing: 0.01em;
   white-space: nowrap;
   border: 1px solid;
-}
-
-.cache-create-badge__type {
-  font-weight: 700;
-}
-
-.cache-create-badge__num {
-  opacity: 0.78;
 }
 
 .cache-create-badge--5m {
@@ -1670,6 +1660,20 @@ html.dark .cost-cell__value--zero {
   border-color: rgba(3, 105, 161, 0.32);
 }
 
+.cache-create-num {
+  font-family: 'SFMono-Regular', Menlo, Consolas, monospace;
+  font-size: 0.68rem;
+  font-weight: 600;
+}
+
+.cache-create-num--5m {
+  color: #9333ea;
+}
+
+.cache-create-num--1h {
+  color: #0369a1;
+}
+
 html.dark .cache-create-badge--5m {
   color: #d8b4fe;
   background: rgba(192, 132, 252, 0.18);
@@ -1680,6 +1684,14 @@ html.dark .cache-create-badge--1h {
   color: #7dd3fc;
   background: rgba(56, 189, 248, 0.18);
   border-color: rgba(56, 189, 248, 0.4);
+}
+
+html.dark .cache-create-num--5m {
+  color: #d8b4fe;
+}
+
+html.dark .cache-create-num--1h {
+  color: #7dd3fc;
 }
 
 .stream-tag {
