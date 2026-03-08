@@ -49,7 +49,7 @@ import { getModalStackIndex, isTopMostModal, pushModalToTop, removeModalFromStac
 type Variant = 'default' | 'confirm'
 const BASE_MODAL_Z_INDEX = 2000
 const MODAL_STACK_STEP = 20
-const MODAL_ENTER_FOCUS_DELAY_MS = 220
+const MODAL_FOCUS_FALLBACK_MS = 380
 
 const props = withDefaults(
   defineProps<{
@@ -98,6 +98,7 @@ const panelRef = ref<HTMLElement | null>(null)
 const closeButtonRef = ref<HTMLButtonElement | null>(null)
 let lastActiveElement: Element | null = null
 let initialFocusTimer: number | null = null
+let pendingTransitionCleanup: { panel: HTMLElement; handler: (e: TransitionEvent) => void } | null = null
 
 const emitClose = () => {
   if (!isTopMostModal(modalId)) return
@@ -160,9 +161,14 @@ const focusFallbackTarget = () => {
 }
 
 const clearInitialFocusTimer = () => {
-  if (initialFocusTimer === null) return
-  window.clearTimeout(initialFocusTimer)
-  initialFocusTimer = null
+  if (initialFocusTimer !== null) {
+    window.clearTimeout(initialFocusTimer)
+    initialFocusTimer = null
+  }
+  if (pendingTransitionCleanup) {
+    pendingTransitionCleanup.panel.removeEventListener('transitionend', pendingTransitionCleanup.handler)
+    pendingTransitionCleanup = null
+  }
 }
 
 const scheduleInitialFocus = () => {
@@ -175,13 +181,41 @@ const scheduleInitialFocus = () => {
       return
     }
 
-    // WebKit/WebView 在元素仍处于 enter transform 时立即 focus textarea，
-    // 有概率只剩模糊遮罩、面板本体不绘制；延后到进场动画结束后再聚焦更稳。
-    initialFocusTimer = window.setTimeout(() => {
-      initialFocusTimer = null
+    const panel = panelRef.value
+    if (!panel) {
+      focusFallbackTarget()
+      return
+    }
+
+    let didFocus = false
+    const doFocus = () => {
+      if (didFocus) return
+      didFocus = true
+      clearInitialFocusTimer()
       if (focusInitialTarget()) return
       focusFallbackTarget()
-    }, MODAL_ENTER_FOCUS_DELAY_MS)
+    }
+
+    // 监听面板进场动画结束后再聚焦，避免 WebKit/WebView 在 transform 动画期间
+    // focus textarea 导致面板不绘制的渲染 bug。
+    // 只监听 transform 属性——它是触发 WebKit 渲染异常的根因，
+    // 且 transition: all 会对 opacity/transform 各触发一次 transitionend
+    const onEnd = (e: TransitionEvent) => {
+      if (e.target !== panel || e.propertyName !== 'transform') return
+      panel.removeEventListener('transitionend', onEnd)
+      pendingTransitionCleanup = null
+      doFocus()
+    }
+    panel.addEventListener('transitionend', onEnd)
+    pendingTransitionCleanup = { panel, handler: onEnd }
+
+    // Fallback：如果 transitionend 未触发（WebKit 极端情况），兜底执行
+    initialFocusTimer = window.setTimeout(() => {
+      initialFocusTimer = null
+      panel.removeEventListener('transitionend', onEnd)
+      pendingTransitionCleanup = null
+      doFocus()
+    }, MODAL_FOCUS_FALLBACK_MS)
   })
 }
 
