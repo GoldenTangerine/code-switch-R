@@ -439,7 +439,7 @@ func buildProviderPricingChallengeMessage(endpoint, challengeType string) string
 	followup := buildProviderPricingChallengeFollowup(endpoint)
 	switch strings.TrimSpace(challengeType) {
 	case "acw_sc__v2":
-		return fmt.Sprintf("检测到浏览器挑战页：%s 要求先在浏览器中执行脚本并写入 acw_sc__v2 Cookie，当前项目和 Postman 不会自动完成这一步。%s", endpointLabel, followup)
+		return fmt.Sprintf("检测到浏览器挑战页：%s 返回了 acw_sc__v2 挑战，自动绕过未能完成，请在浏览器中手动完成验证。%s", endpointLabel, followup)
 	default:
 		return fmt.Sprintf("检测到浏览器挑战页：%s 要求客户端先执行页面脚本并回写挑战 Cookie，非浏览器请求无法直接拿到 JSON。%s", endpointLabel, followup)
 	}
@@ -1120,8 +1120,12 @@ func fetchCommonPricing(client *http.Client, apiURL, apiKey, authType string, de
 				attempt.Error = fmt.Sprintf("JSON 解析失败 (检测到 acw_sc__v2 挑战, 自动绕过成功): %v", err)
 				appendProviderModelPricingDebugAttempt(debug, attempt)
 				return wafResult, nil
+			} else {
+				// 绕过失败 → 更新提示文案，告知用户自动绕过已尝试但失败
+				endpointLabel := normalizeProviderPricingChallengeEndpoint("/api/pricing")
+				followup := buildProviderPricingChallengeFollowup("/api/pricing")
+				challenge.Message = fmt.Sprintf("检测到浏览器挑战页：%s 返回了 acw_sc__v2 挑战，已尝试自动绕过但失败（%v），请在浏览器中手动完成验证。%s", endpointLabel, wafErr, followup)
 			}
-			// 绕过失败 → 继续原有错误处理流程（降级到手动导入提示）
 		}
 
 		parseErr := &providerPricingParseError{
