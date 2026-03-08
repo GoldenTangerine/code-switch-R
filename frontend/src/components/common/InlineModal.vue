@@ -49,6 +49,7 @@ import { getModalStackIndex, isTopMostModal, pushModalToTop, removeModalFromStac
 type Variant = 'default' | 'confirm'
 const BASE_MODAL_Z_INDEX = 2000
 const MODAL_STACK_STEP = 20
+const MODAL_ENTER_FOCUS_DELAY_MS = 220
 
 const props = withDefaults(
   defineProps<{
@@ -96,6 +97,7 @@ const bodyStyle = computed<CSSProperties | undefined>(() => {
 const panelRef = ref<HTMLElement | null>(null)
 const closeButtonRef = ref<HTMLButtonElement | null>(null)
 let lastActiveElement: Element | null = null
+let initialFocusTimer: number | null = null
 
 const emitClose = () => {
   if (!isTopMostModal(modalId)) return
@@ -149,6 +151,40 @@ const focusInitialTarget = () => {
   }
 }
 
+const focusFallbackTarget = () => {
+  if (!props.closeDisabled) {
+    closeButtonRef.value?.focus()
+    return
+  }
+  panelRef.value?.focus()
+}
+
+const clearInitialFocusTimer = () => {
+  if (initialFocusTimer === null) return
+  window.clearTimeout(initialFocusTimer)
+  initialFocusTimer = null
+}
+
+const scheduleInitialFocus = () => {
+  clearInitialFocusTimer()
+
+  nextTick(() => {
+    const selector = props.initialFocusSelector.trim()
+    if (!selector) {
+      focusFallbackTarget()
+      return
+    }
+
+    // WebKit/WebView 在元素仍处于 enter transform 时立即 focus textarea，
+    // 有概率只剩模糊遮罩、面板本体不绘制；延后到进场动画结束后再聚焦更稳。
+    initialFocusTimer = window.setTimeout(() => {
+      initialFocusTimer = null
+      if (focusInitialTarget()) return
+      focusFallbackTarget()
+    }, MODAL_ENTER_FOCUS_DELAY_MS)
+  })
+}
+
 const onKeyDown = (e: KeyboardEvent) => {
   if (!props.open || !isTopMostModal(modalId)) return
 
@@ -195,15 +231,9 @@ watch(
       lastActiveElement = document.activeElement
       window.addEventListener('keydown', onKeyDown, true)
       lockScroll()
-      nextTick(() => {
-        if (focusInitialTarget()) return
-        if (!props.closeDisabled) {
-          closeButtonRef.value?.focus()
-          return
-        }
-        panelRef.value?.focus()
-      })
+      scheduleInitialFocus()
     } else {
+      clearInitialFocusTimer()
       window.removeEventListener('keydown', onKeyDown, true)
       removeModalFromStack(modalId)
       unlockScroll()
@@ -221,6 +251,7 @@ watch(
 )
 
 onBeforeUnmount(() => {
+  clearInitialFocusTimer()
   window.removeEventListener('keydown', onKeyDown, true)
   removeModalFromStack(modalId)
   unlockScroll()
