@@ -259,6 +259,8 @@
                 :page-size="storageDayLogsPageSize"
                 :page-size-options="storageDayLogsPageSizeOptions"
                 :loading="storageDayLogsLoading"
+                align="end"
+                compact
                 @update:page="handlers.goToStorageDayLogsPage"
                 @update:page-size="handlers.updateStorageDayLogsPageSize"
               />

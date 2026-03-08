@@ -1,7 +1,11 @@
 <template>
   <nav
     class="base-pagination"
-    :class="{ 'base-pagination--tools-only': !showMainControls }"
+    :class="{
+      'base-pagination--tools-only': !showMainControls,
+      'base-pagination--align-end': normalizedAlign === 'end',
+      'base-pagination--compact': compact,
+    }"
     :aria-label="t('common.pagination.navigation')"
   >
     <div v-if="showMainControls" class="base-pagination__main">
@@ -108,6 +112,8 @@ type PaginationItem =
   | { type: 'page'; key: string; value: number }
   | { type: 'ellipsis'; key: string }
 
+type PaginationAlign = 'between' | 'end'
+
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max)
 
 const sanitizePositiveInteger = (value: number, fallback: number) => {
@@ -125,6 +131,8 @@ const props = withDefaults(
     showPageSize?: boolean
     showJump?: boolean
     maxVisiblePages?: number
+    align?: PaginationAlign
+    compact?: boolean
   }>(),
   {
     loading: false,
@@ -133,6 +141,8 @@ const props = withDefaults(
     showPageSize: true,
     showJump: true,
     maxVisiblePages: 5,
+    align: 'between',
+    compact: false,
   },
 )
 
@@ -146,6 +156,7 @@ const { t } = useI18n()
 const normalizedTotalPages = computed(() => sanitizePositiveInteger(props.totalPages, 1))
 const normalizedPage = computed(() => clamp(sanitizePositiveInteger(props.page, 1), 1, normalizedTotalPages.value))
 const normalizedPageSize = computed(() => sanitizePositiveInteger(props.pageSize, 0))
+const normalizedAlign = computed<PaginationAlign>(() => (props.align === 'end' ? 'end' : 'between'))
 const normalizedPageSizeOptions = computed(() => {
   const unique = new Set<number>()
   const options: number[] = []
@@ -272,6 +283,10 @@ const handlePageSizeChange = (event: Event) => {
   justify-content: flex-end;
 }
 
+.base-pagination--align-end {
+  justify-content: flex-end;
+}
+
 .base-pagination__main {
   display: inline-flex;
   align-items: center;
@@ -394,6 +409,68 @@ const handlePageSizeChange = (event: Event) => {
   font-variant-numeric: tabular-nums;
 }
 
+.base-pagination--compact {
+  gap: 8px 12px;
+}
+
+.base-pagination--compact .base-pagination__main {
+  gap: 6px;
+}
+
+.base-pagination--compact .base-pagination__pages {
+  gap: 4px;
+}
+
+.base-pagination--compact .base-pagination__nav,
+.base-pagination--compact .base-pagination__page {
+  min-width: 26px;
+  height: 26px;
+  padding: 0 7px;
+  border-radius: 8px;
+  font-size: 0.8rem;
+}
+
+.base-pagination--compact .base-pagination__nav svg {
+  width: 12px;
+  height: 12px;
+}
+
+.base-pagination--compact .base-pagination__ellipsis {
+  min-width: 12px;
+  font-size: 0.8rem;
+  letter-spacing: 0.05em;
+}
+
+.base-pagination--compact .base-pagination__tools {
+  gap: 8px 10px;
+}
+
+.base-pagination--compact .base-pagination__page-size,
+.base-pagination--compact .base-pagination__jump {
+  gap: 6px;
+}
+
+.base-pagination--compact .base-pagination__select {
+  min-width: 92px;
+  min-height: 28px;
+  padding: 0.3rem 1.65rem 0.3rem 0.68rem;
+  border-radius: 8px;
+  font-size: 0.8rem;
+}
+
+.base-pagination--compact .base-pagination__jump-label,
+.base-pagination--compact .base-pagination__jump-suffix {
+  font-size: 0.78rem;
+}
+
+.base-pagination--compact .base-pagination__jump-input {
+  width: 60px;
+  min-width: 60px;
+  min-height: 28px;
+  padding: 0.3rem 0.6rem;
+  font-size: 0.8rem;
+}
+
 html.dark .base-pagination__nav,
 html.dark .base-pagination__page {
   border-color: rgba(148, 163, 184, 0.22);
@@ -441,6 +518,25 @@ html.dark .base-pagination__page.is-active {
 
   .base-pagination__jump {
     margin-left: auto;
+  }
+
+  .base-pagination--align-end .base-pagination__main,
+  .base-pagination--align-end .base-pagination__tools {
+    justify-content: flex-end;
+  }
+
+  .base-pagination--align-end .base-pagination__pages {
+    flex: 0 1 auto;
+  }
+
+  .base-pagination--compact .base-pagination__nav,
+  .base-pagination--compact .base-pagination__page {
+    min-width: 30px;
+    height: 30px;
+  }
+
+  .base-pagination--compact .base-pagination__pages {
+    gap: 6px;
   }
 }
 </style>

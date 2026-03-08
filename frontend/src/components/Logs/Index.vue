@@ -129,6 +129,8 @@
         :page-size="pageSize"
         :page-size-options="pageSizeOptions"
         :loading="loading"
+        align="end"
+        compact
         @update:page="setPage"
         @update:page-size="setPageSize"
       />
