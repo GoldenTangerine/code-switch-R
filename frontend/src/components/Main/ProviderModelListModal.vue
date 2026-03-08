@@ -205,80 +205,51 @@
     </div>
   </InlineModal>
 
-  <Teleport to="body">
-    <Transition name="provider-import-dialog">
-      <div
-        v-if="importModalOpen"
-        class="provider-import-dialog-backdrop"
-        :style="importDialogBackdropStyle"
-        role="presentation"
-        @click="handleImportDialogBackdropClick"
-      >
-        <div
-          class="provider-import-dialog"
-          role="dialog"
-          aria-modal="true"
-          :aria-labelledby="importDialogTitleId"
-          @click.stop
+  <InlineModal
+    :open="importModalOpen"
+    :title="importModalTitle"
+    :panel-width="'min(860px, 94vw)'"
+    :close-disabled="importingJson"
+    :initial-focus-selector="'.base-textarea'"
+    @close="requestImportModalClose"
+  >
+    <div class="provider-import-modal">
+      <p class="pricing-hint import-hint">
+        {{ t('components.main.modelList.importHint') }}
+      </p>
+      <BaseTextarea
+        ref="importTextareaRef"
+        v-model="importJsonInput"
+        rows="14"
+        class="provider-import-textarea"
+        :placeholder="t('components.main.modelList.importPlaceholder')"
+      />
+      <p v-if="importError" class="provider-import-error">
+        {{ importError }}
+      </p>
+      <div class="override-actions debug-actions">
+        <button type="button" class="action-btn" :disabled="importingJson" @click="requestImportModalClose">
+          {{ t('common.close') }}
+        </button>
+        <button
+          type="button"
+          class="action-btn"
+          :disabled="importingJson || !hasImportDebugDetails"
+          @click="openDebugModal('import')"
         >
-          <div class="provider-import-dialog-header">
-            <h2 :id="importDialogTitleId" class="provider-import-dialog-title">
-              {{ importModalTitle }}
-            </h2>
-            <button
-              type="button"
-              class="ghost-icon provider-import-dialog-close"
-              :disabled="importingJson"
-              :aria-label="t('common.close')"
-              @click="requestImportModalClose"
-            >
-              ✕
-            </button>
-          </div>
-
-          <div class="provider-import-dialog-body">
-            <div class="provider-import-modal">
-              <p class="pricing-hint import-hint">
-                {{ t('components.main.modelList.importHint') }}
-              </p>
-              <BaseTextarea
-                ref="importTextareaRef"
-                v-model="importJsonInput"
-                rows="14"
-                class="provider-import-textarea"
-                :placeholder="t('components.main.modelList.importPlaceholder')"
-              />
-              <p v-if="importError" class="provider-import-error">
-                {{ importError }}
-              </p>
-            </div>
-          </div>
-
-          <div class="provider-import-dialog-footer">
-            <button type="button" class="action-btn" :disabled="importingJson" @click="requestImportModalClose">
-              {{ t('common.close') }}
-            </button>
-            <button
-              type="button"
-              class="action-btn"
-              :disabled="importingJson || !hasImportDebugDetails"
-              @click="openDebugModal('import')"
-            >
-              {{ t('components.main.modelList.debugButton') }}
-            </button>
-            <button
-              type="button"
-              class="primary-btn"
-              :disabled="importingJson || !importJsonInput.trim()"
-              @click="submitImportJson"
-            >
-              {{ importingJson ? t('components.main.modelList.importSubmitting') : t('components.main.modelList.importSubmit') }}
-            </button>
-          </div>
-        </div>
+          {{ t('components.main.modelList.debugButton') }}
+        </button>
+        <button
+          type="button"
+          class="primary-btn"
+          :disabled="importingJson || !importJsonInput.trim()"
+          @click="submitImportJson"
+        >
+          {{ importingJson ? t('components.main.modelList.importSubmitting') : t('components.main.modelList.importSubmit') }}
+        </button>
       </div>
-    </Transition>
-  </Teleport>
+    </div>
+  </InlineModal>
 
   <InlineModal
     :open="debugModalOpen"
@@ -574,14 +545,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, reactive, ref, watch, type CSSProperties } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseInput from '../common/BaseInput.vue'
 import BaseTextarea from '../common/BaseTextarea.vue'
 import InlineModal from '../common/InlineModal.vue'
 import type { AutomationCard } from '../../data/cards'
 import { extractErrorMessage } from '../../utils/error'
-import { getModalStackIndex, isTopMostModal, pushModalToTop, removeModalFromStack } from '../../utils/modalStack'
 import { showToast } from '../../utils/toast'
 import {
   deleteProviderModelPricingOverride,
@@ -641,12 +611,6 @@ const importError = ref('')
 const importDebugResponse = ref<ProviderModelPricingResponse | null>(null)
 const importTextareaRef = ref<InstanceType<typeof BaseTextarea> | null>(null)
 const debugContext = ref<'main' | 'import'>('main')
-const importDialogTitleId = `provider-import-dialog-title-${Math.random().toString(36).slice(2, 9)}`
-const importDialogModalId = `provider-import-dialog-${Math.random().toString(36).slice(2, 10)}`
-const importDialogBackdropStyle = computed<CSSProperties>(() => ({
-  zIndex: 2000 + getModalStackIndex(importDialogModalId) * 20,
-}))
-let lastImportActiveElement: Element | null = null
 
 const pricingInteraction = reactive({
   model: '',
@@ -995,22 +959,6 @@ const closeImportModal = (force = false) => {
 
 const requestImportModalClose = () => {
   closeImportModal()
-}
-
-const handleImportDialogBackdropClick = (event: MouseEvent) => {
-  if (!isTopMostModal(importDialogModalId)) return
-  if (importingJson.value) return
-  if (event.target !== event.currentTarget) return
-  requestImportModalClose()
-}
-
-const handleImportDialogKeydown = (event: KeyboardEvent) => {
-  if (!importModalOpen.value || !isTopMostModal(importDialogModalId)) return
-  if (event.key !== 'Escape') return
-  event.preventDefault()
-  event.stopImmediatePropagation()
-  if (importingJson.value) return
-  requestImportModalClose()
 }
 
 const submitImportJson = async () => {
@@ -1477,31 +1425,6 @@ watch(
 )
 
 watch(
-  importModalOpen,
-  (open) => {
-    if (open) {
-      pushModalToTop(importDialogModalId)
-      lastImportActiveElement = document.activeElement
-      window.addEventListener('keydown', handleImportDialogKeydown, true)
-      nextTick(() => importTextareaRef.value?.focus())
-      return
-    }
-
-    window.removeEventListener('keydown', handleImportDialogKeydown, true)
-    removeModalFromStack(importDialogModalId)
-    if (lastImportActiveElement instanceof HTMLElement) {
-      try {
-        lastImportActiveElement.focus()
-      } catch {
-        /* ignore */
-      }
-    }
-    lastImportActiveElement = null
-  },
-  { immediate: true },
-)
-
-watch(
   () => [props.open, props.provider?.id],
   ([isOpen]) => {
     if (!isOpen) {
@@ -1512,11 +1435,6 @@ watch(
     void loadModels()
   },
 )
-
-onBeforeUnmount(() => {
-  window.removeEventListener('keydown', handleImportDialogKeydown, true)
-  removeModalFromStack(importDialogModalId)
-})
 </script>
 
 <style scoped>
@@ -1746,67 +1664,6 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 14px;
-}
-
-.provider-import-dialog-backdrop {
-  position: fixed;
-  inset: 0;
-  padding: 24px;
-  box-sizing: border-box;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(15, 23, 42, 0.52);
-  backdrop-filter: blur(8px);
-}
-
-.provider-import-dialog {
-  width: min(860px, 94vw);
-  max-width: calc(100vw - 48px);
-  max-height: min(90vh, 920px);
-  background: var(--mac-surface);
-  border-radius: 24px;
-  border: 1px solid var(--mac-border);
-  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.28);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.provider-import-dialog-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 24px 24px 14px;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
-}
-
-.provider-import-dialog-title {
-  margin: 0;
-  font-size: 1.06rem;
-  font-weight: 700;
-  line-height: 1.35;
-  color: var(--mac-text);
-}
-
-.provider-import-dialog-close {
-  flex-shrink: 0;
-}
-
-.provider-import-dialog-body {
-  padding: 18px 24px 12px;
-  overflow-y: auto;
-  min-height: 0;
-}
-
-.provider-import-dialog-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  padding: 14px 24px 24px;
-  border-top: 1px solid rgba(148, 163, 184, 0.14);
-  background: color-mix(in srgb, var(--mac-surface) 96%, transparent);
 }
 
 .import-hint {
@@ -2135,27 +1992,7 @@ onBeforeUnmount(() => {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
-}
-
-.provider-import-dialog-enter-active,
-.provider-import-dialog-leave-active {
-  transition: opacity 0.2s ease;
-}
-
-.provider-import-dialog-enter-from,
-.provider-import-dialog-leave-to {
-  opacity: 0;
-}
-
-.provider-import-dialog-enter-active .provider-import-dialog,
-.provider-import-dialog-leave-active .provider-import-dialog {
-  transition: transform 0.2s ease, opacity 0.2s ease;
-}
-
-.provider-import-dialog-enter-from .provider-import-dialog,
-.provider-import-dialog-leave-to .provider-import-dialog {
-  opacity: 0;
-  transform: translateY(16px) scale(0.98);
+  flex-wrap: wrap;
 }
 
 @media (max-width: 720px) {
@@ -2177,22 +2014,6 @@ onBeforeUnmount(() => {
 
   .override-editor-grid {
     grid-template-columns: 1fr;
-  }
-
-  .provider-import-dialog-backdrop {
-    padding: 16px;
-  }
-
-  .provider-import-dialog {
-    max-width: calc(100vw - 32px);
-    max-height: calc(100vh - 32px);
-  }
-
-  .provider-import-dialog-header,
-  .provider-import-dialog-body,
-  .provider-import-dialog-footer {
-    padding-left: 18px;
-    padding-right: 18px;
   }
 }
 
@@ -2227,16 +2048,6 @@ onBeforeUnmount(() => {
 
   .provider-model-item {
     grid-template-columns: 1fr;
-  }
-
-  .provider-import-dialog-footer {
-    flex-direction: column-reverse;
-    align-items: stretch;
-  }
-
-  .provider-import-dialog-footer .action-btn,
-  .provider-import-dialog-footer .primary-btn {
-    width: 100%;
   }
 
   .debug-summary-grid {

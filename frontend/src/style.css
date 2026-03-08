@@ -1074,13 +1074,16 @@ html.dark .mac-sidebar-item:hover {
   }
 }
 
-/* 更新检查按钮样式 - 仅用于设置页面，不影响其他页面的按钮 */
-.general-page .action-btn,
-.general-page .primary-btn {
+/* 通用操作按钮样式；弹窗 Teleport 到 body 后也需要稳定命中 */
+.action-btn,
+.primary-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 8px;
+  width: max-content;
   padding: 0 16px;
+  min-width: 88px;
   min-height: 36px;
   border-radius: 8px;
   font-size: 0.875rem;
@@ -1090,6 +1093,9 @@ html.dark .mac-sidebar-item:hover {
   cursor: pointer;
   transition: all 0.2s ease;
   white-space: nowrap;
+  flex: 0 0 auto;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .action-btn {
@@ -1103,6 +1109,7 @@ html.dark .mac-sidebar-item:hover {
 }
 
 .primary-btn {
+  border: 1px solid transparent;
   background: #0ea5e9;
   color: white;
 }
@@ -2022,6 +2029,7 @@ html.dark .ghost-icon:hover {
   justify-content: space-between;
   align-items: center;
   gap: 12px;
+  min-width: 0;
 }
 
 .modal-body {
@@ -2035,9 +2043,19 @@ html.dark .ghost-icon:hover {
 
 .modal-title {
   margin: 0;
+  flex: 1 1 auto;
+  min-width: 0;
   font-size: 1.1rem;
   font-weight: 600;
+  line-height: 1.35;
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
   color: var(--mac-text);
+}
+
+.modal-header > .ghost-icon {
+  flex: 0 0 auto;
 }
 
 .vendor-form {
@@ -2111,6 +2129,7 @@ html.dark .ghost-icon:hover {
 .btn {
   border: none;
   border-radius: 999px;
+  width: max-content;
   padding: 10px 22px;
   font-weight: 600;
   font-size: 0.95rem;
@@ -2122,6 +2141,9 @@ html.dark .ghost-icon:hover {
   transition: background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
   margin: 0;
   min-width: 88px;
+  max-width: 100%;
+  box-sizing: border-box;
+  flex: 0 0 auto;
 }
 
 .btn-outline {
@@ -2408,7 +2430,7 @@ html.dark .secondary-btn:active:not(:disabled) {
 }
 
 /* 全局按钮样式修复 - 防止 Tailwind Preflight 导致的布局问题 */
-button:where(:not(.ghost-icon):not(.mac-switch):not(.nav-item):not(.platform-tab):not(.tab-pill):not(.collapse-btn):not(.toggle-switch):not(.action-btn):not(.remove-btn):not(.icon-select-button):not(.level-select-button):not(.update-notification-btn):not(.performance-trigger)) {
+button:where(:not(.ghost-icon):not(.mac-switch):not(.nav-item):not(.platform-tab):not(.tab-pill):not(.collapse-btn):not(.toggle-switch):not(.action-btn):not(.primary-btn):not(.btn):not(.remove-btn):not(.icon-select-button):not(.level-select-button):not(.update-notification-btn):not(.performance-trigger)) {
   display: inline-flex !important;
   flex-direction: row !important;
   align-items: center !important;

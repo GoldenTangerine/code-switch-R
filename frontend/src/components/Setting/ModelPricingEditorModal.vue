@@ -578,6 +578,7 @@ const removeOverride = async () => {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
+  flex-wrap: wrap;
   padding-top: 4px;
 }
 

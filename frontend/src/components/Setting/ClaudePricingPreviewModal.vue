@@ -286,7 +286,7 @@ watch(
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: auto;
+  width: max-content;
   max-width: 100%;
   min-width: 88px;
   border: 1px solid rgba(59, 130, 246, 0.35);
@@ -298,9 +298,8 @@ watch(
   font-size: 0.85rem;
   line-height: 1.2;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   flex-shrink: 0;
+  box-sizing: border-box;
   cursor: pointer;
   transition: background 0.15s ease, border-color 0.15s ease;
 }

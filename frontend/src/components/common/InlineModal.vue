@@ -59,8 +59,16 @@ const props = withDefaults(
     closeDisabled?: boolean
     panelWidth?: string
     bodyScrollable?: boolean
+    initialFocusSelector?: string
   }>(),
-  { variant: 'default', closeOnBackdrop: true, closeDisabled: false, panelWidth: '', bodyScrollable: true },
+  {
+    variant: 'default',
+    closeOnBackdrop: true,
+    closeDisabled: false,
+    panelWidth: '',
+    bodyScrollable: true,
+    initialFocusSelector: '',
+  },
 )
 
 const emit = defineEmits<{ (e: 'close'): void }>()
@@ -122,6 +130,25 @@ const getFocusableElements = (): HTMLElement[] => {
   })
 }
 
+const focusInitialTarget = () => {
+  if (!panelRef.value) return false
+
+  const selector = props.initialFocusSelector.trim()
+  if (!selector) return false
+
+  try {
+    const target = panelRef.value.querySelector<HTMLElement>(selector)
+    if (!target) return false
+    if ('disabled' in target && (target as HTMLButtonElement | HTMLInputElement | HTMLTextAreaElement).disabled) {
+      return false
+    }
+    target.focus()
+    return document.activeElement === target
+  } catch {
+    return false
+  }
+}
+
 const onKeyDown = (e: KeyboardEvent) => {
   if (!props.open || !isTopMostModal(modalId)) return
 
@@ -168,7 +195,14 @@ watch(
       lastActiveElement = document.activeElement
       window.addEventListener('keydown', onKeyDown, true)
       lockScroll()
-      nextTick(() => closeButtonRef.value?.focus())
+      nextTick(() => {
+        if (focusInitialTarget()) return
+        if (!props.closeDisabled) {
+          closeButtonRef.value?.focus()
+          return
+        }
+        panelRef.value?.focus()
+      })
     } else {
       window.removeEventListener('keydown', onKeyDown, true)
       removeModalFromStack(modalId)

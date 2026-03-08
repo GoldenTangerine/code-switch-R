@@ -2889,6 +2889,7 @@ onBeforeUnmount(() => {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
+  flex-wrap: wrap;
   padding-top: 12px;
   border-top: 1px solid var(--mac-divider);
 }
@@ -2947,6 +2948,7 @@ onBeforeUnmount(() => {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
+  flex-wrap: wrap;
   padding-top: 12px;
   border-top: 1px solid var(--mac-divider);
 }
@@ -3098,6 +3100,7 @@ onBeforeUnmount(() => {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
+  flex-wrap: wrap;
   padding-top: 16px;
   border-top: 1px solid var(--mac-divider);
 }
