@@ -11,17 +11,42 @@
           <span v-if="siteType" class="meta-pill">
             {{ t('components.main.modelList.siteType') }}：{{ siteType }}
           </span>
-          <span v-if="pricingSource" class="meta-pill">
-            {{ t('components.main.modelList.source') }}：{{ pricingSource }}
+          <span v-if="pricingSourceLabel" class="meta-pill">
+            {{ t('components.main.modelList.source') }}：{{ pricingSourceLabel }}
           </span>
         </div>
 
-        <div class="provider-model-search">
-          <BaseInput
-            v-model="searchTerm"
-            type="text"
-            :placeholder="t('components.main.modelList.searchPlaceholder')"
-          />
+        <div class="provider-model-toolbar-main">
+          <label class="provider-model-source-field">
+            <span class="provider-model-source-label">{{ t('components.main.modelList.sourcePicker') }}</span>
+            <select
+              v-model="selectedSource"
+              class="mac-select provider-model-source-select"
+              @change="handleSourceChange"
+            >
+              <option
+                v-for="option in sourceOptions"
+                :key="option.value"
+                :value="option.value"
+              >
+                {{ option.label }}
+              </option>
+            </select>
+            <span class="provider-model-source-hint">
+              {{ sourcePickerHintText }}
+            </span>
+            <span v-if="pricingSourceLabel" class="provider-model-source-current">
+              {{ t('components.main.modelList.sourceResolved', { source: pricingSourceLabel }) }}
+            </span>
+          </label>
+
+          <div class="provider-model-search">
+            <BaseInput
+              v-model="searchTerm"
+              type="text"
+              :placeholder="t('components.main.modelList.searchPlaceholder')"
+            />
+          </div>
         </div>
 
         <div v-if="vendorTabs.length > 1" class="provider-model-vendors">
@@ -310,6 +335,7 @@ import {
   type ProviderModelPerCallPrice,
   type ProviderModelPricingItem,
   type ProviderModelPricingResponse,
+  type ProviderModelPricingSource,
   upsertProviderModelPricingOverride,
 } from '../../services/providerModelPricing'
 
@@ -319,6 +345,11 @@ type ProviderVendorTab = {
   key: ProviderVendorKey
   label: string
   count: number
+}
+
+type ProviderModelSourceOption = {
+  value: ProviderModelPricingSource
+  label: string
 }
 
 const props = defineProps<{
@@ -336,9 +367,11 @@ const { t } = useI18n()
 const loading = ref(false)
 const error = ref('')
 const response = ref<ProviderModelPricingResponse | null>(null)
+const loadRequestSeq = ref(0)
 
 const searchTerm = ref('')
 const selectedVendor = ref<ProviderVendorKey>('all')
+const selectedSource = ref<ProviderModelPricingSource>('auto')
 const editingModel = ref('')
 const savingModel = ref('')
 const resettingModel = ref('')
@@ -362,9 +395,33 @@ const modalTitle = computed(() => {
 })
 
 const siteType = computed(() => response.value?.siteType ?? '')
-const pricingSource = computed(() => response.value?.pricingSource ?? '')
+const pricingSource = computed<ProviderModelPricingSource | ''>(() => response.value?.pricingSource ?? '')
 const models = computed(() => response.value?.models ?? [])
 const pricingAvailable = computed(() => response.value?.pricingSource !== 'v1/models')
+const sourceLabelMap = computed<Record<ProviderModelPricingSource, string>>(() => ({
+  auto: t('components.main.modelList.sourceAuto'),
+  'api/pricing': t('components.main.modelList.sourceApiPricing'),
+  'one-hub': t('components.main.modelList.sourceOneHub'),
+  'v1/models': t('components.main.modelList.sourceModels'),
+}))
+
+const formatPricingSourceLabel = (source?: ProviderModelPricingSource | '') => {
+  if (!source) return ''
+  return sourceLabelMap.value[source] || source
+}
+
+const pricingSourceLabel = computed(() => formatPricingSourceLabel(pricingSource.value))
+const sourcePickerHintText = computed(() => (
+  selectedSource.value === 'auto'
+    ? t('components.main.modelList.sourcePickerAutoHint')
+    : t('components.main.modelList.sourcePickerFixedHint')
+))
+const sourceOptions = computed<ProviderModelSourceOption[]>(() => [
+  { value: 'auto', label: sourceLabelMap.value.auto },
+  { value: 'api/pricing', label: sourceLabelMap.value['api/pricing'] },
+  { value: 'one-hub', label: sourceLabelMap.value['one-hub'] },
+  { value: 'v1/models', label: sourceLabelMap.value['v1/models'] },
+])
 
 const identifyVendor = (modelName: string, ownerBy?: string): ProviderVendorKey => {
   const raw = `${ownerBy || ''} ${modelName || ''}`.toLowerCase()
@@ -725,17 +782,30 @@ const resolveOverrideHint = (model: ProviderModelPricingItem, kind: 'create' | '
 
 const loadModels = async () => {
   if (!props.provider) return
+  const requestSeq = loadRequestSeq.value + 1
+  loadRequestSeq.value = requestSeq
   loading.value = true
   error.value = ''
   response.value = null
 
   try {
-    response.value = await fetchProviderModelPricing(props.provider, props.platform)
+    const data = await fetchProviderModelPricing(props.provider, props.platform, selectedSource.value)
+    if (requestSeq !== loadRequestSeq.value) return
+    response.value = data
   } catch (err) {
+    if (requestSeq !== loadRequestSeq.value) return
     error.value = extractErrorMessage(err) || t('components.main.modelList.loadFailed')
   } finally {
+    if (requestSeq !== loadRequestSeq.value) return
     loading.value = false
   }
+}
+
+const handleSourceChange = () => {
+  selectedVendor.value = 'all'
+  closeModelDetail()
+  clearPricingInteraction()
+  void loadModels()
 }
 
 const saveOverride = async (model: ProviderModelPricingItem) => {
@@ -808,8 +878,11 @@ const resetOverride = async (model: ProviderModelPricingItem) => {
 const resetUIState = () => {
   searchTerm.value = ''
   selectedVendor.value = 'all'
+  selectedSource.value = 'auto'
+  loading.value = false
   error.value = ''
   response.value = null
+  loadRequestSeq.value += 1
   closeModelDetail()
   clearPricingInteraction()
   savingModel.value = ''
@@ -838,6 +911,50 @@ watch(
 
 .provider-model-state.error {
   color: #ef4444;
+}
+
+.provider-model-toolbar-main {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.provider-model-source-field {
+  display: flex;
+  flex: 0 0 260px;
+  min-width: 220px;
+  max-width: 320px;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.provider-model-source-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--mac-text-secondary);
+}
+
+.provider-model-source-select {
+  min-width: 0;
+  width: 100%;
+}
+
+.provider-model-source-hint {
+  font-size: 0.76rem;
+  line-height: 1.45;
+  color: var(--mac-text-secondary);
+}
+
+.provider-model-source-current {
+  font-size: 0.76rem;
+  line-height: 1.45;
+  color: var(--mac-text);
+}
+
+.provider-model-search {
+  flex: 1 1 320px;
+  min-width: min(100%, 260px);
 }
 
 .provider-model-item.no-pricing {
@@ -1042,6 +1159,12 @@ watch(
 }
 
 @media (max-width: 640px) {
+  .provider-model-source-field,
+  .provider-model-search {
+    flex-basis: 100%;
+    max-width: none;
+  }
+
   .provider-model-item {
     grid-template-columns: 1fr;
   }

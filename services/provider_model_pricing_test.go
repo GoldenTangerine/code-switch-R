@@ -204,3 +204,74 @@ func TestEnrichProviderModelPricingResponse_DoesNotUseFamilyFallbackAsExplicit1h
 		t.Fatalf("CacheCreate1hUSDPerM = %.4f, 期望 0.0000", response.Models[0].CacheCreate1hUSDPerM)
 	}
 }
+
+func TestNormalizeProviderModelPricingSource(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{input: "", want: providerModelPricingSourceAuto},
+		{input: "auto", want: providerModelPricingSourceAuto},
+		{input: "/api/pricing", want: providerModelPricingSourceCommon},
+		{input: "pricing", want: providerModelPricingSourceCommon},
+		{input: "onehub", want: providerModelPricingSourceOneHub},
+		{input: "/api/available_model", want: providerModelPricingSourceOneHub},
+		{input: "/v1/models", want: providerModelPricingSourceOpenAIList},
+		{input: "models", want: providerModelPricingSourceOpenAIList},
+		{input: "weird-source", want: ""},
+	}
+
+	for _, tt := range tests {
+		if got := normalizeProviderModelPricingSource(tt.input); got != tt.want {
+			t.Fatalf("normalizeProviderModelPricingSource(%q) = %q, 期望 %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestShouldCacheProviderModelPricingResponse(t *testing.T) {
+	tests := []struct {
+		name            string
+		requestedSource string
+		response        *ProviderModelPricingResponse
+		want            bool
+	}{
+		{
+			name:            "auto fallback still caches",
+			requestedSource: providerModelPricingSourceAuto,
+			response: &ProviderModelPricingResponse{
+				PricingSource: providerModelPricingSourceOpenAIList,
+			},
+			want: true,
+		},
+		{
+			name:            "explicit common does not warm shared cache",
+			requestedSource: providerModelPricingSourceCommon,
+			response: &ProviderModelPricingResponse{
+				PricingSource: providerModelPricingSourceCommon,
+			},
+			want: false,
+		},
+		{
+			name:            "explicit one hub does not warm shared cache",
+			requestedSource: providerModelPricingSourceOneHub,
+			response: &ProviderModelPricingResponse{
+				PricingSource: providerModelPricingSourceOneHub,
+			},
+			want: false,
+		},
+		{
+			name:            "explicit openai list does not cache",
+			requestedSource: providerModelPricingSourceOpenAIList,
+			response: &ProviderModelPricingResponse{
+				PricingSource: providerModelPricingSourceOpenAIList,
+			},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		if got := shouldCacheProviderModelPricingResponse(tt.requestedSource, tt.response); got != tt.want {
+			t.Fatalf("%s: shouldCacheProviderModelPricingResponse(%q) = %v, 期望 %v", tt.name, tt.requestedSource, got, tt.want)
+		}
+	}
+}

@@ -31,6 +31,13 @@ const (
 	SiteTypeUnknown    SiteType = "unknown"
 )
 
+const (
+	providerModelPricingSourceAuto       = "auto"
+	providerModelPricingSourceCommon     = "api/pricing"
+	providerModelPricingSourceOneHub     = "one-hub"
+	providerModelPricingSourceOpenAIList = "v1/models"
+)
+
 type ProviderModelPerCallPrice struct {
 	Unified *float64 `json:"unified,omitempty"`
 	Input   *float64 `json:"input,omitempty"`
@@ -241,6 +248,40 @@ func firstPositiveFloat(values ...float64) float64 {
 	return 0
 }
 
+func normalizeProviderModelPricingSource(source string) string {
+	switch strings.ToLower(strings.TrimSpace(source)) {
+	case "", providerModelPricingSourceAuto:
+		return providerModelPricingSourceAuto
+	case providerModelPricingSourceCommon, "/api/pricing", "pricing":
+		return providerModelPricingSourceCommon
+	case providerModelPricingSourceOneHub, "one_hub", "onehub", "/api/available_model", "available_model":
+		return providerModelPricingSourceOneHub
+	case providerModelPricingSourceOpenAIList, "/v1/models", "models":
+		return providerModelPricingSourceOpenAIList
+	default:
+		return ""
+	}
+}
+
+func shouldClearProviderModelPricingCacheOnFailure(source string) bool {
+	return normalizeProviderModelPricingSource(source) == providerModelPricingSourceAuto
+}
+
+func shouldCacheProviderModelPricingResponse(requestedSource string, response *ProviderModelPricingResponse) bool {
+	if response == nil {
+		return false
+	}
+
+	// 只有 auto 探测路径会回填共享缓存，避免用户在弹窗里手动切换来源时
+	// 污染日志计价等依赖该缓存的系统行为。
+	switch normalizeProviderModelPricingSource(requestedSource) {
+	case "", providerModelPricingSourceAuto:
+		return true
+	default:
+		return false
+	}
+}
+
 func (ps *ProviderService) cacheProviderModelPricing(apiURL, apiKey, authType string, response *ProviderModelPricingResponse) {
 	if ps == nil || response == nil {
 		return
@@ -372,6 +413,10 @@ func (ps *ProviderService) ResolveCachedProviderModelPricing(apiURL, apiKey, aut
 // - one-hub/done-hub：GET /api/available_model + /api/user_group_map
 // - 均失败时兜底：GET /v1/models（仅模型名，无价格）
 func (ps *ProviderService) FetchProviderModelPricing(apiURL, apiKey, platform, authType string) (*ProviderModelPricingResponse, error) {
+	return ps.FetchProviderModelPricingWithSource(apiURL, apiKey, platform, authType, providerModelPricingSourceAuto)
+}
+
+func (ps *ProviderService) FetchProviderModelPricingWithSource(apiURL, apiKey, platform, authType, source string) (*ProviderModelPricingResponse, error) {
 	apiURL = strings.TrimSpace(apiURL)
 	if apiURL == "" {
 		ps.clearProviderModelPricingCache(apiURL, apiKey, authType)
@@ -387,27 +432,148 @@ func (ps *ProviderService) FetchProviderModelPricing(apiURL, apiKey, platform, a
 	client := &http.Client{Timeout: 20 * time.Second}
 	platform = strings.TrimSpace(platform)
 	_ = platform // 预留：未来可按平台做更多启发式处理
+	source = normalizeProviderModelPricingSource(source)
+	if source == "" {
+		return nil, fmt.Errorf("不支持的数据来源")
+	}
 
 	authCandidates := buildAuthCandidates(authType)
+
+	finalizeResponse := func(response *ProviderModelPricingResponse) *ProviderModelPricingResponse {
+		ps.enrichProviderModelPricingResponse(response, apiURL, apiKey, authType)
+		if shouldCacheProviderModelPricingResponse(source, response) {
+			ps.cacheProviderModelPricing(apiURL, apiKey, authType, response)
+		}
+		return response
+	}
+
+	fetchFromOpenAIModelList := func() (*ProviderModelPricingResponse, error) {
+		var modelErr error
+		for _, candidate := range authCandidates {
+			models, err := fetchOpenAIModels(client, apiURL, apiKey, candidate)
+			if err == nil && len(models) > 0 {
+				items := make([]ProviderModelPricingItem, 0, len(models))
+				for _, model := range models {
+					model = strings.TrimSpace(model)
+					if model == "" {
+						continue
+					}
+					items = append(items, ProviderModelPricingItem{
+						Model:     model,
+						QuotaType: -1,
+					})
+				}
+
+				sort.Slice(items, func(i, j int) bool {
+					return items[i].Model < items[j].Model
+				})
+
+				return finalizeResponse(&ProviderModelPricingResponse{
+					SiteType:      SiteTypeUnknown,
+					PricingSource: providerModelPricingSourceOpenAIList,
+					Models:        items,
+				}), nil
+			}
+
+			modelErr = err
+			if isAuthStatusError(modelErr) {
+				continue
+			}
+			break
+		}
+		return nil, modelErr
+	}
+
+	fetchFromCommonPricing := func() (*ProviderModelPricingResponse, error) {
+		var commonErr error
+		for _, candidate := range authCandidates {
+			commonPricing, err := fetchCommonPricing(client, apiURL, apiKey, candidate)
+			if err == nil {
+				return finalizeResponse(buildProviderModelPricingResponse(
+					SiteTypeUnknown,
+					providerModelPricingSourceCommon,
+					commonPricing,
+				)), nil
+			}
+			commonErr = err
+			if isAuthStatusError(commonErr) {
+				continue
+			}
+			break
+		}
+		return nil, commonErr
+	}
+
+	fetchFromOneHubPricing := func() (*ProviderModelPricingResponse, error) {
+		var oneHubErr error
+		for _, candidate := range authCandidates {
+			oneHubPricing, err := fetchOneHubPricing(client, apiURL, apiKey, candidate)
+			if err == nil {
+				return finalizeResponse(buildProviderModelPricingResponse(
+					SiteTypeOneHub,
+					providerModelPricingSourceOneHub,
+					oneHubPricing,
+				)), nil
+			}
+			oneHubErr = err
+			if isAuthStatusError(oneHubErr) {
+				continue
+			}
+			break
+		}
+		return nil, oneHubErr
+	}
+
+	switch source {
+	case providerModelPricingSourceCommon:
+		response, err := fetchFromCommonPricing()
+		if err != nil {
+			if shouldClearProviderModelPricingCacheOnFailure(source) {
+				ps.clearProviderModelPricingCache(apiURL, apiKey, authType)
+			}
+			return nil, fmt.Errorf("通过 %s 获取模型定价失败: %w", providerModelPricingSourceCommon, err)
+		}
+		return response, nil
+	case providerModelPricingSourceOneHub:
+		response, err := fetchFromOneHubPricing()
+		if err != nil {
+			if shouldClearProviderModelPricingCacheOnFailure(source) {
+				ps.clearProviderModelPricingCache(apiURL, apiKey, authType)
+			}
+			return nil, fmt.Errorf("通过 %s 获取模型定价失败: %w", providerModelPricingSourceOneHub, err)
+		}
+		return response, nil
+	case providerModelPricingSourceOpenAIList:
+		response, err := fetchFromOpenAIModelList()
+		if err != nil {
+			if shouldClearProviderModelPricingCacheOnFailure(source) {
+				ps.clearProviderModelPricingCache(apiURL, apiKey, authType)
+			}
+			return nil, fmt.Errorf("通过 %s 获取模型列表失败: %w", providerModelPricingSourceOpenAIList, err)
+		}
+		return response, nil
+	}
 
 	var commonErr error
 	var oneHubErr error
 	for _, candidate := range authCandidates {
 		commonPricing, err := fetchCommonPricing(client, apiURL, apiKey, candidate)
 		if err == nil {
-			response := buildProviderModelPricingResponse(SiteTypeUnknown, "api/pricing", commonPricing)
-			ps.enrichProviderModelPricingResponse(response, apiURL, apiKey, authType)
-			ps.cacheProviderModelPricing(apiURL, apiKey, authType, response)
-			return response, nil
+			return finalizeResponse(buildProviderModelPricingResponse(
+				SiteTypeUnknown,
+				providerModelPricingSourceCommon,
+				commonPricing,
+			)), nil
 		}
 		commonErr = err
 
 		oneHubPricing, err := fetchOneHubPricing(client, apiURL, apiKey, candidate)
 		if err == nil {
-			response := buildProviderModelPricingResponse(SiteTypeOneHub, "one-hub", oneHubPricing)
-			ps.enrichProviderModelPricingResponse(response, apiURL, apiKey, authType)
-			ps.cacheProviderModelPricing(apiURL, apiKey, authType, response)
-			return response, nil
+			return finalizeResponse(buildProviderModelPricingResponse(
+				SiteTypeOneHub,
+				providerModelPricingSourceOneHub,
+				oneHubPricing,
+			)), nil
 		}
 		oneHubErr = err
 
@@ -418,48 +584,20 @@ func (ps *ProviderService) FetchProviderModelPricing(apiURL, apiKey, platform, a
 	}
 
 	// 兜底：尝试 /v1/models
-	var modelErr error
-	for _, candidate := range authCandidates {
-		models, err := fetchOpenAIModels(client, apiURL, apiKey, candidate)
-		if err == nil && len(models) > 0 {
-			items := make([]ProviderModelPricingItem, 0, len(models))
-			for _, model := range models {
-				model = strings.TrimSpace(model)
-				if model == "" {
-					continue
-				}
-				items = append(items, ProviderModelPricingItem{
-					Model:     model,
-					QuotaType: -1,
-				})
-			}
-
-			sort.Slice(items, func(i, j int) bool {
-				return items[i].Model < items[j].Model
-			})
-
-			response := &ProviderModelPricingResponse{
-				SiteType:      SiteTypeUnknown,
-				PricingSource: "v1/models",
-				Models:        items,
-			}
-			ps.enrichProviderModelPricingResponse(response, apiURL, apiKey, authType)
-			ps.cacheProviderModelPricing(apiURL, apiKey, authType, response)
-			return response, nil
-		}
-
-		modelErr = err
-		if isAuthStatusError(modelErr) {
-			continue
-		}
-		break
+	response, modelErr := fetchFromOpenAIModelList()
+	if modelErr == nil {
+		return response, nil
 	}
 
 	if commonErr != nil || oneHubErr != nil {
-		ps.clearProviderModelPricingCache(apiURL, apiKey, authType)
+		if shouldClearProviderModelPricingCacheOnFailure(source) {
+			ps.clearProviderModelPricingCache(apiURL, apiKey, authType)
+		}
 		return nil, fmt.Errorf("获取模型定价失败：%v；%v", commonErr, oneHubErr)
 	}
-	ps.clearProviderModelPricingCache(apiURL, apiKey, authType)
+	if shouldClearProviderModelPricingCacheOnFailure(source) {
+		ps.clearProviderModelPricingCache(apiURL, apiKey, authType)
+	}
 	return nil, modelErr
 }
 

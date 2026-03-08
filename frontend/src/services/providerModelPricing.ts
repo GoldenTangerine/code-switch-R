@@ -3,6 +3,8 @@ import type { AutomationCard } from '../data/cards'
 
 const PROVIDER_SERVICE = 'codeswitch/services.ProviderService'
 
+export type ProviderModelPricingSource = 'auto' | 'api/pricing' | 'one-hub' | 'v1/models'
+
 export type ProviderModelPerCallPrice = {
   unified?: number
   input?: number
@@ -31,20 +33,22 @@ export type ProviderModelPricingItem = {
 
 export type ProviderModelPricingResponse = {
   siteType: string
-  pricingSource: string
+  pricingSource: ProviderModelPricingSource
   models: ProviderModelPricingItem[]
 }
 
 export async function fetchProviderModelPricing(
   provider: AutomationCard,
   platform: string,
+  source: ProviderModelPricingSource = 'auto',
 ): Promise<ProviderModelPricingResponse> {
   return await Call.ByName(
-    `${PROVIDER_SERVICE}.FetchProviderModelPricing`,
+    `${PROVIDER_SERVICE}.FetchProviderModelPricingWithSource`,
     provider.apiUrl,
     provider.apiKey,
     platform,
     provider.connectivityAuthType || '',
+    source,
   )
 }
 
