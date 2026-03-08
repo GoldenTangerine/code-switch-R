@@ -1,3 +1,16 @@
+# Code Switch v2.7.21
+
+## 修复
+- **首页"粘贴JSON导入"弹窗不显示**：修复首页供应商模型列表中点击"粘贴JSON导入"后，界面出现模糊遮罩但弹窗面板不显示的问题（每次必现）；根因是进场动画期间对 textarea 聚焦触发了 WebKit 渲染 bug，导致面板卡在 `opacity: 0` 状态。
+- **transitionend 多属性事件重复触发**：修复 `transition: all` 导致 `opacity` 和 `transform` 各触发一次 `transitionend`，聚焦逻辑可能被执行两次的问题；现在只监听 `transform` 属性结束事件。
+- **弹窗关闭时 transitionend 监听器未清理**：修复快速开关弹窗时，旧的 `transitionend` 事件监听器未被移除的资源泄漏问题；现在关闭弹窗和组件卸载时统一清理。
+
+## 技术改进
+- **`InlineModal` 初始聚焦改为事件驱动**：用 `transitionend` 事件替代不可靠的 `setTimeout(220ms)`，确保在面板 CSS 进场动画真正结束后再聚焦目标元素，彻底消除时序竞争；保留 380ms fallback timeout 兜底 WebKit 极端情况下 `transitionend` 未触发的场景。
+- **聚焦防重入保护**：新增 `didFocus` 标志位，防止 `transitionend` 回调与 fallback timeout 在极端时序下双重执行聚焦逻辑。
+
+---
+
 # Code Switch v2.7.20
 
 ## 新功能
