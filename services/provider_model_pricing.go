@@ -1113,12 +1113,23 @@ func fetchCommonPricing(client *http.Client, apiURL, apiKey, authType string, de
 
 	var pricing providerPricingResponse
 	if err := json.Unmarshal(body, &pricing); err != nil {
+		// 尝试自动绕过 acw_sc__v2 WAF 挑战
+		challenge := detectProviderPricingChallenge("/api/pricing", attempt.ContentType, string(body))
+		if challenge != nil && challenge.Type == "acw_sc__v2" {
+			if wafResult, wafErr := tryAcwBypass(client, targetURL, apiKey, authType, string(body), debug); wafErr == nil {
+				attempt.Error = fmt.Sprintf("JSON 解析失败 (检测到 acw_sc__v2 挑战, 自动绕过成功): %v", err)
+				appendProviderModelPricingDebugAttempt(debug, attempt)
+				return wafResult, nil
+			}
+			// 绕过失败 → 继续原有错误处理流程（降级到手动导入提示）
+		}
+
 		parseErr := &providerPricingParseError{
 			Endpoint:    "/api/pricing",
 			StatusCode:  resp.StatusCode,
 			ContentType: attempt.ContentType,
 			Body:        string(body),
-			Challenge:   detectProviderPricingChallenge("/api/pricing", attempt.ContentType, string(body)),
+			Challenge:   challenge,
 			Err:         err,
 		}
 		attempt.Error = parseErr.Error()
