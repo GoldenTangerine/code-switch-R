@@ -512,6 +512,7 @@ func getTrayUsage(logService *services.LogService, appSettings *services.AppSett
 				settings.BudgetCycleMode,
 				settings.BudgetRefreshTime,
 				settings.BudgetRefreshDay,
+				settings.BudgetRefreshMonthDay,
 			)
 			used = services.ResolveBudgetUsed(
 				logService,

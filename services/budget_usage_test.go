@@ -8,7 +8,7 @@ import (
 
 func TestBuildBudgetUsageConfig(t *testing.T) {
 	t.Run("normalizes weekly config", func(t *testing.T) {
-		cfg := BuildBudgetUsageConfig(true, " weekly ", " ", 9)
+		cfg := BuildBudgetUsageConfig(true, " weekly ", " ", 9, 99)
 		if !cfg.CycleEnabled {
 			t.Fatal("CycleEnabled should remain true")
 		}
@@ -18,25 +18,31 @@ func TestBuildBudgetUsageConfig(t *testing.T) {
 		if cfg.RefreshTime != "00:00" {
 			t.Fatalf("RefreshTime = %q, want 00:00", cfg.RefreshTime)
 		}
-		if cfg.RefreshDay != 6 {
-			t.Fatalf("RefreshDay = %d, want 6", cfg.RefreshDay)
+		if cfg.RefreshWeekday != 6 {
+			t.Fatalf("RefreshWeekday = %d, want 6", cfg.RefreshWeekday)
+		}
+		if cfg.RefreshMonthDay != 31 {
+			t.Fatalf("RefreshMonthDay = %d, want 31", cfg.RefreshMonthDay)
 		}
 	})
 
-	t.Run("falls back to daily and valid day range", func(t *testing.T) {
-		cfg := BuildBudgetUsageConfig(false, "something", "06:30", -3)
+	t.Run("falls back to daily and valid refresh ranges", func(t *testing.T) {
+		cfg := BuildBudgetUsageConfig(false, "something", "06:30", -3, 0)
 		if cfg.CycleMode != "daily" {
 			t.Fatalf("CycleMode = %q, want daily", cfg.CycleMode)
 		}
-		if cfg.RefreshDay != 0 {
-			t.Fatalf("RefreshDay = %d, want 0", cfg.RefreshDay)
+		if cfg.RefreshWeekday != 0 {
+			t.Fatalf("RefreshWeekday = %d, want 0", cfg.RefreshWeekday)
+		}
+		if cfg.RefreshMonthDay != 1 {
+			t.Fatalf("RefreshMonthDay = %d, want 1", cfg.RefreshMonthDay)
 		}
 	})
 }
 
 func TestResolveBudgetCycleStartDaily(t *testing.T) {
 	loc := time.FixedZone("UTC+8", 8*60*60)
-	cfg := BuildBudgetUsageConfig(true, "daily", "06:45", 1)
+	cfg := BuildBudgetUsageConfig(true, "daily", "06:45", 1, 1)
 
 	nowBeforeRefresh := time.Date(2026, 2, 10, 5, 0, 0, 0, loc)
 	gotBefore := ResolveBudgetCycleStart(cfg, nowBeforeRefresh)
@@ -55,7 +61,7 @@ func TestResolveBudgetCycleStartDaily(t *testing.T) {
 
 func TestResolveBudgetCycleStartWeekly(t *testing.T) {
 	loc := time.FixedZone("UTC+8", 8*60*60)
-	cfg := BuildBudgetUsageConfig(true, "weekly", "06:45", 1) // Monday
+	cfg := BuildBudgetUsageConfig(true, "weekly", "06:45", 1, 1) // Monday
 
 	nowBeforeThisWeekTarget := time.Date(2026, 2, 8, 8, 0, 0, 0, loc) // Sunday
 	gotBefore := ResolveBudgetCycleStart(cfg, nowBeforeThisWeekTarget)
@@ -72,9 +78,28 @@ func TestResolveBudgetCycleStartWeekly(t *testing.T) {
 	}
 }
 
+func TestResolveBudgetCycleStartMonthly(t *testing.T) {
+	loc := time.FixedZone("UTC+8", 8*60*60)
+	cfg := BuildBudgetUsageConfig(true, "monthly", "06:45", 1, 31)
+
+	nowBeforeThisMonthTarget := time.Date(2026, time.March, 31, 6, 30, 0, 0, loc)
+	gotBefore := ResolveBudgetCycleStart(cfg, nowBeforeThisMonthTarget)
+	wantBefore := time.Date(2026, time.February, 28, 6, 45, 0, 0, loc)
+	if !gotBefore.Equal(wantBefore) {
+		t.Fatalf("monthly before target start = %s, want %s", gotBefore, wantBefore)
+	}
+
+	nowAfterThisMonthTarget := time.Date(2026, time.March, 31, 8, 0, 0, 0, loc)
+	gotAfter := ResolveBudgetCycleStart(cfg, nowAfterThisMonthTarget)
+	wantAfter := time.Date(2026, time.March, 31, 6, 45, 0, 0, loc)
+	if !gotAfter.Equal(wantAfter) {
+		t.Fatalf("monthly after target start = %s, want %s", gotAfter, wantAfter)
+	}
+}
+
 func TestResolveBudgetCycleStartWhenCycleDisabled(t *testing.T) {
 	loc := time.FixedZone("UTC+8", 8*60*60)
-	cfg := BuildBudgetUsageConfig(false, "weekly", "06:45", 1)
+	cfg := BuildBudgetUsageConfig(false, "weekly", "06:45", 1, 1)
 	now := time.Date(2026, 2, 10, 17, 30, 0, 0, loc)
 	got := ResolveBudgetCycleStart(cfg, now)
 	want := time.Date(2026, 2, 10, 0, 0, 0, 0, loc)
@@ -132,7 +157,7 @@ func TestComputeBudgetUsed(t *testing.T) {
 }
 
 func TestResolveBudgetRawUsedNilLogService(t *testing.T) {
-	cfg := BuildBudgetUsageConfig(true, "weekly", "06:45", 1)
+	cfg := BuildBudgetUsageConfig(true, "weekly", "06:45", 1, 1)
 	got := ResolveBudgetRawUsed(nil, "claude", cfg, time.Now())
 	if got != 0 {
 		t.Fatalf("ResolveBudgetRawUsed(nil, ...) = %v, want 0", got)

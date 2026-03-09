@@ -38,6 +38,15 @@ const (
 	defaultHeatmapIntensityL3             = 75
 	minHeatmapIntensityStop               = 1
 	maxHeatmapIntensityStop               = 99
+	budgetCycleModeDaily                  = "daily"
+	budgetCycleModeWeekly                 = "weekly"
+	budgetCycleModeMonthly                = "monthly"
+	defaultBudgetRefreshWeekday           = 1
+	minBudgetRefreshWeekday               = 0
+	maxBudgetRefreshWeekday               = 6
+	defaultBudgetRefreshMonthDay          = 1
+	minBudgetRefreshMonthDay              = 1
+	maxBudgetRefreshMonthDay              = 31
 )
 
 type AppSettings struct {
@@ -56,6 +65,7 @@ type AppSettings struct {
 	BudgetCycleMode            string  `json:"budget_cycle_mode"`
 	BudgetRefreshTime          string  `json:"budget_refresh_time"`
 	BudgetRefreshDay           int     `json:"budget_refresh_day"`
+	BudgetRefreshMonthDay      int     `json:"budget_refresh_month_day"`
 	BudgetShowCountdown        bool    `json:"budget_show_countdown"`
 	BudgetShowForecast         bool    `json:"budget_show_forecast"`
 	BudgetForecastMethod       string  `json:"budget_forecast_method"`
@@ -66,6 +76,7 @@ type AppSettings struct {
 	BudgetCycleModeCodex       string  `json:"budget_cycle_mode_codex"`
 	BudgetRefreshTimeCodex     string  `json:"budget_refresh_time_codex"`
 	BudgetRefreshDayCodex      int     `json:"budget_refresh_day_codex"`
+	BudgetRefreshMonthDayCodex int     `json:"budget_refresh_month_day_codex"`
 	BudgetShowCountdownCodex   bool    `json:"budget_show_countdown_codex"`
 	BudgetShowForecastCodex    bool    `json:"budget_show_forecast_codex"`
 	BudgetForecastMethodCodex  string  `json:"budget_forecast_method_codex"`
@@ -202,9 +213,10 @@ func (as *AppSettingsService) defaultSettings() AppSettings {
 		BudgetTotal:                0,
 		BudgetUsedAdjustment:       0,
 		BudgetCycleEnabled:         false,
-		BudgetCycleMode:            "daily",
+		BudgetCycleMode:            budgetCycleModeDaily,
 		BudgetRefreshTime:          "00:00",
-		BudgetRefreshDay:           1,
+		BudgetRefreshDay:           defaultBudgetRefreshWeekday,
+		BudgetRefreshMonthDay:      defaultBudgetRefreshMonthDay,
 		BudgetShowCountdown:        false,
 		BudgetShowForecast:         false,
 		BudgetForecastMethod:       "cycle",
@@ -212,9 +224,10 @@ func (as *AppSettingsService) defaultSettings() AppSettings {
 		BudgetTotalCodex:           0,
 		BudgetUsedAdjustmentCodex:  0,
 		BudgetCycleEnabledCodex:    false,
-		BudgetCycleModeCodex:       "daily",
+		BudgetCycleModeCodex:       budgetCycleModeDaily,
 		BudgetRefreshTimeCodex:     "00:00",
-		BudgetRefreshDayCodex:      1,
+		BudgetRefreshDayCodex:      defaultBudgetRefreshWeekday,
+		BudgetRefreshMonthDayCodex: defaultBudgetRefreshMonthDay,
 		BudgetShowCountdownCodex:   false,
 		BudgetShowForecastCodex:    false,
 		BudgetForecastMethodCodex:  "cycle",
@@ -243,6 +256,7 @@ func (as *AppSettingsService) SaveAppSettings(settings AppSettings) (AppSettings
 	defer as.mu.Unlock()
 	settings.HeatmapGranularity = normalizeHeatmapGranularity(settings.HeatmapGranularity)
 	normalizeHeatmapDisplaySettings(&settings)
+	normalizeBudgetSettings(&settings)
 	settings.UpdateHistoryKeepCount = normalizeUpdateHistoryKeepCount(settings.UpdateHistoryKeepCount)
 
 	// 同步开机自启动状态
@@ -281,6 +295,7 @@ func (as *AppSettingsService) loadLocked() (AppSettings, error) {
 	}
 	settings.HeatmapGranularity = normalizeHeatmapGranularity(settings.HeatmapGranularity)
 	normalizeHeatmapDisplaySettings(&settings)
+	normalizeBudgetSettings(&settings)
 	settings.UpdateHistoryKeepCount = normalizeUpdateHistoryKeepCount(settings.UpdateHistoryKeepCount)
 	return settings, nil
 }
@@ -292,6 +307,7 @@ func (as *AppSettingsService) saveLocked(settings AppSettings) error {
 	}
 	settings.HeatmapGranularity = normalizeHeatmapGranularity(settings.HeatmapGranularity)
 	normalizeHeatmapDisplaySettings(&settings)
+	normalizeBudgetSettings(&settings)
 	settings.UpdateHistoryKeepCount = normalizeUpdateHistoryKeepCount(settings.UpdateHistoryKeepCount)
 	data, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
@@ -308,6 +324,52 @@ func normalizeUpdateHistoryKeepCount(count int) int {
 		return maxUpdateHistoryKeepCount
 	}
 	return count
+}
+
+func normalizeBudgetCycleMode(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case budgetCycleModeWeekly:
+		return budgetCycleModeWeekly
+	case budgetCycleModeMonthly:
+		return budgetCycleModeMonthly
+	default:
+		return budgetCycleModeDaily
+	}
+}
+
+func clampBudgetRefreshWeekday(value int) int {
+	if value < minBudgetRefreshWeekday {
+		return minBudgetRefreshWeekday
+	}
+	if value > maxBudgetRefreshWeekday {
+		return maxBudgetRefreshWeekday
+	}
+	return value
+}
+
+func clampBudgetRefreshMonthDay(value int) int {
+	if value == 0 {
+		return defaultBudgetRefreshMonthDay
+	}
+	if value < minBudgetRefreshMonthDay {
+		return minBudgetRefreshMonthDay
+	}
+	if value > maxBudgetRefreshMonthDay {
+		return maxBudgetRefreshMonthDay
+	}
+	return value
+}
+
+func normalizeBudgetSettings(settings *AppSettings) {
+	if settings == nil {
+		return
+	}
+	settings.BudgetCycleMode = normalizeBudgetCycleMode(settings.BudgetCycleMode)
+	settings.BudgetRefreshDay = clampBudgetRefreshWeekday(settings.BudgetRefreshDay)
+	settings.BudgetRefreshMonthDay = clampBudgetRefreshMonthDay(settings.BudgetRefreshMonthDay)
+	settings.BudgetCycleModeCodex = normalizeBudgetCycleMode(settings.BudgetCycleModeCodex)
+	settings.BudgetRefreshDayCodex = clampBudgetRefreshWeekday(settings.BudgetRefreshDayCodex)
+	settings.BudgetRefreshMonthDayCodex = clampBudgetRefreshMonthDay(settings.BudgetRefreshMonthDayCodex)
 }
 
 func normalizeHeatmapGranularity(value string) string {

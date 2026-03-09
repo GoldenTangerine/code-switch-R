@@ -10,23 +10,29 @@ import (
 const (
 	BudgetUsageTimeLayout    = "2006-01-02 15:04:05"
 	defaultBudgetRefreshTime = "00:00"
-	budgetCycleModeDaily     = "daily"
-	budgetCycleModeWeekly    = "weekly"
 )
 
 type BudgetUsageConfig struct {
-	CycleEnabled bool
-	CycleMode    string
-	RefreshTime  string
-	RefreshDay   int
+	CycleEnabled    bool
+	CycleMode       string
+	RefreshTime     string
+	RefreshWeekday  int
+	RefreshMonthDay int
 }
 
-func BuildBudgetUsageConfig(cycleEnabled bool, cycleMode string, refreshTime string, refreshDay int) BudgetUsageConfig {
+func BuildBudgetUsageConfig(
+	cycleEnabled bool,
+	cycleMode string,
+	refreshTime string,
+	refreshWeekday int,
+	refreshMonthDay int,
+) BudgetUsageConfig {
 	return BudgetUsageConfig{
-		CycleEnabled: cycleEnabled,
-		CycleMode:    normalizeBudgetCycleMode(cycleMode),
-		RefreshTime:  normalizeBudgetRefreshTime(refreshTime),
-		RefreshDay:   normalizeBudgetRefreshDay(refreshDay),
+		CycleEnabled:    cycleEnabled,
+		CycleMode:       normalizeBudgetCycleMode(cycleMode),
+		RefreshTime:     normalizeBudgetRefreshTime(refreshTime),
+		RefreshWeekday:  clampBudgetRefreshWeekday(refreshWeekday),
+		RefreshMonthDay: clampBudgetRefreshMonthDay(refreshMonthDay),
 	}
 }
 
@@ -35,7 +41,8 @@ func ResolveBudgetCycleStart(config BudgetUsageConfig, now time.Time) time.Time 
 		config.CycleEnabled,
 		config.CycleMode,
 		config.RefreshTime,
-		config.RefreshDay,
+		config.RefreshWeekday,
+		config.RefreshMonthDay,
 	)
 	if !normalized.CycleEnabled {
 		return startOfBudgetDay(now)
@@ -44,13 +51,35 @@ func ResolveBudgetCycleStart(config BudgetUsageConfig, now time.Time) time.Time 
 	hour, minute := parseBudgetRefreshTime(normalized.RefreshTime)
 	if normalized.CycleMode == budgetCycleModeWeekly {
 		target := now
-		diff := normalized.RefreshDay - int(target.Weekday())
+		diff := normalized.RefreshWeekday - int(target.Weekday())
 		target = target.AddDate(0, 0, diff)
 		target = time.Date(target.Year(), target.Month(), target.Day(), hour, minute, 0, 0, target.Location())
 		if now.Before(target) {
 			target = target.AddDate(0, 0, -7)
 		}
 		return target
+	}
+	if normalized.CycleMode == budgetCycleModeMonthly {
+		currentMonthTarget := resolveBudgetMonthlyRefreshPoint(
+			now.Year(),
+			now.Month(),
+			normalized.RefreshMonthDay,
+			hour,
+			minute,
+			now.Location(),
+		)
+		if !now.Before(currentMonthTarget) {
+			return currentMonthTarget
+		}
+		previousMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location()).AddDate(0, -1, 0)
+		return resolveBudgetMonthlyRefreshPoint(
+			previousMonth.Year(),
+			previousMonth.Month(),
+			normalized.RefreshMonthDay,
+			hour,
+			minute,
+			now.Location(),
+		)
 	}
 
 	start := time.Date(now.Year(), now.Month(), now.Day(), hour, minute, 0, 0, now.Location())
@@ -69,7 +98,8 @@ func ResolveBudgetRawUsed(logService *LogService, platform string, config Budget
 		config.CycleEnabled,
 		config.CycleMode,
 		config.RefreshTime,
-		config.RefreshDay,
+		config.RefreshWeekday,
+		config.RefreshMonthDay,
 	)
 
 	if normalized.CycleEnabled {
@@ -93,6 +123,22 @@ func ResolveBudgetUsed(logService *LogService, platform string, config BudgetUsa
 	return ComputeBudgetUsed(rawUsed, adjustment)
 }
 
+func resolveBudgetMonthlyRefreshPoint(
+	year int,
+	month time.Month,
+	desiredDay int,
+	hour int,
+	minute int,
+	location *time.Location,
+) time.Time {
+	lastDay := time.Date(year, month+1, 0, 0, 0, 0, 0, location).Day()
+	day := desiredDay
+	if day > lastDay {
+		day = lastDay
+	}
+	return time.Date(year, month, day, hour, minute, 0, 0, location)
+}
+
 func ComputeBudgetUsed(rawUsed float64, adjustment float64) float64 {
 	normalizedRaw := normalizeBudgetRawUsed(rawUsed)
 	normalizedAdjustment := normalizeBudgetAdjustment(adjustment)
@@ -106,29 +152,12 @@ func ComputeBudgetUsed(rawUsed float64, adjustment float64) float64 {
 	return used
 }
 
-func normalizeBudgetCycleMode(value string) string {
-	if strings.TrimSpace(strings.ToLower(value)) == budgetCycleModeWeekly {
-		return budgetCycleModeWeekly
-	}
-	return budgetCycleModeDaily
-}
-
 func normalizeBudgetRefreshTime(value string) string {
 	normalized := strings.TrimSpace(value)
 	if normalized == "" {
 		return defaultBudgetRefreshTime
 	}
 	return normalized
-}
-
-func normalizeBudgetRefreshDay(value int) int {
-	if value < 0 {
-		return 0
-	}
-	if value > 6 {
-		return 6
-	}
-	return value
 }
 
 func parseBudgetRefreshTime(value string) (int, int) {

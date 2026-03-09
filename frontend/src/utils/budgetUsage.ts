@@ -1,10 +1,11 @@
-export type BudgetCycleMode = 'daily' | 'weekly'
+export type BudgetCycleMode = 'daily' | 'weekly' | 'monthly'
 
 export type BudgetUsageConfig = {
   cycleEnabled: boolean
   cycleMode: BudgetCycleMode
   refreshTime: string
-  refreshDay: number
+  refreshWeekday: number
+  refreshMonthDay: number
 }
 
 export const pad2 = (value: number) => String(value).padStart(2, '0')
@@ -14,13 +15,23 @@ export const formatLocalDateTime = (date: Date) => {
 }
 
 export const normalizeBudgetCycleMode = (value: unknown): BudgetCycleMode => {
-  return String(value ?? '').trim().toLowerCase() === 'weekly' ? 'weekly' : 'daily'
+  const normalized = String(value ?? '').trim().toLowerCase()
+  if (normalized === 'weekly' || normalized === 'monthly') {
+    return normalized
+  }
+  return 'daily'
 }
 
-export const normalizeBudgetRefreshDay = (value: unknown) => {
+export const normalizeBudgetRefreshWeekday = (value: unknown) => {
   const numeric = Number(value ?? 1)
   if (!Number.isFinite(numeric)) return 1
   return Math.min(Math.max(Math.floor(numeric), 0), 6)
+}
+
+export const normalizeBudgetRefreshMonthDay = (value: unknown) => {
+  const numeric = Number(value ?? 1)
+  if (!Number.isFinite(numeric)) return 1
+  return Math.min(Math.max(Math.floor(numeric), 1), 31)
 }
 
 export const normalizeBudgetRefreshTime = (value: unknown) => {
@@ -49,13 +60,26 @@ export const startOfDay = (date: Date) => {
   return base
 }
 
+const resolveMonthlyRefreshPoint = (
+  year: number,
+  monthIndex: number,
+  desiredDay: number,
+  hour: number,
+  minute: number,
+) => {
+  const lastDay = new Date(year, monthIndex + 1, 0).getDate()
+  const target = new Date(year, monthIndex, Math.min(desiredDay, lastDay))
+  target.setHours(hour, minute, 0, 0)
+  return target
+}
+
 export const resolveCycleStart = (config: BudgetUsageConfig, now: Date) => {
   if (!config.cycleEnabled) {
     return startOfDay(now)
   }
   const { hour, minute } = parseRefreshTime(config.refreshTime)
   if (config.cycleMode === 'weekly') {
-    const desiredDay = normalizeBudgetRefreshDay(config.refreshDay)
+    const desiredDay = normalizeBudgetRefreshWeekday(config.refreshWeekday)
     const target = new Date(now)
     const currentDay = target.getDay()
     const diff = desiredDay - currentDay
@@ -66,6 +90,27 @@ export const resolveCycleStart = (config: BudgetUsageConfig, now: Date) => {
     }
     return target
   }
+  if (config.cycleMode === 'monthly') {
+    const desiredDay = normalizeBudgetRefreshMonthDay(config.refreshMonthDay)
+    const currentMonthTarget = resolveMonthlyRefreshPoint(
+      now.getFullYear(),
+      now.getMonth(),
+      desiredDay,
+      hour,
+      minute,
+    )
+    if (now >= currentMonthTarget) {
+      return currentMonthTarget
+    }
+    const previousMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+    return resolveMonthlyRefreshPoint(
+      previousMonth.getFullYear(),
+      previousMonth.getMonth(),
+      desiredDay,
+      hour,
+      minute,
+    )
+  }
   const start = new Date(now)
   start.setHours(hour, minute, 0, 0)
   if (now < start) {
@@ -74,17 +119,48 @@ export const resolveCycleStart = (config: BudgetUsageConfig, now: Date) => {
   return start
 }
 
+export const resolveNextCycleStart = (config: BudgetUsageConfig, currentStart: Date) => {
+  const normalized = buildBudgetUsageConfig(
+    config.cycleEnabled,
+    config.cycleMode,
+    config.refreshTime,
+    config.refreshWeekday,
+    config.refreshMonthDay,
+  )
+  if (normalized.cycleMode === 'weekly') {
+    const next = new Date(currentStart)
+    next.setDate(next.getDate() + 7)
+    return next
+  }
+  if (normalized.cycleMode === 'monthly') {
+    const { hour, minute } = parseRefreshTime(normalized.refreshTime)
+    const nextMonth = new Date(currentStart.getFullYear(), currentStart.getMonth() + 1, 1)
+    return resolveMonthlyRefreshPoint(
+      nextMonth.getFullYear(),
+      nextMonth.getMonth(),
+      normalized.refreshMonthDay,
+      hour,
+      minute,
+    )
+  }
+  const next = new Date(currentStart)
+  next.setDate(next.getDate() + 1)
+  return next
+}
+
 export const buildBudgetUsageConfig = (
   cycleEnabled: boolean,
   cycleMode: unknown,
   refreshTime: unknown,
-  refreshDay: unknown,
+  refreshWeekday: unknown,
+  refreshMonthDay: unknown,
 ): BudgetUsageConfig => {
   return {
     cycleEnabled,
     cycleMode: normalizeBudgetCycleMode(cycleMode),
     refreshTime: normalizeBudgetRefreshTime(refreshTime),
-    refreshDay: normalizeBudgetRefreshDay(refreshDay),
+    refreshWeekday: normalizeBudgetRefreshWeekday(refreshWeekday),
+    refreshMonthDay: normalizeBudgetRefreshMonthDay(refreshMonthDay),
   }
 }
 
@@ -93,7 +169,8 @@ export const getBudgetUsageConfigKey = (config: BudgetUsageConfig) => {
     config.cycleEnabled,
     config.cycleMode,
     config.refreshTime,
-    config.refreshDay,
+    config.refreshWeekday,
+    config.refreshMonthDay,
   )
-  return `${normalized.cycleEnabled ? '1' : '0'}|${normalized.cycleMode}|${normalized.refreshTime}|${normalized.refreshDay}`
+  return `${normalized.cycleEnabled ? '1' : '0'}|${normalized.cycleMode}|${normalized.refreshTime}|${normalized.refreshWeekday}|${normalized.refreshMonthDay}`
 }

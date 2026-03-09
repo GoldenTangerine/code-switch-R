@@ -8,10 +8,12 @@ import {
   buildBudgetUsageConfig,
   formatLocalDateTime,
   normalizeBudgetCycleMode,
-  normalizeBudgetRefreshDay,
+  normalizeBudgetRefreshMonthDay,
+  normalizeBudgetRefreshWeekday,
   normalizeBudgetRefreshTime,
   pad2,
   resolveCycleStart,
+  resolveNextCycleStart,
   startOfDay,
   type BudgetCycleMode,
 } from '../../utils/budgetUsage'
@@ -87,7 +89,8 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
   const cycleEnabled = ref(false)
   const cycleMode = ref<BudgetCycleMode>('daily')
   const refreshTime = ref('00:00')
-  const refreshDay = ref(1)
+  const refreshWeekday = ref(1)
+  const refreshMonthDay = ref(1)
   const showCountdown = ref(false)
   const showForecast = ref(false)
   const forecastMethod = ref<ForecastMethod>('cycle')
@@ -111,7 +114,12 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
     const percent = Math.round(progressRatio.value * 100)
     return `${percent}%`
   })
-  const budgetTitle = computed(() => (cycleEnabled.value && cycleMode.value === 'weekly' ? '本周预算' : '今日预算'))
+  const budgetTitle = computed(() => {
+    if (!cycleEnabled.value) return '今日预算'
+    if (cycleMode.value === 'weekly') return '本周预算'
+    if (cycleMode.value === 'monthly') return '本月预算'
+    return '今日预算'
+  })
   const hostingLabel = computed(() => (hostingEnabled.value ? '托管中' : '未托管'))
 
   const applyUsedAdjustment = (rawUsed: number) => {
@@ -138,17 +146,12 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
       cycleEnabled.value,
       cycleMode.value,
       refreshTime.value,
-      refreshDay.value,
+      refreshWeekday.value,
+      refreshMonthDay.value,
     )
     const start = resolveCycleStart(config, now)
-    const next = new Date(start)
-    if (config.cycleMode === 'weekly') {
-      next.setDate(next.getDate() + 7)
-    } else {
-      next.setDate(next.getDate() + 1)
-    }
     cycleStart = start
-    nextReset = next
+    nextReset = resolveNextCycleStart(config, start)
   }
 
   const computeForecastRate = async (now: Date) => {
@@ -235,7 +238,8 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
       cycleEnabled.value = settings?.budget_cycle_enabled_codex ?? false
       cycleMode.value = normalizeBudgetCycleMode(settings?.budget_cycle_mode_codex)
       refreshTime.value = normalizeBudgetRefreshTime(settings?.budget_refresh_time_codex)
-      refreshDay.value = normalizeBudgetRefreshDay(settings?.budget_refresh_day_codex)
+      refreshWeekday.value = normalizeBudgetRefreshWeekday(settings?.budget_refresh_day_codex)
+      refreshMonthDay.value = normalizeBudgetRefreshMonthDay(settings?.budget_refresh_month_day_codex)
       showCountdown.value = settings?.budget_show_countdown_codex ?? false
       showForecast.value = settings?.budget_show_forecast_codex ?? false
       forecastMethod.value = normalizeForecastMethod(settings?.budget_forecast_method_codex ?? 'cycle')
@@ -248,7 +252,8 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
     cycleEnabled.value = settings?.budget_cycle_enabled ?? false
     cycleMode.value = normalizeBudgetCycleMode(settings?.budget_cycle_mode)
     refreshTime.value = normalizeBudgetRefreshTime(settings?.budget_refresh_time)
-    refreshDay.value = normalizeBudgetRefreshDay(settings?.budget_refresh_day)
+    refreshWeekday.value = normalizeBudgetRefreshWeekday(settings?.budget_refresh_day)
+    refreshMonthDay.value = normalizeBudgetRefreshMonthDay(settings?.budget_refresh_month_day)
     showCountdown.value = settings?.budget_show_countdown ?? false
     showForecast.value = settings?.budget_show_forecast ?? false
     forecastMethod.value = normalizeForecastMethod(settings?.budget_forecast_method ?? 'cycle')

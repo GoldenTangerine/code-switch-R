@@ -35,7 +35,8 @@ import {
   formatLocalDateTime,
   getBudgetUsageConfigKey,
   normalizeBudgetCycleMode,
-  normalizeBudgetRefreshDay,
+  normalizeBudgetRefreshMonthDay,
+  normalizeBudgetRefreshWeekday,
   normalizeBudgetRefreshTime,
   normalizeBudgetUsedDisplay,
   resolveCycleStart,
@@ -102,6 +103,7 @@ const budgetCycleEnabled = ref(getCachedValue('budgetCycleEnabled', false))
 const budgetCycleMode = ref(getCachedString('budgetCycleMode', 'daily'))
 const budgetRefreshTime = ref(getCachedString('budgetRefreshTime', '00:00'))
 const budgetRefreshDay = ref(getCachedNumber('budgetRefreshDay', 1))
+const budgetRefreshMonthDay = ref(getCachedNumber('budgetRefreshMonthDay', 1))
 const budgetShowCountdown = ref(getCachedValue('budgetShowCountdown', false))
 const budgetShowForecast = ref(getCachedValue('budgetShowForecast', false))
 const budgetTotalCodex = ref(getCachedNumber('budgetTotalCodex', 0))
@@ -114,6 +116,7 @@ const budgetCycleEnabledCodex = ref(getCachedValue('budgetCycleEnabledCodex', fa
 const budgetCycleModeCodex = ref(getCachedString('budgetCycleModeCodex', 'daily'))
 const budgetRefreshTimeCodex = ref(getCachedString('budgetRefreshTimeCodex', '00:00'))
 const budgetRefreshDayCodex = ref(getCachedNumber('budgetRefreshDayCodex', 1))
+const budgetRefreshMonthDayCodex = ref(getCachedNumber('budgetRefreshMonthDayCodex', 1))
 const budgetShowCountdownCodex = ref(getCachedValue('budgetShowCountdownCodex', false))
 const budgetShowForecastCodex = ref(getCachedValue('budgetShowForecastCodex', false))
 const settingsLoading = ref(true)
@@ -139,6 +142,7 @@ const envPersistDebounceMs =
 const persistDebounceMs = Number.isFinite(envPersistDebounceMs)
   ? Math.min(Math.max(Math.round(envPersistDebounceMs), minPersistDebounceMs), maxPersistDebounceMs)
   : defaultPersistDebounceMs
+const monthDayOptions = Array.from({ length: 31 }, (_, index) => index + 1)
 
 type BudgetPlatform = 'claude' | 'codex'
 type BudgetUsageConfigs = {
@@ -157,12 +161,14 @@ const getCurrentBudgetUsageConfigs = () => {
       budgetCycleMode.value,
       budgetRefreshTime.value,
       budgetRefreshDay.value,
+      budgetRefreshMonthDay.value,
     ),
     codex: buildBudgetUsageConfig(
       budgetCycleEnabledCodex.value,
       budgetCycleModeCodex.value,
       budgetRefreshTimeCodex.value,
       budgetRefreshDayCodex.value,
+      budgetRefreshMonthDayCodex.value,
     ),
   }
 }
@@ -280,6 +286,7 @@ const syncAppSettingsCache = () => {
   localStorage.setItem('app-settings-budgetCycleMode', budgetCycleMode.value)
   localStorage.setItem('app-settings-budgetRefreshTime', budgetRefreshTime.value)
   localStorage.setItem('app-settings-budgetRefreshDay', String(budgetRefreshDay.value))
+  localStorage.setItem('app-settings-budgetRefreshMonthDay', String(budgetRefreshMonthDay.value))
   localStorage.setItem('app-settings-budgetShowCountdown', String(budgetShowCountdown.value))
   localStorage.setItem('app-settings-budgetShowForecast', String(budgetShowForecast.value))
   localStorage.setItem('app-settings-budgetTotalCodex', String(budgetTotalCodex.value))
@@ -290,6 +297,7 @@ const syncAppSettingsCache = () => {
   localStorage.setItem('app-settings-budgetCycleModeCodex', budgetCycleModeCodex.value)
   localStorage.setItem('app-settings-budgetRefreshTimeCodex', budgetRefreshTimeCodex.value)
   localStorage.setItem('app-settings-budgetRefreshDayCodex', String(budgetRefreshDayCodex.value))
+  localStorage.setItem('app-settings-budgetRefreshMonthDayCodex', String(budgetRefreshMonthDayCodex.value))
   localStorage.setItem('app-settings-budgetShowCountdownCodex', String(budgetShowCountdownCodex.value))
   localStorage.setItem('app-settings-budgetShowForecastCodex', String(budgetShowForecastCodex.value))
   localStorage.setItem('app-settings-autoStart', String(autoStartEnabled.value))
@@ -896,7 +904,8 @@ const loadAppSettings = async () => {
     budgetCycleEnabled.value = data?.budget_cycle_enabled ?? false
     budgetCycleMode.value = normalizeBudgetCycleMode(data?.budget_cycle_mode)
     budgetRefreshTime.value = normalizeBudgetRefreshTime(data?.budget_refresh_time)
-    budgetRefreshDay.value = normalizeBudgetRefreshDay(data?.budget_refresh_day)
+    budgetRefreshDay.value = normalizeBudgetRefreshWeekday(data?.budget_refresh_day)
+    budgetRefreshMonthDay.value = normalizeBudgetRefreshMonthDay(data?.budget_refresh_month_day)
     budgetShowCountdown.value = data?.budget_show_countdown ?? false
     budgetShowForecast.value = data?.budget_show_forecast ?? false
     budgetTotalCodex.value = Number(data?.budget_total_codex ?? 0)
@@ -907,7 +916,8 @@ const loadAppSettings = async () => {
     budgetCycleEnabledCodex.value = data?.budget_cycle_enabled_codex ?? false
     budgetCycleModeCodex.value = normalizeBudgetCycleMode(data?.budget_cycle_mode_codex)
     budgetRefreshTimeCodex.value = normalizeBudgetRefreshTime(data?.budget_refresh_time_codex)
-    budgetRefreshDayCodex.value = normalizeBudgetRefreshDay(data?.budget_refresh_day_codex)
+    budgetRefreshDayCodex.value = normalizeBudgetRefreshWeekday(data?.budget_refresh_day_codex)
+    budgetRefreshMonthDayCodex.value = normalizeBudgetRefreshMonthDay(data?.budget_refresh_month_day_codex)
     budgetShowCountdownCodex.value = data?.budget_show_countdown_codex ?? false
     budgetShowForecastCodex.value = data?.budget_show_forecast_codex ?? false
     autoStartEnabled.value = data?.auto_start ?? false
@@ -944,6 +954,7 @@ const loadAppSettings = async () => {
     budgetCycleMode.value = 'daily'
     budgetRefreshTime.value = '00:00'
     budgetRefreshDay.value = 1
+    budgetRefreshMonthDay.value = 1
     budgetShowCountdown.value = false
     budgetShowForecast.value = false
     budgetTotalCodex.value = 0
@@ -956,6 +967,7 @@ const loadAppSettings = async () => {
     budgetCycleModeCodex.value = 'daily'
     budgetRefreshTimeCodex.value = '00:00'
     budgetRefreshDayCodex.value = 1
+    budgetRefreshMonthDayCodex.value = 1
     budgetShowCountdownCodex.value = false
     budgetShowForecastCodex.value = false
     autoStartEnabled.value = false
@@ -1006,12 +1018,16 @@ const persistAppSettingsNow = async () => {
     budgetForecastDisplayCodex.value = normalizedBudgetForecastDisplayCodex
     const normalizedBudgetRefreshTimeCodex = normalizeBudgetRefreshTime(budgetRefreshTimeCodex.value)
     budgetRefreshTimeCodex.value = normalizedBudgetRefreshTimeCodex
-    const normalizedBudgetRefreshDayValue = normalizeBudgetRefreshDay(budgetRefreshDay.value)
+    const normalizedBudgetRefreshDayValue = normalizeBudgetRefreshWeekday(budgetRefreshDay.value)
     budgetRefreshDay.value = normalizedBudgetRefreshDayValue
+    const normalizedBudgetRefreshMonthDayValue = normalizeBudgetRefreshMonthDay(budgetRefreshMonthDay.value)
+    budgetRefreshMonthDay.value = normalizedBudgetRefreshMonthDayValue
     const normalizedBudgetCycleMode = normalizeBudgetCycleMode(budgetCycleMode.value)
     budgetCycleMode.value = normalizedBudgetCycleMode
-    const normalizedBudgetRefreshDayCodexValue = normalizeBudgetRefreshDay(budgetRefreshDayCodex.value)
+    const normalizedBudgetRefreshDayCodexValue = normalizeBudgetRefreshWeekday(budgetRefreshDayCodex.value)
     budgetRefreshDayCodex.value = normalizedBudgetRefreshDayCodexValue
+    const normalizedBudgetRefreshMonthDayCodexValue = normalizeBudgetRefreshMonthDay(budgetRefreshMonthDayCodex.value)
+    budgetRefreshMonthDayCodex.value = normalizedBudgetRefreshMonthDayCodexValue
     const normalizedBudgetCycleModeCodex = normalizeBudgetCycleMode(budgetCycleModeCodex.value)
     budgetCycleModeCodex.value = normalizedBudgetCycleModeCodex
     const normalizedUpdateHistoryKeepCount = normalizeUpdateHistoryKeepCount(updateHistoryKeepCount.value)
@@ -1029,12 +1045,14 @@ const persistAppSettingsNow = async () => {
         normalizedBudgetCycleMode,
         normalizedBudgetRefreshTime,
         normalizedBudgetRefreshDayValue,
+        normalizedBudgetRefreshMonthDayValue,
       ),
       codex: buildBudgetUsageConfig(
         budgetCycleEnabledCodex.value,
         normalizedBudgetCycleModeCodex,
         normalizedBudgetRefreshTimeCodex,
         normalizedBudgetRefreshDayCodexValue,
+        normalizedBudgetRefreshMonthDayCodexValue,
       ),
     }
     const nextBudgetUsageConfigKey = getBudgetUsageConfigKey(nextUsageConfigs.claude)
@@ -1084,6 +1102,7 @@ const persistAppSettingsNow = async () => {
       budget_cycle_mode: normalizedBudgetCycleMode,
       budget_refresh_time: normalizedBudgetRefreshTime,
       budget_refresh_day: normalizedBudgetRefreshDayValue,
+      budget_refresh_month_day: normalizedBudgetRefreshMonthDayValue,
       budget_show_countdown: budgetShowCountdown.value,
       budget_show_forecast: budgetShowForecast.value,
       budget_total_codex: normalizedBudgetTotalCodex,
@@ -1094,6 +1113,7 @@ const persistAppSettingsNow = async () => {
       budget_cycle_mode_codex: normalizedBudgetCycleModeCodex,
       budget_refresh_time_codex: normalizedBudgetRefreshTimeCodex,
       budget_refresh_day_codex: normalizedBudgetRefreshDayCodexValue,
+      budget_refresh_month_day_codex: normalizedBudgetRefreshMonthDayCodexValue,
       budget_show_countdown_codex: budgetShowCountdownCodex.value,
       budget_show_forecast_codex: budgetShowForecastCodex.value,
       auto_start: autoStartEnabled.value,
@@ -1792,11 +1812,12 @@ onBeforeUnmount(() => {
               @change="persistAppSettings">
               <option value="daily">{{ $t('components.general.label.budgetCycleModeDaily') }}</option>
               <option value="weekly">{{ $t('components.general.label.budgetCycleModeWeekly') }}</option>
+              <option value="monthly">{{ $t('components.general.label.budgetCycleModeMonthly') }}</option>
             </select>
           </ListItem>
           <ListItem
             v-if="budgetCycleMode === 'weekly'"
-            :label="$t('components.general.label.budgetRefreshDay')">
+            :label="$t('components.general.label.budgetRefreshWeekday')">
             <select
               v-model.number="budgetRefreshDay"
               :disabled="settingsLoading || saveBusy || !budgetCycleEnabled"
@@ -1810,6 +1831,20 @@ onBeforeUnmount(() => {
               <option :value="6">{{ $t('components.general.label.weekdaySat') }}</option>
               <option :value="0">{{ $t('components.general.label.weekdaySun') }}</option>
             </select>
+          </ListItem>
+          <ListItem
+            v-if="budgetCycleMode === 'monthly'"
+            :label="$t('components.general.label.budgetRefreshMonthDay')">
+            <div class="toggle-with-hint">
+              <select
+                v-model.number="budgetRefreshMonthDay"
+                :disabled="settingsLoading || saveBusy || !budgetCycleEnabled"
+                class="mac-select budget-select"
+                @change="persistAppSettings">
+                <option v-for="day in monthDayOptions" :key="`claude-month-day-${day}`" :value="day">{{ day }}</option>
+              </select>
+              <span class="hint-text">{{ $t('components.general.label.budgetRefreshMonthDayHint') }}</span>
+            </div>
           </ListItem>
           <ListItem :label="$t('components.general.label.budgetRefreshTime')">
             <input
@@ -1933,11 +1968,12 @@ onBeforeUnmount(() => {
               @change="persistAppSettings">
               <option value="daily">{{ $t('components.general.label.budgetCycleModeDaily') }}</option>
               <option value="weekly">{{ $t('components.general.label.budgetCycleModeWeekly') }}</option>
+              <option value="monthly">{{ $t('components.general.label.budgetCycleModeMonthly') }}</option>
             </select>
           </ListItem>
           <ListItem
             v-if="budgetCycleModeCodex === 'weekly'"
-            :label="$t('components.general.label.budgetRefreshDay')">
+            :label="$t('components.general.label.budgetRefreshWeekday')">
             <select
               v-model.number="budgetRefreshDayCodex"
               :disabled="settingsLoading || saveBusy || !budgetCycleEnabledCodex"
@@ -1951,6 +1987,20 @@ onBeforeUnmount(() => {
               <option :value="6">{{ $t('components.general.label.weekdaySat') }}</option>
               <option :value="0">{{ $t('components.general.label.weekdaySun') }}</option>
             </select>
+          </ListItem>
+          <ListItem
+            v-if="budgetCycleModeCodex === 'monthly'"
+            :label="$t('components.general.label.budgetRefreshMonthDay')">
+            <div class="toggle-with-hint">
+              <select
+                v-model.number="budgetRefreshMonthDayCodex"
+                :disabled="settingsLoading || saveBusy || !budgetCycleEnabledCodex"
+                class="mac-select budget-select"
+                @change="persistAppSettings">
+                <option v-for="day in monthDayOptions" :key="`codex-month-day-${day}`" :value="day">{{ day }}</option>
+              </select>
+              <span class="hint-text">{{ $t('components.general.label.budgetRefreshMonthDayHint') }}</span>
+            </div>
           </ListItem>
           <ListItem :label="$t('components.general.label.budgetRefreshTime')">
             <input

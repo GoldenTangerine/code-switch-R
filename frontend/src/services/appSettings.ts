@@ -26,6 +26,7 @@ export type AppSettings = {
   budget_cycle_mode: string
   budget_refresh_time: string
   budget_refresh_day: number
+  budget_refresh_month_day: number
   budget_show_countdown: boolean
   budget_show_forecast: boolean
   budget_forecast_method: string
@@ -36,6 +37,7 @@ export type AppSettings = {
   budget_cycle_mode_codex: string
   budget_refresh_time_codex: string
   budget_refresh_day_codex: number
+  budget_refresh_month_day_codex: number
   budget_show_countdown_codex: boolean
   budget_show_forecast_codex: boolean
   budget_forecast_method_codex: string
@@ -66,6 +68,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   budget_cycle_mode: 'daily',
   budget_refresh_time: '00:00',
   budget_refresh_day: 1,
+  budget_refresh_month_day: 1,
   budget_show_countdown: false,
   budget_show_forecast: false,
   budget_forecast_method: 'cycle',
@@ -76,6 +79,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   budget_cycle_mode_codex: 'daily',
   budget_refresh_time_codex: '00:00',
   budget_refresh_day_codex: 1,
+  budget_refresh_month_day_codex: 1,
   budget_show_countdown_codex: false,
   budget_show_forecast_codex: false,
   budget_forecast_method_codex: 'cycle',
