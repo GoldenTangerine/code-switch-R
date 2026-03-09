@@ -490,11 +490,11 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import BaseInput from '../common/BaseInput.vue'
-import InlineModal from '../common/InlineModal.vue'
-import type { AutomationCard } from '../../data/cards'
-import { extractErrorMessage } from '../../utils/error'
-import { showToast } from '../../utils/toast'
+import BaseInput from '../../common/BaseInput.vue'
+import InlineModal from '../../common/InlineModal.vue'
+import type { AutomationCard } from '../../../data/cards'
+import { extractErrorMessage } from '../../../utils/error'
+import { showToast } from '../../../utils/toast'
 import {
   deleteProviderModelPricingOverride,
   fetchProviderModelPricing,
@@ -505,7 +505,7 @@ import {
   type ProviderModelPricingResponse,
   type ProviderModelPricingSource,
   upsertProviderModelPricingOverride,
-} from '../../services/providerModelPricing'
+} from '../../../services/providerModelPricing'
 
 type ProviderVendorKey = 'all' | 'OpenAI' | 'Claude' | 'Gemini' | 'Moonshot' | 'Grok' | 'DeepSeek' | 'Qwen' | 'Mistral' | 'Unknown'
 
@@ -1264,7 +1264,7 @@ watch(
 </script>
 
 <style scoped>
-@import '../common/provider-model-list-shared.css';
+@import '../../common/provider-model-list-shared.css';
 
 .provider-model-state.error {
   color: #ef4444;

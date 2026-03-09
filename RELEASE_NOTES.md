@@ -1,3 +1,17 @@
+# Code Switch v2.7.28
+
+## 修复
+- **首页 Main 迁移收口后 `others` 代理状态不再串台**：修复自定义 CLI 工具在 `others` 平台切换、新增、删除后，顶部 relay toggle 仍沿用旧工具代理状态的问题；现在代理开关会跟随当前选中的工具即时同步，避免界面状态和真实代理状态打架。
+- **首页热力图刷新与事件驱动切平台恢复等价行为**：修复拆分后热力图 `reload` 暴露链路缺失、`provider:switched` / `provider:blacklisted` 事件切平台时未补齐 tab 激活副作用的问题，避免出现热力图不刷新或切页后状态还停留在旧平台的回归。
+- **`ProviderModelListModal` 目录结构与迁移文档彻底对齐**：将模型列表弹窗正式收口到 `frontend/src/components/Main/modals/`，修复迁移文档已标完成但目录仍残留在根路径的收尾遗漏。
+
+## 技术改进
+- **首页 Main 第二轮解耦改造正式收口**：`frontend/src/components/Main/Index.vue` 已从 `10287fa`（`release: prepare v2.7.27`，`1677` 行）继续收敛到本次 `v2.7.28` 发布提交（`514` 行），热力图展示、页面壳编排、Provider 表单编排、Provider 统计展示与模型列表弹窗目录全部完成收口。
+- **自定义 CLI 代理状态拉取改为并发**：`useCustomCliTools.ts` 现在并发查询各工具代理状态并清理失效缓存，减少首页初始化时串行探测的等待时间。
+- **迁移进度文档与索引同步完结**：`qianyi/main-index-migration.md` 与 `qianyi/README.md` 已回写最终完成状态、完成定义与关键修复点，后续追溯 `Main/Index.vue` 改造范围时不再需要对着 diff 盲猜。
+
+---
+
 # Code Switch v2.7.27
 
 ## 修复

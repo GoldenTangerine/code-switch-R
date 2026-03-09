@@ -1,0 +1,243 @@
+import { reactive, ref } from 'vue'
+import { Call } from '@wailsio/runtime'
+import type { AutomationCard } from '../../../data/cards'
+import { saveCLIConfig, type CLIPlatform } from '../../../services/cliConfig'
+import { createGeminiProviderRef, normalizeProviderRef } from '../adapters/providerCardMappers'
+import { buildPersistedProviderFieldsFromForm } from '../adapters/providerFormMappers'
+import type { ProviderTab, TranslateFn, VendorForm } from '../types'
+
+type ToastType = 'success' | 'error' | 'warning'
+
+type UseProviderFormOptions = {
+  initialTab: ProviderTab
+  t: TranslateFn
+  showToast: (message: string, type?: ToastType) => void
+  getActiveTab: () => ProviderTab
+  cards: Record<ProviderTab, AutomationCard[]>
+  normalizeLevel: (level: number | string | undefined) => number
+  sortProvidersByLevel: (list: AutomationCard[]) => void
+  persistProviders: (tabId: ProviderTab) => Promise<void>
+  refreshDirectAppliedStatus: (tabId: ProviderTab) => Promise<void>
+  removeProvider: (id: number, tabId: ProviderTab) => Promise<void>
+  duplicateProvider: (card: AutomationCard) => Promise<boolean>
+  reloadProviders: () => Promise<void>
+}
+
+type ProviderModalState = {
+  open: boolean
+  tabId: ProviderTab
+  card: AutomationCard | null
+}
+
+type ConfirmState = {
+  open: boolean
+  card: AutomationCard | null
+  tabId: ProviderTab
+}
+
+export function useProviderForm(options: UseProviderFormOptions) {
+  const {
+    initialTab,
+    t,
+    showToast,
+    getActiveTab,
+    cards,
+    normalizeLevel,
+    sortProvidersByLevel,
+    persistProviders,
+    refreshDirectAppliedStatus,
+    removeProvider,
+    duplicateProvider,
+    reloadProviders,
+  } = options
+
+  const modelListModalOpen = ref(false)
+  const modelListModalProvider = ref<AutomationCard | null>(null)
+  const providerModalState = reactive<ProviderModalState>({
+    open: false,
+    tabId: initialTab,
+    card: null,
+  })
+  const confirmState = reactive<ConfirmState>({
+    open: false,
+    card: null,
+    tabId: initialTab,
+  })
+
+  const openModelList = (card: AutomationCard) => {
+    if (!card.apiUrl || !card.apiKey) {
+      showToast(t('components.main.modelList.apiKeyRequired'), 'error')
+      return
+    }
+    modelListModalProvider.value = card
+    modelListModalOpen.value = true
+  }
+
+  const closeModelListModal = () => {
+    modelListModalOpen.value = false
+    modelListModalProvider.value = null
+  }
+
+  const openCreateModal = () => {
+    providerModalState.tabId = getActiveTab()
+    providerModalState.card = null
+    providerModalState.open = true
+  }
+
+  const openEditModal = (card: AutomationCard) => {
+    providerModalState.tabId = getActiveTab()
+    providerModalState.card = card
+    providerModalState.open = true
+  }
+
+  const closeProviderModal = () => {
+    providerModalState.open = false
+  }
+
+  const persistCliConfig = async (form: VendorForm, tabId: ProviderTab) => {
+    const cliConfig = form.cliConfig
+    const supportedPlatforms: CLIPlatform[] = ['claude', 'codex', 'gemini']
+    if (!cliConfig || Object.keys(cliConfig).length === 0 || !supportedPlatforms.includes(tabId as CLIPlatform)) {
+      return
+    }
+
+    try {
+      await saveCLIConfig(tabId as CLIPlatform, cliConfig)
+    } catch (error) {
+      console.error('保存 CLI 配置失败:', error)
+    }
+  }
+
+  const applySavedProvider = async (savedCard: AutomationCard, tabId: ProviderTab) => {
+    try {
+      if (tabId === 'claude') {
+        await Call.ByName('codeswitch/services.ClaudeSettingsService.ApplySingleProvider', savedCard.id)
+      } else if (tabId === 'codex') {
+        await Call.ByName('codeswitch/services.CodexSettingsService.ApplySingleProvider', savedCard.id)
+      } else if (tabId === 'gemini') {
+        const providerRef = normalizeProviderRef(savedCard.providerRef)
+        if (providerRef) {
+          await Call.ByName('codeswitch/services.GeminiService.ApplySingleProvider', providerRef)
+        }
+      }
+
+      await refreshDirectAppliedStatus(tabId)
+      showToast(t('components.main.directApply.success', { name: savedCard.name }), 'success')
+    } catch (error) {
+      console.error('Apply after save failed', error)
+      showToast(t('components.main.directApply.failed'), 'error')
+    }
+  }
+
+  const saveProviderModal = async (form: VendorForm, applyAfterSave = false) => {
+    const tabId = providerModalState.tabId
+    const list = cards[tabId]
+    if (!list) return
+
+    const editingCard = providerModalState.card
+    let savedCard: AutomationCard | null = null
+    const providerFields = buildPersistedProviderFieldsFromForm(form, tabId, normalizeLevel)
+
+    if (editingCard) {
+      const previousLevel = normalizeLevel(editingCard.level)
+      const nextLevel = providerFields.level
+
+      Object.assign(editingCard, {
+        name: form.name || editingCard.name,
+        apiUrl: form.apiUrl || editingCard.apiUrl,
+        ...providerFields,
+      })
+
+      if (previousLevel !== nextLevel) {
+        sortProvidersByLevel(list)
+      }
+      savedCard = editingCard
+      await persistProviders(tabId)
+    } else {
+      const newCardId = Date.now()
+      const providerRef = tabId === 'gemini' ? createGeminiProviderRef() : `${newCardId}`
+      const newCard: AutomationCard = {
+        id: newCardId,
+        providerRef,
+        name: form.name || 'Untitled vendor',
+        apiUrl: form.apiUrl,
+        accent: '#0a84ff',
+        tint: 'rgba(15, 23, 42, 0.12)',
+        ...providerFields,
+      }
+      list.push(newCard)
+      sortProvidersByLevel(list)
+      savedCard = newCard
+      await persistProviders(tabId)
+    }
+
+    await persistCliConfig(form, tabId)
+    closeProviderModal()
+    window.dispatchEvent(new CustomEvent('providers-updated'))
+
+    // 保存后直连和卡片状态都依赖最新落盘结果，这里统一兜底，避免入口分叉。
+    if (!applyAfterSave || !savedCard || tabId === 'others') return
+    await applySavedProvider(savedCard, tabId)
+  }
+
+  const submitProviderModal = async (form: VendorForm) => {
+    await saveProviderModal(form, false)
+  }
+
+  const submitAndApplyProviderModal = async (form: VendorForm) => {
+    await saveProviderModal(form, true)
+  }
+
+  const configure = (card: AutomationCard) => {
+    openEditModal(card)
+  }
+
+  const requestRemove = (card: AutomationCard) => {
+    confirmState.card = card
+    confirmState.tabId = getActiveTab()
+    confirmState.open = true
+  }
+
+  const closeConfirm = () => {
+    confirmState.open = false
+    confirmState.card = null
+  }
+
+  const confirmRemove = async () => {
+    if (!confirmState.card) return
+    await removeProvider(confirmState.card.id, confirmState.tabId)
+    closeConfirm()
+  }
+
+  const handleDuplicate = async (card: AutomationCard) => {
+    const duplicated = await duplicateProvider(card)
+    if (duplicated) {
+      await reloadProviders()
+    }
+  }
+
+  const handleProviderEnabledChange = async (card: AutomationCard, enabled: boolean) => {
+    card.enabled = enabled
+    await persistProviders(getActiveTab())
+  }
+
+  return {
+    modelListModalOpen,
+    modelListModalProvider,
+    providerModalState,
+    confirmState,
+    openModelList,
+    closeModelListModal,
+    openCreateModal,
+    openEditModal,
+    closeProviderModal,
+    submitProviderModal,
+    submitAndApplyProviderModal,
+    configure,
+    requestRemove,
+    closeConfirm,
+    confirmRemove,
+    handleDuplicate,
+    handleProviderEnabledChange,
+  }
+}

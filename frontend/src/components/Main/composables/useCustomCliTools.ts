@@ -39,13 +39,24 @@ export function useCustomCliTools(options: UseCustomCliToolsOptions) {
         : false
       selectedToolId.value = hasSelectedTool ? selectedToolId.value : (tools[0]?.id ?? null)
 
-      for (const tool of tools) {
+      const activeToolIds = new Set(tools.map((tool) => tool.id))
+      Object.keys(customCliProxyStates).forEach((toolId) => {
+        if (!activeToolIds.has(toolId)) {
+          delete customCliProxyStates[toolId]
+        }
+      })
+
+      const statusEntries = await Promise.all(tools.map(async (tool) => {
         try {
           const status = await getCustomCliProxyStatus(tool.id)
-          customCliProxyStates[tool.id] = Boolean(status?.enabled)
+          return [tool.id, Boolean(status?.enabled)] as const
         } catch {
-          customCliProxyStates[tool.id] = false
+          return [tool.id, false] as const
         }
+      }))
+
+      for (const [toolId, enabled] of statusEntries) {
+        customCliProxyStates[toolId] = enabled
       }
 
       if (selectedToolId.value) {
