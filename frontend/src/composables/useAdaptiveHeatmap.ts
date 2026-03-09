@@ -242,6 +242,26 @@ export function useAdaptiveHeatmap(
 	// ResizeObserver 实例
 	let resizeObserver: ResizeObserver | null = null
 
+	const getContainerWidth = (container: HTMLElement) => {
+		const rectWidth = Math.round(container.getBoundingClientRect().width || 0)
+		if (rectWidth > 0) {
+			return rectWidth
+		}
+		return container.clientWidth
+	}
+
+	const probeContainerWidthOnNextFrame = (container: HTMLElement) => {
+		if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
+			return
+		}
+		window.requestAnimationFrame(() => {
+			const nextWidth = getContainerWidth(container)
+			if (nextWidth > 0 && nextWidth !== containerWidth.value) {
+				handleResize(nextWidth)
+			}
+		})
+	}
+
 	/**
 	 * 初始化热力图
 	 */
@@ -254,17 +274,7 @@ export function useAdaptiveHeatmap(
 		const maxColumns = maxColumnsByGranularity(currentGranularity)
 		const maxDays = maxDaysByGranularity(currentGranularity)
 
-		// 初始宽度计算
-		const initialWidth = container.clientWidth
-		containerWidth.value = initialWidth
-		const initialColumns = calculateColumns(initialWidth, columnGroupSize, maxColumns)
-		visibleColumns.value = initialColumns
-
-		// 加载初始数据
-		const initialDays = calculateDaysFromColumns(initialColumns, currentGranularity, maxDays)
-		await loadHeatmapData(initialDays)
-
-		// 设置 ResizeObserver
+		// 先挂尺寸监听，避免首屏布局还没稳定时漏掉真正的宽度变化。
 		resizeObserver = new ResizeObserver((entries) => {
 			for (const entry of entries) {
 				const { width } = entry.contentRect
@@ -272,6 +282,17 @@ export function useAdaptiveHeatmap(
 			}
 		})
 		resizeObserver.observe(container)
+
+		// 初始宽度计算
+		const initialWidth = getContainerWidth(container)
+		containerWidth.value = initialWidth
+		const initialColumns = calculateColumns(initialWidth, columnGroupSize, maxColumns)
+		visibleColumns.value = initialColumns
+		probeContainerWidthOnNextFrame(container)
+
+		// 加载初始数据
+		const initialDays = calculateDaysFromColumns(initialColumns, currentGranularity, maxDays)
+		await loadHeatmapData(initialDays)
 		initialized.value = true
 	}
 
