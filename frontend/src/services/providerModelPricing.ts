@@ -84,20 +84,7 @@ export async function fetchProviderModelPricing(
   )
 }
 
-export async function importProviderModelPricingJSON(
-  provider: AutomationCard,
-  platform: string,
-  raw: string,
-): Promise<ProviderModelPricingResponse> {
-  return await Call.ByName(
-    `${PROVIDER_SERVICE}.ImportProviderModelPricingJSON`,
-    provider.apiUrl,
-    provider.apiKey,
-    platform,
-    provider.connectivityAuthType || '',
-    raw,
-  )
-}
+
 
 export async function upsertProviderModelPricingOverride(
   provider: AutomationCard,

@@ -14,9 +14,6 @@
           <span v-if="pricingSourceLabel" class="meta-pill">
             {{ t('components.main.modelList.source') }}：{{ pricingSourceLabel }}
           </span>
-          <span v-if="importedData" class="meta-pill meta-pill-accent">
-            {{ t('components.main.modelList.importedBadge') }}
-          </span>
         </div>
 
         <div class="provider-model-toolbar-main">
@@ -52,14 +49,6 @@
                   @click="openDebugModal()"
                 >
                   {{ t('components.main.modelList.debugButton') }}
-                </button>
-                <button
-                  type="button"
-                  class="provider-model-import-button"
-                  :disabled="loading"
-                  @click="openImportModal"
-                >
-                  {{ t('components.main.modelList.importButton') }}
                 </button>
               </span>
             </span>
@@ -204,65 +193,6 @@
       </div>
     </div>
   </InlineModal>
-
-  <!-- 导入弹窗：独立 Teleport 实现，不依赖 InlineModal，避免 WebKit transform 动画渲染 bug -->
-  <Teleport to="body">
-    <div v-if="importModalOpen" class="import-standalone-backdrop" @click.self="onImportBackdropClick">
-      <div ref="importPanelRef" class="import-standalone-panel" role="dialog" aria-modal="true" tabindex="-1">
-        <header class="import-standalone-header">
-          <h2 class="import-standalone-title">{{ importModalTitle }}</h2>
-          <button
-            type="button"
-            class="ghost-icon"
-            aria-label="Close"
-            :disabled="importingJson"
-            @click="requestImportModalClose"
-          >
-            ✕
-          </button>
-        </header>
-        <div class="import-standalone-body">
-          <p class="pricing-hint import-hint">
-            {{ t('components.main.modelList.importHint') }}
-          </p>
-          <textarea
-            ref="importTextareaDirectRef"
-            v-model="importJsonInput"
-            rows="14"
-            class="base-textarea provider-import-textarea"
-            :placeholder="t('components.main.modelList.importPlaceholder')"
-            autocorrect="off"
-            autocapitalize="none"
-            spellcheck="false"
-          />
-          <p v-if="importError" class="provider-import-error">
-            {{ importError }}
-          </p>
-          <div class="override-actions debug-actions">
-            <button type="button" class="action-btn" :disabled="importingJson" @click="requestImportModalClose">
-              {{ t('common.close') }}
-            </button>
-            <button
-              type="button"
-              class="action-btn"
-              :disabled="importingJson || !hasImportDebugDetails"
-              @click="openDebugModal('import')"
-            >
-              {{ t('components.main.modelList.debugButton') }}
-            </button>
-            <button
-              type="button"
-              class="primary-btn"
-              :disabled="importingJson || !importJsonInput.trim()"
-              @click="submitImportJson"
-            >
-              {{ importingJson ? t('components.main.modelList.importSubmitting') : t('components.main.modelList.importSubmit') }}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  </Teleport>
 
   <InlineModal
     :open="debugModalOpen"
@@ -558,7 +488,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseInput from '../common/BaseInput.vue'
 import InlineModal from '../common/InlineModal.vue'
@@ -568,7 +498,6 @@ import { showToast } from '../../utils/toast'
 import {
   deleteProviderModelPricingOverride,
   fetchProviderModelPricing,
-  importProviderModelPricingJSON,
   type ProviderModelPricingDebug,
   type ProviderModelPricingDebugAttempt,
   type ProviderModelPerCallPrice,
@@ -607,7 +536,6 @@ const loading = ref(false)
 const error = ref('')
 const response = ref<ProviderModelPricingResponse | null>(null)
 const loadRequestSeq = ref(0)
-const importRequestSeq = ref(0)
 
 const searchTerm = ref('')
 const selectedVendor = ref<ProviderVendorKey>('all')
@@ -616,15 +544,6 @@ const editingModel = ref('')
 const savingModel = ref('')
 const resettingModel = ref('')
 const debugModalOpen = ref(false)
-const importModalOpen = ref(false)
-const importingJson = ref(false)
-const importJsonInput = ref('')
-const importError = ref('')
-const importDebugResponse = ref<ProviderModelPricingResponse | null>(null)
-const importPanelRef = ref<HTMLElement | null>(null)
-const importTextareaDirectRef = ref<HTMLTextAreaElement | null>(null)
-const debugContext = ref<'main' | 'import'>('main')
-let importLastActiveElement: Element | null = null
 
 const pricingInteraction = reactive({
   model: '',
@@ -648,7 +567,6 @@ const siteType = computed(() => response.value?.siteType ?? '')
 const pricingSource = computed<ProviderModelPricingSource | ''>(() => response.value?.pricingSource ?? '')
 const models = computed(() => response.value?.models ?? [])
 const pricingAvailable = computed(() => response.value?.pricingSource !== 'v1/models')
-const importedData = computed(() => Boolean(response.value?.imported))
 const challengeDetected = computed(() => Boolean(response.value?.challengeDetected))
 const challengeMessage = computed(() => response.value?.challengeMessage?.trim() || '')
 const showChallengeHint = computed(() => Boolean(
@@ -681,24 +599,20 @@ const sourceOptions = computed<ProviderModelSourceOption[]>(() => [
   { value: 'v1/models', label: sourceLabelMap.value['v1/models'] },
 ])
 
-const activeDebugResponse = computed<ProviderModelPricingResponse | null>(() => (
-  debugContext.value === 'import' ? importDebugResponse.value : response.value
-))
-const debugInfo = computed<ProviderModelPricingDebug | null>(() => activeDebugResponse.value?.debug ?? null)
+const debugInfo = computed<ProviderModelPricingDebug | null>(() => response.value?.debug ?? null)
 const debugAttempts = computed<ProviderModelPricingDebugAttempt[]>(() => debugInfo.value?.attempts ?? [])
 const hasDebugDetails = computed(() => Boolean(response.value?.debug?.attempts?.length))
-const hasImportDebugDetails = computed(() => Boolean(importDebugResponse.value?.debug?.attempts?.length))
-const debugFetchError = computed(() => activeDebugResponse.value?.fetchError?.trim() || '')
+const debugFetchError = computed(() => response.value?.fetchError?.trim() || '')
 const debugBaseUrl = computed(() => debugInfo.value?.baseUrl || props.provider?.apiUrl || '—')
 const debugPlatformLabel = computed(() => debugInfo.value?.platform?.trim() || props.platform || '')
 const debugRequestedSourceLabel = computed(() => (
   formatSourceLabel(debugInfo.value?.requestedSource) ||
-  (debugContext.value === 'import' ? formatSourceLabel('api/pricing') : formatSourceLabel(selectedSource.value)) ||
+  formatSourceLabel(selectedSource.value) ||
   '—'
 ))
 const debugResolvedSourceLabel = computed(() => (
   formatSourceLabel(debugInfo.value?.resolvedSource) ||
-  formatSourceLabel(activeDebugResponse.value?.pricingSource) ||
+  formatSourceLabel(response.value?.pricingSource) ||
   '—'
 ))
 
@@ -773,25 +687,10 @@ const detailModalTitle = computed(() => {
   return `${baseTitle} · ${editingTargetModel.value.model}`
 })
 
-const importModalTitle = computed(() => {
-  if (!props.provider) return t('components.main.modelList.importTitleFallback')
-  return t('components.main.modelList.importTitle', { name: props.provider.name })
-})
-
 const debugModalTitle = computed(() => {
-  if (debugContext.value === 'import') {
-    if (!props.provider) return t('components.main.modelList.importDebugTitleFallback')
-    return t('components.main.modelList.importDebugTitle', { name: props.provider.name })
-  }
   if (!props.provider) return t('components.main.modelList.debugTitleFallback')
   return t('components.main.modelList.debugTitle', { name: props.provider.name })
 })
-
-const isLikelyChallengeScript = (value: string) => {
-  const raw = String(value ?? '').toLowerCase()
-  return raw.includes('acw_sc__v2') ||
-    (raw.includes('document.cookie') && raw.includes('location.reload'))
-}
 
 const formatDebugAuthType = (authType?: string, kind: 'configured' | 'attempt' = 'attempt') => {
   const trimmed = String(authType ?? '').trim()
@@ -915,19 +814,16 @@ const buildDebugCopyPayload = () => {
   return lines.join('\n')
 }
 
-const openDebugModal = (context: 'main' | 'import' = 'main') => {
-  const targetResponse = context === 'import' ? importDebugResponse.value : response.value
-  if ((targetResponse?.debug?.attempts ?? []).length === 0) {
+const openDebugModal = () => {
+  if ((response.value?.debug?.attempts ?? []).length === 0) {
     showToast(t('components.main.modelList.debugUnavailable'), 'warning')
     return
   }
-  debugContext.value = context
   debugModalOpen.value = true
 }
 
 const closeDebugModal = () => {
   debugModalOpen.value = false
-  debugContext.value = 'main'
 }
 
 const copyDebugDetails = async () => {
@@ -948,104 +844,6 @@ const copyDebugDetails = async () => {
       t('components.main.modelList.toast.debugCopyFailed', { error: extractErrorMessage(err) }),
       'error',
     )
-  }
-}
-
-const resetImportState = () => {
-  importJsonInput.value = ''
-  importError.value = ''
-  importingJson.value = false
-  importDebugResponse.value = null
-}
-
-// 导入弹窗独立键盘事件处理
-const onImportKeyDown = (e: KeyboardEvent) => {
-  if (!importModalOpen.value) return
-  if (e.key === 'Escape') {
-    e.preventDefault()
-    e.stopImmediatePropagation()
-    if (!importingJson.value) closeImportModal()
-  }
-}
-
-const onImportBackdropClick = () => {
-  if (!importingJson.value) closeImportModal()
-}
-
-const openImportModal = () => {
-  importLastActiveElement = document.activeElement
-  importModalOpen.value = true
-  importError.value = ''
-  importDebugResponse.value = null
-  window.addEventListener('keydown', onImportKeyDown, true)
-  // nextTick 后聚焦 textarea，无 transform 动画不会触发 WebKit 渲染 bug
-  nextTick(() => {
-    importTextareaDirectRef.value?.focus()
-  })
-}
-
-const closeImportModal = (force = false) => {
-  if (importingJson.value && !force) return
-  window.removeEventListener('keydown', onImportKeyDown, true)
-  importRequestSeq.value += 1
-  importModalOpen.value = false
-  resetImportState()
-  // 恢复焦点
-  if (importLastActiveElement instanceof HTMLElement) {
-    try { importLastActiveElement.focus() } catch { /* ignore */ }
-  }
-  importLastActiveElement = null
-}
-
-const requestImportModalClose = () => {
-  closeImportModal()
-}
-
-onBeforeUnmount(() => {
-  window.removeEventListener('keydown', onImportKeyDown, true)
-})
-
-const submitImportJson = async () => {
-  if (!props.provider || importingJson.value) return
-  const raw = importJsonInput.value.trim()
-  if (!raw) {
-    importError.value = t('components.main.modelList.importEmpty')
-    return
-  }
-  if (isLikelyChallengeScript(raw)) {
-    importError.value = t('components.main.modelList.importChallengeScript')
-    return
-  }
-
-  const requestSeq = importRequestSeq.value + 1
-  importRequestSeq.value = requestSeq
-  importError.value = ''
-  importDebugResponse.value = null
-  importingJson.value = true
-  try {
-    const data = await importProviderModelPricingJSON(props.provider, props.platform, raw)
-    if (requestSeq !== importRequestSeq.value) return
-    if (data.fetchError?.trim()) {
-      importDebugResponse.value = data
-      importError.value = data.fetchError.trim()
-      return
-    }
-    response.value = data
-    error.value = data.fetchError?.trim() || ''
-    searchTerm.value = ''
-    selectedSource.value = 'api/pricing'
-    selectedVendor.value = 'all'
-    closeDebugModal()
-    closeModelDetail()
-    clearPricingInteraction()
-    closeImportModal(true)
-    showToast(t('components.main.modelList.toast.importSuccess'))
-  } catch (err) {
-    if (requestSeq !== importRequestSeq.value) return
-    importError.value = extractErrorMessage(err)
-  } finally {
-    if (requestSeq !== importRequestSeq.value) return
-    importingJson.value = false
   }
 }
 
@@ -1343,7 +1141,6 @@ const loadModels = async () => {
   error.value = ''
   response.value = null
   closeDebugModal()
-  closeImportModal(true)
 
   try {
     const data = await fetchProviderModelPricing(props.provider, props.platform, selectedSource.value)
@@ -1363,7 +1160,6 @@ const handleSourceChange = () => {
   selectedVendor.value = 'all'
   closeModelDetail()
   closeDebugModal()
-  closeImportModal(true)
   clearPricingInteraction()
   void loadModels()
 }
@@ -1444,7 +1240,6 @@ const resetUIState = () => {
   response.value = null
   loadRequestSeq.value += 1
   closeDebugModal()
-  closeImportModal(true)
   closeModelDetail()
   clearPricingInteraction()
   savingModel.value = ''
@@ -1454,19 +1249,6 @@ const resetUIState = () => {
 const handleClose = () => {
   emit('close')
 }
-
-watch(
-  importJsonInput,
-  (value, previousValue) => {
-    if (value === previousValue || importingJson.value) return
-    if (importError.value) {
-      importError.value = ''
-    }
-    if (importDebugResponse.value) {
-      importDebugResponse.value = null
-    }
-  },
-)
 
 watch(
   () => [props.open, props.provider?.id],
@@ -1563,7 +1345,6 @@ watch(
 }
 
 .provider-model-debug-button,
-.provider-model-import-button,
 .provider-model-inline-debug-btn {
   display: inline-flex;
   align-items: center;
@@ -1582,14 +1363,12 @@ watch(
 }
 
 .provider-model-debug-button:hover,
-.provider-model-import-button:hover,
 .provider-model-inline-debug-btn:hover {
   background: rgba(59, 130, 246, 0.14);
   border-color: rgba(59, 130, 246, 0.3);
 }
 
-.provider-model-debug-button:disabled,
-.provider-model-import-button:disabled {
+.provider-model-debug-button:disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }
@@ -1702,90 +1481,6 @@ watch(
   display: flex;
   flex-direction: column;
   gap: 16px;
-}
-
-/* 独立导入弹窗 —— 不使用 InlineModal，不使用 transform 动画，彻底避免 WebKit 渲染 bug */
-.import-standalone-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 3000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(15, 23, 42, 0.45);
-  backdrop-filter: blur(6px);
-  padding: 24px;
-  box-sizing: border-box;
-}
-
-.import-standalone-panel {
-  width: min(860px, 94vw);
-  max-width: calc(100vw - 48px);
-  max-height: 90vh;
-  background: var(--mac-surface);
-  border-radius: 24px;
-  border: 1px solid var(--mac-border);
-  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.25);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.import-standalone-header {
-  padding: 24px 24px 12px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
-}
-
-.import-standalone-header > .ghost-icon {
-  flex: 0 0 auto;
-}
-
-.import-standalone-title {
-  margin: 0;
-  flex: 1 1 auto;
-  min-width: 0;
-  font-size: 1.1rem;
-  font-weight: 600;
-  line-height: 1.35;
-  white-space: normal;
-  word-break: break-word;
-  overflow-wrap: anywhere;
-  color: var(--mac-text);
-}
-
-.import-standalone-body {
-  padding: 0 24px 24px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  overflow-y: auto;
-}
-
-.import-hint {
-  margin: 0;
-}
-
-.provider-import-textarea {
-  width: 100%;
-  min-height: 320px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
-  font-size: 0.8rem;
-  line-height: 1.65;
-}
-
-.provider-import-error {
-  margin: 0;
-  padding: 10px 12px;
-  border-radius: 14px;
-  border: 1px solid rgba(239, 68, 68, 0.22);
-  background: rgba(239, 68, 68, 0.08);
-  color: #b91c1c;
-  font-size: 0.82rem;
-  line-height: 1.5;
 }
 
 .provider-debug-modal {
@@ -2140,7 +1835,6 @@ watch(
   }
 
   .provider-model-debug-button,
-  .provider-model-import-button,
   .provider-model-inline-debug-btn {
     width: 100%;
   }
