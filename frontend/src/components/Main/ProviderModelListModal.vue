@@ -205,50 +205,64 @@
     </div>
   </InlineModal>
 
-  <InlineModal
-    :open="importModalOpen"
-    :title="importModalTitle"
-    :panel-width="'min(860px, 94vw)'"
-    :close-disabled="importingJson"
-    @close="requestImportModalClose"
-  >
-    <div class="provider-import-modal">
-      <p class="pricing-hint import-hint">
-        {{ t('components.main.modelList.importHint') }}
-      </p>
-      <BaseTextarea
-        ref="importTextareaRef"
-        v-model="importJsonInput"
-        rows="14"
-        class="provider-import-textarea"
-        :placeholder="t('components.main.modelList.importPlaceholder')"
-      />
-      <p v-if="importError" class="provider-import-error">
-        {{ importError }}
-      </p>
-      <div class="override-actions debug-actions">
-        <button type="button" class="action-btn" :disabled="importingJson" @click="requestImportModalClose">
-          {{ t('common.close') }}
-        </button>
-        <button
-          type="button"
-          class="action-btn"
-          :disabled="importingJson || !hasImportDebugDetails"
-          @click="openDebugModal('import')"
-        >
-          {{ t('components.main.modelList.debugButton') }}
-        </button>
-        <button
-          type="button"
-          class="primary-btn"
-          :disabled="importingJson || !importJsonInput.trim()"
-          @click="submitImportJson"
-        >
-          {{ importingJson ? t('components.main.modelList.importSubmitting') : t('components.main.modelList.importSubmit') }}
-        </button>
+  <!-- 导入弹窗：独立 Teleport 实现，不依赖 InlineModal，避免 WebKit transform 动画渲染 bug -->
+  <Teleport to="body">
+    <div v-if="importModalOpen" class="import-standalone-backdrop" @click.self="onImportBackdropClick">
+      <div ref="importPanelRef" class="import-standalone-panel" role="dialog" aria-modal="true" tabindex="-1">
+        <header class="import-standalone-header">
+          <h2 class="import-standalone-title">{{ importModalTitle }}</h2>
+          <button
+            type="button"
+            class="ghost-icon"
+            aria-label="Close"
+            :disabled="importingJson"
+            @click="requestImportModalClose"
+          >
+            ✕
+          </button>
+        </header>
+        <div class="import-standalone-body">
+          <p class="pricing-hint import-hint">
+            {{ t('components.main.modelList.importHint') }}
+          </p>
+          <textarea
+            ref="importTextareaDirectRef"
+            v-model="importJsonInput"
+            rows="14"
+            class="base-textarea provider-import-textarea"
+            :placeholder="t('components.main.modelList.importPlaceholder')"
+            autocorrect="off"
+            autocapitalize="none"
+            spellcheck="false"
+          />
+          <p v-if="importError" class="provider-import-error">
+            {{ importError }}
+          </p>
+          <div class="override-actions debug-actions">
+            <button type="button" class="action-btn" :disabled="importingJson" @click="requestImportModalClose">
+              {{ t('common.close') }}
+            </button>
+            <button
+              type="button"
+              class="action-btn"
+              :disabled="importingJson || !hasImportDebugDetails"
+              @click="openDebugModal('import')"
+            >
+              {{ t('components.main.modelList.debugButton') }}
+            </button>
+            <button
+              type="button"
+              class="primary-btn"
+              :disabled="importingJson || !importJsonInput.trim()"
+              @click="submitImportJson"
+            >
+              {{ importingJson ? t('components.main.modelList.importSubmitting') : t('components.main.modelList.importSubmit') }}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
-  </InlineModal>
+  </Teleport>
 
   <InlineModal
     :open="debugModalOpen"
@@ -544,10 +558,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseInput from '../common/BaseInput.vue'
-import BaseTextarea from '../common/BaseTextarea.vue'
 import InlineModal from '../common/InlineModal.vue'
 import type { AutomationCard } from '../../data/cards'
 import { extractErrorMessage } from '../../utils/error'
@@ -605,12 +618,13 @@ const resettingModel = ref('')
 const debugModalOpen = ref(false)
 const importModalOpen = ref(false)
 const importingJson = ref(false)
-let importFocusTimer: ReturnType<typeof setTimeout> | null = null
 const importJsonInput = ref('')
 const importError = ref('')
 const importDebugResponse = ref<ProviderModelPricingResponse | null>(null)
-const importTextareaRef = ref<InstanceType<typeof BaseTextarea> | null>(null)
+const importPanelRef = ref<HTMLElement | null>(null)
+const importTextareaDirectRef = ref<HTMLTextAreaElement | null>(null)
 const debugContext = ref<'main' | 'import'>('main')
+let importLastActiveElement: Element | null = null
 
 const pricingInteraction = reactive({
   model: '',
@@ -944,37 +958,52 @@ const resetImportState = () => {
   importDebugResponse.value = null
 }
 
-const clearImportFocusTimer = () => {
-  if (importFocusTimer !== null) {
-    clearTimeout(importFocusTimer)
-    importFocusTimer = null
+// 导入弹窗独立键盘事件处理
+const onImportKeyDown = (e: KeyboardEvent) => {
+  if (!importModalOpen.value) return
+  if (e.key === 'Escape') {
+    e.preventDefault()
+    e.stopImmediatePropagation()
+    if (!importingJson.value) closeImportModal()
   }
 }
 
+const onImportBackdropClick = () => {
+  if (!importingJson.value) closeImportModal()
+}
+
 const openImportModal = () => {
+  importLastActiveElement = document.activeElement
   importModalOpen.value = true
   importError.value = ''
   importDebugResponse.value = null
-  // 延迟聚焦 textarea，避免在 CSS 动画期间调用 focus() 触发 WebKit 渲染 bug
-  // 400ms > InlineModal MODAL_FOCUS_FALLBACK_MS(380ms)，确保动画及内部聚焦逻辑全部完成
-  clearImportFocusTimer()
-  importFocusTimer = setTimeout(() => {
-    importFocusTimer = null
-    importTextareaRef.value?.focus()
-  }, 400)
+  window.addEventListener('keydown', onImportKeyDown, true)
+  // nextTick 后聚焦 textarea，无 transform 动画不会触发 WebKit 渲染 bug
+  nextTick(() => {
+    importTextareaDirectRef.value?.focus()
+  })
 }
 
 const closeImportModal = (force = false) => {
   if (importingJson.value && !force) return
-  clearImportFocusTimer()
+  window.removeEventListener('keydown', onImportKeyDown, true)
   importRequestSeq.value += 1
   importModalOpen.value = false
   resetImportState()
+  // 恢复焦点
+  if (importLastActiveElement instanceof HTMLElement) {
+    try { importLastActiveElement.focus() } catch { /* ignore */ }
+  }
+  importLastActiveElement = null
 }
 
 const requestImportModalClose = () => {
   closeImportModal()
 }
+
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onImportKeyDown, true)
+})
 
 const submitImportJson = async () => {
   if (!props.provider || importingJson.value) return
@@ -1675,10 +1704,65 @@ watch(
   gap: 16px;
 }
 
-.provider-import-modal {
+/* 独立导入弹窗 —— 不使用 InlineModal，不使用 transform 动画，彻底避免 WebKit 渲染 bug */
+.import-standalone-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(6px);
+  padding: 24px;
+  box-sizing: border-box;
+}
+
+.import-standalone-panel {
+  width: min(860px, 94vw);
+  max-width: calc(100vw - 48px);
+  max-height: 90vh;
+  background: var(--mac-surface);
+  border-radius: 24px;
+  border: 1px solid var(--mac-border);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.25);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.import-standalone-header {
+  padding: 24px 24px 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.import-standalone-header > .ghost-icon {
+  flex: 0 0 auto;
+}
+
+.import-standalone-title {
+  margin: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+  line-height: 1.35;
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  color: var(--mac-text);
+}
+
+.import-standalone-body {
+  padding: 0 24px 24px;
   display: flex;
   flex-direction: column;
   gap: 14px;
+  overflow-y: auto;
 }
 
 .import-hint {
