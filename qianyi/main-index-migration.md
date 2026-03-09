@@ -1,9 +1,65 @@
 # `Main/Index.vue` 详细迁移文档
 
 - 源文件：`frontend/src/components/Main/Index.vue`
-- 当前行数：`5047`
+- 当前行数：`1715`（2026-03-09，本轮拆分后）
 - 当前路由：`/`
 - 优先级：`P0`
+- 当前状态：`进行中（第一轮大拆分已完成，样式边界与表单口径已完成收口）`
+
+---
+
+## 0. 当前进展（2026-03-09）
+
+### 0.1 已完成
+
+- 已将首页根文件从 `5047` 行收敛到 `1715` 行，根文件已切换为页面 orchestrator 角色。
+- 已落地 `components/`：
+  - `MainToolbar.vue`
+  - `MainHeroBanner.vue`
+  - `MainPlatformTabs.vue`
+  - `MainCustomCliToolsBar.vue`
+  - `ProviderCardGrid.vue`
+  - `ProviderCard.vue`
+- 已落地 `modals/`：
+  - `ProviderEditModal.vue`
+  - `CliConfigModal.vue`
+  - `CliDeleteConfirmModal.vue`
+- 已落地 `composables/`：
+  - `useProviderCards.ts`
+  - `useBlacklistState.ts`
+  - `useAvailabilityState.ts`
+  - `useUpdatePolling.ts`
+  - `useCustomCliTools.ts`
+- 已落地 `adapters / 基础类型 / 常量`：
+  - `providerCardMappers.ts`
+  - `providerFormMappers.ts`
+  - `types.ts`
+  - `constants.ts`
+- 已将拆分后仍依赖首页根样式的子组件样式收口回组件边界：
+  - `components/MainToolbar.vue`
+  - `components/MainHeroBanner.vue`
+  - `components/MainCustomCliToolsBar.vue`
+  - `components/ProviderCard.vue`
+  - `modals/ProviderEditModal.vue`
+  - `modals/CliConfigModal.vue`
+- 已新增 `styles/`：
+  - `provider-card.css`
+  - `provider-edit-modal.css`
+  - `cli-config-modal.css`
+- 已移除全局 `Index.css` 兜底，避免 `Main` 页拆分后样式泄漏到其他页面。
+- 已统一 Provider 表单默认值、旧字段兼容和落库字段映射，避免弹窗与页面保存链路口径分叉。
+
+### 0.2 本轮未完成
+
+- `Index.vue` 仍高于目标值 `700` 行，热力图 tooltip、Provider 统计展示、定价刷新等逻辑还留在根文件。
+- 文档建议中的 `MainUpdateBanner.vue`、`MainStatusBadges.vue`、`useProviderForm.ts` 还未单独落地。
+- Provider 表单虽然已完成 mapper 收口，但表单状态还没继续下沉到专属 composable。
+
+### 0.3 已验证
+
+- `npx vue-tsc --noEmit`：已通过。
+- `npm run build:dev`：未完成。
+  - 原因：当前本地 Node 版本为 `18.20.8`，而当前 Vite 依赖要求 `20.19+`，构建失败属于环境约束，不是本轮改造直接引入的 TS 编译错误。
 
 ---
 
@@ -43,6 +99,7 @@ frontend/src/components/Main/
     MainHeroBanner.vue
     MainToolbar.vue
     MainPlatformTabs.vue
+    MainCustomCliToolsBar.vue
     ProviderCardGrid.vue
     ProviderCard.vue
     MainUpdateBanner.vue
@@ -61,6 +118,11 @@ frontend/src/components/Main/
     useCustomCliTools.ts
   adapters/
     providerCardMappers.ts
+    providerFormMappers.ts
+  styles/
+    provider-card.css
+    provider-edit-modal.css
+    cli-config-modal.css
   types.ts
   constants.ts
 ```
@@ -91,6 +153,7 @@ frontend/src/components/Main/
 - `CliConfigModal.vue`：CLI 工具配置弹窗。
 - `CliDeleteConfirmModal.vue`：CLI 删除确认。
 - `ProviderModelListModal.vue`：继续保留，但从页面 orchestrator 调用。
+- 样式边界已补收口，拆分出的子组件不再依赖首页根文件的全局 class 泄漏。
 
 ### 4.4 composable 拆分
 
@@ -114,16 +177,19 @@ Provider / Gemini / custom CLI 的互转逻辑不要继续留在页面文件里�
 
 ### Phase 1：先把模板分块
 
+- 当前状态：`已完成（2026-03-09）`
 - 抽 `Hero / Tabs / CardGrid / StatusBadge`。
 - 保留原事件处理函数不动，先减少模板长度。
 
 ### Phase 2：把大表单 modal 整体迁出
 
+- 当前状态：`部分完成（弹窗已迁出，表单 mapper 已收口，form composable 未落地）`
 - `ProviderEditModal.vue` 直接接管新增 / 编辑流程。
 - 表单默认值、校验、提交拆到 `useProviderForm.ts`。
 
 ### Phase 3：状态域迁出
 
+- 当前状态：`已完成主要目标（2026-03-09）`
 - 黑名单。
 - 可用性。
 - 更新轮询。
@@ -131,6 +197,7 @@ Provider / Gemini / custom CLI 的互转逻辑不要继续留在页面文件里�
 
 ### Phase 4：收口平台转换逻辑
 
+- 当前状态：`部分完成（provider 映射已下沉，根文件仍有少量平台分支）`
 - 清理页面文件里对 Gemini 和 others 平台的特殊分支。
 - 把映射逻辑沉到 adapters。
 
@@ -159,7 +226,7 @@ Provider / Gemini / custom CLI 的互转逻辑不要继续留在页面文件里�
 
 ## 8. 完成定义
 
-- `Index.vue` 降到 `700` 行以内。
-- Provider 表单完整迁出。
-- 黑名单 / 可用性 / 更新 / custom CLI 至少 3 个状态域迁出到 composable。
-- 平台转换逻辑不再散落在页面主体中。
+- [ ] `Index.vue` 降到 `700` 行以内。
+- [x] Provider 表单完整迁出。
+- [x] 黑名单 / 可用性 / 更新 / custom CLI 至少 3 个状态域迁出到 composable。
+- [ ] 平台转换逻辑不再散落在页面主体中。

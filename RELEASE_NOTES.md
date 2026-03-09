@@ -1,3 +1,15 @@
+# Code Switch v2.7.27
+
+## 修复
+- **首页 Main 拆分后的私有样式不再串到别处**：将 Provider 卡片、Provider 编辑弹窗、CLI 配置弹窗和自定义 CLI 工具条的样式收回组件边界，移除 `Main/Index.css` 全局兜底，修复 `level-badge`、`blacklist-banner`、`current-use-badge` 等类名泄漏后误伤其他页面的风险。
+- **Provider 编辑保存链路不再各走各的**：新增统一的 Provider 表单 mapper，创建、编辑、保存与“保存并应用”现在共用同一套默认值、旧字段兼容和落库归一化逻辑，避免拆分后表单口径分叉把配置写歪。
+
+## 技术改进
+- **首页 Main 第一轮解耦改造完成收口**：首页根文件继续保留页面 orchestration，卡片列表、Provider 编辑、CLI 工具配置、更新轮询、黑名单与可用性逻辑已按目录拆分，`Main` 页结构终于不再是一坨 5000 行大乱炖。
+- **迁移进度文档同步补齐**：`qianyi/main-index-migration.md` 已回写本轮拆分进度、样式边界收口结论和剩余待办，后续继续下沉 `useProviderForm` 时不至于再摸黑瞎改。
+
+---
+
 # Code Switch v2.7.26
 
 ## 新功能

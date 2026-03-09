@@ -1,0 +1,352 @@
+<template>
+  <article
+    :ref="bindCardRef"
+    :class="[
+      'automation-card',
+      { dragging: viewModel.dragging },
+      { 'is-last-used': viewModel.isLastUsed },
+      { 'is-highlighted': viewModel.isHighlighted },
+    ]"
+    draggable="true"
+    @click="$emit('card-click')"
+    @dragstart="$emit('dragstart')"
+    @dragend="$emit('dragend')"
+    @drop="$emit('drop')"
+  >
+    <span v-if="viewModel.isLastUsed" class="last-used-badge">
+      ✓ {{ t('components.main.providers.lastUsed') }}
+    </span>
+
+    <div class="card-leading">
+      <div class="card-icon" :style="{ backgroundColor: viewModel.card.tint, color: viewModel.card.accent }">
+        <span
+          v-if="!viewModel.iconSvg"
+          class="icon-fallback"
+        >
+          {{ viewModel.vendorInitials }}
+        </span>
+        <span
+          v-else
+          class="icon-svg"
+          v-html="viewModel.iconSvg"
+          aria-hidden="true"
+        ></span>
+      </div>
+
+      <div class="card-text">
+        <div class="card-title-row">
+          <p class="card-title">{{ viewModel.card.name }}</p>
+          <span
+            v-if="viewModel.isDirectApplied && !activeProxyState"
+            class="current-use-badge"
+          >
+            {{ t('components.main.directApply.currentBadge') }}
+          </span>
+          <span
+            v-if="viewModel.card.availabilityMonitorEnabled"
+            class="connectivity-dot"
+            :class="viewModel.connectivityClass"
+            :title="viewModel.connectivityTooltip"
+          ></span>
+          <span v-if="viewModel.card.level" class="level-badge scheduling-level" :class="`level-${viewModel.card.level}`">
+            L{{ viewModel.card.level }}
+          </span>
+          <span
+            v-if="viewModel.blacklistStatus"
+            :class="[
+              'blacklist-level-badge',
+              `bl-level-${viewModel.blacklistStatus.blacklistLevel}`,
+              { dark: resolvedTheme === 'dark' },
+            ]"
+            :title="t('components.main.blacklist.levelTitle', { level: viewModel.blacklistStatus.blacklistLevel })"
+          >
+            BL{{ viewModel.blacklistStatus.blacklistLevel }}
+          </span>
+          <button
+            v-if="viewModel.card.officialSite"
+            class="card-site"
+            type="button"
+            @click.stop="$emit('open-site')"
+          >
+            {{ viewModel.formattedOfficialSite }}
+          </button>
+        </div>
+
+        <div
+          v-for="stats in [viewModel.stats]"
+          :key="`metrics-${viewModel.card.id}`"
+          class="card-metrics"
+        >
+          <template v-if="stats.state !== 'ready'">
+            {{ stats.message }}
+          </template>
+          <template v-else>
+            <div class="card-metrics-line">
+              <span
+                v-if="stats.successRateLabel"
+                class="card-success-rate"
+                :class="stats.successRateClass"
+              >
+                {{ stats.successRateLabel }}
+              </span>
+              <span
+                v-if="stats.successRateLabel"
+                class="card-metric-separator"
+                aria-hidden="true"
+              >
+                ·
+              </span>
+              <span>{{ stats.requests }}</span>
+              <span class="card-metric-separator" aria-hidden="true">·</span>
+              <span>{{ stats.tokens }}</span>
+              <span class="card-metric-separator" aria-hidden="true">·</span>
+              <span>{{ stats.cost }}</span>
+            </div>
+            <div
+              class="card-metrics-line card-metrics-line-performance"
+              :title="stats.performanceHint"
+            >
+              <span class="card-performance-item">
+                <span class="performance-badge performance-badge--ttft">首</span>
+                <span>{{ stats.ttft }}</span>
+              </span>
+              <span class="card-performance-item">
+                <span class="performance-badge performance-badge--tps">速</span>
+                <span>{{ stats.tps }}</span>
+              </span>
+            </div>
+          </template>
+        </div>
+
+        <div
+          v-if="viewModel.blacklistStatus?.isBlacklisted"
+          :class="['blacklist-banner', { dark: resolvedTheme === 'dark' }]"
+        >
+          <div class="blacklist-info">
+            <span class="blacklist-icon">⛔</span>
+            <span
+              v-if="viewModel.blacklistStatus.blacklistLevel > 0"
+              :class="[
+                'level-badge',
+                `level-${viewModel.blacklistStatus.blacklistLevel}`,
+                { dark: resolvedTheme === 'dark' },
+              ]"
+            >
+              L{{ viewModel.blacklistStatus.blacklistLevel }}
+            </span>
+            <span class="blacklist-text">
+              {{ t('components.main.blacklist.blocked') }} |
+              {{ t('components.main.blacklist.remaining') }}:
+              {{ formatBlacklistCountdown(viewModel.blacklistStatus.remainingSeconds) }}
+            </span>
+          </div>
+          <div class="blacklist-actions">
+            <button
+              class="unblock-btn primary"
+              type="button"
+              :title="t('components.main.blacklist.unblockAndResetHint')"
+              @click.stop="$emit('unblock-and-reset')"
+            >
+              {{ t('components.main.blacklist.unblockAndReset') }}
+            </button>
+            <button
+              class="unblock-btn secondary"
+              type="button"
+              :title="t('components.main.blacklist.resetLevelHint')"
+              @click.stop="$emit('reset-level')"
+            >
+              {{ t('components.main.blacklist.resetLevel') }}
+            </button>
+          </div>
+        </div>
+        <div
+          v-else-if="viewModel.blacklistStatus && viewModel.blacklistStatus.blacklistLevel > 0"
+          class="level-badge-standalone"
+        >
+          <span
+            :class="[
+              'level-badge',
+              `level-${viewModel.blacklistStatus.blacklistLevel}`,
+              { dark: resolvedTheme === 'dark' },
+            ]"
+          >
+            L{{ viewModel.blacklistStatus.blacklistLevel }}
+          </span>
+          <span class="level-hint">{{ t('components.main.blacklist.levelHint') }}</span>
+          <button
+            class="reset-level-mini"
+            type="button"
+            :title="t('components.main.blacklist.resetLevelHint')"
+            @click.stop="$emit('reset-level')"
+          >
+            ✕
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card-actions" @click.stop>
+      <label class="mac-switch sm">
+        <input
+          type="checkbox"
+          :checked="viewModel.card.enabled"
+          @change="handleToggleEnabled"
+        />
+        <span></span>
+      </label>
+
+      <button
+        v-if="activeTab !== 'others'"
+        class="ghost-icon direct-apply-btn"
+        :class="{ 'is-active': viewModel.isDirectApplied && !activeProxyState }"
+        :disabled="activeProxyState"
+        :data-tooltip="directApplyTooltip"
+        type="button"
+        @click.stop="!viewModel.isDirectApplied && $emit('direct-apply')"
+      >
+        <span v-if="viewModel.isDirectApplied && !activeProxyState" class="apply-text">
+          {{ t('components.main.directApply.inUse') }}
+        </span>
+        <svg v-else viewBox="0 0 24 24" aria-hidden="true" class="lightning-icon">
+          <path
+            d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"
+            stroke="currentColor"
+            stroke-width="1.5"
+            fill="none"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+        </svg>
+      </button>
+
+      <button
+        class="ghost-icon"
+        :data-tooltip="t('components.main.form.editTitle')"
+        type="button"
+        @click="$emit('configure')"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path
+            d="M11.983 2.25a1.125 1.125 0 011.077.81l.563 2.101a7.482 7.482 0 012.326 1.343l2.08-.621a1.125 1.125 0 011.356.651l1.313 3.207a1.125 1.125 0 01-.442 1.339l-1.86 1.205a7.418 7.418 0 010 2.686l1.86 1.205a1.125 1.125 0 01.442 1.339l-1.313 3.207a1.125 1.125 0 01-1.356.651l-2.08-.621a7.482 7.482 0 01-2.326 1.343l-.563 2.101a1.125 1.125 0 01-1.077.81h-2.634a1.125 1.125 0 01-1.077-.81l-.563-2.101a7.482 7.482 0 01-2.326-1.343l-2.08.621a1.125 1.125 0 01-1.356-.651l-1.313-3.207a1.125 1.125 0 01.442-1.339l1.86-1.205a7.418 7.418 0 010-2.686l-1.86-1.205a1.125 1.125 0 01-.442-1.339l1.313-3.207a1.125 1.125 0 011.356-.651l2.08.621a7.482 7.482 0 012.326-1.343l.563-2.101a1.125 1.125 0 011.077-.81h2.634z"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+          <path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+        </svg>
+      </button>
+
+      <button
+        class="ghost-icon"
+        :disabled="!viewModel.card.apiUrl || !viewModel.card.apiKey"
+        :data-tooltip="(!viewModel.card.apiUrl || !viewModel.card.apiKey)
+          ? t('components.main.modelList.buttonDisabledTooltip')
+          : t('components.main.modelList.buttonTooltip')"
+        type="button"
+        @click="$emit('open-model-list')"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path
+            d="M8 6h13M8 12h13M8 18h13"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+          <path
+            d="M3.5 6.5h1v-1h-1v1zm0 6h1v-1h-1v1zm0 6h1v-1h-1v1z"
+            fill="currentColor"
+          />
+        </svg>
+      </button>
+
+      <button
+        class="ghost-icon"
+        :data-tooltip="t('components.main.controls.duplicate')"
+        type="button"
+        @click="$emit('duplicate')"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path
+            d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+        </svg>
+      </button>
+
+      <button
+        class="ghost-icon"
+        :data-tooltip="t('components.main.form.actions.delete')"
+        type="button"
+        @click="$emit('remove')"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path
+            d="M9 3h6m-7 4h8m-6 0v11m4-11v11M5 7h14l-.867 12.138A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.862L5 7z"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+        </svg>
+      </button>
+    </div>
+  </article>
+</template>
+
+<script setup lang="ts">
+import { computed, type ComponentPublicInstance } from 'vue'
+import { useI18n } from 'vue-i18n'
+import type { ProviderCardViewModel, ProviderTab, ResolvedTheme } from '../types'
+
+const props = defineProps<{
+  viewModel: ProviderCardViewModel
+  activeTab: ProviderTab
+  activeProxyState: boolean
+  resolvedTheme: ResolvedTheme
+  formatBlacklistCountdown: (remainingSeconds: number) => string
+  bindCardRef?: (element: Element | ComponentPublicInstance | null) => void
+}>()
+
+const emit = defineEmits<{
+  'card-click': []
+  dragstart: []
+  dragend: []
+  drop: []
+  'open-site': []
+  'unblock-and-reset': []
+  'reset-level': []
+  'toggle-enabled': [enabled: boolean]
+  'direct-apply': []
+  configure: []
+  'open-model-list': []
+  duplicate: []
+  remove: []
+}>()
+
+const { t } = useI18n()
+
+const directApplyTooltip = computed(() => {
+  if (props.activeProxyState) {
+    return t('components.main.directApply.proxyEnabled')
+  }
+  if (props.viewModel.isDirectApplied) {
+    return t('components.main.directApply.inUse')
+  }
+  return t('components.main.directApply.title')
+})
+
+const handleToggleEnabled = (event: Event) => {
+  emit('toggle-enabled', (event.target as HTMLInputElement).checked)
+}
+</script>
+
+<style scoped src="../styles/provider-card.css"></style>

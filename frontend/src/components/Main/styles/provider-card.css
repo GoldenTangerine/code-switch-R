@@ -1,0 +1,570 @@
+.automation-card.is-last-used {
+  position: relative;
+  border: 2px solid rgb(16, 185, 129);
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.3);
+}
+
+.last-used-badge {
+  position: absolute;
+  top: -10px;
+  right: 12px;
+  background: rgb(16, 185, 129);
+  color: white;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+  z-index: 1;
+}
+
+.automation-card.is-highlighted {
+  animation: highlight-pulse 0.6s ease-in-out 3;
+  border-color: rgb(245, 158, 11);
+  box-shadow: 0 0 12px rgba(245, 158, 11, 0.5);
+}
+
+@keyframes highlight-pulse {
+  0%, 100% {
+    box-shadow: 0 0 8px rgba(245, 158, 11, 0.3);
+  }
+
+  50% {
+    box-shadow: 0 0 20px rgba(245, 158, 11, 0.7);
+  }
+}
+
+:global(.dark) .automation-card.is-last-used {
+  border-color: rgb(52, 211, 153);
+  box-shadow: 0 0 8px rgba(52, 211, 153, 0.3);
+}
+
+:global(.dark) .last-used-badge {
+  background: rgb(52, 211, 153);
+  color: rgb(6, 78, 59);
+}
+
+:global(.dark) .automation-card.is-highlighted {
+  border-color: rgb(251, 191, 36);
+  box-shadow: 0 0 12px rgba(251, 191, 36, 0.5);
+}
+
+.card-metrics-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.card-metrics-line-performance {
+  margin-top: 6px;
+  gap: 10px;
+}
+
+.card-performance-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.level-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.03em;
+  text-align: center;
+  transition: all 0.2s ease;
+}
+
+.card-title-row .level-badge {
+  margin-left: 8px;
+}
+
+.card-title-row .blacklist-level-badge {
+  margin-left: 4px;
+}
+
+.level-badge.level-1 {
+  background: rgba(16, 185, 129, 0.12);
+  color: rgb(5, 150, 105);
+}
+
+.level-badge.level-2 {
+  background: rgba(34, 197, 94, 0.12);
+  color: rgb(22, 163, 74);
+}
+
+.level-badge.level-3 {
+  background: rgba(132, 204, 22, 0.12);
+  color: rgb(101, 163, 13);
+}
+
+.level-badge.level-4 {
+  background: rgba(234, 179, 8, 0.12);
+  color: rgb(161, 98, 7);
+}
+
+.level-badge.level-5 {
+  background: rgba(245, 158, 11, 0.12);
+  color: rgb(180, 83, 9);
+}
+
+.level-badge.level-6 {
+  background: rgba(249, 115, 22, 0.12);
+  color: rgb(194, 65, 12);
+}
+
+.level-badge.level-7 {
+  background: rgba(239, 68, 68, 0.12);
+  color: rgb(185, 28, 28);
+}
+
+.level-badge.level-8 {
+  background: rgba(220, 38, 38, 0.12);
+  color: rgb(153, 27, 27);
+}
+
+.level-badge.level-9 {
+  background: rgba(190, 18, 60, 0.12);
+  color: rgb(136, 19, 55);
+}
+
+.level-badge.level-10 {
+  background: rgba(159, 18, 57, 0.12);
+  color: rgb(112, 26, 52);
+}
+
+:global(.dark) .level-badge.level-1 {
+  background: rgba(16, 185, 129, 0.18);
+  color: rgb(52, 211, 153);
+}
+
+:global(.dark) .level-badge.level-2 {
+  background: rgba(34, 197, 94, 0.18);
+  color: rgb(74, 222, 128);
+}
+
+:global(.dark) .level-badge.level-3 {
+  background: rgba(132, 204, 22, 0.18);
+  color: rgb(163, 230, 53);
+}
+
+:global(.dark) .level-badge.level-4 {
+  background: rgba(234, 179, 8, 0.18);
+  color: rgb(250, 204, 21);
+}
+
+:global(.dark) .level-badge.level-5 {
+  background: rgba(245, 158, 11, 0.18);
+  color: rgb(251, 191, 36);
+}
+
+:global(.dark) .level-badge.level-6 {
+  background: rgba(249, 115, 22, 0.18);
+  color: rgb(251, 146, 60);
+}
+
+:global(.dark) .level-badge.level-7 {
+  background: rgba(239, 68, 68, 0.18);
+  color: rgb(248, 113, 113);
+}
+
+:global(.dark) .level-badge.level-8 {
+  background: rgba(220, 38, 38, 0.18);
+  color: rgb(239, 68, 68);
+}
+
+:global(.dark) .level-badge.level-9 {
+  background: rgba(190, 18, 60, 0.18);
+  color: rgb(244, 63, 94);
+}
+
+:global(.dark) .level-badge.level-10 {
+  background: rgba(159, 18, 57, 0.18);
+  color: rgb(236, 72, 153);
+}
+
+.blacklist-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  margin-top: 8px;
+  background: rgba(239, 68, 68, 0.1);
+  border-left: 3px solid #ef4444;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #dc2626;
+}
+
+.blacklist-banner.dark {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+}
+
+.blacklist-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.blacklist-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.blacklist-text {
+  flex: 1;
+  font-weight: 500;
+}
+
+.blacklist-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.unblock-btn {
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.unblock-btn.primary {
+  background: #ef4444;
+  flex: 1;
+}
+
+.unblock-btn.primary:hover {
+  background: #dc2626;
+}
+
+.unblock-btn.secondary {
+  background: #6b7280;
+  flex: 1;
+}
+
+.unblock-btn.secondary:hover {
+  background: #4b5563;
+}
+
+.unblock-btn:active {
+  transform: scale(0.98);
+}
+
+.blacklist-banner .level-badge,
+.level-badge-standalone .level-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 6px;
+  min-width: 28px;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  line-height: 1;
+  flex-shrink: 0;
+  text-align: center;
+}
+
+.blacklist-banner .level-badge.level-1,
+.level-badge-standalone .level-badge.level-1 {
+  background: #fef3c7;
+  color: #d97706;
+}
+
+.blacklist-banner .level-badge.level-2,
+.level-badge-standalone .level-badge.level-2 {
+  background: #fed7aa;
+  color: #ea580c;
+}
+
+.blacklist-banner .level-badge.level-3,
+.level-badge-standalone .level-badge.level-3 {
+  background: #fecaca;
+  color: #dc2626;
+}
+
+.blacklist-banner .level-badge.level-4,
+.level-badge-standalone .level-badge.level-4 {
+  background: #fca5a5;
+  color: #b91c1c;
+}
+
+.blacklist-banner .level-badge.level-5,
+.level-badge-standalone .level-badge.level-5 {
+  background: #ef4444;
+  color: #fff;
+}
+
+.blacklist-banner .level-badge.dark.level-1,
+.level-badge-standalone .level-badge.dark.level-1 {
+  background: rgba(217, 119, 6, 0.2);
+  color: #fbbf24;
+}
+
+.blacklist-banner .level-badge.dark.level-2,
+.level-badge-standalone .level-badge.dark.level-2 {
+  background: rgba(234, 88, 12, 0.2);
+  color: #fb923c;
+}
+
+.blacklist-banner .level-badge.dark.level-3,
+.level-badge-standalone .level-badge.dark.level-3 {
+  background: rgba(220, 38, 38, 0.2);
+  color: #f87171;
+}
+
+.blacklist-banner .level-badge.dark.level-4,
+.level-badge-standalone .level-badge.dark.level-4 {
+  background: rgba(185, 28, 28, 0.2);
+  color: #ef4444;
+}
+
+.blacklist-banner .level-badge.dark.level-5,
+.level-badge-standalone .level-badge.dark.level-5 {
+  background: rgba(220, 38, 38, 0.3);
+  color: #fff;
+}
+
+.level-badge-standalone {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  margin-top: 8px;
+  background: rgba(156, 163, 175, 0.1);
+  border-left: 3px solid #9ca3af;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.level-hint {
+  flex: 1;
+  font-weight: 500;
+}
+
+.reset-level-mini {
+  padding: 2px 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #6b7280;
+  background: transparent;
+  border: 1px solid #d1d5db;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.2s;
+  line-height: 1;
+}
+
+.reset-level-mini:hover {
+  background: #f3f4f6;
+  color: #374151;
+  border-color: #9ca3af;
+}
+
+.reset-level-mini:active {
+  transform: scale(0.95);
+}
+
+.blacklist-level-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.03em;
+  transition: all 0.2s ease;
+  margin-left: 4px;
+}
+
+.blacklist-level-badge.bl-level-0 {
+  background: #e5e7eb;
+  color: #6b7280;
+}
+
+.blacklist-level-badge.bl-level-1 {
+  background: #fef3c7;
+  color: #d97706;
+}
+
+.blacklist-level-badge.bl-level-2 {
+  background: #fed7aa;
+  color: #ea580c;
+}
+
+.blacklist-level-badge.bl-level-3 {
+  background: #fecaca;
+  color: #dc2626;
+}
+
+.blacklist-level-badge.bl-level-4 {
+  background: #fca5a5;
+  color: #b91c1c;
+}
+
+.blacklist-level-badge.bl-level-5 {
+  background: #ef4444;
+  color: #fff;
+}
+
+.blacklist-level-badge.dark.bl-level-0 {
+  background: rgba(107, 114, 128, 0.2);
+  color: #9ca3af;
+}
+
+.blacklist-level-badge.dark.bl-level-1 {
+  background: rgba(217, 119, 6, 0.2);
+  color: #fbbf24;
+}
+
+.blacklist-level-badge.dark.bl-level-2 {
+  background: rgba(234, 88, 12, 0.2);
+  color: #fb923c;
+}
+
+.blacklist-level-badge.dark.bl-level-3 {
+  background: rgba(220, 38, 38, 0.2);
+  color: #f87171;
+}
+
+.blacklist-level-badge.dark.bl-level-4 {
+  background: rgba(185, 28, 28, 0.2);
+  color: #ef4444;
+}
+
+.blacklist-level-badge.dark.bl-level-5 {
+  background: rgba(220, 38, 38, 0.3);
+  color: #fff;
+}
+
+.connectivity-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-left: 6px;
+  flex-shrink: 0;
+  transition: background-color 0.2s ease;
+}
+
+.connectivity-dot.connectivity-green {
+  background-color: #22c55e;
+  box-shadow: 0 0 4px rgba(34, 197, 94, 0.5);
+}
+
+.connectivity-dot.connectivity-yellow {
+  background-color: #eab308;
+  box-shadow: 0 0 4px rgba(234, 179, 8, 0.5);
+}
+
+.connectivity-dot.connectivity-red {
+  background-color: #ef4444;
+  box-shadow: 0 0 4px rgba(239, 68, 68, 0.5);
+}
+
+.connectivity-dot.connectivity-gray {
+  background-color: #9ca3af;
+}
+
+:global(.dark) .connectivity-dot.connectivity-green {
+  background-color: #4ade80;
+  box-shadow: 0 0 6px rgba(74, 222, 128, 0.6);
+}
+
+:global(.dark) .connectivity-dot.connectivity-yellow {
+  background-color: #facc15;
+  box-shadow: 0 0 6px rgba(250, 204, 21, 0.6);
+}
+
+:global(.dark) .connectivity-dot.connectivity-red {
+  background-color: #f87171;
+  box-shadow: 0 0 6px rgba(248, 113, 113, 0.6);
+}
+
+:global(.dark) .connectivity-dot.connectivity-gray {
+  background-color: #6b7280;
+}
+
+.direct-apply-btn {
+  position: relative;
+  transition: all 0.2s ease;
+  color: var(--mac-text-secondary);
+  min-width: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.direct-apply-btn .lightning-icon {
+  width: 16px;
+  height: 16px;
+}
+
+.direct-apply-btn:not(:disabled):not(.is-active):hover {
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.1);
+}
+
+.direct-apply-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+  filter: grayscale(100%);
+}
+
+.direct-apply-btn.is-active {
+  border: 1px solid #10b981;
+  background: rgba(16, 185, 129, 0.1);
+  color: #10b981;
+  width: auto;
+  padding: 0 8px;
+  border-radius: 6px;
+  gap: 4px;
+}
+
+.direct-apply-btn .apply-text {
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+:global(.dark) .direct-apply-btn.is-active {
+  border-color: #34d399;
+  background: rgba(52, 211, 153, 0.15);
+  color: #34d399;
+}
+
+.current-use-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  margin-left: 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: white;
+  box-shadow: 0 2px 4px rgba(16, 185, 129, 0.2);
+}
+
+:global(.dark) .current-use-badge {
+  background: linear-gradient(135deg, #059669 0%, #047857 100%);
+}
