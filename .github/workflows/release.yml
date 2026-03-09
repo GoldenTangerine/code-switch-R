@@ -635,52 +635,10 @@ jobs:
           cp artifacts/linux-amd64/codeswitch-*.rpm.sha256 release-assets/ 2>/dev/null || true
 
           ls -lh release-assets/
-      - name: Generate latest.json
-        run: |
-          VERSION=${GITHUB_REF#refs/tags/}
-          VERSION_NUM=${GITHUB_REF#refs/tags/v}
-          REPO="${{ github.repository }}"
-          BASE_URL="https://github.com/${REPO}/releases/download/${VERSION}"
-
-          # Read SHA256 checksums from existing .sha256 files
-          WIN_SHA=$(cut -d' ' -f1 release-assets/CodeSwitch-${VERSION}.exe.sha256)
-          LINUX_SHA=$(cut -d' ' -f1 release-assets/CodeSwitch-${VERSION}.AppImage.sha256)
-
-          cat > release-assets/latest.json << EOF
-          {
-            "version": "${VERSION}",
-            "release_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-            "files": {
-              "windows": {
-                "name": "CodeSwitch-${VERSION}.exe",
-                "url": "${BASE_URL}/CodeSwitch-${VERSION}.exe",
-                "sha256": "${WIN_SHA}"
-              },
-              "darwin-arm64": {
-                "name": "CodeSwitch-${VERSION}-macos-arm64.zip",
-                "url": "${BASE_URL}/CodeSwitch-${VERSION}-macos-arm64.zip"
-              },
-              "darwin-amd64": {
-                "name": "CodeSwitch-${VERSION}-macos-amd64.zip",
-                "url": "${BASE_URL}/CodeSwitch-${VERSION}-macos-amd64.zip"
-              },
-              "linux": {
-                "name": "CodeSwitch-${VERSION}.AppImage",
-                "url": "${BASE_URL}/CodeSwitch-${VERSION}.AppImage",
-                "sha256": "${LINUX_SHA}"
-              }
-            }
-          }
-          EOF
-
-          echo "Generated latest.json:"
-          cat release-assets/latest.json
-
-
-      - name: Generate release body
+      - name: Prepare release notes
         run: |
           VERSION=${GITHUB_REF#refs/tags/v}
-          echo "Generating release body for v$VERSION"
+          echo "Preparing release notes for v$VERSION"
 
           # 自动汇总上一个 tag 到当前 tag 的提交记录，生成「更新亮点」
           git fetch --tags --force
@@ -771,21 +729,94 @@ jobs:
           print(open("/tmp/auto_highlights.md", "r", encoding="utf-8").read())
           PY
 
-          # 提取当前版本的更新内容（从标题到下一个版本标题之前）
-          # 注意：先用 tr 去除 Windows CRLF 换行符，否则 awk 匹配失败
-          tr -d '\r' < RELEASE_NOTES.md | awk "/^# Code Switch v$VERSION/,/^# Code Switch v[0-9]/" | head -n -1 > /tmp/version_notes.md
-
-          # 如果没找到版本说明，使用默认内容
-          if [ ! -s /tmp/version_notes.md ]; then
-            cp /tmp/auto_highlights.md /tmp/version_notes.md
+          if python3 scripts/extract_release_notes.py --version "$VERSION" --notes-file RELEASE_NOTES.md --output /tmp/version_notes.md; then
+            echo "version_notes" > /tmp/version_notes_source.txt
+            echo "Extracted /tmp/version_notes.md:"
+            cat /tmp/version_notes.md
           else
-            # 如果找到了版本说明，也把自动汇总的「更新亮点」追加进去，方便快速回顾
-            echo "" >> /tmp/version_notes.md
-            cat /tmp/auto_highlights.md >> /tmp/version_notes.md
+            echo "auto_highlights" > /tmp/version_notes_source.txt
+            echo "Failed to extract version-scoped notes, fallback to auto highlights"
+            cp /tmp/auto_highlights.md /tmp/version_notes.md
+            cat /tmp/version_notes.md
           fi
 
-          # 组合完整的 release body
+      - name: Generate latest.json
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          REPO="${{ github.repository }}"
+          BASE_URL="https://github.com/${REPO}/releases/download/${VERSION}"
+
+          # Read SHA256 checksums from existing .sha256 files
+          WIN_SHA=$(cut -d' ' -f1 release-assets/CodeSwitch-${VERSION}.exe.sha256)
+          LINUX_SHA=$(cut -d' ' -f1 release-assets/CodeSwitch-${VERSION}.AppImage.sha256)
+
+          export VERSION BASE_URL WIN_SHA LINUX_SHA
+          python3 - <<'PY'
+          import json
+          import os
+          from datetime import datetime, timezone
+
+          version = os.environ["VERSION"]
+          base_url = os.environ["BASE_URL"]
+          win_sha = os.environ["WIN_SHA"]
+          linux_sha = os.environ["LINUX_SHA"]
+
+          def read_text(path: str) -> str:
+            try:
+              with open(path, "r", encoding="utf-8") as f:
+                return f.read().strip()
+            except FileNotFoundError:
+              return ""
+
+          release_notes = read_text("/tmp/version_notes.md")
+          changelog = read_text("/tmp/auto_highlights.md")
+
+          payload = {
+            "version": version,
+            "release_date": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "release_notes": release_notes,
+            "body": release_notes,
+            "changelog": changelog,
+            "files": {
+              "windows": {
+                "name": f"CodeSwitch-{version}.exe",
+                "url": f"{base_url}/CodeSwitch-{version}.exe",
+                "sha256": win_sha,
+              },
+              "darwin-arm64": {
+                "name": f"CodeSwitch-{version}-macos-arm64.zip",
+                "url": f"{base_url}/CodeSwitch-{version}-macos-arm64.zip",
+              },
+              "darwin-amd64": {
+                "name": f"CodeSwitch-{version}-macos-amd64.zip",
+                "url": f"{base_url}/CodeSwitch-{version}-macos-amd64.zip",
+              },
+              "linux": {
+                "name": f"CodeSwitch-{version}.AppImage",
+                "url": f"{base_url}/CodeSwitch-{version}.AppImage",
+                "sha256": linux_sha,
+              },
+            },
+          }
+
+          with open("release-assets/latest.json", "w", encoding="utf-8", newline="\n") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+            f.write("\n")
+          PY
+
+          echo "Generated latest.json:"
+          cat release-assets/latest.json
+
+      - name: Generate release body
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "Generating release body for v$VERSION"
+
           cat /tmp/version_notes.md > /tmp/release_body.md
+          if [ "$(cat /tmp/version_notes_source.txt 2>/dev/null)" = "version_notes" ] && [ -s /tmp/auto_highlights.md ]; then
+            echo "" >> /tmp/release_body.md
+            cat /tmp/auto_highlights.md >> /tmp/release_body.md
+          fi
 
           cat >> /tmp/release_body.md << EOF
 

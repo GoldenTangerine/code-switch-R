@@ -6,6 +6,11 @@ if ! command -v gh >/dev/null 2>&1; then
   exit 1
 fi
 
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "python3 is required to extract version-scoped release notes" >&2
+  exit 1
+fi
+
 if [ $# -lt 1 ]; then
   echo "Usage: scripts/publish_release.sh <tag> [notes-file]" >&2
   exit 1
@@ -13,9 +18,16 @@ fi
 
 TAG="$1"
 NOTES="${2:-RELEASE_NOTES.md}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+EXTRACT_SCRIPT="${SCRIPT_DIR}/extract_release_notes.py"
 
 if [ ! -f "$NOTES" ]; then
   echo "Release notes file '$NOTES' not found" >&2
+  exit 1
+fi
+
+if [ ! -f "$EXTRACT_SCRIPT" ]; then
+  echo "Release notes extractor '$EXTRACT_SCRIPT' not found" >&2
   exit 1
 fi
 
@@ -106,6 +118,23 @@ for asset in "${ASSETS[@]}"; do
   echo "  asset: $asset"
 done
 
+TMP_NOTES="$(mktemp)"
+cleanup() {
+  rm -f "$TMP_NOTES"
+}
+trap cleanup EXIT
+
+RELEASE_NOTES_FILE="$NOTES"
+if python3 "$EXTRACT_SCRIPT" --version "$TAG" --notes-file "$NOTES" --output "$TMP_NOTES"; then
+  RELEASE_NOTES_FILE="$TMP_NOTES"
+  echo "==> Using extracted release notes for $TAG"
+elif [ "$NOTES" = "RELEASE_NOTES.md" ] || [ "$(basename "$NOTES")" = "RELEASE_NOTES.md" ]; then
+  echo "Failed to extract version-scoped release notes for $TAG from $NOTES" >&2
+  exit 1
+else
+  echo "Warning: failed to extract version-scoped notes from $NOTES, using file as-is" >&2
+fi
+
 gh release create "$TAG" "${ASSETS[@]}" \
   --title "$TAG" \
-  --notes-file "$NOTES"
+  --notes-file "$RELEASE_NOTES_FILE"
