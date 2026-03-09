@@ -20,7 +20,7 @@
           v-for="(day, dayIndex) in week"
           :key="dayIndex"
           class="contrib-cell"
-          :class="intensityClass(day.intensity)"
+          :class="[intensityClass(day.intensity), { 'is-current-time': isCurrentTimeCell(day) }]"
           @mouseenter="showUsageTooltip(day, $event)"
           @mousemove="showUsageTooltip(day, $event)"
           @mouseleave="hideUsageTooltip"
@@ -81,12 +81,17 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, reactive, ref, toRef } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, toRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { type UsageHeatmapDay } from '../../../data/usageHeatmap'
 import { useAdaptiveHeatmap } from '../../../composables/useAdaptiveHeatmap'
 import type { HeatmapDisplaySettings, HeatmapIntensityMetric } from '../../../data/heatmapDisplaySettings'
 import type { HeatmapGranularity } from '../../../services/appSettings'
+import {
+  buildHeatmapCellMatchKey,
+  buildHeatmapCurrentCellMatchKey,
+  getMillisecondsUntilNextHeatmapBoundary,
+} from '../../../utils/heatmapCurrentCell'
 
 const props = defineProps<{
   granularity: HeatmapGranularity
@@ -112,6 +117,33 @@ defineExpose({
 })
 
 const intensityClass = (value: number) => `gh-level-${value}`
+const currentTime = ref(Date.now())
+const currentHeatmapCellMatchKey = computed(() =>
+  buildHeatmapCurrentCellMatchKey(granularityRef.value, currentTime.value),
+)
+const heatmapCellMatchKeyCache = new Map<string, string>()
+
+const syncCurrentTime = () => {
+  currentTime.value = Date.now()
+}
+
+const getHeatmapCellMatchKey = (day: UsageHeatmapDay) => {
+  const cacheKey = `${granularityRef.value}:${day.dateKey}`
+  const cached = heatmapCellMatchKeyCache.get(cacheKey)
+  if (cached !== undefined) {
+    return cached
+  }
+  const nextKey = buildHeatmapCellMatchKey(day.dateKey, granularityRef.value)
+  heatmapCellMatchKeyCache.set(cacheKey, nextKey)
+  return nextKey
+}
+
+const isCurrentTimeCell = (day: UsageHeatmapDay) => {
+  if (!currentHeatmapCellMatchKey.value) {
+    return false
+  }
+  return getHeatmapCellMatchKey(day) === currentHeatmapCellMatchKey.value
+}
 
 type TooltipPlacement = 'above' | 'below'
 type UsageTooltipTone = 'neutral' | 'info' | 'warning' | 'success' | 'violet' | 'rose'
@@ -514,6 +546,23 @@ const updateUsageTooltipPosition = (cellRect: DOMRect | ReturnType<HTMLElement['
 }
 
 let usageTooltipPositionRequestId = 0
+let currentTimeRefreshTimer: number | null = null
+
+const clearCurrentTimeRefreshTimer = () => {
+  if (!currentTimeRefreshTimer) return
+  clearTimeout(currentTimeRefreshTimer)
+  currentTimeRefreshTimer = null
+}
+
+// 只在当前粒度的边界刷新，避免页面常驻时高亮停在旧的小时或日期上。
+const scheduleCurrentTimeRefresh = () => {
+  clearCurrentTimeRefreshTimer()
+  if (typeof window === 'undefined') return
+  currentTimeRefreshTimer = window.setTimeout(() => {
+    syncCurrentTime()
+    scheduleCurrentTimeRefresh()
+  }, getMillisecondsUntilNextHeatmapBoundary(granularityRef.value, currentTime.value))
+}
 
 const finalizeUsageTooltipPosition = async (
   cellRect: DOMRect | ReturnType<HTMLElement['getBoundingClientRect']>,
@@ -553,10 +602,18 @@ const hideUsageTooltip = () => {
 }
 
 onMounted(() => {
+  syncCurrentTime()
+  scheduleCurrentTimeRefresh()
   void init()
 })
 
+watch(granularityRef, () => {
+  syncCurrentTime()
+  scheduleCurrentTimeRefresh()
+})
+
 onUnmounted(() => {
+  clearCurrentTimeRefreshTimer()
   cleanup()
 })
 </script>

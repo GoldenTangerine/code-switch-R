@@ -6,7 +6,7 @@
 name: "CodeSwitch"
 arch: ${GOARCH}
 platform: "linux"
-version: "2.7.28"
+version: "2.7.29"
 section: "default"
 priority: "extra"
 maintainer: ${GIT_COMMITTER_NAME} <${GIT_COMMITTER_EMAIL}>

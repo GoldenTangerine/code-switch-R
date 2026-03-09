@@ -243,7 +243,10 @@ export function useAdaptiveHeatmap(
 	let resizeObserver: ResizeObserver | null = null
 
 	const getContainerWidth = (container: HTMLElement) => {
-		const rectWidth = Math.round(container.getBoundingClientRect().width || 0)
+		const rectWidth =
+			typeof container.getBoundingClientRect === 'function'
+				? Math.round(container.getBoundingClientRect().width || 0)
+				: 0
 		if (rectWidth > 0) {
 			return rectWidth
 		}
