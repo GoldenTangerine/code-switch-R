@@ -1,9 +1,14 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, proxyRefs, ref } from 'vue'
 import { Call } from '@wailsio/runtime'
-import { fetchCostSince } from '../../services/logs'
+import { fetchCostSince, fetchLogStats } from '../../services/logs'
 import { fetchAppSettings, type AppSettings } from '../../services/appSettings'
 import { fetchProxyStatus } from '../../services/claudeSettings'
+import {
+  getVisibleTrayQuotaKeys,
+  resolveTrayBudgetDisplayMode,
+  type TrayBudgetDisplayMode,
+} from '../../utils/trayBudgetDisplay'
 import {
   budgetQuotaOrder,
   createDefaultBudgetQuotaAdjustments,
@@ -147,8 +152,18 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
   const forecastMethod = ref<ForecastMethod>('cycle')
   const forecastDisplay = ref<ForecastDisplay>('datetime')
   const usedAdjustments = ref<BudgetQuotaAdjustments>(createDefaultBudgetQuotaAdjustments())
+  const totalUsage = ref(0)
+  const displayMode = ref<TrayBudgetDisplayMode | 'pending'>('pending')
+  const visibleQuotaKeys = ref<BudgetQuotaKey[]>([])
   const hostingEnabled = ref(false)
   const hostingLabel = computed(() => (hostingEnabled.value ? '托管中' : '未托管'))
+  const visibleQuotas = computed(() => {
+    if (displayMode.value !== 'quotas') return []
+    const allowedKeys = new Set(visibleQuotaKeys.value)
+    return quotas.value.filter((quota) => quota.hasBudget && allowedKeys.has(quota.key))
+  })
+  const showTotalUsage = computed(() => displayMode.value === 'summary')
+  const totalUsageLabel = computed(() => formatCurrency(totalUsage.value))
 
   const applyUsedAdjustment = (key: BudgetQuotaKey, rawUsed: number) => {
     const adjusted = rawUsed + usedAdjustments.value[key]
@@ -257,6 +272,17 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
       : settings.budget_quota_used_adjustments
   }
 
+  const loadTotalUsage = async () => {
+    try {
+      const stats = await fetchLogStats(platform)
+      const numeric = Number(stats?.cost_total)
+      totalUsage.value = Number.isFinite(numeric) ? Math.max(numeric, 0) : 0
+    } catch (error) {
+      console.error(`failed to load ${platform} total usage`, error)
+      totalUsage.value = 0
+    }
+  }
+
   const applySettings = (settings: AppSettings) => {
     if (platform === 'codex') {
       showCountdown.value = settings?.budget_show_countdown_codex ?? false
@@ -280,11 +306,25 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
       const now = new Date()
       const quotaSettings = getQuotaSettings(settings)
       usedAdjustments.value = getQuotaAdjustments(settings)
-      const fetchCostSinceByStart = createCostSinceFetcher(platform)
       await updateHostingState()
+      const nextDisplayMode = resolveTrayBudgetDisplayMode(quotaSettings)
 
+      if (nextDisplayMode === 'summary') {
+        quotas.value = budgetQuotaOrder.map((key) => createQuotaState(key))
+        visibleQuotaKeys.value = []
+        displayMode.value = 'summary'
+        await loadTotalUsage()
+        return
+      }
+
+      const nextVisibleQuotaKeys = getVisibleTrayQuotaKeys(quotaSettings)
+      const visibleQuotaKeySet = new Set(nextVisibleQuotaKeys)
+      const fetchCostSinceByStart = createCostSinceFetcher(platform)
       quotas.value = await Promise.all(
         budgetQuotaOrder.map(async (key) => {
+          if (!visibleQuotaKeySet.has(key)) {
+            return createQuotaState(key)
+          }
           const setting = quotaSettings[key] as BudgetQuotaSetting
           const window = resolveBudgetQuotaWindow(key, setting, now)
           const rawUsed = await fetchCostSinceByStart(window.start)
@@ -302,6 +342,9 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
           return nextQuota
         }),
       )
+      visibleQuotaKeys.value = nextVisibleQuotaKeys
+      displayMode.value = 'quotas'
+      totalUsage.value = 0
     } catch (error) {
       console.error(`failed to load ${platform} tray stats`, error)
     } finally {
@@ -318,6 +361,9 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
     brandName,
     brandIcon,
     quotas,
+    visibleQuotas,
+    showTotalUsage,
+    totalUsageLabel,
     hostingEnabled,
     hostingLabel,
     loading,
@@ -455,7 +501,18 @@ onUnmounted(() => {
           </div>
         </div>
         <div class="tray-content">
-          <div v-for="quota in card.quotas" :key="`${card.platform}-${quota.key}`" class="tray-item">
+          <div v-if="card.showTotalUsage" class="tray-item tray-item--summary">
+            <div class="tray-item__header">
+              <div class="tray-item__title">
+                <span class="tray-dot"></span>
+                <span>总消耗</span>
+              </div>
+              <div class="tray-item__value" :class="{ loading: card.loading }">
+                <span>{{ card.totalUsageLabel }}</span>
+              </div>
+            </div>
+          </div>
+          <div v-for="quota in card.visibleQuotas" :key="`${card.platform}-${quota.key}`" class="tray-item">
             <div class="tray-item__header">
               <div class="tray-item__title">
                 <span class="tray-dot"></span>
