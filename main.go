@@ -496,7 +496,7 @@ func handleDockVisibility(service *dock.DockService, show bool) {
 const (
 	trayWindowWidth      = 360
 	trayWindowMinHeight  = 120
-	trayWindowMaxHeight  = 420
+	trayWindowMaxHeight  = 640
 	trayProgressBarWidth = 28
 )
 

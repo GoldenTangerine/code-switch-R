@@ -355,7 +355,10 @@ const setupTicker = () => {
 const resizeToContent = async () => {
   await nextTick()
   if (!rootRef.value) return
-  const height = Math.ceil(rootRef.value.getBoundingClientRect().height)
+  const height = Math.ceil(Math.max(
+    rootRef.value.getBoundingClientRect().height,
+    rootRef.value.scrollHeight,
+  ))
   if (height <= 0) return
   if (height === lastWindowHeight) return
   try {
@@ -485,6 +488,12 @@ onUnmounted(() => {
 .tray-root {
   padding: 10px;
   color: var(--mac-text);
+  box-sizing: border-box;
+  max-height: 100vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .tray-list {
