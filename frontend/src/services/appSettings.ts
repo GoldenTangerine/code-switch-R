@@ -4,9 +4,13 @@ import {
   normalizeHeatmapDisplaySettings,
 } from '../data/heatmapDisplaySettings'
 import {
+  createDefaultBudgetQuotaAdjustments,
   createDefaultBudgetQuotaSettings,
+  normalizeBudgetQuotaAdjustments,
   normalizeBudgetQuotaSetting,
   normalizeBudgetQuotaSettings,
+  projectBudgetQuotaToLegacy,
+  type BudgetQuotaAdjustments,
   type BudgetQuotaSettings,
 } from '../utils/budgetUsage'
 
@@ -33,6 +37,7 @@ export type AppSettings = {
   budget_refresh_time: string
   budget_refresh_day: number
   budget_refresh_month_day: number
+  budget_quota_used_adjustments: BudgetQuotaAdjustments
   budget_quota_settings: BudgetQuotaSettings
   budget_show_countdown: boolean
   budget_show_forecast: boolean
@@ -45,6 +50,7 @@ export type AppSettings = {
   budget_refresh_time_codex: string
   budget_refresh_day_codex: number
   budget_refresh_month_day_codex: number
+  budget_quota_used_adjustments_codex: BudgetQuotaAdjustments
   budget_quota_settings_codex: BudgetQuotaSettings
   budget_show_countdown_codex: boolean
   budget_show_forecast_codex: boolean
@@ -77,6 +83,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   budget_refresh_time: '00:00',
   budget_refresh_day: 1,
   budget_refresh_month_day: 1,
+  budget_quota_used_adjustments: createDefaultBudgetQuotaAdjustments(),
   budget_quota_settings: createDefaultBudgetQuotaSettings(),
   budget_show_countdown: false,
   budget_show_forecast: false,
@@ -89,6 +96,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   budget_refresh_time_codex: '00:00',
   budget_refresh_day_codex: 1,
   budget_refresh_month_day_codex: 1,
+  budget_quota_used_adjustments_codex: createDefaultBudgetQuotaAdjustments(),
   budget_quota_settings_codex: createDefaultBudgetQuotaSettings(),
   budget_show_countdown_codex: false,
   budget_show_forecast_codex: false,
@@ -105,7 +113,9 @@ const DEFAULT_SETTINGS: AppSettings = {
 }
 
 type AppSettingsResponse = Partial<AppSettings> & {
+  budget_quota_used_adjustments?: unknown
   budget_quota_settings?: unknown
+  budget_quota_used_adjustments_codex?: unknown
   budget_quota_settings_codex?: unknown
 }
 
@@ -121,6 +131,13 @@ type SerializedBudgetQuotaSettings = {
   daily: SerializedBudgetQuotaSetting
   weekly: SerializedBudgetQuotaSetting
   monthly: SerializedBudgetQuotaSetting
+}
+
+type SerializedBudgetQuotaAdjustments = {
+  five_hour: number
+  daily: number
+  weekly: number
+  monthly: number
 }
 
 const normalizeAppSettingsResponse = (value: unknown): AppSettings => {
@@ -145,6 +162,14 @@ const normalizeAppSettingsResponse = (value: unknown): AppSettings => {
     heatmap_intensity_stop_l1: normalizedHeatmapDisplay.intensityStopL1,
     heatmap_intensity_stop_l2: normalizedHeatmapDisplay.intensityStopL2,
     heatmap_intensity_stop_l3: normalizedHeatmapDisplay.intensityStopL3,
+    budget_quota_used_adjustments: normalizeBudgetQuotaAdjustments(
+      data?.budget_quota_used_adjustments,
+      {
+        adjustment: data?.budget_used_adjustment,
+        cycleEnabled: data?.budget_cycle_enabled,
+        cycleMode: data?.budget_cycle_mode,
+      },
+    ),
     budget_quota_settings: normalizeBudgetQuotaSettings(data?.budget_quota_settings, {
       total: data?.budget_total,
       cycleEnabled: data?.budget_cycle_enabled,
@@ -153,6 +178,14 @@ const normalizeAppSettingsResponse = (value: unknown): AppSettings => {
       refreshWeekday: data?.budget_refresh_day,
       refreshMonthDay: data?.budget_refresh_month_day,
     }),
+    budget_quota_used_adjustments_codex: normalizeBudgetQuotaAdjustments(
+      data?.budget_quota_used_adjustments_codex,
+      {
+        adjustment: data?.budget_used_adjustment_codex,
+        cycleEnabled: data?.budget_cycle_enabled_codex,
+        cycleMode: data?.budget_cycle_mode_codex,
+      },
+    ),
     budget_quota_settings_codex: normalizeBudgetQuotaSettings(data?.budget_quota_settings_codex, {
       total: data?.budget_total_codex,
       cycleEnabled: data?.budget_cycle_enabled_codex,
@@ -161,6 +194,16 @@ const normalizeAppSettingsResponse = (value: unknown): AppSettings => {
       refreshWeekday: data?.budget_refresh_day_codex,
       refreshMonthDay: data?.budget_refresh_month_day_codex,
     }),
+  }
+}
+
+const serializeBudgetQuotaAdjustments = (value: unknown): SerializedBudgetQuotaAdjustments => {
+  const normalized = normalizeBudgetQuotaAdjustments(value)
+  return {
+    five_hour: normalized.five_hour,
+    daily: normalized.daily,
+    weekly: normalized.weekly,
+    monthly: normalized.monthly,
   }
 }
 
@@ -184,11 +227,38 @@ const serializeBudgetQuotaSettings = (value: unknown): SerializedBudgetQuotaSett
   }
 }
 
-const serializeAppSettings = (settings: AppSettings) => ({
-  ...settings,
-  budget_quota_settings: serializeBudgetQuotaSettings(settings.budget_quota_settings),
-  budget_quota_settings_codex: serializeBudgetQuotaSettings(settings.budget_quota_settings_codex),
-})
+const serializeAppSettings = (settings: AppSettings) => {
+  const budgetLegacy = projectBudgetQuotaToLegacy(
+    settings.budget_quota_settings,
+    settings.budget_quota_used_adjustments,
+  )
+  const budgetLegacyCodex = projectBudgetQuotaToLegacy(
+    settings.budget_quota_settings_codex,
+    settings.budget_quota_used_adjustments_codex,
+  )
+
+  return {
+    ...settings,
+    budget_total: budgetLegacy.total,
+    budget_used_adjustment: budgetLegacy.adjustment,
+    budget_cycle_enabled: budgetLegacy.cycleEnabled,
+    budget_cycle_mode: budgetLegacy.cycleMode,
+    budget_refresh_time: budgetLegacy.refreshTime,
+    budget_refresh_day: budgetLegacy.refreshWeekday,
+    budget_refresh_month_day: budgetLegacy.refreshMonthDay,
+    budget_quota_used_adjustments: serializeBudgetQuotaAdjustments(settings.budget_quota_used_adjustments),
+    budget_quota_settings: serializeBudgetQuotaSettings(settings.budget_quota_settings),
+    budget_total_codex: budgetLegacyCodex.total,
+    budget_used_adjustment_codex: budgetLegacyCodex.adjustment,
+    budget_cycle_enabled_codex: budgetLegacyCodex.cycleEnabled,
+    budget_cycle_mode_codex: budgetLegacyCodex.cycleMode,
+    budget_refresh_time_codex: budgetLegacyCodex.refreshTime,
+    budget_refresh_day_codex: budgetLegacyCodex.refreshWeekday,
+    budget_refresh_month_day_codex: budgetLegacyCodex.refreshMonthDay,
+    budget_quota_used_adjustments_codex: serializeBudgetQuotaAdjustments(settings.budget_quota_used_adjustments_codex),
+    budget_quota_settings_codex: serializeBudgetQuotaSettings(settings.budget_quota_settings_codex),
+  }
+}
 
 export const fetchAppSettings = async (): Promise<AppSettings> => {
   const data = await Call.ByName('codeswitch/services.AppSettingsService.GetAppSettings')

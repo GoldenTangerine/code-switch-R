@@ -856,6 +856,8 @@
         "budgetQuotaWeeklyHint": "每周按指定星期和时间刷新，未设置则显示为 ∞",
         "budgetQuotaMonthly": "月额度",
         "budgetQuotaMonthlyHint": "每月按指定日期和时间刷新，未设置则显示为 ∞",
+        "budgetQuotaUsedAdjustment": "当前已用调整",
+        "budgetQuotaUsedAdjustmentHint": "仅影响当前额度窗口的已用显示值，显示值 = 实际统计 + 调整值（USD，可正可负）",
         "budgetQuotaUnsetHint": "填 0 或留空都按 ∞ 处理",
         "budgetRefreshTime": "刷新时间",
         "budgetRefreshWeekday": "刷新星期",

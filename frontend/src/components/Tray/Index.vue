@@ -6,10 +6,12 @@ import { fetchAppSettings, type AppSettings } from '../../services/appSettings'
 import { fetchProxyStatus } from '../../services/claudeSettings'
 import {
   budgetQuotaOrder,
+  createDefaultBudgetQuotaAdjustments,
   formatLocalDateTime,
   pad2,
   resolveBudgetQuotaWindow,
   startOfDay,
+  type BudgetQuotaAdjustments,
   type BudgetQuotaKey,
   type BudgetQuotaSetting,
   type BudgetQuotaSettings,
@@ -97,11 +99,6 @@ const normalizeForecastDisplay = (value: unknown): ForecastDisplay => {
   return 'datetime'
 }
 
-const normalizeBudgetAdjustment = (value: unknown) => {
-  const numeric = Number(value ?? 0)
-  return Number.isFinite(numeric) ? numeric : 0
-}
-
 const createQuotaState = (key: BudgetQuotaKey): TrayQuotaState => ({
   key,
   title: quotaTitles[key],
@@ -149,12 +146,12 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
   const showForecast = ref(false)
   const forecastMethod = ref<ForecastMethod>('cycle')
   const forecastDisplay = ref<ForecastDisplay>('datetime')
-  const usedAdjustment = ref(0)
+  const usedAdjustments = ref<BudgetQuotaAdjustments>(createDefaultBudgetQuotaAdjustments())
   const hostingEnabled = ref(false)
   const hostingLabel = computed(() => (hostingEnabled.value ? '托管中' : '未托管'))
 
-  const applyUsedAdjustment = (rawUsed: number) => {
-    const adjusted = rawUsed + usedAdjustment.value
+  const applyUsedAdjustment = (key: BudgetQuotaKey, rawUsed: number) => {
+    const adjusted = rawUsed + usedAdjustments.value[key]
     if (!Number.isFinite(adjusted)) return 0
     return Math.max(adjusted, 0)
   }
@@ -254,20 +251,26 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
       : settings.budget_quota_settings
   }
 
+  const getQuotaAdjustments = (settings: AppSettings): BudgetQuotaAdjustments => {
+    return platform === 'codex'
+      ? settings.budget_quota_used_adjustments_codex
+      : settings.budget_quota_used_adjustments
+  }
+
   const applySettings = (settings: AppSettings) => {
     if (platform === 'codex') {
       showCountdown.value = settings?.budget_show_countdown_codex ?? false
       showForecast.value = settings?.budget_show_forecast_codex ?? false
       forecastMethod.value = normalizeForecastMethod(settings?.budget_forecast_method_codex ?? 'cycle')
       forecastDisplay.value = normalizeForecastDisplay(settings?.budget_forecast_display_codex ?? 'datetime')
-      usedAdjustment.value = normalizeBudgetAdjustment(settings?.budget_used_adjustment_codex)
+      usedAdjustments.value = settings?.budget_quota_used_adjustments_codex ?? createDefaultBudgetQuotaAdjustments()
       return
     }
     showCountdown.value = settings?.budget_show_countdown ?? false
     showForecast.value = settings?.budget_show_forecast ?? false
     forecastMethod.value = normalizeForecastMethod(settings?.budget_forecast_method ?? 'cycle')
     forecastDisplay.value = normalizeForecastDisplay(settings?.budget_forecast_display ?? 'datetime')
-    usedAdjustment.value = normalizeBudgetAdjustment(settings?.budget_used_adjustment)
+    usedAdjustments.value = settings?.budget_quota_used_adjustments ?? createDefaultBudgetQuotaAdjustments()
   }
 
   const refresh = async (settings: AppSettings) => {
@@ -276,6 +279,7 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
       applySettings(settings)
       const now = new Date()
       const quotaSettings = getQuotaSettings(settings)
+      usedAdjustments.value = getQuotaAdjustments(settings)
       const fetchCostSinceByStart = createCostSinceFetcher(platform)
       await updateHostingState()
 
@@ -284,7 +288,7 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
           const setting = quotaSettings[key] as BudgetQuotaSetting
           const window = resolveBudgetQuotaWindow(key, setting, now)
           const rawUsed = await fetchCostSinceByStart(window.start)
-          const used = applyUsedAdjustment(rawUsed)
+          const used = applyUsedAdjustment(key, rawUsed)
           const nextQuota = createQuotaState(key)
           nextQuota.rawUsed = rawUsed
           nextQuota.used = used

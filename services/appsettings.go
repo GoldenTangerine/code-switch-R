@@ -51,47 +51,49 @@ const (
 )
 
 type AppSettings struct {
-	ShowHeatmap                bool                `json:"show_heatmap"`
-	HeatmapGranularity         string              `json:"heatmap_granularity"`
-	HeatmapDailyScaleFactor    int                 `json:"heatmap_daily_scale_factor"`
-	HeatmapDailyIntensityMode  string              `json:"heatmap_daily_intensity_mode"`
-	HeatmapIntensityMetric     string              `json:"heatmap_intensity_metric"`
-	HeatmapIntensityStopL1     int                 `json:"heatmap_intensity_stop_l1"`
-	HeatmapIntensityStopL2     int                 `json:"heatmap_intensity_stop_l2"`
-	HeatmapIntensityStopL3     int                 `json:"heatmap_intensity_stop_l3"`
-	ShowHomeTitle              bool                `json:"show_home_title"`
-	BudgetTotal                float64             `json:"budget_total"`
-	BudgetUsedAdjustment       float64             `json:"budget_used_adjustment"`
-	BudgetCycleEnabled         bool                `json:"budget_cycle_enabled"`
-	BudgetCycleMode            string              `json:"budget_cycle_mode"`
-	BudgetRefreshTime          string              `json:"budget_refresh_time"`
-	BudgetRefreshDay           int                 `json:"budget_refresh_day"`
-	BudgetRefreshMonthDay      int                 `json:"budget_refresh_month_day"`
-	BudgetQuotaSettings        BudgetQuotaSettings `json:"budget_quota_settings"`
-	BudgetShowCountdown        bool                `json:"budget_show_countdown"`
-	BudgetShowForecast         bool                `json:"budget_show_forecast"`
-	BudgetForecastMethod       string              `json:"budget_forecast_method"`
-	BudgetForecastDisplay      string              `json:"budget_forecast_display"`
-	BudgetTotalCodex           float64             `json:"budget_total_codex"`
-	BudgetUsedAdjustmentCodex  float64             `json:"budget_used_adjustment_codex"`
-	BudgetCycleEnabledCodex    bool                `json:"budget_cycle_enabled_codex"`
-	BudgetCycleModeCodex       string              `json:"budget_cycle_mode_codex"`
-	BudgetRefreshTimeCodex     string              `json:"budget_refresh_time_codex"`
-	BudgetRefreshDayCodex      int                 `json:"budget_refresh_day_codex"`
-	BudgetRefreshMonthDayCodex int                 `json:"budget_refresh_month_day_codex"`
-	BudgetQuotaSettingsCodex   BudgetQuotaSettings `json:"budget_quota_settings_codex"`
-	BudgetShowCountdownCodex   bool                `json:"budget_show_countdown_codex"`
-	BudgetShowForecastCodex    bool                `json:"budget_show_forecast_codex"`
-	BudgetForecastMethodCodex  string              `json:"budget_forecast_method_codex"`
-	BudgetForecastDisplayCodex string              `json:"budget_forecast_display_codex"`
-	AutoStart                  bool                `json:"auto_start"`
-	AutoUpdate                 bool                `json:"auto_update"`
-	UpdateHistoryKeepCount     int                 `json:"update_history_keep_count"` // 更新包历史保留数量
-	AutoConnectivityTest       bool                `json:"auto_connectivity_test"`
-	EnableSwitchNotify         bool                `json:"enable_switch_notify"` // 供应商切换通知开关
-	EnableRoundRobin           bool                `json:"enable_round_robin"`   // 同 Level 轮询负载均衡开关（默认关闭）
-	CaptureRequestLogPayload   bool                `json:"capture_request_log_payload"`
-	SanitizeRequestLogPayload  bool                `json:"sanitize_request_log_payload"`
+	ShowHeatmap                     bool                   `json:"show_heatmap"`
+	HeatmapGranularity              string                 `json:"heatmap_granularity"`
+	HeatmapDailyScaleFactor         int                    `json:"heatmap_daily_scale_factor"`
+	HeatmapDailyIntensityMode       string                 `json:"heatmap_daily_intensity_mode"`
+	HeatmapIntensityMetric          string                 `json:"heatmap_intensity_metric"`
+	HeatmapIntensityStopL1          int                    `json:"heatmap_intensity_stop_l1"`
+	HeatmapIntensityStopL2          int                    `json:"heatmap_intensity_stop_l2"`
+	HeatmapIntensityStopL3          int                    `json:"heatmap_intensity_stop_l3"`
+	ShowHomeTitle                   bool                   `json:"show_home_title"`
+	BudgetTotal                     float64                `json:"budget_total"`
+	BudgetUsedAdjustment            float64                `json:"budget_used_adjustment"`
+	BudgetCycleEnabled              bool                   `json:"budget_cycle_enabled"`
+	BudgetCycleMode                 string                 `json:"budget_cycle_mode"`
+	BudgetRefreshTime               string                 `json:"budget_refresh_time"`
+	BudgetRefreshDay                int                    `json:"budget_refresh_day"`
+	BudgetRefreshMonthDay           int                    `json:"budget_refresh_month_day"`
+	BudgetQuotaUsedAdjustments      BudgetQuotaAdjustments `json:"budget_quota_used_adjustments"`
+	BudgetQuotaSettings             BudgetQuotaSettings    `json:"budget_quota_settings"`
+	BudgetShowCountdown             bool                   `json:"budget_show_countdown"`
+	BudgetShowForecast              bool                   `json:"budget_show_forecast"`
+	BudgetForecastMethod            string                 `json:"budget_forecast_method"`
+	BudgetForecastDisplay           string                 `json:"budget_forecast_display"`
+	BudgetTotalCodex                float64                `json:"budget_total_codex"`
+	BudgetUsedAdjustmentCodex       float64                `json:"budget_used_adjustment_codex"`
+	BudgetCycleEnabledCodex         bool                   `json:"budget_cycle_enabled_codex"`
+	BudgetCycleModeCodex            string                 `json:"budget_cycle_mode_codex"`
+	BudgetRefreshTimeCodex          string                 `json:"budget_refresh_time_codex"`
+	BudgetRefreshDayCodex           int                    `json:"budget_refresh_day_codex"`
+	BudgetRefreshMonthDayCodex      int                    `json:"budget_refresh_month_day_codex"`
+	BudgetQuotaUsedAdjustmentsCodex BudgetQuotaAdjustments `json:"budget_quota_used_adjustments_codex"`
+	BudgetQuotaSettingsCodex        BudgetQuotaSettings    `json:"budget_quota_settings_codex"`
+	BudgetShowCountdownCodex        bool                   `json:"budget_show_countdown_codex"`
+	BudgetShowForecastCodex         bool                   `json:"budget_show_forecast_codex"`
+	BudgetForecastMethodCodex       string                 `json:"budget_forecast_method_codex"`
+	BudgetForecastDisplayCodex      string                 `json:"budget_forecast_display_codex"`
+	AutoStart                       bool                   `json:"auto_start"`
+	AutoUpdate                      bool                   `json:"auto_update"`
+	UpdateHistoryKeepCount          int                    `json:"update_history_keep_count"` // 更新包历史保留数量
+	AutoConnectivityTest            bool                   `json:"auto_connectivity_test"`
+	EnableSwitchNotify              bool                   `json:"enable_switch_notify"` // 供应商切换通知开关
+	EnableRoundRobin                bool                   `json:"enable_round_robin"`   // 同 Level 轮询负载均衡开关（默认关闭）
+	CaptureRequestLogPayload        bool                   `json:"capture_request_log_payload"`
+	SanitizeRequestLogPayload       bool                   `json:"sanitize_request_log_payload"`
 }
 
 type BudgetQuotaSetting struct {
@@ -150,6 +152,13 @@ type BudgetQuotaSettings struct {
 	Daily    BudgetQuotaSetting `json:"daily"`
 	Weekly   BudgetQuotaSetting `json:"weekly"`
 	Monthly  BudgetQuotaSetting `json:"monthly"`
+}
+
+type BudgetQuotaAdjustments struct {
+	FiveHour float64 `json:"five_hour"`
+	Daily    float64 `json:"daily"`
+	Weekly   float64 `json:"weekly"`
+	Monthly  float64 `json:"monthly"`
 }
 
 type AppSettingsService struct {
@@ -262,47 +271,49 @@ func (as *AppSettingsService) defaultSettings() AppSettings {
 	}
 
 	return AppSettings{
-		ShowHeatmap:                true,
-		HeatmapGranularity:         heatmapGranularityHourly,
-		HeatmapDailyScaleFactor:    defaultHeatmapDailyScale,
-		HeatmapDailyIntensityMode:  heatmapDailyModeHourlyScaled,
-		HeatmapIntensityMetric:     defaultHeatmapIntensityMetric,
-		HeatmapIntensityStopL1:     defaultHeatmapIntensityL1,
-		HeatmapIntensityStopL2:     defaultHeatmapIntensityL2,
-		HeatmapIntensityStopL3:     defaultHeatmapIntensityL3,
-		ShowHomeTitle:              true,
-		BudgetTotal:                0,
-		BudgetUsedAdjustment:       0,
-		BudgetCycleEnabled:         false,
-		BudgetCycleMode:            budgetCycleModeDaily,
-		BudgetRefreshTime:          "00:00",
-		BudgetRefreshDay:           defaultBudgetRefreshWeekday,
-		BudgetRefreshMonthDay:      defaultBudgetRefreshMonthDay,
-		BudgetQuotaSettings:        defaultBudgetQuotaSettings(),
-		BudgetShowCountdown:        false,
-		BudgetShowForecast:         false,
-		BudgetForecastMethod:       "cycle",
-		BudgetForecastDisplay:      "datetime",
-		BudgetTotalCodex:           0,
-		BudgetUsedAdjustmentCodex:  0,
-		BudgetCycleEnabledCodex:    false,
-		BudgetCycleModeCodex:       budgetCycleModeDaily,
-		BudgetRefreshTimeCodex:     "00:00",
-		BudgetRefreshDayCodex:      defaultBudgetRefreshWeekday,
-		BudgetRefreshMonthDayCodex: defaultBudgetRefreshMonthDay,
-		BudgetQuotaSettingsCodex:   defaultBudgetQuotaSettings(),
-		BudgetShowCountdownCodex:   false,
-		BudgetShowForecastCodex:    false,
-		BudgetForecastMethodCodex:  "cycle",
-		BudgetForecastDisplayCodex: "datetime",
-		AutoStart:                  autoStartEnabled,
-		AutoUpdate:                 true, // 默认开启自动更新
-		UpdateHistoryKeepCount:     defaultUpdateHistoryKeepCount,
-		AutoConnectivityTest:       true,  // 默认开启自动可用性监控（开箱即用）
-		EnableSwitchNotify:         true,  // 默认开启切换通知
-		EnableRoundRobin:           false, // 默认关闭轮询（使用顺序降级）
-		CaptureRequestLogPayload:   false, // 默认关闭 payload 采集，降低隐私与存储风险
-		SanitizeRequestLogPayload:  true,  // 默认开启 payload 脱敏，避免敏感信息明文落库
+		ShowHeatmap:                     true,
+		HeatmapGranularity:              heatmapGranularityHourly,
+		HeatmapDailyScaleFactor:         defaultHeatmapDailyScale,
+		HeatmapDailyIntensityMode:       heatmapDailyModeHourlyScaled,
+		HeatmapIntensityMetric:          defaultHeatmapIntensityMetric,
+		HeatmapIntensityStopL1:          defaultHeatmapIntensityL1,
+		HeatmapIntensityStopL2:          defaultHeatmapIntensityL2,
+		HeatmapIntensityStopL3:          defaultHeatmapIntensityL3,
+		ShowHomeTitle:                   true,
+		BudgetTotal:                     0,
+		BudgetUsedAdjustment:            0,
+		BudgetCycleEnabled:              false,
+		BudgetCycleMode:                 budgetCycleModeDaily,
+		BudgetRefreshTime:               "00:00",
+		BudgetRefreshDay:                defaultBudgetRefreshWeekday,
+		BudgetRefreshMonthDay:           defaultBudgetRefreshMonthDay,
+		BudgetQuotaUsedAdjustments:      defaultBudgetQuotaAdjustments(),
+		BudgetQuotaSettings:             defaultBudgetQuotaSettings(),
+		BudgetShowCountdown:             false,
+		BudgetShowForecast:              false,
+		BudgetForecastMethod:            "cycle",
+		BudgetForecastDisplay:           "datetime",
+		BudgetTotalCodex:                0,
+		BudgetUsedAdjustmentCodex:       0,
+		BudgetCycleEnabledCodex:         false,
+		BudgetCycleModeCodex:            budgetCycleModeDaily,
+		BudgetRefreshTimeCodex:          "00:00",
+		BudgetRefreshDayCodex:           defaultBudgetRefreshWeekday,
+		BudgetRefreshMonthDayCodex:      defaultBudgetRefreshMonthDay,
+		BudgetQuotaUsedAdjustmentsCodex: defaultBudgetQuotaAdjustments(),
+		BudgetQuotaSettingsCodex:        defaultBudgetQuotaSettings(),
+		BudgetShowCountdownCodex:        false,
+		BudgetShowForecastCodex:         false,
+		BudgetForecastMethodCodex:       "cycle",
+		BudgetForecastDisplayCodex:      "datetime",
+		AutoStart:                       autoStartEnabled,
+		AutoUpdate:                      true, // 默认开启自动更新
+		UpdateHistoryKeepCount:          defaultUpdateHistoryKeepCount,
+		AutoConnectivityTest:            true,  // 默认开启自动可用性监控（开箱即用）
+		EnableSwitchNotify:              true,  // 默认开启切换通知
+		EnableRoundRobin:                false, // 默认关闭轮询（使用顺序降级）
+		CaptureRequestLogPayload:        false, // 默认关闭 payload 采集，降低隐私与存储风险
+		SanitizeRequestLogPayload:       true,  // 默认开启 payload 脱敏，避免敏感信息明文落库
 	}
 }
 
@@ -441,6 +452,13 @@ func normalizeBudgetQuotaSetting(setting BudgetQuotaSetting) BudgetQuotaSetting 
 	return setting
 }
 
+func normalizeBudgetQuotaAdjustment(value float64) float64 {
+	if math.IsNaN(value) || math.IsInf(value, 0) {
+		return 0
+	}
+	return value
+}
+
 func defaultBudgetQuotaSettings() BudgetQuotaSettings {
 	defaultSetting := BudgetQuotaSetting{
 		Total:           0,
@@ -456,12 +474,194 @@ func defaultBudgetQuotaSettings() BudgetQuotaSettings {
 	}
 }
 
+func defaultBudgetQuotaAdjustments() BudgetQuotaAdjustments {
+	return BudgetQuotaAdjustments{}
+}
+
+func isBudgetQuotaSettingsEmpty(settings BudgetQuotaSettings) bool {
+	return settings.FiveHour.Total <= 0 &&
+		settings.Daily.Total <= 0 &&
+		settings.Weekly.Total <= 0 &&
+		settings.Monthly.Total <= 0
+}
+
+func resolveLegacyBudgetQuotaMode(cycleEnabled bool, cycleMode string) string {
+	if cycleEnabled {
+		return normalizeBudgetCycleMode(cycleMode)
+	}
+	return budgetCycleModeDaily
+}
+
 func normalizeBudgetQuotaSettings(settings BudgetQuotaSettings) BudgetQuotaSettings {
 	settings.FiveHour = normalizeBudgetQuotaSetting(settings.FiveHour)
 	settings.Daily = normalizeBudgetQuotaSetting(settings.Daily)
 	settings.Weekly = normalizeBudgetQuotaSetting(settings.Weekly)
 	settings.Monthly = normalizeBudgetQuotaSetting(settings.Monthly)
 	return settings
+}
+
+func applyLegacyBudgetQuotaSetting(
+	settings BudgetQuotaSettings,
+	legacyTotal float64,
+	cycleEnabled bool,
+	cycleMode string,
+	refreshTime string,
+	refreshDay int,
+	refreshMonthDay int,
+) BudgetQuotaSettings {
+	total := normalizeBudgetQuotaAdjustment(legacyTotal)
+	if total <= 0 {
+		return settings
+	}
+
+	target := BudgetQuotaSetting{
+		Total:           total,
+		RefreshTime:     normalizeBudgetRefreshTimeSetting(refreshTime),
+		RefreshDay:      clampBudgetRefreshWeekday(refreshDay),
+		RefreshMonthDay: clampBudgetRefreshMonthDay(refreshMonthDay),
+	}
+
+	switch resolveLegacyBudgetQuotaMode(cycleEnabled, cycleMode) {
+	case budgetCycleModeWeekly:
+		settings.Weekly = target
+	case budgetCycleModeMonthly:
+		settings.Monthly = target
+	default:
+		settings.Daily = target
+	}
+
+	return settings
+}
+
+func normalizeBudgetQuotaSettingsWithLegacy(
+	settings BudgetQuotaSettings,
+	legacyTotal float64,
+	cycleEnabled bool,
+	cycleMode string,
+	refreshTime string,
+	refreshDay int,
+	refreshMonthDay int,
+) BudgetQuotaSettings {
+	normalized := normalizeBudgetQuotaSettings(settings)
+	if isBudgetQuotaSettingsEmpty(normalized) {
+		return applyLegacyBudgetQuotaSetting(
+			normalized,
+			legacyTotal,
+			cycleEnabled,
+			cycleMode,
+			refreshTime,
+			refreshDay,
+			refreshMonthDay,
+		)
+	}
+	return normalized
+}
+
+func normalizeBudgetQuotaAdjustments(adjustments BudgetQuotaAdjustments) BudgetQuotaAdjustments {
+	adjustments.FiveHour = normalizeBudgetQuotaAdjustment(adjustments.FiveHour)
+	adjustments.Daily = normalizeBudgetQuotaAdjustment(adjustments.Daily)
+	adjustments.Weekly = normalizeBudgetQuotaAdjustment(adjustments.Weekly)
+	adjustments.Monthly = normalizeBudgetQuotaAdjustment(adjustments.Monthly)
+	return adjustments
+}
+
+func isBudgetQuotaAdjustmentsEmpty(adjustments BudgetQuotaAdjustments) bool {
+	return adjustments.FiveHour == 0 &&
+		adjustments.Daily == 0 &&
+		adjustments.Weekly == 0 &&
+		adjustments.Monthly == 0
+}
+
+func applyLegacyBudgetQuotaAdjustment(
+	adjustments BudgetQuotaAdjustments,
+	legacy float64,
+	cycleEnabled bool,
+	cycleMode string,
+) BudgetQuotaAdjustments {
+	normalizedLegacy := normalizeBudgetQuotaAdjustment(legacy)
+	if normalizedLegacy == 0 {
+		return adjustments
+	}
+
+	switch resolveLegacyBudgetQuotaMode(cycleEnabled, cycleMode) {
+	case budgetCycleModeWeekly:
+		adjustments.Weekly = normalizedLegacy
+	case budgetCycleModeMonthly:
+		adjustments.Monthly = normalizedLegacy
+	default:
+		adjustments.Daily = normalizedLegacy
+	}
+
+	return adjustments
+}
+
+func normalizeBudgetQuotaUsedAdjustments(
+	adjustments BudgetQuotaAdjustments,
+	legacy float64,
+	cycleEnabled bool,
+	cycleMode string,
+) BudgetQuotaAdjustments {
+	normalized := normalizeBudgetQuotaAdjustments(adjustments)
+	if isBudgetQuotaAdjustmentsEmpty(normalized) {
+		return applyLegacyBudgetQuotaAdjustment(normalized, legacy, cycleEnabled, cycleMode)
+	}
+	return normalized
+}
+
+type legacyBudgetQuotaProjection struct {
+	Total           float64
+	UsedAdjustment  float64
+	CycleEnabled    bool
+	CycleMode       string
+	RefreshTime     string
+	RefreshDay      int
+	RefreshMonthDay int
+}
+
+func defaultLegacyBudgetQuotaProjection() legacyBudgetQuotaProjection {
+	return legacyBudgetQuotaProjection{
+		Total:           0,
+		UsedAdjustment:  0,
+		CycleEnabled:    false,
+		CycleMode:       budgetCycleModeDaily,
+		RefreshTime:     normalizeBudgetRefreshTimeSetting(""),
+		RefreshDay:      defaultBudgetRefreshWeekday,
+		RefreshMonthDay: defaultBudgetRefreshMonthDay,
+	}
+}
+
+func buildLegacyBudgetQuotaProjection(
+	settings BudgetQuotaSettings,
+	adjustments BudgetQuotaAdjustments,
+) legacyBudgetQuotaProjection {
+	projection := defaultLegacyBudgetQuotaProjection()
+
+	candidates := []struct {
+		mode       string
+		setting    BudgetQuotaSetting
+		adjustment float64
+	}{
+		{mode: budgetCycleModeDaily, setting: settings.Daily, adjustment: adjustments.Daily},
+		{mode: budgetCycleModeWeekly, setting: settings.Weekly, adjustment: adjustments.Weekly},
+		{mode: budgetCycleModeMonthly, setting: settings.Monthly, adjustment: adjustments.Monthly},
+	}
+
+	for _, candidate := range candidates {
+		if candidate.setting.Total <= 0 {
+			continue
+		}
+		return legacyBudgetQuotaProjection{
+			Total:           candidate.setting.Total,
+			UsedAdjustment:  candidate.adjustment,
+			CycleEnabled:    true,
+			CycleMode:       candidate.mode,
+			RefreshTime:     candidate.setting.RefreshTime,
+			RefreshDay:      candidate.setting.RefreshDay,
+			RefreshMonthDay: candidate.setting.RefreshMonthDay,
+		}
+	}
+
+	return projection
 }
 
 func normalizeBudgetSettings(settings *AppSettings) {
@@ -472,12 +672,62 @@ func normalizeBudgetSettings(settings *AppSettings) {
 	settings.BudgetRefreshTime = normalizeBudgetRefreshTimeSetting(settings.BudgetRefreshTime)
 	settings.BudgetRefreshDay = clampBudgetRefreshWeekday(settings.BudgetRefreshDay)
 	settings.BudgetRefreshMonthDay = clampBudgetRefreshMonthDay(settings.BudgetRefreshMonthDay)
-	settings.BudgetQuotaSettings = normalizeBudgetQuotaSettings(settings.BudgetQuotaSettings)
+	settings.BudgetQuotaUsedAdjustments = normalizeBudgetQuotaUsedAdjustments(
+		settings.BudgetQuotaUsedAdjustments,
+		settings.BudgetUsedAdjustment,
+		settings.BudgetCycleEnabled,
+		settings.BudgetCycleMode,
+	)
+	settings.BudgetQuotaSettings = normalizeBudgetQuotaSettingsWithLegacy(
+		settings.BudgetQuotaSettings,
+		settings.BudgetTotal,
+		settings.BudgetCycleEnabled,
+		settings.BudgetCycleMode,
+		settings.BudgetRefreshTime,
+		settings.BudgetRefreshDay,
+		settings.BudgetRefreshMonthDay,
+	)
+	legacyProjection := buildLegacyBudgetQuotaProjection(
+		settings.BudgetQuotaSettings,
+		settings.BudgetQuotaUsedAdjustments,
+	)
+	settings.BudgetTotal = legacyProjection.Total
+	settings.BudgetUsedAdjustment = legacyProjection.UsedAdjustment
+	settings.BudgetCycleEnabled = legacyProjection.CycleEnabled
+	settings.BudgetCycleMode = legacyProjection.CycleMode
+	settings.BudgetRefreshTime = legacyProjection.RefreshTime
+	settings.BudgetRefreshDay = legacyProjection.RefreshDay
+	settings.BudgetRefreshMonthDay = legacyProjection.RefreshMonthDay
 	settings.BudgetCycleModeCodex = normalizeBudgetCycleMode(settings.BudgetCycleModeCodex)
 	settings.BudgetRefreshTimeCodex = normalizeBudgetRefreshTimeSetting(settings.BudgetRefreshTimeCodex)
 	settings.BudgetRefreshDayCodex = clampBudgetRefreshWeekday(settings.BudgetRefreshDayCodex)
 	settings.BudgetRefreshMonthDayCodex = clampBudgetRefreshMonthDay(settings.BudgetRefreshMonthDayCodex)
-	settings.BudgetQuotaSettingsCodex = normalizeBudgetQuotaSettings(settings.BudgetQuotaSettingsCodex)
+	settings.BudgetQuotaUsedAdjustmentsCodex = normalizeBudgetQuotaUsedAdjustments(
+		settings.BudgetQuotaUsedAdjustmentsCodex,
+		settings.BudgetUsedAdjustmentCodex,
+		settings.BudgetCycleEnabledCodex,
+		settings.BudgetCycleModeCodex,
+	)
+	settings.BudgetQuotaSettingsCodex = normalizeBudgetQuotaSettingsWithLegacy(
+		settings.BudgetQuotaSettingsCodex,
+		settings.BudgetTotalCodex,
+		settings.BudgetCycleEnabledCodex,
+		settings.BudgetCycleModeCodex,
+		settings.BudgetRefreshTimeCodex,
+		settings.BudgetRefreshDayCodex,
+		settings.BudgetRefreshMonthDayCodex,
+	)
+	legacyProjectionCodex := buildLegacyBudgetQuotaProjection(
+		settings.BudgetQuotaSettingsCodex,
+		settings.BudgetQuotaUsedAdjustmentsCodex,
+	)
+	settings.BudgetTotalCodex = legacyProjectionCodex.Total
+	settings.BudgetUsedAdjustmentCodex = legacyProjectionCodex.UsedAdjustment
+	settings.BudgetCycleEnabledCodex = legacyProjectionCodex.CycleEnabled
+	settings.BudgetCycleModeCodex = legacyProjectionCodex.CycleMode
+	settings.BudgetRefreshTimeCodex = legacyProjectionCodex.RefreshTime
+	settings.BudgetRefreshDayCodex = legacyProjectionCodex.RefreshDay
+	settings.BudgetRefreshMonthDayCodex = legacyProjectionCodex.RefreshMonthDay
 }
 
 func normalizeHeatmapGranularity(value string) string {

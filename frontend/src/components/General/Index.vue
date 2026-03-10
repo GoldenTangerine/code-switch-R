@@ -30,10 +30,15 @@ import { useI18n } from 'vue-i18n'
 import { extractErrorMessage } from '../../utils/error'
 import { showToast } from '../../utils/toast'
 import {
+  cloneBudgetQuotaAdjustments,
   cloneBudgetQuotaSettings,
+  createDefaultBudgetQuotaAdjustments,
   createDefaultBudgetQuotaSettings,
+  normalizeBudgetQuotaAdjustments,
   normalizeBudgetQuotaSettings,
+  projectBudgetQuotaToLegacy,
   type BudgetQuotaKey,
+  type BudgetQuotaAdjustments,
   type BudgetQuotaSettings,
 } from '../../utils/budgetUsage'
 
@@ -96,7 +101,14 @@ const switchNotifyEnabled = ref(getCachedValue('switchNotify', true)) // 切换�
 const roundRobinEnabled = ref(getCachedValue('roundRobin', false))    // 同 Level 轮询开关
 const captureRequestLogPayloadEnabled = ref(getCachedValue('captureRequestLogPayload', false))
 const sanitizeRequestLogPayloadEnabled = ref(getCachedValue('sanitizeRequestLogPayload', true))
-const budgetUsedAdjustment = ref(getCachedNumber('budgetUsedAdjustment', 0))
+const budgetQuotaUsedAdjustments = ref<BudgetQuotaAdjustments>(normalizeBudgetQuotaAdjustments(
+  getCachedJson('budgetQuotaUsedAdjustments', createDefaultBudgetQuotaAdjustments()),
+  {
+    adjustment: getCachedNumber('budgetUsedAdjustment', 0),
+    cycleEnabled: getCachedValue('budgetCycleEnabled', false),
+    cycleMode: getCachedString('budgetCycleMode', 'daily'),
+  },
+))
 const budgetQuotaSettings = ref<BudgetQuotaSettings>(normalizeBudgetQuotaSettings(
   getCachedJson('budgetQuotaSettings', createDefaultBudgetQuotaSettings()),
 ))
@@ -104,7 +116,14 @@ const budgetForecastMethod = ref(getCachedString('budgetForecastMethod', 'cycle'
 const budgetForecastDisplay = ref(getCachedString('budgetForecastDisplay', 'datetime'))
 const budgetShowCountdown = ref(getCachedValue('budgetShowCountdown', false))
 const budgetShowForecast = ref(getCachedValue('budgetShowForecast', false))
-const budgetUsedAdjustmentCodex = ref(getCachedNumber('budgetUsedAdjustmentCodex', 0))
+const budgetQuotaUsedAdjustmentsCodex = ref<BudgetQuotaAdjustments>(normalizeBudgetQuotaAdjustments(
+  getCachedJson('budgetQuotaUsedAdjustmentsCodex', createDefaultBudgetQuotaAdjustments()),
+  {
+    adjustment: getCachedNumber('budgetUsedAdjustmentCodex', 0),
+    cycleEnabled: getCachedValue('budgetCycleEnabledCodex', false),
+    cycleMode: getCachedString('budgetCycleModeCodex', 'daily'),
+  },
+))
 const budgetQuotaSettingsCodex = ref<BudgetQuotaSettings>(normalizeBudgetQuotaSettings(
   getCachedJson('budgetQuotaSettingsCodex', createDefaultBudgetQuotaSettings()),
 ))
@@ -182,11 +201,6 @@ const budgetQuotaDefinitions: BudgetQuotaDefinition[] = [
   },
 ]
 
-const normalizeBudgetAdjustmentValue = (value: number) => {
-  if (!Number.isFinite(value)) return 0
-  return value
-}
-
 const formatBudgetLimitLabel = (total: number) => {
   if (total <= 0) return '∞'
   if (total >= 1) return `$${total.toFixed(2)}`
@@ -204,13 +218,15 @@ const syncAppSettingsCache = () => {
   localStorage.setItem('app-settings-heatmapIntensityStopL2', String(heatmapIntensityStopL2.value))
   localStorage.setItem('app-settings-heatmapIntensityStopL3', String(heatmapIntensityStopL3.value))
   localStorage.setItem('app-settings-homeTitle', String(homeTitleVisible.value))
-  localStorage.setItem('app-settings-budgetUsedAdjustment', String(budgetUsedAdjustment.value))
+  localStorage.removeItem('app-settings-budgetUsedAdjustment')
+  localStorage.setItem('app-settings-budgetQuotaUsedAdjustments', JSON.stringify(budgetQuotaUsedAdjustments.value))
   localStorage.setItem('app-settings-budgetQuotaSettings', JSON.stringify(budgetQuotaSettings.value))
   localStorage.setItem('app-settings-budgetForecastMethod', budgetForecastMethod.value)
   localStorage.setItem('app-settings-budgetForecastDisplay', budgetForecastDisplay.value)
   localStorage.setItem('app-settings-budgetShowCountdown', String(budgetShowCountdown.value))
   localStorage.setItem('app-settings-budgetShowForecast', String(budgetShowForecast.value))
-  localStorage.setItem('app-settings-budgetUsedAdjustmentCodex', String(budgetUsedAdjustmentCodex.value))
+  localStorage.removeItem('app-settings-budgetUsedAdjustmentCodex')
+  localStorage.setItem('app-settings-budgetQuotaUsedAdjustmentsCodex', JSON.stringify(budgetQuotaUsedAdjustmentsCodex.value))
   localStorage.setItem('app-settings-budgetQuotaSettingsCodex', JSON.stringify(budgetQuotaSettingsCodex.value))
   localStorage.setItem('app-settings-budgetForecastMethodCodex', budgetForecastMethodCodex.value)
   localStorage.setItem('app-settings-budgetForecastDisplayCodex', budgetForecastDisplayCodex.value)
@@ -812,8 +828,14 @@ const loadAppSettings = async () => {
       intensityStopL3: data?.heatmap_intensity_stop_l3,
     })
     homeTitleVisible.value = data?.show_home_title ?? true
-    const rawBudgetAdjustment = Number(data?.budget_used_adjustment ?? 0)
-    budgetUsedAdjustment.value = normalizeBudgetAdjustmentValue(rawBudgetAdjustment)
+    budgetQuotaUsedAdjustments.value = normalizeBudgetQuotaAdjustments(
+      data?.budget_quota_used_adjustments,
+      {
+        adjustment: data?.budget_used_adjustment,
+        cycleEnabled: data?.budget_cycle_enabled,
+        cycleMode: data?.budget_cycle_mode,
+      },
+    )
     budgetQuotaSettings.value = normalizeBudgetQuotaSettings(data?.budget_quota_settings, {
       total: data?.budget_total,
       cycleEnabled: data?.budget_cycle_enabled,
@@ -826,8 +848,14 @@ const loadAppSettings = async () => {
     budgetForecastDisplay.value = normalizeBudgetForecastDisplay(data?.budget_forecast_display ?? 'datetime')
     budgetShowCountdown.value = data?.budget_show_countdown ?? false
     budgetShowForecast.value = data?.budget_show_forecast ?? false
-    const rawBudgetAdjustmentCodex = Number(data?.budget_used_adjustment_codex ?? 0)
-    budgetUsedAdjustmentCodex.value = normalizeBudgetAdjustmentValue(rawBudgetAdjustmentCodex)
+    budgetQuotaUsedAdjustmentsCodex.value = normalizeBudgetQuotaAdjustments(
+      data?.budget_quota_used_adjustments_codex,
+      {
+        adjustment: data?.budget_used_adjustment_codex,
+        cycleEnabled: data?.budget_cycle_enabled_codex,
+        cycleMode: data?.budget_cycle_mode_codex,
+      },
+    )
     budgetQuotaSettingsCodex.value = normalizeBudgetQuotaSettings(data?.budget_quota_settings_codex, {
       total: data?.budget_total_codex,
       cycleEnabled: data?.budget_cycle_enabled_codex,
@@ -859,13 +887,13 @@ const loadAppSettings = async () => {
     heatmapGranularity.value = 'hourly'
     applyHeatmapDisplaySettingsToState(DEFAULT_HEATMAP_DISPLAY_SETTINGS)
     homeTitleVisible.value = true
-    budgetUsedAdjustment.value = 0
+    budgetQuotaUsedAdjustments.value = createDefaultBudgetQuotaAdjustments()
     budgetQuotaSettings.value = createDefaultBudgetQuotaSettings()
     budgetForecastMethod.value = 'cycle'
     budgetForecastDisplay.value = 'datetime'
     budgetShowCountdown.value = false
     budgetShowForecast.value = false
-    budgetUsedAdjustmentCodex.value = 0
+    budgetQuotaUsedAdjustmentsCodex.value = createDefaultBudgetQuotaAdjustments()
     budgetQuotaSettingsCodex.value = createDefaultBudgetQuotaSettings()
     budgetForecastMethodCodex.value = 'cycle'
     budgetForecastDisplayCodex.value = 'datetime'
@@ -896,16 +924,16 @@ const persistAppSettingsNow = async () => {
   }
   saveBusy.value = true
   try {
-    const normalizedBudgetUsedAdjustment = normalizeBudgetAdjustmentValue(Number(budgetUsedAdjustment.value))
-    budgetUsedAdjustment.value = normalizedBudgetUsedAdjustment
+    const normalizedBudgetQuotaUsedAdjustments = normalizeBudgetQuotaAdjustments(budgetQuotaUsedAdjustments.value)
+    budgetQuotaUsedAdjustments.value = cloneBudgetQuotaAdjustments(normalizedBudgetQuotaUsedAdjustments)
     const normalizedBudgetQuotaSettings = normalizeBudgetQuotaSettings(budgetQuotaSettings.value)
     budgetQuotaSettings.value = cloneBudgetQuotaSettings(normalizedBudgetQuotaSettings)
     const normalizedBudgetForecastMethod = normalizeBudgetForecastMethod(budgetForecastMethod.value)
     budgetForecastMethod.value = normalizedBudgetForecastMethod
     const normalizedBudgetForecastDisplay = normalizeBudgetForecastDisplay(budgetForecastDisplay.value)
     budgetForecastDisplay.value = normalizedBudgetForecastDisplay
-    const normalizedBudgetUsedAdjustmentCodex = normalizeBudgetAdjustmentValue(Number(budgetUsedAdjustmentCodex.value))
-    budgetUsedAdjustmentCodex.value = normalizedBudgetUsedAdjustmentCodex
+    const normalizedBudgetQuotaUsedAdjustmentsCodex = normalizeBudgetQuotaAdjustments(budgetQuotaUsedAdjustmentsCodex.value)
+    budgetQuotaUsedAdjustmentsCodex.value = cloneBudgetQuotaAdjustments(normalizedBudgetQuotaUsedAdjustmentsCodex)
     const normalizedBudgetQuotaSettingsCodex = normalizeBudgetQuotaSettings(budgetQuotaSettingsCodex.value)
     budgetQuotaSettingsCodex.value = cloneBudgetQuotaSettings(normalizedBudgetQuotaSettingsCodex)
     const normalizedBudgetForecastMethodCodex = normalizeBudgetForecastMethod(budgetForecastMethodCodex.value)
@@ -921,6 +949,14 @@ const persistAppSettingsNow = async () => {
     heatmapIntensityStopL1.value = normalizedHeatmapDisplay.intensityStopL1
     heatmapIntensityStopL2.value = normalizedHeatmapDisplay.intensityStopL2
     heatmapIntensityStopL3.value = normalizedHeatmapDisplay.intensityStopL3
+    const legacyBudget = projectBudgetQuotaToLegacy(
+      normalizedBudgetQuotaSettings,
+      normalizedBudgetQuotaUsedAdjustments,
+    )
+    const legacyBudgetCodex = projectBudgetQuotaToLegacy(
+      normalizedBudgetQuotaSettingsCodex,
+      normalizedBudgetQuotaUsedAdjustmentsCodex,
+    )
 
     const payload: AppSettings = {
       show_heatmap: heatmapEnabled.value,
@@ -932,27 +968,29 @@ const persistAppSettingsNow = async () => {
       heatmap_intensity_stop_l2: normalizedHeatmapDisplay.intensityStopL2,
       heatmap_intensity_stop_l3: normalizedHeatmapDisplay.intensityStopL3,
       show_home_title: homeTitleVisible.value,
-      budget_total: 0,
-      budget_used_adjustment: normalizedBudgetUsedAdjustment,
+      budget_total: legacyBudget.total,
+      budget_used_adjustment: legacyBudget.adjustment,
+      budget_quota_used_adjustments: normalizedBudgetQuotaUsedAdjustments,
       budget_forecast_method: normalizedBudgetForecastMethod,
       budget_forecast_display: normalizedBudgetForecastDisplay,
-      budget_cycle_enabled: false,
-      budget_cycle_mode: 'daily',
-      budget_refresh_time: '00:00',
-      budget_refresh_day: 1,
-      budget_refresh_month_day: 1,
+      budget_cycle_enabled: legacyBudget.cycleEnabled,
+      budget_cycle_mode: legacyBudget.cycleMode,
+      budget_refresh_time: legacyBudget.refreshTime,
+      budget_refresh_day: legacyBudget.refreshWeekday,
+      budget_refresh_month_day: legacyBudget.refreshMonthDay,
       budget_quota_settings: normalizedBudgetQuotaSettings,
       budget_show_countdown: budgetShowCountdown.value,
       budget_show_forecast: budgetShowForecast.value,
-      budget_total_codex: 0,
-      budget_used_adjustment_codex: normalizedBudgetUsedAdjustmentCodex,
+      budget_total_codex: legacyBudgetCodex.total,
+      budget_used_adjustment_codex: legacyBudgetCodex.adjustment,
+      budget_quota_used_adjustments_codex: normalizedBudgetQuotaUsedAdjustmentsCodex,
       budget_forecast_method_codex: normalizedBudgetForecastMethodCodex,
       budget_forecast_display_codex: normalizedBudgetForecastDisplayCodex,
-      budget_cycle_enabled_codex: false,
-      budget_cycle_mode_codex: 'daily',
-      budget_refresh_time_codex: '00:00',
-      budget_refresh_day_codex: 1,
-      budget_refresh_month_day_codex: 1,
+      budget_cycle_enabled_codex: legacyBudgetCodex.cycleEnabled,
+      budget_cycle_mode_codex: legacyBudgetCodex.cycleMode,
+      budget_refresh_time_codex: legacyBudgetCodex.refreshTime,
+      budget_refresh_day_codex: legacyBudgetCodex.refreshWeekday,
+      budget_refresh_month_day_codex: legacyBudgetCodex.refreshMonthDay,
       budget_quota_settings_codex: normalizedBudgetQuotaSettingsCodex,
       budget_show_countdown_codex: budgetShowCountdownCodex.value,
       budget_show_forecast_codex: budgetShowForecastCodex.value,
@@ -1581,23 +1619,6 @@ onBeforeUnmount(() => {
         <h2 class="mac-section-title">{{ $t('components.general.title.trayPanel') }}</h2>
         <div class="mac-panel">
           <p class="panel-title">{{ $t('components.general.label.trayPanelClaude') }}</p>
-          <ListItem :label="$t('components.general.label.budgetUsedAdjustmentOffset')">
-            <div class="toggle-with-hint">
-              <div class="budget-input">
-                <input
-                  type="number"
-                  inputmode="decimal"
-                  step="0.01"
-                  :disabled="settingsLoading || saveBusy"
-                  v-model.number="budgetUsedAdjustment"
-                  @change="persistAppSettings"
-                  class="mac-input budget-input-field"
-                />
-                <span class="budget-unit">USD</span>
-              </div>
-              <span class="hint-text">{{ $t('components.general.label.budgetUsedAdjustmentOffsetHintClaude') }}</span>
-            </div>
-          </ListItem>
           <div class="budget-quota-grid">
             <div
               v-for="definition in budgetQuotaDefinitions"
@@ -1629,6 +1650,22 @@ onBeforeUnmount(() => {
                     <span class="budget-unit">USD</span>
                   </div>
                   <span class="budget-quota-field__hint">{{ $t('components.general.label.budgetQuotaUnsetHint') }}</span>
+                </div>
+                <div class="budget-quota-field">
+                  <span class="budget-quota-field__label">{{ $t('components.general.label.budgetQuotaUsedAdjustment') }}</span>
+                  <div class="budget-input">
+                    <input
+                      type="number"
+                      inputmode="decimal"
+                      step="0.01"
+                      :disabled="settingsLoading || saveBusy"
+                      v-model.number="budgetQuotaUsedAdjustments[definition.key]"
+                      @change="persistAppSettings"
+                      class="mac-input budget-input-field"
+                    />
+                    <span class="budget-unit">USD</span>
+                  </div>
+                  <span class="budget-quota-field__hint">{{ $t('components.general.label.budgetQuotaUsedAdjustmentHint') }}</span>
                 </div>
                 <div v-if="definition.showWeekday" class="budget-quota-field">
                   <span class="budget-quota-field__label">{{ $t('components.general.label.budgetRefreshWeekday') }}</span>
@@ -1728,23 +1765,6 @@ onBeforeUnmount(() => {
         </div>
         <div class="mac-panel">
           <p class="panel-title">{{ $t('components.general.label.trayPanelCodex') }}</p>
-          <ListItem :label="$t('components.general.label.budgetUsedAdjustmentOffset')">
-            <div class="toggle-with-hint">
-              <div class="budget-input">
-                <input
-                  type="number"
-                  inputmode="decimal"
-                  step="0.01"
-                  :disabled="settingsLoading || saveBusy"
-                  v-model.number="budgetUsedAdjustmentCodex"
-                  @change="persistAppSettings"
-                  class="mac-input budget-input-field"
-                />
-                <span class="budget-unit">USD</span>
-              </div>
-              <span class="hint-text">{{ $t('components.general.label.budgetUsedAdjustmentOffsetHintCodex') }}</span>
-            </div>
-          </ListItem>
           <div class="budget-quota-grid">
             <div
               v-for="definition in budgetQuotaDefinitions"
@@ -1776,6 +1796,22 @@ onBeforeUnmount(() => {
                     <span class="budget-unit">USD</span>
                   </div>
                   <span class="budget-quota-field__hint">{{ $t('components.general.label.budgetQuotaUnsetHint') }}</span>
+                </div>
+                <div class="budget-quota-field">
+                  <span class="budget-quota-field__label">{{ $t('components.general.label.budgetQuotaUsedAdjustment') }}</span>
+                  <div class="budget-input">
+                    <input
+                      type="number"
+                      inputmode="decimal"
+                      step="0.01"
+                      :disabled="settingsLoading || saveBusy"
+                      v-model.number="budgetQuotaUsedAdjustmentsCodex[definition.key]"
+                      @change="persistAppSettings"
+                      class="mac-input budget-input-field"
+                    />
+                    <span class="budget-unit">USD</span>
+                  </div>
+                  <span class="budget-quota-field__hint">{{ $t('components.general.label.budgetQuotaUsedAdjustmentHint') }}</span>
                 </div>
                 <div v-if="definition.showWeekday" class="budget-quota-field">
                   <span class="budget-quota-field__label">{{ $t('components.general.label.budgetRefreshWeekday') }}</span>

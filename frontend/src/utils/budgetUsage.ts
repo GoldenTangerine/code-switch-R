@@ -23,6 +23,7 @@ type BudgetQuotaSettingSource = Partial<BudgetQuotaSetting> & {
 }
 
 export type BudgetQuotaSettings = Record<BudgetQuotaKey, BudgetQuotaSetting>
+export type BudgetQuotaAdjustments = Record<BudgetQuotaKey, number>
 
 export type BudgetQuotaWindow = {
   start: Date
@@ -36,6 +37,22 @@ export type LegacyBudgetQuotaSource = {
   refreshTime?: unknown
   refreshWeekday?: unknown
   refreshMonthDay?: unknown
+}
+
+export type LegacyBudgetQuotaAdjustmentSource = {
+  adjustment?: unknown
+  cycleEnabled?: unknown
+  cycleMode?: unknown
+}
+
+export type LegacyBudgetQuotaProjection = {
+  total: number
+  adjustment: number
+  cycleEnabled: boolean
+  cycleMode: BudgetCycleMode
+  refreshTime: string
+  refreshWeekday: number
+  refreshMonthDay: number
 }
 
 export const budgetQuotaOrder: BudgetQuotaKey[] = ['five_hour', 'daily', 'weekly', 'monthly']
@@ -80,6 +97,11 @@ export const normalizeBudgetQuotaTotal = (value: unknown) => {
   const numeric = Number(value ?? 0)
   if (!Number.isFinite(numeric)) return 0
   return Math.max(numeric, 0)
+}
+
+export const normalizeBudgetQuotaAdjustment = (value: unknown) => {
+  const numeric = Number(value ?? 0)
+  return Number.isFinite(numeric) ? numeric : 0
 }
 
 export const parseRefreshTime = (value: string) => {
@@ -227,6 +249,13 @@ export const createDefaultBudgetQuotaSettings = (): BudgetQuotaSettings => ({
   monthly: createDefaultBudgetQuotaSetting(),
 })
 
+export const createDefaultBudgetQuotaAdjustments = (): BudgetQuotaAdjustments => ({
+  five_hour: 0,
+  daily: 0,
+  weekly: 0,
+  monthly: 0,
+})
+
 export const normalizeBudgetQuotaSetting = (value: unknown): BudgetQuotaSetting => {
   const source = value && typeof value === 'object'
     ? value as BudgetQuotaSettingSource
@@ -237,6 +266,51 @@ export const normalizeBudgetQuotaSetting = (value: unknown): BudgetQuotaSetting 
     refreshWeekday: normalizeBudgetRefreshWeekday(source.refreshWeekday ?? source.refresh_day),
     refreshMonthDay: normalizeBudgetRefreshMonthDay(source.refreshMonthDay ?? source.refresh_month_day),
   }
+}
+
+const isBudgetQuotaAdjustmentsEmpty = (adjustments: BudgetQuotaAdjustments) => {
+  return budgetQuotaOrder.every((key) => adjustments[key] === 0)
+}
+
+const resolveLegacyBudgetQuotaKey = (
+  legacy?: Pick<LegacyBudgetQuotaSource, 'cycleEnabled' | 'cycleMode'>,
+): Exclude<BudgetQuotaKey, 'five_hour'> => {
+  return legacy?.cycleEnabled
+    ? normalizeBudgetCycleMode(legacy.cycleMode)
+    : 'daily'
+}
+
+const applyLegacyBudgetQuotaAdjustment = (
+  adjustments: BudgetQuotaAdjustments,
+  legacy?: LegacyBudgetQuotaAdjustmentSource,
+) => {
+  const normalizedLegacy = normalizeBudgetQuotaAdjustment(legacy?.adjustment)
+  if (normalizedLegacy === 0) return adjustments
+  adjustments[resolveLegacyBudgetQuotaKey(legacy)] = normalizedLegacy
+  return adjustments
+}
+
+export const normalizeBudgetQuotaAdjustments = (
+  value: unknown,
+  legacy?: LegacyBudgetQuotaAdjustmentSource,
+): BudgetQuotaAdjustments => {
+  const source = value && typeof value === 'object'
+    ? value as Partial<Record<BudgetQuotaKey, unknown>>
+    : {}
+  const normalized: BudgetQuotaAdjustments = {
+    five_hour: normalizeBudgetQuotaAdjustment(source.five_hour),
+    daily: normalizeBudgetQuotaAdjustment(source.daily),
+    weekly: normalizeBudgetQuotaAdjustment(source.weekly),
+    monthly: normalizeBudgetQuotaAdjustment(source.monthly),
+  }
+  if (isBudgetQuotaAdjustmentsEmpty(normalized)) {
+    return applyLegacyBudgetQuotaAdjustment(normalized, legacy)
+  }
+  return normalized
+}
+
+export const cloneBudgetQuotaAdjustments = (adjustments: unknown): BudgetQuotaAdjustments => {
+  return normalizeBudgetQuotaAdjustments(adjustments)
 }
 
 const isBudgetQuotaSettingsEmpty = (settings: BudgetQuotaSettings) => {
@@ -281,6 +355,38 @@ export const normalizeBudgetQuotaSettings = (
 
 export const cloneBudgetQuotaSettings = (settings: unknown): BudgetQuotaSettings => {
   return normalizeBudgetQuotaSettings(settings)
+}
+
+export const projectBudgetQuotaToLegacy = (
+  settings: unknown,
+  adjustments: unknown,
+): LegacyBudgetQuotaProjection => {
+  const normalizedSettings = normalizeBudgetQuotaSettings(settings)
+  const normalizedAdjustments = normalizeBudgetQuotaAdjustments(adjustments)
+
+  for (const key of ['daily', 'weekly', 'monthly'] as const) {
+    const setting = normalizedSettings[key]
+    if (setting.total <= 0) continue
+    return {
+      total: setting.total,
+      adjustment: normalizedAdjustments[key],
+      cycleEnabled: true,
+      cycleMode: key,
+      refreshTime: setting.refreshTime,
+      refreshWeekday: setting.refreshWeekday,
+      refreshMonthDay: setting.refreshMonthDay,
+    }
+  }
+
+  return {
+    total: 0,
+    adjustment: 0,
+    cycleEnabled: false,
+    cycleMode: 'daily',
+    refreshTime: '00:00',
+    refreshWeekday: 1,
+    refreshMonthDay: 1,
+  }
 }
 
 export const resolveBudgetQuotaWindow = (

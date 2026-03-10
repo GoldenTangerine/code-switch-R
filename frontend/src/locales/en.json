@@ -857,6 +857,8 @@
         "budgetQuotaWeeklyHint": "Resets on the configured weekday and time; shows ∞ when unset",
         "budgetQuotaMonthly": "Monthly quota",
         "budgetQuotaMonthlyHint": "Resets on the configured day and time each month; shows ∞ when unset",
+        "budgetQuotaUsedAdjustment": "Current used adjustment",
+        "budgetQuotaUsedAdjustmentHint": "Only affects the displayed used amount for this quota window: displayed used = tracked usage + adjustment (USD, positive or negative)",
         "budgetQuotaUnsetHint": "Use 0 or leave empty to treat this quota as ∞",
         "budgetRefreshTime": "Refresh time",
         "budgetRefreshWeekday": "Refresh weekday",
