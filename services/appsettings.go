@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -50,45 +51,105 @@ const (
 )
 
 type AppSettings struct {
-	ShowHeatmap                bool    `json:"show_heatmap"`
-	HeatmapGranularity         string  `json:"heatmap_granularity"`
-	HeatmapDailyScaleFactor    int     `json:"heatmap_daily_scale_factor"`
-	HeatmapDailyIntensityMode  string  `json:"heatmap_daily_intensity_mode"`
-	HeatmapIntensityMetric     string  `json:"heatmap_intensity_metric"`
-	HeatmapIntensityStopL1     int     `json:"heatmap_intensity_stop_l1"`
-	HeatmapIntensityStopL2     int     `json:"heatmap_intensity_stop_l2"`
-	HeatmapIntensityStopL3     int     `json:"heatmap_intensity_stop_l3"`
-	ShowHomeTitle              bool    `json:"show_home_title"`
-	BudgetTotal                float64 `json:"budget_total"`
-	BudgetUsedAdjustment       float64 `json:"budget_used_adjustment"`
-	BudgetCycleEnabled         bool    `json:"budget_cycle_enabled"`
-	BudgetCycleMode            string  `json:"budget_cycle_mode"`
-	BudgetRefreshTime          string  `json:"budget_refresh_time"`
-	BudgetRefreshDay           int     `json:"budget_refresh_day"`
-	BudgetRefreshMonthDay      int     `json:"budget_refresh_month_day"`
-	BudgetShowCountdown        bool    `json:"budget_show_countdown"`
-	BudgetShowForecast         bool    `json:"budget_show_forecast"`
-	BudgetForecastMethod       string  `json:"budget_forecast_method"`
-	BudgetForecastDisplay      string  `json:"budget_forecast_display"`
-	BudgetTotalCodex           float64 `json:"budget_total_codex"`
-	BudgetUsedAdjustmentCodex  float64 `json:"budget_used_adjustment_codex"`
-	BudgetCycleEnabledCodex    bool    `json:"budget_cycle_enabled_codex"`
-	BudgetCycleModeCodex       string  `json:"budget_cycle_mode_codex"`
-	BudgetRefreshTimeCodex     string  `json:"budget_refresh_time_codex"`
-	BudgetRefreshDayCodex      int     `json:"budget_refresh_day_codex"`
-	BudgetRefreshMonthDayCodex int     `json:"budget_refresh_month_day_codex"`
-	BudgetShowCountdownCodex   bool    `json:"budget_show_countdown_codex"`
-	BudgetShowForecastCodex    bool    `json:"budget_show_forecast_codex"`
-	BudgetForecastMethodCodex  string  `json:"budget_forecast_method_codex"`
-	BudgetForecastDisplayCodex string  `json:"budget_forecast_display_codex"`
-	AutoStart                  bool    `json:"auto_start"`
-	AutoUpdate                 bool    `json:"auto_update"`
-	UpdateHistoryKeepCount     int     `json:"update_history_keep_count"` // 更新包历史保留数量
-	AutoConnectivityTest       bool    `json:"auto_connectivity_test"`
-	EnableSwitchNotify         bool    `json:"enable_switch_notify"` // 供应商切换通知开关
-	EnableRoundRobin           bool    `json:"enable_round_robin"`   // 同 Level 轮询负载均衡开关（默认关闭）
-	CaptureRequestLogPayload   bool    `json:"capture_request_log_payload"`
-	SanitizeRequestLogPayload  bool    `json:"sanitize_request_log_payload"`
+	ShowHeatmap                bool                `json:"show_heatmap"`
+	HeatmapGranularity         string              `json:"heatmap_granularity"`
+	HeatmapDailyScaleFactor    int                 `json:"heatmap_daily_scale_factor"`
+	HeatmapDailyIntensityMode  string              `json:"heatmap_daily_intensity_mode"`
+	HeatmapIntensityMetric     string              `json:"heatmap_intensity_metric"`
+	HeatmapIntensityStopL1     int                 `json:"heatmap_intensity_stop_l1"`
+	HeatmapIntensityStopL2     int                 `json:"heatmap_intensity_stop_l2"`
+	HeatmapIntensityStopL3     int                 `json:"heatmap_intensity_stop_l3"`
+	ShowHomeTitle              bool                `json:"show_home_title"`
+	BudgetTotal                float64             `json:"budget_total"`
+	BudgetUsedAdjustment       float64             `json:"budget_used_adjustment"`
+	BudgetCycleEnabled         bool                `json:"budget_cycle_enabled"`
+	BudgetCycleMode            string              `json:"budget_cycle_mode"`
+	BudgetRefreshTime          string              `json:"budget_refresh_time"`
+	BudgetRefreshDay           int                 `json:"budget_refresh_day"`
+	BudgetRefreshMonthDay      int                 `json:"budget_refresh_month_day"`
+	BudgetQuotaSettings        BudgetQuotaSettings `json:"budget_quota_settings"`
+	BudgetShowCountdown        bool                `json:"budget_show_countdown"`
+	BudgetShowForecast         bool                `json:"budget_show_forecast"`
+	BudgetForecastMethod       string              `json:"budget_forecast_method"`
+	BudgetForecastDisplay      string              `json:"budget_forecast_display"`
+	BudgetTotalCodex           float64             `json:"budget_total_codex"`
+	BudgetUsedAdjustmentCodex  float64             `json:"budget_used_adjustment_codex"`
+	BudgetCycleEnabledCodex    bool                `json:"budget_cycle_enabled_codex"`
+	BudgetCycleModeCodex       string              `json:"budget_cycle_mode_codex"`
+	BudgetRefreshTimeCodex     string              `json:"budget_refresh_time_codex"`
+	BudgetRefreshDayCodex      int                 `json:"budget_refresh_day_codex"`
+	BudgetRefreshMonthDayCodex int                 `json:"budget_refresh_month_day_codex"`
+	BudgetQuotaSettingsCodex   BudgetQuotaSettings `json:"budget_quota_settings_codex"`
+	BudgetShowCountdownCodex   bool                `json:"budget_show_countdown_codex"`
+	BudgetShowForecastCodex    bool                `json:"budget_show_forecast_codex"`
+	BudgetForecastMethodCodex  string              `json:"budget_forecast_method_codex"`
+	BudgetForecastDisplayCodex string              `json:"budget_forecast_display_codex"`
+	AutoStart                  bool                `json:"auto_start"`
+	AutoUpdate                 bool                `json:"auto_update"`
+	UpdateHistoryKeepCount     int                 `json:"update_history_keep_count"` // 更新包历史保留数量
+	AutoConnectivityTest       bool                `json:"auto_connectivity_test"`
+	EnableSwitchNotify         bool                `json:"enable_switch_notify"` // 供应商切换通知开关
+	EnableRoundRobin           bool                `json:"enable_round_robin"`   // 同 Level 轮询负载均衡开关（默认关闭）
+	CaptureRequestLogPayload   bool                `json:"capture_request_log_payload"`
+	SanitizeRequestLogPayload  bool                `json:"sanitize_request_log_payload"`
+}
+
+type BudgetQuotaSetting struct {
+	Total           float64 `json:"total"`
+	RefreshTime     string  `json:"refresh_time"`
+	RefreshDay      int     `json:"refresh_day"`
+	RefreshMonthDay int     `json:"refresh_month_day"`
+}
+
+func (s *BudgetQuotaSetting) UnmarshalJSON(data []byte) error {
+	if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
+		*s = BudgetQuotaSetting{}
+		return nil
+	}
+	type rawBudgetQuotaSetting struct {
+		Total                *float64 `json:"total"`
+		RefreshTime          *string  `json:"refresh_time"`
+		RefreshTimeCamel     *string  `json:"refreshTime"`
+		RefreshDay           *int     `json:"refresh_day"`
+		RefreshDayCamel      *int     `json:"refreshDay"`
+		RefreshWeekdayCamel  *int     `json:"refreshWeekday"`
+		RefreshMonthDay      *int     `json:"refresh_month_day"`
+		RefreshMonthDayCamel *int     `json:"refreshMonthDay"`
+	}
+	var raw rawBudgetQuotaSetting
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	var normalized BudgetQuotaSetting
+	if raw.Total != nil {
+		normalized.Total = *raw.Total
+	}
+	if raw.RefreshTime != nil {
+		normalized.RefreshTime = *raw.RefreshTime
+	} else if raw.RefreshTimeCamel != nil {
+		normalized.RefreshTime = *raw.RefreshTimeCamel
+	}
+	if raw.RefreshDay != nil {
+		normalized.RefreshDay = *raw.RefreshDay
+	} else if raw.RefreshWeekdayCamel != nil {
+		normalized.RefreshDay = *raw.RefreshWeekdayCamel
+	} else if raw.RefreshDayCamel != nil {
+		normalized.RefreshDay = *raw.RefreshDayCamel
+	}
+	if raw.RefreshMonthDay != nil {
+		normalized.RefreshMonthDay = *raw.RefreshMonthDay
+	} else if raw.RefreshMonthDayCamel != nil {
+		normalized.RefreshMonthDay = *raw.RefreshMonthDayCamel
+	}
+	*s = normalized
+	return nil
+}
+
+type BudgetQuotaSettings struct {
+	FiveHour BudgetQuotaSetting `json:"five_hour"`
+	Daily    BudgetQuotaSetting `json:"daily"`
+	Weekly   BudgetQuotaSetting `json:"weekly"`
+	Monthly  BudgetQuotaSetting `json:"monthly"`
 }
 
 type AppSettingsService struct {
@@ -217,6 +278,7 @@ func (as *AppSettingsService) defaultSettings() AppSettings {
 		BudgetRefreshTime:          "00:00",
 		BudgetRefreshDay:           defaultBudgetRefreshWeekday,
 		BudgetRefreshMonthDay:      defaultBudgetRefreshMonthDay,
+		BudgetQuotaSettings:        defaultBudgetQuotaSettings(),
 		BudgetShowCountdown:        false,
 		BudgetShowForecast:         false,
 		BudgetForecastMethod:       "cycle",
@@ -228,6 +290,7 @@ func (as *AppSettingsService) defaultSettings() AppSettings {
 		BudgetRefreshTimeCodex:     "00:00",
 		BudgetRefreshDayCodex:      defaultBudgetRefreshWeekday,
 		BudgetRefreshMonthDayCodex: defaultBudgetRefreshMonthDay,
+		BudgetQuotaSettingsCodex:   defaultBudgetQuotaSettings(),
 		BudgetShowCountdownCodex:   false,
 		BudgetShowForecastCodex:    false,
 		BudgetForecastMethodCodex:  "cycle",
@@ -337,6 +400,14 @@ func normalizeBudgetCycleMode(value string) string {
 	}
 }
 
+func normalizeBudgetRefreshTimeSetting(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return "00:00"
+	}
+	return trimmed
+}
+
 func clampBudgetRefreshWeekday(value int) int {
 	if value < minBudgetRefreshWeekday {
 		return minBudgetRefreshWeekday
@@ -360,16 +431,53 @@ func clampBudgetRefreshMonthDay(value int) int {
 	return value
 }
 
+func normalizeBudgetQuotaSetting(setting BudgetQuotaSetting) BudgetQuotaSetting {
+	if math.IsNaN(setting.Total) || setting.Total < 0 {
+		setting.Total = 0
+	}
+	setting.RefreshTime = normalizeBudgetRefreshTimeSetting(setting.RefreshTime)
+	setting.RefreshDay = clampBudgetRefreshWeekday(setting.RefreshDay)
+	setting.RefreshMonthDay = clampBudgetRefreshMonthDay(setting.RefreshMonthDay)
+	return setting
+}
+
+func defaultBudgetQuotaSettings() BudgetQuotaSettings {
+	defaultSetting := BudgetQuotaSetting{
+		Total:           0,
+		RefreshTime:     "00:00",
+		RefreshDay:      defaultBudgetRefreshWeekday,
+		RefreshMonthDay: defaultBudgetRefreshMonthDay,
+	}
+	return BudgetQuotaSettings{
+		FiveHour: defaultSetting,
+		Daily:    defaultSetting,
+		Weekly:   defaultSetting,
+		Monthly:  defaultSetting,
+	}
+}
+
+func normalizeBudgetQuotaSettings(settings BudgetQuotaSettings) BudgetQuotaSettings {
+	settings.FiveHour = normalizeBudgetQuotaSetting(settings.FiveHour)
+	settings.Daily = normalizeBudgetQuotaSetting(settings.Daily)
+	settings.Weekly = normalizeBudgetQuotaSetting(settings.Weekly)
+	settings.Monthly = normalizeBudgetQuotaSetting(settings.Monthly)
+	return settings
+}
+
 func normalizeBudgetSettings(settings *AppSettings) {
 	if settings == nil {
 		return
 	}
 	settings.BudgetCycleMode = normalizeBudgetCycleMode(settings.BudgetCycleMode)
+	settings.BudgetRefreshTime = normalizeBudgetRefreshTimeSetting(settings.BudgetRefreshTime)
 	settings.BudgetRefreshDay = clampBudgetRefreshWeekday(settings.BudgetRefreshDay)
 	settings.BudgetRefreshMonthDay = clampBudgetRefreshMonthDay(settings.BudgetRefreshMonthDay)
+	settings.BudgetQuotaSettings = normalizeBudgetQuotaSettings(settings.BudgetQuotaSettings)
 	settings.BudgetCycleModeCodex = normalizeBudgetCycleMode(settings.BudgetCycleModeCodex)
+	settings.BudgetRefreshTimeCodex = normalizeBudgetRefreshTimeSetting(settings.BudgetRefreshTimeCodex)
 	settings.BudgetRefreshDayCodex = clampBudgetRefreshWeekday(settings.BudgetRefreshDayCodex)
 	settings.BudgetRefreshMonthDayCodex = clampBudgetRefreshMonthDay(settings.BudgetRefreshMonthDayCodex)
+	settings.BudgetQuotaSettingsCodex = normalizeBudgetQuotaSettings(settings.BudgetQuotaSettingsCodex)
 }
 
 func normalizeHeatmapGranularity(value string) string {

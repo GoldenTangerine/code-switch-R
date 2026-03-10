@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildBudgetUsageConfig,
+  normalizeBudgetQuotaSettings,
+  resolveBudgetQuotaWindow,
   resolveCycleStart,
   resolveNextCycleStart,
 } from './budgetUsage'
@@ -40,5 +42,50 @@ describe('budgetUsage', () => {
     expect(resolveNextCycleStart(config, new Date(2026, 2, 9, 6, 45, 0, 0)).getTime()).toBe(
       new Date(2026, 2, 16, 6, 45, 0, 0).getTime(),
     )
+  })
+
+  it('migrates legacy single budget settings into the matching quota slot', () => {
+    const quotas = normalizeBudgetQuotaSettings(undefined, {
+      total: 42,
+      cycleEnabled: true,
+      cycleMode: 'weekly',
+      refreshTime: '08:15',
+      refreshWeekday: 5,
+      refreshMonthDay: 20,
+    })
+
+    expect(quotas.weekly.total).toBe(42)
+    expect(quotas.weekly.refreshTime).toBe('08:15')
+    expect(quotas.weekly.refreshWeekday).toBe(5)
+    expect(quotas.daily.total).toBe(0)
+  })
+
+  it('accepts snake_case quota refresh fields from persisted settings', () => {
+    const quotas = normalizeBudgetQuotaSettings({
+      daily: {
+        total: 18,
+        refresh_time: '08:15',
+        refresh_day: 4,
+        refresh_month_day: 21,
+      },
+    })
+
+    expect(quotas.daily.total).toBe(18)
+    expect(quotas.daily.refreshTime).toBe('08:15')
+    expect(quotas.daily.refreshWeekday).toBe(4)
+    expect(quotas.daily.refreshMonthDay).toBe(21)
+  })
+
+  it('uses a rolling 5 hour window for the 5 hour quota', () => {
+    const now = new Date(2026, 2, 10, 12, 34, 0, 0)
+    const window = resolveBudgetQuotaWindow('five_hour', {
+      total: 12,
+      refreshTime: '00:00',
+      refreshWeekday: 1,
+      refreshMonthDay: 1,
+    }, now)
+
+    expect(window.start.getTime()).toBe(new Date(2026, 2, 10, 7, 34, 0, 0).getTime())
+    expect(window.nextReset).toBeNull()
   })
 })

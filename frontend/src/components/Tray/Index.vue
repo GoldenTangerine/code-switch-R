@@ -1,32 +1,55 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, proxyRefs, ref } from 'vue'
 import { Call } from '@wailsio/runtime'
-import { fetchCostSince, fetchLogStats } from '../../services/logs'
+import { fetchCostSince } from '../../services/logs'
 import { fetchAppSettings, type AppSettings } from '../../services/appSettings'
 import { fetchProxyStatus } from '../../services/claudeSettings'
 import {
-  buildBudgetUsageConfig,
+  budgetQuotaOrder,
   formatLocalDateTime,
-  normalizeBudgetCycleMode,
-  normalizeBudgetRefreshMonthDay,
-  normalizeBudgetRefreshWeekday,
-  normalizeBudgetRefreshTime,
   pad2,
-  resolveCycleStart,
-  resolveNextCycleStart,
+  resolveBudgetQuotaWindow,
   startOfDay,
-  type BudgetCycleMode,
+  type BudgetQuotaKey,
+  type BudgetQuotaSetting,
+  type BudgetQuotaSettings,
 } from '../../utils/budgetUsage'
 
 type Platform = 'claude' | 'codex'
 type ForecastMethod = 'cycle' | '10m' | '1h' | 'yesterday' | 'last24h'
 type ForecastDisplay = 'datetime' | 'remaining'
+type CostSinceFetcher = (start: Date) => Promise<number>
+
+type TrayQuotaState = {
+  key: BudgetQuotaKey
+  title: string
+  rawUsed: number
+  used: number
+  total: number
+  usedLabel: string
+  totalLabel: string
+  hasBudget: boolean
+  progressRatio: number
+  progressPercentLabel: string
+  countdownLabel: string
+  forecastLabel: string
+  windowStart: Date | null
+  nextReset: Date | null
+  forecastRate: number
+}
 
 const rootRef = ref<HTMLElement | null>(null)
 let ticker: number | undefined
 let refreshBusy = false
 let storageRefreshTimer: number | undefined
 let lastWindowHeight = 0
+
+const quotaTitles: Record<BudgetQuotaKey, string> = {
+  five_hour: '5 小时额度',
+  daily: '日额度',
+  weekly: '周额度',
+  monthly: '月额度',
+}
 
 const formatCurrency = (value?: number) => {
   if (value === undefined || value === null || Number.isNaN(value)) {
@@ -74,52 +97,60 @@ const normalizeForecastDisplay = (value: unknown): ForecastDisplay => {
   return 'datetime'
 }
 
-const normalizeBudgetTotal = (value: unknown) => {
-  const normalized = Number(value ?? 0)
-  if (!Number.isFinite(normalized)) return 0
-  return Math.max(normalized, 0)
+const normalizeBudgetAdjustment = (value: unknown) => {
+  const numeric = Number(value ?? 0)
+  return Number.isFinite(numeric) ? numeric : 0
+}
+
+const createQuotaState = (key: BudgetQuotaKey): TrayQuotaState => ({
+  key,
+  title: quotaTitles[key],
+  rawUsed: 0,
+  used: 0,
+  total: 0,
+  usedLabel: formatCurrency(0),
+  totalLabel: '∞',
+  hasBudget: false,
+  progressRatio: 0,
+  progressPercentLabel: '',
+  countdownLabel: '',
+  forecastLabel: '',
+  windowStart: null,
+  nextReset: null,
+  forecastRate: 0,
+})
+
+const createCostSinceFetcher = (platform: Platform): CostSinceFetcher => {
+  const cache = new Map<string, Promise<number>>()
+  return async (start: Date) => {
+    const key = formatLocalDateTime(start)
+    if (!cache.has(key)) {
+      cache.set(
+        key,
+        fetchCostSince(key, platform)
+          .then((value) => {
+            const numeric = Number(value)
+            return Number.isFinite(numeric) ? numeric : 0
+          })
+          .catch((error) => {
+            console.error(`failed to load ${platform} cost since ${key}`, error)
+            return 0
+          }),
+      )
+    }
+    return cache.get(key)!
+  }
 }
 
 const createTrayCard = (platform: Platform, brandName: string, brandIcon: string) => {
-  const used = ref(0)
-  const usedRaw = ref(0)
-  const total = ref(0)
-  const usedAdjustment = ref(0)
+  const quotas = ref<TrayQuotaState[]>(budgetQuotaOrder.map((key) => createQuotaState(key)))
   const loading = ref(false)
-  const cycleEnabled = ref(false)
-  const cycleMode = ref<BudgetCycleMode>('daily')
-  const refreshTime = ref('00:00')
-  const refreshWeekday = ref(1)
-  const refreshMonthDay = ref(1)
   const showCountdown = ref(false)
   const showForecast = ref(false)
   const forecastMethod = ref<ForecastMethod>('cycle')
   const forecastDisplay = ref<ForecastDisplay>('datetime')
-  const forecastRate = ref(0)
-  const countdownLabel = ref('')
-  const forecastLabel = ref('')
+  const usedAdjustment = ref(0)
   const hostingEnabled = ref(false)
-  let cycleStart: Date | null = null
-  let nextReset: Date | null = null
-
-  const usedLabel = computed(() => formatCurrency(used.value))
-  const hasBudget = computed(() => total.value > 0)
-  const totalLabel = computed(() => (hasBudget.value ? formatCurrency(total.value) : ''))
-  const progressRatio = computed(() => {
-    if (total.value <= 0) return 0
-    return Math.min(Math.max(used.value / total.value, 0), 1)
-  })
-  const progressPercentLabel = computed(() => {
-    if (!hasBudget.value) return ''
-    const percent = Math.round(progressRatio.value * 100)
-    return `${percent}%`
-  })
-  const budgetTitle = computed(() => {
-    if (!cycleEnabled.value) return '今日预算'
-    if (cycleMode.value === 'weekly') return '本周预算'
-    if (cycleMode.value === 'monthly') return '本月预算'
-    return '今日预算'
-  })
   const hostingLabel = computed(() => (hostingEnabled.value ? '托管中' : '未托管'))
 
   const applyUsedAdjustment = (rawUsed: number) => {
@@ -128,99 +159,84 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
     return Math.max(adjusted, 0)
   }
 
-  const clampStartToCycle = (start: Date) => {
-    if (cycleEnabled.value && cycleStart && start < cycleStart) {
-      return cycleStart
+  const clampStartToWindow = (start: Date, windowStart: Date | null) => {
+    if (windowStart && start < windowStart) {
+      return windowStart
     }
     return start
   }
 
-  const updateCycleTimes = () => {
-    const now = new Date()
-    if (!cycleEnabled.value) {
-      cycleStart = startOfDay(now)
-      nextReset = null
-      return
+  const updateQuotaDerivedLabels = (quota: TrayQuotaState, now: Date) => {
+    quota.usedLabel = formatCurrency(quota.used)
+    quota.hasBudget = quota.total > 0
+    quota.totalLabel = quota.hasBudget ? formatCurrency(quota.total) : '∞'
+    quota.progressRatio = quota.hasBudget ? Math.min(Math.max(quota.used / quota.total, 0), 1) : 0
+    quota.progressPercentLabel = quota.hasBudget ? `${Math.round(quota.progressRatio * 100)}%` : ''
+
+    if (showCountdown.value && quota.hasBudget && quota.nextReset) {
+      const remaining = quota.nextReset.getTime() - now.getTime()
+      quota.countdownLabel = remaining > 0 ? `重置倒计时 ${formatCountdown(remaining)}` : '即将重置'
+    } else {
+      quota.countdownLabel = ''
     }
-    const config = buildBudgetUsageConfig(
-      cycleEnabled.value,
-      cycleMode.value,
-      refreshTime.value,
-      refreshWeekday.value,
-      refreshMonthDay.value,
-    )
-    const start = resolveCycleStart(config, now)
-    cycleStart = start
-    nextReset = resolveNextCycleStart(config, start)
+
+    if (showForecast.value && quota.total > 0) {
+      const rate = quota.forecastRate
+      if (rate > 0 && quota.used < quota.total) {
+        const secondsToBudget = (quota.total - quota.used) / rate
+        if (!Number.isFinite(secondsToBudget)) {
+          quota.forecastLabel = '预计耗尽 —'
+        } else if (forecastDisplay.value === 'remaining') {
+          quota.forecastLabel = `预计耗尽 ${formatCountdown(secondsToBudget * 1000)}`
+        } else {
+          quota.forecastLabel = `预计耗尽 ${formatLocalDateTimeLabel(new Date(now.getTime() + secondsToBudget * 1000))}`
+        }
+      } else if (quota.used >= quota.total) {
+        quota.forecastLabel = '已达预算'
+      } else {
+        quota.forecastLabel = '预计耗尽 —'
+      }
+    } else {
+      quota.forecastLabel = ''
+    }
+
+    return Boolean(quota.hasBudget && quota.nextReset && now >= quota.nextReset && !loading.value)
   }
 
-  const computeForecastRate = async (now: Date) => {
+  const computeForecastRate = async (
+    quota: TrayQuotaState,
+    now: Date,
+    fetchCostSinceByStart: CostSinceFetcher,
+  ) => {
     const method = forecastMethod.value
     if (method === 'cycle') {
-      const start = cycleStart ?? startOfDay(now)
+      const start = quota.windowStart ?? startOfDay(now)
       const elapsedSeconds = Math.max((now.getTime() - start.getTime()) / 1000, 1)
-      return calculateRate(usedRaw.value, elapsedSeconds)
+      return calculateRate(quota.rawUsed, elapsedSeconds)
     }
     if (method === '10m') {
-      const windowStart = new Date(now.getTime() - 10 * 60 * 1000)
-      const start = clampStartToCycle(windowStart)
-      const cost = Number(await fetchCostSince(formatLocalDateTime(start), platform))
-      const seconds = (now.getTime() - start.getTime()) / 1000
-      return calculateRate(cost, seconds)
+      const start = clampStartToWindow(new Date(now.getTime() - 10 * 60 * 1000), quota.windowStart)
+      const cost = await fetchCostSinceByStart(start)
+      return calculateRate(cost, (now.getTime() - start.getTime()) / 1000)
     }
     if (method === '1h') {
-      const windowStart = new Date(now.getTime() - 60 * 60 * 1000)
-      const start = clampStartToCycle(windowStart)
-      const cost = Number(await fetchCostSince(formatLocalDateTime(start), platform))
-      const seconds = (now.getTime() - start.getTime()) / 1000
-      return calculateRate(cost, seconds)
+      const start = clampStartToWindow(new Date(now.getTime() - 60 * 60 * 1000), quota.windowStart)
+      const cost = await fetchCostSinceByStart(start)
+      return calculateRate(cost, (now.getTime() - start.getTime()) / 1000)
     }
     if (method === 'yesterday') {
       const todayStart = startOfDay(now)
       const yesterdayStart = new Date(todayStart)
       yesterdayStart.setDate(yesterdayStart.getDate() - 1)
-      const costSinceYesterday = Number(await fetchCostSince(formatLocalDateTime(yesterdayStart), platform))
-      const costSinceToday = Number(await fetchCostSince(formatLocalDateTime(todayStart), platform))
-      const yesterdayCost = Math.max(costSinceYesterday - costSinceToday, 0)
-      return calculateRate(yesterdayCost, 24 * 60 * 60)
+      const [costSinceYesterday, costSinceToday] = await Promise.all([
+        fetchCostSinceByStart(yesterdayStart),
+        fetchCostSinceByStart(todayStart),
+      ])
+      return calculateRate(Math.max(costSinceYesterday - costSinceToday, 0), 24 * 60 * 60)
     }
     const windowStart = new Date(now.getTime() - 24 * 60 * 60 * 1000)
-    const cost = Number(await fetchCostSince(formatLocalDateTime(windowStart), platform))
-    const seconds = (now.getTime() - windowStart.getTime()) / 1000
-    return calculateRate(cost, seconds)
-  }
-
-  const updateDerivedLabels = (now: Date) => {
-    if (showCountdown.value && cycleEnabled.value && nextReset) {
-      const remaining = nextReset.getTime() - now.getTime()
-      countdownLabel.value = remaining > 0 ? `重置倒计时 ${formatCountdown(remaining)}` : '即将重置'
-    } else {
-      countdownLabel.value = ''
-    }
-
-    if (showForecast.value && total.value > 0) {
-      const rate = forecastRate.value
-      if (rate > 0 && used.value < total.value) {
-        const secondsToBudget = (total.value - used.value) / rate
-        if (!Number.isFinite(secondsToBudget)) {
-          forecastLabel.value = '预计耗尽 —'
-        } else if (forecastDisplay.value === 'remaining') {
-          const remainingMs = secondsToBudget * 1000
-          forecastLabel.value = `预计耗尽 ${formatCountdown(remainingMs)}`
-        } else {
-          const forecastTime = new Date(now.getTime() + secondsToBudget * 1000)
-          forecastLabel.value = `预计耗尽 ${formatLocalDateTimeLabel(forecastTime)}`
-        }
-      } else if (used.value >= total.value && total.value > 0) {
-        forecastLabel.value = '已达预算'
-      } else {
-        forecastLabel.value = '预计耗尽 —'
-      }
-    } else {
-      forecastLabel.value = ''
-    }
-
-    return Boolean(cycleEnabled.value && nextReset && now >= nextReset && !loading.value)
+    const cost = await fetchCostSinceByStart(windowStart)
+    return calculateRate(cost, (now.getTime() - windowStart.getTime()) / 1000)
   }
 
   const updateHostingState = async () => {
@@ -232,54 +248,56 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
     }
   }
 
+  const getQuotaSettings = (settings: AppSettings): BudgetQuotaSettings => {
+    return platform === 'codex'
+      ? settings.budget_quota_settings_codex
+      : settings.budget_quota_settings
+  }
+
   const applySettings = (settings: AppSettings) => {
     if (platform === 'codex') {
-      total.value = normalizeBudgetTotal(settings?.budget_total_codex)
-      cycleEnabled.value = settings?.budget_cycle_enabled_codex ?? false
-      cycleMode.value = normalizeBudgetCycleMode(settings?.budget_cycle_mode_codex)
-      refreshTime.value = normalizeBudgetRefreshTime(settings?.budget_refresh_time_codex)
-      refreshWeekday.value = normalizeBudgetRefreshWeekday(settings?.budget_refresh_day_codex)
-      refreshMonthDay.value = normalizeBudgetRefreshMonthDay(settings?.budget_refresh_month_day_codex)
       showCountdown.value = settings?.budget_show_countdown_codex ?? false
       showForecast.value = settings?.budget_show_forecast_codex ?? false
       forecastMethod.value = normalizeForecastMethod(settings?.budget_forecast_method_codex ?? 'cycle')
       forecastDisplay.value = normalizeForecastDisplay(settings?.budget_forecast_display_codex ?? 'datetime')
-      const rawAdjustment = Number(settings?.budget_used_adjustment_codex ?? 0)
-      usedAdjustment.value = Number.isFinite(rawAdjustment) ? rawAdjustment : 0
+      usedAdjustment.value = normalizeBudgetAdjustment(settings?.budget_used_adjustment_codex)
       return
     }
-    total.value = normalizeBudgetTotal(settings?.budget_total)
-    cycleEnabled.value = settings?.budget_cycle_enabled ?? false
-    cycleMode.value = normalizeBudgetCycleMode(settings?.budget_cycle_mode)
-    refreshTime.value = normalizeBudgetRefreshTime(settings?.budget_refresh_time)
-    refreshWeekday.value = normalizeBudgetRefreshWeekday(settings?.budget_refresh_day)
-    refreshMonthDay.value = normalizeBudgetRefreshMonthDay(settings?.budget_refresh_month_day)
     showCountdown.value = settings?.budget_show_countdown ?? false
     showForecast.value = settings?.budget_show_forecast ?? false
     forecastMethod.value = normalizeForecastMethod(settings?.budget_forecast_method ?? 'cycle')
     forecastDisplay.value = normalizeForecastDisplay(settings?.budget_forecast_display ?? 'datetime')
-    const rawAdjustment = Number(settings?.budget_used_adjustment ?? 0)
-    usedAdjustment.value = Number.isFinite(rawAdjustment) ? rawAdjustment : 0
+    usedAdjustment.value = normalizeBudgetAdjustment(settings?.budget_used_adjustment)
   }
 
   const refresh = async (settings: AppSettings) => {
     loading.value = true
     try {
       applySettings(settings)
-      updateCycleTimes()
+      const now = new Date()
+      const quotaSettings = getQuotaSettings(settings)
+      const fetchCostSinceByStart = createCostSinceFetcher(platform)
       await updateHostingState()
 
-      let rawUsed = 0
-      if (cycleEnabled.value && cycleStart) {
-        const startValue = formatLocalDateTime(cycleStart)
-        rawUsed = Number(await fetchCostSince(startValue, platform))
-      } else {
-        const stats = await fetchLogStats(platform)
-        rawUsed = Number(stats?.cost_total ?? 0)
-      }
-      usedRaw.value = Number.isFinite(rawUsed) ? rawUsed : 0
-      used.value = applyUsedAdjustment(usedRaw.value)
-      forecastRate.value = showForecast.value ? await computeForecastRate(new Date()) : 0
+      quotas.value = await Promise.all(
+        budgetQuotaOrder.map(async (key) => {
+          const setting = quotaSettings[key] as BudgetQuotaSetting
+          const window = resolveBudgetQuotaWindow(key, setting, now)
+          const rawUsed = await fetchCostSinceByStart(window.start)
+          const used = applyUsedAdjustment(rawUsed)
+          const nextQuota = createQuotaState(key)
+          nextQuota.rawUsed = rawUsed
+          nextQuota.used = used
+          nextQuota.total = setting.total
+          nextQuota.windowStart = window.start
+          nextQuota.nextReset = window.nextReset
+          nextQuota.forecastRate = showForecast.value && setting.total > 0
+            ? await computeForecastRate(nextQuota, now, fetchCostSinceByStart)
+            : 0
+          updateQuotaDerivedLabels(nextQuota, now)
+          return nextQuota
+        }),
+      )
     } catch (error) {
       console.error(`failed to load ${platform} tray stats`, error)
     } finally {
@@ -287,23 +305,18 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
     }
   }
 
+  const updateDerivedLabels = (now: Date) => {
+    return quotas.value.some((quota) => updateQuotaDerivedLabels(quota, now))
+  }
+
   return proxyRefs({
     platform,
     brandName,
     brandIcon,
-    usedLabel,
-    hasBudget,
-    totalLabel,
-    progressRatio,
-    progressPercentLabel,
-    budgetTitle,
+    quotas,
     hostingEnabled,
     hostingLabel,
     loading,
-    countdownLabel,
-    forecastLabel,
-    showCountdown,
-    showForecast,
     refresh,
     updateDerivedLabels,
   })
@@ -434,29 +447,29 @@ onUnmounted(() => {
             <span class="tray-status__text">{{ card.hostingLabel }}</span>
           </div>
         </div>
-        <div class="tray-item">
-          <div class="tray-item__header">
-            <div class="tray-item__title">
-              <span class="tray-dot"></span>
-              <span>{{ card.budgetTitle }}</span>
-            </div>
-            <div class="tray-item__summary">
-              <div class="tray-item__value" :class="{ loading: card.loading }">
-                <span>已用 {{ card.usedLabel }}</span>
-                <template v-if="card.hasBudget">
-                  <span class="tray-divider">/</span>
-                  <span>{{ card.totalLabel }}</span>
-                </template>
+        <div class="tray-content">
+          <div v-for="quota in card.quotas" :key="`${card.platform}-${quota.key}`" class="tray-item">
+            <div class="tray-item__header">
+              <div class="tray-item__title">
+                <span class="tray-dot"></span>
+                <span>{{ quota.title }}</span>
               </div>
-              <span v-if="card.hasBudget" class="tray-item__percent">{{ card.progressPercentLabel }}</span>
+              <div class="tray-item__summary">
+                <div class="tray-item__value" :class="{ loading: card.loading }">
+                  <span>已用 {{ quota.usedLabel }}</span>
+                  <span class="tray-divider">/</span>
+                  <span>{{ quota.totalLabel }}</span>
+                </div>
+                <span v-if="quota.hasBudget" class="tray-item__percent">{{ quota.progressPercentLabel }}</span>
+              </div>
             </div>
-          </div>
-          <div class="tray-progress">
-            <div class="tray-progress__bar" :style="{ width: `${card.progressRatio * 100}%` }"></div>
-          </div>
-          <div v-if="card.countdownLabel || card.forecastLabel" class="tray-meta">
-            <span v-if="card.countdownLabel">{{ card.countdownLabel }}</span>
-            <span v-if="card.forecastLabel">{{ card.forecastLabel }}</span>
+            <div v-if="quota.hasBudget" class="tray-progress">
+              <div class="tray-progress__bar" :style="{ width: `${quota.progressRatio * 100}%` }"></div>
+            </div>
+            <div v-if="quota.countdownLabel || quota.forecastLabel" class="tray-meta">
+              <span v-if="quota.countdownLabel">{{ quota.countdownLabel }}</span>
+              <span v-if="quota.forecastLabel">{{ quota.forecastLabel }}</span>
+            </div>
           </div>
         </div>
       </div>
@@ -484,10 +497,21 @@ onUnmounted(() => {
   border: 1px solid var(--mac-border);
 }
 
+.tray-content {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 .tray-item {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.tray-item + .tray-item {
+  padding-top: 10px;
+  border-top: 1px solid var(--mac-divider);
 }
 
 .tray-header {
@@ -637,6 +661,10 @@ onUnmounted(() => {
 
 :global(.dark) .tray-header {
   border-bottom-color: var(--mac-divider);
+}
+
+:global(.dark) .tray-item + .tray-item {
+  border-top-color: var(--mac-divider);
 }
 
 :global(.dark) .tray-brand__icon {

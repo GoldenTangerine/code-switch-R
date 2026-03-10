@@ -3,6 +3,12 @@ import {
   DEFAULT_HEATMAP_DISPLAY_SETTINGS,
   normalizeHeatmapDisplaySettings,
 } from '../data/heatmapDisplaySettings'
+import {
+  createDefaultBudgetQuotaSettings,
+  normalizeBudgetQuotaSetting,
+  normalizeBudgetQuotaSettings,
+  type BudgetQuotaSettings,
+} from '../utils/budgetUsage'
 
 export type HeatmapGranularity = 'hourly' | 'daily'
 
@@ -27,6 +33,7 @@ export type AppSettings = {
   budget_refresh_time: string
   budget_refresh_day: number
   budget_refresh_month_day: number
+  budget_quota_settings: BudgetQuotaSettings
   budget_show_countdown: boolean
   budget_show_forecast: boolean
   budget_forecast_method: string
@@ -38,6 +45,7 @@ export type AppSettings = {
   budget_refresh_time_codex: string
   budget_refresh_day_codex: number
   budget_refresh_month_day_codex: number
+  budget_quota_settings_codex: BudgetQuotaSettings
   budget_show_countdown_codex: boolean
   budget_show_forecast_codex: boolean
   budget_forecast_method_codex: string
@@ -69,6 +77,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   budget_refresh_time: '00:00',
   budget_refresh_day: 1,
   budget_refresh_month_day: 1,
+  budget_quota_settings: createDefaultBudgetQuotaSettings(),
   budget_show_countdown: false,
   budget_show_forecast: false,
   budget_forecast_method: 'cycle',
@@ -80,6 +89,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   budget_refresh_time_codex: '00:00',
   budget_refresh_day_codex: 1,
   budget_refresh_month_day_codex: 1,
+  budget_quota_settings_codex: createDefaultBudgetQuotaSettings(),
   budget_show_countdown_codex: false,
   budget_show_forecast_codex: false,
   budget_forecast_method_codex: 'cycle',
@@ -94,8 +104,29 @@ const DEFAULT_SETTINGS: AppSettings = {
   sanitize_request_log_payload: true,
 }
 
-export const fetchAppSettings = async (): Promise<AppSettings> => {
-  const data = await Call.ByName('codeswitch/services.AppSettingsService.GetAppSettings')
+type AppSettingsResponse = Partial<AppSettings> & {
+  budget_quota_settings?: unknown
+  budget_quota_settings_codex?: unknown
+}
+
+type SerializedBudgetQuotaSetting = {
+  total: number
+  refresh_time: string
+  refresh_day: number
+  refresh_month_day: number
+}
+
+type SerializedBudgetQuotaSettings = {
+  five_hour: SerializedBudgetQuotaSetting
+  daily: SerializedBudgetQuotaSetting
+  weekly: SerializedBudgetQuotaSetting
+  monthly: SerializedBudgetQuotaSetting
+}
+
+const normalizeAppSettingsResponse = (value: unknown): AppSettings => {
+  const data = value && typeof value === 'object'
+    ? value as AppSettingsResponse
+    : {}
   const normalizedHeatmapDisplay = normalizeHeatmapDisplaySettings({
     dailyScaleFactor: data?.heatmap_daily_scale_factor,
     dailyIntensityMode: data?.heatmap_daily_intensity_mode,
@@ -114,9 +145,60 @@ export const fetchAppSettings = async (): Promise<AppSettings> => {
     heatmap_intensity_stop_l1: normalizedHeatmapDisplay.intensityStopL1,
     heatmap_intensity_stop_l2: normalizedHeatmapDisplay.intensityStopL2,
     heatmap_intensity_stop_l3: normalizedHeatmapDisplay.intensityStopL3,
+    budget_quota_settings: normalizeBudgetQuotaSettings(data?.budget_quota_settings, {
+      total: data?.budget_total,
+      cycleEnabled: data?.budget_cycle_enabled,
+      cycleMode: data?.budget_cycle_mode,
+      refreshTime: data?.budget_refresh_time,
+      refreshWeekday: data?.budget_refresh_day,
+      refreshMonthDay: data?.budget_refresh_month_day,
+    }),
+    budget_quota_settings_codex: normalizeBudgetQuotaSettings(data?.budget_quota_settings_codex, {
+      total: data?.budget_total_codex,
+      cycleEnabled: data?.budget_cycle_enabled_codex,
+      cycleMode: data?.budget_cycle_mode_codex,
+      refreshTime: data?.budget_refresh_time_codex,
+      refreshWeekday: data?.budget_refresh_day_codex,
+      refreshMonthDay: data?.budget_refresh_month_day_codex,
+    }),
   }
 }
 
+const serializeBudgetQuotaSetting = (value: unknown): SerializedBudgetQuotaSetting => {
+  const normalized = normalizeBudgetQuotaSetting(value)
+  return {
+    total: normalized.total,
+    refresh_time: normalized.refreshTime,
+    refresh_day: normalized.refreshWeekday,
+    refresh_month_day: normalized.refreshMonthDay,
+  }
+}
+
+const serializeBudgetQuotaSettings = (value: unknown): SerializedBudgetQuotaSettings => {
+  const normalized = normalizeBudgetQuotaSettings(value)
+  return {
+    five_hour: serializeBudgetQuotaSetting(normalized.five_hour),
+    daily: serializeBudgetQuotaSetting(normalized.daily),
+    weekly: serializeBudgetQuotaSetting(normalized.weekly),
+    monthly: serializeBudgetQuotaSetting(normalized.monthly),
+  }
+}
+
+const serializeAppSettings = (settings: AppSettings) => ({
+  ...settings,
+  budget_quota_settings: serializeBudgetQuotaSettings(settings.budget_quota_settings),
+  budget_quota_settings_codex: serializeBudgetQuotaSettings(settings.budget_quota_settings_codex),
+})
+
+export const fetchAppSettings = async (): Promise<AppSettings> => {
+  const data = await Call.ByName('codeswitch/services.AppSettingsService.GetAppSettings')
+  return normalizeAppSettingsResponse(data)
+}
+
 export const saveAppSettings = async (settings: AppSettings): Promise<AppSettings> => {
-  return Call.ByName('codeswitch/services.AppSettingsService.SaveAppSettings', settings)
+  const data = await Call.ByName(
+    'codeswitch/services.AppSettingsService.SaveAppSettings',
+    serializeAppSettings(settings),
+  )
+  return normalizeAppSettingsResponse(data)
 }
