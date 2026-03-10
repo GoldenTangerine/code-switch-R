@@ -150,7 +150,7 @@ describe('budgetUsage', () => {
     expect(legacy.cycleMode).toBe('daily')
   })
 
-  it('uses a rolling 5 hour window for the 5 hour quota', () => {
+  it('keeps the legacy rolling 5 hour fallback for pure frontend callers', () => {
     const now = new Date(2026, 2, 10, 12, 34, 0, 0)
     const window = resolveBudgetQuotaWindow('five_hour', {
       total: 12,

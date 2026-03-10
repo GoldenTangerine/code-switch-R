@@ -155,6 +155,19 @@ export const fetchCostSince = async (start: string, platform: LogPlatform | '' =
   return Call.ByName('codeswitch/services.LogService.CostSince', start, platform)
 }
 
+export type FiveHourQuotaStatus = {
+  active: boolean
+  window_start: string
+  next_reset: string
+  used: number
+}
+
+export const fetchFiveHourQuotaStatus = async (
+  platform: LogPlatform | '' = '',
+): Promise<FiveHourQuotaStatus> => {
+  return Call.ByName('codeswitch/services.LogService.ResolveFiveHourQuotaStatus', platform)
+}
+
 export type LogTableStorageStat = {
   name: string
   rows: number

@@ -850,7 +850,7 @@
         "budgetCycleModeWeekly": "Weekly",
         "budgetCycleModeMonthly": "Monthly",
         "budgetQuotaFiveHour": "5 hour quota",
-        "budgetQuotaFiveHourHint": "Rolling 5 hour window; shows ∞ when unset",
+        "budgetQuotaFiveHourHint": "A 5 hour cycle starts with the first request and only restarts after a new request once the prior cycle ends; shows ∞ when unset",
         "budgetQuotaDaily": "Daily quota",
         "budgetQuotaDailyHint": "Resets every day at the configured time; shows ∞ when unset",
         "budgetQuotaWeekly": "Weekly quota",

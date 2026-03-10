@@ -395,6 +395,8 @@ export const resolveBudgetQuotaWindow = (
   now: Date,
 ): BudgetQuotaWindow => {
   if (key === 'five_hour') {
+    // 真实的 5 小时额度周期由后端持久化状态驱动。
+    // 这里保留滚动窗口回退，仅供纯前端调用或兼容测试使用。
     return {
       start: new Date(now.getTime() - 5 * 60 * 60 * 1000),
       nextReset: null,

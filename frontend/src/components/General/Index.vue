@@ -26,7 +26,7 @@ import { fetchCurrentVersion } from '../../services/version'
 import { getBlacklistSettings, updateBlacklistSettings, getLevelBlacklistEnabled, setLevelBlacklistEnabled, getBlacklistEnabled, setBlacklistEnabled, type BlacklistSettings } from '../../services/settings'
 import { fetchConfigImportStatus, importFromPath, type ConfigImportStatus } from '../../services/configImport'
 import { fetchWebDAVConfig, previewWebDAVContent, saveWebDAVConfig, testWebDAVConfig, syncToWebDAV, loadFromWebDAV, type WebDAVSyncConfig } from '../../services/webdavSync'
-import { fetchCostSince } from '../../services/logs'
+import { fetchCostSince, fetchFiveHourQuotaStatus } from '../../services/logs'
 import { useI18n } from 'vue-i18n'
 import { extractErrorMessage } from '../../utils/error'
 import { showToast } from '../../utils/toast'
@@ -362,6 +362,13 @@ const refreshBudgetQuotaUsage = async (platform: BudgetQuotaPlatform) => {
     ))
     const results = await Promise.allSettled(
       activeQuotaKeys.map(async (key) => {
+        if (key === 'five_hour') {
+          const snapshot = await fetchFiveHourQuotaStatus(platform)
+          return {
+            key,
+            usage: normalizeBudgetUsedDisplay(Number(snapshot?.used ?? 0)),
+          }
+        }
         const setting = quotaSettings[key] as BudgetQuotaSetting
         const window = resolveBudgetQuotaWindow(key, setting, now)
         const usage = await fetchCostSince(formatLocalDateTime(window.start), platform)

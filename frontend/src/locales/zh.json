@@ -849,7 +849,7 @@
         "budgetCycleModeWeekly": "每周",
         "budgetCycleModeMonthly": "每月",
         "budgetQuotaFiveHour": "5 小时额度",
-        "budgetQuotaFiveHourHint": "滚动 5 小时窗口，未设置则显示为 ∞",
+        "budgetQuotaFiveHourHint": "首个请求触发 5 小时周期，周期结束后需新请求才会开始下一轮，未设置则显示为 ∞",
         "budgetQuotaDaily": "日额度",
         "budgetQuotaDailyHint": "每日按指定时间刷新，未设置则显示为 ∞",
         "budgetQuotaWeekly": "周额度",

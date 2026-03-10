@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, proxyRefs, ref } from 'vue'
 import { Call } from '@wailsio/runtime'
-import { fetchCostSince, fetchLogStats } from '../../services/logs'
+import { fetchCostSince, fetchFiveHourQuotaStatus, fetchLogStats } from '../../services/logs'
 import { fetchAppSettings, type AppSettings } from '../../services/appSettings'
 import { fetchProxyStatus } from '../../services/claudeSettings'
 import {
@@ -73,6 +73,20 @@ const formatCurrency = (value?: number) => {
 
 const formatLocalDateTimeLabel = (date: Date) => {
   return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())} ${pad2(date.getHours())}:${pad2(date.getMinutes())}`
+}
+
+const parseTrayDateTime = (value?: string | null) => {
+  const raw = String(value ?? '').trim()
+  if (!raw) return null
+  const normalized = raw.replace(' ', 'T')
+  const attempts = [raw, normalized, `${normalized}Z`]
+  for (const candidate of attempts) {
+    const parsed = new Date(candidate)
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed
+    }
+  }
+  return null
 }
 
 const formatCountdown = (remainingMs: number) => {
@@ -326,6 +340,21 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
             return createQuotaState(key)
           }
           const setting = quotaSettings[key] as BudgetQuotaSetting
+          if (key === 'five_hour') {
+            const snapshot = await fetchFiveHourQuotaStatus(platform)
+            const rawUsed = Number.isFinite(Number(snapshot?.used)) ? Math.max(Number(snapshot.used), 0) : 0
+            const nextQuota = createQuotaState(key)
+            nextQuota.rawUsed = rawUsed
+            nextQuota.used = applyUsedAdjustment(key, rawUsed)
+            nextQuota.total = setting.total
+            nextQuota.windowStart = snapshot?.active ? parseTrayDateTime(snapshot.window_start) : null
+            nextQuota.nextReset = snapshot?.active ? parseTrayDateTime(snapshot.next_reset) : null
+            nextQuota.forecastRate = showForecast.value && setting.total > 0
+              ? await computeForecastRate(nextQuota, now, fetchCostSinceByStart)
+              : 0
+            updateQuotaDerivedLabels(nextQuota, now)
+            return nextQuota
+          }
           const window = resolveBudgetQuotaWindow(key, setting, now)
           const rawUsed = await fetchCostSinceByStart(window.start)
           const used = applyUsedAdjustment(key, rawUsed)

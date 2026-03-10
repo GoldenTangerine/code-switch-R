@@ -19,6 +19,7 @@ const timeLayout = "2006-01-02 15:04:05"
 const providerPerformanceCacheTTL = 20 * time.Second
 const providerPerformanceCacheMaxEntries = 512
 const providerTokensPerSecondMinWindowSec = 0.05
+const fiveHourQuotaWindowDuration = 5 * time.Hour
 
 var requestLogListSelectFields = []string{
 	"id",
@@ -118,6 +119,13 @@ type RequestLogPayloadDetail struct {
 	ResponseBodyTruncated bool   `json:"response_body_truncated"`
 }
 
+type FiveHourQuotaStatus struct {
+	Active      bool    `json:"active"`
+	WindowStart string  `json:"window_start"`
+	NextReset   string  `json:"next_reset"`
+	Used        float64 `json:"used"`
+}
+
 func (ls *LogService) CostSince(start string, platform string) (float64, error) {
 	startTime, err := parseTimeInput(start)
 	if err != nil {
@@ -144,6 +152,149 @@ func (ls *LogService) CostSince(start string, platform string) (float64, error) 
 		return 0, err
 	}
 	return total, nil
+}
+
+func (ls *LogService) ResolveFiveHourQuotaStatus(platform string) (FiveHourQuotaStatus, error) {
+	return ls.resolveFiveHourQuotaStatusAt(platform, time.Now())
+}
+
+func (ls *LogService) resolveFiveHourQuotaStatusAt(platform string, now time.Time) (FiveHourQuotaStatus, error) {
+	status := FiveHourQuotaStatus{}
+
+	db, err := xdb.DB("default")
+	if err != nil {
+		return status, err
+	}
+
+	state, err := queryFiveHourQuotaCycleState(db, platform)
+	if err != nil {
+		if isNoSuchTableErr(err) {
+			return status, nil
+		}
+		return status, err
+	}
+	if state.WindowStart.IsZero() || state.NextReset.IsZero() {
+		return status, nil
+	}
+
+	if !now.UTC().Before(state.NextReset) {
+		return status, nil
+	}
+
+	status.Active = true
+	status.WindowStart = state.WindowStart.In(time.Local).Format(timeLayout)
+	status.NextReset = state.NextReset.In(time.Local).Format(timeLayout)
+	status.Used = normalizeBudgetRawUsed(state.Used)
+	return status, nil
+}
+
+func queryLatestRequestLogCreatedAt(db *sql.DB, platform string) (time.Time, error) {
+	query := `SELECT MAX(created_at) FROM request_log`
+	args := make([]interface{}, 0, 1)
+	if strings.TrimSpace(platform) != "" {
+		query += ` WHERE platform = ?`
+		args = append(args, platform)
+	}
+
+	var raw sql.NullString
+	if err := db.QueryRow(query, args...).Scan(&raw); err != nil {
+		return time.Time{}, err
+	}
+	return parseStoredRequestLogTime(raw)
+}
+
+func queryLatestFiveHourQuotaWindowStart(db *sql.DB, platform string) (time.Time, error) {
+	initialWhere := ""
+	nextWhere := ""
+	args := make([]interface{}, 0, 2)
+	if strings.TrimSpace(platform) != "" {
+		initialWhere = ` WHERE platform = ?`
+		nextWhere = ` AND platform = ?`
+		args = append(args, platform, platform)
+	}
+
+	query := `
+		WITH RECURSIVE cycle_starts(start_at) AS (
+			SELECT MIN(created_at) FROM request_log` + initialWhere + `
+			UNION ALL
+			SELECT (
+				SELECT MIN(created_at)
+				FROM request_log
+				WHERE created_at >= datetime(cycle_starts.start_at, '+5 hours')` + nextWhere + `
+			)
+			FROM cycle_starts
+			WHERE cycle_starts.start_at IS NOT NULL
+		)
+		SELECT start_at
+		FROM cycle_starts
+		WHERE start_at IS NOT NULL
+		ORDER BY start_at DESC
+		LIMIT 1
+	`
+
+	var raw sql.NullString
+	if err := db.QueryRow(query, args...).Scan(&raw); err != nil {
+		return time.Time{}, err
+	}
+	return parseStoredRequestLogTime(raw)
+}
+
+func queryRequestLogCostBetween(db *sql.DB, platform string, start time.Time, end time.Time) (float64, error) {
+	query := `SELECT COALESCE(SUM(total_cost), 0) FROM request_log WHERE created_at >= ? AND created_at < ?`
+	args := []interface{}{start.UTC().Format(timeLayout), end.UTC().Format(timeLayout)}
+	if strings.TrimSpace(platform) != "" {
+		query += ` AND platform = ?`
+		args = append(args, platform)
+	}
+
+	total := 0.0
+	if err := db.QueryRow(query, args...).Scan(&total); err != nil {
+		return 0, err
+	}
+	return total, nil
+}
+
+func parseStoredRequestLogTime(value sql.NullString) (time.Time, error) {
+	if !value.Valid {
+		return time.Time{}, nil
+	}
+
+	raw := strings.TrimSpace(value.String)
+	if raw == "" {
+		return time.Time{}, nil
+	}
+
+	layouts := []string{
+		timeLayout,
+		time.RFC3339,
+		"2006-01-02T15:04:05",
+		"2006-01-02 15:04:05 -0700",
+		"2006-01-02 15:04:05 -0700 MST",
+		"2006-01-02 15:04:05 MST",
+		"2006-01-02T15:04:05-0700",
+	}
+	for _, layout := range layouts {
+		if parsed, err := time.Parse(layout, raw); err == nil {
+			return parsed.UTC(), nil
+		}
+		if parsed, err := time.ParseInLocation(layout, raw, time.UTC); err == nil {
+			return parsed.UTC(), nil
+		}
+	}
+
+	if normalized := strings.Replace(raw, " ", "T", 1); normalized != raw {
+		if parsed, err := time.Parse(time.RFC3339, normalized); err == nil {
+			return parsed.UTC(), nil
+		}
+	}
+
+	if len(raw) >= len("2006-01-02") {
+		if parsed, err := time.ParseInLocation("2006-01-02", raw[:10], time.UTC); err == nil {
+			return parsed.UTC(), nil
+		}
+	}
+
+	return time.Time{}, fmt.Errorf("invalid request_log created_at: %s", raw)
 }
 
 func NewLogService(modelPricing *ModelPricingService) *LogService {

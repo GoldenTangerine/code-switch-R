@@ -1538,6 +1538,9 @@ func ensureRequestLogTableWithDB(db *sql.DB) error {
 	if err := ensureRequestLogStatsStorageWithDB(db); err != nil {
 		return err
 	}
+	if err := ensureRequestLogQuotaCycleStorageWithDB(db); err != nil {
+		return err
+	}
 
 	return nil
 }
