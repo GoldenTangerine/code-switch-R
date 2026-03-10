@@ -10,6 +10,11 @@ import {
   type TrayBudgetDisplayMode,
 } from '../../utils/trayBudgetDisplay'
 import {
+  formatClockCountdown,
+  shouldUseSecondPrecisionTrayTicker,
+  updateItemsAndCollectRefresh,
+} from '../../utils/trayCountdown'
+import {
   budgetQuotaOrder,
   createDefaultBudgetQuotaAdjustments,
   formatLocalDateTime,
@@ -46,10 +51,14 @@ type TrayQuotaState = {
 }
 
 const rootRef = ref<HTMLElement | null>(null)
+const FULL_REFRESH_INTERVAL_MS = 60_000
+const RESET_REFRESH_COOLDOWN_MS = 5_000
 let ticker: number | undefined
 let refreshBusy = false
 let storageRefreshTimer: number | undefined
 let lastWindowHeight = 0
+let lastFullRefreshAt = 0
+let lastRefreshAttemptAt = 0
 
 const quotaTitles: Record<BudgetQuotaKey, string> = {
   five_hour: '5 小时额度',
@@ -176,6 +185,9 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
     const allowedKeys = new Set(visibleQuotaKeys.value)
     return quotas.value.filter((quota) => quota.hasBudget && allowedKeys.has(quota.key))
   })
+  const hasSecondPrecisionCountdown = computed(() => (
+    shouldUseSecondPrecisionTrayTicker(displayMode.value, showCountdown.value, quotas.value)
+  ))
   const showTotalUsage = computed(() => displayMode.value === 'summary')
   const totalUsageLabel = computed(() => formatCurrency(totalUsage.value))
 
@@ -192,16 +204,20 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
     return start
   }
 
-  const updateQuotaDerivedLabels = (quota: TrayQuotaState, now: Date) => {
+  const updateQuotaStaticLabels = (quota: TrayQuotaState) => {
     quota.usedLabel = formatCurrency(quota.used)
     quota.hasBudget = quota.total > 0
     quota.totalLabel = quota.hasBudget ? formatCurrency(quota.total) : '∞'
     quota.progressRatio = quota.hasBudget ? Math.min(Math.max(quota.used / quota.total, 0), 1) : 0
     quota.progressPercentLabel = quota.hasBudget ? `${Math.round(quota.progressRatio * 100)}%` : ''
+  }
 
+  const updateQuotaTimeLabels = (quota: TrayQuotaState, now: Date) => {
     if (showCountdown.value && quota.hasBudget && quota.nextReset) {
       const remaining = quota.nextReset.getTime() - now.getTime()
-      quota.countdownLabel = remaining > 0 ? `重置倒计时 ${formatCountdown(remaining)}` : '即将重置'
+      quota.countdownLabel = remaining > 0
+        ? `重置倒计时 ${quota.key === 'five_hour' ? formatClockCountdown(remaining) : formatCountdown(remaining)}`
+        : '即将重置'
     } else {
       quota.countdownLabel = ''
     }
@@ -352,7 +368,8 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
             nextQuota.forecastRate = showForecast.value && setting.total > 0
               ? await computeForecastRate(nextQuota, now, fetchCostSinceByStart)
               : 0
-            updateQuotaDerivedLabels(nextQuota, now)
+            updateQuotaStaticLabels(nextQuota)
+            updateQuotaTimeLabels(nextQuota, now)
             return nextQuota
           }
           const window = resolveBudgetQuotaWindow(key, setting, now)
@@ -367,7 +384,8 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
           nextQuota.forecastRate = showForecast.value && setting.total > 0
             ? await computeForecastRate(nextQuota, now, fetchCostSinceByStart)
             : 0
-          updateQuotaDerivedLabels(nextQuota, now)
+          updateQuotaStaticLabels(nextQuota)
+          updateQuotaTimeLabels(nextQuota, now)
           return nextQuota
         }),
       )
@@ -382,7 +400,7 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
   }
 
   const updateDerivedLabels = (now: Date) => {
-    return quotas.value.some((quota) => updateQuotaDerivedLabels(quota, now))
+    return updateItemsAndCollectRefresh(quotas.value, (quota) => updateQuotaTimeLabels(quota, now))
   }
 
   return proxyRefs({
@@ -397,6 +415,7 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
     hostingLabel,
     loading,
     refresh,
+    hasSecondPrecisionCountdown,
     updateDerivedLabels,
   })
 }
@@ -405,11 +424,31 @@ const claudeCard = createTrayCard('claude', 'Claude Code', 'C')
 const codexCard = createTrayCard('codex', 'Codex', 'X')
 const cards = [claudeCard, codexCard]
 
+const getTickerIntervalMs = () => (
+  cards.some((card) => card.hasSecondPrecisionCountdown) ? 1000 : FULL_REFRESH_INTERVAL_MS
+)
+
+const triggerRefreshAll = () => {
+  if (refreshBusy) return
+  lastRefreshAttemptAt = Date.now()
+  void refreshAll()
+}
+
+const refreshAllIfDue = () => {
+  if (Date.now() - lastFullRefreshAt < FULL_REFRESH_INTERVAL_MS) return
+  triggerRefreshAll()
+}
+
+const refreshAllForResetIfDue = () => {
+  if (Date.now() - lastRefreshAttemptAt < RESET_REFRESH_COOLDOWN_MS) return
+  triggerRefreshAll()
+}
+
 const updateAllDerivedLabels = () => {
   const now = new Date()
-  const shouldRefresh = cards.some((card) => card.updateDerivedLabels(now))
-  if (shouldRefresh && !refreshBusy) {
-    void refreshAll()
+  const shouldRefresh = updateItemsAndCollectRefresh(cards, (card) => card.updateDerivedLabels(now))
+  if (shouldRefresh) {
+    refreshAllForResetIfDue()
   }
 }
 
@@ -419,12 +458,9 @@ const setupTicker = () => {
   }
   ticker = window.setInterval(() => {
     if (document.hidden) return
-    if (refreshBusy) {
-      updateAllDerivedLabels()
-      return
-    }
-    void refreshAll()
-  }, 60_000)
+    updateAllDerivedLabels()
+    refreshAllIfDue()
+  }, getTickerIntervalMs())
 }
 
 const resizeToContent = async () => {
@@ -447,6 +483,7 @@ const resizeToContent = async () => {
 const refreshAll = async () => {
   if (refreshBusy) return
   refreshBusy = true
+  lastRefreshAttemptAt = Date.now()
   try {
     const settings = await fetchAppSettings()
     await Promise.all(cards.map((card) => card.refresh(settings)))
@@ -454,6 +491,8 @@ const refreshAll = async () => {
     console.error('failed to refresh tray cards', error)
   } finally {
     refreshBusy = false
+    lastFullRefreshAt = Date.now()
+    lastRefreshAttemptAt = lastFullRefreshAt
     updateAllDerivedLabels()
     setupTicker()
     await resizeToContent()
@@ -461,12 +500,12 @@ const refreshAll = async () => {
 }
 
 const handleFocus = () => {
-  void refreshAll()
+  triggerRefreshAll()
 }
 
 const handleVisibilityChange = () => {
   if (document.hidden || refreshBusy) return
-  void refreshAll()
+  triggerRefreshAll()
 }
 
 const scheduleRefreshAll = () => {
@@ -479,7 +518,7 @@ const scheduleRefreshAll = () => {
       scheduleRefreshAll()
       return
     }
-    void refreshAll()
+    triggerRefreshAll()
   }, 80)
 }
 
@@ -491,7 +530,7 @@ const handleStorageChange = (event: StorageEvent) => {
 
 onMounted(() => {
   lastWindowHeight = 0
-  void refreshAll()
+  triggerRefreshAll()
   window.addEventListener('focus', handleFocus)
   window.addEventListener('visibilitychange', handleVisibilityChange)
   window.addEventListener('app-settings-updated', handleFocus)
