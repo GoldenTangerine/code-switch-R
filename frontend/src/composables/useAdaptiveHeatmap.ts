@@ -32,6 +32,7 @@ const MAX_DAYS_HOURLY = 21
 const MAX_DAYS_DAILY = 365
 const DEFAULT_DAYS_HOURLY = 14
 const DEFAULT_DAYS_DAILY = 365
+const WIDTH_PROBE_MAX_ATTEMPTS = 6
 
 const columnGroupSizeByGranularity = (granularity: HeatmapGranularity) =>
 	granularity === 'daily' ? 1 : BUCKETS_PER_DAY
@@ -61,6 +62,14 @@ type UseAdaptiveHeatmapOptions = {
 	fetcher?: HeatmapStatsFetcher
 }
 
+type LoadHeatmapDataOptions = {
+	force?: boolean
+}
+
+type ThrottledFunction<T extends (...args: any[]) => void> = ((...args: Parameters<T>) => void) & {
+	cancel: () => void
+}
+
 /**
  * 自适应热力图 Composable
  * @param containerRef 热力图容器的 ref 引用
@@ -88,6 +97,8 @@ export function useAdaptiveHeatmap(
 	const initialized = ref(false)
 	const displaySettingsKey = computed(() => heatmapDisplaySettingsSignature(displaySettings.value))
 	let latestRequestToken = 0
+	let pendingGranularity: HeatmapGranularity | null = null
+	let pendingDays = 0
 
 	/**
 	 * 获取当前视口下的格子尺寸配置
@@ -140,18 +151,32 @@ export function useAdaptiveHeatmap(
 	 * 加载热力图数据
 	 * @param days 需要加载的天数
 	 */
-	const loadHeatmapData = async (days: number) => {
+	const loadHeatmapData = async (
+		days: number,
+		options: LoadHeatmapDataOptions = {},
+	) => {
+		const { force = false } = options
 		const currentGranularity = granularity.value
 		// 如果已加载的天数足够，不重复请求
 		if (
+			!force &&
 			loadedGranularity.value === currentGranularity &&
 			loadedDays.value >= days &&
 			heatmapData.value.length > 0
 		) {
 			return
 		}
+		if (
+			!force &&
+			pendingGranularity === currentGranularity &&
+			pendingDays >= days
+		) {
+			return
+		}
 
 		const requestToken = ++latestRequestToken
+		pendingGranularity = currentGranularity
+		pendingDays = days
 		isLoading.value = true
 		try {
 			const stats = await heatmapStatsFetcher(days)
@@ -174,17 +199,41 @@ export function useAdaptiveHeatmap(
 		} finally {
 			if (requestToken === latestRequestToken) {
 				isLoading.value = false
+				pendingGranularity = null
+				pendingDays = 0
 			}
+		}
+	}
+
+	const syncWidthState = async (width: number) => {
+		if (width <= 0) {
+			return
+		}
+		containerWidth.value = width
+		const currentGranularity = granularity.value
+		const columnGroupSize = columnGroupSizeByGranularity(currentGranularity)
+		const maxColumns = maxColumnsByGranularity(currentGranularity)
+		const maxDays = maxDaysByGranularity(currentGranularity)
+		const nextColumns = calculateColumns(width, columnGroupSize, maxColumns)
+		if (nextColumns !== visibleColumns.value) {
+			visibleColumns.value = nextColumns
+		}
+		const nextDays = calculateDaysFromColumns(nextColumns, currentGranularity, maxDays)
+		if (
+			loadedGranularity.value !== currentGranularity ||
+			loadedDays.value < nextDays
+		) {
+			await loadHeatmapData(nextDays)
 		}
 	}
 
 	/**
 	 * 节流函数
 	 */
-	const throttle = <T extends (...args: any[]) => void>(fn: T, delay: number) => {
+	const throttle = <T extends (...args: any[]) => void>(fn: T, delay: number): ThrottledFunction<T> => {
 		let lastCall = 0
 		let timeoutId: ReturnType<typeof setTimeout> | null = null
-		return (...args: Parameters<T>) => {
+		const throttled = ((...args: Parameters<T>) => {
 			const now = Date.now()
 			const remaining = delay - (now - lastCall)
 			if (remaining <= 0) {
@@ -201,30 +250,22 @@ export function useAdaptiveHeatmap(
 					fn(...args)
 				}, remaining)
 			}
+		}) as ThrottledFunction<T>
+		throttled.cancel = () => {
+			if (timeoutId) {
+				clearTimeout(timeoutId)
+				timeoutId = null
+			}
+			lastCall = 0
 		}
+		return throttled
 	}
 
 	/**
 	 * 处理尺寸变化
 	 */
 	const handleResize = throttle((width: number) => {
-		containerWidth.value = width
-		const currentGranularity = granularity.value
-		const columnGroupSize = columnGroupSizeByGranularity(currentGranularity)
-		const maxColumns = maxColumnsByGranularity(currentGranularity)
-		const maxDays = maxDaysByGranularity(currentGranularity)
-		const newColumns = calculateColumns(width, columnGroupSize, maxColumns)
-
-		// 只有列数变化时才更新
-		if (newColumns !== visibleColumns.value) {
-			const newDays = calculateDaysFromColumns(newColumns, currentGranularity, maxDays)
-			visibleColumns.value = newColumns
-
-			// 只在需要更多数据时重新请求
-			if (newDays > loadedDays.value || loadedGranularity.value !== currentGranularity) {
-				void loadHeatmapData(newDays)
-			}
-		}
+		void syncWidthState(width)
 	}, 150) // 150ms 节流
 
 	/**
@@ -241,6 +282,7 @@ export function useAdaptiveHeatmap(
 
 	// ResizeObserver 实例
 	let resizeObserver: ResizeObserver | null = null
+	let widthProbeFrameId: number | null = null
 
 	const getContainerWidth = (container: HTMLElement) => {
 		const rectWidth =
@@ -253,16 +295,88 @@ export function useAdaptiveHeatmap(
 		return container.clientWidth
 	}
 
-	const probeContainerWidthOnNextFrame = (container: HTMLElement) => {
-		if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
+	const clearWidthProbe = () => {
+		if (
+			widthProbeFrameId === null ||
+			typeof globalThis.cancelAnimationFrame !== 'function'
+		) {
+			widthProbeFrameId = null
 			return
 		}
-		window.requestAnimationFrame(() => {
-			const nextWidth = getContainerWidth(container)
-			if (nextWidth > 0 && nextWidth !== containerWidth.value) {
-				handleResize(nextWidth)
+		globalThis.cancelAnimationFrame(widthProbeFrameId)
+		widthProbeFrameId = null
+	}
+
+	const ensureResizeObserver = (container: HTMLElement) => {
+		if (resizeObserver) {
+			return
+		}
+		resizeObserver = new ResizeObserver(() => {
+			const nextContainer = containerRef.value
+			if (!nextContainer) {
+				return
+			}
+			const measuredWidth = getContainerWidth(nextContainer)
+			if (measuredWidth > 0) {
+				handleResize(measuredWidth)
 			}
 		})
+		resizeObserver.observe(container)
+	}
+
+	const stopLayoutSync = () => {
+		clearWidthProbe()
+		handleResize.cancel()
+		if (resizeObserver) {
+			resizeObserver.disconnect()
+			resizeObserver = null
+		}
+	}
+
+	const probeContainerWidthOnNextFrame = (
+		container: HTMLElement,
+		attempts = WIDTH_PROBE_MAX_ATTEMPTS,
+	) => {
+		if (typeof globalThis.requestAnimationFrame !== 'function') {
+			return
+		}
+		clearWidthProbe()
+		let remainingAttempts = Math.max(1, Math.floor(attempts))
+		let lastMeasuredWidth = -1
+		const probe = () => {
+			widthProbeFrameId = null
+			const nextWidth = getContainerWidth(container)
+			if (nextWidth > 0) {
+				void syncWidthState(nextWidth)
+			}
+			const widthChanged = nextWidth !== lastMeasuredWidth
+			lastMeasuredWidth = nextWidth
+			remainingAttempts -= 1
+			if (remainingAttempts > 0 && (nextWidth <= 0 || widthChanged)) {
+				widthProbeFrameId = globalThis.requestAnimationFrame(probe)
+			}
+		}
+		widthProbeFrameId = globalThis.requestAnimationFrame(probe)
+	}
+
+	const syncLayout = async () => {
+		const container = containerRef.value
+		if (!container) return
+		ensureResizeObserver(container)
+
+		const currentGranularity = granularity.value
+		const defaultDays = defaultDaysByGranularity(currentGranularity)
+		const measuredWidth = getContainerWidth(container)
+
+		if (measuredWidth > 0) {
+			probeContainerWidthOnNextFrame(container)
+			await syncWidthState(measuredWidth)
+			return
+		}
+
+		visibleColumns.value = columnsFromDays(defaultDays, currentGranularity)
+		probeContainerWidthOnNextFrame(container)
+		await loadHeatmapData(defaultDays)
 	}
 
 	/**
@@ -272,53 +386,31 @@ export function useAdaptiveHeatmap(
 		const container = containerRef.value
 		if (!container) return
 
-		const currentGranularity = granularity.value
-		const columnGroupSize = columnGroupSizeByGranularity(currentGranularity)
-		const maxColumns = maxColumnsByGranularity(currentGranularity)
-		const maxDays = maxDaysByGranularity(currentGranularity)
-
 		// 先挂尺寸监听，避免首屏布局还没稳定时漏掉真正的宽度变化。
-		resizeObserver = new ResizeObserver((entries) => {
-			for (const entry of entries) {
-				const { width } = entry.contentRect
-				handleResize(width)
-			}
-		})
-		resizeObserver.observe(container)
-
-		// 初始宽度计算
-		const initialWidth = getContainerWidth(container)
-		containerWidth.value = initialWidth
-		const initialColumns = calculateColumns(initialWidth, columnGroupSize, maxColumns)
-		visibleColumns.value = initialColumns
-		probeContainerWidthOnNextFrame(container)
-
-		// 加载初始数据
-		const initialDays = calculateDaysFromColumns(initialColumns, currentGranularity, maxDays)
-		await loadHeatmapData(initialDays)
 		initialized.value = true
+		ensureResizeObserver(container)
+		await syncLayout()
 	}
 
 	/**
 	 * 清理 ResizeObserver
 	 */
 	const cleanup = () => {
-		if (resizeObserver) {
-			resizeObserver.disconnect()
-			resizeObserver = null
-		}
+		stopLayoutSync()
 	}
 
 	/**
 	 * 重新加载数据
 	 */
 	const reload = async () => {
-		loadedDays.value = 0 // 重置已加载天数，强制重新请求
-		loadedGranularity.value = null
 		const currentGranularity = granularity.value
 		const maxDays = maxDaysByGranularity(currentGranularity)
 		const days = calculateDaysFromColumns(visibleColumns.value, currentGranularity, maxDays)
-		await loadHeatmapData(days)
+		await loadHeatmapData(days, { force: true })
+	}
+
+	const pauseLayoutSync = () => {
+		stopLayoutSync()
 	}
 
 	watch([granularity, displaySettingsKey], ([nextGranularity, nextDisplaySettingsKey], previous) => {
@@ -352,24 +444,21 @@ export function useAdaptiveHeatmap(
 			return
 		}
 
-		const columnGroupSize = columnGroupSizeByGranularity(nextGranularity)
-		const maxColumns = maxColumnsByGranularity(nextGranularity)
-		const maxDays = maxDaysByGranularity(nextGranularity)
-		const width = containerRef.value?.clientWidth ?? containerWidth.value
+		const container = containerRef.value
+		const width = container ? getContainerWidth(container) : containerWidth.value
 		if (width > 0) {
-			const columns = calculateColumns(width, columnGroupSize, maxColumns)
-			visibleColumns.value = columns
-			const days = calculateDaysFromColumns(columns, nextGranularity, maxDays)
-			void loadHeatmapData(days)
+			void syncWidthState(width)
+			if (container) {
+				probeContainerWidthOnNextFrame(container)
+			}
 			return
 		}
 
 		visibleColumns.value = columnsFromDays(defaultDays, nextGranularity)
-		heatmapData.value = generateFallbackUsageHeatmap(
-			defaultDays,
-			nextGranularity,
-			displaySettings.value,
-		)
+		void loadHeatmapData(defaultDays)
+		if (container) {
+			probeContainerWidthOnNextFrame(container)
+		}
 	})
 
 	return {
@@ -379,6 +468,8 @@ export function useAdaptiveHeatmap(
 		cellConfig,
 		isLoading,
 		init,
+		syncLayout,
+		pauseLayoutSync,
 		cleanup,
 		reload,
 	}

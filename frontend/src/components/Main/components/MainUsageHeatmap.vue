@@ -81,7 +81,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, reactive, ref, toRef, watch } from 'vue'
+import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, reactive, ref, toRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { type UsageHeatmapDay } from '../../../data/usageHeatmap'
 import { useAdaptiveHeatmap } from '../../../composables/useAdaptiveHeatmap'
@@ -108,6 +108,8 @@ const displaySettingsRef = toRef(props, 'displaySettings')
 const {
   displayData: usageHeatmap,
   init,
+  syncLayout,
+  pauseLayoutSync,
   cleanup,
   reload,
 } = useAdaptiveHeatmap(heatmapContainerRef, granularityRef, displaySettingsRef)
@@ -547,6 +549,7 @@ const updateUsageTooltipPosition = (cellRect: DOMRect | ReturnType<HTMLElement['
 
 let usageTooltipPositionRequestId = 0
 let currentTimeRefreshTimer: number | null = null
+let hasActivatedOnce = false
 
 const clearCurrentTimeRefreshTimer = () => {
   if (!currentTimeRefreshTimer) return
@@ -605,6 +608,24 @@ onMounted(() => {
   syncCurrentTime()
   scheduleCurrentTimeRefresh()
   void init()
+})
+
+onActivated(() => {
+  if (!hasActivatedOnce) {
+    hasActivatedOnce = true
+    return
+  }
+  syncCurrentTime()
+  scheduleCurrentTimeRefresh()
+  void nextTick(() => {
+    void syncLayout()
+  })
+})
+
+onDeactivated(() => {
+  clearCurrentTimeRefreshTimer()
+  hideUsageTooltip()
+  pauseLayoutSync()
 })
 
 watch(granularityRef, () => {
