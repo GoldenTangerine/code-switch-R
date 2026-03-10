@@ -26,19 +26,25 @@ import { fetchCurrentVersion } from '../../services/version'
 import { getBlacklistSettings, updateBlacklistSettings, getLevelBlacklistEnabled, setLevelBlacklistEnabled, getBlacklistEnabled, setBlacklistEnabled, type BlacklistSettings } from '../../services/settings'
 import { fetchConfigImportStatus, importFromPath, type ConfigImportStatus } from '../../services/configImport'
 import { fetchWebDAVConfig, previewWebDAVContent, saveWebDAVConfig, testWebDAVConfig, syncToWebDAV, loadFromWebDAV, type WebDAVSyncConfig } from '../../services/webdavSync'
+import { fetchCostSince } from '../../services/logs'
 import { useI18n } from 'vue-i18n'
 import { extractErrorMessage } from '../../utils/error'
 import { showToast } from '../../utils/toast'
 import {
+  budgetQuotaOrder,
   cloneBudgetQuotaAdjustments,
   cloneBudgetQuotaSettings,
   createDefaultBudgetQuotaAdjustments,
   createDefaultBudgetQuotaSettings,
+  formatLocalDateTime,
   normalizeBudgetQuotaAdjustments,
   normalizeBudgetQuotaSettings,
+  normalizeBudgetUsedDisplay,
   projectBudgetQuotaToLegacy,
+  resolveBudgetQuotaWindow,
   type BudgetQuotaKey,
   type BudgetQuotaAdjustments,
+  type BudgetQuotaSetting,
   type BudgetQuotaSettings,
 } from '../../utils/budgetUsage'
 
@@ -69,6 +75,37 @@ const getCachedJson = <T,>(key: string, defaultValue: T): T => {
     return defaultValue
   }
 }
+
+const mapBudgetQuotaValues = (resolveValue: (key: BudgetQuotaKey) => number): BudgetQuotaAdjustments => {
+  const nextValues = createDefaultBudgetQuotaAdjustments()
+  budgetQuotaOrder.forEach((key) => {
+    nextValues[key] = resolveValue(key)
+  })
+  return nextValues
+}
+
+type BudgetQuotaUsageStatus = 'inactive' | 'loading' | 'ready' | 'error'
+type BudgetQuotaUsageStatuses = Record<BudgetQuotaKey, BudgetQuotaUsageStatus>
+
+const createDefaultBudgetQuotaUsageStatuses = (
+  status: BudgetQuotaUsageStatus = 'inactive',
+): BudgetQuotaUsageStatuses => ({
+  five_hour: status,
+  daily: status,
+  weekly: status,
+  monthly: status,
+})
+
+const mapBudgetQuotaUsageStatuses = (
+  resolveStatus: (key: BudgetQuotaKey) => BudgetQuotaUsageStatus,
+): BudgetQuotaUsageStatuses => {
+  const nextStatuses = createDefaultBudgetQuotaUsageStatuses()
+  budgetQuotaOrder.forEach((key) => {
+    nextStatuses[key] = resolveStatus(key)
+  })
+  return nextStatuses
+}
+
 const defaultUpdateHistoryKeepCount = 3
 const minUpdateHistoryKeepCount = 1
 const maxUpdateHistoryKeepCount = 20
@@ -112,6 +149,9 @@ const budgetQuotaUsedAdjustments = ref<BudgetQuotaAdjustments>(normalizeBudgetQu
 const budgetQuotaSettings = ref<BudgetQuotaSettings>(normalizeBudgetQuotaSettings(
   getCachedJson('budgetQuotaSettings', createDefaultBudgetQuotaSettings()),
 ))
+const budgetQuotaTrackedUsage = ref<BudgetQuotaAdjustments>(createDefaultBudgetQuotaAdjustments())
+const budgetQuotaCurrentUsed = ref<BudgetQuotaAdjustments>(createDefaultBudgetQuotaAdjustments())
+const budgetQuotaUsageStatuses = ref<BudgetQuotaUsageStatuses>(createDefaultBudgetQuotaUsageStatuses())
 const budgetForecastMethod = ref(getCachedString('budgetForecastMethod', 'cycle'))
 const budgetForecastDisplay = ref(getCachedString('budgetForecastDisplay', 'datetime'))
 const budgetShowCountdown = ref(getCachedValue('budgetShowCountdown', false))
@@ -127,14 +167,21 @@ const budgetQuotaUsedAdjustmentsCodex = ref<BudgetQuotaAdjustments>(normalizeBud
 const budgetQuotaSettingsCodex = ref<BudgetQuotaSettings>(normalizeBudgetQuotaSettings(
   getCachedJson('budgetQuotaSettingsCodex', createDefaultBudgetQuotaSettings()),
 ))
+const budgetQuotaTrackedUsageCodex = ref<BudgetQuotaAdjustments>(createDefaultBudgetQuotaAdjustments())
+const budgetQuotaCurrentUsedCodex = ref<BudgetQuotaAdjustments>(createDefaultBudgetQuotaAdjustments())
+const budgetQuotaUsageStatusesCodex = ref<BudgetQuotaUsageStatuses>(createDefaultBudgetQuotaUsageStatuses())
 const budgetForecastMethodCodex = ref(getCachedString('budgetForecastMethodCodex', 'cycle'))
 const budgetForecastDisplayCodex = ref(getCachedString('budgetForecastDisplayCodex', 'datetime'))
 const budgetShowCountdownCodex = ref(getCachedValue('budgetShowCountdownCodex', false))
 const budgetShowForecastCodex = ref(getCachedValue('budgetShowForecastCodex', false))
+const budgetQuotaUsageLoading = ref(false)
+const budgetQuotaUsageLoadingCodex = ref(false)
 const settingsLoading = ref(true)
 const saveBusy = ref(false)
 let saveQueued = false
 let persistTimer: number | undefined
+let budgetQuotaUsageRequestSeq = 0
+let budgetQuotaUsageRequestSeqCodex = 0
 const defaultPersistDebounceMs = 150
 const minPersistDebounceMs = 0
 const maxPersistDebounceMs = 2000
@@ -165,6 +212,8 @@ type BudgetQuotaDefinition = {
   showMonthDay: boolean
   showTime: boolean
 }
+
+type BudgetQuotaPlatform = 'claude' | 'codex'
 
 const budgetQuotaDefinitions: BudgetQuotaDefinition[] = [
   {
@@ -208,6 +257,163 @@ const formatBudgetLimitLabel = (total: number) => {
   return `$${total.toFixed(4)}`
 }
 
+const buildBudgetQuotaCurrentUsed = (
+  trackedUsage: BudgetQuotaAdjustments,
+  adjustments: BudgetQuotaAdjustments,
+  statuses: BudgetQuotaUsageStatuses,
+) => {
+  return mapBudgetQuotaValues((key) => (
+    statuses[key] === 'ready'
+      ? normalizeBudgetUsedDisplay(trackedUsage[key] + adjustments[key])
+      : 0
+  ))
+}
+
+const getBudgetQuotaRefs = (platform: BudgetQuotaPlatform) => {
+  return platform === 'codex'
+    ? {
+      settings: budgetQuotaSettingsCodex,
+      adjustments: budgetQuotaUsedAdjustmentsCodex,
+      trackedUsage: budgetQuotaTrackedUsageCodex,
+      currentUsed: budgetQuotaCurrentUsedCodex,
+      statuses: budgetQuotaUsageStatusesCodex,
+      loading: budgetQuotaUsageLoadingCodex,
+    }
+    : {
+      settings: budgetQuotaSettings,
+      adjustments: budgetQuotaUsedAdjustments,
+      trackedUsage: budgetQuotaTrackedUsage,
+      currentUsed: budgetQuotaCurrentUsed,
+      statuses: budgetQuotaUsageStatuses,
+      loading: budgetQuotaUsageLoading,
+    }
+}
+
+const syncBudgetQuotaCurrentUsedForPlatform = (platform: BudgetQuotaPlatform) => {
+  const quotaRefs = getBudgetQuotaRefs(platform)
+  quotaRefs.currentUsed.value = buildBudgetQuotaCurrentUsed(
+    quotaRefs.trackedUsage.value,
+    quotaRefs.adjustments.value,
+    quotaRefs.statuses.value,
+  )
+}
+
+const getBudgetQuotaUsageStatus = (platform: BudgetQuotaPlatform, key: BudgetQuotaKey) => {
+  return getBudgetQuotaRefs(platform).statuses.value[key]
+}
+
+const isBudgetQuotaCurrentUsedEditable = (platform: BudgetQuotaPlatform, key: BudgetQuotaKey) => {
+  return getBudgetQuotaUsageStatus(platform, key) === 'ready'
+}
+
+const getBudgetQuotaCurrentUsedHint = (platform: BudgetQuotaPlatform, key: BudgetQuotaKey) => {
+  const status = getBudgetQuotaUsageStatus(platform, key)
+  if (status === 'inactive') {
+    return t('components.general.label.budgetQuotaUsedInactiveHint')
+  }
+  if (status === 'loading') {
+    return t('components.general.label.budgetQuotaUsedLoadingHint')
+  }
+  if (status === 'error') {
+    return t('components.general.label.budgetQuotaUsedUnavailableHint')
+  }
+  return t('components.general.label.budgetQuotaUsedAdjustmentHint')
+}
+
+const nextBudgetQuotaUsageRequestId = (platform: BudgetQuotaPlatform) => {
+  if (platform === 'codex') {
+    budgetQuotaUsageRequestSeqCodex += 1
+    return budgetQuotaUsageRequestSeqCodex
+  }
+  budgetQuotaUsageRequestSeq += 1
+  return budgetQuotaUsageRequestSeq
+}
+
+const isBudgetQuotaUsageRequestCurrent = (platform: BudgetQuotaPlatform, requestId: number) => {
+  return platform === 'codex'
+    ? requestId === budgetQuotaUsageRequestSeqCodex
+    : requestId === budgetQuotaUsageRequestSeq
+}
+
+const refreshBudgetQuotaUsage = async (platform: BudgetQuotaPlatform) => {
+  const requestId = nextBudgetQuotaUsageRequestId(platform)
+  const quotaRefs = getBudgetQuotaRefs(platform)
+  const quotaSettings = normalizeBudgetQuotaSettings(quotaRefs.settings.value)
+  const activeQuotaKeys = budgetQuotaOrder.filter((key) => quotaSettings[key].total > 0)
+  const activeQuotaKeySet = new Set(activeQuotaKeys)
+
+  quotaRefs.loading.value = activeQuotaKeys.length > 0
+  quotaRefs.statuses.value = mapBudgetQuotaUsageStatuses((key) => (
+    activeQuotaKeySet.has(key) ? 'loading' : 'inactive'
+  ))
+  quotaRefs.trackedUsage.value = createDefaultBudgetQuotaAdjustments()
+  quotaRefs.currentUsed.value = createDefaultBudgetQuotaAdjustments()
+
+  if (activeQuotaKeys.length === 0) {
+    quotaRefs.loading.value = false
+    return
+  }
+
+  try {
+    const now = new Date()
+    const nextTrackedUsage = createDefaultBudgetQuotaAdjustments()
+    const nextStatuses = mapBudgetQuotaUsageStatuses((key) => (
+      activeQuotaKeySet.has(key) ? 'error' : 'inactive'
+    ))
+    const results = await Promise.allSettled(
+      activeQuotaKeys.map(async (key) => {
+        const setting = quotaSettings[key] as BudgetQuotaSetting
+        const window = resolveBudgetQuotaWindow(key, setting, now)
+        const usage = await fetchCostSince(formatLocalDateTime(window.start), platform)
+        return {
+          key,
+          usage: normalizeBudgetUsedDisplay(Number(usage)),
+        }
+      }),
+    )
+    if (!isBudgetQuotaUsageRequestCurrent(platform, requestId)) return
+    results.forEach((result) => {
+      if (result.status !== 'fulfilled') return
+      nextTrackedUsage[result.value.key] = result.value.usage
+      nextStatuses[result.value.key] = 'ready'
+    })
+    quotaRefs.trackedUsage.value = nextTrackedUsage
+    quotaRefs.statuses.value = nextStatuses
+    syncBudgetQuotaCurrentUsedForPlatform(platform)
+  } catch (error) {
+    console.error(`failed to load ${platform} quota usage`, error)
+  } finally {
+    if (isBudgetQuotaUsageRequestCurrent(platform, requestId)) {
+      quotaRefs.loading.value = false
+    }
+  }
+}
+
+const refreshAllBudgetQuotaUsage = async () => {
+  await Promise.all([
+    refreshBudgetQuotaUsage('claude'),
+    refreshBudgetQuotaUsage('codex'),
+  ])
+}
+
+const handleBudgetQuotaCurrentUsedChange = (
+  platform: BudgetQuotaPlatform,
+  key: BudgetQuotaKey,
+) => {
+  const quotaRefs = getBudgetQuotaRefs(platform)
+  if (quotaRefs.statuses.value[key] !== 'ready') return
+  const nextUsed = normalizeBudgetUsedDisplay(Number(quotaRefs.currentUsed.value[key]))
+  quotaRefs.currentUsed.value[key] = nextUsed
+  quotaRefs.adjustments.value[key] = Number((nextUsed - quotaRefs.trackedUsage.value[key]).toFixed(6))
+  syncBudgetQuotaCurrentUsedForPlatform(platform)
+  persistAppSettings()
+}
+
+const handleBudgetQuotaConfigChange = (platform: BudgetQuotaPlatform) => {
+  void refreshBudgetQuotaUsage(platform)
+  persistAppSettings()
+}
+
 const syncAppSettingsCache = () => {
   localStorage.setItem('app-settings-heatmap', String(heatmapEnabled.value))
   localStorage.setItem('app-settings-heatmapGranularity', heatmapGranularity.value)
@@ -240,6 +446,10 @@ const syncAppSettingsCache = () => {
   localStorage.setItem('app-settings-roundRobin', String(roundRobinEnabled.value))
   localStorage.setItem('app-settings-captureRequestLogPayload', String(captureRequestLogPayloadEnabled.value))
   localStorage.setItem('app-settings-sanitizeRequestLogPayload', String(sanitizeRequestLogPayloadEnabled.value))
+  localStorage.removeItem('app-settings-budgetQuotaTrackedUsage')
+  localStorage.removeItem('app-settings-budgetQuotaCurrentUsed')
+  localStorage.removeItem('app-settings-budgetQuotaTrackedUsageCodex')
+  localStorage.removeItem('app-settings-budgetQuotaCurrentUsedCodex')
 }
 
 // 更新相关状态
@@ -878,9 +1088,12 @@ const loadAppSettings = async () => {
     roundRobinEnabled.value = data?.enable_round_robin ?? false
     captureRequestLogPayloadEnabled.value = data?.capture_request_log_payload ?? false
     sanitizeRequestLogPayloadEnabled.value = data?.sanitize_request_log_payload ?? true
+    syncBudgetQuotaCurrentUsedForPlatform('claude')
+    syncBudgetQuotaCurrentUsedForPlatform('codex')
 
     // 缓存到 localStorage，下次打开时直接显示正确状态
     syncAppSettingsCache()
+    void refreshAllBudgetQuotaUsage()
   } catch (error) {
     console.error('failed to load app settings', error)
     heatmapEnabled.value = true
@@ -889,12 +1102,18 @@ const loadAppSettings = async () => {
     homeTitleVisible.value = true
     budgetQuotaUsedAdjustments.value = createDefaultBudgetQuotaAdjustments()
     budgetQuotaSettings.value = createDefaultBudgetQuotaSettings()
+    budgetQuotaTrackedUsage.value = createDefaultBudgetQuotaAdjustments()
+    budgetQuotaCurrentUsed.value = createDefaultBudgetQuotaAdjustments()
+    budgetQuotaUsageStatuses.value = createDefaultBudgetQuotaUsageStatuses()
     budgetForecastMethod.value = 'cycle'
     budgetForecastDisplay.value = 'datetime'
     budgetShowCountdown.value = false
     budgetShowForecast.value = false
     budgetQuotaUsedAdjustmentsCodex.value = createDefaultBudgetQuotaAdjustments()
     budgetQuotaSettingsCodex.value = createDefaultBudgetQuotaSettings()
+    budgetQuotaTrackedUsageCodex.value = createDefaultBudgetQuotaAdjustments()
+    budgetQuotaCurrentUsedCodex.value = createDefaultBudgetQuotaAdjustments()
+    budgetQuotaUsageStatusesCodex.value = createDefaultBudgetQuotaUsageStatuses()
     budgetForecastMethodCodex.value = 'cycle'
     budgetForecastDisplayCodex.value = 'datetime'
     budgetShowCountdownCodex.value = false
@@ -907,6 +1126,7 @@ const loadAppSettings = async () => {
     roundRobinEnabled.value = false
     captureRequestLogPayloadEnabled.value = false
     sanitizeRequestLogPayloadEnabled.value = true
+    syncAppSettingsCache()
   } finally {
     settingsLoading.value = false
   }
@@ -932,6 +1152,7 @@ const persistAppSettingsNow = async () => {
     budgetForecastMethod.value = normalizedBudgetForecastMethod
     const normalizedBudgetForecastDisplay = normalizeBudgetForecastDisplay(budgetForecastDisplay.value)
     budgetForecastDisplay.value = normalizedBudgetForecastDisplay
+    syncBudgetQuotaCurrentUsedForPlatform('claude')
     const normalizedBudgetQuotaUsedAdjustmentsCodex = normalizeBudgetQuotaAdjustments(budgetQuotaUsedAdjustmentsCodex.value)
     budgetQuotaUsedAdjustmentsCodex.value = cloneBudgetQuotaAdjustments(normalizedBudgetQuotaUsedAdjustmentsCodex)
     const normalizedBudgetQuotaSettingsCodex = normalizeBudgetQuotaSettings(budgetQuotaSettingsCodex.value)
@@ -940,6 +1161,7 @@ const persistAppSettingsNow = async () => {
     budgetForecastMethodCodex.value = normalizedBudgetForecastMethodCodex
     const normalizedBudgetForecastDisplayCodex = normalizeBudgetForecastDisplay(budgetForecastDisplayCodex.value)
     budgetForecastDisplayCodex.value = normalizedBudgetForecastDisplayCodex
+    syncBudgetQuotaCurrentUsedForPlatform('codex')
     const normalizedUpdateHistoryKeepCount = normalizeUpdateHistoryKeepCount(updateHistoryKeepCount.value)
     updateHistoryKeepCount.value = normalizedUpdateHistoryKeepCount
     const normalizedHeatmapDisplay = getHeatmapDisplaySettingsFromState()
@@ -1644,7 +1866,7 @@ onBeforeUnmount(() => {
                       step="0.01"
                       :disabled="settingsLoading || saveBusy"
                       v-model.number="budgetQuotaSettings[definition.key].total"
-                      @change="persistAppSettings"
+                      @change="handleBudgetQuotaConfigChange('claude')"
                       class="mac-input budget-input-field"
                     />
                     <span class="budget-unit">USD</span>
@@ -1657,15 +1879,16 @@ onBeforeUnmount(() => {
                     <input
                       type="number"
                       inputmode="decimal"
+                      min="0"
                       step="0.01"
-                      :disabled="settingsLoading || saveBusy"
-                      v-model.number="budgetQuotaUsedAdjustments[definition.key]"
-                      @change="persistAppSettings"
+                      :disabled="settingsLoading || saveBusy || !isBudgetQuotaCurrentUsedEditable('claude', definition.key)"
+                      v-model.number="budgetQuotaCurrentUsed[definition.key]"
+                      @change="handleBudgetQuotaCurrentUsedChange('claude', definition.key)"
                       class="mac-input budget-input-field"
                     />
                     <span class="budget-unit">USD</span>
                   </div>
-                  <span class="budget-quota-field__hint">{{ $t('components.general.label.budgetQuotaUsedAdjustmentHint') }}</span>
+                  <span class="budget-quota-field__hint">{{ getBudgetQuotaCurrentUsedHint('claude', definition.key) }}</span>
                 </div>
                 <div v-if="definition.showWeekday" class="budget-quota-field">
                   <span class="budget-quota-field__label">{{ $t('components.general.label.budgetRefreshWeekday') }}</span>
@@ -1673,7 +1896,7 @@ onBeforeUnmount(() => {
                     v-model.number="budgetQuotaSettings[definition.key].refreshWeekday"
                     :disabled="settingsLoading || saveBusy"
                     class="mac-select budget-select"
-                    @change="persistAppSettings">
+                    @change="handleBudgetQuotaConfigChange('claude')">
                     <option
                       v-for="weekday in weekdayOptions"
                       :key="`claude-${definition.key}-${weekday.value}`"
@@ -1688,7 +1911,7 @@ onBeforeUnmount(() => {
                     v-model.number="budgetQuotaSettings[definition.key].refreshMonthDay"
                     :disabled="settingsLoading || saveBusy"
                     class="mac-select budget-select"
-                    @change="persistAppSettings">
+                    @change="handleBudgetQuotaConfigChange('claude')">
                     <option
                       v-for="day in monthDayOptions"
                       :key="`claude-${definition.key}-day-${day}`"
@@ -1704,7 +1927,7 @@ onBeforeUnmount(() => {
                     type="time"
                     :disabled="settingsLoading || saveBusy"
                     v-model="budgetQuotaSettings[definition.key].refreshTime"
-                    @change="persistAppSettings"
+                    @change="handleBudgetQuotaConfigChange('claude')"
                     class="mac-input budget-time-input"
                   />
                 </div>
@@ -1790,7 +2013,7 @@ onBeforeUnmount(() => {
                       step="0.01"
                       :disabled="settingsLoading || saveBusy"
                       v-model.number="budgetQuotaSettingsCodex[definition.key].total"
-                      @change="persistAppSettings"
+                      @change="handleBudgetQuotaConfigChange('codex')"
                       class="mac-input budget-input-field"
                     />
                     <span class="budget-unit">USD</span>
@@ -1803,15 +2026,16 @@ onBeforeUnmount(() => {
                     <input
                       type="number"
                       inputmode="decimal"
+                      min="0"
                       step="0.01"
-                      :disabled="settingsLoading || saveBusy"
-                      v-model.number="budgetQuotaUsedAdjustmentsCodex[definition.key]"
-                      @change="persistAppSettings"
+                      :disabled="settingsLoading || saveBusy || !isBudgetQuotaCurrentUsedEditable('codex', definition.key)"
+                      v-model.number="budgetQuotaCurrentUsedCodex[definition.key]"
+                      @change="handleBudgetQuotaCurrentUsedChange('codex', definition.key)"
                       class="mac-input budget-input-field"
                     />
                     <span class="budget-unit">USD</span>
                   </div>
-                  <span class="budget-quota-field__hint">{{ $t('components.general.label.budgetQuotaUsedAdjustmentHint') }}</span>
+                  <span class="budget-quota-field__hint">{{ getBudgetQuotaCurrentUsedHint('codex', definition.key) }}</span>
                 </div>
                 <div v-if="definition.showWeekday" class="budget-quota-field">
                   <span class="budget-quota-field__label">{{ $t('components.general.label.budgetRefreshWeekday') }}</span>
@@ -1819,7 +2043,7 @@ onBeforeUnmount(() => {
                     v-model.number="budgetQuotaSettingsCodex[definition.key].refreshWeekday"
                     :disabled="settingsLoading || saveBusy"
                     class="mac-select budget-select"
-                    @change="persistAppSettings">
+                    @change="handleBudgetQuotaConfigChange('codex')">
                     <option
                       v-for="weekday in weekdayOptions"
                       :key="`codex-${definition.key}-${weekday.value}`"
@@ -1834,7 +2058,7 @@ onBeforeUnmount(() => {
                     v-model.number="budgetQuotaSettingsCodex[definition.key].refreshMonthDay"
                     :disabled="settingsLoading || saveBusy"
                     class="mac-select budget-select"
-                    @change="persistAppSettings">
+                    @change="handleBudgetQuotaConfigChange('codex')">
                     <option
                       v-for="day in monthDayOptions"
                       :key="`codex-${definition.key}-day-${day}`"
@@ -1850,7 +2074,7 @@ onBeforeUnmount(() => {
                     type="time"
                     :disabled="settingsLoading || saveBusy"
                     v-model="budgetQuotaSettingsCodex[definition.key].refreshTime"
-                    @change="persistAppSettings"
+                    @change="handleBudgetQuotaConfigChange('codex')"
                     class="mac-input budget-time-input"
                   />
                 </div>
