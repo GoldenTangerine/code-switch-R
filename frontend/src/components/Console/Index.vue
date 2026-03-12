@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick, computed } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick, computed, type Ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Call } from '@wailsio/runtime'
 import BaseButton from '../common/BaseButton.vue'
 import BaseModal from '../common/BaseModal.vue'
 import { showToast } from '../../utils/toast'
 import { extractErrorMessage } from '../../utils/error'
+import { parseProviderErrorFromConsoleMessage, type ProviderErrorDetail } from '../../utils/providerError'
 
 interface ConsoleLog {
   timestamp: string
@@ -19,6 +20,7 @@ type LevelFilter = 'ALL' | LogLevel
 interface ConsoleDisplayLog extends ConsoleLog {
   resolvedLevel: LogLevel
   diagnosticTags: string[]
+  providerError: ProviderErrorDetail | null
 }
 
 const levelFilterOptions: Array<{ key: LevelFilter; label: string }> = [
@@ -40,6 +42,7 @@ const activeLevelFilter = ref<LevelFilter>('ALL')
 const keywordQuery = ref('')
 const hitErrorLinkMode = ref(false)
 const copiedLogIdentity = ref('')
+const copiedProviderErrorIdentity = ref('')
 let refreshInterval: number | null = null
 
 const goBack = () => {
@@ -153,9 +156,13 @@ const inferLevelFromMessage = (message: string): LogLevel => {
   return 'INFO'
 }
 
-const getResolvedLevel = (log: ConsoleLog): LogLevel => {
+const getResolvedLevel = (log: ConsoleLog, providerError: ProviderErrorDetail | null): LogLevel => {
   const baseLevel = normalizeLogLevel(log.level)
   const inferredLevel = inferLevelFromMessage(log.message)
+
+  if (providerError != null) {
+    return 'ERROR'
+  }
 
   if (baseLevel === 'ERROR') {
     return 'ERROR'
@@ -168,44 +175,82 @@ const getResolvedLevel = (log: ConsoleLog): LogLevel => {
   return baseLevel
 }
 
-const extractDiagnosticTags = (message: string) => {
+const pushDiagnosticTag = (tags: string[], seen: Set<string>, value: string) => {
+  const normalized = value.trim()
+  if (!normalized || seen.has(normalized)) {
+    return
+  }
+  seen.add(normalized)
+  tags.push(normalized)
+}
+
+const extractDiagnosticTags = (message: string, providerError: ProviderErrorDetail | null) => {
   const diagnosticTags: string[] = []
+  const seenTags = new Set<string>()
   const statusMatch = message.match(/\bstatus(?:=|:|\s)(\d{3})\b/i)
   const providerMatch = message.match(/\bprovider(?:=|:|\s)([^\s|,]+)/i)
   const urlMatch = message.match(/https?:\/\/[^\s|)]+/i)
 
-  if (statusMatch) {
-    const statusCode = Number.parseInt(statusMatch[1], 10)
+  const statusCode = providerError?.statusCode ?? (statusMatch ? Number.parseInt(statusMatch[1], 10) : undefined)
+  if (statusCode != null) {
     const statusType = statusCode >= 500 ? '服务端' : statusCode >= 400 ? '客户端' : '状态'
-    diagnosticTags.push(`HTTP ${statusCode} (${statusType})`)
+    pushDiagnosticTag(diagnosticTags, seenTags, `HTTP ${statusCode} (${statusType})`)
+  }
+
+  if (providerError?.semanticTag) {
+    pushDiagnosticTag(diagnosticTags, seenTags, providerError.semanticTag)
+  }
+
+  if (providerError?.errorStatus) {
+    pushDiagnosticTag(diagnosticTags, seenTags, `Status ${providerError.errorStatus}`)
+  }
+
+  if (providerError?.errorType) {
+    pushDiagnosticTag(diagnosticTags, seenTags, `Type ${providerError.errorType}`)
+  }
+
+  if (providerError?.errorCode) {
+    pushDiagnosticTag(diagnosticTags, seenTags, `Code ${providerError.errorCode}`)
+  }
+
+  if (providerError?.errorParam) {
+    pushDiagnosticTag(diagnosticTags, seenTags, `Param ${providerError.errorParam}`)
   }
 
   if (providerMatch) {
-    diagnosticTags.push(`Provider ${providerMatch[1]}`)
+    pushDiagnosticTag(diagnosticTags, seenTags, `Provider ${providerMatch[1]}`)
   }
 
   if (urlMatch) {
     const normalizedURL = urlMatch[0]
-    diagnosticTags.push(normalizedURL.length > 72 ? `${normalizedURL.slice(0, 69)}...` : normalizedURL)
+    pushDiagnosticTag(
+      diagnosticTags,
+      seenTags,
+      normalizedURL.length > 72 ? `${normalizedURL.slice(0, 69)}...` : normalizedURL,
+    )
   }
 
   if (message.includes('request failed after')) {
-    diagnosticTags.push('重试后仍失败')
+    pushDiagnosticTag(diagnosticTags, seenTags, '重试后仍失败')
   }
 
   if (message.includes('客户端中断')) {
-    diagnosticTags.push('客户端中断')
+    pushDiagnosticTag(diagnosticTags, seenTags, '客户端中断')
   }
 
-  return diagnosticTags.slice(0, 3)
+  return diagnosticTags.slice(0, 6)
 }
 
 const parsedLogs = computed<ConsoleDisplayLog[]>(() => {
-  return logs.value.map((log) => ({
-    ...log,
-    resolvedLevel: getResolvedLevel(log),
-    diagnosticTags: extractDiagnosticTags(log.message),
-  }))
+  return logs.value.map((log) => {
+    const providerError = parseProviderErrorFromConsoleMessage(log.message)
+    return {
+      ...log,
+      providerError,
+      resolvedLevel: getResolvedLevel(log, providerError),
+      diagnosticTags: extractDiagnosticTags(log.message, providerError),
+    }
+  })
 })
 
 const levelCounts = computed<Record<LevelFilter, number>>(() => {
@@ -248,6 +293,13 @@ const matchesKeyword = (log: ConsoleDisplayLog, keyword: string) => {
   const searchableText = [
     log.message,
     log.resolvedLevel,
+    log.providerError?.summary ?? '',
+    log.providerError?.providerMessage ?? '',
+    log.providerError?.errorCode ?? '',
+    log.providerError?.errorType ?? '',
+    log.providerError?.errorStatus ?? '',
+    log.providerError?.errorParam ?? '',
+    log.providerError?.rawPayload ?? '',
     ...log.diagnosticTags,
     formatTimestamp(log.timestamp),
   ].join('\n').toLowerCase()
@@ -311,6 +363,8 @@ const toggleHitErrorLinkMode = async () => {
 const getLogIdentity = (log: ConsoleDisplayLog) => `${log.timestamp}|${log.resolvedLevel}|${log.message}`
 
 const isCopiedLog = (log: ConsoleDisplayLog) => copiedLogIdentity.value === getLogIdentity(log)
+const getProviderErrorIdentity = (log: ConsoleDisplayLog) => `${getLogIdentity(log)}|provider-error`
+const isCopiedProviderError = (log: ConsoleDisplayLog) => copiedProviderErrorIdentity.value === getProviderErrorIdentity(log)
 
 const buildCopyPayload = (log: ConsoleDisplayLog) => {
   const formattedLine = `[${formatTimestamp(log.timestamp)}] [${log.resolvedLevel}] ${log.message}`
@@ -337,24 +391,52 @@ const copyWithFallback = (payload: string) => {
   }
 }
 
+const writeTextToClipboard = async (payload: string) => {
+  const clipboardWriteText = typeof navigator === 'undefined'
+    ? undefined
+    : navigator.clipboard?.writeText?.bind(navigator.clipboard)
+  if (clipboardWriteText != null) {
+    await clipboardWriteText(payload)
+    return
+  }
+  copyWithFallback(payload)
+}
+
+const markCopiedState = (target: Ref<string>, identity: string) => {
+  target.value = identity
+  window.setTimeout(() => {
+    if (target.value === identity) {
+      target.value = ''
+    }
+  }, 1500)
+}
+
 const copyErrorLogLine = async (log: ConsoleDisplayLog) => {
   const payload = buildCopyPayload(log)
   try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(payload)
-    } else {
-      copyWithFallback(payload)
-    }
+    await writeTextToClipboard(payload)
     const identity = getLogIdentity(log)
-    copiedLogIdentity.value = identity
+    markCopiedState(copiedLogIdentity, identity)
     showToast('错误日志已复制', 'success')
-    window.setTimeout(() => {
-      if (copiedLogIdentity.value === identity) {
-        copiedLogIdentity.value = ''
-      }
-    }, 1500)
   } catch (error) {
     console.error('复制错误日志失败:', error)
+    showToast(`复制失败：${extractErrorMessage(error)}`, 'error')
+  }
+}
+
+const copyProviderError = async (log: ConsoleDisplayLog) => {
+  const payload = log.providerError?.copyText?.trim() ?? ''
+  if (!payload) {
+    showToast('该条日志没有可复制的供应商错误信息', 'warning')
+    return
+  }
+
+  try {
+    await writeTextToClipboard(payload)
+    markCopiedState(copiedProviderErrorIdentity, getProviderErrorIdentity(log))
+    showToast('供应商错误已复制', 'success')
+  } catch (error) {
+    console.error('复制供应商错误失败:', error)
     showToast(`复制失败：${extractErrorMessage(error)}`, 'error')
   }
 }
@@ -430,7 +512,7 @@ onUnmounted(() => {
             v-model="keywordQuery"
             class="keyword-input"
             type="text"
-            placeholder="搜索关键词（message / status / provider / url）"
+            placeholder="搜索关键词（message / status / provider / error code / error type）"
             @keydown.esc.prevent="clearKeywordSearch"
           />
           <button
@@ -487,7 +569,7 @@ onUnmounted(() => {
           v-for="(log, index) in visibleLogs"
           :key="index"
           class="log-entry"
-          :class="getLevelClass(log.resolvedLevel)"
+          :class="[getLevelClass(log.resolvedLevel), { 'log-entry--provider-error': log.providerError }]"
         >
           <span class="log-timestamp">{{ formatTimestamp(log.timestamp) }}</span>
           <span class="log-level">
@@ -496,6 +578,17 @@ onUnmounted(() => {
           </span>
           <div class="log-main">
             <span class="log-message">{{ log.message }}</span>
+            <section v-if="log.providerError" class="provider-error-panel">
+              <div class="provider-error-panel__header">
+                <span class="provider-error-panel__label">供应商错误详情</span>
+                <span v-if="log.providerError.statusCode" class="provider-error-panel__status">
+                  HTTP {{ log.providerError.statusCode }}
+                </span>
+              </div>
+              <p class="provider-error-panel__summary">
+                {{ log.providerError.summary }}
+              </p>
+            </section>
             <div v-if="log.diagnosticTags.length > 0" class="log-tags">
               <span
                 v-for="(tag, tagIndex) in log.diagnosticTags"
@@ -506,14 +599,24 @@ onUnmounted(() => {
               </span>
             </div>
           </div>
-          <button
-            v-if="log.resolvedLevel === 'ERROR'"
-            class="copy-log-btn"
-            :class="{ copied: isCopiedLog(log) }"
-            @click="copyErrorLogLine(log)"
-          >
-            {{ isCopiedLog(log) ? '已复制' : '复制错误行' }}
-          </button>
+          <div v-if="log.resolvedLevel === 'ERROR' || log.providerError" class="log-actions">
+            <button
+              v-if="log.providerError?.copyText"
+              class="copy-log-btn copy-provider-btn"
+              :class="{ copied: isCopiedProviderError(log) }"
+              @click="copyProviderError(log)"
+            >
+              {{ isCopiedProviderError(log) ? '已复制错误' : '复制供应商错误' }}
+            </button>
+            <button
+              v-if="log.resolvedLevel === 'ERROR'"
+              class="copy-log-btn"
+              :class="{ copied: isCopiedLog(log) }"
+              @click="copyErrorLogLine(log)"
+            >
+              {{ isCopiedLog(log) ? '已复制' : '复制错误行' }}
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -726,6 +829,10 @@ html.dark .console-content {
   transition: background-color 0.15s ease, border-color 0.15s ease;
 }
 
+.log-entry--provider-error {
+  box-shadow: inset 0 0 0 1px rgba(248, 113, 113, 0.18);
+}
+
 .log-entry + .log-entry {
   margin-top: 6px;
 }
@@ -808,6 +915,53 @@ html.dark .console-content {
   word-break: break-word;
 }
 
+.provider-error-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 2px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(248, 113, 113, 0.28);
+  background: linear-gradient(135deg, rgba(127, 29, 29, 0.28), rgba(69, 10, 10, 0.14));
+}
+
+.provider-error-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.provider-error-panel__label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: #fca5a5;
+}
+
+.provider-error-panel__status {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(248, 113, 113, 0.4);
+  background: rgba(127, 29, 29, 0.35);
+  color: #fecaca;
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.provider-error-panel__summary {
+  margin: 0;
+  color: #ffe4e6;
+  font-size: 0.78rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 .log-tags {
   display: flex;
   flex-wrap: wrap;
@@ -853,9 +1007,27 @@ html.dark .console-content {
   transition: all 0.15s ease;
 }
 
+.log-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.copy-provider-btn {
+  border-color: rgba(251, 191, 36, 0.45);
+  background: rgba(120, 53, 15, 0.35);
+  color: #fde68a;
+}
+
 .copy-log-btn:hover {
   border-color: rgba(252, 165, 165, 0.75);
   background: rgba(220, 38, 38, 0.34);
+}
+
+.copy-provider-btn:hover {
+  border-color: rgba(252, 211, 77, 0.72);
+  background: rgba(180, 83, 9, 0.34);
 }
 
 .copy-log-btn.copied {
@@ -890,9 +1062,12 @@ html.dark .console-content {
     grid-template-columns: auto auto minmax(0, 1fr);
   }
 
-  .copy-log-btn {
+  .log-actions {
     grid-column: 3;
     justify-self: start;
+    align-items: flex-start;
+    flex-direction: row;
+    flex-wrap: wrap;
   }
 }
 
@@ -904,7 +1079,7 @@ html.dark .console-content {
   .log-timestamp,
   .log-level,
   .log-main,
-  .copy-log-btn {
+  .log-actions {
     grid-column: 1;
   }
 
@@ -912,7 +1087,7 @@ html.dark .console-content {
     justify-self: start;
   }
 
-  .copy-log-btn {
+  .log-actions {
     justify-self: start;
   }
 
