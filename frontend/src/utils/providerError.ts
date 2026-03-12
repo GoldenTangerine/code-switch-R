@@ -14,6 +14,7 @@ export type ProviderErrorDetail = {
 type JsonRecord = Record<string, unknown>
 
 const upstreamStatusPattern = /\bupstream status\s+(\d{3})\b/i
+const inlineStatusPattern = /\bstatus(?:=|:|\s)(\d{3})\b/i
 const httpStatusPattern = /\bHTTP\s+(\d{3})\b/i
 const payloadTailMarkers = [' | 耗时:', ' | 重试 ', ' | Model:', ' | mode:', ' | hint:']
 
@@ -135,12 +136,26 @@ const trimPayloadTail = (value: string) => {
   return result
 }
 
-const extractPayloadText = (message: string, upstreamMatch: RegExpMatchArray | null) => {
-  if (upstreamMatch == null || upstreamMatch.index == null) {
+const extractFirstEmbeddedJsonSegment = (input: string): string => {
+  const trimmed = input.trim()
+  if (!trimmed) {
     return ''
   }
 
-  let remainder = message.slice(upstreamMatch.index + upstreamMatch[0].length).trim()
+  const firstJsonStart = trimmed.search(/[{\[]/)
+  if (firstJsonStart < 0) {
+    return ''
+  }
+
+  return extractBalancedJsonSegment(trimmed.slice(firstJsonStart))
+}
+
+const extractPayloadText = (message: string, statusMatch: RegExpMatchArray | null) => {
+  if (statusMatch == null || statusMatch.index == null) {
+    return ''
+  }
+
+  let remainder = message.slice(statusMatch.index + statusMatch[0].length).trim()
   if (remainder.startsWith(':')) {
     remainder = remainder.slice(1).trim()
   }
@@ -148,12 +163,22 @@ const extractPayloadText = (message: string, upstreamMatch: RegExpMatchArray | n
     return ''
   }
 
-  const jsonSegment = extractBalancedJsonSegment(remainder)
-  if (jsonSegment) {
-    return jsonSegment
+  const newlinePayload = remainder.includes('\n')
+    ? remainder.slice(remainder.indexOf('\n') + 1).trim()
+    : ''
+
+  for (const candidate of [remainder, newlinePayload]) {
+    if (!candidate) {
+      continue
+    }
+
+    const jsonSegment = extractBalancedJsonSegment(candidate) || extractFirstEmbeddedJsonSegment(candidate)
+    if (jsonSegment) {
+      return jsonSegment
+    }
   }
 
-  return trimPayloadTail(remainder)
+  return trimPayloadTail(newlinePayload || remainder)
 }
 
 const tryParseJson = (value: string): unknown => {
@@ -196,6 +221,11 @@ const classifyProviderError = (detail: Pick<ProviderErrorDetail, 'statusCode' | 
       'model unavailable',
       'temporarily unavailable',
       'currently unavailable',
+      '负载已经达到上限',
+      '负载达到上限',
+      '模型负载过高',
+      '模型繁忙',
+      '服务繁忙',
     ])
   ) {
     return '模型负载过高'
@@ -275,10 +305,12 @@ export const parseProviderErrorFromConsoleMessage = (message: string): ProviderE
   }
 
   const upstreamMatch = normalizedMessage.match(upstreamStatusPattern)
+  const inlineStatusMatch = normalizedMessage.match(inlineStatusPattern)
+  const statusMatch = upstreamMatch ?? inlineStatusMatch
   const httpStatusMatch = normalizedMessage.match(httpStatusPattern)
-  const upstreamStatusCode = upstreamMatch ? Number.parseInt(upstreamMatch[1], 10) : undefined
+  const upstreamStatusCode = statusMatch ? Number.parseInt(statusMatch[1], 10) : undefined
   const httpStatusCode = httpStatusMatch ? Number.parseInt(httpStatusMatch[1], 10) : undefined
-  const rawPayload = extractPayloadText(normalizedMessage, upstreamMatch)
+  const rawPayload = extractPayloadText(normalizedMessage, statusMatch)
   const parsedPayload = tryParseJson(rawPayload)
 
   const providerMessage = extractProviderMessage(parsedPayload)

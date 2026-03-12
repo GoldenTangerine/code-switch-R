@@ -34,6 +34,22 @@ describe('providerError', () => {
     expect(detail?.semanticTag).toBe('接口 5xx')
   })
 
+  it('extracts real provider payload with folded request id from console logs', () => {
+    const detail = parseProviderErrorFromConsoleMessage(
+      '[ERROR] Upstream codex provider=Any Router status=503 url=https://example.com/responses content_type=application/json\n{"error":{"type":"new_api_error","message":"当前模型 claude-opus-4-6 负载已经达到上限，请稍后重试 (request id:\\n     202603121813186562816676KXPmIKr)"},"type":"error"}',
+    )
+
+    expect(detail).not.toBeNull()
+    expect(detail?.statusCode).toBe(503)
+    expect(detail?.providerMessage).toBe(
+      '当前模型 claude-opus-4-6 负载已经达到上限，请稍后重试 (request id: 202603121813186562816676KXPmIKr)',
+    )
+    expect(detail?.errorType).toBe('new_api_error')
+    expect(detail?.summary).toContain('request id: 202603121813186562816676KXPmIKr')
+    expect(detail?.semanticTag).toBe('模型负载过高')
+    expect(detail?.copyText).toContain('"type": "new_api_error"')
+  })
+
   it('treats bare http 500 log as provider error summary', () => {
     const detail = parseProviderErrorFromConsoleMessage(
       '[Gemini] ✗ 失败: fallback-provider | HTTP 500 | 耗时: 0.87s',

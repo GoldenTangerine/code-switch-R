@@ -114,6 +114,72 @@ func TestProxyHandlerAllProvidersFailedReturnsLastUpstreamErrorRaw(t *testing.T)
 	}
 }
 
+func TestProxyHandlerSingleProvider503ReturnsRawUpstreamError(t *testing.T) {
+	useIsolatedHomeDir(t)
+	gin.SetMode(gin.TestMode)
+	disableBlacklistForTest(t)
+
+	var providerCalls int32
+	finalRawBody := "{\"error\":{\"type\":\"new_api_error\",\"message\":\"当前模型 claude-opus-4-6 负载已经达到上限，请稍后重试 (request id:\\n     202603121813186562816676KXPmIKr)\"},\"type\":\"error\"}"
+	upstreamFail503 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&providerCalls, 1)
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Header().Set("X-Upstream-Trace", "trace-503")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(finalRawBody))
+	}))
+	defer upstreamFail503.Close()
+
+	providerService := NewProviderService()
+	settingsService := NewSettingsService()
+	blacklistService := NewBlacklistService(settingsService, nil)
+
+	providers := []Provider{
+		{
+			ID:      1,
+			Name:    "Any Router",
+			APIURL:  upstreamFail503.URL,
+			APIKey:  "test-key-503",
+			Enabled: true,
+			Level:   1,
+		},
+	}
+	if err := providerService.SaveProviders("codex", providers); err != nil {
+		t.Fatalf("保存 providers 失败: %v", err)
+	}
+
+	relay := NewProviderRelayService(providerService, nil, blacklistService, nil, nil, nil, "")
+	router := gin.New()
+	relay.registerRoutes(router)
+
+	reqBody := `{"model":"claude-opus-4-6","input":"hello"}`
+	req := httptest.NewRequest(http.MethodPost, "/responses", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if atomic.LoadInt32(&providerCalls) != 1 {
+		t.Fatalf("provider 调用次数 = %d, 期望 1", atomic.LoadInt32(&providerCalls))
+	}
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("状态码 = %d, 期望 %d, body=%s", w.Code, http.StatusServiceUnavailable, w.Body.String())
+	}
+
+	if got := strings.TrimSpace(w.Body.String()); got != finalRawBody {
+		t.Fatalf("响应体不匹配\ngot:  %s\nwant: %s", got, finalRawBody)
+	}
+
+	if got := w.Header().Get("Content-Type"); !strings.Contains(got, "application/json") {
+		t.Fatalf("Content-Type = %q, 期望包含 application/json", got)
+	}
+
+	if got := w.Header().Get("X-Upstream-Trace"); got != "trace-503" {
+		t.Fatalf("X-Upstream-Trace = %q, 期望 trace-503", got)
+	}
+}
+
 func TestProxyHandlerNetworkErrorStillReturns502Summary(t *testing.T) {
 	useIsolatedHomeDir(t)
 	gin.SetMode(gin.TestMode)

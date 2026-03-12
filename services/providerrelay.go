@@ -1039,20 +1039,28 @@ func (prs *ProviderRelayService) forwardRequest(
 		requestLog.HttpCode = resp.StatusCode()
 	}
 
+	status := 0
+	if resp != nil {
+		status = resp.StatusCode()
+	}
+
 	if err != nil {
 		// resp 存在但 err != nil：可能是客户端中断，不计入失败
-		if resp != nil && requestLog.HttpCode == 0 {
+		if resp != nil && status == 0 {
 			fmt.Printf("[INFO] Provider %s 响应存在但状态码为0，判定为客户端中断\n", provider.Name)
 			return false, fmt.Errorf("%w: %v", errClientAbort, err)
 		}
-		return false, err
+
+		// xrequest 在 5xx 重试耗尽后会同时返回 resp 和 err。
+		// 这里不能直接丢弃 resp，否则上游原始错误 body 会被吞掉，只剩一个笼统的 retry 错误。
+		if resp == nil || status < http.StatusMultipleChoices {
+			return false, err
+		}
 	}
 
 	if resp == nil {
 		return false, fmt.Errorf("empty response")
 	}
-
-	status := requestLog.HttpCode
 
 	// 状态码为 0 且无错误：当作成功处理
 	if status == 0 {
