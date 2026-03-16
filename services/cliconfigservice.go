@@ -69,14 +69,14 @@ type CLIConfigFile struct {
 
 // CLIConfig CLI 配置数据
 type CLIConfig struct {
-	Platform     CLIPlatform               `json:"platform"`
-	Fields       []CLIConfigField          `json:"fields"`
-	RawContent   string                    `json:"rawContent,omitempty"`   // 原始文件内容（用于高级编辑）
-	RawFiles     []CLIConfigFile           `json:"rawFiles,omitempty"`     // 多文件内容预览
-	ConfigFormat string                    `json:"configFormat,omitempty"` // "json" 或 "toml"
-	EnvContent   map[string]string         `json:"envContent,omitempty"`   // Gemini .env 内容
-	FilePath     string                    `json:"filePath,omitempty"`     // 配置文件路径
-	Editable     map[string]interface{}    `json:"editable,omitempty"`     // 可编辑字段的当前值
+	Platform     CLIPlatform            `json:"platform"`
+	Fields       []CLIConfigField       `json:"fields"`
+	RawContent   string                 `json:"rawContent,omitempty"`   // 原始文件内容（用于高级编辑）
+	RawFiles     []CLIConfigFile        `json:"rawFiles,omitempty"`     // 多文件内容预览
+	ConfigFormat string                 `json:"configFormat,omitempty"` // "json" 或 "toml"
+	EnvContent   map[string]string      `json:"envContent,omitempty"`   // Gemini .env 内容
+	FilePath     string                 `json:"filePath,omitempty"`     // 配置文件路径
+	Editable     map[string]interface{} `json:"editable,omitempty"`     // 可编辑字段的当前值
 }
 
 // CLIConfigSnapshots CLI 配置快照（用于前端对比：当前 vs 预览）
@@ -123,6 +123,21 @@ func (s *CliConfigService) GetConfig(platform string) (*CLIConfig, error) {
 	}
 }
 
+func resolveCLIConfigPreviewMode(apiUrl string, apiKey string, previewMode string) (string, error) {
+	previewModeTrim := strings.ToLower(strings.TrimSpace(previewMode))
+	switch previewModeTrim {
+	case "":
+		if strings.TrimSpace(apiUrl) != "" || strings.TrimSpace(apiKey) != "" {
+			return "direct", nil
+		}
+		return "proxy", nil
+	case "current", "direct", "proxy":
+		return previewModeTrim, nil
+	default:
+		return "", fmt.Errorf("无效的 previewMode: %s（允许值: current, direct, proxy）", previewMode)
+	}
+}
+
 // GetConfigSnapshots 获取指定平台的配置快照，用于前端展示"当前(磁盘)"与"预览(激活后)"对比。
 // 这是纯 dry-run 接口：不会对任何文件进行写入。
 //
@@ -149,22 +164,9 @@ func (s *CliConfigService) GetConfigSnapshots(platform string, apiUrl string, ap
 		return string(content), nil
 	}
 
-	// 解析 previewMode 参数
-	// effectiveMode 取值: "current", "direct", "proxy"
-	var effectiveMode string
-	previewModeTrim := strings.ToLower(strings.TrimSpace(previewMode))
-	switch previewModeTrim {
-	case "":
-		// 兼容旧逻辑：任一非空 => direct，否则 => proxy
-		if strings.TrimSpace(apiUrl) != "" || strings.TrimSpace(apiKey) != "" {
-			effectiveMode = "direct"
-		} else {
-			effectiveMode = "proxy"
-		}
-	case "current", "direct", "proxy":
-		effectiveMode = previewModeTrim
-	default:
-		return nil, fmt.Errorf("无效的 previewMode: %s（允许值: current, direct, proxy）", previewMode)
+	effectiveMode, err := resolveCLIConfigPreviewMode(apiUrl, apiKey, previewMode)
+	if err != nil {
+		return nil, err
 	}
 
 	// 用于旧代码兼容的布尔标志
@@ -443,6 +445,253 @@ func (s *CliConfigService) GetConfigSnapshots(platform string, apiUrl string, ap
 			PreviewFiles: previewFiles,
 			Mode:         currentMode,
 		}, nil
+
+	default:
+		return nil, fmt.Errorf("不支持的平台: %s", platform)
+	}
+}
+
+// GetConfigSnapshotsWithEditable 基于当前编辑中的 editable 生成预览快照。
+// CurrentFiles 始终来自磁盘真实内容；PreviewFiles 则基于 editable 进行 dry-run 生成，
+// 这样前端 JSON 编辑器和“预览效果”可以共享同一份逻辑来源。
+func (s *CliConfigService) GetConfigSnapshotsWithEditable(
+	platform string,
+	editable map[string]interface{},
+	apiUrl string,
+	apiKey string,
+	previewMode string,
+) (*CLIConfigSnapshots, error) {
+	baseSnapshots, err := s.GetConfigSnapshots(platform, apiUrl, apiKey, previewMode)
+	if err != nil {
+		return nil, err
+	}
+
+	effectiveMode, err := resolveCLIConfigPreviewMode(apiUrl, apiKey, previewMode)
+	if err != nil {
+		return nil, err
+	}
+
+	cloneEditable := make(map[string]interface{})
+	if editable != nil {
+		bytes, marshalErr := json.Marshal(editable)
+		if marshalErr != nil {
+			return nil, fmt.Errorf("复制 editable 失败: %w", marshalErr)
+		}
+		if len(bytes) > 0 {
+			if unmarshalErr := json.Unmarshal(bytes, &cloneEditable); unmarshalErr != nil {
+				return nil, fmt.Errorf("复制 editable 失败: %w", unmarshalErr)
+			}
+		}
+	}
+
+	switch CLIPlatform(platform) {
+	case PlatformClaude:
+		configPath := s.getClaudeConfigPath()
+		currentContent := ""
+		if len(baseSnapshots.CurrentFiles) > 0 {
+			currentContent = baseSnapshots.CurrentFiles[0].Content
+		}
+
+		previewData := cloneEditable
+		if previewData == nil {
+			previewData = make(map[string]interface{})
+		}
+
+		env, _ := previewData["env"].(map[string]interface{})
+		if env == nil {
+			env = make(map[string]interface{})
+		}
+
+		switch effectiveMode {
+		case "direct":
+			env["ANTHROPIC_BASE_URL"] = normalizeURLTrimSlash(apiUrl)
+			env["ANTHROPIC_AUTH_TOKEN"] = apiKey
+		case "proxy":
+			env["ANTHROPIC_BASE_URL"] = s.baseURL()
+			env["ANTHROPIC_AUTH_TOKEN"] = "code-switch-r"
+		case "current":
+			currentData := make(map[string]interface{})
+			if strings.TrimSpace(currentContent) != "" {
+				if err := json.Unmarshal([]byte(currentContent), &currentData); err == nil {
+					currentEnv, _ := currentData["env"].(map[string]interface{})
+					if currentEnv != nil {
+						if baseURL := anyToString(currentEnv["ANTHROPIC_BASE_URL"]); baseURL != "" {
+							env["ANTHROPIC_BASE_URL"] = baseURL
+						}
+						if authToken := anyToString(currentEnv["ANTHROPIC_AUTH_TOKEN"]); authToken != "" {
+							env["ANTHROPIC_AUTH_TOKEN"] = authToken
+						}
+					}
+				}
+			}
+			if _, ok := env["ANTHROPIC_BASE_URL"]; !ok {
+				env["ANTHROPIC_BASE_URL"] = s.baseURL()
+			}
+			if _, ok := env["ANTHROPIC_AUTH_TOKEN"]; !ok {
+				env["ANTHROPIC_AUTH_TOKEN"] = "code-switch-r"
+			}
+		}
+
+		previewData["env"] = env
+		previewBytes, err := json.MarshalIndent(previewData, "", "  ")
+		if err != nil {
+			return nil, fmt.Errorf("序列化 Claude 预览配置失败: %w", err)
+		}
+
+		baseSnapshots.PreviewFiles = []CLIConfigFile{
+			{Path: configPath, Format: "json", Content: string(previewBytes)},
+		}
+		return baseSnapshots, nil
+
+	case PlatformCodex:
+		configPath := s.getCodexConfigPath()
+		authPath := s.getCodexAuthPath()
+
+		currentConfig := ""
+		if len(baseSnapshots.CurrentFiles) > 0 {
+			currentConfig = baseSnapshots.CurrentFiles[0].Content
+		}
+		currentAuth := ""
+		if len(baseSnapshots.CurrentFiles) > 1 {
+			currentAuth = baseSnapshots.CurrentFiles[1].Content
+		}
+
+		raw := make(map[string]interface{})
+		if strings.TrimSpace(currentConfig) != "" {
+			if err := toml.Unmarshal([]byte(currentConfig), &raw); err != nil {
+				raw = make(map[string]interface{})
+			}
+		}
+		if raw == nil {
+			raw = make(map[string]interface{})
+		}
+
+		delete(raw, "model")
+		delete(raw, "model_reasoning_effort")
+		delete(raw, "disable_response_storage")
+		for key, value := range cloneEditable {
+			if key == "model_provider" || key == "preferred_auth_method" || strings.HasPrefix(key, "model_providers.") {
+				continue
+			}
+			raw[key] = value
+		}
+
+		authPayload := make(map[string]interface{})
+		if strings.TrimSpace(currentAuth) != "" {
+			if err := json.Unmarshal([]byte(currentAuth), &authPayload); err != nil {
+				authPayload = make(map[string]interface{})
+			}
+		}
+		if authPayload == nil {
+			authPayload = make(map[string]interface{})
+		}
+
+		switch effectiveMode {
+		case "direct":
+			providerKey := "preview-provider"
+			if providers, err := loadProviderSnapshot("codex"); err == nil {
+				for _, p := range providers {
+					if urlsEqualFold(p.APIURL, apiUrl) && p.APIKey == apiKey {
+						providerKey = sanitizeProviderKey(p.Name, int(p.ID))
+						break
+					}
+				}
+			}
+
+			raw["preferred_auth_method"] = "apikey"
+			raw["model_provider"] = providerKey
+
+			modelProviders := ensureTomlTable(raw, "model_providers")
+			providerCfg := ensureProviderTable(modelProviders, providerKey)
+			providerCfg["name"] = providerKey
+			providerCfg["base_url"] = normalizeURLTrimSlash(apiUrl)
+			providerCfg["wire_api"] = "responses"
+			providerCfg["requires_openai_auth"] = false
+			modelProviders[providerKey] = providerCfg
+			raw["model_providers"] = modelProviders
+
+			authPayload = map[string]interface{}{"OPENAI_API_KEY": apiKey}
+		case "proxy":
+			raw["preferred_auth_method"] = "apikey"
+			raw["model_provider"] = "code-switch-r"
+			if _, exists := raw["model"]; !exists {
+				raw["model"] = "gpt-5-codex"
+			}
+
+			modelProviders := ensureTomlTable(raw, "model_providers")
+			providerCfg := ensureProviderTable(modelProviders, "code-switch-r")
+			providerCfg["name"] = "code-switch-r"
+			providerCfg["base_url"] = s.baseURL()
+			providerCfg["wire_api"] = "responses"
+			providerCfg["requires_openai_auth"] = false
+			modelProviders["code-switch-r"] = providerCfg
+			raw["model_providers"] = modelProviders
+
+			authPayload["OPENAI_API_KEY"] = "code-switch-r"
+		}
+
+		tomlBytes, err := toml.Marshal(raw)
+		if err != nil {
+			return nil, fmt.Errorf("序列化 Codex 预览配置失败: %w", err)
+		}
+		cleaned := stripModelProvidersHeader(tomlBytes)
+
+		authBytes, err := json.MarshalIndent(authPayload, "", "  ")
+		if err != nil {
+			return nil, fmt.Errorf("序列化 Codex auth 预览失败: %w", err)
+		}
+
+		baseSnapshots.PreviewFiles = []CLIConfigFile{
+			{Path: configPath, Format: "toml", Content: string(cleaned)},
+			{Path: authPath, Format: "json", Content: string(authBytes)},
+		}
+		return baseSnapshots, nil
+
+	case PlatformGemini:
+		envPath := s.getGeminiEnvPath()
+		currentEnv := ""
+		if len(baseSnapshots.CurrentFiles) > 0 {
+			currentEnv = baseSnapshots.CurrentFiles[0].Content
+		}
+
+		envMap := parseEnvFile(currentEnv)
+		if envMap == nil {
+			envMap = make(map[string]string)
+		}
+
+		for key := range envMap {
+			if key != "GOOGLE_GEMINI_BASE_URL" && key != "GEMINI_API_KEY" {
+				delete(envMap, key)
+			}
+		}
+		for key, value := range cloneEditable {
+			if key == "GOOGLE_GEMINI_BASE_URL" || key == "GEMINI_API_KEY" {
+				continue
+			}
+			envMap[key] = fmt.Sprintf("%v", value)
+		}
+
+		switch effectiveMode {
+		case "direct":
+			if strings.TrimSpace(apiUrl) != "" {
+				envMap["GOOGLE_GEMINI_BASE_URL"] = strings.TrimSpace(apiUrl)
+			} else {
+				delete(envMap, "GOOGLE_GEMINI_BASE_URL")
+			}
+			if strings.TrimSpace(apiKey) != "" {
+				envMap["GEMINI_API_KEY"] = strings.TrimSpace(apiKey)
+			} else {
+				delete(envMap, "GEMINI_API_KEY")
+			}
+		case "proxy":
+			envMap["GOOGLE_GEMINI_BASE_URL"] = s.geminiBaseURL()
+			envMap["GEMINI_API_KEY"] = "code-switch-r"
+		}
+
+		baseSnapshots.PreviewFiles = []CLIConfigFile{
+			{Path: envPath, Format: "env", Content: buildGeminiEnvContent(envMap)},
+		}
+		return baseSnapshots, nil
 
 	default:
 		return nil, fmt.Errorf("不支持的平台: %s", platform)
@@ -755,26 +1004,19 @@ func (s *CliConfigService) getClaudeConfig() (*CLIConfig, error) {
 		}
 	}
 
+	for k, v := range data {
+		if k == "env" || k == "model" || k == "alwaysThinkingEnabled" || k == "enabledPlugins" {
+			continue
+		}
+		config.Editable[k] = v
+	}
+
 	return config, nil
 }
 
 func (s *CliConfigService) saveClaudeConfig(editable map[string]interface{}) error {
 	configPath := s.getClaudeConfigPath()
-
-	// 读取现有配置（保留用户的其他设置）
-	var data map[string]interface{}
-	if content, err := os.ReadFile(configPath); err == nil {
-		// 仅当文件非空时解析
-		if len(content) > 0 {
-			if err := json.Unmarshal(content, &data); err != nil {
-				// JSON 解析失败，使用空配置继续（后续会创建备份）
-				fmt.Printf("[警告] settings.json 格式无效，将使用空配置: %v\n", err)
-			}
-		}
-	}
-	if data == nil {
-		data = make(map[string]interface{})
-	}
+	data := make(map[string]interface{})
 
 	// 创建备份
 	if _, err := CreateBackup(configPath); err != nil {
@@ -782,14 +1024,9 @@ func (s *CliConfigService) saveClaudeConfig(editable map[string]interface{}) err
 		fmt.Printf("创建备份失败: %v\n", err)
 	}
 
-	// 确保 env 存在并设置锁定字段
-	env, ok := data["env"].(map[string]interface{})
-	if !ok {
-		env = make(map[string]interface{})
-	}
+	env := make(map[string]interface{})
 	env["ANTHROPIC_BASE_URL"] = s.baseURL()
 	env["ANTHROPIC_AUTH_TOKEN"] = "code-switch-r"
-	data["env"] = env
 
 	// 锁定字段列表（这些字段不允许用户覆盖）
 	lockedFields := map[string]bool{
@@ -819,6 +1056,8 @@ func (s *CliConfigService) saveClaudeConfig(editable map[string]interface{}) err
 		// 其他字段直接覆盖
 		data[k] = v
 	}
+
+	data["env"] = env
 
 	// 确保目录存在
 	if err := EnsureDir(filepath.Dir(configPath)); err != nil {

@@ -104,3 +104,21 @@ export async function fetchCLIConfigSnapshots(
 ): Promise<CLIConfigSnapshots> {
   return Call.ByName(`${SERVICE_PATH}.GetConfigSnapshots`, platform, apiUrl, apiKey, previewMode)
 }
+
+// 获取基于当前 editable 的配置快照（用于让编辑器与预览共享同一份生成逻辑）
+export async function fetchEditableCLIConfigSnapshots(
+  platform: CLIPlatform,
+  editable: Record<string, any> = {},
+  apiUrl: string = '',
+  apiKey: string = '',
+  previewMode: 'current' | 'direct' | 'proxy' | '' = ''
+): Promise<CLIConfigSnapshots> {
+  return Call.ByName(
+    `${SERVICE_PATH}.GetConfigSnapshotsWithEditable`,
+    platform,
+    editable,
+    apiUrl,
+    apiKey,
+    previewMode,
+  )
+}

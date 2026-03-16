@@ -95,14 +95,16 @@ export function useProviderForm(options: UseProviderFormOptions) {
   }
 
   const persistCliConfig = async (form: VendorForm, tabId: ProviderTab) => {
-    const cliConfig = form.cliConfig
     const supportedPlatforms: CLIPlatform[] = ['claude', 'codex', 'gemini']
-    if (!cliConfig || Object.keys(cliConfig).length === 0 || !supportedPlatforms.includes(tabId as CLIPlatform)) {
+    if (!supportedPlatforms.includes(tabId as CLIPlatform) || !form.cliConfigShouldPersist) {
       return
     }
 
     try {
-      await saveCLIConfig(tabId as CLIPlatform, cliConfig)
+      await saveCLIConfig(
+        tabId as CLIPlatform,
+        form.cliConfigPersistValue ?? form.cliConfig ?? {},
+      )
     } catch (error) {
       console.error('保存 CLI 配置失败:', error)
     }

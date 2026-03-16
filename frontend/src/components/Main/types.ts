@@ -32,6 +32,8 @@ export type VendorForm = {
   level?: number
   apiEndpoint?: string
   cliConfig?: Record<string, any>
+  cliConfigPersistValue?: Record<string, any>
+  cliConfigShouldPersist?: boolean
   availabilityMonitorEnabled?: boolean
   connectivityAutoBlacklist?: boolean
   availabilityConfig?: {

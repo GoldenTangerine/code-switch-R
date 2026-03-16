@@ -181,6 +181,7 @@
 
         <div class="form-field">
           <CLIConfigEditor
+            :key="cliConfigEditorKey"
             ref="cliConfigEditorRef"
             :platform="tabId as CLIPlatform"
             v-model="form.cliConfig"
@@ -283,6 +284,10 @@ import type { CLIPlatform } from '../../../services/cliConfig'
 
 type CLIConfigEditorExposed = InstanceType<typeof CLIConfigEditor> & {
   applyPendingJsonChanges?: () => boolean
+  getCliConfigSubmitState?: () => {
+    value: Record<string, any>
+    shouldPersist: boolean
+  }
 }
 
 const props = defineProps<{
@@ -305,6 +310,7 @@ const defaultIconKey = iconOptions[0] ?? 'aicoding'
 
 const form = reactive<VendorForm>(createDefaultVendorForm(props.tabId, defaultIconKey))
 const cliConfigEditorRef = ref<CLIConfigEditorExposed | null>(null)
+const cliConfigEditorKey = ref(0)
 const errors = reactive({
   apiUrl: '',
 })
@@ -332,6 +338,7 @@ const filteredIconOptions = computed(() => {
 const resetForm = () => {
   errors.apiUrl = ''
   iconSearchQuery.value = ''
+  cliConfigEditorKey.value += 1
 
   if (!props.card) {
     Object.assign(form, createDefaultVendorForm(props.tabId, defaultIconKey))
@@ -406,12 +413,21 @@ const buildFormPayload = (): VendorForm | null => {
 
   form.apiUrl = apiUrl
 
-  return buildNormalizedVendorForm({
+  const payload = buildNormalizedVendorForm({
     form,
     tabId: props.tabId,
     defaultIconKey,
     resolveAuthType: resolveEffectiveAuthType,
   })
+
+  const cliConfigSubmitState = cliConfigEditorRef.value?.getCliConfigSubmitState?.()
+  if (cliConfigSubmitState) {
+    payload.cliConfig = cliConfigSubmitState.shouldPersist ? cliConfigSubmitState.value : {}
+    payload.cliConfigPersistValue = cliConfigSubmitState.value
+    payload.cliConfigShouldPersist = cliConfigSubmitState.shouldPersist
+  }
+
+  return payload
 }
 
 const submit = (applyAfterSave = false) => {
