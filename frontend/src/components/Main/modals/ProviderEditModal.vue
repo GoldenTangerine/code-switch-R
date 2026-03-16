@@ -185,6 +185,7 @@
             ref="cliConfigEditorRef"
             :platform="tabId as CLIPlatform"
             v-model="form.cliConfig"
+            :provider-name="form.name"
             :provider-config="{
               apiKey: form.apiKey,
               baseUrl: form.apiUrl,
@@ -283,9 +284,10 @@ import type { AutomationCard } from '../../../data/cards'
 import type { CLIPlatform } from '../../../services/cliConfig'
 
 type CLIConfigEditorExposed = InstanceType<typeof CLIConfigEditor> & {
-  applyPendingJsonChanges?: () => boolean
+  applyPendingJsonChanges?: () => boolean | Promise<boolean>
   getCliConfigSubmitState?: () => {
     value: Record<string, any>
+    persistValue: Record<string, any>
     shouldPersist: boolean
   }
 }
@@ -396,8 +398,8 @@ const getLevelDescription = (level: number) => {
   return descriptions[level] || t('components.main.levelDesc.normal')
 }
 
-const buildFormPayload = (): VendorForm | null => {
-  const cliConfigReady = cliConfigEditorRef.value?.applyPendingJsonChanges?.() ?? true
+const buildFormPayload = async (): Promise<VendorForm | null> => {
+  const cliConfigReady = await (cliConfigEditorRef.value?.applyPendingJsonChanges?.() ?? true)
   if (!cliConfigReady) return null
 
   const apiUrl = form.apiUrl.trim()
@@ -423,15 +425,15 @@ const buildFormPayload = (): VendorForm | null => {
   const cliConfigSubmitState = cliConfigEditorRef.value?.getCliConfigSubmitState?.()
   if (cliConfigSubmitState) {
     payload.cliConfig = cliConfigSubmitState.shouldPersist ? cliConfigSubmitState.value : {}
-    payload.cliConfigPersistValue = cliConfigSubmitState.value
+    payload.cliConfigPersistValue = cliConfigSubmitState.persistValue
     payload.cliConfigShouldPersist = cliConfigSubmitState.shouldPersist
   }
 
   return payload
 }
 
-const submit = (applyAfterSave = false) => {
-  const payload = buildFormPayload()
+const submit = async (applyAfterSave = false) => {
+  const payload = await buildFormPayload()
   if (!payload) return
 
   if (applyAfterSave) {

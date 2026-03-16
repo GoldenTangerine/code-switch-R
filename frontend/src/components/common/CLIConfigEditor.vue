@@ -7,6 +7,19 @@
       </div>
 
       <div class="cli-header-right">
+        <label
+          class="cli-template-toggle"
+          :class="{ 'is-disabled': !hasSharedTemplate && !sharedTemplateEnabled }"
+          :title="t('components.cliConfig.injectTemplateHint')"
+        >
+          <input
+            type="checkbox"
+            :checked="sharedTemplateEnabled"
+            :disabled="!hasSharedTemplate && !sharedTemplateEnabled"
+            @change="handleSharedTemplateToggle(($event.target as HTMLInputElement).checked)"
+          />
+          <span>{{ t('components.cliConfig.injectTemplate') }}</span>
+        </label>
         <button
           class="cli-action-btn"
           type="button"
@@ -103,88 +116,15 @@
             :rows="14"
             :invalid="!!cliJsonError"
             :placeholder="cliJsonPlaceholder"
-            :show-validation="true"
+            :mode="cliEditorMode"
+            :show-validation="cliEditorMode === 'json'"
+            @format="handleCliEditorFormat"
           />
 
           <p v-if="cliJsonError" class="cli-json-error" role="alert">
             {{ cliJsonError }}
           </p>
           <p class="cli-json-hint">{{ cliJsonHint }}</p>
-
-          <label class="cli-template-inject">
-            <input
-              type="checkbox"
-              :checked="sharedTemplateEnabled"
-              :disabled="!hasSharedTemplate && !sharedTemplateEnabled"
-              @change="handleSharedTemplateToggle(($event.target as HTMLInputElement).checked)"
-            />
-            <span>{{ t('components.cliConfig.injectTemplate') }}</span>
-          </label>
-          <p class="cli-json-hint">{{ t('components.cliConfig.injectTemplateHint') }}</p>
-        </section>
-
-        <section v-if="previewDisplayFiles.length || currentFiles.length" class="cli-section cli-preview-section">
-          <div class="cli-section-header">
-            <span class="cli-section-title">{{ t('components.cliConfig.previewTitle') }}</span>
-            <span class="cli-section-count">{{ currentPreviewCount }}</span>
-          </div>
-
-          <TabGroup :selectedIndex="selectedPreviewTab" @change="selectedPreviewTab = $event">
-            <TabList class="cli-tabs-list">
-              <Tab as="template" v-slot="{ selected }">
-                <button :class="['cli-tab-btn', { selected }]">
-                  {{ t('components.cliConfig.tabPreview') }}
-                </button>
-              </Tab>
-              <Tab as="template" v-slot="{ selected }">
-                <button :class="['cli-tab-btn', { selected }]">
-                  {{ t('components.cliConfig.tabCurrent') }}
-                </button>
-              </Tab>
-            </TabList>
-
-            <TabPanels>
-              <TabPanel class="cli-preview-list">
-                <p v-if="previewDisplayFiles.length === 0" class="cli-empty-state">
-                  {{ t('components.cliConfig.previewEmpty') }}
-                </p>
-
-                <div
-                  v-for="(file, index) in previewDisplayFiles"
-                  :key="getFileKey(file, index)"
-                  class="cli-preview-card"
-                >
-                  <div class="cli-preview-meta">
-                    <span class="cli-preview-name">
-                      {{ file.path || t('components.cliConfig.previewUnknownPath') }}
-                    </span>
-                    <span class="cli-preview-format">{{ (file.format || config?.configFormat || '').toUpperCase() }}</span>
-                  </div>
-                  <pre class="cli-preview-content">{{ file.content || '' }}</pre>
-                </div>
-              </TabPanel>
-
-              <TabPanel class="cli-preview-list">
-                <p v-if="currentFiles.length === 0" class="cli-empty-state">
-                  {{ t('components.cliConfig.previewEmpty') }}
-                </p>
-
-                <div
-                  v-for="(file, index) in currentFiles"
-                  :key="`current-${getFileKey(file, index)}`"
-                  class="cli-preview-card"
-                >
-                  <div class="cli-preview-meta">
-                    <span class="cli-preview-name">
-                      {{ file.path || t('components.cliConfig.previewUnknownPath') }}
-                    </span>
-                    <span class="cli-preview-format">{{ (file.format || config?.configFormat || '').toUpperCase() }}</span>
-                  </div>
-                  <pre class="cli-preview-content">{{ file.content || '' }}</pre>
-                </div>
-              </TabPanel>
-            </TabPanels>
-          </TabGroup>
         </section>
       </template>
 
@@ -213,8 +153,10 @@
           v-model="globalTemplateEditingText"
           :rows="16"
           :invalid="!!globalTemplateError"
-          :placeholder="cliJsonPlaceholder"
+          :placeholder="templateJsonPlaceholder"
+          mode="json"
           :show-validation="true"
+          @format="handleGlobalTemplateFormat"
         />
 
         <p v-if="globalTemplateError" class="cli-json-error" role="alert">
@@ -251,27 +193,31 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Tab, TabGroup, TabList, TabPanel, TabPanels } from '@headlessui/vue'
 import InlineModal from './InlineModal.vue'
 import JsonCodeEditor from './JsonCodeEditor.vue'
 import {
   fetchCLIConfig,
-  fetchEditableCLIConfigSnapshots,
   fetchCLITemplate,
+  normalizeCLIConfigEditorContent,
+  renderCLIConfigEditorContent,
   restoreDefaultConfig,
   setCLITemplate,
   type CLIConfig,
-  type CLIConfigFile,
-  type CLIConfigSnapshots,
+  type CLIConfigField,
+  type CLIEditorContent,
+  type CLINormalizedEditorContent,
   type CLITemplate,
   type CLIPlatform,
 } from '../../services/cliConfig'
 import { showToast } from '../../utils/toast'
 import { extractErrorMessage } from '../../utils/error'
 
+const CLI_CONFIG_FULL_SOURCE_MARKER = '__code_switch_cli_full__'
+
 const props = defineProps<{
   platform: CLIPlatform
   modelValue?: Record<string, any>
+  providerName?: string
   providerConfig?: {
     apiKey?: string
     baseUrl?: string
@@ -308,6 +254,7 @@ type TemplateInjectionEntry = {
 
 type CliConfigSubmitState = {
   value: Record<string, any>
+  persistValue: Record<string, any>
   shouldPersist: boolean
 }
 
@@ -315,12 +262,12 @@ const loading = ref(false)
 const config = ref<CLIConfig | null>(null)
 const baseEditableValues = ref<Record<string, any>>({})
 const editableValues = ref<Record<string, any>>({})
+const editorLockedFields = ref<CLIConfigField[]>([])
 const cliJsonEditorRef = ref<InstanceType<typeof JsonCodeEditor> | null>(null)
 const cliJsonSyncedText = ref('')
 const cliJsonEditingText = ref('')
 const cliJsonError = ref('')
-const selectedPreviewTab = ref(0)
-const snapshotsData = ref<CLIConfigSnapshots | null>(null)
+const cliEditorFormat = ref<'json' | 'toml' | 'env' | string>('json')
 const templateState = ref<CLITemplate | null>(null)
 const globalTemplateModalOpen = ref(false)
 const globalTemplateLoading = ref(false)
@@ -335,24 +282,62 @@ const sharedTemplateInjectedEntries = ref<TemplateInjectionEntry[]>([])
 const persistBaselineValue = ref<Record<string, any>>({})
 const initialModelHasExplicitValue = ref(false)
 
-let snapshotDebounceTimer: ReturnType<typeof setTimeout> | null = null
-let snapshotRequestSeq = 0
 let loadConfigRequestSeq = 0
-
-const clearSnapshotDebounceTimer = () => {
-  if (snapshotDebounceTimer) {
-    clearTimeout(snapshotDebounceTimer)
-    snapshotDebounceTimer = null
-  }
-}
+let cliEditorRenderRequestSeq = 0
+let cliEditorValidateRequestSeq = 0
+let cliEditorValidationTimer: ReturnType<typeof setTimeout> | null = null
 
 const cloneCliConfigValue = <T>(value: T): T => {
   if (value == null) return value
   return JSON.parse(JSON.stringify(value))
 }
 
-const normalizeCliConfigRecord = (value: Record<string, any> | undefined | null): Record<string, any> =>
-  cloneCliConfigValue(value || {})
+const isCliConfigFullSource = (value: Record<string, any> | undefined | null) => (
+  !!value
+  && typeof value === 'object'
+  && !Array.isArray(value)
+  && (value as Record<string, any>)[CLI_CONFIG_FULL_SOURCE_MARKER] === true
+)
+
+const normalizeCliConfigRecord = (value: Record<string, any> | undefined | null): Record<string, any> => {
+  const nextValue = cloneCliConfigValue(value || {})
+  if (nextValue && typeof nextValue === 'object' && !Array.isArray(nextValue)) {
+    delete (nextValue as Record<string, any>)[CLI_CONFIG_FULL_SOURCE_MARKER]
+  }
+  return nextValue
+}
+
+const mergeCliConfigRecords = (
+  baseValue: Record<string, any>,
+  overrideValue: Record<string, any>,
+): Record<string, any> => {
+  const nextValue = normalizeCliConfigRecord(baseValue)
+
+  Object.entries(overrideValue).forEach(([key, value]) => {
+    if (isPlainObjectRecord(nextValue[key]) && isPlainObjectRecord(value)) {
+      nextValue[key] = mergeCliConfigRecords(
+        nextValue[key] as Record<string, any>,
+        value,
+      )
+      return
+    }
+
+    nextValue[key] = cloneCliConfigValue(value)
+  })
+
+  return nextValue
+}
+
+const attachCliConfigMetadata = (value: Record<string, any> | undefined | null): Record<string, any> => {
+  const nextValue = normalizeCliConfigRecord(value)
+  if (Object.keys(nextValue).length === 0) {
+    return {}
+  }
+  return {
+    ...nextValue,
+    [CLI_CONFIG_FULL_SOURCE_MARKER]: true,
+  }
+}
 
 const hasConfigKeys = (value: Record<string, any> | undefined | null) =>
   Object.keys(normalizeCliConfigRecord(value)).length > 0
@@ -372,9 +357,6 @@ const toSortedJsonValue = (value: unknown): unknown => {
 
   return value
 }
-
-const buildCliJsonText = (value: Record<string, any>) =>
-  JSON.stringify(toSortedJsonValue(normalizeCliConfigRecord(value)), null, 2)
 
 const buildComparableCliConfigText = (value: Record<string, any> | undefined | null) =>
   JSON.stringify(toSortedJsonValue(normalizeCliConfigRecord(value)))
@@ -419,7 +401,13 @@ const parseJsonError = (error: unknown): string => {
 }
 
 const platformLabel = computed(() => platformLabels[props.platform] || props.platform)
-const editorUsesEffectiveJson = computed(() => props.platform === 'claude')
+const providerName = computed(() => props.providerName?.trim() || '')
+const providerApiKey = computed(() => props.providerConfig?.apiKey?.trim() || '')
+const providerApiUrl = computed(() => props.providerConfig?.baseUrl?.trim() || '')
+const cliEditorMode = computed<'json' | 'plain'>(() => (
+  cliEditorFormat.value === 'json' ? 'json' : 'plain'
+))
+const lockedFields = computed(() => editorLockedFields.value)
 const cliJsonDirty = computed(() => cliJsonEditingText.value !== cliJsonSyncedText.value)
 const globalTemplateDirty = computed(() => (
   globalTemplateEditingText.value !== globalTemplateSyncedText.value
@@ -436,17 +424,40 @@ const cliJsonPlaceholder = computed(() => {
   "env": {
     "ANTHROPIC_BASE_URL": "https://api.example.com",
     "ANTHROPIC_AUTH_TOKEN": "your-api-key"
+  },
+  "model": "claude-sonnet-4-5"
+}`
+  }
+
+  if (props.platform === 'codex') {
+    return `model = "gpt-5-codex"
+disable_response_storage = true
+model_reasoning_effort = "xhigh"
+
+[features]
+parallel = true`
+  }
+
+  return `GOOGLE_GEMINI_BASE_URL=https://api.example.com
+GEMINI_API_KEY=your-api-key
+GEMINI_MODEL=gemini-2.5-pro`
+})
+
+const templateJsonPlaceholder = computed(() => {
+  if (props.platform === 'claude') {
+    return `{
+  "model": "claude-sonnet-4-5",
+  "env": {
+    "ANTHROPIC_CUSTOM_HEADER": "value"
   }
 }`
   }
 
   if (props.platform === 'codex') {
     return `{
-  "model": "gpt-4.1",
-  "providers": {
-    "default": {
-      "base_url": "https://api.example.com/v1"
-    }
+  "model": "gpt-5-codex",
+  "features": {
+    "parallel": true
   }
 }`
   }
@@ -457,86 +468,7 @@ const cliJsonPlaceholder = computed(() => {
 }`
 })
 
-const cliJsonHint = computed(() => (
-  editorUsesEffectiveJson.value
-    ? t('components.cliConfig.jsonEditor.fileHint')
-    : t('components.cliConfig.jsonEditor.hint')
-))
-
-const hasProviderInput = computed(() => {
-  const apiKey = props.providerConfig?.apiKey?.trim() || ''
-  const baseUrl = props.providerConfig?.baseUrl?.trim() || ''
-
-  if (props.platform === 'gemini') {
-    return !!(apiKey || baseUrl)
-  }
-
-  return !!(apiKey && baseUrl)
-})
-
-const baseLockedFields = computed(() => config.value?.fields.filter((field) => field.locked) || [])
-
-const lockedFields = computed(() => {
-  const fields = baseLockedFields.value
-  if (!hasProviderInput.value) return fields
-
-  const apiKey = props.providerConfig?.apiKey?.trim() || ''
-  const baseUrl = props.providerConfig?.baseUrl?.trim() || ''
-
-  return fields.map((field) => {
-    const nextField = { ...field }
-
-    if (props.platform === 'gemini') {
-      if (field.key === 'GEMINI_API_KEY' && apiKey) {
-        nextField.value = apiKey
-      }
-      if (field.key === 'GOOGLE_GEMINI_BASE_URL' && baseUrl) {
-        nextField.value = baseUrl
-      }
-    }
-
-    if (props.platform === 'claude') {
-      if (field.key === 'env.ANTHROPIC_BASE_URL' && baseUrl) {
-        nextField.value = baseUrl
-      }
-      if (field.key === 'env.ANTHROPIC_AUTH_TOKEN' && apiKey) {
-        nextField.value = apiKey
-      }
-    }
-
-    if (props.platform === 'codex') {
-      if (field.key.includes('.base_url') && baseUrl) {
-        nextField.value = baseUrl
-      }
-      if (field.key === 'OPENAI_API_KEY' && apiKey) {
-        nextField.value = apiKey
-      }
-    }
-
-    return nextField
-  })
-})
-
-const previewFiles = computed((): CLIConfigFile[] => snapshotsData.value?.previewFiles || [])
-const currentFiles = computed((): CLIConfigFile[] => snapshotsData.value?.currentFiles || [])
-
-const previewDisplayFiles = computed((): CLIConfigFile[] => {
-  if (!editorUsesEffectiveJson.value || previewFiles.value.length === 0) {
-    return previewFiles.value
-  }
-
-  return previewFiles.value.map((file, index) => (
-    index === 0 && (file.format || 'json').toLowerCase() === 'json'
-      ? { ...file, content: cliJsonEditingText.value || file.content }
-      : file
-  ))
-})
-
-const currentPreviewCount = computed(() => (
-  selectedPreviewTab.value === 0 ? previewDisplayFiles.value.length : currentFiles.value.length
-))
-
-const getFileKey = (file: CLIConfigFile, index: number) => file.path || `${file.format || 'file'}-${index}`
+const cliJsonHint = computed(() => t('components.cliConfig.jsonEditor.fileHint'))
 
 const focusCliJsonEditor = () => {
   requestAnimationFrame(() => {
@@ -544,83 +476,14 @@ const focusCliJsonEditor = () => {
   })
 }
 
-const getLockedFieldValue = (key: string, useEffectiveValues = true) => {
-  const source = useEffectiveValues ? lockedFields.value : baseLockedFields.value
-  return source.find((field) => field.key === key)?.value ?? ''
-}
-
-const stripLockedKeysFromEditable = (value: Record<string, any>) => {
-  const nextValue = normalizeCliConfigRecord(value)
-
-  baseLockedFields.value.forEach((field) => {
-    if (field.key.startsWith('env.')) {
-      const envKey = field.key.slice(4)
-      const env = nextValue.env
-      if (env && typeof env === 'object' && !Array.isArray(env)) {
-        delete (env as Record<string, any>)[envKey]
-        if (Object.keys(env as Record<string, any>).length === 0) {
-          delete nextValue.env
-        }
-      }
-      return
-    }
-
-    delete nextValue[field.key]
-  })
-
-  return nextValue
-}
-
-const buildClaudeFileJsonValue = (
-  value: Record<string, any>,
-  useEffectiveLockedValues = true,
-) => {
-  const nextValue = normalizeCliConfigRecord(value)
-  const envValue = nextValue.env
-  const env = envValue && typeof envValue === 'object' && !Array.isArray(envValue)
-    ? normalizeCliConfigRecord(envValue as Record<string, any>)
-    : {}
-
-  const anthropicBaseUrl = getLockedFieldValue('env.ANTHROPIC_BASE_URL', useEffectiveLockedValues)
-  const anthropicAuthToken = getLockedFieldValue('env.ANTHROPIC_AUTH_TOKEN', useEffectiveLockedValues)
-
-  if (anthropicBaseUrl) {
-    env.ANTHROPIC_BASE_URL = anthropicBaseUrl
-  } else {
-    delete env.ANTHROPIC_BASE_URL
-  }
-
-  if (anthropicAuthToken) {
-    env.ANTHROPIC_AUTH_TOKEN = anthropicAuthToken
-  } else {
-    delete env.ANTHROPIC_AUTH_TOKEN
-  }
-
-  if (Object.keys(env).length > 0) {
-    nextValue.env = env
-  } else {
-    delete nextValue.env
-  }
-
-  return nextValue
-}
-
-const buildEditorJsonText = (value: Record<string, any>) => (
-  editorUsesEffectiveJson.value
-    ? JSON.stringify(toSortedJsonValue(buildClaudeFileJsonValue(value, true)), null, 2)
-    : buildCliJsonText(value)
-)
-
-const buildTemplateJsonText = (value: Record<string, any>) => (
-  props.platform === 'claude'
-    ? JSON.stringify(toSortedJsonValue(buildClaudeFileJsonValue(value, false)), null, 2)
-    : buildCliJsonText(value)
-)
-
 const isPlainObjectRecord = (value: unknown): value is Record<string, any> => (
   !!value
   && typeof value === 'object'
   && !Array.isArray(value)
+)
+
+const buildTemplateJsonText = (value: Record<string, any>) => (
+  JSON.stringify(toSortedJsonValue(normalizeCliConfigRecord(value)), null, 2)
 )
 
 const mergeMissingTemplateKeys = (
@@ -768,22 +631,30 @@ const resetSharedTemplateState = () => {
   sharedTemplateInjectedEntries.value = []
 }
 
+const clearCliEditorValidationTimer = () => {
+  if (cliEditorValidationTimer) {
+    clearTimeout(cliEditorValidationTimer)
+    cliEditorValidationTimer = null
+  }
+}
+
 const emitChanges = () => {
-  emit('update:modelValue', normalizeCliConfigRecord(editableValues.value))
+  emit('update:modelValue', attachCliConfigMetadata(editableValues.value))
 }
 
 const composeEditableValues = (incomingValue: Record<string, any> | undefined | null) => {
   const nextValue = normalizeCliConfigRecord(baseEditableValues.value)
   const incoming = normalizeCliConfigRecord(incomingValue)
 
-  if (Object.keys(incoming).length > 0) {
-    return {
-      ...nextValue,
-      ...incoming,
-    }
+  if (Object.keys(incoming).length === 0) {
+    return nextValue
   }
 
-  return nextValue
+  if (isCliConfigFullSource(incomingValue)) {
+    return incoming
+  }
+
+  return mergeCliConfigRecords(nextValue, incoming)
 }
 
 const editableValuesChangedFromPersistBaseline = computed(() => (
@@ -796,9 +667,11 @@ const shouldPersistCliConfig = computed(() => (
   || editableValuesChangedFromPersistBaseline.value
 ))
 
-const syncCliJsonFromValues = (forceSyncText = false) => {
+const applyRenderedCliEditorContent = (rendered: CLIEditorContent, forceSyncText = false) => {
   const previousSynced = cliJsonSyncedText.value
-  const nextSynced = buildEditorJsonText(editableValues.value)
+  const nextSynced = rendered.content || ''
+  cliEditorFormat.value = rendered.format || 'json'
+  editorLockedFields.value = (rendered.lockedFields || []).map((field) => ({ ...field }))
   cliJsonSyncedText.value = nextSynced
 
   const editingWasSynced = cliJsonEditingText.value === previousSynced
@@ -811,27 +684,68 @@ const syncCliJsonFromValues = (forceSyncText = false) => {
   }
 }
 
-const setEditableValues = (
+const renderCliEditorContent = async (value: Record<string, any>) => (
+  renderCLIConfigEditorContent(
+    props.platform,
+    normalizeCliConfigRecord(value),
+    providerApiUrl.value,
+    providerApiKey.value,
+    providerName.value,
+  )
+)
+
+const normalizeCliEditorContent = async (content: string) => (
+  normalizeCLIConfigEditorContent(
+    props.platform,
+    content,
+    providerApiUrl.value,
+    providerApiKey.value,
+    providerName.value,
+  )
+)
+
+const syncCliJsonFromValues = async (forceSyncText = false) => {
+  const currentSeq = ++cliEditorRenderRequestSeq
+
+  try {
+    const rendered = await renderCliEditorContent(editableValues.value)
+    if (currentSeq !== cliEditorRenderRequestSeq) {
+      return
+    }
+
+    applyRenderedCliEditorContent(rendered, forceSyncText)
+  } catch (error) {
+    if (currentSeq !== cliEditorRenderRequestSeq) {
+      return
+    }
+    console.error('Failed to render CLI editor content:', error)
+    if (forceSyncText) {
+      cliJsonError.value = extractErrorMessage(error)
+    }
+  }
+}
+
+const setEditableValues = async (
   value: Record<string, any> | undefined | null,
   options: SetEditableValuesOptions = {},
 ) => {
   editableValues.value = normalizeCliConfigRecord(value)
-  syncCliJsonFromValues(options.forceSyncText ?? false)
   if (options.emit) {
     emitChanges()
   }
+  await syncCliJsonFromValues(options.forceSyncText ?? false)
 }
 
 const formatCliConfigJson = (
   input: string,
-  target: 'editor' | 'template' = 'editor',
+  _target: 'editor' | 'template' = 'editor',
 ): FormatCliConfigJsonResult => {
   const trimmed = input.trim()
   if (!trimmed) {
     const emptyValue = {}
     return {
       ok: true,
-      text: target === 'template' ? buildTemplateJsonText(emptyValue) : buildEditorJsonText(emptyValue),
+      text: buildTemplateJsonText(emptyValue),
       value: emptyValue,
     }
   }
@@ -853,31 +767,65 @@ const formatCliConfigJson = (
     }
   }
 
-  const value = stripLockedKeysFromEditable(normalizeCliConfigRecord(parsed as Record<string, any>))
+  const value = normalizeCliConfigRecord(parsed as Record<string, any>)
   return {
     ok: true,
-    text: target === 'template' ? buildTemplateJsonText(value) : buildEditorJsonText(value),
+    text: buildTemplateJsonText(value),
     value,
   }
 }
 
-const applyCliJsonToValues = () => {
+const applyNormalizedCliEditor = (
+  normalized: CLINormalizedEditorContent,
+  options: SetEditableValuesOptions = {},
+) => {
+  editableValues.value = normalizeCliConfigRecord(normalized.editable)
+  if (options.emit) {
+    emitChanges()
+  }
+  applyRenderedCliEditorContent(normalized, options.forceSyncText ?? true)
+}
+
+const applyCliJsonToValues = async () => {
   cliJsonError.value = ''
-  const formatted = formatCliConfigJson(cliJsonEditingText.value, 'editor')
-  if (!formatted.ok) {
-    cliJsonError.value = formatted.error
+
+  try {
+    const normalized = await normalizeCliEditorContent(cliJsonEditingText.value)
+    applyNormalizedCliEditor(normalized, {
+      emit: true,
+      forceSyncText: true,
+    })
+    cliJsonError.value = ''
+    return true
+  } catch (error) {
+    cliJsonError.value = extractErrorMessage(error)
     focusCliJsonEditor()
     return false
   }
+}
 
-  setEditableValues(formatted.value, {
-    emit: true,
-    forceSyncText: true,
-  })
-  cliJsonEditingText.value = formatted.text
-  cliJsonError.value = ''
-  loadSnapshotsDebounced()
-  return true
+const handleCliEditorFormat = async () => {
+  try {
+    const normalized = await normalizeCliEditorContent(cliJsonEditingText.value)
+    cliEditorFormat.value = normalized.format || cliEditorFormat.value
+    editorLockedFields.value = (normalized.lockedFields || []).map((field) => ({ ...field }))
+    cliJsonEditingText.value = normalized.content
+    cliJsonError.value = ''
+  } catch (error) {
+    cliJsonError.value = extractErrorMessage(error)
+    focusCliJsonEditor()
+  }
+}
+
+const handleGlobalTemplateFormat = () => {
+  const formatted = formatCliConfigJson(globalTemplateEditingText.value, 'template')
+  if (!formatted.ok) {
+    globalTemplateError.value = formatted.error
+    return
+  }
+
+  globalTemplateEditingText.value = formatted.text
+  globalTemplateError.value = ''
 }
 
 const resetCliJsonFromValues = () => {
@@ -885,7 +833,7 @@ const resetCliJsonFromValues = () => {
   cliJsonEditingText.value = cliJsonSyncedText.value
 }
 
-const applyPendingJsonChanges = () => {
+const applyPendingJsonChanges = async () => {
   if (!cliJsonDirty.value) return true
   return applyCliJsonToValues()
 }
@@ -893,12 +841,13 @@ const applyPendingJsonChanges = () => {
 defineExpose({
   applyPendingJsonChanges,
   getCliConfigSubmitState: (): CliConfigSubmitState => ({
-    value: normalizeCliConfigRecord(editableValues.value),
+    value: attachCliConfigMetadata(editableValues.value),
+    persistValue: normalizeCliConfigRecord(editableValues.value),
     shouldPersist: shouldPersistCliConfig.value,
   }),
 })
 
-const setSharedTemplateEnabled = (
+const setSharedTemplateEnabled = async (
   nextEnabled: boolean,
   options: SetEditableValuesOptions & { skipPendingApply?: boolean } = {},
 ) => {
@@ -909,7 +858,7 @@ const setSharedTemplateEnabled = (
     }
 
     if (!(options.skipPendingApply ?? false)) {
-      const ready = applyPendingJsonChanges()
+      const ready = await applyPendingJsonChanges()
       if (!ready) return false
     }
 
@@ -920,7 +869,7 @@ const setSharedTemplateEnabled = (
     )
     sharedTemplateEnabled.value = true
     sharedTemplateInjectedEntries.value = merged.injectedEntries
-    setEditableValues(
+    await setEditableValues(
       merged.value,
       {
         emit: options.emit ?? true,
@@ -932,68 +881,60 @@ const setSharedTemplateEnabled = (
 
   if (!sharedTemplateEnabled.value) return true
 
+  if (!(options.skipPendingApply ?? false)) {
+    const ready = await applyPendingJsonChanges()
+    if (!ready) return false
+  }
+
   const baseline = revertTemplateInjectedEntries(
     editableValues.value,
     sharedTemplateInjectedEntries.value,
   )
   resetSharedTemplateState()
-  setEditableValues(baseline, {
+  await setEditableValues(baseline, {
     emit: options.emit ?? true,
     forceSyncText: options.forceSyncText ?? true,
   })
   return true
 }
 
-const handleSharedTemplateToggle = (nextEnabled: boolean) => {
+const handleSharedTemplateToggle = async (nextEnabled: boolean) => {
   if (nextEnabled && !hasSharedTemplate.value) {
     showToast(t('components.cliConfig.injectTemplateUnavailable'), 'warning')
     return
   }
 
-  const success = setSharedTemplateEnabled(nextEnabled)
+  const success = await setSharedTemplateEnabled(nextEnabled)
   if (!success) {
     return
   }
-  loadSnapshotsDebounced()
 }
 
-const loadSnapshots = async () => {
-  const currentSeq = ++snapshotRequestSeq
+const scheduleCliEditorValidation = () => {
+  clearCliEditorValidationTimer()
 
-  try {
-    const previewMode = hasProviderInput.value ? 'direct' : 'current'
-    const apiUrl = props.providerConfig?.baseUrl?.trim() || ''
-    const apiKey = props.providerConfig?.apiKey?.trim() || ''
-
-    const result = await fetchEditableCLIConfigSnapshots(
-      props.platform,
-      editableValues.value,
-      apiUrl,
-      apiKey,
-      previewMode,
-    )
-
-    if (currentSeq !== snapshotRequestSeq) {
-      return
-    }
-
-    snapshotsData.value = result
-  } catch (error) {
-    if (currentSeq !== snapshotRequestSeq) {
-      return
-    }
-
-    console.error('Failed to load CLI config snapshots:', error)
-    snapshotsData.value = null
+  if (!cliJsonEditingText.value.trim() || cliJsonEditingText.value === cliJsonSyncedText.value) {
+    cliJsonError.value = ''
+    return
   }
-}
 
-const loadSnapshotsDebounced = () => {
-  clearSnapshotDebounceTimer()
+  const currentSeq = ++cliEditorValidateRequestSeq
+  const currentText = cliJsonEditingText.value
 
-  snapshotDebounceTimer = setTimeout(() => {
-    loadSnapshots()
-  }, 220)
+  cliEditorValidationTimer = setTimeout(async () => {
+    try {
+      await normalizeCliEditorContent(currentText)
+      if (currentSeq !== cliEditorValidateRequestSeq || cliJsonEditingText.value !== currentText) {
+        return
+      }
+      cliJsonError.value = ''
+    } catch (error) {
+      if (currentSeq !== cliEditorValidateRequestSeq || cliJsonEditingText.value !== currentText) {
+        return
+      }
+      cliJsonError.value = extractErrorMessage(error)
+    }
+  }, 180)
 }
 
 const loadConfig = async () => {
@@ -1002,9 +943,6 @@ const loadConfig = async () => {
 
 const loadConfigWithOptions = async (options: LoadConfigOptions = {}) => {
   const currentSeq = ++loadConfigRequestSeq
-  clearSnapshotDebounceTimer()
-  snapshotRequestSeq += 1
-  snapshotsData.value = null
   loading.value = true
 
   const shouldMergeModelValue = options.mergeModelValue ?? true
@@ -1047,11 +985,10 @@ const loadConfigWithOptions = async (options: LoadConfigOptions = {}) => {
     sharedTemplateInjectedEntries.value = nextEditableValues?.injectedEntries || []
     persistBaselineValue.value = normalizeCliConfigRecord(nextEditableBase)
 
-    setEditableValues(nextEditableValues?.value || nextEditableBase, {
+    await setEditableValues(nextEditableValues?.value || nextEditableBase, {
       emit: shouldEmitChanges,
       forceSyncText: shouldForceSyncText,
     })
-    await loadSnapshots()
   } catch (error) {
     if (currentSeq !== loadConfigRequestSeq) {
       return
@@ -1059,11 +996,11 @@ const loadConfigWithOptions = async (options: LoadConfigOptions = {}) => {
 
     console.error('Failed to load CLI config:', error)
     config.value = null
+    editorLockedFields.value = []
     templateState.value = null
     resetSharedTemplateState()
     persistBaselineValue.value = {}
     initialModelHasExplicitValue.value = false
-    snapshotsData.value = null
     showToast(t('components.cliConfig.loadError'), 'error')
   } finally {
     if (currentSeq === loadConfigRequestSeq) {
@@ -1113,6 +1050,10 @@ const saveGlobalTemplate = async () => {
     return
   }
 
+  if ((!shouldPersistCliConfig.value || sharedTemplateEnabled.value) && !await applyPendingJsonChanges()) {
+    return
+  }
+
   globalTemplateSaving.value = true
   try {
     await setCLITemplate(props.platform, formatted.value, globalTemplateEnabled.value)
@@ -1126,7 +1067,7 @@ const saveGlobalTemplate = async () => {
     globalTemplateError.value = ''
     showToast(t('components.cliConfig.templateSaved'), 'success')
 
-    if (!hasConfigKeys(props.modelValue)) {
+    if (!shouldPersistCliConfig.value) {
       const nextBase = composeEditableValues(undefined)
       const shouldEnableShared = globalTemplateEnabled.value && Object.keys(formatted.value).length > 0
       const nextEditableValues = shouldEnableShared
@@ -1136,14 +1077,13 @@ const saveGlobalTemplate = async () => {
       sharedTemplateEnabled.value = !!nextEditableValues
       sharedTemplateInjectedEntries.value = nextEditableValues?.injectedEntries || []
 
-      setEditableValues(
+      await setEditableValues(
         nextEditableValues?.value || nextBase,
         { emit: true, forceSyncText: true },
       )
-      loadSnapshotsDebounced()
     } else if (sharedTemplateEnabled.value) {
       if (Object.keys(formatted.value).length === 0) {
-        setSharedTemplateEnabled(false, {
+        await setSharedTemplateEnabled(false, {
           emit: true,
           forceSyncText: true,
           skipPendingApply: true,
@@ -1158,12 +1098,11 @@ const saveGlobalTemplate = async () => {
           normalizeCliConfigRecord(formatted.value),
         )
         sharedTemplateInjectedEntries.value = nextEditableValues.injectedEntries
-        setEditableValues(
+        await setEditableValues(
           nextEditableValues.value,
           { emit: true, forceSyncText: true },
         )
       }
-      loadSnapshotsDebounced()
     }
 
     globalTemplateModalOpen.value = false
@@ -1208,18 +1147,17 @@ const handleRestoreDefault = async () => {
   }
 }
 
-watch(() => props.modelValue, (newValue) => {
+watch(() => props.modelValue, async (newValue) => {
   const nextBase = composeEditableValues(newValue)
   const nextValue = sharedTemplateEnabled.value && templateState.value?.template
     ? mergeMissingTemplateKeys(nextBase, normalizeCliConfigRecord(templateState.value.template))
     : nextBase
 
-  setEditableValues(nextValue, { forceSyncText: true })
+  await setEditableValues(nextValue, { forceSyncText: true })
 }, { immediate: true, deep: true })
 
-watch(cliJsonEditingText, (value) => {
-  const formatted = formatCliConfigJson(value, 'editor')
-  cliJsonError.value = formatted.ok ? '' : formatted.error
+watch(cliJsonEditingText, () => {
+  scheduleCliEditorValidation()
 })
 
 watch(globalTemplateEditingText, (value) => {
@@ -1228,46 +1166,32 @@ watch(globalTemplateEditingText, (value) => {
 })
 
 watch(() => props.platform, () => {
-  selectedPreviewTab.value = 0
-  loadConfig()
+  void loadConfig()
 })
 
 watch(
-  () => [props.providerConfig?.apiKey, props.providerConfig?.baseUrl],
-  () => {
-    if (config.value) {
-      syncCliJsonFromValues(false)
-      if (editorUsesEffectiveJson.value && cliJsonDirty.value) {
-        const formatted = formatCliConfigJson(cliJsonEditingText.value, 'editor')
-        if (formatted.ok) {
-          cliJsonEditingText.value = formatted.text
-          cliJsonError.value = ''
-        }
-      }
-      loadSnapshotsDebounced()
+  () => [props.providerName, props.providerConfig?.apiKey, props.providerConfig?.baseUrl],
+  async () => {
+    if (!config.value) {
+      return
     }
-  },
-  { deep: true },
-)
 
-watch(
-  editableValues,
-  () => {
-    if (config.value) {
-      loadSnapshotsDebounced()
-    }
+    await syncCliJsonFromValues(false)
+    scheduleCliEditorValidation()
   },
   { deep: true },
 )
 
 onMounted(() => {
-  loadConfig()
+  void loadConfig()
 })
 
 onUnmounted(() => {
-  clearSnapshotDebounceTimer()
+  clearCliEditorValidationTimer()
   loadConfigRequestSeq += 1
-  snapshotRequestSeq += 1
+  cliEditorRenderRequestSeq += 1
+  cliEditorValidateRequestSeq += 1
+  editorLockedFields.value = []
   resetSharedTemplateState()
 })
 </script>
@@ -1297,7 +1221,6 @@ onUnmounted(() => {
 .cli-json-header,
 .cli-json-header-main,
 .cli-json-actions,
-.cli-preview-meta,
 .cli-template-actions {
   display: flex;
   align-items: center;
@@ -1422,19 +1345,32 @@ onUnmounted(() => {
   color: var(--mac-text-secondary);
 }
 
-.cli-template-inject {
+.cli-template-toggle {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px 12px;
+  min-height: 32px;
+  padding: 0 12px;
   border: 1px solid var(--mac-border);
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--mac-surface-strong) 90%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--mac-surface) 94%, transparent);
   color: var(--mac-text);
-  font-size: 13px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
 }
 
-.cli-template-inject input {
+.cli-template-toggle:hover {
+  border-color: color-mix(in srgb, var(--mac-accent) 45%, var(--mac-border));
+  color: var(--mac-accent);
+}
+
+.cli-template-toggle.is-disabled {
+  opacity: 0.55;
+}
+
+.cli-template-toggle input {
   flex-shrink: 0;
 }
 
@@ -1472,98 +1408,6 @@ onUnmounted(() => {
   color: var(--mac-error, #ff453a);
   font-size: 12px;
   line-height: 1.5;
-}
-
-.cli-preview-section {
-  padding-top: 4px;
-}
-
-.cli-tabs-list {
-  display: flex;
-  gap: 4px;
-  padding: 4px;
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--mac-surface-strong) 92%, transparent);
-}
-
-.cli-tab-btn {
-  flex: 1;
-  min-height: 34px;
-  padding: 0 12px;
-  border: 0;
-  border-radius: 10px;
-  background: transparent;
-  color: var(--mac-text-secondary);
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.cli-tab-btn:hover:not(.selected) {
-  color: var(--mac-text);
-  background: color-mix(in srgb, var(--mac-surface) 88%, transparent);
-}
-
-.cli-tab-btn.selected {
-  background: var(--mac-accent);
-  color: #ffffff;
-}
-
-.cli-preview-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding-top: 12px;
-}
-
-.cli-preview-card {
-  border: 1px solid var(--mac-border);
-  border-radius: 14px;
-  overflow: hidden;
-  background: color-mix(in srgb, var(--mac-surface-strong) 92%, transparent);
-}
-
-.cli-preview-meta {
-  justify-content: space-between;
-  gap: 8px;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--mac-border);
-  background: color-mix(in srgb, var(--mac-surface) 86%, transparent);
-}
-
-.cli-preview-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 11px;
-  color: var(--mac-text-secondary);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-}
-
-.cli-preview-format {
-  flex-shrink: 0;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--mac-accent) 16%, transparent);
-  color: var(--mac-accent);
-  font-size: 10px;
-  font-weight: 700;
-}
-
-.cli-preview-content {
-  margin: 0;
-  padding: 12px;
-  max-height: 220px;
-  overflow: auto;
-  background: transparent;
-  color: var(--mac-text);
-  font-size: 11px;
-  line-height: 1.6;
-  white-space: pre;
-  word-break: normal;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 
 .cli-action-btn {
@@ -1657,6 +1501,11 @@ onUnmounted(() => {
   .cli-template-actions {
     width: 100%;
     justify-content: flex-end;
+  }
+
+  .cli-template-toggle {
+    width: 100%;
+    justify-content: center;
   }
 
   .cli-fields {

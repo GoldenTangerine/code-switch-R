@@ -38,11 +38,14 @@ export interface CLITemplate {
   isGlobalDefault: boolean
 }
 
-// CLI 配置快照（用于前端对比：当前 vs 预览）
-export interface CLIConfigSnapshots {
-  currentFiles: CLIConfigFile[]
-  previewFiles: CLIConfigFile[]
-  mode: 'proxy' | 'direct'
+export interface CLIEditorContent {
+  format?: 'json' | 'toml' | 'env' | string
+  content: string
+  lockedFields?: CLIConfigField[]
+}
+
+export interface CLINormalizedEditorContent extends CLIEditorContent {
+  editable: Record<string, any>
 }
 
 const SERVICE_PATH = 'codeswitch/services.CliConfigService'
@@ -55,15 +58,6 @@ export async function fetchCLIConfig(platform: CLIPlatform): Promise<CLIConfig> 
 // 保存 CLI 配置
 export async function saveCLIConfig(platform: CLIPlatform, editable: Record<string, any>): Promise<void> {
   return Call.ByName(`${SERVICE_PATH}.SaveConfig`, platform, editable)
-}
-
-// 保存指定配置文件内容（预览区高级编辑）
-export async function saveCLIConfigFileContent(
-  platform: CLIPlatform,
-  filePath: string,
-  content: string
-): Promise<void> {
-  return Call.ByName(`${SERVICE_PATH}.SaveConfigFileContent`, platform, filePath, content)
 }
 
 // 获取指定平台的全局模板
@@ -80,45 +74,41 @@ export async function setCLITemplate(
   return Call.ByName(`${SERVICE_PATH}.SetTemplate`, platform, template, isGlobalDefault)
 }
 
-// 获取指定平台的锁定字段列表
-export async function fetchLockedFields(platform: CLIPlatform): Promise<string[]> {
-  return Call.ByName(`${SERVICE_PATH}.GetLockedFields`, platform)
+export async function renderCLIConfigEditorContent(
+  platform: CLIPlatform,
+  editable: Record<string, any> = {},
+  apiUrl: string = '',
+  apiKey: string = '',
+  providerName: string = '',
+): Promise<CLIEditorContent> {
+  return Call.ByName(
+    `${SERVICE_PATH}.RenderEditorContent`,
+    platform,
+    editable,
+    apiUrl,
+    apiKey,
+    providerName,
+  )
+}
+
+export async function normalizeCLIConfigEditorContent(
+  platform: CLIPlatform,
+  content: string,
+  apiUrl: string = '',
+  apiKey: string = '',
+  providerName: string = '',
+): Promise<CLINormalizedEditorContent> {
+  return Call.ByName(
+    `${SERVICE_PATH}.NormalizeEditorContent`,
+    platform,
+    content,
+    apiUrl,
+    apiKey,
+    providerName,
+  )
 }
 
 // 恢复默认配置
 export async function restoreDefaultConfig(platform: CLIPlatform): Promise<void> {
   return Call.ByName(`${SERVICE_PATH}.RestoreDefault`, platform)
-}
-
-// 获取配置快照（用于 Preview/Current 对比）
-// previewMode 参数：
-//   - "current": Preview = Current（不做任何注入，适用于空输入场景）
-//   - "direct": 模拟 ApplySingleProvider() 的写入结果（直连模式）
-//   - "proxy": 模拟 EnableProxy() 的写入结果（代理模式）
-//   - "" (空字符串): 兼容旧逻辑，若 apiUrl/apiKey 任一非空则为 direct，否则为 proxy
-export async function fetchCLIConfigSnapshots(
-  platform: CLIPlatform,
-  apiUrl: string = '',
-  apiKey: string = '',
-  previewMode: 'current' | 'direct' | 'proxy' | '' = ''
-): Promise<CLIConfigSnapshots> {
-  return Call.ByName(`${SERVICE_PATH}.GetConfigSnapshots`, platform, apiUrl, apiKey, previewMode)
-}
-
-// 获取基于当前 editable 的配置快照（用于让编辑器与预览共享同一份生成逻辑）
-export async function fetchEditableCLIConfigSnapshots(
-  platform: CLIPlatform,
-  editable: Record<string, any> = {},
-  apiUrl: string = '',
-  apiKey: string = '',
-  previewMode: 'current' | 'direct' | 'proxy' | '' = ''
-): Promise<CLIConfigSnapshots> {
-  return Call.ByName(
-    `${SERVICE_PATH}.GetConfigSnapshotsWithEditable`,
-    platform,
-    editable,
-    apiUrl,
-    apiKey,
-    previewMode,
-  )
 }

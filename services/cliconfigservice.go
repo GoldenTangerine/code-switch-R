@@ -79,7 +79,7 @@ type CLIConfig struct {
 	Editable     map[string]interface{} `json:"editable,omitempty"`     // 可编辑字段的当前值
 }
 
-// CLIConfigSnapshots CLI 配置快照（用于前端对比：当前 vs 预览）
+// CLIConfigSnapshots CLI 配置快照（用于旧预览链路）
 type CLIConfigSnapshots struct {
 	CurrentFiles []CLIConfigFile `json:"currentFiles"`
 	PreviewFiles []CLIConfigFile `json:"previewFiles"`
@@ -92,11 +92,408 @@ type CLITemplate struct {
 	IsGlobalDefault bool                   `json:"isGlobalDefault"`
 }
 
+type CLIEditorContent struct {
+	Format       string           `json:"format,omitempty"`
+	Content      string           `json:"content"`
+	LockedFields []CLIConfigField `json:"lockedFields,omitempty"`
+}
+
+type CLINormalizedEditorContent struct {
+	Editable     map[string]interface{} `json:"editable"`
+	Format       string                 `json:"format,omitempty"`
+	Content      string                 `json:"content"`
+	LockedFields []CLIConfigField       `json:"lockedFields,omitempty"`
+}
+
 // CLITemplates 所有平台的模板存储
 type CLITemplates struct {
 	Claude CLITemplate `json:"claude"`
 	Codex  CLITemplate `json:"codex"`
 	Gemini CLITemplate `json:"gemini"`
+}
+
+func cloneCLIEditableMap(value map[string]interface{}) map[string]interface{} {
+	if value == nil {
+		return map[string]interface{}{}
+	}
+
+	payload, err := json.Marshal(value)
+	if err != nil || len(payload) == 0 {
+		return map[string]interface{}{}
+	}
+
+	var clone map[string]interface{}
+	if err := json.Unmarshal(payload, &clone); err != nil || clone == nil {
+		return map[string]interface{}{}
+	}
+
+	return clone
+}
+
+func hasCLIEditorProviderInput(platform CLIPlatform, apiURL string, apiKey string) bool {
+	baseURL := strings.TrimSpace(apiURL)
+	token := strings.TrimSpace(apiKey)
+
+	if platform == PlatformGemini {
+		return baseURL != "" || token != ""
+	}
+
+	return baseURL != "" && token != ""
+}
+
+func parseJSONRootObject(content string) (map[string]interface{}, error) {
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" {
+		return map[string]interface{}{}, nil
+	}
+
+	var parsed any
+	if err := json.Unmarshal([]byte(trimmed), &parsed); err != nil {
+		if syntaxErr, ok := err.(*json.SyntaxError); ok {
+			line, column := jsonOffsetToLineColumn(trimmed, syntaxErr.Offset)
+			return nil, fmt.Errorf("JSON 第 %d 行第 %d 列格式无效: %v", line, column, err)
+		}
+		return nil, fmt.Errorf("JSON 格式无效: %w", err)
+	}
+
+	data, ok := parsed.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("JSON 根节点必须是对象")
+	}
+	if data == nil {
+		return map[string]interface{}{}, nil
+	}
+	return data, nil
+}
+
+func jsonOffsetToLineColumn(content string, offset int64) (int, int) {
+	if offset < 1 {
+		return 1, 1
+	}
+
+	line := 1
+	column := 1
+	index := int64(0)
+	for _, r := range content {
+		index += int64(len(string(r)))
+		if index >= offset {
+			return line, column
+		}
+		if r == '\n' {
+			line += 1
+			column = 1
+			continue
+		}
+		column += 1
+	}
+
+	return line, column
+}
+
+func parseEditorEnvContent(content string) (map[string]string, error) {
+	result := make(map[string]string)
+	normalizedContent := strings.ReplaceAll(content, "\r\n", "\n")
+	normalizedContent = strings.ReplaceAll(normalizedContent, "\r", "\n")
+	lines := strings.Split(normalizedContent, "\n")
+
+	for index, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+
+		eqIndex := strings.Index(trimmed, "=")
+		if eqIndex <= 0 {
+			return nil, fmt.Errorf(".env 第 %d 行格式无效，必须是 KEY=VALUE", index+1)
+		}
+
+		key := strings.TrimSpace(trimmed[:eqIndex])
+		value := strings.TrimSpace(trimmed[eqIndex+1:])
+		if key == "" {
+			return nil, fmt.Errorf(".env 第 %d 行缺少变量名", index+1)
+		}
+		if !isValidEnvKey(key) {
+			return nil, fmt.Errorf(".env 第 %d 行变量名无效: %s", index+1, key)
+		}
+		result[key] = value
+	}
+
+	return result, nil
+}
+
+func stripClaudeLockedEditableFields(value map[string]interface{}) map[string]interface{} {
+	nextValue := cloneCLIEditableMap(value)
+	envValue, ok := nextValue["env"].(map[string]interface{})
+	if ok && envValue != nil {
+		delete(envValue, "ANTHROPIC_BASE_URL")
+		delete(envValue, "ANTHROPIC_AUTH_TOKEN")
+		if len(envValue) == 0 {
+			delete(nextValue, "env")
+		} else {
+			nextValue["env"] = envValue
+		}
+	}
+	return nextValue
+}
+
+func stripCodexLockedEditableFields(value map[string]interface{}) map[string]interface{} {
+	nextValue := cloneCLIEditableMap(value)
+	delete(nextValue, "model_provider")
+	delete(nextValue, "preferred_auth_method")
+
+	modelProvidersValue, ok := nextValue["model_providers"].(map[string]interface{})
+	if !ok || modelProvidersValue == nil {
+		return nextValue
+	}
+
+	delete(modelProvidersValue, codexProviderKey)
+	if len(modelProvidersValue) == 0 {
+		delete(nextValue, "model_providers")
+	} else {
+		nextValue["model_providers"] = modelProvidersValue
+	}
+
+	return nextValue
+}
+
+func stripCodexEditorManagedFields(value map[string]interface{}, providerKey string) map[string]interface{} {
+	nextValue := stripCodexLockedEditableFields(value)
+	trimmedProviderKey := strings.TrimSpace(providerKey)
+	if trimmedProviderKey == "" || trimmedProviderKey == codexProviderKey {
+		return nextValue
+	}
+
+	modelProvidersValue, ok := nextValue["model_providers"].(map[string]interface{})
+	if !ok || modelProvidersValue == nil {
+		return nextValue
+	}
+
+	providerValue, exists := modelProvidersValue[trimmedProviderKey]
+	if !exists {
+		return nextValue
+	}
+
+	providerMap, ok := providerValue.(map[string]interface{})
+	if !ok || providerMap == nil {
+		delete(modelProvidersValue, trimmedProviderKey)
+		if len(modelProvidersValue) == 0 {
+			delete(nextValue, "model_providers")
+		} else {
+			nextValue["model_providers"] = modelProvidersValue
+		}
+		return nextValue
+	}
+
+	cleanedProviderMap := cloneCLIEditableMap(providerMap)
+	delete(cleanedProviderMap, "name")
+	delete(cleanedProviderMap, "base_url")
+	delete(cleanedProviderMap, "wire_api")
+	delete(cleanedProviderMap, "requires_openai_auth")
+
+	if len(cleanedProviderMap) == 0 {
+		delete(modelProvidersValue, trimmedProviderKey)
+	} else {
+		modelProvidersValue[trimmedProviderKey] = cleanedProviderMap
+	}
+
+	if len(modelProvidersValue) == 0 {
+		delete(nextValue, "model_providers")
+	} else {
+		nextValue["model_providers"] = modelProvidersValue
+	}
+
+	return nextValue
+}
+
+func buildLockedField(key string, value interface{}, hint string, fieldType string) CLIConfigField {
+	return CLIConfigField{
+		Key:    key,
+		Value:  anyToString(value),
+		Locked: true,
+		Hint:   hint,
+		Type:   fieldType,
+	}
+}
+
+func normalizeTomlGenericMap(value interface{}) map[string]interface{} {
+	if value == nil {
+		return nil
+	}
+
+	if typed, ok := value.(map[string]interface{}); ok {
+		return cloneCLIEditableMap(typed)
+	}
+
+	payload, err := json.Marshal(value)
+	if err != nil || len(payload) == 0 {
+		return nil
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(payload, &result); err != nil || result == nil {
+		return nil
+	}
+
+	return result
+}
+
+func lookupCodexProviderTable(raw map[string]interface{}, providerKey string) map[string]interface{} {
+	if strings.TrimSpace(providerKey) == "" {
+		return nil
+	}
+
+	modelProvidersValue := normalizeTomlGenericMap(raw["model_providers"])
+	if modelProvidersValue == nil {
+		return nil
+	}
+
+	return normalizeTomlGenericMap(modelProvidersValue[providerKey])
+}
+
+func buildClaudeEditorLockedFields(value map[string]interface{}) []CLIConfigField {
+	envValue, _ := value["env"].(map[string]interface{})
+	if envValue == nil {
+		return []CLIConfigField{}
+	}
+
+	lockedFields := make([]CLIConfigField, 0, 2)
+	if baseURL := anyToString(envValue["ANTHROPIC_BASE_URL"]); strings.TrimSpace(baseURL) != "" {
+		lockedFields = append(lockedFields, buildLockedField(
+			"env.ANTHROPIC_BASE_URL",
+			baseURL,
+			"由系统管理，指向当前生效的服务地址",
+			"string",
+		))
+	}
+	if authToken := anyToString(envValue["ANTHROPIC_AUTH_TOKEN"]); strings.TrimSpace(authToken) != "" {
+		lockedFields = append(lockedFields, buildLockedField(
+			"env.ANTHROPIC_AUTH_TOKEN",
+			authToken,
+			"由系统管理，当前认证令牌只读展示",
+			"string",
+		))
+	}
+
+	return lockedFields
+}
+
+func buildCodexEditorLockedFields(raw map[string]interface{}) []CLIConfigField {
+	lockedFields := make([]CLIConfigField, 0, 6)
+	currentProviderKey := strings.TrimSpace(anyToString(raw["model_provider"]))
+	preferredAuth := strings.TrimSpace(anyToString(raw["preferred_auth_method"]))
+
+	if currentProviderKey != "" {
+		lockedFields = append(lockedFields, buildLockedField(
+			"model_provider",
+			currentProviderKey,
+			"由系统管理，指向当前生效的 provider key",
+			"string",
+		))
+	}
+	if preferredAuth != "" {
+		lockedFields = append(lockedFields, buildLockedField(
+			"preferred_auth_method",
+			preferredAuth,
+			"由系统管理，当前认证方式只读展示",
+			"string",
+		))
+	}
+	if currentProviderKey == "" {
+		return lockedFields
+	}
+
+	providerMap := lookupCodexProviderTable(raw, currentProviderKey)
+	if providerMap == nil {
+		return lockedFields
+	}
+
+	if _, exists := providerMap["base_url"]; exists {
+		lockedFields = append(lockedFields, buildLockedField(
+			fmt.Sprintf("model_providers.%s.base_url", currentProviderKey),
+			providerMap["base_url"],
+			"由系统管理，指向当前 provider 的生效地址",
+			"string",
+		))
+	}
+	if _, exists := providerMap["name"]; exists {
+		lockedFields = append(lockedFields, buildLockedField(
+			fmt.Sprintf("model_providers.%s.name", currentProviderKey),
+			providerMap["name"],
+			"由系统管理，标识当前注入的 provider",
+			"string",
+		))
+	}
+	if _, exists := providerMap["wire_api"]; exists {
+		lockedFields = append(lockedFields, buildLockedField(
+			fmt.Sprintf("model_providers.%s.wire_api", currentProviderKey),
+			providerMap["wire_api"],
+			"由系统管理，固定使用的 Wire API",
+			"string",
+		))
+	}
+	if _, exists := providerMap["requires_openai_auth"]; exists {
+		lockedFields = append(lockedFields, buildLockedField(
+			fmt.Sprintf("model_providers.%s.requires_openai_auth", currentProviderKey),
+			providerMap["requires_openai_auth"],
+			"由系统管理，标记是否要求 OpenAI Auth",
+			"boolean",
+		))
+	}
+
+	return lockedFields
+}
+
+func buildGeminiEditorLockedFields(envMap map[string]string) []CLIConfigField {
+	lockedFields := make([]CLIConfigField, 0, 2)
+	if baseURL := strings.TrimSpace(envMap["GOOGLE_GEMINI_BASE_URL"]); baseURL != "" {
+		lockedFields = append(lockedFields, buildLockedField(
+			"GOOGLE_GEMINI_BASE_URL",
+			baseURL,
+			"由系统管理，指向当前生效的服务地址",
+			"string",
+		))
+	}
+	if apiKey := strings.TrimSpace(envMap["GEMINI_API_KEY"]); apiKey != "" {
+		lockedFields = append(lockedFields, buildLockedField(
+			"GEMINI_API_KEY",
+			apiKey,
+			"由系统管理，当前认证令牌只读展示",
+			"string",
+		))
+	}
+
+	return lockedFields
+}
+
+func stripGeminiLockedEditableFields(value map[string]string) map[string]interface{} {
+	nextValue := make(map[string]interface{})
+	for key, entryValue := range value {
+		if key == "GOOGLE_GEMINI_BASE_URL" || key == "GEMINI_API_KEY" {
+			continue
+		}
+		nextValue[key] = entryValue
+	}
+	return nextValue
+}
+
+func resolveCodexEditorProviderKey(providerName string, apiURL string, apiKey string) string {
+	trimmedName := strings.TrimSpace(providerName)
+	if trimmedName != "" {
+		key := sanitizeProviderKey(trimmedName, 0)
+		if key != "" && key != "provider-0" {
+			return key
+		}
+	}
+
+	if providers, err := loadProviderSnapshot("codex"); err == nil {
+		for _, provider := range providers {
+			if urlsEqualFold(provider.APIURL, apiURL) && provider.APIKey == apiKey {
+				return sanitizeProviderKey(provider.Name, int(provider.ID))
+			}
+		}
+	}
+
+	return "preview-provider"
 }
 
 // getTemplatesPath 获取模板存储路径
@@ -809,17 +1206,250 @@ func (s *CliConfigService) SetTemplate(platform string, template map[string]inte
 	return s.saveTemplates(templates)
 }
 
-// GetLockedFields 获取指定平台的锁定字段列表
-func (s *CliConfigService) GetLockedFields(platform string) []string {
+func (s *CliConfigService) RenderEditorContent(
+	platform string,
+	editable map[string]interface{},
+	apiURL string,
+	apiKey string,
+	providerName string,
+) (*CLIEditorContent, error) {
+	if err := s.requireHome(); err != nil {
+		return nil, err
+	}
+
 	switch CLIPlatform(platform) {
 	case PlatformClaude:
-		return []string{"env.ANTHROPIC_BASE_URL", "env.ANTHROPIC_AUTH_TOKEN"}
+		value := stripClaudeLockedEditableFields(editable)
+		envValue, _ := value["env"].(map[string]interface{})
+		if envValue == nil {
+			envValue = make(map[string]interface{})
+		}
+
+		if hasCLIEditorProviderInput(PlatformClaude, apiURL, apiKey) {
+			envValue["ANTHROPIC_BASE_URL"] = normalizeURLTrimSlash(apiURL)
+			envValue["ANTHROPIC_AUTH_TOKEN"] = apiKey
+		} else {
+			currentContent, err := os.ReadFile(s.getClaudeConfigPath())
+			if err != nil && !errors.Is(err, os.ErrNotExist) {
+				return nil, fmt.Errorf("读取 Claude 配置失败: %w", err)
+			}
+			if len(currentContent) > 0 {
+				currentValue, err := parseJSONRootObject(string(currentContent))
+				if err != nil {
+					return nil, err
+				}
+				if currentEnv, ok := currentValue["env"].(map[string]interface{}); ok && currentEnv != nil {
+					if baseURL := anyToString(currentEnv["ANTHROPIC_BASE_URL"]); baseURL != "" {
+						envValue["ANTHROPIC_BASE_URL"] = baseURL
+					}
+					if token := anyToString(currentEnv["ANTHROPIC_AUTH_TOKEN"]); token != "" {
+						envValue["ANTHROPIC_AUTH_TOKEN"] = token
+					}
+				}
+			}
+		}
+
+		if len(envValue) > 0 {
+			value["env"] = envValue
+		} else {
+			delete(value, "env")
+		}
+
+		rendered, err := json.MarshalIndent(value, "", "  ")
+		if err != nil {
+			return nil, fmt.Errorf("序列化 Claude 配置失败: %w", err)
+		}
+		return &CLIEditorContent{
+			Format:       "json",
+			Content:      string(rendered),
+			LockedFields: buildClaudeEditorLockedFields(value),
+		}, nil
+
 	case PlatformCodex:
-		return []string{"model_provider", "preferred_auth_method", "model_providers.code-switch-r.base_url", "model_providers.code-switch-r.name", "model_providers.code-switch-r.wire_api"}
+		directMode := hasCLIEditorProviderInput(PlatformCodex, apiURL, apiKey)
+		raw := stripCodexLockedEditableFields(editable)
+		if directMode {
+			providerKey := resolveCodexEditorProviderKey(providerName, apiURL, apiKey)
+			raw = stripCodexEditorManagedFields(editable, providerKey)
+			raw["preferred_auth_method"] = codexPreferredAuth
+			raw["model_provider"] = providerKey
+
+			modelProviders := ensureTomlTable(raw, "model_providers")
+			providerCfg := ensureProviderTable(modelProviders, providerKey)
+			providerCfg["name"] = providerKey
+			providerCfg["base_url"] = normalizeURLTrimSlash(apiURL)
+			providerCfg["wire_api"] = codexWireAPI
+			providerCfg["requires_openai_auth"] = false
+			modelProviders[providerKey] = providerCfg
+			raw["model_providers"] = modelProviders
+		} else {
+			currentContent, err := os.ReadFile(s.getCodexConfigPath())
+			if err != nil && !errors.Is(err, os.ErrNotExist) {
+				return nil, fmt.Errorf("读取 Codex 配置失败: %w", err)
+			}
+
+			currentRaw := make(map[string]interface{})
+			if len(currentContent) > 0 {
+				if err := toml.Unmarshal(currentContent, &currentRaw); err != nil {
+					return nil, fmt.Errorf("解析 Codex 配置失败: %w", err)
+				}
+			}
+
+			currentProviderKey := anyToString(currentRaw["model_provider"])
+			if currentProviderKey != "" {
+				raw["model_provider"] = currentProviderKey
+			}
+
+			currentPreferredAuth := anyToString(currentRaw["preferred_auth_method"])
+			if currentPreferredAuth != "" {
+				raw["preferred_auth_method"] = currentPreferredAuth
+			}
+
+			if currentProviderKey != "" {
+				if currentProviders, ok := currentRaw["model_providers"].(map[string]interface{}); ok && currentProviders != nil {
+					if currentProviderValue, exists := currentProviders[currentProviderKey]; exists {
+						modelProviders := ensureTomlTable(raw, "model_providers")
+						if providerMap, ok := currentProviderValue.(map[string]interface{}); ok && providerMap != nil {
+							modelProviders[currentProviderKey] = cloneCLIEditableMap(providerMap)
+						}
+						raw["model_providers"] = modelProviders
+					}
+				}
+			}
+		}
+
+		tomlBytes, err := toml.Marshal(raw)
+		if err != nil {
+			return nil, fmt.Errorf("序列化 Codex 配置失败: %w", err)
+		}
+
+		return &CLIEditorContent{
+			Format:       "toml",
+			Content:      string(stripModelProvidersHeader(tomlBytes)),
+			LockedFields: buildCodexEditorLockedFields(raw),
+		}, nil
+
 	case PlatformGemini:
-		return []string{"GOOGLE_GEMINI_BASE_URL", "GEMINI_API_KEY"}
+		envMap := make(map[string]string)
+		for key, value := range editable {
+			if key == "GOOGLE_GEMINI_BASE_URL" || key == "GEMINI_API_KEY" {
+				continue
+			}
+			envMap[key] = fmt.Sprintf("%v", value)
+		}
+
+		if hasCLIEditorProviderInput(PlatformGemini, apiURL, apiKey) {
+			if strings.TrimSpace(apiURL) != "" {
+				envMap["GOOGLE_GEMINI_BASE_URL"] = strings.TrimSpace(apiURL)
+			}
+			if strings.TrimSpace(apiKey) != "" {
+				envMap["GEMINI_API_KEY"] = strings.TrimSpace(apiKey)
+			}
+		} else {
+			currentContent, err := os.ReadFile(s.getGeminiEnvPath())
+			if err != nil && !errors.Is(err, os.ErrNotExist) {
+				return nil, fmt.Errorf("读取 Gemini 配置失败: %w", err)
+			}
+			if len(currentContent) > 0 {
+				currentEnv := parseEnvFile(string(currentContent))
+				if baseURL := strings.TrimSpace(currentEnv["GOOGLE_GEMINI_BASE_URL"]); baseURL != "" {
+					envMap["GOOGLE_GEMINI_BASE_URL"] = baseURL
+				}
+				if token := strings.TrimSpace(currentEnv["GEMINI_API_KEY"]); token != "" {
+					envMap["GEMINI_API_KEY"] = token
+				}
+			}
+		}
+
+		return &CLIEditorContent{
+			Format:       "env",
+			Content:      serializeEnvFile(envMap),
+			LockedFields: buildGeminiEditorLockedFields(envMap),
+		}, nil
+
 	default:
-		return []string{}
+		return nil, fmt.Errorf("不支持的平台: %s", platform)
+	}
+}
+
+func (s *CliConfigService) NormalizeEditorContent(
+	platform string,
+	content string,
+	apiURL string,
+	apiKey string,
+	providerName string,
+) (*CLINormalizedEditorContent, error) {
+	if err := s.requireHome(); err != nil {
+		return nil, err
+	}
+
+	switch CLIPlatform(platform) {
+	case PlatformClaude:
+		value, err := parseJSONRootObject(content)
+		if err != nil {
+			return nil, err
+		}
+
+		editable := stripClaudeLockedEditableFields(value)
+		rendered, err := s.RenderEditorContent(platform, editable, apiURL, apiKey, providerName)
+		if err != nil {
+			return nil, err
+		}
+
+		return &CLINormalizedEditorContent{
+			Editable:     editable,
+			Format:       rendered.Format,
+			Content:      rendered.Content,
+			LockedFields: rendered.LockedFields,
+		}, nil
+
+	case PlatformCodex:
+		trimmed := strings.TrimSpace(content)
+		raw := make(map[string]interface{})
+		if trimmed != "" {
+			if err := toml.Unmarshal([]byte(trimmed), &raw); err != nil {
+				return nil, fmt.Errorf("TOML 格式无效: %w", err)
+			}
+		}
+
+		editable := stripCodexLockedEditableFields(raw)
+		if hasCLIEditorProviderInput(PlatformCodex, apiURL, apiKey) {
+			providerKey := resolveCodexEditorProviderKey(providerName, apiURL, apiKey)
+			editable = stripCodexEditorManagedFields(raw, providerKey)
+		}
+		rendered, err := s.RenderEditorContent(platform, editable, apiURL, apiKey, providerName)
+		if err != nil {
+			return nil, err
+		}
+
+		return &CLINormalizedEditorContent{
+			Editable:     editable,
+			Format:       rendered.Format,
+			Content:      rendered.Content,
+			LockedFields: rendered.LockedFields,
+		}, nil
+
+	case PlatformGemini:
+		envValue, err := parseEditorEnvContent(content)
+		if err != nil {
+			return nil, err
+		}
+
+		editable := stripGeminiLockedEditableFields(envValue)
+		rendered, err := s.RenderEditorContent(platform, editable, apiURL, apiKey, providerName)
+		if err != nil {
+			return nil, err
+		}
+
+		return &CLINormalizedEditorContent{
+			Editable:     editable,
+			Format:       rendered.Format,
+			Content:      rendered.Content,
+			LockedFields: rendered.LockedFields,
+		}, nil
+
+	default:
+		return nil, fmt.Errorf("不支持的平台: %s", platform)
 	}
 }
 
@@ -926,25 +1556,7 @@ func (s *CliConfigService) getClaudeConfig() (*CLIConfig, error) {
 	}
 
 	// 构建字段列表
-	baseURL := s.baseURL()
-
-	// 锁定字段
-	config.Fields = append(config.Fields,
-		CLIConfigField{
-			Key:    "env.ANTHROPIC_BASE_URL",
-			Value:  baseURL,
-			Locked: true,
-			Hint:   "由代理管理，指向本地代理服务",
-			Type:   "string",
-		},
-		CLIConfigField{
-			Key:    "env.ANTHROPIC_AUTH_TOKEN",
-			Value:  "code-switch-r",
-			Locked: true,
-			Hint:   "代理认证令牌",
-			Type:   "string",
-		},
-	)
+	config.Fields = append(config.Fields, buildClaudeEditorLockedFields(data)...)
 
 	// 可编辑字段
 	env, _ := data["env"].(map[string]interface{})
@@ -1150,32 +1762,7 @@ func (s *CliConfigService) getCodexConfig() (*CLIConfig, error) {
 		})
 	}
 
-	baseURL := s.baseURL()
-
-	// 锁定字段
-	config.Fields = append(config.Fields,
-		CLIConfigField{
-			Key:    "model_provider",
-			Value:  "code-switch-r",
-			Locked: true,
-			Hint:   "代理提供商标识",
-			Type:   "string",
-		},
-		CLIConfigField{
-			Key:    "preferred_auth_method",
-			Value:  "apikey",
-			Locked: true,
-			Hint:   "代理认证方式",
-			Type:   "string",
-		},
-		CLIConfigField{
-			Key:    "model_providers.code-switch-r.base_url",
-			Value:  baseURL,
-			Locked: true,
-			Hint:   "由代理管理，指向本地代理服务",
-			Type:   "string",
-		},
-	)
+	config.Fields = append(config.Fields, buildCodexEditorLockedFields(data)...)
 
 	// 可编辑字段
 	model := "gpt-5-codex"
@@ -1214,23 +1801,29 @@ func (s *CliConfigService) getCodexConfig() (*CLIConfig, error) {
 	})
 	config.Editable["disable_response_storage"] = disableStorage
 
+	for key, value := range data {
+		switch key {
+		case "model", "model_reasoning_effort", "disable_response_storage", "model_provider", "preferred_auth_method":
+			continue
+		case "model_providers":
+			if modelProviders, ok := value.(map[string]interface{}); ok && modelProviders != nil {
+				nextProviders := cloneCLIEditableMap(modelProviders)
+				delete(nextProviders, codexProviderKey)
+				if len(nextProviders) > 0 {
+					config.Editable[key] = nextProviders
+				}
+			}
+		default:
+			config.Editable[key] = value
+		}
+	}
+
 	return config, nil
 }
 
 func (s *CliConfigService) saveCodexConfig(editable map[string]interface{}) error {
 	configPath := s.getCodexConfigPath()
-
-	// 读取现有配置（保留用户的其他设置）
-	var raw map[string]interface{}
-	if content, err := os.ReadFile(configPath); err == nil {
-		// 仅当文件非空时解析
-		if len(content) > 0 {
-			if err := toml.Unmarshal(content, &raw); err != nil {
-				// TOML 解析失败，使用空配置继续（后续会创建备份）
-				fmt.Printf("[警告] config.toml 格式无效，将使用空配置: %v\n", err)
-			}
-		}
-	}
+	raw := stripCodexLockedEditableFields(editable)
 	if raw == nil {
 		raw = make(map[string]interface{})
 	}
@@ -1246,11 +1839,11 @@ func (s *CliConfigService) saveCodexConfig(editable map[string]interface{}) erro
 
 	// 确保 model_providers.code-switch-r 存在
 	modelProviders, ok := raw["model_providers"].(map[string]interface{})
-	if !ok {
+	if !ok || modelProviders == nil {
 		modelProviders = make(map[string]interface{})
 	}
 	provider, ok := modelProviders["code-switch-r"].(map[string]interface{})
-	if !ok {
+	if !ok || provider == nil {
 		provider = make(map[string]interface{})
 	}
 	provider["name"] = "code-switch-r"
@@ -1259,23 +1852,6 @@ func (s *CliConfigService) saveCodexConfig(editable map[string]interface{}) erro
 	provider["requires_openai_auth"] = false
 	modelProviders["code-switch-r"] = provider
 	raw["model_providers"] = modelProviders
-
-	// 锁定字段列表（这些字段不允许用户覆盖）
-	lockedFields := map[string]bool{
-		"model_provider":        true,
-		"preferred_auth_method": true,
-		"model_providers":       true,
-	}
-
-	// 合并用户编辑的所有字段（除了锁定字段）
-	for k, v := range editable {
-		// 跳过锁定字段（包括点号路径的嵌套键）
-		if lockedFields[k] || strings.HasPrefix(k, "model_providers.") {
-			continue
-		}
-		// 其他字段直接覆盖
-		raw[k] = v
-	}
 
 	// 确保目录存在
 	if err := EnsureDir(filepath.Dir(configPath)); err != nil {
@@ -1401,28 +1977,7 @@ func (s *CliConfigService) getGeminiConfig() (*CLIConfig, error) {
 		return nil, fmt.Errorf("读取 Gemini .env 失败: %w", err)
 	}
 
-	baseURL := s.geminiBaseURL()
-
-	// 锁定字段（如果启用了代理）
-	config.Fields = append(config.Fields,
-		CLIConfigField{
-			Key:    "GOOGLE_GEMINI_BASE_URL",
-			Value:  baseURL,
-			Locked: true,
-			Hint:   "由代理管理，指向本地代理服务",
-			Type:   "string",
-		},
-	)
-
-	// API Key (锁定字段，由系统管理)
-	apiKey := config.EnvContent["GEMINI_API_KEY"]
-	config.Fields = append(config.Fields, CLIConfigField{
-		Key:    "GEMINI_API_KEY",
-		Value:  apiKey,
-		Locked: true,
-		Hint:   "由系统管理，请勿手动修改",
-		Type:   "string",
-	})
+	config.Fields = append(config.Fields, buildGeminiEditorLockedFields(config.EnvContent)...)
 
 	model := config.EnvContent["GEMINI_MODEL"]
 	if model == "" {
@@ -1455,10 +2010,13 @@ func (s *CliConfigService) getGeminiConfig() (*CLIConfig, error) {
 func (s *CliConfigService) saveGeminiConfig(editable map[string]interface{}) error {
 	envPath := s.getGeminiEnvPath()
 
-	// 读取现有内容（保留用户的其他设置）
 	envMap := make(map[string]string)
+
 	if content, err := os.ReadFile(envPath); err == nil {
-		envMap = parseEnvFile(string(content))
+		currentEnv := parseEnvFile(string(content))
+		if apiKey := currentEnv["GEMINI_API_KEY"]; apiKey != "" {
+			envMap["GEMINI_API_KEY"] = apiKey
+		}
 	}
 
 	// 创建备份
@@ -1469,23 +2027,14 @@ func (s *CliConfigService) saveGeminiConfig(editable map[string]interface{}) err
 	// 设置锁定字段
 	envMap["GOOGLE_GEMINI_BASE_URL"] = s.geminiBaseURL()
 
-	// 锁定字段列表（这些字段不允许用户覆盖）
-	lockedFields := map[string]bool{
-		"GOOGLE_GEMINI_BASE_URL": true,
-		"GEMINI_API_KEY":         true,
-	}
-
-	// 合并用户编辑的所有字段（除了锁定字段）
+	// 以当前编辑结果为完整来源，只保留非锁定字段
 	for k, v := range editable {
-		// 跳过锁定字段
-		if lockedFields[k] {
+		if k == "GOOGLE_GEMINI_BASE_URL" || k == "GEMINI_API_KEY" {
 			continue
 		}
-		// 将值转换为字符串（.env 格式只支持字符串值）
 		if str, ok := v.(string); ok {
 			envMap[k] = str
 		} else {
-			// 对于非字符串类型，转换为字符串表示
 			envMap[k] = fmt.Sprintf("%v", v)
 		}
 	}

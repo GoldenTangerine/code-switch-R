@@ -44,6 +44,7 @@ const props = withDefaults(defineProps<{
   invalid?: boolean
   placeholder?: string
   showValidation?: boolean
+  mode?: 'json' | 'plain'
 }>(), {
   modelValue: '',
   rows: 14,
@@ -51,10 +52,12 @@ const props = withDefaults(defineProps<{
   invalid: false,
   placeholder: '',
   showValidation: true,
+  mode: 'json',
 })
 
 const emit = defineEmits<{
   (e: 'update:modelValue', value: string): void
+  (e: 'format'): void
 }>()
 
 const { t } = useI18n()
@@ -71,22 +74,7 @@ const readOnlyCompartment = new Compartment()
 const placeholderCompartment = new Compartment()
 const validationCompartment = new Compartment()
 const themeCompartment = new Compartment()
-
-const toSortedJsonValue = (value: unknown): unknown => {
-  if (Array.isArray(value)) {
-    return value.map((item) => toSortedJsonValue(item))
-  }
-
-  if (value && typeof value === 'object') {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>)
-        .sort(([left], [right]) => left.localeCompare(right))
-        .map(([key, entryValue]) => [key, toSortedJsonValue(entryValue)]),
-    )
-  }
-
-  return value
-}
+const languageCompartment = new Compartment()
 
 const stripJsonErrorMessage = (message: string) => message
   .replace(/^JSON\.parse:\s*/i, '')
@@ -240,7 +228,11 @@ const createReadOnlyExtension = () => [
 const createPlaceholderExtension = () => editorPlaceholder(props.placeholder)
 
 const createValidationExtension = () => (
-  props.showValidation ? [jsonLinter, lintGutter()] : []
+  props.showValidation && props.mode === 'json' ? [jsonLinter, lintGutter()] : []
+)
+
+const createLanguageExtension = () => (
+  props.mode === 'json' ? [json()] : []
 )
 
 const createThemeExtension = () => {
@@ -281,8 +273,8 @@ const createEditor = (doc = props.modelValue ?? '') => {
       doc,
       extensions: [
         basicSetup,
-        json(),
         baseTheme,
+        languageCompartment.of(createLanguageExtension()),
         layoutCompartment.of(createLayoutExtension()),
         readOnlyCompartment.of(createReadOnlyExtension()),
         placeholderCompartment.of(createPlaceholderExtension()),
@@ -327,19 +319,7 @@ const replaceDocument = (nextValue: string) => {
 
 const formatDocument = () => {
   if (props.readonly || !view) return
-
-  const currentValue = view.state.doc.toString()
-  if (!currentValue.trim()) return
-
-  try {
-    const formatted = JSON.stringify(toSortedJsonValue(JSON.parse(currentValue)), null, 2)
-    if (formatted === currentValue) return
-
-    replaceDocument(formatted)
-    emit('update:modelValue', formatted)
-  } catch {
-    focus()
-  }
+  emit('format')
 }
 
 defineExpose({ focus })
@@ -361,6 +341,11 @@ watch(() => props.placeholder, () => {
 })
 
 watch(() => props.showValidation, () => {
+  reconfigureCompartment(validationCompartment, createValidationExtension())
+})
+
+watch(() => props.mode, () => {
+  reconfigureCompartment(languageCompartment, createLanguageExtension())
   reconfigureCompartment(validationCompartment, createValidationExtension())
 })
 
