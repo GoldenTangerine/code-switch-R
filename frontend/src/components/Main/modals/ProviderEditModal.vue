@@ -181,6 +181,7 @@
 
         <div class="form-field">
           <CLIConfigEditor
+            ref="cliConfigEditorRef"
             :platform="tabId as CLIPlatform"
             v-model="form.cliConfig"
             :provider-config="{
@@ -280,6 +281,10 @@ import type { ProviderTab, VendorForm } from '../types'
 import type { AutomationCard } from '../../../data/cards'
 import type { CLIPlatform } from '../../../services/cliConfig'
 
+type CLIConfigEditorExposed = InstanceType<typeof CLIConfigEditor> & {
+  applyPendingJsonChanges?: () => boolean
+}
+
 const props = defineProps<{
   open: boolean
   tabId: ProviderTab
@@ -299,6 +304,7 @@ const iconOptions = Object.keys(lobeIcons).sort((left, right) => left.localeComp
 const defaultIconKey = iconOptions[0] ?? 'aicoding'
 
 const form = reactive<VendorForm>(createDefaultVendorForm(props.tabId, defaultIconKey))
+const cliConfigEditorRef = ref<CLIConfigEditorExposed | null>(null)
 const errors = reactive({
   apiUrl: '',
 })
@@ -384,6 +390,9 @@ const getLevelDescription = (level: number) => {
 }
 
 const buildFormPayload = (): VendorForm | null => {
+  const cliConfigReady = cliConfigEditorRef.value?.applyPendingJsonChanges?.() ?? true
+  if (!cliConfigReady) return null
+
   const apiUrl = form.apiUrl.trim()
   errors.apiUrl = ''
 

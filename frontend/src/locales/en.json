@@ -472,6 +472,7 @@
           "level": "Priority Level",
           "availabilityMonitor": "Availability Monitoring",
           "connectivityAutoBlacklist": "Auto-Blacklist on Failure",
+          "availabilityConfig": "Advanced Availability Config",
           "availabilityTestModel": "Test Model (optional)",
           "availabilityTestEndpoint": "Test Endpoint (optional)",
           "availabilityTimeout": "Timeout (ms)",
@@ -509,6 +510,33 @@
           "connectivityTestModel": "Select a model for connectivity testing, or leave empty to use platform default",
           "connectivityTestEndpoint": "Select or enter API endpoint path",
           "connectivityAuthType": "Default is Bearer. Use X-API-Key for Anthropic-style APIs. Enter custom header name in the text field if needed."
+        },
+        "jsonEditor": {
+          "title": "Config JSON",
+          "dirty": "Pending",
+          "unlock": "Unlock",
+          "lock": "Lock",
+          "apply": "Apply to Form",
+          "reset": "Reset",
+          "hint": "This editor targets the provider's main JSON config used on the home page. Saved output is formatted with 2-space indentation and stable key ordering. CLI config files are still edited separately below.",
+          "errors": {
+            "empty": "JSON content cannot be empty",
+            "mustBeObject": "JSON root must be an object",
+            "invalidJson": "Failed to parse JSON: {message}",
+            "fieldMustBeString": "Field \"{field}\" must be a string",
+            "fieldMustBeBoolean": "Field \"{field}\" must be a boolean",
+            "fieldMustBeObject": "Field \"{field}\" must be an object",
+            "mapValuesMustBeBoolean": "All values in \"{field}\" must be booleans",
+            "mapValuesMustBeString": "All values in \"{field}\" must be strings",
+            "levelMustBeInteger": "Priority level must be an integer",
+            "levelOutOfRange": "Priority level must be between 1 and 10",
+            "unsupportedFields": "The JSON contains fields this editor does not support: {fields}",
+            "unsupportedAvailabilityFields": "The advanced availability config contains unsupported fields: {fields}",
+            "timeoutMustBePositive": "Timeout must be a number greater than 0"
+          },
+          "toast": {
+            "dirtyNotApplied": "JSON changes are still pending. Saving now will use the form values."
+          }
         },
         "actions": {
           "cancel": "Cancel",
@@ -1445,6 +1473,7 @@
     "cliConfig": {
       "title": "CLI Configuration",
       "lockedFields": "Proxy-managed (read-only)",
+      "noLockedFields": "There are no proxy-managed fields to display.",
       "editableFields": "Editable fields",
       "customFields": "Custom fields",
       "noCustomFields": "No custom fields. Click + to add one.",
@@ -1466,6 +1495,7 @@
       "templateSaveError": "Failed to save template",
       "jsonParseError": "Invalid JSON format, please check your input",
       "previewTitle": "Config preview",
+      "previewEmpty": "No config files are available to preview.",
       "previewUnknownPath": "Unknown path",
       "smartPasteSuccess": "Parsed {format} config and filled fields",
       "smartPasteFailed": "Unrecognized paste, please use JSON / TOML / .env content",
@@ -1478,7 +1508,24 @@
       "saveAllFailed": "All config files failed to save",
       "savePartialSuccess": "{success} saved, {fail} failed",
       "tabPreview": "Preview",
-      "tabCurrent": "Current"
+      "tabCurrent": "Current",
+      "jsonEditor": {
+        "title": "Config JSON",
+        "dirty": "Pending",
+        "unlock": "Unlock",
+        "lock": "Lock",
+        "apply": "Apply",
+        "format": "Format",
+        "reset": "Reset",
+        "hint": "Edit the provider's CLI config JSON here. Output is saved with 2-space indentation and stable key ordering, while the preview area below only shows the generated or detected config files.",
+        "errors": {
+          "mustBeObject": "CLI config JSON root must be an object",
+          "invalidJson": "Failed to parse CLI config JSON: {message}",
+          "invalidJsonGeneric": "Invalid CLI config JSON",
+          "invalidJsonAtPosition": "Invalid CLI config JSON: {message} (position: {position})",
+          "invalidJsonAtLineColumn": "Invalid CLI config JSON at line {line}, column {column}"
+        }
+      }
     }
   }
 }
