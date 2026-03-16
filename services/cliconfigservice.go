@@ -476,6 +476,26 @@ func stripGeminiLockedEditableFields(value map[string]string) map[string]interfa
 	return nextValue
 }
 
+func stripGeminiLockedEditableTemplateFields(value map[string]interface{}) map[string]interface{} {
+	nextValue := cloneCLIEditableMap(value)
+	delete(nextValue, "GOOGLE_GEMINI_BASE_URL")
+	delete(nextValue, "GEMINI_API_KEY")
+	return nextValue
+}
+
+func normalizeTemplateEditableFields(platform CLIPlatform, value map[string]interface{}) map[string]interface{} {
+	switch platform {
+	case PlatformClaude:
+		return stripClaudeLockedEditableFields(value)
+	case PlatformCodex:
+		return stripCodexLockedEditableFields(value)
+	case PlatformGemini:
+		return stripGeminiLockedEditableTemplateFields(value)
+	default:
+		return cloneCLIEditableMap(value)
+	}
+}
+
 func resolveCodexEditorProviderKey(providerName string, apiURL string, apiKey string) string {
 	trimmedName := strings.TrimSpace(providerName)
 	if trimmedName != "" {
@@ -1204,6 +1224,87 @@ func (s *CliConfigService) SetTemplate(platform string, template map[string]inte
 	}
 
 	return s.saveTemplates(templates)
+}
+
+func (s *CliConfigService) RenderTemplateEditorContent(
+	platform string,
+	template map[string]interface{},
+) (*CLIEditorContent, error) {
+	platformType := CLIPlatform(platform)
+	value := normalizeTemplateEditableFields(platformType, template)
+
+	switch platformType {
+	case PlatformClaude, PlatformGemini:
+		rendered, err := json.MarshalIndent(value, "", "  ")
+		if err != nil {
+			return nil, fmt.Errorf("序列化模板失败: %w", err)
+		}
+		return &CLIEditorContent{
+			Format:  "json",
+			Content: string(rendered),
+		}, nil
+
+	case PlatformCodex:
+		if len(value) == 0 {
+			return &CLIEditorContent{
+				Format:  "toml",
+				Content: "",
+			}, nil
+		}
+
+		rendered, err := toml.Marshal(value)
+		if err != nil {
+			return nil, fmt.Errorf("序列化 Codex 模板失败: %w", err)
+		}
+		return &CLIEditorContent{
+			Format:  "toml",
+			Content: string(stripModelProvidersHeader(rendered)),
+		}, nil
+
+	default:
+		return nil, fmt.Errorf("不支持的平台: %s", platform)
+	}
+}
+
+func (s *CliConfigService) NormalizeTemplateEditorContent(
+	platform string,
+	content string,
+) (*CLINormalizedEditorContent, error) {
+	platformType := CLIPlatform(platform)
+	var editable map[string]interface{}
+
+	switch platformType {
+	case PlatformClaude, PlatformGemini:
+		value, err := parseJSONRootObject(content)
+		if err != nil {
+			return nil, err
+		}
+		editable = value
+
+	case PlatformCodex:
+		trimmed := strings.TrimSpace(content)
+		editable = make(map[string]interface{})
+		if trimmed != "" {
+			if err := toml.Unmarshal([]byte(trimmed), &editable); err != nil {
+				return nil, fmt.Errorf("TOML 格式无效: %w", err)
+			}
+		}
+
+	default:
+		return nil, fmt.Errorf("不支持的平台: %s", platform)
+	}
+
+	editable = normalizeTemplateEditableFields(platformType, editable)
+	rendered, err := s.RenderTemplateEditorContent(platform, editable)
+	if err != nil {
+		return nil, err
+	}
+
+	return &CLINormalizedEditorContent{
+		Editable: editable,
+		Format:   rendered.Format,
+		Content:  rendered.Content,
+	}, nil
 }
 
 func (s *CliConfigService) RenderEditorContent(

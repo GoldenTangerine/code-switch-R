@@ -74,6 +74,28 @@ export async function setCLITemplate(
   return Call.ByName(`${SERVICE_PATH}.SetTemplate`, platform, template, isGlobalDefault)
 }
 
+export async function renderCLITemplateEditorContent(
+  platform: CLIPlatform,
+  template: Record<string, any> = {},
+): Promise<CLIEditorContent> {
+  return Call.ByName(
+    `${SERVICE_PATH}.RenderTemplateEditorContent`,
+    platform,
+    template,
+  )
+}
+
+export async function normalizeCLITemplateEditorContent(
+  platform: CLIPlatform,
+  content: string,
+): Promise<CLINormalizedEditorContent> {
+  return Call.ByName(
+    `${SERVICE_PATH}.NormalizeTemplateEditorContent`,
+    platform,
+    content,
+  )
+}
+
 export async function renderCLIConfigEditorContent(
   platform: CLIPlatform,
   editable: Record<string, any> = {},

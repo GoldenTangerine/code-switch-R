@@ -154,8 +154,8 @@
           :rows="16"
           :invalid="!!globalTemplateError"
           :placeholder="templateJsonPlaceholder"
-          mode="json"
-          :show-validation="true"
+          :mode="templateEditorMode"
+          :show-validation="templateEditorMode === 'json'"
           @format="handleGlobalTemplateFormat"
         />
 
@@ -199,7 +199,9 @@ import {
   fetchCLIConfig,
   fetchCLITemplate,
   normalizeCLIConfigEditorContent,
+  normalizeCLITemplateEditorContent,
   renderCLIConfigEditorContent,
+  renderCLITemplateEditorContent,
   restoreDefaultConfig,
   setCLITemplate,
   type CLIConfig,
@@ -229,10 +231,6 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
-
-type FormatCliConfigJsonResult =
-  | { ok: true; text: string; value: Record<string, any> }
-  | { ok: false; error: string }
 
 type SetEditableValuesOptions = {
   emit?: boolean
@@ -277,6 +275,7 @@ const globalTemplateSyncedText = ref('')
 const globalTemplateSyncedEnabled = ref(false)
 const globalTemplateEditingText = ref('')
 const globalTemplateError = ref('')
+const globalTemplateFormat = ref<'json' | 'toml' | 'env' | string>('json')
 const sharedTemplateEnabled = ref(false)
 const sharedTemplateInjectedEntries = ref<TemplateInjectionEntry[]>([])
 const persistBaselineValue = ref<Record<string, any>>({})
@@ -286,6 +285,9 @@ let loadConfigRequestSeq = 0
 let cliEditorRenderRequestSeq = 0
 let cliEditorValidateRequestSeq = 0
 let cliEditorValidationTimer: ReturnType<typeof setTimeout> | null = null
+let globalTemplateFormatRequestSeq = 0
+let globalTemplateValidateRequestSeq = 0
+let globalTemplateValidationTimer: ReturnType<typeof setTimeout> | null = null
 
 const cloneCliConfigValue = <T>(value: T): T => {
   if (value == null) return value
@@ -367,45 +369,15 @@ const platformLabels: Record<CLIPlatform, string> = {
   gemini: 'Gemini',
 }
 
-const stripJsonErrorMessage = (message: string) => message
-  .replace(/^JSON\.parse:\s*/i, '')
-  .replace(/\s+of the JSON data$/i, '')
-  .trim()
-
-const parseJsonError = (error: unknown): string => {
-  if (!(error instanceof SyntaxError)) {
-    return t('components.cliConfig.jsonEditor.errors.invalidJsonGeneric')
-  }
-
-  const rawMessage = error.message
-  const positionMatch = rawMessage.match(/at position (\d+)/i)
-  if (positionMatch) {
-    const detail = stripJsonErrorMessage(rawMessage.replace(/\s+in JSON at position \d+/i, ''))
-    return t('components.cliConfig.jsonEditor.errors.invalidJsonAtPosition', {
-      message: detail || t('components.cliConfig.jsonEditor.errors.invalidJsonGeneric'),
-      position: positionMatch[1],
-    })
-  }
-
-  const lineColumnMatch = rawMessage.match(/line (\d+) column (\d+)/i)
-  if (lineColumnMatch) {
-    return t('components.cliConfig.jsonEditor.errors.invalidJsonAtLineColumn', {
-      line: lineColumnMatch[1],
-      column: lineColumnMatch[2],
-    })
-  }
-
-  return t('components.cliConfig.jsonEditor.errors.invalidJson', {
-    message: stripJsonErrorMessage(rawMessage) || t('components.cliConfig.jsonEditor.errors.invalidJsonGeneric'),
-  })
-}
-
 const platformLabel = computed(() => platformLabels[props.platform] || props.platform)
 const providerName = computed(() => props.providerName?.trim() || '')
 const providerApiKey = computed(() => props.providerConfig?.apiKey?.trim() || '')
 const providerApiUrl = computed(() => props.providerConfig?.baseUrl?.trim() || '')
 const cliEditorMode = computed<'json' | 'plain'>(() => (
   cliEditorFormat.value === 'json' ? 'json' : 'plain'
+))
+const templateEditorMode = computed<'json' | 'plain'>(() => (
+  globalTemplateFormat.value === 'json' ? 'json' : 'plain'
 ))
 const lockedFields = computed(() => editorLockedFields.value)
 const cliJsonDirty = computed(() => cliJsonEditingText.value !== cliJsonSyncedText.value)
@@ -454,12 +426,12 @@ const templateJsonPlaceholder = computed(() => {
   }
 
   if (props.platform === 'codex') {
-    return `{
-  "model": "gpt-5-codex",
-  "features": {
-    "parallel": true
-  }
-}`
+    return `model = "gpt-5-codex"
+disable_response_storage = true
+model_reasoning_effort = "high"
+
+[features]
+parallel = true`
   }
 
   return `{
@@ -480,10 +452,6 @@ const isPlainObjectRecord = (value: unknown): value is Record<string, any> => (
   !!value
   && typeof value === 'object'
   && !Array.isArray(value)
-)
-
-const buildTemplateJsonText = (value: Record<string, any>) => (
-  JSON.stringify(toSortedJsonValue(normalizeCliConfigRecord(value)), null, 2)
 )
 
 const mergeMissingTemplateKeys = (
@@ -638,6 +606,13 @@ const clearCliEditorValidationTimer = () => {
   }
 }
 
+const clearGlobalTemplateValidationTimer = () => {
+  if (globalTemplateValidationTimer) {
+    clearTimeout(globalTemplateValidationTimer)
+    globalTemplateValidationTimer = null
+  }
+}
+
 const emitChanges = () => {
   emit('update:modelValue', attachCliConfigMetadata(editableValues.value))
 }
@@ -704,6 +679,17 @@ const normalizeCliEditorContent = async (content: string) => (
   )
 )
 
+const renderTemplateEditorContent = async (value: Record<string, any>) => (
+  renderCLITemplateEditorContent(
+    props.platform,
+    normalizeCliConfigRecord(value),
+  )
+)
+
+const normalizeTemplateEditorContent = async (content: string): Promise<CLINormalizedEditorContent> => (
+  normalizeCLITemplateEditorContent(props.platform, content)
+)
+
 const syncCliJsonFromValues = async (forceSyncText = false) => {
   const currentSeq = ++cliEditorRenderRequestSeq
 
@@ -734,45 +720,6 @@ const setEditableValues = async (
     emitChanges()
   }
   await syncCliJsonFromValues(options.forceSyncText ?? false)
-}
-
-const formatCliConfigJson = (
-  input: string,
-  _target: 'editor' | 'template' = 'editor',
-): FormatCliConfigJsonResult => {
-  const trimmed = input.trim()
-  if (!trimmed) {
-    const emptyValue = {}
-    return {
-      ok: true,
-      text: buildTemplateJsonText(emptyValue),
-      value: emptyValue,
-    }
-  }
-
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(trimmed)
-  } catch (error) {
-    return {
-      ok: false,
-      error: parseJsonError(error),
-    }
-  }
-
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    return {
-      ok: false,
-      error: t('components.cliConfig.jsonEditor.errors.mustBeObject'),
-    }
-  }
-
-  const value = normalizeCliConfigRecord(parsed as Record<string, any>)
-  return {
-    ok: true,
-    text: buildTemplateJsonText(value),
-    value,
-  }
 }
 
 const applyNormalizedCliEditor = (
@@ -818,14 +765,40 @@ const handleCliEditorFormat = async () => {
 }
 
 const handleGlobalTemplateFormat = () => {
-  const formatted = formatCliConfigJson(globalTemplateEditingText.value, 'template')
-  if (!formatted.ok) {
-    globalTemplateError.value = formatted.error
-    return
-  }
+  void (async () => {
+    const currentSeq = ++globalTemplateFormatRequestSeq
+    const currentText = globalTemplateEditingText.value
 
-  globalTemplateEditingText.value = formatted.text
-  globalTemplateError.value = ''
+    try {
+      const normalized = await normalizeTemplateEditorContent(currentText)
+      if (currentSeq !== globalTemplateFormatRequestSeq || globalTemplateEditingText.value !== currentText) {
+        return
+      }
+      globalTemplateFormat.value = normalized.format || globalTemplateFormat.value
+      globalTemplateEditingText.value = normalized.content
+      globalTemplateError.value = ''
+    } catch (error) {
+      if (currentSeq !== globalTemplateFormatRequestSeq || globalTemplateEditingText.value !== currentText) {
+        return
+      }
+      globalTemplateError.value = extractErrorMessage(error)
+    }
+  })()
+}
+
+const applyRenderedGlobalTemplateContent = (rendered: CLIEditorContent) => {
+  globalTemplateFormat.value = rendered.format || 'json'
+  globalTemplateSyncedText.value = rendered.content || ''
+  globalTemplateEditingText.value = globalTemplateSyncedText.value
+}
+
+const normalizeGlobalTemplateDraft = async () => {
+  const normalized = await normalizeTemplateEditorContent(globalTemplateEditingText.value)
+  globalTemplateFormat.value = normalized.format || globalTemplateFormat.value
+  return {
+    value: normalizeCliConfigRecord(normalized.editable),
+    text: normalized.content,
+  }
 }
 
 const resetCliJsonFromValues = () => {
@@ -937,6 +910,38 @@ const scheduleCliEditorValidation = () => {
   }, 180)
 }
 
+const scheduleGlobalTemplateValidation = () => {
+  clearGlobalTemplateValidationTimer()
+
+  if (!globalTemplateModalOpen.value) {
+    globalTemplateError.value = ''
+    return
+  }
+
+  if (!globalTemplateEditingText.value.trim() || globalTemplateEditingText.value === globalTemplateSyncedText.value) {
+    globalTemplateError.value = ''
+    return
+  }
+
+  const currentSeq = ++globalTemplateValidateRequestSeq
+  const currentText = globalTemplateEditingText.value
+
+  globalTemplateValidationTimer = setTimeout(async () => {
+    try {
+      await normalizeTemplateEditorContent(currentText)
+      if (currentSeq !== globalTemplateValidateRequestSeq || globalTemplateEditingText.value !== currentText) {
+        return
+      }
+      globalTemplateError.value = ''
+    } catch (error) {
+      if (currentSeq !== globalTemplateValidateRequestSeq || globalTemplateEditingText.value !== currentText) {
+        return
+      }
+      globalTemplateError.value = extractErrorMessage(error)
+    }
+  }, 180)
+}
+
 const loadConfig = async () => {
   await loadConfigWithOptions()
 }
@@ -1024,29 +1029,32 @@ const openGlobalTemplateModal = async () => {
 
     globalTemplateEnabled.value = nextTemplate?.isGlobalDefault ?? false
     globalTemplateSyncedEnabled.value = globalTemplateEnabled.value
-    globalTemplateSyncedText.value = buildTemplateJsonText(nextValue)
-    globalTemplateEditingText.value = globalTemplateSyncedText.value
+    applyRenderedGlobalTemplateContent(await renderTemplateEditorContent(nextValue))
   } catch (error) {
     console.error('Failed to load CLI template:', error)
     globalTemplateEnabled.value = false
     globalTemplateSyncedEnabled.value = false
-    globalTemplateSyncedText.value = buildTemplateJsonText(editableValues.value)
-    globalTemplateEditingText.value = globalTemplateSyncedText.value
+    applyRenderedGlobalTemplateContent(await renderTemplateEditorContent(editableValues.value))
   } finally {
     globalTemplateLoading.value = false
   }
 }
 
 const closeGlobalTemplateModal = () => {
+  clearGlobalTemplateValidationTimer()
+  globalTemplateFormatRequestSeq += 1
+  globalTemplateValidateRequestSeq += 1
   globalTemplateModalOpen.value = false
   globalTemplateError.value = ''
 }
 
 const saveGlobalTemplate = async () => {
   globalTemplateError.value = ''
-  const formatted = formatCliConfigJson(globalTemplateEditingText.value, 'template')
-  if (!formatted.ok) {
-    globalTemplateError.value = formatted.error
+  let normalizedTemplate: { value: Record<string, any>; text: string }
+  try {
+    normalizedTemplate = await normalizeGlobalTemplateDraft()
+  } catch (error) {
+    globalTemplateError.value = extractErrorMessage(error)
     return
   }
 
@@ -1056,22 +1064,22 @@ const saveGlobalTemplate = async () => {
 
   globalTemplateSaving.value = true
   try {
-    await setCLITemplate(props.platform, formatted.value, globalTemplateEnabled.value)
+    await setCLITemplate(props.platform, normalizedTemplate.value, globalTemplateEnabled.value)
     templateState.value = {
-      template: normalizeCliConfigRecord(formatted.value),
+      template: normalizeCliConfigRecord(normalizedTemplate.value),
       isGlobalDefault: globalTemplateEnabled.value,
     }
     globalTemplateSyncedEnabled.value = globalTemplateEnabled.value
-    globalTemplateSyncedText.value = formatted.text
-    globalTemplateEditingText.value = formatted.text
+    globalTemplateSyncedText.value = normalizedTemplate.text
+    globalTemplateEditingText.value = normalizedTemplate.text
     globalTemplateError.value = ''
     showToast(t('components.cliConfig.templateSaved'), 'success')
 
     if (!shouldPersistCliConfig.value) {
       const nextBase = composeEditableValues(undefined)
-      const shouldEnableShared = globalTemplateEnabled.value && Object.keys(formatted.value).length > 0
+      const shouldEnableShared = globalTemplateEnabled.value && Object.keys(normalizedTemplate.value).length > 0
       const nextEditableValues = shouldEnableShared
-        ? applyTemplateToEditableValue(nextBase, normalizeCliConfigRecord(formatted.value))
+        ? applyTemplateToEditableValue(nextBase, normalizeCliConfigRecord(normalizedTemplate.value))
         : null
 
       sharedTemplateEnabled.value = !!nextEditableValues
@@ -1082,7 +1090,7 @@ const saveGlobalTemplate = async () => {
         { emit: true, forceSyncText: true },
       )
     } else if (sharedTemplateEnabled.value) {
-      if (Object.keys(formatted.value).length === 0) {
+      if (Object.keys(normalizedTemplate.value).length === 0) {
         await setSharedTemplateEnabled(false, {
           emit: true,
           forceSyncText: true,
@@ -1095,7 +1103,7 @@ const saveGlobalTemplate = async () => {
         )
         const nextEditableValues = applyTemplateToEditableValue(
           nextBase,
-          normalizeCliConfigRecord(formatted.value),
+          normalizeCliConfigRecord(normalizedTemplate.value),
         )
         sharedTemplateInjectedEntries.value = nextEditableValues.injectedEntries
         await setEditableValues(
@@ -1160,9 +1168,8 @@ watch(cliJsonEditingText, () => {
   scheduleCliEditorValidation()
 })
 
-watch(globalTemplateEditingText, (value) => {
-  const formatted = formatCliConfigJson(value, 'template')
-  globalTemplateError.value = formatted.ok ? '' : formatted.error
+watch(globalTemplateEditingText, () => {
+  scheduleGlobalTemplateValidation()
 })
 
 watch(() => props.platform, () => {
@@ -1188,9 +1195,12 @@ onMounted(() => {
 
 onUnmounted(() => {
   clearCliEditorValidationTimer()
+  clearGlobalTemplateValidationTimer()
   loadConfigRequestSeq += 1
   cliEditorRenderRequestSeq += 1
   cliEditorValidateRequestSeq += 1
+  globalTemplateFormatRequestSeq += 1
+  globalTemplateValidateRequestSeq += 1
   editorLockedFields.value = []
   resetSharedTemplateState()
 })
