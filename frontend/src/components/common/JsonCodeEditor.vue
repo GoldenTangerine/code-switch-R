@@ -9,6 +9,7 @@
     <div
       ref="editorHostRef"
       class="json-code-editor__surface"
+      :style="surfaceStyle"
       :aria-invalid="invalid ? 'true' : 'false'"
     />
 
@@ -26,7 +27,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { EditorView, basicSetup } from 'codemirror'
 import { Compartment, EditorState } from '@codemirror/state'
@@ -45,6 +46,7 @@ const props = withDefaults(defineProps<{
   placeholder?: string
   showValidation?: boolean
   mode?: 'json' | 'plain'
+  surfaceHeight?: string
 }>(), {
   modelValue: '',
   rows: 14,
@@ -53,6 +55,7 @@ const props = withDefaults(defineProps<{
   placeholder: '',
   showValidation: true,
   mode: 'json',
+  surfaceHeight: '',
 })
 
 const emit = defineEmits<{
@@ -68,6 +71,16 @@ const isDarkMode = ref(false)
 let view: EditorView | null = null
 let themeObserver: MutationObserver | null = null
 let syncingFromProps = false
+
+const surfaceStyle = computed(() => {
+  const surfaceHeight = props.surfaceHeight.trim()
+  if (!surfaceHeight) return undefined
+
+  return {
+    height: surfaceHeight,
+    minHeight: surfaceHeight,
+  }
+})
 
 const layoutCompartment = new Compartment()
 const readOnlyCompartment = new Compartment()
@@ -162,6 +175,7 @@ const jsonLinter = linter((editorView) => {
 const baseTheme = EditorView.theme({
   '.cm-scroller': {
     overflow: 'auto',
+    overscrollBehavior: 'contain',
     fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
   },
   '.cm-content': {

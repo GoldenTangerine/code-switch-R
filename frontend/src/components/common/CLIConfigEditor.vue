@@ -138,7 +138,7 @@
     :open="globalTemplateModalOpen"
     :title="t('components.cliConfig.templateDialogTitle', { platform: platformLabel })"
     :panel-width="'min(820px, 94vw)'"
-    :body-scrollable="false"
+    :body-scrollable="true"
     @close="closeGlobalTemplateModal"
   >
     <div class="cli-template-modal">
@@ -152,6 +152,7 @@
         <JsonCodeEditor
           v-model="globalTemplateEditingText"
           :rows="16"
+          surface-height="clamp(320px, 48vh, 520px)"
           :invalid="!!globalTemplateError"
           :placeholder="templateJsonPlaceholder"
           :mode="templateEditorMode"
@@ -1286,6 +1287,10 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.cli-template-modal {
+  min-height: 0;
 }
 
 .cli-section-title {

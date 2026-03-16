@@ -2161,10 +2161,13 @@ html.dark .ghost-icon:hover {
 .modal-body {
   padding: 0 24px 24px;
   min-height: 0;
+  flex: 1 1 auto;
 }
 
 .modal-scrollable {
+  min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .modal-title {
