@@ -11,7 +11,8 @@
       "WebFetch(domain:developer.aliyun.com)",
       "Bash(node:*)",
       "Bash(go mod:*)",
-      "Bash(git status:*)"
+      "Bash(git status:*)",
+      "Bash(grep:*)"
     ],
     "deny": [],
     "ask": []
