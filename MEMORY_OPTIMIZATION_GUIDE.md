@@ -1,572 +1,774 @@
-# Code Switch R - macOS 内存优化指南
+# Code Switch R - macOS 内存优化落地指南
 
-## 问题描述
+## 文档目的
 
-应用在 macOS 上打包后，即使仅托盘模式运行（不打开主界面），内存占用约 **400MB**。目标是将空闲状态内存降低到 **150-200MB** 以内。
+这份文档不是泛泛而谈的“优化清单”，而是基于当前代码实际实现梳理出的 **可落地方案**。目标是降低 macOS 下打包应用在“仅托盘 / 未打开主窗口”场景的运行内存，同时尽量 **不影响现有托盘功能、请求日志、可用性监控、自动更新和后台 relay 能力**。
 
-## 内存占用分析
+## 实施进度（2026-03-17）
 
-### 内存分布估算（当前 ~400MB）
+- [x] 为 Go 端补充内存诊断接口：已增加仅允许 loopback 访问的 `/debug/memory`
+- [x] 主窗口延迟创建：启动时不再创建 `mainWindow`，改为显式打开时按需创建
+- [x] 前端路由懒加载 + 手动分包：已完成路由动态导入和 `manualChunks`
+- [x] 前端共享 chunk 去耦：`tray-page` 已不再引用 `main/logs/console/icon-pack/icon-manifest`
+- [x] Lobe 图标库按需加载：移除全量 eager SVG 打包，取消单体 `icon-pack`，图标索引独立为 `icon-manifest`
+- [x] Gin `ReleaseMode`、HTTP timeout、HealthCheck Transport 保守调优：已完成第一阶段落地
+- [x] SQLite 连接池限制 + 保守 PRAGMA：已完成第一阶段落地
+- [x] `trayWindow` 按需创建：macOS 下改为首次点击托盘时创建，保留失焦隐藏与右键菜单；待打包态完整回归
+- [ ] macOS 打包态内存实测与完整回归验收：待执行
 
-| 组件 | 估算内存 | 说明 |
-|------|---------|------|
-| WebKit 主窗口进程 | ~150-200MB | 即使 Hidden 也会加载 WebKit 引擎 |
-| WebKit 托盘窗口进程 | ~80-120MB | macOS 独有的 tray 附属窗口 |
-| Go 运行时 + 服务 | ~40-60MB | 30+ 个服务实例 + Gin HTTP 服务器 |
-| Embed 前端资源 | ~3.5MB | frontend/dist 嵌入二进制 |
-| SQLite + 连接池 | ~5-10MB | WAL 模式 + 预热连接 |
-| 后台 goroutine | ~5-10MB | 健康检查、黑名单定时器、更新检查等 |
+当前唯一未闭环项是 **macOS 打包态实测与完整回归验收**。代码层面的窗口创建时机、前端分包和后端保守调优都已经落地，下面的分析与建议已按当前代码状态修订。
 
-### 核心问题
+本结论已结合当前代码核对，重点参考了以下实现：
 
-**最大的内存消耗者是 WebKit/WebView 进程**。Wails 3 在 macOS 上使用 WKWebView，每个窗口实例都会创建独立的 WebKit 渲染进程。当前应用创建了 **2 个 WebView 窗口**：
-1. `mainWindow` — 主窗口（启动即创建，通过 Hide 隐藏而非销毁）
-2. `trayWindow` — 托盘附属窗口（macOS 专用，启动即创建）
+- `main.go`
+- `services/providerrelay.go`
+- `services/healthcheckservice.go`
+- `services/database.go`
+- `services/dbqueue.go`
+- `services/appsettings.go`
+- `frontend/src/router/index.ts`
+- `frontend/src/components/Tray/Index.vue`
+- `frontend/src/components/Main/composables/useMainPageShell.ts`
 
----
-
-## 优化方案（按优先级排列）
-
----
-
-### P0: WebView 窗口延迟创建（预计节省 150-250MB）
-
-**这是最关键的优化点。** 当前两个 WebView 在应用启动时立即创建，即使用户只需要托盘功能。
-
-#### 方案 A: 主窗口延迟创建（推荐）
-
-**文件**: `main.go`
-
-**当前代码** (第 307-320 行):
-```go
-// 启动时就创建主窗口
-mainWindow := app.Window.NewWithOptions(application.WebviewWindowOptions{
-    Title:  "Code Switch R",
-    Width:  1700,
-    Height: 1040,
-    // ...
-    URL:    "/",
-})
-```
-
-**优化为**:
-```go
-var mainWindow application.Window
-var mainWindowMu sync.Mutex
-
-createMainWindow := func() application.Window {
-    mainWindowMu.Lock()
-    defer mainWindowMu.Unlock()
-
-    if mainWindow != nil {
-        return mainWindow
-    }
-
-    mainWindow = app.Window.NewWithOptions(application.WebviewWindowOptions{
-        Title:  "Code Switch R",
-        Width:  1700,
-        Height: 1040,
-        // ... 保持原有配置
-        URL:    "/",
-    })
-
-    mainWindow.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
-        mainWindow.Hide()
-        handleDockVisibility(dockService, false)
-        e.Cancel()
-    })
-
-    return mainWindow
-}
-
-// showMainWindow 中延迟创建
-showMainWindow := func(withFocus bool) {
-    win := createMainWindow()
-    // ... 后续逻辑不变
-}
-```
-
-**关键**: 应用启动时不调用 `showMainWindow(false)`，仅启动托盘。
-
-#### 方案 B: 托盘窗口使用原生菜单替代 WebView
-
-**文件**: `main.go` (第 375-404 行)
-
-当前 macOS 托盘使用了一个完整的 WebView 窗口（`trayWindow`），这会创建一个完整的 WebKit 进程。如果托盘功能相对简单，可以改用系统原生菜单：
-
-```go
-// 移除 trayWindow 的创建
-// 直接使用 systray.SetMenu() 展示信息（类似 Windows/Linux 的实现方式）
-if runtime.GOOS == "darwin" {
-    // 不再创建 trayWindow，使用与 Windows 相同的菜单方式
-    refreshTrayMenu := func() {
-        used, total := getTrayUsage(logService, appSettings)
-        trayMenu := buildUsageTrayMenu(used, total, func() {
-            showMainWindow(true)
-        }, func() {
-            app.Quit()
-        })
-        systray.SetMenu(trayMenu)
-    }
-    refreshTrayMenu()
-    systray.OnClick(func() {
-        refreshTrayMenu()
-        systray.OpenMenu()
-    })
-}
-```
-
-**注意**: 如果托盘窗口有复杂 UI（如图表、自定义样式），则此方案需要权衡功能和内存的取舍。可以改为「点击托盘时才创建 trayWindow，关闭后销毁」的策略。
-
-#### 方案 C: 托盘窗口按需创建/销毁
-
-如果确实需要 WebView 托盘窗口的富 UI：
-
-```go
-var trayWindow application.Window
-
-showTrayWindow := func() {
-    if trayWindow == nil {
-        trayWindow = app.Window.NewWithOptions(application.WebviewWindowOptions{
-            // ... 原有配置
-            URL: "/#/tray",
-        })
-        // 注册关闭 hook
-        trayWindow.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
-            trayWindow.Hide()
-            // 延迟销毁，释放 WebKit 内存
-            go func() {
-                time.Sleep(500 * time.Millisecond)
-                if trayWindow != nil {
-                    trayWindow.Destroy() // 需要确认 Wails 3 是否支持
-                    trayWindow = nil
-                }
-            }()
-            e.Cancel()
-        })
-    }
-    trayWindow.Show()
-}
-```
+当前项目依赖的 Wails 版本为 `github.com/wailsapp/wails/v3 v3.0.0-alpha.38`，因此所有窗口生命周期相关方案都需要按这个版本的真实能力来判断，不能拿高版本 API 想当然套过来。
 
 ---
 
-### P1: Go 运行时内存优化（预计节省 10-30MB）
+## 功能保护红线
 
-#### 1.1 设置 Go GC 目标
+本计划的前提不是“为了省内存可以牺牲一点功能”，而是：
 
-**文件**: `main.go`，在 `main()` 函数最开头添加:
+- **第一阶段优化完成后，现有功能行为必须保持一致**
+- **允许变化的是启动时机和首次打开时机，不允许变化的是功能可用性和后台能力是否持续工作**
 
-```go
-import "runtime/debug"
+因此，后续按文档实施时，必须遵守以下红线：
 
-func main() {
-    // 降低 GC 目标百分比，让 GC 更积极地回收内存
-    // 默认值 100，降低到 50 意味着更频繁 GC，但内存占用更低
-    debug.SetGCPercent(50)
+### 1. 不能因为主窗口延迟创建，停掉现有后台能力
 
-    // 设置内存软限制（可选，Go 1.19+）
-    // 限制 Go 堆内存在 100MB 以内
-    debug.SetMemoryLimit(100 * 1024 * 1024)
+以下逻辑必须继续在应用启动阶段完成，不能挪到“首次打开主窗口时再做”：
 
-    // ... 原有代码
-}
-```
+- 数据库初始化
+- 全局 DB 写队列初始化
+- provider relay 启动
+- 黑名单自动恢复定时器启动
+- 健康检查表初始化
+- 自动可用性监控后台轮询开关同步
+- 自动更新后台逻辑
 
-#### 1.2 设置环境变量 GOMEMLIMIT
+换句话说：
 
-在 macOS 的应用包 Info.plist 或启动脚本中设置：
-```bash
-export GOMEMLIMIT=100MiB
-```
+- **可以延迟的是 UI 窗口**
+- **不能延迟的是后端服务能力**
+
+### 2. 不能因为省内存，削弱现有托盘能力
+
+第一阶段默认前提：
+
+- 保留 macOS 当前富托盘 UI
+- 保留 `/tray` 页面
+- 保留托盘中的额度、倒计时、forecast、托管状态、动态高度行为
+
+如果某个方案会把 tray 退化成原生菜单，或让 tray 首次打开出现明显功能缺失，这种方案不能进入第一阶段。
+
+### 3. 不能因为日志优化，降低现有排障能力
+
+以下行为必须保持：
+
+- request log 正常入库
+- logs 页列表正常
+- payload detail 弹窗正常
+- 已开启 payload 采集的用户，不得在没有明确确认的情况下被动缩减日志可读内容
+
+因此：
+
+- 第一阶段不允许把 payload 采集逻辑删掉
+- 第一阶段也不建议直接大幅缩小 payload 上限
+
+### 4. 不能因为省内存，影响可用性监控连续性
+
+以下行为必须保持：
+
+- `HealthCheckService.Start()` 启动即初始化表
+- 自动可用性监控开关生效后，后台轮询继续正常工作
+- 不因为主窗口未打开就停止写入 `health_check_history`
+
+因此：
+
+- 第一阶段不允许暂停健康检查轮询
+- 第一阶段不允许因为托盘模式而降低监控能力
+
+### 5. 不能因为调整 HTTP 层，削弱现有稳定性和诊断能力
+
+可以做：
+
+- `ReleaseMode`
+- timeout
+- Transport 保守调优
+
+但不能做：
+
+- 裸 `gin.New()` 后把 `Recovery` 一起拿掉
+- 删除现有对 request log、error path、监控相关链路有保护作用的行为
 
 ---
 
-### P2: HTTP 服务器优化（预计节省 5-15MB）
+## 核实后的现状
 
-#### 2.1 Gin 使用 Release 模式
+### 1. 当前最大的内存来源仍然是 WebView / WebKit，但启动时机已经明显收口
 
-**文件**: `services/providerrelay.go`，在创建 Gin router 之前:
+最初核对代码时，macOS 冷启动会立即创建两个 WebView 窗口：
+
+1. `mainWindow`
+2. `trayWindow`
+
+这也是当时判断空闲内存偏高的核心依据。
+
+当前代码已经改成：
+
+- 启动时不再创建 `mainWindow`
+- macOS 下 `trayWindow` 也改为首次点击托盘时再创建
+- tray 与主窗口关闭后都继续走 `Hide` 语义，而不是反复销毁重建
+
+所以现在真正需要验证的，不是“代码有没有延迟创建”，而是：
+
+- 冷启动待机时 `CodeSwitch` / `WebKit` 进程 RSS 是否明显下降
+- 首次打开 tray / 主窗口时是否只是一次性增量
+- 首次点击 tray 是否出现不可接受的延迟、白屏、错位或焦点异常
+
+### 2. 后端服务不是没成本，但不是主要矛盾
+
+当前启动时仍会同步初始化数据库、全局写队列、provider relay、健康检查、更新检查、黑名单定时器等后台能力。它们确实占内存，但和窗口对应的 WebKit 进程相比，量级仍然小得多。
+
+结论很直接：
+
+- **WebView / WebKit 仍然是主要内存变量**
+- **代码层面的窗口创建时机优化已经做完，剩下的是打包态验收，而不是继续挪后台能力**
+
+### 3. 日志和监控当前是后台能力，不依赖主窗口常驻
+
+以下能力并不依赖主窗口打开：
+
+- provider relay HTTP 服务
+- request log 入库
+- 黑名单自动恢复
+- 健康检查表初始化
+- 自动可用性监控后台轮询
+- 更新检查定时器
+
+这点很重要，说明：
+
+- **主窗口延迟创建是可行的**
+- 但 **暂停健康检查 / 监控轮询** 这种做法会直接影响现有监测能力，不属于“白赚内存”
+
+### 4. 请求日志 payload 采集默认是关闭的
+
+`CaptureRequestLogPayload` 默认值是 `false`。这意味着 `requestLogPayloadMaxBytes` 这一类优化，并不是托盘空闲内存的主要收益来源。
+
+它只会在用户主动开启 request / response payload 采集时才变得重要。
+
+### 5. 构建体积优化不是这次的主战场
+
+当前 macOS 构建已经使用了 `-ldflags="-w -s"`。继续盯着二进制大小、UPX、符号表这些地方，**对常驻运行内存的帮助非常有限**。
+
+别把“包体变小”和“运行时 RSS 下降”混为一谈，这俩不是一回事。
+
+---
+
+## 优化目标
+
+在不明显削弱现有功能的前提下，当前目标可以拆成两档：
+
+| 场景 | 目标 |
+|------|------|
+| 当前已落地方案：主窗口延迟创建 + `trayWindow` 按需创建 + 前端按路由懒加载 | 打包态待机内存尽量逼近 **150-200 MB**，但必须以实测为准 |
+| 若打包态回归显示 tray 首开体验或稳定性不可接受，需要回退到更保守方案 | **180-260 MB** 更现实 |
+
+结论：
+
+- 当前代码已经推进到了更激进的第二档
+- 剩下唯一需要数据确认的是：这档方案在打包态下到底是“真省内存”，还是“指标好看但体验掉链子”
+
+---
+
+## 推荐实施方案
+
+## P0：主窗口延迟创建
+
+### 结论
+
+这是收益最大、最值得优先落地的一项。
+
+### 当前问题
+
+`mainWindow` 在启动时立即创建，并立即 `showMainWindow(false)`。这会让主窗口对应的 WebKit 进程在“只是托盘驻留”的情况下也常驻内存。
+
+### 建议做法
+
+- 启动时 **不再主动创建和显示 `mainWindow`**
+- 把 `mainWindow` 改为按需创建
+- 第一次触发以下任一行为时再创建主窗口：
+  - 点击“显示主窗口”
+  - macOS Dock reopen
+  - 其他显式打开主界面的入口
+
+### 实施约束
+
+这项是最容易“为了省窗口内存，顺手把初始化链路一起搬走”的地方，所以要额外强调：
+
+- 只延迟 `mainWindow` 创建，不延迟 `main.go` 中现有后台服务启动
+- 不允许把 `providerRelay.Start()`、`healthCheckService.Start()`、黑名单定时器、更新逻辑挪进 `createMainWindow()`
+- 不允许把日志、监控、relay、数据库初始化改成依赖首页 `onMounted`
+- 主窗口关闭后继续沿用当前 `Hide` 语义，不在第一阶段改变主窗口关闭行为
+- `ApplicationShouldHandleReopen`、托盘“显示主窗口”、macOS 激活事件都必须继续可用
+
+### 功能兼容要求
+
+落地后应满足：
+
+- 应用冷启动时，不打开主窗口也能正常代理请求
+- 不打开主窗口也能继续写 request log
+- 不打开主窗口也能继续进行自动可用性监控
+- 不打开主窗口也不影响自动更新后台逻辑
+- 首次打开主窗口后，首页原有数据仍能正常加载，只允许“首次显示时加载”，不允许“加载失败或功能缺失”
+
+### 预期收益
+
+粗略估计可节省：
+
+- **120-200 MB**
+
+### 风险与副作用
+
+这项优化本身不会影响后台 relay、日志入库、健康检查、黑名单和更新定时器，但会让一部分原本在主页面 `onMounted` 里做的事情变成“首次打开主窗口时再发生”，包括：
+
+- provider stats 拉取
+- update state 前端轮询
+- import 状态检查
+- provider pricing cache 预热
+
+因此要注意：
+
+- 后台核心能力保持在 `main.go` 启动
+- 前端页面级 warmup 允许延后
+- 不要把真正依赖后台常驻的数据同步逻辑误塞到主页面生命周期里
+
+### 推荐度
+
+**强烈推荐，第一优先级。**
+
+---
+
+## P1：前端按路由懒加载 + 手动分包
+
+### 结论
+
+这是当前文档里原先被低估的一项。它不只是“减包体”，而是能减少每个 WebView 首次加载时需要解析和执行的 JS。
+
+### 当前问题
+
+`frontend/src/router/index.ts` 里所有路由页面都是静态导入：
+
+- `Main`
+- `Logs`
+- `Console`
+- `Availability`
+- `Tray`
+- `Settings`
+- 其他页面
+
+这会导致：
+
+- 即使当前只打开 `/tray`
+- 也要把整个 SPA 的大部分代码都打进同一个首屏 bundle 并解析执行
+
+macOS 下 `trayWindow` 本来就贵，再让它把主窗口、日志页、控制台、图表、编辑器相关代码一锅吃进去，那内存自然不客气。
+
+### 建议做法
+
+1. 路由级别改成动态导入，例如：
+
+```ts
+const MainPage = () => import('../components/Main/Index.vue')
+const LogsPage = () => import('../components/Logs/Index.vue')
+const TrayPage = () => import('../components/Tray/Index.vue')
+```
+
+2. 在 `vite.config.ts` 中做手动分包，至少拆出：
+
+- `chart.js` / `vue-chartjs`
+- `codemirror` 相关依赖
+- `logs` 页面
+- `console` 页面
+- `vendor` 基础包
+
+### 实施约束
+
+- 只改加载方式，不改现有路由路径
+- `/`、`/tray`、`/logs`、`/settings` 等现有路由地址保持不变
+- 不允许因为懒加载删除页面模块里的现有逻辑
+- 不允许为了分包把 tray 页面改成独立第二套应用逻辑
+
+### 功能兼容要求
+
+- tray 页面首次打开可正常渲染
+- logs、console、availability、settings 页面仍能正常进入
+- 首次进入某个懒加载页面允许多一次 chunk 加载，但不允许白屏、事件丢失、路由异常
+
+### 预期收益
+
+- 对托盘窗口首次加载内存有实质帮助
+- 对主窗口首次打开速度也有帮助
+- 对“主窗口延迟创建”方案是强配套项
+
+保守估计：
+
+- **10-40 MB / 每个 WebView 的解析执行压力下降**
+
+### 风险与副作用
+
+- 功能风险低
+- 需要验证路由懒加载后首次进入日志页、控制台页的加载体验
+
+### 推荐度
+
+**强烈推荐，和 P0 配套落地。**
+
+---
+
+## P2：保守的 Go / HTTP / Transport 调优
+
+### 结论
+
+这部分收益不如 WebView 大，但属于可以稳扎稳打的“边角料优化”。
+
+### 建议做法
+
+#### 2.1 Gin 切到 `ReleaseMode`
+
+可以设置：
 
 ```go
 gin.SetMode(gin.ReleaseMode)
-router := gin.New() // 使用 gin.New() 替代 gin.Default()，避免加载默认中间件
 ```
 
-确认当前是否已设置为 Release 模式。Debug 模式会保留更多日志和调试信息。
+但不建议简单粗暴地从 `gin.Default()` 改成裸 `gin.New()` 然后什么中间件都不挂。
 
-#### 2.2 HTTP Server 超时配置
+更稳妥的方向是：
 
-**文件**: `services/providerrelay.go` (第 394-405 行附近)
+- 关闭 debug 模式
+- 保留 `Recovery`
+- 如果后续需要简化 HTTP access log，再按需处理
 
-当前的 HTTP Server 缺少超时配置，可能导致连接泄漏：
+#### 2.2 为 `http.Server` 增加超时
+
+当前 relay server 的 `http.Server` 没有明确设置超时。建议补充：
+
+- `ReadTimeout`
+- `WriteTimeout`
+- `IdleTimeout`
+- `MaxHeaderBytes`
+
+这项更多是稳态和资源释放优化，不是大幅省内存，但属于应该补的基础项。
+
+#### 2.3 微调健康检查客户端连接池
+
+`HealthCheckService` 已经复用了 `http.Client` 和 `Transport`，这点是好的。可以做保守下调，例如：
+
+- `MaxIdleConns: 20 -> 10`
+- `MaxIdleConnsPerHost: 5 -> 3`
+- `IdleConnTimeout: 30s -> 15s`
+
+不要一上来就砍得太狠，免得影响连通性检测的稳定性。
+
+#### 2.4 GC 只做“保守调优”，不要硬卡死
+
+可以先尝试：
 
 ```go
-prs.server = &http.Server{
-    Addr:           prs.addr,
-    Handler:        router,
-    ReadTimeout:    30 * time.Second,     // 读取请求超时
-    WriteTimeout:   120 * time.Second,    // 写入响应超时（流式需要长一些）
-    IdleTimeout:    60 * time.Second,     // 空闲连接超时
-    MaxHeaderBytes: 1 << 20,              // 最大请求头 1MB
-}
+debug.SetGCPercent(60)
 ```
 
-#### 2.3 HTTP Transport 连接池调优
-
-**文件**: `services/healthcheckservice.go` (第 125-134 行)
+或：
 
 ```go
-Transport: &http.Transport{
-    MaxIdleConns:        10,      // 从 20 降为 10
-    IdleConnTimeout:     15 * time.Second,  // 从 30s 降为 15s
-    MaxIdleConnsPerHost: 2,       // 从 5 降为 2
-    DisableKeepAlives:   false,   // 保持连接复用
-}
+debug.SetGCPercent(70)
 ```
 
-对其他使用 HTTP Client 的地方做同样调整。搜索项目中所有 `http.Transport` 和 `http.Client` 的使用。
+但 **不建议第一阶段就写死**：
+
+- `debug.SetMemoryLimit(100 * 1024 * 1024)`
+- `GOMEMLIMIT=100MiB`
+
+这种硬限制如果拍得太紧，容易把 CPU 抬高，甚至在高峰请求、日志写入、模型定价解析时产生抖动。
+
+### 实施约束
+
+- 所有 timeout 调整都必须兼容当前流式响应场景
+- `WriteTimeout` 不能因为设置过小而截断 stream
+- `Transport` 调优只能做保守下调，不允许直接关闭 keep-alive
+- `ReleaseMode` 不能以移除 panic 保护和诊断信息为代价
+- GC 调优第一阶段只允许调 `GCPercent`，不允许直接上激进内存上限
+
+### 预期收益
+
+- **5-20 MB** 的保守收益更可信
+
+### 风险与副作用
+
+- 风险低
+- 但 `SetMemoryLimit` 风险中等，不建议第一阶段启用
+
+### 推荐度
+
+**推荐，但放在 P0 / P1 后面。**
 
 ---
 
-### P3: 数据库连接池优化（预计节省 2-5MB）
+## P3：SQLite 连接池与 PRAGMA 做保守优化
 
-#### 3.1 限制 SQLite 连接池大小
+### 结论
 
-**文件**: `services/database.go` (第 47 行之后)
+可以做，但不是主战场。
 
-当前没有设置连接池参数，Go 默认 `database/sql` 会创建无限连接：
+### 建议做法
 
-```go
-db, err := xdb.DB("default")
-if err != nil {
-    return fmt.Errorf("获取数据库连接失败: %w", err)
-}
+#### 3.1 显式限制 `database/sql` 连接池
 
-// 添加连接池限制
-sqlDB := db // 如果 xdb.DB 返回的是 *sql.DB
-sqlDB.SetMaxOpenConns(5)      // SQLite 单文件，不需要太多连接
-sqlDB.SetMaxIdleConns(2)      // 空闲连接保持 2 个
-sqlDB.SetConnMaxLifetime(30 * time.Minute)  // 连接最大存活时间
-sqlDB.SetConnMaxIdleTime(5 * time.Minute)   // 空闲连接超时
-```
+建议在数据库初始化后设置：
 
-#### 3.2 SQLite 内存优化 PRAGMA
+- `SetMaxOpenConns(5)`
+- `SetMaxIdleConns(2)`
+- `SetConnMaxLifetime(30 * time.Minute)`
+- `SetConnMaxIdleTime(5 * time.Minute)`
 
-在 `InitDatabase()` 中添加：
+这对 SQLite 单文件模式来说更合理。
 
-```go
-// 限制 SQLite 页缓存大小（默认 -2000，即约 2MB）
-// 降低到 500 页（约 2MB → 500KB）
-db.Exec("PRAGMA cache_size = -500")
+#### 3.2 PRAGMA 只做保守项
 
-// 限制 mmap 大小（0 = 禁用 mmap）
-db.Exec("PRAGMA mmap_size = 0")
+可以考虑：
 
-// 降低临时存储的内存使用
-db.Exec("PRAGMA temp_store = FILE")  // 临时数据写磁盘而非内存
-```
+- `PRAGMA cache_size = -1000`
+- `PRAGMA temp_store = FILE`
 
----
+`mmap_size = 0` 这种做法不建议直接上。它不是通用意义上的“更省内存”，某些情况下反而可能把性能打掉。
 
-### P4: 数据库队列缓冲优化（预计节省 2-3MB）
+### 实施约束
 
-**文件**: `services/dbqueue.go` (第 34、39 行)
+- 数据库连接池缩容不能导致现有 request log、health check、settings 写入阻塞
+- 所有 PRAGMA 调整都必须保持当前 WAL 并发读写模型可用
+- 不允许为了省几 MB 把 SQLite 写稳定性搞掉
 
-当前两个队列各有 5000 缓冲容量，对于桌面应用来说过大：
+### 预期收益
 
-```go
-// 当前
-GlobalDBQueue = NewDBWriteQueue(db, 5000, false)
-GlobalDBQueueLogs = NewDBWriteQueue(db, 5000, true)
+- **2-8 MB**
 
-// 优化后
-GlobalDBQueue = NewDBWriteQueue(db, 500, false)      // 5000 → 500
-GlobalDBQueueLogs = NewDBWriteQueue(db, 1000, true)   // 5000 → 1000
-```
+### 风险与副作用
 
-桌面应用的写入量远低于服务端应用，500-1000 的缓冲已经足够。
+- 风险低
+- 不建议为了这点收益去碰太激进的 PRAGMA
+
+### 推荐度
+
+**推荐，但优先级低于 P0 / P1 / P2。**
 
 ---
 
-### P5: 请求日志负载缓冲优化（预计节省 0-8MB/请求）
+## P4：托盘窗口按需创建（已落地，待打包态回归）
 
-**文件**: `services/providerrelay.go` (第 64 行)
+### 结论
 
-```go
-// 当前：单个请求最大缓冲 8MB
-const requestLogPayloadMaxBytes = 8 * 1024 * 1024
+这项已经落地，但它仍然是当前整套方案里风险最高的一刀。因此现在重点不是继续改，而是做打包态实测和完整回归。
 
-// 优化为：降低到 1MB（对于日志记录来说足够）
-const requestLogPayloadMaxBytes = 1 * 1024 * 1024
-```
+### 当前实现
 
-同时确保响应体缓冲在请求处理完成后被及时释放：
+当前托盘页不是简单的原生菜单，而是一个富 UI 面板，包含：
 
-```go
-// 在请求处理完成后显式释放缓冲区
-reqLog.responseBodyBuffer = nil
-reqLog.RequestBody = ""
-reqLog.ResponseBody = ""
-```
+- Claude / Codex 双平台卡片
+- 预算 / 额度展示
+- 倒计时
+- forecast
+- 托管状态
+- 动态高度调整
 
----
+因此：
 
-### P6: 服务延迟初始化（预计节省 5-10MB）
+- **直接改原生 menu = 功能缩水**
+- **直接依赖 Wails alpha.38 里的运行中动态 `AttachWindow` = 生命周期风险偏高**
 
-#### 6.1 非核心服务延迟初始化
+当前代码采用的是更稳的落地方式：
 
-当前在 `main()` 中一次性创建了 **30+ 个服务实例**。某些服务在托盘模式下完全不需要：
+- macOS 启动时不再预创建 `trayWindow`
+- 首次左键点击托盘时再创建 `/#/tray` 窗口
+- 使用 `SystemTray.PositionWindow(...)` 在显示前定位窗口，不依赖运行中动态 `AttachWindow`
+- 右键继续打开菜单
+- `WindowClosing` 和 `WindowLostFocus` 都继续回到 `Hide`
 
-**文件**: `main.go`
+### 实施约束
 
-可以延迟初始化的服务：
-- `speedTestService` — 只在用户触发速度测试时需要
-- `connectivityTestService` — 只在用户触发连通性测试时需要
-- `importService` — 只在导入时需要
-- `deeplinkService` — 只在处理 deeplink 时需要
-- `envCheckService` — 只在检查环境时需要
-- `consoleService` — 只在打开控制台时需要
-- `skillService` — 只在打开技能市场时需要
-- `promptService` — 只在管理 prompt 时需要
+- 不修改 tray 的产品交互模型
+- 必须验证首次点击、失焦关闭、再次打开、右键菜单、动态高度调整都仍然正常
+- 若打包态出现明显白屏、闪烁、错位、焦点异常或首开延迟不可接受，则该方案需要回退或重做
 
-**实现方式**: 使用 `sync.Once` 包装延迟初始化：
+### 预期收益
 
-```go
-// 示例：延迟初始化 SpeedTestService
-type LazySpeedTestService struct {
-    once    sync.Once
-    service *services.SpeedTestService
-}
+`trayWindow` 也延迟创建后，理论上还可能继续节省：
 
-func (l *LazySpeedTestService) Get() *services.SpeedTestService {
-    l.once.Do(func() {
-        l.service = services.NewSpeedTestService()
-    })
-    return l.service
-}
-```
+- **80-120 MB**
 
-**注意**: 需要确认 Wails 3 的 `application.NewService()` 是否支持延迟初始化的服务。如果不支持，可以在服务内部实现延迟初始化逻辑（构造函数只保存配置，首次调用方法时才真正初始化）。
+### 风险与副作用
 
-#### 6.2 健康检查延迟启动
+- 风险中高
+- 首次点击 tray 体验会变差
+- 需要完整回归测试
 
-**文件**: `main.go` (第 140-142 行)
+### 推荐度
 
-当前启动时立即初始化健康检查：
-```go
-if err := healthCheckService.Start(); err != nil {
-    log.Fatalf("初始化健康检查服务失败: %v", err)
-}
-```
-
-可以延迟到用户打开主窗口或首次使用时再启动，或延迟更长时间（如 30 秒后）。
+**代码已落地；只有打包态验收通过后，才算真正闭环。**
 
 ---
 
-### P7: 前端资源优化（预计减少二进制大小 1-2MB）
+## 不建议按当前文档原样实施的方案
 
-#### 7.1 代码分割
+以下项要么风险偏高，要么收益被高估，要么会直接碰现有功能：
 
-**文件**: `frontend/vite.config.ts`
+### 1. 直接把 macOS tray 改成原生菜单
 
-当前所有前端代码打包成单个 3.1MB 的 JS 文件。使用代码分割可以减少初始加载内存：
+不建议原因：
 
-```typescript
-import { defineConfig } from 'vite'
-import vue from '@vitejs/plugin-vue'
+- 会削弱当前富托盘 UI
+- 预算、倒计时、forecast、动态高度都会没掉
 
-export default defineConfig({
-  plugins: [vue()],
-  build: {
-    // 启用代码分割
-    rollupOptions: {
-      output: {
-        manualChunks: {
-          // 将大型依赖分离
-          'chart': ['chart.js', 'vue-chartjs'],
-          'codemirror': ['codemirror', '@codemirror/lang-json', '@codemirror/lang-markdown', '@codemirror/state', '@codemirror/theme-one-dark', '@codemirror/view'],
-          'vendor': ['vue', 'vue-router', 'vue-i18n'],
-        }
-      }
-    },
-    // 压缩优化
-    minify: 'terser',
-    terserOptions: {
-      compress: {
-        drop_console: true,      // 移除 console.log
-        drop_debugger: true,
-      }
-    },
-    // 设置 chunk 大小警告阈值
-    chunkSizeWarningLimit: 500,
-  }
-})
-```
+### 2. 托盘模式下暂停健康检查 / 停止监控
 
-#### 7.2 依赖瘦身
+不建议原因：
 
-检查 `frontend/package.json` 中以下大型依赖是否都有使用：
+- 这会直接影响现有“可用性监控”的连续性
+- 不属于无副作用优化
 
-| 依赖 | 大小 | 建议 |
-|------|------|------|
-| `chart.js` + `vue-chartjs` | ~200KB | 如果只用于简单图表，考虑用轻量替代（如 unovis） |
-| `codemirror` 全套 | ~300KB+ | 仅加载需要的语言包 |
-| `@lobehub/icons-static-svg` | 未知 | 确认是否所有图标都在使用 |
-| `@vuepic/vue-datepicker` | ~100KB | 确认是否真的需要 |
-| `@headlessui/vue` | ~50KB | 如果只用少量组件，考虑自行实现 |
+### 3. 裸用 `gin.New()` 去掉默认中间件
 
-#### 7.3 字体优化
+不建议原因：
 
-当前嵌入了 `Inter-Medium.ttf` (308KB)。考虑：
-- 使用 `woff2` 格式替代 `ttf`（通常小 30-50%）
-- 使用字体子集化（subset），只保留用到的字符
+- 可能顺手把 `Recovery` 和现有诊断能力拿掉
+- 对“日志和监测”反而是负收益
+
+### 4. 把 request payload 上限从 `8 MB` 直接砍到 `1 MB`
+
+不建议原因：
+
+- 当前 payload 采集默认关闭，空闲内存收益有限
+- 如果用户打开了 payload 采集，这会降低日志排障价值
+
+### 5. 第一期就把 `SetMemoryLimit` / `GOMEMLIMIT` 写死到 `100 MiB`
+
+不建议原因：
+
+- 太容易把 GC 压得过猛
+- 在请求高峰、日志写入、模型价格解析时可能带来抖动
+
+### 6. 盯着 `UPX`、二进制体积做主优化
+
+不建议原因：
+
+- 对常驻运行内存帮助非常有限
+- macOS 下还会增加 codesign 风险
 
 ---
 
-### P8: 编译优化（预计减少二进制大小 10-30%）
+## 对现有功能的影响评估
 
-#### 8.1 Go 编译标志
-
-```bash
-# 使用 ldflags 去除调试信息
-go build -ldflags="-s -w" .
-
-# -s: 去除符号表
-# -w: 去除 DWARF 调试信息
-```
-
-确认 `Taskfile.yml` 中的构建命令是否已包含这些标志。
-
-#### 8.2 使用 UPX 压缩二进制（可选）
-
-```bash
-# 压缩后通常可减少 50-70% 体积
-upx --best ./build/bin/CodeSwitch
-```
-
-**注意**: UPX 可能影响 macOS 代码签名，需测试兼容性。
+| 优化项 | 对托盘 UI | 对请求日志 | 对监控 / 可用性检测 | 风险 | 结论 |
+|--------|-----------|------------|----------------------|------|------|
+| 主窗口延迟创建 | 无明显影响 | 无直接影响 | 无直接影响 | 中 | **推荐** |
+| 路由懒加载 / 分包 | 无明显影响 | 无直接影响 | 无直接影响 | 低 | **推荐** |
+| Gin `ReleaseMode` + timeout | 无影响 | 需保留 `Recovery` | 无影响 | 低 | **推荐** |
+| Go GC 保守调优 | 无影响 | 无影响 | 无影响 | 低 | **推荐** |
+| SQLite 连接池限制 | 无影响 | 低风险 | 低风险 | 低 | **推荐** |
+| 托盘窗口按需创建 | 首次点击可能变慢 | 无直接影响 | 无直接影响 | 中高 | **已落地，待回归** |
+| tray 改原生菜单 | **明显缩水** | 无直接影响 | 无直接影响 | 高 | **不推荐** |
+| 托盘模式暂停健康检查 | 无影响 | 无影响 | **直接受影响** | 高 | **不推荐** |
+| payload 上限大幅下调 | 无影响 | **排障信息减少** | 无影响 | 中 | **谨慎** |
+| 激进 `SetMemoryLimit` | 无影响 | 高峰期可能抖动 | 高峰期可能抖动 | 中 | **谨慎** |
 
 ---
 
-### P9: 后台 Goroutine 优化
+## 实施验收门槛
 
-#### 9.1 合并定时器
+后续任何代码改动，只要宣称是“按本计划执行”，就必须满足以下验收门槛，否则视为不符合本文档：
 
-当前有多个独立的定时器 goroutine：
+### A. 后台能力门槛
 
-| Goroutine | 间隔 | 文件位置 |
-|-----------|------|---------|
-| 黑名单自动恢复 | 1 分钟 | main.go:176-190 |
-| 健康检查轮询 | 可配置 | healthcheckservice.go |
-| 更新检查 | 每日 | main.go:159-165 |
-| 可用性监控 | 可配置 | main.go:192-213 |
+- 冷启动后即使从未打开主窗口，relay 仍可正常处理请求
+- 冷启动后 request log 仍持续写入
+- 冷启动后 `health_check_history` 仍持续产生新记录
+- 黑名单自动恢复仍正常工作
+- 自动更新后台逻辑仍正常工作
 
-**建议**: 将多个低频定时器合并为一个统一的调度器，减少 goroutine 数量和上下文切换：
+### B. 托盘能力门槛
+
+- 托盘入口存在且可点击
+- tray 页面仍能正确展示额度、倒计时、forecast、托管状态
+- tray 高度仍能跟随内容变化
+- 托盘打开、关闭、再次打开行为正常
+
+### C. 主窗口能力门槛
+
+- 首次打开主窗口正常
+- 主窗口关闭后重新打开正常
+- Dock reopen 正常唤起主窗口
+- 首页 provider、stats、update、settings 相关数据仍能正常显示
+
+### D. 日志与监控门槛
+
+- logs 页列表正常
+- payload detail 弹窗正常
+- 开启 payload 采集时，request / response payload 仍可查看
+- 可用性监控页面和主页面状态展示正常
+
+### E. 性能门槛
+
+- 冷启动托盘待机内存下降
+- 不能通过明显牺牲首次交互体验来“换指标好看”
+- 若首次打开窗口明显变慢，必须记录并评估是否可接受
+
+---
+
+## 推荐实施顺序
+
+### 第一阶段：代码落地（已完成）
+
+1. 为 Go 端补充内存诊断接口
+2. 主窗口延迟创建
+3. 前端路由懒加载 + 手动分包
+4. Gin `ReleaseMode`、HTTP timeout、保守 Transport 调优
+5. 数据库连接池限制
+6. `trayWindow` 按需创建
+
+### 第二阶段：打包态验收（当前唯一未完成项）
+
+1. 用打包态验证冷启动、打开 tray、打开主窗口三个阶段的 RSS 变化
+2. 完成 tray、Dock reopen、日志、监控、payload 详情的完整回归
+3. 只有当打包态仍明显高于目标，或者 tray 首开体验退化明显时，才讨论回退或继续做更激进优化
+
+---
+
+## 建议补充的观测手段
+
+为了后续优化不靠猜，建议先加一个轻量诊断接口：
 
 ```go
-// 统一调度器
-go func() {
-    minuteTicker := time.NewTicker(1 * time.Minute)
-    defer minuteTicker.Stop()
-
-    for {
-        select {
-        case <-minuteTicker.C:
-            // 所有按分钟级别的任务在这里处理
-            blacklistService.AutoRecoverExpired()
-            // ... 其他周期性任务
-        case <-stopChan:
-            return
-        }
-    }
-}()
-```
-
-#### 9.2 停止不必要的后台服务
-
-在托盘模式（主窗口隐藏）时，考虑暂停或降低以下服务的频率：
-- 健康检查轮询频率降低（如从 30s 到 5min）
-- 停止可用性监控（直到主窗口打开）
-
----
-
-### P10: 内存监控与诊断
-
-#### 10.1 添加内存监控端点
-
-在代理服务器上添加一个内存诊断接口，方便后续排查：
-
-```go
-// 在 providerrelay.go 的路由注册中添加
 router.GET("/debug/memory", func(c *gin.Context) {
     var m runtime.MemStats
     runtime.ReadMemStats(&m)
     c.JSON(200, gin.H{
-        "alloc_mb":       m.Alloc / 1024 / 1024,
-        "total_alloc_mb": m.TotalAlloc / 1024 / 1024,
-        "sys_mb":         m.Sys / 1024 / 1024,
-        "heap_alloc_mb":  m.HeapAlloc / 1024 / 1024,
-        "heap_sys_mb":    m.HeapSys / 1024 / 1024,
-        "heap_idle_mb":   m.HeapIdle / 1024 / 1024,
-        "heap_inuse_mb":  m.HeapInuse / 1024 / 1024,
-        "goroutines":     runtime.NumGoroutine(),
+        "alloc_mb":      m.Alloc / 1024 / 1024,
+        "heap_alloc_mb": m.HeapAlloc / 1024 / 1024,
+        "heap_sys_mb":   m.HeapSys / 1024 / 1024,
+        "sys_mb":        m.Sys / 1024 / 1024,
+        "goroutines":    runtime.NumGoroutine(),
     })
 })
 ```
 
-使用 `curl http://localhost:18100/debug/memory` 查看 Go 端内存使用情况。这能帮助区分是 Go 还是 WebKit 消耗了内存。
+这项的价值不在于“省内存”，而在于帮我们回答两个问题：
 
-#### 10.2 使用 pprof 进行深度分析
-
-```go
-import _ "net/http/pprof"
-
-// 在开发模式下启用 pprof
-go func() {
-    log.Println(http.ListenAndServe(":6060", nil))
-}()
-```
-
-然后使用：
-```bash
-go tool pprof http://localhost:6060/debug/pprof/heap
-```
+1. Go 堆到底占了多少
+2. 主要增量到底来自 Go，还是来自 WebKit / WKWebView
 
 ---
 
-## 优化优先级总结
+## macOS 验证方法
 
-| 优先级 | 优化项 | 预计节省 | 难度 | 风险 |
-|--------|--------|---------|------|------|
-| **P0** | WebView 窗口延迟创建 | **150-250MB** | 中 | 中（需测试窗口生命周期） |
-| **P1** | Go GC 调优 | 10-30MB | 低 | 低 |
-| **P2** | HTTP 服务器优化 | 5-15MB | 低 | 低 |
-| **P3** | 数据库连接池优化 | 2-5MB | 低 | 低 |
-| **P4** | 队列缓冲优化 | 2-3MB | 低 | 低 |
-| **P5** | 请求日志缓冲优化 | 0-8MB | 低 | 低 |
-| **P6** | 服务延迟初始化 | 5-10MB | 中 | 中 |
-| **P7** | 前端资源优化 | 1-2MB | 中 | 低 |
-| **P8** | 编译优化 | 二进制减小 | 低 | 低 |
-| **P9** | Goroutine 合并 | 1-2MB | 低 | 低 |
-| **P10** | 内存监控 | 诊断工具 | 低 | 低 |
+建议按下面顺序做验证，不然容易看花眼：
 
-## 实施建议
+### 0. 先准备打包态
 
-1. **先加 P10 监控**，确定 Go 堆内存和 WebKit 各自的占比
-2. **实施 P0**，这是收益最大的优化
-3. **实施 P1-P5**，这些都是低风险、低难度的快速优化
-4. **按需实施 P6-P9**
+前置要求：
 
-## 验证方式
+- `Node.js 20.19+` 或 `22.12+`
+- `wails3` CLI 可用
 
-优化后使用以下方式验证内存变化：
+建议命令：
 
 ```bash
-# macOS 活动监视器查看进程内存
-# 或使用命令行
-ps aux | grep -i codeswitch | awk '{print $6/1024 "MB", $11}'
-
-# Go 内存（如果加了 P10 监控接口）
-curl -s http://localhost:18100/debug/memory | python3 -m json.tool
+wails3 task package
+open -n bin/CodeSwitch.app
 ```
+
+如果当前 shell 默认 `node` 仍是 `18.x`，先切到 [`frontend/.nvmrc`](./frontend/.nvmrc) 指定的版本再打包，否则 Vite `7` 构建会直接翻车。
+
+### 1. 冷启动后，先不要打开主窗口
+
+记录：
+
+- `CodeSwitch` 主进程 RSS
+- 相关 `WebKit` 子进程 RSS
+- `/debug/memory` 返回的 Go heap
+
+可用命令：
+
+```bash
+ps -axo pid,rss,command | grep -Ei 'CodeSwitch|WebKit' | grep -v grep
+```
+
+### 2. 只打开托盘，不打开主窗口
+
+观察托盘富 UI 是否正常：
+
+- 额度
+- 倒计时
+- forecast
+- 托管状态
+
+### 3. 再打开主窗口
+
+记录主窗口首次打开前后的内存变化，确认：
+
+- 主窗口延迟创建是否生效
+- 首次打开是否只是一次性增量，而不是启动即常驻
+
+### 4. 做功能回归
+
+至少验证以下能力：
+
+- relay 代理转发正常
+- request log 正常写入
+- logs 页能正常查看日志和 payload 详情
+- `health_check_history` 持续有新记录
+- 自动可用性监控不因主窗口延迟而停摆
+- 托盘入口、Dock reopen、主窗口关闭再打开都正常
+
+### 5. 建议记录表
+
+建议至少记录下面这张表，别凭感觉说“好像降了”：
+
+| 阶段 | `CodeSwitch` RSS | `WebKit` RSS 合计 | `/debug/memory` Go heap | 首次交互体验 | 备注 |
+|------|------------------|-------------------|-------------------------|--------------|------|
+| 冷启动待机 | 待填 | 待填 | 待填 | 不涉及 | |
+| 首次打开 tray | 待填 | 待填 | 待填 | 快 / 可接受 / 明显变慢 | |
+| 首次打开主窗口 | 待填 | 待填 | 待填 | 快 / 可接受 / 明显变慢 | |
+| 回归完成后结论 | - | - | - | 通过 / 不通过 | |
+
+---
+
+## 最终结论
+
+基于当前代码，这一轮 macOS 内存优化已经完成了三类关键动作：
+
+1. **启动时不再创建主窗口和 macOS trayWindow**
+2. **前端页面按路由懒加载，tray 依赖去耦，Lobe 图标按需拆分**
+3. **Go / HTTP / SQLite 做保守调优，不去碰后台能力红线**
+
+所以现在真正剩下的，不是继续堆“优化清单”，而是做一件很朴素但必须做的事：
+
+- **用打包态实测和完整回归，确认这套方案既真降内存，又没把 tray 体验搞坏**
+
+如果验收通过，第一阶段可以视为正式完成；如果验收不通过，再决定是保留当前方案、回退 `trayWindow` 按需创建，还是继续做更细的窗口生命周期优化。
+
+---
+
+## 一句话执行原则
+
+后续按本计划改代码时，统一遵守一句话：
+
+**只优化窗口创建时机和前端加载路径，不削减后台能力，不削弱托盘能力，不牺牲日志和监控功能。**

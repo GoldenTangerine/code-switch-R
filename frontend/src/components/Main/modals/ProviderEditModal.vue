@@ -102,7 +102,7 @@
           <Listbox v-model="form.icon" v-slot="{ open: iconSelectOpen }" class="w-full">
             <div class="icon-select">
               <ListboxButton class="icon-select-button">
-                <span class="icon-preview" v-html="iconSvg(form.icon)" aria-hidden="true"></span>
+                <span class="icon-preview" v-html="iconSvg(form.icon)" aria-hidden="true" @mouseenter="warmupIcon(form.icon)"></span>
                 <span class="icon-select-label">{{ form.icon }}</span>
                 <svg viewBox="0 0 20 20" aria-hidden="true">
                   <path d="M6 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none" />
@@ -125,7 +125,7 @@
                   :value="iconName"
                   v-slot="{ active, selected }"
                 >
-                  <div :class="['icon-option', { active, selected }]">
+                  <div :class="['icon-option', { active, selected }]" @mouseenter="warmupIcon(iconName)">
                     <span class="icon-preview" v-html="iconSvg(iconName)" aria-hidden="true"></span>
                     <span class="icon-name">{{ iconName }}</span>
                   </div>
@@ -265,7 +265,7 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Listbox, ListboxButton, ListboxOption, ListboxOptions } from '@headlessui/vue'
-import lobeIcons from '../../../icons/lobeIconMap'
+import lobeIcons, { preloadLobeIcons } from '../../../icons/lobeIconMap'
 import BaseButton from '../../common/BaseButton.vue'
 import BaseInput from '../../common/BaseInput.vue'
 import BaseModal from '../../common/BaseModal.vue'
@@ -308,6 +308,7 @@ const emit = defineEmits<{
 const { t } = useI18n()
 
 const iconOptions = Object.keys(lobeIcons).sort((left, right) => left.localeCompare(right))
+const ICON_PRELOAD_BATCH_SIZE = 80
 const defaultIconKey = iconOptions[0] ?? 'aicoding'
 
 const form = reactive<VendorForm>(createDefaultVendorForm(props.tabId, defaultIconKey))
@@ -335,6 +336,10 @@ const filteredIconOptions = computed(() => {
   const query = iconSearchQuery.value.toLowerCase().trim()
   if (!query) return iconOptions
   return iconOptions.filter((name) => name.toLowerCase().includes(query))
+})
+const iconPreviewOptions = computed(() => {
+  const preferred = iconSearchQuery.value.trim() ? 120 : ICON_PRELOAD_BATCH_SIZE
+  return Array.from(new Set([form.icon, ...filteredIconOptions.value.slice(0, preferred)]))
 })
 
 const resetForm = () => {
@@ -374,12 +379,21 @@ watch(() => props.tabId, () => {
   }
 })
 
+watch(iconPreviewOptions, (icons) => {
+  if (!props.open) return
+  void preloadLobeIcons(icons)
+}, { immediate: true })
+
 const resolveEffectiveAuthType = () =>
   customAuthHeader.value.trim() || selectedAuthType.value || getDefaultAuthType(props.tabId)
 
 const iconSvg = (name: string) => {
   if (!name) return ''
   return lobeIcons[name.toLowerCase()] ?? ''
+}
+
+const warmupIcon = (name: string) => {
+  void preloadLobeIcons([name])
 }
 
 const getLevelDescription = (level: number) => {

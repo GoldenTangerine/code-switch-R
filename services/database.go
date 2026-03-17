@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/daodao97/xgo/xdb"
 	_ "modernc.org/sqlite"
@@ -48,6 +49,10 @@ func InitDatabase() error {
 	if err != nil {
 		return fmt.Errorf("获取数据库连接失败: %w", err)
 	}
+	db.SetMaxOpenConns(5)
+	db.SetMaxIdleConns(2)
+	db.SetConnMaxLifetime(30 * time.Minute)
+	db.SetConnMaxIdleTime(5 * time.Minute)
 
 	// 3.1 设置 busy_timeout（30秒，确保高并发下有足够等待时间）
 	if _, err := db.Exec("PRAGMA busy_timeout = 30000"); err != nil {
@@ -58,6 +63,12 @@ func InitDatabase() error {
 	var journalMode string
 	if err := db.QueryRow("PRAGMA journal_mode = WAL").Scan(&journalMode); err != nil {
 		return fmt.Errorf("设置 WAL 模式失败: %w", err)
+	}
+	if _, err := db.Exec("PRAGMA cache_size = -1000"); err != nil {
+		return fmt.Errorf("设置 cache_size 失败: %w", err)
+	}
+	if _, err := db.Exec("PRAGMA temp_store = FILE"); err != nil {
+		return fmt.Errorf("设置 temp_store 失败: %w", err)
 	}
 	fmt.Printf("✅ SQLite PRAGMA 已设置: journal_mode=%s, busy_timeout=30000ms\n", journalMode)
 

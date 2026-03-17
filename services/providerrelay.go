@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net"
 	"net/http"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -388,12 +390,21 @@ func (prs *ProviderRelayService) Start() error {
 		fmt.Println("========================================")
 	}
 
+	if gin.Mode() == gin.DebugMode {
+		gin.SetMode(gin.ReleaseMode)
+	}
+
 	router := gin.Default()
 	prs.registerRoutes(router)
 
 	prs.server = &http.Server{
-		Addr:    prs.addr,
-		Handler: router,
+		Addr:              prs.addr,
+		Handler:           router,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       5 * time.Minute,
+		WriteTimeout:      30 * time.Minute,
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    1 << 20,
 	}
 
 	fmt.Printf("provider relay server listening on %s\n", prs.addr)
@@ -470,6 +481,25 @@ func (prs *ProviderRelayService) Addr() string {
 }
 
 func (prs *ProviderRelayService) registerRoutes(router gin.IRouter) {
+	router.GET("/debug/memory", func(c *gin.Context) {
+		if !isLoopbackClientIP(c.ClientIP()) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+			return
+		}
+
+		var stats runtime.MemStats
+		runtime.ReadMemStats(&stats)
+		c.JSON(http.StatusOK, gin.H{
+			"alloc_mb":      stats.Alloc / 1024 / 1024,
+			"heap_alloc_mb": stats.HeapAlloc / 1024 / 1024,
+			"heap_idle_mb":  stats.HeapIdle / 1024 / 1024,
+			"heap_sys_mb":   stats.HeapSys / 1024 / 1024,
+			"sys_mb":        stats.Sys / 1024 / 1024,
+			"num_gc":        stats.NumGC,
+			"goroutines":    runtime.NumGoroutine(),
+		})
+	})
+
 	router.POST("/v1/messages", prs.proxyHandler("claude", "/v1/messages"))
 	router.POST("/responses", prs.proxyHandler("codex", "/responses"))
 
@@ -487,6 +517,11 @@ func (prs *ProviderRelayService) registerRoutes(router gin.IRouter) {
 
 	// 自定义 CLI 工具的 /v1/models 端点
 	router.GET("/custom/:toolId/v1/models", prs.customModelsHandler())
+}
+
+func isLoopbackClientIP(raw string) bool {
+	ip := net.ParseIP(strings.TrimSpace(raw))
+	return ip != nil && ip.IsLoopback()
 }
 
 func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.HandlerFunc {

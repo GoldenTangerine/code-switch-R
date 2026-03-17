@@ -262,13 +262,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { computed, ref, reactive, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import BaseButton from '../common/BaseButton.vue'
 import BaseModal from '../common/BaseModal.vue'
 import BaseInput from '../common/BaseInput.vue'
-import lobeIcons from '../../icons/lobeIconMap'
+import lobeIcons, { preloadLobeIcons } from '../../icons/lobeIconMap'
 import {
   GetPresets,
   GetProviders,
@@ -283,7 +283,7 @@ import {
 const { t } = useI18n()
 const router = useRouter()
 
-const geminiIcon = lobeIcons['gemini'] ?? ''
+const geminiIcon = computed(() => lobeIcons['gemini'] ?? '')
 
 type BindingGeminiStatus = Awaited<ReturnType<typeof GetStatus>>
 type BindingGeminiProvider = Awaited<ReturnType<typeof GetProviders>> extends (infer P)[] ? P : any
@@ -367,9 +367,9 @@ const categoryLabel = (category: string) => {
 
 const getPresetIcon = (preset: BindingGeminiPreset) => {
   if (preset.category === 'official') {
-    return lobeIcons['google'] ?? geminiIcon
+    return lobeIcons['google'] ?? geminiIcon.value
   }
-  return geminiIcon
+  return geminiIcon.value
 }
 
 const openPresetModal = (preset: BindingGeminiPreset) => {
@@ -503,6 +503,7 @@ const confirmDelete = async () => {
 }
 
 onMounted(() => {
+  void preloadLobeIcons(['gemini', 'google'])
   reload()
 })
 </script>

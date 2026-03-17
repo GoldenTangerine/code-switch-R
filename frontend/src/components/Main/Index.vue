@@ -141,11 +141,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref, type ComponentPublicInstance } from 'vue'
+import { computed, reactive, ref, watch, type ComponentPublicInstance } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Browser } from '@wailsio/runtime'
 import { useRouter } from 'vue-router'
-import lobeIcons from '../../icons/lobeIconMap'
+import lobeIcons, { preloadLobeIcons } from '../../icons/lobeIconMap'
 import BaseButton from '../common/BaseButton.vue'
 import BaseModal from '../common/BaseModal.vue'
 import CustomCliConfigEditor from '../common/CustomCliConfigEditor.vue'
@@ -451,6 +451,14 @@ const activeCardViewModels = computed<ProviderCardViewModel[]>(() =>
     iconSvg: iconSvg(card.icon),
     vendorInitials: vendorInitials(card.name),
   })),
+)
+
+watch(
+  () => activeCards.value.map((card) => card.icon),
+  (icons) => {
+    void preloadLobeIcons(icons)
+  },
+  { immediate: true },
 )
 
 const bindCardRef = (card: AutomationCard) => (element: Element | ComponentPublicInstance | null) => {

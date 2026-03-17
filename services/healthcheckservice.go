@@ -126,10 +126,10 @@ func NewHealthCheckService(
 			// 由每次请求的 context 控制超时，避免固定值截断自定义配置
 			Timeout: 0,
 			Transport: &http.Transport{
-				MaxIdleConns:        20,
-				IdleConnTimeout:     30 * time.Second,
+				MaxIdleConns:        10,
+				IdleConnTimeout:     15 * time.Second,
 				DisableCompression:  true,
-				MaxIdleConnsPerHost: 5,
+				MaxIdleConnsPerHost: 3,
 			},
 		},
 	}

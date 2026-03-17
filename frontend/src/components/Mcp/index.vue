@@ -405,7 +405,7 @@ import {
   type McpServer,
   type McpServerType,
 } from '../../services/mcp'
-import lobeIcons from '../../icons/lobeIconMap'
+import lobeIcons, { preloadLobeIcons } from '../../icons/lobeIconMap'
 import { showToast } from '../../utils/toast'
 
 type EnvEntry = {
@@ -522,6 +522,8 @@ const loadServers = async () => {
   } finally {
     loading.value = false
   }
+
+  void preloadLobeIcons(['mcp', ...servers.value.map((server) => server.name)])
 }
 
 const persistServers = async () => {

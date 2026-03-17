@@ -1,3 +1,17 @@
+# Code Switch v2.7.45
+
+## 性能优化
+- **macOS 冷启动待机内存继续下砍**：主窗口不再随应用启动立即创建，改成首次打开时按需初始化；macOS 托盘弹窗也改为首次点击托盘时才创建，减少仅托盘常驻时的 WebView / WebKit 常驻占用。
+- **前端首屏资源改成按路由和页面拆包加载**：主页面、日志、控制台、可用性检测、托盘等页面统一改为动态导入，`vite manualChunks` 同步拆分共享依赖，降低启动阶段一次性加载的脚本体积。
+- **Lobe 图标库不再全量 eager 打包**：图标索引和 SVG 资源改为按需加载，首页供应商卡片、编辑弹窗、MCP、Gemini 等入口按实际图标预热，避免主页面和托盘页面继续背整包图标启动。
+
+## 技术改进
+- **后台服务链路补上保守内存调优**：Go 运行时新增 `GOGC` 兜底调优，relay 切到 `gin.ReleaseMode` 并补齐 HTTP timeout，HealthCheck Transport 和 SQLite 连接池 / PRAGMA 也做了保守收口，在不砍后台能力的前提下降低常驻开销。
+- **内存诊断和优化进度文档一起落库**：新增仅允许 loopback 访问的 `/debug/memory` 接口，并把 `MEMORY_OPTIMIZATION_GUIDE.md` 更新为带进度勾选的落地文档；当前唯一未闭环项只剩 macOS 打包态实测与完整回归。
+- **前端构建环境门槛对齐到新工具链**：`frontend/package.json` 增加 Node 版本约束，新增 `.nvmrc` 固定到 `20.19.0`，避免本地和 CI 因 Node 版本不一致把构建链路搞崩。
+
+---
+
 # Code Switch v2.7.44
 
 ## 修复

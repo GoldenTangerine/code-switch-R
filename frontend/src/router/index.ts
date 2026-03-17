@@ -1,15 +1,16 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
-import MainPage from '../components/Main/Index.vue'
-import LogsPage from '../components/Logs/Index.vue'
-import GeneralPage from '../components/General/Index.vue'
-import McpPage from '../components/Mcp/index.vue'
-import SkillPage from '../components/Skill/Index.vue'
-import PromptsPage from '../components/Prompts/Index.vue'
-import SpeedTestPage from '../components/SpeedTest/Index.vue'
-import EnvCheckPage from '../components/EnvCheck/Index.vue'
-import ConsolePage from '../components/Console/Index.vue'
-import AvailabilityPage from '../components/Availability/Index.vue'
-import TrayPage from '../components/Tray/Index.vue'
+
+const MainPage = () => import('../components/Main/Index.vue')
+const LogsPage = () => import('../components/Logs/Index.vue')
+const GeneralPage = () => import('../components/General/Index.vue')
+const McpPage = () => import('../components/Mcp/index.vue')
+const SkillPage = () => import('../components/Skill/Index.vue')
+const PromptsPage = () => import('../components/Prompts/Index.vue')
+const SpeedTestPage = () => import('../components/SpeedTest/Index.vue')
+const EnvCheckPage = () => import('../components/EnvCheck/Index.vue')
+const ConsolePage = () => import('../components/Console/Index.vue')
+const AvailabilityPage = () => import('../components/Availability/Index.vue')
+const TrayPage = () => import('../components/Tray/Index.vue')
 
 const routes = [
   { path: '/', component: MainPage },
@@ -27,5 +28,5 @@ const routes = [
 
 export default createRouter({
   history: createWebHashHistory(), // Use createWebHashHistory for hash-based routing
-  routes
+  routes,
 })

@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"sort"
 	"strconv"
 	"strings"
@@ -83,6 +84,13 @@ func (a *AppService) OpenSecondWindow() {
 // logs any error that might occur.
 func main() {
 	appservice := &AppService{}
+
+	if strings.TrimSpace(os.Getenv("GOGC")) == "" {
+		previousGCPercent := debug.SetGCPercent(70)
+		log.Printf("✅ Go GCPercent 已调优: %d -> 70", previousGCPercent)
+	} else {
+		log.Printf("ℹ️  检测到 GOGC=%s，跳过内置 GCPercent 调优", os.Getenv("GOGC"))
+	}
 
 	// 【更新恢复】全平台：检查并从失败的更新中恢复
 	checkAndRecoverFromFailedUpdate()
@@ -299,80 +307,77 @@ func main() {
 		log.Println("✅ 所有后台服务已停止")
 	})
 
-	// Create a new window with the necessary options.
-	// 'Title' is the title of the window.
-	// 'Mac' options tailor the window when running on macOS.
-	// 'BackgroundColour' is the background colour of the window.
-	// 'URL' is the URL that will be loaded into the webview.
-	mainWindow := app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Title:     "Code Switch R",
-		Width:     1700,
-		Height:    1040,
-		MinWidth:  600,
-		MinHeight: 300,
-		Mac: application.MacWindow{
-			InvisibleTitleBarHeight: 50,
-			Backdrop:                application.MacBackdropTranslucent,
-			TitleBar:                application.MacTitleBarHiddenInset,
-		},
-		BackgroundColour: application.NewRGB(27, 38, 54),
-		URL:              "/",
-	})
+	var mainWindow application.Window
 	var mainWindowCentered bool
+	var trayWindow application.Window
+	var systray *application.SystemTray
+	createMainWindow := func() application.Window {
+		if mainWindow != nil {
+			return mainWindow
+		}
+		mainWindow = app.Window.NewWithOptions(application.WebviewWindowOptions{
+			Title:     "Code Switch R",
+			Width:     1700,
+			Height:    1040,
+			MinWidth:  600,
+			MinHeight: 300,
+			Hidden:    true,
+			Mac: application.MacWindow{
+				InvisibleTitleBarHeight: 50,
+				Backdrop:                application.MacBackdropTranslucent,
+				TitleBar:                application.MacTitleBarHiddenInset,
+			},
+			BackgroundColour: application.NewRGB(27, 38, 54),
+			URL:              "/",
+		})
+		mainWindow.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
+			mainWindow.Hide()
+			handleDockVisibility(dockService, false)
+			e.Cancel()
+		})
+		return mainWindow
+	}
 	focusMainWindow := func() {
+		win := createMainWindow()
 		if runtime.GOOS == "windows" {
-			mainWindow.SetAlwaysOnTop(true)
-			mainWindow.Focus()
+			win.SetAlwaysOnTop(true)
+			win.Focus()
 			go func() {
 				time.Sleep(150 * time.Millisecond)
-				mainWindow.SetAlwaysOnTop(false)
+				win.SetAlwaysOnTop(false)
 			}()
 			return
 		}
-		mainWindow.Focus()
+		win.Focus()
 	}
 	showMainWindow := func(withFocus bool) {
+		win := createMainWindow()
 		if !mainWindowCentered {
-			mainWindow.Center()
+			win.Center()
 			mainWindowCentered = true
 		}
-		if mainWindow.IsMinimised() {
-			mainWindow.UnMinimise()
+		if win.IsMinimised() {
+			win.UnMinimise()
 		}
-		mainWindow.Show()
+		win.Show()
 		if withFocus {
 			focusMainWindow()
 		}
 		handleDockVisibility(dockService, true)
 	}
-
-	showMainWindow(false)
-
-	mainWindow.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
-		mainWindow.Hide()
-		handleDockVisibility(dockService, false)
-		e.Cancel()
-	})
-
-	var trayWindow application.Window
-
-	app.Event.OnApplicationEvent(events.Mac.ApplicationShouldHandleReopen, func(event *application.ApplicationEvent) {
-		showMainWindow(true)
-	})
-
-	app.Event.OnApplicationEvent(events.Mac.ApplicationDidBecomeActive, func(event *application.ApplicationEvent) {
+	isMainWindowVisible := func() bool {
+		return mainWindow != nil && mainWindow.IsVisible()
+	}
+	isMainWindowFocused := func() bool {
+		return mainWindow != nil && mainWindow.IsFocused()
+	}
+	createTrayWindow := func() application.Window {
+		if runtime.GOOS != "darwin" {
+			return nil
+		}
 		if trayWindow != nil {
-			// Tray exists on macOS; avoid auto-opening the main window on activation.
-			return
+			return trayWindow
 		}
-		if mainWindow.IsVisible() {
-			mainWindow.Focus()
-			return
-		}
-		showMainWindow(true)
-	})
-
-	if runtime.GOOS == "darwin" {
 		trayWindow = app.Window.NewWithOptions(application.WebviewWindowOptions{
 			Title:            "Code Switch Tray",
 			Name:             "tray",
@@ -400,10 +405,55 @@ func main() {
 			trayWindow.Hide()
 			e.Cancel()
 		})
+		trayWindow.OnWindowEvent(events.Common.WindowLostFocus, func(event *application.WindowEvent) {
+			trayWindow.Hide()
+		})
 		appservice.TrayWindow = trayWindow
+		return trayWindow
+	}
+	hideTrayWindow := func() {
+		if trayWindow == nil || !trayWindow.IsVisible() {
+			return
+		}
+		trayWindow.Hide()
+	}
+	showTrayWindow := func() {
+		if runtime.GOOS != "darwin" {
+			return
+		}
+		win := createTrayWindow()
+		if win == nil {
+			return
+		}
+		if systray != nil {
+			_ = systray.PositionWindow(win, trayWindowOffset)
+		}
+		win.Show().Focus()
+	}
+	toggleTrayWindow := func() {
+		if trayWindow != nil && trayWindow.IsVisible() {
+			trayWindow.Hide()
+			return
+		}
+		showTrayWindow()
 	}
 
-	systray := app.SystemTray.New()
+	app.Event.OnApplicationEvent(events.Mac.ApplicationShouldHandleReopen, func(event *application.ApplicationEvent) {
+		showMainWindow(true)
+	})
+
+	app.Event.OnApplicationEvent(events.Mac.ApplicationDidBecomeActive, func(event *application.ApplicationEvent) {
+		if runtime.GOOS == "darwin" {
+			// macOS 保持 tray-first 语义，不因 trayWindow 延迟创建就自动弹主窗口。
+			return
+		}
+		if isMainWindowVisible() {
+			mainWindow.Focus()
+			return
+		}
+		showMainWindow(true)
+	})
+	systray = app.SystemTray.New()
 	// systray.SetLabel("AI Code Studio")
 	systray.SetTooltip("AI Code Studio")
 	if lightIcon := loadTrayIcon("assets/icon.png"); len(lightIcon) > 0 {
@@ -413,7 +463,7 @@ func main() {
 		systray.SetDarkModeIcon(darkIcon)
 	}
 
-	if runtime.GOOS == "darwin" && trayWindow != nil {
+	if runtime.GOOS == "darwin" {
 		trayMenu := application.NewMenu()
 		trayMenu.Add("显示主窗口").OnClick(func(ctx *application.Context) {
 			showMainWindow(true)
@@ -422,8 +472,11 @@ func main() {
 			app.Quit()
 		})
 		systray.SetMenu(trayMenu)
-		systray.AttachWindow(trayWindow).WindowOffset(8)
+		systray.OnClick(func() {
+			toggleTrayWindow()
+		})
 		systray.OnRightClick(func() {
+			hideTrayWindow()
 			systray.OpenMenu()
 		})
 	} else {
@@ -442,11 +495,11 @@ func main() {
 			systray.OpenMenu()
 		})
 		systray.OnClick(func() {
-			if !mainWindow.IsVisible() {
+			if !isMainWindowVisible() {
 				showMainWindow(true)
 				return
 			}
-			if !mainWindow.IsFocused() {
+			if !isMainWindowFocused() {
 				focusMainWindow()
 			}
 		})
@@ -497,6 +550,7 @@ const (
 	trayWindowWidth      = 360
 	trayWindowMinHeight  = 120
 	trayWindowMaxHeight  = 640
+	trayWindowOffset     = 8
 	trayProgressBarWidth = 28
 )
 
