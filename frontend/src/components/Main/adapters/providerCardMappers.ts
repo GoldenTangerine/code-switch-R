@@ -12,6 +12,16 @@ const cloneCardValue = <T>(value: T): T => {
   return JSON.parse(JSON.stringify(value))
 }
 
+const normalizeStringRecord = (source: Record<string, unknown> | null | undefined): Record<string, string> => {
+  const normalized: Record<string, string> = {}
+  Object.entries(source ?? {}).forEach(([key, value]) => {
+    if (typeof value === 'string') {
+      normalized[key] = value
+    }
+  })
+  return normalized
+}
+
 const extractGeminiCliConfig = (provider: GeminiProvider): Record<string, any> => {
   const envConfig = provider?.envConfig ?? {}
   const cliConfig: Record<string, any> = {}
@@ -29,9 +39,7 @@ const extractGeminiCliConfig = (provider: GeminiProvider): Record<string, any> =
 }
 
 const buildGeminiEnvConfig = (card: AutomationCard, original: GeminiProvider): Record<string, string> => {
-  const nextEnv: Record<string, string> = {
-    ...(original?.envConfig ?? {}),
-  }
+  const nextEnv = normalizeStringRecord(original?.envConfig)
 
   if (card.apiUrl) {
     nextEnv.GOOGLE_GEMINI_BASE_URL = card.apiUrl
