@@ -19,7 +19,7 @@ import {
   type GeminiProvider,
 } from '../adapters/providerCardMappers'
 import { PROVIDER_TAB_IDS } from '../constants'
-import type { ProviderTab, TranslateFn } from '../types'
+import type { ProviderDragTarget, ProviderTab, TranslateFn } from '../types'
 
 type UseProviderCardsOptions = {
   t: TranslateFn
@@ -49,8 +49,70 @@ export function useProviderCards(options: UseProviderCardsOptions) {
 
   const cards = reactive(createCardRecord())
   const draggingId = ref<number | null>(null)
+  const dragOverId = ref<number | null>(null)
   const directAppliedIds = reactive(createDirectAppliedIds())
   const geminiProvidersCache = ref<GeminiProvider[]>([])
+  const dragStartOrder = ref<number[]>([])
+  const dragSourceTab = ref<ProviderTab | null>(null)
+  const lastDragTarget = ref<ProviderDragTarget | null>(null)
+
+  const hasOrderChanged = (list: AutomationCard[], snapshot: number[]) =>
+    snapshot.length === list.length && snapshot.some((id, index) => list[index]?.id !== id)
+
+  const restoreOrder = (list: AutomationCard[], snapshot: number[]) => {
+    if (!snapshot.length) return
+    const orderMap = new Map(snapshot.map((id, index) => [id, index]))
+    list.sort((left, right) => {
+      const leftIndex = orderMap.get(left.id) ?? Number.MAX_SAFE_INTEGER
+      const rightIndex = orderMap.get(right.id) ?? Number.MAX_SAFE_INTEGER
+      return leftIndex - rightIndex
+    })
+  }
+
+  const resetDragState = () => {
+    draggingId.value = null
+    dragOverId.value = null
+    dragStartOrder.value = []
+    dragSourceTab.value = null
+    lastDragTarget.value = null
+  }
+
+  const reorderDraggingCard = (target: ProviderDragTarget) => {
+    if (draggingId.value === null) return false
+
+    const currentTab = dragSourceTab.value ?? getActiveTab()
+    const list = cards[currentTab]
+    if (!list?.length) return false
+
+    const { id: targetId, position } = target
+    dragOverId.value = targetId
+
+    if (lastDragTarget.value?.id === targetId && lastDragTarget.value.position === position) {
+      return false
+    }
+
+    if (draggingId.value === targetId) {
+      lastDragTarget.value = target
+      return false
+    }
+
+    const fromIndex = list.findIndex((card) => card.id === draggingId.value)
+    const toIndex = list.findIndex((card) => card.id === targetId)
+    if (fromIndex === -1 || toIndex === -1) return false
+
+    let newIndex = position === 'after' ? toIndex + 1 : toIndex
+    if (fromIndex < newIndex) {
+      newIndex -= 1
+    }
+
+    lastDragTarget.value = target
+
+    if (newIndex === fromIndex) return false
+
+    const [moved] = list.splice(fromIndex, 1)
+    list.splice(newIndex, 0, moved)
+    return true
+  }
 
   const normalizeLevel = (level: number | string | undefined): number => {
     const numeric = Number(level)
@@ -293,34 +355,52 @@ export function useProviderCards(options: UseProviderCardsOptions) {
   }
 
   const onDragStart = (id: number) => {
+    const currentTab = getActiveTab()
     draggingId.value = id
+    dragOverId.value = null
+    dragSourceTab.value = currentTab
+    dragStartOrder.value = cards[currentTab].map((card) => card.id)
+    lastDragTarget.value = null
   }
 
-  const onDrop = async (targetId: number) => {
-    if (draggingId.value === null || draggingId.value === targetId) return
+  const onDragOverCard = (target: ProviderDragTarget) => {
+    reorderDraggingCard(target)
+  }
 
-    const currentTab = getActiveTab()
+  const onDrop = async (target: ProviderDragTarget) => {
+    if (draggingId.value === null) return
+
+    reorderDraggingCard(target)
+
+    const currentTab = dragSourceTab.value ?? getActiveTab()
     const list = cards[currentTab]
-    if (!list) return
+    if (!list) {
+      resetDragState()
+      return
+    }
 
-    const fromIndex = list.findIndex((card) => card.id === draggingId.value)
-    const toIndex = list.findIndex((card) => card.id === targetId)
-    if (fromIndex === -1 || toIndex === -1) return
-
-    const [moved] = list.splice(fromIndex, 1)
-    const newIndex = fromIndex < toIndex ? toIndex - 1 : toIndex
-    list.splice(newIndex, 0, moved)
-    draggingId.value = null
-    await persistProviders(currentTab)
+    const changed = hasOrderChanged(list, dragStartOrder.value)
+    resetDragState()
+    if (changed) {
+      await persistProviders(currentTab)
+    }
   }
 
   const onDragEnd = () => {
-    draggingId.value = null
+    if (draggingId.value === null) return
+
+    const currentTab = dragSourceTab.value ?? getActiveTab()
+    const list = cards[currentTab]
+    if (list && hasOrderChanged(list, dragStartOrder.value)) {
+      restoreOrder(list, dragStartOrder.value)
+    }
+    resetDragState()
   }
 
   return {
     cards,
     draggingId,
+    dragOverId,
     directAppliedIds,
     normalizeLevel,
     sortProvidersByLevel,
@@ -333,6 +413,7 @@ export function useProviderCards(options: UseProviderCardsOptions) {
     removeProvider,
     duplicateProvider,
     onDragStart,
+    onDragOverCard,
     onDrop,
     onDragEnd,
   }

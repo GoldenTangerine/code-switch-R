@@ -59,10 +59,12 @@
           :active-tab="activeTab"
           :active-proxy-state="activeProxyState"
           :resolved-theme="resolvedTheme"
+          :is-sorting="draggingId !== null"
           :format-blacklist-countdown="formatBlacklistCountdown"
           :bind-card-ref="bindCardRef"
           @card-click="handleProviderCardClick"
           @dragstart="onDragStart"
+          @dragover-card="onDragOverCard"
           @dragend="onDragEnd"
           @drop="onDrop"
           @open-site="handleOpenSite"
@@ -203,6 +205,7 @@ let pageShell: ReturnType<typeof useMainPageShell>
 const {
   cards,
   draggingId,
+  dragOverId,
   normalizeLevel,
   sortProvidersByLevel,
   refreshDirectAppliedStatus,
@@ -214,6 +217,7 @@ const {
   removeProvider,
   duplicateProvider,
   onDragStart,
+  onDragOverCard,
   onDrop,
   onDragEnd,
 } = useProviderCards({
@@ -440,6 +444,7 @@ const activeCardViewModels = computed<ProviderCardViewModel[]>(() =>
   activeCards.value.map((card) => ({
     card,
     dragging: draggingId.value === card.id,
+    dragOver: dragOverId.value === card.id && draggingId.value !== card.id,
     isLastUsed: isLastUsedProvider(card),
     isHighlighted: isHighlightedCard(card),
     isDirectApplied: isDirectApplied(card),

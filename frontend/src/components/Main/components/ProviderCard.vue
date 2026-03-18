@@ -4,14 +4,16 @@
     :class="[
       'automation-card',
       { dragging: viewModel.dragging },
+      { 'drag-over': viewModel.dragOver },
       { 'is-last-used': viewModel.isLastUsed },
       { 'is-highlighted': viewModel.isHighlighted },
     ]"
     draggable="true"
     @click="$emit('card-click')"
     @dragstart="$emit('dragstart')"
+    @dragover.prevent="handleDragOver"
     @dragend="$emit('dragend')"
-    @drop="$emit('drop')"
+    @drop.prevent="handleDrop"
   >
     <span v-if="viewModel.isLastUsed" class="last-used-badge">
       ✓ {{ t('components.main.providers.lastUsed') }}
@@ -305,7 +307,7 @@
 <script setup lang="ts">
 import { computed, type ComponentPublicInstance } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { ProviderCardViewModel, ProviderTab, ResolvedTheme } from '../types'
+import type { ProviderCardViewModel, ProviderDragTarget, ProviderTab, ResolvedTheme } from '../types'
 
 const props = defineProps<{
   viewModel: ProviderCardViewModel
@@ -319,8 +321,9 @@ const props = defineProps<{
 const emit = defineEmits<{
   'card-click': []
   dragstart: []
+  'dragover-card': [target: ProviderDragTarget]
   dragend: []
-  drop: []
+  drop: [target: ProviderDragTarget]
   'open-site': []
   'unblock-and-reset': []
   'reset-level': []
@@ -346,6 +349,24 @@ const directApplyTooltip = computed(() => {
 
 const handleToggleEnabled = (event: Event) => {
   emit('toggle-enabled', (event.target as HTMLInputElement).checked)
+}
+
+const resolveDragTarget = (event: DragEvent): ProviderDragTarget => {
+  const currentTarget = event.currentTarget as HTMLElement | null
+  const bounds = currentTarget?.getBoundingClientRect()
+  const midpoint = bounds ? bounds.top + bounds.height / 2 : 0
+  return {
+    id: props.viewModel.card.id,
+    position: event.clientY > midpoint ? 'after' : 'before',
+  }
+}
+
+const handleDragOver = (event: DragEvent) => {
+  emit('dragover-card', resolveDragTarget(event))
+}
+
+const handleDrop = (event: DragEvent) => {
+  emit('drop', resolveDragTarget(event))
 }
 </script>
 

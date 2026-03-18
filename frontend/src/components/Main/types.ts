@@ -13,6 +13,13 @@ export type MainTabOption = {
 
 export type ResolvedTheme = 'light' | 'dark'
 
+export type ProviderDragTargetPosition = 'before' | 'after'
+
+export type ProviderDragTarget = {
+  id: number
+  position: ProviderDragTargetPosition
+}
+
 export interface LastUsedProvider {
   platform: string
   provider_id?: string
@@ -64,6 +71,7 @@ export type ProviderStatDisplay =
 export type ProviderCardViewModel = {
   card: AutomationCard
   dragging: boolean
+  dragOver: boolean
   isLastUsed: boolean
   isHighlighted: boolean
   isDirectApplied: boolean
