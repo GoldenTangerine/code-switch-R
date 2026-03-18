@@ -67,10 +67,13 @@ const { t } = useI18n()
 
 const editorHostRef = ref<HTMLDivElement | null>(null)
 const isDarkMode = ref(false)
+const WHEEL_LINE_HEIGHT_PX = 16
+const SCROLL_EPSILON = 1
 
 let view: EditorView | null = null
 let themeObserver: MutationObserver | null = null
 let syncingFromProps = false
+let editorWheelCleanup: (() => void) | null = null
 
 const surfaceStyle = computed(() => {
   const surfaceHeight = props.surfaceHeight.trim()
@@ -279,6 +282,73 @@ const reconfigureCompartment = (compartment: Compartment, extension: Extension) 
   })
 }
 
+const normalizeWheelDeltaY = (event: WheelEvent, referenceElement: HTMLElement) => {
+  if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) {
+    return event.deltaY * WHEEL_LINE_HEIGHT_PX
+  }
+  if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) {
+    return event.deltaY * referenceElement.clientHeight
+  }
+  return event.deltaY
+}
+
+const canScrollWithin = (element: HTMLElement, deltaY: number) => {
+  if (element.scrollHeight <= element.clientHeight + SCROLL_EPSILON) {
+    return false
+  }
+
+  if (deltaY < 0) {
+    return element.scrollTop > SCROLL_EPSILON
+  }
+
+  if (deltaY > 0) {
+    return element.scrollTop + element.clientHeight < element.scrollHeight - SCROLL_EPSILON
+  }
+
+  return false
+}
+
+const findScrollableAncestor = (startElement: HTMLElement | null, exclude: HTMLElement | null) => {
+  let current = startElement
+
+  while (current) {
+    if (current !== exclude) {
+      const style = window.getComputedStyle(current)
+      const overflowY = style.overflowY
+      const isScrollable = (overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'overlay')
+        && current.scrollHeight > current.clientHeight + SCROLL_EPSILON
+
+      if (isScrollable) {
+        return current
+      }
+    }
+
+    current = current.parentElement
+  }
+
+  return null
+}
+
+const handleEditorWheel = (event: WheelEvent) => {
+  if (!view || event.defaultPrevented || event.ctrlKey) return
+
+  const editorScroller = view.scrollDOM as HTMLElement
+  if (!editorScroller) return
+
+  const deltaY = normalizeWheelDeltaY(event, editorScroller)
+  if (!deltaY) return
+  if (canScrollWithin(editorScroller, deltaY)) return
+
+  const parentScroller = findScrollableAncestor(editorHostRef.value?.parentElement ?? null, editorScroller)
+  if (!parentScroller) return
+
+  parentScroller.scrollBy({
+    top: deltaY,
+    behavior: 'auto',
+  })
+  event.preventDefault()
+}
+
 const createEditor = (doc = props.modelValue ?? '') => {
   if (!editorHostRef.value) return
 
@@ -303,9 +373,17 @@ const createEditor = (doc = props.modelValue ?? '') => {
     }),
     parent: editorHostRef.value,
   })
+
+  const editorScroller = view.scrollDOM as HTMLElement
+  editorScroller.addEventListener('wheel', handleEditorWheel, { passive: false })
+  editorWheelCleanup = () => {
+    editorScroller.removeEventListener('wheel', handleEditorWheel)
+  }
 }
 
 const destroyEditor = () => {
+  editorWheelCleanup?.()
+  editorWheelCleanup = null
   view?.destroy()
   view = null
 }
