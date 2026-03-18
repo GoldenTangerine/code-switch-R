@@ -53,6 +53,37 @@ type ProviderRelayService struct {
 
 // errClientAbort 表示客户端中断连接，不应计入 provider 失败次数
 var errClientAbort = errors.New("client aborted, skip failure count")
+var errResponseStarted = errors.New("response already started")
+var errIncompleteStream = errors.New("stream ended before completion")
+
+type responseStartedError struct {
+	cause error
+}
+
+func (e *responseStartedError) Error() string {
+	if e == nil {
+		return errResponseStarted.Error()
+	}
+	if e.cause != nil {
+		return e.cause.Error()
+	}
+	return errResponseStarted.Error()
+}
+
+func (e *responseStartedError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.cause
+}
+
+func (e *responseStartedError) Is(target error) bool {
+	return target == errResponseStarted
+}
+
+func markResponseStarted(err error) error {
+	return &responseStartedError{cause: err}
+}
 
 var (
 	responseModelRegex                     = regexp.MustCompile(`"model"\s*:\s*"([^"]+)"`)
@@ -705,6 +736,18 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 						if err != nil {
 							errorMsg = err.Error()
 						}
+						if errors.Is(err, errResponseStarted) {
+							fmt.Printf("[WARN] ⚠️ 响应已部分写入，无法重试: %s | 错误: %s | 耗时: %.2fs\n",
+								provider.Name, errorMsg, duration.Seconds())
+							if errors.Is(err, errClientAbort) {
+								fmt.Printf("[INFO] 客户端中断，停止重试\n")
+								return
+							}
+							if err := prs.blacklistService.RecordFailureByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
+								fmt.Printf("[ERROR] 记录失败到黑名单失败: %v\n", err)
+							}
+							return
+						}
 						fmt.Printf("[WARN] ✗ 失败: %s | 重试 %d/%d | 错误: %s | 耗时: %.2fs\n",
 							provider.Name, retryCount+1, maxRetryPerProvider, errorMsg, duration.Seconds())
 
@@ -830,6 +873,18 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 				errorMsg := "未知错误"
 				if err != nil {
 					errorMsg = err.Error()
+				}
+				if errors.Is(err, errResponseStarted) {
+					fmt.Printf("[WARN]   ⚠️ 响应已部分写入，无法降级: %s | 错误: %s | 耗时: %.2fs\n",
+						provider.Name, errorMsg, duration.Seconds())
+					if errors.Is(err, errClientAbort) {
+						fmt.Printf("[INFO] 客户端中断，跳过失败计数: %s\n", provider.Name)
+						return
+					}
+					if err := prs.blacklistService.RecordFailureByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
+						fmt.Printf("[ERROR] 记录失败到黑名单失败: %v\n", err)
+					}
+					return
 				}
 				fmt.Printf("[WARN]   ✗ Level %d 失败: %s | 错误: %s | 耗时: %.2fs\n",
 					level, provider.Name, errorMsg, duration.Seconds())
@@ -1100,20 +1155,13 @@ func (prs *ProviderRelayService) forwardRequest(
 	// 状态码为 0 且无错误：当作成功处理
 	if status == 0 {
 		fmt.Printf("[WARN] Provider %s 返回状态码 0，但无错误，当作成功处理\n", provider.Name)
-		_, copyErr := resp.ToHttpResponseWriter(c.Writer, ReqeustLogHook(c, kind, requestLog))
-		if copyErr != nil {
-			fmt.Printf("[WARN] 复制响应到客户端失败（不影响provider成功判定）: %v\n", copyErr)
-		}
-		return true, nil
+		writtenBytes, copyErr := resp.ToHttpResponseWriter(c.Writer, ReqeustLogHook(c, kind, requestLog))
+		return finalizeForwardSuccess(c, kind, requestLog, writtenBytes, copyErr)
 	}
 
 	if status >= http.StatusOK && status < http.StatusMultipleChoices {
-		_, copyErr := resp.ToHttpResponseWriter(c.Writer, ReqeustLogHook(c, kind, requestLog))
-		if copyErr != nil {
-			fmt.Printf("[WARN] 复制响应到客户端失败（不影响provider成功判定）: %v\n", copyErr)
-		}
-		// 只要provider返回了2xx状态码，就算成功（复制失败是客户端问题，不是provider问题）
-		return true, nil
+		writtenBytes, copyErr := resp.ToHttpResponseWriter(c.Writer, ReqeustLogHook(c, kind, requestLog))
+		return finalizeForwardSuccess(c, kind, requestLog, writtenBytes, copyErr)
 	}
 
 	// 非 2xx：打印上游错误信息，便于在控制台追踪原因
@@ -1171,6 +1219,38 @@ func cloneMap(m map[string]string) map[string]string {
 		cloned[k] = v
 	}
 	return cloned
+}
+
+func responseHasStarted(c *gin.Context) bool {
+	return c != nil && c.Writer != nil && c.Writer.Written()
+}
+
+func finalizeForwardSuccess(c *gin.Context, kind string, requestLog *ReqeustLog, writtenBytes int64, copyErr error) (bool, error) {
+	if copyErr != nil {
+		if isClientWriteAbortError(copyErr) {
+			requestLog.HttpCode = 499
+			clientErr := fmt.Errorf("%w: %v", errClientAbort, copyErr)
+			if responseHasStarted(c) || writtenBytes > 0 {
+				return false, markResponseStarted(clientErr)
+			}
+			return false, clientErr
+		}
+		requestLog.HttpCode = http.StatusBadGateway
+		streamErr := fmt.Errorf("%w: %v", errIncompleteStream, copyErr)
+		if responseHasStarted(c) || writtenBytes > 0 {
+			return false, markResponseStarted(streamErr)
+		}
+		return false, streamErr
+	}
+	if err := validateStreamCompletion(kind, requestLog); err != nil {
+		requestLog.HttpCode = http.StatusBadGateway
+		if responseHasStarted(c) || writtenBytes > 0 {
+			return false, markResponseStarted(err)
+		}
+		return false, err
+	}
+	// 2xx 只是“上游接受请求”，流式请求还要确认复制过程未中断且收到了协议级完成事件。
+	return true, nil
 }
 
 func flattenQuery(values map[string][]string) map[string]string {
@@ -1601,7 +1681,7 @@ func ReqeustLogHook(c *gin.Context, kind string, usage *ReqeustLog) func(data []
 			parserFn = GeminiParseTokenUsageFromResponse
 		}
 		appendRequestLogResponseBody(usage, data)
-		parseTokenUsageChunk(data, usage, parserFn, &sseRemainder, &rawJSONBuffer)
+		parseTokenUsageChunk(data, usage, parserFn, &sseRemainder, &rawJSONBuffer, kind)
 
 		return true, data
 	}
@@ -1613,6 +1693,7 @@ func parseTokenUsageChunk(
 	parser func(string, *ReqeustLog),
 	sseRemainder *strings.Builder,
 	rawJSONBuffer *strings.Builder,
+	kind string,
 ) {
 	if usage == nil || parser == nil || len(chunk) == 0 {
 		return
@@ -1621,15 +1702,15 @@ func parseTokenUsageChunk(
 	payload := string(chunk)
 	if usage.IsStream {
 		if sseRemainder != nil && (sseRemainder.Len() > 0 || looksLikeSSEPayload(payload)) {
-			parseEventPayload(payload, parser, usage, sseRemainder)
+			parseEventPayload(payload, parser, usage, sseRemainder, kind)
 			return
 		}
 	}
 
-	parseRawJSONPayload(payload, parser, usage, rawJSONBuffer)
+	parseRawJSONPayload(payload, parser, usage, rawJSONBuffer, kind)
 }
 
-func parseEventPayload(payload string, parser func(string, *ReqeustLog), usage *ReqeustLog, remainder *strings.Builder) {
+func parseEventPayload(payload string, parser func(string, *ReqeustLog), usage *ReqeustLog, remainder *strings.Builder, kind string) {
 	if strings.TrimSpace(payload) == "" || parser == nil || usage == nil || remainder == nil {
 		return
 	}
@@ -1648,7 +1729,7 @@ func parseEventPayload(payload string, parser func(string, *ReqeustLog), usage *
 		}
 		lineEnd := offset + newlineIdx
 		line := combined[offset:lineEnd]
-		parseSSEDataLine(line, parser, usage)
+		parseSSEDataLine(line, parser, usage, kind)
 		offset = lineEnd + 1
 	}
 
@@ -1659,14 +1740,14 @@ func parseEventPayload(payload string, parser func(string, *ReqeustLog), usage *
 	}
 
 	if shouldProcessStandaloneSSELine(tail) {
-		parseSSEDataLine(tail, parser, usage)
+		parseSSEDataLine(tail, parser, usage, kind)
 		return
 	}
 
 	remainder.WriteString(tail)
 }
 
-func parseSSEDataLine(line string, parser func(string, *ReqeustLog), usage *ReqeustLog) {
+func parseSSEDataLine(line string, parser func(string, *ReqeustLog), usage *ReqeustLog, kind string) {
 	line = strings.TrimSpace(line)
 	if !strings.HasPrefix(line, "data:") {
 		return
@@ -1678,6 +1759,7 @@ func parseSSEDataLine(line string, parser func(string, *ReqeustLog), usage *Reqe
 	parser(dataLine, usage)
 	updateResponseModelFromPayload(dataLine, usage)
 	updateFirstTokenFromPayload(dataLine, usage)
+	updateStreamLifecycleFromPayload(kind, dataLine, usage)
 }
 
 func looksLikeSSEPayload(payload string) bool {
@@ -1742,7 +1824,7 @@ func extractResponseModelFromPayload(payload string) string {
 	return ""
 }
 
-func parseRawJSONPayload(payload string, parser func(string, *ReqeustLog), usage *ReqeustLog, rawJSONBuffer *strings.Builder) {
+func parseRawJSONPayload(payload string, parser func(string, *ReqeustLog), usage *ReqeustLog, rawJSONBuffer *strings.Builder, kind string) {
 	if parser == nil || usage == nil || rawJSONBuffer == nil || payload == "" {
 		return
 	}
@@ -1754,6 +1836,7 @@ func parseRawJSONPayload(payload string, parser func(string, *ReqeustLog), usage
 	parser(buffered, usage)
 	updateResponseModelFromPayload(buffered, usage)
 	updateFirstTokenFromPayload(buffered, usage)
+	updateStreamLifecycleFromPayload(kind, buffered, usage)
 	rawJSONBuffer.Reset()
 }
 
@@ -1764,6 +1847,124 @@ func updateFirstTokenFromPayload(payload string, reqLog *ReqeustLog) {
 	if payloadHasGeneratedToken(payload) {
 		markFirstTokenTimestamp(reqLog)
 	}
+}
+
+func updateStreamLifecycleFromPayload(kind string, payload string, reqLog *ReqeustLog) {
+	if reqLog == nil || !reqLog.IsStream {
+		return
+	}
+	if !strings.EqualFold(strings.TrimSpace(kind), "codex") {
+		return
+	}
+
+	eventType, completed, failureMessage, terminal := detectCodexStreamTerminalState(payload)
+	if !terminal {
+		return
+	}
+
+	reqLog.streamTerminalEvent = eventType
+	if completed {
+		reqLog.streamFailureMessage = ""
+		return
+	}
+	reqLog.streamFailureMessage = failureMessage
+}
+
+func detectCodexStreamTerminalState(payload string) (eventType string, completed bool, failureMessage string, terminal bool) {
+	eventType = strings.TrimSpace(gjson.Get(payload, "type").String())
+	switch eventType {
+	case "response.completed":
+		return eventType, true, "", true
+	case "response.failed", "response.incomplete", "response.cancelled", "error":
+		return eventType, false, extractCodexStreamFailureMessage(payload), true
+	}
+
+	status := extractCodexResponseStatus(payload)
+	switch status {
+	case "completed":
+		return "response.completed", true, "", true
+	case "failed":
+		return "response.failed", false, extractCodexStreamFailureMessage(payload), true
+	case "incomplete":
+		return "response.incomplete", false, extractCodexStreamFailureMessage(payload), true
+	case "cancelled", "canceled":
+		return "response.cancelled", false, extractCodexStreamFailureMessage(payload), true
+	default:
+		return "", false, "", false
+	}
+}
+
+func extractCodexResponseStatus(payload string) string {
+	for _, path := range []string{"status", "response.status"} {
+		if value := strings.TrimSpace(gjson.Get(payload, path).String()); value != "" {
+			return strings.ToLower(value)
+		}
+	}
+	return ""
+}
+
+func extractCodexStreamFailureMessage(payload string) string {
+	for _, path := range []string{
+		"status_details.error.message",
+		"status_details.reason",
+		"error.message",
+		"message",
+		"response.status_details.error.message",
+		"response.error.message",
+		"response.status_details.reason",
+	} {
+		if value := strings.TrimSpace(gjson.Get(payload, path).String()); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func validateStreamCompletion(kind string, reqLog *ReqeustLog) error {
+	if reqLog == nil || !reqLog.IsStream {
+		return nil
+	}
+	if !strings.EqualFold(strings.TrimSpace(kind), "codex") {
+		return nil
+	}
+
+	switch strings.TrimSpace(reqLog.streamTerminalEvent) {
+	case "response.completed":
+		return nil
+	case "":
+		return fmt.Errorf("%w: missing response.completed event", errIncompleteStream)
+	default:
+		if msg := strings.TrimSpace(reqLog.streamFailureMessage); msg != "" {
+			return fmt.Errorf("%w: %s (%s)", errIncompleteStream, reqLog.streamTerminalEvent, msg)
+		}
+		return fmt.Errorf("%w: %s", errIncompleteStream, reqLog.streamTerminalEvent)
+	}
+}
+
+func isClientWriteAbortError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	if strings.Contains(message, "error streaming response") ||
+		strings.Contains(message, "error peeking response") ||
+		strings.Contains(message, "error reading non-standard response") {
+		return false
+	}
+	if !strings.Contains(message, "error writing response") &&
+		!strings.Contains(message, "error writing final line") &&
+		!strings.Contains(message, "error writing non-standard response") &&
+		!strings.Contains(message, "error copying response") {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, net.ErrClosed) {
+		return true
+	}
+	return strings.Contains(message, "broken pipe") ||
+		strings.Contains(message, "connection reset by peer") ||
+		strings.Contains(message, "use of closed network connection") ||
+		strings.Contains(message, "context canceled") ||
+		strings.Contains(message, "operation was canceled")
 }
 
 func markFirstTokenTimestamp(reqLog *ReqeustLog) {
@@ -2000,7 +2201,9 @@ type ReqeustLog struct {
 	ProviderAuthType string    `json:"-"`
 	RequestStartedAt time.Time `json:"-"`
 
-	responseBodyBuffer []byte
+	responseBodyBuffer   []byte
+	streamTerminalEvent  string
+	streamFailureMessage string
 }
 
 // claude code usage parser
@@ -3042,6 +3245,18 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 						if err != nil {
 							errorMsg = err.Error()
 						}
+						if errors.Is(err, errResponseStarted) {
+							fmt.Printf("[CustomCLI][WARN] ⚠️ 响应已部分写入，无法重试: %s | 错误: %s | 耗时: %.2fs\n",
+								provider.Name, errorMsg, duration.Seconds())
+							if errors.Is(err, errClientAbort) {
+								fmt.Printf("[CustomCLI][INFO] 客户端中断，停止重试\n")
+								return
+							}
+							if err := prs.blacklistService.RecordFailureByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
+								fmt.Printf("[CustomCLI][ERROR] 记录失败到黑名单失败: %v\n", err)
+							}
+							return
+						}
 						fmt.Printf("[CustomCLI][WARN] ✗ 失败: %s | 重试 %d/%d | 错误: %s | 耗时: %.2fs\n",
 							provider.Name, retryCount+1, maxRetryPerProvider, errorMsg, duration.Seconds())
 
@@ -3155,6 +3370,18 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 				errorMsg := "未知错误"
 				if err != nil {
 					errorMsg = err.Error()
+				}
+				if errors.Is(err, errResponseStarted) {
+					fmt.Printf("[CustomCLI][WARN]   ⚠️ 响应已部分写入，无法降级: %s | 错误: %s | 耗时: %.2fs\n",
+						provider.Name, errorMsg, duration.Seconds())
+					if errors.Is(err, errClientAbort) {
+						fmt.Printf("[CustomCLI][INFO] 客户端中断，跳过失败计数: %s\n", provider.Name)
+						return
+					}
+					if err := prs.blacklistService.RecordFailureByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
+						fmt.Printf("[CustomCLI][ERROR] 记录失败到黑名单失败: %v\n", err)
+					}
+					return
 				}
 				fmt.Printf("[CustomCLI][WARN]   ✗ Level %d 失败: %s | 错误: %s | 耗时: %.2fs\n",
 					level, provider.Name, errorMsg, duration.Seconds())

@@ -1,3 +1,16 @@
+# Code Switch v2.7.49
+
+## 修复
+- **Codex stream 成功判定终于不再嘴硬**：修复代理层只要拿到 `2xx` 就提前记成功的问题；现在 `stream=true` 的 Codex 请求会校验协议完成态，缺少 `response.completed`、中途断流或流复制失败时，不会再在控制台和日志里硬记成 `Level 1 成功`。
+- **响应写出一半后不再乱切下一个 provider**：修复首个 provider 已经开始向客户端输出 stream 时，后端仍可能继续重试/降级的风险；现在一旦响应已部分写出，就会立即停止切换，避免多家 provider 的流被硬拼成一锅粥。
+- **流式兼容路径不再误杀整块 JSON 回包**：修复部分 Codex 兼容供应商在 `stream=true` 下直接返回完整 JSON、却被误判为“未完成 stream”的回归问题；现在会兼容识别 `status=completed` 这类完成态，不再把能正常工作的 provider 顺手打死。
+
+## 技术改进
+- **下游断开与上游读失败的错误分类收紧**：客户端中断判定现在只在明确的下游写失败场景生效，上游 `streaming response` / `non-standard response` 读取失败不会再被误算成用户断开，失败计数和黑名单统计终于不再背锅背错人。
+- **stream 收尾逻辑统一收口并补齐回归测试**：成功收尾改为统一走 `finalizeForwardSuccess`，同时新增 Codex incomplete stream、完整 JSON fallback 和客户端断开分类测试，后面谁再把这套成功判定改回“只看 2xx”，测试会先狠狠干他一锤子。
+
+---
+
 # Code Switch v2.7.47
 
 ## 修复

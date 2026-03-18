@@ -2,6 +2,7 @@ package services
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -224,5 +225,177 @@ func TestProxyHandlerNetworkErrorStillReturns502Summary(t *testing.T) {
 	}
 	if _, ok := payload["error"]; !ok {
 		t.Fatalf("响应缺少 error 字段: %v", payload)
+	}
+}
+
+func TestForwardRequestCodexIncompleteStreamReturnsStartedError(t *testing.T) {
+	useIsolatedHomeDir(t)
+	gin.SetMode(gin.TestMode)
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("data: {\"type\":\"response.created\"}\n\n"))
+		_, _ = w.Write([]byte("data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n"))
+	}))
+	defer upstream.Close()
+
+	providerService := NewProviderService()
+	settingsService := NewSettingsService()
+	blacklistService := NewBlacklistService(settingsService, nil)
+	relay := NewProviderRelayService(providerService, nil, blacklistService, nil, nil, nil, "")
+
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+
+	ok, err := relay.forwardRequest(
+		ctx,
+		"codex",
+		Provider{Name: "BrokenStream", APIURL: upstream.URL, APIKey: "test-key", Enabled: true},
+		"/responses",
+		map[string]string{},
+		map[string]string{"Content-Type": "application/json"},
+		[]byte(`{"model":"gpt-5.3-codex","stream":true,"input":"hello"}`),
+		true,
+		"gpt-5.3-codex",
+		"gpt-5.3-codex",
+	)
+
+	if ok {
+		t.Fatalf("缺少 response.completed 的流式响应不应判定为成功")
+	}
+	if !errors.Is(err, errIncompleteStream) {
+		t.Fatalf("错误 = %v, 期望包含 errIncompleteStream", err)
+	}
+	if !errors.Is(err, errResponseStarted) {
+		t.Fatalf("错误 = %v, 期望包含 errResponseStarted", err)
+	}
+	if w.Code != http.StatusOK {
+		t.Fatalf("写给客户端的状态码 = %d, 期望 200", w.Code)
+	}
+	if got := w.Body.String(); !strings.Contains(got, "response.output_text.delta") {
+		t.Fatalf("响应体未透传上游流内容: %s", got)
+	}
+}
+
+func TestForwardRequestCodexStreamAcceptsCompletedJSONFallback(t *testing.T) {
+	useIsolatedHomeDir(t)
+	gin.SetMode(gin.TestMode)
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"type":"response","status":"completed","response":{"usage":{"input_tokens":12,"output_tokens":3}}}`))
+	}))
+	defer upstream.Close()
+
+	providerService := NewProviderService()
+	settingsService := NewSettingsService()
+	blacklistService := NewBlacklistService(settingsService, nil)
+	relay := NewProviderRelayService(providerService, nil, blacklistService, nil, nil, nil, "")
+
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+
+	ok, err := relay.forwardRequest(
+		ctx,
+		"codex",
+		Provider{Name: "JSONFallback", APIURL: upstream.URL, APIKey: "test-key", Enabled: true},
+		"/responses",
+		map[string]string{},
+		map[string]string{"Content-Type": "application/json"},
+		[]byte(`{"model":"gpt-5.3-codex","stream":true,"input":"hello"}`),
+		true,
+		"gpt-5.3-codex",
+		"gpt-5.3-codex",
+	)
+
+	if !ok {
+		t.Fatalf("完整 JSON fallback 应视为成功，当前错误: %v", err)
+	}
+	if err != nil {
+		t.Fatalf("成功请求不应返回错误: %v", err)
+	}
+	if w.Code != http.StatusOK {
+		t.Fatalf("写给客户端的状态码 = %d, 期望 200", w.Code)
+	}
+	if got := strings.TrimSpace(w.Body.String()); !strings.Contains(got, `"status":"completed"`) {
+		t.Fatalf("响应体未透传完整 JSON fallback: %s", got)
+	}
+}
+
+func TestProxyHandlerIncompleteCodexStreamDoesNotFallbackAfterResponseStarted(t *testing.T) {
+	useIsolatedHomeDir(t)
+	gin.SetMode(gin.TestMode)
+	disableBlacklistForTest(t)
+
+	var brokenProviderCalls int32
+	upstreamBroken := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&brokenProviderCalls, 1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("data: {\"type\":\"response.created\"}\n\n"))
+		_, _ = w.Write([]byte("data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n"))
+	}))
+	defer upstreamBroken.Close()
+
+	var fallbackProviderCalls int32
+	upstreamCompleted := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&fallbackProviderCalls, 1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("data: {\"type\":\"response.created\"}\n\n"))
+		_, _ = w.Write([]byte("data: {\"type\":\"response.completed\"}\n\n"))
+	}))
+	defer upstreamCompleted.Close()
+
+	providerService := NewProviderService()
+	settingsService := NewSettingsService()
+	blacklistService := NewBlacklistService(settingsService, nil)
+
+	providers := []Provider{
+		{
+			ID:      1,
+			Name:    "BrokenStream",
+			APIURL:  upstreamBroken.URL,
+			APIKey:  "test-key-1",
+			Enabled: true,
+			Level:   1,
+		},
+		{
+			ID:      2,
+			Name:    "FallbackShouldNotRun",
+			APIURL:  upstreamCompleted.URL,
+			APIKey:  "test-key-2",
+			Enabled: true,
+			Level:   1,
+		},
+	}
+	if err := providerService.SaveProviders("codex", providers); err != nil {
+		t.Fatalf("保存 providers 失败: %v", err)
+	}
+
+	relay := NewProviderRelayService(providerService, nil, blacklistService, nil, nil, nil, "")
+	router := gin.New()
+	relay.registerRoutes(router)
+
+	reqBody := `{"model":"gpt-5.3-codex","stream":true,"input":"hello"}`
+	req := httptest.NewRequest(http.MethodPost, "/responses", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if atomic.LoadInt32(&brokenProviderCalls) != 1 {
+		t.Fatalf("异常 provider 调用次数 = %d, 期望 1", atomic.LoadInt32(&brokenProviderCalls))
+	}
+	if atomic.LoadInt32(&fallbackProviderCalls) != 0 {
+		t.Fatalf("fallback provider 调用次数 = %d, 期望 0", atomic.LoadInt32(&fallbackProviderCalls))
+	}
+	if w.Code != http.StatusOK {
+		t.Fatalf("状态码 = %d, 期望 200", w.Code)
+	}
+	if got := w.Body.String(); !strings.Contains(got, "response.output_text.delta") {
+		t.Fatalf("响应体未保留首个 provider 的流内容: %s", got)
 	}
 }

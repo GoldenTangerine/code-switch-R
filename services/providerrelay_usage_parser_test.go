@@ -1,6 +1,7 @@
 package services
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -11,7 +12,7 @@ func TestParseEventPayloadSupportsChunkedSSEWithoutSpaceAfterDataPrefix(t *testi
 	var remainder strings.Builder
 
 	chunk1 := "event: message_start\ndata:{\"message\":{\"usage\":{\"input_tokens\":128"
-	parseEventPayload(chunk1, ClaudeCodeParseTokenUsageFromResponse, reqLog, &remainder)
+	parseEventPayload(chunk1, ClaudeCodeParseTokenUsageFromResponse, reqLog, &remainder, "claude")
 
 	if reqLog.InputTokens != 0 || reqLog.OutputTokens != 0 {
 		t.Fatalf("chunk1 不应产生完整 token 统计，当前 input=%d output=%d", reqLog.InputTokens, reqLog.OutputTokens)
@@ -21,7 +22,7 @@ func TestParseEventPayloadSupportsChunkedSSEWithoutSpaceAfterDataPrefix(t *testi
 	}
 
 	chunk2 := ",\"output_tokens\":9,\"cache_read_input_tokens\":4}}}\n\n"
-	parseEventPayload(chunk2, ClaudeCodeParseTokenUsageFromResponse, reqLog, &remainder)
+	parseEventPayload(chunk2, ClaudeCodeParseTokenUsageFromResponse, reqLog, &remainder, "claude")
 
 	if reqLog.InputTokens != 128 {
 		t.Fatalf("InputTokens = %d, 期望 128", reqLog.InputTokens)
@@ -41,7 +42,7 @@ func TestParseEventPayloadHandlesLineByLineSSEWithoutTrailingNewline(t *testing.
 	reqLog := &ReqeustLog{IsStream: true}
 	var remainder strings.Builder
 
-	parseEventPayload("event: message_start", ClaudeCodeParseTokenUsageFromResponse, reqLog, &remainder)
+	parseEventPayload("event: message_start", ClaudeCodeParseTokenUsageFromResponse, reqLog, &remainder, "claude")
 	if remainder.Len() != 0 {
 		t.Fatalf("event 行应被立即消费，remainder=%q", remainder.String())
 	}
@@ -51,6 +52,7 @@ func TestParseEventPayloadHandlesLineByLineSSEWithoutTrailingNewline(t *testing.
 		ClaudeCodeParseTokenUsageFromResponse,
 		reqLog,
 		&remainder,
+		"claude",
 	)
 	if reqLog.InputTokens != 77 {
 		t.Fatalf("InputTokens = %d, 期望 77", reqLog.InputTokens)
@@ -99,6 +101,50 @@ func TestReqeustLogHookStreamRequestFallsBackToRawJSONUsage(t *testing.T) {
 	}
 	if reqLog.OutputTokens != 8 {
 		t.Fatalf("OutputTokens = %d, 期望 8", reqLog.OutputTokens)
+	}
+}
+
+func TestReqeustLogHookCodexStreamAcceptsCompletedJSONFallback(t *testing.T) {
+	reqLog := &ReqeustLog{IsStream: true}
+	hook := ReqeustLogHook(nil, "codex", reqLog)
+
+	payload := `{"type":"response","status":"completed","response":{"usage":{"input_tokens":66,"output_tokens":8}}}`
+	_, _ = hook([]byte(payload))
+
+	if err := validateStreamCompletion("codex", reqLog); err != nil {
+		t.Fatalf("完整 JSON fallback 不应被视为未完成: %v", err)
+	}
+}
+
+func TestIsClientWriteAbortErrorOnlyTreatsDownstreamWriteFailuresAsClientAbort(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "downstream broken pipe",
+			err:  fmt.Errorf("error writing response: broken pipe"),
+			want: true,
+		},
+		{
+			name: "upstream streaming reset",
+			err:  fmt.Errorf("error streaming response: connection reset by peer"),
+			want: false,
+		},
+		{
+			name: "upstream non-standard read canceled",
+			err:  fmt.Errorf("error reading non-standard response: context canceled"),
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isClientWriteAbortError(tt.err); got != tt.want {
+				t.Fatalf("isClientWriteAbortError(%v) = %v, 期望 %v", tt.err, got, tt.want)
+			}
+		})
 	}
 }
 
