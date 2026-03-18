@@ -28,11 +28,11 @@ const (
 
 // NetworkSettings 网络设置
 type NetworkSettings struct {
-	ListenMode    ListenMode `json:"listenMode"`
-	CustomAddress string     `json:"customAddress,omitempty"`
-	CurrentAddress string    `json:"currentAddress,omitempty"`
-	WSLAutoConfig bool       `json:"wslAutoConfig"`
-	TargetCli     TargetCli  `json:"targetCli"`
+	ListenMode     ListenMode `json:"listenMode"`
+	CustomAddress  string     `json:"customAddress,omitempty"`
+	CurrentAddress string     `json:"currentAddress,omitempty"`
+	WSLAutoConfig  bool       `json:"wslAutoConfig"`
+	TargetCli      TargetCli  `json:"targetCli"`
 }
 
 // TargetCli 目标 CLI 工具配置
@@ -53,6 +53,40 @@ type ConfigureResult struct {
 	Success bool   `json:"success"`
 	Message string `json:"message,omitempty"`
 }
+
+const wslBackupShellHelpers = `
+cleanup_legacy_backups() {
+  find "$(dirname "$1")" -maxdepth 1 -type f -name "$(basename "$1").bak.*" -exec rm -f {} +
+}
+
+ensure_backup_path_safe() {
+  if [ -L "$1" ]; then
+    echo "Refusing to modify backup: $1 is a symlink. Please remove the symlink first." >&2
+    exit 2
+  fi
+}
+
+create_backup() {
+  src="$1"
+  backup="$2"
+  if [ ! -f "$src" ]; then
+    return 0
+  fi
+  ensure_backup_path_safe "$backup"
+  tmp_backup="$(mktemp "${backup}.tmp.XXXXXX")"
+  if ! cp -a "$src" "$tmp_backup"; then
+    rm -f "$tmp_backup"
+    echo "Failed to create backup from $src" >&2
+    exit 1
+  fi
+  if ! mv -f "$tmp_backup" "$backup"; then
+    rm -f "$tmp_backup"
+    echo "Failed to move backup into place: $backup" >&2
+    exit 1
+  fi
+  cleanup_legacy_backups "$src"
+}
+`
 
 // NetworkService 网络配置服务
 type NetworkService struct {
@@ -370,10 +404,8 @@ func bashSingleQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
 }
 
-// configureWSLClaude 在 WSL 中配置 Claude Code（字段级合并）
-func (ns *NetworkService) configureWSLClaude(distro, proxyURL string) error {
-	// 字段级合并：仅更新 env.ANTHROPIC_BASE_URL / env.ANTHROPIC_AUTH_TOKEN，保留其他设置
-	script := fmt.Sprintf(`
+func buildWSLClaudeConfigScript(proxyURL string) string {
+	return fmt.Sprintf(`
 set -euo pipefail
 
 # 修复 WSL 中 HOME 环境变量指向 Windows 路径的问题
@@ -382,6 +414,8 @@ export HOME
 
 mkdir -p "$HOME/.claude"
 config_path="$HOME/.claude/settings.json"
+backup_path="$config_path.bak"
+%s
 
 # Symlink protection: refuse to modify symlinks to avoid breaking dotfiles management
 if [ -L "$config_path" ]; then
@@ -392,10 +426,7 @@ fi
 base_url=%s
 auth_token='code-switch-r'
 
-ts="$(date +%%s)"
-if [ -f "$config_path" ]; then
-  cp -a "$config_path" "$config_path.bak.$ts"
-fi
+create_backup "$config_path" "$backup_path"
 
 tmp_path="$(mktemp "${config_path}.tmp.XXXXXX")"
 cleanup() { rm -f "$tmp_path"; }
@@ -501,18 +532,16 @@ fi
 
 mv -f "$tmp_path" "$config_path"
 trap - EXIT
-`, bashSingleQuote(proxyURL))
-
-	return ns.runWSLCommand(distro, script)
+`, wslBackupShellHelpers, bashSingleQuote(proxyURL))
 }
 
-// configureWSLCodex 在 WSL 中配置 Codex（字段级合并）
-func (ns *NetworkService) configureWSLCodex(distro, proxyURL string) error {
-	// 字段级合并：
-	// - config.toml: 更新 preferred_auth_method、model_provider；移除旧的 [model_providers.code-switch-r]；追加新段到文件末尾
-	// - auth.json: 仅更新 OPENAI_API_KEY
-	// 写入采用 tmp + mv，并对双文件写入做失败回滚
-	script := fmt.Sprintf(`
+// configureWSLClaude 在 WSL 中配置 Claude Code（字段级合并）
+func (ns *NetworkService) configureWSLClaude(distro, proxyURL string) error {
+	return ns.runWSLCommand(distro, buildWSLClaudeConfigScript(proxyURL))
+}
+
+func buildWSLCodexConfigScript(proxyURL string) string {
+	return fmt.Sprintf(`
 set -euo pipefail
 
 # 修复 WSL 中 HOME 环境变量指向 Windows 路径的问题
@@ -522,6 +551,9 @@ export HOME
 mkdir -p "$HOME/.codex"
 config_path="$HOME/.codex/config.toml"
 auth_path="$HOME/.codex/auth.json"
+backup_config_path="$config_path.bak"
+backup_auth_path="$auth_path.bak"
+%s
 
 # Symlink protection: refuse to modify symlinks to avoid breaking dotfiles management
 if [ -L "$config_path" ]; then
@@ -537,9 +569,8 @@ base_url=%s
 provider_key='code-switch-r'
 api_key='code-switch-r'
 
-ts="$(date +%%s)"
-[ -f "$config_path" ] && cp -a "$config_path" "$config_path.bak.$ts"
-[ -f "$auth_path" ] && cp -a "$auth_path" "$auth_path.bak.$ts"
+create_backup "$config_path" "$backup_config_path"
+create_backup "$auth_path" "$backup_auth_path"
 
 tmp_config="$(mktemp "${config_path}.tmp.XXXXXX")"
 tmp_auth="$(mktemp "${auth_path}.tmp.XXXXXX")"
@@ -552,16 +583,12 @@ if [ -s "$config_path" ]; then
     function ltrim(s) { sub(/^[[:space:]]+/, "", s); return s }
     function rtrim(s) { sub(/[[:space:]]+$/, "", s); return s }
     function extract_header(s) {
-      # Extract pure header from line, removing inline comments
-      # e.g., "[foo.bar] # comment" -> "[foo.bar]"
       if (match(s, /^\[[^\]]+\]/)) {
         return substr(s, RSTART, RLENGTH)
       }
       return s
     }
     function is_target_section(h, pk) {
-      # Match: [model_providers.code-switch-r], [model_providers."code-switch-r"], [model_providers.'"'"'code-switch-r'"'"']
-      # Also match subtables: [model_providers.code-switch-r.xxx]
       header = extract_header(h)
       base1 = "[model_providers." pk "]"
       base2 = "[model_providers.\"" pk "\"]"
@@ -575,7 +602,6 @@ if [ -s "$config_path" ]; then
       line=$0
       trimmed=rtrim(ltrim(line))
 
-      # skipping check BEFORE comment check to delete comments inside skipped section
       if (skipping) {
         if (substr(trimmed, 1, 1) == "[") {
           if (is_target_section(trimmed, provider_key)) {
@@ -647,8 +673,6 @@ grep -qF 'preferred_auth_method = "apikey"' "$tmp_config" || { echo "Sanity chec
 grep -qF 'model_provider = "code-switch-r"' "$tmp_config" || { echo "Sanity check failed: missing model_provider" >&2; exit 2; }
 grep -qF "base_url = \"$base_url\"" "$tmp_config" || { echo "Sanity check failed: missing provider base_url" >&2; exit 2; }
 
-# Use AWK to count section headers (ignoring comments), matching all header variants
-# Also handles inline comments like "[model_providers.code-switch-r] # comment"
 count_section="$(awk -v pk="$provider_key" '
   BEGIN { c=0 }
   function extract_header(s) {
@@ -754,34 +778,33 @@ if mv -f "$tmp_config" "$config_path"; then
   fi
 
   echo "Failed to write $auth_path; attempting to rollback $config_path" >&2
-  if [ -f "$config_path.bak.$ts" ]; then
-    if cp -a "$config_path.bak.$ts" "$config_path"; then
+  if [ -f "$backup_config_path" ]; then
+    if cp -a "$backup_config_path" "$config_path"; then
       echo "Rollback successful: restored $config_path from backup" >&2
     else
-      echo "CRITICAL: Rollback failed! Manual recovery needed: cp $config_path.bak.$ts $config_path" >&2
+      echo "CRITICAL: Rollback failed! Manual recovery needed: cp $backup_config_path $config_path" >&2
     fi
   else
-    echo "WARNING: No backup found for $config_path, moving to $config_path.failed.$ts" >&2
-    mv -f "$config_path" "$config_path.failed.$ts" 2>/dev/null || echo "CRITICAL: Failed to move config to .failed" >&2
+    failed_path="$config_path.failed.$(date +%%s)"
+    echo "WARNING: No backup found for $config_path, moving to $failed_path" >&2
+    mv -f "$config_path" "$failed_path" 2>/dev/null || echo "CRITICAL: Failed to move config to .failed" >&2
   fi
   exit 1
 fi
 
 echo "Failed to write $config_path" >&2
 exit 1
-`, bashSingleQuote(proxyURL))
-
-	return ns.runWSLCommand(distro, script)
+`, wslBackupShellHelpers, bashSingleQuote(proxyURL))
 }
 
-// configureWSLGemini 在 WSL 中配置 Gemini CLI（字段级合并）
-func (ns *NetworkService) configureWSLGemini(distro, proxyURL string) error {
-	// Gemini CLI 配置路径: ~/.gemini/.env
-	// 注意：Gemini 代理路由带 /gemini 前缀
-	geminiURL := strings.TrimRight(proxyURL, "/") + "/gemini"
+// configureWSLCodex 在 WSL 中配置 Codex（字段级合并）
+func (ns *NetworkService) configureWSLCodex(distro, proxyURL string) error {
+	return ns.runWSLCommand(distro, buildWSLCodexConfigScript(proxyURL))
+}
 
-	// 字段级合并：仅更新 GOOGLE_GEMINI_BASE_URL / GEMINI_API_KEY；更新首次出现并删除后续重复项
-	script := fmt.Sprintf(`
+func buildWSLGeminiConfigScript(proxyURL string) string {
+	geminiURL := strings.TrimRight(proxyURL, "/") + "/gemini"
+	return fmt.Sprintf(`
 set -euo pipefail
 
 # 修复 WSL 中 HOME 环境变量指向 Windows 路径的问题
@@ -790,6 +813,8 @@ export HOME
 
 mkdir -p "$HOME/.gemini"
 env_path="$HOME/.gemini/.env"
+backup_path="$env_path.bak"
+%s
 
 # Symlink protection: refuse to modify symlinks to avoid breaking dotfiles management
 if [ -L "$env_path" ]; then
@@ -800,8 +825,7 @@ fi
 gemini_base_url=%s
 api_key='code-switch-r'
 
-ts="$(date +%%s)"
-[ -f "$env_path" ] && cp -a "$env_path" "$env_path.bak.$ts"
+create_backup "$env_path" "$backup_path"
 
 tmp_path="$(mktemp "${env_path}.tmp.XXXXXX")"
 cleanup() { rm -f "$tmp_path"; }
@@ -933,9 +957,12 @@ fi
 
 mv -f "$tmp_path" "$env_path"
 trap - EXIT
-`, bashSingleQuote(geminiURL))
+`, wslBackupShellHelpers, bashSingleQuote(geminiURL))
+}
 
-	return ns.runWSLCommand(distro, script)
+// configureWSLGemini 在 WSL 中配置 Gemini CLI（字段级合并）
+func (ns *NetworkService) configureWSLGemini(distro, proxyURL string) error {
+	return ns.runWSLCommand(distro, buildWSLGeminiConfigScript(proxyURL))
 }
 
 // runWSLCommand 在指定的 WSL 发行版中执行命令

@@ -3,12 +3,15 @@ package services
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"time"
 )
+
+const rollingBackupSuffix = ".bak"
 
 // AtomicWriteJSON 原子写入 JSON 文件
 // 写入临时文件后重命名，避免半写状态导致文件损坏
@@ -64,8 +67,37 @@ func AtomicWriteText(path string, text string) error {
 	return AtomicWriteBytes(path, []byte(text))
 }
 
+func backupPathFor(path string) string {
+	return path + rollingBackupSuffix
+}
+
+func cleanupLegacyTimestampBackups(path string) {
+	dir := filepath.Dir(path)
+	base := filepath.Base(path)
+	pattern := base + rollingBackupSuffix + ".*"
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		matched, _ := filepath.Match(pattern, entry.Name())
+		if !matched {
+			continue
+		}
+		legacyPath := filepath.Join(dir, entry.Name())
+		if err := os.Remove(legacyPath); err != nil && !os.IsNotExist(err) {
+			log.Printf("[Backup] 清理旧备份失败 %s: %v", legacyPath, err)
+		}
+	}
+}
+
 // CreateBackup 创建文件备份
-// 返回备份文件路径，使用纳秒级时间戳 + O_EXCL 避免并发碰撞
+// 统一写入固定的滚动备份文件，并清理旧的时间戳备份残留
 func CreateBackup(path string) (string, error) {
 	info, err := os.Stat(path)
 	if os.IsNotExist(err) {
@@ -84,36 +116,29 @@ func CreateBackup(path string) (string, error) {
 		return "", fmt.Errorf("读取原文件失败 %s: %w", path, err)
 	}
 
-	// 重试最多 3 次，使用 O_EXCL 避免覆盖
-	for attempt := 0; attempt < 3; attempt++ {
-		backupPath := fmt.Sprintf("%s.bak.%d", path, time.Now().UnixNano())
-		f, err := os.OpenFile(backupPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-		if os.IsExist(err) {
-			// 纳秒级时间戳碰撞，短暂延迟后重试
-			time.Sleep(time.Microsecond)
-			continue
-		}
-		if err != nil {
-			return "", fmt.Errorf("创建备份文件失败 %s: %w", backupPath, err)
-		}
+	backupPath := backupPathFor(path)
+	tmpPath := fmt.Sprintf("%s.tmp.%d", backupPath, time.Now().UnixNano())
 
-		// 写入内容
-		if _, err := f.Write(content); err != nil {
-			_ = f.Close()
-			_ = os.Remove(backupPath)
-			return "", fmt.Errorf("写入备份文件失败 %s: %w", backupPath, err)
-		}
-
-		// 关闭文件
-		if err := f.Close(); err != nil {
-			_ = os.Remove(backupPath)
-			return "", fmt.Errorf("关闭备份文件失败 %s: %w", backupPath, err)
-		}
-
-		return backupPath, nil
+	if err := os.WriteFile(tmpPath, content, info.Mode().Perm()); err != nil {
+		return "", fmt.Errorf("写入备份临时文件失败 %s: %w", tmpPath, err)
 	}
 
-	return "", fmt.Errorf("创建备份失败：文件名冲突过多，请稍后重试")
+	if runtime.GOOS == "windows" {
+		if _, err := os.Stat(backupPath); err == nil {
+			if err := os.Remove(backupPath); err != nil {
+				_ = os.Remove(tmpPath)
+				return "", fmt.Errorf("删除旧备份失败 %s: %w", backupPath, err)
+			}
+		}
+	}
+
+	if err := os.Rename(tmpPath, backupPath); err != nil {
+		_ = os.Remove(tmpPath)
+		return "", fmt.Errorf("写入备份文件失败 %s: %w", backupPath, err)
+	}
+
+	cleanupLegacyTimestampBackups(path)
+	return backupPath, nil
 }
 
 // RestoreBackup 从备份恢复文件
@@ -152,11 +177,12 @@ func EnsureDir(path string) error {
 	return os.MkdirAll(path, 0o755)
 }
 
-// FindLatestBackup 按时间戳查找最新的备份文件（*.bak.<timestamp>）
+// FindLatestBackup 查找可用于恢复的最新备份文件
+// 优先兼容新的滚动备份文件，同时回退支持旧的 *.bak.<timestamp> 格式
 func FindLatestBackup(configPath string) (string, error) {
 	dir := filepath.Dir(configPath)
 	base := filepath.Base(configPath)
-	pattern := base + ".bak.*"
+	pattern := base + rollingBackupSuffix + ".*"
 
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -168,6 +194,11 @@ func FindLatestBackup(configPath string) (string, error) {
 
 	var latestPath string
 	var latestMod time.Time
+
+	rollingPath := backupPathFor(configPath)
+	if info, statErr := os.Stat(rollingPath); statErr == nil && !info.IsDir() {
+		return rollingPath, nil
+	}
 
 	for _, entry := range entries {
 		if entry.IsDir() {
