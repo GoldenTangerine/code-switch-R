@@ -32,6 +32,9 @@ type Provider struct {
 	Accent  string `json:"accent"`
 	Enabled bool   `json:"enabled"`
 
+	// CLI 配置草稿 - 存储供应商关联的 CLI 可编辑配置
+	CLIConfig map[string]interface{} `json:"cliConfig,omitempty"`
+
 	// API 端点路径（可选）- 覆盖平台默认端点
 	// 如：GLM 模型需要使用 /v1/chat/completions 而非 /v1/messages
 	// 留空则使用平台默认（claude: /v1/messages, codex: /responses）
@@ -151,20 +154,32 @@ func (ps *ProviderService) Start() error { return nil }
 func (ps *ProviderService) Stop() error  { return nil }
 
 func providerFilePath(kind string) (string, error) {
+	return providerConfigPath(kind, true)
+}
+
+func providerConfigPath(kind string, create bool) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
 	dir := filepath.Join(home, ".code-switch")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", err
+	if create {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return "", err
+		}
 	}
-	var filename string
+
 	switch strings.ToLower(kind) {
 	case "claude", "claude-code", "claude_code":
-		filename = "claude-code.json"
+		return filepath.Join(dir, "claude-code.json"), nil
 	case "codex":
-		filename = "codex.json"
+		providersDir := filepath.Join(dir, "providers")
+		if create {
+			if err := os.MkdirAll(providersDir, 0o755); err != nil {
+				return "", err
+			}
+		}
+		return filepath.Join(providersDir, "codex.json"), nil
 	default:
 		// 支持自定义 CLI 工具的供应商存储：custom:{tool-id}
 		if strings.HasPrefix(kind, "custom:") {
@@ -174,14 +189,58 @@ func providerFilePath(kind string) (string, error) {
 			}
 			// 存储在 providers 子目录下
 			providersDir := filepath.Join(dir, "providers")
-			if err := os.MkdirAll(providersDir, 0o755); err != nil {
-				return "", err
+			if create {
+				if err := os.MkdirAll(providersDir, 0o755); err != nil {
+					return "", err
+				}
 			}
 			return filepath.Join(providersDir, toolId+".json"), nil
 		}
 		return "", fmt.Errorf("unknown provider type: %s", kind)
 	}
-	return filepath.Join(dir, filename), nil
+}
+
+func legacyProviderFilePathNoCreate(kind string) (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+
+	switch strings.ToLower(kind) {
+	case "codex":
+		return filepath.Join(home, ".code-switch", "codex.json"), nil
+	default:
+		return "", nil
+	}
+}
+
+func resolveProviderReadPath(kind string) (string, error) {
+	path, err := providerConfigPath(kind, false)
+	if err != nil {
+		return "", err
+	}
+	if providerConfigFileExists(path) {
+		return path, nil
+	}
+
+	legacyPath, err := legacyProviderFilePathNoCreate(kind)
+	if err != nil {
+		return "", err
+	}
+	if providerConfigFileExists(legacyPath) {
+		return legacyPath, nil
+	}
+
+	return path, nil
+}
+
+func providerConfigFileExists(path string) bool {
+	if strings.TrimSpace(path) == "" {
+		return false
+	}
+
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
 }
 
 func (ps *ProviderService) SaveProviders(kind string, providers []Provider) error {
@@ -193,7 +252,7 @@ func (ps *ProviderService) SaveProviders(kind string, providers []Provider) erro
 // loadProvidersRaw 原样读取配置文件（不迁移、不保存）
 // 用于内部需要读取现有配置但不触发迁移的场景（如名称校验）
 func (ps *ProviderService) loadProvidersRaw(kind string) ([]Provider, error) {
-	path, err := providerFilePath(kind)
+	path, err := resolveProviderReadPath(kind)
 	if err != nil {
 		return nil, err
 	}
@@ -327,7 +386,7 @@ func (ps *ProviderService) saveProvidersLocked(kind string, providers []Provider
 }
 
 func (ps *ProviderService) LoadProviders(kind string) ([]Provider, error) {
-	path, err := providerFilePath(kind)
+	path, err := resolveProviderReadPath(kind)
 	if err != nil {
 		return nil, err
 	}
@@ -379,7 +438,7 @@ func (ps *ProviderService) LoadProviders(kind string) ([]Provider, error) {
 // 执行配置加载和迁移，如有迁移则直接保存（不再加锁）
 // 仅在已持有 ps.mu 锁的上下文中调用（如 DuplicateProvider）
 func (ps *ProviderService) loadProvidersNoLock(kind string) ([]Provider, error) {
-	path, err := providerFilePath(kind)
+	path, err := resolveProviderReadPath(kind)
 	if err != nil {
 		return nil, err
 	}
@@ -511,6 +570,10 @@ func (ps *ProviderService) DuplicateProvider(kind string, sourceID int64) (*Prov
 		// 可用性监控配置
 		AvailabilityMonitorEnabled: source.AvailabilityMonitorEnabled,
 		ConnectivityAutoBlacklist:  false, // 副本默认关闭自动拉黑
+	}
+
+	if source.CLIConfig != nil {
+		cloned.CLIConfig = cloneCLIEditableMap(source.CLIConfig)
 	}
 
 	// 6. 深拷贝 map（避免共享引用）

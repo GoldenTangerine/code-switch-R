@@ -3,37 +3,19 @@ package services
 import (
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"strings"
 )
 
 // providerFilePathNoCreate 返回 provider 配置文件路径（不创建目录）
 // 用于只读操作场景，避免副作用
 func providerFilePathNoCreate(kind string) (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-
-	dir := filepath.Join(home, ".code-switch")
-	var filename string
-
-	switch strings.ToLower(kind) {
-	case "claude", "claude-code", "claude_code":
-		filename = "claude-code.json"
-	case "codex":
-		filename = "codex.json"
-	default:
-		return "", nil
-	}
-
-	return filepath.Join(dir, filename), nil
+	return providerConfigPath(kind, false)
 }
 
 // loadProviderSnapshot 只读加载 provider 列表（不触发迁移和保存）
 // 返回当前磁盘上的快照，用于直连应用的 provider 查找
 func loadProviderSnapshot(kind string) ([]Provider, error) {
-	path, err := providerFilePathNoCreate(kind)
+	path, err := resolveProviderReadPath(kind)
 	if err != nil {
 		return nil, err
 	}

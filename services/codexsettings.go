@@ -649,6 +649,7 @@ func (css *CodexSettingsService) ApplySingleProvider(providerID int) error {
 	if raw == nil {
 		raw = make(map[string]any)
 	}
+	raw = mergeCodexCLIConfig(raw, provider.CLIConfig)
 
 	// 8. 使用供应商名称作为 provider key（处理特殊字符）
 	providerKey := sanitizeProviderKey(provider.Name, int(provider.ID))
@@ -726,6 +727,24 @@ func sanitizeProviderKey(name string, providerID int) string {
 		return fmt.Sprintf("%s-%d", finalKey, providerID)
 	}
 	return finalKey
+}
+
+func mergeCodexCLIConfig(raw map[string]any, editable map[string]interface{}) map[string]any {
+	next := raw
+	if next == nil {
+		next = make(map[string]any)
+	}
+
+	for key, value := range stripCodexLockedEditableFields(editable) {
+		switch key {
+		case "model_provider", "preferred_auth_method":
+			continue
+		default:
+			next[key] = value
+		}
+	}
+
+	return next
 }
 
 // GetDirectAppliedProviderID 返回当前直连应用的 Provider ID

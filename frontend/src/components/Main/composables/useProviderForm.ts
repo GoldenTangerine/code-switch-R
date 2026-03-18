@@ -1,7 +1,6 @@
 import { reactive, ref } from 'vue'
 import { Call } from '@wailsio/runtime'
 import type { AutomationCard } from '../../../data/cards'
-import { saveCLIConfig, type CLIPlatform } from '../../../services/cliConfig'
 import { createGeminiProviderRef, normalizeProviderRef } from '../adapters/providerCardMappers'
 import { buildPersistedProviderFieldsFromForm } from '../adapters/providerFormMappers'
 import type { ProviderTab, TranslateFn, VendorForm } from '../types'
@@ -94,22 +93,6 @@ export function useProviderForm(options: UseProviderFormOptions) {
     providerModalState.open = false
   }
 
-  const persistCliConfig = async (form: VendorForm, tabId: ProviderTab) => {
-    const supportedPlatforms: CLIPlatform[] = ['claude', 'codex', 'gemini']
-    if (!supportedPlatforms.includes(tabId as CLIPlatform) || !form.cliConfigShouldPersist) {
-      return
-    }
-
-    try {
-      await saveCLIConfig(
-        tabId as CLIPlatform,
-        form.cliConfigPersistValue ?? form.cliConfig ?? {},
-      )
-    } catch (error) {
-      console.error('保存 CLI 配置失败:', error)
-    }
-  }
-
   const applySavedProvider = async (savedCard: AutomationCard, tabId: ProviderTab) => {
     try {
       if (tabId === 'claude') {
@@ -173,7 +156,6 @@ export function useProviderForm(options: UseProviderFormOptions) {
       await persistProviders(tabId)
     }
 
-    await persistCliConfig(form, tabId)
     closeProviderModal()
     window.dispatchEvent(new CustomEvent('providers-updated'))
 

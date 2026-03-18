@@ -56,8 +56,14 @@ export async function fetchCLIConfig(platform: CLIPlatform): Promise<CLIConfig> 
 }
 
 // 保存 CLI 配置
-export async function saveCLIConfig(platform: CLIPlatform, editable: Record<string, any>): Promise<void> {
-  return Call.ByName(`${SERVICE_PATH}.SaveConfig`, platform, editable)
+export async function saveCLIConfig(
+  platform: CLIPlatform,
+  editable: Record<string, any>,
+  apiUrl: string = '',
+  apiKey: string = '',
+  providerName: string = '',
+): Promise<void> {
+  return Call.ByName(`${SERVICE_PATH}.SaveConfig`, platform, editable, apiUrl, apiKey, providerName)
 }
 
 // 获取指定平台的全局模板

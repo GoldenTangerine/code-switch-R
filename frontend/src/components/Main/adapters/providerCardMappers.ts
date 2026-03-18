@@ -5,6 +5,60 @@ import { GetProviders as GetGeminiProviders } from '../../../../bindings/codeswi
 
 export type GeminiProvider = Awaited<ReturnType<typeof GetGeminiProviders>> extends (infer P)[] ? P : any
 
+const GEMINI_LOCKED_ENV_KEYS = new Set(['GOOGLE_GEMINI_BASE_URL', 'GEMINI_API_KEY'])
+
+const cloneCardValue = <T>(value: T): T => {
+  if (value == null) return value
+  return JSON.parse(JSON.stringify(value))
+}
+
+const extractGeminiCliConfig = (provider: GeminiProvider): Record<string, any> => {
+  const envConfig = provider?.envConfig ?? {}
+  const cliConfig: Record<string, any> = {}
+
+  Object.entries(envConfig).forEach(([key, value]) => {
+    if (GEMINI_LOCKED_ENV_KEYS.has(key)) return
+    cliConfig[key] = value
+  })
+
+  if (provider?.model) {
+    cliConfig.GEMINI_MODEL = provider.model
+  }
+
+  return cliConfig
+}
+
+const buildGeminiEnvConfig = (card: AutomationCard, original: GeminiProvider): Record<string, string> => {
+  const nextEnv: Record<string, string> = {
+    ...(original?.envConfig ?? {}),
+  }
+
+  if (card.apiUrl) {
+    nextEnv.GOOGLE_GEMINI_BASE_URL = card.apiUrl
+  } else {
+    delete nextEnv.GOOGLE_GEMINI_BASE_URL
+  }
+
+  if (card.apiKey) {
+    nextEnv.GEMINI_API_KEY = card.apiKey
+  } else {
+    delete nextEnv.GEMINI_API_KEY
+  }
+
+  const cliConfig = cloneCardValue(card.cliConfig || {})
+  Object.entries(cliConfig).forEach(([key, value]) => {
+    if (GEMINI_LOCKED_ENV_KEYS.has(key)) return
+    const text = `${value ?? ''}`.trim()
+    if (text) {
+      nextEnv[key] = text
+    } else {
+      delete nextEnv[key]
+    }
+  })
+
+  return nextEnv
+}
+
 export const normalizeProviderKey = (value: string) => value?.trim().toLowerCase() ?? ''
 
 export const normalizeProviderRef = (value: string | number | null | undefined) => `${value ?? ''}`.trim()
@@ -48,6 +102,7 @@ export const geminiToCard = (provider: GeminiProvider, index: number): Automatio
   accent: '#fb923c',
   enabled: provider.enabled,
   level: provider.level || 1,
+  cliConfig: extractGeminiCliConfig(provider),
   availabilityMonitorEnabled: false,
   connectivityAutoBlacklist: false,
   availabilityConfig: undefined,
@@ -58,9 +113,11 @@ export const cardToGemini = (card: AutomationCard, original: GeminiProvider): Ge
   name: card.name,
   baseUrl: card.apiUrl,
   apiKey: card.apiKey,
+  model: `${card.cliConfig?.GEMINI_MODEL ?? ''}`.trim() || original.model || '',
   websiteUrl: card.officialSite,
   enabled: card.enabled,
   level: card.level || 1,
+  envConfig: buildGeminiEnvConfig(card, original),
 })
 
 export const serializeProviders = (providers: AutomationCard[]) =>

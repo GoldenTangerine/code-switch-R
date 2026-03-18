@@ -498,18 +498,26 @@ func normalizeTemplateEditableFields(platform CLIPlatform, value map[string]inte
 
 func resolveCodexEditorProviderKey(providerName string, apiURL string, apiKey string) string {
 	trimmedName := strings.TrimSpace(providerName)
-	if trimmedName != "" {
-		key := sanitizeProviderKey(trimmedName, 0)
-		if key != "" && key != "provider-0" {
-			return key
-		}
-	}
 
 	if providers, err := loadProviderSnapshot("codex"); err == nil {
+		if trimmedName != "" {
+			for _, provider := range providers {
+				if strings.EqualFold(strings.TrimSpace(provider.Name), trimmedName) {
+					return sanitizeProviderKey(provider.Name, int(provider.ID))
+				}
+			}
+		}
 		for _, provider := range providers {
 			if urlsEqualFold(provider.APIURL, apiURL) && provider.APIKey == apiKey {
 				return sanitizeProviderKey(provider.Name, int(provider.ID))
 			}
+		}
+	}
+
+	if trimmedName != "" {
+		key := sanitizeProviderKey(trimmedName, 0)
+		if key != "" && key != "provider-0" {
+			return key
 		}
 	}
 
@@ -1116,7 +1124,13 @@ func (s *CliConfigService) GetConfigSnapshotsWithEditable(
 }
 
 // SaveConfig 保存 CLI 配置
-func (s *CliConfigService) SaveConfig(platform string, editable map[string]interface{}) error {
+func (s *CliConfigService) SaveConfig(
+	platform string,
+	editable map[string]interface{},
+	apiURL string,
+	apiKey string,
+	providerName string,
+) error {
 	if err := s.requireHome(); err != nil {
 		return err
 	}
@@ -1124,11 +1138,11 @@ func (s *CliConfigService) SaveConfig(platform string, editable map[string]inter
 	p := CLIPlatform(platform)
 	switch p {
 	case PlatformClaude:
-		return s.saveClaudeConfig(editable)
+		return s.saveClaudeConfig(editable, apiURL, apiKey)
 	case PlatformCodex:
-		return s.saveCodexConfig(editable)
+		return s.saveCodexConfig(editable, apiURL, apiKey, providerName)
 	case PlatformGemini:
-		return s.saveGeminiConfig(editable)
+		return s.saveGeminiConfig(editable, apiURL, apiKey)
 	default:
 		return fmt.Errorf("不支持的平台: %s", platform)
 	}
@@ -1727,7 +1741,7 @@ func (s *CliConfigService) getClaudeConfig() (*CLIConfig, error) {
 	return config, nil
 }
 
-func (s *CliConfigService) saveClaudeConfig(editable map[string]interface{}) error {
+func (s *CliConfigService) saveClaudeConfig(editable map[string]interface{}, apiURL string, apiKey string) error {
 	configPath := s.getClaudeConfigPath()
 	data := make(map[string]interface{})
 
@@ -1738,8 +1752,13 @@ func (s *CliConfigService) saveClaudeConfig(editable map[string]interface{}) err
 	}
 
 	env := make(map[string]interface{})
-	env["ANTHROPIC_BASE_URL"] = s.baseURL()
-	env["ANTHROPIC_AUTH_TOKEN"] = "code-switch-r"
+	if hasCLIEditorProviderInput(PlatformClaude, apiURL, apiKey) {
+		env["ANTHROPIC_BASE_URL"] = normalizeURLTrimSlash(apiURL)
+		env["ANTHROPIC_AUTH_TOKEN"] = apiKey
+	} else {
+		env["ANTHROPIC_BASE_URL"] = s.baseURL()
+		env["ANTHROPIC_AUTH_TOKEN"] = "code-switch-r"
+	}
 
 	// 锁定字段列表（这些字段不允许用户覆盖）
 	lockedFields := map[string]bool{
@@ -1922,8 +1941,14 @@ func (s *CliConfigService) getCodexConfig() (*CLIConfig, error) {
 	return config, nil
 }
 
-func (s *CliConfigService) saveCodexConfig(editable map[string]interface{}) error {
+func (s *CliConfigService) saveCodexConfig(
+	editable map[string]interface{},
+	apiURL string,
+	apiKey string,
+	providerName string,
+) error {
 	configPath := s.getCodexConfigPath()
+	authPath := s.getCodexAuthPath()
 	raw := stripCodexLockedEditableFields(editable)
 	if raw == nil {
 		raw = make(map[string]interface{})
@@ -1933,29 +1958,57 @@ func (s *CliConfigService) saveCodexConfig(editable map[string]interface{}) erro
 	if _, err := CreateBackup(configPath); err != nil {
 		fmt.Printf("创建备份失败: %v\n", err)
 	}
-
-	// 设置锁定字段
-	raw["model_provider"] = "code-switch-r"
-	raw["preferred_auth_method"] = "apikey"
-
-	// 确保 model_providers.code-switch-r 存在
-	modelProviders, ok := raw["model_providers"].(map[string]interface{})
-	if !ok || modelProviders == nil {
-		modelProviders = make(map[string]interface{})
+	if _, err := CreateBackup(authPath); err != nil {
+		fmt.Printf("创建备份失败: %v\n", err)
 	}
-	provider, ok := modelProviders["code-switch-r"].(map[string]interface{})
-	if !ok || provider == nil {
-		provider = make(map[string]interface{})
+
+	authPayload := make(map[string]interface{})
+	if content, err := os.ReadFile(authPath); err == nil && strings.TrimSpace(string(content)) != "" {
+		if err := json.Unmarshal(content, &authPayload); err != nil {
+			authPayload = make(map[string]interface{})
+		}
 	}
-	provider["name"] = "code-switch-r"
-	provider["base_url"] = s.baseURL()
-	provider["wire_api"] = "responses"
-	provider["requires_openai_auth"] = false
-	modelProviders["code-switch-r"] = provider
+	if authPayload == nil {
+		authPayload = make(map[string]interface{})
+	}
+
+	raw["preferred_auth_method"] = codexPreferredAuth
+
+	modelProviders := ensureTomlTable(raw, "model_providers")
+	if hasCLIEditorProviderInput(PlatformCodex, apiURL, apiKey) {
+		providerKey := resolveCodexEditorProviderKey(providerName, apiURL, apiKey)
+		raw["model_provider"] = providerKey
+
+		provider := ensureProviderTable(modelProviders, providerKey)
+		provider["name"] = providerKey
+		provider["base_url"] = normalizeURLTrimSlash(apiURL)
+		provider["wire_api"] = codexWireAPI
+		provider["requires_openai_auth"] = false
+		modelProviders[providerKey] = provider
+
+		authPayload["OPENAI_API_KEY"] = apiKey
+	} else {
+		raw["model_provider"] = codexProviderKey
+		if _, exists := raw["model"]; !exists {
+			raw["model"] = codexDefaultModel
+		}
+
+		provider := ensureProviderTable(modelProviders, codexProviderKey)
+		provider["name"] = codexProviderKey
+		provider["base_url"] = s.baseURL()
+		provider["wire_api"] = codexWireAPI
+		provider["requires_openai_auth"] = false
+		modelProviders[codexProviderKey] = provider
+
+		authPayload["OPENAI_API_KEY"] = codexTokenValue
+	}
 	raw["model_providers"] = modelProviders
 
 	// 确保目录存在
 	if err := EnsureDir(filepath.Dir(configPath)); err != nil {
+		return err
+	}
+	if err := EnsureDir(filepath.Dir(authPath)); err != nil {
 		return err
 	}
 
@@ -1968,8 +2021,11 @@ func (s *CliConfigService) saveCodexConfig(editable map[string]interface{}) erro
 	// 清理多余的 [model_providers] 头
 	cleaned := stripModelProvidersHeader(tomlData)
 
-	// 原子写入
-	return AtomicWriteBytes(configPath, cleaned)
+	if err := AtomicWriteBytes(configPath, cleaned); err != nil {
+		return err
+	}
+
+	return AtomicWriteJSON(authPath, authPayload)
 }
 
 // saveCodexConfigContent 将预览区编辑的 config.toml 写入磁盘，并强制覆盖代理锁定字段
@@ -2108,7 +2164,7 @@ func (s *CliConfigService) getGeminiConfig() (*CLIConfig, error) {
 	return config, nil
 }
 
-func (s *CliConfigService) saveGeminiConfig(editable map[string]interface{}) error {
+func (s *CliConfigService) saveGeminiConfig(editable map[string]interface{}, apiURL string, apiKey string) error {
 	envPath := s.getGeminiEnvPath()
 
 	envMap := make(map[string]string)
@@ -2125,8 +2181,21 @@ func (s *CliConfigService) saveGeminiConfig(editable map[string]interface{}) err
 		fmt.Printf("创建备份失败: %v\n", err)
 	}
 
-	// 设置锁定字段
-	envMap["GOOGLE_GEMINI_BASE_URL"] = s.geminiBaseURL()
+	if hasCLIEditorProviderInput(PlatformGemini, apiURL, apiKey) {
+		if trimmedURL := strings.TrimSpace(apiURL); trimmedURL != "" {
+			envMap["GOOGLE_GEMINI_BASE_URL"] = trimmedURL
+		} else {
+			delete(envMap, "GOOGLE_GEMINI_BASE_URL")
+		}
+		if trimmedKey := strings.TrimSpace(apiKey); trimmedKey != "" {
+			envMap["GEMINI_API_KEY"] = trimmedKey
+		} else {
+			delete(envMap, "GEMINI_API_KEY")
+		}
+	} else {
+		envMap["GOOGLE_GEMINI_BASE_URL"] = s.geminiBaseURL()
+		envMap["GEMINI_API_KEY"] = codexTokenValue
+	}
 
 	// 以当前编辑结果为完整来源，只保留非锁定字段
 	for k, v := range editable {

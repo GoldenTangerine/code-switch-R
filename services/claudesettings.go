@@ -287,6 +287,40 @@ func anyToString(v any) string {
 	return fmt.Sprintf("%v", v)
 }
 
+func mergeClaudeCLIConfig(raw map[string]interface{}, editable map[string]interface{}) map[string]interface{} {
+	next := raw
+	if next == nil {
+		next = make(map[string]interface{})
+	}
+
+	env, _ := next["env"].(map[string]interface{})
+	if env == nil {
+		env = make(map[string]interface{})
+	}
+
+	for key, value := range cloneCLIEditableMap(editable) {
+		if key == "env" {
+			if customEnv, ok := value.(map[string]interface{}); ok {
+				for envKey, envValue := range customEnv {
+					if envKey == "ANTHROPIC_BASE_URL" || envKey == "ANTHROPIC_AUTH_TOKEN" {
+						continue
+					}
+					env[envKey] = envValue
+				}
+			}
+			continue
+		}
+
+		next[key] = value
+	}
+
+	if len(env) > 0 {
+		next["env"] = env
+	}
+
+	return next
+}
+
 // ApplySingleProvider 直连应用单一供应商（仅在代理关闭时可用）
 // 将指定 provider 的配置直接写入 Claude Code 的 settings.json
 func (css *ClaudeSettingsService) ApplySingleProvider(providerID int) error {
@@ -338,6 +372,7 @@ func (css *ClaudeSettingsService) ApplySingleProvider(providerID int) error {
 			return fmt.Errorf("settings.json 解析失败，请检查文件格式: %w", unmarshalErr)
 		}
 	}
+	existingData = mergeClaudeCLIConfig(existingData, provider.CLIConfig)
 
 	// 8. 仅更新代理相关字段
 	env, ok := existingData["env"].(map[string]interface{})

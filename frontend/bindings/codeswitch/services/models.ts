@@ -1464,6 +1464,8 @@ export class Provider {
     "tint": string;
     "accent": string;
     "enabled": boolean;
+    "cliConfig"?: { [_: string]: any };
+    "apiEndpoint"?: string;
 
     /**
      * 模型白名单 - Provider 原生支持的模型名
@@ -1487,6 +1489,12 @@ export class Provider {
      * 连通性检测开关 - 是否启用自动连通性检测
      */
     "connectivityCheck"?: boolean;
+    "availabilityMonitorEnabled"?: boolean;
+    "connectivityAutoBlacklist"?: boolean;
+    "availabilityConfig"?: { [_: string]: any };
+    "connectivityTestModel"?: string;
+    "connectivityTestEndpoint"?: string;
+    "connectivityAuthType"?: string;
 
     /** Creates a new Provider instance. */
     constructor($$source: Partial<Provider> = {}) {
