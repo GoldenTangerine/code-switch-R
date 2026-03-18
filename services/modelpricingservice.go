@@ -44,6 +44,7 @@ type ModelPricingRow struct {
 	CacheCreationInputTokenCost float64 `json:"cache_creation_input_token_cost"`
 	CacheReadInputTokenCost     float64 `json:"cache_read_input_token_cost"`
 	Ephemeral1hCostPerToken     float64 `json:"ephemeral_1h_cost_per_token"`
+	GroupMultiplier             float64 `json:"group_multiplier"`
 	IsOverride                  bool    `json:"is_override"`
 	IsCustom                    bool    `json:"is_custom"`
 	Source                      string  `json:"source"`
@@ -151,6 +152,7 @@ func (mps *ModelPricingService) ListModelPricing() ([]ModelPricingRow, error) {
 			CacheCreationInputTokenCost: entry.CacheCreationInputTokenCost,
 			CacheReadInputTokenCost:     entry.CacheReadInputTokenCost,
 			Ephemeral1hCostPerToken:     ephemeral1hCostPerToken,
+			GroupMultiplier:             effectiveModelPricingGroupMultiplier(entry),
 			IsOverride:                  isOverride,
 			IsCustom:                    isCustom,
 			Source:                      resolveModelPricingSource(meta, isOverride || isCustom),
@@ -194,6 +196,9 @@ func (mps *ModelPricingService) UpsertModelPricing(row ModelPricingRow) error {
 	if err := validateNonNegative(row.Ephemeral1hCostPerToken, "ephemeral_1h_cost_per_token"); err != nil {
 		return err
 	}
+	if err := validateNonNegative(row.GroupMultiplier, "group_multiplier"); err != nil {
+		return err
+	}
 
 	mps.mu.Lock()
 	defer mps.mu.Unlock()
@@ -217,6 +222,8 @@ func (mps *ModelPricingService) UpsertModelPricing(row ModelPricingRow) error {
 	existing.OutputCostPerReasoningToken = row.OutputCostPerReasoningToken
 	existing.CacheCreationInputTokenCost = row.CacheCreationInputTokenCost
 	existing.CacheReadInputTokenCost = row.CacheReadInputTokenCost
+	existing.GroupMultiplier = row.GroupMultiplier
+	existing.HasGroupMultiplier = true
 	newOverrides.Pricing[model] = existing
 
 	newOverrides.Ephemeral1h[model] = row.Ephemeral1hCostPerToken
@@ -310,6 +317,13 @@ func hasTokenPricing(entry modelpricing.PricingEntry) bool {
 		entry.OutputCostPerReasoningToken != 0 ||
 		entry.CacheCreationInputTokenCost != 0 ||
 		entry.CacheReadInputTokenCost != 0
+}
+
+func effectiveModelPricingGroupMultiplier(entry modelpricing.PricingEntry) float64 {
+	if entry.HasGroupMultiplier || entry.GroupMultiplier != 0 {
+		return entry.GroupMultiplier
+	}
+	return 1
 }
 
 func cloneModelPricingOverrides(src modelPricingOverrides) modelPricingOverrides {

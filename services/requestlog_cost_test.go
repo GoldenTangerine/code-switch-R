@@ -87,6 +87,98 @@ func TestCalculateProviderAPICost_UsesProviderCacheMultipliersWhenProvided(t *te
 	}
 }
 
+func TestCalculateProviderAPICost_AppliesManualGroupMultiplier(t *testing.T) {
+	providerService := &ProviderService{
+		providerPricingOverrides: newProviderPricingOverrideStore(),
+	}
+	scopeKey := providerPricingOverrideScopeKey("https://example.com/v1", "secret-key", "")
+	providerService.providerPricingOverrides.Providers[scopeKey] = map[string]providerPricingOverrideItem{
+		normalizeProviderPricingModelName("gpt-4.1"): {
+			GroupMultiplier:    0.05,
+			HasGroupMultiplier: true,
+		},
+	}
+
+	item := ProviderModelPricingItem{
+		Model:         "gpt-4.1",
+		QuotaType:     0,
+		InputUSDPerM:  2.5,
+		OutputUSDPerM: 15,
+	}
+	usage := modelpricing.UsageSnapshot{
+		InputTokens:     7696,
+		CacheReadTokens: 2432,
+		OutputTokens:    84,
+	}
+
+	result, ok := calculateProviderAPICost(
+		providerService,
+		"https://example.com/v1",
+		"secret-key",
+		"",
+		item,
+		usage,
+		nil,
+		"gpt-4.1",
+	)
+	if !ok {
+		t.Fatalf("calculateProviderAPICost 返回 hasPricing=false")
+	}
+
+	baseInput := float64(usage.InputTokens) * (2.5 / 1_000_000.0)
+	baseCacheRead := float64(usage.CacheReadTokens) * (2.5 / 1_000_000.0)
+	baseOutput := float64(usage.OutputTokens) * (15.0 / 1_000_000.0)
+	wantTotal := (baseInput + baseCacheRead + baseOutput) * 0.05
+
+	if !floatEquals(result.GroupMultiplier, 0.05) {
+		t.Fatalf("GroupMultiplier = %.12f, 期望 %.12f", result.GroupMultiplier, 0.05)
+	}
+	if !floatEquals(result.TotalCost, wantTotal) {
+		t.Fatalf("TotalCost = %.12f, 期望 %.12f", result.TotalCost, wantTotal)
+	}
+}
+
+func TestCalculateProviderAPICost_PerCallSnapshotKeepsRawPriceWhenGroupMultiplierApplied(t *testing.T) {
+	providerService := &ProviderService{
+		providerPricingOverrides: newProviderPricingOverrideStore(),
+	}
+	scopeKey := providerPricingOverrideScopeKey("https://example.com/v1", "secret-key", "")
+	providerService.providerPricingOverrides.Providers[scopeKey] = map[string]providerPricingOverrideItem{
+		normalizeProviderPricingModelName("gpt-4.1"): {
+			GroupMultiplier:    0.5,
+			HasGroupMultiplier: true,
+		},
+	}
+
+	unified := 0.2
+	item := ProviderModelPricingItem{
+		Model:        "gpt-4.1",
+		QuotaType:    1,
+		PerCallPrice: &ProviderModelPerCallPrice{Unified: &unified},
+	}
+
+	result, ok := calculateProviderAPICost(
+		providerService,
+		"https://example.com/v1",
+		"secret-key",
+		"",
+		item,
+		modelpricing.UsageSnapshot{},
+		nil,
+		"gpt-4.1",
+	)
+	if !ok {
+		t.Fatalf("calculateProviderAPICost 返回 hasPricing=false")
+	}
+
+	if !floatEquals(result.ProviderPerCallUnified, unified) {
+		t.Fatalf("ProviderPerCallUnified = %.12f, 期望 %.12f（应保留原始快照）", result.ProviderPerCallUnified, unified)
+	}
+	if !floatEquals(result.TotalCost, unified*0.5) {
+		t.Fatalf("TotalCost = %.12f, 期望 %.12f", result.TotalCost, unified*0.5)
+	}
+}
+
 func TestCalculateProviderAPICost_SplitsClaudeCacheCreateBy5mAnd1h(t *testing.T) {
 	item := ProviderModelPricingItem{
 		QuotaType:     0,

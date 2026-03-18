@@ -51,6 +51,8 @@ type ProviderModelPricingItem struct {
 	QuotaType                     int                        `json:"quotaType"` // 0=按量，1=按次
 	ModelRatio                    float64                    `json:"modelRatio"`
 	CompletionRatio               float64                    `json:"completionRatio"`
+	GroupMultiplier               float64                    `json:"groupMultiplier,omitempty"`
+	GroupMultiplierSource         string                     `json:"groupMultiplierSource,omitempty"`
 	CacheCreateMultiplier         float64                    `json:"cacheCreateMultiplier,omitempty"`
 	CacheReadMultiplier           float64                    `json:"cacheReadMultiplier,omitempty"`
 	ResolvedCacheCreateMultiplier float64                    `json:"resolvedCacheCreateMultiplier,omitempty"`
@@ -693,6 +695,9 @@ func (ps *ProviderService) enrichProviderModelPricingResponse(response *Provider
 
 	for index := range response.Models {
 		item := &response.Models[index]
+		groupMultiplier, groupSource := resolveProviderGroupMultiplierDetails(ps, apiURL, apiKey, authType, item.Model)
+		item.GroupMultiplier = groupMultiplier
+		item.GroupMultiplierSource = groupSource
 		if item.QuotaType != 0 {
 			continue
 		}

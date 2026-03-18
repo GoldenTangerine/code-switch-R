@@ -31,6 +31,7 @@ const form = reactive({
   originalModel: '',
   templateModel: '',
   model: '',
+  groupMultiplier: '1',
   inputUsdPer1M: '',
   outputUsdPer1M: '',
   reasoningUsdPer1M: '',
@@ -183,6 +184,7 @@ const resetForm = () => {
   form.originalModel = ''
   form.templateModel = ''
   form.model = ''
+  form.groupMultiplier = '1'
   form.inputUsdPer1M = ''
   form.outputUsdPer1M = ''
   form.reasoningUsdPer1M = ''
@@ -196,6 +198,7 @@ const resetForm = () => {
 }
 
 const assignPricingFields = (row: ModelPricingRow) => {
+  form.groupMultiplier = formatEditableNumber(row.group_multiplier > 0 || row.group_multiplier === 0 ? row.group_multiplier : 1)
   form.inputUsdPer1M = formatEditableNumber(perTokenToPer1M(row.input_cost_per_token))
   form.outputUsdPer1M = formatEditableNumber(perTokenToPer1M(row.output_cost_per_token))
   form.reasoningUsdPer1M = formatEditableNumber(perTokenToPer1M(row.output_cost_per_reasoning_token))
@@ -278,6 +281,7 @@ const buildRowFromForm = (): ModelPricingRow | null => {
   const input1m = parseNumber(form.inputUsdPer1M)
   const output1m = parseNumber(form.outputUsdPer1M)
   const reasoning1m = parseNumber(form.reasoningUsdPer1M)
+  const groupMultiplier = parseNumber(form.groupMultiplier)
   const cacheCreate1m = parseNumber(form.cacheCreateUsdPer1M)
   const cacheRead1m = parseNumber(form.cacheReadUsdPer1M)
   const eph1m = parseNumber(form.ephemeral1hUsdPer1M)
@@ -288,6 +292,7 @@ const buildRowFromForm = (): ModelPricingRow | null => {
     [t('components.general.modelPricing.fields.input'), input1m],
     [t('components.general.modelPricing.fields.output'), output1m],
     [t('components.general.modelPricing.fields.reasoning'), reasoning1m],
+    [t('components.general.modelPricing.fields.groupMultiplier'), groupMultiplier],
     [t('components.general.modelPricing.fields.cacheCreate'), cacheCreate1m],
     [t('components.general.modelPricing.fields.cacheRead'), cacheRead1m],
     [t('components.general.modelPricing.fields.cacheCreateMultiplier'), cacheCreateMultiplier],
@@ -319,6 +324,7 @@ const buildRowFromForm = (): ModelPricingRow | null => {
   return {
     original_model: props.mode === 'edit' ? form.originalModel.trim() : undefined,
     model,
+    group_multiplier: groupMultiplier,
     input_cost_per_token: per1MToPerToken(input1m),
     output_cost_per_token: per1MToPerToken(output1m),
     output_cost_per_reasoning_token: per1MToPerToken(reasoning1m),
@@ -414,6 +420,11 @@ const removeOverride = async () => {
         <div class="editor-field full-width">
           <label class="editor-label">{{ $t('components.general.modelPricing.fields.model') }}</label>
           <input v-model="form.model" class="mac-input editor-input" />
+        </div>
+
+        <div class="editor-field">
+          <label class="editor-label">{{ $t('components.general.modelPricing.fields.groupMultiplier') }}</label>
+          <input v-model="form.groupMultiplier" type="number" step="0.0001" min="0" class="mac-input editor-input" />
         </div>
 
         <div class="editor-field">

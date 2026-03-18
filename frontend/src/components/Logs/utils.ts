@@ -341,8 +341,8 @@ export const formatUsdPerMillion = (perTokenPrice: number) =>
   formatUsdPrecise(safeNumber(perTokenPrice) * PER_MILLION_TOKENS)
 
 export const formatMultiplierValue = (value: number) => {
-  const numeric = safeNumber(value)
-  if (numeric <= 0) return '1'
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric) || numeric < 0) return '1'
   const rounded = Number(numeric.toFixed(4))
   if (Number.isInteger(rounded)) return String(rounded)
   return rounded.toString()
@@ -1041,12 +1041,12 @@ export type TokenCostPricingContext = {
   cacheCreateRates: CacheCreatePriceRate[]
   calculatedTotal: number
   cacheReadMultiplier: number
+  groupMultiplier: number
 }
 
 export type BuiltinTokenPricingContext = TokenCostPricingContext & {
   modelName: string
   matchedModelChanged: boolean
-  groupMultiplier: number
 }
 
 const mapCacheCreateRates = (
@@ -1078,39 +1078,49 @@ export const buildProviderApiTokenPricingContext = (item: RequestLog): TokenCost
   const breakdownCacheReadCost = Math.max(0, safeNumber(item.cache_read_cost))
   const breakdownEphemeral5mCost = Math.max(0, safeNumber(item.ephemeral_5m_cost))
   const breakdownEphemeral1hCost = Math.max(0, safeNumber(item.ephemeral_1h_cost))
+  const groupMultiplier = resolveGroupMultiplier(item)
 
   const inputPerTokenSnapshot = Math.max(0, safeNumber(item.provider_input_usd_per_m)) / PER_MILLION_TOKENS
   const outputPerTokenSnapshot = Math.max(0, safeNumber(item.provider_output_usd_per_m)) / PER_MILLION_TOKENS
 
+  const unscaleCost = (cost: number) => (groupMultiplier > 0 ? cost / groupMultiplier : cost)
+  const baseInputCost = unscaleCost(breakdownInputCost)
+  const baseOutputCost = unscaleCost(breakdownOutputCost)
+  const baseReasoningCost = unscaleCost(breakdownReasoningCost)
+  const baseCacheCreateCost = unscaleCost(breakdownCacheCreateCost)
+  const baseCacheReadCost = unscaleCost(breakdownCacheReadCost)
+  const baseEphemeral5mCost = unscaleCost(breakdownEphemeral5mCost)
+  const baseEphemeral1hCost = unscaleCost(breakdownEphemeral1hCost)
+
   const inputPerToken =
     inputPerTokenSnapshot > 0
       ? inputPerTokenSnapshot
-      : inputTokens > 0 && breakdownInputCost > 0
-        ? breakdownInputCost / inputTokens
+      : inputTokens > 0 && baseInputCost > 0
+        ? baseInputCost / inputTokens
         : 0
   const outputPerToken =
     outputPerTokenSnapshot > 0
       ? outputPerTokenSnapshot
-      : outputTokens > 0 && breakdownOutputCost > 0
-        ? breakdownOutputCost / outputTokens
+      : outputTokens > 0 && baseOutputCost > 0
+        ? baseOutputCost / outputTokens
         : 0
   const reasoningPerToken =
-    reasoningTokens > 0 && breakdownReasoningCost > 0
-      ? breakdownReasoningCost / reasoningTokens
+    reasoningTokens > 0 && baseReasoningCost > 0
+      ? baseReasoningCost / reasoningTokens
       : outputPerToken
   const cacheCreateCombinedPerToken =
-    cacheCreateTokens > 0 && breakdownCacheCreateCost > 0
-      ? breakdownCacheCreateCost / cacheCreateTokens
+    cacheCreateTokens > 0 && baseCacheCreateCost > 0
+      ? baseCacheCreateCost / cacheCreateTokens
       : inputPerToken
   const cacheReadPerToken =
-    cacheReadTokens > 0 && breakdownCacheReadCost > 0
-      ? breakdownCacheReadCost / cacheReadTokens
+    cacheReadTokens > 0 && baseCacheReadCost > 0
+      ? baseCacheReadCost / cacheReadTokens
       : inputPerToken
   const cacheCreateDetails = buildCacheCreateCostDetails({
     split: cacheCreateSplit,
-    totalCost: breakdownCacheCreateCost,
-    ephemeral5mCost: breakdownEphemeral5mCost,
-    ephemeral1hCost: breakdownEphemeral1hCost,
+    totalCost: baseCacheCreateCost,
+    ephemeral5mCost: baseEphemeral5mCost,
+    ephemeral1hCost: baseEphemeral1hCost,
     fallback5mPerToken: inputPerToken > 0 ? inputPerToken : cacheCreateCombinedPerToken,
     fallback1hPerToken: cacheCreateCombinedPerToken > 0 ? cacheCreateCombinedPerToken : inputPerToken,
     fallbackCombinedPerToken: cacheCreateCombinedPerToken,
@@ -1125,21 +1135,21 @@ export const buildProviderApiTokenPricingContext = (item: RequestLog): TokenCost
     (cacheReadTokens > 0 && cacheReadPerToken > 0)
   if (!hasAnyTokenRate) return null
 
-  const inputCost = inputTokens > 0 && breakdownInputCost > 0 ? breakdownInputCost : inputTokens * inputPerToken
-  const outputCost = outputTokens > 0 && breakdownOutputCost > 0 ? breakdownOutputCost : outputTokens * outputPerToken
-  const reasoningCost = reasoningTokens > 0 && breakdownReasoningCost > 0
-    ? breakdownReasoningCost
+  const inputCost = inputTokens > 0 && baseInputCost > 0 ? baseInputCost : inputTokens * inputPerToken
+  const outputCost = outputTokens > 0 && baseOutputCost > 0 ? baseOutputCost : outputTokens * outputPerToken
+  const reasoningCost = reasoningTokens > 0 && baseReasoningCost > 0
+    ? baseReasoningCost
     : reasoningTokens * reasoningPerToken
   const cacheCreateCost = cacheCreateDetails.length > 0
     ? cacheCreateDetails.reduce((sum, detail) => sum + detail.cost, 0)
-    : cacheCreateTokens > 0 && breakdownCacheCreateCost > 0
-      ? breakdownCacheCreateCost
+    : cacheCreateTokens > 0 && baseCacheCreateCost > 0
+      ? baseCacheCreateCost
       : cacheCreateTokens * cacheCreateCombinedPerToken
-  const cacheReadCost = cacheReadTokens > 0 && breakdownCacheReadCost > 0
-    ? breakdownCacheReadCost
+  const cacheReadCost = cacheReadTokens > 0 && baseCacheReadCost > 0
+    ? baseCacheReadCost
     : cacheReadTokens * cacheReadPerToken
 
-  const calculatedTotal = inputCost + outputCost + reasoningCost + cacheCreateCost + cacheReadCost
+  const calculatedTotal = (inputCost + outputCost + reasoningCost + cacheCreateCost + cacheReadCost) * groupMultiplier
   const cacheReadMultiplier = inputPerToken > 0 ? cacheReadPerToken / inputPerToken : 0
 
   return {
@@ -1155,6 +1165,7 @@ export const buildProviderApiTokenPricingContext = (item: RequestLog): TokenCost
     cacheCreateRates,
     calculatedTotal,
     cacheReadMultiplier,
+    groupMultiplier,
   }
 }
 
@@ -1190,18 +1201,27 @@ export const buildBuiltinTokenPricingContext = (
   const breakdownCacheReadCost = Math.max(0, safeNumber(item.cache_read_cost))
   const breakdownEphemeral5mCost = Math.max(0, safeNumber(item.ephemeral_5m_cost))
   const breakdownEphemeral1hCost = Math.max(0, safeNumber(item.ephemeral_1h_cost))
+  const groupMultiplier = resolveGroupMultiplier(item)
+  const unscaleCost = (cost: number) => (groupMultiplier > 0 ? cost / groupMultiplier : cost)
+  const baseInputCost = unscaleCost(breakdownInputCost)
+  const baseOutputCost = unscaleCost(breakdownOutputCost)
+  const baseReasoningCost = unscaleCost(breakdownReasoningCost)
+  const baseCacheCreateCost = unscaleCost(breakdownCacheCreateCost)
+  const baseCacheReadCost = unscaleCost(breakdownCacheReadCost)
+  const baseEphemeral5mCost = unscaleCost(breakdownEphemeral5mCost)
+  const baseEphemeral1hCost = unscaleCost(breakdownEphemeral1hCost)
   const cacheCreateFallback5mPerToken = breakdownPayload ? 0 : cacheCreate5mPerTokenBase
   const cacheCreateFallback1hPerToken = breakdownPayload ? 0 : cacheCreate1hPerTokenBase
   const cacheCreateFallbackCombinedPerToken = breakdownPayload ? 0 : cacheCreate5mPerTokenBase
 
-  const inputCost = breakdownPayload ? breakdownInputCost : inputTokens * inputPerTokenBase
-  const outputCost = breakdownPayload ? breakdownOutputCost : outputTokens * outputPerTokenBase
-  const reasoningCost = breakdownPayload ? breakdownReasoningCost : reasoningTokens * reasoningPerTokenBase
+  const inputCost = breakdownPayload ? baseInputCost : inputTokens * inputPerTokenBase
+  const outputCost = breakdownPayload ? baseOutputCost : outputTokens * outputPerTokenBase
+  const reasoningCost = breakdownPayload ? baseReasoningCost : reasoningTokens * reasoningPerTokenBase
   const cacheCreateDetails = buildCacheCreateCostDetails({
     split: cacheCreateSplit,
-    totalCost: breakdownPayload ? breakdownCacheCreateCost : 0,
-    ephemeral5mCost: breakdownPayload ? breakdownEphemeral5mCost : 0,
-    ephemeral1hCost: breakdownPayload ? breakdownEphemeral1hCost : 0,
+    totalCost: breakdownPayload ? baseCacheCreateCost : 0,
+    ephemeral5mCost: breakdownPayload ? baseEphemeral5mCost : 0,
+    ephemeral1hCost: breakdownPayload ? baseEphemeral1hCost : 0,
     fallback5mPerToken: cacheCreateFallback5mPerToken,
     fallback1hPerToken: cacheCreateFallback1hPerToken,
     fallbackCombinedPerToken: cacheCreateFallbackCombinedPerToken,
@@ -1210,9 +1230,9 @@ export const buildBuiltinTokenPricingContext = (
   const cacheCreateCost = cacheCreateDetails.length > 0
     ? cacheCreateDetails.reduce((sum, detail) => sum + detail.cost, 0)
     : breakdownPayload
-      ? breakdownCacheCreateCost
+      ? baseCacheCreateCost
       : cacheCreateTokens * cacheCreate5mPerTokenBase
-  const cacheReadCost = breakdownPayload ? breakdownCacheReadCost : cacheReadTokens * cacheReadPerTokenBase
+  const cacheReadCost = breakdownPayload ? baseCacheReadCost : cacheReadTokens * cacheReadPerTokenBase
 
   const inputPerToken = inputTokens > 0 ? inputCost / inputTokens : inputPerTokenBase
   const outputPerToken = outputTokens > 0 ? outputCost / outputTokens : outputPerTokenBase
@@ -1220,8 +1240,7 @@ export const buildBuiltinTokenPricingContext = (
   const cacheReadPerToken = cacheReadTokens > 0 ? cacheReadCost / cacheReadTokens : cacheReadPerTokenBase
 
   const cacheReadMultiplier = inputPerToken > 0 ? cacheReadPerToken / inputPerToken : 0
-  const groupMultiplier = resolveGroupMultiplier(item)
-  const calculatedTotal = inputCost + cacheCreateCost + cacheReadCost + outputCost + reasoningCost
+  const calculatedTotal = (inputCost + cacheCreateCost + cacheReadCost + outputCost + reasoningCost) * groupMultiplier
 
   const rowModel = modelName.toLowerCase()
   const logModel = String(item.model ?? '').trim().toLowerCase()
@@ -1252,9 +1271,17 @@ const buildTokenCostFormulaResult = (
   formulaParts: string[],
   calculatedTotal: number,
   emptyFormula: string,
+  groupMultiplier: number,
+  labels: TokenCostFormulaLabels,
 ) =>
   formulaParts.length > 0
-    ? `${formulaParts.join(' + ')} = ${formatUsdPrecise(calculatedTotal)}`
+    ? (() => {
+      const baseFormula = formulaParts.join(' + ')
+      if (groupMultiplier !== 1) {
+        return `(${baseFormula}) * ${labels.groupMultiplierLabel(groupMultiplier)} = ${formatUsdPrecise(calculatedTotal)}`
+      }
+      return `${baseFormula} = ${formatUsdPrecise(calculatedTotal)}`
+    })()
     : emptyFormula
 
 export const buildProviderApiTokenFormula = (
@@ -1274,6 +1301,7 @@ export const buildProviderApiTokenFormula = (
     cacheCreateDetails,
     calculatedTotal,
     cacheReadMultiplier,
+    groupMultiplier,
   } = context
 
   const formulaParts: string[] = []
@@ -1316,7 +1344,7 @@ export const buildProviderApiTokenFormula = (
     )
   }
 
-  return buildTokenCostFormulaResult(formulaParts, calculatedTotal, emptyFormula)
+  return buildTokenCostFormulaResult(formulaParts, calculatedTotal, emptyFormula, groupMultiplier, labels)
 }
 
 export const buildBuiltinTokenFormula = (
@@ -1365,17 +1393,17 @@ export const buildBuiltinTokenFormula = (
 
   if (outputTokens > 0 && outputPerToken > 0) {
     formulaParts.push(
-      `${labels.usageCompletion} ${formatTokenFormulaValue(outputTokens)} ${TOKEN_FORMULA_UNIT} * ${formatUsdPerMillion(outputPerToken)} * ${labels.groupMultiplierLabel(groupMultiplier)}`,
+      `${labels.usageCompletion} ${formatTokenFormulaValue(outputTokens)} ${TOKEN_FORMULA_UNIT} * ${formatUsdPerMillion(outputPerToken)}`,
     )
   }
 
   if (reasoningTokens > 0 && reasoningPerToken > 0) {
     formulaParts.push(
-      `${labels.usageReasoning} ${formatTokenFormulaValue(reasoningTokens)} ${TOKEN_FORMULA_UNIT} * ${formatUsdPerMillion(reasoningPerToken)} * ${labels.groupMultiplierLabel(groupMultiplier)}`,
+      `${labels.usageReasoning} ${formatTokenFormulaValue(reasoningTokens)} ${TOKEN_FORMULA_UNIT} * ${formatUsdPerMillion(reasoningPerToken)}`,
     )
   }
 
-  return buildTokenCostFormulaResult(formulaParts, calculatedTotal, labels.formulaEmpty)
+  return buildTokenCostFormulaResult(formulaParts, calculatedTotal, labels.formulaEmpty, groupMultiplier, labels)
 }
 
 
@@ -1524,8 +1552,8 @@ export const priceSourceClass = (item: RequestLog) => {
 }
 
 export const resolveGroupMultiplier = (item: RequestLog) => {
-  const candidate = safeNumber((item as RequestLog & { group_multiplier?: number }).group_multiplier)
-  if (candidate <= 0) return 1
+  const candidate = (item as RequestLog & { group_multiplier?: number }).group_multiplier
+  if (typeof candidate !== 'number' || !Number.isFinite(candidate) || candidate < 0) return 1
   return candidate
 }
 

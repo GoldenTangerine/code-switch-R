@@ -15,6 +15,8 @@ import (
 const providerPricingOverridesSettingKey = "provider_model_pricing_overrides_v1"
 
 type providerPricingOverrideItem struct {
+	GroupMultiplier          float64 `json:"group_multiplier,omitempty"`
+	HasGroupMultiplier       bool    `json:"has_group_multiplier,omitempty"`
 	CacheCreateMultiplier    float64 `json:"cache_create_multiplier,omitempty"`
 	HasCacheCreateMultiplier bool    `json:"has_cache_create_multiplier,omitempty"`
 	CacheReadMultiplier      float64 `json:"cache_read_multiplier,omitempty"`
@@ -128,7 +130,7 @@ func (ps *ProviderService) resolveProviderModelPricingOverride(apiURL, apiKey, a
 	if !ok {
 		return providerPricingOverrideItem{}, false
 	}
-	if !item.HasCacheCreateMultiplier && !item.HasCacheReadMultiplier {
+	if !item.HasGroupMultiplier && !item.HasCacheCreateMultiplier && !item.HasCacheReadMultiplier {
 		return providerPricingOverrideItem{}, false
 	}
 	return item, true
@@ -139,6 +141,8 @@ func (ps *ProviderService) UpsertProviderModelPricingOverride(
 	apiKey,
 	authType,
 	model string,
+	groupMultiplier float64,
+	hasGroupMultiplier bool,
 	cacheCreateMultiplier float64,
 	hasCacheCreateMultiplier bool,
 	cacheReadMultiplier float64,
@@ -146,6 +150,11 @@ func (ps *ProviderService) UpsertProviderModelPricingOverride(
 ) error {
 	if ps == nil {
 		return fmt.Errorf("nil provider service")
+	}
+	if hasGroupMultiplier {
+		if err := validateNonNegative(groupMultiplier, "group_multiplier"); err != nil {
+			return err
+		}
 	}
 	if hasCacheCreateMultiplier {
 		if err := validateNonNegative(cacheCreateMultiplier, "cache_create_multiplier"); err != nil {
@@ -167,7 +176,7 @@ func (ps *ProviderService) UpsertProviderModelPricingOverride(
 		return fmt.Errorf("model 不能为空")
 	}
 
-	if !hasCacheCreateMultiplier && !hasCacheReadMultiplier {
+	if !hasGroupMultiplier && !hasCacheCreateMultiplier && !hasCacheReadMultiplier {
 		return ps.DeleteProviderModelPricingOverride(apiURL, apiKey, authType, model)
 	}
 
@@ -184,6 +193,8 @@ func (ps *ProviderService) UpsertProviderModelPricingOverride(
 		store.Providers[scopeKey] = modelOverrides
 	}
 	modelOverrides[modelKey] = providerPricingOverrideItem{
+		GroupMultiplier:          groupMultiplier,
+		HasGroupMultiplier:       hasGroupMultiplier,
 		CacheCreateMultiplier:    cacheCreateMultiplier,
 		HasCacheCreateMultiplier: hasCacheCreateMultiplier,
 		CacheReadMultiplier:      cacheReadMultiplier,

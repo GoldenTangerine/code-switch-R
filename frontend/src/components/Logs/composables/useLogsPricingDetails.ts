@@ -19,8 +19,10 @@ import {
   formatCacheCreateTierLabel,
   formatUsdPrecise,
   hasProviderPricingSnapshot,
+  isProviderPerCallValueSet,
   mergeCostTooltipNotes,
   resolvePriceSource,
+  resolveGroupMultiplier,
   resolvePricingRow,
   safeNumber,
 } from '../utils'
@@ -42,6 +44,31 @@ export function useLogsPricingDetails(options: UseLogsPricingDetailsOptions) {
 
   const buildInfoTooltipLabels = () => buildLogsInfoTooltipLabels(t)
   const buildCostTooltipLabels = () => buildLogsCostTooltipLabels(t, formatCacheCreateTierLabel)
+
+  const buildProviderAPIPerCallFormula = (item: RequestLog, recordedCost: number) => {
+    const labels = buildCostTooltipLabels()
+    const parts: string[] = []
+    const perRequestSuffix = labels.providerApiPerCallPriceLineLabels.perRequestSuffix
+    const groupMultiplier = resolveGroupMultiplier(item)
+
+    if (isProviderPerCallValueSet(item.provider_per_call_unified, item.provider_per_call_unified_set)) {
+      parts.push(`${formatUsdPrecise(safeNumber(item.provider_per_call_unified))} ${perRequestSuffix}`)
+    } else {
+      if (isProviderPerCallValueSet(item.provider_per_call_input, item.provider_per_call_input_set)) {
+        parts.push(`${formatUsdPrecise(safeNumber(item.provider_per_call_input))} ${perRequestSuffix}`)
+      }
+      if (isProviderPerCallValueSet(item.provider_per_call_output, item.provider_per_call_output_set)) {
+        parts.push(`${formatUsdPrecise(safeNumber(item.provider_per_call_output))} ${perRequestSuffix}`)
+      }
+    }
+
+    if (parts.length === 0) return labels.providerApiPerCallFormula
+    const baseFormula = parts.length > 1 ? `(${parts.join(' + ')})` : parts[0]
+    if (groupMultiplier !== 1) {
+      return `${baseFormula} * ${labels.tokenFormulaLabels.groupMultiplierLabel(groupMultiplier)} = ${formatUsdPrecise(recordedCost)}`
+    }
+    return `${baseFormula} = ${formatUsdPrecise(recordedCost)}`
+  }
 
   const buildProviderAPITokenTooltipDetail = (
     item: RequestLog,
@@ -178,7 +205,7 @@ export function useLogsPricingDetails(options: UseLogsPricingDetailsOptions) {
           pricingModel: fallbackModelName,
           hasPricing: true,
           priceLines: providerPerCallLines,
-          formula: labels.providerApiPerCallFormula,
+          formula: buildProviderAPIPerCallFormula(item, recordedCost),
           note: labels.providerApiHint,
           recordedCostHint,
         }

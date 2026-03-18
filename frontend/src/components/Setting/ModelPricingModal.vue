@@ -489,6 +489,10 @@ watch(
                 <span class="price-label">{{ $t('components.general.modelPricing.columns.output') }}</span>
                 <span class="price-value output">{{ formatUsdPer1M(item.output_cost_per_token) }}/M</span>
               </div>
+              <div class="price-block">
+                <span class="price-label">{{ $t('components.general.modelPricing.columns.groupMultiplier') }}</span>
+                <span class="price-value">{{ formatMultiplier(item.group_multiplier) }}</span>
+              </div>
               <div
                 v-for="cacheItem in resolveCacheCreatePriceEntries(item)"
                 :key="`${item.model}-${cacheItem.key}`"

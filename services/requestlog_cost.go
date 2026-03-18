@@ -8,6 +8,7 @@ import (
 const (
 	providerAPIDefaultCacheCreateMultiplier = 1.25
 	providerAPIDefaultCacheReadMultiplier   = 0.1
+	providerAPIDefaultGroupMultiplier       = 1
 )
 
 const (
@@ -15,6 +16,8 @@ const (
 	providerCacheMultiplierSourceProvider = "provider"
 	providerCacheMultiplierSourceBuiltin  = "builtin"
 	providerCacheMultiplierSourceFallback = "fallback"
+	providerGroupMultiplierSourceManual   = "manual"
+	providerGroupMultiplierSourceDefault  = "default"
 )
 
 type requestLogCostResult struct {
@@ -26,6 +29,7 @@ type requestLogCostResult struct {
 	Ephemeral5mCost           float64
 	Ephemeral1hCost           float64
 	TotalCost                 float64
+	GroupMultiplier           float64
 	HasPricing                bool
 	MatchedPricingModel       string
 	PriceSource               string
@@ -98,6 +102,7 @@ func calculateRequestLogCost(
 				Ephemeral5mCost:     breakdown.Ephemeral5mCost,
 				Ephemeral1hCost:     breakdown.Ephemeral1hCost,
 				TotalCost:           breakdown.TotalCost,
+				GroupMultiplier:     breakdown.GroupMultiplier,
 				HasPricing:          true,
 				MatchedPricingModel: matchedPricingModel,
 				PriceSource:         requestLogPriceSourceBuiltin,
@@ -108,6 +113,7 @@ func calculateRequestLogCost(
 
 	return requestLogCostResult{
 		TotalCost:         0,
+		GroupMultiplier:   1,
 		PriceSource:       requestLogPriceSourceNone,
 		ProviderQuotaType: -1,
 	}
@@ -126,7 +132,16 @@ func calculateProviderAPICost(
 	result := requestLogCostResult{
 		ProviderPricingAvailable: true,
 		ProviderQuotaType:        item.QuotaType,
+		GroupMultiplier:          providerAPIDefaultGroupMultiplier,
 	}
+	groupMultiplier, _ := resolveProviderGroupMultiplierDetails(
+		providerService,
+		providerAPIURL,
+		providerAPIKey,
+		providerAuthType,
+		model,
+	)
+	result.GroupMultiplier = groupMultiplier
 
 	switch item.QuotaType {
 	case 0:
@@ -173,6 +188,7 @@ func calculateProviderAPICost(
 		}
 		result.CacheReadCost = float64(usage.CacheReadTokens) * cacheReadPerToken
 		result.TotalCost = result.InputCost + result.OutputCost + result.ReasoningCost + result.CacheCreateCost + result.CacheReadCost
+		scaleRequestLogCostResult(&result, groupMultiplier)
 		return result, true
 	case 1:
 		if item.PerCallPrice == nil {
@@ -186,6 +202,7 @@ func calculateProviderAPICost(
 			result.ProviderPerCallUnified = *item.PerCallPrice.Unified
 			result.ProviderPerCallUnifiedSet = true
 			result.TotalCost = *item.PerCallPrice.Unified
+			scaleRequestLogCostResult(&result, groupMultiplier)
 			return result, true
 		}
 
@@ -209,10 +226,44 @@ func calculateProviderAPICost(
 			hasPricing = true
 		}
 		result.TotalCost = result.InputCost + result.OutputCost
+		scaleRequestLogCostResult(&result, groupMultiplier)
 		return result, hasPricing
 	default:
 		return requestLogCostResult{}, false
 	}
+}
+
+func scaleRequestLogCostResult(result *requestLogCostResult, multiplier float64) {
+	if result == nil {
+		return
+	}
+	result.GroupMultiplier = multiplier
+	if multiplier == 1 {
+		return
+	}
+	result.InputCost *= multiplier
+	result.OutputCost *= multiplier
+	result.ReasoningCost *= multiplier
+	result.CacheCreateCost *= multiplier
+	result.CacheReadCost *= multiplier
+	result.Ephemeral5mCost *= multiplier
+	result.Ephemeral1hCost *= multiplier
+	result.TotalCost *= multiplier
+}
+
+func resolveProviderGroupMultiplierDetails(
+	providerService *ProviderService,
+	providerAPIURL string,
+	providerAPIKey string,
+	providerAuthType string,
+	model string,
+) (float64, string) {
+	if providerService != nil {
+		if override, ok := providerService.resolveProviderModelPricingOverride(providerAPIURL, providerAPIKey, providerAuthType, model); ok && override.HasGroupMultiplier {
+			return override.GroupMultiplier, providerGroupMultiplierSourceManual
+		}
+	}
+	return providerAPIDefaultGroupMultiplier, providerGroupMultiplierSourceDefault
 }
 
 func resolveProviderCacheMultipliers(

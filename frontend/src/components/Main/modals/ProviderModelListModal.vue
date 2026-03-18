@@ -126,7 +126,7 @@
               <span v-if="model.ownerBy" class="tag tag-neutral">
                 {{ model.ownerBy }}
               </span>
-              <span v-if="hasManualCacheOverride(model)" class="tag tag-manual">
+              <span v-if="hasManualPricingOverride(model)" class="tag tag-manual">
                 {{ t('components.main.modelList.manualOverride') }}
               </span>
             </div>
@@ -153,6 +153,15 @@
                   <span class="price-label">{{ t('components.main.modelList.output') }}</span>
                   <span class="price-value output">
                     {{ formatUSD(model.outputUsdPerM) }}/M
+                  </span>
+                </div>
+                <div class="price-block">
+                  <span class="price-label">{{ t('components.main.modelList.groupMultiplier') }}</span>
+                  <span class="price-value">
+                    {{ formatMultiplier(resolveGroupMultiplier(model)) }}
+                  </span>
+                  <span v-if="resolveGroupMultiplierHint(model)" class="price-note" :class="groupHintClass(model.groupMultiplierSource)">
+                    {{ resolveGroupMultiplierHint(model) }}
                   </span>
                 </div>
                 <div
@@ -183,6 +192,15 @@
                   <span class="price-label">{{ t('components.main.modelList.perCall') }}</span>
                   <span class="price-value">
                     {{ formatPerCall(model.perCallPrice) }}
+                  </span>
+                </div>
+                <div class="price-block">
+                  <span class="price-label">{{ t('components.main.modelList.groupMultiplier') }}</span>
+                  <span class="price-value">
+                    {{ formatMultiplier(resolveGroupMultiplier(model)) }}
+                  </span>
+                  <span v-if="resolveGroupMultiplierHint(model)" class="price-note" :class="groupHintClass(model.groupMultiplierSource)">
+                    {{ resolveGroupMultiplierHint(model) }}
                   </span>
                 </div>
               </template>
@@ -360,6 +378,14 @@
           <span class="detail-value">{{ billingLabel(editingTargetModel.quotaType) }}</span>
         </div>
 
+        <div class="detail-item">
+          <span class="detail-label">{{ t('components.main.modelList.detailGroupMultiplier') }}</span>
+          <span class="detail-value">{{ formatMultiplier(resolveGroupMultiplier(editingTargetModel)) }}</span>
+          <span v-if="formatGroupMultiplierSource(editingTargetModel.groupMultiplierSource)" class="detail-note" :class="groupHintClass(editingTargetModel.groupMultiplierSource)">
+            {{ formatGroupMultiplierSource(editingTargetModel.groupMultiplierSource) }}
+          </span>
+        </div>
+
         <div v-if="editingTargetModel.ownerBy" class="detail-item">
           <span class="detail-label">{{ t('components.main.modelList.detailOwner') }}</span>
           <span class="detail-value detail-value--wrap">{{ editingTargetModel.ownerBy }}</span>
@@ -426,12 +452,25 @@
         </div>
       </div>
 
-      <template v-if="editingTargetModel.quotaType === 0">
-        <div class="detail-divider"></div>
+      <div class="detail-divider"></div>
 
-        <div class="detail-section-title">{{ t('components.main.modelList.detailOverrideSection') }}</div>
+      <div class="detail-section-title">{{ t('components.main.modelList.detailOverrideSection') }}</div>
 
-        <div class="override-editor-grid">
+      <div class="override-editor-grid">
+        <div class="override-field">
+          <label class="override-label">{{ t('components.main.modelList.groupMultiplier') }}</label>
+          <input
+            v-model="overrideForm.groupMultiplier"
+            type="number"
+            step="0.0001"
+            min="0"
+            class="mac-input override-input"
+            :placeholder="resolveGroupOverridePlaceholder(editingTargetModel)"
+          />
+          <span class="override-field-hint">{{ resolveGroupOverrideHint(editingTargetModel) }}</span>
+        </div>
+
+        <template v-if="editingTargetModel.quotaType === 0">
           <div class="override-field">
             <label class="override-label">{{ resolveCacheCreateMultiplierLabel(editingTargetModel, 'input') }}</label>
             <input
@@ -457,24 +496,23 @@
             />
             <span class="override-field-hint">{{ resolveOverrideHint(editingTargetModel, 'read') }}</span>
           </div>
-        </div>
-      </template>
+        </template>
+      </div>
 
       <div class="override-actions">
         <button type="button" class="action-btn" @click="closeModelDetail">
           {{ t('common.cancel') }}
         </button>
         <button
-          v-if="editingTargetModel.quotaType === 0 && hasManualCacheOverride(editingTargetModel)"
+          v-if="hasManualPricingOverride(editingTargetModel)"
           type="button"
           class="action-btn"
           :disabled="isWorkingModel(editingTargetModel.model)"
           @click="resetOverride(editingTargetModel)"
         >
-          {{ resettingModel === editingTargetModel.model ? t('components.general.modelPricing.removing') : t('components.main.modelList.resetCache') }}
+          {{ resettingModel === editingTargetModel.model ? t('components.general.modelPricing.removing') : t('components.main.modelList.resetPricingOverrides') }}
         </button>
         <button
-          v-if="editingTargetModel.quotaType === 0"
           type="button"
           class="primary-btn"
           :disabled="isWorkingModel(editingTargetModel.model)"
@@ -554,6 +592,7 @@ const pricingInteraction = reactive({
 })
 
 const overrideForm = reactive({
+  groupMultiplier: '',
   cacheCreateMultiplier: '',
   cacheReadMultiplier: '',
 })
@@ -1028,6 +1067,7 @@ const billingTagClass = (quotaType: number) => {
 }
 
 const clearOverrideForm = () => {
+  overrideForm.groupMultiplier = ''
   overrideForm.cacheCreateMultiplier = ''
   overrideForm.cacheReadMultiplier = ''
 }
@@ -1037,10 +1077,39 @@ const isWorkingModel = (modelName: string) => savingModel.value === modelName ||
 const hasManualCacheOverride = (model: ProviderModelPricingItem) =>
   model.cacheCreateMultiplierSource === 'manual' || model.cacheReadMultiplierSource === 'manual'
 
+const hasManualPricingOverride = (model: ProviderModelPricingItem) =>
+  model.groupMultiplierSource === 'manual' || hasManualCacheOverride(model)
+
+const resolveGroupMultiplier = (model: ProviderModelPricingItem) => {
+  if (typeof model.groupMultiplier === 'number' && Number.isFinite(model.groupMultiplier) && model.groupMultiplier >= 0) {
+    return model.groupMultiplier
+  }
+  return 1
+}
+
+const formatGroupMultiplierSource = (source?: string) => {
+  if (source === 'manual') return t('components.main.modelList.cacheSourceManual')
+  if (source === 'default') return t('components.main.modelList.groupSourceDefault')
+  return ''
+}
+
+const groupHintClass = (source?: string) => ({
+  'is-manual': source === 'manual',
+})
+
+const resolveGroupMultiplierHint = (model: ProviderModelPricingItem) => {
+  const sourceLabel = formatGroupMultiplierSource(model.groupMultiplierSource)
+  if (!sourceLabel) return ''
+  return sourceLabel
+}
+
 const openModelDetail = (model: ProviderModelPricingItem) => {
   editingModel.value = model.model
+  overrideForm.groupMultiplier =
+    model.groupMultiplierSource === 'manual' ? formatEditableMultiplier(resolveGroupMultiplier(model)) : ''
   if (model.quotaType !== 0) {
-    clearOverrideForm()
+    overrideForm.cacheCreateMultiplier = ''
+    overrideForm.cacheReadMultiplier = ''
     return
   }
   overrideForm.cacheCreateMultiplier =
@@ -1119,6 +1188,25 @@ const buildOverrideAutoHint = (multiplier?: number, source?: string) => {
   return t('components.main.modelList.followAutoWithSource', { value: formatted, source: sourceLabel })
 }
 
+const buildGroupOverrideAutoHint = (multiplier?: number, source?: string) => {
+  const formatted = formatMultiplier(multiplier)
+  const sourceLabel = formatGroupMultiplierSource(source)
+  if (formatted === '—') return t('components.main.modelList.followAutoEmpty')
+  if (!sourceLabel) return t('components.main.modelList.followAuto', { value: formatted })
+  return t('components.main.modelList.followAutoWithSource', { value: formatted, source: sourceLabel })
+}
+
+const resolveGroupOverridePlaceholder = (model: ProviderModelPricingItem) =>
+  formatEditableMultiplier(resolveGroupMultiplier(model))
+
+const resolveGroupOverrideHint = (model: ProviderModelPricingItem) => {
+  const multiplier = resolveGroupMultiplier(model)
+  if (model.groupMultiplierSource === 'manual') {
+    return t('components.main.modelList.manualFieldHint', { value: formatMultiplier(multiplier) })
+  }
+  return buildGroupOverrideAutoHint(multiplier, model.groupMultiplierSource)
+}
+
 const resolveOverridePlaceholder = (model: ProviderModelPricingItem, kind: 'create' | 'read') => {
   const multiplier = kind === 'create' ? resolveCacheCreateMultiplier(model) : resolveCacheReadMultiplier(model)
   return formatEditableMultiplier(multiplier)
@@ -1166,6 +1254,12 @@ const handleSourceChange = () => {
 
 const saveOverride = async (model: ProviderModelPricingItem) => {
   if (!props.provider || isWorkingModel(model.model)) return
+  const groupMultiplier = parseOverrideMultiplier(
+    overrideForm.groupMultiplier,
+    t('components.main.modelList.groupMultiplier'),
+  )
+  if (groupMultiplier === null) return
+
   const cacheCreateMultiplier = parseOverrideMultiplier(
     overrideForm.cacheCreateMultiplier,
     resolveCacheCreateMultiplierLabel(model, 'input'),
@@ -1178,8 +1272,8 @@ const saveOverride = async (model: ProviderModelPricingItem) => {
   )
   if (cacheReadMultiplier === null) return
 
-  const hadManualOverride = hasManualCacheOverride(model)
-  if (!hadManualOverride && !cacheCreateMultiplier.isSet && !cacheReadMultiplier.isSet) {
+  const hadManualOverride = hasManualPricingOverride(model)
+  if (!hadManualOverride && !groupMultiplier.isSet && !cacheCreateMultiplier.isSet && !cacheReadMultiplier.isSet) {
     showToast(t('components.main.modelList.toast.overrideRequired'), 'warning')
     return
   }
@@ -1189,13 +1283,15 @@ const saveOverride = async (model: ProviderModelPricingItem) => {
     await upsertProviderModelPricingOverride(
       props.provider,
       model.model,
+      groupMultiplier.value,
+      groupMultiplier.isSet,
       cacheCreateMultiplier.value,
       cacheCreateMultiplier.isSet,
       cacheReadMultiplier.value,
       cacheReadMultiplier.isSet,
     )
     showToast(
-      !cacheCreateMultiplier.isSet && !cacheReadMultiplier.isSet
+      !groupMultiplier.isSet && !cacheCreateMultiplier.isSet && !cacheReadMultiplier.isSet
         ? t('components.main.modelList.toast.resetSuccess')
         : t('components.main.modelList.toast.saveSuccess'),
     )

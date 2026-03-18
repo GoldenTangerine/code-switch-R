@@ -49,6 +49,7 @@ var requestLogListSelectFields = []string{
 	"ephemeral_5m_cost",
 	"ephemeral_1h_cost",
 	"total_cost",
+	"group_multiplier",
 	"has_pricing",
 	"matched_pricing_model",
 	"provider_pricing_available",
@@ -473,6 +474,7 @@ func buildRequestLogList(records []xdb.Record, pricingSnapshot *modelpricing.Ser
 			Ephemeral5mCost:           record.GetFloat64("ephemeral_5m_cost"),
 			Ephemeral1hCost:           record.GetFloat64("ephemeral_1h_cost"),
 			TotalCost:                 record.GetFloat64("total_cost"),
+			GroupMultiplier:           record.GetFloat64("group_multiplier"),
 			HasPricing:                record.GetBool("has_pricing"),
 			MatchedPricingModel:       record.GetString("matched_pricing_model"),
 			ProviderPricingAvailable:  record.GetBool("provider_pricing_available"),
@@ -779,6 +781,7 @@ func applyLogPricing(pricing *modelpricing.Service, logEntry *ReqeustLog) {
 	logEntry.CacheReadCost = breakdown.CacheReadCost
 	logEntry.Ephemeral5mCost = breakdown.Ephemeral5mCost
 	logEntry.Ephemeral1hCost = breakdown.Ephemeral1hCost
+	logEntry.GroupMultiplier = breakdown.GroupMultiplier
 	logEntry.HasPricing = true
 	if logEntry.PriceSource == requestLogPriceSourceNone {
 		logEntry.PriceSource = requestLogPriceSourceBuiltin

@@ -18,6 +18,8 @@ export type ProviderModelPricingItem = {
   quotaType: number
   modelRatio: number
   completionRatio: number
+  groupMultiplier?: number
+  groupMultiplierSource?: 'manual' | 'default' | string
   cacheCreateMultiplier?: number
   cacheReadMultiplier?: number
   resolvedCacheCreateMultiplier?: number
@@ -89,6 +91,8 @@ export async function fetchProviderModelPricing(
 export async function upsertProviderModelPricingOverride(
   provider: AutomationCard,
   model: string,
+  groupMultiplier: number,
+  hasGroupMultiplier: boolean,
   cacheCreateMultiplier: number,
   hasCacheCreateMultiplier: boolean,
   cacheReadMultiplier: number,
@@ -100,6 +104,8 @@ export async function upsertProviderModelPricingOverride(
     provider.apiKey,
     provider.connectivityAuthType || '',
     model,
+    groupMultiplier,
+    hasGroupMultiplier,
     cacheCreateMultiplier,
     hasCacheCreateMultiplier,
     cacheReadMultiplier,

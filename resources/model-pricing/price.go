@@ -40,6 +40,32 @@ type PricingEntry struct {
 	InputCostPerTokenAbove200k          float64 `json:"input_cost_per_token_above_200k_tokens"`
 	InputCostPerTokenAbove128k          float64 `json:"input_cost_per_token_above_128k_tokens"`
 	OutputCostPerTokenAbove200k         float64 `json:"output_cost_per_token_above_200k_tokens"`
+	GroupMultiplier                     float64 `json:"group_multiplier,omitempty"`
+	HasGroupMultiplier                  bool    `json:"has_group_multiplier,omitempty"`
+}
+
+func (p *PricingEntry) UnmarshalJSON(data []byte) error {
+	type alias PricingEntry
+	type rawPricingEntry struct {
+		alias
+		GroupMultiplier    *float64 `json:"group_multiplier"`
+		HasGroupMultiplier *bool    `json:"has_group_multiplier"`
+	}
+
+	var raw rawPricingEntry
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	*p = PricingEntry(raw.alias)
+	if raw.GroupMultiplier != nil {
+		p.GroupMultiplier = *raw.GroupMultiplier
+		p.HasGroupMultiplier = true
+	}
+	if raw.HasGroupMultiplier != nil {
+		p.HasGroupMultiplier = *raw.HasGroupMultiplier || raw.GroupMultiplier != nil
+	}
+	return nil
 }
 
 // UsageSnapshot 描述一次请求的 token 用量。
@@ -72,6 +98,7 @@ type CostBreakdown struct {
 	IsLongContext   bool    `json:"is_long_context"`
 	PricingModel    string  `json:"pricing_model"`
 	FuzzyMatched    bool    `json:"fuzzy_matched"`
+	GroupMultiplier float64 `json:"group_multiplier"`
 }
 
 // LongContextPricing 描述 1M 上下文模型的单价。
@@ -98,7 +125,7 @@ func NewService() (*Service, error) {
 	normalized := make(map[string]string, len(raw))
 	for key, entry := range raw {
 		item := entry
-		ensureCachePricing(&item)
+		ensurePricingEntryDefaults(&item)
 		pricing[key] = &item
 		norm := normalizeName(key)
 		if _, exists := normalized[norm]; !exists {
@@ -120,9 +147,10 @@ func (s *Service) CalculateCost(model string, usage UsageSnapshot) CostBreakdown
 	}
 	entry, pricingModel, hasPricing, fuzzyMatched := s.getPricingWithKey(model)
 	breakdown := CostBreakdown{
-		HasPricing:   hasPricing,
-		PricingModel: pricingModel,
-		FuzzyMatched: fuzzyMatched,
+		HasPricing:      hasPricing,
+		PricingModel:    pricingModel,
+		FuzzyMatched:    fuzzyMatched,
+		GroupMultiplier: 1,
 	}
 	if entry == nil && !strings.Contains(strings.ToLower(model), "[1m]") {
 		return breakdown
@@ -131,6 +159,11 @@ func (s *Service) CalculateCost(model string, usage UsageSnapshot) CostBreakdown
 	if entry == nil {
 		entry = &PricingEntry{}
 	}
+	groupMultiplier := 1.0
+	if entry.HasGroupMultiplier || entry.GroupMultiplier != 0 {
+		groupMultiplier = entry.GroupMultiplier
+	}
+	breakdown.GroupMultiplier = groupMultiplier
 	if useLong {
 		breakdown.IsLongContext = true
 		breakdown.InputCost = float64(usage.InputTokens) * longTier.Input
@@ -155,6 +188,7 @@ func (s *Service) CalculateCost(model string, usage UsageSnapshot) CostBreakdown
 	breakdown.CacheCreateCost = cache5mCost + cache1hCost
 	breakdown.CacheReadCost = float64(usage.CacheReadTokens) * entry.CacheReadInputTokenCost
 	breakdown.TotalCost = breakdown.InputCost + breakdown.OutputCost + breakdown.ReasoningCost + breakdown.CacheCreateCost + breakdown.CacheReadCost
+	scaleCostBreakdown(&breakdown, groupMultiplier)
 	if breakdown.TotalCost > 0 {
 		breakdown.HasPricing = true
 	}
@@ -698,7 +732,7 @@ func (s *Service) ApplyOverrides(pricingOverrides map[string]PricingEntry, ephem
 	for model, entry := range pricingOverrides {
 		item := entry
 		// 兼容：用户只填了 input/output 时，自动补齐 cache 定价（与默认行为一致）。
-		ensureCachePricing(&item)
+		ensurePricingEntryDefaults(&item)
 		s.pricingMap[model] = &item
 
 		normalized := normalizeName(model)
@@ -711,4 +745,35 @@ func (s *Service) ApplyOverrides(pricingOverrides map[string]PricingEntry, ephem
 		}
 		s.ephemeral1h[model] = cost
 	}
+}
+
+func ensurePricingEntryDefaults(entry *PricingEntry) {
+	if entry == nil {
+		return
+	}
+	ensureCachePricing(entry)
+	if !entry.HasGroupMultiplier && entry.GroupMultiplier != 0 {
+		entry.HasGroupMultiplier = true
+	}
+	if !entry.HasGroupMultiplier {
+		entry.GroupMultiplier = 1
+	}
+}
+
+func scaleCostBreakdown(breakdown *CostBreakdown, multiplier float64) {
+	if breakdown == nil {
+		return
+	}
+	breakdown.GroupMultiplier = multiplier
+	if multiplier == 1 {
+		return
+	}
+	breakdown.InputCost *= multiplier
+	breakdown.OutputCost *= multiplier
+	breakdown.ReasoningCost *= multiplier
+	breakdown.CacheCreateCost *= multiplier
+	breakdown.CacheReadCost *= multiplier
+	breakdown.Ephemeral5mCost *= multiplier
+	breakdown.Ephemeral1hCost *= multiplier
+	breakdown.TotalCost *= multiplier
 }

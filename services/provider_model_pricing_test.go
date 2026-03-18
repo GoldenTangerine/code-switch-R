@@ -113,6 +113,39 @@ func TestEnrichProviderModelPricingResponse_DefaultsForGPT(t *testing.T) {
 	}
 }
 
+func TestEnrichProviderModelPricingResponse_AppliesManualGroupMultiplier(t *testing.T) {
+	providerService := NewProviderService()
+	scopeKey := providerPricingOverrideScopeKey("https://example.com/v1", "secret-key", "")
+	providerService.providerPricingOverrides.Providers[scopeKey] = map[string]providerPricingOverrideItem{
+		normalizeProviderPricingModelName("gpt-4.1"): {
+			GroupMultiplier:    0.05,
+			HasGroupMultiplier: true,
+		},
+	}
+
+	response := &ProviderModelPricingResponse{
+		Models: []ProviderModelPricingItem{
+			{
+				Model:         "gpt-4.1",
+				QuotaType:     1,
+				PerCallPrice:  &ProviderModelPerCallPrice{Unified: func() *float64 { v := 0.2; return &v }()},
+				InputUSDPerM:  2,
+				OutputUSDPerM: 8,
+			},
+		},
+	}
+
+	providerService.enrichProviderModelPricingResponse(response, "https://example.com/v1", "secret-key", "")
+
+	item := response.Models[0]
+	if item.GroupMultiplier != 0.05 {
+		t.Fatalf("GroupMultiplier = %.4f, 期望 0.0500", item.GroupMultiplier)
+	}
+	if item.GroupMultiplierSource != providerGroupMultiplierSourceManual {
+		t.Fatalf("GroupMultiplierSource = %q, 期望 %q", item.GroupMultiplierSource, providerGroupMultiplierSourceManual)
+	}
+}
+
 func TestEnrichProviderModelPricingResponse_DefaultsForClaude(t *testing.T) {
 	providerService := NewProviderService()
 	response := &ProviderModelPricingResponse{

@@ -1053,14 +1053,14 @@ func (prs *ProviderRelayService) forwardRequest(
 				INSERT INTO request_log (
 					platform, model, requested_model, response_model, provider_id, provider, http_code,
 					input_tokens, output_tokens, cache_create_tokens, ephemeral_5m_tokens, ephemeral_1h_tokens, cache_read_tokens,
-					reasoning_tokens, is_stream, duration_sec, first_token_sec, total_cost, price_source,
+					reasoning_tokens, is_stream, duration_sec, first_token_sec, total_cost, group_multiplier, price_source,
 					input_cost, output_cost, reasoning_cost, cache_create_cost, cache_read_cost,
 					ephemeral_5m_cost, ephemeral_1h_cost, has_pricing, matched_pricing_model,
 					provider_pricing_available, provider_quota_type, provider_input_usd_per_m, provider_output_usd_per_m,
 					provider_per_call_unified, provider_per_call_input, provider_per_call_output,
 					provider_per_call_unified_set, provider_per_call_input_set, provider_per_call_output_set,
 					request_body, response_body, request_body_truncated, response_body_truncated, payload_bytes, payload_captured
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			`,
 			requestLog.Platform,
 			requestLog.Model,
@@ -1080,6 +1080,7 @@ func (prs *ProviderRelayService) forwardRequest(
 			requestLog.DurationSec,
 			requestLog.FirstTokenSec,
 			requestLog.TotalCost,
+			requestLog.GroupMultiplier,
 			requestLog.PriceSource,
 			requestLog.InputCost,
 			requestLog.OutputCost,
@@ -1494,6 +1495,7 @@ func ensureRequestLogTableWithDB(db *sql.DB) error {
 		duration_sec REAL DEFAULT 0,
 		first_token_sec REAL DEFAULT 0,
 		total_cost REAL DEFAULT 0,
+		group_multiplier REAL DEFAULT 1,
 		price_source TEXT DEFAULT '',
 		input_cost REAL DEFAULT 0,
 		output_cost REAL DEFAULT 0,
@@ -1547,6 +1549,9 @@ func ensureRequestLogTableWithDB(db *sql.DB) error {
 		return err
 	}
 	if err := ensureRequestLogColumn(db, "total_cost", "REAL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "group_multiplier", "REAL DEFAULT 1"); err != nil {
 		return err
 	}
 	if err := ensureRequestLogColumn(db, "price_source", "TEXT DEFAULT ''"); err != nil {
@@ -2130,6 +2135,7 @@ func applyRequestLogCostResult(reqLog *ReqeustLog, result requestLogCostResult) 
 	reqLog.Ephemeral5mCost = result.Ephemeral5mCost
 	reqLog.Ephemeral1hCost = result.Ephemeral1hCost
 	reqLog.TotalCost = result.TotalCost
+	reqLog.GroupMultiplier = result.GroupMultiplier
 	reqLog.HasPricing = result.HasPricing
 	reqLog.MatchedPricingModel = result.MatchedPricingModel
 	reqLog.PriceSource = result.PriceSource
@@ -2174,6 +2180,7 @@ type ReqeustLog struct {
 	Ephemeral5mCost           float64 `json:"ephemeral_5m_cost"`
 	Ephemeral1hCost           float64 `json:"ephemeral_1h_cost"`
 	TotalCost                 float64 `json:"total_cost"`
+	GroupMultiplier           float64 `json:"group_multiplier"`
 	HasPricing                bool    `json:"has_pricing"`
 	MatchedPricingModel       string  `json:"matched_pricing_model,omitempty"`
 	ProviderPricingAvailable  bool    `json:"provider_pricing_available"`
@@ -2675,19 +2682,19 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 					INSERT INTO request_log (
 						platform, model, requested_model, response_model, provider_id, provider, http_code,
 						input_tokens, output_tokens, cache_create_tokens, ephemeral_5m_tokens, ephemeral_1h_tokens, cache_read_tokens,
-						reasoning_tokens, is_stream, duration_sec, first_token_sec, total_cost, price_source,
+						reasoning_tokens, is_stream, duration_sec, first_token_sec, total_cost, group_multiplier, price_source,
 						input_cost, output_cost, reasoning_cost, cache_create_cost, cache_read_cost,
 						ephemeral_5m_cost, ephemeral_1h_cost, has_pricing, matched_pricing_model,
 						provider_pricing_available, provider_quota_type, provider_input_usd_per_m, provider_output_usd_per_m,
 						provider_per_call_unified, provider_per_call_input, provider_per_call_output,
 						provider_per_call_unified_set, provider_per_call_input_set, provider_per_call_output_set,
 						request_body, response_body, request_body_truncated, response_body_truncated, payload_bytes, payload_captured
-					) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+					) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 				`,
 				requestLog.Platform, requestLog.Model, requestLog.RequestedModel, requestLog.ResponseModel, requestLog.ProviderID, requestLog.Provider, requestLog.HttpCode,
 				requestLog.InputTokens, requestLog.OutputTokens, requestLog.CacheCreateTokens, requestLog.Ephemeral5mTokens, requestLog.Ephemeral1hTokens,
 				requestLog.CacheReadTokens, requestLog.ReasoningTokens,
-				boolToInt(requestLog.IsStream), requestLog.DurationSec, requestLog.FirstTokenSec, requestLog.TotalCost, requestLog.PriceSource,
+				boolToInt(requestLog.IsStream), requestLog.DurationSec, requestLog.FirstTokenSec, requestLog.TotalCost, requestLog.GroupMultiplier, requestLog.PriceSource,
 				requestLog.InputCost, requestLog.OutputCost, requestLog.ReasoningCost, requestLog.CacheCreateCost, requestLog.CacheReadCost,
 				requestLog.Ephemeral5mCost, requestLog.Ephemeral1hCost, boolToInt(requestLog.HasPricing), requestLog.MatchedPricingModel,
 				boolToInt(requestLog.ProviderPricingAvailable), requestLog.ProviderQuotaType, requestLog.ProviderInputUSDPerM, requestLog.ProviderOutputUSDPerM,

@@ -14,6 +14,7 @@ export interface ModelPricingRow {
   cache_creation_input_token_cost: number
   cache_read_input_token_cost: number
   ephemeral_1h_cost_per_token: number
+  group_multiplier: number
   is_override: boolean
   is_custom: boolean
   source?: 'builtin' | 'manual' | 'claude_sync' | string
@@ -39,6 +40,7 @@ export interface ClaudeOfficialPricingPreviewRow {
   cache_creation_input_token_cost: number
   cache_read_input_token_cost: number
   ephemeral_1h_cost_per_token: number
+  group_multiplier?: number
   is_recognized: boolean
 }
 

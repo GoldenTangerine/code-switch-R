@@ -30,6 +30,7 @@ export type RequestLog = {
   cache_read_cost?: number
   ephemeral_5m_cost?: number
   ephemeral_1h_cost?: number
+  group_multiplier?: number
   has_pricing?: boolean
   matched_pricing_model?: string
   price_source?: string
