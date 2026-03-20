@@ -157,7 +157,11 @@ import {
 } from '../../../services/logs'
 import { cardProviderRef } from '../adapters/providerCardMappers'
 import { buildPayloadPreview, type PayloadPreview } from '../../../utils/payloadPreview'
-import { parseProviderErrorFromConsoleMessage, type ProviderErrorDetail } from '../../../utils/providerError'
+import {
+  hasMeaningfulProviderErrorPayload,
+  parseProviderErrorFromConsoleMessage,
+  type ProviderErrorDetail,
+} from '../../../utils/providerError'
 import { extractErrorMessage } from '../../../utils/error'
 import { showToast } from '../../../utils/toast'
 import { writeTextToClipboard } from '../../../utils/clipboard'
@@ -182,6 +186,12 @@ type ProviderLogEntry = {
   detailLabel: string
   sourceLabel: string
   copyText: string
+}
+
+type PayloadErrorState = {
+  responseBody: string
+  parsedError: ProviderErrorDetail | null
+  hasMeaningfulDetail: boolean
 }
 
 type ConsoleCoverageMode = 'recent' | 'all'
@@ -324,6 +334,19 @@ const buildModelTerms = (log: RequestLog) => {
   return [...terms]
 }
 
+const getPayloadErrorState = (log: RequestLog): PayloadErrorState => {
+  const responseBody = log.response_body?.trim() || ''
+  const parsedError = parseProviderErrorFromConsoleMessage(
+    responseBody ? `status ${log.http_code}: ${responseBody}` : `status ${log.http_code}:`,
+  )
+
+  return {
+    responseBody,
+    parsedError,
+    hasMeaningfulDetail: hasMeaningfulProviderErrorPayload(responseBody, parsedError),
+  }
+}
+
 const matchConsoleCandidate = (log: RequestLog, candidates: ConsoleLogCandidate[]) => {
   const requestTimestamp = toTimestamp(log.created_at)
   const providerTerms = buildProviderTerms(log)
@@ -394,15 +417,20 @@ const matchConsoleCandidate = (log: RequestLog, candidates: ConsoleLogCandidate[
   }
 }
 
-const buildLogEntry = (log: RequestLog, matchedConsoleCandidate?: ConsoleLogCandidate | null): ProviderLogEntry => {
-  const responseBody = log.response_body?.trim() || ''
-  const payloadParsedError = parseProviderErrorFromConsoleMessage(
-    responseBody ? `status ${log.http_code}: ${responseBody}` : `status ${log.http_code}:`,
-  )
+const buildLogEntry = (
+  log: RequestLog,
+  payloadState: PayloadErrorState,
+  matchedConsoleCandidate?: ConsoleLogCandidate | null,
+): ProviderLogEntry => {
+  const {
+    responseBody,
+    parsedError: payloadParsedError,
+    hasMeaningfulDetail: payloadHasMeaningfulDetail,
+  } = payloadState
   const consoleParsedError = matchedConsoleCandidate?.providerError ?? null
 
-  const fallbackSummary = responseBody || `HTTP ${log.http_code}`
-  const detailSource: DetailSource = responseBody ? 'payload' : consoleParsedError ? 'console' : 'none'
+  const fallbackSummary = payloadHasMeaningfulDetail ? responseBody : `HTTP ${log.http_code}`
+  const detailSource: DetailSource = payloadHasMeaningfulDetail ? 'payload' : consoleParsedError ? 'console' : 'none'
   const activeDetail = detailSource === 'console' ? consoleParsedError : payloadParsedError
   const detailText = detailSource === 'payload'
     ? payloadParsedError?.copyText?.trim() || responseBody
@@ -410,8 +438,10 @@ const buildLogEntry = (log: RequestLog, matchedConsoleCandidate?: ConsoleLogCand
       ? consoleParsedError?.copyText?.trim() || consoleParsedError?.rawPayload?.trim() || consoleParsedError?.summary?.trim() || ''
       : ''
   const summaryText = detailSource === 'console'
-    ? consoleParsedError?.summary || payloadParsedError?.summary || fallbackSummary
-    : payloadParsedError?.summary || fallbackSummary
+    ? consoleParsedError?.summary || (payloadHasMeaningfulDetail ? payloadParsedError?.summary : '') || fallbackSummary
+    : payloadHasMeaningfulDetail
+      ? payloadParsedError?.summary || fallbackSummary
+      : fallbackSummary
 
   return {
     log,
@@ -436,16 +466,13 @@ const resolveEntries = (logs: RequestLog[], candidates: ConsoleLogCandidate[]): 
   let unmatchedNoPayloadCount = 0
 
   const resolvedEntries = logs.map((item) => {
-    if (item.response_body?.trim()) {
-      return buildLogEntry(item)
-    }
-
-    const matched = matchConsoleCandidate(item, availableCandidates)
+    const payloadState = getPayloadErrorState(item)
+    const matched = payloadState.hasMeaningfulDetail ? null : matchConsoleCandidate(item, availableCandidates)
     if (matched) {
       availableCandidates.splice(matched.index, 1)
     }
 
-    const entry = buildLogEntry(item, matched?.candidate ?? null)
+    const entry = buildLogEntry(item, payloadState, matched?.candidate ?? null)
     if (!entry.copyText) {
       unmatchedNoPayloadCount += 1
     }

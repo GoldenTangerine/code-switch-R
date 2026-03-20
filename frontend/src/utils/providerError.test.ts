@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { parseProviderErrorFromConsoleMessage } from './providerError'
+import {
+  hasMeaningfulProviderErrorPayload,
+  isLikelyProviderRequestMetadata,
+  parseProviderErrorFromConsoleMessage,
+} from './providerError'
 
 describe('providerError', () => {
   it('returns null for empty or undefined-like input', () => {
@@ -78,6 +82,36 @@ describe('providerError', () => {
     expect(detail?.statusCode).toBe(500)
     expect(detail?.summary).toBe('{broken json')
     expect(detail?.copyText).toBe('{broken json')
+  })
+
+  it('identifies request metadata blobs as non-meaningful payload detail', () => {
+    const responseBody = 'url=https://api-cch.pipidan.xyz/v1/messages content_type=application/json; charset=utf-8'
+    const detail = parseProviderErrorFromConsoleMessage(`status 503: ${responseBody}`)
+
+    expect(isLikelyProviderRequestMetadata(responseBody)).toBe(true)
+    expect(hasMeaningfulProviderErrorPayload(responseBody, detail)).toBe(false)
+    expect(detail?.summary).toBe(responseBody)
+  })
+
+  it('keeps payload meaningful when metadata prefix is followed by json body', () => {
+    const responseBody = [
+      'url=https://api-cch.pipidan.xyz/v1/messages content_type=application/json; charset=utf-8',
+      '{"error":{"message":"No available providers","type":"no_available_providers","code":"no_available_providers"}}',
+    ].join('\n')
+    const detail = parseProviderErrorFromConsoleMessage(`status 503: ${responseBody}`)
+
+    expect(isLikelyProviderRequestMetadata(responseBody)).toBe(false)
+    expect(hasMeaningfulProviderErrorPayload(responseBody, detail)).toBe(true)
+    expect(detail?.providerMessage).toBe('No available providers')
+  })
+
+  it('keeps metadata classification when braces are present but embedded content is not valid json', () => {
+    const responseBody = 'url=https://api-cch.pipidan.xyz/v1/messages headers={x-request-id:abc123} content_type=application/json; charset=utf-8'
+    const detail = parseProviderErrorFromConsoleMessage(`status 503: ${responseBody}`)
+
+    expect(isLikelyProviderRequestMetadata(responseBody)).toBe(true)
+    expect(hasMeaningfulProviderErrorPayload(responseBody, detail)).toBe(false)
+    expect(detail?.summary).toBe(responseBody)
   })
 
   it('classifies rate limit errors', () => {

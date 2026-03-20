@@ -17,6 +17,28 @@ const upstreamStatusPattern = /\bupstream status\s+(\d{3})\b/i
 const inlineStatusPattern = /\bstatus(?:=|:|\s)(\d{3})\b/i
 const httpStatusPattern = /\bHTTP\s+(\d{3})\b/i
 const payloadTailMarkers = [' | 耗时:', ' | 重试 ', ' | Model:', ' | mode:', ' | hint:']
+const metadataSignalPatterns = [
+  /\burl=https?:\/\/[^\s]+/i,
+  /\bcontent_type=[^;\s]+/i,
+  /\bcharset=[^;\s]+/i,
+  /\bmethod=(?:GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD)\b/i,
+]
+const metadataErrorSignalPatterns = [
+  /\berror\b/i,
+  /\bmessage\b/i,
+  /\bdetail\b/i,
+  /\breason\b/i,
+  /\bno_available_providers\b/i,
+  /\bno available providers\b/i,
+  /\brate limit\b/i,
+  /\boverloaded\b/i,
+  /\bunauthorized\b/i,
+  /\bforbidden\b/i,
+  /\bquota\b/i,
+  /\btimeout\b/i,
+  /\binternal\b/i,
+  /\bservice unavailable\b/i,
+]
 
 const normalizeWhitespace = (value: string) => value.replace(/\s+/g, ' ').trim()
 
@@ -150,6 +172,25 @@ const extractFirstEmbeddedJsonSegment = (input: string): string => {
   return extractBalancedJsonSegment(trimmed.slice(firstJsonStart))
 }
 
+const extractStructuredPayloadCandidate = (candidate: string) => {
+  const trimmed = candidate.trim()
+  if (!trimmed) {
+    return ''
+  }
+
+  const balancedSegment = extractBalancedJsonSegment(trimmed)
+  if (balancedSegment) {
+    return balancedSegment
+  }
+
+  const embeddedSegment = extractFirstEmbeddedJsonSegment(trimmed)
+  if (!embeddedSegment) {
+    return ''
+  }
+
+  return tryParseJson(embeddedSegment) != null ? embeddedSegment : ''
+}
+
 const extractPayloadText = (message: string, statusMatch: RegExpMatchArray | null) => {
   if (statusMatch == null || statusMatch.index == null) {
     return ''
@@ -172,7 +213,7 @@ const extractPayloadText = (message: string, statusMatch: RegExpMatchArray | nul
       continue
     }
 
-    const jsonSegment = extractBalancedJsonSegment(candidate) || extractFirstEmbeddedJsonSegment(candidate)
+    const jsonSegment = extractStructuredPayloadCandidate(candidate)
     if (jsonSegment) {
       return jsonSegment
     }
@@ -296,6 +337,58 @@ const buildCopyText = (rawPayload: string, fallback: string) => {
     return rawPayload
   }
   return fallback
+}
+
+const hasValidEmbeddedJsonPayload = (value: string) => {
+  const embeddedSegment = extractFirstEmbeddedJsonSegment(value)
+  if (!embeddedSegment) {
+    return false
+  }
+  return tryParseJson(embeddedSegment) != null
+}
+
+export const isLikelyProviderRequestMetadata = (value: string) => {
+  const normalized = String(value ?? '').trim()
+  if (!normalized) {
+    return false
+  }
+
+  if (hasValidEmbeddedJsonPayload(normalized)) {
+    return false
+  }
+
+  const metadataSignalCount = metadataSignalPatterns.reduce((count, pattern) => {
+    return count + (pattern.test(normalized) ? 1 : 0)
+  }, 0)
+
+  if (metadataSignalCount < 2) {
+    return false
+  }
+
+  return !metadataErrorSignalPatterns.some((pattern) => pattern.test(normalized))
+}
+
+export const hasMeaningfulProviderErrorPayload = (
+  rawPayload: string | null | undefined,
+  parsedDetail?: ProviderErrorDetail | null,
+) => {
+  const normalized = String(rawPayload ?? '').trim()
+  if (!normalized) {
+    return false
+  }
+
+  if (isLikelyProviderRequestMetadata(normalized)) {
+    return false
+  }
+
+  return Boolean(
+    parsedDetail?.providerMessage ||
+    parsedDetail?.errorCode ||
+    parsedDetail?.errorType ||
+    parsedDetail?.errorStatus ||
+    parsedDetail?.errorParam ||
+    normalized,
+  )
 }
 
 export const parseProviderErrorFromConsoleMessage = (message: string): ProviderErrorDetail | null => {
