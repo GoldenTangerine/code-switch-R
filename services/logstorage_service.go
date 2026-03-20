@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -33,11 +34,40 @@ type LogStorageStats struct {
 	StatsDay   LogTableStorageStat    `json:"stats_day"`
 }
 
+type ProviderLogStorageStat struct {
+	Platform        string `json:"platform"`
+	ProviderID      string `json:"provider_id,omitempty"`
+	Provider        string `json:"provider"`
+	RequestLogRows  int64  `json:"request_log_rows"`
+	RequestLogBytes int64  `json:"request_log_bytes"`
+	StatsRows       int64  `json:"stats_rows"`
+	StatsBytes      int64  `json:"stats_bytes"`
+	TotalBytes      int64  `json:"total_bytes"`
+	LatestAt        string `json:"latest_at"`
+}
+
 type DeleteRequestLogsByDateResult struct {
 	DeletedRequestLogs int64 `json:"deleted_request_logs"`
 	DeletedStatsHour   int64 `json:"deleted_stats_hour"`
 	DeletedStatsDay    int64 `json:"deleted_stats_day"`
 }
+
+type deleteProviderLogsTarget struct {
+	Platform   string
+	ProviderID string
+	Provider   string
+}
+
+type providerLogStorageRow struct {
+	Platform   string
+	ProviderID string
+	Provider   string
+	Rows       int64
+	Bytes      int64
+	LatestAt   string
+}
+
+const providerLogStorageUnknownIdentity = "__unknown__"
 
 func (ls *LogService) GetLogStorageStats() (LogStorageStats, error) {
 	stats := LogStorageStats{
@@ -124,6 +154,145 @@ func (ls *LogService) ClearLogStats() error {
 	}
 	_, _ = db.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
 	return nil
+}
+
+func (ls *LogService) ListProviderLogStorageStats() ([]ProviderLogStorageStat, error) {
+	db, err := xdb.DB("default")
+	if err != nil {
+		return nil, err
+	}
+
+	merged := make(map[string]*ProviderLogStorageStat)
+
+	requestRows, err := queryProviderRequestLogStorageRows(db)
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range requestRows {
+		entry := mergeProviderLogStorageRow(merged, row)
+		entry.RequestLogRows += row.Rows
+		entry.RequestLogBytes += row.Bytes
+		entry.TotalBytes = entry.RequestLogBytes + entry.StatsBytes
+	}
+
+	statsHourlyRows, err := queryProviderStatsStorageRows(db, requestLogStatsHourlyTable)
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range statsHourlyRows {
+		entry := mergeProviderLogStorageRow(merged, row)
+		entry.StatsRows += row.Rows
+		entry.StatsBytes += row.Bytes
+		entry.TotalBytes = entry.RequestLogBytes + entry.StatsBytes
+	}
+
+	statsDailyRows, err := queryProviderStatsStorageRows(db, requestLogStatsDailyTable)
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range statsDailyRows {
+		entry := mergeProviderLogStorageRow(merged, row)
+		entry.StatsRows += row.Rows
+		entry.StatsBytes += row.Bytes
+		entry.TotalBytes = entry.RequestLogBytes + entry.StatsBytes
+	}
+
+	items := make([]ProviderLogStorageStat, 0, len(merged))
+	for _, item := range merged {
+		if item == nil {
+			continue
+		}
+		item.TotalBytes = item.RequestLogBytes + item.StatsBytes
+		items = append(items, *item)
+	}
+
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].TotalBytes != items[j].TotalBytes {
+			return items[i].TotalBytes > items[j].TotalBytes
+		}
+		if items[i].RequestLogRows != items[j].RequestLogRows {
+			return items[i].RequestLogRows > items[j].RequestLogRows
+		}
+		if items[i].StatsRows != items[j].StatsRows {
+			return items[i].StatsRows > items[j].StatsRows
+		}
+		if items[i].LatestAt != items[j].LatestAt {
+			return items[i].LatestAt > items[j].LatestAt
+		}
+		if items[i].Platform != items[j].Platform {
+			return items[i].Platform < items[j].Platform
+		}
+		return items[i].Provider < items[j].Provider
+	})
+
+	return items, nil
+}
+
+func (ls *LogService) ClearProviderLogStorage(platform string, providerID string, provider string) (DeleteRequestLogsByDateResult, error) {
+	result := DeleteRequestLogsByDateResult{}
+	target, err := normalizeProviderLogStorageTarget(platform, providerID, provider)
+	if err != nil {
+		return result, err
+	}
+
+	db, err := xdb.DB("default")
+	if err != nil {
+		return result, err
+	}
+	triggersCleaned := false
+	defer func() {
+		if !triggersCleaned {
+			return
+		}
+		if err := ensureRequestLogStatsTriggersWithDB(db); err != nil {
+			fmt.Printf("[WARN] ensureRequestLogStatsTriggersWithDB failed after deleting request_log by provider: %v\n", err)
+		}
+	}()
+	if err := cleanupRequestLogStatsTriggersWithDB(db); err != nil {
+		return result, err
+	}
+	triggersCleaned = true
+
+	tx, err := db.Begin()
+	if err != nil {
+		return result, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	whereClause, args := buildProviderLogStorageWhereClause(target)
+	requestLogExec, err := tx.Exec(
+		"DELETE FROM request_log WHERE "+whereClause,
+		args...,
+	)
+	if err != nil {
+		return result, err
+	}
+	result.DeletedRequestLogs = rowsAffected(requestLogExec)
+
+	deletedHourly, err := deleteRequestLogStatsByProviderTx(tx, requestLogStatsHourlyTable, target)
+	if err != nil {
+		return result, err
+	}
+	result.DeletedStatsHour = deletedHourly
+
+	deletedDaily, err := deleteRequestLogStatsByProviderTx(tx, requestLogStatsDailyTable, target)
+	if err != nil {
+		return result, err
+	}
+	result.DeletedStatsDay = deletedDaily
+
+	if err := tx.Commit(); err != nil {
+		return result, err
+	}
+	committed = true
+
+	_, _ = db.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
+	return result, nil
 }
 
 func (ls *LogService) RequestLogDailyHeatmapStats(days int) ([]HeatmapStat, error) {
@@ -325,6 +494,281 @@ func parseLogStorageDay(value string) (time.Time, error) {
 		return time.Time{}, fmt.Errorf("invalid date: %s", value)
 	}
 	return startOfDay(parsed), nil
+}
+
+func normalizeProviderLogStorageTarget(platform string, providerID string, provider string) (deleteProviderLogsTarget, error) {
+	normalizedProviderID := normalizeProviderLogStorageIdentity(providerID, provider)
+	normalizedProvider := normalizeProviderLogStorageName(providerID, provider)
+	target := deleteProviderLogsTarget{
+		Platform:   strings.TrimSpace(platform),
+		ProviderID: normalizedProviderID,
+		Provider:   normalizedProvider,
+	}
+	if target.Platform == "" {
+		return target, fmt.Errorf("invalid platform")
+	}
+	if target.ProviderID == "" || target.ProviderID == providerLogStorageUnknownIdentity {
+		return target, fmt.Errorf("invalid provider")
+	}
+	return target, nil
+}
+
+func providerLogStorageIdentity(platform string, providerID string, provider string) string {
+	normalizedPlatform := strings.TrimSpace(platform)
+	normalizedProviderID := normalizeProviderLogStorageIdentity(providerID, provider)
+	return normalizedPlatform + "\x00id:" + normalizedProviderID
+}
+
+func normalizeProviderLogStorageIdentity(providerID string, provider string) string {
+	normalizedProviderID := strings.TrimSpace(providerID)
+	if normalizedProviderID != "" {
+		return normalizedProviderID
+	}
+	normalizedProvider := strings.TrimSpace(provider)
+	if normalizedProvider != "" {
+		return normalizedProvider
+	}
+	return providerLogStorageUnknownIdentity
+}
+
+func normalizeProviderLogStorageName(providerID string, provider string) string {
+	normalizedProvider := strings.TrimSpace(provider)
+	if normalizedProvider != "" {
+		return normalizedProvider
+	}
+	normalizedProviderID := strings.TrimSpace(providerID)
+	if normalizedProviderID != "" {
+		return normalizedProviderID
+	}
+	return "unknown"
+}
+
+func mergeProviderLogStorageRow(entries map[string]*ProviderLogStorageStat, row providerLogStorageRow) *ProviderLogStorageStat {
+	if entries == nil {
+		return nil
+	}
+	key := providerLogStorageIdentity(row.Platform, row.ProviderID, row.Provider)
+	entry, ok := entries[key]
+	if !ok || entry == nil {
+		entry = &ProviderLogStorageStat{
+			Platform:   strings.TrimSpace(row.Platform),
+			ProviderID: strings.TrimSpace(row.ProviderID),
+			Provider:   normalizeProviderLogStorageName(row.ProviderID, row.Provider),
+			LatestAt:   strings.TrimSpace(row.LatestAt),
+		}
+		entries[key] = entry
+		return entry
+	}
+	if entry.ProviderID == "" && strings.TrimSpace(row.ProviderID) != "" {
+		entry.ProviderID = strings.TrimSpace(row.ProviderID)
+	}
+	if (strings.TrimSpace(row.Provider) != "" && entry.Provider == "unknown") ||
+		strings.TrimSpace(row.LatestAt) > strings.TrimSpace(entry.LatestAt) {
+		entry.Provider = normalizeProviderLogStorageName(row.ProviderID, row.Provider)
+	}
+	if strings.TrimSpace(row.LatestAt) > strings.TrimSpace(entry.LatestAt) {
+		entry.LatestAt = strings.TrimSpace(row.LatestAt)
+	}
+	return entry
+}
+
+func buildProviderLogStorageWhereClause(target deleteProviderLogsTarget) (string, []any) {
+	matchName := normalizeProviderLogStorageName(target.ProviderID, target.Provider)
+	return strings.Join([]string{
+		"platform = ?",
+		"(TRIM(COALESCE(provider_id, '')) = ? OR (TRIM(COALESCE(provider_id, '')) = '' AND TRIM(COALESCE(provider, '')) = ?))",
+	}, " AND "), []any{target.Platform, target.ProviderID, matchName}
+}
+
+func deleteRequestLogStatsByProviderTx(tx *sql.Tx, table string, target deleteProviderLogsTarget) (int64, error) {
+	if tx == nil {
+		return 0, fmt.Errorf("nil tx")
+	}
+	if strings.TrimSpace(table) == "" {
+		return 0, fmt.Errorf("empty table")
+	}
+	whereClause := strings.Join([]string{
+		"platform = ?",
+		"(TRIM(COALESCE(provider_id, '')) = ? OR (TRIM(COALESCE(provider_id, '')) = '' AND TRIM(COALESCE(provider, '')) = ?))",
+	}, " AND ")
+	args := []any{target.Platform, target.ProviderID, normalizeProviderLogStorageName(target.ProviderID, target.Provider)}
+	execResult, err := tx.Exec(
+		fmt.Sprintf("DELETE FROM %s WHERE %s", table, whereClause),
+		args...,
+	)
+	if err != nil && !isNoSuchTableErr(err) {
+		return 0, err
+	}
+	if err != nil {
+		return 0, nil
+	}
+	return rowsAffected(execResult), nil
+}
+
+func queryProviderRequestLogStorageRows(db *sql.DB) ([]providerLogStorageRow, error) {
+	if db == nil {
+		return nil, errors.New("nil db")
+	}
+
+	queryWithPayloadBytes := `
+		SELECT
+			TRIM(COALESCE(platform, '')) AS platform,
+			CASE
+				WHEN TRIM(COALESCE(provider_id, '')) <> '' THEN TRIM(provider_id)
+				WHEN TRIM(COALESCE(provider, '')) <> '' THEN TRIM(provider)
+				ELSE '` + providerLogStorageUnknownIdentity + `'
+			END AS provider_id,
+			MAX(
+				CASE
+					WHEN TRIM(COALESCE(provider, '')) <> '' THEN TRIM(provider)
+					WHEN TRIM(COALESCE(provider_id, '')) <> '' THEN TRIM(provider_id)
+					ELSE 'unknown'
+				END
+			) AS provider,
+			COUNT(*) AS rows,
+			COALESCE(SUM(
+				COALESCE(LENGTH(CAST(platform AS BLOB)), 0) +
+				COALESCE(LENGTH(CAST(model AS BLOB)), 0) +
+				COALESCE(LENGTH(CAST(requested_model AS BLOB)), 0) +
+				COALESCE(LENGTH(CAST(response_model AS BLOB)), 0) +
+				COALESCE(LENGTH(CAST(provider_id AS BLOB)), 0) +
+				COALESCE(LENGTH(CAST(provider AS BLOB)), 0) +
+				COALESCE(LENGTH(CAST(price_source AS BLOB)), 0) +
+				COALESCE(LENGTH(CAST(matched_pricing_model AS BLOB)), 0) +
+				CASE
+					WHEN COALESCE(payload_bytes, 0) > 0 THEN COALESCE(payload_bytes, 0)
+					ELSE COALESCE(LENGTH(CAST(request_body AS BLOB)), 0) + COALESCE(LENGTH(CAST(response_body AS BLOB)), 0)
+				END +
+				176
+			), 0) AS bytes,
+			MAX(created_at) AS latest_at
+		FROM request_log
+		WHERE TRIM(COALESCE(provider_id, '')) <> '' OR TRIM(COALESCE(provider, '')) <> ''
+		GROUP BY platform,
+			CASE
+				WHEN TRIM(COALESCE(provider_id, '')) <> '' THEN TRIM(provider_id)
+				WHEN TRIM(COALESCE(provider, '')) <> '' THEN TRIM(provider)
+				ELSE '` + providerLogStorageUnknownIdentity + `'
+			END
+	`
+	queryLegacy := `
+		SELECT
+			TRIM(COALESCE(platform, '')) AS platform,
+			CASE
+				WHEN TRIM(COALESCE(provider_id, '')) <> '' THEN TRIM(provider_id)
+				WHEN TRIM(COALESCE(provider, '')) <> '' THEN TRIM(provider)
+				ELSE '` + providerLogStorageUnknownIdentity + `'
+			END AS provider_id,
+			MAX(
+				CASE
+					WHEN TRIM(COALESCE(provider, '')) <> '' THEN TRIM(provider)
+					WHEN TRIM(COALESCE(provider_id, '')) <> '' THEN TRIM(provider_id)
+					ELSE 'unknown'
+				END
+			) AS provider,
+			COUNT(*) AS rows,
+			COALESCE(SUM(
+				COALESCE(LENGTH(CAST(platform AS BLOB)), 0) +
+				COALESCE(LENGTH(CAST(model AS BLOB)), 0) +
+				COALESCE(LENGTH(CAST(provider_id AS BLOB)), 0) +
+				COALESCE(LENGTH(CAST(provider AS BLOB)), 0) +
+				COALESCE(LENGTH(CAST(request_body AS BLOB)), 0) +
+				COALESCE(LENGTH(CAST(response_body AS BLOB)), 0) +
+				160
+			), 0) AS bytes,
+			MAX(created_at) AS latest_at
+		FROM request_log
+		WHERE TRIM(COALESCE(provider_id, '')) <> '' OR TRIM(COALESCE(provider, '')) <> ''
+		GROUP BY platform,
+			CASE
+				WHEN TRIM(COALESCE(provider_id, '')) <> '' THEN TRIM(provider_id)
+				WHEN TRIM(COALESCE(provider, '')) <> '' THEN TRIM(provider)
+				ELSE '` + providerLogStorageUnknownIdentity + `'
+			END
+	`
+	return queryProviderLogStorageRows(db, queryWithPayloadBytes, queryLegacy)
+}
+
+func queryProviderStatsStorageRows(db *sql.DB, table string) ([]providerLogStorageRow, error) {
+	if db == nil {
+		return nil, errors.New("nil db")
+	}
+	if strings.TrimSpace(table) == "" {
+		return nil, fmt.Errorf("empty table")
+	}
+
+	query := fmt.Sprintf(`
+		SELECT
+			TRIM(COALESCE(platform, '')) AS platform,
+			CASE
+				WHEN TRIM(COALESCE(provider_id, '')) <> '' THEN TRIM(provider_id)
+				WHEN TRIM(COALESCE(provider, '')) <> '' THEN TRIM(provider)
+				ELSE '%s'
+			END AS provider_id,
+			MAX(
+				CASE
+					WHEN TRIM(COALESCE(provider, '')) <> '' THEN TRIM(provider)
+					WHEN TRIM(COALESCE(provider_id, '')) <> '' THEN TRIM(provider_id)
+					ELSE 'unknown'
+				END
+			) AS provider,
+			COUNT(*) AS rows,
+			COALESCE(SUM(
+				COALESCE(LENGTH(CAST(bucket_start AS BLOB)), 0) +
+				COALESCE(LENGTH(CAST(platform AS BLOB)), 0) +
+				COALESCE(LENGTH(CAST(provider_id AS BLOB)), 0) +
+				COALESCE(LENGTH(CAST(provider AS BLOB)), 0) +
+				96
+			), 0) AS bytes,
+			MAX(bucket_start) AS latest_at
+		FROM %s
+		WHERE TRIM(COALESCE(provider_id, '')) <> '' OR TRIM(COALESCE(provider, '')) <> ''
+		GROUP BY platform,
+			CASE
+				WHEN TRIM(COALESCE(provider_id, '')) <> '' THEN TRIM(provider_id)
+				WHEN TRIM(COALESCE(provider, '')) <> '' THEN TRIM(provider)
+				ELSE '%s'
+			END
+	`, providerLogStorageUnknownIdentity, table, providerLogStorageUnknownIdentity)
+	return queryProviderLogStorageRows(db, query, "")
+}
+
+func queryProviderLogStorageRows(db *sql.DB, primaryQuery string, fallbackQuery string) ([]providerLogStorageRow, error) {
+	rows, err := db.Query(primaryQuery)
+	if err != nil && fallbackQuery != "" && strings.Contains(err.Error(), "no such column") {
+		rows, err = db.Query(fallbackQuery)
+	}
+	if err != nil {
+		if isNoSuchTableErr(err) {
+			return []providerLogStorageRow{}, nil
+		}
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]providerLogStorageRow, 0, 64)
+	for rows.Next() {
+		var platform sql.NullString
+		var providerID sql.NullString
+		var provider sql.NullString
+		var latestAt sql.NullString
+		var row providerLogStorageRow
+		if err := rows.Scan(&platform, &providerID, &provider, &row.Rows, &row.Bytes, &latestAt); err != nil {
+			return nil, err
+		}
+		row.Platform = strings.TrimSpace(platform.String)
+		row.ProviderID = strings.TrimSpace(providerID.String)
+		row.Provider = normalizeProviderLogStorageName(row.ProviderID, provider.String)
+		row.LatestAt = strings.TrimSpace(latestAt.String)
+		if row.Platform == "" || row.ProviderID == "" || row.ProviderID == providerLogStorageUnknownIdentity {
+			continue
+		}
+		items = append(items, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 func deleteRequestLogStatsRangeTx(tx *sql.Tx, table string, startKey string, endKey string) (int64, error) {

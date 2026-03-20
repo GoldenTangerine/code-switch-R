@@ -343,6 +343,250 @@ func TestListRequestLogHeatmapYears_ReturnsDistinctYearsDescending(t *testing.T)
 	}
 }
 
+func TestListProviderLogStorageStats_ReturnsProviderAggregates(t *testing.T) {
+	useIsolatedHomeDir(t)
+
+	if err := InitDatabase(); err != nil {
+		t.Fatalf("初始化数据库失败: %v", err)
+	}
+
+	db, err := xdb.DB("default")
+	if err != nil {
+		t.Fatalf("获取数据库连接失败: %v", err)
+	}
+
+	baseDay := startOfDay(time.Now()).AddDate(0, 0, -1)
+	insertProviderRequestLogForStorage(t, db, "codex", "pid-a", "provider-a", baseDay.Add(2*time.Hour), "req-a", "resp-a")
+	insertProviderRequestLogForStorage(t, db, "codex", "pid-a", "provider-a", baseDay.Add(5*time.Hour), "req-aaaa", "resp-aaaa")
+	insertProviderRequestLogForStorage(t, db, "claude", "pid-b", "provider-b", baseDay.Add(6*time.Hour), "req-b", "resp-b")
+
+	ls := NewLogService(nil)
+	stats, err := ls.ListProviderLogStorageStats()
+	if err != nil {
+		t.Fatalf("ListProviderLogStorageStats 调用失败: %v", err)
+	}
+	if len(stats) != 2 {
+		t.Fatalf("期望返回 2 个供应商聚合，实际 %d，详情 %+v", len(stats), stats)
+	}
+
+	var codexProvider *ProviderLogStorageStat
+	for i := range stats {
+		if stats[i].Platform == "codex" && stats[i].ProviderID == "pid-a" {
+			codexProvider = &stats[i]
+			break
+		}
+	}
+	if codexProvider == nil {
+		t.Fatalf("期望返回 codex / pid-a 的供应商存储统计，实际 %+v", stats)
+	}
+	if codexProvider.RequestLogRows != 2 {
+		t.Fatalf("期望 codex / pid-a 请求明细为 2，实际 %d", codexProvider.RequestLogRows)
+	}
+	if codexProvider.StatsRows != 3 {
+		t.Fatalf("期望 codex / pid-a 统计汇总为 3（2 hourly + 1 daily），实际 %d", codexProvider.StatsRows)
+	}
+	if codexProvider.TotalBytes <= 0 || codexProvider.RequestLogBytes <= 0 || codexProvider.StatsBytes <= 0 {
+		t.Fatalf("期望 codex / pid-a 占用估算均大于 0，实际 %+v", codexProvider)
+	}
+}
+
+func TestListProviderLogStorageStats_MergesLegacyProviderNameIdentity(t *testing.T) {
+	useIsolatedHomeDir(t)
+
+	if err := InitDatabase(); err != nil {
+		t.Fatalf("初始化数据库失败: %v", err)
+	}
+
+	db, err := xdb.DB("default")
+	if err != nil {
+		t.Fatalf("获取数据库连接失败: %v", err)
+	}
+
+	baseDay := startOfDay(time.Now()).AddDate(0, 0, -1)
+	insertProviderRequestLogForStorage(t, db, "codex", "", "legacy-provider", baseDay.Add(1*time.Hour), "req-legacy", "resp-legacy")
+	insertProviderRequestLogForStorage(t, db, "codex", "", "legacy-provider", baseDay.Add(3*time.Hour), "req-legacy-2", "resp-legacy-2")
+
+	ls := NewLogService(nil)
+	stats, err := ls.ListProviderLogStorageStats()
+	if err != nil {
+		t.Fatalf("ListProviderLogStorageStats 调用失败: %v", err)
+	}
+
+	if len(stats) != 1 {
+		t.Fatalf("期望 legacy 供应商只聚合成 1 条，实际 %d，详情 %+v", len(stats), stats)
+	}
+	if stats[0].ProviderID != "legacy-provider" {
+		t.Fatalf("期望 legacy 供应商统一后的 provider_id 为 legacy-provider，实际 %+v", stats[0])
+	}
+	if stats[0].RequestLogRows != 2 || stats[0].StatsRows != 3 {
+		t.Fatalf("期望 legacy 供应商明细 / 统计分别为 2 / 3，实际 %+v", stats[0])
+	}
+}
+
+func TestClearProviderLogStorage_RemovesProviderRequestLogsAndStats(t *testing.T) {
+	useIsolatedHomeDir(t)
+
+	if err := InitDatabase(); err != nil {
+		t.Fatalf("初始化数据库失败: %v", err)
+	}
+
+	db, err := xdb.DB("default")
+	if err != nil {
+		t.Fatalf("获取数据库连接失败: %v", err)
+	}
+
+	targetDay := startOfDay(time.Now()).AddDate(0, 0, -2)
+	insertProviderRequestLogForStorage(t, db, "codex", "pid-a", "provider-a", targetDay.Add(2*time.Hour), "req-a", "resp-a")
+	insertProviderRequestLogForStorage(t, db, "codex", "pid-a", "provider-a", targetDay.Add(4*time.Hour), "req-aa", "resp-aa")
+	insertProviderRequestLogForStorage(t, db, "codex", "pid-b", "provider-b", targetDay.Add(6*time.Hour), "req-b", "resp-b")
+
+	ls := NewLogService(nil)
+	result, err := ls.ClearProviderLogStorage("codex", "pid-a", "provider-a")
+	if err != nil {
+		t.Fatalf("ClearProviderLogStorage 调用失败: %v", err)
+	}
+	if result.DeletedRequestLogs != 2 {
+		t.Fatalf("期望删除 2 条 request_log，实际 %d", result.DeletedRequestLogs)
+	}
+	if result.DeletedStatsHour != 2 {
+		t.Fatalf("期望删除 2 条 hourly stats，实际 %d", result.DeletedStatsHour)
+	}
+	if result.DeletedStatsDay != 1 {
+		t.Fatalf("期望删除 1 条 daily stats，实际 %d", result.DeletedStatsDay)
+	}
+
+	assertTableCount(t, db,
+		"SELECT COUNT(*) FROM request_log WHERE platform = ? AND provider_id = ?",
+		0,
+		"codex",
+		"pid-a",
+	)
+	assertTableCount(t, db,
+		"SELECT COUNT(*) FROM request_log WHERE platform = ? AND provider_id = ?",
+		1,
+		"codex",
+		"pid-b",
+	)
+	assertTableCount(t, db,
+		"SELECT COUNT(*) FROM request_log_stats_hourly WHERE platform = ? AND provider_id = ?",
+		0,
+		"codex",
+		"pid-a",
+	)
+	assertTableCount(t, db,
+		"SELECT COUNT(*) FROM request_log_stats_daily WHERE platform = ? AND provider_id = ?",
+		0,
+		"codex",
+		"pid-a",
+	)
+	assertTableCount(t, db,
+		"SELECT COUNT(*) FROM request_log_stats_daily WHERE platform = ? AND provider_id = ?",
+		1,
+		"codex",
+		"pid-b",
+	)
+}
+
+func TestClearProviderLogStorage_RemovesLegacyProviderStats(t *testing.T) {
+	useIsolatedHomeDir(t)
+
+	if err := InitDatabase(); err != nil {
+		t.Fatalf("初始化数据库失败: %v", err)
+	}
+
+	db, err := xdb.DB("default")
+	if err != nil {
+		t.Fatalf("获取数据库连接失败: %v", err)
+	}
+
+	targetDay := startOfDay(time.Now()).AddDate(0, 0, -1)
+	insertProviderRequestLogForStorage(t, db, "codex", "", "legacy-provider", targetDay.Add(2*time.Hour), "req-legacy", "resp-legacy")
+	insertProviderRequestLogForStorage(t, db, "codex", "", "legacy-provider", targetDay.Add(4*time.Hour), "req-legacy-2", "resp-legacy-2")
+	insertProviderRequestLogForStorage(t, db, "codex", "pid-b", "provider-b", targetDay.Add(6*time.Hour), "req-b", "resp-b")
+
+	ls := NewLogService(nil)
+	result, err := ls.ClearProviderLogStorage("codex", "", "legacy-provider")
+	if err != nil {
+		t.Fatalf("ClearProviderLogStorage 调用失败: %v", err)
+	}
+	if result.DeletedRequestLogs != 2 || result.DeletedStatsHour != 2 || result.DeletedStatsDay != 1 {
+		t.Fatalf("期望 legacy 供应商删除 2 条明细、2 条 hourly、1 条 daily，实际 %+v", result)
+	}
+
+	assertTableCount(t, db,
+		"SELECT COUNT(*) FROM request_log WHERE platform = ? AND COALESCE(provider_id, '') = '' AND provider = ?",
+		0,
+		"codex",
+		"legacy-provider",
+	)
+	assertTableCount(t, db,
+		"SELECT COUNT(*) FROM request_log_stats_hourly WHERE platform = ? AND provider_id = ?",
+		0,
+		"codex",
+		"legacy-provider",
+	)
+	assertTableCount(t, db,
+		"SELECT COUNT(*) FROM request_log_stats_daily WHERE platform = ? AND provider_id = ?",
+		0,
+		"codex",
+		"legacy-provider",
+	)
+}
+
+func insertProviderRequestLogForStorage(
+	t *testing.T,
+	db *sql.DB,
+	platform string,
+	providerID string,
+	provider string,
+	createdAt time.Time,
+	requestBody string,
+	responseBody string,
+) {
+	t.Helper()
+	payloadBytes := len(requestBody) + len(responseBody)
+	_, err := db.Exec(`
+		INSERT INTO request_log (
+			platform,
+			model,
+			provider_id,
+			provider,
+			http_code,
+			input_tokens,
+			output_tokens,
+			cache_create_tokens,
+			cache_read_tokens,
+			reasoning_tokens,
+			total_cost,
+			request_body,
+			response_body,
+			payload_bytes,
+			payload_captured,
+			created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`,
+		platform,
+		"test-model",
+		providerID,
+		provider,
+		500,
+		10,
+		20,
+		0,
+		3,
+		1,
+		0.2,
+		requestBody,
+		responseBody,
+		payloadBytes,
+		1,
+		createdAt.UTC().Format(timeLayout),
+	)
+	if err != nil {
+		t.Fatalf("插入供应商 request_log 失败: %v", err)
+	}
+}
+
 func assertTableCount(t *testing.T, db *sql.DB, query string, expected int64, args ...any) {
 	t.Helper()
 	var count int64

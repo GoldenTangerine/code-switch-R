@@ -161,6 +161,7 @@
           :storage-loading="storageLoading"
           :storage-clearing="storageClearing"
           :storage-stats="storageStats"
+          :provider-storage-stats="providerStorageStats"
           :storage-heatmap-year="storageHeatmapYear"
           :storage-heatmap-years="storageHeatmapYears"
           :storage-heatmap-loading="storageHeatmapLoading"
@@ -351,6 +352,7 @@ const {
 
 const {
   storageStats,
+  providerStorageStats,
   storageLoading,
   storageClearing,
   storageModal,

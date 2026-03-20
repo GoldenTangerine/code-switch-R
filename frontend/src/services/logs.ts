@@ -207,6 +207,22 @@ export const fetchLogStorageStats = async (): Promise<LogStorageStats> => {
   return Call.ByName('codeswitch/services.LogService.GetLogStorageStats')
 }
 
+export type ProviderLogStorageStat = {
+  platform: LogPlatform | ''
+  provider_id?: string
+  provider: string
+  request_log_rows: number
+  request_log_bytes: number
+  stats_rows: number
+  stats_bytes: number
+  total_bytes: number
+  latest_at: string
+}
+
+export const fetchProviderLogStorageStats = async (): Promise<ProviderLogStorageStat[]> => {
+  return Call.ByName('codeswitch/services.LogService.ListProviderLogStorageStats')
+}
+
 export const clearRequestLogs = async (): Promise<void> => {
   await Call.ByName('codeswitch/services.LogService.ClearRequestLogs')
 }
@@ -220,6 +236,19 @@ export type DeleteRequestLogsByDateResult = {
 export const deleteRequestLogsByDate = async (date: string): Promise<DeleteRequestLogsByDateResult> => {
   const normalized = String(date ?? '').trim()
   return Call.ByName('codeswitch/services.LogService.DeleteRequestLogsByDate', normalized)
+}
+
+export const clearProviderLogStorage = async (
+  platform: LogPlatform | '',
+  providerId: string,
+  provider: string,
+): Promise<DeleteRequestLogsByDateResult> => {
+  return Call.ByName(
+    'codeswitch/services.LogService.ClearProviderLogStorage',
+    platform ?? '',
+    String(providerId ?? '').trim(),
+    String(provider ?? '').trim(),
+  )
 }
 
 export const clearLogStats = async (): Promise<void> => {

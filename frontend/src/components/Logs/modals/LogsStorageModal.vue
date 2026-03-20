@@ -76,6 +76,82 @@
         {{ t('components.logs.storage.empty') }}
       </p>
 
+      <section v-if="providerStorageStats.length" class="mac-panel logs-storage-provider-panel">
+        <div class="logs-storage-provider-panel__header">
+          <div class="logs-storage-provider-panel__copy">
+            <h3 class="logs-storage-provider-panel__title">{{ t('components.logs.storage.providersTitle') }}</h3>
+            <p class="logs-storage-provider-panel__hint">
+              {{ t('components.logs.storage.providersHint', { count: providerStorageStats.length }) }}
+            </p>
+          </div>
+          <div class="logs-storage-provider-panel__summary">
+            {{ t('components.logs.storage.providersSummary', { count: providerStorageStats.length }) }}
+          </div>
+        </div>
+
+        <div class="logs-storage-provider-list">
+          <article
+            v-for="item in providerStorageStats"
+            :key="`${item.platform}-${item.provider_id || item.provider}`"
+            class="logs-storage-provider-item"
+          >
+            <div class="logs-storage-provider-item__header">
+              <div class="logs-storage-provider-item__identity">
+                <div class="logs-storage-provider-item__name">{{ item.provider || item.provider_id || 'unknown' }}</div>
+                <div class="logs-storage-provider-item__meta">
+                  <span class="logs-storage-provider-item__platform">{{ item.platform || '—' }}</span>
+                  <span class="logs-storage-provider-item__latest">
+                    {{ t('components.logs.storage.providerLastSeen') }}：{{ formatters.formatStorageTimestamp(item.latest_at) }}
+                  </span>
+                </div>
+              </div>
+              <BaseButton
+                variant="danger"
+                size="sm"
+                :disabled="storageClearing"
+                @click="handlers.handleClearProviderLogs(item)"
+              >
+                {{ storageClearing ? t('components.logs.storage.clearing') : t('components.logs.storage.clearProvider') }}
+              </BaseButton>
+            </div>
+
+            <div class="logs-storage-provider-item__stats">
+              <div class="logs-storage-provider-item__stat-card">
+                <span class="logs-storage-provider-item__stat-label">{{ t('components.logs.storage.requestLog') }}</span>
+                <strong class="logs-storage-provider-item__stat-value">
+                  {{ formatters.formatBytes(item.request_log_bytes, item.request_log_rows) }}
+                </strong>
+                <span class="logs-storage-provider-item__stat-meta">
+                  {{ t('components.logs.storage.rows', { count: item.request_log_rows }) }}
+                </span>
+              </div>
+
+              <div class="logs-storage-provider-item__stat-card">
+                <span class="logs-storage-provider-item__stat-label">{{ t('components.logs.storage.stats') }}</span>
+                <strong class="logs-storage-provider-item__stat-value">
+                  {{ formatters.formatBytes(item.stats_bytes, item.stats_rows) }}
+                </strong>
+                <span class="logs-storage-provider-item__stat-meta">
+                  {{ t('components.logs.storage.rows', { count: item.stats_rows }) }}
+                </span>
+              </div>
+
+              <div class="logs-storage-provider-item__stat-card logs-storage-provider-item__stat-card--accent">
+                <span class="logs-storage-provider-item__stat-label">{{ t('components.logs.storage.providerTotalEstimate') }}</span>
+                <strong class="logs-storage-provider-item__stat-value">
+                  {{ formatters.formatBytes(item.total_bytes) }}
+                </strong>
+                <span class="logs-storage-provider-item__stat-meta">
+                  {{ t('components.logs.storage.providerTotalRows', {
+                    count: formatters.formatNumber(item.request_log_rows + item.stats_rows),
+                  }) }}
+                </span>
+              </div>
+            </div>
+          </article>
+        </div>
+      </section>
+
       <section
         class="contrib-wall logs-storage-heatmap-panel"
         :aria-label="t('components.logs.storage.heatmapAriaLabel', { year: storageHeatmapYear })"
@@ -326,7 +402,7 @@ import { useI18n } from 'vue-i18n'
 import BaseButton from '../../common/BaseButton.vue'
 import BaseModal from '../../common/BaseModal.vue'
 import BasePagination from '../../common/BasePagination.vue'
-import type { RequestLog, LogStorageStats } from '../../../services/logs'
+import type { RequestLog, LogStorageStats, ProviderLogStorageStat } from '../../../services/logs'
 import type { UsageHeatmapDay } from '../../../data/usageHeatmap'
 
 type StorageHeatmapTooltipPlacement = 'above' | 'below'
@@ -347,9 +423,11 @@ type RefBinder = (element: Element | ComponentPublicInstance | null) => void
 
 type StorageModalFormatters = {
   formatBytes: (bytes?: number, rows?: number) => string
+  formatNumber: (value?: number) => string
   intensityClass: (value: number) => string
   isSelectedStorageHeatmapDay: (day: UsageHeatmapDay) => boolean
   formatStorageHeatmapAriaLabel: (day: UsageHeatmapDay) => string
+  formatStorageTimestamp: (value?: string) => string
   formatTime: (value?: string) => string
   formatTokenNumber: (value?: number) => string
   formatCurrency: (value?: number) => string
@@ -365,6 +443,7 @@ type StorageModalHandlers = {
   refreshStorageOverview: () => void | Promise<void>
   handleClearRequestLogs: () => void
   handleClearRequestLogsByDate: () => void
+  handleClearProviderLogs: (item: ProviderLogStorageStat) => void
   handleClearStats: () => void
   updateStorageHeatmapYear: (year: number | string) => void | Promise<void>
   showStorageHeatmapTooltip: (day: UsageHeatmapDay, event: MouseEvent | FocusEvent) => void
@@ -380,6 +459,7 @@ defineProps<{
   storageLoading: boolean
   storageClearing: boolean
   storageStats: LogStorageStats | null
+  providerStorageStats: ProviderLogStorageStat[]
   storageHeatmapYear: number
   storageHeatmapYears: number[]
   storageHeatmapLoading: boolean
@@ -412,6 +492,166 @@ const { t } = useI18n()
 .logs-storage-modal--wide {
   gap: 18px;
   min-height: min(78vh, 920px);
+}
+
+.logs-storage-provider-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 18px;
+}
+
+.logs-storage-provider-panel__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.logs-storage-provider-panel__copy {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.logs-storage-provider-panel__title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--mac-text);
+}
+
+.logs-storage-provider-panel__hint {
+  margin: 0;
+  font-size: 0.86rem;
+  line-height: 1.5;
+  color: var(--mac-text-secondary);
+}
+
+.logs-storage-provider-panel__summary {
+  flex: 0 0 auto;
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(148, 163, 184, 0.08);
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--mac-text-secondary);
+}
+
+.logs-storage-provider-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-height: 340px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.logs-storage-provider-item {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(148, 163, 184, 0.04));
+}
+
+.logs-storage-provider-item__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.logs-storage-provider-item__identity {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.logs-storage-provider-item__name {
+  font-size: 0.98rem;
+  font-weight: 700;
+  color: var(--mac-text);
+  word-break: break-word;
+}
+
+.logs-storage-provider-item__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  align-items: center;
+}
+
+.logs-storage-provider-item__platform,
+.logs-storage-provider-item__latest {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.logs-storage-provider-item__platform {
+  background: rgba(59, 130, 246, 0.12);
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  color: #60a5fa;
+  text-transform: uppercase;
+}
+
+.logs-storage-provider-item__latest {
+  background: rgba(148, 163, 184, 0.08);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  color: var(--mac-text-secondary);
+}
+
+.logs-storage-provider-item__stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.logs-storage-provider-item__stat-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 13px;
+  border-radius: 16px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: rgba(148, 163, 184, 0.06);
+}
+
+.logs-storage-provider-item__stat-card--accent {
+  border-color: rgba(16, 185, 129, 0.24);
+  background: rgba(16, 185, 129, 0.1);
+}
+
+.logs-storage-provider-item__stat-label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--mac-text-secondary);
+}
+
+.logs-storage-provider-item__stat-value {
+  font-size: 0.96rem;
+  font-weight: 700;
+  color: var(--mac-text);
+}
+
+.logs-storage-provider-item__stat-meta {
+  font-size: 0.8rem;
+  color: var(--mac-text-secondary);
 }
 
 .logs-storage-heatmap-panel {
@@ -861,6 +1101,23 @@ html.dark .cost-detail-empty {
   color: #94a3b8;
 }
 
+html.dark .logs-storage-provider-item {
+  border-color: rgba(148, 163, 184, 0.18);
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.74), rgba(15, 23, 42, 0.5));
+}
+
+html.dark .logs-storage-provider-panel__summary,
+html.dark .logs-storage-provider-item__latest,
+html.dark .logs-storage-provider-item__stat-card {
+  border-color: rgba(148, 163, 184, 0.2);
+  background: rgba(15, 23, 42, 0.46);
+}
+
+html.dark .logs-storage-provider-item__stat-card--accent {
+  border-color: rgba(52, 211, 153, 0.28);
+  background: rgba(6, 78, 59, 0.42);
+}
+
 html.dark .logs-storage-day-item {
   border-color: rgba(148, 163, 184, 0.18);
   background: linear-gradient(180deg, rgba(15, 23, 42, 0.74), rgba(15, 23, 42, 0.5));
@@ -890,6 +1147,8 @@ html.dark .logs-storage-heatmap-year-select {
 }
 
 @media (max-width: 768px) {
+  .logs-storage-provider-panel__header,
+  .logs-storage-provider-item__header,
   .logs-storage-heatmap-header,
   .logs-storage-heatmap-detail__header {
     flex-direction: column;
@@ -922,6 +1181,11 @@ html.dark .logs-storage-heatmap-year-select {
   .logs-storage-day-item__stats {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .logs-storage-provider-item__stats {
+    display: grid;
+    grid-template-columns: 1fr;
   }
 
   .logs-storage-day-pagination {

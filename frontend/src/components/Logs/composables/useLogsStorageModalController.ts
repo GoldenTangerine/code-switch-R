@@ -7,12 +7,15 @@ import {
 } from '../../../data/usageHeatmap'
 import {
   clearLogStats,
+  clearProviderLogStorage,
   clearRequestLogs,
   deleteRequestLogsByDate,
   fetchLogStorageStats,
+  fetchProviderLogStorageStats,
   fetchRequestLogDailyHeatmapStatsByYear,
   fetchRequestLogHeatmapYears,
   type LogStorageStats,
+  type ProviderLogStorageStat,
   type RequestLog,
 } from '../../../services/logs'
 import { extractErrorMessage } from '../../../utils/error'
@@ -41,7 +44,7 @@ type UseLogsStorageModalControllerOptions = {
   openPayloadDetailModal: (item: RequestLog) => void | Promise<void>
 }
 
-type StorageClearTarget = 'requestLogs' | 'requestLogsByDate' | 'stats'
+type StorageClearTarget = 'requestLogs' | 'requestLogsByDate' | 'stats' | 'providerLogs'
 
 const STORAGE_HEATMAP_GRANULARITY = 'daily'
 
@@ -66,6 +69,7 @@ export function useLogsStorageModalController(options: UseLogsStorageModalContro
   const { locale, t, loadDashboard, openPayloadDetailModal } = options
 
   const storageStats = ref<LogStorageStats | null>(null)
+  const providerStorageStats = ref<ProviderLogStorageStat[]>([])
   const storageLoading = ref(false)
   const storageClearing = ref(false)
   const storageModal = reactive({
@@ -172,7 +176,12 @@ export function useLogsStorageModalController(options: UseLogsStorageModalContro
   const loadStorageStats = async () => {
     storageLoading.value = true
     try {
-      storageStats.value = await fetchLogStorageStats()
+      const [overview, providers] = await Promise.all([
+        fetchLogStorageStats(),
+        fetchProviderLogStorageStats(),
+      ])
+      storageStats.value = overview
+      providerStorageStats.value = Array.isArray(providers) ? providers : []
     } catch (error) {
       console.error('failed to load log storage stats', error)
     } finally {
@@ -269,22 +278,26 @@ export function useLogsStorageModalController(options: UseLogsStorageModalContro
     open: boolean
     target: StorageClearTarget | null
     date: string
+    providerTarget: ProviderLogStorageStat | null
   }>({
     open: false,
     target: null,
     date: '',
+    providerTarget: null,
   })
 
   const resetStorageClearConfirm = () => {
     storageClearConfirm.open = false
     storageClearConfirm.target = null
     storageClearConfirm.date = ''
+    storageClearConfirm.providerTarget = null
   }
 
   const closeStorageModal = () => {
     if (storageClearing.value) return
     storageModal.open = false
     storageHeatmapReady = false
+    providerStorageStats.value = []
     selectedStorageHeatmapDate.value = ''
     resetStorageClearConfirm()
     hideStorageHeatmapTooltip()
@@ -298,6 +311,30 @@ export function useLogsStorageModalController(options: UseLogsStorageModalContro
     resetStorageClearConfirm()
   }
 
+  const formatStorageProviderLabel = (item: Pick<ProviderLogStorageStat, 'platform' | 'provider' | 'provider_id'> | null) => {
+    if (!item) return ''
+    const providerName = String(item.provider || item.provider_id || 'unknown').trim()
+    const platformLabel = String(item.platform || '').trim()
+    if (!platformLabel) return providerName
+    return `${platformLabel} / ${providerName}`
+  }
+
+  const formatStorageTimestamp = (value?: string) => {
+    const raw = String(value ?? '').trim()
+    if (!raw) return '—'
+    const normalized = raw.includes('T') ? raw : raw.replace(' ', 'T')
+    const date = new Date(normalized)
+    if (Number.isNaN(date.getTime())) return raw
+    return new Intl.DateTimeFormat(locale.value || 'en', {
+      year: 'numeric',
+      month: 'short',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).format(date)
+  }
+
   const storageClearConfirmMessage = computed(() => {
     switch (storageClearConfirm.target) {
       case 'requestLogs':
@@ -305,6 +342,10 @@ export function useLogsStorageModalController(options: UseLogsStorageModalContro
       case 'requestLogsByDate':
         return t('components.logs.storage.confirmClearByDate', {
           date: formatStorageHeatmapDateLabel(storageClearConfirm.date),
+        })
+      case 'providerLogs':
+        return t('components.logs.storage.confirmClearProvider', {
+          provider: formatStorageProviderLabel(storageClearConfirm.providerTarget),
         })
       case 'stats':
         return t('components.logs.storage.confirmClearStats')
@@ -319,6 +360,8 @@ export function useLogsStorageModalController(options: UseLogsStorageModalContro
         return t('components.logs.storage.clearRequestLog')
       case 'requestLogsByDate':
         return t('components.logs.storage.clearByDate')
+      case 'providerLogs':
+        return t('components.logs.storage.clearProvider')
       case 'stats':
         return t('components.logs.storage.clearStats')
       default:
@@ -345,10 +388,18 @@ export function useLogsStorageModalController(options: UseLogsStorageModalContro
     storageClearConfirm.open = true
   }
 
+  const handleClearProviderLogs = (item: ProviderLogStorageStat) => {
+    if (storageClearing.value) return
+    storageClearConfirm.target = 'providerLogs'
+    storageClearConfirm.providerTarget = item
+    storageClearConfirm.open = true
+  }
+
   const confirmStorageClear = async () => {
     if (storageClearing.value || !storageClearConfirm.target) return
     const target = storageClearConfirm.target
     const targetDate = storageClearConfirm.date
+    const targetProvider = storageClearConfirm.providerTarget
     storageClearing.value = true
     try {
       let successMessage = t('components.logs.storage.success')
@@ -370,6 +421,29 @@ export function useLogsStorageModalController(options: UseLogsStorageModalContro
               date: formatStorageHeatmapDateLabel(targetDate),
             })
         successTone = deletedLogs > 0 || deletedStats > 0 ? 'success' : 'warning'
+      } else if (target === 'providerLogs') {
+        if (!targetProvider) {
+          throw new Error('missing provider target')
+        }
+        const result = await clearProviderLogStorage(
+          targetProvider?.platform ?? '',
+          targetProvider?.provider_id ?? '',
+          targetProvider?.provider ?? '',
+        )
+        const deletedStats = Number(result?.deleted_stats_hour ?? 0) + Number(result?.deleted_stats_day ?? 0)
+        const deletedLogs = Number(result?.deleted_request_logs ?? 0)
+        const providerLabel = formatStorageProviderLabel(targetProvider)
+        successMessage =
+          deletedLogs > 0 || deletedStats > 0
+            ? t('components.logs.storage.clearProviderSuccess', {
+              provider: providerLabel,
+              logs: formatNumber(deletedLogs),
+              stats: formatNumber(deletedStats),
+            })
+            : t('components.logs.storage.clearProviderEmpty', {
+              provider: providerLabel,
+            })
+        successTone = deletedLogs > 0 || deletedStats > 0 ? 'success' : 'warning'
       } else {
         await clearLogStats()
       }
@@ -389,9 +463,11 @@ export function useLogsStorageModalController(options: UseLogsStorageModalContro
 
   const storageModalFormatters = {
     formatBytes,
+    formatNumber,
     intensityClass,
     isSelectedStorageHeatmapDay,
     formatStorageHeatmapAriaLabel,
+    formatStorageTimestamp,
     formatTime,
     formatTokenNumber,
     formatCurrency,
@@ -407,6 +483,7 @@ export function useLogsStorageModalController(options: UseLogsStorageModalContro
     refreshStorageOverview,
     handleClearRequestLogs,
     handleClearRequestLogsByDate,
+    handleClearProviderLogs,
     handleClearStats,
     updateStorageHeatmapYear,
     showStorageHeatmapTooltip,
@@ -419,6 +496,7 @@ export function useLogsStorageModalController(options: UseLogsStorageModalContro
 
   const disposeStorageModalController = () => {
     storageHeatmapReady = false
+    providerStorageStats.value = []
     hideStorageHeatmapTooltip()
     resetStorageDayLogs()
     resetStorageClearConfirm()
@@ -428,6 +506,7 @@ export function useLogsStorageModalController(options: UseLogsStorageModalContro
 
   return {
     storageStats,
+    providerStorageStats,
     storageLoading,
     storageClearing,
     storageModal,
