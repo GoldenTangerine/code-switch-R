@@ -52,6 +52,10 @@ type DeleteRequestLogsByDateResult struct {
 	DeletedStatsDay    int64 `json:"deleted_stats_day"`
 }
 
+type DeleteRequestLogsResult struct {
+	DeletedRequestLogs int64 `json:"deleted_request_logs"`
+}
+
 type deleteProviderLogsTarget struct {
 	Platform   string
 	ProviderID string
@@ -285,6 +289,65 @@ func (ls *LogService) ClearProviderLogStorage(platform string, providerID string
 		return result, err
 	}
 	result.DeletedStatsDay = deletedDaily
+
+	if err := tx.Commit(); err != nil {
+		return result, err
+	}
+	committed = true
+
+	_, _ = db.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
+	return result, nil
+}
+
+func (ls *LogService) ClearProviderFailedRequestLogsByIDs(platform string, providerID string, provider string, ids []int64) (DeleteRequestLogsResult, error) {
+	result := DeleteRequestLogsResult{}
+	target, err := normalizeProviderLogStorageTarget(platform, providerID, provider)
+	if err != nil {
+		return result, err
+	}
+	normalizedIDs := normalizeRequestLogIDs(ids)
+	if len(normalizedIDs) == 0 {
+		return result, nil
+	}
+
+	db, err := xdb.DB("default")
+	if err != nil {
+		return result, err
+	}
+	triggersCleaned := false
+	defer func() {
+		if !triggersCleaned {
+			return
+		}
+		if err := ensureRequestLogStatsTriggersWithDB(db); err != nil {
+			fmt.Printf("[WARN] ensureRequestLogStatsTriggersWithDB failed after deleting failed request_log by ids: %v\n", err)
+		}
+	}()
+	if err := cleanupRequestLogStatsTriggersWithDB(db); err != nil {
+		return result, err
+	}
+	triggersCleaned = true
+
+	tx, err := db.Begin()
+	if err != nil {
+		return result, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	whereClause, args := buildProviderFailedRequestLogIDsWhereClause(target, normalizedIDs)
+	requestLogExec, err := tx.Exec(
+		"DELETE FROM request_log WHERE "+whereClause,
+		args...,
+	)
+	if err != nil {
+		return result, err
+	}
+	result.DeletedRequestLogs = rowsAffected(requestLogExec)
 
 	if err := tx.Commit(); err != nil {
 		return result, err
@@ -578,6 +641,42 @@ func buildProviderLogStorageWhereClause(target deleteProviderLogsTarget) (string
 		"platform = ?",
 		"(TRIM(COALESCE(provider_id, '')) = ? OR (TRIM(COALESCE(provider_id, '')) = '' AND TRIM(COALESCE(provider, '')) = ?))",
 	}, " AND "), []any{target.Platform, target.ProviderID, matchName}
+}
+
+func buildProviderFailedRequestLogIDsWhereClause(target deleteProviderLogsTarget, ids []int64) (string, []any) {
+	baseWhereClause, baseArgs := buildProviderLogStorageWhereClause(target)
+	normalizedIDs := normalizeRequestLogIDs(ids)
+	placeholders := strings.TrimRight(strings.Repeat("?,", len(normalizedIDs)), ",")
+	args := make([]any, 0, len(baseArgs)+len(normalizedIDs))
+	args = append(args, baseArgs...)
+	for _, id := range normalizedIDs {
+		args = append(args, id)
+	}
+	whereClause := strings.Join([]string{
+		baseWhereClause,
+		"COALESCE(http_code, 0) >= 400",
+		"id IN (" + placeholders + ")",
+	}, " AND ")
+	return whereClause, args
+}
+
+func normalizeRequestLogIDs(ids []int64) []int64 {
+	if len(ids) == 0 {
+		return nil
+	}
+	normalized := make([]int64, 0, len(ids))
+	seen := make(map[int64]struct{}, len(ids))
+	for _, id := range ids {
+		if id <= 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		normalized = append(normalized, id)
+	}
+	return normalized
 }
 
 func deleteRequestLogStatsByProviderTx(tx *sql.Tx, table string, target deleteProviderLogsTarget) (int64, error) {

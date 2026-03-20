@@ -187,7 +187,7 @@ import BaseButton from '../../common/BaseButton.vue'
 import BaseModal from '../../common/BaseModal.vue'
 import InlineModal from '../../common/InlineModal.vue'
 import {
-  clearProviderLogStorage,
+  clearProviderFailedRequestLogs,
   fetchFailedRequestLogsPage,
   type LogPlatform,
   type RequestLog,
@@ -298,7 +298,7 @@ const modalTitle = computed(() => {
 
 const hasMore = computed(() => entries.value.length < total.value)
 const canClearProviderLogs = computed(() => {
-  return !loading.value && !loadingMore.value && !clearingLogs.value && !!props.platform && !!providerFilter.value && total.value > 0
+  return !loading.value && !loadingMore.value && !clearingLogs.value && displayEntries.value.length > 0
 })
 
 const resetState = () => {
@@ -570,25 +570,36 @@ const closeClearLogsConfirm = () => {
 }
 
 const clearCurrentProviderLogs = async () => {
-  if (!canClearProviderLogs.value || !props.platform) return
+  if (!canClearProviderLogs.value) return
 
   clearingLogs.value = true
   clearConfirmOpen.value = false
   try {
-    const result = await clearProviderLogStorage(
-      props.platform,
+    const targetLogIds = displayEntries.value
+      .map((entry) => Number(entry.log.id))
+      .filter((id) => Number.isFinite(id) && id > 0)
+    if (targetLogIds.length === 0) {
+      showToast(
+        t('components.main.providerLogs.clearLogsEmpty', {
+          provider: providerName.value,
+        }),
+        'warning',
+      )
+      return
+    }
+    const result = await clearProviderFailedRequestLogs(
+      props.platform ?? '',
       providerFilter.value,
       providerName.value,
+      targetLogIds,
     )
     const deletedLogs = Number(result?.deleted_request_logs ?? 0)
-    const deletedStats = Number(result?.deleted_stats_hour ?? 0) + Number(result?.deleted_stats_day ?? 0)
 
-    if (deletedLogs > 0 || deletedStats > 0) {
+    if (deletedLogs > 0) {
       showToast(
         t('components.main.providerLogs.clearLogsSuccess', {
           provider: providerName.value,
           logs: deletedLogs,
-          stats: deletedStats,
         }),
         'success',
       )
