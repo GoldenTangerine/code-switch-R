@@ -266,6 +266,41 @@
       </button>
 
       <button
+        v-if="activeTab !== 'others'"
+        class="ghost-icon provider-log-btn"
+        :data-tooltip="t('components.main.providerLogs.buttonTooltip')"
+        type="button"
+        @click="$emit('open-provider-logs')"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path
+            d="M7.25 4.75h6.5l3 3v11a1.75 1.75 0 01-1.75 1.75h-7.75A1.75 1.75 0 015.5 18.75V6.5a1.75 1.75 0 011.75-1.75z"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+          <path
+            d="M13.75 4.75V8h3.25"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+          <path
+            d="M11.5 10v4"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.7"
+            stroke-linecap="round"
+          />
+          <circle cx="11.5" cy="17" r="0.9" fill="currentColor" />
+        </svg>
+      </button>
+
+      <button
         class="ghost-icon"
         :data-tooltip="t('components.main.controls.duplicate')"
         type="button"
@@ -331,6 +366,7 @@ const emit = defineEmits<{
   'direct-apply': []
   configure: []
   'open-model-list': []
+  'open-provider-logs': []
   duplicate: []
   remove: []
 }>()

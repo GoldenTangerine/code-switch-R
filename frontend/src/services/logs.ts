@@ -44,6 +44,8 @@ export type RequestLog = {
   provider_per_call_unified_set?: boolean
   provider_per_call_input_set?: boolean
   provider_per_call_output_set?: boolean
+  response_body?: string
+  response_body_truncated?: boolean
 }
 
 type RequestLogQuery = {
@@ -79,6 +81,16 @@ export const fetchRequestLogsPage = async (query: RequestLogQuery = {}): Promise
   const startAt = query.startAt ?? ''
   const endAt = query.endAt ?? ''
   return Call.ByName('codeswitch/services.LogService.ListRequestLogsPageV2', platform, provider, limit, offset, startAt, endAt)
+}
+
+export const fetchFailedRequestLogsPage = async (query: RequestLogQuery = {}): Promise<RequestLogPageResult> => {
+  const platform = query.platform ?? ''
+  const provider = query.provider ?? ''
+  const limit = query.limit ?? 100
+  const offset = query.offset ?? 0
+  const startAt = query.startAt ?? ''
+  const endAt = query.endAt ?? ''
+  return Call.ByName('codeswitch/services.LogService.ListFailedRequestLogsPageV2', platform, provider, limit, offset, startAt, endAt)
 }
 
 export type RequestLogPayloadDetail = {

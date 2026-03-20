@@ -1,6 +1,7 @@
 import { reactive, ref } from 'vue'
 import { Call } from '@wailsio/runtime'
 import type { AutomationCard } from '../../../data/cards'
+import type { LogPlatform } from '../../../services/logs'
 import { createGeminiProviderRef, normalizeProviderRef } from '../adapters/providerCardMappers'
 import { buildPersistedProviderFieldsFromForm } from '../adapters/providerFormMappers'
 import type { ProviderTab, TranslateFn, VendorForm } from '../types'
@@ -52,6 +53,9 @@ export function useProviderForm(options: UseProviderFormOptions) {
 
   const modelListModalOpen = ref(false)
   const modelListModalProvider = ref<AutomationCard | null>(null)
+  const providerLogsModalOpen = ref(false)
+  const providerLogsModalProvider = ref<AutomationCard | null>(null)
+  const providerLogsModalPlatform = ref<LogPlatform | null>(null)
   const providerModalState = reactive<ProviderModalState>({
     open: false,
     tabId: initialTab,
@@ -75,6 +79,22 @@ export function useProviderForm(options: UseProviderFormOptions) {
   const closeModelListModal = () => {
     modelListModalOpen.value = false
     modelListModalProvider.value = null
+  }
+
+  const openProviderLogs = (card: AutomationCard) => {
+    const activeTab = getActiveTab()
+    if (activeTab === 'others') {
+      return
+    }
+    providerLogsModalProvider.value = card
+    providerLogsModalPlatform.value = activeTab
+    providerLogsModalOpen.value = true
+  }
+
+  const closeProviderLogsModal = () => {
+    providerLogsModalOpen.value = false
+    providerLogsModalProvider.value = null
+    providerLogsModalPlatform.value = null
   }
 
   const openCreateModal = () => {
@@ -208,10 +228,15 @@ export function useProviderForm(options: UseProviderFormOptions) {
   return {
     modelListModalOpen,
     modelListModalProvider,
+    providerLogsModalOpen,
+    providerLogsModalProvider,
+    providerLogsModalPlatform,
     providerModalState,
     confirmState,
     openModelList,
     closeModelListModal,
+    openProviderLogs,
+    closeProviderLogsModal,
     openCreateModal,
     openEditModal,
     closeProviderModal,

@@ -433,6 +433,29 @@
           "debugCopyFailed": "Failed to copy debug details: {error}"
         }
       },
+      "providerLogs": {
+        "buttonTooltip": "Provider logs",
+        "modalTitle": "{name} · Provider logs",
+        "modalTitleFallback": "Provider logs",
+        "platformClaude": "Claude Code",
+        "platformCodex": "Codex",
+        "platformGemini": "Gemini CLI",
+        "summary": "This panel isolates the latest failed requests for the current provider, so only the noisy HTTP 4xx / 5xx rows stay in view.",
+        "failureOnly": "Failures only",
+        "loadedCount": "{count} shown",
+        "loading": "Loading provider failures...",
+        "loadFailed": "Failed to load provider logs: {error}",
+        "empty": "No recent failure logs for this provider.",
+        "emptyHint": "Either the latest requests are healthy, or request detail capture has not been enabled yet.",
+        "loadMore": "Load more failures",
+        "loadingMore": "Loading more...",
+        "model": "Model",
+        "logId": "Log #{id}",
+        "responseBody": "Error response body",
+        "noPayload": "No response payload was captured for this row. The status and summary above should still help narrow it down.",
+        "responseTruncated": "Truncated",
+        "payloadLarge": "Large payload, JSON formatting highlight skipped"
+      },
       "importConfig": {
         "tooltip": "Import {providers} providers · {servers} MCP servers",
         "success": "Imported {providers} providers and {servers} MCP servers",

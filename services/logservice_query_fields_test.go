@@ -37,3 +37,30 @@ func TestRequestLogPayloadDetailSelectFields_IncludePayloadColumns(t *testing.T)
 		}
 	}
 }
+
+func TestRequestLogFailureListSelectFields_IncludeResponsePayloadColumnsOnly(t *testing.T) {
+	t.Helper()
+	required := map[string]bool{
+		"response_body":           false,
+		"response_body_truncated": false,
+	}
+	forbidden := map[string]struct{}{
+		"request_body":           {},
+		"request_body_truncated": {},
+	}
+
+	for _, field := range requestLogFailureListSelectFields {
+		if _, ok := required[field]; ok {
+			required[field] = true
+		}
+		if _, ok := forbidden[field]; ok {
+			t.Fatalf("失败日志列表字段不应包含 request payload 列: %s", field)
+		}
+	}
+
+	for field, found := range required {
+		if !found {
+			t.Fatalf("失败日志列表字段缺失: %s", field)
+		}
+	}
+}

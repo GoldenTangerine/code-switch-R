@@ -65,6 +65,12 @@ var requestLogListSelectFields = []string{
 	"created_at",
 }
 
+var requestLogFailureListSelectFields = append(
+	append([]string{}, requestLogListSelectFields...),
+	"response_body",
+	"response_body_truncated",
+)
+
 var requestLogPayloadDetailSelectFields = []string{
 	"id",
 	"request_body",
@@ -437,6 +443,14 @@ func buildRequestLogFilterOptions(platform string, startAt string, endAt string)
 	return options, nil
 }
 
+func buildFailedRequestLogFilterOptions(platform string, startAt string, endAt string) ([]xdb.Option, error) {
+	options, err := buildRequestLogFilterOptions(platform, startAt, endAt)
+	if err != nil {
+		return nil, err
+	}
+	return append(options, xdb.WhereGte("http_code", 400)), nil
+}
+
 func buildRequestLogList(records []xdb.Record, pricingSnapshot *modelpricing.Service) []ReqeustLog {
 	logs := make([]ReqeustLog, 0, len(records))
 	for _, record := range records {
@@ -487,6 +501,8 @@ func buildRequestLogList(records []xdb.Record, pricingSnapshot *modelpricing.Ser
 			ProviderPerCallUnifiedSet: record.GetBool("provider_per_call_unified_set"),
 			ProviderPerCallInputSet:   record.GetBool("provider_per_call_input_set"),
 			ProviderPerCallOutputSet:  record.GetBool("provider_per_call_output_set"),
+			ResponseBody:              record.GetString("response_body"),
+			ResponseBodyTruncated:     record.GetBool("response_body_truncated"),
 		}
 		applyLogPricing(pricingSnapshot, &logEntry)
 		logs = append(logs, logEntry)
@@ -675,6 +691,49 @@ func (ls *LogService) ListRequestLogsPageV2(platform string, provider string, li
 
 	selectOptions := append([]xdb.Option{
 		xdb.Field(requestLogListSelectFields...),
+		xdb.OrderByDesc("created_at"),
+		xdb.OrderByDesc("id"),
+		xdb.Limit(result.Limit),
+		xdb.Offset(result.Offset),
+	}, filterOptions...)
+	records, err := selectRecordsByProviderRef(model, selectOptions, provider)
+	if err != nil {
+		if isNoSuchTableErr(err) {
+			return result, nil
+		}
+		return result, err
+	}
+	result.Items = buildRequestLogList(records, ls.resolvePricingSnapshot())
+	return result, nil
+}
+
+func (ls *LogService) ListFailedRequestLogsPageV2(platform string, provider string, limit int, offset int, startAt string, endAt string) (RequestLogPageResult, error) {
+	result := RequestLogPageResult{
+		Items:  []ReqeustLog{},
+		Limit:  normalizeRequestLogListLimit(limit),
+		Offset: normalizeRequestLogListOffset(offset),
+	}
+
+	model := xdb.New("request_log")
+	filterOptions, err := buildFailedRequestLogFilterOptions(platform, startAt, endAt)
+	if err != nil {
+		return result, err
+	}
+
+	total, err := countRecordsByProviderRef(model, filterOptions, provider)
+	if err != nil {
+		if isNoSuchTableErr(err) {
+			return result, nil
+		}
+		return result, err
+	}
+	result.Total = total
+	if total == 0 {
+		return result, nil
+	}
+
+	selectOptions := append([]xdb.Option{
+		xdb.Field(requestLogFailureListSelectFields...),
 		xdb.OrderByDesc("created_at"),
 		xdb.OrderByDesc("id"),
 		xdb.Limit(result.Limit),

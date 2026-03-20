@@ -27,6 +27,7 @@
       @direct-apply="$emit('direct-apply', viewModel.card)"
       @configure="$emit('configure', viewModel.card)"
       @open-model-list="$emit('open-model-list', viewModel.card)"
+      @open-provider-logs="$emit('open-provider-logs', viewModel.card)"
       @duplicate="$emit('duplicate', viewModel.card)"
       @remove="$emit('remove', viewModel.card)"
     />
@@ -62,6 +63,7 @@ defineEmits<{
   'direct-apply': [card: AutomationCard]
   configure: [card: AutomationCard]
   'open-model-list': [card: AutomationCard]
+  'open-provider-logs': [card: AutomationCard]
   duplicate: [card: AutomationCard]
   remove: [card: AutomationCard]
 }>()

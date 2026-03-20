@@ -434,6 +434,29 @@
           "debugCopyFailed": "复制调试内容失败：{error}"
         }
       },
+      "providerLogs": {
+        "buttonTooltip": "供应商日志",
+        "modalTitle": "{name} · 供应商日志",
+        "modalTitleFallback": "供应商日志",
+        "platformClaude": "Claude Code",
+        "platformCodex": "Codex",
+        "platformGemini": "Gemini CLI",
+        "summary": "这里只展示当前供应商最近的失败请求，默认筛掉成功记录，专门拿来逮那些 4xx / 5xx 的幺蛾子。",
+        "failureOnly": "仅失败日志",
+        "loadedCount": "已展示 {count} 条",
+        "loading": "正在拉取供应商失败日志...",
+        "loadFailed": "加载供应商日志失败：{error}",
+        "empty": "这个供应商最近挺消停，暂时没翻车日志。",
+        "emptyHint": "要么最近都成功了，要么当前还没采集到请求明细。",
+        "loadMore": "继续捞更多失败日志",
+        "loadingMore": "继续加载中...",
+        "model": "模型",
+        "logId": "日志 #{id}",
+        "responseBody": "错误返回体",
+        "noPayload": "这条日志没采集到返回体，先看上面的状态码和摘要也能定位个大概。",
+        "responseTruncated": "已截断",
+        "payloadLarge": "内容较大，已跳过 JSON 格式化高亮"
+      },
       "importConfig": {
         "tooltip": "导入 {providers} 个供应商 · {servers} 个 MCP 服务器",
         "success": "已导入 {providers} 个供应商与 {servers} 个 MCP 服务器",

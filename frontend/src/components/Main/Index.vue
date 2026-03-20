@@ -74,6 +74,7 @@
           @direct-apply="handleDirectApply"
           @configure="configure"
           @open-model-list="openModelList"
+          @open-provider-logs="openProviderLogs"
           @duplicate="handleDuplicate"
           @remove="requestRemove"
         />
@@ -92,6 +93,12 @@
         :provider="modelListModalProvider"
         :platform="activeTab"
         @close="closeModelListModal"
+      />
+      <ProviderLogsModal
+        :open="providerLogsModalOpen"
+        :provider="providerLogsModalProvider"
+        :platform="providerLogsModalPlatform"
+        @close="closeProviderLogsModal"
       />
 
       <ProviderEditModal
@@ -154,6 +161,7 @@ import CustomCliConfigEditor from '../common/CustomCliConfigEditor.vue'
 import CliConfigModal from './modals/CliConfigModal.vue'
 import CliDeleteConfirmModal from './modals/CliDeleteConfirmModal.vue'
 import ProviderEditModal from './modals/ProviderEditModal.vue'
+import ProviderLogsModal from './modals/ProviderLogsModal.vue'
 import ProviderModelListModal from './modals/ProviderModelListModal.vue'
 import MainCustomCliToolsBar from './components/MainCustomCliToolsBar.vue'
 import MainHeroBanner from './components/MainHeroBanner.vue'
@@ -297,10 +305,15 @@ const {
 const {
   modelListModalOpen,
   modelListModalProvider,
+  providerLogsModalOpen,
+  providerLogsModalProvider,
+  providerLogsModalPlatform,
   providerModalState,
   confirmState,
   openModelList,
   closeModelListModal,
+  openProviderLogs,
+  closeProviderLogsModal,
   openCreateModal,
   closeProviderModal,
   submitProviderModal,
