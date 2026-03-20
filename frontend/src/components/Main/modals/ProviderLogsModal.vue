@@ -74,24 +74,58 @@
           <div class="provider-log-entry__meta">
             <span>{{ t('components.main.providerLogs.model') }}：{{ displayModel(entry.log) }}</span>
             <span>{{ t('components.main.providerLogs.logId', { id: entry.log.id }) }}</span>
+            <span v-if="entry.sourceLabel">{{ entry.sourceLabel }}</span>
           </div>
 
-          <div v-if="!entry.responsePreview.rawText" class="provider-log-entry__hint">
+          <div class="provider-log-entry__toolbar">
+            <span
+              v-if="entry.detailSource === 'console'"
+              class="provider-log-entry__source-note"
+            >
+              {{ t('components.main.providerLogs.consoleMatched') }}
+            </span>
+            <button
+              type="button"
+              class="provider-log-entry__copy"
+              :class="{ 'is-disabled': !entry.copyText, 'is-copied': isCopied(entry) }"
+              :disabled="!entry.copyText"
+              @click="copyProviderDetail(entry)"
+            >
+              {{ copyButtonLabel(entry) }}
+            </button>
+          </div>
+
+          <div v-if="!entry.detailPreview.rawText" class="provider-log-entry__hint">
             {{ t('components.main.providerLogs.noPayload') }}
           </div>
           <div v-else class="provider-log-code">
             <div class="provider-log-code__header">
-              <span>{{ t('components.main.providerLogs.responseBody') }}</span>
+              <span>{{ entry.detailLabel }}</span>
               <div class="provider-log-code__badges">
-                <span v-if="entry.log.response_body_truncated" class="provider-log-code__badge">
+                <span
+                  v-if="entry.detailSource === 'console'"
+                  class="provider-log-code__badge provider-log-code__badge--console"
+                >
+                  {{ t('components.main.providerLogs.detailFromConsole') }}
+                </span>
+                <span
+                  v-else-if="entry.detailSource === 'payload'"
+                  class="provider-log-code__badge provider-log-code__badge--payload"
+                >
+                  {{ t('components.main.providerLogs.detailFromRequest') }}
+                </span>
+                <span
+                  v-if="entry.detailSource === 'payload' && entry.log.response_body_truncated"
+                  class="provider-log-code__badge"
+                >
                   {{ t('components.main.providerLogs.responseTruncated') }}
                 </span>
-                <span v-if="entry.responsePreview.formatSkippedLarge" class="provider-log-code__badge">
+                <span v-if="entry.detailPreview.formatSkippedLarge" class="provider-log-code__badge">
                   {{ t('components.main.providerLogs.payloadLarge') }}
                 </span>
               </div>
             </div>
-            <pre class="provider-log-code__body" v-html="entry.responsePreview.html"></pre>
+            <pre class="provider-log-code__body" v-html="entry.detailPreview.html"></pre>
           </div>
         </article>
 
@@ -114,6 +148,7 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { AutomationCard } from '../../../data/cards'
+import { GetLogs, GetRecentLogs } from '../../../../bindings/codeswitch/services/consoleservice'
 import InlineModal from '../../common/InlineModal.vue'
 import {
   fetchFailedRequestLogsPage,
@@ -122,19 +157,44 @@ import {
 } from '../../../services/logs'
 import { cardProviderRef } from '../adapters/providerCardMappers'
 import { buildPayloadPreview, type PayloadPreview } from '../../../utils/payloadPreview'
-import { parseProviderErrorFromConsoleMessage } from '../../../utils/providerError'
+import { parseProviderErrorFromConsoleMessage, type ProviderErrorDetail } from '../../../utils/providerError'
 import { extractErrorMessage } from '../../../utils/error'
+import { showToast } from '../../../utils/toast'
+import { writeTextToClipboard } from '../../../utils/clipboard'
+
+type DetailSource = 'payload' | 'console' | 'none'
+
+type ConsoleLogCandidate = {
+  timestamp: string
+  level: string
+  message: string
+  providerError: ProviderErrorDetail
+}
 
 type ProviderLogEntry = {
   log: RequestLog
-  responsePreview: PayloadPreview
+  detailPreview: PayloadPreview
   errorSummary: string
   semanticTag: string
   errorCode: string
   errorType: string
+  detailSource: DetailSource
+  detailLabel: string
+  sourceLabel: string
+  copyText: string
+}
+
+type ConsoleCoverageMode = 'recent' | 'all'
+
+type ResolvedEntriesResult = {
+  entries: ProviderLogEntry[]
+  unmatchedNoPayloadCount: number
 }
 
 const DISPLAY_CHUNK_SIZE = 12
+const RECENT_CONSOLE_LOG_COUNT = 400
+const CONSOLE_MATCH_MAX_WINDOW_MS = 15 * 60 * 1000
+const CONSOLE_TIGHT_MATCH_WINDOW_MS = 45 * 1000
 
 const props = defineProps<{
   open: boolean
@@ -152,8 +212,11 @@ const loading = ref(false)
 const loadingMore = ref(false)
 const error = ref('')
 const entries = ref<RequestLog[]>([])
+const consoleCandidates = ref<ConsoleLogCandidate[]>([])
 const total = ref(0)
 const requestSeq = ref(0)
+const copiedEntryKey = ref('')
+const consoleCoverageMode = ref<ConsoleCoverageMode>('recent')
 
 const providerName = computed(() => props.provider?.name?.trim() || t('components.main.providerLogs.modalTitleFallback'))
 const providerAccent = computed(() => props.provider?.accent || '#ea580c')
@@ -185,10 +248,13 @@ const hasMore = computed(() => entries.value.length < total.value)
 
 const resetState = () => {
   entries.value = []
+  consoleCandidates.value = []
   total.value = 0
   error.value = ''
   loading.value = false
   loadingMore.value = false
+  copiedEntryKey.value = ''
+  consoleCoverageMode.value = 'recent'
 }
 
 const truncateText = (value: string, maxLength = 240) => {
@@ -196,6 +262,19 @@ const truncateText = (value: string, maxLength = 240) => {
   if (!normalized) return ''
   if (normalized.length <= maxLength) return normalized
   return `${normalized.slice(0, maxLength).trimEnd()}...`
+}
+
+const normalizeLooseText = (value: string) =>
+  String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_\-:/|()[\]{}]+/g, '')
+
+const toTimestamp = (value: string | null | undefined) => {
+  if (!value) return Number.NaN
+  const normalized = value.includes('T') ? value : value.replace(' ', 'T')
+  const timestamp = new Date(normalized).getTime()
+  return Number.isFinite(timestamp) ? timestamp : Number.NaN
 }
 
 const mergeLogsById = (current: RequestLog[], incoming: RequestLog[]) => {
@@ -210,24 +289,326 @@ const mergeLogsById = (current: RequestLog[], incoming: RequestLog[]) => {
   return merged
 }
 
-const buildLogEntry = (log: RequestLog): ProviderLogEntry => {
-  const responseBody = log.response_body || ''
-  const parsedError = parseProviderErrorFromConsoleMessage(
-    responseBody ? `status ${log.http_code}: ${responseBody}` : `status ${log.http_code}:`,
-  )
-  const fallbackSummary = responseBody || `HTTP ${log.http_code}`
+const displayModel = (log: RequestLog) => log.requested_model || log.model || log.response_model || '-'
+
+const buildProviderTerms = (log: RequestLog) => {
+  const providerTerms = new Set<string>()
+  ;[
+    props.provider?.name,
+    providerFilter.value,
+    log.provider,
+    log.provider_id,
+  ].forEach((value) => {
+    const normalized = normalizeLooseText(String(value ?? ''))
+    if (normalized.length >= 2) {
+      providerTerms.add(normalized)
+    }
+  })
+  return [...providerTerms]
+}
+
+const buildModelTerms = (log: RequestLog) => {
+  const model = displayModel(log)
+  const terms = new Set<string>()
+  const normalizedFull = normalizeLooseText(model)
+  if (normalizedFull.length >= 3 && normalizedFull !== '-') {
+    terms.add(normalizedFull)
+  }
+
+  model
+    .split(/[\/:,|@_\-\s]+/)
+    .map((segment) => normalizeLooseText(segment))
+    .filter((segment) => segment.length >= 3)
+    .forEach((segment) => terms.add(segment))
+
+  return [...terms]
+}
+
+const matchConsoleCandidate = (log: RequestLog, candidates: ConsoleLogCandidate[]) => {
+  const requestTimestamp = toTimestamp(log.created_at)
+  const providerTerms = buildProviderTerms(log)
+  const modelTerms = buildModelTerms(log)
+  const hasValidRequestTimestamp = Number.isFinite(requestTimestamp)
+
+  let bestIndex = -1
+  let bestScore = -1
+
+  candidates.forEach((candidate, index) => {
+    const messageLoose = normalizeLooseText(candidate.message)
+    const providerMatched = providerTerms.some((term) => messageLoose.includes(term))
+    if (!providerMatched) {
+      return
+    }
+
+    const candidateTimestamp = toTimestamp(candidate.timestamp)
+    const hasValidCandidateTimestamp = Number.isFinite(candidateTimestamp)
+    const deltaMs = Math.abs(candidateTimestamp - requestTimestamp)
+    if (hasValidRequestTimestamp && hasValidCandidateTimestamp && deltaMs > CONSOLE_MATCH_MAX_WINDOW_MS) {
+      return
+    }
+
+    const statusMatched = candidate.providerError.statusCode === log.http_code
+    const modelMatched = modelTerms.some((term) => messageLoose.includes(term))
+    const hasTightTimeProximity =
+      hasValidRequestTimestamp &&
+      hasValidCandidateTimestamp &&
+      deltaMs <= CONSOLE_TIGHT_MATCH_WINDOW_MS
+    const canUseWithoutTime = statusMatched && modelMatched
+
+    if (!hasValidRequestTimestamp || !hasValidCandidateTimestamp) {
+      if (!canUseWithoutTime) {
+        return
+      }
+    } else if (!statusMatched && !modelMatched && !hasTightTimeProximity) {
+      return
+    }
+
+    let score = 5
+    if (statusMatched) score += 4
+    if (modelMatched) score += 2
+    if (candidate.level.toUpperCase().includes('ERROR')) score += 1
+
+    if (hasValidRequestTimestamp && hasValidCandidateTimestamp) {
+      if (deltaMs <= CONSOLE_TIGHT_MATCH_WINDOW_MS) score += 5
+      else if (deltaMs <= 60 * 1000) score += 4
+      else if (deltaMs <= 3 * 60 * 1000) score += 3
+      else if (deltaMs <= 5 * 60 * 1000) score += 2
+      else score += 1
+    } else {
+      score -= 2
+    }
+
+    if (score > bestScore) {
+      bestScore = score
+      bestIndex = index
+    }
+  })
+
+  if (bestIndex < 0 || bestScore < 10) {
+    return null
+  }
 
   return {
-    log,
-    responsePreview: buildPayloadPreview(responseBody),
-    errorSummary: truncateText(parsedError?.summary || fallbackSummary),
-    semanticTag: parsedError?.semanticTag || '',
-    errorCode: parsedError?.errorCode || '',
-    errorType: parsedError?.errorType || '',
+    index: bestIndex,
+    candidate: candidates[bestIndex],
   }
 }
 
-const displayEntries = computed(() => entries.value.map((item) => buildLogEntry(item)))
+const buildLogEntry = (log: RequestLog, matchedConsoleCandidate?: ConsoleLogCandidate | null): ProviderLogEntry => {
+  const responseBody = log.response_body?.trim() || ''
+  const payloadParsedError = parseProviderErrorFromConsoleMessage(
+    responseBody ? `status ${log.http_code}: ${responseBody}` : `status ${log.http_code}:`,
+  )
+  const consoleParsedError = matchedConsoleCandidate?.providerError ?? null
+
+  const fallbackSummary = responseBody || `HTTP ${log.http_code}`
+  const detailSource: DetailSource = responseBody ? 'payload' : consoleParsedError ? 'console' : 'none'
+  const activeDetail = detailSource === 'console' ? consoleParsedError : payloadParsedError
+  const detailText = detailSource === 'payload'
+    ? payloadParsedError?.copyText?.trim() || responseBody
+    : detailSource === 'console'
+      ? consoleParsedError?.copyText?.trim() || consoleParsedError?.rawPayload?.trim() || consoleParsedError?.summary?.trim() || ''
+      : ''
+  const summaryText = detailSource === 'console'
+    ? consoleParsedError?.summary || payloadParsedError?.summary || fallbackSummary
+    : payloadParsedError?.summary || fallbackSummary
+
+  return {
+    log,
+    detailPreview: buildPayloadPreview(detailText),
+    errorSummary: truncateText(summaryText),
+    semanticTag: activeDetail?.semanticTag || payloadParsedError?.semanticTag || '',
+    errorCode: activeDetail?.errorCode || payloadParsedError?.errorCode || '',
+    errorType: activeDetail?.errorType || payloadParsedError?.errorType || '',
+    detailSource,
+    detailLabel: t('components.main.providerLogs.providerErrorDetail'),
+    sourceLabel: detailSource === 'console'
+      ? t('components.main.providerLogs.detailFromConsole')
+      : detailSource === 'payload'
+        ? t('components.main.providerLogs.detailFromRequest')
+        : '',
+    copyText: detailText,
+  }
+}
+
+const resolveEntries = (logs: RequestLog[], candidates: ConsoleLogCandidate[]): ResolvedEntriesResult => {
+  const availableCandidates = [...candidates]
+  let unmatchedNoPayloadCount = 0
+
+  const resolvedEntries = logs.map((item) => {
+    if (item.response_body?.trim()) {
+      return buildLogEntry(item)
+    }
+
+    const matched = matchConsoleCandidate(item, availableCandidates)
+    if (matched) {
+      availableCandidates.splice(matched.index, 1)
+    }
+
+    const entry = buildLogEntry(item, matched?.candidate ?? null)
+    if (!entry.copyText) {
+      unmatchedNoPayloadCount += 1
+    }
+    return entry
+  })
+
+  return {
+    entries: resolvedEntries,
+    unmatchedNoPayloadCount,
+  }
+}
+
+const getOldestLogTimestamp = (logs: RequestLog[]) => {
+  let oldest = Number.POSITIVE_INFINITY
+  logs.forEach((log) => {
+    const timestamp = toTimestamp(log.created_at)
+    if (Number.isFinite(timestamp)) {
+      oldest = Math.min(oldest, timestamp)
+    }
+  })
+  return Number.isFinite(oldest) ? oldest : Number.NaN
+}
+
+const getEarliestCandidateTimestamp = (candidates: ConsoleLogCandidate[]) => {
+  let oldest = Number.POSITIVE_INFINITY
+  candidates.forEach((candidate) => {
+    const timestamp = toTimestamp(candidate.timestamp)
+    if (Number.isFinite(timestamp)) {
+      oldest = Math.min(oldest, timestamp)
+    }
+  })
+  return Number.isFinite(oldest) ? oldest : Number.NaN
+}
+
+const parseConsoleCandidates = async (mode: ConsoleCoverageMode) => {
+  const logs = mode === 'all'
+    ? await GetLogs()
+    : await GetRecentLogs(RECENT_CONSOLE_LOG_COUNT)
+
+  return logs
+    .map((log) => {
+      const message = String(log.message ?? '')
+      const providerError = parseProviderErrorFromConsoleMessage(message)
+      if (!providerError) {
+        return null
+      }
+      return {
+        timestamp: String(log.timestamp ?? ''),
+        level: String(log.level ?? ''),
+        message,
+        providerError,
+      } satisfies ConsoleLogCandidate
+    })
+    .filter((item): item is ConsoleLogCandidate => item != null)
+}
+
+const shouldExpandConsoleCoverage = (
+  logs: RequestLog[],
+  candidates: ConsoleLogCandidate[],
+  resolved: ResolvedEntriesResult,
+) => {
+  if (consoleCoverageMode.value === 'all' || logs.length === 0) {
+    return false
+  }
+
+  const oldestLogTimestamp = getOldestLogTimestamp(logs)
+  const earliestCandidateTimestamp = getEarliestCandidateTimestamp(candidates)
+  const timeCoverageInsufficient =
+    Number.isFinite(oldestLogTimestamp) &&
+    Number.isFinite(earliestCandidateTimestamp) &&
+    oldestLogTimestamp < earliestCandidateTimestamp - CONSOLE_MATCH_MAX_WINDOW_MS
+  const recentPoolLikelyTruncated = candidates.length >= RECENT_CONSOLE_LOG_COUNT
+
+  return timeCoverageInsufficient || (recentPoolLikelyTruncated && resolved.unmatchedNoPayloadCount > 0)
+}
+
+const ensureConsoleCoverage = async (
+  logs: RequestLog[],
+  currentSeq: number,
+  recentCandidates?: ConsoleLogCandidate[],
+) => {
+  const baseCandidates = recentCandidates ?? consoleCandidates.value
+  if (currentSeq !== requestSeq.value) return
+
+  const resolved = resolveEntries(logs, baseCandidates)
+  if (!shouldExpandConsoleCoverage(logs, baseCandidates, resolved)) {
+    if (recentCandidates) {
+      consoleCandidates.value = baseCandidates
+      consoleCoverageMode.value = 'recent'
+    }
+    return
+  }
+
+  try {
+    const fullCandidates = await parseConsoleCandidates('all')
+    if (currentSeq !== requestSeq.value) return
+    consoleCandidates.value = fullCandidates
+    consoleCoverageMode.value = 'all'
+  } catch (err) {
+    console.warn('扩展控制台日志覆盖范围失败:', err)
+    if (recentCandidates && currentSeq === requestSeq.value) {
+      consoleCandidates.value = baseCandidates
+      consoleCoverageMode.value = 'recent'
+    }
+  }
+}
+
+const displayResolution = computed(() => {
+  locale.value
+  return resolveEntries(entries.value, consoleCandidates.value)
+})
+
+const displayEntries = computed(() => {
+  return displayResolution.value.entries
+})
+
+const getEntryKey = (entry: ProviderLogEntry) => `${entry.log.id}:${entry.detailSource}`
+
+const isCopied = (entry: ProviderLogEntry) => copiedEntryKey.value === getEntryKey(entry)
+
+const markCopiedState = (entryKey: string) => {
+  copiedEntryKey.value = entryKey
+  window.setTimeout(() => {
+    if (copiedEntryKey.value === entryKey) {
+      copiedEntryKey.value = ''
+    }
+  }, 1500)
+}
+
+const copyProviderDetail = async (entry: ProviderLogEntry) => {
+  const payload = entry.copyText.trim()
+  if (!payload) {
+    showToast(t('components.main.providerLogs.copyUnavailable'), 'warning')
+    return
+  }
+
+  try {
+    await writeTextToClipboard(payload)
+    markCopiedState(getEntryKey(entry))
+    showToast(t('components.main.providerLogs.copySuccess'), 'success')
+  } catch (err) {
+    showToast(t('components.main.providerLogs.copyFailed', { error: extractErrorMessage(err) }), 'error')
+  }
+}
+
+const copyButtonLabel = (entry: ProviderLogEntry) => {
+  if (isCopied(entry)) {
+    return t('components.main.providerLogs.copied')
+  }
+  if (!entry.copyText) {
+    return t('components.main.providerLogs.copyUnavailableShort')
+  }
+  return t('components.main.providerLogs.copyDetail')
+}
+
+const fetchRecentConsoleCandidates = async () => {
+  try {
+    return await parseConsoleCandidates('recent')
+  } catch (err) {
+    console.warn('加载最近控制台错误详情失败:', err)
+    return []
+  }
+}
 
 const reloadLogs = async () => {
   const currentSeq = ++requestSeq.value
@@ -237,15 +618,21 @@ const reloadLogs = async () => {
 
   loading.value = true
   try {
-    const page = await fetchFailedRequestLogsPage({
-      platform: props.platform,
-      provider: providerFilter.value,
-      limit: DISPLAY_CHUNK_SIZE,
-      offset: 0,
-    })
+    const [page, recentConsoleErrors] = await Promise.all([
+      fetchFailedRequestLogsPage({
+        platform: props.platform,
+        provider: providerFilter.value,
+        limit: DISPLAY_CHUNK_SIZE,
+        offset: 0,
+      }),
+      fetchRecentConsoleCandidates(),
+    ])
     if (currentSeq !== requestSeq.value) return
     entries.value = page.items
+    consoleCandidates.value = recentConsoleErrors
+    consoleCoverageMode.value = 'recent'
     total.value = page.total
+    await ensureConsoleCoverage(page.items, currentSeq, recentConsoleErrors)
   } catch (err) {
     if (currentSeq !== requestSeq.value) return
     error.value = extractErrorMessage(err)
@@ -268,8 +655,10 @@ const loadMore = async () => {
       offset: entries.value.length,
     })
     if (currentSeq !== requestSeq.value) return
+    const mergedEntries = mergeLogsById(entries.value, page.items)
     total.value = page.total
-    entries.value = mergeLogsById(entries.value, page.items)
+    entries.value = mergedEntries
+    await ensureConsoleCoverage(mergedEntries, currentSeq)
   } catch (err) {
     if (currentSeq !== requestSeq.value) return
     error.value = extractErrorMessage(err)
@@ -279,8 +668,6 @@ const loadMore = async () => {
     }
   }
 }
-
-const displayModel = (log: RequestLog) => log.requested_model || log.model || log.response_model || '-'
 
 const formatCreatedAt = (value: string) => {
   if (!value) return '-'
@@ -327,8 +714,8 @@ watch(
   padding: 20px 22px;
   border-radius: 22px;
   background:
-    radial-gradient(circle at top right, color-mix(in srgb, var(--provider-log-accent) 24%, transparent), transparent 36%),
-    linear-gradient(135deg, color-mix(in srgb, var(--provider-log-tint) 88%, #ffffff), rgba(255, 255, 255, 0.94));
+    radial-gradient(circle at top right, color-mix(in srgb, var(--provider-log-accent) 26%, transparent), transparent 38%),
+    linear-gradient(135deg, color-mix(in srgb, var(--provider-log-tint) 86%, #ffffff), rgba(255, 255, 255, 0.96));
   border: 1px solid color-mix(in srgb, var(--provider-log-accent) 18%, rgba(15, 23, 42, 0.08));
   box-shadow: 0 24px 48px rgba(15, 23, 42, 0.08);
 }
@@ -508,9 +895,63 @@ watch(
   display: flex;
   flex-wrap: wrap;
   gap: 14px;
-  margin-bottom: 14px;
+  margin-bottom: 12px;
   font-size: 13px;
   color: rgba(71, 85, 105, 0.92);
+}
+
+.provider-log-entry__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.provider-log-entry__source-note {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(154, 52, 18, 0.92);
+}
+
+.provider-log-entry__copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 156px;
+  min-height: 34px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--provider-log-accent) 26%, rgba(15, 23, 42, 0.08));
+  background: linear-gradient(135deg, rgba(255, 247, 237, 0.98), rgba(255, 255, 255, 0.94));
+  color: color-mix(in srgb, var(--provider-log-accent) 76%, #7c2d12);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    transform 0.18s ease,
+    border-color 0.18s ease,
+    background 0.18s ease,
+    color 0.18s ease;
+}
+
+.provider-log-entry__copy:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--provider-log-accent) 34%, transparent);
+  background: linear-gradient(135deg, rgba(255, 237, 213, 0.98), rgba(255, 247, 237, 0.96));
+}
+
+.provider-log-entry__copy.is-copied {
+  color: #166534;
+  border-color: rgba(34, 197, 94, 0.3);
+  background: linear-gradient(135deg, rgba(220, 252, 231, 0.96), rgba(240, 253, 244, 0.96));
+}
+
+.provider-log-entry__copy.is-disabled,
+.provider-log-entry__copy:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+  transform: none;
 }
 
 .provider-log-entry__hint {
@@ -521,12 +962,6 @@ watch(
   color: rgba(71, 85, 105, 0.96);
   background: rgba(248, 250, 252, 0.98);
   border: 1px dashed rgba(203, 213, 225, 0.72);
-}
-
-.provider-log-entry__hint--error {
-  color: #b91c1c;
-  background: rgba(254, 242, 242, 0.98);
-  border-color: rgba(248, 113, 113, 0.3);
 }
 
 .provider-log-code {
@@ -564,6 +999,16 @@ watch(
   border-radius: 999px;
   color: #fdba74;
   background: rgba(249, 115, 22, 0.18);
+}
+
+.provider-log-code__badge--console {
+  color: #bfdbfe;
+  background: rgba(59, 130, 246, 0.18);
+}
+
+.provider-log-code__badge--payload {
+  color: #fde68a;
+  background: rgba(234, 179, 8, 0.16);
 }
 
 .provider-log-code__body {
@@ -632,78 +1077,16 @@ watch(
   opacity: 0.72;
 }
 
-:global(.dark) .provider-logs-hero {
-  background:
-    radial-gradient(circle at top right, color-mix(in srgb, var(--provider-log-accent) 28%, transparent), transparent 38%),
-    linear-gradient(135deg, rgba(15, 23, 42, 0.96), rgba(30, 41, 59, 0.94));
-  border-color: rgba(71, 85, 105, 0.42);
-  box-shadow: 0 28px 48px rgba(2, 6, 23, 0.34);
-}
-
-:global(.dark) .provider-logs-hero__subtitle,
-:global(.dark) .provider-logs-pill,
-:global(.dark) .provider-log-entry__time,
-:global(.dark) .provider-log-entry__meta,
-:global(.dark) .provider-logs-state {
-  color: rgba(226, 232, 240, 0.76);
-}
-
-:global(.dark) .provider-logs-pill {
-  background: rgba(15, 23, 42, 0.46);
-  border-color: rgba(148, 163, 184, 0.2);
-}
-
-:global(.dark) .provider-logs-pill--accent {
-  color: #fdba74;
-  background: rgba(124, 45, 18, 0.34);
-}
-
-:global(.dark) .provider-logs-state {
-  background: linear-gradient(180deg, rgba(15, 23, 42, 0.94), rgba(30, 41, 59, 0.9));
-  border-color: rgba(71, 85, 105, 0.46);
-}
-
-:global(.dark) .provider-logs-state--empty strong,
-:global(.dark) .provider-log-entry__summary {
-  color: rgba(248, 250, 252, 0.94);
-}
-
-:global(.dark) .provider-log-entry {
-  border-color: rgba(71, 85, 105, 0.46);
-  background:
-    linear-gradient(180deg, rgba(15, 23, 42, 0.98), rgba(30, 41, 59, 0.94));
-  box-shadow: 0 18px 34px rgba(2, 6, 23, 0.26);
-}
-
-:global(.dark) .provider-log-entry__tag {
-  color: rgba(226, 232, 240, 0.78);
-  background: rgba(30, 41, 59, 0.92);
-  border-color: rgba(100, 116, 139, 0.34);
-}
-
-:global(.dark) .provider-log-entry__tag--semantic {
-  color: #fdba74;
-  background: rgba(154, 52, 18, 0.3);
-  border-color: rgba(251, 146, 60, 0.34);
-}
-
-:global(.dark) .provider-log-entry__hint {
-  color: rgba(226, 232, 240, 0.74);
-  background: rgba(15, 23, 42, 0.7);
-  border-color: rgba(100, 116, 139, 0.34);
-}
-
-:global(.dark) .provider-log-entry__hint--error {
-  color: #fda4af;
-  background: rgba(69, 10, 10, 0.5);
-  border-color: rgba(251, 113, 133, 0.24);
-}
-
 @media (max-width: 860px) {
   .provider-logs-hero,
   .provider-log-entry__header,
   .provider-log-code__header {
     flex-direction: column;
+  }
+
+  .provider-log-entry__toolbar {
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .provider-logs-hero__stats {
@@ -713,5 +1096,145 @@ watch(
   .provider-log-entry__time {
     white-space: normal;
   }
+
+  .provider-log-entry__copy {
+    width: 100%;
+  }
+}
+
+:global(.dark) .provider-logs-modal {
+  color: #f3f4f6;
+}
+
+:global(.dark) .provider-logs-hero {
+  background:
+    radial-gradient(circle at top right, color-mix(in srgb, var(--provider-log-accent) 28%, rgba(15, 23, 42, 0)), transparent 42%),
+    linear-gradient(145deg, rgba(10, 14, 24, 0.96), rgba(19, 24, 35, 0.94));
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 28px 64px rgba(0, 0, 0, 0.42);
+}
+
+:global(.dark) .provider-logs-hero__eyebrow {
+  color: color-mix(in srgb, var(--provider-log-accent) 70%, #fdba74);
+}
+
+:global(.dark) .provider-logs-hero__subtitle {
+  color: rgba(226, 232, 240, 0.72);
+}
+
+:global(.dark) .provider-logs-pill {
+  color: rgba(226, 232, 240, 0.84);
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+:global(.dark) .provider-logs-pill--accent {
+  color: #fed7aa;
+  background: color-mix(in srgb, var(--provider-log-accent) 18%, rgba(255, 255, 255, 0.04));
+  border-color: color-mix(in srgb, var(--provider-log-accent) 22%, rgba(255, 255, 255, 0.1));
+}
+
+:global(.dark) .provider-logs-state {
+  color: rgba(226, 232, 240, 0.74);
+  border-color: rgba(255, 255, 255, 0.08);
+  background: linear-gradient(180deg, rgba(14, 19, 30, 0.92), rgba(20, 26, 38, 0.9));
+}
+
+:global(.dark) .provider-logs-state--error {
+  color: #fca5a5;
+  background: linear-gradient(180deg, rgba(55, 22, 28, 0.94), rgba(34, 18, 24, 0.92));
+  border-color: rgba(248, 113, 113, 0.24);
+}
+
+:global(.dark) .provider-logs-state--empty strong {
+  color: rgba(255, 255, 255, 0.92);
+}
+
+:global(.dark) .provider-log-entry {
+  border-color: rgba(255, 255, 255, 0.08);
+  background:
+    linear-gradient(180deg, rgba(11, 16, 27, 0.98), rgba(17, 23, 34, 0.96));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 24px 48px rgba(0, 0, 0, 0.34);
+}
+
+:global(.dark) .provider-log-entry__tag {
+  color: rgba(226, 232, 240, 0.82);
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+:global(.dark) .provider-log-entry__tag--semantic {
+  color: #fdba74;
+  background: rgba(249, 115, 22, 0.16);
+  border-color: rgba(249, 115, 22, 0.24);
+}
+
+:global(.dark) .provider-log-entry__time {
+  color: rgba(148, 163, 184, 0.82);
+}
+
+:global(.dark) .provider-log-entry__summary {
+  color: rgba(248, 250, 252, 0.95);
+}
+
+:global(.dark) .provider-log-entry__meta {
+  color: rgba(148, 163, 184, 0.92);
+}
+
+:global(.dark) .provider-log-entry__source-note {
+  color: #93c5fd;
+}
+
+:global(.dark) .provider-log-entry__copy {
+  color: rgba(255, 237, 213, 0.92);
+  background: linear-gradient(135deg, rgba(41, 27, 22, 0.96), rgba(28, 20, 19, 0.96));
+  border-color: rgba(249, 115, 22, 0.24);
+}
+
+:global(.dark) .provider-log-entry__copy:hover:not(:disabled) {
+  background: linear-gradient(135deg, rgba(61, 36, 26, 0.98), rgba(39, 25, 20, 0.98));
+  border-color: rgba(251, 146, 60, 0.34);
+}
+
+:global(.dark) .provider-log-entry__copy.is-copied {
+  color: #bbf7d0;
+  border-color: rgba(34, 197, 94, 0.32);
+  background: linear-gradient(135deg, rgba(20, 48, 35, 0.96), rgba(18, 37, 31, 0.96));
+}
+
+:global(.dark) .provider-log-entry__hint {
+  color: rgba(203, 213, 225, 0.86);
+  background: rgba(255, 255, 255, 0.03);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+:global(.dark) .provider-log-code {
+  border-color: rgba(255, 255, 255, 0.08);
+  background: linear-gradient(180deg, rgba(5, 10, 18, 0.98), rgba(12, 18, 28, 0.98));
+}
+
+:global(.dark) .provider-log-code__header {
+  color: rgba(226, 232, 240, 0.72);
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+:global(.dark) .provider-log-code__badge {
+  color: #fdba74;
+  background: rgba(249, 115, 22, 0.16);
+}
+
+:global(.dark) .provider-log-code__badge--console {
+  color: #bfdbfe;
+  background: rgba(59, 130, 246, 0.18);
+}
+
+:global(.dark) .provider-log-code__badge--payload {
+  color: #fde68a;
+  background: rgba(234, 179, 8, 0.16);
 }
 </style>
