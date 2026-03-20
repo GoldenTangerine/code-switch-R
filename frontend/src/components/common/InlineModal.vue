@@ -10,7 +10,7 @@
           <Transition name="modal-slide" appear>
             <div
               ref="panelRef"
-              :class="['modal', variantClass]"
+              :class="['modal', variantClass, panelClass]"
               :style="panelStyle"
               role="dialog"
               aria-modal="true"
@@ -47,6 +47,7 @@ import { lockScroll, unlockScroll } from '../../utils/scrollLock'
 import { getModalStackIndex, isTopMostModal, pushModalToTop, removeModalFromStack } from '../../utils/modalStack'
 
 type Variant = 'default' | 'confirm'
+type InlineModalPanelClass = string | string[] | Record<string, boolean>
 const BASE_MODAL_Z_INDEX = 2000
 const MODAL_STACK_STEP = 20
 const MODAL_FOCUS_FALLBACK_MS = 380
@@ -61,6 +62,7 @@ const props = withDefaults(
     panelWidth?: string
     bodyScrollable?: boolean
     initialFocusSelector?: string
+    panelClass?: InlineModalPanelClass
   }>(),
   {
     variant: 'default',
@@ -69,6 +71,7 @@ const props = withDefaults(
     panelWidth: '',
     bodyScrollable: true,
     initialFocusSelector: '',
+    panelClass: '',
   },
 )
 

@@ -3,10 +3,11 @@
     :open="open"
     :title="modalTitle"
     :panel-width="'min(1120px, 94vw)'"
+    :panel-class="modalPanelClass"
     @close="$emit('close')"
   >
     <div
-      class="provider-logs-modal"
+      :class="['provider-logs-modal', isDarkTheme ? 'provider-logs-modal--dark' : 'provider-logs-modal--light']"
       :style="{
         '--provider-log-accent': providerAccent,
         '--provider-log-tint': providerTint,
@@ -24,9 +25,20 @@
           <span class="provider-logs-pill provider-logs-pill--accent">
             {{ t('components.main.providerLogs.failureOnly') }}
           </span>
-          <span class="provider-logs-pill">
-            {{ t('components.main.providerLogs.loadedCount', { count: entries.length }) }}
-          </span>
+          <div class="provider-logs-hero__actions">
+            <span class="provider-logs-pill">
+              {{ t('components.main.providerLogs.loadedCount', { count: entries.length }) }}
+            </span>
+            <button
+              v-if="canClearProviderLogs"
+              type="button"
+              class="provider-logs-clear"
+              :disabled="clearingLogs"
+              @click="clearCurrentProviderLogs"
+            >
+              {{ clearingLogs ? t('components.main.providerLogs.clearingLogs') : t('components.main.providerLogs.clearLogs') }}
+            </button>
+          </div>
         </div>
       </section>
 
@@ -148,9 +160,11 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { AutomationCard } from '../../../data/cards'
+import type { ResolvedTheme } from '../types'
 import { GetLogs, GetRecentLogs } from '../../../../bindings/codeswitch/services/consoleservice'
 import InlineModal from '../../common/InlineModal.vue'
 import {
+  clearProviderLogStorage,
   fetchFailedRequestLogsPage,
   type LogPlatform,
   type RequestLog,
@@ -207,6 +221,7 @@ const props = defineProps<{
   open: boolean
   provider: AutomationCard | null
   platform: LogPlatform | null
+  resolvedTheme: ResolvedTheme
 }>()
 
 defineEmits<{
@@ -224,10 +239,16 @@ const total = ref(0)
 const requestSeq = ref(0)
 const copiedEntryKey = ref('')
 const consoleCoverageMode = ref<ConsoleCoverageMode>('recent')
+const clearingLogs = ref(false)
 
 const providerName = computed(() => props.provider?.name?.trim() || t('components.main.providerLogs.modalTitleFallback'))
 const providerAccent = computed(() => props.provider?.accent || '#ea580c')
 const providerTint = computed(() => props.provider?.tint || 'rgba(249, 115, 22, 0.14)')
+const isDarkTheme = computed(() => props.resolvedTheme === 'dark')
+const modalPanelClass = computed(() => [
+  'provider-logs-inline-modal',
+  isDarkTheme.value ? 'provider-logs-inline-modal--dark' : 'provider-logs-inline-modal--light',
+])
 
 const providerFilter = computed(() => {
   const ref = props.provider ? cardProviderRef(props.provider) : ''
@@ -252,6 +273,9 @@ const modalTitle = computed(() => {
 })
 
 const hasMore = computed(() => entries.value.length < total.value)
+const canClearProviderLogs = computed(() => {
+  return !loading.value && !loadingMore.value && !clearingLogs.value && !!props.platform && !!providerFilter.value && total.value > 0
+})
 
 const resetState = () => {
   entries.value = []
@@ -262,6 +286,7 @@ const resetState = () => {
   loadingMore.value = false
   copiedEntryKey.value = ''
   consoleCoverageMode.value = 'recent'
+  clearingLogs.value = false
 }
 
 const truncateText = (value: string, maxLength = 240) => {
@@ -509,6 +534,52 @@ const copyButtonLabel = (entry: ProviderLogEntry) => {
   return t('components.main.providerLogs.copyDetail')
 }
 
+const clearCurrentProviderLogs = async () => {
+  if (!canClearProviderLogs.value || !props.platform) return
+
+  const confirmed = window.confirm(
+    t('components.main.providerLogs.confirmClearLogs', {
+      provider: providerName.value,
+    }),
+  )
+  if (!confirmed) return
+
+  clearingLogs.value = true
+  try {
+    const result = await clearProviderLogStorage(
+      props.platform,
+      providerFilter.value,
+      providerName.value,
+    )
+    const deletedLogs = Number(result?.deleted_request_logs ?? 0)
+    const deletedStats = Number(result?.deleted_stats_hour ?? 0) + Number(result?.deleted_stats_day ?? 0)
+
+    if (deletedLogs > 0 || deletedStats > 0) {
+      showToast(
+        t('components.main.providerLogs.clearLogsSuccess', {
+          provider: providerName.value,
+          logs: deletedLogs,
+          stats: deletedStats,
+        }),
+        'success',
+      )
+    } else {
+      showToast(
+        t('components.main.providerLogs.clearLogsEmpty', {
+          provider: providerName.value,
+        }),
+        'warning',
+      )
+    }
+
+    await reloadLogs()
+  } catch (err) {
+    showToast(t('components.main.providerLogs.clearLogsFailed', { error: extractErrorMessage(err) }), 'error')
+  } finally {
+    clearingLogs.value = false
+  }
+}
+
 const fetchRecentConsoleCandidates = async () => {
   try {
     return await parseConsoleCandidates('recent')
@@ -607,6 +678,92 @@ watch(
 </script>
 
 <style scoped>
+:global(.provider-logs-inline-modal) {
+  border-radius: 28px;
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.99), rgba(248, 250, 252, 0.97));
+  box-shadow:
+    0 30px 80px rgba(15, 23, 42, 0.18),
+    0 10px 24px rgba(15, 23, 42, 0.08);
+}
+
+:global(.provider-logs-inline-modal .modal-header) {
+  padding: 24px 24px 16px;
+  border-bottom: 1px solid rgba(226, 232, 240, 0.88);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(248, 250, 252, 0.72));
+}
+
+:global(.provider-logs-inline-modal .modal-title) {
+  color: rgba(15, 23, 42, 0.96);
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+:global(.provider-logs-inline-modal .modal-body) {
+  padding: 0 24px 24px;
+  background: transparent;
+}
+
+:global(.provider-logs-inline-modal .ghost-icon) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: rgba(255, 255, 255, 0.82);
+  color: rgba(51, 65, 85, 0.84);
+  transition:
+    border-color 0.18s ease,
+    background 0.18s ease,
+    color 0.18s ease,
+    transform 0.18s ease;
+}
+
+:global(.provider-logs-inline-modal .ghost-icon:hover:not(:disabled)),
+:global(.provider-logs-inline-modal .ghost-icon:focus-visible) {
+  transform: translateY(-1px);
+  border-color: rgba(249, 115, 22, 0.28);
+  background: rgba(255, 247, 237, 0.96);
+  color: #9a3412;
+}
+
+:global(.provider-logs-inline-modal--dark) {
+  border-color: rgba(148, 163, 184, 0.18);
+  background:
+    linear-gradient(180deg, rgba(7, 12, 21, 0.99), rgba(11, 18, 31, 0.98));
+  box-shadow:
+    0 36px 92px rgba(0, 0, 0, 0.58),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+:global(.provider-logs-inline-modal--dark .modal-header) {
+  border-bottom-color: rgba(148, 163, 184, 0.14);
+  background:
+    linear-gradient(180deg, rgba(12, 19, 32, 0.94), rgba(8, 14, 24, 0.78));
+}
+
+:global(.provider-logs-inline-modal--dark .modal-title) {
+  color: rgba(248, 250, 252, 0.96);
+}
+
+:global(.provider-logs-inline-modal--dark .ghost-icon) {
+  border-color: rgba(148, 163, 184, 0.18);
+  background: rgba(148, 163, 184, 0.1);
+  color: rgba(226, 232, 240, 0.82);
+}
+
+:global(.provider-logs-inline-modal--dark .ghost-icon:hover:not(:disabled)),
+:global(.provider-logs-inline-modal--dark .ghost-icon:focus-visible) {
+  border-color: rgba(251, 146, 60, 0.3);
+  background: rgba(249, 115, 22, 0.16);
+  color: #fdba74;
+}
+
 .provider-logs-modal {
   --provider-log-heading: rgba(15, 23, 42, 0.94);
   --provider-log-subtitle: rgba(15, 23, 42, 0.68);
@@ -640,7 +797,7 @@ watch(
   color: var(--mac-text);
 }
 
-:global(html.dark) .provider-logs-modal {
+.provider-logs-modal--dark {
   --provider-log-heading: rgba(248, 250, 252, 0.96);
   --provider-log-subtitle: rgba(203, 213, 225, 0.78);
   --provider-log-pill-text: rgba(226, 232, 240, 0.86);
@@ -720,6 +877,13 @@ watch(
   gap: 10px;
 }
 
+.provider-logs-hero__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
 .provider-logs-pill {
   display: inline-flex;
   align-items: center;
@@ -738,6 +902,40 @@ watch(
   color: color-mix(in srgb, var(--provider-log-accent) 80%, #9a3412);
   background: color-mix(in srgb, var(--provider-log-accent) 10%, rgba(255, 255, 255, 0.84));
   border-color: color-mix(in srgb, var(--provider-log-accent) 22%, transparent);
+}
+
+.provider-logs-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--provider-log-accent) 18%, rgba(239, 68, 68, 0.24));
+  background: linear-gradient(135deg, rgba(255, 245, 245, 0.98), rgba(255, 255, 255, 0.92));
+  color: #b91c1c;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    transform 0.18s ease,
+    border-color 0.18s ease,
+    background 0.18s ease,
+    color 0.18s ease,
+    opacity 0.18s ease;
+}
+
+.provider-logs-clear:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: rgba(239, 68, 68, 0.34);
+  background: linear-gradient(135deg, rgba(254, 242, 242, 0.98), rgba(255, 245, 245, 0.94));
+  color: #991b1b;
+}
+
+.provider-logs-clear:disabled {
+  cursor: wait;
+  opacity: 0.68;
+  transform: none;
 }
 
 .provider-logs-state {
@@ -1057,6 +1255,10 @@ watch(
     justify-content: flex-start;
   }
 
+  .provider-logs-hero__actions {
+    justify-content: flex-start;
+  }
+
   .provider-log-entry__time {
     white-space: normal;
   }
@@ -1066,7 +1268,7 @@ watch(
   }
 }
 
-:global(.dark) .provider-logs-hero {
+.provider-logs-modal--dark .provider-logs-hero {
   background:
     radial-gradient(circle at top right, color-mix(in srgb, var(--provider-log-accent) 28%, rgba(15, 23, 42, 0)), transparent 42%),
     linear-gradient(145deg, rgba(10, 14, 24, 0.96), rgba(19, 24, 35, 0.94));
@@ -1076,56 +1278,68 @@ watch(
     0 28px 64px rgba(0, 0, 0, 0.42);
 }
 
-:global(.dark) .provider-logs-hero__eyebrow {
+.provider-logs-modal--dark .provider-logs-hero__eyebrow {
   color: color-mix(in srgb, var(--provider-log-accent) 70%, #fdba74);
 }
 
-:global(.dark) .provider-logs-pill--accent {
+.provider-logs-modal--dark .provider-logs-pill--accent {
   color: #fed7aa;
   background: color-mix(in srgb, var(--provider-log-accent) 18%, rgba(255, 255, 255, 0.04));
   border-color: color-mix(in srgb, var(--provider-log-accent) 22%, rgba(255, 255, 255, 0.1));
 }
 
-:global(.dark) .provider-logs-state--error {
+.provider-logs-modal--dark .provider-logs-clear {
+  border-color: rgba(248, 113, 113, 0.22);
+  background: linear-gradient(135deg, rgba(55, 22, 28, 0.96), rgba(34, 18, 24, 0.94));
+  color: #fecaca;
+}
+
+.provider-logs-modal--dark .provider-logs-clear:hover:not(:disabled) {
+  border-color: rgba(248, 113, 113, 0.34);
+  background: linear-gradient(135deg, rgba(76, 24, 32, 0.98), rgba(44, 19, 27, 0.96));
+  color: #fee2e2;
+}
+
+.provider-logs-modal--dark .provider-logs-state--error {
   color: #fca5a5;
   background: linear-gradient(180deg, rgba(55, 22, 28, 0.94), rgba(34, 18, 24, 0.92));
   border-color: rgba(248, 113, 113, 0.24);
 }
 
-:global(.dark) .provider-log-entry__tag--semantic {
+.provider-logs-modal--dark .provider-log-entry__tag--semantic {
   color: #fdba74;
   background: rgba(249, 115, 22, 0.16);
   border-color: rgba(249, 115, 22, 0.24);
 }
 
-:global(.dark) .provider-log-entry__copy.is-copied {
+.provider-logs-modal--dark .provider-log-entry__copy.is-copied {
   color: #bbf7d0;
   border-color: rgba(34, 197, 94, 0.32);
   background: linear-gradient(135deg, rgba(20, 48, 35, 0.96), rgba(18, 37, 31, 0.96));
 }
 
-:global(.dark) .provider-log-code {
+.provider-logs-modal--dark .provider-log-code {
   border-color: rgba(255, 255, 255, 0.08);
   background: linear-gradient(180deg, rgba(5, 10, 18, 0.98), rgba(12, 18, 28, 0.98));
 }
 
-:global(.dark) .provider-log-code__header {
+.provider-logs-modal--dark .provider-log-code__header {
   color: rgba(226, 232, 240, 0.72);
   border-bottom-color: rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.03);
 }
 
-:global(.dark) .provider-log-code__badge {
+.provider-logs-modal--dark .provider-log-code__badge {
   color: #fdba74;
   background: rgba(249, 115, 22, 0.16);
 }
 
-:global(.dark) .provider-log-code__badge--console {
+.provider-logs-modal--dark .provider-log-code__badge--console {
   color: #bfdbfe;
   background: rgba(59, 130, 246, 0.18);
 }
 
-:global(.dark) .provider-log-code__badge--payload {
+.provider-logs-modal--dark .provider-log-code__badge--payload {
   color: #fde68a;
   background: rgba(234, 179, 8, 0.16);
 }

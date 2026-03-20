@@ -1,9 +1,15 @@
 // src/utils/ThemeManager.ts
 const THEME_KEY = 'theme'
 const THEME_CHANNEL = 'code-switch-theme'
+const THEME_CHANGE_EVENT = 'code-switch-theme-change'
 let themeChannel: BroadcastChannel | null = null
 
 export type ThemeMode = 'light' | 'dark' | 'systemdefault'
+export type ResolvedTheme = 'light' | 'dark'
+export type ThemeChangeDetail = {
+  mode: ThemeMode
+  resolvedTheme: ResolvedTheme
+}
 
 const normalizeThemeMode = (value: string | null): ThemeMode => {
   if (value === 'light' || value === 'dark' || value === 'systemdefault') {
@@ -28,14 +34,23 @@ const ensureThemeChannel = () => {
   })
 }
 
-export function applyTheme(mode: ThemeMode) {
-  let resolvedTheme = mode
+export function getResolvedTheme(mode: ThemeMode = getCurrentTheme()): ResolvedTheme {
   if (mode === 'systemdefault') {
-    resolvedTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
   }
+  return mode
+}
+
+const emitThemeChange = (detail: ThemeChangeDetail) => {
+  window.dispatchEvent(new CustomEvent<ThemeChangeDetail>(THEME_CHANGE_EVENT, { detail }))
+}
+
+export function applyTheme(mode: ThemeMode) {
+  const resolvedTheme = getResolvedTheme(mode)
 
   document.documentElement.classList.remove('dark', 'light')
   document.documentElement.classList.add(resolvedTheme)
+  emitThemeChange({ mode, resolvedTheme })
 }
 
 export function initTheme() {
@@ -68,4 +83,17 @@ export function setTheme(mode: ThemeMode) {
 
 export function getCurrentTheme(): ThemeMode {
   return normalizeThemeMode(localStorage.getItem(THEME_KEY))
+}
+
+export function onThemeChange(listener: (detail: ThemeChangeDetail) => void) {
+  const handleThemeChange = (event: Event) => {
+    const detail = (event as CustomEvent<ThemeChangeDetail>).detail
+    if (!detail) return
+    listener(detail)
+  }
+
+  window.addEventListener(THEME_CHANGE_EVENT, handleThemeChange)
+  return () => {
+    window.removeEventListener(THEME_CHANGE_EVENT, handleThemeChange)
+  }
 }

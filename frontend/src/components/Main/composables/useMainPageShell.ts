@@ -20,7 +20,13 @@ import {
   markFirstRunDone,
   type ConfigImportStatus,
 } from '../../../services/configImport'
-import { getCurrentTheme, setTheme, type ThemeMode } from '../../../utils/ThemeManager'
+import {
+  getCurrentTheme,
+  getResolvedTheme,
+  onThemeChange,
+  setTheme,
+  type ThemeMode,
+} from '../../../utils/ThemeManager'
 import { showToast } from '../../../utils/toast'
 import { disableCustomCliProxy, enableCustomCliProxy, type CustomCliTool } from '../../../services/customCliService'
 import { PROVIDER_TAB_IDS } from '../constants'
@@ -80,13 +86,12 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
   } = options
 
   const themeMode = ref<ThemeMode>(getCurrentTheme())
-  const resolvedTheme = computed<ResolvedTheme>(() => {
-    if (themeMode.value === 'systemdefault') {
-      return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-    }
-    return themeMode.value
-  })
+  const resolvedTheme = ref<ResolvedTheme>(getResolvedTheme(themeMode.value))
   const themeIcon = computed<'sun' | 'moon'>(() => (resolvedTheme.value === 'dark' ? 'moon' : 'sun'))
+  const syncThemeState = () => {
+    themeMode.value = getCurrentTheme()
+    resolvedTheme.value = getResolvedTheme(themeMode.value)
+  }
 
   const proxyStates = reactive<Record<ProviderTab, boolean>>({
     claude: false,
@@ -310,7 +315,6 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
 
   const toggleTheme = () => {
     const nextTheme = resolvedTheme.value === 'dark' ? 'light' : 'dark'
-    themeMode.value = nextTheme
     setTheme(nextTheme)
   }
 
@@ -356,12 +360,14 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
   }
 
   let handleProvidersUpdated: (() => void) | undefined
+  let cleanupThemeListener: (() => void) | undefined
 
   watch(activeTab, (newTab) => {
     void loadBlacklistStatus(newTab)
   })
 
   onMounted(async () => {
+    syncThemeState()
     await loadAppSettings()
     await loadProviders()
     void refreshProviderPricingCachesOnStartup()
@@ -383,6 +389,10 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
       void loadProviders()
     }
     window.addEventListener('providers-updated', handleProvidersUpdated)
+    cleanupThemeListener = onThemeChange(({ mode, resolvedTheme: nextResolvedTheme }) => {
+      themeMode.value = mode
+      resolvedTheme.value = nextResolvedTheme
+    })
 
     await loadLastUsedProviders()
   })
@@ -396,6 +406,8 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
       window.removeEventListener('providers-updated', handleProvidersUpdated)
       handleProvidersUpdated = undefined
     }
+    cleanupThemeListener?.()
+    cleanupThemeListener = undefined
   })
 
   return {

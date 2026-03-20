@@ -98,6 +98,7 @@
         :open="providerLogsModalOpen"
         :provider="providerLogsModalProvider"
         :platform="providerLogsModalPlatform"
+        :resolved-theme="resolvedTheme"
         @close="closeProviderLogsModal"
       />
 
