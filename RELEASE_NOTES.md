@@ -1,3 +1,15 @@
+# Code Switch v2.7.57
+
+## 修复
+- **首页供应商错误详情匹配不再只会盯着“下一行”瞎猜**：修复首页供应商日志之前只会把控制台里紧跟在 `Upstream ... url=...` 后面的单行 JSON 当成候选 continuation 的问题；现在会在短时间窗口内扫描并合并连续的多行 JSON 错误体，`header + pretty JSON` 这类日志也能还原出真正的 provider error。
+- **首页供应商日志优先命中真实错误正文，不再让 `url=...` 元数据抢戏**：修复控制台里同时存在 metadata-only 候选和真实 provider error 候选时，首页有机会选中 `url=... content_type=...` 这类伪详情的问题；现在候选会按错误正文质量加权，`No available providers` 这类真实消息会被优先采用。
+
+## 技术改进
+- **供应商错误候选构建与匹配逻辑从页面里抽离成纯函数模块**：把首页弹窗里分散的 console candidate 解析、continuation 合并和匹配评分收口到独立 helper，页面代码少了一坨临时判断，后面继续修这块不至于把 UI 和解析逻辑一起搅成浆糊。
+- **补齐首页错误详情回归测试，覆盖多行 JSON 与候选择优场景**：新增针对 `header + 单行 JSON`、`header + 多行 pretty JSON`、以及 metadata-only / rich error 同时存在时的匹配优先级测试，后面谁再把这条链路改歪，单测会先给他一巴掌。
+
+---
+
 # Code Switch v2.7.55
 
 ## 修复

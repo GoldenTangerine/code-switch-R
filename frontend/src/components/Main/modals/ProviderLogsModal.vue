@@ -165,15 +165,13 @@ import {
 import { extractErrorMessage } from '../../../utils/error'
 import { showToast } from '../../../utils/toast'
 import { writeTextToClipboard } from '../../../utils/clipboard'
+import {
+  buildConsoleProviderErrorCandidates,
+  matchConsoleProviderCandidate,
+  type ConsoleProviderErrorCandidate,
+} from './providerLogsConsoleMatch'
 
 type DetailSource = 'payload' | 'console' | 'none'
-
-type ConsoleLogCandidate = {
-  timestamp: string
-  level: string
-  message: string
-  providerError: ProviderErrorDetail
-}
 
 type ProviderLogEntry = {
   log: RequestLog
@@ -204,7 +202,6 @@ type ResolvedEntriesResult = {
 const DISPLAY_CHUNK_SIZE = 12
 const RECENT_CONSOLE_LOG_COUNT = 400
 const CONSOLE_MATCH_MAX_WINDOW_MS = 15 * 60 * 1000
-const CONSOLE_TIGHT_MATCH_WINDOW_MS = 45 * 1000
 
 const props = defineProps<{
   open: boolean
@@ -222,7 +219,7 @@ const loading = ref(false)
 const loadingMore = ref(false)
 const error = ref('')
 const entries = ref<RequestLog[]>([])
-const consoleCandidates = ref<ConsoleLogCandidate[]>([])
+const consoleCandidates = ref<ConsoleProviderErrorCandidate[]>([])
 const total = ref(0)
 const requestSeq = ref(0)
 const copiedEntryKey = ref('')
@@ -274,12 +271,6 @@ const truncateText = (value: string, maxLength = 240) => {
   return `${normalized.slice(0, maxLength).trimEnd()}...`
 }
 
-const normalizeLooseText = (value: string) =>
-  String(value ?? '')
-    .trim()
-    .toLowerCase()
-    .replace(/[\s_\-:/|()[\]{}]+/g, '')
-
 const toTimestamp = (value: string | null | undefined) => {
   if (!value) return Number.NaN
   const normalized = value.includes('T') ? value : value.replace(' ', 'T')
@@ -301,39 +292,6 @@ const mergeLogsById = (current: RequestLog[], incoming: RequestLog[]) => {
 
 const displayModel = (log: RequestLog) => log.requested_model || log.model || log.response_model || '-'
 
-const buildProviderTerms = (log: RequestLog) => {
-  const providerTerms = new Set<string>()
-  ;[
-    props.provider?.name,
-    providerFilter.value,
-    log.provider,
-    log.provider_id,
-  ].forEach((value) => {
-    const normalized = normalizeLooseText(String(value ?? ''))
-    if (normalized.length >= 2) {
-      providerTerms.add(normalized)
-    }
-  })
-  return [...providerTerms]
-}
-
-const buildModelTerms = (log: RequestLog) => {
-  const model = displayModel(log)
-  const terms = new Set<string>()
-  const normalizedFull = normalizeLooseText(model)
-  if (normalizedFull.length >= 3 && normalizedFull !== '-') {
-    terms.add(normalizedFull)
-  }
-
-  model
-    .split(/[\/:,|@_\-\s]+/)
-    .map((segment) => normalizeLooseText(segment))
-    .filter((segment) => segment.length >= 3)
-    .forEach((segment) => terms.add(segment))
-
-  return [...terms]
-}
-
 const getPayloadErrorState = (log: RequestLog): PayloadErrorState => {
   const responseBody = log.response_body?.trim() || ''
   const parsedError = parseProviderErrorFromConsoleMessage(
@@ -347,80 +305,17 @@ const getPayloadErrorState = (log: RequestLog): PayloadErrorState => {
   }
 }
 
-const matchConsoleCandidate = (log: RequestLog, candidates: ConsoleLogCandidate[]) => {
-  const requestTimestamp = toTimestamp(log.created_at)
-  const providerTerms = buildProviderTerms(log)
-  const modelTerms = buildModelTerms(log)
-  const hasValidRequestTimestamp = Number.isFinite(requestTimestamp)
-
-  let bestIndex = -1
-  let bestScore = -1
-
-  candidates.forEach((candidate, index) => {
-    const messageLoose = normalizeLooseText(candidate.message)
-    const providerMatched = providerTerms.some((term) => messageLoose.includes(term))
-    if (!providerMatched) {
-      return
-    }
-
-    const candidateTimestamp = toTimestamp(candidate.timestamp)
-    const hasValidCandidateTimestamp = Number.isFinite(candidateTimestamp)
-    const deltaMs = Math.abs(candidateTimestamp - requestTimestamp)
-    if (hasValidRequestTimestamp && hasValidCandidateTimestamp && deltaMs > CONSOLE_MATCH_MAX_WINDOW_MS) {
-      return
-    }
-
-    const statusMatched = candidate.providerError.statusCode === log.http_code
-    const modelMatched = modelTerms.some((term) => messageLoose.includes(term))
-    const hasTightTimeProximity =
-      hasValidRequestTimestamp &&
-      hasValidCandidateTimestamp &&
-      deltaMs <= CONSOLE_TIGHT_MATCH_WINDOW_MS
-    const canUseWithoutTime = statusMatched && modelMatched
-
-    if (!hasValidRequestTimestamp || !hasValidCandidateTimestamp) {
-      if (!canUseWithoutTime) {
-        return
-      }
-    } else if (!statusMatched && !modelMatched && !hasTightTimeProximity) {
-      return
-    }
-
-    let score = 5
-    if (statusMatched) score += 4
-    if (modelMatched) score += 2
-    if (candidate.level.toUpperCase().includes('ERROR')) score += 1
-
-    if (hasValidRequestTimestamp && hasValidCandidateTimestamp) {
-      if (deltaMs <= CONSOLE_TIGHT_MATCH_WINDOW_MS) score += 5
-      else if (deltaMs <= 60 * 1000) score += 4
-      else if (deltaMs <= 3 * 60 * 1000) score += 3
-      else if (deltaMs <= 5 * 60 * 1000) score += 2
-      else score += 1
-    } else {
-      score -= 2
-    }
-
-    if (score > bestScore) {
-      bestScore = score
-      bestIndex = index
-    }
-  })
-
-  if (bestIndex < 0 || bestScore < 10) {
-    return null
-  }
-
-  return {
-    index: bestIndex,
-    candidate: candidates[bestIndex],
-  }
+const matchConsoleCandidate = (log: RequestLog, candidates: ConsoleProviderErrorCandidate[]) => {
+  return matchConsoleProviderCandidate(log, candidates, [
+    props.provider?.name ?? '',
+    providerFilter.value,
+  ])
 }
 
 const buildLogEntry = (
   log: RequestLog,
   payloadState: PayloadErrorState,
-  matchedConsoleCandidate?: ConsoleLogCandidate | null,
+  matchedConsoleCandidate?: ConsoleProviderErrorCandidate | null,
 ): ProviderLogEntry => {
   const {
     responseBody,
@@ -461,7 +356,7 @@ const buildLogEntry = (
   }
 }
 
-const resolveEntries = (logs: RequestLog[], candidates: ConsoleLogCandidate[]): ResolvedEntriesResult => {
+const resolveEntries = (logs: RequestLog[], candidates: ConsoleProviderErrorCandidate[]): ResolvedEntriesResult => {
   const availableCandidates = [...candidates]
   let unmatchedNoPayloadCount = 0
 
@@ -496,7 +391,7 @@ const getOldestLogTimestamp = (logs: RequestLog[]) => {
   return Number.isFinite(oldest) ? oldest : Number.NaN
 }
 
-const getEarliestCandidateTimestamp = (candidates: ConsoleLogCandidate[]) => {
+const getEarliestCandidateTimestamp = (candidates: ConsoleProviderErrorCandidate[]) => {
   let oldest = Number.POSITIVE_INFINITY
   candidates.forEach((candidate) => {
     const timestamp = toTimestamp(candidate.timestamp)
@@ -512,26 +407,12 @@ const parseConsoleCandidates = async (mode: ConsoleCoverageMode) => {
     ? await GetLogs()
     : await GetRecentLogs(RECENT_CONSOLE_LOG_COUNT)
 
-  return logs
-    .map((log) => {
-      const message = String(log.message ?? '')
-      const providerError = parseProviderErrorFromConsoleMessage(message)
-      if (!providerError) {
-        return null
-      }
-      return {
-        timestamp: String(log.timestamp ?? ''),
-        level: String(log.level ?? ''),
-        message,
-        providerError,
-      } satisfies ConsoleLogCandidate
-    })
-    .filter((item): item is ConsoleLogCandidate => item != null)
+  return buildConsoleProviderErrorCandidates(logs)
 }
 
 const shouldExpandConsoleCoverage = (
   logs: RequestLog[],
-  candidates: ConsoleLogCandidate[],
+  candidates: ConsoleProviderErrorCandidate[],
   resolved: ResolvedEntriesResult,
 ) => {
   if (consoleCoverageMode.value === 'all' || logs.length === 0) {
@@ -552,7 +433,7 @@ const shouldExpandConsoleCoverage = (
 const ensureConsoleCoverage = async (
   logs: RequestLog[],
   currentSeq: number,
-  recentCandidates?: ConsoleLogCandidate[],
+  recentCandidates?: ConsoleProviderErrorCandidate[],
 ) => {
   const baseCandidates = recentCandidates ?? consoleCandidates.value
   if (currentSeq !== requestSeq.value) return
