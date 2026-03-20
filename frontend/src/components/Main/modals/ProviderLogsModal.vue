@@ -34,7 +34,7 @@
               type="button"
               class="provider-logs-clear"
               :disabled="clearingLogs"
-              @click="clearCurrentProviderLogs"
+              @click="openClearLogsConfirm"
             >
               {{ clearingLogs ? t('components.main.providerLogs.clearingLogs') : t('components.main.providerLogs.clearLogs') }}
             </button>
@@ -154,6 +154,27 @@
       </div>
     </div>
   </InlineModal>
+
+  <BaseModal
+    :open="clearConfirmOpen"
+    :title="t('components.main.providerLogs.clearLogsConfirmTitle')"
+    variant="confirm"
+    @close="closeClearLogsConfirm"
+  >
+    <div class="confirm-body">
+      <p>
+        {{ t('components.main.providerLogs.confirmClearLogs', { provider: providerName }) }}
+      </p>
+    </div>
+    <footer class="form-actions confirm-actions">
+      <BaseButton variant="outline" type="button" :disabled="clearingLogs" @click="closeClearLogsConfirm">
+        {{ t('common.cancel') }}
+      </BaseButton>
+      <BaseButton variant="danger" type="button" :disabled="clearingLogs" @click="clearCurrentProviderLogs">
+        {{ clearingLogs ? t('components.main.providerLogs.clearingLogs') : t('components.main.providerLogs.clearLogs') }}
+      </BaseButton>
+    </footer>
+  </BaseModal>
 </template>
 
 <script setup lang="ts">
@@ -162,6 +183,8 @@ import { useI18n } from 'vue-i18n'
 import type { AutomationCard } from '../../../data/cards'
 import type { ResolvedTheme } from '../types'
 import { GetLogs, GetRecentLogs } from '../../../../bindings/codeswitch/services/consoleservice'
+import BaseButton from '../../common/BaseButton.vue'
+import BaseModal from '../../common/BaseModal.vue'
 import InlineModal from '../../common/InlineModal.vue'
 import {
   clearProviderLogStorage,
@@ -240,6 +263,7 @@ const requestSeq = ref(0)
 const copiedEntryKey = ref('')
 const consoleCoverageMode = ref<ConsoleCoverageMode>('recent')
 const clearingLogs = ref(false)
+const clearConfirmOpen = ref(false)
 
 const providerName = computed(() => props.provider?.name?.trim() || t('components.main.providerLogs.modalTitleFallback'))
 const providerAccent = computed(() => props.provider?.accent || '#ea580c')
@@ -287,6 +311,7 @@ const resetState = () => {
   copiedEntryKey.value = ''
   consoleCoverageMode.value = 'recent'
   clearingLogs.value = false
+  clearConfirmOpen.value = false
 }
 
 const truncateText = (value: string, maxLength = 240) => {
@@ -534,17 +559,21 @@ const copyButtonLabel = (entry: ProviderLogEntry) => {
   return t('components.main.providerLogs.copyDetail')
 }
 
+const openClearLogsConfirm = () => {
+  if (!canClearProviderLogs.value) return
+  clearConfirmOpen.value = true
+}
+
+const closeClearLogsConfirm = () => {
+  if (clearingLogs.value) return
+  clearConfirmOpen.value = false
+}
+
 const clearCurrentProviderLogs = async () => {
   if (!canClearProviderLogs.value || !props.platform) return
 
-  const confirmed = window.confirm(
-    t('components.main.providerLogs.confirmClearLogs', {
-      provider: providerName.value,
-    }),
-  )
-  if (!confirmed) return
-
   clearingLogs.value = true
+  clearConfirmOpen.value = false
   try {
     const result = await clearProviderLogStorage(
       props.platform,

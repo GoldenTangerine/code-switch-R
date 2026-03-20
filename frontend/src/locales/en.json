@@ -445,6 +445,7 @@
         "loadedCount": "{count} shown",
         "clearLogs": "Clear storage",
         "clearingLogs": "Clearing...",
+        "clearLogsConfirmTitle": "Confirm provider log cleanup",
         "confirmClearLogs": "Clear the stored request logs and related stats for {provider}? This removes the failure logs shown below together with this provider's log storage usage.",
         "clearLogsSuccess": "Cleared {provider} log storage: removed {logs} request logs and {stats} stats rows",
         "clearLogsEmpty": "No stored provider logs to clear for {provider}",
