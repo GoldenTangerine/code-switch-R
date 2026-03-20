@@ -8,6 +8,10 @@ on:
 permissions:
   contents: write
 
+env:
+  GO_VERSION: '1.24'
+  WAILS_VERSION: 'v3.0.0-alpha.38'
+
 jobs:
   build-macos:
     name: Build macOS
@@ -30,7 +34,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: '1.24'
+          go-version: ${{ env.GO_VERSION }}
 
       - uses: actions/setup-node@v6
         with:
@@ -38,7 +42,7 @@ jobs:
           package-manager-cache: false
 
       - name: Install Wails
-        run: go install github.com/wailsapp/wails/v3/cmd/wails3@latest
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@${{ env.WAILS_VERSION }}
 
       - name: Install frontend dependencies
         run: cd frontend && npm install
@@ -106,7 +110,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: '1.24'
+          go-version: ${{ env.GO_VERSION }}
 
       - uses: actions/setup-node@v6
         with:
@@ -114,7 +118,7 @@ jobs:
           package-manager-cache: false
 
       - name: Install Wails
-        run: go install github.com/wailsapp/wails/v3/cmd/wails3@latest
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@${{ env.WAILS_VERSION }}
 
       - name: Install frontend dependencies
         run: cd frontend && npm install
@@ -501,7 +505,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: '1.24'
+          go-version: ${{ env.GO_VERSION }}
 
       - uses: actions/setup-node@v6
         with:
@@ -518,7 +522,7 @@ jobs:
             libwebkit2gtk-4.1-dev
 
       - name: Install Wails
-        run: go install github.com/wailsapp/wails/v3/cmd/wails3@latest
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@${{ env.WAILS_VERSION }}
 
       - name: Install frontend dependencies
         run: cd frontend && npm install

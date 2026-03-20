@@ -222,7 +222,7 @@ sudo rpm -i codeswitch-*.rpm
 # 安装 Node.js 20.19+（或 22.12+）
 
 # 安装 Wails CLI
-go install github.com/wailsapp/wails/v3/cmd/wails3@latest
+go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-alpha.38
 ```
 
 ### 开发运行
