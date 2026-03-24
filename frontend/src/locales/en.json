@@ -492,7 +492,11 @@
         "performanceHint": "Scope: valid streaming samples from today only; TTFT = avg first-token latency (samples: {ttftSamples}), TPS = total output tokens / total generation time (samples: {tpsSamples}, generation windows < {minWindowMs}ms are filtered).",
         "loading": "Refreshing...",
         "noData": "No data yet today",
-        "lastUsed": "In Use"
+        "hostedLive": "Hosted",
+        "currentRouted": "Current Route",
+        "recentRouted": "Recently Routed",
+        "currentRoutedHint": "Hosting is enabled and the latest request is currently routed to this provider.",
+        "recentRoutedHint": "The most recent hosted request was routed to this provider."
       },
       "directApply": {
         "title": "Direct Apply",

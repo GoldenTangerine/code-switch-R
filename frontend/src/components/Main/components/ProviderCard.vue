@@ -6,6 +6,7 @@
       { dragging: viewModel.dragging },
       { 'drag-over': viewModel.dragOver },
       { 'is-last-used': viewModel.isLastUsed },
+      { 'is-hosted-active': hostedSelectionActive },
       { 'is-highlighted': viewModel.isHighlighted },
     ]"
     draggable="true"
@@ -15,10 +16,6 @@
     @dragend="$emit('dragend')"
     @drop.prevent="handleDrop"
   >
-    <span v-if="viewModel.isLastUsed" class="last-used-badge">
-      ✓ {{ t('components.main.providers.lastUsed') }}
-    </span>
-
     <div class="card-leading">
       <div class="card-icon" :style="{ backgroundColor: viewModel.card.tint, color: viewModel.card.accent }">
         <span
@@ -72,6 +69,22 @@
           >
             {{ viewModel.formattedOfficialSite }}
           </button>
+        </div>
+
+        <div v-if="viewModel.isLastUsed" class="card-state-row" :title="relayStatusTitle">
+          <span
+            v-if="hostedSelectionActive"
+            class="provider-state-pill provider-state-pill--hosted"
+          >
+            <span class="provider-state-pulse" aria-hidden="true"></span>
+            {{ t('components.main.providers.hostedLive') }}
+          </span>
+          <span
+            class="provider-state-pill"
+            :class="hostedSelectionActive ? 'provider-state-pill--active' : 'provider-state-pill--recent'"
+          >
+            {{ relayStatusLabel }}
+          </span>
         </div>
 
         <div
@@ -343,6 +356,7 @@
 import { computed, type ComponentPublicInstance } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { ProviderCardViewModel, ProviderDragTarget, ProviderTab, ResolvedTheme } from '../types'
+import { isHostedRouteActive } from '../utils/providerRoutingState'
 
 const props = defineProps<{
   viewModel: ProviderCardViewModel
@@ -382,6 +396,27 @@ const directApplyTooltip = computed(() => {
   }
   return t('components.main.directApply.title')
 })
+
+const hostedSelectionActive = computed(() => isHostedRouteActive({
+  activeProxyState: props.activeProxyState,
+  isLastUsed: props.viewModel.isLastUsed,
+  enabled: props.viewModel.card.enabled,
+  apiUrl: props.viewModel.card.apiUrl,
+  apiKey: props.viewModel.card.apiKey,
+  isBlacklisted: props.viewModel.blacklistStatus?.isBlacklisted === true,
+}))
+
+const relayStatusLabel = computed(() => (
+  hostedSelectionActive.value
+    ? t('components.main.providers.currentRouted')
+    : t('components.main.providers.recentRouted')
+))
+
+const relayStatusTitle = computed(() => (
+  hostedSelectionActive.value
+    ? t('components.main.providers.currentRoutedHint')
+    : t('components.main.providers.recentRoutedHint')
+))
 
 const handleToggleEnabled = (event: Event) => {
   emit('toggle-enabled', (event.target as HTMLInputElement).checked)
