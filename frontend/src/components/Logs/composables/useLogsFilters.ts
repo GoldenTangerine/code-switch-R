@@ -1,7 +1,15 @@
 import { computed, reactive } from 'vue'
 import type { MonthModel } from '@vuepic/vue-datepicker'
 import type { LogDateFilterType, LogsFiltersState } from '../types'
-import { formatDateYmd, pad2, startOfTodayLocal, toDateParts, toTimeLayout } from '../utils'
+import {
+  formatDateYmd,
+  getCurrentYear,
+  isLogsYearInRange,
+  pad2,
+  startOfTodayLocal,
+  toDateParts,
+  toTimeLayout,
+} from '../utils'
 
 type TranslateFn = (key: string, params?: Record<string, unknown>) => string
 
@@ -31,7 +39,7 @@ export function useLogsFilters(options: UseLogsFiltersOptions) {
   const yearPickerValue = computed<number | null>({
     get() {
       const year = Number(filters.year)
-      if (!Number.isFinite(year) || year < 1970 || year > 9999) return null
+      if (!isLogsYearInRange(year)) return null
       return year
     },
     set(value) {
@@ -106,6 +114,9 @@ export function useLogsFilters(options: UseLogsFiltersOptions) {
 
   const updateFilterDateType = (value: LogDateFilterType) => {
     filters.dateType = value
+    if (value === 'year') {
+      filters.year = String(getCurrentYear())
+    }
   }
 
   const updateYearPickerValue = (value: number | null) => {
@@ -136,7 +147,7 @@ export function useLogsFilters(options: UseLogsFiltersOptions) {
       }
       case 'year': {
         const year = Number(filters.year)
-        if (!Number.isFinite(year) || year < 1970 || year > 9999) return null
+        if (!isLogsYearInRange(year)) return null
         const start = new Date(year, 0, 1, 0, 0, 0, 0)
         const end = new Date(year + 1, 0, 1, 0, 0, 0, 0)
         return { startAt: toTimeLayout(start), endAt: toTimeLayout(end) }

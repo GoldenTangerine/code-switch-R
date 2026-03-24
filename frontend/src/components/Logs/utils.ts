@@ -117,6 +117,21 @@ export const pad2 = (num: number) => String(num).padStart(2, '0')
 export const formatDateYmd = (date: Date) =>
   `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`
 
+export const getCurrentYear = () => new Date().getFullYear()
+
+export const LOGS_YEAR_PICKER_SPAN = 10
+
+export const getLogsYearPickerRange = (baseYear = getCurrentYear()): [number, number] => [
+  baseYear - LOGS_YEAR_PICKER_SPAN,
+  baseYear + LOGS_YEAR_PICKER_SPAN,
+]
+
+export const isLogsYearInRange = (year: number, baseYear = getCurrentYear()) => {
+  if (!Number.isInteger(year)) return false
+  const [minYear, maxYear] = getLogsYearPickerRange(baseYear)
+  return year >= minYear && year <= maxYear
+}
+
 export const toDateParts = (value: string) => {
   const [y, m, d] = value.split('-').map((item) => Number(item))
   if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return null

@@ -119,6 +119,7 @@ import { VueDatePicker, type MonthModel } from '@vuepic/vue-datepicker'
 import { enUS, zhCN } from 'date-fns/locale'
 import BaseButton from '../../common/BaseButton.vue'
 import type { LogDateFilterType, LogProviderOption, LogsFiltersState } from '../types'
+import { getLogsYearPickerRange } from '../utils'
 
 defineProps<{
   filters: LogsFiltersState
@@ -152,10 +153,7 @@ const datePickerUi = {
   menu: 'mac-panel logs-date-picker-menu',
 }
 
-const yearPickerRange = computed<[number, number]>(() => {
-  const currentYear = new Date().getFullYear()
-  return [1970, Math.max(currentYear + 1, 1971)]
-})
+const yearPickerRange = computed<[number, number]>(() => getLogsYearPickerRange())
 
 const rangePickerConfig = { partialRange: false } as const
 
