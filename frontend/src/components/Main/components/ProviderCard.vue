@@ -74,7 +74,11 @@
               :title="relayStatusTitle"
               :aria-hidden="true"
             >
-              <span class="provider-state-pulse" aria-hidden="true"></span>
+              <span
+                v-if="hostedSelectionActive"
+                class="provider-state-pulse"
+                aria-hidden="true"
+              ></span>
               {{ t('components.main.providers.hostedLive') }}
             </span>
             <span
