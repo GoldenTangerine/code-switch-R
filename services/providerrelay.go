@@ -234,12 +234,18 @@ func providerRefFromGeminiProvider(provider GeminiProvider) string {
 // @author sm
 func (prs *ProviderRelayService) setLastUsedProvider(platform, providerID, providerName string) {
 	prs.lastUsedMu.Lock()
-	defer prs.lastUsedMu.Unlock()
+	previous := prs.lastUsed[platform]
+	changed := previous == nil || previous.ProviderID != providerID || previous.ProviderName != providerName
 	prs.lastUsed[platform] = &LastUsedProvider{
 		Platform:     platform,
 		ProviderID:   providerID,
 		ProviderName: providerName,
 		UpdatedAt:    time.Now().UnixMilli(),
+	}
+	prs.lastUsedMu.Unlock()
+
+	if changed && prs.notificationService != nil {
+		go prs.notificationService.EmitProviderRouted(platform, providerID, providerName)
 	}
 }
 

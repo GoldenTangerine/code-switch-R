@@ -164,6 +164,20 @@ func (ns *NotificationService) emitSwitchEvent(info SwitchNotification) {
 	})
 }
 
+// EmitProviderRouted 向前端广播当前实际命中的供应商，不触发系统通知
+// @author sm
+func (ns *NotificationService) EmitProviderRouted(platform, providerID, providerName string) {
+	if ns.app == nil {
+		return
+	}
+	ns.app.Event.Emit("provider:routed", map[string]interface{}{
+		"platform":     platform,
+		"providerId":   providerID,
+		"providerName": providerName,
+		"timestamp":    time.Now().UnixMilli(),
+	})
+}
+
 // NotifyProviderBlacklisted 发送供应商被拉黑通知
 func (ns *NotificationService) NotifyProviderBlacklisted(platform, providerID, providerName string, level int, durationMinutes int) {
 	if !ns.isEnabled() {

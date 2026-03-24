@@ -181,6 +181,8 @@ import { useProviderCards } from './composables/useProviderCards'
 import { useProviderForm } from './composables/useProviderForm'
 import { useProviderStats } from './composables/useProviderStats'
 import { useUpdatePolling } from './composables/useUpdatePolling'
+import { cardProviderRef } from './adapters/providerCardMappers'
+import { getDefaultHostedProviderRef, isHostedRouteActive } from './utils/providerRoutingState'
 import type { CustomCliToolDraft, ProviderCardViewModel, ProviderTab } from './types'
 import type { AutomationCard } from '../../data/cards'
 
@@ -281,6 +283,7 @@ const {
 } = useBlacklistState({
   t,
   getActiveTab: () => activeTab.value,
+  getSelectedToolId: () => selectedToolId.value,
   switchToPlatform,
 })
 
@@ -374,6 +377,7 @@ const {
   toggleTheme,
   showHeatmap,
   showHomeTitle,
+  enableRoundRobin,
   heatmapGranularity,
   heatmapDisplaySettings,
   showFirstRunPrompt,
@@ -454,12 +458,40 @@ const vendorInitials = (name: string) => {
     .toUpperCase()
 }
 
+const activeHostedProviderRef = computed(() => {
+  if (!activeProxyState.value) return null
+
+  const hostedCard = activeCards.value.find((card) => {
+    const blacklistStatus = getProviderBlacklistStatus(card)
+    return isHostedRouteActive({
+      activeProxyState: true,
+      isLastUsed: isLastUsedProvider(card),
+      enabled: card.enabled,
+      apiUrl: card.apiUrl,
+      apiKey: card.apiKey,
+      isBlacklisted: blacklistStatus?.isBlacklisted === true,
+    })
+  })
+
+  return hostedCard ? cardProviderRef(hostedCard) : null
+})
+
+const defaultHostedProviderRef = computed(() => {
+  if (!activeProxyState.value || activeHostedProviderRef.value || enableRoundRobin.value) return null
+
+  return getDefaultHostedProviderRef(
+    activeCards.value,
+    (card) => getProviderBlacklistStatus(card)?.isBlacklisted === true,
+  )
+})
+
 const activeCardViewModels = computed<ProviderCardViewModel[]>(() =>
   activeCards.value.map((card) => ({
     card,
     dragging: draggingId.value === card.id,
     dragOver: dragOverId.value === card.id && draggingId.value !== card.id,
     isLastUsed: isLastUsedProvider(card),
+    isDefaultHostedProvider: defaultHostedProviderRef.value === cardProviderRef(card),
     isHighlighted: isHighlightedCard(card),
     isDirectApplied: isDirectApplied(card),
     blacklistStatus: getProviderBlacklistStatus(card),
@@ -479,6 +511,10 @@ watch(
   },
   { immediate: true },
 )
+
+watch(selectedToolId, () => {
+  void loadLastUsedProviders()
+})
 
 const bindCardRef = (card: AutomationCard) => (element: Element | ComponentPublicInstance | null) => {
   const target = element instanceof HTMLElement ? element : null

@@ -118,6 +118,7 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
   })
   const showHeatmap = ref(true)
   const showHomeTitle = ref(true)
+  const enableRoundRobin = ref(false)
   const showFirstRunPrompt = ref(false)
   const importStatus = ref<ConfigImportStatus | null>(null)
   const importBusy = ref(false)
@@ -162,6 +163,7 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
       }
 
       showHomeTitle.value = data?.show_home_title ?? true
+      enableRoundRobin.value = data?.enable_round_robin ?? false
     } catch (error) {
       console.error('failed to load app settings', error)
       showHeatmap.value = true
@@ -172,6 +174,7 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
         heatmapDisplaySettings.value = { ...DEFAULT_HEATMAP_DISPLAY_SETTINGS }
       }
       showHomeTitle.value = true
+      enableRoundRobin.value = false
       showToast(t('components.main.errors.loadAppSettingsFailed'), 'warning')
     }
   }
@@ -283,6 +286,7 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
         ...PROVIDER_TAB_IDS.map((tab) => refreshDirectAppliedStatus(tab)),
         loadAllProviderStats(),
         ...PROVIDER_TAB_IDS.map((tab) => loadBlacklistStatus(tab)),
+        loadLastUsedProviders(),
         loadAvailabilityResults(),
         refreshImportStatus(),
         pollUpdateState(),
@@ -416,6 +420,7 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
     toggleTheme,
     showHeatmap,
     showHomeTitle,
+    enableRoundRobin,
     heatmapGranularity,
     heatmapDisplaySettings,
     showFirstRunPrompt,

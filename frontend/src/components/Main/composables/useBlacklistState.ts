@@ -11,10 +11,12 @@ import {
 import { PROVIDER_TAB_IDS } from '../constants'
 import type { LastUsedProvider, ProviderTab, TranslateFn } from '../types'
 import type { AutomationCard } from '../../../data/cards'
+import { normalizeLastUsedProvider, shouldUseLastUsedProviderForTool } from '../utils/lastUsedProvider'
 
 type UseBlacklistStateOptions = {
   t: TranslateFn
   getActiveTab: () => ProviderTab
+  getSelectedToolId: () => string | null
   switchToPlatform: (platform: ProviderTab) => void
 }
 
@@ -36,7 +38,7 @@ const isProviderTab = (value: string): value is ProviderTab =>
   PROVIDER_TAB_IDS.includes(value as ProviderTab)
 
 export function useBlacklistState(options: UseBlacklistStateOptions) {
-  const { t, getActiveTab, switchToPlatform } = options
+  const { t, getActiveTab, getSelectedToolId, switchToPlatform } = options
 
   const blacklistStatusMap = reactive(createBlacklistMap())
   const lastUsedProviders = reactive(createLastUsedMap())
@@ -48,7 +50,21 @@ export function useBlacklistState(options: UseBlacklistStateOptions) {
   let highlightTimer: number | undefined
   let unsubscribeSwitched: (() => void) | undefined
   let unsubscribeBlacklisted: (() => void) | undefined
+  let unsubscribeRouted: (() => void) | undefined
   let handleWindowFocus: (() => void) | undefined
+
+  const applyHighlightedProvider = (provider: LastUsedProvider) => {
+    highlightedProviderRef.value = normalizeProviderRef(provider.provider_id)
+    highlightedProviderName.value = provider.provider_name
+
+    if (highlightTimer) {
+      clearTimeout(highlightTimer)
+    }
+    highlightTimer = window.setTimeout(() => {
+      highlightedProviderRef.value = null
+      highlightedProviderName.value = null
+    }, 3000)
+  }
 
   const loadBlacklistStatus = async (tab: ProviderTab) => {
     if (tab === 'others') return
@@ -129,12 +145,20 @@ export function useBlacklistState(options: UseBlacklistStateOptions) {
 
   const loadLastUsedProviders = async () => {
     try {
+      PROVIDER_TAB_IDS.forEach((platform) => {
+        lastUsedProviders[platform] = null
+      })
+
       const result = await Call.ByName('codeswitch/services.ProviderRelayService.GetAllLastUsedProviders')
       if (!result) return
 
       Object.keys(result).forEach((platform) => {
-        if (isProviderTab(platform) && result[platform]) {
-          lastUsedProviders[platform] = result[platform]
+        const normalized = normalizeLastUsedProvider(result[platform])
+        if (normalized) {
+          if (!shouldUseLastUsedProviderForTool(normalized, getSelectedToolId())) {
+            return
+          }
+          lastUsedProviders[normalized.platform] = normalized
         }
       })
     } catch (error) {
@@ -142,47 +166,56 @@ export function useBlacklistState(options: UseBlacklistStateOptions) {
     }
   }
 
-  const switchToTabAndHighlight = (platform: ProviderTab, providerName: string, providerId?: string) => {
-    switchToPlatform(platform)
+  const switchToTabAndHighlight = (provider: LastUsedProvider) => {
+    if (!shouldUseLastUsedProviderForTool(provider, getSelectedToolId())) return
 
-    const normalizedProviderId = normalizeProviderRef(providerId)
-    lastUsedProviders[platform] = {
-      platform,
-      provider_id: normalizedProviderId,
-      provider_name: providerName,
-      updated_at: Date.now(),
-    }
-    highlightedProviderRef.value = normalizedProviderId || null
-    highlightedProviderName.value = providerName
+    switchToPlatform(provider.platform as ProviderTab)
+    lastUsedProviders[provider.platform as ProviderTab] = provider
+    applyHighlightedProvider(provider)
 
-    if (highlightTimer) {
-      clearTimeout(highlightTimer)
-    }
-    highlightTimer = window.setTimeout(() => {
-      highlightedProviderRef.value = null
-      highlightedProviderName.value = null
-    }, 3000)
-
-    void loadBlacklistStatus(platform)
+    void loadBlacklistStatus(provider.platform as ProviderTab)
   }
 
-  const handleProviderSwitched = (event: { data: { platform: string; toProvider: string; toProviderId?: string } }) => {
-    const { platform, toProvider, toProviderId } = event.data
-    if (!isProviderTab(platform)) return
-    console.log('[Event] provider:switched', platform, toProvider, toProviderId)
-    switchToTabAndHighlight(platform, toProvider, toProviderId)
+  const handleProviderSwitched = (event: { data: { platform: string; toProvider: string; toProviderId?: string; timestamp?: number } }) => {
+    const normalized = normalizeLastUsedProvider({
+      platform: event.data.platform,
+      providerId: event.data.toProviderId,
+      providerName: event.data.toProvider,
+      updatedAt: event.data.timestamp,
+    })
+    if (!normalized || !isProviderTab(normalized.platform)) return
+    console.log('[Event] provider:switched', normalized.platform, normalized.provider_name, normalized.provider_id)
+    switchToTabAndHighlight(normalized)
   }
 
-  const handleProviderBlacklisted = (event: { data: { platform: string; providerName: string; providerId?: string } }) => {
-    const { platform, providerName, providerId } = event.data
-    if (!isProviderTab(platform)) return
-    console.log('[Event] provider:blacklisted', platform, providerName, providerId)
-    switchToTabAndHighlight(platform, providerName, providerId)
+  const handleProviderBlacklisted = (event: { data: { platform: string; providerName: string; providerId?: string; timestamp?: number } }) => {
+    const normalized = normalizeLastUsedProvider({
+      platform: event.data.platform,
+      providerId: event.data.providerId,
+      providerName: event.data.providerName,
+      updatedAt: event.data.timestamp,
+    })
+    if (!normalized || !isProviderTab(normalized.platform)) return
+    console.log('[Event] provider:blacklisted', normalized.platform, normalized.provider_name, normalized.provider_id)
+    switchToTabAndHighlight(normalized)
+  }
+
+  const handleProviderRouted = (event: { data: { platform: string; providerName: string; providerId?: string; timestamp?: number } }) => {
+    const normalized = normalizeLastUsedProvider(event.data)
+    if (!normalized || !isProviderTab(normalized.platform)) return
+    if (!shouldUseLastUsedProviderForTool(normalized, getSelectedToolId())) return
+
+    lastUsedProviders[normalized.platform] = normalized
+
+    if (normalized.platform === getActiveTab()) {
+      applyHighlightedProvider(normalized)
+    }
   }
 
   const isLastUsedProvider = (card: AutomationCard): boolean => {
     const lastUsed = lastUsedProviders[getActiveTab()]
     if (!lastUsed) return false
+    if (!shouldUseLastUsedProviderForTool(lastUsed, getSelectedToolId())) return false
     const cardRef = cardProviderRef(card)
     if (cardRef && normalizeProviderRef(lastUsed.provider_id) !== '') {
       return normalizeProviderRef(lastUsed.provider_id) === cardRef
@@ -223,15 +256,18 @@ export function useBlacklistState(options: UseBlacklistStateOptions) {
 
     handleWindowFocus = () => {
       void loadBlacklistStatus(getActiveTab())
+      void loadLastUsedProviders()
     }
     window.addEventListener('focus', handleWindowFocus)
 
     blacklistPollingTimer = window.setInterval(() => {
       void loadBlacklistStatus(getActiveTab())
+      void loadLastUsedProviders()
     }, 10_000)
 
     unsubscribeSwitched = Events.On('provider:switched', handleProviderSwitched as Events.Callback)
     unsubscribeBlacklisted = Events.On('provider:blacklisted', handleProviderBlacklisted as Events.Callback)
+    unsubscribeRouted = Events.On('provider:routed', handleProviderRouted as Events.Callback)
   }
 
   const stopStatusSync = () => {
@@ -258,6 +294,10 @@ export function useBlacklistState(options: UseBlacklistStateOptions) {
     if (unsubscribeBlacklisted) {
       unsubscribeBlacklisted()
       unsubscribeBlacklisted = undefined
+    }
+    if (unsubscribeRouted) {
+      unsubscribeRouted()
+      unsubscribeRouted = undefined
     }
   }
 

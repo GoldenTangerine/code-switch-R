@@ -495,8 +495,10 @@
         "noData": "今日暂无数据",
         "hostedLive": "托管中",
         "currentRouted": "当前路由",
+        "defaultRouted": "默认路由",
         "recentRouted": "最近命中",
         "currentRoutedHint": "托管已开启，最新请求当前命中这个供应商。",
+        "defaultRoutedHint": "托管已开启，在还没有实时命中记录前，会先按当前顺序尝试这个供应商。",
         "recentRoutedHint": "最近一次托管请求命中了这个供应商。"
       },
       "directApply": {

@@ -22,6 +22,8 @@ export type ProviderDragTarget = {
 
 export interface LastUsedProvider {
   platform: string
+  source_platform?: string
+  tool_id?: string
   provider_id?: string
   provider_name: string
   updated_at: number
@@ -73,6 +75,7 @@ export type ProviderCardViewModel = {
   dragging: boolean
   dragOver: boolean
   isLastUsed: boolean
+  isDefaultHostedProvider: boolean
   isHighlighted: boolean
   isDirectApplied: boolean
   blacklistStatus: BlacklistStatus | null

@@ -71,9 +71,9 @@
           </button>
         </div>
 
-        <div v-if="viewModel.isLastUsed" class="card-state-row" :title="relayStatusTitle">
+        <div v-if="showHostedStateRow" class="card-state-row" :title="relayStatusTitle">
           <span
-            v-if="hostedSelectionActive"
+            v-if="hostedSelectionActive || viewModel.isDefaultHostedProvider"
             class="provider-state-pill provider-state-pill--hosted"
           >
             <span class="provider-state-pulse" aria-hidden="true"></span>
@@ -81,7 +81,7 @@
           </span>
           <span
             class="provider-state-pill"
-            :class="hostedSelectionActive ? 'provider-state-pill--active' : 'provider-state-pill--recent'"
+            :class="statePillClass"
           >
             {{ relayStatusLabel }}
           </span>
@@ -397,6 +397,8 @@ const directApplyTooltip = computed(() => {
   return t('components.main.directApply.title')
 })
 
+const showHostedStateRow = computed(() => props.viewModel.isLastUsed || props.viewModel.isDefaultHostedProvider)
+
 const hostedSelectionActive = computed(() => isHostedRouteActive({
   activeProxyState: props.activeProxyState,
   isLastUsed: props.viewModel.isLastUsed,
@@ -406,15 +408,29 @@ const hostedSelectionActive = computed(() => isHostedRouteActive({
   isBlacklisted: props.viewModel.blacklistStatus?.isBlacklisted === true,
 }))
 
+const statePillClass = computed(() => {
+  if (hostedSelectionActive.value) {
+    return 'provider-state-pill--active'
+  }
+  if (props.viewModel.isDefaultHostedProvider) {
+    return 'provider-state-pill--default'
+  }
+  return 'provider-state-pill--recent'
+})
+
 const relayStatusLabel = computed(() => (
   hostedSelectionActive.value
     ? t('components.main.providers.currentRouted')
+    : props.viewModel.isDefaultHostedProvider
+      ? t('components.main.providers.defaultRouted')
     : t('components.main.providers.recentRouted')
 ))
 
 const relayStatusTitle = computed(() => (
   hostedSelectionActive.value
     ? t('components.main.providers.currentRoutedHint')
+    : props.viewModel.isDefaultHostedProvider
+      ? t('components.main.providers.defaultRoutedHint')
     : t('components.main.providers.recentRoutedHint')
 ))
 
