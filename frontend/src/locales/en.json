@@ -493,9 +493,9 @@
         "loading": "Refreshing...",
         "noData": "No data yet today",
         "hostedLive": "Hosted",
-        "currentRouted": "Current Route",
-        "defaultRouted": "Default Route",
-        "recentRouted": "Recently Routed",
+        "currentRouted": "Current",
+        "defaultRouted": "Default",
+        "recentRouted": "Last",
         "currentRoutedHint": "Hosting is enabled and the latest request is currently routed to this provider.",
         "defaultRoutedHint": "Hosting is enabled and, before any live routing record is available, this provider will be tried first with the current order.",
         "recentRoutedHint": "The most recent hosted request was routed to this provider."

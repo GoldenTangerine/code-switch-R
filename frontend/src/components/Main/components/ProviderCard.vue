@@ -61,6 +61,31 @@
           >
             BL{{ viewModel.blacklistStatus.blacklistLevel }}
           </span>
+          <span
+            v-if="showHostedStateBadges"
+            class="provider-state-inline"
+            :title="relayStatusTitle"
+            :aria-label="relayStatusTitle"
+            role="group"
+          >
+            <span
+              v-if="showHostedModeBadge"
+              class="provider-state-pill provider-state-pill--hosted"
+              :title="relayStatusTitle"
+              :aria-hidden="true"
+            >
+              <span class="provider-state-pulse" aria-hidden="true"></span>
+              {{ t('components.main.providers.hostedLive') }}
+            </span>
+            <span
+              class="provider-state-pill"
+              :class="statePillClass"
+              :title="relayStatusTitle"
+              :aria-hidden="true"
+            >
+              {{ relayStatusLabel }}
+            </span>
+          </span>
           <button
             v-if="viewModel.card.officialSite"
             class="card-site"
@@ -69,22 +94,6 @@
           >
             {{ viewModel.formattedOfficialSite }}
           </button>
-        </div>
-
-        <div v-if="showHostedStateRow" class="card-state-row" :title="relayStatusTitle">
-          <span
-            v-if="hostedSelectionActive || viewModel.isDefaultHostedProvider"
-            class="provider-state-pill provider-state-pill--hosted"
-          >
-            <span class="provider-state-pulse" aria-hidden="true"></span>
-            {{ t('components.main.providers.hostedLive') }}
-          </span>
-          <span
-            class="provider-state-pill"
-            :class="statePillClass"
-          >
-            {{ relayStatusLabel }}
-          </span>
         </div>
 
         <div
@@ -397,8 +406,6 @@ const directApplyTooltip = computed(() => {
   return t('components.main.directApply.title')
 })
 
-const showHostedStateRow = computed(() => props.viewModel.isLastUsed || props.viewModel.isDefaultHostedProvider)
-
 const hostedSelectionActive = computed(() => isHostedRouteActive({
   activeProxyState: props.activeProxyState,
   isLastUsed: props.viewModel.isLastUsed,
@@ -407,6 +414,10 @@ const hostedSelectionActive = computed(() => isHostedRouteActive({
   apiKey: props.viewModel.card.apiKey,
   isBlacklisted: props.viewModel.blacklistStatus?.isBlacklisted === true,
 }))
+
+const showHostedStateBadges = computed(() => props.viewModel.isLastUsed || props.viewModel.isDefaultHostedProvider)
+
+const showHostedModeBadge = computed(() => hostedSelectionActive.value || props.viewModel.isDefaultHostedProvider)
 
 const statePillClass = computed(() => {
   if (hostedSelectionActive.value) {
