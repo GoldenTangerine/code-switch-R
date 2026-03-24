@@ -75,8 +75,8 @@
               :aria-hidden="true"
             >
               <span
-                v-if="hostedSelectionActive"
-                class="provider-state-pulse"
+                class="provider-state-indicator"
+                :class="hostedSelectionActive ? 'provider-state-pulse' : 'provider-state-pulse provider-state-pulse--idle'"
                 aria-hidden="true"
               ></span>
               {{ t('components.main.providers.hostedLive') }}
