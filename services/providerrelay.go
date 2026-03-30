@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -589,6 +590,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 		}
 
 		active := make([]Provider, 0, len(providers))
+		requestPlans := make(map[string]providerRequestPlan, len(providers))
 		skippedCount := 0
 		for _, provider := range providers {
 			// 基础过滤：enabled、URL、APIKey
@@ -603,13 +605,6 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 				continue
 			}
 
-			// 核心过滤：只保留支持请求模型的 provider
-			if requestedModel != "" && !provider.IsModelSupported(requestedModel) {
-				fmt.Printf("[INFO] Provider %s 不支持模型 %s，已跳过\n", provider.Name, requestedModel)
-				skippedCount++
-				continue
-			}
-
 			// 黑名单检查：跳过已拉黑的 provider
 			if isBlacklisted, until := prs.blacklistService.IsBlacklistedByID(kind, providerRefFromProvider(provider), provider.Name); isBlacklisted {
 				fmt.Printf("⛔ Provider %s 已拉黑，过期时间: %v\n", provider.Name, until.Format("15:04:05"))
@@ -617,6 +612,24 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 				continue
 			}
 
+			plan, err := buildProviderRequestPlan(provider, bodyBytes, endpoint, requestedModel)
+			if err != nil {
+				fmt.Printf("[WARN] Provider %s 请求体预处理失败，已自动跳过: %v\n", provider.Name, err)
+				skippedCount++
+				continue
+			}
+
+			if !provider.IsResolvedModelSupported(requestedModel, plan.EffectiveModel) {
+				fmt.Printf("[INFO] Provider %s 不支持最终模型 %s（原始请求模型: %s），已跳过\n",
+					provider.Name,
+					displayModelForLog(plan.EffectiveModel),
+					displayModelForLog(requestedModel),
+				)
+				skippedCount++
+				continue
+			}
+
+			requestPlans[providerRefFromProvider(provider)] = plan
 			active = append(active, provider)
 		}
 
@@ -691,21 +704,11 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 						continue
 					}
 
-					// 获取实际模型名
-					effectiveModel := provider.GetEffectiveModel(requestedModel)
-					currentBodyBytes := bodyBytes
-					if effectiveModel != requestedModel && requestedModel != "" {
-						fmt.Printf("[INFO] Provider %s 映射模型: %s -> %s\n", provider.Name, requestedModel, effectiveModel)
-						modifiedBody, err := ReplaceModelInRequestBody(bodyBytes, effectiveModel)
-						if err != nil {
-							fmt.Printf("[ERROR] 模型映射失败: %v，跳过此 Provider\n", err)
-							continue
-						}
-						currentBodyBytes = modifiedBody
+					plan, err := getProviderRequestPlan(requestPlans, provider, bodyBytes, endpoint, requestedModel)
+					if err != nil {
+						fmt.Printf("[ERROR] Provider %s 请求体预处理失败: %v，跳过此 Provider\n", provider.Name, err)
+						continue
 					}
-
-					// 获取有效端点
-					effectiveEndpoint := provider.GetEffectiveEndpoint(endpoint)
 
 					// 同 Provider 内重试循环
 					for retryCount := 0; retryCount < maxRetryPerProvider; retryCount++ {
@@ -718,10 +721,10 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 						}
 
 						fmt.Printf("[INFO] [拉黑模式] Provider: %s (Level %d) | 重试 %d/%d | Model: %s\n",
-							provider.Name, level, retryCount+1, maxRetryPerProvider, effectiveModel)
+							provider.Name, level, retryCount+1, maxRetryPerProvider, plan.EffectiveModel)
 
 						startTime := time.Now()
-						ok, err := prs.forwardRequest(c, kind, provider, effectiveEndpoint, query, clientHeaders, currentBodyBytes, isStream, effectiveModel, requestedModel)
+						ok, err := prs.forwardRequest(c, kind, provider, plan.EffectiveEndpoint, query, clientHeaders, plan.BodyBytes, isStream, plan.EffectiveModel, requestedModel)
 						duration := time.Since(startTime)
 
 						if ok {
@@ -831,30 +834,17 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 			for i, provider := range providersInLevel {
 				totalAttempts++
 
-				// 获取实际应该使用的模型名
-				effectiveModel := provider.GetEffectiveModel(requestedModel)
-
-				// 如果需要映射，修改请求体
-				currentBodyBytes := bodyBytes
-				if effectiveModel != requestedModel && requestedModel != "" {
-					fmt.Printf("[INFO] Provider %s 映射模型: %s -> %s\n", provider.Name, requestedModel, effectiveModel)
-
-					modifiedBody, err := ReplaceModelInRequestBody(bodyBytes, effectiveModel)
-					if err != nil {
-						fmt.Printf("[ERROR] 替换模型名失败: %v\n", err)
-						// 映射失败不应阻止尝试其他 provider
-						continue
-					}
-					currentBodyBytes = modifiedBody
+				plan, err := getProviderRequestPlan(requestPlans, provider, bodyBytes, endpoint, requestedModel)
+				if err != nil {
+					fmt.Printf("[ERROR] Provider %s 请求体预处理失败: %v\n", provider.Name, err)
+					continue
 				}
 
-				fmt.Printf("[INFO]   [%d/%d] Provider: %s | Model: %s\n", i+1, len(providersInLevel), provider.Name, effectiveModel)
+				fmt.Printf("[INFO]   [%d/%d] Provider: %s | Model: %s\n", i+1, len(providersInLevel), provider.Name, plan.EffectiveModel)
 
 				// 尝试发送请求
-				// 获取有效的端点（用户配置优先）
-				effectiveEndpoint := provider.GetEffectiveEndpoint(endpoint)
 				startTime := time.Now()
-				ok, err := prs.forwardRequest(c, kind, provider, effectiveEndpoint, query, clientHeaders, currentBodyBytes, isStream, effectiveModel, requestedModel)
+				ok, err := prs.forwardRequest(c, kind, provider, plan.EffectiveEndpoint, query, clientHeaders, plan.BodyBytes, isStream, plan.EffectiveModel, requestedModel)
 				duration := time.Since(startTime)
 
 				if ok {
@@ -2556,6 +2546,140 @@ func ReplaceModelInRequestBody(bodyBytes []byte, newModel string) ([]byte, error
 	return modified, nil
 }
 
+func ApplyRequestBodyOverrides(bodyBytes []byte, overrides map[string]interface{}) ([]byte, error) {
+	if len(overrides) == 0 {
+		return bodyBytes, nil
+	}
+
+	trimmedBody := bytes.TrimSpace(bodyBytes)
+	if len(trimmedBody) == 0 {
+		trimmedBody = []byte("{}")
+	}
+
+	if !json.Valid(trimmedBody) {
+		return bodyBytes, fmt.Errorf("请求体不是合法 JSON")
+	}
+	if trimmedBody[0] != '{' {
+		return bodyBytes, fmt.Errorf("请求体根节点必须是 JSON 对象")
+	}
+
+	currentBody := append([]byte(nil), trimmedBody...)
+	return applyRequestBodyOverrideMap(currentBody, "", overrides)
+}
+
+func applyRequestBodyOverrideMap(bodyBytes []byte, prefix string, values map[string]interface{}) ([]byte, error) {
+	if len(values) == 0 {
+		return bodyBytes, nil
+	}
+
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		if strings.TrimSpace(key) == "" {
+			continue
+		}
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	currentBody := bodyBytes
+	for _, key := range keys {
+		fullPath := key
+		if prefix != "" {
+			fullPath = prefix + "." + key
+		}
+
+		value := values[key]
+		nested, isNestedMap := value.(map[string]interface{})
+		if isNestedMap && len(nested) > 0 {
+			modifiedBody, err := applyRequestBodyOverrideMap(currentBody, fullPath, nested)
+			if err != nil {
+				return bodyBytes, err
+			}
+			currentBody = modifiedBody
+			continue
+		}
+
+		modifiedBody, err := sjson.SetBytes(currentBody, fullPath, value)
+		if err != nil {
+			return bodyBytes, fmt.Errorf("设置请求体字段 %q 失败: %w", fullPath, err)
+		}
+		currentBody = modifiedBody
+	}
+
+	return currentBody, nil
+}
+
+func resolveModelFromRequestBody(bodyBytes []byte, fallback string) string {
+	model := strings.TrimSpace(gjson.GetBytes(bodyBytes, "model").String())
+	if model != "" {
+		return model
+	}
+	return fallback
+}
+
+type providerRequestPlan struct {
+	BodyBytes         []byte
+	EffectiveModel    string
+	EffectiveEndpoint string
+}
+
+func buildProviderRequestPlan(provider Provider, bodyBytes []byte, endpoint string, requestedModel string) (providerRequestPlan, error) {
+	effectiveModel := provider.GetEffectiveModel(requestedModel)
+	currentBodyBytes := bodyBytes
+
+	if effectiveModel != requestedModel && requestedModel != "" {
+		modifiedBody, err := ReplaceModelInRequestBody(bodyBytes, effectiveModel)
+		if err != nil {
+			return providerRequestPlan{}, err
+		}
+		currentBodyBytes = modifiedBody
+	}
+
+	if len(provider.RequestBodyOverrides) > 0 {
+		modifiedBody, err := ApplyRequestBodyOverrides(currentBodyBytes, provider.RequestBodyOverrides)
+		if err != nil {
+			return providerRequestPlan{}, err
+		}
+		currentBodyBytes = modifiedBody
+	}
+
+	return providerRequestPlan{
+		BodyBytes:         currentBodyBytes,
+		EffectiveModel:    resolveModelFromRequestBody(currentBodyBytes, effectiveModel),
+		EffectiveEndpoint: provider.GetEffectiveEndpoint(endpoint),
+	}, nil
+}
+
+func getProviderRequestPlan(
+	plans map[string]providerRequestPlan,
+	provider Provider,
+	bodyBytes []byte,
+	endpoint string,
+	requestedModel string,
+) (providerRequestPlan, error) {
+	if plans != nil {
+		if plan, ok := plans[providerRefFromProvider(provider)]; ok {
+			return plan, nil
+		}
+	}
+	return buildProviderRequestPlan(provider, bodyBytes, endpoint, requestedModel)
+}
+
+func displayModelForLog(model string) string {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return "<empty>"
+	}
+	return model
+}
+
+func buildGeminiRequestBody(bodyBytes []byte, provider GeminiProvider) ([]byte, error) {
+	if len(provider.RequestBodyOverrides) == 0 {
+		return bodyBytes, nil
+	}
+	return ApplyRequestBodyOverrides(bodyBytes, provider.RequestBodyOverrides)
+}
+
 // geminiProxyHandler 处理 Gemini API 请求（支持 Level 分组降级和黑名单）
 func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -2746,6 +2870,13 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 					requestLog.Model = provider.Model
 					requestLog.ProviderAPIURL = provider.BaseURL
 					requestLog.ProviderAPIKey = provider.APIKey
+					currentBodyBytes, err := buildGeminiRequestBody(bodyBytes, provider)
+					if err != nil {
+						fmt.Printf("[Gemini][ERROR] 应用 Provider %s 的请求体强制字段失败: %v，跳过此 Provider\n", provider.Name, err)
+						lastError = err
+						lastProvider = provider.Name
+						continue
+					}
 
 					// 同 Provider 内重试循环
 					for retryCount := 0; retryCount < maxRetryPerProvider; retryCount++ {
@@ -2760,7 +2891,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 						fmt.Printf("[Gemini] [拉黑模式] Provider: %s (Level %d) | 重试 %d/%d\n",
 							provider.Name, level, retryCount+1, maxRetryPerProvider)
 
-						ok, err, responseWritten := prs.forwardGeminiRequest(c, &provider, endpoint, bodyBytes, isStream, requestLog)
+						ok, err, responseWritten := prs.forwardGeminiRequest(c, &provider, endpoint, currentBodyBytes, isStream, requestLog)
 						if ok {
 							fmt.Printf("[Gemini] ✓ 成功: %s | 重试 %d 次\n", provider.Name, retryCount+1)
 							_ = prs.blacklistService.RecordSuccessByID("gemini", providerRefFromGeminiProvider(provider), provider.Name)
@@ -2858,8 +2989,14 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 				requestLog.Model = provider.Model
 				requestLog.ProviderAPIURL = provider.BaseURL
 				requestLog.ProviderAPIKey = provider.APIKey
+				currentBodyBytes, err := buildGeminiRequestBody(bodyBytes, provider)
+				if err != nil {
+					fmt.Printf("[Gemini][ERROR] 应用 Provider %s 的请求体强制字段失败: %v\n", provider.Name, err)
+					lastError = err
+					continue
+				}
 
-				ok, err, responseWritten := prs.forwardGeminiRequest(c, &provider, endpoint, bodyBytes, isStream, requestLog)
+				ok, err, responseWritten := prs.forwardGeminiRequest(c, &provider, endpoint, currentBodyBytes, isStream, requestLog)
 				if ok {
 					_ = prs.blacklistService.RecordSuccessByID("gemini", providerRefFromGeminiProvider(provider), provider.Name)
 					// 记录最后使用的供应商
@@ -3111,6 +3248,7 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 
 		// 过滤可用的 providers
 		active := make([]Provider, 0, len(providers))
+		requestPlans := make(map[string]providerRequestPlan, len(providers))
 		skippedCount := 0
 		for _, provider := range providers {
 			if !provider.Enabled || provider.APIURL == "" || provider.APIKey == "" {
@@ -3123,12 +3261,6 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 				continue
 			}
 
-			if requestedModel != "" && !provider.IsModelSupported(requestedModel) {
-				fmt.Printf("[CustomCLI][INFO] Provider %s 不支持模型 %s，已跳过\n", provider.Name, requestedModel)
-				skippedCount++
-				continue
-			}
-
 			// 黑名单检查
 			if isBlacklisted, until := prs.blacklistService.IsBlacklistedByID(kind, providerRefFromProvider(provider), provider.Name); isBlacklisted {
 				fmt.Printf("[CustomCLI] ⛔ Provider %s 已拉黑，过期时间: %v\n", provider.Name, until.Format("15:04:05"))
@@ -3136,6 +3268,24 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 				continue
 			}
 
+			plan, err := buildProviderRequestPlan(provider, bodyBytes, endpoint, requestedModel)
+			if err != nil {
+				fmt.Printf("[CustomCLI][WARN] Provider %s 请求体预处理失败，已自动跳过: %v\n", provider.Name, err)
+				skippedCount++
+				continue
+			}
+
+			if !provider.IsResolvedModelSupported(requestedModel, plan.EffectiveModel) {
+				fmt.Printf("[CustomCLI][INFO] Provider %s 不支持最终模型 %s（原始请求模型: %s），已跳过\n",
+					provider.Name,
+					displayModelForLog(plan.EffectiveModel),
+					displayModelForLog(requestedModel),
+				)
+				skippedCount++
+				continue
+			}
+
+			requestPlans[providerRefFromProvider(provider)] = plan
 			active = append(active, provider)
 		}
 
@@ -3207,21 +3357,11 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 						continue
 					}
 
-					// 获取实际模型名
-					effectiveModel := provider.GetEffectiveModel(requestedModel)
-					currentBodyBytes := bodyBytes
-					if effectiveModel != requestedModel && requestedModel != "" {
-						fmt.Printf("[CustomCLI][INFO] Provider %s 映射模型: %s -> %s\n", provider.Name, requestedModel, effectiveModel)
-						modifiedBody, err := ReplaceModelInRequestBody(bodyBytes, effectiveModel)
-						if err != nil {
-							fmt.Printf("[CustomCLI][ERROR] 模型映射失败: %v，跳过此 Provider\n", err)
-							continue
-						}
-						currentBodyBytes = modifiedBody
+					plan, err := getProviderRequestPlan(requestPlans, provider, bodyBytes, endpoint, requestedModel)
+					if err != nil {
+						fmt.Printf("[CustomCLI][ERROR] Provider %s 请求体预处理失败: %v，跳过此 Provider\n", provider.Name, err)
+						continue
 					}
-
-					// 获取有效端点
-					effectiveEndpoint := provider.GetEffectiveEndpoint(endpoint)
 
 					// 同 Provider 内重试循环
 					for retryCount := 0; retryCount < maxRetryPerProvider; retryCount++ {
@@ -3234,10 +3374,10 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 						}
 
 						fmt.Printf("[CustomCLI][INFO] [拉黑模式] Provider: %s (Level %d) | 重试 %d/%d | Model: %s\n",
-							provider.Name, level, retryCount+1, maxRetryPerProvider, effectiveModel)
+							provider.Name, level, retryCount+1, maxRetryPerProvider, plan.EffectiveModel)
 
 						startTime := time.Now()
-						ok, err := prs.forwardRequest(c, kind, provider, effectiveEndpoint, query, clientHeaders, currentBodyBytes, isStream, effectiveModel, requestedModel)
+						ok, err := prs.forwardRequest(c, kind, provider, plan.EffectiveEndpoint, query, clientHeaders, plan.BodyBytes, isStream, plan.EffectiveModel, requestedModel)
 						duration := time.Since(startTime)
 
 						if ok {
@@ -3347,24 +3487,17 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 			for i, provider := range providersInLevel {
 				totalAttempts++
 
-				effectiveModel := provider.GetEffectiveModel(requestedModel)
-				currentBodyBytes := bodyBytes
-				if effectiveModel != requestedModel && requestedModel != "" {
-					fmt.Printf("[CustomCLI][INFO] Provider %s 映射模型: %s -> %s\n", provider.Name, requestedModel, effectiveModel)
-					modifiedBody, err := ReplaceModelInRequestBody(bodyBytes, effectiveModel)
-					if err != nil {
-						fmt.Printf("[CustomCLI][ERROR] 替换模型名失败: %v\n", err)
-						continue
-					}
-					currentBodyBytes = modifiedBody
+				plan, err := getProviderRequestPlan(requestPlans, provider, bodyBytes, endpoint, requestedModel)
+				if err != nil {
+					fmt.Printf("[CustomCLI][ERROR] Provider %s 请求体预处理失败: %v\n", provider.Name, err)
+					continue
 				}
 
-				fmt.Printf("[CustomCLI][INFO]   [%d/%d] Provider: %s | Model: %s\n", i+1, len(providersInLevel), provider.Name, effectiveModel)
+				fmt.Printf("[CustomCLI][INFO]   [%d/%d] Provider: %s | Model: %s\n", i+1, len(providersInLevel), provider.Name, plan.EffectiveModel)
 				// 获取有效的端点（用户配置优先）
-				effectiveEndpoint := provider.GetEffectiveEndpoint(endpoint)
 
 				startTime := time.Now()
-				ok, err := prs.forwardRequest(c, kind, provider, effectiveEndpoint, query, clientHeaders, currentBodyBytes, isStream, effectiveModel, requestedModel)
+				ok, err := prs.forwardRequest(c, kind, provider, plan.EffectiveEndpoint, query, clientHeaders, plan.BodyBytes, isStream, plan.EffectiveModel, requestedModel)
 				duration := time.Since(startTime)
 
 				if ok {

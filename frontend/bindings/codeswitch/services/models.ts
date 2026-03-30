@@ -1000,6 +1000,7 @@ export class GeminiProvider {
      * settings.json 配置
      */
     "settingsConfig"?: { [_: string]: any };
+    "requestBodyOverrides"?: { [_: string]: any };
 
     /** Creates a new GeminiProvider instance. */
     constructor($$source: Partial<GeminiProvider> = {}) {
@@ -1478,6 +1479,12 @@ export class Provider {
      * 支持精确匹配和通配符（如 "claude-*" -> "anthropic/claude-*"）
      */
     "modelMapping"?: { [_: string]: string };
+
+    /**
+     * 请求体强制覆盖字段 - 仅在命中当前 Provider 转发时生效
+     * 同名字段会覆盖，不存在的字段会新增；嵌套对象按层级递归写入
+     */
+    "requestBodyOverrides"?: { [_: string]: any };
 
     /**
      * 优先级分组 - 数字越小优先级越高（1-10，默认 1）

@@ -111,6 +111,7 @@ export const geminiToCard = (provider: GeminiProvider, index: number): Automatio
   enabled: provider.enabled,
   level: provider.level || 1,
   cliConfig: extractGeminiCliConfig(provider),
+  requestBodyOverrides: cloneCardValue(provider.requestBodyOverrides || {}),
   availabilityMonitorEnabled: false,
   connectivityAutoBlacklist: false,
   availabilityConfig: undefined,
@@ -126,6 +127,7 @@ export const cardToGemini = (card: AutomationCard, original: GeminiProvider): Ge
   enabled: card.enabled,
   level: card.level || 1,
   envConfig: buildGeminiEnvConfig(card, original),
+  requestBodyOverrides: cloneCardValue(card.requestBodyOverrides || {}),
 })
 
 export const serializeProviders = (providers: AutomationCard[]) =>
@@ -133,6 +135,7 @@ export const serializeProviders = (providers: AutomationCard[]) =>
     const { providerRef, ...persistable } = provider
     return {
       ...persistable,
+      requestBodyOverrides: cloneCardValue(provider.requestBodyOverrides || {}),
       availabilityMonitorEnabled: !!provider.availabilityMonitorEnabled,
       connectivityAutoBlacklist: !!provider.connectivityAutoBlacklist,
       availabilityConfig: provider.availabilityConfig

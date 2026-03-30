@@ -180,6 +180,22 @@
         </div>
 
         <div class="form-field">
+          <span class="label-row">
+            {{ t('components.main.form.labels.requestBodyOverrides') }}
+            <span v-if="requestBodyOverridesError" class="field-error">
+              {{ requestBodyOverridesError }}
+            </span>
+          </span>
+          <JsonCodeEditor
+            v-model="requestBodyOverridesText"
+            :invalid="!!requestBodyOverridesError"
+            :rows="10"
+            :surface-height="'220px'"
+          />
+          <span class="field-hint">{{ t('components.main.form.hints.requestBodyOverrides') }}</span>
+        </div>
+
+        <div class="form-field">
           <CLIConfigEditor
             :key="cliConfigEditorKey"
             ref="cliConfigEditorRef"
@@ -270,6 +286,7 @@ import BaseButton from '../../common/BaseButton.vue'
 import BaseInput from '../../common/BaseInput.vue'
 import BaseModal from '../../common/BaseModal.vue'
 import CLIConfigEditor from '../../common/CLIConfigEditor.vue'
+import JsonCodeEditor from '../../common/JsonCodeEditor.vue'
 import ModelMappingEditor from '../../common/ModelMappingEditor.vue'
 import ModelWhitelistEditor from '../../common/ModelWhitelistEditor.vue'
 import { AUTH_TYPE_OPTIONS, getDefaultAuthType } from '../constants'
@@ -320,6 +337,8 @@ const errors = reactive({
 const selectedAuthType = ref<string>(getDefaultAuthType(props.tabId))
 const customAuthHeader = ref('')
 const iconSearchQuery = ref('')
+const requestBodyOverridesText = ref('{}')
+const requestBodyOverridesError = ref('')
 
 const authTypeOptions = AUTH_TYPE_OPTIONS
 
@@ -345,16 +364,19 @@ const iconPreviewOptions = computed(() => {
 const resetForm = () => {
   errors.apiUrl = ''
   iconSearchQuery.value = ''
+  requestBodyOverridesError.value = ''
   cliConfigEditorKey.value += 1
 
   if (!props.card) {
     Object.assign(form, createDefaultVendorForm(props.tabId, defaultIconKey))
     selectedAuthType.value = getDefaultAuthType(props.tabId)
     customAuthHeader.value = ''
+    requestBodyOverridesText.value = formatJsonObject(form.requestBodyOverrides)
     return
   }
 
   Object.assign(form, createVendorFormFromCard(props.card, props.tabId))
+  requestBodyOverridesText.value = formatJsonObject(form.requestBodyOverrides)
 
   const authState = resolveProviderAuthState(props.card.connectivityAuthType, props.tabId)
   selectedAuthType.value = authState.selectedAuthType
@@ -384,8 +406,59 @@ watch(iconPreviewOptions, (icons) => {
   void preloadLobeIcons(icons)
 }, { immediate: true })
 
+watch(requestBodyOverridesText, () => {
+  requestBodyOverridesError.value = ''
+})
+
 const resolveEffectiveAuthType = () =>
   customAuthHeader.value.trim() || selectedAuthType.value || getDefaultAuthType(props.tabId)
+
+const toSortedJsonValue = (value: unknown): unknown => {
+  if (Array.isArray(value)) {
+    return value.map((item) => toSortedJsonValue(item))
+  }
+
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, entryValue]) => [key, toSortedJsonValue(entryValue)]),
+    )
+  }
+
+  return value
+}
+
+const formatJsonObject = (value: Record<string, any> | undefined) => (
+  JSON.stringify(toSortedJsonValue(value || {}), null, 2)
+)
+
+const parseRequestBodyOverrides = (): Record<string, any> | null => {
+  requestBodyOverridesError.value = ''
+
+  const raw = requestBodyOverridesText.value.trim()
+  if (!raw) {
+    requestBodyOverridesText.value = formatJsonObject({})
+    return {}
+  }
+
+  try {
+    const parsed = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      requestBodyOverridesError.value = t('components.main.form.errors.requestBodyOverridesMustBeObject')
+      return null
+    }
+
+    const normalized = parsed as Record<string, any>
+    requestBodyOverridesText.value = formatJsonObject(normalized)
+    return normalized
+  } catch (error) {
+    requestBodyOverridesError.value = t('components.main.form.errors.requestBodyOverridesInvalid', {
+      error: error instanceof Error ? error.message : String(error),
+    })
+    return null
+  }
+}
 
 const iconSvg = (name: string) => {
   if (!name) return ''
@@ -428,6 +501,8 @@ const buildFormPayload = async (): Promise<VendorForm | null> => {
   }
 
   form.apiUrl = apiUrl
+  const requestBodyOverrides = parseRequestBodyOverrides()
+  if (!requestBodyOverrides) return null
 
   const payload = buildNormalizedVendorForm({
     form,
@@ -435,6 +510,7 @@ const buildFormPayload = async (): Promise<VendorForm | null> => {
     defaultIconKey,
     resolveAuthType: resolveEffectiveAuthType,
   })
+  payload.requestBodyOverrides = requestBodyOverrides
 
   const cliConfigSubmitState = cliConfigEditorRef.value?.getCliConfigSubmitState?.()
   if (cliConfigSubmitState) {

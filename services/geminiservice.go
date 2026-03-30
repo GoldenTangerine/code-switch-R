@@ -25,20 +25,21 @@ const (
 
 // GeminiProvider Gemini 供应商配置
 type GeminiProvider struct {
-	ID                  string            `json:"id"`
-	Name                string            `json:"name"`
-	WebsiteURL          string            `json:"websiteUrl,omitempty"`
-	APIKeyURL           string            `json:"apiKeyUrl,omitempty"`
-	BaseURL             string            `json:"baseUrl,omitempty"`
-	APIKey              string            `json:"apiKey,omitempty"`
-	Model               string            `json:"model,omitempty"`
-	Description         string            `json:"description,omitempty"`
-	Category            string            `json:"category,omitempty"`            // official, third_party, custom
-	PartnerPromotionKey string            `json:"partnerPromotionKey,omitempty"` // 用于识别供应商类型
-	Enabled             bool              `json:"enabled"`
-	Level               int               `json:"level,omitempty"`          // 优先级分组 (1-10, 默认 1)
-	EnvConfig           map[string]string `json:"envConfig,omitempty"`      // .env 配置
-	SettingsConfig      map[string]any    `json:"settingsConfig,omitempty"` // settings.json 配置
+	ID                   string            `json:"id"`
+	Name                 string            `json:"name"`
+	WebsiteURL           string            `json:"websiteUrl,omitempty"`
+	APIKeyURL            string            `json:"apiKeyUrl,omitempty"`
+	BaseURL              string            `json:"baseUrl,omitempty"`
+	APIKey               string            `json:"apiKey,omitempty"`
+	Model                string            `json:"model,omitempty"`
+	Description          string            `json:"description,omitempty"`
+	Category             string            `json:"category,omitempty"`            // official, third_party, custom
+	PartnerPromotionKey  string            `json:"partnerPromotionKey,omitempty"` // 用于识别供应商类型
+	Enabled              bool              `json:"enabled"`
+	Level                int               `json:"level,omitempty"`          // 优先级分组 (1-10, 默认 1)
+	EnvConfig            map[string]string `json:"envConfig,omitempty"`      // .env 配置
+	SettingsConfig       map[string]any    `json:"settingsConfig,omitempty"` // settings.json 配置
+	RequestBodyOverrides map[string]any    `json:"requestBodyOverrides,omitempty"`
 }
 
 // GeminiPreset 预设供应商
@@ -1034,6 +1035,7 @@ func (s *GeminiService) DuplicateProvider(sourceID string) (*GeminiProvider, err
 		Category:            source.Category,
 		PartnerPromotionKey: source.PartnerPromotionKey,
 		Enabled:             false, // 默认禁用，避免与源供应商冲突
+		Level:               source.Level,
 	}
 
 	// 4. 深拷贝 map（避免共享引用）
@@ -1050,6 +1052,10 @@ func (s *GeminiService) DuplicateProvider(sourceID string) (*GeminiProvider, err
 			// 对于 map/slice 类型的值，需要深拷贝（简化处理，直接赋值）
 			cloned.SettingsConfig[k] = v
 		}
+	}
+
+	if source.RequestBodyOverrides != nil {
+		cloned.RequestBodyOverrides = cloneJSONLikeMap(source.RequestBodyOverrides)
 	}
 
 	// 5. 添加到列表并保存

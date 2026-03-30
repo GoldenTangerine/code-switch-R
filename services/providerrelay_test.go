@@ -122,6 +122,230 @@ func TestReplaceModelInRequestBody(t *testing.T) {
 	}
 }
 
+func TestApplyRequestBodyOverrides(t *testing.T) {
+	tests := []struct {
+		name            string
+		inputJSON       string
+		overrides       map[string]interface{}
+		expectError     bool
+		expectedModel   string
+		expectedTemp    float64
+		expectedTraceID string
+		expectedRegion  string
+	}{
+		{
+			name: "覆盖现有字段并新增字段",
+			inputJSON: `{
+				"model": "claude-sonnet-4",
+				"temperature": 0.7,
+				"messages": [{"role": "user", "content": "Hello"}]
+			}`,
+			overrides: map[string]interface{}{
+				"temperature": 0.2,
+				"metadata": map[string]interface{}{
+					"trace_id": "trace-001",
+					"region":   "cn-east",
+				},
+			},
+			expectedModel:   "claude-sonnet-4",
+			expectedTemp:    0.2,
+			expectedTraceID: "trace-001",
+			expectedRegion:  "cn-east",
+		},
+		{
+			name:      "空请求体时自动补空对象",
+			inputJSON: ``,
+			overrides: map[string]interface{}{
+				"model":      "forced-model",
+				"max_tokens": 256,
+			},
+			expectedModel: "forced-model",
+		},
+		{
+			name:        "非法JSON返回错误",
+			inputJSON:   `{invalid json}`,
+			overrides:   map[string]interface{}{"temperature": 0.1},
+			expectError: true,
+		},
+		{
+			name:        "根节点不是对象返回错误",
+			inputJSON:   `[]`,
+			overrides:   map[string]interface{}{"temperature": 0.1},
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := ApplyRequestBodyOverrides([]byte(tt.inputJSON), tt.overrides)
+			if tt.expectError {
+				if err == nil {
+					t.Fatalf("期望返回错误，但实际没有")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("不期望错误，但返回了: %v", err)
+			}
+			if !json.Valid(result) {
+				t.Fatalf("返回的 JSON 无效: %s", string(result))
+			}
+
+			if tt.expectedModel != "" && gjson.GetBytes(result, "model").String() != tt.expectedModel {
+				t.Fatalf("model = %q, 期望 %q", gjson.GetBytes(result, "model").String(), tt.expectedModel)
+			}
+			if tt.expectedTemp != 0 && gjson.GetBytes(result, "temperature").Float() != tt.expectedTemp {
+				t.Fatalf("temperature = %v, 期望 %v", gjson.GetBytes(result, "temperature").Float(), tt.expectedTemp)
+			}
+			if tt.expectedTraceID != "" && gjson.GetBytes(result, "metadata.trace_id").String() != tt.expectedTraceID {
+				t.Fatalf("metadata.trace_id = %q, 期望 %q", gjson.GetBytes(result, "metadata.trace_id").String(), tt.expectedTraceID)
+			}
+			if tt.expectedRegion != "" && gjson.GetBytes(result, "metadata.region").String() != tt.expectedRegion {
+				t.Fatalf("metadata.region = %q, 期望 %q", gjson.GetBytes(result, "metadata.region").String(), tt.expectedRegion)
+			}
+		})
+	}
+}
+
+func TestRequestBodyOverridesOverrideMappedModel(t *testing.T) {
+	provider := Provider{
+		Name: "Override Provider",
+		ModelMapping: map[string]string{
+			"claude-sonnet-4": "anthropic/claude-sonnet-4",
+		},
+		RequestBodyOverrides: map[string]interface{}{
+			"model":       "forced-provider-model",
+			"temperature": 0.15,
+			"metadata": map[string]interface{}{
+				"route": "vendor-a",
+			},
+		},
+	}
+
+	bodyBytes := []byte(`{
+		"model": "claude-sonnet-4",
+		"messages": [{"role": "user", "content": "hi"}]
+	}`)
+	requestedModel := "claude-sonnet-4"
+
+	effectiveModel := provider.GetEffectiveModel(requestedModel)
+	modifiedBody, err := ReplaceModelInRequestBody(bodyBytes, effectiveModel)
+	if err != nil {
+		t.Fatalf("ReplaceModelInRequestBody 失败: %v", err)
+	}
+
+	modifiedBody, err = ApplyRequestBodyOverrides(modifiedBody, provider.RequestBodyOverrides)
+	if err != nil {
+		t.Fatalf("ApplyRequestBodyOverrides 失败: %v", err)
+	}
+
+	finalModel := resolveModelFromRequestBody(modifiedBody, effectiveModel)
+	if finalModel != "forced-provider-model" {
+		t.Fatalf("最终模型 = %q, 期望 %q", finalModel, "forced-provider-model")
+	}
+	if gjson.GetBytes(modifiedBody, "temperature").Float() != 0.15 {
+		t.Fatalf("temperature = %v, 期望 0.15", gjson.GetBytes(modifiedBody, "temperature").Float())
+	}
+	if gjson.GetBytes(modifiedBody, "metadata.route").String() != "vendor-a" {
+		t.Fatalf("metadata.route = %q, 期望 %q", gjson.GetBytes(modifiedBody, "metadata.route").String(), "vendor-a")
+	}
+}
+
+func TestProviderResolvedModelSupport(t *testing.T) {
+	tests := []struct {
+		name           string
+		provider       Provider
+		requestedModel string
+		effectiveModel string
+		expectAllowed  bool
+	}{
+		{
+			name: "最终模型命中 native whitelist",
+			provider: Provider{
+				SupportedModels: map[string]bool{
+					"anthropic/claude-sonnet-4": true,
+				},
+			},
+			requestedModel: "claude-sonnet-4",
+			effectiveModel: "anthropic/claude-sonnet-4",
+			expectAllowed:  true,
+		},
+		{
+			name: "最终模型不在 native whitelist 中应拦截",
+			provider: Provider{
+				SupportedModels: map[string]bool{
+					"anthropic/claude-sonnet-4": true,
+				},
+			},
+			requestedModel: "claude-sonnet-4",
+			effectiveModel: "openai/gpt-4.1",
+			expectAllowed:  false,
+		},
+		{
+			name: "未配置 native whitelist 时允许最终模型变化",
+			provider: Provider{
+				ModelMapping: map[string]string{
+					"claude-*": "anthropic/claude-*",
+				},
+			},
+			requestedModel: "claude-sonnet-4",
+			effectiveModel: "forced-provider-model",
+			expectAllowed:  true,
+		},
+		{
+			name: "未改模型时沿用原有支持判断",
+			provider: Provider{
+				ModelMapping: map[string]string{
+					"claude-sonnet-4": "anthropic/claude-sonnet-4",
+				},
+			},
+			requestedModel: "claude-sonnet-4",
+			effectiveModel: "claude-sonnet-4",
+			expectAllowed:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			allowed := tt.provider.IsResolvedModelSupported(tt.requestedModel, tt.effectiveModel)
+			if allowed != tt.expectAllowed {
+				t.Fatalf("IsResolvedModelSupported(%q, %q) = %v, 期望 %v",
+					tt.requestedModel, tt.effectiveModel, allowed, tt.expectAllowed)
+			}
+		})
+	}
+}
+
+func TestBuildProviderRequestPlanUsesOverrideModelForFiltering(t *testing.T) {
+	provider := Provider{
+		Name: "Filterable Provider",
+		SupportedModels: map[string]bool{
+			"forced-provider-model": true,
+		},
+		RequestBodyOverrides: map[string]interface{}{
+			"model": "forced-provider-model",
+		},
+	}
+
+	bodyBytes := []byte(`{
+		"model": "claude-sonnet-4",
+		"messages": [{"role": "user", "content": "hi"}]
+	}`)
+
+	plan, err := buildProviderRequestPlan(provider, bodyBytes, "/v1/messages", "claude-sonnet-4")
+	if err != nil {
+		t.Fatalf("buildProviderRequestPlan 失败: %v", err)
+	}
+
+	if plan.EffectiveModel != "forced-provider-model" {
+		t.Fatalf("最终模型 = %q, 期望 %q", plan.EffectiveModel, "forced-provider-model")
+	}
+
+	if !provider.IsResolvedModelSupported("claude-sonnet-4", plan.EffectiveModel) {
+		t.Fatalf("期望最终模型命中过滤校验，但实际被判定为不支持")
+	}
+}
+
 // ==================== 端到端场景测试 ====================
 
 func TestModelMappingEndToEnd(t *testing.T) {
@@ -129,19 +353,19 @@ func TestModelMappingEndToEnd(t *testing.T) {
 	provider := Provider{
 		Name: "OpenRouter",
 		SupportedModels: map[string]bool{
-			"anthropic/claude-sonnet-4":     true,
-			"anthropic/claude-opus-4":       true,
-			"openai/gpt-4":                  true,
-			"google/gemini-pro":             true,
-			"meta-llama/llama-3.1-405b":     true,
-			"anthropic/claude-3.5-sonnet":   true,
-			"anthropic/claude-3.5-haiku":    true,
+			"anthropic/claude-sonnet-4":   true,
+			"anthropic/claude-opus-4":     true,
+			"openai/gpt-4":                true,
+			"google/gemini-pro":           true,
+			"meta-llama/llama-3.1-405b":   true,
+			"anthropic/claude-3.5-sonnet": true,
+			"anthropic/claude-3.5-haiku":  true,
 		},
 		ModelMapping: map[string]string{
-			"claude-*":                     "anthropic/claude-*",
-			"gpt-*":                        "openai/gpt-*",
-			"gemini-*":                     "google/gemini-*",
-			"llama-*":                      "meta-llama/llama-*",
+			"claude-*": "anthropic/claude-*",
+			"gpt-*":    "openai/gpt-*",
+			"gemini-*": "google/gemini-*",
+			"llama-*":  "meta-llama/llama-*",
 		},
 	}
 

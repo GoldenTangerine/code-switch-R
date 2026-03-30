@@ -38,6 +38,7 @@ export type VendorForm = {
   enabled: boolean
   supportedModels?: Record<string, boolean>
   modelMapping?: Record<string, string>
+  requestBodyOverrides?: Record<string, any>
   level?: number
   apiEndpoint?: string
   cliConfig?: Record<string, any>

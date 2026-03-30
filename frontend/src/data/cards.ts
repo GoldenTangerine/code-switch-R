@@ -13,6 +13,8 @@ export type AutomationCard = {
   supportedModels?: Record<string, boolean>
   // 模型映射：external model -> internal model
   modelMapping?: Record<string, string>
+  // 请求体强制字段：仅在命中当前供应商转发时应用
+  requestBodyOverrides?: Record<string, any>
   // 优先级分组：数字越小优先级越高（1-10，默认 1）
   level?: number
   // API 端点路径（可选）：覆盖平台默认端点

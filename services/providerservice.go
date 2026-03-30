@@ -48,6 +48,10 @@ type Provider struct {
 	// 支持精确匹配和通配符（如 "claude-*" -> "anthropic/claude-*"）
 	ModelMapping map[string]string `json:"modelMapping,omitempty"`
 
+	// 请求体强制覆盖字段 - 仅在命中当前 Provider 转发时生效
+	// 同名字段会覆盖，不存在的字段会新增；嵌套对象按层级递归写入
+	RequestBodyOverrides map[string]interface{} `json:"requestBodyOverrides,omitempty"`
+
 	// 优先级分组 - 数字越小优先级越高（1-10，默认 1）
 	// 使用 omitempty 确保零值不序列化，向后兼容
 	Level int `json:"level,omitempty"`
@@ -88,6 +92,24 @@ type Provider struct {
 
 type providerEnvelope struct {
 	Providers []Provider `json:"providers"`
+}
+
+func cloneJSONLikeMap(value map[string]interface{}) map[string]interface{} {
+	if value == nil {
+		return map[string]interface{}{}
+	}
+
+	payload, err := json.Marshal(value)
+	if err != nil || len(payload) == 0 {
+		return map[string]interface{}{}
+	}
+
+	var clone map[string]interface{}
+	if err := json.Unmarshal(payload, &clone); err != nil || clone == nil {
+		return map[string]interface{}{}
+	}
+
+	return clone
 }
 
 type ProviderService struct {
@@ -600,6 +622,10 @@ func (ps *ProviderService) DuplicateProvider(kind string, sourceID int64) (*Prov
 		}
 	}
 
+	if source.RequestBodyOverrides != nil {
+		cloned.RequestBodyOverrides = cloneJSONLikeMap(source.RequestBodyOverrides)
+	}
+
 	// 7. 添加到列表并保存（使用内部方法避免死锁）
 	providers = append(providers, *cloned)
 	if err := ps.saveProvidersLocked(kind, providers); err != nil {
@@ -649,6 +675,54 @@ func (p *Provider) IsModelSupported(modelName string) bool {
 
 	// 场景 C：不支持
 	return false
+}
+
+// IsNativeModelSupported 检查 Provider 原生支持的模型名（只看 SupportedModels）
+// 当未配置 SupportedModels 时，默认视为不限制原生模型
+func (p *Provider) IsNativeModelSupported(modelName string) bool {
+	modelName = strings.TrimSpace(modelName)
+	if modelName == "" {
+		return true
+	}
+
+	if p.SupportedModels == nil || len(p.SupportedModels) == 0 {
+		return true
+	}
+
+	if p.SupportedModels[modelName] {
+		return true
+	}
+
+	for supportedModel := range p.SupportedModels {
+		if matchWildcard(supportedModel, modelName) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// IsResolvedModelSupported 检查在映射 / 请求体覆盖完成后，最终模型是否允许路由到当前 Provider
+// requestedModel 表示原始请求模型，effectiveModel 表示最终将发往上游的模型
+func (p *Provider) IsResolvedModelSupported(requestedModel, effectiveModel string) bool {
+	requestedModel = strings.TrimSpace(requestedModel)
+	effectiveModel = strings.TrimSpace(effectiveModel)
+
+	if requestedModel == "" && effectiveModel == "" {
+		return true
+	}
+
+	// 最终模型未变化时，沿用原有的兼容性判断逻辑
+	if effectiveModel == "" || effectiveModel == requestedModel {
+		if requestedModel == "" {
+			return true
+		}
+		return p.IsModelSupported(requestedModel)
+	}
+
+	// 最终模型发生变化（模型映射或请求体强制覆盖），
+	// 应按 Provider 原生模型能力判断，而不是继续看外部模型名。
+	return p.IsNativeModelSupported(effectiveModel)
 }
 
 // GetEffectiveModel 获取实际应该使用的模型名
