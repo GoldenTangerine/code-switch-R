@@ -57,7 +57,7 @@
 .card-cost-inline {
   display: inline-flex;
   align-items: baseline;
-  gap: 3px;
+  gap: 1px;
 }
 
 .card-cost-label {
@@ -66,32 +66,52 @@
 
 .card-cost-trigger {
   display: inline-flex;
-  align-items: center;
+  align-items: baseline;
+  gap: 5px;
   white-space: nowrap;
-  font-family: 'SFMono-Regular', Menlo, Consolas, monospace;
   font-size: inherit;
-  font-weight: 700;
   line-height: inherit;
-  font-variant-numeric: tabular-nums;
-  color: #c2410c;
+  color: inherit;
   background: transparent;
   border: none;
   border-radius: 4px;
   padding: 0;
   cursor: pointer;
-  text-decoration: underline;
-  text-decoration-thickness: 1.5px;
-  text-decoration-color: rgba(194, 65, 12, 0.24);
-  text-underline-offset: 3px;
   transition:
     color 0.18s ease,
-    text-decoration-color 0.18s ease,
     opacity 0.18s ease;
 }
 
+.card-cost-trigger__part {
+  line-height: 1;
+}
+
+.card-cost-trigger__part--currency {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: rgba(154, 52, 18, 0.78);
+}
+
+.card-cost-trigger__part--amount {
+  font-family: 'SFMono-Regular', Menlo, Consolas, monospace;
+  font-size: inherit;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  color: #c2410c;
+}
+
 .card-cost-trigger:hover {
+  opacity: 0.88;
+}
+
+.card-cost-trigger:hover .card-cost-trigger__part--currency {
+  color: rgba(124, 45, 18, 0.74);
+}
+
+.card-cost-trigger:hover .card-cost-trigger__part--amount {
   color: #9a3412;
-  text-decoration-color: currentColor;
 }
 
 .card-cost-trigger:focus-visible {
@@ -99,14 +119,20 @@
   outline-offset: 3px;
 }
 
-.card-cost-trigger--zero {
-  color: #64748b;
-  text-decoration-color: rgba(100, 116, 139, 0.22);
+.card-cost-trigger--zero .card-cost-trigger__part--currency {
+  color: rgba(100, 116, 139, 0.72);
 }
 
-.card-cost-trigger--zero:hover {
+.card-cost-trigger--zero .card-cost-trigger__part--amount {
+  color: #64748b;
+}
+
+.card-cost-trigger--zero:hover .card-cost-trigger__part--currency {
+  color: rgba(71, 85, 105, 0.74);
+}
+
+.card-cost-trigger--zero:hover .card-cost-trigger__part--amount {
   color: #475569;
-  text-decoration-color: currentColor;
 }
 
 .card-metrics-line-performance {
@@ -262,27 +288,43 @@
 }
 
 :global(.dark) .card-cost-trigger {
-  color: #fbbf24;
-  text-decoration-color: rgba(251, 191, 36, 0.28);
+  color: inherit;
 }
 
-:global(.dark) .card-cost-trigger:hover {
+:global(.dark) .card-cost-trigger__part--currency {
+  color: rgba(251, 191, 36, 0.76);
+}
+
+:global(.dark) .card-cost-trigger__part--amount {
+  color: #fbbf24;
+}
+
+:global(.dark) .card-cost-trigger:hover .card-cost-trigger__part--currency {
+  color: rgba(253, 224, 71, 0.8);
+}
+
+:global(.dark) .card-cost-trigger:hover .card-cost-trigger__part--amount {
   color: #fde68a;
-  text-decoration-color: currentColor;
 }
 
 :global(.dark) .card-cost-trigger:focus-visible {
   outline-color: rgba(251, 191, 36, 0.42);
 }
 
-:global(.dark) .card-cost-trigger--zero {
-  color: #94a3b8;
-  text-decoration-color: rgba(148, 163, 184, 0.24);
+:global(.dark) .card-cost-trigger--zero .card-cost-trigger__part--currency {
+  color: rgba(148, 163, 184, 0.72);
 }
 
-:global(.dark) .card-cost-trigger--zero:hover {
+:global(.dark) .card-cost-trigger--zero .card-cost-trigger__part--amount {
+  color: #94a3b8;
+}
+
+:global(.dark) .card-cost-trigger--zero:hover .card-cost-trigger__part--currency {
+  color: rgba(203, 213, 225, 0.76);
+}
+
+:global(.dark) .card-cost-trigger--zero:hover .card-cost-trigger__part--amount {
   color: #cbd5e1;
-  text-decoration-color: currentColor;
 }
 
 :global(.dark) .provider-state-pulse {

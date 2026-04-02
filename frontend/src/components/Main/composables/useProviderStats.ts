@@ -10,6 +10,7 @@ import {
 } from '../constants'
 import { cardProviderRef, normalizeProviderKey, providerStatsKeyFromStat } from '../adapters/providerCardMappers'
 import type { ProviderStatDisplay, ProviderTab, TranslateFn } from '../types'
+import { buildProviderCostDisplay } from '../utils/providerCostDisplay'
 
 type UseProviderStatsOptions = {
   t: TranslateFn
@@ -227,16 +228,6 @@ export function useProviderStats(options: UseProviderStatsOptions) {
     return 'success-bad'
   }
 
-  const formatCurrency = (value: number) => {
-    const locale = getLocale() || 'en'
-    return new Intl.NumberFormat(locale, {
-      style: 'currency',
-      currency: 'USD',
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(value)
-  }
-
   const providerStatDisplay = (card: AutomationCard): ProviderStatDisplay => {
     const tab = getActiveTab()
     if (!providerStatsLoaded[tab]) {
@@ -260,6 +251,9 @@ export function useProviderStats(options: UseProviderStatsOptions) {
     const tpsSampleCountRaw = Number(stat.tps_sample_count ?? 0)
     const ttftSampleCount = Number.isFinite(ttftSampleCountRaw) ? Math.max(0, Math.floor(ttftSampleCountRaw)) : 0
     const tpsSampleCount = Number.isFinite(tpsSampleCountRaw) ? Math.max(0, Math.floor(tpsSampleCountRaw)) : 0
+    const costTotalRaw = Number(stat.cost_total ?? 0)
+    const normalizedCost = Number.isFinite(costTotalRaw) ? Math.max(costTotalRaw, 0) : 0
+    const costDisplay = buildProviderCostDisplay(normalizedCost, getLocale() || 'en')
     const performanceHint = t('components.main.providers.performanceHint', {
       ttftSamples: formatMetric(ttftSampleCount),
       tpsSamples: formatMetric(tpsSampleCount),
@@ -271,8 +265,9 @@ export function useProviderStats(options: UseProviderStatsOptions) {
       requests: `${t('components.main.providers.requests')}: ${formatMetric(stat.total_requests)}`,
       tokens: `${t('components.main.providers.tokens')}: ${formatTokenNumber(totalTokens)}`,
       costLabel: t('components.main.providers.cost'),
-      costFormatted: formatCurrency(Math.max(stat.cost_total, 0)),
-      costValue: Math.max(stat.cost_total, 0),
+      costParts: costDisplay.parts,
+      costFormatted: costDisplay.formatted,
+      costValue: normalizedCost,
       ttft: formatAverageFirstTokenMs(stat.avg_first_token_sec),
       tps: formatAverageTokensPerSecond(stat.avg_tokens_per_sec),
       performanceHint,

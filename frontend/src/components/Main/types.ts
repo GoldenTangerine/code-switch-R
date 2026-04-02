@@ -64,6 +64,7 @@ export type ProviderStatDisplay =
       requests: string
       tokens: string
       costLabel: string
+      costParts: ProviderCostDisplayPart[]
       costFormatted: string
       costValue: number
       ttft: string
@@ -72,6 +73,11 @@ export type ProviderStatDisplay =
       successRateLabel: string
       successRateClass: string
     }
+
+export type ProviderCostDisplayPart = {
+  type: 'currency' | 'amount'
+  value: string
+}
 
 export type ProviderCardViewModel = {
   card: AutomationCard

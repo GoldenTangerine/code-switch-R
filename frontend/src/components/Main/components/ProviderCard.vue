@@ -141,7 +141,13 @@
                   })"
                   @click.stop="$emit('open-provider-cost-trend')"
                 >
-                  {{ stats.costFormatted }}
+                  <span
+                    v-for="(part, index) in stats.costParts"
+                    :key="`${part.type}-${index}`"
+                    :class="['card-cost-trigger__part', `card-cost-trigger__part--${part.type}`]"
+                  >
+                    {{ part.value }}
+                  </span>
                 </button>
               </span>
             </div>
