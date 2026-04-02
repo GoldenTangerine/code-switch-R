@@ -128,7 +128,22 @@
               <span class="card-metric-separator" aria-hidden="true">·</span>
               <span>{{ stats.tokens }}</span>
               <span class="card-metric-separator" aria-hidden="true">·</span>
-              <span>{{ stats.cost }}</span>
+              <span class="card-cost-inline">
+                <span>{{ stats.costLabel }}:</span>
+                <button
+                  type="button"
+                  class="card-cost-trigger"
+                  :class="{ 'card-cost-trigger--zero': stats.costValue <= 0 }"
+                  :title="t('components.main.providerCostTrend.buttonTooltip')"
+                  :aria-label="t('components.main.providerCostTrend.buttonAriaLabel', {
+                    name: viewModel.card.name,
+                    amount: stats.costFormatted,
+                  })"
+                  @click.stop="$emit('open-provider-cost-trend')"
+                >
+                  {{ stats.costFormatted }}
+                </button>
+              </span>
             </div>
             <div
               class="card-metrics-line card-metrics-line-performance"
@@ -394,6 +409,7 @@ const emit = defineEmits<{
   configure: []
   'open-model-list': []
   'open-provider-logs': []
+  'open-provider-cost-trend': []
   duplicate: []
   remove: []
 }>()

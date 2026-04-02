@@ -501,6 +501,26 @@
         "defaultRoutedHint": "托管已开启，在还没有实时命中记录前，会先按当前顺序尝试这个供应商。",
         "recentRoutedHint": "最近一次托管请求命中了这个供应商。"
       },
+      "providerCostTrend": {
+        "buttonTooltip": "查看今日累计消费金额走势",
+        "buttonAriaLabel": "查看 {name} 今日累计消费金额走势，当前花费 {amount}",
+        "modalTitle": "{name} · 累计消费金额折线图",
+        "summary": "这里会把今天该供应商每条请求的消费金额按时间累加，直接看出累计花费是怎么往上长的。",
+        "todayTotal": "今日累计消费",
+        "timeRange": "记录区间",
+        "requestCount": "记录笔数",
+        "loading": "正在加载今日消费明细...",
+        "loadFailed": "加载消费趋势失败：{error}",
+        "loadFailedFallback": "加载消费趋势失败",
+        "empty": "今日暂无消费记录",
+        "emptyHint": "当前供应商今天还没有可用于累计消费折线图的请求明细。",
+        "chartTitle": "累计消费金额折线图",
+        "chartHint": "X 轴是请求时间，Y 轴是累计消费金额；支持 tooltip、dataZoom、平滑折线和面积阴影。",
+        "legend": "Today · Cumulative Cost",
+        "axisName": "累计消费金额（USD）",
+        "seriesName": "累计消费金额",
+        "singleCost": "单次消费"
+      },
       "directApply": {
         "title": "直接应用",
         "inUse": "使用中",

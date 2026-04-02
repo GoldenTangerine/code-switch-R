@@ -63,7 +63,9 @@ export type ProviderStatDisplay =
       state: 'ready'
       requests: string
       tokens: string
-      cost: string
+      costLabel: string
+      costFormatted: string
+      costValue: number
       ttft: string
       tps: string
       performanceHint: string

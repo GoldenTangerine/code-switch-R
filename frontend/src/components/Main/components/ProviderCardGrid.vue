@@ -28,6 +28,7 @@
       @configure="$emit('configure', viewModel.card)"
       @open-model-list="$emit('open-model-list', viewModel.card)"
       @open-provider-logs="$emit('open-provider-logs', viewModel.card)"
+      @open-provider-cost-trend="$emit('open-provider-cost-trend', viewModel.card)"
       @duplicate="$emit('duplicate', viewModel.card)"
       @remove="$emit('remove', viewModel.card)"
     />
@@ -64,6 +65,7 @@ defineEmits<{
   configure: [card: AutomationCard]
   'open-model-list': [card: AutomationCard]
   'open-provider-logs': [card: AutomationCard]
+  'open-provider-cost-trend': [card: AutomationCard]
   duplicate: [card: AutomationCard]
   remove: [card: AutomationCard]
 }>()

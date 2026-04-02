@@ -56,6 +56,9 @@ export function useProviderForm(options: UseProviderFormOptions) {
   const providerLogsModalOpen = ref(false)
   const providerLogsModalProvider = ref<AutomationCard | null>(null)
   const providerLogsModalPlatform = ref<LogPlatform | null>(null)
+  const providerCostTrendModalOpen = ref(false)
+  const providerCostTrendModalProvider = ref<AutomationCard | null>(null)
+  const providerCostTrendModalPlatform = ref<LogPlatform | null>(null)
   const providerModalState = reactive<ProviderModalState>({
     open: false,
     tabId: initialTab,
@@ -95,6 +98,22 @@ export function useProviderForm(options: UseProviderFormOptions) {
     providerLogsModalOpen.value = false
     providerLogsModalProvider.value = null
     providerLogsModalPlatform.value = null
+  }
+
+  const openProviderCostTrend = (card: AutomationCard) => {
+    const activeTab = getActiveTab()
+    if (activeTab === 'others') {
+      return
+    }
+    providerCostTrendModalProvider.value = card
+    providerCostTrendModalPlatform.value = activeTab
+    providerCostTrendModalOpen.value = true
+  }
+
+  const closeProviderCostTrendModal = () => {
+    providerCostTrendModalOpen.value = false
+    providerCostTrendModalProvider.value = null
+    providerCostTrendModalPlatform.value = null
   }
 
   const openCreateModal = () => {
@@ -231,12 +250,17 @@ export function useProviderForm(options: UseProviderFormOptions) {
     providerLogsModalOpen,
     providerLogsModalProvider,
     providerLogsModalPlatform,
+    providerCostTrendModalOpen,
+    providerCostTrendModalProvider,
+    providerCostTrendModalPlatform,
     providerModalState,
     confirmState,
     openModelList,
     closeModelListModal,
     openProviderLogs,
     closeProviderLogsModal,
+    openProviderCostTrend,
+    closeProviderCostTrendModal,
     openCreateModal,
     openEditModal,
     closeProviderModal,

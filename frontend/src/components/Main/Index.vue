@@ -75,6 +75,7 @@
           @configure="configure"
           @open-model-list="openModelList"
           @open-provider-logs="openProviderLogs"
+          @open-provider-cost-trend="openProviderCostTrend"
           @duplicate="handleDuplicate"
           @remove="requestRemove"
         />
@@ -100,6 +101,13 @@
         :platform="providerLogsModalPlatform"
         :resolved-theme="resolvedTheme"
         @close="closeProviderLogsModal"
+      />
+      <ProviderCostTrendModal
+        :open="providerCostTrendModalOpen"
+        :provider="providerCostTrendModalProvider"
+        :platform="providerCostTrendModalPlatform"
+        :resolved-theme="resolvedTheme"
+        @close="closeProviderCostTrendModal"
       />
 
       <ProviderEditModal
@@ -163,6 +171,7 @@ import CliConfigModal from './modals/CliConfigModal.vue'
 import CliDeleteConfirmModal from './modals/CliDeleteConfirmModal.vue'
 import ProviderEditModal from './modals/ProviderEditModal.vue'
 import ProviderLogsModal from './modals/ProviderLogsModal.vue'
+import ProviderCostTrendModal from './modals/ProviderCostTrendModal.vue'
 import ProviderModelListModal from './modals/ProviderModelListModal.vue'
 import MainCustomCliToolsBar from './components/MainCustomCliToolsBar.vue'
 import MainHeroBanner from './components/MainHeroBanner.vue'
@@ -312,12 +321,17 @@ const {
   providerLogsModalOpen,
   providerLogsModalProvider,
   providerLogsModalPlatform,
+  providerCostTrendModalOpen,
+  providerCostTrendModalProvider,
+  providerCostTrendModalPlatform,
   providerModalState,
   confirmState,
   openModelList,
   closeModelListModal,
   openProviderLogs,
   closeProviderLogsModal,
+  openProviderCostTrend,
+  closeProviderCostTrendModal,
   openCreateModal,
   closeProviderModal,
   submitProviderModal,
