@@ -129,7 +129,7 @@
               <span>{{ stats.tokens }}</span>
               <span class="card-metric-separator" aria-hidden="true">·</span>
               <span class="card-cost-inline">
-                <span>{{ stats.costLabel }}:</span>
+                <span class="card-cost-label">{{ stats.costLabel }}:</span>
                 <button
                   type="button"
                   class="card-cost-trigger"

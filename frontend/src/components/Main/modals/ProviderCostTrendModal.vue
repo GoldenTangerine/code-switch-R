@@ -15,27 +15,38 @@
     >
       <section class="provider-cost-modal__hero">
         <div class="provider-cost-modal__copy">
-          <span class="provider-cost-modal__eyebrow">{{ platformLabel }}</span>
-          <h3 class="provider-cost-modal__title">{{ providerName }}</h3>
-          <p class="provider-cost-modal__subtitle">
-            {{ t('components.main.providerCostTrend.summary') }}
-          </p>
+          <div class="provider-cost-modal__copy-top">
+            <span class="provider-cost-modal__eyebrow">{{ platformLabel }}</span>
+          </div>
+          <div class="provider-cost-modal__copy-body">
+            <h3 class="provider-cost-modal__title">{{ providerName }}</h3>
+            <p class="provider-cost-modal__subtitle">
+              {{ t('components.main.providerCostTrend.summary') }}
+            </p>
+          </div>
         </div>
 
         <div class="provider-cost-modal__stats">
-          <article class="provider-cost-modal__stat-card">
+          <article class="provider-cost-modal__stat-card provider-cost-modal__stat-card--primary">
             <span class="provider-cost-modal__stat-label">{{ t('components.main.providerCostTrend.todayTotal') }}</span>
-            <strong class="provider-cost-modal__stat-value">{{ formatCurrency(totalCost) }}</strong>
+            <strong class="provider-cost-modal__stat-value provider-cost-modal__stat-value--primary">
+              {{ formatCurrency(totalCost) }}
+            </strong>
+            <span v-if="latestRecordLabel" class="provider-cost-modal__stat-note">
+              {{ latestRecordLabel }}
+            </span>
           </article>
           <article class="provider-cost-modal__stat-card">
             <span class="provider-cost-modal__stat-label">{{ t('components.main.providerCostTrend.timeRange') }}</span>
-            <strong class="provider-cost-modal__stat-value provider-cost-modal__stat-value--small">
-              {{ timeRangeLabel }}
+            <strong class="provider-cost-modal__stat-value provider-cost-modal__stat-value--range">
+              <span>{{ timeRange.start }}</span>
+              <span class="provider-cost-modal__stat-range-separator" aria-hidden="true">→</span>
+              <span>{{ timeRange.end }}</span>
             </strong>
           </article>
           <article class="provider-cost-modal__stat-card">
             <span class="provider-cost-modal__stat-label">{{ t('components.main.providerCostTrend.requestCount') }}</span>
-            <strong class="provider-cost-modal__stat-value">{{ trendPoints.length }}</strong>
+            <strong class="provider-cost-modal__stat-value">{{ recordCountLabel }}</strong>
           </article>
         </div>
       </section>
@@ -136,6 +147,10 @@ const compactCurrencyFormatter = computed(() => new Intl.NumberFormat(locale.val
   maximumFractionDigits: 2,
 }))
 
+const countFormatter = computed(() => new Intl.NumberFormat(locale.value || 'en', {
+  maximumFractionDigits: 0,
+}))
+
 const timeFormatter = computed(() => new Intl.DateTimeFormat(locale.value || 'en', {
   hour: '2-digit',
   minute: '2-digit',
@@ -154,6 +169,7 @@ const dateTimeFormatter = computed(() => new Intl.DateTimeFormat(locale.value ||
 
 const formatCurrency = (value: number) => currencyFormatter.value.format(Number.isFinite(value) ? value : 0)
 const formatAxisCurrency = (value: number) => compactCurrencyFormatter.value.format(Number.isFinite(value) ? value : 0)
+const formatCount = (value: number) => countFormatter.value.format(Number.isFinite(value) ? value : 0)
 
 const parseTime = (value: string) => {
   const raw = `${value ?? ''}`.trim()
@@ -184,12 +200,26 @@ const formatDateTime = (value: string) => {
 }
 
 const totalCost = computed(() => trendPoints.value[trendPoints.value.length - 1]?.cumulativeCost ?? 0)
-const timeRangeLabel = computed(() => {
+const timeRange = computed(() => {
   const first = trendPoints.value[0]?.time
   const last = trendPoints.value[trendPoints.value.length - 1]?.time
-  if (!first || !last) return '—'
-  return `${formatTime(first)} - ${formatTime(last)}`
+  if (!first || !last) {
+    return {
+      start: '—',
+      end: '—',
+    }
+  }
+  return {
+    start: formatTime(first),
+    end: formatTime(last),
+  }
 })
+const latestRecordLabel = computed(() => {
+  const last = trendPoints.value[trendPoints.value.length - 1]?.time
+  if (!last) return ''
+  return t('components.main.providerCostTrend.updatedAt', { time: formatTime(last) })
+})
+const recordCountLabel = computed(() => formatCount(trendPoints.value.length))
 
 const buildTodayRange = () => {
   const now = new Date()
@@ -507,33 +537,143 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+:global(.provider-cost-modal-shell) {
+  border-radius: 28px;
+  border: 1px solid rgba(226, 232, 240, 0.88);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.99), rgba(248, 250, 252, 0.97));
+  box-shadow:
+    0 32px 96px rgba(15, 23, 42, 0.18),
+    0 12px 28px rgba(15, 23, 42, 0.08);
+}
+
+:global(.provider-cost-modal-shell .modal-header) {
+  padding: 22px 24px 16px;
+  border-bottom: 1px solid rgba(226, 232, 240, 0.86);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.72));
+}
+
+:global(.provider-cost-modal-shell .modal-title) {
+  color: rgba(15, 23, 42, 0.96);
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+:global(.provider-cost-modal-shell .modal-body) {
+  padding: 0 24px 24px;
+  background: transparent;
+}
+
+:global(.provider-cost-modal-shell .ghost-icon) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: rgba(255, 255, 255, 0.82);
+  color: rgba(51, 65, 85, 0.84);
+  transition:
+    border-color 0.18s ease,
+    background 0.18s ease,
+    color 0.18s ease,
+    transform 0.18s ease;
+}
+
+:global(.provider-cost-modal-shell .ghost-icon:hover:not(:disabled)),
+:global(.provider-cost-modal-shell .ghost-icon:focus-visible) {
+  transform: translateY(-1px);
+  border-color: rgba(59, 130, 246, 0.24);
+  background: rgba(239, 246, 255, 0.98);
+  color: #1d4ed8;
+}
+
+:global(.provider-cost-modal-shell--dark) {
+  border-color: rgba(148, 163, 184, 0.18);
+  background:
+    linear-gradient(180deg, rgba(7, 12, 21, 0.99), rgba(11, 18, 31, 0.98));
+  box-shadow:
+    0 36px 92px rgba(0, 0, 0, 0.58),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+:global(.provider-cost-modal-shell--dark .modal-header) {
+  border-bottom-color: rgba(148, 163, 184, 0.14);
+  background:
+    linear-gradient(180deg, rgba(12, 19, 32, 0.94), rgba(8, 14, 24, 0.78));
+}
+
+:global(.provider-cost-modal-shell--dark .modal-title) {
+  color: rgba(248, 250, 252, 0.96);
+}
+
+:global(.provider-cost-modal-shell--dark .ghost-icon) {
+  border-color: rgba(148, 163, 184, 0.18);
+  background: rgba(148, 163, 184, 0.1);
+  color: rgba(226, 232, 240, 0.82);
+}
+
+:global(.provider-cost-modal-shell--dark .ghost-icon:hover:not(:disabled)),
+:global(.provider-cost-modal-shell--dark .ghost-icon:focus-visible) {
+  border-color: rgba(96, 165, 250, 0.28);
+  background: rgba(37, 99, 235, 0.18);
+  color: #bfdbfe;
+}
+
 .provider-cost-modal {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 20px;
   min-height: 0;
 }
 
 .provider-cost-modal__hero {
   display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
-  gap: 16px;
-  padding: 22px;
-  border-radius: 22px;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 380px);
+  align-items: stretch;
+  gap: 18px;
+  padding: 24px;
+  border-radius: 24px;
   background:
-    radial-gradient(circle at top right, rgba(37, 99, 235, 0.16), transparent 34%),
-    linear-gradient(145deg, var(--provider-cost-tint), rgba(255, 255, 255, 0.92));
-  border: 1px solid rgba(148, 163, 184, 0.18);
+    radial-gradient(circle at top left, var(--provider-cost-tint), transparent 42%),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.98), rgba(241, 245, 249, 0.92));
+  border: 1px solid rgba(191, 219, 254, 0.24);
+  box-shadow: 0 20px 44px rgba(15, 23, 42, 0.08);
+}
+
+.provider-cost-modal__copy {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 18px;
+  min-width: 0;
+}
+
+.provider-cost-modal__copy-top {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.provider-cost-modal__copy-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
 }
 
 .provider-cost-modal__eyebrow {
   display: inline-flex;
   align-items: center;
-  padding: 7px 11px;
+  padding: 7px 12px;
   border-radius: 999px;
   color: var(--provider-cost-accent);
-  background: rgba(255, 255, 255, 0.74);
-  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(148, 163, 184, 0.2);
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.06em;
@@ -541,36 +681,54 @@ onBeforeUnmount(() => {
 }
 
 .provider-cost-modal__title {
-  margin: 14px 0 10px;
-  font-size: 28px;
+  margin: 0;
+  max-width: 18ch;
+  font-size: 30px;
   line-height: 1.05;
-  letter-spacing: -0.04em;
+  letter-spacing: -0.05em;
 }
 
 .provider-cost-modal__subtitle {
   margin: 0;
   color: var(--mac-text-secondary);
   font-size: 14px;
-  line-height: 1.7;
+  line-height: 1.68;
+  max-width: 48ch;
 }
 
 .provider-cost-modal__stats {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1.08fr) minmax(0, 1fr);
+  grid-template-rows: repeat(2, minmax(0, 1fr));
   gap: 12px;
+  min-width: 0;
 }
 
 .provider-cost-modal__stat-card {
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
+  justify-content: center;
   gap: 10px;
-  min-height: 112px;
+  min-height: 100px;
   padding: 16px 18px;
   border-radius: 18px;
-  background: rgba(255, 255, 255, 0.82);
-  border: 1px solid rgba(226, 232, 240, 0.88);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.26);
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.26),
+    0 10px 24px rgba(15, 23, 42, 0.06);
+}
+
+.provider-cost-modal__stat-card--primary {
+  grid-row: 1 / span 2;
+  justify-content: space-between;
+  padding: 18px 20px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(239, 246, 255, 0.76));
+  border-color: rgba(96, 165, 250, 0.22);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.3),
+    0 16px 32px rgba(37, 99, 235, 0.1);
 }
 
 .provider-cost-modal__stat-label {
@@ -586,10 +744,30 @@ onBeforeUnmount(() => {
   font-weight: 700;
   color: var(--mac-text);
   line-height: 1.2;
+  letter-spacing: -0.03em;
 }
 
-.provider-cost-modal__stat-value--small {
-  font-size: 19px;
+.provider-cost-modal__stat-value--primary {
+  font-size: 34px;
+}
+
+.provider-cost-modal__stat-value--range {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 8px;
+  font-size: 17px;
+  white-space: nowrap;
+}
+
+.provider-cost-modal__stat-range-separator {
+  color: var(--mac-text-secondary);
+}
+
+.provider-cost-modal__stat-note {
+  color: var(--mac-text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .provider-cost-modal__state {
@@ -615,10 +793,12 @@ onBeforeUnmount(() => {
 }
 
 .provider-cost-chart {
-  padding: 16px;
+  padding: 18px 20px 16px;
   border-radius: 22px;
-  background: rgba(255, 255, 255, 0.94);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.92));
   border: 1px solid rgba(226, 232, 240, 0.9);
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
 }
 
 .provider-cost-chart__header {
@@ -626,21 +806,22 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   align-items: flex-start;
   gap: 16px;
-  margin-bottom: 12px;
+  margin-bottom: 14px;
 }
 
 .provider-cost-chart__title {
   margin: 0;
-  font-size: 18px;
+  font-size: 17px;
   font-weight: 800;
   letter-spacing: -0.03em;
 }
 
 .provider-cost-chart__hint {
-  margin: 8px 0 0;
+  margin: 6px 0 0;
   color: var(--mac-text-secondary);
   font-size: 13px;
   line-height: 1.6;
+  max-width: 52ch;
 }
 
 .provider-cost-chart__legend {
@@ -648,8 +829,12 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(191, 219, 254, 0.46);
+  background: rgba(239, 246, 255, 0.78);
   color: var(--mac-text-secondary);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
 }
 
@@ -668,14 +853,22 @@ onBeforeUnmount(() => {
 }
 
 .provider-cost-modal--dark .provider-cost-modal__hero {
-  border-color: rgba(71, 85, 105, 0.56);
+  border-color: rgba(71, 85, 105, 0.52);
   background:
-    radial-gradient(circle at top right, rgba(59, 130, 246, 0.22), transparent 34%),
-    linear-gradient(145deg, rgba(15, 23, 42, 0.92), rgba(30, 41, 59, 0.94));
+    radial-gradient(circle at top left, rgba(59, 130, 246, 0.2), transparent 40%),
+    linear-gradient(145deg, rgba(11, 18, 32, 0.94), rgba(15, 23, 42, 0.96));
+  box-shadow: 0 22px 52px rgba(2, 6, 23, 0.36);
+}
+
+.provider-cost-modal--dark .provider-cost-modal__eyebrow {
+  background: rgba(148, 163, 184, 0.12);
+  border-color: rgba(148, 163, 184, 0.18);
 }
 
 .provider-cost-modal--dark .provider-cost-modal__subtitle,
 .provider-cost-modal--dark .provider-cost-modal__stat-label,
+.provider-cost-modal--dark .provider-cost-modal__stat-note,
+.provider-cost-modal--dark .provider-cost-modal__stat-range-separator,
 .provider-cost-modal--dark .provider-cost-chart__hint,
 .provider-cost-modal--dark .provider-cost-chart__legend,
 .provider-cost-modal--dark .provider-cost-modal__state {
@@ -696,6 +889,20 @@ onBeforeUnmount(() => {
   border-color: rgba(51, 65, 85, 0.84);
 }
 
+.provider-cost-modal--dark .provider-cost-modal__stat-card--primary {
+  background:
+    linear-gradient(180deg, rgba(15, 23, 42, 0.9), rgba(30, 41, 59, 0.82));
+  border-color: rgba(59, 130, 246, 0.32);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 18px 34px rgba(2, 6, 23, 0.34);
+}
+
+.provider-cost-modal--dark .provider-cost-chart__legend {
+  border-color: rgba(59, 130, 246, 0.24);
+  background: rgba(37, 99, 235, 0.12);
+}
+
 .provider-cost-modal--dark .provider-cost-modal__state--error {
   color: #fecaca;
   background: rgba(69, 10, 10, 0.72);
@@ -708,18 +915,50 @@ onBeforeUnmount(() => {
   }
 
   .provider-cost-modal__stats {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: auto;
+  }
+
+  .provider-cost-modal__stat-card--primary {
+    grid-row: auto;
+    grid-column: 1 / -1;
   }
 }
 
 @media (max-width: 640px) {
+  :global(.provider-cost-modal-shell .modal-header) {
+    padding: 18px 18px 14px;
+  }
+
+  :global(.provider-cost-modal-shell .modal-body) {
+    padding: 0 18px 18px;
+  }
+
   .provider-cost-modal__hero {
-    padding: 16px;
+    padding: 18px;
     border-radius: 18px;
   }
 
   .provider-cost-modal__title {
     font-size: 24px;
+  }
+
+  .provider-cost-modal__stats {
+    grid-template-columns: 1fr;
+  }
+
+  .provider-cost-modal__stat-card,
+  .provider-cost-modal__stat-card--primary {
+    grid-column: auto;
+    min-height: 0;
+  }
+
+  .provider-cost-modal__stat-value--primary {
+    font-size: 30px;
+  }
+
+  .provider-cost-modal__stat-value--range {
+    font-size: 16px;
   }
 
   .provider-cost-chart {
