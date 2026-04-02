@@ -1,0 +1,1198 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>供应商累计消费金额折线图 Demo</title>
+    <script src="./vendor-echarts.min.js"></script>
+    <style>
+      @font-face {
+        font-family: "Inter Local";
+        src: url("./Inter-Medium.ttf") format("truetype");
+        font-style: normal;
+        font-weight: 500;
+        font-display: swap;
+      }
+
+      :root {
+        --bg-1: #f5f7fb;
+        --bg-2: #edf4ff;
+        --panel: rgba(255, 255, 255, 0.9);
+        --panel-strong: rgba(255, 255, 255, 0.96);
+        --border: rgba(148, 163, 184, 0.24);
+        --text: #0f172a;
+        --text-secondary: #475569;
+        --text-tertiary: #64748b;
+        --primary: #2563eb;
+        --primary-deep: #1d4ed8;
+        --primary-soft: rgba(37, 99, 235, 0.12);
+        --gold: #b45309;
+        --gold-soft: rgba(180, 83, 9, 0.1);
+        --shadow: 0 24px 64px rgba(15, 23, 42, 0.12);
+        --radius-xl: 28px;
+        --radius-lg: 22px;
+        --radius-md: 16px;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        min-height: 100%;
+      }
+
+      body {
+        font-family: "Inter Local", "PingFang SC", "Microsoft YaHei", sans-serif;
+        color: var(--text);
+        background:
+          radial-gradient(circle at top left, rgba(59, 130, 246, 0.12), transparent 32%),
+          radial-gradient(circle at top right, rgba(14, 165, 233, 0.1), transparent 28%),
+          linear-gradient(180deg, var(--bg-2) 0%, var(--bg-1) 42%, #f8fafc 100%);
+      }
+
+      button {
+        font: inherit;
+      }
+
+      .page-shell {
+        max-width: 1180px;
+        margin: 0 auto;
+        padding: 42px 20px 60px;
+      }
+
+      .hero {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 20px;
+        align-items: end;
+        margin-bottom: 24px;
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.72);
+        border: 1px solid rgba(37, 99, 235, 0.12);
+        color: var(--primary-deep);
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .hero h1 {
+        margin: 14px 0 10px;
+        font-size: clamp(28px, 4vw, 42px);
+        line-height: 1.06;
+        letter-spacing: -0.04em;
+      }
+
+      .hero p {
+        margin: 0;
+        max-width: 760px;
+        color: var(--text-secondary);
+        font-size: 15px;
+        line-height: 1.7;
+      }
+
+      .hero-note {
+        min-width: 220px;
+        padding: 18px 20px;
+        border-radius: 22px;
+        background: linear-gradient(145deg, rgba(37, 99, 235, 0.1), rgba(255, 255, 255, 0.92));
+        border: 1px solid rgba(59, 130, 246, 0.18);
+        box-shadow: 0 18px 36px rgba(37, 99, 235, 0.08);
+      }
+
+      .hero-note__label {
+        display: block;
+        color: var(--text-tertiary);
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .hero-note__value {
+        display: block;
+        margin-top: 8px;
+        color: var(--text);
+        font-family: "JetBrains Mono", monospace;
+        font-size: 24px;
+        font-weight: 700;
+      }
+
+      .hero-note__desc {
+        display: block;
+        margin-top: 8px;
+        color: var(--text-secondary);
+        font-size: 13px;
+        line-height: 1.55;
+      }
+
+      .panel {
+        border-radius: var(--radius-xl);
+        border: 1px solid var(--border);
+        background: var(--panel);
+        backdrop-filter: blur(14px);
+        box-shadow: var(--shadow);
+      }
+
+      .panel-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 16px;
+        padding: 24px 24px 0;
+      }
+
+      .panel-title {
+        margin: 0;
+        font-size: 20px;
+        font-weight: 800;
+        letter-spacing: -0.03em;
+      }
+
+      .panel-desc {
+        margin: 8px 0 0;
+        color: var(--text-secondary);
+        font-size: 14px;
+      }
+
+      .panel-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 14px;
+        border-radius: 999px;
+        color: var(--primary-deep);
+        background: var(--primary-soft);
+        border: 1px solid rgba(37, 99, 235, 0.15);
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .supplier-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 16px;
+        padding: 24px;
+      }
+
+      .supplier-card {
+        position: relative;
+        overflow: hidden;
+        min-height: 212px;
+        border-radius: var(--radius-lg);
+        border: 1px solid rgba(226, 232, 240, 0.9);
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.9));
+        padding: 18px 18px 16px;
+      }
+
+      .supplier-card::after {
+        content: "";
+        position: absolute;
+        inset: auto -26px -42px auto;
+        width: 120px;
+        height: 120px;
+        border-radius: 999px;
+        background: radial-gradient(circle, rgba(37, 99, 235, 0.12), transparent 70%);
+        pointer-events: none;
+      }
+
+      .supplier-top {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 12px;
+      }
+
+      .supplier-brand {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+      }
+
+      .supplier-avatar {
+        width: 46px;
+        height: 46px;
+        border-radius: 14px;
+        display: grid;
+        place-items: center;
+        font-weight: 800;
+        font-size: 16px;
+        color: #eff6ff;
+        background: linear-gradient(145deg, #2563eb, #1e3a8a);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28);
+      }
+
+      .supplier-name {
+        margin: 0;
+        font-size: 18px;
+        font-weight: 800;
+      }
+
+      .supplier-subtitle {
+        margin: 5px 0 0;
+        color: var(--text-secondary);
+        font-size: 13px;
+      }
+
+      .status-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 7px 10px;
+        border-radius: 999px;
+        color: #047857;
+        background: rgba(16, 185, 129, 0.1);
+        border: 1px solid rgba(16, 185, 129, 0.18);
+        font-size: 12px;
+        font-weight: 700;
+        white-space: nowrap;
+      }
+
+      .status-pill::before {
+        content: "";
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        background: #10b981;
+      }
+
+      .metric-group {
+        margin-top: 24px;
+      }
+
+      .metric-label {
+        display: block;
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--text-tertiary);
+      }
+
+      .cost-button {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 10px;
+        padding: 8px 12px;
+        border: none;
+        border-radius: 12px;
+        background: var(--gold-soft);
+        color: var(--gold);
+        cursor: pointer;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 20px;
+        font-weight: 700;
+        transition:
+          transform 0.18s ease,
+          box-shadow 0.18s ease,
+          background 0.18s ease;
+      }
+
+      .cost-button:hover {
+        transform: translateY(-1px);
+        background: rgba(180, 83, 9, 0.14);
+        box-shadow: 0 12px 24px rgba(180, 83, 9, 0.14);
+      }
+
+      .cost-button:focus-visible {
+        outline: 2px solid rgba(180, 83, 9, 0.38);
+        outline-offset: 2px;
+      }
+
+      .cost-button__hint {
+        color: var(--text-tertiary);
+        font-family: "Inter Local", "PingFang SC", "Microsoft YaHei", sans-serif;
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .supplier-meta {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+        margin-top: 22px;
+      }
+
+      .meta-item {
+        padding: 12px 14px;
+        border-radius: 14px;
+        background: rgba(248, 250, 252, 0.96);
+        border: 1px solid rgba(226, 232, 240, 0.95);
+      }
+
+      .meta-item__label {
+        display: block;
+        color: var(--text-tertiary);
+        font-size: 12px;
+      }
+
+      .meta-item__value {
+        display: block;
+        margin-top: 6px;
+        font-size: 14px;
+        font-weight: 700;
+        color: var(--text);
+      }
+
+      .modal {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        background: rgba(15, 23, 42, 0.5);
+        backdrop-filter: blur(10px);
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+        transition:
+          opacity 0.22s ease,
+          visibility 0.22s ease;
+        z-index: 1000;
+      }
+
+      .modal.is-open {
+        opacity: 1;
+        visibility: visible;
+        pointer-events: auto;
+      }
+
+      .modal-card {
+        width: min(980px, calc(100vw - 32px));
+        max-height: calc(100vh - 48px);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        border-radius: 30px;
+        border: 1px solid rgba(226, 232, 240, 0.95);
+        background: var(--panel-strong);
+        box-shadow: 0 32px 88px rgba(15, 23, 42, 0.24);
+        transform: translateY(18px) scale(0.98);
+        transition: transform 0.22s ease;
+      }
+
+      .modal.is-open .modal-card {
+        transform: translateY(0) scale(1);
+      }
+
+      .modal-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 16px;
+        padding: 24px 24px 18px;
+        border-bottom: 1px solid rgba(226, 232, 240, 0.92);
+      }
+
+      .modal-title {
+        margin: 0;
+        font-size: 26px;
+        line-height: 1.1;
+        letter-spacing: -0.04em;
+      }
+
+      .modal-subtitle {
+        margin: 10px 0 0;
+        color: var(--text-secondary);
+        font-size: 14px;
+        line-height: 1.65;
+      }
+
+      .modal-close {
+        width: 42px;
+        height: 42px;
+        border: none;
+        border-radius: 14px;
+        background: rgba(15, 23, 42, 0.06);
+        color: var(--text);
+        cursor: pointer;
+        font-size: 20px;
+        transition:
+          background 0.18s ease,
+          transform 0.18s ease;
+      }
+
+      .modal-close:hover {
+        background: rgba(15, 23, 42, 0.1);
+        transform: rotate(90deg);
+      }
+
+      .modal-content {
+        padding: 20px 24px 24px;
+        overflow: auto;
+      }
+
+      .summary-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 14px;
+        margin-bottom: 16px;
+      }
+
+      .summary-card {
+        padding: 16px 18px;
+        border-radius: 18px;
+        background: linear-gradient(180deg, rgba(248, 250, 252, 0.96), rgba(255, 255, 255, 0.95));
+        border: 1px solid rgba(226, 232, 240, 0.95);
+      }
+
+      .summary-card__label {
+        display: block;
+        color: var(--text-tertiary);
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .summary-card__value {
+        display: block;
+        margin-top: 10px;
+        color: var(--text);
+        font-family: "JetBrains Mono", monospace;
+        font-size: 24px;
+        font-weight: 700;
+      }
+
+      .chart-panel {
+        border-radius: 22px;
+        border: 1px solid rgba(226, 232, 240, 0.95);
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.96));
+        padding: 16px;
+      }
+
+      .chart-panel__top {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 16px;
+        margin-bottom: 12px;
+      }
+
+      .chart-panel__title {
+        margin: 0;
+        font-size: 18px;
+        font-weight: 800;
+        letter-spacing: -0.03em;
+      }
+
+      .chart-panel__legend {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--text-secondary);
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .chart-panel__legend::before {
+        content: "";
+        width: 12px;
+        height: 12px;
+        border-radius: 999px;
+        background: linear-gradient(180deg, #3b82f6, #1d4ed8);
+        box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.14);
+      }
+
+      #cumulative-cost-chart {
+        width: 100%;
+        height: 420px;
+      }
+
+      .chart-status {
+        display: none;
+        align-items: center;
+        justify-content: center;
+        min-height: 220px;
+        border-radius: 18px;
+        background: rgba(248, 250, 252, 0.92);
+        border: 1px dashed rgba(148, 163, 184, 0.42);
+        color: var(--text-secondary);
+        font-size: 14px;
+        text-align: center;
+        line-height: 1.7;
+        padding: 18px;
+      }
+
+      .chart-status.is-visible {
+        display: flex;
+      }
+
+      .chart-status.is-error {
+        color: #991b1b;
+        background: rgba(254, 242, 242, 0.96);
+        border-color: rgba(239, 68, 68, 0.28);
+      }
+
+      .modal-footnote {
+        margin-top: 14px;
+        color: var(--text-secondary);
+        font-size: 13px;
+        line-height: 1.65;
+      }
+
+      @media (max-width: 860px) {
+        .hero {
+          grid-template-columns: 1fr;
+        }
+
+        .summary-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (max-width: 640px) {
+        .page-shell {
+          padding: 28px 14px 40px;
+        }
+
+        .panel-header,
+        .supplier-grid,
+        .modal-header,
+        .modal-content {
+          padding-left: 16px;
+          padding-right: 16px;
+        }
+
+        .supplier-grid {
+          padding-top: 16px;
+        }
+
+        .modal {
+          padding: 12px;
+        }
+
+        .modal-card {
+          width: 100%;
+          max-height: calc(100vh - 24px);
+          border-radius: 24px;
+        }
+
+        #cumulative-cost-chart {
+          height: 340px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page-shell">
+      <section class="hero">
+        <div>
+          <span class="eyebrow">Dashboard Module Demo</span>
+          <h1>首页供应商花费点击后，弹出今日累计消费金额折线图</h1>
+          <p>
+            这个示例模拟了 dashboard 中的“供应商卡片”模块。用户点击供应商的花费金额后，会打开弹窗，
+            用 ECharts 展示当天 API token 消费金额随时间累计增长的趋势。
+          </p>
+        </div>
+
+        <aside class="hero-note">
+          <span class="hero-note__label">Chart Unit</span>
+          <span class="hero-note__value">USD</span>
+          <span class="hero-note__desc">
+            这里统一按 USD 展示。你要换成人民币也简单，把 `currencyCode` 改成 `CNY` 就完事。
+          </span>
+        </aside>
+      </section>
+
+      <section class="panel">
+        <header class="panel-header">
+          <div>
+            <h2 class="panel-title">供应商花费概览</h2>
+            <p class="panel-desc">点击任意供应商的花费金额，查看今天的累计消费金额变化折线图。</p>
+          </div>
+          <div class="panel-chip">Today · Cumulative Cost</div>
+        </header>
+
+        <div id="supplier-grid" class="supplier-grid"></div>
+      </section>
+    </main>
+
+    <div id="chart-modal" class="modal" aria-hidden="true">
+      <section
+        class="modal-card"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="modal-title"
+        aria-describedby="modal-subtitle"
+      >
+        <header class="modal-header">
+          <div>
+            <h2 id="modal-title" class="modal-title">累计消费金额折线图</h2>
+            <p id="modal-subtitle" class="modal-subtitle"></p>
+          </div>
+          <button id="close-modal" class="modal-close" type="button" aria-label="关闭弹窗">×</button>
+        </header>
+
+        <div class="modal-content">
+          <div id="summary-grid" class="summary-grid"></div>
+
+          <section class="chart-panel">
+            <div class="chart-panel__top">
+              <h3 class="chart-panel__title">累计消费金额折线图</h3>
+              <div class="chart-panel__legend">平滑折线 + 面积阴影 + dataZoom</div>
+            </div>
+            <div id="chart-status" class="chart-status" aria-live="polite"></div>
+            <div id="cumulative-cost-chart"></div>
+          </section>
+
+          <p class="modal-footnote">
+            鼠标悬停可查看该时间点的累计金额和单次消费金额；底部滑块和滚轮缩放可快速聚焦波峰区间。
+          </p>
+        </div>
+      </section>
+    </div>
+
+    <script>
+      // 图表金额单位。这里使用 USD，如果你想展示人民币，改成 CNY 即可。
+      const currencyCode = "USD";
+      const locale = "zh-CN";
+      const timeFormatter = new Intl.DateTimeFormat(locale, {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      });
+      const dateTimeFormatter = new Intl.DateTimeFormat(locale, {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+      });
+
+      const currencyFormatter = new Intl.NumberFormat(locale, {
+        style: "currency",
+        currency: currencyCode,
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
+
+      const compactCurrencyFormatter = new Intl.NumberFormat(locale, {
+        style: "currency",
+        currency: currencyCode,
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 2,
+      });
+
+      const formatCurrency = (value) => currencyFormatter.format(Number(value || 0));
+      const formatAxisCurrency = (value) => compactCurrencyFormatter.format(Number(value || 0));
+      const toFiniteNumber = (value) => {
+        const next = Number(value);
+        return Number.isFinite(next) ? next : 0;
+      };
+      const escapeHtml = (value) =>
+        String(value ?? "").replace(/[&<>"']/g, (char) => {
+          const lookup = {
+            "&": "&amp;",
+            "<": "&lt;",
+            ">": "&gt;",
+            '"': "&quot;",
+            "'": "&#39;",
+          };
+          return lookup[char];
+        });
+      const parseRecordTime = (value) => {
+        if (typeof value !== "string") return Number.NaN;
+
+        const trimmed = value.trim();
+        if (!trimmed) return Number.NaN;
+
+        const normalized = trimmed.includes("T") ? trimmed : trimmed.replace(" ", "T");
+        const parsed = Date.parse(normalized);
+        if (Number.isFinite(parsed)) return parsed;
+
+        const fallback = Date.parse(trimmed.replace(/-/g, "/"));
+        return Number.isFinite(fallback) ? fallback : Number.NaN;
+      };
+      const formatTimeLabel = (value) => {
+        const timestamp = parseRecordTime(value);
+        if (!Number.isFinite(timestamp)) return String(value ?? "--");
+        return timeFormatter.format(timestamp);
+      };
+      const formatDateTimeLabel = (value) => {
+        const timestamp = parseRecordTime(value);
+        if (!Number.isFinite(timestamp)) return String(value ?? "--");
+        return dateTimeFormatter.format(timestamp);
+      };
+      const compareRecordTime = (left, right) => {
+        const leftTime = parseRecordTime(left.time);
+        const rightTime = parseRecordTime(right.time);
+        const leftValid = Number.isFinite(leftTime);
+        const rightValid = Number.isFinite(rightTime);
+
+        if (leftValid && rightValid) return leftTime - rightTime;
+        if (leftValid) return -1;
+        if (rightValid) return 1;
+        return 0;
+      };
+      const createElement = (tagName, className, textContent) => {
+        const element = document.createElement(tagName);
+        if (className) element.className = className;
+        if (textContent !== undefined) element.textContent = textContent;
+        return element;
+      };
+
+      // 原始数据结构说明：
+      // 1. 每个供应商有一个 records 数组
+      // 2. records 按时间排序
+      // 3. 每一条记录至少包含：
+      //    - time: 时间字符串，例如 "2026-04-02 10:00:00"
+      //    - cost: 该时间点的单次消费金额
+      const supplierUsageSource = [
+        {
+          id: "openai",
+          name: "OpenAI",
+          subtitle: "gpt-5 / token usage",
+          region: "US-East",
+          status: "稳定",
+          requests: 326,
+          tokens: "1.26M",
+          records: [
+            { time: "2026-04-02 09:00:00", cost: 1.28 },
+            { time: "2026-04-02 09:35:00", cost: 0.92 },
+            { time: "2026-04-02 10:20:00", cost: 1.66 },
+            { time: "2026-04-02 11:05:00", cost: 0.84 },
+            { time: "2026-04-02 11:48:00", cost: 1.42 },
+            { time: "2026-04-02 13:10:00", cost: 2.12 },
+            { time: "2026-04-02 14:40:00", cost: 1.07 },
+            { time: "2026-04-02 15:30:00", cost: 1.95 },
+          ],
+        },
+        {
+          id: "anthropic",
+          name: "Anthropic",
+          subtitle: "claude / token usage",
+          region: "Global",
+          status: "稳定",
+          requests: 281,
+          tokens: "980K",
+          records: [
+            { time: "2026-04-02 09:10:00", cost: 0.74 },
+            { time: "2026-04-02 09:56:00", cost: 1.12 },
+            { time: "2026-04-02 10:44:00", cost: 0.98 },
+            { time: "2026-04-02 11:37:00", cost: 1.56 },
+            { time: "2026-04-02 12:42:00", cost: 1.21 },
+            { time: "2026-04-02 13:54:00", cost: 1.88 },
+            { time: "2026-04-02 15:05:00", cost: 1.64 },
+          ],
+        },
+        {
+          id: "gemini",
+          name: "Gemini",
+          subtitle: "gemini-2.5 / token usage",
+          region: "Asia",
+          status: "稳定",
+          requests: 198,
+          tokens: "734K",
+          records: [
+            { time: "2026-04-02 08:50:00", cost: 0.52 },
+            { time: "2026-04-02 09:42:00", cost: 0.67 },
+            { time: "2026-04-02 10:33:00", cost: 0.59 },
+            { time: "2026-04-02 11:26:00", cost: 0.93 },
+            { time: "2026-04-02 13:02:00", cost: 1.08 },
+            { time: "2026-04-02 14:18:00", cost: 0.84 },
+            { time: "2026-04-02 15:12:00", cost: 1.24 },
+          ],
+        },
+      ];
+
+      // 如何计算累计金额：
+      // 把每条记录的 cost 按时间顺序持续累加，得到 cumulativeCost。
+      // 这个 cumulativeCost 才是画折线图真正使用的数据。
+      const buildCumulativeRecords = (records) => {
+        const normalizedRecords = Array.isArray(records)
+          ? records
+              .map((record) => ({
+                time: typeof record?.time === "string" ? record.time.trim() : "",
+                cost: toFiniteNumber(record?.cost),
+              }))
+              .filter((record) => record.time.length > 0)
+              .sort(compareRecordTime)
+          : [];
+
+        let runningTotal = 0;
+
+        return normalizedRecords.map((record) => {
+          runningTotal += record.cost;
+
+          return {
+            ...record,
+            cumulativeCost: Number(runningTotal.toFixed(4)),
+          };
+        });
+      };
+
+      const suppliers = supplierUsageSource.map((supplier) => {
+        const cumulativeRecords = buildCumulativeRecords(supplier.records);
+        const lastRecord = cumulativeRecords[cumulativeRecords.length - 1];
+        const totalCost = lastRecord?.cumulativeCost ?? 0;
+        const latestTime = lastRecord?.time ?? "-";
+
+        return {
+          ...supplier,
+          cumulativeRecords,
+          totalCost,
+          latestTime,
+        };
+      });
+
+      const supplierGrid = document.getElementById("supplier-grid");
+      const modal = document.getElementById("chart-modal");
+      const closeModalButton = document.getElementById("close-modal");
+      const modalTitle = document.getElementById("modal-title");
+      const modalSubtitle = document.getElementById("modal-subtitle");
+      const summaryGrid = document.getElementById("summary-grid");
+      const chartContainer = document.getElementById("cumulative-cost-chart");
+      const chartStatus = document.getElementById("chart-status");
+
+      let chartInstance = null;
+      let activeSupplierId = null;
+      let lastActiveTrigger = null;
+
+      const destroyChart = () => {
+        if (!chartInstance) return;
+        chartInstance.dispose();
+        chartInstance = null;
+      };
+      const setChartStatus = (message, isError = false) => {
+        chartStatus.textContent = message;
+        chartStatus.classList.toggle("is-visible", Boolean(message));
+        chartStatus.classList.toggle("is-error", Boolean(message) && isError);
+        chartContainer.hidden = Boolean(message);
+      };
+      const clearChartStatus = () => {
+        setChartStatus("", false);
+      };
+
+      const createSupplierCard = (supplier) => {
+        const article = document.createElement("article");
+        article.className = "supplier-card";
+        const supplierTop = createElement("div", "supplier-top");
+        const supplierBrand = createElement("div", "supplier-brand");
+        const avatar = createElement("div", "supplier-avatar", supplier.name.slice(0, 2).toUpperCase());
+        const brandText = document.createElement("div");
+        const name = createElement("h3", "supplier-name", supplier.name);
+        const subtitle = createElement("p", "supplier-subtitle", supplier.subtitle);
+        brandText.append(name, subtitle);
+        supplierBrand.append(avatar, brandText);
+        const status = createElement("span", "status-pill", supplier.status);
+        supplierTop.append(supplierBrand, status);
+
+        const metricGroup = createElement("div", "metric-group");
+        const metricLabel = createElement("span", "metric-label", "Today's Spend");
+        const costButton = createElement("button", "cost-button");
+        costButton.type = "button";
+        costButton.dataset.supplierId = supplier.id;
+        costButton.append(formatCurrency(supplier.totalCost));
+        costButton.append(createElement("span", "cost-button__hint", "点击看累计"));
+        metricGroup.append(metricLabel, costButton);
+
+        const supplierMeta = createElement("div", "supplier-meta");
+        const metaPairs = [
+          ["请求次数", `${supplier.requests}`],
+          ["Token 量", supplier.tokens],
+          ["区域", supplier.region],
+          ["最新记录", formatTimeLabel(supplier.latestTime)],
+        ];
+
+        metaPairs.forEach(([label, value]) => {
+          const metaItem = createElement("div", "meta-item");
+          metaItem.append(
+            createElement("span", "meta-item__label", label),
+            createElement("span", "meta-item__value", value),
+          );
+          supplierMeta.appendChild(metaItem);
+        });
+
+        article.append(supplierTop, metricGroup, supplierMeta);
+
+        return article;
+      };
+
+      const renderSupplierCards = () => {
+        supplierGrid.textContent = "";
+        const fragment = document.createDocumentFragment();
+        suppliers.forEach((supplier) => {
+          fragment.appendChild(createSupplierCard(supplier));
+        });
+        supplierGrid.appendChild(fragment);
+
+        supplierGrid.addEventListener("click", (event) => {
+          const button = event.target.closest(".cost-button");
+          if (!button) return;
+
+          const supplierId = button.dataset.supplierId;
+          if (!supplierId) return;
+
+          lastActiveTrigger = button;
+          openChartModal(supplierId);
+        });
+      };
+
+      const renderSummaryCards = (supplier) => {
+        const recordCount = supplier.cumulativeRecords.length;
+        const lastPoint = supplier.cumulativeRecords[supplier.cumulativeRecords.length - 1];
+        const firstPoint = supplier.cumulativeRecords[0];
+        const summaryItems = [
+          ["今日累计消费", formatCurrency(lastPoint?.cumulativeCost ?? 0)],
+          ["记录区间", `${formatTimeLabel(firstPoint?.time)} - ${formatTimeLabel(lastPoint?.time)}`],
+          ["记录笔数", `${recordCount}`],
+        ];
+
+        summaryGrid.textContent = "";
+        const fragment = document.createDocumentFragment();
+
+        summaryItems.forEach(([label, value]) => {
+          const card = createElement("article", "summary-card");
+          card.append(
+            createElement("span", "summary-card__label", label),
+            createElement("span", "summary-card__value", value),
+          );
+          fragment.appendChild(card);
+        });
+
+        summaryGrid.appendChild(fragment);
+      };
+
+      const buildChartOption = (supplier) => {
+        const seriesData = supplier.cumulativeRecords.map((record) => ({
+          value: record.cumulativeCost,
+          time: record.time,
+          cost: record.cost,
+          cumulativeCost: record.cumulativeCost,
+        }));
+
+        // ECharts 配置关键部分说明：
+        // 1. tooltip: 鼠标悬停时展示当前时间点的累计金额和单次消费金额
+        // 2. dataZoom: 提供内部缩放 + 底部滑块，方便在长时间序列中快速聚焦
+        // 3. smooth + areaStyle: 让折线更平滑，并增加面积阴影提升 dashboard 观感
+        // 4. yAxis.axisLabel.formatter: 把纵轴数值格式化成金额，而不是裸数字
+        return {
+          color: ["#2563eb"],
+          grid: {
+            top: 42,
+            right: 20,
+            bottom: 76,
+            left: 72,
+          },
+          tooltip: {
+            trigger: "axis",
+            backgroundColor: "rgba(15, 23, 42, 0.94)",
+            borderWidth: 0,
+            padding: 14,
+            textStyle: {
+              color: "#e2e8f0",
+              fontFamily: '"Inter Local", "PingFang SC", "Microsoft YaHei", sans-serif',
+            },
+            axisPointer: {
+              type: "line",
+              lineStyle: {
+                color: "rgba(96, 165, 250, 0.72)",
+                width: 1.5,
+              },
+            },
+            formatter(params) {
+              const point = params[0];
+              const record = point.data;
+
+              return `
+                <div style="min-width: 220px;">
+                  <div style="margin-bottom: 10px; color: #94a3b8; font-size: 12px;">${escapeHtml(formatDateTimeLabel(record.time))}</div>
+                  <div style="display: flex; justify-content: space-between; gap: 16px; margin-bottom: 6px;">
+                    <span>累计消费</span>
+                    <strong style="color: #ffffff;">${formatCurrency(record.cumulativeCost)}</strong>
+                  </div>
+                  <div style="display: flex; justify-content: space-between; gap: 16px;">
+                    <span style="color: #cbd5e1;">单次消费</span>
+                    <span style="color: #bfdbfe;">${formatCurrency(record.cost)}</span>
+                  </div>
+                </div>
+              `;
+            },
+          },
+          dataZoom: [
+            {
+              type: "inside",
+              start: 0,
+              end: 100,
+            },
+            {
+              type: "slider",
+              start: 0,
+              end: 100,
+              height: 22,
+              bottom: 18,
+              borderColor: "transparent",
+              backgroundColor: "rgba(148, 163, 184, 0.12)",
+              fillerColor: "rgba(37, 99, 235, 0.16)",
+              handleStyle: {
+                color: "#2563eb",
+                borderColor: "#1d4ed8",
+              },
+              moveHandleStyle: {
+                color: "rgba(37, 99, 235, 0.2)",
+              },
+              textStyle: {
+                color: "#64748b",
+              },
+            },
+          ],
+          xAxis: {
+            type: "category",
+            boundaryGap: false,
+            data: supplier.cumulativeRecords.map((record) => record.time),
+            axisLine: {
+              lineStyle: {
+                color: "rgba(148, 163, 184, 0.36)",
+              },
+            },
+            axisLabel: {
+              color: "#64748b",
+              formatter(value) {
+                return formatTimeLabel(value);
+              },
+            },
+          },
+          yAxis: {
+            type: "value",
+            name: `累计消费金额（${currencyCode}）`,
+            nameTextStyle: {
+              color: "#64748b",
+              padding: [0, 0, 8, 0],
+            },
+            axisLabel: {
+              color: "#64748b",
+              formatter(value) {
+                return formatAxisCurrency(value);
+              },
+            },
+            splitLine: {
+              lineStyle: {
+                color: "rgba(148, 163, 184, 0.18)",
+                type: "dashed",
+              },
+            },
+          },
+          series: [
+            {
+              name: "累计消费金额",
+              type: "line",
+              smooth: true,
+              showSymbol: false,
+              symbolSize: 8,
+              data: seriesData,
+              lineStyle: {
+                width: 3,
+                color: "#2563eb",
+              },
+              itemStyle: {
+                color: "#2563eb",
+                borderColor: "#ffffff",
+                borderWidth: 2,
+              },
+              areaStyle: {
+                color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                  { offset: 0, color: "rgba(37, 99, 235, 0.32)" },
+                  { offset: 1, color: "rgba(37, 99, 235, 0.04)" },
+                ]),
+              },
+              emphasis: {
+                focus: "series",
+              },
+            },
+          ],
+        };
+      };
+
+      const ensureChart = () => {
+        if (typeof window.echarts === "undefined") {
+          return null;
+        }
+        if (!chartInstance) {
+          chartInstance = window.echarts.init(chartContainer);
+        }
+        return chartInstance;
+      };
+
+      const openChartModal = (supplierId) => {
+        const supplier = suppliers.find((item) => item.id === supplierId);
+        if (!supplier) return;
+
+        activeSupplierId = supplierId;
+        modal.classList.add("is-open");
+        modal.setAttribute("aria-hidden", "false");
+        document.body.style.overflow = "hidden";
+
+        modalTitle.textContent = `${supplier.name} · 累计消费金额折线图`;
+        modalSubtitle.textContent =
+          "X 轴是时间，Y 轴是累计消费金额。原始 cost 会先做累计，再送给 ECharts 画图。";
+
+        renderSummaryCards(supplier);
+        clearChartStatus();
+
+        if (supplier.cumulativeRecords.length === 0) {
+          setChartStatus("当前没有有效的时间序列记录，累计消费折线图画不出来。");
+          closeModalButton.focus();
+          return;
+        }
+
+        const chart = ensureChart();
+        if (!chart) {
+          setChartStatus("ECharts 本地资源加载失败，请确认 vendor-echarts.min.js 是否存在。", true);
+          closeModalButton.focus();
+          return;
+        }
+
+        chart.setOption(buildChartOption(supplier), true);
+        chart.resize();
+        closeModalButton.focus();
+      };
+
+      const closeChartModal = () => {
+        modal.classList.remove("is-open");
+        modal.setAttribute("aria-hidden", "true");
+        document.body.style.overflow = "";
+        activeSupplierId = null;
+        destroyChart();
+        clearChartStatus();
+
+        if (lastActiveTrigger instanceof HTMLElement) {
+          lastActiveTrigger.focus();
+        }
+      };
+
+      closeModalButton.addEventListener("click", closeChartModal);
+
+      modal.addEventListener("click", (event) => {
+        if (event.target === modal) {
+          closeChartModal();
+        }
+      });
+
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && modal.classList.contains("is-open")) {
+          closeChartModal();
+        }
+      });
+
+      window.addEventListener("resize", () => {
+        if (chartInstance && activeSupplierId && modal.classList.contains("is-open")) {
+          chartInstance.resize();
+        }
+      });
+
+      window.addEventListener("beforeunload", destroyChart);
+
+      renderSupplierCards();
+    </script>
+  </body>
+</html>
