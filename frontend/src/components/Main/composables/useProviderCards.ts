@@ -20,7 +20,7 @@ import {
   type GeminiProvider,
 } from '../adapters/providerCardMappers'
 import { PROVIDER_TAB_IDS } from '../constants'
-import type { ProviderDragTarget, ProviderTab, TranslateFn } from '../types'
+import type { ProviderDragEndPayload, ProviderDragTarget, ProviderTab, TranslateFn } from '../types'
 import { applyNormalizedProviderOrder, appendProviderToStatusGroup, moveProviderToStatusGroupEnd } from '../utils/providerOrder'
 
 type UseProviderCardsOptions = {
@@ -45,6 +45,7 @@ const createDirectAppliedIds = (): Record<ProviderTab, string | number | null> =
 })
 
 const getCustomProviderKind = (toolId: string): string => `custom:${toolId}`
+const DRAG_FINALIZE_DELAY_MS = 24
 
 export function useProviderCards(options: UseProviderCardsOptions) {
   const { t, getActiveTab, isActiveProxyEnabled, getSelectedToolId } = options
@@ -88,6 +89,7 @@ export function useProviderCards(options: UseProviderCardsOptions) {
     sessionId: number,
     options: {
       dropEffect?: DataTransfer['dropEffect'] | 'none'
+      endedInsideList?: boolean | null
       forcePersist?: boolean
     } = {},
   ) => {
@@ -98,14 +100,21 @@ export function useProviderCards(options: UseProviderCardsOptions) {
     const list = cards[currentTab]
     const changed = list ? hasOrderChanged(list, dragStartOrder.value) : false
     const wasDropped = droppedDragSessionId.value === sessionId
+    const endedInsideList = options.endedInsideList ?? null
     const shouldPersist =
       !!list &&
       changed &&
       (
         options.forcePersist === true ||
         wasDropped ||
-        options.dropEffect === 'move' ||
-        (dragWithinList.value && lastDragTarget.value !== null)
+        endedInsideList === true ||
+        (
+          endedInsideList === null &&
+          (
+            options.dropEffect === 'move' ||
+            (dragWithinList.value && lastDragTarget.value !== null)
+          )
+        )
       )
 
     finalizedDragSessionId.value = sessionId
@@ -424,14 +433,22 @@ export function useProviderCards(options: UseProviderCardsOptions) {
     await finalizeDrag(sessionId, { forcePersist: true })
   }
 
-  const onDragEnd = (dropEffect: DataTransfer['dropEffect'] | 'none' = 'none') => {
+  const onDragEnd = (payload: ProviderDragEndPayload = {
+    dropEffect: 'none',
+    clientX: null,
+    clientY: null,
+    endedInsideList: null,
+  }) => {
     if (draggingId.value === null) return
     const sessionId = dragSessionId.value
 
     return new Promise<void>((resolve) => {
       setTimeout(() => {
-        void finalizeDrag(sessionId, { dropEffect }).finally(resolve)
-      }, 0)
+        void finalizeDrag(sessionId, {
+          dropEffect: payload.dropEffect,
+          endedInsideList: payload.endedInsideList ?? null,
+        }).finally(resolve)
+      }, DRAG_FINALIZE_DELAY_MS)
     })
   }
 

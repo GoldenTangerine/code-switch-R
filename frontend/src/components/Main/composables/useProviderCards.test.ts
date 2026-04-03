@@ -46,6 +46,18 @@ const createCard = (
 })
 
 const getIds = (cards: AutomationCard[]) => cards.map((card) => card.id)
+const createDragEndPayload = (overrides: Partial<{
+  dropEffect: DataTransfer['dropEffect'] | 'none'
+  clientX: number | null
+  clientY: number | null
+  endedInsideList: boolean | null
+}> = {}) => ({
+  dropEffect: 'none' as DataTransfer['dropEffect'] | 'none',
+  clientX: 320,
+  clientY: 240,
+  endedInsideList: null as boolean | null,
+  ...overrides,
+})
 
 describe('useProviderCards drag sort', () => {
   beforeEach(() => {
@@ -74,7 +86,7 @@ describe('useProviderCards drag sort', () => {
     expect(getIds(providerCards.cards.codex)).toEqual([2, 3, 1])
 
     await providerCards.onDrop(dragTarget)
-    await providerCards.onDragEnd()
+    await providerCards.onDragEnd(createDragEndPayload())
 
     expect(getIds(providerCards.cards.codex)).toEqual([2, 3, 1])
     expect(providerCards.draggingId.value).toBeNull()
@@ -94,7 +106,7 @@ describe('useProviderCards drag sort', () => {
 
     providerCards.onDragStart(1)
 
-    await providerCards.onDragEnd()
+    await providerCards.onDragEnd(createDragEndPayload({ endedInsideList: true }))
 
     expect(getIds(providerCards.cards.codex)).toEqual([1, 2, 3])
     expect(vi.mocked(SaveProviders)).not.toHaveBeenCalled()
@@ -135,7 +147,7 @@ describe('useProviderCards drag sort', () => {
     providerCards.onDragOverCard({ id: 3, position: 'after' })
     providerCards.onDragLeaveList()
 
-    await providerCards.onDragEnd()
+    await providerCards.onDragEnd(createDragEndPayload({ endedInsideList: false }))
 
     expect(getIds(providerCards.cards.codex)).toEqual([1, 2, 3])
     expect(vi.mocked(SaveProviders)).not.toHaveBeenCalled()
@@ -155,12 +167,34 @@ describe('useProviderCards drag sort', () => {
     providerCards.onDragStart(1)
     providerCards.onDragOverCard(dragTarget)
 
-    const dragEndPromise = providerCards.onDragEnd()
+    const dragEndPromise = providerCards.onDragEnd(createDragEndPayload({ endedInsideList: true }))
     await providerCards.onDrop(dragTarget)
     await dragEndPromise
 
     expect(getIds(providerCards.cards.codex)).toEqual([2, 3, 1])
     expect(vi.mocked(SaveProviders)).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not persist reorder when dragend reports outside-list release even if dropEffect is move', async () => {
+    const providerCards = useProviderCards({
+      t: (key: string) => key,
+      getActiveTab: () => 'codex',
+      isActiveProxyEnabled: () => false,
+      getSelectedToolId: () => null,
+    })
+
+    providerCards.cards.codex.splice(0, providerCards.cards.codex.length, createCard(1), createCard(2), createCard(3))
+
+    providerCards.onDragStart(1)
+    providerCards.onDragOverCard({ id: 3, position: 'after' })
+
+    await providerCards.onDragEnd(createDragEndPayload({
+      dropEffect: 'move',
+      endedInsideList: false,
+    }))
+
+    expect(getIds(providerCards.cards.codex)).toEqual([1, 2, 3])
+    expect(vi.mocked(SaveProviders)).not.toHaveBeenCalled()
   })
 
   it('reorders before or after target based on pointer half', () => {

@@ -388,7 +388,7 @@
 <script setup lang="ts">
 import { computed, type ComponentPublicInstance } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { ProviderCardViewModel, ProviderTab, ResolvedTheme } from '../types'
+import type { ProviderCardViewModel, ProviderDragEndPayload, ProviderTab, ResolvedTheme } from '../types'
 import { isHostedRouteActive } from '../utils/providerRoutingState'
 
 const props = defineProps<{
@@ -403,7 +403,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   'card-click': []
   dragstart: []
-  dragend: [dropEffect: DataTransfer['dropEffect'] | 'none']
+  dragend: [payload: ProviderDragEndPayload]
   'open-site': []
   'unblock-and-reset': []
   'reset-level': []
@@ -481,7 +481,11 @@ const handleDragStart = (event: DragEvent) => {
 }
 
 const handleDragEnd = (event: DragEvent) => {
-  emit('dragend', event.dataTransfer?.dropEffect ?? 'none')
+  emit('dragend', {
+    dropEffect: event.dataTransfer?.dropEffect ?? 'none',
+    clientX: Number.isFinite(event.clientX) ? event.clientX : null,
+    clientY: Number.isFinite(event.clientY) ? event.clientY : null,
+  })
 }
 </script>
 

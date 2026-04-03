@@ -20,6 +20,13 @@ export type ProviderDragTarget = {
   position: ProviderDragTargetPosition
 }
 
+export type ProviderDragEndPayload = {
+  dropEffect: DataTransfer['dropEffect'] | 'none'
+  clientX: number | null
+  clientY: number | null
+  endedInsideList?: boolean | null
+}
+
 export interface LastUsedProvider {
   platform: string
   source_platform?: string

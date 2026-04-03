@@ -20,7 +20,7 @@
       :bind-card-ref="bindCardRef(viewModel.card)"
       @card-click="$emit('card-click', viewModel.card)"
       @dragstart="$emit('dragstart', viewModel.card.id)"
-      @dragend="$emit('dragend', $event)"
+      @dragend="handleItemDragEnd"
       @open-site="$emit('open-site', viewModel.card)"
       @unblock-and-reset="$emit('unblock-and-reset', viewModel.card)"
       @reset-level="$emit('reset-level', viewModel.card)"
@@ -40,7 +40,13 @@
 import { ref, TransitionGroup, type ComponentPublicInstance } from 'vue'
 import type { AutomationCard } from '../../../data/cards'
 import ProviderCard from './ProviderCard.vue'
-import type { ProviderCardViewModel, ProviderDragTarget, ProviderTab, ResolvedTheme } from '../types'
+import type {
+  ProviderCardViewModel,
+  ProviderDragEndPayload,
+  ProviderDragTarget,
+  ProviderTab,
+  ResolvedTheme,
+} from '../types'
 import { resolveProviderDragTarget } from '../utils/providerDragTarget'
 
 defineProps<{
@@ -58,7 +64,7 @@ const emit = defineEmits<{
   dragstart: [id: number]
   'dragover-card': [target: ProviderDragTarget]
   'dragleave-list': []
-  dragend: [dropEffect: DataTransfer['dropEffect'] | 'none']
+  dragend: [payload: ProviderDragEndPayload]
   drop: [target: ProviderDragTarget]
   'open-site': [card: AutomationCard]
   'unblock-and-reset': [card: AutomationCard]
@@ -99,6 +105,23 @@ const resolveListDragTarget = (event: DragEvent): ProviderDragTarget | null => {
   return resolveProviderDragTarget(bounds, event.clientY)
 }
 
+const isPointInsideList = (clientX: number | null, clientY: number | null): boolean | null => {
+  if (typeof clientX !== 'number' || !Number.isFinite(clientX) || typeof clientY !== 'number' || !Number.isFinite(clientY)) {
+    return null
+  }
+  const x = clientX
+  const y = clientY
+
+  const listElement = listRef.value instanceof HTMLElement
+    ? listRef.value
+    : ((listRef.value as ComponentPublicInstance | null)?.$el as HTMLElement | undefined) ?? null
+
+  if (!listElement) return null
+
+  const rect = listElement.getBoundingClientRect()
+  return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom
+}
+
 const handleListDragOver = (event: DragEvent) => {
   if (event.dataTransfer) {
     event.dataTransfer.dropEffect = 'move'
@@ -121,6 +144,13 @@ const handleListDragLeave = (event: DragEvent) => {
   }
 
   emit('dragleave-list')
+}
+
+const handleItemDragEnd = (payload: ProviderDragEndPayload) => {
+  emit('dragend', {
+    ...payload,
+    endedInsideList: isPointInsideList(payload.clientX, payload.clientY),
+  })
 }
 
 const handleListDrop = (event: DragEvent) => {
