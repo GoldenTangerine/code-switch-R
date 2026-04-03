@@ -4,7 +4,7 @@
     name="provider-card-list"
     class="automation-list"
     :class="{ 'is-sorting': isSorting }"
-    @dragover.prevent
+    @dragover.prevent="handleListDragOver"
   >
     <ProviderCard
       v-for="viewModel in cards"
@@ -18,7 +18,7 @@
       @card-click="$emit('card-click', viewModel.card)"
       @dragstart="$emit('dragstart', viewModel.card.id)"
       @dragover-card="$emit('dragover-card', $event)"
-      @dragend="$emit('dragend')"
+      @dragend="$emit('dragend', $event)"
       @drop="$emit('drop', $event)"
       @open-site="$emit('open-site', viewModel.card)"
       @unblock-and-reset="$emit('unblock-and-reset', viewModel.card)"
@@ -55,7 +55,7 @@ defineEmits<{
   'card-click': [card: AutomationCard]
   dragstart: [id: number]
   'dragover-card': [target: ProviderDragTarget]
-  dragend: []
+  dragend: [dropEffect: DataTransfer['dropEffect'] | 'none']
   drop: [target: ProviderDragTarget]
   'open-site': [card: AutomationCard]
   'unblock-and-reset': [card: AutomationCard]
@@ -69,4 +69,10 @@ defineEmits<{
   duplicate: [card: AutomationCard]
   remove: [card: AutomationCard]
 }>()
+
+const handleListDragOver = (event: DragEvent) => {
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect = 'move'
+  }
+}
 </script>

@@ -382,12 +382,21 @@ export function useProviderCards(options: UseProviderCardsOptions) {
     }
   }
 
-  const onDragEnd = () => {
+  const onDragEnd = async (dropEffect: DataTransfer['dropEffect'] | 'none' = 'none') => {
     if (draggingId.value === null) return
 
     const currentTab = dragSourceTab.value ?? getActiveTab()
     const list = cards[currentTab]
-    if (list && hasOrderChanged(list, dragStartOrder.value)) {
+    const changed = list ? hasOrderChanged(list, dragStartOrder.value) : false
+
+    if (list && changed && dropEffect === 'move') {
+      applyNormalizedProviderOrder(list)
+      resetDragState()
+      await persistProviders(currentTab)
+      return
+    }
+
+    if (list && changed) {
       restoreOrder(list, dragStartOrder.value)
     }
     resetDragState()

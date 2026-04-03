@@ -11,10 +11,10 @@
     ]"
     draggable="true"
     @click="$emit('card-click')"
-    @dragstart="$emit('dragstart')"
+    @dragstart="handleDragStart"
     @dragover.prevent="handleDragOver"
-    @dragend="$emit('dragend')"
-    @drop.prevent="handleDrop"
+    @dragend="handleDragEnd"
+    @drop.prevent.stop="handleDrop"
   >
     <div class="card-leading">
       <div class="card-icon" :style="{ backgroundColor: viewModel.card.tint, color: viewModel.card.accent }">
@@ -405,7 +405,7 @@ const emit = defineEmits<{
   'card-click': []
   dragstart: []
   'dragover-card': [target: ProviderDragTarget]
-  dragend: []
+  dragend: [dropEffect: DataTransfer['dropEffect'] | 'none']
   drop: [target: ProviderDragTarget]
   'open-site': []
   'unblock-and-reset': []
@@ -485,8 +485,23 @@ const resolveDragTarget = (event: DragEvent): ProviderDragTarget => {
   }
 }
 
+const handleDragStart = (event: DragEvent) => {
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', `${props.viewModel.card.id}`)
+  }
+  emit('dragstart')
+}
+
 const handleDragOver = (event: DragEvent) => {
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect = 'move'
+  }
   emit('dragover-card', resolveDragTarget(event))
+}
+
+const handleDragEnd = (event: DragEvent) => {
+  emit('dragend', event.dataTransfer?.dropEffect ?? 'none')
 }
 
 const handleDrop = (event: DragEvent) => {
