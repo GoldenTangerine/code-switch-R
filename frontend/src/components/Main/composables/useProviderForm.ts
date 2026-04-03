@@ -20,6 +20,8 @@ type UseProviderFormOptions = {
   removeProvider: (id: number, tabId: ProviderTab) => Promise<void>
   duplicateProvider: (card: AutomationCard) => Promise<boolean>
   reloadProviders: () => Promise<void>
+  moveCardToStatusGroup: (tabId: ProviderTab, card: AutomationCard, enabled: boolean) => boolean
+  appendCardToGroup: (tabId: ProviderTab, card: AutomationCard) => void
 }
 
 type ProviderModalState = {
@@ -47,6 +49,8 @@ export function useProviderForm(options: UseProviderFormOptions) {
     removeProvider,
     duplicateProvider,
     reloadProviders,
+    moveCardToStatusGroup,
+    appendCardToGroup,
   } = options
 
   const modelListModalOpen = ref(false)
@@ -161,11 +165,17 @@ export function useProviderForm(options: UseProviderFormOptions) {
     const providerFields = buildPersistedProviderFieldsFromForm(form, tabId, normalizeLevel)
 
     if (editingCard) {
+      const previousEnabled = editingCard.enabled
+
       Object.assign(editingCard, {
         name: form.name || editingCard.name,
         apiUrl: form.apiUrl || editingCard.apiUrl,
         ...providerFields,
       })
+
+      if (previousEnabled !== providerFields.enabled) {
+        moveCardToStatusGroup(tabId, editingCard, providerFields.enabled)
+      }
 
       savedCard = editingCard
       await persistProviders(tabId)
@@ -181,8 +191,7 @@ export function useProviderForm(options: UseProviderFormOptions) {
         tint: 'rgba(15, 23, 42, 0.12)',
         ...providerFields,
       }
-      // 首页展示顺序以手动拖拽为准，新建卡片默认追加到末尾。
-      list.push(newCard)
+      appendCardToGroup(tabId, newCard)
       savedCard = newCard
       await persistProviders(tabId)
     }
@@ -232,7 +241,7 @@ export function useProviderForm(options: UseProviderFormOptions) {
   }
 
   const handleProviderEnabledChange = async (card: AutomationCard, enabled: boolean) => {
-    card.enabled = enabled
+    moveCardToStatusGroup(getActiveTab(), card, enabled)
     await persistProviders(getActiveTab())
   }
 

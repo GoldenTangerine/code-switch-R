@@ -31,6 +31,8 @@ type Provider struct {
 	Tint    string `json:"tint"`
 	Accent  string `json:"accent"`
 	Enabled bool   `json:"enabled"`
+	// 隐藏排序字段：仅控制启用 / 未启用组内顺序
+	SortOrder int `json:"sortOrder,omitempty"`
 
 	// CLI 配置草稿 - 存储供应商关联的 CLI 可编辑配置
 	CLIConfig map[string]interface{} `json:"cliConfig,omitempty"`

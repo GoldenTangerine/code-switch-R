@@ -239,6 +239,8 @@ const {
   onDragOverCard,
   onDrop,
   onDragEnd,
+  moveCardToStatusGroup,
+  appendCardToGroup,
 } = useProviderCards({
   t,
   getActiveTab: () => activeTab.value,
@@ -353,6 +355,8 @@ const {
   removeProvider,
   duplicateProvider,
   reloadProviders: () => loadProvidersFromDisk(loadCustomCliTools),
+  moveCardToStatusGroup,
+  appendCardToGroup,
 })
 
 pageShell = useMainPageShell({

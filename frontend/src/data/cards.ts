@@ -9,6 +9,8 @@ export type AutomationCard = {
   tint: string
   accent: string
   enabled: boolean
+  // 隐藏排序字段：仅控制启用组 / 未启用组内部顺序
+  sortOrder?: number
   // 模型白名单：声明 provider 支持的模型（精确或通配符）
   supportedModels?: Record<string, boolean>
   // 模型映射：external model -> internal model

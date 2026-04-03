@@ -3,7 +3,9 @@ import type { BlacklistStatus } from '../../../services/blacklist'
 import type { AutomationCard } from '../../../data/cards'
 import { GetProviders as GetGeminiProviders } from '../../../../bindings/codeswitch/services/geminiservice'
 
-export type GeminiProvider = Awaited<ReturnType<typeof GetGeminiProviders>> extends (infer P)[] ? P : any
+export type GeminiProvider = Awaited<ReturnType<typeof GetGeminiProviders>> extends (infer P)[] ? (P & {
+  sortOrder?: number
+}) : any
 
 const GEMINI_LOCKED_ENV_KEYS = new Set(['GOOGLE_GEMINI_BASE_URL', 'GEMINI_API_KEY'])
 
@@ -109,6 +111,7 @@ export const geminiToCard = (provider: GeminiProvider, index: number): Automatio
   tint: 'rgba(251, 146, 60, 0.18)',
   accent: '#fb923c',
   enabled: provider.enabled,
+  sortOrder: provider.sortOrder || index + 1,
   level: provider.level || 1,
   cliConfig: extractGeminiCliConfig(provider),
   requestBodyOverrides: cloneCardValue(provider.requestBodyOverrides || {}),
@@ -125,8 +128,26 @@ export const cardToGemini = (card: AutomationCard, original: GeminiProvider): Ge
   model: `${card.cliConfig?.GEMINI_MODEL ?? ''}`.trim() || original.model || '',
   websiteUrl: card.officialSite,
   enabled: card.enabled,
+  sortOrder: card.sortOrder || 0,
   level: card.level || 1,
   envConfig: buildGeminiEnvConfig(card, original),
+  requestBodyOverrides: cloneCardValue(card.requestBodyOverrides || {}),
+})
+
+export const createGeminiFromCard = (
+  card: AutomationCard,
+  providerID: string,
+): GeminiProvider => ({
+  id: providerID,
+  name: card.name,
+  baseUrl: card.apiUrl,
+  apiKey: card.apiKey,
+  model: `${card.cliConfig?.GEMINI_MODEL ?? ''}`.trim(),
+  websiteUrl: card.officialSite,
+  enabled: card.enabled,
+  sortOrder: card.sortOrder || 0,
+  level: card.level || 1,
+  envConfig: buildGeminiEnvConfig(card, {} as GeminiProvider),
   requestBodyOverrides: cloneCardValue(card.requestBodyOverrides || {}),
 })
 
@@ -135,6 +156,7 @@ export const serializeProviders = (providers: AutomationCard[]) =>
     const { providerRef, ...persistable } = provider
     return {
       ...persistable,
+      sortOrder: provider.sortOrder || 0,
       requestBodyOverrides: cloneCardValue(provider.requestBodyOverrides || {}),
       availabilityMonitorEnabled: !!provider.availabilityMonitorEnabled,
       connectivityAutoBlacklist: !!provider.connectivityAutoBlacklist,

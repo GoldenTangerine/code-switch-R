@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AutomationCard } from '../../../data/cards'
 import type { ProviderTab, VendorForm } from '../types'
+import { appendProviderToStatusGroup, moveProviderToStatusGroupEnd } from '../utils/providerOrder'
 
 vi.mock('@wailsio/runtime', () => ({
   Call: {
@@ -25,6 +26,7 @@ const createCard = (
   accent: '#0a84ff',
   enabled: true,
   level: 1,
+  sortOrder: 1,
   supportedModels: {},
   modelMapping: {},
   requestBodyOverrides: {},
@@ -106,9 +108,10 @@ describe('useProviderForm order preservation', () => {
 
   it('keeps manual order when editing a provider level', async () => {
     const cards = createCardRecord()
-    const first = createCard(2, { level: 3 })
-    const second = createCard(1, { level: 1 })
-    cards.codex.push(first, second)
+    const first = createCard(2, { enabled: true, sortOrder: 2, level: 3 })
+    const second = createCard(1, { enabled: true, sortOrder: 1, level: 1 })
+    const third = createCard(3, { enabled: false, sortOrder: 1, level: 1 })
+    cards.codex.push(first, second, third)
 
     const persistProviders = vi.fn().mockResolvedValue(undefined)
     const providerForm = useProviderForm({
@@ -123,6 +126,8 @@ describe('useProviderForm order preservation', () => {
       removeProvider: vi.fn().mockResolvedValue(undefined),
       duplicateProvider: vi.fn().mockResolvedValue(false),
       reloadProviders: vi.fn().mockResolvedValue(undefined),
+      moveCardToStatusGroup: (tabId, card, enabled) => moveProviderToStatusGroupEnd(cards[tabId], card, enabled),
+      appendCardToGroup: (tabId, card) => appendProviderToStatusGroup(cards[tabId], card),
     })
 
     providerForm.configure(first)
@@ -134,16 +139,17 @@ describe('useProviderForm order preservation', () => {
       level: 1,
     }))
 
-    expect(cards.codex.map((card) => card.id)).toEqual([2, 1])
+    expect(cards.codex.map((card) => card.id)).toEqual([2, 1, 3])
     expect(cards.codex[0]?.level).toBe(1)
     expect(persistProviders).toHaveBeenCalledWith('codex')
   })
 
-  it('appends new providers to the end instead of reordering the list', async () => {
+  it('appends new enabled providers to the end of enabled group', async () => {
     const cards = createCardRecord()
     cards.codex.push(
-      createCard(2, { level: 3 }),
-      createCard(1, { level: 1 }),
+      createCard(2, { enabled: true, sortOrder: 1, level: 3 }),
+      createCard(1, { enabled: true, sortOrder: 2, level: 1 }),
+      createCard(3, { enabled: false, sortOrder: 1, level: 1 }),
     )
 
     const persistProviders = vi.fn().mockResolvedValue(undefined)
@@ -161,17 +167,52 @@ describe('useProviderForm order preservation', () => {
       removeProvider: vi.fn().mockResolvedValue(undefined),
       duplicateProvider: vi.fn().mockResolvedValue(false),
       reloadProviders: vi.fn().mockResolvedValue(undefined),
+      moveCardToStatusGroup: (tabId, card, enabled) => moveProviderToStatusGroupEnd(cards[tabId], card, enabled),
+      appendCardToGroup: (tabId, card) => appendProviderToStatusGroup(cards[tabId], card),
     })
 
     providerForm.openCreateModal()
     await providerForm.submitProviderModal(createForm({
       name: 'Appended Provider',
+      enabled: true,
       level: 1,
     }))
 
-    expect(cards.codex.map((card) => card.id)).toEqual([2, 1, 999])
+    expect(cards.codex.map((card) => card.id)).toEqual([2, 1, 999, 3])
     expect(cards.codex[2]?.name).toBe('Appended Provider')
     expect(cards.codex[2]?.level).toBe(1)
+    expect(persistProviders).toHaveBeenCalledWith('codex')
+  })
+
+  it('moves provider to the end of enabled group when toggled on', async () => {
+    const cards = createCardRecord()
+    const first = createCard(1, { enabled: true, sortOrder: 1 })
+    const second = createCard(2, { enabled: true, sortOrder: 2 })
+    const third = createCard(3, { enabled: false, sortOrder: 1 })
+    cards.codex.push(first, second, third)
+
+    const persistProviders = vi.fn().mockResolvedValue(undefined)
+    const providerForm = useProviderForm({
+      initialTab: 'codex',
+      t: (key: string) => key,
+      showToast: vi.fn(),
+      getActiveTab: () => 'codex',
+      cards,
+      normalizeLevel,
+      persistProviders,
+      refreshDirectAppliedStatus: vi.fn().mockResolvedValue(undefined),
+      removeProvider: vi.fn().mockResolvedValue(undefined),
+      duplicateProvider: vi.fn().mockResolvedValue(false),
+      reloadProviders: vi.fn().mockResolvedValue(undefined),
+      moveCardToStatusGroup: (tabId, card, enabled) => moveProviderToStatusGroupEnd(cards[tabId], card, enabled),
+      appendCardToGroup: (tabId, card) => appendProviderToStatusGroup(cards[tabId], card),
+    })
+
+    await providerForm.handleProviderEnabledChange(third, true)
+
+    expect(cards.codex.map((card) => card.id)).toEqual([1, 2, 3])
+    expect(cards.codex.map((card) => card.enabled)).toEqual([true, true, true])
+    expect(cards.codex.map((card) => card.sortOrder)).toEqual([1, 2, 3])
     expect(persistProviders).toHaveBeenCalledWith('codex')
   })
 })

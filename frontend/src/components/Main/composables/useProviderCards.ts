@@ -12,6 +12,7 @@ import {
 import { showToast } from '../../../utils/toast'
 import {
   cardToGemini,
+  createGeminiFromCard,
   createGeminiProviderRef,
   geminiToCard,
   normalizeProviderRef,
@@ -20,6 +21,7 @@ import {
 } from '../adapters/providerCardMappers'
 import { PROVIDER_TAB_IDS } from '../constants'
 import type { ProviderDragTarget, ProviderTab, TranslateFn } from '../types'
+import { applyNormalizedProviderOrder, appendProviderToStatusGroup, moveProviderToStatusGroupEnd } from '../utils/providerOrder'
 
 type UseProviderCardsOptions = {
   t: TranslateFn
@@ -99,6 +101,12 @@ export function useProviderCards(options: UseProviderCardsOptions) {
     const fromIndex = list.findIndex((card) => card.id === draggingId.value)
     const toIndex = list.findIndex((card) => card.id === targetId)
     if (fromIndex === -1 || toIndex === -1) return false
+
+    if (list[fromIndex]?.enabled !== list[toIndex]?.enabled) {
+      dragOverId.value = null
+      lastDragTarget.value = null
+      return false
+    }
 
     let newIndex = position === 'after' ? toIndex + 1 : toIndex
     if (fromIndex < newIndex) {
@@ -180,6 +188,7 @@ export function useProviderCards(options: UseProviderCardsOptions) {
       providerRef: normalizeProviderRef(card.providerRef) || `${card.id}`,
     }))
     cards[tabId].splice(0, cards[tabId].length, ...withRefs)
+    applyNormalizedProviderOrder(cards[tabId])
   }
 
   const loadCustomCliProviders = async (toolId: string) => {
@@ -189,6 +198,7 @@ export function useProviderCards(options: UseProviderCardsOptions) {
       const saved = await LoadProviders(getCustomProviderKind(toolId))
       if (Array.isArray(saved)) {
         cards.others.splice(0, cards.others.length, ...createAutomationCards(saved as AutomationCard[]))
+        applyNormalizedProviderOrder(cards.others)
       } else {
         cards.others.splice(0, cards.others.length)
       }
@@ -200,6 +210,8 @@ export function useProviderCards(options: UseProviderCardsOptions) {
 
   const persistProviders = async (tabId: ProviderTab) => {
     try {
+      applyNormalizedProviderOrder(cards[tabId])
+
       if (tabId === 'others') {
         const selectedToolId = getSelectedToolId()
         if (!selectedToolId) {
@@ -230,14 +242,7 @@ export function useProviderCards(options: UseProviderCardsOptions) {
           } else {
             const newProviderID = providerRef || createGeminiProviderRef()
             card.providerRef = newProviderID
-            const newProvider: GeminiProvider = {
-              id: newProviderID,
-              name: card.name,
-              baseUrl: card.apiUrl,
-              apiKey: card.apiKey,
-              websiteUrl: card.officialSite,
-              enabled: card.enabled,
-            }
+            const newProvider = createGeminiFromCard(card, newProviderID)
             await AddGeminiProvider(newProvider)
           }
         }
@@ -277,8 +282,8 @@ export function useProviderCards(options: UseProviderCardsOptions) {
         } else if (tab === 'gemini') {
           const geminiProviders = await GetGeminiProviders()
           geminiProvidersCache.value = geminiProviders
-          // 刷新时要保留用户手动拖拽后的顺序，不能在这里再按状态或 Level 重排。
           cards.gemini.splice(0, cards.gemini.length, ...geminiProviders.map(geminiToCard))
+          applyNormalizedProviderOrder(cards.gemini)
         } else {
           const saved = await LoadProviders(tab)
           if (Array.isArray(saved)) {
@@ -368,6 +373,9 @@ export function useProviderCards(options: UseProviderCardsOptions) {
     }
 
     const changed = hasOrderChanged(list, dragStartOrder.value)
+    if (changed) {
+      applyNormalizedProviderOrder(list)
+    }
     resetDragState()
     if (changed) {
       await persistProviders(currentTab)
@@ -383,6 +391,18 @@ export function useProviderCards(options: UseProviderCardsOptions) {
       restoreOrder(list, dragStartOrder.value)
     }
     resetDragState()
+  }
+
+  const moveCardToStatusGroup = (tabId: ProviderTab, card: AutomationCard, enabled: boolean) => {
+    const list = cards[tabId]
+    if (!list) return false
+    return moveProviderToStatusGroupEnd(list, card, enabled)
+  }
+
+  const appendCardToGroup = (tabId: ProviderTab, card: AutomationCard) => {
+    const list = cards[tabId]
+    if (!list) return
+    appendProviderToStatusGroup(list, card)
   }
 
   return {
@@ -403,5 +423,7 @@ export function useProviderCards(options: UseProviderCardsOptions) {
     onDragOverCard,
     onDrop,
     onDragEnd,
+    moveCardToStatusGroup,
+    appendCardToGroup,
   }
 }
