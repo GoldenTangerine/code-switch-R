@@ -37,6 +37,8 @@ type GeminiProvider struct {
 	PartnerPromotionKey  string            `json:"partnerPromotionKey,omitempty"` // 用于识别供应商类型
 	Enabled              bool              `json:"enabled"`
 	SortOrder            int               `json:"sortOrder,omitempty"`      // 隐藏排序字段：仅控制启用 / 未启用组内顺序
+	EnabledSortOrder     int               `json:"enabledSortOrder,omitempty"`  // 记忆启用组内顺序，切回启用时优先恢复
+	DisabledSortOrder    int               `json:"disabledSortOrder,omitempty"` // 记忆未启用组内顺序，切回未启用时优先恢复
 	Level                int               `json:"level,omitempty"`          // 优先级分组 (1-10, 默认 1)
 	EnvConfig            map[string]string `json:"envConfig,omitempty"`      // .env 配置
 	SettingsConfig       map[string]any    `json:"settingsConfig,omitempty"` // settings.json 配置

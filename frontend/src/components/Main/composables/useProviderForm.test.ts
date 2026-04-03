@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AutomationCard } from '../../../data/cards'
 import type { ProviderTab, VendorForm } from '../types'
-import { appendProviderToStatusGroup, moveProviderToStatusGroupEnd } from '../utils/providerOrder'
+import { appendProviderToStatusGroup, moveProviderToStatusGroup } from '../utils/providerOrder'
 
 vi.mock('@wailsio/runtime', () => ({
   Call: {
@@ -126,7 +126,7 @@ describe('useProviderForm order preservation', () => {
       removeProvider: vi.fn().mockResolvedValue(undefined),
       duplicateProvider: vi.fn().mockResolvedValue(false),
       reloadProviders: vi.fn().mockResolvedValue(undefined),
-      moveCardToStatusGroup: (tabId, card, enabled) => moveProviderToStatusGroupEnd(cards[tabId], card, enabled),
+      moveCardToStatusGroup: (tabId, card, enabled) => moveProviderToStatusGroup(cards[tabId], card, enabled),
       appendCardToGroup: (tabId, card) => appendProviderToStatusGroup(cards[tabId], card),
     })
 
@@ -167,7 +167,7 @@ describe('useProviderForm order preservation', () => {
       removeProvider: vi.fn().mockResolvedValue(undefined),
       duplicateProvider: vi.fn().mockResolvedValue(false),
       reloadProviders: vi.fn().mockResolvedValue(undefined),
-      moveCardToStatusGroup: (tabId, card, enabled) => moveProviderToStatusGroupEnd(cards[tabId], card, enabled),
+      moveCardToStatusGroup: (tabId, card, enabled) => moveProviderToStatusGroup(cards[tabId], card, enabled),
       appendCardToGroup: (tabId, card) => appendProviderToStatusGroup(cards[tabId], card),
     })
 
@@ -204,7 +204,7 @@ describe('useProviderForm order preservation', () => {
       removeProvider: vi.fn().mockResolvedValue(undefined),
       duplicateProvider: vi.fn().mockResolvedValue(false),
       reloadProviders: vi.fn().mockResolvedValue(undefined),
-      moveCardToStatusGroup: (tabId, card, enabled) => moveProviderToStatusGroupEnd(cards[tabId], card, enabled),
+      moveCardToStatusGroup: (tabId, card, enabled) => moveProviderToStatusGroup(cards[tabId], card, enabled),
       appendCardToGroup: (tabId, card) => appendProviderToStatusGroup(cards[tabId], card),
     })
 
@@ -214,5 +214,40 @@ describe('useProviderForm order preservation', () => {
     expect(cards.codex.map((card) => card.enabled)).toEqual([true, true, true])
     expect(cards.codex.map((card) => card.sortOrder)).toEqual([1, 2, 3])
     expect(persistProviders).toHaveBeenCalledWith('codex')
+  })
+
+  it('restores provider to its previous disabled position when toggled off again', async () => {
+    const cards = createCardRecord()
+    const first = createCard(1, { enabled: true, sortOrder: 1, enabledSortOrder: 1 })
+    const second = createCard(2, { enabled: false, sortOrder: 1, disabledSortOrder: 1 })
+    const third = createCard(3, { enabled: false, sortOrder: 2, disabledSortOrder: 2 })
+    const fourth = createCard(4, { enabled: false, sortOrder: 3, disabledSortOrder: 3 })
+    cards.codex.push(first, second, third, fourth)
+
+    const persistProviders = vi.fn().mockResolvedValue(undefined)
+    const providerForm = useProviderForm({
+      initialTab: 'codex',
+      t: (key: string) => key,
+      showToast: vi.fn(),
+      getActiveTab: () => 'codex',
+      cards,
+      normalizeLevel,
+      persistProviders,
+      refreshDirectAppliedStatus: vi.fn().mockResolvedValue(undefined),
+      removeProvider: vi.fn().mockResolvedValue(undefined),
+      duplicateProvider: vi.fn().mockResolvedValue(false),
+      reloadProviders: vi.fn().mockResolvedValue(undefined),
+      moveCardToStatusGroup: (tabId, card, enabled) => moveProviderToStatusGroup(cards[tabId], card, enabled),
+      appendCardToGroup: (tabId, card) => appendProviderToStatusGroup(cards[tabId], card),
+    })
+
+    await providerForm.handleProviderEnabledChange(third, true)
+    expect(cards.codex.map((card) => card.id)).toEqual([1, 3, 2, 4])
+
+    await providerForm.handleProviderEnabledChange(third, false)
+
+    expect(cards.codex.map((card) => card.id)).toEqual([1, 2, 3, 4])
+    expect(cards.codex.map((card) => card.disabledSortOrder ?? null)).toEqual([null, 1, 2, 3])
+    expect(persistProviders).toHaveBeenCalledTimes(2)
   })
 })

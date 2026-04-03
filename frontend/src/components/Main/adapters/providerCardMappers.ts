@@ -5,6 +5,8 @@ import { GetProviders as GetGeminiProviders } from '../../../../bindings/codeswi
 
 export type GeminiProvider = Awaited<ReturnType<typeof GetGeminiProviders>> extends (infer P)[] ? (P & {
   sortOrder?: number
+  enabledSortOrder?: number
+  disabledSortOrder?: number
 }) : any
 
 const GEMINI_LOCKED_ENV_KEYS = new Set(['GOOGLE_GEMINI_BASE_URL', 'GEMINI_API_KEY'])
@@ -112,6 +114,8 @@ export const geminiToCard = (provider: GeminiProvider, index: number): Automatio
   accent: '#fb923c',
   enabled: provider.enabled,
   sortOrder: provider.sortOrder || index + 1,
+  enabledSortOrder: provider.enabledSortOrder || (provider.enabled ? (provider.sortOrder || index + 1) : undefined),
+  disabledSortOrder: provider.disabledSortOrder || (!provider.enabled ? (provider.sortOrder || index + 1) : undefined),
   level: provider.level || 1,
   cliConfig: extractGeminiCliConfig(provider),
   requestBodyOverrides: cloneCardValue(provider.requestBodyOverrides || {}),
@@ -129,6 +133,8 @@ export const cardToGemini = (card: AutomationCard, original: GeminiProvider): Ge
   websiteUrl: card.officialSite,
   enabled: card.enabled,
   sortOrder: card.sortOrder || 0,
+  enabledSortOrder: card.enabledSortOrder || 0,
+  disabledSortOrder: card.disabledSortOrder || 0,
   level: card.level || 1,
   envConfig: buildGeminiEnvConfig(card, original),
   requestBodyOverrides: cloneCardValue(card.requestBodyOverrides || {}),
@@ -146,6 +152,8 @@ export const createGeminiFromCard = (
   websiteUrl: card.officialSite,
   enabled: card.enabled,
   sortOrder: card.sortOrder || 0,
+  enabledSortOrder: card.enabledSortOrder || 0,
+  disabledSortOrder: card.disabledSortOrder || 0,
   level: card.level || 1,
   envConfig: buildGeminiEnvConfig(card, {} as GeminiProvider),
   requestBodyOverrides: cloneCardValue(card.requestBodyOverrides || {}),
@@ -157,6 +165,8 @@ export const serializeProviders = (providers: AutomationCard[]) =>
     return {
       ...persistable,
       sortOrder: provider.sortOrder || 0,
+      enabledSortOrder: provider.enabledSortOrder || 0,
+      disabledSortOrder: provider.disabledSortOrder || 0,
       requestBodyOverrides: cloneCardValue(provider.requestBodyOverrides || {}),
       availabilityMonitorEnabled: !!provider.availabilityMonitorEnabled,
       connectivityAutoBlacklist: !!provider.connectivityAutoBlacklist,

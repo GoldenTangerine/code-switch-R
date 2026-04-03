@@ -11,6 +11,10 @@ export type AutomationCard = {
   enabled: boolean
   // 隐藏排序字段：仅控制启用组 / 未启用组内部顺序
   sortOrder?: number
+  // 记忆启用组内顺序，切回启用时优先恢复到这里
+  enabledSortOrder?: number
+  // 记忆未启用组内顺序，切回未启用时优先恢复到这里
+  disabledSortOrder?: number
   // 模型白名单：声明 provider 支持的模型（精确或通配符）
   supportedModels?: Record<string, boolean>
   // 模型映射：external model -> internal model

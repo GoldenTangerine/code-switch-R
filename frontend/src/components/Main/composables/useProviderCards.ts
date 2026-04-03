@@ -25,7 +25,7 @@ import {
   applyNormalizedProviderOrder,
   appendProviderToStatusGroup,
   commitProviderOrder,
-  moveProviderToStatusGroupEnd,
+  moveProviderToStatusGroup,
 } from '../utils/providerOrder'
 
 type UseProviderCardsOptions = {
@@ -460,7 +460,7 @@ export function useProviderCards(options: UseProviderCardsOptions) {
   const moveCardToStatusGroup = (tabId: ProviderTab, card: AutomationCard, enabled: boolean) => {
     const list = cards[tabId]
     if (!list) return false
-    return moveProviderToStatusGroupEnd(list, card, enabled)
+    return moveProviderToStatusGroup(list, card, enabled)
   }
 
   const appendCardToGroup = (tabId: ProviderTab, card: AutomationCard) => {

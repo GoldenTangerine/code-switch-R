@@ -33,6 +33,10 @@ type Provider struct {
 	Enabled bool   `json:"enabled"`
 	// 隐藏排序字段：仅控制启用 / 未启用组内顺序
 	SortOrder int `json:"sortOrder,omitempty"`
+	// 记忆启用组内顺序，切回启用时优先恢复
+	EnabledSortOrder int `json:"enabledSortOrder,omitempty"`
+	// 记忆未启用组内顺序，切回未启用时优先恢复
+	DisabledSortOrder int `json:"disabledSortOrder,omitempty"`
 
 	// CLI 配置草稿 - 存储供应商关联的 CLI 可编辑配置
 	CLIConfig map[string]interface{} `json:"cliConfig,omitempty"`
