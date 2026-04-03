@@ -21,7 +21,12 @@ import {
 } from '../adapters/providerCardMappers'
 import { PROVIDER_TAB_IDS } from '../constants'
 import type { ProviderDragEndPayload, ProviderDragTarget, ProviderTab, TranslateFn } from '../types'
-import { applyNormalizedProviderOrder, appendProviderToStatusGroup, moveProviderToStatusGroupEnd } from '../utils/providerOrder'
+import {
+  applyNormalizedProviderOrder,
+  appendProviderToStatusGroup,
+  commitProviderOrder,
+  moveProviderToStatusGroupEnd,
+} from '../utils/providerOrder'
 
 type UseProviderCardsOptions = {
   t: TranslateFn
@@ -120,7 +125,7 @@ export function useProviderCards(options: UseProviderCardsOptions) {
     finalizedDragSessionId.value = sessionId
 
     if (list && changed && shouldPersist) {
-      applyNormalizedProviderOrder(list)
+      commitProviderOrder(list)
       resetDragState()
       await persistProviders(currentTab)
       return
@@ -263,7 +268,7 @@ export function useProviderCards(options: UseProviderCardsOptions) {
 
   const persistProviders = async (tabId: ProviderTab) => {
     try {
-      applyNormalizedProviderOrder(cards[tabId])
+      commitProviderOrder(cards[tabId])
 
       if (tabId === 'others') {
         const selectedToolId = getSelectedToolId()

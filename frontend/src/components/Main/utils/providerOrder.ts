@@ -31,6 +31,10 @@ const buildOrderedEntries = <T extends AutomationCard>(list: T[], enabled: boole
 )
 
 const countEnabledCards = <T extends AutomationCard>(list: T[]) => list.filter((card) => card.enabled).length
+const splitProviderGroupsPreservingOrder = <T extends AutomationCard>(list: T[]) => ({
+  enabledCards: list.filter((card) => card.enabled),
+  disabledCards: list.filter((card) => !card.enabled),
+})
 
 export const applyNormalizedProviderOrder = <T extends AutomationCard>(list: T[]) => {
   if (!Array.isArray(list) || list.length === 0) return
@@ -53,6 +57,21 @@ export const applyNormalizedProviderOrder = <T extends AutomationCard>(list: T[]
   )
 }
 
+export const commitProviderOrder = <T extends AutomationCard>(list: T[]) => {
+  if (!Array.isArray(list) || list.length === 0) return
+
+  const { enabledCards, disabledCards } = splitProviderGroupsPreservingOrder(list)
+
+  enabledCards.forEach((card, index) => {
+    card.sortOrder = index + 1
+  })
+  disabledCards.forEach((card, index) => {
+    card.sortOrder = index + 1
+  })
+
+  list.splice(0, list.length, ...enabledCards, ...disabledCards)
+}
+
 export const appendProviderToStatusGroup = <T extends AutomationCard>(list: T[], card: T) => {
   applyNormalizedProviderOrder(list)
 
@@ -61,7 +80,7 @@ export const appendProviderToStatusGroup = <T extends AutomationCard>(list: T[],
   const insertIndex = card.enabled ? enabledCount : list.length
   list.splice(insertIndex, 0, card)
 
-  applyNormalizedProviderOrder(list)
+  commitProviderOrder(list)
 }
 
 export const moveProviderToStatusGroupEnd = <T extends AutomationCard>(
@@ -82,6 +101,6 @@ export const moveProviderToStatusGroupEnd = <T extends AutomationCard>(
   const insertIndex = enabled ? enabledCount : list.length
   list.splice(insertIndex, 0, moved)
 
-  applyNormalizedProviderOrder(list)
+  commitProviderOrder(list)
   return true
 }

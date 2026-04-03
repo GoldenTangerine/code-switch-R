@@ -94,6 +94,35 @@ describe('useProviderCards drag sort', () => {
     expect(vi.mocked(SaveProviders).mock.calls[0]?.[0]).toBe(activeTab)
   })
 
+  it('persists dragged order when existing cards already have distinct sortOrder values', async () => {
+    const dragTarget: ProviderDragTarget = { id: 3, position: 'after' }
+    const providerCards = useProviderCards({
+      t: (key: string) => key,
+      getActiveTab: () => 'codex',
+      isActiveProxyEnabled: () => false,
+      getSelectedToolId: () => null,
+    })
+
+    providerCards.cards.codex.splice(
+      0,
+      providerCards.cards.codex.length,
+      createCard(1, { sortOrder: 1 }),
+      createCard(2, { sortOrder: 2 }),
+      createCard(3, { sortOrder: 3 }),
+    )
+
+    providerCards.onDragStart(1)
+    providerCards.onDragOverCard(dragTarget)
+
+    await providerCards.onDrop(dragTarget)
+    await providerCards.onDragEnd(createDragEndPayload({ endedInsideList: true }))
+
+    expect(getIds(providerCards.cards.codex)).toEqual([2, 3, 1])
+    expect(providerCards.cards.codex.map((card) => card.sortOrder)).toEqual([1, 2, 3])
+    expect(vi.mocked(SaveProviders)).toHaveBeenCalledTimes(1)
+    expect((vi.mocked(SaveProviders).mock.calls[0]?.[1] as AutomationCard[]).map((card) => card.id)).toEqual([2, 3, 1])
+  })
+
   it('keeps original order when drag ends without any effective reorder', async () => {
     const providerCards = useProviderCards({
       t: (key: string) => key,

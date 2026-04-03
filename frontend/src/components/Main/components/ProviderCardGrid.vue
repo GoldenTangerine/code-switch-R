@@ -19,7 +19,7 @@
       :format-blacklist-countdown="formatBlacklistCountdown"
       :bind-card-ref="bindCardRef(viewModel.card)"
       @card-click="$emit('card-click', viewModel.card)"
-      @dragstart="$emit('dragstart', viewModel.card.id)"
+      @dragstart="handleItemDragStart(viewModel.card.id)"
       @dragend="handleItemDragEnd"
       @open-site="$emit('open-site', viewModel.card)"
       @unblock-and-reset="$emit('unblock-and-reset', viewModel.card)"
@@ -80,6 +80,7 @@ const emit = defineEmits<{
 }>()
 
 const listRef = ref<ComponentPublicInstance | HTMLElement | null>(null)
+const lastKnownInsideList = ref<boolean | null>(null)
 
 const resolveListDragTarget = (event: DragEvent): ProviderDragTarget | null => {
   const listElement = listRef.value instanceof HTMLElement
@@ -123,6 +124,8 @@ const isPointInsideList = (clientX: number | null, clientY: number | null): bool
 }
 
 const handleListDragOver = (event: DragEvent) => {
+  lastKnownInsideList.value = true
+
   if (event.dataTransfer) {
     event.dataTransfer.dropEffect = 'move'
   }
@@ -143,17 +146,30 @@ const handleListDragLeave = (event: DragEvent) => {
     return
   }
 
+  if (isPointInsideList(event.clientX, event.clientY) === true) {
+    return
+  }
+
+  lastKnownInsideList.value = false
   emit('dragleave-list')
 }
 
+const handleItemDragStart = (id: number) => {
+  lastKnownInsideList.value = true
+  emit('dragstart', id)
+}
+
 const handleItemDragEnd = (payload: ProviderDragEndPayload) => {
+  const endedInsideList = isPointInsideList(payload.clientX, payload.clientY)
   emit('dragend', {
     ...payload,
-    endedInsideList: isPointInsideList(payload.clientX, payload.clientY),
+    endedInsideList: endedInsideList ?? lastKnownInsideList.value ?? null,
   })
+  lastKnownInsideList.value = null
 }
 
 const handleListDrop = (event: DragEvent) => {
+  lastKnownInsideList.value = true
   const target = resolveListDragTarget(event)
   if (target) {
     emit('drop', target)
