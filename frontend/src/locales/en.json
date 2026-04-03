@@ -215,6 +215,7 @@
         "valuePlaceholder": "Provider model (e.g., kimi-k2-thinking)",
         "add": "Add",
         "remove": "Remove mapping",
+        "duplicateError": "This CLI model already has a mapping. Direct overwrite is disabled; remove the existing mapping first if you want to change it.",
         "examples": {
           "title": "Examples:",
           "exact": "Exact mapping",
@@ -1613,6 +1614,16 @@
           "invalidJsonAtPosition": "Invalid CLI config JSON: {message} (position: {position})",
           "invalidJsonAtLineColumn": "Invalid CLI config JSON at line {line}, column {column}"
         }
+      },
+      "modelPicker": {
+        "title": "CLI Model",
+        "placeholder": "Type a model name or pick from the builtin model list",
+        "apply": "Apply model",
+        "reset": "Reset value",
+        "loadingHint": "Loading builtin model options. You can still type a model manually in the meantime.",
+        "loadFailedHint": "Failed to load builtin model options. Manual input is still available.",
+        "emptyHint": "No builtin model options matched this platform. You can still type a model manually.",
+        "readyHint": "You can type a model manually or choose from the existing model list. {count} options are available and will sync back to field {field}."
       }
     }
   }

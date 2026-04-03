@@ -22,7 +22,7 @@
     <div v-if="mappingList.length > 0" class="mapping-list">
       <div
         v-for="(mapping, index) in mappingList"
-        :key="index"
+        :key="mapping.key"
         class="mapping-row"
       >
         <div class="mapping-content">
@@ -94,6 +94,9 @@
         {{ $t('components.provider.modelMapping.add') }}
       </BaseButton>
     </div>
+    <p v-if="inputError" class="mapping-input-error" role="alert">
+      {{ inputError }}
+    </p>
 
     <!-- 映射示例和说明 -->
     <div class="help-text">
@@ -119,7 +122,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import BaseInput from './BaseInput.vue'
 import BaseButton from './BaseButton.vue'
 
@@ -133,6 +137,7 @@ interface Emits {
 
 const props = defineProps<Props>()
 const emit = defineEmits<Emits>()
+const { t } = useI18n()
 
 // 将 Record<string, string> 转换为数组便于展示
 const mappingList = computed(() => {
@@ -142,17 +147,17 @@ const mappingList = computed(() => {
 
 const newKey = ref('')
 const newValue = ref('')
+const inputError = ref('')
 const valueInputRef = ref<InstanceType<typeof BaseInput> | null>(null)
 
 const isWildcard = (text: string) => text.includes('*')
+const hasMappingKey = (key: string) => Object.prototype.hasOwnProperty.call(props.modelValue || {}, key)
 
 const focusValueInput = () => {
   // 当在 key 输入框按 Enter 时，聚焦到 value 输入框
   if (valueInputRef.value) {
-    const inputElement = (valueInputRef.value as any).$el?.querySelector('input')
-    if (inputElement) {
-      inputElement.focus()
-    }
+    const inputElement = (valueInputRef.value as any).$el as HTMLInputElement | undefined
+    inputElement?.focus()
   }
 }
 
@@ -162,18 +167,16 @@ const addMapping = () => {
 
   if (!key || !value) return
 
-  // 检查是否已存在相同的 key
-  if (props.modelValue && props.modelValue[key]) {
-    // 可以选择覆盖或提示用户
-    // 这里选择覆盖
+  if (hasMappingKey(key)) {
+    inputError.value = t('components.provider.modelMapping.duplicateError')
+    return
   }
 
-  // 添加到映射列表
   const updated = { ...props.modelValue }
   updated[key] = value
   emit('update:modelValue', updated)
 
-  // 清空输入框
+  inputError.value = ''
   newKey.value = ''
   newValue.value = ''
 }
@@ -185,7 +188,18 @@ const removeMapping = (index: number) => {
   const updated = { ...props.modelValue }
   delete updated[mapping.key]
   emit('update:modelValue', updated)
+  inputError.value = ''
 }
+
+watch([newKey, newValue], () => {
+  inputError.value = ''
+})
+
+watch(() => props.modelValue, () => {
+  if (inputError.value && !hasMappingKey(newKey.value.trim())) {
+    inputError.value = ''
+  }
+}, { deep: true })
 </script>
 
 <style scoped>
@@ -307,6 +321,13 @@ const removeMapping = (index: number) => {
   display: flex;
   gap: 8px;
   align-items: center;
+}
+
+.mapping-input-error {
+  margin: -4px 0 0;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--error);
 }
 
 .mapping-input-row :deep(input) {

@@ -81,6 +81,58 @@
           </p>
         </section>
 
+        <section class="cli-section">
+          <div class="cli-section-header">
+            <span class="cli-section-title">{{ t('components.cliConfig.modelPicker.title') }}</span>
+            <span v-if="builtinCliModelOptions.length" class="cli-section-count">
+              {{ builtinCliModelOptions.length }}
+            </span>
+          </div>
+
+          <div class="cli-field cli-model-picker-field">
+            <label class="cli-field-label" :for="cliModelDatalistId">
+              {{ cliModelFieldKey }}
+            </label>
+            <div class="cli-model-picker-row">
+              <BaseInput
+                :id="cliModelDatalistId"
+                v-model="cliModelDraft"
+                type="text"
+                class="cli-model-input"
+                :list="cliModelDatalistId + '-options'"
+                :placeholder="t('components.cliConfig.modelPicker.placeholder')"
+                @change="void applyCliModelDraft()"
+                @keydown.enter.prevent="void applyCliModelDraft()"
+              />
+              <button
+                type="button"
+                class="cli-action-btn cli-primary-btn"
+                :disabled="!cliModelDraftDirty"
+                @click="void applyCliModelDraft()"
+              >
+                {{ t('components.cliConfig.modelPicker.apply') }}
+              </button>
+              <button
+                type="button"
+                class="cli-action-btn"
+                :disabled="!cliModelDraftDirty"
+                @click="resetCliModelDraft"
+              >
+                {{ t('components.cliConfig.modelPicker.reset') }}
+              </button>
+            </div>
+            <span class="cli-field-hint">{{ cliModelPickerHint }}</span>
+          </div>
+
+          <datalist :id="cliModelDatalistId + '-options'">
+            <option
+              v-for="model in builtinCliModelOptions"
+              :key="model"
+              :value="model"
+            />
+          </datalist>
+        </section>
+
         <section class="cli-section cli-json-section">
           <div class="cli-json-header">
             <div class="cli-json-header-main">
@@ -195,6 +247,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import InlineModal from './InlineModal.vue'
+import BaseInput from './BaseInput.vue'
 import JsonCodeEditor from './JsonCodeEditor.vue'
 import {
   fetchCLIConfig,
@@ -212,6 +265,7 @@ import {
   type CLITemplate,
   type CLIPlatform,
 } from '../../services/cliConfig'
+import { listModelPricing, type ModelPricingRow } from '../../services/modelPricing'
 import { showToast } from '../../utils/toast'
 import { extractErrorMessage } from '../../utils/error'
 
@@ -281,6 +335,10 @@ const sharedTemplateEnabled = ref(false)
 const sharedTemplateInjectedEntries = ref<TemplateInjectionEntry[]>([])
 const persistBaselineValue = ref<Record<string, any>>({})
 const initialModelHasExplicitValue = ref(false)
+const builtinCliModelRows = ref<ModelPricingRow[]>([])
+const builtinCliModelLoading = ref(false)
+const builtinCliModelLoadError = ref('')
+const cliModelDraft = ref('')
 
 let loadConfigRequestSeq = 0
 let cliEditorRenderRequestSeq = 0
@@ -289,6 +347,7 @@ let cliEditorValidationTimer: ReturnType<typeof setTimeout> | null = null
 let globalTemplateFormatRequestSeq = 0
 let globalTemplateValidateRequestSeq = 0
 let globalTemplateValidationTimer: ReturnType<typeof setTimeout> | null = null
+let builtinCliModelLoadRequestSeq = 0
 
 const cloneCliConfigValue = <T>(value: T): T => {
   if (value == null) return value
@@ -390,6 +449,23 @@ const hasSharedTemplate = computed(() => (
   !!templateState.value?.template
   && Object.keys(templateState.value.template).length > 0
 ))
+const cliModelFieldKey = computed(() => (
+  props.platform === 'gemini' ? 'GEMINI_MODEL' : 'model'
+))
+const currentCliModelValue = computed(() => {
+  const rawValue = editableValues.value[cliModelFieldKey.value]
+  if (typeof rawValue === 'string') {
+    return rawValue.trim()
+  }
+  if (rawValue == null) {
+    return ''
+  }
+  return `${rawValue}`.trim()
+})
+const cliModelDraftDirty = computed(() => (
+  cliModelDraft.value.trim() !== currentCliModelValue.value
+))
+const cliModelDatalistId = computed(() => `cli-config-model-${props.platform}`)
 
 const cliJsonPlaceholder = computed(() => {
   if (props.platform === 'claude') {
@@ -442,6 +518,43 @@ parallel = true`
 })
 
 const cliJsonHint = computed(() => t('components.cliConfig.jsonEditor.fileHint'))
+const builtinCliModelOptions = computed(() => {
+  const seen = new Set<string>()
+  return builtinCliModelRows.value
+    .filter((row) => {
+      const source = `${row.source || ''}`.trim().toLowerCase()
+      if (source && source !== 'builtin' && source !== 'claude_sync') {
+        return false
+      }
+      return isDirectCliModelCandidate(row.model) && matchesBuiltinCliModelPlatform(props.platform, row.model)
+    })
+    .map((row) => row.model.trim())
+    .filter((model) => {
+      if (!model || seen.has(model)) return false
+      seen.add(model)
+      return true
+    })
+    .sort((left, right) => {
+      const scoreDiff = scoreBuiltinCliModel(right) - scoreBuiltinCliModel(left)
+      if (scoreDiff !== 0) return scoreDiff
+      return left.localeCompare(right)
+    })
+})
+const cliModelPickerHint = computed(() => {
+  if (builtinCliModelLoading.value) {
+    return t('components.cliConfig.modelPicker.loadingHint')
+  }
+  if (builtinCliModelLoadError.value) {
+    return t('components.cliConfig.modelPicker.loadFailedHint')
+  }
+  if (builtinCliModelOptions.value.length === 0) {
+    return t('components.cliConfig.modelPicker.emptyHint')
+  }
+  return t('components.cliConfig.modelPicker.readyHint', {
+    field: cliModelFieldKey.value,
+    count: builtinCliModelOptions.value.length,
+  })
+})
 
 const focusCliJsonEditor = () => {
   requestAnimationFrame(() => {
@@ -454,6 +567,33 @@ const isPlainObjectRecord = (value: unknown): value is Record<string, any> => (
   && typeof value === 'object'
   && !Array.isArray(value)
 )
+
+const isDirectCliModelCandidate = (model: string) => !/[/:@]/.test(model) && !/^[a-z]+\./i.test(model)
+
+const matchesBuiltinCliModelPlatform = (platform: CLIPlatform, model: string) => {
+  const normalized = model.trim().toLowerCase()
+  if (!normalized) return false
+
+  if (platform === 'claude') {
+    return /claude|sonnet|haiku|opus|anthropic/.test(normalized)
+  }
+
+  if (platform === 'gemini') {
+    return /gemini/.test(normalized)
+  }
+
+  return /\bgpt\b|\bo\d+|codex|whisper|text-embedding|openai/.test(normalized)
+}
+
+const scoreBuiltinCliModel = (model: string) => {
+  const normalized = model.toLowerCase()
+  let score = 0
+  if (!/[/:@]/.test(model)) score += 4
+  if (!normalized.includes('azure/')) score += 2
+  if (!normalized.includes('openrouter/')) score += 2
+  if (!normalized.includes('vertex_ai/')) score += 1
+  return score
+}
 
 const mergeMissingTemplateKeys = (
   currentValue: Record<string, any>,
@@ -807,9 +947,90 @@ const resetCliJsonFromValues = () => {
   cliJsonEditingText.value = cliJsonSyncedText.value
 }
 
+const commitCliModelValue = async (
+  model: string,
+  options: SetEditableValuesOptions = {
+    emit: true,
+    forceSyncText: true,
+  },
+) => {
+  if (model === currentCliModelValue.value) {
+    cliModelDraft.value = currentCliModelValue.value
+    return true
+  }
+
+  const nextValue = normalizeCliConfigRecord(editableValues.value)
+  if (model) {
+    nextValue[cliModelFieldKey.value] = model
+  } else {
+    delete nextValue[cliModelFieldKey.value]
+  }
+
+  await setEditableValues(nextValue, options)
+  return true
+}
+
 const applyPendingJsonChanges = async () => {
-  if (!cliJsonDirty.value) return true
-  return applyCliJsonToValues()
+  const pendingModel = cliModelDraft.value.trim()
+  const hasPendingModel = pendingModel !== currentCliModelValue.value
+
+  if (cliJsonDirty.value) {
+    const ready = await applyCliJsonToValues()
+    if (!ready) return false
+  }
+
+  if (hasPendingModel && pendingModel !== currentCliModelValue.value) {
+    return commitCliModelValue(pendingModel)
+  }
+
+  return true
+}
+
+const loadBuiltinCliModelRows = async () => {
+  const currentSeq = ++builtinCliModelLoadRequestSeq
+  builtinCliModelLoading.value = true
+  builtinCliModelLoadError.value = ''
+
+  try {
+    builtinCliModelRows.value = await listModelPricing()
+  } catch (error) {
+    if (currentSeq !== builtinCliModelLoadRequestSeq) {
+      return
+    }
+    builtinCliModelRows.value = []
+    builtinCliModelLoadError.value = extractErrorMessage(error)
+    console.error('Failed to load builtin CLI model rows:', error)
+  } finally {
+    if (currentSeq === builtinCliModelLoadRequestSeq) {
+      builtinCliModelLoading.value = false
+    }
+  }
+}
+
+const applyCliModelDraft = async () => {
+  const pendingModel = cliModelDraft.value.trim()
+  const hasPendingModel = pendingModel !== currentCliModelValue.value
+
+  if (!hasPendingModel && !cliJsonDirty.value) {
+    return true
+  }
+
+  if (cliJsonDirty.value) {
+    const ready = await applyCliJsonToValues()
+    if (!ready) {
+      return false
+    }
+  }
+
+  if (hasPendingModel && pendingModel !== currentCliModelValue.value) {
+    return commitCliModelValue(pendingModel)
+  }
+
+  return true
+}
+
+const resetCliModelDraft = () => {
+  cliModelDraft.value = currentCliModelValue.value
 }
 
 defineExpose({
@@ -1173,6 +1394,10 @@ watch(globalTemplateEditingText, () => {
   scheduleGlobalTemplateValidation()
 })
 
+watch(currentCliModelValue, (value) => {
+  cliModelDraft.value = value
+}, { immediate: true })
+
 watch(() => props.platform, () => {
   void loadConfig()
 })
@@ -1192,6 +1417,7 @@ watch(
 
 onMounted(() => {
   void loadConfig()
+  void loadBuiltinCliModelRows()
 })
 
 onUnmounted(() => {
@@ -1202,6 +1428,7 @@ onUnmounted(() => {
   cliEditorValidateRequestSeq += 1
   globalTemplateFormatRequestSeq += 1
   globalTemplateValidateRequestSeq += 1
+  builtinCliModelLoadRequestSeq += 1
   editorLockedFields.value = []
   resetSharedTemplateState()
 })
@@ -1358,6 +1585,21 @@ onUnmounted(() => {
   font-size: 12px;
   line-height: 1.6;
   color: var(--mac-text-secondary);
+}
+
+.cli-model-picker-field {
+  gap: 10px;
+}
+
+.cli-model-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.cli-model-input {
+  flex: 1 1 280px;
 }
 
 .cli-template-toggle {
@@ -1525,6 +1767,10 @@ onUnmounted(() => {
 
   .cli-fields {
     grid-template-columns: 1fr;
+  }
+
+  .cli-model-picker-row > * {
+    width: 100%;
   }
 }
 </style>
