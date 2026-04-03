@@ -176,7 +176,11 @@
         </div>
 
         <div class="form-field">
-          <ModelMappingEditor v-model="form.modelMapping" />
+          <ModelMappingEditor
+            :key="cliConfigEditorKey"
+            v-model="form.modelMapping"
+            :platform="builtinModelPlatform"
+          />
         </div>
 
         <div class="form-field">
@@ -299,6 +303,7 @@ import {
 import type { ProviderTab, VendorForm } from '../types'
 import type { AutomationCard } from '../../../data/cards'
 import type { CLIPlatform } from '../../../services/cliConfig'
+import { isBuiltinModelPlatform } from '../../../utils/builtinModels'
 
 type CLIConfigEditorExposed = InstanceType<typeof CLIConfigEditor> & {
   applyPendingJsonChanges?: () => boolean | Promise<boolean>
@@ -350,6 +355,9 @@ const modalTitle = computed(() => (
 ))
 const authTypeLabel = computed(() => (
   authTypeOptions.find((option) => option.value === selectedAuthType.value)?.label || selectedAuthType.value
+))
+const builtinModelPlatform = computed<CLIPlatform | undefined>(() => (
+  isBuiltinModelPlatform(props.tabId) ? props.tabId : undefined
 ))
 const filteredIconOptions = computed(() => {
   const query = iconSearchQuery.value.toLowerCase().trim()

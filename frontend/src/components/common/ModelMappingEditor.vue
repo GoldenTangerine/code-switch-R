@@ -18,12 +18,12 @@
       </label>
     </div>
 
-    <!-- 已添加的映射规则列表 -->
     <div v-if="mappingList.length > 0" class="mapping-list">
       <div
-        v-for="(mapping, index) in mappingList"
+        v-for="mapping in mappingList"
         :key="mapping.key"
         class="mapping-row"
+        :class="{ 'is-editing': editingOriginalKey === mapping.key }"
       >
         <div class="mapping-content">
           <code class="mapping-key" :class="{ wildcard: isWildcard(mapping.key) }">
@@ -43,62 +43,125 @@
             {{ mapping.value }}
           </code>
         </div>
-        <button
-          type="button"
-          class="mapping-remove"
-          :aria-label="$t('components.provider.modelMapping.remove')"
-          @click="removeMapping(index)"
-        >
-          <svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true">
-            <path
-              d="M3 3l6 6M9 3l-6 6"
-              stroke="currentColor"
-              stroke-width="1.5"
-              stroke-linecap="round"
-            />
-          </svg>
-        </button>
+
+        <div class="mapping-row-actions">
+          <button
+            type="button"
+            class="mapping-action"
+            :aria-label="$t('components.provider.modelMapping.edit')"
+            @click="startEditing(mapping.key, mapping.value)"
+          >
+            <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
+              <path
+                d="M11.5 2.5l2 2L6 12l-3 .5.5-3 7.5-7z"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.25"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </button>
+          <button
+            type="button"
+            class="mapping-remove"
+            :aria-label="$t('components.provider.modelMapping.remove')"
+            @click="removeMapping(mapping.key)"
+          >
+            <svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true">
+              <path
+                d="M3 3l6 6M9 3l-6 6"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+              />
+            </svg>
+          </button>
+        </div>
       </div>
     </div>
 
-    <!-- 添加新映射规则输入框 -->
-    <div class="mapping-input-row">
-      <BaseInput
-        v-model="newKey"
-        type="text"
-        :placeholder="$t('components.provider.modelMapping.keyPlaceholder')"
-        @keydown.enter.prevent="focusValueInput"
-      />
-      <svg class="input-arrow" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-        <path
-          d="M6 4l4 4-4 4"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.5"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        />
-      </svg>
-      <BaseInput
-        ref="valueInputRef"
-        v-model="newValue"
-        type="text"
-        :placeholder="$t('components.provider.modelMapping.valuePlaceholder')"
-        @keydown.enter.prevent="addMapping"
-      />
-      <BaseButton
-        type="button"
-        variant="outline"
-        @click="addMapping"
-      >
-        {{ $t('components.provider.modelMapping.add') }}
-      </BaseButton>
-    </div>
-    <p v-if="inputError" class="mapping-input-error" role="alert">
-      {{ inputError }}
-    </p>
+    <div class="mapping-input-panel" :class="{ 'is-editing': isEditing }">
+      <div class="mapping-input-row">
+        <div class="mapping-field mapping-field--key">
+          <BaseInput
+            v-model="newKey"
+            type="text"
+            :placeholder="$t('components.provider.modelMapping.keyPlaceholder')"
+            @keydown.enter.prevent="focusValueInput"
+          />
 
-    <!-- 映射示例和说明 -->
+          <div v-if="platform" class="mapping-builtin-picker">
+            <span class="mapping-picker-label">
+              {{ $t('components.provider.modelMapping.builtinPickerLabel') }}
+            </span>
+            <select
+              class="mac-select mapping-model-select"
+              :value="selectedBuiltinKey"
+              :disabled="builtinModelLoading || builtinModelOptions.length === 0"
+              @change="handleBuiltinModelSelect"
+            >
+              <option value="">
+                {{ $t('components.provider.modelMapping.builtinSelectPlaceholder') }}
+              </option>
+              <option
+                v-for="model in builtinModelOptions"
+                :key="model"
+                :value="model"
+              >
+                {{ model }}
+              </option>
+            </select>
+          </div>
+        </div>
+
+        <svg class="input-arrow" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+          <path
+            d="M6 4l4 4-4 4"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+        </svg>
+
+        <div class="mapping-field">
+          <BaseInput
+            ref="valueInputRef"
+            v-model="newValue"
+            type="text"
+            :placeholder="$t('components.provider.modelMapping.valuePlaceholder')"
+            @keydown.enter.prevent="submitMapping"
+          />
+        </div>
+
+        <div class="mapping-actions">
+          <BaseButton type="button" @click="submitMapping">
+            {{ isEditing ? $t('components.provider.modelMapping.save') : $t('components.provider.modelMapping.add') }}
+          </BaseButton>
+          <BaseButton
+            v-if="isEditing"
+            type="button"
+            variant="outline"
+            @click="cancelEditing"
+          >
+            {{ $t('components.provider.modelMapping.cancel') }}
+          </BaseButton>
+        </div>
+      </div>
+
+      <p v-if="builtinPickerHint" class="mapping-picker-hint">
+        {{ builtinPickerHint }}
+      </p>
+      <p v-if="isEditing" class="mapping-editing-hint">
+        {{ $t('components.provider.modelMapping.editingHint', { key: editingOriginalKey }) }}
+      </p>
+      <p v-if="inputError" class="mapping-input-error" role="alert">
+        {{ inputError }}
+      </p>
+    </div>
+
     <div class="help-text">
       <p class="help-example">
         <strong>{{ $t('components.provider.modelMapping.examples.title') }}</strong>
@@ -124,11 +187,15 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import type { CLIPlatform } from '../../services/cliConfig'
+import { listModelPricing, type ModelPricingRow } from '../../services/modelPricing'
+import { buildBuiltinModelOptions } from '../../utils/builtinModels'
 import BaseInput from './BaseInput.vue'
 import BaseButton from './BaseButton.vue'
 
 interface Props {
   modelValue?: Record<string, string>
+  platform?: CLIPlatform
 }
 
 interface Emits {
@@ -139,7 +206,6 @@ const props = defineProps<Props>()
 const emit = defineEmits<Emits>()
 const { t } = useI18n()
 
-// 将 Record<string, string> 转换为数组便于展示
 const mappingList = computed(() => {
   if (!props.modelValue) return []
   return Object.entries(props.modelValue).map(([key, value]) => ({ key, value }))
@@ -147,48 +213,127 @@ const mappingList = computed(() => {
 
 const newKey = ref('')
 const newValue = ref('')
+const editingOriginalKey = ref('')
 const inputError = ref('')
+const builtinModelRows = ref<ModelPricingRow[]>([])
+const builtinModelLoading = ref(false)
+const builtinModelLoadFailed = ref(false)
 const valueInputRef = ref<InstanceType<typeof BaseInput> | null>(null)
 
-const isWildcard = (text: string) => text.includes('*')
-const hasMappingKey = (key: string) => Object.prototype.hasOwnProperty.call(props.modelValue || {}, key)
-
-const focusValueInput = () => {
-  // 当在 key 输入框按 Enter 时，聚焦到 value 输入框
-  if (valueInputRef.value) {
-    const inputElement = (valueInputRef.value as any).$el as HTMLInputElement | undefined
-    inputElement?.focus()
+const isEditing = computed(() => editingOriginalKey.value !== '')
+const builtinModelOptions = computed(() => buildBuiltinModelOptions(builtinModelRows.value, props.platform))
+const selectedBuiltinKey = computed(() => (
+  builtinModelOptions.value.includes(newKey.value.trim()) ? newKey.value.trim() : ''
+))
+const builtinPickerHint = computed(() => {
+  if (!props.platform) return ''
+  if (builtinModelLoading.value) {
+    return t('components.provider.modelMapping.builtinLoadingHint')
   }
+  if (builtinModelLoadFailed.value) {
+    return t('components.provider.modelMapping.builtinLoadFailedHint')
+  }
+  if (builtinModelOptions.value.length === 0) {
+    return t('components.provider.modelMapping.builtinEmptyHint')
+  }
+  return t('components.provider.modelMapping.builtinReadyHint', {
+    count: builtinModelOptions.value.length,
+  })
+})
+
+function isWildcard(text: string): boolean {
+  return text.includes('*')
 }
 
-const addMapping = () => {
+function hasMappingKey(key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(props.modelValue || {}, key)
+}
+
+function hasConflictingKey(key: string): boolean {
+  if (!key || !hasMappingKey(key)) return false
+  return !isEditing.value || key !== editingOriginalKey.value
+}
+
+function resetDraft(): void {
+  newKey.value = ''
+  newValue.value = ''
+  editingOriginalKey.value = ''
+  inputError.value = ''
+}
+
+function focusValueInput(): void {
+  const inputElement = (valueInputRef.value as any)?.$el as HTMLInputElement | undefined
+  inputElement?.focus()
+}
+
+function handleBuiltinModelSelect(event: Event): void {
+  const target = event.target as HTMLSelectElement
+  newKey.value = target.value
+  inputError.value = ''
+  focusValueInput()
+}
+
+function startEditing(key: string, value: string): void {
+  editingOriginalKey.value = key
+  newKey.value = key
+  newValue.value = value
+  inputError.value = ''
+}
+
+function cancelEditing(): void {
+  resetDraft()
+}
+
+function submitMapping(): void {
   const key = newKey.value.trim()
   const value = newValue.value.trim()
 
   if (!key || !value) return
 
-  if (hasMappingKey(key)) {
+  if (hasConflictingKey(key)) {
     inputError.value = t('components.provider.modelMapping.duplicateError')
     return
   }
 
-  const updated = { ...props.modelValue }
+  const updated = { ...(props.modelValue || {}) }
+  if (isEditing.value && editingOriginalKey.value !== key) {
+    delete updated[editingOriginalKey.value]
+  }
   updated[key] = value
   emit('update:modelValue', updated)
-
-  inputError.value = ''
-  newKey.value = ''
-  newValue.value = ''
+  resetDraft()
 }
 
-const removeMapping = (index: number) => {
-  const mapping = mappingList.value[index]
-  if (!mapping) return
-
-  const updated = { ...props.modelValue }
-  delete updated[mapping.key]
+function removeMapping(key: string): void {
+  const updated = { ...(props.modelValue || {}) }
+  delete updated[key]
   emit('update:modelValue', updated)
-  inputError.value = ''
+
+  if (editingOriginalKey.value === key) {
+    resetDraft()
+    return
+  }
+
+  if (!hasConflictingKey(newKey.value.trim())) {
+    inputError.value = ''
+  }
+}
+
+async function loadBuiltinModelRows(): Promise<void> {
+  if (builtinModelRows.value.length > 0 || builtinModelLoading.value) return
+
+  builtinModelLoading.value = true
+  builtinModelLoadFailed.value = false
+
+  try {
+    builtinModelRows.value = await listModelPricing()
+  } catch (error) {
+    builtinModelRows.value = []
+    builtinModelLoadFailed.value = true
+    console.error('Failed to load builtin model rows for mapping editor:', error)
+  } finally {
+    builtinModelLoading.value = false
+  }
 }
 
 watch([newKey, newValue], () => {
@@ -196,10 +341,21 @@ watch([newKey, newValue], () => {
 })
 
 watch(() => props.modelValue, () => {
-  if (inputError.value && !hasMappingKey(newKey.value.trim())) {
+  if (editingOriginalKey.value && !hasMappingKey(editingOriginalKey.value)) {
+    resetDraft()
+    return
+  }
+
+  if (inputError.value && !hasConflictingKey(newKey.value.trim())) {
     inputError.value = ''
   }
 }, { deep: true })
+
+watch(() => props.platform, (platform) => {
+  if (platform) {
+    void loadBuiltinModelRows()
+  }
+}, { immediate: true })
 </script>
 
 <style scoped>
@@ -267,6 +423,11 @@ watch(() => props.modelValue, () => {
   background-color: var(--background-hover);
 }
 
+.mapping-row.is-editing {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-primary) 28%, transparent);
+}
+
 .mapping-content {
   display: flex;
   align-items: center;
@@ -293,11 +454,20 @@ watch(() => props.modelValue, () => {
   font-weight: 500;
 }
 
-.mapping-arrow {
+.mapping-arrow,
+.input-arrow {
   flex-shrink: 0;
   color: var(--foreground-muted);
 }
 
+.mapping-row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.mapping-action,
 .mapping-remove {
   display: inline-flex;
   align-items: center;
@@ -308,8 +478,12 @@ watch(() => props.modelValue, () => {
   color: var(--foreground-muted);
   cursor: pointer;
   border-radius: 3px;
-  flex-shrink: 0;
   transition: all 0.2s;
+}
+
+.mapping-action:hover {
+  color: var(--accent-primary);
+  background-color: color-mix(in srgb, var(--accent-primary) 10%, transparent);
 }
 
 .mapping-remove:hover {
@@ -317,27 +491,82 @@ watch(() => props.modelValue, () => {
   background-color: var(--error-bg);
 }
 
-.mapping-input-row {
+.mapping-input-panel {
   display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background-color: color-mix(in srgb, var(--background-secondary) 92%, transparent);
+}
+
+.mapping-input-panel.is-editing {
+  border-color: var(--accent-primary);
+  background-color: color-mix(in srgb, var(--accent-primary) 6%, var(--background-secondary));
+}
+
+.mapping-input-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) auto minmax(0, 1fr) auto;
   gap: 8px;
-  align-items: center;
+  align-items: flex-start;
 }
 
-.mapping-input-error {
-  margin: -4px 0 0;
-  font-size: 0.75rem;
-  line-height: 1.5;
-  color: var(--error);
+.mapping-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
 }
 
-.mapping-input-row :deep(input) {
-  flex: 1;
+.mapping-field--key :deep(input),
+.mapping-field :deep(input),
+.mapping-model-select {
   font-family: 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
 }
 
-.input-arrow {
-  flex-shrink: 0;
+.mapping-builtin-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mapping-picker-label {
+  font-size: 0.75rem;
   color: var(--foreground-muted);
+}
+
+.mapping-model-select {
+  width: 100%;
+  min-width: 0;
+}
+
+.mapping-actions {
+  display: flex;
+  gap: 8px;
+  align-self: flex-end;
+}
+
+.mapping-picker-hint,
+.mapping-editing-hint,
+.mapping-input-error {
+  margin: 0;
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+.mapping-picker-hint,
+.mapping-editing-hint {
+  color: var(--foreground-muted);
+}
+
+.mapping-editing-hint {
+  color: var(--accent-primary);
+}
+
+.mapping-input-error {
+  color: var(--error);
 }
 
 .help-text {
@@ -378,5 +607,32 @@ watch(() => props.modelValue, () => {
   font-size: 0.75rem;
   color: var(--foreground-muted);
   font-style: italic;
+}
+
+@media (max-width: 768px) {
+  .mapping-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .mapping-row-actions {
+    align-self: flex-end;
+  }
+
+  .mapping-input-row {
+    grid-template-columns: 1fr;
+  }
+
+  .input-arrow {
+    display: none;
+  }
+
+  .mapping-actions {
+    align-self: stretch;
+  }
+
+  .mapping-actions > * {
+    flex: 1;
+  }
 }
 </style>

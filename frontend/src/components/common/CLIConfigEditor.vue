@@ -90,20 +90,48 @@
           </div>
 
           <div class="cli-field cli-model-picker-field">
-            <label class="cli-field-label" :for="cliModelDatalistId">
+            <label class="cli-field-label" :for="cliModelInputId">
               {{ cliModelFieldKey }}
             </label>
+            <div class="cli-model-picker-controls">
+              <label class="cli-picker-control">
+                <span class="cli-picker-control-label">
+                  {{ t('components.cliConfig.modelPicker.builtinLabel') }}
+                </span>
+                <select
+                  class="mac-select cli-model-select"
+                  :value="selectedBuiltinCliModel"
+                  :disabled="builtinCliModelLoading || builtinCliModelOptions.length === 0"
+                  @change="handleBuiltinCliModelSelect"
+                >
+                  <option value="">
+                    {{ t('components.cliConfig.modelPicker.selectPlaceholder') }}
+                  </option>
+                  <option
+                    v-for="model in builtinCliModelOptions"
+                    :key="model"
+                    :value="model"
+                  >
+                    {{ model }}
+                  </option>
+                </select>
+              </label>
+              <label class="cli-picker-control cli-picker-control--grow">
+                <span class="cli-picker-control-label">
+                  {{ t('components.cliConfig.modelPicker.manualLabel') }}
+                </span>
+                <BaseInput
+                  :id="cliModelInputId"
+                  v-model="cliModelDraft"
+                  type="text"
+                  class="cli-model-input"
+                  :placeholder="t('components.cliConfig.modelPicker.placeholder')"
+                  @change="void applyCliModelDraft()"
+                  @keydown.enter.prevent="void applyCliModelDraft()"
+                />
+              </label>
+            </div>
             <div class="cli-model-picker-row">
-              <BaseInput
-                :id="cliModelDatalistId"
-                v-model="cliModelDraft"
-                type="text"
-                class="cli-model-input"
-                :list="cliModelDatalistId + '-options'"
-                :placeholder="t('components.cliConfig.modelPicker.placeholder')"
-                @change="void applyCliModelDraft()"
-                @keydown.enter.prevent="void applyCliModelDraft()"
-              />
               <button
                 type="button"
                 class="cli-action-btn cli-primary-btn"
@@ -123,14 +151,6 @@
             </div>
             <span class="cli-field-hint">{{ cliModelPickerHint }}</span>
           </div>
-
-          <datalist :id="cliModelDatalistId + '-options'">
-            <option
-              v-for="model in builtinCliModelOptions"
-              :key="model"
-              :value="model"
-            />
-          </datalist>
         </section>
 
         <section class="cli-section cli-json-section">
@@ -268,6 +288,7 @@ import {
 import { listModelPricing, type ModelPricingRow } from '../../services/modelPricing'
 import { showToast } from '../../utils/toast'
 import { extractErrorMessage } from '../../utils/error'
+import { buildBuiltinModelOptions } from '../../utils/builtinModels'
 
 const CLI_CONFIG_FULL_SOURCE_MARKER = '__code_switch_cli_full__'
 
@@ -465,7 +486,7 @@ const currentCliModelValue = computed(() => {
 const cliModelDraftDirty = computed(() => (
   cliModelDraft.value.trim() !== currentCliModelValue.value
 ))
-const cliModelDatalistId = computed(() => `cli-config-model-${props.platform}`)
+const cliModelInputId = computed(() => `cli-config-model-${props.platform}`)
 
 const cliJsonPlaceholder = computed(() => {
   if (props.platform === 'claude') {
@@ -518,28 +539,12 @@ parallel = true`
 })
 
 const cliJsonHint = computed(() => t('components.cliConfig.jsonEditor.fileHint'))
-const builtinCliModelOptions = computed(() => {
-  const seen = new Set<string>()
-  return builtinCliModelRows.value
-    .filter((row) => {
-      const source = `${row.source || ''}`.trim().toLowerCase()
-      if (source && source !== 'builtin' && source !== 'claude_sync') {
-        return false
-      }
-      return isDirectCliModelCandidate(row.model) && matchesBuiltinCliModelPlatform(props.platform, row.model)
-    })
-    .map((row) => row.model.trim())
-    .filter((model) => {
-      if (!model || seen.has(model)) return false
-      seen.add(model)
-      return true
-    })
-    .sort((left, right) => {
-      const scoreDiff = scoreBuiltinCliModel(right) - scoreBuiltinCliModel(left)
-      if (scoreDiff !== 0) return scoreDiff
-      return left.localeCompare(right)
-    })
-})
+const builtinCliModelOptions = computed(() => (
+  buildBuiltinModelOptions(builtinCliModelRows.value, props.platform)
+))
+const selectedBuiltinCliModel = computed(() => (
+  builtinCliModelOptions.value.includes(cliModelDraft.value.trim()) ? cliModelDraft.value.trim() : ''
+))
 const cliModelPickerHint = computed(() => {
   if (builtinCliModelLoading.value) {
     return t('components.cliConfig.modelPicker.loadingHint')
@@ -567,33 +572,6 @@ const isPlainObjectRecord = (value: unknown): value is Record<string, any> => (
   && typeof value === 'object'
   && !Array.isArray(value)
 )
-
-const isDirectCliModelCandidate = (model: string) => !/[/:@]/.test(model) && !/^[a-z]+\./i.test(model)
-
-const matchesBuiltinCliModelPlatform = (platform: CLIPlatform, model: string) => {
-  const normalized = model.trim().toLowerCase()
-  if (!normalized) return false
-
-  if (platform === 'claude') {
-    return /claude|sonnet|haiku|opus|anthropic/.test(normalized)
-  }
-
-  if (platform === 'gemini') {
-    return /gemini/.test(normalized)
-  }
-
-  return /\bgpt\b|\bo\d+|codex|whisper|text-embedding|openai/.test(normalized)
-}
-
-const scoreBuiltinCliModel = (model: string) => {
-  const normalized = model.toLowerCase()
-  let score = 0
-  if (!/[/:@]/.test(model)) score += 4
-  if (!normalized.includes('azure/')) score += 2
-  if (!normalized.includes('openrouter/')) score += 2
-  if (!normalized.includes('vertex_ai/')) score += 1
-  return score
-}
 
 const mergeMissingTemplateKeys = (
   currentValue: Record<string, any>,
@@ -1027,6 +1005,11 @@ const applyCliModelDraft = async () => {
   }
 
   return true
+}
+
+const handleBuiltinCliModelSelect = (event: Event) => {
+  const target = event.target as HTMLSelectElement
+  cliModelDraft.value = target.value
 }
 
 const resetCliModelDraft = () => {
@@ -1591,6 +1574,29 @@ onUnmounted(() => {
   gap: 10px;
 }
 
+.cli-model-picker-controls {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.95fr) minmax(260px, 1.05fr);
+  gap: 10px;
+}
+
+.cli-picker-control {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.cli-picker-control--grow {
+  flex: 1 1 auto;
+}
+
+.cli-picker-control-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--mac-text-secondary);
+}
+
 .cli-model-picker-row {
   display: flex;
   align-items: center;
@@ -1598,8 +1604,10 @@ onUnmounted(() => {
   flex-wrap: wrap;
 }
 
+.cli-model-select,
 .cli-model-input {
-  flex: 1 1 280px;
+  width: 100%;
+  min-width: 0;
 }
 
 .cli-template-toggle {
@@ -1766,6 +1774,10 @@ onUnmounted(() => {
   }
 
   .cli-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .cli-model-picker-controls {
     grid-template-columns: 1fr;
   }
 
