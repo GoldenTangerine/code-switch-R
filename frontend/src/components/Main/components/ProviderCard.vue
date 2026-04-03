@@ -1,6 +1,7 @@
 <template>
   <article
     :ref="bindCardRef"
+    :data-provider-id="viewModel.card.id"
     :class="[
       'automation-card',
       { dragging: viewModel.dragging },
@@ -12,9 +13,7 @@
     draggable="true"
     @click="$emit('card-click')"
     @dragstart="handleDragStart"
-    @dragover.prevent="handleDragOver"
     @dragend="handleDragEnd"
-    @drop.prevent.stop="handleDrop"
   >
     <div class="card-leading">
       <div class="card-icon" :style="{ backgroundColor: viewModel.card.tint, color: viewModel.card.accent }">
@@ -389,7 +388,7 @@
 <script setup lang="ts">
 import { computed, type ComponentPublicInstance } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { ProviderCardViewModel, ProviderDragTarget, ProviderTab, ResolvedTheme } from '../types'
+import type { ProviderCardViewModel, ProviderTab, ResolvedTheme } from '../types'
 import { isHostedRouteActive } from '../utils/providerRoutingState'
 
 const props = defineProps<{
@@ -404,9 +403,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   'card-click': []
   dragstart: []
-  'dragover-card': [target: ProviderDragTarget]
   dragend: [dropEffect: DataTransfer['dropEffect'] | 'none']
-  drop: [target: ProviderDragTarget]
   'open-site': []
   'unblock-and-reset': []
   'reset-level': []
@@ -475,16 +472,6 @@ const handleToggleEnabled = (event: Event) => {
   emit('toggle-enabled', (event.target as HTMLInputElement).checked)
 }
 
-const resolveDragTarget = (event: DragEvent): ProviderDragTarget => {
-  const currentTarget = event.currentTarget as HTMLElement | null
-  const bounds = currentTarget?.getBoundingClientRect()
-  const midpoint = bounds ? bounds.top + bounds.height / 2 : 0
-  return {
-    id: props.viewModel.card.id,
-    position: event.clientY > midpoint ? 'after' : 'before',
-  }
-}
-
 const handleDragStart = (event: DragEvent) => {
   if (event.dataTransfer) {
     event.dataTransfer.effectAllowed = 'move'
@@ -493,19 +480,8 @@ const handleDragStart = (event: DragEvent) => {
   emit('dragstart')
 }
 
-const handleDragOver = (event: DragEvent) => {
-  if (event.dataTransfer) {
-    event.dataTransfer.dropEffect = 'move'
-  }
-  emit('dragover-card', resolveDragTarget(event))
-}
-
 const handleDragEnd = (event: DragEvent) => {
   emit('dragend', event.dataTransfer?.dropEffect ?? 'none')
-}
-
-const handleDrop = (event: DragEvent) => {
-  emit('drop', resolveDragTarget(event))
 }
 </script>
 

@@ -1,10 +1,12 @@
 <template>
   <TransitionGroup
+    ref="listRef"
     tag="div"
     name="provider-card-list"
     class="automation-list"
     :class="{ 'is-sorting': isSorting }"
     @dragover.prevent="handleListDragOver"
+    @drop.prevent="handleListDrop"
   >
     <ProviderCard
       v-for="viewModel in cards"
@@ -17,9 +19,7 @@
       :bind-card-ref="bindCardRef(viewModel.card)"
       @card-click="$emit('card-click', viewModel.card)"
       @dragstart="$emit('dragstart', viewModel.card.id)"
-      @dragover-card="$emit('dragover-card', $event)"
       @dragend="$emit('dragend', $event)"
-      @drop="$emit('drop', $event)"
       @open-site="$emit('open-site', viewModel.card)"
       @unblock-and-reset="$emit('unblock-and-reset', viewModel.card)"
       @reset-level="$emit('reset-level', viewModel.card)"
@@ -36,10 +36,11 @@
 </template>
 
 <script setup lang="ts">
-import { TransitionGroup, type ComponentPublicInstance } from 'vue'
+import { ref, TransitionGroup, type ComponentPublicInstance } from 'vue'
 import type { AutomationCard } from '../../../data/cards'
 import ProviderCard from './ProviderCard.vue'
 import type { ProviderCardViewModel, ProviderDragTarget, ProviderTab, ResolvedTheme } from '../types'
+import { resolveProviderDragTarget } from '../utils/providerDragTarget'
 
 defineProps<{
   cards: ProviderCardViewModel[]
@@ -51,7 +52,7 @@ defineProps<{
   bindCardRef: (card: AutomationCard) => (element: Element | ComponentPublicInstance | null) => void
 }>()
 
-defineEmits<{
+const emit = defineEmits<{
   'card-click': [card: AutomationCard]
   dragstart: [id: number]
   'dragover-card': [target: ProviderDragTarget]
@@ -70,9 +71,47 @@ defineEmits<{
   remove: [card: AutomationCard]
 }>()
 
+const listRef = ref<ComponentPublicInstance | HTMLElement | null>(null)
+
+const resolveListDragTarget = (event: DragEvent): ProviderDragTarget | null => {
+  const listElement = listRef.value instanceof HTMLElement
+    ? listRef.value
+    : ((listRef.value as ComponentPublicInstance | null)?.$el as HTMLElement | undefined) ?? null
+
+  if (!listElement) return null
+
+  const bounds = Array.from(listElement.querySelectorAll<HTMLElement>('.automation-card[data-provider-id]'))
+    .map((cardElement) => {
+      const id = Number(cardElement.dataset.providerId)
+      if (!Number.isFinite(id)) return null
+      const rect = cardElement.getBoundingClientRect()
+      return {
+        id,
+        top: rect.top,
+        height: rect.height,
+        bottom: rect.bottom,
+      }
+    })
+    .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
+
+  return resolveProviderDragTarget(bounds, event.clientY)
+}
+
 const handleListDragOver = (event: DragEvent) => {
   if (event.dataTransfer) {
     event.dataTransfer.dropEffect = 'move'
+  }
+
+  const target = resolveListDragTarget(event)
+  if (target) {
+    emit('dragover-card', target)
+  }
+}
+
+const handleListDrop = (event: DragEvent) => {
+  const target = resolveListDragTarget(event)
+  if (target) {
+    emit('drop', target)
   }
 }
 </script>
