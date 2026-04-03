@@ -65,6 +65,7 @@
           @card-click="handleProviderCardClick"
           @dragstart="onDragStart"
           @dragover-card="onDragOverCard"
+          @dragleave-list="onDragLeaveList"
           @dragend="onDragEnd"
           @drop="onDrop"
           @open-site="handleOpenSite"
@@ -237,6 +238,7 @@ const {
   duplicateProvider,
   onDragStart,
   onDragOverCard,
+  onDragLeaveList,
   onDrop,
   onDragEnd,
   moveCardToStatusGroup,

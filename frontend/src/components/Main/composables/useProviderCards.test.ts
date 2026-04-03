@@ -82,7 +82,25 @@ describe('useProviderCards drag sort', () => {
     expect(vi.mocked(SaveProviders).mock.calls[0]?.[0]).toBe(activeTab)
   })
 
-  it('restores original order when drag ends without drop', async () => {
+  it('keeps original order when drag ends without any effective reorder', async () => {
+    const providerCards = useProviderCards({
+      t: (key: string) => key,
+      getActiveTab: () => 'codex',
+      isActiveProxyEnabled: () => false,
+      getSelectedToolId: () => null,
+    })
+
+    providerCards.cards.codex.splice(0, providerCards.cards.codex.length, createCard(1), createCard(2), createCard(3))
+
+    providerCards.onDragStart(1)
+
+    await providerCards.onDragEnd()
+
+    expect(getIds(providerCards.cards.codex)).toEqual([1, 2, 3])
+    expect(vi.mocked(SaveProviders)).not.toHaveBeenCalled()
+  })
+
+  it('persists reordered result on drag end when drop event is missing', async () => {
     const providerCards = useProviderCards({
       t: (key: string) => key,
       getActiveTab: () => 'codex',
@@ -99,11 +117,11 @@ describe('useProviderCards drag sort', () => {
 
     await providerCards.onDragEnd()
 
-    expect(getIds(providerCards.cards.codex)).toEqual([1, 2, 3])
-    expect(vi.mocked(SaveProviders)).not.toHaveBeenCalled()
+    expect(getIds(providerCards.cards.codex)).toEqual([2, 3, 1])
+    expect(vi.mocked(SaveProviders)).toHaveBeenCalledTimes(1)
   })
 
-  it('persists reordered result on drag end when browser reports a move but card drop does not fire', async () => {
+  it('restores original order when dragging leaves the list before release', async () => {
     const providerCards = useProviderCards({
       t: (key: string) => key,
       getActiveTab: () => 'codex',
@@ -115,10 +133,31 @@ describe('useProviderCards drag sort', () => {
 
     providerCards.onDragStart(1)
     providerCards.onDragOverCard({ id: 3, position: 'after' })
+    providerCards.onDragLeaveList()
 
-    expect(getIds(providerCards.cards.codex)).toEqual([2, 3, 1])
+    await providerCards.onDragEnd()
 
-    await providerCards.onDragEnd('move')
+    expect(getIds(providerCards.cards.codex)).toEqual([1, 2, 3])
+    expect(vi.mocked(SaveProviders)).not.toHaveBeenCalled()
+  })
+
+  it('keeps reordered result when dragend fires before drop in desktop webviews', async () => {
+    const dragTarget: ProviderDragTarget = { id: 3, position: 'after' }
+    const providerCards = useProviderCards({
+      t: (key: string) => key,
+      getActiveTab: () => 'codex',
+      isActiveProxyEnabled: () => false,
+      getSelectedToolId: () => null,
+    })
+
+    providerCards.cards.codex.splice(0, providerCards.cards.codex.length, createCard(1), createCard(2), createCard(3))
+
+    providerCards.onDragStart(1)
+    providerCards.onDragOverCard(dragTarget)
+
+    const dragEndPromise = providerCards.onDragEnd()
+    await providerCards.onDrop(dragTarget)
+    await dragEndPromise
 
     expect(getIds(providerCards.cards.codex)).toEqual([2, 3, 1])
     expect(vi.mocked(SaveProviders)).toHaveBeenCalledTimes(1)

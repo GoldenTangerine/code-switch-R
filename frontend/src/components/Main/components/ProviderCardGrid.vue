@@ -6,6 +6,7 @@
     class="automation-list"
     :class="{ 'is-sorting': isSorting }"
     @dragover.prevent="handleListDragOver"
+    @dragleave="handleListDragLeave"
     @drop.prevent="handleListDrop"
   >
     <ProviderCard
@@ -56,6 +57,7 @@ const emit = defineEmits<{
   'card-click': [card: AutomationCard]
   dragstart: [id: number]
   'dragover-card': [target: ProviderDragTarget]
+  'dragleave-list': []
   dragend: [dropEffect: DataTransfer['dropEffect'] | 'none']
   drop: [target: ProviderDragTarget]
   'open-site': [card: AutomationCard]
@@ -106,6 +108,19 @@ const handleListDragOver = (event: DragEvent) => {
   if (target) {
     emit('dragover-card', target)
   }
+}
+
+const handleListDragLeave = (event: DragEvent) => {
+  const listElement = listRef.value instanceof HTMLElement
+    ? listRef.value
+    : ((listRef.value as ComponentPublicInstance | null)?.$el as HTMLElement | undefined) ?? null
+
+  const nextTarget = event.relatedTarget as Node | null
+  if (listElement && nextTarget && listElement.contains(nextTarget)) {
+    return
+  }
+
+  emit('dragleave-list')
 }
 
 const handleListDrop = (event: DragEvent) => {

@@ -57,6 +57,10 @@ export function useProviderCards(options: UseProviderCardsOptions) {
   const dragStartOrder = ref<number[]>([])
   const dragSourceTab = ref<ProviderTab | null>(null)
   const lastDragTarget = ref<ProviderDragTarget | null>(null)
+  const dragSessionId = ref(0)
+  const finalizedDragSessionId = ref(0)
+  const droppedDragSessionId = ref(0)
+  const dragWithinList = ref(false)
 
   const hasOrderChanged = (list: AutomationCard[], snapshot: number[]) =>
     snapshot.length === list.length && snapshot.some((id, index) => list[index]?.id !== id)
@@ -77,6 +81,46 @@ export function useProviderCards(options: UseProviderCardsOptions) {
     dragStartOrder.value = []
     dragSourceTab.value = null
     lastDragTarget.value = null
+    dragWithinList.value = false
+  }
+
+  const finalizeDrag = async (
+    sessionId: number,
+    options: {
+      dropEffect?: DataTransfer['dropEffect'] | 'none'
+      forcePersist?: boolean
+    } = {},
+  ) => {
+    if (finalizedDragSessionId.value === sessionId) return
+    if (dragSessionId.value !== sessionId) return
+
+    const currentTab = dragSourceTab.value ?? getActiveTab()
+    const list = cards[currentTab]
+    const changed = list ? hasOrderChanged(list, dragStartOrder.value) : false
+    const wasDropped = droppedDragSessionId.value === sessionId
+    const shouldPersist =
+      !!list &&
+      changed &&
+      (
+        options.forcePersist === true ||
+        wasDropped ||
+        options.dropEffect === 'move' ||
+        (dragWithinList.value && lastDragTarget.value !== null)
+      )
+
+    finalizedDragSessionId.value = sessionId
+
+    if (list && changed && shouldPersist) {
+      applyNormalizedProviderOrder(list)
+      resetDragState()
+      await persistProviders(currentTab)
+      return
+    }
+
+    if (list && changed) {
+      restoreOrder(list, dragStartOrder.value)
+    }
+    resetDragState()
   }
 
   const reorderDraggingCard = (target: ProviderDragTarget) => {
@@ -349,57 +393,46 @@ export function useProviderCards(options: UseProviderCardsOptions) {
 
   const onDragStart = (id: number) => {
     const currentTab = getActiveTab()
+    dragSessionId.value += 1
+    finalizedDragSessionId.value = 0
+    droppedDragSessionId.value = 0
     draggingId.value = id
     dragOverId.value = null
     dragSourceTab.value = currentTab
     dragStartOrder.value = cards[currentTab].map((card) => card.id)
     lastDragTarget.value = null
+    dragWithinList.value = false
   }
 
   const onDragOverCard = (target: ProviderDragTarget) => {
+    dragWithinList.value = true
     reorderDraggingCard(target)
+  }
+
+  const onDragLeaveList = () => {
+    if (draggingId.value === null) return
+    dragWithinList.value = false
+    dragOverId.value = null
   }
 
   const onDrop = async (target: ProviderDragTarget) => {
     if (draggingId.value === null) return
 
     reorderDraggingCard(target)
-
-    const currentTab = dragSourceTab.value ?? getActiveTab()
-    const list = cards[currentTab]
-    if (!list) {
-      resetDragState()
-      return
-    }
-
-    const changed = hasOrderChanged(list, dragStartOrder.value)
-    if (changed) {
-      applyNormalizedProviderOrder(list)
-    }
-    resetDragState()
-    if (changed) {
-      await persistProviders(currentTab)
-    }
+    const sessionId = dragSessionId.value
+    droppedDragSessionId.value = sessionId
+    await finalizeDrag(sessionId, { forcePersist: true })
   }
 
-  const onDragEnd = async (dropEffect: DataTransfer['dropEffect'] | 'none' = 'none') => {
+  const onDragEnd = (dropEffect: DataTransfer['dropEffect'] | 'none' = 'none') => {
     if (draggingId.value === null) return
+    const sessionId = dragSessionId.value
 
-    const currentTab = dragSourceTab.value ?? getActiveTab()
-    const list = cards[currentTab]
-    const changed = list ? hasOrderChanged(list, dragStartOrder.value) : false
-
-    if (list && changed && dropEffect === 'move') {
-      applyNormalizedProviderOrder(list)
-      resetDragState()
-      await persistProviders(currentTab)
-      return
-    }
-
-    if (list && changed) {
-      restoreOrder(list, dragStartOrder.value)
-    }
-    resetDragState()
+    return new Promise<void>((resolve) => {
+      setTimeout(() => {
+        void finalizeDrag(sessionId, { dropEffect }).finally(resolve)
+      }, 0)
+    })
   }
 
   const moveCardToStatusGroup = (tabId: ProviderTab, card: AutomationCard, enabled: boolean) => {
@@ -430,6 +463,7 @@ export function useProviderCards(options: UseProviderCardsOptions) {
     duplicateProvider,
     onDragStart,
     onDragOverCard,
+    onDragLeaveList,
     onDrop,
     onDragEnd,
     moveCardToStatusGroup,
