@@ -121,16 +121,6 @@ export function useProviderCards(options: UseProviderCardsOptions) {
     return Math.floor(numeric)
   }
 
-  const sortProvidersByLevel = (list: AutomationCard[]) => {
-    if (!Array.isArray(list)) return
-    list.sort((left, right) => {
-      if (left.enabled !== right.enabled) {
-        return left.enabled ? -1 : 1
-      }
-      return normalizeLevel(left.level) - normalizeLevel(right.level)
-    })
-  }
-
   const refreshDirectAppliedStatus = async (tab: ProviderTab = getActiveTab()) => {
     if (tab === 'others') return
 
@@ -199,7 +189,6 @@ export function useProviderCards(options: UseProviderCardsOptions) {
       const saved = await LoadProviders(getCustomProviderKind(toolId))
       if (Array.isArray(saved)) {
         cards.others.splice(0, cards.others.length, ...createAutomationCards(saved as AutomationCard[]))
-        sortProvidersByLevel(cards.others)
       } else {
         cards.others.splice(0, cards.others.length)
       }
@@ -288,13 +277,12 @@ export function useProviderCards(options: UseProviderCardsOptions) {
         } else if (tab === 'gemini') {
           const geminiProviders = await GetGeminiProviders()
           geminiProvidersCache.value = geminiProviders
+          // 刷新时要保留用户手动拖拽后的顺序，不能在这里再按状态或 Level 重排。
           cards.gemini.splice(0, cards.gemini.length, ...geminiProviders.map(geminiToCard))
-          sortProvidersByLevel(cards.gemini)
         } else {
           const saved = await LoadProviders(tab)
           if (Array.isArray(saved)) {
             replaceProviders(tab, saved as AutomationCard[])
-            sortProvidersByLevel(cards[tab])
           } else {
             await persistProviders(tab)
           }
@@ -403,7 +391,6 @@ export function useProviderCards(options: UseProviderCardsOptions) {
     dragOverId,
     directAppliedIds,
     normalizeLevel,
-    sortProvidersByLevel,
     refreshDirectAppliedStatus,
     handleDirectApply,
     isDirectApplied,

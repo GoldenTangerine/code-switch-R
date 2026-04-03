@@ -23,9 +23,14 @@ vi.mock('@wailsio/runtime', () => ({
 }))
 
 import { SaveProviders } from '../../../../bindings/codeswitch/services/providerservice'
+import { LoadProviders } from '../../../../bindings/codeswitch/services/providerservice'
+import { GetProviders as GetGeminiProviders } from '../../../../bindings/codeswitch/services/geminiservice'
 import { useProviderCards } from './useProviderCards'
 
-const createCard = (id: number): AutomationCard => ({
+const createCard = (
+  id: number,
+  overrides: Partial<AutomationCard> = {},
+): AutomationCard => ({
   id,
   name: `Provider ${id}`,
   apiUrl: `https://example-${id}.com`,
@@ -35,6 +40,8 @@ const createCard = (id: number): AutomationCard => ({
   tint: 'rgba(10, 132, 255, 0.14)',
   accent: '#0a84ff',
   enabled: true,
+  level: 1,
+  ...overrides,
 })
 
 const getIds = (cards: AutomationCard[]) => cards.map((card) => card.id)
@@ -43,6 +50,8 @@ describe('useProviderCards drag sort', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.mocked(SaveProviders).mockResolvedValue(undefined)
+    vi.mocked(LoadProviders).mockResolvedValue([])
+    vi.mocked(GetGeminiProviders).mockResolvedValue([])
   })
 
   it('keeps reordered result after drop and persists once', async () => {
@@ -109,5 +118,116 @@ describe('useProviderCards drag sort', () => {
     providerCards.onDragOverCard({ id: 3, position: 'after' })
 
     expect(getIds(providerCards.cards.codex)).toEqual([2, 3, 1])
+  })
+
+  it('allows dragging disabled providers and persists the manual order', async () => {
+    const providerCards = useProviderCards({
+      t: (key: string) => key,
+      getActiveTab: () => 'codex',
+      isActiveProxyEnabled: () => false,
+      getSelectedToolId: () => null,
+    })
+
+    providerCards.cards.codex.splice(
+      0,
+      providerCards.cards.codex.length,
+      createCard(1, { enabled: true }),
+      createCard(2, { enabled: false }),
+      createCard(3, { enabled: true }),
+    )
+
+    providerCards.onDragStart(2)
+    providerCards.onDragOverCard({ id: 1, position: 'before' })
+    await providerCards.onDrop({ id: 1, position: 'before' })
+
+    expect(getIds(providerCards.cards.codex)).toEqual([2, 1, 3])
+    expect(vi.mocked(SaveProviders)).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps persisted provider order after reload, including disabled cards', async () => {
+    const providerCards = useProviderCards({
+      t: (key: string) => key,
+      getActiveTab: () => 'codex',
+      isActiveProxyEnabled: () => false,
+      getSelectedToolId: () => null,
+    })
+
+    vi.mocked(LoadProviders).mockImplementation(((kind: string) => {
+      if (kind === 'codex') {
+        return Promise.resolve([
+          createCard(2, { enabled: false, level: 3 }),
+          createCard(1, { enabled: true, level: 1 }),
+          createCard(3, { enabled: true, level: 2 }),
+        ]) as any
+      }
+      return Promise.resolve([]) as any
+    }) as any)
+
+    await providerCards.loadProvidersFromDisk(async () => {})
+
+    expect(getIds(providerCards.cards.codex)).toEqual([2, 1, 3])
+    expect(providerCards.cards.codex.map((card) => card.enabled)).toEqual([false, true, true])
+  })
+
+  it('keeps persisted custom CLI provider order after reload', async () => {
+    const providerCards = useProviderCards({
+      t: (key: string) => key,
+      getActiveTab: () => 'others',
+      isActiveProxyEnabled: () => false,
+      getSelectedToolId: () => 'tool-1',
+    })
+
+    vi.mocked(LoadProviders).mockImplementation(((kind: string) => {
+      if (kind === 'custom:tool-1') {
+        return Promise.resolve([
+          createCard(2, { enabled: false, level: 4 }),
+          createCard(1, { enabled: true, level: 1 }),
+        ]) as any
+      }
+      return Promise.resolve([]) as any
+    }) as any)
+
+    await providerCards.loadCustomCliProviders('tool-1')
+
+    expect(getIds(providerCards.cards.others)).toEqual([2, 1])
+    expect(providerCards.cards.others.map((card) => card.enabled)).toEqual([false, true])
+  })
+
+  it('keeps persisted Gemini provider order after reload', async () => {
+    const providerCards = useProviderCards({
+      t: (key: string) => key,
+      getActiveTab: () => 'gemini',
+      isActiveProxyEnabled: () => false,
+      getSelectedToolId: () => null,
+    })
+
+    vi.mocked(GetGeminiProviders).mockResolvedValue([
+      {
+        id: 'gemini-disabled',
+        name: 'Gemini Disabled',
+        baseUrl: 'https://disabled.example.com',
+        apiKey: 'disabled-key',
+        websiteUrl: 'https://disabled.example.com',
+        enabled: false,
+        level: 5,
+      },
+      {
+        id: 'gemini-enabled',
+        name: 'Gemini Enabled',
+        baseUrl: 'https://enabled.example.com',
+        apiKey: 'enabled-key',
+        websiteUrl: 'https://enabled.example.com',
+        enabled: true,
+        level: 1,
+      },
+    ] as any)
+
+    await providerCards.loadProvidersFromDisk(async () => {})
+
+    expect(providerCards.cards.gemini.map((card) => card.providerRef)).toEqual([
+      'gemini-disabled',
+      'gemini-enabled',
+    ])
+    expect(providerCards.cards.gemini.map((card) => card.enabled)).toEqual([false, true])
   })
 })

@@ -15,7 +15,6 @@ type UseProviderFormOptions = {
   getActiveTab: () => ProviderTab
   cards: Record<ProviderTab, AutomationCard[]>
   normalizeLevel: (level: number | string | undefined) => number
-  sortProvidersByLevel: (list: AutomationCard[]) => void
   persistProviders: (tabId: ProviderTab) => Promise<void>
   refreshDirectAppliedStatus: (tabId: ProviderTab) => Promise<void>
   removeProvider: (id: number, tabId: ProviderTab) => Promise<void>
@@ -43,7 +42,6 @@ export function useProviderForm(options: UseProviderFormOptions) {
     getActiveTab,
     cards,
     normalizeLevel,
-    sortProvidersByLevel,
     persistProviders,
     refreshDirectAppliedStatus,
     removeProvider,
@@ -163,18 +161,12 @@ export function useProviderForm(options: UseProviderFormOptions) {
     const providerFields = buildPersistedProviderFieldsFromForm(form, tabId, normalizeLevel)
 
     if (editingCard) {
-      const previousLevel = normalizeLevel(editingCard.level)
-      const nextLevel = providerFields.level
-
       Object.assign(editingCard, {
         name: form.name || editingCard.name,
         apiUrl: form.apiUrl || editingCard.apiUrl,
         ...providerFields,
       })
 
-      if (previousLevel !== nextLevel) {
-        sortProvidersByLevel(list)
-      }
       savedCard = editingCard
       await persistProviders(tabId)
     } else {
@@ -189,8 +181,8 @@ export function useProviderForm(options: UseProviderFormOptions) {
         tint: 'rgba(15, 23, 42, 0.12)',
         ...providerFields,
       }
+      // 首页展示顺序以手动拖拽为准，新建卡片默认追加到末尾。
       list.push(newCard)
-      sortProvidersByLevel(list)
       savedCard = newCard
       await persistProviders(tabId)
     }
