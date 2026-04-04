@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import InlineModal from '../common/InlineModal.vue'
+import SearchableModelInput from '../common/SearchableModelInput.vue'
 import { useI18n } from 'vue-i18n'
 import { deleteModelPricing, upsertModelPricing, type ModelPricingRow } from '../../services/modelPricing'
 import { extractErrorMessage } from '../../utils/error'
@@ -47,7 +48,12 @@ const cacheFieldMode = reactive<{ create: CacheFieldMode; read: CacheFieldMode }
   read: 'price',
 })
 
-const templateOptions = computed(() => [...props.rows].sort((a, b) => a.model.localeCompare(b.model)))
+const templateOptions = computed<string[]>(() => (
+  [...props.rows]
+    .filter((item) => String(item.model ?? '').trim() !== '')
+    .map((item) => String(item.model).trim())
+    .sort((left, right) => left.localeCompare(right))
+))
 
 const perTokenToPer1M = (value: number) => (Number.isFinite(value) ? value * 1_000_000 : 0)
 const per1MToPerToken = (value: number) => (Number.isFinite(value) ? value / 1_000_000 : 0)
@@ -409,12 +415,16 @@ const removeOverride = async () => {
       <div class="editor-form">
         <div v-if="mode === 'new' && templateOptions.length > 0" class="editor-field full-width">
           <label class="editor-label">{{ $t('components.general.modelPricing.fields.template') }}</label>
-          <select v-model="form.templateModel" class="mac-select editor-input">
-            <option value="">{{ $t('components.general.modelPricing.templateEmpty') }}</option>
-            <option v-for="item in templateOptions" :key="item.model" :value="item.model">
-              {{ item.model }}
-            </option>
-          </select>
+          <SearchableModelInput
+            v-model="form.templateModel"
+            :options="templateOptions"
+            :placeholder="$t('components.general.modelPricing.templateSearchPlaceholder')"
+            :empty-text="$t('components.general.modelPricing.templateNoResults')"
+            select-only
+          />
+          <p class="template-hint">
+            {{ $t('components.general.modelPricing.templateEmpty') }}
+          </p>
         </div>
 
         <div class="editor-field full-width">
@@ -583,6 +593,13 @@ const removeOverride = async () => {
 .editor-input {
   width: 100%;
   min-width: 0;
+}
+
+.template-hint {
+  margin: 6px 0 0;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--mac-text-secondary);
 }
 
 .editor-actions {

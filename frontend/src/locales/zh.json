@@ -222,10 +222,11 @@
         "duplicateError": "这个 CLI 模型已经有别的映射占着了，不能重名；要改就换个没占用的键。",
         "builtinPickerLabel": "内置 CLI 模型",
         "builtinSelectPlaceholder": "从内置模型表选择",
+        "builtinNoResults": "没搜到匹配的内置 CLI 模型，直接手动输也行。",
         "builtinLoadingHint": "内置模型表加载中，先手动输也行，不耽误。",
         "builtinLoadFailedHint": "内置模型表没加载出来，先手动输入，映射编辑不受影响。",
         "builtinEmptyHint": "当前平台没有匹配到可选的内置模型，先手动输入。",
-        "builtinReadyHint": "支持手动输入，也可以直接从内置模型表里选；当前共 {count} 个候选。",
+        "builtinReadyHint": "支持手动输入，也可以在同一个输入框里模糊搜索内置 CLI 模型；当前共 {count} 个候选。",
         "editingHint": "正在编辑映射 {key}，保存后会覆盖原记录。",
         "examples": {
           "title": "示例：",
@@ -1109,6 +1110,8 @@
         "unitHint": "单位：USD / 1M tokens；分组倍率（Group Multiplier）会在最终金额合计后统一相乘，缓存倍率（Cache Multiplier）会自动换算缓存价格。",
         "scrollHint": "价格区域支持左右滑动查看完整字段。",
         "templateEmpty": "从现有模型填充（保留 Model）",
+        "templateSearchPlaceholder": "搜索并选择现有模型模板",
+        "templateNoResults": "没有匹配的模型模板",
         "columns": {
           "model": "模型",
           "input": "Input",
@@ -1631,13 +1634,14 @@
         "builtinLabel": "内置模型表",
         "manualLabel": "手动输入",
         "selectPlaceholder": "从内置模型表选择模型",
-        "placeholder": "手动输入模型名",
+        "placeholder": "搜索或输入模型名",
         "apply": "应用模型",
         "reset": "恢复当前值",
+        "noResults": "没搜到匹配模型，直接手动输入也行。",
         "loadingHint": "正在加载内置模型表，先手动输也行，不耽误事。",
         "loadFailedHint": "内置模型表加载失败了，先保留手动输入，不影响继续编辑。",
         "emptyHint": "当前平台没有匹配到可选的内置模型，先手动输入。",
-        "readyHint": "支持手动输入，也可以从现有模型表里直接选；当前共 {count} 个候选，会写回字段 {field}。"
+        "readyHint": "支持手动输入，也可以在同一个输入框里模糊搜索现有模型；当前共 {count} 个候选，会写回字段 {field}。"
       }
     }
   }

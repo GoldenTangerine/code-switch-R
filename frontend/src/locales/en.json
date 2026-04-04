@@ -221,10 +221,11 @@
         "duplicateError": "This CLI model key is already used by another mapping. Pick a different key before saving.",
         "builtinPickerLabel": "Builtin CLI models",
         "builtinSelectPlaceholder": "Choose from builtin models",
+        "builtinNoResults": "No matching builtin CLI models found. You can still type the key manually.",
         "builtinLoadingHint": "Loading builtin model options. You can still type the CLI model manually.",
         "builtinLoadFailedHint": "Failed to load builtin model options. Manual editing is still available.",
         "builtinEmptyHint": "No builtin model options matched this platform. You can still type the CLI model manually.",
-        "builtinReadyHint": "You can type the CLI model manually or choose from the builtin model list. {count} options are available.",
+        "builtinReadyHint": "You can type the CLI model manually or fuzzy-search builtin CLI models in the same field. {count} options are available.",
         "editingHint": "Editing mapping {key}. Saving will replace the original entry.",
         "examples": {
           "title": "Examples:",
@@ -1108,6 +1109,8 @@
         "unitHint": "Unit: USD / 1M tokens; the group multiplier is applied to the final total cost, while editing cache multipliers automatically updates cache prices.",
         "scrollHint": "The price section supports horizontal scrolling to reveal all fields.",
         "templateEmpty": "Fill from an existing model (keep current Model)",
+        "templateSearchPlaceholder": "Search and pick an existing model template",
+        "templateNoResults": "No matching model templates",
         "columns": {
           "model": "Model",
           "input": "Input",
@@ -1630,13 +1633,14 @@
         "builtinLabel": "Builtin models",
         "manualLabel": "Manual input",
         "selectPlaceholder": "Choose from builtin models",
-        "placeholder": "Type a model name",
+        "placeholder": "Search or type a model name",
         "apply": "Apply model",
         "reset": "Reset value",
+        "noResults": "No matching models found. You can still type the model manually.",
         "loadingHint": "Loading builtin model options. You can still type a model manually in the meantime.",
         "loadFailedHint": "Failed to load builtin model options. Manual input is still available.",
         "emptyHint": "No builtin model options matched this platform. You can still type a model manually.",
-        "readyHint": "You can type a model manually or choose from the existing model list. {count} options are available and will sync back to field {field}."
+        "readyHint": "You can type a model manually or fuzzy-search the existing model list in the same field. {count} options are available and will sync back to field {field}."
       }
     }
   }

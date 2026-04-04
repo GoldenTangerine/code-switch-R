@@ -94,42 +94,14 @@
               {{ cliModelFieldKey }}
             </label>
             <div class="cli-model-picker-controls">
-              <label class="cli-picker-control">
-                <span class="cli-picker-control-label">
-                  {{ t('components.cliConfig.modelPicker.builtinLabel') }}
-                </span>
-                <select
-                  class="mac-select cli-model-select"
-                  :value="selectedBuiltinCliModel"
-                  :disabled="builtinCliModelLoading || builtinCliModelOptions.length === 0"
-                  @change="handleBuiltinCliModelSelect"
-                >
-                  <option value="">
-                    {{ t('components.cliConfig.modelPicker.selectPlaceholder') }}
-                  </option>
-                  <option
-                    v-for="model in builtinCliModelOptions"
-                    :key="model"
-                    :value="model"
-                  >
-                    {{ model }}
-                  </option>
-                </select>
-              </label>
-              <label class="cli-picker-control cli-picker-control--grow">
-                <span class="cli-picker-control-label">
-                  {{ t('components.cliConfig.modelPicker.manualLabel') }}
-                </span>
-                <BaseInput
-                  :id="cliModelInputId"
-                  v-model="cliModelDraft"
-                  type="text"
-                  class="cli-model-input"
-                  :placeholder="t('components.cliConfig.modelPicker.placeholder')"
-                  @change="void applyCliModelDraft()"
-                  @keydown.enter.prevent="void applyCliModelDraft()"
-                />
-              </label>
+              <SearchableModelInput
+                :input-id="cliModelInputId"
+                v-model="cliModelDraft"
+                :options="builtinCliModelOptions"
+                :placeholder="t('components.cliConfig.modelPicker.placeholder')"
+                :empty-text="t('components.cliConfig.modelPicker.noResults')"
+                @keydown.enter.prevent="handleCliModelDraftEnter"
+              />
             </div>
             <div class="cli-model-picker-row">
               <button
@@ -264,11 +236,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import InlineModal from './InlineModal.vue'
-import BaseInput from './BaseInput.vue'
 import JsonCodeEditor from './JsonCodeEditor.vue'
+import SearchableModelInput from './SearchableModelInput.vue'
 import {
   fetchCLIConfig,
   fetchCLITemplate,
@@ -541,9 +513,6 @@ parallel = true`
 const cliJsonHint = computed(() => t('components.cliConfig.jsonEditor.fileHint'))
 const builtinCliModelOptions = computed(() => (
   buildBuiltinModelOptions(builtinCliModelRows.value, props.platform)
-))
-const selectedBuiltinCliModel = computed(() => (
-  builtinCliModelOptions.value.includes(cliModelDraft.value.trim()) ? cliModelDraft.value.trim() : ''
 ))
 const cliModelPickerHint = computed(() => {
   if (builtinCliModelLoading.value) {
@@ -1007,9 +976,10 @@ const applyCliModelDraft = async () => {
   return true
 }
 
-const handleBuiltinCliModelSelect = (event: Event) => {
-  const target = event.target as HTMLSelectElement
-  cliModelDraft.value = target.value
+const handleCliModelDraftEnter = () => {
+  nextTick(() => {
+    void applyCliModelDraft()
+  })
 }
 
 const resetCliModelDraft = () => {
@@ -1575,26 +1545,7 @@ onUnmounted(() => {
 }
 
 .cli-model-picker-controls {
-  display: grid;
-  grid-template-columns: minmax(220px, 0.95fr) minmax(260px, 1.05fr);
-  gap: 10px;
-}
-
-.cli-picker-control {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 0;
-}
-
-.cli-picker-control--grow {
-  flex: 1 1 auto;
-}
-
-.cli-picker-control-label {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--mac-text-secondary);
+  width: 100%;
 }
 
 .cli-model-picker-row {
@@ -1604,8 +1555,7 @@ onUnmounted(() => {
   flex-wrap: wrap;
 }
 
-.cli-model-select,
-.cli-model-input {
+.cli-model-picker-controls :deep(.searchable-model-input__field) {
   width: 100%;
   min-width: 0;
 }
@@ -1774,10 +1724,6 @@ onUnmounted(() => {
   }
 
   .cli-fields {
-    grid-template-columns: 1fr;
-  }
-
-  .cli-model-picker-controls {
     grid-template-columns: 1fr;
   }
 

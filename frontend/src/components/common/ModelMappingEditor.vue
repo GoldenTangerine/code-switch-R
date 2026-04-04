@@ -84,35 +84,14 @@
     <div class="mapping-input-panel" :class="{ 'is-editing': isEditing }">
       <div class="mapping-input-row">
         <div class="mapping-field mapping-field--key">
-          <BaseInput
+          <SearchableModelInput
             v-model="newKey"
-            type="text"
             :placeholder="$t('components.provider.modelMapping.keyPlaceholder')"
+            :options="builtinModelOptions"
+            :empty-text="$t('components.provider.modelMapping.builtinNoResults')"
             @keydown.enter.prevent="focusValueInput"
+            @select="handleBuiltinModelSelect"
           />
-
-          <div v-if="platform" class="mapping-builtin-picker">
-            <span class="mapping-picker-label">
-              {{ $t('components.provider.modelMapping.builtinPickerLabel') }}
-            </span>
-            <select
-              class="mac-select mapping-model-select"
-              :value="selectedBuiltinKey"
-              :disabled="builtinModelLoading || builtinModelOptions.length === 0"
-              @change="handleBuiltinModelSelect"
-            >
-              <option value="">
-                {{ $t('components.provider.modelMapping.builtinSelectPlaceholder') }}
-              </option>
-              <option
-                v-for="model in builtinModelOptions"
-                :key="model"
-                :value="model"
-              >
-                {{ model }}
-              </option>
-            </select>
-          </div>
         </div>
 
         <svg class="input-arrow" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
@@ -192,6 +171,7 @@ import { listModelPricing, type ModelPricingRow } from '../../services/modelPric
 import { buildBuiltinModelOptions } from '../../utils/builtinModels'
 import BaseInput from './BaseInput.vue'
 import BaseButton from './BaseButton.vue'
+import SearchableModelInput from './SearchableModelInput.vue'
 
 interface Props {
   modelValue?: Record<string, string>
@@ -222,9 +202,6 @@ const valueInputRef = ref<InstanceType<typeof BaseInput> | null>(null)
 
 const isEditing = computed(() => editingOriginalKey.value !== '')
 const builtinModelOptions = computed(() => buildBuiltinModelOptions(builtinModelRows.value, props.platform))
-const selectedBuiltinKey = computed(() => (
-  builtinModelOptions.value.includes(newKey.value.trim()) ? newKey.value.trim() : ''
-))
 const builtinPickerHint = computed(() => {
   if (!props.platform) return ''
   if (builtinModelLoading.value) {
@@ -266,9 +243,7 @@ function focusValueInput(): void {
   inputElement?.focus()
 }
 
-function handleBuiltinModelSelect(event: Event): void {
-  const target = event.target as HTMLSelectElement
-  newKey.value = target.value
+function handleBuiltinModelSelect(): void {
   inputError.value = ''
   focusValueInput()
 }
@@ -521,25 +496,8 @@ watch(() => props.platform, (platform) => {
 }
 
 .mapping-field--key :deep(input),
-.mapping-field :deep(input),
-.mapping-model-select {
+.mapping-field :deep(input) {
   font-family: 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
-}
-
-.mapping-builtin-picker {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.mapping-picker-label {
-  font-size: 0.75rem;
-  color: var(--foreground-muted);
-}
-
-.mapping-model-select {
-  width: 100%;
-  min-width: 0;
 }
 
 .mapping-actions {
