@@ -100,6 +100,9 @@
             class="config-textarea"
             :class="{ 'has-error': fileErrors[file.id] }"
             rows="15"
+            autocomplete="off"
+            autocorrect="off"
+            autocapitalize="off"
             spellcheck="false"
             @input="markFileChanged(file.id)"
           />

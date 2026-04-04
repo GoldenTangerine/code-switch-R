@@ -8,6 +8,10 @@
           class="mac-input searchable-model-input__field"
           :display-value="displayValue"
           :placeholder="placeholder"
+          autocomplete="off"
+          autocorrect="off"
+          autocapitalize="off"
+          spellcheck="false"
           @change="handleInputChange"
           @blur="clearSearchQuery"
         />

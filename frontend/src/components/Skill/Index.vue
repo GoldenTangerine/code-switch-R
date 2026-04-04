@@ -242,11 +242,11 @@
         <form class="skill-repo-form" @submit.prevent="submitRepo">
           <div class="repo-input-field">
             <input v-model="repoForm.url" type="text" :placeholder="t('components.skill.repos.urlPlaceholder')"
-              :disabled="repoBusy" />
+              :disabled="repoBusy" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
           </div>
           <div class="repo-form-actions">
             <input v-model="repoForm.branch" type="text" :placeholder="t('components.skill.repos.branchPlaceholder')"
-              :disabled="repoBusy" />
+              :disabled="repoBusy" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
             <button class="ghost-icon" type="submit" :disabled="repoBusy" :title="t('components.skill.repos.addLabel')"
               :data-tooltip="t('components.skill.repos.addLabel')">
               <svg viewBox="0 0 24 24" aria-hidden="true" :class="{ spin: repoBusy }">

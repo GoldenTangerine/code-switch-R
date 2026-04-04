@@ -1,3 +1,14 @@
+# Code Switch v2.7.87
+
+## 修复
+- **模型价格、Skill 仓库、CLI 配置这些技术型输入框，终于不再被浏览器自动纠错瞎掺和了**：为模型价格编辑器、Skill 仓库地址 / 分支输入、共享模型搜索输入和配置文本框统一补上 `autocomplete`、`autocorrect`、`autocapitalize`、`spellcheck` 控制，像模型名、分支名、JSON / YAML 这种本来就不该被“热心纠错”的内容，现在不会再被系统乱改大小写、乱加红波浪线。
+
+## 技术改进
+- **技术输入的行为策略这回算是往组件层收了收**：共享 `BaseTextarea` 和 `SearchableModelInput` 统一声明输入辅助策略，减少以后再遇到 Teleport、内联弹窗和原生 `input` 混搭时，这边关了那边没关、修一半漏一半的破事。
+- **本次发版版本号统一推进到 `v2.7.87`**：同步更新应用版本常量、构建配置、Windows 元数据和 Linux 包版本，继续保证仓库版本号、Git tag 和 GitHub 自动打包产物是一套数，别整那种 tag 都飞上天了、仓库里还在报上一版的糊涂账。
+
+---
+
 # Code Switch v2.7.86
 
 ## 修复

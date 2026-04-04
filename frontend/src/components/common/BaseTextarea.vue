@@ -4,6 +4,7 @@
     v-bind="$attrs"
     class="base-textarea"
     :value="modelValue"
+    autocomplete="off"
     autocorrect="off"
     autocapitalize="none"
     spellcheck="false"

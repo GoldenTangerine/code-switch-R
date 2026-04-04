@@ -429,52 +429,52 @@ const removeOverride = async () => {
 
         <div class="editor-field full-width">
           <label class="editor-label">{{ $t('components.general.modelPricing.fields.model') }}</label>
-          <input v-model="form.model" class="mac-input editor-input" />
+          <input v-model="form.model" class="mac-input editor-input" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
         </div>
 
         <div class="editor-field">
           <label class="editor-label">{{ $t('components.general.modelPricing.fields.groupMultiplier') }}</label>
-          <input v-model="form.groupMultiplier" type="number" step="0.0001" min="0" class="mac-input editor-input" />
+          <input v-model="form.groupMultiplier" type="number" step="0.0001" min="0" class="mac-input editor-input" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
         </div>
 
         <div class="editor-field">
           <label class="editor-label">{{ $t('components.general.modelPricing.fields.input') }}</label>
-          <input v-model="form.inputUsdPer1M" type="number" step="0.0001" min="0" class="mac-input editor-input" @input="handleInputUsdChange" />
+          <input v-model="form.inputUsdPer1M" type="number" step="0.0001" min="0" class="mac-input editor-input" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" @input="handleInputUsdChange" />
         </div>
 
         <div class="editor-field">
           <label class="editor-label">{{ $t('components.general.modelPricing.fields.output') }}</label>
-          <input v-model="form.outputUsdPer1M" type="number" step="0.0001" min="0" class="mac-input editor-input" />
+          <input v-model="form.outputUsdPer1M" type="number" step="0.0001" min="0" class="mac-input editor-input" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
         </div>
 
         <div class="editor-field">
           <label class="editor-label">{{ $t('components.general.modelPricing.fields.reasoning') }}</label>
-          <input v-model="form.reasoningUsdPer1M" type="number" step="0.0001" min="0" class="mac-input editor-input" />
+          <input v-model="form.reasoningUsdPer1M" type="number" step="0.0001" min="0" class="mac-input editor-input" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
         </div>
 
         <div class="editor-field">
           <label class="editor-label">{{ $t('components.general.modelPricing.fields.ephemeral1h') }}</label>
-          <input v-model="form.ephemeral1hUsdPer1M" type="number" step="0.0001" min="0" class="mac-input editor-input" />
+          <input v-model="form.ephemeral1hUsdPer1M" type="number" step="0.0001" min="0" class="mac-input editor-input" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
         </div>
 
         <div class="editor-field">
           <label class="editor-label">{{ $t('components.general.modelPricing.fields.cacheCreate') }}</label>
-          <input v-model="form.cacheCreateUsdPer1M" type="number" step="0.0001" min="0" class="mac-input editor-input" @input="handleCacheCreatePriceInput" />
+          <input v-model="form.cacheCreateUsdPer1M" type="number" step="0.0001" min="0" class="mac-input editor-input" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" @input="handleCacheCreatePriceInput" />
         </div>
 
         <div class="editor-field">
           <label class="editor-label">{{ $t('components.general.modelPricing.fields.cacheCreateMultiplier') }}</label>
-          <input v-model="form.cacheCreateMultiplier" type="number" step="0.0001" min="0" class="mac-input editor-input" @input="handleCacheCreateMultiplierInput" />
+          <input v-model="form.cacheCreateMultiplier" type="number" step="0.0001" min="0" class="mac-input editor-input" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" @input="handleCacheCreateMultiplierInput" />
         </div>
 
         <div class="editor-field">
           <label class="editor-label">{{ $t('components.general.modelPricing.fields.cacheRead') }}</label>
-          <input v-model="form.cacheReadUsdPer1M" type="number" step="0.0001" min="0" class="mac-input editor-input" @input="handleCacheReadPriceInput" />
+          <input v-model="form.cacheReadUsdPer1M" type="number" step="0.0001" min="0" class="mac-input editor-input" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" @input="handleCacheReadPriceInput" />
         </div>
 
         <div class="editor-field">
           <label class="editor-label">{{ $t('components.general.modelPricing.fields.cacheReadMultiplier') }}</label>
-          <input v-model="form.cacheReadMultiplier" type="number" step="0.0001" min="0" class="mac-input editor-input" @input="handleCacheReadMultiplierInput" />
+          <input v-model="form.cacheReadMultiplier" type="number" step="0.0001" min="0" class="mac-input editor-input" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" @input="handleCacheReadMultiplierInput" />
         </div>
       </div>
 
