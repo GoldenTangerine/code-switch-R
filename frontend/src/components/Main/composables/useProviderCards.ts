@@ -23,7 +23,7 @@ import { PROVIDER_TAB_IDS } from '../constants'
 import type { ProviderDragEndPayload, ProviderDragTarget, ProviderTab, TranslateFn } from '../types'
 import {
   applyNormalizedProviderOrder,
-  appendProviderToStatusGroup,
+  insertProviderToStatusGroup,
   commitProviderOrder,
   moveProviderToStatusGroup,
 } from '../utils/providerOrder'
@@ -466,7 +466,7 @@ export function useProviderCards(options: UseProviderCardsOptions) {
   const appendCardToGroup = (tabId: ProviderTab, card: AutomationCard) => {
     const list = cards[tabId]
     if (!list) return
-    appendProviderToStatusGroup(list, card)
+    insertProviderToStatusGroup(list, card)
   }
 
   return {

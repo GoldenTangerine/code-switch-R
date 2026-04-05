@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import type { AutomationCard } from '../../../data/cards'
-import { applyNormalizedProviderOrder, commitProviderOrder, moveProviderToStatusGroup } from './providerOrder'
+import {
+  insertProviderToStatusGroup,
+  applyNormalizedProviderOrder,
+  commitProviderOrder,
+  moveProviderToStatusGroup,
+} from './providerOrder'
 
 const createCard = (
   id: number,
@@ -84,5 +89,25 @@ describe('providerOrder', () => {
     expect(moveProviderToStatusGroup(list, list[1]!, false)).toBe(true)
     expect(list.map((card) => card.id)).toEqual([1, 2, 3, 4])
     expect(list.map((card) => card.disabledSortOrder ?? null)).toEqual([null, 1, 2, 3])
+  })
+
+  it('prepends new disabled providers to the top of disabled group', () => {
+    const list = [
+      createCard(1, { enabled: true, sortOrder: 1, enabledSortOrder: 1 }),
+      createCard(2, { enabled: false, sortOrder: 1, disabledSortOrder: 1 }),
+      createCard(3, { enabled: false, sortOrder: 2, disabledSortOrder: 2 }),
+    ]
+
+    const newCard = createCard(4, {
+      enabled: false,
+      sortOrder: 99,
+      disabledSortOrder: 99,
+    })
+
+    insertProviderToStatusGroup(list, newCard)
+
+    expect(list.map((card) => card.id)).toEqual([1, 4, 2, 3])
+    expect(list.map((card) => card.disabledSortOrder ?? null)).toEqual([null, 1, 2, 3])
+    expect(list[1]?.sortOrder).toBe(1)
   })
 })

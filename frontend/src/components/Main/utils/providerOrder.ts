@@ -106,17 +106,17 @@ export const commitProviderOrder = <T extends AutomationCard>(list: T[]) => {
   list.splice(0, list.length, ...enabledCards, ...disabledCards)
 }
 
-export const appendProviderToStatusGroup = <T extends AutomationCard>(list: T[], card: T) => {
+export const insertProviderToStatusGroup = <T extends AutomationCard>(list: T[], card: T) => {
   applyNormalizedProviderOrder(list)
 
-  setGroupSortOrder(
-    card,
-    resolveStatusGroup(card.enabled),
-    list.filter((item) => item.enabled === card.enabled).length + 1,
-  )
-
   const enabledCount = countEnabledCards(list)
-  const insertIndex = card.enabled ? enabledCount : list.length
+  const targetGroup = resolveStatusGroup(card.enabled)
+  const insertIndex = enabledCount
+  const nextSortOrder = card.enabled
+    ? list.filter((item) => item.enabled).length + 1
+    : 1
+
+  setGroupSortOrder(card, targetGroup, nextSortOrder)
   list.splice(insertIndex, 0, card)
 
   commitProviderOrder(list)
