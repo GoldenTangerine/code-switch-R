@@ -74,6 +74,7 @@
           @toggle-enabled="handleProviderEnabledChange"
           @direct-apply="handleDirectApply"
           @configure="configure"
+          @open-provider-data="openProviderDataOverview"
           @open-model-list="openModelList"
           @open-provider-logs="openProviderLogs"
           @open-provider-cost-trend="openProviderCostTrend"
@@ -102,6 +103,13 @@
         :platform="providerLogsModalPlatform"
         :resolved-theme="resolvedTheme"
         @close="closeProviderLogsModal"
+      />
+      <ProviderDataOverviewModal
+        :open="providerDataOverviewModalOpen"
+        :provider="providerDataOverviewModalProvider"
+        :platform="providerDataOverviewModalPlatform"
+        :resolved-theme="resolvedTheme"
+        @close="closeProviderDataOverviewModal"
       />
       <ProviderCostTrendModal
         :open="providerCostTrendModalOpen"
@@ -173,6 +181,7 @@ import CliDeleteConfirmModal from './modals/CliDeleteConfirmModal.vue'
 import ProviderEditModal from './modals/ProviderEditModal.vue'
 import ProviderLogsModal from './modals/ProviderLogsModal.vue'
 import ProviderCostTrendModal from './modals/ProviderCostTrendModal.vue'
+import ProviderDataOverviewModal from './modals/ProviderDataOverviewModal.vue'
 import ProviderModelListModal from './modals/ProviderModelListModal.vue'
 import MainCustomCliToolsBar from './components/MainCustomCliToolsBar.vue'
 import MainHeroBanner from './components/MainHeroBanner.vue'
@@ -336,6 +345,9 @@ const {
   providerLogsModalOpen,
   providerLogsModalProvider,
   providerLogsModalPlatform,
+  providerDataOverviewModalOpen,
+  providerDataOverviewModalProvider,
+  providerDataOverviewModalPlatform,
   providerCostTrendModalOpen,
   providerCostTrendModalProvider,
   providerCostTrendModalPlatform,
@@ -345,6 +357,8 @@ const {
   closeModelListModal,
   openProviderLogs,
   closeProviderLogsModal,
+  openProviderDataOverview,
+  closeProviderDataOverviewModal,
   openProviderCostTrend,
   closeProviderCostTrendModal,
   openCreateModal,

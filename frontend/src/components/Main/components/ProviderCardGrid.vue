@@ -27,6 +27,7 @@
       @toggle-enabled="(enabled) => $emit('toggle-enabled', viewModel.card, enabled)"
       @direct-apply="$emit('direct-apply', viewModel.card)"
       @configure="$emit('configure', viewModel.card)"
+      @open-provider-data="$emit('open-provider-data', viewModel.card)"
       @open-model-list="$emit('open-model-list', viewModel.card)"
       @open-provider-logs="$emit('open-provider-logs', viewModel.card)"
       @open-provider-cost-trend="$emit('open-provider-cost-trend', viewModel.card)"
@@ -72,6 +73,7 @@ const emit = defineEmits<{
   'toggle-enabled': [card: AutomationCard, enabled: boolean]
   'direct-apply': [card: AutomationCard]
   configure: [card: AutomationCard]
+  'open-provider-data': [card: AutomationCard]
   'open-model-list': [card: AutomationCard]
   'open-provider-logs': [card: AutomationCard]
   'open-provider-cost-trend': [card: AutomationCard]

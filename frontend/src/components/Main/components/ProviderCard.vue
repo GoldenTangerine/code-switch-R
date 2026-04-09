@@ -309,6 +309,35 @@
       </button>
 
       <button
+        v-if="activeTab !== 'others'"
+        class="ghost-icon provider-data-btn"
+        :data-tooltip="t('components.main.providerDataOverview.buttonTooltip')"
+        :aria-label="t('components.main.providerDataOverview.buttonAriaLabel', { name: viewModel.card.name })"
+        type="button"
+        @click="$emit('open-provider-data')"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path
+            d="M5.5 18.5V11.5M12 18.5V6.5M18.5 18.5V9.5"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.7"
+            stroke-linecap="round"
+          />
+          <path
+            d="M4.5 19.5h15"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+          />
+          <circle cx="5.5" cy="9.5" r="1.2" fill="currentColor" />
+          <circle cx="12" cy="4.5" r="1.2" fill="currentColor" />
+          <circle cx="18.5" cy="7.5" r="1.2" fill="currentColor" />
+        </svg>
+      </button>
+
+      <button
         class="ghost-icon"
         :disabled="!viewModel.card.apiUrl || !viewModel.card.apiKey"
         :data-tooltip="(!viewModel.card.apiUrl || !viewModel.card.apiKey)
@@ -433,6 +462,7 @@ const emit = defineEmits<{
   'toggle-enabled': [enabled: boolean]
   'direct-apply': []
   configure: []
+  'open-provider-data': []
   'open-model-list': []
   'open-provider-logs': []
   'open-provider-cost-trend': []

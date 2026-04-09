@@ -58,6 +58,9 @@ export function useProviderForm(options: UseProviderFormOptions) {
   const providerLogsModalOpen = ref(false)
   const providerLogsModalProvider = ref<AutomationCard | null>(null)
   const providerLogsModalPlatform = ref<LogPlatform | null>(null)
+  const providerDataOverviewModalOpen = ref(false)
+  const providerDataOverviewModalProvider = ref<AutomationCard | null>(null)
+  const providerDataOverviewModalPlatform = ref<LogPlatform | null>(null)
   const providerCostTrendModalOpen = ref(false)
   const providerCostTrendModalProvider = ref<AutomationCard | null>(null)
   const providerCostTrendModalPlatform = ref<LogPlatform | null>(null)
@@ -100,6 +103,22 @@ export function useProviderForm(options: UseProviderFormOptions) {
     providerLogsModalOpen.value = false
     providerLogsModalProvider.value = null
     providerLogsModalPlatform.value = null
+  }
+
+  const openProviderDataOverview = (card: AutomationCard) => {
+    const activeTab = getActiveTab()
+    if (activeTab === 'others') {
+      return
+    }
+    providerDataOverviewModalProvider.value = card
+    providerDataOverviewModalPlatform.value = activeTab
+    providerDataOverviewModalOpen.value = true
+  }
+
+  const closeProviderDataOverviewModal = () => {
+    providerDataOverviewModalOpen.value = false
+    providerDataOverviewModalProvider.value = null
+    providerDataOverviewModalPlatform.value = null
   }
 
   const openProviderCostTrend = (card: AutomationCard) => {
@@ -251,6 +270,9 @@ export function useProviderForm(options: UseProviderFormOptions) {
     providerLogsModalOpen,
     providerLogsModalProvider,
     providerLogsModalPlatform,
+    providerDataOverviewModalOpen,
+    providerDataOverviewModalProvider,
+    providerDataOverviewModalPlatform,
     providerCostTrendModalOpen,
     providerCostTrendModalProvider,
     providerCostTrendModalPlatform,
@@ -260,6 +282,8 @@ export function useProviderForm(options: UseProviderFormOptions) {
     closeModelListModal,
     openProviderLogs,
     closeProviderLogsModal,
+    openProviderDataOverview,
+    closeProviderDataOverviewModal,
     openProviderCostTrend,
     closeProviderCostTrendModal,
     openCreateModal,

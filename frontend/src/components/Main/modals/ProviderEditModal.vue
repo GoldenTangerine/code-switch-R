@@ -213,7 +213,7 @@
                       v-model.number="budgetQuotaCurrentUsed[def.key]"
                       type="number"
                       inputmode="decimal"
-                      step="0.01"
+                      step="any"
                       min="0"
                       class="mac-input budget-input-field"
                       :disabled="!isBudgetQuotaCurrentUsedEditable(def.key)"
@@ -405,10 +405,13 @@ import {
   createDefaultBudgetQuotaSettings,
   formatLocalDateTime,
   hasConfiguredBudgetQuotaSettings,
+  normalizeBudgetAdjustmentPrecision,
+  normalizeBudgetEditableAmount,
   normalizeBudgetQuotaAdjustments,
   normalizeBudgetQuotaSettings,
   normalizeBudgetUsedDisplay,
   resolveBudgetQuotaWindow,
+  resolveBudgetCurrentUsedValue,
 } from '../../../utils/budgetUsage'
 import type { AutomationCard } from '../../../data/cards'
 import type { CLIPlatform } from '../../../services/cliConfig'
@@ -582,7 +585,7 @@ const buildBudgetQuotaCurrentUsed = (
 ) => {
   return mapBudgetQuotaValues((key) => (
     statuses[key] === 'ready'
-      ? normalizeBudgetUsedDisplay(trackedUsage[key] + adjustments[key])
+      ? resolveBudgetCurrentUsedValue(trackedUsage[key], adjustments[key])
       : 0
   ))
 }
@@ -700,12 +703,14 @@ const refreshBudgetQuotaUsage = async () => {
 
 const handleBudgetQuotaCurrentUsedChange = (key: BudgetQuotaKey) => {
   if (budgetQuotaUsageStatuses.value[key] !== 'ready') return
-  const nextUsed = normalizeBudgetUsedDisplay(Number(budgetQuotaCurrentUsed.value[key]))
+  const nextUsed = normalizeBudgetEditableAmount(budgetQuotaCurrentUsed.value[key])
   budgetQuotaCurrentUsed.value[key] = nextUsed
   if (!form.budgetQuotaUsedAdjustments) {
     form.budgetQuotaUsedAdjustments = createDefaultBudgetQuotaAdjustments()
   }
-  form.budgetQuotaUsedAdjustments[key] = Number((nextUsed - budgetQuotaTrackedUsage.value[key]).toFixed(6))
+  form.budgetQuotaUsedAdjustments[key] = normalizeBudgetAdjustmentPrecision(
+    nextUsed - budgetQuotaTrackedUsage.value[key],
+  )
   syncBudgetQuotaCurrentUsed()
 }
 

@@ -37,11 +37,14 @@ import {
   createDefaultBudgetQuotaAdjustments,
   createDefaultBudgetQuotaSettings,
   formatLocalDateTime,
+  normalizeBudgetAdjustmentPrecision,
+  normalizeBudgetEditableAmount,
   normalizeBudgetQuotaAdjustments,
   normalizeBudgetQuotaSettings,
   normalizeBudgetUsedDisplay,
   projectBudgetQuotaToLegacy,
   resolveBudgetQuotaWindow,
+  resolveBudgetCurrentUsedValue,
   type BudgetQuotaKey,
   type BudgetQuotaAdjustments,
   type BudgetQuotaSetting,
@@ -264,7 +267,7 @@ const buildBudgetQuotaCurrentUsed = (
 ) => {
   return mapBudgetQuotaValues((key) => (
     statuses[key] === 'ready'
-      ? normalizeBudgetUsedDisplay(trackedUsage[key] + adjustments[key])
+      ? resolveBudgetCurrentUsedValue(trackedUsage[key], adjustments[key])
       : 0
   ))
 }
@@ -409,9 +412,11 @@ const handleBudgetQuotaCurrentUsedChange = (
 ) => {
   const quotaRefs = getBudgetQuotaRefs(platform)
   if (quotaRefs.statuses.value[key] !== 'ready') return
-  const nextUsed = normalizeBudgetUsedDisplay(Number(quotaRefs.currentUsed.value[key]))
+  const nextUsed = normalizeBudgetEditableAmount(quotaRefs.currentUsed.value[key])
   quotaRefs.currentUsed.value[key] = nextUsed
-  quotaRefs.adjustments.value[key] = Number((nextUsed - quotaRefs.trackedUsage.value[key]).toFixed(6))
+  quotaRefs.adjustments.value[key] = normalizeBudgetAdjustmentPrecision(
+    nextUsed - quotaRefs.trackedUsage.value[key],
+  )
   syncBudgetQuotaCurrentUsedForPlatform(platform)
   persistAppSettings()
 }
@@ -1887,7 +1892,7 @@ onBeforeUnmount(() => {
                       type="number"
                       inputmode="decimal"
                       min="0"
-                      step="0.01"
+                      step="any"
                       :disabled="settingsLoading || saveBusy || !isBudgetQuotaCurrentUsedEditable('claude', definition.key)"
                       v-model.number="budgetQuotaCurrentUsed[definition.key]"
                       @change="handleBudgetQuotaCurrentUsedChange('claude', definition.key)"
@@ -2034,7 +2039,7 @@ onBeforeUnmount(() => {
                       type="number"
                       inputmode="decimal"
                       min="0"
-                      step="0.01"
+                      step="any"
                       :disabled="settingsLoading || saveBusy || !isBudgetQuotaCurrentUsedEditable('codex', definition.key)"
                       v-model.number="budgetQuotaCurrentUsedCodex[definition.key]"
                       @change="handleBudgetQuotaCurrentUsedChange('codex', definition.key)"

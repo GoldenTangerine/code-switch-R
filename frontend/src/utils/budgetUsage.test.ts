@@ -2,9 +2,12 @@ import { describe, expect, it } from 'vitest'
 import {
   buildBudgetUsageConfig,
   hasConfiguredBudgetQuotaSettings,
+  normalizeBudgetAdjustmentPrecision,
+  normalizeBudgetEditableAmount,
   normalizeBudgetQuotaAdjustments,
   normalizeBudgetQuotaSettings,
   projectBudgetQuotaToLegacy,
+  resolveBudgetCurrentUsedValue,
   resolveBudgetQuotaWindow,
   resolveCycleStart,
   resolveNextCycleStart,
@@ -137,6 +140,29 @@ describe('budgetUsage', () => {
     expect(adjustments.daily).toBe(-2)
     expect(adjustments.weekly).toBe(0)
     expect(adjustments.monthly).toBe(4.75)
+  })
+
+  it('rounds persisted quota adjustments to stable precision before reuse', () => {
+    const adjustments = normalizeBudgetQuotaAdjustments({
+      five_hour: 0,
+      daily: 44.600099995,
+      weekly: -0.000099995,
+      monthly: 0,
+    })
+
+    expect(adjustments.daily).toBe(44.6001)
+    expect(adjustments.weekly).toBe(-0.0001)
+  })
+
+  it('rounds editable budget amounts to cents without leaking floating point noise', () => {
+    expect(normalizeBudgetEditableAmount(44.600099995)).toBe(44.6)
+    expect(normalizeBudgetEditableAmount(44.599999950000004)).toBe(44.6)
+    expect(normalizeBudgetEditableAmount(-3)).toBe(0)
+  })
+
+  it('keeps adjustment precision stable while resolving a clean current used value', () => {
+    expect(normalizeBudgetAdjustmentPrecision(44.6 - 44.600099995)).toBe(-0.0001)
+    expect(resolveBudgetCurrentUsedValue(44.600099995, -0.0001)).toBe(44.6)
   })
 
   it('projects the first representable multi-quota config back into legacy single budget fields', () => {

@@ -64,6 +64,8 @@ export type LegacyBudgetQuotaProjection = {
 }
 
 export const budgetQuotaOrder: BudgetQuotaKey[] = ['five_hour', 'daily', 'weekly', 'monthly']
+export const BUDGET_EDITABLE_AMOUNT_PRECISION = 2
+export const BUDGET_ADJUSTMENT_PRECISION = 6
 
 export const pad2 = (value: number) => String(value).padStart(2, '0')
 
@@ -109,7 +111,32 @@ export const normalizeBudgetQuotaTotal = (value: unknown) => {
 
 export const normalizeBudgetQuotaAdjustment = (value: unknown) => {
   const numeric = Number(value ?? 0)
-  return Number.isFinite(numeric) ? numeric : 0
+  if (!Number.isFinite(numeric)) return 0
+  return roundBudgetValue(numeric, BUDGET_ADJUSTMENT_PRECISION)
+}
+
+export const roundBudgetValue = (value: number, precision = BUDGET_EDITABLE_AMOUNT_PRECISION) => {
+  if (!Number.isFinite(value)) return 0
+  const factor = 10 ** Math.max(0, precision)
+  const epsilon = value === 0 ? 0 : Math.sign(value) * Number.EPSILON
+  return Math.round((value + epsilon) * factor) / factor
+}
+
+export const normalizeBudgetEditableAmount = (value: unknown) => {
+  return roundBudgetValue(
+    normalizeBudgetUsedDisplay(Number(value ?? 0)),
+    BUDGET_EDITABLE_AMOUNT_PRECISION,
+  )
+}
+
+export const normalizeBudgetAdjustmentPrecision = (value: unknown) => {
+  return normalizeBudgetQuotaAdjustment(value)
+}
+
+export const resolveBudgetCurrentUsedValue = (trackedUsage: unknown, adjustment: unknown) => {
+  const tracked = normalizeBudgetUsedDisplay(Number(trackedUsage ?? 0))
+  const calibrated = tracked + normalizeBudgetQuotaAdjustment(adjustment)
+  return normalizeBudgetEditableAmount(calibrated)
 }
 
 export const parseRefreshTime = (value: string) => {

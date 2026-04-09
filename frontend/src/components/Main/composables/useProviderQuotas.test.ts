@@ -228,6 +228,48 @@ describe('useProviderQuotas', () => {
     ])
   })
 
+  it('normalizes persisted noisy adjustments before computing quota progress', async () => {
+    const cards = createCardRecord()
+    const quotas = createDefaultBudgetQuotaSettings()
+    quotas.daily.total = 44.6
+
+    const card = createCard(7, {
+      budgetQuotaSettings: quotas,
+      budgetQuotaUsedAdjustments: {
+        five_hour: 0,
+        daily: 44.600099995,
+        weekly: 0,
+        monthly: 0,
+      },
+    })
+    cards.claude.push(card)
+
+    vi.mocked(fetchCostSinceByProvider).mockResolvedValue(0)
+    vi.mocked(fetchFiveHourQuotaStatusByProvider).mockResolvedValue({
+      active: false,
+      window_start: '',
+      next_reset: '',
+      used: 0,
+    })
+
+    const quotaState = useProviderQuotas({
+      t: (key: string) => key,
+      getActiveTab: () => 'claude',
+      cards,
+    })
+
+    await quotaState.refreshProviderQuotas()
+
+    expect(quotaState.getQuotaDisplay(card)).toEqual([
+      expect.objectContaining({
+        key: 'daily',
+        used: 44.6,
+        progressRatio: 1,
+        remaining: 0,
+      }),
+    ])
+  })
+
   it('refreshes provider quotas once the countdown crosses the reset point', async () => {
     vi.setSystemTime(new Date('2026-04-09T15:59:59.500'))
 

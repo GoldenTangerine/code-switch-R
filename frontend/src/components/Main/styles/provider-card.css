@@ -54,6 +54,10 @@
   flex-wrap: wrap;
 }
 
+.card-actions {
+  gap: 8px;
+}
+
 .card-cost-inline {
   display: inline-flex;
   align-items: center;
@@ -720,6 +724,36 @@
   background:
     linear-gradient(135deg, rgba(154, 52, 18, 0.98), rgba(159, 18, 57, 0.92));
   color: #ffedd5;
+}
+
+.provider-data-btn {
+  color: #1d4ed8;
+  background:
+    linear-gradient(135deg, rgba(219, 234, 254, 0.98), rgba(191, 219, 254, 0.88));
+  box-shadow:
+    inset 0 0 0 1px rgba(59, 130, 246, 0.18),
+    0 8px 18px rgba(59, 130, 246, 0.12);
+}
+
+.provider-data-btn:hover {
+  color: #1e40af;
+  background:
+    linear-gradient(135deg, rgba(239, 246, 255, 1), rgba(191, 219, 254, 0.95));
+}
+
+:global(.dark) .provider-data-btn {
+  color: #bfdbfe;
+  background:
+    linear-gradient(135deg, rgba(30, 64, 175, 0.86), rgba(30, 41, 59, 0.88));
+  box-shadow:
+    inset 0 0 0 1px rgba(96, 165, 250, 0.26),
+    0 10px 24px rgba(30, 64, 175, 0.24);
+}
+
+:global(.dark) .provider-data-btn:hover {
+  color: #eff6ff;
+  background:
+    linear-gradient(135deg, rgba(37, 99, 235, 0.94), rgba(30, 41, 59, 0.94));
 }
 
 .unblock-btn:active {
