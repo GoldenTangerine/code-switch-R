@@ -120,12 +120,12 @@ func ensureRequestLogProviderQuotaCycleTriggerWithDB(db *sql.DB) error {
 		END
 	`
 	triggerSQL := fmt.Sprintf(`
-CREATE TRIGGER IF NOT EXISTS %s
+CREATE TRIGGER IF NOT EXISTS %[1]s
 AFTER INSERT ON request_log
 WHEN TRIM(COALESCE(NEW.platform, '')) <> ''
   AND (TRIM(COALESCE(NEW.provider_id, '')) <> '' OR TRIM(COALESCE(NEW.provider, '')) <> '')
 BEGIN
-  INSERT INTO %s (
+  INSERT INTO %[2]s (
     platform,
     provider_ref,
     five_hour_window_start,
@@ -134,7 +134,7 @@ BEGIN
     updated_at
   ) VALUES (
     TRIM(COALESCE(NEW.platform, '')),
-    %s,
+    %[3]s,
     NEW.created_at,
     datetime(NEW.created_at, '+5 hours'),
     COALESCE(NEW.total_cost, 0),
@@ -142,38 +142,28 @@ BEGIN
   )
   ON CONFLICT(platform, provider_ref) DO UPDATE SET
     five_hour_window_start = CASE
-      WHEN TRIM(COALESCE(%s.five_hour_next_reset, '')) = ''
-        OR excluded.five_hour_window_start >= %s.five_hour_next_reset
+      WHEN TRIM(COALESCE(%[2]s.five_hour_next_reset, '')) = ''
+        OR excluded.five_hour_window_start >= %[2]s.five_hour_next_reset
       THEN excluded.five_hour_window_start
-      ELSE %s.five_hour_window_start
+      ELSE %[2]s.five_hour_window_start
     END,
     five_hour_next_reset = CASE
-      WHEN TRIM(COALESCE(%s.five_hour_next_reset, '')) = ''
-        OR excluded.five_hour_window_start >= %s.five_hour_next_reset
+      WHEN TRIM(COALESCE(%[2]s.five_hour_next_reset, '')) = ''
+        OR excluded.five_hour_window_start >= %[2]s.five_hour_next_reset
       THEN excluded.five_hour_next_reset
-      ELSE %s.five_hour_next_reset
+      ELSE %[2]s.five_hour_next_reset
     END,
     five_hour_used = CASE
-      WHEN TRIM(COALESCE(%s.five_hour_next_reset, '')) = ''
-        OR excluded.five_hour_window_start >= %s.five_hour_next_reset
+      WHEN TRIM(COALESCE(%[2]s.five_hour_next_reset, '')) = ''
+        OR excluded.five_hour_window_start >= %[2]s.five_hour_next_reset
       THEN excluded.five_hour_used
-      ELSE %s.five_hour_used + excluded.five_hour_used
+      ELSE %[2]s.five_hour_used + excluded.five_hour_used
     END,
     updated_at = CURRENT_TIMESTAMP;
 END;`,
 		requestLogProviderQuotaCycleTriggerName,
 		requestLogProviderQuotaCycleStateTable,
 		providerRefExpr,
-		requestLogProviderQuotaCycleStateTable,
-		requestLogProviderQuotaCycleStateTable,
-		requestLogProviderQuotaCycleStateTable,
-		requestLogProviderQuotaCycleStateTable,
-		requestLogProviderQuotaCycleStateTable,
-		requestLogProviderQuotaCycleStateTable,
-		requestLogProviderQuotaCycleStateTable,
-		requestLogProviderQuotaCycleStateTable,
-		requestLogProviderQuotaCycleStateTable,
-		requestLogProviderQuotaCycleStateTable,
 	)
 
 	_, err := db.Exec(triggerSQL)

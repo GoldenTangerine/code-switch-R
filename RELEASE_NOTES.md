@@ -1,3 +1,15 @@
+# Code Switch v2.7.91
+
+## 修复
+- **macOS 安装包启动即退这次算是把雷点揪出来了**：修复供应商级 `5 小时额度` 持久化新增的 SQLite trigger 在 `fmt.Sprintf` 里占位符和参数错位，导致应用启动阶段 `InitDatabase()` 初始化 `request_log` 相关表结构时直接报 `near "%": syntax error`，最终在 macOS arm64 上一打开就闪退。
+- **发版版本号链路这回不再各唱各的调了**：补齐应用常量、构建配置、Darwin `Info.plist`、Windows 元数据和 Linux 包版本到 `v2.7.91`，避免仓库版本、包内版本和 Git tag 再出现“表面一个号、包里另一个号”的散装场面。
+
+## 技术改进
+- **额度周期 trigger SQL 不再靠肉眼数 `%s` 硬撑**：将全局 / 供应商级 `5 小时额度` trigger 统一改为 indexed placeholder（`%[1]s / %[2]s / %[3]s`），把这类一不留神就多传少传参数的低级坑直接堵上，后面再改 SQL 模板不容易继续把启动链路炸穿。
+- **GitHub Release 工作流补上版本同步与 Darwin 元数据校验**：CI 现在会从 tag 同步更新 `build/config.yml`，并在 macOS 打包前校验生成的 `Info.plist` 版本字段，提前拦住“tag 已经是新版本、App bundle 还挂旧版本号”的糊涂账。
+
+---
+
 # Code Switch v2.7.90
 
 ## 修复

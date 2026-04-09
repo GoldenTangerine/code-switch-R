@@ -102,11 +102,11 @@ func ensureRequestLogQuotaCycleTriggerWithDB(db *sql.DB) error {
 	}
 
 	triggerSQL := fmt.Sprintf(`
-CREATE TRIGGER IF NOT EXISTS %s
+CREATE TRIGGER IF NOT EXISTS %[1]s
 AFTER INSERT ON request_log
 WHEN TRIM(COALESCE(NEW.platform, '')) <> ''
 BEGIN
-  INSERT INTO %s (
+  INSERT INTO %[2]s (
     platform,
     five_hour_window_start,
     five_hour_next_reset,
@@ -121,35 +121,26 @@ BEGIN
   )
   ON CONFLICT(platform) DO UPDATE SET
     five_hour_window_start = CASE
-      WHEN TRIM(COALESCE(%s.five_hour_next_reset, '')) = ''
-        OR excluded.five_hour_window_start >= %s.five_hour_next_reset
+      WHEN TRIM(COALESCE(%[2]s.five_hour_next_reset, '')) = ''
+        OR excluded.five_hour_window_start >= %[2]s.five_hour_next_reset
       THEN excluded.five_hour_window_start
-      ELSE %s.five_hour_window_start
+      ELSE %[2]s.five_hour_window_start
     END,
     five_hour_next_reset = CASE
-      WHEN TRIM(COALESCE(%s.five_hour_next_reset, '')) = ''
-        OR excluded.five_hour_window_start >= %s.five_hour_next_reset
+      WHEN TRIM(COALESCE(%[2]s.five_hour_next_reset, '')) = ''
+        OR excluded.five_hour_window_start >= %[2]s.five_hour_next_reset
       THEN excluded.five_hour_next_reset
-      ELSE %s.five_hour_next_reset
+      ELSE %[2]s.five_hour_next_reset
     END,
     five_hour_used = CASE
-      WHEN TRIM(COALESCE(%s.five_hour_next_reset, '')) = ''
-        OR excluded.five_hour_window_start >= %s.five_hour_next_reset
+      WHEN TRIM(COALESCE(%[2]s.five_hour_next_reset, '')) = ''
+        OR excluded.five_hour_window_start >= %[2]s.five_hour_next_reset
       THEN excluded.five_hour_used
-      ELSE %s.five_hour_used + excluded.five_hour_used
+      ELSE %[2]s.five_hour_used + excluded.five_hour_used
     END,
     updated_at = CURRENT_TIMESTAMP;
 END;`,
 		requestLogQuotaCycleTriggerName,
-		requestLogQuotaCycleStateTable,
-		requestLogQuotaCycleStateTable,
-		requestLogQuotaCycleStateTable,
-		requestLogQuotaCycleStateTable,
-		requestLogQuotaCycleStateTable,
-		requestLogQuotaCycleStateTable,
-		requestLogQuotaCycleStateTable,
-		requestLogQuotaCycleStateTable,
-		requestLogQuotaCycleStateTable,
 		requestLogQuotaCycleStateTable,
 	)
 

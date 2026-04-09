@@ -29,8 +29,11 @@ jobs:
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
           echo "Updating version to: $VERSION"
           sed -i '' "s/const AppVersion = \"v[^\"]*\"/const AppVersion = \"v$VERSION\"/" version_service.go
+          sed -i '' "s/version: \"[^\"]*\" # The application version/version: \"$VERSION\" # The application version/" build/config.yml
           echo "Updated version_service.go:"
           grep "AppVersion" version_service.go
+          echo "Updated build/config.yml:"
+          grep 'version: "' build/config.yml | head -n 1
 
       - uses: actions/setup-go@v6
         with:
@@ -49,6 +52,13 @@ jobs:
 
       - name: Update build assets
         run: wails3 task common:update:build-assets
+
+      - name: Verify macOS bundle version metadata
+        run: |
+          VERSION=${{ steps.version.outputs.VERSION }}
+          grep -A1 'CFBundleVersion' build/darwin/Info.plist
+          grep -A1 'CFBundleShortVersionString' build/darwin/Info.plist
+          test "$(grep -c "<string>${VERSION}</string>" build/darwin/Info.plist)" -ge 2
 
       - name: Generate bindings
         run: wails3 task common:generate:bindings
@@ -90,21 +100,28 @@ jobs:
         shell: pwsh
         run: |
           $VERSION = "${{ github.ref_name }}".TrimStart('v')
-          "VERSION=$VERSION" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "VERSION=$VERSION" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           Write-Host "Updating version to: $VERSION"
 
           # Update version_service.go
           $content = Get-Content version_service.go -Raw
           $content = $content -replace 'const AppVersion = "v[^"]*"', "const AppVersion = `"v$VERSION`""
-          Set-Content version_service.go $content
+          Set-Content version_service.go $content -Encoding utf8
           Write-Host "Updated version_service.go:"
           Select-String "AppVersion" version_service.go
+
+          # Update build/config.yml
+          $config = Get-Content build/config.yml -Raw
+          $config = $config -replace 'version: "[^"]*" # The application version', "version: `"$VERSION`" # The application version"
+          Set-Content build/config.yml $config -Encoding utf8
+          Write-Host "Updated build/config.yml:"
+          Select-String 'version: "' build/config.yml | Select-Object -First 1
 
           # Update build/windows/info.json
           $json = Get-Content build/windows/info.json -Raw | ConvertFrom-Json
           $json.fixed.file_version = $VERSION
           $json.info.'0000'.ProductVersion = $VERSION
-          $json | ConvertTo-Json -Depth 10 | Set-Content build/windows/info.json
+          $json | ConvertTo-Json -Depth 10 | Set-Content build/windows/info.json -Encoding utf8
           Write-Host "Updated build/windows/info.json:"
           Get-Content build/windows/info.json
 
@@ -500,8 +517,11 @@ jobs:
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
           echo "Updating version to: $VERSION"
           sed -i "s/const AppVersion = \"v[^\"]*\"/const AppVersion = \"v$VERSION\"/" version_service.go
+          sed -i "s/version: \"[^\"]*\" # The application version/version: \"$VERSION\" # The application version/" build/config.yml
           echo "Updated version_service.go:"
           grep "AppVersion" version_service.go
+          echo "Updated build/config.yml:"
+          grep 'version: "' build/config.yml | head -n 1
 
       - uses: actions/setup-go@v6
         with:
