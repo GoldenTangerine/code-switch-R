@@ -14,10 +14,12 @@ import {
   cardToGemini,
   createGeminiFromCard,
   createGeminiProviderRef,
+  deserializeProviders,
   geminiToCard,
   normalizeProviderRef,
   serializeProviders,
   type GeminiProvider,
+  type PersistedProvider,
 } from '../adapters/providerCardMappers'
 import { PROVIDER_TAB_IDS } from '../constants'
 import type { ProviderDragEndPayload, ProviderDragTarget, ProviderTab, TranslateFn } from '../types'
@@ -240,12 +242,8 @@ export function useProviderCards(options: UseProviderCardsOptions) {
     return card.id === appliedId
   }
 
-  const replaceProviders = (tabId: ProviderTab, data: AutomationCard[]) => {
-    const withRefs = createAutomationCards(data).map((card) => ({
-      ...card,
-      providerRef: normalizeProviderRef(card.providerRef) || `${card.id}`,
-    }))
-    cards[tabId].splice(0, cards[tabId].length, ...withRefs)
+  const replaceProviders = (tabId: ProviderTab, data: PersistedProvider[]) => {
+    cards[tabId].splice(0, cards[tabId].length, ...deserializeProviders(data))
     applyNormalizedProviderOrder(cards[tabId])
   }
 
@@ -255,7 +253,7 @@ export function useProviderCards(options: UseProviderCardsOptions) {
     try {
       const saved = await LoadProviders(getCustomProviderKind(toolId))
       if (Array.isArray(saved)) {
-        cards.others.splice(0, cards.others.length, ...createAutomationCards(saved as AutomationCard[]))
+        cards.others.splice(0, cards.others.length, ...deserializeProviders(saved as PersistedProvider[]))
         applyNormalizedProviderOrder(cards.others)
       } else {
         cards.others.splice(0, cards.others.length)
@@ -345,7 +343,7 @@ export function useProviderCards(options: UseProviderCardsOptions) {
         } else {
           const saved = await LoadProviders(tab)
           if (Array.isArray(saved)) {
-            replaceProviders(tab, saved as AutomationCard[])
+            replaceProviders(tab, saved as PersistedProvider[])
           } else {
             await persistProviders(tab)
           }

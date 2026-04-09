@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildBudgetUsageConfig,
+  hasConfiguredBudgetQuotaSettings,
   normalizeBudgetQuotaAdjustments,
   normalizeBudgetQuotaSettings,
   projectBudgetQuotaToLegacy,
   resolveBudgetQuotaWindow,
   resolveCycleStart,
   resolveNextCycleStart,
+  serializeBudgetQuotaSettings,
 } from './budgetUsage'
 
 describe('budgetUsage', () => {
@@ -76,6 +78,34 @@ describe('budgetUsage', () => {
     expect(quotas.daily.refreshTime).toBe('08:15')
     expect(quotas.daily.refreshWeekday).toBe(4)
     expect(quotas.daily.refreshMonthDay).toBe(21)
+  })
+
+  it('serializes normalized quota settings back into snake_case payloads', () => {
+    const serialized = serializeBudgetQuotaSettings({
+      weekly: {
+        total: 25,
+        refreshTime: '09:30',
+        refreshWeekday: 6,
+        refreshMonthDay: 28,
+      },
+    })
+
+    expect(serialized.weekly).toEqual({
+      total: 25,
+      refresh_time: '09:30',
+      refresh_day: 6,
+      refresh_month_day: 28,
+    })
+  })
+
+  it('treats all-zero quota settings as unconfigured', () => {
+    expect(hasConfiguredBudgetQuotaSettings(undefined)).toBe(false)
+    expect(hasConfiguredBudgetQuotaSettings({
+      five_hour: { total: 0, refreshTime: '00:00', refreshWeekday: 1, refreshMonthDay: 1 },
+      daily: { total: 0, refreshTime: '00:00', refreshWeekday: 1, refreshMonthDay: 1 },
+      weekly: { total: 0, refreshTime: '00:00', refreshWeekday: 1, refreshMonthDay: 1 },
+      monthly: { total: 0, refreshTime: '00:00', refreshWeekday: 1, refreshMonthDay: 1 },
+    })).toBe(false)
   })
 
   it('migrates legacy used adjustment only into the matching cycle quota slot', () => {

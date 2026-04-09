@@ -356,7 +356,12 @@ import {
 } from '../adapters/providerFormMappers'
 import type { ProviderTab, VendorForm } from '../types'
 import type { BudgetQuotaKey } from '../../../utils/budgetUsage'
-import { createDefaultBudgetQuotaSettings, normalizeBudgetQuotaSettings } from '../../../utils/budgetUsage'
+import {
+  cloneBudgetQuotaSettings,
+  createDefaultBudgetQuotaSettings,
+  hasConfiguredBudgetQuotaSettings,
+  normalizeBudgetQuotaSettings,
+} from '../../../utils/budgetUsage'
 import type { AutomationCard } from '../../../data/cards'
 import type { CLIPlatform } from '../../../services/cliConfig'
 import { isBuiltinModelPlatform } from '../../../utils/builtinModels'
@@ -603,8 +608,9 @@ const buildFormPayload = async (): Promise<VendorForm | null> => {
 
   // 处理预算额度：仅保存 total > 0 的配置
   const qs = form.budgetQuotaSettings
-  const hasAnyQuota = qs ? Object.values(qs).some((s) => s.total > 0) : false
-  payload.budgetQuotaSettings = hasAnyQuota ? JSON.parse(JSON.stringify(qs)) : undefined
+  payload.budgetQuotaSettings = hasConfiguredBudgetQuotaSettings(qs)
+    ? cloneBudgetQuotaSettings(qs)
+    : undefined
 
   const cliConfigSubmitState = cliConfigEditorRef.value?.getCliConfigSubmitState?.()
   if (cliConfigSubmitState) {

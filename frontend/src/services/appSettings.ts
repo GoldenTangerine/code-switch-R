@@ -7,9 +7,9 @@ import {
   createDefaultBudgetQuotaAdjustments,
   createDefaultBudgetQuotaSettings,
   normalizeBudgetQuotaAdjustments,
-  normalizeBudgetQuotaSetting,
   normalizeBudgetQuotaSettings,
   projectBudgetQuotaToLegacy,
+  serializeBudgetQuotaSettings,
   type BudgetQuotaAdjustments,
   type BudgetQuotaSettings,
 } from '../utils/budgetUsage'
@@ -119,20 +119,6 @@ type AppSettingsResponse = Partial<AppSettings> & {
   budget_quota_settings_codex?: unknown
 }
 
-type SerializedBudgetQuotaSetting = {
-  total: number
-  refresh_time: string
-  refresh_day: number
-  refresh_month_day: number
-}
-
-type SerializedBudgetQuotaSettings = {
-  five_hour: SerializedBudgetQuotaSetting
-  daily: SerializedBudgetQuotaSetting
-  weekly: SerializedBudgetQuotaSetting
-  monthly: SerializedBudgetQuotaSetting
-}
-
 type SerializedBudgetQuotaAdjustments = {
   five_hour: number
   daily: number
@@ -204,26 +190,6 @@ const serializeBudgetQuotaAdjustments = (value: unknown): SerializedBudgetQuotaA
     daily: normalized.daily,
     weekly: normalized.weekly,
     monthly: normalized.monthly,
-  }
-}
-
-const serializeBudgetQuotaSetting = (value: unknown): SerializedBudgetQuotaSetting => {
-  const normalized = normalizeBudgetQuotaSetting(value)
-  return {
-    total: normalized.total,
-    refresh_time: normalized.refreshTime,
-    refresh_day: normalized.refreshWeekday,
-    refresh_month_day: normalized.refreshMonthDay,
-  }
-}
-
-const serializeBudgetQuotaSettings = (value: unknown): SerializedBudgetQuotaSettings => {
-  const normalized = normalizeBudgetQuotaSettings(value)
-  return {
-    five_hour: serializeBudgetQuotaSetting(normalized.five_hour),
-    daily: serializeBudgetQuotaSetting(normalized.daily),
-    weekly: serializeBudgetQuotaSetting(normalized.weekly),
-    monthly: serializeBudgetQuotaSetting(normalized.monthly),
   }
 }
 

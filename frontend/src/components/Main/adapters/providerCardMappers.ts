@@ -1,15 +1,26 @@
 import type { ProviderDailyStat } from '../../../services/logs'
 import type { BlacklistStatus } from '../../../services/blacklist'
 import type { AutomationCard } from '../../../data/cards'
-import type { BudgetQuotaSettings } from '../../../utils/budgetUsage'
+import {
+  cloneBudgetQuotaSettings,
+  serializeOptionalBudgetQuotaSettings,
+} from '../../../utils/budgetUsage'
+import type { GeminiProvider as GeminiProviderModel, Provider as PersistedProviderModel } from '../../../../bindings/codeswitch/services/models'
 import { GetProviders as GetGeminiProviders } from '../../../../bindings/codeswitch/services/geminiservice'
 
 export type GeminiProvider = Awaited<ReturnType<typeof GetGeminiProviders>> extends (infer P)[] ? (P & {
   sortOrder?: number
   enabledSortOrder?: number
   disabledSortOrder?: number
-  budgetQuotaSettings?: BudgetQuotaSettings
+  budgetQuotaSettings?: unknown | null
 }) : any
+
+export type PersistedProvider = PersistedProviderModel & {
+  sortOrder?: number
+  enabledSortOrder?: number
+  disabledSortOrder?: number
+  budgetQuotaSettings?: unknown | null
+}
 
 const GEMINI_LOCKED_ENV_KEYS = new Set(['GOOGLE_GEMINI_BASE_URL', 'GEMINI_API_KEY'])
 
@@ -73,6 +84,15 @@ const buildGeminiEnvConfig = (card: AutomationCard, original: GeminiProvider): R
   return nextEnv
 }
 
+const normalizeAvailabilityConfig = (value: Record<string, any> | null | undefined) => {
+  if (!value) return undefined
+  return {
+    testModel: `${value.testModel ?? ''}`.trim(),
+    testEndpoint: `${value.testEndpoint ?? ''}`.trim(),
+    timeout: Number(value.timeout) || 15000,
+  }
+}
+
 export const normalizeProviderKey = (value: string) => value?.trim().toLowerCase() ?? ''
 
 export const normalizeProviderRef = (value: string | number | null | undefined) => `${value ?? ''}`.trim()
@@ -104,6 +124,42 @@ export const blacklistStatusKeyFromCard = (card: AutomationCard): string => {
 
 export const createGeminiProviderRef = () => `gemini-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 
+export const providerToCard = (provider: PersistedProvider): AutomationCard => ({
+  id: Number(provider.id),
+  providerRef: normalizeProviderRef(provider.id),
+  name: provider.name,
+  apiUrl: provider.apiUrl || '',
+  apiKey: provider.apiKey || '',
+  officialSite: provider.officialSite || '',
+  icon: provider.icon || '',
+  tint: provider.tint || '',
+  accent: provider.accent || '',
+  enabled: provider.enabled,
+  sortOrder: provider.sortOrder || 0,
+  enabledSortOrder: provider.enabledSortOrder || (provider.enabled ? (provider.sortOrder || 0) : undefined),
+  disabledSortOrder: provider.disabledSortOrder || (!provider.enabled ? (provider.sortOrder || 0) : undefined),
+  supportedModels: cloneCardValue(provider.supportedModels || {}),
+  modelMapping: cloneCardValue(provider.modelMapping || {}),
+  requestBodyOverrides: cloneCardValue(provider.requestBodyOverrides || {}),
+  level: provider.level || 1,
+  apiEndpoint: provider.apiEndpoint || '',
+  cliConfig: cloneCardValue(provider.cliConfig || {}),
+  availabilityMonitorEnabled: !!provider.availabilityMonitorEnabled,
+  connectivityAutoBlacklist: !!provider.connectivityAutoBlacklist,
+  availabilityConfig: normalizeAvailabilityConfig(provider.availabilityConfig),
+  connectivityCheck: !!provider.connectivityCheck,
+  connectivityTestModel: provider.connectivityTestModel || '',
+  connectivityTestEndpoint: provider.connectivityTestEndpoint || '',
+  connectivityAuthType: provider.connectivityAuthType || '',
+  budgetQuotaSettings: provider.budgetQuotaSettings == null
+    ? undefined
+    : cloneBudgetQuotaSettings(provider.budgetQuotaSettings),
+})
+
+export const deserializeProviders = (providers: PersistedProvider[]): AutomationCard[] => {
+  return providers.map(providerToCard)
+}
+
 export const geminiToCard = (provider: GeminiProvider, index: number): AutomationCard => ({
   id: 300 + index,
   providerRef: normalizeProviderRef(provider.id),
@@ -121,7 +177,9 @@ export const geminiToCard = (provider: GeminiProvider, index: number): Automatio
   level: provider.level || 1,
   cliConfig: extractGeminiCliConfig(provider),
   requestBodyOverrides: cloneCardValue(provider.requestBodyOverrides || {}),
-  budgetQuotaSettings: cloneCardValue(provider.budgetQuotaSettings) || undefined,
+  budgetQuotaSettings: provider.budgetQuotaSettings == null
+    ? undefined
+    : cloneBudgetQuotaSettings(provider.budgetQuotaSettings),
   availabilityMonitorEnabled: false,
   connectivityAutoBlacklist: false,
   availabilityConfig: undefined,
@@ -141,7 +199,7 @@ export const cardToGemini = (card: AutomationCard, original: GeminiProvider): Ge
   level: card.level || 1,
   envConfig: buildGeminiEnvConfig(card, original),
   requestBodyOverrides: cloneCardValue(card.requestBodyOverrides || {}),
-  budgetQuotaSettings: cloneCardValue(card.budgetQuotaSettings) || undefined,
+  budgetQuotaSettings: serializeOptionalBudgetQuotaSettings(card.budgetQuotaSettings),
 })
 
 export const createGeminiFromCard = (
@@ -161,10 +219,10 @@ export const createGeminiFromCard = (
   level: card.level || 1,
   envConfig: buildGeminiEnvConfig(card, {} as GeminiProvider),
   requestBodyOverrides: cloneCardValue(card.requestBodyOverrides || {}),
-  budgetQuotaSettings: cloneCardValue(card.budgetQuotaSettings) || undefined,
+  budgetQuotaSettings: serializeOptionalBudgetQuotaSettings(card.budgetQuotaSettings),
 })
 
-export const serializeProviders = (providers: AutomationCard[]) =>
+export const serializeProviders = (providers: AutomationCard[]): PersistedProvider[] =>
   providers.map((provider) => {
     const { providerRef, ...persistable } = provider
     return {
@@ -186,6 +244,6 @@ export const serializeProviders = (providers: AutomationCard[]) =>
       connectivityTestModel: '',
       connectivityTestEndpoint: '',
       connectivityAuthType: provider.connectivityAuthType || '',
-      budgetQuotaSettings: cloneCardValue(provider.budgetQuotaSettings) || undefined,
+      budgetQuotaSettings: serializeOptionalBudgetQuotaSettings(provider.budgetQuotaSettings),
     }
   })

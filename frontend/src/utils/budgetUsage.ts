@@ -16,6 +16,13 @@ export type BudgetQuotaSetting = {
   refreshMonthDay: number
 }
 
+export type SerializedBudgetQuotaSetting = {
+  total: number
+  refresh_time: string
+  refresh_day: number
+  refresh_month_day: number
+}
+
 type BudgetQuotaSettingSource = Partial<BudgetQuotaSetting> & {
   refresh_time?: unknown
   refresh_day?: unknown
@@ -23,6 +30,7 @@ type BudgetQuotaSettingSource = Partial<BudgetQuotaSetting> & {
 }
 
 export type BudgetQuotaSettings = Record<BudgetQuotaKey, BudgetQuotaSetting>
+export type SerializedBudgetQuotaSettings = Record<BudgetQuotaKey, SerializedBudgetQuotaSetting>
 export type BudgetQuotaAdjustments = Record<BudgetQuotaKey, number>
 
 export type BudgetQuotaWindow = {
@@ -353,8 +361,40 @@ export const normalizeBudgetQuotaSettings = (
   return normalized
 }
 
+export const hasConfiguredBudgetQuotaSettings = (value: unknown): boolean => {
+  return !isBudgetQuotaSettingsEmpty(normalizeBudgetQuotaSettings(value))
+}
+
 export const cloneBudgetQuotaSettings = (settings: unknown): BudgetQuotaSettings => {
   return normalizeBudgetQuotaSettings(settings)
+}
+
+export const serializeBudgetQuotaSetting = (value: unknown): SerializedBudgetQuotaSetting => {
+  const normalized = normalizeBudgetQuotaSetting(value)
+  return {
+    total: normalized.total,
+    refresh_time: normalized.refreshTime,
+    refresh_day: normalized.refreshWeekday,
+    refresh_month_day: normalized.refreshMonthDay,
+  }
+}
+
+export const serializeBudgetQuotaSettings = (value: unknown): SerializedBudgetQuotaSettings => {
+  const normalized = normalizeBudgetQuotaSettings(value)
+  return {
+    five_hour: serializeBudgetQuotaSetting(normalized.five_hour),
+    daily: serializeBudgetQuotaSetting(normalized.daily),
+    weekly: serializeBudgetQuotaSetting(normalized.weekly),
+    monthly: serializeBudgetQuotaSetting(normalized.monthly),
+  }
+}
+
+export const serializeOptionalBudgetQuotaSettings = (
+  value: unknown,
+): SerializedBudgetQuotaSettings | undefined => {
+  return hasConfiguredBudgetQuotaSettings(value)
+    ? serializeBudgetQuotaSettings(value)
+    : undefined
 }
 
 export const projectBudgetQuotaToLegacy = (

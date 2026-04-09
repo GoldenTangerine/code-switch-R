@@ -1,3 +1,16 @@
+# Code Switch v2.7.90
+
+## 修复
+- **发版打包这回不再被供应商额度类型映射反手掀桌子了**：修复首页供应商额度配置在前端内部 `camelCase` 结构与 Wails bindings 生成的 `snake_case` 持久化结构之间直接混用，导致 CI 在重新生成 bindings 后，`providerCardMappers` / `useProviderCards` 构建阶段出现 `BudgetQuotaSettings` 类型不兼容并直接中止打包的问题。
+
+## 技术改进
+- **预算额度的“界面类型”和“持久化类型”正式拆账**：将 `budgetUsage` 里的 quota normalize / serialize 能力收口，前端内部继续统一使用 `refreshTime / refreshWeekday / refreshMonthDay`，真正进入 providers / gemini / app settings 持久化边界时，再统一序列化成 `refresh_time / refresh_day / refresh_month_day`，避免同一份数据结构在 UI 和 bindings 之间来回串味。
+- **Provider 加载 / 保存映射链路补齐统一适配层**：新增通用 provider 反序列化与预算额度配置判空逻辑，把普通供应商与 Gemini 供应商的 quota 设置都在 adapter 层归一化，后面再扩字段时不用继续在页面和 composable 里到处手搓兼容。
+- **前端专项回归继续补到预算额度序列化边界**：新增额度设置序列化与“全 0 配置视为未配置”的单测，配合既有 `useProviderQuotas` 测试，把这次 CI 才炸出来的类型边界问题提前钉在本地静态检查和单测里。
+- **本次发版版本号统一推进到 `v2.7.90`**：同步更新应用版本常量、构建配置和 Windows 元数据，直接用新 tag 重新触发 GitHub 自动打包，别再拿已经失败过的 `v2.7.89` 来回薅。
+
+---
+
 # Code Switch v2.7.89
 
 ## 修复
