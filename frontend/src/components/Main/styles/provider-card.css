@@ -237,6 +237,7 @@
 
 .quota-progress-fill {
   display: block;
+  width: 0;
   height: 100%;
   border-radius: 2px;
   transition: width 0.3s ease;

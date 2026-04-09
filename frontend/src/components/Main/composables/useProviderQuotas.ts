@@ -66,6 +66,12 @@ const formatCountdown = (nextReset: Date | null, now: Date): string => {
   return formatQuotaCountdown(remaining)
 }
 
+const hasCountdownCrossedReset = (nextReset: Date | null, previousTickAt: Date, now: Date) => {
+  if (!nextReset) return false
+  const nextResetTime = nextReset.getTime()
+  return nextResetTime <= now.getTime() && nextResetTime > previousTickAt.getTime()
+}
+
 const resolveProgressRatio = (used: number, total: number) => {
   if (!Number.isFinite(total) || total <= 0) return 0
   return normalizeBudgetUsedDisplay(used) / total
@@ -82,8 +88,9 @@ export function useProviderQuotas(options: UseProviderQuotasOptions) {
   // tab -> providerRef -> ProviderQuotaDisplayItem[]
   const quotaDisplayMap = reactive(createQuotaDisplayMap())
 
-  let refreshTimer: number | undefined
-  let countdownTimer: number | undefined
+  let refreshTimer: ReturnType<typeof globalThis.setInterval> | undefined
+  let countdownTimer: ReturnType<typeof globalThis.setInterval> | undefined
+  let lastCountdownTickAt: Date | null = null
   let refreshInFlight = false
   let refreshQueued = false
 
@@ -208,20 +215,21 @@ export function useProviderQuotas(options: UseProviderQuotasOptions) {
   const updateCountdowns = () => {
     const tabQuotaDisplayMap = quotaDisplayMap[getActiveTab()]
     const now = new Date()
+    const previousTickAt = lastCountdownTickAt ?? new Date(now.getTime() - COUNTDOWN_TICK_INTERVAL_MS)
     let needsRefresh = false
     for (const ref in tabQuotaDisplayMap) {
       const items = tabQuotaDisplayMap[ref]
       if (!items) continue
       for (const item of items) {
         if (!item.nextReset) continue
-        const prevLabel = item.countdownLabel
         item.countdownLabel = formatCountdown(item.nextReset, now)
         // 倒计时刚归零时触发一次数据刷新，使进度条和已用金额及时更新
-        if (item.countdownLabel === '00:00:00' && prevLabel !== '00:00:00') {
+        if (hasCountdownCrossedReset(item.nextReset, previousTickAt, now)) {
           needsRefresh = true
         }
       }
     }
+    lastCountdownTickAt = now
     if (needsRefresh) {
       void refreshProviderQuotas()
     }
@@ -234,21 +242,23 @@ export function useProviderQuotas(options: UseProviderQuotasOptions) {
 
   const startTimers = () => {
     stopTimers()
-    refreshTimer = window.setInterval(() => {
+    lastCountdownTickAt = new Date()
+    refreshTimer = globalThis.setInterval(() => {
       void refreshProviderQuotas()
     }, QUOTA_REFRESH_INTERVAL_MS)
-    countdownTimer = window.setInterval(updateCountdowns, COUNTDOWN_TICK_INTERVAL_MS)
+    countdownTimer = globalThis.setInterval(updateCountdowns, COUNTDOWN_TICK_INTERVAL_MS)
   }
 
   const stopTimers = () => {
     if (refreshTimer !== undefined) {
-      clearInterval(refreshTimer)
+      globalThis.clearInterval(refreshTimer)
       refreshTimer = undefined
     }
     if (countdownTimer !== undefined) {
-      clearInterval(countdownTimer)
+      globalThis.clearInterval(countdownTimer)
       countdownTimer = undefined
     }
+    lastCountdownTickAt = null
   }
 
   onUnmounted(stopTimers)

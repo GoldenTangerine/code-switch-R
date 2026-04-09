@@ -162,26 +162,28 @@
                 <span class="performance-badge performance-badge--tps">速</span>
                 <span>{{ stats.tps }}</span>
               </span>
-              v-if="viewModel.quotaDisplay.length > 0"
-              class="card-performance-quotas"
-            >
-              <span
-                v-for="item in viewModel.quotaDisplay"
-                :key="item.key"
-                class="card-quota-item"
-                :title="quotaTooltip(item)"
+              <div
+                v-if="viewModel.quotaDisplay.length > 0"
+                class="card-performance-quotas"
               >
-                <span class="quota-badge" :class="`quota-badge--${item.key}`">{{ item.label }}</span>
-                <span class="quota-progress-bar">
-                  <span
-                    class="quota-progress-fill"
-                    :class="quotaProgressClass(item)"
-                    :style="{ width: `${quotaProgressWidth(item)}` }"
-                  ></span>
+                <span
+                  v-for="item in viewModel.quotaDisplay"
+                  :key="item.key"
+                  class="card-quota-item"
+                  :title="quotaTooltip(item)"
+                >
+                  <span class="quota-badge" :class="`quota-badge--${item.key}`">{{ item.label }}</span>
+                  <span class="quota-progress-bar">
+                    <span
+                      class="quota-progress-fill"
+                      :class="quotaProgressClass(item)"
+                      :style="{ width: `${quotaProgressWidth(item)}%` }"
+                    ></span>
+                  </span>
+                  <span class="quota-usage-percent">{{ quotaUsagePercent(item) }}</span>
+                  <span class="quota-countdown">{{ item.countdownLabel }}</span>
                 </span>
-                <span class="quota-usage-percent">{{ quotaUsagePercent(item) }}</span>
-                <span class="quota-countdown">{{ item.countdownLabel }}</span>
-              </span>
+              </div>
             </div>
           </template>
         </div>
@@ -409,6 +411,7 @@
 import { computed, type ComponentPublicInstance } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { ProviderCardViewModel, ProviderDragEndPayload, ProviderQuotaDisplayItem, ProviderTab, ResolvedTheme } from '../types'
+import { formatQuotaUsagePercent, getQuotaProgressClass, getQuotaProgressPercent } from '../utils/providerQuotaDisplay'
 import { isHostedRouteActive } from '../utils/providerRoutingState'
 
 const props = defineProps<{
@@ -439,20 +442,11 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 
-const quotaProgressClass = (item: ProviderQuotaDisplayItem) => {
-  if (item.progressRatio >= 1) return 'quota-progress--over'
-  if (item.progressRatio >= 0.8) return 'quota-progress--warn'
-  return 'quota-progress--ok'
-}
+const quotaProgressClass = (item: ProviderQuotaDisplayItem) => getQuotaProgressClass(item)
 
-const quotaProgressWidth = (item: ProviderQuotaDisplayItem) => Math.min(Math.max(item.progressRatio, 0), 1) * 100
+const quotaProgressWidth = (item: ProviderQuotaDisplayItem) => getQuotaProgressPercent(item)
 
-const quotaUsagePercent = (item: ProviderQuotaDisplayItem) => {
-  const percent = Math.max(item.progressRatio, 0) * 100
-  if (!Number.isFinite(percent) || percent <= 0) return '0%'
-  if (percent < 1) return '<1%'
-  return `${Math.round(percent)}%`
-}
+const quotaUsagePercent = (item: ProviderQuotaDisplayItem) => formatQuotaUsagePercent(item)
 
 const quotaTooltip = (item: ProviderQuotaDisplayItem) => {
   const used = item.used.toFixed(2)

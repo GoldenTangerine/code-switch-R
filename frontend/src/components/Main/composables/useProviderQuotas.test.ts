@@ -227,4 +227,56 @@ describe('useProviderQuotas', () => {
       }),
     ])
   })
+
+  it('refreshes provider quotas once the countdown crosses the reset point', async () => {
+    vi.setSystemTime(new Date('2026-04-09T15:59:59.500'))
+
+    const cards = createCardRecord()
+    const quotas = createDefaultBudgetQuotaSettings()
+    quotas.daily.total = 100
+    quotas.daily.refreshTime = '16:00'
+
+    const card = createCard(6, { budgetQuotaSettings: quotas })
+    cards.codex.push(card)
+
+    vi.mocked(fetchCostSinceByProvider)
+      .mockResolvedValueOnce(42)
+      .mockResolvedValueOnce(64)
+    vi.mocked(fetchFiveHourQuotaStatusByProvider).mockResolvedValue({
+      active: false,
+      window_start: '',
+      next_reset: '',
+      used: 0,
+    })
+
+    const quotaState = useProviderQuotas({
+      t: (key: string) => key,
+      getActiveTab: () => 'codex',
+      cards,
+    })
+
+    await quotaState.refreshProviderQuotas()
+    quotaState.startTimers()
+
+    expect(quotaState.getQuotaDisplay(card)).toEqual([
+      expect.objectContaining({
+        key: 'daily',
+        used: 42,
+        countdownLabel: '0h1m',
+      }),
+    ])
+
+    await vi.advanceTimersByTimeAsync(1_000)
+
+    expect(fetchCostSinceByProvider).toHaveBeenCalledTimes(2)
+    expect(quotaState.getQuotaDisplay(card)).toEqual([
+      expect.objectContaining({
+        key: 'daily',
+        used: 64,
+        countdownLabel: '23h59m',
+      }),
+    ])
+
+    quotaState.stopTimers()
+  })
 })
