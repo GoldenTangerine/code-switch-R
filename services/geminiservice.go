@@ -45,6 +45,8 @@ type GeminiProvider struct {
 	RequestBodyOverrides map[string]any    `json:"requestBodyOverrides,omitempty"`
 	// 供应商级别预算额度配置（5 小时 / 日 / 周 / 月）
 	BudgetQuotaSettings  *BudgetQuotaSettings `json:"budgetQuotaSettings,omitempty"`
+	// 供应商级别预算额度当前已使用校准值（5 小时 / 日 / 周 / 月）
+	BudgetQuotaUsedAdjustments *BudgetQuotaAdjustments `json:"budgetQuotaUsedAdjustments,omitempty"`
 }
 
 // GeminiPreset 预设供应商

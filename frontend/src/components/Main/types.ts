@@ -1,7 +1,7 @@
 import type { AutomationCard } from '../../data/cards'
 import type { BlacklistStatus } from '../../services/blacklist'
 import type { ConfigFile, ProxyInjection } from '../../services/customCliService'
-import type { BudgetQuotaKey, BudgetQuotaSettings } from '../../utils/budgetUsage'
+import type { BudgetQuotaAdjustments, BudgetQuotaKey, BudgetQuotaSettings } from '../../utils/budgetUsage'
 
 export type TranslateFn = (key: string, ...args: any[]) => string
 
@@ -64,6 +64,7 @@ export type VendorForm = {
   connectivityTestEndpoint?: string
   connectivityAuthType?: string
   budgetQuotaSettings?: BudgetQuotaSettings
+  budgetQuotaUsedAdjustments?: BudgetQuotaAdjustments
 }
 
 export type ProviderQuotaDisplayItem = {

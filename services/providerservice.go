@@ -85,6 +85,9 @@ type Provider struct {
 	// 供应商级别预算额度配置（5 小时 / 日 / 周 / 月）
 	// nil 表示未配置，各子项 Total 为 0 时不生效
 	BudgetQuotaSettings *BudgetQuotaSettings `json:"budgetQuotaSettings,omitempty"`
+	// 供应商级别预算额度当前已使用校准值（5 小时 / 日 / 周 / 月）
+	// 用于在统计值基础上做手动校准，nil / 全 0 均视为未配置
+	BudgetQuotaUsedAdjustments *BudgetQuotaAdjustments `json:"budgetQuotaUsedAdjustments,omitempty"`
 
 	// ========== 旧字段（已废弃，仅用于读取迁移） ==========
 	// 这些字段在保存时不再写入，但读取时会自动迁移到新字段

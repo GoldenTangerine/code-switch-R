@@ -173,52 +173,90 @@
 
         <div class="form-field">
           <span>{{ t('components.main.form.labels.budgetQuota') }}</span>
-          <div v-if="form.budgetQuotaSettings" class="quota-settings-grid">
+          <div v-if="form.budgetQuotaSettings" class="budget-quota-grid provider-budget-quota-grid">
             <div
               v-for="def in quotaDefinitions"
               :key="def.key"
-              class="quota-setting-row"
+              class="budget-quota-card"
             >
-              <span class="quota-setting-label">{{ def.label }}</span>
-              <div class="quota-setting-inputs">
-                <div class="quota-total-input">
-                  <input
-                    v-model.number="form.budgetQuotaSettings[def.key].total"
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    class="quota-number-input"
-                    :placeholder="t('components.main.form.placeholders.budgetQuotaTotal')"
-                  />
-                  <span class="quota-unit">USD</span>
+              <div class="budget-quota-card__header">
+                <div class="budget-quota-card__heading">
+                  <p class="budget-quota-card__title">{{ t(def.titleKey) }}</p>
+                  <p class="budget-quota-card__hint">{{ t(def.hintKey) }}</p>
                 </div>
-                <template v-if="def.hasRefreshTime">
+                <span class="budget-quota-card__limit">
+                  {{ formatBudgetLimitLabel(form.budgetQuotaSettings[def.key].total) }}
+                </span>
+              </div>
+              <div class="budget-quota-card__body">
+                <div class="budget-quota-field">
+                  <span class="budget-quota-field__label">{{ t('components.general.label.budgetTotal') }}</span>
+                  <div class="budget-input">
+                    <input
+                      v-model.number="form.budgetQuotaSettings[def.key].total"
+                      type="number"
+                      inputmode="decimal"
+                      step="0.01"
+                      min="0"
+                      class="mac-input budget-input-field"
+                      :placeholder="t('components.main.form.placeholders.budgetQuotaTotal')"
+                      @change="handleBudgetQuotaConfigChange"
+                    />
+                    <span class="budget-unit">USD</span>
+                  </div>
+                  <span class="budget-quota-field__hint">{{ t('components.general.label.budgetQuotaUnsetHint') }}</span>
+                </div>
+                <div class="budget-quota-field">
+                  <span class="budget-quota-field__label">{{ t('components.general.label.budgetQuotaUsedAdjustment') }}</span>
+                  <div class="budget-input">
+                    <input
+                      v-model.number="budgetQuotaCurrentUsed[def.key]"
+                      type="number"
+                      inputmode="decimal"
+                      step="0.01"
+                      min="0"
+                      class="mac-input budget-input-field"
+                      :disabled="!isBudgetQuotaCurrentUsedEditable(def.key)"
+                      @change="handleBudgetQuotaCurrentUsedChange(def.key)"
+                    />
+                    <span class="budget-unit">USD</span>
+                  </div>
+                  <span class="budget-quota-field__hint">{{ getBudgetQuotaCurrentUsedHint(def.key) }}</span>
+                </div>
+                <div v-if="def.showWeekday" class="budget-quota-field">
+                  <span class="budget-quota-field__label">{{ t('components.general.label.budgetRefreshWeekday') }}</span>
+                  <select
+                    v-model.number="form.budgetQuotaSettings[def.key].refreshWeekday"
+                    class="mac-select budget-select"
+                    @change="handleBudgetQuotaConfigChange"
+                  >
+                    <option v-for="weekday in weekdayOptions" :key="weekday.value" :value="weekday.value">
+                      {{ weekday.label }}
+                    </option>
+                  </select>
+                </div>
+                <div v-if="def.showMonthDay" class="budget-quota-field">
+                  <span class="budget-quota-field__label">{{ t('components.general.label.budgetRefreshMonthDay') }}</span>
+                  <select
+                    v-model.number="form.budgetQuotaSettings[def.key].refreshMonthDay"
+                    class="mac-select budget-select"
+                    @change="handleBudgetQuotaConfigChange"
+                  >
+                    <option v-for="day in monthDayOptions" :key="day" :value="day">
+                      {{ day }}
+                    </option>
+                  </select>
+                  <span class="budget-quota-field__hint">{{ t('components.general.label.budgetRefreshMonthDayHint') }}</span>
+                </div>
+                <div v-if="def.showTime" class="budget-quota-field">
+                  <span class="budget-quota-field__label">{{ t('components.general.label.budgetRefreshTime') }}</span>
                   <input
                     v-model="form.budgetQuotaSettings[def.key].refreshTime"
                     type="time"
-                    class="quota-time-input"
+                    class="mac-input budget-time-input"
+                    @change="handleBudgetQuotaConfigChange"
                   />
-                </template>
-                <template v-if="def.key === 'weekly'">
-                  <select
-                    v-model.number="form.budgetQuotaSettings[def.key].refreshWeekday"
-                    class="quota-select-input"
-                  >
-                    <option v-for="d in weekdayOptions" :key="d.value" :value="d.value">
-                      {{ d.label }}
-                    </option>
-                  </select>
-                </template>
-                <template v-if="def.key === 'monthly'">
-                  <input
-                    v-model.number="form.budgetQuotaSettings[def.key].refreshMonthDay"
-                    type="number"
-                    min="1"
-                    max="31"
-                    class="quota-day-input"
-                    :placeholder="'1'"
-                  />
-                </template>
+                </div>
               </div>
             </div>
           </div>
@@ -348,6 +386,7 @@ import JsonCodeEditor from '../../common/JsonCodeEditor.vue'
 import ModelMappingEditor from '../../common/ModelMappingEditor.vue'
 import ModelWhitelistEditor from '../../common/ModelWhitelistEditor.vue'
 import { AUTH_TYPE_OPTIONS, getDefaultAuthType } from '../constants'
+import { cardProviderRef } from '../adapters/providerCardMappers'
 import {
   buildNormalizedVendorForm,
   createDefaultVendorForm,
@@ -355,12 +394,21 @@ import {
   resolveProviderAuthState,
 } from '../adapters/providerFormMappers'
 import type { ProviderTab, VendorForm } from '../types'
-import type { BudgetQuotaKey } from '../../../utils/budgetUsage'
+import type { LogPlatform } from '../../../services/logs'
+import { fetchCostSinceByProvider, fetchFiveHourQuotaStatusByProvider } from '../../../services/logs'
+import type { BudgetQuotaAdjustments, BudgetQuotaKey, BudgetQuotaSetting } from '../../../utils/budgetUsage'
 import {
+  budgetQuotaOrder,
+  cloneBudgetQuotaAdjustments,
   cloneBudgetQuotaSettings,
+  createDefaultBudgetQuotaAdjustments,
   createDefaultBudgetQuotaSettings,
+  formatLocalDateTime,
   hasConfiguredBudgetQuotaSettings,
+  normalizeBudgetQuotaAdjustments,
   normalizeBudgetQuotaSettings,
+  normalizeBudgetUsedDisplay,
+  resolveBudgetQuotaWindow,
 } from '../../../utils/budgetUsage'
 import type { AutomationCard } from '../../../data/cards'
 import type { CLIPlatform } from '../../../services/cliConfig'
@@ -408,15 +456,46 @@ const requestBodyOverridesError = ref('')
 
 type QuotaDefinition = {
   key: BudgetQuotaKey
-  label: string
-  hasRefreshTime: boolean
+  titleKey: string
+  hintKey: string
+  showWeekday: boolean
+  showMonthDay: boolean
+  showTime: boolean
 }
 
 const quotaDefinitions = computed<QuotaDefinition[]>(() => [
-  { key: 'five_hour', label: t('components.main.form.labels.budgetQuotaFiveHour'), hasRefreshTime: false },
-  { key: 'daily', label: t('components.main.form.labels.budgetQuotaDaily'), hasRefreshTime: true },
-  { key: 'weekly', label: t('components.main.form.labels.budgetQuotaWeekly'), hasRefreshTime: true },
-  { key: 'monthly', label: t('components.main.form.labels.budgetQuotaMonthly'), hasRefreshTime: true },
+  {
+    key: 'five_hour',
+    titleKey: 'components.general.label.budgetQuotaFiveHour',
+    hintKey: 'components.general.label.budgetQuotaFiveHourHint',
+    showWeekday: false,
+    showMonthDay: false,
+    showTime: false,
+  },
+  {
+    key: 'daily',
+    titleKey: 'components.general.label.budgetQuotaDaily',
+    hintKey: 'components.general.label.budgetQuotaDailyHint',
+    showWeekday: false,
+    showMonthDay: false,
+    showTime: true,
+  },
+  {
+    key: 'weekly',
+    titleKey: 'components.general.label.budgetQuotaWeekly',
+    hintKey: 'components.general.label.budgetQuotaWeeklyHint',
+    showWeekday: true,
+    showMonthDay: false,
+    showTime: true,
+  },
+  {
+    key: 'monthly',
+    titleKey: 'components.general.label.budgetQuotaMonthly',
+    hintKey: 'components.general.label.budgetQuotaMonthlyHint',
+    showWeekday: false,
+    showMonthDay: true,
+    showTime: true,
+  },
 ])
 
 const weekdayOptions = computed(() => [
@@ -428,6 +507,42 @@ const weekdayOptions = computed(() => [
   { value: 6, label: t('components.general.label.weekdaySat') },
   { value: 0, label: t('components.general.label.weekdaySun') },
 ])
+const monthDayOptions = Array.from({ length: 31 }, (_, index) => index + 1)
+
+type BudgetQuotaUsageStatus = 'inactive' | 'loading' | 'ready' | 'error'
+type BudgetQuotaUsageStatuses = Record<BudgetQuotaKey, BudgetQuotaUsageStatus>
+
+const createDefaultBudgetQuotaUsageStatuses = (
+  status: BudgetQuotaUsageStatus = 'inactive',
+): BudgetQuotaUsageStatuses => ({
+  five_hour: status,
+  daily: status,
+  weekly: status,
+  monthly: status,
+})
+
+const mapBudgetQuotaValues = (resolveValue: (key: BudgetQuotaKey) => number): BudgetQuotaAdjustments => {
+  const nextValues = createDefaultBudgetQuotaAdjustments()
+  budgetQuotaOrder.forEach((key) => {
+    nextValues[key] = resolveValue(key)
+  })
+  return nextValues
+}
+
+const mapBudgetQuotaUsageStatuses = (
+  resolveStatus: (key: BudgetQuotaKey) => BudgetQuotaUsageStatus,
+): BudgetQuotaUsageStatuses => {
+  const nextStatuses = createDefaultBudgetQuotaUsageStatuses()
+  budgetQuotaOrder.forEach((key) => {
+    nextStatuses[key] = resolveStatus(key)
+  })
+  return nextStatuses
+}
+
+const budgetQuotaTrackedUsage = ref<BudgetQuotaAdjustments>(createDefaultBudgetQuotaAdjustments())
+const budgetQuotaCurrentUsed = ref<BudgetQuotaAdjustments>(createDefaultBudgetQuotaAdjustments())
+const budgetQuotaUsageStatuses = ref<BudgetQuotaUsageStatuses>(createDefaultBudgetQuotaUsageStatuses())
+let budgetQuotaUsageRequestSeq = 0
 
 const authTypeOptions = AUTH_TYPE_OPTIONS
 
@@ -453,6 +568,151 @@ const iconPreviewOptions = computed(() => {
   return Array.from(new Set([form.icon, ...filteredIconOptions.value.slice(0, preferred)]))
 })
 
+const formatBudgetLimitLabel = (total: number) => {
+  if (total <= 0) return '∞'
+  if (total >= 1) return `$${total.toFixed(2)}`
+  if (total >= 0.01) return `$${total.toFixed(3)}`
+  return `$${total.toFixed(4)}`
+}
+
+const buildBudgetQuotaCurrentUsed = (
+  trackedUsage: BudgetQuotaAdjustments,
+  adjustments: BudgetQuotaAdjustments,
+  statuses: BudgetQuotaUsageStatuses,
+) => {
+  return mapBudgetQuotaValues((key) => (
+    statuses[key] === 'ready'
+      ? normalizeBudgetUsedDisplay(trackedUsage[key] + adjustments[key])
+      : 0
+  ))
+}
+
+const syncBudgetQuotaCurrentUsed = () => {
+  budgetQuotaCurrentUsed.value = buildBudgetQuotaCurrentUsed(
+    budgetQuotaTrackedUsage.value,
+    normalizeBudgetQuotaAdjustments(form.budgetQuotaUsedAdjustments),
+    budgetQuotaUsageStatuses.value,
+  )
+}
+
+const isBudgetQuotaCurrentUsedEditable = (key: BudgetQuotaKey) => budgetQuotaUsageStatuses.value[key] === 'ready'
+
+const getBudgetQuotaCurrentUsedHint = (key: BudgetQuotaKey) => {
+  const status = budgetQuotaUsageStatuses.value[key]
+  if (status === 'inactive') {
+    return t('components.general.label.budgetQuotaUsedInactiveHint')
+  }
+  if (status === 'loading') {
+    return t('components.general.label.budgetQuotaUsedLoadingHint')
+  }
+  if (status === 'error') {
+    return t('components.general.label.budgetQuotaUsedUnavailableHint')
+  }
+  return t('components.general.label.budgetQuotaUsedAdjustmentHint')
+}
+
+const resolveQuotaPlatform = (): LogPlatform | '' => {
+  if (props.tabId === 'claude' || props.tabId === 'codex' || props.tabId === 'gemini') {
+    return props.tabId
+  }
+  return ''
+}
+
+const nextBudgetQuotaUsageRequestId = () => {
+  budgetQuotaUsageRequestSeq += 1
+  return budgetQuotaUsageRequestSeq
+}
+
+const refreshBudgetQuotaUsage = async () => {
+  const requestId = nextBudgetQuotaUsageRequestId()
+  const quotaSettings = normalizeBudgetQuotaSettings(form.budgetQuotaSettings)
+  const activeQuotaKeys = budgetQuotaOrder.filter((key) => quotaSettings[key].total > 0)
+  const activeQuotaKeySet = new Set(activeQuotaKeys)
+
+  budgetQuotaUsageStatuses.value = mapBudgetQuotaUsageStatuses((key) => (
+    activeQuotaKeySet.has(key) ? 'loading' : 'inactive'
+  ))
+  budgetQuotaTrackedUsage.value = createDefaultBudgetQuotaAdjustments()
+  budgetQuotaCurrentUsed.value = createDefaultBudgetQuotaAdjustments()
+
+  if (activeQuotaKeys.length === 0) {
+    return
+  }
+
+  const platform = resolveQuotaPlatform()
+  const persistedCard = props.card
+  const providerRef = persistedCard ? cardProviderRef(persistedCard) : ''
+  const providerName = persistedCard?.name?.trim() || form.name.trim()
+
+  if (!persistedCard || !platform || !providerRef || !providerName) {
+    if (requestId !== budgetQuotaUsageRequestSeq) return
+    budgetQuotaUsageStatuses.value = mapBudgetQuotaUsageStatuses((key) => (
+      activeQuotaKeySet.has(key) ? 'ready' : 'inactive'
+    ))
+    budgetQuotaTrackedUsage.value = createDefaultBudgetQuotaAdjustments()
+    syncBudgetQuotaCurrentUsed()
+    return
+  }
+
+  try {
+    const now = new Date()
+    const nextTrackedUsage = createDefaultBudgetQuotaAdjustments()
+    const nextStatuses = mapBudgetQuotaUsageStatuses((key) => (
+      activeQuotaKeySet.has(key) ? 'error' : 'inactive'
+    ))
+    const results = await Promise.allSettled(
+      activeQuotaKeys.map(async (key) => {
+        if (key === 'five_hour') {
+          const snapshot = await fetchFiveHourQuotaStatusByProvider(platform, providerRef, providerName)
+          return {
+            key,
+            status: (snapshot.active ? 'ready' : 'inactive') as BudgetQuotaUsageStatus,
+            usage: normalizeBudgetUsedDisplay(Number(snapshot?.used ?? 0)),
+          }
+        }
+        const setting = quotaSettings[key] as BudgetQuotaSetting
+        const window = resolveBudgetQuotaWindow(key, setting, now)
+        const usage = await fetchCostSinceByProvider(formatLocalDateTime(window.start), platform, providerRef, providerName)
+        return {
+          key,
+          status: 'ready' as const,
+          usage: normalizeBudgetUsedDisplay(Number(usage)),
+        }
+      }),
+    )
+    if (requestId !== budgetQuotaUsageRequestSeq) return
+    results.forEach((result) => {
+      if (result.status !== 'fulfilled') return
+      nextTrackedUsage[result.value.key] = result.value.usage
+      nextStatuses[result.value.key] = result.value.status
+    })
+    budgetQuotaTrackedUsage.value = nextTrackedUsage
+    budgetQuotaUsageStatuses.value = nextStatuses
+    syncBudgetQuotaCurrentUsed()
+  } catch (error) {
+    console.error('failed to load provider quota usage', error)
+    if (requestId !== budgetQuotaUsageRequestSeq) return
+    budgetQuotaUsageStatuses.value = mapBudgetQuotaUsageStatuses((key) => (
+      activeQuotaKeySet.has(key) ? 'error' : 'inactive'
+    ))
+  }
+}
+
+const handleBudgetQuotaCurrentUsedChange = (key: BudgetQuotaKey) => {
+  if (budgetQuotaUsageStatuses.value[key] !== 'ready') return
+  const nextUsed = normalizeBudgetUsedDisplay(Number(budgetQuotaCurrentUsed.value[key]))
+  budgetQuotaCurrentUsed.value[key] = nextUsed
+  if (!form.budgetQuotaUsedAdjustments) {
+    form.budgetQuotaUsedAdjustments = createDefaultBudgetQuotaAdjustments()
+  }
+  form.budgetQuotaUsedAdjustments[key] = Number((nextUsed - budgetQuotaTrackedUsage.value[key]).toFixed(6))
+  syncBudgetQuotaCurrentUsed()
+}
+
+const handleBudgetQuotaConfigChange = () => {
+  void refreshBudgetQuotaUsage()
+}
+
 const resetForm = () => {
   errors.apiUrl = ''
   iconSearchQuery.value = ''
@@ -462,19 +722,23 @@ const resetForm = () => {
   if (!props.card) {
     Object.assign(form, createDefaultVendorForm(props.tabId, defaultIconKey))
     form.budgetQuotaSettings = createDefaultBudgetQuotaSettings()
+    form.budgetQuotaUsedAdjustments = createDefaultBudgetQuotaAdjustments()
     selectedAuthType.value = getDefaultAuthType(props.tabId)
     customAuthHeader.value = ''
     requestBodyOverridesText.value = formatJsonObject(form.requestBodyOverrides)
+    void refreshBudgetQuotaUsage()
     return
   }
 
   Object.assign(form, createVendorFormFromCard(props.card, props.tabId))
   form.budgetQuotaSettings = normalizeBudgetQuotaSettings(props.card.budgetQuotaSettings)
+  form.budgetQuotaUsedAdjustments = cloneBudgetQuotaAdjustments(props.card.budgetQuotaUsedAdjustments)
   requestBodyOverridesText.value = formatJsonObject(form.requestBodyOverrides)
 
   const authState = resolveProviderAuthState(props.card.connectivityAuthType, props.tabId)
   selectedAuthType.value = authState.selectedAuthType
   customAuthHeader.value = authState.customAuthHeader
+  void refreshBudgetQuotaUsage()
 }
 
 watch(() => props.open, (open) => {
@@ -610,6 +874,9 @@ const buildFormPayload = async (): Promise<VendorForm | null> => {
   const qs = form.budgetQuotaSettings
   payload.budgetQuotaSettings = hasConfiguredBudgetQuotaSettings(qs)
     ? cloneBudgetQuotaSettings(qs)
+    : undefined
+  payload.budgetQuotaUsedAdjustments = hasConfiguredBudgetQuotaSettings(qs)
+    ? cloneBudgetQuotaAdjustments(form.budgetQuotaUsedAdjustments)
     : undefined
 
   const cliConfigSubmitState = cliConfigEditorRef.value?.getCliConfigSubmitState?.()

@@ -240,127 +240,121 @@
   color: var(--mac-accent);
 }
 
-/* 预算额度设置 */
-.quota-settings-grid {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-top: 6px;
-}
-
-.quota-setting-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.quota-setting-label {
-  min-width: 80px;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--mac-text-secondary);
-  flex-shrink: 0;
-}
-
-.quota-setting-inputs {
+.budget-input {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex: 1;
-  flex-wrap: wrap;
 }
 
-.quota-total-input {
+.budget-input-field {
+  width: 100%;
+}
+
+.budget-time-input {
+  width: 140px;
+}
+
+.budget-select {
+  width: 160px;
+}
+
+.provider-budget-quota-grid {
+  margin-top: 6px;
+}
+
+.budget-quota-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.budget-quota-card {
+  border: 1px solid color-mix(in srgb, var(--mac-border) 88%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--mac-surface-strong) 72%, var(--mac-surface));
+  padding: 14px;
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.budget-quota-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.budget-quota-card__heading {
+  display: flex;
+  flex-direction: column;
   gap: 4px;
-  flex: 1;
-  min-width: 140px;
 }
 
-.quota-number-input {
-  flex: 1;
-  min-width: 80px;
-  padding: 6px 10px;
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
+.budget-quota-card__title {
+  margin: 0;
   font-size: 13px;
-  color: var(--color-text-primary);
-  transition: border-color 0.2s ease;
+  font-weight: 700;
+  color: var(--mac-text);
 }
 
-.quota-number-input:focus {
-  outline: none;
-  border-color: var(--mac-accent);
-}
-
-.quota-number-input::placeholder {
+.budget-quota-card__hint {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
   color: var(--mac-text-secondary);
-  opacity: 0.6;
 }
 
-.quota-unit {
+.budget-quota-card__limit {
+  flex-shrink: 0;
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--mac-accent) 14%, transparent);
+  color: var(--mac-accent);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.budget-quota-card__body {
+  display: grid;
+  gap: 12px;
+}
+
+.budget-quota-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.budget-quota-field__label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--mac-text-secondary);
+}
+
+.budget-quota-field__hint {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--mac-text-secondary);
+}
+
+.budget-unit {
   font-size: 12px;
   color: var(--mac-text-secondary);
-  flex-shrink: 0;
 }
 
-.quota-time-input {
-  width: 100px;
-  padding: 6px 8px;
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  font-size: 13px;
-  color: var(--color-text-primary);
-  transition: border-color 0.2s ease;
+:global(.dark) .budget-quota-card {
+  background: color-mix(in srgb, rgba(255, 255, 255, 0.04) 70%, rgba(17, 24, 39, 0.92));
+  border-color: rgba(255, 255, 255, 0.08);
 }
 
-.quota-time-input:focus {
-  outline: none;
-  border-color: var(--mac-accent);
+:global(.dark) .budget-quota-card__hint,
+:global(.dark) .budget-quota-field__label,
+:global(.dark) .budget-quota-field__hint {
+  color: rgba(255, 255, 255, 0.58);
 }
 
-.quota-select-input {
-  width: 80px;
-  padding: 6px 8px;
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  font-size: 13px;
-  color: var(--color-text-primary);
-  cursor: pointer;
-  transition: border-color 0.2s ease;
-}
-
-.quota-select-input:focus {
-  outline: none;
-  border-color: var(--mac-accent);
-}
-
-.quota-day-input {
-  width: 60px;
-  padding: 6px 8px;
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  font-size: 13px;
-  color: var(--color-text-primary);
-  text-align: center;
-  transition: border-color 0.2s ease;
-}
-
-.quota-day-input:focus {
-  outline: none;
-  border-color: var(--mac-accent);
-}
-
-:global(.dark) .quota-number-input,
-:global(.dark) .quota-time-input,
-:global(.dark) .quota-select-input,
-:global(.dark) .quota-day-input {
-  background: var(--color-bg-secondary);
-  border-color: var(--color-border);
-  color: var(--color-text-primary);
+:global(.dark) .budget-quota-card__limit {
+  background: rgba(124, 224, 127, 0.12);
+  color: #8be08e;
 }

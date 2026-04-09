@@ -4,12 +4,13 @@ import type { LogPlatform } from '../../../services/logs'
 import { fetchCostSinceByProvider, fetchFiveHourQuotaStatusByProvider } from '../../../services/logs'
 import {
   budgetQuotaOrder,
+  normalizeBudgetQuotaAdjustments,
+  normalizeBudgetUsedDisplay,
   normalizeBudgetQuotaSettings,
   resolveBudgetQuotaWindow,
   formatLocalDateTime,
   type BudgetQuotaKey,
 } from '../../../utils/budgetUsage'
-import { formatClockCountdown } from '../../../utils/trayCountdown'
 import { cardProviderRef } from '../adapters/providerCardMappers'
 import type { ProviderQuotaDisplayItem, ProviderTab, TranslateFn } from '../types'
 
@@ -21,6 +22,9 @@ type UseProviderQuotasOptions = {
 
 const QUOTA_REFRESH_INTERVAL_MS = 30_000
 const COUNTDOWN_TICK_INTERVAL_MS = 1_000
+const MINUTE_MS = 60_000
+const HOUR_MS = 60 * MINUTE_MS
+const DAY_MS = 24 * HOUR_MS
 
 const quotaLabelKey: Record<BudgetQuotaKey, string> = {
   five_hour: 'components.main.providers.quotaFiveHour',
@@ -41,11 +45,30 @@ const tabToPlatform = (tab: ProviderTab): LogPlatform | '' => {
   return ''
 }
 
+const formatQuotaCountdown = (remainingMs: number) => {
+  if (remainingMs <= 0) return '0h0m'
+
+  const remainingDays = Math.floor(remainingMs / DAY_MS)
+  if (remainingDays >= 1) {
+    const remainingHours = Math.floor((remainingMs % DAY_MS) / HOUR_MS)
+    return `${remainingDays}d${remainingHours}h`
+  }
+
+  const totalMinutes = Math.max(Math.floor(remainingMs / MINUTE_MS), 1)
+  const hours = Math.floor(totalMinutes / 60)
+  const minutes = totalMinutes % 60
+  return `${hours}h${minutes}m`
+}
+
 const formatCountdown = (nextReset: Date | null, now: Date): string => {
   if (!nextReset) return ''
   const remaining = nextReset.getTime() - now.getTime()
-  if (remaining <= 0) return '00:00:00'
-  return formatClockCountdown(remaining)
+  return formatQuotaCountdown(remaining)
+}
+
+const resolveProgressRatio = (used: number, total: number) => {
+  if (!Number.isFinite(total) || total <= 0) return 0
+  return normalizeBudgetUsedDisplay(used) / total
 }
 
 /**
@@ -70,6 +93,7 @@ export function useProviderQuotas(options: UseProviderQuotasOptions) {
     now: Date,
   ): Promise<ProviderQuotaDisplayItem[]> => {
     const settings = normalizeBudgetQuotaSettings(card.budgetQuotaSettings)
+    const adjustments = normalizeBudgetQuotaAdjustments(card.budgetQuotaUsedAdjustments)
     const visibleKeys = budgetQuotaOrder.filter((key) => settings[key].total > 0)
     if (visibleKeys.length === 0) return []
 
@@ -85,7 +109,7 @@ export function useProviderQuotas(options: UseProviderQuotasOptions) {
         if (key === 'five_hour') {
           const status = await fetchFiveHourQuotaStatusByProvider(platform, ref, card.name)
           if (status.active) {
-            used = status.used
+            used = normalizeBudgetUsedDisplay(status.used + adjustments[key])
             nextReset = new Date(status.next_reset)
           }
           items.push({
@@ -93,7 +117,7 @@ export function useProviderQuotas(options: UseProviderQuotasOptions) {
             label: t(quotaLabelKey[key]),
             used,
             total: setting.total,
-            progressRatio: setting.total > 0 ? used / setting.total : 0,
+            progressRatio: resolveProgressRatio(used, setting.total),
             countdownLabel: status.active
               ? formatCountdown(nextReset, now)
               : t('components.main.providers.quotaInactive'),
@@ -104,10 +128,11 @@ export function useProviderQuotas(options: UseProviderQuotasOptions) {
           const window = resolveBudgetQuotaWindow(key, setting, now)
           nextReset = window.nextReset
           const startStr = formatLocalDateTime(window.start)
-          used = await fetchCostSinceByProvider(startStr, platform, ref, card.name)
+          const trackedUsed = await fetchCostSinceByProvider(startStr, platform, ref, card.name)
+          used = normalizeBudgetUsedDisplay(trackedUsed + adjustments[key])
         }
 
-        const progressRatio = setting.total > 0 ? used / setting.total : 0
+        const progressRatio = resolveProgressRatio(used, setting.total)
 
         items.push({
           key,

@@ -162,10 +162,8 @@
                 <span class="performance-badge performance-badge--tps">速</span>
                 <span>{{ stats.tps }}</span>
               </span>
-            </div>
-            <div
               v-if="viewModel.quotaDisplay.length > 0"
-              class="card-metrics-line card-metrics-line-quota"
+              class="card-performance-quotas"
             >
               <span
                 v-for="item in viewModel.quotaDisplay"
@@ -178,9 +176,10 @@
                   <span
                     class="quota-progress-fill"
                     :class="quotaProgressClass(item)"
-                    :style="{ width: `${Math.min(item.progressRatio * 100, 100)}%` }"
+                    :style="{ width: `${quotaProgressWidth(item)}` }"
                   ></span>
                 </span>
+                <span class="quota-usage-percent">{{ quotaUsagePercent(item) }}</span>
                 <span class="quota-countdown">{{ item.countdownLabel }}</span>
               </span>
             </div>
@@ -444,6 +443,15 @@ const quotaProgressClass = (item: ProviderQuotaDisplayItem) => {
   if (item.progressRatio >= 1) return 'quota-progress--over'
   if (item.progressRatio >= 0.8) return 'quota-progress--warn'
   return 'quota-progress--ok'
+}
+
+const quotaProgressWidth = (item: ProviderQuotaDisplayItem) => Math.min(Math.max(item.progressRatio, 0), 1) * 100
+
+const quotaUsagePercent = (item: ProviderQuotaDisplayItem) => {
+  const percent = Math.max(item.progressRatio, 0) * 100
+  if (!Number.isFinite(percent) || percent <= 0) return '0%'
+  if (percent < 1) return '<1%'
+  return `${Math.round(percent)}%`
 }
 
 const quotaTooltip = (item: ProviderQuotaDisplayItem) => {

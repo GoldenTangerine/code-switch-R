@@ -321,6 +321,25 @@ export const cloneBudgetQuotaAdjustments = (adjustments: unknown): BudgetQuotaAd
   return normalizeBudgetQuotaAdjustments(adjustments)
 }
 
+export const serializeBudgetQuotaAdjustments = (value: unknown): BudgetQuotaAdjustments => {
+  const normalized = normalizeBudgetQuotaAdjustments(value)
+  return {
+    five_hour: normalized.five_hour,
+    daily: normalized.daily,
+    weekly: normalized.weekly,
+    monthly: normalized.monthly,
+  }
+}
+
+export const serializeOptionalBudgetQuotaAdjustments = (
+  value: unknown,
+): BudgetQuotaAdjustments | undefined => {
+  const normalized = normalizeBudgetQuotaAdjustments(value)
+  return isBudgetQuotaAdjustmentsEmpty(normalized)
+    ? undefined
+    : serializeBudgetQuotaAdjustments(normalized)
+}
+
 const isBudgetQuotaSettingsEmpty = (settings: BudgetQuotaSettings) => {
   return budgetQuotaOrder.every((key) => settings[key].total <= 0)
 }

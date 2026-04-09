@@ -143,6 +143,7 @@
 .card-metrics-line-performance {
   margin-top: 6px;
   gap: 10px;
+  row-gap: 6px;
 }
 
 .card-performance-item {
@@ -151,11 +152,12 @@
   gap: 6px;
 }
 
-/* 供应商额度展示 */
-.card-metrics-line-quota {
-  margin-top: 6px;
-  gap: 10px;
+.card-performance-quotas {
+  display: inline-flex;
+  align-items: center;
   flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
 }
 
 .card-quota-item {
@@ -163,6 +165,7 @@
   align-items: center;
   gap: 5px;
   font-size: 0.7rem;
+  min-width: 0;
 }
 
 .quota-badge {
@@ -220,8 +223,8 @@
 }
 
 .quota-progress-bar {
-  width: 48px;
-  height: 4px;
+  width: 56px;
+  height: 5px;
   border-radius: 2px;
   background: rgba(148, 163, 184, 0.18);
   overflow: hidden;
@@ -233,6 +236,7 @@
 }
 
 .quota-progress-fill {
+  display: block;
   height: 100%;
   border-radius: 2px;
   transition: width 0.3s ease;
@@ -254,11 +258,23 @@
   font-family: 'SFMono-Regular', Menlo, Consolas, monospace;
   font-size: 0.65rem;
   color: #64748b;
-  min-width: 52px;
+  min-width: 34px;
+}
+
+.quota-usage-percent {
+  font-family: 'SFMono-Regular', Menlo, Consolas, monospace;
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: #475569;
+  min-width: 28px;
 }
 
 :global(.dark) .quota-countdown {
   color: #94a3b8;
+}
+
+:global(.dark) .quota-usage-percent {
+  color: #cbd5e1;
 }
 
 .provider-state-inline {
