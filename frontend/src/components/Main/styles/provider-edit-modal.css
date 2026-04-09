@@ -239,3 +239,128 @@
 .level-option.selected .level-name {
   color: var(--mac-accent);
 }
+
+/* 预算额度设置 */
+.quota-settings-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.quota-setting-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.quota-setting-label {
+  min-width: 80px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--mac-text-secondary);
+  flex-shrink: 0;
+}
+
+.quota-setting-inputs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  flex-wrap: wrap;
+}
+
+.quota-total-input {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  min-width: 140px;
+}
+
+.quota-number-input {
+  flex: 1;
+  min-width: 80px;
+  padding: 6px 10px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--color-text-primary);
+  transition: border-color 0.2s ease;
+}
+
+.quota-number-input:focus {
+  outline: none;
+  border-color: var(--mac-accent);
+}
+
+.quota-number-input::placeholder {
+  color: var(--mac-text-secondary);
+  opacity: 0.6;
+}
+
+.quota-unit {
+  font-size: 12px;
+  color: var(--mac-text-secondary);
+  flex-shrink: 0;
+}
+
+.quota-time-input {
+  width: 100px;
+  padding: 6px 8px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--color-text-primary);
+  transition: border-color 0.2s ease;
+}
+
+.quota-time-input:focus {
+  outline: none;
+  border-color: var(--mac-accent);
+}
+
+.quota-select-input {
+  width: 80px;
+  padding: 6px 8px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  transition: border-color 0.2s ease;
+}
+
+.quota-select-input:focus {
+  outline: none;
+  border-color: var(--mac-accent);
+}
+
+.quota-day-input {
+  width: 60px;
+  padding: 6px 8px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--color-text-primary);
+  text-align: center;
+  transition: border-color 0.2s ease;
+}
+
+.quota-day-input:focus {
+  outline: none;
+  border-color: var(--mac-accent);
+}
+
+:global(.dark) .quota-number-input,
+:global(.dark) .quota-time-input,
+:global(.dark) .quota-select-input,
+:global(.dark) .quota-day-input {
+  background: var(--color-bg-secondary);
+  border-color: var(--color-border);
+  color: var(--color-text-primary);
+}

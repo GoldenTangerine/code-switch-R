@@ -189,6 +189,7 @@ import { useCustomCliTools } from './composables/useCustomCliTools'
 import { useMainPageShell } from './composables/useMainPageShell'
 import { useProviderCards } from './composables/useProviderCards'
 import { useProviderForm } from './composables/useProviderForm'
+import { useProviderQuotas } from './composables/useProviderQuotas'
 import { useProviderStats } from './composables/useProviderStats'
 import { useUpdatePolling } from './composables/useUpdatePolling'
 import { cardProviderRef } from './adapters/providerCardMappers'
@@ -319,6 +320,17 @@ const {
 })
 
 const {
+  getQuotaDisplay,
+  refreshProviderQuotas,
+  startTimers: startQuotaTimers,
+  stopTimers: stopQuotaTimers,
+} = useProviderQuotas({
+  t,
+  getActiveTab: () => activeTab.value,
+  cards,
+})
+
+const {
   modelListModalOpen,
   modelListModalProvider,
   providerLogsModalOpen,
@@ -380,6 +392,9 @@ pageShell = useMainPageShell({
   stopUpdateTimer,
   startProviderStatsTimer,
   stopProviderStatsTimer,
+  refreshProviderQuotas,
+  startQuotaTimers,
+  stopQuotaTimers,
   startStatusSync,
   stopStatusSync,
   loadLastUsedProviders,
@@ -516,6 +531,7 @@ const activeCardViewModels = computed<ProviderCardViewModel[]>(() =>
     connectivityClass: getConnectivityIndicatorClass(card.id),
     connectivityTooltip: getConnectivityTooltip(card.id),
     stats: providerStatDisplay(card),
+    quotaDisplay: getQuotaDisplay(card),
     formattedOfficialSite: formatOfficialSite(card.officialSite),
     iconSvg: iconSvg(card.icon),
     vendorInitials: vendorInitials(card.name),

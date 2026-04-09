@@ -151,6 +151,116 @@
   gap: 6px;
 }
 
+/* 供应商额度展示 */
+.card-metrics-line-quota {
+  margin-top: 6px;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.card-quota-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.7rem;
+}
+
+.quota-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.02em;
+}
+
+.quota-badge--five_hour {
+  background: rgba(139, 92, 246, 0.12);
+  color: #7c3aed;
+}
+
+.quota-badge--daily {
+  background: rgba(59, 130, 246, 0.12);
+  color: #2563eb;
+}
+
+.quota-badge--weekly {
+  background: rgba(16, 185, 129, 0.12);
+  color: #059669;
+}
+
+.quota-badge--monthly {
+  background: rgba(245, 158, 11, 0.12);
+  color: #d97706;
+}
+
+:global(.dark) .quota-badge--five_hour {
+  background: rgba(139, 92, 246, 0.2);
+  color: #a78bfa;
+}
+
+:global(.dark) .quota-badge--daily {
+  background: rgba(59, 130, 246, 0.2);
+  color: #93c5fd;
+}
+
+:global(.dark) .quota-badge--weekly {
+  background: rgba(16, 185, 129, 0.2);
+  color: #6ee7b7;
+}
+
+:global(.dark) .quota-badge--monthly {
+  background: rgba(245, 158, 11, 0.2);
+  color: #fcd34d;
+}
+
+.quota-progress-bar {
+  width: 48px;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(148, 163, 184, 0.18);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+:global(.dark) .quota-progress-bar {
+  background: rgba(100, 116, 139, 0.28);
+}
+
+.quota-progress-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+.quota-progress--ok {
+  background: #22c55e;
+}
+
+.quota-progress--warn {
+  background: #f59e0b;
+}
+
+.quota-progress--over {
+  background: #ef4444;
+}
+
+.quota-countdown {
+  font-family: 'SFMono-Regular', Menlo, Consolas, monospace;
+  font-size: 0.65rem;
+  color: #64748b;
+  min-width: 52px;
+}
+
+:global(.dark) .quota-countdown {
+  color: #94a3b8;
+}
+
 .provider-state-inline {
   display: inline-flex;
   align-items: center;

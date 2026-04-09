@@ -511,7 +511,14 @@
         "recentRouted": "上次",
         "currentRoutedHint": "托管已开启，最新请求当前命中这个供应商。",
         "defaultRoutedHint": "托管已开启，在还没有实时命中记录前，会先按当前顺序尝试这个供应商。",
-        "recentRoutedHint": "最近一次托管请求命中了这个供应商。"
+        "recentRoutedHint": "最近一次托管请求命中了这个供应商。",
+        "quotaFiveHour": "5h",
+        "quotaDaily": "日",
+        "quotaWeekly": "周",
+        "quotaMonthly": "月",
+        "quotaTooltip": "{label}：已用 ${used} / ${total}，{countdown} 后刷新",
+        "quotaTooltipNoCountdown": "{label}：已用 ${used} / ${total}",
+        "quotaInactive": "未激活"
       },
       "providerCostTrend": {
         "buttonTooltip": "查看今日累计消费金额走势",
@@ -564,7 +571,12 @@
           "connectivityTestModel": "测试模型",
           "connectivityTestEndpoint": "测试端点",
           "connectivityAuthType": "认证方式",
-          "requestBodyOverrides": "请求体强制字段"
+          "requestBodyOverrides": "请求体强制字段",
+          "budgetQuota": "预算额度",
+          "budgetQuotaFiveHour": "5 小时额度",
+          "budgetQuotaDaily": "日额度",
+          "budgetQuotaWeekly": "周额度",
+          "budgetQuotaMonthly": "月额度"
         },
         "placeholders": {
           "name": "例如：AICoding.sh",
@@ -579,7 +591,8 @@
           "customModel": "或输入自定义模型",
           "customEndpoint": "或输入自定义端点",
           "customAuthHeader": "自定义 Header 名称（如 Authorization、X-Custom-Key）",
-          "searchIcon": "搜索图标..."
+          "searchIcon": "搜索图标...",
+          "budgetQuotaTotal": "USD 上限（0 = 不限）"
         },
         "noIconResults": "未找到匹配的图标",
         "hints": {
@@ -595,7 +608,11 @@
           "connectivityTestModel": "选择用于连通性测试的模型，留空则使用平台默认模型",
           "connectivityTestEndpoint": "选择或输入 API 端点路径",
           "connectivityAuthType": "默认使用 Bearer。Anthropic 官方 API 请选择 X-API-Key。如需自定义请在下方输入 Header 名称。",
-          "requestBodyOverrides": "仅在请求实际转发到当前供应商时生效。这里填写 JSON 对象；同名字段会覆盖，不存在则新增，嵌套对象会递归写入。"
+          "requestBodyOverrides": "仅在请求实际转发到当前供应商时生效。这里填写 JSON 对象；同名字段会覆盖，不存在则新增，嵌套对象会递归写入。",
+          "budgetQuota": "为此供应商设置独立预算额度。填 0 或留空表示不限额。仅统计当前供应商的使用量。",
+          "budgetQuotaRefreshTime": "每日刷新时间",
+          "budgetQuotaRefreshWeekday": "每周刷新星期",
+          "budgetQuotaRefreshMonthDay": "每月刷新日期"
         },
         "jsonEditor": {
           "title": "配置 JSON",

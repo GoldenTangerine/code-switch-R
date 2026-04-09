@@ -51,6 +51,9 @@ type UseMainPageShellOptions = {
   stopUpdateTimer: () => void
   startProviderStatsTimer: () => void
   stopProviderStatsTimer: () => void
+  refreshProviderQuotas: () => Promise<void>
+  startQuotaTimers: () => void
+  stopQuotaTimers: () => void
   startStatusSync: () => void
   stopStatusSync: () => void
   loadLastUsedProviders: () => Promise<void>
@@ -78,6 +81,9 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
     stopUpdateTimer,
     startProviderStatsTimer,
     stopProviderStatsTimer,
+    refreshProviderQuotas,
+    startQuotaTimers,
+    stopQuotaTimers,
     startStatusSync,
     stopStatusSync,
     loadLastUsedProviders,
@@ -279,9 +285,9 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
 
     refreshing.value = true
     try {
+      await loadProviders()
       await Promise.all([
         reloadHeatmap(),
-        loadProviders(),
         ...PROVIDER_TAB_IDS.map(refreshProxyState),
         ...PROVIDER_TAB_IDS.map((tab) => refreshDirectAppliedStatus(tab)),
         loadAllProviderStats(),
@@ -290,6 +296,7 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
         loadAvailabilityResults(),
         refreshImportStatus(),
         pollUpdateState(),
+        refreshProviderQuotas(),
       ])
     } catch (error) {
       console.error('Failed to refresh data', error)
@@ -368,6 +375,7 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
 
   watch(activeTab, (newTab) => {
     void loadBlacklistStatus(newTab)
+    void refreshProviderQuotas()
   })
 
   onMounted(async () => {
@@ -383,6 +391,8 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
     await refreshImportStatus()
     await checkFirstRun()
     startProviderStatsTimer()
+    startQuotaTimers()
+    void refreshProviderQuotas()
     startUpdateTimer()
     await Promise.all(PROVIDER_TAB_IDS.map((tab) => loadBlacklistStatus(tab)))
     await loadAvailabilityResults()
@@ -390,7 +400,14 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
 
     window.addEventListener('app-settings-updated', handleAppSettingsUpdated)
     handleProvidersUpdated = () => {
-      void loadProviders()
+      void (async () => {
+        try {
+          await loadProviders()
+          await refreshProviderQuotas()
+        } catch (error) {
+          console.error('Failed to reload providers after providers-updated event', error)
+        }
+      })()
     }
     window.addEventListener('providers-updated', handleProvidersUpdated)
     cleanupThemeListener = onThemeChange(({ mode, resolvedTheme: nextResolvedTheme }) => {
@@ -403,6 +420,7 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
 
   onUnmounted(() => {
     stopProviderStatsTimer()
+    stopQuotaTimers()
     stopUpdateTimer()
     stopStatusSync()
     window.removeEventListener('app-settings-updated', handleAppSettingsUpdated)

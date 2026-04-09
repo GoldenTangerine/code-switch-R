@@ -172,6 +172,60 @@
         </div>
 
         <div class="form-field">
+          <span>{{ t('components.main.form.labels.budgetQuota') }}</span>
+          <div v-if="form.budgetQuotaSettings" class="quota-settings-grid">
+            <div
+              v-for="def in quotaDefinitions"
+              :key="def.key"
+              class="quota-setting-row"
+            >
+              <span class="quota-setting-label">{{ def.label }}</span>
+              <div class="quota-setting-inputs">
+                <div class="quota-total-input">
+                  <input
+                    v-model.number="form.budgetQuotaSettings[def.key].total"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    class="quota-number-input"
+                    :placeholder="t('components.main.form.placeholders.budgetQuotaTotal')"
+                  />
+                  <span class="quota-unit">USD</span>
+                </div>
+                <template v-if="def.hasRefreshTime">
+                  <input
+                    v-model="form.budgetQuotaSettings[def.key].refreshTime"
+                    type="time"
+                    class="quota-time-input"
+                  />
+                </template>
+                <template v-if="def.key === 'weekly'">
+                  <select
+                    v-model.number="form.budgetQuotaSettings[def.key].refreshWeekday"
+                    class="quota-select-input"
+                  >
+                    <option v-for="d in weekdayOptions" :key="d.value" :value="d.value">
+                      {{ d.label }}
+                    </option>
+                  </select>
+                </template>
+                <template v-if="def.key === 'monthly'">
+                  <input
+                    v-model.number="form.budgetQuotaSettings[def.key].refreshMonthDay"
+                    type="number"
+                    min="1"
+                    max="31"
+                    class="quota-day-input"
+                    :placeholder="'1'"
+                  />
+                </template>
+              </div>
+            </div>
+          </div>
+          <span class="field-hint">{{ t('components.main.form.hints.budgetQuota') }}</span>
+        </div>
+
+        <div class="form-field">
           <ModelWhitelistEditor v-model="form.supportedModels" />
         </div>
 
@@ -301,6 +355,8 @@ import {
   resolveProviderAuthState,
 } from '../adapters/providerFormMappers'
 import type { ProviderTab, VendorForm } from '../types'
+import type { BudgetQuotaKey } from '../../../utils/budgetUsage'
+import { createDefaultBudgetQuotaSettings, normalizeBudgetQuotaSettings } from '../../../utils/budgetUsage'
 import type { AutomationCard } from '../../../data/cards'
 import type { CLIPlatform } from '../../../services/cliConfig'
 import { isBuiltinModelPlatform } from '../../../utils/builtinModels'
@@ -345,6 +401,29 @@ const iconSearchQuery = ref('')
 const requestBodyOverridesText = ref('{}')
 const requestBodyOverridesError = ref('')
 
+type QuotaDefinition = {
+  key: BudgetQuotaKey
+  label: string
+  hasRefreshTime: boolean
+}
+
+const quotaDefinitions = computed<QuotaDefinition[]>(() => [
+  { key: 'five_hour', label: t('components.main.form.labels.budgetQuotaFiveHour'), hasRefreshTime: false },
+  { key: 'daily', label: t('components.main.form.labels.budgetQuotaDaily'), hasRefreshTime: true },
+  { key: 'weekly', label: t('components.main.form.labels.budgetQuotaWeekly'), hasRefreshTime: true },
+  { key: 'monthly', label: t('components.main.form.labels.budgetQuotaMonthly'), hasRefreshTime: true },
+])
+
+const weekdayOptions = computed(() => [
+  { value: 1, label: t('components.general.label.weekdayMon') },
+  { value: 2, label: t('components.general.label.weekdayTue') },
+  { value: 3, label: t('components.general.label.weekdayWed') },
+  { value: 4, label: t('components.general.label.weekdayThu') },
+  { value: 5, label: t('components.general.label.weekdayFri') },
+  { value: 6, label: t('components.general.label.weekdaySat') },
+  { value: 0, label: t('components.general.label.weekdaySun') },
+])
+
 const authTypeOptions = AUTH_TYPE_OPTIONS
 
 const isEditing = computed(() => props.card !== null)
@@ -377,6 +456,7 @@ const resetForm = () => {
 
   if (!props.card) {
     Object.assign(form, createDefaultVendorForm(props.tabId, defaultIconKey))
+    form.budgetQuotaSettings = createDefaultBudgetQuotaSettings()
     selectedAuthType.value = getDefaultAuthType(props.tabId)
     customAuthHeader.value = ''
     requestBodyOverridesText.value = formatJsonObject(form.requestBodyOverrides)
@@ -384,6 +464,7 @@ const resetForm = () => {
   }
 
   Object.assign(form, createVendorFormFromCard(props.card, props.tabId))
+  form.budgetQuotaSettings = normalizeBudgetQuotaSettings(props.card.budgetQuotaSettings)
   requestBodyOverridesText.value = formatJsonObject(form.requestBodyOverrides)
 
   const authState = resolveProviderAuthState(props.card.connectivityAuthType, props.tabId)
@@ -519,6 +600,11 @@ const buildFormPayload = async (): Promise<VendorForm | null> => {
     resolveAuthType: resolveEffectiveAuthType,
   })
   payload.requestBodyOverrides = requestBodyOverrides
+
+  // 处理预算额度：仅保存 total > 0 的配置
+  const qs = form.budgetQuotaSettings
+  const hasAnyQuota = qs ? Object.values(qs).some((s) => s.total > 0) : false
+  payload.budgetQuotaSettings = hasAnyQuota ? JSON.parse(JSON.stringify(qs)) : undefined
 
   const cliConfigSubmitState = cliConfigEditorRef.value?.getCliConfigSubmitState?.()
   if (cliConfigSubmitState) {

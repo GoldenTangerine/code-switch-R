@@ -1,12 +1,14 @@
 import type { ProviderDailyStat } from '../../../services/logs'
 import type { BlacklistStatus } from '../../../services/blacklist'
 import type { AutomationCard } from '../../../data/cards'
+import type { BudgetQuotaSettings } from '../../../utils/budgetUsage'
 import { GetProviders as GetGeminiProviders } from '../../../../bindings/codeswitch/services/geminiservice'
 
 export type GeminiProvider = Awaited<ReturnType<typeof GetGeminiProviders>> extends (infer P)[] ? (P & {
   sortOrder?: number
   enabledSortOrder?: number
   disabledSortOrder?: number
+  budgetQuotaSettings?: BudgetQuotaSettings
 }) : any
 
 const GEMINI_LOCKED_ENV_KEYS = new Set(['GOOGLE_GEMINI_BASE_URL', 'GEMINI_API_KEY'])
@@ -119,6 +121,7 @@ export const geminiToCard = (provider: GeminiProvider, index: number): Automatio
   level: provider.level || 1,
   cliConfig: extractGeminiCliConfig(provider),
   requestBodyOverrides: cloneCardValue(provider.requestBodyOverrides || {}),
+  budgetQuotaSettings: cloneCardValue(provider.budgetQuotaSettings) || undefined,
   availabilityMonitorEnabled: false,
   connectivityAutoBlacklist: false,
   availabilityConfig: undefined,
@@ -138,6 +141,7 @@ export const cardToGemini = (card: AutomationCard, original: GeminiProvider): Ge
   level: card.level || 1,
   envConfig: buildGeminiEnvConfig(card, original),
   requestBodyOverrides: cloneCardValue(card.requestBodyOverrides || {}),
+  budgetQuotaSettings: cloneCardValue(card.budgetQuotaSettings) || undefined,
 })
 
 export const createGeminiFromCard = (
@@ -157,6 +161,7 @@ export const createGeminiFromCard = (
   level: card.level || 1,
   envConfig: buildGeminiEnvConfig(card, {} as GeminiProvider),
   requestBodyOverrides: cloneCardValue(card.requestBodyOverrides || {}),
+  budgetQuotaSettings: cloneCardValue(card.budgetQuotaSettings) || undefined,
 })
 
 export const serializeProviders = (providers: AutomationCard[]) =>
@@ -181,5 +186,6 @@ export const serializeProviders = (providers: AutomationCard[]) =>
       connectivityTestModel: '',
       connectivityTestEndpoint: '',
       connectivityAuthType: provider.connectivityAuthType || '',
+      budgetQuotaSettings: cloneCardValue(provider.budgetQuotaSettings) || undefined,
     }
   })

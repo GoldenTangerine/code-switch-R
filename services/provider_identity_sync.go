@@ -11,6 +11,7 @@ import (
 
 type providerIdentitySyncExecer interface {
 	Exec(query string, args ...interface{}) (sql.Result, error)
+	QueryRow(query string, args ...interface{}) *sql.Row
 }
 
 func normalizeProviderIdentityRenameInput(kind, providerID, oldName, newName string) (string, string, string, string) {
@@ -89,6 +90,9 @@ func syncProviderIdentityRenameWithExec(exec providerIdentitySyncExecer, kind, p
 		return err
 	}
 	if err := syncRequestLogStatsIdentityWithExec(exec, requestLogStatsDailyTable, kind, providerID, oldName, newName); err != nil && !isNoSuchTableErr(err) {
+		return err
+	}
+	if err := syncRequestLogProviderQuotaCycleIdentityWithExec(exec, kind, providerID, oldName, newName); err != nil && !isNoSuchTableErr(err) {
 		return err
 	}
 
@@ -299,5 +303,51 @@ func syncRequestLogStatsIdentityWithExec(exec providerIdentitySyncExecer, table,
 			return err
 		}
 	}
+	return nil
+}
+
+func syncRequestLogProviderQuotaCycleIdentityWithExec(exec providerIdentitySyncExecer, kind, providerID, oldName, newName string) error {
+	if exec == nil {
+		return nil
+	}
+
+	kind = strings.TrimSpace(kind)
+	providerID = strings.TrimSpace(providerID)
+	oldName = strings.TrimSpace(oldName)
+	newName = strings.TrimSpace(newName)
+	if kind == "" || newName == "" {
+		return nil
+	}
+
+	targetRef := providerRefFromStringID(providerID, newName)
+	legacyRef := strings.TrimSpace(oldName)
+	if legacyRef == "" {
+		legacyRef = newName
+	}
+
+	state, err := buildFiveHourQuotaCycleStateFromHistoryByProvider(exec, kind, targetRef)
+	if err != nil {
+		return err
+	}
+	if state.WindowStart.IsZero() || state.NextReset.IsZero() {
+		if err := deleteFiveHourQuotaCycleStateByProviderWithExec(exec, kind, targetRef); err != nil {
+			return err
+		}
+	} else if err := upsertFiveHourQuotaCycleStateByProviderWithExec(exec, state); err != nil {
+		return err
+	}
+
+	if legacyRef != "" && legacyRef != targetRef {
+		if err := deleteFiveHourQuotaCycleStateByProviderWithExec(exec, kind, legacyRef); err != nil {
+			return err
+		}
+	}
+
+	if providerID != "" && newName != "" && newName != targetRef && newName != legacyRef {
+		if err := deleteFiveHourQuotaCycleStateByProviderWithExec(exec, kind, newName); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }

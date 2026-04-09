@@ -41,6 +41,7 @@ export const createDefaultVendorForm = (
   connectivityTestModel: '',
   connectivityTestEndpoint: '',
   connectivityAuthType: '',
+  budgetQuotaSettings: undefined,
 })
 
 export const createVendorFormFromCard = (
@@ -74,6 +75,7 @@ export const createVendorFormFromCard = (
   connectivityTestModel: '',
   connectivityTestEndpoint: '',
   connectivityAuthType: card.connectivityAuthType || '',
+  budgetQuotaSettings: cloneProviderValue(card.budgetQuotaSettings) || undefined,
 })
 
 export const resolveProviderAuthState = (
@@ -137,6 +139,7 @@ export const buildNormalizedVendorForm = ({
   connectivityTestModel: '',
   connectivityTestEndpoint: '',
   connectivityAuthType: resolveAuthType().trim() || getDefaultAuthType(tabId),
+  budgetQuotaSettings: cloneProviderValue(form.budgetQuotaSettings) || undefined,
 })
 
 export const buildPersistedProviderFieldsFromForm = (
@@ -165,4 +168,5 @@ export const buildPersistedProviderFieldsFromForm = (
   connectivityTestModel: '',
   connectivityTestEndpoint: '',
   connectivityAuthType: form.connectivityAuthType || '',
+  budgetQuotaSettings: cloneProviderValue(form.budgetQuotaSettings) || undefined,
 })

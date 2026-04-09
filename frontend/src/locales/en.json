@@ -510,7 +510,14 @@
         "recentRouted": "Last",
         "currentRoutedHint": "Hosting is enabled and the latest request is currently routed to this provider.",
         "defaultRoutedHint": "Hosting is enabled and, before any live routing record is available, this provider will be tried first with the current order.",
-        "recentRoutedHint": "The most recent hosted request was routed to this provider."
+        "recentRoutedHint": "The most recent hosted request was routed to this provider.",
+        "quotaFiveHour": "5h",
+        "quotaDaily": "D",
+        "quotaWeekly": "W",
+        "quotaMonthly": "M",
+        "quotaTooltip": "{label}: ${used} / ${total} used, resets in {countdown}",
+        "quotaTooltipNoCountdown": "{label}: ${used} / ${total} used",
+        "quotaInactive": "Inactive"
       },
       "providerCostTrend": {
         "buttonTooltip": "View today's cumulative cost trend",
@@ -563,7 +570,12 @@
           "connectivityTestModel": "Test Model",
           "connectivityTestEndpoint": "Test Endpoint",
           "connectivityAuthType": "Auth Method",
-          "requestBodyOverrides": "Forced Request Body Fields"
+          "requestBodyOverrides": "Forced Request Body Fields",
+          "budgetQuota": "Budget Quota",
+          "budgetQuotaFiveHour": "5-Hour Quota",
+          "budgetQuotaDaily": "Daily Quota",
+          "budgetQuotaWeekly": "Weekly Quota",
+          "budgetQuotaMonthly": "Monthly Quota"
         },
         "placeholders": {
           "name": "e.g. AICoding.sh",
@@ -578,7 +590,8 @@
           "customModel": "Or enter custom model",
           "customEndpoint": "Or enter custom endpoint",
           "customAuthHeader": "Custom header name (e.g. Authorization, X-Custom-Key)",
-          "searchIcon": "Search icons..."
+          "searchIcon": "Search icons...",
+          "budgetQuotaTotal": "USD limit (0 = unlimited)"
         },
         "noIconResults": "No matching icons found",
         "hints": {
@@ -594,7 +607,11 @@
           "connectivityTestModel": "Select a model for connectivity testing, or leave empty to use platform default",
           "connectivityTestEndpoint": "Select or enter API endpoint path",
           "connectivityAuthType": "Default is Bearer. Use X-API-Key for Anthropic-style APIs. Enter custom header name in the text field if needed.",
-          "requestBodyOverrides": "Only applies when the request is actually routed to this provider. Provide a JSON object: matching fields are overwritten, missing fields are added, and nested objects are merged recursively."
+          "requestBodyOverrides": "Only applies when the request is actually routed to this provider. Provide a JSON object: matching fields are overwritten, missing fields are added, and nested objects are merged recursively.",
+          "budgetQuota": "Set independent budget quotas for this provider. Enter 0 or leave blank for unlimited. Only tracks this provider's usage.",
+          "budgetQuotaRefreshTime": "Daily refresh time",
+          "budgetQuotaRefreshWeekday": "Weekly refresh day",
+          "budgetQuotaRefreshMonthDay": "Monthly refresh date"
         },
         "jsonEditor": {
           "title": "Config JSON",

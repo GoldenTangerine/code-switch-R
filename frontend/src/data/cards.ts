@@ -1,3 +1,5 @@
+import type { BudgetQuotaSettings } from '../utils/budgetUsage'
+
 export type AutomationCard = {
   id: number
   providerRef?: string
@@ -39,6 +41,10 @@ export type AutomationCard = {
     testEndpoint?: string   // 测试端点路径
     timeout?: number        // 超时时间（毫秒）
   }
+
+  // === 供应商级别预算额度 ===
+  // 供应商独立预算配置（5 小时 / 日 / 周 / 月），nil 表示未配置
+  budgetQuotaSettings?: BudgetQuotaSettings
 
   // === 旧连通性字段（已废弃，仅用于兼容旧数据） ===
   /** @deprecated 已迁移到 availabilityMonitorEnabled */

@@ -43,6 +43,8 @@ type GeminiProvider struct {
 	EnvConfig            map[string]string `json:"envConfig,omitempty"`      // .env 配置
 	SettingsConfig       map[string]any    `json:"settingsConfig,omitempty"` // settings.json 配置
 	RequestBodyOverrides map[string]any    `json:"requestBodyOverrides,omitempty"`
+	// 供应商级别预算额度配置（5 小时 / 日 / 周 / 月）
+	BudgetQuotaSettings  *BudgetQuotaSettings `json:"budgetQuotaSettings,omitempty"`
 }
 
 // GeminiPreset 预设供应商

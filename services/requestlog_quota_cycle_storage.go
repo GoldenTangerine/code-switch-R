@@ -31,6 +31,9 @@ func ensureRequestLogQuotaCycleStorageWithDB(db *sql.DB) error {
 	if err := ensureRequestLogQuotaCycleTriggerWithDB(db); err != nil {
 		return err
 	}
+	if err := ensureRequestLogProviderQuotaCycleStorageWithDB(db); err != nil {
+		return err
+	}
 	if err := ensureSchemaMigrationsTable(db); err != nil {
 		return err
 	}

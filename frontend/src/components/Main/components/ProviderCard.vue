@@ -163,6 +163,27 @@
                 <span>{{ stats.tps }}</span>
               </span>
             </div>
+            <div
+              v-if="viewModel.quotaDisplay.length > 0"
+              class="card-metrics-line card-metrics-line-quota"
+            >
+              <span
+                v-for="item in viewModel.quotaDisplay"
+                :key="item.key"
+                class="card-quota-item"
+                :title="quotaTooltip(item)"
+              >
+                <span class="quota-badge" :class="`quota-badge--${item.key}`">{{ item.label }}</span>
+                <span class="quota-progress-bar">
+                  <span
+                    class="quota-progress-fill"
+                    :class="quotaProgressClass(item)"
+                    :style="{ width: `${Math.min(item.progressRatio * 100, 100)}%` }"
+                  ></span>
+                </span>
+                <span class="quota-countdown">{{ item.countdownLabel }}</span>
+              </span>
+            </div>
           </template>
         </div>
 
@@ -388,7 +409,7 @@
 <script setup lang="ts">
 import { computed, type ComponentPublicInstance } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { ProviderCardViewModel, ProviderDragEndPayload, ProviderTab, ResolvedTheme } from '../types'
+import type { ProviderCardViewModel, ProviderDragEndPayload, ProviderQuotaDisplayItem, ProviderTab, ResolvedTheme } from '../types'
 import { isHostedRouteActive } from '../utils/providerRoutingState'
 
 const props = defineProps<{
@@ -418,6 +439,21 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+
+const quotaProgressClass = (item: ProviderQuotaDisplayItem) => {
+  if (item.progressRatio >= 1) return 'quota-progress--over'
+  if (item.progressRatio >= 0.8) return 'quota-progress--warn'
+  return 'quota-progress--ok'
+}
+
+const quotaTooltip = (item: ProviderQuotaDisplayItem) => {
+  const used = item.used.toFixed(2)
+  const total = item.total.toFixed(2)
+  if (item.nextReset) {
+    return t('components.main.providers.quotaTooltip', { label: item.label, used, total, countdown: item.countdownLabel })
+  }
+  return t('components.main.providers.quotaTooltipNoCountdown', { label: item.label, used, total })
+}
 
 const directApplyTooltip = computed(() => {
   if (props.activeProxyState) {

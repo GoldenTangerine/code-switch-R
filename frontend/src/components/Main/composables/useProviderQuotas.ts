@@ -1,0 +1,238 @@
+import { reactive, onUnmounted } from 'vue'
+import type { AutomationCard } from '../../../data/cards'
+import type { LogPlatform } from '../../../services/logs'
+import { fetchCostSinceByProvider, fetchFiveHourQuotaStatusByProvider } from '../../../services/logs'
+import {
+  budgetQuotaOrder,
+  normalizeBudgetQuotaSettings,
+  resolveBudgetQuotaWindow,
+  formatLocalDateTime,
+  type BudgetQuotaKey,
+} from '../../../utils/budgetUsage'
+import { formatClockCountdown } from '../../../utils/trayCountdown'
+import { cardProviderRef } from '../adapters/providerCardMappers'
+import type { ProviderQuotaDisplayItem, ProviderTab, TranslateFn } from '../types'
+
+type UseProviderQuotasOptions = {
+  t: TranslateFn
+  getActiveTab: () => ProviderTab
+  cards: Record<ProviderTab, AutomationCard[]>
+}
+
+const QUOTA_REFRESH_INTERVAL_MS = 30_000
+const COUNTDOWN_TICK_INTERVAL_MS = 1_000
+
+const quotaLabelKey: Record<BudgetQuotaKey, string> = {
+  five_hour: 'components.main.providers.quotaFiveHour',
+  daily: 'components.main.providers.quotaDaily',
+  weekly: 'components.main.providers.quotaWeekly',
+  monthly: 'components.main.providers.quotaMonthly',
+}
+
+const createQuotaDisplayMap = (): Record<ProviderTab, Record<string, ProviderQuotaDisplayItem[]>> => ({
+  claude: {},
+  codex: {},
+  gemini: {},
+  others: {},
+})
+
+const tabToPlatform = (tab: ProviderTab): LogPlatform | '' => {
+  if (tab === 'claude' || tab === 'codex' || tab === 'gemini') return tab
+  return ''
+}
+
+const formatCountdown = (nextReset: Date | null, now: Date): string => {
+  if (!nextReset) return ''
+  const remaining = nextReset.getTime() - now.getTime()
+  if (remaining <= 0) return '00:00:00'
+  return formatClockCountdown(remaining)
+}
+
+/**
+ * @author sm
+ * 供应商级别预算额度状态管理
+ * 定时获取每个供应商各周期的已用金额，计算进度和倒计时
+ */
+export function useProviderQuotas(options: UseProviderQuotasOptions) {
+  const { t, getActiveTab, cards } = options
+
+  // tab -> providerRef -> ProviderQuotaDisplayItem[]
+  const quotaDisplayMap = reactive(createQuotaDisplayMap())
+
+  let refreshTimer: number | undefined
+  let countdownTimer: number | undefined
+  let refreshInFlight = false
+  let refreshQueued = false
+
+  const resolveQuotaForCard = async (
+    card: AutomationCard,
+    platform: LogPlatform | '',
+    now: Date,
+  ): Promise<ProviderQuotaDisplayItem[]> => {
+    const settings = normalizeBudgetQuotaSettings(card.budgetQuotaSettings)
+    const visibleKeys = budgetQuotaOrder.filter((key) => settings[key].total > 0)
+    if (visibleKeys.length === 0) return []
+
+    const ref = cardProviderRef(card)
+    const items: ProviderQuotaDisplayItem[] = []
+
+    for (const key of visibleKeys) {
+      const setting = settings[key]
+      try {
+        let used = 0
+        let nextReset: Date | null = null
+
+        if (key === 'five_hour') {
+          const status = await fetchFiveHourQuotaStatusByProvider(platform, ref, card.name)
+          if (status.active) {
+            used = status.used
+            nextReset = new Date(status.next_reset)
+          }
+          items.push({
+            key,
+            label: t(quotaLabelKey[key]),
+            used,
+            total: setting.total,
+            progressRatio: setting.total > 0 ? used / setting.total : 0,
+            countdownLabel: status.active
+              ? formatCountdown(nextReset, now)
+              : t('components.main.providers.quotaInactive'),
+            nextReset,
+          })
+          continue
+        } else {
+          const window = resolveBudgetQuotaWindow(key, setting, now)
+          nextReset = window.nextReset
+          const startStr = formatLocalDateTime(window.start)
+          used = await fetchCostSinceByProvider(startStr, platform, ref, card.name)
+        }
+
+        const progressRatio = setting.total > 0 ? used / setting.total : 0
+
+        items.push({
+          key,
+          label: t(quotaLabelKey[key]),
+          used,
+          total: setting.total,
+          progressRatio,
+          countdownLabel: formatCountdown(nextReset, now),
+          nextReset,
+        })
+      } catch (error) {
+        console.warn(`[ProviderQuota] Failed to resolve ${key} for ${card.name}:`, error)
+      }
+    }
+
+    return items
+  }
+
+  const refreshProviderQuotas = async () => {
+    if (refreshInFlight) {
+      // 正在刷新时排队，等当前结束后自动重跑，避免丢失切 tab 等触发
+      refreshQueued = true
+      return
+    }
+    refreshInFlight = true
+
+    try {
+      const tab = getActiveTab()
+      const platform = tabToPlatform(tab)
+      const tabCards = cards[tab] ?? []
+      const tabQuotaDisplayMap = quotaDisplayMap[tab]
+      const now = new Date()
+      const currentRefs = new Set<string>()
+
+      const tasks = tabCards.map(async (card) => {
+        const ref = cardProviderRef(card) || card.name
+        if (!ref) return
+        currentRefs.add(ref)
+
+        const settings = normalizeBudgetQuotaSettings(card.budgetQuotaSettings)
+        const hasQuota = budgetQuotaOrder.some((key) => settings[key].total > 0)
+        if (!hasQuota) {
+          // 清理无额度的供应商
+          if (tabQuotaDisplayMap[ref]) {
+            delete tabQuotaDisplayMap[ref]
+          }
+          return
+        }
+
+        const items = await resolveQuotaForCard(card, platform, now)
+        tabQuotaDisplayMap[ref] = items
+      })
+
+      await Promise.all(tasks)
+
+      for (const ref of Object.keys(tabQuotaDisplayMap)) {
+        if (!currentRefs.has(ref)) {
+          delete tabQuotaDisplayMap[ref]
+        }
+      }
+    } catch (error) {
+      console.error('[ProviderQuota] refresh failed:', error)
+    } finally {
+      refreshInFlight = false
+      // 如果排队了新请求，立即执行
+      if (refreshQueued) {
+        refreshQueued = false
+        void refreshProviderQuotas()
+      }
+    }
+  }
+
+  const updateCountdowns = () => {
+    const tabQuotaDisplayMap = quotaDisplayMap[getActiveTab()]
+    const now = new Date()
+    let needsRefresh = false
+    for (const ref in tabQuotaDisplayMap) {
+      const items = tabQuotaDisplayMap[ref]
+      if (!items) continue
+      for (const item of items) {
+        if (!item.nextReset) continue
+        const prevLabel = item.countdownLabel
+        item.countdownLabel = formatCountdown(item.nextReset, now)
+        // 倒计时刚归零时触发一次数据刷新，使进度条和已用金额及时更新
+        if (item.countdownLabel === '00:00:00' && prevLabel !== '00:00:00') {
+          needsRefresh = true
+        }
+      }
+    }
+    if (needsRefresh) {
+      void refreshProviderQuotas()
+    }
+  }
+
+  const getQuotaDisplay = (card: AutomationCard): ProviderQuotaDisplayItem[] => {
+    const ref = cardProviderRef(card) || card.name
+    return quotaDisplayMap[getActiveTab()][ref] ?? []
+  }
+
+  const startTimers = () => {
+    stopTimers()
+    refreshTimer = window.setInterval(() => {
+      void refreshProviderQuotas()
+    }, QUOTA_REFRESH_INTERVAL_MS)
+    countdownTimer = window.setInterval(updateCountdowns, COUNTDOWN_TICK_INTERVAL_MS)
+  }
+
+  const stopTimers = () => {
+    if (refreshTimer !== undefined) {
+      clearInterval(refreshTimer)
+      refreshTimer = undefined
+    }
+    if (countdownTimer !== undefined) {
+      clearInterval(countdownTimer)
+      countdownTimer = undefined
+    }
+  }
+
+  onUnmounted(stopTimers)
+
+  return {
+    quotaDisplayMap,
+    refreshProviderQuotas,
+    getQuotaDisplay,
+    startTimers,
+    stopTimers,
+  }
+}
