@@ -162,7 +162,7 @@ describe('useAdaptiveHeatmap', () => {
 
 		expect(mockedFetch).toHaveBeenCalledTimes(1)
 		expect(mockedFetch.mock.calls[0]?.[0]).toBe(365)
-		expect(visibleColumns.value).toBe(27)
+		expect(visibleColumns.value).toBe(26)
 	})
 
 	it('loads default hourly range when container width is unavailable during init', async () => {
@@ -212,8 +212,8 @@ describe('useAdaptiveHeatmap', () => {
 		await flushPromises()
 
 		expect(mockedFetch).toHaveBeenCalledTimes(2)
-		expect(mockedFetch.mock.calls[1]?.[0]).toBe(21)
-		expect(visibleColumns.value).toBe(63)
+		expect(mockedFetch.mock.calls[1]?.[0]).toBe(20)
+		expect(visibleColumns.value).toBe(60)
 	})
 
 	it('pauses layout sync before hidden-page probes can trigger extra requests', async () => {
@@ -248,7 +248,7 @@ describe('useAdaptiveHeatmap', () => {
 		await flushPromises()
 
 		expect(mockedFetch).toHaveBeenCalledTimes(2)
-		expect(mockedFetch.mock.calls[1]?.[0]).toBe(21)
+		expect(mockedFetch.mock.calls[1]?.[0]).toBe(20)
 	})
 
 	it('reloads data when display settings change', async () => {
@@ -384,8 +384,8 @@ describe('useAdaptiveHeatmap', () => {
 		await flushPromises()
 
 		expect(mockedFetch).toHaveBeenCalledTimes(2)
-		expect(mockedFetch.mock.calls[0]?.[0]).toBe(19)
-		expect(mockedFetch.mock.calls[1]?.[0]).toBe(19)
+		expect(mockedFetch.mock.calls[0]?.[0]).toBe(18)
+		expect(mockedFetch.mock.calls[1]?.[0]).toBe(18)
 
 		resolveReload([makeStat(nowKey, 7)])
 		await flushPromises()
@@ -432,7 +432,7 @@ describe('useAdaptiveHeatmap', () => {
 		await flushPromises()
 
 		expect(mockedFetch).toHaveBeenCalledTimes(2)
-		expect(mockedFetch.mock.calls[0]?.[0]).toBe(19)
+		expect(mockedFetch.mock.calls[0]?.[0]).toBe(18)
 		expect(mockedFetch.mock.calls[1]?.[0]).toBe(365)
 
 		resolveDaily([makeStat(nowKey, 24)])

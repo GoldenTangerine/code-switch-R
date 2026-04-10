@@ -23,6 +23,7 @@ const CELL_SIZES = {
 	medium: { cell: 12, gap: 3, padding: 24 }, // 640-960px
 	small: { cell: 10, gap: 2, padding: 16 }, // < 640px
 } as const
+const GRID_HORIZONTAL_PADDING = 4
 
 // 边界限制
 const MIN_COLUMNS = 9
@@ -120,7 +121,7 @@ export function useAdaptiveHeatmap(
 		maxColumns: number,
 	): number => {
 		const { cell, gap, padding } = cellConfig.value
-		const availableWidth = containerWidth - padding * 2
+		const availableWidth = containerWidth - padding * 2 - GRID_HORIZONTAL_PADDING * 2
 		const cellUnit = cell + gap
 
 		// 计算可容纳的列数

@@ -92,6 +92,7 @@ import {
   buildHeatmapCurrentCellMatchKey,
   getMillisecondsUntilNextHeatmapBoundary,
 } from '../../../utils/heatmapCurrentCell'
+import { createHeatmapAutoRefreshController } from '../../../utils/heatmapAutoRefresh'
 
 const props = defineProps<{
   granularity: HeatmapGranularity
@@ -253,10 +254,15 @@ const formatTooltipPercentValue = (value: number) => {
   }).format(normalized)
 }
 
+const tooltipLocale = computed(() => locale.value || 'en')
+const shouldUseLongWeekday = computed(() => tooltipLocale.value.toLowerCase().startsWith('zh'))
+
 const tooltipDateFormatter = computed(() =>
-  new Intl.DateTimeFormat(locale.value || 'en', {
+  new Intl.DateTimeFormat(tooltipLocale.value, {
+    year: 'numeric',
     month: 'short',
     day: 'numeric',
+    weekday: shouldUseLongWeekday.value ? 'long' : 'short',
     ...(granularityRef.value === 'daily'
       ? {}
       : {
@@ -272,7 +278,31 @@ const formattedTooltipLabel = computed(() => {
   if (Number.isNaN(date.getTime())) {
     return usageTooltip.label
   }
-  return tooltipDateFormatter.value.format(date)
+  if (!shouldUseLongWeekday.value) {
+    return tooltipDateFormatter.value.format(date)
+  }
+
+  const parts = tooltipDateFormatter.value.formatToParts(date)
+  let formatted = ''
+
+  parts.forEach((part, index) => {
+    if (part.type === 'weekday') {
+      if (formatted && !formatted.endsWith(' ')) {
+        formatted += ' '
+      }
+      formatted += part.value
+
+      const nextPart = parts[index + 1]
+      if (nextPart && nextPart.type !== 'literal') {
+        formatted += ' '
+      }
+      return
+    }
+
+    formatted += part.value
+  })
+
+  return formatted.replace(/\s{2,}/g, ' ').trim()
 })
 
 const getHeatmapMetricLabel = (metric: HeatmapIntensityMetric) => {
@@ -487,6 +517,7 @@ const TOOLTIP_DEFAULT_HEIGHT = 384
 const TOOLTIP_VERTICAL_OFFSET = 12
 const TOOLTIP_HORIZONTAL_MARGIN = 20
 const TOOLTIP_VERTICAL_MARGIN = 24
+const HEATMAP_AUTO_REFRESH_INTERVAL_MS = 60_000
 
 const getTooltipSize = () => {
   const rect = tooltipRef.value?.getBoundingClientRect()
@@ -550,6 +581,10 @@ const updateUsageTooltipPosition = (cellRect: DOMRect | ReturnType<HTMLElement['
 let usageTooltipPositionRequestId = 0
 let currentTimeRefreshTimer: number | null = null
 let hasActivatedOnce = false
+const heatmapAutoRefresh = createHeatmapAutoRefreshController({
+  intervalMs: HEATMAP_AUTO_REFRESH_INTERVAL_MS,
+  reload,
+})
 
 const clearCurrentTimeRefreshTimer = () => {
   if (!currentTimeRefreshTimer) return
@@ -607,6 +642,7 @@ const hideUsageTooltip = () => {
 onMounted(() => {
   syncCurrentTime()
   scheduleCurrentTimeRefresh()
+  heatmapAutoRefresh.start()
   void init()
 })
 
@@ -617,13 +653,16 @@ onActivated(() => {
   }
   syncCurrentTime()
   scheduleCurrentTimeRefresh()
+  heatmapAutoRefresh.start()
   void nextTick(() => {
     void syncLayout()
+    void reload()
   })
 })
 
 onDeactivated(() => {
   clearCurrentTimeRefreshTimer()
+  heatmapAutoRefresh.stop()
   hideUsageTooltip()
   pauseLayoutSync()
 })
@@ -635,6 +674,7 @@ watch(granularityRef, () => {
 
 onUnmounted(() => {
   clearCurrentTimeRefreshTimer()
+  heatmapAutoRefresh.stop()
   cleanup()
 })
 </script>

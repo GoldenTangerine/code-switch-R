@@ -18,7 +18,12 @@ export type HeatmapGranularity = 'hourly' | 'daily'
 
 export const normalizeHeatmapGranularity = (
   value?: string | null,
-): HeatmapGranularity => (value === 'daily' ? 'daily' : 'hourly')
+  fallback: HeatmapGranularity = 'daily',
+): HeatmapGranularity => {
+  if (value === 'daily') return 'daily'
+  if (value === 'hourly') return 'hourly'
+  return fallback
+}
 
 export type AppSettings = {
   show_heatmap: boolean
@@ -68,7 +73,7 @@ export type AppSettings = {
 
 const DEFAULT_SETTINGS: AppSettings = {
   show_heatmap: true,
-  heatmap_granularity: 'hourly',
+  heatmap_granularity: 'daily',
   heatmap_daily_scale_factor: DEFAULT_HEATMAP_DISPLAY_SETTINGS.dailyScaleFactor,
   heatmap_daily_intensity_mode: DEFAULT_HEATMAP_DISPLAY_SETTINGS.dailyIntensityMode,
   heatmap_intensity_metric: DEFAULT_HEATMAP_DISPLAY_SETTINGS.intensityMetric,
@@ -141,7 +146,10 @@ const normalizeAppSettingsResponse = (value: unknown): AppSettings => {
   return {
     ...DEFAULT_SETTINGS,
     ...data,
-    heatmap_granularity: normalizeHeatmapGranularity(data?.heatmap_granularity),
+    heatmap_granularity: normalizeHeatmapGranularity(
+      data?.heatmap_granularity,
+      DEFAULT_SETTINGS.heatmap_granularity,
+    ),
     heatmap_daily_scale_factor: normalizedHeatmapDisplay.dailyScaleFactor,
     heatmap_daily_intensity_mode: normalizedHeatmapDisplay.dailyIntensityMode,
     heatmap_intensity_metric: normalizedHeatmapDisplay.intensityMetric,

@@ -272,7 +272,7 @@ func (as *AppSettingsService) defaultSettings() AppSettings {
 
 	return AppSettings{
 		ShowHeatmap:                     true,
-		HeatmapGranularity:              heatmapGranularityHourly,
+		HeatmapGranularity:              heatmapGranularityDaily,
 		HeatmapDailyScaleFactor:         defaultHeatmapDailyScale,
 		HeatmapDailyIntensityMode:       heatmapDailyModeHourlyScaled,
 		HeatmapIntensityMetric:          defaultHeatmapIntensityMetric,
@@ -734,8 +734,10 @@ func normalizeHeatmapGranularity(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case heatmapGranularityDaily:
 		return heatmapGranularityDaily
-	default:
+	case heatmapGranularityHourly:
 		return heatmapGranularityHourly
+	default:
+		return heatmapGranularityDaily
 	}
 }
 

@@ -113,7 +113,7 @@ const defaultUpdateHistoryKeepCount = 3
 const minUpdateHistoryKeepCount = 1
 const maxUpdateHistoryKeepCount = 20
 const heatmapEnabled = ref(getCachedValue('heatmap', true))
-const heatmapGranularity = ref(normalizeHeatmapGranularity(getCachedString('heatmapGranularity', 'hourly')))
+const heatmapGranularity = ref(normalizeHeatmapGranularity(getCachedString('heatmapGranularity', 'daily')))
 const initialHeatmapDisplaySettings = normalizeHeatmapDisplaySettings({
   dailyScaleFactor: getCachedNumber('heatmapDailyScaleFactor', DEFAULT_HEATMAP_DISPLAY_SETTINGS.dailyScaleFactor),
   dailyIntensityMode: normalizeHeatmapDailyIntensityMode(
@@ -1109,7 +1109,7 @@ const loadAppSettings = async () => {
   } catch (error) {
     console.error('failed to load app settings', error)
     heatmapEnabled.value = true
-    heatmapGranularity.value = 'hourly'
+    heatmapGranularity.value = 'daily'
     applyHeatmapDisplaySettingsToState(DEFAULT_HEATMAP_DISPLAY_SETTINGS)
     homeTitleVisible.value = true
     budgetQuotaUsedAdjustments.value = createDefaultBudgetQuotaAdjustments()

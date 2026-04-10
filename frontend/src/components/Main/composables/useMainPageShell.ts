@@ -118,7 +118,7 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
     proxyStates.others = enabled
   }
 
-  const heatmapGranularity = ref<HeatmapGranularity>('hourly')
+  const heatmapGranularity = ref<HeatmapGranularity>('daily')
   const heatmapDisplaySettings = ref<HeatmapDisplaySettings>({
     ...DEFAULT_HEATMAP_DISPLAY_SETTINGS,
   })
@@ -173,8 +173,8 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
     } catch (error) {
       console.error('failed to load app settings', error)
       showHeatmap.value = true
-      if (heatmapGranularity.value !== 'hourly') {
-        heatmapGranularity.value = 'hourly'
+      if (heatmapGranularity.value !== 'daily') {
+        heatmapGranularity.value = 'daily'
       }
       if (!areHeatmapDisplaySettingsEqual(heatmapDisplaySettings.value, DEFAULT_HEATMAP_DISPLAY_SETTINGS)) {
         heatmapDisplaySettings.value = { ...DEFAULT_HEATMAP_DISPLAY_SETTINGS }
