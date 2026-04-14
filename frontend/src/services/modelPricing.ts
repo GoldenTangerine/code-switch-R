@@ -1,9 +1,19 @@
 /**
  * 模型价格（input/output/cache）配置 API 封装
  */
-import { Call } from '@wailsio/runtime'
+import { Call, Events } from '@wailsio/runtime'
 
 const MODEL_PRICING_SERVICE = 'codeswitch/services.ModelPricingService'
+export const MODEL_PRICING_CHANGED_EVENT = 'model-pricing:changed'
+
+export type ModelPricingChangedAction = 'upsert' | 'delete' | 'sync'
+
+export interface ModelPricingChangedEventPayload {
+  action: ModelPricingChangedAction
+  model?: string
+  syncedAt?: string
+  timestamp: number
+}
 
 export interface ModelPricingRow {
   original_model?: string
@@ -51,6 +61,14 @@ export interface ClaudeOfficialPricingPreviewResult {
   unrecognized_models?: string[]
 }
 
+const emitModelPricingChanged = async (payload: ModelPricingChangedEventPayload) => {
+  try {
+    await Events.Emit(MODEL_PRICING_CHANGED_EVENT, payload)
+  } catch (error) {
+    console.warn('failed to emit model pricing changed event', error)
+  }
+}
+
 export const listModelPricing = async (): Promise<ModelPricingRow[]> => {
   const result = await Call.ByName(`${MODEL_PRICING_SERVICE}.ListModelPricing`)
   return (result ?? []) as ModelPricingRow[]
@@ -58,14 +76,30 @@ export const listModelPricing = async (): Promise<ModelPricingRow[]> => {
 
 export const upsertModelPricing = async (row: ModelPricingRow): Promise<void> => {
   await Call.ByName(`${MODEL_PRICING_SERVICE}.UpsertModelPricing`, row)
+  await emitModelPricingChanged({
+    action: 'upsert',
+    model: row.model,
+    timestamp: Date.now(),
+  })
 }
 
 export const deleteModelPricing = async (model: string): Promise<void> => {
   await Call.ByName(`${MODEL_PRICING_SERVICE}.DeleteModelPricing`, model)
+  await emitModelPricingChanged({
+    action: 'delete',
+    model,
+    timestamp: Date.now(),
+  })
 }
 
 export const syncClaudeOfficialPricing = async (): Promise<ModelPricingSyncResult> => {
-  return Call.ByName(`${MODEL_PRICING_SERVICE}.SyncClaudeOfficialPricing`)
+  const result = await Call.ByName(`${MODEL_PRICING_SERVICE}.SyncClaudeOfficialPricing`) as ModelPricingSyncResult
+  await emitModelPricingChanged({
+    action: 'sync',
+    syncedAt: result?.synced_at,
+    timestamp: Date.now(),
+  })
+  return result
 }
 
 export const previewClaudeOfficialPricing = async (): Promise<ClaudeOfficialPricingPreviewResult> => {

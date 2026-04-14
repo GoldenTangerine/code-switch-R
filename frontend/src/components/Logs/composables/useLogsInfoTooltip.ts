@@ -5,8 +5,9 @@ import type { LogInfoTooltipDetail, TooltipPlacement } from '../types'
 type UseLogsInfoTooltipOptions = {
   buildModelInfoTooltipDetail: (item: RequestLog) => LogInfoTooltipDetail
   buildVerifyInfoTooltipDetail: (item: RequestLog) => LogInfoTooltipDetail
-  ensureModelPricingLoaded: () => Promise<void>
+  ensureModelPricingLoaded: (force?: boolean) => Promise<void>
   modelPricingLoaded: Ref<boolean>
+  modelPricingStale: Ref<boolean>
   hidePeerTooltipImmediately?: () => void
 }
 
@@ -141,8 +142,9 @@ export function useLogsInfoTooltip(options: UseLogsInfoTooltipOptions) {
     target: HTMLElement,
     requestId: number,
   ) => {
-    if (options.modelPricingLoaded.value) return
-    await options.ensureModelPricingLoaded()
+    const shouldRefreshPricing = !options.modelPricingLoaded.value || options.modelPricingStale.value
+    if (!shouldRefreshPricing) return
+    await options.ensureModelPricingLoaded(options.modelPricingStale.value)
     if (requestId !== logInfoTooltipRequestId.value) return
     if (!logInfoTooltip.visible) return
     if (logInfoTooltipAnchorRef.value !== target) return

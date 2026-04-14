@@ -220,6 +220,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import { Events } from '@wailsio/runtime'
 import {
   Chart,
   CategoryScale,
@@ -252,6 +253,7 @@ import { useLogsPageData } from './composables/useLogsPageData'
 import { useLogsPayloadDetail } from './composables/useLogsPayloadDetail'
 import { useLogsPricingDetails } from './composables/useLogsPricingDetails'
 import { useLogsStorageModalController } from './composables/useLogsStorageModalController'
+import { MODEL_PRICING_CHANGED_EVENT } from '../../services/modelPricing'
 import { formatCurrency, formatNumber, formatTokenNumber } from './utils'
 
 Chart.register(CategoryScale, LinearScale, ArcElement, PointElement, LineElement, Tooltip, Legend)
@@ -261,6 +263,7 @@ const router = useRouter()
 
 const isDarkTheme = ref(document.documentElement.classList.contains('dark'))
 let themeObserver: MutationObserver | null = null
+let unsubscribeModelPricingChanged: (() => void) | null = null
 
 const startThemeObserver = () => {
   themeObserver?.disconnect()
@@ -392,6 +395,8 @@ const {
 
 const {
   modelPricingLoaded,
+  modelPricingStale,
+  markModelPricingStale,
   loadModelPricingRows,
   buildCostTooltipDetail,
   buildModelInfoTooltipDetail,
@@ -444,6 +449,7 @@ const {
   buildVerifyInfoTooltipDetail,
   ensureModelPricingLoaded: loadModelPricingRows,
   modelPricingLoaded,
+  modelPricingStale,
   hidePeerTooltipImmediately: hideCostTooltipPeer,
 })
 
@@ -461,8 +467,13 @@ const {
   buildCostTooltipDetail,
   ensureModelPricingLoaded: loadModelPricingRows,
   modelPricingLoaded,
+  modelPricingStale,
   hidePeerTooltipImmediately: hideLogInfoTooltipPeer,
 })
+
+const handleModelPricingChanged = () => {
+  markModelPricingStale()
+}
 
 const handleViewportChange = () => {
   if (logInfoTooltip.visible) {
@@ -505,6 +516,10 @@ onMounted(async () => {
   startThemeObserver()
   window.addEventListener('scroll', handleViewportChange, true)
   window.addEventListener('resize', handleViewportChange)
+  unsubscribeModelPricingChanged = Events.On(
+    MODEL_PRICING_CHANGED_EVENT,
+    handleModelPricingChanged as Events.Callback,
+  )
   await Promise.all([loadDashboard(), loadModelPricingRows()])
   startCountdown()
 })
@@ -516,6 +531,8 @@ onUnmounted(() => {
   window.removeEventListener('scroll', handleViewportChange, true)
   window.removeEventListener('resize', handleViewportChange)
   stopCountdown()
+  unsubscribeModelPricingChanged?.()
+  unsubscribeModelPricingChanged = null
   themeObserver?.disconnect()
   themeObserver = null
 })

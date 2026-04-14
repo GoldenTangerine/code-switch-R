@@ -38,6 +38,7 @@ export function useLogsPricingDetails(options: UseLogsPricingDetailsOptions) {
 
   const modelPricingRows = ref<ModelPricingRow[]>([])
   const modelPricingLoaded = ref(false)
+  const modelPricingStale = ref(false)
   let modelPricingLoadingTask: Promise<void> | null = null
 
   const modelPricingIndex = computed(() => buildModelPricingLookup(modelPricingRows.value))
@@ -280,8 +281,12 @@ export function useLogsPricingDetails(options: UseLogsPricingDetailsOptions) {
       responseModel: item.response_model,
     }, buildInfoTooltipLabels())
 
-  const loadModelPricingRows = async () => {
-    if (modelPricingLoaded.value) return
+  const markModelPricingStale = () => {
+    modelPricingStale.value = true
+  }
+
+  const loadModelPricingRows = async (force = false) => {
+    if (modelPricingLoaded.value && !modelPricingStale.value && !force) return
     if (modelPricingLoadingTask) {
       await modelPricingLoadingTask
       return
@@ -291,6 +296,7 @@ export function useLogsPricingDetails(options: UseLogsPricingDetailsOptions) {
       try {
         modelPricingRows.value = (await listModelPricing()) ?? []
         modelPricingLoaded.value = true
+        modelPricingStale.value = false
       } catch (error) {
         console.error('failed to load model pricing rows', error)
       } finally {
@@ -303,6 +309,8 @@ export function useLogsPricingDetails(options: UseLogsPricingDetailsOptions) {
 
   return {
     modelPricingLoaded,
+    modelPricingStale,
+    markModelPricingStale,
     loadModelPricingRows,
     buildCostTooltipDetail,
     buildModelInfoTooltipDetail,

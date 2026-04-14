@@ -1,3 +1,20 @@
+# Code Switch v2.7.96
+
+## 修复
+- **日志页模型价格变更终于能被及时感知了**：模型价格在设置页新增、删除或同步后，前端现在会显式广播 `model-pricing:changed` 事件，日志页收到后只标记本地价格表为 stale，不再继续抱着旧缓存硬算，`qwen3.6` 这类刚新增的自定义模型终于不会出现“设置页里有、日志 tooltip 还说未命中价格表”的拧巴场面。
+- **日志金额 Tooltip 不再靠 UI 文案结构瞎猜业务状态了**：移除 `info tooltip` 通过 `pricing-line-empty` 这种展示层 row key 反推是否要刷新价格表的土办法，改为依赖显式的 `loaded / stale` 状态判断，后面就算 tooltip 行结构或文案再调整，也不会把价格刷新链路顺手改劈叉。
+- **无价格日志不会再每次 hover 都傻乎乎重拉一遍价表**：成本 Tooltip 和模型 Tooltip 现在只会在“首次未加载”或“确实收到价格表变更通知”时刷新模型价格，真正没有匹配价格的历史日志不再每悬停一次就打一枪 `listModelPricing()`，少做无用功也少给自己找抖动。
+
+## 技术改进
+- **模型价格服务前端接口补齐事件语义**：`frontend/src/services/modelPricing.ts` 新增统一的价格表变更事件常量与 payload 类型，`upsert / delete / sync` 三条写链路统一发事件，后续如果别的页面也要跟着做缓存失效，不用再各写各的野路子。
+- **日志页价格表缓存从“只会加载”升级成“能感知失效”**：`useLogsPricingDetails` 现在把 `modelPricingLoaded` 和 `modelPricingStale` 分开管理，并提供 `markModelPricingStale()` 显式失效入口，缓存状态总算不再全靠 hover 时的临场发挥。
+- **前端回归测试补到“价表失效后应自动重载”这条链上**：新增 `useLogsPricingDetails.test.ts`，覆盖初次加载、标记 stale、再次读取后自动刷新到新价格的场景，后面谁再把价表失效通知改没了，测试会先站出来抽脸。
+
+## 发布
+- **本次发版版本号统一推进到 `v2.7.96`**：同步更新应用常量、构建配置、Darwin `Info.plist`、Windows 元数据和 Linux 包版本，继续保证仓库版本号、Git tag 和 GitHub 自动打包产物是一套数，别整那种 tag 推上去了、包里还在喊上一版的糊涂账。
+
+---
+
 # Code Switch v2.7.95
 
 ## 修复

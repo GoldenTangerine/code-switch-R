@@ -4,8 +4,9 @@ import type { CostTooltipDetail, TooltipPlacement } from '../types'
 
 type UseLogsCostTooltipOptions = {
   buildCostTooltipDetail: (item: RequestLog) => CostTooltipDetail
-  ensureModelPricingLoaded: () => Promise<void>
+  ensureModelPricingLoaded: (force?: boolean) => Promise<void>
   modelPricingLoaded: Ref<boolean>
+  modelPricingStale: Ref<boolean>
   hidePeerTooltipImmediately?: () => void
 }
 
@@ -134,8 +135,9 @@ export function useLogsCostTooltip(options: UseLogsCostTooltipOptions) {
     if (requestId !== costTooltipRequestId.value) return
     if (costTooltipAnchorRef.value !== target) return
     updateCostTooltipPosition(target)
-    if (options.modelPricingLoaded.value) return
-    await options.ensureModelPricingLoaded()
+    const shouldRefreshPricing = !options.modelPricingLoaded.value || options.modelPricingStale.value
+    if (!shouldRefreshPricing) return
+    await options.ensureModelPricingLoaded(options.modelPricingStale.value)
     if (requestId !== costTooltipRequestId.value) return
     if (costTooltipAnchorRef.value !== target) return
     costTooltip.detail = options.buildCostTooltipDetail(item)
