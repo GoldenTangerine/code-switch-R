@@ -2,8 +2,8 @@ import { reactive, onUnmounted } from 'vue'
 import type { AutomationCard } from '../../../data/cards'
 import type { LogPlatform } from '../../../services/logs'
 import {
-  budgetQuotaOrder,
   normalizeBudgetQuotaSettings,
+  providerBudgetQuotaOrder,
 } from '../../../utils/budgetUsage'
 import { cardProviderRef } from '../adapters/providerCardMappers'
 import type { ProviderQuotaDisplayItem, ProviderTab, TranslateFn } from '../types'
@@ -86,7 +86,7 @@ export function useProviderQuotas(options: UseProviderQuotasOptions) {
         currentRefs.add(ref)
 
         const settings = normalizeBudgetQuotaSettings(card.budgetQuotaSettings)
-        const hasQuota = budgetQuotaOrder.some((key) => settings[key].total > 0)
+        const hasQuota = providerBudgetQuotaOrder.some((key) => settings[key].total > 0)
         if (!hasQuota) {
           // 清理无额度的供应商
           if (tabQuotaDisplayMap[ref]) {

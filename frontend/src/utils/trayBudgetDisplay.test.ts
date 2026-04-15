@@ -21,4 +21,12 @@ describe('trayBudgetDisplay', () => {
     expect(resolveTrayBudgetDisplayMode(settings)).toBe('quotas')
     expect(getVisibleTrayQuotaKeys(settings)).toEqual(['five_hour', 'weekly'])
   })
+
+  it('ignores provider-only total quota settings in tray mode selection', () => {
+    const settings = createDefaultBudgetQuotaSettings()
+    settings.total.total = 512
+
+    expect(resolveTrayBudgetDisplayMode(settings)).toBe('summary')
+    expect(getVisibleTrayQuotaKeys(settings)).toEqual([])
+  })
 })

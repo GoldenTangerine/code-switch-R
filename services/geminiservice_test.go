@@ -1,6 +1,9 @@
 package services
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -113,8 +116,8 @@ func TestParseEnvFile(t *testing.T) {
 		expected map[string]string
 	}{
 		{
-			name:    "Empty file",
-			content: "",
+			name:     "Empty file",
+			content:  "",
 			expected: map[string]string{},
 		},
 		{
@@ -182,10 +185,10 @@ func TestIsValidEnvKey(t *testing.T) {
 		{"GOOGLE_GEMINI_BASE_URL", true},
 		{"KEY123", true},
 		{"_KEY", true},
-		{"KEY-NAME", false},  // hyphen not allowed
-		{"KEY.NAME", false},  // dot not allowed
-		{"KEY NAME", false},  // space not allowed
-		{"", true},           // empty is technically valid (no invalid chars)
+		{"KEY-NAME", false}, // hyphen not allowed
+		{"KEY.NAME", false}, // dot not allowed
+		{"KEY NAME", false}, // space not allowed
+		{"", true},          // empty is technically valid (no invalid chars)
 	}
 
 	for _, tt := range tests {
@@ -258,5 +261,56 @@ func TestGeminiPreset_Fields(t *testing.T) {
 		if !validCategories[p.Category] {
 			t.Errorf("Preset %q has invalid Category: %q", p.Name, p.Category)
 		}
+	}
+}
+
+func TestGeminiService_LoadProvidersSupportsTotalQuotaFieldAfterInitDatabase(t *testing.T) {
+	useIsolatedHomeDir(t)
+	if err := InitDatabase(); err != nil {
+		t.Fatalf("初始化数据库失败: %v", err)
+	}
+
+	path := getGeminiProvidersPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("创建 Gemini providers 目录失败: %v", err)
+	}
+
+	payload, err := json.Marshal([]GeminiProvider{
+		{
+			ID:      "gemini-total",
+			Name:    "Gemini Total",
+			BaseURL: "https://gemini.example.com",
+			APIKey:  "gm-key",
+			Enabled: true,
+			BudgetQuotaSettings: &BudgetQuotaSettings{
+				Total: BudgetQuotaSetting{
+					Total:           1024,
+					RefreshTime:     "00:00",
+					RefreshDay:      1,
+					RefreshMonthDay: 1,
+				},
+			},
+			BudgetQuotaUsedAdjustments: &BudgetQuotaAdjustments{
+				Total: 45.67,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("序列化 Gemini provider 配置失败: %v", err)
+	}
+	if err := os.WriteFile(path, payload, 0o644); err != nil {
+		t.Fatalf("写入 Gemini provider 配置失败: %v", err)
+	}
+
+	svc := NewGeminiService("127.0.0.1:18100")
+	providers := svc.GetProviders()
+	if len(providers) != 1 {
+		t.Fatalf("期望读取到 1 个 Gemini provider，实际为 %d", len(providers))
+	}
+	if providers[0].BudgetQuotaSettings == nil || providers[0].BudgetQuotaSettings.Total.Total != 1024 {
+		t.Fatalf("Gemini total quota 反序列化失败: %+v", providers[0].BudgetQuotaSettings)
+	}
+	if providers[0].BudgetQuotaUsedAdjustments == nil || providers[0].BudgetQuotaUsedAdjustments.Total != 45.67 {
+		t.Fatalf("Gemini total quota adjustment 反序列化失败: %+v", providers[0].BudgetQuotaUsedAdjustments)
 	}
 }

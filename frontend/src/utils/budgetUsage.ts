@@ -1,5 +1,6 @@
 export type BudgetCycleMode = 'daily' | 'weekly' | 'monthly'
-export type BudgetQuotaKey = 'five_hour' | 'daily' | 'weekly' | 'monthly'
+export type BudgetQuotaKey = 'five_hour' | 'daily' | 'weekly' | 'monthly' | 'total'
+export type BudgetWindowQuotaKey = Exclude<BudgetQuotaKey, 'total'>
 
 export type BudgetUsageConfig = {
   cycleEnabled: boolean
@@ -63,7 +64,8 @@ export type LegacyBudgetQuotaProjection = {
   refreshMonthDay: number
 }
 
-export const budgetQuotaOrder: BudgetQuotaKey[] = ['five_hour', 'daily', 'weekly', 'monthly']
+export const budgetQuotaOrder: BudgetWindowQuotaKey[] = ['five_hour', 'daily', 'weekly', 'monthly']
+export const providerBudgetQuotaOrder: BudgetQuotaKey[] = [...budgetQuotaOrder, 'total']
 export const BUDGET_EDITABLE_AMOUNT_PRECISION = 2
 export const BUDGET_ADJUSTMENT_PRECISION = 6
 
@@ -282,6 +284,7 @@ export const createDefaultBudgetQuotaSettings = (): BudgetQuotaSettings => ({
   daily: createDefaultBudgetQuotaSetting(),
   weekly: createDefaultBudgetQuotaSetting(),
   monthly: createDefaultBudgetQuotaSetting(),
+  total: createDefaultBudgetQuotaSetting(),
 })
 
 export const createDefaultBudgetQuotaAdjustments = (): BudgetQuotaAdjustments => ({
@@ -289,6 +292,7 @@ export const createDefaultBudgetQuotaAdjustments = (): BudgetQuotaAdjustments =>
   daily: 0,
   weekly: 0,
   monthly: 0,
+  total: 0,
 })
 
 export const normalizeBudgetQuotaSetting = (value: unknown): BudgetQuotaSetting => {
@@ -304,12 +308,12 @@ export const normalizeBudgetQuotaSetting = (value: unknown): BudgetQuotaSetting 
 }
 
 const isBudgetQuotaAdjustmentsEmpty = (adjustments: BudgetQuotaAdjustments) => {
-  return budgetQuotaOrder.every((key) => adjustments[key] === 0)
+  return providerBudgetQuotaOrder.every((key) => adjustments[key] === 0)
 }
 
 const resolveLegacyBudgetQuotaKey = (
   legacy?: Pick<LegacyBudgetQuotaSource, 'cycleEnabled' | 'cycleMode'>,
-): Exclude<BudgetQuotaKey, 'five_hour'> => {
+): Exclude<BudgetQuotaKey, 'five_hour' | 'total'> => {
   return legacy?.cycleEnabled
     ? normalizeBudgetCycleMode(legacy.cycleMode)
     : 'daily'
@@ -337,6 +341,7 @@ export const normalizeBudgetQuotaAdjustments = (
     daily: normalizeBudgetQuotaAdjustment(source.daily),
     weekly: normalizeBudgetQuotaAdjustment(source.weekly),
     monthly: normalizeBudgetQuotaAdjustment(source.monthly),
+    total: normalizeBudgetQuotaAdjustment(source.total),
   }
   if (isBudgetQuotaAdjustmentsEmpty(normalized)) {
     return applyLegacyBudgetQuotaAdjustment(normalized, legacy)
@@ -355,6 +360,7 @@ export const serializeBudgetQuotaAdjustments = (value: unknown): BudgetQuotaAdju
     daily: normalized.daily,
     weekly: normalized.weekly,
     monthly: normalized.monthly,
+    total: normalized.total,
   }
 }
 
@@ -368,7 +374,7 @@ export const serializeOptionalBudgetQuotaAdjustments = (
 }
 
 const isBudgetQuotaSettingsEmpty = (settings: BudgetQuotaSettings) => {
-  return budgetQuotaOrder.every((key) => settings[key].total <= 0)
+  return providerBudgetQuotaOrder.every((key) => settings[key].total <= 0)
 }
 
 const applyLegacyBudgetQuotaSource = (
@@ -400,6 +406,7 @@ export const normalizeBudgetQuotaSettings = (
     daily: normalizeBudgetQuotaSetting(source.daily),
     weekly: normalizeBudgetQuotaSetting(source.weekly),
     monthly: normalizeBudgetQuotaSetting(source.monthly),
+    total: normalizeBudgetQuotaSetting(source.total),
   }
   if (isBudgetQuotaSettingsEmpty(normalized)) {
     return applyLegacyBudgetQuotaSource(normalized, legacy)
@@ -432,6 +439,7 @@ export const serializeBudgetQuotaSettings = (value: unknown): SerializedBudgetQu
     daily: serializeBudgetQuotaSetting(normalized.daily),
     weekly: serializeBudgetQuotaSetting(normalized.weekly),
     monthly: serializeBudgetQuotaSetting(normalized.monthly),
+    total: serializeBudgetQuotaSetting(normalized.total),
   }
 }
 
@@ -476,7 +484,7 @@ export const projectBudgetQuotaToLegacy = (
 }
 
 export const resolveBudgetQuotaWindow = (
-  key: BudgetQuotaKey,
+  key: BudgetWindowQuotaKey,
   setting: BudgetQuotaSetting,
   now: Date,
 ): BudgetQuotaWindow => {

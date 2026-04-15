@@ -395,10 +395,9 @@ import {
 } from '../adapters/providerFormMappers'
 import type { ProviderTab, VendorForm } from '../types'
 import type { LogPlatform } from '../../../services/logs'
-import { fetchCostSinceByProvider, fetchFiveHourQuotaStatusByProvider } from '../../../services/logs'
+import { fetchCostByProvider, fetchCostSinceByProvider, fetchFiveHourQuotaStatusByProvider } from '../../../services/logs'
 import type { BudgetQuotaAdjustments, BudgetQuotaKey, BudgetQuotaSetting } from '../../../utils/budgetUsage'
 import {
-  budgetQuotaOrder,
   cloneBudgetQuotaAdjustments,
   cloneBudgetQuotaSettings,
   createDefaultBudgetQuotaAdjustments,
@@ -410,6 +409,7 @@ import {
   normalizeBudgetQuotaAdjustments,
   normalizeBudgetQuotaSettings,
   normalizeBudgetUsedDisplay,
+  providerBudgetQuotaOrder,
   resolveBudgetQuotaWindow,
   resolveBudgetCurrentUsedValue,
 } from '../../../utils/budgetUsage'
@@ -499,6 +499,14 @@ const quotaDefinitions = computed<QuotaDefinition[]>(() => [
     showMonthDay: true,
     showTime: true,
   },
+  {
+    key: 'total',
+    titleKey: 'components.general.label.budgetQuotaTotal',
+    hintKey: 'components.general.label.budgetQuotaTotalHint',
+    showWeekday: false,
+    showMonthDay: false,
+    showTime: false,
+  },
 ])
 
 const weekdayOptions = computed(() => [
@@ -522,11 +530,12 @@ const createDefaultBudgetQuotaUsageStatuses = (
   daily: status,
   weekly: status,
   monthly: status,
+  total: status,
 })
 
 const mapBudgetQuotaValues = (resolveValue: (key: BudgetQuotaKey) => number): BudgetQuotaAdjustments => {
   const nextValues = createDefaultBudgetQuotaAdjustments()
-  budgetQuotaOrder.forEach((key) => {
+  providerBudgetQuotaOrder.forEach((key) => {
     nextValues[key] = resolveValue(key)
   })
   return nextValues
@@ -536,7 +545,7 @@ const mapBudgetQuotaUsageStatuses = (
   resolveStatus: (key: BudgetQuotaKey) => BudgetQuotaUsageStatus,
 ): BudgetQuotaUsageStatuses => {
   const nextStatuses = createDefaultBudgetQuotaUsageStatuses()
-  budgetQuotaOrder.forEach((key) => {
+  providerBudgetQuotaOrder.forEach((key) => {
     nextStatuses[key] = resolveStatus(key)
   })
   return nextStatuses
@@ -611,6 +620,9 @@ const getBudgetQuotaCurrentUsedHint = (key: BudgetQuotaKey) => {
   if (status === 'error') {
     return t('components.general.label.budgetQuotaUsedUnavailableHint')
   }
+  if (key === 'total') {
+    return t('components.general.label.budgetQuotaUsedTotalAdjustmentHint')
+  }
   return t('components.general.label.budgetQuotaUsedAdjustmentHint')
 }
 
@@ -629,7 +641,7 @@ const nextBudgetQuotaUsageRequestId = () => {
 const refreshBudgetQuotaUsage = async () => {
   const requestId = nextBudgetQuotaUsageRequestId()
   const quotaSettings = normalizeBudgetQuotaSettings(form.budgetQuotaSettings)
-  const activeQuotaKeys = budgetQuotaOrder.filter((key) => quotaSettings[key].total > 0)
+  const activeQuotaKeys = providerBudgetQuotaOrder.filter((key) => quotaSettings[key].total > 0)
   const activeQuotaKeySet = new Set(activeQuotaKeys)
 
   budgetQuotaUsageStatuses.value = mapBudgetQuotaUsageStatuses((key) => (
@@ -665,6 +677,14 @@ const refreshBudgetQuotaUsage = async () => {
     ))
     const results = await Promise.allSettled(
       activeQuotaKeys.map(async (key) => {
+        if (key === 'total') {
+          const usage = await fetchCostByProvider(platform, providerRef, providerName)
+          return {
+            key,
+            status: 'ready' as const,
+            usage: normalizeBudgetUsedDisplay(Number(usage)),
+          }
+        }
         if (key === 'five_hour') {
           const snapshot = await fetchFiveHourQuotaStatusByProvider(platform, providerRef, providerName)
           return {

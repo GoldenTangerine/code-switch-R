@@ -129,6 +129,7 @@ type SerializedBudgetQuotaAdjustments = {
   daily: number
   weekly: number
   monthly: number
+  total: number
 }
 
 const normalizeAppSettingsResponse = (value: unknown): AppSettings => {
@@ -198,6 +199,7 @@ const serializeBudgetQuotaAdjustments = (value: unknown): SerializedBudgetQuotaA
     daily: normalized.daily,
     weekly: normalized.weekly,
     monthly: normalized.monthly,
+    total: normalized.total,
   }
 }
 

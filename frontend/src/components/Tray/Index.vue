@@ -65,6 +65,7 @@ const quotaTitles: Record<BudgetQuotaKey, string> = {
   daily: '日额度',
   weekly: '周额度',
   monthly: '月额度',
+  total: '总额度',
 }
 
 const formatCurrency = (value?: number) => {

@@ -206,6 +206,11 @@
   color: #d97706;
 }
 
+.quota-badge--total {
+  background: rgba(236, 72, 153, 0.12);
+  color: #db2777;
+}
+
 :global(.dark) .quota-badge--five_hour {
   background: rgba(139, 92, 246, 0.2);
   color: #a78bfa;
@@ -224,6 +229,11 @@
 :global(.dark) .quota-badge--monthly {
   background: rgba(245, 158, 11, 0.2);
   color: #fcd34d;
+}
+
+:global(.dark) .quota-badge--total {
+  background: rgba(236, 72, 153, 0.22);
+  color: #f9a8d4;
 }
 
 .quota-progress-bar {

@@ -438,9 +438,11 @@ const quotaCards = computed(() => quotaItems.value.map((item) => ({
   percentLabel: formatQuotaUsagePercent(item),
   progressWidth: getQuotaProgressPercent(item),
   progressClass: getQuotaProgressClass(item),
-  countdownLabel: item.isActive
-    ? item.countdownLabel
-    : t('components.main.providers.quotaInactive'),
+  countdownLabel: item.key === 'total'
+    ? t('components.main.providerDataOverview.quotaNoResetLabel')
+    : item.isActive
+      ? item.countdownLabel
+      : t('components.main.providers.quotaInactive'),
   remainingLabel: !item.isActive
     ? t('components.main.providerDataOverview.quotaInactiveLabel')
     : item.remaining >= 0
@@ -1359,6 +1361,11 @@ onBeforeUnmount(() => {
 .provider-data-quota-card__badge--monthly {
   color: #d97706;
   background: rgba(245, 158, 11, 0.16);
+}
+
+.provider-data-quota-card__badge--total {
+  color: #db2777;
+  background: rgba(236, 72, 153, 0.16);
 }
 
 .provider-data-quota-card__percent {

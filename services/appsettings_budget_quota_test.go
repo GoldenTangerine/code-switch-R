@@ -68,7 +68,7 @@ func TestBudgetQuotaSettingUnmarshalJSONSupportsSnakeAndCamelCase(t *testing.T) 
 func TestNormalizeBudgetQuotaUsedAdjustmentsMigratesLegacyAdjustmentOnlyToMatchingMode(t *testing.T) {
 	got := normalizeBudgetQuotaUsedAdjustments(BudgetQuotaAdjustments{}, 2.75, true, budgetCycleModeWeekly)
 
-	if got.FiveHour != 0 || got.Daily != 0 || got.Weekly != 2.75 || got.Monthly != 0 {
+	if got.FiveHour != 0 || got.Daily != 0 || got.Weekly != 2.75 || got.Monthly != 0 || got.Total != 0 {
 		t.Fatalf("期望旧 adjustment 只迁移到 weekly 额度，实际 = %+v", got)
 	}
 }
@@ -93,6 +93,9 @@ func TestNormalizeBudgetQuotaUsedAdjustmentsPreservesPerQuotaValues(t *testing.T
 	if got.Monthly != 4.25 {
 		t.Fatalf("Monthly = %v, want 4.25", got.Monthly)
 	}
+	if got.Total != 0 {
+		t.Fatalf("Total = %v, want 0", got.Total)
+	}
 }
 
 func TestNormalizeBudgetSettingsMigratesLegacySingleQuotaIntoMatchingSlot(t *testing.T) {
@@ -111,13 +114,13 @@ func TestNormalizeBudgetSettingsMigratesLegacySingleQuotaIntoMatchingSlot(t *tes
 	if settings.BudgetQuotaSettings.Weekly.Total != 42 {
 		t.Fatalf("Weekly.Total = %v, want 42", settings.BudgetQuotaSettings.Weekly.Total)
 	}
-	if settings.BudgetQuotaSettings.Daily.Total != 0 || settings.BudgetQuotaSettings.Monthly.Total != 0 || settings.BudgetQuotaSettings.FiveHour.Total != 0 {
+	if settings.BudgetQuotaSettings.Daily.Total != 0 || settings.BudgetQuotaSettings.Monthly.Total != 0 || settings.BudgetQuotaSettings.FiveHour.Total != 0 || settings.BudgetQuotaSettings.Total.Total != 0 {
 		t.Fatalf("期望仅 weekly 被迁移，实际 quota settings = %+v", settings.BudgetQuotaSettings)
 	}
 	if settings.BudgetQuotaUsedAdjustments.Weekly != 3.5 {
 		t.Fatalf("Weekly adjustment = %v, want 3.5", settings.BudgetQuotaUsedAdjustments.Weekly)
 	}
-	if settings.BudgetQuotaUsedAdjustments.Daily != 0 || settings.BudgetQuotaUsedAdjustments.Monthly != 0 || settings.BudgetQuotaUsedAdjustments.FiveHour != 0 {
+	if settings.BudgetQuotaUsedAdjustments.Daily != 0 || settings.BudgetQuotaUsedAdjustments.Monthly != 0 || settings.BudgetQuotaUsedAdjustments.FiveHour != 0 || settings.BudgetQuotaUsedAdjustments.Total != 0 {
 		t.Fatalf("期望仅 weekly adjustment 被迁移，实际 = %+v", settings.BudgetQuotaUsedAdjustments)
 	}
 	if settings.BudgetTotal != 42 || settings.BudgetUsedAdjustment != 3.5 || !settings.BudgetCycleEnabled || settings.BudgetCycleMode != budgetCycleModeWeekly {
@@ -132,12 +135,14 @@ func TestNormalizeBudgetSettingsProjectsMultiQuotaBackToLegacyFields(t *testing.
 			Daily:    BudgetQuotaSetting{Total: 12, RefreshTime: "07:30", RefreshDay: 2, RefreshMonthDay: 5},
 			Weekly:   BudgetQuotaSetting{Total: 48, RefreshTime: "08:15", RefreshDay: 5, RefreshMonthDay: 10},
 			Monthly:  BudgetQuotaSetting{Total: 128, RefreshTime: "09:45", RefreshDay: 3, RefreshMonthDay: 20},
+			Total:    BudgetQuotaSetting{Total: 512, RefreshTime: "00:00", RefreshDay: 1, RefreshMonthDay: 1},
 		},
 		BudgetQuotaUsedAdjustments: BudgetQuotaAdjustments{
 			FiveHour: 1,
 			Daily:    2.5,
 			Weekly:   3.5,
 			Monthly:  4.5,
+			Total:    9,
 		},
 	}
 
@@ -164,9 +169,11 @@ func TestNormalizeBudgetSettingsClearsLegacyFieldsWhenOnlyFiveHourQuotaIsConfigu
 	settings := AppSettings{
 		BudgetQuotaSettings: BudgetQuotaSettings{
 			FiveHour: BudgetQuotaSetting{Total: 9, RefreshTime: "00:00", RefreshDay: 1, RefreshMonthDay: 1},
+			Total:    BudgetQuotaSetting{Total: 240, RefreshTime: "00:00", RefreshDay: 1, RefreshMonthDay: 1},
 		},
 		BudgetQuotaUsedAdjustments: BudgetQuotaAdjustments{
 			FiveHour: 1.5,
+			Total:    4,
 		},
 		BudgetTotal:           88,
 		BudgetUsedAdjustment:  6.25,

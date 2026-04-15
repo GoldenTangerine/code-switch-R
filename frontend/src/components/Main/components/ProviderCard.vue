@@ -181,7 +181,7 @@
                     ></span>
                   </span>
                   <span class="quota-usage-percent">{{ quotaUsagePercent(item) }}</span>
-                  <span class="quota-countdown">{{ item.countdownLabel }}</span>
+                  <span v-if="showQuotaCountdown(item)" class="quota-countdown">{{ item.countdownLabel }}</span>
                 </span>
               </div>
             </div>
@@ -478,10 +478,15 @@ const quotaProgressWidth = (item: ProviderQuotaDisplayItem) => getQuotaProgressP
 
 const quotaUsagePercent = (item: ProviderQuotaDisplayItem) => formatQuotaUsagePercent(item)
 
+const showQuotaCountdown = (item: ProviderQuotaDisplayItem) => Boolean(item.countdownLabel)
+
 const quotaTooltip = (item: ProviderQuotaDisplayItem) => {
   const used = item.used.toFixed(2)
   const total = item.total.toFixed(2)
-  if (item.nextReset) {
+  if (item.key === 'total') {
+    return t('components.main.providers.quotaTooltipNoReset', { label: item.label, used, total })
+  }
+  if (item.nextReset && item.countdownLabel) {
     return t('components.main.providers.quotaTooltip', { label: item.label, used, total, countdown: item.countdownLabel })
   }
   return t('components.main.providers.quotaTooltipNoCountdown', { label: item.label, used, total })

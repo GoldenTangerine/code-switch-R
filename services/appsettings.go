@@ -152,6 +152,7 @@ type BudgetQuotaSettings struct {
 	Daily    BudgetQuotaSetting `json:"daily"`
 	Weekly   BudgetQuotaSetting `json:"weekly"`
 	Monthly  BudgetQuotaSetting `json:"monthly"`
+	Total    BudgetQuotaSetting `json:"total"`
 }
 
 type BudgetQuotaAdjustments struct {
@@ -159,6 +160,7 @@ type BudgetQuotaAdjustments struct {
 	Daily    float64 `json:"daily"`
 	Weekly   float64 `json:"weekly"`
 	Monthly  float64 `json:"monthly"`
+	Total    float64 `json:"total"`
 }
 
 type AppSettingsService struct {
@@ -471,6 +473,7 @@ func defaultBudgetQuotaSettings() BudgetQuotaSettings {
 		Daily:    defaultSetting,
 		Weekly:   defaultSetting,
 		Monthly:  defaultSetting,
+		Total:    defaultSetting,
 	}
 }
 
@@ -482,7 +485,8 @@ func isBudgetQuotaSettingsEmpty(settings BudgetQuotaSettings) bool {
 	return settings.FiveHour.Total <= 0 &&
 		settings.Daily.Total <= 0 &&
 		settings.Weekly.Total <= 0 &&
-		settings.Monthly.Total <= 0
+		settings.Monthly.Total <= 0 &&
+		settings.Total.Total <= 0
 }
 
 func resolveLegacyBudgetQuotaMode(cycleEnabled bool, cycleMode string) string {
@@ -497,6 +501,7 @@ func normalizeBudgetQuotaSettings(settings BudgetQuotaSettings) BudgetQuotaSetti
 	settings.Daily = normalizeBudgetQuotaSetting(settings.Daily)
 	settings.Weekly = normalizeBudgetQuotaSetting(settings.Weekly)
 	settings.Monthly = normalizeBudgetQuotaSetting(settings.Monthly)
+	settings.Total = normalizeBudgetQuotaSetting(settings.Total)
 	return settings
 }
 
@@ -562,6 +567,7 @@ func normalizeBudgetQuotaAdjustments(adjustments BudgetQuotaAdjustments) BudgetQ
 	adjustments.Daily = normalizeBudgetQuotaAdjustment(adjustments.Daily)
 	adjustments.Weekly = normalizeBudgetQuotaAdjustment(adjustments.Weekly)
 	adjustments.Monthly = normalizeBudgetQuotaAdjustment(adjustments.Monthly)
+	adjustments.Total = normalizeBudgetQuotaAdjustment(adjustments.Total)
 	return adjustments
 }
 
@@ -569,7 +575,8 @@ func isBudgetQuotaAdjustmentsEmpty(adjustments BudgetQuotaAdjustments) bool {
 	return adjustments.FiveHour == 0 &&
 		adjustments.Daily == 0 &&
 		adjustments.Weekly == 0 &&
-		adjustments.Monthly == 0
+		adjustments.Monthly == 0 &&
+		adjustments.Total == 0
 }
 
 func applyLegacyBudgetQuotaAdjustment(

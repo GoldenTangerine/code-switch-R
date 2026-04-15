@@ -97,6 +97,7 @@ const createDefaultBudgetQuotaUsageStatuses = (
   daily: status,
   weekly: status,
   monthly: status,
+  total: status,
 })
 
 const mapBudgetQuotaUsageStatuses = (
@@ -343,7 +344,7 @@ const refreshBudgetQuotaUsage = async (platform: BudgetQuotaPlatform) => {
   const quotaRefs = getBudgetQuotaRefs(platform)
   const quotaSettings = normalizeBudgetQuotaSettings(quotaRefs.settings.value)
   const activeQuotaKeys = budgetQuotaOrder.filter((key) => quotaSettings[key].total > 0)
-  const activeQuotaKeySet = new Set(activeQuotaKeys)
+  const activeQuotaKeySet = new Set<BudgetQuotaKey>(activeQuotaKeys)
 
   quotaRefs.loading.value = activeQuotaKeys.length > 0
   quotaRefs.statuses.value = mapBudgetQuotaUsageStatuses((key) => (

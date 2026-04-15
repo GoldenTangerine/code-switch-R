@@ -43,9 +43,9 @@ export type AutomationCard = {
   }
 
   // === 供应商级别预算额度 ===
-  // 供应商独立预算配置（5 小时 / 日 / 周 / 月），nil 表示未配置
+  // 供应商独立预算配置（5 小时 / 日 / 周 / 月 / 总额度），nil 表示未配置
   budgetQuotaSettings?: BudgetQuotaSettings
-  // 供应商独立预算额度当前已使用校准值（5 小时 / 日 / 周 / 月）
+  // 供应商独立预算额度当前已使用校准值（5 小时 / 日 / 周 / 月 / 总额度）
   budgetQuotaUsedAdjustments?: BudgetQuotaAdjustments
 
   // === 旧连通性字段（已废弃，仅用于兼容旧数据） ===

@@ -107,3 +107,59 @@ func TestProviderService_LoadCodexProvidersFallsBackToLegacyPath(t *testing.T) {
 		t.Fatalf("snapshot 未按旧路径回退读取: %#v", snapshot)
 	}
 }
+
+func TestProviderService_LoadProvidersSupportsTotalQuotaFieldAfterInitDatabase(t *testing.T) {
+	homeDir := useIsolatedHomeDir(t)
+	if err := InitDatabase(); err != nil {
+		t.Fatalf("初始化数据库失败: %v", err)
+	}
+
+	configPath := filepath.Join(homeDir, ".code-switch", "providers", "codex.json")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("创建 provider 目录失败: %v", err)
+	}
+
+	payload, err := json.Marshal(providerEnvelope{
+		Providers: []Provider{
+			{
+				ID:      11,
+				Name:    "Quota Total Codex",
+				APIURL:  "https://quota.example.com",
+				APIKey:  "quota-key",
+				Enabled: true,
+				BudgetQuotaSettings: &BudgetQuotaSettings{
+					Total: BudgetQuotaSetting{
+						Total:           512,
+						RefreshTime:     "00:00",
+						RefreshDay:      1,
+						RefreshMonthDay: 1,
+					},
+				},
+				BudgetQuotaUsedAdjustments: &BudgetQuotaAdjustments{
+					Total: 12.34,
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("序列化 provider 配置失败: %v", err)
+	}
+	if err := os.WriteFile(configPath, payload, 0o644); err != nil {
+		t.Fatalf("写入 provider 配置失败: %v", err)
+	}
+
+	service := NewProviderService()
+	loaded, err := service.LoadProviders("codex")
+	if err != nil {
+		t.Fatalf("读取 provider 配置失败: %v", err)
+	}
+	if len(loaded) != 1 {
+		t.Fatalf("期望读取到 1 个 provider，实际为 %d", len(loaded))
+	}
+	if loaded[0].BudgetQuotaSettings == nil || loaded[0].BudgetQuotaSettings.Total.Total != 512 {
+		t.Fatalf("total quota 反序列化失败: %+v", loaded[0].BudgetQuotaSettings)
+	}
+	if loaded[0].BudgetQuotaUsedAdjustments == nil || loaded[0].BudgetQuotaUsedAdjustments.Total != 12.34 {
+		t.Fatalf("total quota adjustment 反序列化失败: %+v", loaded[0].BudgetQuotaUsedAdjustments)
+	}
+}

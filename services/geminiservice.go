@@ -36,16 +36,16 @@ type GeminiProvider struct {
 	Category             string            `json:"category,omitempty"`            // official, third_party, custom
 	PartnerPromotionKey  string            `json:"partnerPromotionKey,omitempty"` // 用于识别供应商类型
 	Enabled              bool              `json:"enabled"`
-	SortOrder            int               `json:"sortOrder,omitempty"`      // 隐藏排序字段：仅控制启用 / 未启用组内顺序
+	SortOrder            int               `json:"sortOrder,omitempty"`         // 隐藏排序字段：仅控制启用 / 未启用组内顺序
 	EnabledSortOrder     int               `json:"enabledSortOrder,omitempty"`  // 记忆启用组内顺序，切回启用时优先恢复
 	DisabledSortOrder    int               `json:"disabledSortOrder,omitempty"` // 记忆未启用组内顺序，切回未启用时优先恢复
-	Level                int               `json:"level,omitempty"`          // 优先级分组 (1-10, 默认 1)
-	EnvConfig            map[string]string `json:"envConfig,omitempty"`      // .env 配置
-	SettingsConfig       map[string]any    `json:"settingsConfig,omitempty"` // settings.json 配置
+	Level                int               `json:"level,omitempty"`             // 优先级分组 (1-10, 默认 1)
+	EnvConfig            map[string]string `json:"envConfig,omitempty"`         // .env 配置
+	SettingsConfig       map[string]any    `json:"settingsConfig,omitempty"`    // settings.json 配置
 	RequestBodyOverrides map[string]any    `json:"requestBodyOverrides,omitempty"`
-	// 供应商级别预算额度配置（5 小时 / 日 / 周 / 月）
-	BudgetQuotaSettings  *BudgetQuotaSettings `json:"budgetQuotaSettings,omitempty"`
-	// 供应商级别预算额度当前已使用校准值（5 小时 / 日 / 周 / 月）
+	// 供应商级别预算额度配置（5 小时 / 日 / 周 / 月 / 总额度）
+	BudgetQuotaSettings *BudgetQuotaSettings `json:"budgetQuotaSettings,omitempty"`
+	// 供应商级别预算额度当前已使用校准值（5 小时 / 日 / 周 / 月 / 总额度）
 	BudgetQuotaUsedAdjustments *BudgetQuotaAdjustments `json:"budgetQuotaUsedAdjustments,omitempty"`
 }
 

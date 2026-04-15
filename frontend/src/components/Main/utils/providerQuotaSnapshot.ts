@@ -1,15 +1,16 @@
 import type { AutomationCard } from '../../../data/cards'
 import {
+  fetchCostByProvider,
   fetchCostSinceByProvider,
   fetchFiveHourQuotaStatusByProvider,
   type LogPlatform,
 } from '../../../services/logs'
 import {
-  budgetQuotaOrder,
   formatLocalDateTime,
   normalizeBudgetQuotaAdjustments,
   normalizeBudgetQuotaSettings,
   normalizeBudgetUsedDisplay,
+  providerBudgetQuotaOrder,
   resolveBudgetCurrentUsedValue,
   resolveBudgetQuotaWindow,
   roundBudgetValue,
@@ -27,6 +28,7 @@ export const providerQuotaLabelKeyMap: Record<BudgetQuotaKey, string> = {
   daily: 'components.main.providers.quotaDaily',
   weekly: 'components.main.providers.quotaWeekly',
   monthly: 'components.main.providers.quotaMonthly',
+  total: 'components.main.providers.quotaTotal',
 }
 
 export type ProviderQuotaSnapshotItem = ProviderQuotaDisplayItem & {
@@ -84,7 +86,7 @@ export const resolveProviderQuotaSnapshot = async ({
 }): Promise<ProviderQuotaSnapshotItem[]> => {
   const settings = normalizeBudgetQuotaSettings(card.budgetQuotaSettings)
   const adjustments = normalizeBudgetQuotaAdjustments(card.budgetQuotaUsedAdjustments)
-  const visibleKeys = budgetQuotaOrder.filter((key) => settings[key].total > 0)
+  const visibleKeys = providerBudgetQuotaOrder.filter((key) => settings[key].total > 0)
   if (visibleKeys.length === 0) return []
 
   const providerRef = cardProviderRef(card) || card.name
@@ -100,7 +102,12 @@ export const resolveProviderQuotaSnapshot = async ({
       let nextReset: Date | null = null
       let isActive = true
 
-      if (key === 'five_hour') {
+      if (key === 'total') {
+        trackedUsed = roundBudgetValue(normalizeBudgetUsedDisplay(
+          await fetchCostByProvider(platform, providerRef, card.name),
+        ))
+        used = resolveBudgetCurrentUsedValue(trackedUsed, adjustment)
+      } else if (key === 'five_hour') {
         const status = await fetchFiveHourQuotaStatusByProvider(platform, providerRef, card.name)
         isActive = status.active
         if (status.active) {
@@ -120,15 +127,19 @@ export const resolveProviderQuotaSnapshot = async ({
         used = resolveBudgetCurrentUsedValue(trackedUsed, adjustment)
       }
 
+      const countdownLabel = key === 'total'
+        ? ''
+        : isActive
+          ? formatProviderQuotaCountdownLabel(nextReset, now)
+          : t('components.main.providers.quotaInactive')
+
       items.push({
         key,
         label: t(providerQuotaLabelKeyMap[key]),
         used,
         total: setting.total,
         progressRatio: resolveProgressRatio(used, setting.total),
-        countdownLabel: isActive
-          ? formatProviderQuotaCountdownLabel(nextReset, now)
-          : t('components.main.providers.quotaInactive'),
+        countdownLabel,
         nextReset,
         trackedUsed,
         adjustment,

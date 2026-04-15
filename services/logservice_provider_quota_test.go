@@ -116,6 +116,124 @@ func TestSyncProviderIdentityRename_UpdatesProviderQuotaCycleStateKey(t *testing
 	}
 }
 
+func TestCostSinceByProvider_MatchesProviderIDAndLegacyName(t *testing.T) {
+	useIsolatedHomeDir(t)
+
+	if err := InitDatabase(); err != nil {
+		t.Fatalf("初始化数据库失败: %v", err)
+	}
+
+	db, err := xdb.DB("default")
+	if err != nil {
+		t.Fatalf("获取数据库连接失败: %v", err)
+	}
+
+	insertRequestLogForProviderQuotaTest(t, db, providerQuotaLogEntry{
+		Platform:   "codex",
+		ProviderID: "pid-1",
+		Provider:   "Acme Renamed",
+		CreatedAt:  "2026-02-24 15:59:59",
+		TotalCost:  99,
+	})
+	insertRequestLogForProviderQuotaTest(t, db, providerQuotaLogEntry{
+		Platform:   "codex",
+		ProviderID: "pid-1",
+		Provider:   "Acme Renamed",
+		CreatedAt:  "2026-02-25 10:00:00",
+		TotalCost:  2,
+	})
+	insertRequestLogForProviderQuotaTest(t, db, providerQuotaLogEntry{
+		Platform:   "codex",
+		ProviderID: "",
+		Provider:   "Acme Renamed",
+		CreatedAt:  "2026-02-26 12:00:00",
+		TotalCost:  3,
+	})
+	insertRequestLogForProviderQuotaTest(t, db, providerQuotaLogEntry{
+		Platform:   "codex",
+		ProviderID: "",
+		Provider:   "Other Name",
+		CreatedAt:  "2026-02-26 13:00:00",
+		TotalCost:  9,
+	})
+
+	ls := NewLogService(nil)
+	total, err := ls.CostSinceByProvider("2026-02-25 00:00:00", "codex", "pid-1", "Acme Renamed")
+	if err != nil {
+		t.Fatalf("CostSinceByProvider 调用失败: %v", err)
+	}
+	if total != 5 {
+		t.Fatalf("期望累计费用为 5，实际 %f", total)
+	}
+}
+
+func TestCostByProvider_PrefersDailyStatsAndMatchesLegacyNameBucket(t *testing.T) {
+	useIsolatedHomeDir(t)
+
+	if err := InitDatabase(); err != nil {
+		t.Fatalf("初始化数据库失败: %v", err)
+	}
+
+	db, err := xdb.DB("default")
+	if err != nil {
+		t.Fatalf("获取数据库连接失败: %v", err)
+	}
+
+	insertRequestLogStatsDailyForProviderQuotaTest(t, db, "2026-02-24 00:00:00", "codex", "pid-1", "Acme Renamed", 7)
+	insertRequestLogStatsDailyForProviderQuotaTest(t, db, "2026-02-23 00:00:00", "codex", "Acme Renamed", "Acme Renamed", 3)
+	insertRequestLogStatsDailyForProviderQuotaTest(t, db, "2026-02-23 00:00:00", "codex", "Other Provider", "Other Provider", 9)
+
+	ls := NewLogService(nil)
+	total, err := ls.CostByProvider("codex", "pid-1", "Acme Renamed")
+	if err != nil {
+		t.Fatalf("CostByProvider 调用失败: %v", err)
+	}
+	if total != 10 {
+		t.Fatalf("期望累计费用为 10，实际 %f", total)
+	}
+}
+
+func TestCostByProvider_FallsBackToRequestLogWhenDailyStatsTableMissing(t *testing.T) {
+	useIsolatedHomeDir(t)
+
+	if err := InitDatabase(); err != nil {
+		t.Fatalf("初始化数据库失败: %v", err)
+	}
+
+	db, err := xdb.DB("default")
+	if err != nil {
+		t.Fatalf("获取数据库连接失败: %v", err)
+	}
+
+	insertRequestLogForProviderQuotaTest(t, db, providerQuotaLogEntry{
+		Platform:   "codex",
+		ProviderID: "pid-1",
+		Provider:   "Acme Renamed",
+		CreatedAt:  "2026-02-25 10:00:00",
+		TotalCost:  2,
+	})
+	insertRequestLogForProviderQuotaTest(t, db, providerQuotaLogEntry{
+		Platform:   "codex",
+		ProviderID: "",
+		Provider:   "Acme Renamed",
+		CreatedAt:  "2026-02-26 12:00:00",
+		TotalCost:  3,
+	})
+
+	if _, err := db.Exec(`DROP TABLE IF EXISTS request_log_stats_daily`); err != nil {
+		t.Fatalf("删除 request_log_stats_daily 失败: %v", err)
+	}
+
+	ls := NewLogService(nil)
+	total, err := ls.CostByProvider("codex", "pid-1", "Acme Renamed")
+	if err != nil {
+		t.Fatalf("CostByProvider 调用失败: %v", err)
+	}
+	if total != 5 {
+		t.Fatalf("期望 fallback 后累计费用为 5，实际 %f", total)
+	}
+}
+
 type providerQuotaLogEntry struct {
 	Platform   string
 	ProviderID string
@@ -157,5 +275,27 @@ func insertRequestLogForProviderQuotaTest(t *testing.T, db *sql.DB, entry provid
 	)
 	if err != nil {
 		t.Fatalf("插入 provider quota request_log 失败: %v", err)
+	}
+}
+
+func insertRequestLogStatsDailyForProviderQuotaTest(t *testing.T, db *sql.DB, bucketStart string, platform string, providerID string, provider string, totalCost float64) {
+	t.Helper()
+	_, err := db.Exec(`
+		INSERT INTO request_log_stats_daily (
+			bucket_start,
+			platform,
+			provider_id,
+			provider,
+			total_cost
+		) VALUES (?, ?, ?, ?, ?)
+	`,
+		bucketStart,
+		platform,
+		providerID,
+		provider,
+		totalCost,
+	)
+	if err != nil {
+		t.Fatalf("插入 provider quota request_log_stats_daily 失败: %v", err)
 	}
 }

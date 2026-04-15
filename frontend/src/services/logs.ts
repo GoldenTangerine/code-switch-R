@@ -193,6 +193,17 @@ export const fetchCostSinceByProvider = async (
   )
 }
 
+export const fetchCostByProvider = async (
+  platform: LogPlatform | '' = '',
+  providerID: string = '',
+  providerName: string = '',
+): Promise<number> => {
+  return Call.ByName(
+    'codeswitch/services.LogService.CostByProvider',
+    platform, providerID, providerName,
+  )
+}
+
 export const fetchFiveHourQuotaStatusByProvider = async (
   platform: LogPlatform | '' = '',
   providerID: string = '',

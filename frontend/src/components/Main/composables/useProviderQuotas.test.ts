@@ -4,11 +4,12 @@ import { createDefaultBudgetQuotaSettings } from '../../../utils/budgetUsage'
 import type { ProviderTab } from '../types'
 
 vi.mock('../../../services/logs', () => ({
+  fetchCostByProvider: vi.fn(),
   fetchCostSinceByProvider: vi.fn(),
   fetchFiveHourQuotaStatusByProvider: vi.fn(),
 }))
 
-import { fetchCostSinceByProvider, fetchFiveHourQuotaStatusByProvider } from '../../../services/logs'
+import { fetchCostByProvider, fetchCostSinceByProvider, fetchFiveHourQuotaStatusByProvider } from '../../../services/logs'
 import { useProviderQuotas } from './useProviderQuotas'
 
 const createCard = (
@@ -199,6 +200,7 @@ describe('useProviderQuotas', () => {
         daily: 7.57,
         weekly: 0,
         monthly: 0,
+        total: 0,
       },
     })
     cards.claude.push(card)
@@ -240,6 +242,7 @@ describe('useProviderQuotas', () => {
         daily: 44.600099995,
         weekly: 0,
         monthly: 0,
+        total: 0,
       },
     })
     cards.claude.push(card)
@@ -266,6 +269,44 @@ describe('useProviderQuotas', () => {
         used: 44.6,
         progressRatio: 1,
         remaining: 0,
+      }),
+    ])
+  })
+
+  it('uses cumulative provider cost for total quotas without countdown refresh state', async () => {
+    const cards = createCardRecord()
+    const quotas = createDefaultBudgetQuotaSettings()
+    quotas.total.total = 250
+
+    const card = createCard(8, { budgetQuotaSettings: quotas })
+    cards.claude.push(card)
+
+    vi.mocked(fetchCostByProvider).mockResolvedValue(123.45)
+    vi.mocked(fetchCostSinceByProvider).mockResolvedValue(0)
+    vi.mocked(fetchFiveHourQuotaStatusByProvider).mockResolvedValue({
+      active: false,
+      window_start: '',
+      next_reset: '',
+      used: 0,
+    })
+
+    const quotaState = useProviderQuotas({
+      t: (key: string) => key,
+      getActiveTab: () => 'claude',
+      cards,
+    })
+
+    await quotaState.refreshProviderQuotas()
+
+    expect(fetchCostByProvider).toHaveBeenCalledWith('claude', '8', 'Provider 8')
+    expect(fetchCostSinceByProvider).not.toHaveBeenCalled()
+    expect(quotaState.getQuotaDisplay(card)).toEqual([
+      expect.objectContaining({
+        key: 'total',
+        used: 123.45,
+        progressRatio: 0.4938,
+        countdownLabel: '',
+        nextReset: null,
       }),
     ])
   })

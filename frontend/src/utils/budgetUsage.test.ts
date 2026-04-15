@@ -99,6 +99,12 @@ describe('budgetUsage', () => {
       refresh_day: 6,
       refresh_month_day: 28,
     })
+    expect(serialized.total).toEqual({
+      total: 0,
+      refresh_time: '00:00',
+      refresh_day: 1,
+      refresh_month_day: 1,
+    })
   })
 
   it('treats all-zero quota settings as unconfigured', () => {
@@ -108,7 +114,14 @@ describe('budgetUsage', () => {
       daily: { total: 0, refreshTime: '00:00', refreshWeekday: 1, refreshMonthDay: 1 },
       weekly: { total: 0, refreshTime: '00:00', refreshWeekday: 1, refreshMonthDay: 1 },
       monthly: { total: 0, refreshTime: '00:00', refreshWeekday: 1, refreshMonthDay: 1 },
+      total: { total: 0, refreshTime: '00:00', refreshWeekday: 1, refreshMonthDay: 1 },
     })).toBe(false)
+  })
+
+  it('treats total quota as a configured provider quota slot', () => {
+    expect(hasConfiguredBudgetQuotaSettings({
+      total: { total: 240, refreshTime: '00:00', refreshWeekday: 1, refreshMonthDay: 1 },
+    })).toBe(true)
   })
 
   it('migrates legacy used adjustment only into the matching cycle quota slot', () => {
@@ -122,6 +135,7 @@ describe('budgetUsage', () => {
     expect(adjustments.daily).toBe(0)
     expect(adjustments.weekly).toBe(3.25)
     expect(adjustments.monthly).toBe(0)
+    expect(adjustments.total).toBe(0)
   })
 
   it('keeps per-quota used adjustments independent', () => {
@@ -130,6 +144,7 @@ describe('budgetUsage', () => {
       daily: -2,
       weekly: 0,
       monthly: 4.75,
+      total: 8.5,
     }, {
       adjustment: 9,
       cycleEnabled: true,
@@ -140,6 +155,7 @@ describe('budgetUsage', () => {
     expect(adjustments.daily).toBe(-2)
     expect(adjustments.weekly).toBe(0)
     expect(adjustments.monthly).toBe(4.75)
+    expect(adjustments.total).toBe(8.5)
   })
 
   it('rounds persisted quota adjustments to stable precision before reuse', () => {
@@ -148,10 +164,12 @@ describe('budgetUsage', () => {
       daily: 44.600099995,
       weekly: -0.000099995,
       monthly: 0,
+      total: 1.23456789,
     })
 
     expect(adjustments.daily).toBe(44.6001)
     expect(adjustments.weekly).toBe(-0.0001)
+    expect(adjustments.total).toBe(1.234568)
   })
 
   it('rounds editable budget amounts to cents without leaking floating point noise', () => {
@@ -171,11 +189,13 @@ describe('budgetUsage', () => {
       daily: { total: 12, refreshTime: '07:30', refreshWeekday: 2, refreshMonthDay: 5 },
       weekly: { total: 40, refreshTime: '08:15', refreshWeekday: 5, refreshMonthDay: 10 },
       monthly: { total: 100, refreshTime: '09:45', refreshWeekday: 3, refreshMonthDay: 20 },
+      total: { total: 999, refreshTime: '00:00', refreshWeekday: 1, refreshMonthDay: 1 },
     }, {
       five_hour: 1,
       daily: 2.5,
       weekly: 3.5,
       monthly: 4.5,
+      total: 99,
     })
 
     expect(legacy.total).toBe(12)
@@ -193,11 +213,13 @@ describe('budgetUsage', () => {
       daily: { total: 0, refreshTime: '07:30', refreshWeekday: 2, refreshMonthDay: 5 },
       weekly: { total: 0, refreshTime: '08:15', refreshWeekday: 5, refreshMonthDay: 10 },
       monthly: { total: 0, refreshTime: '09:45', refreshWeekday: 3, refreshMonthDay: 20 },
+      total: { total: 200, refreshTime: '00:00', refreshWeekday: 1, refreshMonthDay: 1 },
     }, {
       five_hour: 1,
       daily: 2.5,
       weekly: 3.5,
       monthly: 4.5,
+      total: 9,
     })
 
     expect(legacy.total).toBe(0)
