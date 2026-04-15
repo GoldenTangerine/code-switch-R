@@ -565,9 +565,9 @@ func (hcs *HealthCheckService) checkProvider(ctx context.Context, provider Provi
 	result.Endpoint = endpoint
 
 	// 构建请求体
-	reqBody := hcs.buildTestRequest(platform, model)
-	if reqBody == nil {
-		result.ErrorMessage = "无法构建测试请求"
+	reqBody, successContains, err := hcs.buildTestRequest(platform, &provider, model, endpoint)
+	if err != nil {
+		result.ErrorMessage = fmt.Sprintf("无法构建测试请求: %v", err)
 		return result
 	}
 
@@ -650,6 +650,11 @@ func (hcs *HealthCheckService) checkProvider(ctx context.Context, provider Provi
 
 	// 判定状态
 	result.Status, result.ErrorMessage = hcs.determineStatus(resp.StatusCode, latencyMs, body)
+	if (result.Status == HealthStatusOperational || result.Status == HealthStatusDegraded) &&
+		!responseContainsExpectedField(body, successContains) {
+		result.Status = HealthStatusValidationError
+		result.ErrorMessage = fmt.Sprintf("响应内容缺少 %s", successContains)
+	}
 
 	return result
 }
@@ -722,15 +727,18 @@ func (hcs *HealthCheckService) getEffectiveEndpoint(provider *Provider, platform
 		return provider.AvailabilityConfig.TestEndpoint
 	}
 
-	// 优先级 2：用户配置的生产端点（如果配置了 apiEndpoint）
+	// 优先级 2：Claude API 格式映射后的默认端点
+	if strings.EqualFold(platform, "claude") {
+		return resolveProviderEffectiveEndpoint("claude", *provider, "/v1/messages")
+	}
+
+	// 优先级 3：用户配置的生产端点（如果配置了 apiEndpoint）
 	if provider.APIEndpoint != "" {
 		return provider.GetEffectiveEndpoint("")
 	}
 
-	// 优先级 3：平台默认端点
+	// 优先级 4：平台默认端点
 	switch strings.ToLower(platform) {
-	case "claude":
-		return "/v1/messages"
 	case "codex":
 		return "/responses"
 	default:
@@ -748,7 +756,15 @@ func (hcs *HealthCheckService) getEffectiveTimeout(provider *Provider) int {
 }
 
 // buildTestRequest 构建测试请求体
-func (hcs *HealthCheckService) buildTestRequest(platform, model string) []byte {
+func (hcs *HealthCheckService) buildTestRequest(platform string, provider *Provider, model string, endpoint string) ([]byte, string, error) {
+	if strings.EqualFold(platform, "claude") {
+		spec, err := buildClaudeProbeRequest(provider, endpoint, model)
+		if err != nil {
+			return nil, "", err
+		}
+		return spec.Body, spec.SuccessContains, nil
+	}
+
 	// Anthropic 格式
 	if platform == "claude" {
 		reqBody := map[string]interface{}{
@@ -759,7 +775,7 @@ func (hcs *HealthCheckService) buildTestRequest(platform, model string) []byte {
 			},
 		}
 		data, _ := json.Marshal(reqBody)
-		return data
+		return data, "content", nil
 	}
 
 	// OpenAI/Codex 格式
@@ -771,7 +787,7 @@ func (hcs *HealthCheckService) buildTestRequest(platform, model string) []byte {
 		},
 	}
 	data, _ := json.Marshal(reqBody)
-	return data
+	return data, "choices", nil
 }
 
 // saveResult 保存检测结果到数据库

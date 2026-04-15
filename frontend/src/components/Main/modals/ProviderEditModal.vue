@@ -62,6 +62,38 @@
           <span class="field-hint">{{ t('components.main.form.hints.apiEndpoint') }}</span>
         </label>
 
+        <div v-if="tabId === 'claude'" class="form-field provider-advanced-field">
+          <button
+            type="button"
+            class="advanced-toggle"
+            :aria-expanded="claudeAdvancedExpanded"
+            @click="claudeAdvancedExpanded = !claudeAdvancedExpanded"
+          >
+            <span class="advanced-toggle__icon">{{ claudeAdvancedExpanded ? '▾' : '▸' }}</span>
+            <span>{{ t('components.main.form.labels.advancedOptions') }}</span>
+          </button>
+          <span v-if="!claudeAdvancedExpanded" class="field-hint">
+            {{ t('components.main.form.hints.advancedOptions') }}
+          </span>
+          <div v-else class="advanced-section">
+            <label class="form-field">
+              <span>{{ t('components.main.form.labels.apiFormat') }}</span>
+              <select v-model="form.apiFormat" class="mac-select">
+                <option value="anthropic">
+                  {{ t('components.main.form.labels.apiFormatAnthropic') }}
+                </option>
+                <option value="openai_chat">
+                  {{ t('components.main.form.labels.apiFormatOpenAIChat') }}
+                </option>
+                <option value="openai_responses">
+                  {{ t('components.main.form.labels.apiFormatOpenAIResponses') }}
+                </option>
+              </select>
+              <span class="field-hint">{{ t('components.main.form.hints.apiFormat') }}</span>
+            </label>
+          </div>
+        </div>
+
         <div class="form-field">
           <span>{{ t('components.main.form.labels.connectivityAuthType') }}</span>
           <Listbox v-model="selectedAuthType" v-slot="{ open: authTypeOpen }">
@@ -456,6 +488,7 @@ const customAuthHeader = ref('')
 const iconSearchQuery = ref('')
 const requestBodyOverridesText = ref('{}')
 const requestBodyOverridesError = ref('')
+const claudeAdvancedExpanded = ref(false)
 
 type QuotaDefinition = {
   key: BudgetQuotaKey
@@ -575,6 +608,9 @@ const filteredIconOptions = computed(() => {
   if (!query) return iconOptions
   return iconOptions.filter((name) => name.toLowerCase().includes(query))
 })
+const hasClaudeAdvancedValue = computed(() => (
+  props.tabId === 'claude' && (form.apiFormat || 'anthropic') !== 'anthropic'
+))
 const iconPreviewOptions = computed(() => {
   const preferred = iconSearchQuery.value.trim() ? 120 : ICON_PRELOAD_BATCH_SIZE
   return Array.from(new Set([form.icon, ...filteredIconOptions.value.slice(0, preferred)]))
@@ -750,6 +786,7 @@ const resetForm = () => {
     form.budgetQuotaUsedAdjustments = createDefaultBudgetQuotaAdjustments()
     selectedAuthType.value = getDefaultAuthType(props.tabId)
     customAuthHeader.value = ''
+    claudeAdvancedExpanded.value = props.tabId === 'claude' && (form.apiFormat || 'anthropic') !== 'anthropic'
     requestBodyOverridesText.value = formatJsonObject(form.requestBodyOverrides)
     void refreshBudgetQuotaUsage()
     return
@@ -758,6 +795,7 @@ const resetForm = () => {
   Object.assign(form, createVendorFormFromCard(props.card, props.tabId))
   form.budgetQuotaSettings = normalizeBudgetQuotaSettings(props.card.budgetQuotaSettings)
   form.budgetQuotaUsedAdjustments = cloneBudgetQuotaAdjustments(props.card.budgetQuotaUsedAdjustments)
+  claudeAdvancedExpanded.value = props.tabId === 'claude' && (form.apiFormat || 'anthropic') !== 'anthropic'
   requestBodyOverridesText.value = formatJsonObject(form.requestBodyOverrides)
 
   const authState = resolveProviderAuthState(props.card.connectivityAuthType, props.tabId)
@@ -791,6 +829,12 @@ watch(iconPreviewOptions, (icons) => {
 
 watch(requestBodyOverridesText, () => {
   requestBodyOverridesError.value = ''
+})
+
+watch(hasClaudeAdvancedValue, (value) => {
+  if (value) {
+    claudeAdvancedExpanded.value = true
+  }
 })
 
 const resolveEffectiveAuthType = () =>

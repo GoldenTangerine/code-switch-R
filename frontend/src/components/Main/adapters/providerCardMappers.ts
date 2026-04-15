@@ -1,6 +1,7 @@
 import type { ProviderDailyStat } from '../../../services/logs'
 import type { BlacklistStatus } from '../../../services/blacklist'
 import type { AutomationCard } from '../../../data/cards'
+import type { ProviderTab } from '../types'
 import {
   cloneBudgetQuotaAdjustments,
   cloneBudgetQuotaSettings,
@@ -128,7 +129,10 @@ export const blacklistStatusKeyFromCard = (card: AutomationCard): string => {
 
 export const createGeminiProviderRef = () => `gemini-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 
-export const providerToCard = (provider: PersistedProvider): AutomationCard => ({
+export const providerToCard = (
+  provider: PersistedProvider,
+  platform?: ProviderTab | string,
+): AutomationCard => ({
   id: Number(provider.id),
   providerRef: normalizeProviderRef(provider.id),
   name: provider.name,
@@ -139,6 +143,9 @@ export const providerToCard = (provider: PersistedProvider): AutomationCard => (
   tint: provider.tint || '',
   accent: provider.accent || '',
   enabled: provider.enabled,
+  apiFormat: platform === 'claude'
+    ? ((provider.apiFormat as AutomationCard['apiFormat']) || 'anthropic')
+    : undefined,
   sortOrder: provider.sortOrder || 0,
   enabledSortOrder: provider.enabledSortOrder || (provider.enabled ? (provider.sortOrder || 0) : undefined),
   disabledSortOrder: provider.disabledSortOrder || (!provider.enabled ? (provider.sortOrder || 0) : undefined),
@@ -163,8 +170,11 @@ export const providerToCard = (provider: PersistedProvider): AutomationCard => (
     : cloneBudgetQuotaAdjustments(provider.budgetQuotaUsedAdjustments),
 })
 
-export const deserializeProviders = (providers: PersistedProvider[]): AutomationCard[] => {
-  return providers.map(providerToCard)
+export const deserializeProviders = (
+  providers: PersistedProvider[],
+  platform?: ProviderTab | string,
+): AutomationCard[] => {
+  return providers.map((provider) => providerToCard(provider, platform))
 }
 
 export const geminiToCard = (provider: GeminiProvider, index: number): AutomationCard => ({
@@ -234,11 +244,17 @@ export const createGeminiFromCard = (
   budgetQuotaUsedAdjustments: serializeOptionalBudgetQuotaAdjustments(card.budgetQuotaUsedAdjustments),
 })
 
-export const serializeProviders = (providers: AutomationCard[]): PersistedProvider[] =>
+export const serializeProviders = (
+  providers: AutomationCard[],
+  platform?: ProviderTab | string,
+): PersistedProvider[] =>
   providers.map((provider) => {
     const { providerRef, ...persistable } = provider
     return {
       ...persistable,
+      ...(platform === 'claude'
+        ? { apiFormat: provider.apiFormat || 'anthropic' }
+        : {}),
       sortOrder: provider.sortOrder || 0,
       enabledSortOrder: provider.enabledSortOrder || 0,
       disabledSortOrder: provider.disabledSortOrder || 0,

@@ -258,6 +258,45 @@
   width: 160px;
 }
 
+.provider-advanced-field {
+  gap: 10px;
+}
+
+.advanced-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--mac-text);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.advanced-toggle:hover {
+  opacity: 0.72;
+}
+
+.advanced-toggle__icon {
+  display: inline-flex;
+  width: 14px;
+  justify-content: center;
+  color: var(--mac-text-secondary);
+}
+
+.advanced-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--mac-border) 86%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--mac-surface-strong) 64%, var(--mac-surface));
+}
+
 .provider-budget-quota-grid {
   margin-top: 6px;
 }
@@ -345,6 +384,11 @@
 
 :global(.dark) .budget-quota-card {
   background: color-mix(in srgb, rgba(255, 255, 255, 0.04) 70%, rgba(17, 24, 39, 0.92));
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+:global(.dark) .advanced-section {
+  background: color-mix(in srgb, rgba(255, 255, 255, 0.03) 70%, rgba(17, 24, 39, 0.92));
   border-color: rgba(255, 255, 255, 0.08);
 }
 

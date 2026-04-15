@@ -11,6 +11,8 @@ export type AutomationCard = {
   tint: string
   accent: string
   enabled: boolean
+  // Claude API 格式（仅 Claude 供应商使用）
+  apiFormat?: 'anthropic' | 'openai_chat' | 'openai_responses'
   // 隐藏排序字段：仅控制启用组 / 未启用组内部顺序
   sortOrder?: number
   // 记忆启用组内顺序，切回启用时优先恢复到这里

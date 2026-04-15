@@ -31,6 +31,11 @@ type Provider struct {
 	Tint    string `json:"tint"`
 	Accent  string `json:"accent"`
 	Enabled bool   `json:"enabled"`
+	// Claude API 格式（仅 Claude 供应商使用）
+	// - anthropic: 原生 Anthropic Messages API，直接透传
+	// - openai_chat: OpenAI Chat Completions，需要格式转换
+	// - openai_responses: OpenAI Responses API，需要格式转换
+	APIFormat string `json:"apiFormat,omitempty"`
 	// 隐藏排序字段：仅控制启用 / 未启用组内顺序
 	SortOrder int `json:"sortOrder,omitempty"`
 	// 记忆启用组内顺序，切回启用时优先恢复
@@ -602,6 +607,7 @@ func (ps *ProviderService) DuplicateProvider(kind string, sourceID int64) (*Prov
 		Tint:        source.Tint,
 		Accent:      source.Accent,
 		Enabled:     false, // 默认禁用，避免与源供应商冲突
+		APIFormat:   source.APIFormat,
 		Level:       source.Level,
 		APIEndpoint: source.APIEndpoint, // 复制端点配置
 		// 可用性监控配置

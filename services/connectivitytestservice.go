@@ -104,16 +104,18 @@ func (cts *ConnectivityTestService) TestProvider(ctx context.Context, provider P
 		LastChecked:  time.Now(),
 	}
 
+	endpoint := cts.getEffectiveEndpoint(&provider, platform)
+
 	// 构建测试请求
-	reqBody, contentField := cts.buildTestRequest(platform, &provider)
-	if reqBody == nil {
-		result.Message = "无法构建测试请求"
+	reqBody, contentField, err := cts.buildTestRequest(platform, &provider, endpoint)
+	if err != nil {
+		result.Message = fmt.Sprintf("无法构建测试请求: %v", err)
 		result.SubStatus = SubStatusClientError
 		return result
 	}
 
 	// 根据用户配置的端点拼接目标 URL
-	targetURL := cts.buildTargetURL(&provider, platform)
+	targetURL := cts.buildTargetURL(&provider, endpoint)
 	authType := cts.getEffectiveAuthType(&provider, platform)
 
 	// 调试日志：打印最终请求信息
@@ -204,10 +206,13 @@ func (cts *ConnectivityTestService) getEffectiveEndpoint(provider *Provider, pla
 	if endpoint != "" {
 		return endpoint
 	}
+
+	if strings.EqualFold(platform, "claude") {
+		return resolveProviderEffectiveEndpoint("claude", *provider, "/v1/messages")
+	}
+
 	// 平台默认端点
 	switch strings.ToLower(platform) {
-	case "claude":
-		return "/v1/messages"
 	case "codex":
 		return "/responses"
 	default:
@@ -230,7 +235,7 @@ func (cts *ConnectivityTestService) getEffectiveAuthType(provider *Provider, pla
 }
 
 // buildTestRequest 根据端点构建测试请求体
-func (cts *ConnectivityTestService) buildTestRequest(platform string, provider *Provider) ([]byte, string) {
+func (cts *ConnectivityTestService) buildTestRequest(platform string, provider *Provider, endpoint string) ([]byte, string, error) {
 	// 平台默认模型
 	platformKey := strings.ToLower(platform)
 	defaults := map[string]string{
@@ -247,8 +252,16 @@ func (cts *ConnectivityTestService) buildTestRequest(platform string, provider *
 		model = "gpt-3.5-turbo"
 	}
 
+	if strings.EqualFold(platform, "claude") {
+		spec, err := buildClaudeProbeRequest(provider, endpoint, model)
+		if err != nil {
+			return nil, "", err
+		}
+		return spec.Body, spec.SuccessContains, nil
+	}
+
 	// 获取有效端点（含平台默认值）
-	endpoint := strings.ToLower(cts.getEffectiveEndpoint(provider, platform))
+	endpoint = strings.ToLower(endpoint)
 
 	// Anthropic 格式: /v1/messages
 	if strings.Contains(endpoint, "/messages") {
@@ -260,7 +273,7 @@ func (cts *ConnectivityTestService) buildTestRequest(platform string, provider *
 			},
 		}
 		data, _ := json.Marshal(reqBody)
-		return data, "content"
+		return data, "content", nil
 	}
 
 	// Codex 格式: /responses
@@ -273,7 +286,7 @@ func (cts *ConnectivityTestService) buildTestRequest(platform string, provider *
 			},
 		}
 		data, _ := json.Marshal(reqBody)
-		return data, "choices"
+		return data, "choices", nil
 	}
 
 	// 默认 OpenAI 格式: /v1/chat/completions
@@ -285,7 +298,7 @@ func (cts *ConnectivityTestService) buildTestRequest(platform string, provider *
 		},
 	}
 	data, _ := json.Marshal(reqBody)
-	return data, "choices"
+	return data, "choices", nil
 }
 
 // determineStatus 根据 HTTP 状态码和延迟判定状态
@@ -338,7 +351,7 @@ func (cts *ConnectivityTestService) evaluateContent(baseStatus int, subStatus st
 		return baseStatus, subStatus
 	}
 
-	if !strings.Contains(string(body), successContains) {
+	if !responseContainsExpectedField(body, successContains) {
 		return StatusUnavailable, SubStatusContentMismatch
 	}
 
@@ -354,9 +367,8 @@ func (cts *ConnectivityTestService) truncateMessage(msg string) string {
 }
 
 // buildTargetURL 根据用户配置的端点构建目标 URL
-func (cts *ConnectivityTestService) buildTargetURL(provider *Provider, platform string) string {
+func (cts *ConnectivityTestService) buildTargetURL(provider *Provider, endpoint string) string {
 	baseURL := strings.TrimSuffix(provider.APIURL, "/")
-	endpoint := cts.getEffectiveEndpoint(provider, platform)
 	if !strings.HasPrefix(endpoint, "/") {
 		endpoint = "/" + endpoint
 	}

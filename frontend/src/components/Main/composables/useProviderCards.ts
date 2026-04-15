@@ -243,7 +243,7 @@ export function useProviderCards(options: UseProviderCardsOptions) {
   }
 
   const replaceProviders = (tabId: ProviderTab, data: PersistedProvider[]) => {
-    cards[tabId].splice(0, cards[tabId].length, ...deserializeProviders(data))
+    cards[tabId].splice(0, cards[tabId].length, ...deserializeProviders(data, tabId))
     applyNormalizedProviderOrder(cards[tabId])
   }
 
@@ -253,7 +253,7 @@ export function useProviderCards(options: UseProviderCardsOptions) {
     try {
       const saved = await LoadProviders(getCustomProviderKind(toolId))
       if (Array.isArray(saved)) {
-        cards.others.splice(0, cards.others.length, ...deserializeProviders(saved as PersistedProvider[]))
+        cards.others.splice(0, cards.others.length, ...deserializeProviders(saved as PersistedProvider[], 'others'))
         applyNormalizedProviderOrder(cards.others)
       } else {
         cards.others.splice(0, cards.others.length)
@@ -274,7 +274,7 @@ export function useProviderCards(options: UseProviderCardsOptions) {
           showToast(t('components.main.customCli.selectToolFirst'), 'error')
           return
         }
-        await SaveProviders(getCustomProviderKind(selectedToolId), serializeProviders(cards.others))
+        await SaveProviders(getCustomProviderKind(selectedToolId), serializeProviders(cards.others, 'others'))
         return
       }
 
@@ -323,7 +323,7 @@ export function useProviderCards(options: UseProviderCardsOptions) {
         return
       }
 
-      await SaveProviders(tabId, serializeProviders(cards[tabId]))
+      await SaveProviders(tabId, serializeProviders(cards[tabId], tabId))
     } catch (error) {
       console.error('Failed to save providers', error)
       showToast(t('components.main.form.saveFailed'), 'error')

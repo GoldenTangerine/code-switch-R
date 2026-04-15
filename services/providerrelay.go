@@ -1152,12 +1152,22 @@ func (prs *ProviderRelayService) forwardRequest(
 	// 状态码为 0 且无错误：当作成功处理
 	if status == 0 {
 		fmt.Printf("[WARN] Provider %s 返回状态码 0，但无错误，当作成功处理\n", provider.Name)
-		writtenBytes, copyErr := resp.ToHttpResponseWriter(c.Writer, ReqeustLogHook(c, kind, requestLog))
+		hooks := make([]xrequest.ResponseHook, 0, 2)
+		if kind == "claude" && claudeAPIFormatNeedsTransform(resolveClaudeAPIFormat(provider)) {
+			hooks = append(hooks, newClaudeResponseTransformHook(resolveClaudeAPIFormat(provider), isStream))
+		}
+		hooks = append(hooks, ReqeustLogHook(c, kind, requestLog))
+		writtenBytes, copyErr := resp.ToHttpResponseWriter(c.Writer, hooks...)
 		return finalizeForwardSuccess(c, kind, requestLog, writtenBytes, copyErr)
 	}
 
 	if status >= http.StatusOK && status < http.StatusMultipleChoices {
-		writtenBytes, copyErr := resp.ToHttpResponseWriter(c.Writer, ReqeustLogHook(c, kind, requestLog))
+		hooks := make([]xrequest.ResponseHook, 0, 2)
+		if kind == "claude" && claudeAPIFormatNeedsTransform(resolveClaudeAPIFormat(provider)) {
+			hooks = append(hooks, newClaudeResponseTransformHook(resolveClaudeAPIFormat(provider), isStream))
+		}
+		hooks = append(hooks, ReqeustLogHook(c, kind, requestLog))
+		writtenBytes, copyErr := resp.ToHttpResponseWriter(c.Writer, hooks...)
 		return finalizeForwardSuccess(c, kind, requestLog, writtenBytes, copyErr)
 	}
 
@@ -2643,10 +2653,22 @@ func buildProviderRequestPlan(provider Provider, bodyBytes []byte, endpoint stri
 		currentBodyBytes = modifiedBody
 	}
 
+	effectiveEndpoint := provider.GetEffectiveEndpoint(endpoint)
+	if endpoint == "/v1/messages" {
+		effectiveEndpoint = resolveProviderEffectiveEndpoint("claude", provider, endpoint)
+		if claudeAPIFormatNeedsTransform(resolveClaudeAPIFormat(provider)) {
+			modifiedBody, err := transformClaudeRequestForAPIFormat(currentBodyBytes, provider)
+			if err != nil {
+				return providerRequestPlan{}, err
+			}
+			currentBodyBytes = modifiedBody
+		}
+	}
+
 	return providerRequestPlan{
 		BodyBytes:         currentBodyBytes,
 		EffectiveModel:    resolveModelFromRequestBody(currentBodyBytes, effectiveModel),
-		EffectiveEndpoint: provider.GetEffectiveEndpoint(endpoint),
+		EffectiveEndpoint: effectiveEndpoint,
 	}, nil
 }
 

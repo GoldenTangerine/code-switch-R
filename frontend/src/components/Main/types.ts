@@ -44,6 +44,7 @@ export type VendorForm = {
   officialSite: string
   icon: string
   enabled: boolean
+  apiFormat?: 'anthropic' | 'openai_chat' | 'openai_responses'
   supportedModels?: Record<string, boolean>
   modelMapping?: Record<string, string>
   requestBodyOverrides?: Record<string, any>

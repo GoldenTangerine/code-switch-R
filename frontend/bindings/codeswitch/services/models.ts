@@ -1465,6 +1465,7 @@ export class Provider {
     "tint": string;
     "accent": string;
     "enabled": boolean;
+    "apiFormat"?: string;
     "cliConfig"?: { [_: string]: any };
     "apiEndpoint"?: string;
 

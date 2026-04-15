@@ -1,3 +1,20 @@
+# Code Switch v2.7.98
+
+## 修复
+- **Claude 供应商编辑弹窗终于把“高级选项 -> API 格式”这块补齐了**：`首页 -> 供应商 -> 编辑供应商` 里的 Claude 表单现在新增可折叠的高级选项区，支持在 `Anthropic Messages / OpenAI Chat Completions / OpenAI Responses` 三种协议之间切换，并且创建、编辑、保存、再次打开时都会按同一字段口径回填，不再出现“界面能选、配置存不住”这种半截活。
+- **Claude 转第三方 OpenAI 兼容上游这回不再靠撞大运了**：当 Claude 供应商切到 `openai_chat` 或 `openai_responses` 时，转发层现在会自动把原始 `/v1/messages` 请求改写到对应上游端点，并完成请求体、普通响应和 SSE 流式事件的双向转换；Claude Code 继续说自己的 Messages 协议，上游说 OpenAI 兼容协议，中间这一层终于把人话翻明白了。
+- **Claude 的连通性测试和健康检查不再拿旧协议去瞎测了**：连通性测试 / 可用性监控现在会根据 Claude 供应商的 `apiFormat` 生成对应协议的探测请求，并按 `content / choices / output` 各自的成功字段做校验，避免 OpenAI Chat / Responses 风格的 Claude 上游明明能跑，却被检测链路误判成“请求错误”或“内容不匹配”。
+
+## 技术改进
+- **Claude 协议探测链路正式收口成统一 helper**：新增统一的 probe request builder，把“按端点 / apiFormat 推导协议、构造测试请求、识别成功字段”这套逻辑从连通性测试和健康检查里抽出来，少写两套分叉逻辑，也少给自己埋两套不一致的坑。
+- **前端 provider 持久化边界顺手收干净了**：`apiFormat` 现在只在 Claude tab 下序列化 / 反序列化和表单映射，Codex、Gemini 以及自定义 provider 不会再被顺手塞个默认 `anthropic`，配置结构终于不再带着无关字段到处乱窜。
+- **专项回归测试继续往 Claude 协议转换的薄弱点补刀**：补上 Claude 请求规划、probe 请求构造、Responses named event SSE 转换和字段存在性判断测试，尤其把 `output_tokens` 误判成 `output` 这种字符串匹配假阳性先钉死，省得后面谁一图省事又把检测逻辑写回字符串 contains。
+
+## 发布
+- **本次发版版本号统一推进到 `v2.7.98`**：同步更新应用常量、构建配置、Darwin `Info.plist`、Windows 元数据和 Linux 包版本，继续保证仓库版本号、Git tag 和 GitHub 自动打包产物是一套数，别整那种 tag 都飞出去了、包里还在喊上一版的糊涂账。
+
+---
+
 # Code Switch v2.7.97
 
 ## 修复
