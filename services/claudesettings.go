@@ -345,6 +345,10 @@ func (css *ClaudeSettingsService) ApplySingleProvider(providerID int) error {
 		return fmt.Errorf("未找到 ID 为 %d 的供应商", providerID)
 	}
 
+	if claudeAPIFormatNeedsTransform(provider.APIFormat) {
+		return fmt.Errorf("供应商 '%s' 当前 API 格式仅支持托管路由，不能直接应用", provider.Name)
+	}
+
 	// 4. 验证 provider 配置
 	if provider.APIURL == "" {
 		return fmt.Errorf("供应商 '%s' 未配置 API 地址", provider.Name)

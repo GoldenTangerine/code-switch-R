@@ -9,6 +9,7 @@ vi.mock('@wailsio/runtime', () => ({
   },
 }))
 
+import { Call } from '@wailsio/runtime'
 import { useProviderForm } from './useProviderForm'
 
 const createCard = (
@@ -89,6 +90,7 @@ const normalizeLevel = (level: number | string | undefined) => {
 
 describe('useProviderForm order preservation', () => {
   beforeEach(() => {
+    vi.clearAllMocks()
     vi.stubGlobal('window', {
       dispatchEvent: vi.fn(),
     })
@@ -289,5 +291,42 @@ describe('useProviderForm order preservation', () => {
     expect(cards.codex.map((card) => card.id)).toEqual([1, 2, 3, 4])
     expect(cards.codex.map((card) => card.disabledSortOrder ?? null)).toEqual([null, 1, 2, 3])
     expect(persistProviders).toHaveBeenCalledTimes(2)
+  })
+
+  it('saves claude providers with transformed apiFormat without attempting direct apply', async () => {
+    const cards = createCardRecord()
+    const showToast = vi.fn()
+    const persistProviders = vi.fn().mockResolvedValue(undefined)
+    const refreshDirectAppliedStatus = vi.fn().mockResolvedValue(undefined)
+    const providerForm = useProviderForm({
+      initialTab: 'claude',
+      t: (key: string) => key,
+      showToast,
+      getActiveTab: () => 'claude',
+      cards,
+      normalizeLevel,
+      persistProviders,
+      refreshDirectAppliedStatus,
+      removeProvider: vi.fn().mockResolvedValue(undefined),
+      duplicateProvider: vi.fn().mockResolvedValue(false),
+      reloadProviders: vi.fn().mockResolvedValue(undefined),
+      moveCardToStatusGroup: (tabId, card, enabled) => moveProviderToStatusGroup(cards[tabId], card, enabled),
+      appendCardToGroup: (tabId, card) => insertProviderToStatusGroup(cards[tabId], card),
+    })
+
+    vi.spyOn(Date, 'now').mockReturnValue(999)
+    providerForm.openCreateModal()
+
+    await providerForm.submitAndApplyProviderModal(createForm({
+      name: 'Claude Routed Provider',
+      apiFormat: 'openai_responses',
+      apiKey: 'claude-key',
+    }))
+
+    expect(persistProviders).toHaveBeenCalledWith('claude')
+    expect(vi.mocked(Call.ByName)).not.toHaveBeenCalled()
+    expect(refreshDirectAppliedStatus).not.toHaveBeenCalled()
+    expect(showToast).toHaveBeenCalledWith('components.main.directApply.requiresHostedRouting', 'warning')
+    expect(cards.claude[0]?.apiFormat).toBe('openai_responses')
   })
 })

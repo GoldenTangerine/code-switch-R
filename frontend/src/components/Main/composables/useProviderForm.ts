@@ -5,6 +5,7 @@ import type { LogPlatform } from '../../../services/logs'
 import { createGeminiProviderRef, normalizeProviderRef } from '../adapters/providerCardMappers'
 import { buildPersistedProviderFieldsFromForm } from '../adapters/providerFormMappers'
 import type { ProviderTab, TranslateFn, VendorForm } from '../types'
+import { isDirectApplyBlockedForProvider } from '../utils/providerDirectApply'
 
 type ToastType = 'success' | 'error' | 'warning'
 
@@ -154,6 +155,11 @@ export function useProviderForm(options: UseProviderFormOptions) {
   }
 
   const applySavedProvider = async (savedCard: AutomationCard, tabId: ProviderTab) => {
+    if (isDirectApplyBlockedForProvider(tabId, savedCard)) {
+      showToast(t('components.main.directApply.requiresHostedRouting'), 'warning')
+      return
+    }
+
     try {
       if (tabId === 'claude') {
         await Call.ByName('codeswitch/services.ClaudeSettingsService.ApplySingleProvider', savedCard.id)

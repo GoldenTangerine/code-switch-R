@@ -41,6 +41,55 @@
             {{ t('components.main.directApply.currentBadge') }}
           </span>
           <span
+            v-if="apiFormatBadge"
+            class="api-format-badge"
+            :class="`api-format-badge--${apiFormatBadge.format}`"
+            :data-tooltip="apiFormatBadge.title"
+            :title="apiFormatBadge.title"
+            :aria-label="apiFormatBadge.title"
+          >
+            <svg
+              v-if="apiFormatBadge.format === 'openai_chat'"
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+              class="api-format-badge__icon"
+            >
+              <path
+                d="M7.5 16.5L5 19v-4.25A4.75 4.75 0 016.75 5.6 4.72 4.72 0 019.5 4.75h5a4.75 4.75 0 014.75 4.75v.5a4.75 4.75 0 01-4.75 4.75H7.5z"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+              <path
+                d="M9 10h6M9 13h3.5"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+              />
+            </svg>
+            <svg
+              v-else
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+              class="api-format-badge__icon"
+            >
+              <path
+                d="M6.75 6.75h10.5M6.75 12h10.5M6.75 17.25h7"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.7"
+                stroke-linecap="round"
+              />
+              <path
+                d="M16.25 14.75l1.25 2.5 2.5 1.25-2.5 1.25-1.25 2.5-1.25-2.5-2.5-1.25 2.5-1.25 1.25-2.5z"
+                fill="currentColor"
+              />
+            </svg>
+          </span>
+          <span
             v-if="viewModel.card.availabilityMonitorEnabled"
             class="connectivity-dot"
             :class="viewModel.connectivityClass"
@@ -269,10 +318,10 @@
         v-if="activeTab !== 'others'"
         class="ghost-icon direct-apply-btn"
         :class="{ 'is-active': viewModel.isDirectApplied && !activeProxyState }"
-        :disabled="activeProxyState"
+        :disabled="directApplyDisabled"
         :data-tooltip="directApplyTooltip"
         type="button"
-        @click.stop="!viewModel.isDirectApplied && $emit('direct-apply')"
+        @click.stop="!viewModel.isDirectApplied && !directApplyDisabled && $emit('direct-apply')"
       >
         <span v-if="viewModel.isDirectApplied && !activeProxyState" class="apply-text">
           {{ t('components.main.directApply.inUse') }}
@@ -441,6 +490,7 @@ import { computed, type ComponentPublicInstance } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { ProviderCardViewModel, ProviderDragEndPayload, ProviderQuotaDisplayItem, ProviderTab, ResolvedTheme } from '../types'
 import { formatQuotaUsagePercent, getQuotaProgressClass, getQuotaProgressPercent } from '../utils/providerQuotaDisplay'
+import { isDirectApplyBlockedForProvider } from '../utils/providerDirectApply'
 import { isHostedRouteActive } from '../utils/providerRoutingState'
 
 const props = defineProps<{
@@ -492,14 +542,47 @@ const quotaTooltip = (item: ProviderQuotaDisplayItem) => {
   return t('components.main.providers.quotaTooltipNoCountdown', { label: item.label, used, total })
 }
 
+type ApiFormatBadgeMeta = {
+  format: 'openai_chat' | 'openai_responses'
+  title: string
+}
+
 const directApplyTooltip = computed(() => {
   if (props.activeProxyState) {
     return t('components.main.directApply.proxyEnabled')
+  }
+  if (directApplyBlockedByProvider.value) {
+    return t('components.main.directApply.requiresHostedRouting')
   }
   if (props.viewModel.isDirectApplied) {
     return t('components.main.directApply.inUse')
   }
   return t('components.main.directApply.title')
+})
+
+const directApplyBlockedByProvider = computed(() => (
+  isDirectApplyBlockedForProvider(props.activeTab, props.viewModel.card)
+))
+
+const directApplyDisabled = computed(() => props.activeProxyState || directApplyBlockedByProvider.value)
+
+const apiFormatBadge = computed<ApiFormatBadgeMeta | null>(() => {
+  if (props.activeTab !== 'claude') return null
+
+  switch (props.viewModel.card.apiFormat || 'anthropic') {
+    case 'openai_chat':
+      return {
+        format: 'openai_chat',
+        title: t('components.main.providers.apiFormatOpenAIChatHint'),
+      }
+    case 'openai_responses':
+      return {
+        format: 'openai_responses',
+        title: t('components.main.providers.apiFormatOpenAIResponsesHint'),
+      }
+    default:
+      return null
+  }
 })
 
 const hostedSelectionActive = computed(() => isHostedRouteActive({

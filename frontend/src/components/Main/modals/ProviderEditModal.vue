@@ -396,6 +396,8 @@
           v-if="isEditing && tabId !== 'others' && !activeProxyState"
           type="button"
           variant="primary"
+          :disabled="saveAndApplyBlockedByProvider"
+          :title="saveAndApplyTooltip"
           @click="submit(true)"
         >
           {{ t('components.main.form.actions.saveAndApply') }}
@@ -448,6 +450,7 @@ import {
 import type { AutomationCard } from '../../../data/cards'
 import type { CLIPlatform } from '../../../services/cliConfig'
 import { isBuiltinModelPlatform } from '../../../utils/builtinModels'
+import { isDirectApplyBlockedForProvider } from '../utils/providerDirectApply'
 
 type CLIConfigEditorExposed = InstanceType<typeof CLIConfigEditor> & {
   applyPendingJsonChanges?: () => boolean | Promise<boolean>
@@ -489,6 +492,14 @@ const iconSearchQuery = ref('')
 const requestBodyOverridesText = ref('{}')
 const requestBodyOverridesError = ref('')
 const claudeAdvancedExpanded = ref(false)
+const saveAndApplyBlockedByProvider = computed(() => (
+  isDirectApplyBlockedForProvider(props.tabId, form)
+))
+const saveAndApplyTooltip = computed(() => (
+  saveAndApplyBlockedByProvider.value
+    ? t('components.main.directApply.requiresHostedRouting')
+    : t('components.main.directApply.title')
+))
 
 type QuotaDefinition = {
   key: BudgetQuotaKey

@@ -511,6 +511,10 @@
         "currentRoutedHint": "Hosting is enabled and the latest request is currently routed to this provider.",
         "defaultRoutedHint": "Hosting is enabled and, before any live routing record is available, this provider will be tried first with the current order.",
         "recentRoutedHint": "The most recent hosted request was routed to this provider.",
+        "apiFormatOpenAIChatBadge": "Chat",
+        "apiFormatOpenAIChatHint": "This provider uses the OpenAI Chat Completions API, so Code Switch R converts Claude requests before forwarding them.",
+        "apiFormatOpenAIResponsesBadge": "Resp",
+        "apiFormatOpenAIResponsesHint": "This provider uses the OpenAI Responses API, so Code Switch R converts Claude requests before forwarding them.",
         "quotaFiveHour": "5h",
         "quotaDaily": "D",
         "quotaWeekly": "W",
@@ -594,7 +598,8 @@
         "currentBadge": "Current",
         "success": "{name} applied",
         "failed": "Failed to apply",
-        "proxyEnabled": "Disable proxy first"
+        "proxyEnabled": "Disable proxy first",
+        "requiresHostedRouting": "This API format only works through hosted routing and cannot be directly applied"
       },
       "form": {
         "createTitle": "Add vendor",

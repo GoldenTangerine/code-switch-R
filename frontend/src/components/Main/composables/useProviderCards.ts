@@ -29,6 +29,7 @@ import {
   commitProviderOrder,
   moveProviderToStatusGroup,
 } from '../utils/providerOrder'
+import { isDirectApplyBlockedForProvider } from '../utils/providerDirectApply'
 
 type UseProviderCardsOptions = {
   t: TranslateFn
@@ -37,8 +38,63 @@ type UseProviderCardsOptions = {
   getSelectedToolId: () => string | null
 }
 
+type BrowserWindowWithWailsBridge = Window & {
+  chrome?: {
+    webview?: {
+      postMessage?: (...args: any[]) => void
+    }
+  }
+  webkit?: {
+    messageHandlers?: {
+      external?: {
+        postMessage?: (...args: any[]) => void
+      }
+    }
+  }
+}
+
+const DEV_CLAUDE_API_FORMAT_DEMO_BY_NAME: Partial<Record<string, NonNullable<AutomationCard['apiFormat']>>> = {
+  Kimi: 'openai_chat',
+  Deepseek: 'openai_responses',
+}
+
+const hasDesktopRuntimeBridge = () => {
+  if (typeof window === 'undefined') {
+    return false
+  }
+  const browserWindow = window as BrowserWindowWithWailsBridge
+  return Boolean(
+    browserWindow.chrome?.webview?.postMessage ||
+    browserWindow.webkit?.messageHandlers?.external?.postMessage,
+  )
+}
+
+const shouldApplyDevClaudeApiFormatDemo = () => (
+  import.meta.env.DEV
+  && typeof window !== 'undefined'
+  && !hasDesktopRuntimeBridge()
+)
+
+const withDevClaudeApiFormatDemo = (cards: AutomationCard[]): AutomationCard[] => {
+  if (!shouldApplyDevClaudeApiFormatDemo()) {
+    return cards
+  }
+
+  return cards.map((card) => {
+    const demoApiFormat = DEV_CLAUDE_API_FORMAT_DEMO_BY_NAME[card.name.trim()]
+    if (demoApiFormat) {
+      return {
+        ...card,
+        apiFormat: demoApiFormat,
+      }
+    }
+
+    return card
+  })
+}
+
 const createCardRecord = (): Record<ProviderTab, AutomationCard[]> => ({
-  claude: createAutomationCards(automationCardGroups.claude),
+  claude: withDevClaudeApiFormatDemo(createAutomationCards(automationCardGroups.claude)),
   codex: createAutomationCards(automationCardGroups.codex),
   gemini: [],
   others: [],
@@ -208,9 +264,9 @@ export function useProviderCards(options: UseProviderCardsOptions) {
   }
 
   const handleDirectApply = async (card: AutomationCard) => {
-    if (isActiveProxyEnabled()) return
-
     const tab = getActiveTab()
+    if (isActiveProxyEnabled() || isDirectApplyBlockedForProvider(tab, card)) return
+
     try {
       if (tab === 'claude') {
         await Call.ByName('codeswitch/services.ClaudeSettingsService.ApplySingleProvider', card.id)

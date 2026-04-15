@@ -22,6 +22,7 @@ vi.mock('@wailsio/runtime', () => ({
   },
 }))
 
+import { Call } from '@wailsio/runtime'
 import { SaveProviders } from '../../../../bindings/codeswitch/services/providerservice'
 import { LoadProviders } from '../../../../bindings/codeswitch/services/providerservice'
 import { AddProvider as AddGeminiProvider, GetProviders as GetGeminiProviders } from '../../../../bindings/codeswitch/services/geminiservice'
@@ -62,6 +63,7 @@ const createDragEndPayload = (overrides: Partial<{
 describe('useProviderCards drag sort', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.mocked(Call.ByName).mockResolvedValue(undefined)
     vi.mocked(SaveProviders).mockResolvedValue(undefined)
     vi.mocked(LoadProviders).mockResolvedValue([])
     vi.mocked(AddGeminiProvider).mockResolvedValue(undefined)
@@ -442,5 +444,23 @@ describe('useProviderCards drag sort', () => {
       model: 'gemini-2.5-pro',
       requestBodyOverrides: { temperature: 0.3 },
     })
+  })
+
+  it('blocks direct apply for claude providers that require hosted routing', async () => {
+    const providerCards = useProviderCards({
+      t: (key: string) => key,
+      getActiveTab: () => 'claude',
+      isActiveProxyEnabled: () => false,
+      getSelectedToolId: () => null,
+    })
+
+    const card = createCard(101, {
+      apiFormat: 'openai_chat',
+      apiKey: 'claude-key',
+    })
+
+    await providerCards.handleDirectApply(card)
+
+    expect(vi.mocked(Call.ByName)).not.toHaveBeenCalled()
   })
 })

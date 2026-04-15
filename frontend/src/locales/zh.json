@@ -512,6 +512,10 @@
         "currentRoutedHint": "托管已开启，最新请求当前命中这个供应商。",
         "defaultRoutedHint": "托管已开启，在还没有实时命中记录前，会先按当前顺序尝试这个供应商。",
         "recentRoutedHint": "最近一次托管请求命中了这个供应商。",
+        "apiFormatOpenAIChatBadge": "Chat",
+        "apiFormatOpenAIChatHint": "接口转换说明：当前供应商采用 OpenAI Chat Completions 接口，系统将在请求转发前自动完成 Claude 请求格式转换。",
+        "apiFormatOpenAIResponsesBadge": "Resp",
+        "apiFormatOpenAIResponsesHint": "接口转换说明：当前供应商采用 OpenAI Responses API，系统将在请求转发前自动完成 Claude 请求格式转换。",
         "quotaFiveHour": "5h",
         "quotaDaily": "日",
         "quotaWeekly": "周",
@@ -595,7 +599,8 @@
         "currentBadge": "当前使用",
         "success": "{name} 已应用",
         "failed": "应用失败",
-        "proxyEnabled": "请先关闭代理"
+        "proxyEnabled": "请先关闭代理",
+        "requiresHostedRouting": "当前 API 格式仅支持托管路由，不能直接应用"
       },
       "form": {
         "createTitle": "新增供应商",
