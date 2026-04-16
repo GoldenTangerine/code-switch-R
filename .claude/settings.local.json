@@ -12,7 +12,8 @@
       "Bash(node:*)",
       "Bash(go mod:*)",
       "Bash(git status:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Skill(team-onboarding)"
     ],
     "deny": [],
     "ask": []
