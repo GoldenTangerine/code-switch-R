@@ -62,14 +62,11 @@
             <div class="model-main">
               <div class="model-name" :title="model.display_name">{{ model.display_name }}</div>
               <div class="model-tags">
-                <span class="tag" :class="model.is_recognized ? 'tag-token' : 'tag-neutral'">
-                  {{ model.is_recognized ? t('components.general.modelPricing.preview.mapped') : t('components.general.modelPricing.preview.unmapped') }}
+                <span class="tag" :class="resolvePreviewTargetMode(model) === 'mapped' ? 'tag-token' : 'tag-neutral'">
+                  {{ resolvePreviewStatusLabel(model) }}
                 </span>
-                <span v-if="(model.target_models ?? []).length > 0" class="tag tag-neutral tag-wrap">
-                  {{ t('components.general.modelPricing.preview.mappingHint', { models: summarizeTargetModels(model) }) }}
-                </span>
-                <span v-else class="tag tag-neutral">
-                  {{ t('components.general.modelPricing.preview.mappingMissing') }}
+                <span class="tag tag-neutral tag-wrap">
+                  {{ resolvePreviewTargetHint(model) }}
                 </span>
               </div>
             </div>
@@ -128,6 +125,10 @@ import { useI18n } from 'vue-i18n'
 import InlineModal from '../common/InlineModal.vue'
 import BaseInput from '../common/BaseInput.vue'
 import type { ClaudeOfficialPricingPreviewRow } from '../../services/modelPricing'
+import {
+  resolveClaudePricingPreviewTargetMode,
+  summarizeClaudePricingPreviewTargets,
+} from '../../utils/claudePricingPreview'
 
 type PreviewFilter = 'all' | 'mapped' | 'unmapped'
 
@@ -201,10 +202,29 @@ const formatUsdPer1M = (perToken: number) => {
   return `$${per1M.toFixed(2)}`
 }
 
-const summarizeTargetModels = (row: ClaudeOfficialPricingPreviewRow) => {
-  const targets = row.target_models ?? []
-  if (targets.length <= 2) return targets.join(', ')
-  return `${targets.slice(0, 2).join(', ')} +${targets.length - 2}`
+const resolvePreviewTargetMode = (row: ClaudeOfficialPricingPreviewRow) => (
+  resolveClaudePricingPreviewTargetMode(row)
+)
+
+const resolvePreviewStatusLabel = (row: ClaudeOfficialPricingPreviewRow) => (
+  resolvePreviewTargetMode(row) === 'mapped'
+    ? t('components.general.modelPricing.preview.mapped')
+    : t('components.general.modelPricing.preview.unmapped')
+)
+
+const resolvePreviewTargetHint = (row: ClaudeOfficialPricingPreviewRow) => {
+  const mode = resolvePreviewTargetMode(row)
+  if (mode === 'mapped') {
+    return t('components.general.modelPricing.preview.mappingHint', {
+      models: summarizeClaudePricingPreviewTargets(row),
+    })
+  }
+  if (mode === 'custom') {
+    return t('components.general.modelPricing.preview.customHint', {
+      models: summarizeClaudePricingPreviewTargets(row),
+    })
+  }
+  return t('components.general.modelPricing.preview.mappingMissing')
 }
 
 watch(

@@ -111,6 +111,11 @@ type claudePricingPreviewCache struct {
 	fetchedAt time.Time
 }
 
+type claudeSyncPricingEntry struct {
+	Pricing claudeOfficialModelPricing
+	Source  string
+}
+
 func (mps *ModelPricingService) PreviewClaudeOfficialPricing() (ClaudeOfficialPricingPreviewResult, error) {
 	result := ClaudeOfficialPricingPreviewResult{
 		Provider:  "claude",
@@ -171,7 +176,12 @@ func (mps *ModelPricingService) SyncClaudeOfficialPricing() (ModelPricingSyncRes
 	sort.Strings(models)
 
 	for _, model := range models {
-		pricing := syncMap[model]
+		syncEntry := syncMap[model]
+		pricing := syncEntry.Pricing
+		source := normalizeModelPricingSource(syncEntry.Source)
+		if source == "" {
+			source = modelPricingSourceClaudeSync
+		}
 		result.TotalModels++
 
 		oldEntry, hadPriceOverride := newOverrides.Pricing[model]
@@ -194,7 +204,7 @@ func (mps *ModelPricingService) SyncClaudeOfficialPricing() (ModelPricingSyncRes
 		newOverrides.Pricing[model] = entry
 		newOverrides.Ephemeral1h[model] = pricing.CacheCreate1hPerToken
 		newOverrides.Meta[model] = modelPricingMeta{
-			Source:    modelPricingSourceClaudeSync,
+			Source:    source,
 			UpdatedAt: result.SyncedAt,
 		}
 
@@ -203,7 +213,7 @@ func (mps *ModelPricingService) SyncClaudeOfficialPricing() (ModelPricingSyncRes
 			!hadEphemeralOverride ||
 			!floatAlmostEqual(oldEphemeral, pricing.CacheCreate1hPerToken) ||
 			!hadMeta ||
-			normalizeModelPricingSource(oldMeta.Source) != modelPricingSourceClaudeSync
+			normalizeModelPricingSource(oldMeta.Source) != source
 		if !changed {
 			result.UnchangedModels++
 			continue
@@ -559,19 +569,28 @@ func parseUSDPerMTok(raw string) (float64, error) {
 	return parsed, nil
 }
 
-func buildClaudeSyncPricingMap(rows []claudeOfficialModelPricing) (map[string]claudeOfficialModelPricing, []string) {
-	result := make(map[string]claudeOfficialModelPricing)
+func buildClaudeSyncPricingMap(rows []claudeOfficialModelPricing) (map[string]claudeSyncPricingEntry, []string) {
+	result := make(map[string]claudeSyncPricingEntry)
 	unrecognizedSet := make(map[string]struct{})
 	for _, row := range rows {
 		targetModels, recognized := resolveClaudePricingTargetModels(row.DisplayName)
+		source := modelPricingSourceClaudeSync
 		if !recognized {
-			if strings.TrimSpace(row.DisplayName) != "" {
-				unrecognizedSet[row.DisplayName] = struct{}{}
+			fallbackModel := normalizeClaudeFallbackModelKey(row.DisplayName)
+			if fallbackModel == "" {
+				if strings.TrimSpace(row.DisplayName) != "" {
+					unrecognizedSet[row.DisplayName] = struct{}{}
+				}
+				continue
 			}
-			continue
+			targetModels = []string{fallbackModel}
+			source = modelPricingSourceManual
 		}
 		for _, model := range targetModels {
-			result[model] = row
+			result[model] = claudeSyncPricingEntry{
+				Pricing: row,
+				Source:  source,
+			}
 		}
 	}
 
@@ -589,8 +608,15 @@ func buildClaudePricingPreviewRows(rows []claudeOfficialModelPricing) ([]ClaudeO
 
 	for _, row := range rows {
 		targetModels, recognized := resolveClaudePricingTargetModels(row.DisplayName)
-		if !recognized && strings.TrimSpace(row.DisplayName) != "" {
-			unrecognizedSet[row.DisplayName] = struct{}{}
+		if !recognized {
+			fallbackModel := normalizeClaudeFallbackModelKey(row.DisplayName)
+			if fallbackModel == "" {
+				if strings.TrimSpace(row.DisplayName) != "" {
+					unrecognizedSet[row.DisplayName] = struct{}{}
+				}
+			} else {
+				targetModels = []string{fallbackModel}
+			}
 		}
 
 		targets := append([]string(nil), targetModels...)
@@ -618,6 +644,19 @@ func buildClaudePricingPreviewRows(rows []claudeOfficialModelPricing) ([]ClaudeO
 	}
 	sort.Strings(unrecognized)
 	return previewRows, unrecognized
+}
+
+func normalizeClaudeFallbackModelKey(displayName string) string {
+	normalizedDisplayName := normalizeModelDisplayName(displayName)
+	if normalizedDisplayName == "" {
+		return ""
+	}
+
+	tokens := alnumTokenPattern.FindAllString(strings.ToLower(normalizedDisplayName), -1)
+	if len(tokens) == 0 {
+		return ""
+	}
+	return strings.Join(tokens, "-")
 }
 
 func resolveClaudePricingTargetModels(displayName string) ([]string, bool) {

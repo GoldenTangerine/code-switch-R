@@ -310,7 +310,8 @@ const confirmClaudeSync = async () => {
       const result = await syncClaudeOfficialPricing()
       showToast(
         t('components.general.modelPricing.toast.syncSummary', {
-          changed: result.changed_models,
+          created: result.created_models,
+          updated: result.updated_models,
           unchanged: result.unchanged_models,
         }),
       )

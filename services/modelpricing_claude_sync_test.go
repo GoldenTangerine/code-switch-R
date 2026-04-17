@@ -234,17 +234,56 @@ func TestResolveClaudePricingTargetModels_AllOfficialNamesMapped(t *testing.T) {
 	}
 }
 
-func TestBuildClaudeSyncPricingMap_ReturnsUnrecognizedDisplayNames(t *testing.T) {
+func TestNormalizeClaudeFallbackModelKey(t *testing.T) {
+	if got := normalizeClaudeFallbackModelKey(" Claude Unknown 9.9 "); got != "claude-unknown-9-9" {
+		t.Fatalf("normalizeClaudeFallbackModelKey 返回 %q，期望 %q", got, "claude-unknown-9-9")
+	}
+	if got := normalizeClaudeFallbackModelKey("Claude Sonnet 3.7 (deprecated)"); got != "claude-sonnet-3-7" {
+		t.Fatalf("normalizeClaudeFallbackModelKey 返回 %q，期望 %q", got, "claude-sonnet-3-7")
+	}
+	if got := normalizeClaudeFallbackModelKey("!!!"); got != "" {
+		t.Fatalf("normalizeClaudeFallbackModelKey 返回 %q，期望空字符串", got)
+	}
+}
+
+func TestBuildClaudeSyncPricingMap_UsesManualFallbackForUnmappedDisplayNames(t *testing.T) {
 	rows := []claudeOfficialModelPricing{
 		{DisplayName: "Claude Opus 4.5"},
 		{DisplayName: "Claude Unknown 9.9"},
 	}
 	syncMap, unrecognized := buildClaudeSyncPricingMap(rows)
-	if len(syncMap) == 0 {
-		t.Fatalf("len(syncMap) = 0, 期望 > 0")
+	if len(unrecognized) != 0 {
+		t.Fatalf("unrecognized = %v, 期望空", unrecognized)
 	}
-	if len(unrecognized) != 1 || unrecognized[0] != "Claude Unknown 9.9" {
-		t.Fatalf("unrecognized = %v, 期望 [Claude Unknown 9.9]", unrecognized)
+	mappedTarget, ok := syncMap["claude-opus-4-5"]
+	if !ok {
+		t.Fatalf("未找到已映射模型 claude-opus-4-5")
+	}
+	if mappedTarget.Source != modelPricingSourceClaudeSync {
+		t.Fatalf("mappedTarget.Source = %q, 期望 %q", mappedTarget.Source, modelPricingSourceClaudeSync)
+	}
+	fallbackTarget, ok := syncMap["claude-unknown-9-9"]
+	if !ok {
+		t.Fatalf("未找到 fallback 自定义模型 claude-unknown-9-9")
+	}
+	if fallbackTarget.Source != modelPricingSourceManual {
+		t.Fatalf("fallbackTarget.Source = %q, 期望 %q", fallbackTarget.Source, modelPricingSourceManual)
+	}
+	if fallbackTarget.Pricing.DisplayName != "Claude Unknown 9.9" {
+		t.Fatalf("fallbackTarget.Pricing.DisplayName = %q, 期望 %q", fallbackTarget.Pricing.DisplayName, "Claude Unknown 9.9")
+	}
+}
+
+func TestBuildClaudeSyncPricingMap_ReturnsUnrecognizedDisplayNamesWhenFallbackKeyMissing(t *testing.T) {
+	rows := []claudeOfficialModelPricing{
+		{DisplayName: "!!!"},
+	}
+	syncMap, unrecognized := buildClaudeSyncPricingMap(rows)
+	if len(syncMap) != 0 {
+		t.Fatalf("len(syncMap) = %d, 期望 0", len(syncMap))
+	}
+	if len(unrecognized) != 1 || unrecognized[0] != "!!!" {
+		t.Fatalf("unrecognized = %v, 期望 [!!!]", unrecognized)
 	}
 }
 
@@ -305,8 +344,42 @@ func TestBuildClaudePricingPreviewRows_ReturnsUnrecognizedDisplayNames(t *testin
 	if len(previewRows) != 2 {
 		t.Fatalf("len(previewRows) = %d, 期望 2", len(previewRows))
 	}
-	if len(unrecognized) != 1 || unrecognized[0] != "Claude Unknown 9.9" {
-		t.Fatalf("unrecognized = %v, 期望 [Claude Unknown 9.9]", unrecognized)
+	if len(unrecognized) != 0 {
+		t.Fatalf("unrecognized = %v, 期望空", unrecognized)
+	}
+
+	foundFallback := false
+	for _, row := range previewRows {
+		if row.DisplayName != "Claude Unknown 9.9" {
+			continue
+		}
+		foundFallback = true
+		if row.IsRecognized {
+			t.Fatalf("Claude Unknown 9.9 不应被视为已映射")
+		}
+		if len(row.TargetModels) != 1 || row.TargetModels[0] != "claude-unknown-9-9" {
+			t.Fatalf("TargetModels = %v, 期望 [claude-unknown-9-9]", row.TargetModels)
+		}
+	}
+	if !foundFallback {
+		t.Fatalf("未找到 Claude Unknown 9.9 的预览行")
+	}
+}
+
+func TestBuildClaudePricingPreviewRows_ReturnsUnrecognizedDisplayNamesWhenFallbackKeyMissing(t *testing.T) {
+	rows := []claudeOfficialModelPricing{
+		{DisplayName: "!!!"},
+	}
+
+	previewRows, unrecognized := buildClaudePricingPreviewRows(rows)
+	if len(previewRows) != 1 {
+		t.Fatalf("len(previewRows) = %d, 期望 1", len(previewRows))
+	}
+	if len(unrecognized) != 1 || unrecognized[0] != "!!!" {
+		t.Fatalf("unrecognized = %v, 期望 [!!!]", unrecognized)
+	}
+	if len(previewRows[0].TargetModels) != 0 {
+		t.Fatalf("TargetModels = %v, 期望空", previewRows[0].TargetModels)
 	}
 }
 
