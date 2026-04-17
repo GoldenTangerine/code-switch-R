@@ -70,8 +70,8 @@ func TestListModelPricing_IncludesBuiltinFreeAndZeroCacheModels(t *testing.T) {
 	if glm51.CacheCreationInputTokenCost != 0 {
 		t.Fatalf("GLM-5.1 CacheCreationInputTokenCost = %f, 期望 0", glm51.CacheCreationInputTokenCost)
 	}
-	if glm51.CacheReadInputTokenCost != 0.000002 {
-		t.Fatalf("GLM-5.1 CacheReadInputTokenCost = %f, 期望 %f", glm51.CacheReadInputTokenCost, 0.000002)
+	if math.Abs(glm51.CacheReadInputTokenCost-0.0000002857) > 1e-12 {
+		t.Fatalf("GLM-5.1 CacheReadInputTokenCost = %f, 期望 %f", glm51.CacheReadInputTokenCost, 0.0000002857)
 	}
 	if glm51.GroupMultiplier != 1 {
 		t.Fatalf("GLM-5.1 GroupMultiplier = %f, 期望 1", glm51.GroupMultiplier)

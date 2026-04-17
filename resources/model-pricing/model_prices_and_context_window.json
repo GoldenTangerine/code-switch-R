@@ -22602,45 +22602,45 @@
         "supports_web_search": true
     },
     "GLM-5.1": {
-        "input_cost_per_token": 8e-06,
-        "output_cost_per_token": 2.8e-05,
+        "input_cost_per_token": 1.1429e-06,
+        "output_cost_per_token": 4e-06,
         "cache_creation_input_token_cost": 0.0,
-        "cache_read_input_token_cost": 2e-06,
+        "cache_read_input_token_cost": 2.857e-07,
         "group_multiplier": 1
     },
     "GLM-5-Turbo": {
-        "input_cost_per_token": 7e-06,
-        "output_cost_per_token": 2.6e-05,
+        "input_cost_per_token": 1e-06,
+        "output_cost_per_token": 3.7143e-06,
         "cache_creation_input_token_cost": 0.0,
-        "cache_read_input_token_cost": 1.8e-06,
+        "cache_read_input_token_cost": 2.571e-07,
         "group_multiplier": 1
     },
     "GLM-5": {
-        "input_cost_per_token": 6e-06,
-        "output_cost_per_token": 2.2e-05,
+        "input_cost_per_token": 8.571e-07,
+        "output_cost_per_token": 3.1429e-06,
         "cache_creation_input_token_cost": 0.0,
-        "cache_read_input_token_cost": 1.5e-06,
+        "cache_read_input_token_cost": 2.143e-07,
         "group_multiplier": 1
     },
     "GLM-4.7": {
-        "input_cost_per_token": 4e-06,
-        "output_cost_per_token": 1.6e-05,
+        "input_cost_per_token": 5.714e-07,
+        "output_cost_per_token": 2.2857e-06,
         "cache_creation_input_token_cost": 0.0,
-        "cache_read_input_token_cost": 8e-07,
+        "cache_read_input_token_cost": 1.143e-07,
         "group_multiplier": 1
     },
     "GLM-4.5-Air": {
-        "input_cost_per_token": 1.2e-06,
-        "output_cost_per_token": 8e-06,
+        "input_cost_per_token": 1.714e-07,
+        "output_cost_per_token": 1.1429e-06,
         "cache_creation_input_token_cost": 0.0,
-        "cache_read_input_token_cost": 2.4e-07,
+        "cache_read_input_token_cost": 3.43e-08,
         "group_multiplier": 1
     },
     "GLM-4.7-FlashX": {
-        "input_cost_per_token": 5e-07,
-        "output_cost_per_token": 3e-06,
+        "input_cost_per_token": 7.14e-08,
+        "output_cost_per_token": 4.286e-07,
         "cache_creation_input_token_cost": 0.0,
-        "cache_read_input_token_cost": 1e-07,
+        "cache_read_input_token_cost": 1.43e-08,
         "group_multiplier": 1
     },
     "GLM-4.7-Flash": {
@@ -22651,36 +22651,36 @@
         "group_multiplier": 1
     },
     "GLM-4-Plus": {
-        "input_cost_per_token": 5e-06,
-        "output_cost_per_token": 5e-06,
+        "input_cost_per_token": 7.143e-07,
+        "output_cost_per_token": 7.143e-07,
         "cache_creation_input_token_cost": 0.0,
         "cache_read_input_token_cost": 0.0,
         "group_multiplier": 1
     },
     "GLM-4-Long": {
-        "input_cost_per_token": 1e-06,
-        "output_cost_per_token": 1e-06,
+        "input_cost_per_token": 1.429e-07,
+        "output_cost_per_token": 1.429e-07,
         "cache_creation_input_token_cost": 0.0,
         "cache_read_input_token_cost": 0.0,
         "group_multiplier": 1
     },
     "GLM-4-Air-250414": {
-        "input_cost_per_token": 5e-07,
-        "output_cost_per_token": 5e-07,
+        "input_cost_per_token": 7.14e-08,
+        "output_cost_per_token": 7.14e-08,
         "cache_creation_input_token_cost": 0.0,
         "cache_read_input_token_cost": 0.0,
         "group_multiplier": 1
     },
     "GLM-Z1-Air": {
-        "input_cost_per_token": 5e-07,
-        "output_cost_per_token": 5e-07,
+        "input_cost_per_token": 7.14e-08,
+        "output_cost_per_token": 7.14e-08,
         "cache_creation_input_token_cost": 0.0,
         "cache_read_input_token_cost": 0.0,
         "group_multiplier": 1
     },
     "GLM-Z1-FlashX": {
-        "input_cost_per_token": 1e-07,
-        "output_cost_per_token": 1e-07,
+        "input_cost_per_token": 1.43e-08,
+        "output_cost_per_token": 1.43e-08,
         "cache_creation_input_token_cost": 0.0,
         "cache_read_input_token_cost": 0.0,
         "group_multiplier": 1

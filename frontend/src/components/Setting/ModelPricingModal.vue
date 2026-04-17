@@ -650,6 +650,7 @@ watch(
 <template>
   <InlineModal
     :open="open"
+    :body-scrollable="false"
     :title="$t('components.general.modelPricing.title')"
     :panel-width="'min(1280px, 98vw)'"
     @close="closeModal"
@@ -833,6 +834,8 @@ watch(
 .model-pricing-modal {
   display: flex;
   flex-direction: column;
+  height: 100%;
+  min-height: 0;
   gap: 16px;
 }
 
@@ -934,13 +937,15 @@ watch(
 .model-pricing-list {
   display: flex;
   flex-direction: column;
+  flex: 1 1 auto;
   gap: 10px;
   min-height: 0;
+  overflow: hidden;
 }
 
 .model-pricing-viewport {
-  min-height: 360px;
-  max-height: min(62vh, 720px);
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
   overscroll-behavior: contain;
