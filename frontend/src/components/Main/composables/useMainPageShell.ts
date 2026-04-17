@@ -51,7 +51,8 @@ type UseMainPageShellOptions = {
   stopUpdateTimer: () => void
   startProviderStatsTimer: () => void
   stopProviderStatsTimer: () => void
-  refreshProviderQuotas: () => Promise<void>
+  refreshProviderQuotas: (options?: { forceRemoteRefs?: Set<string> }) => Promise<void>
+  resolveManualRefreshRemoteQuotaRefs?: () => Set<string>
   startQuotaTimers: () => void
   stopQuotaTimers: () => void
   startStatusSync: () => void
@@ -82,6 +83,7 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
     startProviderStatsTimer,
     stopProviderStatsTimer,
     refreshProviderQuotas,
+    resolveManualRefreshRemoteQuotaRefs,
     startQuotaTimers,
     stopQuotaTimers,
     startStatusSync,
@@ -286,6 +288,7 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
     refreshing.value = true
     try {
       await loadProviders()
+      const forceRemoteRefs = resolveManualRefreshRemoteQuotaRefs?.()
       await Promise.all([
         reloadHeatmap(),
         ...PROVIDER_TAB_IDS.map(refreshProxyState),
@@ -296,7 +299,11 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
         loadAvailabilityResults(),
         refreshImportStatus(),
         pollUpdateState(),
-        refreshProviderQuotas(),
+        refreshProviderQuotas(
+          forceRemoteRefs && forceRemoteRefs.size > 0
+            ? { forceRemoteRefs }
+            : undefined,
+        ),
       ])
     } catch (error) {
       console.error('Failed to refresh data', error)

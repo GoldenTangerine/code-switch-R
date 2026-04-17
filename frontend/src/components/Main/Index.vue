@@ -203,6 +203,7 @@ import { useProviderStats } from './composables/useProviderStats'
 import { useUpdatePolling } from './composables/useUpdatePolling'
 import { cardProviderRef } from './adapters/providerCardMappers'
 import { getDefaultHostedProviderRef, isHostedRouteActive } from './utils/providerRoutingState'
+import { hasProviderQuotaQueryType } from '../../utils/providerQuotaQuery'
 import type { CustomCliToolDraft, ProviderCardViewModel, ProviderTab } from './types'
 import type { AutomationCard } from '../../data/cards'
 
@@ -339,6 +340,21 @@ const {
   cards,
 })
 
+const resolveManualRefreshRemoteQuotaRefs = () => {
+  const refs = new Set<string>()
+  const activeTabCards = cards[activeTab.value] ?? []
+
+  activeTabCards.forEach((card) => {
+    if (!hasProviderQuotaQueryType(card.providerQuotaQueryType)) return
+    const ref = cardProviderRef(card) || card.name
+    if (ref) {
+      refs.add(ref)
+    }
+  })
+
+  return refs
+}
+
 const {
   modelListModalOpen,
   modelListModalProvider,
@@ -407,6 +423,7 @@ pageShell = useMainPageShell({
   startProviderStatsTimer,
   stopProviderStatsTimer,
   refreshProviderQuotas,
+  resolveManualRefreshRemoteQuotaRefs,
   startQuotaTimers,
   stopQuotaTimers,
   startStatusSync,

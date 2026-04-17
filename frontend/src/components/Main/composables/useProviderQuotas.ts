@@ -5,7 +5,10 @@ import {
   normalizeBudgetQuotaSettings,
   providerBudgetQuotaOrder,
 } from '../../../utils/budgetUsage'
-import { hasProviderQuotaQueryType } from '../../../utils/providerQuotaQuery'
+import {
+  hasProviderQuotaQueryType,
+  normalizeProviderQuotaQueryType,
+} from '../../../utils/providerQuotaQuery'
 import { cardProviderRef } from '../adapters/providerCardMappers'
 import type { ProviderQuotaDisplayItem, ProviderTab, TranslateFn } from '../types'
 import {
@@ -36,6 +39,7 @@ const createQuotaDisplayMap = (): Record<ProviderTab, Record<string, ProviderQuo
 type RemoteQuotaCacheEntry = {
   items: ProviderQuotaSnapshotItem[]
   fetchedAt: number
+  cacheIdentity: string
 }
 
 const createRemoteQuotaCacheMap = (): Record<ProviderTab, Record<string, RemoteQuotaCacheEntry>> => ({
@@ -48,6 +52,14 @@ const createRemoteQuotaCacheMap = (): Record<ProviderTab, Record<string, RemoteQ
 const tabToPlatform = (tab: ProviderTab): LogPlatform | '' => {
   if (tab === 'claude' || tab === 'codex' || tab === 'gemini') return tab
   return ''
+}
+
+function buildRemoteQuotaCacheIdentity(card: AutomationCard): string {
+  return JSON.stringify([
+    normalizeProviderQuotaQueryType(card.providerQuotaQueryType),
+    String(card.apiUrl ?? '').trim(),
+    String(card.apiKey ?? '').trim(),
+  ])
 }
 
 /**
@@ -65,7 +77,7 @@ export function useProviderQuotas(options: UseProviderQuotasOptions) {
   let refreshTimer: ReturnType<typeof globalThis.setInterval> | undefined
   let countdownTimer: ReturnType<typeof globalThis.setInterval> | undefined
   let lastCountdownTickAt: Date | null = null
-  let refreshInFlight = false
+  let refreshTask: Promise<void> | null = null
   let refreshQueued = false
   let queuedForceRemoteRefs = new Set<string>()
 
@@ -100,7 +112,9 @@ export function useProviderQuotas(options: UseProviderQuotasOptions) {
   }): Promise<ProviderQuotaSnapshotItem[]> => {
     const tabCache = remoteQuotaCacheMap[tab]
     const cacheEntry = tabCache[ref]
-    const cacheIsFresh = cacheEntry
+    const cacheIdentity = buildRemoteQuotaCacheIdentity(card)
+    const cacheMatchesIdentity = cacheEntry?.cacheIdentity === cacheIdentity
+    const cacheIsFresh = cacheMatchesIdentity && cacheEntry
       ? (now.getTime() - cacheEntry.fetchedAt) < REMOTE_QUOTA_CACHE_TTL_MS
       : false
 
@@ -119,16 +133,17 @@ export function useProviderQuotas(options: UseProviderQuotasOptions) {
       tabCache[ref] = {
         items: cachedItems,
         fetchedAt: now.getTime(),
+        cacheIdentity,
       }
       return cloneRemoteQuotaItems(cachedItems, now)
     }
 
-    if (forceRefresh) {
+    if (forceRefresh || !cacheMatchesIdentity) {
       delete tabCache[ref]
       return []
     }
 
-    if (cacheEntry) {
+    if (cacheEntry && cacheMatchesIdentity) {
       return cloneRemoteQuotaItems(cacheEntry.items, now)
     }
 
@@ -161,20 +176,7 @@ export function useProviderQuotas(options: UseProviderQuotasOptions) {
     })
   }
 
-  const refreshProviderQuotas = async (
-    options: {
-      forceRemoteRefs?: Set<string>
-    } = {},
-  ) => {
-    if (refreshInFlight) {
-      // 正在刷新时排队，等当前结束后自动重跑，避免丢失切 tab 等触发
-      refreshQueued = true
-      options.forceRemoteRefs?.forEach((ref) => queuedForceRemoteRefs.add(ref))
-      return
-    }
-    refreshInFlight = true
-    const forceRemoteRefs = options.forceRemoteRefs ?? new Set<string>()
-
+  const runRefreshProviderQuotas = async (forceRemoteRefs: Set<string>) => {
     try {
       const tab = getActiveTab()
       const platform = tabToPlatform(tab)
@@ -232,16 +234,33 @@ export function useProviderQuotas(options: UseProviderQuotasOptions) {
       }
     } catch (error) {
       console.error('[ProviderQuota] refresh failed:', error)
-    } finally {
-      refreshInFlight = false
-      // 如果排队了新请求，立即执行
-      if (refreshQueued) {
-        const nextForceRemoteRefs = queuedForceRemoteRefs
-        refreshQueued = false
-        queuedForceRemoteRefs = new Set<string>()
-        void refreshProviderQuotas({ forceRemoteRefs: nextForceRemoteRefs })
-      }
     }
+  }
+
+  const refreshProviderQuotas = (
+    options: {
+      forceRemoteRefs?: Set<string>
+    } = {},
+  ) => {
+    refreshQueued = true
+    options.forceRemoteRefs?.forEach((ref) => queuedForceRemoteRefs.add(ref))
+
+    if (!refreshTask) {
+      refreshTask = (async () => {
+        try {
+          while (refreshQueued) {
+            refreshQueued = false
+            const nextForceRemoteRefs = queuedForceRemoteRefs
+            queuedForceRemoteRefs = new Set<string>()
+            await runRefreshProviderQuotas(nextForceRemoteRefs)
+          }
+        } finally {
+          refreshTask = null
+        }
+      })()
+    }
+
+    return refreshTask
   }
 
   const updateCountdowns = () => {
