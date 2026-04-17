@@ -293,6 +293,7 @@ func TestGeminiService_LoadProvidersSupportsTotalQuotaFieldAfterInitDatabase(t *
 			BudgetQuotaUsedAdjustments: &BudgetQuotaAdjustments{
 				Total: 45.67,
 			},
+			ProviderQuotaQueryType: string(ProviderQuotaQueryTypeTokenPlanMiniMax),
 		},
 	})
 	if err != nil {
@@ -312,5 +313,8 @@ func TestGeminiService_LoadProvidersSupportsTotalQuotaFieldAfterInitDatabase(t *
 	}
 	if providers[0].BudgetQuotaUsedAdjustments == nil || providers[0].BudgetQuotaUsedAdjustments.Total != 45.67 {
 		t.Fatalf("Gemini total quota adjustment 反序列化失败: %+v", providers[0].BudgetQuotaUsedAdjustments)
+	}
+	if providers[0].ProviderQuotaQueryType != string(ProviderQuotaQueryTypeTokenPlanMiniMax) {
+		t.Fatalf("Gemini providerQuotaQueryType 反序列化失败: %q", providers[0].ProviderQuotaQueryType)
 	}
 }

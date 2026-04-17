@@ -145,6 +145,7 @@ export const resolveProviderQuotaSnapshot = async ({
         adjustment,
         remaining: roundBudgetValue(setting.total - used),
         isActive,
+        valueMode: 'currency',
       })
     } catch (error) {
       console.warn(`[ProviderQuotaSnapshot] Failed to resolve ${key} for ${card.name}:`, error)

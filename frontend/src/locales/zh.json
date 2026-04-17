@@ -521,9 +521,9 @@
         "quotaWeekly": "周",
         "quotaMonthly": "月",
         "quotaTotal": "总",
-        "quotaTooltip": "{label}：已用 ${used} / ${total}，{countdown} 后刷新",
-        "quotaTooltipNoReset": "{label}：已用 ${used} / ${total}，累计总额度不刷新",
-        "quotaTooltipNoCountdown": "{label}：已用 ${used} / ${total}",
+        "quotaTooltip": "{label}：已用 {used} / {total}，{countdown} 后刷新",
+        "quotaTooltipNoReset": "{label}：已用 {used} / {total}，累计总额度不刷新",
+        "quotaTooltipNoCountdown": "{label}：已用 {used} / {total}",
         "quotaInactive": "未激活"
       },
       "providerCostTrend": {
@@ -631,6 +631,7 @@
           "connectivityAuthType": "认证方式",
           "requestBodyOverrides": "请求体强制字段",
           "budgetQuota": "预算额度",
+          "providerQuotaQueryType": "供应商查询类型",
           "budgetQuotaFiveHour": "5 小时额度",
           "budgetQuotaDaily": "日额度",
           "budgetQuotaWeekly": "周额度",
@@ -671,9 +672,18 @@
           "connectivityAuthType": "默认使用 Bearer。Anthropic 官方 API 请选择 X-API-Key。如需自定义请在下方输入 Header 名称。",
           "requestBodyOverrides": "仅在请求实际转发到当前供应商时生效。这里填写 JSON 对象；同名字段会覆盖，不存在则新增，嵌套对象会递归写入。",
           "budgetQuota": "为此供应商设置独立预算额度。填 0 或留空表示不限额。仅统计当前供应商的使用量。",
+          "providerQuotaQueryType": "给当前供应商选一个 Token Plan 查询类型，首页卡片会自动复用此供应商的 API 地址和 API 密钥去查额度，并继续用预算额度那套进度条展示。",
+          "providerQuotaQueryUsesProviderCredentials": "已启用后会直接使用当前供应商的 API 地址和 API 密钥查询 Token Plan 额度，结果只显示在首页供应商卡片上。",
+          "providerQuotaQueryMissingCredentials": "要启用供应商额度查询，至少得把当前供应商的 API 地址和 API 密钥填完整，不然这功能就只能搁这儿当摆设。",
           "budgetQuotaRefreshTime": "每日刷新时间",
           "budgetQuotaRefreshWeekday": "每周刷新星期",
           "budgetQuotaRefreshMonthDay": "每月刷新日期"
+        },
+        "options": {
+          "providerQuotaQueryNone": "不启用",
+          "providerQuotaQueryTokenPlanGLM": "GLM Token Plan",
+          "providerQuotaQueryTokenPlanKimi": "Kimi Token Plan",
+          "providerQuotaQueryTokenPlanMiniMax": "MiniMax Token Plan"
         },
         "jsonEditor": {
           "title": "配置 JSON",

@@ -93,6 +93,8 @@ type Provider struct {
 	// 供应商级别预算额度当前已使用校准值（5 小时 / 日 / 周 / 月 / 总额度）
 	// 用于在统计值基础上做手动校准，nil / 全 0 均视为未配置
 	BudgetQuotaUsedAdjustments *BudgetQuotaAdjustments `json:"budgetQuotaUsedAdjustments,omitempty"`
+	// 供应商额度查询类型：启用后首页卡片会改为按远端 Token Plan 查询结果展示额度
+	ProviderQuotaQueryType string `json:"providerQuotaQueryType,omitempty"`
 
 	// ========== 旧字段（已废弃，仅用于读取迁移） ==========
 	// 这些字段在保存时不再写入，但读取时会自动迁移到新字段

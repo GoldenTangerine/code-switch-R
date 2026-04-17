@@ -2,6 +2,7 @@ import type { AutomationCard } from '../../data/cards'
 import type { BlacklistStatus } from '../../services/blacklist'
 import type { ConfigFile, ProxyInjection } from '../../services/customCliService'
 import type { BudgetQuotaAdjustments, BudgetQuotaKey, BudgetQuotaSettings } from '../../utils/budgetUsage'
+import type { ProviderQuotaQueryType } from '../../utils/providerQuotaQuery'
 
 export type TranslateFn = (key: string, ...args: any[]) => string
 
@@ -66,6 +67,7 @@ export type VendorForm = {
   connectivityAuthType?: string
   budgetQuotaSettings?: BudgetQuotaSettings
   budgetQuotaUsedAdjustments?: BudgetQuotaAdjustments
+  providerQuotaQueryType?: ProviderQuotaQueryType
 }
 
 export type ProviderQuotaDisplayItem = {
@@ -76,6 +78,7 @@ export type ProviderQuotaDisplayItem = {
   progressRatio: number
   countdownLabel: string
   nextReset: Date | null
+  valueMode?: 'currency' | 'count'
 }
 
 export type ProviderStatDisplay =

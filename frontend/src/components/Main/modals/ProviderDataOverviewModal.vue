@@ -159,11 +159,11 @@
                   <div class="provider-data-quota-card__values">
                     <div>
                       <span class="provider-data-quota-card__meta-label">{{ t('components.main.providerDataOverview.quotaUsed') }}</span>
-                      <strong>{{ formatCurrency(item.used) }}</strong>
+                      <strong>{{ formatQuotaValue(item, item.used) }}</strong>
                     </div>
                     <div>
                       <span class="provider-data-quota-card__meta-label">{{ t('components.main.providerDataOverview.quotaLimit') }}</span>
-                      <strong>{{ formatCurrency(item.total) }}</strong>
+                      <strong>{{ formatQuotaValue(item, item.total) }}</strong>
                     </div>
                   </div>
                   <div class="provider-data-quota-card__progress">
@@ -267,10 +267,12 @@ import type { AutomationCard } from '../../../data/cards'
 import { fetchLogStatsV2, type LogPlatform, type LogStats } from '../../../services/logs'
 import { extractErrorMessage } from '../../../utils/error'
 import { ensureEChartsLoaded, type EChartsInstanceLike, type EChartsStaticLike } from '../../../utils/echarts'
+import { hasProviderQuotaQueryType } from '../../../utils/providerQuotaQuery'
 import type { ResolvedTheme } from '../types'
 import InlineModal from '../../common/InlineModal.vue'
 import { cardProviderRef } from '../adapters/providerCardMappers'
 import { formatQuotaUsagePercent, getQuotaProgressClass, getQuotaProgressPercent } from '../utils/providerQuotaDisplay'
+import { resolveProviderQuotaQueryDisplay } from '../utils/providerQuotaQueryDisplay'
 import {
   formatProviderQuotaCountdownLabel,
   hasProviderQuotaCountdownCrossedReset,
@@ -360,6 +362,10 @@ const countFormatter = computed(() => new Intl.NumberFormat(locale.value || 'en'
   maximumFractionDigits: 0,
 }))
 
+const quotaCountFormatter = computed(() => new Intl.NumberFormat(locale.value || 'en', {
+  maximumFractionDigits: 2,
+}))
+
 const compactCountFormatter = computed(() => new Intl.NumberFormat(locale.value || 'en', {
   notation: 'compact',
   maximumFractionDigits: 1,
@@ -374,6 +380,16 @@ const formatCurrency = (value: number) => currencyFormatter.value.format(Number.
 const formatCount = (value: number) => countFormatter.value.format(Number.isFinite(value) ? value : 0)
 const formatCompactCount = (value: number) => compactCountFormatter.value.format(Number.isFinite(value) ? value : 0)
 const formatChartDate = (timestamp: number) => dateFormatter.value.format(timestamp)
+const formatQuotaValue = (
+  item: Pick<ProviderQuotaSnapshotItem, 'valueMode'>,
+  value: number,
+) => {
+  const normalized = Number.isFinite(value) ? value : 0
+  if (item.valueMode === 'count') {
+    return quotaCountFormatter.value.format(normalized)
+  }
+  return formatCurrency(normalized)
+}
 
 const hasTrafficData = computed(() => dailyPoints.value.some((point) => point.cost > 0 || point.requests > 0 || point.totalTokens > 0))
 const todayPoint = computed(() => dailyPoints.value[dailyPoints.value.length - 1] ?? {
@@ -446,8 +462,8 @@ const quotaCards = computed(() => quotaItems.value.map((item) => ({
   remainingLabel: !item.isActive
     ? t('components.main.providerDataOverview.quotaInactiveLabel')
     : item.remaining >= 0
-      ? t('components.main.providerDataOverview.quotaRemaining', { amount: formatCurrency(item.remaining) })
-      : t('components.main.providerDataOverview.quotaExceeded', { amount: formatCurrency(Math.abs(item.remaining)) }),
+      ? t('components.main.providerDataOverview.quotaRemaining', { amount: formatQuotaValue(item, item.remaining) })
+      : t('components.main.providerDataOverview.quotaExceeded', { amount: formatQuotaValue(item, Math.abs(item.remaining)) }),
 })))
 
 const nextLoadRequestId = () => {
@@ -717,11 +733,11 @@ const buildQuotaChartOption = () => ({
           <div style="margin-bottom: 10px; color: #94a3b8; font-size: 12px;">${item.label}</div>
           <div style="display: flex; justify-content: space-between; gap: 16px; margin-bottom: 6px;">
             <span>${t('components.main.providerDataOverview.quotaUsed')}</span>
-            <strong style="color: #ffffff;">${formatCurrency(item.used)}</strong>
+            <strong style="color: #ffffff;">${formatQuotaValue(item, item.used)}</strong>
           </div>
           <div style="display: flex; justify-content: space-between; gap: 16px;">
             <span style="color: #cbd5e1;">${t('components.main.providerDataOverview.quotaLimit')}</span>
-            <span style="color: #bfdbfe;">${formatCurrency(item.total)}</span>
+            <span style="color: #bfdbfe;">${formatQuotaValue(item, item.total)}</span>
           </div>
         </div>
       `
@@ -885,6 +901,18 @@ const loadOverview = async () => {
     const providerRef = cardProviderRef(props.provider) || props.provider.name
     const range = buildProviderOverviewRange(LOOKBACK_DAYS)
     const now = new Date()
+    const quotaPromise = hasProviderQuotaQueryType(props.provider.providerQuotaQueryType)
+      ? resolveProviderQuotaQueryDisplay({
+        card: props.provider,
+        now,
+        t,
+      })
+      : resolveProviderQuotaSnapshot({
+        card: props.provider,
+        platform: props.platform,
+        now,
+        t,
+      })
 
     const [stats, quotas] = await Promise.all([
       fetchLogStatsV2({
@@ -893,12 +921,7 @@ const loadOverview = async () => {
         startAt: range.startAt,
         endAt: range.endAt,
       }),
-      resolveProviderQuotaSnapshot({
-        card: props.provider,
-        platform: props.platform,
-        now,
-        t,
-      }),
+      quotaPromise,
     ])
 
     if (!isCurrentLoad(requestId)) return

@@ -8,6 +8,10 @@ import {
   serializeOptionalBudgetQuotaAdjustments,
   serializeOptionalBudgetQuotaSettings,
 } from '../../../utils/budgetUsage'
+import {
+  normalizeProviderQuotaQueryType,
+  serializeProviderQuotaQueryType,
+} from '../../../utils/providerQuotaQuery'
 import type { GeminiProvider as GeminiProviderModel, Provider as PersistedProviderModel } from '../../../../bindings/codeswitch/services/models'
 import { GetProviders as GetGeminiProviders } from '../../../../bindings/codeswitch/services/geminiservice'
 
@@ -17,6 +21,7 @@ export type GeminiProvider = Awaited<ReturnType<typeof GetGeminiProviders>> exte
   disabledSortOrder?: number
   budgetQuotaSettings?: unknown | null
   budgetQuotaUsedAdjustments?: unknown | null
+  providerQuotaQueryType?: unknown | null
 }) : any
 
 export type PersistedProvider = PersistedProviderModel & {
@@ -25,6 +30,7 @@ export type PersistedProvider = PersistedProviderModel & {
   disabledSortOrder?: number
   budgetQuotaSettings?: unknown | null
   budgetQuotaUsedAdjustments?: unknown | null
+  providerQuotaQueryType?: unknown | null
 }
 
 const GEMINI_LOCKED_ENV_KEYS = new Set(['GOOGLE_GEMINI_BASE_URL', 'GEMINI_API_KEY'])
@@ -168,6 +174,7 @@ export const providerToCard = (
   budgetQuotaUsedAdjustments: provider.budgetQuotaUsedAdjustments == null
     ? undefined
     : cloneBudgetQuotaAdjustments(provider.budgetQuotaUsedAdjustments),
+  providerQuotaQueryType: normalizeProviderQuotaQueryType(provider.providerQuotaQueryType),
 })
 
 export const deserializeProviders = (
@@ -200,6 +207,7 @@ export const geminiToCard = (provider: GeminiProvider, index: number): Automatio
   budgetQuotaUsedAdjustments: provider.budgetQuotaUsedAdjustments == null
     ? undefined
     : cloneBudgetQuotaAdjustments(provider.budgetQuotaUsedAdjustments),
+  providerQuotaQueryType: normalizeProviderQuotaQueryType(provider.providerQuotaQueryType),
   availabilityMonitorEnabled: false,
   connectivityAutoBlacklist: false,
   availabilityConfig: undefined,
@@ -221,6 +229,7 @@ export const cardToGemini = (card: AutomationCard, original: GeminiProvider): Ge
   requestBodyOverrides: cloneCardValue(card.requestBodyOverrides || {}),
   budgetQuotaSettings: serializeOptionalBudgetQuotaSettings(card.budgetQuotaSettings),
   budgetQuotaUsedAdjustments: serializeOptionalBudgetQuotaAdjustments(card.budgetQuotaUsedAdjustments),
+  providerQuotaQueryType: serializeProviderQuotaQueryType(card.providerQuotaQueryType),
 })
 
 export const createGeminiFromCard = (
@@ -242,6 +251,7 @@ export const createGeminiFromCard = (
   requestBodyOverrides: cloneCardValue(card.requestBodyOverrides || {}),
   budgetQuotaSettings: serializeOptionalBudgetQuotaSettings(card.budgetQuotaSettings),
   budgetQuotaUsedAdjustments: serializeOptionalBudgetQuotaAdjustments(card.budgetQuotaUsedAdjustments),
+  providerQuotaQueryType: serializeProviderQuotaQueryType(card.providerQuotaQueryType),
 })
 
 export const serializeProviders = (
@@ -274,5 +284,6 @@ export const serializeProviders = (
       connectivityAuthType: provider.connectivityAuthType || '',
       budgetQuotaSettings: serializeOptionalBudgetQuotaSettings(provider.budgetQuotaSettings),
       budgetQuotaUsedAdjustments: serializeOptionalBudgetQuotaAdjustments(provider.budgetQuotaUsedAdjustments),
+      providerQuotaQueryType: serializeProviderQuotaQueryType(provider.providerQuotaQueryType),
     }
   })

@@ -206,6 +206,43 @@
         <div class="form-field">
           <span>{{ t('components.main.form.labels.budgetQuota') }}</span>
           <div v-if="form.budgetQuotaSettings" class="budget-quota-grid provider-budget-quota-grid">
+            <div class="budget-quota-card budget-quota-card--query">
+              <div class="budget-quota-card__header">
+                <div class="budget-quota-card__heading">
+                  <p class="budget-quota-card__title">{{ t('components.main.form.labels.providerQuotaQueryType') }}</p>
+                  <p class="budget-quota-card__hint">{{ t('components.main.form.hints.providerQuotaQueryType') }}</p>
+                </div>
+                <span class="budget-quota-card__limit">
+                  {{ providerQuotaQueryTypeLabel }}
+                </span>
+              </div>
+              <div class="budget-quota-card__body">
+                <div class="budget-quota-field">
+                  <span class="budget-quota-field__label">{{ t('components.main.form.labels.providerQuotaQueryType') }}</span>
+                  <select
+                    v-model="form.providerQuotaQueryType"
+                    class="mac-select"
+                    @change="handleProviderQuotaQueryTypeChange"
+                  >
+                    <option
+                      v-for="option in providerQuotaQueryTypeOptions"
+                      :key="option.value"
+                      :value="option.value"
+                    >
+                      {{ option.label }}
+                    </option>
+                  </select>
+                  <span
+                    :class="[
+                      'budget-quota-field__hint',
+                      { 'budget-quota-field__hint--warning': providerQuotaQueryMissingCredentials },
+                    ]"
+                  >
+                    {{ providerQuotaQueryHint }}
+                  </span>
+                </div>
+              </div>
+            </div>
             <div
               v-for="def in quotaDefinitions"
               :key="def.key"
@@ -447,6 +484,11 @@ import {
   resolveBudgetQuotaWindow,
   resolveBudgetCurrentUsedValue,
 } from '../../../utils/budgetUsage'
+import {
+  normalizeProviderQuotaQueryType,
+  providerQuotaQueryTypeLabelKeyMap,
+  providerQuotaQueryTypes,
+} from '../../../utils/providerQuotaQuery'
 import type { AutomationCard } from '../../../data/cards'
 import type { CLIPlatform } from '../../../services/cliConfig'
 import { isBuiltinModelPlatform } from '../../../utils/builtinModels'
@@ -499,6 +541,27 @@ const saveAndApplyTooltip = computed(() => (
   saveAndApplyBlockedByProvider.value
     ? t('components.main.directApply.requiresHostedRouting')
     : t('components.main.directApply.title')
+))
+const providerQuotaQueryTypeOptions = computed(() => (
+  providerQuotaQueryTypes.map((value) => ({
+    value,
+    label: t(providerQuotaQueryTypeLabelKeyMap[value]),
+  }))
+))
+const normalizedProviderQuotaQueryType = computed(() => normalizeProviderQuotaQueryType(form.providerQuotaQueryType))
+const providerQuotaQueryTypeLabel = computed(() => (
+  t(providerQuotaQueryTypeLabelKeyMap[normalizedProviderQuotaQueryType.value])
+))
+const providerQuotaQueryMissingCredentials = computed(() => (
+  normalizedProviderQuotaQueryType.value !== 'none'
+    && (!form.apiKey.trim() || !form.apiUrl.trim())
+))
+const providerQuotaQueryHint = computed(() => (
+  providerQuotaQueryMissingCredentials.value
+    ? t('components.main.form.hints.providerQuotaQueryMissingCredentials')
+    : normalizedProviderQuotaQueryType.value === 'none'
+      ? t('components.main.form.hints.providerQuotaQueryType')
+      : t('components.main.form.hints.providerQuotaQueryUsesProviderCredentials')
 ))
 
 type QuotaDefinition = {
@@ -783,6 +846,10 @@ const handleBudgetQuotaCurrentUsedChange = (key: BudgetQuotaKey) => {
 
 const handleBudgetQuotaConfigChange = () => {
   void refreshBudgetQuotaUsage()
+}
+
+const handleProviderQuotaQueryTypeChange = () => {
+  form.providerQuotaQueryType = normalizeProviderQuotaQueryType(form.providerQuotaQueryType)
 }
 
 const resetForm = () => {

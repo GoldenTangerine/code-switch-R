@@ -125,6 +125,7 @@ func main() {
 	autoStartService := services.NewAutoStartService()
 	appSettings := services.NewAppSettingsService(autoStartService)
 	modelPricingService := services.NewModelPricingService()
+	providerQuotaQueryService := services.NewProviderQuotaQueryService()
 	providerService.BindModelPricingService(modelPricingService)
 	notificationService := services.NewNotificationService(appSettings) // 通知服务
 	blacklistService := services.NewBlacklistService(settingsService, notificationService)
@@ -241,6 +242,7 @@ func main() {
 			application.NewService(logService),
 			application.NewService(appSettings),
 			application.NewService(modelPricingService),
+			application.NewService(providerQuotaQueryService),
 			application.NewService(updateService),
 			application.NewService(mcpService),
 			application.NewService(skillService),

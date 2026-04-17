@@ -317,6 +317,10 @@
   gap: 14px;
 }
 
+.budget-quota-card--query {
+  border-style: dashed;
+}
+
 .budget-quota-card__header {
   display: flex;
   align-items: flex-start;
@@ -377,6 +381,10 @@
   color: var(--mac-text-secondary);
 }
 
+.budget-quota-field__hint--warning {
+  color: #d97706;
+}
+
 .budget-unit {
   font-size: 12px;
   color: var(--mac-text-secondary);
@@ -396,6 +404,10 @@
 :global(.dark) .budget-quota-field__label,
 :global(.dark) .budget-quota-field__hint {
   color: rgba(255, 255, 255, 0.58);
+}
+
+:global(.dark) .budget-quota-field__hint--warning {
+  color: #fbbf24;
 }
 
 :global(.dark) .budget-quota-card__limit {

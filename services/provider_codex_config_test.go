@@ -138,6 +138,7 @@ func TestProviderService_LoadProvidersSupportsTotalQuotaFieldAfterInitDatabase(t
 				BudgetQuotaUsedAdjustments: &BudgetQuotaAdjustments{
 					Total: 12.34,
 				},
+				ProviderQuotaQueryType: string(ProviderQuotaQueryTypeTokenPlanGLM),
 			},
 		},
 	})
@@ -161,5 +162,8 @@ func TestProviderService_LoadProvidersSupportsTotalQuotaFieldAfterInitDatabase(t
 	}
 	if loaded[0].BudgetQuotaUsedAdjustments == nil || loaded[0].BudgetQuotaUsedAdjustments.Total != 12.34 {
 		t.Fatalf("total quota adjustment 反序列化失败: %+v", loaded[0].BudgetQuotaUsedAdjustments)
+	}
+	if loaded[0].ProviderQuotaQueryType != string(ProviderQuotaQueryTypeTokenPlanGLM) {
+		t.Fatalf("providerQuotaQueryType 反序列化失败: %q", loaded[0].ProviderQuotaQueryType)
 	}
 }

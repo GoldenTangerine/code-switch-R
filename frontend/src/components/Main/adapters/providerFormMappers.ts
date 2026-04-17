@@ -1,5 +1,9 @@
 import type { AutomationCard } from '../../../data/cards'
 import { cloneBudgetQuotaAdjustments } from '../../../utils/budgetUsage'
+import {
+  normalizeProviderQuotaQueryType,
+  serializeProviderQuotaQueryType,
+} from '../../../utils/providerQuotaQuery'
 import { getDefaultAuthType, getDefaultEndpoint } from '../constants'
 import type { ProviderTab, VendorForm } from '../types'
 
@@ -45,6 +49,7 @@ export const createDefaultVendorForm = (
   connectivityAuthType: '',
   budgetQuotaSettings: undefined,
   budgetQuotaUsedAdjustments: undefined,
+  providerQuotaQueryType: 'none',
 })
 
 export const createVendorFormFromCard = (
@@ -81,6 +86,7 @@ export const createVendorFormFromCard = (
   connectivityAuthType: card.connectivityAuthType || '',
   budgetQuotaSettings: cloneProviderValue(card.budgetQuotaSettings) || undefined,
   budgetQuotaUsedAdjustments: cloneBudgetQuotaAdjustments(card.budgetQuotaUsedAdjustments),
+  providerQuotaQueryType: normalizeProviderQuotaQueryType(card.providerQuotaQueryType),
 })
 
 export const resolveProviderAuthState = (
@@ -147,6 +153,7 @@ export const buildNormalizedVendorForm = ({
   connectivityAuthType: resolveAuthType().trim() || getDefaultAuthType(tabId),
   budgetQuotaSettings: cloneProviderValue(form.budgetQuotaSettings) || undefined,
   budgetQuotaUsedAdjustments: cloneBudgetQuotaAdjustments(form.budgetQuotaUsedAdjustments),
+  providerQuotaQueryType: normalizeProviderQuotaQueryType(form.providerQuotaQueryType),
 })
 
 export const buildPersistedProviderFieldsFromForm = (
@@ -178,4 +185,5 @@ export const buildPersistedProviderFieldsFromForm = (
   connectivityAuthType: form.connectivityAuthType || '',
   budgetQuotaSettings: cloneProviderValue(form.budgetQuotaSettings) || undefined,
   budgetQuotaUsedAdjustments: cloneBudgetQuotaAdjustments(form.budgetQuotaUsedAdjustments),
+  providerQuotaQueryType: serializeProviderQuotaQueryType(form.providerQuotaQueryType),
 })

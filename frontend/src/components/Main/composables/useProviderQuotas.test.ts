@@ -9,7 +9,12 @@ vi.mock('../../../services/logs', () => ({
   fetchFiveHourQuotaStatusByProvider: vi.fn(),
 }))
 
+vi.mock('../../../services/providerQuotaQuery', () => ({
+  queryProviderQuota: vi.fn(),
+}))
+
 import { fetchCostByProvider, fetchCostSinceByProvider, fetchFiveHourQuotaStatusByProvider } from '../../../services/logs'
+import { queryProviderQuota } from '../../../services/providerQuotaQuery'
 import { useProviderQuotas } from './useProviderQuotas'
 
 const createCard = (
@@ -59,6 +64,11 @@ describe('useProviderQuotas', () => {
     vi.useFakeTimers()
     vi.spyOn(console, 'warn').mockImplementation(() => {})
     vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.mocked(queryProviderQuota).mockResolvedValue({
+      success: false,
+      queryType: 'none',
+      items: [],
+    })
   })
 
   afterEach(() => {
@@ -357,6 +367,265 @@ describe('useProviderQuotas', () => {
         key: 'daily',
         used: 64,
         countdownLabel: '23h59m',
+      }),
+    ])
+
+    quotaState.stopTimers()
+  })
+
+  it('shows provider query quota on cards even without local budget settings', async () => {
+    vi.setSystemTime(new Date('2026-04-09T10:00:00.000Z'))
+
+    const cards = createCardRecord()
+    const card = createCard(9, {
+      providerQuotaQueryType: 'token_plan_glm',
+      budgetQuotaSettings: undefined,
+    })
+    cards.codex.push(card)
+
+    vi.mocked(queryProviderQuota).mockResolvedValue({
+      success: true,
+      queryType: 'token_plan_glm',
+      items: [
+        {
+          key: 'five_hour',
+          used: 25,
+          total: 100,
+          nextReset: '2026-04-09T15:00:00.000Z',
+          active: true,
+        },
+      ],
+    })
+
+    const quotaState = useProviderQuotas({
+      t: (key: string) => key,
+      getActiveTab: () => 'codex',
+      cards,
+    })
+
+    await quotaState.refreshProviderQuotas()
+
+    expect(queryProviderQuota).toHaveBeenCalledWith('token_plan_glm', card.apiUrl, card.apiKey)
+    expect(fetchCostSinceByProvider).not.toHaveBeenCalled()
+    expect(quotaState.getQuotaDisplay(card)).toEqual([
+      expect.objectContaining({
+        key: 'five_hour',
+        used: 25,
+        total: 100,
+        progressRatio: 0.25,
+        countdownLabel: '5h0m',
+        valueMode: 'count',
+      }),
+    ])
+  })
+
+  it('prefers provider query result over local budget-log quota calculation', async () => {
+    const cards = createCardRecord()
+    const quotas = createDefaultBudgetQuotaSettings()
+    quotas.daily.total = 100
+
+    const card = createCard(10, {
+      providerQuotaQueryType: 'token_plan_kimi',
+      budgetQuotaSettings: quotas,
+    })
+    cards.claude.push(card)
+
+    vi.mocked(queryProviderQuota).mockResolvedValue({
+      success: true,
+      queryType: 'token_plan_kimi',
+      items: [
+        {
+          key: 'weekly',
+          used: 30,
+          total: 120,
+          nextReset: '2026-04-12T00:00:00.000Z',
+          active: true,
+        },
+      ],
+    })
+    vi.mocked(fetchCostSinceByProvider).mockResolvedValue(88)
+
+    const quotaState = useProviderQuotas({
+      t: (key: string) => key,
+      getActiveTab: () => 'claude',
+      cards,
+    })
+
+    await quotaState.refreshProviderQuotas()
+
+    expect(queryProviderQuota).toHaveBeenCalledWith('token_plan_kimi', card.apiUrl, card.apiKey)
+    expect(fetchCostSinceByProvider).not.toHaveBeenCalled()
+    expect(quotaState.getQuotaDisplay(card)).toEqual([
+      expect.objectContaining({
+        key: 'weekly',
+        used: 30,
+        total: 120,
+        progressRatio: 0.25,
+        valueMode: 'count',
+      }),
+    ])
+  })
+
+  it('reuses cached remote quota within ttl instead of querying every 30 seconds', async () => {
+    vi.setSystemTime(new Date('2026-04-09T10:00:00.000Z'))
+
+    const cards = createCardRecord()
+    const card = createCard(11, {
+      providerQuotaQueryType: 'token_plan_kimi',
+    })
+    cards.claude.push(card)
+
+    vi.mocked(queryProviderQuota).mockResolvedValue({
+      success: true,
+      queryType: 'token_plan_kimi',
+      items: [
+        {
+          key: 'weekly',
+          used: 30,
+          total: 120,
+          nextReset: '2026-04-12T00:00:00.000Z',
+          active: true,
+        },
+      ],
+    })
+
+    const quotaState = useProviderQuotas({
+      t: (key: string) => key,
+      getActiveTab: () => 'claude',
+      cards,
+    })
+
+    await quotaState.refreshProviderQuotas()
+
+    vi.setSystemTime(new Date('2026-04-09T10:00:30.000Z'))
+    await quotaState.refreshProviderQuotas()
+
+    expect(queryProviderQuota).toHaveBeenCalledTimes(1)
+    expect(quotaState.getQuotaDisplay(card)).toEqual([
+      expect.objectContaining({
+        key: 'weekly',
+        used: 30,
+        total: 120,
+        valueMode: 'count',
+      }),
+    ])
+  })
+
+  it('refreshes cached remote quota again after cache ttl expires', async () => {
+    vi.setSystemTime(new Date('2026-04-09T10:00:00.000Z'))
+
+    const cards = createCardRecord()
+    const card = createCard(12, {
+      providerQuotaQueryType: 'token_plan_minimax',
+    })
+    cards.codex.push(card)
+
+    vi.mocked(queryProviderQuota)
+      .mockResolvedValueOnce({
+        success: true,
+        queryType: 'token_plan_minimax',
+        items: [
+          {
+            key: 'five_hour',
+            used: 20,
+            total: 100,
+            nextReset: '2026-04-09T16:00:00.000Z',
+            active: true,
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        queryType: 'token_plan_minimax',
+        items: [
+          {
+            key: 'five_hour',
+            used: 45,
+            total: 100,
+            nextReset: '2026-04-09T21:00:00.000Z',
+            active: true,
+          },
+        ],
+      })
+
+    const quotaState = useProviderQuotas({
+      t: (key: string) => key,
+      getActiveTab: () => 'codex',
+      cards,
+    })
+
+    await quotaState.refreshProviderQuotas()
+
+    vi.setSystemTime(new Date('2026-04-09T10:05:01.000Z'))
+    await quotaState.refreshProviderQuotas()
+
+    expect(queryProviderQuota).toHaveBeenCalledTimes(2)
+    expect(quotaState.getQuotaDisplay(card)).toEqual([
+      expect.objectContaining({
+        key: 'five_hour',
+        used: 45,
+        total: 100,
+        valueMode: 'count',
+      }),
+    ])
+  })
+
+  it('forces remote quota refresh when countdown crosses reset before cache ttl expires', async () => {
+    vi.setSystemTime(new Date('2026-04-09T14:59:59.500Z'))
+
+    const cards = createCardRecord()
+    const card = createCard(13, {
+      providerQuotaQueryType: 'token_plan_glm',
+    })
+    cards.codex.push(card)
+
+    vi.mocked(queryProviderQuota)
+      .mockResolvedValueOnce({
+        success: true,
+        queryType: 'token_plan_glm',
+        items: [
+          {
+            key: 'five_hour',
+            used: 25,
+            total: 100,
+            nextReset: '2026-04-09T15:00:00.000Z',
+            active: true,
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        queryType: 'token_plan_glm',
+        items: [
+          {
+            key: 'five_hour',
+            used: 2,
+            total: 100,
+            nextReset: '2026-04-09T20:01:00.000Z',
+            active: true,
+          },
+        ],
+      })
+
+    const quotaState = useProviderQuotas({
+      t: (key: string) => key,
+      getActiveTab: () => 'codex',
+      cards,
+    })
+
+    await quotaState.refreshProviderQuotas()
+    quotaState.startTimers()
+
+    await vi.advanceTimersByTimeAsync(1_000)
+
+    expect(queryProviderQuota).toHaveBeenCalledTimes(2)
+    expect(quotaState.getQuotaDisplay(card)).toEqual([
+      expect.objectContaining({
+        key: 'five_hour',
+        used: 2,
+        total: 100,
+        countdownLabel: '5h0m',
+        valueMode: 'count',
       }),
     ])
 

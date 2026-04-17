@@ -520,9 +520,9 @@
         "quotaWeekly": "W",
         "quotaMonthly": "M",
         "quotaTotal": "Total",
-        "quotaTooltip": "{label}: ${used} / ${total} used, resets in {countdown}",
-        "quotaTooltipNoReset": "{label}: ${used} / ${total} used, never resets",
-        "quotaTooltipNoCountdown": "{label}: ${used} / ${total} used",
+        "quotaTooltip": "{label}: {used} / {total} used, resets in {countdown}",
+        "quotaTooltipNoReset": "{label}: {used} / {total} used, never resets",
+        "quotaTooltipNoCountdown": "{label}: {used} / {total} used",
         "quotaInactive": "Inactive"
       },
       "providerCostTrend": {
@@ -630,6 +630,7 @@
           "connectivityAuthType": "Auth Method",
           "requestBodyOverrides": "Forced Request Body Fields",
           "budgetQuota": "Budget Quota",
+          "providerQuotaQueryType": "Provider query type",
           "budgetQuotaFiveHour": "5-Hour Quota",
           "budgetQuotaDaily": "Daily Quota",
           "budgetQuotaWeekly": "Weekly Quota",
@@ -670,9 +671,18 @@
           "connectivityAuthType": "Default is Bearer. Use X-API-Key for Anthropic-style APIs. Enter custom header name in the text field if needed.",
           "requestBodyOverrides": "Only applies when the request is actually routed to this provider. Provide a JSON object: matching fields are overwritten, missing fields are added, and nested objects are merged recursively.",
           "budgetQuota": "Set independent budget quotas for this provider. Enter 0 or leave blank for unlimited. Only tracks this provider's usage.",
+          "providerQuotaQueryType": "Choose a Token Plan query type for this provider. The home page card will automatically reuse the provider's API URL and API key to query quota and render it with the existing budget quota UI.",
+          "providerQuotaQueryUsesProviderCredentials": "When enabled, Code Switch R directly uses this provider's API URL and API key to query Token Plan quota. The query result is shown only on the home page provider card.",
+          "providerQuotaQueryMissingCredentials": "Provider quota query needs both the provider's API URL and API key. Fill those in first, otherwise this switch is just decoration.",
           "budgetQuotaRefreshTime": "Daily refresh time",
           "budgetQuotaRefreshWeekday": "Weekly refresh day",
           "budgetQuotaRefreshMonthDay": "Monthly refresh date"
+        },
+        "options": {
+          "providerQuotaQueryNone": "Disabled",
+          "providerQuotaQueryTokenPlanGLM": "GLM Token Plan",
+          "providerQuotaQueryTokenPlanKimi": "Kimi Token Plan",
+          "providerQuotaQueryTokenPlanMiniMax": "MiniMax Token Plan"
         },
         "jsonEditor": {
           "title": "Config JSON",

@@ -154,7 +154,9 @@
           class="card-metrics"
         >
           <template v-if="stats.state !== 'ready'">
-            {{ stats.message }}
+            <div class="card-metrics-line">
+              {{ stats.message }}
+            </div>
           </template>
           <template v-else>
             <div class="card-metrics-line">
@@ -212,7 +214,7 @@
                 <span>{{ stats.tps }}</span>
               </span>
               <div
-                v-if="viewModel.quotaDisplay.length > 0"
+                v-if="quotaSectionMode === 'inline-with-performance'"
                 class="card-performance-quotas"
               >
                 <span
@@ -235,6 +237,30 @@
               </div>
             </div>
           </template>
+          <div
+            v-if="quotaSectionMode === 'standalone'"
+            class="card-metrics-line card-metrics-line-performance"
+          >
+            <div class="card-performance-quotas">
+              <span
+                v-for="item in viewModel.quotaDisplay"
+                :key="item.key"
+                class="card-quota-item"
+                :title="quotaTooltip(item)"
+              >
+                <span class="quota-badge" :class="`quota-badge--${item.key}`">{{ item.label }}</span>
+                <span class="quota-progress-bar">
+                  <span
+                    class="quota-progress-fill"
+                    :class="quotaProgressClass(item)"
+                    :style="{ width: `${quotaProgressWidth(item)}%` }"
+                  ></span>
+                </span>
+                <span class="quota-usage-percent">{{ quotaUsagePercent(item) }}</span>
+                <span v-if="showQuotaCountdown(item)" class="quota-countdown">{{ item.countdownLabel }}</span>
+              </span>
+            </div>
+          </div>
         </div>
 
         <div
@@ -490,6 +516,7 @@ import { computed, type ComponentPublicInstance } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { ProviderCardViewModel, ProviderDragEndPayload, ProviderQuotaDisplayItem, ProviderTab, ResolvedTheme } from '../types'
 import { formatQuotaUsagePercent, getQuotaProgressClass, getQuotaProgressPercent } from '../utils/providerQuotaDisplay'
+import { resolveProviderCardQuotaSectionMode } from '../utils/providerCardQuotaVisibility'
 import { isDirectApplyBlockedForProvider } from '../utils/providerDirectApply'
 import { isHostedRouteActive } from '../utils/providerRoutingState'
 
@@ -520,7 +547,14 @@ const emit = defineEmits<{
   remove: []
 }>()
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
+
+const quotaCurrencyFormatter = computed(() => new Intl.NumberFormat(locale.value || 'en', {
+  style: 'currency',
+  currency: 'USD',
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+}))
 
 const quotaProgressClass = (item: ProviderQuotaDisplayItem) => getQuotaProgressClass(item)
 
@@ -530,9 +564,24 @@ const quotaUsagePercent = (item: ProviderQuotaDisplayItem) => formatQuotaUsagePe
 
 const showQuotaCountdown = (item: ProviderQuotaDisplayItem) => Boolean(item.countdownLabel)
 
+const quotaSectionMode = computed(() => resolveProviderCardQuotaSectionMode(
+  props.viewModel.stats,
+  props.viewModel.quotaDisplay,
+))
+
+const formatQuotaValue = (item: ProviderQuotaDisplayItem, value: number) => {
+  const normalized = Number.isFinite(value) ? value : 0
+  if (item.valueMode === 'count') {
+    return new Intl.NumberFormat(locale.value || 'en', {
+      maximumFractionDigits: Number.isInteger(normalized) ? 0 : 2,
+    }).format(normalized)
+  }
+  return quotaCurrencyFormatter.value.format(normalized)
+}
+
 const quotaTooltip = (item: ProviderQuotaDisplayItem) => {
-  const used = item.used.toFixed(2)
-  const total = item.total.toFixed(2)
+  const used = formatQuotaValue(item, item.used)
+  const total = formatQuotaValue(item, item.total)
   if (item.key === 'total') {
     return t('components.main.providers.quotaTooltipNoReset', { label: item.label, used, total })
   }
