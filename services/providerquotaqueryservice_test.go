@@ -77,10 +77,28 @@ func TestProviderQuotaQueryService_QueryQuotaParsesGLMTokenPlan(t *testing.T) {
 				"limits": [
 					{
 						"type": "TOKENS_LIMIT",
+						"unit": 6,
+						"number": 7,
+						"currentValue": 1,
+						"usage": 100,
+						"percentage": 1,
+						"nextResetTime": 1760600000000
+					},
+					{
+						"type": "TOKENS_LIMIT",
+						"unit": 3,
+						"number": 5,
 						"currentValue": 25,
 						"usage": 100,
 						"percentage": 25,
 						"nextResetTime": 1760000000000
+					},
+					{
+						"type": "TOKENS_LIMIT",
+						"window": "5 小时额度",
+						"currentValue": 88,
+						"usage": 100,
+						"percentage": 88
 					}
 				]
 			}
@@ -94,17 +112,75 @@ func TestProviderQuotaQueryService_QueryQuotaParsesGLMTokenPlan(t *testing.T) {
 	if !result.Success {
 		t.Fatalf("期望 GLM 查询成功，实际失败：%s", result.Error)
 	}
-	if len(result.Items) != 1 {
-		t.Fatalf("期望 GLM 返回 1 个额度窗口，实际为 %d", len(result.Items))
+	if len(result.Items) != 2 {
+		t.Fatalf("期望 GLM 返回 2 个额度窗口，实际为 %d", len(result.Items))
 	}
 	if result.Items[0].Key != "five_hour" {
-		t.Fatalf("期望额度 key 为 five_hour，实际为 %s", result.Items[0].Key)
+		t.Fatalf("期望第 1 个额度 key 为 five_hour，实际为 %s", result.Items[0].Key)
 	}
 	if result.Items[0].Used != 25 || result.Items[0].Total != 100 {
 		t.Fatalf("期望 GLM 已用 / 总量为 25 / 100，实际为 %f / %f", result.Items[0].Used, result.Items[0].Total)
 	}
 	if result.Items[0].NextReset == "" {
-		t.Fatal("期望 GLM 返回 nextReset")
+		t.Fatal("期望 GLM 5 小时额度返回 nextReset")
+	}
+	if result.Items[1].Key != "weekly" {
+		t.Fatalf("期望第 2 个额度 key 为 weekly，实际为 %s", result.Items[1].Key)
+	}
+	if result.Items[1].Used != 1 || result.Items[1].Total != 100 {
+		t.Fatalf("期望 GLM 周额度已用 / 总量为 1 / 100，实际为 %f / %f", result.Items[1].Used, result.Items[1].Total)
+	}
+	if result.Items[1].NextReset == "" {
+		t.Fatal("期望 GLM 周额度返回 nextReset")
+	}
+}
+
+func TestResolveGLMTokenPlanQuotaKey(t *testing.T) {
+	tests := []struct {
+		name      string
+		limitItem map[string]any
+		expected  string
+	}{
+		{
+			name: "unit has highest priority for five hour",
+			limitItem: map[string]any{
+				"unit":   3,
+				"window": "每周额度",
+			},
+			expected: "five_hour",
+		},
+		{
+			name: "recognizes weekly from chinese labels without unit number",
+			limitItem: map[string]any{
+				"window": "周额度",
+				"cycle":  "每周",
+			},
+			expected: "weekly",
+		},
+		{
+			name: "recognizes five hour from chinese labels without unit number",
+			limitItem: map[string]any{
+				"name": "5 小时窗口",
+			},
+			expected: "five_hour",
+		},
+		{
+			name: "does not fallback unknown localized labels to five hour",
+			limitItem: map[string]any{
+				"window": "额度窗口",
+				"cycle":  "重置周期",
+			},
+			expected: "",
+		},
+	}
+
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			actual := resolveGLMTokenPlanQuotaKey(testCase.limitItem)
+			if actual != testCase.expected {
+				t.Fatalf("期望 key 为 %s，实际为 %s", testCase.expected, actual)
+			}
+		})
 	}
 }
 

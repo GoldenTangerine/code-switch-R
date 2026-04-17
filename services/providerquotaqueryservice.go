@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 )
@@ -78,7 +79,7 @@ func (s *ProviderQuotaQueryService) QueryQuota(queryType string, apiURL string, 
 	}
 
 	result.Success = true
-	result.Items = items
+	result.Items = normalizeProviderQuotaQueryItems(items)
 	return result
 }
 
@@ -250,8 +251,13 @@ func (s *ProviderQuotaQueryService) queryGLMQuota(baseURL string, apiKey string)
 			continue
 		}
 
+		key := resolveGLMTokenPlanQuotaKey(limitItem)
+		if key == "" {
+			continue
+		}
+
 		items = append(items, ProviderQuotaQueryItem{
-			Key:       "five_hour",
+			Key:       key,
 			Used:      clampNonNegativeFloat(used),
 			Total:     clampNonNegativeFloat(total),
 			NextReset: isoTimeFromAny(limitItem["nextResetTime"]),
@@ -264,6 +270,145 @@ func (s *ProviderQuotaQueryService) queryGLMQuota(baseURL string, apiKey string)
 	}
 
 	return items, nil
+}
+
+func resolveGLMTokenPlanQuotaKey(limitItem map[string]any) string {
+	unit := int(floatFromAny(limitItem["unit"]))
+
+	switch unit {
+	case 6:
+		return "weekly"
+	case 3:
+		return "five_hour"
+	}
+
+	windowLabels := []string{
+		stringFromAny(limitItem["window"]),
+		stringFromAny(limitItem["cycle"]),
+		stringFromAny(limitItem["name"]),
+	}
+	if matchGLMQuotaWindowLabel(windowLabels, []string{
+		"weekly", "week", "7d", "7day", "7days",
+		"每周", "周额度", "周限制", "周窗口", "周配额", "7天", "七天",
+	}) {
+		return "weekly"
+	}
+	if matchGLMQuotaWindowLabel(windowLabels, []string{
+		"5h", "5hour", "5hours", "5小时", "五小时",
+		"5小时额度", "5小时限制", "5小时窗口", "5小时配额",
+	}) {
+		return "five_hour"
+	}
+
+	return ""
+}
+
+func matchGLMQuotaWindowLabel(labels []string, aliases []string) bool {
+	for _, label := range labels {
+		normalizedLabel := normalizeGLMQuotaWindowLabel(label)
+		if normalizedLabel == "" {
+			continue
+		}
+		for _, alias := range aliases {
+			if strings.Contains(normalizedLabel, normalizeGLMQuotaWindowLabel(alias)) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func normalizeGLMQuotaWindowLabel(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return ""
+	}
+
+	lowerCased := strings.ToLower(strings.TrimSpace(value))
+	return strings.NewReplacer(
+		" ", "",
+		"\t", "",
+		"\n", "",
+		"\r", "",
+		"-", "",
+		"_", "",
+	).Replace(lowerCased)
+}
+
+func normalizeProviderQuotaQueryItems(items []ProviderQuotaQueryItem) []ProviderQuotaQueryItem {
+	if len(items) == 0 {
+		return items
+	}
+
+	dedupedItems := make(map[string]ProviderQuotaQueryItem, len(items))
+	orderedKeys := make([]string, 0, len(items))
+
+	for _, item := range items {
+		key := strings.TrimSpace(item.Key)
+		if key == "" {
+			continue
+		}
+
+		item.Key = key
+		if existing, ok := dedupedItems[key]; ok {
+			dedupedItems[key] = mergeProviderQuotaQueryItem(existing, item)
+			continue
+		}
+
+		dedupedItems[key] = item
+		orderedKeys = append(orderedKeys, key)
+	}
+
+	sort.SliceStable(orderedKeys, func(left, right int) bool {
+		leftRank := providerQuotaQueryItemSortRank(orderedKeys[left])
+		rightRank := providerQuotaQueryItemSortRank(orderedKeys[right])
+		if leftRank == rightRank {
+			return left < right
+		}
+		return leftRank < rightRank
+	})
+
+	normalizedItems := make([]ProviderQuotaQueryItem, 0, len(orderedKeys))
+	for _, key := range orderedKeys {
+		normalizedItems = append(normalizedItems, dedupedItems[key])
+	}
+
+	return normalizedItems
+}
+
+func mergeProviderQuotaQueryItem(existing ProviderQuotaQueryItem, candidate ProviderQuotaQueryItem) ProviderQuotaQueryItem {
+	merged := existing
+
+	if merged.Total <= 0 && candidate.Total > 0 {
+		merged.Total = candidate.Total
+	}
+	if merged.Used <= 0 && candidate.Used > 0 {
+		merged.Used = candidate.Used
+	}
+	if strings.TrimSpace(merged.NextReset) == "" && strings.TrimSpace(candidate.NextReset) != "" {
+		merged.NextReset = candidate.NextReset
+	}
+	if !merged.Active && candidate.Active {
+		merged.Active = true
+	}
+
+	return merged
+}
+
+func providerQuotaQueryItemSortRank(key string) int {
+	switch key {
+	case "five_hour":
+		return 0
+	case "daily":
+		return 1
+	case "weekly":
+		return 2
+	case "monthly":
+		return 3
+	case "total":
+		return 4
+	default:
+		return 100
+	}
 }
 
 func (s *ProviderQuotaQueryService) queryKimiQuota(baseURL string, apiKey string) ([]ProviderQuotaQueryItem, error) {
