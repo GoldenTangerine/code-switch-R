@@ -22,7 +22,9 @@ export interface ModelPricingRow {
   output_cost_per_token: number
   output_cost_per_reasoning_token: number
   cache_creation_input_token_cost: number
+  has_cache_creation_input_token_cost?: boolean
   cache_read_input_token_cost: number
+  has_cache_read_input_token_cost?: boolean
   ephemeral_1h_cost_per_token: number
   group_multiplier: number
   is_override: boolean

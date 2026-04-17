@@ -36,19 +36,21 @@ type modelPricingMeta struct {
 }
 
 type ModelPricingRow struct {
-	OriginalModel               string  `json:"original_model,omitempty"`
-	Model                       string  `json:"model"`
-	InputCostPerToken           float64 `json:"input_cost_per_token"`
-	OutputCostPerToken          float64 `json:"output_cost_per_token"`
-	OutputCostPerReasoningToken float64 `json:"output_cost_per_reasoning_token"`
-	CacheCreationInputTokenCost float64 `json:"cache_creation_input_token_cost"`
-	CacheReadInputTokenCost     float64 `json:"cache_read_input_token_cost"`
-	Ephemeral1hCostPerToken     float64 `json:"ephemeral_1h_cost_per_token"`
-	GroupMultiplier             float64 `json:"group_multiplier"`
-	IsOverride                  bool    `json:"is_override"`
-	IsCustom                    bool    `json:"is_custom"`
-	Source                      string  `json:"source"`
-	SourceUpdatedAt             string  `json:"source_updated_at,omitempty"`
+	OriginalModel                  string  `json:"original_model,omitempty"`
+	Model                          string  `json:"model"`
+	InputCostPerToken              float64 `json:"input_cost_per_token"`
+	OutputCostPerToken             float64 `json:"output_cost_per_token"`
+	OutputCostPerReasoningToken    float64 `json:"output_cost_per_reasoning_token"`
+	CacheCreationInputTokenCost    float64 `json:"cache_creation_input_token_cost"`
+	HasCacheCreationInputTokenCost bool    `json:"has_cache_creation_input_token_cost"`
+	CacheReadInputTokenCost        float64 `json:"cache_read_input_token_cost"`
+	HasCacheReadInputTokenCost     bool    `json:"has_cache_read_input_token_cost"`
+	Ephemeral1hCostPerToken        float64 `json:"ephemeral_1h_cost_per_token"`
+	GroupMultiplier                float64 `json:"group_multiplier"`
+	IsOverride                     bool    `json:"is_override"`
+	IsCustom                       bool    `json:"is_custom"`
+	Source                         string  `json:"source"`
+	SourceUpdatedAt                string  `json:"source_updated_at,omitempty"`
 }
 
 type ModelPricingService struct {
@@ -145,18 +147,20 @@ func (mps *ModelPricingService) ListModelPricing() ([]ModelPricingRow, error) {
 		ephemeral1hCostPerToken, _ := svc.ExplicitEphemeral1hCostPerToken(model)
 
 		rows = append(rows, ModelPricingRow{
-			Model:                       model,
-			InputCostPerToken:           entry.InputCostPerToken,
-			OutputCostPerToken:          entry.OutputCostPerToken,
-			OutputCostPerReasoningToken: entry.OutputCostPerReasoningToken,
-			CacheCreationInputTokenCost: entry.CacheCreationInputTokenCost,
-			CacheReadInputTokenCost:     entry.CacheReadInputTokenCost,
-			Ephemeral1hCostPerToken:     ephemeral1hCostPerToken,
-			GroupMultiplier:             effectiveModelPricingGroupMultiplier(entry),
-			IsOverride:                  isOverride,
-			IsCustom:                    isCustom,
-			Source:                      resolveModelPricingSource(meta, isOverride || isCustom),
-			SourceUpdatedAt:             strings.TrimSpace(meta.UpdatedAt),
+			Model:                          model,
+			InputCostPerToken:              entry.InputCostPerToken,
+			OutputCostPerToken:             entry.OutputCostPerToken,
+			OutputCostPerReasoningToken:    entry.OutputCostPerReasoningToken,
+			CacheCreationInputTokenCost:    entry.CacheCreationInputTokenCost,
+			HasCacheCreationInputTokenCost: entry.HasCacheCreationInputTokenCost,
+			CacheReadInputTokenCost:        entry.CacheReadInputTokenCost,
+			HasCacheReadInputTokenCost:     entry.HasCacheReadInputTokenCost,
+			Ephemeral1hCostPerToken:        ephemeral1hCostPerToken,
+			GroupMultiplier:                effectiveModelPricingGroupMultiplier(entry),
+			IsOverride:                     isOverride,
+			IsCustom:                       isCustom,
+			Source:                         resolveModelPricingSource(meta, isOverride || isCustom),
+			SourceUpdatedAt:                strings.TrimSpace(meta.UpdatedAt),
 		})
 	}
 
@@ -217,14 +221,7 @@ func (mps *ModelPricingService) UpsertModelPricing(row ModelPricingRow) error {
 	if v, ok := newOverrides.Pricing[model]; ok {
 		existing = v
 	}
-	existing.InputCostPerToken = row.InputCostPerToken
-	existing.OutputCostPerToken = row.OutputCostPerToken
-	existing.OutputCostPerReasoningToken = row.OutputCostPerReasoningToken
-	existing.CacheCreationInputTokenCost = row.CacheCreationInputTokenCost
-	existing.CacheReadInputTokenCost = row.CacheReadInputTokenCost
-	existing.GroupMultiplier = row.GroupMultiplier
-	existing.HasGroupMultiplier = true
-	newOverrides.Pricing[model] = existing
+	newOverrides.Pricing[model] = applyModelPricingRowToEntry(existing, row)
 
 	newOverrides.Ephemeral1h[model] = row.Ephemeral1hCostPerToken
 	newOverrides.Meta[model] = modelPricingMeta{
@@ -311,12 +308,33 @@ func validateNonNegative(value float64, name string) error {
 	return nil
 }
 
+func applyModelPricingRowToEntry(existing modelpricing.PricingEntry, row ModelPricingRow) modelpricing.PricingEntry {
+	existing.InputCostPerToken = row.InputCostPerToken
+	existing.HasInputCostPerToken = true
+	existing.OutputCostPerToken = row.OutputCostPerToken
+	existing.HasOutputCostPerToken = true
+	existing.OutputCostPerReasoningToken = row.OutputCostPerReasoningToken
+	existing.HasOutputCostPerReasoningToken = true
+	existing.CacheCreationInputTokenCost = row.CacheCreationInputTokenCost
+	existing.HasCacheCreationInputTokenCost = row.HasCacheCreationInputTokenCost
+	existing.CacheReadInputTokenCost = row.CacheReadInputTokenCost
+	existing.HasCacheReadInputTokenCost = row.HasCacheReadInputTokenCost
+	existing.GroupMultiplier = row.GroupMultiplier
+	existing.HasGroupMultiplier = true
+	return existing
+}
+
 func hasTokenPricing(entry modelpricing.PricingEntry) bool {
 	return entry.InputCostPerToken != 0 ||
+		entry.HasInputCostPerToken ||
 		entry.OutputCostPerToken != 0 ||
+		entry.HasOutputCostPerToken ||
 		entry.OutputCostPerReasoningToken != 0 ||
+		entry.HasOutputCostPerReasoningToken ||
 		entry.CacheCreationInputTokenCost != 0 ||
-		entry.CacheReadInputTokenCost != 0
+		entry.HasCacheCreationInputTokenCost ||
+		entry.CacheReadInputTokenCost != 0 ||
+		entry.HasCacheReadInputTokenCost
 }
 
 func effectiveModelPricingGroupMultiplier(entry modelpricing.PricingEntry) float64 {

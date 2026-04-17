@@ -1,3 +1,20 @@
+# Code Switch v2.8.1
+
+## 修复
+- **模型价格编辑器终于分得清“没填 cache”和“明确填 0”了**：`设置 -> 模型价格` 里手动编辑价格时，`cache create / cache read` 字段现在会显式携带 presence 语义；未填写时继续按 `input` 默认补齐，明确填 `0` 时则稳定保留免费 cache，不再出现“你明明想走默认，它却偷偷给你写死成 0”或“你都明确填 0 了，结果又被默认价反盖回去”的拧巴场面。
+- **免费模型和零缓存模型不再被价格列表当空气**：`ListModelPricing` 现在会按显式字段存在性判断 token 定价，像 `GLM-4.7-Flash` 这类 `input / output = 0` 的免费模型，以及 `cache create = 0`、`cache read` 仍收费的模型，都能稳定出现在设置页列表里，不会再被“值等于 0 就当没价格”这套糊涂逻辑顺手过滤掉。
+- **模型价格编辑后再次打开不会把 cache 输入模式带偏**：编辑器现在会按后端返回的 `has_cache_*` 标志回填 `价格 / 倍率` 输入模式，默认补齐模型和显式 `0` 价模型终于各归各位，避免刚保存完再点开，表单显示口径已经跟真实落库状态对不上。
+
+## 技术改进
+- **模型价格弹窗切成变量高度虚拟列表**：大价目表现在改用 `buildVariableHeightVirtualList` 做按需渲染，并补上可视区域测量、滚动定位和 overscan，模型一多时打开弹窗和上下滚动不再跟拖水泥似的。
+- **内置价格表补上 GLM 新模型梯队**：资源文件新增 `GLM-5.1 / GLM-5 / GLM-5-Turbo / GLM-4.7 / GLM-4.5-Air / GLM-4.7-FlashX / GLM-Z1-Air / GLM-Z1-FlashX` 等内置价格，免费模型和零缓存场景也一并覆盖，后续映射和日志金额展示少靠用户手填。
+- **presence 语义前后端统一收口并补齐回归测试**：`PricingEntry`、`ModelPricingRow`、表单 payload 和服务层 apply helper 现在统一传播 `has_cache_creation_input_token_cost / has_cache_read_input_token_cost`，后面谁再把“显式 0 vs 缺省字段”改糊，测试会先出来掀桌子。
+
+## 发布
+- **本次发版版本号统一推进到 `v2.8.1`**：同步更新应用常量、构建配置、Darwin `Info.plist`、Windows 元数据和 Linux 包版本，并准备推送 `v2.8.1` tag 触发 GitHub 自动打包，继续保证仓库版本、Git tag 和发布产物别再各唱各的调。
+
+---
+
 # Code Switch v2.8.0
 
 ## 修复

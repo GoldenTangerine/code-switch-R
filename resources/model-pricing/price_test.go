@@ -151,6 +151,60 @@ func TestPricingEntryUnmarshal_RecognizesGroupMultiplierPresence(t *testing.T) {
 	}
 }
 
+func TestPricingEntryDefaults_PreservesExplicitZeroCachePricing(t *testing.T) {
+	var entry PricingEntry
+	if err := json.Unmarshal([]byte(`{
+		"input_cost_per_token": 0.000008,
+		"output_cost_per_token": 0.000028,
+		"cache_creation_input_token_cost": 0,
+		"cache_read_input_token_cost": 0
+	}`), &entry); err != nil {
+		t.Fatalf("json.Unmarshal 失败: %v", err)
+	}
+
+	ensurePricingEntryDefaults(&entry)
+
+	if !entry.HasCacheCreationInputTokenCost {
+		t.Fatalf("HasCacheCreationInputTokenCost = false, 期望 true")
+	}
+	if !entry.HasCacheReadInputTokenCost {
+		t.Fatalf("HasCacheReadInputTokenCost = false, 期望 true")
+	}
+	if entry.CacheCreationInputTokenCost != 0 {
+		t.Fatalf("CacheCreationInputTokenCost = %f, 期望 0", entry.CacheCreationInputTokenCost)
+	}
+	if entry.CacheReadInputTokenCost != 0 {
+		t.Fatalf("CacheReadInputTokenCost = %f, 期望 0", entry.CacheReadInputTokenCost)
+	}
+}
+
+func TestPricingEntryDefaults_AutoFillsCachePricingWhenCacheFieldsAbsent(t *testing.T) {
+	var entry PricingEntry
+	if err := json.Unmarshal([]byte(`{
+		"input_cost_per_token": 0.000008,
+		"output_cost_per_token": 0.000028
+	}`), &entry); err != nil {
+		t.Fatalf("json.Unmarshal 失败: %v", err)
+	}
+
+	ensurePricingEntryDefaults(&entry)
+
+	wantCreate := 0.000008 * 1.25
+	wantRead := 0.000008 * 0.1
+	if math.Abs(entry.CacheCreationInputTokenCost-wantCreate) > 1e-12 {
+		t.Fatalf("CacheCreationInputTokenCost = %f, 期望 %f", entry.CacheCreationInputTokenCost, wantCreate)
+	}
+	if math.Abs(entry.CacheReadInputTokenCost-wantRead) > 1e-12 {
+		t.Fatalf("CacheReadInputTokenCost = %f, 期望 %f", entry.CacheReadInputTokenCost, wantRead)
+	}
+	if entry.HasCacheCreationInputTokenCost {
+		t.Fatalf("HasCacheCreationInputTokenCost = true, 期望 false")
+	}
+	if entry.HasCacheReadInputTokenCost {
+		t.Fatalf("HasCacheReadInputTokenCost = true, 期望 false")
+	}
+}
+
 func newUnitTestPricingService() *Service {
 	pricing := map[string]*PricingEntry{
 		"claude-opus-4-1": {

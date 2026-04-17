@@ -48,6 +48,11 @@ const cacheFieldMode = reactive<{ create: CacheFieldMode; read: CacheFieldMode }
   read: 'price',
 })
 
+const cacheFieldPresence = reactive<{ create: boolean; read: boolean }>({
+  create: false,
+  read: false,
+})
+
 const templateOptions = computed<string[]>(() => (
   [...props.rows]
     .filter((item) => String(item.model ?? '').trim() !== '')
@@ -111,6 +116,22 @@ const parseOptionalNumber = (raw: string) => {
   return Number.isFinite(value) ? value : null
 }
 
+const parseOptionalNumberField = (raw: string) => {
+  const trimmed = String(raw ?? '').trim()
+  if (!trimmed) {
+    return {
+      isSet: false,
+      value: 0,
+    }
+  }
+
+  const value = Number(trimmed)
+  return {
+    isSet: true,
+    value: Number.isFinite(value) ? value : NaN,
+  }
+}
+
 const calculateMultiplierFromPrices = (cachePriceRaw: string, inputPriceRaw: string) => {
   const cachePrice = parseOptionalNumber(cachePriceRaw)
   const inputPrice = parseOptionalNumber(inputPriceRaw)
@@ -168,21 +189,25 @@ const handleInputUsdChange = () => {
 
 const handleCacheCreatePriceInput = () => {
   cacheFieldMode.create = 'price'
+  cacheFieldPresence.create = String(form.cacheCreateUsdPer1M).trim() !== ''
   syncCacheCreateMultiplierFromPrice()
 }
 
 const handleCacheReadPriceInput = () => {
   cacheFieldMode.read = 'price'
+  cacheFieldPresence.read = String(form.cacheReadUsdPer1M).trim() !== ''
   syncCacheReadMultiplierFromPrice()
 }
 
 const handleCacheCreateMultiplierInput = () => {
   cacheFieldMode.create = 'multiplier'
+  cacheFieldPresence.create = String(form.cacheCreateMultiplier).trim() !== ''
   syncCacheCreatePriceFromMultiplier()
 }
 
 const handleCacheReadMultiplierInput = () => {
   cacheFieldMode.read = 'multiplier'
+  cacheFieldPresence.read = String(form.cacheReadMultiplier).trim() !== ''
   syncCacheReadPriceFromMultiplier()
 }
 
@@ -201,9 +226,14 @@ const resetForm = () => {
   form.ephemeral1hUsdPer1M = ''
   cacheFieldMode.create = 'price'
   cacheFieldMode.read = 'price'
+  cacheFieldPresence.create = false
+  cacheFieldPresence.read = false
 }
 
 const assignPricingFields = (row: ModelPricingRow) => {
+  const hasExplicitCacheCreate = row.has_cache_creation_input_token_cost === true
+  const hasExplicitCacheRead = row.has_cache_read_input_token_cost === true
+
   form.groupMultiplier = formatEditableNumber(row.group_multiplier > 0 || row.group_multiplier === 0 ? row.group_multiplier : 1)
   form.inputUsdPer1M = formatEditableNumber(perTokenToPer1M(row.input_cost_per_token))
   form.outputUsdPer1M = formatEditableNumber(perTokenToPer1M(row.output_cost_per_token))
@@ -211,10 +241,18 @@ const assignPricingFields = (row: ModelPricingRow) => {
   form.cacheCreateUsdPer1M = formatEditableNumber(perTokenToPer1M(row.cache_creation_input_token_cost))
   form.cacheReadUsdPer1M = formatEditableNumber(perTokenToPer1M(row.cache_read_input_token_cost))
   form.ephemeral1hUsdPer1M = formatEditableNumber(perTokenToPer1M(row.ephemeral_1h_cost_per_token))
-  cacheFieldMode.create = 'price'
-  cacheFieldMode.read = 'price'
   syncCacheCreateMultiplierFromPrice()
   syncCacheReadMultiplierFromPrice()
+  cacheFieldPresence.create = hasExplicitCacheCreate
+  cacheFieldPresence.read = hasExplicitCacheRead
+  cacheFieldMode.create = hasExplicitCacheCreate ? 'price' : 'multiplier'
+  cacheFieldMode.read = hasExplicitCacheRead ? 'price' : 'multiplier'
+  if (cacheFieldMode.create === 'multiplier') {
+    syncCacheCreatePriceFromMultiplier()
+  }
+  if (cacheFieldMode.read === 'multiplier') {
+    syncCacheReadPriceFromMultiplier()
+  }
 }
 
 const fillFormFromRow = (row: ModelPricingRow) => {
@@ -288,21 +326,17 @@ const buildRowFromForm = (): ModelPricingRow | null => {
   const output1m = parseNumber(form.outputUsdPer1M)
   const reasoning1m = parseNumber(form.reasoningUsdPer1M)
   const groupMultiplier = parseNumber(form.groupMultiplier)
-  const cacheCreate1m = parseNumber(form.cacheCreateUsdPer1M)
-  const cacheRead1m = parseNumber(form.cacheReadUsdPer1M)
   const eph1m = parseNumber(form.ephemeral1hUsdPer1M)
-  const cacheCreateMultiplier = parseNumber(form.cacheCreateMultiplier)
-  const cacheReadMultiplier = parseNumber(form.cacheReadMultiplier)
+  const cacheCreate1mField = parseOptionalNumberField(form.cacheCreateUsdPer1M)
+  const cacheRead1mField = parseOptionalNumberField(form.cacheReadUsdPer1M)
+  const cacheCreateMultiplierField = parseOptionalNumberField(form.cacheCreateMultiplier)
+  const cacheReadMultiplierField = parseOptionalNumberField(form.cacheReadMultiplier)
 
   const numbers = [
     [t('components.general.modelPricing.fields.input'), input1m],
     [t('components.general.modelPricing.fields.output'), output1m],
     [t('components.general.modelPricing.fields.reasoning'), reasoning1m],
     [t('components.general.modelPricing.fields.groupMultiplier'), groupMultiplier],
-    [t('components.general.modelPricing.fields.cacheCreate'), cacheCreate1m],
-    [t('components.general.modelPricing.fields.cacheRead'), cacheRead1m],
-    [t('components.general.modelPricing.fields.cacheCreateMultiplier'), cacheCreateMultiplier],
-    [t('components.general.modelPricing.fields.cacheReadMultiplier'), cacheReadMultiplier],
     [t('components.general.modelPricing.fields.ephemeral1h'), eph1m],
   ] as const
 
@@ -313,19 +347,40 @@ const buildRowFromForm = (): ModelPricingRow | null => {
     }
   }
 
-  if (input1m <= 0 && cacheCreateMultiplier > 0) {
+  const optionalNumbers = [
+    [t('components.general.modelPricing.fields.cacheCreate'), cacheCreate1mField],
+    [t('components.general.modelPricing.fields.cacheRead'), cacheRead1mField],
+    [t('components.general.modelPricing.fields.cacheCreateMultiplier'), cacheCreateMultiplierField],
+    [t('components.general.modelPricing.fields.cacheReadMultiplier'), cacheReadMultiplierField],
+  ] as const
+
+  for (const [name, field] of optionalNumbers) {
+    if (!field.isSet) continue
+    if (Number.isNaN(field.value) || field.value < 0) {
+      showToast(t('components.general.modelPricing.toast.invalidNumber', { field: name }), 'warning')
+      return null
+    }
+  }
+
+  if (input1m <= 0 && cacheCreateMultiplierField.isSet && cacheCreateMultiplierField.value > 0) {
     showToast(t('components.general.modelPricing.toast.multiplierRequiresInput'), 'warning')
     return null
   }
-  if (input1m <= 0 && cacheReadMultiplier > 0) {
+  if (input1m <= 0 && cacheReadMultiplierField.isSet && cacheReadMultiplierField.value > 0) {
     showToast(t('components.general.modelPricing.toast.multiplierRequiresInput'), 'warning')
     return null
   }
 
+  const hasCacheCreate = cacheFieldPresence.create
+  const hasCacheRead = cacheFieldPresence.read
   const finalCacheCreate1m =
-    cacheFieldMode.create === 'multiplier' ? input1m * cacheCreateMultiplier : cacheCreate1m
+    hasCacheCreate
+      ? (cacheFieldMode.create === 'multiplier' ? input1m * cacheCreateMultiplierField.value : cacheCreate1mField.value)
+      : 0
   const finalCacheRead1m =
-    cacheFieldMode.read === 'multiplier' ? input1m * cacheReadMultiplier : cacheRead1m
+    hasCacheRead
+      ? (cacheFieldMode.read === 'multiplier' ? input1m * cacheReadMultiplierField.value : cacheRead1mField.value)
+      : 0
 
   return {
     original_model: props.mode === 'edit' ? form.originalModel.trim() : undefined,
@@ -335,7 +390,9 @@ const buildRowFromForm = (): ModelPricingRow | null => {
     output_cost_per_token: per1MToPerToken(output1m),
     output_cost_per_reasoning_token: per1MToPerToken(reasoning1m),
     cache_creation_input_token_cost: per1MToPerToken(finalCacheCreate1m),
+    has_cache_creation_input_token_cost: hasCacheCreate,
     cache_read_input_token_cost: per1MToPerToken(finalCacheRead1m),
+    has_cache_read_input_token_cost: hasCacheRead,
     ephemeral_1h_cost_per_token: per1MToPerToken(eph1m),
     is_override: true,
     is_custom: props.mode === 'new',

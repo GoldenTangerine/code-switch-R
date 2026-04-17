@@ -42,14 +42,24 @@ type PricingEntry struct {
 	OutputCostPerTokenAbove200k         float64 `json:"output_cost_per_token_above_200k_tokens"`
 	GroupMultiplier                     float64 `json:"group_multiplier,omitempty"`
 	HasGroupMultiplier                  bool    `json:"has_group_multiplier,omitempty"`
+	HasInputCostPerToken                bool    `json:"-"`
+	HasOutputCostPerToken               bool    `json:"-"`
+	HasOutputCostPerReasoningToken      bool    `json:"-"`
+	HasCacheCreationInputTokenCost      bool    `json:"-"`
+	HasCacheReadInputTokenCost          bool    `json:"-"`
 }
 
 func (p *PricingEntry) UnmarshalJSON(data []byte) error {
 	type alias PricingEntry
 	type rawPricingEntry struct {
 		alias
-		GroupMultiplier    *float64 `json:"group_multiplier"`
-		HasGroupMultiplier *bool    `json:"has_group_multiplier"`
+		InputCostPerToken           *float64 `json:"input_cost_per_token"`
+		OutputCostPerToken          *float64 `json:"output_cost_per_token"`
+		OutputCostPerReasoningToken *float64 `json:"output_cost_per_reasoning_token"`
+		CacheCreationInputTokenCost *float64 `json:"cache_creation_input_token_cost"`
+		CacheReadInputTokenCost     *float64 `json:"cache_read_input_token_cost"`
+		GroupMultiplier             *float64 `json:"group_multiplier"`
+		HasGroupMultiplier          *bool    `json:"has_group_multiplier"`
 	}
 
 	var raw rawPricingEntry
@@ -58,6 +68,26 @@ func (p *PricingEntry) UnmarshalJSON(data []byte) error {
 	}
 
 	*p = PricingEntry(raw.alias)
+	if raw.InputCostPerToken != nil {
+		p.InputCostPerToken = *raw.InputCostPerToken
+		p.HasInputCostPerToken = true
+	}
+	if raw.OutputCostPerToken != nil {
+		p.OutputCostPerToken = *raw.OutputCostPerToken
+		p.HasOutputCostPerToken = true
+	}
+	if raw.OutputCostPerReasoningToken != nil {
+		p.OutputCostPerReasoningToken = *raw.OutputCostPerReasoningToken
+		p.HasOutputCostPerReasoningToken = true
+	}
+	if raw.CacheCreationInputTokenCost != nil {
+		p.CacheCreationInputTokenCost = *raw.CacheCreationInputTokenCost
+		p.HasCacheCreationInputTokenCost = true
+	}
+	if raw.CacheReadInputTokenCost != nil {
+		p.CacheReadInputTokenCost = *raw.CacheReadInputTokenCost
+		p.HasCacheReadInputTokenCost = true
+	}
 	if raw.GroupMultiplier != nil {
 		p.GroupMultiplier = *raw.GroupMultiplier
 		p.HasGroupMultiplier = true
@@ -561,10 +591,10 @@ func ensureCachePricing(entry *PricingEntry) {
 	if entry == nil {
 		return
 	}
-	if entry.CacheCreationInputTokenCost == 0 && entry.InputCostPerToken > 0 {
+	if !entry.HasCacheCreationInputTokenCost && entry.CacheCreationInputTokenCost == 0 && entry.InputCostPerToken > 0 {
 		entry.CacheCreationInputTokenCost = entry.InputCostPerToken * 1.25
 	}
-	if entry.CacheReadInputTokenCost == 0 && entry.InputCostPerToken > 0 {
+	if !entry.HasCacheReadInputTokenCost && entry.CacheReadInputTokenCost == 0 && entry.InputCostPerToken > 0 {
 		entry.CacheReadInputTokenCost = entry.InputCostPerToken * 0.1
 	}
 }

@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { Events } from '@wailsio/runtime'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch, type ComponentPublicInstance } from 'vue'
 import InlineModal from '../common/InlineModal.vue'
 import BaseInput from '../common/BaseInput.vue'
 import ModelPricingEditorModal from './ModelPricingEditorModal.vue'
 import ClaudePricingPreviewModal from './ClaudePricingPreviewModal.vue'
 import { useI18n } from 'vue-i18n'
 import {
+  MODEL_PRICING_CHANGED_EVENT,
   listModelPricing,
   previewClaudeOfficialPricing,
   syncClaudeOfficialPricing,
@@ -14,6 +16,7 @@ import {
 } from '../../services/modelPricing'
 import { extractErrorMessage } from '../../utils/error'
 import { showToast } from '../../utils/toast'
+import { buildVariableHeightVirtualList } from '../../utils/virtualList'
 
 const props = defineProps<{
   open: boolean
@@ -25,10 +28,39 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 
+const MODEL_PRICING_ROW_ESTIMATED_HEIGHT = 120
+const MODEL_PRICING_ROW_GAP = 10
+const MODEL_PRICING_OVERSCAN = 720
+
+type EditMode = 'edit' | 'new'
+
+interface DisplayCacheCreatePriceEntry {
+  key: string
+  label: string
+  valueText: string
+  hint: string
+}
+
+interface DisplayModelPricingRow {
+  raw: ModelPricingRow
+  model: string
+  searchableModel: string
+  isOverrideLike: boolean
+  sourceClass: string
+  sourceLabel: string
+  sourceTooltip: string
+  inputValueText: string
+  outputValueText: string
+  groupMultiplierText: string
+  cacheCreateEntries: DisplayCacheCreatePriceEntry[]
+  cacheReadValueText: string
+  cacheReadHint: string
+}
+
 const loading = ref(false)
 const error = ref('')
 
-const rows = ref<ModelPricingRow[]>([])
+const rows = shallowRef<ModelPricingRow[]>([])
 const search = ref('')
 const onlyOverrides = ref(false)
 const selectedModel = ref<string>('')
@@ -41,16 +73,27 @@ const claudePreviewOpen = ref(false)
 const claudePreviewRows = ref<ClaudeOfficialPricingPreviewRow[]>([])
 const claudePreviewFetchedAt = ref('')
 const previewRequestSeq = ref(0)
-
-type EditMode = 'edit' | 'new'
-
 const editorOpen = ref(false)
 const editorMode = ref<EditMode>('edit')
 const editorRow = ref<ModelPricingRow | null>(null)
+const hasLoadedRows = ref(false)
+const rowsStale = ref(true)
+const listViewportRef = ref<HTMLElement | null>(null)
+const listScrollTop = ref(0)
+const listViewportHeight = ref(0)
+const measuredItemHeights = shallowRef<Record<string, number>>({})
 
-const perTokenToPer1M = (value: number) => (Number.isFinite(value) ? value * 1_000_000 : 0)
+const visibleItemElements = new Map<string, HTMLElement>()
+let loadRowsTask: Promise<void> | null = null
+let measureFrameId = 0
+let scrollFrameId = 0
+let unsubscribeModelPricingChanged: (() => void) | null = null
 
-const formatUsdPer1M = (value: number) => {
+function perTokenToPer1M(value: number) {
+  return Number.isFinite(value) ? value * 1_000_000 : 0
+}
+
+function formatUsdPer1M(value: number) {
   if (!Number.isFinite(value)) return '—'
   const per1m = perTokenToPer1M(value)
   if (per1m === 0) return '$0'
@@ -60,47 +103,44 @@ const formatUsdPer1M = (value: number) => {
   return `$${per1m.toFixed(2)}`
 }
 
-const calculateMultiplier = (value: number, input: number) => {
+function calculateMultiplier(value: number, input: number) {
   if (!Number.isFinite(value) || value < 0) return null
   if (!Number.isFinite(input) || input < 0) return null
   if (input === 0) return value === 0 ? 0 : null
   return value / input
 }
 
-const formatMultiplier = (value: number | null | undefined) => {
+function formatMultiplier(value: number | null | undefined) {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return '—'
   if (Math.abs(value - Math.round(value)) < 1e-9) return `${Math.round(value)}x`
   if (value < 0.01) return `${value.toFixed(4)}x`
   return `${value.toFixed(2)}x`
 }
 
-const formatMultiplierHint = (value: number | null | undefined) => {
+function formatMultiplierHint(value: number | null | undefined) {
   const formatted = formatMultiplier(value)
   if (formatted === '—') return ''
   return `${t('components.general.modelPricing.columns.multiplier')} ${formatted}`
 }
 
-const resolveCacheCreateMultiplier = (row: ModelPricingRow) =>
-  calculateMultiplier(row.cache_creation_input_token_cost, row.input_cost_per_token)
-
-const resolveCacheReadMultiplier = (row: ModelPricingRow) =>
-  calculateMultiplier(row.cache_read_input_token_cost, row.input_cost_per_token)
-
-const resolveCacheCreateHint = (row: ModelPricingRow) =>
-  formatMultiplierHint(resolveCacheCreateMultiplier(row))
-
-const resolveCacheReadHint = (row: ModelPricingRow) =>
-  formatMultiplierHint(resolveCacheReadMultiplier(row))
-
-type CacheCreatePriceEntry = {
-  key: string
-  label: string
-  value: number
-  hint: string
+function resolveCacheCreateMultiplier(row: ModelPricingRow) {
+  return calculateMultiplier(row.cache_creation_input_token_cost, row.input_cost_per_token)
 }
 
-const resolveCacheCreatePriceEntries = (row: ModelPricingRow): CacheCreatePriceEntry[] => {
-  const entries: CacheCreatePriceEntry[] = []
+function resolveCacheReadMultiplier(row: ModelPricingRow) {
+  return calculateMultiplier(row.cache_read_input_token_cost, row.input_cost_per_token)
+}
+
+function resolveCacheCreateHint(row: ModelPricingRow) {
+  return formatMultiplierHint(resolveCacheCreateMultiplier(row))
+}
+
+function resolveCacheReadHint(row: ModelPricingRow) {
+  return formatMultiplierHint(resolveCacheReadMultiplier(row))
+}
+
+function resolveCacheCreatePriceEntries(row: ModelPricingRow) {
+  const entries: Array<{ key: string; label: string; value: number; hint: string }> = []
   const hasGenericCache = Number.isFinite(row.cache_creation_input_token_cost) && row.cache_creation_input_token_cost >= 0
   const has1hCache = Number.isFinite(row.ephemeral_1h_cost_per_token) && row.ephemeral_1h_cost_per_token > 0
   const shouldShowBaseCache = hasGenericCache && (row.cache_creation_input_token_cost > 0 || !has1hCache)
@@ -135,99 +175,28 @@ const resolveCacheCreatePriceEntries = (row: ModelPricingRow): CacheCreatePriceE
   return entries
 }
 
-const overrideCount = computed(() => rows.value.filter((item) => item.is_override || item.is_custom).length)
-
-const filteredRows = computed(() => {
-  const keyword = search.value.trim().toLowerCase()
-  const base = onlyOverrides.value ? rows.value.filter((item) => item.is_override || item.is_custom) : rows.value
-  if (!keyword) return base
-  return base.filter((item) => item.model.toLowerCase().includes(keyword))
-})
-
-const loadRows = async () => {
-  loading.value = true
-  error.value = ''
-  try {
-    rows.value = await listModelPricing()
-  } catch (err) {
-    const message = t('components.general.modelPricing.toast.loadFailed', { error: extractErrorMessage(err) })
-    error.value = message
-    showToast(message, 'error')
-  } finally {
-    loading.value = false
-  }
-}
-
-const openCreateModal = () => {
-  editorMode.value = 'new'
-  editorRow.value = null
-  editorOpen.value = true
-}
-
-const openEditModal = (row: ModelPricingRow) => {
-  selectedModel.value = row.model
-  editorMode.value = 'edit'
-  editorRow.value = row
-  editorOpen.value = true
-  syncMenuOpen.value = false
-}
-
-const resetClaudePreviewState = () => {
-  previewRequestSeq.value += 1
-  claudePreviewOpen.value = false
-  claudePreviewRows.value = []
-  claudePreviewFetchedAt.value = ''
-}
-
-const resetUIState = () => {
-  search.value = ''
-  onlyOverrides.value = false
-  selectedModel.value = ''
-  error.value = ''
-  syncMenuOpen.value = false
-  resetClaudePreviewState()
-}
-
-const closeModal = () => {
-  editorOpen.value = false
-  syncMenuOpen.value = false
-  emit('close')
-}
-
-const onSaved = async (model: string) => {
-  selectedModel.value = model
-  editorOpen.value = false
-  await loadRows()
-}
-
-const onRemoved = async (model: string) => {
-  selectedModel.value = model
-  editorOpen.value = false
-  await loadRows()
-}
-
-const resolvePricingSource = (row: ModelPricingRow) => {
+function resolvePricingSource(row: ModelPricingRow) {
   if (row.source === 'claude_sync') return 'claude_sync'
   if (row.source === 'manual') return 'manual'
   if (row.source === 'builtin') return 'builtin'
   return row.is_override || row.is_custom ? 'manual' : 'builtin'
 }
 
-const resolvePricingSourceLabel = (row: ModelPricingRow) => {
+function resolvePricingSourceLabel(row: ModelPricingRow) {
   const source = resolvePricingSource(row)
   if (source === 'claude_sync') return t('components.general.modelPricing.badge.synced')
   if (source === 'builtin') return t('components.general.modelPricing.badge.builtin')
   return t('components.general.modelPricing.badge.manual')
 }
 
-const resolvePricingSourceClass = (row: ModelPricingRow) => {
+function resolvePricingSourceClass(row: ModelPricingRow) {
   const source = resolvePricingSource(row)
   if (source === 'claude_sync') return 'tag-synced'
   if (source === 'builtin') return 'tag-builtin'
   return 'tag-manual'
 }
 
-const formatDateTimeForTooltip = (raw: string | undefined) => {
+function formatDateTimeForTooltip(raw: string | undefined) {
   const value = (raw ?? '').trim()
   if (!value) return ''
   const parsed = new Date(value)
@@ -243,19 +212,271 @@ const formatDateTimeForTooltip = (raw: string | undefined) => {
   return `${year}-${month}-${day} ${hour}:${minute}:${second}`
 }
 
-const resolvePricingSourceTooltip = (row: ModelPricingRow) => {
+function resolvePricingSourceTooltip(row: ModelPricingRow) {
   if (resolvePricingSource(row) !== 'claude_sync') return ''
   const formatted = formatDateTimeForTooltip(row.source_updated_at)
   if (!formatted) return ''
   return t('components.general.modelPricing.badge.syncedAtTooltip', { time: formatted })
 }
 
-const toggleSyncMenu = () => {
+function buildDisplayModelPricingRow(row: ModelPricingRow): DisplayModelPricingRow {
+  return {
+    raw: row,
+    model: row.model,
+    searchableModel: row.model.toLowerCase(),
+    isOverrideLike: row.is_override || row.is_custom,
+    sourceClass: resolvePricingSourceClass(row),
+    sourceLabel: resolvePricingSourceLabel(row),
+    sourceTooltip: resolvePricingSourceTooltip(row),
+    inputValueText: `${formatUsdPer1M(row.input_cost_per_token)}/M`,
+    outputValueText: `${formatUsdPer1M(row.output_cost_per_token)}/M`,
+    groupMultiplierText: formatMultiplier(row.group_multiplier),
+    cacheCreateEntries: resolveCacheCreatePriceEntries(row).map((entry) => ({
+      key: entry.key,
+      label: entry.label,
+      valueText: `${formatUsdPer1M(entry.value)}/M`,
+      hint: entry.hint,
+    })),
+    cacheReadValueText: `${formatUsdPer1M(row.cache_read_input_token_cost)}/M`,
+    cacheReadHint: resolveCacheReadHint(row),
+  }
+}
+
+const displayRows = computed<DisplayModelPricingRow[]>(() => rows.value.map((row) => buildDisplayModelPricingRow(row)))
+
+const overrideCount = computed(() => displayRows.value.filter((item) => item.isOverrideLike).length)
+
+const filteredRows = computed(() => {
+  const keyword = search.value.trim().toLowerCase()
+  const base = onlyOverrides.value ? displayRows.value.filter((item) => item.isOverrideLike) : displayRows.value
+  if (!keyword) return base
+  return base.filter((item) => item.searchableModel.includes(keyword))
+})
+
+const virtualRowsState = computed(() => buildVariableHeightVirtualList({
+  items: filteredRows.value,
+  getItemKey: (item) => item.model,
+  measuredHeights: measuredItemHeights.value,
+  scrollTop: listScrollTop.value,
+  viewportHeight: listViewportHeight.value,
+  estimatedItemHeight: MODEL_PRICING_ROW_ESTIMATED_HEIGHT,
+  overscan: MODEL_PRICING_OVERSCAN,
+  gap: MODEL_PRICING_ROW_GAP,
+}))
+
+function syncListViewportMetrics() {
+  const viewport = listViewportRef.value
+  listScrollTop.value = viewport?.scrollTop ?? 0
+  listViewportHeight.value = viewport?.clientHeight ?? 0
+}
+
+function scheduleVisibleItemMeasurement() {
+  if (measureFrameId !== 0) return
+  measureFrameId = window.requestAnimationFrame(() => {
+    measureFrameId = 0
+    if (visibleItemElements.size === 0) return
+
+    const nextHeights = { ...measuredItemHeights.value }
+    let changed = false
+
+    for (const [model, element] of visibleItemElements.entries()) {
+      const height = Math.ceil(element.getBoundingClientRect().height)
+      if (height <= 0 || nextHeights[model] === height) continue
+      nextHeights[model] = height
+      changed = true
+    }
+
+    if (changed) {
+      measuredItemHeights.value = nextHeights
+    }
+  })
+}
+
+function registerVisibleItemElement(model: string, element: Element | ComponentPublicInstance | null) {
+  const htmlElement = element instanceof HTMLElement ? element : null
+  if (htmlElement) {
+    visibleItemElements.set(model, htmlElement)
+    scheduleVisibleItemMeasurement()
+    return
+  }
+  visibleItemElements.delete(model)
+}
+
+function resetListViewportPosition() {
+  if (listViewportRef.value) {
+    listViewportRef.value.scrollTop = 0
+  }
+  listScrollTop.value = 0
+}
+
+function reconcileMeasuredItemHeights(nextRows: ModelPricingRow[], resetAll = false) {
+  if (resetAll) {
+    measuredItemHeights.value = {}
+    return
+  }
+
+  const activeModels = new Set(nextRows.map((row) => row.model))
+  const currentHeights = measuredItemHeights.value
+  let changed = false
+  const nextHeights: Record<string, number> = {}
+
+  for (const [model, height] of Object.entries(currentHeights)) {
+    if (!activeModels.has(model)) {
+      changed = true
+      continue
+    }
+    nextHeights[model] = height
+  }
+
+  if (changed) {
+    measuredItemHeights.value = nextHeights
+  }
+}
+
+function handleListScroll() {
+  if (scrollFrameId !== 0) return
+  scrollFrameId = window.requestAnimationFrame(() => {
+    scrollFrameId = 0
+    syncListViewportMetrics()
+    scheduleVisibleItemMeasurement()
+  })
+}
+
+function findModelOffset(model: string) {
+  let offset = 0
+  for (let index = 0; index < filteredRows.value.length; index += 1) {
+    const item = filteredRows.value[index]
+    if (item.model === model) return offset
+    const height = measuredItemHeights.value[item.model] ?? MODEL_PRICING_ROW_ESTIMATED_HEIGHT
+    offset += height + (index < filteredRows.value.length - 1 ? MODEL_PRICING_ROW_GAP : 0)
+  }
+  return null
+}
+
+function scrollModelIntoView(model: string) {
+  const viewport = listViewportRef.value
+  if (!viewport || !model) return
+
+  const targetOffset = findModelOffset(model)
+  if (targetOffset == null) return
+
+  const targetHeight = measuredItemHeights.value[model] ?? MODEL_PRICING_ROW_ESTIMATED_HEIGHT
+  const currentTop = viewport.scrollTop
+  const currentBottom = currentTop + viewport.clientHeight
+  const targetBottom = targetOffset + targetHeight
+
+  if (targetOffset >= currentTop && targetBottom <= currentBottom) return
+
+  viewport.scrollTop = Math.max(0, targetOffset - MODEL_PRICING_ROW_GAP)
+  syncListViewportMetrics()
+  scheduleVisibleItemMeasurement()
+}
+
+async function loadRows(options: { force?: boolean; keepCurrentRows?: boolean } = {}) {
+  const force = options.force === true
+  const keepCurrentRows = options.keepCurrentRows === true
+
+  if (!force && hasLoadedRows.value && !rowsStale.value) {
+    await nextTick()
+    syncListViewportMetrics()
+    scheduleVisibleItemMeasurement()
+    return
+  }
+
+  if (loadRowsTask) {
+    await loadRowsTask
+    return
+  }
+
+  loading.value = true
+  if (!keepCurrentRows || rows.value.length === 0) {
+    error.value = ''
+  }
+
+  loadRowsTask = (async () => {
+    try {
+      const nextRows = (await listModelPricing()) ?? []
+      reconcileMeasuredItemHeights(nextRows, force)
+      rows.value = nextRows
+      hasLoadedRows.value = true
+      rowsStale.value = false
+      error.value = ''
+      await nextTick()
+      syncListViewportMetrics()
+      if (selectedModel.value) {
+        scrollModelIntoView(selectedModel.value)
+      }
+      scheduleVisibleItemMeasurement()
+    } catch (err) {
+      const message = t('components.general.modelPricing.toast.loadFailed', { error: extractErrorMessage(err) })
+      if (rows.value.length === 0) {
+        error.value = message
+      }
+      showToast(message, 'error')
+    } finally {
+      loading.value = false
+      loadRowsTask = null
+    }
+  })()
+
+  await loadRowsTask
+}
+
+function openCreateModal() {
+  editorMode.value = 'new'
+  editorRow.value = null
+  editorOpen.value = true
+}
+
+function openEditModal(row: ModelPricingRow) {
+  selectedModel.value = row.model
+  editorMode.value = 'edit'
+  editorRow.value = row
+  editorOpen.value = true
+  syncMenuOpen.value = false
+}
+
+function resetClaudePreviewState() {
+  previewRequestSeq.value += 1
+  claudePreviewOpen.value = false
+  claudePreviewRows.value = []
+  claudePreviewFetchedAt.value = ''
+}
+
+function resetUIState() {
+  search.value = ''
+  onlyOverrides.value = false
+  selectedModel.value = ''
+  error.value = ''
+  syncMenuOpen.value = false
+  resetClaudePreviewState()
+  resetListViewportPosition()
+}
+
+function closeModal() {
+  editorOpen.value = false
+  syncMenuOpen.value = false
+  emit('close')
+}
+
+async function onSaved(model: string) {
+  selectedModel.value = model
+  editorOpen.value = false
+  await loadRows({ force: true, keepCurrentRows: true })
+}
+
+async function onRemoved(model: string) {
+  selectedModel.value = model
+  editorOpen.value = false
+  await loadRows({ force: true, keepCurrentRows: true })
+}
+
+function toggleSyncMenu() {
   if (syncing.value) return
   syncMenuOpen.value = !syncMenuOpen.value
 }
 
-const runSyncTask = async (operation: () => Promise<void>) => {
+async function runSyncTask(operation: () => Promise<void>) {
   if (syncing.value) return
 
   let task: Promise<void> | null = null
@@ -277,7 +498,7 @@ const runSyncTask = async (operation: () => Promise<void>) => {
   }
 }
 
-const openClaudePreview = async () => {
+async function openClaudePreview() {
   if (syncing.value) return
   syncMenuOpen.value = false
   const requestSeq = previewRequestSeq.value + 1
@@ -302,7 +523,7 @@ const openClaudePreview = async () => {
   })
 }
 
-const confirmClaudeSync = async () => {
+async function confirmClaudeSync() {
   if (syncing.value) return
 
   await runSyncTask(async () => {
@@ -324,7 +545,7 @@ const confirmClaudeSync = async () => {
         )
       }
       claudePreviewOpen.value = false
-      await loadRows()
+      await loadRows({ force: true, keepCurrentRows: true })
     } catch (err) {
       showToast(
         t('components.general.modelPricing.toast.syncFailed', {
@@ -336,12 +557,12 @@ const confirmClaudeSync = async () => {
   })
 }
 
-const closeClaudePreview = () => {
+function closeClaudePreview() {
   if (syncing.value) return
   claudePreviewOpen.value = false
 }
 
-const onGlobalPointerDown = (event: PointerEvent) => {
+function onGlobalPointerDown(event: PointerEvent) {
   if (!syncMenuOpen.value) return
   const target = event.target as Node | null
   if (!target) {
@@ -353,12 +574,41 @@ const onGlobalPointerDown = (event: PointerEvent) => {
   syncMenuOpen.value = false
 }
 
+function onWindowResize() {
+  syncListViewportMetrics()
+  scheduleVisibleItemMeasurement()
+}
+
+function handleModelPricingChanged() {
+  rowsStale.value = true
+  if (props.open) {
+    void loadRows({ force: true, keepCurrentRows: true })
+  }
+}
+
 onMounted(() => {
   document.addEventListener('pointerdown', onGlobalPointerDown)
+  window.addEventListener('resize', onWindowResize)
+  unsubscribeModelPricingChanged = Events.On(
+    MODEL_PRICING_CHANGED_EVENT,
+    handleModelPricingChanged as Events.Callback,
+  )
 })
 
 onBeforeUnmount(() => {
   document.removeEventListener('pointerdown', onGlobalPointerDown)
+  window.removeEventListener('resize', onWindowResize)
+  unsubscribeModelPricingChanged?.()
+  unsubscribeModelPricingChanged = null
+  visibleItemElements.clear()
+  if (measureFrameId !== 0) {
+    window.cancelAnimationFrame(measureFrameId)
+    measureFrameId = 0
+  }
+  if (scrollFrameId !== 0) {
+    window.cancelAnimationFrame(scrollFrameId)
+    scrollFrameId = 0
+  }
 })
 
 watch(
@@ -371,8 +621,28 @@ watch(
     }
 
     resetUIState()
-    // 每次打开都刷新一次，避免后端价格表更新后前端显示滞后
-    void loadRows()
+    void nextTick(() => {
+      syncListViewportMetrics()
+      scheduleVisibleItemMeasurement()
+    })
+
+    if (!hasLoadedRows.value) {
+      void loadRows()
+      return
+    }
+
+    void loadRows({ force: true, keepCurrentRows: true })
+  },
+)
+
+watch(
+  [search, onlyOverrides],
+  () => {
+    resetListViewportPosition()
+    void nextTick(() => {
+      syncListViewportMetrics()
+      scheduleVisibleItemMeasurement()
+    })
   },
 )
 </script>
@@ -391,7 +661,12 @@ watch(
             <button type="button" class="action-btn" @click="openCreateModal">
               {{ $t('components.general.modelPricing.add') }}
             </button>
-            <button type="button" class="action-btn" :disabled="loading" @click="loadRows">
+            <button
+              type="button"
+              class="action-btn"
+              :disabled="loading"
+              @click="loadRows({ force: true, keepCurrentRows: rows.length > 0 })"
+            >
               {{ loading ? $t('components.general.modelPricing.loading') : $t('components.general.modelPricing.refresh') }}
             </button>
             <div class="sync-menu-anchor">
@@ -449,7 +724,7 @@ watch(
       <div v-if="loading && rows.length === 0" class="model-pricing-state">
         {{ $t('components.general.modelPricing.loading') }}
       </div>
-      <div v-else-if="error" class="model-pricing-state error">
+      <div v-else-if="error && rows.length === 0" class="model-pricing-state error">
         {{ error }}
       </div>
       <div v-else-if="filteredRows.length === 0" class="model-pricing-state">
@@ -461,56 +736,69 @@ watch(
         </p>
 
         <div
-          v-for="item in filteredRows"
-          :key="item.model"
-          class="model-pricing-item"
-          :class="{ selected: item.model === selectedModel }"
-          @click="openEditModal(item)"
+          ref="listViewportRef"
+          class="model-pricing-viewport"
+          @scroll="handleListScroll"
         >
-          <div class="model-main">
-            <div class="model-name" :title="item.model">{{ item.model }}</div>
-            <div class="model-tags">
-              <span
-                class="tag"
-                :class="resolvePricingSourceClass(item)"
-                :title="resolvePricingSourceTooltip(item) || undefined"
-              >
-                {{ resolvePricingSourceLabel(item) }}
-              </span>
-            </div>
-          </div>
+          <div
+            class="model-pricing-viewport-inner"
+            :style="{ height: `${virtualRowsState.totalHeight}px` }"
+          >
+            <div
+              v-for="virtualRow in virtualRowsState.items"
+              :key="virtualRow.item.model"
+              :ref="(element) => registerVisibleItemElement(virtualRow.item.model, element)"
+              class="model-pricing-item model-pricing-item--virtual"
+              :class="{ selected: virtualRow.item.model === selectedModel }"
+              :style="{ top: `${virtualRow.top}px` }"
+              @click="openEditModal(virtualRow.item.raw)"
+            >
+              <div class="model-main">
+                <div class="model-name" :title="virtualRow.item.model">{{ virtualRow.item.model }}</div>
+                <div class="model-tags">
+                  <span
+                    class="tag"
+                    :class="virtualRow.item.sourceClass"
+                    :title="virtualRow.item.sourceTooltip || undefined"
+                  >
+                    {{ virtualRow.item.sourceLabel }}
+                  </span>
+                </div>
+              </div>
 
-          <div class="pricing-inline-container" @pointerdown.stop @click.stop>
-            <div class="model-pricing">
-              <div class="price-block">
-                <span class="price-label">{{ $t('components.general.modelPricing.columns.input') }}</span>
-                <span class="price-value input">{{ formatUsdPer1M(item.input_cost_per_token) }}/M</span>
-              </div>
-              <div class="price-block">
-                <span class="price-label">{{ $t('components.general.modelPricing.columns.output') }}</span>
-                <span class="price-value output">{{ formatUsdPer1M(item.output_cost_per_token) }}/M</span>
-              </div>
-              <div class="price-block">
-                <span class="price-label">{{ $t('components.general.modelPricing.columns.groupMultiplier') }}</span>
-                <span class="price-value">{{ formatMultiplier(item.group_multiplier) }}</span>
-              </div>
-              <div
-                v-for="cacheItem in resolveCacheCreatePriceEntries(item)"
-                :key="`${item.model}-${cacheItem.key}`"
-                class="price-block"
-              >
-                <span class="price-label">{{ cacheItem.label }}</span>
-                <span class="price-value cache-create">{{ formatUsdPer1M(cacheItem.value) }}/M</span>
-                <span v-if="cacheItem.hint" class="price-note">
-                  {{ cacheItem.hint }}
-                </span>
-              </div>
-              <div class="price-block">
-                <span class="price-label">{{ $t('components.general.modelPricing.columns.cacheRead') }}</span>
-                <span class="price-value cache-read">{{ formatUsdPer1M(item.cache_read_input_token_cost) }}/M</span>
-                <span v-if="resolveCacheReadHint(item)" class="price-note">
-                  {{ resolveCacheReadHint(item) }}
-                </span>
+              <div class="pricing-inline-container" @pointerdown.stop @click.stop>
+                <div class="model-pricing">
+                  <div class="price-block">
+                    <span class="price-label">{{ $t('components.general.modelPricing.columns.input') }}</span>
+                    <span class="price-value input">{{ virtualRow.item.inputValueText }}</span>
+                  </div>
+                  <div class="price-block">
+                    <span class="price-label">{{ $t('components.general.modelPricing.columns.output') }}</span>
+                    <span class="price-value output">{{ virtualRow.item.outputValueText }}</span>
+                  </div>
+                  <div class="price-block">
+                    <span class="price-label">{{ $t('components.general.modelPricing.columns.groupMultiplier') }}</span>
+                    <span class="price-value">{{ virtualRow.item.groupMultiplierText }}</span>
+                  </div>
+                  <div
+                    v-for="cacheItem in virtualRow.item.cacheCreateEntries"
+                    :key="`${virtualRow.item.model}-${cacheItem.key}`"
+                    class="price-block"
+                  >
+                    <span class="price-label">{{ cacheItem.label }}</span>
+                    <span class="price-value cache-create">{{ cacheItem.valueText }}</span>
+                    <span v-if="cacheItem.hint" class="price-note">
+                      {{ cacheItem.hint }}
+                    </span>
+                  </div>
+                  <div class="price-block">
+                    <span class="price-label">{{ $t('components.general.modelPricing.columns.cacheRead') }}</span>
+                    <span class="price-value cache-read">{{ virtualRow.item.cacheReadValueText }}</span>
+                    <span v-if="virtualRow.item.cacheReadHint" class="price-note">
+                      {{ virtualRow.item.cacheReadHint }}
+                    </span>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -647,6 +935,21 @@ watch(
   display: flex;
   flex-direction: column;
   gap: 10px;
+  min-height: 0;
+}
+
+.model-pricing-viewport {
+  min-height: 360px;
+  max-height: min(62vh, 720px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  padding-right: 4px;
+}
+
+.model-pricing-viewport-inner {
+  position: relative;
+  min-height: 100%;
 }
 
 .pricing-hint {
@@ -672,6 +975,13 @@ watch(
   align-items: start;
   cursor: pointer;
   transition: background 0.15s ease, border-color 0.15s ease;
+  contain: layout paint;
+}
+
+.model-pricing-item--virtual {
+  position: absolute;
+  left: 0;
+  right: 0;
 }
 
 .model-pricing-item:hover {

@@ -196,9 +196,13 @@ func (mps *ModelPricingService) SyncClaudeOfficialPricing() (ModelPricingSyncRes
 		}
 
 		entry.InputCostPerToken = pricing.InputPerToken
+		entry.HasInputCostPerToken = true
 		entry.OutputCostPerToken = pricing.OutputPerToken
+		entry.HasOutputCostPerToken = true
 		entry.CacheCreationInputTokenCost = pricing.CacheCreate5mPerToken
+		entry.HasCacheCreationInputTokenCost = true
 		entry.CacheReadInputTokenCost = pricing.CacheReadPerToken
+		entry.HasCacheReadInputTokenCost = true
 		entry.CacheCreationInputTokenCostAbove1Hr = pricing.CacheCreate1hPerToken
 
 		newOverrides.Pricing[model] = entry
