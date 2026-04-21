@@ -21,6 +21,21 @@ import {
 import { extractErrorMessage } from '../../utils/error'
 import { showToast } from '../../utils/toast'
 import { buildVariableHeightVirtualList } from '../../utils/virtualList'
+import lobeIcons, { preloadLobeIcons } from '../../icons/lobeIconMap'
+import {
+  buildModelProviderTabs,
+  collectModelProviderIconKeys,
+  resolveModelProviderKey,
+  resolveModelProviderMeta,
+  type ModelProviderFilterKey,
+  type ModelProviderKey,
+} from '../../utils/modelProviders'
+import {
+  isManualModelPricingRow,
+  matchesModelPricingSourceFilter,
+  normalizeModelPricingSource,
+  type ModelPricingSourceFilter,
+} from '../../utils/modelPricingFilters'
 
 const props = defineProps<{
   open: boolean
@@ -49,8 +64,13 @@ interface DisplayCacheCreatePriceEntry {
 interface DisplayModelPricingRow {
   raw: ModelPricingRow
   model: string
-  searchableModel: string
-  isOverrideLike: boolean
+  searchableText: string
+  source: PricingSource
+  isManualSource: boolean
+  providerKey: ModelProviderKey
+  providerLabel: string
+  providerIconKey: string
+  hasKnownProvider: boolean
   sourceClass: string
   sourceLabel: string
   sourceTooltip: string
@@ -67,7 +87,8 @@ const error = ref('')
 
 const rows = shallowRef<ModelPricingRow[]>([])
 const search = ref('')
-const onlyOverrides = ref(false)
+const selectedSourceFilter = ref<ModelPricingSourceFilter>('all')
+const selectedProvider = ref<ModelProviderFilterKey>('all')
 const selectedModel = ref<string>('')
 const syncTask = ref<Promise<void> | null>(null)
 const syncing = computed(() => syncTask.value !== null)
@@ -184,17 +205,8 @@ function resolveCacheCreatePriceEntries(row: ModelPricingRow) {
   return entries
 }
 
-function normalizePricingSource(source: string | undefined): PricingSource | '' {
-  const normalized = `${source ?? ''}`.trim().toLowerCase()
-  if (normalized === 'builtin') return 'builtin'
-  if (normalized === 'manual') return 'manual'
-  if (normalized === 'claude_sync') return 'claude_sync'
-  if (normalized === 'cloud_sync') return 'cloud_sync'
-  return ''
-}
-
 function resolvePricingSource(row: ModelPricingRow): PricingSource {
-  const normalized = normalizePricingSource(row.source)
+  const normalized = normalizeModelPricingSource(row.source)
   if (normalized) return normalized
   return row.is_override || row.is_custom ? 'manual' : 'builtin'
 }
@@ -242,12 +254,35 @@ function resolvePricingSourceTooltip(row: ModelPricingRow) {
   })
 }
 
+function warmupProviderIcons(targetRows: ModelPricingRow[]) {
+  const iconKeys = collectModelProviderIconKeys(targetRows.map((row) => ({ model: row.model })))
+  if (iconKeys.length > 0) {
+    void preloadLobeIcons(iconKeys)
+  }
+}
+
+function providerIconSvg(iconKey: string) {
+  const normalized = String(iconKey ?? '').trim().toLowerCase()
+  if (!normalized) return ''
+  return lobeIcons[normalized] ?? ''
+}
+
 function buildDisplayModelPricingRow(row: ModelPricingRow): DisplayModelPricingRow {
+  const source = resolvePricingSource(row)
+  const providerMeta = resolveModelProviderMeta(row.model)
   return {
     raw: row,
     model: row.model,
-    searchableModel: row.model.toLowerCase(),
-    isOverrideLike: row.is_override || row.is_custom,
+    searchableText: [row.model, providerMeta?.label ?? '']
+      .join(' ')
+      .trim()
+      .toLowerCase(),
+    source,
+    isManualSource: isManualModelPricingRow(row),
+    providerKey: resolveModelProviderKey(row.model),
+    providerLabel: providerMeta?.label ?? '',
+    providerIconKey: providerMeta?.iconKey ?? '',
+    hasKnownProvider: Boolean(providerMeta),
     sourceClass: resolvePricingSourceClass(row),
     sourceLabel: resolvePricingSourceLabel(row),
     sourceTooltip: resolvePricingSourceTooltip(row),
@@ -267,13 +302,27 @@ function buildDisplayModelPricingRow(row: ModelPricingRow): DisplayModelPricingR
 
 const displayRows = computed<DisplayModelPricingRow[]>(() => rows.value.map((row) => buildDisplayModelPricingRow(row)))
 
-const overrideCount = computed(() => displayRows.value.filter((item) => item.isOverrideLike).length)
+const manualCount = computed(() => displayRows.value.filter((item) => item.isManualSource).length)
+
+const sourceFilteredRows = computed(() => (
+  displayRows.value.filter((item) => matchesModelPricingSourceFilter(selectedSourceFilter.value, item.raw))
+))
+
+const providerTabs = computed(() => buildModelProviderTabs(
+  sourceFilteredRows.value.map((item) => ({ model: item.model })),
+  {
+    allLabel: t('components.general.modelPricing.vendorFilters.all'),
+    unknownLabel: t('components.general.modelPricing.vendorFilters.unknown'),
+  },
+))
 
 const filteredRows = computed(() => {
   const keyword = search.value.trim().toLowerCase()
-  const base = onlyOverrides.value ? displayRows.value.filter((item) => item.isOverrideLike) : displayRows.value
+  const base = sourceFilteredRows.value.filter((item) => (
+    selectedProvider.value === 'all' || item.providerKey === selectedProvider.value
+  ))
   if (!keyword) return base
-  return base.filter((item) => item.searchableModel.includes(keyword))
+  return base.filter((item) => item.searchableText.includes(keyword))
 })
 
 const virtualRowsState = computed(() => buildVariableHeightVirtualList({
@@ -421,6 +470,7 @@ async function loadRows(options: { force?: boolean; keepCurrentRows?: boolean } 
       const nextRows = (await listModelPricing()) ?? []
       reconcileMeasuredItemHeights(nextRows, force)
       rows.value = nextRows
+      warmupProviderIcons(nextRows)
       hasLoadedRows.value = true
       rowsStale.value = false
       error.value = ''
@@ -475,7 +525,8 @@ function resetCloudConflictState() {
 
 function resetUIState() {
   search.value = ''
-  onlyOverrides.value = false
+  selectedSourceFilter.value = 'all'
+  selectedProvider.value = 'all'
   selectedModel.value = ''
   error.value = ''
   syncMenuOpen.value = false
@@ -726,6 +777,7 @@ watch(
 
     resetUIState()
     void nextTick(() => {
+      warmupProviderIcons(rows.value)
       syncListViewportMetrics()
       scheduleVisibleItemMeasurement()
     })
@@ -740,7 +792,16 @@ watch(
 )
 
 watch(
-  [search, onlyOverrides],
+  providerTabs,
+  (tabs) => {
+    if (!tabs.some((tab) => tab.key === selectedProvider.value)) {
+      selectedProvider.value = 'all'
+    }
+  },
+)
+
+watch(
+  [search, selectedSourceFilter, selectedProvider],
   () => {
     resetListViewportPosition()
     void nextTick(() => {
@@ -818,18 +879,55 @@ watch(
           <button
             type="button"
             class="vendor-pill"
-            :class="{ active: !onlyOverrides }"
-            @click="onlyOverrides = false"
+            :class="{ active: selectedSourceFilter === 'all' }"
+            @click="selectedSourceFilter = 'all'"
           >
             {{ $t('components.general.modelPricing.filterAll') }} ({{ rows.length }})
           </button>
           <button
             type="button"
             class="vendor-pill"
-            :class="{ active: onlyOverrides }"
-            @click="onlyOverrides = true"
+            :class="{ active: selectedSourceFilter === 'manual' }"
+            @click="selectedSourceFilter = 'manual'"
           >
-            {{ $t('components.general.modelPricing.onlyOverrides') }} ({{ overrideCount }})
+            <svg class="vendor-pill-icon vendor-pill-icon--stroke" viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M4.75 7.75 12 4.5l7.25 3.25V16.25L12 19.5 4.75 16.25V7.75Z"
+                fill="none"
+                stroke="currentColor"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="1.6"
+              />
+              <path
+                d="M4.75 7.75 12 11l7.25-3.25M12 11v8.5"
+                fill="none"
+                stroke="currentColor"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="1.6"
+              />
+            </svg>
+            <span>{{ $t('components.general.modelPricing.filterLocal') }} ({{ manualCount }})</span>
+          </button>
+        </div>
+
+        <div v-if="providerTabs.length > 1" class="model-pricing-filters model-pricing-filters--vendors">
+          <button
+            v-for="tab in providerTabs"
+            :key="tab.key"
+            type="button"
+            class="vendor-pill"
+            :class="{ active: selectedProvider === tab.key }"
+            @click="selectedProvider = tab.key"
+          >
+            <span
+              v-if="tab.iconKey && providerIconSvg(tab.iconKey)"
+              class="vendor-pill-icon"
+              v-html="providerIconSvg(tab.iconKey)"
+              aria-hidden="true"
+            ></span>
+            <span>{{ tab.label }} ({{ tab.count }})</span>
           </button>
         </div>
       </div>
@@ -869,6 +967,15 @@ watch(
               <div class="model-main">
                 <div class="model-name" :title="virtualRow.item.model">{{ virtualRow.item.model }}</div>
                 <div class="model-tags">
+                  <span v-if="virtualRow.item.hasKnownProvider" class="tag tag-vendor">
+                    <span
+                      v-if="providerIconSvg(virtualRow.item.providerIconKey)"
+                      class="tag-icon"
+                      v-html="providerIconSvg(virtualRow.item.providerIconKey)"
+                      aria-hidden="true"
+                    ></span>
+                    {{ virtualRow.item.providerLabel }}
+                  </span>
                   <span
                     class="tag"
                     :class="virtualRow.item.sourceClass"
@@ -1024,6 +1131,9 @@ watch(
 }
 
 .vendor-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   border: 1px solid transparent;
   background: rgba(148, 163, 184, 0.12);
   color: var(--mac-text-secondary);
@@ -1042,6 +1152,35 @@ watch(
   border-color: rgba(59, 130, 246, 0.35);
   background: rgba(59, 130, 246, 0.14);
   color: var(--mac-text);
+}
+
+.vendor-pill-icon,
+.tag-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+.vendor-pill-icon {
+  width: 16px;
+  height: 16px;
+}
+
+.vendor-pill-icon--stroke {
+  flex: 0 0 auto;
+}
+
+.tag-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.vendor-pill-icon :deep(svg),
+.tag-icon :deep(svg) {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
 .model-pricing-state {
@@ -1154,6 +1293,13 @@ watch(
   font-size: 0.78rem;
   border: 1px solid transparent;
   white-space: nowrap;
+}
+
+.tag-vendor {
+  gap: 6px;
+  background: rgba(99, 102, 241, 0.1);
+  color: var(--mac-text);
+  border-color: rgba(99, 102, 241, 0.22);
 }
 
 .tag-builtin {

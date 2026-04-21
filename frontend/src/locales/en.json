@@ -1187,7 +1187,12 @@
         "manage": "Manage",
         "searchPlaceholder": "Search models (fuzzy match)",
         "filterAll": "All",
+        "filterLocal": "Local",
         "onlyOverrides": "Overrides only",
+        "vendorFilters": {
+          "all": "All vendors",
+          "unknown": "Unknown"
+        },
         "add": "Add model",
         "refresh": "Refresh",
         "sync": "Sync",

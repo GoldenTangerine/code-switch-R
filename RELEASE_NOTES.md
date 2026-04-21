@@ -1,3 +1,20 @@
+# Code Switch v2.8.7
+
+## 修复
+- **模型价格页的供应商筛选这回终于按 provider 语义说人话了**：`设置 -> 模型价格` 顶部新增的供应商 tabs 现在优先按显式 provider 前缀归类，像 `azure/...`、`openrouter/...`、`bedrock/...`、`fireworks_ai/...`、`groq/...` 这类模型都会稳定落回各自 provider，不再被尾巴上的 `gpt-*`、`claude-*`、`llama-*` 抢走分类，终于和参考项目按 `litellmProvider` 筛选的口径对上了。
+- **模型价格列表的“本地”过滤终于不再把同步覆盖项一锅端了**：原来前端偷懒拿 `is_override || is_custom` 当“仅自定义/覆盖”过滤，结果 `claude_sync / cloud_sync` 这类同步覆盖模型也会被顺手算进去；现在改成只认 `source === manual`，真正把本地手动修改和同步来源分开，用户点“本地”终于不会再看到一堆串味条目。
+- **模型价格列表项上的供应商图标和标签也顺手收口到 provider 口径**：列表里展示的标识不再按底层模型厂商瞎猜，而是和顶部 provider tabs 共用同一套前缀优先规则；像 `openrouter/anthropic/claude-*`、`bedrock/.../anthropic.claude-*` 这类嵌套路径模型，终于不会再挂着 Anthropic 标签却被归进第三方 provider 路由里，整出前后不一致的别扭场面。
+
+## 技术改进
+- **模型价格 provider 识别逻辑正式抽成独立工具并分成“两段式优先级”**：新增 `modelProviders` 工具，先做显式 provider 前缀匹配，再做模型家族 fallback 兜底，同时把 tabs 顺序收口到参考实现的核心顺序，后面再补更多 provider 前缀时不至于继续把语义搞串。
+- **模型价格 source/manual 过滤单独抽成纯函数并补齐回归测试**：新增 `modelPricingFilters` 工具，把 `manual` source 过滤逻辑独立出来，专门补了“`cloud_sync` 且 override 不算本地”的测试；以后谁再想图省事把覆盖层和来源层混成一锅，测试会先出来掀桌子。
+- **前端专项回归测试继续朝最容易串味的 provider 路径补刀**：补上 `azure/gpt-4o -> Azure`、`openrouter/anthropic/claude-* -> OpenRouter`、`bedrock/.../anthropic.claude-* -> Bedrock`、`fireworks_ai/.../deepseek-* -> Fireworks` 等定向测试，并确认 `vue-tsc --noEmit` 继续通过，省得这次把语义修正了，下次又被人悄悄改回去。
+
+## 发布
+- **本次发版版本号统一推进到 `v2.8.7`**：同步补齐更新日志，并准备推送 `v2.8.7` tag 触发 GitHub 自动打包，继续保证 Git tag、发布说明和最终产物别再各唱各的调。
+
+---
+
 # Code Switch v2.8.6
 
 ## 新功能
