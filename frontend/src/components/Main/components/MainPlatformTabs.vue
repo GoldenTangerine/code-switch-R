@@ -1,6 +1,12 @@
 <template>
   <div class="section-header main-platform-tabs">
-    <div class="tab-group" role="tablist" :aria-label="t('components.main.tabs.ariaLabel')">
+    <div
+      ref="tabGroupRef"
+      class="tab-group"
+      :style="tabGroupStyle"
+      role="tablist"
+      :aria-label="t('components.main.tabs.ariaLabel')"
+    >
       <button
         v-for="(tab, idx) in tabs"
         :key="tab.id"
@@ -97,10 +103,11 @@
 </template>
 
 <script setup lang="ts">
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { MainTabOption } from '../types'
 
-defineProps<{
+const props = defineProps<{
   tabs: readonly MainTabOption[]
   selectedIndex: number
   currentProxyLabel: string
@@ -117,4 +124,162 @@ defineEmits<{
 }>()
 
 const { t } = useI18n()
+const tabGroupRef = ref<HTMLDivElement | null>(null)
+const measuredTabGroupWidth = ref<number | null>(null)
+
+let tabGroupResizeObserver: ResizeObserver | null = null
+let tabGroupMeasureFrameId: number | null = null
+
+function parsePixelValue(value: string | null | undefined) {
+  return Number.parseFloat(value ?? '0') || 0
+}
+
+function cleanupMeasureFrame() {
+  if (typeof window === 'undefined' || tabGroupMeasureFrameId === null) return
+  window.cancelAnimationFrame(tabGroupMeasureFrameId)
+  tabGroupMeasureFrameId = null
+}
+
+function measureTabGroupWidth() {
+  if (typeof window === 'undefined') return
+
+  const tabGroupElement = tabGroupRef.value
+  if (!tabGroupElement) return
+
+  const tabButtons = Array.from(tabGroupElement.querySelectorAll<HTMLButtonElement>('.tab-pill'))
+  if (!tabButtons.length) return
+
+  const styles = window.getComputedStyle(tabGroupElement)
+  const gap = parsePixelValue(styles.columnGap || styles.gap)
+  const paddingLeft = parsePixelValue(styles.paddingLeft)
+  const paddingRight = parsePixelValue(styles.paddingRight)
+  const borderLeft = parsePixelValue(styles.borderLeftWidth)
+  const borderRight = parsePixelValue(styles.borderRightWidth)
+
+  const buttonsWidth = tabButtons.reduce((total, button) => total + button.getBoundingClientRect().width, 0)
+  const nextWidth = Math.ceil(
+    buttonsWidth +
+      gap * Math.max(tabButtons.length - 1, 0) +
+      paddingLeft +
+      paddingRight +
+      borderLeft +
+      borderRight,
+  )
+
+  if (nextWidth > 0 && nextWidth !== measuredTabGroupWidth.value) {
+    measuredTabGroupWidth.value = nextWidth
+  }
+}
+
+function scheduleTabGroupMeasure() {
+  if (typeof window === 'undefined') return
+
+  cleanupMeasureFrame()
+  nextTick(() => {
+    tabGroupMeasureFrameId = window.requestAnimationFrame(() => {
+      tabGroupMeasureFrameId = null
+      measureTabGroupWidth()
+    })
+  })
+}
+
+function bindResizeObserver() {
+  if (typeof window === 'undefined' || typeof ResizeObserver === 'undefined') return
+
+  tabGroupResizeObserver?.disconnect()
+
+  const tabGroupElement = tabGroupRef.value
+  if (!tabGroupElement) return
+
+  tabGroupResizeObserver = new ResizeObserver(() => {
+    scheduleTabGroupMeasure()
+  })
+
+  tabGroupResizeObserver.observe(tabGroupElement)
+  Array.from(tabGroupElement.children).forEach((child) => {
+    if (child instanceof HTMLElement) {
+      tabGroupResizeObserver?.observe(child)
+    }
+  })
+}
+
+const tabGroupStyle = computed(() => {
+  if (!measuredTabGroupWidth.value) return undefined
+  return {
+    '--main-platform-tab-group-width': `${measuredTabGroupWidth.value}px`,
+  }
+})
+
+watch(
+  () => props.tabs.map((tab) => `${tab.id}:${tab.label}`).join('|'),
+  () => {
+    scheduleTabGroupMeasure()
+    bindResizeObserver()
+  },
+  { immediate: true },
+)
+
+onMounted(() => {
+  scheduleTabGroupMeasure()
+  bindResizeObserver()
+
+  window.addEventListener('resize', scheduleTabGroupMeasure)
+
+  if (typeof document !== 'undefined' && 'fonts' in document && document.fonts?.ready) {
+    void document.fonts.ready.then(() => {
+      scheduleTabGroupMeasure()
+      bindResizeObserver()
+    })
+  }
+})
+
+onBeforeUnmount(() => {
+  cleanupMeasureFrame()
+  tabGroupResizeObserver?.disconnect()
+  tabGroupResizeObserver = null
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('resize', scheduleTabGroupMeasure)
+  }
+})
 </script>
+
+<style scoped>
+.main-platform-tabs {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: nowrap;
+}
+
+.main-platform-tabs .tab-group {
+  width: var(--main-platform-tab-group-width, auto);
+  min-width: 0;
+  max-width: none;
+  flex: 0 0 auto;
+  overflow: visible;
+}
+
+.main-platform-tabs .section-controls {
+  min-width: max-content;
+  margin-left: auto;
+  justify-self: auto;
+}
+
+@media (max-width: 700px) {
+  .main-platform-tabs {
+    display: flex;
+  }
+
+  .main-platform-tabs .tab-group {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .main-platform-tabs .section-controls {
+    justify-self: auto;
+  }
+}
+</style>

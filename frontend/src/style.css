@@ -1069,25 +1069,6 @@ html.dark .mac-sidebar-item:hover {
   justify-content: flex-end;
 }
 
-.main-platform-tabs {
-  display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
-  align-items: center;
-}
-
-.main-platform-tabs .tab-group {
-  width: max-content;
-  min-width: max-content;
-  max-width: max-content;
-  overflow: visible;
-}
-
-.main-platform-tabs .section-controls {
-  min-width: 0;
-  margin-left: 0;
-  justify-self: end;
-}
-
 /* 小窗口下 Tab 和 Controls 垂直堆叠 */
 @media (max-width: 700px) {
   .section-header {
@@ -1113,22 +1094,6 @@ html.dark .mac-sidebar-item:hover {
     min-width: 0;
     overflow-x: auto;
     overflow-y: hidden;
-  }
-
-  .main-platform-tabs {
-    display: flex;
-  }
-
-  .main-platform-tabs .tab-group {
-    width: 100%;
-    max-width: 100%;
-    min-width: 0;
-    overflow-x: auto;
-    overflow-y: hidden;
-  }
-
-  .main-platform-tabs .section-controls {
-    justify-self: auto;
   }
 }
 

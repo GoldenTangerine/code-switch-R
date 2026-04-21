@@ -1,3 +1,16 @@
+# Code Switch v2.8.13
+
+## 修复
+- **首页供应商类型切换在打包版里终于不再“边框只包半截，后面内容悬空裸奔”了**：`MainPlatformTabs` 不再继续赌 `grid + max-content` 在桌面 WebView 里的玄学宽度计算，改为在组件内按 tab 按钮真实像素宽度动态测量并回写容器尺寸，开发态和打包态现在终于按同一套结果老实显示。
+
+## 技术改进
+- **首页 tabs 布局正式从“浏览器自己悟”改成“组件自己量”**：新增 `ResizeObserver`、`requestAnimationFrame`、字体加载后复测和窗口 resize 重算，把 `main-platform-tabs` 的专属布局收回组件作用域；全局 `style.css` 里那段会和组件私有布局打架的旧 `grid` 覆盖规则也一并撤掉，少让构建产物和运行时内核继续互相整活。
+
+## 发布
+- **本次发版版本号统一推进到 `v2.8.13`**：同步更新应用常量、构建配置、Darwin `Info.plist`、Windows 元数据、Linux 包版本与更新日志，并准备推送 `v2.8.13` tag 触发 GitHub 自动打包，继续保证仓库版本、Git tag 和最终产物别再各唱各的调。
+
+---
+
 # Code Switch v2.8.12
 
 ## 修复
