@@ -1,3 +1,25 @@
+# Code Switch v2.8.6
+
+## 新功能
+- **模型价格终于补上“云端同步”这条腿了**：`设置 -> 模型价格 -> 同步` 现在除了 Claude 官方价格外，还新增了云端价格表同步入口，直接复用 `claude-code-hub` 的 `https://claude-code-hub.app/config/prices-base.toml` 数据源，后续补模型价格不用再靠手填或者等人肉搬运。
+- **云端同步终于不再是“一把梭过去，manual 自求多福”了**：前端点击云端同步时会先预检冲突，把本地 `manual` 模型单独拎出来给用户勾选覆盖；没勾的继续保留本地价格，勾了的才会转成云端同步结果，终于像个正经的冲突处理流程。
+
+## 修复
+- **云端 TOML 解析方式这回真按参考项目口径收口了**：后端不再把价格表硬反序列化成一撮固定字段，而是先按 raw `models` 结构解析，再统一提取当前系统可用的 token/cache/group 字段，并支持 `pricing.*`、`selected_pricing_provider`、`litellm_provider` 的 fallback，后面云端 schema 再长点儿肉，也不至于一变就碎。
+- **模型价格来源标签终于不再把 Claude 和云端同步炖成一锅了**：设置页列表现在会明确区分 `Claude 同步`、`云端同步`、`手动修改` 和 `内置价格`，tooltip 也会带上来源和同步时间，排查价格从哪儿来的终于不用靠猜。
+- **模型价格编辑弹窗不再拿同步项逗你玩了**：删除/恢复按钮现在只对 `manual` 来源开放，像 `claude_sync` / `cloud_sync` 这类同步项不会再摆出一副“你点我试试”的姿势，省得用户看着像能删，实际只是演戏。
+- **云端同步写库不再把主 overrides blob 往死里抡**：模型价格覆盖层现在拆成 `localOverrides + cloudOverrides` 两层，云端同步单独写 `model_pricing_cloud_overrides_v1`，最终效果再和本地层合并；这样既保住 manual / Claude 的优先级，也把大 JSON blob 持续膨胀的风险压下去。
+
+## 技术改进
+- **云端同步与 Claude 同步的存储职责终于分清了**：`Claude sync` 继续写 primary/local 层，`cloud sync` 单独写 cloud 层，启动时还会自动把旧 `cloud_sync` 数据从 primary key 迁移拆出去，避免历史数据继续和新逻辑拧巴。
+- **Go 侧回归测试终于不再测复制出来的假逻辑了**：补上云端 TOML raw parse、nested pricing fallback、manual 冲突预检、真实 `SyncCloudPriceTable()` 跳过/覆盖 manual 的测试，后面谁再把云端同步改回“表面能跑，细节全糊”，测试会先出来掀桌子。
+- **前端冲突弹窗和同步状态机也顺手收稳了**：新增独立的 `CloudPricingConflictModal`，把冲突预检、勾选覆盖、同步执行和状态重置拆开，少让 `ModelPricingModal.vue` 继续长成一锅乱炖面条。
+
+## 发布
+- **本次发版版本号统一推进到 `v2.8.6`**：同步更新应用常量、构建配置、Darwin `Info.plist`、Windows 元数据和 Linux 包版本，并准备推送 `v2.8.6` tag 触发 GitHub 自动打包，继续保证仓库版本、Git tag 和发布产物别再各唱各的调。
+
+---
+
 # Code Switch v2.8.5
 
 ## 修复

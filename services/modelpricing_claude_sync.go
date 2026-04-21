@@ -69,14 +69,15 @@ var claudeOfficialDisplayNameToModels = map[string][]string{
 }
 
 type ModelPricingSyncResult struct {
-	Provider           string   `json:"provider"`
-	SyncedAt           string   `json:"synced_at"`
-	TotalModels        int      `json:"total_models"`
-	CreatedModels      int      `json:"created_models"`
-	UpdatedModels      int      `json:"updated_models"`
-	ChangedModels      int      `json:"changed_models"`
-	UnchangedModels    int      `json:"unchanged_models"`
-	UnrecognizedModels []string `json:"unrecognized_models,omitempty"`
+	Provider            string   `json:"provider"`
+	SyncedAt            string   `json:"synced_at"`
+	TotalModels         int      `json:"total_models"`
+	CreatedModels       int      `json:"created_models"`
+	UpdatedModels       int      `json:"updated_models"`
+	ChangedModels       int      `json:"changed_models"`
+	UnchangedModels     int      `json:"unchanged_models"`
+	UnrecognizedModels  []string `json:"unrecognized_models,omitempty"`
+	SkippedManualModels []string `json:"skipped_manual_models,omitempty"`
 }
 
 type ClaudeOfficialPricingPreviewResult struct {
@@ -164,7 +165,7 @@ func (mps *ModelPricingService) SyncClaudeOfficialPricing() (ModelPricingSyncRes
 	mps.mu.Lock()
 	defer mps.mu.Unlock()
 
-	newOverrides := cloneModelPricingOverrides(mps.overrides)
+	newOverrides := cloneModelPricingOverrides(mps.localOverrides)
 	if newOverrides.Meta == nil {
 		newOverrides.Meta = make(map[string]modelPricingMeta)
 	}
@@ -239,7 +240,7 @@ func (mps *ModelPricingService) SyncClaudeOfficialPricing() (ModelPricingSyncRes
 		return result, err
 	}
 
-	mps.overrides = newOverrides
+	mps.localOverrides = newOverrides
 	mps.rebuildLocked()
 	return result, nil
 }

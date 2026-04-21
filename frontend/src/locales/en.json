@@ -1192,6 +1192,10 @@
         "refresh": "Refresh",
         "sync": "Sync",
         "syncing": "Syncing...",
+        "syncOptions": {
+          "claude": "Claude",
+          "cloud": "Cloud sync"
+        },
         "loading": "Loading...",
         "empty": "No model pricing data",
         "removing": "Working...",
@@ -1220,7 +1224,9 @@
           "builtin": "Built-in",
           "manual": "Manual",
           "synced": "Synced",
-          "syncedAtTooltip": "Synced from network at {time}"
+          "syncedAtTooltip": "{source} at {time}",
+          "claudeSynced": "Claude sync",
+          "cloudSynced": "Cloud sync"
         },
         "editor": {
           "create": "Create",
@@ -1273,6 +1279,7 @@
           "deleteSuccess": "Model pricing deleted",
           "syncSuccess": "Sync completed, updated {count} model prices",
           "syncSummary": "Sync completed: {created} created, {updated} updated, {unchanged} unchanged",
+          "syncSkippedManual": "Skipped {count} manual models and kept local pricing",
           "syncUnrecognized": "These official model names could not produce valid target keys and were not synced: {models}",
           "previewFailed": "Failed to fetch official pricing: {error}",
           "syncFailed": "Sync failed: {error}",
@@ -1280,6 +1287,21 @@
           "invalidNumber": "Field {field} is not a valid number",
           "multiplierRequiresInput": "Set Input first before editing cache multipliers",
           "modelConflict": "Model {model} already exists and cannot be overwritten by renaming"
+        },
+        "conflict": {
+          "title": "Cloud Sync Conflict Review",
+          "fetchedAt": "Fetched at",
+          "total": "Conflicts",
+          "selected": "Selected to overwrite",
+          "searchPlaceholder": "Search model, display name, or provider",
+          "selectAll": "Select filtered",
+          "clear": "Clear selection",
+          "keepLocalHint": "Only the checked manual models will be overwritten. Unchecked manual entries keep local pricing, while other non-conflicting models still sync normally.",
+          "empty": "No matching conflicts",
+          "current": "Current manual pricing",
+          "incoming": "Incoming cloud pricing",
+          "close": "Close",
+          "apply": "Sync and keep unchecked manual entries"
         }
       },
       "webdav": {

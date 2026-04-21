@@ -55,7 +55,7 @@ export function buildBuiltinModelOptions(
   return rows
     .filter((row) => {
       const source = `${row.source || ''}`.trim().toLowerCase()
-      if (source && source !== 'builtin' && source !== 'claude_sync') {
+      if (source && source !== 'builtin' && source !== 'claude_sync' && source !== 'cloud_sync') {
         return false
       }
 

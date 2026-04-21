@@ -5,13 +5,17 @@ import InlineModal from '../common/InlineModal.vue'
 import BaseInput from '../common/BaseInput.vue'
 import ModelPricingEditorModal from './ModelPricingEditorModal.vue'
 import ClaudePricingPreviewModal from './ClaudePricingPreviewModal.vue'
+import CloudPricingConflictModal from './CloudPricingConflictModal.vue'
 import { useI18n } from 'vue-i18n'
 import {
   MODEL_PRICING_CHANGED_EVENT,
   listModelPricing,
+  previewCloudPriceTableSyncConflicts,
   previewClaudeOfficialPricing,
+  syncCloudPriceTable,
   syncClaudeOfficialPricing,
   type ClaudeOfficialPricingPreviewRow,
+  type CloudPriceTableSyncConflictRow,
   type ModelPricingRow,
 } from '../../services/modelPricing'
 import { extractErrorMessage } from '../../utils/error'
@@ -33,6 +37,7 @@ const MODEL_PRICING_ROW_GAP = 10
 const MODEL_PRICING_OVERSCAN = 720
 
 type EditMode = 'edit' | 'new'
+type PricingSource = 'builtin' | 'manual' | 'claude_sync' | 'cloud_sync'
 
 interface DisplayCacheCreatePriceEntry {
   key: string
@@ -73,6 +78,10 @@ const claudePreviewOpen = ref(false)
 const claudePreviewRows = ref<ClaudeOfficialPricingPreviewRow[]>([])
 const claudePreviewFetchedAt = ref('')
 const previewRequestSeq = ref(0)
+const cloudConflictOpen = ref(false)
+const cloudConflictRows = ref<CloudPriceTableSyncConflictRow[]>([])
+const cloudConflictFetchedAt = ref('')
+const cloudConflictRequestSeq = ref(0)
 const editorOpen = ref(false)
 const editorMode = ref<EditMode>('edit')
 const editorRow = ref<ModelPricingRow | null>(null)
@@ -175,23 +184,33 @@ function resolveCacheCreatePriceEntries(row: ModelPricingRow) {
   return entries
 }
 
-function resolvePricingSource(row: ModelPricingRow) {
-  if (row.source === 'claude_sync') return 'claude_sync'
-  if (row.source === 'manual') return 'manual'
-  if (row.source === 'builtin') return 'builtin'
+function normalizePricingSource(source: string | undefined): PricingSource | '' {
+  const normalized = `${source ?? ''}`.trim().toLowerCase()
+  if (normalized === 'builtin') return 'builtin'
+  if (normalized === 'manual') return 'manual'
+  if (normalized === 'claude_sync') return 'claude_sync'
+  if (normalized === 'cloud_sync') return 'cloud_sync'
+  return ''
+}
+
+function resolvePricingSource(row: ModelPricingRow): PricingSource {
+  const normalized = normalizePricingSource(row.source)
+  if (normalized) return normalized
   return row.is_override || row.is_custom ? 'manual' : 'builtin'
 }
 
 function resolvePricingSourceLabel(row: ModelPricingRow) {
   const source = resolvePricingSource(row)
-  if (source === 'claude_sync') return t('components.general.modelPricing.badge.synced')
+  if (source === 'claude_sync') return t('components.general.modelPricing.badge.claudeSynced')
+  if (source === 'cloud_sync') return t('components.general.modelPricing.badge.cloudSynced')
   if (source === 'builtin') return t('components.general.modelPricing.badge.builtin')
   return t('components.general.modelPricing.badge.manual')
 }
 
 function resolvePricingSourceClass(row: ModelPricingRow) {
   const source = resolvePricingSource(row)
-  if (source === 'claude_sync') return 'tag-synced'
+  if (source === 'claude_sync') return 'tag-claude-synced'
+  if (source === 'cloud_sync') return 'tag-cloud-synced'
   if (source === 'builtin') return 'tag-builtin'
   return 'tag-manual'
 }
@@ -213,10 +232,14 @@ function formatDateTimeForTooltip(raw: string | undefined) {
 }
 
 function resolvePricingSourceTooltip(row: ModelPricingRow) {
-  if (resolvePricingSource(row) !== 'claude_sync') return ''
+  const source = resolvePricingSource(row)
+  if (source !== 'claude_sync' && source !== 'cloud_sync') return ''
   const formatted = formatDateTimeForTooltip(row.source_updated_at)
   if (!formatted) return ''
-  return t('components.general.modelPricing.badge.syncedAtTooltip', { time: formatted })
+  return t('components.general.modelPricing.badge.syncedAtTooltip', {
+    source: resolvePricingSourceLabel(row),
+    time: formatted,
+  })
 }
 
 function buildDisplayModelPricingRow(row: ModelPricingRow): DisplayModelPricingRow {
@@ -443,6 +466,13 @@ function resetClaudePreviewState() {
   claudePreviewFetchedAt.value = ''
 }
 
+function resetCloudConflictState() {
+  cloudConflictRequestSeq.value += 1
+  cloudConflictOpen.value = false
+  cloudConflictRows.value = []
+  cloudConflictFetchedAt.value = ''
+}
+
 function resetUIState() {
   search.value = ''
   onlyOverrides.value = false
@@ -450,6 +480,7 @@ function resetUIState() {
   error.value = ''
   syncMenuOpen.value = false
   resetClaudePreviewState()
+  resetCloudConflictState()
   resetListViewportPosition()
 }
 
@@ -557,9 +588,82 @@ async function confirmClaudeSync() {
   })
 }
 
+async function executeCloudSync(overwriteManualModels: string[] = []) {
+  const result = await syncCloudPriceTable(overwriteManualModels)
+  showToast(
+    t('components.general.modelPricing.toast.syncSummary', {
+      created: result.created_models,
+      updated: result.updated_models,
+      unchanged: result.unchanged_models,
+    }),
+  )
+  if ((result.skipped_manual_models ?? []).length > 0) {
+    showToast(
+      t('components.general.modelPricing.toast.syncSkippedManual', {
+        count: result.skipped_manual_models?.length ?? 0,
+      }),
+      'warning',
+    )
+  }
+  cloudConflictOpen.value = false
+  await loadRows({ force: true, keepCurrentRows: true })
+}
+
+async function openCloudSync() {
+  if (syncing.value) return
+  syncMenuOpen.value = false
+  const requestSeq = cloudConflictRequestSeq.value + 1
+  cloudConflictRequestSeq.value = requestSeq
+
+  await runSyncTask(async () => {
+    try {
+      const preview = await previewCloudPriceTableSyncConflicts()
+      if (!props.open || requestSeq !== cloudConflictRequestSeq.value) return
+      const conflicts = preview.conflicts ?? []
+      if (conflicts.length === 0) {
+        await executeCloudSync([])
+        return
+      }
+      cloudConflictRows.value = conflicts
+      cloudConflictFetchedAt.value = preview.fetched_at ?? ''
+      cloudConflictOpen.value = true
+    } catch (err) {
+      if (!props.open || requestSeq !== cloudConflictRequestSeq.value) return
+      showToast(
+        t('components.general.modelPricing.toast.syncFailed', {
+          error: extractErrorMessage(err),
+        }),
+        'error',
+      )
+    }
+  })
+}
+
+async function confirmCloudConflictSync(models: string[]) {
+  if (syncing.value) return
+
+  await runSyncTask(async () => {
+    try {
+      await executeCloudSync(models)
+    } catch (err) {
+      showToast(
+        t('components.general.modelPricing.toast.syncFailed', {
+          error: extractErrorMessage(err),
+        }),
+        'error',
+      )
+    }
+  })
+}
+
 function closeClaudePreview() {
   if (syncing.value) return
   claudePreviewOpen.value = false
+}
+
+function closeCloudConflict() {
+  if (syncing.value) return
+  cloudConflictOpen.value = false
 }
 
 function onGlobalPointerDown(event: PointerEvent) {
@@ -687,7 +791,15 @@ watch(
                   :disabled="syncing"
                   @click="openClaudePreview"
                 >
-                  Claude
+                  {{ $t('components.general.modelPricing.syncOptions.claude') }}
+                </button>
+                <button
+                  type="button"
+                  class="sync-menu-btn"
+                  :disabled="syncing"
+                  @click="openCloudSync"
+                >
+                  {{ $t('components.general.modelPricing.syncOptions.cloud') }}
                 </button>
               </div>
             </div>
@@ -824,6 +936,15 @@ watch(
       :syncing="syncing"
       @close="closeClaudePreview"
       @confirm-sync="confirmClaudeSync"
+    />
+
+    <CloudPricingConflictModal
+      :open="cloudConflictOpen"
+      :rows="cloudConflictRows"
+      :fetched-at="cloudConflictFetchedAt"
+      :syncing="syncing"
+      @close="closeCloudConflict"
+      @confirm-sync="confirmCloudConflictSync"
     />
   </InlineModal>
 </template>
@@ -1047,10 +1168,16 @@ watch(
   border-color: rgba(245, 158, 11, 0.25);
 }
 
-.tag-synced {
+.tag-claude-synced {
   background: rgba(16, 185, 129, 0.15);
   color: #10b981;
   border-color: rgba(16, 185, 129, 0.3);
+}
+
+.tag-cloud-synced {
+  background: rgba(59, 130, 246, 0.14);
+  color: #2563eb;
+  border-color: rgba(59, 130, 246, 0.28);
 }
 
 .price-value.input {

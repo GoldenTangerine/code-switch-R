@@ -92,7 +92,9 @@ const badgeClass = computed(() => {
   return 'tag-neutral'
 })
 
-const canRemove = computed(() => props.mode === 'edit')
+const canRemove = computed(() => (
+  props.mode === 'edit' && normalizeRowSource(props.row?.source) === 'manual'
+))
 
 const renameHint = computed(() => {
   if (props.mode !== 'edit' || !props.row) return ''
@@ -130,6 +132,14 @@ const parseOptionalNumberField = (raw: string) => {
     isSet: true,
     value: Number.isFinite(value) ? value : NaN,
   }
+}
+
+const normalizeRowSource = (source: string | undefined) => {
+  const normalized = `${source ?? ''}`.trim().toLowerCase()
+  if (normalized === 'builtin' || normalized === 'manual' || normalized === 'claude_sync' || normalized === 'cloud_sync') {
+    return normalized
+  }
+  return ''
 }
 
 const calculateMultiplierFromPrices = (cachePriceRaw: string, inputPriceRaw: string) => {

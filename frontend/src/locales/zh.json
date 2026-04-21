@@ -1193,6 +1193,10 @@
         "refresh": "刷新",
         "sync": "同步",
         "syncing": "同步中...",
+        "syncOptions": {
+          "claude": "Claude",
+          "cloud": "云端同步"
+        },
         "loading": "加载中...",
         "empty": "暂无模型价格数据",
         "removing": "处理中...",
@@ -1221,7 +1225,9 @@
           "builtin": "内置价格（Built-in）",
           "manual": "手动修改（Manual）",
           "synced": "网络同步（Synced）",
-          "syncedAtTooltip": "网络同步时间：{time}"
+          "syncedAtTooltip": "{source} 时间：{time}",
+          "claudeSynced": "Claude 同步",
+          "cloudSynced": "云端同步"
         },
         "editor": {
           "create": "新增",
@@ -1274,6 +1280,7 @@
           "deleteSuccess": "已删除模型价格",
           "syncSuccess": "已完成同步，更新 {count} 个模型价格",
           "syncSummary": "同步完成：新增 {created} 个，更新 {updated} 个，未变化 {unchanged} 个",
+          "syncSkippedManual": "已跳过 {count} 个手动模型，保留本地价格",
           "syncUnrecognized": "以下官方模型名无法生成有效目标 key，仍未同步：{models}",
           "previewFailed": "抓取官方价格失败：{error}",
           "syncFailed": "同步失败：{error}",
@@ -1281,6 +1288,21 @@
           "invalidNumber": "字段 {field} 不是合法数字",
           "multiplierRequiresInput": "请先填写 Input，再调整 Cache Multiplier",
           "modelConflict": "模型 {model} 已存在，不能直接重命名覆盖"
+        },
+        "conflict": {
+          "title": "云端同步冲突处理",
+          "fetchedAt": "抓取时间",
+          "total": "冲突模型",
+          "selected": "已勾选覆盖",
+          "searchPlaceholder": "搜索模型名、展示名或 Provider",
+          "selectAll": "全选当前结果",
+          "clear": "清空勾选",
+          "keepLocalHint": "只会覆盖你勾选的手动模型；未勾选的手动项会继续保留本地价格，其余非冲突模型仍会正常同步。",
+          "empty": "没有匹配的冲突模型",
+          "current": "当前手动价格",
+          "incoming": "即将写入的云端价格",
+          "close": "关闭",
+          "apply": "同步（保留未勾选手动项）"
         }
       },
       "webdav": {

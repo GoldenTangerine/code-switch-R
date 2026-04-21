@@ -29,7 +29,7 @@ export interface ModelPricingRow {
   group_multiplier: number
   is_override: boolean
   is_custom: boolean
-  source?: 'builtin' | 'manual' | 'claude_sync' | string
+  source?: 'builtin' | 'manual' | 'claude_sync' | 'cloud_sync' | string
   source_updated_at?: string
 }
 
@@ -42,6 +42,7 @@ export interface ModelPricingSyncResult {
   changed_models: number
   unchanged_models: number
   unrecognized_models?: string[]
+  skipped_manual_models?: string[]
 }
 
 export interface ClaudeOfficialPricingPreviewRow {
@@ -61,6 +62,31 @@ export interface ClaudeOfficialPricingPreviewResult {
   fetched_at: string
   rows: ClaudeOfficialPricingPreviewRow[]
   unrecognized_models?: string[]
+}
+
+export interface CloudPriceTableConflictPricing {
+  input_cost_per_token: number
+  output_cost_per_token: number
+  output_cost_per_reasoning_token: number
+  cache_creation_input_token_cost: number
+  cache_read_input_token_cost: number
+  ephemeral_1h_cost_per_token: number
+  group_multiplier: number
+}
+
+export interface CloudPriceTableSyncConflictRow {
+  model: string
+  display_name?: string
+  litellm_provider?: string
+  mode?: string
+  current: CloudPriceTableConflictPricing
+  incoming: CloudPriceTableConflictPricing
+}
+
+export interface CloudPriceTableSyncConflictResult {
+  provider: string
+  fetched_at: string
+  conflicts: CloudPriceTableSyncConflictRow[]
 }
 
 const emitModelPricingChanged = async (payload: ModelPricingChangedEventPayload) => {
@@ -96,6 +122,23 @@ export const deleteModelPricing = async (model: string): Promise<void> => {
 
 export const syncClaudeOfficialPricing = async (): Promise<ModelPricingSyncResult> => {
   const result = await Call.ByName(`${MODEL_PRICING_SERVICE}.SyncClaudeOfficialPricing`) as ModelPricingSyncResult
+  await emitModelPricingChanged({
+    action: 'sync',
+    syncedAt: result?.synced_at,
+    timestamp: Date.now(),
+  })
+  return result
+}
+
+export const previewCloudPriceTableSyncConflicts = async (): Promise<CloudPriceTableSyncConflictResult> => {
+  return Call.ByName(`${MODEL_PRICING_SERVICE}.PreviewCloudPriceTableSyncConflicts`)
+}
+
+export const syncCloudPriceTable = async (overwriteManualModels: string[] = []): Promise<ModelPricingSyncResult> => {
+  const result = await Call.ByName(
+    `${MODEL_PRICING_SERVICE}.SyncCloudPriceTable`,
+    overwriteManualModels,
+  ) as ModelPricingSyncResult
   await emitModelPricingChanged({
     action: 'sync',
     syncedAt: result?.synced_at,

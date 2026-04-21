@@ -16,12 +16,16 @@ import (
 	"github.com/daodao97/xgo/xdb"
 )
 
-const modelPricingOverridesSettingKey = "model_pricing_overrides_v1"
+const (
+	modelPricingOverridesSettingKey      = "model_pricing_overrides_v1"
+	modelPricingCloudOverridesSettingKey = "model_pricing_cloud_overrides_v1"
+)
 
 const (
 	modelPricingSourceBuiltin    = "builtin"
 	modelPricingSourceManual     = "manual"
 	modelPricingSourceClaudeSync = "claude_sync"
+	modelPricingSourceCloudSync  = "cloud_sync"
 )
 
 type modelPricingOverrides struct {
@@ -57,8 +61,11 @@ type ModelPricingService struct {
 	mu                   sync.RWMutex
 	defaults             *modelpricing.Service
 	effective            *modelpricing.Service
+	localOverrides       modelPricingOverrides
+	cloudOverrides       modelPricingOverrides
 	overrides            modelPricingOverrides
 	claudePricingPreview claudePricingPreviewCache
+	cloudPricingPreview  cloudPricingPreviewCache
 }
 
 func NewModelPricingService() *ModelPricingService {
@@ -68,12 +75,10 @@ func NewModelPricingService() *ModelPricingService {
 	}
 
 	svc := &ModelPricingService{
-		defaults: defaults,
-		overrides: modelPricingOverrides{
-			Pricing:     make(map[string]modelpricing.PricingEntry),
-			Ephemeral1h: make(map[string]float64),
-			Meta:        make(map[string]modelPricingMeta),
-		},
+		defaults:       defaults,
+		localOverrides: newEmptyModelPricingOverrides(),
+		cloudOverrides: newEmptyModelPricingOverrides(),
+		overrides:      newEmptyModelPricingOverrides(),
 	}
 	svc.mu.Lock()
 	svc.rebuildLocked()
@@ -207,7 +212,7 @@ func (mps *ModelPricingService) UpsertModelPricing(row ModelPricingRow) error {
 	mps.mu.Lock()
 	defer mps.mu.Unlock()
 
-	newOverrides := cloneModelPricingOverrides(mps.overrides)
+	newOverrides := cloneModelPricingOverrides(mps.localOverrides)
 	if mps.hasRenameConflictLocked(originalModel, model) {
 		return fmt.Errorf("模型 %s 已存在，不能重命名覆盖", model)
 	}
@@ -233,7 +238,7 @@ func (mps *ModelPricingService) UpsertModelPricing(row ModelPricingRow) error {
 		return err
 	}
 
-	mps.overrides = newOverrides
+	mps.localOverrides = newOverrides
 	mps.rebuildLocked()
 	return nil
 }
@@ -250,7 +255,7 @@ func (mps *ModelPricingService) DeleteModelPricing(model string) error {
 	mps.mu.Lock()
 	defer mps.mu.Unlock()
 
-	newOverrides := cloneModelPricingOverrides(mps.overrides)
+	newOverrides := cloneModelPricingOverrides(mps.localOverrides)
 	delete(newOverrides.Pricing, key)
 	delete(newOverrides.Ephemeral1h, key)
 	delete(newOverrides.Meta, key)
@@ -259,22 +264,37 @@ func (mps *ModelPricingService) DeleteModelPricing(model string) error {
 		return err
 	}
 
-	mps.overrides = newOverrides
+	mps.localOverrides = newOverrides
 	mps.rebuildLocked()
 	return nil
 }
 
 func (mps *ModelPricingService) reloadFromDB() error {
-	mps.mu.Lock()
-	defer mps.mu.Unlock()
-
-	overrides, err := loadModelPricingOverridesFromDB()
+	localOverrides, cloudOverrides, migratedCloudOverrides, err := loadModelPricingOverrideLayersFromDB()
 	if err != nil {
+		mps.mu.Lock()
 		mps.rebuildLocked()
+		mps.mu.Unlock()
 		return err
 	}
-	mps.overrides = overrides
+
+	if len(migratedCloudOverrides.Pricing) > 0 ||
+		len(migratedCloudOverrides.Ephemeral1h) > 0 ||
+		len(migratedCloudOverrides.Meta) > 0 {
+		cloudOverrides = overlayModelPricingOverrides(cloudOverrides, migratedCloudOverrides)
+		if err := saveCloudModelPricingOverridesToDB(cloudOverrides); err != nil {
+			log.Printf("pricing cloud overrides migration save failed: %v", err)
+		}
+		if err := saveModelPricingOverridesToDB(localOverrides); err != nil {
+			log.Printf("pricing primary overrides migration save failed: %v", err)
+		}
+	}
+
+	mps.mu.Lock()
+	mps.localOverrides = localOverrides
+	mps.cloudOverrides = cloudOverrides
 	mps.rebuildLocked()
+	mps.mu.Unlock()
 	return nil
 }
 
@@ -283,6 +303,7 @@ func (mps *ModelPricingService) rebuildLocked() {
 		mps.effective = nil
 		return
 	}
+	mps.overrides = overlayModelPricingOverrides(mps.cloudOverrides, mps.localOverrides)
 	merged := mps.defaults.Clone()
 	merged.ApplyOverrides(mps.overrides.Pricing, mps.overrides.Ephemeral1h)
 	mps.effective = merged
@@ -345,11 +366,7 @@ func effectiveModelPricingGroupMultiplier(entry modelpricing.PricingEntry) float
 }
 
 func cloneModelPricingOverrides(src modelPricingOverrides) modelPricingOverrides {
-	dst := modelPricingOverrides{
-		Pricing:     make(map[string]modelpricing.PricingEntry, len(src.Pricing)),
-		Ephemeral1h: make(map[string]float64, len(src.Ephemeral1h)),
-		Meta:        make(map[string]modelPricingMeta, len(src.Meta)),
-	}
+	dst := newEmptyModelPricingOverridesWithCapacity(len(src.Pricing), len(src.Ephemeral1h), len(src.Meta))
 	for key, value := range src.Pricing {
 		dst.Pricing[key] = value
 	}
@@ -362,36 +379,22 @@ func cloneModelPricingOverrides(src modelPricingOverrides) modelPricingOverrides
 	return dst
 }
 
-func loadModelPricingOverridesFromDB() (modelPricingOverrides, error) {
-	overrides := modelPricingOverrides{
-		Pricing:     make(map[string]modelpricing.PricingEntry),
-		Ephemeral1h: make(map[string]float64),
-		Meta:        make(map[string]modelPricingMeta),
-	}
+func newEmptyModelPricingOverrides() modelPricingOverrides {
+	return newEmptyModelPricingOverridesWithCapacity(0, 0, 0)
+}
 
-	db, err := xdb.DB("default")
-	if err != nil {
-		return overrides, fmt.Errorf("获取数据库连接失败: %w", err)
+func newEmptyModelPricingOverridesWithCapacity(pricingCap, ephCap, metaCap int) modelPricingOverrides {
+	return modelPricingOverrides{
+		Pricing:     make(map[string]modelpricing.PricingEntry, pricingCap),
+		Ephemeral1h: make(map[string]float64, ephCap),
+		Meta:        make(map[string]modelPricingMeta, metaCap),
 	}
+}
 
-	var raw string
-	err = db.QueryRow(`SELECT value FROM app_settings WHERE key = ?`, modelPricingOverridesSettingKey).Scan(&raw)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return overrides, nil
-		}
-		return overrides, err
+func ensureModelPricingOverridesInitialized(overrides *modelPricingOverrides) {
+	if overrides == nil {
+		return
 	}
-
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return overrides, nil
-	}
-
-	if err := json.Unmarshal([]byte(raw), &overrides); err != nil {
-		return overrides, fmt.Errorf("解析自定义价格表失败: %w", err)
-	}
-
 	if overrides.Pricing == nil {
 		overrides.Pricing = make(map[string]modelpricing.PricingEntry)
 	}
@@ -401,13 +404,69 @@ func loadModelPricingOverridesFromDB() (modelPricingOverrides, error) {
 	if overrides.Meta == nil {
 		overrides.Meta = make(map[string]modelPricingMeta)
 	}
+}
 
-	return overrides, nil
+func loadModelPricingOverrideLayersFromDB() (modelPricingOverrides, modelPricingOverrides, modelPricingOverrides, error) {
+	localOverrides, _, err := loadModelPricingOverridesFromDB(modelPricingOverridesSettingKey)
+	if err != nil {
+		return newEmptyModelPricingOverrides(), newEmptyModelPricingOverrides(), newEmptyModelPricingOverrides(), err
+	}
+
+	cloudOverrides, _, err := loadModelPricingOverridesFromDB(modelPricingCloudOverridesSettingKey)
+	if err != nil {
+		return newEmptyModelPricingOverrides(), newEmptyModelPricingOverrides(), newEmptyModelPricingOverrides(), err
+	}
+
+	localOverrides, migratedCloudOverrides := splitCloudOverridesFromPrimary(localOverrides)
+	return localOverrides, cloudOverrides, migratedCloudOverrides, nil
+}
+
+func loadModelPricingOverridesFromDB(settingKey string) (modelPricingOverrides, bool, error) {
+	overrides := newEmptyModelPricingOverrides()
+
+	db, err := xdb.DB("default")
+	if err != nil {
+		return overrides, false, fmt.Errorf("获取数据库连接失败: %w", err)
+	}
+
+	var raw string
+	err = db.QueryRow(`SELECT value FROM app_settings WHERE key = ?`, settingKey).Scan(&raw)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return overrides, false, nil
+		}
+		return overrides, false, err
+	}
+
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return overrides, false, nil
+	}
+
+	if err := json.Unmarshal([]byte(raw), &overrides); err != nil {
+		return overrides, true, fmt.Errorf("解析自定义价格表失败: %w", err)
+	}
+
+	ensureModelPricingOverridesInitialized(&overrides)
+	return overrides, true, nil
 }
 
 func saveModelPricingOverridesToDB(overrides modelPricingOverrides) error {
+	return saveModelPricingOverridesByKey(modelPricingOverridesSettingKey, overrides)
+}
+
+func saveCloudModelPricingOverridesToDB(overrides modelPricingOverrides) error {
+	return saveModelPricingOverridesByKey(modelPricingCloudOverridesSettingKey, overrides)
+}
+
+func saveModelPricingOverridesByKey(settingKey string, overrides modelPricingOverrides) error {
 	if GlobalDBQueue == nil {
 		return fmt.Errorf("db queue not initialized")
+	}
+
+	ensureModelPricingOverridesInitialized(&overrides)
+	if isModelPricingOverridesEmpty(overrides) {
+		return GlobalDBQueue.Exec(`DELETE FROM app_settings WHERE key = ?`, settingKey)
 	}
 
 	payload, err := json.Marshal(overrides)
@@ -418,7 +477,70 @@ func saveModelPricingOverridesToDB(overrides modelPricingOverrides) error {
 	return GlobalDBQueue.Exec(`
 		INSERT INTO app_settings (key, value) VALUES (?, ?)
 		ON CONFLICT(key) DO UPDATE SET value = excluded.value
-	`, modelPricingOverridesSettingKey, string(payload))
+	`, settingKey, string(payload))
+}
+
+func isModelPricingOverridesEmpty(overrides modelPricingOverrides) bool {
+	return len(overrides.Pricing) == 0 &&
+		len(overrides.Ephemeral1h) == 0 &&
+		len(overrides.Meta) == 0
+}
+
+func overlayModelPricingOverrides(base modelPricingOverrides, overlay modelPricingOverrides) modelPricingOverrides {
+	merged := cloneModelPricingOverrides(base)
+	for key, value := range overlay.Pricing {
+		merged.Pricing[key] = value
+	}
+	for key, value := range overlay.Ephemeral1h {
+		merged.Ephemeral1h[key] = value
+	}
+	for key, value := range overlay.Meta {
+		merged.Meta[key] = value
+	}
+	return merged
+}
+
+func splitCloudOverridesFromPrimary(primary modelPricingOverrides) (modelPricingOverrides, modelPricingOverrides) {
+	localOverrides := cloneModelPricingOverrides(primary)
+	cloudOverrides := newEmptyModelPricingOverrides()
+	visited := make(map[string]struct{})
+
+	moveKey := func(model string) {
+		if _, ok := visited[model]; ok {
+			return
+		}
+		visited[model] = struct{}{}
+
+		meta := localOverrides.Meta[model]
+		if normalizeModelPricingSource(meta.Source) != modelPricingSourceCloudSync {
+			return
+		}
+
+		if entry, ok := localOverrides.Pricing[model]; ok {
+			cloudOverrides.Pricing[model] = entry
+			delete(localOverrides.Pricing, model)
+		}
+		if eph, ok := localOverrides.Ephemeral1h[model]; ok {
+			cloudOverrides.Ephemeral1h[model] = eph
+			delete(localOverrides.Ephemeral1h, model)
+		}
+		if metaValue, ok := localOverrides.Meta[model]; ok {
+			cloudOverrides.Meta[model] = metaValue
+			delete(localOverrides.Meta, model)
+		}
+	}
+
+	for model := range localOverrides.Meta {
+		moveKey(model)
+	}
+	for model := range localOverrides.Pricing {
+		moveKey(model)
+	}
+	for model := range localOverrides.Ephemeral1h {
+		moveKey(model)
+	}
+
+	return localOverrides, cloudOverrides
 }
 
 func resolveModelPricingSource(meta modelPricingMeta, fallbackManual bool) string {
@@ -440,6 +562,8 @@ func normalizeModelPricingSource(source string) string {
 		return modelPricingSourceManual
 	case modelPricingSourceClaudeSync:
 		return modelPricingSourceClaudeSync
+	case modelPricingSourceCloudSync:
+		return modelPricingSourceCloudSync
 	default:
 		return ""
 	}
