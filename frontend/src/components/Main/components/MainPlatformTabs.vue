@@ -1,5 +1,5 @@
 <template>
-  <div class="section-header">
+  <div class="section-header main-platform-tabs">
     <div class="tab-group" role="tablist" :aria-label="t('components.main.tabs.ariaLabel')">
       <button
         v-for="(tab, idx) in tabs"

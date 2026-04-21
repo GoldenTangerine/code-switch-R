@@ -1,3 +1,16 @@
+# Code Switch v2.8.12
+
+## 修复
+- **首页供应商类型切换外边框这回终于按真实内容宽度老老实实包裹了**：为首页 `MainPlatformTabs` 单独收口 tabs 区布局后，`Claude Code / Codex / Gemini / 其他` 这排标签现在会按内容宽度完整计算外框，不会再出现边框只包住一半、后半截标签被裁掉的别扭场面。
+
+## 技术改进
+- **首页 tabs 区正式从通用 flex 挤压逻辑切到专属 grid 收口**：`main-platform-tabs` 现改为 `max-content + minmax(0, 1fr)` 的双列布局，左侧 tab 组独立按内容宽度计算，右侧 controls 单独靠右；移动端再回退为可滚动布局，少让桌面端继续被通用宽度规则拖后腿。
+
+## 发布
+- **本次发版版本号统一推进到 `v2.8.12`**：同步更新应用常量、构建配置、Darwin `Info.plist`、Windows 元数据、Linux 包版本与更新日志，并准备推送 `v2.8.12` tag 触发 GitHub 自动打包，继续保证仓库版本、Git tag 和最终产物别再各唱各的调。
+
+---
+
 # Code Switch v2.8.11
 
 ## 修复
