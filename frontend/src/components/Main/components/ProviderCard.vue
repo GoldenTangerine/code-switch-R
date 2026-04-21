@@ -4,8 +4,12 @@
     :data-provider-id="viewModel.card.id"
     :class="[
       'automation-card',
+      { 'theme-dark': resolvedTheme === 'dark' },
+      { 'theme-light': resolvedTheme === 'light' },
       { dragging: viewModel.dragging },
       { 'drag-over': viewModel.dragOver },
+      { 'is-enabled': viewModel.card.enabled },
+      { 'is-currently-active': isCurrentlyActive },
       { 'is-last-used': viewModel.isLastUsed },
       { 'is-hosted-active': hostedSelectionActive },
       { 'is-highlighted': viewModel.isHighlighted },
@@ -268,7 +272,12 @@
           :class="['blacklist-banner', { dark: resolvedTheme === 'dark' }]"
         >
           <div class="blacklist-info">
-            <span class="blacklist-icon">⛔</span>
+            <span class="blacklist-icon" aria-hidden="true">
+              <svg viewBox="0 0 20 20">
+                <circle cx="10" cy="10" r="7.5" fill="none" stroke="currentColor" stroke-width="1.6" />
+                <path d="M6.9 13.1l6.2-6.2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+              </svg>
+            </span>
             <span
               v-if="viewModel.blacklistStatus.blacklistLevel > 0"
               :class="[
@@ -340,173 +349,177 @@
         <span></span>
       </label>
 
-      <button
-        v-if="activeTab !== 'others'"
-        class="ghost-icon direct-apply-btn"
-        :class="{ 'is-active': viewModel.isDirectApplied && !activeProxyState }"
-        :disabled="directApplyDisabled"
-        :data-tooltip="directApplyTooltip"
-        type="button"
-        @click.stop="!viewModel.isDirectApplied && !directApplyDisabled && $emit('direct-apply')"
-      >
-        <span v-if="viewModel.isDirectApplied && !activeProxyState" class="apply-text">
-          {{ t('components.main.directApply.inUse') }}
-        </span>
-        <svg v-else viewBox="0 0 24 24" aria-hidden="true" class="lightning-icon">
-          <path
-            d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"
-            stroke="currentColor"
-            stroke-width="1.5"
-            fill="none"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          />
-        </svg>
-      </button>
+      <span class="card-actions-divider" aria-hidden="true"></span>
 
-      <button
-        class="ghost-icon"
-        :data-tooltip="t('components.main.form.editTitle')"
-        type="button"
-        @click="$emit('configure')"
-      >
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path
-            d="M11.983 2.25a1.125 1.125 0 011.077.81l.563 2.101a7.482 7.482 0 012.326 1.343l2.08-.621a1.125 1.125 0 011.356.651l1.313 3.207a1.125 1.125 0 01-.442 1.339l-1.86 1.205a7.418 7.418 0 010 2.686l1.86 1.205a1.125 1.125 0 01.442 1.339l-1.313 3.207a1.125 1.125 0 01-1.356.651l-2.08-.621a7.482 7.482 0 01-2.326 1.343l-.563 2.101a1.125 1.125 0 01-1.077.81h-2.634a1.125 1.125 0 01-1.077-.81l-.563-2.101a7.482 7.482 0 01-2.326-1.343l-2.08.621a1.125 1.125 0 01-1.356-.651l-1.313-3.207a1.125 1.125 0 01.442-1.339l1.86-1.205a7.418 7.418 0 010-2.686l-1.86-1.205a1.125 1.125 0 01-.442-1.339l1.313-3.207a1.125 1.125 0 011.356-.651l2.08.621a7.482 7.482 0 012.326-1.343l.563-2.101a1.125 1.125 0 011.077-.81h2.634z"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.5"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          />
-          <path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-        </svg>
-      </button>
+      <div class="card-actions-toolbar">
+        <button
+          v-if="activeTab !== 'others'"
+          class="ghost-icon direct-apply-btn"
+          :class="{ 'is-active': viewModel.isDirectApplied && !activeProxyState }"
+          :disabled="directApplyDisabled"
+          :data-tooltip="directApplyTooltip"
+          type="button"
+          @click.stop="!viewModel.isDirectApplied && !directApplyDisabled && $emit('direct-apply')"
+        >
+          <span v-if="viewModel.isDirectApplied && !activeProxyState" class="apply-text">
+            {{ t('components.main.directApply.inUse') }}
+          </span>
+          <svg v-else viewBox="0 0 24 24" aria-hidden="true" class="lightning-icon">
+            <path
+              d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"
+              stroke="currentColor"
+              stroke-width="1.5"
+              fill="none"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+        </button>
 
-      <button
-        v-if="activeTab !== 'others'"
-        class="ghost-icon provider-data-btn"
-        :data-tooltip="t('components.main.providerDataOverview.buttonTooltip')"
-        :aria-label="t('components.main.providerDataOverview.buttonAriaLabel', { name: viewModel.card.name })"
-        type="button"
-        @click="$emit('open-provider-data')"
-      >
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path
-            d="M5.5 18.5V11.5M12 18.5V6.5M18.5 18.5V9.5"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.7"
-            stroke-linecap="round"
-          />
-          <path
-            d="M4.5 19.5h15"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.5"
-            stroke-linecap="round"
-          />
-          <circle cx="5.5" cy="9.5" r="1.2" fill="currentColor" />
-          <circle cx="12" cy="4.5" r="1.2" fill="currentColor" />
-          <circle cx="18.5" cy="7.5" r="1.2" fill="currentColor" />
-        </svg>
-      </button>
+        <button
+          class="ghost-icon"
+          :data-tooltip="t('components.main.form.editTitle')"
+          type="button"
+          @click="$emit('configure')"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              d="M11.983 2.25a1.125 1.125 0 011.077.81l.563 2.101a7.482 7.482 0 012.326 1.343l2.08-.621a1.125 1.125 0 011.356.651l1.313 3.207a1.125 1.125 0 01-.442 1.339l-1.86 1.205a7.418 7.418 0 010 2.686l1.86 1.205a1.125 1.125 0 01.442 1.339l-1.313 3.207a1.125 1.125 0 01-1.356.651l-2.08-.621a7.482 7.482 0 01-2.326 1.343l-.563 2.101a1.125 1.125 0 01-1.077.81h-2.634a1.125 1.125 0 01-1.077-.81l-.563-2.101a7.482 7.482 0 01-2.326-1.343l-2.08.621a1.125 1.125 0 01-1.356-.651l-1.313-3.207a1.125 1.125 0 01.442-1.339l1.86-1.205a7.418 7.418 0 010-2.686l-1.86-1.205a1.125 1.125 0 01-.442-1.339l1.313-3.207a1.125 1.125 0 011.356-.651l2.08.621a7.482 7.482 0 012.326-1.343l.563-2.101a1.125 1.125 0 011.077-.81h2.634z"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+            <path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+          </svg>
+        </button>
 
-      <button
-        class="ghost-icon"
-        :disabled="!viewModel.card.apiUrl || !viewModel.card.apiKey"
-        :data-tooltip="(!viewModel.card.apiUrl || !viewModel.card.apiKey)
-          ? t('components.main.modelList.buttonDisabledTooltip')
-          : t('components.main.modelList.buttonTooltip')"
-        type="button"
-        @click="$emit('open-model-list')"
-      >
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path
-            d="M8 6h13M8 12h13M8 18h13"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.5"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          />
-          <path
-            d="M3.5 6.5h1v-1h-1v1zm0 6h1v-1h-1v1zm0 6h1v-1h-1v1z"
-            fill="currentColor"
-          />
-        </svg>
-      </button>
+        <button
+          v-if="activeTab !== 'others'"
+          class="ghost-icon provider-data-btn"
+          :data-tooltip="t('components.main.providerDataOverview.buttonTooltip')"
+          :aria-label="t('components.main.providerDataOverview.buttonAriaLabel', { name: viewModel.card.name })"
+          type="button"
+          @click="$emit('open-provider-data')"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              d="M5.5 18.5V11.5M12 18.5V6.5M18.5 18.5V9.5"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.7"
+              stroke-linecap="round"
+            />
+            <path
+              d="M4.5 19.5h15"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.5"
+              stroke-linecap="round"
+            />
+            <circle cx="5.5" cy="9.5" r="1.2" fill="currentColor" />
+            <circle cx="12" cy="4.5" r="1.2" fill="currentColor" />
+            <circle cx="18.5" cy="7.5" r="1.2" fill="currentColor" />
+          </svg>
+        </button>
 
-      <button
-        v-if="activeTab !== 'others'"
-        class="ghost-icon provider-log-btn"
-        :data-tooltip="t('components.main.providerLogs.buttonTooltip')"
-        type="button"
-        @click="$emit('open-provider-logs')"
-      >
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path
-            d="M7.25 4.75h6.5l3 3v11a1.75 1.75 0 01-1.75 1.75h-7.75A1.75 1.75 0 015.5 18.75V6.5a1.75 1.75 0 011.75-1.75z"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.5"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          />
-          <path
-            d="M13.75 4.75V8h3.25"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.5"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          />
-          <path
-            d="M11.5 10v4"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.7"
-            stroke-linecap="round"
-          />
-          <circle cx="11.5" cy="17" r="0.9" fill="currentColor" />
-        </svg>
-      </button>
+        <button
+          class="ghost-icon"
+          :disabled="!viewModel.card.apiUrl || !viewModel.card.apiKey"
+          :data-tooltip="(!viewModel.card.apiUrl || !viewModel.card.apiKey)
+            ? t('components.main.modelList.buttonDisabledTooltip')
+            : t('components.main.modelList.buttonTooltip')"
+          type="button"
+          @click="$emit('open-model-list')"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              d="M8 6h13M8 12h13M8 18h13"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+            <path
+              d="M3.5 6.5h1v-1h-1v1zm0 6h1v-1h-1v1zm0 6h1v-1h-1v1z"
+              fill="currentColor"
+            />
+          </svg>
+        </button>
 
-      <button
-        class="ghost-icon"
-        :data-tooltip="t('components.main.controls.duplicate')"
-        type="button"
-        @click="$emit('duplicate')"
-      >
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path
-            d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.5"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          />
-        </svg>
-      </button>
+        <button
+          v-if="activeTab !== 'others'"
+          class="ghost-icon provider-log-btn"
+          :data-tooltip="t('components.main.providerLogs.buttonTooltip')"
+          type="button"
+          @click="$emit('open-provider-logs')"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              d="M7.25 4.75h6.5l3 3v11a1.75 1.75 0 01-1.75 1.75h-7.75A1.75 1.75 0 015.5 18.75V6.5a1.75 1.75 0 011.75-1.75z"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+            <path
+              d="M13.75 4.75V8h3.25"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+            <path
+              d="M11.5 10v4"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.7"
+              stroke-linecap="round"
+            />
+            <circle cx="11.5" cy="17" r="0.9" fill="currentColor" />
+          </svg>
+        </button>
 
-      <button
-        class="ghost-icon"
-        :data-tooltip="t('components.main.form.actions.delete')"
-        type="button"
-        @click="$emit('remove')"
-      >
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path
-            d="M9 3h6m-7 4h8m-6 0v11m4-11v11M5 7h14l-.867 12.138A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.862L5 7z"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.5"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          />
-        </svg>
-      </button>
+        <button
+          class="ghost-icon"
+          :data-tooltip="t('components.main.controls.duplicate')"
+          type="button"
+          @click="$emit('duplicate')"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+        </button>
+
+        <button
+          class="ghost-icon ghost-icon-danger ghost-icon-alert"
+          :data-tooltip="t('components.main.form.actions.delete')"
+          type="button"
+          @click="$emit('remove')"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              d="M9 3h6m-7 4h8m-6 0v11m4-11v11M5 7h14l-.867 12.138A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.862L5 7z"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+        </button>
+      </div>
     </div>
   </article>
 </template>
@@ -642,6 +655,10 @@ const hostedSelectionActive = computed(() => isHostedRouteActive({
   apiKey: props.viewModel.card.apiKey,
   isBlacklisted: props.viewModel.blacklistStatus?.isBlacklisted === true,
 }))
+
+const isCurrentlyActive = computed(() => (
+  hostedSelectionActive.value || (!props.activeProxyState && props.viewModel.isDirectApplied)
+))
 
 const showHostedStateBadges = computed(() => props.viewModel.isLastUsed || props.viewModel.isDefaultHostedProvider)
 

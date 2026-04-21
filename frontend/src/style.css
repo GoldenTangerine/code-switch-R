@@ -15,6 +15,24 @@
   --mac-text-secondary: #6e6e73;
   --mac-accent: #0a84ff;
   --app-background: linear-gradient(180deg, #f6f7fb 0%, #eef1f7 50%, #e7ebf5 100%);
+  --main-home-bg: linear-gradient(180deg, #f4f7ff 0%, #edf2ff 44%, #f7f9fc 100%);
+  --main-home-glow: radial-gradient(circle at top center, rgba(99, 102, 241, 0.14) 0%, rgba(99, 102, 241, 0) 60%);
+  --main-home-glow-secondary: radial-gradient(circle at 18% 12%, rgba(56, 189, 248, 0.08) 0%, rgba(56, 189, 248, 0) 42%);
+  --main-home-shell-bg: rgba(255, 255, 255, 0.52);
+  --main-home-shell-border: rgba(148, 163, 184, 0.18);
+  --main-home-shell-shadow: 0 22px 48px rgba(15, 23, 42, 0.08);
+  --main-home-tab-bg: rgba(255, 255, 255, 0.46);
+  --main-home-tab-border: rgba(148, 163, 184, 0.16);
+  --main-home-tab-text: #475569;
+  --main-home-tab-text-active: #0f172a;
+  --main-home-tab-active-bg: linear-gradient(180deg, rgba(99, 102, 241, 0.12) 0%, rgba(99, 102, 241, 0.04) 100%);
+  --main-home-tab-active-border: rgba(99, 102, 241, 0.22);
+  --main-home-action-bg: rgba(255, 255, 255, 0.5);
+  --main-home-action-border: rgba(148, 163, 184, 0.18);
+  --main-home-action-text: rgba(51, 65, 85, 0.78);
+  --main-home-action-hover-bg: rgba(79, 70, 229, 0.1);
+  --main-home-action-hover-border: rgba(99, 102, 241, 0.22);
+  --main-home-action-hover-text: #4338ca;
   --contrib-surface: #f6f8fa;
   --contrib-text: #0f1116;
   --contrib-muted: rgba(15, 23, 42, 0.6);
@@ -63,6 +81,24 @@ html.dark {
   --mac-text-secondary: #b7bac7;
   --mac-accent: #0a84ff;
   --app-background: linear-gradient(180deg, #0f1116 0%, #11131a 45%, #0d0f15 100%);
+  --main-home-bg: linear-gradient(180deg, #09090b 0%, #0b1020 44%, #09090b 100%);
+  --main-home-glow: radial-gradient(circle at top center, rgba(99, 102, 241, 0.2) 0%, rgba(99, 102, 241, 0) 64%);
+  --main-home-glow-secondary: radial-gradient(circle at 18% 12%, rgba(56, 189, 248, 0.1) 0%, rgba(56, 189, 248, 0) 40%);
+  --main-home-shell-bg: rgba(10, 12, 18, 0.48);
+  --main-home-shell-border: rgba(129, 140, 248, 0.16);
+  --main-home-shell-shadow: 0 26px 56px rgba(2, 6, 23, 0.42);
+  --main-home-tab-bg: rgba(15, 23, 42, 0.48);
+  --main-home-tab-border: rgba(71, 85, 105, 0.6);
+  --main-home-tab-text: #94a3b8;
+  --main-home-tab-text-active: #f8fafc;
+  --main-home-tab-active-bg: linear-gradient(180deg, rgba(99, 102, 241, 0.22) 0%, rgba(79, 70, 229, 0.08) 100%);
+  --main-home-tab-active-border: rgba(129, 140, 248, 0.28);
+  --main-home-action-bg: rgba(15, 23, 42, 0.48);
+  --main-home-action-border: rgba(71, 85, 105, 0.6);
+  --main-home-action-text: rgba(148, 163, 184, 0.88);
+  --main-home-action-hover-bg: rgba(79, 70, 229, 0.18);
+  --main-home-action-hover-border: rgba(129, 140, 248, 0.28);
+  --main-home-action-hover-text: #e0e7ff;
   --contrib-surface: #0d1117;
   --contrib-text: #ffffff;
   --contrib-muted: rgba(255, 255, 255, 0.7);
@@ -407,12 +443,14 @@ html.dark .mac-sidebar-item:hover {
 .contrib-page {
   flex: 1;
   width: 100%;
-  max-width: 1280px;
+  max-width: 1360px;
   margin: 0 auto;
-  padding: 40px 48px;
+  padding: 36px 40px 56px;
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 20px;
+  position: relative;
+  z-index: 1;
 }
 
 .contrib-hero {
@@ -945,7 +983,7 @@ html.dark .mac-sidebar-item:hover {
 .automation-section {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 20px;
 }
 
 .section-header {
@@ -953,10 +991,18 @@ html.dark .mac-sidebar-item:hover {
   justify-content: space-between;
   align-items: center;
   gap: 12px;
-  padding-inline: 0;
+  padding: 12px 14px;
   flex-wrap: wrap;
   row-gap: 16px;
   position: relative;
+  border-radius: 26px;
+  border: 1px solid var(--main-home-shell-border);
+  background: var(--main-home-shell-bg);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    var(--main-home-shell-shadow);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
 }
 
 /* 移除左侧占位符，使 tab-group 左对齐 */
@@ -966,13 +1012,14 @@ html.dark .mac-sidebar-item:hover {
 
 .tab-group {
   display: inline-flex;
-  gap: 10px;
+  gap: 6px;
   align-items: center;
   flex-wrap: nowrap;
-  padding: 0;
-  border-radius: 999px;
-  border: none;
-  background: transparent;
+  padding: 4px;
+  border-radius: 18px;
+  border: 1px solid var(--main-home-tab-border);
+  background: var(--main-home-tab-bg);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
   width: auto;
   max-width: 100%;
   justify-content: flex-start;
@@ -989,7 +1036,7 @@ html.dark .mac-sidebar-item:hover {
 .section-controls {
   display: inline-flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   flex: 1;
   flex-wrap: wrap;
   justify-content: flex-end;
@@ -1022,9 +1069,26 @@ html.dark .mac-sidebar-item:hover {
   flex-direction: column;
   min-height: 100vh;
   width: 100%;
-  background: var(--app-background);
+  background: var(--main-home-bg);
   padding-bottom: 40px;
   position: relative;
+  overflow: hidden;
+}
+
+.main-shell::before,
+.main-shell::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.main-shell::before {
+  background: var(--main-home-glow);
+}
+
+.main-shell::after {
+  background: var(--main-home-glow-secondary);
 }
 
 .global-actions {
@@ -1831,12 +1895,14 @@ html.dark .stream-tag.off {
   position: relative;
   border: none;
   background: transparent;
-  color: var(--mac-text-secondary);
-  border-radius: 999px;
-  padding: 10px 22px;
+  color: var(--main-home-tab-text);
+  border-radius: 14px;
+  padding: 10px 18px;
   font-weight: 600;
   cursor: pointer;
-  transition: color 0.2s ease;
+  transition:
+    color 0.2s ease,
+    transform 0.2s ease;
   white-space: nowrap;
   flex: 0 0 auto;
   display: inline-flex;
@@ -1859,14 +1925,50 @@ html.dark .stream-tag.off {
 }
 
 .tab-pill.active {
-  color: var(--mac-text);
+  color: var(--main-home-tab-text-active);
 }
 
 .tab-pill.active::before {
-  background: rgba(10, 132, 255, 0.08); /* fallback for old WebKit */
-  background: color-mix(in srgb, var(--mac-accent) 6%, var(--mac-surface-strong));
-  box-shadow: inset 0 0 0 1px rgba(10, 132, 255, 0.25); /* fallback for old WebKit */
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--mac-accent) 25%, transparent);
+  background: var(--main-home-tab-active-bg);
+  box-shadow:
+    inset 0 0 0 1px var(--main-home-tab-active-border),
+    0 10px 22px rgba(79, 70, 229, 0.08);
+}
+
+.tab-pill:hover {
+  transform: translateY(-1px);
+}
+
+.section-controls .ghost-icon {
+  background: var(--main-home-action-bg);
+  border: 1px solid var(--main-home-action-border);
+  color: var(--main-home-action-text);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.section-controls .ghost-icon:hover,
+.section-controls .ghost-icon:focus-visible {
+  background: var(--main-home-action-hover-bg);
+  border-color: var(--main-home-action-hover-border);
+  color: var(--main-home-action-hover-text);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 10px 22px rgba(79, 70, 229, 0.12);
+}
+
+.section-controls .mac-switch.sm span {
+  background: var(--main-home-action-bg);
+  border: 1px solid var(--main-home-action-border);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 10px 18px rgba(15, 23, 42, 0.08);
+}
+
+.section-controls .mac-switch.sm input:checked + span {
+  background: linear-gradient(135deg, #6366f1 0%, #818cf8 100%);
+  border-color: rgba(129, 140, 248, 0.22);
 }
 
 
