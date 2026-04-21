@@ -1,3 +1,16 @@
+# Code Switch v2.8.11
+
+## 修复
+- **首页供应商类型切换这回终于不再被自己容器啃半截了**：收口 `tab-group / section-controls` 的桌面端布局约束后，`Claude Code / Codex / Gemini / 其他` 这排 tabs 现在会按真实内容宽度完整展示，不会再出现最后几个标签被裁成半拉的别扭场面。
+
+## 技术改进
+- **首页 tabs 布局正式改成“内容宽度优先，移动端单独回退”**：桌面端改用 `inline-flex + max-content + margin-left: auto` 收口 tab 组与右侧 controls 的空间分配，小屏场景再回退为 `100% + overflow-x:auto`，避免继续拿一套互相打架的宽度规则硬糊所有视口。
+
+## 发布
+- **本次发版版本号统一推进到 `v2.8.11`**：同步更新应用常量、构建配置、Darwin `Info.plist`、Windows 元数据、Linux 包版本与更新日志，并准备推送 `v2.8.11` tag 触发 GitHub 自动打包，继续保证仓库版本、Git tag 和最终产物别再各唱各的调。
+
+---
+
 # Code Switch v2.8.10
 
 ## 修复

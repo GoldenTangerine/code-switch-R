@@ -1030,7 +1030,7 @@ html.dark .mac-sidebar-item:hover {
 
 .tab-group {
   position: relative;
-  display: flex;
+  display: inline-flex;
   gap: 6px;
   align-items: center;
   flex-wrap: nowrap;
@@ -1040,12 +1040,11 @@ html.dark .mac-sidebar-item:hover {
   background: var(--main-home-tab-bg);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
   box-sizing: border-box;
-  width: fit-content;
+  width: max-content;
   min-width: max-content;
-  max-width: 100%;
+  max-width: none;
   justify-content: flex-start;
-  overflow-x: auto;
-  overflow-y: hidden;
+  overflow: visible;
   flex: 0 0 auto;
   white-space: nowrap;
   margin: 0;
@@ -1059,10 +1058,11 @@ html.dark .mac-sidebar-item:hover {
   display: inline-flex;
   align-items: center;
   gap: 10px;
-  flex: 1;
-  flex-wrap: wrap;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
   justify-content: flex-end;
-  min-width: 0;
+  min-width: max-content;
+  margin-left: auto;
 }
 
 .section-header.section-header-solo {
@@ -1082,7 +1082,18 @@ html.dark .mac-sidebar-item:hover {
 
   .section-controls {
     width: 100%;
+    min-width: 0;
+    margin-left: 0;
+    flex-wrap: wrap;
     justify-content: center;
+  }
+
+  .tab-group {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
   }
 }
 
