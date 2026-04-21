@@ -172,7 +172,6 @@ import { computed, reactive, ref, watch, type ComponentPublicInstance } from 'vu
 import { useI18n } from 'vue-i18n'
 import { Browser } from '@wailsio/runtime'
 import { useRouter } from 'vue-router'
-import lobeIcons, { preloadLobeIcons } from '../../icons/lobeIconMap'
 import BaseButton from '../common/BaseButton.vue'
 import BaseModal from '../common/BaseModal.vue'
 import CustomCliConfigEditor from '../common/CustomCliConfigEditor.vue'
@@ -190,6 +189,10 @@ import MainToolbar from './components/MainToolbar.vue'
 import MainUsageHeatmap from './components/MainUsageHeatmap.vue'
 import ProviderCardGrid from './components/ProviderCardGrid.vue'
 import { showToast } from '../../utils/toast'
+import {
+  getProviderDisplayIconSvg,
+  preloadProviderDisplayIcons,
+} from '../../utils/providerIconAssets'
 import type { CustomCliTool } from '../../services/customCliService'
 import { MAIN_TABS } from './constants'
 import { useAvailabilityState } from './composables/useAvailabilityState'
@@ -507,8 +510,7 @@ const formatOfficialSite = (site: string) => {
 }
 
 const iconSvg = (name: string) => {
-  if (!name) return ''
-  return lobeIcons[name.toLowerCase()] ?? ''
+  return getProviderDisplayIconSvg(name)
 }
 
 const vendorInitials = (name: string) => {
@@ -572,7 +574,7 @@ const activeCardViewModels = computed<ProviderCardViewModel[]>(() =>
 watch(
   () => activeCards.value.map((card) => card.icon),
   (icons) => {
-    void preloadLobeIcons(icons)
+    void preloadProviderDisplayIcons(icons)
   },
   { immediate: true },
 )

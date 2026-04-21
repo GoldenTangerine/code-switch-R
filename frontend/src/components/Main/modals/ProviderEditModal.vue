@@ -448,7 +448,7 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Listbox, ListboxButton, ListboxOption, ListboxOptions } from '@headlessui/vue'
-import lobeIcons, { preloadLobeIcons } from '../../../icons/lobeIconMap'
+import lobeIcons from '../../../icons/lobeIconMap'
 import BaseButton from '../../common/BaseButton.vue'
 import BaseInput from '../../common/BaseInput.vue'
 import BaseModal from '../../common/BaseModal.vue'
@@ -492,6 +492,11 @@ import {
 import type { AutomationCard } from '../../../data/cards'
 import type { CLIPlatform } from '../../../services/cliConfig'
 import { isBuiltinModelPlatform } from '../../../utils/builtinModels'
+import {
+  buildProviderIconOptionKeys,
+  getProviderDisplayIconSvg,
+  preloadProviderDisplayIcons,
+} from '../../../utils/providerIconAssets'
 import { isDirectApplyBlockedForProvider } from '../utils/providerDirectApply'
 
 type CLIConfigEditorExposed = InstanceType<typeof CLIConfigEditor> & {
@@ -518,9 +523,9 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 
-const iconOptions = Object.keys(lobeIcons).sort((left, right) => left.localeCompare(right))
+const iconOptions = buildProviderIconOptionKeys(Object.keys(lobeIcons))
 const ICON_PRELOAD_BATCH_SIZE = 80
-const defaultIconKey = iconOptions[0] ?? 'aicoding'
+const defaultIconKey = iconOptions.find((iconKey) => iconKey === 'aicoding') ?? iconOptions[0] ?? 'aicoding'
 
 const form = reactive<VendorForm>(createDefaultVendorForm(props.tabId, defaultIconKey))
 const cliConfigEditorRef = ref<CLIConfigEditorExposed | null>(null)
@@ -902,7 +907,7 @@ watch(() => props.tabId, () => {
 
 watch(iconPreviewOptions, (icons) => {
   if (!props.open) return
-  void preloadLobeIcons(icons)
+  void preloadProviderDisplayIcons(icons)
 }, { immediate: true })
 
 watch(requestBodyOverridesText, () => {
@@ -966,12 +971,11 @@ const parseRequestBodyOverrides = (): Record<string, any> | null => {
 }
 
 const iconSvg = (name: string) => {
-  if (!name) return ''
-  return lobeIcons[name.toLowerCase()] ?? ''
+  return getProviderDisplayIconSvg(name)
 }
 
 const warmupIcon = (name: string) => {
-  void preloadLobeIcons([name])
+  void preloadProviderDisplayIcons([name])
 }
 
 const getLevelDescription = (level: number) => {

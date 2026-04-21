@@ -21,7 +21,6 @@ import {
 import { extractErrorMessage } from '../../utils/error'
 import { showToast } from '../../utils/toast'
 import { buildVariableHeightVirtualList } from '../../utils/virtualList'
-import lobeIcons, { preloadLobeIcons } from '../../icons/lobeIconMap'
 import {
   buildModelProviderTabs,
   collectModelProviderIconKeys,
@@ -30,6 +29,12 @@ import {
   type ModelProviderFilterKey,
   type ModelProviderKey,
 } from '../../utils/modelProviders'
+import {
+  collectProviderDisplayIconKeys,
+  getProviderDisplayIconSvg,
+  preloadProviderDisplayIcons,
+  resolveProviderDisplayIconKey,
+} from '../../utils/providerIconAssets'
 import {
   isManualModelPricingRow,
   matchesModelPricingSourceFilter,
@@ -255,16 +260,16 @@ function resolvePricingSourceTooltip(row: ModelPricingRow) {
 }
 
 function warmupProviderIcons(targetRows: ModelPricingRow[]) {
-  const iconKeys = collectModelProviderIconKeys(targetRows.map((row) => ({ model: row.model })))
+  const iconKeys = collectProviderDisplayIconKeys(
+    collectModelProviderIconKeys(targetRows.map((row) => ({ model: row.model }))),
+  )
   if (iconKeys.length > 0) {
-    void preloadLobeIcons(iconKeys)
+    void preloadProviderDisplayIcons(iconKeys)
   }
 }
 
 function providerIconSvg(iconKey: string) {
-  const normalized = String(iconKey ?? '').trim().toLowerCase()
-  if (!normalized) return ''
-  return lobeIcons[normalized] ?? ''
+  return getProviderDisplayIconSvg(resolveProviderDisplayIconKey(iconKey))
 }
 
 function buildDisplayModelPricingRow(row: ModelPricingRow): DisplayModelPricingRow {

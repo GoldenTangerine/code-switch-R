@@ -1,3 +1,19 @@
+# Code Switch v2.8.8
+
+## 修复
+- **provider 图标这回终于不再在不同页面里一会儿彩色、一会儿黑白演分裂了**：把供应商图标展示统一收口到同一套 provider 彩色图标映射后，`设置 -> 模型价格`、首页供应商卡片、以及 `编辑供应商` 弹窗里的图标预览现在都会优先吃对应的彩色品牌资源；像 `Azure`、`Anthropic`、`Bedrock`、`Qwen`、`Fireworks`、`Volcengine` 这些图标终于不再到了本项目就像被人抽了色一样一片灰。
+- **编辑供应商弹窗里的图标下拉终于不再是“资源很多，但找 provider 图标像翻垃圾桶”了**：图标选择下拉现在会把常用 provider 图标优先排到前面，并统一使用和首页 / 模型价格同一套展示逻辑；用户选 `claude`、`azure`、`openrouter`、`volcengine` 这类图标时，看到的预览和最终保存后的实际展示终于对得上，不再出现“下拉一个样、卡片另一个样”的串味体验。
+- **首页供应商卡片和设置页模型价格的图标预加载也顺手收稳了**：provider 相关图标现在会按展示用的彩色资源 key 预加载，不再只预热单色默认 SVG，避免进入页面后图标先黑白糊一脸、再慢半拍切彩的别扭观感。
+
+## 技术改进
+- **provider 图标展示能力正式抽成通用工具层**：新增 `providerIconAssets` 工具，把“存储的 icon key”“展示时优先使用的彩色资源 key”“预加载 key 收集”和“provider 图标优先排序”几件事统一收口，少让 `Main/Index.vue`、`ProviderEditModal.vue`、`ModelPricingModal.vue` 各自偷写一套土法逻辑，后面再扩 provider 图标也不用继续满地抄胶水代码。
+- **前端回归测试继续朝最容易串味的图标映射补刀**：补上 provider 彩色资源映射、去重收集和 provider 图标优先排序的专项测试，并确认 `providerIconAssets / modelProviders / modelPricingFilters` 相关单测与 `vue-tsc --noEmit` 继续通过，省得后面谁一手把彩色图标逻辑改回黑白遗照风，测试还在旁边装睡。
+
+## 发布
+- **本次发版版本号统一推进到 `v2.8.8`**：同步补齐更新日志，并准备推送 `v2.8.8` tag 触发 GitHub 自动打包，继续保证 Git tag、发布说明和最终产物版本别再各唱各的调。
+
+---
+
 # Code Switch v2.8.7
 
 ## 修复
