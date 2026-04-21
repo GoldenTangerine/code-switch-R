@@ -9,8 +9,9 @@
     0 24px 54px rgba(15, 23, 42, 0.14),
     0 0 0 1px rgba(99, 102, 241, 0.08);
   --provider-card-hover-shadow:
-    0 22px 52px rgba(15, 23, 42, 0.12),
-    0 0 0 1px rgba(99, 102, 241, 0.08);
+    0 20px 46px rgba(15, 23, 42, 0.1),
+    0 0 0 1px rgba(99, 102, 241, 0.12),
+    0 0 20px rgba(99, 102, 241, 0.1);
   --provider-card-glow: rgba(99, 102, 241, 0.18);
   --provider-title-color: #0f172a;
   --provider-text-color: rgba(15, 23, 42, 0.74);
@@ -49,6 +50,12 @@
   cursor: pointer;
 }
 
+.automation-card:hover,
+.automation-card:focus-within {
+  overflow: visible;
+  z-index: 6;
+}
+
 .automation-card::before,
 .automation-card::after {
   content: '';
@@ -83,7 +90,6 @@
   box-shadow:
     inset 0 1px 0 var(--provider-card-edge),
     var(--provider-card-hover-shadow);
-  transform: translateY(-3px);
 }
 
 .automation-card:hover::before,
@@ -92,8 +98,8 @@
 }
 
 .automation-card:hover::after {
-  opacity: 0.56;
-  transform: scale(1);
+  opacity: 0.5;
+  transform: scale(0.92);
 }
 
 .automation-card.is-enabled {
@@ -217,8 +223,9 @@
     0 0 0 1px rgba(99, 102, 241, 0.16),
     0 0 22px rgba(99, 102, 241, 0.12);
   --provider-card-hover-shadow:
-    0 22px 48px rgba(2, 6, 23, 0.6),
-    0 0 0 1px rgba(99, 102, 241, 0.12);
+    0 20px 44px rgba(2, 6, 23, 0.56),
+    0 0 0 1px rgba(129, 140, 248, 0.18),
+    0 0 26px rgba(99, 102, 241, 0.12);
   --provider-card-glow: rgba(129, 140, 248, 0.12);
   --provider-title-color: #f8fafc;
   --provider-text-color: rgba(226, 232, 240, 0.78);
@@ -246,8 +253,7 @@
 .automation-card.theme-dark:hover {
   box-shadow:
     inset 0 1px 0 var(--provider-card-edge),
-    var(--provider-card-hover-shadow),
-    0 0 22px rgba(99, 102, 241, 0.08);
+    var(--provider-card-hover-shadow);
 }
 
 .automation-card.theme-dark.drag-over {
@@ -1561,6 +1567,7 @@
   color: var(--provider-muted-color);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16);
   cursor: help;
+  z-index: 2;
 }
 
 .api-format-badge__icon {
@@ -1587,7 +1594,7 @@
   white-space: nowrap;
   opacity: 0;
   pointer-events: none;
-  z-index: 18;
+  z-index: 30;
   transition:
     opacity 160ms ease,
     transform 160ms ease;
