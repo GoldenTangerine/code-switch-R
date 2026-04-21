@@ -251,6 +251,8 @@ export function useProviderStats(options: UseProviderStatsOptions) {
     const tpsSampleCountRaw = Number(stat.tps_sample_count ?? 0)
     const ttftSampleCount = Number.isFinite(ttftSampleCountRaw) ? Math.max(0, Math.floor(ttftSampleCountRaw)) : 0
     const tpsSampleCount = Number.isFinite(tpsSampleCountRaw) ? Math.max(0, Math.floor(tpsSampleCountRaw)) : 0
+    const failedRequestsRaw = Number(stat.failed_requests ?? 0)
+    const failedRequests = Number.isFinite(failedRequestsRaw) ? Math.max(0, Math.floor(failedRequestsRaw)) : 0
     const costTotalRaw = Number(stat.cost_total ?? 0)
     const normalizedCost = Number.isFinite(costTotalRaw) ? Math.max(costTotalRaw, 0) : 0
     const costDisplay = buildProviderCostDisplay(normalizedCost, getLocale() || 'en')
@@ -273,6 +275,8 @@ export function useProviderStats(options: UseProviderStatsOptions) {
       performanceHint,
       successRateLabel,
       successRateClass,
+      failedRequests,
+      hasErrorLogsToday: failedRequests > 0,
     }
   }
 

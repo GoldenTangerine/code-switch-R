@@ -458,7 +458,7 @@
         "clearLogs": "Clear failures",
         "clearingLogs": "Clearing...",
         "clearLogsConfirmTitle": "Confirm failure log cleanup",
-        "confirmClearLogs": "Clear only the failed request logs currently shown for {provider}? This will not remove hourly or daily aggregated stats.",
+        "confirmClearLogs": "Clear all failed request logs for {provider}? This will not remove hourly or daily aggregated stats.",
         "clearLogsSuccess": "Cleared {provider} failure logs: removed {logs} request entries",
         "clearLogsEmpty": "No failure logs to clear for {provider}",
         "clearLogsFailed": "Failed to clear failure logs: {error}",

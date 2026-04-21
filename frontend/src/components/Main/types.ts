@@ -96,6 +96,8 @@ export type ProviderStatDisplay =
       performanceHint: string
       successRateLabel: string
       successRateClass: string
+      failedRequests: number
+      hasErrorLogsToday: boolean
     }
 
 export type ProviderCostDisplayPart = {

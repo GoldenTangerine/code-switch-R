@@ -310,6 +310,27 @@ func (ls *LogService) ClearProviderFailedRequestLogsByIDs(platform string, provi
 		return result, nil
 	}
 
+	whereClause, args := buildProviderFailedRequestLogIDsWhereClause(target, normalizedIDs)
+	return ls.deleteProviderFailedRequestLogs(whereClause, args)
+}
+
+func (ls *LogService) ClearProviderFailedRequestLogs(platform string, providerID string, provider string) (DeleteRequestLogsResult, error) {
+	result := DeleteRequestLogsResult{}
+	target, err := normalizeProviderLogStorageTarget(platform, providerID, provider)
+	if err != nil {
+		return result, err
+	}
+
+	whereClause, args := buildProviderFailedRequestLogWhereClause(target)
+	return ls.deleteProviderFailedRequestLogs(whereClause, args)
+}
+
+func (ls *LogService) deleteProviderFailedRequestLogs(whereClause string, args []any) (DeleteRequestLogsResult, error) {
+	result := DeleteRequestLogsResult{}
+	if strings.TrimSpace(whereClause) == "" {
+		return result, fmt.Errorf("empty where clause")
+	}
+
 	db, err := xdb.DB("default")
 	if err != nil {
 		return result, err
@@ -339,7 +360,6 @@ func (ls *LogService) ClearProviderFailedRequestLogsByIDs(platform string, provi
 		}
 	}()
 
-	whereClause, args := buildProviderFailedRequestLogIDsWhereClause(target, normalizedIDs)
 	requestLogExec, err := tx.Exec(
 		"DELETE FROM request_log WHERE "+whereClause,
 		args...,
@@ -644,7 +664,7 @@ func buildProviderLogStorageWhereClause(target deleteProviderLogsTarget) (string
 }
 
 func buildProviderFailedRequestLogIDsWhereClause(target deleteProviderLogsTarget, ids []int64) (string, []any) {
-	baseWhereClause, baseArgs := buildProviderLogStorageWhereClause(target)
+	baseWhereClause, baseArgs := buildProviderFailedRequestLogWhereClause(target)
 	normalizedIDs := normalizeRequestLogIDs(ids)
 	placeholders := strings.TrimRight(strings.Repeat("?,", len(normalizedIDs)), ",")
 	args := make([]any, 0, len(baseArgs)+len(normalizedIDs))
@@ -652,12 +672,17 @@ func buildProviderFailedRequestLogIDsWhereClause(target deleteProviderLogsTarget
 	for _, id := range normalizedIDs {
 		args = append(args, id)
 	}
+	whereClause := strings.Join([]string{baseWhereClause, "id IN (" + placeholders + ")"}, " AND ")
+	return whereClause, args
+}
+
+func buildProviderFailedRequestLogWhereClause(target deleteProviderLogsTarget) (string, []any) {
+	baseWhereClause, baseArgs := buildProviderLogStorageWhereClause(target)
 	whereClause := strings.Join([]string{
 		baseWhereClause,
 		"COALESCE(http_code, 0) >= 400",
-		"id IN (" + placeholders + ")",
 	}, " AND ")
-	return whereClause, args
+	return whereClause, baseArgs
 }
 
 func normalizeRequestLogIDs(ids []int64) []int64 {

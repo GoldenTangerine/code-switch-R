@@ -293,18 +293,12 @@ export const clearProviderFailedRequestLogs = async (
   platform: LogPlatform | '',
   providerId: string,
   provider: string,
-  ids: number[],
 ): Promise<DeleteRequestLogsResult> => {
-  const normalized = ids
-    .map((item) => Number(item))
-    .filter((item) => Number.isFinite(item) && item > 0)
-    .map((item) => Math.floor(item))
   return Call.ByName(
-    'codeswitch/services.LogService.ClearProviderFailedRequestLogsByIDs',
+    'codeswitch/services.LogService.ClearProviderFailedRequestLogs',
     platform ?? '',
     String(providerId ?? '').trim(),
     String(provider ?? '').trim(),
-    normalized,
   )
 }
 

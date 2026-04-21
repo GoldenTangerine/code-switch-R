@@ -147,8 +147,12 @@
                 <article
                   v-for="item in quotaCards"
                   :key="item.key"
-                  class="provider-data-quota-card"
-                  :class="{ 'is-over': item.isOver, 'is-inactive': item.isInactive }"
+                  :class="[
+                    'provider-data-quota-card',
+                    `provider-data-quota-card--${item.key}`,
+                    item.progressClass,
+                    { 'is-over': item.isOver, 'is-inactive': item.isInactive },
+                  ]"
                 >
                   <header class="provider-data-quota-card__header">
                     <span class="provider-data-quota-card__badge" :class="`provider-data-quota-card__badge--${item.key}`">
@@ -1415,18 +1419,114 @@ onBeforeUnmount(() => {
   display: block;
   height: 100%;
   border-radius: inherit;
+  transition:
+    width 220ms ease,
+    background 220ms ease,
+    box-shadow 220ms ease;
 }
 
-.quota-progress--ok {
-  background: #22c55e;
+.provider-data-quota-card {
+  --quota-fill-fresh-from: #818cf8;
+  --quota-fill-fresh-to: #93c5fd;
+  --quota-fill-steady-from: #6366f1;
+  --quota-fill-steady-to: #60a5fa;
+  --quota-fill-glow: rgba(99, 102, 241, 0.34);
 }
 
-.quota-progress--warn {
-  background: #f59e0b;
+.provider-data-quota-card--five_hour {
+  --quota-fill-fresh-from: #818cf8;
+  --quota-fill-fresh-to: #93c5fd;
+  --quota-fill-steady-from: #6366f1;
+  --quota-fill-steady-to: #60a5fa;
+  --quota-fill-glow: rgba(99, 102, 241, 0.34);
 }
 
-.quota-progress--over {
-  background: #ef4444;
+.provider-data-quota-card--daily {
+  --quota-fill-fresh-from: #60a5fa;
+  --quota-fill-fresh-to: #7dd3fc;
+  --quota-fill-steady-from: #3b82f6;
+  --quota-fill-steady-to: #38bdf8;
+  --quota-fill-glow: rgba(56, 189, 248, 0.32);
+}
+
+.provider-data-quota-card--weekly {
+  --quota-fill-fresh-from: #6ee7b7;
+  --quota-fill-fresh-to: #86efac;
+  --quota-fill-steady-from: #10b981;
+  --quota-fill-steady-to: #4ade80;
+  --quota-fill-glow: rgba(16, 185, 129, 0.3);
+}
+
+.provider-data-quota-card--monthly {
+  --quota-fill-fresh-from: #fbbf24;
+  --quota-fill-fresh-to: #fde68a;
+  --quota-fill-steady-from: #f59e0b;
+  --quota-fill-steady-to: #fbbf24;
+  --quota-fill-glow: rgba(245, 158, 11, 0.3);
+}
+
+.provider-data-quota-card--total {
+  --quota-fill-fresh-from: #f9a8d4;
+  --quota-fill-fresh-to: #fbcfe8;
+  --quota-fill-steady-from: #ec4899;
+  --quota-fill-steady-to: #f472b6;
+  --quota-fill-glow: rgba(236, 72, 153, 0.3);
+}
+
+.provider-data-quota-card.quota-progress--fresh .provider-data-quota-card__progress-fill {
+  background: linear-gradient(90deg, var(--quota-fill-fresh-from) 0%, var(--quota-fill-fresh-to) 100%);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--quota-fill-glow) 58%, transparent);
+}
+
+.provider-data-quota-card.quota-progress--steady .provider-data-quota-card__progress-fill {
+  background: linear-gradient(90deg, var(--quota-fill-steady-from) 0%, var(--quota-fill-steady-to) 100%);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--quota-fill-glow) 62%, transparent);
+}
+
+.provider-data-quota-card.quota-progress--warm .provider-data-quota-card__progress-fill {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--quota-fill-steady-from) 28%, #f59e0b 72%) 0%,
+    #f59e0b 52%,
+    #fbbf24 100%
+  );
+  box-shadow: 0 0 16px rgba(245, 158, 11, 0.28);
+}
+
+.provider-data-quota-card.quota-progress--hot .provider-data-quota-card__progress-fill {
+  background: linear-gradient(90deg, #f97316 0%, #fb7185 100%);
+  box-shadow: 0 0 18px rgba(249, 115, 22, 0.28);
+}
+
+.provider-data-quota-card.quota-progress--critical .provider-data-quota-card__progress-fill {
+  background: linear-gradient(90deg, #ef4444 0%, #fb7185 100%);
+  box-shadow: 0 0 20px rgba(239, 68, 68, 0.32);
+}
+
+.provider-data-quota-card.quota-progress--over .provider-data-quota-card__progress-fill {
+  background: linear-gradient(90deg, #dc2626 0%, #f43f5e 100%);
+  box-shadow: 0 0 22px rgba(244, 63, 94, 0.34);
+}
+
+.provider-data-quota-card.quota-progress--fresh .provider-data-quota-card__percent {
+  color: color-mix(in srgb, var(--quota-fill-fresh-to) 58%, currentColor 42%);
+}
+
+.provider-data-quota-card.quota-progress--steady .provider-data-quota-card__percent {
+  color: color-mix(in srgb, var(--quota-fill-steady-to) 62%, currentColor 38%);
+}
+
+.provider-data-quota-card.quota-progress--warm .provider-data-quota-card__percent {
+  color: #d97706;
+}
+
+.provider-data-quota-card.quota-progress--hot .provider-data-quota-card__percent {
+  color: #ea580c;
+}
+
+.provider-data-quota-card.quota-progress--critical .provider-data-quota-card__percent,
+.provider-data-quota-card.quota-progress--over .provider-data-quota-card__percent {
+  color: #dc2626;
 }
 
 .provider-data-modal--dark {

@@ -32,6 +32,21 @@ import { disableCustomCliProxy, enableCustomCliProxy, type CustomCliTool } from 
 import { PROVIDER_TAB_IDS } from '../constants'
 import type { ProviderTab, ResolvedTheme, TranslateFn } from '../types'
 
+type BrowserWindowWithWailsBridge = Window & {
+  chrome?: {
+    webview?: {
+      postMessage?: (...args: any[]) => void
+    }
+  }
+  webkit?: {
+    messageHandlers?: {
+      external?: {
+        postMessage?: (...args: any[]) => void
+      }
+    }
+  }
+}
+
 type UseMainPageShellOptions = {
   t: TranslateFn
   activeTab: ComputedRef<ProviderTab>
@@ -61,6 +76,23 @@ type UseMainPageShellOptions = {
   reloadHeatmap: () => Promise<void>
   navigateToSettings: () => void
 }
+
+const hasDesktopRuntimeBridge = () => {
+  if (typeof window === 'undefined') {
+    return false
+  }
+  const browserWindow = window as BrowserWindowWithWailsBridge
+  return Boolean(
+    browserWindow.chrome?.webview?.postMessage ||
+    browserWindow.webkit?.messageHandlers?.external?.postMessage,
+  )
+}
+
+const shouldUseBrowserPreviewProxyMock = () => (
+  import.meta.env.DEV
+  && typeof window !== 'undefined'
+  && !hasDesktopRuntimeBridge()
+)
 
 export function useMainPageShell(options: UseMainPageShellOptions) {
   const {
@@ -222,6 +254,15 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
   }
 
   const refreshProxyState = async (tab: ProviderTab) => {
+    if (shouldUseBrowserPreviewProxyMock()) {
+      if (tab === 'others') {
+        proxyStates[tab] = selectedToolId.value
+          ? Boolean(customCliProxyStates[selectedToolId.value])
+          : false
+      }
+      return
+    }
+
     try {
       if (tab === 'others') {
         if (selectedToolId.value) {
@@ -250,6 +291,18 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
     const nextState = !proxyStates[tab]
 
     try {
+      if (shouldUseBrowserPreviewProxyMock()) {
+        if (tab === 'others') {
+          if (!selectedToolId.value) {
+            showToast(t('components.main.customCli.selectToolFirst'), 'error')
+            return
+          }
+          customCliProxyStates[selectedToolId.value] = nextState
+        }
+        proxyStates[tab] = nextState
+        return
+      }
+
       if (tab === 'others') {
         if (!selectedToolId.value) {
           showToast(t('components.main.customCli.selectToolFirst'), 'error')

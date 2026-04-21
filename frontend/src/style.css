@@ -33,6 +33,15 @@
   --main-home-action-hover-bg: rgba(79, 70, 229, 0.1);
   --main-home-action-hover-border: rgba(99, 102, 241, 0.22);
   --main-home-action-hover-text: #4338ca;
+  --main-home-relay-track-off: #d6dbe6;
+  --main-home-relay-track-on: #5e5ce6;
+  --main-home-relay-track-shadow-off: inset 0 2px 4px rgba(15, 23, 42, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  --main-home-relay-track-shadow-on: inset 0 2px 4px rgba(15, 23, 42, 0.2), 0 0 24px rgba(94, 92, 230, 0.28);
+  --main-home-relay-thumb-bg: linear-gradient(180deg, #ffffff 0%, #eef2ff 100%);
+  --main-home-relay-thumb-shadow: 0 4px 12px rgba(15, 23, 42, 0.24);
+  --main-home-relay-thumb-icon: #5e5ce6;
+  --main-home-relay-thumb-dot: #cbd5e1;
+  --main-home-relay-focus-ring: rgba(94, 92, 230, 0.26);
   --contrib-surface: #f6f8fa;
   --contrib-text: #0f1116;
   --contrib-muted: rgba(15, 23, 42, 0.6);
@@ -99,6 +108,15 @@ html.dark {
   --main-home-action-hover-bg: rgba(79, 70, 229, 0.18);
   --main-home-action-hover-border: rgba(129, 140, 248, 0.28);
   --main-home-action-hover-text: #e0e7ff;
+  --main-home-relay-track-off: #2c2c2e;
+  --main-home-relay-track-on: #5e5ce6;
+  --main-home-relay-track-shadow-off: inset 0 2px 4px rgba(0, 0, 0, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  --main-home-relay-track-shadow-on: inset 0 2px 4px rgba(0, 0, 0, 0.2), 0 0 25px rgba(94, 92, 230, 0.5);
+  --main-home-relay-thumb-bg: linear-gradient(180deg, #ffffff 0%, #eef2ff 100%);
+  --main-home-relay-thumb-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  --main-home-relay-thumb-icon: #5e5ce6;
+  --main-home-relay-thumb-dot: #cbd5e1;
+  --main-home-relay-focus-ring: rgba(129, 140, 248, 0.34);
   --contrib-surface: #0d1117;
   --contrib-text: #ffffff;
   --contrib-muted: rgba(255, 255, 255, 0.7);
@@ -1011,7 +1029,8 @@ html.dark .mac-sidebar-item:hover {
 }
 
 .tab-group {
-  display: inline-flex;
+  position: relative;
+  display: flex;
   gap: 6px;
   align-items: center;
   flex-wrap: nowrap;
@@ -1020,11 +1039,14 @@ html.dark .mac-sidebar-item:hover {
   border: 1px solid var(--main-home-tab-border);
   background: var(--main-home-tab-bg);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
-  width: auto;
+  box-sizing: border-box;
+  width: fit-content;
+  min-width: max-content;
   max-width: 100%;
   justify-content: flex-start;
-  overflow: visible;
-  flex-shrink: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  flex: 0 0 auto;
   white-space: nowrap;
   margin: 0;
 }
@@ -1311,6 +1333,17 @@ html.dark .mac-sidebar-item:hover {
 .relay-switch:hover::after,
 .relay-switch:focus-within::after {
   opacity: 1;
+}
+
+@keyframes relay-toggle-zap-pulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.9;
+  }
+  50% {
+    transform: scale(1.08);
+    opacity: 1;
+  }
 }
 
 .logs-page {
@@ -1958,17 +1991,92 @@ html.dark .stream-tag.off {
     0 10px 22px rgba(79, 70, 229, 0.12);
 }
 
-.section-controls .mac-switch.sm span {
-  background: var(--main-home-action-bg);
-  border: 1px solid var(--main-home-action-border);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.08),
-    0 10px 18px rgba(15, 23, 42, 0.08);
+.relay-toggle-switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  width: 56px;
+  height: 30px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: var(--main-home-relay-track-off);
+  box-shadow: var(--main-home-relay-track-shadow-off);
+  cursor: pointer;
+  overflow: hidden;
+  flex: 0 0 auto;
+  line-height: 0;
+  vertical-align: middle;
+  transition:
+    background 0.5s ease,
+    box-shadow 0.5s ease,
+    transform 0.2s ease,
+    opacity 0.2s ease;
 }
 
-.section-controls .mac-switch.sm input:checked + span {
-  background: linear-gradient(135deg, #6366f1 0%, #818cf8 100%);
-  border-color: rgba(129, 140, 248, 0.22);
+.relay-toggle-switch:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.relay-toggle-switch:focus-visible {
+  outline: none;
+  box-shadow:
+    var(--main-home-relay-track-shadow-off),
+    0 0 0 3px var(--main-home-relay-focus-ring);
+}
+
+.relay-toggle-switch.is-active {
+  background: var(--main-home-relay-track-on);
+  box-shadow: var(--main-home-relay-track-shadow-on);
+}
+
+.relay-toggle-switch.is-active:focus-visible {
+  box-shadow:
+    var(--main-home-relay-track-shadow-on),
+    0 0 0 3px var(--main-home-relay-focus-ring);
+}
+
+.relay-toggle-switch:disabled,
+.relay-toggle-switch.is-busy {
+  cursor: wait;
+  opacity: 0.74;
+}
+
+.relay-toggle-switch__thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--main-home-relay-thumb-bg);
+  box-shadow: var(--main-home-relay-thumb-shadow);
+  transition: transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+  will-change: transform;
+}
+
+.relay-toggle-switch.is-active .relay-toggle-switch__thumb {
+  transform: translateX(26px);
+}
+
+.relay-toggle-switch__icon {
+  width: 12px;
+  height: 12px;
+  color: var(--main-home-relay-thumb-icon);
+  filter: drop-shadow(0 0 6px rgba(94, 92, 230, 0.35));
+  animation: relay-toggle-zap-pulse 1.4s ease-in-out infinite;
+}
+
+.relay-toggle-switch__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--main-home-relay-thumb-dot);
+  box-shadow: 0 0 0 1px rgba(148, 163, 184, 0.12);
 }
 
 
@@ -2723,7 +2831,7 @@ html.dark .secondary-btn:active:not(:disabled) {
 }
 
 /* 全局按钮样式修复 - 防止 Tailwind Preflight 导致的布局问题 */
-button:where(:not(.ghost-icon):not(.mac-switch):not(.nav-item):not(.platform-tab):not(.tab-pill):not(.collapse-btn):not(.toggle-switch):not(.action-btn):not(.primary-btn):not(.btn):not(.remove-btn):not(.icon-select-button):not(.level-select-button):not(.update-notification-btn):not(.performance-trigger):not(.card-cost-trigger)) {
+button:where(:not(.ghost-icon):not(.mac-switch):not(.nav-item):not(.platform-tab):not(.tab-pill):not(.collapse-btn):not(.toggle-switch):not(.relay-toggle-switch):not(.action-btn):not(.primary-btn):not(.btn):not(.remove-btn):not(.icon-select-button):not(.level-select-button):not(.update-notification-btn):not(.performance-trigger):not(.card-cost-trigger)) {
   display: inline-flex !important;
   flex-direction: row !important;
   align-items: center !important;

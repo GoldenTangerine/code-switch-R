@@ -24,6 +24,9 @@ export const formatQuotaUsagePercent = (item: Pick<ProviderQuotaDisplayItem, 'pr
 export const getQuotaProgressClass = (item: Pick<ProviderQuotaDisplayItem, 'progressRatio'>) => {
   const percent = getQuotaUsagePercentValue(item)
   if (percent >= 100) return 'quota-progress--over'
-  if (percent >= 80) return 'quota-progress--warn'
-  return 'quota-progress--ok'
+  if (percent >= 90) return 'quota-progress--critical'
+  if (percent >= 72) return 'quota-progress--hot'
+  if (percent >= 45) return 'quota-progress--warm'
+  if (percent >= 18) return 'quota-progress--steady'
+  return 'quota-progress--fresh'
 }

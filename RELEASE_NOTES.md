@@ -1,3 +1,21 @@
+# Code Switch v2.8.10
+
+## 修复
+- **首页供应商面板这回终于不再“这儿亮一点、那儿歪半截”各唱各的调了**：统一收口首页 tabs 外框、托管胶囊开关、供应商图标居中放大、当前在用背光、额度进度条渐变、删除按钮悬停细节与深浅主题配色，首页供应商区终于从壳子到卡片都是一套语言，不再东一榔头西一棒子。
+- **供应商日志弹窗这回终于更像正经的错误看板了**：弹窗整体重做成暗色玻璃风格，错误卡片左侧状态条贴合边框，首页供应商日志入口补上“今日有错”红点提示，并在前端 `pnpm run dev` 预览时为 Claude `0011` 注入几条模拟失败日志，调样式不用再硬等真实错误。
+- **“清除失败日志”不再只会清当前页那几条装样子了**：现在会按当前供应商一次性清空全部失败请求明细，同时继续严格避开 hourly / daily 聚合统计表，终于把“该清的全清、不该碰的别碰”这条边界说人话了。
+- **浏览器预览模式下首页托管按钮不再一点击就把 Wails runtime 点炸了**：补上前端 dev 预览环境的 `_wails.environment` 兜底，并为首页托管状态增加 browser preview 本地 mock，托管按钮在纯前端调样式时也能正常切换，不会再报 `Cannot read properties of undefined (reading 'OS')` 这种抽风错误。
+
+## 技术改进
+- **首页托管开关正式从通用 `mac-switch` 拆成专属交互组件**：`MainPlatformTabs` 改用独立的 `relay-toggle-switch` 结构和样式，单独管理轨道、滑块、闪电图标、发光和状态动画，避免全局开关样式继续互相连坐。
+- **供应商日志清理链路正式升级成“前端语义对齐 + 后端能力补齐”**：前端 `clearProviderFailedRequestLogs` 改成按供应商全量清理，后端新增 `ClearProviderFailedRequestLogs` 并补齐 provider / legacy provider 场景测试，后面谁再把清理范围改回分页凑数，测试会先出来掀桌子。
+- **浏览器预览与桌面运行时的边界判断继续往共享 helper 收口**：`ProviderLogsModal`、`useProviderCards`、`useMainPageShell` 与 `main.ts` 现在统一补齐“是否存在桌面 bridge”的判断和前端 dev fallback，少让纯前端预览继续踩 Wails 运行时环境假设的老雷。
+
+## 发布
+- **本次发版版本号统一推进到 `v2.8.10`**：同步更新应用常量、构建配置、Darwin `Info.plist`、Windows 元数据、Linux 包版本与更新日志，并准备推送 `v2.8.10` tag 触发 GitHub 自动打包，继续保证仓库版本、Git tag 和最终产物别再各唱各的调。
+
+---
+
 # Code Switch v2.8.9
 
 ## 修复

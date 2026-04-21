@@ -19,7 +19,7 @@ describe('providerQuotaDisplay', () => {
     expect(getQuotaUsagePercentValue(item)).toBe(44)
     expect(getQuotaProgressPercent(item)).toBe(44)
     expect(formatQuotaUsagePercent(item)).toBe('44%')
-    expect(getQuotaProgressClass(item)).toBe('quota-progress--ok')
+    expect(getQuotaProgressClass(item)).toBe('quota-progress--steady')
   })
 
   it('clamps visual fill at 100 percent but keeps over-limit state', () => {
@@ -36,5 +36,12 @@ describe('providerQuotaDisplay', () => {
 
     expect(getQuotaProgressPercent(item)).toBe(0.4)
     expect(formatQuotaUsagePercent(item)).toBe('<1%')
+    expect(getQuotaProgressClass(item)).toBe('quota-progress--fresh')
+  })
+
+  it('elevates medium-to-high usage into warm and hot states before turning red', () => {
+    expect(getQuotaProgressClass(createQuotaItem(0.58))).toBe('quota-progress--warm')
+    expect(getQuotaProgressClass(createQuotaItem(0.82))).toBe('quota-progress--hot')
+    expect(getQuotaProgressClass(createQuotaItem(0.94))).toBe('quota-progress--critical')
   })
 })

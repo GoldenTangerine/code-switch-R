@@ -224,7 +224,7 @@
                 <span
                   v-for="item in viewModel.quotaDisplay"
                   :key="item.key"
-                  class="card-quota-item"
+                  :class="['card-quota-item', `card-quota-item--${item.key}`, quotaProgressClass(item)]"
                   :title="quotaTooltip(item)"
                 >
                   <span class="quota-badge" :class="`quota-badge--${item.key}`">{{ item.label }}</span>
@@ -249,7 +249,7 @@
               <span
                 v-for="item in viewModel.quotaDisplay"
                 :key="item.key"
-                class="card-quota-item"
+                :class="['card-quota-item', `card-quota-item--${item.key}`, quotaProgressClass(item)]"
                 :title="quotaTooltip(item)"
               >
                 <span class="quota-badge" :class="`quota-badge--${item.key}`">{{ item.label }}</span>
@@ -451,7 +451,7 @@
 
         <button
           v-if="activeTab !== 'others'"
-          class="ghost-icon provider-log-btn"
+          :class="['ghost-icon', 'provider-log-btn', { 'ghost-icon-alert': hasTodayErrorLogs }]"
           :data-tooltip="t('components.main.providerLogs.buttonTooltip')"
           type="button"
           @click="$emit('open-provider-logs')"
@@ -503,7 +503,7 @@
         </button>
 
         <button
-          class="ghost-icon ghost-icon-danger ghost-icon-alert"
+          class="ghost-icon ghost-icon-danger ghost-icon-tooltip-end"
           :data-tooltip="t('components.main.form.actions.delete')"
           type="button"
           @click="$emit('remove')"
@@ -658,6 +658,10 @@ const hostedSelectionActive = computed(() => isHostedRouteActive({
 
 const isCurrentlyActive = computed(() => (
   hostedSelectionActive.value || (!props.activeProxyState && props.viewModel.isDirectApplied)
+))
+
+const hasTodayErrorLogs = computed(() => (
+  props.viewModel.stats.state === 'ready' && props.viewModel.stats.hasErrorLogsToday
 ))
 
 const showHostedStateBadges = computed(() => props.viewModel.isLastUsed || props.viewModel.isDefaultHostedProvider)

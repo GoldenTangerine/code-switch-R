@@ -627,6 +627,100 @@ func TestClearProviderFailedRequestLogsByIDs_IgnoresInvalidDuplicateAndLegacySuc
 	)
 }
 
+func TestClearProviderFailedRequestLogs_RemovesAllFailuresForProviderAndPreservesStats(t *testing.T) {
+	useIsolatedHomeDir(t)
+
+	if err := InitDatabase(); err != nil {
+		t.Fatalf("初始化数据库失败: %v", err)
+	}
+
+	db, err := xdb.DB("default")
+	if err != nil {
+		t.Fatalf("获取数据库连接失败: %v", err)
+	}
+
+	targetDay := startOfDay(time.Now()).AddDate(0, 0, -1)
+	failedID1 := insertProviderRequestLogForStorageWithStatus(t, db, "codex", "pid-a", "provider-a", 500, targetDay.Add(2*time.Hour), "req-fail", "resp-fail")
+	failedID2 := insertProviderRequestLogForStorageWithStatus(t, db, "codex", "pid-a", "provider-a", 429, targetDay.Add(3*time.Hour), "req-fail-2", "resp-fail-2")
+	successID := insertProviderRequestLogForStorageWithStatus(t, db, "codex", "pid-a", "provider-a", 200, targetDay.Add(4*time.Hour), "req-ok", "resp-ok")
+	otherID := insertProviderRequestLogForStorageWithStatus(t, db, "codex", "pid-b", "provider-b", 500, targetDay.Add(5*time.Hour), "req-other", "resp-other")
+
+	ls := NewLogService(nil)
+	result, err := ls.ClearProviderFailedRequestLogs("codex", "pid-a", "provider-a")
+	if err != nil {
+		t.Fatalf("ClearProviderFailedRequestLogs 调用失败: %v", err)
+	}
+	if result.DeletedRequestLogs != 2 {
+		t.Fatalf("期望删除 2 条当前供应商失败 request_log，实际 %+v", result)
+	}
+
+	assertTableCount(t, db,
+		"SELECT COUNT(*) FROM request_log WHERE id IN (?, ?)",
+		0,
+		failedID1,
+		failedID2,
+	)
+	assertTableCount(t, db,
+		"SELECT COUNT(*) FROM request_log WHERE id = ?",
+		1,
+		successID,
+	)
+	assertTableCount(t, db,
+		"SELECT COUNT(*) FROM request_log WHERE id = ?",
+		1,
+		otherID,
+	)
+	assertTableCount(t, db,
+		"SELECT COUNT(*) FROM request_log_stats_hourly WHERE platform = ? AND provider_id = ?",
+		3,
+		"codex",
+		"pid-a",
+	)
+	assertTableCount(t, db,
+		"SELECT COUNT(*) FROM request_log_stats_daily WHERE platform = ? AND provider_id = ?",
+		1,
+		"codex",
+		"pid-a",
+	)
+}
+
+func TestClearProviderFailedRequestLogs_FallbackToLegacyProviderName(t *testing.T) {
+	useIsolatedHomeDir(t)
+
+	if err := InitDatabase(); err != nil {
+		t.Fatalf("初始化数据库失败: %v", err)
+	}
+
+	db, err := xdb.DB("default")
+	if err != nil {
+		t.Fatalf("获取数据库连接失败: %v", err)
+	}
+
+	targetDay := startOfDay(time.Now()).AddDate(0, 0, -1)
+	validFailedID := insertProviderRequestLogForStorageWithStatus(t, db, "codex", "", "legacy-provider", 500, targetDay.Add(2*time.Hour), "req-legacy-fail", "resp-legacy-fail")
+	legacySuccessID := insertProviderRequestLogForStorageWithStatus(t, db, "codex", "", "legacy-provider", 200, targetDay.Add(3*time.Hour), "req-legacy-ok", "resp-legacy-ok")
+
+	ls := NewLogService(nil)
+	result, err := ls.ClearProviderFailedRequestLogs("codex", "", "legacy-provider")
+	if err != nil {
+		t.Fatalf("ClearProviderFailedRequestLogs legacy 调用失败: %v", err)
+	}
+	if result.DeletedRequestLogs != 1 {
+		t.Fatalf("期望只删除 1 条 legacy 失败 request_log，实际 %d", result.DeletedRequestLogs)
+	}
+
+	assertTableCount(t, db,
+		"SELECT COUNT(*) FROM request_log WHERE id = ?",
+		0,
+		validFailedID,
+	)
+	assertTableCount(t, db,
+		"SELECT COUNT(*) FROM request_log WHERE id = ?",
+		1,
+		legacySuccessID,
+	)
+}
+
 func insertProviderRequestLogForStorage(
 	t *testing.T,
 	db *sql.DB,

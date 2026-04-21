@@ -18,15 +18,37 @@
     <div class="section-controls">
       <div class="relay-toggle" :aria-label="currentProxyLabel">
         <div class="relay-switch">
-          <label class="mac-switch sm">
-            <input
-              type="checkbox"
-              :checked="activeProxyState"
-              :disabled="activeProxyBusy"
-              @change="$emit('toggle-proxy')"
-            />
-            <span></span>
-          </label>
+          <button
+            type="button"
+            class="relay-toggle-switch"
+            :class="{ 'is-active': activeProxyState, 'is-busy': activeProxyBusy }"
+            role="switch"
+            :aria-checked="activeProxyState"
+            :aria-label="`${currentProxyLabel} · ${activeProxyState ? t('components.main.relayToggle.statusOn') : t('components.main.relayToggle.statusOff')}`"
+            :disabled="activeProxyBusy"
+            @click="$emit('toggle-proxy')"
+          >
+            <span class="relay-toggle-switch__thumb" aria-hidden="true">
+              <svg
+                v-if="activeProxyState"
+                viewBox="0 0 24 24"
+                class="relay-toggle-switch__icon"
+                aria-hidden="true"
+              >
+                <path
+                  d="M13 2L5.5 12.2h4.6L9.4 22 18.5 10.8h-4.9L13 2z"
+                  fill="currentColor"
+                  stroke="currentColor"
+                  stroke-width="0.6"
+                  stroke-linejoin="round"
+                />
+              </svg>
+              <span v-else class="relay-toggle-switch__dot"></span>
+            </span>
+            <span class="sr-only">
+              {{ activeProxyState ? t('components.main.relayToggle.statusOn') : t('components.main.relayToggle.statusOff') }}
+            </span>
+          </button>
           <span class="relay-tooltip-content">
             {{ currentProxyLabel }} · {{ t('components.main.relayToggle.tooltip') }}
           </span>

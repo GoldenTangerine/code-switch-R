@@ -14,6 +14,7 @@
       }"
     >
       <section class="provider-logs-hero">
+        <div class="provider-logs-hero__glow" aria-hidden="true"></div>
         <div class="provider-logs-hero__copy">
           <span class="provider-logs-hero__eyebrow">{{ platformLabel }}</span>
           <h3 class="provider-logs-hero__title">{{ providerName }}</h3>
@@ -21,14 +22,25 @@
             {{ t('components.main.providerLogs.summary') }}
           </p>
         </div>
-        <div class="provider-logs-hero__stats">
-          <span class="provider-logs-pill provider-logs-pill--accent">
-            {{ t('components.main.providerLogs.failureOnly') }}
-          </span>
-          <div class="provider-logs-hero__actions">
-            <span class="provider-logs-pill">
+        <div class="provider-logs-hero__side">
+          <div class="provider-logs-hero__toolbar">
+            <span class="provider-logs-pill provider-logs-pill--count">
               {{ t('components.main.providerLogs.loadedCount', { count: entries.length }) }}
             </span>
+            <span class="provider-logs-pill provider-logs-pill--accent">
+              <svg viewBox="0 0 24 24" aria-hidden="true" class="provider-logs-pill__icon">
+                <path
+                  d="M4 6.75h16M7 11.75h10M10.5 16.75h3"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.7"
+                  stroke-linecap="round"
+                />
+              </svg>
+              {{ t('components.main.providerLogs.failureOnly') }}
+            </span>
+          </div>
+          <div class="provider-logs-hero__actions">
             <button
               v-if="canClearProviderLogs"
               type="button"
@@ -36,6 +48,16 @@
               :disabled="clearingLogs"
               @click="openClearLogsConfirm"
             >
+              <svg viewBox="0 0 24 24" aria-hidden="true" class="provider-logs-clear__icon">
+                <path
+                  d="M9 3h6m-7 4h8m-6 0v11m4-11v11M5 7h14l-.867 12.138A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.862L5 7z"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
               {{ clearingLogs ? t('components.main.providerLogs.clearingLogs') : t('components.main.providerLogs.clearLogs') }}
             </button>
           </div>
@@ -64,32 +86,129 @@
               <span class="provider-log-entry__status">
                 HTTP {{ entry.log.http_code }}
               </span>
+              <span class="provider-log-entry__tag">
+                {{ entry.errorType || (entry.log.http_code >= 500 ? 'HTTP 5xx' : 'HTTP 4xx') }}
+              </span>
               <span v-if="entry.semanticTag" class="provider-log-entry__tag provider-log-entry__tag--semantic">
                 {{ entry.semanticTag }}
-              </span>
-              <span v-if="entry.errorType" class="provider-log-entry__tag">
-                {{ entry.errorType }}
               </span>
               <span v-if="entry.errorCode" class="provider-log-entry__tag">
                 {{ entry.errorCode }}
               </span>
             </div>
             <time class="provider-log-entry__time" :datetime="entry.log.created_at">
+              <svg viewBox="0 0 24 24" aria-hidden="true" class="provider-log-entry__time-icon">
+                <circle cx="12" cy="12" r="7.25" fill="none" stroke="currentColor" stroke-width="1.6" />
+                <path
+                  d="M12 8.4v4.2l2.9 1.7"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
               {{ formatCreatedAt(entry.log.created_at) }}
             </time>
           </header>
 
-          <p class="provider-log-entry__summary">
-            {{ entry.errorSummary }}
-          </p>
-
-          <div class="provider-log-entry__meta">
-            <span>{{ t('components.main.providerLogs.model') }}：{{ displayModel(entry.log) }}</span>
-            <span>{{ t('components.main.providerLogs.logId', { id: entry.log.id }) }}</span>
-            <span v-if="entry.sourceLabel">{{ entry.sourceLabel }}</span>
+          <div class="provider-log-entry__headline-row">
+            <h4 class="provider-log-entry__headline">
+              HTTP {{ entry.log.http_code }}
+              <svg viewBox="0 0 24 24" aria-hidden="true" class="provider-log-entry__headline-icon">
+                <circle cx="12" cy="12" r="8.25" fill="none" stroke="currentColor" stroke-width="1.8" />
+                <path
+                  d="M12 8.25v4.4"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                />
+                <circle cx="12" cy="16.55" r="0.95" fill="currentColor" />
+              </svg>
+            </h4>
           </div>
 
-          <div class="provider-log-entry__toolbar">
+          <div class="provider-log-entry__meta">
+            <span class="provider-log-entry__meta-item">
+              <svg viewBox="0 0 24 24" aria-hidden="true" class="provider-log-entry__meta-icon">
+                <path
+                  d="M6.5 8.25h11M6.5 12h11M6.5 15.75h6"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                />
+                <rect x="4.25" y="5.25" width="15.5" height="13.5" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.4" />
+              </svg>
+              {{ t('components.main.providerLogs.model') }}：<strong>{{ displayModel(entry.log) }}</strong>
+            </span>
+            <span class="provider-log-entry__meta-divider" aria-hidden="true">·</span>
+            <span class="provider-log-entry__meta-item">
+              <svg viewBox="0 0 24 24" aria-hidden="true" class="provider-log-entry__meta-icon">
+                <path
+                  d="M8 8h8M8 12h8M8 16h5"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                />
+                <rect x="5" y="4.75" width="14" height="14.5" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.4" />
+              </svg>
+              {{ t('components.main.providerLogs.logId', { id: entry.log.id }) }}
+            </span>
+            <template v-if="entry.sourceLabel">
+              <span class="provider-log-entry__meta-divider" aria-hidden="true">·</span>
+              <span class="provider-log-entry__meta-item">{{ entry.sourceLabel }}</span>
+            </template>
+          </div>
+
+          <div class="provider-log-terminal">
+            <div class="provider-log-terminal__chrome" aria-hidden="true">
+              <span></span>
+              <span></span>
+              <span></span>
+            </div>
+            <div class="provider-log-terminal__body-wrap">
+              <div class="provider-log-terminal__toolbar">
+                <span class="provider-log-terminal__label">{{ entry.detailLabel }}</span>
+                <div class="provider-log-terminal__badges">
+                  <span
+                    v-if="entry.detailSource === 'console'"
+                    class="provider-log-terminal__badge provider-log-terminal__badge--console"
+                  >
+                    {{ t('components.main.providerLogs.detailFromConsole') }}
+                  </span>
+                  <span
+                    v-else-if="entry.detailSource === 'payload'"
+                    class="provider-log-terminal__badge provider-log-terminal__badge--payload"
+                  >
+                    {{ t('components.main.providerLogs.detailFromRequest') }}
+                  </span>
+                  <span
+                    v-if="entry.detailSource === 'payload' && entry.log.response_body_truncated"
+                    class="provider-log-terminal__badge"
+                  >
+                    {{ t('components.main.providerLogs.responseTruncated') }}
+                  </span>
+                  <span v-if="entry.detailPreview.formatSkippedLarge" class="provider-log-terminal__badge">
+                    {{ t('components.main.providerLogs.payloadLarge') }}
+                  </span>
+                </div>
+              </div>
+              <pre
+                v-if="entry.detailPreview.rawText"
+                class="provider-log-terminal__body"
+                v-html="entry.detailPreview.html"
+              ></pre>
+              <div v-else class="provider-log-terminal__body provider-log-terminal__body--fallback">
+                <span class="provider-log-terminal__prompt">&gt;</span>
+                <span>{{ t('components.main.providerLogs.noPayload') }}</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="provider-log-entry__footer">
             <span
               v-if="entry.detailSource === 'console'"
               class="provider-log-entry__source-note"
@@ -103,41 +222,26 @@
               :disabled="!entry.copyText"
               @click="copyProviderDetail(entry)"
             >
+              <svg viewBox="0 0 24 24" aria-hidden="true" class="provider-log-entry__copy-icon">
+                <path
+                  d="M8.5 8.5h8v10h-8a2 2 0 01-2-2v-6a2 2 0 012-2z"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+                <path
+                  d="M10.5 8.5V7a2 2 0 012-2h5a2 2 0 012 2v7a2 2 0 01-2 2h-1"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
               {{ copyButtonLabel(entry) }}
             </button>
-          </div>
-
-          <div v-if="!entry.detailPreview.rawText" class="provider-log-entry__hint">
-            {{ t('components.main.providerLogs.noPayload') }}
-          </div>
-          <div v-else class="provider-log-code">
-            <div class="provider-log-code__header">
-              <span>{{ entry.detailLabel }}</span>
-              <div class="provider-log-code__badges">
-                <span
-                  v-if="entry.detailSource === 'console'"
-                  class="provider-log-code__badge provider-log-code__badge--console"
-                >
-                  {{ t('components.main.providerLogs.detailFromConsole') }}
-                </span>
-                <span
-                  v-else-if="entry.detailSource === 'payload'"
-                  class="provider-log-code__badge provider-log-code__badge--payload"
-                >
-                  {{ t('components.main.providerLogs.detailFromRequest') }}
-                </span>
-                <span
-                  v-if="entry.detailSource === 'payload' && entry.log.response_body_truncated"
-                  class="provider-log-code__badge"
-                >
-                  {{ t('components.main.providerLogs.responseTruncated') }}
-                </span>
-                <span v-if="entry.detailPreview.formatSkippedLarge" class="provider-log-code__badge">
-                  {{ t('components.main.providerLogs.payloadLarge') }}
-                </span>
-              </div>
-            </div>
-            <pre class="provider-log-code__body" v-html="entry.detailPreview.html"></pre>
           </div>
         </article>
 
@@ -236,9 +340,153 @@ type ResolvedEntriesResult = {
   unmatchedNoPayloadCount: number
 }
 
+type BrowserWindowWithWailsBridge = Window & {
+  chrome?: {
+    webview?: {
+      postMessage?: (...args: any[]) => void
+    }
+  }
+  webkit?: {
+    messageHandlers?: {
+      external?: {
+        postMessage?: (...args: any[]) => void
+      }
+    }
+  }
+}
+
 const DISPLAY_CHUNK_SIZE = 12
 const RECENT_CONSOLE_LOG_COUNT = 400
 const CONSOLE_MATCH_MAX_WINDOW_MS = 15 * 60 * 1000
+const DEV_PROVIDER_LOGS_PLATFORM: LogPlatform = 'claude'
+const DEV_PROVIDER_LOGS_PROVIDER = '0011'
+
+function hasDesktopRuntimeBridge() {
+  if (typeof window === 'undefined') {
+    return false
+  }
+  const browserWindow = window as BrowserWindowWithWailsBridge
+  return Boolean(
+    browserWindow.chrome?.webview?.postMessage
+    || browserWindow.webkit?.messageHandlers?.external?.postMessage,
+  )
+}
+
+function shouldUseFrontendDevProviderLogsMock() {
+  return import.meta.env.DEV
+    && typeof window !== 'undefined'
+    && !hasDesktopRuntimeBridge()
+}
+
+function createTodayMockTimestamp(hour: number, minute: number, second: number) {
+  const now = new Date()
+  const value = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+    hour,
+    minute,
+    second,
+    0,
+  )
+  const pad = (input: number) => String(input).padStart(2, '0')
+  return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())} ${pad(value.getHours())}:${pad(value.getMinutes())}:${pad(value.getSeconds())}`
+}
+
+function createDevMockRequestLogs(): RequestLog[] {
+  return [
+    {
+      id: 40784,
+      platform: 'claude',
+      provider_id: DEV_PROVIDER_LOGS_PROVIDER,
+      provider: DEV_PROVIDER_LOGS_PROVIDER,
+      model: 'claude-opus-4-1',
+      requested_model: 'claude-opus-4-1',
+      response_model: '',
+      http_code: 499,
+      input_tokens: 318,
+      output_tokens: 0,
+      cache_create_tokens: 0,
+      cache_read_tokens: 0,
+      reasoning_tokens: 0,
+      created_at: createTodayMockTimestamp(18, 20, 19),
+      response_body: '',
+      response_body_truncated: false,
+    },
+    {
+      id: 40761,
+      platform: 'claude',
+      provider_id: DEV_PROVIDER_LOGS_PROVIDER,
+      provider: DEV_PROVIDER_LOGS_PROVIDER,
+      model: 'claude-opus-4-1',
+      requested_model: 'claude-opus-4-1',
+      response_model: '',
+      http_code: 429,
+      input_tokens: 286,
+      output_tokens: 0,
+      cache_create_tokens: 0,
+      cache_read_tokens: 0,
+      reasoning_tokens: 0,
+      created_at: createTodayMockTimestamp(16, 31, 36),
+      response_body: JSON.stringify({
+        error: {
+          message: 'Rate limit exceeded for demo provider 0011. Please wait a moment before retrying.',
+          type: 'rate_limit_error',
+          code: 'too_many_requests',
+        },
+      }),
+      response_body_truncated: false,
+    },
+    {
+      id: 40637,
+      platform: 'claude',
+      provider_id: DEV_PROVIDER_LOGS_PROVIDER,
+      provider: DEV_PROVIDER_LOGS_PROVIDER,
+      model: 'claude-opus-4-1',
+      requested_model: 'claude-opus-4-1',
+      response_model: '',
+      http_code: 503,
+      input_tokens: 452,
+      output_tokens: 0,
+      cache_create_tokens: 0,
+      cache_read_tokens: 0,
+      reasoning_tokens: 0,
+      created_at: createTodayMockTimestamp(14, 24, 48),
+      response_body: JSON.stringify({
+        error: {
+          message: 'The upstream model is overloaded for provider 0011. Please retry in a few seconds.',
+          type: 'overloaded_error',
+          code: 'overloaded',
+        },
+      }),
+      response_body_truncated: false,
+    },
+    {
+      id: 40592,
+      platform: 'claude',
+      provider_id: DEV_PROVIDER_LOGS_PROVIDER,
+      provider: DEV_PROVIDER_LOGS_PROVIDER,
+      model: 'claude-sonnet-4',
+      requested_model: 'claude-sonnet-4',
+      response_model: '',
+      http_code: 401,
+      input_tokens: 132,
+      output_tokens: 0,
+      cache_create_tokens: 0,
+      cache_read_tokens: 0,
+      reasoning_tokens: 0,
+      created_at: createTodayMockTimestamp(11, 9, 12),
+      response_body: JSON.stringify({
+        error: {
+          message: 'Invalid demo API key for frontend-only preview provider 0011.',
+          type: 'authentication_error',
+          code: 'invalid_api_key',
+        },
+      }),
+      response_body_truncated: false,
+    },
+  ]
+}
 
 const props = defineProps<{
   open: boolean
@@ -264,6 +512,7 @@ const copiedEntryKey = ref('')
 const consoleCoverageMode = ref<ConsoleCoverageMode>('recent')
 const clearingLogs = ref(false)
 const clearConfirmOpen = ref(false)
+const devMockLogs = ref<RequestLog[]>(createDevMockRequestLogs())
 
 const providerName = computed(() => props.provider?.name?.trim() || t('components.main.providerLogs.modalTitleFallback'))
 const providerAccent = computed(() => props.provider?.accent || '#ea580c')
@@ -281,6 +530,23 @@ const providerFilter = computed(() => {
   }
   return props.provider?.name?.trim() || ''
 })
+
+function isDevMockProviderTarget() {
+  const providerName = props.provider?.name?.trim() || ''
+  const providerId = Number(props.provider?.id)
+  const providerRef = providerFilter.value.trim()
+
+  return providerName === DEV_PROVIDER_LOGS_PROVIDER
+    || providerRef === DEV_PROVIDER_LOGS_PROVIDER
+    || (Number.isFinite(providerId) && providerId === 100)
+    || providerRef === '100'
+}
+
+const isDevMockProviderLogs = computed(() => (
+  shouldUseFrontendDevProviderLogsMock()
+  && props.platform === DEV_PROVIDER_LOGS_PLATFORM
+  && isDevMockProviderTarget()
+))
 
 const platformLabel = computed(() => {
   if (props.platform === 'claude') return t('components.main.providerLogs.platformClaude')
@@ -300,6 +566,18 @@ const hasMore = computed(() => entries.value.length < total.value)
 const canClearProviderLogs = computed(() => {
   return !loading.value && !loadingMore.value && !clearingLogs.value && displayEntries.value.length > 0
 })
+
+function buildDevMockLogsPage(limit: number, offset: number) {
+  const normalizedLimit = Math.max(1, Math.floor(limit || DISPLAY_CHUNK_SIZE))
+  const normalizedOffset = Math.max(0, Math.floor(offset || 0))
+  const items = devMockLogs.value.slice(normalizedOffset, normalizedOffset + normalizedLimit)
+  return {
+    items,
+    total: devMockLogs.value.length,
+    limit: normalizedLimit,
+    offset: normalizedOffset,
+  }
+}
 
 const resetState = () => {
   entries.value = []
@@ -575,10 +853,7 @@ const clearCurrentProviderLogs = async () => {
   clearingLogs.value = true
   clearConfirmOpen.value = false
   try {
-    const targetLogIds = displayEntries.value
-      .map((entry) => Number(entry.log.id))
-      .filter((id) => Number.isFinite(id) && id > 0)
-    if (targetLogIds.length === 0) {
+    if (entries.value.length === 0) {
       showToast(
         t('components.main.providerLogs.clearLogsEmpty', {
           provider: providerName.value,
@@ -587,11 +862,36 @@ const clearCurrentProviderLogs = async () => {
       )
       return
     }
+
+    if (isDevMockProviderLogs.value) {
+      const deletedLogs = devMockLogs.value.length
+      devMockLogs.value = []
+
+      if (deletedLogs > 0) {
+        showToast(
+          t('components.main.providerLogs.clearLogsSuccess', {
+            provider: providerName.value,
+            logs: deletedLogs,
+          }),
+          'success',
+        )
+      } else {
+        showToast(
+          t('components.main.providerLogs.clearLogsEmpty', {
+            provider: providerName.value,
+          }),
+          'warning',
+        )
+      }
+
+      await reloadLogs()
+      return
+    }
+
     const result = await clearProviderFailedRequestLogs(
       props.platform ?? '',
       providerFilter.value,
       providerName.value,
-      targetLogIds,
     )
     const deletedLogs = Number(result?.deleted_request_logs ?? 0)
 
@@ -635,6 +935,15 @@ const reloadLogs = async () => {
 
   if (!props.open || !props.platform || !providerFilter.value) return
 
+  if (isDevMockProviderLogs.value) {
+    const page = buildDevMockLogsPage(DISPLAY_CHUNK_SIZE, 0)
+    entries.value = page.items
+    total.value = page.total
+    consoleCandidates.value = []
+    consoleCoverageMode.value = 'recent'
+    return
+  }
+
   loading.value = true
   try {
     const [page, recentConsoleErrors] = await Promise.all([
@@ -664,6 +973,14 @@ const reloadLogs = async () => {
 
 const loadMore = async () => {
   if (loading.value || loadingMore.value || !hasMore.value) return
+
+  if (isDevMockProviderLogs.value) {
+    const page = buildDevMockLogsPage(DISPLAY_CHUNK_SIZE, entries.value.length)
+    entries.value = mergeLogsById(entries.value, page.items)
+    total.value = page.total
+    return
+  }
+
   loadingMore.value = true
   const currentSeq = requestSeq.value
   try {
@@ -719,31 +1036,30 @@ watch(
 
 <style scoped>
 :global(.provider-logs-inline-modal) {
-  border-radius: 28px;
-  border: 1px solid rgba(226, 232, 240, 0.9);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.99), rgba(248, 250, 252, 0.97));
+  overflow: hidden;
+  border-radius: 24px;
+  border: 1px solid rgba(226, 232, 240, 0.82);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(246, 249, 255, 0.96));
   box-shadow:
-    0 30px 80px rgba(15, 23, 42, 0.18),
-    0 10px 24px rgba(15, 23, 42, 0.08);
+    0 36px 90px rgba(15, 23, 42, 0.16),
+    0 12px 28px rgba(15, 23, 42, 0.08);
 }
 
 :global(.provider-logs-inline-modal .modal-header) {
-  padding: 24px 24px 16px;
-  border-bottom: 1px solid rgba(226, 232, 240, 0.88);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(248, 250, 252, 0.72));
+  padding: 16px 20px;
+  border-bottom: 1px solid rgba(226, 232, 240, 0.9);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(246, 248, 252, 0.88));
 }
 
 :global(.provider-logs-inline-modal .modal-title) {
-  color: rgba(15, 23, 42, 0.96);
-  font-size: 20px;
-  font-weight: 700;
+  color: rgba(15, 23, 42, 0.92);
+  font-size: 15px;
+  font-weight: 600;
   letter-spacing: -0.01em;
 }
 
 :global(.provider-logs-inline-modal .modal-body) {
-  padding: 0 24px 24px;
+  padding: 14px 18px 20px;
   background: transparent;
 }
 
@@ -751,12 +1067,12 @@ watch(
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
-  border-radius: 999px;
-  border: 1px solid rgba(148, 163, 184, 0.22);
-  background: rgba(255, 255, 255, 0.82);
-  color: rgba(51, 65, 85, 0.84);
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: rgba(255, 255, 255, 0.56);
+  color: rgba(71, 85, 105, 0.82);
   transition:
     border-color 0.18s ease,
     background 0.18s ease,
@@ -767,195 +1083,254 @@ watch(
 :global(.provider-logs-inline-modal .ghost-icon:hover:not(:disabled)),
 :global(.provider-logs-inline-modal .ghost-icon:focus-visible) {
   transform: translateY(-1px);
-  border-color: rgba(249, 115, 22, 0.28);
-  background: rgba(255, 247, 237, 0.96);
-  color: #9a3412;
+  border-color: rgba(99, 102, 241, 0.26);
+  background: rgba(99, 102, 241, 0.08);
+  color: #4338ca;
 }
 
 :global(.provider-logs-inline-modal--dark) {
-  border-color: rgba(148, 163, 184, 0.18);
-  background:
-    linear-gradient(180deg, rgba(7, 12, 21, 0.99), rgba(11, 18, 31, 0.98));
+  border-color: rgba(255, 255, 255, 0.08);
+  background: linear-gradient(180deg, rgba(16, 17, 24, 0.995), rgba(11, 13, 19, 0.985));
   box-shadow:
-    0 36px 92px rgba(0, 0, 0, 0.58),
+    0 42px 110px rgba(0, 0, 0, 0.62),
     inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
 :global(.provider-logs-inline-modal--dark .modal-header) {
-  border-bottom-color: rgba(148, 163, 184, 0.14);
-  background:
-    linear-gradient(180deg, rgba(12, 19, 32, 0.94), rgba(8, 14, 24, 0.78));
+  border-bottom-color: rgba(255, 255, 255, 0.05);
+  background: linear-gradient(180deg, rgba(23, 24, 31, 0.98), rgba(19, 20, 28, 0.94));
 }
 
 :global(.provider-logs-inline-modal--dark .modal-title) {
-  color: rgba(248, 250, 252, 0.96);
+  color: rgba(241, 245, 249, 0.96);
 }
 
 :global(.provider-logs-inline-modal--dark .ghost-icon) {
-  border-color: rgba(148, 163, 184, 0.18);
-  background: rgba(148, 163, 184, 0.1);
-  color: rgba(226, 232, 240, 0.82);
+  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  color: rgba(148, 163, 184, 0.82);
 }
 
 :global(.provider-logs-inline-modal--dark .ghost-icon:hover:not(:disabled)),
 :global(.provider-logs-inline-modal--dark .ghost-icon:focus-visible) {
-  border-color: rgba(251, 146, 60, 0.3);
-  background: rgba(249, 115, 22, 0.16);
-  color: #fdba74;
+  border-color: rgba(129, 140, 248, 0.24);
+  background: rgba(99, 102, 241, 0.12);
+  color: #e0e7ff;
 }
 
 .provider-logs-modal {
-  --provider-log-heading: rgba(15, 23, 42, 0.94);
-  --provider-log-subtitle: rgba(15, 23, 42, 0.68);
-  --provider-log-pill-text: rgba(15, 23, 42, 0.72);
-  --provider-log-pill-bg: rgba(255, 255, 255, 0.72);
-  --provider-log-pill-border: rgba(148, 163, 184, 0.24);
+  --provider-log-page-bg: linear-gradient(180deg, rgba(249, 250, 255, 0.9), rgba(243, 246, 252, 0.96));
+  --provider-log-heading: rgba(15, 23, 42, 0.96);
+  --provider-log-subtitle: rgba(51, 65, 85, 0.74);
+  --provider-log-toolbar-bg: rgba(255, 255, 255, 0.62);
+  --provider-log-toolbar-border: rgba(148, 163, 184, 0.2);
+  --provider-log-pill-text: rgba(51, 65, 85, 0.82);
+  --provider-log-pill-bg: rgba(255, 255, 255, 0.7);
+  --provider-log-pill-border: rgba(148, 163, 184, 0.18);
   --provider-log-state-bg: linear-gradient(180deg, rgba(248, 250, 252, 0.96), rgba(255, 255, 255, 0.92));
-  --provider-log-state-border: rgba(148, 163, 184, 0.36);
-  --provider-log-state-text: rgba(15, 23, 42, 0.72);
-  --provider-log-card-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.94));
-  --provider-log-card-border: rgba(226, 232, 240, 0.92);
+  --provider-log-state-border: rgba(148, 163, 184, 0.3);
+  --provider-log-state-text: rgba(51, 65, 85, 0.74);
+  --provider-log-card-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(245, 247, 251, 0.96));
+  --provider-log-card-border: rgba(203, 213, 225, 0.56);
+  --provider-log-card-hover-border: rgba(148, 163, 184, 0.8);
   --provider-log-card-shadow: 0 18px 36px rgba(15, 23, 42, 0.08);
-  --provider-log-card-tag-text: rgba(15, 23, 42, 0.7);
-  --provider-log-card-tag-bg: rgba(241, 245, 249, 0.98);
-  --provider-log-card-tag-border: rgba(203, 213, 225, 0.7);
-  --provider-log-time-text: rgba(100, 116, 139, 0.92);
-  --provider-log-summary-text: rgba(15, 23, 42, 0.92);
+  --provider-log-card-tag-text: rgba(51, 65, 85, 0.76);
+  --provider-log-card-tag-bg: rgba(248, 250, 252, 0.94);
+  --provider-log-card-tag-border: rgba(203, 213, 225, 0.64);
+  --provider-log-time-text: rgba(100, 116, 139, 0.82);
+  --provider-log-headline-text: rgba(15, 23, 42, 0.96);
   --provider-log-meta-text: rgba(71, 85, 105, 0.92);
-  --provider-log-source-text: rgba(154, 52, 18, 0.92);
-  --provider-log-copy-bg: linear-gradient(135deg, rgba(255, 247, 237, 0.98), rgba(255, 255, 255, 0.94));
-  --provider-log-copy-bg-hover: linear-gradient(135deg, rgba(255, 237, 213, 0.98), rgba(255, 247, 237, 0.96));
-  --provider-log-copy-border: color-mix(in srgb, var(--provider-log-accent) 26%, rgba(15, 23, 42, 0.08));
-  --provider-log-copy-border-hover: color-mix(in srgb, var(--provider-log-accent) 34%, transparent);
-  --provider-log-copy-text: color-mix(in srgb, var(--provider-log-accent) 76%, #7c2d12);
-  --provider-log-hint-bg: rgba(248, 250, 252, 0.98);
-  --provider-log-hint-border: rgba(203, 213, 225, 0.72);
-  --provider-log-hint-text: rgba(71, 85, 105, 0.96);
+  --provider-log-source-text: rgba(37, 99, 235, 0.92);
+  --provider-log-terminal-bg: linear-gradient(180deg, rgba(12, 18, 30, 0.98), rgba(17, 24, 39, 0.98));
+  --provider-log-terminal-border: rgba(15, 23, 42, 0.08);
+  --provider-log-terminal-toolbar-bg: rgba(255, 255, 255, 0.02);
+  --provider-log-terminal-toolbar-border: rgba(148, 163, 184, 0.12);
+  --provider-log-terminal-text: #cbd5e1;
+  --provider-log-terminal-muted: rgba(148, 163, 184, 0.58);
+  --provider-log-copy-bg: linear-gradient(135deg, rgba(255, 255, 255, 0.92), rgba(248, 250, 252, 0.94));
+  --provider-log-copy-bg-hover: linear-gradient(135deg, rgba(255, 247, 237, 0.96), rgba(255, 255, 255, 0.98));
+  --provider-log-copy-border: rgba(148, 163, 184, 0.26);
+  --provider-log-copy-border-hover: rgba(249, 115, 22, 0.3);
+  --provider-log-copy-text: rgba(51, 65, 85, 0.82);
+  --provider-log-copy-glow: rgba(249, 115, 22, 0.18);
   display: flex;
   flex-direction: column;
   gap: 18px;
+  min-height: min(76vh, 860px);
+  padding: 4px 2px 2px;
   color: var(--mac-text);
+  background: var(--provider-log-page-bg);
 }
 
 .provider-logs-modal--dark {
-  --provider-log-heading: rgba(248, 250, 252, 0.96);
-  --provider-log-subtitle: rgba(203, 213, 225, 0.78);
-  --provider-log-pill-text: rgba(226, 232, 240, 0.86);
-  --provider-log-pill-bg: rgba(255, 255, 255, 0.06);
+  --provider-log-page-bg: linear-gradient(180deg, rgba(18, 19, 24, 0.76), rgba(11, 13, 19, 0.98));
+  --provider-log-heading: rgba(248, 250, 252, 0.98);
+  --provider-log-subtitle: rgba(148, 163, 184, 0.82);
+  --provider-log-toolbar-bg: rgba(7, 10, 16, 0.46);
+  --provider-log-toolbar-border: rgba(255, 255, 255, 0.08);
+  --provider-log-pill-text: rgba(226, 232, 240, 0.88);
+  --provider-log-pill-bg: rgba(255, 255, 255, 0.04);
   --provider-log-pill-border: rgba(255, 255, 255, 0.08);
-  --provider-log-state-bg: linear-gradient(180deg, rgba(14, 19, 30, 0.92), rgba(20, 26, 38, 0.9));
+  --provider-log-state-bg: linear-gradient(180deg, rgba(16, 18, 24, 0.96), rgba(13, 15, 22, 0.94));
   --provider-log-state-border: rgba(255, 255, 255, 0.08);
-  --provider-log-state-text: rgba(226, 232, 240, 0.76);
-  --provider-log-card-bg: linear-gradient(180deg, rgba(18, 24, 38, 0.96), rgba(10, 16, 28, 0.98));
-  --provider-log-card-border: rgba(148, 163, 184, 0.18);
+  --provider-log-state-text: rgba(203, 213, 225, 0.78);
+  --provider-log-card-bg: linear-gradient(180deg, rgba(24, 24, 31, 0.96), rgba(19, 20, 28, 0.94));
+  --provider-log-card-border: rgba(255, 255, 255, 0.05);
+  --provider-log-card-hover-border: rgba(255, 255, 255, 0.1);
   --provider-log-card-shadow: 0 24px 48px rgba(0, 0, 0, 0.28);
-  --provider-log-card-tag-text: rgba(226, 232, 240, 0.86);
-  --provider-log-card-tag-bg: rgba(148, 163, 184, 0.12);
-  --provider-log-card-tag-border: rgba(148, 163, 184, 0.2);
-  --provider-log-time-text: rgba(148, 163, 184, 0.82);
-  --provider-log-summary-text: rgba(248, 250, 252, 0.96);
-  --provider-log-meta-text: rgba(203, 213, 225, 0.76);
+  --provider-log-card-tag-text: rgba(203, 213, 225, 0.84);
+  --provider-log-card-tag-bg: rgba(255, 255, 255, 0.04);
+  --provider-log-card-tag-border: rgba(255, 255, 255, 0.08);
+  --provider-log-time-text: rgba(100, 116, 139, 0.92);
+  --provider-log-headline-text: rgba(248, 250, 252, 0.98);
+  --provider-log-meta-text: rgba(148, 163, 184, 0.82);
   --provider-log-source-text: #93c5fd;
-  --provider-log-copy-bg: linear-gradient(135deg, rgba(41, 27, 22, 0.96), rgba(28, 20, 19, 0.96));
-  --provider-log-copy-bg-hover: linear-gradient(135deg, rgba(61, 36, 26, 0.98), rgba(39, 25, 20, 0.98));
-  --provider-log-copy-border: rgba(249, 115, 22, 0.24);
-  --provider-log-copy-border-hover: rgba(251, 146, 60, 0.34);
-  --provider-log-copy-text: rgba(255, 237, 213, 0.92);
-  --provider-log-hint-bg: rgba(15, 23, 42, 0.42);
-  --provider-log-hint-border: rgba(148, 163, 184, 0.18);
-  --provider-log-hint-text: rgba(203, 213, 225, 0.86);
+  --provider-log-terminal-bg: linear-gradient(180deg, rgba(7, 8, 12, 0.94), rgba(4, 6, 10, 0.98));
+  --provider-log-terminal-border: rgba(255, 255, 255, 0.06);
+  --provider-log-terminal-toolbar-bg: rgba(255, 255, 255, 0.02);
+  --provider-log-terminal-toolbar-border: rgba(255, 255, 255, 0.05);
+  --provider-log-terminal-text: rgba(203, 213, 225, 0.9);
+  --provider-log-terminal-muted: rgba(100, 116, 139, 0.58);
+  --provider-log-copy-bg: rgba(255, 255, 255, 0.04);
+  --provider-log-copy-bg-hover: rgba(249, 115, 22, 0.12);
+  --provider-log-copy-border: rgba(255, 255, 255, 0.08);
+  --provider-log-copy-border-hover: rgba(249, 115, 22, 0.24);
+  --provider-log-copy-text: rgba(226, 232, 240, 0.9);
+  --provider-log-copy-glow: rgba(249, 115, 22, 0.18);
   color: #f3f4f6;
 }
 
 .provider-logs-hero {
+  position: relative;
+  overflow: hidden;
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
+  gap: 28px;
   padding: 20px 22px;
-  border-radius: 22px;
-  background:
-    radial-gradient(circle at top right, color-mix(in srgb, var(--provider-log-accent) 26%, transparent), transparent 38%),
-    linear-gradient(135deg, color-mix(in srgb, var(--provider-log-tint) 86%, #ffffff), rgba(255, 255, 255, 0.96));
-  border: 1px solid color-mix(in srgb, var(--provider-log-accent) 18%, rgba(15, 23, 42, 0.08));
-  box-shadow: 0 24px 48px rgba(15, 23, 42, 0.08);
+  border-radius: 18px;
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.92), color-mix(in srgb, var(--provider-log-tint) 24%, rgba(248, 250, 252, 0.96)));
+  border: 1px solid color-mix(in srgb, var(--provider-log-accent) 16%, rgba(148, 163, 184, 0.18));
+  box-shadow: 0 22px 44px rgba(15, 23, 42, 0.08);
+}
+
+.provider-logs-hero__glow {
+  position: absolute;
+  inset: -40px auto auto 55%;
+  width: 320px;
+  height: 220px;
+  border-radius: 999px;
+  pointer-events: none;
+  background: radial-gradient(circle, color-mix(in srgb, var(--provider-log-accent) 22%, rgba(99, 102, 241, 0.18)) 0%, transparent 72%);
+  filter: blur(28px);
+  opacity: 0.9;
 }
 
 .provider-logs-hero__copy {
+  position: relative;
+  z-index: 1;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
+  min-width: 0;
 }
 
 .provider-logs-hero__eyebrow {
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: color-mix(in srgb, var(--provider-log-accent) 72%, #7c2d12);
+  color: color-mix(in srgb, var(--provider-log-accent) 70%, #6366f1);
 }
 
 .provider-logs-hero__title {
   margin: 0;
-  font-size: 28px;
+  font-size: clamp(1.7rem, 2vw, 2rem);
   font-weight: 700;
-  line-height: 1.1;
+  line-height: 1.08;
+  letter-spacing: -0.02em;
   color: var(--provider-log-heading);
 }
 
 .provider-logs-hero__subtitle {
   margin: 0;
-  max-width: 700px;
-  line-height: 1.6;
+  max-width: 760px;
+  font-size: 13px;
+  line-height: 1.72;
   color: var(--provider-log-subtitle);
 }
 
-.provider-logs-hero__stats {
+.provider-logs-hero__side {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.provider-logs-hero__toolbar {
   display: flex;
   flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 10px;
+  align-items: center;
+  gap: 8px;
+  padding: 4px;
+  border-radius: 14px;
+  border: 1px solid var(--provider-log-toolbar-border);
+  background: var(--provider-log-toolbar-bg);
+  backdrop-filter: blur(12px);
 }
 
 .provider-logs-hero__actions {
   display: flex;
-  flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 10px;
 }
 
 .provider-logs-pill {
   display: inline-flex;
   align-items: center;
-  min-height: 36px;
-  padding: 0 14px;
-  border-radius: 999px;
-  font-size: 13px;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 13px;
+  border-radius: 10px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--provider-log-pill-text);
   background: var(--provider-log-pill-bg);
   border: 1px solid var(--provider-log-pill-border);
-  backdrop-filter: blur(10px);
+  font-variant-numeric: tabular-nums;
+}
+
+.provider-logs-pill--count {
+  min-width: 110px;
+}
+
+.provider-logs-pill__icon {
+  width: 13px;
+  height: 13px;
 }
 
 .provider-logs-pill--accent {
-  color: color-mix(in srgb, var(--provider-log-accent) 80%, #9a3412);
-  background: color-mix(in srgb, var(--provider-log-accent) 10%, rgba(255, 255, 255, 0.84));
-  border-color: color-mix(in srgb, var(--provider-log-accent) 22%, transparent);
+  color: color-mix(in srgb, var(--provider-log-accent) 76%, #6366f1);
+  background: color-mix(in srgb, var(--provider-log-accent) 11%, rgba(255, 255, 255, 0.72));
+  border-color: color-mix(in srgb, var(--provider-log-accent) 24%, transparent);
 }
 
 .provider-logs-clear {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 7px;
   min-height: 36px;
-  padding: 0 16px;
-  border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--provider-log-accent) 18%, rgba(239, 68, 68, 0.24));
-  background: linear-gradient(135deg, rgba(255, 245, 245, 0.98), rgba(255, 255, 255, 0.92));
+  padding: 0 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(248, 113, 113, 0.18);
+  background: linear-gradient(135deg, rgba(255, 236, 236, 0.9), rgba(255, 245, 245, 0.88));
   color: #b91c1c;
-  font-size: 13px;
-  font-weight: 700;
+  font-size: 12px;
+  font-weight: 600;
   cursor: pointer;
   transition:
     transform 0.18s ease,
@@ -965,10 +1340,15 @@ watch(
     opacity 0.18s ease;
 }
 
+.provider-logs-clear__icon {
+  width: 14px;
+  height: 14px;
+}
+
 .provider-logs-clear:hover:not(:disabled) {
   transform: translateY(-1px);
-  border-color: rgba(239, 68, 68, 0.34);
-  background: linear-gradient(135deg, rgba(254, 242, 242, 0.98), rgba(255, 245, 245, 0.94));
+  border-color: rgba(239, 68, 68, 0.3);
+  background: linear-gradient(135deg, rgba(254, 242, 242, 0.96), rgba(255, 236, 236, 0.92));
   color: #991b1b;
 }
 
@@ -979,9 +1359,9 @@ watch(
 }
 
 .provider-logs-state {
-  padding: 34px 20px;
+  padding: 40px 24px;
   text-align: center;
-  border-radius: 20px;
+  border-radius: 18px;
   border: 1px dashed var(--provider-log-state-border);
   background: var(--provider-log-state-bg);
   color: var(--provider-log-state-text);
@@ -989,7 +1369,7 @@ watch(
 
 .provider-logs-state--error {
   color: #b91c1c;
-  background: linear-gradient(180deg, rgba(254, 242, 242, 0.98), rgba(255, 255, 255, 0.92));
+  background: linear-gradient(180deg, rgba(254, 242, 242, 0.96), rgba(255, 255, 255, 0.92));
   border-color: rgba(248, 113, 113, 0.3);
 }
 
@@ -1007,33 +1387,49 @@ watch(
 .provider-logs-feed {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 14px;
 }
 
 .provider-log-entry {
   position: relative;
-  padding: 18px 18px 16px;
-  border-radius: 22px;
+  overflow: hidden;
+  padding: 16px 18px 16px 22px;
+  border-radius: 16px;
   border: 1px solid var(--provider-log-card-border);
   background: var(--provider-log-card-bg);
   box-shadow: var(--provider-log-card-shadow);
+  transition:
+    transform 0.18s ease,
+    border-color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.provider-log-entry:hover {
+  transform: translateY(-1px);
+  border-color: var(--provider-log-card-hover-border);
 }
 
 .provider-log-entry::before {
   content: '';
   position: absolute;
   left: 0;
-  top: 18px;
-  bottom: 18px;
+  top: 0;
+  bottom: 0;
   width: 4px;
-  border-radius: 999px;
+  border-radius: 16px 0 0 16px;
+  box-shadow:
+    0 0 16px currentColor,
+    1px 0 0 rgba(255, 255, 255, 0.04);
+  pointer-events: none;
 }
 
 .provider-log-entry.is-severe::before {
+  color: rgba(244, 63, 94, 0.52);
   background: linear-gradient(180deg, #ef4444, #f97316);
 }
 
 .provider-log-entry.is-warning::before {
+  color: rgba(249, 115, 22, 0.46);
   background: linear-gradient(180deg, #f59e0b, #fb923c);
 }
 
@@ -1054,16 +1450,26 @@ watch(
 .provider-log-entry__tag {
   display: inline-flex;
   align-items: center;
-  min-height: 30px;
-  padding: 0 11px;
-  border-radius: 999px;
-  font-size: 12px;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: 6px;
+  font-size: 11px;
   font-weight: 700;
+  line-height: 1;
 }
 
-.provider-log-entry__status {
-  color: #fff7ed;
-  background: linear-gradient(135deg, #b91c1c, #ea580c);
+.provider-log-entry.is-warning .provider-log-entry__status {
+  color: #fdba74;
+  background: rgba(249, 115, 22, 0.12);
+  border: 1px solid rgba(249, 115, 22, 0.28);
+  box-shadow: 0 0 12px rgba(249, 115, 22, 0.1);
+}
+
+.provider-log-entry.is-severe .provider-log-entry__status {
+  color: #fda4af;
+  background: rgba(244, 63, 94, 0.12);
+  border: 1px solid rgba(244, 63, 94, 0.26);
+  box-shadow: 0 0 12px rgba(244, 63, 94, 0.1);
 }
 
 .provider-log-entry__tag {
@@ -1073,195 +1479,287 @@ watch(
 }
 
 .provider-log-entry__tag--semantic {
-  color: #9a3412;
-  background: rgba(255, 237, 213, 0.98);
-  border-color: rgba(251, 146, 60, 0.34);
+  color: #fb923c;
+  background: rgba(249, 115, 22, 0.12);
+  border-color: rgba(249, 115, 22, 0.18);
 }
 
 .provider-log-entry__time {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   color: var(--provider-log-time-text);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
+  font-family: 'SFMono-Regular', Menlo, Consolas, monospace;
 }
 
-.provider-log-entry__summary {
-  margin: 14px 0 10px;
-  font-size: 17px;
+.provider-log-entry__time-icon {
+  width: 13px;
+  height: 13px;
+}
+
+.provider-log-entry__headline-row {
+  margin: 12px 0 8px;
+}
+
+.provider-log-entry__headline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 18px;
   font-weight: 600;
-  line-height: 1.55;
-  color: var(--provider-log-summary-text);
+  line-height: 1.25;
+  color: var(--provider-log-headline-text);
+  letter-spacing: -0.01em;
+}
+
+.provider-log-entry__headline-icon {
+  width: 15px;
+  height: 15px;
+}
+
+.provider-log-entry.is-warning .provider-log-entry__headline-icon {
+  color: #fb923c;
+}
+
+.provider-log-entry.is-severe .provider-log-entry__headline-icon {
+  color: #fb7185;
 }
 
 .provider-log-entry__meta {
   display: flex;
+  align-items: center;
   flex-wrap: wrap;
-  gap: 14px;
+  gap: 8px;
   margin-bottom: 12px;
   font-size: 13px;
   color: var(--provider-log-meta-text);
 }
 
-.provider-log-entry__toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 14px;
-}
-
-.provider-log-entry__source-note {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--provider-log-source-text);
-}
-
-.provider-log-entry__copy {
+.provider-log-entry__meta-item {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  min-width: 156px;
-  min-height: 34px;
-  padding: 0 14px;
-  border-radius: 999px;
-  border: 1px solid var(--provider-log-copy-border);
-  background: var(--provider-log-copy-bg);
-  color: var(--provider-log-copy-text);
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
-  transition:
-    transform 0.18s ease,
-    border-color 0.18s ease,
-    background 0.18s ease,
-    color 0.18s ease;
+  gap: 5px;
 }
 
-.provider-log-entry__copy:hover:not(:disabled) {
-  transform: translateY(-1px);
-  border-color: var(--provider-log-copy-border-hover);
-  background: var(--provider-log-copy-bg-hover);
+.provider-log-entry__meta-item strong {
+  color: var(--provider-log-headline-text);
+  font-weight: 600;
 }
 
-.provider-log-entry__copy.is-copied {
-  color: #166534;
-  border-color: rgba(34, 197, 94, 0.3);
-  background: linear-gradient(135deg, rgba(220, 252, 231, 0.96), rgba(240, 253, 244, 0.96));
+.provider-log-entry__meta-divider {
+  color: rgba(100, 116, 139, 0.6);
 }
 
-.provider-log-entry__copy.is-disabled,
-.provider-log-entry__copy:disabled {
-  cursor: not-allowed;
-  opacity: 0.58;
-  transform: none;
+.provider-log-entry__meta-icon {
+  width: 13px;
+  height: 13px;
+  color: rgba(100, 116, 139, 0.82);
 }
 
-.provider-log-entry__hint {
-  padding: 14px 16px;
-  border-radius: 16px;
-  font-size: 13px;
-  line-height: 1.65;
-  color: var(--provider-log-hint-text);
-  background: var(--provider-log-hint-bg);
-  border: 1px dashed var(--provider-log-hint-border);
-}
-
-.provider-log-code {
+.provider-log-terminal {
   overflow: hidden;
-  border-radius: 18px;
-  border: 1px solid rgba(226, 232, 240, 0.95);
-  background: linear-gradient(180deg, rgba(15, 23, 42, 0.98), rgba(30, 41, 59, 0.98));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  border-radius: 12px;
+  border: 1px solid var(--provider-log-terminal-border);
+  background: var(--provider-log-terminal-bg);
 }
 
-.provider-log-code__header {
+.provider-log-terminal__chrome {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 12px;
+  background: var(--provider-log-terminal-toolbar-bg);
+  border-bottom: 1px solid var(--provider-log-terminal-toolbar-border);
+}
+
+.provider-log-terminal__chrome span {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--provider-log-terminal-muted);
+}
+
+.provider-log-terminal__body-wrap {
+  padding: 0;
+}
+
+.provider-log-terminal__toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 12px 14px;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: rgba(226, 232, 240, 0.78);
-  border-bottom: 1px solid rgba(71, 85, 105, 0.36);
-  background: rgba(15, 23, 42, 0.42);
+  padding: 12px 14px 0;
 }
 
-.provider-log-code__badges {
+.provider-log-terminal__label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: rgba(148, 163, 184, 0.78);
+}
+
+.provider-log-terminal__badges {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
 }
 
-.provider-log-code__badge {
+.provider-log-terminal__badge {
   padding: 4px 8px;
   border-radius: 999px;
   color: #fdba74;
-  background: rgba(249, 115, 22, 0.18);
+  font-size: 10px;
+  font-weight: 700;
+  background: rgba(249, 115, 22, 0.14);
 }
 
-.provider-log-code__badge--console {
+.provider-log-terminal__badge--console {
   color: #bfdbfe;
-  background: rgba(59, 130, 246, 0.18);
+  background: rgba(59, 130, 246, 0.16);
 }
 
-.provider-log-code__badge--payload {
+.provider-log-terminal__badge--payload {
   color: #fde68a;
-  background: rgba(234, 179, 8, 0.16);
+  background: rgba(234, 179, 8, 0.14);
 }
 
-.provider-log-code__body {
+.provider-log-entry__source-note {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--provider-log-source-text);
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.18);
+}
+
+.provider-log-terminal__body {
   margin: 0;
-  padding: 16px;
-  max-height: 300px;
+  padding: 14px 14px 16px;
+  max-height: 280px;
   overflow: auto;
   font-size: 12px;
   line-height: 1.72;
-  color: #e2e8f0;
+  color: var(--provider-log-terminal-text);
   white-space: pre-wrap;
   word-break: break-word;
+  font-family: 'SFMono-Regular', Menlo, Consolas, monospace;
 }
 
-.provider-log-code__body :deep(.json-token.json-key) {
+.provider-log-terminal__body--fallback {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.provider-log-terminal__prompt {
+  color: rgba(148, 163, 184, 0.46);
+}
+
+.provider-log-terminal__body :deep(.json-token.json-key) {
   color: #fda4af;
 }
 
-.provider-log-code__body :deep(.json-token.json-string) {
+.provider-log-terminal__body :deep(.json-token.json-string) {
   color: #86efac;
 }
 
-.provider-log-code__body :deep(.json-token.json-number) {
+.provider-log-terminal__body :deep(.json-token.json-number) {
   color: #7dd3fc;
 }
 
-.provider-log-code__body :deep(.json-token.json-boolean) {
+.provider-log-terminal__body :deep(.json-token.json-boolean) {
   color: #c4b5fd;
 }
 
-.provider-log-code__body :deep(.json-token.json-null) {
+.provider-log-terminal__body :deep(.json-token.json-null) {
   color: #fcd34d;
+}
+
+.provider-log-entry__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.provider-log-entry__copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 1px solid var(--provider-log-copy-border);
+  background: var(--provider-log-copy-bg);
+  color: var(--provider-log-copy-text);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    transform 0.18s ease,
+    border-color 0.18s ease,
+    background 0.18s ease,
+    color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.provider-log-entry__copy-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.provider-log-entry__copy:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: var(--provider-log-copy-border-hover);
+  background: var(--provider-log-copy-bg-hover);
+  box-shadow: 0 10px 18px var(--provider-log-copy-glow);
+}
+
+.provider-log-entry__copy.is-copied {
+  color: #22c55e;
+  border-color: rgba(34, 197, 94, 0.26);
+  background: rgba(34, 197, 94, 0.1);
+}
+
+.provider-log-entry__copy.is-disabled,
+.provider-log-entry__copy:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+  transform: none;
+  box-shadow: none;
 }
 
 .provider-logs-actions {
   display: flex;
   justify-content: center;
-  padding-top: 4px;
+  padding: 4px 0 0;
 }
 
 .provider-logs-load-more {
   min-width: 160px;
-  min-height: 42px;
+  min-height: 40px;
   padding: 0 18px;
   border: none;
-  border-radius: 999px;
-  font-size: 14px;
+  border-radius: 12px;
+  font-size: 13px;
   font-weight: 700;
-  color: #fff7ed;
-  background: linear-gradient(135deg, color-mix(in srgb, var(--provider-log-accent) 90%, #ea580c), #b91c1c);
-  box-shadow: 0 16px 30px rgba(185, 28, 28, 0.22);
+  color: #eef2ff;
+  background: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%);
+  box-shadow: 0 14px 28px rgba(79, 70, 229, 0.28);
   cursor: pointer;
   transition:
     transform 0.2s ease,
@@ -1271,7 +1769,7 @@ watch(
 
 .provider-logs-load-more:hover:not(:disabled) {
   transform: translateY(-1px);
-  box-shadow: 0 22px 36px rgba(185, 28, 28, 0.28);
+  box-shadow: 0 18px 32px rgba(79, 70, 229, 0.32);
 }
 
 .provider-logs-load-more:disabled {
@@ -1279,28 +1777,44 @@ watch(
   opacity: 0.72;
 }
 
+:global(.provider-logs-inline-modal .modal-body::-webkit-scrollbar),
+.provider-log-terminal__body::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+:global(.provider-logs-inline-modal .modal-body::-webkit-scrollbar-track),
+.provider-log-terminal__body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+:global(.provider-logs-inline-modal .modal-body::-webkit-scrollbar-thumb),
+.provider-log-terminal__body::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.22);
+}
+
+:global(.provider-logs-inline-modal .modal-body::-webkit-scrollbar-thumb:hover),
+.provider-log-terminal__body::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.34);
+}
+
 @media (max-width: 860px) {
   .provider-logs-hero,
   .provider-log-entry__header,
-  .provider-log-code__header {
+  .provider-log-terminal__toolbar {
     flex-direction: column;
   }
 
-  .provider-log-entry__toolbar {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .provider-logs-hero__stats {
-    justify-content: flex-start;
-  }
-
+  .provider-logs-hero__side,
+  .provider-logs-hero__toolbar,
   .provider-logs-hero__actions {
     justify-content: flex-start;
+    align-items: flex-start;
   }
 
-  .provider-log-entry__time {
-    white-space: normal;
+  .provider-log-entry__footer {
+    align-items: stretch;
   }
 
   .provider-log-entry__copy {
@@ -1310,77 +1824,40 @@ watch(
 
 .provider-logs-modal--dark .provider-logs-hero {
   background:
-    radial-gradient(circle at top right, color-mix(in srgb, var(--provider-log-accent) 28%, rgba(15, 23, 42, 0)), transparent 42%),
-    linear-gradient(145deg, rgba(10, 14, 24, 0.96), rgba(19, 24, 35, 0.94));
-  border-color: rgba(255, 255, 255, 0.08);
+    linear-gradient(145deg, rgba(20, 22, 32, 0.96), rgba(15, 16, 24, 0.95));
+  border-color: rgba(99, 102, 241, 0.18);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.04),
-    0 28px 64px rgba(0, 0, 0, 0.42);
-}
-
-.provider-logs-modal--dark .provider-logs-hero__eyebrow {
-  color: color-mix(in srgb, var(--provider-log-accent) 70%, #fdba74);
+    0 24px 56px rgba(0, 0, 0, 0.34);
 }
 
 .provider-logs-modal--dark .provider-logs-pill--accent {
-  color: #fed7aa;
-  background: color-mix(in srgb, var(--provider-log-accent) 18%, rgba(255, 255, 255, 0.04));
-  border-color: color-mix(in srgb, var(--provider-log-accent) 22%, rgba(255, 255, 255, 0.1));
+  color: #c7d2fe;
+  background: rgba(99, 102, 241, 0.14);
+  border-color: rgba(129, 140, 248, 0.22);
 }
 
 .provider-logs-modal--dark .provider-logs-clear {
-  border-color: rgba(248, 113, 113, 0.22);
-  background: linear-gradient(135deg, rgba(55, 22, 28, 0.96), rgba(34, 18, 24, 0.94));
+  border-color: rgba(248, 113, 113, 0.18);
+  background: rgba(127, 29, 29, 0.16);
   color: #fecaca;
 }
 
 .provider-logs-modal--dark .provider-logs-clear:hover:not(:disabled) {
-  border-color: rgba(248, 113, 113, 0.34);
-  background: linear-gradient(135deg, rgba(76, 24, 32, 0.98), rgba(44, 19, 27, 0.96));
+  border-color: rgba(248, 113, 113, 0.28);
+  background: rgba(127, 29, 29, 0.24);
   color: #fee2e2;
 }
 
 .provider-logs-modal--dark .provider-logs-state--error {
-  color: #fca5a5;
+  color: #fda4af;
   background: linear-gradient(180deg, rgba(55, 22, 28, 0.94), rgba(34, 18, 24, 0.92));
-  border-color: rgba(248, 113, 113, 0.24);
-}
-
-.provider-logs-modal--dark .provider-log-entry__tag--semantic {
-  color: #fdba74;
-  background: rgba(249, 115, 22, 0.16);
-  border-color: rgba(249, 115, 22, 0.24);
+  border-color: rgba(248, 113, 113, 0.18);
 }
 
 .provider-logs-modal--dark .provider-log-entry__copy.is-copied {
   color: #bbf7d0;
-  border-color: rgba(34, 197, 94, 0.32);
-  background: linear-gradient(135deg, rgba(20, 48, 35, 0.96), rgba(18, 37, 31, 0.96));
-}
-
-.provider-logs-modal--dark .provider-log-code {
-  border-color: rgba(255, 255, 255, 0.08);
-  background: linear-gradient(180deg, rgba(5, 10, 18, 0.98), rgba(12, 18, 28, 0.98));
-}
-
-.provider-logs-modal--dark .provider-log-code__header {
-  color: rgba(226, 232, 240, 0.72);
-  border-bottom-color: rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.03);
-}
-
-.provider-logs-modal--dark .provider-log-code__badge {
-  color: #fdba74;
-  background: rgba(249, 115, 22, 0.16);
-}
-
-.provider-logs-modal--dark .provider-log-code__badge--console {
-  color: #bfdbfe;
-  background: rgba(59, 130, 246, 0.18);
-}
-
-.provider-logs-modal--dark .provider-log-code__badge--payload {
-  color: #fde68a;
-  background: rgba(234, 179, 8, 0.16);
+  border-color: rgba(34, 197, 94, 0.22);
+  background: rgba(20, 83, 45, 0.18);
 }
 </style>

@@ -459,7 +459,7 @@
         "clearLogs": "清除失败日志",
         "clearingLogs": "清除中...",
         "clearLogsConfirmTitle": "确认清除失败日志",
-        "confirmClearLogs": "确认只清除 {provider} 当前下面展示的失败请求日志吗？这不会清理 hourly / daily 统计汇总。",
+        "confirmClearLogs": "确认清除 {provider} 当前全部失败请求日志吗？这不会清理 hourly / daily 统计汇总。",
         "clearLogsSuccess": "已清除 {provider} 的失败日志：删除 {logs} 条请求明细",
         "clearLogsEmpty": "{provider} 当前没有可清理的失败日志",
         "clearLogsFailed": "清除失败日志失败：{error}",

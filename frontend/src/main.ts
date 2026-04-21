@@ -6,7 +6,66 @@ import { i18n, setupI18n } from './utils/i18n'
 import { initTheme } from './utils/ThemeManager'
 import router from './router/index'
 
+type BrowserWindowWithWailsBridge = Window & {
+  chrome?: {
+    webview?: {
+      postMessage?: (...args: any[]) => void
+    }
+  }
+  webkit?: {
+    messageHandlers?: {
+      external?: {
+        postMessage?: (...args: any[]) => void
+      }
+    }
+  }
+  _wails?: {
+    environment?: {
+      OS?: string
+      Arch?: string
+    }
+  }
+}
+
+const hasDesktopRuntimeBridge = () => {
+  if (typeof window === 'undefined') {
+    return false
+  }
+  const browserWindow = window as BrowserWindowWithWailsBridge
+  return Boolean(
+    browserWindow.chrome?.webview?.postMessage ||
+    browserWindow.webkit?.messageHandlers?.external?.postMessage,
+  )
+}
+
+const resolvePreviewOS = () => {
+  const browserNavigator = navigator as Navigator & {
+    userAgentData?: {
+      platform?: string
+    }
+  }
+  const normalizedPlatform = `${browserNavigator.userAgentData?.platform ?? navigator.platform ?? navigator.userAgent ?? ''}`.toLowerCase()
+  if (normalizedPlatform.includes('win')) return 'windows'
+  if (normalizedPlatform.includes('mac') || normalizedPlatform.includes('darwin')) return 'darwin'
+  if (normalizedPlatform.includes('linux') || normalizedPlatform.includes('x11')) return 'linux'
+  return 'browser'
+}
+
+const ensureBrowserPreviewWailsEnvironment = () => {
+  if (typeof window === 'undefined' || hasDesktopRuntimeBridge()) {
+    return
+  }
+
+  const browserWindow = window as BrowserWindowWithWailsBridge
+  browserWindow._wails = browserWindow._wails ?? {}
+  browserWindow._wails.environment = {
+    OS: browserWindow._wails.environment?.OS || resolvePreviewOS(),
+    Arch: browserWindow._wails.environment?.Arch || 'browser',
+  }
+}
+
 initTheme()
+ensureBrowserPreviewWailsEnvironment()
 const isMac = navigator.userAgent.includes('Mac')
 if (isMac) {
   document.documentElement.classList.add('mac')
