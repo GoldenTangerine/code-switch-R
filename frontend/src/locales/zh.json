@@ -843,6 +843,50 @@
         "dayScope": "日期 · {date}",
         "rangeScope": "时间段 · {start} ~ {end}"
       },
+      "summaryCards": {
+        "requests": {
+          "title": "调用次数",
+          "subtitle": "Call Frequency",
+          "status": "LIVE",
+          "totalHint": "累计调用总数",
+          "liveQps": "实时 QPS · 过去 1 分钟",
+          "avgQps": "平均 QPS",
+          "liveCalls": "1m 调用",
+          "peakQps": "峰值 QPS",
+          "successRate": "请求成功率",
+          "alert": "Alert"
+        },
+        "tokens": {
+          "title": "Token 消耗",
+          "subtitle": "Token Usage",
+          "status": "VOLUME",
+          "totalHint": "总消耗 Token",
+          "ratioLabel": "Input / Output 结构",
+          "avgPerRequest": "Avg/Req",
+          "peak": "Peak"
+        },
+        "cache": {
+          "title": "缓存命中",
+          "subtitle": "Cache Performance",
+          "status": "EFFICIENT",
+          "totalHint": "缓存读取 Token",
+          "hitRate": "环形命中率",
+          "savedCost": "节省成本",
+          "pulseStrong": "效率表现极佳",
+          "pulseNormal": "缓存仍有提升空间",
+          "savingsEstimate": "节省金额为按当前输入均价估算值"
+        },
+        "cost": {
+          "title": "费用消耗",
+          "subtitle": "Cost Analysis",
+          "status": "BILLING",
+          "totalHint": "当前累计消耗美金",
+          "weekTrend": "最近一周费用阶梯",
+          "dayTrend": "最近一天费用阶梯",
+          "compareYesterday": "较昨日同期",
+          "projectedDaily": "预测日均"
+        }
+      },
       "table": {
         "time": "时间",
         "platform": "平台",

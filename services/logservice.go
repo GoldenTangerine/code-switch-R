@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"sync"
@@ -576,6 +577,60 @@ func defaultRangeEnd(start time.Time) time.Time {
 		return startOfDay(start).AddDate(0, 0, 1)
 	}
 	return start.Add(24 * time.Hour)
+}
+
+func resolveAggregationRange(startAt string, endAt string) (time.Time, time.Time, error) {
+	start, err := parseTimeInput(startAt)
+	if err != nil {
+		return time.Time{}, time.Time{}, err
+	}
+
+	end := time.Time{}
+	if strings.TrimSpace(endAt) != "" {
+		end, err = parseTimeInput(endAt)
+		if err != nil {
+			return time.Time{}, time.Time{}, err
+		}
+	} else {
+		end = defaultRangeEnd(start)
+	}
+
+	return start, end, nil
+}
+
+func resolveSummaryVisibleEnd(start time.Time, end time.Time, now time.Time) time.Time {
+	if now.After(start) && now.Before(end) {
+		return now
+	}
+	return end
+}
+
+func buildSummaryComparisonRange(start time.Time, end time.Time, visibleEnd time.Time) (time.Time, time.Time, bool) {
+	if !start.Before(end) {
+		return time.Time{}, time.Time{}, false
+	}
+
+	if !visibleEnd.After(start) {
+		visibleEnd = end
+	}
+	if !visibleEnd.After(start) {
+		return time.Time{}, time.Time{}, false
+	}
+
+	visibleDuration := visibleEnd.Sub(start)
+	if visibleDuration <= 0 {
+		return time.Time{}, time.Time{}, false
+	}
+
+	if end.Sub(start) <= 24*time.Hour {
+		return start.Add(-24 * time.Hour), visibleEnd.Add(-24 * time.Hour), true
+	}
+
+	return start.Add(-visibleDuration), start, true
+}
+
+func calculateLogTotalTokens(logEntry ReqeustLog) int64 {
+	return int64(logEntry.InputTokens) + int64(logEntry.OutputTokens) + int64(logEntry.CacheReadTokens)
 }
 
 func buildProviderPerformanceCacheKey(platformKey string, providerRef string, startUTCKey string, endUTCKey string) string {
@@ -1267,19 +1322,9 @@ func (ls *LogService) StatsRangeV2(platform string, provider string, startAt str
 		Series: make([]LogStatsSeries, 0),
 	}
 
-	start, err := parseTimeInput(startAt)
+	start, end, err := resolveAggregationRange(startAt, endAt)
 	if err != nil {
 		return stats, err
-	}
-
-	end := time.Time{}
-	if strings.TrimSpace(endAt) != "" {
-		end, err = parseTimeInput(endAt)
-		if err != nil {
-			return stats, err
-		}
-	} else {
-		end = defaultRangeEnd(start)
 	}
 
 	if !start.Before(end) {
@@ -1392,6 +1437,140 @@ func (ls *LogService) StatsRangeV2(platform string, provider string, startAt str
 	return stats, nil
 }
 
+func (ls *LogService) SummaryRangeV2(platform string, provider string, startAt string, endAt string) (LogSummary, error) {
+	const activityBucketCount = 12
+
+	summary := LogSummary{
+		ActivityPoints: make([]float64, activityBucketCount),
+	}
+
+	start, end, err := resolveAggregationRange(startAt, endAt)
+	if err != nil {
+		return summary, err
+	}
+	if !start.Before(end) {
+		return summary, nil
+	}
+
+	logs, err := ls.loadRequestLogsForAggregation(platform, provider, start, end)
+	if err != nil {
+		return summary, err
+	}
+
+	var successCount int64
+	for _, logEntry := range logs {
+		totalTokens := calculateLogTotalTokens(logEntry)
+
+		summary.TotalRequests++
+		summary.InputTokens += int64(logEntry.InputTokens)
+		summary.OutputTokens += int64(logEntry.OutputTokens)
+		summary.CacheReadTokens += int64(logEntry.CacheReadTokens)
+		summary.TotalTokens += totalTokens
+		summary.CostTotal += logEntry.TotalCost
+		summary.CostInput += logEntry.InputCost
+		summary.CostCacheRead += logEntry.CacheReadCost
+
+		if logEntry.HttpCode >= 400 {
+			summary.FailedRequests++
+		} else {
+			successCount++
+		}
+
+		if totalTokens > summary.PeakTokens {
+			summary.PeakTokens = totalTokens
+		}
+	}
+
+	if summary.TotalRequests > 0 {
+		summary.SuccessRate = float64(successCount) / float64(summary.TotalRequests)
+		summary.AvgTokensPerRequest = float64(summary.TotalTokens) / float64(summary.TotalRequests)
+	}
+
+	if summary.InputTokens > 0 && summary.CacheReadTokens > 0 {
+		effectiveInputRate := summary.CostInput / float64(summary.InputTokens)
+		estimatedUncachedCost := float64(summary.CacheReadTokens) * effectiveInputRate
+		if estimatedUncachedCost > summary.CostCacheRead {
+			summary.SavedCostEstimate = estimatedUncachedCost - summary.CostCacheRead
+		}
+	}
+
+	now := time.Now().In(time.Local)
+	visibleEnd := resolveSummaryVisibleEnd(start, end, now)
+	if !visibleEnd.After(start) {
+		visibleEnd = end
+	}
+	if visibleEnd.After(start) {
+		summary.ProjectedDailyCost = summary.CostTotal / visibleEnd.Sub(start).Hours() * 24
+		if math.IsNaN(summary.ProjectedDailyCost) || math.IsInf(summary.ProjectedDailyCost, 0) {
+			summary.ProjectedDailyCost = 0
+		}
+	}
+
+	if compareStart, compareEnd, ok := buildSummaryComparisonRange(start, end, visibleEnd); ok && compareStart.Before(compareEnd) {
+		previousLogs, compareErr := ls.loadRequestLogsForAggregation(platform, provider, compareStart, compareEnd)
+		if compareErr != nil {
+			return summary, compareErr
+		}
+		summary.ComparisonAvailable = true
+		for _, logEntry := range previousLogs {
+			summary.PreviousCostTotal += logEntry.TotalCost
+		}
+	}
+
+	activityEnd := visibleEnd
+	if !activityEnd.After(start) {
+		activityEnd = end
+	}
+	activityStart := activityEnd.Add(-time.Minute)
+	if activityStart.Before(start) {
+		activityStart = start
+	}
+
+	activityDuration := activityEnd.Sub(activityStart)
+	if activityDuration > 0 {
+		bucketCounts := make([]int64, activityBucketCount)
+		activityRequests := int64(0)
+		peakBucketCount := int64(0)
+		activityDurationSeconds := activityDuration.Seconds()
+		bucketDurationSeconds := activityDurationSeconds / float64(activityBucketCount)
+		if bucketDurationSeconds <= 0 {
+			bucketDurationSeconds = 1
+		}
+
+		for _, logEntry := range logs {
+			createdAt, ok := parseRequestLogLocalTime(logEntry.CreatedAt)
+			if !ok || createdAt.Before(activityStart) || !createdAt.Before(activityEnd) {
+				continue
+			}
+
+			offset := createdAt.Sub(activityStart)
+			bucketIndex := int((float64(offset) / float64(activityDuration)) * float64(activityBucketCount))
+			if bucketIndex < 0 {
+				bucketIndex = 0
+			}
+			if bucketIndex >= activityBucketCount {
+				bucketIndex = activityBucketCount - 1
+			}
+
+			bucketCounts[bucketIndex]++
+			activityRequests++
+			if bucketCounts[bucketIndex] > peakBucketCount {
+				peakBucketCount = bucketCounts[bucketIndex]
+			}
+		}
+
+		for i, count := range bucketCounts {
+			summary.ActivityPoints[i] = float64(count) / bucketDurationSeconds
+		}
+		if activityDurationSeconds > 0 {
+			summary.ActivityAvgQPS = float64(activityRequests) / activityDurationSeconds
+		}
+		summary.ActivityPeakQPS = float64(peakBucketCount) / bucketDurationSeconds
+	}
+
+	return summary, nil
+}
+
 func (ls *LogService) ProviderDailyStats(platform string) ([]ProviderDailyStat, error) {
 	start := startOfDay(time.Now())
 	end := start.AddDate(0, 0, 1)
@@ -1399,19 +1578,9 @@ func (ls *LogService) ProviderDailyStats(platform string) ([]ProviderDailyStat, 
 }
 
 func (ls *LogService) ProviderStatsRangeV2(platform string, provider string, startAt string, endAt string) ([]ProviderDailyStat, error) {
-	start, err := parseTimeInput(startAt)
+	start, end, err := resolveAggregationRange(startAt, endAt)
 	if err != nil {
 		return nil, err
-	}
-
-	end := time.Time{}
-	if strings.TrimSpace(endAt) != "" {
-		end, err = parseTimeInput(endAt)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		end = defaultRangeEnd(start)
 	}
 
 	if !start.Before(end) {
@@ -1666,19 +1835,9 @@ func (ls *LogService) ProviderStatsRangeV2(platform string, provider string, sta
 }
 
 func (ls *LogService) ModelStatsRangeV2(platform string, provider string, startAt string, endAt string) ([]ModelUsageStat, error) {
-	start, err := parseTimeInput(startAt)
+	start, end, err := resolveAggregationRange(startAt, endAt)
 	if err != nil {
 		return nil, err
-	}
-
-	end := time.Time{}
-	if strings.TrimSpace(endAt) != "" {
-		end, err = parseTimeInput(endAt)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		end = defaultRangeEnd(start)
 	}
 
 	if !start.Before(end) {
@@ -1890,6 +2049,28 @@ type LogStats struct {
 	CostCacheCreate   float64          `json:"cost_cache_create"`
 	CostCacheRead     float64          `json:"cost_cache_read"`
 	Series            []LogStatsSeries `json:"series"`
+}
+
+type LogSummary struct {
+	TotalRequests       int64     `json:"total_requests"`
+	FailedRequests      int64     `json:"failed_requests"`
+	SuccessRate         float64   `json:"success_rate"`
+	InputTokens         int64     `json:"input_tokens"`
+	OutputTokens        int64     `json:"output_tokens"`
+	CacheReadTokens     int64     `json:"cache_read_tokens"`
+	TotalTokens         int64     `json:"total_tokens"`
+	PeakTokens          int64     `json:"peak_tokens"`
+	AvgTokensPerRequest float64   `json:"avg_tokens_per_request"`
+	CostTotal           float64   `json:"cost_total"`
+	CostInput           float64   `json:"cost_input"`
+	CostCacheRead       float64   `json:"cost_cache_read"`
+	SavedCostEstimate   float64   `json:"saved_cost_estimate"`
+	ProjectedDailyCost  float64   `json:"projected_daily_cost"`
+	PreviousCostTotal   float64   `json:"previous_cost_total"`
+	ComparisonAvailable bool      `json:"comparison_available"`
+	ActivityAvgQPS      float64   `json:"activity_avg_qps"`
+	ActivityPeakQPS     float64   `json:"activity_peak_qps"`
+	ActivityPoints      []float64 `json:"activity_points"`
 }
 
 type ProviderDailyStat struct {

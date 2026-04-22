@@ -20,12 +20,82 @@ export type LogProviderOption = {
   providerName: string
 }
 
+export type LogsSummaryCardTone = 'blue' | 'purple' | 'amber' | 'green'
+
+export type LogsSummaryCardValueSize = 'regular' | 'compact' | 'dense'
+
+export type LogsSummaryBadgeTone = 'neutral' | 'alert' | 'success' | 'warning'
+
+export type LogsSummaryMetricTone = 'neutral' | 'success' | 'warning' | 'danger'
+
+export type LogsSummaryMicroPoint = {
+  label: string
+  value: number
+  intensity: number
+  active?: boolean
+}
+
+export type LogsSummaryProgress = {
+  label: string
+  value: number
+  valueLabel: string
+  tone: 'primary' | 'alert' | 'success'
+}
+
+export type LogsSummaryMetric = {
+  label: string
+  value: string
+  tone?: LogsSummaryMetricTone
+  icon?: 'up' | 'alert' | 'spark'
+  animated?: boolean
+}
+
+export type LogsSummaryRatioSegment = {
+  label: string
+  value: number
+  valueLabel?: string
+  color: string
+}
+
+export type LogsSummaryBadge = {
+  text: string
+  tone: LogsSummaryBadgeTone
+}
+
 export type LogsSummaryCard = {
   key: string
   label: string
+  subtitle: string
+  statusLabel?: string
   value: string
+  valueSuffix?: string
   hint: string
   subValue?: string
+  tone: LogsSummaryCardTone
+  valueSize?: LogsSummaryCardValueSize
+  badge?: LogsSummaryBadge
+  miniBars?: {
+    label: string
+    points: LogsSummaryMicroPoint[]
+    footerLeft: string
+    footerRight: string
+  }
+  progress?: LogsSummaryProgress
+  ratio?: {
+    label: string
+    segments: LogsSummaryRatioSegment[]
+  }
+  ring?: {
+    label: string
+    value: number
+    valueLabel: string
+    pulse: boolean
+  }
+  trend?: {
+    label: string
+    points: LogsSummaryMicroPoint[]
+  }
+  metrics?: LogsSummaryMetric[]
 }
 
 export type ModelShareRow = {

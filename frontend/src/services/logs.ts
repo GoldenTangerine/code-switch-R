@@ -145,6 +145,28 @@ export type LogStats = {
   series: LogStatsSeries[]
 }
 
+export type LogSummary = {
+  total_requests: number
+  failed_requests: number
+  success_rate: number
+  input_tokens: number
+  output_tokens: number
+  cache_read_tokens: number
+  total_tokens: number
+  peak_tokens: number
+  avg_tokens_per_request: number
+  cost_total: number
+  cost_input: number
+  cost_cache_read: number
+  saved_cost_estimate: number
+  projected_daily_cost: number
+  previous_cost_total: number
+  comparison_available: boolean
+  activity_avg_qps: number
+  activity_peak_qps: number
+  activity_points: number[]
+}
+
 export const fetchLogStats = async (platform: LogPlatform | '' = ''): Promise<LogStats> => {
   return Call.ByName('codeswitch/services.LogService.StatsSince', platform)
 }
@@ -162,6 +184,14 @@ export const fetchLogStatsV2 = async (query: LogStatsQuery = {}): Promise<LogSta
   const startAt = query.startAt ?? ''
   const endAt = query.endAt ?? ''
   return Call.ByName('codeswitch/services.LogService.StatsRangeV2', platform, provider, startAt, endAt)
+}
+
+export const fetchLogSummaryV2 = async (query: LogStatsQuery = {}): Promise<LogSummary> => {
+  const platform = query.platform ?? ''
+  const provider = query.provider ?? ''
+  const startAt = query.startAt ?? ''
+  const endAt = query.endAt ?? ''
+  return Call.ByName('codeswitch/services.LogService.SummaryRangeV2', platform, provider, startAt, endAt)
 }
 
 export const fetchCostSince = async (start: string, platform: LogPlatform | '' = ''): Promise<number> => {

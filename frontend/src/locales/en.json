@@ -842,6 +842,50 @@
         "dayScope": "Day · {date}",
         "rangeScope": "Range · {start} ~ {end}"
       },
+      "summaryCards": {
+        "requests": {
+          "title": "Call Frequency",
+          "subtitle": "Call Frequency",
+          "status": "LIVE",
+          "totalHint": "Cumulative calls",
+          "liveQps": "Live QPS · Last 1 minute",
+          "avgQps": "Avg QPS",
+          "liveCalls": "1m calls",
+          "peakQps": "Peak QPS",
+          "successRate": "Success rate",
+          "alert": "Alert"
+        },
+        "tokens": {
+          "title": "Token Usage",
+          "subtitle": "Token Usage",
+          "status": "VOLUME",
+          "totalHint": "Total consumed tokens",
+          "ratioLabel": "Input / Output mix",
+          "avgPerRequest": "Avg/Req",
+          "peak": "Peak"
+        },
+        "cache": {
+          "title": "Cache Performance",
+          "subtitle": "Cache Performance",
+          "status": "EFFICIENT",
+          "totalHint": "Cache-read tokens",
+          "hitRate": "Hit rate",
+          "savedCost": "Saved cost",
+          "pulseStrong": "Cache efficiency looks excellent",
+          "pulseNormal": "There is still room to improve cache reuse",
+          "savingsEstimate": "Savings are estimated from the current effective input rate"
+        },
+        "cost": {
+          "title": "Cost Analysis",
+          "subtitle": "Cost Analysis",
+          "status": "BILLING",
+          "totalHint": "Current cumulative spend",
+          "weekTrend": "Last 7 days cost steps",
+          "dayTrend": "Last 24 hours cost steps",
+          "compareYesterday": "vs yesterday",
+          "projectedDaily": "Projected / day"
+        }
+      },
       "table": {
         "time": "Time",
         "platform": "Platform",

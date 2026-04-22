@@ -4,9 +4,11 @@ import { GetProviders as GetGeminiProviders } from '../../../../bindings/codeswi
 import {
   fetchRequestLogsPage,
   fetchLogProviderRefs,
+  fetchLogSummaryV2,
   fetchLogStatsV2,
   fetchModelStatsV2,
   type RequestLog,
+  type LogSummary,
   type LogStats,
   type LogPlatform,
   type ModelUsageStat,
@@ -113,6 +115,7 @@ export function useLogsPageData(options: UseLogsPageDataOptions) {
   const { filters, computeDateRange } = options
 
   const logs = ref<RequestLog[]>([])
+  const summary = ref<LogSummary | null>(null)
   const stats = ref<LogStats | null>(null)
   const modelStats = ref<ModelUsageStat[]>([])
   const loading = ref(false)
@@ -120,6 +123,10 @@ export function useLogsPageData(options: UseLogsPageDataOptions) {
   const pageSize = ref(DEFAULT_PAGE_SIZE)
   const logsTotalCount = ref(0)
   const logsRequestId = ref(0)
+  const summaryRequestId = ref(0)
+  const statsRequestId = ref(0)
+  const modelStatsRequestId = ref(0)
+  const providerOptionsRequestId = ref(0)
   const providerOptions = ref<LogProviderOption[]>([])
   const providerConfigCache = new Map<string, { loadedAt: number; options: LogProviderOption[] }>()
 
@@ -208,6 +215,7 @@ export function useLogsPageData(options: UseLogsPageDataOptions) {
   }
 
   const loadProviderOptions = async () => {
+    const requestId = ++providerOptionsRequestId.value
     const [fromLogs, fromConfig] = await Promise.all([
       fetchLogProviderRefs(filters.platform).catch((error) => {
         console.error('failed to load provider refs from request logs', error)
@@ -218,6 +226,7 @@ export function useLogsPageData(options: UseLogsPageDataOptions) {
         return [] as LogProviderOption[]
       }),
     ])
+    if (requestId !== providerOptionsRequestId.value) return
 
     providerOptions.value = mergeProviderOptions([
       ...buildProviderOptionsFromRefs(fromLogs ?? []),
@@ -270,40 +279,88 @@ export function useLogsPageData(options: UseLogsPageDataOptions) {
   }
 
   const loadStats = async () => {
+    const requestId = ++statsRequestId.value
     try {
       const range = computeDateRange()
-      if (range == null) return
+      if (range == null) {
+        if (requestId === statsRequestId.value) {
+          stats.value = null
+        }
+        return
+      }
       const data = await fetchLogStatsV2({
         platform: filters.platform,
         provider: filters.provider,
         startAt: range.startAt,
         endAt: range.endAt,
       })
+      if (requestId !== statsRequestId.value) return
       stats.value = data ?? null
     } catch (error) {
+      if (requestId !== statsRequestId.value) return
       console.error('failed to load log stats', error)
+      stats.value = null
+    }
+  }
+
+  const loadSummary = async () => {
+    const requestId = ++summaryRequestId.value
+    try {
+      const range = computeDateRange()
+      if (range == null) {
+        if (requestId === summaryRequestId.value) {
+          summary.value = null
+        }
+        return
+      }
+      const data = await fetchLogSummaryV2({
+        platform: filters.platform,
+        provider: filters.provider,
+        startAt: range.startAt,
+        endAt: range.endAt,
+      })
+      if (requestId !== summaryRequestId.value) return
+      summary.value = data ?? null
+    } catch (error) {
+      if (requestId !== summaryRequestId.value) return
+      console.error('failed to load log summary', error)
+      summary.value = null
     }
   }
 
   const loadModelStats = async () => {
+    const requestId = ++modelStatsRequestId.value
     try {
       const range = computeDateRange()
-      if (range == null) return
+      if (range == null) {
+        if (requestId === modelStatsRequestId.value) {
+          modelStats.value = []
+        }
+        return
+      }
       const data = await fetchModelStatsV2({
         platform: filters.platform,
         provider: filters.provider,
         startAt: range.startAt,
         endAt: range.endAt,
       })
+      if (requestId !== modelStatsRequestId.value) return
       modelStats.value = data ?? []
     } catch (error) {
+      if (requestId !== modelStatsRequestId.value) return
       console.error('failed to load model stats', error)
       modelStats.value = []
     }
   }
 
   const loadDashboard = async () => {
-    await Promise.all([loadLogs(), loadStats(), loadModelStats(), loadProviderOptions()])
+    await Promise.all([
+      loadLogs(),
+      loadSummary(),
+      loadStats(),
+      loadModelStats(),
+      loadProviderOptions(),
+    ])
     syncProviderOptionsFromLogs(logs.value)
   }
 
@@ -339,6 +396,7 @@ export function useLogsPageData(options: UseLogsPageDataOptions) {
 
   return {
     logs,
+    summary,
     stats,
     modelStats,
     loading,

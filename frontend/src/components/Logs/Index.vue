@@ -296,6 +296,7 @@ const {
 
 const {
   logs,
+  summary,
   stats,
   modelStats,
   loading,
@@ -325,6 +326,7 @@ const {
 } = useLogsChartsPresentation({
   t,
   isDarkTheme,
+  summary,
   stats,
   modelStats,
   statsSeries: computed(() => stats.value?.series ?? []),

@@ -1,3 +1,20 @@
+# Code Switch v2.8.16
+
+## 修复
+- **日志统计顶部 4 张 summary 卡片终于不再“外表一套，口径四套”了**：日志页新增统一的 `SummaryRangeV2` 聚合链路后，请求数、成功率、QPS、Token 总量、峰值、缓存收益和费用对比现在都基于同一时间窗口计算；默认 / 历史筛选下不再出现“调用次数按今天算、失败数却是全历史、QPS 还是最近 1 分钟采样”的串味场面。
+- **Token 消耗卡终于把 `Cache Read` 当人看了**：比例条从原来的 `Input / Output` 两段升级成 `Input / Cache Read / Output` 三段结构，缓存读取单独拿琥珀色标识并展示占比标签，不再把缓存命中的 token 悄悄塞进总量里却在结构图里装失踪。
+- **日志卡片的空态和视觉比例终于不像放大版 demo 了**：summary 卡片现在补齐了 `subtitle / trend / ring value / footer meta / animated` 等关键展示字段，空数据会老实显示 `—` 而不是假装 `$0` 或 `100%`，同时整体布局、留白和卡片宽度也重新收紧到参考稿那套紧凑比例，不再在宽屏上中间挤一坨、两边空得能跑马。
+
+## 技术改进
+- **日志汇总正式从前端多请求拼 KPI 收口到后端聚合接口**：新增 `LogService.SummaryRangeV2` 与前端 `fetchLogSummaryV2`，统一输出 `total_tokens / peak_tokens / previous_cost_total / activity_points` 等卡片所需指标；`useLogsPageData` 也补上 summary / stats / model stats 的 requestId 防旧请求回写，少让快速切筛选时旧响应把新状态冲掉。
+- **summary 卡片模板与表现层重构成一套可维护结构**：`LogsSummaryCards.vue` 现在按 tone、value size、ratio segments、ring、trend 和 metrics 统一渲染，三色比例条、缓存环形值精度、费用趋势标签与收益动效都落到了模板里，后面再调单卡样式不用继续在模板和计算层之间来回缝补丁。
+- **前后端校验链路顺手补强**：Vitest 补上了 `fetchLogSummaryV2` mock 和 stale request 场景，前端 `vue-tsc` / 单测继续全绿；后端 summary 聚合的投影日成本兜底也补成 `NaN/Inf` 安全判断，避免运行时再冒出奇怪的无穷大费用。
+
+## 发布
+- **本次发版版本号统一推进到 `v2.8.16`**：同步更新应用常量、构建配置、Darwin `Info.plist`、Windows 元数据、Linux 包版本与更新日志，并准备推送 `v2.8.16` tag 触发 GitHub 自动打包，继续保证仓库版本、Git tag 和最终产物别再各唱各的调。
+
+---
+
 # Code Switch v2.8.15
 
 ## 修复
