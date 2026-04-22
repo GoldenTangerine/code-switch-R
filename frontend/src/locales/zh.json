@@ -53,7 +53,17 @@
     "env": "环境",
     "logs": "日志",
     "console": "控制台",
-    "settings": "设置"
+    "settings": "设置",
+    "sections": {
+      "workspace": "核心工作台",
+      "monitoring": "监控与诊断",
+      "system": "系统控制"
+    },
+    "meta": {
+      "version": "Version",
+      "online": "ONLINE",
+      "offline": "OFFLINE"
+    }
   },
   "availability": {
     "title": "可用性监控",

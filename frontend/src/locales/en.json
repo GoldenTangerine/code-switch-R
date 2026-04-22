@@ -53,7 +53,17 @@
     "env": "Env Check",
     "logs": "Logs",
     "console": "Console",
-    "settings": "Settings"
+    "settings": "Settings",
+    "sections": {
+      "workspace": "Workspace",
+      "monitoring": "Monitoring & Diagnostics",
+      "system": "System Control"
+    },
+    "meta": {
+      "version": "Version",
+      "online": "ONLINE",
+      "offline": "OFFLINE"
+    }
   },
   "availability": {
     "title": "Availability Monitor",
