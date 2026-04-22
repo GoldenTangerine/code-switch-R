@@ -112,7 +112,18 @@ export function useLogsFilters(options: UseLogsFiltersOptions) {
     filters.provider = value
   }
 
+  const resetDateFilterFields = () => {
+    filters.year = ''
+    filters.month = ''
+    filters.day = ''
+    filters.rangeStart = ''
+    filters.rangeEnd = ''
+  }
+
   const updateFilterDateType = (value: LogDateFilterType) => {
+    if (filters.dateType !== value) {
+      resetDateFilterFields()
+    }
     filters.dateType = value
     if (value === 'year') {
       filters.year = String(getCurrentYear())

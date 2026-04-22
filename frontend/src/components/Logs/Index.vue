@@ -20,6 +20,7 @@
         :day-picker-value="dayPickerValue"
         :range-picker-value="rangePickerValue"
         :is-dark-theme="isDarkTheme"
+        :summary-scope-hint="summaryScopeHint"
         @submit="applyFilters"
         @update:platform="updateFilterPlatform"
         @update:provider="updateFilterProvider"

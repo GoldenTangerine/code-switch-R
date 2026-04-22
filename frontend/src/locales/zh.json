@@ -874,7 +874,17 @@
         "month": "月份",
         "day": "日期",
         "range": "时间段",
+        "footer": {
+          "statusReady": "服务状态：就绪",
+          "statusLoading": "服务状态：同步中",
+          "statusInvalid": "服务状态：待补全",
+          "scope": "范围：{scope}",
+          "utilityClear": "清空当前时间条件",
+          "utilityClose": "收起当前下拉",
+          "utilityIdle": "筛选工具"
+        },
         "providerPlaceholder": "输入供应商名称",
+        "providerNoResults": "没有匹配的供应商",
         "limit": "条数上限"
       },
       "tabs": {

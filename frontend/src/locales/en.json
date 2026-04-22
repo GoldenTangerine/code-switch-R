@@ -873,7 +873,17 @@
         "month": "Month",
         "day": "Date",
         "range": "Range",
+        "footer": {
+          "statusReady": "Service Status: Operational",
+          "statusLoading": "Service Status: Syncing",
+          "statusInvalid": "Service Status: Awaiting Input",
+          "scope": "Scope: {scope}",
+          "utilityClear": "Clear current date filter",
+          "utilityClose": "Close active dropdown",
+          "utilityIdle": "Filter tools"
+        },
         "providerPlaceholder": "Provider name",
+        "providerNoResults": "No matching providers",
         "limit": "Limit"
       },
       "tabs": {
