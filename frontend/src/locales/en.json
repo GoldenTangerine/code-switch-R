@@ -67,20 +67,58 @@
   },
   "availability": {
     "title": "Availability Monitor",
-    "subtitle": "Real-time health monitoring for AI providers",
+    "kicker": "Live Status Center",
+    "subtitle": "Real-time health status and latency monitoring for AI providers",
+    "loading": "Loading monitoring data...",
     "refreshAll": "Check All",
     "refreshing": "Checking...",
     "check": "Check",
     "providers": "Providers",
     "lastUpdate": "Last update",
     "nextRefresh": "Next refresh",
-    "notMonitored": "Not monitored",
+    "notMonitored": "Not enabled",
     "noProviders": "No providers yet. Please add provider configuration first.",
+    "runtime": {
+      "pollingRunning": "Background polling online",
+      "pollingStopped": "Background polling paused"
+    },
     "stats": {
       "operational": "Operational",
-      "degraded": "Degraded",
-      "failed": "Failed",
+      "degraded": "High Latency",
+      "failed": "Outage",
       "disabled": "Disabled"
+    },
+    "statusDescription": {
+      "operational": "Stable response path. The latest check passed cleanly.",
+      "degraded": "The endpoint is reachable, but latency is starting to drift.",
+      "failed": "The latest health check failed. Investigate the upstream path.",
+      "disabled": "This node is currently excluded from automatic health checks."
+    },
+    "history": {
+      "title": "90-day uptime history",
+      "start": "90 days ago",
+      "end": "Today",
+      "noSample": "No sample yet",
+      "noData": "No historical sample",
+      "tooltip": {
+        "status": "Status",
+        "latency": "Latency"
+      }
+    },
+    "card": {
+      "toggleMonitoring": "Toggle monitoring",
+      "currentLatency": "Current latency",
+      "avgLatency": "Average latency",
+      "uptime": "Uptime",
+      "lastChecked": "Last checked",
+      "quickCheck": "Check this node now",
+      "checking": "Checking...",
+      "autoRefresh": "Check frequency: every {seconds}s",
+      "model": "Model",
+      "endpoint": "Endpoint",
+      "timeout": "Timeout",
+      "autoBlacklist": "Auto blacklist",
+      "latestError": "Latest error"
     },
     "settings": {
       "title": "Availability Monitor Settings",
@@ -92,8 +130,8 @@
       "operationalThresholdHint": "Response latency below this is considered operational"
     },
     "editConfig": "Edit Config",
-    "enableMonitoring": "Enable Monitoring",
-    "enableToMonitor": "Please enable availability monitoring first",
+    "enableMonitoring": "Enable monitoring",
+    "enableToMonitor": "Enable monitoring to start health checks",
     "configTitle": "Advanced Availability Config",
     "field": {
       "testModel": "Test Model",
@@ -122,6 +160,12 @@
       "testEndpointHint": "Leave empty for default endpoint",
       "timeout": "Timeout",
       "timeoutHint": "Default 15 seconds"
+    },
+    "statusChip": {
+      "operational": "Operational",
+      "degraded": "Slow Response",
+      "failed": "Service Down",
+      "disabled": "Pending"
     }
   },
   "common": {

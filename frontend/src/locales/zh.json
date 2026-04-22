@@ -67,20 +67,58 @@
   },
   "availability": {
     "title": "可用性监控",
-    "subtitle": "实时监控 AI 供应商的健康状态",
+    "kicker": "实时状态中枢",
+    "subtitle": "实时监控各 AI 供应商 API 健康状态与响应速度",
+    "loading": "正在加载监测数据...",
     "refreshAll": "全部检测",
     "refreshing": "检测中...",
     "check": "检测",
     "providers": "供应商",
     "lastUpdate": "最后更新",
     "nextRefresh": "下次刷新",
-    "notMonitored": "未监控",
+    "notMonitored": "未启用",
     "noProviders": "暂无供应商，请先添加供应商配置",
+    "runtime": {
+      "pollingRunning": "后台巡检运行中",
+      "pollingStopped": "后台巡检已暂停"
+    },
     "stats": {
-      "operational": "正常",
-      "degraded": "延迟",
-      "failed": "故障",
+      "operational": "正常运行",
+      "degraded": "高延迟",
+      "failed": "故障中",
       "disabled": "未启用"
+    },
+    "statusDescription": {
+      "operational": "响应稳定，最近一次检测通过。",
+      "degraded": "接口可达，但延迟已经出现明显波动。",
+      "failed": "最近一次检测失败，建议尽快排查上游链路。",
+      "disabled": "该节点当前未参与自动健康检测。"
+    },
+    "history": {
+      "title": "近 90 天可用性",
+      "start": "90 天前",
+      "end": "今日",
+      "noSample": "暂无采样",
+      "noData": "暂无历史采样",
+      "tooltip": {
+        "status": "状态",
+        "latency": "延迟"
+      }
+    },
+    "card": {
+      "toggleMonitoring": "切换监控状态",
+      "currentLatency": "当前延迟",
+      "avgLatency": "平均延迟",
+      "uptime": "可用率",
+      "lastChecked": "最近检测",
+      "quickCheck": "立即检测此节点",
+      "checking": "检测中...",
+      "autoRefresh": "监控频率：每 {seconds} 秒",
+      "model": "模型",
+      "endpoint": "端点",
+      "timeout": "超时",
+      "autoBlacklist": "自动拉黑",
+      "latestError": "最近错误"
     },
     "settings": {
       "title": "可用性监控设置",
@@ -92,7 +130,7 @@
       "operationalThresholdHint": "响应延迟小于此值判定为正常"
     },
     "editConfig": "编辑配置",
-    "enableMonitoring": "启用监控",
+    "enableMonitoring": "启动监控",
     "enableToMonitor": "请先启用可用性监控",
     "configTitle": "可用性高级配置",
     "field": {
@@ -122,6 +160,12 @@
       "testEndpointHint": "留空使用默认端点",
       "timeout": "超时时间",
       "timeoutHint": "默认 15 秒"
+    },
+    "statusChip": {
+      "operational": "正常运行",
+      "degraded": "响应缓慢",
+      "failed": "服务中断",
+      "disabled": "待连接"
     }
   },
   "common": {
