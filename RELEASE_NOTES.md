@@ -1,3 +1,18 @@
+# Code Switch v2.8.15
+
+## 修复
+- **日志页金额口径终于不再“列表一套、汇总一套、图表再来一套”各算各的了**：`StatsRangeV2`、`ProviderStatsRangeV2` 和 `ModelStatsRangeV2` 现统一从请求明细走纠偏后的金额聚合，旧日志和新日志都会优先按 `response_model` 对应价格重算展示，日志列表、汇总卡片、Provider 统计和模型占比终于能对上账。
+- **金额计算链路不再偷偷回退到本地模型把账带歪**：后端写日志计费、读日志纠偏以及前端 tooltip / 明细候选链都已移除对本地 `model` 的兜底依赖，缺少 `response_model / requested_model` 时宁可老实承认没命中价格，也不再拿本地路由模型价格硬凑金额。
+
+## 技术改进
+- **日志统计聚合正式收口到“明细纠偏后再汇总”**：新增聚合明细加载 helper，让统计接口直接复用 `buildRequestLogList -> applyLogPricing` 这条现成链路，少让金额修正逻辑在列表、汇总和图表里各自拷一份野路子。
+- **回归测试把 response model 计价和 fallback 边界钉死了**：补齐 Go 和 Vitest 用例，覆盖日志写入计费、日志读取纠偏、统计聚合、前端价格 tooltip 以及“缺少返回/请求模型时不得回退本地 model”这几条关键路径，后面谁再手痒改回去，测试会先出来狠狠干他一锤。
+
+## 发布
+- **本次发版版本号统一推进到 `v2.8.15`**：同步更新应用常量、构建配置、Darwin `Info.plist`、Windows 元数据、Linux 包版本与更新日志，并准备推送 `v2.8.15` tag 触发 GitHub 自动打包，继续保证仓库版本、Git tag 和最终产物别再各唱各的调。
+
+---
+
 # Code Switch v2.8.14
 
 ## 修复

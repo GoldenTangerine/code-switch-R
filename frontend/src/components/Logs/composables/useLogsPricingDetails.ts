@@ -21,6 +21,7 @@ import {
   hasProviderPricingSnapshot,
   isProviderPerCallValueSet,
   mergeCostTooltipNotes,
+  resolveLogPricingModelName,
   resolvePriceSource,
   resolveGroupMultiplier,
   resolvePricingRow,
@@ -186,7 +187,7 @@ export function useLogsPricingDetails(options: UseLogsPricingDetailsOptions) {
 
   const buildCostTooltipDetail = (item: RequestLog): CostTooltipDetail => {
     const source = resolvePriceSource(item)
-    const fallbackModelName = String(item.matched_pricing_model ?? item.model ?? '').trim() || '—'
+    const fallbackModelName = resolveLogPricingModelName(item) || '—'
     const recordedCost = safeNumber(item.total_cost)
     const providerSnapshotAvailable = hasProviderPricingSnapshot(item)
     const shouldAvoidFallbackEstimate =

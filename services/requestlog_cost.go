@@ -51,13 +51,47 @@ const (
 	requestLogPriceSourceNone        = "none"
 )
 
+func buildRequestLogPricingModelCandidates(models ...string) []string {
+	candidates := make([]string, 0, len(models))
+	seen := make(map[string]struct{}, len(models))
+	for _, raw := range models {
+		model := strings.TrimSpace(raw)
+		if model == "" {
+			continue
+		}
+		key := strings.ToLower(model)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		candidates = append(candidates, model)
+	}
+	return candidates
+}
+
+func resolveRequestLogMatchedPricingModel(baseModel string, breakdown modelpricing.CostBreakdown, fallbackModel string) string {
+	pricingModel := strings.TrimSpace(breakdown.PricingModel)
+	if pricingModel == "" {
+		pricingModel = strings.TrimSpace(fallbackModel)
+	}
+	if pricingModel == "" {
+		return ""
+	}
+	if strings.EqualFold(strings.TrimSpace(baseModel), pricingModel) {
+		return ""
+	}
+	return pricingModel
+}
+
 func calculateRequestLogCost(
 	providerService *ProviderService,
 	pricing *modelpricing.Service,
 	providerAPIURL string,
 	providerAPIKey string,
 	providerAuthType string,
+	responseModel string,
 	model string,
+	requestedModel string,
 	inputTokens int,
 	outputTokens int,
 	reasoningTokens int,
@@ -76,9 +110,29 @@ func calculateRequestLogCost(
 		cacheReadTokens,
 	)
 
+	pricingModelCandidates := buildRequestLogPricingModelCandidates(responseModel, requestedModel)
+
 	if providerService != nil {
-		if item, ok := providerService.ResolveCachedProviderModelPricing(providerAPIURL, providerAPIKey, providerAuthType, model); ok {
-			if result, hasPricing := calculateProviderAPICost(providerService, providerAPIURL, providerAPIKey, providerAuthType, item, usage, pricing, model); hasPricing {
+		for _, pricingModelCandidate := range pricingModelCandidates {
+			item, ok := providerService.ResolveCachedProviderModelPricing(
+				providerAPIURL,
+				providerAPIKey,
+				providerAuthType,
+				pricingModelCandidate,
+			)
+			if !ok {
+				continue
+			}
+			if result, hasPricing := calculateProviderAPICost(
+				providerService,
+				providerAPIURL,
+				providerAPIKey,
+				providerAuthType,
+				item,
+				usage,
+				pricing,
+				pricingModelCandidate,
+			); hasPricing {
 				result.PriceSource = requestLogPriceSourceProviderAPI
 				result.HasPricing = true
 				return result
@@ -87,12 +141,13 @@ func calculateRequestLogCost(
 	}
 
 	if pricing != nil {
-		breakdown := pricing.CalculateCost(model, usage)
-		if breakdown.HasPricing {
-			matchedPricingModel := ""
-			if breakdown.FuzzyMatched && breakdown.PricingModel != "" {
-				matchedPricingModel = breakdown.PricingModel
+		for _, pricingModelCandidate := range pricingModelCandidates {
+			breakdown := pricing.CalculateCost(pricingModelCandidate, usage)
+			if !breakdown.HasPricing {
+				continue
 			}
+			matchedPricingModel := ""
+			matchedPricingModel = resolveRequestLogMatchedPricingModel(model, breakdown, pricingModelCandidate)
 			return requestLogCostResult{
 				InputCost:           breakdown.InputCost,
 				OutputCost:          breakdown.OutputCost,

@@ -1,15 +1,15 @@
 {
-	"fixed": {
-		"file_version": "2.8.14"
-	},
-	"info": {
-		"0000": {
-			"ProductVersion": "2.8.14",
-			"CompanyName": "Code Switch",
-			"FileDescription": "Manage Claude & Codex relays, providers, and request logs.",
-			"LegalCopyright": "(c) 2025, Code Switch",
-			"ProductName": "Code Switch",
-			"Comments": "Code Switch desktop relay controller"
-		}
-	}
+  "fixed": {
+    "file_version": "2.8.15"
+  },
+  "info": {
+    "0000": {
+      "ProductVersion": "2.8.15",
+      "CompanyName": "Code Switch",
+      "FileDescription": "Manage Claude & Codex relays, providers, and request logs.",
+      "LegalCopyright": "(c) 2025, Code Switch",
+      "ProductName": "Code Switch",
+      "Comments": "Code Switch desktop relay controller"
+    }
+  }
 }

@@ -5,6 +5,7 @@ import (
 	"math"
 	"testing"
 
+	modelpricing "codeswitch/resources/model-pricing"
 	"github.com/daodao97/xgo/xdb"
 )
 
@@ -166,17 +167,74 @@ func TestModelStatsRangeV2_FallbackToProviderNameWhenIDNotFound(t *testing.T) {
 	}
 }
 
+func TestModelStatsRangeV2_UsesResponseModelToRefreshCostTotal(t *testing.T) {
+	useIsolatedHomeDir(t)
+
+	if err := InitDatabase(); err != nil {
+		t.Fatalf("初始化数据库失败: %v", err)
+	}
+
+	pricing, err := modelpricing.NewService()
+	if err != nil {
+		t.Fatalf("初始化价格服务失败: %v", err)
+	}
+
+	usage := modelpricing.UsageSnapshot{
+		InputTokens:  900,
+		OutputTokens: 260,
+	}
+	modelBreakdown := pricing.CalculateCost("gpt-5", usage)
+	responseBreakdown := pricing.CalculateCost("claude-sonnet-4", usage)
+	if !modelBreakdown.HasPricing || !responseBreakdown.HasPricing {
+		t.Fatalf("测试模型未命中价格表，前提不成立")
+	}
+
+	db, err := xdb.DB("default")
+	if err != nil {
+		t.Fatalf("获取数据库连接失败: %v", err)
+	}
+
+	insertRequestLogForModelStats(t, db, modelStatsLogEntry{
+		Platform:      "codex",
+		Model:         "gpt-5",
+		ResponseModel: "claude-sonnet-4",
+		ProviderID:    "pid-response",
+		Provider:      "Acme",
+		InputTokens:   usage.InputTokens,
+		OutputTokens:  usage.OutputTokens,
+		TotalCost:     modelBreakdown.TotalCost,
+		CreatedAt:     "2026-02-25 10:00:00",
+	})
+
+	ls := NewLogService(nil)
+	stats, err := ls.ModelStatsRangeV2("codex", "pid-response", "2026-02-25 00:00:00", "2026-02-26 00:00:00")
+	if err != nil {
+		t.Fatalf("ModelStatsRangeV2 调用失败: %v", err)
+	}
+	if len(stats) != 1 {
+		t.Fatalf("期望 1 条模型统计，实际 %d", len(stats))
+	}
+	if stats[0].Model != "gpt-5" {
+		t.Fatalf("期望模型分组仍为 gpt-5，实际 %s", stats[0].Model)
+	}
+	if !almostEqualFloat(stats[0].CostTotal, responseBreakdown.TotalCost) {
+		t.Fatalf("CostTotal = %.12f, 期望按 response_model 纠偏为 %.12f", stats[0].CostTotal, responseBreakdown.TotalCost)
+	}
+}
+
 type modelStatsLogEntry struct {
-	Platform     string
-	Model        string
-	ProviderID   string
-	Provider     string
-	InputTokens  int
-	OutputTokens int
-	CacheRead    int
-	Reasoning    int
-	TotalCost    float64
-	CreatedAt    string
+	Platform       string
+	Model          string
+	RequestedModel string
+	ResponseModel  string
+	ProviderID     string
+	Provider       string
+	InputTokens    int
+	OutputTokens   int
+	CacheRead      int
+	Reasoning      int
+	TotalCost      float64
+	CreatedAt      string
 }
 
 func insertRequestLogForModelStats(t *testing.T, db *sql.DB, entry modelStatsLogEntry) {
@@ -185,6 +243,8 @@ func insertRequestLogForModelStats(t *testing.T, db *sql.DB, entry modelStatsLog
 		INSERT INTO request_log (
 			platform,
 			model,
+			requested_model,
+			response_model,
 			provider_id,
 			provider,
 			http_code,
@@ -195,10 +255,12 @@ func insertRequestLogForModelStats(t *testing.T, db *sql.DB, entry modelStatsLog
 			reasoning_tokens,
 			total_cost,
 			created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		entry.Platform,
 		entry.Model,
+		entry.RequestedModel,
+		entry.ResponseModel,
 		entry.ProviderID,
 		entry.Provider,
 		200,

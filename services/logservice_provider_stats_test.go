@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	modelpricing "codeswitch/resources/model-pricing"
 	"github.com/daodao97/xgo/xdb"
 )
 
@@ -116,7 +117,7 @@ func TestProviderStatsRangeV2_PerformanceIgnoresTinyGenerationWindowOutlier(t *t
 		DurationSec:   2.2,
 		FirstTokenSec: 0.2,
 		OutputTokens:  200,
-		CreatedAt:     "2026-02-25 16:00:00",
+		CreatedAt:     "2026-02-25 14:00:00",
 	})
 	// 极小生成窗口（1ms）理论速率会非常夸张，应被过滤掉。
 	insertRequestLogForProviderStats(t, db, providerStatsLogEntry{
@@ -127,7 +128,7 @@ func TestProviderStatsRangeV2_PerformanceIgnoresTinyGenerationWindowOutlier(t *t
 		DurationSec:   0.401,
 		FirstTokenSec: 0.4,
 		OutputTokens:  5000,
-		CreatedAt:     "2026-02-25 16:30:00",
+		CreatedAt:     "2026-02-25 14:30:00",
 	})
 
 	ls := NewLogService(nil)
@@ -257,6 +258,58 @@ func TestProviderStatsRangeV2_FallbackToProviderNameWhenProviderIDNotFound(t *te
 	}
 }
 
+func TestProviderStatsRangeV2_UsesResponseModelToRefreshCostTotal(t *testing.T) {
+	useIsolatedHomeDir(t)
+
+	if err := InitDatabase(); err != nil {
+		t.Fatalf("初始化数据库失败: %v", err)
+	}
+
+	pricing, err := modelpricing.NewService()
+	if err != nil {
+		t.Fatalf("初始化价格服务失败: %v", err)
+	}
+
+	usage := modelpricing.UsageSnapshot{
+		InputTokens:  1600,
+		OutputTokens: 420,
+	}
+	modelBreakdown := pricing.CalculateCost("gpt-5", usage)
+	responseBreakdown := pricing.CalculateCost("claude-sonnet-4", usage)
+	if !modelBreakdown.HasPricing || !responseBreakdown.HasPricing {
+		t.Fatalf("测试模型未命中价格表，前提不成立")
+	}
+
+	db, err := xdb.DB("default")
+	if err != nil {
+		t.Fatalf("获取数据库连接失败: %v", err)
+	}
+
+	insertRequestLogForProviderStats(t, db, providerStatsLogEntry{
+		Platform:      "codex",
+		Model:         "gpt-5",
+		ResponseModel: "claude-sonnet-4",
+		ProviderID:    "pid-cost",
+		Provider:      "Cost Provider",
+		InputTokens:   usage.InputTokens,
+		OutputTokens:  usage.OutputTokens,
+		TotalCost:     modelBreakdown.TotalCost,
+		CreatedAt:     "2026-02-25 10:00:00",
+	})
+
+	ls := NewLogService(nil)
+	stats, err := ls.ProviderStatsRangeV2("codex", "pid-cost", "2026-02-25 00:00:00", "2026-02-26 00:00:00")
+	if err != nil {
+		t.Fatalf("ProviderStatsRangeV2 调用失败: %v", err)
+	}
+	if len(stats) != 1 {
+		t.Fatalf("期望返回 1 条 provider 统计，实际 %d", len(stats))
+	}
+	if !almostEqualFloatProviderStat(stats[0].CostTotal, responseBreakdown.TotalCost) {
+		t.Fatalf("CostTotal = %.12f, 期望按 response_model 纠偏为 %.12f", stats[0].CostTotal, responseBreakdown.TotalCost)
+	}
+}
+
 func TestDefaultRangeEnd_DayBoundaryUsesNextLocalMidnight(t *testing.T) {
 	start := time.Date(2026, 2, 28, 0, 0, 0, 0, time.Local)
 	expected := start.AddDate(0, 0, 1)
@@ -272,14 +325,19 @@ func TestDefaultRangeEnd_DayBoundaryUsesNextLocalMidnight(t *testing.T) {
 }
 
 type providerStatsLogEntry struct {
-	Platform      string
-	ProviderID    string
-	Provider      string
-	IsStream      int
-	DurationSec   float64
-	FirstTokenSec float64
-	OutputTokens  int
-	CreatedAt     string
+	Platform       string
+	Model          string
+	RequestedModel string
+	ResponseModel  string
+	ProviderID     string
+	Provider       string
+	InputTokens    int
+	IsStream       int
+	DurationSec    float64
+	FirstTokenSec  float64
+	OutputTokens   int
+	TotalCost      float64
+	CreatedAt      string
 }
 
 func insertRequestLogForProviderStats(t *testing.T, db *sql.DB, entry providerStatsLogEntry) {
@@ -287,6 +345,9 @@ func insertRequestLogForProviderStats(t *testing.T, db *sql.DB, entry providerSt
 	_, err := db.Exec(`
 		INSERT INTO request_log (
 			platform,
+			model,
+			requested_model,
+			response_model,
 			provider_id,
 			provider,
 			http_code,
@@ -300,13 +361,16 @@ func insertRequestLogForProviderStats(t *testing.T, db *sql.DB, entry providerSt
 			first_token_sec,
 			total_cost,
 			created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		entry.Platform,
+		entry.Model,
+		entry.RequestedModel,
+		entry.ResponseModel,
 		entry.ProviderID,
 		entry.Provider,
 		200,
-		0,
+		entry.InputTokens,
 		entry.OutputTokens,
 		0,
 		0,
@@ -314,7 +378,7 @@ func insertRequestLogForProviderStats(t *testing.T, db *sql.DB, entry providerSt
 		entry.IsStream,
 		entry.DurationSec,
 		entry.FirstTokenSec,
-		0,
+		entry.TotalCost,
 		entry.CreatedAt,
 	)
 	if err != nil {

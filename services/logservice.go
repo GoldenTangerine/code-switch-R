@@ -510,6 +510,39 @@ func buildRequestLogList(records []xdb.Record, pricingSnapshot *modelpricing.Ser
 	return logs
 }
 
+func parseRequestLogLocalTime(value string) (time.Time, bool) {
+	parsed, err := parseTimeInput(value)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return parsed, true
+}
+
+func (ls *LogService) loadRequestLogsForAggregation(
+	platform string,
+	provider string,
+	start time.Time,
+	end time.Time,
+) ([]ReqeustLog, error) {
+	model := xdb.New("request_log")
+	options := []xdb.Option{
+		xdb.Field(requestLogListSelectFields...),
+		xdb.WhereGte("created_at", start.UTC().Format(timeLayout)),
+		xdb.WhereLt("created_at", end.UTC().Format(timeLayout)),
+	}
+	if strings.TrimSpace(platform) != "" {
+		options = append(options, xdb.WhereEq("platform", strings.TrimSpace(platform)))
+	}
+	records, err := selectRecordsByProviderRef(model, options, provider)
+	if err != nil {
+		if errors.Is(err, xdb.ErrNotFound) || isNoSuchTableErr(err) {
+			return []ReqeustLog{}, nil
+		}
+		return nil, err
+	}
+	return buildRequestLogList(records, ls.resolvePricingSnapshot()), nil
+}
+
 func normalizedProviderDisplayName(providerName string) string {
 	trimmed := strings.TrimSpace(providerName)
 	if trimmed == "" {
@@ -798,6 +831,11 @@ func applyLogPricing(pricing *modelpricing.Service, logEntry *ReqeustLog) {
 	}
 
 	logEntry.PriceSource = normalizeRequestLogPriceSource(logEntry.PriceSource, logEntry.TotalCost)
+	pricingModelCandidates := buildRequestLogPricingModelCandidates(
+		logEntry.ResponseModel,
+		logEntry.MatchedPricingModel,
+		logEntry.RequestedModel,
+	)
 
 	if logEntry.TotalCost > 0 {
 		logEntry.HasPricing = true
@@ -807,11 +845,11 @@ func applyLogPricing(pricing *modelpricing.Service, logEntry *ReqeustLog) {
 			logEntry.HasPricing = true
 			return
 		}
-		if pricing == nil || strings.TrimSpace(logEntry.Model) == "" {
+		if pricing == nil || len(pricingModelCandidates) == 0 {
 			logEntry.HasPricing = true
 			return
 		}
-	} else if pricing == nil || strings.TrimSpace(logEntry.Model) == "" {
+	} else if pricing == nil || len(pricingModelCandidates) == 0 {
 		return
 	}
 
@@ -825,7 +863,17 @@ func applyLogPricing(pricing *modelpricing.Service, logEntry *ReqeustLog) {
 		logEntry.CacheReadTokens,
 	)
 
-	breakdown := pricing.CalculateCost(logEntry.Model, usage)
+	var breakdown modelpricing.CostBreakdown
+	resolvedPricingCandidate := ""
+	for _, pricingModelCandidate := range pricingModelCandidates {
+		current := pricing.CalculateCost(pricingModelCandidate, usage)
+		if !current.HasPricing {
+			continue
+		}
+		breakdown = current
+		resolvedPricingCandidate = pricingModelCandidate
+		break
+	}
 	if !breakdown.HasPricing {
 		if logEntry.PriceSource == requestLogPriceSourceProviderAPI {
 			logEntry.HasPricing = true
@@ -845,15 +893,22 @@ func applyLogPricing(pricing *modelpricing.Service, logEntry *ReqeustLog) {
 	if logEntry.PriceSource == requestLogPriceSourceNone {
 		logEntry.PriceSource = requestLogPriceSourceBuiltin
 	}
-	if logEntry.TotalCost <= 0 && breakdown.TotalCost > 0 && logEntry.PriceSource != requestLogPriceSourceProviderAPI {
+	resolvedPricingModel := strings.TrimSpace(breakdown.PricingModel)
+	if resolvedPricingModel == "" {
+		resolvedPricingModel = resolvedPricingCandidate
+	}
+	if breakdown.TotalCost > 0 &&
+		logEntry.PriceSource != requestLogPriceSourceProviderAPI &&
+		(logEntry.TotalCost <= 0 ||
+			(resolvedPricingModel != "" &&
+				!strings.EqualFold(strings.TrimSpace(logEntry.Model), resolvedPricingModel))) {
 		logEntry.TotalCost = breakdown.TotalCost
 		logEntry.PriceSource = requestLogPriceSourceBuiltin
 	}
-	if breakdown.FuzzyMatched &&
-		strings.TrimSpace(breakdown.PricingModel) != "" &&
+	if resolvedPricingModel != "" &&
 		logEntry.PriceSource != requestLogPriceSourceProviderAPI &&
-		!strings.EqualFold(strings.TrimSpace(logEntry.Model), strings.TrimSpace(breakdown.PricingModel)) {
-		logEntry.MatchedPricingModel = breakdown.PricingModel
+		!strings.EqualFold(strings.TrimSpace(logEntry.Model), resolvedPricingModel) {
+		logEntry.MatchedPricingModel = resolvedPricingModel
 	}
 }
 
@@ -1267,62 +1322,39 @@ func (ls *LogService) StatsRangeV2(platform string, provider string, startAt str
 		}
 	}
 
-	startKey := start.Format(timeLayout)
-	endKey := end.Format(timeLayout)
-	tableName := requestLogStatsHourlyTable
-	if useDayBuckets {
-		tableName = requestLogStatsDailyTable
-		startKey = startOfDay(start).Format(timeLayout)
-		endKey = startOfDay(end).Format(timeLayout)
-	}
-	model := xdb.New(tableName)
-	options := []xdb.Option{
-		xdb.WhereGte("bucket_start", startKey),
-		xdb.WhereLt("bucket_start", endKey),
-		xdb.Field(
-			"provider",
-			"bucket_start",
-			"total_requests",
-			"input_tokens",
-			"output_tokens",
-			"reasoning_tokens",
-			"cache_create_tokens",
-			"cache_read_tokens",
-			"total_cost",
-		),
-		xdb.OrderByAsc("bucket_start"),
-	}
-	if platform != "" {
-		options = append(options, xdb.WhereEq("platform", platform))
-	}
-	records, err := selectRecordsByProviderRef(model, options, provider)
+	logs, err := ls.loadRequestLogsForAggregation(platform, provider, start, end)
 	if err != nil {
-		if errors.Is(err, xdb.ErrNotFound) || isNoSuchTableErr(err) {
-			return stats, nil
-		}
 		return stats, err
 	}
 
-	bucketByKey := make(map[string]*LogStatsSeries, bucketCount)
-	for i := range seriesBuckets {
-		if seriesBuckets[i] != nil {
-			bucketByKey[seriesBuckets[i].Day] = seriesBuckets[i]
+	for _, logEntry := range logs {
+		createdAt, ok := parseRequestLogLocalTime(logEntry.CreatedAt)
+		if !ok || createdAt.Before(start) || !createdAt.Before(end) {
+			continue
 		}
-	}
 
-	for _, record := range records {
-		key := strings.TrimSpace(record.GetString("bucket_start"))
-		bucket := bucketByKey[key]
+		bucketIndex := -1
+		if useDayBuckets {
+			bucketIndex = int(startOfDay(createdAt).Sub(startOfDay(start)) / (24 * time.Hour))
+		} else {
+			bucketIndex = int(createdAt.Sub(start) / bucketSize)
+		}
+		if bucketIndex < 0 || bucketIndex >= bucketCount {
+			continue
+		}
+
+		bucket := seriesBuckets[bucketIndex]
 		if bucket == nil {
 			continue
 		}
-		total := record.GetInt64("total_requests")
-		input := record.GetInt64("input_tokens")
-		output := record.GetInt64("output_tokens")
-		reasoning := record.GetInt64("reasoning_tokens")
-		cacheCreate := record.GetInt64("cache_create_tokens")
-		cacheRead := record.GetInt64("cache_read_tokens")
-		costTotal := record.GetFloat64("total_cost")
+
+		total := int64(1)
+		input := int64(logEntry.InputTokens)
+		output := int64(logEntry.OutputTokens)
+		reasoning := int64(logEntry.ReasoningTokens)
+		cacheCreate := int64(logEntry.CacheCreateTokens)
+		cacheRead := int64(logEntry.CacheReadTokens)
+		costTotal := logEntry.TotalCost
 
 		bucket.TotalRequests += total
 		bucket.InputTokens += input
@@ -1339,6 +1371,10 @@ func (ls *LogService) StatsRangeV2(platform string, provider string, startAt str
 		stats.CacheCreateTokens += cacheCreate
 		stats.CacheReadTokens += cacheRead
 		stats.CostTotal += costTotal
+		stats.CostInput += logEntry.InputCost
+		stats.CostOutput += logEntry.OutputCost + logEntry.ReasoningCost
+		stats.CostCacheCreate += logEntry.CacheCreateCost
+		stats.CostCacheRead += logEntry.CacheReadCost
 	}
 
 	stats.Series = make([]LogStatsSeries, 0, bucketCount)
@@ -1386,47 +1422,15 @@ func (ls *LogService) ProviderStatsRangeV2(platform string, provider string, sta
 	startUTCKey := start.UTC().Format(timeLayout)
 	endUTCKey := end.UTC().Format(timeLayout)
 	platformKey := strings.TrimSpace(platform)
-	startKey := start.Format(timeLayout)
-	endKey := end.Format(timeLayout)
-	tableName := requestLogStatsHourlyTable
-	if duration > 48*time.Hour {
-		tableName = requestLogStatsDailyTable
-		startKey = startOfDay(start).Format(timeLayout)
-		endKey = startOfDay(end).Format(timeLayout)
-	}
-	model := xdb.New(tableName)
-	options := []xdb.Option{
-		xdb.WhereGte("bucket_start", startKey),
-		xdb.WhereLt("bucket_start", endKey),
-		xdb.Field(
-			"provider_id",
-			"provider",
-			"total_requests",
-			"successful_requests",
-			"failed_requests",
-			"input_tokens",
-			"output_tokens",
-			"reasoning_tokens",
-			"cache_create_tokens",
-			"cache_read_tokens",
-			"total_cost",
-		),
-	}
-	if platformKey != "" {
-		options = append(options, xdb.WhereEq("platform", platformKey))
-	}
-	records, err := selectRecordsByProviderRef(model, options, provider)
+	logs, err := ls.loadRequestLogsForAggregation(platform, provider, start, end)
 	if err != nil {
-		if errors.Is(err, xdb.ErrNotFound) || isNoSuchTableErr(err) {
-			return []ProviderDailyStat{}, nil
-		}
 		return nil, err
 	}
 
 	statMap := map[string]*ProviderDailyStat{}
-	for _, record := range records {
-		providerID := strings.TrimSpace(record.GetString("provider_id"))
-		providerName := normalizedProviderDisplayName(record.GetString("provider"))
+	for _, logEntry := range logs {
+		providerID := strings.TrimSpace(logEntry.ProviderID)
+		providerName := normalizedProviderDisplayName(logEntry.Provider)
 		statKey := providerStatMapKey(providerID, providerName)
 
 		stat := statMap[statKey]
@@ -1444,18 +1448,21 @@ func (ls *LogService) ProviderStatsRangeV2(platform string, provider string, sta
 			stat.Provider = providerName
 		}
 
-		total := record.GetInt64("total_requests")
-		success := record.GetInt64("successful_requests")
-		fail := record.GetInt64("failed_requests")
+		total := int64(1)
+		success := int64(0)
+		if logEntry.HttpCode < 400 {
+			success = 1
+		}
+		fail := total - success
 		stat.TotalRequests += total
 		stat.SuccessfulRequests += success
 		stat.FailedRequests += fail
-		stat.InputTokens += record.GetInt64("input_tokens")
-		stat.OutputTokens += record.GetInt64("output_tokens")
-		stat.ReasoningTokens += record.GetInt64("reasoning_tokens")
-		stat.CacheCreateTokens += record.GetInt64("cache_create_tokens")
-		stat.CacheReadTokens += record.GetInt64("cache_read_tokens")
-		stat.CostTotal += record.GetFloat64("total_cost")
+		stat.InputTokens += int64(logEntry.InputTokens)
+		stat.OutputTokens += int64(logEntry.OutputTokens)
+		stat.ReasoningTokens += int64(logEntry.ReasoningTokens)
+		stat.CacheCreateTokens += int64(logEntry.CacheCreateTokens)
+		stat.CacheReadTokens += int64(logEntry.CacheReadTokens)
+		stat.CostTotal += logEntry.TotalCost
 	}
 
 	if duration <= 48*time.Hour {
@@ -1678,92 +1685,53 @@ func (ls *LogService) ModelStatsRangeV2(platform string, provider string, startA
 		return []ModelUsageStat{}, nil
 	}
 
-	db, err := xdb.DB("default")
+	logs, err := ls.loadRequestLogsForAggregation(platform, provider, start, end)
 	if err != nil {
 		return nil, err
 	}
 
-	startKey := start.UTC().Format(timeLayout)
-	endKey := end.UTC().Format(timeLayout)
-	platformKey := strings.TrimSpace(platform)
+	grouped := make(map[string]*ModelUsageStat, 16)
+	for _, logEntry := range logs {
+		modelName := strings.TrimSpace(logEntry.Model)
+		if modelName == "" {
+			modelName = "—"
+		}
+		stat := grouped[modelName]
+		if stat == nil {
+			stat = &ModelUsageStat{Model: modelName}
+			grouped[modelName] = stat
+		}
+		inputTokens := int64(logEntry.InputTokens)
+		outputTokens := int64(logEntry.OutputTokens)
+		cacheReadTokens := int64(logEntry.CacheReadTokens)
 
-	queryModelStats := func(providerColumn string, providerValue string) ([]ModelUsageStat, error) {
-		query := `
-			SELECT
-				CASE
-					WHEN TRIM(COALESCE(model, '')) = '' THEN '—'
-					ELSE TRIM(model)
-				END AS model_name,
-				COUNT(*) AS total_requests,
-				COALESCE(SUM(CASE WHEN input_tokens > 0 THEN input_tokens ELSE 0 END), 0) AS input_tokens,
-				COALESCE(SUM(CASE WHEN output_tokens > 0 THEN output_tokens ELSE 0 END), 0) AS output_tokens,
-				COALESCE(SUM(CASE WHEN cache_read_tokens > 0 THEN cache_read_tokens ELSE 0 END), 0) AS cache_read_tokens,
-				COALESCE(SUM(CASE WHEN input_tokens > 0 THEN input_tokens ELSE 0 END), 0)
-				  + COALESCE(SUM(CASE WHEN output_tokens > 0 THEN output_tokens ELSE 0 END), 0)
-				  + COALESCE(SUM(CASE WHEN cache_read_tokens > 0 THEN cache_read_tokens ELSE 0 END), 0) AS total_tokens,
-				COALESCE(SUM(total_cost), 0) AS total_cost
-			FROM request_log
-			WHERE created_at >= ? AND created_at < ?
-		`
-		args := make([]interface{}, 0, 4)
-		args = append(args, startKey, endKey)
-		if platformKey != "" {
-			query += " AND platform = ?"
-			args = append(args, platformKey)
-		}
-		if providerColumn != "" {
-			query += " AND " + providerColumn + " = ?"
-			args = append(args, providerValue)
-		}
-		query += `
-			GROUP BY model_name
-			ORDER BY total_tokens DESC, total_requests DESC, total_cost DESC, model_name ASC
-		`
-
-		rows, err := db.Query(query, args...)
-		if err != nil {
-			if isNoSuchTableErr(err) {
-				return []ModelUsageStat{}, nil
-			}
-			return nil, err
-		}
-		defer rows.Close()
-
-		stats := make([]ModelUsageStat, 0, 16)
-		for rows.Next() {
-			stat := ModelUsageStat{}
-			if err := rows.Scan(
-				&stat.Model,
-				&stat.TotalRequests,
-				&stat.InputTokens,
-				&stat.OutputTokens,
-				&stat.CacheReadTokens,
-				&stat.TotalTokens,
-				&stat.CostTotal,
-			); err != nil {
-				return nil, err
-			}
-			stats = append(stats, stat)
-		}
-		if err := rows.Err(); err != nil {
-			return nil, err
-		}
-		return stats, nil
+		stat.TotalRequests++
+		stat.InputTokens += inputTokens
+		stat.OutputTokens += outputTokens
+		stat.CacheReadTokens += cacheReadTokens
+		stat.TotalTokens += inputTokens + outputTokens + cacheReadTokens
+		stat.CostTotal += logEntry.TotalCost
 	}
 
-	providerRef := strings.TrimSpace(provider)
-	if providerRef == "" {
-		return queryModelStats("", "")
+	stats := make([]ModelUsageStat, 0, len(grouped))
+	for _, stat := range grouped {
+		stats = append(stats, *stat)
 	}
 
-	stats, err := queryModelStats("provider_id", providerRef)
-	if err != nil {
-		return nil, err
-	}
-	if len(stats) > 0 {
-		return stats, nil
-	}
-	return queryModelStats("provider", providerRef)
+	sort.Slice(stats, func(i, j int) bool {
+		if stats[i].TotalTokens != stats[j].TotalTokens {
+			return stats[i].TotalTokens > stats[j].TotalTokens
+		}
+		if stats[i].TotalRequests != stats[j].TotalRequests {
+			return stats[i].TotalRequests > stats[j].TotalRequests
+		}
+		if stats[i].CostTotal != stats[j].CostTotal {
+			return stats[i].CostTotal > stats[j].CostTotal
+		}
+		return stats[i].Model < stats[j].Model
+	})
+
+	return stats, nil
 }
 
 func parseCreatedAt(record xdb.Record) (time.Time, bool) {

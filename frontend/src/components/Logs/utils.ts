@@ -383,12 +383,33 @@ export const buildModelPricingLookup = (modelPricingRows: ModelPricingRow[]): Mo
   return { byExact, byLower, byNormalized }
 }
 
+export const buildLogPricingModelCandidates = (
+  item: Pick<RequestLog, 'response_model' | 'matched_pricing_model' | 'requested_model'>,
+) => {
+  const candidates = [item.response_model, item.matched_pricing_model, item.requested_model]
+  const seen = new Set<string>()
+  const resolved: string[] = []
+  for (const value of candidates) {
+    const normalized = String(value ?? '').trim()
+    if (!normalized) continue
+    const key = normalized.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    resolved.push(normalized)
+  }
+  return resolved
+}
+
+export const resolveLogPricingModelName = (
+  item: Pick<RequestLog, 'response_model' | 'matched_pricing_model' | 'requested_model'>,
+) => buildLogPricingModelCandidates(item)[0] ?? ''
+
 export const resolvePricingRow = (
   item: RequestLog,
   lookup: ModelPricingLookup,
   modelPricingRows: ModelPricingRow[],
 ) => {
-  const candidates = [item.matched_pricing_model, item.model]
+  const candidates = buildLogPricingModelCandidates(item)
   for (const modelName of candidates) {
     const name = String(modelName ?? '').trim()
     if (!name) continue

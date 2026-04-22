@@ -47,6 +47,87 @@ func TestCalculateProviderAPICost_AppliesClaudeCacheFallbackMultiplier(t *testin
 	}
 }
 
+func TestCalculateRequestLogCost_PrefersResponseModelForBuiltinPricing(t *testing.T) {
+	pricing, err := modelpricing.NewService()
+	if err != nil {
+		t.Fatalf("初始化价格服务失败: %v", err)
+	}
+
+	result := calculateRequestLogCost(
+		nil,
+		pricing,
+		"",
+		"",
+		"",
+		"claude-sonnet-4",
+		"ark-code-latest",
+		"claude-sonnet-4-6",
+		1200,
+		450,
+		0,
+		0,
+		0,
+		0,
+		0,
+	)
+
+	want := pricing.CalculateCost("claude-sonnet-4", modelpricing.UsageSnapshot{
+		InputTokens:  1200,
+		OutputTokens: 450,
+	})
+	if !want.HasPricing {
+		t.Fatalf("response_model 未命中价格表，测试前提不成立")
+	}
+
+	if !floatEquals(result.TotalCost, want.TotalCost) {
+		t.Fatalf("TotalCost = %.12f, 期望按 response_model 计算为 %.12f", result.TotalCost, want.TotalCost)
+	}
+	if result.MatchedPricingModel != want.PricingModel {
+		t.Fatalf("MatchedPricingModel = %q, 期望 %q", result.MatchedPricingModel, want.PricingModel)
+	}
+	if result.PriceSource != requestLogPriceSourceBuiltin {
+		t.Fatalf("PriceSource = %q, 期望 %q", result.PriceSource, requestLogPriceSourceBuiltin)
+	}
+}
+
+func TestCalculateRequestLogCost_DoesNotFallbackToLocalModelWhenResponseAndRequestedMissing(t *testing.T) {
+	pricing, err := modelpricing.NewService()
+	if err != nil {
+		t.Fatalf("初始化价格服务失败: %v", err)
+	}
+
+	result := calculateRequestLogCost(
+		nil,
+		pricing,
+		"",
+		"",
+		"",
+		"",
+		"gpt-5",
+		"",
+		1200,
+		450,
+		0,
+		0,
+		0,
+		0,
+		0,
+	)
+
+	if result.HasPricing {
+		t.Fatalf("缺少 response_model/requested_model 时不应再回退到本地 model 命中价格")
+	}
+	if !floatEquals(result.TotalCost, 0) {
+		t.Fatalf("TotalCost = %.12f, 期望保持 0", result.TotalCost)
+	}
+	if result.PriceSource != requestLogPriceSourceNone {
+		t.Fatalf("PriceSource = %q, 期望 %q", result.PriceSource, requestLogPriceSourceNone)
+	}
+	if result.MatchedPricingModel != "" {
+		t.Fatalf("MatchedPricingModel = %q, 期望为空", result.MatchedPricingModel)
+	}
+}
+
 func TestCalculateProviderAPICost_UsesProviderCacheMultipliersWhenProvided(t *testing.T) {
 	item := ProviderModelPricingItem{
 		QuotaType:             0,

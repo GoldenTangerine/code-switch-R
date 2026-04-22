@@ -79,7 +79,7 @@ function createTranslate() {
   }
 }
 
-function createRequestLog(model: string): RequestLog {
+function createRequestLog(model: string, overrides: Partial<RequestLog> = {}): RequestLog {
   return {
     id: 1,
     platform: 'claude',
@@ -94,6 +94,7 @@ function createRequestLog(model: string): RequestLog {
     created_at: '2026-04-14 16:00:00',
     total_cost: 0.01,
     price_source: 'builtin',
+    ...overrides,
   }
 }
 
@@ -138,7 +139,9 @@ describe('useLogsPricingDetails', () => {
     const { loadModelPricingRows, buildCostTooltipDetail, modelPricingStale, markModelPricingStale } = useLogsPricingDetails({
       t: createTranslate(),
     })
-    const item = createRequestLog('qwen3.6')
+    const item = createRequestLog('qwen3.6', {
+      requested_model: 'qwen3.6',
+    })
 
     await loadModelPricingRows()
     const initialDetail = buildCostTooltipDetail(item)
@@ -157,5 +160,88 @@ describe('useLogsPricingDetails', () => {
     expect(refreshedDetail.priceLines.some((line) => line.value.includes('$8.00'))).toBe(true)
     expect(modelPricingStale.value).toBe(false)
     expect(listModelPricing).toHaveBeenCalledTimes(2)
+  })
+
+  it('prefers response model when resolving builtin pricing details', async () => {
+    vi.mocked(listModelPricing).mockResolvedValueOnce([
+      {
+        model: 'ark-code-latest',
+        input_cost_per_token: 1 / 1_000_000,
+        output_cost_per_token: 2 / 1_000_000,
+        output_cost_per_reasoning_token: 0,
+        cache_creation_input_token_cost: 1.25 / 1_000_000,
+        cache_read_input_token_cost: 0.1 / 1_000_000,
+        ephemeral_1h_cost_per_token: 2 / 1_000_000,
+        group_multiplier: 1,
+        is_override: true,
+        is_custom: true,
+        source: 'manual',
+      },
+      {
+        model: 'kimi-k2.6',
+        input_cost_per_token: 3 / 1_000_000,
+        output_cost_per_token: 9 / 1_000_000,
+        output_cost_per_reasoning_token: 0,
+        cache_creation_input_token_cost: 3.75 / 1_000_000,
+        cache_read_input_token_cost: 0.3 / 1_000_000,
+        ephemeral_1h_cost_per_token: 6 / 1_000_000,
+        group_multiplier: 1,
+        is_override: true,
+        is_custom: true,
+        source: 'manual',
+      },
+    ])
+
+    const { loadModelPricingRows, buildCostTooltipDetail } = useLogsPricingDetails({
+      t: createTranslate(),
+    })
+    const item = createRequestLog('ark-code-latest', {
+      requested_model: 'ark-code-latest',
+      response_model: 'kimi-k2.6',
+      total_cost: 0,
+    })
+
+    await loadModelPricingRows()
+    const detail = buildCostTooltipDetail(item)
+
+    expect(detail.hasPricing).toBe(true)
+    expect(detail.pricingModel).toBe('kimi-k2.6')
+    expect(detail.note).toContain('kimi-k2.6')
+    expect(detail.priceLines.some((line) => line.value.includes('$9.00'))).toBe(true)
+  })
+
+  it('does not fallback to local model when response/requested pricing model is missing', async () => {
+    vi.mocked(listModelPricing).mockResolvedValueOnce([
+      {
+        model: 'ark-code-latest',
+        input_cost_per_token: 1 / 1_000_000,
+        output_cost_per_token: 2 / 1_000_000,
+        output_cost_per_reasoning_token: 0,
+        cache_creation_input_token_cost: 1.25 / 1_000_000,
+        cache_read_input_token_cost: 0.1 / 1_000_000,
+        ephemeral_1h_cost_per_token: 2 / 1_000_000,
+        group_multiplier: 1,
+        is_override: true,
+        is_custom: true,
+        source: 'manual',
+      },
+    ])
+
+    const { loadModelPricingRows, buildCostTooltipDetail } = useLogsPricingDetails({
+      t: createTranslate(),
+    })
+    const item = createRequestLog('ark-code-latest', {
+      total_cost: 0,
+      response_model: '',
+      requested_model: '',
+      matched_pricing_model: '',
+    })
+
+    await loadModelPricingRows()
+    const detail = buildCostTooltipDetail(item)
+
+    expect(detail.hasPricing).toBe(false)
+    expect(detail.pricingModel).toBe('—')
+    expect(detail.priceLines).toHaveLength(0)
   })
 })
