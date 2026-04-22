@@ -5,12 +5,10 @@
 package services
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
-	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
 	"log"
 	"math/rand"
 	"net/http"
@@ -560,100 +558,45 @@ func (hcs *HealthCheckService) checkProvider(ctx context.Context, provider Provi
 	model := hcs.getEffectiveModel(&provider, platform)
 	endpoint := hcs.getEffectiveEndpoint(&provider, platform)
 	timeout := hcs.getEffectiveTimeout(&provider)
-
 	result.Model = model
 	result.Endpoint = endpoint
 
-	// 构建请求体
-	reqBody, successContains, err := hcs.buildTestRequest(platform, &provider, model, endpoint)
+	// 执行共享探测逻辑
+	probeResult, err := executeAvailabilityProbe(ctx, hcs.client, &provider, platform, model, endpoint, timeout)
+	if probeResult.Plan.EffectiveModel != "" {
+		result.Model = probeResult.Plan.EffectiveModel
+	}
+	if probeResult.Plan.EffectiveEndpoint != "" {
+		result.Endpoint = probeResult.Plan.EffectiveEndpoint
+	}
+	result.LatencyMs = probeResult.LatencyMs
+
 	if err != nil {
-		result.ErrorMessage = fmt.Sprintf("无法构建测试请求: %v", err)
-		return result
-	}
-
-	// 构建目标 URL
-	baseURL := strings.TrimSuffix(provider.APIURL, "/")
-	if !strings.HasPrefix(endpoint, "/") {
-		endpoint = "/" + endpoint
-	}
-	targetURL := baseURL + endpoint
-
-	// 创建 HTTP 请求
-	req, err := http.NewRequestWithContext(ctx, "POST", targetURL, bytes.NewReader(reqBody))
-	if err != nil {
-		result.ErrorMessage = fmt.Sprintf("创建请求失败: %v", err)
-		return result
-	}
-
-	// 设置 Headers
-	req.Header.Set("Content-Type", "application/json")
-	if provider.APIKey != "" {
-		// 根据认证方式设置请求头
-		authTypeRaw := strings.TrimSpace(provider.ConnectivityAuthType)
-		authType := strings.ToLower(authTypeRaw)
-		if authType == "" {
-			// 空值时使用平台默认（claude: x-api-key, codex: bearer）
-			if strings.ToLower(platform) == "claude" {
-				authType = "x-api-key"
-			} else {
-				authType = "bearer"
-			}
+		var buildErr availabilityProbeBuildError
+		if errors.As(err, &buildErr) {
+			result.ErrorMessage = fmt.Sprintf("无法构建测试请求: %v", buildErr)
+			return result
 		}
-		switch authType {
-		case "x-api-key":
-			req.Header.Set("x-api-key", provider.APIKey)
-			req.Header.Set("anthropic-version", "2023-06-01")
-		case "bearer":
-			req.Header.Set("Authorization", "Bearer "+provider.APIKey)
-		default:
-			// 自定义 Header 名
-			headerName := authTypeRaw
-			if headerName == "" || strings.EqualFold(headerName, "custom") {
-				headerName = "Authorization"
-			}
-			req.Header.Set(headerName, provider.APIKey)
-		}
-	}
-
-	// 发送请求并计时
-	start := time.Now()
-
-	// 使用 per-request context 控制超时（复用服务级客户端）
-	reqCtx, cancelReq := context.WithTimeout(ctx, time.Duration(timeout)*time.Millisecond)
-	defer cancelReq()
-	req = req.WithContext(reqCtx)
-
-	resp, err := hcs.client.Do(req)
-	latencyMs := int(time.Since(start).Milliseconds())
-	result.LatencyMs = latencyMs
-
-	if err != nil {
 		// 检测是否为超时错误
 		if isTimeoutError(err) {
 			result.Status = HealthStatusFailed
 			result.ErrorMessage = fmt.Sprintf("响应超时 (>%dms)", timeout)
 			log.Printf("[HealthCheck] [%s/%s] 请求超时: %dms (阈值: %dms)",
-				platform, provider.Name, latencyMs, timeout)
+				platform, provider.Name, result.LatencyMs, timeout)
 			return result
 		}
 		result.ErrorMessage = fmt.Sprintf("网络错误: %v", err)
 		log.Printf("[HealthCheck] [%s/%s] 网络错误: %v", platform, provider.Name, err)
 		return result
 	}
-	defer resp.Body.Close()
-
-	// 读取响应体（限制大小）
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
-	if err != nil {
-		body = []byte{}
-	}
+	body := probeResult.ResponseBody
 
 	// 判定状态
-	result.Status, result.ErrorMessage = hcs.determineStatus(resp.StatusCode, latencyMs, body)
+	result.Status, result.ErrorMessage = hcs.determineStatus(probeResult.HTTPStatusCode, result.LatencyMs, body)
 	if (result.Status == HealthStatusOperational || result.Status == HealthStatusDegraded) &&
-		!responseContainsExpectedField(body, successContains) {
+		!responseContainsExpectedText(body, probeResult.Plan.ResponseFormat, probeResult.Plan.ExpectedText) {
 		result.Status = HealthStatusValidationError
-		result.ErrorMessage = fmt.Sprintf("响应内容缺少 %s", successContains)
+		result.ErrorMessage = buildAvailabilityValidationError(body, probeResult.Plan.ResponseFormat, probeResult.Plan.ExpectedText)
 	}
 
 	return result
@@ -702,92 +645,17 @@ func (hcs *HealthCheckService) determineStatus(statusCode, latencyMs int, body [
 
 // getEffectiveModel 获取有效的测试模型
 func (hcs *HealthCheckService) getEffectiveModel(provider *Provider, platform string) string {
-	// 优先使用用户配置
-	if provider.AvailabilityConfig != nil && provider.AvailabilityConfig.TestModel != "" {
-		return provider.AvailabilityConfig.TestModel
-	}
-
-	// 平台默认模型
-	switch strings.ToLower(platform) {
-	case "claude":
-		return "claude-3-5-haiku-20241022"
-	case "codex":
-		return "gpt-4o-mini"
-	case "gemini":
-		return "gemini-1.5-flash"
-	default:
-		return "gpt-3.5-turbo"
-	}
+	return resolveProviderAvailabilityModel(provider, platform)
 }
 
 // getEffectiveEndpoint 获取有效的测试端点
 func (hcs *HealthCheckService) getEffectiveEndpoint(provider *Provider, platform string) string {
-	// 优先级 1：用户配置的健康检查专用端点
-	if provider.AvailabilityConfig != nil && provider.AvailabilityConfig.TestEndpoint != "" {
-		return provider.AvailabilityConfig.TestEndpoint
-	}
-
-	// 优先级 2：Claude API 格式映射后的默认端点
-	if strings.EqualFold(platform, "claude") {
-		return resolveProviderEffectiveEndpoint("claude", *provider, "/v1/messages")
-	}
-
-	// 优先级 3：用户配置的生产端点（如果配置了 apiEndpoint）
-	if provider.APIEndpoint != "" {
-		return provider.GetEffectiveEndpoint("")
-	}
-
-	// 优先级 4：平台默认端点
-	switch strings.ToLower(platform) {
-	case "codex":
-		return "/responses"
-	default:
-		return "/v1/chat/completions"
-	}
+	return resolveProviderAvailabilityEndpoint(provider, platform)
 }
 
 // getEffectiveTimeout 获取有效的超时时间（毫秒）
 func (hcs *HealthCheckService) getEffectiveTimeout(provider *Provider) int {
-	// 优先使用用户配置
-	if provider.AvailabilityConfig != nil && provider.AvailabilityConfig.Timeout > 0 {
-		return provider.AvailabilityConfig.Timeout
-	}
-	return DefaultTimeoutMs
-}
-
-// buildTestRequest 构建测试请求体
-func (hcs *HealthCheckService) buildTestRequest(platform string, provider *Provider, model string, endpoint string) ([]byte, string, error) {
-	if strings.EqualFold(platform, "claude") {
-		spec, err := buildClaudeProbeRequest(provider, endpoint, model)
-		if err != nil {
-			return nil, "", err
-		}
-		return spec.Body, spec.SuccessContains, nil
-	}
-
-	// Anthropic 格式
-	if platform == "claude" {
-		reqBody := map[string]interface{}{
-			"model":      model,
-			"max_tokens": 1,
-			"messages": []map[string]string{
-				{"role": "user", "content": "hi"},
-			},
-		}
-		data, _ := json.Marshal(reqBody)
-		return data, "content", nil
-	}
-
-	// OpenAI/Codex 格式
-	reqBody := map[string]interface{}{
-		"model":      model,
-		"max_tokens": 1,
-		"messages": []map[string]string{
-			{"role": "user", "content": "hi"},
-		},
-	}
-	data, _ := json.Marshal(reqBody)
-	return data, "choices", nil
+	return resolveProviderAvailabilityTimeout(provider)
 }
 
 // saveResult 保存检测结果到数据库
@@ -858,7 +726,7 @@ func (hcs *HealthCheckService) handleBlacklistIntegration(provider *Provider, re
 	var shouldRecordSuccess bool
 	var prevFails int
 
-	if result.Status == HealthStatusFailed {
+	if result.Status == HealthStatusFailed || result.Status == HealthStatusValidationError {
 		counter.ConsecutiveFails++
 		counter.LastFailedAt = time.Now()
 		prevFails = counter.ConsecutiveFails
@@ -1062,7 +930,7 @@ func (hcs *HealthCheckService) SaveAvailabilityConfig(platform string, providerI
 	found := false
 	for i := range providers {
 		if providers[i].ID == providerID {
-			providers[i].AvailabilityConfig = config
+			providers[i].AvailabilityConfig = normalizeAvailabilityConfig(config, &providers[i], platform)
 			found = true
 			break
 		}

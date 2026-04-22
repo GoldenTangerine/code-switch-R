@@ -1,3 +1,23 @@
+# Code Switch v2.8.19
+
+## 新功能
+- **可用性监控页面这回总算不像临时拼的管理表了**：监控页重写为深蓝黑卡片化布局，补上全局概览、供应商状态标签、延迟、最后更新时间、自动刷新倒计时、全局“全部检测”和单节点“立即检测”入口；故障卡片还会带轻量呼吸灯提醒，管理员一眼就能看出哪家上游在掉链子。
+- **可用历史条终于按设计稿收口成可读的离散健康方块**：历史状态从糊成一条的堆叠实现改成独立色块阵列，hover 会显示对应日期、状态和延迟信息；同时浏览器 dev 预览补上监控供应商 mock 数据，调页面不用再硬等真实后端状态回流。
+
+## 修复
+- **健康检查这次不再是“接口回个壳子就算活着”那套糊弄学了**：可用性探测改成真实模型请求与 `pong` 响应校验，响应内容不符合预期时会明确落到 `validation_failed`，并正确计入自动拉黑连续失败次数，少让监控面板看着挺热闹、联动逻辑却在旁边装睡。
+- **Claude / OpenAI 兼容探测的边角坑顺手一锅端了**：Claude 探测补齐 `x-api-key + Authorization + anthropic-version` 兼容头，`TestEndpoint` 会统一 trim 后再拼接目标地址，Responses API 的 refusal 文本也不再被误判成成功，省得上游稍微有点兼容性脾气就把监控结果带歪。
+
+## 技术改进
+- **手动测试、连通性测试、可用性监测总算往一条共享 probe 链路上收了**：新增统一的 `availability probe` 执行器，按端点形态区分 Anthropic Messages、OpenAI Chat Completions 和 OpenAI Responses，请求体还能继续吃 `modelMapping` 和 `requestBodyOverrides`，后续维护不用再守着三套半生不熟的探测口径互相打架。
+- **preset 候选和 retry fallback 也补上了，探测容错终于更像正经发布前的样子**：现在会按模型提示优先尝试 Codex / GPT 风格 Responses preset，并在 `400/404/405/415/422` 或内容不匹配时自动 fallback 到下一候选，必要时再切换 `/responses` 与 `/v1/responses` 等备用端点；网络错误和超时则保持保守，不会为了装聪明把同一个坏链路反复打爆。
+- **回归测试把关键容错边界狠狠干实了**：补上 preset 优先级、同路径 body fallback、备用 endpoint fallback、网络错误不重试、`validation_failed` 拉黑联动等定向测试，少让这套探测器后面又被人改回“能跑就行”的散装状态。
+
+## 发布
+- **本次发版版本号统一推进到 `v2.8.19`**：同步更新应用常量、构建配置、Darwin `Info.plist`、Windows 元数据、Linux 包版本与更新日志，并准备推送 `v2.8.19` tag 触发 GitHub 自动打包，继续保证仓库版本、Git tag 和最终产物别再各唱各的调。
+
+---
+
 # Code Switch v2.8.18
 
 ## 新功能

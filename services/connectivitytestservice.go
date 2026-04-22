@@ -1,12 +1,9 @@
 package services
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"os"
@@ -82,7 +79,7 @@ func NewConnectivityTestService(
 		},
 		autoTestEnabled: false,
 		client: &http.Client{
-			Timeout: 10 * time.Second,
+			Timeout: 0,
 			Transport: &http.Transport{
 				MaxIdleConns:        10,
 				IdleConnTimeout:     30 * time.Second,
@@ -104,68 +101,26 @@ func (cts *ConnectivityTestService) TestProvider(ctx context.Context, provider P
 		LastChecked:  time.Now(),
 	}
 
+	model := cts.getEffectiveModel(&provider, platform)
 	endpoint := cts.getEffectiveEndpoint(&provider, platform)
+	timeoutMs := cts.getEffectiveTimeout(&provider)
+	probeResult, err := executeAvailabilityProbe(ctx, cts.client, &provider, platform, model, endpoint, timeoutMs)
+	result.LatencyMs = probeResult.LatencyMs
 
-	// 构建测试请求
-	reqBody, contentField, err := cts.buildTestRequest(platform, &provider, endpoint)
 	if err != nil {
-		result.Message = fmt.Sprintf("无法构建测试请求: %v", err)
-		result.SubStatus = SubStatusClientError
-		return result
-	}
-
-	// 根据用户配置的端点拼接目标 URL
-	targetURL := cts.buildTargetURL(&provider, endpoint)
-	authType := cts.getEffectiveAuthType(&provider, platform)
-
-	// 调试日志：打印最终请求信息
-	fmt.Printf("[DEBUG] 连通性测试请求:\n")
-	fmt.Printf("  targetURL: %s\n", targetURL)
-	fmt.Printf("  authType:  %s\n", authType)
-	fmt.Printf("  reqBody:   %s\n", string(reqBody))
-
-	// 创建 HTTP 请求
-	req, err := http.NewRequestWithContext(ctx, "POST", targetURL, bytes.NewReader(reqBody))
-	if err != nil {
-		result.Message = fmt.Sprintf("创建请求失败: %v", err)
-		result.SubStatus = SubStatusNetworkError
-		return result
-	}
-
-	// 设置 Headers
-	req.Header.Set("Content-Type", "application/json")
-	if provider.APIKey != "" {
-		// authType 已在上方获取
-		authTypeLower := strings.ToLower(authType)
-		switch authTypeLower {
-		case "x-api-key":
-			req.Header.Set("x-api-key", provider.APIKey)
-			req.Header.Set("anthropic-version", "2023-06-01")
-		case "bearer":
-			req.Header.Set("Authorization", "Bearer "+provider.APIKey)
-		default:
-			// 自定义 Header 名
-			headerName := strings.TrimSpace(authType)
-			if headerName == "" || strings.EqualFold(headerName, "custom") {
-				headerName = "Authorization"
-			}
-			req.Header.Set(headerName, provider.APIKey)
+		var buildErr availabilityProbeBuildError
+		if errors.As(err, &buildErr) {
+			result.Status = StatusUnavailable
+			result.SubStatus = SubStatusClientError
+			result.Message = cts.truncateMessage(fmt.Sprintf("无法构建测试请求: %v", buildErr))
+			return result
 		}
-	}
-
-	// 发送请求并计时
-	start := time.Now()
-	resp, err := cts.client.Do(req)
-	latencyMs := int(time.Since(start).Milliseconds())
-	result.LatencyMs = latencyMs
-
-	if err != nil {
 		// 检测是否为超时错误 - 超时应视为"慢但可用"（黄色），而非"不可用"（红色）
 		// 这样可以避免慢响应的 Provider 被误判为失败而拉黑
 		if isTimeoutError(err) {
 			result.Status = StatusDegraded
 			result.SubStatus = SubStatusSlowLatency
-			result.Message = fmt.Sprintf("响应超时 (>%ds)", int(cts.client.Timeout.Seconds()))
+			result.Message = fmt.Sprintf("响应超时 (>%dms)", timeoutMs)
 			return result
 		}
 		// 真正的网络错误（连接失败、DNS 解析失败等）
@@ -174,131 +129,48 @@ func (cts *ConnectivityTestService) TestProvider(ctx context.Context, provider P
 		result.Message = cts.truncateMessage(fmt.Sprintf("网络错误: %v", err))
 		return result
 	}
-	defer resp.Body.Close()
-
-	result.HTTPCode = resp.StatusCode
-
-	// 读取响应体
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
-	if err != nil {
-		body = []byte{}
-	}
+	result.HTTPCode = probeResult.HTTPStatusCode
+	body := probeResult.ResponseBody
 
 	// 第一阶段：HTTP 状态码 + 延迟判定
-	result.Status, result.SubStatus = cts.determineStatus(resp.StatusCode, latencyMs, 5000)
+	result.Status, result.SubStatus = cts.determineStatus(probeResult.HTTPStatusCode, result.LatencyMs, 5000)
 
 	// 第二阶段：内容校验（仅对成功响应）
-	if result.Status != StatusUnavailable && contentField != "" {
-		result.Status, result.SubStatus = cts.evaluateContent(result.Status, result.SubStatus, body, contentField)
+	if result.Status != StatusUnavailable {
+		result.Status, result.SubStatus = cts.evaluateContent(
+			result.Status,
+			result.SubStatus,
+			body,
+			probeResult.Plan.ResponseFormat,
+			probeResult.Plan.ExpectedText,
+		)
 	}
 
 	// 设置错误消息
 	if result.Status == StatusUnavailable {
-		result.Message = cts.truncateMessage(string(body))
+		if result.SubStatus == SubStatusContentMismatch {
+			result.Message = cts.truncateMessage(
+				buildAvailabilityValidationError(body, probeResult.Plan.ResponseFormat, probeResult.Plan.ExpectedText),
+			)
+		} else {
+			result.Message = cts.truncateMessage(string(body))
+		}
 	}
 
 	return result
 }
 
+func (cts *ConnectivityTestService) getEffectiveModel(provider *Provider, platform string) string {
+	return resolveProviderAvailabilityModel(provider, platform)
+}
+
 // getEffectiveEndpoint 获取有效端点（含平台默认值）
 func (cts *ConnectivityTestService) getEffectiveEndpoint(provider *Provider, platform string) string {
-	endpoint := strings.TrimSpace(provider.ConnectivityTestEndpoint)
-	if endpoint != "" {
-		return endpoint
-	}
-
-	if strings.EqualFold(platform, "claude") {
-		return resolveProviderEffectiveEndpoint("claude", *provider, "/v1/messages")
-	}
-
-	// 平台默认端点
-	switch strings.ToLower(platform) {
-	case "codex":
-		return "/responses"
-	default:
-		return "/v1/chat/completions"
-	}
+	return resolveProviderAvailabilityEndpoint(provider, platform)
 }
 
-// getEffectiveAuthType 获取有效认证方式（含平台默认值）
-// 返回值保留原始大小写，用于自定义 Header 名
-func (cts *ConnectivityTestService) getEffectiveAuthType(provider *Provider, platform string) string {
-	authType := strings.TrimSpace(provider.ConnectivityAuthType)
-	if authType != "" {
-		return authType
-	}
-	// 平台默认认证方式
-	if strings.ToLower(platform) == "claude" {
-		return "x-api-key"
-	}
-	return "bearer"
-}
-
-// buildTestRequest 根据端点构建测试请求体
-func (cts *ConnectivityTestService) buildTestRequest(platform string, provider *Provider, endpoint string) ([]byte, string, error) {
-	// 平台默认模型
-	platformKey := strings.ToLower(platform)
-	defaults := map[string]string{
-		"claude": "claude-haiku-4-5-20251001",
-		"codex":  "gpt-5.1",
-		"gemini": "gemini-2.5-flash",
-	}
-
-	model := strings.TrimSpace(provider.ConnectivityTestModel)
-	if model == "" {
-		model = defaults[platformKey]
-	}
-	if model == "" {
-		model = "gpt-3.5-turbo"
-	}
-
-	if strings.EqualFold(platform, "claude") {
-		spec, err := buildClaudeProbeRequest(provider, endpoint, model)
-		if err != nil {
-			return nil, "", err
-		}
-		return spec.Body, spec.SuccessContains, nil
-	}
-
-	// 获取有效端点（含平台默认值）
-	endpoint = strings.ToLower(endpoint)
-
-	// Anthropic 格式: /v1/messages
-	if strings.Contains(endpoint, "/messages") {
-		reqBody := map[string]interface{}{
-			"model":      model,
-			"max_tokens": 1,
-			"messages": []map[string]string{
-				{"role": "user", "content": "hi"},
-			},
-		}
-		data, _ := json.Marshal(reqBody)
-		return data, "content", nil
-	}
-
-	// Codex 格式: /responses
-	if strings.Contains(endpoint, "/responses") {
-		reqBody := map[string]interface{}{
-			"model":      model,
-			"max_tokens": 1,
-			"messages": []map[string]string{
-				{"role": "user", "content": "hi"},
-			},
-		}
-		data, _ := json.Marshal(reqBody)
-		return data, "choices", nil
-	}
-
-	// 默认 OpenAI 格式: /v1/chat/completions
-	reqBody := map[string]interface{}{
-		"model":      model,
-		"max_tokens": 1,
-		"messages": []map[string]string{
-			{"role": "user", "content": "hi"},
-		},
-	}
-	data, _ := json.Marshal(reqBody)
-	return data, "choices", nil
+func (cts *ConnectivityTestService) getEffectiveTimeout(provider *Provider) int {
+	return resolveProviderAvailabilityTimeout(provider)
 }
 
 // determineStatus 根据 HTTP 状态码和延迟判定状态
@@ -342,8 +214,8 @@ func (cts *ConnectivityTestService) determineStatus(statusCode, latencyMs, slowT
 }
 
 // evaluateContent 内容校验
-func (cts *ConnectivityTestService) evaluateContent(baseStatus int, subStatus string, body []byte, successContains string) (int, string) {
-	if successContains == "" {
+func (cts *ConnectivityTestService) evaluateContent(baseStatus int, subStatus string, body []byte, responseFormat string, expectedText string) (int, string) {
+	if strings.TrimSpace(expectedText) == "" {
 		return baseStatus, subStatus
 	}
 
@@ -351,7 +223,7 @@ func (cts *ConnectivityTestService) evaluateContent(baseStatus int, subStatus st
 		return baseStatus, subStatus
 	}
 
-	if !responseContainsExpectedField(body, successContains) {
+	if !responseContainsExpectedText(body, responseFormat, expectedText) {
 		return StatusUnavailable, SubStatusContentMismatch
 	}
 
@@ -364,15 +236,6 @@ func (cts *ConnectivityTestService) truncateMessage(msg string) string {
 		return msg[:512] + "..."
 	}
 	return msg
-}
-
-// buildTargetURL 根据用户配置的端点构建目标 URL
-func (cts *ConnectivityTestService) buildTargetURL(provider *Provider, endpoint string) string {
-	baseURL := strings.TrimSuffix(provider.APIURL, "/")
-	if !strings.HasPrefix(endpoint, "/") {
-		endpoint = "/" + endpoint
-	}
-	return baseURL + endpoint
 }
 
 // isTimeoutError 检测错误是否为超时类型
@@ -423,7 +286,7 @@ func (cts *ConnectivityTestService) TestAll(platform string) []ConnectivityResul
 
 	for _, provider := range providers {
 		// 只测试启用了连通性检测的供应商
-		if !provider.ConnectivityCheck {
+		if !provider.AvailabilityMonitorEnabled && !provider.ConnectivityCheck {
 			continue
 		}
 
@@ -531,7 +394,8 @@ func (cts *ConnectivityTestService) RunSingleTest(platform string, providerID in
 		return nil, fmt.Errorf("未找到供应商 ID: %d", providerID)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	timeout := cts.getEffectiveTimeout(targetProvider)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Millisecond)
 	defer cancel()
 
 	result := cts.TestProvider(ctx, *targetProvider, platform)
@@ -677,11 +541,14 @@ func (cts *ConnectivityTestService) TestProviderManual(
 
 	// 构建临时 Provider
 	provider := Provider{
-		APIURL:                   apiURL,
-		APIKey:                   apiKey,
-		ConnectivityTestModel:    model,
-		ConnectivityTestEndpoint: endpoint,
-		ConnectivityAuthType:     authType,
+		APIURL: apiURL,
+		APIKey: apiKey,
+		AvailabilityConfig: &AvailabilityConfig{
+			TestModel:    strings.TrimSpace(model),
+			TestEndpoint: normalizeAvailabilityEndpoint(endpoint),
+			Timeout:      DefaultTimeoutMs,
+		},
+		ConnectivityAuthType: strings.TrimSpace(authType),
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
