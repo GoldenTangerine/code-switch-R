@@ -1059,10 +1059,14 @@
       },
       "modelShare": {
         "title": "Model Distribution",
+        "detailTitle": "Model Distribution Details",
+        "totalCalls": "Total Calls",
         "model": "Model",
         "requests": "Requests",
+        "requestsUnit": "req",
         "tokens": "Token",
         "cost": "Cost",
+        "centerHint": "Global real-time traffic anchor",
         "empty": "No model data in the current filter range"
       }
     },

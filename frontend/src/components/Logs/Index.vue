@@ -34,8 +34,7 @@
 
       <LogsChartsPanel
         :model-share-rows="modelShareRows"
-        :model-share-chart-data="modelShareChartData"
-        :model-share-chart-options="modelShareChartOptions"
+        :is-dark-theme="isDarkTheme"
         :chart-data="chartData"
         :chart-options="chartOptions"
         :format-number="formatNumber"
@@ -318,8 +317,6 @@ const {
 const {
   statsCards,
   modelShareRows,
-  modelShareChartData,
-  modelShareChartOptions,
   chartData,
   chartOptions,
   logsTableFormatters,

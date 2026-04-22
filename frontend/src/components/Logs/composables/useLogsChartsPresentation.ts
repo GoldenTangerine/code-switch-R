@@ -11,7 +11,6 @@ import {
   formatCurrency,
   formatDuration,
   formatFirstTokenMs,
-  formatModelShareTooltipLabel,
   formatSeriesLabel,
   formatTime,
   formatTokenNumber,
@@ -182,38 +181,6 @@ export function useLogsChartsPresentation(options: UseLogsChartsPresentationOpti
   const modelShareRows = computed<ModelShareRow[]>(() =>
     buildModelShareRows(modelStats.value, MODEL_SHARE_COLORS),
   )
-
-  const modelShareTotalTokens = computed(() =>
-    modelShareRows.value.reduce((sum, item) => sum + item.tokens, 0),
-  )
-
-  const modelShareChartData = computed<ChartData<'doughnut'>>(() => ({
-    labels: modelShareRows.value.map(item => item.model),
-    datasets: [
-      {
-        data: modelShareRows.value.map(item => item.tokens),
-        backgroundColor: modelShareRows.value.map(item => item.color),
-        borderWidth: 0,
-        hoverOffset: 6,
-      },
-    ],
-  }))
-
-  const modelShareChartOptions: ChartOptions<'doughnut'> = {
-    responsive: true,
-    maintainAspectRatio: false,
-    cutout: '50%',
-    plugins: {
-      legend: {
-        display: false,
-      },
-      tooltip: {
-        callbacks: {
-          label: (context) => formatModelShareTooltipLabel(context.label, context.raw, modelShareTotalTokens.value),
-        },
-      },
-    },
-  }
 
   const seriesGranularity = computed<'hour' | 'day'>(() =>
     resolveSeriesGranularityFromData(computeDateRange(), statsSeries.value, dateType.value),
@@ -581,8 +548,6 @@ export function useLogsChartsPresentation(options: UseLogsChartsPresentationOpti
   return {
     statsCards,
     modelShareRows,
-    modelShareChartData,
-    modelShareChartOptions,
     chartData,
     chartOptions,
     logsTableFormatters,

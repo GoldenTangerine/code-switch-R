@@ -1,0 +1,76 @@
+import { describe, expect, it } from 'vitest'
+import type { ModelUsageStat } from '../../services/logs'
+import { buildModelShareRows, formatModelShareTooltipLabel } from './utils'
+
+const MODEL_SHARE_COLORS = ['#818cf8', '#fb923c', '#34d399', '#60a5fa'] as const
+
+const createModelUsageStat = (overrides: Partial<ModelUsageStat> = {}): ModelUsageStat => ({
+  model: 'model-a',
+  total_requests: 0,
+  input_tokens: 0,
+  output_tokens: 0,
+  cache_read_tokens: 0,
+  total_tokens: 0,
+  cost_total: 0,
+  ...overrides,
+})
+
+describe('buildModelShareRows', () => {
+  it('sorts rows by requests, then tokens, then cost', () => {
+    const rows = buildModelShareRows(
+      [
+        createModelUsageStat({ model: 'alpha', total_requests: 5, total_tokens: 100, cost_total: 1 }),
+        createModelUsageStat({ model: 'beta', total_requests: 8, total_tokens: 10, cost_total: 0.2 }),
+        createModelUsageStat({ model: 'gamma', total_requests: 5, total_tokens: 120, cost_total: 0.1 }),
+        createModelUsageStat({ model: 'delta', total_requests: 5, total_tokens: 120, cost_total: 0.3 }),
+      ],
+      MODEL_SHARE_COLORS,
+    )
+
+    expect(rows.map(item => item.model)).toEqual(['beta', 'delta', 'gamma', 'alpha'])
+    expect(rows.map(item => item.color)).toEqual(['#818cf8', '#fb923c', '#34d399', '#60a5fa'])
+  })
+
+  it('merges model names case-insensitively and falls back to summed tokens when total_tokens is empty', () => {
+    const rows = buildModelShareRows(
+      [
+        createModelUsageStat({
+          model: 'GLM-4-Plus',
+          total_requests: 2,
+          input_tokens: 10,
+          output_tokens: 20,
+          cache_read_tokens: 5,
+          total_tokens: 0,
+          cost_total: 0.1,
+        }),
+        createModelUsageStat({
+          model: 'glm-4-plus',
+          total_requests: 3,
+          input_tokens: 15,
+          output_tokens: 25,
+          cache_read_tokens: 10,
+          total_tokens: 0,
+          cost_total: 0.2,
+        }),
+      ],
+      MODEL_SHARE_COLORS,
+    )
+
+    expect(rows).toHaveLength(1)
+    expect(rows[0]?.model).toBe('GLM-4-Plus')
+    expect(rows[0]?.requests).toBe(5)
+    expect(rows[0]?.tokens).toBe(85)
+    expect(rows[0]?.cost).toBeCloseTo(0.3, 10)
+    expect(rows[0]?.color).toBe('#818cf8')
+  })
+})
+
+describe('formatModelShareTooltipLabel', () => {
+  it('formats request tooltip text with a custom localized unit', () => {
+    expect(formatModelShareTooltipLabel('glm-4-plus', 42, 120, '请求')).toBe('glm-4-plus: 42 请求 (35.0%)')
+  })
+
+  it('uses the default req suffix and handles empty totals safely', () => {
+    expect(formatModelShareTooltipLabel('ark-code-v2', 7, 0)).toBe('ark-code-v2: 7 req (0.0%)')
+  })
+})

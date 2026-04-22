@@ -1060,10 +1060,14 @@
       },
       "modelShare": {
         "title": "模型分布",
+        "detailTitle": "模型分布详情",
+        "totalCalls": "总调用",
         "model": "模型",
         "requests": "请求",
+        "requestsUnit": "请求",
         "tokens": "Token",
         "cost": "金额",
+        "centerHint": "全集群实时流量锚点",
         "empty": "当前筛选范围暂无模型数据"
       }
     },

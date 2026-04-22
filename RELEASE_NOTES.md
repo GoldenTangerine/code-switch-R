@@ -1,3 +1,19 @@
+# Code Switch v2.8.17
+
+## 修复
+- **日志页模型分布卡片终于不再“主题一套、图表一套、文案还夹点英文”各玩各的了**：收口 `LogsChartsPanel` 的 light / dark 双主题样式后，模型分布卡片与趋势图容器现在都会跟着 `isDarkTheme` 一起切换；浅色主题下不再出现整张卡片黑着、图表 legend 和刻度却按浅色文本渲染，导致对比度直接废掉的尴尬场面。
+- **模型分布中心文案和 tooltip 不再偷偷往中文界面里塞英文碎片**：`Total Calls`、`req` 这类硬编码已改为走 i18n，中心标签、请求单位和 tooltip 输出现在会按当前语言老老实实显示，不会再出现中文界面里夹着半截英文的串味感。
+- **模型分布卡片的配置契约不再“看着能配，其实配不进去”**：Doughnut 图的交互配置正式从父层假透传改为组件内自主管理，避免之前 `LogsChartsPanel` 一边接收 `modelShareChartData / Options`、一边自己偷偷重算覆盖，后面维护时不再容易出现“你明明传了配置，结果压根没生效”的扯淡问题。
+
+## 技术改进
+- **日志模型分布面板职责边界重新收口**：父层 `useLogsChartsPresentation` 现在只负责产出 `modelShareRows` 和趋势图数据，Doughnut 图的 hover glow、tooltip、中心锚点和交互态统一下沉到 `LogsChartsPanel` 组件内部，少让表现层和数据层继续互相踩脚。
+- **统计口径切换正式补上回归测试保险丝**：新增 `frontend/src/components/Logs/utils.test.ts`，把 `buildModelShareRows` 的 `requests -> tokens -> cost` 排序规则，以及 `formatModelShareTooltipLabel` 按请求数和占比输出的口径钉进 Vitest，后面谁再手痒改回去，测试会先狠狠干他一锤。
+
+## 发布
+- **本次发版版本号统一推进到 `v2.8.17`**：同步更新应用常量、构建配置、Darwin `Info.plist`、Windows 元数据、Linux 包版本与更新日志，并准备推送 `v2.8.17` tag 触发 GitHub 自动打包，继续保证仓库版本、Git tag 和最终产物别再各唱各的调。
+
+---
+
 # Code Switch v2.8.16
 
 ## 修复

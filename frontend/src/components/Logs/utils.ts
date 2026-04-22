@@ -1519,8 +1519,8 @@ export const buildModelShareRows = (
   }
 
   const rows = Array.from(grouped.values()).sort((a, b) => {
-    if (b.tokens !== a.tokens) return b.tokens - a.tokens
     if (b.requests !== a.requests) return b.requests - a.requests
+    if (b.tokens !== a.tokens) return b.tokens - a.tokens
     return b.cost - a.cost
   })
 
@@ -1533,11 +1533,17 @@ export const buildModelShareRows = (
 export const formatModelShareTooltipLabel = (
   label: string | number | undefined,
   rawValue: unknown,
-  totalTokens: number,
+  totalRequests: number,
+  requestUnitLabel: string = 'req',
 ) => {
-  const tokenValue = Number(rawValue ?? 0)
-  const ratio = totalTokens > 0 ? (tokenValue / totalTokens) * 100 : 0
-  return `${String(label ?? '')}: ${formatTokenNumber(tokenValue)} (${ratio.toFixed(1)}%)`
+  const requestValue = Math.max(0, Math.round(Number(rawValue ?? 0)))
+  const ratio = totalRequests > 0 ? (requestValue / totalRequests) * 100 : 0
+  const resolvedLabel = String(label ?? '').trim() || '—'
+  const resolvedUnit = String(requestUnitLabel ?? '').trim()
+  const valueLabel = resolvedUnit
+    ? `${formatNumber(requestValue)} ${resolvedUnit}`
+    : formatNumber(requestValue)
+  return `${resolvedLabel}: ${valueLabel} (${ratio.toFixed(1)}%)`
 }
 
 const hexToRgb = (hexColor: string) => {
