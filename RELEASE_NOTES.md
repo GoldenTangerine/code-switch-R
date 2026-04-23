@@ -1,3 +1,17 @@
+# Code Switch v2.8.31
+
+## 修复
+- **额度查询配置弹窗这回不再被“延后挂载编辑器”这套时序戏法反噬了**：撤掉 `ProviderQuotaQueryConfigModal.vue` 里 `JsonCodeEditor / CodeMirror` 的 `after-open + fallback timer` 延后挂载逻辑，脚本编辑区在 `Custom / General / NewApi` 模版下直接跟随内容区渲染，避免打包版里出现弹窗已经打开、脚本区却只剩空白占位或挂载时序判断继续绕圈的问题。
+
+## 技术改进
+- **额度查询弹窗的编辑器渲染条件正式收口到一处**：`showScriptSection` 现在同时决定脚本配置区和编辑器本体是否渲染，移除 `modalPanelReady / codeEditorReady / timer` 等中间状态，减少 Wails / WebKit 下弹窗打开时的状态分叉，后续排查也不用再跟一堆时序变量狠狠干架。
+- **发版元数据继续按同一版号收口**：同步更新应用常量、构建配置、Darwin `Info.plist` / `Info.dev.plist`、Windows 版本信息与 Linux `nfpm` 版本到 `v2.8.31`，避免 tag、更新日志和包内版本继续各唱各的调。
+
+## 发布
+- **本次发版版本号统一推进到 `v2.8.31`**：补齐更新日志并准备推送 `v2.8.31` tag 触发 GitHub 自动打包，继续保证仓库版本、Git tag 和最终产物别再各玩各的。
+
+---
+
 # Code Switch v2.8.30
 
 ## 修复

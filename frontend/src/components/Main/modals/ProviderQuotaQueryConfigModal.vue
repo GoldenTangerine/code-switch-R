@@ -5,7 +5,6 @@
     :body-scrollable="true"
     :panel-width="'min(960px, 94vw)'"
     @close="$emit('close')"
-    @after-open="handleModalAfterOpen"
   >
     <form class="provider-quota-query-config-modal" @submit.prevent="handleSave">
       <section class="provider-quota-query-config-modal__section">
@@ -234,7 +233,7 @@
         </div>
 
         <JsonCodeEditor
-          v-if="shouldRenderScriptEditor"
+          v-if="showScriptSection"
           v-model="draft.code"
           mode="plain"
           :rows="20"
@@ -242,11 +241,6 @@
           :surface-height="'360px'"
           :placeholder="t('components.main.form.placeholders.providerQuotaQueryCode')"
         />
-        <div
-          v-else
-          class="provider-quota-query-config-modal__editor-placeholder"
-          aria-hidden="true"
-        ></div>
       </section>
 
       <footer class="provider-quota-query-config-modal__actions">
@@ -294,7 +288,6 @@ import {
 
 const DEFAULT_TIMEOUT = 10
 const DEFAULT_AUTO_QUERY_INTERVAL = 5
-const SCRIPT_EDITOR_MOUNT_FALLBACK_MS = 420
 
 const props = defineProps<{
   open: boolean
@@ -323,9 +316,6 @@ const draft = reactive<ProviderQuotaQueryConfig>({
   autoQueryInterval: DEFAULT_AUTO_QUERY_INTERVAL,
 })
 const testing = ref(false)
-const modalPanelReady = ref(false)
-const codeEditorReady = ref(false)
-let codeEditorReadyTimer: number | null = null
 
 const detectedTokenPlanProvider = computed(() => (
   detectProviderQuotaTokenPlanProvider(props.providerApiUrl)
@@ -352,9 +342,6 @@ const showScriptSection = computed(() => (
   selectedTemplate.value === 'custom'
     || selectedTemplate.value === 'general'
     || selectedTemplate.value === 'newapi'
-))
-const shouldRenderScriptEditor = computed(() => (
-  showScriptSection.value && codeEditorReady.value
 ))
 const showCredentialsSection = computed(() => showScriptSection.value)
 const showBaseUrlField = computed(() => showCredentialsSection.value)
@@ -542,38 +529,6 @@ function resetDraft() {
   applyDraft(nextConfig)
 }
 
-function clearCodeEditorReadyTimer() {
-  if (codeEditorReadyTimer !== null) {
-    window.clearTimeout(codeEditorReadyTimer)
-    codeEditorReadyTimer = null
-  }
-}
-
-function markCodeEditorReady() {
-  clearCodeEditorReadyTimer()
-  if (!props.open || !showScriptSection.value) return
-  codeEditorReady.value = true
-}
-
-function scheduleCodeEditorMount() {
-  clearCodeEditorReadyTimer()
-  if (!props.open || !showScriptSection.value) {
-    codeEditorReady.value = false
-    return
-  }
-
-  if (modalPanelReady.value) {
-    codeEditorReady.value = true
-    return
-  }
-
-  codeEditorReady.value = false
-  codeEditorReadyTimer = window.setTimeout(() => {
-    codeEditorReadyTimer = null
-    markCodeEditorReady()
-  }, SCRIPT_EDITOR_MOUNT_FALLBACK_MS)
-}
-
 function showScriptTemplate(templateType: ProviderQuotaTemplateType | undefined): templateType is Extract<ProviderQuotaTemplateType, 'custom' | 'general' | 'newapi'> {
   return templateType === 'custom' || templateType === 'general' || templateType === 'newapi'
 }
@@ -685,11 +640,6 @@ function handleLoadPresetCode() {
   showToast(t('components.main.form.toast.providerQuotaQueryPresetLoaded'), 'success')
 }
 
-function handleModalAfterOpen() {
-  modalPanelReady.value = true
-  markCodeEditorReady()
-}
-
 async function handleTest() {
   const validationIssue = validateCurrentDraft(true)
   if (validationIssue) {
@@ -760,32 +710,10 @@ watch(
   () => props.open,
   (open) => {
     if (open) {
-      modalPanelReady.value = false
-      codeEditorReady.value = false
       resetDraft()
-      scheduleCodeEditorMount()
-      return
     }
-
-    modalPanelReady.value = false
-    codeEditorReady.value = false
-    clearCodeEditorReadyTimer()
   },
-  { immediate: true },
 )
-
-watch(showScriptSection, (visible) => {
-  if (!props.open) return
-
-  if (!visible) {
-    codeEditorReady.value = false
-    clearCodeEditorReadyTimer()
-    return
-  }
-
-  if (codeEditorReady.value) return
-  scheduleCodeEditorMount()
-})
 </script>
 
 <style scoped>
@@ -992,13 +920,6 @@ watch(showScriptSection, (visible) => {
   min-width: 0;
 }
 
-.provider-quota-query-config-modal__editor-placeholder {
-  min-height: 408px;
-  border: 1px dashed color-mix(in srgb, var(--mac-border) 72%, transparent);
-  border-radius: 16px;
-  background: color-mix(in srgb, var(--mac-surface) 72%, transparent);
-}
-
 .provider-quota-query-config-modal__actions {
   display: flex;
   justify-content: flex-end;
@@ -1024,11 +945,6 @@ watch(showScriptSection, (visible) => {
 :global(.dark) .provider-quota-query-config-modal__template-card.is-selected {
   background: color-mix(in srgb, rgba(59, 130, 246, 0.16) 74%, rgba(15, 23, 42, 0.92));
   box-shadow: 0 14px 34px rgba(2, 6, 23, 0.3);
-}
-
-:global(.dark) .provider-quota-query-config-modal__editor-placeholder {
-  background: rgba(15, 23, 42, 0.52);
-  border-color: rgba(255, 255, 255, 0.1);
 }
 
 :global(.dark) .provider-quota-query-config-modal__hint,
