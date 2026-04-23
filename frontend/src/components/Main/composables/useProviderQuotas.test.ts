@@ -135,7 +135,15 @@ describe('useProviderQuotas', () => {
     vi.mocked(fetchCostSinceByProvider).mockResolvedValue(0)
 
     const quotaState = useProviderQuotas({
-      t: (key: string) => key,
+      t: (key: string, params?: Record<string, string>) => {
+        if (key === 'components.main.providers.quotaRefreshFailedCached') {
+          return `刷新失败（${params?.reason}），当前仍显示上次成功获取的数据`
+        }
+        if (key === 'components.main.providers.quotaQueryFailed') {
+          return '额度查询失败'
+        }
+        return key
+      },
       getActiveTab: () => 'codex',
       cards,
     })
@@ -507,6 +515,112 @@ describe('useProviderQuotas', () => {
     ])
   })
 
+  it('creates a visible remote error item when the first balance query returns no displayable data', async () => {
+    vi.setSystemTime(new Date('2026-04-09T10:00:00.000Z'))
+
+    const cards = createCardRecord()
+    const card = createCard(185, {
+      providerQuotaQueryType: 'balance',
+      budgetQuotaSettings: undefined,
+      apiUrl: 'https://openrouter.ai/api/v1/chat/completions',
+    })
+    cards.codex.push(card)
+
+    vi.mocked(queryProviderQuota).mockResolvedValue({
+      success: false,
+      queryType: 'balance',
+      error: 'temporary upstream timeout',
+      queriedAt: Date.UTC(2026, 3, 9, 10, 0, 0),
+      items: [],
+    })
+
+    const quotaState = useProviderQuotas({
+      t: (key: string, params?: Record<string, string>) => {
+        if (key === 'components.main.providers.quotaQueryStatusLabel') {
+          return '额度查询'
+        }
+        if (key === 'components.main.providers.quotaQueryFailed') {
+          return '额度查询失败'
+        }
+        if (key === 'components.main.providers.quotaQueryEmpty') {
+          return '远端额度接口没有返回可展示的数据'
+        }
+        if (key === 'components.main.providers.quotaRefreshFailedCached') {
+          return `刷新失败（${params?.reason}），当前仍显示上次成功获取的数据`
+        }
+        return key
+      },
+      getActiveTab: () => 'codex',
+      cards,
+    })
+
+    await quotaState.refreshProviderQuotas()
+
+    expect(quotaState.getQuotaDisplay(card)).toEqual([
+      expect.objectContaining({
+        key: 'remote_quota_query_error',
+        label: '额度查询',
+        queriedAt: Date.UTC(2026, 3, 9, 10, 0, 0),
+        invalidMessage: 'temporary upstream timeout',
+        total: 0,
+        used: 0,
+        valueMode: 'currency',
+      }),
+    ])
+  })
+
+  it('keeps queriedAt on remote balance items and preserves it when ttl cache is reused', async () => {
+    vi.setSystemTime(new Date('2026-04-09T10:00:00.000Z'))
+
+    const cards = createCardRecord()
+    const card = createCard(183, {
+      providerQuotaQueryType: 'balance',
+      budgetQuotaSettings: undefined,
+      apiUrl: 'https://openrouter.ai/api/v1/chat/completions',
+    })
+    cards.codex.push(card)
+
+    vi.mocked(queryProviderQuota).mockResolvedValue({
+      success: true,
+      queryType: 'balance',
+      queriedAt: Date.UTC(2026, 3, 9, 9, 58, 0),
+      items: [
+        {
+          key: 'openrouter',
+          label: 'OpenRouter',
+          used: 8,
+          total: 50,
+          active: true,
+          valueMode: 'currency',
+          unit: 'USD',
+        },
+      ],
+    })
+
+    const quotaState = useProviderQuotas({
+      t: (key: string) => key,
+      getActiveTab: () => 'codex',
+      cards,
+    })
+
+    await quotaState.refreshProviderQuotas()
+
+    vi.setSystemTime(new Date('2026-04-09T10:00:30.000Z'))
+    await quotaState.refreshProviderQuotas()
+
+    expect(queryProviderQuota).toHaveBeenCalledTimes(1)
+    expect(quotaState.getQuotaDisplay(card)).toEqual([
+      expect.objectContaining({
+        key: 'openrouter',
+        queriedAt: Date.UTC(2026, 3, 9, 9, 58, 0),
+        used: 8,
+        total: 50,
+        valueMode: 'currency',
+        unit: 'USD',
+      }),
+    ])
+  })
+
   it('prefers provider query result over local budget-log quota calculation', async () => {
     const cards = createCardRecord()
     const quotas = createDefaultBudgetQuotaSettings()
@@ -651,6 +765,91 @@ describe('useProviderQuotas', () => {
     quotaState.stopTimers()
   })
 
+  it('only refreshes the targeted remote provider when targetRefs are specified', async () => {
+    vi.setSystemTime(new Date('2026-04-09T10:00:00.000Z'))
+
+    const cards = createCardRecord()
+    const targetCard = createCard(23, {
+      providerRef: 'target-ref',
+      providerQuotaQueryType: 'token_plan_kimi',
+    })
+    const siblingCard = createCard(24, {
+      providerRef: 'sibling-ref',
+      providerQuotaQueryType: 'token_plan_kimi',
+    })
+    cards.claude.push(targetCard, siblingCard)
+
+    vi.mocked(queryProviderQuota)
+      .mockResolvedValueOnce({
+        success: true,
+        queryType: 'token_plan_kimi',
+        items: [
+          {
+            key: 'weekly',
+            used: 10,
+            total: 100,
+            nextReset: '2026-04-12T00:00:00.000Z',
+            active: true,
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        queryType: 'token_plan_kimi',
+        items: [
+          {
+            key: 'weekly',
+            used: 20,
+            total: 100,
+            nextReset: '2026-04-12T00:00:00.000Z',
+            active: true,
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        queryType: 'token_plan_kimi',
+        items: [
+          {
+            key: 'weekly',
+            used: 33,
+            total: 100,
+            nextReset: '2026-04-12T00:00:00.000Z',
+            active: true,
+          },
+        ],
+      })
+
+    const quotaState = useProviderQuotas({
+      t: (key: string) => key,
+      getActiveTab: () => 'claude',
+      cards,
+    })
+
+    await quotaState.refreshProviderQuotas()
+
+    expect(queryProviderQuota).toHaveBeenCalledTimes(2)
+    expect(quotaState.getQuotaDisplay(targetCard)[0]?.used).toBe(10)
+    expect(quotaState.getQuotaDisplay(siblingCard)[0]?.used).toBe(20)
+
+    const targetedRefreshPromise = quotaState.refreshProviderQuotas({
+      targetRefs: new Set(['target-ref']),
+      forceRemoteRefs: new Set(['target-ref']),
+    })
+
+    await Promise.resolve()
+
+    expect(quotaState.isQuotaRefreshing(targetCard)).toBe(true)
+    expect(quotaState.isQuotaRefreshing(siblingCard)).toBe(false)
+
+    await targetedRefreshPromise
+
+    expect(queryProviderQuota).toHaveBeenCalledTimes(3)
+    expect(queryProviderQuota).toHaveBeenLastCalledWith('token_plan_kimi', targetCard.apiUrl, targetCard.apiKey)
+    expect(quotaState.getQuotaDisplay(targetCard)[0]?.used).toBe(33)
+    expect(quotaState.getQuotaDisplay(siblingCard)[0]?.used).toBe(20)
+  })
+
   it('refreshes cached remote quota again after cache ttl expires', async () => {
     vi.setSystemTime(new Date('2026-04-09T10:00:00.000Z'))
 
@@ -768,7 +967,14 @@ describe('useProviderQuotas', () => {
     await quotaState.refreshProviderQuotas()
 
     expect(queryProviderQuota).toHaveBeenCalledTimes(3)
-    expect(quotaState.getQuotaDisplay(card)).toEqual([])
+    expect(quotaState.getQuotaDisplay(card)).toEqual([
+      expect.objectContaining({
+        key: 'remote_quota_query_error',
+        invalidMessage: 'temporary upstream timeout',
+        total: 0,
+        used: 0,
+      }),
+    ])
   })
 
   it('re-fetches remote quota immediately when explicit forceRemoteRefs are provided', async () => {
@@ -829,6 +1035,79 @@ describe('useProviderQuotas', () => {
         used: 45,
         total: 120,
         valueMode: 'count',
+      }),
+    ])
+  })
+
+  it('preserves cached remote balance when manual force refresh returns no items', async () => {
+    vi.setSystemTime(new Date('2026-04-09T10:00:00.000Z'))
+
+    const cards = createCardRecord()
+    const card = createCard(184, {
+      providerQuotaQueryType: 'balance',
+      budgetQuotaSettings: undefined,
+      apiUrl: 'https://openrouter.ai/api/v1/chat/completions',
+    })
+    cards.codex.push(card)
+
+    const firstQueriedAt = Date.UTC(2026, 3, 9, 9, 58, 0)
+    vi.mocked(queryProviderQuota)
+      .mockResolvedValueOnce({
+        success: true,
+        queryType: 'balance',
+        queriedAt: firstQueriedAt,
+        items: [
+          {
+            key: 'openrouter',
+            label: 'OpenRouter',
+            used: 8,
+            total: 50,
+            active: true,
+            valueMode: 'currency',
+            unit: 'USD',
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        success: false,
+        queryType: 'balance',
+        error: 'temporary upstream timeout',
+        items: [],
+      })
+
+    const quotaState = useProviderQuotas({
+      t: (key: string, params?: Record<string, string>) => {
+        if (key === 'components.main.providers.quotaRefreshFailedCached') {
+          return `刷新失败（${params?.reason}），当前仍显示上次成功获取的数据`
+        }
+        if (key === 'components.main.providers.quotaQueryFailed') {
+          return '额度查询失败'
+        }
+        return key
+      },
+      getActiveTab: () => 'codex',
+      cards,
+    })
+
+    await quotaState.refreshProviderQuotas()
+
+    const providerRef = card.providerRef || `${card.id}`
+    vi.setSystemTime(new Date('2026-04-09T10:01:00.000Z'))
+    await quotaState.refreshProviderQuotas({
+      targetRefs: new Set([providerRef]),
+      forceRemoteRefs: new Set([providerRef]),
+    })
+
+    expect(queryProviderQuota).toHaveBeenCalledTimes(2)
+    expect(quotaState.getQuotaDisplay(card)).toEqual([
+      expect.objectContaining({
+        key: 'openrouter',
+        queriedAt: firstQueriedAt,
+        used: 8,
+        total: 50,
+        valueMode: 'currency',
+        unit: 'USD',
+        refreshErrorMessage: '刷新失败（temporary upstream timeout），当前仍显示上次成功获取的数据',
       }),
     ])
   })
@@ -1000,6 +1279,7 @@ describe('useProviderQuotas', () => {
 
     expect(queuedRefreshPromise).toBe(firstRefreshPromise)
     expect(queryProviderQuota).toHaveBeenCalledTimes(1)
+    expect(quotaState.isQuotaRefreshing(card)).toBe(true)
 
     if (!resolveFirstRequest) {
       throw new Error('expected first remote quota request to be pending')
@@ -1023,6 +1303,7 @@ describe('useProviderQuotas', () => {
     await queuedRefreshPromise
 
     expect(queryProviderQuota).toHaveBeenCalledTimes(2)
+    expect(quotaState.isQuotaRefreshing(card)).toBe(false)
     expect(quotaState.getQuotaDisplay(card)).toEqual([
       expect.objectContaining({
         key: 'five_hour',

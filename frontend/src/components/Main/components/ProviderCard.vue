@@ -218,11 +218,11 @@
                 <span>{{ stats.tps }}</span>
               </span>
               <div
-                v-if="quotaSectionMode === 'inline-with-performance'"
+                v-if="progressQuotaSectionMode === 'inline-with-performance'"
                 class="card-performance-quotas"
               >
                 <span
-                  v-for="item in viewModel.quotaDisplay"
+                  v-for="item in progressQuotaItems"
                   :key="item.key"
                   :class="['card-quota-item', `card-quota-item--${item.key}`, quotaProgressClass(item)]"
                   :title="quotaTooltip(item)"
@@ -242,12 +242,12 @@
             </div>
           </template>
           <div
-            v-if="quotaSectionMode === 'standalone'"
+            v-if="progressQuotaSectionMode === 'standalone'"
             class="card-metrics-line card-metrics-line-performance"
           >
             <div class="card-performance-quotas">
               <span
-                v-for="item in viewModel.quotaDisplay"
+                v-for="item in progressQuotaItems"
                 :key="item.key"
                 :class="['card-quota-item', `card-quota-item--${item.key}`, quotaProgressClass(item)]"
                 :title="quotaTooltip(item)"
@@ -263,6 +263,147 @@
                 <span class="quota-usage-percent">{{ quotaUsagePercent(item) }}</span>
                 <span v-if="showQuotaCountdown(item)" class="quota-countdown">{{ item.countdownLabel }}</span>
               </span>
+            </div>
+          </div>
+          <div
+            v-if="hasBalanceQuotaItems"
+            class="card-balance-quota-panel"
+          >
+            <div class="card-balance-quota-panel__meta">
+              <span class="card-balance-quota-panel__updated">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path
+                    d="M12 7.25v5.15l3.1 1.85M20 12a8 8 0 11-2.34-5.66"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.7"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+                {{ balanceQuotaUpdatedAtLabel }}
+              </span>
+              <button
+                class="card-balance-quota-panel__refresh"
+                type="button"
+                :disabled="viewModel.quotaRefreshing"
+                :title="t('components.main.providers.quotaRefresh')"
+                :aria-label="t('components.main.providers.quotaRefreshAriaLabel', { name: viewModel.card.name })"
+                @click.stop="$emit('refresh-provider-quota')"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                  :class="{ 'is-spinning': viewModel.quotaRefreshing }"
+                >
+                  <path
+                    d="M20 12a8 8 0 10-2.34 5.66M20 12v5m0-5h-5"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.7"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+              </button>
+            </div>
+
+            <div class="card-balance-quota-list">
+              <div
+                v-for="item in balanceQuotaItems"
+                :key="`balance-${item.key}`"
+                class="card-balance-quota"
+                :title="quotaTooltip(item)"
+              >
+                <span
+                  v-if="showBalanceItemLabel(item)"
+                  class="card-balance-quota__item-label"
+                >
+                  {{ item.label }}
+                </span>
+                <div class="card-balance-quota__value-row">
+                  <span class="card-balance-quota__label">
+                    {{ t('components.main.providers.quotaRemainingLabel') }}
+                  </span>
+                  <span
+                    class="card-balance-quota__amount"
+                    :class="balanceQuotaAmountClass(item)"
+                  >
+                    {{ formatBalanceRemainingValue(item) }}
+                  </span>
+                </div>
+                <p
+                  v-if="quotaItemNote(item)"
+                  class="card-balance-quota__note"
+                >
+                  {{ quotaItemNote(item) }}
+                </p>
+              </div>
+            </div>
+          </div>
+          <div
+            v-if="hasErrorQuotaItems"
+            class="card-balance-quota-panel card-balance-quota-panel--error"
+          >
+            <div class="card-balance-quota-panel__meta">
+              <span class="card-balance-quota-panel__updated">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path
+                    d="M12 7.25v5.15l3.1 1.85M20 12a8 8 0 11-2.34-5.66"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.7"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+                {{ errorQuotaUpdatedAtLabel }}
+              </span>
+              <button
+                class="card-balance-quota-panel__refresh"
+                type="button"
+                :disabled="viewModel.quotaRefreshing"
+                :title="t('components.main.providers.quotaRefresh')"
+                :aria-label="t('components.main.providers.quotaRefreshAriaLabel', { name: viewModel.card.name })"
+                @click.stop="$emit('refresh-provider-quota')"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                  :class="{ 'is-spinning': viewModel.quotaRefreshing }"
+                >
+                  <path
+                    d="M20 12a8 8 0 10-2.34 5.66M20 12v5m0-5h-5"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.7"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+              </button>
+            </div>
+
+            <div class="card-balance-quota-list">
+              <div
+                v-for="item in errorQuotaItems"
+                :key="`error-${item.key}`"
+                class="card-balance-quota card-balance-quota--error"
+                :title="quotaTooltip(item)"
+              >
+                <span
+                  v-if="showErrorItemLabel(item)"
+                  class="card-balance-quota__item-label card-balance-quota__item-label--error"
+                >
+                  {{ item.label }}
+                </span>
+                <div class="card-balance-quota__error-row">
+                  <span class="card-balance-quota__error-icon" aria-hidden="true">!</span>
+                  <span class="card-balance-quota__error-text">
+                    {{ quotaItemNote(item) || t('components.main.providers.quotaQueryFailed') }}
+                  </span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -525,12 +666,20 @@
 </template>
 
 <script setup lang="ts">
-import { computed, type ComponentPublicInstance } from 'vue'
+import { computed, onUnmounted, ref, watch, type ComponentPublicInstance } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { ProviderCardViewModel, ProviderDragEndPayload, ProviderQuotaDisplayItem, ProviderTab, ResolvedTheme } from '../types'
 import { formatQuotaUsagePercent, getQuotaProgressClass, getQuotaProgressPercent } from '../utils/providerQuotaDisplay'
 import { resolveProviderCardQuotaSectionMode } from '../utils/providerCardQuotaVisibility'
 import { resolveProviderQuotaCurrencyCode } from '../utils/providerQuotaValueFormat'
+import {
+  formatProviderQuotaRelativeUpdatedAt,
+  getProviderQuotaBalanceTone,
+  getProviderQuotaRemainingValue,
+  getProviderQuotaVisibleNote,
+  isProviderQuotaBalanceItem,
+  isProviderQuotaErrorItem,
+} from '../utils/providerQuotaCardDisplay'
 import { isDirectApplyBlockedForProvider } from '../utils/providerDirectApply'
 import { isHostedRouteActive } from '../utils/providerRoutingState'
 
@@ -557,6 +706,7 @@ const emit = defineEmits<{
   'open-model-list': []
   'open-provider-logs': []
   'open-provider-cost-trend': []
+  'refresh-provider-quota': []
   duplicate: []
   remove: []
 }>()
@@ -584,9 +734,30 @@ const quotaUsagePercent = (item: ProviderQuotaDisplayItem) => formatQuotaUsagePe
 
 const showQuotaCountdown = (item: ProviderQuotaDisplayItem) => Boolean(item.countdownLabel)
 
-const quotaSectionMode = computed(() => resolveProviderCardQuotaSectionMode(
+const progressQuotaItems = computed(() => (
+  props.viewModel.quotaDisplay.filter((item) => (
+    !isProviderQuotaBalanceItem(item)
+    && !isProviderQuotaErrorItem(item)
+  ))
+))
+
+const balanceQuotaItems = computed(() => (
+  props.viewModel.quotaDisplay.filter((item) => isProviderQuotaBalanceItem(item))
+))
+
+const errorQuotaItems = computed(() => (
+  props.viewModel.quotaDisplay.filter((item) => isProviderQuotaErrorItem(item))
+))
+
+const progressQuotaSectionMode = computed(() => resolveProviderCardQuotaSectionMode(
   props.viewModel.stats,
-  props.viewModel.quotaDisplay,
+  progressQuotaItems.value,
+))
+
+const hasBalanceQuotaItems = computed(() => balanceQuotaItems.value.length > 0)
+const hasErrorQuotaItems = computed(() => errorQuotaItems.value.length > 0)
+const hasQuotaStatusPanelItems = computed(() => (
+  hasBalanceQuotaItems.value || hasErrorQuotaItems.value
 ))
 
 const formatQuotaValue = (item: ProviderQuotaDisplayItem, value: number) => {
@@ -609,11 +780,98 @@ const formatQuotaValue = (item: ProviderQuotaDisplayItem, value: number) => {
   return item.unit?.trim() ? `${fallbackFormatted} ${item.unit.trim()}` : fallbackFormatted
 }
 
+const formatBalanceRemainingValue = (item: ProviderQuotaDisplayItem) => {
+  const remaining = getProviderQuotaRemainingValue(item)
+  const formatted = new Intl.NumberFormat(locale.value || 'en', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(remaining)
+  return item.unit?.trim() ? `${formatted} ${item.unit.trim()}` : formatted
+}
+
+const showBalanceItemLabel = (item: ProviderQuotaDisplayItem) => {
+  const normalizedLabel = `${item.label ?? ''}`.trim()
+  const normalizedProviderName = `${props.viewModel.card.name ?? ''}`.trim()
+  if (!normalizedLabel) return false
+  if (balanceQuotaItems.value.length > 1) return true
+  return normalizedLabel.toLowerCase() !== normalizedProviderName.toLowerCase()
+}
+
+const showErrorItemLabel = (item: ProviderQuotaDisplayItem) => {
+  const normalizedLabel = `${item.label ?? ''}`.trim()
+  if (!normalizedLabel) return false
+  return errorQuotaItems.value.length > 1
+}
+
+const balanceQuotaAmountClass = (item: ProviderQuotaDisplayItem) => (
+  `card-balance-quota__amount--${getProviderQuotaBalanceTone(item)}`
+)
+
+const quotaItemNote = (item: ProviderQuotaDisplayItem) => getProviderQuotaVisibleNote(item)
+
+const balanceQuotaNow = ref(Date.now())
+let balanceQuotaTimeTicker: ReturnType<typeof globalThis.setInterval> | undefined
+
+const stopBalanceQuotaTimeTicker = () => {
+  if (balanceQuotaTimeTicker !== undefined) {
+    globalThis.clearInterval(balanceQuotaTimeTicker)
+    balanceQuotaTimeTicker = undefined
+  }
+}
+
+const startBalanceQuotaTimeTicker = () => {
+  stopBalanceQuotaTimeTicker()
+  balanceQuotaNow.value = Date.now()
+  balanceQuotaTimeTicker = globalThis.setInterval(() => {
+    balanceQuotaNow.value = Date.now()
+  }, 30_000)
+}
+
+const balanceQuotaUpdatedAt = computed(() => (
+  balanceQuotaItems.value.find((item) => Number.isFinite(item.queriedAt))?.queriedAt
+))
+
+const balanceQuotaUpdatedAtLabel = computed(() => formatProviderQuotaRelativeUpdatedAt(
+  balanceQuotaUpdatedAt.value,
+  balanceQuotaNow.value,
+  t,
+))
+
+const errorQuotaUpdatedAt = computed(() => (
+  errorQuotaItems.value.find((item) => Number.isFinite(item.queriedAt))?.queriedAt
+))
+
+const errorQuotaUpdatedAtLabel = computed(() => formatProviderQuotaRelativeUpdatedAt(
+  errorQuotaUpdatedAt.value,
+  balanceQuotaNow.value,
+  t,
+))
+
+watch(hasQuotaStatusPanelItems, (enabled) => {
+  if (enabled) {
+    startBalanceQuotaTimeTicker()
+    return
+  }
+  stopBalanceQuotaTimeTicker()
+}, { immediate: true })
+
+onUnmounted(stopBalanceQuotaTimeTicker)
+
 const quotaTooltip = (item: ProviderQuotaDisplayItem) => {
   const invalidMessage = `${item.invalidMessage ?? ''}`.trim()
   const extra = `${item.extra ?? ''}`.trim()
+  const refreshErrorMessage = `${item.refreshErrorMessage ?? ''}`.trim()
   if (invalidMessage && item.total <= 0 && item.used <= 0) {
-    return [item.label, invalidMessage, extra].filter(Boolean).join('\n')
+    return [item.label, refreshErrorMessage, invalidMessage, extra].filter(Boolean).join('\n')
+  }
+
+  if (isProviderQuotaBalanceItem(item)) {
+    const remaining = formatBalanceRemainingValue(item)
+    const baseTooltip = t('components.main.providers.quotaBalanceTooltip', {
+      label: item.label,
+      remaining,
+    })
+    return [baseTooltip, refreshErrorMessage, invalidMessage, extra].filter(Boolean).join('\n')
   }
 
   const used = formatQuotaValue(item, item.used)
@@ -624,7 +882,7 @@ const quotaTooltip = (item: ProviderQuotaDisplayItem) => {
       ? t('components.main.providers.quotaTooltip', { label: item.label, used, total, countdown: item.countdownLabel })
       : t('components.main.providers.quotaTooltipNoCountdown', { label: item.label, used, total })
 
-  return [baseTooltip, invalidMessage, extra].filter(Boolean).join('\n')
+  return [baseTooltip, refreshErrorMessage, invalidMessage, extra].filter(Boolean).join('\n')
 }
 
 type ApiFormatBadgeMeta = {

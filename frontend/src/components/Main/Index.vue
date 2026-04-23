@@ -78,6 +78,7 @@
           @open-model-list="openModelList"
           @open-provider-logs="openProviderLogs"
           @open-provider-cost-trend="openProviderCostTrend"
+          @refresh-provider-quota="handleRefreshProviderQuota"
           @duplicate="handleDuplicate"
           @remove="requestRemove"
         />
@@ -350,6 +351,7 @@ const {
 
 const {
   getQuotaDisplay,
+  isQuotaRefreshing,
   refreshProviderQuotas,
   startTimers: startQuotaTimers,
   stopTimers: stopQuotaTimers,
@@ -552,6 +554,15 @@ const handleOpenSite = (card: AutomationCard) => {
   openOfficialSite(card.officialSite)
 }
 
+const handleRefreshProviderQuota = (card: AutomationCard) => {
+  const ref = cardProviderRef(card) || card.name
+  if (!ref) return
+  void refreshProviderQuotas({
+    targetRefs: new Set([ref]),
+    forceRemoteRefs: new Set([ref]),
+  })
+}
+
 const formatOfficialSite = (site: string) => {
   if (!site) return ''
   try {
@@ -618,6 +629,7 @@ const activeCardViewModels = computed<ProviderCardViewModel[]>(() =>
     connectivityTooltip: getConnectivityTooltip(card.id),
     stats: providerStatDisplay(card),
     quotaDisplay: getQuotaDisplay(card),
+    quotaRefreshing: isQuotaRefreshing(card),
     formattedOfficialSite: formatOfficialSite(card.officialSite),
     iconSvg: iconSvg(card.icon),
     vendorInitials: vendorInitials(card.name),

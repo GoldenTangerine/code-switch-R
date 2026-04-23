@@ -39,6 +39,13 @@ const createQuotaDisplayMap = (): Record<ProviderTab, Record<string, ProviderQuo
   others: {},
 })
 
+const createQuotaRefreshStateMap = (): Record<ProviderTab, Record<string, boolean>> => ({
+  claude: {},
+  codex: {},
+  gemini: {},
+  others: {},
+})
+
 type RemoteQuotaCacheEntry = {
   items: ProviderQuotaSnapshotItem[]
   fetchedAt: number
@@ -98,6 +105,7 @@ export function useProviderQuotas(options: UseProviderQuotasOptions) {
 
   // tab -> providerRef -> ProviderQuotaDisplayItem[]
   const quotaDisplayMap = reactive(createQuotaDisplayMap())
+  const quotaRefreshStateMap = reactive(createQuotaRefreshStateMap())
   const remoteQuotaCacheMap = createRemoteQuotaCacheMap()
 
   let refreshTimer: ReturnType<typeof globalThis.setInterval> | undefined
@@ -107,6 +115,7 @@ export function useProviderQuotas(options: UseProviderQuotasOptions) {
   let refreshQueued = false
   let queuedForceRemoteRefs = new Set<string>()
   let queuedAutoRefreshRemoteRefs: Set<string> | null = null
+  let queuedTargetRefs: Set<string> | null = null
 
   const cloneRemoteQuotaItems = (
     items: ProviderQuotaSnapshotItem[],
@@ -123,6 +132,52 @@ export function useProviderQuotas(options: UseProviderQuotasOptions) {
       }
     })
   )
+
+  const buildRemoteQuotaErrorItems = ({
+    queriedAt,
+    message,
+  }: {
+    queriedAt: number
+    message: string
+  }): ProviderQuotaSnapshotItem[] => {
+    const normalizedMessage = `${message ?? ''}`.trim() || t('components.main.providers.quotaQueryFailed')
+    return [{
+      key: 'remote_quota_query_error',
+      label: t('components.main.providers.quotaQueryStatusLabel'),
+      used: 0,
+      total: 0,
+      progressRatio: 0,
+      countdownLabel: '',
+      nextReset: null,
+      queriedAt,
+      trackedUsed: 0,
+      adjustment: 0,
+      remaining: 0,
+      isActive: false,
+      valueMode: 'currency',
+      invalidMessage: normalizedMessage,
+    }]
+  }
+
+  const attachRefreshErrorMessage = (
+    items: ProviderQuotaSnapshotItem[],
+    now: Date,
+    message: string,
+  ): ProviderQuotaSnapshotItem[] => {
+    const normalizedMessage = `${message ?? ''}`.trim() || t('components.main.providers.quotaQueryFailed')
+    const fallbackMessage = t('components.main.providers.quotaRefreshFailedCached', {
+      reason: normalizedMessage,
+    })
+
+    return cloneRemoteQuotaItems(items, now).map((item) => {
+      const existingExtra = `${item.extra ?? ''}`.trim()
+      return {
+        ...item,
+        refreshErrorMessage: fallbackMessage,
+        extra: existingExtra || undefined,
+      }
+    })
+  }
 
   const resolveRemoteQuotaForCard = async ({
     card,
@@ -150,11 +205,16 @@ export function useProviderQuotas(options: UseProviderQuotasOptions) {
       return cloneRemoteQuotaItems(cacheEntry.items, now)
     }
 
-    const fetchedItems = await resolveProviderQuotaQueryDisplay({
+    const queryResult = await resolveProviderQuotaQueryDisplay({
       card,
       now,
       t,
     })
+    const fetchedItems = queryResult.items
+    const failureMessage = `${queryResult.failureMessage ?? ''}`.trim()
+    const failureQueriedAt = Number.isFinite(queryResult.queriedAt)
+      ? Number(queryResult.queriedAt)
+      : now.getTime()
 
     if (fetchedItems.length > 0) {
       const cachedItems = cloneRemoteQuotaItems(fetchedItems, now)
@@ -167,21 +227,28 @@ export function useProviderQuotas(options: UseProviderQuotasOptions) {
       return cloneRemoteQuotaItems(cachedItems, now)
     }
 
-    if (forceRefresh || !cacheMatchesIdentity) {
-      delete tabCache[ref]
-      return []
-    }
-
     if (cacheEntry && cacheMatchesIdentity) {
+      if (forceRefresh) {
+        return attachRefreshErrorMessage(cacheEntry.items, now, failureMessage)
+      }
       if (cacheEntry.staleFallbackCount >= 1) {
         delete tabCache[ref]
-        return []
+        return failureMessage
+          ? buildRemoteQuotaErrorItems({ queriedAt: failureQueriedAt, message: failureMessage })
+          : []
       }
       tabCache[ref] = {
         ...cacheEntry,
         staleFallbackCount: cacheEntry.staleFallbackCount + 1,
       }
       return cloneRemoteQuotaItems(cacheEntry.items, now)
+    }
+
+    if (forceRefresh || !cacheMatchesIdentity) {
+      delete tabCache[ref]
+      return failureMessage
+        ? buildRemoteQuotaErrorItems({ queriedAt: failureQueriedAt, message: failureMessage })
+        : []
     }
 
     return []
@@ -216,20 +283,24 @@ export function useProviderQuotas(options: UseProviderQuotasOptions) {
   const runRefreshProviderQuotas = async (
     forceRemoteRefs: Set<string>,
     autoRefreshRemoteRefs?: Set<string>,
+    targetRefs?: Set<string>,
   ) => {
     try {
       const tab = getActiveTab()
       const platform = tabToPlatform(tab)
       const tabCards = cards[tab] ?? []
       const tabQuotaDisplayMap = quotaDisplayMap[tab]
+      const tabQuotaRefreshStateMap = quotaRefreshStateMap[tab]
       const tabRemoteQuotaCache = remoteQuotaCacheMap[tab]
       const now = new Date()
       const currentRefs = new Set<string>()
+      const isPartialRefresh = targetRefs !== undefined
 
       const tasks = tabCards.map(async (card) => {
         const ref = cardProviderRef(card) || card.name
         if (!ref) return
         currentRefs.add(ref)
+        if (targetRefs && !targetRefs.has(ref)) return
 
         const settings = normalizeBudgetQuotaSettings(card.budgetQuotaSettings)
         const hasQuota = providerBudgetQuotaOrder.some((key) => settings[key].total > 0)
@@ -242,6 +313,9 @@ export function useProviderQuotas(options: UseProviderQuotasOptions) {
           if (tabQuotaDisplayMap[ref]) {
             delete tabQuotaDisplayMap[ref]
           }
+          if (tabQuotaRefreshStateMap[ref] !== undefined) {
+            delete tabQuotaRefreshStateMap[ref]
+          }
           if (tabRemoteQuotaCache[ref]) {
             delete tabRemoteQuotaCache[ref]
           }
@@ -250,6 +324,9 @@ export function useProviderQuotas(options: UseProviderQuotasOptions) {
 
         if (!hasRemoteQuota && tabRemoteQuotaCache[ref]) {
           delete tabRemoteQuotaCache[ref]
+        }
+        if (!hasRemoteQuota && tabQuotaRefreshStateMap[ref] !== undefined) {
+          delete tabQuotaRefreshStateMap[ref]
         }
 
         if (
@@ -261,30 +338,48 @@ export function useProviderQuotas(options: UseProviderQuotasOptions) {
           if (!tabQuotaDisplayMap[ref] && tabRemoteQuotaCache[ref]?.cacheIdentity === buildRemoteQuotaCacheIdentity(card)) {
             tabQuotaDisplayMap[ref] = cloneRemoteQuotaItems(tabRemoteQuotaCache[ref].items, now)
           }
+          tabQuotaRefreshStateMap[ref] = false
           return
         }
 
-        const items = await resolveQuotaForCard(
-          card,
-          tab,
-          ref,
-          platform,
-          now,
-          forceRemoteRefs.has(ref),
-        )
-        tabQuotaDisplayMap[ref] = items
+        if (hasRemoteQuota) {
+          tabQuotaRefreshStateMap[ref] = true
+        }
+
+        try {
+          const items = await resolveQuotaForCard(
+            card,
+            tab,
+            ref,
+            platform,
+            now,
+            forceRemoteRefs.has(ref),
+          )
+          tabQuotaDisplayMap[ref] = items
+        } finally {
+          if (hasRemoteQuota) {
+            tabQuotaRefreshStateMap[ref] = false
+          }
+        }
       })
 
       await Promise.all(tasks)
 
-      for (const ref of Object.keys(tabQuotaDisplayMap)) {
-        if (!currentRefs.has(ref)) {
-          delete tabQuotaDisplayMap[ref]
+      if (!isPartialRefresh) {
+        for (const ref of Object.keys(tabQuotaDisplayMap)) {
+          if (!currentRefs.has(ref)) {
+            delete tabQuotaDisplayMap[ref]
+          }
         }
-      }
-      for (const ref of Object.keys(tabRemoteQuotaCache)) {
-        if (!currentRefs.has(ref)) {
-          delete tabRemoteQuotaCache[ref]
+        for (const ref of Object.keys(tabRemoteQuotaCache)) {
+          if (!currentRefs.has(ref)) {
+            delete tabRemoteQuotaCache[ref]
+          }
+        }
+        for (const ref of Object.keys(tabQuotaRefreshStateMap)) {
+          if (!currentRefs.has(ref)) {
+            delete tabQuotaRefreshStateMap[ref]
+          }
         }
       }
     } catch (error) {
@@ -296,6 +391,7 @@ export function useProviderQuotas(options: UseProviderQuotasOptions) {
     options: {
       forceRemoteRefs?: Set<string>
       autoRefreshRemoteRefs?: Set<string>
+      targetRefs?: Set<string>
     } = {},
   ) => {
     const hadPendingRefresh = refreshQueued || refreshTask !== null
@@ -311,6 +407,16 @@ export function useProviderQuotas(options: UseProviderQuotasOptions) {
     } else if (queuedAutoRefreshRemoteRefs !== null) {
       options.autoRefreshRemoteRefs?.forEach((ref) => queuedAutoRefreshRemoteRefs?.add(ref))
     }
+    const hasTargetLimit = Object.prototype.hasOwnProperty.call(options, 'targetRefs')
+    if (!hadPendingRefresh) {
+      queuedTargetRefs = hasTargetLimit
+        ? new Set(options.targetRefs ?? [])
+        : null
+    } else if (!hasTargetLimit) {
+      queuedTargetRefs = null
+    } else if (queuedTargetRefs !== null) {
+      options.targetRefs?.forEach((ref) => queuedTargetRefs?.add(ref))
+    }
 
     if (!refreshTask) {
       refreshTask = (async () => {
@@ -321,9 +427,12 @@ export function useProviderQuotas(options: UseProviderQuotasOptions) {
             queuedForceRemoteRefs = new Set<string>()
             const nextAutoRefreshRemoteRefs = queuedAutoRefreshRemoteRefs
             queuedAutoRefreshRemoteRefs = null
+            const nextTargetRefs = queuedTargetRefs
+            queuedTargetRefs = null
             await runRefreshProviderQuotas(
               nextForceRemoteRefs,
               nextAutoRefreshRemoteRefs ?? undefined,
+              nextTargetRefs ?? undefined,
             )
           }
         } finally {
@@ -372,6 +481,11 @@ export function useProviderQuotas(options: UseProviderQuotasOptions) {
     return quotaDisplayMap[getActiveTab()][ref] ?? []
   }
 
+  const isQuotaRefreshing = (card: AutomationCard) => {
+    const ref = cardProviderRef(card) || card.name
+    return quotaRefreshStateMap[getActiveTab()][ref] === true
+  }
+
   const startTimers = () => {
     stopTimers()
     lastCountdownTickAt = new Date()
@@ -402,8 +516,10 @@ export function useProviderQuotas(options: UseProviderQuotasOptions) {
 
   return {
     quotaDisplayMap,
+    quotaRefreshStateMap,
     refreshProviderQuotas,
     getQuotaDisplay,
+    isQuotaRefreshing,
     startTimers,
     stopTimers,
   }

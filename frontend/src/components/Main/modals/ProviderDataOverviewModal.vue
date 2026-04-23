@@ -939,14 +939,14 @@ const loadOverview = async () => {
       ? resolveProviderQuotaQueryDisplay({
           card: props.provider,
           now,
-        t,
-      })
+          t,
+        }).then((result) => result.items)
       : resolveProviderQuotaSnapshot({
-        card: props.provider,
-        platform: props.platform,
-        now,
-        t,
-      })
+          card: props.provider,
+          platform: props.platform,
+          now,
+          t,
+        })
 
     const [stats, quotas] = await Promise.all([
       fetchLogStatsV2({

@@ -79,10 +79,12 @@ export type ProviderQuotaDisplayItem = {
   progressRatio: number
   countdownLabel: string
   nextReset: Date | null
+  queriedAt?: number
   valueMode?: 'currency' | 'count'
   unit?: string
   extra?: string
   invalidMessage?: string
+  refreshErrorMessage?: string
 }
 
 export type ProviderStatDisplay =
@@ -122,6 +124,7 @@ export type ProviderCardViewModel = {
   connectivityTooltip: string
   stats: ProviderStatDisplay
   quotaDisplay: ProviderQuotaDisplayItem[]
+  quotaRefreshing: boolean
   formattedOfficialSite: string
   iconSvg: string
   vendorInitials: string

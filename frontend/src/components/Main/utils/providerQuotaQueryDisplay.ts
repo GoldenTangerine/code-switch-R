@@ -24,6 +24,12 @@ function normalizeDisplayValue(value: number) {
   return Math.max(value, 0)
 }
 
+export type ProviderQuotaQueryDisplayResult = {
+  items: ProviderQuotaSnapshotItem[]
+  failureMessage?: string
+  queriedAt?: number
+}
+
 export async function resolveProviderQuotaQueryDisplay({
   card,
   now,
@@ -32,29 +38,37 @@ export async function resolveProviderQuotaQueryDisplay({
   card: AutomationCard
   now: Date
   t: TranslateFn
-}): Promise<ProviderQuotaSnapshotItem[]> {
+}): Promise<ProviderQuotaQueryDisplayResult> {
   const queryConfig = normalizeProviderQuotaQueryConfig(
     card.providerQuotaQueryConfig,
     card.providerQuotaQueryType,
   )
   if (!hasProviderQuotaQueryType(queryConfig ?? card.providerQuotaQueryType, card.providerQuotaQueryType)) {
-    return []
+    return { items: [] }
   }
 
   const queryType = resolveProviderQuotaQueryType(queryConfig ?? card.providerQuotaQueryType)
   try {
     const response = await queryProviderQuota(queryConfig ?? queryType, card.apiUrl, card.apiKey)
     const responseItems = Array.isArray(response?.items) ? response.items : []
+    const queriedAt = Number(response?.queriedAt)
+    const normalizedQueriedAt = Number.isFinite(queriedAt) ? queriedAt : now.getTime()
     if (response?.error) {
       console.warn(`[ProviderQuotaQuery] ${card.name} query failed: ${response.error}`)
     }
     if (responseItems.length === 0) {
-      return []
+      return {
+        items: [],
+        failureMessage: `${response?.error ?? ''}`.trim() || t('components.main.providers.quotaQueryEmpty'),
+        queriedAt: normalizedQueriedAt,
+      }
     }
 
-    return responseItems
-      .filter((item) => item && `${item.key ?? ''}`.trim())
-      .map((item) => {
+    return {
+      queriedAt: normalizedQueriedAt,
+      items: responseItems
+        .filter((item) => item && `${item.key ?? ''}`.trim())
+        .map((item) => {
         const used = normalizeDisplayValue(Number(item.used))
         const total = normalizeDisplayValue(Number(item.total))
         const nextReset = item.nextReset ? new Date(item.nextReset) : null
@@ -73,6 +87,7 @@ export async function resolveProviderQuotaQueryDisplay({
             ? formatProviderQuotaCountdownLabel(nextReset, now)
             : t('components.main.providers.quotaInactive'),
           nextReset,
+          queriedAt: normalizedQueriedAt,
           trackedUsed: used,
           adjustment: 0,
           remaining: roundBudgetValue(total - used),
@@ -82,9 +97,16 @@ export async function resolveProviderQuotaQueryDisplay({
           extra,
           invalidMessage,
         }
-      })
+      }),
+    }
   } catch (error) {
     console.warn(`[ProviderQuotaQuery] ${card.name} query crashed:`, error)
-    return []
+    return {
+      items: [],
+      failureMessage: error instanceof Error
+        ? error.message
+        : t('components.main.providers.quotaQueryFailed'),
+      queriedAt: now.getTime(),
+    }
   }
 }

@@ -66,7 +66,11 @@ type UseMainPageShellOptions = {
   stopUpdateTimer: () => void
   startProviderStatsTimer: () => void
   stopProviderStatsTimer: () => void
-  refreshProviderQuotas: (options?: { forceRemoteRefs?: Set<string> }) => Promise<void>
+  refreshProviderQuotas: (options?: {
+    forceRemoteRefs?: Set<string>
+    autoRefreshRemoteRefs?: Set<string>
+    targetRefs?: Set<string>
+  }) => Promise<void>
   resolveManualRefreshRemoteQuotaRefs?: () => Set<string>
   startQuotaTimers: () => void
   stopQuotaTimers: () => void
