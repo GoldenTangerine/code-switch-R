@@ -923,46 +923,33 @@
 }
 
 .card-balance-quota-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-top: 2px;
-  padding: 12px 14px;
-  border-radius: 16px;
-  border: 1px solid color-mix(in srgb, var(--provider-btn-border) 88%, transparent);
-  background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.46) 0%, rgba(248, 250, 252, 0.36) 100%);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.32),
-    0 12px 28px rgba(15, 23, 42, 0.06);
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+  margin-left: 2px;
+  padding-left: 14px;
+  border-left: 1px solid var(--provider-separator);
 }
 
 .automation-card.theme-dark .card-balance-quota-panel {
-  background:
-    linear-gradient(135deg, rgba(19, 24, 34, 0.82) 0%, rgba(12, 16, 24, 0.76) 100%);
-  border-color: rgba(71, 85, 105, 0.42);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.04),
-    0 18px 34px rgba(2, 6, 23, 0.34);
+  border-left-color: var(--provider-separator);
 }
 
 .card-balance-quota-panel--error {
-  border-color: rgba(248, 113, 113, 0.26);
-  background:
-    linear-gradient(135deg, rgba(254, 242, 242, 0.78) 0%, rgba(255, 247, 237, 0.7) 100%);
+  color: #b91c1c;
 }
 
 .automation-card.theme-dark .card-balance-quota-panel--error {
-  border-color: rgba(248, 113, 113, 0.3);
-  background:
-    linear-gradient(135deg, rgba(36, 17, 24, 0.84) 0%, rgba(29, 18, 23, 0.8) 100%);
+  color: #fecdd3;
 }
 
 .card-balance-quota-panel__meta {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
+  min-width: 0;
 }
 
 .card-balance-quota-panel__updated {
@@ -972,15 +959,15 @@
   min-width: 0;
   color: var(--provider-muted-color);
   font-family: 'SFMono-Regular', Menlo, Consolas, monospace;
-  font-size: 0.68rem;
+  font-size: 0.65rem;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
 .card-balance-quota-panel__updated svg {
-  width: 13px;
-  height: 13px;
+  width: 12px;
+  height: 12px;
   flex-shrink: 0;
   opacity: 0.82;
 }
@@ -989,10 +976,10 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 22px;
+  height: 22px;
   flex-shrink: 0;
-  border-radius: 10px;
+  border-radius: 7px;
   border: 1px solid var(--provider-btn-border);
   background: var(--provider-btn-bg);
   color: var(--provider-btn-text);
@@ -1019,12 +1006,12 @@
 
 .card-balance-quota-panel__refresh:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--provider-card-border-active) 82%, transparent);
-  outline-offset: 3px;
+  outline-offset: 2px;
 }
 
 .card-balance-quota-panel__refresh svg {
-  width: 14px;
-  height: 14px;
+  width: 12px;
+  height: 12px;
 }
 
 .card-balance-quota-panel__refresh svg.is-spinning {
@@ -1038,48 +1025,36 @@
 }
 
 .card-balance-quota-list {
-  display: flex;
+  display: inline-flex;
   flex-wrap: wrap;
-  gap: 10px;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
 }
 
 .card-balance-quota {
-  display: flex;
-  flex: 1 1 180px;
+  display: inline-flex;
+  align-items: center;
+  flex: 0 1 auto;
   min-width: 0;
-  flex-direction: column;
+  flex-wrap: wrap;
   gap: 6px;
-  padding: 10px 12px;
-  border-radius: 14px;
-  border: 1px solid color-mix(in srgb, var(--provider-tooltip-border) 88%, transparent);
-  background: color-mix(in srgb, var(--provider-btn-bg) 78%, transparent);
-}
-
-.automation-card.theme-dark .card-balance-quota {
-  background: rgba(25, 32, 45, 0.72);
-  border-color: rgba(71, 85, 105, 0.42);
+  padding: 0;
 }
 
 .card-balance-quota--error {
-  border-color: rgba(248, 113, 113, 0.24);
-  background: rgba(255, 255, 255, 0.5);
-}
-
-.automation-card.theme-dark .card-balance-quota--error {
-  border-color: rgba(248, 113, 113, 0.28);
-  background: rgba(46, 23, 31, 0.78);
+  color: inherit;
 }
 
 .card-balance-quota__item-label {
   display: inline-flex;
   align-items: center;
-  align-self: flex-start;
   max-width: 100%;
-  padding: 3px 8px;
+  padding: 2px 6px;
   border-radius: 999px;
   background: rgba(99, 102, 241, 0.1);
   color: color-mix(in srgb, var(--provider-url-color) 72%, var(--provider-text-color) 28%);
-  font-size: 0.62rem;
+  font-size: 0.58rem;
   font-weight: 700;
   letter-spacing: 0.03em;
   white-space: nowrap;
@@ -1101,26 +1076,28 @@
 }
 
 .card-balance-quota__value-row {
-  display: flex;
+  display: inline-flex;
   align-items: baseline;
-  gap: 6px;
+  gap: 4px;
   flex-wrap: wrap;
 }
 
 .card-balance-quota__label {
   color: var(--provider-muted-color);
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   font-weight: 600;
+  white-space: nowrap;
 }
 
 .card-balance-quota__amount {
   color: var(--provider-title-color);
   font-family: 'SFMono-Regular', Menlo, Consolas, monospace;
-  font-size: 0.98rem;
-  font-weight: 800;
+  font-size: 0.82rem;
+  font-weight: 700;
   line-height: 1.2;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em;
+  white-space: nowrap;
 }
 
 .card-balance-quota__amount--healthy {
@@ -1150,30 +1127,34 @@
 }
 
 .card-balance-quota__note {
+  display: inline-flex;
+  align-items: center;
   margin: 0;
+  min-width: 0;
   color: var(--provider-muted-color);
-  font-size: 0.66rem;
+  font-size: 0.64rem;
   line-height: 1.4;
   word-break: break-word;
 }
 
 .card-balance-quota__error-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
 }
 
 .card-balance-quota__error-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
+  width: 14px;
+  height: 14px;
   flex-shrink: 0;
   border-radius: 999px;
   background: rgba(239, 68, 68, 0.12);
   color: #dc2626;
-  font-size: 0.72rem;
+  font-size: 0.6rem;
   font-weight: 800;
   line-height: 1;
 }
@@ -1184,10 +1165,11 @@
 }
 
 .card-balance-quota__error-text {
+  min-width: 0;
   color: #b91c1c;
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   font-weight: 600;
-  line-height: 1.45;
+  line-height: 1.35;
   word-break: break-word;
 }
 
@@ -2185,6 +2167,13 @@
   }
 
   .card-performance-quotas {
+    width: 100%;
+    margin-left: 0;
+    padding-left: 0;
+    border-left: none;
+  }
+
+  .card-balance-quota-panel {
     width: 100%;
     margin-left: 0;
     padding-left: 0;
