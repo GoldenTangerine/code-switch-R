@@ -937,6 +937,12 @@
   border-left-color: var(--provider-separator);
 }
 
+.card-balance-quota-panel--standalone {
+  margin-left: 0;
+  padding-left: 0;
+  border-left: none;
+}
+
 .card-balance-quota-panel--error {
   color: #b91c1c;
 }

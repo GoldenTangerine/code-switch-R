@@ -381,6 +381,150 @@
             </div>
           </template>
           <div
+            v-if="showStandaloneQuotaStatusRow"
+            class="card-metrics-line card-metrics-line-performance"
+          >
+            <div
+              v-if="hasBalanceQuotaItems"
+              class="card-balance-quota-panel card-balance-quota-panel--standalone"
+            >
+              <div class="card-balance-quota-list">
+                <div
+                  v-for="item in balanceQuotaItems"
+                  :key="`balance-standalone-${item.key}`"
+                  class="card-balance-quota"
+                  :title="quotaTooltip(item)"
+                >
+                  <span
+                    v-if="showBalanceItemLabel(item)"
+                    class="card-balance-quota__item-label"
+                  >
+                    {{ item.label }}
+                  </span>
+                  <span class="card-balance-quota__value-row">
+                    <span class="card-balance-quota__label">
+                      {{ t('components.main.providers.quotaRemainingLabel') }}
+                    </span>
+                    <span
+                      class="card-balance-quota__amount"
+                      :class="balanceQuotaAmountClass(item)"
+                    >
+                      {{ formatBalanceRemainingValue(item) }}
+                    </span>
+                  </span>
+                  <span
+                    v-if="quotaItemNote(item)"
+                    class="card-balance-quota__note"
+                  >
+                    {{ quotaItemNote(item) }}
+                  </span>
+                </div>
+              </div>
+              <div class="card-balance-quota-panel__meta">
+                <span class="card-balance-quota-panel__updated">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path
+                      d="M12 7.25v5.15l3.1 1.85M20 12a8 8 0 11-2.34-5.66"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.7"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    />
+                  </svg>
+                  {{ balanceQuotaUpdatedAtLabel }}
+                </span>
+                <button
+                  class="card-balance-quota-panel__refresh"
+                  type="button"
+                  :disabled="viewModel.quotaRefreshing"
+                  :title="t('components.main.providers.quotaRefresh')"
+                  :aria-label="t('components.main.providers.quotaRefreshAriaLabel', { name: viewModel.card.name })"
+                  @click.stop="$emit('refresh-provider-quota')"
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    aria-hidden="true"
+                    :class="{ 'is-spinning': viewModel.quotaRefreshing }"
+                  >
+                    <path
+                      d="M20 12a8 8 0 10-2.34 5.66M20 12v5m0-5h-5"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.7"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    />
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <div
+              v-if="hasErrorQuotaItems"
+              class="card-balance-quota-panel card-balance-quota-panel--standalone card-balance-quota-panel--error"
+            >
+              <div class="card-balance-quota-list">
+                <div
+                  v-for="item in errorQuotaItems"
+                  :key="`error-standalone-${item.key}`"
+                  class="card-balance-quota card-balance-quota--error"
+                  :title="quotaTooltip(item)"
+                >
+                  <span
+                    v-if="showErrorItemLabel(item)"
+                    class="card-balance-quota__item-label card-balance-quota__item-label--error"
+                  >
+                    {{ item.label }}
+                  </span>
+                  <div class="card-balance-quota__error-row">
+                    <span class="card-balance-quota__error-icon" aria-hidden="true">!</span>
+                    <span class="card-balance-quota__error-text">
+                      {{ quotaItemNote(item) || t('components.main.providers.quotaQueryFailed') }}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <div class="card-balance-quota-panel__meta">
+                <span class="card-balance-quota-panel__updated">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path
+                      d="M12 7.25v5.15l3.1 1.85M20 12a8 8 0 11-2.34-5.66"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.7"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    />
+                  </svg>
+                  {{ errorQuotaUpdatedAtLabel }}
+                </span>
+                <button
+                  class="card-balance-quota-panel__refresh"
+                  type="button"
+                  :disabled="viewModel.quotaRefreshing"
+                  :title="t('components.main.providers.quotaRefresh')"
+                  :aria-label="t('components.main.providers.quotaRefreshAriaLabel', { name: viewModel.card.name })"
+                  @click.stop="$emit('refresh-provider-quota')"
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    aria-hidden="true"
+                    :class="{ 'is-spinning': viewModel.quotaRefreshing }"
+                  >
+                    <path
+                      d="M20 12a8 8 0 10-2.34 5.66M20 12v5m0-5h-5"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.7"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </div>
+          <div
             v-if="progressQuotaSectionMode === 'standalone'"
             class="card-metrics-line card-metrics-line-performance"
           >
@@ -756,6 +900,9 @@ const hasBalanceQuotaItems = computed(() => balanceQuotaItems.value.length > 0)
 const hasErrorQuotaItems = computed(() => errorQuotaItems.value.length > 0)
 const hasQuotaStatusPanelItems = computed(() => (
   hasBalanceQuotaItems.value || hasErrorQuotaItems.value
+))
+const showStandaloneQuotaStatusRow = computed(() => (
+  props.viewModel.stats.state !== 'ready' && hasQuotaStatusPanelItems.value
 ))
 
 const formatQuotaValue = (item: ProviderQuotaDisplayItem, value: number) => {
