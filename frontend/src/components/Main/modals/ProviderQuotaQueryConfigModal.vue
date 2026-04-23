@@ -2,254 +2,252 @@
   <InlineModal
     :open="open"
     :title="t('components.main.form.labels.providerQuotaQueryConfig')"
-    :body-scrollable="false"
-    :panel-width="'min(1080px, 96vw)'"
+    :body-scrollable="true"
+    :panel-width="'min(960px, 94vw)'"
     @close="$emit('close')"
     @after-open="handleModalAfterOpen"
   >
     <form class="provider-quota-query-config-modal" @submit.prevent="handleSave">
-      <div class="provider-quota-query-config-modal__scroll-body">
-        <section class="provider-quota-query-config-modal__section">
-          <div class="provider-quota-query-config-modal__switch-row">
-            <div class="provider-quota-query-config-modal__heading-block">
-              <p class="provider-quota-query-config-modal__title">
-                {{ t('components.main.form.labels.providerQuotaQueryEnabled') }}
-              </p>
-              <p class="provider-quota-query-config-modal__hint">
-                {{ draft.enabled
-                  ? t('components.main.form.hints.providerQuotaQueryEnabled')
-                  : t('components.main.form.hints.providerQuotaQueryDisabled') }}
-              </p>
-            </div>
-            <label class="mac-switch">
-              <input v-model="draft.enabled" type="checkbox" />
-              <span></span>
-            </label>
-          </div>
-        </section>
-
-        <section class="provider-quota-query-config-modal__section">
-          <div class="provider-quota-query-config-modal__section-header">
-            <div>
-              <p class="provider-quota-query-config-modal__title">
-                {{ t('components.main.form.labels.providerQuotaQueryTemplate') }}
-              </p>
-              <p class="provider-quota-query-config-modal__hint">
-                {{ t('components.main.form.hints.providerQuotaQueryTemplateHint') }}
-              </p>
-            </div>
-          </div>
-
-          <div class="provider-quota-query-config-modal__template-grid">
-            <button
-              v-for="option in templateOptions"
-              :key="option.value"
-              type="button"
-              :class="[
-                'provider-quota-query-config-modal__template-card',
-                'provider-quota-query-config-modal__template-card--detail',
-                { 'is-selected': selectedTemplate === option.value },
-              ]"
-              @click="handleSelectTemplate(option.value)"
-            >
-              <span class="provider-quota-query-config-modal__template-copy">
-                <span class="provider-quota-query-config-modal__template-name">{{ option.label }}</span>
-                <span class="provider-quota-query-config-modal__template-desc">{{ option.description }}</span>
-              </span>
-            </button>
-          </div>
-
-          <div
-            v-if="selectedTemplate === 'balance'"
-            :class="[
-              'provider-quota-query-config-modal__template-status',
-              { 'is-warning': !detectedBalanceProviderOption },
-            ]"
-          >
-            <span class="provider-quota-query-config-modal__template-status-badge">
-              {{ detectedBalanceProviderOption
-                ? t('components.main.form.hints.providerQuotaQueryBalanceDetectedBadge', {
-                  provider: detectedBalanceProviderOption.label,
-                })
-                : t('components.main.form.hints.providerQuotaQueryBalanceUnsupportedBadge') }}
-            </span>
-            <p class="provider-quota-query-config-modal__template-status-text">
-              {{ detectedBalanceProviderOption
-                ? t('components.main.form.hints.providerQuotaQueryBalanceDetected', {
-                  provider: detectedBalanceProviderOption.label,
-                })
-                : t('components.main.form.hints.providerQuotaQueryBalanceUnsupported', {
-                  url: `${props.providerApiUrl ?? ''}`.trim() || '-',
-                }) }}
+      <section class="provider-quota-query-config-modal__section">
+        <div class="provider-quota-query-config-modal__switch-row">
+          <div class="provider-quota-query-config-modal__heading-block">
+            <p class="provider-quota-query-config-modal__title">
+              {{ t('components.main.form.labels.providerQuotaQueryEnabled') }}
+            </p>
+            <p class="provider-quota-query-config-modal__hint">
+              {{ draft.enabled
+                ? t('components.main.form.hints.providerQuotaQueryEnabled')
+                : t('components.main.form.hints.providerQuotaQueryDisabled') }}
             </p>
           </div>
-        </section>
+          <label class="mac-switch">
+            <input v-model="draft.enabled" type="checkbox" />
+            <span></span>
+          </label>
+        </div>
+      </section>
 
-        <section class="provider-quota-query-config-modal__section">
-          <div class="provider-quota-query-config-modal__section-header">
-            <div>
-              <p class="provider-quota-query-config-modal__title">
-                {{ t('components.main.form.labels.providerQuotaQueryTiming') }}
-              </p>
-              <p class="provider-quota-query-config-modal__hint">
-                {{ t('components.main.form.hints.providerQuotaQueryAutoInterval') }}
-              </p>
-            </div>
+      <section class="provider-quota-query-config-modal__section">
+        <div class="provider-quota-query-config-modal__section-header">
+          <div>
+            <p class="provider-quota-query-config-modal__title">
+              {{ t('components.main.form.labels.providerQuotaQueryTemplate') }}
+            </p>
+            <p class="provider-quota-query-config-modal__hint">
+              {{ t('components.main.form.hints.providerQuotaQueryTemplateHint') }}
+            </p>
           </div>
+        </div>
 
-          <div class="provider-quota-query-config-modal__field-grid">
-            <label class="form-field provider-quota-query-config-modal__field">
-              <span>{{ t('components.main.form.labels.providerQuotaQueryTimeout') }}</span>
-              <input
-                v-model.number="draft.timeout"
-                type="number"
-                min="2"
-                max="30"
-                step="1"
-                class="mac-input"
-                :placeholder="t('components.main.form.placeholders.providerQuotaQueryTimeout')"
-              />
-              <span class="field-hint">{{ t('components.main.form.hints.providerQuotaQueryTimeout') }}</span>
-            </label>
+        <div class="provider-quota-query-config-modal__template-grid">
+          <button
+            v-for="option in templateOptions"
+            :key="option.value"
+            type="button"
+            :class="[
+              'provider-quota-query-config-modal__template-card',
+              'provider-quota-query-config-modal__template-card--detail',
+              { 'is-selected': selectedTemplate === option.value },
+            ]"
+            @click="handleSelectTemplate(option.value)"
+          >
+            <span class="provider-quota-query-config-modal__template-copy">
+              <span class="provider-quota-query-config-modal__template-name">{{ option.label }}</span>
+              <span class="provider-quota-query-config-modal__template-desc">{{ option.description }}</span>
+            </span>
+          </button>
+        </div>
 
-            <label class="form-field provider-quota-query-config-modal__field">
-              <span>{{ t('components.main.form.labels.providerQuotaQueryAutoInterval') }}</span>
-              <input
-                v-model.number="draft.autoQueryInterval"
-                type="number"
-                min="0"
-                max="1440"
-                step="1"
-                class="mac-input"
-                :placeholder="t('components.main.form.placeholders.providerQuotaQueryAutoInterval')"
-              />
-              <span class="field-hint">{{ t('components.main.form.hints.providerQuotaQueryAutoInterval') }}</span>
-            </label>
-          </div>
-        </section>
-
-        <section
-          v-if="selectedTemplate === 'token_plan'"
-          class="provider-quota-query-config-modal__section"
+        <div
+          v-if="selectedTemplate === 'balance'"
+          :class="[
+            'provider-quota-query-config-modal__template-status',
+            { 'is-warning': !detectedBalanceProviderOption },
+          ]"
         >
-          <div class="provider-quota-query-config-modal__section-header">
-            <div>
-              <p class="provider-quota-query-config-modal__title">
-                {{ t('components.main.form.labels.providerQuotaQueryTokenPlanProvider') }}
-              </p>
-              <p class="provider-quota-query-config-modal__hint">
-                {{ t('components.main.form.hints.providerQuotaQueryTemplateTokenPlan') }}
-              </p>
-            </div>
+          <span class="provider-quota-query-config-modal__template-status-badge">
+            {{ detectedBalanceProviderOption
+              ? t('components.main.form.hints.providerQuotaQueryBalanceDetectedBadge', {
+                provider: detectedBalanceProviderOption.label,
+              })
+              : t('components.main.form.hints.providerQuotaQueryBalanceUnsupportedBadge') }}
+          </span>
+          <p class="provider-quota-query-config-modal__template-status-text">
+            {{ detectedBalanceProviderOption
+              ? t('components.main.form.hints.providerQuotaQueryBalanceDetected', {
+                provider: detectedBalanceProviderOption.label,
+              })
+              : t('components.main.form.hints.providerQuotaQueryBalanceUnsupported', {
+                url: `${props.providerApiUrl ?? ''}`.trim() || '-',
+              }) }}
+          </p>
+        </div>
+      </section>
+
+      <section class="provider-quota-query-config-modal__section">
+        <div class="provider-quota-query-config-modal__section-header">
+          <div>
+            <p class="provider-quota-query-config-modal__title">
+              {{ t('components.main.form.labels.providerQuotaQueryTiming') }}
+            </p>
+            <p class="provider-quota-query-config-modal__hint">
+              {{ t('components.main.form.hints.providerQuotaQueryAutoInterval') }}
+            </p>
           </div>
+        </div>
 
-          <div class="provider-quota-query-config-modal__template-grid provider-quota-query-config-modal__template-grid--compact">
-            <button
-              v-for="provider in tokenPlanProviders"
-              :key="provider.value"
-              type="button"
-              :class="[
-                'provider-quota-query-config-modal__template-card',
-                'provider-quota-query-config-modal__template-card--compact',
-                { 'is-selected': draft.tokenPlanProvider === provider.value },
-              ]"
-              @click="draft.tokenPlanProvider = provider.value"
-            >
-              <span class="provider-quota-query-config-modal__template-name">{{ provider.label }}</span>
-            </button>
+        <div class="provider-quota-query-config-modal__field-grid">
+          <label class="form-field provider-quota-query-config-modal__field">
+            <span>{{ t('components.main.form.labels.providerQuotaQueryTimeout') }}</span>
+            <input
+              v-model.number="draft.timeout"
+              type="number"
+              min="2"
+              max="30"
+              step="1"
+              class="mac-input"
+              :placeholder="t('components.main.form.placeholders.providerQuotaQueryTimeout')"
+            />
+            <span class="field-hint">{{ t('components.main.form.hints.providerQuotaQueryTimeout') }}</span>
+          </label>
+
+          <label class="form-field provider-quota-query-config-modal__field">
+            <span>{{ t('components.main.form.labels.providerQuotaQueryAutoInterval') }}</span>
+            <input
+              v-model.number="draft.autoQueryInterval"
+              type="number"
+              min="0"
+              max="1440"
+              step="1"
+              class="mac-input"
+              :placeholder="t('components.main.form.placeholders.providerQuotaQueryAutoInterval')"
+            />
+            <span class="field-hint">{{ t('components.main.form.hints.providerQuotaQueryAutoInterval') }}</span>
+          </label>
+        </div>
+      </section>
+
+      <section
+        v-if="selectedTemplate === 'token_plan'"
+        class="provider-quota-query-config-modal__section"
+      >
+        <div class="provider-quota-query-config-modal__section-header">
+          <div>
+            <p class="provider-quota-query-config-modal__title">
+              {{ t('components.main.form.labels.providerQuotaQueryTokenPlanProvider') }}
+            </p>
+            <p class="provider-quota-query-config-modal__hint">
+              {{ t('components.main.form.hints.providerQuotaQueryTemplateTokenPlan') }}
+            </p>
           </div>
-        </section>
+        </div>
 
-        <section
-          v-if="showCredentialsSection"
-          class="provider-quota-query-config-modal__section"
-        >
-          <div class="provider-quota-query-config-modal__section-header">
-            <div>
-              <p class="provider-quota-query-config-modal__title">
-                {{ t('components.main.form.labels.providerQuotaQueryCredentials') }}
-              </p>
-              <p class="provider-quota-query-config-modal__hint">
-                {{ credentialHint }}
-              </p>
-            </div>
+        <div class="provider-quota-query-config-modal__template-grid provider-quota-query-config-modal__template-grid--compact">
+          <button
+            v-for="provider in tokenPlanProviders"
+            :key="provider.value"
+            type="button"
+            :class="[
+              'provider-quota-query-config-modal__template-card',
+              'provider-quota-query-config-modal__template-card--compact',
+              { 'is-selected': draft.tokenPlanProvider === provider.value },
+            ]"
+            @click="draft.tokenPlanProvider = provider.value"
+          >
+            <span class="provider-quota-query-config-modal__template-name">{{ provider.label }}</span>
+          </button>
+        </div>
+      </section>
+
+      <section
+        v-if="showCredentialsSection"
+        class="provider-quota-query-config-modal__section"
+      >
+        <div class="provider-quota-query-config-modal__section-header">
+          <div>
+            <p class="provider-quota-query-config-modal__title">
+              {{ t('components.main.form.labels.providerQuotaQueryCredentials') }}
+            </p>
+            <p class="provider-quota-query-config-modal__hint">
+              {{ credentialHint }}
+            </p>
           </div>
+        </div>
 
-          <div class="provider-quota-query-config-modal__field-grid">
-            <label v-if="showBaseUrlField" class="form-field provider-quota-query-config-modal__field">
-              <span>{{ t('components.main.form.labels.providerQuotaQueryDedicatedBaseUrl') }}</span>
-              <BaseInput
-                v-model="draft.baseUrl"
-                type="text"
-                :placeholder="t('components.main.form.placeholders.providerQuotaQueryBaseUrl')"
-              />
-            </label>
+        <div class="provider-quota-query-config-modal__field-grid">
+          <label v-if="showBaseUrlField" class="form-field provider-quota-query-config-modal__field">
+            <span>{{ t('components.main.form.labels.providerQuotaQueryDedicatedBaseUrl') }}</span>
+            <BaseInput
+              v-model="draft.baseUrl"
+              type="text"
+              :placeholder="t('components.main.form.placeholders.providerQuotaQueryBaseUrl')"
+            />
+          </label>
 
-            <label v-if="showApiKeyField" class="form-field provider-quota-query-config-modal__field">
-              <span>{{ t('components.main.form.labels.providerQuotaQueryDedicatedApiKey') }}</span>
-              <BaseInput
-                v-model="draft.apiKey"
-                type="text"
-                :placeholder="t('components.main.form.placeholders.providerQuotaQueryApiKey')"
-              />
-            </label>
+          <label v-if="showApiKeyField" class="form-field provider-quota-query-config-modal__field">
+            <span>{{ t('components.main.form.labels.providerQuotaQueryDedicatedApiKey') }}</span>
+            <BaseInput
+              v-model="draft.apiKey"
+              type="text"
+              :placeholder="t('components.main.form.placeholders.providerQuotaQueryApiKey')"
+            />
+          </label>
 
-            <label v-if="showAccessTokenField" class="form-field provider-quota-query-config-modal__field">
-              <span>{{ t('components.main.form.labels.providerQuotaQueryAccessToken') }}</span>
-              <BaseInput
-                v-model="draft.accessToken"
-                type="text"
-                :placeholder="t('components.main.form.placeholders.providerQuotaQueryAccessToken')"
-              />
-              <span class="field-hint">{{ t('components.main.form.hints.providerQuotaQueryAccessTokenHint') }}</span>
-            </label>
+          <label v-if="showAccessTokenField" class="form-field provider-quota-query-config-modal__field">
+            <span>{{ t('components.main.form.labels.providerQuotaQueryAccessToken') }}</span>
+            <BaseInput
+              v-model="draft.accessToken"
+              type="text"
+              :placeholder="t('components.main.form.placeholders.providerQuotaQueryAccessToken')"
+            />
+            <span class="field-hint">{{ t('components.main.form.hints.providerQuotaQueryAccessTokenHint') }}</span>
+          </label>
 
-            <label v-if="showUserIdField" class="form-field provider-quota-query-config-modal__field">
-              <span>{{ t('components.main.form.labels.providerQuotaQueryUserId') }}</span>
-              <BaseInput
-                v-model="draft.userId"
-                type="text"
-                :placeholder="t('components.main.form.placeholders.providerQuotaQueryUserId')"
-              />
-              <span class="field-hint">{{ t('components.main.form.hints.providerQuotaQueryUserIdHint') }}</span>
-            </label>
+          <label v-if="showUserIdField" class="form-field provider-quota-query-config-modal__field">
+            <span>{{ t('components.main.form.labels.providerQuotaQueryUserId') }}</span>
+            <BaseInput
+              v-model="draft.userId"
+              type="text"
+              :placeholder="t('components.main.form.placeholders.providerQuotaQueryUserId')"
+            />
+            <span class="field-hint">{{ t('components.main.form.hints.providerQuotaQueryUserIdHint') }}</span>
+          </label>
+        </div>
+      </section>
+
+      <section
+        v-if="showScriptSection"
+        class="provider-quota-query-config-modal__section"
+      >
+        <div class="provider-quota-query-config-modal__section-header provider-quota-query-config-modal__section-header--with-action">
+          <div>
+            <p class="provider-quota-query-config-modal__title">
+              {{ t('components.main.form.labels.providerQuotaQueryCode') }}
+            </p>
+            <p class="provider-quota-query-config-modal__hint">
+              {{ t('components.main.form.hints.providerQuotaQueryCodeHint') }}
+            </p>
           </div>
-        </section>
+          <BaseButton variant="outline" type="button" @click="handleLoadPresetCode">
+            {{ t('components.main.form.actions.providerQuotaQueryLoadPreset') }}
+          </BaseButton>
+        </div>
 
-        <section
-          v-if="showScriptSection"
-          class="provider-quota-query-config-modal__section"
-        >
-          <div class="provider-quota-query-config-modal__section-header provider-quota-query-config-modal__section-header--with-action">
-            <div>
-              <p class="provider-quota-query-config-modal__title">
-                {{ t('components.main.form.labels.providerQuotaQueryCode') }}
-              </p>
-              <p class="provider-quota-query-config-modal__hint">
-                {{ t('components.main.form.hints.providerQuotaQueryCodeHint') }}
-              </p>
-            </div>
-            <BaseButton variant="outline" type="button" @click="handleLoadPresetCode">
-              {{ t('components.main.form.actions.providerQuotaQueryLoadPreset') }}
-            </BaseButton>
-          </div>
-
-          <JsonCodeEditor
-            v-if="shouldRenderScriptEditor"
-            v-model="draft.code"
-            mode="plain"
-            :rows="20"
-            :show-validation="false"
-            :surface-height="'360px'"
-            :placeholder="t('components.main.form.placeholders.providerQuotaQueryCode')"
-          />
-          <div
-            v-else
-            class="provider-quota-query-config-modal__editor-placeholder"
-            aria-hidden="true"
-          ></div>
-        </section>
-      </div>
+        <JsonCodeEditor
+          v-if="shouldRenderScriptEditor"
+          v-model="draft.code"
+          mode="plain"
+          :rows="20"
+          :show-validation="false"
+          :surface-height="'360px'"
+          :placeholder="t('components.main.form.placeholders.providerQuotaQueryCode')"
+        />
+        <div
+          v-else
+          class="provider-quota-query-config-modal__editor-placeholder"
+          aria-hidden="true"
+        ></div>
+      </section>
 
       <footer class="provider-quota-query-config-modal__actions">
         <BaseButton variant="outline" type="button" @click="$emit('close')">
@@ -794,25 +792,13 @@ watch(showScriptSection, (visible) => {
 .provider-quota-query-config-modal {
   display: flex;
   flex-direction: column;
-  min-height: 0;
-  height: 100%;
-}
-
-.provider-quota-query-config-modal__scroll-body {
-  display: flex;
-  flex-direction: column;
   gap: 16px;
-  min-height: 0;
-  overflow-y: auto;
-  -ms-overflow-style: none;
-  scrollbar-width: none;
-  padding: 0 0 12px;
+  width: 100%;
+  min-width: 0;
 }
 
-.provider-quota-query-config-modal__scroll-body::-webkit-scrollbar {
-  width: 0;
-  height: 0;
-  display: none;
+.provider-quota-query-config-modal > * {
+  min-width: 0;
 }
 
 .provider-quota-query-config-modal__section {
@@ -1018,8 +1004,11 @@ watch(showScriptSection, (visible) => {
   justify-content: flex-end;
   gap: 10px;
   padding-top: 12px;
-  margin-top: 8px;
+  margin-top: 4px;
   border-top: 1px solid var(--mac-border);
+  background: color-mix(in srgb, var(--mac-surface) 94%, transparent);
+  backdrop-filter: blur(6px);
+  flex-shrink: 0;
 }
 
 :global(.dark) .provider-quota-query-config-modal__section {

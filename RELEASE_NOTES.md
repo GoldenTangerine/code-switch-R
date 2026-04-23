@@ -1,3 +1,17 @@
+# Code Switch v2.8.29
+
+## 修复
+- **额度查询配置弹窗这回终于不再被自己那套布局壳子狠狠干沟里了**：修复首页「编辑供应商 → 配置查询」在浏览器 `pnpm run dev` 预览正常、但 Wails 打包版里仍可能只剩模糊遮罩、配置面板继续装死的问题；这次对照“编辑通用配置”弹窗的稳定实现后，将额度查询配置弹窗改回由 `InlineModal` body 直接接管滚动，移除内部多层 `height / flex / overflow` 滚动壳并收窄面板宽度，打包产物里点击后会稳定显示配置面板，不会再被 WebKit 布局合成坑继续拽回沟里。
+
+## 技术改进
+- **额度查询弹窗结构正式向已验证稳定的实现收口**：`ProviderQuotaQueryConfigModal.vue` 现在对齐 `CLIConfigEditor` 这类已验证稳定的 modal 壳体，改用更保守的 `bodyScrollable` 和单层内容布局，减少 Wails / WebKit 在二层弹窗场景下对超宽面板、嵌套滚动和 `height: 100%` 组合的渲染不确定性。
+- **发版元数据继续按同一版号收口**：同步更新应用常量、构建配置、Darwin `Info.plist` / `Info.dev.plist`、Windows 版本信息与 Linux `nfpm` 版本到 `v2.8.29`，避免 tag、更新日志和包内版本继续各唱各的调。
+
+## 发布
+- **本次发版版本号统一推进到 `v2.8.29`**：补齐更新日志并准备推送 `v2.8.29` tag 触发 GitHub 自动打包，继续保证仓库版本、Git tag 和最终产物别再各玩各的。
+
+---
+
 # Code Switch v2.8.28
 
 ## 修复
