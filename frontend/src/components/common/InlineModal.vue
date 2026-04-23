@@ -207,12 +207,12 @@ const scheduleInitialFocus = () => {
       focusFallbackTarget()
     }
 
-    // 监听面板进场动画结束后再聚焦，避免 WebKit/WebView 在 transform 动画期间
+    // 监听面板进场动画结束后再聚焦，避免 WebKit/WebView 在动画期间
     // focus textarea 导致面板不绘制的渲染 bug。
-    // 只监听 transform 属性——它是触发 WebKit 渲染异常的根因，
-    // 且 transition: all 会对 opacity/transform 各触发一次 transitionend
+    // 入场动画仅过渡 opacity（避免 WKWebView 下 transform 合成层与 backdrop-filter 冲突
+    // 导致面板不绘制），因此只监听 opacity 的 transitionend
     const onEnd = (e: TransitionEvent) => {
-      if (e.target !== panel || e.propertyName !== 'transform') return
+      if (e.target !== panel || e.propertyName !== 'opacity') return
       panel.removeEventListener('transitionend', onEnd)
       pendingTransitionCleanup = null
       doFocus()
@@ -315,11 +315,10 @@ onBeforeUnmount(() => {
 
 .modal-slide-enter-active,
 .modal-slide-leave-active {
-  transition: all 0.2s ease;
+  transition: opacity 0.2s ease;
 }
 .modal-slide-enter-from,
 .modal-slide-leave-to {
   opacity: 0;
-  transform: translateY(16px);
 }
 </style>

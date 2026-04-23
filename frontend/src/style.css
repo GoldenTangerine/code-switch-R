@@ -2441,6 +2441,11 @@ html.dark .ghost-icon:hover {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  position: relative;
+  z-index: 2;
+  transform: translateZ(0);
+  will-change: transform, opacity;
+  isolation: isolate;
 }
 
 .modal-header {

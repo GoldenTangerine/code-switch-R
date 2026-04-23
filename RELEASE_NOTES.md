@@ -1,3 +1,17 @@
+# Code Switch v2.8.30
+
+## 修复
+- **通用弹窗这回不再跟 WKWebView 的 transform 合成层狠狠干架了**：修复部分 Wails 打包版弹窗在进场动画期间，如果初始焦点落到 `textarea` 或其它可编辑控件，可能因为 `transform` 过渡和遮罩 `backdrop-filter` 的合成冲突导致面板不绘制、界面只剩模糊遮罩的问题；现在 `InlineModal` 的进场动画改为仅过渡 `opacity`，并把初始聚焦明确放到 `opacity` 动画结束后执行，弹窗会先稳定画出来，再安全接管焦点。
+
+## 技术改进
+- **通用 modal 壳体补上合成层隔离兜底**：全局 `.modal` 样式新增 `position: relative`、`z-index`、`translateZ(0)`、`will-change` 与 `isolation: isolate`，减少 Wails / WKWebView 下弹窗内容层和模糊遮罩互相抢合成层时出现的渲染不确定性。
+- **初始聚焦和进场动画终于按同一套口径说话**：`scheduleInitialFocus` 现在只监听 `opacity` 的 `transitionend`，不再继续等一个已经被移除的 `transform` 过渡，避免焦点时序判断和实际动画配置继续各唱各的调。
+
+## 发布
+- **本次发版版本号统一推进到 `v2.8.30`**：同步更新应用常量、构建配置、Darwin `Info.plist` / `Info.dev.plist`、Windows 版本信息与 Linux `nfpm` 版本到 `v2.8.30`，并准备推送 `v2.8.30` tag 触发 GitHub 自动打包，继续保证仓库版本、Git tag 和最终产物别再各玩各的。
+
+---
+
 # Code Switch v2.8.29
 
 ## 修复
