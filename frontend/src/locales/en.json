@@ -877,6 +877,7 @@
           "statusReady": "Service Status: Operational",
           "statusLoading": "Service Status: Syncing",
           "statusInvalid": "Service Status: Awaiting Input",
+          "statusPending": "Service Status: Pending Apply",
           "scope": "Scope: {scope}",
           "utilityClear": "Clear current date filter",
           "utilityClose": "Close active dropdown",
@@ -1095,6 +1096,19 @@
       },
       "costDetail": {
         "title": "Cost breakdown",
+        "subtitle": "Inspect token spend by provider",
+        "totalAmount": "Total spend (USD)",
+        "updatedAt": "Updated {time}",
+        "providerColumn": "Provider",
+        "currentUsageColumn": "Current spend",
+        "share": "Share {value}",
+        "highUsage": "High spend",
+        "totalProviders": "{count} providers with recorded spend",
+        "scope": "Scope: {scope}",
+        "filterHint": "Click a provider to drill into filtered logs",
+        "statementEnd": "End of statement",
+        "providerSelectAria": "Filter logs by provider {provider}, current spend {amount}",
+        "loadFailed": "Failed to load cost breakdown: {error}",
         "empty": "No cost records"
       },
       "tokenDetail": {

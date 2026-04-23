@@ -11,9 +11,9 @@ import {
   toTimeLayout,
 } from '../utils'
 
-type TranslateFn = (key: string, params?: Record<string, unknown>) => string
+export type TranslateFn = (key: string, params?: Record<string, unknown>) => string
 
-type LogsDateRange = {
+export type LogsDateRange = {
   startAt: string
   endAt: string
 }
@@ -22,10 +22,8 @@ type UseLogsFiltersOptions = {
   t: TranslateFn
 }
 
-export function useLogsFilters(options: UseLogsFiltersOptions) {
-  const { t } = options
-
-  const filters = reactive<LogsFiltersState>({
+export function createLogsFiltersState(): LogsFiltersState {
+  return {
     platform: '',
     provider: '',
     dateType: 'all',
@@ -34,7 +32,123 @@ export function useLogsFilters(options: UseLogsFiltersOptions) {
     day: '',
     rangeStart: '',
     rangeEnd: '',
-  })
+  }
+}
+
+export function cloneLogsFiltersState(filters: LogsFiltersState): LogsFiltersState {
+  return {
+    platform: filters.platform,
+    provider: filters.provider,
+    dateType: filters.dateType,
+    year: filters.year,
+    month: filters.month,
+    day: filters.day,
+    rangeStart: filters.rangeStart,
+    rangeEnd: filters.rangeEnd,
+  }
+}
+
+export function areLogsFiltersEqual(left: LogsFiltersState, right: LogsFiltersState): boolean {
+  return left.platform === right.platform
+    && left.provider === right.provider
+    && left.dateType === right.dateType
+    && left.year === right.year
+    && left.month === right.month
+    && left.day === right.day
+    && left.rangeStart === right.rangeStart
+    && left.rangeEnd === right.rangeEnd
+}
+
+export function computeLogsDateRange(filters: LogsFiltersState): LogsDateRange | null {
+  switch (filters.dateType) {
+    case 'all':
+      return { startAt: '', endAt: '' }
+    case 'today': {
+      const start = startOfTodayLocal()
+      const end = new Date(start.getTime())
+      end.setDate(end.getDate() + 1)
+      return { startAt: toTimeLayout(start), endAt: toTimeLayout(end) }
+    }
+    case 'year': {
+      const year = Number(filters.year)
+      if (!isLogsYearInRange(year)) return null
+      const start = new Date(year, 0, 1, 0, 0, 0, 0)
+      const end = new Date(year + 1, 0, 1, 0, 0, 0, 0)
+      return { startAt: toTimeLayout(start), endAt: toTimeLayout(end) }
+    }
+    case 'month': {
+      const match = String(filters.month || '').match(/^(\d{4})-(\d{2})$/)
+      if (!match) return null
+      const year = Number(match[1])
+      const month = Number(match[2])
+      if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) return null
+      const start = new Date(year, month - 1, 1, 0, 0, 0, 0)
+      const end = new Date(year, month, 1, 0, 0, 0, 0)
+      return { startAt: toTimeLayout(start), endAt: toTimeLayout(end) }
+    }
+    case 'day': {
+      if (!filters.day) return null
+      const parts = toDateParts(filters.day)
+      if (!parts) return null
+      const start = new Date(parts.y, parts.m - 1, parts.d, 0, 0, 0, 0)
+      const end = new Date(parts.y, parts.m - 1, parts.d + 1, 0, 0, 0, 0)
+      return { startAt: toTimeLayout(start), endAt: toTimeLayout(end) }
+    }
+    case 'range': {
+      if (!filters.rangeStart || !filters.rangeEnd) return null
+      const startParts = toDateParts(filters.rangeStart)
+      const endParts = toDateParts(filters.rangeEnd)
+      if (!startParts || !endParts) return null
+      const start = new Date(startParts.y, startParts.m - 1, startParts.d, 0, 0, 0, 0)
+      const inclusiveEnd = new Date(endParts.y, endParts.m - 1, endParts.d, 0, 0, 0, 0)
+      if (start.getTime() > inclusiveEnd.getTime()) return null
+      const endExclusive = new Date(endParts.y, endParts.m - 1, endParts.d + 1, 0, 0, 0, 0)
+      return { startAt: toTimeLayout(start), endAt: toTimeLayout(endExclusive) }
+    }
+    default:
+      return null
+  }
+}
+
+export function buildLogsSummaryScopeHint(filters: LogsFiltersState, t: TranslateFn): string {
+  switch (filters.dateType) {
+    case 'all': {
+      const today = startOfTodayLocal()
+      const date = `${today.getFullYear()}-${pad2(today.getMonth() + 1)}-${pad2(today.getDate())}`
+      return t('components.logs.summary.todayScope', { date })
+    }
+    case 'today': {
+      const today = startOfTodayLocal()
+      const date = `${today.getFullYear()}-${pad2(today.getMonth() + 1)}-${pad2(today.getDate())}`
+      return t('components.logs.summary.todayScope', { date })
+    }
+    case 'year': {
+      const year = filters.year?.trim()
+      return year ? t('components.logs.summary.yearScope', { year }) : ''
+    }
+    case 'month': {
+      const month = filters.month?.trim()
+      return month ? t('components.logs.summary.monthScope', { month }) : ''
+    }
+    case 'day': {
+      const day = filters.day?.trim()
+      return day ? t('components.logs.summary.dayScope', { date: day }) : ''
+    }
+    case 'range': {
+      const start = filters.rangeStart?.trim()
+      const end = filters.rangeEnd?.trim()
+      if (!start || !end) return ''
+      return t('components.logs.summary.rangeScope', { start, end })
+    }
+    default:
+      return ''
+  }
+}
+
+export function useLogsFilters(options: UseLogsFiltersOptions) {
+  const { t } = options
+
+  const filters = reactive<LogsFiltersState>(createLogsFiltersState())
 
   const yearPickerValue = computed<number | null>({
     get() {
@@ -146,96 +260,14 @@ export function useLogsFilters(options: UseLogsFiltersOptions) {
     rangePickerValue.value = value
   }
 
-  const computeDateRange = (): LogsDateRange | null => {
-    switch (filters.dateType) {
-      case 'all':
-        return { startAt: '', endAt: '' }
-      case 'today': {
-        const start = startOfTodayLocal()
-        const end = new Date(start.getTime())
-        end.setDate(end.getDate() + 1)
-        return { startAt: toTimeLayout(start), endAt: toTimeLayout(end) }
-      }
-      case 'year': {
-        const year = Number(filters.year)
-        if (!isLogsYearInRange(year)) return null
-        const start = new Date(year, 0, 1, 0, 0, 0, 0)
-        const end = new Date(year + 1, 0, 1, 0, 0, 0, 0)
-        return { startAt: toTimeLayout(start), endAt: toTimeLayout(end) }
-      }
-      case 'month': {
-        const match = String(filters.month || '').match(/^(\d{4})-(\d{2})$/)
-        if (!match) return null
-        const year = Number(match[1])
-        const month = Number(match[2])
-        if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) return null
-        const start = new Date(year, month - 1, 1, 0, 0, 0, 0)
-        const end = new Date(year, month, 1, 0, 0, 0, 0)
-        return { startAt: toTimeLayout(start), endAt: toTimeLayout(end) }
-      }
-      case 'day': {
-        if (!filters.day) return null
-        const parts = toDateParts(filters.day)
-        if (!parts) return null
-        const start = new Date(parts.y, parts.m - 1, parts.d, 0, 0, 0, 0)
-        const end = new Date(parts.y, parts.m - 1, parts.d + 1, 0, 0, 0, 0)
-        return { startAt: toTimeLayout(start), endAt: toTimeLayout(end) }
-      }
-      case 'range': {
-        if (!filters.rangeStart || !filters.rangeEnd) return null
-        const startParts = toDateParts(filters.rangeStart)
-        const endParts = toDateParts(filters.rangeEnd)
-        if (!startParts || !endParts) return null
-        const start = new Date(startParts.y, startParts.m - 1, startParts.d, 0, 0, 0, 0)
-        const inclusiveEnd = new Date(endParts.y, endParts.m - 1, endParts.d, 0, 0, 0, 0)
-        if (start.getTime() > inclusiveEnd.getTime()) return null
-        const endExclusive = new Date(endParts.y, endParts.m - 1, endParts.d + 1, 0, 0, 0, 0)
-        return { startAt: toTimeLayout(start), endAt: toTimeLayout(endExclusive) }
-      }
-      default:
-        return null
-    }
-  }
+  const computeDateRange = (): LogsDateRange | null => computeLogsDateRange(filters)
 
   const isFilterValid = computed(() => {
     if (filters.dateType === 'all') return true
     return computeDateRange() != null
   })
 
-  const summaryScopeHint = computed(() => {
-    switch (filters.dateType) {
-      case 'all': {
-        const today = startOfTodayLocal()
-        const date = `${today.getFullYear()}-${pad2(today.getMonth() + 1)}-${pad2(today.getDate())}`
-        return t('components.logs.summary.todayScope', { date })
-      }
-      case 'today': {
-        const today = startOfTodayLocal()
-        const date = `${today.getFullYear()}-${pad2(today.getMonth() + 1)}-${pad2(today.getDate())}`
-        return t('components.logs.summary.todayScope', { date })
-      }
-      case 'year': {
-        const year = filters.year?.trim()
-        return year ? t('components.logs.summary.yearScope', { year }) : ''
-      }
-      case 'month': {
-        const month = filters.month?.trim()
-        return month ? t('components.logs.summary.monthScope', { month }) : ''
-      }
-      case 'day': {
-        const day = filters.day?.trim()
-        return day ? t('components.logs.summary.dayScope', { date: day }) : ''
-      }
-      case 'range': {
-        const start = filters.rangeStart?.trim()
-        const end = filters.rangeEnd?.trim()
-        if (!start || !end) return ''
-        return t('components.logs.summary.rangeScope', { start, end })
-      }
-      default:
-        return ''
-    }
-  })
+  const summaryScopeHint = computed(() => buildLogsSummaryScopeHint(filters, t))
 
   return {
     filters,

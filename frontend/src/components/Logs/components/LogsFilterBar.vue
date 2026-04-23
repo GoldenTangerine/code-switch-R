@@ -464,6 +464,7 @@ const props = defineProps<{
   providerOptions: LogProviderOption[]
   loading: boolean
   isFilterValid: boolean
+  hasPendingChanges?: boolean
   yearPickerValue: number | null
   monthPickerValue: MonthModel | null
   dayPickerValue: Date | null
@@ -650,15 +651,19 @@ const showDateClearButton = computed(() => {
   }
 })
 
-const footerStatusTone = computed<'ready' | 'loading' | 'invalid'>(() => {
+const footerStatusTone = computed<'ready' | 'loading' | 'invalid' | 'pending'>(() => {
   if (props.loading) return 'loading'
-  return props.isFilterValid ? 'ready' : 'invalid'
+  if (!props.isFilterValid) return 'invalid'
+  if (props.hasPendingChanges) return 'pending'
+  return 'ready'
 })
 
 const footerStatusText = computed(() => {
   switch (footerStatusTone.value) {
     case 'loading':
       return t('components.logs.filters.footer.statusLoading')
+    case 'pending':
+      return t('components.logs.filters.footer.statusPending')
     case 'invalid':
       return t('components.logs.filters.footer.statusInvalid')
     default:
@@ -1424,6 +1429,11 @@ html.dark .logs-filter-date-picker-menu {
   background: rgba(245, 158, 11, 0.08);
 }
 
+.logs-filter-footer-chip.is-pending {
+  border-color: rgba(168, 85, 247, 0.22);
+  background: rgba(168, 85, 247, 0.1);
+}
+
 .logs-filter-footer-dot {
   width: 6px;
   height: 6px;
@@ -1445,6 +1455,11 @@ html.dark .logs-filter-date-picker-menu {
 .logs-filter-footer-chip.is-invalid .logs-filter-footer-dot {
   background: rgb(245, 158, 11);
   box-shadow: 0 0 10px rgba(245, 158, 11, 0.48);
+}
+
+.logs-filter-footer-chip.is-pending .logs-filter-footer-dot {
+  background: rgb(168, 85, 247);
+  box-shadow: 0 0 10px rgba(168, 85, 247, 0.5);
 }
 
 .logs-filter-footer-scope {

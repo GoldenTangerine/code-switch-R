@@ -170,6 +170,42 @@ describe('useLogsPageData', () => {
     expect(summary.value).toEqual(createSummary())
   })
 
+  it('reloads with the last applied filters instead of pending draft edits', async () => {
+    const filters = createFilters()
+    filters.provider = 'provider-applied'
+
+    const { applyDashboardFilters, loadDashboard } = useLogsPageData({
+      filters,
+      computeDateRange: () => ({ startAt: '2026-03-01 00:00:00', endAt: '2026-03-31 23:59:59' }),
+    })
+
+    await applyDashboardFilters()
+
+    filters.provider = 'provider-draft'
+    await loadDashboard()
+
+    expect(fetchLogSummaryV2).toHaveBeenNthCalledWith(1, {
+      platform: '',
+      provider: 'provider-applied',
+      startAt: '2026-03-01 00:00:00',
+      endAt: '2026-03-31 23:59:59',
+    })
+    expect(fetchLogSummaryV2).toHaveBeenNthCalledWith(2, {
+      platform: '',
+      provider: 'provider-applied',
+      startAt: '2026-03-01 00:00:00',
+      endAt: '2026-03-31 23:59:59',
+    })
+    expect(fetchRequestLogsPage).toHaveBeenNthCalledWith(2, {
+      platform: '',
+      provider: 'provider-applied',
+      limit: 15,
+      offset: 0,
+      startAt: '2026-03-01 00:00:00',
+      endAt: '2026-03-31 23:59:59',
+    })
+  })
+
   it('reloads logs when switching page', async () => {
     vi.mocked(fetchRequestLogsPage)
       .mockResolvedValueOnce(createPageResult([createRequestLog(1)], 47, 15, 0))
@@ -276,14 +312,14 @@ describe('useLogsPageData', () => {
       .mockResolvedValueOnce(latestSummary)
 
     const filters = createFilters()
-    const { loadDashboard, summary } = useLogsPageData({
+    const { loadDashboard, applyDashboardFilters, summary } = useLogsPageData({
       filters,
       computeDateRange: () => ({ startAt: '2026-03-01 00:00:00', endAt: '2026-03-31 23:59:59' }),
     })
 
     const firstLoad = loadDashboard()
     filters.provider = 'provider-new'
-    const secondLoad = loadDashboard()
+    const secondLoad = applyDashboardFilters()
 
     await secondLoad
     expect(summary.value).toEqual(latestSummary)

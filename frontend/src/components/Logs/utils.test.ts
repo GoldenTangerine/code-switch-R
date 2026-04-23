@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ModelUsageStat } from '../../services/logs'
-import { buildModelShareRows, formatModelShareTooltipLabel } from './utils'
+import { buildModelShareRows, formatCurrencyParts, formatModelShareTooltipLabel } from './utils'
 
 const MODEL_SHARE_COLORS = ['#818cf8', '#fb923c', '#34d399', '#60a5fa'] as const
 
@@ -72,5 +72,16 @@ describe('formatModelShareTooltipLabel', () => {
 
   it('uses the default req suffix and handles empty totals safely', () => {
     expect(formatModelShareTooltipLabel('ark-code-v2', 7, 0)).toBe('ark-code-v2: 7 req (0.0%)')
+  })
+})
+
+describe('formatCurrencyParts', () => {
+  it('keeps small fractional spend precision aligned with the shared currency formatter', () => {
+    expect(formatCurrencyParts(0.0042)).toEqual({
+      symbol: '$',
+      whole: '0',
+      fraction: '0042',
+      formatted: '$0.0042',
+    })
   })
 })

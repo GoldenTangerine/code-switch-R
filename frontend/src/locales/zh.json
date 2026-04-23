@@ -878,6 +878,7 @@
           "statusReady": "服务状态：就绪",
           "statusLoading": "服务状态：同步中",
           "statusInvalid": "服务状态：待补全",
+          "statusPending": "服务状态：待应用",
           "scope": "范围：{scope}",
           "utilityClear": "清空当前时间条件",
           "utilityClose": "收起当前下拉",
@@ -1096,6 +1097,19 @@
       },
       "costDetail": {
         "title": "消费明细",
+        "subtitle": "查看各供应商 Token 消耗统计",
+        "totalAmount": "总支出 (USD)",
+        "updatedAt": "更新于 {time}",
+        "providerColumn": "供应商",
+        "currentUsageColumn": "当前消耗",
+        "share": "占比 {value}",
+        "highUsage": "消耗较高",
+        "totalProviders": "{count} 个供应商有消费记录",
+        "scope": "统计范围：{scope}",
+        "filterHint": "点击供应商可快速切换日志筛选",
+        "statementEnd": "账单到底了",
+        "providerSelectAria": "按供应商 {provider} 过滤日志，当前消费 {amount}",
+        "loadFailed": "加载消费明细失败：{error}",
         "empty": "暂无消费记录"
       },
       "tokenDetail": {

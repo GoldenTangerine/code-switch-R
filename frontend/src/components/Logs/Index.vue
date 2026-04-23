@@ -15,12 +15,13 @@
         :provider-options="providerOptions"
         :loading="loading"
         :is-filter-valid="isFilterValid"
+        :has-pending-changes="hasPendingFilters"
         :year-picker-value="yearPickerValue"
         :month-picker-value="monthPickerValue"
         :day-picker-value="dayPickerValue"
         :range-picker-value="rangePickerValue"
         :is-dark-theme="isDarkTheme"
-        :summary-scope-hint="summaryScopeHint"
+        :summary-scope-hint="draftSummaryScopeHint"
         @submit="applyFilters"
         @update:platform="updateFilterPlatform"
         @update:provider="updateFilterProvider"
@@ -188,9 +189,14 @@
         <LogsCostDetailModal
           :open="costDetailModal.open"
           :loading="costDetailModal.loading"
+          :error="costDetailModal.error"
           :data="costDetailModal.data"
+          :updated-at="costDetailModal.updatedAt"
+          :scope-hint="appliedSummaryScopeHint"
+          :is-dark-theme="isDarkTheme"
           :format-currency="formatCurrency"
           @close="closeCostDetailModal"
+          @select-provider="handleCostDetailProviderSelect"
         />
 
         <!-- Token 明细弹窗 -->
@@ -247,7 +253,7 @@ import { useLogsAutoRefresh } from './composables/useLogsAutoRefresh'
 import { useLogsChartsPresentation } from './composables/useLogsChartsPresentation'
 import { useLogsCostTooltip } from './composables/useLogsCostTooltip'
 import { useLogsDetailModals } from './composables/useLogsDetailModals'
-import { useLogsFilters } from './composables/useLogsFilters'
+import { areLogsFiltersEqual, buildLogsSummaryScopeHint, useLogsFilters } from './composables/useLogsFilters'
 import { useLogsInfoTooltip } from './composables/useLogsInfoTooltip'
 import { useLogsPageData } from './composables/useLogsPageData'
 import { useLogsPayloadDetail } from './composables/useLogsPayloadDetail'
@@ -291,7 +297,7 @@ const {
   updateRangePickerValue,
   computeDateRange,
   isFilterValid,
-  summaryScopeHint,
+  summaryScopeHint: draftSummaryScopeHint,
 } = useLogsFilters({ t })
 
 const {
@@ -306,6 +312,9 @@ const {
   providerOptions,
   pagedLogs,
   totalPages,
+  appliedFilters,
+  appliedDateRange,
+  applyDashboardFilters,
   loadDashboard,
   setPage,
   setPageSize,
@@ -314,6 +323,9 @@ const {
   filters,
   computeDateRange,
 })
+
+const appliedSummaryScopeHint = computed(() => buildLogsSummaryScopeHint(appliedFilters.value, t))
+const hasPendingFilters = computed(() => !areLogsFiltersEqual(filters, appliedFilters.value))
 
 const {
   statsCards,
@@ -328,7 +340,7 @@ const {
   stats,
   modelStats,
   statsSeries: computed(() => stats.value?.series ?? []),
-  summaryScopeHint,
+  summaryScopeHint: appliedSummaryScopeHint,
   computeDateRange,
   dateType: computed(() => filters.dateType),
 })
@@ -340,8 +352,8 @@ const {
   closeTokenDetailModal,
   handleCardClick,
 } = useLogsDetailModals({
-  filters,
-  computeDateRange,
+  appliedFilters,
+  appliedDateRange,
 })
 
 const {
@@ -416,8 +428,22 @@ const applyFilters = async () => {
     return
   }
   resetPage()
-  await loadDashboard()
+  await applyDashboardFilters()
   resetTimer()
+}
+
+const handleCostDetailProviderSelect = async (provider: string) => {
+  const nextProvider = `${provider ?? ''}`.trim()
+  if (!nextProvider) return
+
+  closeCostDetailModal()
+
+  if (filters.provider === nextProvider) {
+    return
+  }
+
+  updateFilterProvider(nextProvider)
+  await applyFilters()
 }
 
 const backToHome = () => {
@@ -520,7 +546,7 @@ onMounted(async () => {
     MODEL_PRICING_CHANGED_EVENT,
     handleModelPricingChanged as Events.Callback,
   )
-  await Promise.all([loadDashboard(), loadModelPricingRows()])
+  await Promise.all([applyDashboardFilters(), loadModelPricingRows()])
   startCountdown()
 })
 

@@ -1490,6 +1490,18 @@ export const formatCurrency = (value?: number) => {
   return `$${value.toFixed(4)}`
 }
 
+export const formatCurrencyParts = (value?: number) => {
+  const formatted = formatCurrency(value)
+  const normalized = formatted.startsWith('$') ? formatted.slice(1) : formatted
+  const [whole = '0', fraction = ''] = normalized.split('.')
+  return {
+    symbol: '$',
+    whole,
+    fraction,
+    formatted,
+  }
+}
+
 export const hasProviderPricingSnapshot = (item: RequestLog) =>
   isTrueFlag(item.provider_pricing_available)
 
