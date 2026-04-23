@@ -1,18 +1,25 @@
 import { Call } from '@wailsio/runtime'
-import type { BudgetQuotaKey } from '../utils/budgetUsage'
 import {
-  normalizeProviderQuotaQueryType,
+  resolveProviderQuotaQueryType,
+  sanitizeProviderQuotaQueryConfigForSave,
   type ProviderQuotaQueryType,
+  type ProviderQuotaQueryConfig,
 } from '../utils/providerQuotaQuery'
 
 const PROVIDER_QUOTA_QUERY_SERVICE = 'codeswitch/services.ProviderQuotaQueryService'
 
 export type ProviderQuotaQueryItem = {
-  key: BudgetQuotaKey
+  key: string
+  label?: string
   used: number
   total: number
   nextReset?: string
   active?: boolean
+  isValid?: boolean
+  valueMode?: 'currency' | 'count'
+  unit?: string
+  extra?: string
+  invalidMessage?: string
 }
 
 export type ProviderQuotaQueryResult = {
@@ -24,15 +31,17 @@ export type ProviderQuotaQueryResult = {
 }
 
 export async function queryProviderQuota(
-  queryType: ProviderQuotaQueryType,
+  queryTypeOrConfig: ProviderQuotaQueryType | ProviderQuotaQueryConfig,
   apiUrl: string,
   apiKey: string,
 ): Promise<ProviderQuotaQueryResult> {
-  const normalizedQueryType = normalizeProviderQuotaQueryType(queryType)
+  const normalizedQueryType = resolveProviderQuotaQueryType(queryTypeOrConfig)
+  const normalizedConfig = sanitizeProviderQuotaQueryConfigForSave(queryTypeOrConfig, normalizedQueryType)
   return Call.ByName(
     `${PROVIDER_QUOTA_QUERY_SERVICE}.QueryQuota`,
     normalizedQueryType,
     apiUrl.trim(),
     apiKey.trim(),
+    normalizedConfig ?? null,
   )
 }

@@ -341,6 +341,36 @@ const {
   t,
   getActiveTab: () => activeTab.value,
   cards,
+  resolveAutoRefreshRemoteQuotaRefs: () => {
+    const refs = new Set<string>()
+    const activeTabCards = cards[activeTab.value] ?? []
+
+    activeTabCards.forEach((card) => {
+      if (!hasProviderQuotaQueryType(card.providerQuotaQueryConfig ?? card.providerQuotaQueryType, card.providerQuotaQueryType)) {
+        return
+      }
+
+      const isCurrentlyActive = pageShell.activeProxyState.value
+        ? isHostedRouteActive({
+            activeProxyState: true,
+            isLastUsed: isLastUsedProvider(card),
+            enabled: card.enabled,
+            apiUrl: card.apiUrl,
+            apiKey: card.apiKey,
+            isBlacklisted: getProviderBlacklistStatus(card)?.isBlacklisted === true,
+          })
+        : isDirectApplied(card)
+
+      if (!isCurrentlyActive) return
+
+      const ref = cardProviderRef(card) || card.name
+      if (ref) {
+        refs.add(ref)
+      }
+    })
+
+    return refs
+  },
 })
 
 const resolveManualRefreshRemoteQuotaRefs = () => {
@@ -348,7 +378,7 @@ const resolveManualRefreshRemoteQuotaRefs = () => {
   const activeTabCards = cards[activeTab.value] ?? []
 
   activeTabCards.forEach((card) => {
-    if (!hasProviderQuotaQueryType(card.providerQuotaQueryType)) return
+    if (!hasProviderQuotaQueryType(card.providerQuotaQueryConfig ?? card.providerQuotaQueryType, card.providerQuotaQueryType)) return
     const ref = cardProviderRef(card) || card.name
     if (ref) {
       refs.add(ref)

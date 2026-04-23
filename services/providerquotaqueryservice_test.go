@@ -3,8 +3,28 @@ package services
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
+
+	"github.com/dop251/goja"
 )
+
+type rewriteHostTransport struct {
+	target    *url.URL
+	transport http.RoundTripper
+}
+
+func (t rewriteHostTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	cloned := req.Clone(req.Context())
+	cloned.URL.Scheme = t.target.Scheme
+	cloned.URL.Host = t.target.Host
+	cloned.Host = t.target.Host
+	transport := t.transport
+	if transport == nil {
+		transport = http.DefaultTransport
+	}
+	return transport.RoundTrip(cloned)
+}
 
 func TestResolveProviderQuotaQueryTargetBaseURL(t *testing.T) {
 	tests := []struct {
@@ -107,7 +127,7 @@ func TestProviderQuotaQueryService_QueryQuotaParsesGLMTokenPlan(t *testing.T) {
 	defer server.Close()
 
 	service := NewProviderQuotaQueryService()
-	result := service.QueryQuota(string(ProviderQuotaQueryTypeTokenPlanGLM), server.URL+"/api/paas/v4/chat/completions", "glm-key")
+	result := service.QueryQuota(string(ProviderQuotaQueryTypeTokenPlanGLM), server.URL+"/api/paas/v4/chat/completions", "glm-key", nil)
 
 	if !result.Success {
 		t.Fatalf("期望 GLM 查询成功，实际失败：%s", result.Error)
@@ -260,7 +280,7 @@ func TestProviderQuotaQueryService_QueryQuotaParsesKimiAndMiniMaxTokenPlan(t *te
 			if testCase.name == "minimax" {
 				apiKey = "minimax-key"
 			}
-			result := service.QueryQuota(testCase.queryType, server.URL+"/v1/messages", apiKey)
+			result := service.QueryQuota(testCase.queryType, server.URL+"/v1/messages", apiKey, nil)
 
 			if !result.Success {
 				t.Fatalf("期望 %s 查询成功，实际失败：%s", testCase.name, result.Error)
@@ -277,5 +297,424 @@ func TestProviderQuotaQueryService_QueryQuotaParsesKimiAndMiniMaxTokenPlan(t *te
 				}
 			}
 		})
+	}
+}
+
+func TestProviderQuotaQueryService_QueryQuotaParsesGeneralScriptTemplate(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/user/balance" {
+			t.Fatalf("期望请求 /user/balance，实际为 %s", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer general-key" {
+			t.Fatalf("期望 Authorization 为 Bearer general-key，实际为 %s", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"balance": 12.5}`))
+	}))
+	defer server.Close()
+
+	service := NewProviderQuotaQueryService()
+	result := service.QueryQuota(string(ProviderQuotaQueryTypeGeneral), server.URL, "", &ProviderQuotaQueryConfig{
+		Enabled:      true,
+		TemplateType: string(ProviderQuotaTemplateTypeGeneral),
+		APIKey:       "general-key",
+		Timeout:      6,
+		Code: `({
+  request: {
+    url: '{{baseUrl}}/user/balance',
+    method: 'GET',
+    headers: {
+      'Authorization': 'Bearer {{apiKey}}'
+    }
+  },
+  extractor: function(response) {
+    return {
+      label: 'Balance',
+      remaining: response.balance,
+      unit: 'USD',
+      valueMode: 'currency'
+    };
+  }
+})`,
+	})
+
+	if !result.Success {
+		t.Fatalf("期望通用模版查询成功，实际失败：%s", result.Error)
+	}
+	if len(result.Items) != 1 {
+		t.Fatalf("期望返回 1 条余额数据，实际为 %d", len(result.Items))
+	}
+	if result.Items[0].Label != "Balance" {
+		t.Fatalf("期望标签为 Balance，实际为 %s", result.Items[0].Label)
+	}
+	if result.Items[0].Used != 0 || result.Items[0].Total != 12.5 {
+		t.Fatalf("期望已用/总量为 0 / 12.5，实际为 %f / %f", result.Items[0].Used, result.Items[0].Total)
+	}
+	if result.Items[0].ValueMode != string(ProviderQuotaValueModeCurrency) || result.Items[0].Unit != "USD" {
+		t.Fatalf("期望金额模式为 currency/USD，实际为 %s / %s", result.Items[0].ValueMode, result.Items[0].Unit)
+	}
+}
+
+func TestProviderQuotaQueryService_QueryQuotaParsesNewAPIScriptTemplate(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/user/self" {
+			t.Fatalf("期望请求 /api/user/self，实际为 %s", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer access-token" {
+			t.Fatalf("期望 Authorization 为 Bearer access-token，实际为 %s", got)
+		}
+		if got := r.Header.Get("New-Api-User"); got != "user-42" {
+			t.Fatalf("期望 New-Api-User 为 user-42，实际为 %s", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"success": true,
+			"data": {
+				"group": "Pro",
+				"quota": 3000000,
+				"used_quota": 2000000
+			}
+		}`))
+	}))
+	defer server.Close()
+
+	service := NewProviderQuotaQueryService()
+	result := service.QueryQuota(string(ProviderQuotaQueryTypeNewAPI), server.URL, "", &ProviderQuotaQueryConfig{
+		Enabled:      true,
+		TemplateType: string(ProviderQuotaTemplateTypeNewAPI),
+		AccessToken:  "access-token",
+		UserID:       "user-42",
+		Code: `({
+  request: {
+    url: '{{baseUrl}}/api/user/self',
+    method: 'GET',
+    headers: {
+      'Authorization': 'Bearer {{accessToken}}',
+      'New-Api-User': '{{userId}}'
+    }
+  },
+  extractor: function(response) {
+    return {
+      label: response.data.group,
+      remaining: response.data.quota / 500000,
+      used: response.data.used_quota / 500000,
+      total: (response.data.quota + response.data.used_quota) / 500000,
+      unit: 'USD',
+      valueMode: 'currency'
+    };
+  }
+})`,
+	})
+
+	if !result.Success {
+		t.Fatalf("期望 NewAPI 模版查询成功，实际失败：%s", result.Error)
+	}
+	if len(result.Items) != 1 {
+		t.Fatalf("期望返回 1 条额度数据，实际为 %d", len(result.Items))
+	}
+	if result.Items[0].Label != "Pro" {
+		t.Fatalf("期望标签为 Pro，实际为 %s", result.Items[0].Label)
+	}
+	if result.Items[0].Used != 4 || result.Items[0].Total != 10 {
+		t.Fatalf("期望已用/总量为 4 / 10，实际为 %f / %f", result.Items[0].Used, result.Items[0].Total)
+	}
+}
+
+func TestProviderQuotaQueryService_QueryQuotaPreservesInvalidMessageForNewAPI(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/user/self" {
+			t.Fatalf("期望请求 /api/user/self，实际为 %s", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer expired-token" {
+			t.Fatalf("期望 Authorization 为 Bearer expired-token，实际为 %s", got)
+		}
+		if got := r.Header.Get("New-Api-User"); got != "user-42" {
+			t.Fatalf("期望 New-Api-User 为 user-42，实际为 %s", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"success": false,
+			"message": "Access token expired"
+		}`))
+	}))
+	defer server.Close()
+
+	service := NewProviderQuotaQueryService()
+	result := service.QueryQuota(string(ProviderQuotaQueryTypeNewAPI), server.URL, "", &ProviderQuotaQueryConfig{
+		Enabled:      true,
+		TemplateType: string(ProviderQuotaTemplateTypeNewAPI),
+		AccessToken:  "expired-token",
+		UserID:       "user-42",
+		Code: `({
+  request: {
+    url: '{{baseUrl}}/api/user/self',
+    method: 'GET',
+    headers: {
+      'Authorization': 'Bearer {{accessToken}}',
+      'New-Api-User': '{{userId}}'
+    }
+  },
+  extractor: function(response) {
+    return {
+      label: 'NewAPI',
+      isValid: false,
+      invalidMessage: response.message || 'Query failed',
+      extra: '请检查 Access Token 和 User ID'
+    };
+  }
+})`,
+	})
+
+	if !result.Success {
+		t.Fatalf("期望 NewAPI 失败态仍能返回结果，实际失败：%s", result.Error)
+	}
+	if len(result.Items) != 1 {
+		t.Fatalf("期望返回 1 条额度数据，实际为 %d", len(result.Items))
+	}
+	item := result.Items[0]
+	if item.Active {
+		t.Fatal("期望 NewAPI 失败态为 inactive")
+	}
+	if item.InvalidMessage != "Access token expired" {
+		t.Fatalf("期望 invalidMessage 为 Access token expired，实际为 %s", item.InvalidMessage)
+	}
+	if item.Extra != "请检查 Access Token 和 User ID" {
+		t.Fatalf("期望 extra 被透传，实际为 %s", item.Extra)
+	}
+	if item.Used != 0 || item.Total != 0 {
+		t.Fatalf("期望失败态已用/总量为 0 / 0，实际为 %f / %f", item.Used, item.Total)
+	}
+}
+
+func TestBuildProviderQuotaScriptWithVarsEscapesSpecialCharacters(t *testing.T) {
+	vm := goja.New()
+	script := buildProviderQuotaScriptWithVars(`({
+  request: {
+    url: '{{baseUrl}}/user/balance',
+    method: 'GET',
+    headers: {
+      'Authorization': 'Bearer {{apiKey}}',
+      'X-Access-Token': '{{accessToken}}',
+      'X-User-Id': '{{userId}}'
+    }
+  },
+  extractor: function(response) {
+    return response;
+  }
+})`, `quota'"key\slash`, "https://quota.example.com", "token\nline", "user'42")
+
+	value, err := vm.RunString(script)
+	if err != nil {
+		t.Fatalf("期望替换后的脚本仍可执行，实际失败：%v", err)
+	}
+
+	configObject := value.ToObject(vm)
+	requestObject := configObject.Get("request").ToObject(vm)
+	headersObject := requestObject.Get("headers").ToObject(vm)
+
+	if got := requestObject.Get("url").String(); got != "https://quota.example.com/user/balance" {
+		t.Fatalf("期望 URL 正确替换，实际为 %s", got)
+	}
+	if got := headersObject.Get("Authorization").String(); got != `Bearer quota'"key\slash` {
+		t.Fatalf("期望 Authorization 保留特殊字符，实际为 %s", got)
+	}
+	if got := headersObject.Get("X-Access-Token").String(); got != "token\nline" {
+		t.Fatalf("期望 access token 保留换行，实际为 %q", got)
+	}
+	if got := headersObject.Get("X-User-Id").String(); got != "user'42" {
+		t.Fatalf("期望 user id 保留单引号，实际为 %s", got)
+	}
+}
+
+func TestNormalizeProviderQuotaQueryConfigStripsHiddenFieldsForBuiltinTemplates(t *testing.T) {
+	balanceConfig := normalizeProviderQuotaQueryConfig(&ProviderQuotaQueryConfig{
+		Enabled:      true,
+		TemplateType: string(ProviderQuotaTemplateTypeBalance),
+		Code:         "stale-code",
+		APIKey:       "dedicated-key",
+		BaseURL:      "https://stale.example.com",
+		AccessToken:  "stale-token",
+		UserID:       "stale-user",
+	}, ProviderQuotaQueryTypeBalance)
+
+	if balanceConfig == nil {
+		t.Fatal("期望 balance 配置被标准化")
+	}
+	if balanceConfig.Code != "" || balanceConfig.APIKey != "" || balanceConfig.BaseURL != "" || balanceConfig.AccessToken != "" || balanceConfig.UserID != "" {
+		t.Fatalf("期望 balance 模板隐藏字段被清空，实际为 %+v", *balanceConfig)
+	}
+
+	tokenPlanConfig := normalizeProviderQuotaQueryConfig(&ProviderQuotaQueryConfig{
+		Enabled:           true,
+		TemplateType:      string(ProviderQuotaTemplateTypeTokenPlan),
+		Code:              "stale-code",
+		APIKey:            "dedicated-key",
+		BaseURL:           "https://stale.example.com",
+		AccessToken:       "stale-token",
+		UserID:            "stale-user",
+		TokenPlanProvider: "",
+	}, ProviderQuotaQueryTypeTokenPlanKimi)
+
+	if tokenPlanConfig == nil {
+		t.Fatal("期望 token plan 配置被标准化")
+	}
+	if tokenPlanConfig.Code != "" || tokenPlanConfig.APIKey != "" || tokenPlanConfig.BaseURL != "" || tokenPlanConfig.AccessToken != "" || tokenPlanConfig.UserID != "" {
+		t.Fatalf("期望 token plan 模板隐藏字段被清空，实际为 %+v", *tokenPlanConfig)
+	}
+	if tokenPlanConfig.TokenPlanProvider != "kimi" {
+		t.Fatalf("期望 token plan 默认 provider 为 kimi，实际为 %s", tokenPlanConfig.TokenPlanProvider)
+	}
+}
+
+func TestProviderQuotaQueryService_QueryQuotaAllowsCustomScriptWithoutBaseURL(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/custom/quota" {
+			t.Fatalf("期望请求 /custom/quota，实际为 %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"remaining": 88}`))
+	}))
+	defer server.Close()
+
+	service := NewProviderQuotaQueryService()
+	result := service.QueryQuota(string(ProviderQuotaQueryTypeCustom), "", "", &ProviderQuotaQueryConfig{
+		Enabled:      true,
+		TemplateType: string(ProviderQuotaTemplateTypeCustom),
+		Code: `({
+  request: {
+    url: '` + server.URL + `/custom/quota',
+    method: 'GET'
+  },
+  extractor: function(response) {
+    return {
+      label: 'Quota',
+      remaining: response.remaining,
+      unit: 'requests',
+      valueMode: 'count'
+    };
+  }
+})`,
+	})
+
+	if !result.Success {
+		t.Fatalf("期望自定义模版查询成功，实际失败：%s", result.Error)
+	}
+	if len(result.Items) != 1 || result.Items[0].Total != 88 {
+		t.Fatalf("期望自定义模版返回 total=88，实际为 %+v", result.Items)
+	}
+}
+
+func TestProviderQuotaQueryService_QueryQuotaRejectsNonCustomCrossOriginScript(t *testing.T) {
+	service := NewProviderQuotaQueryService()
+	result := service.QueryQuota(string(ProviderQuotaQueryTypeGeneral), "https://api.example.com", "quota-key", &ProviderQuotaQueryConfig{
+		Enabled:      true,
+		TemplateType: string(ProviderQuotaTemplateTypeGeneral),
+		Code: `({
+  request: {
+    url: 'https://evil.example.com/user/balance',
+    method: 'GET'
+  },
+  extractor: function(response) {
+    return {
+      remaining: response.balance,
+      unit: 'USD',
+      valueMode: 'currency'
+    };
+  }
+})`,
+	})
+
+	if result.Success {
+		t.Fatal("期望同源校验失败，但查询成功了")
+	}
+	if result.Error == "" {
+		t.Fatal("期望返回同源校验错误")
+	}
+}
+
+func TestProviderQuotaQueryService_QueryQuotaParsesOpenRouterBalance(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/credits" {
+			t.Fatalf("期望请求 /api/v1/credits，实际为 %s", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer balance-key" {
+			t.Fatalf("期望 Authorization 为 Bearer balance-key，实际为 %s", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"data": {
+				"total_credits": 100,
+				"total_usage": 30
+			}
+		}`))
+	}))
+	defer server.Close()
+
+	parsedServerURL, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatalf("解析测试服务地址失败: %v", err)
+	}
+
+	service := NewProviderQuotaQueryService()
+	service.client = server.Client()
+	service.client.Transport = rewriteHostTransport{target: parsedServerURL, transport: server.Client().Transport}
+
+	result := service.QueryQuota(string(ProviderQuotaQueryTypeBalance), "https://openrouter.ai/api/v1/chat/completions", "balance-key", nil)
+	if !result.Success {
+		t.Fatalf("期望官方余额查询成功，实际失败：%s", result.Error)
+	}
+	if len(result.Items) != 1 {
+		t.Fatalf("期望返回 1 条余额数据，实际为 %d", len(result.Items))
+	}
+	item := result.Items[0]
+	if item.Label != "OpenRouter" {
+		t.Fatalf("期望标签为 OpenRouter，实际为 %s", item.Label)
+	}
+	if item.Used != 30 || item.Total != 100 {
+		t.Fatalf("期望已用/总量为 30 / 100，实际为 %f / %f", item.Used, item.Total)
+	}
+	if item.ValueMode != string(ProviderQuotaValueModeCurrency) || item.Unit != "USD" {
+		t.Fatalf("期望金额模式为 currency/USD，实际为 %s / %s", item.ValueMode, item.Unit)
+	}
+}
+
+func TestProviderQuotaQueryService_QueryQuotaReturnsInvalidItemForOfficialBalanceAuthFailure(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/credits" {
+			t.Fatalf("期望请求 /api/v1/credits，实际为 %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":"invalid api key"}`))
+	}))
+	defer server.Close()
+
+	parsedServerURL, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatalf("解析测试服务地址失败: %v", err)
+	}
+
+	service := NewProviderQuotaQueryService()
+	service.client = server.Client()
+	service.client.Transport = rewriteHostTransport{target: parsedServerURL, transport: server.Client().Transport}
+
+	result := service.QueryQuota(string(ProviderQuotaQueryTypeBalance), "https://openrouter.ai/api/v1/chat/completions", "balance-key", nil)
+	if !result.Success {
+		t.Fatalf("期望官方余额认证失败时仍返回失败项，实际失败：%s", result.Error)
+	}
+	if len(result.Items) != 1 {
+		t.Fatalf("期望返回 1 条失败态数据，实际为 %d", len(result.Items))
+	}
+	item := result.Items[0]
+	if item.Active {
+		t.Fatal("期望失败态余额项为 inactive")
+	}
+	if item.Label != "OpenRouter" {
+		t.Fatalf("期望标签为 OpenRouter，实际为 %s", item.Label)
+	}
+	if item.InvalidMessage != "官方余额查询认证失败 (HTTP 401)" {
+		t.Fatalf("期望 invalidMessage 为认证失败提示，实际为 %s", item.InvalidMessage)
+	}
+	if item.Used != 0 || item.Total != 0 {
+		t.Fatalf("期望失败态已用/总量为 0 / 0，实际为 %f / %f", item.Used, item.Total)
 	}
 }

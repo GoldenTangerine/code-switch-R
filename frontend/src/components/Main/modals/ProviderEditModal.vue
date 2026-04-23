@@ -209,8 +209,8 @@
             <div class="budget-quota-card budget-quota-card--query">
               <div class="budget-quota-card__header">
                 <div class="budget-quota-card__heading">
-                  <p class="budget-quota-card__title">{{ t('components.main.form.labels.providerQuotaQueryType') }}</p>
-                  <p class="budget-quota-card__hint">{{ t('components.main.form.hints.providerQuotaQueryType') }}</p>
+                  <p class="budget-quota-card__title">{{ t('components.main.form.labels.providerQuotaQueryConfig') }}</p>
+                  <p class="budget-quota-card__hint">{{ t('components.main.form.hints.providerQuotaQueryConfig') }}</p>
                 </div>
                 <span class="budget-quota-card__limit">
                   {{ providerQuotaQueryTypeLabel }}
@@ -218,20 +218,16 @@
               </div>
               <div class="budget-quota-card__body">
                 <div class="budget-quota-field">
-                  <span class="budget-quota-field__label">{{ t('components.main.form.labels.providerQuotaQueryType') }}</span>
-                  <select
-                    v-model="form.providerQuotaQueryType"
-                    class="mac-select"
-                    @change="handleProviderQuotaQueryTypeChange"
-                  >
-                    <option
-                      v-for="option in providerQuotaQueryTypeOptions"
-                      :key="option.value"
-                      :value="option.value"
-                    >
-                      {{ option.label }}
-                    </option>
-                  </select>
+                  <span class="budget-quota-field__label">{{ t('components.main.form.labels.providerQuotaQueryConfig') }}</span>
+                  <div class="provider-quota-query-summary">
+                    <strong class="provider-quota-query-summary__title">{{ providerQuotaQueryTypeLabel }}</strong>
+                    <span class="provider-quota-query-summary__meta">{{ providerQuotaQuerySummary }}</span>
+                  </div>
+                  <div class="provider-quota-query-actions">
+                    <BaseButton variant="outline" type="button" @click="providerQuotaQueryConfigModalOpen = true">
+                      {{ t('components.main.form.actions.providerQuotaQueryConfigure') }}
+                    </BaseButton>
+                  </div>
                   <span
                     :class="[
                       'budget-quota-field__hint',
@@ -442,6 +438,14 @@
       </footer>
     </form>
   </BaseModal>
+  <ProviderQuotaQueryConfigModal
+    :open="providerQuotaQueryConfigModalOpen"
+    :model-value="form.providerQuotaQueryConfig"
+    :provider-api-url="form.apiUrl"
+    :provider-api-key="form.apiKey"
+    @close="providerQuotaQueryConfigModalOpen = false"
+    @save="handleProviderQuotaQueryConfigSave"
+  />
 </template>
 
 <script setup lang="ts">
@@ -456,6 +460,7 @@ import CLIConfigEditor from '../../common/CLIConfigEditor.vue'
 import JsonCodeEditor from '../../common/JsonCodeEditor.vue'
 import ModelMappingEditor from '../../common/ModelMappingEditor.vue'
 import ModelWhitelistEditor from '../../common/ModelWhitelistEditor.vue'
+import ProviderQuotaQueryConfigModal from './ProviderQuotaQueryConfigModal.vue'
 import { AUTH_TYPE_OPTIONS, getDefaultAuthType } from '../constants'
 import { cardProviderRef } from '../adapters/providerCardMappers'
 import {
@@ -485,9 +490,16 @@ import {
   resolveBudgetCurrentUsedValue,
 } from '../../../utils/budgetUsage'
 import {
+  detectProviderQuotaBalanceProvider,
+  hasProviderQuotaQueryMissingCredentials,
+  normalizeProviderQuotaQueryConfig,
   normalizeProviderQuotaQueryType,
+  providerQuotaBalanceProviderOptions,
+  providerQuotaTemplateLabelKeyMap,
   providerQuotaQueryTypeLabelKeyMap,
-  providerQuotaQueryTypes,
+  providerQuotaTokenPlanProviderLabelKeyMap,
+  queryTypeToTemplateType,
+  resolveProviderQuotaQueryType,
 } from '../../../utils/providerQuotaQuery'
 import type { AutomationCard } from '../../../data/cards'
 import type { CLIPlatform } from '../../../services/cliConfig'
@@ -535,6 +547,7 @@ const errors = reactive({
 })
 const selectedAuthType = ref<string>(getDefaultAuthType(props.tabId))
 const customAuthHeader = ref('')
+const providerQuotaQueryConfigModalOpen = ref(false)
 const iconSearchQuery = ref('')
 const requestBodyOverridesText = ref('{}')
 const requestBodyOverridesError = ref('')
@@ -547,26 +560,78 @@ const saveAndApplyTooltip = computed(() => (
     ? t('components.main.directApply.requiresHostedRouting')
     : t('components.main.directApply.title')
 ))
-const providerQuotaQueryTypeOptions = computed(() => (
-  providerQuotaQueryTypes.map((value) => ({
-    value,
-    label: t(providerQuotaQueryTypeLabelKeyMap[value]),
-  }))
-))
 const normalizedProviderQuotaQueryType = computed(() => normalizeProviderQuotaQueryType(form.providerQuotaQueryType))
+const normalizedProviderQuotaQueryConfig = computed(() => (
+  normalizeProviderQuotaQueryConfig(form.providerQuotaQueryConfig, form.providerQuotaQueryType)
+))
+const providerQuotaQueryTemplateType = computed(() => (
+  normalizedProviderQuotaQueryConfig.value?.templateType
+    ?? queryTypeToTemplateType(form.providerQuotaQueryType)
+))
 const providerQuotaQueryTypeLabel = computed(() => (
-  t(providerQuotaQueryTypeLabelKeyMap[normalizedProviderQuotaQueryType.value])
+  normalizedProviderQuotaQueryConfig.value?.enabled
+    ? providerQuotaQueryTemplateType.value === 'token_plan'
+      ? t(providerQuotaTokenPlanProviderLabelKeyMap[
+          normalizedProviderQuotaQueryConfig.value?.tokenPlanProvider ?? 'kimi'
+        ])
+      : providerQuotaQueryTemplateType.value
+        ? t(providerQuotaTemplateLabelKeyMap[providerQuotaQueryTemplateType.value])
+        : t(providerQuotaQueryTypeLabelKeyMap[normalizedProviderQuotaQueryType.value])
+    : t(providerQuotaQueryTypeLabelKeyMap.none)
 ))
-const providerQuotaQueryMissingCredentials = computed(() => (
-  normalizedProviderQuotaQueryType.value !== 'none'
-    && (!form.apiKey.trim() || !form.apiUrl.trim())
-))
+const providerQuotaQueryMissingCredentials = computed(() => {
+  return hasProviderQuotaQueryMissingCredentials(normalizedProviderQuotaQueryConfig.value, {
+    fallbackQueryType: form.providerQuotaQueryType,
+    fallbackBaseUrl: form.apiUrl,
+    fallbackApiKey: form.apiKey,
+  })
+})
+const providerQuotaQuerySummary = computed(() => {
+  const config = normalizedProviderQuotaQueryConfig.value
+  if (!config?.enabled) {
+    return t('components.main.form.hints.providerQuotaQueryDisabled')
+  }
+
+  const summaryParts: string[] = []
+  if (providerQuotaQueryTemplateType.value) {
+    summaryParts.push(t(providerQuotaTemplateLabelKeyMap[providerQuotaQueryTemplateType.value]))
+  }
+
+  if (providerQuotaQueryTemplateType.value === 'token_plan') {
+    summaryParts.push(t(providerQuotaTokenPlanProviderLabelKeyMap[config.tokenPlanProvider ?? 'kimi']))
+  } else if (providerQuotaQueryTemplateType.value === 'balance') {
+    const balanceProvider = detectProviderQuotaBalanceProvider(config.baseUrl || form.apiUrl)
+    const providerLabel = providerQuotaBalanceProviderOptions.find((option) => option.value === balanceProvider)?.label
+    if (providerLabel) {
+      summaryParts.push(providerLabel)
+    }
+  }
+
+  const interval = Number(config.autoQueryInterval ?? config.autoIntervalMinutes ?? 5)
+  summaryParts.push(
+    interval > 0
+      ? t('components.main.form.hints.providerQuotaQueryAutoEvery', { minutes: interval })
+      : t('components.main.form.labels.providerQuotaQueryManualOnly'),
+  )
+
+  return summaryParts.join(' · ')
+})
 const providerQuotaQueryHint = computed(() => (
   providerQuotaQueryMissingCredentials.value
     ? t('components.main.form.hints.providerQuotaQueryMissingCredentials')
-    : normalizedProviderQuotaQueryType.value === 'none'
-      ? t('components.main.form.hints.providerQuotaQueryType')
-      : t('components.main.form.hints.providerQuotaQueryUsesProviderCredentials')
+    : !normalizedProviderQuotaQueryConfig.value?.enabled
+      ? t('components.main.form.hints.providerQuotaQueryConfig')
+      : providerQuotaQueryTemplateType.value === 'balance'
+        ? t('components.main.form.hints.providerQuotaQueryTemplateBalance')
+        : providerQuotaQueryTemplateType.value === 'custom'
+          ? t('components.main.form.hints.providerQuotaQueryTemplateCustom')
+          : providerQuotaQueryTemplateType.value === 'general'
+            ? t('components.main.form.hints.providerQuotaQueryTemplateGeneral')
+            : providerQuotaQueryTemplateType.value === 'newapi'
+              ? t('components.main.form.hints.providerQuotaQueryTemplateNewApi')
+              : providerQuotaQueryTemplateType.value === 'token_plan'
+                ? t('components.main.form.hints.providerQuotaQueryTemplateTokenPlan')
+                : t('components.main.form.hints.providerQuotaQueryConfig')
 ))
 
 type QuotaDefinition = {
@@ -853,14 +918,19 @@ const handleBudgetQuotaConfigChange = () => {
   void refreshBudgetQuotaUsage()
 }
 
-const handleProviderQuotaQueryTypeChange = () => {
-  form.providerQuotaQueryType = normalizeProviderQuotaQueryType(form.providerQuotaQueryType)
+const handleProviderQuotaQueryConfigSave = (nextConfig: VendorForm['providerQuotaQueryConfig']) => {
+  form.providerQuotaQueryConfig = nextConfig
+  form.providerQuotaQueryType = normalizeProviderQuotaQueryType(
+    resolveProviderQuotaQueryType(nextConfig, form.providerQuotaQueryType),
+  )
+  providerQuotaQueryConfigModalOpen.value = false
 }
 
 const resetForm = () => {
   errors.apiUrl = ''
   iconSearchQuery.value = ''
   requestBodyOverridesError.value = ''
+  providerQuotaQueryConfigModalOpen.value = false
   cliConfigEditorKey.value += 1
 
   if (!props.card) {

@@ -16,7 +16,15 @@
   min-width: 0;
   overflow-x: hidden;
   overflow-y: auto;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
   padding: 0 0 12px;
+}
+
+.vendor-form__scroll-body::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
 }
 
 .vendor-form__scroll-body > * {
@@ -385,6 +393,34 @@
   color: #d97706;
 }
 
+.provider-quota-query-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--mac-border) 88%, transparent);
+  background: color-mix(in srgb, var(--mac-surface) 90%, transparent);
+}
+
+.provider-quota-query-summary__title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--mac-text);
+}
+
+.provider-quota-query-summary__meta {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--mac-text-secondary);
+}
+
+.provider-quota-query-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .budget-unit {
   font-size: 12px;
   color: var(--mac-text-secondary);
@@ -408,6 +444,15 @@
 
 :global(.dark) .budget-quota-field__hint--warning {
   color: #fbbf24;
+}
+
+:global(.dark) .provider-quota-query-summary {
+  background: rgba(15, 23, 42, 0.64);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+:global(.dark) .provider-quota-query-summary__meta {
+  color: rgba(255, 255, 255, 0.6);
 }
 
 :global(.dark) .budget-quota-card__limit {

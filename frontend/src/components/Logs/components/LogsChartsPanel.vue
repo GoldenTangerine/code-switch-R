@@ -151,15 +151,29 @@ const doughnutActiveGlowPlugin: Plugin<'doughnut'> = {
     )
 
     const context = chart.ctx
+    const expandedInnerRadius = Math.max(innerRadius - (props.isDarkTheme ? 4 : 3), 0)
+    const expandedOuterRadius = outerRadius + (props.isDarkTheme ? 6 : 5)
+
     context.save()
     context.beginPath()
-    context.lineCap = 'round'
-    context.strokeStyle = glowColor
+    context.arc(x, y, expandedOuterRadius, startAngle, endAngle)
+    context.arc(x, y, expandedInnerRadius, endAngle, startAngle, true)
+    context.closePath()
+    context.fillStyle = glowColor
     context.shadowColor = glowColor
-    context.shadowBlur = props.isDarkTheme ? 28 : 18
-    context.globalAlpha = props.isDarkTheme ? 0.95 : 0.78
-    context.lineWidth = Math.max(outerRadius - innerRadius - 6, 10)
-    context.arc(x, y, (innerRadius + outerRadius) / 2, startAngle, endAngle)
+    context.shadowBlur = props.isDarkTheme ? 26 : 16
+    context.globalAlpha = props.isDarkTheme ? 0.96 : 0.88
+    context.fill()
+    context.restore()
+
+    context.save()
+    context.beginPath()
+    context.arc(x, y, expandedOuterRadius, startAngle, endAngle)
+    context.arc(x, y, expandedInnerRadius, endAngle, startAngle, true)
+    context.closePath()
+    context.lineJoin = 'round'
+    context.lineWidth = 2
+    context.strokeStyle = doughnutHoverBorderColor.value
     context.stroke()
     context.restore()
   },
@@ -207,7 +221,7 @@ const interactiveModelShareChartData = computed<ChartData<'doughnut'>>(() => ({
       hoverBorderColor: props.modelShareRows.map(() => doughnutHoverBorderColor.value),
       hoverBorderWidth: 3,
       spacing: 2,
-      hoverOffset: 10,
+      hoverOffset: 0,
     },
   ],
 }))
@@ -234,7 +248,7 @@ const interactiveModelShareChartOptions = computed<ChartOptions<'doughnut'>>(() 
         label: (context) =>
           formatModelShareTooltipLabel(
             context.label,
-            context.raw,
+            props.modelShareRows[context.dataIndex]?.requests ?? context.raw,
             totalRequests.value,
             requestUnitLabel.value,
           ),

@@ -530,6 +530,7 @@ import { useI18n } from 'vue-i18n'
 import type { ProviderCardViewModel, ProviderDragEndPayload, ProviderQuotaDisplayItem, ProviderTab, ResolvedTheme } from '../types'
 import { formatQuotaUsagePercent, getQuotaProgressClass, getQuotaProgressPercent } from '../utils/providerQuotaDisplay'
 import { resolveProviderCardQuotaSectionMode } from '../utils/providerCardQuotaVisibility'
+import { resolveProviderQuotaCurrencyCode } from '../utils/providerQuotaValueFormat'
 import { isDirectApplyBlockedForProvider } from '../utils/providerDirectApply'
 import { isHostedRouteActive } from '../utils/providerRoutingState'
 
@@ -562,12 +563,18 @@ const emit = defineEmits<{
 
 const { t, locale } = useI18n()
 
-const quotaCurrencyFormatter = computed(() => new Intl.NumberFormat(locale.value || 'en', {
-  style: 'currency',
-  currency: 'USD',
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-}))
+const resolveQuotaCurrencyFormatter = (unit?: string) => {
+  const currencyCode = resolveProviderQuotaCurrencyCode(unit)
+  if (currencyCode) {
+    return new Intl.NumberFormat(locale.value || 'en', {
+      style: 'currency',
+      currency: currencyCode,
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })
+  }
+  return null
+}
 
 const quotaProgressClass = (item: ProviderQuotaDisplayItem) => getQuotaProgressClass(item)
 
@@ -585,23 +592,39 @@ const quotaSectionMode = computed(() => resolveProviderCardQuotaSectionMode(
 const formatQuotaValue = (item: ProviderQuotaDisplayItem, value: number) => {
   const normalized = Number.isFinite(value) ? value : 0
   if (item.valueMode === 'count') {
-    return new Intl.NumberFormat(locale.value || 'en', {
+    const formatted = new Intl.NumberFormat(locale.value || 'en', {
       maximumFractionDigits: Number.isInteger(normalized) ? 0 : 2,
     }).format(normalized)
+    return item.unit?.trim() ? `${formatted} ${item.unit.trim()}` : formatted
   }
-  return quotaCurrencyFormatter.value.format(normalized)
+
+  const currencyFormatter = resolveQuotaCurrencyFormatter(item.unit)
+  if (currencyFormatter) {
+    return currencyFormatter.format(normalized)
+  }
+
+  const fallbackFormatted = new Intl.NumberFormat(locale.value || 'en', {
+    maximumFractionDigits: Number.isInteger(normalized) ? 0 : 2,
+  }).format(normalized)
+  return item.unit?.trim() ? `${fallbackFormatted} ${item.unit.trim()}` : fallbackFormatted
 }
 
 const quotaTooltip = (item: ProviderQuotaDisplayItem) => {
+  const invalidMessage = `${item.invalidMessage ?? ''}`.trim()
+  const extra = `${item.extra ?? ''}`.trim()
+  if (invalidMessage && item.total <= 0 && item.used <= 0) {
+    return [item.label, invalidMessage, extra].filter(Boolean).join('\n')
+  }
+
   const used = formatQuotaValue(item, item.used)
   const total = formatQuotaValue(item, item.total)
-  if (item.key === 'total') {
-    return t('components.main.providers.quotaTooltipNoReset', { label: item.label, used, total })
-  }
-  if (item.nextReset && item.countdownLabel) {
-    return t('components.main.providers.quotaTooltip', { label: item.label, used, total, countdown: item.countdownLabel })
-  }
-  return t('components.main.providers.quotaTooltipNoCountdown', { label: item.label, used, total })
+  const baseTooltip = item.key === 'total'
+    ? t('components.main.providers.quotaTooltipNoReset', { label: item.label, used, total })
+    : item.nextReset && item.countdownLabel
+      ? t('components.main.providers.quotaTooltip', { label: item.label, used, total, countdown: item.countdownLabel })
+      : t('components.main.providers.quotaTooltipNoCountdown', { label: item.label, used, total })
+
+  return [baseTooltip, invalidMessage, extra].filter(Boolean).join('\n')
 }
 
 type ApiFormatBadgeMeta = {

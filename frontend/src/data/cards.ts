@@ -1,5 +1,5 @@
 import type { BudgetQuotaAdjustments, BudgetQuotaSettings } from '../utils/budgetUsage'
-import type { ProviderQuotaQueryType } from '../utils/providerQuotaQuery'
+import type { ProviderQuotaQueryConfig, ProviderQuotaQueryType } from '../utils/providerQuotaQuery'
 
 export type AutomationCard = {
   id: number
@@ -52,6 +52,8 @@ export type AutomationCard = {
   budgetQuotaUsedAdjustments?: BudgetQuotaAdjustments
   // 供应商额度查询类型（Token Plan）
   providerQuotaQueryType?: ProviderQuotaQueryType
+  // 供应商额度查询完整配置（兼容 cc-switch 用量查询预设模板）
+  providerQuotaQueryConfig?: ProviderQuotaQueryConfig
 
   // === 旧连通性字段（已废弃，仅用于兼容旧数据） ===
   /** @deprecated 已迁移到 availabilityMonitorEnabled */

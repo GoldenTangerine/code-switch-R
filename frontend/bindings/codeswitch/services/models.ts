@@ -985,6 +985,9 @@ export class GeminiProvider {
      */
     "partnerPromotionKey"?: string;
     "enabled": boolean;
+    "sortOrder"?: number;
+    "enabledSortOrder"?: number;
+    "disabledSortOrder"?: number;
 
     /**
      * 优先级分组 (1-10, 默认 1)
@@ -1001,6 +1004,10 @@ export class GeminiProvider {
      */
     "settingsConfig"?: { [_: string]: any };
     "requestBodyOverrides"?: { [_: string]: any };
+    "budgetQuotaSettings"?: { [_: string]: any };
+    "budgetQuotaUsedAdjustments"?: { [_: string]: number };
+    "providerQuotaQueryType"?: string;
+    "providerQuotaQueryConfig"?: { [_: string]: any };
 
     /** Creates a new GeminiProvider instance. */
     constructor($$source: Partial<GeminiProvider> = {}) {
@@ -1466,6 +1473,9 @@ export class Provider {
     "accent": string;
     "enabled": boolean;
     "apiFormat"?: string;
+    "sortOrder"?: number;
+    "enabledSortOrder"?: number;
+    "disabledSortOrder"?: number;
     "cliConfig"?: { [_: string]: any };
     "apiEndpoint"?: string;
 
@@ -1503,6 +1513,10 @@ export class Provider {
     "connectivityTestModel"?: string;
     "connectivityTestEndpoint"?: string;
     "connectivityAuthType"?: string;
+    "budgetQuotaSettings"?: { [_: string]: any };
+    "budgetQuotaUsedAdjustments"?: { [_: string]: number };
+    "providerQuotaQueryType"?: string;
+    "providerQuotaQueryConfig"?: { [_: string]: any };
 
     /** Creates a new Provider instance. */
     constructor($$source: Partial<Provider> = {}) {

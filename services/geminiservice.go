@@ -49,6 +49,8 @@ type GeminiProvider struct {
 	BudgetQuotaUsedAdjustments *BudgetQuotaAdjustments `json:"budgetQuotaUsedAdjustments,omitempty"`
 	// 供应商额度查询类型：启用后首页卡片会改为按远端 Token Plan 查询结果展示额度
 	ProviderQuotaQueryType string `json:"providerQuotaQueryType,omitempty"`
+	// 供应商额度查询完整配置：兼容旧类型字段，并承载脚本/官方余额/NewAPI 等模板能力
+	ProviderQuotaQueryConfig *ProviderQuotaQueryConfig `json:"providerQuotaQueryConfig,omitempty"`
 }
 
 // GeminiPreset 预设供应商

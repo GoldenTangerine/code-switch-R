@@ -294,6 +294,13 @@ func TestGeminiService_LoadProvidersSupportsTotalQuotaFieldAfterInitDatabase(t *
 				Total: 45.67,
 			},
 			ProviderQuotaQueryType: string(ProviderQuotaQueryTypeTokenPlanMiniMax),
+			ProviderQuotaQueryConfig: &ProviderQuotaQueryConfig{
+				Enabled:           true,
+				TemplateType:      string(ProviderQuotaTemplateTypeTokenPlan),
+				TokenPlanProvider: "minimax",
+				Timeout:           10,
+				AutoQueryInterval: 5,
+			},
 		},
 	})
 	if err != nil {
@@ -316,5 +323,8 @@ func TestGeminiService_LoadProvidersSupportsTotalQuotaFieldAfterInitDatabase(t *
 	}
 	if providers[0].ProviderQuotaQueryType != string(ProviderQuotaQueryTypeTokenPlanMiniMax) {
 		t.Fatalf("Gemini providerQuotaQueryType 反序列化失败: %q", providers[0].ProviderQuotaQueryType)
+	}
+	if providers[0].ProviderQuotaQueryConfig == nil || providers[0].ProviderQuotaQueryConfig.TokenPlanProvider != "minimax" {
+		t.Fatalf("Gemini providerQuotaQueryConfig 反序列化失败: %+v", providers[0].ProviderQuotaQueryConfig)
 	}
 }

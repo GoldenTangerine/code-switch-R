@@ -1,6 +1,7 @@
 package services
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,23 +11,66 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
+
+	"github.com/dop251/goja"
 )
 
 type ProviderQuotaQueryType string
 
+type ProviderQuotaTemplateType string
+
+type ProviderQuotaValueMode string
+
 const (
 	ProviderQuotaQueryTypeNone             ProviderQuotaQueryType = "none"
+	ProviderQuotaQueryTypeBalance          ProviderQuotaQueryType = "balance"
+	ProviderQuotaQueryTypeCustom           ProviderQuotaQueryType = "custom"
+	ProviderQuotaQueryTypeGeneral          ProviderQuotaQueryType = "general"
+	ProviderQuotaQueryTypeNewAPI           ProviderQuotaQueryType = "newapi"
 	ProviderQuotaQueryTypeTokenPlanGLM     ProviderQuotaQueryType = "token_plan_glm"
 	ProviderQuotaQueryTypeTokenPlanKimi    ProviderQuotaQueryType = "token_plan_kimi"
 	ProviderQuotaQueryTypeTokenPlanMiniMax ProviderQuotaQueryType = "token_plan_minimax"
 )
 
+const (
+	ProviderQuotaTemplateTypeBalance   ProviderQuotaTemplateType = "balance"
+	ProviderQuotaTemplateTypeCustom    ProviderQuotaTemplateType = "custom"
+	ProviderQuotaTemplateTypeGeneral   ProviderQuotaTemplateType = "general"
+	ProviderQuotaTemplateTypeNewAPI    ProviderQuotaTemplateType = "newapi"
+	ProviderQuotaTemplateTypeTokenPlan ProviderQuotaTemplateType = "token_plan"
+)
+
+const (
+	ProviderQuotaValueModeCurrency ProviderQuotaValueMode = "currency"
+	ProviderQuotaValueModeCount    ProviderQuotaValueMode = "count"
+)
+
+type ProviderQuotaQueryConfig struct {
+	Enabled           bool   `json:"enabled"`
+	TemplateType      string `json:"templateType,omitempty"`
+	Code              string `json:"code,omitempty"`
+	Timeout           int    `json:"timeout,omitempty"`
+	APIKey            string `json:"apiKey,omitempty"`
+	BaseURL           string `json:"baseUrl,omitempty"`
+	AccessToken       string `json:"accessToken,omitempty"`
+	UserID            string `json:"userId,omitempty"`
+	TokenPlanProvider string `json:"tokenPlanProvider,omitempty"`
+	AutoQueryInterval int    `json:"autoQueryInterval,omitempty"`
+	AutoIntervalMins  int    `json:"autoIntervalMinutes,omitempty"`
+}
+
 type ProviderQuotaQueryItem struct {
-	Key       string  `json:"key"`
-	Used      float64 `json:"used"`
-	Total     float64 `json:"total"`
-	NextReset string  `json:"nextReset,omitempty"`
-	Active    bool    `json:"active"`
+	Key            string  `json:"key"`
+	Label          string  `json:"label,omitempty"`
+	Used           float64 `json:"used"`
+	Total          float64 `json:"total"`
+	NextReset      string  `json:"nextReset,omitempty"`
+	Active         bool    `json:"active"`
+	ValueMode      string  `json:"valueMode,omitempty"`
+	Unit           string  `json:"unit,omitempty"`
+	Extra          string  `json:"extra,omitempty"`
+	InvalidMessage string  `json:"invalidMessage,omitempty"`
 }
 
 type ProviderQuotaQueryResult struct {
@@ -41,14 +85,32 @@ type ProviderQuotaQueryService struct {
 	client *http.Client
 }
 
+type providerQuotaBalanceTarget struct {
+	Provider string
+	BaseURL  string
+}
+
+type providerQuotaScriptRequestConfig struct {
+	URL     string            `json:"url"`
+	Method  string            `json:"method"`
+	Headers map[string]string `json:"headers"`
+	Body    any               `json:"body,omitempty"`
+}
+
 func NewProviderQuotaQueryService() *ProviderQuotaQueryService {
 	return &ProviderQuotaQueryService{
 		client: &http.Client{Timeout: 10 * time.Second},
 	}
 }
 
-func (s *ProviderQuotaQueryService) QueryQuota(queryType string, apiURL string, apiKey string) *ProviderQuotaQueryResult {
+func (s *ProviderQuotaQueryService) QueryQuota(
+	queryType string,
+	apiURL string,
+	apiKey string,
+	queryConfig *ProviderQuotaQueryConfig,
+) *ProviderQuotaQueryResult {
 	normalizedType := normalizeProviderQuotaQueryType(queryType)
+	normalizedConfig := normalizeProviderQuotaQueryConfig(queryConfig, normalizedType)
 	result := &ProviderQuotaQueryResult{
 		Success:   false,
 		QueryType: string(normalizedType),
@@ -56,23 +118,27 @@ func (s *ProviderQuotaQueryService) QueryQuota(queryType string, apiURL string, 
 		QueriedAt: time.Now().UnixMilli(),
 	}
 
+	if normalizedConfig != nil && !normalizedConfig.Enabled {
+		result.QueryType = string(ProviderQuotaQueryTypeNone)
+		return result
+	}
+
 	if normalizedType == ProviderQuotaQueryTypeNone {
 		return result
 	}
 
-	trimmedKey := strings.TrimSpace(apiKey)
-	if trimmedKey == "" {
-		result.Error = "缺少 API Key"
-		return result
+	effectiveBaseURL := strings.TrimSpace(apiURL)
+	effectiveAPIKey := strings.TrimSpace(apiKey)
+	if normalizedConfig != nil {
+		if normalizedConfig.BaseURL != "" {
+			effectiveBaseURL = normalizedConfig.BaseURL
+		}
+		if normalizedConfig.APIKey != "" {
+			effectiveAPIKey = normalizedConfig.APIKey
+		}
 	}
 
-	targetBaseURL := resolveProviderQuotaQueryTargetBaseURL(normalizedType, apiURL)
-	if targetBaseURL == "" {
-		result.Error = "缺少可用的 API 地址"
-		return result
-	}
-
-	items, err := s.queryQuotaByType(normalizedType, targetBaseURL, trimmedKey)
+	items, err := s.queryQuotaByType(normalizedType, effectiveBaseURL, effectiveAPIKey, normalizedConfig)
 	if err != nil {
 		result.Error = err.Error()
 		return result
@@ -85,6 +151,14 @@ func (s *ProviderQuotaQueryService) QueryQuota(queryType string, apiURL string, 
 
 func normalizeProviderQuotaQueryType(value string) ProviderQuotaQueryType {
 	switch ProviderQuotaQueryType(strings.TrimSpace(strings.ToLower(value))) {
+	case ProviderQuotaQueryTypeBalance:
+		return ProviderQuotaQueryTypeBalance
+	case ProviderQuotaQueryTypeCustom:
+		return ProviderQuotaQueryTypeCustom
+	case ProviderQuotaQueryTypeGeneral:
+		return ProviderQuotaQueryTypeGeneral
+	case ProviderQuotaQueryTypeNewAPI:
+		return ProviderQuotaQueryTypeNewAPI
 	case ProviderQuotaQueryTypeTokenPlanGLM:
 		return ProviderQuotaQueryTypeTokenPlanGLM
 	case ProviderQuotaQueryTypeTokenPlanKimi:
@@ -93,6 +167,108 @@ func normalizeProviderQuotaQueryType(value string) ProviderQuotaQueryType {
 		return ProviderQuotaQueryTypeTokenPlanMiniMax
 	default:
 		return ProviderQuotaQueryTypeNone
+	}
+}
+
+func normalizeProviderQuotaQueryConfig(
+	config *ProviderQuotaQueryConfig,
+	fallbackType ProviderQuotaQueryType,
+) *ProviderQuotaQueryConfig {
+	if config == nil {
+		return nil
+	}
+
+	normalized := *config
+	normalized.TemplateType = strings.TrimSpace(strings.ToLower(normalized.TemplateType))
+	normalized.Code = strings.TrimSpace(normalized.Code)
+	normalized.APIKey = strings.TrimSpace(normalized.APIKey)
+	normalized.BaseURL = strings.TrimSpace(normalized.BaseURL)
+	normalized.AccessToken = strings.TrimSpace(normalized.AccessToken)
+	normalized.UserID = strings.TrimSpace(normalized.UserID)
+	normalized.TokenPlanProvider = strings.TrimSpace(strings.ToLower(normalized.TokenPlanProvider))
+	normalized.Timeout = normalizeProviderQuotaTimeout(normalized.Timeout)
+	if normalized.AutoQueryInterval <= 0 && normalized.AutoIntervalMins > 0 {
+		normalized.AutoQueryInterval = normalized.AutoIntervalMins
+	}
+	if normalized.TemplateType == "" {
+		normalized.TemplateType = string(queryTypeToProviderQuotaTemplateType(fallbackType))
+	}
+	if normalized.TokenPlanProvider == "" {
+		normalized.TokenPlanProvider = tokenPlanProviderFromQueryType(fallbackType)
+	}
+	sanitizeProviderQuotaQueryConfigForTemplate(&normalized)
+	return &normalized
+}
+
+func sanitizeProviderQuotaQueryConfigForTemplate(config *ProviderQuotaQueryConfig) {
+	if config == nil {
+		return
+	}
+
+	switch ProviderQuotaTemplateType(strings.TrimSpace(strings.ToLower(config.TemplateType))) {
+	case ProviderQuotaTemplateTypeBalance:
+		config.Code = ""
+		config.APIKey = ""
+		config.BaseURL = ""
+		config.AccessToken = ""
+		config.UserID = ""
+	case ProviderQuotaTemplateTypeGeneral:
+		config.AccessToken = ""
+		config.UserID = ""
+	case ProviderQuotaTemplateTypeNewAPI:
+		config.APIKey = ""
+	case ProviderQuotaTemplateTypeTokenPlan:
+		config.Code = ""
+		config.APIKey = ""
+		config.BaseURL = ""
+		config.AccessToken = ""
+		config.UserID = ""
+		if config.TokenPlanProvider == "" {
+			config.TokenPlanProvider = "kimi"
+		}
+	}
+}
+
+func normalizeProviderQuotaTimeout(timeoutSeconds int) int {
+	if timeoutSeconds <= 0 {
+		return 10
+	}
+	if timeoutSeconds < 2 {
+		return 2
+	}
+	if timeoutSeconds > 30 {
+		return 30
+	}
+	return timeoutSeconds
+}
+
+func queryTypeToProviderQuotaTemplateType(queryType ProviderQuotaQueryType) ProviderQuotaTemplateType {
+	switch queryType {
+	case ProviderQuotaQueryTypeBalance:
+		return ProviderQuotaTemplateTypeBalance
+	case ProviderQuotaQueryTypeCustom:
+		return ProviderQuotaTemplateTypeCustom
+	case ProviderQuotaQueryTypeGeneral:
+		return ProviderQuotaTemplateTypeGeneral
+	case ProviderQuotaQueryTypeNewAPI:
+		return ProviderQuotaTemplateTypeNewAPI
+	case ProviderQuotaQueryTypeTokenPlanGLM, ProviderQuotaQueryTypeTokenPlanKimi, ProviderQuotaQueryTypeTokenPlanMiniMax:
+		return ProviderQuotaTemplateTypeTokenPlan
+	default:
+		return ""
+	}
+}
+
+func tokenPlanProviderFromQueryType(queryType ProviderQuotaQueryType) string {
+	switch queryType {
+	case ProviderQuotaQueryTypeTokenPlanGLM:
+		return "glm"
+	case ProviderQuotaQueryTypeTokenPlanMiniMax:
+		return "minimax"
+	case ProviderQuotaQueryTypeTokenPlanKimi:
+		fallthrough
+	default:
+		return "kimi"
 	}
 }
 
@@ -167,24 +343,785 @@ func resolveProviderQuotaQueryTargetBaseURL(queryType ProviderQuotaQueryType, ap
 	}
 }
 
+func resolveProviderQuotaBalanceTarget(baseURL string) (providerQuotaBalanceTarget, error) {
+	normalized := strings.ToLower(strings.TrimSpace(baseURL))
+	switch {
+	case strings.Contains(normalized, "api.deepseek.com"):
+		return providerQuotaBalanceTarget{Provider: "deepseek", BaseURL: "https://api.deepseek.com"}, nil
+	case strings.Contains(normalized, "api.stepfun.ai"), strings.Contains(normalized, "api.stepfun.com"):
+		return providerQuotaBalanceTarget{Provider: "stepfun", BaseURL: "https://api.stepfun.com"}, nil
+	case strings.Contains(normalized, "api.siliconflow.cn"):
+		return providerQuotaBalanceTarget{Provider: "siliconflow", BaseURL: "https://api.siliconflow.cn"}, nil
+	case strings.Contains(normalized, "api.siliconflow.com"):
+		return providerQuotaBalanceTarget{Provider: "siliconflow", BaseURL: "https://api.siliconflow.com"}, nil
+	case strings.Contains(normalized, "openrouter.ai"):
+		return providerQuotaBalanceTarget{Provider: "openrouter", BaseURL: "https://openrouter.ai"}, nil
+	case strings.Contains(normalized, "api.novita.ai"):
+		return providerQuotaBalanceTarget{Provider: "novita", BaseURL: "https://api.novita.ai"}, nil
+	default:
+		return providerQuotaBalanceTarget{}, fmt.Errorf("暂不支持当前 Base URL 的官方余额查询")
+	}
+}
+
 func (s *ProviderQuotaQueryService) queryQuotaByType(
 	queryType ProviderQuotaQueryType,
 	baseURL string,
 	apiKey string,
+	queryConfig *ProviderQuotaQueryConfig,
 ) ([]ProviderQuotaQueryItem, error) {
 	switch queryType {
+	case ProviderQuotaQueryTypeBalance:
+		return s.queryBalanceQuota(baseURL, apiKey)
+	case ProviderQuotaQueryTypeCustom, ProviderQuotaQueryTypeGeneral, ProviderQuotaQueryTypeNewAPI:
+		return s.queryScriptQuota(queryType, baseURL, apiKey, queryConfig)
 	case ProviderQuotaQueryTypeTokenPlanGLM:
-		return s.queryGLMQuota(baseURL, apiKey)
+		return s.queryGLMQuota(resolveProviderQuotaQueryTargetBaseURL(queryType, baseURL), apiKey)
 	case ProviderQuotaQueryTypeTokenPlanKimi:
-		return s.queryKimiQuota(baseURL, apiKey)
+		return s.queryKimiQuota(resolveProviderQuotaQueryTargetBaseURL(queryType, baseURL), apiKey)
 	case ProviderQuotaQueryTypeTokenPlanMiniMax:
-		return s.queryMiniMaxQuota(baseURL, apiKey)
+		return s.queryMiniMaxQuota(resolveProviderQuotaQueryTargetBaseURL(queryType, baseURL), apiKey)
 	default:
 		return nil, fmt.Errorf("不支持的供应商查询类型：%s", queryType)
 	}
 }
 
+func (s *ProviderQuotaQueryService) queryBalanceQuota(baseURL string, apiKey string) ([]ProviderQuotaQueryItem, error) {
+	trimmedKey := strings.TrimSpace(apiKey)
+	if trimmedKey == "" {
+		return nil, fmt.Errorf("缺少 API Key")
+	}
+
+	target, err := resolveProviderQuotaBalanceTarget(baseURL)
+	if err != nil {
+		return nil, err
+	}
+
+	switch target.Provider {
+	case "deepseek":
+		return s.queryDeepSeekBalance(trimmedKey)
+	case "stepfun":
+		return s.queryStepFunBalance(trimmedKey)
+	case "siliconflow":
+		return s.querySiliconFlowBalance(target.BaseURL, trimmedKey)
+	case "openrouter":
+		return s.queryOpenRouterBalance(trimmedKey)
+	case "novita":
+		return s.queryNovitaBalance(trimmedKey)
+	default:
+		return nil, fmt.Errorf("暂不支持当前官方余额查询供应商")
+	}
+}
+
+func (s *ProviderQuotaQueryService) queryScriptQuota(
+	queryType ProviderQuotaQueryType,
+	baseURL string,
+	apiKey string,
+	queryConfig *ProviderQuotaQueryConfig,
+) ([]ProviderQuotaQueryItem, error) {
+	if queryConfig == nil {
+		return nil, fmt.Errorf("缺少额度查询配置")
+	}
+	if strings.TrimSpace(queryConfig.Code) == "" {
+		return nil, fmt.Errorf("缺少额度查询脚本")
+	}
+	if queryType != ProviderQuotaQueryTypeCustom && strings.TrimSpace(baseURL) == "" {
+		return nil, fmt.Errorf("缺少 Base URL")
+	}
+
+	return s.executeScriptQuotaQuery(
+		queryConfig.Code,
+		apiKey,
+		baseURL,
+		queryConfig.AccessToken,
+		queryConfig.UserID,
+		queryConfig.TemplateType,
+		queryConfig.Timeout,
+	)
+}
+
+func (s *ProviderQuotaQueryService) executeScriptQuotaQuery(
+	scriptCode string,
+	apiKey string,
+	baseURL string,
+	accessToken string,
+	userID string,
+	templateType string,
+	timeoutSeconds int,
+) ([]ProviderQuotaQueryItem, error) {
+	scriptWithVars := buildProviderQuotaScriptWithVars(scriptCode, apiKey, baseURL, accessToken, userID)
+	trimmedBaseURL := strings.TrimSpace(baseURL)
+	isCustomTemplate := strings.EqualFold(strings.TrimSpace(templateType), string(ProviderQuotaTemplateTypeCustom))
+
+	if trimmedBaseURL != "" {
+		if err := validateProviderQuotaBaseURL(trimmedBaseURL); err != nil {
+			return nil, err
+		}
+	}
+
+	vm := goja.New()
+	compiledValue, err := vm.RunString(scriptWithVars)
+	if err != nil {
+		return nil, fmt.Errorf("解析额度查询脚本失败: %w", err)
+	}
+
+	configObject := compiledValue.ToObject(vm)
+	if configObject == nil {
+		return nil, fmt.Errorf("额度查询脚本必须返回配置对象")
+	}
+
+	var requestConfig providerQuotaScriptRequestConfig
+	requestPayload, err := json.Marshal(configObject.Get("request").Export())
+	if err != nil {
+		return nil, fmt.Errorf("序列化 request 配置失败: %w", err)
+	}
+	if err := json.Unmarshal(requestPayload, &requestConfig); err != nil {
+		return nil, fmt.Errorf("解析 request 配置失败: %w", err)
+	}
+	if requestConfig.Headers == nil {
+		requestConfig.Headers = map[string]string{}
+	}
+
+	requestConfig.URL = strings.TrimSpace(requestConfig.URL)
+	requestConfig.Method = strings.TrimSpace(requestConfig.Method)
+	if requestConfig.URL == "" {
+		return nil, fmt.Errorf("request.url 不能为空")
+	}
+	if requestConfig.Method == "" {
+		requestConfig.Method = http.MethodGet
+	}
+	if err := validateProviderQuotaRequestURL(requestConfig.URL, trimmedBaseURL, isCustomTemplate); err != nil {
+		return nil, err
+	}
+
+	responseBody, err := s.sendScriptRequest(requestConfig, timeoutSeconds)
+	if err != nil {
+		return nil, err
+	}
+
+	var responsePayload any
+	if err := json.Unmarshal(responseBody, &responsePayload); err != nil {
+		return nil, fmt.Errorf("解析脚本响应 JSON 失败: %w", err)
+	}
+
+	extractor, ok := goja.AssertFunction(configObject.Get("extractor"))
+	if !ok {
+		return nil, fmt.Errorf("缺少 extractor 函数")
+	}
+
+	resultValue, err := extractor(goja.Undefined(), vm.ToValue(responsePayload))
+	if err != nil {
+		return nil, fmt.Errorf("执行 extractor 失败: %w", err)
+	}
+
+	items, err := buildProviderQuotaItemsFromScriptResult(resultValue.Export(), templateType)
+	if err != nil {
+		return nil, err
+	}
+	if len(items) == 0 {
+		return nil, fmt.Errorf("脚本未返回可展示的额度数据")
+	}
+	return normalizeProviderQuotaQueryItems(items), nil
+}
+
+func buildProviderQuotaScriptWithVars(
+	scriptCode string,
+	apiKey string,
+	baseURL string,
+	accessToken string,
+	userID string,
+) string {
+	replaced := strings.ReplaceAll(scriptCode, "{{apiKey}}", escapeProviderQuotaScriptTemplateValue(apiKey))
+	replaced = strings.ReplaceAll(replaced, "{{baseUrl}}", escapeProviderQuotaScriptTemplateValue(baseURL))
+	replaced = strings.ReplaceAll(replaced, "{{accessToken}}", escapeProviderQuotaScriptTemplateValue(accessToken))
+	replaced = strings.ReplaceAll(replaced, "{{userId}}", escapeProviderQuotaScriptTemplateValue(userID))
+	return replaced
+}
+
+func escapeProviderQuotaScriptTemplateValue(value string) string {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return strings.ReplaceAll(strings.ReplaceAll(value, "\\", "\\\\"), "'", "\\'")
+	}
+
+	escaped := strings.TrimPrefix(strings.TrimSuffix(string(encoded), `"`), `"`)
+	return strings.ReplaceAll(escaped, `'`, `\'`)
+}
+
+func validateProviderQuotaBaseURL(baseURL string) error {
+	parsedURL, err := url.Parse(strings.TrimSpace(baseURL))
+	if err != nil || parsedURL.Scheme == "" || parsedURL.Host == "" {
+		return fmt.Errorf("无效的 Base URL")
+	}
+	if parsedURL.Scheme != "https" && !isLoopbackProviderQuotaURL(parsedURL) {
+		return fmt.Errorf("Base URL 必须使用 HTTPS（localhost 例外）")
+	}
+	if strings.TrimSpace(parsedURL.Hostname()) == "" {
+		return fmt.Errorf("Base URL 缺少有效主机名")
+	}
+	return nil
+}
+
+func validateProviderQuotaRequestURL(requestURL string, baseURL string, isCustomTemplate bool) error {
+	parsedRequest, err := url.Parse(strings.TrimSpace(requestURL))
+	if err != nil || parsedRequest.Scheme == "" || parsedRequest.Host == "" {
+		return fmt.Errorf("无效的请求 URL")
+	}
+	if !isCustomTemplate && parsedRequest.Scheme != "https" && !isLoopbackProviderQuotaURL(parsedRequest) {
+		return fmt.Errorf("请求 URL 必须使用 HTTPS（localhost 例外）")
+	}
+	if isCustomTemplate || strings.TrimSpace(baseURL) == "" {
+		return nil
+	}
+
+	parsedBase, err := url.Parse(strings.TrimSpace(baseURL))
+	if err != nil || parsedBase.Host == "" {
+		return fmt.Errorf("无效的 Base URL")
+	}
+	if !strings.EqualFold(parsedRequest.Host, parsedBase.Host) {
+		return fmt.Errorf("请求 URL 必须与 Base URL 同源")
+	}
+	return nil
+}
+
+func isLoopbackProviderQuotaURL(parsedURL *url.URL) bool {
+	if parsedURL == nil {
+		return false
+	}
+	host := strings.TrimSpace(strings.ToLower(parsedURL.Hostname()))
+	if host == "" {
+		return false
+	}
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+func (s *ProviderQuotaQueryService) sendScriptRequest(
+	config providerQuotaScriptRequestConfig,
+	timeoutSeconds int,
+) ([]byte, error) {
+	var bodyReader io.Reader
+	if config.Body != nil {
+		serializedBody, err := serializeProviderQuotaScriptBody(config.Body)
+		if err != nil {
+			return nil, fmt.Errorf("序列化请求体失败: %w", err)
+		}
+		bodyReader = bytes.NewReader(serializedBody)
+	}
+
+	method := strings.ToUpper(strings.TrimSpace(config.Method))
+	if method == "" {
+		method = http.MethodGet
+	}
+
+	req, err := http.NewRequest(method, config.URL, bodyReader)
+	if err != nil {
+		return nil, fmt.Errorf("创建额度查询请求失败: %w", err)
+	}
+	for key, value := range config.Headers {
+		if strings.TrimSpace(key) == "" || strings.TrimSpace(value) == "" {
+			continue
+		}
+		req.Header.Set(key, value)
+	}
+
+	client := s.resolveHTTPClientWithTimeout(time.Duration(normalizeProviderQuotaTimeout(timeoutSeconds)) * time.Second)
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("请求额度查询接口失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	responseBody, readErr := io.ReadAll(resp.Body)
+	if readErr != nil {
+		return nil, fmt.Errorf("读取额度查询响应失败: %w", readErr)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("额度查询失败 (HTTP %d): %s", resp.StatusCode, truncateText(string(responseBody), 512))
+	}
+	return responseBody, nil
+}
+
+func serializeProviderQuotaScriptBody(body any) ([]byte, error) {
+	switch typed := body.(type) {
+	case nil:
+		return nil, nil
+	case string:
+		return []byte(typed), nil
+	case []byte:
+		return typed, nil
+	default:
+		return json.Marshal(typed)
+	}
+}
+
+func (s *ProviderQuotaQueryService) resolveHTTPClientWithTimeout(timeout time.Duration) *http.Client {
+	if s == nil || s.client == nil {
+		return &http.Client{Timeout: timeout}
+	}
+	if timeout <= 0 || s.client.Timeout == timeout {
+		return s.client
+	}
+	clone := *s.client
+	clone.Timeout = timeout
+	return &clone
+}
+
+func buildProviderQuotaItemsFromScriptResult(result any, templateType string) ([]ProviderQuotaQueryItem, error) {
+	switch typed := result.(type) {
+	case map[string]any:
+		item, err := buildProviderQuotaItemFromScriptObject(typed, 0, templateType)
+		if err != nil {
+			return nil, err
+		}
+		return []ProviderQuotaQueryItem{item}, nil
+	case []any:
+		items := make([]ProviderQuotaQueryItem, 0, len(typed))
+		for index, rawItem := range typed {
+			objectItem, ok := rawItem.(map[string]any)
+			if !ok {
+				return nil, fmt.Errorf("脚本返回数组时，第 %d 项不是对象", index+1)
+			}
+			item, err := buildProviderQuotaItemFromScriptObject(objectItem, index, templateType)
+			if err != nil {
+				return nil, err
+			}
+			items = append(items, item)
+		}
+		return items, nil
+	default:
+		return nil, fmt.Errorf("脚本必须返回对象或对象数组")
+	}
+}
+
+func buildProviderQuotaItemFromScriptObject(
+	payload map[string]any,
+	index int,
+	templateType string,
+) (ProviderQuotaQueryItem, error) {
+	label := firstNonEmptyProviderQuotaString(payload["label"], payload["planName"], payload["name"])
+	key := firstNonEmptyProviderQuotaString(payload["key"])
+	if key == "" {
+		key = buildProviderQuotaItemFallbackKey(label, index, templateType)
+	}
+	invalidMessage := strings.TrimSpace(firstNonEmptyProviderQuotaString(payload["invalidMessage"]))
+	extra := strings.TrimSpace(firstNonEmptyProviderQuotaString(payload["extra"]))
+
+	active, hasActive := boolFromAny(payload["active"])
+	isValid, hasIsValid := boolFromAny(payload["isValid"])
+	switch {
+	case hasActive && hasIsValid:
+		active = active && isValid
+	case !hasActive && hasIsValid:
+		active = isValid
+	case !hasActive:
+		active = true
+	}
+
+	total, hasTotal := floatFromAnyOk(payload["total"])
+	used, hasUsed := floatFromAnyOk(payload["used"])
+	remaining, hasRemaining := floatFromAnyOk(payload["remaining"])
+
+	switch {
+	case hasTotal && hasUsed:
+	case hasTotal && hasRemaining:
+		used = total - remaining
+		hasUsed = true
+	case hasUsed && hasRemaining:
+		total = used + remaining
+		hasTotal = true
+	case hasRemaining:
+		total = remaining
+		used = 0
+		hasTotal = true
+		hasUsed = true
+	case hasTotal:
+		used = 0
+		hasUsed = true
+	case hasUsed:
+		total = used
+		used = 0
+		hasTotal = true
+		hasUsed = true
+	default:
+		if !active {
+			total = 0
+			used = 0
+			hasTotal = true
+			hasUsed = true
+			break
+		}
+		return ProviderQuotaQueryItem{}, fmt.Errorf("脚本返回结果缺少 total / used / remaining 数值字段")
+	}
+
+	if !hasTotal {
+		total = 0
+	}
+	if !hasUsed {
+		used = 0
+	}
+
+	unit := strings.TrimSpace(firstNonEmptyProviderQuotaString(payload["unit"]))
+	valueMode := normalizeProviderQuotaValueMode(payload["valueMode"], unit)
+	nextReset := isoTimeFromAny(payload["nextReset"])
+	if nextReset == "" {
+		nextReset = isoTimeFromAny(payload["resetTime"])
+	}
+	if label == "" {
+		label = defaultProviderQuotaItemLabel(valueMode, templateType, index)
+	}
+
+	return ProviderQuotaQueryItem{
+		Key:            key,
+		Label:          label,
+		Used:           clampNonNegativeFloat(used),
+		Total:          clampNonNegativeFloat(total),
+		NextReset:      nextReset,
+		Active:         active,
+		ValueMode:      valueMode,
+		Unit:           unit,
+		Extra:          extra,
+		InvalidMessage: invalidMessage,
+	}, nil
+}
+
+func buildProviderQuotaItemFallbackKey(label string, index int, templateType string) string {
+	slug := slugifyProviderQuotaKey(label)
+	if slug != "" {
+		return slug
+	}
+	switch strings.TrimSpace(strings.ToLower(templateType)) {
+	case string(ProviderQuotaTemplateTypeBalance):
+		return "balance"
+	case string(ProviderQuotaTemplateTypeGeneral), string(ProviderQuotaTemplateTypeNewAPI), string(ProviderQuotaTemplateTypeCustom):
+		return fmt.Sprintf("quota_%d", index+1)
+	default:
+		return fmt.Sprintf("item_%d", index+1)
+	}
+}
+
+func slugifyProviderQuotaKey(value string) string {
+	trimmed := strings.TrimSpace(strings.ToLower(value))
+	if trimmed == "" {
+		return ""
+	}
+
+	var builder strings.Builder
+	lastUnderscore := false
+	for _, r := range trimmed {
+		switch {
+		case unicode.IsLetter(r) || unicode.IsDigit(r):
+			builder.WriteRune(r)
+			lastUnderscore = false
+		case r == '-' || r == '_' || unicode.IsSpace(r):
+			if builder.Len() > 0 && !lastUnderscore {
+				builder.WriteRune('_')
+				lastUnderscore = true
+			}
+		}
+	}
+	return strings.Trim(builder.String(), "_")
+}
+
+func defaultProviderQuotaItemLabel(valueMode string, templateType string, index int) string {
+	if valueMode == string(ProviderQuotaValueModeCurrency) || strings.EqualFold(templateType, string(ProviderQuotaTemplateTypeBalance)) {
+		if index == 0 {
+			return "Balance"
+		}
+		return fmt.Sprintf("Balance %d", index+1)
+	}
+	if index == 0 {
+		return "Quota"
+	}
+	return fmt.Sprintf("Quota %d", index+1)
+}
+
+func firstNonEmptyProviderQuotaString(values ...any) string {
+	for _, value := range values {
+		if normalized := strings.TrimSpace(stringFromAny(value)); normalized != "" {
+			return normalized
+		}
+	}
+	return ""
+}
+
+func normalizeProviderQuotaValueMode(value any, unit string) string {
+	normalized := strings.TrimSpace(strings.ToLower(stringFromAny(value)))
+	switch normalized {
+	case string(ProviderQuotaValueModeCurrency):
+		return string(ProviderQuotaValueModeCurrency)
+	case string(ProviderQuotaValueModeCount):
+		return string(ProviderQuotaValueModeCount)
+	}
+	switch strings.TrimSpace(strings.ToUpper(unit)) {
+	case "USD", "CNY", "RMB", "JPY", "EUR", "GBP", "HKD", "SGD", "AUD", "CAD", "CHF", "NZD", "KRW", "INR", "￥", "¥":
+		return string(ProviderQuotaValueModeCurrency)
+	default:
+		return string(ProviderQuotaValueModeCount)
+	}
+}
+
+func buildProviderQuotaInvalidItem(label string, invalidMessage string, extra string) ProviderQuotaQueryItem {
+	key := buildProviderQuotaItemFallbackKey(label, 0, string(ProviderQuotaTemplateTypeBalance))
+	if strings.TrimSpace(key) == "" {
+		key = "balance"
+	}
+	return ProviderQuotaQueryItem{
+		Key:            key,
+		Label:          strings.TrimSpace(label),
+		Used:           0,
+		Total:          0,
+		Active:         false,
+		ValueMode:      string(ProviderQuotaValueModeCurrency),
+		Extra:          strings.TrimSpace(extra),
+		InvalidMessage: strings.TrimSpace(invalidMessage),
+	}
+}
+
+func buildProviderQuotaAuthFailureItems(label string, status int) []ProviderQuotaQueryItem {
+	return []ProviderQuotaQueryItem{
+		buildProviderQuotaInvalidItem(
+			label,
+			fmt.Sprintf("官方余额查询认证失败 (HTTP %d)", status),
+			"",
+		),
+	}
+}
+
+func (s *ProviderQuotaQueryService) queryDeepSeekBalance(apiKey string) ([]ProviderQuotaQueryItem, error) {
+	body, status, err := s.sendJSONRequest(
+		http.MethodGet,
+		"https://api.deepseek.com/user/balance",
+		nil,
+		map[string]string{
+			"Authorization": "Bearer " + apiKey,
+			"Accept":        "application/json",
+			"User-Agent":    "code-switch-R/1.0",
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	if status == http.StatusUnauthorized || status == http.StatusForbidden {
+		return buildProviderQuotaAuthFailureItems("DeepSeek", status), nil
+	}
+	if status < 200 || status >= 300 {
+		return nil, fmt.Errorf("官方余额查询失败 (HTTP %d): %s", status, truncateText(string(body), 512))
+	}
+
+	payload, err := decodeProviderQuotaJSONMap(body)
+	if err != nil {
+		return nil, fmt.Errorf("解析 DeepSeek 余额响应失败: %w", err)
+	}
+
+	isAvailable, hasAvailable := boolFromAny(payload["is_available"])
+	if !hasAvailable {
+		isAvailable = true
+	}
+
+	infos, ok := payload["balance_infos"].([]any)
+	if !ok || len(infos) == 0 {
+		return nil, fmt.Errorf("DeepSeek 余额响应缺少 balance_infos 数据")
+	}
+
+	items := make([]ProviderQuotaQueryItem, 0, len(infos))
+	for index, rawInfo := range infos {
+		info, ok := rawInfo.(map[string]any)
+		if !ok {
+			continue
+		}
+		currency := firstNonEmptyProviderQuotaString(info["currency"])
+		if currency == "" {
+			currency = "CNY"
+		}
+		remaining := clampNonNegativeFloat(floatFromAny(info["total_balance"]))
+		items = append(items, ProviderQuotaQueryItem{
+			Key:       buildProviderQuotaItemFallbackKey(currency, index, string(ProviderQuotaTemplateTypeBalance)),
+			Label:     currency,
+			Used:      0,
+			Total:     remaining,
+			Active:    isAvailable && remaining > 0,
+			ValueMode: string(ProviderQuotaValueModeCurrency),
+			Unit:      currency,
+		})
+	}
+	if len(items) == 0 {
+		return nil, fmt.Errorf("DeepSeek 余额响应未返回可展示的数据")
+	}
+	return items, nil
+}
+
+func (s *ProviderQuotaQueryService) queryStepFunBalance(apiKey string) ([]ProviderQuotaQueryItem, error) {
+	body, status, err := s.sendJSONRequest(
+		http.MethodGet,
+		"https://api.stepfun.com/v1/accounts",
+		nil,
+		map[string]string{
+			"Authorization": "Bearer " + apiKey,
+			"Accept":        "application/json",
+			"User-Agent":    "code-switch-R/1.0",
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	if status == http.StatusUnauthorized || status == http.StatusForbidden {
+		return buildProviderQuotaAuthFailureItems("StepFun", status), nil
+	}
+	if status < 200 || status >= 300 {
+		return nil, fmt.Errorf("官方余额查询失败 (HTTP %d): %s", status, truncateText(string(body), 512))
+	}
+
+	payload, err := decodeProviderQuotaJSONMap(body)
+	if err != nil {
+		return nil, fmt.Errorf("解析 StepFun 余额响应失败: %w", err)
+	}
+	remaining := clampNonNegativeFloat(floatFromAny(payload["balance"]))
+	return []ProviderQuotaQueryItem{{
+		Key:       "balance",
+		Label:     "StepFun",
+		Used:      0,
+		Total:     remaining,
+		Active:    remaining > 0,
+		ValueMode: string(ProviderQuotaValueModeCurrency),
+		Unit:      "CNY",
+	}}, nil
+}
+
+func (s *ProviderQuotaQueryService) querySiliconFlowBalance(baseURL string, apiKey string) ([]ProviderQuotaQueryItem, error) {
+	body, status, err := s.sendJSONRequest(
+		http.MethodGet,
+		joinURL(baseURL, "/v1/user/info"),
+		nil,
+		map[string]string{
+			"Authorization": "Bearer " + apiKey,
+			"Accept":        "application/json",
+			"User-Agent":    "code-switch-R/1.0",
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	if status == http.StatusUnauthorized || status == http.StatusForbidden {
+		return buildProviderQuotaAuthFailureItems("SiliconFlow", status), nil
+	}
+	if status < 200 || status >= 300 {
+		return nil, fmt.Errorf("官方余额查询失败 (HTTP %d): %s", status, truncateText(string(body), 512))
+	}
+
+	payload, err := decodeProviderQuotaJSONMap(body)
+	if err != nil {
+		return nil, fmt.Errorf("解析 SiliconFlow 余额响应失败: %w", err)
+	}
+	data, ok := payload["data"].(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("SiliconFlow 余额响应缺少 data 字段")
+	}
+	remaining := clampNonNegativeFloat(floatFromAny(data["totalBalance"]))
+	return []ProviderQuotaQueryItem{{
+		Key:       "balance",
+		Label:     "SiliconFlow",
+		Used:      0,
+		Total:     remaining,
+		Active:    remaining > 0,
+		ValueMode: string(ProviderQuotaValueModeCurrency),
+		Unit:      "CNY",
+	}}, nil
+}
+
+func (s *ProviderQuotaQueryService) queryOpenRouterBalance(apiKey string) ([]ProviderQuotaQueryItem, error) {
+	body, status, err := s.sendJSONRequest(
+		http.MethodGet,
+		"https://openrouter.ai/api/v1/credits",
+		nil,
+		map[string]string{
+			"Authorization": "Bearer " + apiKey,
+			"Accept":        "application/json",
+			"User-Agent":    "code-switch-R/1.0",
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	if status == http.StatusUnauthorized || status == http.StatusForbidden {
+		return buildProviderQuotaAuthFailureItems("OpenRouter", status), nil
+	}
+	if status < 200 || status >= 300 {
+		return nil, fmt.Errorf("官方余额查询失败 (HTTP %d): %s", status, truncateText(string(body), 512))
+	}
+
+	payload, err := decodeProviderQuotaJSONMap(body)
+	if err != nil {
+		return nil, fmt.Errorf("解析 OpenRouter 余额响应失败: %w", err)
+	}
+	data, ok := payload["data"].(map[string]any)
+	if !ok {
+		data = payload
+	}
+	total := clampNonNegativeFloat(floatFromAny(data["total_credits"]))
+	used := clampNonNegativeFloat(floatFromAny(data["total_usage"]))
+	if total <= 0 && used > 0 {
+		total = used
+	}
+	active := total-used > 0
+	return []ProviderQuotaQueryItem{{
+		Key:       "balance",
+		Label:     "OpenRouter",
+		Used:      used,
+		Total:     total,
+		Active:    active,
+		ValueMode: string(ProviderQuotaValueModeCurrency),
+		Unit:      "USD",
+	}}, nil
+}
+
+func (s *ProviderQuotaQueryService) queryNovitaBalance(apiKey string) ([]ProviderQuotaQueryItem, error) {
+	body, status, err := s.sendJSONRequest(
+		http.MethodGet,
+		"https://api.novita.ai/v3/user/balance",
+		nil,
+		map[string]string{
+			"Authorization": "Bearer " + apiKey,
+			"Accept":        "application/json",
+			"User-Agent":    "code-switch-R/1.0",
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	if status == http.StatusUnauthorized || status == http.StatusForbidden {
+		return buildProviderQuotaAuthFailureItems("Novita AI", status), nil
+	}
+	if status < 200 || status >= 300 {
+		return nil, fmt.Errorf("官方余额查询失败 (HTTP %d): %s", status, truncateText(string(body), 512))
+	}
+
+	payload, err := decodeProviderQuotaJSONMap(body)
+	if err != nil {
+		return nil, fmt.Errorf("解析 Novita 余额响应失败: %w", err)
+	}
+	remaining := clampNonNegativeFloat(floatFromAny(payload["availableBalance"]) / 10000)
+	return []ProviderQuotaQueryItem{{
+		Key:       "balance",
+		Label:     "Novita AI",
+		Used:      0,
+		Total:     remaining,
+		Active:    remaining > 0,
+		ValueMode: string(ProviderQuotaValueModeCurrency),
+		Unit:      "USD",
+	}}, nil
+}
+
 func (s *ProviderQuotaQueryService) queryGLMQuota(baseURL string, apiKey string) ([]ProviderQuotaQueryItem, error) {
+	if strings.TrimSpace(apiKey) == "" {
+		return nil, fmt.Errorf("缺少 API Key")
+	}
+	if strings.TrimSpace(baseURL) == "" {
+		return nil, fmt.Errorf("缺少可用的 API 地址")
+	}
+
 	body, status, err := s.sendJSONRequest(
 		http.MethodGet,
 		joinURL(baseURL, "/api/monitor/usage/quota/limit"),
@@ -262,6 +1199,7 @@ func (s *ProviderQuotaQueryService) queryGLMQuota(baseURL string, apiKey string)
 			Total:     clampNonNegativeFloat(total),
 			NextReset: isoTimeFromAny(limitItem["nextResetTime"]),
 			Active:    true,
+			ValueMode: string(ProviderQuotaValueModeCount),
 		})
 	}
 
@@ -390,6 +1328,23 @@ func mergeProviderQuotaQueryItem(existing ProviderQuotaQueryItem, candidate Prov
 	if !merged.Active && candidate.Active {
 		merged.Active = true
 	}
+	if strings.TrimSpace(merged.Label) == "" && strings.TrimSpace(candidate.Label) != "" {
+		merged.Label = candidate.Label
+	}
+	if strings.TrimSpace(merged.ValueMode) == "" && strings.TrimSpace(candidate.ValueMode) != "" {
+		merged.ValueMode = candidate.ValueMode
+	}
+	if strings.TrimSpace(merged.Unit) == "" && strings.TrimSpace(candidate.Unit) != "" {
+		merged.Unit = candidate.Unit
+	}
+	if strings.TrimSpace(merged.Extra) == "" && strings.TrimSpace(candidate.Extra) != "" {
+		merged.Extra = candidate.Extra
+	}
+	if merged.Active {
+		merged.InvalidMessage = ""
+	} else if strings.TrimSpace(merged.InvalidMessage) == "" && strings.TrimSpace(candidate.InvalidMessage) != "" {
+		merged.InvalidMessage = candidate.InvalidMessage
+	}
 
 	return merged
 }
@@ -406,12 +1361,21 @@ func providerQuotaQueryItemSortRank(key string) int {
 		return 3
 	case "total":
 		return 4
+	case "balance":
+		return 5
 	default:
 		return 100
 	}
 }
 
 func (s *ProviderQuotaQueryService) queryKimiQuota(baseURL string, apiKey string) ([]ProviderQuotaQueryItem, error) {
+	if strings.TrimSpace(apiKey) == "" {
+		return nil, fmt.Errorf("缺少 API Key")
+	}
+	if strings.TrimSpace(baseURL) == "" {
+		return nil, fmt.Errorf("缺少可用的 API 地址")
+	}
+
 	body, status, err := s.sendJSONRequest(
 		http.MethodGet,
 		joinURL(baseURL, "/coding/v1/usages"),
@@ -460,6 +1424,7 @@ func (s *ProviderQuotaQueryService) queryKimiQuota(baseURL string, apiKey string
 				Total:     clampNonNegativeFloat(total),
 				NextReset: isoTimeFromAny(detail["resetTime"]),
 				Active:    true,
+				ValueMode: string(ProviderQuotaValueModeCount),
 			})
 		}
 	}
@@ -474,6 +1439,7 @@ func (s *ProviderQuotaQueryService) queryKimiQuota(baseURL string, apiKey string
 				Total:     clampNonNegativeFloat(total),
 				NextReset: isoTimeFromAny(usage["resetTime"]),
 				Active:    true,
+				ValueMode: string(ProviderQuotaValueModeCount),
 			})
 		}
 	}
@@ -486,6 +1452,13 @@ func (s *ProviderQuotaQueryService) queryKimiQuota(baseURL string, apiKey string
 }
 
 func (s *ProviderQuotaQueryService) queryMiniMaxQuota(baseURL string, apiKey string) ([]ProviderQuotaQueryItem, error) {
+	if strings.TrimSpace(apiKey) == "" {
+		return nil, fmt.Errorf("缺少 API Key")
+	}
+	if strings.TrimSpace(baseURL) == "" {
+		return nil, fmt.Errorf("缺少可用的 API 地址")
+	}
+
 	body, status, err := s.sendJSONRequest(
 		http.MethodGet,
 		joinURL(baseURL, "/v1/api/openplatform/coding_plan/remains"),
@@ -544,6 +1517,7 @@ func (s *ProviderQuotaQueryService) queryMiniMaxQuota(baseURL string, apiKey str
 			Total:     clampNonNegativeFloat(intervalTotal),
 			NextReset: isoTimeFromAny(item["end_time"]),
 			Active:    true,
+			ValueMode: string(ProviderQuotaValueModeCount),
 		})
 	}
 
@@ -556,6 +1530,7 @@ func (s *ProviderQuotaQueryService) queryMiniMaxQuota(baseURL string, apiKey str
 			Total:     clampNonNegativeFloat(weeklyTotal),
 			NextReset: isoTimeFromAny(item["weekly_end_time"]),
 			Active:    true,
+			ValueMode: string(ProviderQuotaValueModeCount),
 		})
 	}
 
@@ -605,28 +1580,63 @@ func decodeProviderQuotaJSONMap(body []byte) (map[string]any, error) {
 	return payload, nil
 }
 
-func floatFromAny(value any) float64 {
+func floatFromAnyOk(value any) (float64, bool) {
 	switch typed := value.(type) {
+	case nil:
+		return 0, false
 	case float64:
-		return typed
+		return typed, true
 	case float32:
-		return float64(typed)
+		return float64(typed), true
 	case int:
-		return float64(typed)
+		return float64(typed), true
 	case int64:
-		return float64(typed)
+		return float64(typed), true
 	case int32:
-		return float64(typed)
+		return float64(typed), true
 	case json.Number:
-		result, _ := typed.Float64()
-		return result
+		result, err := typed.Float64()
+		return result, err == nil
 	case string:
-		number, err := json.Number(strings.TrimSpace(typed)).Float64()
-		if err == nil {
-			return number
+		trimmed := strings.TrimSpace(typed)
+		if trimmed == "" {
+			return 0, false
 		}
+		number, err := json.Number(trimmed).Float64()
+		return number, err == nil
+	default:
+		return 0, false
 	}
-	return 0
+}
+
+func floatFromAny(value any) float64 {
+	result, _ := floatFromAnyOk(value)
+	return result
+}
+
+func boolFromAny(value any) (bool, bool) {
+	switch typed := value.(type) {
+	case nil:
+		return false, false
+	case bool:
+		return typed, true
+	case string:
+		normalized := strings.TrimSpace(strings.ToLower(typed))
+		switch normalized {
+		case "true", "1", "yes", "on":
+			return true, true
+		case "false", "0", "no", "off":
+			return false, true
+		default:
+			return false, false
+		}
+	case float64:
+		return typed != 0, true
+	case int:
+		return typed != 0, true
+	default:
+		return false, false
+	}
 }
 
 func stringFromAny(value any) string {

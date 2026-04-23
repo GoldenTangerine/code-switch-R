@@ -1,7 +1,9 @@
 import type { AutomationCard } from '../../../data/cards'
 import { cloneBudgetQuotaAdjustments } from '../../../utils/budgetUsage'
 import {
+  normalizeProviderQuotaQueryConfig,
   normalizeProviderQuotaQueryType,
+  sanitizeProviderQuotaQueryConfigForSave,
   serializeProviderQuotaQueryType,
 } from '../../../utils/providerQuotaQuery'
 import { getDefaultAuthType, getDefaultEndpoint } from '../constants'
@@ -50,6 +52,7 @@ export const createDefaultVendorForm = (
   budgetQuotaSettings: undefined,
   budgetQuotaUsedAdjustments: undefined,
   providerQuotaQueryType: 'none',
+  providerQuotaQueryConfig: undefined,
 })
 
 export const createVendorFormFromCard = (
@@ -87,6 +90,10 @@ export const createVendorFormFromCard = (
   budgetQuotaSettings: cloneProviderValue(card.budgetQuotaSettings) || undefined,
   budgetQuotaUsedAdjustments: cloneBudgetQuotaAdjustments(card.budgetQuotaUsedAdjustments),
   providerQuotaQueryType: normalizeProviderQuotaQueryType(card.providerQuotaQueryType),
+  providerQuotaQueryConfig: cloneProviderValue(normalizeProviderQuotaQueryConfig(
+    card.providerQuotaQueryConfig,
+    card.providerQuotaQueryType,
+  )),
 })
 
 export const resolveProviderAuthState = (
@@ -154,6 +161,10 @@ export const buildNormalizedVendorForm = ({
   budgetQuotaSettings: cloneProviderValue(form.budgetQuotaSettings) || undefined,
   budgetQuotaUsedAdjustments: cloneBudgetQuotaAdjustments(form.budgetQuotaUsedAdjustments),
   providerQuotaQueryType: normalizeProviderQuotaQueryType(form.providerQuotaQueryType),
+  providerQuotaQueryConfig: cloneProviderValue(normalizeProviderQuotaQueryConfig(
+    form.providerQuotaQueryConfig,
+    form.providerQuotaQueryType,
+  )),
 })
 
 export const buildPersistedProviderFieldsFromForm = (
@@ -186,4 +197,8 @@ export const buildPersistedProviderFieldsFromForm = (
   budgetQuotaSettings: cloneProviderValue(form.budgetQuotaSettings) || undefined,
   budgetQuotaUsedAdjustments: cloneBudgetQuotaAdjustments(form.budgetQuotaUsedAdjustments),
   providerQuotaQueryType: serializeProviderQuotaQueryType(form.providerQuotaQueryType),
+  providerQuotaQueryConfig: sanitizeProviderQuotaQueryConfigForSave(
+    cloneProviderValue(form.providerQuotaQueryConfig),
+    form.providerQuotaQueryType,
+  ),
 })

@@ -464,10 +464,14 @@ html.dark .mac-sidebar-item:hover {
   max-width: 1360px;
   margin: 0 auto;
   padding: 36px 40px 56px;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   gap: 20px;
   position: relative;
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-x: clip;
   z-index: 1;
 }
 
@@ -568,7 +572,7 @@ html.dark .mac-sidebar-item:hover {
   padding: 14px;
   box-shadow: var(--contrib-tooltip-shadow);
   pointer-events: none;
-  z-index: 10;
+  z-index: 60;
   backdrop-filter: blur(18px);
   opacity: 0;
   visibility: hidden;
@@ -583,6 +587,13 @@ html.dark .mac-sidebar-item:hover {
 .contrib-tooltip.is-positioned {
   opacity: 1;
   visibility: visible;
+}
+
+.usage-heatmap-tooltip,
+.usage-heatmap-tooltip.left,
+.usage-heatmap-tooltip.right,
+.usage-heatmap-tooltip.overlay {
+  transform: none;
 }
 
 .tooltip-heading {
@@ -2842,7 +2853,7 @@ html.dark .secondary-btn:active:not(:disabled) {
 }
 
 /* 全局按钮样式修复 - 防止 Tailwind Preflight 导致的布局问题 */
-button:where(:not(.ghost-icon):not(.mac-switch):not(.nav-item):not(.platform-tab):not(.tab-pill):not(.collapse-btn):not(.toggle-switch):not(.relay-toggle-switch):not(.action-btn):not(.primary-btn):not(.btn):not(.remove-btn):not(.icon-select-button):not(.level-select-button):not(.update-notification-btn):not(.performance-trigger):not(.card-cost-trigger):not(.logs-select-button):not(.logs-select-option):not(.logs-sub-filter-clear):not(.logs-filter-tool-btn):not(.logs-cost-modal__row)) {
+button:where(:not(.ghost-icon):not(.mac-switch):not(.nav-item):not(.platform-tab):not(.tab-pill):not(.collapse-btn):not(.toggle-switch):not(.relay-toggle-switch):not(.action-btn):not(.primary-btn):not(.btn):not(.remove-btn):not(.icon-select-button):not(.level-select-button):not(.update-notification-btn):not(.performance-trigger):not(.card-cost-trigger):not(.logs-select-button):not(.logs-select-option):not(.logs-sub-filter-clear):not(.logs-filter-tool-btn):not(.logs-cost-modal__row):not(.provider-quota-query-config-modal__template-card)) {
   display: inline-flex !important;
   flex-direction: row !important;
   align-items: center !important;

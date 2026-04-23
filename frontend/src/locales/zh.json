@@ -690,7 +690,21 @@
           "budgetQuotaDaily": "日额度",
           "budgetQuotaWeekly": "周额度",
           "budgetQuotaMonthly": "月额度",
-          "budgetQuotaTotal": "总额度"
+          "budgetQuotaTotal": "总额度",
+          "providerQuotaQueryConfig": "额度查询配置",
+          "providerQuotaQueryEnabled": "启用远端额度查询",
+          "providerQuotaQueryTemplate": "查询模版",
+          "providerQuotaQueryTiming": "查询节奏",
+          "providerQuotaQueryCredentials": "专用凭证",
+          "providerQuotaQueryTimeout": "请求超时（秒）",
+          "providerQuotaQueryAutoInterval": "自动查询间隔（分钟）",
+          "providerQuotaQueryDedicatedBaseUrl": "专用 Base URL",
+          "providerQuotaQueryDedicatedApiKey": "专用 API Key",
+          "providerQuotaQueryAccessToken": "Access Token",
+          "providerQuotaQueryUserId": "User ID",
+          "providerQuotaQueryTokenPlanProvider": "Token Plan 供应商",
+          "providerQuotaQueryCode": "查询脚本",
+          "providerQuotaQueryManualOnly": "仅手动刷新"
         },
         "placeholders": {
           "name": "例如：AICoding.sh",
@@ -706,7 +720,14 @@
           "customEndpoint": "或输入自定义端点",
           "customAuthHeader": "自定义 Header 名称（如 Authorization、X-Custom-Key）",
           "searchIcon": "搜索图标...",
-          "budgetQuotaTotal": "USD 上限（0 = 不限）"
+          "budgetQuotaTotal": "USD 上限（0 = 不限）",
+          "providerQuotaQueryBaseUrl": "https://api.example.com",
+          "providerQuotaQueryApiKey": "留空则沿用当前供应商 API Key",
+          "providerQuotaQueryAccessToken": "填写 NewAPI 面板的 Access Token",
+          "providerQuotaQueryUserId": "例如：10001",
+          "providerQuotaQueryTimeout": "10",
+          "providerQuotaQueryAutoInterval": "5",
+          "providerQuotaQueryCode": "返回 { request, extractor }"
         },
         "noIconResults": "未找到匹配的图标",
         "hints": {
@@ -731,13 +752,40 @@
           "providerQuotaQueryMissingCredentials": "要启用供应商额度查询，至少得把当前供应商的 API 地址和 API 密钥填完整，不然这功能就只能搁这儿当摆设。",
           "budgetQuotaRefreshTime": "每日刷新时间",
           "budgetQuotaRefreshWeekday": "每周刷新星期",
-          "budgetQuotaRefreshMonthDay": "每月刷新日期"
+          "budgetQuotaRefreshMonthDay": "每月刷新日期",
+          "providerQuotaQueryConfig": "配置完成后，首页供应商卡片会按这里的模板查询远端额度，并继续复用预算额度那套展示。",
+          "providerQuotaQueryEnabled": "关闭后会保留模版和脚本，但首页不会自动查询额度。",
+          "providerQuotaQueryDisabled": "当前已关闭远端额度查询，配置会保留，首页不会自动拉额度。",
+          "providerQuotaQueryTemplateHint": "官方余额和 Token Plan 走内置查询；自定义、通用模版、NewApi 会执行脚本。",
+          "providerQuotaQueryTemplateBalance": "适合 DeepSeek、StepFun、SiliconFlow、OpenRouter、Novita 这类官方余额接口。",
+          "providerQuotaQueryTemplateCustom": "完全自定义请求和提取逻辑，允许跨域名和 HTTP（localhost / 自担风险）。",
+          "providerQuotaQueryTemplateGeneral": "通用余额模版，默认请求 {{baseUrl}}/user/balance，并要求同源 + HTTPS。",
+          "providerQuotaQueryTemplateNewApi": "适配 NewAPI 系面板，默认请求 /api/user/self，需要 Access Token 和 User ID。",
+          "providerQuotaQueryTemplateTokenPlan": "使用内置 Token Plan 查询，不需要写脚本。",
+          "providerQuotaQueryBalanceDetectedBadge": "已识别：{provider}",
+          "providerQuotaQueryBalanceUnsupportedBadge": "暂不支持",
+          "providerQuotaQueryBalanceDetected": "当前 API 地址已识别为 {provider} 官方余额接口，保存后会直接复用当前供应商的 API Key 去查余额。",
+          "providerQuotaQueryBalanceUnsupported": "当前 API 地址暂未识别为受支持的官方余额接口（{url}）。硬选这个模版，保存和测试都会直接拦下，别等到首页再闹鬼。",
+          "providerQuotaQueryWillFallbackToProvider": "留空时会回退到当前供应商的 API 地址和 API 密钥。",
+          "providerQuotaQueryCustomCredentialHint": "这些字段都是可选的，脚本里可通过 {{baseUrl}} / {{apiKey}} / {{accessToken}} / {{userId}} 取值。",
+          "providerQuotaQueryNewApiCredentialHint": "NewAPI 通常不会直接复用当前供应商 API Key，记得填 Access Token 和 User ID。",
+          "providerQuotaQueryAccessTokenHint": "用于 NewAPI 请求头里的 Bearer Token。",
+          "providerQuotaQueryUserIdHint": "部分 NewAPI 面板要求额外带上用户 ID 请求头。",
+          "providerQuotaQueryCodeHint": "脚本需要返回 { request, extractor }，extractor 可以返回单对象或对象数组。",
+          "providerQuotaQueryAutoInterval": "填 0 表示只在手动刷新或重置时查询，不自动轮询。",
+          "providerQuotaQueryTimeout": "超时时间会限制在 2 - 30 秒，别往天上填。",
+          "providerQuotaQueryAutoEvery": "自动 {minutes} 分钟"
         },
         "options": {
           "providerQuotaQueryNone": "不启用",
           "providerQuotaQueryTokenPlanGLM": "GLM Token Plan",
           "providerQuotaQueryTokenPlanKimi": "Kimi Token Plan",
-          "providerQuotaQueryTokenPlanMiniMax": "MiniMax Token Plan"
+          "providerQuotaQueryTokenPlanMiniMax": "MiniMax Token Plan",
+          "providerQuotaQueryOfficial": "官方余额",
+          "providerQuotaQueryCustom": "自定义",
+          "providerQuotaQueryGeneral": "通用模版",
+          "providerQuotaQueryNewApi": "NewApi",
+          "providerQuotaQueryTokenPlan": "Token Plan"
         },
         "jsonEditor": {
           "title": "配置 JSON",
@@ -772,7 +820,11 @@
           "saveAndApply": "保存并应用",
           "delete": "删除",
           "testConnectivity": "测试连通性",
-          "testing": "测试中..."
+          "testing": "测试中...",
+          "providerQuotaQueryConfigure": "配置查询",
+          "providerQuotaQueryLoadPreset": "载入预设",
+          "providerQuotaQueryTest": "测试查询",
+          "providerQuotaQueryTesting": "测试中..."
         },
         "connectivity": {
           "success": "连接成功（延迟: {latency}ms）",
@@ -790,7 +842,16 @@
           "requestBodyOverridesInvalid": "请求体强制字段 JSON 解析失败：{error}",
           "requestBodyOverridesMustBeObject": "请求体强制字段必须是 JSON 对象"
         },
-        "saveFailed": "保存供应商配置失败"
+        "saveFailed": "保存供应商配置失败",
+        "toast": {
+          "providerQuotaQueryTestSuccess": "额度查询成功：",
+          "providerQuotaQueryTestFailed": "额度查询失败",
+          "providerQuotaQueryPresetLoaded": "已经载入当前模版预设",
+          "providerQuotaQueryScriptRequired": "脚本模版启用时，查询脚本不能为空，不然保存进去就是定时自爆。",
+          "providerQuotaQueryNewApiCredentialsRequired": "NewApi 模版启用时，得把 Base URL、Access Token 和 User ID 填完整。",
+          "providerQuotaQueryProviderCredentialsRequired": "当前模版启用时，至少要能拿到可用的 Base URL 和 API Key，不然这配置保存了也得炸。",
+          "providerQuotaQueryBalanceProviderUnsupported": "官方余额模版只支持已识别的官方余额供应商，当前 Base URL 还对不上。"
+        }
       },
       "levelDesc": {
         "highest": "最高优先级",

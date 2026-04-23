@@ -7,7 +7,10 @@ import {
 } from '../../../utils/budgetUsage'
 import {
   hasProviderQuotaQueryType,
-  normalizeProviderQuotaQueryType,
+  normalizeProviderQuotaQueryConfig,
+  resolveProviderQuotaAutoQueryIntervalMinutes,
+  resolveProviderQuotaQueryType,
+  sanitizeProviderQuotaQueryConfigForSave,
 } from '../../../utils/providerQuotaQuery'
 import { cardProviderRef } from '../adapters/providerCardMappers'
 import type { ProviderQuotaDisplayItem, ProviderTab, TranslateFn } from '../types'
@@ -23,10 +26,10 @@ type UseProviderQuotasOptions = {
   t: TranslateFn
   getActiveTab: () => ProviderTab
   cards: Record<ProviderTab, AutomationCard[]>
+  resolveAutoRefreshRemoteQuotaRefs?: () => Set<string>
 }
 
 const QUOTA_REFRESH_INTERVAL_MS = 30_000
-const REMOTE_QUOTA_CACHE_TTL_MS = 5 * 60_000
 const COUNTDOWN_TICK_INTERVAL_MS = 1_000
 
 const createQuotaDisplayMap = (): Record<ProviderTab, Record<string, ProviderQuotaDisplayItem[]>> => ({
@@ -40,6 +43,7 @@ type RemoteQuotaCacheEntry = {
   items: ProviderQuotaSnapshotItem[]
   fetchedAt: number
   cacheIdentity: string
+  staleFallbackCount: number
 }
 
 const createRemoteQuotaCacheMap = (): Record<ProviderTab, Record<string, RemoteQuotaCacheEntry>> => ({
@@ -55,11 +59,33 @@ const tabToPlatform = (tab: ProviderTab): LogPlatform | '' => {
 }
 
 function buildRemoteQuotaCacheIdentity(card: AutomationCard): string {
+  const normalizedConfig = normalizeProviderQuotaQueryConfig(
+    card.providerQuotaQueryConfig,
+    card.providerQuotaQueryType,
+  )
   return JSON.stringify([
-    normalizeProviderQuotaQueryType(card.providerQuotaQueryType),
+    resolveProviderQuotaQueryType(normalizedConfig ?? card.providerQuotaQueryType),
+    sanitizeProviderQuotaQueryConfigForSave(normalizedConfig, card.providerQuotaQueryType) ?? null,
     String(card.apiUrl ?? '').trim(),
     String(card.apiKey ?? '').trim(),
   ])
+}
+
+function resolveRemoteQuotaCacheTTL(card: AutomationCard): number {
+  const normalizedConfig = normalizeProviderQuotaQueryConfig(
+    card.providerQuotaQueryConfig,
+    card.providerQuotaQueryType,
+  )
+  const autoQueryIntervalMinutes = resolveProviderQuotaAutoQueryIntervalMinutes(
+    normalizedConfig,
+    card.providerQuotaQueryType,
+  )
+
+  if (autoQueryIntervalMinutes <= 0) {
+    return Number.POSITIVE_INFINITY
+  }
+
+  return autoQueryIntervalMinutes * 60_000
 }
 
 /**
@@ -68,7 +94,7 @@ function buildRemoteQuotaCacheIdentity(card: AutomationCard): string {
  * 定时获取每个供应商各周期的已用金额，计算进度和倒计时
  */
 export function useProviderQuotas(options: UseProviderQuotasOptions) {
-  const { t, getActiveTab, cards } = options
+  const { t, getActiveTab, cards, resolveAutoRefreshRemoteQuotaRefs } = options
 
   // tab -> providerRef -> ProviderQuotaDisplayItem[]
   const quotaDisplayMap = reactive(createQuotaDisplayMap())
@@ -80,6 +106,7 @@ export function useProviderQuotas(options: UseProviderQuotasOptions) {
   let refreshTask: Promise<void> | null = null
   let refreshQueued = false
   let queuedForceRemoteRefs = new Set<string>()
+  let queuedAutoRefreshRemoteRefs: Set<string> | null = null
 
   const cloneRemoteQuotaItems = (
     items: ProviderQuotaSnapshotItem[],
@@ -113,9 +140,10 @@ export function useProviderQuotas(options: UseProviderQuotasOptions) {
     const tabCache = remoteQuotaCacheMap[tab]
     const cacheEntry = tabCache[ref]
     const cacheIdentity = buildRemoteQuotaCacheIdentity(card)
+    const cacheTTL = resolveRemoteQuotaCacheTTL(card)
     const cacheMatchesIdentity = cacheEntry?.cacheIdentity === cacheIdentity
     const cacheIsFresh = cacheMatchesIdentity && cacheEntry
-      ? (now.getTime() - cacheEntry.fetchedAt) < REMOTE_QUOTA_CACHE_TTL_MS
+      ? (now.getTime() - cacheEntry.fetchedAt) < cacheTTL
       : false
 
     if (cacheEntry && cacheIsFresh && !forceRefresh) {
@@ -134,6 +162,7 @@ export function useProviderQuotas(options: UseProviderQuotasOptions) {
         items: cachedItems,
         fetchedAt: now.getTime(),
         cacheIdentity,
+        staleFallbackCount: 0,
       }
       return cloneRemoteQuotaItems(cachedItems, now)
     }
@@ -144,6 +173,14 @@ export function useProviderQuotas(options: UseProviderQuotasOptions) {
     }
 
     if (cacheEntry && cacheMatchesIdentity) {
+      if (cacheEntry.staleFallbackCount >= 1) {
+        delete tabCache[ref]
+        return []
+      }
+      tabCache[ref] = {
+        ...cacheEntry,
+        staleFallbackCount: cacheEntry.staleFallbackCount + 1,
+      }
       return cloneRemoteQuotaItems(cacheEntry.items, now)
     }
 
@@ -158,7 +195,7 @@ export function useProviderQuotas(options: UseProviderQuotasOptions) {
     now: Date,
     forceRemoteRefresh: boolean,
   ): Promise<ProviderQuotaDisplayItem[]> => {
-    if (hasProviderQuotaQueryType(card.providerQuotaQueryType)) {
+    if (hasProviderQuotaQueryType(card.providerQuotaQueryConfig ?? card.providerQuotaQueryType, card.providerQuotaQueryType)) {
       return resolveRemoteQuotaForCard({
         card,
         tab,
@@ -176,7 +213,10 @@ export function useProviderQuotas(options: UseProviderQuotasOptions) {
     })
   }
 
-  const runRefreshProviderQuotas = async (forceRemoteRefs: Set<string>) => {
+  const runRefreshProviderQuotas = async (
+    forceRemoteRefs: Set<string>,
+    autoRefreshRemoteRefs?: Set<string>,
+  ) => {
     try {
       const tab = getActiveTab()
       const platform = tabToPlatform(tab)
@@ -193,7 +233,10 @@ export function useProviderQuotas(options: UseProviderQuotasOptions) {
 
         const settings = normalizeBudgetQuotaSettings(card.budgetQuotaSettings)
         const hasQuota = providerBudgetQuotaOrder.some((key) => settings[key].total > 0)
-        const hasRemoteQuota = hasProviderQuotaQueryType(card.providerQuotaQueryType)
+        const hasRemoteQuota = hasProviderQuotaQueryType(
+          card.providerQuotaQueryConfig ?? card.providerQuotaQueryType,
+          card.providerQuotaQueryType,
+        )
         if (!hasQuota && !hasRemoteQuota) {
           // 清理无额度的供应商
           if (tabQuotaDisplayMap[ref]) {
@@ -207,6 +250,18 @@ export function useProviderQuotas(options: UseProviderQuotasOptions) {
 
         if (!hasRemoteQuota && tabRemoteQuotaCache[ref]) {
           delete tabRemoteQuotaCache[ref]
+        }
+
+        if (
+          hasRemoteQuota
+          && autoRefreshRemoteRefs
+          && !forceRemoteRefs.has(ref)
+          && !autoRefreshRemoteRefs.has(ref)
+        ) {
+          if (!tabQuotaDisplayMap[ref] && tabRemoteQuotaCache[ref]?.cacheIdentity === buildRemoteQuotaCacheIdentity(card)) {
+            tabQuotaDisplayMap[ref] = cloneRemoteQuotaItems(tabRemoteQuotaCache[ref].items, now)
+          }
+          return
         }
 
         const items = await resolveQuotaForCard(
@@ -240,10 +295,22 @@ export function useProviderQuotas(options: UseProviderQuotasOptions) {
   const refreshProviderQuotas = (
     options: {
       forceRemoteRefs?: Set<string>
+      autoRefreshRemoteRefs?: Set<string>
     } = {},
   ) => {
+    const hadPendingRefresh = refreshQueued || refreshTask !== null
     refreshQueued = true
     options.forceRemoteRefs?.forEach((ref) => queuedForceRemoteRefs.add(ref))
+    const hasAutoRefreshLimit = Object.prototype.hasOwnProperty.call(options, 'autoRefreshRemoteRefs')
+    if (!hadPendingRefresh) {
+      queuedAutoRefreshRemoteRefs = hasAutoRefreshLimit
+        ? new Set(options.autoRefreshRemoteRefs ?? [])
+        : null
+    } else if (!hasAutoRefreshLimit) {
+      queuedAutoRefreshRemoteRefs = null
+    } else if (queuedAutoRefreshRemoteRefs !== null) {
+      options.autoRefreshRemoteRefs?.forEach((ref) => queuedAutoRefreshRemoteRefs?.add(ref))
+    }
 
     if (!refreshTask) {
       refreshTask = (async () => {
@@ -252,7 +319,12 @@ export function useProviderQuotas(options: UseProviderQuotasOptions) {
             refreshQueued = false
             const nextForceRemoteRefs = queuedForceRemoteRefs
             queuedForceRemoteRefs = new Set<string>()
-            await runRefreshProviderQuotas(nextForceRemoteRefs)
+            const nextAutoRefreshRemoteRefs = queuedAutoRefreshRemoteRefs
+            queuedAutoRefreshRemoteRefs = null
+            await runRefreshProviderQuotas(
+              nextForceRemoteRefs,
+              nextAutoRefreshRemoteRefs ?? undefined,
+            )
           }
         } finally {
           refreshTask = null
@@ -265,6 +337,7 @@ export function useProviderQuotas(options: UseProviderQuotasOptions) {
 
   const updateCountdowns = () => {
     const tabQuotaDisplayMap = quotaDisplayMap[getActiveTab()]
+    const autoRefreshRemoteRefs = resolveAutoRefreshRemoteQuotaRefs?.()
     const now = new Date()
     const previousTickAt = lastCountdownTickAt ?? new Date(now.getTime() - COUNTDOWN_TICK_INTERVAL_MS)
     let needsRefresh = false
@@ -278,7 +351,8 @@ export function useProviderQuotas(options: UseProviderQuotasOptions) {
         // 倒计时刚归零时触发一次数据刷新，使进度条和已用金额及时更新
         if (hasProviderQuotaCountdownCrossedReset(item.nextReset, previousTickAt, now)) {
           needsRefresh = true
-          if (item.valueMode === 'count') {
+          const canAutoRefreshRemote = !autoRefreshRemoteRefs || autoRefreshRemoteRefs.has(ref)
+          if (item.valueMode === 'count' && canAutoRefreshRemote) {
             forceRemoteRefs.add(ref)
           }
         }
@@ -286,7 +360,10 @@ export function useProviderQuotas(options: UseProviderQuotasOptions) {
     }
     lastCountdownTickAt = now
     if (needsRefresh) {
-      void refreshProviderQuotas({ forceRemoteRefs })
+      void refreshProviderQuotas({
+        forceRemoteRefs,
+        ...(autoRefreshRemoteRefs ? { autoRefreshRemoteRefs } : {}),
+      })
     }
   }
 
@@ -299,7 +376,12 @@ export function useProviderQuotas(options: UseProviderQuotasOptions) {
     stopTimers()
     lastCountdownTickAt = new Date()
     refreshTimer = globalThis.setInterval(() => {
-      void refreshProviderQuotas()
+      const autoRefreshRemoteRefs = resolveAutoRefreshRemoteQuotaRefs?.()
+      void refreshProviderQuotas(
+        autoRefreshRemoteRefs
+          ? { autoRefreshRemoteRefs }
+          : undefined,
+      )
     }, QUOTA_REFRESH_INTERVAL_MS)
     countdownTimer = globalThis.setInterval(updateCountdowns, COUNTDOWN_TICK_INTERVAL_MS)
   }

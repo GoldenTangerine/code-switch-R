@@ -2,7 +2,7 @@ import type { AutomationCard } from '../../data/cards'
 import type { BlacklistStatus } from '../../services/blacklist'
 import type { ConfigFile, ProxyInjection } from '../../services/customCliService'
 import type { BudgetQuotaAdjustments, BudgetQuotaKey, BudgetQuotaSettings } from '../../utils/budgetUsage'
-import type { ProviderQuotaQueryType } from '../../utils/providerQuotaQuery'
+import type { ProviderQuotaQueryConfig, ProviderQuotaQueryType } from '../../utils/providerQuotaQuery'
 
 export type TranslateFn = (key: string, ...args: any[]) => string
 
@@ -68,10 +68,11 @@ export type VendorForm = {
   budgetQuotaSettings?: BudgetQuotaSettings
   budgetQuotaUsedAdjustments?: BudgetQuotaAdjustments
   providerQuotaQueryType?: ProviderQuotaQueryType
+  providerQuotaQueryConfig?: ProviderQuotaQueryConfig
 }
 
 export type ProviderQuotaDisplayItem = {
-  key: BudgetQuotaKey
+  key: string
   label: string
   used: number
   total: number
@@ -79,6 +80,9 @@ export type ProviderQuotaDisplayItem = {
   countdownLabel: string
   nextReset: Date | null
   valueMode?: 'currency' | 'count'
+  unit?: string
+  extra?: string
+  invalidMessage?: string
 }
 
 export type ProviderStatDisplay =

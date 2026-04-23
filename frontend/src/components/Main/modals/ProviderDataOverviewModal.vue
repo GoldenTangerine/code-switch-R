@@ -153,6 +153,7 @@
                     item.progressClass,
                     { 'is-over': item.isOver, 'is-inactive': item.isInactive },
                   ]"
+                  :title="item.detailTooltip || undefined"
                 >
                   <header class="provider-data-quota-card__header">
                     <span class="provider-data-quota-card__badge" :class="`provider-data-quota-card__badge--${item.key}`">
@@ -181,6 +182,9 @@
                     <span>{{ item.remainingLabel }}</span>
                     <span>{{ item.countdownLabel }}</span>
                   </footer>
+                  <p v-if="item.detailLabel" class="provider-data-quota-card__detail">
+                    {{ item.detailLabel }}
+                  </p>
                 </article>
               </div>
             </template>
@@ -277,6 +281,7 @@ import InlineModal from '../../common/InlineModal.vue'
 import { cardProviderRef } from '../adapters/providerCardMappers'
 import { formatQuotaUsagePercent, getQuotaProgressClass, getQuotaProgressPercent } from '../utils/providerQuotaDisplay'
 import { resolveProviderQuotaQueryDisplay } from '../utils/providerQuotaQueryDisplay'
+import { resolveProviderQuotaCurrencyCode } from '../utils/providerQuotaValueFormat'
 import {
   formatProviderQuotaCountdownLabel,
   hasProviderQuotaCountdownCrossedReset,
@@ -384,15 +389,35 @@ const formatCurrency = (value: number) => currencyFormatter.value.format(Number.
 const formatCount = (value: number) => countFormatter.value.format(Number.isFinite(value) ? value : 0)
 const formatCompactCount = (value: number) => compactCountFormatter.value.format(Number.isFinite(value) ? value : 0)
 const formatChartDate = (timestamp: number) => dateFormatter.value.format(timestamp)
+const resolveQuotaCurrencyFormatter = (unit?: string) => {
+  const currencyCode = resolveProviderQuotaCurrencyCode(unit)
+  if (currencyCode) {
+    return new Intl.NumberFormat(locale.value || 'en', {
+      style: 'currency',
+      currency: currencyCode,
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })
+  }
+  return null
+}
 const formatQuotaValue = (
-  item: Pick<ProviderQuotaSnapshotItem, 'valueMode'>,
+  item: Pick<ProviderQuotaSnapshotItem, 'valueMode' | 'unit'>,
   value: number,
 ) => {
   const normalized = Number.isFinite(value) ? value : 0
   if (item.valueMode === 'count') {
-    return quotaCountFormatter.value.format(normalized)
+    const formatted = quotaCountFormatter.value.format(normalized)
+    return item.unit?.trim() ? `${formatted} ${item.unit.trim()}` : formatted
   }
-  return formatCurrency(normalized)
+
+  const currencyFormatter = resolveQuotaCurrencyFormatter(item.unit)
+  if (currencyFormatter) {
+    return currencyFormatter.format(normalized)
+  }
+
+  const fallbackFormatted = quotaCountFormatter.value.format(normalized)
+  return item.unit?.trim() ? `${fallbackFormatted} ${item.unit.trim()}` : fallbackFormatted
 }
 
 const hasTrafficData = computed(() => dailyPoints.value.some((point) => point.cost > 0 || point.requests > 0 || point.totalTokens > 0))
@@ -452,7 +477,7 @@ const highestQuotaUsageLabel = computed(() => {
 
 const quotaCards = computed(() => quotaItems.value.map((item) => ({
   ...item,
-  label: t(providerQuotaLabelKeyMap[item.key]),
+  label: providerQuotaLabelKeyMap[item.key] ? t(providerQuotaLabelKeyMap[item.key]) : item.label,
   isOver: item.progressRatio >= 1,
   isInactive: !item.isActive,
   percentLabel: formatQuotaUsagePercent(item),
@@ -464,10 +489,12 @@ const quotaCards = computed(() => quotaItems.value.map((item) => ({
       ? item.countdownLabel
       : t('components.main.providers.quotaInactive'),
   remainingLabel: !item.isActive
-    ? t('components.main.providerDataOverview.quotaInactiveLabel')
+    ? `${item.invalidMessage ?? ''}`.trim() || t('components.main.providerDataOverview.quotaInactiveLabel')
     : item.remaining >= 0
       ? t('components.main.providerDataOverview.quotaRemaining', { amount: formatQuotaValue(item, item.remaining) })
       : t('components.main.providerDataOverview.quotaExceeded', { amount: formatQuotaValue(item, Math.abs(item.remaining)) }),
+  detailLabel: `${item.extra ?? ''}`.trim() || undefined,
+  detailTooltip: [`${item.invalidMessage ?? ''}`.trim(), `${item.extra ?? ''}`.trim()].filter(Boolean).join('\n'),
 })))
 
 const nextLoadRequestId = () => {
@@ -905,10 +932,13 @@ const loadOverview = async () => {
     const providerRef = cardProviderRef(props.provider) || props.provider.name
     const range = buildProviderOverviewRange(LOOKBACK_DAYS)
     const now = new Date()
-    const quotaPromise = hasProviderQuotaQueryType(props.provider.providerQuotaQueryType)
+    const quotaPromise = hasProviderQuotaQueryType(
+      props.provider.providerQuotaQueryConfig ?? props.provider.providerQuotaQueryType,
+      props.provider.providerQuotaQueryType,
+    )
       ? resolveProviderQuotaQueryDisplay({
-        card: props.provider,
-        now,
+          card: props.provider,
+          now,
         t,
       })
       : resolveProviderQuotaSnapshot({
@@ -1184,7 +1214,8 @@ onBeforeUnmount(() => {
 .provider-data-panel__hint,
 .provider-data-panel__legend,
 .provider-data-quota-card__meta-label,
-.provider-data-quota-card__footer {
+.provider-data-quota-card__footer,
+.provider-data-quota-card__detail {
   font-size: 0.82rem;
   color: #64748b;
 }
@@ -1423,6 +1454,11 @@ onBeforeUnmount(() => {
     width 220ms ease,
     background 220ms ease,
     box-shadow 220ms ease;
+}
+
+.provider-data-quota-card__detail {
+  margin: 0;
+  line-height: 1.45;
 }
 
 .provider-data-quota-card {

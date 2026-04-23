@@ -28,55 +28,57 @@
       </div>
     </div>
 
-    <div
-      v-if="usageTooltip.visible"
-      ref="tooltipRef"
-      class="contrib-tooltip"
-      :class="[usageTooltip.placement, { 'is-positioned': usageTooltip.positioned }]"
-      :style="{ left: `${usageTooltip.left}px`, top: `${usageTooltip.top}px` }"
-      role="tooltip"
-    >
-      <p class="tooltip-heading">{{ formattedTooltipLabel }}</p>
-      <div class="tooltip-summary-grid">
-        <div
-          v-for="card in usageTooltipSummaryCards"
-          :key="card.key"
-          :class="['tooltip-summary-card', `is-${card.tone}`, { 'is-full': card.fullWidth }]"
-        >
-          <span class="tooltip-summary-label">{{ card.label }}</span>
-          <span class="tooltip-summary-value">{{ card.value }}</span>
+    <Teleport to="body">
+      <div
+        v-if="usageTooltip.visible"
+        ref="tooltipRef"
+        class="contrib-tooltip usage-heatmap-tooltip"
+        :class="[usageTooltip.placement, { 'is-positioned': usageTooltip.positioned }]"
+        :style="{ left: `${usageTooltip.left}px`, top: `${usageTooltip.top}px` }"
+        role="tooltip"
+      >
+        <p class="tooltip-heading">{{ formattedTooltipLabel }}</p>
+        <div class="tooltip-summary-grid">
+          <div
+            v-for="card in usageTooltipSummaryCards"
+            :key="card.key"
+            :class="['tooltip-summary-card', `is-${card.tone}`, { 'is-full': card.fullWidth }]"
+          >
+            <span class="tooltip-summary-label">{{ card.label }}</span>
+            <span class="tooltip-summary-value">{{ card.value }}</span>
+          </div>
+        </div>
+        <div class="tooltip-sections">
+          <section
+            v-for="section in usageTooltipSections"
+            :key="section.key"
+            class="tooltip-section"
+          >
+            <div class="tooltip-section-heading" :class="`is-${section.tone}`">
+              {{ section.title }}
+            </div>
+            <div class="tooltip-section-body">
+              <div
+                v-for="row in section.rows"
+                :key="row.key"
+                :class="['tooltip-row', `is-${row.tone}`, { 'is-active': row.active }]"
+              >
+                <span class="tooltip-row-label">{{ row.label }}</span>
+                <span
+                  :class="[
+                    'tooltip-row-value',
+                    `is-${row.tone}`,
+                    { 'is-emphasis': row.emphasis || row.active },
+                  ]"
+                >
+                  {{ row.value }}
+                </span>
+              </div>
+            </div>
+          </section>
         </div>
       </div>
-      <div class="tooltip-sections">
-        <section
-          v-for="section in usageTooltipSections"
-          :key="section.key"
-          class="tooltip-section"
-        >
-          <div class="tooltip-section-heading" :class="`is-${section.tone}`">
-            {{ section.title }}
-          </div>
-          <div class="tooltip-section-body">
-            <div
-              v-for="row in section.rows"
-              :key="row.key"
-              :class="['tooltip-row', `is-${row.tone}`, { 'is-active': row.active }]"
-            >
-              <span class="tooltip-row-label">{{ row.label }}</span>
-              <span
-                :class="[
-                  'tooltip-row-value',
-                  `is-${row.tone}`,
-                  { 'is-emphasis': row.emphasis || row.active },
-                ]"
-              >
-                {{ row.value }}
-              </span>
-            </div>
-          </div>
-        </section>
-      </div>
-    </div>
+    </Teleport>
   </section>
 </template>
 
@@ -148,7 +150,7 @@ const isCurrentTimeCell = (day: UsageHeatmapDay) => {
   return getHeatmapCellMatchKey(day) === currentHeatmapCellMatchKey.value
 }
 
-type TooltipPlacement = 'above' | 'below'
+type TooltipPlacement = 'right' | 'left' | 'overlay'
 type UsageTooltipTone = 'neutral' | 'info' | 'warning' | 'success' | 'violet' | 'rose'
 type UsageTooltipSummaryCard = {
   key: string
@@ -187,7 +189,7 @@ const usageTooltip = reactive({
   dateKey: '',
   left: 0,
   top: 0,
-  placement: 'above' as TooltipPlacement,
+  placement: 'right' as TooltipPlacement,
   requests: 0,
   inputTokens: 0,
   outputTokens: 0,
@@ -514,10 +516,18 @@ const clamp = (value: number, min: number, max: number) => {
 
 const TOOLTIP_DEFAULT_WIDTH = 336
 const TOOLTIP_DEFAULT_HEIGHT = 384
-const TOOLTIP_VERTICAL_OFFSET = 12
 const TOOLTIP_HORIZONTAL_MARGIN = 20
 const TOOLTIP_VERTICAL_MARGIN = 24
+const TOOLTIP_CURSOR_SIDE_OFFSET = 18
+const TOOLTIP_CURSOR_VERTICAL_BIAS = 56
+const TOOLTIP_CELL_CLEARANCE = 10
 const HEATMAP_AUTO_REFRESH_INTERVAL_MS = 60_000
+
+type UsageTooltipAnchor = {
+  cellRect: DOMRect | ReturnType<HTMLElement['getBoundingClientRect']>
+  cursorX: number
+  cursorY: number
+}
 
 const getTooltipSize = () => {
   const rect = tooltipRef.value?.getBoundingClientRect()
@@ -557,25 +567,45 @@ const applyUsageTooltipMetrics = (day: UsageHeatmapDay) => {
   usageTooltip.intensityPeakValue = day.intensityPeakValue
 }
 
-const updateUsageTooltipPosition = (cellRect: DOMRect | ReturnType<HTMLElement['getBoundingClientRect']>) => {
+const updateUsageTooltipPosition = ({ cellRect, cursorX, cursorY }: UsageTooltipAnchor) => {
   const { width: tooltipWidth, height: tooltipHeight } = getTooltipSize()
   const { width: viewportWidth, height: viewportHeight } = viewportSize()
-  const centerX = cellRect.left + cellRect.width / 2
-  const halfWidth = tooltipWidth / 2
-  const minLeft = TOOLTIP_HORIZONTAL_MARGIN + halfWidth
-  const maxLeft = viewportWidth > 0 ? viewportWidth - halfWidth - TOOLTIP_HORIZONTAL_MARGIN : centerX
-  usageTooltip.left = clamp(centerX, minLeft, maxLeft)
+  const maxLeft = viewportWidth > 0 ? viewportWidth - tooltipWidth - TOOLTIP_HORIZONTAL_MARGIN : TOOLTIP_HORIZONTAL_MARGIN
+  const maxTop = viewportHeight > 0 ? viewportHeight - tooltipHeight - TOOLTIP_VERTICAL_MARGIN : TOOLTIP_VERTICAL_MARGIN
 
-  const anchorTop = cellRect.top
-  const anchorBottom = cellRect.bottom
-  const canShowAbove = anchorTop - tooltipHeight - TOOLTIP_VERTICAL_OFFSET >= TOOLTIP_VERTICAL_MARGIN
-  const viewportBottomLimit = viewportHeight > 0 ? viewportHeight - tooltipHeight - TOOLTIP_VERTICAL_MARGIN : anchorBottom
-  const shouldPlaceBelow = !canShowAbove
-  usageTooltip.placement = shouldPlaceBelow ? 'below' : 'above'
-  const desiredTop = shouldPlaceBelow
-    ? anchorBottom + TOOLTIP_VERTICAL_OFFSET
-    : anchorTop - tooltipHeight - TOOLTIP_VERTICAL_OFFSET
-  usageTooltip.top = clamp(desiredTop, TOOLTIP_VERTICAL_MARGIN, viewportBottomLimit)
+  const desiredTop = cursorY - tooltipHeight / 2 + TOOLTIP_CURSOR_VERTICAL_BIAS
+  usageTooltip.top = clamp(desiredTop, TOOLTIP_VERTICAL_MARGIN, maxTop)
+
+  const desiredRightLeft = Math.max(
+    cursorX + TOOLTIP_CURSOR_SIDE_OFFSET,
+    cellRect.right + TOOLTIP_CELL_CLEARANCE,
+  )
+  const desiredLeftLeft = Math.min(
+    cursorX - tooltipWidth - TOOLTIP_CURSOR_SIDE_OFFSET,
+    cellRect.left - tooltipWidth - TOOLTIP_CELL_CLEARANCE,
+  )
+
+  const canShowRight = desiredRightLeft <= maxLeft
+  const canShowLeft = desiredLeftLeft >= TOOLTIP_HORIZONTAL_MARGIN
+
+  if (canShowRight) {
+    usageTooltip.placement = 'right'
+    usageTooltip.left = desiredRightLeft
+    return
+  }
+
+  if (canShowLeft) {
+    usageTooltip.placement = 'left'
+    usageTooltip.left = desiredLeftLeft
+    return
+  }
+
+  usageTooltip.placement = 'overlay'
+  usageTooltip.left = clamp(
+    cursorX - tooltipWidth / 2,
+    TOOLTIP_HORIZONTAL_MARGIN,
+    maxLeft,
+  )
 }
 
 let usageTooltipPositionRequestId = 0
@@ -603,12 +633,12 @@ const scheduleCurrentTimeRefresh = () => {
 }
 
 const finalizeUsageTooltipPosition = async (
-  cellRect: DOMRect | ReturnType<HTMLElement['getBoundingClientRect']>,
+  anchor: UsageTooltipAnchor,
   positionRequestId: number,
 ) => {
   await nextTick()
   if (!usageTooltip.visible || positionRequestId !== usageTooltipPositionRequestId) return
-  updateUsageTooltipPosition(cellRect)
+  updateUsageTooltipPosition(anchor)
   usageTooltip.positioned = true
 }
 
@@ -616,7 +646,11 @@ const showUsageTooltip = (day: UsageHeatmapDay, event: MouseEvent) => {
   const target = event.currentTarget as HTMLElement | null
   if (!target) return
 
-  const cellRect = target.getBoundingClientRect()
+  const anchor = {
+    cellRect: target.getBoundingClientRect(),
+    cursorX: event.clientX,
+    cursorY: event.clientY,
+  }
   const isInitialRender = !usageTooltip.visible
   const positionRequestId = ++usageTooltipPositionRequestId
   applyUsageTooltipMetrics(day)
@@ -624,13 +658,13 @@ const showUsageTooltip = (day: UsageHeatmapDay, event: MouseEvent) => {
   if (isInitialRender || !usageTooltip.positioned) {
     usageTooltip.visible = true
     usageTooltip.positioned = false
-    void finalizeUsageTooltipPosition(cellRect, positionRequestId)
+    void finalizeUsageTooltipPosition(anchor, positionRequestId)
     return
   }
 
-  updateUsageTooltipPosition(cellRect)
+  updateUsageTooltipPosition(anchor)
   usageTooltip.positioned = true
-  void finalizeUsageTooltipPosition(cellRect, positionRequestId)
+  void finalizeUsageTooltipPosition(anchor, positionRequestId)
 }
 
 const hideUsageTooltip = () => {

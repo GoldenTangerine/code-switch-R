@@ -419,6 +419,94 @@ describe('useProviderQuotas', () => {
     ])
   })
 
+  it('preserves invalid messages and extra details from remote quota items', async () => {
+    const cards = createCardRecord()
+    const card = createCard(18, {
+      providerQuotaQueryType: 'newapi',
+      budgetQuotaSettings: undefined,
+    })
+    cards.codex.push(card)
+
+    vi.mocked(queryProviderQuota).mockResolvedValue({
+      success: true,
+      queryType: 'newapi',
+      items: [
+        {
+          key: 'quota_1',
+          label: 'NewAPI',
+          used: 0,
+          total: 0,
+          active: false,
+          invalidMessage: 'Access token expired',
+          extra: '请重新检查 User ID',
+        },
+      ],
+    })
+
+    const quotaState = useProviderQuotas({
+      t: (key: string) => key,
+      getActiveTab: () => 'codex',
+      cards,
+    })
+
+    await quotaState.refreshProviderQuotas()
+
+    expect(quotaState.getQuotaDisplay(card)).toEqual([
+      expect.objectContaining({
+        key: 'quota_1',
+        label: 'NewAPI',
+        isActive: false,
+        countdownLabel: 'components.main.providers.quotaInactive',
+        invalidMessage: 'Access token expired',
+        extra: '请重新检查 User ID',
+      }),
+    ])
+  })
+
+  it('keeps rendering remote failure items even when the query returns success=false', async () => {
+    const cards = createCardRecord()
+    const card = createCard(181, {
+      providerQuotaQueryType: 'balance',
+      budgetQuotaSettings: undefined,
+      apiUrl: 'https://openrouter.ai/api/v1/chat/completions',
+    })
+    cards.codex.push(card)
+
+    vi.mocked(queryProviderQuota).mockResolvedValue({
+      success: false,
+      queryType: 'balance',
+      error: '官方余额查询认证失败 (HTTP 401)',
+      items: [
+        {
+          key: 'openrouter',
+          label: 'OpenRouter',
+          used: 0,
+          total: 0,
+          active: false,
+          invalidMessage: '官方余额查询认证失败 (HTTP 401)',
+        },
+      ],
+    })
+
+    const quotaState = useProviderQuotas({
+      t: (key: string) => key,
+      getActiveTab: () => 'codex',
+      cards,
+    })
+
+    await quotaState.refreshProviderQuotas()
+
+    expect(quotaState.getQuotaDisplay(card)).toEqual([
+      expect.objectContaining({
+        key: 'openrouter',
+        label: 'OpenRouter',
+        isActive: false,
+        countdownLabel: 'components.main.providers.quotaInactive',
+        invalidMessage: '官方余额查询认证失败 (HTTP 401)',
+      }),
+    ])
+  })
+
   it('prefers provider query result over local budget-log quota calculation', async () => {
     const cards = createCardRecord()
     const quotas = createDefaultBudgetQuotaSettings()
@@ -511,6 +599,58 @@ describe('useProviderQuotas', () => {
     ])
   })
 
+  it('limits timer-based remote quota polling to currently active providers', async () => {
+    vi.setSystemTime(new Date('2026-04-09T10:00:00.000Z'))
+
+    const cards = createCardRecord()
+    const activeCard = createCard(21, {
+      providerRef: 'active-ref',
+      providerQuotaQueryType: 'token_plan_kimi',
+    })
+    const idleCard = createCard(22, {
+      providerRef: 'idle-ref',
+      providerQuotaQueryType: 'token_plan_kimi',
+    })
+    cards.claude.push(activeCard, idleCard)
+
+    vi.mocked(queryProviderQuota).mockImplementation(async (queryTypeOrConfig, apiUrl) => ({
+      success: true,
+      queryType: typeof queryTypeOrConfig === 'string' ? queryTypeOrConfig : 'token_plan_kimi',
+      items: [
+        {
+          key: apiUrl === activeCard.apiUrl ? 'weekly' : 'five_hour',
+          used: apiUrl === activeCard.apiUrl ? 10 : 88,
+          total: 100,
+          nextReset: '2026-04-12T00:00:00.000Z',
+          active: true,
+        },
+      ],
+    }))
+
+    const quotaState = useProviderQuotas({
+      t: (key: string) => key,
+      getActiveTab: () => 'claude',
+      cards,
+      resolveAutoRefreshRemoteQuotaRefs: () => new Set(['active-ref']),
+    })
+
+    quotaState.startTimers()
+    await vi.advanceTimersByTimeAsync(30_000)
+
+    expect(queryProviderQuota).toHaveBeenCalledTimes(1)
+    expect(queryProviderQuota).toHaveBeenCalledWith('token_plan_kimi', activeCard.apiUrl, activeCard.apiKey)
+    expect(quotaState.getQuotaDisplay(activeCard)).toEqual([
+      expect.objectContaining({
+        key: 'weekly',
+        used: 10,
+        total: 100,
+      }),
+    ])
+    expect(quotaState.getQuotaDisplay(idleCard)).toEqual([])
+
+    quotaState.stopTimers()
+  })
+
   it('refreshes cached remote quota again after cache ttl expires', async () => {
     vi.setSystemTime(new Date('2026-04-09T10:00:00.000Z'))
 
@@ -568,6 +708,67 @@ describe('useProviderQuotas', () => {
         valueMode: 'count',
       }),
     ])
+  })
+
+  it('only falls back to an expired remote quota cache once after ttl refresh failures', async () => {
+    vi.setSystemTime(new Date('2026-04-09T10:00:00.000Z'))
+
+    const cards = createCardRecord()
+    const card = createCard(182, {
+      providerQuotaQueryType: 'token_plan_kimi',
+    })
+    cards.claude.push(card)
+
+    vi.mocked(queryProviderQuota)
+      .mockResolvedValueOnce({
+        success: true,
+        queryType: 'token_plan_kimi',
+        items: [
+          {
+            key: 'weekly',
+            used: 30,
+            total: 120,
+            nextReset: '2026-04-12T00:00:00.000Z',
+            active: true,
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        success: false,
+        queryType: 'token_plan_kimi',
+        items: [],
+        error: 'temporary upstream timeout',
+      })
+      .mockResolvedValueOnce({
+        success: false,
+        queryType: 'token_plan_kimi',
+        items: [],
+        error: 'temporary upstream timeout',
+      })
+
+    const quotaState = useProviderQuotas({
+      t: (key: string) => key,
+      getActiveTab: () => 'claude',
+      cards,
+    })
+
+    await quotaState.refreshProviderQuotas()
+
+    vi.setSystemTime(new Date('2026-04-09T10:05:01.000Z'))
+    await quotaState.refreshProviderQuotas()
+    expect(quotaState.getQuotaDisplay(card)).toEqual([
+      expect.objectContaining({
+        key: 'weekly',
+        used: 30,
+        total: 120,
+      }),
+    ])
+
+    vi.setSystemTime(new Date('2026-04-09T10:05:31.000Z'))
+    await quotaState.refreshProviderQuotas()
+
+    expect(queryProviderQuota).toHaveBeenCalledTimes(3)
+    expect(quotaState.getQuotaDisplay(card)).toEqual([])
   })
 
   it('re-fetches remote quota immediately when explicit forceRemoteRefs are provided', async () => {

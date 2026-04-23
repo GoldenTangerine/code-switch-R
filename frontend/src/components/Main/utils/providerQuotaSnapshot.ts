@@ -23,7 +23,7 @@ const MINUTE_MS = 60_000
 const HOUR_MS = 60 * MINUTE_MS
 const DAY_MS = 24 * HOUR_MS
 
-export const providerQuotaLabelKeyMap: Record<BudgetQuotaKey, string> = {
+export const providerQuotaLabelKeyMap: Record<string, string> = {
   five_hour: 'components.main.providers.quotaFiveHour',
   daily: 'components.main.providers.quotaDaily',
   weekly: 'components.main.providers.quotaWeekly',

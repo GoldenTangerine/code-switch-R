@@ -1,7 +1,11 @@
 import type { AutomationCard } from '../../../data/cards'
 import { queryProviderQuota } from '../../../services/providerQuotaQuery'
 import { roundBudgetValue } from '../../../utils/budgetUsage'
-import { hasProviderQuotaQueryType, normalizeProviderQuotaQueryType } from '../../../utils/providerQuotaQuery'
+import {
+  hasProviderQuotaQueryType,
+  normalizeProviderQuotaQueryConfig,
+  resolveProviderQuotaQueryType,
+} from '../../../utils/providerQuotaQuery'
 import type { TranslateFn } from '../types'
 import {
   formatProviderQuotaCountdownLabel,
@@ -29,30 +33,39 @@ export async function resolveProviderQuotaQueryDisplay({
   now: Date
   t: TranslateFn
 }): Promise<ProviderQuotaSnapshotItem[]> {
-  if (!hasProviderQuotaQueryType(card.providerQuotaQueryType)) {
+  const queryConfig = normalizeProviderQuotaQueryConfig(
+    card.providerQuotaQueryConfig,
+    card.providerQuotaQueryType,
+  )
+  if (!hasProviderQuotaQueryType(queryConfig ?? card.providerQuotaQueryType, card.providerQuotaQueryType)) {
     return []
   }
 
-  const queryType = normalizeProviderQuotaQueryType(card.providerQuotaQueryType)
+  const queryType = resolveProviderQuotaQueryType(queryConfig ?? card.providerQuotaQueryType)
   try {
-    const response = await queryProviderQuota(queryType, card.apiUrl, card.apiKey)
-    if (!response?.success || !Array.isArray(response.items) || response.items.length === 0) {
-      if (response?.error) {
-        console.warn(`[ProviderQuotaQuery] ${card.name} query failed: ${response.error}`)
-      }
+    const response = await queryProviderQuota(queryConfig ?? queryType, card.apiUrl, card.apiKey)
+    const responseItems = Array.isArray(response?.items) ? response.items : []
+    if (response?.error) {
+      console.warn(`[ProviderQuotaQuery] ${card.name} query failed: ${response.error}`)
+    }
+    if (responseItems.length === 0) {
       return []
     }
 
-    return response.items
-      .filter((item) => item && providerQuotaLabelKeyMap[item.key])
+    return responseItems
+      .filter((item) => item && `${item.key ?? ''}`.trim())
       .map((item) => {
         const used = normalizeDisplayValue(Number(item.used))
         const total = normalizeDisplayValue(Number(item.total))
         const nextReset = item.nextReset ? new Date(item.nextReset) : null
-        const isActive = item.active !== false
+        const isActive = item.active !== false && item.isValid !== false
+        const normalizedKey = `${item.key}`.trim()
+        const defaultLabelKey = providerQuotaLabelKeyMap[normalizedKey]
+        const invalidMessage = `${item.invalidMessage ?? ''}`.trim() || undefined
+        const extra = `${item.extra ?? ''}`.trim() || undefined
         return {
-          key: item.key,
-          label: t(providerQuotaLabelKeyMap[item.key]),
+          key: normalizedKey,
+          label: `${item.label ?? ''}`.trim() || (defaultLabelKey ? t(defaultLabelKey) : normalizedKey),
           used,
           total,
           progressRatio: resolveProgressRatio(used, total),
@@ -64,7 +77,10 @@ export async function resolveProviderQuotaQueryDisplay({
           adjustment: 0,
           remaining: roundBudgetValue(total - used),
           isActive,
-          valueMode: 'count' as const,
+          valueMode: item.valueMode === 'currency' ? 'currency' : 'count',
+          unit: `${item.unit ?? ''}`.trim() || undefined,
+          extra,
+          invalidMessage,
         }
       })
   } catch (error) {

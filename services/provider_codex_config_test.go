@@ -139,6 +139,13 @@ func TestProviderService_LoadProvidersSupportsTotalQuotaFieldAfterInitDatabase(t
 					Total: 12.34,
 				},
 				ProviderQuotaQueryType: string(ProviderQuotaQueryTypeTokenPlanGLM),
+				ProviderQuotaQueryConfig: &ProviderQuotaQueryConfig{
+					Enabled:           true,
+					TemplateType:      string(ProviderQuotaTemplateTypeTokenPlan),
+					TokenPlanProvider: "glm",
+					Timeout:           10,
+					AutoQueryInterval: 5,
+				},
 			},
 		},
 	})
@@ -165,5 +172,8 @@ func TestProviderService_LoadProvidersSupportsTotalQuotaFieldAfterInitDatabase(t
 	}
 	if loaded[0].ProviderQuotaQueryType != string(ProviderQuotaQueryTypeTokenPlanGLM) {
 		t.Fatalf("providerQuotaQueryType 反序列化失败: %q", loaded[0].ProviderQuotaQueryType)
+	}
+	if loaded[0].ProviderQuotaQueryConfig == nil || loaded[0].ProviderQuotaQueryConfig.TokenPlanProvider != "glm" {
+		t.Fatalf("providerQuotaQueryConfig 反序列化失败: %+v", loaded[0].ProviderQuotaQueryConfig)
 	}
 }
