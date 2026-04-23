@@ -1,5 +1,5 @@
 <template>
-  <BaseModal
+  <InlineModal
     :open="open"
     :title="t('components.main.form.labels.providerQuotaQueryConfig')"
     :body-scrollable="false"
@@ -258,7 +258,7 @@
         </BaseButton>
       </footer>
     </form>
-  </BaseModal>
+  </InlineModal>
 </template>
 
 <script setup lang="ts">
@@ -266,7 +266,7 @@ import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseButton from '../../common/BaseButton.vue'
 import BaseInput from '../../common/BaseInput.vue'
-import BaseModal from '../../common/BaseModal.vue'
+import InlineModal from '../../common/InlineModal.vue'
 import JsonCodeEditor from '../../common/JsonCodeEditor.vue'
 import { queryProviderQuota } from '../../../services/providerQuotaQuery'
 import { showToast } from '../../../utils/toast'
