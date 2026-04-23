@@ -726,7 +726,7 @@
           "providerQuotaQueryUserId": "Example: 10001",
           "providerQuotaQueryTimeout": "10",
           "providerQuotaQueryAutoInterval": "5",
-          "providerQuotaQueryCode": "Return { request, extractor }"
+          "providerQuotaQueryCode": "Return request / extractor"
         },
         "noIconResults": "No matching icons found",
         "hints": {
@@ -758,7 +758,7 @@
           "providerQuotaQueryTemplateHint": "Official balance and Token Plan use built-in queries; Custom, General and NewApi execute scripts.",
           "providerQuotaQueryTemplateBalance": "Best for official balance endpoints such as DeepSeek, StepFun, SiliconFlow, OpenRouter and Novita.",
           "providerQuotaQueryTemplateCustom": "Full custom request + extractor logic. Cross-domain and plain HTTP are allowed here (localhost / your own risk).",
-          "providerQuotaQueryTemplateGeneral": "General balance preset. It requests {{baseUrl}}/user/balance by default and still enforces same-origin + HTTPS.",
+          "providerQuotaQueryTemplateGeneral": "General balance preset. It requests baseUrl + /user/balance by default and still enforces same-origin + HTTPS.",
           "providerQuotaQueryTemplateNewApi": "Targets NewAPI-style panels. It requests /api/user/self by default and needs Access Token plus User ID.",
           "providerQuotaQueryTemplateTokenPlan": "Uses the built-in Token Plan query, so no script is required.",
           "providerQuotaQueryBalanceDetectedBadge": "Detected: {provider}",
@@ -766,11 +766,11 @@
           "providerQuotaQueryBalanceDetected": "The current API URL matches the {provider} official balance endpoint. Saving this template will reuse the provider API key directly.",
           "providerQuotaQueryBalanceUnsupported": "The current API URL is not recognized as a supported official balance endpoint ({url}). Save and test will block this template instead of letting it fail later on the home page.",
           "providerQuotaQueryWillFallbackToProvider": "Leave these blank to fall back to the current provider API URL and API key.",
-          "providerQuotaQueryCustomCredentialHint": "All fields are optional. Your script can access {{baseUrl}}, {{apiKey}}, {{accessToken}} and {{userId}}.",
+          "providerQuotaQueryCustomCredentialHint": "All fields are optional. Your script can access baseUrl, apiKey, accessToken and userId.",
           "providerQuotaQueryNewApiCredentialHint": "NewAPI usually does not reuse the provider API key directly, so fill in Access Token and User ID explicitly.",
           "providerQuotaQueryAccessTokenHint": "Used as the Bearer token for NewAPI requests.",
           "providerQuotaQueryUserIdHint": "Some NewAPI panels require an extra user id header.",
-          "providerQuotaQueryCodeHint": "The script must return { request, extractor }. The extractor may return one object or an array of objects.",
+          "providerQuotaQueryCodeHint": "The script must return an object containing request and extractor. The extractor may return one object or an array of objects.",
           "providerQuotaQueryAutoInterval": "Use 0 to disable polling and only query on manual refresh or reset.",
           "providerQuotaQueryTimeout": "Timeout is clamped to 2 - 30 seconds. Do not set anything ridiculous.",
           "providerQuotaQueryAutoEvery": "Auto every {minutes} min"

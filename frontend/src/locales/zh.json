@@ -727,7 +727,7 @@
           "providerQuotaQueryUserId": "例如：10001",
           "providerQuotaQueryTimeout": "10",
           "providerQuotaQueryAutoInterval": "5",
-          "providerQuotaQueryCode": "返回 { request, extractor }"
+          "providerQuotaQueryCode": "返回 request / extractor"
         },
         "noIconResults": "未找到匹配的图标",
         "hints": {
@@ -759,7 +759,7 @@
           "providerQuotaQueryTemplateHint": "官方余额和 Token Plan 走内置查询；自定义、通用模版、NewApi 会执行脚本。",
           "providerQuotaQueryTemplateBalance": "适合 DeepSeek、StepFun、SiliconFlow、OpenRouter、Novita 这类官方余额接口。",
           "providerQuotaQueryTemplateCustom": "完全自定义请求和提取逻辑，允许跨域名和 HTTP（localhost / 自担风险）。",
-          "providerQuotaQueryTemplateGeneral": "通用余额模版，默认请求 {{baseUrl}}/user/balance，并要求同源 + HTTPS。",
+          "providerQuotaQueryTemplateGeneral": "通用余额模版，默认请求 baseUrl + /user/balance，并要求同源 + HTTPS。",
           "providerQuotaQueryTemplateNewApi": "适配 NewAPI 系面板，默认请求 /api/user/self，需要 Access Token 和 User ID。",
           "providerQuotaQueryTemplateTokenPlan": "使用内置 Token Plan 查询，不需要写脚本。",
           "providerQuotaQueryBalanceDetectedBadge": "已识别：{provider}",
@@ -767,11 +767,11 @@
           "providerQuotaQueryBalanceDetected": "当前 API 地址已识别为 {provider} 官方余额接口，保存后会直接复用当前供应商的 API Key 去查余额。",
           "providerQuotaQueryBalanceUnsupported": "当前 API 地址暂未识别为受支持的官方余额接口（{url}）。硬选这个模版，保存和测试都会直接拦下，别等到首页再闹鬼。",
           "providerQuotaQueryWillFallbackToProvider": "留空时会回退到当前供应商的 API 地址和 API 密钥。",
-          "providerQuotaQueryCustomCredentialHint": "这些字段都是可选的，脚本里可通过 {{baseUrl}} / {{apiKey}} / {{accessToken}} / {{userId}} 取值。",
+          "providerQuotaQueryCustomCredentialHint": "这些字段都是可选的，脚本里可通过 baseUrl / apiKey / accessToken / userId 取值。",
           "providerQuotaQueryNewApiCredentialHint": "NewAPI 通常不会直接复用当前供应商 API Key，记得填 Access Token 和 User ID。",
           "providerQuotaQueryAccessTokenHint": "用于 NewAPI 请求头里的 Bearer Token。",
           "providerQuotaQueryUserIdHint": "部分 NewAPI 面板要求额外带上用户 ID 请求头。",
-          "providerQuotaQueryCodeHint": "脚本需要返回 { request, extractor }，extractor 可以返回单对象或对象数组。",
+          "providerQuotaQueryCodeHint": "脚本需要返回包含 request 和 extractor 的对象，extractor 可以返回单对象或对象数组。",
           "providerQuotaQueryAutoInterval": "填 0 表示只在手动刷新或重置时查询，不自动轮询。",
           "providerQuotaQueryTimeout": "超时时间会限制在 2 - 30 秒，别往天上填。",
           "providerQuotaQueryAutoEvery": "自动 {minutes} 分钟"

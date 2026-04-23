@@ -1,3 +1,18 @@
+# Code Switch v2.8.34
+
+## 修复
+- **首页「编辑供应商 → 配置查询」这回把真正的内容初始化雷挖出来了**：空白诊断弹窗验证通过后，已将入口切回原 `ProviderQuotaQueryConfigModal.vue`，并修复额度查询配置文案里的裸花括号触发 `vue-i18n` message 编译错误的问题；打包版里不应再因为 `{baseUrl}` 或 `{ request, extractor }` 这类提示文案把弹窗首帧渲染狠狠干懵。
+
+## 技术改进
+- **额度查询弹窗排障过程正式沉淀成文档，后面别再一看遮罩就去莽改 z-index 了**：新增 `doc/provider-quota-query-modal-debug-notes.md`，记录 `v2.8.33` 空白弹窗隔离验证、`v2.8.34` 原内容初始化排查、i18n 报错证据、验证命令和后续排查顺序。
+- **清理临时诊断入口并恢复真实配置弹窗链路**：删除 `ProviderQuotaQueryConfigBlankModal.vue`，`Main/Index.vue` 重新导入原 `ProviderQuotaQueryConfigModal.vue`；中英文额度查询提示文案统一改成不含裸花括号的安全写法，避免 `vue-i18n` 把普通代码提示误当插值语法解析。
+- **发版元数据继续按同一版号收口**：同步更新应用常量、构建配置、Darwin `Info.plist` / `Info.dev.plist`、Windows 版本信息与 Linux `nfpm` 版本到 `v2.8.34`，避免 tag、更新日志和包内版本继续各唱各的调。
+
+## 发布
+- **本次发版版本号统一推进到 `v2.8.34`**：补齐更新日志并准备推送 `v2.8.34` tag 触发 GitHub 自动打包，用真实打包产物验证原额度查询配置弹窗恢复后的表现。
+
+---
+
 # Code Switch v2.8.33
 
 ## 修复
