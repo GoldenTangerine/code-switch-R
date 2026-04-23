@@ -7,7 +7,7 @@
 
         <!-- 点击空白处关闭：只有点到 wrapper 自身时才触发 -->
         <div class="modal-wrapper" @click="onWrapperClick">
-          <Transition name="modal-slide" appear>
+          <Transition name="modal-slide" appear @after-enter="handleAfterEnter">
             <div
               ref="panelRef"
               :class="['modal', variantClass, panelClass]"
@@ -75,7 +75,10 @@ const props = withDefaults(
   },
 )
 
-const emit = defineEmits<{ (e: 'close'): void }>()
+const emit = defineEmits<{
+  (e: 'close'): void
+  (e: 'after-open'): void
+}>()
 
 const variantClass = computed(() => (props.variant === 'confirm' ? 'confirm-modal' : ''))
 const titleId = `modal-title-${Math.random().toString(36).slice(2, 9)}`
@@ -107,6 +110,11 @@ const emitClose = () => {
   if (!isTopMostModal(modalId)) return
   if (props.closeDisabled) return
   emit('close')
+}
+
+const handleAfterEnter = () => {
+  if (!props.open) return
+  emit('after-open')
 }
 
 // 统一阻断冒泡；只有点到 wrapper 空白处才关闭（等价于 @click.self）
