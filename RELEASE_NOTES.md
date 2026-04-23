@@ -1,3 +1,17 @@
+# Code Switch v2.8.32
+
+## 修复
+- **打包版里的 JSON / 脚本编辑弹窗这回终于不再被 CodeMirror 首帧同步挂载狠狠干懵了**：修复 `JsonCodeEditor` 在 Wails / WKWebView 场景下首次挂载时，`EditorView + basicSetup + 长文本 doc` 的同步初始化可能吃掉父级 modal 首帧绘制，导致配置弹窗面板没及时画出来、编辑区空白或界面只剩模糊遮罩的问题；现在编辑器会延后到下一帧再创建，先让弹窗壳体稳定落地。
+
+## 技术改进
+- **通用编辑器挂载时序和入参兜底终于按一套口径收口**：`JsonCodeEditor` 改为用 `requestAnimationFrame` 延后构造 `EditorView`，同时把非字符串 `doc` 统一归一化为字符串并补上构造失败日志，减少配置弹窗在 WebKit / Wails 下因为同步阻塞或脏数据导致的挂载分叉。
+- **发版元数据继续按同一版号收口**：同步更新应用常量、构建配置、Darwin `Info.plist` / `Info.dev.plist`、Windows 版本信息与 Linux `nfpm` 版本到 `v2.8.32`，避免 tag、更新日志和包内版本继续各唱各的调。
+
+## 发布
+- **本次发版版本号统一推进到 `v2.8.32`**：补齐更新日志并准备推送 `v2.8.32` tag 触发 GitHub 自动打包，继续保证仓库版本、Git tag 和最终产物别再各玩各的。
+
+---
+
 # Code Switch v2.8.31
 
 ## 修复

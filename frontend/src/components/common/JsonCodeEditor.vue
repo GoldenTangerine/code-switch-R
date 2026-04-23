@@ -349,30 +349,38 @@ const handleEditorWheel = (event: WheelEvent) => {
   event.preventDefault()
 }
 
-const createEditor = (doc = props.modelValue ?? '') => {
+const createEditor = (doc: unknown = props.modelValue ?? '') => {
   if (!editorHostRef.value) return
 
-  view = new EditorView({
-    state: EditorState.create({
-      doc,
-      extensions: [
-        basicSetup,
-        baseTheme,
-        languageCompartment.of(createLanguageExtension()),
-        layoutCompartment.of(createLayoutExtension()),
-        readOnlyCompartment.of(createReadOnlyExtension()),
-        placeholderCompartment.of(createPlaceholderExtension()),
-        validationCompartment.of(createValidationExtension()),
-        themeCompartment.of(createThemeExtension()),
-        EditorView.updateListener.of((update) => {
-          if (update.docChanged && !syncingFromProps) {
-            emit('update:modelValue', update.state.doc.toString())
-          }
-        }),
-      ],
-    }),
-    parent: editorHostRef.value,
-  })
+  const safeDoc = typeof doc === 'string' ? doc : `${doc ?? ''}`
+
+  try {
+    view = new EditorView({
+      state: EditorState.create({
+        doc: safeDoc,
+        extensions: [
+          basicSetup,
+          baseTheme,
+          languageCompartment.of(createLanguageExtension()),
+          layoutCompartment.of(createLayoutExtension()),
+          readOnlyCompartment.of(createReadOnlyExtension()),
+          placeholderCompartment.of(createPlaceholderExtension()),
+          validationCompartment.of(createValidationExtension()),
+          themeCompartment.of(createThemeExtension()),
+          EditorView.updateListener.of((update) => {
+            if (update.docChanged && !syncingFromProps) {
+              emit('update:modelValue', update.state.doc.toString())
+            }
+          }),
+        ],
+      }),
+      parent: editorHostRef.value,
+    })
+  } catch (error) {
+    console.error('[JsonCodeEditor] createEditor failed', error)
+    view = null
+    return
+  }
 
   const editorScroller = view.scrollDOM as HTMLElement
   editorScroller.addEventListener('wheel', handleEditorWheel, { passive: false })
@@ -445,6 +453,8 @@ watch(isDarkMode, () => {
   reconfigureCompartment(themeCompartment, createThemeExtension())
 })
 
+let deferredMountHandle: number | null = null
+
 onMounted(() => {
   isDarkMode.value = document.documentElement.classList.contains('dark')
   themeObserver = new MutationObserver(() => {
@@ -455,10 +465,21 @@ onMounted(() => {
     attributeFilter: ['class'],
   })
 
-  createEditor()
+  // 推迟到下一帧再构造 CodeMirror：CodeMirror basicSetup + doc 初始化
+  // 在 WKWebView 下是同步阻塞调用（尤其 doc 较长时），
+  // 会吃掉父级 modal 面板第一次绘制的机会，导致「背景模糊、弹窗面板不出现」。
+  // 让父级先完成首帧布局，再 mount 编辑器。
+  deferredMountHandle = window.requestAnimationFrame(() => {
+    deferredMountHandle = null
+    createEditor()
+  })
 })
 
 onUnmounted(() => {
+  if (deferredMountHandle !== null) {
+    window.cancelAnimationFrame(deferredMountHandle)
+    deferredMountHandle = null
+  }
   themeObserver?.disconnect()
   themeObserver = null
   destroyEditor()
