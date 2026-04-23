@@ -1,10 +1,10 @@
 {
   "fixed": {
-    "file_version": "2.8.21"
+    "file_version": "2.8.22"
   },
   "info": {
     "0000": {
-      "ProductVersion": "2.8.21",
+      "ProductVersion": "2.8.22",
       "CompanyName": "Code Switch",
       "FileDescription": "Manage Claude & Codex relays, providers, and request logs.",
       "LegalCopyright": "(c) 2025, Code Switch",

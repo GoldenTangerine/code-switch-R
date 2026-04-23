@@ -156,10 +156,6 @@
         </template>
       </section>
 
-      <footer v-if="!loading && !error && rows.length" class="logs-cost-modal__footer">
-        <span>{{ t('components.logs.costDetail.statementEnd') }}</span>
-        <span>{{ t('components.logs.costDetail.filterHint') }}</span>
-      </footer>
     </div>
   </InlineModal>
 </template>
@@ -240,6 +236,8 @@ function handleProviderSelect(provider: string) {
   overflow: hidden;
   border-radius: 30px;
   border: 1px solid rgba(226, 232, 240, 0.82);
+  --logs-cost-scrollbar-thumb: rgba(148, 163, 184, 0.3);
+  --logs-cost-scrollbar-thumb-hover: rgba(100, 116, 139, 0.46);
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.985), rgba(248, 250, 252, 0.96));
   box-shadow:
@@ -262,7 +260,35 @@ function handleProviderSelect(provider: string) {
 }
 
 :global(.logs-cost-modal-shell .modal-body) {
-  padding: 0 24px 24px;
+  padding: 0 18px 24px 24px;
+  background: transparent;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: var(--logs-cost-scrollbar-thumb) transparent;
+}
+
+:global(.logs-cost-modal-shell .modal-body::-webkit-scrollbar) {
+  width: 10px;
+}
+
+:global(.logs-cost-modal-shell .modal-body::-webkit-scrollbar-track) {
+  background: transparent;
+}
+
+:global(.logs-cost-modal-shell .modal-body::-webkit-scrollbar-thumb) {
+  min-height: 44px;
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: var(--logs-cost-scrollbar-thumb);
+  background-clip: padding-box;
+}
+
+:global(.logs-cost-modal-shell .modal-body::-webkit-scrollbar-thumb:hover) {
+  background: var(--logs-cost-scrollbar-thumb-hover);
+  background-clip: padding-box;
+}
+
+:global(.logs-cost-modal-shell .modal-body::-webkit-scrollbar-corner) {
   background: transparent;
 }
 
@@ -293,6 +319,8 @@ function handleProviderSelect(provider: string) {
 
 :global(.logs-cost-modal-shell--dark) {
   border-color: rgba(148, 163, 184, 0.16);
+  --logs-cost-scrollbar-thumb: rgba(148, 163, 184, 0.24);
+  --logs-cost-scrollbar-thumb-hover: rgba(148, 163, 184, 0.4);
   background:
     linear-gradient(180deg, rgba(8, 13, 23, 0.995), rgba(10, 16, 28, 0.985));
   box-shadow:
@@ -330,6 +358,7 @@ function handleProviderSelect(provider: string) {
   gap: 20px;
   min-height: 380px;
   padding-top: 18px;
+  padding-right: 6px;
   overflow: hidden;
 }
 
@@ -584,7 +613,7 @@ function handleProviderSelect(provider: string) {
 .logs-cost-modal__list-section {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
 }
 
 .logs-cost-modal__list-header {
@@ -592,7 +621,7 @@ function handleProviderSelect(provider: string) {
   justify-content: space-between;
   align-items: center;
   gap: 16px;
-  padding: 0 2px;
+  padding: 0 6px;
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.18em;
@@ -604,9 +633,13 @@ function handleProviderSelect(provider: string) {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 14px;
+  justify-content: space-between;
+  gap: 16px;
   width: 100%;
-  padding: 16px 18px;
+  margin: 0;
+  box-sizing: border-box;
+  min-height: 82px;
+  padding: 18px 20px;
   border-radius: 22px;
   border: 1px solid var(--logs-cost-border);
   background: var(--logs-cost-surface-soft);
@@ -655,7 +688,7 @@ function handleProviderSelect(provider: string) {
 .logs-cost-modal__row-main {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 16px;
   min-width: 0;
   flex: 1 1 auto;
 }
@@ -664,13 +697,13 @@ function handleProviderSelect(provider: string) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 42px;
-  height: 42px;
-  border-radius: 15px;
+  width: 44px;
+  height: 44px;
+  border-radius: 16px;
   border: 1px solid var(--logs-cost-border);
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02));
-  font-size: 18px;
+  font-size: 19px;
   font-weight: 700;
   color: var(--logs-cost-text-secondary);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
@@ -678,13 +711,17 @@ function handleProviderSelect(provider: string) {
 }
 
 .logs-cost-modal__provider-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   min-width: 0;
   flex: 1 1 auto;
 }
 
 .logs-cost-modal__provider-name {
-  font-size: 15px;
-  font-weight: 650;
+  font-size: 16px;
+  line-height: 1.2;
+  font-weight: 700;
   color: var(--logs-cost-text-primary);
   white-space: nowrap;
   overflow: hidden;
@@ -694,14 +731,15 @@ function handleProviderSelect(provider: string) {
 .logs-cost-modal__provider-share {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-top: 6px;
+  gap: 12px;
+  min-height: 16px;
+  margin-top: 0;
 }
 
 .logs-cost-modal__share-track {
   position: relative;
-  flex: 0 0 72px;
-  height: 6px;
+  flex: 0 0 78px;
+  height: 5px;
   overflow: hidden;
   border-radius: 999px;
   background: var(--logs-cost-track);
@@ -716,6 +754,7 @@ function handleProviderSelect(provider: string) {
 
 .logs-cost-modal__share-label {
   font-size: 11px;
+  line-height: 1;
   color: var(--logs-cost-text-secondary);
 }
 
@@ -723,13 +762,15 @@ function handleProviderSelect(provider: string) {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 4px;
+  gap: 6px;
+  min-width: 116px;
   flex: 0 0 auto;
 }
 
 .logs-cost-modal__row-amount {
   font-family: "SFMono-Regular", "Roboto Mono", "Consolas", monospace;
-  font-size: 16px;
+  font-size: 17px;
+  line-height: 1.1;
   font-weight: 700;
   letter-spacing: -0.01em;
   color: var(--logs-cost-accent);
@@ -741,6 +782,7 @@ function handleProviderSelect(provider: string) {
   align-items: center;
   gap: 4px;
   font-size: 10px;
+  line-height: 1;
   font-weight: 600;
   color: var(--logs-cost-danger);
 }
@@ -765,21 +807,6 @@ function handleProviderSelect(provider: string) {
 .logs-cost-modal__row:focus-visible .logs-cost-modal__row-arrow {
   color: var(--logs-cost-text-secondary);
   transform: translateX(3px);
-}
-
-.logs-cost-modal__footer {
-  position: relative;
-  z-index: 1;
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-  padding-top: 4px;
-  border-top: 1px solid var(--logs-cost-border-strong);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--logs-cost-footer);
 }
 
 .logs-cost-modal__loading-block {
@@ -886,11 +913,12 @@ function handleProviderSelect(provider: string) {
   }
 
   :global(.logs-cost-modal-shell .modal-body) {
-    padding: 0 18px 18px;
+    padding: 0 14px 18px 18px;
   }
 
   .logs-cost-modal {
     padding-top: 14px;
+    padding-right: 2px;
   }
 
   .logs-cost-modal__summary-card {
@@ -909,7 +937,8 @@ function handleProviderSelect(provider: string) {
   .logs-cost-modal__row {
     align-items: flex-start;
     gap: 12px;
-    padding: 15px 16px;
+    min-height: 76px;
+    padding: 16px;
   }
 
   .logs-cost-modal__row-main {
@@ -923,13 +952,10 @@ function handleProviderSelect(provider: string) {
   }
 
   .logs-cost-modal__row-side {
+    gap: 4px;
     min-width: 78px;
   }
 
-  .logs-cost-modal__footer {
-    flex-direction: column;
-    gap: 8px;
-  }
 }
 
 @media (max-width: 560px) {
