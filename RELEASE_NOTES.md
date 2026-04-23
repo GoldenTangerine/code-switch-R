@@ -1,3 +1,17 @@
+# Code Switch v2.8.33
+
+## 修复
+- **首页「编辑供应商 → 配置查询」先切到空白诊断弹窗，别再让额度配置内容把排查现场搅成东北乱炖了**：配置查询按钮现在会打开一个最小化的空白 `InlineModal`，用于验证按钮事件、页面级弹窗状态和通用弹窗壳体是否能稳定工作；原额度查询配置内容暂时不参与渲染，方便判断“不显示”到底是弹窗实现问题，还是配置内容加载时把渲染链路干崩了。
+
+## 技术改进
+- **额度查询配置弹窗入口改成可回滚的隔离诊断组件**：新增 `ProviderQuotaQueryConfigBlankModal.vue`，保留原 `open / modelValue / providerApiUrl / providerApiKey / close / save` 接口，`Main/Index.vue` 仅切换导入目标，原 `ProviderQuotaQueryConfigModal.vue` 完整保留，后续确认根因后可以直接切回或继续精修内部内容。
+- **发版元数据继续按同一版号收口**：同步更新应用常量、构建配置、Darwin `Info.plist` / `Info.dev.plist`、Windows 版本信息与 Linux `nfpm` 版本到 `v2.8.33`，避免 tag、更新日志和包内版本继续各唱各的调。
+
+## 发布
+- **本次发版版本号统一推进到 `v2.8.33`**：补齐更新日志并准备推送 `v2.8.33` tag 触发 GitHub 自动打包，用打包产物验证空白诊断弹窗在真实 Wails / WebKit 环境下到底能不能正常显示。
+
+---
+
 # Code Switch v2.8.32
 
 ## 修复
