@@ -224,7 +224,7 @@
                     <span class="provider-quota-query-summary__meta">{{ providerQuotaQuerySummary }}</span>
                   </div>
                   <div class="provider-quota-query-actions">
-                    <BaseButton variant="outline" type="button" @click="providerQuotaQueryConfigModalOpen = true">
+                    <BaseButton variant="outline" type="button" @click="openProviderQuotaQueryConfigModal">
                       {{ t('components.main.form.actions.providerQuotaQueryConfigure') }}
                     </BaseButton>
                   </div>
@@ -438,14 +438,6 @@
       </footer>
     </form>
   </InlineModal>
-  <ProviderQuotaQueryConfigModal
-    :open="providerQuotaQueryConfigModalOpen"
-    :model-value="form.providerQuotaQueryConfig"
-    :provider-api-url="form.apiUrl"
-    :provider-api-key="form.apiKey"
-    @close="providerQuotaQueryConfigModalOpen = false"
-    @save="handleProviderQuotaQueryConfigSave"
-  />
 </template>
 
 <script setup lang="ts">
@@ -460,7 +452,6 @@ import InlineModal from '../../common/InlineModal.vue'
 import JsonCodeEditor from '../../common/JsonCodeEditor.vue'
 import ModelMappingEditor from '../../common/ModelMappingEditor.vue'
 import ModelWhitelistEditor from '../../common/ModelWhitelistEditor.vue'
-import ProviderQuotaQueryConfigModal from './ProviderQuotaQueryConfigModal.vue'
 import { AUTH_TYPE_OPTIONS, getDefaultAuthType } from '../constants'
 import { cardProviderRef } from '../adapters/providerCardMappers'
 import {
@@ -531,6 +522,11 @@ const emit = defineEmits<{
   close: []
   submit: [form: VendorForm]
   'submit-and-apply': [form: VendorForm]
+  'open-provider-quota-query-config': [payload: {
+    modelValue: VendorForm['providerQuotaQueryConfig']
+    providerApiUrl: string
+    providerApiKey: string
+  }]
 }>()
 
 const { t } = useI18n()
@@ -547,7 +543,6 @@ const errors = reactive({
 })
 const selectedAuthType = ref<string>(getDefaultAuthType(props.tabId))
 const customAuthHeader = ref('')
-const providerQuotaQueryConfigModalOpen = ref(false)
 const iconSearchQuery = ref('')
 const requestBodyOverridesText = ref('{}')
 const requestBodyOverridesError = ref('')
@@ -923,14 +918,22 @@ const handleProviderQuotaQueryConfigSave = (nextConfig: VendorForm['providerQuot
   form.providerQuotaQueryType = normalizeProviderQuotaQueryType(
     resolveProviderQuotaQueryType(nextConfig, form.providerQuotaQueryType),
   )
-  providerQuotaQueryConfigModalOpen.value = false
+}
+
+const openProviderQuotaQueryConfigModal = () => {
+  emit('open-provider-quota-query-config', {
+    modelValue: form.providerQuotaQueryConfig
+      ? { ...form.providerQuotaQueryConfig }
+      : undefined,
+    providerApiUrl: `${form.apiUrl ?? ''}`,
+    providerApiKey: `${form.apiKey ?? ''}`,
+  })
 }
 
 const resetForm = () => {
   errors.apiUrl = ''
   iconSearchQuery.value = ''
   requestBodyOverridesError.value = ''
-  providerQuotaQueryConfigModalOpen.value = false
   cliConfigEditorKey.value += 1
 
   if (!props.card) {
@@ -988,6 +991,12 @@ watch(hasClaudeAdvancedValue, (value) => {
   if (value) {
     claudeAdvancedExpanded.value = true
   }
+})
+
+defineExpose<{
+  applyProviderQuotaQueryConfig: (nextConfig: VendorForm['providerQuotaQueryConfig']) => void
+}>({
+  applyProviderQuotaQueryConfig: handleProviderQuotaQueryConfigSave,
 })
 
 const resolveEffectiveAuthType = () =>

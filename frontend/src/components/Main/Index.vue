@@ -120,6 +120,7 @@
       />
 
       <ProviderEditModal
+        ref="providerEditModalRef"
         :open="providerModalState.open"
         :tab-id="providerModalState.tabId"
         :card="providerModalState.card"
@@ -127,6 +128,15 @@
         @close="closeProviderModal"
         @submit="submitProviderModal"
         @submit-and-apply="submitAndApplyProviderModal"
+        @open-provider-quota-query-config="openProviderQuotaQueryConfigModal"
+      />
+      <ProviderQuotaQueryConfigModal
+        :open="providerQuotaQueryConfigModalState.open"
+        :model-value="providerQuotaQueryConfigModalState.modelValue"
+        :provider-api-url="providerQuotaQueryConfigModalState.providerApiUrl"
+        :provider-api-key="providerQuotaQueryConfigModalState.providerApiKey"
+        @close="closeProviderQuotaQueryConfigModal"
+        @save="handleProviderQuotaQueryConfigModalSave"
       />
 
       <BaseModal
@@ -182,6 +192,7 @@ import ProviderLogsModal from './modals/ProviderLogsModal.vue'
 import ProviderCostTrendModal from './modals/ProviderCostTrendModal.vue'
 import ProviderDataOverviewModal from './modals/ProviderDataOverviewModal.vue'
 import ProviderModelListModal from './modals/ProviderModelListModal.vue'
+import ProviderQuotaQueryConfigModal from './modals/ProviderQuotaQueryConfigModal.vue'
 import MainCustomCliToolsBar from './components/MainCustomCliToolsBar.vue'
 import MainHeroBanner from './components/MainHeroBanner.vue'
 import MainPlatformTabs from './components/MainPlatformTabs.vue'
@@ -207,11 +218,15 @@ import { useUpdatePolling } from './composables/useUpdatePolling'
 import { cardProviderRef } from './adapters/providerCardMappers'
 import { getDefaultHostedProviderRef, isHostedRouteActive } from './utils/providerRoutingState'
 import { hasProviderQuotaQueryType } from '../../utils/providerQuotaQuery'
-import type { CustomCliToolDraft, ProviderCardViewModel, ProviderTab } from './types'
+import type { CustomCliToolDraft, ProviderCardViewModel, ProviderTab, VendorForm } from './types'
 import type { AutomationCard } from '../../data/cards'
 
 type MainUsageHeatmapExpose = {
   reload: () => Promise<void>
+}
+
+type ProviderEditModalExpose = {
+  applyProviderQuotaQueryConfig: (nextConfig: VendorForm['providerQuotaQueryConfig']) => void
 }
 
 const { t, locale } = useI18n()
@@ -221,6 +236,7 @@ const tabs = MAIN_TABS
 const selectedIndex = ref(0)
 const activeTab = computed<ProviderTab>(() => tabs[selectedIndex.value]?.id ?? tabs[0].id)
 const heatmapRef = ref<MainUsageHeatmapExpose | null>(null)
+const providerEditModalRef = ref<ProviderEditModalExpose | null>(null)
 
 const {
   hasUpdateAvailable,
@@ -504,6 +520,13 @@ const cliToolConfirmState = reactive({
   tool: null as CustomCliTool | null,
 })
 
+const providerQuotaQueryConfigModalState = reactive({
+  open: false,
+  modelValue: undefined as VendorForm['providerQuotaQueryConfig'],
+  providerApiUrl: '',
+  providerApiKey: '',
+})
+
 const activeCards = computed(() => cards[activeTab.value] ?? [])
 
 const normalizeUrlWithScheme = (value: string) => {
@@ -630,6 +653,28 @@ const onConfigFileSaved = () => {
   console.log('[CustomCliConfigEditor] Config file saved')
 }
 
+const openProviderQuotaQueryConfigModal = (payload: {
+  modelValue: VendorForm['providerQuotaQueryConfig']
+  providerApiUrl: string
+  providerApiKey: string
+}) => {
+  providerQuotaQueryConfigModalState.modelValue = payload.modelValue
+    ? { ...payload.modelValue }
+    : undefined
+  providerQuotaQueryConfigModalState.providerApiUrl = `${payload.providerApiUrl ?? ''}`
+  providerQuotaQueryConfigModalState.providerApiKey = `${payload.providerApiKey ?? ''}`
+  providerQuotaQueryConfigModalState.open = true
+}
+
+const closeProviderQuotaQueryConfigModal = () => {
+  providerQuotaQueryConfigModalState.open = false
+}
+
+const handleProviderQuotaQueryConfigModalSave = (nextConfig: VendorForm['providerQuotaQueryConfig']) => {
+  providerEditModalRef.value?.applyProviderQuotaQueryConfig(nextConfig)
+  closeProviderQuotaQueryConfigModal()
+}
+
 const openCliToolModal = () => {
   cliToolModalState.tool = null
   cliToolModalState.open = true
@@ -671,4 +716,10 @@ const confirmDeleteCliTool = async () => {
     closeCliToolConfirm()
   }
 }
+
+watch(() => providerModalState.open, (open) => {
+  if (!open) {
+    closeProviderQuotaQueryConfigModal()
+  }
+})
 </script>
