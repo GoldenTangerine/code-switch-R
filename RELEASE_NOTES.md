@@ -1,3 +1,16 @@
+# Code Switch v2.8.25
+
+## 修复
+- **打包版里“额度查询配置”这回才算真从遮罩坑里爬出来了**：修复上一版只替换了内层额度查询配置弹窗、但外层“编辑供应商”弹窗仍停留在 `BaseModal` 的半截收口问题；现在外层 `ProviderEditModal` 也统一切到 `InlineModal` 链路，打包后的 Wails / WebKit 环境下不会再出现“全局遮罩糊住了、内层额度配置面板却不显示或交互失活”的离谱场面。
+
+## 技术改进
+- **供应商编辑链路正式彻底对齐项目现有的 WebView 兼容方案**：`ProviderEditModal.vue` 与 `ProviderQuotaQueryConfigModal.vue` 现在统一走 `InlineModal` 的 `Teleport + modal stack + 延后初始 focus` 方案，彻底避开 `BaseModal` 外层配 `InlineModal` 内层在 WebKit / Wails 打包态下容易触发的层级、焦点和交互冲突。
+
+## 发布
+- **本次发版版本号统一推进到 `v2.8.25`**：同步更新应用常量、构建配置、Darwin `Info.plist`、Windows 元数据、Linux 包版本与更新日志，并准备推送 `v2.8.25` tag 触发 GitHub 自动打包，继续保证仓库版本、Git tag 和最终产物别再各唱各的调。
+
+---
+
 # Code Switch v2.8.24
 
 ## 修复

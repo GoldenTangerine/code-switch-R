@@ -1,5 +1,5 @@
 <template>
-  <BaseModal
+  <InlineModal
     :open="open"
     :title="modalTitle"
     :body-scrollable="false"
@@ -437,7 +437,7 @@
         </BaseButton>
       </footer>
     </form>
-  </BaseModal>
+  </InlineModal>
   <ProviderQuotaQueryConfigModal
     :open="providerQuotaQueryConfigModalOpen"
     :model-value="form.providerQuotaQueryConfig"
@@ -455,8 +455,8 @@ import { Listbox, ListboxButton, ListboxOption, ListboxOptions } from '@headless
 import lobeIcons from '../../../icons/lobeIconMap'
 import BaseButton from '../../common/BaseButton.vue'
 import BaseInput from '../../common/BaseInput.vue'
-import BaseModal from '../../common/BaseModal.vue'
 import CLIConfigEditor from '../../common/CLIConfigEditor.vue'
+import InlineModal from '../../common/InlineModal.vue'
 import JsonCodeEditor from '../../common/JsonCodeEditor.vue'
 import ModelMappingEditor from '../../common/ModelMappingEditor.vue'
 import ModelWhitelistEditor from '../../common/ModelWhitelistEditor.vue'
