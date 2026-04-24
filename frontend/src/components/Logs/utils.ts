@@ -112,6 +112,18 @@ export type LogsTableTextFormatters = {
 
 const cacheCreateTokenSplitCache = new WeakMap<RequestLog, CacheCreateTokenSplit>()
 
+type CostSnapshotPayload = Pick<RequestLog,
+  | 'total_cost'
+  | 'input_cost'
+  | 'output_cost'
+  | 'reasoning_cost'
+  | 'cache_create_cost'
+  | 'cache_read_cost'
+  | 'ephemeral_5m_cost'
+  | 'ephemeral_1h_cost'
+  | 'has_pricing'
+>
+
 export const pad2 = (num: number) => String(num).padStart(2, '0')
 
 export const formatDateYmd = (date: Date) =>
@@ -384,9 +396,25 @@ export const buildModelPricingLookup = (modelPricingRows: ModelPricingRow[]): Mo
 }
 
 export const buildLogPricingModelCandidates = (
-  item: Pick<RequestLog, 'response_model' | 'matched_pricing_model' | 'requested_model'>,
+  item: Pick<RequestLog,
+    | 'response_model'
+    | 'matched_pricing_model'
+    | 'requested_model'
+    | 'total_cost'
+    | 'input_cost'
+    | 'output_cost'
+    | 'reasoning_cost'
+    | 'cache_create_cost'
+    | 'cache_read_cost'
+    | 'ephemeral_5m_cost'
+    | 'ephemeral_1h_cost'
+    | 'has_pricing'
+  >,
 ) => {
-  const candidates = [item.response_model, item.matched_pricing_model, item.requested_model]
+  const hasHistoricalPricingSnapshot = hasStoredCostSnapshot(item)
+  const candidates = hasHistoricalPricingSnapshot
+    ? [item.matched_pricing_model, item.response_model, item.requested_model]
+    : [item.response_model, item.matched_pricing_model, item.requested_model]
   const seen = new Set<string>()
   const resolved: string[] = []
   for (const value of candidates) {
@@ -401,7 +429,7 @@ export const buildLogPricingModelCandidates = (
 }
 
 export const resolveLogPricingModelName = (
-  item: Pick<RequestLog, 'response_model' | 'matched_pricing_model' | 'requested_model'>,
+  item: Parameters<typeof buildLogPricingModelCandidates>[0],
 ) => buildLogPricingModelCandidates(item)[0] ?? ''
 
 export const resolvePricingRow = (
@@ -1594,8 +1622,8 @@ export const resolvePriceSource = (item: RequestLog): LogPriceSource => {
   const source = String(item.price_source ?? '').trim().toLowerCase()
   if (source === 'provider_api') return 'provider_api'
   if (source === 'builtin') return 'builtin'
-  if (source === 'none') return 'none'
-  if (safeNumber(item.total_cost) > 0) return 'builtin'
+  if (source === 'none') return hasStoredCostSnapshot(item) ? 'builtin' : 'none'
+  if (hasStoredCostSnapshot(item)) return 'builtin'
   return 'none'
 }
 
@@ -1611,7 +1639,9 @@ export const resolveGroupMultiplier = (item: RequestLog) => {
   return candidate
 }
 
-export const hasBreakdownCostPayload = (item: RequestLog) =>
+export const hasNonZeroCostValue = (value?: number) => safeNumber(value) !== 0
+
+export const hasBreakdownCostPayload = (item: CostSnapshotPayload) =>
   [
     item.input_cost,
     item.output_cost,
@@ -1621,7 +1651,10 @@ export const hasBreakdownCostPayload = (item: RequestLog) =>
     item.ephemeral_5m_cost,
     item.ephemeral_1h_cost,
   ]
-    .some(value => safeNumber(value) > 0)
+    .some(hasNonZeroCostValue)
+
+export const hasStoredCostSnapshot = (item: CostSnapshotPayload) =>
+  hasNonZeroCostValue(item.total_cost) || hasBreakdownCostPayload(item) || isTrueFlag(item.has_pricing)
 
 export const mergeCostTooltipNotes = (...notes: Array<string | undefined>) =>
   notes

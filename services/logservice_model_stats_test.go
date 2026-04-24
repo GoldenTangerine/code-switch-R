@@ -167,7 +167,7 @@ func TestModelStatsRangeV2_FallbackToProviderNameWhenIDNotFound(t *testing.T) {
 	}
 }
 
-func TestModelStatsRangeV2_UsesResponseModelToRefreshCostTotal(t *testing.T) {
+func TestModelStatsRangeV2_PreservesStoredCostSnapshot(t *testing.T) {
 	useIsolatedHomeDir(t)
 
 	if err := InitDatabase(); err != nil {
@@ -187,6 +187,9 @@ func TestModelStatsRangeV2_UsesResponseModelToRefreshCostTotal(t *testing.T) {
 	responseBreakdown := pricing.CalculateCost("claude-sonnet-4", usage)
 	if !modelBreakdown.HasPricing || !responseBreakdown.HasPricing {
 		t.Fatalf("测试模型未命中价格表，前提不成立")
+	}
+	if almostEqualFloat(modelBreakdown.TotalCost, responseBreakdown.TotalCost) {
+		t.Fatalf("测试模型价格刚好相同，无法验证历史金额快照")
 	}
 
 	db, err := xdb.DB("default")
@@ -217,8 +220,8 @@ func TestModelStatsRangeV2_UsesResponseModelToRefreshCostTotal(t *testing.T) {
 	if stats[0].Model != "gpt-5" {
 		t.Fatalf("期望模型分组仍为 gpt-5，实际 %s", stats[0].Model)
 	}
-	if !almostEqualFloat(stats[0].CostTotal, responseBreakdown.TotalCost) {
-		t.Fatalf("CostTotal = %.12f, 期望按 response_model 纠偏为 %.12f", stats[0].CostTotal, responseBreakdown.TotalCost)
+	if !almostEqualFloat(stats[0].CostTotal, modelBreakdown.TotalCost) {
+		t.Fatalf("CostTotal = %.12f, 期望保留历史快照 %.12f", stats[0].CostTotal, modelBreakdown.TotalCost)
 	}
 }
 

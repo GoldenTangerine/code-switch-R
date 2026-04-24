@@ -8,7 +8,7 @@ import (
 	"github.com/daodao97/xgo/xdb"
 )
 
-func TestStatsRangeV2_UsesResponseModelToRefreshAggregatedCost(t *testing.T) {
+func TestStatsRangeV2_PreservesStoredAggregatedCostSnapshot(t *testing.T) {
 	useIsolatedHomeDir(t)
 
 	if err := InitDatabase(); err != nil {
@@ -29,6 +29,9 @@ func TestStatsRangeV2_UsesResponseModelToRefreshAggregatedCost(t *testing.T) {
 	if !modelBreakdownA.HasPricing || !responseBreakdownA.HasPricing {
 		t.Fatalf("测试模型未命中价格表，前提不成立")
 	}
+	if floatEquals(modelBreakdownA.TotalCost, responseBreakdownA.TotalCost) {
+		t.Fatalf("测试模型价格刚好相同，无法验证历史金额快照")
+	}
 
 	usageB := modelpricing.UsageSnapshot{
 		InputTokens:  800,
@@ -38,6 +41,9 @@ func TestStatsRangeV2_UsesResponseModelToRefreshAggregatedCost(t *testing.T) {
 	responseBreakdownB := pricing.CalculateCost("claude-sonnet-4", usageB)
 	if !modelBreakdownB.HasPricing || !responseBreakdownB.HasPricing {
 		t.Fatalf("测试模型未命中价格表，前提不成立")
+	}
+	if floatEquals(modelBreakdownB.TotalCost, responseBreakdownB.TotalCost) {
+		t.Fatalf("测试模型价格刚好相同，无法验证历史金额快照")
 	}
 
 	db, err := xdb.DB("default")
@@ -70,15 +76,9 @@ func TestStatsRangeV2_UsesResponseModelToRefreshAggregatedCost(t *testing.T) {
 		t.Fatalf("StatsRangeV2 调用失败: %v", err)
 	}
 
-	wantTotalCost := responseBreakdownA.TotalCost + responseBreakdownB.TotalCost
+	wantTotalCost := modelBreakdownA.TotalCost + modelBreakdownB.TotalCost
 	if !floatEquals(stats.CostTotal, wantTotalCost) {
-		t.Fatalf("CostTotal = %.12f, 期望按 response_model 汇总为 %.12f", stats.CostTotal, wantTotalCost)
-	}
-	if !floatEquals(stats.CostInput, responseBreakdownA.InputCost+responseBreakdownB.InputCost) {
-		t.Fatalf("CostInput = %.12f, 期望 %.12f", stats.CostInput, responseBreakdownA.InputCost+responseBreakdownB.InputCost)
-	}
-	if !floatEquals(stats.CostOutput, responseBreakdownA.OutputCost+responseBreakdownB.OutputCost) {
-		t.Fatalf("CostOutput = %.12f, 期望 %.12f", stats.CostOutput, responseBreakdownA.OutputCost+responseBreakdownB.OutputCost)
+		t.Fatalf("CostTotal = %.12f, 期望按历史快照汇总为 %.12f", stats.CostTotal, wantTotalCost)
 	}
 
 	nonZeroBuckets := make([]LogStatsSeries, 0, 2)
@@ -90,11 +90,11 @@ func TestStatsRangeV2_UsesResponseModelToRefreshAggregatedCost(t *testing.T) {
 	if len(nonZeroBuckets) != 2 {
 		t.Fatalf("期望命中 2 个非空统计桶，实际 %d", len(nonZeroBuckets))
 	}
-	if !floatEquals(nonZeroBuckets[0].TotalCost, responseBreakdownA.TotalCost) {
-		t.Fatalf("首个非空桶 TotalCost = %.12f, 期望 %.12f", nonZeroBuckets[0].TotalCost, responseBreakdownA.TotalCost)
+	if !floatEquals(nonZeroBuckets[0].TotalCost, modelBreakdownA.TotalCost) {
+		t.Fatalf("首个非空桶 TotalCost = %.12f, 期望 %.12f", nonZeroBuckets[0].TotalCost, modelBreakdownA.TotalCost)
 	}
-	if !floatEquals(nonZeroBuckets[1].TotalCost, responseBreakdownB.TotalCost) {
-		t.Fatalf("第二个非空桶 TotalCost = %.12f, 期望 %.12f", nonZeroBuckets[1].TotalCost, responseBreakdownB.TotalCost)
+	if !floatEquals(nonZeroBuckets[1].TotalCost, modelBreakdownB.TotalCost) {
+		t.Fatalf("第二个非空桶 TotalCost = %.12f, 期望 %.12f", nonZeroBuckets[1].TotalCost, modelBreakdownB.TotalCost)
 	}
 }
 

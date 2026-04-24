@@ -141,6 +141,7 @@ describe('useLogsPricingDetails', () => {
     })
     const item = createRequestLog('qwen3.6', {
       requested_model: 'qwen3.6',
+      total_cost: 0,
     })
 
     await loadModelPricingRows()
@@ -208,6 +209,119 @@ describe('useLogsPricingDetails', () => {
     expect(detail.pricingModel).toBe('kimi-k2.6')
     expect(detail.note).toContain('kimi-k2.6')
     expect(detail.priceLines.some((line) => line.value.includes('$9.00'))).toBe(true)
+  })
+
+  it('does not rebuild formula from current pricing when a historical amount has no cost breakdown', async () => {
+    vi.mocked(listModelPricing).mockResolvedValueOnce([
+      {
+        model: 'gpt-5.5',
+        input_cost_per_token: 5 / 1_000_000,
+        output_cost_per_token: 30 / 1_000_000,
+        output_cost_per_reasoning_token: 0,
+        cache_creation_input_token_cost: 6.25 / 1_000_000,
+        cache_read_input_token_cost: 0.5 / 1_000_000,
+        ephemeral_1h_cost_per_token: 6.25 / 1_000_000,
+        group_multiplier: 1,
+        is_override: true,
+        is_custom: true,
+        source: 'manual',
+      },
+    ])
+
+    const { loadModelPricingRows, buildCostTooltipDetail } = useLogsPricingDetails({
+      t: createTranslate(),
+    })
+    const item = createRequestLog('gpt-5.5', {
+      requested_model: 'gpt-5.5',
+      response_model: 'gpt-5.5',
+      input_tokens: 10170,
+      output_tokens: 919,
+      cache_read_tokens: 16000,
+      total_cost: 0.0239025,
+      input_cost: 0,
+      output_cost: 0,
+      cache_read_cost: 0,
+    })
+
+    await loadModelPricingRows()
+    const detail = buildCostTooltipDetail(item)
+
+    expect(detail.hasPricing).toBe(false)
+    expect(detail.priceLines).toHaveLength(0)
+    expect(detail.formula).toBe('未命中可用价格表，无法按价格表拆解计算。')
+    expect(detail.note).toBe('当前仅展示日志记录金额。')
+    expect(detail.recordedCostHint).toBe('日志记录金额：$0.023903')
+  })
+
+  it('does not fallback to builtin formula for provider api historical amount without snapshot or breakdown', async () => {
+    vi.mocked(listModelPricing).mockResolvedValueOnce([
+      {
+        model: 'gpt-5.5',
+        input_cost_per_token: 5 / 1_000_000,
+        output_cost_per_token: 30 / 1_000_000,
+        output_cost_per_reasoning_token: 0,
+        cache_creation_input_token_cost: 6.25 / 1_000_000,
+        cache_read_input_token_cost: 0.5 / 1_000_000,
+        ephemeral_1h_cost_per_token: 6.25 / 1_000_000,
+        group_multiplier: 1,
+        is_override: true,
+        is_custom: true,
+        source: 'manual',
+      },
+    ])
+
+    const { loadModelPricingRows, buildCostTooltipDetail } = useLogsPricingDetails({
+      t: createTranslate(),
+    })
+    const item = createRequestLog('gpt-5.5', {
+      requested_model: 'gpt-5.5',
+      response_model: 'gpt-5.5',
+      price_source: 'provider_api',
+      provider_pricing_available: false,
+      input_tokens: 10170,
+      output_tokens: 919,
+      cache_read_tokens: 16000,
+      total_cost: 0.0239025,
+      input_cost: 0,
+      output_cost: 0,
+      cache_read_cost: 0,
+    })
+
+    await loadModelPricingRows()
+    const detail = buildCostTooltipDetail(item)
+
+    expect(detail.hasPricing).toBe(false)
+    expect(detail.priceLines).toHaveLength(0)
+    expect(detail.formula).toBe('接口计价')
+    expect(detail.note).toBe('接口提示 当前仅展示日志记录金额。')
+    expect(detail.recordedCostHint).toBe('日志记录金额：$0.023903')
+  })
+
+  it('keeps provider api negative historical amount as recorded snapshot', async () => {
+    vi.mocked(listModelPricing).mockResolvedValueOnce([])
+
+    const { loadModelPricingRows, buildCostTooltipDetail } = useLogsPricingDetails({
+      t: createTranslate(),
+    })
+    const item = createRequestLog('gpt-5.5', {
+      requested_model: 'gpt-5.5',
+      response_model: 'gpt-5.5',
+      price_source: 'provider_api',
+      provider_pricing_available: false,
+      total_cost: -0.0025,
+      input_cost: 0,
+      output_cost: 0,
+      cache_read_cost: 0,
+    })
+
+    await loadModelPricingRows()
+    const detail = buildCostTooltipDetail(item)
+
+    expect(detail.hasPricing).toBe(false)
+    expect(detail.priceLines).toHaveLength(0)
+    expect(detail.formula).toBe('接口计价')
+    expect(detail.note).toBe('接口提示 当前仅展示日志记录金额。')
+    expect(detail.recordedCostHint).toBe('日志记录金额：$-0.002500')
   })
 
   it('does not fallback to local model when response/requested pricing model is missing', async () => {

@@ -18,7 +18,9 @@ import {
   buildVerifyInfoTooltipDetailData,
   formatCacheCreateTierLabel,
   formatUsdPrecise,
+  hasBreakdownCostPayload,
   hasProviderPricingSnapshot,
+  hasStoredCostSnapshot,
   isProviderPerCallValueSet,
   mergeCostTooltipNotes,
   resolveLogPricingModelName,
@@ -128,9 +130,21 @@ export function useLogsPricingDetails(options: UseLogsPricingDetailsOptions) {
     fallbackModelName: string,
     recordedCost: number,
   ): CostTooltipDetail => {
+    const labels = buildCostTooltipLabels()
+
+    if (hasStoredCostSnapshot(item) && !hasBreakdownCostPayload(item)) {
+      return {
+        pricingModel: fallbackModelName,
+        hasPricing: false,
+        priceLines: [],
+        formula: labels.noPricingFormula,
+        note: labels.noPricingHint,
+        recordedCostHint: labels.recordedCostHint(formatUsdPrecise(recordedCost)),
+      }
+    }
+
     const pricingRow = resolvePricingRow(item, modelPricingIndex.value, modelPricingRows.value)
     const modelName = String(pricingRow?.model ?? fallbackModelName).trim() || '—'
-    const labels = buildCostTooltipLabels()
 
     if (!pricingRow) {
       return {
@@ -189,9 +203,10 @@ export function useLogsPricingDetails(options: UseLogsPricingDetailsOptions) {
     const source = resolvePriceSource(item)
     const fallbackModelName = resolveLogPricingModelName(item) || '—'
     const recordedCost = safeNumber(item.total_cost)
+    const storedCostSnapshotAvailable = hasStoredCostSnapshot(item)
     const providerSnapshotAvailable = hasProviderPricingSnapshot(item)
     const shouldAvoidFallbackEstimate =
-      !providerSnapshotAvailable && recordedCost <= COST_TOOLTIP_DIFF_EPSILON
+      !providerSnapshotAvailable && !storedCostSnapshotAvailable
     const labels = buildCostTooltipLabels()
     const recordedCostHint = labels.recordedCostHint(formatUsdPrecise(recordedCost))
 
@@ -237,6 +252,17 @@ export function useLogsPricingDetails(options: UseLogsPricingDetailsOptions) {
           note: providerSnapshotAvailable
             ? labels.providerApiHint
             : mergeCostTooltipNotes(labels.providerApiHint, labels.providerApiFallbackHint),
+          recordedCostHint,
+        }
+      }
+
+      if (storedCostSnapshotAvailable) {
+        return {
+          pricingModel: fallbackModelName,
+          hasPricing: false,
+          priceLines: [],
+          formula: labels.providerApiFormula,
+          note: mergeCostTooltipNotes(labels.providerApiHint, labels.noPricingHint),
           recordedCostHint,
         }
       }

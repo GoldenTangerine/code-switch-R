@@ -858,13 +858,23 @@ func normalizeRequestLogPriceSource(source string, totalCost float64) string {
 	case requestLogPriceSourceBuiltin:
 		return requestLogPriceSourceBuiltin
 	case requestLogPriceSourceNone:
+		if totalCost != 0 {
+			return requestLogPriceSourceBuiltin
+		}
 		return requestLogPriceSourceNone
 	default:
-		if totalCost > 0 {
+		if totalCost != 0 {
 			return requestLogPriceSourceBuiltin
 		}
 		return requestLogPriceSourceNone
 	}
+}
+
+func normalizeStoredPricingSource(logEntry *ReqeustLog) {
+	if logEntry == nil || logEntry.PriceSource != requestLogPriceSourceNone {
+		return
+	}
+	logEntry.PriceSource = requestLogPriceSourceBuiltin
 }
 
 func hasStoredBreakdownCost(logEntry *ReqeustLog) bool {
@@ -880,23 +890,53 @@ func hasStoredBreakdownCost(logEntry *ReqeustLog) bool {
 		logEntry.Ephemeral1hCost != 0
 }
 
+func storedBreakdownTotalCost(logEntry *ReqeustLog) float64 {
+	if logEntry == nil {
+		return 0
+	}
+	cacheCreateCost := logEntry.CacheCreateCost
+	if cacheCreateCost == 0 {
+		cacheCreateCost = logEntry.Ephemeral5mCost + logEntry.Ephemeral1hCost
+	}
+	return logEntry.InputCost +
+		logEntry.OutputCost +
+		logEntry.ReasoningCost +
+		cacheCreateCost +
+		logEntry.CacheReadCost
+}
+
 func applyLogPricing(pricing *modelpricing.Service, logEntry *ReqeustLog) {
 	if logEntry == nil {
 		return
 	}
 
 	logEntry.PriceSource = normalizeRequestLogPriceSource(logEntry.PriceSource, logEntry.TotalCost)
+	if hasStoredBreakdownCost(logEntry) {
+		if logEntry.TotalCost == 0 {
+			logEntry.TotalCost = storedBreakdownTotalCost(logEntry)
+		}
+		logEntry.HasPricing = true
+		normalizeStoredPricingSource(logEntry)
+		return
+	}
+	if logEntry.TotalCost != 0 {
+		logEntry.HasPricing = true
+		normalizeStoredPricingSource(logEntry)
+		return
+	}
+	if logEntry.HasPricing {
+		normalizeStoredPricingSource(logEntry)
+		return
+	}
+
 	pricingModelCandidates := buildRequestLogPricingModelCandidates(
 		logEntry.ResponseModel,
 		logEntry.MatchedPricingModel,
 		logEntry.RequestedModel,
 	)
 
-	if logEntry.TotalCost > 0 {
-		logEntry.HasPricing = true
-	}
 	if logEntry.PriceSource == requestLogPriceSourceProviderAPI {
-		if logEntry.ProviderPricingAvailable || hasStoredBreakdownCost(logEntry) {
+		if logEntry.ProviderPricingAvailable {
 			logEntry.HasPricing = true
 			return
 		}
@@ -952,11 +992,7 @@ func applyLogPricing(pricing *modelpricing.Service, logEntry *ReqeustLog) {
 	if resolvedPricingModel == "" {
 		resolvedPricingModel = resolvedPricingCandidate
 	}
-	if breakdown.TotalCost > 0 &&
-		logEntry.PriceSource != requestLogPriceSourceProviderAPI &&
-		(logEntry.TotalCost <= 0 ||
-			(resolvedPricingModel != "" &&
-				!strings.EqualFold(strings.TrimSpace(logEntry.Model), resolvedPricingModel))) {
+	if breakdown.TotalCost > 0 && logEntry.PriceSource != requestLogPriceSourceProviderAPI {
 		logEntry.TotalCost = breakdown.TotalCost
 		logEntry.PriceSource = requestLogPriceSourceBuiltin
 	}
