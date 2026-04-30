@@ -8,6 +8,7 @@ export type AutomationCard = {
   apiUrl: string
   apiKey: string
   officialSite: string
+  apiKeyUrl?: string
   icon: string
   tint: string
   accent: string
@@ -34,6 +35,9 @@ export type AutomationCard = {
   opencodeNpm?: string
   // OpenCode provider fragment，最终写入 opencode.json 的 provider.{id}
   opencodeSettingsConfig?: Record<string, any>
+  // OpenCode 供应商分类 / 合作伙伴元数据，来自 cc-switch 预设。
+  category?: string
+  partnerPromotionKey?: string
   // OpenCode additive mode：是否由本应用管理 live config 中的 provider key
   liveConfigManaged?: boolean
   // OpenCode additive mode：provider 当前是否存在于 live config

@@ -42,6 +42,12 @@ export function GetProviders(): $CancellablePromise<$models.OpenCodeProvider[]> 
     });
 }
 
+export function GetLiveProviderIds(): $CancellablePromise<string[]> {
+    return $Call.ByName(`${$$SERVICE_PATH}.GetLiveProviderIds`).then(($result: any) => {
+        return Array.isArray($result) ? $result.map(($item: any) => String($item)) : [];
+    });
+}
+
 export function ImportFromLive(): $CancellablePromise<number> {
     return $Call.ByName(`${$$SERVICE_PATH}.ImportFromLive`);
 }

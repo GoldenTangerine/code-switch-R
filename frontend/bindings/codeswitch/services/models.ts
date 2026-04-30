@@ -1052,6 +1052,7 @@ export class OpenCodeProvider {
     "baseUrl"?: string;
     "apiKey"?: string;
     "npm"?: string;
+    "icon"?: string;
     "description"?: string;
     "category"?: string;
     "partnerPromotionKey"?: string;

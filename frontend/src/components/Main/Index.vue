@@ -35,6 +35,7 @@
           :tabs="tabs"
           :selected-index="selectedIndex"
           :current-proxy-label="currentProxyLabel"
+          :show-proxy-toggle="shouldShowProviderProxyToggle(activeTab)"
           :active-proxy-state="activeProxyState"
           :active-proxy-busy="activeProxyBusy"
           :refreshing="refreshing"
@@ -125,6 +126,7 @@
         :open="providerModalState.open"
         :tab-id="providerModalState.tabId"
         :card="providerModalState.card"
+        :cards="cards[providerModalState.tabId] ?? []"
         :active-proxy-state="activeProxyState"
         @close="closeProviderModal"
         @submit="submitProviderModal"
@@ -217,6 +219,8 @@ import { useProviderQuotas } from './composables/useProviderQuotas'
 import { useProviderStats } from './composables/useProviderStats'
 import { useUpdatePolling } from './composables/useUpdatePolling'
 import { cardProviderRef } from './adapters/providerCardMappers'
+import { shouldAutoRefreshProviderQuota } from './utils/providerQuotaAutoRefresh'
+import { shouldShowProviderProxyToggle } from './utils/providerProxyToggleVisibility'
 import { getDefaultHostedProviderRef, isHostedRouteActive } from './utils/providerRoutingState'
 import { hasProviderQuotaQueryType } from '../../utils/providerQuotaQuery'
 import type { CustomCliToolDraft, ProviderCardViewModel, ProviderTab, VendorForm } from './types'
@@ -362,7 +366,8 @@ const {
   cards,
   resolveAutoRefreshRemoteQuotaRefs: () => {
     const refs = new Set<string>()
-    const activeTabCards = cards[activeTab.value] ?? []
+    const tab = activeTab.value
+    const activeTabCards = cards[tab] ?? []
 
     activeTabCards.forEach((card) => {
       if (!hasProviderQuotaQueryType(card.providerQuotaQueryConfig ?? card.providerQuotaQueryType, card.providerQuotaQueryType)) {
@@ -377,10 +382,10 @@ const {
             apiUrl: card.apiUrl,
             apiKey: card.apiKey,
             isBlacklisted: getProviderBlacklistStatus(card)?.isBlacklisted === true,
-          })
+        })
         : isDirectApplied(card)
 
-      if (!isCurrentlyActive) return
+      if (!shouldAutoRefreshProviderQuota(tab, card, isCurrentlyActive)) return
 
       const ref = cardProviderRef(card) || card.name
       if (ref) {

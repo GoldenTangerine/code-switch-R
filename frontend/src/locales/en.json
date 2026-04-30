@@ -723,7 +723,18 @@
           "providerQuotaQueryManualOnly": "Manual only",
           "providerKey": "Provider ID",
           "opencodeNpm": "AI SDK package",
-          "opencodeSettingsConfig": "OpenCode provider config"
+          "opencodeSettingsConfig": "OpenCode provider config",
+          "opencodeExtraOptions": "Extra SDK options",
+          "opencodeOptionKey": "Key",
+          "opencodeOptionValue": "Value",
+          "opencodeModels": "Model configuration",
+          "opencodeModelId": "Model ID",
+          "opencodeModelName": "Display name",
+          "opencodeModelExtraFields": "Model properties",
+          "opencodeModelOptions": "SDK options",
+          "opencodePreset": "OpenCode preset",
+          "opencodeTemplateValues": "Template values",
+          "opencodeModelSuggestions": "Model suggestions"
         },
         "placeholders": {
           "name": "e.g. AICoding.sh",
@@ -747,7 +758,14 @@
           "providerQuotaQueryTimeout": "10",
           "providerQuotaQueryAutoInterval": "5",
           "providerQuotaQueryCode": "Return request / extractor",
-          "providerKey": "e.g. deepseek, my-openai-compatible"
+          "providerKey": "e.g. deepseek, my-openai-compatible",
+          "opencodeOptionKey": "timeout",
+          "opencodeOptionValue": "600000",
+          "opencodeModelId": "deepseek-v4-pro",
+          "opencodeModelName": "DeepSeek V4 Pro",
+          "opencodeModelExtraFieldKey": "variants",
+          "opencodeModelOptionKey": "provider",
+          "opencodeModelOptionValue": "{\"order\":[\"baseten\"]}"
         },
         "noIconResults": "No matching icons found",
         "hints": {
@@ -797,7 +815,27 @@
           "providerQuotaQueryAutoEvery": "Auto every {minutes} min",
           "providerKey": "Written to provider.{id} in ~/.config/opencode/opencode.json. Use lowercase letters, numbers, and hyphens only. It is locked while editing.",
           "opencodeNpm": "OpenCode uses the AI SDK package name to select the provider adapter, such as OpenAI Compatible, Anthropic, or Google.",
-          "opencodeSettingsConfig": "This is a single provider fragment, not the full opencode.json. Saving syncs name, npm, options.baseURL, and options.apiKey."
+          "opencodeSettingsConfig": "This is a single provider fragment, not the full opencode.json. Saving syncs name, npm, options.baseURL, options.apiKey, extra options, and models.",
+          "opencodeExtraOptions": "Configure extra SDK options such as timeout or setCacheKey. Values are parsed as JSON when possible, so numbers and booleans keep their native types.",
+          "opencodeNoExtraOptions": "No extra options yet. Add timeout, setCacheKey, or other SDK options only when needed.",
+          "opencodeModels": "Configure available models for this provider. Model ID is the API identifier; display name is shown in the UI.",
+          "opencodeNoModels": "No models configured. Click Add model; the save layer will add an SDK-specific default model if this stays empty.",
+          "opencodeNoModelExtraFields": "No model properties yet. Add variants, cost, limit, or similar fields when needed.",
+          "opencodeNoModelOptions": "No model SDK options yet. Add provider, region, or other model-level options when needed.",
+          "opencodePreset": "Choose a full provider template migrated from cc-switch; it fills NPM, Base URL, models and SDK options.",
+          "opencodeTemplateValues": "These values replace ${...} placeholders in the preset and sync into the OpenCode provider config.",
+          "opencodePartnerPromotion": "{provider} is a partner provider. Use the API key link for promotion or onboarding details.",
+          "providerKeyChecking": "Checking Provider ID against live config...",
+          "providerKeyAvailable": "Provider ID is available",
+          "providerKeyLocked": "This provider already exists in live opencode.json, so its Provider ID is locked. Delete/import and recreate it if you really need a different key.",
+          "opencodeCategoryOfficial": "Official providers usually use their official adapter. Fill credentials according to the provider requirements.",
+          "opencodeCategoryCnOfficial": "CN official providers include a preset endpoint; usually only the API key is required.",
+          "opencodeCategoryAggregator": "Aggregator providers include a preset endpoint; fill the API key to use them.",
+          "opencodeCategoryThirdParty": "Third-party providers may require both API key and endpoint verification.",
+          "opencodeCategoryCloudProvider": "Cloud providers may require region, model-level provider, or other SDK options.",
+          "opencodeCategoryCustom": "Custom presets are only a skeleton. Verify NPM, Base URL, API key, and models manually.",
+          "opencodeCategoryOmo": "OMO manages agent model assignments and is compatible with oh-my-openagent.jsonc / oh-my-opencode.jsonc.",
+          "opencodeCategoryOmoSlim": "OMO Slim is a lightweight agent model assignment preset for smaller setups."
         },
         "options": {
           "providerQuotaQueryNone": "Disabled",
@@ -808,7 +846,16 @@
           "providerQuotaQueryCustom": "Custom",
           "providerQuotaQueryGeneral": "General preset",
           "providerQuotaQueryNewApi": "NewApi",
-          "providerQuotaQueryTokenPlan": "Token Plan"
+          "providerQuotaQueryTokenPlan": "Token Plan",
+          "opencodeCustomPreset": "Custom / no preset",
+          "opencodeCategoryOfficial": "Official",
+          "opencodeCategoryAggregator": "Aggregator",
+          "opencodeCategoryThirdParty": "Third party",
+          "opencodeCategoryCustom": "Custom",
+          "opencodeCategoryOmo": "OMO",
+          "opencodeCategoryOmoSlim": "OMO Slim",
+          "opencodeCategoryCnOfficial": "CN official",
+          "opencodeCategoryCloudProvider": "Cloud provider"
         },
         "jsonEditor": {
           "title": "Config JSON",
@@ -847,7 +894,17 @@
           "providerQuotaQueryConfigure": "Configure query",
           "providerQuotaQueryLoadPreset": "Load preset",
           "providerQuotaQueryTest": "Test query",
-          "providerQuotaQueryTesting": "Testing..."
+          "providerQuotaQueryTesting": "Testing...",
+          "addOpenCodeOption": "Add option",
+          "removeOpenCodeOption": "Remove option",
+          "addOpenCodeModel": "Add model",
+          "removeOpenCodeModel": "Remove model",
+          "removeOpenCodeModelField": "Remove model property",
+          "removeOpenCodeModelOption": "Remove model option",
+          "fetchOpenCodeModels": "Fetch models",
+          "fetchingOpenCodeModels": "Fetching...",
+          "getApiKey": "Get API key",
+          "openOfficialSite": "Open site"
         },
         "connectivity": {
           "success": "Connected (latency: {latency}ms)",
@@ -866,7 +923,15 @@
           "requestBodyOverridesMustBeObject": "Forced request body fields must be a JSON object",
           "providerKeyRequired": "Enter a valid OpenCode Provider ID",
           "opencodeSettingsConfigInvalid": "Failed to parse OpenCode config JSON: {error}",
-          "opencodeSettingsConfigMustBeObject": "OpenCode config must be a JSON object"
+          "opencodeSettingsConfigMustBeObject": "OpenCode config must be a JSON object",
+          "opencodeModelFetchMissingCredentials": "Configure API URL and API key before fetching models",
+          "opencodeModelFetchEmpty": "No available models were returned",
+          "opencodeModelFetchFailed": "Failed to fetch OpenCode models: {error}",
+          "providerKeyInvalid": "Invalid Provider ID. Use lowercase letters, numbers and hyphens only; it cannot start or end with a hyphen.",
+          "providerKeyDuplicate": "This Provider ID already exists in the current list or live opencode.json.",
+          "providerKeyStatusLoading": "Provider ID status is still loading. Please try saving again shortly.",
+          "providerKeyStatusFailed": "Failed to check live Provider IDs: {error}",
+          "opencodeModelsRequired": "Add at least one OpenCode model configuration."
         },
         "saveFailed": "Failed to save provider configuration",
         "toast": {
@@ -1975,6 +2040,29 @@
         "emptyHint": "No builtin model options matched this platform. You can still type a model manually.",
         "readyHint": "You can type a model manually or fuzzy-search the existing model list in the same field. {count} options are available and will sync back to field {field}."
       }
+    }
+  },
+  "providerForm": {
+    "partnerPromotion": {
+      "packycode": "PackyCode is an official partner of CC Switch. Register using this link and enter \"cc-switch\" promo code during recharge to get 10% off",
+      "minimax_cn": "MiniMax Coding Plan Special Offer, Starter from ¥9.9",
+      "minimax_en": "MiniMax Coding Plan Black Friday, Starter is now $2/mo (80% OFF!)",
+      "dmxapi": "Claude Code exclusive model 66% OFF now!",
+      "cubence": "Cubence is an official partner of CC Switch. Register using this link and enter \"CCSWITCH\" promo code during recharge to get 10% off every top-up",
+      "aigocode": "AIGoCode is an official partner of CC Switch. Register using this link and get 10% bonus credit on your first top-up!",
+      "rightcode": "RightCode is an official partner of CC Switch. Register using this link and get 5% bonus credit on every top-up!",
+      "aicodemirror": "AICodeMirror is an official partner of CC Switch. Register using this link to get 20% off!",
+      "aicoding": "AI Coding offers an exclusive discount for CC Switch users — 10% off your first top-up!",
+      "crazyrouter": "CrazyRouter offers an exclusive bonus for CC Switch users — 30% extra credit on your first top-up!",
+      "sssaicode": "SSAI Code offers an exclusive bonus for CC Switch users — $10 extra credit on every top-up!",
+      "micu": "Micu is an official partner of CC Switch",
+      "ctok": "Join the CTok community on the official website and subscribe to a plan.",
+      "lionccapi": "LionCCAPI offers exclusive benefits for CC Switch users. After registration, add WeChat HSQBJ088888888 and mention 'cc-switch' to receive $10 free credits!",
+      "shengsuanyun": "Shengsuanyun offers exclusive benefits for CC Switch users. New users who register via this link get ¥10 free credits and 10% bonus on first top-up!",
+      "lemondata": "Lemon Code offers a special promotion for CC Switch users. Sign up via this link to receive $1 in free credits."
+    },
+    "presets": {
+      "shengsuanyun": "Shengsuanyun"
     }
   }
 }

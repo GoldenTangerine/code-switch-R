@@ -1,3 +1,24 @@
+# Code Switch v2.8.43
+
+## 功能
+- **OpenCode 供应商配置正式补齐 cc-switch 同款预设能力**：新增 OpenCode provider preset 配置库，编辑供应商时支持按 AI SDK 包选择预设、自动带出 Base URL / API Key / 官网 / API Key 地址 / 分类 / 合作伙伴信息，并保留原始 provider id，别再靠手抄 `opencode.json` 跟 JSON 拼刺刀。
+- **OpenCode 模型配置入口补上了**：编辑 OpenCode 供应商时可直接维护 `models`、模型名称、展示名称、额外字段和 `options`，并提供预设模型建议，迁移过来的 OpenCode 供应商终于不是“只有壳没有芯”。
+
+## 修复
+- **OpenCode 余额查询不再依赖当天是否使用过供应商**：只要供应商在 OpenCode 配置中启用 / 存在且配置了余额查询，就会像 cc-switch 一样参与自动刷新并常驻显示余额，不再因为今天没跑过请求就把余额藏起来。
+- **OpenCode tab 隐藏本地转发托管开关**：OpenCode 是 additive config 管理，不是 Claude / Codex / Gemini 那套本地代理模式；首页切到 OpenCode 时不再显示误导性的托管开关，只保留新增和刷新操作。
+- **OpenCode 模型配置卡片布局收口**：修复模型配置行输入框撑爆卡片、删除按钮被遮挡、嵌套字段边距不齐的问题，小屏下也会自动堆叠显示，别再让按钮躲猫猫。
+
+## 技术改进
+- **OpenCode live provider id 能力补到前后端链路**：后端新增 live provider id 查询能力，前端编辑表单可用它校验 provider id 冲突，避免配置写进 live config 时出现重复 key 和幽灵供应商。
+- **OpenCode provider 元数据完整持久化**：卡片、表单、序列化、OpenCode service 和 Wails bindings 全链路补齐 `apiKeyUrl`、`category`、`partnerPromotionKey`、`icon` 等字段，预设信息不会再保存一次就丢。
+- **额度刷新与代理开关规则拆成可测试工具**：新增 OpenCode 余额自动刷新和代理开关显隐的独立规则单测，避免后续又把 OpenCode 当成本地代理平台处理。
+
+## 发布
+- **本次发版版本号统一推进到 `v2.8.43`**：作为 OpenCode 供应商配置迁移补齐、模型配置 UI 优化和余额常驻显示修复版本推送 tag，触发 GitHub 自动打包。
+
+---
+
 # Code Switch v2.8.42
 
 ## 优化

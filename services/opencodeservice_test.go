@@ -73,6 +73,26 @@ func TestOpenCodeAddProviderRejectsExistingLiveProvider(t *testing.T) {
 	}
 }
 
+func TestOpenCodeGetLiveProviderIdsReturnsSortedIDs(t *testing.T) {
+	homeDir := useIsolatedHomeDir(t)
+	configPath := filepath.Join(homeDir, ".config", "opencode", "opencode.json")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("创建 OpenCode 配置目录失败: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte(`{"provider":{"zeta":{"npm":"@ai-sdk/openai-compatible"},"alpha":{"npm":"@ai-sdk/openai-compatible"}}}`), 0o644); err != nil {
+		t.Fatalf("写入 OpenCode live 配置失败: %v", err)
+	}
+
+	service := &OpenCodeService{}
+	ids, err := service.GetLiveProviderIds()
+	if err != nil {
+		t.Fatalf("读取 OpenCode live provider ids 失败: %v", err)
+	}
+	if got, want := strings.Join(ids, ","), "alpha,zeta"; got != want {
+		t.Fatalf("live provider ids = %q, want %q", got, want)
+	}
+}
+
 func TestOpenCodeSettingsConfigClearsManagedOptions(t *testing.T) {
 	provider := normalizeOpenCodeProvider(OpenCodeProvider{
 		ID:      "custom",

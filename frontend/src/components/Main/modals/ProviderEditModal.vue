@@ -8,6 +8,46 @@
   >
     <form class="vendor-form vendor-form--provider-modal" @submit.prevent="submit()">
       <div class="vendor-form__scroll-body">
+        <section v-if="tabId === 'opencode'" class="opencode-preset-panel">
+          <div class="opencode-preset-panel__header">
+            <div>
+              <h3 class="opencode-preset-panel__title">
+                {{ t('components.main.form.labels.opencodePreset') }}
+              </h3>
+              <p class="opencode-preset-panel__hint">
+                {{ t('components.main.form.hints.opencodePreset') }}
+              </p>
+            </div>
+            <span v-if="selectedOpenCodePreset" class="opencode-preset-badge">
+              {{ openCodeCategoryLabel(selectedOpenCodePreset.category) }}
+            </span>
+          </div>
+          <select v-model="selectedOpenCodePresetId" class="mac-select" @change="handleOpenCodePresetChange">
+            <option value="custom">{{ t('components.main.form.options.opencodeCustomPreset') }}</option>
+            <option
+              v-for="entry in openCodePresetEntries"
+              :key="entry.id"
+              :value="entry.id"
+            >
+              {{ openCodePresetLabel(entry.preset) }}
+            </option>
+          </select>
+          <div v-if="selectedOpenCodePreset" class="opencode-preset-meta">
+            <span>{{ selectedOpenCodePreset.description || selectedOpenCodePreset.name }}</span>
+            <a
+              v-if="selectedOpenCodePreset.websiteUrl"
+              :href="selectedOpenCodePreset.websiteUrl"
+              target="_blank"
+              rel="noreferrer"
+            >
+              {{ t('components.main.form.actions.openOfficialSite') }}
+            </a>
+          </div>
+          <p class="opencode-preset-category-hint">
+            {{ openCodeCategoryHint(selectedOpenCodePreset?.category) }}
+          </p>
+        </section>
+
         <label v-if="tabId === 'opencode'" class="form-field">
           <span class="label-row">
             {{ t('components.main.form.labels.providerKey') }}
@@ -16,13 +56,27 @@
             </span>
           </span>
           <BaseInput
-            v-model="form.providerRef"
+            :model-value="form.providerRef || ''"
             type="text"
             :placeholder="t('components.main.form.placeholders.providerKey')"
-            :disabled="isEditing"
+            :disabled="isOpenCodeProviderKeyInputDisabled"
             :class="{ 'has-error': !!errors.providerRef }"
+            @update:model-value="handleOpenCodeProviderKeyInput"
           />
-          <span class="field-hint">{{ t('components.main.form.hints.providerKey') }}</span>
+          <span class="field-hint">
+            {{ isOpenCodeProviderKeyLocked
+              ? t('components.main.form.hints.providerKeyLocked')
+              : t('components.main.form.hints.providerKey') }}
+          </span>
+          <span v-if="isLoadingOpenCodeLiveProviderIds" class="field-hint">
+            {{ t('components.main.form.hints.providerKeyChecking') }}
+          </span>
+          <span v-else-if="openCodeLiveProviderIdsError" class="field-error">
+            {{ openCodeLiveProviderIdsError }}
+          </span>
+          <span v-else-if="openCodeProviderKeyStatus" :class="openCodeProviderKeyStatus.className">
+            {{ openCodeProviderKeyStatus.message }}
+          </span>
         </label>
 
         <label class="form-field">
@@ -53,12 +107,14 @@
 
         <label v-if="tabId === 'opencode'" class="form-field">
           <span>{{ t('components.main.form.labels.opencodeNpm') }}</span>
-          <select v-model="form.opencodeNpm" class="mac-select">
-            <option value="@ai-sdk/openai-compatible">OpenAI Compatible</option>
-            <option value="@ai-sdk/openai">OpenAI Responses</option>
-            <option value="@ai-sdk/anthropic">Anthropic</option>
-            <option value="@ai-sdk/google">Google Gemini</option>
-            <option value="@ai-sdk/amazon-bedrock">Amazon Bedrock</option>
+          <select v-model="form.opencodeNpm" class="mac-select" @change="handleOpenCodeNpmChange">
+            <option
+              v-for="pkg in opencodeNpmPackages"
+              :key="pkg.value"
+              :value="pkg.value"
+            >
+              {{ pkg.label }}
+            </option>
           </select>
           <span class="field-hint">{{ t('components.main.form.hints.opencodeNpm') }}</span>
         </label>
@@ -73,13 +129,258 @@
         </label>
 
         <label class="form-field">
-          <span>{{ t('components.main.form.labels.apiKey') }}</span>
+          <span class="label-row">
+            {{ t('components.main.form.labels.apiKey') }}
+            <a
+              v-if="tabId === 'opencode' && opencodeApiKeyLink"
+              :href="opencodeApiKeyLink"
+              target="_blank"
+              rel="noreferrer"
+              class="opencode-inline-link"
+            >
+              {{ t('components.main.form.actions.getApiKey') }}
+            </a>
+          </span>
           <BaseInput
             v-model="form.apiKey"
             type="text"
             :placeholder="t('components.main.form.placeholders.apiKey')"
           />
+          <span v-if="tabId === 'opencode' && openCodePartnerPromotionText" class="opencode-partner-hint">
+            {{ openCodePartnerPromotionText }}
+          </span>
         </label>
+
+        <section v-if="tabId === 'opencode' && openCodeTemplateValueEntries.length > 0" class="opencode-template-panel">
+          <div class="opencode-template-panel__header">
+            <h3>{{ t('components.main.form.labels.opencodeTemplateValues') }}</h3>
+            <span>{{ t('components.main.form.hints.opencodeTemplateValues') }}</span>
+          </div>
+          <label
+            v-for="entry in openCodeTemplateValueEntries"
+            :key="entry.key"
+            class="form-field"
+          >
+            <span>{{ entry.config.label }}</span>
+            <BaseInput
+              :model-value="entry.value"
+              type="text"
+              :placeholder="entry.config.placeholder || entry.config.defaultValue || ''"
+              @update:model-value="updateOpenCodeTemplateValue(entry.key, $event)"
+            />
+          </label>
+        </section>
+
+        <div v-if="tabId === 'opencode'" class="opencode-config-panel">
+          <section class="opencode-editor-card">
+            <div class="opencode-editor-card__header">
+              <div>
+                <h3 class="opencode-editor-card__title">
+                  {{ t('components.main.form.labels.opencodeExtraOptions') }}
+                </h3>
+                <p class="opencode-editor-card__hint">
+                  {{ t('components.main.form.hints.opencodeExtraOptions') }}
+                </p>
+              </div>
+              <BaseButton type="button" variant="outline" class="opencode-editor-card__action" @click="addOpenCodeExtraOption">
+                {{ t('components.main.form.actions.addOpenCodeOption') }}
+              </BaseButton>
+            </div>
+
+            <p v-if="opencodeExtraOptionEntries.length === 0" class="opencode-empty-state">
+              {{ t('components.main.form.hints.opencodeNoExtraOptions') }}
+            </p>
+            <div v-else class="opencode-kv-list">
+              <div class="opencode-kv-row opencode-kv-row--head">
+                <span>{{ t('components.main.form.labels.opencodeOptionKey') }}</span>
+                <span>{{ t('components.main.form.labels.opencodeOptionValue') }}</span>
+                <span />
+              </div>
+              <div v-for="entry in opencodeExtraOptionEntries" :key="entry.key" class="opencode-kv-row">
+                <BaseInput
+                  :model-value="entry.key"
+                  type="text"
+                  :placeholder="t('components.main.form.placeholders.opencodeOptionKey')"
+                  @update:model-value="renameOpenCodeExtraOption(entry.key, $event)"
+                />
+                <BaseInput
+                  :model-value="entry.value"
+                  type="text"
+                  :placeholder="t('components.main.form.placeholders.opencodeOptionValue')"
+                  @update:model-value="updateOpenCodeExtraOptionValue(entry.key, $event)"
+                />
+                <button
+                  type="button"
+                  class="opencode-row-remove"
+                  :aria-label="t('components.main.form.actions.removeOpenCodeOption')"
+                  @click="removeOpenCodeExtraOption(entry.key)"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+          </section>
+
+          <section class="opencode-editor-card">
+            <div class="opencode-editor-card__header">
+              <div>
+                <h3 class="opencode-editor-card__title">
+                  {{ t('components.main.form.labels.opencodeModels') }}
+                </h3>
+                <p class="opencode-editor-card__hint">
+                  {{ t('components.main.form.hints.opencodeModels') }}
+                </p>
+              </div>
+              <div class="opencode-editor-card__actions">
+                <BaseButton
+                  type="button"
+                  variant="outline"
+                  class="opencode-editor-card__action"
+                  :disabled="isFetchingOpenCodeModels"
+                  @click="fetchOpenCodeModels"
+                >
+                  {{ isFetchingOpenCodeModels ? t('components.main.form.actions.fetchingOpenCodeModels') : t('components.main.form.actions.fetchOpenCodeModels') }}
+                </BaseButton>
+                <BaseButton type="button" variant="outline" class="opencode-editor-card__action" @click="addOpenCodeModel">
+                  {{ t('components.main.form.actions.addOpenCodeModel') }}
+                </BaseButton>
+              </div>
+            </div>
+            <p v-if="opencodeModelFetchError" class="field-error opencode-fetch-error">
+              {{ opencodeModelFetchError }}
+            </p>
+            <div v-if="openCodeModelSuggestions.length > 0" class="opencode-model-suggestions">
+              <span>{{ t('components.main.form.labels.opencodeModelSuggestions') }}</span>
+              <button
+                v-for="model in openCodeModelSuggestions.slice(0, 12)"
+                :key="`${model.source}:${model.id}`"
+                type="button"
+                class="opencode-model-chip"
+                @click="addSuggestedOpenCodeModel(model)"
+              >
+                {{ model.name || model.id }}
+              </button>
+            </div>
+
+            <p v-if="opencodeModelEntries.length === 0" class="opencode-empty-state">
+              {{ t('components.main.form.hints.opencodeNoModels') }}
+            </p>
+            <div v-else class="opencode-model-list">
+              <div class="opencode-model-row opencode-model-row--head">
+                <span />
+                <span>{{ t('components.main.form.labels.opencodeModelId') }}</span>
+                <span>{{ t('components.main.form.labels.opencodeModelName') }}</span>
+                <span />
+              </div>
+              <div v-for="entry in opencodeModelEntries" :key="entry.id" class="opencode-model-item">
+                <div class="opencode-model-row">
+                  <button
+                    type="button"
+                    class="opencode-row-expand"
+                    :aria-expanded="isOpenCodeModelExpanded(entry.id)"
+                    @click="toggleOpenCodeModelExpansion(entry.id)"
+                  >
+                    {{ isOpenCodeModelExpanded(entry.id) ? '▾' : '▸' }}
+                  </button>
+                  <BaseInput
+                    :model-value="entry.id"
+                    type="text"
+                    :placeholder="t('components.main.form.placeholders.opencodeModelId')"
+                    @update:model-value="renameOpenCodeModel(entry.id, $event)"
+                  />
+                  <BaseInput
+                    :model-value="entry.model.name || ''"
+                    type="text"
+                    :placeholder="t('components.main.form.placeholders.opencodeModelName')"
+                    @update:model-value="updateOpenCodeModelName(entry.id, $event)"
+                  />
+                  <button
+                    type="button"
+                    class="opencode-row-remove"
+                    :aria-label="t('components.main.form.actions.removeOpenCodeModel')"
+                    @click="removeOpenCodeModel(entry.id)"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                <div v-if="isOpenCodeModelExpanded(entry.id)" class="opencode-model-details">
+                  <div class="opencode-model-subsection">
+                    <div class="opencode-model-subsection__header">
+                      <span>{{ t('components.main.form.labels.opencodeModelExtraFields') }}</span>
+                      <button type="button" class="opencode-mini-action" @click="addOpenCodeModelExtraField(entry.id)">
+                        +
+                      </button>
+                    </div>
+                    <p v-if="getOpenCodeModelExtraFieldEntries(entry.model).length === 0" class="opencode-empty-state opencode-empty-state--small">
+                      {{ t('components.main.form.hints.opencodeNoModelExtraFields') }}
+                    </p>
+                    <div v-else class="opencode-kv-list opencode-kv-list--nested">
+                      <div v-for="field in getOpenCodeModelExtraFieldEntries(entry.model)" :key="field.key" class="opencode-kv-row opencode-kv-row--nested">
+                        <BaseInput
+                          :model-value="field.key"
+                          type="text"
+                          :placeholder="t('components.main.form.placeholders.opencodeModelExtraFieldKey')"
+                          @update:model-value="renameOpenCodeModelExtraField(entry.id, field.key, $event)"
+                        />
+                        <BaseInput
+                          :model-value="field.value"
+                          type="text"
+                          :placeholder="t('components.main.form.placeholders.opencodeModelOptionValue')"
+                          @update:model-value="updateOpenCodeModelExtraFieldValue(entry.id, field.key, $event)"
+                        />
+                        <button
+                          type="button"
+                          class="opencode-row-remove"
+                          :aria-label="t('components.main.form.actions.removeOpenCodeModelField')"
+                          @click="removeOpenCodeModelExtraField(entry.id, field.key)"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="opencode-model-subsection">
+                    <div class="opencode-model-subsection__header">
+                      <span>{{ t('components.main.form.labels.opencodeModelOptions') }}</span>
+                      <button type="button" class="opencode-mini-action" @click="addOpenCodeModelOption(entry.id)">
+                        +
+                      </button>
+                    </div>
+                    <p v-if="getOpenCodeModelOptionEntries(entry.model).length === 0" class="opencode-empty-state opencode-empty-state--small">
+                      {{ t('components.main.form.hints.opencodeNoModelOptions') }}
+                    </p>
+                    <div v-else class="opencode-kv-list opencode-kv-list--nested">
+                      <div v-for="option in getOpenCodeModelOptionEntries(entry.model)" :key="option.key" class="opencode-kv-row opencode-kv-row--nested">
+                        <BaseInput
+                          :model-value="option.key"
+                          type="text"
+                          :placeholder="t('components.main.form.placeholders.opencodeModelOptionKey')"
+                          @update:model-value="renameOpenCodeModelOption(entry.id, option.key, $event)"
+                        />
+                        <BaseInput
+                          :model-value="option.value"
+                          type="text"
+                          :placeholder="t('components.main.form.placeholders.opencodeModelOptionValue')"
+                          @update:model-value="updateOpenCodeModelOptionValue(entry.id, option.key, $event)"
+                        />
+                        <button
+                          type="button"
+                          class="opencode-row-remove"
+                          :aria-label="t('components.main.form.actions.removeOpenCodeModelOption')"
+                          @click="removeOpenCodeModelOption(entry.id, option.key)"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
 
         <label v-if="tabId !== 'opencode'" class="form-field">
           <span>{{ t('components.main.form.labels.apiEndpoint') }}</span>
@@ -486,7 +787,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Listbox, ListboxButton, ListboxOption, ListboxOptions } from '@headlessui/vue'
 import lobeIcons from '../../../icons/lobeIconMap'
@@ -511,6 +812,7 @@ import {
 import type { ProviderTab, VendorForm } from '../types'
 import type { LogPlatform } from '../../../services/logs'
 import { fetchCostByProvider, fetchCostSinceByProvider, fetchFiveHourQuotaStatusByProvider } from '../../../services/logs'
+import { getOpenCodeLiveProviderIds } from '../../../services/opencode'
 import type { BudgetQuotaAdjustments, BudgetQuotaKey, BudgetQuotaSetting } from '../../../utils/budgetUsage'
 import {
   cloneBudgetQuotaAdjustments,
@@ -542,6 +844,7 @@ import {
 } from '../../../utils/providerQuotaQuery'
 import type { AutomationCard } from '../../../data/cards'
 import type { CLIPlatform } from '../../../services/cliConfig'
+import { fetchProviderModelPricing } from '../../../services/providerModelPricing'
 import { isBuiltinModelPlatform } from '../../../utils/builtinModels'
 import {
   buildProviderIconOptionKeys,
@@ -549,6 +852,15 @@ import {
   preloadProviderDisplayIcons,
 } from '../../../utils/providerIconAssets'
 import { isDirectApplyBlockedForProvider } from '../utils/providerDirectApply'
+import {
+  getPresetModelDefaults,
+  opencodeNpmPackages,
+  opencodeProviderPresets,
+  OPENCODE_PRESET_MODEL_VARIANTS,
+  type OpenCodeProviderPreset,
+  type PresetModelVariant,
+  type TemplateValueConfig,
+} from '../config/opencodeProviderPresets'
 
 type CLIConfigEditorExposed = InstanceType<typeof CLIConfigEditor> & {
   applyPendingJsonChanges?: () => boolean | Promise<boolean>
@@ -559,10 +871,47 @@ type CLIConfigEditorExposed = InstanceType<typeof CLIConfigEditor> & {
   }
 }
 
+type OpenCodeModel = {
+  name?: string
+  options?: Record<string, any>
+  [key: string]: any
+}
+
+type OpenCodeKeyValueEntry = {
+  key: string
+  value: string
+}
+
+type OpenCodeModelEntry = {
+  id: string
+  model: OpenCodeModel
+}
+
+type OpenCodeFetchedModel = {
+  id: string
+  name?: string
+  source: 'fetched' | 'preset'
+}
+
+type OpenCodeTemplateValueState = Record<string, TemplateValueConfig>
+
+const OPENCODE_DEFAULT_NPM = '@ai-sdk/openai-compatible'
+const OPENCODE_KNOWN_OPTION_KEYS = new Set([
+  'baseURL',
+  'baseUrl',
+  'url',
+  'apiKey',
+  'api_key',
+  'APIKey',
+  'headers',
+])
+const OPENCODE_MODEL_RESERVED_KEYS = new Set(['name', 'limit', 'options'])
+
 const props = defineProps<{
   open: boolean
   tabId: ProviderTab
   card: AutomationCard | null
+  cards: AutomationCard[]
   activeProxyState: boolean
 }>()
 
@@ -597,6 +946,19 @@ const requestBodyOverridesText = ref('{}')
 const requestBodyOverridesError = ref('')
 const opencodeSettingsConfigText = ref('{}')
 const opencodeSettingsConfigError = ref('')
+const opencodeModels = ref<Record<string, OpenCodeModel>>({})
+const opencodeExtraOptions = ref<Record<string, string>>({})
+const expandedOpenCodeModelIds = ref<string[]>([])
+const selectedOpenCodePresetId = ref('custom')
+const opencodeTemplateValues = ref<OpenCodeTemplateValueState>({})
+const openCodeLiveProviderIds = ref<string[]>([])
+const isLoadingOpenCodeLiveProviderIds = ref(false)
+const openCodeLiveProviderIdsError = ref('')
+const fetchedOpenCodeModels = ref<OpenCodeFetchedModel[]>([])
+const isSyncingOpenCodeConfigText = ref(false)
+const opencodeConfigTextSyncSeq = ref(0)
+const isFetchingOpenCodeModels = ref(false)
+const opencodeModelFetchError = ref('')
 const claudeAdvancedExpanded = ref(false)
 const saveAndApplyBlockedByProvider = computed(() => (
   isDirectApplyBlockedForProvider(props.tabId, form)
@@ -805,6 +1167,115 @@ const iconPreviewOptions = computed(() => {
   const preferred = iconSearchQuery.value.trim() ? 120 : ICON_PRELOAD_BATCH_SIZE
   return Array.from(new Set([form.icon, ...filteredIconOptions.value.slice(0, preferred)]))
 })
+const opencodeExtraOptionEntries = computed<OpenCodeKeyValueEntry[]>(() => (
+  Object.entries(opencodeExtraOptions.value).map(([key, value]) => ({ key, value }))
+))
+const opencodeModelEntries = computed<OpenCodeModelEntry[]>(() => (
+  Object.entries(opencodeModels.value).map(([id, model]) => ({ id, model }))
+))
+const openCodePresetEntries = computed(() => (
+  opencodeProviderPresets.map((preset, index) => ({ id: `opencode-${index}`, preset }))
+))
+const selectedOpenCodePreset = computed<OpenCodeProviderPreset | null>(() => (
+  openCodePresetEntries.value.find((entry) => entry.id === selectedOpenCodePresetId.value)?.preset ?? null
+))
+const shouldShowOpenCodeApiKeyLink = computed(() => {
+  if (props.tabId !== 'opencode') return false
+  const category = `${form.category || selectedOpenCodePreset.value?.category || ''}`.trim()
+  return ['cn_official', 'aggregator', 'third_party'].includes(category)
+})
+const opencodeApiKeyLink = computed(() => (
+  shouldShowOpenCodeApiKeyLink.value
+    ? `${form.apiKeyUrl ?? ''}`.trim()
+      || selectedOpenCodePreset.value?.apiKeyUrl
+      || selectedOpenCodePreset.value?.websiteUrl
+      || ''
+    : ''
+))
+const openCodePartnerPromotionText = computed(() => {
+  if (!form.partnerPromotionKey) return ''
+  const key = `providerForm.partnerPromotion.${form.partnerPromotionKey}`
+  const fallback = t('components.main.form.hints.opencodePartnerPromotion', {
+    provider: form.name || selectedOpenCodePreset.value?.name || 'OpenCode',
+  })
+  const translated = t(key)
+  return translated === key ? fallback : translated
+})
+const openCodeTemplateValueEntries = computed(() => (
+  Object.entries(selectedOpenCodePreset.value?.templateValues ?? {}).map(([key, config]) => ({
+    key,
+    config,
+    value: opencodeTemplateValues.value[key]?.editorValue
+      ?? opencodeTemplateValues.value[key]?.defaultValue
+      ?? config.defaultValue
+      ?? '',
+  }))
+))
+const existingOpenCodeProviderKeys = computed(() => (
+  new Set(
+    props.cards
+      .map((card) => `${card.providerRef ?? ''}`.trim())
+      .filter((providerRef) => providerRef && providerRef !== `${props.card?.providerRef ?? ''}`.trim()),
+  )
+))
+const currentOpenCodeProviderKey = computed(() => (
+  isEditing.value ? `${form.providerRef ?? ''}`.trim() : normalizeNewOpenCodeProviderKey(form.providerRef || form.name)
+))
+const isOpenCodeProviderKeyLocked = computed(() => (
+  props.tabId === 'opencode'
+    && isEditing.value
+    && openCodeLiveProviderIds.value.includes(`${props.card?.providerRef ?? ''}`.trim())
+))
+const isOpenCodeProviderKeyInputDisabled = computed(() => (
+  isEditing.value || (isEditing.value && isLoadingOpenCodeLiveProviderIds.value)
+))
+const isOpenCodeProviderKeyDuplicate = computed(() => {
+  const providerKey = currentOpenCodeProviderKey.value
+  if (!providerKey) return false
+  if (existingOpenCodeProviderKeys.value.has(providerKey)) return true
+  if (isEditing.value && providerKey === `${props.card?.providerRef ?? ''}`.trim()) return false
+  return openCodeLiveProviderIds.value.includes(providerKey)
+})
+const openCodeProviderKeyStatus = computed(() => {
+  if (props.tabId !== 'opencode') return null
+  const providerKey = currentOpenCodeProviderKey.value
+  if (!providerKey) return null
+  if (isEditing.value) return null
+  if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(providerKey)) {
+    return {
+      className: 'field-error',
+      message: t('components.main.form.errors.providerKeyInvalid'),
+    }
+  }
+  if (isOpenCodeProviderKeyDuplicate.value) {
+    return {
+      className: 'field-error',
+      message: t('components.main.form.errors.providerKeyDuplicate'),
+    }
+  }
+  return {
+    className: 'field-hint opencode-key-ok',
+    message: t('components.main.form.hints.providerKeyAvailable'),
+  }
+})
+const openCodePresetModelSuggestions = computed<OpenCodeFetchedModel[]>(() => {
+  const npm = form.opencodeNpm || OPENCODE_DEFAULT_NPM
+  return (OPENCODE_PRESET_MODEL_VARIANTS[npm] ?? []).map((model) => ({
+    id: model.id,
+    name: model.name,
+    source: 'preset' as const,
+  }))
+})
+const openCodeModelSuggestions = computed<OpenCodeFetchedModel[]>(() => {
+  const configured = new Set(Object.keys(opencodeModels.value))
+  const merged = [...fetchedOpenCodeModels.value, ...openCodePresetModelSuggestions.value]
+  const seen = new Set<string>()
+  return merged.filter((model) => {
+    if (!model.id || configured.has(model.id) || seen.has(model.id)) return false
+    seen.add(model.id)
+    return true
+  })
+})
 
 const formatBudgetLimitLabel = (total: number) => {
   if (total <= 0) return '∞'
@@ -981,12 +1452,155 @@ const openProviderQuotaQueryConfigModal = () => {
   })
 }
 
+const loadOpenCodeLiveProviderIds = async () => {
+  if (props.tabId !== 'opencode') return
+  isLoadingOpenCodeLiveProviderIds.value = true
+  openCodeLiveProviderIdsError.value = ''
+  try {
+    openCodeLiveProviderIds.value = await getOpenCodeLiveProviderIds()
+  } catch (error) {
+    openCodeLiveProviderIds.value = []
+    openCodeLiveProviderIdsError.value = t('components.main.form.errors.providerKeyStatusFailed', {
+      error: error instanceof Error ? error.message : String(error),
+    })
+  } finally {
+    isLoadingOpenCodeLiveProviderIds.value = false
+  }
+}
+
+const openCodeCategoryLabel = (category?: string) => {
+  const normalized = `${category ?? 'custom'}`.trim() || 'custom'
+  const keyMap: Record<string, string> = {
+    official: 'components.main.form.options.opencodeCategoryOfficial',
+    cn_official: 'components.main.form.options.opencodeCategoryCnOfficial',
+    aggregator: 'components.main.form.options.opencodeCategoryAggregator',
+    third_party: 'components.main.form.options.opencodeCategoryThirdParty',
+    cloud_provider: 'components.main.form.options.opencodeCategoryCloudProvider',
+    custom: 'components.main.form.options.opencodeCategoryCustom',
+    omo: 'components.main.form.options.opencodeCategoryOmo',
+    'omo-slim': 'components.main.form.options.opencodeCategoryOmoSlim',
+  }
+  return t(keyMap[normalized] || keyMap.custom)
+}
+
+const openCodeCategoryHint = (category?: string) => {
+  const normalized = `${category ?? 'custom'}`.trim() || 'custom'
+  const keyMap: Record<string, string> = {
+    official: 'components.main.form.hints.opencodeCategoryOfficial',
+    cn_official: 'components.main.form.hints.opencodeCategoryCnOfficial',
+    aggregator: 'components.main.form.hints.opencodeCategoryAggregator',
+    third_party: 'components.main.form.hints.opencodeCategoryThirdParty',
+    cloud_provider: 'components.main.form.hints.opencodeCategoryCloudProvider',
+    custom: 'components.main.form.hints.opencodeCategoryCustom',
+    omo: 'components.main.form.hints.opencodeCategoryOmo',
+    'omo-slim': 'components.main.form.hints.opencodeCategoryOmoSlim',
+  }
+  return t(keyMap[normalized] || keyMap.custom)
+}
+
+const openCodePresetLabel = (preset: OpenCodeProviderPreset) => (
+  preset.nameKey && t(preset.nameKey) !== preset.nameKey ? t(preset.nameKey) : preset.name
+)
+
+const handleOpenCodeProviderKeyInput = (value: string) => {
+  if (props.tabId !== 'opencode' || isOpenCodeProviderKeyLocked.value) return
+  form.providerRef = normalizeNewOpenCodeProviderKey(value)
+}
+
+const createTemplateValueState = (preset: OpenCodeProviderPreset | null): OpenCodeTemplateValueState => {
+  const values: OpenCodeTemplateValueState = {}
+  Object.entries(preset?.templateValues ?? {}).forEach(([key, config]) => {
+    const currentValue = key === 'apiKey'
+      ? form.apiKey
+      : key === 'baseURL'
+        ? form.apiUrl
+        : `${config.editorValue ?? config.defaultValue ?? ''}`
+    values[key] = {
+      ...config,
+      editorValue: currentValue || config.editorValue || config.defaultValue || '',
+    }
+  })
+  return values
+}
+
+const applyOpenCodeTemplateValues = (
+  source: unknown,
+  values: OpenCodeTemplateValueState = opencodeTemplateValues.value,
+): any => {
+  if (typeof source === 'string') {
+    return Object.entries(values).reduce((current, [key, config]) => {
+      const value = config.editorValue ?? config.defaultValue ?? ''
+      return current.split('${' + key + '}').join(value)
+    }, source)
+  }
+  if (Array.isArray(source)) {
+    return source.map((item) => applyOpenCodeTemplateValues(item, values))
+  }
+  if (source && typeof source === 'object') {
+    return Object.fromEntries(
+      Object.entries(source as Record<string, unknown>).map(([key, value]) => [
+        key,
+        applyOpenCodeTemplateValues(value, values),
+      ]),
+    )
+  }
+  return source
+}
+
+const applyOpenCodePreset = (preset: OpenCodeProviderPreset) => {
+  const config = cloneProviderValue(applyOpenCodeTemplateValues(preset.settingsConfig || {}))
+  const options = (config.options && typeof config.options === 'object' && !Array.isArray(config.options))
+    ? config.options as Record<string, any>
+    : {}
+
+  form.name = preset.name
+  form.officialSite = preset.websiteUrl || ''
+  form.apiKeyUrl = preset.apiKeyUrl || ''
+  form.category = preset.category || ''
+  form.partnerPromotionKey = preset.partnerPromotionKey || ''
+  form.icon = preset.icon || 'opencode'
+  form.opencodeNpm = `${config.npm ?? preset.settingsConfig?.npm ?? OPENCODE_DEFAULT_NPM}`.trim() || OPENCODE_DEFAULT_NPM
+  form.apiUrl = `${options.baseURL ?? options.baseUrl ?? options.url ?? preset.baseUrl ?? ''}`
+  form.apiKey = `${options.apiKey ?? options.api_key ?? options.APIKey ?? ''}`
+  form.opencodeSettingsConfig = config
+  syncOpenCodeSettingsConfigText()
+}
+
+const handleOpenCodePresetChange = () => {
+  const preset = selectedOpenCodePreset.value
+  if (!preset) {
+    opencodeTemplateValues.value = {}
+    return
+  }
+  opencodeTemplateValues.value = createTemplateValueState(preset)
+  applyOpenCodePreset(preset)
+}
+
+const updateOpenCodeTemplateValue = (key: string, value: string) => {
+  const preset = selectedOpenCodePreset.value
+  const config = preset?.templateValues?.[key]
+  if (!preset || !config) return
+  opencodeTemplateValues.value = {
+    ...opencodeTemplateValues.value,
+    [key]: {
+      ...config,
+      ...(opencodeTemplateValues.value[key] ?? {}),
+      editorValue: value,
+    },
+  }
+  applyOpenCodePreset(preset)
+}
+
 const resetForm = () => {
   errors.apiUrl = ''
   errors.providerRef = ''
   iconSearchQuery.value = ''
   requestBodyOverridesError.value = ''
   opencodeSettingsConfigError.value = ''
+  opencodeModelFetchError.value = ''
+  selectedOpenCodePresetId.value = 'custom'
+  opencodeTemplateValues.value = {}
+  fetchedOpenCodeModels.value = []
   cliConfigEditorKey.value += 1
 
   if (!props.card) {
@@ -1001,6 +1615,7 @@ const resetForm = () => {
       form.icon = 'opencode'
       form.opencodeNpm = form.opencodeNpm || '@ai-sdk/openai-compatible'
       syncOpenCodeSettingsConfigText()
+      void loadOpenCodeLiveProviderIds()
     }
     void refreshBudgetQuotaUsage()
     return
@@ -1013,6 +1628,7 @@ const resetForm = () => {
   requestBodyOverridesText.value = formatJsonObject(form.requestBodyOverrides)
   if (props.tabId === 'opencode') {
     syncOpenCodeSettingsConfigText()
+    void loadOpenCodeLiveProviderIds()
   }
 
   const authState = resolveProviderAuthState(props.card.connectivityAuthType, props.tabId)
@@ -1050,6 +1666,11 @@ watch(requestBodyOverridesText, () => {
 
 watch(opencodeSettingsConfigText, () => {
   opencodeSettingsConfigError.value = ''
+  if (isSyncingOpenCodeConfigText.value || props.tabId !== 'opencode') return
+  const parsedConfig = parseOpenCodeSettingsConfigTextObject()
+  if (!parsedConfig) return
+  form.opencodeSettingsConfig = cloneProviderValue(parsedConfig)
+  syncOpenCodeStructuredStateFromConfig(parsedConfig, { syncBasicFields: true })
 })
 
 watch(hasClaudeAdvancedValue, (value) => {
@@ -1093,8 +1714,177 @@ const normalizeNewOpenCodeProviderKey = (value: string | undefined) => `${value 
   .replace(/[^a-z0-9-]+/g, '-')
   .replace(/^-+|-+$/g, '')
 
+const isRecordValue = (value: unknown): value is Record<string, any> => (
+  !!value && typeof value === 'object' && !Array.isArray(value)
+)
+
+const parseOpenCodeEditableValue = (value: string): any => {
+  const trimmed = value.trim()
+  if (!trimmed) return ''
+  try {
+    return JSON.parse(trimmed)
+  } catch {
+    return value
+  }
+}
+
+const stringifyOpenCodeEditableValue = (value: unknown): string => {
+  if (typeof value === 'string') return value
+  if (value === undefined) return ''
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return `${value ?? ''}`
+  }
+}
+
+const parseOpenCodeSettingsConfigTextObject = (): Record<string, any> | null => {
+  const raw = opencodeSettingsConfigText.value.trim()
+  if (!raw) return null
+
+  try {
+    const parsed = JSON.parse(raw)
+    return isRecordValue(parsed) ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+const getOpenCodeConfigOptions = (config?: Record<string, any> | null): Record<string, any> => {
+  const options = config?.options
+  return isRecordValue(options) ? { ...options } : {}
+}
+
+const getOpenCodeConfigModels = (config?: Record<string, any> | null): Record<string, OpenCodeModel> => {
+  const models = config?.models
+  return isRecordValue(models) ? cloneProviderValue(models as Record<string, OpenCodeModel>) : {}
+}
+
+const toOpenCodeExtraOptions = (options: Record<string, any>): Record<string, string> => {
+  const extra: Record<string, string> = {}
+  Object.entries(options).forEach(([key, value]) => {
+    if (OPENCODE_KNOWN_OPTION_KEYS.has(key)) return
+    extra[key] = stringifyOpenCodeEditableValue(value)
+  })
+  return extra
+}
+
+const createOpenCodeDraftKey = (prefix: string, record: Record<string, unknown>) => {
+  const seed = `${prefix}-${Date.now()}`
+  if (!(seed in record)) return seed
+  let index = 2
+  while (`${seed}-${index}` in record) index += 1
+  return `${seed}-${index}`
+}
+
+const renameRecordKey = <T,>(record: Record<string, T>, oldKey: string, newKey: string): Record<string, T> => {
+  const normalizedKey = newKey.trim()
+  if (!normalizedKey || normalizedKey === oldKey) return record
+  if (normalizedKey in record && normalizedKey !== oldKey) return record
+
+  const renamed: Record<string, T> = {}
+  Object.entries(record).forEach(([key, value]) => {
+    renamed[key === oldKey ? normalizedKey : key] = value
+  })
+  return renamed
+}
+
+const getOpenCodeModelExtraFieldEntries = (model: OpenCodeModel): OpenCodeKeyValueEntry[] => (
+  Object.entries(model)
+    .filter(([key]) => !OPENCODE_MODEL_RESERVED_KEYS.has(key))
+    .map(([key, value]) => ({ key, value: stringifyOpenCodeEditableValue(value) }))
+)
+
+const getOpenCodeModelOptionEntries = (model: OpenCodeModel): OpenCodeKeyValueEntry[] => {
+  const options = isRecordValue(model.options) ? model.options : {}
+  return Object.entries(options).map(([key, value]) => ({
+    key,
+    value: stringifyOpenCodeEditableValue(value),
+  }))
+}
+
+const buildOpenCodeSettingsConfigFromStructuredState = (baseConfig?: Record<string, any> | null): Record<string, any> => {
+  const source = cloneProviderValue(
+    baseConfig && Object.keys(baseConfig).length > 0
+      ? baseConfig
+      : buildDefaultOpenCodeSettingsConfig(),
+  )
+  const config: Record<string, any> = {
+    ...source,
+    npm: `${form.opencodeNpm || source.npm || OPENCODE_DEFAULT_NPM}`.trim() || OPENCODE_DEFAULT_NPM,
+    name: form.name || source.name || 'OpenCode Provider',
+  }
+  const options = getOpenCodeConfigOptions(source)
+
+  delete options.baseURL
+  delete options.baseUrl
+  delete options.url
+  delete options.apiKey
+  delete options.api_key
+  delete options.APIKey
+  Object.keys(options).forEach((key) => {
+    if (!OPENCODE_KNOWN_OPTION_KEYS.has(key)) {
+      delete options[key]
+    }
+  })
+
+  Object.entries(opencodeExtraOptions.value).forEach(([rawKey, rawValue]) => {
+    const key = rawKey.trim()
+    if (!key || OPENCODE_KNOWN_OPTION_KEYS.has(key)) return
+    options[key] = parseOpenCodeEditableValue(rawValue)
+  })
+
+  const baseUrl = form.apiUrl.trim()
+  const apiKey = form.apiKey.trim()
+  if (baseUrl) options.baseURL = baseUrl
+  if (apiKey) options.apiKey = apiKey
+
+  if (Object.keys(options).length > 0) {
+    config.options = options
+  } else {
+    delete config.options
+  }
+
+  config.models = cloneProviderValue(opencodeModels.value)
+  return config
+}
+
+const syncOpenCodeSettingsConfigTextFromStructuredState = (baseConfig?: Record<string, any> | null) => {
+  const config = buildOpenCodeSettingsConfigFromStructuredState(baseConfig ?? parseOpenCodeSettingsConfigTextObject())
+  form.opencodeSettingsConfig = cloneProviderValue(config)
+  const syncSeq = opencodeConfigTextSyncSeq.value + 1
+  opencodeConfigTextSyncSeq.value = syncSeq
+  isSyncingOpenCodeConfigText.value = true
+  opencodeSettingsConfigText.value = formatJsonObject(config)
+  void nextTick(() => {
+    if (opencodeConfigTextSyncSeq.value === syncSeq) {
+      isSyncingOpenCodeConfigText.value = false
+    }
+  })
+}
+
+const syncOpenCodeStructuredStateFromConfig = (
+  config: Record<string, any>,
+  options: { syncBasicFields?: boolean } = {},
+) => {
+  const normalizedNpm = `${config.npm ?? form.opencodeNpm ?? OPENCODE_DEFAULT_NPM}`.trim() || OPENCODE_DEFAULT_NPM
+  form.opencodeNpm = normalizedNpm
+
+  const providerOptions = getOpenCodeConfigOptions(config)
+  if (options.syncBasicFields) {
+    if (typeof config.name === 'string') form.name = config.name
+    form.apiUrl = `${providerOptions.baseURL ?? providerOptions.baseUrl ?? providerOptions.url ?? ''}`
+    form.apiKey = `${providerOptions.apiKey ?? providerOptions.api_key ?? providerOptions.APIKey ?? ''}`
+  }
+
+  opencodeExtraOptions.value = toOpenCodeExtraOptions(providerOptions)
+  opencodeModels.value = getOpenCodeConfigModels(config)
+  const modelIds = new Set(Object.keys(opencodeModels.value))
+  expandedOpenCodeModelIds.value = expandedOpenCodeModelIds.value.filter((modelId) => modelIds.has(modelId))
+}
+
 const buildDefaultOpenCodeSettingsConfig = (): Record<string, any> => createDefaultOpenCodeSettingsConfig(
-  form.opencodeNpm || '@ai-sdk/openai-compatible',
+  form.opencodeNpm || OPENCODE_DEFAULT_NPM,
   form.name || 'OpenCode Provider',
   form.apiUrl,
   form.apiKey,
@@ -1104,7 +1894,280 @@ const syncOpenCodeSettingsConfigText = () => {
   const config = form.opencodeSettingsConfig && Object.keys(form.opencodeSettingsConfig).length > 0
     ? form.opencodeSettingsConfig
     : buildDefaultOpenCodeSettingsConfig()
+  syncOpenCodeStructuredStateFromConfig(config)
+  form.opencodeSettingsConfig = cloneProviderValue(config)
+  const syncSeq = opencodeConfigTextSyncSeq.value + 1
+  opencodeConfigTextSyncSeq.value = syncSeq
+  isSyncingOpenCodeConfigText.value = true
   opencodeSettingsConfigText.value = formatJsonObject(config)
+  void nextTick(() => {
+    if (opencodeConfigTextSyncSeq.value === syncSeq) {
+      isSyncingOpenCodeConfigText.value = false
+    }
+  })
+}
+
+const isOpenCodeModelExpanded = (modelId: string) => expandedOpenCodeModelIds.value.includes(modelId)
+
+const toggleOpenCodeModelExpansion = (modelId: string) => {
+  expandedOpenCodeModelIds.value = isOpenCodeModelExpanded(modelId)
+    ? expandedOpenCodeModelIds.value.filter((id) => id !== modelId)
+    : [...expandedOpenCodeModelIds.value, modelId]
+}
+
+const handleOpenCodeNpmChange = () => {
+  const baseConfig = parseOpenCodeSettingsConfigTextObject() || form.opencodeSettingsConfig || buildDefaultOpenCodeSettingsConfig()
+  if (isDefaultOpenCodeModels(opencodeModels.value)) {
+    const nextDefault = createDefaultOpenCodeSettingsConfig(
+      form.opencodeNpm || OPENCODE_DEFAULT_NPM,
+      form.name || 'OpenCode Provider',
+      form.apiUrl,
+      form.apiKey,
+    ).models as Record<string, OpenCodeModel>
+    opencodeModels.value = cloneProviderValue(nextDefault)
+  }
+  syncOpenCodeSettingsConfigTextFromStructuredState(baseConfig)
+}
+
+const addOpenCodeExtraOption = () => {
+  const key = createOpenCodeDraftKey('option', opencodeExtraOptions.value)
+  opencodeExtraOptions.value = { ...opencodeExtraOptions.value, [key]: '' }
+  syncOpenCodeSettingsConfigTextFromStructuredState()
+}
+
+const renameOpenCodeExtraOption = (oldKey: string, newKey: string) => {
+  opencodeExtraOptions.value = renameRecordKey(opencodeExtraOptions.value, oldKey, newKey)
+  syncOpenCodeSettingsConfigTextFromStructuredState()
+}
+
+const updateOpenCodeExtraOptionValue = (key: string, value: string) => {
+  opencodeExtraOptions.value = { ...opencodeExtraOptions.value, [key]: value }
+  syncOpenCodeSettingsConfigTextFromStructuredState()
+}
+
+const removeOpenCodeExtraOption = (key: string) => {
+  const nextOptions = { ...opencodeExtraOptions.value }
+  delete nextOptions[key]
+  opencodeExtraOptions.value = nextOptions
+  syncOpenCodeSettingsConfigTextFromStructuredState()
+}
+
+const addOpenCodeModel = () => {
+  const id = createOpenCodeDraftKey('model', opencodeModels.value)
+  opencodeModels.value = { ...opencodeModels.value, [id]: { name: '' } }
+  expandedOpenCodeModelIds.value = [...expandedOpenCodeModelIds.value, id]
+  syncOpenCodeSettingsConfigTextFromStructuredState()
+}
+
+const renameOpenCodeModel = (oldId: string, newId: string) => {
+  const normalizedId = newId.trim()
+  if (!normalizedId || normalizedId === oldId) return
+  if (normalizedId in opencodeModels.value && normalizedId !== oldId) return
+  opencodeModels.value = renameRecordKey(opencodeModels.value, oldId, normalizedId)
+  if (isOpenCodeModelExpanded(oldId)) {
+    expandedOpenCodeModelIds.value = expandedOpenCodeModelIds.value.map((id) => (id === oldId ? normalizedId : id))
+  }
+  syncOpenCodeSettingsConfigTextFromStructuredState()
+}
+
+const updateOpenCodeModelName = (modelId: string, name: string) => {
+  const model = opencodeModels.value[modelId] || {}
+  opencodeModels.value = {
+    ...opencodeModels.value,
+    [modelId]: { ...model, name },
+  }
+  syncOpenCodeSettingsConfigTextFromStructuredState()
+}
+
+const removeOpenCodeModel = (modelId: string) => {
+  const nextModels = { ...opencodeModels.value }
+  delete nextModels[modelId]
+  opencodeModels.value = nextModels
+  expandedOpenCodeModelIds.value = expandedOpenCodeModelIds.value.filter((id) => id !== modelId)
+  syncOpenCodeSettingsConfigTextFromStructuredState()
+}
+
+const buildOpenCodeModelFromSuggestion = (model: OpenCodeFetchedModel | PresetModelVariant): OpenCodeModel => {
+  const defaults = getPresetModelDefaults(form.opencodeNpm || OPENCODE_DEFAULT_NPM, model.id)
+  const modelName = 'name' in model ? model.name : undefined
+  const nextModel: OpenCodeModel = {
+    name: modelName || defaults?.name || model.id,
+  }
+  const limit: Record<string, unknown> = {}
+  if (defaults?.contextLimit) limit.context = defaults.contextLimit
+  if (defaults?.outputLimit) limit.output = defaults.outputLimit
+  if (Object.keys(limit).length > 0) nextModel.limit = limit
+  if (defaults?.modalities) nextModel.modalities = cloneProviderValue(defaults.modalities)
+  if (defaults?.variants) nextModel.variants = cloneProviderValue(defaults.variants)
+  if (defaults?.options) nextModel.options = cloneProviderValue(defaults.options)
+  return nextModel
+}
+
+const addSuggestedOpenCodeModel = (model: OpenCodeFetchedModel) => {
+  if (!model.id) return
+  opencodeModels.value = {
+    ...opencodeModels.value,
+    [model.id]: {
+      ...(opencodeModels.value[model.id] || {}),
+      ...buildOpenCodeModelFromSuggestion(model),
+    },
+  }
+  expandedOpenCodeModelIds.value = Array.from(new Set([...expandedOpenCodeModelIds.value, model.id]))
+  syncOpenCodeSettingsConfigTextFromStructuredState()
+}
+
+const fetchOpenCodeModels = async () => {
+  opencodeModelFetchError.value = ''
+  const apiUrl = form.apiUrl.trim()
+  const apiKey = form.apiKey.trim()
+  if (!apiUrl || !apiKey) {
+    opencodeModelFetchError.value = t('components.main.form.errors.opencodeModelFetchMissingCredentials')
+    return
+  }
+
+  isFetchingOpenCodeModels.value = true
+  try {
+    const response = await fetchProviderModelPricing({
+      id: Number(form.providerRef) || 0,
+      providerRef: form.providerRef || 'opencode-model-fetch',
+      name: form.name || 'OpenCode Provider',
+      apiUrl,
+      apiKey,
+      officialSite: form.officialSite || '',
+      icon: form.icon || 'opencode',
+      tint: '',
+      accent: '',
+      enabled: form.enabled,
+      connectivityAuthType: '',
+    }, 'opencode', 'v1/models')
+    const modelIds = Array.from(new Set(
+      (response.models || [])
+        .map((item) => `${item.model ?? ''}`.trim())
+        .filter(Boolean),
+    ))
+    if (modelIds.length === 0) {
+      opencodeModelFetchError.value = response.fetchError?.trim() || t('components.main.form.errors.opencodeModelFetchEmpty')
+      return
+    }
+
+    fetchedOpenCodeModels.value = modelIds.map((modelId) => ({
+      id: modelId,
+      name: modelId,
+      source: 'fetched',
+    }))
+  } catch (error) {
+    opencodeModelFetchError.value = t('components.main.form.errors.opencodeModelFetchFailed', {
+      error: error instanceof Error ? error.message : String(error),
+    })
+  } finally {
+    isFetchingOpenCodeModels.value = false
+  }
+}
+
+const addOpenCodeModelExtraField = (modelId: string) => {
+  const model = opencodeModels.value[modelId] || { name: '' }
+  const extraFields = Object.fromEntries(
+    Object.keys(model)
+      .filter((key) => !OPENCODE_MODEL_RESERVED_KEYS.has(key))
+      .map((key) => [key, true]),
+  )
+  const key = createOpenCodeDraftKey('field', extraFields)
+  opencodeModels.value = {
+    ...opencodeModels.value,
+    [modelId]: { ...model, [key]: '' },
+  }
+  syncOpenCodeSettingsConfigTextFromStructuredState()
+}
+
+const renameOpenCodeModelExtraField = (modelId: string, oldKey: string, newKey: string) => {
+  const model = opencodeModels.value[modelId]
+  const normalizedKey = newKey.trim()
+  if (!model || !normalizedKey || normalizedKey === oldKey) return
+  if (OPENCODE_MODEL_RESERVED_KEYS.has(normalizedKey) || (normalizedKey in model && normalizedKey !== oldKey)) return
+
+  const renamedModel: OpenCodeModel = {}
+  Object.entries(model).forEach(([key, value]) => {
+    renamedModel[key === oldKey ? normalizedKey : key] = value
+  })
+  opencodeModels.value = { ...opencodeModels.value, [modelId]: renamedModel }
+  syncOpenCodeSettingsConfigTextFromStructuredState()
+}
+
+const updateOpenCodeModelExtraFieldValue = (modelId: string, key: string, value: string) => {
+  const model = opencodeModels.value[modelId] || { name: '' }
+  if (OPENCODE_MODEL_RESERVED_KEYS.has(key)) return
+  opencodeModels.value = {
+    ...opencodeModels.value,
+    [modelId]: { ...model, [key]: parseOpenCodeEditableValue(value) },
+  }
+  syncOpenCodeSettingsConfigTextFromStructuredState()
+}
+
+const removeOpenCodeModelExtraField = (modelId: string, key: string) => {
+  const model = opencodeModels.value[modelId]
+  if (!model || OPENCODE_MODEL_RESERVED_KEYS.has(key)) return
+  const nextModel = { ...model }
+  delete nextModel[key]
+  opencodeModels.value = { ...opencodeModels.value, [modelId]: nextModel }
+  syncOpenCodeSettingsConfigTextFromStructuredState()
+}
+
+const addOpenCodeModelOption = (modelId: string) => {
+  const model = opencodeModels.value[modelId] || { name: '' }
+  const options = isRecordValue(model.options) ? model.options : {}
+  const key = createOpenCodeDraftKey('option', options)
+  opencodeModels.value = {
+    ...opencodeModels.value,
+    [modelId]: {
+      ...model,
+      options: { ...options, [key]: '' },
+    },
+  }
+  syncOpenCodeSettingsConfigTextFromStructuredState()
+}
+
+const renameOpenCodeModelOption = (modelId: string, oldKey: string, newKey: string) => {
+  const model = opencodeModels.value[modelId]
+  const normalizedKey = newKey.trim()
+  if (!model || !normalizedKey || normalizedKey === oldKey) return
+  const options = isRecordValue(model.options) ? model.options : {}
+  if (normalizedKey in options && normalizedKey !== oldKey) return
+  opencodeModels.value = {
+    ...opencodeModels.value,
+    [modelId]: {
+      ...model,
+      options: renameRecordKey(options, oldKey, normalizedKey),
+    },
+  }
+  syncOpenCodeSettingsConfigTextFromStructuredState()
+}
+
+const updateOpenCodeModelOptionValue = (modelId: string, key: string, value: string) => {
+  const model = opencodeModels.value[modelId] || { name: '' }
+  const options = isRecordValue(model.options) ? model.options : {}
+  opencodeModels.value = {
+    ...opencodeModels.value,
+    [modelId]: {
+      ...model,
+      options: { ...options, [key]: parseOpenCodeEditableValue(value) },
+    },
+  }
+  syncOpenCodeSettingsConfigTextFromStructuredState()
+}
+
+const removeOpenCodeModelOption = (modelId: string, key: string) => {
+  const model = opencodeModels.value[modelId]
+  if (!model) return
+  const options = isRecordValue(model.options) ? { ...model.options } : {}
+  delete options[key]
+  const nextModel: OpenCodeModel = { ...model }
+  if (Object.keys(options).length > 0) {
+    nextModel.options = options
+  } else {
+    delete nextModel.options
+  }
+  opencodeModels.value = { ...opencodeModels.value, [modelId]: nextModel }
+  syncOpenCodeSettingsConfigTextFromStructuredState()
 }
 
 const parseOpenCodeSettingsConfig = (): Record<string, any> | null => {
@@ -1216,10 +2279,22 @@ const buildFormPayload = async (): Promise<VendorForm | null> => {
 
   if (props.tabId === 'opencode') {
     const providerRef = isEditing.value
-      ? `${form.providerRef || ''}`.trim()
+      ? normalizeNewOpenCodeProviderKey(form.providerRef || props.card?.providerRef || '')
       : normalizeNewOpenCodeProviderKey(form.providerRef || form.name)
     if (!providerRef) {
       errors.providerRef = t('components.main.form.errors.providerKeyRequired')
+      return null
+    }
+    if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(providerRef)) {
+      errors.providerRef = t('components.main.form.errors.providerKeyInvalid')
+      return null
+    }
+    if (isLoadingOpenCodeLiveProviderIds.value) {
+      errors.providerRef = t('components.main.form.errors.providerKeyStatusLoading')
+      return null
+    }
+    if (isOpenCodeProviderKeyDuplicate.value) {
+      errors.providerRef = t('components.main.form.errors.providerKeyDuplicate')
       return null
     }
     form.providerRef = providerRef
@@ -1248,6 +2323,10 @@ const buildFormPayload = async (): Promise<VendorForm | null> => {
     ? parseOpenCodeSettingsConfig()
     : undefined
   if (props.tabId === 'opencode' && !opencodeSettingsConfig) return null
+  if (props.tabId === 'opencode' && Object.keys(opencodeModels.value).length === 0) {
+    opencodeModelFetchError.value = t('components.main.form.errors.opencodeModelsRequired')
+    return null
+  }
 
   const payload = buildNormalizedVendorForm({
     form,
@@ -1260,6 +2339,9 @@ const buildFormPayload = async (): Promise<VendorForm | null> => {
     payload.providerRef = form.providerRef
     payload.opencodeNpm = form.opencodeNpm || opencodeSettingsConfig?.npm || '@ai-sdk/openai-compatible'
     payload.opencodeSettingsConfig = opencodeSettingsConfig ?? undefined
+    payload.apiKeyUrl = form.apiKeyUrl || ''
+    payload.category = form.category || ''
+    payload.partnerPromotionKey = form.partnerPromotionKey || ''
   }
 
   // 处理预算额度：仅保存 total > 0 的配置

@@ -27,6 +27,7 @@ type OpenCodeProvider struct {
 	BaseURL              string         `json:"baseUrl,omitempty"`
 	APIKey               string         `json:"apiKey,omitempty"`
 	NPM                  string         `json:"npm,omitempty"`
+	Icon                 string         `json:"icon,omitempty"`
 	Description          string         `json:"description,omitempty"`
 	Category             string         `json:"category,omitempty"`
 	PartnerPromotionKey  string         `json:"partnerPromotionKey,omitempty"`
@@ -89,6 +90,22 @@ func (s *OpenCodeService) GetProviders() []OpenCodeProvider {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return cloneOpenCodeProviders(s.providers)
+}
+
+func (s *OpenCodeService) GetLiveProviderIds() ([]string, error) {
+	liveProviders, err := readOpenCodeLiveProviders()
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(liveProviders))
+	for id := range liveProviders {
+		normalized := normalizeOpenCodeProviderID(id)
+		if normalized != "" {
+			ids = append(ids, normalized)
+		}
+	}
+	sort.Strings(ids)
+	return ids, nil
 }
 
 func (s *OpenCodeService) SaveProviders(providers []OpenCodeProvider) error {
@@ -563,6 +580,7 @@ func normalizeOpenCodeProvider(provider OpenCodeProvider) OpenCodeProvider {
 	provider.BaseURL = strings.TrimSpace(provider.BaseURL)
 	provider.APIKey = strings.TrimSpace(provider.APIKey)
 	provider.NPM = strings.TrimSpace(provider.NPM)
+	provider.Icon = strings.TrimSpace(provider.Icon)
 	provider.Description = strings.TrimSpace(provider.Description)
 	provider.Category = strings.TrimSpace(provider.Category)
 	provider.PartnerPromotionKey = strings.TrimSpace(provider.PartnerPromotionKey)

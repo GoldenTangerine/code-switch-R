@@ -22,7 +22,7 @@
     </div>
 
     <div class="section-controls">
-      <div class="relay-toggle" :aria-label="currentProxyLabel">
+      <div v-if="showProxyToggle" class="relay-toggle" :aria-label="currentProxyLabel">
         <div class="relay-switch">
           <button
             type="button"
@@ -107,14 +107,17 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { MainTabOption } from '../types'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   tabs: readonly MainTabOption[]
   selectedIndex: number
   currentProxyLabel: string
+  showProxyToggle?: boolean
   activeProxyState: boolean
   activeProxyBusy: boolean
   refreshing: boolean
-}>()
+}>(), {
+  showProxyToggle: true,
+})
 
 defineEmits<{
   change: [index: number]

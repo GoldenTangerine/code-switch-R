@@ -4,6 +4,7 @@ import {
   DuplicateProvider,
   GetPresets,
   GetProviders,
+  GetLiveProviderIds,
   ImportFromLive,
   ReorderProviders,
   SaveProviders,
@@ -14,11 +15,15 @@ import type {
   OpenCodeProviderPreset as OpenCodeProviderPresetModel,
 } from '../../bindings/codeswitch/services/models'
 
-export type OpenCodeProvider = OpenCodeProviderModel
+export type OpenCodeProvider = OpenCodeProviderModel & { icon?: string }
 export type OpenCodeProviderPreset = OpenCodeProviderPresetModel
 
 export const getOpenCodeProviders = (): Promise<OpenCodeProvider[]> => (
   GetProviders()
+)
+
+export const getOpenCodeLiveProviderIds = (): Promise<string[]> => (
+  GetLiveProviderIds()
 )
 
 export const addOpenCodeProvider = (provider: OpenCodeProvider): Promise<void> => (

@@ -30,6 +30,7 @@ export type GeminiProvider = Awaited<ReturnType<typeof GetGeminiProviders>> exte
 }) : any
 
 export type OpenCodeProvider = OpenCodeProviderModel & {
+  icon?: string
   sortOrder?: number
   enabledSortOrder?: number
   disabledSortOrder?: number
@@ -49,6 +50,9 @@ export type PersistedProvider = PersistedProviderModel & {
   providerQuotaQueryConfig?: unknown | null
   opencodeNpm?: string
   opencodeSettingsConfig?: Record<string, any>
+  apiKeyUrl?: string
+  category?: string
+  partnerPromotionKey?: string
   liveConfigManaged?: boolean
   isInConfig?: boolean
 }
@@ -215,6 +219,7 @@ export const providerToCard = (
   apiUrl: provider.apiUrl || '',
   apiKey: provider.apiKey || '',
   officialSite: provider.officialSite || '',
+  apiKeyUrl: provider.apiKeyUrl || '',
   icon: provider.icon || '',
   tint: provider.tint || '',
   accent: provider.accent || '',
@@ -232,6 +237,8 @@ export const providerToCard = (
   apiEndpoint: provider.apiEndpoint || '',
   opencodeNpm: provider.opencodeNpm || '',
   opencodeSettingsConfig: cloneCardValue(provider.opencodeSettingsConfig || {}),
+  category: provider.category || '',
+  partnerPromotionKey: provider.partnerPromotionKey || '',
   cliConfig: cloneCardValue(provider.cliConfig || {}),
   availabilityMonitorEnabled: !!provider.availabilityMonitorEnabled,
   connectivityAutoBlacklist: !!provider.connectivityAutoBlacklist,
@@ -306,7 +313,8 @@ export const opencodeToCard = (provider: OpenCodeProvider, index: number): Autom
     apiUrl: extractOpenCodeBaseUrl(provider),
     apiKey: extractOpenCodeApiKey(provider),
     officialSite: provider.websiteUrl || '',
-    icon: 'opencode',
+    apiKeyUrl: provider.apiKeyUrl || '',
+    icon: provider.icon || 'opencode',
     tint: 'rgba(14, 165, 233, 0.16)',
     accent: '#0ea5e9',
     enabled: provider.enabled,
@@ -316,6 +324,8 @@ export const opencodeToCard = (provider: OpenCodeProvider, index: number): Autom
     level: provider.level || 1,
     opencodeNpm: extractOpenCodeNpm(provider),
     opencodeSettingsConfig: settingsConfig,
+    category: provider.category || '',
+    partnerPromotionKey: provider.partnerPromotionKey || '',
     liveConfigManaged: provider.liveConfigManaged === true,
     isInConfig: provider.isInConfig === true,
     requestBodyOverrides: cloneCardValue(provider.requestBodyOverrides || {}),
@@ -392,9 +402,13 @@ export const cardToOpenCode = (card: AutomationCard, original: OpenCodeProvider)
   id: normalizeProviderRef(card.providerRef) || original.id,
   name: card.name,
   websiteUrl: card.officialSite,
+  apiKeyUrl: card.apiKeyUrl || original.apiKeyUrl || '',
   baseUrl: card.apiUrl,
   apiKey: card.apiKey,
   npm: card.opencodeNpm || original.npm || '@ai-sdk/openai-compatible',
+  icon: card.icon || original.icon || 'opencode',
+  category: card.category || original.category || '',
+  partnerPromotionKey: card.partnerPromotionKey || original.partnerPromotionKey || '',
   enabled: card.enabled,
   liveConfigManaged: card.enabled,
   isInConfig: card.enabled,
@@ -420,9 +434,13 @@ export const createOpenCodeFromCard = (
   id: providerID,
   name: card.name,
   websiteUrl: card.officialSite,
+  apiKeyUrl: card.apiKeyUrl || '',
   baseUrl: card.apiUrl,
   apiKey: card.apiKey,
   npm: card.opencodeNpm || '@ai-sdk/openai-compatible',
+  icon: card.icon || 'opencode',
+  category: card.category || '',
+  partnerPromotionKey: card.partnerPromotionKey || '',
   enabled: card.enabled,
   liveConfigManaged: card.enabled,
   isInConfig: card.enabled,
@@ -458,6 +476,9 @@ export const serializeProviders = (
       requestBodyOverrides: cloneCardValue(provider.requestBodyOverrides || {}),
       opencodeNpm: provider.opencodeNpm || '',
       opencodeSettingsConfig: cloneCardValue(provider.opencodeSettingsConfig || {}),
+      apiKeyUrl: provider.apiKeyUrl || '',
+      category: provider.category || '',
+      partnerPromotionKey: provider.partnerPromotionKey || '',
       liveConfigManaged: provider.liveConfigManaged,
       isInConfig: provider.isInConfig,
       availabilityMonitorEnabled: !!provider.availabilityMonitorEnabled,

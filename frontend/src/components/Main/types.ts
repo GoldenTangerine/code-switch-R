@@ -44,6 +44,7 @@ export type VendorForm = {
   apiUrl: string
   apiKey: string
   officialSite: string
+  apiKeyUrl?: string
   icon: string
   enabled: boolean
   apiFormat?: 'anthropic' | 'openai_chat' | 'openai_responses'
@@ -54,6 +55,8 @@ export type VendorForm = {
   apiEndpoint?: string
   opencodeNpm?: string
   opencodeSettingsConfig?: Record<string, any>
+  category?: string
+  partnerPromotionKey?: string
   liveConfigManaged?: boolean
   isInConfig?: boolean
   cliConfig?: Record<string, any>

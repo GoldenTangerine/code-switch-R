@@ -15,6 +15,7 @@ vi.mock('../../../services/providerQuotaQuery', () => ({
 
 import { fetchCostByProvider, fetchCostSinceByProvider, fetchFiveHourQuotaStatusByProvider } from '../../../services/logs'
 import { queryProviderQuota, type ProviderQuotaQueryResult } from '../../../services/providerQuotaQuery'
+import { shouldAutoRefreshProviderQuota } from '../utils/providerQuotaAutoRefresh'
 import { useProviderQuotas } from './useProviderQuotas'
 
 const createCard = (
@@ -762,6 +763,70 @@ describe('useProviderQuotas', () => {
       }),
     ])
     expect(quotaState.getQuotaDisplay(idleCard)).toEqual([])
+
+    quotaState.stopTimers()
+  })
+
+  it('keeps timer-based remote quota polling active for OpenCode balance query providers', async () => {
+    vi.setSystemTime(new Date('2026-04-09T10:00:00.000Z'))
+
+    const cards = createCardRecord()
+    const opencodeCard = createCard(25, {
+      providerRef: 'opencode-balance-ref',
+      providerQuotaQueryType: 'balance',
+    })
+    const disabledOpenCodeCard = createCard(26, {
+      providerRef: 'disabled-opencode-balance-ref',
+      providerQuotaQueryType: 'balance',
+      enabled: false,
+    })
+    cards.opencode.push(opencodeCard, disabledOpenCodeCard)
+
+    vi.mocked(queryProviderQuota).mockResolvedValue({
+      success: true,
+      queryType: 'balance',
+      queriedAt: new Date('2026-04-09T10:00:30.000Z').getTime(),
+      items: [
+        {
+          key: 'balance',
+          label: 'Balance',
+          used: 0,
+          total: 47.89,
+          valueMode: 'currency',
+          unit: 'USD',
+          active: true,
+        },
+      ],
+    })
+
+    const quotaState = useProviderQuotas({
+      t: (key: string) => key,
+      getActiveTab: () => 'opencode',
+      cards,
+      resolveAutoRefreshRemoteQuotaRefs: () => new Set(
+        cards.opencode
+          .filter((card) => shouldAutoRefreshProviderQuota('opencode', card, false))
+          .map((card) => card.providerRef || card.name),
+      ),
+    })
+
+    quotaState.startTimers()
+    await vi.advanceTimersByTimeAsync(30_000)
+
+    expect(queryProviderQuota).toHaveBeenCalledTimes(1)
+    expect(queryProviderQuota).toHaveBeenCalledWith('balance', opencodeCard.apiUrl, opencodeCard.apiKey)
+    expect(queryProviderQuota).not.toHaveBeenCalledWith('balance', disabledOpenCodeCard.apiUrl, disabledOpenCodeCard.apiKey)
+    expect(quotaState.getQuotaDisplay(opencodeCard)).toEqual([
+      expect.objectContaining({
+        key: 'balance',
+        used: 0,
+        total: 47.89,
+        remaining: 47.89,
+        nextReset: null,
+        valueMode: 'currency',
+        unit: 'USD',
+      }),
+    ])
 
     quotaState.stopTimers()
   })
