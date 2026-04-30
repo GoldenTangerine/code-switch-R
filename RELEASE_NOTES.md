@@ -1,3 +1,16 @@
+# Code Switch v2.8.40
+
+## 修复
+- **修复 OpenCode 供应商导致的 release 打包失败**：Wails 在 CI 打包前会重新生成 bindings，`OpenCodeProvider.liveConfigManaged` / `isInConfig` 这类 Go 指针布尔值会被映射成 `boolean | null | undefined`；前端现在在转换卡片模型时统一收口为明确 `boolean`，避免 `vue-tsc` 在 Windows / macOS / Linux 打包阶段报 TS2322。
+
+## 技术改进
+- **补齐 CI 同款验证路径**：按 Windows production flags 重新执行 `wails3 generate bindings` 后再跑 `vue-tsc --noEmit`，确认生成 binding 后的类型检查通过，避免手写 binding 和 CI 生成结果不一致造成“本地绿、远端红”的阴间体验。
+
+## 发布
+- **本次发版版本号统一推进到 `v2.8.40`**：作为 `v2.8.39` 的打包热修复版本重新推送 tag，触发 GitHub 自动打包。
+
+---
+
 # Code Switch v2.8.39
 
 ## 功能

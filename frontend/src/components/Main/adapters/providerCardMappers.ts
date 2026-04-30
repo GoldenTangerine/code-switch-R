@@ -316,8 +316,8 @@ export const opencodeToCard = (provider: OpenCodeProvider, index: number): Autom
     level: provider.level || 1,
     opencodeNpm: extractOpenCodeNpm(provider),
     opencodeSettingsConfig: settingsConfig,
-    liveConfigManaged: provider.liveConfigManaged,
-    isInConfig: provider.isInConfig,
+    liveConfigManaged: provider.liveConfigManaged === true,
+    isInConfig: provider.isInConfig === true,
     requestBodyOverrides: cloneCardValue(provider.requestBodyOverrides || {}),
     budgetQuotaSettings: provider.budgetQuotaSettings == null
       ? undefined
