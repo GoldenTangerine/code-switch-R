@@ -7,6 +7,7 @@ import UpdateNotification from './components/common/UpdateNotification.vue'
 const route = useRoute()
 const isTray = computed(() => route.path === '/tray')
 const isHome = computed(() => route.path === '/')
+const isConsole = computed(() => route.path === '/console')
 </script>
 
 <template>
@@ -18,7 +19,7 @@ const isHome = computed(() => route.path === '/')
   <div v-else class="app-layout">
     <div class="app-layout__glow" aria-hidden="true"></div>
     <Sidebar />
-    <main :class="['main-content', { 'main-content--home-scrollbar-hidden': isHome }]">
+    <main :class="['main-content', { 'main-content--home-scrollbar-hidden': isHome, 'main-content--no-scroll': isConsole }]">
       <RouterView v-slot="{ Component }">
         <keep-alive>
           <component :is="Component" />
@@ -61,6 +62,7 @@ const isHome = computed(() => route.path === '/')
 .main-content {
   flex: 1;
   min-width: 0;
+  min-height: 0;
   overflow-y: auto;
   position: relative;
   border-radius: 30px;
@@ -72,6 +74,10 @@ const isHome = computed(() => route.path === '/')
     0 24px 54px rgba(2, 6, 23, 0.18);
   backdrop-filter: blur(18px) saturate(140%);
   -webkit-backdrop-filter: blur(18px) saturate(140%);
+}
+
+.main-content--no-scroll {
+  overflow: hidden;
 }
 
 .main-content--home-scrollbar-hidden {
