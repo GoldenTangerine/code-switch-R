@@ -620,12 +620,25 @@ onUnmounted(() => {
   overflow: hidden;
 }
 
+.console-shell .global-actions {
+  align-items: flex-start;
+}
+
+.console-shell .global-eyebrow {
+  flex: 0 0 auto;
+  min-width: max-content;
+  white-space: nowrap;
+  line-height: 30px;
+}
+
 .actions-group {
   display: flex;
   align-items: center;
+  flex: 1 1 auto;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 12px;
+  min-width: 0;
 }
 
 .auto-scroll-toggle {
