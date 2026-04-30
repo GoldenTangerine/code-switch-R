@@ -1,5 +1,9 @@
 import { getLobeIconSvg, preloadLobeIcons } from '../icons/lobeIconMap'
 
+const INLINE_PROVIDER_ICONS: Record<string, string> = {
+  opencode: '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3.25 4.75 7.5v9L12 20.75l7.25-4.25v-9L12 3.25Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="m9.25 9-2.5 3 2.5 3M14.75 9l2.5 3-2.5 3M13.25 7.75l-2.5 8.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+}
+
 const PROVIDER_COLOR_ICON_ALIASES: Record<string, string> = {
   claude: 'claude-color',
   gemini: 'gemini-color',
@@ -32,6 +36,7 @@ const PROVIDER_COLOR_ICON_ALIASES: Record<string, string> = {
 const PROVIDER_PRIORITY_ICON_KEYS = [
   'claude',
   'openai',
+  'opencode',
   'gemini',
   'deepseek',
   'mistral',
@@ -91,7 +96,7 @@ export function getProviderDisplayIconSvg(iconKey: string | null | undefined) {
   if (!normalized) return ''
 
   const preferred = resolveProviderDisplayIconKey(normalized)
-  return getLobeIconSvg(preferred) || getLobeIconSvg(normalized)
+  return INLINE_PROVIDER_ICONS[preferred] || INLINE_PROVIDER_ICONS[normalized] || getLobeIconSvg(preferred) || getLobeIconSvg(normalized)
 }
 
 export async function preloadProviderDisplayIcons(iconKeys: readonly string[]) {
@@ -117,6 +122,7 @@ export function buildProviderIconOptionKeys(iconKeys: readonly string[]) {
 
   return [
     ...ordered,
+    ...Object.keys(INLINE_PROVIDER_ICONS).filter((iconKey) => !ordered.includes(iconKey) && !remaining.has(iconKey)),
     ...Array.from(remaining).sort((left, right) => left.localeCompare(right)),
   ]
 }

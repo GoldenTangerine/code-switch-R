@@ -73,12 +73,14 @@ export function useProviderStats(options: UseProviderStatsOptions) {
     claude: {},
     codex: {},
     gemini: {},
+    opencode: {},
     others: {},
   })
   const providerStatsLoaded = reactive<Record<ProviderTab, boolean>>({
     claude: false,
     codex: false,
     gemini: false,
+    opencode: false,
     others: false,
   })
 
@@ -186,7 +188,8 @@ export function useProviderStats(options: UseProviderStatsOptions) {
   }
 
   const loadProviderStats = async (tab: ProviderTab) => {
-    if (tab === 'others') {
+    if (tab === 'others' || tab === 'opencode') {
+      providerStatsMap[tab] = {}
       providerStatsLoaded[tab] = true
       return
     }

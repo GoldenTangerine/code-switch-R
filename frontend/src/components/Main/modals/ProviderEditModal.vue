@@ -8,6 +8,23 @@
   >
     <form class="vendor-form vendor-form--provider-modal" @submit.prevent="submit()">
       <div class="vendor-form__scroll-body">
+        <label v-if="tabId === 'opencode'" class="form-field">
+          <span class="label-row">
+            {{ t('components.main.form.labels.providerKey') }}
+            <span v-if="errors.providerRef" class="field-error">
+              {{ errors.providerRef }}
+            </span>
+          </span>
+          <BaseInput
+            v-model="form.providerRef"
+            type="text"
+            :placeholder="t('components.main.form.placeholders.providerKey')"
+            :disabled="isEditing"
+            :class="{ 'has-error': !!errors.providerRef }"
+          />
+          <span class="field-hint">{{ t('components.main.form.hints.providerKey') }}</span>
+        </label>
+
         <label class="form-field">
           <span>{{ t('components.main.form.labels.name') }}</span>
           <BaseInput
@@ -29,9 +46,21 @@
             v-model="form.apiUrl"
             type="text"
             :placeholder="t('components.main.form.placeholders.apiUrl')"
-            required
+            :required="tabId !== 'opencode'"
             :class="{ 'has-error': !!errors.apiUrl }"
           />
+        </label>
+
+        <label v-if="tabId === 'opencode'" class="form-field">
+          <span>{{ t('components.main.form.labels.opencodeNpm') }}</span>
+          <select v-model="form.opencodeNpm" class="mac-select">
+            <option value="@ai-sdk/openai-compatible">OpenAI Compatible</option>
+            <option value="@ai-sdk/openai">OpenAI Responses</option>
+            <option value="@ai-sdk/anthropic">Anthropic</option>
+            <option value="@ai-sdk/google">Google Gemini</option>
+            <option value="@ai-sdk/amazon-bedrock">Amazon Bedrock</option>
+          </select>
+          <span class="field-hint">{{ t('components.main.form.hints.opencodeNpm') }}</span>
         </label>
 
         <label class="form-field">
@@ -52,7 +81,7 @@
           />
         </label>
 
-        <label class="form-field">
+        <label v-if="tabId !== 'opencode'" class="form-field">
           <span>{{ t('components.main.form.labels.apiEndpoint') }}</span>
           <BaseInput
             v-model="form.apiEndpoint"
@@ -94,7 +123,23 @@
           </div>
         </div>
 
-        <div class="form-field">
+        <div v-if="tabId === 'opencode'" class="form-field">
+          <span class="label-row">
+            {{ t('components.main.form.labels.opencodeSettingsConfig') }}
+            <span v-if="opencodeSettingsConfigError" class="field-error">
+              {{ opencodeSettingsConfigError }}
+            </span>
+          </span>
+          <JsonCodeEditor
+            v-model="opencodeSettingsConfigText"
+            :invalid="!!opencodeSettingsConfigError"
+            :rows="12"
+            :surface-height="'260px'"
+          />
+          <span class="field-hint">{{ t('components.main.form.hints.opencodeSettingsConfig') }}</span>
+        </div>
+
+        <div v-if="tabId !== 'opencode'" class="form-field">
           <span>{{ t('components.main.form.labels.connectivityAuthType') }}</span>
           <Listbox v-model="selectedAuthType" v-slot="{ open: authTypeOpen }">
             <div class="level-select">
@@ -328,11 +373,11 @@
           <span class="field-hint">{{ t('components.main.form.hints.budgetQuota') }}</span>
         </div>
 
-        <div class="form-field">
+        <div v-if="tabId !== 'opencode'" class="form-field">
           <ModelWhitelistEditor v-model="form.supportedModels" />
         </div>
 
-        <div class="form-field">
+        <div v-if="tabId !== 'opencode'" class="form-field">
           <ModelMappingEditor
             :key="cliConfigEditorKey"
             v-model="form.modelMapping"
@@ -340,7 +385,7 @@
           />
         </div>
 
-        <div class="form-field">
+        <div v-if="tabId !== 'opencode'" class="form-field">
           <span class="label-row">
             {{ t('components.main.form.labels.requestBodyOverrides') }}
             <span v-if="requestBodyOverridesError" class="field-error">
@@ -356,7 +401,7 @@
           <span class="field-hint">{{ t('components.main.form.hints.requestBodyOverrides') }}</span>
         </div>
 
-        <div class="form-field">
+        <div v-if="tabId !== 'opencode'" class="form-field">
           <CLIConfigEditor
             :key="cliConfigEditorKey"
             ref="cliConfigEditorRef"
@@ -383,7 +428,7 @@
           </div>
         </div>
 
-        <div class="form-field switch-field">
+        <div v-if="tabId !== 'opencode'" class="form-field switch-field">
           <span>{{ t('components.main.form.labels.availabilityMonitor') }}</span>
           <div class="switch-inline">
             <label class="mac-switch">
@@ -397,7 +442,7 @@
           <span class="field-hint">{{ t('components.main.form.hints.availabilityMonitor') }}</span>
         </div>
 
-        <div v-if="form.availabilityMonitorEnabled" class="form-field switch-field">
+        <div v-if="tabId !== 'opencode' && form.availabilityMonitorEnabled" class="form-field switch-field">
           <span>{{ t('components.main.form.labels.connectivityAutoBlacklist') }}</span>
           <div class="switch-inline">
             <label class="mac-switch">
@@ -411,7 +456,7 @@
           <span class="field-hint">{{ t('components.main.form.hints.connectivityAutoBlacklist') }}</span>
         </div>
 
-        <div v-if="form.availabilityMonitorEnabled" class="form-field">
+        <div v-if="tabId !== 'opencode' && form.availabilityMonitorEnabled" class="form-field">
           <span class="field-hint" style="color: #6b7280;">
             💡 {{ t('components.main.form.hints.availabilityAdvancedConfig') }}
           </span>
@@ -426,7 +471,7 @@
           {{ t('components.main.form.actions.save') }}
         </BaseButton>
         <BaseButton
-          v-if="isEditing && tabId !== 'others' && !activeProxyState"
+          v-if="isEditing && tabId !== 'others' && tabId !== 'opencode' && !activeProxyState"
           type="button"
           variant="primary"
           :disabled="saveAndApplyBlockedByProvider"
@@ -456,8 +501,11 @@ import { AUTH_TYPE_OPTIONS, getDefaultAuthType } from '../constants'
 import { cardProviderRef } from '../adapters/providerCardMappers'
 import {
   buildNormalizedVendorForm,
+  cloneProviderValue,
+  createDefaultOpenCodeSettingsConfig,
   createDefaultVendorForm,
   createVendorFormFromCard,
+  isDefaultOpenCodeModels,
   resolveProviderAuthState,
 } from '../adapters/providerFormMappers'
 import type { ProviderTab, VendorForm } from '../types'
@@ -540,12 +588,15 @@ const cliConfigEditorRef = ref<CLIConfigEditorExposed | null>(null)
 const cliConfigEditorKey = ref(0)
 const errors = reactive({
   apiUrl: '',
+  providerRef: '',
 })
 const selectedAuthType = ref<string>(getDefaultAuthType(props.tabId))
 const customAuthHeader = ref('')
 const iconSearchQuery = ref('')
 const requestBodyOverridesText = ref('{}')
 const requestBodyOverridesError = ref('')
+const opencodeSettingsConfigText = ref('{}')
+const opencodeSettingsConfigError = ref('')
 const claudeAdvancedExpanded = ref(false)
 const saveAndApplyBlockedByProvider = computed(() => (
   isDirectApplyBlockedForProvider(props.tabId, form)
@@ -932,8 +983,10 @@ const openProviderQuotaQueryConfigModal = () => {
 
 const resetForm = () => {
   errors.apiUrl = ''
+  errors.providerRef = ''
   iconSearchQuery.value = ''
   requestBodyOverridesError.value = ''
+  opencodeSettingsConfigError.value = ''
   cliConfigEditorKey.value += 1
 
   if (!props.card) {
@@ -944,6 +997,11 @@ const resetForm = () => {
     customAuthHeader.value = ''
     claudeAdvancedExpanded.value = props.tabId === 'claude' && (form.apiFormat || 'anthropic') !== 'anthropic'
     requestBodyOverridesText.value = formatJsonObject(form.requestBodyOverrides)
+    if (props.tabId === 'opencode') {
+      form.icon = 'opencode'
+      form.opencodeNpm = form.opencodeNpm || '@ai-sdk/openai-compatible'
+      syncOpenCodeSettingsConfigText()
+    }
     void refreshBudgetQuotaUsage()
     return
   }
@@ -953,6 +1011,9 @@ const resetForm = () => {
   form.budgetQuotaUsedAdjustments = cloneBudgetQuotaAdjustments(props.card.budgetQuotaUsedAdjustments)
   claudeAdvancedExpanded.value = props.tabId === 'claude' && (form.apiFormat || 'anthropic') !== 'anthropic'
   requestBodyOverridesText.value = formatJsonObject(form.requestBodyOverrides)
+  if (props.tabId === 'opencode') {
+    syncOpenCodeSettingsConfigText()
+  }
 
   const authState = resolveProviderAuthState(props.card.connectivityAuthType, props.tabId)
   selectedAuthType.value = authState.selectedAuthType
@@ -985,6 +1046,10 @@ watch(iconPreviewOptions, (icons) => {
 
 watch(requestBodyOverridesText, () => {
   requestBodyOverridesError.value = ''
+})
+
+watch(opencodeSettingsConfigText, () => {
+  opencodeSettingsConfigError.value = ''
 })
 
 watch(hasClaudeAdvancedValue, (value) => {
@@ -1021,6 +1086,74 @@ const toSortedJsonValue = (value: unknown): unknown => {
 const formatJsonObject = (value: Record<string, any> | undefined) => (
   JSON.stringify(toSortedJsonValue(value || {}), null, 2)
 )
+
+const normalizeNewOpenCodeProviderKey = (value: string | undefined) => `${value ?? ''}`
+  .trim()
+  .toLowerCase()
+  .replace(/[^a-z0-9-]+/g, '-')
+  .replace(/^-+|-+$/g, '')
+
+const buildDefaultOpenCodeSettingsConfig = (): Record<string, any> => createDefaultOpenCodeSettingsConfig(
+  form.opencodeNpm || '@ai-sdk/openai-compatible',
+  form.name || 'OpenCode Provider',
+  form.apiUrl,
+  form.apiKey,
+)
+
+const syncOpenCodeSettingsConfigText = () => {
+  const config = form.opencodeSettingsConfig && Object.keys(form.opencodeSettingsConfig).length > 0
+    ? form.opencodeSettingsConfig
+    : buildDefaultOpenCodeSettingsConfig()
+  opencodeSettingsConfigText.value = formatJsonObject(config)
+}
+
+const parseOpenCodeSettingsConfig = (): Record<string, any> | null => {
+  opencodeSettingsConfigError.value = ''
+  const raw = opencodeSettingsConfigText.value.trim()
+  if (!raw) {
+    const fallback = buildDefaultOpenCodeSettingsConfig()
+    opencodeSettingsConfigText.value = formatJsonObject(fallback)
+    return fallback
+  }
+
+  try {
+    const parsed = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      opencodeSettingsConfigError.value = t('components.main.form.errors.opencodeSettingsConfigMustBeObject')
+      return null
+    }
+
+    const normalized = parsed as Record<string, any>
+    normalized.npm = form.opencodeNpm || normalized.npm || '@ai-sdk/openai-compatible'
+    normalized.name = form.name || normalized.name
+    const options = normalized.options && typeof normalized.options === 'object' && !Array.isArray(normalized.options)
+      ? { ...normalized.options }
+      : {}
+    delete options.baseURL
+    delete options.baseUrl
+    delete options.url
+    delete options.apiKey
+    delete options.api_key
+    delete options.APIKey
+    if (form.apiUrl) options.baseURL = form.apiUrl
+    if (form.apiKey) options.apiKey = form.apiKey
+    if (Object.keys(options).length > 0) {
+      normalized.options = options
+    } else {
+      delete normalized.options
+    }
+    if (!normalized.models || typeof normalized.models !== 'object' || Array.isArray(normalized.models) || isDefaultOpenCodeModels(normalized.models)) {
+      normalized.models = buildDefaultOpenCodeSettingsConfig().models
+    }
+    opencodeSettingsConfigText.value = formatJsonObject(normalized)
+    return normalized
+  } catch (error) {
+    opencodeSettingsConfigError.value = t('components.main.form.errors.opencodeSettingsConfigInvalid', {
+      error: error instanceof Error ? error.message : String(error),
+    })
+    return null
+  }
+}
 
 const parseRequestBodyOverrides = (): Record<string, any> | null => {
   requestBodyOverridesError.value = ''
@@ -1079,18 +1212,42 @@ const buildFormPayload = async (): Promise<VendorForm | null> => {
 
   const apiUrl = form.apiUrl.trim()
   errors.apiUrl = ''
+  errors.providerRef = ''
 
-  try {
-    const parsed = new URL(apiUrl)
-    if (!/^https?:/.test(parsed.protocol)) throw new Error('protocol')
-  } catch {
+  if (props.tabId === 'opencode') {
+    const providerRef = isEditing.value
+      ? `${form.providerRef || ''}`.trim()
+      : normalizeNewOpenCodeProviderKey(form.providerRef || form.name)
+    if (!providerRef) {
+      errors.providerRef = t('components.main.form.errors.providerKeyRequired')
+      return null
+    }
+    form.providerRef = providerRef
+  }
+
+  if (apiUrl) {
+    try {
+      const parsed = new URL(apiUrl)
+      if (!/^https?:/.test(parsed.protocol)) throw new Error('protocol')
+    } catch {
+      errors.apiUrl = t('components.main.form.errors.invalidUrl')
+      return null
+    }
+  } else if (props.tabId !== 'opencode') {
     errors.apiUrl = t('components.main.form.errors.invalidUrl')
     return null
   }
 
   form.apiUrl = apiUrl
-  const requestBodyOverrides = parseRequestBodyOverrides()
+  const requestBodyOverrides = props.tabId === 'opencode'
+    ? cloneProviderValue(form.requestBodyOverrides || props.card?.requestBodyOverrides || {})
+    : parseRequestBodyOverrides()
   if (!requestBodyOverrides) return null
+
+  const opencodeSettingsConfig = props.tabId === 'opencode'
+    ? parseOpenCodeSettingsConfig()
+    : undefined
+  if (props.tabId === 'opencode' && !opencodeSettingsConfig) return null
 
   const payload = buildNormalizedVendorForm({
     form,
@@ -1099,6 +1256,11 @@ const buildFormPayload = async (): Promise<VendorForm | null> => {
     resolveAuthType: resolveEffectiveAuthType,
   })
   payload.requestBodyOverrides = requestBodyOverrides
+  if (props.tabId === 'opencode') {
+    payload.providerRef = form.providerRef
+    payload.opencodeNpm = form.opencodeNpm || opencodeSettingsConfig?.npm || '@ai-sdk/openai-compatible'
+    payload.opencodeSettingsConfig = opencodeSettingsConfig ?? undefined
+  }
 
   // 处理预算额度：仅保存 total > 0 的配置
   const qs = form.budgetQuotaSettings
@@ -1109,7 +1271,9 @@ const buildFormPayload = async (): Promise<VendorForm | null> => {
     ? cloneBudgetQuotaAdjustments(form.budgetQuotaUsedAdjustments)
     : undefined
 
-  const cliConfigSubmitState = cliConfigEditorRef.value?.getCliConfigSubmitState?.()
+  const cliConfigSubmitState = props.tabId === 'opencode'
+    ? undefined
+    : cliConfigEditorRef.value?.getCliConfigSubmitState?.()
   if (cliConfigSubmitState) {
     payload.cliConfig = cliConfigSubmitState.shouldPersist ? cliConfigSubmitState.value : {}
     payload.cliConfigPersistValue = cliConfigSubmitState.persistValue

@@ -6,7 +6,7 @@ import type { ProviderQuotaQueryConfig, ProviderQuotaQueryType } from '../../uti
 
 export type TranslateFn = (key: string, ...args: any[]) => string
 
-export type ProviderTab = 'claude' | 'codex' | 'gemini' | 'others'
+export type ProviderTab = 'claude' | 'codex' | 'gemini' | 'opencode' | 'others'
 
 export type MainTabOption = {
   id: ProviderTab
@@ -39,6 +39,7 @@ export interface LastUsedProvider {
 }
 
 export type VendorForm = {
+  providerRef?: string
   name: string
   apiUrl: string
   apiKey: string
@@ -51,6 +52,10 @@ export type VendorForm = {
   requestBodyOverrides?: Record<string, any>
   level?: number
   apiEndpoint?: string
+  opencodeNpm?: string
+  opencodeSettingsConfig?: Record<string, any>
+  liveConfigManaged?: boolean
+  isInConfig?: boolean
   cliConfig?: Record<string, any>
   cliConfigPersistValue?: Record<string, any>
   cliConfigShouldPersist?: boolean

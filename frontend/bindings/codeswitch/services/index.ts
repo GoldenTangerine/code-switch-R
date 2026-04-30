@@ -14,6 +14,7 @@ import * as GeminiService from "./geminiservice.js";
 import * as ImportService from "./importservice.js";
 import * as LogService from "./logservice.js";
 import * as MCPService from "./mcpservice.js";
+import * as OpenCodeService from "./opencodeservice.js";
 import * as PromptService from "./promptservice.js";
 import * as ProviderService from "./providerservice.js";
 import * as SettingsService from "./settingsservice.js";
@@ -35,6 +36,7 @@ export {
     ImportService,
     LogService,
     MCPService,
+    OpenCodeService,
     PromptService,
     ProviderService,
     SettingsService,
@@ -73,6 +75,8 @@ export {
     LogStatsSeries,
     MCPParseResult,
     MCPServer,
+    OpenCodeProvider,
+    OpenCodeProviderPreset,
     Prompt,
     Provider,
     ProviderDailyStat,

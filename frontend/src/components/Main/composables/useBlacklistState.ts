@@ -24,6 +24,7 @@ const createBlacklistMap = (): Record<ProviderTab, Record<string, BlacklistStatu
   claude: {},
   codex: {},
   gemini: {},
+  opencode: {},
   others: {},
 })
 
@@ -31,6 +32,7 @@ const createLastUsedMap = (): Record<ProviderTab, LastUsedProvider | null> => ({
   claude: null,
   codex: null,
   gemini: null,
+  opencode: null,
   others: null,
 })
 
@@ -67,7 +69,10 @@ export function useBlacklistState(options: UseBlacklistStateOptions) {
   }
 
   const loadBlacklistStatus = async (tab: ProviderTab) => {
-    if (tab === 'others') return
+    if (tab === 'others' || tab === 'opencode') {
+      blacklistStatusMap[tab] = {}
+      return
+    }
 
     try {
       const statuses = await getBlacklistStatus(tab)

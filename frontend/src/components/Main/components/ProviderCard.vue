@@ -636,7 +636,7 @@
 
       <div class="card-actions-toolbar">
         <button
-          v-if="activeTab !== 'others'"
+          v-if="activeTab !== 'others' && activeTab !== 'opencode'"
           class="ghost-icon direct-apply-btn"
           :class="{ 'is-active': viewModel.isDirectApplied && !activeProxyState }"
           :disabled="directApplyDisabled"
@@ -679,7 +679,7 @@
         </button>
 
         <button
-          v-if="activeTab !== 'others'"
+          v-if="activeTab !== 'others' && activeTab !== 'opencode'"
           class="ghost-icon provider-data-btn"
           :data-tooltip="t('components.main.providerDataOverview.buttonTooltip')"
           :aria-label="t('components.main.providerDataOverview.buttonAriaLabel', { name: viewModel.card.name })"
@@ -708,6 +708,7 @@
         </button>
 
         <button
+          v-if="activeTab !== 'opencode'"
           class="ghost-icon"
           :disabled="!viewModel.card.apiUrl || !viewModel.card.apiKey"
           :data-tooltip="(!viewModel.card.apiUrl || !viewModel.card.apiKey)
@@ -733,7 +734,7 @@
         </button>
 
         <button
-          v-if="activeTab !== 'others'"
+          v-if="activeTab !== 'others' && activeTab !== 'opencode'"
           :class="['ghost-icon', 'provider-log-btn', { 'ghost-icon-alert': hasTodayErrorLogs }]"
           :data-tooltip="t('components.main.providerLogs.buttonTooltip')"
           type="button"

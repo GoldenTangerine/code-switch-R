@@ -437,6 +437,7 @@ const createMockTimelineState = (): Record<string, MockProviderRuntime[]> => {
     claude: [],
     codex: [],
     gemini: [],
+    opencode: [],
     others: [],
   }
 

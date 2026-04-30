@@ -54,6 +54,7 @@ type UseMainPageShellOptions = {
   customCliTools: Ref<CustomCliTool[]>
   customCliProxyStates: Record<string, boolean>
   loadProviders: () => Promise<void>
+  importOpenCodeLiveProviders: () => Promise<number | null>
   refreshProviderPricingCachesOnStartup: () => Promise<void>
   refreshDirectAppliedStatus: (tab: ProviderTab) => Promise<void>
   loadProviderStats: (tab: ProviderTab) => Promise<void>
@@ -106,6 +107,7 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
     customCliTools,
     customCliProxyStates,
     loadProviders,
+    importOpenCodeLiveProviders,
     refreshProviderPricingCachesOnStartup,
     refreshDirectAppliedStatus,
     loadProviderStats,
@@ -141,12 +143,14 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
     claude: false,
     codex: false,
     gemini: false,
+    opencode: false,
     others: false,
   })
   const proxyBusy = reactive<Record<ProviderTab, boolean>>({
     claude: false,
     codex: false,
     gemini: false,
+    opencode: false,
     others: false,
   })
   const activeProxyState = computed(() => proxyStates[activeTab.value])
@@ -169,12 +173,18 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
   const refreshing = ref(false)
 
   const showImportButton = computed(() => {
+    if (activeTab.value === 'opencode') {
+      return true
+    }
     const status = importStatus.value
     if (!status) return false
     return status.config_exists && (status.pending_providers || status.pending_mcp)
   })
 
   const importButtonTooltip = computed(() => {
+    if (activeTab.value === 'opencode') {
+      return t('components.main.importConfig.opencodeTooltip')
+    }
     if (!showImportButton.value || !importStatus.value) {
       return t('components.main.controls.import')
     }
@@ -259,7 +269,9 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
 
   const refreshProxyState = async (tab: ProviderTab) => {
     if (shouldUseBrowserPreviewProxyMock()) {
-      if (tab === 'others') {
+      if (tab === 'opencode') {
+        proxyStates[tab] = false
+      } else if (tab === 'others') {
         proxyStates[tab] = selectedToolId.value
           ? Boolean(customCliProxyStates[selectedToolId.value])
           : false
@@ -268,7 +280,9 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
     }
 
     try {
-      if (tab === 'others') {
+      if (tab === 'opencode') {
+        proxyStates[tab] = false
+      } else if (tab === 'others') {
         if (selectedToolId.value) {
           proxyStates[tab] = customCliProxyStates[selectedToolId.value] ?? false
         } else {
@@ -289,6 +303,10 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
 
   const onProxyToggle = async () => {
     const tab = activeTab.value
+    if (tab === 'opencode') {
+      proxyStates[tab] = false
+      return
+    }
     if (proxyBusy[tab]) return
 
     proxyBusy[tab] = true
@@ -380,6 +398,9 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
     if (tab === 'gemini') {
       return t('components.main.relayToggle.hostGemini')
     }
+    if (tab === 'opencode') {
+      return 'OpenCode'
+    }
     const tool = customCliTools.value.find((item) => item.id === selectedToolId.value)
     return tool?.name || t('components.main.relayToggle.hostOthers')
   })
@@ -404,6 +425,17 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
 
     importBusy.value = true
     try {
+      if (activeTab.value === 'opencode') {
+        const imported = await importOpenCodeLiveProviders()
+        if (imported === null) return
+        if (imported > 0) {
+          showToast(t('components.main.importConfig.opencodeSuccess', { providers: imported }))
+        } else {
+          showToast(t('components.main.importConfig.opencodeEmpty'))
+        }
+        return
+      }
+
       const result = await importFromCcSwitch()
       importStatus.value = result?.status ?? null
       const importedProviders = result?.imported_providers ?? 0

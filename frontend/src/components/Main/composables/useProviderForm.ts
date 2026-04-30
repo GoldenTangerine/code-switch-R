@@ -2,7 +2,7 @@ import { reactive, ref } from 'vue'
 import { Call } from '@wailsio/runtime'
 import type { AutomationCard } from '../../../data/cards'
 import type { LogPlatform } from '../../../services/logs'
-import { createGeminiProviderRef, normalizeProviderRef } from '../adapters/providerCardMappers'
+import { createGeminiProviderRef, createOpenCodeProviderRef, normalizeProviderRef } from '../adapters/providerCardMappers'
 import { buildPersistedProviderFieldsFromForm } from '../adapters/providerFormMappers'
 import type { ProviderTab, TranslateFn, VendorForm } from '../types'
 import { isDirectApplyBlockedForProvider } from '../utils/providerDirectApply'
@@ -35,6 +35,14 @@ type ConfirmState = {
   open: boolean
   card: AutomationCard | null
   tabId: ProviderTab
+}
+
+const cloneAutomationCards = (source: AutomationCard[]): AutomationCard[] => (
+  JSON.parse(JSON.stringify(source)) as AutomationCard[]
+)
+
+const restoreCards = (target: AutomationCard[], snapshot: AutomationCard[]) => {
+  target.splice(0, target.length, ...snapshot)
 }
 
 export function useProviderForm(options: UseProviderFormOptions) {
@@ -77,6 +85,9 @@ export function useProviderForm(options: UseProviderFormOptions) {
   })
 
   const openModelList = (card: AutomationCard) => {
+    if (getActiveTab() === 'opencode') {
+      return
+    }
     if (!card.apiUrl || !card.apiKey) {
       showToast(t('components.main.modelList.apiKeyRequired'), 'error')
       return
@@ -92,7 +103,7 @@ export function useProviderForm(options: UseProviderFormOptions) {
 
   const openProviderLogs = (card: AutomationCard) => {
     const activeTab = getActiveTab()
-    if (activeTab === 'others') {
+    if (activeTab === 'others' || activeTab === 'opencode') {
       return
     }
     providerLogsModalProvider.value = card
@@ -108,7 +119,7 @@ export function useProviderForm(options: UseProviderFormOptions) {
 
   const openProviderDataOverview = (card: AutomationCard) => {
     const activeTab = getActiveTab()
-    if (activeTab === 'others') {
+    if (activeTab === 'others' || activeTab === 'opencode') {
       return
     }
     providerDataOverviewModalProvider.value = card
@@ -124,7 +135,7 @@ export function useProviderForm(options: UseProviderFormOptions) {
 
   const openProviderCostTrend = (card: AutomationCard) => {
     const activeTab = getActiveTab()
-    if (activeTab === 'others') {
+    if (activeTab === 'others' || activeTab === 'opencode') {
       return
     }
     providerCostTrendModalProvider.value = card
@@ -191,10 +202,11 @@ export function useProviderForm(options: UseProviderFormOptions) {
 
     if (editingCard) {
       const previousEnabled = editingCard.enabled
+      const previousSnapshot = JSON.parse(JSON.stringify(editingCard)) as AutomationCard
 
       Object.assign(editingCard, {
         name: form.name || editingCard.name,
-        apiUrl: form.apiUrl || editingCard.apiUrl,
+        apiUrl: tabId === 'opencode' ? form.apiUrl : (form.apiUrl || editingCard.apiUrl),
         ...providerFields,
       })
 
@@ -203,22 +215,42 @@ export function useProviderForm(options: UseProviderFormOptions) {
       }
 
       savedCard = editingCard
-      await persistProviders(tabId)
+      try {
+        await persistProviders(tabId)
+      } catch (error) {
+        Object.assign(editingCard, previousSnapshot)
+        if (previousEnabled !== providerFields.enabled) {
+          moveCardToStatusGroup(tabId, editingCard, previousEnabled)
+        }
+        throw error
+      }
     } else {
       const newCardId = Date.now()
-      const providerRef = tabId === 'gemini' ? createGeminiProviderRef() : `${newCardId}`
+      const providerRef = tabId === 'gemini'
+        ? createGeminiProviderRef()
+        : tabId === 'opencode'
+          ? (form.providerRef || createOpenCodeProviderRef())
+          : `${newCardId}`
       const newCard: AutomationCard = {
         id: newCardId,
-        providerRef,
         name: form.name || 'Untitled vendor',
         apiUrl: form.apiUrl,
         accent: '#0a84ff',
         tint: 'rgba(15, 23, 42, 0.12)',
         ...providerFields,
+        providerRef,
       }
       appendCardToGroup(tabId, newCard)
       savedCard = newCard
-      await persistProviders(tabId)
+      try {
+        await persistProviders(tabId)
+      } catch (error) {
+        const insertedIndex = list.findIndex((card) => card === newCard)
+        if (insertedIndex >= 0) {
+          list.splice(insertedIndex, 1)
+        }
+        throw error
+      }
     }
 
     closeProviderModal()
@@ -266,8 +298,19 @@ export function useProviderForm(options: UseProviderFormOptions) {
   }
 
   const handleProviderEnabledChange = async (card: AutomationCard, enabled: boolean) => {
-    moveCardToStatusGroup(getActiveTab(), card, enabled)
-    await persistProviders(getActiveTab())
+    const tabId = getActiveTab()
+    const previousCards = cloneAutomationCards(cards[tabId])
+    moveCardToStatusGroup(tabId, card, enabled)
+    if (tabId === 'opencode') {
+      card.liveConfigManaged = enabled
+      card.isInConfig = enabled
+    }
+    try {
+      await persistProviders(tabId)
+    } catch (error) {
+      restoreCards(cards[tabId], previousCards)
+      throw error
+    }
   }
 
   return {

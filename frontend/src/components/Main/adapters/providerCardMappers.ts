@@ -2,6 +2,7 @@ import type { ProviderDailyStat } from '../../../services/logs'
 import type { BlacklistStatus } from '../../../services/blacklist'
 import type { AutomationCard } from '../../../data/cards'
 import type { ProviderTab } from '../types'
+import { createDefaultOpenCodeSettingsConfig, isDefaultOpenCodeModels } from './providerFormMappers'
 import {
   cloneBudgetQuotaAdjustments,
   cloneBudgetQuotaSettings,
@@ -16,6 +17,7 @@ import {
 } from '../../../utils/providerQuotaQuery'
 import type { GeminiProvider as GeminiProviderModel, Provider as PersistedProviderModel } from '../../../../bindings/codeswitch/services/models'
 import { GetProviders as GetGeminiProviders } from '../../../../bindings/codeswitch/services/geminiservice'
+import type { OpenCodeProvider as OpenCodeProviderModel } from '../../../services/opencode'
 
 export type GeminiProvider = Awaited<ReturnType<typeof GetGeminiProviders>> extends (infer P)[] ? (P & {
   sortOrder?: number
@@ -27,6 +29,16 @@ export type GeminiProvider = Awaited<ReturnType<typeof GetGeminiProviders>> exte
   providerQuotaQueryConfig?: unknown | null
 }) : any
 
+export type OpenCodeProvider = OpenCodeProviderModel & {
+  sortOrder?: number
+  enabledSortOrder?: number
+  disabledSortOrder?: number
+  budgetQuotaSettings?: unknown | null
+  budgetQuotaUsedAdjustments?: unknown | null
+  providerQuotaQueryType?: unknown | null
+  providerQuotaQueryConfig?: unknown | null
+}
+
 export type PersistedProvider = PersistedProviderModel & {
   sortOrder?: number
   enabledSortOrder?: number
@@ -35,6 +47,10 @@ export type PersistedProvider = PersistedProviderModel & {
   budgetQuotaUsedAdjustments?: unknown | null
   providerQuotaQueryType?: unknown | null
   providerQuotaQueryConfig?: unknown | null
+  opencodeNpm?: string
+  opencodeSettingsConfig?: Record<string, any>
+  liveConfigManaged?: boolean
+  isInConfig?: boolean
 }
 
 const GEMINI_LOCKED_ENV_KEYS = new Set(['GOOGLE_GEMINI_BASE_URL', 'GEMINI_API_KEY'])
@@ -139,6 +155,56 @@ export const blacklistStatusKeyFromCard = (card: AutomationCard): string => {
 
 export const createGeminiProviderRef = () => `gemini-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 
+export const createOpenCodeProviderRef = () => `opencode-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+
+const extractOpenCodeOptions = (settingsConfig?: Record<string, any> | null): Record<string, any> => {
+  const options = settingsConfig?.options
+  return options && typeof options === 'object' && !Array.isArray(options) ? options : {}
+}
+
+const extractOpenCodeBaseUrl = (provider: OpenCodeProvider): string => {
+  const options = extractOpenCodeOptions(provider.settingsConfig)
+  return provider.baseUrl || `${options.baseURL ?? options.baseUrl ?? options.url ?? ''}`
+}
+
+const extractOpenCodeApiKey = (provider: OpenCodeProvider): string => {
+  const options = extractOpenCodeOptions(provider.settingsConfig)
+  return provider.apiKey || `${options.apiKey ?? options.api_key ?? ''}`
+}
+
+const extractOpenCodeNpm = (provider: OpenCodeProvider): string => {
+  return provider.npm || `${provider.settingsConfig?.npm ?? ''}` || '@ai-sdk/openai-compatible'
+}
+
+const buildOpenCodeSettingsConfig = (card: AutomationCard, original?: OpenCodeProvider): Record<string, any> => {
+  const base = cloneCardValue(card.opencodeSettingsConfig || original?.settingsConfig || {}) || {}
+  const npm = card.opencodeNpm || `${base.npm ?? original?.npm ?? ''}` || '@ai-sdk/openai-compatible'
+  const settingsConfig: Record<string, any> = {
+    ...base,
+    npm,
+    name: card.name || base.name || original?.name || '',
+  }
+  const options = extractOpenCodeOptions(settingsConfig)
+  delete options.baseURL
+  delete options.baseUrl
+  delete options.url
+  delete options.apiKey
+  delete options.api_key
+  delete options.APIKey
+  if (options.setCacheKey === undefined) options.setCacheKey = true
+  if (card.apiUrl) options.baseURL = card.apiUrl
+  if (card.apiKey) options.apiKey = card.apiKey
+  if (Object.keys(options).length > 0) {
+    settingsConfig.options = options
+  } else {
+    delete settingsConfig.options
+  }
+  if (!settingsConfig.models || typeof settingsConfig.models !== 'object' || Array.isArray(settingsConfig.models) || isDefaultOpenCodeModels(settingsConfig.models)) {
+    settingsConfig.models = createDefaultOpenCodeSettingsConfig(npm).models
+  }
+  return settingsConfig
+}
+
 export const providerToCard = (
   provider: PersistedProvider,
   platform?: ProviderTab | string,
@@ -164,6 +230,8 @@ export const providerToCard = (
   requestBodyOverrides: cloneCardValue(provider.requestBodyOverrides || {}),
   level: provider.level || 1,
   apiEndpoint: provider.apiEndpoint || '',
+  opencodeNpm: provider.opencodeNpm || '',
+  opencodeSettingsConfig: cloneCardValue(provider.opencodeSettingsConfig || {}),
   cliConfig: cloneCardValue(provider.cliConfig || {}),
   availabilityMonitorEnabled: !!provider.availabilityMonitorEnabled,
   connectivityAutoBlacklist: !!provider.connectivityAutoBlacklist,
@@ -229,6 +297,47 @@ export const geminiToCard = (provider: GeminiProvider, index: number): Automatio
   availabilityConfig: undefined,
 })
 
+export const opencodeToCard = (provider: OpenCodeProvider, index: number): AutomationCard => {
+  const settingsConfig = cloneCardValue(provider.settingsConfig || {})
+  return {
+    id: 400 + index,
+    providerRef: normalizeProviderRef(provider.id),
+    name: provider.name,
+    apiUrl: extractOpenCodeBaseUrl(provider),
+    apiKey: extractOpenCodeApiKey(provider),
+    officialSite: provider.websiteUrl || '',
+    icon: 'opencode',
+    tint: 'rgba(14, 165, 233, 0.16)',
+    accent: '#0ea5e9',
+    enabled: provider.enabled,
+    sortOrder: provider.sortOrder || index + 1,
+    enabledSortOrder: provider.enabledSortOrder || (provider.enabled ? (provider.sortOrder || index + 1) : undefined),
+    disabledSortOrder: provider.disabledSortOrder || (!provider.enabled ? (provider.sortOrder || index + 1) : undefined),
+    level: provider.level || 1,
+    opencodeNpm: extractOpenCodeNpm(provider),
+    opencodeSettingsConfig: settingsConfig,
+    liveConfigManaged: provider.liveConfigManaged,
+    isInConfig: provider.isInConfig,
+    requestBodyOverrides: cloneCardValue(provider.requestBodyOverrides || {}),
+    budgetQuotaSettings: provider.budgetQuotaSettings == null
+      ? undefined
+      : cloneBudgetQuotaSettings(provider.budgetQuotaSettings),
+    budgetQuotaUsedAdjustments: provider.budgetQuotaUsedAdjustments == null
+      ? undefined
+      : cloneBudgetQuotaAdjustments(provider.budgetQuotaUsedAdjustments),
+    providerQuotaQueryType: normalizeProviderQuotaQueryType(provider.providerQuotaQueryType),
+    providerQuotaQueryConfig: provider.providerQuotaQueryConfig == null
+      ? undefined
+      : cloneCardValue(normalizeProviderQuotaQueryConfig(
+          provider.providerQuotaQueryConfig,
+          provider.providerQuotaQueryType,
+        )),
+    availabilityMonitorEnabled: false,
+    connectivityAutoBlacklist: false,
+    availabilityConfig: undefined,
+  }
+}
+
 export const cardToGemini = (card: AutomationCard, original: GeminiProvider): GeminiProvider => ({
   ...original,
   name: card.name,
@@ -278,6 +387,60 @@ export const createGeminiFromCard = (
   ),
 })
 
+export const cardToOpenCode = (card: AutomationCard, original: OpenCodeProvider): OpenCodeProvider => ({
+  ...original,
+  id: normalizeProviderRef(card.providerRef) || original.id,
+  name: card.name,
+  websiteUrl: card.officialSite,
+  baseUrl: card.apiUrl,
+  apiKey: card.apiKey,
+  npm: card.opencodeNpm || original.npm || '@ai-sdk/openai-compatible',
+  enabled: card.enabled,
+  liveConfigManaged: card.enabled,
+  isInConfig: card.enabled,
+  sortOrder: card.sortOrder || 0,
+  enabledSortOrder: card.enabledSortOrder || 0,
+  disabledSortOrder: card.disabledSortOrder || 0,
+  level: card.level || 1,
+  settingsConfig: buildOpenCodeSettingsConfig(card, original),
+  requestBodyOverrides: cloneCardValue(card.requestBodyOverrides || {}),
+  budgetQuotaSettings: serializeOptionalBudgetQuotaSettings(card.budgetQuotaSettings),
+  budgetQuotaUsedAdjustments: serializeOptionalBudgetQuotaAdjustments(card.budgetQuotaUsedAdjustments),
+  providerQuotaQueryType: serializeProviderQuotaQueryType(card.providerQuotaQueryType),
+  providerQuotaQueryConfig: sanitizeProviderQuotaQueryConfigForSave(
+    cloneCardValue(card.providerQuotaQueryConfig),
+    card.providerQuotaQueryType,
+  ),
+})
+
+export const createOpenCodeFromCard = (
+  card: AutomationCard,
+  providerID: string,
+): OpenCodeProvider => ({
+  id: providerID,
+  name: card.name,
+  websiteUrl: card.officialSite,
+  baseUrl: card.apiUrl,
+  apiKey: card.apiKey,
+  npm: card.opencodeNpm || '@ai-sdk/openai-compatible',
+  enabled: card.enabled,
+  liveConfigManaged: card.enabled,
+  isInConfig: card.enabled,
+  sortOrder: card.sortOrder || 0,
+  enabledSortOrder: card.enabledSortOrder || 0,
+  disabledSortOrder: card.disabledSortOrder || 0,
+  level: card.level || 1,
+  settingsConfig: buildOpenCodeSettingsConfig(card),
+  requestBodyOverrides: cloneCardValue(card.requestBodyOverrides || {}),
+  budgetQuotaSettings: serializeOptionalBudgetQuotaSettings(card.budgetQuotaSettings),
+  budgetQuotaUsedAdjustments: serializeOptionalBudgetQuotaAdjustments(card.budgetQuotaUsedAdjustments),
+  providerQuotaQueryType: serializeProviderQuotaQueryType(card.providerQuotaQueryType),
+  providerQuotaQueryConfig: sanitizeProviderQuotaQueryConfigForSave(
+    cloneCardValue(card.providerQuotaQueryConfig),
+    card.providerQuotaQueryType,
+  ),
+})
+
 export const serializeProviders = (
   providers: AutomationCard[],
   platform?: ProviderTab | string,
@@ -293,6 +456,10 @@ export const serializeProviders = (
       enabledSortOrder: provider.enabledSortOrder || 0,
       disabledSortOrder: provider.disabledSortOrder || 0,
       requestBodyOverrides: cloneCardValue(provider.requestBodyOverrides || {}),
+      opencodeNpm: provider.opencodeNpm || '',
+      opencodeSettingsConfig: cloneCardValue(provider.opencodeSettingsConfig || {}),
+      liveConfigManaged: provider.liveConfigManaged,
+      isInConfig: provider.isInConfig,
       availabilityMonitorEnabled: !!provider.availabilityMonitorEnabled,
       connectivityAutoBlacklist: !!provider.connectivityAutoBlacklist,
       availabilityConfig: provider.availabilityConfig

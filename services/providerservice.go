@@ -226,6 +226,14 @@ func providerConfigPath(kind string, create bool) (string, error) {
 			}
 		}
 		return filepath.Join(providersDir, "codex.json"), nil
+	case "opencode":
+		providersDir := filepath.Join(dir, "providers")
+		if create {
+			if err := os.MkdirAll(providersDir, 0o755); err != nil {
+				return "", err
+			}
+		}
+		return filepath.Join(providersDir, "opencode.json"), nil
 	default:
 		// 支持自定义 CLI 工具的供应商存储：custom:{tool-id}
 		if strings.HasPrefix(kind, "custom:") {

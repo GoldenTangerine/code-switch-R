@@ -1,3 +1,25 @@
+# Code Switch v2.8.39
+
+## 功能
+- **OpenCode 供应商管理正式接进首页供应商体系**：在 Gemini 后新增 OpenCode 供应商页，支持基础 CRUD、排序、复制、从 `~/.config/opencode/opencode.json` 导入 live provider，并接入 Wails service / 前端 binding，让 OpenCode 终于不用靠手改 JSON 续命。
+- **OpenCode provider 表单补齐 AI SDK 配置入口**：支持 npm 类型、Base URL、API Key、models / options JSON 配置，Anthropic / Google / OpenAI Compatible 默认模型按包类型生成，不再一股脑塞 `gpt-4o`。
+
+## 修复
+- **OpenCode live config 不再被半截保存污染**：前端保存改为单次批量 RPC，后端按完整 provider snapshot 原子写入 managed 配置和 live config；写 live / 写本地任一步失败都会回滚，避免用户真实 `opencode.json` 被悄悄写歪。
+- **OpenCode provider key 保留原样**：导入 live config 时保留用户原始 key，后续编辑不会把 `OpenAI.Custom` 之类的 key 归一化成 `openai-custom` 造成重复 provider。
+- **OpenCode 开关语义收口**：普通启用 / 停用会同步驱动 `liveConfigManaged` / `isInConfig`，关闭卡片就会从 live config 移除；新建关闭和复制副本也保持 DB-only，不会出现“看起来禁用了，实际仍写进 opencode.json”的坑。
+- **OpenCode 隐藏字段不再被表单擦掉**：编辑 OpenCode 时保留 `requestBodyOverrides` 等隐藏配置，不再因为 UI 没展示就保存成空对象。
+- **开发预览 mock 不再污染真实桌面开发环境**：OpenCode dev mock 只在浏览器 dev 且没有 Wails bridge 时启用，连接真实 Wails 服务返回空列表时不再塞假卡片、保存也不再莫名 no-op。
+
+## 技术改进
+- **补齐 OpenCode 批量保存和 live config 回滚测试**：覆盖 raw key 保真、live 冲突、managed/live 双写失败回滚、DB-only provider、复制副本 live flags 清理、前端保存失败回滚和 dev mock 边界。
+- **OpenCode 默认配置补上 `options.setCacheKey: true`**：对齐 cc-switch 默认表单行为，同时继续避免空 URL / 空 API Key 写入占位符污染 live config。
+
+## 发布
+- **本次发版版本号统一推进到 `v2.8.39`**：补齐更新日志并准备推送 `v2.8.39` tag 触发 GitHub 自动打包，这波主要是 OpenCode 供应商管理迁移和 live config 安全收口，别再让用户的真实配置文件当试验田。
+
+---
+
 # Code Switch v2.8.38
 
 ## 修复

@@ -51,6 +51,7 @@ const createCardRecord = (): Record<ProviderTab, AutomationCard[]> => ({
   claude: [],
   codex: [],
   gemini: [],
+  opencode: [],
   others: [],
 })
 
@@ -224,6 +225,178 @@ describe('useProviderForm order preservation', () => {
     expect(cards.codex[1]?.name).toBe('Prepended Disabled Provider')
     expect(cards.codex.slice(1).map((card) => card.disabledSortOrder ?? null)).toEqual([1, 2, 3])
     expect(persistProviders).toHaveBeenCalledWith('codex')
+  })
+
+  it('keeps create modal open and removes optimistic card when persist fails', async () => {
+    const cards = createCardRecord()
+    const persistProviders = vi.fn().mockRejectedValue(new Error('save failed'))
+    vi.spyOn(Date, 'now').mockReturnValue(999)
+
+    const providerForm = useProviderForm({
+      initialTab: 'opencode',
+      t: (key: string) => key,
+      showToast: vi.fn(),
+      getActiveTab: () => 'opencode',
+      cards,
+      normalizeLevel,
+      persistProviders,
+      refreshDirectAppliedStatus: vi.fn().mockResolvedValue(undefined),
+      removeProvider: vi.fn().mockResolvedValue(undefined),
+      duplicateProvider: vi.fn().mockResolvedValue(false),
+      reloadProviders: vi.fn().mockResolvedValue(undefined),
+      moveCardToStatusGroup: (tabId, card, enabled) => moveProviderToStatusGroup(cards[tabId], card, enabled),
+      appendCardToGroup: (tabId, card) => insertProviderToStatusGroup(cards[tabId], card),
+    })
+
+    providerForm.openCreateModal()
+    await expect(providerForm.submitProviderModal(createForm({
+      name: 'OpenCode Provider',
+      providerRef: 'raw-key',
+      opencodeNpm: '@ai-sdk/openai-compatible',
+      opencodeSettingsConfig: { npm: '@ai-sdk/openai-compatible', models: { 'gpt-4o': { name: 'GPT-4o' } } },
+    }))).rejects.toThrow('save failed')
+
+    expect(providerForm.providerModalState.open).toBe(true)
+    expect(cards.opencode).toHaveLength(0)
+    expect(window.dispatchEvent).not.toHaveBeenCalled()
+  })
+
+  it('keeps edit modal open and restores card when persist fails', async () => {
+    const cards = createCardRecord()
+    const original = createCard(1, {
+      providerRef: 'Imported.Provider',
+      name: 'Imported Provider',
+      enabled: true,
+      sortOrder: 1,
+      enabledSortOrder: 1,
+    })
+    cards.opencode.push(original)
+    const persistProviders = vi.fn().mockRejectedValue(new Error('save failed'))
+
+    const providerForm = useProviderForm({
+      initialTab: 'opencode',
+      t: (key: string) => key,
+      showToast: vi.fn(),
+      getActiveTab: () => 'opencode',
+      cards,
+      normalizeLevel,
+      persistProviders,
+      refreshDirectAppliedStatus: vi.fn().mockResolvedValue(undefined),
+      removeProvider: vi.fn().mockResolvedValue(undefined),
+      duplicateProvider: vi.fn().mockResolvedValue(false),
+      reloadProviders: vi.fn().mockResolvedValue(undefined),
+      moveCardToStatusGroup: (tabId, card, enabled) => moveProviderToStatusGroup(cards[tabId], card, enabled),
+      appendCardToGroup: (tabId, card) => insertProviderToStatusGroup(cards[tabId], card),
+    })
+
+    providerForm.configure(original)
+    await expect(providerForm.submitProviderModal(createForm({
+      name: 'Broken Update',
+      providerRef: 'Imported.Provider',
+      enabled: false,
+      opencodeNpm: '@ai-sdk/anthropic',
+      opencodeSettingsConfig: { npm: '@ai-sdk/anthropic', models: { 'claude-3-5-sonnet-latest': { name: 'Claude 3.5 Sonnet' } } },
+    }))).rejects.toThrow('save failed')
+
+    expect(providerForm.providerModalState.open).toBe(true)
+    expect(cards.opencode).toHaveLength(1)
+    expect(cards.opencode[0]).toMatchObject({
+      providerRef: 'Imported.Provider',
+      name: 'Imported Provider',
+      enabled: true,
+      sortOrder: 1,
+      enabledSortOrder: 1,
+    })
+    expect(window.dispatchEvent).not.toHaveBeenCalled()
+  })
+
+  it('preserves hidden OpenCode request overrides and syncs live flags from enabled on edit', async () => {
+    const cards = createCardRecord()
+    const original = createCard(1, {
+      providerRef: 'Imported.Provider',
+      name: 'Imported Provider',
+      enabled: true,
+      liveConfigManaged: false,
+      isInConfig: false,
+      requestBodyOverrides: { metadata: { source: 'imported' } },
+    })
+    cards.opencode.push(original)
+    const persistProviders = vi.fn().mockResolvedValue(undefined)
+
+    const providerForm = useProviderForm({
+      initialTab: 'opencode',
+      t: (key: string) => key,
+      showToast: vi.fn(),
+      getActiveTab: () => 'opencode',
+      cards,
+      normalizeLevel,
+      persistProviders,
+      refreshDirectAppliedStatus: vi.fn().mockResolvedValue(undefined),
+      removeProvider: vi.fn().mockResolvedValue(undefined),
+      duplicateProvider: vi.fn().mockResolvedValue(false),
+      reloadProviders: vi.fn().mockResolvedValue(undefined),
+      moveCardToStatusGroup: (tabId, card, enabled) => moveProviderToStatusGroup(cards[tabId], card, enabled),
+      appendCardToGroup: (tabId, card) => insertProviderToStatusGroup(cards[tabId], card),
+    })
+
+    providerForm.configure(original)
+    await providerForm.submitProviderModal(createForm({
+      name: 'Edited Provider',
+      providerRef: 'Imported.Provider',
+      enabled: true,
+      requestBodyOverrides: { metadata: { source: 'imported' } },
+      liveConfigManaged: false,
+      isInConfig: false,
+      opencodeNpm: '@ai-sdk/openai-compatible',
+      opencodeSettingsConfig: { npm: '@ai-sdk/openai-compatible', models: { 'gpt-4o': { name: 'GPT-4o' } } },
+    }))
+
+    expect(cards.opencode[0]).toMatchObject({
+      providerRef: 'Imported.Provider',
+      name: 'Edited Provider',
+      liveConfigManaged: true,
+      isInConfig: true,
+      requestBodyOverrides: { metadata: { source: 'imported' } },
+    })
+    expect(persistProviders).toHaveBeenCalledWith('opencode')
+  })
+
+  it('syncs OpenCode live flags when toggling enabled state', async () => {
+    const cards = createCardRecord()
+    const provider = createCard(1, {
+      providerRef: 'Managed.Provider',
+      enabled: true,
+      liveConfigManaged: true,
+      isInConfig: true,
+      sortOrder: 1,
+      enabledSortOrder: 1,
+    })
+    cards.opencode.push(provider)
+    const persistProviders = vi.fn().mockResolvedValue(undefined)
+    const providerForm = useProviderForm({
+      initialTab: 'opencode',
+      t: (key: string) => key,
+      showToast: vi.fn(),
+      getActiveTab: () => 'opencode',
+      cards,
+      normalizeLevel,
+      persistProviders,
+      refreshDirectAppliedStatus: vi.fn().mockResolvedValue(undefined),
+      removeProvider: vi.fn().mockResolvedValue(undefined),
+      duplicateProvider: vi.fn().mockResolvedValue(false),
+      reloadProviders: vi.fn().mockResolvedValue(undefined),
+      moveCardToStatusGroup: (tabId, card, enabled) => moveProviderToStatusGroup(cards[tabId], card, enabled),
+      appendCardToGroup: (tabId, card) => insertProviderToStatusGroup(cards[tabId], card),
+    })
+
+    await providerForm.handleProviderEnabledChange(provider, false)
+
+    expect(provider).toMatchObject({
+      enabled: false,
+      liveConfigManaged: false,
+      isInConfig: false,
+    })
+    expect(persistProviders).toHaveBeenCalledWith('opencode')
   })
 
   it('moves provider to the end of enabled group when toggled on', async () => {

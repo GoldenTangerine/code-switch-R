@@ -30,6 +30,14 @@ export type AutomationCard = {
   level?: number
   // API 端点路径（可选）：覆盖平台默认端点
   apiEndpoint?: string
+  // OpenCode AI SDK 包名，例如 @ai-sdk/openai-compatible
+  opencodeNpm?: string
+  // OpenCode provider fragment，最终写入 opencode.json 的 provider.{id}
+  opencodeSettingsConfig?: Record<string, any>
+  // OpenCode additive mode：是否由本应用管理 live config 中的 provider key
+  liveConfigManaged?: boolean
+  // OpenCode additive mode：provider 当前是否存在于 live config
+  isInConfig?: boolean
   // CLI 配置：存储供应商关联的 CLI 可编辑配置
   cliConfig?: Record<string, any>
 

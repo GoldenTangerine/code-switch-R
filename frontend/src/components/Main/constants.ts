@@ -4,6 +4,7 @@ export const MAIN_TABS = [
   { id: 'claude', label: 'Claude Code' },
   { id: 'codex', label: 'Codex' },
   { id: 'gemini', label: 'Gemini' },
+  { id: 'opencode', label: 'OpenCode' },
   { id: 'others', label: '其他' },
 ] as const
 
@@ -30,6 +31,7 @@ export const getDefaultEndpoint = (platform: string) => {
   const defaults: Record<string, string> = {
     claude: '/v1/messages',
     codex: '/responses',
+    opencode: '/v1/chat/completions',
   }
   return defaults[platform] || '/v1/chat/completions'
 }

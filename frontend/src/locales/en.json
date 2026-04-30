@@ -543,7 +543,11 @@
         "tooltip": "Import {providers} providers · {servers} MCP servers",
         "success": "Imported {providers} providers and {servers} MCP servers",
         "empty": "Everything from cc-switch is already in sync",
-        "error": "Failed to import cc-switch config"
+        "error": "Failed to import cc-switch config",
+        "opencodeTooltip": "Import live providers from ~/.config/opencode/opencode.json",
+        "opencodeSuccess": "Imported {providers} OpenCode live providers",
+        "opencodeEmpty": "All OpenCode live providers are already managed",
+        "opencodeError": "Failed to import OpenCode live config"
       },
       "firstRun": {
         "message": "Welcome to Code Switch R! If you have cc-switch config, you can import it from Settings.",
@@ -716,7 +720,10 @@
           "providerQuotaQueryUserId": "User ID",
           "providerQuotaQueryTokenPlanProvider": "Token Plan provider",
           "providerQuotaQueryCode": "Query script",
-          "providerQuotaQueryManualOnly": "Manual only"
+          "providerQuotaQueryManualOnly": "Manual only",
+          "providerKey": "Provider ID",
+          "opencodeNpm": "AI SDK package",
+          "opencodeSettingsConfig": "OpenCode provider config"
         },
         "placeholders": {
           "name": "e.g. AICoding.sh",
@@ -739,7 +746,8 @@
           "providerQuotaQueryUserId": "Example: 10001",
           "providerQuotaQueryTimeout": "10",
           "providerQuotaQueryAutoInterval": "5",
-          "providerQuotaQueryCode": "Return request / extractor"
+          "providerQuotaQueryCode": "Return request / extractor",
+          "providerKey": "e.g. deepseek, my-openai-compatible"
         },
         "noIconResults": "No matching icons found",
         "hints": {
@@ -786,7 +794,10 @@
           "providerQuotaQueryCodeHint": "The script must return an object containing request and extractor. The extractor may return one object or an array of objects.",
           "providerQuotaQueryAutoInterval": "Use 0 to disable polling and only query on manual refresh or reset.",
           "providerQuotaQueryTimeout": "Timeout is clamped to 2 - 30 seconds. Do not set anything ridiculous.",
-          "providerQuotaQueryAutoEvery": "Auto every {minutes} min"
+          "providerQuotaQueryAutoEvery": "Auto every {minutes} min",
+          "providerKey": "Written to provider.{id} in ~/.config/opencode/opencode.json. Use lowercase letters, numbers, and hyphens only. It is locked while editing.",
+          "opencodeNpm": "OpenCode uses the AI SDK package name to select the provider adapter, such as OpenAI Compatible, Anthropic, or Google.",
+          "opencodeSettingsConfig": "This is a single provider fragment, not the full opencode.json. Saving syncs name, npm, options.baseURL, and options.apiKey."
         },
         "options": {
           "providerQuotaQueryNone": "Disabled",
@@ -852,7 +863,10 @@
         "errors": {
           "invalidUrl": "Please enter a valid API URL",
           "requestBodyOverridesInvalid": "Failed to parse forced request body JSON: {error}",
-          "requestBodyOverridesMustBeObject": "Forced request body fields must be a JSON object"
+          "requestBodyOverridesMustBeObject": "Forced request body fields must be a JSON object",
+          "providerKeyRequired": "Enter a valid OpenCode Provider ID",
+          "opencodeSettingsConfigInvalid": "Failed to parse OpenCode config JSON: {error}",
+          "opencodeSettingsConfigMustBeObject": "OpenCode config must be a JSON object"
         },
         "saveFailed": "Failed to save provider configuration",
         "toast": {

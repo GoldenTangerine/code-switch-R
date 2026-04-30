@@ -21,10 +21,47 @@ export const cloneProviderValue = <T>(value: T): T => {
   return JSON.parse(JSON.stringify(value))
 }
 
+export const getDefaultOpenCodeModels = (npm = '@ai-sdk/openai-compatible') => {
+  switch (npm.trim()) {
+    case '@ai-sdk/anthropic':
+      return { 'claude-3-5-sonnet-latest': { name: 'Claude 3.5 Sonnet' } }
+    case '@ai-sdk/google':
+      return { 'gemini-2.5-pro': { name: 'Gemini 2.5 Pro' } }
+    default:
+      return { 'gpt-4o': { name: 'GPT-4o' } }
+  }
+}
+
+export const isDefaultOpenCodeModels = (models: unknown) => {
+  if (!models || typeof models !== 'object' || Array.isArray(models)) return false
+  const modelKeys = Object.keys(models as Record<string, unknown>)
+  if (modelKeys.length !== 1) return false
+  return ['gpt-4o', 'claude-3-5-sonnet-latest', 'gemini-2.5-pro'].includes(modelKeys[0])
+}
+
+export const createDefaultOpenCodeSettingsConfig = (
+  npm = '@ai-sdk/openai-compatible',
+  name = 'OpenCode Provider',
+  baseUrl = '',
+  apiKey = '',
+): Record<string, any> => {
+  const options: Record<string, any> = { setCacheKey: true }
+  if (baseUrl) options.baseURL = baseUrl
+  if (apiKey) options.apiKey = apiKey
+
+  return {
+    npm,
+    name,
+    ...(Object.keys(options).length > 0 ? { options } : {}),
+    models: getDefaultOpenCodeModels(npm),
+  }
+}
+
 export const createDefaultVendorForm = (
   platform: ProviderTab | string,
   defaultIconKey: string,
 ): VendorForm => ({
+  providerRef: '',
   name: '',
   apiUrl: '',
   apiKey: '',
@@ -38,6 +75,12 @@ export const createDefaultVendorForm = (
   requestBodyOverrides: {},
   cliConfig: {},
   apiEndpoint: '',
+  opencodeNpm: platform === 'opencode' ? '@ai-sdk/openai-compatible' : undefined,
+  opencodeSettingsConfig: platform === 'opencode'
+    ? createDefaultOpenCodeSettingsConfig()
+    : undefined,
+  liveConfigManaged: platform === 'opencode' ? true : undefined,
+  isInConfig: platform === 'opencode' ? true : undefined,
   availabilityMonitorEnabled: false,
   connectivityAutoBlacklist: false,
   availabilityConfig: {
@@ -59,6 +102,7 @@ export const createVendorFormFromCard = (
   card: AutomationCard,
   tabId: ProviderTab,
 ): VendorForm => ({
+  providerRef: card.providerRef || '',
   name: card.name,
   apiUrl: card.apiUrl,
   apiKey: card.apiKey,
@@ -72,6 +116,10 @@ export const createVendorFormFromCard = (
   requestBodyOverrides: cloneProviderValue(card.requestBodyOverrides || {}),
   cliConfig: cloneProviderValue(card.cliConfig || {}),
   apiEndpoint: card.apiEndpoint || '',
+  opencodeNpm: card.opencodeNpm || '',
+  opencodeSettingsConfig: cloneProviderValue(card.opencodeSettingsConfig || {}),
+  liveConfigManaged: card.liveConfigManaged,
+  isInConfig: card.isInConfig,
   // 旧字段兼容统一放在这里，避免创建、编辑两条链路口径飘掉。
   availabilityMonitorEnabled: card.availabilityMonitorEnabled ?? card.connectivityCheck ?? false,
   connectivityAutoBlacklist: card.connectivityAutoBlacklist ?? false,
@@ -147,13 +195,20 @@ export const buildNormalizedVendorForm = ({
   requestBodyOverrides: cloneProviderValue(form.requestBodyOverrides || {}),
   cliConfig: cloneProviderValue(form.cliConfig || {}),
   apiEndpoint: form.apiEndpoint || '',
-  availabilityMonitorEnabled: !!form.availabilityMonitorEnabled,
-  connectivityAutoBlacklist: !!form.connectivityAutoBlacklist,
-  availabilityConfig: {
-    testModel: form.availabilityConfig?.testModel || '',
-    testEndpoint: form.availabilityConfig?.testEndpoint || getDefaultEndpoint(tabId),
-    timeout: form.availabilityConfig?.timeout || 15000,
-  },
+  providerRef: form.providerRef || '',
+  opencodeNpm: form.opencodeNpm || '',
+  opencodeSettingsConfig: cloneProviderValue(form.opencodeSettingsConfig || {}),
+  liveConfigManaged: tabId === 'opencode' ? form.enabled : form.liveConfigManaged,
+  isInConfig: tabId === 'opencode' ? form.enabled : form.isInConfig,
+  availabilityMonitorEnabled: tabId === 'opencode' ? false : !!form.availabilityMonitorEnabled,
+  connectivityAutoBlacklist: tabId === 'opencode' ? false : !!form.connectivityAutoBlacklist,
+  availabilityConfig: tabId === 'opencode'
+    ? { testModel: '', testEndpoint: '', timeout: 15000 }
+    : {
+      testModel: form.availabilityConfig?.testModel || '',
+      testEndpoint: form.availabilityConfig?.testEndpoint || getDefaultEndpoint(tabId),
+      timeout: form.availabilityConfig?.timeout || 15000,
+    },
   connectivityCheck: false,
   connectivityTestModel: '',
   connectivityTestEndpoint: '',
@@ -183,13 +238,20 @@ export const buildPersistedProviderFieldsFromForm = (
   requestBodyOverrides: cloneProviderValue(form.requestBodyOverrides || {}),
   cliConfig: cloneProviderValue(form.cliConfig || {}),
   apiEndpoint: form.apiEndpoint || '',
-  availabilityMonitorEnabled: !!form.availabilityMonitorEnabled,
-  connectivityAutoBlacklist: !!form.connectivityAutoBlacklist,
-  availabilityConfig: {
-    testModel: form.availabilityConfig?.testModel || '',
-    testEndpoint: form.availabilityConfig?.testEndpoint || getDefaultEndpoint(tabId),
-    timeout: form.availabilityConfig?.timeout || 15000,
-  },
+  providerRef: form.providerRef || '',
+  opencodeNpm: form.opencodeNpm || '',
+  opencodeSettingsConfig: cloneProviderValue(form.opencodeSettingsConfig || {}),
+  liveConfigManaged: tabId === 'opencode' ? form.enabled : form.liveConfigManaged,
+  isInConfig: tabId === 'opencode' ? form.enabled : form.isInConfig,
+  availabilityMonitorEnabled: tabId === 'opencode' ? false : !!form.availabilityMonitorEnabled,
+  connectivityAutoBlacklist: tabId === 'opencode' ? false : !!form.connectivityAutoBlacklist,
+  availabilityConfig: tabId === 'opencode'
+    ? { testModel: '', testEndpoint: '', timeout: 15000 }
+    : {
+      testModel: form.availabilityConfig?.testModel || '',
+      testEndpoint: form.availabilityConfig?.testEndpoint || getDefaultEndpoint(tabId),
+      timeout: form.availabilityConfig?.timeout || 15000,
+    },
   connectivityCheck: false,
   connectivityTestModel: '',
   connectivityTestEndpoint: '',

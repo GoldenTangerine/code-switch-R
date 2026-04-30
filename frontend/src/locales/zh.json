@@ -544,7 +544,11 @@
         "tooltip": "导入 {providers} 个供应商 · {servers} 个 MCP 服务器",
         "success": "已导入 {providers} 个供应商与 {servers} 个 MCP 服务器",
         "empty": "cc-switch 中的供应商与 MCP 均已同步",
-        "error": "导入 cc-switch 配置失败"
+        "error": "导入 cc-switch 配置失败",
+        "opencodeTooltip": "从 ~/.config/opencode/opencode.json 导入 live provider",
+        "opencodeSuccess": "已导入 {providers} 个 OpenCode live provider",
+        "opencodeEmpty": "OpenCode live provider 已全部纳入管理",
+        "opencodeError": "导入 OpenCode live 配置失败"
       },
       "firstRun": {
         "message": "欢迎使用 Code Switch R！如果你有 cc-switch 的配置，可以前往设置页导入。",
@@ -717,7 +721,10 @@
           "providerQuotaQueryUserId": "User ID",
           "providerQuotaQueryTokenPlanProvider": "Token Plan 供应商",
           "providerQuotaQueryCode": "查询脚本",
-          "providerQuotaQueryManualOnly": "仅手动刷新"
+          "providerQuotaQueryManualOnly": "仅手动刷新",
+          "providerKey": "Provider ID",
+          "opencodeNpm": "AI SDK 包名",
+          "opencodeSettingsConfig": "OpenCode Provider 配置"
         },
         "placeholders": {
           "name": "例如：AICoding.sh",
@@ -740,7 +747,8 @@
           "providerQuotaQueryUserId": "例如：10001",
           "providerQuotaQueryTimeout": "10",
           "providerQuotaQueryAutoInterval": "5",
-          "providerQuotaQueryCode": "返回 request / extractor"
+          "providerQuotaQueryCode": "返回 request / extractor",
+          "providerKey": "例如：deepseek、my-openai-compatible"
         },
         "noIconResults": "未找到匹配的图标",
         "hints": {
@@ -787,7 +795,10 @@
           "providerQuotaQueryCodeHint": "脚本需要返回包含 request 和 extractor 的对象，extractor 可以返回单对象或对象数组。",
           "providerQuotaQueryAutoInterval": "填 0 表示只在手动刷新或重置时查询，不自动轮询。",
           "providerQuotaQueryTimeout": "超时时间会限制在 2 - 30 秒，别往天上填。",
-          "providerQuotaQueryAutoEvery": "自动 {minutes} 分钟"
+          "providerQuotaQueryAutoEvery": "自动 {minutes} 分钟",
+          "providerKey": "写入 ~/.config/opencode/opencode.json 的 provider.{id}，只允许小写字母、数字和短横线。保存后不可在编辑时改名，别乱起名，后面会找不到对象。",
+          "opencodeNpm": "OpenCode 使用 AI SDK 包名决定供应商适配器，例如 OpenAI Compatible、Anthropic 或 Google。",
+          "opencodeSettingsConfig": "这里是单个 provider fragment，不是完整 opencode.json。保存时会同步 name、npm、options.baseURL 和 options.apiKey。"
         },
         "options": {
           "providerQuotaQueryNone": "不启用",
@@ -853,7 +864,10 @@
         "errors": {
           "invalidUrl": "请输入合法的 API 地址",
           "requestBodyOverridesInvalid": "请求体强制字段 JSON 解析失败：{error}",
-          "requestBodyOverridesMustBeObject": "请求体强制字段必须是 JSON 对象"
+          "requestBodyOverridesMustBeObject": "请求体强制字段必须是 JSON 对象",
+          "providerKeyRequired": "请填写有效的 OpenCode Provider ID",
+          "opencodeSettingsConfigInvalid": "OpenCode 配置 JSON 解析失败：{error}",
+          "opencodeSettingsConfigMustBeObject": "OpenCode 配置必须是 JSON 对象"
         },
         "saveFailed": "保存供应商配置失败",
         "toast": {

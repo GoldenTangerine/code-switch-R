@@ -10,4 +10,7 @@ export const claudeDirectApplyRequiresHostedRouting = (
 export const isDirectApplyBlockedForProvider = (
   tabId: ProviderTab,
   provider: DirectApplyProviderLike,
-): boolean => tabId === 'claude' && claudeDirectApplyRequiresHostedRouting(provider)
+): boolean => (
+  tabId === 'opencode' ||
+  (tabId === 'claude' && claudeDirectApplyRequiresHostedRouting(provider))
+)

@@ -12,15 +12,26 @@ import {
 import { showToast } from '../../../utils/toast'
 import {
   cardToGemini,
+  cardToOpenCode,
   createGeminiFromCard,
   createGeminiProviderRef,
+  createOpenCodeFromCard,
+  createOpenCodeProviderRef,
   deserializeProviders,
   geminiToCard,
   normalizeProviderRef,
+  opencodeToCard,
   serializeProviders,
   type GeminiProvider,
+  type OpenCodeProvider,
   type PersistedProvider,
 } from '../adapters/providerCardMappers'
+import {
+  duplicateOpenCodeProvider,
+  getOpenCodeProviders,
+  importOpenCodeProvidersFromLive,
+  saveOpenCodeProviders,
+} from '../../../services/opencode'
 import { PROVIDER_TAB_IDS } from '../constants'
 import type { ProviderDragEndPayload, ProviderDragTarget, ProviderTab, TranslateFn } from '../types'
 import {
@@ -69,10 +80,16 @@ const hasDesktopRuntimeBridge = () => {
   )
 }
 
-const shouldApplyDevClaudeApiFormatDemo = () => (
-  import.meta.env.DEV
+const shouldApplyBrowserDevDemo = () => (
+  import.meta.env.MODE !== 'production'
   && typeof window !== 'undefined'
   && !hasDesktopRuntimeBridge()
+)
+
+const shouldApplyDevClaudeApiFormatDemo = shouldApplyBrowserDevDemo
+
+const shouldApplyDevOpenCodeProviders = () => (
+  shouldApplyBrowserDevDemo()
 )
 
 const withDevClaudeApiFormatDemo = (cards: AutomationCard[]): AutomationCard[] => {
@@ -93,10 +110,64 @@ const withDevClaudeApiFormatDemo = (cards: AutomationCard[]): AutomationCard[] =
   })
 }
 
+const loadDevOpenCodeProviders = async (): Promise<OpenCodeProvider[] | null> => {
+  if (import.meta.env.MODE === 'production') {
+    return null
+  }
+
+  if (!shouldApplyDevOpenCodeProviders()) {
+    return null
+  }
+
+  const { createDevOpenCodeProviders } = await import('./devOpenCodeProviders')
+  return createDevOpenCodeProviders()
+}
+
+const loadDevOpenCodeCards = async (): Promise<AutomationCard[] | null> => {
+  if (import.meta.env.MODE === 'production') {
+    return null
+  }
+
+  if (!shouldApplyDevOpenCodeProviders()) {
+    return null
+  }
+
+  const { createDevOpenCodeCards } = await import('./devOpenCodeProviders')
+  return createDevOpenCodeCards()
+}
+
+const loadOpenCodeProvidersForCards = async (): Promise<{
+  providers: OpenCodeProvider[]
+  isDevPreview: boolean
+}> => {
+  try {
+    const loadedProviders = await getOpenCodeProviders()
+    const providers = Array.isArray(loadedProviders) ? loadedProviders : []
+    return { providers, isDevPreview: false }
+  } catch (error) {
+    if (!shouldApplyDevOpenCodeProviders()) {
+      throw error
+    }
+    console.warn('[OpenCode] 本地 dev 预览无法连接桌面服务，已使用前端 mock provider。', error)
+  }
+
+  const devProviders = await loadDevOpenCodeProviders()
+  if (devProviders) {
+    return { providers: devProviders, isDevPreview: true }
+  }
+
+  return { providers: [], isDevPreview: false }
+}
+
+const cloneAutomationCards = (source: AutomationCard[]): AutomationCard[] => (
+  JSON.parse(JSON.stringify(source)) as AutomationCard[]
+)
+
 const createCardRecord = (): Record<ProviderTab, AutomationCard[]> => ({
   claude: withDevClaudeApiFormatDemo(createAutomationCards(automationCardGroups.claude)),
   codex: createAutomationCards(automationCardGroups.codex),
   gemini: [],
+  opencode: [],
   others: [],
 })
 
@@ -104,6 +175,7 @@ const createDirectAppliedIds = (): Record<ProviderTab, string | number | null> =
   claude: null,
   codex: null,
   gemini: null,
+  opencode: null,
   others: null,
 })
 
@@ -118,6 +190,8 @@ export function useProviderCards(options: UseProviderCardsOptions) {
   const dragOverId = ref<number | null>(null)
   const directAppliedIds = reactive(createDirectAppliedIds())
   const geminiProvidersCache = ref<GeminiProvider[]>([])
+  const opencodeProvidersCache = ref<OpenCodeProvider[]>([])
+  const isOpenCodeDevPreview = ref(false)
   const dragStartOrder = ref<number[]>([])
   const dragSourceTab = ref<ProviderTab | null>(null)
   const lastDragTarget = ref<ProviderDragTarget | null>(null)
@@ -125,6 +199,20 @@ export function useProviderCards(options: UseProviderCardsOptions) {
   const finalizedDragSessionId = ref(0)
   const droppedDragSessionId = ref(0)
   const dragWithinList = ref(false)
+
+  const hydrateDevOpenCodePreviewCards = async () => {
+    const devCards = await loadDevOpenCodeCards()
+    if (!devCards || cards.opencode.length > 0) {
+      return
+    }
+
+    isOpenCodeDevPreview.value = true
+    opencodeProvidersCache.value = []
+    cards.opencode.splice(0, cards.opencode.length, ...devCards)
+    applyNormalizedProviderOrder(cards.opencode)
+  }
+
+  void hydrateDevOpenCodePreviewCards()
 
   const hasOrderChanged = (list: AutomationCard[], snapshot: number[]) =>
     snapshot.length === list.length && snapshot.some((id, index) => list[index]?.id !== id)
@@ -246,7 +334,10 @@ export function useProviderCards(options: UseProviderCardsOptions) {
   }
 
   const refreshDirectAppliedStatus = async (tab: ProviderTab = getActiveTab()) => {
-    if (tab === 'others') return
+    if (tab === 'others' || tab === 'opencode') {
+      directAppliedIds[tab] = null
+      return
+    }
 
     try {
       let id: string | number | null = null
@@ -379,10 +470,53 @@ export function useProviderCards(options: UseProviderCardsOptions) {
         return
       }
 
+      if (tabId === 'opencode') {
+        if (isOpenCodeDevPreview.value) {
+          return
+        }
+
+        const nextProviders: OpenCodeProvider[] = []
+        for (const card of cards.opencode) {
+          const providerRef = normalizeProviderRef(card.providerRef)
+          const original = providerRef
+            ? opencodeProvidersCache.value.find((provider) => normalizeProviderRef(provider.id) === providerRef)
+            : undefined
+
+          if (original) {
+            nextProviders.push(cardToOpenCode(card, original))
+          } else {
+            const newProviderID = providerRef || createOpenCodeProviderRef()
+            card.providerRef = newProviderID
+            nextProviders.push(createOpenCodeFromCard(card, newProviderID))
+          }
+        }
+
+        await saveOpenCodeProviders(nextProviders)
+        opencodeProvidersCache.value = await getOpenCodeProviders()
+        return
+      }
+
       await SaveProviders(tabId, serializeProviders(cards[tabId], tabId))
     } catch (error) {
       console.error('Failed to save providers', error)
       showToast(t('components.main.form.saveFailed'), 'error')
+      throw error
+    }
+  }
+
+  const importOpenCodeLiveProviders = async () => {
+    try {
+      const imported = await importOpenCodeProvidersFromLive()
+      const opencodeProviders = await getOpenCodeProviders()
+      isOpenCodeDevPreview.value = false
+      opencodeProvidersCache.value = opencodeProviders
+      cards.opencode.splice(0, cards.opencode.length, ...opencodeProviders.map(opencodeToCard))
+      applyNormalizedProviderOrder(cards.opencode)
+      return imported
+    } catch (error) {
+      console.error('Failed to import OpenCode live providers', error)
+      showToast(t('components.main.importConfig.opencodeError'), 'error')
+      return null
     }
   }
 
@@ -396,6 +530,12 @@ export function useProviderCards(options: UseProviderCardsOptions) {
           geminiProvidersCache.value = geminiProviders
           cards.gemini.splice(0, cards.gemini.length, ...geminiProviders.map(geminiToCard))
           applyNormalizedProviderOrder(cards.gemini)
+        } else if (tab === 'opencode') {
+          const { providers: opencodeProviders, isDevPreview } = await loadOpenCodeProvidersForCards()
+          isOpenCodeDevPreview.value = isDevPreview
+          opencodeProvidersCache.value = opencodeProviders
+          cards.opencode.splice(0, cards.opencode.length, ...opencodeProviders.map(opencodeToCard))
+          applyNormalizedProviderOrder(cards.opencode)
         } else {
           const saved = await LoadProviders(tab)
           if (Array.isArray(saved)) {
@@ -418,8 +558,14 @@ export function useProviderCards(options: UseProviderCardsOptions) {
     const index = list.findIndex((card) => card.id === id)
     if (index < 0) return
 
+    const previousCards = cloneAutomationCards(list)
     list.splice(index, 1)
-    await persistProviders(tabId)
+    try {
+      await persistProviders(tabId)
+    } catch (error) {
+      list.splice(0, list.length, ...previousCards)
+      throw error
+    }
   }
 
   const duplicateProvider = async (card: AutomationCard) => {
@@ -443,6 +589,27 @@ export function useProviderCards(options: UseProviderCardsOptions) {
           return false
         }
         console.log(`[Duplicate] Gemini Provider "${card.name}" duplicated`)
+        return true
+      }
+
+      if (tab === 'opencode') {
+        if (isOpenCodeDevPreview.value) {
+          console.info('[Duplicate] OpenCode dev mock provider 不支持复制到后端，已跳过')
+          return false
+        }
+
+        const providerRef = normalizeProviderRef(card.providerRef)
+        if (!providerRef) {
+          console.error('[Duplicate] 未找到 OpenCode provider')
+          return false
+        }
+
+        const newProvider = await duplicateOpenCodeProvider(providerRef)
+        if (!newProvider) {
+          console.warn('[Duplicate] OpenCode DuplicateProvider 返回空结果，已跳过刷新')
+          return false
+        }
+        console.log(`[Duplicate] OpenCode Provider "${card.name}" duplicated`)
         return true
       }
 
@@ -535,6 +702,7 @@ export function useProviderCards(options: UseProviderCardsOptions) {
     loadCustomCliProviders,
     persistProviders,
     loadProvidersFromDisk,
+    importOpenCodeLiveProviders,
     removeProvider,
     duplicateProvider,
     onDragStart,

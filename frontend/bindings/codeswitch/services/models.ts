@@ -1042,6 +1042,111 @@ export class GeminiProvider {
 }
 
 /**
+ * OpenCodeProvider OpenCode 供应商配置。
+ */
+export class OpenCodeProvider {
+    "id": string;
+    "name": string;
+    "websiteUrl"?: string;
+    "apiKeyUrl"?: string;
+    "baseUrl"?: string;
+    "apiKey"?: string;
+    "npm"?: string;
+    "description"?: string;
+    "category"?: string;
+    "partnerPromotionKey"?: string;
+    "enabled": boolean;
+    "liveConfigManaged"?: boolean;
+    "isInConfig"?: boolean;
+    "sortOrder"?: number;
+    "enabledSortOrder"?: number;
+    "disabledSortOrder"?: number;
+    "level"?: number;
+    "settingsConfig"?: { [_: string]: any };
+    "requestBodyOverrides"?: { [_: string]: any };
+    "budgetQuotaSettings"?: { [_: string]: any };
+    "budgetQuotaUsedAdjustments"?: { [_: string]: number };
+    "providerQuotaQueryType"?: string;
+    "providerQuotaQueryConfig"?: { [_: string]: any };
+
+    /** Creates a new OpenCodeProvider instance. */
+    constructor($$source: Partial<OpenCodeProvider> = {}) {
+        if (!("id" in $$source)) {
+            this["id"] = "";
+        }
+        if (!("name" in $$source)) {
+            this["name"] = "";
+        }
+        if (!("enabled" in $$source)) {
+            this["enabled"] = false;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new OpenCodeProvider instance from a string or object.
+     */
+    static createFrom($$source: any = {}): OpenCodeProvider {
+        const $$createField14_0 = $$createType4;
+        const $$createField15_0 = $$createType5;
+        const $$createField16_0 = $$createType4;
+        const $$createField17_0 = $$createType5;
+        const $$createField19_0 = $$createType4;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("settingsConfig" in $$parsedSource) {
+            $$parsedSource["settingsConfig"] = $$createField14_0($$parsedSource["settingsConfig"]);
+        }
+        if ("requestBodyOverrides" in $$parsedSource) {
+            $$parsedSource["requestBodyOverrides"] = $$createField15_0($$parsedSource["requestBodyOverrides"]);
+        }
+        if ("budgetQuotaSettings" in $$parsedSource) {
+            $$parsedSource["budgetQuotaSettings"] = $$createField16_0($$parsedSource["budgetQuotaSettings"]);
+        }
+        if ("budgetQuotaUsedAdjustments" in $$parsedSource) {
+            $$parsedSource["budgetQuotaUsedAdjustments"] = $$createField17_0($$parsedSource["budgetQuotaUsedAdjustments"]);
+        }
+        if ("providerQuotaQueryConfig" in $$parsedSource) {
+            $$parsedSource["providerQuotaQueryConfig"] = $$createField19_0($$parsedSource["providerQuotaQueryConfig"]);
+        }
+        return new OpenCodeProvider($$parsedSource as Partial<OpenCodeProvider>);
+    }
+}
+
+export class OpenCodeProviderPreset {
+    "name": string;
+    "websiteUrl"?: string;
+    "apiKeyUrl"?: string;
+    "npm"?: string;
+    "baseUrl"?: string;
+    "description"?: string;
+    "category"?: string;
+    "partnerPromotionKey"?: string;
+    "settingsConfig"?: { [_: string]: any };
+
+    /** Creates a new OpenCodeProviderPreset instance. */
+    constructor($$source: Partial<OpenCodeProviderPreset> = {}) {
+        if (!("name" in $$source)) {
+            this["name"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new OpenCodeProviderPreset instance from a string or object.
+     */
+    static createFrom($$source: any = {}): OpenCodeProviderPreset {
+        const $$createField8_0 = $$createType4;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("settingsConfig" in $$parsedSource) {
+            $$parsedSource["settingsConfig"] = $$createField8_0($$parsedSource["settingsConfig"]);
+        }
+        return new OpenCodeProviderPreset($$parsedSource as Partial<OpenCodeProviderPreset>);
+    }
+}
+
+/**
  * GeminiProxyStatus Gemini 代理状态
  */
 export class GeminiProxyStatus {

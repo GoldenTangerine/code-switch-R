@@ -16,6 +16,18 @@ vi.mock('../../../../bindings/codeswitch/services/geminiservice', () => ({
   UpdateProvider: vi.fn(),
 }))
 
+vi.mock('../../../../bindings/codeswitch/services/opencodeservice', () => ({
+  AddProvider: vi.fn(),
+  DeleteProvider: vi.fn(),
+  DuplicateProvider: vi.fn(),
+  GetPresets: vi.fn(),
+  GetProviders: vi.fn(),
+  ImportFromLive: vi.fn(),
+  ReorderProviders: vi.fn(),
+  SaveProviders: vi.fn(),
+  UpdateProvider: vi.fn(),
+}))
+
 vi.mock('@wailsio/runtime', () => ({
   Call: {
     ByName: vi.fn(),
@@ -26,6 +38,7 @@ import { Call } from '@wailsio/runtime'
 import { SaveProviders } from '../../../../bindings/codeswitch/services/providerservice'
 import { LoadProviders } from '../../../../bindings/codeswitch/services/providerservice'
 import { AddProvider as AddGeminiProvider, GetProviders as GetGeminiProviders } from '../../../../bindings/codeswitch/services/geminiservice'
+import { GetProviders as GetOpenCodeProviders, SaveProviders as SaveOpenCodeProviders } from '../../../../bindings/codeswitch/services/opencodeservice'
 import { useProviderCards } from './useProviderCards'
 
 const createCard = (
@@ -63,11 +76,15 @@ const createDragEndPayload = (overrides: Partial<{
 describe('useProviderCards drag sort', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.unstubAllGlobals()
+    vi.unstubAllEnvs()
     vi.mocked(Call.ByName).mockResolvedValue(undefined)
     vi.mocked(SaveProviders).mockResolvedValue(undefined)
     vi.mocked(LoadProviders).mockResolvedValue([])
     vi.mocked(AddGeminiProvider).mockResolvedValue(undefined)
     vi.mocked(GetGeminiProviders).mockResolvedValue([])
+    vi.mocked(GetOpenCodeProviders).mockResolvedValue([])
+    vi.mocked(SaveOpenCodeProviders).mockResolvedValue(undefined)
   })
 
   it('keeps reordered result after drop and persists once', async () => {
@@ -446,6 +463,102 @@ describe('useProviderCards drag sort', () => {
     })
   })
 
+  it('persists OpenCode provider payload with raw key and npm-specific default models', async () => {
+    const providerCards = useProviderCards({
+      t: (key: string) => key,
+      getActiveTab: () => 'opencode',
+      isActiveProxyEnabled: () => false,
+      getSelectedToolId: () => null,
+    })
+
+    providerCards.appendCardToGroup('opencode', createCard(10, {
+      providerRef: 'Imported.Provider',
+      name: 'Imported Provider',
+      enabled: true,
+      sortOrder: 1,
+      level: 2,
+      apiUrl: '',
+      apiKey: '',
+      officialSite: 'https://opencode.example.com',
+      opencodeNpm: '@ai-sdk/google',
+      opencodeSettingsConfig: {
+        npm: '@ai-sdk/google',
+      },
+    }))
+
+    vi.mocked(GetOpenCodeProviders).mockResolvedValueOnce([
+      {
+        id: 'Imported.Provider',
+        name: 'Imported Provider',
+        websiteUrl: 'https://opencode.example.com',
+        npm: '@ai-sdk/google',
+        enabled: true,
+        liveConfigManaged: true,
+        isInConfig: true,
+        sortOrder: 1,
+        level: 2,
+      },
+    ] as any)
+
+    await providerCards.persistProviders('opencode')
+
+    expect(vi.mocked(SaveOpenCodeProviders)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(SaveOpenCodeProviders).mock.calls[0]?.[0]).toHaveLength(1)
+    expect(vi.mocked(SaveOpenCodeProviders).mock.calls[0]?.[0]?.[0]).toMatchObject({
+      id: 'Imported.Provider',
+      websiteUrl: 'https://opencode.example.com',
+      baseUrl: '',
+      apiKey: '',
+      npm: '@ai-sdk/google',
+      enabled: true,
+      liveConfigManaged: true,
+      isInConfig: true,
+      sortOrder: 1,
+      level: 2,
+      settingsConfig: {
+        npm: '@ai-sdk/google',
+        name: 'Imported Provider',
+        models: { 'gemini-2.5-pro': { name: 'Gemini 2.5 Pro' } },
+      },
+    })
+    expect(vi.mocked(SaveOpenCodeProviders).mock.calls[0]?.[0]?.[0]?.settingsConfig?.options).toMatchObject({
+      setCacheKey: true,
+    })
+  })
+
+  it('persists OpenCode cards in one batch and follows enabled live flags', async () => {
+    const providerCards = useProviderCards({
+      t: (key: string) => key,
+      getActiveTab: () => 'opencode',
+      isActiveProxyEnabled: () => false,
+      getSelectedToolId: () => null,
+    })
+
+    providerCards.appendCardToGroup('opencode', createCard(20, {
+      providerRef: 'DB.Only',
+      name: 'DB Only',
+      enabled: false,
+      liveConfigManaged: true,
+      isInConfig: true,
+      opencodeNpm: '@ai-sdk/openai-compatible',
+      opencodeSettingsConfig: { npm: '@ai-sdk/openai-compatible' },
+      requestBodyOverrides: { metadata: { source: 'kept' } },
+    }))
+
+    await providerCards.persistProviders('opencode')
+
+    expect(vi.mocked(SaveOpenCodeProviders)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(SaveOpenCodeProviders).mock.calls[0]?.[0]).toMatchObject([
+      {
+        id: 'DB.Only',
+        enabled: false,
+        liveConfigManaged: false,
+        isInConfig: false,
+        requestBodyOverrides: { metadata: { source: 'kept' } },
+      },
+    ])
+  })
+
   it('blocks direct apply for claude providers that require hosted routing', async () => {
     const providerCards = useProviderCards({
       t: (key: string) => key,
@@ -462,5 +575,59 @@ describe('useProviderCards drag sort', () => {
     await providerCards.handleDirectApply(card)
 
     expect(vi.mocked(Call.ByName)).not.toHaveBeenCalled()
+  })
+
+  it('hydrates OpenCode dev mock cards for browser dev preview', async () => {
+    vi.stubGlobal('window', {})
+    vi.mocked(GetOpenCodeProviders).mockRejectedValue(new Error('no bridge'))
+    const providerCards = useProviderCards({
+      t: (key: string) => key,
+      getActiveTab: () => 'opencode',
+      isActiveProxyEnabled: () => false,
+      getSelectedToolId: () => null,
+    })
+
+    await providerCards.loadProvidersFromDisk(vi.fn().mockResolvedValue(undefined))
+
+    expect(providerCards.cards.opencode.map((card) => card.name)).toEqual(['Kimi', 'Deepseek'])
+    expect(providerCards.cards.opencode.map((card) => card.providerRef)).toEqual([
+      'dev-opencode-kimi',
+      'dev-opencode-deepseek',
+    ])
+  })
+
+  it('does not show OpenCode dev mock cards when desktop bridge returns empty providers', async () => {
+    vi.stubGlobal('window', {
+      chrome: {
+        webview: {
+          postMessage: vi.fn(),
+        },
+      },
+    })
+    vi.stubGlobal('document', {
+      createElement: vi.fn(() => ({
+        className: '',
+        textContent: '',
+        classList: { add: vi.fn(), remove: vi.fn() },
+        appendChild: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        remove: vi.fn(),
+        childElementCount: 0,
+      })),
+      body: { appendChild: vi.fn() },
+    })
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => setTimeout(callback, 0))
+    vi.mocked(GetOpenCodeProviders).mockResolvedValue([])
+    const providerCards = useProviderCards({
+      t: (key: string) => key,
+      getActiveTab: () => 'opencode',
+      isActiveProxyEnabled: () => false,
+      getSelectedToolId: () => null,
+    })
+
+    await providerCards.loadProvidersFromDisk(vi.fn().mockResolvedValue(undefined))
+
+    expect(providerCards.cards.opencode).toHaveLength(0)
   })
 })

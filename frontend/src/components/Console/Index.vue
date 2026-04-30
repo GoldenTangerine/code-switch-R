@@ -77,11 +77,11 @@ const closeClearConfirm = () => {
 const confirmClearLogs = async () => {
   if (clearing.value) return
   clearing.value = true
+  clearConfirmOpen.value = false
   try {
     await Call.ByName('codeswitch/services.ConsoleService.ClearLogs')
     logs.value = []
     showToast('清空成功', 'success')
-    closeClearConfirm()
   } catch (error) {
     console.error('清空日志失败:', error)
     showToast(`清空失败：${extractErrorMessage(error)}`, 'error')
@@ -615,6 +615,8 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   height: 100%;
+  min-height: 0;
+  padding-bottom: 0;
   overflow: hidden;
 }
 
@@ -765,6 +767,7 @@ onUnmounted(() => {
 
 .console-container {
   flex: 1;
+  min-height: 0;
   overflow: hidden;
   background: var(--mac-surface);
   border: 1px solid var(--mac-border);
@@ -775,6 +778,7 @@ onUnmounted(() => {
 
 .console-content {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 16px;
   font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', 'Consolas', monospace;
