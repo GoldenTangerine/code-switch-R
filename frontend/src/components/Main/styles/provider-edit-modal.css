@@ -481,6 +481,148 @@
   font-weight: 700;
 }
 
+.opencode-preset-select {
+  position: relative;
+  width: 100%;
+}
+
+.opencode-preset-select__button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 46px;
+  padding: 10px 14px;
+  border: 1px solid var(--mac-border);
+  border-radius: 12px;
+  background: var(--mac-surface-strong);
+  color: var(--mac-text);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.opencode-preset-select__button:hover,
+.opencode-preset-select__button:focus {
+  border-color: color-mix(in srgb, var(--mac-accent) 54%, var(--mac-border));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--mac-accent) 14%, transparent);
+  outline: none;
+}
+
+.opencode-preset-select__button svg {
+  width: 18px;
+  height: 18px;
+  color: var(--mac-text-secondary);
+}
+
+.opencode-preset-select__label {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--mac-text);
+  font-size: 14px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.opencode-preset-select__meta {
+  max-width: 150px;
+  overflow: hidden;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--mac-accent) 12%, transparent);
+  color: var(--mac-accent);
+  font-size: 11px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.opencode-preset-select__options {
+  position: absolute;
+  z-index: 70;
+  top: calc(100% + 6px);
+  right: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: min(360px, 48vh);
+  padding: 6px;
+  overflow-y: auto;
+  border: 1px solid var(--mac-border);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--mac-surface) 96%, transparent);
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.26);
+  backdrop-filter: blur(18px);
+}
+
+.opencode-preset-select__search {
+  position: sticky;
+  z-index: 1;
+  top: 0;
+  padding: 4px;
+  background: color-mix(in srgb, var(--mac-surface) 96%, transparent);
+}
+
+.opencode-preset-select__search-input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid color-mix(in srgb, var(--mac-border) 86%, transparent);
+  border-radius: 10px;
+  padding: 9px 11px;
+  background: var(--mac-surface-strong);
+  color: var(--mac-text);
+  font: inherit;
+}
+
+.opencode-preset-select__search-input:focus {
+  border-color: color-mix(in srgb, var(--mac-accent) 54%, var(--mac-border));
+  outline: none;
+}
+
+.opencode-preset-select__option {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 9px 10px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.opencode-preset-select__option.active {
+  background: color-mix(in srgb, var(--mac-accent) 10%, var(--mac-surface-strong));
+}
+
+.opencode-preset-select__option.selected {
+  background: color-mix(in srgb, var(--mac-accent) 16%, transparent);
+}
+
+.opencode-preset-select__option-name {
+  color: var(--mac-text);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.opencode-preset-select__option-meta {
+  overflow: hidden;
+  color: var(--mac-text-secondary);
+  font-size: 11px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.opencode-preset-select__empty {
+  padding: 14px 10px;
+  color: var(--mac-text-secondary);
+  font-size: 12px;
+  text-align: center;
+}
+
 .opencode-preset-meta {
   display: flex;
   flex-wrap: wrap;

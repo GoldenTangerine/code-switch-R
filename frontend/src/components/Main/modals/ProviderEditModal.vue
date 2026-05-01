@@ -22,16 +22,66 @@
               {{ openCodeCategoryLabel(selectedOpenCodePreset.category) }}
             </span>
           </div>
-          <select v-model="selectedOpenCodePresetId" class="mac-select" @change="handleOpenCodePresetChange">
-            <option value="custom">{{ t('components.main.form.options.opencodeCustomPreset') }}</option>
-            <option
-              v-for="entry in openCodePresetEntries"
-              :key="entry.id"
-              :value="entry.id"
-            >
-              {{ openCodePresetLabel(entry.preset) }}
-            </option>
-          </select>
+          <Listbox
+            v-model="selectedOpenCodePresetId"
+            v-slot="{ open: presetSelectOpen }"
+            class="w-full"
+            @update:model-value="handleOpenCodePresetChange"
+          >
+            <div class="opencode-preset-select">
+              <ListboxButton class="opencode-preset-select__button" @click="focusOpenCodePresetSearchInput">
+                <span class="opencode-preset-select__label">{{ selectedOpenCodePresetLabel }}</span>
+                <span v-if="selectedOpenCodePreset" class="opencode-preset-select__meta">
+                  {{ openCodeCategoryLabel(selectedOpenCodePreset.category) }}
+                </span>
+                <svg viewBox="0 0 20 20" aria-hidden="true">
+                  <path d="M6 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+                </svg>
+              </ListboxButton>
+              <ListboxOptions v-if="presetSelectOpen" class="opencode-preset-select__options">
+                <div class="opencode-preset-select__search">
+                  <input
+                    ref="openCodePresetSearchInputRef"
+                    v-model="openCodePresetSearchQuery"
+                    type="text"
+                    class="opencode-preset-select__search-input"
+                    :placeholder="t('components.main.form.placeholders.searchOpenCodePreset')"
+                    @click.stop
+                    @keydown.stop
+                  />
+                </div>
+                <ListboxOption value="custom" v-slot="{ active, selected }">
+                  <div :class="['opencode-preset-select__option', { active, selected }]">
+                    <span class="opencode-preset-select__option-name">
+                      {{ t('components.main.form.options.opencodeCustomPreset') }}
+                    </span>
+                    <span class="opencode-preset-select__option-meta">
+                      {{ openCodeCategoryLabel('custom') }}
+                    </span>
+                  </div>
+                </ListboxOption>
+                <ListboxOption
+                  v-for="entry in filteredOpenCodePresetEntries"
+                  :key="entry.id"
+                  :value="entry.id"
+                  v-slot="{ active, selected }"
+                >
+                  <div :class="['opencode-preset-select__option', { active, selected }]">
+                    <span class="opencode-preset-select__option-name">
+                      {{ openCodePresetLabel(entry.preset) }}
+                    </span>
+                    <span class="opencode-preset-select__option-meta">
+                      {{ openCodeCategoryLabel(entry.preset.category) }}
+                      <template v-if="entry.preset.baseUrl"> · {{ entry.preset.baseUrl }}</template>
+                    </span>
+                  </div>
+                </ListboxOption>
+                <div v-if="filteredOpenCodePresetEntries.length === 0" class="opencode-preset-select__empty">
+                  {{ t('components.main.form.noOpenCodePresetResults') }}
+                </div>
+              </ListboxOptions>
+            </div>
+          </Listbox>
           <div v-if="selectedOpenCodePreset" class="opencode-preset-meta">
             <span>{{ selectedOpenCodePreset.description || selectedOpenCodePreset.name }}</span>
             <a
@@ -942,6 +992,8 @@ const errors = reactive({
 const selectedAuthType = ref<string>(getDefaultAuthType(props.tabId))
 const customAuthHeader = ref('')
 const iconSearchQuery = ref('')
+const openCodePresetSearchQuery = ref('')
+const openCodePresetSearchInputRef = ref<HTMLInputElement | null>(null)
 const requestBodyOverridesText = ref('{}')
 const requestBodyOverridesError = ref('')
 const opencodeSettingsConfigText = ref('{}')
@@ -1178,6 +1230,52 @@ const openCodePresetEntries = computed(() => (
 ))
 const selectedOpenCodePreset = computed<OpenCodeProviderPreset | null>(() => (
   openCodePresetEntries.value.find((entry) => entry.id === selectedOpenCodePresetId.value)?.preset ?? null
+))
+const normalizeOpenCodePresetSearchText = (value: unknown) => `${value ?? ''}`
+  .normalize('NFKD')
+  .replace(/[\u0300-\u036f]/g, '')
+  .toLowerCase()
+  .replace(/\s+/g, ' ')
+  .trim()
+const isOpenCodePresetFuzzyMatch = (source: string, query: string) => {
+  if (source.includes(query)) return true
+  let sourceIndex = 0
+  for (const character of query) {
+    sourceIndex = source.indexOf(character, sourceIndex)
+    if (sourceIndex === -1) return false
+    sourceIndex += 1
+  }
+  return true
+}
+const matchesOpenCodePresetSearchQuery = (source: string, query: string) => {
+  const normalizedSource = normalizeOpenCodePresetSearchText(source)
+  const tokens = normalizeOpenCodePresetSearchText(query).split(' ').filter(Boolean)
+  return tokens.every((token) => isOpenCodePresetFuzzyMatch(normalizedSource, token))
+}
+const filteredOpenCodePresetEntries = computed(() => {
+  const query = openCodePresetSearchQuery.value
+  if (!query) return openCodePresetEntries.value
+  return openCodePresetEntries.value.filter(({ preset }) => {
+    const searchableText = [
+      preset.name,
+      preset.description,
+      preset.category,
+      preset.baseUrl,
+      preset.websiteUrl,
+      preset.apiKeyUrl,
+      preset.settingsConfig?.npm,
+      openCodePresetLabel(preset),
+      openCodeCategoryLabel(preset.category),
+    ]
+      .filter(Boolean)
+      .join(' ')
+    return matchesOpenCodePresetSearchQuery(searchableText, query)
+  })
+})
+const selectedOpenCodePresetLabel = computed(() => (
+  selectedOpenCodePreset.value
+    ? openCodePresetLabel(selectedOpenCodePreset.value)
+    : t('components.main.form.options.opencodeCustomPreset')
 ))
 const shouldShowOpenCodeApiKeyLink = computed(() => {
   if (props.tabId !== 'opencode') return false
@@ -1567,6 +1665,7 @@ const applyOpenCodePreset = (preset: OpenCodeProviderPreset) => {
 }
 
 const handleOpenCodePresetChange = () => {
+  openCodePresetSearchQuery.value = ''
   const preset = selectedOpenCodePreset.value
   if (!preset) {
     opencodeTemplateValues.value = {}
@@ -1574,6 +1673,15 @@ const handleOpenCodePresetChange = () => {
   }
   opencodeTemplateValues.value = createTemplateValueState(preset)
   applyOpenCodePreset(preset)
+}
+
+const focusOpenCodePresetSearchInput = () => {
+  void nextTick(() => {
+    void nextTick(() => {
+      openCodePresetSearchInputRef.value?.focus()
+      openCodePresetSearchInputRef.value?.select()
+    })
+  })
 }
 
 const updateOpenCodeTemplateValue = (key: string, value: string) => {
@@ -1599,6 +1707,7 @@ const resetForm = () => {
   opencodeSettingsConfigError.value = ''
   opencodeModelFetchError.value = ''
   selectedOpenCodePresetId.value = 'custom'
+  openCodePresetSearchQuery.value = ''
   opencodeTemplateValues.value = {}
   fetchedOpenCodeModels.value = []
   cliConfigEditorKey.value += 1

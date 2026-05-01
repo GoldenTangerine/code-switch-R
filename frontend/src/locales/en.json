@@ -750,6 +750,7 @@
           "customEndpoint": "Or enter custom endpoint",
           "customAuthHeader": "Custom header name (e.g. Authorization, X-Custom-Key)",
           "searchIcon": "Search icons...",
+          "searchOpenCodePreset": "Search preset name, category, domain...",
           "budgetQuotaTotal": "USD limit (0 = unlimited)",
           "providerQuotaQueryBaseUrl": "https://api.example.com",
           "providerQuotaQueryApiKey": "Leave blank to reuse the provider API key",
@@ -768,6 +769,7 @@
           "opencodeModelOptionValue": "{\"order\":[\"baseten\"]}"
         },
         "noIconResults": "No matching icons found",
+        "noOpenCodePresetResults": "No matching OpenCode presets found",
         "hints": {
           "level": "Lower numbers = higher priority. Level 1 providers are tried first, then Level 2, etc.",
           "apiEndpoint": "Override platform default endpoint. Leave blank for default (claude: /v1/messages, codex: /responses). For GLM models use /v1/chat/completions",
@@ -823,7 +825,7 @@
           "opencodeNoModelExtraFields": "No model properties yet. Add variants, cost, limit, or similar fields when needed.",
           "opencodeNoModelOptions": "No model SDK options yet. Add provider, region, or other model-level options when needed.",
           "opencodePreset": "Choose a full provider template migrated from cc-switch; it fills NPM, Base URL, models and SDK options.",
-          "opencodeTemplateValues": "These values replace ${...} placeholders in the preset and sync into the OpenCode provider config.",
+          "opencodeTemplateValues": "These values replace {'${...}'} placeholders in the preset and sync into the OpenCode provider config.",
           "opencodePartnerPromotion": "{provider} is a partner provider. Use the API key link for promotion or onboarding details.",
           "providerKeyChecking": "Checking Provider ID against live config...",
           "providerKeyAvailable": "Provider ID is available",

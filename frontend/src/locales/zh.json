@@ -751,6 +751,7 @@
           "customEndpoint": "或输入自定义端点",
           "customAuthHeader": "自定义 Header 名称（如 Authorization、X-Custom-Key）",
           "searchIcon": "搜索图标...",
+          "searchOpenCodePreset": "搜索预设名称、分类、域名...",
           "budgetQuotaTotal": "USD 上限（0 = 不限）",
           "providerQuotaQueryBaseUrl": "https://api.example.com",
           "providerQuotaQueryApiKey": "留空则沿用当前供应商 API Key",
@@ -769,6 +770,7 @@
           "opencodeModelOptionValue": "{\"order\":[\"baseten\"]}"
         },
         "noIconResults": "未找到匹配的图标",
+        "noOpenCodePresetResults": "未找到匹配的 OpenCode 预设",
         "hints": {
           "level": "数字越小优先级越高，Level 1 会被优先尝试，失败后依次尝试 Level 2、Level 3 等",
           "apiEndpoint": "覆盖平台默认端点。留空使用默认（claude: /v1/messages, codex: /responses）。GLM 模型请使用 /v1/chat/completions",
@@ -824,7 +826,7 @@
           "opencodeNoModelExtraFields": "暂无模型属性。需要 variants、cost、limit 等字段时再添加。",
           "opencodeNoModelOptions": "暂无模型 SDK 选项。需要 provider、region 等模型级 options 时再添加。",
           "opencodePreset": "选择从 cc-switch 迁移来的完整供应商模板，会自动填充 NPM、Base URL、模型和 SDK 选项。",
-          "opencodeTemplateValues": "这些值会替换预设里的 ${...} 占位符，并同步写入 OpenCode Provider 配置。",
+          "opencodeTemplateValues": "这些值会替换预设里的 {'${...}'} 占位符，并同步写入 OpenCode Provider 配置。",
           "opencodePartnerPromotion": "{provider} 是合作供应商，可通过获取 API Key 链接查看优惠或开通信息。",
           "providerKeyChecking": "正在检查 live 配置中的 Provider ID...",
           "providerKeyAvailable": "Provider ID 可用",

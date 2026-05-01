@@ -1,3 +1,21 @@
+# Code Switch v2.8.44
+
+## 优化
+- **OpenCode 预设选择器支持模糊搜索了**：首页编辑 OpenCode 供应商时，预设下拉从原生 `select` 升级为带搜索框的选择器，可按预设名称、描述、分类、Base URL、官网 / API Key 地址和 AI SDK `npm` 包名快速过滤，`ds` 这种字符序搜索也能命中 `DeepSeek`，不用再在一长串供应商里人工潜水。
+- **OpenCode 预设下拉展示信息更清楚**：选项里直接展示供应商分类和 Base URL，当前选中项也会显示分类 badge，选错预设的概率降下来一点，省得配置表单像盲盒。
+
+## 修复
+- **OpenCode 预设选择不再触发 i18n 编译异常**：修复“模板参数”提示文案中的 `${...}` 被 `vue-i18n` 当作占位符解析，导致打包后选择预设时报 `Invalid token in placeholder: '...'`、弹窗内容发糊和预设无法选择的问题。
+
+## 技术改进
+- **预设搜索逻辑前端本地化收口**：新增轻量字符序 fuzzy match，搜索状态不进入表单持久化，切换预设和重置表单时会自动清理搜索关键字；下拉打开后自动聚焦搜索框，减少鼠标来回折腾。
+- **OpenCode 预设文案转义按 `vue-i18n` message literal 规范处理**：中英文 locale 使用 `{'${...}'}` 保留字面量展示，避免后续生产构建再被 message compiler 偷袭。
+
+## 发布
+- **本次发版版本号统一推进到 `v2.8.44`**：同步更新应用常量、构建配置、Darwin `Info.plist` / `Info.dev.plist`、Windows 版本信息与 Linux `nfpm` 版本，并准备推送 `v2.8.44` tag 触发 GitHub 自动打包。
+
+---
+
 # Code Switch v2.8.43
 
 ## 功能
