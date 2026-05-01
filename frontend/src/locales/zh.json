@@ -825,7 +825,7 @@
           "opencodeNoModels": "暂无模型配置。点击添加模型；没有模型时保存层会按 SDK 包名补一个默认模型。",
           "opencodeNoModelExtraFields": "暂无模型属性。需要 variants、cost、limit 等字段时再添加。",
           "opencodeNoModelOptions": "暂无模型 SDK 选项。需要 provider、region 等模型级 options 时再添加。",
-          "opencodePreset": "选择从 cc-switch 迁移来的完整供应商模板，会自动填充 NPM、Base URL、模型和 SDK 选项。",
+          "opencodePreset": "选择完整供应商模板，会自动填充 NPM、Base URL、模型和 SDK 选项。",
           "opencodeTemplateValues": "这些值会替换预设里的 {'${...}'} 占位符，并同步写入 OpenCode Provider 配置。",
           "opencodePartnerPromotion": "{provider} 是合作供应商，可通过获取 API Key 链接查看优惠或开通信息。",
           "providerKeyChecking": "正在检查 live 配置中的 Provider ID...",

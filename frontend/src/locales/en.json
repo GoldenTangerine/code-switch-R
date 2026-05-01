@@ -824,7 +824,7 @@
           "opencodeNoModels": "No models configured. Click Add model; the save layer will add an SDK-specific default model if this stays empty.",
           "opencodeNoModelExtraFields": "No model properties yet. Add variants, cost, limit, or similar fields when needed.",
           "opencodeNoModelOptions": "No model SDK options yet. Add provider, region, or other model-level options when needed.",
-          "opencodePreset": "Choose a full provider template migrated from cc-switch; it fills NPM, Base URL, models and SDK options.",
+          "opencodePreset": "Choose a full provider template; it fills NPM, Base URL, models and SDK options.",
           "opencodeTemplateValues": "These values replace {'${...}'} placeholders in the preset and sync into the OpenCode provider config.",
           "opencodePartnerPromotion": "{provider} is a partner provider. Use the API key link for promotion or onboarding details.",
           "providerKeyChecking": "Checking Provider ID against live config...",

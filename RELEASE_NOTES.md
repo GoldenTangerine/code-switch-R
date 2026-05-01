@@ -1,3 +1,16 @@
+# Code Switch v2.8.45
+
+## 优化
+- **OpenCode 预设说明去掉 cc-switch 迁移限定**：首页编辑 OpenCode 供应商时，预设说明从“选择从 cc-switch 迁移来的完整供应商模板”调整为“选择完整供应商模板”，中英文同步更新，避免用户误以为这些预设只能用于 cc-switch 迁移场景。
+
+## 技术改进
+- **OpenCode 预设文案语义收口**：中英文 locale 保持同一语义口径，继续保留自动填充 NPM、Base URL、模型和 SDK 选项的说明，不改动实际预设选择、搜索和配置写入逻辑。
+
+## 发布
+- **本次发版版本号统一推进到 `v2.8.45`**：同步更新应用常量、构建配置、Darwin `Info.plist` / `Info.dev.plist`、Windows 版本信息与 Linux `nfpm` 版本，并准备推送 `v2.8.45` tag 触发 GitHub 自动打包。
+
+---
+
 # Code Switch v2.8.44
 
 ## 优化
