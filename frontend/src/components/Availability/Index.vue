@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   getLatestResults,
@@ -11,6 +11,7 @@ import {
   type ProviderTimeline,
   HealthStatus,
 } from '../../services/healthcheck'
+import { lockScroll, unlockScroll } from '../../utils/scrollLock'
 
 type StatusTone = 'operational' | 'degraded' | 'failed' | 'disabled'
 type HistoryTone = StatusTone | 'empty'
@@ -57,6 +58,7 @@ const loading = ref(true)
 const refreshing = ref(false)
 const timelines = ref<Record<string, ProviderTimeline[]>>({})
 const pollingRunning = ref(false)
+const isDarkTheme = ref(document.documentElement.classList.contains('dark'))
 const lastUpdated = ref<Date | null>(null)
 const nextRefreshIn = ref(REFRESH_INTERVAL_SECONDS)
 
@@ -73,6 +75,7 @@ const configForm = ref({
 
 let refreshTimer: ReturnType<typeof setInterval> | null = null
 let countdownTimer: ReturnType<typeof setInterval> | null = null
+let themeObserver: MutationObserver | null = null
 
 const localeTag = computed(() => (locale.value?.startsWith('zh') ? 'zh-CN' : 'en-US'))
 
@@ -147,6 +150,19 @@ const summaryCards = computed(() => [
     value: statusStats.value.disabled,
   },
 ])
+
+const pageThemeClass = computed(() => (
+  isDarkTheme.value ? 'availability-page--dark' : 'availability-page--light'
+))
+
+watch(showConfigModal, (open) => {
+  if (open) {
+    lockScroll()
+    return
+  }
+
+  unlockScroll()
+})
 
 const handleProvidersUpdated = () => {
   void loadData()
@@ -531,6 +547,17 @@ function startRefreshTimer() {
   }, 1000)
 }
 
+function startThemeObserver() {
+  themeObserver?.disconnect()
+  themeObserver = new MutationObserver(() => {
+    isDarkTheme.value = document.documentElement.classList.contains('dark')
+  })
+  themeObserver.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ['class'],
+  })
+}
+
 function stopTimers() {
   if (refreshTimer) {
     clearInterval(refreshTimer)
@@ -544,6 +571,7 @@ function stopTimers() {
 }
 
 onMounted(async () => {
+  startThemeObserver()
   window.addEventListener(PROVIDERS_UPDATED_EVENT, handleProvidersUpdated)
   window.addEventListener('keydown', handleEscape)
   await loadData()
@@ -551,6 +579,11 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  if (showConfigModal.value) {
+    unlockScroll()
+  }
+  themeObserver?.disconnect()
+  themeObserver = null
   window.removeEventListener(PROVIDERS_UPDATED_EVENT, handleProvidersUpdated)
   window.removeEventListener('keydown', handleEscape)
   stopTimers()
@@ -558,7 +591,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="availability-page">
+  <div :class="['availability-page', pageThemeClass]">
     <div class="availability-page__grid" aria-hidden="true"></div>
     <div class="availability-page__glow availability-page__glow--primary" aria-hidden="true"></div>
     <div class="availability-page__glow availability-page__glow--secondary" aria-hidden="true"></div>
@@ -957,71 +990,79 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <div v-if="showConfigModal" class="availability-modal" role="dialog" aria-modal="true">
-      <div class="availability-modal__backdrop" @click="closeConfigModal"></div>
-      <div class="availability-modal__panel">
-        <div class="availability-modal__header">
-          <div>
-            <h3>{{ t('availability.configTitle') }}</h3>
-            <p>{{ activeProvider?.providerName }} · {{ resolvePlatformLabel(activeProvider?.platform || '') }}</p>
+    <Teleport to="body">
+      <div
+        v-if="showConfigModal"
+        class="availability-modal"
+        :class="pageThemeClass"
+        role="dialog"
+        aria-modal="true"
+      >
+        <div class="availability-modal__backdrop" @click="closeConfigModal"></div>
+        <div class="availability-modal__panel" @click.stop>
+          <div class="availability-modal__header">
+            <div>
+              <h3>{{ t('availability.configTitle') }}</h3>
+              <p>{{ activeProvider?.providerName }} · {{ resolvePlatformLabel(activeProvider?.platform || '') }}</p>
+            </div>
+            <button type="button" class="availability-icon-button" :title="t('common.close')" @click="closeConfigModal">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path
+                  d="M6 6l12 12M18 6L6 18"
+                  stroke="currentColor"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="1.8"
+                />
+              </svg>
+            </button>
           </div>
-          <button type="button" class="availability-icon-button" :title="t('common.close')" @click="closeConfigModal">
-            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path
-                d="M6 6l12 12M18 6L6 18"
-                stroke="currentColor"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="1.8"
+
+          <div class="availability-modal__body">
+            <label class="availability-field">
+              <span>{{ t('availability.field.testModel') }}</span>
+              <input
+                v-model="configForm.testModel"
+                type="text"
+                class="base-input availability-field__input"
+                :placeholder="t('availability.placeholder.testModel')"
               />
-            </svg>
-          </button>
-        </div>
+            </label>
 
-        <div class="availability-modal__body">
-          <label class="availability-field">
-            <span>{{ t('availability.field.testModel') }}</span>
-            <input
-              v-model="configForm.testModel"
-              type="text"
-              class="base-input availability-field__input"
-              :placeholder="t('availability.placeholder.testModel')"
-            />
-          </label>
+            <label class="availability-field">
+              <span>{{ t('availability.field.testEndpoint') }}</span>
+              <input
+                v-model="configForm.testEndpoint"
+                type="text"
+                class="base-input availability-field__input"
+                :placeholder="t('availability.placeholder.testEndpoint')"
+              />
+            </label>
 
-          <label class="availability-field">
-            <span>{{ t('availability.field.testEndpoint') }}</span>
-            <input
-              v-model="configForm.testEndpoint"
-              type="text"
-              class="base-input availability-field__input"
-              :placeholder="t('availability.placeholder.testEndpoint')"
-            />
-          </label>
+            <label class="availability-field">
+              <span>{{ t('availability.field.timeout') }}</span>
+              <input
+                v-model.number="configForm.timeout"
+                type="number"
+                min="1000"
+                class="base-input availability-field__input"
+                :placeholder="t('availability.placeholder.timeout')"
+              />
+              <small>{{ t('availability.hint.timeout') }}</small>
+            </label>
+          </div>
 
-          <label class="availability-field">
-            <span>{{ t('availability.field.timeout') }}</span>
-            <input
-              v-model.number="configForm.timeout"
-              type="number"
-              min="1000"
-              class="base-input availability-field__input"
-              :placeholder="t('availability.placeholder.timeout')"
-            />
-            <small>{{ t('availability.hint.timeout') }}</small>
-          </label>
-        </div>
-
-        <div class="availability-modal__footer">
-          <button type="button" class="availability-tertiary-button" @click="closeConfigModal">
-            {{ t('common.cancel') }}
-          </button>
-          <button type="button" class="availability-primary-button availability-primary-button--compact" :disabled="savingConfig" @click="saveConfig">
-            <span>{{ savingConfig ? t('common.saving') : t('common.save') }}</span>
-          </button>
+          <div class="availability-modal__footer">
+            <button type="button" class="availability-tertiary-button" @click="closeConfigModal">
+              {{ t('common.cancel') }}
+            </button>
+            <button type="button" class="availability-primary-button availability-primary-button--compact" :disabled="savingConfig" @click="saveConfig">
+              <span>{{ savingConfig ? t('common.saving') : t('common.save') }}</span>
+            </button>
+          </div>
         </div>
       </div>
-    </div>
+    </Teleport>
   </div>
 </template>
 
@@ -1300,8 +1341,7 @@ onUnmounted(() => {
 .availability-secondary-button:hover:not(:disabled),
 .availability-tertiary-button:hover:not(:disabled),
 .availability-primary-link:hover:not(:disabled),
-.availability-icon-button:hover:not(:disabled),
-.availability-provider-card:hover {
+.availability-icon-button:hover:not(:disabled) {
   transform: translateY(-2px);
 }
 
@@ -1428,6 +1468,8 @@ onUnmounted(() => {
 }
 
 .availability-provider-card {
+  --availability-card-edge: #64748b;
+  --availability-card-glow: rgba(100, 116, 139, 0.22);
   position: relative;
   display: flex;
   flex-direction: column;
@@ -1437,24 +1479,73 @@ onUnmounted(() => {
   border-radius: 24px;
   background: rgba(22, 27, 34, 0.82);
   box-shadow: 0 18px 38px rgba(2, 6, 23, 0.24);
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease,
+    background-color 0.2s ease;
 }
 
 .availability-provider-card--operational {
+  --availability-card-edge: #22c55e;
+  --availability-card-glow: rgba(34, 197, 94, 0.24);
   border-color: rgba(74, 222, 128, 0.14);
 }
 
 .availability-provider-card--degraded {
+  --availability-card-edge: #f59e0b;
+  --availability-card-glow: rgba(245, 158, 11, 0.24);
   border-color: rgba(251, 191, 36, 0.16);
 }
 
 .availability-provider-card--failed {
+  --availability-card-edge: #ef4444;
+  --availability-card-glow: rgba(239, 68, 68, 0.26);
   border-color: rgba(248, 113, 113, 0.22);
   animation: availability-breathe 2.6s ease-in-out infinite;
 }
 
 .availability-provider-card--disabled {
+  --availability-card-edge: #64748b;
+  --availability-card-glow: rgba(100, 116, 139, 0.18);
   border-color: rgba(148, 163, 184, 0.1);
   opacity: 0.76;
+}
+
+.availability-provider-card::before {
+  inset: 0;
+  width: auto;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--availability-card-edge) 0 3px, transparent 3px 100%);
+  pointer-events: none;
+  transition: filter 0.2s ease;
+}
+
+.availability-provider-card::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  opacity: 0;
+  pointer-events: none;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.04),
+    0 0 24px var(--availability-card-glow);
+  transition: opacity 0.2s ease, box-shadow 0.2s ease;
+}
+
+.availability-provider-card:hover {
+  border-color: color-mix(in srgb, var(--availability-card-edge) 36%, rgba(148, 163, 184, 0.18));
+  box-shadow:
+    0 18px 40px rgba(2, 6, 23, 0.24),
+    0 0 26px var(--availability-card-glow);
+}
+
+.availability-provider-card:hover::before {
+  filter: drop-shadow(0 0 8px var(--availability-card-glow));
+}
+
+.availability-provider-card:hover::after {
+  opacity: 1;
 }
 
 .availability-provider-card--checking,
@@ -2096,6 +2187,433 @@ onUnmounted(() => {
 .availability-toggle:focus-within {
   outline: 2px solid rgba(96, 165, 250, 0.78);
   outline-offset: 2px;
+}
+
+.availability-page--light {
+  color: #111827;
+  background:
+    radial-gradient(circle at 14% 2%, rgba(96, 165, 250, 0.12), transparent 28%),
+    radial-gradient(circle at 86% 12%, rgba(59, 130, 246, 0.08), transparent 30%),
+    linear-gradient(180deg, #f8fafc 0%, #f3f6fb 46%, #eef2f7 100%);
+}
+
+.availability-page--light .availability-page__grid {
+  background-image:
+    linear-gradient(rgba(148, 163, 184, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 163, 184, 0.08) 1px, transparent 1px);
+  mask-image: linear-gradient(180deg, rgba(255, 255, 255, 0.38), transparent 82%);
+}
+
+.availability-page--light .availability-page__glow--primary {
+  background: rgba(96, 165, 250, 0.16);
+}
+
+.availability-page--light .availability-page__glow--secondary {
+  background: rgba(52, 211, 153, 0.12);
+}
+
+.availability-page--light .availability-hero__title-icon {
+  border-color: rgba(147, 197, 253, 0.56);
+  background: linear-gradient(180deg, rgba(239, 246, 255, 0.98), rgba(219, 234, 254, 0.76));
+  color: #2563eb;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 10px 24px rgba(37, 99, 235, 0.1);
+}
+
+.availability-page--light .availability-hero__title-group h1,
+.availability-page--light .availability-empty-state h2,
+.availability-page--light .availability-modal__header h3,
+.availability-page--light .availability-provider-card__title-block h2 {
+  color: #111827;
+}
+
+.availability-modal.availability-page--light .availability-modal__header h3 {
+  color: #111827;
+}
+
+.availability-page--light .availability-hero__title-group p,
+.availability-page--light .availability-empty-state p,
+.availability-page--light .availability-modal__header p,
+.availability-page--light .availability-state-panel p,
+.availability-page--light .availability-provider-card__title-block p,
+.availability-page--light .availability-provider-card__footer-copy,
+.availability-page--light .availability-field small {
+  color: #64748b;
+}
+
+.availability-modal.availability-page--light .availability-modal__header p,
+.availability-modal.availability-page--light .availability-field small {
+  color: #64748b;
+}
+
+.availability-page--light .availability-hero__runtime {
+  border-color: rgba(248, 113, 113, 0.22);
+  background: rgba(254, 242, 242, 0.92);
+  color: #dc2626;
+}
+
+.availability-page--light .availability-hero__runtime--active {
+  border-color: rgba(34, 197, 94, 0.22);
+  background: rgba(240, 253, 244, 0.96);
+  color: #16a34a;
+}
+
+.availability-page--light .availability-hero__runtime-dot,
+.availability-page--light .availability-status-chip__dot,
+.availability-page--light .availability-history__tooltip-dot {
+  box-shadow: 0 0 0 4px rgba(15, 23, 42, 0.05);
+}
+
+.availability-page--light .availability-runtime-card,
+.availability-page--light .availability-summary-card,
+.availability-page--light .availability-provider-card,
+.availability-page--light .availability-state-panel,
+.availability-page--light .availability-empty-state,
+.availability-page--light .availability-history-card,
+.availability-page--light .availability-modal__panel {
+  border-color: rgba(203, 213, 225, 0.82);
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 16px 36px rgba(15, 23, 42, 0.08);
+}
+
+.availability-page--light .availability-runtime-card__item + .availability-runtime-card__item {
+  border-left-color: rgba(203, 213, 225, 0.76);
+}
+
+.availability-page--light .availability-runtime-card__item span,
+.availability-page--light .availability-history-card__label,
+.availability-page--light .availability-summary-card__label {
+  color: #64748b;
+}
+
+.availability-page--light .availability-runtime-card__item strong,
+.availability-page--light .availability-history-card__uptime strong {
+  color: #2563eb;
+}
+
+.availability-page--light .availability-summary-card {
+  background: #ffffff;
+  box-shadow: 0 14px 28px rgba(15, 23, 42, 0.08);
+}
+
+.availability-page--light .availability-summary-card--operational {
+  border-color: rgba(34, 197, 94, 0.2);
+  box-shadow: 0 14px 28px rgba(15, 23, 42, 0.08), inset 0 -4px 0 rgba(34, 197, 94, 0.68);
+}
+
+.availability-page--light .availability-summary-card--degraded {
+  border-color: rgba(245, 158, 11, 0.24);
+  box-shadow: 0 14px 28px rgba(15, 23, 42, 0.08), inset 0 -4px 0 rgba(245, 158, 11, 0.72);
+}
+
+.availability-page--light .availability-summary-card--failed {
+  border-color: rgba(239, 68, 68, 0.24);
+  box-shadow: 0 14px 28px rgba(15, 23, 42, 0.08), inset 0 -4px 0 rgba(239, 68, 68, 0.68);
+}
+
+.availability-page--light .availability-summary-card--disabled {
+  border-color: rgba(148, 163, 184, 0.36);
+  box-shadow: 0 14px 28px rgba(15, 23, 42, 0.08), inset 0 -4px 0 rgba(148, 163, 184, 0.56);
+}
+
+.availability-page--light .availability-summary-card--operational .availability-summary-card__value {
+  color: #16a34a;
+}
+
+.availability-page--light .availability-summary-card--degraded .availability-summary-card__value {
+  color: #c0841a;
+}
+
+.availability-page--light .availability-summary-card--failed .availability-summary-card__value {
+  color: #dc2626;
+}
+
+.availability-page--light .availability-summary-card--disabled .availability-summary-card__value {
+  color: #334155;
+}
+
+.availability-page--light .availability-loader {
+  border-color: rgba(203, 213, 225, 0.76);
+  border-top-color: #3b82f6;
+}
+
+.availability-page--light .availability-provider-card {
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 18px 38px rgba(15, 23, 42, 0.08);
+}
+
+.availability-page--light .availability-provider-card::after {
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.92),
+    0 0 24px var(--availability-card-glow);
+}
+
+.availability-page--light .availability-provider-card:hover {
+  border-color: color-mix(in srgb, var(--availability-card-edge) 38%, rgba(148, 163, 184, 0.34));
+  box-shadow:
+    0 18px 40px rgba(15, 23, 42, 0.09),
+    0 0 24px var(--availability-card-glow);
+}
+
+.availability-page--light .availability-provider-card--operational {
+  border-color: rgba(34, 197, 94, 0.22);
+}
+
+.availability-page--light .availability-provider-card--degraded {
+  border-color: rgba(245, 158, 11, 0.24);
+}
+
+.availability-page--light .availability-provider-card--failed {
+  border-color: rgba(239, 68, 68, 0.28);
+}
+
+.availability-page--light .availability-provider-card--disabled {
+  border-color: rgba(203, 213, 225, 0.82);
+  opacity: 0.82;
+}
+
+.availability-page--light .availability-provider-card--checking,
+.availability-page--light .availability-provider-card--toggling {
+  border-color: rgba(59, 130, 246, 0.32);
+}
+
+.availability-page--light .availability-provider-card__status-icon {
+  border-color: rgba(203, 213, 225, 0.82);
+  background: #f8fafc;
+}
+
+.availability-page--light .availability-provider-card__status-icon--operational {
+  color: #16a34a;
+  background: rgba(240, 253, 244, 0.98);
+}
+
+.availability-page--light .availability-provider-card__status-icon--degraded {
+  color: #c0841a;
+  background: rgba(255, 251, 235, 0.98);
+}
+
+.availability-page--light .availability-provider-card__status-icon--failed {
+  color: #dc2626;
+  background: rgba(254, 242, 242, 0.98);
+}
+
+.availability-page--light .availability-provider-card__status-icon--disabled {
+  color: #94a3b8;
+  background: #f1f5f9;
+}
+
+.availability-page--light .availability-provider-card__disabled-chip {
+  border-color: rgba(203, 213, 225, 0.9);
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.availability-page--light .availability-status-chip--operational {
+  background: rgba(240, 253, 244, 0.98);
+  border-color: rgba(34, 197, 94, 0.22);
+  color: #16a34a;
+}
+
+.availability-page--light .availability-status-chip--degraded {
+  background: rgba(255, 251, 235, 0.98);
+  border-color: rgba(245, 158, 11, 0.24);
+  color: #c0841a;
+}
+
+.availability-page--light .availability-status-chip--failed {
+  background: rgba(254, 242, 242, 0.98);
+  border-color: rgba(239, 68, 68, 0.24);
+  color: #dc2626;
+}
+
+.availability-page--light .availability-status-chip--disabled {
+  background: #f1f5f9;
+  border-color: rgba(203, 213, 225, 0.9);
+  color: #64748b;
+}
+
+.availability-page--light .availability-provider-card__latency,
+.availability-page--light .availability-history-card__uptime span,
+.availability-page--light .availability-history__legend,
+.availability-page--light .availability-page__legend-items {
+  color: #94a3b8;
+}
+
+.availability-page--light .availability-toggle__track {
+  border-color: rgba(203, 213, 225, 0.9);
+  background: #e5e7eb;
+  box-shadow: inset 0 2px 5px rgba(15, 23, 42, 0.08);
+}
+
+.availability-page--light .availability-toggle__thumb {
+  background: #ffffff;
+  box-shadow: 0 3px 10px rgba(15, 23, 42, 0.18);
+}
+
+.availability-page--light .availability-toggle--on .availability-toggle__track {
+  border-color: rgba(59, 130, 246, 0.4);
+  background: linear-gradient(135deg, #2563eb 0%, #4f7df3 100%);
+}
+
+.availability-page--light .availability-icon-button {
+  border-color: rgba(203, 213, 225, 0.82);
+  background: #f8fafc;
+  color: #94a3b8;
+}
+
+.availability-modal.availability-page--light .availability-icon-button {
+  border-color: rgba(203, 213, 225, 0.82);
+  background: #f8fafc;
+  color: #94a3b8;
+}
+
+.availability-page--light .availability-history-card {
+  background: #f8fafc;
+}
+
+.availability-page--light .availability-history__segment {
+  background: #e5e7eb;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.92);
+}
+
+.availability-page--light .availability-history__segment--operational {
+  background: #4ade80;
+}
+
+.availability-page--light .availability-history__segment--degraded {
+  background: #f59e0b;
+}
+
+.availability-page--light .availability-history__segment--failed {
+  background: #ef4444;
+}
+
+.availability-page--light .availability-history__segment--empty,
+.availability-page--light .availability-provider-card--disabled .availability-history__segment {
+  background: #e5e7eb;
+}
+
+.availability-page--light .availability-history__segment:hover {
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.95),
+    0 8px 18px rgba(15, 23, 42, 0.16);
+}
+
+.availability-page--light .availability-history__tooltip {
+  --availability-history-tooltip-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.99) 0%, rgba(248, 250, 252, 0.99) 100%);
+  --availability-history-tooltip-border: rgba(203, 213, 225, 0.92);
+  color: #0f172a;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 18px 36px rgba(15, 23, 42, 0.14);
+}
+
+.availability-page--light .availability-history__tooltip::after {
+  border-right-color: var(--availability-history-tooltip-border);
+  border-bottom-color: var(--availability-history-tooltip-border);
+}
+
+.availability-page--light .availability-history__tooltip-date,
+.availability-page--light .availability-history__tooltip-value,
+.availability-page--light .availability-history__tooltip-value--latency {
+  color: #0f172a;
+}
+
+.availability-page--light .availability-history__tooltip-label {
+  color: #64748b;
+}
+
+.availability-page--light .availability-history__tooltip-value--operational {
+  color: #16a34a;
+}
+
+.availability-page--light .availability-history__tooltip-value--degraded {
+  color: #c0841a;
+}
+
+.availability-page--light .availability-history__tooltip-value--failed {
+  color: #dc2626;
+}
+
+.availability-page--light .availability-history__tooltip-value--disabled,
+.availability-page--light .availability-history__tooltip-value--empty {
+  color: #64748b;
+}
+
+.availability-page--light .availability-history__legend-line,
+.availability-page--light .availability-provider-card__footer {
+  border-color: rgba(203, 213, 225, 0.76);
+}
+
+.availability-page--light .availability-history__legend-line {
+  background: rgba(203, 213, 225, 0.78);
+}
+
+.availability-page--light .availability-provider-card__hint {
+  color: #dc2626;
+}
+
+.availability-page--light .availability-secondary-button {
+  border-color: rgba(147, 197, 253, 0.72);
+  background: #eff6ff;
+  color: #2563eb;
+}
+
+.availability-page--light .availability-primary-link {
+  border-color: rgba(191, 219, 254, 0.9);
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.availability-page--light .availability-tertiary-button {
+  border-color: rgba(203, 213, 225, 0.88);
+  background: #f8fafc;
+  color: #334155;
+}
+
+.availability-modal.availability-page--light .availability-tertiary-button {
+  border-color: rgba(203, 213, 225, 0.88);
+  background: #f8fafc;
+  color: #334155;
+}
+
+.availability-page--light .availability-secondary-button:hover:not(:disabled),
+.availability-page--light .availability-primary-link:hover:not(:disabled),
+.availability-page--light .availability-tertiary-button:hover:not(:disabled),
+.availability-page--light .availability-icon-button:hover:not(:disabled) {
+  border-color: rgba(96, 165, 250, 0.44);
+  background: #eff6ff;
+  box-shadow: 0 10px 22px rgba(37, 99, 235, 0.12);
+}
+
+.availability-page--light .availability-empty-state__icon {
+  background: #eff6ff;
+  color: #2563eb;
+}
+
+.availability-page--light .availability-modal__backdrop {
+  background: rgba(15, 23, 42, 0.26);
+}
+
+.availability-page--light .availability-modal__panel,
+.availability-modal.availability-page--light .availability-modal__panel {
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 28px 70px rgba(15, 23, 42, 0.18);
+}
+
+.availability-page--light .availability-field span,
+.availability-modal.availability-page--light .availability-field span {
+  color: #0f172a;
+}
+
+.availability-page--light .availability-field__input,
+.availability-modal.availability-page--light .availability-field__input {
+  border-color: rgba(203, 213, 225, 0.9);
+  background: #ffffff;
+  color: #0f172a;
 }
 
 @keyframes availability-spin {
