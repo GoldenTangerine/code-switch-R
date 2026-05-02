@@ -72,6 +72,8 @@
     "loading": "Loading monitoring data...",
     "refreshAll": "Check All",
     "refreshing": "Checking...",
+    "reloadLogs": "Reload logs",
+    "loadingLogs": "Reading logs...",
     "check": "Check",
     "providers": "Providers",
     "lastUpdate": "Last update",
@@ -80,7 +82,23 @@
     "noProviders": "No providers yet. Please add provider configuration first.",
     "runtime": {
       "pollingRunning": "Background polling online",
-      "pollingStopped": "Background polling paused"
+      "pollingStopped": "Background polling paused",
+      "logMode": "Log aggregation mode"
+    },
+    "mode": {
+      "title": "Mode",
+      "probe": "Endpoint",
+      "logs": "Logs",
+      "probeHint": "Actively probes test endpoints to generate the availability timeline",
+      "logsHint": "Aggregates real request logs within the selected time range to generate the availability timeline"
+    },
+    "range": {
+      "title": "Range",
+      "last15min": "15 min",
+      "last1h": "1 hour",
+      "last6h": "6 hours",
+      "last24h": "24 hours",
+      "last7d": "7 days"
     },
     "stats": {
       "operational": "Operational",
@@ -96,8 +114,11 @@
     },
     "history": {
       "title": "90-day uptime history",
+      "logTitle": "Last {range} log uptime",
       "start": "90 days ago",
+      "rangeStart": "{range} ago",
       "end": "Today",
+      "now": "Now",
       "noSample": "No sample yet",
       "noData": "No historical sample",
       "tooltip": {
@@ -114,6 +135,7 @@
       "quickCheck": "Check this node now",
       "checking": "Checking...",
       "autoRefresh": "Check frequency: every {seconds}s",
+      "logSource": "Source: request logs in the selected time range",
       "model": "Model",
       "endpoint": "Endpoint",
       "timeout": "Timeout",

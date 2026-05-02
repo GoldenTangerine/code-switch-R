@@ -35,7 +35,19 @@ const (
 	DefaultFailureThreshold       = 2     // 默认拉黑阈值（连续失败次数）
 	MaxConcurrentChecks           = 5     // 最大并发检测数
 	MaxHistoryPerProvider         = 60    // 每个 Provider 最多保留历史数
+	LogAvailabilityHistoryLimit   = 72    // 日志模式最多返回的时间桶数量
 )
+
+const (
+	LogAvailabilityRange15Min   = "15min"
+	LogAvailabilityRange1H      = "1h"
+	LogAvailabilityRange6H      = "6h"
+	LogAvailabilityRange24H     = "24h"
+	LogAvailabilityRange7D      = "7d"
+	LogAvailabilityRangeDefault = LogAvailabilityRange24H
+)
+
+var availabilityPlatforms = []string{"claude", "codex"}
 
 // HealthCheckResult 健康检查结果
 type HealthCheckResult struct {
@@ -190,7 +202,7 @@ func (hcs *HealthCheckService) GetLatestResults() (map[string][]ProviderTimeline
 	results := make(map[string][]ProviderTimeline)
 
 	// 遍历所有平台
-	for _, platform := range []string{"claude", "codex"} {
+	for _, platform := range availabilityPlatforms {
 		providers, err := hcs.providerService.LoadProviders(platform)
 		if err != nil {
 			log.Printf("[HealthCheck] 加载 %s 供应商失败: %v", platform, err)
@@ -230,6 +242,378 @@ func (hcs *HealthCheckService) GetLatestResults() (map[string][]ProviderTimeline
 	}
 
 	return results, nil
+}
+
+// GetLogBasedResults 获取基于真实请求日志聚合的 Provider 可用性时间线。
+// 与 GetLatestResults 返回同一种 ProviderTimeline，方便前端复用同一套卡片和状态条。
+func (hcs *HealthCheckService) GetLogBasedResults(rangeKey string) (map[string][]ProviderTimeline, error) {
+	results := make(map[string][]ProviderTimeline)
+	rangeSpec := resolveLogAvailabilityRange(rangeKey, time.Now())
+	operationalThresholdMs := hcs.getOperationalThresholdMs()
+
+	for _, platform := range availabilityPlatforms {
+		providers, err := hcs.providerService.LoadProviders(platform)
+		if err != nil {
+			log.Printf("[HealthCheck] 加载 %s 供应商失败: %v", platform, err)
+			continue
+		}
+
+		historiesMap, err := hcs.batchGetLogBasedHistories(platform, providers, rangeSpec, operationalThresholdMs)
+		if err != nil {
+			log.Printf("[HealthCheck] 批量聚合 %s 日志可用性失败: %v", platform, err)
+		}
+
+		var timelines []ProviderTimeline
+		for _, p := range providers {
+			timeline := ProviderTimeline{
+				ProviderID:                 p.ID,
+				ProviderName:               p.Name,
+				Platform:                   platform,
+				AvailabilityMonitorEnabled: true,
+				ConnectivityAutoBlacklist:  p.ConnectivityAutoBlacklist,
+				AvailabilityConfig:         p.AvailabilityConfig,
+			}
+
+			if history, ok := historiesMap[healthCheckHistoryKey(p.ID, p.Name)]; ok {
+				timeline.Items = history.Items
+				timeline.Latest = history.Latest
+				timeline.Uptime = history.Uptime
+				timeline.AvgLatencyMs = history.AvgLatencyMs
+			}
+
+			timelines = append(timelines, timeline)
+		}
+
+		results[platform] = timelines
+	}
+
+	return results, nil
+}
+
+type logAvailabilityBucket struct {
+	ProviderID     int64
+	ProviderName   string
+	BucketStart    time.Time
+	TotalRequests  int
+	FailedCount    int
+	WarningCount   int
+	LatencyTotalMs int64
+	LatencySamples int
+	AvgLatencyMs   int
+	LatestModel    string
+	LastRequestAt  time.Time
+	LastStatusCode int
+}
+
+type logAvailabilityRangeSpec struct {
+	Key            string
+	Start          time.Time
+	End            time.Time
+	BucketDuration time.Duration
+}
+
+type logAvailabilityRequestLog struct {
+	ProviderRef string
+	Model       string
+	HTTPCode    int
+	DurationMs  int
+	CreatedAt   time.Time
+}
+
+type logAvailabilityProviderBucketSet struct {
+	Provider Provider
+	Buckets  []logAvailabilityBucket
+}
+
+func (hcs *HealthCheckService) batchGetLogBasedHistories(platform string, providers []Provider, rangeSpec logAvailabilityRangeSpec, operationalThresholdMs int) (map[string]*HealthCheckHistory, error) {
+	db, err := xdb.DB("default")
+	if err != nil {
+		return nil, fmt.Errorf("获取数据库连接失败: %w", err)
+	}
+
+	if len(providers) == 0 {
+		return map[string]*HealthCheckHistory{}, nil
+	}
+
+	bucketSetsByProviderRef := make(map[string]*logAvailabilityProviderBucketSet, len(providers)*2)
+	bucketSetsByHistoryKey := make(map[string]*logAvailabilityProviderBucketSet, len(providers))
+	for _, provider := range providers {
+		providerRef := providerRefFromNumericID(provider.ID, provider.Name)
+		if strings.TrimSpace(providerRef) == "" {
+			continue
+		}
+
+		bucketSet := &logAvailabilityProviderBucketSet{
+			Provider: provider,
+			Buckets:  buildLogAvailabilityBuckets(provider, rangeSpec),
+		}
+		bucketSetsByHistoryKey[healthCheckHistoryKey(provider.ID, provider.Name)] = bucketSet
+		bucketSetsByProviderRef[providerRef] = bucketSet
+		trimmedName := strings.TrimSpace(provider.Name)
+		if trimmedName != "" {
+			bucketSetsByProviderRef[trimmedName] = bucketSet
+		}
+	}
+
+	if err := hcs.applyLogAvailabilityRequests(db, platform, rangeSpec, bucketSetsByProviderRef, operationalThresholdMs); err != nil {
+		return nil, err
+	}
+
+	historiesMap := make(map[string]*HealthCheckHistory, len(bucketSetsByHistoryKey))
+	for key, bucketSet := range bucketSetsByHistoryKey {
+		buckets := bucketSet.Buckets
+		if len(buckets) == 0 {
+			continue
+		}
+		finalizeLogAvailabilityBuckets(buckets)
+		reverseLogAvailabilityBuckets(buckets)
+
+		history := &HealthCheckHistory{
+			ProviderID:   buckets[0].ProviderID,
+			ProviderName: buckets[0].ProviderName,
+			Platform:     platform,
+			Items:        make([]HealthCheckResult, 0, len(buckets)),
+		}
+
+		var totalLatency int64
+		var totalLatencySamples int
+		var successBuckets int
+		var sampledBuckets int
+		latestIndex := -1
+		for index, bucket := range buckets {
+			status := resolveLogAvailabilityStatus(bucket)
+			if status == HealthStatusOperational || status == HealthStatusDegraded {
+				successBuckets++
+				totalLatency += bucket.LatencyTotalMs
+				totalLatencySamples += bucket.LatencySamples
+			}
+			if bucket.TotalRequests > 0 {
+				sampledBuckets++
+				if latestIndex < 0 {
+					latestIndex = index
+				}
+			}
+
+			history.Items = append(history.Items, HealthCheckResult{
+				ID:           int64(index + 1),
+				ProviderID:   bucket.ProviderID,
+				ProviderName: bucket.ProviderName,
+				Platform:     platform,
+				Model:        bucket.LatestModel,
+				Endpoint:     "request_log",
+				Status:       status,
+				LatencyMs:    bucket.AvgLatencyMs,
+				ErrorMessage: formatLogAvailabilityError(bucket, operationalThresholdMs),
+				CheckedAt:    bucket.BucketStart,
+			})
+		}
+
+		if len(history.Items) > 0 && latestIndex >= 0 {
+			history.Latest = &history.Items[latestIndex]
+		}
+		if sampledBuckets > 0 {
+			history.Uptime = float64(successBuckets) / float64(sampledBuckets) * 100
+			if totalLatencySamples > 0 {
+				history.AvgLatencyMs = int(totalLatency / int64(totalLatencySamples))
+			}
+		}
+		historiesMap[key] = history
+	}
+
+	return historiesMap, nil
+}
+
+func (hcs *HealthCheckService) applyLogAvailabilityRequests(db *sql.DB, platform string, rangeSpec logAvailabilityRangeSpec, bucketSetsByProviderRef map[string]*logAvailabilityProviderBucketSet, operationalThresholdMs int) error {
+	if len(bucketSetsByProviderRef) == 0 {
+		return nil
+	}
+
+	query := `
+		SELECT provider_id, provider, model, http_code, duration_sec, created_at
+		FROM request_log
+		WHERE platform = ?
+		  AND created_at >= ?
+		  AND created_at <= ?
+		ORDER BY created_at ASC
+	`
+
+	rows, err := db.Query(
+		query,
+		platform,
+		rangeSpec.Start.UTC().Format(timeLayout),
+		rangeSpec.End.UTC().Format(timeLayout),
+	)
+	if err != nil {
+		if isNoSuchTableErr(err) {
+			return nil
+		}
+		return fmt.Errorf("聚合日志可用性失败: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		logItem, err := scanLogAvailabilityRequest(rows)
+		if err != nil {
+			return err
+		}
+		bucketSet := bucketSetsByProviderRef[logItem.ProviderRef]
+		if bucketSet == nil {
+			continue
+		}
+		applyLogAvailabilityRequest(bucketSet.Buckets, rangeSpec, logItem, operationalThresholdMs)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func resolveLogAvailabilityRange(rangeKey string, now time.Time) logAvailabilityRangeSpec {
+	key := strings.TrimSpace(rangeKey)
+	duration := 24 * time.Hour
+	switch key {
+	case LogAvailabilityRange15Min:
+		duration = 15 * time.Minute
+	case LogAvailabilityRange1H:
+		duration = time.Hour
+	case LogAvailabilityRange6H:
+		duration = 6 * time.Hour
+	case LogAvailabilityRange24H:
+		duration = 24 * time.Hour
+	case LogAvailabilityRange7D:
+		duration = 7 * 24 * time.Hour
+	default:
+		key = LogAvailabilityRangeDefault
+	}
+
+	end := now.UTC().Truncate(time.Second)
+	start := end.Add(-duration)
+	return logAvailabilityRangeSpec{
+		Key:            key,
+		Start:          start,
+		End:            end,
+		BucketDuration: duration / time.Duration(LogAvailabilityHistoryLimit),
+	}
+}
+
+func buildLogAvailabilityBuckets(provider Provider, rangeSpec logAvailabilityRangeSpec) []logAvailabilityBucket {
+	buckets := make([]logAvailabilityBucket, LogAvailabilityHistoryLimit)
+	for index := range buckets {
+		buckets[index] = logAvailabilityBucket{
+			ProviderID:   provider.ID,
+			ProviderName: provider.Name,
+			BucketStart:  rangeSpec.Start.Add(time.Duration(index) * rangeSpec.BucketDuration),
+		}
+	}
+	return buckets
+}
+
+func scanLogAvailabilityRequest(rows *sql.Rows) (logAvailabilityRequestLog, error) {
+	var providerID, providerName sql.NullString
+	var model sql.NullString
+	var httpCode sql.NullInt64
+	var durationSec sql.NullFloat64
+	var createdAtRaw sql.NullString
+	if err := rows.Scan(&providerID, &providerName, &model, &httpCode, &durationSec, &createdAtRaw); err != nil {
+		return logAvailabilityRequestLog{}, err
+	}
+
+	createdAt, err := parseStoredRequestLogTime(createdAtRaw)
+	if err != nil {
+		return logAvailabilityRequestLog{}, err
+	}
+
+	durationMs := 0
+	if durationSec.Valid && durationSec.Float64 > 0 {
+		durationMs = int(durationSec.Float64*1000 + 0.5)
+	}
+
+	return logAvailabilityRequestLog{
+		ProviderRef: providerRefFromStringID(providerID.String, providerName.String),
+		Model:       strings.TrimSpace(model.String),
+		HTTPCode:    int(httpCode.Int64),
+		DurationMs:  durationMs,
+		CreatedAt:   createdAt,
+	}, nil
+}
+
+func applyLogAvailabilityRequest(buckets []logAvailabilityBucket, rangeSpec logAvailabilityRangeSpec, logItem logAvailabilityRequestLog, operationalThresholdMs int) {
+	if logItem.CreatedAt.IsZero() || logItem.CreatedAt.Before(rangeSpec.Start) || logItem.CreatedAt.After(rangeSpec.End) {
+		return
+	}
+
+	bucketIndex := int(logItem.CreatedAt.Sub(rangeSpec.Start) / rangeSpec.BucketDuration)
+	if bucketIndex < 0 {
+		bucketIndex = 0
+	}
+	if bucketIndex >= len(buckets) {
+		bucketIndex = len(buckets) - 1
+	}
+
+	bucket := &buckets[bucketIndex]
+	bucket.TotalRequests++
+	if isLogAvailabilityFailure(logItem.HTTPCode) {
+		bucket.FailedCount++
+	} else if logItem.DurationMs > operationalThresholdMs {
+		bucket.WarningCount++
+	}
+	if logItem.DurationMs > 0 {
+		bucket.LatencyTotalMs += int64(logItem.DurationMs)
+		bucket.LatencySamples++
+	}
+	if logItem.CreatedAt.After(bucket.LastRequestAt) || bucket.LastRequestAt.IsZero() {
+		bucket.LastRequestAt = logItem.CreatedAt
+		bucket.LatestModel = logItem.Model
+		bucket.LastStatusCode = logItem.HTTPCode
+	}
+}
+
+func finalizeLogAvailabilityBuckets(buckets []logAvailabilityBucket) {
+	for index := range buckets {
+		if buckets[index].LatencySamples > 0 {
+			buckets[index].AvgLatencyMs = int(buckets[index].LatencyTotalMs / int64(buckets[index].LatencySamples))
+		}
+	}
+}
+
+func reverseLogAvailabilityBuckets(buckets []logAvailabilityBucket) {
+	for left, right := 0, len(buckets)-1; left < right; left, right = left+1, right-1 {
+		buckets[left], buckets[right] = buckets[right], buckets[left]
+	}
+}
+
+func isLogAvailabilityFailure(httpCode int) bool {
+	return httpCode <= 0 || httpCode >= 400
+}
+
+func resolveLogAvailabilityStatus(bucket logAvailabilityBucket) string {
+	if bucket.TotalRequests <= 0 {
+		return ""
+	}
+	if bucket.FailedCount > 0 {
+		return HealthStatusFailed
+	}
+	if bucket.WarningCount > 0 {
+		return HealthStatusDegraded
+	}
+	return HealthStatusOperational
+}
+
+func formatLogAvailabilityError(bucket logAvailabilityBucket, operationalThresholdMs int) string {
+	if bucket.TotalRequests <= 0 {
+		return ""
+	}
+	if bucket.FailedCount > 0 {
+		if bucket.LastStatusCode >= 400 {
+			return fmt.Sprintf("日志聚合：%d/%d 请求失败，最近 HTTP %d", bucket.FailedCount, bucket.TotalRequests, bucket.LastStatusCode)
+		}
+		return fmt.Sprintf("日志聚合：%d/%d 请求失败", bucket.FailedCount, bucket.TotalRequests)
+	}
+	if bucket.WarningCount > 0 {
+		return fmt.Sprintf("日志聚合：%d/%d 请求延迟超过 %dms", bucket.WarningCount, bucket.TotalRequests, operationalThresholdMs)
+	}
+	return ""
 }
 
 // batchGetHistories 批量获取某平台所有 Provider 的历史记录（避免 N+1 查询）
@@ -482,7 +866,7 @@ func (hcs *HealthCheckService) RunSingleCheck(platform string, providerID int64)
 func (hcs *HealthCheckService) RunAllChecks() (map[string][]HealthCheckResult, error) {
 	results := make(map[string][]HealthCheckResult)
 
-	for _, platform := range []string{"claude", "codex"} {
+	for _, platform := range availabilityPlatforms {
 		platformResults := hcs.checkAllProviders(platform)
 		results[platform] = platformResults
 	}
@@ -605,12 +989,7 @@ func (hcs *HealthCheckService) checkProvider(ctx context.Context, provider Provi
 // determineStatus 根据 HTTP 状态码和延迟判定健康状态
 func (hcs *HealthCheckService) determineStatus(statusCode, latencyMs int, body []byte) (string, string) {
 	// 获取正常阈值（全局配置）
-	operationalThresholdMs := DefaultOperationalThresholdMs
-	if hcs.settingsService != nil {
-		if threshold := hcs.settingsService.GetIntSetting("availability_operational_threshold_ms"); threshold > 0 {
-			operationalThresholdMs = threshold
-		}
-	}
+	operationalThresholdMs := hcs.getOperationalThresholdMs()
 
 	// 2xx = 成功
 	if statusCode >= 200 && statusCode < 300 {
@@ -656,6 +1035,15 @@ func (hcs *HealthCheckService) getEffectiveEndpoint(provider *Provider, platform
 // getEffectiveTimeout 获取有效的超时时间（毫秒）
 func (hcs *HealthCheckService) getEffectiveTimeout(provider *Provider) int {
 	return resolveProviderAvailabilityTimeout(provider)
+}
+
+func (hcs *HealthCheckService) getOperationalThresholdMs() int {
+	if hcs.settingsService != nil {
+		if threshold := hcs.settingsService.GetIntSetting("availability_operational_threshold_ms"); threshold > 0 {
+			return threshold
+		}
+	}
+	return DefaultOperationalThresholdMs
 }
 
 // saveResult 保存检测结果到数据库
@@ -854,8 +1242,7 @@ func (hcs *HealthCheckService) SetAutoAvailabilityPolling(enabled bool) {
 
 // runAllPlatformChecks 执行所有平台的检测
 func (hcs *HealthCheckService) runAllPlatformChecks() {
-	platforms := []string{"claude", "codex"}
-	for _, platform := range platforms {
+	for _, platform := range availabilityPlatforms {
 		hcs.checkAllProviders(platform)
 	}
 }

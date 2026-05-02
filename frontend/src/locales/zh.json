@@ -72,6 +72,8 @@
     "loading": "正在加载监测数据...",
     "refreshAll": "全部检测",
     "refreshing": "检测中...",
+    "reloadLogs": "刷新日志",
+    "loadingLogs": "读取日志...",
     "check": "检测",
     "providers": "供应商",
     "lastUpdate": "最后更新",
@@ -80,7 +82,23 @@
     "noProviders": "暂无供应商，请先添加供应商配置",
     "runtime": {
       "pollingRunning": "后台巡检运行中",
-      "pollingStopped": "后台巡检已暂停"
+      "pollingStopped": "后台巡检已暂停",
+      "logMode": "日志聚合模式"
+    },
+    "mode": {
+      "title": "模式",
+      "probe": "端点检测",
+      "logs": "日志生成",
+      "probeHint": "通过主动请求测试端点生成可用性状态条",
+      "logsHint": "根据真实请求日志按所选时间范围聚合生成可用性状态条"
+    },
+    "range": {
+      "title": "时间范围",
+      "last15min": "15 分钟",
+      "last1h": "1 小时",
+      "last6h": "6 小时",
+      "last24h": "24 小时",
+      "last7d": "7 天"
     },
     "stats": {
       "operational": "正常运行",
@@ -96,8 +114,11 @@
     },
     "history": {
       "title": "近 90 天可用性",
+      "logTitle": "近 {range} 日志可用性",
       "start": "90 天前",
+      "rangeStart": "{range} 前",
       "end": "今日",
+      "now": "现在",
       "noSample": "暂无采样",
       "noData": "暂无历史采样",
       "tooltip": {
@@ -114,6 +135,7 @@
       "quickCheck": "立即检测此节点",
       "checking": "检测中...",
       "autoRefresh": "监控频率：每 {seconds} 秒",
+      "logSource": "数据来源：所选时间范围内请求日志",
       "model": "模型",
       "endpoint": "端点",
       "timeout": "超时",

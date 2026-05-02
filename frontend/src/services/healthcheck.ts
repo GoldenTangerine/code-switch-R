@@ -14,6 +14,8 @@ export const HealthStatus = {
 
 export type HealthStatusValue = typeof HealthStatus[keyof typeof HealthStatus]
 
+export type LogAvailabilityRange = '15min' | '1h' | '6h' | '24h' | '7d'
+
 // 健康检查结果类型
 export interface HealthCheckResult {
   id: number
@@ -104,6 +106,13 @@ const MOCK_HISTORY_LIMIT = 72
 const MOCK_POLLING_DEFAULT = true
 const MOCK_TIME_STEP_MS = 37 * 60 * 1000
 const MOCK_LATENCY_WAVE = [0, 16, -12, 24, -7, 31, 9, -4] as const
+const LOG_AVAILABILITY_RANGE_MS: Record<LogAvailabilityRange, number> = {
+  '15min': 15 * 60 * 1000,
+  '1h': 60 * 60 * 1000,
+  '6h': 6 * 60 * 60 * 1000,
+  '24h': 24 * 60 * 60 * 1000,
+  '7d': 7 * 24 * 60 * 60 * 1000,
+}
 
 const buildMockStatusWindow = (
   length: number,
@@ -321,6 +330,22 @@ const cloneProviderTimeline = (timeline: ProviderTimeline): ProviderTimeline => 
   latest: timeline.availabilityMonitorEnabled ? cloneHealthCheckResult(timeline.latest) : null,
 })
 
+const cloneLogProviderTimeline = (
+  timeline: ProviderTimeline,
+  range: LogAvailabilityRange = '24h',
+): ProviderTimeline => {
+  const cloned = cloneProviderTimeline({ ...timeline, availabilityMonitorEnabled: true })
+  const bucketDurationMs = LOG_AVAILABILITY_RANGE_MS[range] / MOCK_HISTORY_LIMIT
+  const now = Date.now()
+  cloned.availabilityMonitorEnabled = true
+  cloned.items = cloned.items.slice(0, MOCK_HISTORY_LIMIT).map((item, index) => ({
+    ...item,
+    checkedAt: new Date(now - index * bucketDurationMs).toISOString(),
+  }))
+  cloned.latest = cloned.items.find((item) => item.status) ?? null
+  return cloned
+}
+
 const resolveMockLatency = (
   nominalLatencyMs: number,
   status: HealthStatusValue,
@@ -492,6 +517,16 @@ const getMockLatestResults = (): Record<string, ProviderTimeline[]> => {
   )
 }
 
+const getMockLogBasedResults = (range: LogAvailabilityRange = '24h'): Record<string, ProviderTimeline[]> => {
+  const state = getMockTimelineState()
+  return Object.fromEntries(
+    Object.entries(state).map(([platform, runtimes]) => [
+      platform,
+      runtimes.map((runtime) => cloneLogProviderTimeline(runtime.timeline, range)),
+    ]),
+  )
+}
+
 const getMockHistoryByProviderName = (platform: string, providerName: string, limit: number): MockHealthHistory => {
   const runtime = getMockTimelineState()[platform]?.find((item) => item.timeline.providerName === providerName)
   if (!runtime) {
@@ -520,6 +555,16 @@ export async function getLatestResults(): Promise<Record<string, ProviderTimelin
     return getMockLatestResults()
   }
   return Call.ByName(`${SERVICE_PATH}.GetLatestResults`)
+}
+
+/**
+ * 获取基于请求日志聚合的 Provider 可用性状态（按平台分组）
+ */
+export async function getLogBasedResults(range: LogAvailabilityRange = '24h'): Promise<Record<string, ProviderTimeline[]>> {
+  if (shouldUseBrowserPreviewAvailabilityMock()) {
+    return getMockLogBasedResults(range)
+  }
+  return Call.ByName(`${SERVICE_PATH}.GetLogBasedResults`, range)
 }
 
 /**

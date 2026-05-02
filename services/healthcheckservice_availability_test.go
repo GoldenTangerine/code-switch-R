@@ -2,11 +2,16 @@ package services
 
 import (
 	"context"
+	"database/sql"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/daodao97/xgo/xdb"
 )
 
 func TestHealthCheckServiceCheckProviderUsesModelProbeForCodex(t *testing.T) {
@@ -113,5 +118,169 @@ func TestHealthCheckServiceHandleBlacklistIntegrationTreatsValidationFailureAsFa
 	}
 	if counter.ConsecutiveFails != 1 {
 		t.Fatalf("ConsecutiveFails = %d, 期望 1", counter.ConsecutiveFails)
+	}
+}
+
+func TestHealthCheckServiceGetLogBasedResultsAggregatesRequestLogs(t *testing.T) {
+	useIsolatedHomeDir(t)
+
+	if err := InitDatabase(); err != nil {
+		t.Fatalf("初始化数据库失败: %v", err)
+	}
+
+	providerService := NewProviderService()
+	if err := providerService.SaveProviders("codex", []Provider{
+		{
+			ID:      42,
+			Name:    "LogProbe",
+			Enabled: true,
+		},
+		{
+			ID:      43,
+			Name:    "WeightedProbe",
+			Enabled: true,
+		},
+	}); err != nil {
+		t.Fatalf("保存供应商失败: %v", err)
+	}
+
+	db, err := xdb.DB("default")
+	if err != nil {
+		t.Fatalf("获取数据库连接失败: %v", err)
+	}
+
+	rangeSpec := resolveLogAvailabilityRange(LogAvailabilityRange24H, time.Now())
+	failedBucketAt := rangeSpec.Start.Add(rangeSpec.BucketDuration*10 + time.Second)
+	degradedBucketAt := rangeSpec.Start.Add(rangeSpec.BucketDuration*20 + time.Second)
+	latestBucketAt := rangeSpec.Start.Add(rangeSpec.BucketDuration*30 + time.Second)
+	insertAvailabilityRequestLog(t, db, "codex", "42", "LogProbe", "gpt-ok", 200, 0.12, failedBucketAt.Format(timeLayout))
+	insertAvailabilityRequestLog(t, db, "codex", "42", "LogProbe", "gpt-failed", 503, 0.36, failedBucketAt.Add(time.Second).Format(timeLayout))
+	insertAvailabilityRequestLog(t, db, "codex", "42", "LogProbe", "gpt-slow", 200, 6.50, degradedBucketAt.Format(timeLayout))
+	insertAvailabilityRequestLog(t, db, "codex", "42", "LogProbe", "gpt-latest", 200, 0.18, latestBucketAt.Format(timeLayout))
+	insertAvailabilityRequestLog(t, db, "codex", "", "42", "wrong-name-fallback", 200, 0.1, latestBucketAt.Add(time.Second).Format(timeLayout))
+	insertAvailabilityRequestLog(t, db, "codex", "43", "WeightedProbe", "weighted-many-1", 200, 0.10, failedBucketAt.Format(timeLayout))
+	insertAvailabilityRequestLog(t, db, "codex", "43", "WeightedProbe", "weighted-many-2", 200, 0.10, failedBucketAt.Add(time.Second).Format(timeLayout))
+	insertAvailabilityRequestLog(t, db, "codex", "43", "WeightedProbe", "weighted-many-3", 200, 0.10, failedBucketAt.Add(2*time.Second).Format(timeLayout))
+	insertAvailabilityRequestLog(t, db, "codex", "43", "WeightedProbe", "weighted-single", 200, 1.00, degradedBucketAt.Format(timeLayout))
+
+	settingsService := NewSettingsService()
+	if _, err := db.Exec(`
+		INSERT INTO app_settings (key, value) VALUES (?, ?)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value
+	`, "availability_operational_threshold_ms", "7000"); err != nil {
+		t.Fatalf("设置可用性阈值失败: %v", err)
+	}
+
+	hcs := NewHealthCheckService(providerService, nil, settingsService)
+	results, err := hcs.GetLogBasedResults(LogAvailabilityRange24H)
+	if err != nil {
+		t.Fatalf("GetLogBasedResults 调用失败: %v", err)
+	}
+
+	codexTimelines := results["codex"]
+	if len(codexTimelines) != 2 {
+		t.Fatalf("期望 2 个 codex timeline，实际 %d", len(codexTimelines))
+	}
+
+	timeline := findAvailabilityTimelineByProvider(t, codexTimelines, 42)
+	if !timeline.AvailabilityMonitorEnabled {
+		t.Fatalf("日志模式应始终允许展示 timeline")
+	}
+	if len(timeline.Items) != LogAvailabilityHistoryLimit {
+		t.Fatalf("期望固定 %d 个 bucket，实际 %d", LogAvailabilityHistoryLimit, len(timeline.Items))
+	}
+	if timeline.Latest == nil || timeline.Latest.Status != HealthStatusOperational {
+		t.Fatalf("期望最新 bucket 正常，实际 %+v", timeline.Latest)
+	}
+	if timeline.Latest.Model != "wrong-name-fallback" {
+		t.Fatalf("期望 provider 字段回退映射后的最新模型 wrong-name-fallback，实际 %q", timeline.Latest.Model)
+	}
+
+	failedBucket := findAvailabilityBucketByStatus(t, timeline.Items, HealthStatusFailed)
+	if failedBucket.LatencyMs != 240 {
+		t.Fatalf("期望失败 bucket 平均延迟 240ms，实际 %d", failedBucket.LatencyMs)
+	}
+	if !strings.Contains(failedBucket.ErrorMessage, "1/2 请求失败") {
+		t.Fatalf("期望失败 bucket 错误信息包含失败数量，实际 %q", failedBucket.ErrorMessage)
+	}
+
+	if degradedBucket := findOptionalAvailabilityBucketByStatus(timeline.Items, HealthStatusDegraded); degradedBucket != nil {
+		t.Fatalf("自定义阈值 7000ms 下 6500ms 不应告警，实际 %+v", degradedBucket)
+	}
+
+	if math.Abs(timeline.Uptime-66.66666666666666) > 0.0001 {
+		t.Fatalf("期望空桶不参与可用率且自定义阈值下 2/3 bucket 可用，实际 %.8f", timeline.Uptime)
+	}
+	if timeline.AvgLatencyMs != 2260 {
+		t.Fatalf("期望请求级加权平均延迟 2260ms，实际 %d", timeline.AvgLatencyMs)
+	}
+
+	weightedTimeline := findAvailabilityTimelineByProvider(t, codexTimelines, 43)
+	if weightedTimeline.AvgLatencyMs != 325 {
+		t.Fatalf("期望 WeightedProbe 请求级加权平均延迟 325ms，实际 %d", weightedTimeline.AvgLatencyMs)
+	}
+
+}
+
+func findAvailabilityTimelineByProvider(t *testing.T, timelines []ProviderTimeline, providerID int64) ProviderTimeline {
+	t.Helper()
+	for _, timeline := range timelines {
+		if timeline.ProviderID == providerID {
+			return timeline
+		}
+	}
+	t.Fatalf("未找到 providerID=%d 的 timeline", providerID)
+	return ProviderTimeline{}
+}
+
+func findAvailabilityBucketByStatus(t *testing.T, items []HealthCheckResult, status string) HealthCheckResult {
+	t.Helper()
+	if item := findOptionalAvailabilityBucketByStatus(items, status); item != nil {
+		return *item
+	}
+	t.Fatalf("未找到状态为 %s 的 bucket", status)
+	return HealthCheckResult{}
+}
+
+func findOptionalAvailabilityBucketByStatus(items []HealthCheckResult, status string) *HealthCheckResult {
+	for _, item := range items {
+		if item.Status == status {
+			bucket := item
+			return &bucket
+		}
+	}
+	return nil
+}
+
+func insertAvailabilityRequestLog(
+	t *testing.T,
+	db *sql.DB,
+	platform string,
+	providerID string,
+	provider string,
+	model string,
+	httpCode int,
+	durationSec float64,
+	createdAt string,
+) {
+	t.Helper()
+	_, err := db.Exec(`
+		INSERT INTO request_log (
+			platform,
+			model,
+			provider_id,
+			provider,
+			http_code,
+			duration_sec,
+			input_tokens,
+			output_tokens,
+			cache_create_tokens,
+			cache_read_tokens,
+			reasoning_tokens,
+			created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, platform, model, providerID, provider, httpCode, durationSec, 1, 1, 0, 0, 0, createdAt)
+	if err != nil {
+		t.Fatalf("插入 request_log 失败: %v", err)
 	}
 }

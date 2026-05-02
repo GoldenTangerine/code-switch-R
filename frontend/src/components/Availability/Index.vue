@@ -3,18 +3,21 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   getLatestResults,
+  getLogBasedResults,
   runAllChecks,
   runSingleCheck,
   setAvailabilityMonitorEnabled,
   isPollingRunning,
   saveAvailabilityConfig,
   type ProviderTimeline,
+  type LogAvailabilityRange,
   HealthStatus,
 } from '../../services/healthcheck'
 import { lockScroll, unlockScroll } from '../../utils/scrollLock'
 
 type StatusTone = 'operational' | 'degraded' | 'failed' | 'disabled'
 type HistoryTone = StatusTone | 'empty'
+type AvailabilityMode = 'probe' | 'logs'
 
 type HistorySegment = {
   key: string
@@ -45,6 +48,15 @@ type ProviderCardViewModel = ProviderTimeline & {
 const REFRESH_INTERVAL_SECONDS = 60
 const HISTORY_SEGMENT_LIMIT = 72
 const PROVIDERS_UPDATED_EVENT = 'providers-updated'
+const AVAILABILITY_MODE_STORAGE_KEY = 'code-switch:availability-mode'
+const LOG_AVAILABILITY_RANGE_STORAGE_KEY = 'code-switch:availability-log-range'
+const LOG_AVAILABILITY_RANGE_MS: Record<LogAvailabilityRange, number> = {
+  '15min': 15 * 60 * 1000,
+  '1h': 60 * 60 * 1000,
+  '6h': 6 * 60 * 60 * 1000,
+  '24h': 24 * 60 * 60 * 1000,
+  '7d': 7 * 24 * 60 * 60 * 1000,
+}
 const PLATFORM_LABELS: Record<string, string> = {
   claude: 'Claude',
   codex: 'Codex',
@@ -58,6 +70,8 @@ const loading = ref(true)
 const refreshing = ref(false)
 const timelines = ref<Record<string, ProviderTimeline[]>>({})
 const pollingRunning = ref(false)
+const activeAvailabilityMode = ref<AvailabilityMode>(resolveInitialAvailabilityMode())
+const activeLogRange = ref<LogAvailabilityRange>(resolveInitialLogRange())
 const isDarkTheme = ref(document.documentElement.classList.contains('dark'))
 const lastUpdated = ref<Date | null>(null)
 const nextRefreshIn = ref(REFRESH_INTERVAL_SECONDS)
@@ -76,6 +90,7 @@ const configForm = ref({
 let refreshTimer: ReturnType<typeof setInterval> | null = null
 let countdownTimer: ReturnType<typeof setInterval> | null = null
 let themeObserver: MutationObserver | null = null
+let loadDataRequestId = 0
 
 const localeTag = computed(() => (locale.value?.startsWith('zh') ? 'zh-CN' : 'en-US'))
 
@@ -155,6 +170,68 @@ const pageThemeClass = computed(() => (
   isDarkTheme.value ? 'availability-page--dark' : 'availability-page--light'
 ))
 
+const isLogAvailabilityMode = computed(() => activeAvailabilityMode.value === 'logs')
+
+const availabilityModeOptions = computed(() => [
+  {
+    value: 'logs' as const,
+    label: t('availability.mode.logs'),
+    title: t('availability.mode.logsHint'),
+  },
+  {
+    value: 'probe' as const,
+    label: t('availability.mode.probe'),
+    title: t('availability.mode.probeHint'),
+  },
+])
+
+const logRangeOptions = computed(() => [
+  {
+    value: '15min' as const,
+    label: t('availability.range.last15min'),
+  },
+  {
+    value: '1h' as const,
+    label: t('availability.range.last1h'),
+  },
+  {
+    value: '6h' as const,
+    label: t('availability.range.last6h'),
+  },
+  {
+    value: '24h' as const,
+    label: t('availability.range.last24h'),
+  },
+  {
+    value: '7d' as const,
+    label: t('availability.range.last7d'),
+  },
+])
+
+const activeModeHint = computed(() => (
+  isLogAvailabilityMode.value ? t('availability.mode.logsHint') : t('availability.mode.probeHint')
+))
+
+const activeLogRangeLabel = computed(() => (
+  logRangeOptions.value.find((option) => option.value === activeLogRange.value)?.label ?? t('availability.range.last15min')
+))
+
+const historyTitleLabel = computed(() => (
+  isLogAvailabilityMode.value
+    ? t('availability.history.logTitle', { range: activeLogRangeLabel.value })
+    : t('availability.history.title')
+))
+
+const historyStartLabel = computed(() => (
+  isLogAvailabilityMode.value
+    ? t('availability.history.rangeStart', { range: activeLogRangeLabel.value })
+    : t('availability.history.start')
+))
+
+const historyEndLabel = computed(() => (
+  isLogAvailabilityMode.value ? t('availability.history.now') : t('availability.history.end')
+))
+
 watch(showConfigModal, (open) => {
   if (open) {
     lockScroll()
@@ -195,6 +272,61 @@ function getProviderKey(platform: string, providerId: number) {
 
 function resolvePlatformLabel(platform: string) {
   return PLATFORM_LABELS[platform] ?? platform
+}
+
+function resolveInitialAvailabilityMode(): AvailabilityMode {
+  if (typeof window === 'undefined') {
+    return 'logs'
+  }
+  return window.localStorage.getItem(AVAILABILITY_MODE_STORAGE_KEY) === 'probe' ? 'probe' : 'logs'
+}
+
+function isLogAvailabilityRange(value: string | null): value is LogAvailabilityRange {
+  return value === '15min' || value === '1h' || value === '6h' || value === '24h' || value === '7d'
+}
+
+function resolveInitialLogRange(): LogAvailabilityRange {
+  if (typeof window === 'undefined') {
+    return '24h'
+  }
+  const storedRange = window.localStorage.getItem(LOG_AVAILABILITY_RANGE_STORAGE_KEY)
+  return isLogAvailabilityRange(storedRange) ? storedRange : '24h'
+}
+
+function setAvailabilityMode(mode: AvailabilityMode) {
+  if (activeAvailabilityMode.value === mode) return
+  activeAvailabilityMode.value = mode
+  if (typeof window !== 'undefined') {
+    window.localStorage.setItem(AVAILABILITY_MODE_STORAGE_KEY, mode)
+  }
+  loading.value = true
+  nextRefreshIn.value = REFRESH_INTERVAL_SECONDS
+  void loadData()
+}
+
+function setLogAvailabilityRange(range: LogAvailabilityRange) {
+  if (activeLogRange.value === range) return
+  activeLogRange.value = range
+  if (typeof window !== 'undefined') {
+    window.localStorage.setItem(LOG_AVAILABILITY_RANGE_STORAGE_KEY, range)
+  }
+  if (isLogAvailabilityMode.value) {
+    loading.value = true
+    nextRefreshIn.value = REFRESH_INTERVAL_SECONDS
+    void loadData()
+  }
+}
+
+function canDisplayTimeline(timeline: ProviderTimeline) {
+  return isLogAvailabilityMode.value || timeline.availabilityMonitorEnabled
+}
+
+function hasTimelineSamples(timeline: ProviderTimeline) {
+  if (!canDisplayTimeline(timeline)) return false
+  if (!isLogAvailabilityMode.value) {
+    return (timeline.items?.length ?? 0) > 0
+  }
+  return (timeline.items ?? []).some((item) => Boolean(item.status))
 }
 
 function toDate(value?: string | Date | null) {
@@ -248,6 +380,43 @@ function formatHistoryDate(value?: string | Date | null) {
   return `${date.getFullYear()}-${month}-${day}`
 }
 
+function getLogBucketSizeMinutes() {
+  return (LOG_AVAILABILITY_RANGE_MS[activeLogRange.value] / HISTORY_SEGMENT_LIMIT) / (60 * 1000)
+}
+
+function formatLogHistoryDate(value?: string | Date | null) {
+  const bucketSizeMinutes = getLogBucketSizeMinutes()
+  if (bucketSizeMinutes >= 1440) {
+    return formatDateTime(value, {
+      month: '2-digit',
+      day: '2-digit',
+    })
+  }
+  if (bucketSizeMinutes >= 60) {
+    return formatDateTime(value, {
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+  }
+  if (bucketSizeMinutes < 1) {
+    return formatDateTime(value, {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    })
+  }
+  return formatDateTime(value, {
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+function formatHistoryTooltipDate(value?: string | Date | null) {
+  return isLogAvailabilityMode.value ? formatLogHistoryDate(value) : formatHistoryDate(value)
+}
+
 function formatLatency(value?: number | null) {
   if (!Number.isFinite(value) || Number(value) <= 0) {
     return '--'
@@ -256,7 +425,7 @@ function formatLatency(value?: number | null) {
 }
 
 function formatUptime(timeline: ProviderTimeline) {
-  if (!timeline.availabilityMonitorEnabled || (timeline.items?.length ?? 0) === 0) {
+  if (!hasTimelineSamples(timeline)) {
     return '--'
   }
 
@@ -272,7 +441,7 @@ function formatUptime(timeline: ProviderTimeline) {
 }
 
 function resolveStatusTone(timeline: ProviderTimeline): StatusTone {
-  if (!timeline.availabilityMonitorEnabled) {
+  if (!canDisplayTimeline(timeline)) {
     return 'disabled'
   }
 
@@ -290,7 +459,7 @@ function resolveStatusTone(timeline: ProviderTimeline): StatusTone {
 }
 
 function resolveStatusLabel(timeline: ProviderTimeline) {
-  if (!timeline.availabilityMonitorEnabled) {
+  if (!canDisplayTimeline(timeline)) {
     return t('availability.statusChip.disabled')
   }
 
@@ -308,7 +477,7 @@ function resolveStatusLabel(timeline: ProviderTimeline) {
 }
 
 function resolveStatusDescription(timeline: ProviderTimeline) {
-  if (!timeline.availabilityMonitorEnabled) {
+  if (!canDisplayTimeline(timeline)) {
     return t('availability.statusDescription.disabled')
   }
 
@@ -340,7 +509,8 @@ function resolveHistoryTone(status?: string): HistoryTone {
 }
 
 function buildHistorySegments(timeline: ProviderTimeline): HistorySegment[] {
-  const recentItems = timeline.availabilityMonitorEnabled
+  const hasTimelineData = canDisplayTimeline(timeline)
+  const recentItems = hasTimelineData
     ? [...(timeline.items ?? [])].slice(0, HISTORY_SEGMENT_LIMIT).reverse()
     : []
 
@@ -353,7 +523,7 @@ function buildHistorySegments(timeline: ProviderTimeline): HistorySegment[] {
       items: [item],
       availabilityMonitorEnabled: true,
     }),
-    checkedAtDateLabel: formatHistoryDate(item.checkedAt),
+    checkedAtDateLabel: formatHistoryTooltipDate(item.checkedAt),
     checkedAtLabel: formatShortDateTime(item.checkedAt),
     checkedAtFullLabel: formatFullDateTime(item.checkedAt),
     latencyLabel: formatLatency(item.latencyMs),
@@ -361,8 +531,8 @@ function buildHistorySegments(timeline: ProviderTimeline): HistorySegment[] {
   }))
 
   const placeholderCount = Math.max(HISTORY_SEGMENT_LIMIT - segments.length, 0)
-  const placeholderLabel = timeline.availabilityMonitorEnabled ? t('availability.history.noSample') : t('availability.notMonitored')
-  const placeholderTime = timeline.availabilityMonitorEnabled ? t('availability.history.noData') : t('availability.notMonitored')
+  const placeholderLabel = hasTimelineData ? t('availability.history.noSample') : t('availability.notMonitored')
+  const placeholderTime = hasTimelineData ? t('availability.history.noData') : t('availability.notMonitored')
 
   const placeholders = Array.from({ length: placeholderCount }, (_, index) => ({
     key: `${timeline.providerId}-placeholder-${index}`,
@@ -423,21 +593,39 @@ function isTogglingCard(providerKey: string) {
 }
 
 async function loadData() {
+  const requestId = ++loadDataRequestId
+  const requestedMode = activeAvailabilityMode.value
+  const requestedRange = activeLogRange.value
+
   try {
-    timelines.value = await getLatestResults()
+    const nextTimelines = requestedMode === 'logs'
+      ? await getLogBasedResults(requestedRange)
+      : await getLatestResults()
+    let nextPollingRunning = pollingRunning.value
 
     try {
-      pollingRunning.value = await isPollingRunning()
+      nextPollingRunning = await isPollingRunning()
     } catch (pollingError) {
-      console.error('Failed to load polling status:', pollingError)
+      if (requestId === loadDataRequestId) {
+        console.error('Failed to load polling status:', pollingError)
+      }
     }
+
+    if (requestId !== loadDataRequestId) return
+
+    timelines.value = nextTimelines
+    pollingRunning.value = nextPollingRunning
 
     lastUpdated.value = new Date()
     nextRefreshIn.value = REFRESH_INTERVAL_SECONDS
   } catch (error) {
-    console.error('Failed to load availability data:', error)
+    if (requestId === loadDataRequestId) {
+      console.error('Failed to load availability data:', error)
+    }
   } finally {
-    loading.value = false
+    if (requestId === loadDataRequestId) {
+      loading.value = false
+    }
   }
 }
 
@@ -446,7 +634,9 @@ async function refreshAll() {
 
   refreshing.value = true
   try {
-    await runAllChecks()
+    if (!isLogAvailabilityMode.value) {
+      await runAllChecks()
+    }
     await loadData()
   } catch (error) {
     console.error('Failed to refresh availability data:', error)
@@ -547,6 +737,10 @@ function startRefreshTimer() {
   }, 1000)
 }
 
+watch(activeAvailabilityMode, () => {
+  nextRefreshIn.value = REFRESH_INTERVAL_SECONDS
+})
+
 function startThemeObserver() {
   themeObserver?.disconnect()
   themeObserver = new MutationObserver(() => {
@@ -600,72 +794,111 @@ onUnmounted(() => {
       <header class="availability-hero">
         <div class="availability-hero__copy">
           <div class="availability-hero__title-wrap">
-            <span class="availability-hero__title-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none">
-                <path
-                  d="M4 12h3l2.2-5.5L13 18l2.5-6H20"
-                  stroke="currentColor"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="1.8"
-                />
-              </svg>
+            <div class="availability-hero__title-main">
+              <span class="availability-hero__title-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none">
+                  <path
+                    d="M4 12h3l2.2-5.5L13 18l2.5-6H20"
+                    stroke="currentColor"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="1.8"
+                  />
+                </svg>
+              </span>
+
+              <div class="availability-hero__title-group">
+                <h1>{{ t('availability.title') }}</h1>
+                <p>{{ t('availability.subtitle') }}</p>
+              </div>
+            </div>
+
+            <div class="availability-runtime-card">
+              <div class="availability-runtime-card__item">
+                <span>{{ t('availability.lastUpdate') }}</span>
+                <strong>{{ formatLastUpdated() }}</strong>
+              </div>
+              <div class="availability-runtime-card__item">
+                <span>{{ t('availability.nextRefresh') }}</span>
+                <strong>{{ nextRefreshIn }}s</strong>
+              </div>
+            </div>
+          </div>
+
+          <div class="availability-hero__control-row">
+            <span class="availability-hero__runtime" :class="{ 'availability-hero__runtime--active': pollingRunning || isLogAvailabilityMode }">
+              <span class="availability-hero__runtime-dot"></span>
+              {{ isLogAvailabilityMode ? t('availability.runtime.logMode') : (pollingRunning ? t('availability.runtime.pollingRunning') : t('availability.runtime.pollingStopped')) }}
             </span>
 
-            <div class="availability-hero__title-group">
-              <h1>{{ t('availability.title') }}</h1>
-              <p>{{ t('availability.subtitle') }}</p>
+            <div class="availability-hero__actions">
+              <div class="availability-mode-switch" :title="activeModeHint">
+                <span class="availability-mode-switch__label">{{ t('availability.mode.title') }}</span>
+                <div class="availability-mode-switch__options" role="group" :aria-label="t('availability.mode.title')">
+                  <button
+                    v-for="option in availabilityModeOptions"
+                    :key="option.value"
+                    type="button"
+                    class="availability-mode-switch__option"
+                    :class="{ 'availability-mode-switch__option--active': activeAvailabilityMode === option.value }"
+                    :title="option.title"
+                    @click="setAvailabilityMode(option.value)"
+                  >
+                    {{ option.label }}
+                  </button>
+                </div>
+              </div>
+
+              <div v-if="isLogAvailabilityMode" class="availability-mode-switch availability-range-switch">
+                <span class="availability-mode-switch__label">{{ t('availability.range.title') }}</span>
+                <div class="availability-mode-switch__options" role="group" :aria-label="t('availability.range.title')">
+                  <button
+                    v-for="option in logRangeOptions"
+                    :key="option.value"
+                    type="button"
+                    class="availability-mode-switch__option"
+                    :class="{ 'availability-mode-switch__option--active': activeLogRange === option.value }"
+                    @click="setLogAvailabilityRange(option.value)"
+                  >
+                    {{ option.label }}
+                  </button>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                class="availability-primary-button"
+                :disabled="refreshing"
+                @click="refreshAll"
+              >
+                <svg
+                  class="availability-primary-button__icon"
+                  :class="{ 'availability-primary-button__icon--spinning': refreshing }"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M20 12a8 8 0 1 1-2.343-5.657"
+                    stroke="currentColor"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="1.8"
+                  />
+                  <path
+                    d="M20 4v5h-5"
+                    stroke="currentColor"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="1.8"
+                  />
+                </svg>
+                <span>
+                  {{ refreshing ? (isLogAvailabilityMode ? t('availability.loadingLogs') : t('availability.refreshing')) : (isLogAvailabilityMode ? t('availability.reloadLogs') : t('availability.refreshAll')) }}
+                </span>
+              </button>
             </div>
           </div>
-
-          <span class="availability-hero__runtime" :class="{ 'availability-hero__runtime--active': pollingRunning }">
-            <span class="availability-hero__runtime-dot"></span>
-            {{ pollingRunning ? t('availability.runtime.pollingRunning') : t('availability.runtime.pollingStopped') }}
-          </span>
-        </div>
-
-        <div class="availability-hero__actions">
-          <div class="availability-runtime-card">
-            <div class="availability-runtime-card__item">
-              <span>{{ t('availability.lastUpdate') }}</span>
-              <strong>{{ formatLastUpdated() }}</strong>
-            </div>
-            <div class="availability-runtime-card__item">
-              <span>{{ t('availability.nextRefresh') }}</span>
-              <strong>{{ nextRefreshIn }}s</strong>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            class="availability-primary-button"
-            :disabled="refreshing"
-            @click="refreshAll"
-          >
-            <svg
-              class="availability-primary-button__icon"
-              :class="{ 'availability-primary-button__icon--spinning': refreshing }"
-              viewBox="0 0 24 24"
-              fill="none"
-              aria-hidden="true"
-            >
-              <path
-                d="M20 12a8 8 0 1 1-2.343-5.657"
-                stroke="currentColor"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="1.8"
-              />
-              <path
-                d="M20 4v5h-5"
-                stroke="currentColor"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="1.8"
-              />
-            </svg>
-            <span>{{ refreshing ? t('availability.refreshing') : t('availability.refreshAll') }}</span>
-          </button>
         </div>
       </header>
 
@@ -749,8 +982,11 @@ onUnmounted(() => {
                 <div class="availability-provider-card__title-block">
                   <div class="availability-provider-card__name-row">
                     <h2>{{ card.providerName }}</h2>
-                    <span v-if="!card.availabilityMonitorEnabled" class="availability-provider-card__disabled-chip">
+                    <span v-if="!isLogAvailabilityMode && !card.availabilityMonitorEnabled" class="availability-provider-card__disabled-chip">
                       {{ t('availability.stats.disabled') }}
+                    </span>
+                    <span v-else-if="isLogAvailabilityMode" class="availability-provider-card__source-chip">
+                      {{ t('availability.mode.logs') }}
                     </span>
                   </div>
 
@@ -779,12 +1015,12 @@ onUnmounted(() => {
                     {{ card.platformLabel }}
                     <span aria-hidden="true">·</span>
                     {{ t('availability.card.lastChecked') }}
-                    {{ card.availabilityMonitorEnabled ? card.lastCheckedLabel : t('availability.history.noData') }}
+                    {{ (isLogAvailabilityMode || card.availabilityMonitorEnabled) ? card.lastCheckedLabel : t('availability.history.noData') }}
                   </p>
                 </div>
               </div>
 
-              <div class="availability-provider-card__actions">
+              <div v-if="!isLogAvailabilityMode" class="availability-provider-card__actions">
                 <label
                   class="availability-toggle"
                   :class="{ 'availability-toggle--on': card.availabilityMonitorEnabled }"
@@ -828,7 +1064,7 @@ onUnmounted(() => {
 
             <section class="availability-history-card">
               <div class="availability-history-card__heading">
-                <span class="availability-history-card__label">{{ t('availability.history.title') }}</span>
+                <span class="availability-history-card__label">{{ historyTitleLabel }}</span>
                 <div class="availability-history-card__uptime">
                   <span>{{ t('availability.card.uptime') }}</span>
                   <strong>{{ card.uptimeLabel }}</strong>
@@ -882,9 +1118,9 @@ onUnmounted(() => {
               </div>
 
               <div class="availability-history__legend">
-                <span>{{ t('availability.history.start') }}</span>
+                <span>{{ historyStartLabel }}</span>
                 <span class="availability-history__legend-line"></span>
-                <span>{{ t('availability.history.end') }}</span>
+                <span>{{ historyEndLabel }}</span>
               </div>
             </section>
 
@@ -898,10 +1134,10 @@ onUnmounted(() => {
 
             <footer class="availability-provider-card__footer">
               <span class="availability-provider-card__footer-copy">
-                {{ card.availabilityMonitorEnabled ? t('availability.card.autoRefresh', { seconds: REFRESH_INTERVAL_SECONDS }) : t('availability.enableToMonitor') }}
+                {{ isLogAvailabilityMode ? t('availability.card.logSource') : (card.availabilityMonitorEnabled ? t('availability.card.autoRefresh', { seconds: REFRESH_INTERVAL_SECONDS }) : t('availability.enableToMonitor')) }}
               </span>
 
-              <div class="availability-provider-card__footer-actions">
+              <div v-if="!isLogAvailabilityMode" class="availability-provider-card__footer-actions">
                 <button
                   v-if="card.availabilityMonitorEnabled"
                   type="button"
@@ -1079,6 +1315,10 @@ onUnmounted(() => {
     linear-gradient(180deg, #0f1115 0%, #11161f 52%, #0d1118 100%);
 }
 
+.availability-page button {
+  margin: 0;
+}
+
 .availability-page__grid {
   position: absolute;
   inset: 0;
@@ -1134,13 +1374,25 @@ onUnmounted(() => {
 .availability-hero__copy {
   display: flex;
   flex-direction: column;
+  flex: 1 1 100%;
   gap: 14px;
+  min-width: 0;
 }
 
 .availability-hero__title-wrap {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  width: 100%;
+  min-width: 0;
+}
+
+.availability-hero__title-main {
+  display: flex;
+  align-items: center;
   gap: 14px;
+  min-width: 0;
 }
 
 .availability-hero__title-icon {
@@ -1193,6 +1445,7 @@ onUnmounted(() => {
 
 .availability-hero__runtime {
   display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
   gap: 8px;
   width: fit-content;
@@ -1224,12 +1477,22 @@ onUnmounted(() => {
   box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.04);
 }
 
+.availability-hero__control-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+}
+
 .availability-hero__actions {
   display: flex;
   flex-wrap: wrap;
-  align-items: stretch;
-  justify-content: flex-end;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: flex-start;
   gap: 12px;
+  min-width: 0;
 }
 
 .availability-runtime-card,
@@ -1247,18 +1510,19 @@ onUnmounted(() => {
 .availability-runtime-card {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  flex: 0 0 auto;
   gap: 0;
-  min-width: 272px;
+  min-width: 222px;
   overflow: hidden;
-  border-radius: 18px;
-  box-shadow: 0 16px 32px rgba(2, 6, 23, 0.2);
+  border-radius: 16px;
+  box-shadow: 0 12px 24px rgba(2, 6, 23, 0.16);
 }
 
 .availability-runtime-card__item {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 14px 16px;
+  gap: 5px;
+  padding: 10px 14px;
 }
 
 .availability-runtime-card__item + .availability-runtime-card__item {
@@ -1286,6 +1550,7 @@ onUnmounted(() => {
 .availability-tertiary-button,
 .availability-primary-link,
 .availability-icon-button,
+.availability-mode-switch__option,
 .availability-history__segment,
 .availability-toggle {
   transition:
@@ -1301,7 +1566,8 @@ onUnmounted(() => {
 .availability-secondary-button,
 .availability-tertiary-button,
 .availability-primary-link,
-.availability-icon-button {
+.availability-icon-button,
+.availability-mode-switch__option {
   cursor: pointer;
 }
 
@@ -1356,6 +1622,66 @@ onUnmounted(() => {
 .availability-primary-button__icon--spinning,
 .availability-secondary-button__icon--spinning {
   animation: availability-spin 0.9s linear infinite;
+}
+
+.availability-mode-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 6px 8px 6px 14px;
+  border: 1px solid rgba(96, 165, 250, 0.14);
+  border-radius: 16px;
+  background: rgba(15, 23, 42, 0.58);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 14px 26px rgba(2, 6, 23, 0.14);
+}
+
+.availability-mode-switch__label {
+  color: rgba(191, 219, 254, 0.9);
+  font-size: 0.8rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.availability-mode-switch__options {
+  display: inline-flex;
+  gap: 4px;
+  padding: 3px;
+  border-radius: 12px;
+  background: rgba(2, 6, 23, 0.22);
+}
+
+.availability-mode-switch__option {
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: rgba(203, 213, 225, 0.82);
+  font-size: 0.78rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.availability-mode-switch__option:hover {
+  color: #e0f2fe;
+  background: rgba(96, 165, 250, 0.12);
+}
+
+.availability-mode-switch__option--active {
+  border-color: rgba(96, 165, 250, 0.24);
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.9) 0%, rgba(59, 130, 246, 0.86) 100%);
+  color: #eff6ff;
+  box-shadow: 0 8px 18px rgba(37, 99, 235, 0.24);
+}
+
+.availability-range-switch .availability-mode-switch__options {
+  flex-wrap: wrap;
+}
+
+.availability-range-switch .availability-mode-switch__option {
+  min-width: 54px;
+  padding-inline: 10px;
 }
 
 .availability-summary-grid {
@@ -1471,6 +1797,7 @@ onUnmounted(() => {
   --availability-card-edge: #64748b;
   --availability-card-glow: rgba(100, 116, 139, 0.22);
   position: relative;
+  z-index: 0;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -1534,10 +1861,15 @@ onUnmounted(() => {
 }
 
 .availability-provider-card:hover {
+  z-index: 10;
   border-color: color-mix(in srgb, var(--availability-card-edge) 36%, rgba(148, 163, 184, 0.18));
   box-shadow:
     0 18px 40px rgba(2, 6, 23, 0.24),
     0 0 26px var(--availability-card-glow);
+}
+
+.availability-provider-card:focus-within {
+  z-index: 10;
 }
 
 .availability-provider-card:hover::before {
@@ -1658,6 +1990,7 @@ onUnmounted(() => {
 }
 
 .availability-provider-card__disabled-chip,
+.availability-provider-card__source-chip,
 .availability-status-chip {
   display: inline-flex;
   align-items: center;
@@ -1673,6 +2006,13 @@ onUnmounted(() => {
   border: 1px solid rgba(148, 163, 184, 0.14);
   background: rgba(51, 65, 85, 0.44);
   color: #94a3b8;
+}
+
+.availability-provider-card__source-chip {
+  border: 1px solid rgba(96, 165, 250, 0.18);
+  background: rgba(37, 99, 235, 0.12);
+  color: #bfdbfe;
+  font-weight: 800;
 }
 
 .availability-status-chip {
@@ -1881,7 +2221,7 @@ onUnmounted(() => {
   position: absolute;
   left: 50%;
   bottom: calc(100% + 10px);
-  z-index: 4;
+  z-index: 20;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -2411,6 +2751,39 @@ onUnmounted(() => {
   color: #64748b;
 }
 
+.availability-page--light .availability-provider-card__source-chip {
+  border-color: rgba(59, 130, 246, 0.2);
+  background: rgba(239, 246, 255, 0.98);
+  color: #2563eb;
+}
+
+.availability-page--light .availability-mode-switch {
+  border-color: rgba(191, 219, 254, 0.88);
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.08);
+}
+
+.availability-page--light .availability-mode-switch__label {
+  color: #475569;
+}
+
+.availability-page--light .availability-mode-switch__options {
+  background: #eff6ff;
+}
+
+.availability-page--light .availability-mode-switch__option {
+  color: #64748b;
+}
+
+.availability-page--light .availability-mode-switch__option:hover {
+  color: #2563eb;
+  background: rgba(191, 219, 254, 0.62);
+}
+
+.availability-page--light .availability-mode-switch__option--active {
+  color: #eff6ff;
+}
+
 .availability-page--light .availability-status-chip--operational {
   background: rgba(240, 253, 244, 0.98);
   border-color: rgba(34, 197, 94, 0.22);
@@ -2650,14 +3023,38 @@ onUnmounted(() => {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .availability-hero__actions {
-    width: 100%;
-    justify-content: stretch;
+  .availability-hero__title-wrap {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 14px;
   }
 
-  .availability-runtime-card,
+  .availability-hero__control-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .availability-hero__runtime {
+    width: fit-content;
+  }
+
+  .availability-hero__actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .availability-mode-switch,
   .availability-primary-button {
     width: 100%;
+  }
+
+  .availability-runtime-card {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .availability-mode-switch {
+    justify-content: space-between;
   }
 }
 
@@ -2704,6 +3101,7 @@ onUnmounted(() => {
   .availability-tertiary-button,
   .availability-primary-link,
   .availability-icon-button,
+  .availability-mode-switch__option,
   .availability-history__segment,
   .availability-toggle,
   .availability-loader,
@@ -2719,6 +3117,7 @@ onUnmounted(() => {
   .availability-tertiary-button:hover,
   .availability-primary-link:hover,
   .availability-icon-button:hover,
+  .availability-mode-switch__option:hover,
   .availability-history__segment:hover {
     transform: none !important;
   }
