@@ -2,6 +2,34 @@ package services
 
 import "testing"
 
+func TestNormalizeHomeProviderTabsDefaultsWhenEmpty(t *testing.T) {
+	got := normalizeHomeProviderTabs(nil)
+	want := []string{"claude", "codex", "gemini"}
+
+	if len(got) != len(want) {
+		t.Fatalf("len = %d, want %d: %+v", len(got), len(want), got)
+	}
+	for index := range want {
+		if got[index] != want[index] {
+			t.Fatalf("tab[%d] = %q, want %q", index, got[index], want[index])
+		}
+	}
+}
+
+func TestNormalizeHomeProviderTabsFiltersInvalidAndDuplicateValues(t *testing.T) {
+	got := normalizeHomeProviderTabs([]string{" opencode ", "invalid", "others", "opencode", "gemini"})
+	want := []string{"opencode", "others", "gemini"}
+
+	if len(got) != len(want) {
+		t.Fatalf("len = %d, want %d: %+v", len(got), len(want), got)
+	}
+	for index := range want {
+		if got[index] != want[index] {
+			t.Fatalf("tab[%d] = %q, want %q", index, got[index], want[index])
+		}
+	}
+}
+
 func TestNormalizeHeatmapDisplaySettingsIntensityMetricDefaultsToRequests(t *testing.T) {
 	settings := AppSettings{
 		HeatmapDailyScaleFactor:   defaultHeatmapDailyScale,

@@ -1,3 +1,18 @@
+# Code Switch v2.8.50
+
+## 新增
+- **首页供应商 Tab 显示可配置**：通用设置新增“首页供应商 Tab”，可控制首页顶部显示 `Claude Code`、`Codex`、`Gemini`、`OpenCode` 与“其他”哪些供应商分类；默认仅显示 `Claude Code`、`Codex`、`Gemini`，并会至少保留一个可见 Tab，避免首页被自己手滑关成空城。
+- **首页和设置项统一显示供应商图标**：设置页的供应商显示按钮、首页顶部 Tab 均改为“图标 + 名称”展示，复用同一套图标映射，`Codex` 使用 OpenAI 图标，`其他` 提供内置 fallback 图标，整体观感不再像原生 checkbox 临时客串。
+
+## 技术改进
+- **首页 Tab 可见性纳入 AppSettings 持久化**：新增 `home_provider_tabs` 字段并在前后端统一归一化，旧配置自动回退到默认三项，非法值与重复值会被过滤。
+- **Tab 配置来源收口**：`MAIN_TABS` 改为复用共享的 `HOME_PROVIDER_TAB_OPTIONS`，首页渲染、设置页展示和持久化合法值不再三套配置各唱各的调。
+
+## 发布
+- **本次发版版本号统一推进到 `v2.8.50`**：同步更新应用常量、构建配置、Darwin `Info.plist` / `Info.dev.plist`、Windows 版本信息与 Linux `nfpm` 版本，并准备推送 `v2.8.50` tag 触发 GitHub 自动打包。
+
+---
+
 # Code Switch v2.8.49
 
 ## 修复

@@ -4,6 +4,11 @@ import {
   normalizeHeatmapDisplaySettings,
 } from '../data/heatmapDisplaySettings'
 import {
+  DEFAULT_HOME_PROVIDER_TABS,
+  normalizeHomeProviderTabs,
+  type HomeProviderTab,
+} from '../data/homeProviderTabs'
+import {
   createDefaultBudgetQuotaAdjustments,
   createDefaultBudgetQuotaSettings,
   normalizeBudgetQuotaAdjustments,
@@ -35,6 +40,7 @@ export type AppSettings = {
   heatmap_intensity_stop_l2: number
   heatmap_intensity_stop_l3: number
   show_home_title: boolean
+  home_provider_tabs: HomeProviderTab[]
   budget_total: number
   budget_used_adjustment: number
   budget_cycle_enabled: boolean
@@ -81,6 +87,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   heatmap_intensity_stop_l2: DEFAULT_HEATMAP_DISPLAY_SETTINGS.intensityStopL2,
   heatmap_intensity_stop_l3: DEFAULT_HEATMAP_DISPLAY_SETTINGS.intensityStopL3,
   show_home_title: true,
+  home_provider_tabs: [...DEFAULT_HOME_PROVIDER_TABS],
   budget_total: 0,
   budget_used_adjustment: 0,
   budget_cycle_enabled: false,
@@ -144,6 +151,7 @@ const normalizeAppSettingsResponse = (value: unknown): AppSettings => {
     intensityStopL2: data?.heatmap_intensity_stop_l2,
     intensityStopL3: data?.heatmap_intensity_stop_l3,
   })
+  const normalizedHomeProviderTabs = normalizeHomeProviderTabs(data?.home_provider_tabs)
   return {
     ...DEFAULT_SETTINGS,
     ...data,
@@ -157,6 +165,7 @@ const normalizeAppSettingsResponse = (value: unknown): AppSettings => {
     heatmap_intensity_stop_l1: normalizedHeatmapDisplay.intensityStopL1,
     heatmap_intensity_stop_l2: normalizedHeatmapDisplay.intensityStopL2,
     heatmap_intensity_stop_l3: normalizedHeatmapDisplay.intensityStopL3,
+    home_provider_tabs: normalizedHomeProviderTabs,
     budget_quota_used_adjustments: normalizeBudgetQuotaAdjustments(
       data?.budget_quota_used_adjustments,
       {
@@ -231,6 +240,7 @@ const serializeAppSettings = (settings: AppSettings) => {
     budget_refresh_time_codex: budgetLegacyCodex.refreshTime,
     budget_refresh_day_codex: budgetLegacyCodex.refreshWeekday,
     budget_refresh_month_day_codex: budgetLegacyCodex.refreshMonthDay,
+    home_provider_tabs: normalizeHomeProviderTabs(settings.home_provider_tabs),
     budget_quota_used_adjustments_codex: serializeBudgetQuotaAdjustments(settings.budget_quota_used_adjustments_codex),
     budget_quota_settings_codex: serializeBudgetQuotaSettings(settings.budget_quota_settings_codex),
   }

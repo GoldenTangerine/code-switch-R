@@ -1,12 +1,7 @@
 import type { ProviderTab } from './types'
+import { HOME_PROVIDER_TAB_OPTIONS } from '../../data/homeProviderTabs'
 
-export const MAIN_TABS = [
-  { id: 'claude', label: 'Claude Code' },
-  { id: 'codex', label: 'Codex' },
-  { id: 'gemini', label: 'Gemini' },
-  { id: 'opencode', label: 'OpenCode' },
-  { id: 'others', label: '其他' },
-] as const
+export const MAIN_TABS = HOME_PROVIDER_TAB_OPTIONS
 
 export const PROVIDER_TAB_IDS = MAIN_TABS.map((tab) => tab.id) as ProviderTab[]
 

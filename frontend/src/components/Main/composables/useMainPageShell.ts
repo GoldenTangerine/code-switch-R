@@ -13,6 +13,7 @@ import {
   normalizeHeatmapDisplaySettings,
   type HeatmapDisplaySettings,
 } from '../../../data/heatmapDisplaySettings'
+import { normalizeHomeProviderTabs } from '../../../data/homeProviderTabs'
 import {
   fetchConfigImportStatus,
   importFromCcSwitch,
@@ -50,6 +51,7 @@ type BrowserWindowWithWailsBridge = Window & {
 type UseMainPageShellOptions = {
   t: TranslateFn
   activeTab: ComputedRef<ProviderTab>
+  visibleProviderTabs: Ref<ProviderTab[]>
   selectedToolId: Ref<string | null>
   customCliTools: Ref<CustomCliTool[]>
   customCliProxyStates: Record<string, boolean>
@@ -103,6 +105,7 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
   const {
     t,
     activeTab,
+    visibleProviderTabs,
     selectedToolId,
     customCliTools,
     customCliProxyStates,
@@ -217,6 +220,7 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
       }
 
       showHomeTitle.value = data?.show_home_title ?? true
+      visibleProviderTabs.value = normalizeHomeProviderTabs(data?.home_provider_tabs) as ProviderTab[]
       enableRoundRobin.value = data?.enable_round_robin ?? false
     } catch (error) {
       console.error('failed to load app settings', error)
@@ -228,6 +232,7 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
         heatmapDisplaySettings.value = { ...DEFAULT_HEATMAP_DISPLAY_SETTINGS }
       }
       showHomeTitle.value = true
+      visibleProviderTabs.value = normalizeHomeProviderTabs(null) as ProviderTab[]
       enableRoundRobin.value = false
       showToast(t('components.main.errors.loadAppSettingsFailed'), 'warning')
     }

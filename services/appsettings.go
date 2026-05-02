@@ -60,6 +60,7 @@ type AppSettings struct {
 	HeatmapIntensityStopL2          int                    `json:"heatmap_intensity_stop_l2"`
 	HeatmapIntensityStopL3          int                    `json:"heatmap_intensity_stop_l3"`
 	ShowHomeTitle                   bool                   `json:"show_home_title"`
+	HomeProviderTabs                []string               `json:"home_provider_tabs"`
 	BudgetTotal                     float64                `json:"budget_total"`
 	BudgetUsedAdjustment            float64                `json:"budget_used_adjustment"`
 	BudgetCycleEnabled              bool                   `json:"budget_cycle_enabled"`
@@ -282,6 +283,7 @@ func (as *AppSettingsService) defaultSettings() AppSettings {
 		HeatmapIntensityStopL2:          defaultHeatmapIntensityL2,
 		HeatmapIntensityStopL3:          defaultHeatmapIntensityL3,
 		ShowHomeTitle:                   true,
+		HomeProviderTabs:                defaultHomeProviderTabs(),
 		BudgetTotal:                     0,
 		BudgetUsedAdjustment:            0,
 		BudgetCycleEnabled:              false,
@@ -319,6 +321,40 @@ func (as *AppSettingsService) defaultSettings() AppSettings {
 	}
 }
 
+func defaultHomeProviderTabs() []string {
+	return []string{"claude", "codex", "gemini"}
+}
+
+func normalizeHomeProviderTabs(tabs []string) []string {
+	if len(tabs) == 0 {
+		return defaultHomeProviderTabs()
+	}
+
+	allowedTabs := map[string]bool{
+		"claude":   true,
+		"codex":    true,
+		"gemini":   true,
+		"opencode": true,
+		"others":   true,
+	}
+	seenTabs := make(map[string]bool, len(tabs))
+	normalizedTabs := make([]string, 0, len(tabs))
+
+	for _, tab := range tabs {
+		tab = strings.TrimSpace(tab)
+		if !allowedTabs[tab] || seenTabs[tab] {
+			continue
+		}
+		seenTabs[tab] = true
+		normalizedTabs = append(normalizedTabs, tab)
+	}
+
+	if len(normalizedTabs) == 0 {
+		return defaultHomeProviderTabs()
+	}
+	return normalizedTabs
+}
+
 // GetAppSettings returns the persisted app settings or defaults if the file does not exist.
 func (as *AppSettingsService) GetAppSettings() (AppSettings, error) {
 	as.mu.Lock()
@@ -331,6 +367,7 @@ func (as *AppSettingsService) SaveAppSettings(settings AppSettings) (AppSettings
 	as.mu.Lock()
 	defer as.mu.Unlock()
 	settings.HeatmapGranularity = normalizeHeatmapGranularity(settings.HeatmapGranularity)
+	settings.HomeProviderTabs = normalizeHomeProviderTabs(settings.HomeProviderTabs)
 	normalizeHeatmapDisplaySettings(&settings)
 	normalizeBudgetSettings(&settings)
 	settings.UpdateHistoryKeepCount = normalizeUpdateHistoryKeepCount(settings.UpdateHistoryKeepCount)
@@ -371,6 +408,7 @@ func (as *AppSettingsService) loadLocked() (AppSettings, error) {
 	}
 	settings.HeatmapGranularity = normalizeHeatmapGranularity(settings.HeatmapGranularity)
 	normalizeHeatmapDisplaySettings(&settings)
+	settings.HomeProviderTabs = normalizeHomeProviderTabs(settings.HomeProviderTabs)
 	normalizeBudgetSettings(&settings)
 	settings.UpdateHistoryKeepCount = normalizeUpdateHistoryKeepCount(settings.UpdateHistoryKeepCount)
 	return settings, nil
@@ -383,6 +421,7 @@ func (as *AppSettingsService) saveLocked(settings AppSettings) error {
 	}
 	settings.HeatmapGranularity = normalizeHeatmapGranularity(settings.HeatmapGranularity)
 	normalizeHeatmapDisplaySettings(&settings)
+	settings.HomeProviderTabs = normalizeHomeProviderTabs(settings.HomeProviderTabs)
 	normalizeBudgetSettings(&settings)
 	settings.UpdateHistoryKeepCount = normalizeUpdateHistoryKeepCount(settings.UpdateHistoryKeepCount)
 	data, err := json.MarshalIndent(settings, "", "  ")

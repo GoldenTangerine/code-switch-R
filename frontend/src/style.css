@@ -2858,7 +2858,7 @@ html.dark .secondary-btn:active:not(:disabled) {
 }
 
 /* 全局按钮样式修复 - 防止 Tailwind Preflight 导致的布局问题 */
-button:where(:not(.ghost-icon):not(.mac-switch):not(.nav-item):not(.platform-tab):not(.tab-pill):not(.collapse-btn):not(.toggle-switch):not(.relay-toggle-switch):not(.action-btn):not(.primary-btn):not(.btn):not(.remove-btn):not(.icon-select-button):not(.level-select-button):not(.update-notification-btn):not(.performance-trigger):not(.card-cost-trigger):not(.logs-select-button):not(.logs-select-option):not(.logs-sub-filter-clear):not(.logs-filter-tool-btn):not(.logs-cost-modal__row):not(.provider-quota-query-config-modal__template-card)) {
+button:where(:not(.ghost-icon):not(.mac-switch):not(.nav-item):not(.platform-tab):not(.tab-pill):not(.collapse-btn):not(.toggle-switch):not(.relay-toggle-switch):not(.action-btn):not(.primary-btn):not(.btn):not(.remove-btn):not(.icon-select-button):not(.level-select-button):not(.update-notification-btn):not(.performance-trigger):not(.card-cost-trigger):not(.logs-select-button):not(.logs-select-option):not(.logs-sub-filter-clear):not(.logs-filter-tool-btn):not(.logs-cost-modal__row):not(.provider-quota-query-config-modal__template-card):not(.opencode-row-expand):not(.opencode-row-remove):not(.opencode-mini-action):not(.opencode-model-chip)) {
   display: inline-flex !important;
   flex-direction: row !important;
   align-items: center !important;

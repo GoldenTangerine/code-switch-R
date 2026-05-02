@@ -2,6 +2,7 @@ import { getLobeIconSvg, preloadLobeIcons } from '../icons/lobeIconMap'
 
 const INLINE_PROVIDER_ICONS: Record<string, string> = {
   opencode: '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3.25 4.75 7.5v9L12 20.75l7.25-4.25v-9L12 3.25Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="m9.25 9-2.5 3 2.5 3M14.75 9l2.5 3-2.5 3M13.25 7.75l-2.5 8.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  others: '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6.75 8.25h10.5M6.75 12h10.5M6.75 15.75h10.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M4.75 4.75h14.5v14.5H4.75z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>',
 }
 
 const PROVIDER_COLOR_ICON_ALIASES: Record<string, string> = {

@@ -21,6 +21,15 @@ import {
   normalizeHeatmapIntensityMetric,
   type HeatmapDisplaySettings,
 } from '../../data/heatmapDisplaySettings'
+import {
+  HOME_PROVIDER_TAB_OPTIONS,
+  normalizeHomeProviderTabs,
+  type HomeProviderTab,
+} from '../../data/homeProviderTabs'
+import {
+  getProviderDisplayIconSvg,
+  preloadProviderDisplayIcons,
+} from '../../utils/providerIconAssets'
 import { checkUpdate, downloadUpdate, restartApp, getUpdateState, setAutoCheckEnabled, type UpdateInfo, type UpdateState } from '../../services/update'
 import { fetchCurrentVersion } from '../../services/version'
 import { getBlacklistSettings, updateBlacklistSettings, getLevelBlacklistEnabled, setLevelBlacklistEnabled, getBlacklistEnabled, setBlacklistEnabled, type BlacklistSettings } from '../../services/settings'
@@ -78,6 +87,21 @@ const getCachedJson = <T,>(key: string, defaultValue: T): T => {
     return defaultValue
   }
 }
+const getCachedHomeProviderTabs = (): HomeProviderTab[] => {
+  return normalizeHomeProviderTabs(getCachedJson('homeProviderTabs', null))
+}
+
+const getHomeProviderTabIconSvg = (icon: string) => getProviderDisplayIconSvg(icon)
+
+const getHomeProviderTabInitials = (label: string) => {
+  return label
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => word[0])
+    .join('')
+    .slice(0, 2)
+    .toUpperCase()
+}
 
 const mapBudgetQuotaValues = (resolveValue: (key: BudgetQuotaKey) => number): BudgetQuotaAdjustments => {
   const nextValues = createDefaultBudgetQuotaAdjustments()
@@ -134,6 +158,7 @@ const heatmapIntensityStopL1 = ref(initialHeatmapDisplaySettings.intensityStopL1
 const heatmapIntensityStopL2 = ref(initialHeatmapDisplaySettings.intensityStopL2)
 const heatmapIntensityStopL3 = ref(initialHeatmapDisplaySettings.intensityStopL3)
 const homeTitleVisible = ref(getCachedValue('homeTitle', true))
+const homeProviderTabs = ref<HomeProviderTab[]>(getCachedHomeProviderTabs())
 const autoStartEnabled = ref(getCachedValue('autoStart', false))
 const autoUpdateEnabled = ref(getCachedValue('autoUpdate', true))
 const updateHistoryKeepCount = ref(getCachedNumber('updateHistoryKeepCount', defaultUpdateHistoryKeepCount))
@@ -437,6 +462,7 @@ const syncAppSettingsCache = () => {
   localStorage.setItem('app-settings-heatmapIntensityStopL2', String(heatmapIntensityStopL2.value))
   localStorage.setItem('app-settings-heatmapIntensityStopL3', String(heatmapIntensityStopL3.value))
   localStorage.setItem('app-settings-homeTitle', String(homeTitleVisible.value))
+  localStorage.setItem('app-settings-homeProviderTabs', JSON.stringify(normalizeHomeProviderTabs(homeProviderTabs.value)))
   localStorage.removeItem('app-settings-budgetUsedAdjustment')
   localStorage.setItem('app-settings-budgetQuotaUsedAdjustments', JSON.stringify(budgetQuotaUsedAdjustments.value))
   localStorage.setItem('app-settings-budgetQuotaSettings', JSON.stringify(budgetQuotaSettings.value))
@@ -1051,6 +1077,7 @@ const loadAppSettings = async () => {
       intensityStopL3: data?.heatmap_intensity_stop_l3,
     })
     homeTitleVisible.value = data?.show_home_title ?? true
+    homeProviderTabs.value = normalizeHomeProviderTabs(data?.home_provider_tabs)
     budgetQuotaUsedAdjustments.value = normalizeBudgetQuotaAdjustments(
       data?.budget_quota_used_adjustments,
       {
@@ -1113,6 +1140,7 @@ const loadAppSettings = async () => {
     heatmapGranularity.value = 'daily'
     applyHeatmapDisplaySettingsToState(DEFAULT_HEATMAP_DISPLAY_SETTINGS)
     homeTitleVisible.value = true
+    homeProviderTabs.value = normalizeHomeProviderTabs(null)
     budgetQuotaUsedAdjustments.value = createDefaultBudgetQuotaAdjustments()
     budgetQuotaSettings.value = createDefaultBudgetQuotaSettings()
     budgetQuotaTrackedUsage.value = createDefaultBudgetQuotaAdjustments()
@@ -1184,6 +1212,7 @@ const persistAppSettingsNow = async () => {
     heatmapIntensityStopL1.value = normalizedHeatmapDisplay.intensityStopL1
     heatmapIntensityStopL2.value = normalizedHeatmapDisplay.intensityStopL2
     heatmapIntensityStopL3.value = normalizedHeatmapDisplay.intensityStopL3
+    homeProviderTabs.value = normalizeHomeProviderTabs(homeProviderTabs.value)
     const legacyBudget = projectBudgetQuotaToLegacy(
       normalizedBudgetQuotaSettings,
       normalizedBudgetQuotaUsedAdjustments,
@@ -1203,6 +1232,7 @@ const persistAppSettingsNow = async () => {
       heatmap_intensity_stop_l2: normalizedHeatmapDisplay.intensityStopL2,
       heatmap_intensity_stop_l3: normalizedHeatmapDisplay.intensityStopL3,
       show_home_title: homeTitleVisible.value,
+      home_provider_tabs: homeProviderTabs.value,
       budget_total: legacyBudget.total,
       budget_used_adjustment: legacyBudget.adjustment,
       budget_quota_used_adjustments: normalizedBudgetQuotaUsedAdjustments,
@@ -1663,6 +1693,8 @@ const downloadFromWebDAV = () => {
 }
 
 onMounted(async () => {
+  void preloadProviderDisplayIcons(HOME_PROVIDER_TAB_OPTIONS.map((tab) => tab.icon))
+
   await loadAppSettings()
 
   // 加载当前版本号
@@ -1763,6 +1795,39 @@ onBeforeUnmount(() => {
               />
               <span></span>
             </label>
+          </ListItem>
+          <ListItem :label="$t('components.general.label.homeProviderTabs')">
+            <div class="home-provider-tabs-setting">
+              <div class="home-provider-tabs-options">
+                <label
+                  v-for="tab in HOME_PROVIDER_TAB_OPTIONS"
+                  :key="tab.id"
+                  class="provider-tab-option"
+                  :class="{ selected: homeProviderTabs.includes(tab.id) }"
+                >
+                  <input
+                    v-model="homeProviderTabs"
+                    class="provider-tab-option-input"
+                    type="checkbox"
+                    :value="tab.id"
+                    :disabled="settingsLoading || saveBusy"
+                    @change="persistAppSettings"
+                  />
+                  <span class="provider-tab-option-icon" aria-hidden="true">
+                    <span
+                      v-if="getHomeProviderTabIconSvg(tab.icon)"
+                      class="provider-tab-option-svg"
+                      v-html="getHomeProviderTabIconSvg(tab.icon)"
+                    ></span>
+                    <span v-else class="provider-tab-option-fallback">
+                      {{ getHomeProviderTabInitials(tab.label) }}
+                    </span>
+                  </span>
+                  <span>{{ tab.label }}</span>
+                </label>
+              </div>
+              <span class="hint-text">{{ $t('components.general.label.homeProviderTabsHint') }}</span>
+            </div>
           </ListItem>
           <ListItem :label="$t('components.general.label.autoStart')">
             <label class="mac-switch">
@@ -2892,8 +2957,106 @@ onBeforeUnmount(() => {
   overflow-wrap: normal;
 }
 
+.home-provider-tabs-setting {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.home-provider-tabs-options {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  max-width: 520px;
+}
+
+.provider-tab-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 7px 11px;
+  border: 1px solid var(--mac-border);
+  border-radius: 9px;
+  background: var(--mac-surface);
+  color: var(--mac-text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.provider-tab-option:hover {
+  border-color: var(--mac-accent);
+  color: var(--mac-text);
+}
+
+.provider-tab-option.selected {
+  border-color: rgba(59, 130, 246, 0.6);
+  background: rgba(59, 130, 246, 0.12);
+  color: var(--mac-accent);
+}
+
+.provider-tab-option-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.provider-tab-option-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: currentColor;
+}
+
+.provider-tab-option-svg,
+.provider-tab-option-svg :deep(svg) {
+  display: block;
+  width: 16px;
+  height: 16px;
+}
+
+.provider-tab-option-fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 5px;
+  background: rgba(148, 163, 184, 0.16);
+  font-size: 8px;
+  font-weight: 700;
+}
+
+.provider-tab-option:has(input:disabled) {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 :global(.dark) .hint-text {
   color: rgba(255, 255, 255, 0.5);
+}
+
+:global(.dark) .provider-tab-option {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+:global(.dark) .provider-tab-option.selected {
+  background: rgba(96, 165, 250, 0.16);
+  border-color: rgba(96, 165, 250, 0.46);
 }
 
 .budget-input {

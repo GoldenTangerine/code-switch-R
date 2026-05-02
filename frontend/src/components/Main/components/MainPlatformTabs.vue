@@ -17,7 +17,17 @@
         type="button"
         @click="$emit('change', idx)"
       >
-        {{ tab.label }}
+        <span class="tab-pill__icon" aria-hidden="true">
+          <span
+            v-if="getTabIconSvg(tab.icon)"
+            class="tab-pill__icon-svg"
+            v-html="getTabIconSvg(tab.icon)"
+          ></span>
+          <span v-else class="tab-pill__icon-fallback">
+            {{ getTabInitials(tab.label) }}
+          </span>
+        </span>
+        <span class="tab-pill__label">{{ tab.label }}</span>
       </button>
     </div>
 
@@ -105,6 +115,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import {
+  getProviderDisplayIconSvg,
+  preloadProviderDisplayIcons,
+} from '../../../utils/providerIconAssets'
 import type { MainTabOption } from '../types'
 
 const props = withDefaults(defineProps<{
@@ -129,6 +143,18 @@ defineEmits<{
 const { t } = useI18n()
 const tabGroupRef = ref<HTMLDivElement | null>(null)
 const measuredTabGroupWidth = ref<number | null>(null)
+
+const getTabIconSvg = (icon: string) => getProviderDisplayIconSvg(icon)
+
+const getTabInitials = (label: string) => {
+  return label
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => word[0])
+    .join('')
+    .slice(0, 2)
+    .toUpperCase()
+}
 
 let tabGroupResizeObserver: ResizeObserver | null = null
 let tabGroupMeasureFrameId: number | null = null
@@ -214,8 +240,9 @@ const tabGroupStyle = computed(() => {
 })
 
 watch(
-  () => props.tabs.map((tab) => `${tab.id}:${tab.label}`).join('|'),
+  () => props.tabs.map((tab) => `${tab.id}:${tab.label}:${tab.icon}`).join('|'),
   () => {
+    void preloadProviderDisplayIcons(props.tabs.map((tab) => tab.icon))
     scheduleTabGroupMeasure()
     bindResizeObserver()
   },
@@ -260,6 +287,43 @@ onBeforeUnmount(() => {
   max-width: none;
   flex: 0 0 auto;
   overflow: visible;
+}
+
+.main-platform-tabs :deep(.tab-pill) {
+  gap: 7px;
+}
+
+.tab-pill__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: currentColor;
+}
+
+.tab-pill__icon-svg,
+.tab-pill__icon-svg :deep(svg) {
+  display: block;
+  width: 16px;
+  height: 16px;
+}
+
+.tab-pill__icon-fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 5px;
+  background: rgba(148, 163, 184, 0.16);
+  font-size: 8px;
+  font-weight: 700;
+}
+
+.tab-pill__label {
+  line-height: 1.1;
 }
 
 .main-platform-tabs .section-controls {

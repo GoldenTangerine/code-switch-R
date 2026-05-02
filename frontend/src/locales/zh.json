@@ -1331,6 +1331,8 @@
         "heatmapGranularityDaily": "按天",
         "heatmapDisplayConfig": "热力墙显示配置",
         "homeTitle": "显示首页标题",
+        "homeProviderTabs": "首页供应商 Tab",
+        "homeProviderTabsHint": "控制首页顶部显示哪些供应商 Tab；至少保留一个，默认 Claude Code、Codex、Gemini。",
         "budgetTotal": "预算总额",
         "budgetTotalHint": "用于托盘菜单进度条（USD）",
         "budgetUsedAdjustment": "已用额度",

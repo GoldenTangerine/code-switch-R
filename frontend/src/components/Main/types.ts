@@ -11,6 +11,7 @@ export type ProviderTab = 'claude' | 'codex' | 'gemini' | 'opencode' | 'others'
 export type MainTabOption = {
   id: ProviderTab
   label: string
+  icon: string
 }
 
 export type ResolvedTheme = 'light' | 'dark'

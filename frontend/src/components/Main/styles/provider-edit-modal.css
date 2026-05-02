@@ -811,7 +811,8 @@
 }
 
 .opencode-model-row {
-  grid-template-columns: 28px minmax(0, 1fr) minmax(0, 1fr) 40px;
+  grid-template-columns: 36px minmax(0, 1fr) minmax(0, 1fr) 40px;
+  gap: 12px;
 }
 
 .opencode-kv-row--head,
@@ -860,13 +861,18 @@
 .opencode-row-remove {
   width: 34px;
   height: 34px;
+  padding: 0;
+  box-sizing: border-box;
   justify-self: center;
   flex: 0 0 auto;
 }
 
 .opencode-row-expand {
-  width: 28px;
-  font-size: 13px;
+  width: 34px;
+  border-color: color-mix(in srgb, var(--mac-accent) 18%, transparent);
+  background: color-mix(in srgb, var(--mac-accent) 9%, transparent);
+  color: var(--mac-accent);
+  font-size: 18px;
 }
 
 .opencode-row-remove {

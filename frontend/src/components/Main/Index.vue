@@ -207,6 +207,7 @@ import {
   getProviderDisplayIconSvg,
   preloadProviderDisplayIcons,
 } from '../../utils/providerIconAssets'
+import { DEFAULT_HOME_PROVIDER_TABS } from '../../data/homeProviderTabs'
 import type { CustomCliTool } from '../../services/customCliService'
 import { MAIN_TABS } from './constants'
 import { useAvailabilityState } from './composables/useAvailabilityState'
@@ -237,9 +238,11 @@ type ProviderEditModalExpose = {
 const { t, locale } = useI18n()
 const router = useRouter()
 
-const tabs = MAIN_TABS
+const visibleProviderTabs = ref<ProviderTab[]>([...DEFAULT_HOME_PROVIDER_TABS])
+const visibleProviderTabSet = computed(() => new Set<ProviderTab>(visibleProviderTabs.value))
+const tabs = computed(() => MAIN_TABS.filter((tab) => visibleProviderTabSet.value.has(tab.id)))
 const selectedIndex = ref(0)
-const activeTab = computed<ProviderTab>(() => tabs[selectedIndex.value]?.id ?? tabs[0].id)
+const activeTab = computed<ProviderTab>(() => tabs.value[selectedIndex.value]?.id ?? tabs.value[0]?.id ?? 'claude')
 const heatmapRef = ref<MainUsageHeatmapExpose | null>(null)
 const providerEditModalRef = ref<ProviderEditModalExpose | null>(null)
 
@@ -307,7 +310,7 @@ const {
 })
 
 const switchToPlatform = (platform: ProviderTab) => {
-  const tabIndex = tabs.findIndex((tab) => tab.id === platform)
+  const tabIndex = tabs.value.findIndex((tab) => tab.id === platform)
   if (tabIndex < 0) return
   if (selectedIndex.value !== tabIndex) {
     selectedIndex.value = tabIndex
@@ -445,7 +448,7 @@ const {
   handleDuplicate,
   handleProviderEnabledChange,
 } = useProviderForm({
-  initialTab: tabs[0].id,
+  initialTab: activeTab.value,
   t,
   showToast,
   getActiveTab: () => activeTab.value,
@@ -463,6 +466,7 @@ const {
 pageShell = useMainPageShell({
   t,
   activeTab,
+  visibleProviderTabs,
   selectedToolId,
   customCliTools,
   customCliProxyStates,
@@ -644,6 +648,32 @@ const activeCardViewModels = computed<ProviderCardViewModel[]>(() =>
 )
 
 watch(
+  tabs,
+  (nextTabs, previousTabs) => {
+    if (nextTabs.length === 0) {
+      selectedIndex.value = 0
+      return
+    }
+
+    const previousActiveTab = previousTabs?.[selectedIndex.value]?.id
+    if (previousActiveTab) {
+      const nextIndex = nextTabs.findIndex((tab) => tab.id === previousActiveTab)
+      if (nextIndex >= 0) {
+        selectedIndex.value = nextIndex
+        return
+      }
+      selectedIndex.value = 0
+      return
+    }
+
+    if (selectedIndex.value >= nextTabs.length) {
+      selectedIndex.value = 0
+    }
+  },
+  { immediate: true },
+)
+
+watch(
   () => activeCards.value.map((card) => card.icon),
   (icons) => {
     void preloadProviderDisplayIcons(icons)
@@ -663,7 +693,7 @@ const bindCardRef = (card: AutomationCard) => (element: Element | ComponentPubli
 }
 
 const onTabChange = (index: number) => {
-  const nextTab = tabs[index]?.id
+  const nextTab = tabs.value[index]?.id
   if (!nextTab) return
   switchToPlatform(nextTab)
 }

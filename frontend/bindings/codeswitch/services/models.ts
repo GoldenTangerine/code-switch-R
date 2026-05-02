@@ -12,6 +12,7 @@ import * as time$0 from "../../time/models.js";
 export class AppSettings {
     "show_heatmap": boolean;
     "show_home_title": boolean;
+    "home_provider_tabs": string[];
     "auto_start": boolean;
     "auto_update": boolean;
     "update_history_keep_count": number;
@@ -29,6 +30,9 @@ export class AppSettings {
         }
         if (!("show_home_title" in $$source)) {
             this["show_home_title"] = false;
+        }
+        if (!("home_provider_tabs" in $$source)) {
+            this["home_provider_tabs"] = [];
         }
         if (!("auto_start" in $$source)) {
             this["auto_start"] = false;
