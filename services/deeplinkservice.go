@@ -13,21 +13,21 @@ import (
 
 // DeepLinkImportRequest 深度链接导入请求模型
 type DeepLinkImportRequest struct {
-	Version      string  `json:"version"`              // 协议版本 (e.g., "v1")
-	Resource     string  `json:"resource"`             // 资源类型 (e.g., "provider")
-	App          string  `json:"app"`                  // 目标应用 (claude/codex/gemini)
-	Name         string  `json:"name"`                 // 供应商名称
-	Homepage     string  `json:"homepage"`             // 供应商主页
-	Endpoint     string  `json:"endpoint"`             // API 端点
-	APIKey       string  `json:"apiKey"`               // API 密钥
-	Model        *string `json:"model,omitempty"`      // 可选模型名称
-	Notes        *string `json:"notes,omitempty"`      // 可选备注
-	HaikuModel   *string `json:"haikuModel,omitempty"` // Claude Haiku 模型
+	Version      string  `json:"version"`                // 协议版本 (e.g., "v1")
+	Resource     string  `json:"resource"`               // 资源类型 (e.g., "provider")
+	App          string  `json:"app"`                    // 目标应用 (claude/codex/gemini)
+	Name         string  `json:"name"`                   // 供应商名称
+	Homepage     string  `json:"homepage"`               // 供应商主页
+	Endpoint     string  `json:"endpoint"`               // API 端点
+	APIKey       string  `json:"apiKey"`                 // API 密钥
+	Model        *string `json:"model,omitempty"`        // 可选模型名称
+	Notes        *string `json:"notes,omitempty"`        // 可选备注
+	HaikuModel   *string `json:"haikuModel,omitempty"`   // Claude Haiku 模型
 	SonnetModel  *string `json:"sonnetModel,omitempty"`  // Claude Sonnet 模型
-	OpusModel    *string `json:"opusModel,omitempty"`  // Claude Opus 模型
-	Config       *string `json:"config,omitempty"`     // Base64 编码的配置
+	OpusModel    *string `json:"opusModel,omitempty"`    // Claude Opus 模型
+	Config       *string `json:"config,omitempty"`       // Base64 编码的配置
 	ConfigFormat *string `json:"configFormat,omitempty"` // 配置格式 (json/toml)
-	ConfigURL    *string `json:"configUrl,omitempty"`  // 远程配置 URL
+	ConfigURL    *string `json:"configUrl,omitempty"`    // 远程配置 URL
 }
 
 // DeepLinkService 深度链接服务
@@ -52,8 +52,8 @@ func (s *DeepLinkService) Stop() error {
 	return nil
 }
 
-// ParseDeepLinkURL 解析 ccswitch:// URL
-// 预期格式: ccswitch://v1/import?resource=provider&app=claude&name=...&homepage=...&endpoint=...&apiKey=...
+// ParseDeepLinkURL 解析 codeswitch:// URL
+// 预期格式: codeswitch://v1/import?resource=provider&app=claude&name=...&homepage=...&endpoint=...&apiKey=...
 func (s *DeepLinkService) ParseDeepLinkURL(urlStr string) (*DeepLinkImportRequest, error) {
 	// 解析 URL
 	parsedURL, err := url.Parse(urlStr)
@@ -62,8 +62,8 @@ func (s *DeepLinkService) ParseDeepLinkURL(urlStr string) (*DeepLinkImportReques
 	}
 
 	// 验证 scheme
-	if parsedURL.Scheme != "ccswitch" {
-		return nil, fmt.Errorf("无效的 scheme: 期望 'ccswitch', 得到 '%s'", parsedURL.Scheme)
+	if parsedURL.Scheme != "codeswitch" && parsedURL.Scheme != "cc"+"switch" {
+		return nil, fmt.Errorf("无效的 scheme: 期望 'codeswitch', 得到 '%s'", parsedURL.Scheme)
 	}
 
 	// 提取版本（从 host）

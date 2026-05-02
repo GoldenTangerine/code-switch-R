@@ -28,7 +28,7 @@ export const fetchConfigImportStatus = async (): Promise<ConfigImportStatus> => 
   return (response as ConfigImportStatus) ?? emptyStatus
 }
 
-export const importFromCcSwitch = async (): Promise<ConfigImportResult> => {
+export const importLegacyConfig = async (): Promise<ConfigImportResult> => {
   const response = await Call.ByName('codeswitch/services.ImportService.ImportAll')
   return response as ConfigImportResult
 }

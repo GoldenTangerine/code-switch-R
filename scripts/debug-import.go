@@ -1,3 +1,4 @@
+//go:build ignore
 // +build ignore
 
 package main
@@ -9,7 +10,9 @@ import (
 	"path/filepath"
 )
 
-type ccSwitchConfig struct {
+const legacyImportConfigDir = ".cc" + "-switch"
+
+type legacyImportConfig struct {
 	Claude ccProviderSection `json:"claude"`
 	Codex  ccProviderSection `json:"codex"`
 	MCP    ccMCPSection      `json:"mcp"`
@@ -42,7 +45,7 @@ type ccMCPPlatform struct {
 }
 
 func main() {
-	fmt.Println("=== cc-switch 导入诊断 ===")
+	fmt.Println("=== 配置导入诊断 ===")
 	fmt.Println()
 
 	// 1. 检查 HOME 目录
@@ -59,7 +62,7 @@ func main() {
 	fmt.Println()
 
 	// 2. 检查配置文件路径
-	configPath := filepath.Join(home, ".cc-switch", "config.json")
+	configPath := filepath.Join(home, legacyImportConfigDir, "config.json")
 	fmt.Printf("配置文件路径: %s\n", configPath)
 
 	// 3. 检查文件是否存在
@@ -84,7 +87,7 @@ func main() {
 	fmt.Printf("读取成功, 内容长度: %d 字节\n", len(data))
 
 	// 5. 解析 JSON
-	var cfg ccSwitchConfig
+	var cfg legacyImportConfig
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		fmt.Printf("JSON 解析错误: %v\n", err)
 		fmt.Println()

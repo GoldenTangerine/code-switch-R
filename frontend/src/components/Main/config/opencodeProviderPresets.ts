@@ -1094,7 +1094,7 @@ export const opencodeProviderPresets: OpenCodeProviderPreset[] = [
   {
     name: "PackyCode",
     websiteUrl: "https://www.packyapi.com",
-    apiKeyUrl: "https://www.packyapi.com/register?aff=cc-switch",
+    apiKeyUrl: "https://www.packyapi.com/register",
     settingsConfig: {
       npm: "@ai-sdk/anthropic",
       name: "PackyCode",
@@ -1123,7 +1123,7 @@ export const opencodeProviderPresets: OpenCodeProviderPreset[] = [
   {
     name: "Cubence",
     websiteUrl: "https://cubence.com",
-    apiKeyUrl: "https://cubence.com/signup?code=CCSWITCH&source=ccs",
+    apiKeyUrl: "https://cubence.com/signup",
     settingsConfig: {
       npm: "@ai-sdk/anthropic",
       name: "Cubence",
@@ -1153,7 +1153,7 @@ export const opencodeProviderPresets: OpenCodeProviderPreset[] = [
   {
     name: "AIGoCode",
     websiteUrl: "https://aigocode.com",
-    apiKeyUrl: "https://aigocode.com/invite/CC-SWITCH",
+    apiKeyUrl: "https://aigocode.com/invite",
     settingsConfig: {
       npm: "@ai-sdk/anthropic",
       name: "AIGoCode",
@@ -1183,7 +1183,7 @@ export const opencodeProviderPresets: OpenCodeProviderPreset[] = [
   {
     name: "RightCode",
     websiteUrl: "https://www.right.codes",
-    apiKeyUrl: "https://www.right.codes/register?aff=CCSWITCH",
+    apiKeyUrl: "https://www.right.codes/register",
     settingsConfig: {
       npm: "@ai-sdk/openai",
       name: "RightCode",
@@ -1242,7 +1242,7 @@ export const opencodeProviderPresets: OpenCodeProviderPreset[] = [
   {
     name: "AICoding",
     websiteUrl: "https://aicoding.sh",
-    apiKeyUrl: "https://aicoding.sh/i/CCSWITCH",
+    apiKeyUrl: "https://aicoding.sh/i",
     settingsConfig: {
       npm: "@ai-sdk/anthropic",
       name: "AICoding",
@@ -1272,7 +1272,7 @@ export const opencodeProviderPresets: OpenCodeProviderPreset[] = [
   {
     name: "CrazyRouter",
     websiteUrl: "https://www.crazyrouter.com",
-    apiKeyUrl: "https://www.crazyrouter.com/register?aff=OZcm&ref=cc-switch",
+    apiKeyUrl: "https://www.crazyrouter.com/register?aff=OZcm",
     settingsConfig: {
       npm: "@ai-sdk/anthropic",
       name: "CrazyRouter",

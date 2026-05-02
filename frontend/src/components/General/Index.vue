@@ -540,7 +540,7 @@ const levelBlacklistEnabled = ref(false)
 const blacklistLoading = ref(false)
 const blacklistSaving = ref(false)
 
-// cc-switch 导入相关状态
+// 配置导入相关状态
 const importStatus = ref<ConfigImportStatus | null>(null)
 const importPath = ref('')
 const importing = ref(false)
@@ -1545,7 +1545,7 @@ const toggleLevelBlacklist = async () => {
   }
 }
 
-// 加载 cc-switch 导入状态
+// 加载配置导入状态
 const loadImportStatus = async () => {
   importLoading.value = true
   try {

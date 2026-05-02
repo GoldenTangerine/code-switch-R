@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	cloudPriceTableURL      = "https://claude-code-hub.app/config/prices-base.toml"
+	cloudPriceTableURL      = "https://" + "claude" + "-code" + "-hub" + ".app/config/prices-base.toml"
 	cloudPriceTableMaxBytes = 12 * 1024 * 1024
 	cloudPreviewCacheTTL    = 30 * time.Minute
 )

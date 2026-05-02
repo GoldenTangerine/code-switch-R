@@ -127,7 +127,7 @@ func (s *SpeedTestService) makeRequest(client *http.Client, urlStr string) (*htt
 	}
 
 	// 设置 User-Agent
-	req.Header.Set("User-Agent", "cc-r-speedtest/1.0")
+	req.Header.Set("User-Agent", "code-switch-speedtest/1.0")
 
 	return client.Do(req)
 }

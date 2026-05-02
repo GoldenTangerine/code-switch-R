@@ -400,7 +400,7 @@
         "mcp": "Open MCP panel",
         "skill": "Open skill catalog",
         "gemini": "Open Gemini CLI manager",
-        "import": "Import cc-switch config",
+        "import": "Import config",
         "duplicate": "Duplicate provider"
       },
       "modelList": {
@@ -564,15 +564,15 @@
       "importConfig": {
         "tooltip": "Import {providers} providers · {servers} MCP servers",
         "success": "Imported {providers} providers and {servers} MCP servers",
-        "empty": "Everything from cc-switch is already in sync",
-        "error": "Failed to import cc-switch config",
+        "empty": "Providers and MCP servers are already in sync",
+        "error": "Failed to import config",
         "opencodeTooltip": "Import live providers from ~/.config/opencode/opencode.json",
         "opencodeSuccess": "Imported {providers} OpenCode live providers",
         "opencodeEmpty": "All OpenCode live providers are already managed",
         "opencodeError": "Failed to import OpenCode live config"
       },
       "firstRun": {
-        "message": "Welcome to Code Switch R! If you have cc-switch config, you can import it from Settings.",
+        "message": "Welcome to Code Switch R! If you have existing config, you can import it from Settings.",
         "goToSettings": "Go to Settings",
         "dismiss": "Later"
       },
@@ -1680,7 +1680,7 @@
       },
       "import": {
         "configPath": "Config file path",
-        "pathPlaceholder": "Enter cc-switch config file path",
+        "pathPlaceholder": "Enter config file path",
         "status": "Config status",
         "loading": "Loading...",
         "configFound": "Config file found",
@@ -2073,22 +2073,22 @@
   },
   "providerForm": {
     "partnerPromotion": {
-      "packycode": "PackyCode is an official partner of CC Switch. Register using this link and enter \"cc-switch\" promo code during recharge to get 10% off",
+      "packycode": "PackyCode relay service. Use this link to open the registration page.",
       "minimax_cn": "MiniMax Coding Plan Special Offer, Starter from ¥9.9",
       "minimax_en": "MiniMax Coding Plan Black Friday, Starter is now $2/mo (80% OFF!)",
       "dmxapi": "Claude Code exclusive model 66% OFF now!",
-      "cubence": "Cubence is an official partner of CC Switch. Register using this link and enter \"CCSWITCH\" promo code during recharge to get 10% off every top-up",
-      "aigocode": "AIGoCode is an official partner of CC Switch. Register using this link and get 10% bonus credit on your first top-up!",
-      "rightcode": "RightCode is an official partner of CC Switch. Register using this link and get 5% bonus credit on every top-up!",
-      "aicodemirror": "AICodeMirror is an official partner of CC Switch. Register using this link to get 20% off!",
-      "aicoding": "AI Coding offers an exclusive discount for CC Switch users — 10% off your first top-up!",
-      "crazyrouter": "CrazyRouter offers an exclusive bonus for CC Switch users — 30% extra credit on your first top-up!",
-      "sssaicode": "SSAI Code offers an exclusive bonus for CC Switch users — $10 extra credit on every top-up!",
-      "micu": "Micu is an official partner of CC Switch",
+      "cubence": "Cubence relay service. Use this link to open the registration page.",
+      "aigocode": "AIGoCode relay service. Use this link to open the registration page.",
+      "rightcode": "RightCode relay service. Use this link to open the registration page.",
+      "aicodemirror": "AICodeMirror relay service. Use this link to open the registration page.",
+      "aicoding": "AI Coding relay service. Use this link to open the registration page.",
+      "crazyrouter": "CrazyRouter relay service. Use this link to open the registration page.",
+      "sssaicode": "SSAI Code relay service. Use this link to open the registration page.",
+      "micu": "Micu relay service.",
       "ctok": "Join the CTok community on the official website and subscribe to a plan.",
-      "lionccapi": "LionCCAPI offers exclusive benefits for CC Switch users. After registration, add WeChat HSQBJ088888888 and mention 'cc-switch' to receive $10 free credits!",
-      "shengsuanyun": "Shengsuanyun offers exclusive benefits for CC Switch users. New users who register via this link get ¥10 free credits and 10% bonus on first top-up!",
-      "lemondata": "Lemon Code offers a special promotion for CC Switch users. Sign up via this link to receive $1 in free credits."
+      "lionccapi": "LionCCAPI relay service. Use this link to open the registration page.",
+      "shengsuanyun": "Shengsuanyun relay service. Use this link to open the registration page.",
+      "lemondata": "Lemon Code relay service. Use this link to open the registration page."
     },
     "presets": {
       "shengsuanyun": "Shengsuanyun"

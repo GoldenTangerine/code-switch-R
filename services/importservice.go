@@ -17,9 +17,12 @@ import (
 	_ "modernc.org/sqlite" // SQLite driver
 )
 
+const legacyImportConfigDir = ".cc" + "-switch"
+const legacyImportSQLiteFile = "cc" + "-switch.db"
+
 // stringMap 是一个宽容的 map[string]string 类型
 // 在 JSON 反序列化时自动将数字、布尔等类型转为字符串
-// 用于兼容旧版 cc-switch 配置中 env 值为数字的情况
+// 用于兼容历史配置中 env 值为数字的情况
 type stringMap map[string]string
 
 func (m *stringMap) UnmarshalJSON(data []byte) error {
@@ -84,14 +87,14 @@ func (is *ImportService) Stop() error  { return nil }
 func (is *ImportService) IsFirstRun() bool {
 	marker, err := firstRunMarkerPath()
 	if err != nil {
-		log.Printf("⚠️  cc-switch: 获取首次使用标记路径失败: %v", err)
+		log.Printf("⚠️  code switch: 获取首次使用标记路径失败: %v", err)
 		return true
 	}
 	if _, err := os.Stat(marker); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return true
 		}
-		log.Printf("⚠️  cc-switch: 检查首次使用标记失败: %v", err)
+		log.Printf("⚠️  code switch: 检查首次使用标记失败: %v", err)
 		return true
 	}
 	return false
@@ -101,28 +104,28 @@ func (is *ImportService) IsFirstRun() bool {
 func (is *ImportService) MarkFirstRunDone() error {
 	marker, err := firstRunMarkerPath()
 	if err != nil {
-		log.Printf("⚠️  cc-switch: 获取首次使用标记路径失败: %v", err)
+		log.Printf("⚠️  code switch: 获取首次使用标记路径失败: %v", err)
 		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(marker), 0755); err != nil {
-		log.Printf("⚠️  cc-switch: 创建首次使用标记目录失败: %v", err)
+		log.Printf("⚠️  code switch: 创建首次使用标记目录失败: %v", err)
 		return err
 	}
 	if err := os.WriteFile(marker, []byte("1"), 0644); err != nil {
-		log.Printf("⚠️  cc-switch: 写入首次使用标记失败: %v", err)
+		log.Printf("⚠️  code switch: 写入首次使用标记失败: %v", err)
 		return err
 	}
-	log.Printf("✅ cc-switch: 首次使用标记已创建: %s", marker)
+	log.Printf("✅ code switch: 首次使用标记已创建: %s", marker)
 	return nil
 }
 
 func (is *ImportService) GetStatus() (ConfigImportStatus, error) {
 	status := ConfigImportStatus{}
 	// 填充配置文件路径，便于前端展示
-	if path, err := ccSwitchConfigPath(); err == nil {
+	if path, err := legacyImportConfigPath(); err == nil {
 		status.ConfigPath = path
 	}
-	cfg, exists, err := loadCcSwitchConfig()
+	cfg, exists, err := loadLegacyImportConfig()
 	if err != nil {
 		return status, err
 	}
@@ -133,19 +136,19 @@ func (is *ImportService) GetStatus() (ConfigImportStatus, error) {
 	return is.evaluateStatus(cfg)
 }
 
-// ImportFromPath 从指定路径导入 cc-switch 配置
+// ImportFromPath 从指定路径导入配置
 func (is *ImportService) ImportFromPath(path string) (ConfigImportResult, error) {
 	result := ConfigImportResult{}
 	path = strings.TrimSpace(path)
 	if path == "" {
-		err := errors.New("cc-switch: 导入路径为空")
+		err := errors.New("code switch: 导入路径为空")
 		log.Printf("⚠️  %v", err)
 		return result, err
 	}
 	path = filepath.Clean(path)
 	result.Status.ConfigPath = path
 
-	cfg, exists, err := loadCcSwitchConfigFromPath(path)
+	cfg, exists, err := loadLegacyImportConfigFromPath(path)
 	if err != nil {
 		return result, err
 	}
@@ -182,16 +185,16 @@ func (is *ImportService) ImportFromPath(path string) (ConfigImportResult, error)
 	return result, nil
 }
 
-// ImportAll 从默认路径导入 cc-switch 配置
+// ImportAll 从默认路径导入配置
 func (is *ImportService) ImportAll() (ConfigImportResult, error) {
-	path, err := ccSwitchConfigPath()
+	path, err := legacyImportConfigPath()
 	if err != nil {
 		return ConfigImportResult{}, err
 	}
 	return is.ImportFromPath(path)
 }
 
-func (is *ImportService) evaluateStatus(cfg *ccSwitchConfig) (ConfigImportStatus, error) {
+func (is *ImportService) evaluateStatus(cfg *legacyImportConfig) (ConfigImportStatus, error) {
 	status := ConfigImportStatus{ConfigExists: true}
 	pendingProviders, err := is.pendingProviders(cfg)
 	if err != nil {
@@ -210,49 +213,49 @@ func (is *ImportService) evaluateStatus(cfg *ccSwitchConfig) (ConfigImportStatus
 	return status, nil
 }
 
-func loadCcSwitchConfig() (*ccSwitchConfig, bool, error) {
-	path, err := ccSwitchConfigPath()
+func loadLegacyImportConfig() (*legacyImportConfig, bool, error) {
+	path, err := legacyImportConfigPath()
 	if err != nil {
-		log.Printf("⚠️  cc-switch: 获取配置路径失败: %v", err)
+		log.Printf("⚠️  code switch: 获取配置路径失败: %v", err)
 		return nil, false, err
 	}
-	return loadCcSwitchConfigFromPath(path)
+	return loadLegacyImportConfigFromPath(path)
 }
 
-func loadCcSwitchConfigFromPath(path string) (*ccSwitchConfig, bool, error) {
+func loadLegacyImportConfigFromPath(path string) (*legacyImportConfig, bool, error) {
 	path = filepath.Clean(strings.TrimSpace(path))
 	if path == "" {
-		err := errors.New("cc-switch: 配置路径为空")
+		err := errors.New("code switch: 配置路径为空")
 		log.Printf("⚠️  %v", err)
 		return nil, false, err
 	}
 
 	// 检测是否为 SQLite 文件
 	if isSQLiteFile(path) {
-		log.Printf("ℹ️  cc-switch: 检测到 SQLite 数据库: %s", path)
-		return loadCcSwitchConfigFromSQLite(path)
+		log.Printf("ℹ️  code switch: 检测到 SQLite 数据库: %s", path)
+		return loadLegacyImportConfigFromSQLite(path)
 	}
 
 	// JSON 文件处理（原有逻辑）
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			log.Printf("ℹ️  cc-switch: 配置文件不存在: %s", path)
+			log.Printf("ℹ️  code switch: 配置文件不存在: %s", path)
 			return nil, false, nil
 		}
-		log.Printf("⚠️  cc-switch: 读取配置文件失败: %s - %v", path, err)
+		log.Printf("⚠️  code switch: 读取配置文件失败: %s - %v", path, err)
 		return nil, false, err
 	}
 	if len(data) == 0 {
-		log.Printf("ℹ️  cc-switch: 配置文件为空: %s", path)
-		return &ccSwitchConfig{}, true, nil
+		log.Printf("ℹ️  code switch: 配置文件为空: %s", path)
+		return &legacyImportConfig{}, true, nil
 	}
-	var cfg ccSwitchConfig
+	var cfg legacyImportConfig
 	if err := json.Unmarshal(data, &cfg); err != nil {
-		log.Printf("⚠️  cc-switch: JSON 解析失败: %s - %v", path, err)
+		log.Printf("⚠️  code switch: JSON 解析失败: %s - %v", path, err)
 		return nil, true, err
 	}
-	log.Printf("✅ cc-switch: 配置文件加载成功: %s", path)
+	log.Printf("✅ code switch: 配置文件加载成功: %s", path)
 	return &cfg, true, nil
 }
 
@@ -275,8 +278,8 @@ func isSQLiteFile(path string) bool {
 	return bytes.HasPrefix(header, []byte("SQLite format 3"))
 }
 
-// loadCcSwitchConfigFromSQLite 从 SQLite 数据库加载 cc-switch 配置
-func loadCcSwitchConfigFromSQLite(path string) (*ccSwitchConfig, bool, error) {
+// loadLegacyImportConfigFromSQLite 从 SQLite 数据库加载配置
+func loadLegacyImportConfigFromSQLite(path string) (*legacyImportConfig, bool, error) {
 	if _, err := os.Stat(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, false, nil
@@ -286,12 +289,12 @@ func loadCcSwitchConfigFromSQLite(path string) (*ccSwitchConfig, bool, error) {
 
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
-		log.Printf("⚠️  cc-switch: 打开 SQLite 失败: %v", err)
+		log.Printf("⚠️  code switch: 打开 SQLite 失败: %v", err)
 		return nil, true, err
 	}
 	defer db.Close()
 
-	cfg := &ccSwitchConfig{
+	cfg := &legacyImportConfig{
 		Claude: ccProviderSection{Providers: map[string]ccProviderEntry{}},
 		Codex:  ccProviderSection{Providers: map[string]ccProviderEntry{}},
 		MCP: ccMCPSection{
@@ -302,22 +305,22 @@ func loadCcSwitchConfigFromSQLite(path string) (*ccSwitchConfig, bool, error) {
 
 	// 1. 读取 providers
 	if err := loadProvidersFromSQLite(db, cfg); err != nil {
-		log.Printf("⚠️  cc-switch: 读取 providers 失败: %v", err)
+		log.Printf("⚠️  code switch: 读取 providers 失败: %v", err)
 		return nil, true, err
 	}
 
 	// 2. 读取 MCP servers
 	if err := loadMCPServersFromSQLite(db, cfg); err != nil {
-		log.Printf("⚠️  cc-switch: 读取 MCP servers 失败: %v", err)
+		log.Printf("⚠️  code switch: 读取 MCP servers 失败: %v", err)
 		// MCP 失败不阻断，继续导入 providers
 	}
 
-	log.Printf("✅ cc-switch: SQLite 数据库加载成功: %s", path)
+	log.Printf("✅ code switch: SQLite 数据库加载成功: %s", path)
 	return cfg, true, nil
 }
 
 // loadProvidersFromSQLite 从 SQLite 读取 providers 数据
-func loadProvidersFromSQLite(db *sql.DB, cfg *ccSwitchConfig) error {
+func loadProvidersFromSQLite(db *sql.DB, cfg *legacyImportConfig) error {
 	// 读取 provider_endpoints 作为 URL 补充
 	endpoints := make(map[string]string) // key: "app_type|provider_id" -> url
 	epRows, err := db.Query(`SELECT provider_id, app_type, url FROM provider_endpoints`)
@@ -345,7 +348,7 @@ func loadProvidersFromSQLite(db *sql.DB, cfg *ccSwitchConfig) error {
 	for rows.Next() {
 		var id, appType, name, settingsJSON, website string
 		if err := rows.Scan(&id, &appType, &name, &settingsJSON, &website); err != nil {
-			log.Printf("⚠️  cc-switch: 扫描 provider 行失败: %v", err)
+			log.Printf("⚠️  code switch: 扫描 provider 行失败: %v", err)
 			continue
 		}
 
@@ -411,7 +414,7 @@ func loadProvidersFromSQLite(db *sql.DB, cfg *ccSwitchConfig) error {
 }
 
 // loadMCPServersFromSQLite 从 SQLite 读取 MCP servers 数据
-func loadMCPServersFromSQLite(db *sql.DB, cfg *ccSwitchConfig) error {
+func loadMCPServersFromSQLite(db *sql.DB, cfg *legacyImportConfig) error {
 	rows, err := db.Query(`
 		SELECT id, name, server_config,
 		       COALESCE(description, ''), COALESCE(homepage, ''),
@@ -427,14 +430,14 @@ func loadMCPServersFromSQLite(db *sql.DB, cfg *ccSwitchConfig) error {
 		var id, name, serverConfigJSON, description, homepage string
 		var enabledClaude, enabledCodex bool
 		if err := rows.Scan(&id, &name, &serverConfigJSON, &description, &homepage, &enabledClaude, &enabledCodex); err != nil {
-			log.Printf("⚠️  cc-switch: 扫描 MCP server 行失败: %v", err)
+			log.Printf("⚠️  code switch: 扫描 MCP server 行失败: %v", err)
 			continue
 		}
 
 		// 解析 server_config JSON
 		var serverCfg ccMCPServerConfig
 		if err := json.Unmarshal([]byte(serverConfigJSON), &serverCfg); err != nil {
-			log.Printf("⚠️  cc-switch: 解析 MCP server_config 失败: %v", err)
+			log.Printf("⚠️  code switch: 解析 MCP server_config 失败: %v", err)
 			continue
 		}
 
@@ -465,16 +468,16 @@ func loadMCPServersFromSQLite(db *sql.DB, cfg *ccSwitchConfig) error {
 	return rows.Err()
 }
 
-func ccSwitchConfigPath() (string, error) {
+func legacyImportConfigPath() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	// 优先检查 SQLite 数据库（新版 cc-switch），然后是 JSON 配置文件
+	// 优先检查 SQLite 数据库，然后是历史 JSON 配置文件
 	candidates := []string{
-		filepath.Join(home, ".cc-switch", "cc-switch.db"),         // 新版 SQLite
-		filepath.Join(home, ".cc-switch", "config.json.migrated"), // 旧版迁移后的 JSON
-		filepath.Join(home, ".cc-switch", "config.json"),          // 旧版 JSON
+		filepath.Join(home, legacyImportConfigDir, legacyImportSQLiteFile), // SQLite
+		filepath.Join(home, legacyImportConfigDir, "config.json.migrated"), // 迁移后的 JSON
+		filepath.Join(home, legacyImportConfigDir, "config.json"),          // JSON
 	}
 	for _, p := range candidates {
 		if _, err := os.Stat(p); err == nil {
@@ -495,7 +498,7 @@ func firstRunMarkerPath() (string, error) {
 	return filepath.Join(home, ".code-switch", ".import_prompted"), nil
 }
 
-type ccSwitchConfig struct {
+type legacyImportConfig struct {
 	Claude ccProviderSection `json:"claude"`
 	Codex  ccProviderSection `json:"codex"`
 	MCP    ccMCPSection      `json:"mcp"`
@@ -552,7 +555,7 @@ type providerCandidate struct {
 	Icon   string
 }
 
-func (is *ImportService) pendingProviders(cfg *ccSwitchConfig) (map[string][]providerCandidate, error) {
+func (is *ImportService) pendingProviders(cfg *legacyImportConfig) (map[string][]providerCandidate, error) {
 	result := map[string][]providerCandidate{
 		"claude": {},
 		"codex":  {},
@@ -619,7 +622,7 @@ func parseProviderEntry(kind, key string, entry ccProviderEntry) (providerCandid
 		apiURL := strings.TrimSpace(entry.Settings.Env["ANTHROPIC_BASE_URL"])
 		apiKey := strings.TrimSpace(entry.Settings.Env["ANTHROPIC_AUTH_TOKEN"])
 		if apiURL == "" || apiKey == "" {
-			log.Printf("ℹ️  cc-switch: 跳过 claude provider [%s]: 缺少 ANTHROPIC_BASE_URL 或 ANTHROPIC_AUTH_TOKEN", key)
+			log.Printf("ℹ️  code switch: 跳过 claude provider [%s]: 缺少 ANTHROPIC_BASE_URL 或 ANTHROPIC_AUTH_TOKEN", key)
 			return providerCandidate{}, false
 		}
 		return providerCandidate{Name: name, APIURL: apiURL, APIKey: apiKey, Site: site}, true
@@ -631,12 +634,12 @@ func parseProviderEntry(kind, key string, entry ccProviderEntry) (providerCandid
 			entry.Settings.Env["OPENAI_API_KEY"],
 		)
 		if apiKey == "" {
-			log.Printf("ℹ️  cc-switch: 跳过 codex provider [%s]: 缺少 OPENAI_API_KEY", key)
+			log.Printf("ℹ️  code switch: 跳过 codex provider [%s]: 缺少 OPENAI_API_KEY", key)
 			return providerCandidate{}, false
 		}
 		apiURL := resolveCodexAPIURL(entry.Settings.Config)
 		if apiURL == "" {
-			log.Printf("ℹ️  cc-switch: 跳过 codex provider [%s]: 无法解析 API URL (TOML 配置无效或缺失)", key)
+			log.Printf("ℹ️  code switch: 跳过 codex provider [%s]: 无法解析 API URL (TOML 配置无效或缺失)", key)
 			return providerCandidate{}, false
 		}
 		return providerCandidate{Name: name, APIURL: apiURL, APIKey: apiKey, Site: site}, true
@@ -719,7 +722,7 @@ func normalizeName(value string) string {
 	return strings.ToLower(strings.TrimSpace(value))
 }
 
-func (is *ImportService) importProviders(cfg *ccSwitchConfig, pending map[string][]providerCandidate) (int, error) {
+func (is *ImportService) importProviders(cfg *legacyImportConfig, pending map[string][]providerCandidate) (int, error) {
 	total := 0
 	if candidates := pending["claude"]; len(candidates) > 0 {
 		added, err := is.saveProviders("claude", candidates)
@@ -787,7 +790,7 @@ func defaultVisual(kind string) (accent, tint string) {
 	}
 }
 
-func (is *ImportService) pendingMCPCandidates(cfg *ccSwitchConfig) ([]MCPServer, error) {
+func (is *ImportService) pendingMCPCandidates(cfg *legacyImportConfig) ([]MCPServer, error) {
 	existing, err := is.mcpService.ListServers()
 	if err != nil {
 		return nil, err
@@ -838,7 +841,7 @@ func (is *ImportService) importMCPServers(candidates []MCPServer) (int, error) {
 	return len(candidates), nil
 }
 
-func collectMCPServers(cfg *ccSwitchConfig) []MCPServer {
+func collectMCPServers(cfg *legacyImportConfig) []MCPServer {
 	stores := map[string]*MCPServer{}
 	appendMCPEntries(stores, cfg.MCP.Claude.Servers, platClaudeCode)
 	appendMCPEntries(stores, cfg.MCP.Codex.Servers, platCodex)

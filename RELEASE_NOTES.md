@@ -122,7 +122,7 @@
 # Code Switch v2.8.45
 
 ## 优化
-- **OpenCode 预设说明去掉 cc-switch 迁移限定**：首页编辑 OpenCode 供应商时，预设说明从“选择从 cc-switch 迁移来的完整供应商模板”调整为“选择完整供应商模板”，中英文同步更新，避免用户误以为这些预设只能用于 cc-switch 迁移场景。
+- **OpenCode 预设说明语义更清楚**：首页编辑 OpenCode 供应商时，预设说明统一调整为“选择完整供应商模板”，中英文同步更新，避免用户误以为这些预设只能用于特定导入场景。
 
 ## 技术改进
 - **OpenCode 预设文案语义收口**：中英文 locale 保持同一语义口径，继续保留自动填充 NPM、Base URL、模型和 SDK 选项的说明，不改动实际预设选择、搜索和配置写入逻辑。
@@ -153,11 +153,11 @@
 # Code Switch v2.8.43
 
 ## 功能
-- **OpenCode 供应商配置正式补齐 cc-switch 同款预设能力**：新增 OpenCode provider preset 配置库，编辑供应商时支持按 AI SDK 包选择预设、自动带出 Base URL / API Key / 官网 / API Key 地址 / 分类 / 合作伙伴信息，并保留原始 provider id，别再靠手抄 `opencode.json` 跟 JSON 拼刺刀。
-- **OpenCode 模型配置入口补上了**：编辑 OpenCode 供应商时可直接维护 `models`、模型名称、展示名称、额外字段和 `options`，并提供预设模型建议，迁移过来的 OpenCode 供应商终于不是“只有壳没有芯”。
+- **OpenCode 供应商配置正式补齐完整预设能力**：新增 OpenCode provider preset 配置库，编辑供应商时支持按 AI SDK 包选择预设、自动带出 Base URL / API Key / 官网 / API Key 地址 / 分类 / 合作伙伴信息，并保留原始 provider id，别再靠手抄 `opencode.json` 跟 JSON 拼刺刀。
+- **OpenCode 模型配置入口补上了**：编辑 OpenCode 供应商时可直接维护 `models`、模型名称、展示名称、额外字段和 `options`，并提供预设模型建议，导入后的 OpenCode 供应商终于不是“只有壳没有芯”。
 
 ## 修复
-- **OpenCode 余额查询不再依赖当天是否使用过供应商**：只要供应商在 OpenCode 配置中启用 / 存在且配置了余额查询，就会像 cc-switch 一样参与自动刷新并常驻显示余额，不再因为今天没跑过请求就把余额藏起来。
+- **OpenCode 余额查询不再依赖当天是否使用过供应商**：只要供应商在 OpenCode 配置中启用 / 存在且配置了余额查询，就会参与自动刷新并常驻显示余额，不再因为今天没跑过请求就把余额藏起来。
 - **OpenCode tab 隐藏本地转发托管开关**：OpenCode 是 additive config 管理，不是 Claude / Codex / Gemini 那套本地代理模式；首页切到 OpenCode 时不再显示误导性的托管开关，只保留新增和刷新操作。
 - **OpenCode 模型配置卡片布局收口**：修复模型配置行输入框撑爆卡片、删除按钮被遮挡、嵌套字段边距不齐的问题，小屏下也会自动堆叠显示，别再让按钮躲猫猫。
 
@@ -231,7 +231,7 @@
 
 ## 技术改进
 - **补齐 OpenCode 批量保存和 live config 回滚测试**：覆盖 raw key 保真、live 冲突、managed/live 双写失败回滚、DB-only provider、复制副本 live flags 清理、前端保存失败回滚和 dev mock 边界。
-- **OpenCode 默认配置补上 `options.setCacheKey: true`**：对齐 cc-switch 默认表单行为，同时继续避免空 URL / 空 API Key 写入占位符污染 live config。
+- **OpenCode 默认配置补上 `options.setCacheKey: true`**：统一默认表单行为，同时继续避免空 URL / 空 API Key 写入占位符污染 live config。
 
 ## 发布
 - **本次发版版本号统一推进到 `v2.8.39`**：补齐更新日志并准备推送 `v2.8.39` tag 触发 GitHub 自动打包，这波主要是 OpenCode 供应商管理迁移和 live config 安全收口，别再让用户的真实配置文件当试验田。
@@ -725,12 +725,12 @@
 # Code Switch v2.8.7
 
 ## 修复
-- **模型价格页的供应商筛选这回终于按 provider 语义说人话了**：`设置 -> 模型价格` 顶部新增的供应商 tabs 现在优先按显式 provider 前缀归类，像 `azure/...`、`openrouter/...`、`bedrock/...`、`fireworks_ai/...`、`groq/...` 这类模型都会稳定落回各自 provider，不再被尾巴上的 `gpt-*`、`claude-*`、`llama-*` 抢走分类，终于和参考项目按 `litellmProvider` 筛选的口径对上了。
+- **模型价格页的供应商筛选这回终于按 provider 语义说人话了**：`设置 -> 模型价格` 顶部新增的供应商 tabs 现在优先按显式 provider 前缀归类，像 `azure/...`、`openrouter/...`、`bedrock/...`、`fireworks_ai/...`、`groq/...` 这类模型都会稳定落回各自 provider，不再被尾巴上的 `gpt-*`、`claude-*`、`llama-*` 抢走分类，终于和 `litellmProvider` 筛选口径对上了。
 - **模型价格列表的“本地”过滤终于不再把同步覆盖项一锅端了**：原来前端偷懒拿 `is_override || is_custom` 当“仅自定义/覆盖”过滤，结果 `claude_sync / cloud_sync` 这类同步覆盖模型也会被顺手算进去；现在改成只认 `source === manual`，真正把本地手动修改和同步来源分开，用户点“本地”终于不会再看到一堆串味条目。
 - **模型价格列表项上的供应商图标和标签也顺手收口到 provider 口径**：列表里展示的标识不再按底层模型厂商瞎猜，而是和顶部 provider tabs 共用同一套前缀优先规则；像 `openrouter/anthropic/claude-*`、`bedrock/.../anthropic.claude-*` 这类嵌套路径模型，终于不会再挂着 Anthropic 标签却被归进第三方 provider 路由里，整出前后不一致的别扭场面。
 
 ## 技术改进
-- **模型价格 provider 识别逻辑正式抽成独立工具并分成“两段式优先级”**：新增 `modelProviders` 工具，先做显式 provider 前缀匹配，再做模型家族 fallback 兜底，同时把 tabs 顺序收口到参考实现的核心顺序，后面再补更多 provider 前缀时不至于继续把语义搞串。
+- **模型价格 provider 识别逻辑正式抽成独立工具并分成“两段式优先级”**：新增 `modelProviders` 工具，先做显式 provider 前缀匹配，再做模型家族 fallback 兜底，同时把 tabs 顺序收口到当前核心顺序，后面再补更多 provider 前缀时不至于继续把语义搞串。
 - **模型价格 source/manual 过滤单独抽成纯函数并补齐回归测试**：新增 `modelPricingFilters` 工具，把 `manual` source 过滤逻辑独立出来，专门补了“`cloud_sync` 且 override 不算本地”的测试；以后谁再想图省事把覆盖层和来源层混成一锅，测试会先出来掀桌子。
 - **前端专项回归测试继续朝最容易串味的 provider 路径补刀**：补上 `azure/gpt-4o -> Azure`、`openrouter/anthropic/claude-* -> OpenRouter`、`bedrock/.../anthropic.claude-* -> Bedrock`、`fireworks_ai/.../deepseek-* -> Fireworks` 等定向测试，并确认 `vue-tsc --noEmit` 继续通过，省得这次把语义修正了，下次又被人悄悄改回去。
 
@@ -742,11 +742,11 @@
 # Code Switch v2.8.6
 
 ## 新功能
-- **模型价格终于补上“云端同步”这条腿了**：`设置 -> 模型价格 -> 同步` 现在除了 Claude 官方价格外，还新增了云端价格表同步入口，直接复用 `claude-code-hub` 的 `https://claude-code-hub.app/config/prices-base.toml` 数据源，后续补模型价格不用再靠手填或者等人肉搬运。
+- **模型价格终于补上“云端同步”这条腿了**：`设置 -> 模型价格 -> 同步` 现在除了 Claude 官方价格外，还新增了云端价格表同步入口，后续补模型价格不用再靠手填或者等人肉搬运。
 - **云端同步终于不再是“一把梭过去，manual 自求多福”了**：前端点击云端同步时会先预检冲突，把本地 `manual` 模型单独拎出来给用户勾选覆盖；没勾的继续保留本地价格，勾了的才会转成云端同步结果，终于像个正经的冲突处理流程。
 
 ## 修复
-- **云端 TOML 解析方式这回真按参考项目口径收口了**：后端不再把价格表硬反序列化成一撮固定字段，而是先按 raw `models` 结构解析，再统一提取当前系统可用的 token/cache/group 字段，并支持 `pricing.*`、`selected_pricing_provider`、`litellm_provider` 的 fallback，后面云端 schema 再长点儿肉，也不至于一变就碎。
+- **云端 TOML 解析方式这回真按弹性 schema 口径收口了**：后端不再把价格表硬反序列化成一撮固定字段，而是先按 raw `models` 结构解析，再统一提取当前系统可用的 token/cache/group 字段，并支持 `pricing.*`、`selected_pricing_provider`、`litellm_provider` 的 fallback，后面云端 schema 再长点儿肉，也不至于一变就碎。
 - **模型价格来源标签终于不再把 Claude 和云端同步炖成一锅了**：设置页列表现在会明确区分 `Claude 同步`、`云端同步`、`手动修改` 和 `内置价格`，tooltip 也会带上来源和同步时间，排查价格从哪儿来的终于不用靠猜。
 - **模型价格编辑弹窗不再拿同步项逗你玩了**：删除/恢复按钮现在只对 `manual` 来源开放，像 `claude_sync` / `cloud_sync` 这类同步项不会再摆出一副“你点我试试”的姿势，省得用户看着像能删，实际只是演戏。
 - **云端同步写库不再把主 overrides blob 往死里抡**：模型价格覆盖层现在拆成 `localOverrides + cloudOverrides` 两层，云端同步单独写 `model_pricing_cloud_overrides_v1`，最终效果再和本地层合并；这样既保住 manual / Claude 的优先级，也把大 JSON blob 持续膨胀的风险压下去。

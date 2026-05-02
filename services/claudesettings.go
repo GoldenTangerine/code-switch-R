@@ -12,7 +12,7 @@ import (
 const (
 	claudeSettingsDir      = ".claude"
 	claudeSettingsFileName = "settings.json"
-	claudeBackupFileName   = "cc-studio.back.settings.json"
+	claudeBackupFileName   = "code-switch.back.settings.json"
 	claudeAuthTokenValue   = "code-switch-r"
 )
 

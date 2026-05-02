@@ -113,7 +113,7 @@ func getGeminiPresets() []GeminiPreset {
 		{
 			Name:                "PackyCode",
 			WebsiteURL:          "https://www.packyapi.com",
-			APIKeyURL:           "https://www.packyapi.com/register?aff=cc-switch",
+			APIKeyURL:           "https://www.packyapi.com/register",
 			BaseURL:             "https://www.packyapi.com",
 			Model:               "gemini-2.5-pro-preview",
 			Description:         "PackyCode 中转服务",

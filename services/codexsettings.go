@@ -14,9 +14,9 @@ import (
 const (
 	codexSettingsDir      = ".codex"
 	codexConfigFileName   = "config.toml"
-	codexBackupConfigName = "cc-studio.back.config.toml"
+	codexBackupConfigName = "code-switch.back.config.toml"
 	codexAuthFileName     = "auth.json"
-	codexBackupAuthName   = "cc-studio.back.auth.json"
+	codexBackupAuthName   = "code-switch.back.auth.json"
 	codexPreferredAuth    = "apikey"
 	codexDefaultModel     = "gpt-5-codex"
 	codexProviderKey      = "code-switch-r"

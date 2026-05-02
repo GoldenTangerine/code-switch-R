@@ -16,7 +16,7 @@ import {
 import { normalizeHomeProviderTabs } from '../../../data/homeProviderTabs'
 import {
   fetchConfigImportStatus,
-  importFromCcSwitch,
+  importLegacyConfig,
   isFirstRun,
   markFirstRunDone,
   type ConfigImportStatus,
@@ -242,7 +242,7 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
     try {
       importStatus.value = await fetchConfigImportStatus()
     } catch (error) {
-      console.error('Failed to load cc-switch import status', error)
+      console.error('Failed to load config import status', error)
       importStatus.value = null
     }
   }
@@ -441,7 +441,7 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
         return
       }
 
-      const result = await importFromCcSwitch()
+      const result = await importLegacyConfig()
       importStatus.value = result?.status ?? null
       const importedProviders = result?.imported_providers ?? 0
       const importedMcp = result?.imported_mcp ?? 0
@@ -459,7 +459,7 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
         showToast(t('components.main.importConfig.empty'))
       }
     } catch (error) {
-      console.error('Failed to import cc-switch config', error)
+      console.error('Failed to import config', error)
       showToast(t('components.main.importConfig.error'), 'error')
     } finally {
       importBusy.value = false

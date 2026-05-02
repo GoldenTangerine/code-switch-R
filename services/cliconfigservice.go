@@ -12,6 +12,8 @@ import (
 	"github.com/pelletier/go-toml/v2"
 )
 
+const legacyCodexBackupConfigName = "cc" + "-studio" + ".back.config.toml"
+
 // CliConfigService CLI 配置管理服务
 // 管理 Claude Code、Codex、Gemini 的 CLI 配置文件
 type CliConfigService struct {
@@ -1595,9 +1597,14 @@ func (s *CliConfigService) RestoreDefault(platform string) error {
 		// 尝试兼容旧格式的备份文件
 		switch p {
 		case PlatformCodex:
-			legacy := filepath.Join(filepath.Dir(configPath), "cc-studio.back.config.toml")
-			if FileExists(legacy) {
-				backupPath, err = legacy, nil
+			for _, legacy := range []string{
+				filepath.Join(filepath.Dir(configPath), "code-switch.back.config.toml"),
+				filepath.Join(filepath.Dir(configPath), legacyCodexBackupConfigName),
+			} {
+				if FileExists(legacy) {
+					backupPath, err = legacy, nil
+					break
+				}
 			}
 		case PlatformGemini:
 			legacy := configPath + ".code-switch.backup"

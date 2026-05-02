@@ -22,8 +22,8 @@ export function ImportProviderFromDeepLink(request: $models.DeepLinkImportReques
 }
 
 /**
- * ParseDeepLinkURL 解析 ccswitch:// URL
- * 预期格式: ccswitch://v1/import?resource=provider&app=claude&name=...&homepage=...&endpoint=...&apiKey=...
+ * ParseDeepLinkURL 解析 codeswitch:// URL
+ * 预期格式: codeswitch://v1/import?resource=provider&app=claude&name=...&homepage=...&endpoint=...&apiKey=...
  */
 export function ParseDeepLinkURL(urlStr: string): $CancellablePromise<$models.DeepLinkImportRequest | null> {
     return $Call.ByID(3816480018, urlStr).then(($result: any) => {

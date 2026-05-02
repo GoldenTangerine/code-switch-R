@@ -16,7 +16,7 @@ export function GetStatus(): $CancellablePromise<$models.ConfigImportStatus> {
 }
 
 /**
- * ImportAll 从默认路径导入 cc-switch 配置
+ * ImportAll 从默认路径导入配置
  */
 export function ImportAll(): $CancellablePromise<$models.ConfigImportResult> {
     return $Call.ByID(124174517).then(($result: any) => {
@@ -25,7 +25,7 @@ export function ImportAll(): $CancellablePromise<$models.ConfigImportResult> {
 }
 
 /**
- * ImportFromPath 从指定路径导入 cc-switch 配置
+ * ImportFromPath 从指定路径导入配置
  */
 export function ImportFromPath(path: string): $CancellablePromise<$models.ConfigImportResult> {
     return $Call.ByID(2519238097, path).then(($result: any) => {

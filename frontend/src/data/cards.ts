@@ -35,7 +35,7 @@ export type AutomationCard = {
   opencodeNpm?: string
   // OpenCode provider fragment，最终写入 opencode.json 的 provider.{id}
   opencodeSettingsConfig?: Record<string, any>
-  // OpenCode 供应商分类 / 合作伙伴元数据，来自 cc-switch 预设。
+  // OpenCode 供应商分类 / 合作伙伴元数据。
   category?: string
   partnerPromotionKey?: string
   // OpenCode additive mode：是否由本应用管理 live config 中的 provider key
@@ -64,7 +64,7 @@ export type AutomationCard = {
   budgetQuotaUsedAdjustments?: BudgetQuotaAdjustments
   // 供应商额度查询类型（Token Plan）
   providerQuotaQueryType?: ProviderQuotaQueryType
-  // 供应商额度查询完整配置（兼容 cc-switch 用量查询预设模板）
+  // 供应商额度查询完整配置
   providerQuotaQueryConfig?: ProviderQuotaQueryConfig
 
   // === 旧连通性字段（已废弃，仅用于兼容旧数据） ===

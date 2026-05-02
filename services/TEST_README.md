@@ -14,7 +14,7 @@ services/
 
 ### 运行所有测试
 ```bash
-cd G:\claude-lit\cc-r
+cd G:\claude-lit\code-switch-R
 go test ./services/... -v
 ```
 

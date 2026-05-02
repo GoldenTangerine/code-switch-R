@@ -401,7 +401,7 @@
         "mcp": "打开 MCP 面板",
         "skill": "打开 Skill 列表",
         "gemini": "打开 Gemini CLI 管理",
-        "import": "导入 cc-switch 配置",
+        "import": "导入配置",
         "duplicate": "复制供应商"
       },
       "modelList": {
@@ -565,15 +565,15 @@
       "importConfig": {
         "tooltip": "导入 {providers} 个供应商 · {servers} 个 MCP 服务器",
         "success": "已导入 {providers} 个供应商与 {servers} 个 MCP 服务器",
-        "empty": "cc-switch 中的供应商与 MCP 均已同步",
-        "error": "导入 cc-switch 配置失败",
+        "empty": "供应商与 MCP 均已同步",
+        "error": "导入配置失败",
         "opencodeTooltip": "从 ~/.config/opencode/opencode.json 导入 live provider",
         "opencodeSuccess": "已导入 {providers} 个 OpenCode live provider",
         "opencodeEmpty": "OpenCode live provider 已全部纳入管理",
         "opencodeError": "导入 OpenCode live 配置失败"
       },
       "firstRun": {
-        "message": "欢迎使用 Code Switch R！如果你有 cc-switch 的配置，可以前往设置页导入。",
+        "message": "欢迎使用 Code Switch R！如果你有历史配置，可以前往设置页导入。",
         "goToSettings": "前往设置",
         "dismiss": "稍后"
       },
@@ -1681,7 +1681,7 @@
       },
       "import": {
         "configPath": "配置文件路径",
-        "pathPlaceholder": "输入 cc-switch 配置文件路径",
+        "pathPlaceholder": "输入配置文件路径",
         "status": "配置状态",
         "loading": "加载中...",
         "configFound": "已找到配置文件",
@@ -2074,22 +2074,22 @@
   },
   "providerForm": {
     "partnerPromotion": {
-      "packycode": "PackyCode 是 CC Switch 的官方合作伙伴，使用此链接注册并在充值时填写 \"cc-switch\" 优惠码，可以享受9折优惠",
+      "packycode": "PackyCode 中转服务，使用此链接可前往注册页面。",
       "minimax_cn": "MiniMax Coding Plan 特惠，Starter 套餐 9.9 元起",
       "minimax_en": "MiniMax Coding Plan 黑五特惠，Starter 套餐现仅 $2/月（2折优惠！）",
       "dmxapi": "Claude Code 专属模型 3.4 折优惠进行中！",
-      "cubence": "Cubence 是 CC Switch 的官方合作伙伴，使用此链接注册并在充值时填写 \"CCSWITCH\" 优惠码，每次充值均可享受9折优惠",
-      "aigocode": "AIGoCode 是 CC Switch 的官方合作伙伴，使用此链接注册首次充值时可以获得10%额度奖励！",
-      "rightcode": "RightCode 是 CC Switch 的官方合作伙伴，使用此链接注册每次充值均可赠送5%额外额度！",
-      "aicodemirror": "AICodeMirror 是 CC Switch 的官方合作伙伴，使用此链接注册可享受8折优惠！",
-      "aicoding": "AI Coding 为 CC Switch 的用户提供了特殊优惠，首次充值可以享受 9 折优惠！",
-      "crazyrouter": "CrazyRouter 为 CC Switch 的用户提供了特殊优惠，首次充值赠予 30% 额外额度！",
-      "sssaicode": "SSAI Code 为 CC Switch 的用户提供了特殊优惠，每次充值赠予额外 $10 额度！",
-      "micu": "Micu 是 CC Switch 的官方合作伙伴",
+      "cubence": "Cubence 中转服务，使用此链接可前往注册页面。",
+      "aigocode": "AIGoCode 中转服务，使用此链接可前往注册页面。",
+      "rightcode": "RightCode 中转服务，使用此链接可前往注册页面。",
+      "aicodemirror": "AICodeMirror 中转服务，使用此链接可前往注册页面。",
+      "aicoding": "AI Coding 中转服务，使用此链接可前往注册页面。",
+      "crazyrouter": "CrazyRouter 中转服务，使用此链接可前往注册页面。",
+      "sssaicode": "SSAI Code 中转服务，使用此链接可前往注册页面。",
+      "micu": "Micu 中转服务。",
       "ctok": "官网加入 CTok 社群，订阅套餐。",
-      "lionccapi": "LionCCAPI 为 CC Switch 的用户提供了特别福利，注册后添加客服微信 HSQBJ088888888，发暗号 cc-switch 备注即可送 10 美金额度！",
-      "shengsuanyun": "胜算云为 CC Switch 的用户提供了特别福利，使用此链接注册的新用户可获 10 元模力及首充 10% 赠送！",
-      "lemondata": "Lemon Code 为 CC Switch 的用户提供了特别优惠。使用此链接注册可以获得 1 美元免费额度。"
+      "lionccapi": "LionCCAPI 中转服务，使用此链接可前往注册页面。",
+      "shengsuanyun": "胜算云中转服务，使用此链接可前往注册页面。",
+      "lemondata": "Lemon Code 中转服务，使用此链接可前往注册页面。"
     },
     "presets": {
       "shengsuanyun": "胜算云"

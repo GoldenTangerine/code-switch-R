@@ -5,7 +5,7 @@
 ### Step 1: 启动应用
 
 ```bash
-cd G:\claude-lit\cc-r
+cd G:\claude-lit\code-switch-R
 wails3 task dev
 ```
 
