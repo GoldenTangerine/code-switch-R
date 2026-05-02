@@ -1,3 +1,20 @@
+# Code Switch v2.8.46
+
+## 修复
+- **OpenCode 模型编辑不再因为改 key 抖成筛子**：首页编辑 OpenCode 供应商时，额外 options、模型 id、模型扩展字段和模型 options 改名都改用稳定 UI key 渲染，避免 Vue 在输入过程中复用错 DOM，导致焦点跳动、输入值串台或列表项看起来“穿模”。
+
+## 优化
+- **供应商编辑弹窗减少合成层负担**：Provider 编辑弹窗单独关闭面板 `transform` / `will-change` 提示，避开 WebView 下长表单、backdrop-filter 和输入框频繁重绘叠在一起时的渲染抽风。
+
+## 技术改进
+- **OpenCode 编辑器渲染身份和业务 key 解耦**：新增 `uiKey` 状态维护、重命名迁移和删除清理逻辑，保留 provider/model 配置真实 key 的同时，让前端列表渲染拥有独立稳定身份。
+- **模型嵌套字段的 key 生命周期补齐**：模型改名时同步迁移嵌套字段 / options 的 UI key，删除模型或字段时同步清理，降低后续编辑器状态泄漏概率。
+
+## 发布
+- **本次发版版本号统一推进到 `v2.8.46`**：同步更新应用常量、构建配置、Darwin `Info.plist` / `Info.dev.plist`、Windows 版本信息与 Linux `nfpm` 版本，并准备推送 `v2.8.46` tag 触发 GitHub 自动打包。
+
+---
+
 # Code Switch v2.8.45
 
 ## 优化

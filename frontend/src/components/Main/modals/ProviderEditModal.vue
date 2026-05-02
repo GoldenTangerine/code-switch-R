@@ -4,6 +4,7 @@
     :title="modalTitle"
     :body-scrollable="false"
     :panel-width="'min(980px, 96vw)'"
+    panel-class="provider-edit-modal-panel"
     @close="$emit('close')"
   >
     <form class="vendor-form vendor-form--provider-modal" @submit.prevent="submit()">
@@ -246,7 +247,7 @@
                 <span>{{ t('components.main.form.labels.opencodeOptionValue') }}</span>
                 <span />
               </div>
-              <div v-for="entry in opencodeExtraOptionEntries" :key="entry.key" class="opencode-kv-row">
+              <div v-for="entry in opencodeExtraOptionEntries" :key="entry.uiKey" class="opencode-kv-row">
                 <BaseInput
                   :model-value="entry.key"
                   type="text"
@@ -322,7 +323,7 @@
                 <span>{{ t('components.main.form.labels.opencodeModelName') }}</span>
                 <span />
               </div>
-              <div v-for="entry in opencodeModelEntries" :key="entry.id" class="opencode-model-item">
+              <div v-for="entry in opencodeModelEntries" :key="entry.uiKey" class="opencode-model-item">
                 <div class="opencode-model-row">
                   <button
                     type="button"
@@ -362,11 +363,11 @@
                         +
                       </button>
                     </div>
-                    <p v-if="getOpenCodeModelExtraFieldEntries(entry.model).length === 0" class="opencode-empty-state opencode-empty-state--small">
+                    <p v-if="getOpenCodeModelExtraFieldEntries(entry.id, entry.model).length === 0" class="opencode-empty-state opencode-empty-state--small">
                       {{ t('components.main.form.hints.opencodeNoModelExtraFields') }}
                     </p>
                     <div v-else class="opencode-kv-list opencode-kv-list--nested">
-                      <div v-for="field in getOpenCodeModelExtraFieldEntries(entry.model)" :key="field.key" class="opencode-kv-row opencode-kv-row--nested">
+                      <div v-for="field in getOpenCodeModelExtraFieldEntries(entry.id, entry.model)" :key="field.uiKey" class="opencode-kv-row opencode-kv-row--nested">
                         <BaseInput
                           :model-value="field.key"
                           type="text"
@@ -398,11 +399,11 @@
                         +
                       </button>
                     </div>
-                    <p v-if="getOpenCodeModelOptionEntries(entry.model).length === 0" class="opencode-empty-state opencode-empty-state--small">
+                    <p v-if="getOpenCodeModelOptionEntries(entry.id, entry.model).length === 0" class="opencode-empty-state opencode-empty-state--small">
                       {{ t('components.main.form.hints.opencodeNoModelOptions') }}
                     </p>
                     <div v-else class="opencode-kv-list opencode-kv-list--nested">
-                      <div v-for="option in getOpenCodeModelOptionEntries(entry.model)" :key="option.key" class="opencode-kv-row opencode-kv-row--nested">
+                      <div v-for="option in getOpenCodeModelOptionEntries(entry.id, entry.model)" :key="option.uiKey" class="opencode-kv-row opencode-kv-row--nested">
                         <BaseInput
                           :model-value="option.key"
                           type="text"
@@ -837,7 +838,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, reactive, ref, watch } from 'vue'
+import { computed, nextTick, reactive, ref, watch, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Listbox, ListboxButton, ListboxOption, ListboxOptions } from '@headlessui/vue'
 import lobeIcons from '../../../icons/lobeIconMap'
@@ -930,11 +931,13 @@ type OpenCodeModel = {
 type OpenCodeKeyValueEntry = {
   key: string
   value: string
+  uiKey: string
 }
 
 type OpenCodeModelEntry = {
   id: string
   model: OpenCodeModel
+  uiKey: string
 }
 
 type OpenCodeFetchedModel = {
@@ -1000,6 +1003,10 @@ const opencodeSettingsConfigText = ref('{}')
 const opencodeSettingsConfigError = ref('')
 const opencodeModels = ref<Record<string, OpenCodeModel>>({})
 const opencodeExtraOptions = ref<Record<string, string>>({})
+const opencodeExtraOptionUiKeys = ref<Record<string, string>>({})
+const opencodeModelUiKeys = ref<Record<string, string>>({})
+const opencodeModelExtraFieldUiKeys = ref<Record<string, Record<string, string>>>({})
+const opencodeModelOptionUiKeys = ref<Record<string, Record<string, string>>>({})
 const expandedOpenCodeModelIds = ref<string[]>([])
 const selectedOpenCodePresetId = ref('custom')
 const opencodeTemplateValues = ref<OpenCodeTemplateValueState>({})
@@ -1220,10 +1227,18 @@ const iconPreviewOptions = computed(() => {
   return Array.from(new Set([form.icon, ...filteredIconOptions.value.slice(0, preferred)]))
 })
 const opencodeExtraOptionEntries = computed<OpenCodeKeyValueEntry[]>(() => (
-  Object.entries(opencodeExtraOptions.value).map(([key, value]) => ({ key, value }))
+  Object.entries(opencodeExtraOptions.value).map(([key, value]) => ({
+    key,
+    value,
+    uiKey: getOpenCodeUiKey(opencodeExtraOptionUiKeys, key, 'extra-option'),
+  }))
 ))
 const opencodeModelEntries = computed<OpenCodeModelEntry[]>(() => (
-  Object.entries(opencodeModels.value).map(([id, model]) => ({ id, model }))
+  Object.entries(opencodeModels.value).map(([id, model]) => ({
+    id,
+    model,
+    uiKey: getOpenCodeUiKey(opencodeModelUiKeys, id, 'model'),
+  }))
 ))
 const openCodePresetEntries = computed(() => (
   opencodeProviderPresets.map((preset, index) => ({ id: `opencode-${index}`, preset }))
@@ -1706,6 +1721,10 @@ const resetForm = () => {
   requestBodyOverridesError.value = ''
   opencodeSettingsConfigError.value = ''
   opencodeModelFetchError.value = ''
+  opencodeExtraOptionUiKeys.value = {}
+  opencodeModelUiKeys.value = {}
+  opencodeModelExtraFieldUiKeys.value = {}
+  opencodeModelOptionUiKeys.value = {}
   selectedOpenCodePresetId.value = 'custom'
   openCodePresetSearchQuery.value = ''
   opencodeTemplateValues.value = {}
@@ -1886,9 +1905,175 @@ const createOpenCodeDraftKey = (prefix: string, record: Record<string, unknown>)
   return `${seed}-${index}`
 }
 
+let openCodeUiKeySeed = 0
+
+const createOpenCodeUiKey = (prefix: string) => `${prefix}-${Date.now()}-${++openCodeUiKeySeed}`
+
+const getOpenCodeUiKey = (
+  store: Ref<Record<string, string>>,
+  key: string,
+  prefix: string,
+) => store.value[key] || `${prefix}:${key}`
+
+const ensureOpenCodeUiKey = (
+  store: Ref<Record<string, string>>,
+  key: string,
+  prefix: string,
+) => {
+  if (!store.value[key]) {
+    store.value = { ...store.value, [key]: createOpenCodeUiKey(prefix) }
+  }
+  return store.value[key]
+}
+
+const ensureNestedOpenCodeUiKey = (
+  store: Ref<Record<string, Record<string, string>>>,
+  parentKey: string,
+  key: string,
+  prefix: string,
+) => {
+  const parent = store.value[parentKey] || {}
+  if (!parent[key]) {
+    store.value = {
+      ...store.value,
+      [parentKey]: { ...parent, [key]: createOpenCodeUiKey(prefix) },
+    }
+  }
+  return store.value[parentKey]?.[key] || parent[key]
+}
+
+const getNestedOpenCodeUiKey = (
+  store: Ref<Record<string, Record<string, string>>>,
+  parentKey: string,
+  key: string,
+  prefix: string,
+) => store.value[parentKey]?.[key] || `${prefix}:${parentKey}:${key}`
+
+const reconcileOpenCodeUiKeys = (
+  store: Ref<Record<string, string>>,
+  keys: string[],
+  prefix: string,
+) => {
+  const nextKeys = new Set(keys)
+  const nextStore: Record<string, string> = {}
+  keys.forEach((key) => {
+    nextStore[key] = store.value[key] || createOpenCodeUiKey(prefix)
+  })
+  if (Object.keys(store.value).some((key) => !nextKeys.has(key)) || Object.keys(store.value).length !== keys.length) {
+    store.value = nextStore
+  }
+}
+
+const reconcileNestedOpenCodeUiKeys = (
+  store: Ref<Record<string, Record<string, string>>>,
+  entries: Record<string, string[]>,
+  prefix: string,
+) => {
+  const nextStore: Record<string, Record<string, string>> = {}
+  Object.entries(entries).forEach(([parentKey, keys]) => {
+    const previous = store.value[parentKey] || {}
+    nextStore[parentKey] = {}
+    keys.forEach((key) => {
+      nextStore[parentKey][key] = previous[key] || createOpenCodeUiKey(prefix)
+    })
+  })
+  store.value = nextStore
+}
+
+const renameOpenCodeUiKey = (
+  store: Ref<Record<string, string>>,
+  oldKey: string,
+  newKey: string,
+) => {
+  const uiKey = store.value[oldKey]
+  if (!uiKey || oldKey === newKey) return
+  const nextStore = { ...store.value }
+  delete nextStore[oldKey]
+  nextStore[newKey] = uiKey
+  store.value = nextStore
+}
+
+const renameNestedOpenCodeUiKey = (
+  store: Ref<Record<string, Record<string, string>>>,
+  parentKey: string,
+  oldKey: string,
+  newKey: string,
+) => {
+  const parent = store.value[parentKey]
+  const uiKey = parent?.[oldKey]
+  if (!parent || !uiKey || oldKey === newKey) return
+  store.value = {
+    ...store.value,
+    [parentKey]: Object.fromEntries(
+      Object.entries(parent).map(([key, value]) => [key === oldKey ? newKey : key, value]),
+    ),
+  }
+}
+
+const renameOpenCodeModelScopedUiKeys = (oldModelId: string, newModelId: string) => {
+  const migrate = (store: Ref<Record<string, Record<string, string>>>) => {
+    const scoped = store.value[oldModelId]
+    if (!scoped || oldModelId === newModelId) return
+    const nextStore = { ...store.value }
+    delete nextStore[oldModelId]
+    nextStore[newModelId] = scoped
+    store.value = nextStore
+  }
+  migrate(opencodeModelExtraFieldUiKeys)
+  migrate(opencodeModelOptionUiKeys)
+}
+
+const removeOpenCodeUiKey = (store: Ref<Record<string, string>>, key: string) => {
+  if (!store.value[key]) return
+  const nextStore = { ...store.value }
+  delete nextStore[key]
+  store.value = nextStore
+}
+
+const removeNestedOpenCodeUiKey = (
+  store: Ref<Record<string, Record<string, string>>>,
+  parentKey: string,
+  key: string,
+) => {
+  const parent = store.value[parentKey]
+  if (!parent?.[key]) return
+  const nextParent = { ...parent }
+  delete nextParent[key]
+  store.value = {
+    ...store.value,
+    [parentKey]: nextParent,
+  }
+}
+
+const removeOpenCodeModelScopedUiKeys = (modelId: string) => {
+  const removeScoped = (store: Ref<Record<string, Record<string, string>>>) => {
+    if (!store.value[modelId]) return
+    const nextStore = { ...store.value }
+    delete nextStore[modelId]
+    store.value = nextStore
+  }
+  removeScoped(opencodeModelExtraFieldUiKeys)
+  removeScoped(opencodeModelOptionUiKeys)
+}
+
+const reconcileOpenCodeEditorUiKeys = () => {
+  reconcileOpenCodeUiKeys(opencodeExtraOptionUiKeys, Object.keys(opencodeExtraOptions.value), 'extra-option')
+  reconcileOpenCodeUiKeys(opencodeModelUiKeys, Object.keys(opencodeModels.value), 'model')
+
+  const modelExtraFields: Record<string, string[]> = {}
+  const modelOptions: Record<string, string[]> = {}
+  Object.entries(opencodeModels.value).forEach(([modelId, model]) => {
+    modelExtraFields[modelId] = Object.keys(model).filter((key) => !OPENCODE_MODEL_RESERVED_KEYS.has(key))
+    modelOptions[modelId] = isRecordValue(model.options) ? Object.keys(model.options) : []
+  })
+  reconcileNestedOpenCodeUiKeys(opencodeModelExtraFieldUiKeys, modelExtraFields, 'model-field')
+  reconcileNestedOpenCodeUiKeys(opencodeModelOptionUiKeys, modelOptions, 'model-option')
+}
+
 const renameRecordKey = <T,>(record: Record<string, T>, oldKey: string, newKey: string): Record<string, T> => {
   const normalizedKey = newKey.trim()
   if (!normalizedKey || normalizedKey === oldKey) return record
+  if (!(oldKey in record)) return record
   if (normalizedKey in record && normalizedKey !== oldKey) return record
 
   const renamed: Record<string, T> = {}
@@ -1898,17 +2083,22 @@ const renameRecordKey = <T,>(record: Record<string, T>, oldKey: string, newKey: 
   return renamed
 }
 
-const getOpenCodeModelExtraFieldEntries = (model: OpenCodeModel): OpenCodeKeyValueEntry[] => (
+const getOpenCodeModelExtraFieldEntries = (modelId: string, model: OpenCodeModel): OpenCodeKeyValueEntry[] => (
   Object.entries(model)
     .filter(([key]) => !OPENCODE_MODEL_RESERVED_KEYS.has(key))
-    .map(([key, value]) => ({ key, value: stringifyOpenCodeEditableValue(value) }))
+    .map(([key, value]) => ({
+      key,
+      value: stringifyOpenCodeEditableValue(value),
+      uiKey: getNestedOpenCodeUiKey(opencodeModelExtraFieldUiKeys, modelId, key, 'model-field'),
+    }))
 )
 
-const getOpenCodeModelOptionEntries = (model: OpenCodeModel): OpenCodeKeyValueEntry[] => {
+const getOpenCodeModelOptionEntries = (modelId: string, model: OpenCodeModel): OpenCodeKeyValueEntry[] => {
   const options = isRecordValue(model.options) ? model.options : {}
   return Object.entries(options).map(([key, value]) => ({
     key,
     value: stringifyOpenCodeEditableValue(value),
+    uiKey: getNestedOpenCodeUiKey(opencodeModelOptionUiKeys, modelId, key, 'model-option'),
   }))
 }
 
@@ -1988,6 +2178,7 @@ const syncOpenCodeStructuredStateFromConfig = (
 
   opencodeExtraOptions.value = toOpenCodeExtraOptions(providerOptions)
   opencodeModels.value = getOpenCodeConfigModels(config)
+  reconcileOpenCodeEditorUiKeys()
   const modelIds = new Set(Object.keys(opencodeModels.value))
   expandedOpenCodeModelIds.value = expandedOpenCodeModelIds.value.filter((modelId) => modelIds.has(modelId))
 }
@@ -2034,6 +2225,7 @@ const handleOpenCodeNpmChange = () => {
       form.apiKey,
     ).models as Record<string, OpenCodeModel>
     opencodeModels.value = cloneProviderValue(nextDefault)
+    reconcileOpenCodeEditorUiKeys()
   }
   syncOpenCodeSettingsConfigTextFromStructuredState(baseConfig)
 }
@@ -2041,11 +2233,17 @@ const handleOpenCodeNpmChange = () => {
 const addOpenCodeExtraOption = () => {
   const key = createOpenCodeDraftKey('option', opencodeExtraOptions.value)
   opencodeExtraOptions.value = { ...opencodeExtraOptions.value, [key]: '' }
+  ensureOpenCodeUiKey(opencodeExtraOptionUiKeys, key, 'extra-option')
   syncOpenCodeSettingsConfigTextFromStructuredState()
 }
 
 const renameOpenCodeExtraOption = (oldKey: string, newKey: string) => {
-  opencodeExtraOptions.value = renameRecordKey(opencodeExtraOptions.value, oldKey, newKey)
+  const normalizedKey = newKey.trim()
+  if (!normalizedKey || normalizedKey === oldKey) return
+  const nextOptions = renameRecordKey(opencodeExtraOptions.value, oldKey, normalizedKey)
+  if (nextOptions === opencodeExtraOptions.value || !(normalizedKey in nextOptions)) return
+  opencodeExtraOptions.value = nextOptions
+  renameOpenCodeUiKey(opencodeExtraOptionUiKeys, oldKey, normalizedKey)
   syncOpenCodeSettingsConfigTextFromStructuredState()
 }
 
@@ -2058,12 +2256,14 @@ const removeOpenCodeExtraOption = (key: string) => {
   const nextOptions = { ...opencodeExtraOptions.value }
   delete nextOptions[key]
   opencodeExtraOptions.value = nextOptions
+  removeOpenCodeUiKey(opencodeExtraOptionUiKeys, key)
   syncOpenCodeSettingsConfigTextFromStructuredState()
 }
 
 const addOpenCodeModel = () => {
   const id = createOpenCodeDraftKey('model', opencodeModels.value)
   opencodeModels.value = { ...opencodeModels.value, [id]: { name: '' } }
+  ensureOpenCodeUiKey(opencodeModelUiKeys, id, 'model')
   expandedOpenCodeModelIds.value = [...expandedOpenCodeModelIds.value, id]
   syncOpenCodeSettingsConfigTextFromStructuredState()
 }
@@ -2072,7 +2272,11 @@ const renameOpenCodeModel = (oldId: string, newId: string) => {
   const normalizedId = newId.trim()
   if (!normalizedId || normalizedId === oldId) return
   if (normalizedId in opencodeModels.value && normalizedId !== oldId) return
-  opencodeModels.value = renameRecordKey(opencodeModels.value, oldId, normalizedId)
+  const nextModels = renameRecordKey(opencodeModels.value, oldId, normalizedId)
+  if (nextModels === opencodeModels.value || !(normalizedId in nextModels)) return
+  opencodeModels.value = nextModels
+  renameOpenCodeUiKey(opencodeModelUiKeys, oldId, normalizedId)
+  renameOpenCodeModelScopedUiKeys(oldId, normalizedId)
   if (isOpenCodeModelExpanded(oldId)) {
     expandedOpenCodeModelIds.value = expandedOpenCodeModelIds.value.map((id) => (id === oldId ? normalizedId : id))
   }
@@ -2093,6 +2297,8 @@ const removeOpenCodeModel = (modelId: string) => {
   delete nextModels[modelId]
   opencodeModels.value = nextModels
   expandedOpenCodeModelIds.value = expandedOpenCodeModelIds.value.filter((id) => id !== modelId)
+  removeOpenCodeUiKey(opencodeModelUiKeys, modelId)
+  removeOpenCodeModelScopedUiKeys(modelId)
   syncOpenCodeSettingsConfigTextFromStructuredState()
 }
 
@@ -2121,6 +2327,7 @@ const addSuggestedOpenCodeModel = (model: OpenCodeFetchedModel) => {
       ...buildOpenCodeModelFromSuggestion(model),
     },
   }
+  ensureOpenCodeUiKey(opencodeModelUiKeys, model.id, 'model')
   expandedOpenCodeModelIds.value = Array.from(new Set([...expandedOpenCodeModelIds.value, model.id]))
   syncOpenCodeSettingsConfigTextFromStructuredState()
 }
@@ -2185,6 +2392,7 @@ const addOpenCodeModelExtraField = (modelId: string) => {
     ...opencodeModels.value,
     [modelId]: { ...model, [key]: '' },
   }
+  ensureNestedOpenCodeUiKey(opencodeModelExtraFieldUiKeys, modelId, key, 'model-field')
   syncOpenCodeSettingsConfigTextFromStructuredState()
 }
 
@@ -2192,6 +2400,7 @@ const renameOpenCodeModelExtraField = (modelId: string, oldKey: string, newKey: 
   const model = opencodeModels.value[modelId]
   const normalizedKey = newKey.trim()
   if (!model || !normalizedKey || normalizedKey === oldKey) return
+  if (!(oldKey in model)) return
   if (OPENCODE_MODEL_RESERVED_KEYS.has(normalizedKey) || (normalizedKey in model && normalizedKey !== oldKey)) return
 
   const renamedModel: OpenCodeModel = {}
@@ -2199,6 +2408,7 @@ const renameOpenCodeModelExtraField = (modelId: string, oldKey: string, newKey: 
     renamedModel[key === oldKey ? normalizedKey : key] = value
   })
   opencodeModels.value = { ...opencodeModels.value, [modelId]: renamedModel }
+  renameNestedOpenCodeUiKey(opencodeModelExtraFieldUiKeys, modelId, oldKey, normalizedKey)
   syncOpenCodeSettingsConfigTextFromStructuredState()
 }
 
@@ -2218,6 +2428,7 @@ const removeOpenCodeModelExtraField = (modelId: string, key: string) => {
   const nextModel = { ...model }
   delete nextModel[key]
   opencodeModels.value = { ...opencodeModels.value, [modelId]: nextModel }
+  removeNestedOpenCodeUiKey(opencodeModelExtraFieldUiKeys, modelId, key)
   syncOpenCodeSettingsConfigTextFromStructuredState()
 }
 
@@ -2232,6 +2443,7 @@ const addOpenCodeModelOption = (modelId: string) => {
       options: { ...options, [key]: '' },
     },
   }
+  ensureNestedOpenCodeUiKey(opencodeModelOptionUiKeys, modelId, key, 'model-option')
   syncOpenCodeSettingsConfigTextFromStructuredState()
 }
 
@@ -2241,13 +2453,16 @@ const renameOpenCodeModelOption = (modelId: string, oldKey: string, newKey: stri
   if (!model || !normalizedKey || normalizedKey === oldKey) return
   const options = isRecordValue(model.options) ? model.options : {}
   if (normalizedKey in options && normalizedKey !== oldKey) return
+  const renamedOptions = renameRecordKey(options, oldKey, normalizedKey)
+  if (renamedOptions === options || !(normalizedKey in renamedOptions)) return
   opencodeModels.value = {
     ...opencodeModels.value,
     [modelId]: {
       ...model,
-      options: renameRecordKey(options, oldKey, normalizedKey),
+      options: renamedOptions,
     },
   }
+  renameNestedOpenCodeUiKey(opencodeModelOptionUiKeys, modelId, oldKey, normalizedKey)
   syncOpenCodeSettingsConfigTextFromStructuredState()
 }
 
@@ -2276,6 +2491,7 @@ const removeOpenCodeModelOption = (modelId: string, key: string) => {
     delete nextModel.options
   }
   opencodeModels.value = { ...opencodeModels.value, [modelId]: nextModel }
+  removeNestedOpenCodeUiKey(opencodeModelOptionUiKeys, modelId, key)
   syncOpenCodeSettingsConfigTextFromStructuredState()
 }
 
