@@ -4,7 +4,7 @@
     :title="modalTitle"
     :body-scrollable="false"
     :panel-width="'min(980px, 96vw)'"
-    panel-class="provider-edit-modal-panel"
+    :close-on-backdrop="false"
     @close="$emit('close')"
   >
     <form class="vendor-form vendor-form--provider-modal" @submit.prevent="submit()">
@@ -329,7 +329,8 @@
                     type="button"
                     class="opencode-row-expand"
                     :aria-expanded="isOpenCodeModelExpanded(entry.id)"
-                    @click="toggleOpenCodeModelExpansion(entry.id)"
+                    @pointerdown.stop
+                    @click.stop.prevent="toggleOpenCodeModelExpansion(entry.id)"
                   >
                     {{ isOpenCodeModelExpanded(entry.id) ? '▾' : '▸' }}
                   </button>
@@ -340,7 +341,7 @@
                     @update:model-value="renameOpenCodeModel(entry.id, $event)"
                   />
                   <BaseInput
-                    :model-value="entry.model.name || ''"
+                    :model-value="entry.modelName"
                     type="text"
                     :placeholder="t('components.main.form.placeholders.opencodeModelName')"
                     @update:model-value="updateOpenCodeModelName(entry.id, $event)"
@@ -363,11 +364,11 @@
                         +
                       </button>
                     </div>
-                    <p v-if="getOpenCodeModelExtraFieldEntries(entry.id, entry.model).length === 0" class="opencode-empty-state opencode-empty-state--small">
+                    <p v-if="entry.extraFieldEntries.length === 0" class="opencode-empty-state opencode-empty-state--small">
                       {{ t('components.main.form.hints.opencodeNoModelExtraFields') }}
                     </p>
                     <div v-else class="opencode-kv-list opencode-kv-list--nested">
-                      <div v-for="field in getOpenCodeModelExtraFieldEntries(entry.id, entry.model)" :key="field.uiKey" class="opencode-kv-row opencode-kv-row--nested">
+                      <div v-for="field in entry.extraFieldEntries" :key="field.uiKey" class="opencode-kv-row opencode-kv-row--nested">
                         <BaseInput
                           :model-value="field.key"
                           type="text"
@@ -399,11 +400,11 @@
                         +
                       </button>
                     </div>
-                    <p v-if="getOpenCodeModelOptionEntries(entry.id, entry.model).length === 0" class="opencode-empty-state opencode-empty-state--small">
+                    <p v-if="entry.optionEntries.length === 0" class="opencode-empty-state opencode-empty-state--small">
                       {{ t('components.main.form.hints.opencodeNoModelOptions') }}
                     </p>
                     <div v-else class="opencode-kv-list opencode-kv-list--nested">
-                      <div v-for="option in getOpenCodeModelOptionEntries(entry.id, entry.model)" :key="option.uiKey" class="opencode-kv-row opencode-kv-row--nested">
+                      <div v-for="option in entry.optionEntries" :key="option.uiKey" class="opencode-kv-row opencode-kv-row--nested">
                         <BaseInput
                           :model-value="option.key"
                           type="text"
@@ -937,6 +938,9 @@ type OpenCodeKeyValueEntry = {
 type OpenCodeModelEntry = {
   id: string
   model: OpenCodeModel
+  modelName: string
+  extraFieldEntries: OpenCodeKeyValueEntry[]
+  optionEntries: OpenCodeKeyValueEntry[]
   uiKey: string
 }
 
@@ -1234,11 +1238,17 @@ const opencodeExtraOptionEntries = computed<OpenCodeKeyValueEntry[]>(() => (
   }))
 ))
 const opencodeModelEntries = computed<OpenCodeModelEntry[]>(() => (
-  Object.entries(opencodeModels.value).map(([id, model]) => ({
-    id,
-    model,
-    uiKey: getOpenCodeUiKey(opencodeModelUiKeys, id, 'model'),
-  }))
+  Object.entries(opencodeModels.value).map(([id, model]) => {
+    const modelRecord = getOpenCodeModelRecord(model)
+    return {
+      id,
+      model: modelRecord,
+      modelName: typeof modelRecord.name === 'string' ? modelRecord.name : stringifyOpenCodeEditableValue(modelRecord.name),
+      extraFieldEntries: getOpenCodeModelExtraFieldEntries(id, modelRecord),
+      optionEntries: getOpenCodeModelOptionEntries(id, modelRecord),
+      uiKey: getOpenCodeUiKey(opencodeModelUiKeys, id, 'model'),
+    }
+  })
 ))
 const openCodePresetEntries = computed(() => (
   opencodeProviderPresets.map((preset, index) => ({ id: `opencode-${index}`, preset }))
@@ -1725,6 +1735,7 @@ const resetForm = () => {
   opencodeModelUiKeys.value = {}
   opencodeModelExtraFieldUiKeys.value = {}
   opencodeModelOptionUiKeys.value = {}
+  expandedOpenCodeModelIds.value = []
   selectedOpenCodePresetId.value = 'custom'
   openCodePresetSearchQuery.value = ''
   opencodeTemplateValues.value = {}
@@ -1891,6 +1902,18 @@ const getOpenCodeConfigModels = (config?: Record<string, any> | null): Record<st
 const getOpenCodeModelRecord = (model: unknown): OpenCodeModel => (
   isRecordValue(model) ? model as OpenCodeModel : {}
 )
+
+const safeBuildOpenCodeEntries = (
+  buildEntries: () => OpenCodeKeyValueEntry[],
+  label: string,
+): OpenCodeKeyValueEntry[] => {
+  try {
+    return buildEntries()
+  } catch (error) {
+    console.warn('failed to render OpenCode model editor entries', label, error)
+    return []
+  }
+}
 
 const toOpenCodeExtraOptions = (options: Record<string, any>): Record<string, string> => {
   const extra: Record<string, string> = {}
@@ -2089,23 +2112,27 @@ const renameRecordKey = <T,>(record: Record<string, T>, oldKey: string, newKey: 
 }
 
 const getOpenCodeModelExtraFieldEntries = (modelId: string, model: OpenCodeModel): OpenCodeKeyValueEntry[] => (
-  Object.entries(getOpenCodeModelRecord(model))
-    .filter(([key]) => !OPENCODE_MODEL_RESERVED_KEYS.has(key))
-    .map(([key, value]) => ({
-      key,
-      value: stringifyOpenCodeEditableValue(value),
-      uiKey: getNestedOpenCodeUiKey(opencodeModelExtraFieldUiKeys, modelId, key, 'model-field'),
-    }))
+  safeBuildOpenCodeEntries(() => (
+    Object.entries(getOpenCodeModelRecord(model))
+      .filter(([key]) => !OPENCODE_MODEL_RESERVED_KEYS.has(key))
+      .map(([key, value]) => ({
+        key,
+        value: stringifyOpenCodeEditableValue(value),
+        uiKey: getNestedOpenCodeUiKey(opencodeModelExtraFieldUiKeys, modelId, key, 'model-field'),
+      }))
+  ), `model extra fields:${modelId}`)
 )
 
 const getOpenCodeModelOptionEntries = (modelId: string, model: OpenCodeModel): OpenCodeKeyValueEntry[] => {
-  const modelRecord = getOpenCodeModelRecord(model)
-  const options = isRecordValue(modelRecord.options) ? modelRecord.options : {}
-  return Object.entries(options).map(([key, value]) => ({
-    key,
-    value: stringifyOpenCodeEditableValue(value),
-    uiKey: getNestedOpenCodeUiKey(opencodeModelOptionUiKeys, modelId, key, 'model-option'),
-  }))
+  return safeBuildOpenCodeEntries(() => {
+    const modelRecord = getOpenCodeModelRecord(model)
+    const options = isRecordValue(modelRecord.options) ? modelRecord.options : {}
+    return Object.entries(options).map(([key, value]) => ({
+      key,
+      value: stringifyOpenCodeEditableValue(value),
+      uiKey: getNestedOpenCodeUiKey(opencodeModelOptionUiKeys, modelId, key, 'model-option'),
+    }))
+  }, `model options:${modelId}`)
 }
 
 const buildOpenCodeSettingsConfigFromStructuredState = (baseConfig?: Record<string, any> | null): Record<string, any> => {

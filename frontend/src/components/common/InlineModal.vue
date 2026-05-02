@@ -16,6 +16,7 @@
               aria-modal="true"
               :aria-labelledby="titleId"
               tabindex="-1"
+              @click.stop
             >
               <header class="modal-header">
                 <h2 :id="titleId" class="modal-title">{{ title }}</h2>
