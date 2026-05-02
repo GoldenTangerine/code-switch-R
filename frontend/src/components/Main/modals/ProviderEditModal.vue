@@ -328,11 +328,11 @@
                   <button
                     type="button"
                     class="opencode-row-expand"
-                    :aria-expanded="isOpenCodeModelExpanded(entry.id)"
+                    :aria-expanded="isOpenCodeModelDetailOpen(entry.id)"
                     @pointerdown.stop
-                    @click.stop.prevent="toggleOpenCodeModelExpansion(entry.id)"
+                    @click.stop.prevent="openOpenCodeModelDetail(entry.id)"
                   >
-                    {{ isOpenCodeModelExpanded(entry.id) ? '▾' : '▸' }}
+                    ›
                   </button>
                   <BaseInput
                     :model-value="entry.id"
@@ -356,79 +356,6 @@
                   </button>
                 </div>
 
-                <div v-if="isOpenCodeModelExpanded(entry.id)" class="opencode-model-details">
-                  <div class="opencode-model-subsection">
-                    <div class="opencode-model-subsection__header">
-                      <span>{{ t('components.main.form.labels.opencodeModelExtraFields') }}</span>
-                      <button type="button" class="opencode-mini-action" @click="addOpenCodeModelExtraField(entry.id)">
-                        +
-                      </button>
-                    </div>
-                    <p v-if="entry.extraFieldEntries.length === 0" class="opencode-empty-state opencode-empty-state--small">
-                      {{ t('components.main.form.hints.opencodeNoModelExtraFields') }}
-                    </p>
-                    <div v-else class="opencode-kv-list opencode-kv-list--nested">
-                      <div v-for="field in entry.extraFieldEntries" :key="field.uiKey" class="opencode-kv-row opencode-kv-row--nested">
-                        <BaseInput
-                          :model-value="field.key"
-                          type="text"
-                          :placeholder="t('components.main.form.placeholders.opencodeModelExtraFieldKey')"
-                          @update:model-value="renameOpenCodeModelExtraField(entry.id, field.key, $event)"
-                        />
-                        <BaseInput
-                          :model-value="field.value"
-                          type="text"
-                          :placeholder="t('components.main.form.placeholders.opencodeModelOptionValue')"
-                          @update:model-value="updateOpenCodeModelExtraFieldValue(entry.id, field.key, $event)"
-                        />
-                        <button
-                          type="button"
-                          class="opencode-row-remove"
-                          :aria-label="t('components.main.form.actions.removeOpenCodeModelField')"
-                          @click="removeOpenCodeModelExtraField(entry.id, field.key)"
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div class="opencode-model-subsection">
-                    <div class="opencode-model-subsection__header">
-                      <span>{{ t('components.main.form.labels.opencodeModelOptions') }}</span>
-                      <button type="button" class="opencode-mini-action" @click="addOpenCodeModelOption(entry.id)">
-                        +
-                      </button>
-                    </div>
-                    <p v-if="entry.optionEntries.length === 0" class="opencode-empty-state opencode-empty-state--small">
-                      {{ t('components.main.form.hints.opencodeNoModelOptions') }}
-                    </p>
-                    <div v-else class="opencode-kv-list opencode-kv-list--nested">
-                      <div v-for="option in entry.optionEntries" :key="option.uiKey" class="opencode-kv-row opencode-kv-row--nested">
-                        <BaseInput
-                          :model-value="option.key"
-                          type="text"
-                          :placeholder="t('components.main.form.placeholders.opencodeModelOptionKey')"
-                          @update:model-value="renameOpenCodeModelOption(entry.id, option.key, $event)"
-                        />
-                        <BaseInput
-                          :model-value="option.value"
-                          type="text"
-                          :placeholder="t('components.main.form.placeholders.opencodeModelOptionValue')"
-                          @update:model-value="updateOpenCodeModelOptionValue(entry.id, option.key, $event)"
-                        />
-                        <button
-                          type="button"
-                          class="opencode-row-remove"
-                          :aria-label="t('components.main.form.actions.removeOpenCodeModelOption')"
-                          @click="removeOpenCodeModelOption(entry.id, option.key)"
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
               </div>
             </div>
           </section>
@@ -836,6 +763,37 @@
       </footer>
     </form>
   </InlineModal>
+
+  <InlineModal
+    :open="isOpenCodeModelDetailModalOpen"
+    :title="openCodeModelDetailTitle"
+    :panel-width="'min(720px, 94vw)'"
+    :close-on-backdrop="false"
+    @close="closeOpenCodeModelDetail"
+  >
+    <form class="opencode-model-detail-modal" @submit.prevent="saveOpenCodeModelDetail">
+      <p class="field-hint">
+        {{ t('components.main.form.hints.opencodeModelDetailJson') }}
+      </p>
+      <textarea
+        v-model="opencodeModelDetailText"
+        class="opencode-model-detail-textarea"
+        spellcheck="false"
+        autocomplete="off"
+      />
+      <p v-if="opencodeModelDetailError" class="field-error">
+        {{ opencodeModelDetailError }}
+      </p>
+      <footer class="form-actions form-actions--provider-modal">
+        <BaseButton variant="outline" type="button" @click="closeOpenCodeModelDetail">
+          {{ t('components.main.form.actions.cancel') }}
+        </BaseButton>
+        <BaseButton type="submit">
+          {{ t('components.main.form.actions.save') }}
+        </BaseButton>
+      </footer>
+    </form>
+  </InlineModal>
 </template>
 
 <script setup lang="ts">
@@ -1012,6 +970,9 @@ const opencodeModelUiKeys = ref<Record<string, string>>({})
 const opencodeModelExtraFieldUiKeys = ref<Record<string, Record<string, string>>>({})
 const opencodeModelOptionUiKeys = ref<Record<string, Record<string, string>>>({})
 const expandedOpenCodeModelIds = ref<string[]>([])
+const opencodeModelDetailId = ref('')
+const opencodeModelDetailText = ref('{}')
+const opencodeModelDetailError = ref('')
 const selectedOpenCodePresetId = ref('custom')
 const opencodeTemplateValues = ref<OpenCodeTemplateValueState>({})
 const openCodeLiveProviderIds = ref<string[]>([])
@@ -1249,6 +1210,12 @@ const opencodeModelEntries = computed<OpenCodeModelEntry[]>(() => (
       uiKey: getOpenCodeUiKey(opencodeModelUiKeys, id, 'model'),
     }
   })
+))
+const isOpenCodeModelDetailModalOpen = computed(() => !!opencodeModelDetailId.value)
+const openCodeModelDetailTitle = computed(() => (
+  opencodeModelDetailId.value
+    ? `${t('components.main.form.labels.opencodeModelOptions')} · ${opencodeModelDetailId.value}`
+    : t('components.main.form.labels.opencodeModelOptions')
 ))
 const openCodePresetEntries = computed(() => (
   opencodeProviderPresets.map((preset, index) => ({ id: `opencode-${index}`, preset }))
@@ -1736,6 +1703,7 @@ const resetForm = () => {
   opencodeModelExtraFieldUiKeys.value = {}
   opencodeModelOptionUiKeys.value = {}
   expandedOpenCodeModelIds.value = []
+  closeOpenCodeModelDetail()
   selectedOpenCodePresetId.value = 'custom'
   openCodePresetSearchQuery.value = ''
   opencodeTemplateValues.value = {}
@@ -1779,6 +1747,8 @@ const resetForm = () => {
 watch(() => props.open, (open) => {
   if (open) {
     resetForm()
+  } else {
+    closeOpenCodeModelDetail()
   }
 })
 
@@ -2214,6 +2184,9 @@ const syncOpenCodeStructuredStateFromConfig = (
   reconcileOpenCodeEditorUiKeys()
   const modelIds = new Set(Object.keys(opencodeModels.value))
   expandedOpenCodeModelIds.value = expandedOpenCodeModelIds.value.filter((modelId) => modelIds.has(modelId))
+  if (opencodeModelDetailId.value && !modelIds.has(opencodeModelDetailId.value)) {
+    closeOpenCodeModelDetail()
+  }
 }
 
 const buildDefaultOpenCodeSettingsConfig = (): Record<string, any> => createDefaultOpenCodeSettingsConfig(
@@ -2246,6 +2219,50 @@ const toggleOpenCodeModelExpansion = (modelId: string) => {
   expandedOpenCodeModelIds.value = isOpenCodeModelExpanded(modelId)
     ? expandedOpenCodeModelIds.value.filter((id) => id !== modelId)
     : [...expandedOpenCodeModelIds.value, modelId]
+}
+
+const isOpenCodeModelDetailOpen = (modelId: string) => opencodeModelDetailId.value === modelId
+
+const openOpenCodeModelDetail = (modelId: string) => {
+  const model = opencodeModels.value[modelId]
+  if (!model) return
+  opencodeModelDetailError.value = ''
+  opencodeModelDetailText.value = formatJsonObject(getOpenCodeModelRecord(model))
+  opencodeModelDetailId.value = modelId
+}
+
+const closeOpenCodeModelDetail = () => {
+  opencodeModelDetailId.value = ''
+  opencodeModelDetailText.value = '{}'
+  opencodeModelDetailError.value = ''
+}
+
+const saveOpenCodeModelDetail = () => {
+  const modelId = opencodeModelDetailId.value
+  if (!modelId || !(modelId in opencodeModels.value)) {
+    closeOpenCodeModelDetail()
+    return
+  }
+
+  try {
+    const parsed = JSON.parse(opencodeModelDetailText.value.trim() || '{}')
+    if (!isRecordValue(parsed)) {
+      opencodeModelDetailError.value = t('components.main.form.errors.opencodeModelDetailMustBeObject')
+      return
+    }
+
+    opencodeModels.value = {
+      ...opencodeModels.value,
+      [modelId]: cloneProviderValue(parsed as OpenCodeModel),
+    }
+    reconcileOpenCodeEditorUiKeys()
+    syncOpenCodeSettingsConfigTextFromStructuredState()
+    closeOpenCodeModelDetail()
+  } catch (error) {
+    opencodeModelDetailError.value = error instanceof Error
+      ? error.message
+      : t('components.main.form.errors.opencodeModelDetailInvalidJson')
+  }
 }
 
 const handleOpenCodeNpmChange = () => {
@@ -2297,7 +2314,6 @@ const addOpenCodeModel = () => {
   const id = createOpenCodeDraftKey('model', opencodeModels.value)
   opencodeModels.value = { ...opencodeModels.value, [id]: { name: '' } }
   ensureOpenCodeUiKey(opencodeModelUiKeys, id, 'model')
-  expandedOpenCodeModelIds.value = [...expandedOpenCodeModelIds.value, id]
   syncOpenCodeSettingsConfigTextFromStructuredState()
 }
 
@@ -2312,6 +2328,9 @@ const renameOpenCodeModel = (oldId: string, newId: string) => {
   renameOpenCodeModelScopedUiKeys(oldId, normalizedId)
   if (isOpenCodeModelExpanded(oldId)) {
     expandedOpenCodeModelIds.value = expandedOpenCodeModelIds.value.map((id) => (id === oldId ? normalizedId : id))
+  }
+  if (opencodeModelDetailId.value === oldId) {
+    opencodeModelDetailId.value = normalizedId
   }
   syncOpenCodeSettingsConfigTextFromStructuredState()
 }
@@ -2330,6 +2349,9 @@ const removeOpenCodeModel = (modelId: string) => {
   delete nextModels[modelId]
   opencodeModels.value = nextModels
   expandedOpenCodeModelIds.value = expandedOpenCodeModelIds.value.filter((id) => id !== modelId)
+  if (opencodeModelDetailId.value === modelId) {
+    closeOpenCodeModelDetail()
+  }
   removeOpenCodeUiKey(opencodeModelUiKeys, modelId)
   removeOpenCodeModelScopedUiKeys(modelId)
   syncOpenCodeSettingsConfigTextFromStructuredState()
@@ -2361,7 +2383,6 @@ const addSuggestedOpenCodeModel = (model: OpenCodeFetchedModel) => {
     },
   }
   ensureOpenCodeUiKey(opencodeModelUiKeys, model.id, 'model')
-  expandedOpenCodeModelIds.value = Array.from(new Set([...expandedOpenCodeModelIds.value, model.id]))
   syncOpenCodeSettingsConfigTextFromStructuredState()
 }
 

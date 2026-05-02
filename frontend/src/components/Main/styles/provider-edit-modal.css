@@ -40,6 +40,37 @@
   backdrop-filter: blur(6px);
 }
 
+.opencode-model-detail-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+}
+
+.opencode-model-detail-textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: min(50vh, 420px);
+  resize: vertical;
+  padding: 14px 16px;
+  border: 1px solid var(--mac-border);
+  border-radius: 14px;
+  outline: none;
+  background: color-mix(in srgb, var(--mac-surface) 96%, transparent);
+  color: var(--mac-text-primary);
+  font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  tab-size: 2;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.opencode-model-detail-textarea:focus {
+  border-color: color-mix(in srgb, var(--mac-accent) 62%, var(--mac-border));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--mac-accent) 14%, transparent);
+}
+
 .level-badge {
   display: inline-flex;
   align-items: center;
