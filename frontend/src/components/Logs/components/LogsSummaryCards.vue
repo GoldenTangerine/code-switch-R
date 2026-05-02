@@ -1,5 +1,11 @@
 <template>
-  <section class="logs-summary" v-if="statsCards.length">
+  <section
+    v-if="statsCards.length"
+    :class="[
+      'logs-summary',
+      isDarkTheme ? 'logs-summary--dark' : 'logs-summary--light',
+    ]"
+  >
     <article
       v-for="card in statsCards"
       :key="card.key"
@@ -239,6 +245,7 @@ import type { LogsSummaryCard, LogsSummaryCardTone } from '../types'
 
 defineProps<{
   statsCards: LogsSummaryCard[]
+  isDarkTheme?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -930,6 +937,152 @@ const extractFooterValue = (value: string) => value.split('·').pop()?.trim() ??
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.04),
     0 24px 44px -34px rgba(var(--summary-glow), 0.48);
+}
+
+.logs-summary--light {
+  border-color: rgba(203, 213, 225, 0.72);
+  background:
+    radial-gradient(circle at 16% 0%, rgba(99, 102, 241, 0.13), transparent 34%),
+    radial-gradient(circle at 88% 12%, rgba(14, 165, 233, 0.1), transparent 32%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.96));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 24px 52px -38px rgba(15, 23, 42, 0.32);
+}
+
+.logs-summary--light .summary-card {
+  border-color: rgba(203, 213, 225, 0.78);
+  background:
+    radial-gradient(circle at top right, rgba(var(--summary-glow), 0.11), transparent 42%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.95));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.86),
+    0 18px 38px -30px rgba(15, 23, 42, 0.26);
+}
+
+.logs-summary--light .summary-card::after {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.72), transparent 30%);
+}
+
+.logs-summary--light .summary-card__glow {
+  background: radial-gradient(circle, rgba(var(--summary-glow), 0.16), transparent 72%);
+}
+
+.logs-summary--light .summary-card__icon-box {
+  border-color: rgba(var(--summary-glow), 0.2);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82);
+}
+
+.logs-summary--light .summary-card__status {
+  border-color: rgba(148, 163, 184, 0.18);
+  background: rgba(15, 23, 42, 0.04);
+  color: rgba(71, 85, 105, 0.74);
+}
+
+.logs-summary--light .summary-card__label,
+.logs-summary--light .summary-card__micro-footer,
+.logs-summary--light .summary-card__section-label,
+.logs-summary--light .summary-card__metric-label,
+.logs-summary--light .summary-card__ring-label,
+.logs-summary--light .summary-card__cache-label,
+.logs-summary--light .summary-card__cache-note,
+.logs-summary--light .summary-card__cost-label,
+.logs-summary--light .summary-card__sub-value {
+  color: rgba(71, 85, 105, 0.74);
+}
+
+.logs-summary--light .summary-card__value,
+.logs-summary--light .summary-card__progress-meta strong,
+.logs-summary--light .summary-card__cost-value {
+  color: #0f172a;
+}
+
+.logs-summary--light .summary-card__value-suffix,
+.logs-summary--light .summary-card__progress-meta {
+  color: rgba(51, 65, 85, 0.78);
+}
+
+.logs-summary--light .summary-card__badge.is-alert {
+  color: #dc2626;
+  background: rgba(254, 226, 226, 0.92);
+}
+
+.logs-summary--light .summary-card__badge.is-success {
+  color: #047857;
+  background: rgba(209, 250, 229, 0.92);
+}
+
+.logs-summary--light .summary-card__badge.is-warning {
+  color: #b45309;
+  background: rgba(254, 243, 199, 0.95);
+}
+
+.logs-summary--light .summary-card__badge.is-neutral {
+  color: #475569;
+  background: rgba(241, 245, 249, 0.95);
+}
+
+.logs-summary--light .summary-card__progress-track,
+.logs-summary--light .summary-card__ratio-track {
+  background: rgba(226, 232, 240, 0.96);
+  box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.08);
+}
+
+.logs-summary--light .summary-card__metric {
+  border-color: rgba(203, 213, 225, 0.68);
+  background: rgba(248, 250, 252, 0.9);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82);
+}
+
+.logs-summary--light .summary-card__ratio-chip-value {
+  color: color-mix(in srgb, var(--ratio-chip-color) 72%, #0f172a 28%);
+}
+
+.logs-summary--light .summary-card__ring {
+  background: conic-gradient(var(--summary-accent) 0 var(--ring-progress), rgba(226, 232, 240, 0.95) var(--ring-progress) 100%);
+}
+
+.logs-summary--light .summary-card__ring::before {
+  background: rgba(255, 255, 255, 0.98);
+}
+
+.logs-summary--light .summary-card__cache-value,
+.logs-summary--light .summary-card__cost-value.tone-success,
+.logs-summary--light .summary-card__metric-value.tone-success {
+  color: #047857;
+}
+
+.logs-summary--light .summary-card__cost-value.tone-warning,
+.logs-summary--light .summary-card__metric-value.tone-warning {
+  color: #b45309;
+}
+
+.logs-summary--light .summary-card__cost-value.tone-danger,
+.logs-summary--light .summary-card__metric-value.tone-danger {
+  color: #dc2626;
+}
+
+.logs-summary--light .summary-card__pulse {
+  background: rgba(100, 116, 139, 0.28);
+}
+
+.logs-summary--light .summary-card__step-bar {
+  background: rgba(var(--summary-glow), 0.18);
+}
+
+.logs-summary--light .summary-card__cost-grid {
+  border-top-color: rgba(203, 213, 225, 0.72);
+}
+
+.logs-summary--light .summary-card__cost-item--bordered {
+  border-left-color: rgba(203, 213, 225, 0.72);
+}
+
+.logs-summary--light .summary-card--clickable:hover {
+  border-color: rgba(var(--summary-glow), 0.32);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 26px 48px -34px rgba(var(--summary-glow), 0.44);
 }
 
 @keyframes pulse-dot {

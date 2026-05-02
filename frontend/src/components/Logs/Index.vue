@@ -32,7 +32,11 @@
         @update:range-picker-value="updateRangePickerValue"
       />
 
-      <LogsSummaryCards :stats-cards="statsCards" @card-click="handleCardClick" />
+      <LogsSummaryCards
+        :stats-cards="statsCards"
+        :is-dark-theme="isDarkTheme"
+        @card-click="handleCardClick"
+      />
 
       <LogsChartsPanel
         :model-share-rows="modelShareRows"
