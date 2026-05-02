@@ -1888,6 +1888,10 @@ const getOpenCodeConfigModels = (config?: Record<string, any> | null): Record<st
   return isRecordValue(models) ? cloneProviderValue(models as Record<string, OpenCodeModel>) : {}
 }
 
+const getOpenCodeModelRecord = (model: unknown): OpenCodeModel => (
+  isRecordValue(model) ? model as OpenCodeModel : {}
+)
+
 const toOpenCodeExtraOptions = (options: Record<string, any>): Record<string, string> => {
   const extra: Record<string, string> = {}
   Object.entries(options).forEach(([key, value]) => {
@@ -2063,8 +2067,9 @@ const reconcileOpenCodeEditorUiKeys = () => {
   const modelExtraFields: Record<string, string[]> = {}
   const modelOptions: Record<string, string[]> = {}
   Object.entries(opencodeModels.value).forEach(([modelId, model]) => {
-    modelExtraFields[modelId] = Object.keys(model).filter((key) => !OPENCODE_MODEL_RESERVED_KEYS.has(key))
-    modelOptions[modelId] = isRecordValue(model.options) ? Object.keys(model.options) : []
+    const modelRecord = getOpenCodeModelRecord(model)
+    modelExtraFields[modelId] = Object.keys(modelRecord).filter((key) => !OPENCODE_MODEL_RESERVED_KEYS.has(key))
+    modelOptions[modelId] = isRecordValue(modelRecord.options) ? Object.keys(modelRecord.options) : []
   })
   reconcileNestedOpenCodeUiKeys(opencodeModelExtraFieldUiKeys, modelExtraFields, 'model-field')
   reconcileNestedOpenCodeUiKeys(opencodeModelOptionUiKeys, modelOptions, 'model-option')
@@ -2084,7 +2089,7 @@ const renameRecordKey = <T,>(record: Record<string, T>, oldKey: string, newKey: 
 }
 
 const getOpenCodeModelExtraFieldEntries = (modelId: string, model: OpenCodeModel): OpenCodeKeyValueEntry[] => (
-  Object.entries(model)
+  Object.entries(getOpenCodeModelRecord(model))
     .filter(([key]) => !OPENCODE_MODEL_RESERVED_KEYS.has(key))
     .map(([key, value]) => ({
       key,
@@ -2094,7 +2099,8 @@ const getOpenCodeModelExtraFieldEntries = (modelId: string, model: OpenCodeModel
 )
 
 const getOpenCodeModelOptionEntries = (modelId: string, model: OpenCodeModel): OpenCodeKeyValueEntry[] => {
-  const options = isRecordValue(model.options) ? model.options : {}
+  const modelRecord = getOpenCodeModelRecord(model)
+  const options = isRecordValue(modelRecord.options) ? modelRecord.options : {}
   return Object.entries(options).map(([key, value]) => ({
     key,
     value: stringifyOpenCodeEditableValue(value),
