@@ -1,3 +1,16 @@
+# Code Switch v2.8.55
+
+## 修复
+- **托盘平台图标与首页供应商 Tab 保持一致**：托盘弹窗的 Claude Code / Codex 头像不再显示 `C` / `X` 字母块，而是复用首页供应商切换 Tab 的同一套品牌图标映射，Claude Code 显示 Claude 图标，Codex 显示 OpenAI 图标。
+
+## 技术改进
+- **托盘品牌图标复用统一 provider icon helper**：托盘现在通过 `HOME_PROVIDER_TAB_OPTIONS` 和 `getProviderDisplayIconSvg` 获取平台图标，并预加载对应 SVG；图标加载失败时仍保留字母 fallback，避免弹窗出现空白。
+
+## 发布
+- **本次发版版本号统一推进到 `v2.8.55`**：同步更新应用常量、构建配置、Darwin `Info.plist` / `Info.dev.plist`、Windows 版本信息与 Linux `nfpm` 版本，并准备推送 `v2.8.55` tag 触发 GitHub 自动打包。
+
+---
+
 # Code Switch v2.8.54
 
 ## 新增

@@ -7,6 +7,7 @@ import { fetchCostSince, fetchFiveHourQuotaStatus, fetchLogStats } from '../../s
 import { fetchAppSettings, type AppSettings } from '../../services/appSettings'
 import { fetchProxyStatus } from '../../services/claudeSettings'
 import type { AutomationCard } from '../../data/cards'
+import { HOME_PROVIDER_TAB_OPTIONS } from '../../data/homeProviderTabs'
 import {
   getVisibleTrayQuotaKeys,
   resolveTrayBudgetDisplayMode,
@@ -50,6 +51,10 @@ import {
 import {
   listTrayFallbackProviders,
 } from './trayProviderFallback'
+import {
+  getProviderDisplayIconSvg,
+  preloadProviderDisplayIcons,
+} from '../../utils/providerIconAssets'
 
 type Platform = 'claude' | 'codex'
 type ForecastMethod = 'cycle' | '10m' | '1h' | 'yesterday' | 'last24h'
@@ -100,6 +105,12 @@ const quotaTitleKeys: Record<BudgetQuotaKey, string> = {
 }
 
 const { t, locale } = useI18n()
+const trayPlatformIconKeys = Object.fromEntries(
+  HOME_PROVIDER_TAB_OPTIONS.map((tab) => [tab.id, tab.icon]),
+) as Record<string, string>
+
+const getTrayPlatformIconKey = (platform: Platform) => trayPlatformIconKeys[platform] || platform
+const getTrayPlatformIconSvg = (platform: Platform) => getProviderDisplayIconSvg(getTrayPlatformIconKey(platform))
 
 const formatCurrency = (value?: number, unit?: string) => {
   const numeric = Number(value ?? 0)
@@ -247,6 +258,7 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
   const displayMode = ref<TrayBudgetDisplayMode | 'provider-quotas' | 'pending'>('pending')
   const visibleQuotaKeys = ref<BudgetQuotaKey[]>([])
   const fallbackProviderName = ref('')
+  const brandIconSvg = computed(() => getTrayPlatformIconSvg(platform))
   const hostingEnabled = ref(false)
   const hostingLabel = computed(() => (
     hostingEnabled.value ? t('tray.hosted') : t('tray.notHosted')
@@ -637,6 +649,7 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
     platform,
     brandName,
     brandIcon,
+    brandIconSvg,
     quotas,
     visibleQuotas,
     providerQuotas,
@@ -656,6 +669,8 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
 const claudeCard = createTrayCard('claude', 'Claude Code', 'C')
 const codexCard = createTrayCard('codex', 'Codex', 'X')
 const cards = [claudeCard, codexCard]
+
+void preloadProviderDisplayIcons(cards.map((card) => getTrayPlatformIconKey(card.platform)))
 
 const getTickerIntervalMs = () => (
   cards.some((card) => card.hasSecondPrecisionCountdown) ? 1000 : FULL_REFRESH_INTERVAL_MS
@@ -793,7 +808,14 @@ onUnmounted(() => {
       <div v-for="card in cards" :key="card.platform" class="tray-panel">
         <div class="tray-header">
           <div class="tray-brand">
-            <div class="tray-brand__icon" aria-hidden="true">{{ card.brandIcon }}</div>
+            <div class="tray-brand__icon" aria-hidden="true">
+              <span
+                v-if="card.brandIconSvg"
+                class="tray-brand__icon-svg"
+                v-html="card.brandIconSvg"
+              ></span>
+              <span v-else class="tray-brand__icon-fallback">{{ card.brandIcon }}</span>
+            </div>
             <span class="tray-brand__name">{{ card.brandName }}</span>
           </div>
           <div class="tray-status" :class="{ active: card.hostingEnabled }">
@@ -984,6 +1006,19 @@ onUnmounted(() => {
   font-weight: 700;
   color: var(--mac-text);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.tray-brand__icon-svg,
+.tray-brand__icon-svg :deep(svg) {
+  display: block;
+  width: 16px;
+  height: 16px;
+}
+
+.tray-brand__icon-fallback {
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
 }
 
 .tray-brand__name {
