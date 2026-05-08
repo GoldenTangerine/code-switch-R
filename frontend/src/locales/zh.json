@@ -37,6 +37,27 @@
       "saveFailed": "保存网络设置失败"
     }
   },
+  "tray": {
+    "quotaFiveHour": "5 小时额度",
+    "quotaDaily": "日额度",
+    "quotaWeekly": "周额度",
+    "quotaMonthly": "月额度",
+    "quotaTotal": "总额度",
+    "hosted": "托管中",
+    "notHosted": "未托管",
+    "countdownDays": "{days}天 {time}",
+    "resetCountdown": "重置倒计时 {countdown}",
+    "resetSoon": "即将重置",
+    "forecastUnavailable": "预计耗尽 —",
+    "forecastDepletion": "预计耗尽 {value}",
+    "budgetReached": "已达预算",
+    "totalUsage": "总消耗",
+    "used": "已用 {amount}",
+    "sourceProvider": "来自启用供应商",
+    "remaining": "剩余 {amount}",
+    "queryFailed": "查询失败",
+    "providerQuotaQuery": "额度查询"
+  },
   "menus": {
     "general": "通用设置",
     "shortcut": "快捷键",

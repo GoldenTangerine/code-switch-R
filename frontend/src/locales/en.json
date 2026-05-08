@@ -37,6 +37,27 @@
       "saveFailed": "Failed to save network settings"
     }
   },
+  "tray": {
+    "quotaFiveHour": "5 hour quota",
+    "quotaDaily": "Daily quota",
+    "quotaWeekly": "Weekly quota",
+    "quotaMonthly": "Monthly quota",
+    "quotaTotal": "Total quota",
+    "hosted": "Hosted",
+    "notHosted": "Not hosted",
+    "countdownDays": "{days}d {time}",
+    "resetCountdown": "Reset in {countdown}",
+    "resetSoon": "Resetting soon",
+    "forecastUnavailable": "Depletion estimate —",
+    "forecastDepletion": "Depletes around {value}",
+    "budgetReached": "Budget reached",
+    "totalUsage": "Total usage",
+    "used": "Used {amount}",
+    "sourceProvider": "From enabled provider",
+    "remaining": "Remaining {amount}",
+    "queryFailed": "Query failed",
+    "providerQuotaQuery": "Quota query"
+  },
   "menus": {
     "about": "About",
     "general": "General settings",

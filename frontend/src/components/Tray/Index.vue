@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, proxyRefs, ref } from 'vue'
 import { Call } from '@wailsio/runtime'
+import { useI18n } from 'vue-i18n'
+import { LoadProviders } from '../../../bindings/codeswitch/services/providerservice'
 import { fetchCostSince, fetchFiveHourQuotaStatus, fetchLogStats } from '../../services/logs'
 import { fetchAppSettings, type AppSettings } from '../../services/appSettings'
 import { fetchProxyStatus } from '../../services/claudeSettings'
+import type { AutomationCard } from '../../data/cards'
 import {
   getVisibleTrayQuotaKeys,
   resolveTrayBudgetDisplayMode,
@@ -13,6 +16,7 @@ import {
   formatClockCountdown,
   shouldUseSecondPrecisionTrayTicker,
   updateItemsAndCollectRefresh,
+  type TrayCountdownQuota,
 } from '../../utils/trayCountdown'
 import {
   budgetQuotaOrder,
@@ -26,6 +30,26 @@ import {
   type BudgetQuotaSetting,
   type BudgetQuotaSettings,
 } from '../../utils/budgetUsage'
+import { hasProviderQuotaQueryType } from '../../utils/providerQuotaQuery'
+import {
+  deserializeProviders,
+  type PersistedProvider,
+} from '../Main/adapters/providerCardMappers'
+import { resolveProviderQuotaQueryDisplay } from '../Main/utils/providerQuotaQueryDisplay'
+import {
+  providerQuotaLabelKeyMap,
+  resolveProviderQuotaSnapshot,
+  type ProviderQuotaSnapshotItem,
+} from '../Main/utils/providerQuotaSnapshot'
+import { resolveProviderQuotaCurrencyCode } from '../Main/utils/providerQuotaValueFormat'
+import {
+  getProviderQuotaRemainingValue,
+  isProviderQuotaBalanceItem,
+  isProviderQuotaErrorItem,
+} from '../Main/utils/providerQuotaCardDisplay'
+import {
+  listTrayFallbackProviders,
+} from './trayProviderFallback'
 
 type Platform = 'claude' | 'codex'
 type ForecastMethod = 'cycle' | '10m' | '1h' | 'yesterday' | 'last24h'
@@ -33,13 +57,20 @@ type ForecastDisplay = 'datetime' | 'remaining'
 type CostSinceFetcher = (start: Date) => Promise<number>
 
 type TrayQuotaState = {
-  key: BudgetQuotaKey
+  key: string
   title: string
   rawUsed: number
   used: number
   total: number
   usedLabel: string
   totalLabel: string
+  remainingLabel: string
+  valueMode: 'currency' | 'count'
+  unit?: string
+  extra: string
+  invalidMessage: string
+  source: 'global' | 'provider'
+  displayKind: 'progress' | 'balance' | 'error'
   hasBudget: boolean
   progressRatio: number
   progressPercentLabel: string
@@ -60,25 +91,51 @@ let lastWindowHeight = 0
 let lastFullRefreshAt = 0
 let lastRefreshAttemptAt = 0
 
-const quotaTitles: Record<BudgetQuotaKey, string> = {
-  five_hour: '5 小时额度',
-  daily: '日额度',
-  weekly: '周额度',
-  monthly: '月额度',
-  total: '总额度',
+const quotaTitleKeys: Record<BudgetQuotaKey, string> = {
+  five_hour: 'tray.quotaFiveHour',
+  daily: 'tray.quotaDaily',
+  weekly: 'tray.quotaWeekly',
+  monthly: 'tray.quotaMonthly',
+  total: 'tray.quotaTotal',
 }
 
-const formatCurrency = (value?: number) => {
-  if (value === undefined || value === null || Number.isNaN(value)) {
-    return '$0.0000'
+const { t, locale } = useI18n()
+
+const formatCurrency = (value?: number, unit?: string) => {
+  const numeric = Number(value ?? 0)
+  const safeValue = Number.isFinite(numeric) ? numeric : 0
+  const currencyCode = resolveProviderQuotaCurrencyCode(unit)
+  if (currencyCode) {
+    return new Intl.NumberFormat(locale.value || 'en', {
+      style: 'currency',
+      currency: currencyCode,
+      minimumFractionDigits: safeValue >= 1 ? 2 : 4,
+      maximumFractionDigits: safeValue >= 1 ? 2 : 4,
+    }).format(safeValue)
   }
-  if (value >= 1) {
-    return `$${value.toFixed(2)}`
+  if (safeValue >= 1) {
+    return `$${safeValue.toFixed(2)}`
   }
-  if (value >= 0.01) {
-    return `$${value.toFixed(3)}`
+  if (safeValue >= 0.01) {
+    return `$${safeValue.toFixed(3)}`
   }
-  return `$${value.toFixed(4)}`
+  return `$${safeValue.toFixed(4)}`
+}
+
+const formatQuotaValue = (
+  value: number | undefined,
+  valueMode: TrayQuotaState['valueMode'] = 'currency',
+  unit?: string,
+) => {
+  const normalized = Number(value)
+  const safeValue = Number.isFinite(normalized) ? normalized : 0
+  if (valueMode === 'count') {
+    const formatted = new Intl.NumberFormat(locale.value || 'en', {
+      maximumFractionDigits: Number.isInteger(safeValue) ? 0 : 2,
+    }).format(safeValue)
+    return unit?.trim() ? `${formatted} ${unit.trim()}` : formatted
+  }
+  return formatCurrency(safeValue, unit)
 }
 
 const formatLocalDateTimeLabel = (date: Date) => {
@@ -104,7 +161,10 @@ const formatCountdown = (remainingMs: number) => {
   const days = Math.floor(totalMinutes / (24 * 60))
   const hours = Math.floor((totalMinutes % (24 * 60)) / 60)
   const minutes = totalMinutes % 60
-  return `${pad2(days)}天 ${pad2(hours)}:${pad2(minutes)}`
+  return t('tray.countdownDays', {
+    days: pad2(days),
+    time: `${pad2(hours)}:${pad2(minutes)}`,
+  })
 }
 
 const calculateRate = (cost: number, seconds: number) => {
@@ -130,12 +190,19 @@ const normalizeForecastDisplay = (value: unknown): ForecastDisplay => {
 
 const createQuotaState = (key: BudgetQuotaKey): TrayQuotaState => ({
   key,
-  title: quotaTitles[key],
+  title: t(quotaTitleKeys[key]),
   rawUsed: 0,
   used: 0,
   total: 0,
   usedLabel: formatCurrency(0),
   totalLabel: '∞',
+  remainingLabel: formatCurrency(0),
+  valueMode: 'currency',
+  unit: undefined,
+  extra: '',
+  invalidMessage: '',
+  source: 'global',
+  displayKind: 'progress',
   hasBudget: false,
   progressRatio: 0,
   progressPercentLabel: '',
@@ -177,17 +244,32 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
   const forecastDisplay = ref<ForecastDisplay>('datetime')
   const usedAdjustments = ref<BudgetQuotaAdjustments>(createDefaultBudgetQuotaAdjustments())
   const totalUsage = ref(0)
-  const displayMode = ref<TrayBudgetDisplayMode | 'pending'>('pending')
+  const displayMode = ref<TrayBudgetDisplayMode | 'provider-quotas' | 'pending'>('pending')
   const visibleQuotaKeys = ref<BudgetQuotaKey[]>([])
+  const fallbackProviderName = ref('')
   const hostingEnabled = ref(false)
-  const hostingLabel = computed(() => (hostingEnabled.value ? '托管中' : '未托管'))
+  const hostingLabel = computed(() => (
+    hostingEnabled.value ? t('tray.hosted') : t('tray.notHosted')
+  ))
   const visibleQuotas = computed(() => {
     if (displayMode.value !== 'quotas') return []
     const allowedKeys = new Set(visibleQuotaKeys.value)
-    return quotas.value.filter((quota) => quota.hasBudget && allowedKeys.has(quota.key))
+    return quotas.value.filter((quota) => quota.hasBudget && allowedKeys.has(quota.key as BudgetQuotaKey))
   })
+  const providerQuotas = computed(() => (
+    displayMode.value === 'provider-quotas'
+      ? quotas.value.filter((quota) => quota.hasBudget || quota.displayKind === 'balance' || quota.displayKind === 'error')
+      : []
+  ))
+  const showProviderSource = computed(() => (
+    displayMode.value === 'provider-quotas' && Boolean(fallbackProviderName.value)
+  ))
   const hasSecondPrecisionCountdown = computed(() => (
-    shouldUseSecondPrecisionTrayTicker(displayMode.value, showCountdown.value, quotas.value)
+    shouldUseSecondPrecisionTrayTicker(
+      displayMode.value,
+      showCountdown.value || displayMode.value === 'provider-quotas',
+      quotas.value as TrayCountdownQuota[],
+    )
   ))
   const showTotalUsage = computed(() => displayMode.value === 'summary')
   const totalUsageLabel = computed(() => formatCurrency(totalUsage.value))
@@ -206,19 +288,45 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
   }
 
   const updateQuotaStaticLabels = (quota: TrayQuotaState) => {
-    quota.usedLabel = formatCurrency(quota.used)
-    quota.hasBudget = quota.total > 0
-    quota.totalLabel = quota.hasBudget ? formatCurrency(quota.total) : '∞'
-    quota.progressRatio = quota.hasBudget ? Math.min(Math.max(quota.used / quota.total, 0), 1) : 0
-    quota.progressPercentLabel = quota.hasBudget ? `${Math.round(quota.progressRatio * 100)}%` : ''
+    const remaining = getProviderQuotaRemainingValue(quota)
+    quota.usedLabel = formatQuotaValue(quota.used, quota.valueMode, quota.unit)
+    quota.remainingLabel = formatQuotaValue(remaining, quota.valueMode, quota.unit)
+    quota.hasBudget = quota.displayKind === 'balance'
+      ? true
+      : quota.displayKind === 'error'
+        ? false
+        : quota.total > 0
+    quota.totalLabel = quota.hasBudget && quota.displayKind !== 'balance'
+      ? formatQuotaValue(quota.total, quota.valueMode, quota.unit)
+      : '∞'
+    quota.progressRatio = quota.displayKind === 'progress' && quota.hasBudget
+      ? Math.min(Math.max(quota.used / quota.total, 0), 1)
+      : 0
+    quota.progressPercentLabel = quota.displayKind === 'progress' && quota.hasBudget
+      ? `${Math.round(quota.progressRatio * 100)}%`
+      : ''
   }
 
   const updateQuotaTimeLabels = (quota: TrayQuotaState, now: Date) => {
+    if (quota.source === 'provider') {
+      if (quota.displayKind === 'progress' && quota.hasBudget && quota.nextReset) {
+        const remaining = quota.nextReset.getTime() - now.getTime()
+        quota.countdownLabel = remaining > 0
+          ? t('tray.resetCountdown', {
+            countdown: quota.key === 'five_hour' ? formatClockCountdown(remaining) : formatCountdown(remaining),
+          })
+          : t('tray.resetSoon')
+      }
+      return Boolean(quota.displayKind === 'progress' && quota.hasBudget && quota.nextReset && now >= quota.nextReset && !loading.value)
+    }
+
     if (showCountdown.value && quota.hasBudget && quota.nextReset) {
       const remaining = quota.nextReset.getTime() - now.getTime()
       quota.countdownLabel = remaining > 0
-        ? `重置倒计时 ${quota.key === 'five_hour' ? formatClockCountdown(remaining) : formatCountdown(remaining)}`
-        : '即将重置'
+        ? t('tray.resetCountdown', {
+          countdown: quota.key === 'five_hour' ? formatClockCountdown(remaining) : formatCountdown(remaining),
+        })
+        : t('tray.resetSoon')
     } else {
       quota.countdownLabel = ''
     }
@@ -228,16 +336,20 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
       if (rate > 0 && quota.used < quota.total) {
         const secondsToBudget = (quota.total - quota.used) / rate
         if (!Number.isFinite(secondsToBudget)) {
-          quota.forecastLabel = '预计耗尽 —'
+          quota.forecastLabel = t('tray.forecastUnavailable')
         } else if (forecastDisplay.value === 'remaining') {
-          quota.forecastLabel = `预计耗尽 ${formatCountdown(secondsToBudget * 1000)}`
+          quota.forecastLabel = t('tray.forecastDepletion', {
+            value: formatCountdown(secondsToBudget * 1000),
+          })
         } else {
-          quota.forecastLabel = `预计耗尽 ${formatLocalDateTimeLabel(new Date(now.getTime() + secondsToBudget * 1000))}`
+          quota.forecastLabel = t('tray.forecastDepletion', {
+            value: formatLocalDateTimeLabel(new Date(now.getTime() + secondsToBudget * 1000)),
+          })
         }
       } else if (quota.used >= quota.total) {
-        quota.forecastLabel = '已达预算'
+        quota.forecastLabel = t('tray.budgetReached')
       } else {
-        quota.forecastLabel = '预计耗尽 —'
+        quota.forecastLabel = t('tray.forecastUnavailable')
       }
     } else {
       quota.forecastLabel = ''
@@ -303,6 +415,109 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
       : settings.budget_quota_used_adjustments
   }
 
+  const loadFallbackProviders = async (): Promise<AutomationCard[]> => {
+    try {
+      const saved = await LoadProviders(platform)
+      if (!Array.isArray(saved) || saved.length === 0) return []
+      const providers = deserializeProviders(saved as PersistedProvider[], platform)
+      return listTrayFallbackProviders(providers)
+    } catch (error) {
+      console.error(`failed to load ${platform} fallback provider`, error)
+      return []
+    }
+  }
+
+  const getProviderQuotaTitle = (item: ProviderQuotaSnapshotItem) => {
+    const labelKey = providerQuotaLabelKeyMap[item.key]
+    if (labelKey) return t(labelKey)
+    return `${item.label ?? ''}`.trim() || item.key
+  }
+
+  const createProviderQuotaState = (item: ProviderQuotaSnapshotItem): TrayQuotaState => {
+    const valueMode = item.valueMode === 'count' ? 'count' : 'currency'
+    const normalizedUsed = Number.isFinite(Number(item.used)) ? Math.max(Number(item.used), 0) : 0
+    const normalizedTotal = Number.isFinite(Number(item.total)) ? Math.max(Number(item.total), 0) : 0
+    const displayKind = isProviderQuotaErrorItem(item)
+      ? 'error'
+      : isProviderQuotaBalanceItem(item)
+        ? 'balance'
+        : 'progress'
+    const invalidMessage = `${item.invalidMessage ?? ''}`.trim()
+    const nextQuota: TrayQuotaState = {
+      key: `${item.key ?? ''}`.trim() || getProviderQuotaTitle(item),
+      title: getProviderQuotaTitle(item),
+      rawUsed: normalizedUsed,
+      used: normalizedUsed,
+      total: normalizedTotal,
+      usedLabel: '',
+      totalLabel: '',
+      remainingLabel: '',
+      valueMode,
+      unit: `${item.unit ?? ''}`.trim() || undefined,
+      extra: `${item.extra ?? ''}`.trim(),
+      invalidMessage,
+      source: 'provider',
+      displayKind,
+      hasBudget: displayKind === 'error' ? false : normalizedTotal > 0,
+      progressRatio: 0,
+      progressPercentLabel: '',
+      countdownLabel: `${item.countdownLabel ?? ''}`.trim(),
+      forecastLabel: '',
+      windowStart: null,
+      nextReset: item.nextReset,
+      forecastRate: 0,
+    }
+    updateQuotaStaticLabels(nextQuota)
+    return nextQuota
+  }
+
+  const loadProviderQuotas = async (provider: AutomationCard, now: Date): Promise<TrayQuotaState[]> => {
+    if (hasProviderQuotaQueryType(provider.providerQuotaQueryConfig ?? provider.providerQuotaQueryType, provider.providerQuotaQueryType)) {
+      const result = await resolveProviderQuotaQueryDisplay({
+        card: provider,
+        now,
+        t,
+      })
+      if (result.items.length > 0) {
+        return result.items.map(createProviderQuotaState)
+      }
+      if (result.failureMessage) {
+        return [{
+          key: 'provider_quota_error',
+          title: t('tray.providerQuotaQuery'),
+          rawUsed: 0,
+          used: 0,
+          total: 0,
+          usedLabel: formatQuotaValue(0),
+          totalLabel: '∞',
+          remainingLabel: formatQuotaValue(0),
+          valueMode: 'currency',
+          unit: undefined,
+          extra: '',
+          invalidMessage: result.failureMessage,
+          source: 'provider',
+          displayKind: 'error',
+          hasBudget: false,
+          progressRatio: 0,
+          progressPercentLabel: '',
+          countdownLabel: '',
+          forecastLabel: '',
+          windowStart: null,
+          nextReset: null,
+          forecastRate: 0,
+        }]
+      }
+    }
+
+    const snapshots = await resolveProviderQuotaSnapshot({
+      card: provider,
+      platform,
+      now,
+      t,
+    })
+    return snapshots.map(createProviderQuotaState)
+  }
+
   const loadTotalUsage = async () => {
     try {
       const stats = await fetchLogStats(platform)
@@ -341,8 +556,21 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
       const nextDisplayMode = resolveTrayBudgetDisplayMode(quotaSettings)
 
       if (nextDisplayMode === 'summary') {
+        const fallbackProviders = await loadFallbackProviders()
+        for (const fallbackProvider of fallbackProviders) {
+          const providerQuotaStates = await loadProviderQuotas(fallbackProvider, now)
+          if (providerQuotaStates.length > 0) {
+            quotas.value = providerQuotaStates
+            visibleQuotaKeys.value = []
+            fallbackProviderName.value = fallbackProvider.name
+            displayMode.value = 'provider-quotas'
+            totalUsage.value = 0
+            return
+          }
+        }
         quotas.value = budgetQuotaOrder.map((key) => createQuotaState(key))
         visibleQuotaKeys.value = []
+        fallbackProviderName.value = ''
         displayMode.value = 'summary'
         await loadTotalUsage()
         return
@@ -391,6 +619,7 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
         }),
       )
       visibleQuotaKeys.value = nextVisibleQuotaKeys
+      fallbackProviderName.value = ''
       displayMode.value = 'quotas'
       totalUsage.value = 0
     } catch (error) {
@@ -410,8 +639,11 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
     brandIcon,
     quotas,
     visibleQuotas,
+    providerQuotas,
     showTotalUsage,
     totalUsageLabel,
+    fallbackProviderName,
+    showProviderSource,
     hostingEnabled,
     hostingLabel,
     loading,
@@ -574,7 +806,7 @@ onUnmounted(() => {
             <div class="tray-item__header">
               <div class="tray-item__title">
                 <span class="tray-dot"></span>
-                <span>总消耗</span>
+                <span>{{ t('tray.totalUsage') }}</span>
               </div>
               <div class="tray-item__value" :class="{ loading: card.loading }">
                 <span>{{ card.totalUsageLabel }}</span>
@@ -589,7 +821,7 @@ onUnmounted(() => {
               </div>
               <div class="tray-item__summary">
                 <div class="tray-item__value" :class="{ loading: card.loading }">
-                  <span>已用 {{ quota.usedLabel }}</span>
+                  <span>{{ t('tray.used', { amount: quota.usedLabel }) }}</span>
                   <span class="tray-divider">/</span>
                   <span>{{ quota.totalLabel }}</span>
                 </div>
@@ -602,6 +834,52 @@ onUnmounted(() => {
             <div v-if="quota.countdownLabel || quota.forecastLabel" class="tray-meta">
               <span v-if="quota.countdownLabel">{{ quota.countdownLabel }}</span>
               <span v-if="quota.forecastLabel">{{ quota.forecastLabel }}</span>
+            </div>
+          </div>
+          <div v-if="card.showProviderSource" class="tray-provider-source">
+            <span>{{ t('tray.sourceProvider') }}</span>
+            <strong>{{ card.fallbackProviderName }}</strong>
+          </div>
+          <div
+            v-for="quota in card.providerQuotas"
+            :key="`${card.platform}-provider-${quota.key}`"
+            class="tray-item"
+            :class="{
+              'tray-item--balance': quota.displayKind === 'balance',
+              'tray-item--error': quota.displayKind === 'error',
+            }"
+          >
+            <div class="tray-item__header">
+              <div class="tray-item__title">
+                <span class="tray-dot"></span>
+                <span>{{ quota.title }}</span>
+              </div>
+              <div class="tray-item__summary">
+                <div class="tray-item__value" :class="{ loading: card.loading }">
+                  <template v-if="quota.displayKind === 'balance'">
+                    <span>{{ t('tray.remaining', { amount: quota.remainingLabel }) }}</span>
+                  </template>
+                  <template v-else-if="quota.displayKind === 'error'">
+                    <span>{{ t('tray.queryFailed') }}</span>
+                  </template>
+                  <template v-else>
+                    <span>{{ t('tray.used', { amount: quota.usedLabel }) }}</span>
+                    <span class="tray-divider">/</span>
+                    <span>{{ quota.totalLabel }}</span>
+                  </template>
+                </div>
+                <span v-if="quota.displayKind === 'progress' && quota.hasBudget" class="tray-item__percent">
+                  {{ quota.progressPercentLabel }}
+                </span>
+              </div>
+            </div>
+            <div v-if="quota.displayKind === 'progress' && quota.hasBudget" class="tray-progress">
+              <div class="tray-progress__bar" :style="{ width: `${quota.progressRatio * 100}%` }"></div>
+            </div>
+            <div v-if="quota.countdownLabel || quota.extra || quota.invalidMessage" class="tray-meta">
+              <span v-if="quota.countdownLabel">{{ quota.countdownLabel }}</span>
+              <span v-if="quota.invalidMessage">{{ quota.invalidMessage }}</span>
+              <span v-if="quota.extra">{{ quota.extra }}</span>
             </div>
           </div>
         </div>
@@ -649,6 +927,30 @@ onUnmounted(() => {
 }
 
 .tray-item + .tray-item {
+  padding-top: 10px;
+  border-top: 1px solid var(--mac-divider);
+}
+
+.tray-provider-source {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 0 0;
+  font-size: 11px;
+  color: var(--mac-text-secondary);
+}
+
+.tray-provider-source strong {
+  overflow: hidden;
+  color: var(--mac-text);
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tray-provider-source + .tray-item {
   padding-top: 10px;
   border-top: 1px solid var(--mac-divider);
 }
@@ -748,9 +1050,12 @@ onUnmounted(() => {
 .tray-item__value {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 6px;
   font-size: 12px;
   color: var(--mac-text-secondary);
+  text-align: right;
+  white-space: nowrap;
 }
 
 .tray-item__value.loading {
@@ -786,9 +1091,31 @@ onUnmounted(() => {
 
 .tray-meta {
   display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
   justify-content: space-between;
   font-size: 11px;
   color: var(--mac-text-secondary);
+}
+
+.tray-item--balance .tray-dot {
+  background: #0a84ff;
+  box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.18);
+}
+
+.tray-item--balance .tray-item__value {
+  color: var(--mac-text);
+  font-weight: 600;
+}
+
+.tray-item--error .tray-dot {
+  background: #ff5f57;
+  box-shadow: 0 0 0 2px rgba(255, 95, 87, 0.2);
+}
+
+.tray-item--error .tray-item__value,
+.tray-item--error .tray-meta {
+  color: #bf2b24;
 }
 
 :global(.dark) .tray-panel {
@@ -803,6 +1130,10 @@ onUnmounted(() => {
 }
 
 :global(.dark) .tray-item + .tray-item {
+  border-top-color: var(--mac-divider);
+}
+
+:global(.dark) .tray-provider-source + .tray-item {
   border-top-color: var(--mac-divider);
 }
 
@@ -854,5 +1185,20 @@ onUnmounted(() => {
 
 :global(.dark) .tray-meta {
   color: var(--mac-text-secondary);
+}
+
+:global(.dark) .tray-item--balance .tray-dot {
+  background: #64b5ff;
+  box-shadow: 0 0 0 2px rgba(100, 181, 255, 0.24);
+}
+
+:global(.dark) .tray-item--error .tray-dot {
+  background: #ff6b63;
+  box-shadow: 0 0 0 2px rgba(255, 107, 99, 0.26);
+}
+
+:global(.dark) .tray-item--error .tray-item__value,
+:global(.dark) .tray-item--error .tray-meta {
+  color: #ff8a82;
 }
 </style>

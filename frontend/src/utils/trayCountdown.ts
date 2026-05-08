@@ -1,11 +1,13 @@
-import { pad2, type BudgetQuotaKey } from './budgetUsage'
+import { pad2 } from './budgetUsage'
 import type { TrayBudgetDisplayMode } from './trayBudgetDisplay'
 
 export type TrayCountdownQuota = {
-  key: BudgetQuotaKey
+  key: string
   hasBudget: boolean
   nextReset: Date | null
 }
+
+export type TrayCountdownDisplayMode = TrayBudgetDisplayMode | 'provider-quotas' | 'pending'
 
 export const formatClockCountdown = (remainingMs: number) => {
   if (remainingMs <= 0) {
@@ -19,12 +21,12 @@ export const formatClockCountdown = (remainingMs: number) => {
 }
 
 export const shouldUseSecondPrecisionTrayTicker = (
-  displayMode: TrayBudgetDisplayMode | 'pending',
+  displayMode: TrayCountdownDisplayMode,
   showCountdown: boolean,
   quotas: readonly TrayCountdownQuota[],
 ) => {
   return showCountdown
-    && displayMode === 'quotas'
+    && (displayMode === 'quotas' || displayMode === 'provider-quotas')
     && quotas.some((quota) => quota.key === 'five_hour' && quota.hasBudget && Boolean(quota.nextReset))
 }
 

@@ -19,6 +19,7 @@ describe('trayCountdown', () => {
     ]
 
     expect(shouldUseSecondPrecisionTrayTicker('quotas', true, quotas)).toBe(true)
+    expect(shouldUseSecondPrecisionTrayTicker('provider-quotas', true, quotas)).toBe(true)
     expect(shouldUseSecondPrecisionTrayTicker('summary', true, quotas)).toBe(false)
     expect(shouldUseSecondPrecisionTrayTicker('quotas', false, quotas)).toBe(false)
     expect(shouldUseSecondPrecisionTrayTicker('quotas', true, [{ ...quotas[0], key: 'daily' }])).toBe(false)
