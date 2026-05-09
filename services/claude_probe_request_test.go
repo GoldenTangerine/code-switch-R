@@ -101,11 +101,18 @@ func TestBuildClaudeProbeRequest(t *testing.T) {
 				if got := gjson.GetBytes(body, "input.0.content.0.text").String(); got != "hi" {
 					t.Fatalf("input.0.content.0.text = %q, 期望 hi", got)
 				}
-				if got := gjson.GetBytes(body, "prompt_cache_key").String(); got != "42" {
-					t.Fatalf("prompt_cache_key = %q, 期望 42", got)
+				gotCacheKey := gjson.GetBytes(body, "prompt_cache_key").String()
+				if gotCacheKey == "" {
+					t.Fatalf("prompt_cache_key 不应为空")
+				}
+				if gotCacheKey == "42" {
+					t.Fatalf("prompt_cache_key 不应复用 provider ID，实际=%q", gotCacheKey)
 				}
 				if gjson.GetBytes(body, "messages").Exists() {
 					t.Fatalf("Responses 请求不应包含 messages")
+				}
+				if gjson.GetBytes(body, "store").Exists() {
+					t.Fatalf("Responses 探测请求默认不应固定 store=false")
 				}
 			},
 		},
@@ -178,6 +185,9 @@ func TestBuildProviderRequestPlanForClaudeAPIFormats(t *testing.T) {
 				}
 				if gjson.GetBytes(body, "messages").Exists() {
 					t.Fatalf("Responses body 不应包含 messages")
+				}
+				if gjson.GetBytes(body, "store").Exists() {
+					t.Fatalf("Responses body 默认不应固定 store=false")
 				}
 			},
 		},

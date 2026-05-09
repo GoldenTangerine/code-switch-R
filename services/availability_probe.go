@@ -281,8 +281,20 @@ func executeAvailabilityProbe(
 		if result.HTTPStatusCode == 0 {
 			return result, nil
 		}
-		if result.HTTPStatusCode >= 200 && result.HTTPStatusCode < 400 && responseContainsExpectedText(result.ResponseBody, result.Plan.ResponseFormat, result.Plan.ExpectedText) {
+		if availabilityProbeSucceeded(result) {
 			return result, nil
+		}
+		if shouldRetryAvailabilityProbeWithoutPromptCacheKey(result) {
+			retryPlan := result.Plan
+			retryPlan.BodyBytes = removeJSONFieldBytes(retryPlan.BodyBytes, "prompt_cache_key")
+			disableOpenAICompatPromptCache(*provider, "")
+			result, execErr = executeSingleAvailabilityProbe(ctx, client, provider, platform, retryPlan, attemptTimeoutMs)
+			if execErr != nil {
+				return result, execErr
+			}
+			if result.HTTPStatusCode == 0 || availabilityProbeSucceeded(result) {
+				return result, nil
+			}
 		}
 		if !shouldRetryAvailabilityProbe(result) || i == len(plans)-1 {
 			return result, nil
@@ -352,6 +364,12 @@ func executeSingleAvailabilityProbe(
 	}, nil
 }
 
+func availabilityProbeSucceeded(result availabilityProbeExecutionResult) bool {
+	return result.HTTPStatusCode >= 200 &&
+		result.HTTPStatusCode < 400 &&
+		responseContainsExpectedText(result.ResponseBody, result.Plan.ResponseFormat, result.Plan.ExpectedText)
+}
+
 func shouldRetryAvailabilityProbe(result availabilityProbeExecutionResult) bool {
 	if _, ok := availabilityProbeRetryableHTTPStatusCodes[result.HTTPStatusCode]; ok {
 		return true
@@ -362,6 +380,13 @@ func shouldRetryAvailabilityProbe(result availabilityProbeExecutionResult) bool 
 	}
 
 	return false
+}
+
+func shouldRetryAvailabilityProbeWithoutPromptCacheKey(result availabilityProbeExecutionResult) bool {
+	if !gjson.GetBytes(result.Plan.BodyBytes, "prompt_cache_key").Exists() {
+		return false
+	}
+	return isOpenAICompatPromptCacheKeyUnsupportedStatus(result.HTTPStatusCode, result.ResponseBody)
 }
 
 func buildAvailabilityProbePlans(platform string, provider *Provider, model string, endpoint string) ([]availabilityProbePlan, error) {
@@ -431,6 +456,9 @@ func buildAvailabilityProbePlanFromCandidate(platform string, provider *Provider
 		if err != nil {
 			return availabilityProbePlan{}, fmt.Errorf("应用请求体覆盖失败: %w", err)
 		}
+	}
+	if normalizeClaudeAPIFormat(responseFormat) == claudeAPIFormatOpenAIResponse && isOpenAICompatPromptCacheDisabled(*provider, "") {
+		bodyBytes = removeJSONFieldBytes(bodyBytes, "prompt_cache_key")
 	}
 
 	effectiveModel = resolveModelFromRequestBody(bodyBytes, effectiveModel)

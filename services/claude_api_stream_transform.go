@@ -19,6 +19,7 @@ type claudeResponseTransformState struct {
 	isStream  bool
 
 	pendingEventType string
+	pendingDataLines []string
 
 	chat      claudeChatStreamState
 	responses claudeResponsesStreamState
@@ -64,6 +65,9 @@ type claudeResponsesStreamState struct {
 	FallbackOpenIndex    int
 	HasFallbackOpenIndex bool
 	ToolIndexByItemID    map[string]int
+	ToolArgsByIndex      map[int]string
+	ToolNameByIndex      map[int]string
+	FinishedToolKeys     map[string]bool
 	LastToolIndex        int
 	HasLastToolIndex     bool
 }
@@ -80,6 +84,9 @@ func newClaudeResponseTransformHook(apiFormat string, isStream bool) xrequest.Re
 			IndexByKey:        make(map[string]int),
 			OpenIndices:       make(map[int]bool),
 			ToolIndexByItemID: make(map[string]int),
+			ToolArgsByIndex:   make(map[int]string),
+			ToolNameByIndex:   make(map[int]string),
+			FinishedToolKeys:  make(map[string]bool),
 		},
 	}
 
@@ -94,6 +101,11 @@ func newClaudeResponseTransformHook(apiFormat string, isStream bool) xrequest.Re
 
 		line := strings.TrimSpace(string(data))
 		if line == "" {
+			if len(state.pendingDataLines) > 0 {
+				payload := combineOpenAIResponsesDataLines(state.pendingDataLines)
+				state.pendingDataLines = nil
+				return state.transformPayload(payload, data)
+			}
 			return false, nil
 		}
 
@@ -113,47 +125,64 @@ func newClaudeResponseTransformHook(apiFormat string, isStream bool) xrequest.Re
 		}
 
 		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		switch payload {
-		case "", "[DONE]":
-			if state.apiFormat == claudeAPIFormatOpenAIChat && !state.chat.HasMessageStopSent {
-				state.chat.HasMessageStopSent = true
-				return true, formatAnthropicSSEEvents([]anthropicSSEEvent{
-					newAnthropicSSEEvent("message_stop", map[string]interface{}{
-						"type": "message_stop",
-					}),
-				})
+		if len(state.pendingDataLines) > 0 {
+			state.pendingDataLines = append(state.pendingDataLines, payload)
+			combinedPayload := combineOpenAIResponsesDataLines(state.pendingDataLines)
+			if json.Valid([]byte(combinedPayload)) {
+				state.pendingDataLines = nil
+				return state.transformPayload(combinedPayload, data)
 			}
 			return false, nil
 		}
-
-		var parsed map[string]interface{}
-		decoder := json.NewDecoder(strings.NewReader(payload))
-		decoder.UseNumber()
-		if err := decoder.Decode(&parsed); err != nil {
-			return true, data
-		}
-		if state.apiFormat == claudeAPIFormatOpenAIResponse {
-			if getString(parsed, "type") == "" && state.pendingEventType != "" {
-				parsed["type"] = state.pendingEventType
-			}
-			state.pendingEventType = ""
-		}
-
-		var events []anthropicSSEEvent
-		switch state.apiFormat {
-		case claudeAPIFormatOpenAIChat:
-			events = state.chat.transformChunk(parsed)
-		case claudeAPIFormatOpenAIResponse:
-			events = state.responses.transformChunk(parsed)
-		default:
-			return true, data
-		}
-
-		if len(events) == 0 {
+		if payload != "" && payload != "[DONE]" && !json.Valid([]byte(payload)) {
+			state.pendingDataLines = append(state.pendingDataLines, payload)
 			return false, nil
 		}
-		return true, formatAnthropicSSEEvents(events)
+		return state.transformPayload(payload, data)
 	}
+}
+
+func (state *claudeResponseTransformState) transformPayload(payload string, fallback []byte) (bool, []byte) {
+	switch payload {
+	case "", "[DONE]":
+		if state.apiFormat == claudeAPIFormatOpenAIChat && !state.chat.HasMessageStopSent {
+			state.chat.HasMessageStopSent = true
+			return true, formatAnthropicSSEEvents([]anthropicSSEEvent{
+				newAnthropicSSEEvent("message_stop", map[string]interface{}{
+					"type": "message_stop",
+				}),
+			})
+		}
+		return false, nil
+	}
+
+	var parsed map[string]interface{}
+	decoder := json.NewDecoder(strings.NewReader(payload))
+	decoder.UseNumber()
+	if err := decoder.Decode(&parsed); err != nil {
+		return true, fallback
+	}
+	if state.apiFormat == claudeAPIFormatOpenAIResponse {
+		if getString(parsed, "type") == "" && state.pendingEventType != "" {
+			parsed["type"] = state.pendingEventType
+		}
+		state.pendingEventType = ""
+	}
+
+	var events []anthropicSSEEvent
+	switch state.apiFormat {
+	case claudeAPIFormatOpenAIChat:
+		events = state.chat.transformChunk(parsed)
+	case claudeAPIFormatOpenAIResponse:
+		events = state.responses.transformChunk(parsed)
+	default:
+		return true, fallback
+	}
+
+	if len(events) == 0 {
+		return false, nil
+	}
+	return true, formatAnthropicSSEEvents(events)
 }
 
 func newAnthropicSSEEvent(event string, data map[string]interface{}) anthropicSSEEvent {
@@ -279,20 +308,26 @@ func (state *claudeChatStreamState) transformChunk(chunk map[string]interface{})
 						},
 					}))
 					if blockState.PendingArgs != "" {
-						events = append(events, newAnthropicSSEEvent("content_block_delta", map[string]interface{}{
-							"type":  "content_block_delta",
-							"index": blockState.AnthropicIndex,
-							"delta": map[string]interface{}{
-								"type":         "input_json_delta",
-								"partial_json": blockState.PendingArgs,
-							},
-						}))
-						blockState.PendingArgs = ""
+						if isClaudeReadToolName(blockState.Name) {
+							state.HasSeenToolUse = true
+						} else {
+							events = append(events, newAnthropicSSEEvent("content_block_delta", map[string]interface{}{
+								"type":  "content_block_delta",
+								"index": blockState.AnthropicIndex,
+								"delta": map[string]interface{}{
+									"type":         "input_json_delta",
+									"partial_json": blockState.PendingArgs,
+								},
+							}))
+							blockState.PendingArgs = ""
+						}
 					}
 				}
 			}
 			if argsDelta != "" {
-				if blockState.Started {
+				if isClaudeReadToolName(blockState.Name) {
+					blockState.PendingArgs += argsDelta
+				} else if blockState.Started {
 					events = append(events, newAnthropicSSEEvent("content_block_delta", map[string]interface{}{
 						"type":  "content_block_delta",
 						"index": blockState.AnthropicIndex,
@@ -317,6 +352,17 @@ func (state *claudeChatStreamState) transformChunk(chunk map[string]interface{})
 		}
 		sort.Ints(toolIndices)
 		for _, index := range toolIndices {
+			if blockState := state.toolBlockForAnthropicIndex(index); blockState != nil && blockState.PendingArgs != "" {
+				events = append(events, newAnthropicSSEEvent("content_block_delta", map[string]interface{}{
+					"type":  "content_block_delta",
+					"index": index,
+					"delta": map[string]interface{}{
+						"type":         "input_json_delta",
+						"partial_json": sanitizeAnthropicToolUseArguments(blockState.Name, blockState.PendingArgs),
+					},
+				}))
+				blockState.PendingArgs = ""
+			}
 			delete(state.OpenToolBlockIndices, index)
 			events = append(events, newAnthropicSSEEvent("content_block_stop", map[string]interface{}{
 				"type":  "content_block_stop",
@@ -368,6 +414,15 @@ func (state *claudeChatStreamState) openNonToolBlock(blockType string) []anthrop
 		"content_block": contentBlock,
 	}))
 	return events
+}
+
+func (state *claudeChatStreamState) toolBlockForAnthropicIndex(index int) *claudeChatToolBlockState {
+	for _, blockState := range state.ToolBlocksByIndex {
+		if blockState != nil && blockState.AnthropicIndex == index {
+			return blockState
+		}
+	}
+	return nil
 }
 
 func (state *claudeChatStreamState) closeCurrentNonToolBlock() []anthropicSSEEvent {
@@ -472,6 +527,9 @@ func (state *claudeResponsesStreamState) transformChunk(data map[string]interfac
 			callID = getString(item, "id")
 		}
 		name := getString(item, "name")
+		if name != "" {
+			state.ToolNameByIndex[index] = name
+		}
 		if !state.OpenIndices[index] {
 			state.OpenIndices[index] = true
 			events = append(events, newAnthropicSSEEvent("content_block_start", map[string]interface{}{
@@ -484,6 +542,18 @@ func (state *claudeResponsesStreamState) transformChunk(data map[string]interfac
 				},
 			}))
 		}
+	case "response.output_item.done":
+		item, _ := data["item"].(map[string]interface{})
+		if getString(item, "type") != "function_call" {
+			break
+		}
+		if state.isFunctionCallItemFinished(data) {
+			break
+		}
+		state.HasToolUse = true
+		events = append(events, state.closeCurrentTextIndex(nil)...)
+		events = append(events, state.ensureMessageStart()...)
+		events = append(events, state.finishFunctionCallItem(data, item)...)
 	case "response.function_call_arguments.delta":
 		delta := getString(data, "delta")
 		if delta == "" {
@@ -496,37 +566,71 @@ func (state *claudeResponsesStreamState) transformChunk(data map[string]interfac
 			if callID == "" {
 				callID = getString(data, "item_id")
 			}
+			name := getString(data, "name")
+			if name != "" {
+				state.ToolNameByIndex[index] = name
+			} else {
+				name = state.toolNameForIndex(index)
+			}
 			events = append(events, newAnthropicSSEEvent("content_block_start", map[string]interface{}{
 				"type":  "content_block_start",
 				"index": index,
 				"content_block": map[string]interface{}{
 					"type": "tool_use",
 					"id":   callID,
-					"name": getString(data, "name"),
+					"name": name,
+				},
+			}))
+		} else if name := getString(data, "name"); name != "" {
+			state.ToolNameByIndex[index] = name
+		}
+		state.ToolArgsByIndex[index] += delta
+		if !isClaudeReadToolName(state.toolNameForIndex(index)) {
+			events = append(events, newAnthropicSSEEvent("content_block_delta", map[string]interface{}{
+				"type":  "content_block_delta",
+				"index": index,
+				"delta": map[string]interface{}{
+					"type":         "input_json_delta",
+					"partial_json": delta,
 				},
 			}))
 		}
-		events = append(events, newAnthropicSSEEvent("content_block_delta", map[string]interface{}{
-			"type":  "content_block_delta",
-			"index": index,
-			"delta": map[string]interface{}{
-				"type":         "input_json_delta",
-				"partial_json": delta,
-			},
-		}))
 	case "response.function_call_arguments.done":
 		index, ok := state.lookupToolIndexFromEvent(data)
 		if ok && state.OpenIndices[index] {
+			if item, _ := data["item"].(map[string]interface{}); item != nil {
+				if name := getString(item, "name"); name != "" {
+					state.ToolNameByIndex[index] = name
+				}
+			}
+			toolName := state.toolNameForIndex(index)
+			arguments := responsesFunctionCallDoneArguments(data)
+			if collected := state.ToolArgsByIndex[index]; collected != "" && isClaudeReadToolName(toolName) {
+				arguments = collected
+			}
+			if arguments != "" && (state.ToolArgsByIndex[index] == "" || isClaudeReadToolName(toolName)) {
+				events = append(events, newAnthropicSSEEvent("content_block_delta", map[string]interface{}{
+					"type":  "content_block_delta",
+					"index": index,
+					"delta": map[string]interface{}{
+						"type":         "input_json_delta",
+						"partial_json": sanitizeAnthropicToolUseArguments(toolName, arguments),
+					},
+				}))
+			}
 			delete(state.OpenIndices, index)
+			delete(state.ToolArgsByIndex, index)
+			delete(state.ToolNameByIndex, index)
 			events = append(events, newAnthropicSSEEvent("content_block_stop", map[string]interface{}{
 				"type":  "content_block_stop",
 				"index": index,
 			}))
-			if itemID := getString(data, "item_id"); itemID != "" {
+			state.markFunctionCallItemFinished(data)
+			if itemID := toolItemIDFromEvent(data); itemID != "" {
 				delete(state.ToolIndexByItemID, itemID)
 			}
 		}
-	case "response.reasoning.delta":
+	case "response.reasoning.delta", "response.reasoning_summary_text.delta":
 		delta := getString(data, "delta")
 		if delta == "" {
 			delta = getString(data, "text")
@@ -555,7 +659,7 @@ func (state *claudeResponsesStreamState) transformChunk(data map[string]interfac
 				"thinking": delta,
 			},
 		}))
-	case "response.reasoning.done":
+	case "response.reasoning.done", "response.reasoning_summary_text.done":
 		index, ok := state.lookupContentIndex(data)
 		if ok && state.OpenIndices[index] {
 			delete(state.OpenIndices, index)
@@ -567,40 +671,171 @@ func (state *claudeResponsesStreamState) transformChunk(data map[string]interfac
 				state.HasFallbackOpenIndex = false
 			}
 		}
-	case "response.completed":
-		responseObj := responseObjectFromEvent(data)
-		indices := make([]int, 0, len(state.OpenIndices))
-		for index := range state.OpenIndices {
-			indices = append(indices, index)
-		}
-		sort.Ints(indices)
-		for _, index := range indices {
-			delete(state.OpenIndices, index)
-			events = append(events, newAnthropicSSEEvent("content_block_stop", map[string]interface{}{
-				"type":  "content_block_stop",
-				"index": index,
-			}))
-		}
-		state.HasCurrentTextIndex = false
-		state.HasFallbackOpenIndex = false
-
-		events = append(events, newAnthropicSSEEvent("message_delta", map[string]interface{}{
-			"type": "message_delta",
-			"delta": map[string]interface{}{
-				"stop_reason":   mapResponsesStopReason(getString(responseObj, "status"), state.HasToolUse, getNestedString(responseObj, "incomplete_details", "reason")),
-				"stop_sequence": nil,
-			},
-			"usage": buildAnthropicUsageFromResponses(responseObj["usage"]),
-		}))
-		if !state.HasMessageStopSent {
-			state.HasMessageStopSent = true
-			events = append(events, newAnthropicSSEEvent("message_stop", map[string]interface{}{
-				"type": "message_stop",
-			}))
-		}
+	case "response.completed", "response.done", "response.incomplete", "response.failed":
+		events = append(events, state.finishResponseMessage(data)...)
 	}
 
 	return events
+}
+
+func (state *claudeResponsesStreamState) finishFunctionCallItem(data map[string]interface{}, item map[string]interface{}) []anthropicSSEEvent {
+	events := make([]anthropicSSEEvent, 0)
+	index := state.resolveToolIndexFromEvent(data)
+	toolName := getString(item, "name")
+	if toolName != "" {
+		state.ToolNameByIndex[index] = toolName
+	} else {
+		toolName = state.toolNameForIndex(index)
+	}
+	if !state.OpenIndices[index] {
+		state.OpenIndices[index] = true
+		callID := getString(item, "call_id")
+		if callID == "" {
+			callID = getString(item, "id")
+		}
+		events = append(events, newAnthropicSSEEvent("content_block_start", map[string]interface{}{
+			"type":  "content_block_start",
+			"index": index,
+			"content_block": map[string]interface{}{
+				"type": "tool_use",
+				"id":   callID,
+				"name": toolName,
+			},
+		}))
+	}
+
+	arguments := responsesFunctionCallDoneArguments(data)
+	if arguments == "" {
+		arguments = getString(item, "arguments")
+	}
+	if collected := state.ToolArgsByIndex[index]; collected != "" && isClaudeReadToolName(toolName) {
+		arguments = collected
+	}
+	if arguments != "" && (state.ToolArgsByIndex[index] == "" || isClaudeReadToolName(toolName)) {
+		events = append(events, newAnthropicSSEEvent("content_block_delta", map[string]interface{}{
+			"type":  "content_block_delta",
+			"index": index,
+			"delta": map[string]interface{}{
+				"type":         "input_json_delta",
+				"partial_json": sanitizeAnthropicToolUseArguments(toolName, arguments),
+			},
+		}))
+	}
+
+	delete(state.OpenIndices, index)
+	delete(state.ToolArgsByIndex, index)
+	delete(state.ToolNameByIndex, index)
+	events = append(events, newAnthropicSSEEvent("content_block_stop", map[string]interface{}{
+		"type":  "content_block_stop",
+		"index": index,
+	}))
+	state.markFunctionCallItemFinished(data)
+	if itemID := toolItemIDFromEvent(data); itemID != "" {
+		delete(state.ToolIndexByItemID, itemID)
+	}
+	return events
+}
+
+func (state *claudeResponsesStreamState) toolNameForIndex(index int) string {
+	if state == nil || state.ToolNameByIndex == nil {
+		return ""
+	}
+	return state.ToolNameByIndex[index]
+}
+
+func (state *claudeResponsesStreamState) isFunctionCallItemFinished(data map[string]interface{}) bool {
+	if state == nil {
+		return false
+	}
+	for _, key := range functionCallFinishKeys(data) {
+		if state.FinishedToolKeys[key] {
+			return true
+		}
+	}
+	return false
+}
+
+func (state *claudeResponsesStreamState) markFunctionCallItemFinished(data map[string]interface{}) {
+	if state == nil {
+		return
+	}
+	if state.FinishedToolKeys == nil {
+		state.FinishedToolKeys = make(map[string]bool)
+	}
+	for _, key := range functionCallFinishKeys(data) {
+		state.FinishedToolKeys[key] = true
+	}
+}
+
+func (state *claudeResponsesStreamState) finishResponseMessage(data map[string]interface{}) []anthropicSSEEvent {
+	responseObj := responseObjectFromEvent(data)
+	status := responseStatusFromEvent(data, responseObj)
+
+	events := make([]anthropicSSEEvent, 0)
+	events = append(events, state.ensureMessageStart()...)
+	events = append(events, state.closeAllOpenBlocks()...)
+	events = append(events, newAnthropicSSEEvent("message_delta", map[string]interface{}{
+		"type": "message_delta",
+		"delta": map[string]interface{}{
+			"stop_reason":   mapResponsesStopReason(status, state.HasToolUse, getNestedString(responseObj, "incomplete_details", "reason")),
+			"stop_sequence": nil,
+		},
+		"usage": buildAnthropicUsageFromResponses(responseObj["usage"]),
+	}))
+	if !state.HasMessageStopSent {
+		state.HasMessageStopSent = true
+		events = append(events, newAnthropicSSEEvent("message_stop", map[string]interface{}{
+			"type": "message_stop",
+		}))
+	}
+	return events
+}
+
+func (state *claudeResponsesStreamState) closeAllOpenBlocks() []anthropicSSEEvent {
+	events := make([]anthropicSSEEvent, 0, len(state.OpenIndices))
+	indices := make([]int, 0, len(state.OpenIndices))
+	for index := range state.OpenIndices {
+		indices = append(indices, index)
+	}
+	sort.Ints(indices)
+	for _, index := range indices {
+		if arguments := state.ToolArgsByIndex[index]; arguments != "" && isClaudeReadToolName(state.toolNameForIndex(index)) {
+			events = append(events, newAnthropicSSEEvent("content_block_delta", map[string]interface{}{
+				"type":  "content_block_delta",
+				"index": index,
+				"delta": map[string]interface{}{
+					"type":         "input_json_delta",
+					"partial_json": sanitizeAnthropicToolUseArguments(state.toolNameForIndex(index), arguments),
+				},
+			}))
+		}
+		delete(state.OpenIndices, index)
+		delete(state.ToolArgsByIndex, index)
+		delete(state.ToolNameByIndex, index)
+		events = append(events, newAnthropicSSEEvent("content_block_stop", map[string]interface{}{
+			"type":  "content_block_stop",
+			"index": index,
+		}))
+	}
+	state.HasCurrentTextIndex = false
+	state.HasFallbackOpenIndex = false
+	return events
+}
+
+func responseStatusFromEvent(data map[string]interface{}, responseObj map[string]interface{}) string {
+	if status := getString(responseObj, "status"); status != "" {
+		return status
+	}
+	switch getString(data, "type") {
+	case "response.incomplete":
+		return "incomplete"
+	case "response.failed":
+		return "failed"
+	case "response.completed", "response.done":
+		return "completed"
+	default:
+		return ""
+	}
 }
 
 func (state *claudeResponsesStreamState) ensureMessageStart() []anthropicSSEEvent {
@@ -719,8 +954,11 @@ func (state *claudeResponsesStreamState) resolveToolIndexFromAdded(data map[stri
 }
 
 func (state *claudeResponsesStreamState) lookupToolIndexFromEvent(data map[string]interface{}) (int, bool) {
-	if itemID := getString(data, "item_id"); itemID != "" {
+	if itemID := toolItemIDFromEvent(data); itemID != "" {
 		if index, exists := state.ToolIndexByItemID[itemID]; exists {
+			return index, true
+		}
+		if index, exists := state.IndexByKey["tool:"+itemID]; exists {
 			return index, true
 		}
 	}
@@ -743,10 +981,23 @@ func (state *claudeResponsesStreamState) resolveToolIndexFromEvent(data map[stri
 	state.NextContentIndex++
 	state.HasLastToolIndex = true
 	state.LastToolIndex = index
-	if itemID := getString(data, "item_id"); itemID != "" {
+	if itemID := toolItemIDFromEvent(data); itemID != "" {
 		state.ToolIndexByItemID[itemID] = index
+		state.IndexByKey["tool:"+itemID] = index
 	}
 	return index
+}
+
+func responsesFunctionCallDoneArguments(data map[string]interface{}) string {
+	if arguments := getString(data, "arguments"); arguments != "" {
+		return arguments
+	}
+	if item, ok := data["item"].(map[string]interface{}); ok {
+		if arguments := getString(item, "arguments"); arguments != "" {
+			return arguments
+		}
+	}
+	return ""
 }
 
 func responseObjectFromEvent(data map[string]interface{}) map[string]interface{} {
@@ -784,11 +1035,34 @@ func toolItemKeyFromAdded(data map[string]interface{}, item map[string]interface
 }
 
 func toolItemKeyFromEvent(data map[string]interface{}) (string, bool) {
-	if itemID := getString(data, "item_id"); itemID != "" {
+	if itemID := toolItemIDFromEvent(data); itemID != "" {
 		return "tool:" + itemID, true
 	}
 	if outputIndex := numberFromValue(data["output_index"]); outputIndex > 0 || data["output_index"] != nil {
 		return fmt.Sprintf("tool:out:%d", outputIndex), true
 	}
 	return "", false
+}
+
+func toolItemIDFromEvent(data map[string]interface{}) string {
+	if itemID := getString(data, "item_id"); itemID != "" {
+		return itemID
+	}
+	if item, ok := data["item"].(map[string]interface{}); ok {
+		if itemID := getString(item, "id"); itemID != "" {
+			return itemID
+		}
+	}
+	return ""
+}
+
+func functionCallFinishKeys(data map[string]interface{}) []string {
+	keys := make([]string, 0, 2)
+	if itemID := toolItemIDFromEvent(data); itemID != "" {
+		keys = append(keys, "id:"+itemID)
+	}
+	if outputIndex := numberFromValue(data["output_index"]); outputIndex > 0 || data["output_index"] != nil {
+		keys = append(keys, fmt.Sprintf("out:%d", outputIndex))
+	}
+	return keys
 }

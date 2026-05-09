@@ -242,6 +242,7 @@ func TestExecuteAvailabilityProbeAddsClaudeCompatibilityHeaders(t *testing.T) {
 	if result.HTTPStatusCode != 200 {
 		t.Fatalf("HTTPStatusCode = %d, 期望 200", result.HTTPStatusCode)
 	}
+
 }
 
 func TestExecuteAvailabilityProbeFallsBackToNextResponsesPresetOnInvalidRequest(t *testing.T) {
@@ -292,6 +293,71 @@ func TestExecuteAvailabilityProbeFallsBackToNextResponsesPresetOnInvalidRequest(
 	}
 	if result.HTTPStatusCode != 200 {
 		t.Fatalf("HTTPStatusCode = %d, 期望 200", result.HTTPStatusCode)
+	}
+
+}
+
+func TestExecuteAvailabilityProbeRetriesWithoutPromptCacheKeyWhenUnsupported(t *testing.T) {
+	requestBodies := make([]string, 0, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bodyBytes, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("读取请求体失败: %v", err)
+		}
+		body := string(bodyBytes)
+		requestBodies = append(requestBodies, body)
+
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(body, "prompt_cache_key") {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":{"message":"unsupported parameter: prompt_cache_key"}}`))
+			return
+		}
+
+		_, _ = w.Write([]byte(`{"output":[{"type":"message","content":[{"type":"output_text","text":"pong"}]}]}`))
+	}))
+	defer server.Close()
+
+	provider := &Provider{
+		ID:        17,
+		Name:      "Prompt Cache Probe",
+		APIURL:    server.URL,
+		APIKey:    "sk-test",
+		APIFormat: claudeAPIFormatOpenAIResponse,
+		RequestBodyOverrides: map[string]interface{}{
+			"prompt_cache_key": "probe-cache",
+		},
+	}
+	result, err := executeAvailabilityProbe(context.Background(), &http.Client{Timeout: 0}, provider, "claude", "gpt-5.4", "/responses", 5000)
+	if err != nil {
+		t.Fatalf("executeAvailabilityProbe 失败: %v", err)
+	}
+
+	if len(requestBodies) != 2 {
+		t.Fatalf("请求次数 = %d, 期望 2", len(requestBodies))
+	}
+	if !strings.Contains(requestBodies[0], "prompt_cache_key") {
+		t.Fatalf("首个探测请求应包含 prompt_cache_key: %s", requestBodies[0])
+	}
+	if strings.Contains(requestBodies[1], "prompt_cache_key") {
+		t.Fatalf("prompt_cache_key 不兼容重试应移除该字段: %s", requestBodies[1])
+	}
+	if result.HTTPStatusCode != 200 {
+		t.Fatalf("HTTPStatusCode = %d, 期望 200", result.HTTPStatusCode)
+	}
+
+	result, err = executeAvailabilityProbe(context.Background(), &http.Client{Timeout: 0}, provider, "claude", "gpt-5.4", "/responses", 5000)
+	if err != nil {
+		t.Fatalf("第二次 executeAvailabilityProbe 失败: %v", err)
+	}
+	if result.HTTPStatusCode != 200 {
+		t.Fatalf("第二次 HTTPStatusCode = %d, 期望 200", result.HTTPStatusCode)
+	}
+	if len(requestBodies) != 3 {
+		t.Fatalf("第二次探测应复用禁用状态直接成功，总请求次数=%d，期望 3", len(requestBodies))
+	}
+	if strings.Contains(requestBodies[2], "prompt_cache_key") {
+		t.Fatalf("缓存禁用状态应让后续探测首包直接移除 prompt_cache_key: %s", requestBodies[2])
 	}
 }
 

@@ -116,6 +116,89 @@ func TestReqeustLogHookCodexStreamAcceptsCompletedJSONFallback(t *testing.T) {
 	}
 }
 
+func TestOpenAIResponsesStreamLifecycleHookCombinesMultilineDataPayload(t *testing.T) {
+	reqLog := &ReqeustLog{IsStream: true, streamCompletionRequired: true}
+	hook := openAIResponsesStreamLifecycleHook(reqLog)
+
+	_, _ = hook([]byte("event: response.completed"))
+	_, _ = hook([]byte(`data: {"response":`))
+	_, _ = hook([]byte(`data: {"status":"completed"}}`))
+	_, _ = hook([]byte(""))
+
+	if err := validateStreamCompletion("claude", reqLog); err != nil {
+		t.Fatalf("多行 response.completed 不应被误判为未完成: %v", err)
+	}
+}
+
+func TestClaudeResponsesStreamSessionHookCombinesMultilineDataPayload(t *testing.T) {
+	relay := NewProviderRelayService(nil, nil, nil, nil, nil, nil, "")
+	provider := Provider{ID: 1, Name: "OpenAI Responses", APIURL: "https://example.test", APIKey: "test-key"}
+	plan := providerRequestPlan{ContinuationSessionKey: "session-a"}
+	hook := relay.newClaudeResponsesStreamSessionHook(provider, plan)
+
+	_, _ = hook([]byte("event: response.created"))
+	_, _ = hook([]byte(`data: {"response":`))
+	_, _ = hook([]byte(`data: {"id":"resp_multiline"}}`))
+	_, _ = hook([]byte(""))
+	_, _ = hook([]byte("event: response.completed"))
+	_, _ = hook([]byte(`data: {"response":`))
+	_, _ = hook([]byte(`data: {"status":"completed"}}`))
+	_, _ = hook([]byte(""))
+
+	if got := relay.getClaudeResponsesPreviousResponseID(provider, "session-a"); got != "resp_multiline" {
+		t.Fatalf("多行 SSE session hook 绑定 response_id=%q，期望 resp_multiline", got)
+	}
+}
+
+func TestClaudeResponsesSessionBindingsSweepExpiredAndCapSize(t *testing.T) {
+	relay := NewProviderRelayService(nil, nil, nil, nil, nil, nil, "")
+	provider := Provider{ID: 1, Name: "OpenAI Responses", APIURL: "https://example.test", APIKey: "test-key"}
+	now := time.Now()
+
+	relay.claudeResponsesMu.Lock()
+	relay.claudeResponses = map[string]claudeResponsesSessionBinding{
+		"expired": {ResponseID: "resp_expired", ExpiresAt: now.Add(-time.Minute)},
+	}
+	for i := 0; i < claudeResponsesMaxSessionBindings+10; i++ {
+		relay.claudeResponses[fmt.Sprintf("old-%04d", i)] = claudeResponsesSessionBinding{
+			ResponseID: fmt.Sprintf("resp_%04d", i),
+			ExpiresAt:  now.Add(time.Duration(i) * time.Second),
+		}
+	}
+	relay.claudeResponsesMu.Unlock()
+
+	relay.bindClaudeResponsesPreviousResponseID(provider, "session-new", "resp_new")
+
+	relay.claudeResponsesMu.Lock()
+	defer relay.claudeResponsesMu.Unlock()
+	if _, ok := relay.claudeResponses["expired"]; ok {
+		t.Fatalf("过期 claudeResponses session binding 未被清理")
+	}
+	if len(relay.claudeResponses) > claudeResponsesMaxSessionBindings {
+		t.Fatalf("claudeResponses session binding 数=%d，期望不超过 %d", len(relay.claudeResponses), claudeResponsesMaxSessionBindings)
+	}
+	if _, ok := relay.claudeResponses["old-0000"]; ok {
+		t.Fatalf("超过容量时应优先清理最早过期的 session binding")
+	}
+}
+
+func TestClaudeResponsesMemoryKeysHashProviderAPIKey(t *testing.T) {
+	relay := NewProviderRelayService(nil, nil, nil, nil, nil, nil, "")
+	provider := Provider{ID: 1, Name: "OpenAI Responses", APIURL: "https://example.test", APIKey: "sk-secret-value"}
+
+	sessionKey := relay.claudeResponsesSessionKey(provider, "session-a")
+	promptCacheKey := relay.openAICompatPromptCacheDisableKey(provider, "session-a")
+
+	for _, key := range []string{sessionKey, promptCacheKey} {
+		if strings.Contains(key, provider.APIKey) {
+			t.Fatalf("内存 key 不应包含明文 API key: %q", key)
+		}
+		if !strings.Contains(key, "sha256:") {
+			t.Fatalf("内存 key 应包含 API key 短哈希: %q", key)
+		}
+	}
+}
+
 func TestIsClientWriteAbortErrorOnlyTreatsDownstreamWriteFailuresAsClientAbort(t *testing.T) {
 	tests := []struct {
 		name string

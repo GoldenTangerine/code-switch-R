@@ -50,6 +50,8 @@ type ProviderRelayService struct {
 	lastUsedMu          sync.RWMutex                 // 保护 lastUsed 的锁
 	rrMu                sync.Mutex                   // 轮询状态锁
 	rrLastStart         map[string]string            // 轮询状态：key="platform:level" → value=上次起始 Provider ID（回退为 Name）
+	claudeResponsesMu   sync.Mutex
+	claudeResponses     map[string]claudeResponsesSessionBinding
 }
 
 // errClientAbort 表示客户端中断连接，不应计入 provider 失败次数
@@ -89,14 +91,38 @@ func markResponseStarted(err error) error {
 var (
 	responseModelRegex                     = regexp.MustCompile(`"model"\s*:\s*"([^"]+)"`)
 	responseModelVersionRegex              = regexp.MustCompile(`"modelVersion"\s*:\s*"([^"]+)"`)
+	claudeMetadataLegacyUserIDRegex        = regexp.MustCompile(`^user_([a-fA-F0-9]{64})_account_([a-fA-F0-9-]*)_session_([a-fA-F0-9-]{36})$`)
 	requestLogSensitiveJSONValuePattern    = regexp.MustCompile(`(?i)("(?:api[_-]?key|x-api-key|x-goog-api-key|authorization|auth[_-]?token|access[_-]?token|refresh[_-]?token|password|secret)"\s*:\s*)"[^"]*"`)
 	requestLogAuthorizationBearerPattern   = regexp.MustCompile(`(?i)(authorization\s*[:=]\s*bearer\s+)[^\s",]+`)
 	requestLogSensitiveQueryValuePattern   = regexp.MustCompile(`(?i)((?:api[_-]?key|x-api-key|x-goog-api-key|auth[_-]?token|access[_-]?token)=)[^&\s]+`)
 	requestLogSensitiveKeywordQuickPattern = regexp.MustCompile(`(?i)(api[_-]?key|x-api-key|x-goog-api-key|authorization|auth[_-]?token|access[_-]?token|refresh[_-]?token|password|secret)`)
 )
 
+var (
+	openAICompatPromptCacheDisabledMu sync.Mutex
+	openAICompatPromptCacheDisabled   = make(map[string]time.Time)
+)
+
 const requestLogPayloadMaxBytes = 8 * 1024 * 1024
 const requestLogPayloadRedactedValue = "[REDACTED]"
+const claudeResponsesSessionTTL = 30 * time.Minute
+const claudeResponsesMaxSessionBindings = 4096
+const claudeResponsesTailReplayMaxInputItems = 80
+const openAICompatPromptCacheDisableTTL = 30 * time.Minute
+
+type claudeResponsesContinuationRejection int
+
+const (
+	claudeResponsesContinuationRejectionNone claudeResponsesContinuationRejection = iota
+	claudeResponsesContinuationRejectionNotFound
+	claudeResponsesContinuationRejectionUnsupported
+)
+
+type claudeResponsesSessionBinding struct {
+	ResponseID string
+	Disabled   bool
+	ExpiresAt  time.Time
+}
 
 // upstreamErrorResponse 保存上游非 2xx 响应，供“最终失败”场景透传给客户端
 type upstreamErrorResponse struct {
@@ -219,7 +245,8 @@ func NewProviderRelayService(providerService *ProviderService, geminiService *Ge
 			"codex":  nil,
 			"gemini": nil,
 		},
-		rrLastStart: make(map[string]string),
+		rrLastStart:     make(map[string]string),
+		claudeResponses: make(map[string]claudeResponsesSessionBinding),
 	}
 }
 
@@ -612,7 +639,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 				continue
 			}
 
-			plan, err := buildProviderRequestPlan(provider, bodyBytes, endpoint, requestedModel)
+			plan, err := prs.buildProviderRequestPlan(provider, bodyBytes, endpoint, requestedModel)
 			if err != nil {
 				fmt.Printf("[WARN] Provider %s 请求体预处理失败，已自动跳过: %v\n", provider.Name, err)
 				skippedCount++
@@ -704,7 +731,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 						continue
 					}
 
-					plan, err := getProviderRequestPlan(requestPlans, provider, bodyBytes, endpoint, requestedModel)
+					plan, err := prs.getProviderRequestPlan(requestPlans, provider, bodyBytes, endpoint, requestedModel)
 					if err != nil {
 						fmt.Printf("[ERROR] Provider %s 请求体预处理失败: %v，跳过此 Provider\n", provider.Name, err)
 						continue
@@ -724,7 +751,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 							provider.Name, level, retryCount+1, maxRetryPerProvider, plan.EffectiveModel)
 
 						startTime := time.Now()
-						ok, err := prs.forwardRequest(c, kind, provider, plan.EffectiveEndpoint, query, clientHeaders, plan.BodyBytes, isStream, plan.EffectiveModel, requestedModel)
+						ok, err := prs.forwardRequestWithPlan(c, kind, provider, plan.EffectiveEndpoint, query, clientHeaders, plan.BodyBytes, isStream, plan.EffectiveModel, requestedModel, plan)
 						duration := time.Since(startTime)
 
 						if ok {
@@ -834,7 +861,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 			for i, provider := range providersInLevel {
 				totalAttempts++
 
-				plan, err := getProviderRequestPlan(requestPlans, provider, bodyBytes, endpoint, requestedModel)
+				plan, err := prs.getProviderRequestPlan(requestPlans, provider, bodyBytes, endpoint, requestedModel)
 				if err != nil {
 					fmt.Printf("[ERROR] Provider %s 请求体预处理失败: %v\n", provider.Name, err)
 					continue
@@ -844,7 +871,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 
 				// 尝试发送请求
 				startTime := time.Now()
-				ok, err := prs.forwardRequest(c, kind, provider, plan.EffectiveEndpoint, query, clientHeaders, plan.BodyBytes, isStream, plan.EffectiveModel, requestedModel)
+				ok, err := prs.forwardRequestWithPlan(c, kind, provider, plan.EffectiveEndpoint, query, clientHeaders, plan.BodyBytes, isStream, plan.EffectiveModel, requestedModel, plan)
 				duration := time.Since(startTime)
 
 				if ok {
@@ -961,6 +988,39 @@ func (prs *ProviderRelayService) forwardRequest(
 	model string,
 	requestedModel string,
 ) (bool, error) {
+	return prs.forwardRequestWithPlan(c, kind, provider, endpoint, query, clientHeaders, bodyBytes, isStream, model, requestedModel, providerRequestPlan{
+		BodyBytes:         bodyBytes,
+		EffectiveModel:    model,
+		EffectiveEndpoint: endpoint,
+	})
+}
+
+func (prs *ProviderRelayService) forwardRequestWithPlan(
+	c *gin.Context,
+	kind string,
+	provider Provider,
+	endpoint string,
+	query map[string]string,
+	clientHeaders map[string]string,
+	bodyBytes []byte,
+	isStream bool,
+	model string,
+	requestedModel string,
+	plan providerRequestPlan,
+) (bool, error) {
+	if kind == "claude" &&
+		resolveClaudeAPIFormat(provider) == claudeAPIFormatOpenAIResponse &&
+		strings.TrimSpace(plan.ContinuationSessionKey) != "" &&
+		strings.TrimSpace(plan.PreviousResponseID) != "" &&
+		prs.isClaudeResponsesContinuationDisabled(provider, plan.ContinuationSessionKey) {
+		if len(plan.ContinuationRetryBodyBytes) > 0 {
+			bodyBytes = plan.ContinuationRetryBodyBytes
+			plan.BodyBytes = plan.ContinuationRetryBodyBytes
+		}
+		plan.PreviousResponseID = ""
+		plan.ContinuationRetryBodyBytes = nil
+	}
+
 	targetURL := joinURL(provider.APIURL, endpoint)
 	headers := cloneMap(clientHeaders)
 
@@ -986,6 +1046,9 @@ func (prs *ProviderRelayService) forwardRequest(
 	if _, ok := headers["Accept"]; !ok {
 		headers["Accept"] = "application/json"
 	}
+	if kind == "claude" && resolveClaudeAPIFormat(provider) == claudeAPIFormatOpenAIResponse {
+		setHeaderIfAbsentCaseInsensitive(headers, "openai-beta", "responses=experimental")
+	}
 
 	start := time.Now()
 	capturePayloadEnabled, sanitizePayloadEnabled := prs.resolveRequestLogPayloadCaptureAndSanitization()
@@ -1003,6 +1066,9 @@ func (prs *ProviderRelayService) forwardRequest(
 		ProviderAPIKey:   provider.APIKey,
 		ProviderAuthType: provider.ConnectivityAuthType,
 	}
+	requestLog.streamCompletionRequired = kind == "claude" &&
+		isStream &&
+		resolveClaudeAPIFormat(provider) == claudeAPIFormatOpenAIResponse
 	captureRequestLogRequestBody(requestLog, bodyBytes)
 	pricingSnapshot := (*modelpricing.Service)(nil)
 	if prs != nil && prs.modelPricing != nil {
@@ -1112,104 +1178,146 @@ func (prs *ProviderRelayService) forwardRequest(
 		}
 	}()
 
-	req := xrequest.New().
-		SetHeaders(headers).
-		SetQueryParams(query).
-		SetRetry(1, 500*time.Millisecond).
-		SetTimeout(32 * time.Hour) // 32小时超时，适配超大型项目分析
+	doForward := func(currentBody []byte, currentPlan providerRequestPlan) (bool, error, bool, bool) {
+		req := xrequest.New().
+			SetHeaders(headers).
+			SetQueryParams(query).
+			SetRetry(1, 500*time.Millisecond).
+			SetTimeout(32 * time.Hour) // 32小时超时，适配超大型项目分析
 
-	reqBody := bytes.NewReader(bodyBytes)
-	req = req.SetBody(reqBody)
+		reqBody := bytes.NewReader(currentBody)
+		req = req.SetBody(reqBody)
 
-	resp, err := req.Post(targetURL)
+		resp, err := req.Post(targetURL)
 
-	// 无论成功失败，先尝试记录 HttpCode
-	if resp != nil {
-		requestLog.HttpCode = resp.StatusCode()
-	}
-
-	status := 0
-	if resp != nil {
-		status = resp.StatusCode()
-	}
-
-	if err != nil {
-		// resp 存在但 err != nil：可能是客户端中断，不计入失败
-		if resp != nil && status == 0 {
-			fmt.Printf("[INFO] Provider %s 响应存在但状态码为0，判定为客户端中断\n", provider.Name)
-			return false, fmt.Errorf("%w: %v", errClientAbort, err)
+		// 无论成功失败，先尝试记录 HttpCode
+		if resp != nil {
+			requestLog.HttpCode = resp.StatusCode()
 		}
 
-		// xrequest 在 5xx 重试耗尽后会同时返回 resp 和 err。
-		// 这里不能直接丢弃 resp，否则上游原始错误 body 会被吞掉，只剩一个笼统的 retry 错误。
-		if resp == nil || status < http.StatusMultipleChoices {
-			return false, err
+		status := 0
+		if resp != nil {
+			status = resp.StatusCode()
 		}
+
+		if err != nil {
+			// resp 存在但 err != nil：可能是客户端中断，不计入失败
+			if resp != nil && status == 0 {
+				fmt.Printf("[INFO] Provider %s 响应存在但状态码为0，判定为客户端中断\n", provider.Name)
+				return false, fmt.Errorf("%w: %v", errClientAbort, err), false, false
+			}
+
+			// xrequest 在 5xx 重试耗尽后会同时返回 resp 和 err。
+			// 这里不能直接丢弃 resp，否则上游原始错误 body 会被吞掉，只剩一个笼统的 retry 错误。
+			if resp == nil || status < http.StatusMultipleChoices {
+				return false, err, false, false
+			}
+		}
+
+		if resp == nil {
+			return false, fmt.Errorf("empty response"), false, false
+		}
+
+		// 状态码为 0 且无错误：当作成功处理
+		if status == 0 {
+			fmt.Printf("[WARN] Provider %s 返回状态码 0，但无错误，当作成功处理\n", provider.Name)
+			hooks := buildClaudeProviderResponseHooks(prs, c, kind, provider, currentPlan, isStream, requestLog)
+			writtenBytes, copyErr := resp.ToHttpResponseWriter(c.Writer, hooks...)
+			ok, forwardErr := finalizeForwardSuccess(c, kind, requestLog, writtenBytes, copyErr)
+			return ok, forwardErr, false, false
+		}
+
+		if status >= http.StatusOK && status < http.StatusMultipleChoices {
+			if !isStream && kind == "claude" && resolveClaudeAPIFormat(provider) == claudeAPIFormatOpenAIResponse {
+				if protocolErr := newClaudeResponsesNonStreamTerminalErrorResponse(resp.Bytes(), resp.RawResponse); protocolErr != nil {
+					requestLog.HttpCode = protocolErr.statusCode
+					setRequestLogResponseBody(requestLog, protocolErr.body)
+					return false, protocolErr, false, false
+				}
+			}
+			hooks := buildClaudeProviderResponseHooks(prs, c, kind, provider, currentPlan, isStream, requestLog)
+			writtenBytes, copyErr := resp.ToHttpResponseWriter(c.Writer, hooks...)
+			ok, forwardErr := finalizeForwardSuccess(c, kind, requestLog, writtenBytes, copyErr)
+			return ok, forwardErr, false, false
+		}
+
+		// 非 2xx：打印上游错误信息，便于在控制台追踪原因
+		contentType := ""
+		if resp.RawResponse != nil {
+			contentType = resp.RawResponse.Header.Get("Content-Type")
+		}
+		upstreamBody := resp.Bytes()
+		setRequestLogResponseBody(requestLog, upstreamBody)
+		retryWithoutContinuation := false
+		retryWithoutPromptCacheKey := false
+		switch prs.classifyClaudeResponsesContinuationRejection(kind, provider, currentPlan, status, upstreamBody) {
+		case claudeResponsesContinuationRejectionNotFound:
+			prs.deleteClaudeResponsesPreviousResponseID(provider, currentPlan.ContinuationSessionKey)
+			retryWithoutContinuation = claudeResponsesCanRetryWithoutContinuation(currentPlan)
+		case claudeResponsesContinuationRejectionUnsupported:
+			prs.disableClaudeResponsesContinuation(provider, currentPlan.ContinuationSessionKey)
+			retryWithoutContinuation = claudeResponsesCanRetryWithoutContinuation(currentPlan)
+		}
+		if !retryWithoutContinuation && prs.isOpenAICompatPromptCacheKeyUnsupported(kind, provider, currentPlan, status, upstreamBody) {
+			prs.disableOpenAICompatPromptCache(provider, currentPlan.ContinuationSessionKey)
+			retryWithoutPromptCacheKey = true
+		}
+		body := strings.TrimSpace(string(upstreamBody))
+		if body != "" {
+			level := "ERROR"
+			if status >= http.StatusMultipleChoices && status < http.StatusBadRequest {
+				level = "WARN"
+			}
+			fmt.Printf("[%s] Upstream %s provider=%s status=%d url=%s content_type=%s\n%s\n",
+				level,
+				kind,
+				provider.Name,
+				status,
+				targetURL,
+				contentType,
+				truncateText(body, 12*1024),
+			)
+		} else {
+			fmt.Printf("[ERROR] Upstream %s provider=%s status=%d url=%s content_type=%s (empty body)\n",
+				kind,
+				provider.Name,
+				status,
+				targetURL,
+				contentType,
+			)
+		}
+
+		var upstreamHeaders http.Header
+		if resp.RawResponse != nil && resp.RawResponse.Header != nil {
+			upstreamHeaders = resp.RawResponse.Header
+		}
+		return false, newUpstreamErrorResponse(status, contentType, upstreamHeaders, upstreamBody), retryWithoutContinuation, retryWithoutPromptCacheKey
 	}
 
-	if resp == nil {
-		return false, fmt.Errorf("empty response")
+	ok, err, retryWithoutContinuation, retryWithoutPromptCacheKey := doForward(bodyBytes, plan)
+	if (!retryWithoutContinuation && !retryWithoutPromptCacheKey) || responseHasStarted(c) {
+		return ok, err
 	}
-
-	// 状态码为 0 且无错误：当作成功处理
-	if status == 0 {
-		fmt.Printf("[WARN] Provider %s 返回状态码 0，但无错误，当作成功处理\n", provider.Name)
-		hooks := make([]xrequest.ResponseHook, 0, 2)
-		if kind == "claude" && claudeAPIFormatNeedsTransform(resolveClaudeAPIFormat(provider)) {
-			hooks = append(hooks, newClaudeResponseTransformHook(resolveClaudeAPIFormat(provider), isStream))
-		}
-		hooks = append(hooks, ReqeustLogHook(c, kind, requestLog))
-		writtenBytes, copyErr := resp.ToHttpResponseWriter(c.Writer, hooks...)
-		return finalizeForwardSuccess(c, kind, requestLog, writtenBytes, copyErr)
-	}
-
-	if status >= http.StatusOK && status < http.StatusMultipleChoices {
-		hooks := make([]xrequest.ResponseHook, 0, 2)
-		if kind == "claude" && claudeAPIFormatNeedsTransform(resolveClaudeAPIFormat(provider)) {
-			hooks = append(hooks, newClaudeResponseTransformHook(resolveClaudeAPIFormat(provider), isStream))
-		}
-		hooks = append(hooks, ReqeustLogHook(c, kind, requestLog))
-		writtenBytes, copyErr := resp.ToHttpResponseWriter(c.Writer, hooks...)
-		return finalizeForwardSuccess(c, kind, requestLog, writtenBytes, copyErr)
-	}
-
-	// 非 2xx：打印上游错误信息，便于在控制台追踪原因
-	contentType := ""
-	if resp.RawResponse != nil {
-		contentType = resp.RawResponse.Header.Get("Content-Type")
-	}
-	upstreamBody := resp.Bytes()
-	setRequestLogResponseBody(requestLog, upstreamBody)
-	body := strings.TrimSpace(string(upstreamBody))
-	if body != "" {
-		level := "ERROR"
-		if status >= http.StatusMultipleChoices && status < http.StatusBadRequest {
-			level = "WARN"
-		}
-		fmt.Printf("[%s] Upstream %s provider=%s status=%d url=%s content_type=%s\n%s\n",
-			level,
-			kind,
-			provider.Name,
-			status,
-			targetURL,
-			contentType,
-			truncateText(body, 12*1024),
-		)
+	retryPlan := plan
+	retryMessage := ""
+	if retryWithoutContinuation {
+		retryPlan.BodyBytes = plan.ContinuationRetryBodyBytes
+		retryPlan.PreviousResponseID = ""
+		retryPlan.ContinuationRetryBodyBytes = nil
+		retryMessage = "previous_response_id 失效"
 	} else {
-		fmt.Printf("[ERROR] Upstream %s provider=%s status=%d url=%s content_type=%s (empty body)\n",
-			kind,
-			provider.Name,
-			status,
-			targetURL,
-			contentType,
-		)
+		retryPlan.BodyBytes = removeJSONFieldBytes(plan.BodyBytes, "prompt_cache_key")
+		retryPlan.ContinuationRetryBodyBytes = removeJSONFieldBytes(plan.ContinuationRetryBodyBytes, "prompt_cache_key")
+		retryPlan.PromptCacheKey = ""
+		retryMessage = "prompt_cache_key 不兼容"
 	}
-
-	var upstreamHeaders http.Header
-	if resp.RawResponse != nil && resp.RawResponse.Header != nil {
-		upstreamHeaders = resp.RawResponse.Header
-	}
-	return false, newUpstreamErrorResponse(status, contentType, upstreamHeaders, upstreamBody)
+	captureRequestLogRequestBody(requestLog, retryPlan.BodyBytes)
+	requestLog.ResponseBody = ""
+	requestLog.ResponseBodyTruncated = false
+	requestLog.responseBodyBuffer = nil
+	fmt.Printf("[INFO] Claude Responses %s，Provider %s 已回退请求重试一次\n", retryMessage, provider.Name)
+	ok, err, _, _ = doForward(retryPlan.BodyBytes, retryPlan)
+	return ok, err
 }
 
 func cloneHeaders(header http.Header) map[string]string {
@@ -1230,8 +1338,175 @@ func cloneMap(m map[string]string) map[string]string {
 	return cloned
 }
 
+func setHeaderIfAbsentCaseInsensitive(headers map[string]string, key string, value string) {
+	if headers == nil {
+		return
+	}
+	for existingKey := range headers {
+		if strings.EqualFold(existingKey, key) {
+			return
+		}
+	}
+	headers[key] = value
+}
+
+func removeJSONFieldBytes(bodyBytes []byte, path string) []byte {
+	if len(bodyBytes) == 0 || strings.TrimSpace(path) == "" || !gjson.GetBytes(bodyBytes, path).Exists() {
+		return bodyBytes
+	}
+	updated, err := sjson.DeleteBytes(bodyBytes, path)
+	if err != nil {
+		return bodyBytes
+	}
+	return updated
+}
+
 func responseHasStarted(c *gin.Context) bool {
 	return c != nil && c.Writer != nil && c.Writer.Written()
+}
+
+func buildClaudeProviderResponseHooks(
+	prs *ProviderRelayService,
+	c *gin.Context,
+	kind string,
+	provider Provider,
+	plan providerRequestPlan,
+	isStream bool,
+	requestLog *ReqeustLog,
+) []xrequest.ResponseHook {
+	hooks := make([]xrequest.ResponseHook, 0, 4)
+	if hook := prs.newClaudeResponsesSessionHook(kind, provider, plan, isStream); hook != nil {
+		hooks = append(hooks, hook)
+	}
+	if requestLog != nil && requestLog.streamCompletionRequired {
+		hooks = append(hooks, openAIResponsesStreamLifecycleHook(requestLog))
+	}
+	if kind == "claude" && claudeAPIFormatNeedsTransform(resolveClaudeAPIFormat(provider)) {
+		hooks = append(hooks, newClaudeResponseTransformHook(resolveClaudeAPIFormat(provider), isStream))
+	}
+	hooks = append(hooks, ReqeustLogHook(c, kind, requestLog))
+	return hooks
+}
+
+func openAIResponsesStreamLifecycleHook(reqLog *ReqeustLog) xrequest.ResponseHook {
+	var pendingEventType string
+	var pendingDataLines []string
+	var rawJSONBuffer strings.Builder
+
+	return func(data []byte) (bool, []byte) {
+		if reqLog == nil || !reqLog.IsStream || !reqLog.streamCompletionRequired {
+			return true, data
+		}
+
+		line := strings.TrimSpace(string(data))
+		switch {
+		case line == "":
+			if len(pendingDataLines) > 0 {
+				payload := combineOpenAIResponsesDataLines(pendingDataLines)
+				updateOpenAIResponsesStreamLifecyclePayload(payload, pendingEventType, reqLog)
+				pendingDataLines = nil
+				pendingEventType = ""
+			}
+			return true, data
+		case strings.HasPrefix(line, "event:"):
+			pendingEventType = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+		case strings.HasPrefix(line, "data:"):
+			payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+			if len(pendingDataLines) > 0 {
+				pendingDataLines = append(pendingDataLines, payload)
+				combinedPayload := combineOpenAIResponsesDataLines(pendingDataLines)
+				if gjson.Valid(combinedPayload) {
+					updateOpenAIResponsesStreamLifecyclePayload(combinedPayload, pendingEventType, reqLog)
+					pendingDataLines = nil
+					pendingEventType = ""
+				}
+				return true, data
+			}
+			if payload != "" && payload != "[DONE]" && !gjson.Valid(payload) {
+				pendingDataLines = append(pendingDataLines, payload)
+				return true, data
+			}
+			updateOpenAIResponsesStreamLifecyclePayload(payload, pendingEventType, reqLog)
+			pendingEventType = ""
+		default:
+			rawJSONBuffer.WriteString(string(data))
+			payload := strings.TrimSpace(rawJSONBuffer.String())
+			if payload != "" && gjson.Valid(payload) {
+				updateOpenAIResponsesStreamLifecyclePayload(payload, "", reqLog)
+				rawJSONBuffer.Reset()
+			}
+		}
+
+		return true, data
+	}
+}
+
+func combineOpenAIResponsesDataLines(lines []string) string {
+	payload := strings.TrimSpace(strings.Join(lines, "\n"))
+	if payload == "" || gjson.Valid(payload) {
+		return payload
+	}
+	compactPayload := strings.TrimSpace(strings.Join(lines, ""))
+	if compactPayload == "" || gjson.Valid(compactPayload) {
+		return compactPayload
+	}
+	return payload
+}
+
+func updateOpenAIResponsesStreamLifecyclePayload(payload string, eventType string, reqLog *ReqeustLog) {
+	payload = strings.TrimSpace(payload)
+	if payload == "" || payload == "[DONE]" || !gjson.Valid(payload) {
+		return
+	}
+	eventType = strings.TrimSpace(eventType)
+	if eventType != "" && strings.TrimSpace(gjson.Get(payload, "type").String()) == "" {
+		if withType, err := sjson.Set(payload, "type", eventType); err == nil {
+			payload = withType
+		}
+	}
+	updateResponseModelFromPayload(payload, reqLog)
+	updateFirstTokenFromPayload(payload, reqLog)
+	updateStreamLifecycleFromPayload("claude", payload, reqLog)
+}
+
+func newClaudeResponsesNonStreamTerminalErrorResponse(upstreamBody []byte, rawResponse *http.Response) *upstreamErrorResponse {
+	payload := strings.TrimSpace(string(upstreamBody))
+	if payload == "" || !gjson.Valid(payload) {
+		return nil
+	}
+	status := extractOpenAIResponsesResponseStatus(payload)
+	if !isOpenAIResponsesTerminalFailureStatus(status) &&
+		!(strings.EqualFold(status, "incomplete") && !openAIResponsesPayloadHasUsableOutput(payload)) {
+		return nil
+	}
+	message := strings.TrimSpace(extractOpenAIResponsesStreamFailureMessage(payload))
+	if message == "" {
+		message = strings.TrimSpace(status)
+	}
+	if message == "" {
+		message = "unknown terminal status"
+	}
+	errorBody, err := json.Marshal(map[string]interface{}{
+		"type": "error",
+		"error": map[string]interface{}{
+			"type":    "api_error",
+			"message": fmt.Sprintf("OpenAI Responses response %s: %s", status, message),
+		},
+	})
+	if err != nil {
+		errorBody = []byte(`{"type":"error","error":{"type":"api_error","message":"OpenAI Responses response failed"}}`)
+	}
+
+	headers := http.Header{}
+	if rawResponse != nil && rawResponse.Header != nil {
+		for key, values := range rawResponse.Header {
+			copied := make([]string, len(values))
+			copy(copied, values)
+			headers[key] = copied
+		}
+	}
+	headers.Set("Content-Type", "application/json")
+	return newUpstreamErrorResponse(http.StatusBadGateway, "application/json", headers, errorBody)
 }
 
 func finalizeForwardSuccess(c *gin.Context, kind string, requestLog *ReqeustLog, writtenBytes int64, copyErr error) (bool, error) {
@@ -1866,11 +2141,11 @@ func updateStreamLifecycleFromPayload(kind string, payload string, reqLog *Reqeu
 	if reqLog == nil || !reqLog.IsStream {
 		return
 	}
-	if !strings.EqualFold(strings.TrimSpace(kind), "codex") {
+	if !strings.EqualFold(strings.TrimSpace(kind), "codex") && !reqLog.streamCompletionRequired {
 		return
 	}
 
-	eventType, completed, failureMessage, terminal := detectCodexStreamTerminalState(payload)
+	eventType, completed, failureMessage, terminal := detectOpenAIResponsesStreamTerminalState(payload)
 	if !terminal {
 		return
 	}
@@ -1884,30 +2159,49 @@ func updateStreamLifecycleFromPayload(kind string, payload string, reqLog *Reqeu
 }
 
 func detectCodexStreamTerminalState(payload string) (eventType string, completed bool, failureMessage string, terminal bool) {
+	return detectOpenAIResponsesStreamTerminalState(payload)
+}
+
+func detectOpenAIResponsesStreamTerminalState(payload string) (eventType string, completed bool, failureMessage string, terminal bool) {
 	eventType = strings.TrimSpace(gjson.Get(payload, "type").String())
 	switch eventType {
 	case "response.completed":
 		return eventType, true, "", true
+	case "response.done":
+		switch extractOpenAIResponsesResponseStatus(payload) {
+		case "failed":
+			return "response.failed", false, extractOpenAIResponsesStreamFailureMessage(payload), true
+		case "incomplete":
+			return "response.incomplete", false, extractOpenAIResponsesStreamFailureMessage(payload), true
+		case "cancelled", "canceled":
+			return "response.cancelled", false, extractOpenAIResponsesStreamFailureMessage(payload), true
+		default:
+			return eventType, true, "", true
+		}
 	case "response.failed", "response.incomplete", "response.cancelled", "error":
-		return eventType, false, extractCodexStreamFailureMessage(payload), true
+		return eventType, false, extractOpenAIResponsesStreamFailureMessage(payload), true
 	}
 
-	status := extractCodexResponseStatus(payload)
+	status := extractOpenAIResponsesResponseStatus(payload)
 	switch status {
 	case "completed":
 		return "response.completed", true, "", true
 	case "failed":
-		return "response.failed", false, extractCodexStreamFailureMessage(payload), true
+		return "response.failed", false, extractOpenAIResponsesStreamFailureMessage(payload), true
 	case "incomplete":
-		return "response.incomplete", false, extractCodexStreamFailureMessage(payload), true
+		return "response.incomplete", false, extractOpenAIResponsesStreamFailureMessage(payload), true
 	case "cancelled", "canceled":
-		return "response.cancelled", false, extractCodexStreamFailureMessage(payload), true
+		return "response.cancelled", false, extractOpenAIResponsesStreamFailureMessage(payload), true
 	default:
 		return "", false, "", false
 	}
 }
 
 func extractCodexResponseStatus(payload string) string {
+	return extractOpenAIResponsesResponseStatus(payload)
+}
+
+func extractOpenAIResponsesResponseStatus(payload string) string {
 	for _, path := range []string{"status", "response.status"} {
 		if value := strings.TrimSpace(gjson.Get(payload, path).String()); value != "" {
 			return strings.ToLower(value)
@@ -1916,15 +2210,72 @@ func extractCodexResponseStatus(payload string) string {
 	return ""
 }
 
+func isOpenAIResponsesTerminalFailureStatus(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "failed", "cancelled", "canceled":
+		return true
+	default:
+		return false
+	}
+}
+
+func openAIResponsesPayloadHasUsableOutput(payload string) bool {
+	output := gjson.Get(payload, "output")
+	if !output.IsArray() {
+		return false
+	}
+	for _, item := range output.Array() {
+		switch strings.TrimSpace(item.Get("type").String()) {
+		case "function_call":
+			return true
+		case "message":
+			content := item.Get("content")
+			if !content.IsArray() {
+				continue
+			}
+			for _, block := range content.Array() {
+				switch strings.TrimSpace(block.Get("type").String()) {
+				case "output_text":
+					if strings.TrimSpace(block.Get("text").String()) != "" {
+						return true
+					}
+				case "refusal":
+					if strings.TrimSpace(block.Get("refusal").String()) != "" {
+						return true
+					}
+				}
+			}
+		case "reasoning":
+			summary := item.Get("summary")
+			if !summary.IsArray() {
+				continue
+			}
+			for _, block := range summary.Array() {
+				if strings.TrimSpace(block.Get("type").String()) == "summary_text" &&
+					strings.TrimSpace(block.Get("text").String()) != "" {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 func extractCodexStreamFailureMessage(payload string) string {
+	return extractOpenAIResponsesStreamFailureMessage(payload)
+}
+
+func extractOpenAIResponsesStreamFailureMessage(payload string) string {
 	for _, path := range []string{
 		"status_details.error.message",
 		"status_details.reason",
+		"incomplete_details.reason",
 		"error.message",
 		"message",
 		"response.status_details.error.message",
 		"response.error.message",
 		"response.status_details.reason",
+		"response.incomplete_details.reason",
 	} {
 		if value := strings.TrimSpace(gjson.Get(payload, path).String()); value != "" {
 			return value
@@ -1937,12 +2288,12 @@ func validateStreamCompletion(kind string, reqLog *ReqeustLog) error {
 	if reqLog == nil || !reqLog.IsStream {
 		return nil
 	}
-	if !strings.EqualFold(strings.TrimSpace(kind), "codex") {
+	if !strings.EqualFold(strings.TrimSpace(kind), "codex") && !reqLog.streamCompletionRequired {
 		return nil
 	}
 
 	switch strings.TrimSpace(reqLog.streamTerminalEvent) {
-	case "response.completed":
+	case "response.completed", "response.done":
 		return nil
 	case "":
 		return fmt.Errorf("%w: missing response.completed event", errIncompleteStream)
@@ -2216,9 +2567,10 @@ type ReqeustLog struct {
 	ProviderAuthType string    `json:"-"`
 	RequestStartedAt time.Time `json:"-"`
 
-	responseBodyBuffer   []byte
-	streamTerminalEvent  string
-	streamFailureMessage string
+	responseBodyBuffer       []byte
+	streamCompletionRequired bool
+	streamTerminalEvent      string
+	streamFailureMessage     string
 }
 
 // claude code usage parser
@@ -2630,12 +2982,16 @@ func resolveModelFromRequestBody(bodyBytes []byte, fallback string) string {
 }
 
 type providerRequestPlan struct {
-	BodyBytes         []byte
-	EffectiveModel    string
-	EffectiveEndpoint string
+	BodyBytes                  []byte
+	ContinuationRetryBodyBytes []byte
+	EffectiveModel             string
+	EffectiveEndpoint          string
+	PromptCacheKey             string
+	ContinuationSessionKey     string
+	PreviousResponseID         string
 }
 
-func buildProviderRequestPlan(provider Provider, bodyBytes []byte, endpoint string, requestedModel string) (providerRequestPlan, error) {
+func (prs *ProviderRelayService) buildProviderRequestPlan(provider Provider, bodyBytes []byte, endpoint string, requestedModel string) (providerRequestPlan, error) {
 	effectiveModel := provider.GetEffectiveModel(requestedModel)
 	currentBodyBytes := bodyBytes
 
@@ -2656,25 +3012,831 @@ func buildProviderRequestPlan(provider Provider, bodyBytes []byte, endpoint stri
 	}
 
 	effectiveEndpoint := provider.GetEffectiveEndpoint(endpoint)
+	promptCacheKey := ""
+	continuationSessionKey := ""
+	previousResponseID := ""
 	if endpoint == "/v1/messages" {
 		effectiveEndpoint = resolveProviderEffectiveEndpoint("claude", provider, endpoint)
 		if claudeAPIFormatNeedsTransform(resolveClaudeAPIFormat(provider)) {
+			claudeBodyBytes := currentBodyBytes
+			hasExplicitPromptCacheKey := strings.TrimSpace(gjson.GetBytes(claudeBodyBytes, "prompt_cache_key").String()) != ""
 			modifiedBody, err := transformClaudeRequestForAPIFormat(currentBodyBytes, provider)
 			if err != nil {
 				return providerRequestPlan{}, err
 			}
 			currentBodyBytes = modifiedBody
+			if resolveClaudeAPIFormat(provider) == claudeAPIFormatOpenAIResponse {
+				continuationSessionKey = deriveClaudeResponsesContinuationSessionKey(claudeBodyBytes)
+				if !hasExplicitPromptCacheKey && prs != nil && prs.isOpenAICompatPromptCacheDisabled(provider, continuationSessionKey) {
+					currentBodyBytes = removeJSONFieldBytes(currentBodyBytes, "prompt_cache_key")
+				}
+				promptCacheKey = strings.TrimSpace(gjson.GetBytes(currentBodyBytes, "prompt_cache_key").String())
+				baseResponsesBodyBytes := currentBodyBytes
+				continuationRetryBodyBytes := trimClaudeResponsesInputForTailReplayGuard(baseResponsesBodyBytes, claudeResponsesTailReplayMaxInputItems)
+				storeDisabled := gjson.GetBytes(currentBodyBytes, "store").Exists() &&
+					!gjson.GetBytes(currentBodyBytes, "store").Bool()
+				if continuationSessionKey != "" && prs != nil && !storeDisabled && !prs.isClaudeResponsesContinuationDisabled(provider, continuationSessionKey) {
+					previousResponseID = prs.getClaudeResponsesPreviousResponseID(provider, continuationSessionKey)
+					if previousResponseID != "" {
+						currentBodyBytes = trimClaudeResponsesInputToLatestTurn(baseResponsesBodyBytes)
+					}
+					if previousResponseID != "" {
+						withPrevious, err := sjson.SetBytes(currentBodyBytes, "previous_response_id", previousResponseID)
+						if err != nil {
+							return providerRequestPlan{}, fmt.Errorf("设置 previous_response_id 失败: %w", err)
+						}
+						currentBodyBytes = withPrevious
+					}
+				}
+				if previousResponseID == "" {
+					currentBodyBytes = baseResponsesBodyBytes
+				}
+				return providerRequestPlan{
+					BodyBytes:                  currentBodyBytes,
+					ContinuationRetryBodyBytes: continuationRetryBodyBytes,
+					EffectiveModel:             resolveModelFromRequestBody(currentBodyBytes, effectiveModel),
+					EffectiveEndpoint:          effectiveEndpoint,
+					PromptCacheKey:             promptCacheKey,
+					ContinuationSessionKey:     continuationSessionKey,
+					PreviousResponseID:         previousResponseID,
+				}, nil
+			}
 		}
 	}
 
 	return providerRequestPlan{
-		BodyBytes:         currentBodyBytes,
-		EffectiveModel:    resolveModelFromRequestBody(currentBodyBytes, effectiveModel),
-		EffectiveEndpoint: effectiveEndpoint,
+		BodyBytes:                  currentBodyBytes,
+		ContinuationRetryBodyBytes: nil,
+		EffectiveModel:             resolveModelFromRequestBody(currentBodyBytes, effectiveModel),
+		EffectiveEndpoint:          effectiveEndpoint,
+		PromptCacheKey:             promptCacheKey,
+		ContinuationSessionKey:     continuationSessionKey,
+		PreviousResponseID:         previousResponseID,
 	}, nil
 }
 
-func getProviderRequestPlan(
+func buildProviderRequestPlan(provider Provider, bodyBytes []byte, endpoint string, requestedModel string) (providerRequestPlan, error) {
+	return (*ProviderRelayService)(nil).buildProviderRequestPlan(provider, bodyBytes, endpoint, requestedModel)
+}
+
+func deriveClaudeResponsesContinuationSessionKey(bodyBytes []byte) string {
+	metadata := gjson.GetBytes(bodyBytes, "metadata")
+	if !metadata.Exists() {
+		return ""
+	}
+
+	if parsed := parseClaudeMetadataUserID(metadata.Get("user_id").String()); parsed != nil {
+		seed := strings.Join([]string{
+			strings.TrimSpace(parsed.DeviceID),
+			strings.TrimSpace(parsed.AccountUUID),
+			strings.TrimSpace(parsed.SessionID),
+		}, "|")
+		return "metadata-user-" + shortSHA256Hex(seed)
+	}
+
+	for _, path := range []string{
+		"session_id",
+		"sessionId",
+		"conversation_id",
+		"conversationId",
+		"thread_id",
+		"threadId",
+	} {
+		if value := strings.TrimSpace(metadata.Get(path).String()); value != "" {
+			return "metadata-session-" + shortSHA256Hex(path+"="+value)
+		}
+	}
+	return ""
+}
+
+type claudeMetadataUserIDParts struct {
+	DeviceID    string
+	AccountUUID string
+	SessionID   string
+}
+
+func parseClaudeMetadataUserID(raw string) *claudeMetadataUserIDParts {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	if strings.HasPrefix(raw, "{") {
+		var parsed struct {
+			DeviceID    string `json:"device_id"`
+			AccountUUID string `json:"account_uuid"`
+			SessionID   string `json:"session_id"`
+		}
+		if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
+			return nil
+		}
+		if strings.TrimSpace(parsed.DeviceID) == "" || strings.TrimSpace(parsed.SessionID) == "" {
+			return nil
+		}
+		return &claudeMetadataUserIDParts{
+			DeviceID:    parsed.DeviceID,
+			AccountUUID: parsed.AccountUUID,
+			SessionID:   parsed.SessionID,
+		}
+	}
+	matches := claudeMetadataLegacyUserIDRegex.FindStringSubmatch(raw)
+	if matches == nil {
+		return nil
+	}
+	return &claudeMetadataUserIDParts{
+		DeviceID:    matches[1],
+		AccountUUID: matches[2],
+		SessionID:   matches[3],
+	}
+}
+
+func (prs *ProviderRelayService) claudeResponsesSessionKey(provider Provider, continuationSessionKey string) string {
+	key := strings.TrimSpace(continuationSessionKey)
+	if key == "" {
+		return ""
+	}
+	return strings.Join([]string{
+		providerRefFromProvider(provider),
+		strings.TrimSpace(provider.APIURL),
+		hashProviderAPIKeyForMemoryKey(provider.APIKey),
+		key,
+	}, "\x00")
+}
+
+func (prs *ProviderRelayService) openAICompatPromptCacheDisableKey(provider Provider, continuationSessionKey string) string {
+	return openAICompatPromptCacheDisableKey(provider, continuationSessionKey)
+}
+
+func openAICompatPromptCacheDisableKey(provider Provider, continuationSessionKey string) string {
+	scope := strings.TrimSpace(continuationSessionKey)
+	if scope == "" {
+		scope = "provider"
+	}
+	return strings.Join([]string{
+		providerRefFromProvider(provider),
+		strings.TrimSpace(provider.APIURL),
+		hashProviderAPIKeyForMemoryKey(provider.APIKey),
+		scope,
+	}, "\x00")
+}
+
+func hashProviderAPIKeyForMemoryKey(apiKey string) string {
+	apiKey = strings.TrimSpace(apiKey)
+	if apiKey == "" {
+		return ""
+	}
+	return "sha256:" + shortSHA256Hex(apiKey)
+}
+
+func (prs *ProviderRelayService) isOpenAICompatPromptCacheDisabled(provider Provider, continuationSessionKey string) bool {
+	return isOpenAICompatPromptCacheDisabled(provider, continuationSessionKey)
+}
+
+func isOpenAICompatPromptCacheDisabled(provider Provider, continuationSessionKey string) bool {
+	providerKey := openAICompatPromptCacheDisableKey(provider, "")
+	key := openAICompatPromptCacheDisableKey(provider, continuationSessionKey)
+	if key == "" {
+		return false
+	}
+	openAICompatPromptCacheDisabledMu.Lock()
+	defer openAICompatPromptCacheDisabledMu.Unlock()
+	if openAICompatPromptCacheDisabled == nil {
+		return false
+	}
+	now := time.Now()
+	sweepOpenAICompatPromptCacheDisabledLocked(now)
+	if providerKey != "" && providerKey != key {
+		if promptCacheDisableEntryActiveLocked(providerKey, now) {
+			return true
+		}
+	}
+	return promptCacheDisableEntryActiveLocked(key, now)
+}
+
+func promptCacheDisableEntryActiveLocked(key string, now time.Time) bool {
+	expiresAt, ok := openAICompatPromptCacheDisabled[key]
+	if !ok {
+		return false
+	}
+	if !expiresAt.IsZero() && now.After(expiresAt) {
+		delete(openAICompatPromptCacheDisabled, key)
+		return false
+	}
+	return true
+}
+
+func (prs *ProviderRelayService) disableOpenAICompatPromptCache(provider Provider, continuationSessionKey string) {
+	disableOpenAICompatPromptCache(provider, continuationSessionKey)
+}
+
+func disableOpenAICompatPromptCache(provider Provider, continuationSessionKey string) {
+	key := openAICompatPromptCacheDisableKey(provider, continuationSessionKey)
+	if key == "" {
+		return
+	}
+	providerKey := openAICompatPromptCacheDisableKey(provider, "")
+	openAICompatPromptCacheDisabledMu.Lock()
+	defer openAICompatPromptCacheDisabledMu.Unlock()
+	if openAICompatPromptCacheDisabled == nil {
+		openAICompatPromptCacheDisabled = make(map[string]time.Time)
+	}
+	now := time.Now()
+	expiresAt := now.Add(openAICompatPromptCacheDisableTTL)
+	openAICompatPromptCacheDisabled[key] = expiresAt
+	if providerKey != "" {
+		openAICompatPromptCacheDisabled[providerKey] = expiresAt
+	}
+	sweepOpenAICompatPromptCacheDisabledLocked(now)
+}
+
+func (prs *ProviderRelayService) sweepOpenAICompatPromptCacheDisabledLocked(now time.Time) {
+	sweepOpenAICompatPromptCacheDisabledLocked(now)
+}
+
+func sweepOpenAICompatPromptCacheDisabledLocked(now time.Time) {
+	if len(openAICompatPromptCacheDisabled) == 0 {
+		return
+	}
+	for key, expiresAt := range openAICompatPromptCacheDisabled {
+		if !expiresAt.IsZero() && now.After(expiresAt) {
+			delete(openAICompatPromptCacheDisabled, key)
+		}
+	}
+}
+
+func (prs *ProviderRelayService) getClaudeResponsesPreviousResponseID(provider Provider, continuationSessionKey string) string {
+	if prs == nil {
+		return ""
+	}
+	key := prs.claudeResponsesSessionKey(provider, continuationSessionKey)
+	if key == "" {
+		return ""
+	}
+	prs.claudeResponsesMu.Lock()
+	defer prs.claudeResponsesMu.Unlock()
+	if prs.claudeResponses == nil {
+		return ""
+	}
+	now := time.Now()
+	prs.sweepClaudeResponsesSessionsLocked(now)
+	binding, ok := prs.claudeResponses[key]
+	if !ok {
+		return ""
+	}
+	if !binding.ExpiresAt.IsZero() && now.After(binding.ExpiresAt) {
+		delete(prs.claudeResponses, key)
+		return ""
+	}
+	if binding.Disabled {
+		return ""
+	}
+	return strings.TrimSpace(binding.ResponseID)
+}
+
+func (prs *ProviderRelayService) bindClaudeResponsesPreviousResponseID(provider Provider, continuationSessionKey string, responseID string) {
+	if prs == nil {
+		return
+	}
+	key := prs.claudeResponsesSessionKey(provider, continuationSessionKey)
+	id := strings.TrimSpace(responseID)
+	if key == "" || id == "" {
+		return
+	}
+	prs.claudeResponsesMu.Lock()
+	defer prs.claudeResponsesMu.Unlock()
+	if prs.claudeResponses == nil {
+		prs.claudeResponses = make(map[string]claudeResponsesSessionBinding)
+	}
+	now := time.Now()
+	existing := prs.claudeResponses[key]
+	if existing.Disabled {
+		existing.ExpiresAt = now.Add(claudeResponsesSessionTTL)
+		prs.claudeResponses[key] = existing
+		prs.sweepClaudeResponsesSessionsLocked(now)
+		return
+	}
+	prs.claudeResponses[key] = claudeResponsesSessionBinding{
+		ResponseID: id,
+		ExpiresAt:  now.Add(claudeResponsesSessionTTL),
+	}
+	prs.sweepClaudeResponsesSessionsLocked(now)
+}
+
+func (prs *ProviderRelayService) disableClaudeResponsesContinuation(provider Provider, continuationSessionKey string) {
+	if prs == nil {
+		return
+	}
+	key := prs.claudeResponsesSessionKey(provider, continuationSessionKey)
+	if key == "" {
+		return
+	}
+	prs.claudeResponsesMu.Lock()
+	defer prs.claudeResponsesMu.Unlock()
+	if prs.claudeResponses == nil {
+		prs.claudeResponses = make(map[string]claudeResponsesSessionBinding)
+	}
+	now := time.Now()
+	prs.claudeResponses[key] = claudeResponsesSessionBinding{
+		Disabled:  true,
+		ExpiresAt: now.Add(claudeResponsesSessionTTL),
+	}
+	prs.sweepClaudeResponsesSessionsLocked(now)
+}
+
+func (prs *ProviderRelayService) deleteClaudeResponsesPreviousResponseID(provider Provider, continuationSessionKey string) {
+	if prs == nil {
+		return
+	}
+	key := prs.claudeResponsesSessionKey(provider, continuationSessionKey)
+	if key == "" {
+		return
+	}
+	prs.claudeResponsesMu.Lock()
+	defer prs.claudeResponsesMu.Unlock()
+	if prs.claudeResponses == nil {
+		return
+	}
+	delete(prs.claudeResponses, key)
+}
+
+func (prs *ProviderRelayService) isClaudeResponsesContinuationDisabled(provider Provider, continuationSessionKey string) bool {
+	if prs == nil {
+		return false
+	}
+	key := prs.claudeResponsesSessionKey(provider, continuationSessionKey)
+	if key == "" {
+		return false
+	}
+	prs.claudeResponsesMu.Lock()
+	defer prs.claudeResponsesMu.Unlock()
+	if prs.claudeResponses == nil {
+		return false
+	}
+	now := time.Now()
+	prs.sweepClaudeResponsesSessionsLocked(now)
+	binding, ok := prs.claudeResponses[key]
+	if !ok {
+		return false
+	}
+	if !binding.ExpiresAt.IsZero() && now.After(binding.ExpiresAt) {
+		delete(prs.claudeResponses, key)
+		return false
+	}
+	return binding.Disabled
+}
+
+func (prs *ProviderRelayService) sweepClaudeResponsesSessionsLocked(now time.Time) {
+	if prs == nil || len(prs.claudeResponses) == 0 {
+		return
+	}
+	for key, binding := range prs.claudeResponses {
+		if !binding.ExpiresAt.IsZero() && now.After(binding.ExpiresAt) {
+			delete(prs.claudeResponses, key)
+		}
+	}
+	if claudeResponsesMaxSessionBindings <= 0 || len(prs.claudeResponses) <= claudeResponsesMaxSessionBindings {
+		return
+	}
+
+	type sessionExpiry struct {
+		Key       string
+		ExpiresAt time.Time
+	}
+	entries := make([]sessionExpiry, 0, len(prs.claudeResponses))
+	for key, binding := range prs.claudeResponses {
+		entries = append(entries, sessionExpiry{Key: key, ExpiresAt: binding.ExpiresAt})
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		left := entries[i].ExpiresAt
+		right := entries[j].ExpiresAt
+		if left.IsZero() && right.IsZero() {
+			return entries[i].Key < entries[j].Key
+		}
+		if left.IsZero() {
+			return false
+		}
+		if right.IsZero() {
+			return true
+		}
+		if left.Equal(right) {
+			return entries[i].Key < entries[j].Key
+		}
+		return left.Before(right)
+	})
+	for i := 0; i < len(entries)-claudeResponsesMaxSessionBindings; i++ {
+		delete(prs.claudeResponses, entries[i].Key)
+	}
+}
+
+func (prs *ProviderRelayService) newClaudeResponsesSessionHook(kind string, provider Provider, plan providerRequestPlan, isStream bool) xrequest.ResponseHook {
+	if prs == nil ||
+		kind != "claude" ||
+		resolveClaudeAPIFormat(provider) != claudeAPIFormatOpenAIResponse ||
+		strings.TrimSpace(plan.ContinuationSessionKey) == "" {
+		return nil
+	}
+	if isStream {
+		return prs.newClaudeResponsesStreamSessionHook(provider, plan)
+	}
+	return func(data []byte) (bool, []byte) {
+		responseID := strings.TrimSpace(gjson.GetBytes(data, "id").String())
+		if responseID != "" {
+			prs.bindClaudeResponsesPreviousResponseID(provider, plan.ContinuationSessionKey, responseID)
+		}
+		return true, data
+	}
+}
+
+func (prs *ProviderRelayService) newClaudeResponsesStreamSessionHook(provider Provider, plan providerRequestPlan) xrequest.ResponseHook {
+	var pendingEventType string
+	var pendingResponseID string
+	var pendingDataLines []string
+	return func(data []byte) (bool, []byte) {
+		line := strings.TrimSpace(string(data))
+		if line == "" {
+			if len(pendingDataLines) > 0 {
+				payload := combineOpenAIResponsesDataLines(pendingDataLines)
+				prs.updateClaudeResponsesStreamSessionBinding(provider, plan, payload, pendingEventType, &pendingResponseID)
+				pendingDataLines = nil
+				pendingEventType = ""
+			}
+			return true, data
+		}
+		if strings.HasPrefix(line, "event:") {
+			pendingEventType = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+			return true, data
+		}
+		if !strings.HasPrefix(line, "data:") {
+			return true, data
+		}
+		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if len(pendingDataLines) > 0 {
+			pendingDataLines = append(pendingDataLines, payload)
+			combinedPayload := combineOpenAIResponsesDataLines(pendingDataLines)
+			if gjson.Valid(combinedPayload) {
+				prs.updateClaudeResponsesStreamSessionBinding(provider, plan, combinedPayload, pendingEventType, &pendingResponseID)
+				pendingDataLines = nil
+				pendingEventType = ""
+			}
+			return true, data
+		}
+		if payload != "" && payload != "[DONE]" && !gjson.Valid(payload) {
+			pendingDataLines = append(pendingDataLines, payload)
+			return true, data
+		}
+		prs.updateClaudeResponsesStreamSessionBinding(provider, plan, payload, pendingEventType, &pendingResponseID)
+		if payload != "" && payload != "[DONE]" {
+			pendingEventType = ""
+		}
+		return true, data
+	}
+}
+
+func (prs *ProviderRelayService) updateClaudeResponsesStreamSessionBinding(
+	provider Provider,
+	plan providerRequestPlan,
+	payload string,
+	pendingEventType string,
+	pendingResponseID *string,
+) {
+	payload = strings.TrimSpace(payload)
+	if payload == "" || payload == "[DONE]" || !gjson.Valid(payload) {
+		return
+	}
+	eventType := strings.TrimSpace(gjson.Get(payload, "type").String())
+	if eventType == "" {
+		eventType = strings.TrimSpace(pendingEventType)
+	}
+	switch eventType {
+	case "response.created":
+		responseID := strings.TrimSpace(gjson.Get(payload, "response.id").String())
+		if responseID == "" {
+			responseID = strings.TrimSpace(gjson.Get(payload, "id").String())
+		}
+		if responseID != "" && pendingResponseID != nil {
+			*pendingResponseID = responseID
+		}
+	case "response.completed", "response.done":
+		if eventType == "response.done" {
+			switch extractOpenAIResponsesResponseStatus(payload) {
+			case "failed", "incomplete", "cancelled", "canceled":
+				return
+			}
+		}
+		responseID := strings.TrimSpace(gjson.Get(payload, "response.id").String())
+		if responseID == "" {
+			responseID = strings.TrimSpace(gjson.Get(payload, "id").String())
+		}
+		if responseID == "" && pendingResponseID != nil {
+			responseID = *pendingResponseID
+		}
+		if responseID != "" {
+			prs.bindClaudeResponsesPreviousResponseID(provider, plan.ContinuationSessionKey, responseID)
+		}
+	}
+}
+
+func (prs *ProviderRelayService) classifyClaudeResponsesContinuationRejection(kind string, provider Provider, plan providerRequestPlan, status int, body []byte) claudeResponsesContinuationRejection {
+	if prs == nil ||
+		kind != "claude" ||
+		resolveClaudeAPIFormat(provider) != claudeAPIFormatOpenAIResponse ||
+		strings.TrimSpace(plan.ContinuationSessionKey) == "" ||
+		strings.TrimSpace(plan.PreviousResponseID) == "" {
+		return claudeResponsesContinuationRejectionNone
+	}
+	if isClaudeResponsesPreviousResponseNotFound(status, body) {
+		return claudeResponsesContinuationRejectionNotFound
+	}
+	if isClaudeResponsesPreviousResponseUnsupported(status, body) {
+		return claudeResponsesContinuationRejectionUnsupported
+	}
+	return claudeResponsesContinuationRejectionNone
+}
+
+func (prs *ProviderRelayService) isOpenAICompatPromptCacheKeyUnsupported(kind string, provider Provider, plan providerRequestPlan, status int, body []byte) bool {
+	if prs == nil ||
+		kind != "claude" ||
+		resolveClaudeAPIFormat(provider) != claudeAPIFormatOpenAIResponse ||
+		strings.TrimSpace(plan.PromptCacheKey) == "" {
+		return false
+	}
+	return isOpenAICompatPromptCacheKeyUnsupportedStatus(status, body)
+}
+
+func isOpenAICompatPromptCacheKeyUnsupportedStatus(status int, body []byte) bool {
+	if status < http.StatusBadRequest || status >= http.StatusInternalServerError {
+		return false
+	}
+	bodyText := strings.ToLower(strings.TrimSpace(string(body)))
+	if bodyText == "" || !strings.Contains(bodyText, "prompt_cache_key") {
+		return false
+	}
+	return strings.Contains(bodyText, "unsupported") ||
+		strings.Contains(bodyText, "not supported") ||
+		strings.Contains(bodyText, "unsupported parameter") ||
+		strings.Contains(bodyText, "unknown parameter") ||
+		strings.Contains(bodyText, "unrecognized parameter") ||
+		strings.Contains(bodyText, "invalid parameter")
+}
+
+func isClaudeResponsesPreviousResponseNotFound(status int, body []byte) bool {
+	if status != http.StatusBadRequest && status != http.StatusNotFound {
+		return false
+	}
+	bodyText := strings.ToLower(strings.TrimSpace(string(body)))
+	if bodyText == "" {
+		return false
+	}
+	if strings.Contains(bodyText, "previous_response_not_found") ||
+		(strings.Contains(bodyText, "previous response") && strings.Contains(bodyText, "not found")) {
+		return true
+	}
+	return false
+}
+
+func isClaudeResponsesPreviousResponseUnsupported(status int, body []byte) bool {
+	if status != http.StatusBadRequest && status != http.StatusNotFound {
+		return false
+	}
+	bodyText := strings.ToLower(strings.TrimSpace(string(body)))
+	if bodyText == "" {
+		return false
+	}
+	mentionsPreviousResponseID := strings.Contains(bodyText, "previous_response_id") ||
+		strings.Contains(bodyText, "previous response id") ||
+		strings.Contains(bodyText, "previous response")
+	if mentionsPreviousResponseID &&
+		(strings.Contains(bodyText, "unsupported") ||
+			strings.Contains(bodyText, "not supported") ||
+			strings.Contains(bodyText, "only supported on responses websocket") ||
+			strings.Contains(bodyText, "unsupported parameter") ||
+			strings.Contains(bodyText, "unknown parameter") ||
+			strings.Contains(bodyText, "unrecognized parameter")) {
+		return true
+	}
+	return false
+}
+
+func claudeResponsesInputHasFunctionCallOutput(bodyBytes []byte) bool {
+	return gjson.GetBytes(bodyBytes, `input.#(type=="function_call_output")`).Exists()
+}
+
+func claudeResponsesCanRetryWithoutContinuation(plan providerRequestPlan) bool {
+	if len(plan.ContinuationRetryBodyBytes) == 0 {
+		return false
+	}
+	if !claudeResponsesInputHasFunctionCallOutput(plan.ContinuationRetryBodyBytes) {
+		return true
+	}
+	return claudeResponsesInputHasSafeFunctionCallReplay(plan.ContinuationRetryBodyBytes)
+}
+
+func claudeResponsesInputHasSafeFunctionCallReplay(bodyBytes []byte) bool {
+	input := gjson.GetBytes(bodyBytes, "input")
+	if !input.IsArray() {
+		return false
+	}
+	functionCallIDs := make(map[string]bool)
+	functionCallOutputIDs := make(map[string]bool)
+	for _, item := range input.Array() {
+		itemType := strings.TrimSpace(item.Get("type").String())
+		callID := strings.TrimSpace(item.Get("call_id").String())
+		if callID == "" {
+			callID = strings.TrimSpace(item.Get("id").String())
+		}
+		if callID == "" {
+			continue
+		}
+		switch itemType {
+		case "function_call":
+			functionCallIDs[callID] = true
+		case "function_call_output":
+			functionCallOutputIDs[callID] = true
+		}
+	}
+	if len(functionCallOutputIDs) == 0 {
+		return true
+	}
+	for callID := range functionCallOutputIDs {
+		if !functionCallIDs[callID] {
+			return false
+		}
+	}
+	return true
+}
+
+func trimClaudeResponsesInputToLatestTurn(bodyBytes []byte) []byte {
+	input := gjson.GetBytes(bodyBytes, "input")
+	if !input.IsArray() {
+		return bodyBytes
+	}
+	rawItems := input.Array()
+	if len(rawItems) == 0 {
+		return bodyBytes
+	}
+	start := claudeResponsesLatestTurnStartIndex(rawItems)
+	if start <= 0 {
+		return bodyBytes
+	}
+	trimmed := make([]interface{}, 0, len(rawItems)-start)
+	for _, item := range rawItems[start:] {
+		var decoded interface{}
+		if err := json.Unmarshal([]byte(item.Raw), &decoded); err != nil {
+			return bodyBytes
+		}
+		trimmed = append(trimmed, decoded)
+	}
+	updated, err := sjson.SetBytes(bodyBytes, "input", trimmed)
+	if err != nil {
+		return bodyBytes
+	}
+	return updated
+}
+
+func trimClaudeResponsesInputForTailReplayGuard(bodyBytes []byte, maxItems int) []byte {
+	if maxItems <= 0 {
+		return bodyBytes
+	}
+	input := gjson.GetBytes(bodyBytes, "input")
+	if !input.IsArray() {
+		return bodyBytes
+	}
+	rawItems := input.Array()
+	if len(rawItems) <= maxItems {
+		return bodyBytes
+	}
+
+	leading := 0
+	for leading < len(rawItems) &&
+		strings.TrimSpace(rawItems[leading].Get("type").String()) == "message" &&
+		strings.TrimSpace(rawItems[leading].Get("role").String()) == "developer" {
+		leading++
+	}
+	tailBudget := maxItems - leading
+	if tailBudget <= 0 {
+		return bodyBytes
+	}
+	start := len(rawItems) - tailBudget
+	if start < leading {
+		return bodyBytes
+	}
+	start = claudeResponsesTailReplayStartIndex(rawItems, start, leading)
+	if start <= leading {
+		return bodyBytes
+	}
+
+	trimmed := make([]interface{}, 0, leading+len(rawItems)-start)
+	for _, item := range rawItems[:leading] {
+		var decoded interface{}
+		if err := json.Unmarshal([]byte(item.Raw), &decoded); err != nil {
+			return bodyBytes
+		}
+		trimmed = append(trimmed, decoded)
+	}
+	for _, item := range rawItems[start:] {
+		var decoded interface{}
+		if err := json.Unmarshal([]byte(item.Raw), &decoded); err != nil {
+			return bodyBytes
+		}
+		trimmed = append(trimmed, decoded)
+	}
+	if len(trimmed) >= len(rawItems) {
+		return bodyBytes
+	}
+	updated, err := sjson.SetBytes(bodyBytes, "input", trimmed)
+	if err != nil {
+		return bodyBytes
+	}
+	return updated
+}
+
+func claudeResponsesTailReplayStartIndex(rawItems []gjson.Result, start int, minStart int) int {
+	if start < minStart {
+		start = minStart
+	}
+	for start > minStart &&
+		isClaudeResponsesToolResultImageMessage(rawItems[start]) &&
+		strings.TrimSpace(rawItems[start-1].Get("type").String()) == "function_call_output" {
+		start--
+	}
+
+	requiredCallIDs := make(map[string]bool)
+	for _, item := range rawItems[start:] {
+		if strings.TrimSpace(item.Get("type").String()) != "function_call_output" {
+			continue
+		}
+		if callID := strings.TrimSpace(item.Get("call_id").String()); callID != "" {
+			requiredCallIDs[callID] = true
+		}
+	}
+	if len(requiredCallIDs) == 0 {
+		return start
+	}
+	for i := start - 1; i >= minStart; i-- {
+		if strings.TrimSpace(rawItems[i].Get("type").String()) != "function_call" {
+			continue
+		}
+		callID := strings.TrimSpace(rawItems[i].Get("call_id").String())
+		if callID == "" {
+			callID = strings.TrimSpace(rawItems[i].Get("id").String())
+		}
+		if !requiredCallIDs[callID] {
+			continue
+		}
+		start = i
+		delete(requiredCallIDs, callID)
+		if len(requiredCallIDs) == 0 {
+			break
+		}
+	}
+	return start
+}
+
+func claudeResponsesLatestTurnStartIndex(rawItems []gjson.Result) int {
+	if len(rawItems) == 0 {
+		return 0
+	}
+
+	start := len(rawItems)
+	for i := len(rawItems) - 1; i >= 0; {
+		for i >= 0 && isClaudeResponsesToolResultImageMessage(rawItems[i]) {
+			i--
+		}
+		if i < 0 || strings.TrimSpace(rawItems[i].Get("type").String()) != "function_call_output" {
+			break
+		}
+		for i >= 0 && strings.TrimSpace(rawItems[i].Get("type").String()) == "function_call_output" {
+			i--
+		}
+		start = i + 1
+	}
+	if start < len(rawItems) {
+		return start
+	}
+	return len(rawItems) - 1
+}
+
+func isClaudeResponsesToolResultImageMessage(item gjson.Result) bool {
+	if strings.TrimSpace(item.Get("type").String()) != "message" ||
+		strings.TrimSpace(item.Get("role").String()) != "user" {
+		return false
+	}
+	content := item.Get("content")
+	if !content.IsArray() {
+		return false
+	}
+	parts := content.Array()
+	if len(parts) == 0 {
+		return false
+	}
+	for _, part := range parts {
+		if strings.TrimSpace(part.Get("type").String()) != "input_image" {
+			return false
+		}
+	}
+	return true
+}
+
+func (prs *ProviderRelayService) getProviderRequestPlan(
 	plans map[string]providerRequestPlan,
 	provider Provider,
 	bodyBytes []byte,
@@ -2683,10 +3845,16 @@ func getProviderRequestPlan(
 ) (providerRequestPlan, error) {
 	if plans != nil {
 		if plan, ok := plans[providerRefFromProvider(provider)]; ok {
+			if resolveClaudeAPIFormat(provider) == claudeAPIFormatOpenAIResponse &&
+				strings.TrimSpace(plan.ContinuationSessionKey) != "" &&
+				strings.TrimSpace(plan.PreviousResponseID) != "" &&
+				prs.isClaudeResponsesContinuationDisabled(provider, plan.ContinuationSessionKey) {
+				return prs.buildProviderRequestPlan(provider, bodyBytes, endpoint, requestedModel)
+			}
 			return plan, nil
 		}
 	}
-	return buildProviderRequestPlan(provider, bodyBytes, endpoint, requestedModel)
+	return prs.buildProviderRequestPlan(provider, bodyBytes, endpoint, requestedModel)
 }
 
 func displayModelForLog(model string) string {
@@ -3294,7 +4462,7 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 				continue
 			}
 
-			plan, err := buildProviderRequestPlan(provider, bodyBytes, endpoint, requestedModel)
+			plan, err := prs.buildProviderRequestPlan(provider, bodyBytes, endpoint, requestedModel)
 			if err != nil {
 				fmt.Printf("[CustomCLI][WARN] Provider %s 请求体预处理失败，已自动跳过: %v\n", provider.Name, err)
 				skippedCount++
@@ -3383,7 +4551,7 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 						continue
 					}
 
-					plan, err := getProviderRequestPlan(requestPlans, provider, bodyBytes, endpoint, requestedModel)
+					plan, err := prs.getProviderRequestPlan(requestPlans, provider, bodyBytes, endpoint, requestedModel)
 					if err != nil {
 						fmt.Printf("[CustomCLI][ERROR] Provider %s 请求体预处理失败: %v，跳过此 Provider\n", provider.Name, err)
 						continue
@@ -3403,7 +4571,7 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 							provider.Name, level, retryCount+1, maxRetryPerProvider, plan.EffectiveModel)
 
 						startTime := time.Now()
-						ok, err := prs.forwardRequest(c, kind, provider, plan.EffectiveEndpoint, query, clientHeaders, plan.BodyBytes, isStream, plan.EffectiveModel, requestedModel)
+						ok, err := prs.forwardRequestWithPlan(c, kind, provider, plan.EffectiveEndpoint, query, clientHeaders, plan.BodyBytes, isStream, plan.EffectiveModel, requestedModel, plan)
 						duration := time.Since(startTime)
 
 						if ok {
@@ -3513,7 +4681,7 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 			for i, provider := range providersInLevel {
 				totalAttempts++
 
-				plan, err := getProviderRequestPlan(requestPlans, provider, bodyBytes, endpoint, requestedModel)
+				plan, err := prs.getProviderRequestPlan(requestPlans, provider, bodyBytes, endpoint, requestedModel)
 				if err != nil {
 					fmt.Printf("[CustomCLI][ERROR] Provider %s 请求体预处理失败: %v\n", provider.Name, err)
 					continue
@@ -3523,7 +4691,7 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 				// 获取有效的端点（用户配置优先）
 
 				startTime := time.Now()
-				ok, err := prs.forwardRequest(c, kind, provider, plan.EffectiveEndpoint, query, clientHeaders, plan.BodyBytes, isStream, plan.EffectiveModel, requestedModel)
+				ok, err := prs.forwardRequestWithPlan(c, kind, provider, plan.EffectiveEndpoint, query, clientHeaders, plan.BodyBytes, isStream, plan.EffectiveModel, requestedModel, plan)
 				duration := time.Since(startTime)
 
 				if ok {
