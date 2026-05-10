@@ -10,6 +10,8 @@ import { getDefaultAuthType, getDefaultEndpoint } from '../constants'
 import type { ProviderTab, VendorForm } from '../types'
 
 type NormalizeLevelFn = (level: number | string | undefined) => number
+type ClaudeAPIFormat = 'anthropic' | 'openai_chat' | 'openai_responses'
+type AnthropicCacheTTL = '' | '5m' | '1h'
 
 export type ProviderAuthState = {
   selectedAuthType: string
@@ -20,6 +22,29 @@ export const cloneProviderValue = <T>(value: T): T => {
   if (value == null) return value
   return JSON.parse(JSON.stringify(value))
 }
+
+export const normalizeClaudeAPIFormatValue = (value: unknown): ClaudeAPIFormat => {
+  const normalized = `${value ?? ''}`.trim().toLowerCase()
+  if (normalized === 'openai_chat' || normalized === 'openai_responses') {
+    return normalized
+  }
+  return 'anthropic'
+}
+
+export const normalizeAnthropicCacheTTL = (value: unknown): AnthropicCacheTTL => {
+  const normalized = `${value ?? ''}`.trim().toLowerCase()
+  return normalized === '5m' || normalized === '1h' ? normalized : ''
+}
+
+export const resolvePersistedAnthropicCacheTTL = (
+  tabId: ProviderTab,
+  apiFormat: unknown,
+  ttl: unknown,
+): AnthropicCacheTTL => (
+  tabId === 'claude' && normalizeClaudeAPIFormatValue(apiFormat) === 'anthropic'
+    ? normalizeAnthropicCacheTTL(ttl)
+    : ''
+)
 
 export const getDefaultOpenCodeModels = (npm = '@ai-sdk/openai-compatible') => {
   switch (npm.trim()) {
@@ -71,6 +96,7 @@ export const createDefaultVendorForm = (
   level: 1,
   enabled: true,
   apiFormat: platform === 'claude' ? 'anthropic' : undefined,
+  anthropicCacheTTL: '',
   supportedModels: {},
   modelMapping: {},
   requestBodyOverrides: {},
@@ -114,7 +140,8 @@ export const createVendorFormFromCard = (
   icon: card.icon,
   level: card.level || 1,
   enabled: card.enabled,
-  apiFormat: tabId === 'claude' ? (card.apiFormat || 'anthropic') : undefined,
+  apiFormat: tabId === 'claude' ? normalizeClaudeAPIFormatValue(card.apiFormat) : undefined,
+  anthropicCacheTTL: resolvePersistedAnthropicCacheTTL(tabId, card.apiFormat, card.anthropicCacheTTL),
   supportedModels: cloneProviderValue(card.supportedModels || {}),
   modelMapping: cloneProviderValue(card.modelMapping || {}),
   requestBodyOverrides: cloneProviderValue(card.requestBodyOverrides || {}),
@@ -187,92 +214,100 @@ export const buildNormalizedVendorForm = ({
   tabId: ProviderTab
   defaultIconKey: string
   resolveAuthType: () => string
-}): VendorForm => ({
-  name: form.name.trim(),
-  apiUrl: form.apiUrl.trim(),
-  apiKey: form.apiKey.trim(),
-  officialSite: form.officialSite.trim(),
-  apiKeyUrl: `${form.apiKeyUrl ?? ''}`.trim(),
-  icon: (form.icon || defaultIconKey).toString().trim().toLowerCase() || defaultIconKey,
-  level: form.level || 1,
-  enabled: form.enabled,
-  apiFormat: tabId === 'claude' ? (form.apiFormat || 'anthropic') : undefined,
-  supportedModels: cloneProviderValue(form.supportedModels || {}),
-  modelMapping: cloneProviderValue(form.modelMapping || {}),
-  requestBodyOverrides: cloneProviderValue(form.requestBodyOverrides || {}),
-  cliConfig: cloneProviderValue(form.cliConfig || {}),
-  apiEndpoint: form.apiEndpoint || '',
-  providerRef: form.providerRef || '',
-  opencodeNpm: form.opencodeNpm || '',
-  opencodeSettingsConfig: cloneProviderValue(form.opencodeSettingsConfig || {}),
-  category: form.category || '',
-  partnerPromotionKey: form.partnerPromotionKey || '',
-  liveConfigManaged: tabId === 'opencode' ? form.enabled : form.liveConfigManaged,
-  isInConfig: tabId === 'opencode' ? form.enabled : form.isInConfig,
-  availabilityMonitorEnabled: tabId === 'opencode' ? false : !!form.availabilityMonitorEnabled,
-  connectivityAutoBlacklist: tabId === 'opencode' ? false : !!form.connectivityAutoBlacklist,
-  availabilityConfig: tabId === 'opencode'
-    ? { testModel: '', testEndpoint: '', timeout: 15000 }
-    : {
-      testModel: form.availabilityConfig?.testModel || '',
-      testEndpoint: form.availabilityConfig?.testEndpoint || getDefaultEndpoint(tabId),
-      timeout: form.availabilityConfig?.timeout || 15000,
-    },
-  connectivityCheck: false,
-  connectivityTestModel: '',
-  connectivityTestEndpoint: '',
-  connectivityAuthType: resolveAuthType().trim() || getDefaultAuthType(tabId),
-  budgetQuotaSettings: cloneProviderValue(form.budgetQuotaSettings) || undefined,
-  budgetQuotaUsedAdjustments: cloneBudgetQuotaAdjustments(form.budgetQuotaUsedAdjustments),
-  providerQuotaQueryType: normalizeProviderQuotaQueryType(form.providerQuotaQueryType),
-  providerQuotaQueryConfig: cloneProviderValue(normalizeProviderQuotaQueryConfig(
-    form.providerQuotaQueryConfig,
-    form.providerQuotaQueryType,
-  )),
-})
+}): VendorForm => {
+  const apiFormat = tabId === 'claude' ? normalizeClaudeAPIFormatValue(form.apiFormat) : undefined
+  return {
+    name: form.name.trim(),
+    apiUrl: form.apiUrl.trim(),
+    apiKey: form.apiKey.trim(),
+    officialSite: form.officialSite.trim(),
+    apiKeyUrl: `${form.apiKeyUrl ?? ''}`.trim(),
+    icon: (form.icon || defaultIconKey).toString().trim().toLowerCase() || defaultIconKey,
+    level: form.level || 1,
+    enabled: form.enabled,
+    apiFormat,
+    anthropicCacheTTL: resolvePersistedAnthropicCacheTTL(tabId, apiFormat, form.anthropicCacheTTL),
+    supportedModels: cloneProviderValue(form.supportedModels || {}),
+    modelMapping: cloneProviderValue(form.modelMapping || {}),
+    requestBodyOverrides: cloneProviderValue(form.requestBodyOverrides || {}),
+    cliConfig: cloneProviderValue(form.cliConfig || {}),
+    apiEndpoint: form.apiEndpoint || '',
+    providerRef: form.providerRef || '',
+    opencodeNpm: form.opencodeNpm || '',
+    opencodeSettingsConfig: cloneProviderValue(form.opencodeSettingsConfig || {}),
+    category: form.category || '',
+    partnerPromotionKey: form.partnerPromotionKey || '',
+    liveConfigManaged: tabId === 'opencode' ? form.enabled : form.liveConfigManaged,
+    isInConfig: tabId === 'opencode' ? form.enabled : form.isInConfig,
+    availabilityMonitorEnabled: tabId === 'opencode' ? false : !!form.availabilityMonitorEnabled,
+    connectivityAutoBlacklist: tabId === 'opencode' ? false : !!form.connectivityAutoBlacklist,
+    availabilityConfig: tabId === 'opencode'
+      ? { testModel: '', testEndpoint: '', timeout: 15000 }
+      : {
+        testModel: form.availabilityConfig?.testModel || '',
+        testEndpoint: form.availabilityConfig?.testEndpoint || getDefaultEndpoint(tabId),
+        timeout: form.availabilityConfig?.timeout || 15000,
+      },
+    connectivityCheck: false,
+    connectivityTestModel: '',
+    connectivityTestEndpoint: '',
+    connectivityAuthType: resolveAuthType().trim() || getDefaultAuthType(tabId),
+    budgetQuotaSettings: cloneProviderValue(form.budgetQuotaSettings) || undefined,
+    budgetQuotaUsedAdjustments: cloneBudgetQuotaAdjustments(form.budgetQuotaUsedAdjustments),
+    providerQuotaQueryType: normalizeProviderQuotaQueryType(form.providerQuotaQueryType),
+    providerQuotaQueryConfig: cloneProviderValue(normalizeProviderQuotaQueryConfig(
+      form.providerQuotaQueryConfig,
+      form.providerQuotaQueryType,
+    )),
+  }
+}
 
 export const buildPersistedProviderFieldsFromForm = (
   form: VendorForm,
   tabId: ProviderTab,
   normalizeLevel: NormalizeLevelFn,
-) => ({
-  apiKey: form.apiKey,
-  officialSite: form.officialSite,
-  apiKeyUrl: form.apiKeyUrl || '',
-  icon: form.icon,
-  level: normalizeLevel(form.level),
-  enabled: form.enabled,
-  apiFormat: tabId === 'claude' ? (form.apiFormat || 'anthropic') : undefined,
-  supportedModels: cloneProviderValue(form.supportedModels || {}),
-  modelMapping: cloneProviderValue(form.modelMapping || {}),
-  requestBodyOverrides: cloneProviderValue(form.requestBodyOverrides || {}),
-  cliConfig: cloneProviderValue(form.cliConfig || {}),
-  apiEndpoint: form.apiEndpoint || '',
-  providerRef: form.providerRef || '',
-  opencodeNpm: form.opencodeNpm || '',
-  opencodeSettingsConfig: cloneProviderValue(form.opencodeSettingsConfig || {}),
-  category: form.category || '',
-  partnerPromotionKey: form.partnerPromotionKey || '',
-  liveConfigManaged: tabId === 'opencode' ? form.enabled : form.liveConfigManaged,
-  isInConfig: tabId === 'opencode' ? form.enabled : form.isInConfig,
-  availabilityMonitorEnabled: tabId === 'opencode' ? false : !!form.availabilityMonitorEnabled,
-  connectivityAutoBlacklist: tabId === 'opencode' ? false : !!form.connectivityAutoBlacklist,
-  availabilityConfig: tabId === 'opencode'
-    ? { testModel: '', testEndpoint: '', timeout: 15000 }
-    : {
-      testModel: form.availabilityConfig?.testModel || '',
-      testEndpoint: form.availabilityConfig?.testEndpoint || getDefaultEndpoint(tabId),
-      timeout: form.availabilityConfig?.timeout || 15000,
-    },
-  connectivityCheck: false,
-  connectivityTestModel: '',
-  connectivityTestEndpoint: '',
-  connectivityAuthType: form.connectivityAuthType || '',
-  budgetQuotaSettings: cloneProviderValue(form.budgetQuotaSettings) || undefined,
-  budgetQuotaUsedAdjustments: cloneBudgetQuotaAdjustments(form.budgetQuotaUsedAdjustments),
-  providerQuotaQueryType: serializeProviderQuotaQueryType(form.providerQuotaQueryType),
-  providerQuotaQueryConfig: sanitizeProviderQuotaQueryConfigForSave(
-    cloneProviderValue(form.providerQuotaQueryConfig),
-    form.providerQuotaQueryType,
-  ),
-})
+) => {
+  const apiFormat = tabId === 'claude' ? normalizeClaudeAPIFormatValue(form.apiFormat) : undefined
+  return {
+    apiKey: form.apiKey,
+    officialSite: form.officialSite,
+    apiKeyUrl: form.apiKeyUrl || '',
+    icon: form.icon,
+    level: normalizeLevel(form.level),
+    enabled: form.enabled,
+    apiFormat,
+    anthropicCacheTTL: resolvePersistedAnthropicCacheTTL(tabId, apiFormat, form.anthropicCacheTTL),
+    supportedModels: cloneProviderValue(form.supportedModels || {}),
+    modelMapping: cloneProviderValue(form.modelMapping || {}),
+    requestBodyOverrides: cloneProviderValue(form.requestBodyOverrides || {}),
+    cliConfig: cloneProviderValue(form.cliConfig || {}),
+    apiEndpoint: form.apiEndpoint || '',
+    providerRef: form.providerRef || '',
+    opencodeNpm: form.opencodeNpm || '',
+    opencodeSettingsConfig: cloneProviderValue(form.opencodeSettingsConfig || {}),
+    category: form.category || '',
+    partnerPromotionKey: form.partnerPromotionKey || '',
+    liveConfigManaged: tabId === 'opencode' ? form.enabled : form.liveConfigManaged,
+    isInConfig: tabId === 'opencode' ? form.enabled : form.isInConfig,
+    availabilityMonitorEnabled: tabId === 'opencode' ? false : !!form.availabilityMonitorEnabled,
+    connectivityAutoBlacklist: tabId === 'opencode' ? false : !!form.connectivityAutoBlacklist,
+    availabilityConfig: tabId === 'opencode'
+      ? { testModel: '', testEndpoint: '', timeout: 15000 }
+      : {
+        testModel: form.availabilityConfig?.testModel || '',
+        testEndpoint: form.availabilityConfig?.testEndpoint || getDefaultEndpoint(tabId),
+        timeout: form.availabilityConfig?.timeout || 15000,
+      },
+    connectivityCheck: false,
+    connectivityTestModel: '',
+    connectivityTestEndpoint: '',
+    connectivityAuthType: form.connectivityAuthType || '',
+    budgetQuotaSettings: cloneProviderValue(form.budgetQuotaSettings) || undefined,
+    budgetQuotaUsedAdjustments: cloneBudgetQuotaAdjustments(form.budgetQuotaUsedAdjustments),
+    providerQuotaQueryType: serializeProviderQuotaQueryType(form.providerQuotaQueryType),
+    providerQuotaQueryConfig: sanitizeProviderQuotaQueryConfigForSave(
+      cloneProviderValue(form.providerQuotaQueryConfig),
+      form.providerQuotaQueryType,
+    ),
+  }
+}

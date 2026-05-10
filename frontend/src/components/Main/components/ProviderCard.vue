@@ -103,6 +103,16 @@
             L{{ viewModel.card.level }}
           </span>
           <span
+            v-if="anthropicCacheTTLBadge"
+            class="anthropic-cache-ttl-badge"
+            :class="`anthropic-cache-ttl-badge--${anthropicCacheTTLBadge.ttl}`"
+            :data-tooltip="anthropicCacheTTLBadge.title"
+            :title="anthropicCacheTTLBadge.title"
+            :aria-label="anthropicCacheTTLBadge.title"
+          >
+            {{ anthropicCacheTTLBadge.label }}
+          </span>
+          <span
             v-if="viewModel.blacklistStatus"
             :class="[
               'blacklist-level-badge',
@@ -1036,6 +1046,12 @@ type ApiFormatBadgeMeta = {
   title: string
 }
 
+type AnthropicCacheTTLBadgeMeta = {
+  ttl: '5m' | '1h'
+  label: string
+  title: string
+}
+
 const directApplyTooltip = computed(() => {
   if (props.activeProxyState) {
     return t('components.main.directApply.proxyEnabled')
@@ -1071,6 +1087,19 @@ const apiFormatBadge = computed<ApiFormatBadgeMeta | null>(() => {
       }
     default:
       return null
+  }
+})
+
+const anthropicCacheTTLBadge = computed<AnthropicCacheTTLBadgeMeta | null>(() => {
+  if (props.activeTab !== 'claude') return null
+  if ((props.viewModel.card.apiFormat || 'anthropic') !== 'anthropic') return null
+  const ttl = props.viewModel.card.anthropicCacheTTL
+  if (ttl !== '5m' && ttl !== '1h') return null
+
+  return {
+    ttl,
+    label: `TTL ${ttl}`,
+    title: t('components.main.providers.anthropicCacheTTLHint', { ttl }),
   }
 })
 

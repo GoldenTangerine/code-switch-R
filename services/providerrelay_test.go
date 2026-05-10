@@ -207,6 +207,70 @@ func TestApplyRequestBodyOverrides(t *testing.T) {
 	}
 }
 
+func TestApplyProviderAnthropicCacheTTLOverride_OnlyUpdatesExistingEphemeralCacheControl(t *testing.T) {
+	provider := Provider{
+		APIFormat:         "anthropic",
+		AnthropicCacheTTL: "1h",
+	}
+	body := []byte(`{"alpha":1,"cache_control":{"type":"ephemeral"},"system":[{"type":"text","text":"sys","cache_control":{"type":"ephemeral","ttl":"5m"}},{"type":"text","text":"plain"}],"messages":[{"role":"user","content":[{"type":"text","text":"hi","cache_control":{"type":"ephemeral"}},{"type":"text","text":"non","cache_control":{"type":"persistent","ttl":"5m"}}]}],"tools":[{"name":"a","input_schema":{},"cache_control":{"type":"ephemeral"}}],"omega":2}`)
+
+	result := applyProviderAnthropicCacheTTLOverride(provider, "/v1/messages", body)
+
+	if got := gjson.GetBytes(result, "cache_control.ttl").String(); got != "1h" {
+		t.Fatalf("top-level cache_control.ttl = %q, 期望 1h", got)
+	}
+	if got := gjson.GetBytes(result, "system.0.cache_control.ttl").String(); got != "1h" {
+		t.Fatalf("system cache_control.ttl = %q, 期望 1h", got)
+	}
+	if gjson.GetBytes(result, "system.1.cache_control").Exists() {
+		t.Fatalf("不应给没有 cache_control 的 system block 新增缓存断点: %s", result)
+	}
+	if got := gjson.GetBytes(result, "messages.0.content.0.cache_control.ttl").String(); got != "1h" {
+		t.Fatalf("message cache_control.ttl = %q, 期望 1h", got)
+	}
+	if got := gjson.GetBytes(result, "messages.0.content.1.cache_control.ttl").String(); got != "5m" {
+		t.Fatalf("非 ephemeral cache_control.ttl = %q, 期望保留 5m", got)
+	}
+	if got := gjson.GetBytes(result, "tools.0.cache_control.ttl").String(); got != "1h" {
+		t.Fatalf("tool cache_control.ttl = %q, 期望 1h", got)
+	}
+}
+
+func TestApplyProviderAnthropicCacheTTLOverride_RespectsScopeAndDefault(t *testing.T) {
+	body := []byte(`{"model":"claude-sonnet-4","messages":[{"role":"user","content":[{"type":"text","text":"hi","cache_control":{"type":"ephemeral","ttl":"1h"}}]}]}`)
+
+	emptyResult := applyProviderAnthropicCacheTTLOverride(Provider{
+		APIFormat: "anthropic",
+	}, "/v1/messages", body)
+	if string(emptyResult) != string(body) {
+		t.Fatalf("空 TTL 不应修改请求体，got=%s", emptyResult)
+	}
+
+	openAIResult := applyProviderAnthropicCacheTTLOverride(Provider{
+		APIFormat:         "openai_chat",
+		AnthropicCacheTTL: "5m",
+	}, "/v1/messages", body)
+	if string(openAIResult) != string(body) {
+		t.Fatalf("OpenAI 兼容格式不应修改 Anthropic cache_control，got=%s", openAIResult)
+	}
+
+	otherEndpointResult := applyProviderAnthropicCacheTTLOverride(Provider{
+		APIFormat:         "anthropic",
+		AnthropicCacheTTL: "5m",
+	}, "/responses", body)
+	if string(otherEndpointResult) != string(body) {
+		t.Fatalf("非 /v1/messages 端点不应修改请求体，got=%s", otherEndpointResult)
+	}
+
+	forced5m := applyProviderAnthropicCacheTTLOverride(Provider{
+		APIFormat:         "anthropic",
+		AnthropicCacheTTL: "5m",
+	}, "/v1/messages", body)
+	if got := gjson.GetBytes(forced5m, "messages.0.content.0.cache_control.ttl").String(); got != "5m" {
+		t.Fatalf("cache_control.ttl = %q, 期望 5m", got)
+	}
+}
+
 func TestRequestBodyOverridesOverrideMappedModel(t *testing.T) {
 	provider := Provider{
 		Name: "Override Provider",

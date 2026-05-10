@@ -502,4 +502,44 @@ describe('useProviderForm order preservation', () => {
     expect(showToast).toHaveBeenCalledWith('components.main.directApply.requiresHostedRouting', 'warning')
     expect(cards.claude[0]?.apiFormat).toBe('openai_responses')
   })
+
+  it('persists Anthropic cache TTL only for native Claude providers', async () => {
+    const cards = createCardRecord()
+    const persistProviders = vi.fn().mockResolvedValue(undefined)
+    const providerForm = useProviderForm({
+      initialTab: 'claude',
+      t: (key: string) => key,
+      showToast: vi.fn(),
+      getActiveTab: () => 'claude',
+      cards,
+      normalizeLevel,
+      persistProviders,
+      refreshDirectAppliedStatus: vi.fn().mockResolvedValue(undefined),
+      removeProvider: vi.fn().mockResolvedValue(undefined),
+      duplicateProvider: vi.fn().mockResolvedValue(false),
+      reloadProviders: vi.fn().mockResolvedValue(undefined),
+      moveCardToStatusGroup: (tabId, card, enabled) => moveProviderToStatusGroup(cards[tabId], card, enabled),
+      appendCardToGroup: (tabId, card) => insertProviderToStatusGroup(cards[tabId], card),
+    })
+
+    vi.spyOn(Date, 'now').mockReturnValue(1001)
+    providerForm.openCreateModal()
+    await providerForm.submitProviderModal(createForm({
+      apiFormat: 'anthropic',
+      anthropicCacheTTL: '1h',
+    }))
+
+    expect(cards.claude[0]?.anthropicCacheTTL).toBe('1h')
+
+    vi.spyOn(Date, 'now').mockReturnValue(1002)
+    providerForm.openCreateModal()
+    await providerForm.submitProviderModal(createForm({
+      name: 'OpenAI-style Claude',
+      apiFormat: 'openai_chat',
+      anthropicCacheTTL: '1h',
+    }))
+
+    expect(cards.claude[1]?.apiFormat).toBe('openai_chat')
+    expect(cards.claude[1]?.anthropicCacheTTL).toBe('')
+  })
 })

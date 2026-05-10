@@ -1,3 +1,22 @@
+# Code Switch v2.8.56
+
+## 新增
+- **Claude 原生供应商支持缓存 TTL 配置**：首页编辑 Claude 供应商时，Anthropic Messages 原生格式现在可以选择缓存 TTL：默认、5 分钟或 1 小时；不选择时保持原有默认行为。
+- **供应商卡片显示 TTL 标签**：选择 5m 或 1h 后，首页供应商卡片会在优先级标签后显示对应 TTL 标记，并用不同颜色区分，鼠标悬停可查看说明。
+
+## 优化
+- **包含 `c16be83c8d09dfd647fec7ec89358ef90b83ae44` 的 Claude Responses 兼容增强**：完善 Claude 与 OpenAI Responses 的请求 / 响应转换、流式事件转换、工具调用收尾、prompt_cache_key 不兼容回退和 previous_response_id 续链绑定。
+- **TTL 注入范围更克制**：供应商级 TTL 只会覆盖请求中已经存在的 Anthropic `ephemeral cache_control`，不会新增缓存断点，也不会影响 OpenAI Chat / Responses 兼容格式供应商。
+
+## 技术改进
+- **补齐 TTL 全链路测试**：覆盖后端 TTL 覆盖规则、前端表单归一化、供应商卡片展示和中英文文案。
+- **锁定 prompt_cache_key 共享禁用契约**：新增 runtime 与 availability probe 的交叉测试，确保任一链路发现上游不支持 `prompt_cache_key` 后，另一链路会共享禁用状态并跳过自动注入。
+
+## 发布
+- **本次发版版本号统一推进到 `v2.8.56`**：同步更新应用常量、构建配置、Darwin `Info.plist` / `Info.dev.plist`、Windows 版本信息与 Linux `nfpm` 版本，并准备推送 `v2.8.56` tag 触发 GitHub 自动打包。
+
+---
+
 # Code Switch v2.8.55
 
 ## 修复

@@ -400,6 +400,21 @@
               </select>
               <span class="field-hint">{{ t('components.main.form.hints.apiFormat') }}</span>
             </label>
+            <label v-if="showAnthropicCacheTTLField" class="form-field">
+              <span>{{ t('components.main.form.labels.anthropicCacheTTL') }}</span>
+              <select v-model="form.anthropicCacheTTL" class="mac-select">
+                <option value="">
+                  {{ t('components.main.form.options.anthropicCacheTTLDefault') }}
+                </option>
+                <option value="5m">
+                  {{ t('components.main.form.options.anthropicCacheTTL5m') }}
+                </option>
+                <option value="1h">
+                  {{ t('components.main.form.options.anthropicCacheTTL1h') }}
+                </option>
+              </select>
+              <span class="field-hint">{{ t('components.main.form.hints.anthropicCacheTTL') }}</span>
+            </label>
           </div>
         </div>
 
@@ -1184,8 +1199,14 @@ const filteredIconOptions = computed(() => {
   if (!query) return iconOptions
   return iconOptions.filter((name) => name.toLowerCase().includes(query))
 })
+const showAnthropicCacheTTLField = computed(() => (
+  props.tabId === 'claude' && (form.apiFormat || 'anthropic') === 'anthropic'
+))
 const hasClaudeAdvancedValue = computed(() => (
-  props.tabId === 'claude' && (form.apiFormat || 'anthropic') !== 'anthropic'
+  props.tabId === 'claude' && (
+    (form.apiFormat || 'anthropic') !== 'anthropic' ||
+    !!form.anthropicCacheTTL
+  )
 ))
 const iconPreviewOptions = computed(() => {
   const preferred = iconSearchQuery.value.trim() ? 120 : ICON_PRELOAD_BATCH_SIZE
@@ -1785,6 +1806,12 @@ watch(opencodeSettingsConfigText, () => {
 watch(hasClaudeAdvancedValue, (value) => {
   if (value) {
     claudeAdvancedExpanded.value = true
+  }
+})
+
+watch(() => form.apiFormat, (value) => {
+  if (props.tabId === 'claude' && (value || 'anthropic') !== 'anthropic') {
+    form.anthropicCacheTTL = ''
   }
 })
 

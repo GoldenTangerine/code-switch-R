@@ -617,6 +617,7 @@
         "apiFormatOpenAIChatHint": "接口转换说明：当前供应商采用 OpenAI Chat Completions 接口，系统将在请求转发前自动完成 Claude 请求格式转换。",
         "apiFormatOpenAIResponsesBadge": "Resp",
         "apiFormatOpenAIResponsesHint": "接口转换说明：当前供应商采用 OpenAI Responses API，系统将在请求转发前自动完成 Claude 请求格式转换。",
+        "anthropicCacheTTLHint": "当前供应商会把已有 Anthropic ephemeral cache_control 的 TTL 覆盖为 {ttl}。",
         "quotaFiveHour": "5h",
         "quotaDaily": "日",
         "quotaWeekly": "周",
@@ -729,6 +730,7 @@
           "apiFormatAnthropic": "Anthropic Messages (原生)",
           "apiFormatOpenAIChat": "OpenAI Chat Completions (需开启路由)",
           "apiFormatOpenAIResponses": "OpenAI Responses API (需开启路由)",
+          "anthropicCacheTTL": "缓存 TTL",
           "officialSite": "官网地址",
           "icon": "图标",
           "enabled": "启用状态",
@@ -819,6 +821,7 @@
           "apiEndpoint": "覆盖平台默认端点。留空使用默认（claude: /v1/messages, codex: /responses）。GLM 模型请使用 /v1/chat/completions",
           "advancedOptions": "默认使用 Anthropic Messages。只有 Claude 供应商要接 OpenAI 兼容端点时，才需要展开这里改协议。",
           "apiFormat": "选择供应商 API 的输入格式",
+          "anthropicCacheTTL": "仅覆盖请求中已存在的 ephemeral cache_control，不会新增缓存断点。默认表示不覆盖，由请求或系统默认决定。",
           "availabilityMonitor": "启用后会定期进行健康检查，监控此供应商的可用性状态",
           "connectivityAutoBlacklist": "健康检查失败时自动拉黑该供应商",
           "availabilityAdvancedConfig": "高级配置（测试模型、端点、超时）可在可用性页面中编辑",
@@ -885,6 +888,9 @@
           "opencodeCategoryOmoSlim": "OMO Slim 是精简版 Agent 模型分配配置，适合轻量场景。"
         },
         "options": {
+          "anthropicCacheTTLDefault": "默认",
+          "anthropicCacheTTL5m": "5 分钟",
+          "anthropicCacheTTL1h": "1 小时",
           "providerQuotaQueryNone": "不启用",
           "providerQuotaQueryTokenPlanGLM": "GLM Token Plan",
           "providerQuotaQueryTokenPlanKimi": "Kimi Token Plan",

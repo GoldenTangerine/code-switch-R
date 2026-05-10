@@ -36,6 +36,9 @@ type Provider struct {
 	// - openai_chat: OpenAI Chat Completions，需要格式转换
 	// - openai_responses: OpenAI Responses API，需要格式转换
 	APIFormat string `json:"apiFormat,omitempty"`
+	// Anthropic Cache TTL 覆盖（仅 Claude 原生 Anthropic Messages 供应商使用）
+	// 空值表示不覆盖；支持 5m / 1h。
+	AnthropicCacheTTL string `json:"anthropicCacheTTL,omitempty"`
 	// 隐藏排序字段：仅控制启用 / 未启用组内顺序
 	SortOrder int `json:"sortOrder,omitempty"`
 	// 记忆启用组内顺序，切回启用时优先恢复

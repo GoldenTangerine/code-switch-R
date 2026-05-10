@@ -1831,6 +1831,77 @@
   z-index: 2;
 }
 
+.anthropic-cache-ttl-badge {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 20px;
+  padding: 0 8px;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  cursor: help;
+  z-index: 2;
+}
+
+.anthropic-cache-ttl-badge[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 10px);
+  transform: translateX(-50%) translateY(4px);
+  padding: 7px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--provider-tooltip-border);
+  background: var(--provider-tooltip-bg);
+  color: var(--provider-title-color);
+  box-shadow: var(--provider-tooltip-shadow);
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 30;
+  transition:
+    opacity 160ms ease,
+    transform 160ms ease;
+}
+
+.anthropic-cache-ttl-badge[data-tooltip]:hover::after {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.anthropic-cache-ttl-badge--5m {
+  color: #b45309;
+  background: rgba(245, 158, 11, 0.13);
+  border-color: rgba(245, 158, 11, 0.18);
+}
+
+.anthropic-cache-ttl-badge--1h {
+  color: #be123c;
+  background: rgba(244, 63, 94, 0.12);
+  border-color: rgba(244, 63, 94, 0.18);
+}
+
+.automation-card.theme-dark .anthropic-cache-ttl-badge--5m {
+  color: #fbbf24;
+  background: rgba(180, 83, 9, 0.28);
+  border-color: rgba(251, 191, 36, 0.24);
+}
+
+.automation-card.theme-dark .anthropic-cache-ttl-badge--1h {
+  color: #fb7185;
+  background: rgba(159, 18, 57, 0.28);
+  border-color: rgba(251, 113, 133, 0.24);
+}
+
 .api-format-badge__icon {
   width: 12px;
   height: 12px;

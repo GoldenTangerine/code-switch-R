@@ -361,6 +361,86 @@ func TestExecuteAvailabilityProbeRetriesWithoutPromptCacheKeyWhenUnsupported(t *
 	}
 }
 
+func TestRuntimePromptCacheDisableSharedWithAvailabilityProbe(t *testing.T) {
+	resetOpenAICompatPromptCacheDisabledForTest(t)
+
+	provider := &Provider{
+		ID:        1701,
+		Name:      "Runtime Disable Shared Probe",
+		APIURL:    "https://example.com",
+		APIKey:    "sk-runtime-disable",
+		APIFormat: claudeAPIFormatOpenAIResponse,
+		RequestBodyOverrides: map[string]interface{}{
+			"prompt_cache_key": "probe-cache",
+		},
+	}
+
+	baselinePlan, err := buildAvailabilityProbePlan("claude", provider, "gpt-5.4", "/responses")
+	if err != nil {
+		t.Fatalf("baseline buildAvailabilityProbePlan 失败: %v", err)
+	}
+	if !gjson.GetBytes(baselinePlan.BodyBytes, "prompt_cache_key").Exists() {
+		t.Fatalf("baseline 探测请求应包含 prompt_cache_key: %s", string(baselinePlan.BodyBytes))
+	}
+
+	(&ProviderRelayService{}).disableOpenAICompatPromptCache(*provider, "runtime-session")
+
+	plan, err := buildAvailabilityProbePlan("claude", provider, "gpt-5.4", "/responses")
+	if err != nil {
+		t.Fatalf("buildAvailabilityProbePlan 失败: %v", err)
+	}
+	if gjson.GetBytes(plan.BodyBytes, "prompt_cache_key").Exists() {
+		t.Fatalf("runtime 禁用状态应让 availability probe 首包移除 prompt_cache_key: %s", string(plan.BodyBytes))
+	}
+}
+
+func TestAvailabilityProbePromptCacheDisableSharedWithRuntime(t *testing.T) {
+	resetOpenAICompatPromptCacheDisabledForTest(t)
+
+	provider := Provider{
+		ID:        1702,
+		Name:      "Probe Disable Shared Runtime",
+		APIURL:    "https://example.com",
+		APIKey:    "sk-probe-disable",
+		APIFormat: claudeAPIFormatOpenAIResponse,
+	}
+	bodyBytes := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`)
+	relay := &ProviderRelayService{}
+
+	baselinePlan, err := relay.buildProviderRequestPlan(provider, bodyBytes, "/v1/messages", "gpt-5.4")
+	if err != nil {
+		t.Fatalf("baseline buildProviderRequestPlan 失败: %v", err)
+	}
+	if !gjson.GetBytes(baselinePlan.BodyBytes, "prompt_cache_key").Exists() {
+		t.Fatalf("baseline runtime 自动注入应包含 prompt_cache_key: %s", string(baselinePlan.BodyBytes))
+	}
+
+	disableOpenAICompatPromptCache(provider, "")
+
+	plan, err := relay.buildProviderRequestPlan(provider, bodyBytes, "/v1/messages", "gpt-5.4")
+	if err != nil {
+		t.Fatalf("buildProviderRequestPlan 失败: %v", err)
+	}
+	if gjson.GetBytes(plan.BodyBytes, "prompt_cache_key").Exists() {
+		t.Fatalf("probe 禁用状态应让 runtime 自动注入跳过 prompt_cache_key: %s", string(plan.BodyBytes))
+	}
+	if plan.PromptCacheKey != "" {
+		t.Fatalf("probe 禁用状态下 plan.PromptCacheKey = %q，期望为空", plan.PromptCacheKey)
+	}
+}
+
+func resetOpenAICompatPromptCacheDisabledForTest(t *testing.T) {
+	t.Helper()
+	clearOpenAICompatPromptCacheDisabledForTest()
+	t.Cleanup(clearOpenAICompatPromptCacheDisabledForTest)
+}
+
+func clearOpenAICompatPromptCacheDisabledForTest() {
+	openAICompatPromptCacheDisabledMu.Lock()
+	defer openAICompatPromptCacheDisabledMu.Unlock()
+	openAICompatPromptCacheDisabled = nil
+}
+
 func TestExecuteAvailabilityProbeFallsBackOnContentMismatch(t *testing.T) {
 	requestBodies := make([]string, 0, 2)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -3011,6 +3011,8 @@ func (prs *ProviderRelayService) buildProviderRequestPlan(provider Provider, bod
 		currentBodyBytes = modifiedBody
 	}
 
+	currentBodyBytes = applyProviderAnthropicCacheTTLOverride(provider, endpoint, currentBodyBytes)
+
 	effectiveEndpoint := provider.GetEffectiveEndpoint(endpoint)
 	promptCacheKey := ""
 	continuationSessionKey := ""

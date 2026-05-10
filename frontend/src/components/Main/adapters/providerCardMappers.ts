@@ -2,7 +2,12 @@ import type { ProviderDailyStat } from '../../../services/logs'
 import type { BlacklistStatus } from '../../../services/blacklist'
 import type { AutomationCard } from '../../../data/cards'
 import type { ProviderTab } from '../types'
-import { createDefaultOpenCodeSettingsConfig, isDefaultOpenCodeModels } from './providerFormMappers'
+import {
+  createDefaultOpenCodeSettingsConfig,
+  isDefaultOpenCodeModels,
+  normalizeClaudeAPIFormatValue,
+  resolvePersistedAnthropicCacheTTL,
+} from './providerFormMappers'
 import {
   cloneBudgetQuotaAdjustments,
   cloneBudgetQuotaSettings,
@@ -48,6 +53,7 @@ export type PersistedProvider = PersistedProviderModel & {
   budgetQuotaUsedAdjustments?: unknown | null
   providerQuotaQueryType?: unknown | null
   providerQuotaQueryConfig?: unknown | null
+  anthropicCacheTTL?: unknown | null
   opencodeNpm?: string
   opencodeSettingsConfig?: Record<string, any>
   apiKeyUrl?: string
@@ -225,8 +231,11 @@ export const providerToCard = (
   accent: provider.accent || '',
   enabled: provider.enabled,
   apiFormat: platform === 'claude'
-    ? ((provider.apiFormat as AutomationCard['apiFormat']) || 'anthropic')
+    ? normalizeClaudeAPIFormatValue(provider.apiFormat)
     : undefined,
+  anthropicCacheTTL: platform === 'claude'
+    ? resolvePersistedAnthropicCacheTTL('claude', provider.apiFormat, provider.anthropicCacheTTL)
+    : '',
   sortOrder: provider.sortOrder || 0,
   enabledSortOrder: provider.enabledSortOrder || (provider.enabled ? (provider.sortOrder || 0) : undefined),
   disabledSortOrder: provider.disabledSortOrder || (!provider.enabled ? (provider.sortOrder || 0) : undefined),
@@ -470,6 +479,9 @@ export const serializeProviders = (
       ...(platform === 'claude'
         ? { apiFormat: provider.apiFormat || 'anthropic' }
         : {}),
+      anthropicCacheTTL: platform === 'claude'
+        ? resolvePersistedAnthropicCacheTTL('claude', provider.apiFormat, provider.anthropicCacheTTL)
+        : '',
       sortOrder: provider.sortOrder || 0,
       enabledSortOrder: provider.enabledSortOrder || 0,
       disabledSortOrder: provider.disabledSortOrder || 0,

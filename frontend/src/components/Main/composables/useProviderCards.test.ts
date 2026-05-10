@@ -113,6 +113,28 @@ describe('useProviderCards drag sort', () => {
     expect(vi.mocked(SaveProviders).mock.calls[0]?.[0]).toBe(activeTab)
   })
 
+  it('serializes Anthropic cache TTL for native Claude providers only', async () => {
+    const providerCards = useProviderCards({
+      t: (key: string) => key,
+      getActiveTab: () => 'claude',
+      isActiveProxyEnabled: () => false,
+      getSelectedToolId: () => null,
+    })
+
+    providerCards.cards.claude.splice(
+      0,
+      providerCards.cards.claude.length,
+      createCard(1, { apiFormat: 'anthropic', anthropicCacheTTL: '1h' }),
+      createCard(2, { apiFormat: 'openai_chat', anthropicCacheTTL: '1h' }),
+    )
+
+    await providerCards.persistProviders('claude')
+
+    const saved = vi.mocked(SaveProviders).mock.calls[0]?.[1] as AutomationCard[]
+    expect(saved[0]?.anthropicCacheTTL).toBe('1h')
+    expect(saved[1]?.anthropicCacheTTL).toBe('')
+  })
+
   it('persists dragged order when existing cards already have distinct sortOrder values', async () => {
     const dragTarget: ProviderDragTarget = { id: 3, position: 'after' }
     const providerCards = useProviderCards({
