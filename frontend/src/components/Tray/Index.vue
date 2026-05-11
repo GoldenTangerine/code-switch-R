@@ -1157,7 +1157,7 @@ onUnmounted(() => {
 }
 
 .tray-remaining__part--amount {
-  color: #c2410c;
+  color: #fbbf24;
   font-weight: 700;
 }
 
@@ -1173,6 +1173,10 @@ onUnmounted(() => {
 .tray-item--error .tray-item__value,
 .tray-item--error .tray-meta {
   color: #bf2b24;
+}
+
+:global(html.light) .tray-remaining__part--amount {
+  color: #c2410c;
 }
 
 :global(.dark) .tray-panel {
