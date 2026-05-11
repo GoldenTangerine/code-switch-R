@@ -62,6 +62,11 @@ type Provider struct {
 	// 支持精确匹配和通配符（如 "claude-*" -> "anthropic/claude-*"）
 	ModelMapping map[string]string `json:"modelMapping,omitempty"`
 
+	// 模型映射未命中策略：
+	// - block: 未命中映射时跳过该 Provider（默认）
+	// - passthrough: 未命中映射时按原模型名转发给该 Provider
+	ModelMappingMissPolicy string `json:"modelMappingMissPolicy,omitempty"`
+
 	// 请求体强制覆盖字段 - 仅在命中当前 Provider 转发时生效
 	// 同名字段会覆盖，不存在的字段会新增；嵌套对象按层级递归写入
 	RequestBodyOverrides map[string]interface{} `json:"requestBodyOverrides,omitempty"`
@@ -120,6 +125,11 @@ type Provider struct {
 type providerEnvelope struct {
 	Providers []Provider `json:"providers"`
 }
+
+const (
+	ModelMappingMissPolicyBlock       = "block"
+	ModelMappingMissPolicyPassthrough = "passthrough"
+)
 
 func cloneJSONLikeMap(value map[string]interface{}) map[string]interface{} {
 	if value == nil {
@@ -613,18 +623,19 @@ func (ps *ProviderService) DuplicateProvider(kind string, sourceID int64) (*Prov
 
 	// 5. 克隆配置（深拷贝）
 	cloned := &Provider{
-		ID:          newID,
-		Name:        source.Name + " (副本)",
-		APIURL:      source.APIURL,
-		APIKey:      source.APIKey,
-		Site:        source.Site,
-		Icon:        source.Icon,
-		Tint:        source.Tint,
-		Accent:      source.Accent,
-		Enabled:     false, // 默认禁用，避免与源供应商冲突
-		APIFormat:   source.APIFormat,
-		Level:       source.Level,
-		APIEndpoint: source.APIEndpoint, // 复制端点配置
+		ID:                     newID,
+		Name:                   source.Name + " (副本)",
+		APIURL:                 source.APIURL,
+		APIKey:                 source.APIKey,
+		Site:                   source.Site,
+		Icon:                   source.Icon,
+		Tint:                   source.Tint,
+		Accent:                 source.Accent,
+		Enabled:                false, // 默认禁用，避免与源供应商冲突
+		APIFormat:              source.APIFormat,
+		Level:                  source.Level,
+		APIEndpoint:            source.APIEndpoint, // 复制端点配置
+		ModelMappingMissPolicy: normalizeModelMappingMissPolicy(source.ModelMappingMissPolicy),
 		// 可用性监控配置
 		AvailabilityMonitorEnabled: source.AvailabilityMonitorEnabled,
 		ConnectivityAutoBlacklist:  false, // 副本默认关闭自动拉黑
@@ -674,6 +685,7 @@ func (ps *ProviderService) DuplicateProvider(kind string, sourceID int64) (*Prov
 // IsModelSupported 检查 provider 是否支持指定的模型
 // 支持条件：1) 模型在 SupportedModels 中（精确或通配符匹配）
 //  2. 模型在 ModelMapping 的 key 中（精确或通配符匹配）
+//  3. ModelMapping 未命中，但 modelMappingMissPolicy=passthrough
 func (p *Provider) IsModelSupported(modelName string) bool {
 	// 向后兼容：如果未配置白名单和映射，假设支持所有模型
 	if (p.SupportedModels == nil || len(p.SupportedModels) == 0) &&
@@ -696,17 +708,13 @@ func (p *Provider) IsModelSupported(modelName string) bool {
 	}
 
 	// 场景 B：Provider 通过映射支持该模型（精确匹配）
-	if p.ModelMapping != nil {
-		if _, exists := p.ModelMapping[modelName]; exists {
-			return true
-		}
+	if p.hasModelMappingForModel(modelName) {
+		return true
+	}
 
-		// 场景 B+：通过通配符映射支持
-		for pattern := range p.ModelMapping {
-			if matchWildcard(pattern, modelName) {
-				return true
-			}
-		}
+	// 场景 B-：映射未命中，但允许按原模型名透传
+	if p.shouldPassthroughModelMappingMiss() {
+		return true
 	}
 
 	// 场景 C：不支持
@@ -782,6 +790,38 @@ func (p *Provider) GetEffectiveModel(requestedModel string) string {
 
 	// 无映射，返回原模型名
 	return requestedModel
+}
+
+func normalizeModelMappingMissPolicy(policy string) string {
+	switch strings.TrimSpace(strings.ToLower(policy)) {
+	case ModelMappingMissPolicyPassthrough:
+		return ModelMappingMissPolicyPassthrough
+	default:
+		return ModelMappingMissPolicyBlock
+	}
+}
+
+func (p *Provider) shouldPassthroughModelMappingMiss() bool {
+	return len(p.ModelMapping) > 0 &&
+		normalizeModelMappingMissPolicy(p.ModelMappingMissPolicy) == ModelMappingMissPolicyPassthrough
+}
+
+func (p *Provider) hasModelMappingForModel(modelName string) bool {
+	if p.ModelMapping == nil || len(p.ModelMapping) == 0 {
+		return false
+	}
+
+	if _, exists := p.ModelMapping[modelName]; exists {
+		return true
+	}
+
+	for pattern := range p.ModelMapping {
+		if matchWildcard(pattern, modelName) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // GetEffectiveEndpoint 获取有效的 API 端点

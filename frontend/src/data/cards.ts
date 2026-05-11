@@ -1,6 +1,8 @@
 import type { BudgetQuotaAdjustments, BudgetQuotaSettings } from '../utils/budgetUsage'
 import type { ProviderQuotaQueryConfig, ProviderQuotaQueryType } from '../utils/providerQuotaQuery'
 
+export type ModelMappingMissPolicy = 'block' | 'passthrough'
+
 export type AutomationCard = {
   id: number
   providerRef?: string
@@ -27,6 +29,8 @@ export type AutomationCard = {
   supportedModels?: Record<string, boolean>
   // 模型映射：external model -> internal model
   modelMapping?: Record<string, string>
+  // 模型映射未命中策略：默认拦截；也可按原模型名透传
+  modelMappingMissPolicy?: ModelMappingMissPolicy
   // 请求体强制字段：仅在命中当前供应商转发时应用
   requestBodyOverrides?: Record<string, any>
   // 优先级分组：数字越小优先级越高（1-10，默认 1）

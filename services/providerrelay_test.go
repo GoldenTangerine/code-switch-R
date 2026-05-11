@@ -367,6 +367,29 @@ func TestProviderResolvedModelSupport(t *testing.T) {
 			effectiveModel: "claude-sonnet-4",
 			expectAllowed:  true,
 		},
+		{
+			name: "未改模型且映射未命中时默认拦截",
+			provider: Provider{
+				ModelMapping: map[string]string{
+					"claude-*": "anthropic/claude-*",
+				},
+			},
+			requestedModel: "gpt-4",
+			effectiveModel: "gpt-4",
+			expectAllowed:  false,
+		},
+		{
+			name: "未改模型且映射未命中时允许原样转发",
+			provider: Provider{
+				ModelMapping: map[string]string{
+					"claude-*": "anthropic/claude-*",
+				},
+				ModelMappingMissPolicy: ModelMappingMissPolicyPassthrough,
+			},
+			requestedModel: "gpt-4",
+			effectiveModel: "gpt-4",
+			expectAllowed:  true,
+		},
 	}
 
 	for _, tt := range tests {

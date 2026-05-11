@@ -1,4 +1,4 @@
-import type { AutomationCard } from '../../data/cards'
+import type { AutomationCard, ModelMappingMissPolicy } from '../../data/cards'
 import type { BlacklistStatus } from '../../services/blacklist'
 import type { ConfigFile, ProxyInjection } from '../../services/customCliService'
 import type { BudgetQuotaAdjustments, BudgetQuotaKey, BudgetQuotaSettings } from '../../utils/budgetUsage'
@@ -52,6 +52,7 @@ export type VendorForm = {
   anthropicCacheTTL?: '' | '5m' | '1h'
   supportedModels?: Record<string, boolean>
   modelMapping?: Record<string, string>
+  modelMappingMissPolicy?: ModelMappingMissPolicy
   requestBodyOverrides?: Record<string, any>
   level?: number
   apiEndpoint?: string

@@ -1,11 +1,12 @@
 import type { ProviderDailyStat } from '../../../services/logs'
 import type { BlacklistStatus } from '../../../services/blacklist'
-import type { AutomationCard } from '../../../data/cards'
+import type { AutomationCard, ModelMappingMissPolicy } from '../../../data/cards'
 import type { ProviderTab } from '../types'
 import {
   createDefaultOpenCodeSettingsConfig,
   isDefaultOpenCodeModels,
   normalizeClaudeAPIFormatValue,
+  normalizeModelMappingMissPolicy,
   resolvePersistedAnthropicCacheTTL,
 } from './providerFormMappers'
 import {
@@ -54,6 +55,7 @@ export type PersistedProvider = PersistedProviderModel & {
   providerQuotaQueryType?: unknown | null
   providerQuotaQueryConfig?: unknown | null
   anthropicCacheTTL?: unknown | null
+  modelMappingMissPolicy?: ModelMappingMissPolicy
   opencodeNpm?: string
   opencodeSettingsConfig?: Record<string, any>
   apiKeyUrl?: string
@@ -241,6 +243,7 @@ export const providerToCard = (
   disabledSortOrder: provider.disabledSortOrder || (!provider.enabled ? (provider.sortOrder || 0) : undefined),
   supportedModels: cloneCardValue(provider.supportedModels || {}),
   modelMapping: cloneCardValue(provider.modelMapping || {}),
+  modelMappingMissPolicy: normalizeModelMappingMissPolicy(provider.modelMappingMissPolicy),
   requestBodyOverrides: cloneCardValue(provider.requestBodyOverrides || {}),
   level: provider.level || 1,
   apiEndpoint: provider.apiEndpoint || '',

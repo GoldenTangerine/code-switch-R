@@ -307,6 +307,41 @@ func TestProvider_IsModelSupported(t *testing.T) {
 			modelName: "native-model",
 			expected:  true,
 		},
+		{
+			name: "映射未命中-默认拦截",
+			provider: Provider{
+				ModelMapping: map[string]string{
+					"claude-*": "anthropic/claude-*",
+				},
+			},
+			modelName: "gpt-4",
+			expected:  false,
+		},
+		{
+			name: "映射未命中-原样透传",
+			provider: Provider{
+				ModelMapping: map[string]string{
+					"claude-*": "anthropic/claude-*",
+				},
+				ModelMappingMissPolicy: ModelMappingMissPolicyPassthrough,
+			},
+			modelName: "gpt-4",
+			expected:  true,
+		},
+		{
+			name: "映射未命中-原样透传覆盖白名单",
+			provider: Provider{
+				SupportedModels: map[string]bool{
+					"anthropic/claude-*": true,
+				},
+				ModelMapping: map[string]string{
+					"claude-*": "anthropic/claude-*",
+				},
+				ModelMappingMissPolicy: ModelMappingMissPolicyPassthrough,
+			},
+			modelName: "gpt-4",
+			expected:  true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -447,22 +482,19 @@ func TestProvider_ValidateConfiguration(t *testing.T) {
 			errorContains: "不在 supportedModels 中",
 		},
 
-		// 警告：只配置映射未配置白名单
 		{
-			name: "警告-无白名单",
+			name: "允许-无白名单",
 			provider: Provider{
 				Name: "test-provider",
 				ModelMapping: map[string]string{
 					"external": "internal",
 				},
 			},
-			expectErrors:  true,
-			errorContains: "未配置 supportedModels",
+			expectErrors: false,
 		},
 
-		// 警告：自映射
 		{
-			name: "警告-自映射",
+			name: "允许-自映射",
 			provider: Provider{
 				Name: "test-provider",
 				SupportedModels: map[string]bool{
@@ -472,8 +504,7 @@ func TestProvider_ValidateConfiguration(t *testing.T) {
 					"model-a": "model-a",
 				},
 			},
-			expectErrors:  true,
-			errorContains: "映射到自身",
+			expectErrors: false,
 		},
 
 		// 通配符映射（不验证）
@@ -532,7 +563,7 @@ func TestProviderLevelGrouping(t *testing.T) {
 			name: "默认 Level（未设置）",
 			providers: []Provider{
 				{ID: 1, Name: "Provider-A", Level: 0}, // 0 应默认为 1
-				{ID: 2, Name: "Provider-B"},            // 未设置应默认为 1
+				{ID: 2, Name: "Provider-B"},           // 未设置应默认为 1
 			},
 			expected: map[int][]string{
 				1: {"Provider-A", "Provider-B"},

@@ -1,4 +1,4 @@
-import type { AutomationCard } from '../../../data/cards'
+import type { AutomationCard, ModelMappingMissPolicy } from '../../../data/cards'
 import { cloneBudgetQuotaAdjustments } from '../../../utils/budgetUsage'
 import {
   normalizeProviderQuotaQueryConfig,
@@ -34,6 +34,11 @@ export const normalizeClaudeAPIFormatValue = (value: unknown): ClaudeAPIFormat =
 export const normalizeAnthropicCacheTTL = (value: unknown): AnthropicCacheTTL => {
   const normalized = `${value ?? ''}`.trim().toLowerCase()
   return normalized === '5m' || normalized === '1h' ? normalized : ''
+}
+
+export const normalizeModelMappingMissPolicy = (value: unknown): ModelMappingMissPolicy => {
+  const normalized = `${value ?? ''}`.trim().toLowerCase()
+  return normalized === 'passthrough' ? 'passthrough' : 'block'
 }
 
 export const resolvePersistedAnthropicCacheTTL = (
@@ -99,6 +104,7 @@ export const createDefaultVendorForm = (
   anthropicCacheTTL: '',
   supportedModels: {},
   modelMapping: {},
+  modelMappingMissPolicy: 'block',
   requestBodyOverrides: {},
   cliConfig: {},
   apiEndpoint: '',
@@ -144,6 +150,7 @@ export const createVendorFormFromCard = (
   anthropicCacheTTL: resolvePersistedAnthropicCacheTTL(tabId, card.apiFormat, card.anthropicCacheTTL),
   supportedModels: cloneProviderValue(card.supportedModels || {}),
   modelMapping: cloneProviderValue(card.modelMapping || {}),
+  modelMappingMissPolicy: normalizeModelMappingMissPolicy(card.modelMappingMissPolicy),
   requestBodyOverrides: cloneProviderValue(card.requestBodyOverrides || {}),
   cliConfig: cloneProviderValue(card.cliConfig || {}),
   apiEndpoint: card.apiEndpoint || '',
@@ -229,6 +236,7 @@ export const buildNormalizedVendorForm = ({
     anthropicCacheTTL: resolvePersistedAnthropicCacheTTL(tabId, apiFormat, form.anthropicCacheTTL),
     supportedModels: cloneProviderValue(form.supportedModels || {}),
     modelMapping: cloneProviderValue(form.modelMapping || {}),
+    modelMappingMissPolicy: normalizeModelMappingMissPolicy(form.modelMappingMissPolicy),
     requestBodyOverrides: cloneProviderValue(form.requestBodyOverrides || {}),
     cliConfig: cloneProviderValue(form.cliConfig || {}),
     apiEndpoint: form.apiEndpoint || '',
@@ -279,6 +287,7 @@ export const buildPersistedProviderFieldsFromForm = (
     anthropicCacheTTL: resolvePersistedAnthropicCacheTTL(tabId, apiFormat, form.anthropicCacheTTL),
     supportedModels: cloneProviderValue(form.supportedModels || {}),
     modelMapping: cloneProviderValue(form.modelMapping || {}),
+    modelMappingMissPolicy: normalizeModelMappingMissPolicy(form.modelMappingMissPolicy),
     requestBodyOverrides: cloneProviderValue(form.requestBodyOverrides || {}),
     cliConfig: cloneProviderValue(form.cliConfig || {}),
     apiEndpoint: form.apiEndpoint || '',

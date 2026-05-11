@@ -668,14 +668,15 @@
           <span class="field-hint">{{ t('components.main.form.hints.budgetQuota') }}</span>
         </div>
 
-        <div v-if="tabId !== 'opencode'" class="form-field">
+        <div v-if="supportsProviderModelRouting" class="form-field">
           <ModelWhitelistEditor v-model="form.supportedModels" />
         </div>
 
-        <div v-if="tabId !== 'opencode'" class="form-field">
+        <div v-if="supportsProviderModelRouting" class="form-field">
           <ModelMappingEditor
             :key="cliConfigEditorKey"
             v-model="form.modelMapping"
+            v-model:miss-policy="form.modelMappingMissPolicy"
             :platform="builtinModelPlatform"
           />
         </div>
@@ -1193,6 +1194,9 @@ const authTypeLabel = computed(() => (
 ))
 const builtinModelPlatform = computed<CLIPlatform | undefined>(() => (
   isBuiltinModelPlatform(props.tabId) ? props.tabId : undefined
+))
+const supportsProviderModelRouting = computed(() => (
+  props.tabId === 'claude' || props.tabId === 'codex' || props.tabId === 'others'
 ))
 const filteredIconOptions = computed(() => {
   const query = iconSearchQuery.value.toLowerCase().trim()

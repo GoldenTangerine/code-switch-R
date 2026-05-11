@@ -1602,6 +1602,13 @@ export class Provider {
     "modelMapping"?: { [_: string]: string };
 
     /**
+     * 模型映射未命中策略：
+     * - block: 未命中映射时跳过该 Provider（默认）
+     * - passthrough: 未命中映射时按原模型名转发给该 Provider
+     */
+    "modelMappingMissPolicy"?: string;
+
+    /**
      * 请求体强制覆盖字段 - 仅在命中当前 Provider 转发时生效
      * 同名字段会覆盖，不存在的字段会新增；嵌套对象按层级递归写入
      */

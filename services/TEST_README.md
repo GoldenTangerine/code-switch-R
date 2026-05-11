@@ -81,6 +81,7 @@ go tool cover -html=coverage.out
 - ✅ 映射支持 - 精确匹配
 - ✅ 映射支持 - 通配符匹配
 - ✅ 混合模式（原生 + 映射）
+- ✅ 映射未命中策略（默认拦截 / 原样透传）
 
 #### 4. **获取有效模型测试** (`TestProvider_GetEffectiveModel`)
 - ✅ 无映射场景
@@ -91,8 +92,8 @@ go tool cover -html=coverage.out
 #### 5. **配置验证测试** (`TestProvider_ValidateConfiguration`)
 - ✅ 有效配置
 - ✅ 无效映射（目标不在白名单）
-- ✅ 警告：只配置映射未配置白名单
-- ✅ 警告：自映射
+- ✅ 允许：只配置映射未配置白名单
+- ✅ 允许：自映射
 - ✅ 通配符映射（跳过验证）
 
 ### providerrelay_test.go

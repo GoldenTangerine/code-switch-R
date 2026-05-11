@@ -308,7 +308,10 @@
       },
       "modelMapping": {
         "label": "Model Mapping",
-        "tooltip": "Map CLI requested model names to provider-specific names. Supports wildcard expansion",
+        "description": "Configure conversion rules from CLI aliases to provider API models",
+        "tooltip": "Map CLI requested model names to provider-specific names. Supports wildcard expansion and miss policy",
+        "ruleCount": "{count} rules configured",
+        "empty": "No model mapping rules yet",
         "keyPlaceholder": "CLI model (e.g., claude-*)",
         "valuePlaceholder": "Provider model (e.g., kimi-k2-thinking)",
         "add": "Add",
@@ -324,7 +327,20 @@
         "builtinLoadFailedHint": "Failed to load builtin model options. Manual editing is still available.",
         "builtinEmptyHint": "No builtin model options matched this platform. You can still type the CLI model manually.",
         "builtinReadyHint": "You can type the CLI model manually or fuzzy-search builtin CLI models in the same field. {count} options are available.",
+        "builtinCompactHint": "Fuzzy search across {count} builtin models",
         "editingHint": "Editing mapping {key}. Saving will replace the original entry.",
+        "types": {
+          "exact": "Exact",
+          "prefix": "Prefix",
+          "wildcard": "Wildcard"
+        },
+        "missPolicy": {
+          "label": "Miss Policy",
+          "block": "Block",
+          "passthrough": "Pass through",
+          "blockHint": "Unmatched models skip this provider.",
+          "passthroughHint": "Unmatched models are forwarded to this provider with the original name."
+        },
         "examples": {
           "title": "Examples:",
           "exact": "Exact mapping",
