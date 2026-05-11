@@ -42,7 +42,6 @@ import {
   resolveProviderQuotaSnapshot,
   type ProviderQuotaSnapshotItem,
 } from '../Main/utils/providerQuotaSnapshot'
-import { resolveProviderQuotaCurrencyCode } from '../Main/utils/providerQuotaValueFormat'
 import {
   getProviderQuotaRemainingValue,
   isProviderQuotaBalanceItem,
@@ -55,6 +54,15 @@ import {
   getProviderDisplayIconSvg,
   preloadProviderDisplayIcons,
 } from '../../utils/providerIconAssets'
+import {
+  formatTrayCurrency,
+  formatTrayCurrencyParts,
+  formatTrayQuotaValue,
+  formatTrayQuotaValueParts,
+  joinTrayAmountParts,
+  type TrayAmountPart,
+  type TrayQuotaValueMode,
+} from './trayAmountFormatter'
 
 type Platform = 'claude' | 'codex'
 type ForecastMethod = 'cycle' | '10m' | '1h' | 'yesterday' | 'last24h'
@@ -69,8 +77,8 @@ type TrayQuotaState = {
   total: number
   usedLabel: string
   totalLabel: string
-  remainingLabel: string
-  valueMode: 'currency' | 'count'
+  remainingParts: TrayAmountPart[]
+  valueMode: TrayQuotaValueMode
   unit?: string
   extra: string
   invalidMessage: string
@@ -112,42 +120,19 @@ const trayPlatformIconKeys = Object.fromEntries(
 const getTrayPlatformIconKey = (platform: Platform) => trayPlatformIconKeys[platform] || platform
 const getTrayPlatformIconSvg = (platform: Platform) => getProviderDisplayIconSvg(getTrayPlatformIconKey(platform))
 
-const formatCurrency = (value?: number, unit?: string) => {
-  const numeric = Number(value ?? 0)
-  const safeValue = Number.isFinite(numeric) ? numeric : 0
-  const currencyCode = resolveProviderQuotaCurrencyCode(unit)
-  if (currencyCode) {
-    return new Intl.NumberFormat(locale.value || 'en', {
-      style: 'currency',
-      currency: currencyCode,
-      minimumFractionDigits: safeValue >= 1 ? 2 : 4,
-      maximumFractionDigits: safeValue >= 1 ? 2 : 4,
-    }).format(safeValue)
-  }
-  if (safeValue >= 1) {
-    return `$${safeValue.toFixed(2)}`
-  }
-  if (safeValue >= 0.01) {
-    return `$${safeValue.toFixed(3)}`
-  }
-  return `$${safeValue.toFixed(4)}`
-}
-
+const currentLocale = () => locale.value || 'en'
+const formatCurrency = (value?: number, unit?: string) => formatTrayCurrency(value, unit, currentLocale())
+const formatCurrencyParts = (value?: number, unit?: string) => formatTrayCurrencyParts(value, unit, currentLocale())
 const formatQuotaValue = (
   value: number | undefined,
-  valueMode: TrayQuotaState['valueMode'] = 'currency',
+  valueMode: TrayQuotaValueMode = 'currency',
   unit?: string,
-) => {
-  const normalized = Number(value)
-  const safeValue = Number.isFinite(normalized) ? normalized : 0
-  if (valueMode === 'count') {
-    const formatted = new Intl.NumberFormat(locale.value || 'en', {
-      maximumFractionDigits: Number.isInteger(safeValue) ? 0 : 2,
-    }).format(safeValue)
-    return unit?.trim() ? `${formatted} ${unit.trim()}` : formatted
-  }
-  return formatCurrency(safeValue, unit)
-}
+) => formatTrayQuotaValue(value, valueMode, unit, currentLocale())
+const formatQuotaValueParts = (
+  value: number | undefined,
+  valueMode: TrayQuotaValueMode = 'currency',
+  unit?: string,
+) => formatTrayQuotaValueParts(value, valueMode, unit, currentLocale())
 
 const formatLocalDateTimeLabel = (date: Date) => {
   return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())} ${pad2(date.getHours())}:${pad2(date.getMinutes())}`
@@ -207,7 +192,7 @@ const createQuotaState = (key: BudgetQuotaKey): TrayQuotaState => ({
   total: 0,
   usedLabel: formatCurrency(0),
   totalLabel: '∞',
-  remainingLabel: formatCurrency(0),
+  remainingParts: formatCurrencyParts(0),
   valueMode: 'currency',
   unit: undefined,
   extra: '',
@@ -302,7 +287,7 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
   const updateQuotaStaticLabels = (quota: TrayQuotaState) => {
     const remaining = getProviderQuotaRemainingValue(quota)
     quota.usedLabel = formatQuotaValue(quota.used, quota.valueMode, quota.unit)
-    quota.remainingLabel = formatQuotaValue(remaining, quota.valueMode, quota.unit)
+    quota.remainingParts = formatQuotaValueParts(remaining, quota.valueMode, quota.unit)
     quota.hasBudget = quota.displayKind === 'balance'
       ? true
       : quota.displayKind === 'error'
@@ -463,7 +448,7 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
       total: normalizedTotal,
       usedLabel: '',
       totalLabel: '',
-      remainingLabel: '',
+      remainingParts: [],
       valueMode,
       unit: `${item.unit ?? ''}`.trim() || undefined,
       extra: `${item.extra ?? ''}`.trim(),
@@ -502,7 +487,7 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
           total: 0,
           usedLabel: formatQuotaValue(0),
           totalLabel: '∞',
-          remainingLabel: formatQuotaValue(0),
+          remainingParts: formatQuotaValueParts(0),
           valueMode: 'currency',
           unit: undefined,
           extra: '',
@@ -879,7 +864,18 @@ onUnmounted(() => {
               <div class="tray-item__summary">
                 <div class="tray-item__value" :class="{ loading: card.loading }">
                   <template v-if="quota.displayKind === 'balance'">
-                    <span>{{ t('tray.remaining', { amount: quota.remainingLabel }) }}</span>
+                    <span class="tray-remaining">
+                      <span class="sr-only">{{ t('tray.remaining', { amount: joinTrayAmountParts(quota.remainingParts) }) }}</span>
+                      <span class="tray-remaining__label" aria-hidden="true">{{ t('tray.remainingLabel') }}</span>
+                      <span class="tray-remaining__amount" aria-hidden="true">
+                        <span
+                          v-for="(part, index) in quota.remainingParts"
+                          :key="`${quota.key}-remaining-${index}`"
+                          class="tray-remaining__part"
+                          :class="`tray-remaining__part--${part.role}`"
+                        >{{ part.value }}</span>
+                      </span>
+                    </span>
                   </template>
                   <template v-else-if="quota.displayKind === 'error'">
                     <span>{{ t('tray.queryFailed') }}</span>
@@ -1143,6 +1139,32 @@ onUnmounted(() => {
   font-weight: 600;
 }
 
+.tray-remaining {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.tray-remaining__amount {
+  display: inline-flex;
+  align-items: baseline;
+  font-variant-numeric: tabular-nums;
+}
+
+.tray-remaining__part--unit {
+  color: color-mix(in srgb, var(--mac-accent, #0a84ff) 90%, var(--mac-text) 10%);
+  font-weight: 700;
+}
+
+.tray-remaining__part--amount {
+  color: var(--mac-text);
+  font-weight: 700;
+}
+
+.tray-remaining__part--literal {
+  color: var(--mac-text-secondary);
+}
+
 .tray-item--error .tray-dot {
   background: #ff5f57;
   box-shadow: 0 0 0 2px rgba(255, 95, 87, 0.2);
@@ -1225,6 +1247,14 @@ onUnmounted(() => {
 :global(.dark) .tray-item--balance .tray-dot {
   background: #64b5ff;
   box-shadow: 0 0 0 2px rgba(100, 181, 255, 0.24);
+}
+
+:global(.dark) .tray-remaining__part--unit {
+  color: color-mix(in srgb, var(--mac-accent, #0a84ff) 72%, white 28%);
+}
+
+:global(.dark) .tray-remaining__part--amount {
+  color: var(--mac-text);
 }
 
 :global(.dark) .tray-item--error .tray-dot {

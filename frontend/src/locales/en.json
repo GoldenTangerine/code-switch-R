@@ -54,6 +54,7 @@
     "totalUsage": "Total usage",
     "used": "Used {amount}",
     "sourceProvider": "From enabled provider",
+    "remainingLabel": "Remaining",
     "remaining": "Remaining {amount}",
     "queryFailed": "Query failed",
     "providerQuotaQuery": "Quota query"
