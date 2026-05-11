@@ -134,6 +134,17 @@ const formatQuotaValueParts = (
   unit?: string,
 ) => formatTrayQuotaValueParts(value, valueMode, unit, currentLocale())
 
+const getTrayProviderInitials = (name: string) => {
+  if (!name) return 'AI'
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => word[0])
+    .join('')
+    .slice(0, 2)
+    .toUpperCase()
+}
+
 const formatLocalDateTimeLabel = (date: Date) => {
   return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())} ${pad2(date.getHours())}:${pad2(date.getMinutes())}`
 }
@@ -243,6 +254,9 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
   const displayMode = ref<TrayBudgetDisplayMode | 'provider-quotas' | 'pending'>('pending')
   const visibleQuotaKeys = ref<BudgetQuotaKey[]>([])
   const fallbackProviderName = ref('')
+  const fallbackProviderIconKey = ref('')
+  const fallbackProviderIconSvg = computed(() => getProviderDisplayIconSvg(fallbackProviderIconKey.value))
+  const fallbackProviderInitials = computed(() => getTrayProviderInitials(fallbackProviderName.value))
   const brandIconSvg = computed(() => getTrayPlatformIconSvg(platform))
   const hostingEnabled = ref(false)
   const hostingLabel = computed(() => (
@@ -554,12 +568,14 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
 
       if (nextDisplayMode === 'summary') {
         const fallbackProviders = await loadFallbackProviders()
+        void preloadProviderDisplayIcons(fallbackProviders.map((provider) => provider.icon))
         for (const fallbackProvider of fallbackProviders) {
           const providerQuotaStates = await loadProviderQuotas(fallbackProvider, now)
           if (providerQuotaStates.length > 0) {
             quotas.value = providerQuotaStates
             visibleQuotaKeys.value = []
             fallbackProviderName.value = fallbackProvider.name
+            fallbackProviderIconKey.value = fallbackProvider.icon
             displayMode.value = 'provider-quotas'
             totalUsage.value = 0
             return
@@ -568,6 +584,7 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
         quotas.value = budgetQuotaOrder.map((key) => createQuotaState(key))
         visibleQuotaKeys.value = []
         fallbackProviderName.value = ''
+        fallbackProviderIconKey.value = ''
         displayMode.value = 'summary'
         await loadTotalUsage()
         return
@@ -617,6 +634,7 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
       )
       visibleQuotaKeys.value = nextVisibleQuotaKeys
       fallbackProviderName.value = ''
+      fallbackProviderIconKey.value = ''
       displayMode.value = 'quotas'
       totalUsage.value = 0
     } catch (error) {
@@ -641,6 +659,8 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
     showTotalUsage,
     totalUsageLabel,
     fallbackProviderName,
+    fallbackProviderIconSvg,
+    fallbackProviderInitials,
     showProviderSource,
     hostingEnabled,
     hostingLabel,
@@ -845,7 +865,22 @@ onUnmounted(() => {
           </div>
           <div v-if="card.showProviderSource" class="tray-provider-source">
             <span>{{ t('tray.sourceProvider') }}</span>
-            <strong>{{ card.fallbackProviderName }}</strong>
+            <strong
+              class="tray-provider-source__provider"
+              :title="card.fallbackProviderName"
+            >
+              <span class="tray-provider-source__icon" aria-hidden="true">
+                <span
+                  v-if="card.fallbackProviderIconSvg"
+                  class="tray-provider-source__icon-svg"
+                  v-html="card.fallbackProviderIconSvg"
+                ></span>
+                <span v-else class="tray-provider-source__icon-fallback">
+                  {{ card.fallbackProviderInitials }}
+                </span>
+              </span>
+              <span class="tray-provider-source__name">{{ card.fallbackProviderName }}</span>
+            </strong>
           </div>
           <div
             v-for="quota in card.providerQuotas"
@@ -964,6 +999,47 @@ onUnmounted(() => {
   color: var(--mac-text);
   font-size: 12px;
   font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tray-provider-source__provider {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
+.tray-provider-source__icon {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 15px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--mac-text);
+}
+
+.tray-provider-source__icon-svg,
+.tray-provider-source__icon-svg :deep(svg) {
+  display: block;
+  width: 14px;
+  height: 14px;
+}
+
+.tray-provider-source__icon-fallback {
+  overflow: hidden;
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 1;
+  max-width: 15px;
+  text-align: center;
+}
+
+.tray-provider-source__name {
+  min-width: 0;
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
