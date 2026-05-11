@@ -405,6 +405,7 @@
   font-weight: 500;
   letter-spacing: 0.01em;
   opacity: 0.94;
+  transform: none;
   transition:
     color 180ms ease,
     opacity 180ms ease;
@@ -414,12 +415,14 @@
   color: var(--provider-url-hover);
   text-decoration: none;
   opacity: 1;
+  transform: none;
 }
 
 .card-site:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--provider-card-border-active) 80%, transparent);
   outline-offset: 4px;
   border-radius: 6px;
+  transform: none;
 }
 
 .card-metrics {
@@ -506,8 +509,7 @@
   cursor: pointer;
   transition:
     color 180ms ease,
-    opacity 180ms ease,
-    transform 180ms ease;
+    opacity 180ms ease;
 }
 
 .card-cost-trigger__part {
@@ -529,7 +531,7 @@
 }
 
 .card-cost-trigger:hover {
-  transform: translateY(-1px);
+  transform: none;
 }
 
 .card-cost-trigger:hover .card-cost-trigger__part--currency {
@@ -975,7 +977,6 @@
   color: var(--provider-btn-text);
   cursor: pointer;
   transition:
-    transform 180ms ease,
     border-color 180ms ease,
     background 180ms ease,
     color 180ms ease,
@@ -983,7 +984,7 @@
 }
 
 .card-balance-quota-panel__refresh:hover:not(:disabled) {
-  transform: translateY(-1px);
+  transform: none;
   border-color: var(--provider-btn-hover-border);
   background: var(--provider-btn-hover-bg);
   color: var(--provider-btn-hover-text);
@@ -1231,14 +1232,14 @@
   box-shadow:
     0 0 0 0 rgba(34, 197, 94, 0.42),
     0 0 10px rgba(34, 197, 94, 0.42);
-  animation: hosted-state-pulse 1.4s ease-out infinite;
+  animation: none;
 }
 
 .provider-state-pulse--idle {
   box-shadow:
     0 0 0 0 rgba(34, 197, 94, 0.24),
     0 0 6px rgba(34, 197, 94, 0.22);
-  animation: hosted-state-idle 1.8s ease-in-out infinite;
+  animation: none;
 }
 
 @keyframes hosted-state-pulse {
@@ -1524,7 +1525,6 @@
   color: var(--provider-btn-text);
   cursor: pointer;
   transition:
-    transform 180ms ease,
     border-color 180ms ease,
     background 180ms ease,
     color 180ms ease;
@@ -1534,7 +1534,7 @@
   color: var(--provider-btn-hover-text);
   background: var(--provider-btn-hover-bg);
   border-color: var(--provider-btn-hover-border);
-  transform: translateY(-1px);
+  transform: none;
 }
 
 .reset-level-mini:active {
@@ -1701,7 +1701,6 @@
   line-height: 1;
   cursor: pointer;
   transition:
-    transform 180ms ease,
     box-shadow 180ms ease,
     background 180ms ease,
     color 180ms ease,
@@ -1716,7 +1715,7 @@
 }
 
 .unblock-btn.primary:hover {
-  transform: translateY(-1px);
+  transform: none;
   box-shadow: 0 14px 24px rgba(239, 68, 68, 0.24);
 }
 
@@ -1727,7 +1726,7 @@
 }
 
 .unblock-btn.secondary:hover {
-  transform: translateY(-1px);
+  transform: none;
   background: rgba(255, 255, 255, 0.72);
   border-color: rgba(99, 102, 241, 0.18);
   color: #4338ca;
@@ -1752,8 +1751,8 @@
   flex-shrink: 0;
   margin-left: 2px;
   border-radius: 999px;
+  transform: none;
   transition:
-    transform 180ms ease,
     box-shadow 180ms ease,
     background-color 180ms ease;
 }
@@ -1852,9 +1851,7 @@
   opacity: 0;
   pointer-events: none;
   z-index: 30;
-  transition:
-    opacity 160ms ease,
-    transform 160ms ease;
+  transition: opacity 160ms ease;
 }
 
 .anthropic-cache-ttl-badge[data-tooltip]:hover::after {
@@ -1911,16 +1908,14 @@
   opacity: 0;
   pointer-events: none;
   z-index: 30;
-  transition:
-    opacity 160ms ease,
-    transform 160ms ease;
+  transition: opacity 160ms ease;
 }
 
 .api-format-badge[data-tooltip]:hover::after,
 .card-actions .ghost-icon[data-tooltip]:hover::after,
 .card-actions .ghost-icon[data-tooltip]:focus-visible::after {
   opacity: 1;
-  transform: translateX(-50%) translateY(0);
+  transform: translateX(-50%) translateY(4px);
 }
 
 .card-actions .ghost-icon-tooltip-end[data-tooltip]::after {
@@ -1932,7 +1927,7 @@
 
 .card-actions .ghost-icon-tooltip-end[data-tooltip]:hover::after,
 .card-actions .ghost-icon-tooltip-end[data-tooltip]:focus-visible::after {
-  transform: translateX(0) translateY(0);
+  transform: translateX(0) translateY(4px);
 }
 
 .api-format-badge--openai_chat {
@@ -2062,7 +2057,6 @@
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   transition:
-    transform 180ms ease,
     color 180ms ease,
     background 180ms ease,
     border-color 180ms ease,
@@ -2083,7 +2077,7 @@
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.18),
     0 12px 24px rgba(79, 70, 229, 0.14);
-  transform: translateY(-1px);
+  transform: none;
   z-index: 1;
 }
 
