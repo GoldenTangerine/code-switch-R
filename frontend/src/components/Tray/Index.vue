@@ -1156,6 +1156,10 @@ onUnmounted(() => {
   font-weight: 700;
 }
 
+.tray-remaining__part--unit + .tray-remaining__part--amount {
+  margin-left: 3px;
+}
+
 .tray-remaining__part--amount {
   color: #fbbf24;
   font-weight: 700;
