@@ -928,15 +928,12 @@ const extractFooterValue = (value: string) => value.split('·').pop()?.trim() ??
 
 .summary-card--clickable {
   cursor: pointer;
-  transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+  transition: border-color 0.18s ease;
 }
 
 .summary-card--clickable:hover {
-  transform: translateY(-2px);
+  transform: none;
   border-color: rgba(255, 255, 255, 0.24);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.04),
-    0 24px 44px -34px rgba(var(--summary-glow), 0.48);
 }
 
 .logs-summary--light {
@@ -1080,9 +1077,6 @@ const extractFooterValue = (value: string) => value.split('·').pop()?.trim() ??
 
 .logs-summary--light .summary-card--clickable:hover {
   border-color: rgba(var(--summary-glow), 0.32);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.9),
-    0 26px 48px -34px rgba(var(--summary-glow), 0.44);
 }
 
 @keyframes pulse-dot {
