@@ -295,7 +295,7 @@
         {{ t('components.main.providerLogs.confirmMarkRead', { provider: providerName }) }}
       </p>
     </div>
-    <footer class="form-actions confirm-actions">
+    <footer class="form-actions confirm-actions provider-logs-confirm-actions">
       <BaseButton variant="outline" type="button" :disabled="markingLogsRead" @click="closeMarkReadConfirm">
         {{ t('common.cancel') }}
       </BaseButton>
@@ -1185,6 +1185,11 @@ watch(
   border-color: rgba(99, 102, 241, 0.26);
   background: rgba(99, 102, 241, 0.08);
   color: #4338ca;
+}
+
+:global(.provider-logs-inline-modal button),
+.provider-logs-confirm-actions :deep(button) {
+  margin: 0;
 }
 
 :global(.provider-logs-inline-modal--dark) {

@@ -87,6 +87,18 @@ const providerUnreadStatsKeyFromStat = (stat: ProviderUnreadFailedStat) => {
   return normalizeProviderKey(stat.provider)
 }
 
+export const resolveProviderUnreadFailedRequestsForCard = (
+  card: AutomationCard,
+  unreadMap: Record<string, number> | undefined,
+) => {
+  const statKey = cardProviderRef(card)
+  if (statKey) {
+    return normalizeUnreadFailedRequests(unreadMap?.[statKey])
+  }
+
+  return normalizeUnreadFailedRequests(unreadMap?.[normalizeProviderKey(card.name)])
+}
+
 export function useProviderStats(options: UseProviderStatsOptions) {
   const { t, getLocale, getActiveTab, cards, refreshAvailabilityResults } = options
 
@@ -277,8 +289,7 @@ export function useProviderStats(options: UseProviderStatsOptions) {
   const providerStatDisplay = (card: AutomationCard): ProviderStatDisplay => {
     const tab = getActiveTab()
     const statKey = cardProviderRef(card) || normalizeProviderKey(card.name)
-    const nameKey = normalizeProviderKey(card.name)
-    const unreadFailedRequests = providerUnreadFailedMap[tab]?.[statKey] ?? providerUnreadFailedMap[tab]?.[nameKey] ?? 0
+    const unreadFailedRequests = resolveProviderUnreadFailedRequestsForCard(card, providerUnreadFailedMap[tab])
     const hasUnreadErrorLogs = unreadFailedRequests > 0
 
     if (!providerStatsLoaded[tab]) {
