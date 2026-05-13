@@ -4,7 +4,7 @@
     :title="modalTitle"
     :panel-width="'min(1120px, 94vw)'"
     :panel-class="modalPanelClass"
-    @close="$emit('close')"
+    @close="emit('close')"
   >
     <div
       :class="['provider-logs-modal', isDarkTheme ? 'provider-logs-modal--dark' : 'provider-logs-modal--light']"
@@ -37,28 +37,50 @@
                   stroke-linecap="round"
                 />
               </svg>
-              {{ t('components.main.providerLogs.failureOnly') }}
+              {{ showUnreadOnly ? t('components.main.providerLogs.unreadFailures') : t('components.main.providerLogs.allFailures') }}
             </span>
           </div>
           <div class="provider-logs-hero__actions">
+            <div class="provider-logs-scope" role="tablist" :aria-label="t('components.main.providerLogs.scopeLabel')">
+              <button
+                type="button"
+                :class="['provider-logs-scope__button', { 'is-active': showUnreadOnly }]"
+                :disabled="loading || loadingMore || markingLogsRead"
+                role="tab"
+                :aria-selected="showUnreadOnly"
+                @click="setLogScope('unread')"
+              >
+                {{ t('components.main.providerLogs.unreadFailures') }}
+              </button>
+              <button
+                type="button"
+                :class="['provider-logs-scope__button', { 'is-active': !showUnreadOnly }]"
+                :disabled="loading || loadingMore || markingLogsRead"
+                role="tab"
+                :aria-selected="!showUnreadOnly"
+                @click="setLogScope('all')"
+              >
+                {{ t('components.main.providerLogs.allFailures') }}
+              </button>
+            </div>
             <button
-              v-if="canClearProviderLogs"
+              v-if="canMarkProviderLogsRead"
               type="button"
               class="provider-logs-clear"
-              :disabled="clearingLogs"
-              @click="openClearLogsConfirm"
+              :disabled="markingLogsRead"
+              @click="openMarkReadConfirm"
             >
               <svg viewBox="0 0 24 24" aria-hidden="true" class="provider-logs-clear__icon">
                 <path
-                  d="M9 3h6m-7 4h8m-6 0v11m4-11v11M5 7h14l-.867 12.138A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.862L5 7z"
+                  d="M5 12.5l4.2 4.2L19 6.9"
                   fill="none"
                   stroke="currentColor"
-                  stroke-width="1.6"
+                  stroke-width="1.8"
                   stroke-linecap="round"
                   stroke-linejoin="round"
                 />
               </svg>
-              {{ clearingLogs ? t('components.main.providerLogs.clearingLogs') : t('components.main.providerLogs.clearLogs') }}
+              {{ markingLogsRead ? t('components.main.providerLogs.markingRead') : t('components.main.providerLogs.markRead') }}
             </button>
           </div>
         </div>
@@ -71,8 +93,8 @@
         {{ t('components.main.providerLogs.loadFailed', { error }) }}
       </div>
       <div v-else-if="entries.length === 0" class="provider-logs-state provider-logs-state--empty">
-        <strong>{{ t('components.main.providerLogs.empty') }}</strong>
-        <p>{{ t('components.main.providerLogs.emptyHint') }}</p>
+        <strong>{{ emptyTitle }}</strong>
+        <p>{{ emptyHint }}</p>
       </div>
       <div v-else class="provider-logs-feed">
         <article
@@ -94,6 +116,9 @@
               </span>
               <span v-if="entry.errorCode" class="provider-log-entry__tag">
                 {{ entry.errorCode }}
+              </span>
+              <span class="provider-log-entry__tag">
+                {{ entry.log.error_read_at?.trim() ? t('components.main.providerLogs.readStatus') : t('components.main.providerLogs.unreadStatus') }}
               </span>
             </div>
             <time class="provider-log-entry__time" :datetime="entry.log.created_at">
@@ -260,22 +285,22 @@
   </InlineModal>
 
   <BaseModal
-    :open="clearConfirmOpen"
-    :title="t('components.main.providerLogs.clearLogsConfirmTitle')"
+    :open="markReadConfirmOpen"
+    :title="t('components.main.providerLogs.markReadConfirmTitle')"
     variant="confirm"
-    @close="closeClearLogsConfirm"
+    @close="closeMarkReadConfirm"
   >
     <div class="confirm-body">
       <p>
-        {{ t('components.main.providerLogs.confirmClearLogs', { provider: providerName }) }}
+        {{ t('components.main.providerLogs.confirmMarkRead', { provider: providerName }) }}
       </p>
     </div>
     <footer class="form-actions confirm-actions">
-      <BaseButton variant="outline" type="button" :disabled="clearingLogs" @click="closeClearLogsConfirm">
+      <BaseButton variant="outline" type="button" :disabled="markingLogsRead" @click="closeMarkReadConfirm">
         {{ t('common.cancel') }}
       </BaseButton>
-      <BaseButton variant="danger" type="button" :disabled="clearingLogs" @click="clearCurrentProviderLogs">
-        {{ clearingLogs ? t('components.main.providerLogs.clearingLogs') : t('components.main.providerLogs.clearLogs') }}
+      <BaseButton variant="primary" type="button" :disabled="markingLogsRead" @click="markCurrentProviderLogsRead">
+        {{ markingLogsRead ? t('components.main.providerLogs.markingRead') : t('components.main.providerLogs.markRead') }}
       </BaseButton>
     </footer>
   </BaseModal>
@@ -291,8 +316,9 @@ import BaseButton from '../../common/BaseButton.vue'
 import BaseModal from '../../common/BaseModal.vue'
 import InlineModal from '../../common/InlineModal.vue'
 import {
-  clearProviderFailedRequestLogs,
+  countProviderUnreadFailedRequestLogs,
   fetchFailedRequestLogsPage,
+  markProviderFailedRequestLogsRead,
   type LogPlatform,
   type RequestLog,
 } from '../../../services/logs'
@@ -334,6 +360,7 @@ type PayloadErrorState = {
 }
 
 type ConsoleCoverageMode = 'recent' | 'all'
+type ProviderLogsScope = 'unread' | 'all'
 
 type ResolvedEntriesResult = {
   entries: ProviderLogEntry[]
@@ -495,8 +522,9 @@ const props = defineProps<{
   resolvedTheme: ResolvedTheme
 }>()
 
-defineEmits<{
+const emit = defineEmits<{
   close: []
+  markedRead: []
 }>()
 
 const { t, locale } = useI18n()
@@ -507,11 +535,13 @@ const error = ref('')
 const entries = ref<RequestLog[]>([])
 const consoleCandidates = ref<ConsoleProviderErrorCandidate[]>([])
 const total = ref(0)
+const unreadTotal = ref(0)
 const requestSeq = ref(0)
 const copiedEntryKey = ref('')
 const consoleCoverageMode = ref<ConsoleCoverageMode>('recent')
-const clearingLogs = ref(false)
-const clearConfirmOpen = ref(false)
+const logScope = ref<ProviderLogsScope>('unread')
+const markingLogsRead = ref(false)
+const markReadConfirmOpen = ref(false)
 const devMockLogs = ref<RequestLog[]>(createDevMockRequestLogs())
 
 const providerName = computed(() => props.provider?.name?.trim() || t('components.main.providerLogs.modalTitleFallback'))
@@ -563,33 +593,46 @@ const modalTitle = computed(() => {
 })
 
 const hasMore = computed(() => entries.value.length < total.value)
-const canClearProviderLogs = computed(() => {
-  return !loading.value && !loadingMore.value && !clearingLogs.value && displayEntries.value.length > 0
+const showUnreadOnly = computed(() => logScope.value === 'unread')
+const isUnreadLog = (log: RequestLog) => !log.error_read_at?.trim()
+const canMarkProviderLogsRead = computed(() => {
+  return !loading.value
+    && !loadingMore.value
+    && !markingLogsRead.value
+    && (unreadTotal.value > 0 || entries.value.some(isUnreadLog))
 })
 
 function buildDevMockLogsPage(limit: number, offset: number) {
   const normalizedLimit = Math.max(1, Math.floor(limit || DISPLAY_CHUNK_SIZE))
   const normalizedOffset = Math.max(0, Math.floor(offset || 0))
-  const items = devMockLogs.value.slice(normalizedOffset, normalizedOffset + normalizedLimit)
+  const source = showUnreadOnly.value
+    ? devMockLogs.value.filter(isUnreadLog)
+    : devMockLogs.value
+  const items = source.slice(normalizedOffset, normalizedOffset + normalizedLimit)
   return {
     items,
-    total: devMockLogs.value.length,
+    total: source.length,
     limit: normalizedLimit,
     offset: normalizedOffset,
   }
+}
+
+function countDevMockUnreadLogs() {
+  return devMockLogs.value.filter(isUnreadLog).length
 }
 
 const resetState = () => {
   entries.value = []
   consoleCandidates.value = []
   total.value = 0
+  unreadTotal.value = 0
   error.value = ''
   loading.value = false
   loadingMore.value = false
   copiedEntryKey.value = ''
   consoleCoverageMode.value = 'recent'
-  clearingLogs.value = false
-  clearConfirmOpen.value = false
+  markingLogsRead.value = false
+  markReadConfirmOpen.value = false
 }
 
 const truncateText = (value: string, maxLength = 240) => {
@@ -837,25 +880,42 @@ const copyButtonLabel = (entry: ProviderLogEntry) => {
   return t('components.main.providerLogs.copyDetail')
 }
 
-const openClearLogsConfirm = () => {
-  if (!canClearProviderLogs.value) return
-  clearConfirmOpen.value = true
+const emptyTitle = computed(() => (
+  showUnreadOnly.value
+    ? t('components.main.providerLogs.emptyUnread')
+    : t('components.main.providerLogs.emptyAll')
+))
+
+const emptyHint = computed(() => (
+  showUnreadOnly.value
+    ? t('components.main.providerLogs.emptyUnreadHint')
+    : t('components.main.providerLogs.emptyAllHint')
+))
+
+const setLogScope = (scope: ProviderLogsScope) => {
+  if (logScope.value === scope || loading.value || loadingMore.value || markingLogsRead.value) return
+  logScope.value = scope
 }
 
-const closeClearLogsConfirm = () => {
-  if (clearingLogs.value) return
-  clearConfirmOpen.value = false
+const openMarkReadConfirm = () => {
+  if (!canMarkProviderLogsRead.value) return
+  markReadConfirmOpen.value = true
 }
 
-const clearCurrentProviderLogs = async () => {
-  if (!canClearProviderLogs.value) return
+const closeMarkReadConfirm = () => {
+  if (markingLogsRead.value) return
+  markReadConfirmOpen.value = false
+}
 
-  clearingLogs.value = true
-  clearConfirmOpen.value = false
+const markCurrentProviderLogsRead = async () => {
+  if (!canMarkProviderLogsRead.value) return
+
+  markingLogsRead.value = true
+  markReadConfirmOpen.value = false
   try {
     if (entries.value.length === 0) {
       showToast(
-        t('components.main.providerLogs.clearLogsEmpty', {
+        t('components.main.providerLogs.markReadEmpty', {
           provider: providerName.value,
         }),
         'warning',
@@ -864,20 +924,29 @@ const clearCurrentProviderLogs = async () => {
     }
 
     if (isDevMockProviderLogs.value) {
-      const deletedLogs = devMockLogs.value.length
-      devMockLogs.value = []
+      const readAt = createTodayMockTimestamp(new Date().getHours(), new Date().getMinutes(), new Date().getSeconds())
+      let markedLogs = 0
+      devMockLogs.value = devMockLogs.value.map((log) => {
+        if (!isUnreadLog(log)) return log
+        markedLogs += 1
+        return {
+          ...log,
+          error_read_at: readAt,
+        }
+      })
 
-      if (deletedLogs > 0) {
+      if (markedLogs > 0) {
         showToast(
-          t('components.main.providerLogs.clearLogsSuccess', {
+          t('components.main.providerLogs.markReadSuccess', {
             provider: providerName.value,
-            logs: deletedLogs,
+            logs: markedLogs,
           }),
           'success',
         )
+        emit('markedRead')
       } else {
         showToast(
-          t('components.main.providerLogs.clearLogsEmpty', {
+          t('components.main.providerLogs.markReadEmpty', {
             provider: providerName.value,
           }),
           'warning',
@@ -888,24 +957,25 @@ const clearCurrentProviderLogs = async () => {
       return
     }
 
-    const result = await clearProviderFailedRequestLogs(
+    const result = await markProviderFailedRequestLogsRead(
       props.platform ?? '',
       providerFilter.value,
       providerName.value,
     )
-    const deletedLogs = Number(result?.deleted_request_logs ?? 0)
+    const markedLogs = Number(result?.marked_request_logs ?? 0)
 
-    if (deletedLogs > 0) {
+    if (markedLogs > 0) {
       showToast(
-        t('components.main.providerLogs.clearLogsSuccess', {
+        t('components.main.providerLogs.markReadSuccess', {
           provider: providerName.value,
-          logs: deletedLogs,
+          logs: markedLogs,
         }),
         'success',
       )
+      emit('markedRead')
     } else {
       showToast(
-        t('components.main.providerLogs.clearLogsEmpty', {
+        t('components.main.providerLogs.markReadEmpty', {
           provider: providerName.value,
         }),
         'warning',
@@ -914,9 +984,9 @@ const clearCurrentProviderLogs = async () => {
 
     await reloadLogs()
   } catch (err) {
-    showToast(t('components.main.providerLogs.clearLogsFailed', { error: extractErrorMessage(err) }), 'error')
+    showToast(t('components.main.providerLogs.markReadFailed', { error: extractErrorMessage(err) }), 'error')
   } finally {
-    clearingLogs.value = false
+    markingLogsRead.value = false
   }
 }
 
@@ -929,8 +999,31 @@ const fetchRecentConsoleCandidates = async () => {
   }
 }
 
+const fetchUnreadFailureCount = async () => {
+  if (isDevMockProviderLogs.value) {
+    return countDevMockUnreadLogs()
+  }
+  const result = await countProviderUnreadFailedRequestLogs(
+    props.platform ?? '',
+    providerFilter.value,
+    providerName.value,
+  )
+  const count = Number(result?.unread_failed_requests ?? 0)
+  return Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0
+}
+
+const fetchUnreadFailureCountSafely = async (fallbackCount: number) => {
+  try {
+    return await fetchUnreadFailureCount()
+  } catch (err) {
+    console.warn('加载供应商未读失败日志计数失败:', err)
+    return fallbackCount
+  }
+}
+
 const reloadLogs = async () => {
   const currentSeq = ++requestSeq.value
+  const fallbackUnreadTotal = unreadTotal.value
   resetState()
 
   if (!props.open || !props.platform || !providerFilter.value) return
@@ -939,6 +1032,7 @@ const reloadLogs = async () => {
     const page = buildDevMockLogsPage(DISPLAY_CHUNK_SIZE, 0)
     entries.value = page.items
     total.value = page.total
+    unreadTotal.value = countDevMockUnreadLogs()
     consoleCandidates.value = []
     consoleCoverageMode.value = 'recent'
     return
@@ -946,20 +1040,23 @@ const reloadLogs = async () => {
 
   loading.value = true
   try {
-    const [page, recentConsoleErrors] = await Promise.all([
+    const [page, recentConsoleErrors, unreadCount] = await Promise.all([
       fetchFailedRequestLogsPage({
         platform: props.platform,
         provider: providerFilter.value,
         limit: DISPLAY_CHUNK_SIZE,
         offset: 0,
+        unreadOnly: showUnreadOnly.value,
       }),
       fetchRecentConsoleCandidates(),
+      fetchUnreadFailureCountSafely(fallbackUnreadTotal),
     ])
     if (currentSeq !== requestSeq.value) return
     entries.value = page.items
     consoleCandidates.value = recentConsoleErrors
     consoleCoverageMode.value = 'recent'
     total.value = page.total
+    unreadTotal.value = Math.max(unreadCount, page.items.filter(isUnreadLog).length)
     await ensureConsoleCoverage(page.items, currentSeq, recentConsoleErrors)
   } catch (err) {
     if (currentSeq !== requestSeq.value) return
@@ -989,6 +1086,7 @@ const loadMore = async () => {
       provider: providerFilter.value,
       limit: DISPLAY_CHUNK_SIZE,
       offset: entries.value.length,
+      unreadOnly: showUnreadOnly.value,
     })
     if (currentSeq !== requestSeq.value) return
     const mergedEntries = mergeLogsById(entries.value, page.items)
@@ -1021,10 +1119,11 @@ const formatCreatedAt = (value: string) => {
 }
 
 watch(
-  () => [props.open, props.platform, props.provider?.id, props.provider?.name, props.provider?.providerRef] as const,
+  () => [props.open, props.platform, props.provider?.id, props.provider?.name, props.provider?.providerRef, logScope.value] as const,
   ([open]) => {
     if (!open) {
       requestSeq.value += 1
+      logScope.value = 'unread'
       resetState()
       return
     }
@@ -1284,7 +1383,10 @@ watch(
 
 .provider-logs-hero__actions {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   justify-content: flex-end;
+  gap: 8px;
 }
 
 .provider-logs-pill {
@@ -1318,6 +1420,43 @@ watch(
   border-color: color-mix(in srgb, var(--provider-log-accent) 24%, transparent);
 }
 
+.provider-logs-scope {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 36px;
+  padding: 4px;
+  border-radius: 12px;
+  border: 1px solid var(--provider-log-toolbar-border);
+  background: var(--provider-log-toolbar-bg);
+}
+
+.provider-logs-scope__button {
+  min-height: 28px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--provider-log-pill-text);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background 0.18s ease,
+    color 0.18s ease,
+    opacity 0.18s ease;
+}
+
+.provider-logs-scope__button.is-active {
+  background: color-mix(in srgb, var(--provider-log-accent) 14%, rgba(255, 255, 255, 0.86));
+  color: color-mix(in srgb, var(--provider-log-accent) 80%, #4338ca);
+}
+
+.provider-logs-scope__button:disabled {
+  cursor: wait;
+  opacity: 0.64;
+}
+
 .provider-logs-clear {
   display: inline-flex;
   align-items: center;
@@ -1326,9 +1465,9 @@ watch(
   min-height: 36px;
   padding: 0 14px;
   border-radius: 12px;
-  border: 1px solid rgba(248, 113, 113, 0.18);
-  background: linear-gradient(135deg, rgba(255, 236, 236, 0.9), rgba(255, 245, 245, 0.88));
-  color: #b91c1c;
+  border: 1px solid rgba(34, 197, 94, 0.18);
+  background: linear-gradient(135deg, rgba(236, 253, 245, 0.9), rgba(240, 253, 244, 0.88));
+  color: #047857;
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
@@ -1347,9 +1486,9 @@ watch(
 
 .provider-logs-clear:hover:not(:disabled) {
   transform: translateY(-1px);
-  border-color: rgba(239, 68, 68, 0.3);
-  background: linear-gradient(135deg, rgba(254, 242, 242, 0.96), rgba(255, 236, 236, 0.92));
-  color: #991b1b;
+  border-color: rgba(34, 197, 94, 0.3);
+  background: linear-gradient(135deg, rgba(236, 253, 245, 0.96), rgba(220, 252, 231, 0.92));
+  color: #065f46;
 }
 
 .provider-logs-clear:disabled {
@@ -1837,16 +1976,21 @@ watch(
   border-color: rgba(129, 140, 248, 0.22);
 }
 
+.provider-logs-modal--dark .provider-logs-scope__button.is-active {
+  background: rgba(99, 102, 241, 0.18);
+  color: #e0e7ff;
+}
+
 .provider-logs-modal--dark .provider-logs-clear {
-  border-color: rgba(248, 113, 113, 0.18);
-  background: rgba(127, 29, 29, 0.16);
-  color: #fecaca;
+  border-color: rgba(74, 222, 128, 0.2);
+  background: rgba(20, 83, 45, 0.18);
+  color: #bbf7d0;
 }
 
 .provider-logs-modal--dark .provider-logs-clear:hover:not(:disabled) {
-  border-color: rgba(248, 113, 113, 0.28);
-  background: rgba(127, 29, 29, 0.24);
-  color: #fee2e2;
+  border-color: rgba(74, 222, 128, 0.3);
+  background: rgba(20, 83, 45, 0.28);
+  color: #dcfce7;
 }
 
 .provider-logs-modal--dark .provider-logs-state--error {

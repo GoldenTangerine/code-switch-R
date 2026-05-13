@@ -105,6 +105,7 @@
         :platform="providerLogsModalPlatform"
         :resolved-theme="resolvedTheme"
         @close="closeProviderLogsModal"
+        @marked-read="handleProviderLogsMarkedRead"
       />
       <ProviderDataOverviewModal
         :open="providerDataOverviewModalOpen"
@@ -462,6 +463,11 @@ const {
   moveCardToStatusGroup,
   appendCardToGroup,
 })
+
+const handleProviderLogsMarkedRead = () => {
+  if (!providerLogsModalPlatform.value) return
+  void loadProviderStats(providerLogsModalPlatform.value)
+}
 
 pageShell = useMainPageShell({
   t,

@@ -1,6 +1,11 @@
 import { reactive } from 'vue'
 import type { AutomationCard } from '../../../data/cards'
-import { fetchProviderDailyStats, type ProviderDailyStat } from '../../../services/logs'
+import {
+  fetchProviderDailyStats,
+  fetchProviderUnreadFailedStats,
+  type ProviderDailyStat,
+  type ProviderUnreadFailedStat,
+} from '../../../services/logs'
 import { fetchProviderModelPricing } from '../../../services/providerModelPricing'
 import {
   PROVIDER_PRICING_CLICK_THROTTLE_MS,
@@ -8,7 +13,12 @@ import {
   PROVIDER_TAB_IDS,
   SUCCESS_RATE_THRESHOLDS,
 } from '../constants'
-import { cardProviderRef, normalizeProviderKey, providerStatsKeyFromStat } from '../adapters/providerCardMappers'
+import {
+  cardProviderRef,
+  normalizeProviderKey,
+  normalizeProviderRef,
+  providerStatsKeyFromStat,
+} from '../adapters/providerCardMappers'
 import type { ProviderStatDisplay, ProviderTab, TranslateFn } from '../types'
 import { buildProviderCostDisplay } from '../utils/providerCostDisplay'
 
@@ -66,6 +76,17 @@ const formatAverageTokensPerSecond = (value: unknown) => {
   return `${tokensPerSecond.toFixed(precision)} tokens/s`
 }
 
+const normalizeUnreadFailedRequests = (value: unknown) => {
+  const numeric = Number(value ?? 0)
+  return Number.isFinite(numeric) ? Math.max(0, Math.floor(numeric)) : 0
+}
+
+const providerUnreadStatsKeyFromStat = (stat: ProviderUnreadFailedStat) => {
+  const ref = normalizeProviderRef(stat.provider_id)
+  if (ref) return ref
+  return normalizeProviderKey(stat.provider)
+}
+
 export function useProviderStats(options: UseProviderStatsOptions) {
   const { t, getLocale, getActiveTab, cards, refreshAvailabilityResults } = options
 
@@ -82,6 +103,13 @@ export function useProviderStats(options: UseProviderStatsOptions) {
     gemini: false,
     opencode: false,
     others: false,
+  })
+  const providerUnreadFailedMap = reactive<Record<ProviderTab, Record<string, number>>>({
+    claude: {},
+    codex: {},
+    gemini: {},
+    opencode: {},
+    others: {},
   })
 
   let providerStatsTimer: number | undefined
@@ -190,24 +218,39 @@ export function useProviderStats(options: UseProviderStatsOptions) {
   const loadProviderStats = async (tab: ProviderTab) => {
     if (tab === 'others' || tab === 'opencode') {
       providerStatsMap[tab] = {}
+      providerUnreadFailedMap[tab] = {}
       providerStatsLoaded[tab] = true
       return
     }
 
-    try {
-      const stats = await fetchProviderDailyStats(tab as 'claude' | 'codex' | 'gemini')
+    const platform = tab as 'claude' | 'codex' | 'gemini'
+    const [dailyResult, unreadResult] = await Promise.allSettled([
+      fetchProviderDailyStats(platform),
+      fetchProviderUnreadFailedStats(platform),
+    ])
+
+    if (dailyResult.status === 'fulfilled') {
       const mapped: Record<string, ProviderDailyStat> = {}
-      ;(stats ?? []).forEach((stat) => {
+      ;(dailyResult.value ?? []).forEach((stat) => {
         mapped[providerStatsKeyFromStat(stat)] = stat
       })
       providerStatsMap[tab] = mapped
-      providerStatsLoaded[tab] = true
-    } catch (error) {
-      console.error(`Failed to load provider stats for ${tab}`, error)
-      if (!providerStatsLoaded[tab]) {
-        providerStatsLoaded[tab] = true
-      }
+    } else {
+      console.error(`Failed to load provider stats for ${tab}`, dailyResult.reason)
     }
+
+    if (unreadResult.status === 'fulfilled') {
+      const unreadMapped: Record<string, number> = {}
+      ;(unreadResult.value ?? []).forEach((stat) => {
+        unreadMapped[providerUnreadStatsKeyFromStat(stat)] = normalizeUnreadFailedRequests(stat.unread_failed_requests)
+      })
+      providerUnreadFailedMap[tab] = unreadMapped
+    } else {
+      // 未读提醒比实时精确更重要：短暂查询失败时保留上一轮红点，避免把仍需处理的错误提示吞掉。
+      console.error(`Failed to load provider unread failure stats for ${tab}`, unreadResult.reason)
+    }
+
+    providerStatsLoaded[tab] = true
   }
 
   const loadAllProviderStats = async () => {
@@ -233,14 +276,28 @@ export function useProviderStats(options: UseProviderStatsOptions) {
 
   const providerStatDisplay = (card: AutomationCard): ProviderStatDisplay => {
     const tab = getActiveTab()
+    const statKey = cardProviderRef(card) || normalizeProviderKey(card.name)
+    const nameKey = normalizeProviderKey(card.name)
+    const unreadFailedRequests = providerUnreadFailedMap[tab]?.[statKey] ?? providerUnreadFailedMap[tab]?.[nameKey] ?? 0
+    const hasUnreadErrorLogs = unreadFailedRequests > 0
+
     if (!providerStatsLoaded[tab]) {
-      return { state: 'loading', message: t('components.main.providers.loading') }
+      return {
+        state: 'loading',
+        message: t('components.main.providers.loading'),
+        unreadFailedRequests: 0,
+        hasUnreadErrorLogs: false,
+      }
     }
 
-    const statKey = cardProviderRef(card) || normalizeProviderKey(card.name)
     const stat = providerStatsMap[tab]?.[statKey] ?? providerStatsMap[tab]?.[normalizeProviderKey(card.name)]
     if (!stat) {
-      return { state: 'empty', message: t('components.main.providers.noData') }
+      return {
+        state: 'empty',
+        message: t('components.main.providers.noData'),
+        unreadFailedRequests,
+        hasUnreadErrorLogs,
+      }
     }
 
     const inputTokens = Number.isFinite(Number(stat.input_tokens)) ? Number(stat.input_tokens) : 0
@@ -279,7 +336,8 @@ export function useProviderStats(options: UseProviderStatsOptions) {
       successRateLabel,
       successRateClass,
       failedRequests,
-      hasErrorLogsToday: failedRequests > 0,
+      unreadFailedRequests,
+      hasUnreadErrorLogs,
     }
   }
 

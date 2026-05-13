@@ -533,7 +533,7 @@ func TestClearProviderLogStorage_RemovesLegacyProviderStats(t *testing.T) {
 	)
 }
 
-func TestClearProviderFailedRequestLogsByIDs_RemovesOnlySelectedFailedLogsForProvider(t *testing.T) {
+func TestMarkProviderFailedRequestLogsRead_PreservesLogsStatsAndAllFailureQuery(t *testing.T) {
 	useIsolatedHomeDir(t)
 
 	if err := InitDatabase(); err != nil {
@@ -545,180 +545,96 @@ func TestClearProviderFailedRequestLogsByIDs_RemovesOnlySelectedFailedLogsForPro
 		t.Fatalf("获取数据库连接失败: %v", err)
 	}
 
-	targetDay := startOfDay(time.Now()).AddDate(0, 0, -1)
-	failedID1 := insertProviderRequestLogForStorageWithStatus(t, db, "codex", "pid-a", "provider-a", 500, targetDay.Add(2*time.Hour), "req-fail", "resp-fail")
-	failedID2 := insertProviderRequestLogForStorageWithStatus(t, db, "codex", "pid-a", "provider-a", 429, targetDay.Add(3*time.Hour), "req-fail-2", "resp-fail-2")
-	successID := insertProviderRequestLogForStorageWithStatus(t, db, "codex", "pid-a", "provider-a", 200, targetDay.Add(4*time.Hour), "req-ok", "resp-ok")
-	otherID := insertProviderRequestLogForStorageWithStatus(t, db, "codex", "pid-b", "provider-b", 500, targetDay.Add(5*time.Hour), "req-other", "resp-other")
+	targetDay := time.Date(2026, time.February, 25, 0, 0, 0, 0, time.Local)
+	failedID1 := insertProviderRequestLogForStorageWithStatus(t, db, "codex", "pid-read", "provider-read", 500, targetDay.Add(2*time.Hour), "req-fail", "resp-fail")
+	failedID2 := insertProviderRequestLogForStorageWithStatus(t, db, "codex", "pid-read", "provider-read", 429, targetDay.Add(3*time.Hour), "req-fail-2", "resp-fail-2")
+	successID := insertProviderRequestLogForStorageWithStatus(t, db, "codex", "pid-read", "provider-read", 200, targetDay.Add(4*time.Hour), "req-ok", "resp-ok")
 
 	ls := NewLogService(nil)
-	result, err := ls.ClearProviderFailedRequestLogsByIDs("codex", "pid-a", "provider-a", []int64{failedID1, failedID2, successID, otherID})
+	beforeStats, err := ls.ProviderStatsRangeV2("codex", "pid-read", "2026-02-25 00:00:00", "2026-02-26 00:00:00")
 	if err != nil {
-		t.Fatalf("ClearProviderFailedRequestLogsByIDs 调用失败: %v", err)
+		t.Fatalf("标记前 ProviderStatsRangeV2 调用失败: %v", err)
 	}
-	if result.DeletedRequestLogs != 2 {
-		t.Fatalf("期望只删除 2 条当前供应商失败 request_log，实际 %+v", result)
+	if len(beforeStats) != 1 {
+		t.Fatalf("期望标记前 1 条供应商统计，实际 %+v", beforeStats)
+	}
+	if beforeStats[0].FailedRequests != 2 || beforeStats[0].UnreadFailedRequests != 2 {
+		t.Fatalf("期望标记前 failed=2/unread=2，实际 %+v", beforeStats[0])
+	}
+	beforeCount, err := ls.CountProviderUnreadFailedRequestLogs("codex", "pid-read", "provider-read")
+	if err != nil {
+		t.Fatalf("标记前 CountProviderUnreadFailedRequestLogs 调用失败: %v", err)
+	}
+	if beforeCount.UnreadFailedRequests != 2 {
+		t.Fatalf("期望标记前全量未读失败计数为 2，实际 %+v", beforeCount)
+	}
+
+	unreadStats, err := ls.ProviderUnreadFailedStats("codex")
+	if err != nil {
+		t.Fatalf("ProviderUnreadFailedStats 调用失败: %v", err)
+	}
+	if len(unreadStats) != 1 || unreadStats[0].ProviderID != "pid-read" || unreadStats[0].UnreadFailedRequests != 2 {
+		t.Fatalf("期望全量未读统计命中 pid-read=2，实际 %+v", unreadStats)
+	}
+
+	result, err := ls.MarkProviderFailedRequestLogsRead("codex", "pid-read", "provider-read")
+	if err != nil {
+		t.Fatalf("MarkProviderFailedRequestLogsRead 调用失败: %v", err)
+	}
+	if result.MarkedRequestLogs != 2 {
+		t.Fatalf("期望标记 2 条未读失败日志，实际 %+v", result)
 	}
 
 	assertTableCount(t, db,
-		"SELECT COUNT(*) FROM request_log WHERE id IN (?, ?)",
-		0,
+		"SELECT COUNT(*) FROM request_log WHERE id IN (?, ?, ?)",
+		3,
 		failedID1,
 		failedID2,
-	)
-	assertTableCount(t, db,
-		"SELECT COUNT(*) FROM request_log WHERE id = ?",
-		1,
 		successID,
 	)
 	assertTableCount(t, db,
-		"SELECT COUNT(*) FROM request_log WHERE id = ?",
-		1,
-		otherID,
-	)
-	assertTableCount(t, db,
-		"SELECT COUNT(*) FROM request_log_stats_hourly WHERE platform = ? AND provider_id = ?",
-		3,
-		"codex",
-		"pid-a",
-	)
-	assertTableCount(t, db,
-		"SELECT COUNT(*) FROM request_log_stats_daily WHERE platform = ? AND provider_id = ?",
-		1,
-		"codex",
-		"pid-a",
-	)
-}
-
-func TestClearProviderFailedRequestLogsByIDs_IgnoresInvalidDuplicateAndLegacySuccessIDs(t *testing.T) {
-	useIsolatedHomeDir(t)
-
-	if err := InitDatabase(); err != nil {
-		t.Fatalf("初始化数据库失败: %v", err)
-	}
-
-	db, err := xdb.DB("default")
-	if err != nil {
-		t.Fatalf("获取数据库连接失败: %v", err)
-	}
-
-	targetDay := startOfDay(time.Now()).AddDate(0, 0, -1)
-	validFailedID := insertProviderRequestLogForStorageWithStatus(t, db, "codex", "", "legacy-provider", 500, targetDay.Add(2*time.Hour), "req-legacy-fail", "resp-legacy-fail")
-	legacySuccessID := insertProviderRequestLogForStorageWithStatus(t, db, "codex", "", "legacy-provider", 200, targetDay.Add(3*time.Hour), "req-legacy-ok", "resp-legacy-ok")
-
-	ls := NewLogService(nil)
-	result, err := ls.ClearProviderFailedRequestLogsByIDs("codex", "", "legacy-provider", []int64{0, -1, validFailedID, validFailedID, legacySuccessID})
-	if err != nil {
-		t.Fatalf("ClearProviderFailedRequestLogsByIDs 调用失败: %v", err)
-	}
-	if result.DeletedRequestLogs != 1 {
-		t.Fatalf("期望只删除 1 条 legacy 失败 request_log，实际 %d", result.DeletedRequestLogs)
-	}
-
-	assertTableCount(t, db,
-		"SELECT COUNT(*) FROM request_log WHERE id = ?",
-		0,
-		validFailedID,
-	)
-	assertTableCount(t, db,
-		"SELECT COUNT(*) FROM request_log WHERE id = ?",
-		1,
-		legacySuccessID,
-	)
-}
-
-func TestClearProviderFailedRequestLogs_RemovesAllFailuresForProviderAndPreservesStats(t *testing.T) {
-	useIsolatedHomeDir(t)
-
-	if err := InitDatabase(); err != nil {
-		t.Fatalf("初始化数据库失败: %v", err)
-	}
-
-	db, err := xdb.DB("default")
-	if err != nil {
-		t.Fatalf("获取数据库连接失败: %v", err)
-	}
-
-	targetDay := startOfDay(time.Now()).AddDate(0, 0, -1)
-	failedID1 := insertProviderRequestLogForStorageWithStatus(t, db, "codex", "pid-a", "provider-a", 500, targetDay.Add(2*time.Hour), "req-fail", "resp-fail")
-	failedID2 := insertProviderRequestLogForStorageWithStatus(t, db, "codex", "pid-a", "provider-a", 429, targetDay.Add(3*time.Hour), "req-fail-2", "resp-fail-2")
-	successID := insertProviderRequestLogForStorageWithStatus(t, db, "codex", "pid-a", "provider-a", 200, targetDay.Add(4*time.Hour), "req-ok", "resp-ok")
-	otherID := insertProviderRequestLogForStorageWithStatus(t, db, "codex", "pid-b", "provider-b", 500, targetDay.Add(5*time.Hour), "req-other", "resp-other")
-
-	ls := NewLogService(nil)
-	result, err := ls.ClearProviderFailedRequestLogs("codex", "pid-a", "provider-a")
-	if err != nil {
-		t.Fatalf("ClearProviderFailedRequestLogs 调用失败: %v", err)
-	}
-	if result.DeletedRequestLogs != 2 {
-		t.Fatalf("期望删除 2 条当前供应商失败 request_log，实际 %+v", result)
-	}
-
-	assertTableCount(t, db,
-		"SELECT COUNT(*) FROM request_log WHERE id IN (?, ?)",
-		0,
+		"SELECT COUNT(*) FROM request_log WHERE id IN (?, ?) AND TRIM(COALESCE(error_read_at, '')) != ''",
+		2,
 		failedID1,
 		failedID2,
 	)
-	assertTableCount(t, db,
-		"SELECT COUNT(*) FROM request_log WHERE id = ?",
-		1,
-		successID,
-	)
-	assertTableCount(t, db,
-		"SELECT COUNT(*) FROM request_log WHERE id = ?",
-		1,
-		otherID,
-	)
-	assertTableCount(t, db,
-		"SELECT COUNT(*) FROM request_log_stats_hourly WHERE platform = ? AND provider_id = ?",
-		3,
-		"codex",
-		"pid-a",
-	)
-	assertTableCount(t, db,
-		"SELECT COUNT(*) FROM request_log_stats_daily WHERE platform = ? AND provider_id = ?",
-		1,
-		"codex",
-		"pid-a",
-	)
-}
 
-func TestClearProviderFailedRequestLogs_FallbackToLegacyProviderName(t *testing.T) {
-	useIsolatedHomeDir(t)
-
-	if err := InitDatabase(); err != nil {
-		t.Fatalf("初始化数据库失败: %v", err)
-	}
-
-	db, err := xdb.DB("default")
+	afterStats, err := ls.ProviderStatsRangeV2("codex", "pid-read", "2026-02-25 00:00:00", "2026-02-26 00:00:00")
 	if err != nil {
-		t.Fatalf("获取数据库连接失败: %v", err)
+		t.Fatalf("标记后 ProviderStatsRangeV2 调用失败: %v", err)
 	}
-
-	targetDay := startOfDay(time.Now()).AddDate(0, 0, -1)
-	validFailedID := insertProviderRequestLogForStorageWithStatus(t, db, "codex", "", "legacy-provider", 500, targetDay.Add(2*time.Hour), "req-legacy-fail", "resp-legacy-fail")
-	legacySuccessID := insertProviderRequestLogForStorageWithStatus(t, db, "codex", "", "legacy-provider", 200, targetDay.Add(3*time.Hour), "req-legacy-ok", "resp-legacy-ok")
-
-	ls := NewLogService(nil)
-	result, err := ls.ClearProviderFailedRequestLogs("codex", "", "legacy-provider")
+	if len(afterStats) != 1 {
+		t.Fatalf("期望标记后 1 条供应商统计，实际 %+v", afterStats)
+	}
+	if afterStats[0].TotalRequests != 3 || afterStats[0].FailedRequests != 2 || afterStats[0].UnreadFailedRequests != 0 {
+		t.Fatalf("标记已读不应改变总请求/失败请求，只应清空未读失败数，实际 %+v", afterStats[0])
+	}
+	if afterStats[0].SuccessRate != beforeStats[0].SuccessRate {
+		t.Fatalf("标记已读不应改变成功率，标记前 %.6f，标记后 %.6f", beforeStats[0].SuccessRate, afterStats[0].SuccessRate)
+	}
+	afterCount, err := ls.CountProviderUnreadFailedRequestLogs("codex", "pid-read", "provider-read")
 	if err != nil {
-		t.Fatalf("ClearProviderFailedRequestLogs legacy 调用失败: %v", err)
+		t.Fatalf("标记后 CountProviderUnreadFailedRequestLogs 调用失败: %v", err)
 	}
-	if result.DeletedRequestLogs != 1 {
-		t.Fatalf("期望只删除 1 条 legacy 失败 request_log，实际 %d", result.DeletedRequestLogs)
+	if afterCount.UnreadFailedRequests != 0 {
+		t.Fatalf("期望标记后全量未读失败计数为 0，实际 %+v", afterCount)
 	}
 
-	assertTableCount(t, db,
-		"SELECT COUNT(*) FROM request_log WHERE id = ?",
-		0,
-		validFailedID,
-	)
-	assertTableCount(t, db,
-		"SELECT COUNT(*) FROM request_log WHERE id = ?",
-		1,
-		legacySuccessID,
-	)
+	allFailures, err := ls.ListFailedRequestLogsPageV2("codex", "pid-read", 10, 0, "2026-02-25 00:00:00", "2026-02-26 00:00:00")
+	if err != nil {
+		t.Fatalf("查询全部失败日志失败: %v", err)
+	}
+	if allFailures.Total != 2 {
+		t.Fatalf("标记已读后全部失败日志仍应可查，实际 total=%d", allFailures.Total)
+	}
+
+	unreadFailures, err := ls.ListUnreadFailedRequestLogsPageV2("codex", "pid-read", 10, 0, "2026-02-25 00:00:00", "2026-02-26 00:00:00")
+	if err != nil {
+		t.Fatalf("查询未读失败日志失败: %v", err)
+	}
+	if unreadFailures.Total != 0 {
+		t.Fatalf("标记已读后未读失败日志应为空，实际 total=%d", unreadFailures.Total)
+	}
 }
 
 func insertProviderRequestLogForStorage(

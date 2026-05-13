@@ -230,6 +230,91 @@ func TestListFailedRequestLogsPageV2_FallbackToProviderNameWhenProviderIDMissing
 	}
 }
 
+func TestListUnreadFailedRequestLogsPageV2_ExcludesReadFailures(t *testing.T) {
+	useIsolatedHomeDir(t)
+
+	if err := InitDatabase(); err != nil {
+		t.Fatalf("初始化数据库失败: %v", err)
+	}
+
+	db, err := xdb.DB("default")
+	if err != nil {
+		t.Fatalf("获取数据库连接失败: %v", err)
+	}
+
+	insertRequestLogForPageTest(t, db, requestLogPageEntry{
+		Platform:     "codex",
+		Model:        "unread-failure",
+		ProviderID:   "pid-read-state",
+		Provider:     "Acme",
+		HttpCode:     503,
+		ResponseBody: `{"error":{"message":"fresh failure"}}`,
+		CreatedAt:    "2026-02-25 11:00:00",
+		TotalCost:    0.2,
+	})
+	nullReadAtID := insertRequestLogForPageTest(t, db, requestLogPageEntry{
+		Platform:     "codex",
+		Model:        "null-read-at-failure",
+		ProviderID:   "pid-read-state",
+		Provider:     "Acme",
+		HttpCode:     500,
+		ResponseBody: `{"error":{"message":"null read marker"}}`,
+		CreatedAt:    "2026-02-25 12:00:00",
+		TotalCost:    0.4,
+	})
+	if _, err := db.Exec("UPDATE request_log SET error_read_at = NULL WHERE id = ?", nullReadAtID); err != nil {
+		t.Fatalf("设置 error_read_at=NULL 失败: %v", err)
+	}
+	insertRequestLogForPageTest(t, db, requestLogPageEntry{
+		Platform:     "codex",
+		Model:        "blank-read-at-failure",
+		ProviderID:   "pid-read-state",
+		Provider:     "Acme",
+		HttpCode:     500,
+		ResponseBody: `{"error":{"message":"blank read marker"}}`,
+		CreatedAt:    "2026-02-25 09:00:00",
+		TotalCost:    0.4,
+		ErrorReadAt:  "   ",
+	})
+	insertRequestLogForPageTest(t, db, requestLogPageEntry{
+		Platform:     "codex",
+		Model:        "read-failure",
+		ProviderID:   "pid-read-state",
+		Provider:     "Acme",
+		HttpCode:     429,
+		ResponseBody: `{"error":{"message":"old failure"}}`,
+		CreatedAt:    "2026-02-25 10:00:00",
+		TotalCost:    0.3,
+		ErrorReadAt:  "2026-02-25 10:30:00",
+	})
+
+	ls := NewLogService(nil)
+	allFailures, err := ls.ListFailedRequestLogsPageV2("codex", "pid-read-state", 10, 0, "2026-02-25 00:00:00", "2026-02-26 00:00:00")
+	if err != nil {
+		t.Fatalf("ListFailedRequestLogsPageV2 调用失败: %v", err)
+	}
+	if allFailures.Total != 4 {
+		t.Fatalf("期望全部失败日志 total=4，实际 %d", allFailures.Total)
+	}
+
+	unreadFailures, err := ls.ListUnreadFailedRequestLogsPageV2("codex", "pid-read-state", 10, 0, "2026-02-25 00:00:00", "2026-02-26 00:00:00")
+	if err != nil {
+		t.Fatalf("ListUnreadFailedRequestLogsPageV2 调用失败: %v", err)
+	}
+	if unreadFailures.Total != 3 {
+		t.Fatalf("期望未读失败日志 total=3，实际 %d", unreadFailures.Total)
+	}
+	if len(unreadFailures.Items) != 3 ||
+		unreadFailures.Items[0].Model != "null-read-at-failure" ||
+		unreadFailures.Items[1].Model != "unread-failure" ||
+		unreadFailures.Items[2].Model != "blank-read-at-failure" {
+		t.Fatalf("期望返回 NULL/空/空白 error_read_at 的失败日志，实际 %+v", unreadFailures.Items)
+	}
+	if unreadFailures.Items[0].ErrorReadAt != "" {
+		t.Fatalf("未读失败日志 error_read_at 应为空，实际 %q", unreadFailures.Items[0].ErrorReadAt)
+	}
+}
+
 type requestLogPageEntry struct {
 	Platform      string
 	Model         string
@@ -240,15 +325,16 @@ type requestLogPageEntry struct {
 	ResponseTrunc bool
 	CreatedAt     string
 	TotalCost     float64
+	ErrorReadAt   string
 }
 
-func insertRequestLogForPageTest(t *testing.T, db *sql.DB, entry requestLogPageEntry) {
+func insertRequestLogForPageTest(t *testing.T, db *sql.DB, entry requestLogPageEntry) int64 {
 	t.Helper()
 	httpCode := entry.HttpCode
 	if httpCode == 0 {
 		httpCode = 200
 	}
-	_, err := db.Exec(`
+	result, err := db.Exec(`
 		INSERT INTO request_log (
 			platform,
 			model,
@@ -263,8 +349,9 @@ func insertRequestLogForPageTest(t *testing.T, db *sql.DB, entry requestLogPageE
 			total_cost,
 			response_body,
 			response_body_truncated,
+			error_read_at,
 			created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		entry.Platform,
 		entry.Model,
@@ -279,9 +366,15 @@ func insertRequestLogForPageTest(t *testing.T, db *sql.DB, entry requestLogPageE
 		entry.TotalCost,
 		entry.ResponseBody,
 		boolToInt(entry.ResponseTrunc),
+		entry.ErrorReadAt,
 		entry.CreatedAt,
 	)
 	if err != nil {
 		t.Fatalf("插入 request_log 失败: %v", err)
 	}
+	id, err := result.LastInsertId()
+	if err != nil {
+		t.Fatalf("读取 request_log 自增 ID 失败: %v", err)
+	}
+	return id
 }

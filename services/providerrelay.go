@@ -1805,6 +1805,7 @@ func ensureRequestLogTableWithDB(db *sql.DB) error {
 			response_body_truncated INTEGER DEFAULT 0,
 			payload_bytes INTEGER DEFAULT 0,
 			payload_captured INTEGER DEFAULT 0,
+			error_read_at TEXT DEFAULT '',
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		)`
 
@@ -1930,6 +1931,9 @@ func ensureRequestLogTableWithDB(db *sql.DB) error {
 	if err := ensureRequestLogColumn(db, "payload_captured", "INTEGER DEFAULT 0"); err != nil {
 		return err
 	}
+	if err := ensureRequestLogColumn(db, "error_read_at", "TEXT DEFAULT ''"); err != nil {
+		return err
+	}
 	if err := backfillRequestLogPayloadMetricsWithDB(db); err != nil {
 		return err
 	}
@@ -1943,6 +1947,12 @@ func ensureRequestLogTableWithDB(db *sql.DB) error {
 		return err
 	}
 	if err := ensureRequestLogIndex(db, "idx_request_log_platform_provider_id_created_at", "platform, provider_id, created_at"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogIndex(db, "idx_request_log_platform_provider_id_error_read_at", "platform, provider_id, error_read_at, created_at"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogIndex(db, "idx_request_log_platform_provider_error_read_at", "platform, provider, error_read_at, created_at"); err != nil {
 		return err
 	}
 
@@ -2531,6 +2541,7 @@ type ReqeustLog struct {
 	DurationSec               float64 `json:"duration_sec"`
 	FirstTokenSec             float64 `json:"first_token_sec"`
 	CreatedAt                 string  `json:"created_at"`
+	ErrorReadAt               string  `json:"error_read_at,omitempty"`
 	InputCost                 float64 `json:"input_cost"`
 	OutputCost                float64 `json:"output_cost"`
 	ReasoningCost             float64 `json:"reasoning_cost"`

@@ -22,6 +22,7 @@ export type RequestLog = {
   duration_sec?: number
   first_token_sec?: number
   created_at: string
+  error_read_at?: string
   total_cost?: number
   input_cost?: number
   output_cost?: number
@@ -55,6 +56,7 @@ type RequestLogQuery = {
   offset?: number
   startAt?: string
   endAt?: string
+  unreadOnly?: boolean
 }
 
 export const fetchRequestLogs = async (query: RequestLogQuery = {}): Promise<RequestLog[]> => {
@@ -90,7 +92,10 @@ export const fetchFailedRequestLogsPage = async (query: RequestLogQuery = {}): P
   const offset = query.offset ?? 0
   const startAt = query.startAt ?? ''
   const endAt = query.endAt ?? ''
-  return Call.ByName('codeswitch/services.LogService.ListFailedRequestLogsPageV2', platform, provider, limit, offset, startAt, endAt)
+  const method = query.unreadOnly
+    ? 'codeswitch/services.LogService.ListUnreadFailedRequestLogsPageV2'
+    : 'codeswitch/services.LogService.ListFailedRequestLogsPageV2'
+  return Call.ByName(method, platform, provider, limit, offset, startAt, endAt)
 }
 
 export type RequestLogPayloadDetail = {
@@ -297,8 +302,18 @@ export type DeleteRequestLogsByDateResult = {
   deleted_stats_day: number
 }
 
-export type DeleteRequestLogsResult = {
-  deleted_request_logs: number
+export type MarkRequestLogsReadResult = {
+  marked_request_logs: number
+}
+
+export type ProviderUnreadFailedCountResult = {
+  unread_failed_requests: number
+}
+
+export type ProviderUnreadFailedStat = {
+  provider_id?: string
+  provider: string
+  unread_failed_requests: number
 }
 
 export const deleteRequestLogsByDate = async (date: string): Promise<DeleteRequestLogsByDateResult> => {
@@ -319,17 +334,36 @@ export const clearProviderLogStorage = async (
   )
 }
 
-export const clearProviderFailedRequestLogs = async (
+export const markProviderFailedRequestLogsRead = async (
   platform: LogPlatform | '',
   providerId: string,
   provider: string,
-): Promise<DeleteRequestLogsResult> => {
+): Promise<MarkRequestLogsReadResult> => {
   return Call.ByName(
-    'codeswitch/services.LogService.ClearProviderFailedRequestLogs',
+    'codeswitch/services.LogService.MarkProviderFailedRequestLogsRead',
     platform ?? '',
     String(providerId ?? '').trim(),
     String(provider ?? '').trim(),
   )
+}
+
+export const countProviderUnreadFailedRequestLogs = async (
+  platform: LogPlatform | '',
+  providerId: string,
+  provider: string,
+): Promise<ProviderUnreadFailedCountResult> => {
+  return Call.ByName(
+    'codeswitch/services.LogService.CountProviderUnreadFailedRequestLogs',
+    platform ?? '',
+    String(providerId ?? '').trim(),
+    String(provider ?? '').trim(),
+  )
+}
+
+export const fetchProviderUnreadFailedStats = async (
+  platform: LogPlatform | '' = '',
+): Promise<ProviderUnreadFailedStat[]> => {
+  return Call.ByName('codeswitch/services.LogService.ProviderUnreadFailedStats', platform)
 }
 
 export const clearLogStats = async (): Promise<void> => {
@@ -342,6 +376,7 @@ export type ProviderDailyStat = {
   total_requests: number
   successful_requests: number
   failed_requests: number
+  unread_failed_requests?: number
   success_rate: number
   input_tokens: number
   output_tokens: number

@@ -99,7 +99,12 @@ export type ProviderQuotaDisplayItem = {
 }
 
 export type ProviderStatDisplay =
-  | { state: 'loading' | 'empty'; message: string }
+  | {
+      state: 'loading' | 'empty'
+      message: string
+      unreadFailedRequests: number
+      hasUnreadErrorLogs: boolean
+    }
   | {
       state: 'ready'
       requests: string
@@ -114,7 +119,8 @@ export type ProviderStatDisplay =
       successRateLabel: string
       successRateClass: string
       failedRequests: number
-      hasErrorLogsToday: boolean
+      unreadFailedRequests: number
+      hasUnreadErrorLogs: boolean
     }
 
 export type ProviderCostDisplayPart = {

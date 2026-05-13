@@ -745,7 +745,7 @@
 
         <button
           v-if="activeTab !== 'others' && activeTab !== 'opencode'"
-          :class="['ghost-icon', 'provider-log-btn', { 'ghost-icon-alert': hasTodayErrorLogs }]"
+          :class="['ghost-icon', 'provider-log-btn', { 'ghost-icon-alert': hasUnreadErrorLogs }]"
           :data-tooltip="t('components.main.providerLogs.buttonTooltip')"
           type="button"
           @click="$emit('open-provider-logs')"
@@ -1116,8 +1116,8 @@ const isCurrentlyActive = computed(() => (
   hostedSelectionActive.value || (!props.activeProxyState && props.viewModel.isDirectApplied)
 ))
 
-const hasTodayErrorLogs = computed(() => (
-  props.viewModel.stats.state === 'ready' && props.viewModel.stats.hasErrorLogsToday
+const hasUnreadErrorLogs = computed(() => (
+  props.viewModel.stats.hasUnreadErrorLogs
 ))
 
 const showHostedStateBadges = computed(() => props.viewModel.isLastUsed || props.viewModel.isDefaultHostedProvider)

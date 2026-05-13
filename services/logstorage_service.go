@@ -52,8 +52,8 @@ type DeleteRequestLogsByDateResult struct {
 	DeletedStatsDay    int64 `json:"deleted_stats_day"`
 }
 
-type DeleteRequestLogsResult struct {
-	DeletedRequestLogs int64 `json:"deleted_request_logs"`
+type MarkRequestLogsReadResult struct {
+	MarkedRequestLogs int64 `json:"marked_request_logs"`
 }
 
 type deleteProviderLogsTarget struct {
@@ -111,6 +111,8 @@ func (ls *LogService) GetLogStorageStats() (LogStorageStats, error) {
 			"idx_request_log_platform_created_at",
 			"idx_request_log_platform_provider_created_at",
 			"idx_request_log_platform_provider_id_created_at",
+			"idx_request_log_platform_provider_id_error_read_at",
+			"idx_request_log_platform_provider_error_read_at",
 		)
 		stats.StatsHour.Bytes = tableBytes[requestLogStatsHourlyTable]
 		stats.StatsDay.Bytes = tableBytes[requestLogStatsDailyTable]
@@ -299,34 +301,19 @@ func (ls *LogService) ClearProviderLogStorage(platform string, providerID string
 	return result, nil
 }
 
-func (ls *LogService) ClearProviderFailedRequestLogsByIDs(platform string, providerID string, provider string, ids []int64) (DeleteRequestLogsResult, error) {
-	result := DeleteRequestLogsResult{}
-	target, err := normalizeProviderLogStorageTarget(platform, providerID, provider)
-	if err != nil {
-		return result, err
-	}
-	normalizedIDs := normalizeRequestLogIDs(ids)
-	if len(normalizedIDs) == 0 {
-		return result, nil
-	}
-
-	whereClause, args := buildProviderFailedRequestLogIDsWhereClause(target, normalizedIDs)
-	return ls.deleteProviderFailedRequestLogs(whereClause, args)
-}
-
-func (ls *LogService) ClearProviderFailedRequestLogs(platform string, providerID string, provider string) (DeleteRequestLogsResult, error) {
-	result := DeleteRequestLogsResult{}
+func (ls *LogService) MarkProviderFailedRequestLogsRead(platform string, providerID string, provider string) (MarkRequestLogsReadResult, error) {
+	result := MarkRequestLogsReadResult{}
 	target, err := normalizeProviderLogStorageTarget(platform, providerID, provider)
 	if err != nil {
 		return result, err
 	}
 
-	whereClause, args := buildProviderFailedRequestLogWhereClause(target)
-	return ls.deleteProviderFailedRequestLogs(whereClause, args)
+	whereClause, args := buildProviderUnreadFailedRequestLogWhereClause(target)
+	return ls.markProviderFailedRequestLogsRead(whereClause, args)
 }
 
-func (ls *LogService) deleteProviderFailedRequestLogs(whereClause string, args []any) (DeleteRequestLogsResult, error) {
-	result := DeleteRequestLogsResult{}
+func (ls *LogService) markProviderFailedRequestLogsRead(whereClause string, args []any) (MarkRequestLogsReadResult, error) {
+	result := MarkRequestLogsReadResult{}
 	if strings.TrimSpace(whereClause) == "" {
 		return result, fmt.Errorf("empty where clause")
 	}
@@ -335,46 +322,37 @@ func (ls *LogService) deleteProviderFailedRequestLogs(whereClause string, args [
 	if err != nil {
 		return result, err
 	}
-	triggersCleaned := false
-	defer func() {
-		if !triggersCleaned {
-			return
+
+	var matched int64
+	if err := db.QueryRow("SELECT COUNT(*) FROM request_log WHERE "+whereClause, args...).Scan(&matched); err != nil {
+		if isNoSuchTableErr(err) {
+			return result, nil
 		}
-		if err := ensureRequestLogStatsTriggersWithDB(db); err != nil {
-			fmt.Printf("[WARN] ensureRequestLogStatsTriggersWithDB failed after deleting failed request_log by ids: %v\n", err)
+		return result, err
+	}
+	if matched == 0 {
+		return result, nil
+	}
+
+	now := time.Now().UTC().Format(timeLayout)
+	updateArgs := make([]any, 0, len(args)+1)
+	updateArgs = append(updateArgs, now)
+	updateArgs = append(updateArgs, args...)
+	updateSQL := "UPDATE request_log SET error_read_at = ? WHERE " + whereClause
+
+	if GlobalDBQueue != nil {
+		if err := GlobalDBQueue.Exec(updateSQL, updateArgs...); err != nil {
+			return result, err
 		}
-	}()
-	if err := cleanupRequestLogStatsTriggersWithDB(db); err != nil {
-		return result, err
-	}
-	triggersCleaned = true
-
-	tx, err := db.Begin()
-	if err != nil {
-		return result, err
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
+	} else {
+		execResult, err := db.Exec(updateSQL, updateArgs...)
+		if err != nil {
+			return result, err
 		}
-	}()
-
-	requestLogExec, err := tx.Exec(
-		"DELETE FROM request_log WHERE "+whereClause,
-		args...,
-	)
-	if err != nil {
-		return result, err
+		matched = rowsAffected(execResult)
 	}
-	result.DeletedRequestLogs = rowsAffected(requestLogExec)
 
-	if err := tx.Commit(); err != nil {
-		return result, err
-	}
-	committed = true
-
-	_, _ = db.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
+	result.MarkedRequestLogs = matched
 	return result, nil
 }
 
@@ -663,19 +641,6 @@ func buildProviderLogStorageWhereClause(target deleteProviderLogsTarget) (string
 	}, " AND "), []any{target.Platform, target.ProviderID, matchName}
 }
 
-func buildProviderFailedRequestLogIDsWhereClause(target deleteProviderLogsTarget, ids []int64) (string, []any) {
-	baseWhereClause, baseArgs := buildProviderFailedRequestLogWhereClause(target)
-	normalizedIDs := normalizeRequestLogIDs(ids)
-	placeholders := strings.TrimRight(strings.Repeat("?,", len(normalizedIDs)), ",")
-	args := make([]any, 0, len(baseArgs)+len(normalizedIDs))
-	args = append(args, baseArgs...)
-	for _, id := range normalizedIDs {
-		args = append(args, id)
-	}
-	whereClause := strings.Join([]string{baseWhereClause, "id IN (" + placeholders + ")"}, " AND ")
-	return whereClause, args
-}
-
 func buildProviderFailedRequestLogWhereClause(target deleteProviderLogsTarget) (string, []any) {
 	baseWhereClause, baseArgs := buildProviderLogStorageWhereClause(target)
 	whereClause := strings.Join([]string{
@@ -685,23 +650,13 @@ func buildProviderFailedRequestLogWhereClause(target deleteProviderLogsTarget) (
 	return whereClause, baseArgs
 }
 
-func normalizeRequestLogIDs(ids []int64) []int64 {
-	if len(ids) == 0 {
-		return nil
-	}
-	normalized := make([]int64, 0, len(ids))
-	seen := make(map[int64]struct{}, len(ids))
-	for _, id := range ids {
-		if id <= 0 {
-			continue
-		}
-		if _, ok := seen[id]; ok {
-			continue
-		}
-		seen[id] = struct{}{}
-		normalized = append(normalized, id)
-	}
-	return normalized
+func buildProviderUnreadFailedRequestLogWhereClause(target deleteProviderLogsTarget) (string, []any) {
+	baseWhereClause, baseArgs := buildProviderFailedRequestLogWhereClause(target)
+	whereClause := strings.Join([]string{
+		baseWhereClause,
+		requestLogUnreadWhereClause,
+	}, " AND ")
+	return whereClause, baseArgs
 }
 
 func deleteRequestLogStatsByProviderTx(tx *sql.Tx, table string, target deleteProviderLogsTarget) (int64, error) {

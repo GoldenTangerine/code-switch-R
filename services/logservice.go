@@ -16,6 +16,7 @@ import (
 )
 
 const timeLayout = "2006-01-02 15:04:05"
+const requestLogUnreadWhereClause = "TRIM(COALESCE(error_read_at, '')) = ''"
 
 const providerPerformanceCacheTTL = 20 * time.Second
 const providerPerformanceCacheMaxEntries = 512
@@ -63,6 +64,7 @@ var requestLogListSelectFields = []string{
 	"provider_per_call_unified_set",
 	"provider_per_call_input_set",
 	"provider_per_call_output_set",
+	"error_read_at",
 	"created_at",
 }
 
@@ -502,6 +504,7 @@ func buildRequestLogList(records []xdb.Record, pricingSnapshot *modelpricing.Ser
 			ProviderPerCallUnifiedSet: record.GetBool("provider_per_call_unified_set"),
 			ProviderPerCallInputSet:   record.GetBool("provider_per_call_input_set"),
 			ProviderPerCallOutputSet:  record.GetBool("provider_per_call_output_set"),
+			ErrorReadAt:               record.GetString("error_read_at"),
 			ResponseBody:              record.GetString("response_body"),
 			ResponseBodyTruncated:     record.GetBool("response_body_truncated"),
 		}
@@ -796,6 +799,14 @@ func (ls *LogService) ListRequestLogsPageV2(platform string, provider string, li
 }
 
 func (ls *LogService) ListFailedRequestLogsPageV2(platform string, provider string, limit int, offset int, startAt string, endAt string) (RequestLogPageResult, error) {
+	return ls.listFailedRequestLogsPageV2(platform, provider, limit, offset, startAt, endAt, false)
+}
+
+func (ls *LogService) ListUnreadFailedRequestLogsPageV2(platform string, provider string, limit int, offset int, startAt string, endAt string) (RequestLogPageResult, error) {
+	return ls.listFailedRequestLogsPageV2(platform, provider, limit, offset, startAt, endAt, true)
+}
+
+func (ls *LogService) listFailedRequestLogsPageV2(platform string, provider string, limit int, offset int, startAt string, endAt string, unreadOnly bool) (RequestLogPageResult, error) {
 	result := RequestLogPageResult{
 		Items:  []ReqeustLog{},
 		Limit:  normalizeRequestLogListLimit(limit),
@@ -806,6 +817,9 @@ func (ls *LogService) ListFailedRequestLogsPageV2(platform string, provider stri
 	filterOptions, err := buildFailedRequestLogFilterOptions(platform, startAt, endAt)
 	if err != nil {
 		return result, err
+	}
+	if unreadOnly {
+		filterOptions = append(filterOptions, xdb.WhereRaw(requestLogUnreadWhereClause))
 	}
 
 	total, err := countRecordsByProviderRef(model, filterOptions, provider)
@@ -1613,6 +1627,106 @@ func (ls *LogService) ProviderDailyStats(platform string) ([]ProviderDailyStat, 
 	return ls.ProviderStatsRangeV2(platform, "", start.Format(timeLayout), end.Format(timeLayout))
 }
 
+func (ls *LogService) CountProviderUnreadFailedRequestLogs(platform string, providerID string, provider string) (ProviderUnreadFailedCountResult, error) {
+	result := ProviderUnreadFailedCountResult{}
+	target, err := normalizeProviderLogStorageTarget(platform, providerID, provider)
+	if err != nil {
+		return result, err
+	}
+
+	whereClause, args := buildProviderUnreadFailedRequestLogWhereClause(target)
+	db, err := xdb.DB("default")
+	if err != nil {
+		return result, err
+	}
+
+	var count int64
+	if err := db.QueryRow("SELECT COUNT(*) FROM request_log WHERE "+whereClause, args...).Scan(&count); err != nil {
+		if isNoSuchTableErr(err) {
+			return result, nil
+		}
+		return result, err
+	}
+	result.UnreadFailedRequests = count
+	return result, nil
+}
+
+func (ls *LogService) ProviderUnreadFailedStats(platform string) ([]ProviderUnreadFailedStat, error) {
+	db, err := xdb.DB("default")
+	if err != nil {
+		return nil, err
+	}
+
+	providerIdentityExpr := `CASE
+		WHEN TRIM(COALESCE(provider_id, '')) <> '' THEN TRIM(provider_id)
+		WHEN TRIM(COALESCE(provider, '')) <> '' THEN TRIM(provider)
+		ELSE ''
+	END`
+	providerNameExpr := `CASE
+		WHEN TRIM(COALESCE(provider, '')) <> '' THEN TRIM(provider)
+		WHEN TRIM(COALESCE(provider_id, '')) <> '' THEN TRIM(provider_id)
+		ELSE '(unknown)'
+	END`
+	query := `
+		SELECT
+			` + providerIdentityExpr + ` AS provider_id,
+			MAX(` + providerNameExpr + `) AS provider,
+			COUNT(*) AS unread_failed_requests
+		FROM request_log
+		WHERE COALESCE(http_code, 0) >= 400
+			AND ` + requestLogUnreadWhereClause + `
+			AND (TRIM(COALESCE(provider_id, '')) <> '' OR TRIM(COALESCE(provider, '')) <> '')
+	`
+	args := make([]any, 0, 1)
+	if strings.TrimSpace(platform) != "" {
+		query += " AND platform = ?"
+		args = append(args, strings.TrimSpace(platform))
+	}
+	query += " GROUP BY " + providerIdentityExpr
+
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		if isNoSuchTableErr(err) || strings.Contains(err.Error(), "no such column") {
+			return []ProviderUnreadFailedStat{}, nil
+		}
+		return nil, err
+	}
+	defer rows.Close()
+
+	stats := make([]ProviderUnreadFailedStat, 0, 16)
+	for rows.Next() {
+		var providerID sql.NullString
+		var providerName sql.NullString
+		var unreadFailedRequests sql.NullInt64
+		if err := rows.Scan(&providerID, &providerName, &unreadFailedRequests); err != nil {
+			return nil, err
+		}
+
+		normalizedProviderID := strings.TrimSpace(providerID.String)
+		if normalizedProviderID == "" {
+			continue
+		}
+		normalizedProvider := normalizedProviderDisplayName(providerName.String)
+		stats = append(stats, ProviderUnreadFailedStat{
+			ProviderID:           normalizedProviderID,
+			Provider:             normalizedProvider,
+			UnreadFailedRequests: unreadFailedRequests.Int64,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	sort.Slice(stats, func(i, j int) bool {
+		if stats[i].UnreadFailedRequests == stats[j].UnreadFailedRequests {
+			return stats[i].Provider < stats[j].Provider
+		}
+		return stats[i].UnreadFailedRequests > stats[j].UnreadFailedRequests
+	})
+
+	return stats, nil
+}
+
 func (ls *LogService) ProviderStatsRangeV2(platform string, provider string, startAt string, endAt string) ([]ProviderDailyStat, error) {
 	start, end, err := resolveAggregationRange(startAt, endAt)
 	if err != nil {
@@ -1662,6 +1776,9 @@ func (ls *LogService) ProviderStatsRangeV2(platform string, provider string, sta
 		stat.TotalRequests += total
 		stat.SuccessfulRequests += success
 		stat.FailedRequests += fail
+		if fail > 0 && strings.TrimSpace(logEntry.ErrorReadAt) == "" {
+			stat.UnreadFailedRequests += fail
+		}
 		stat.InputTokens += int64(logEntry.InputTokens)
 		stat.OutputTokens += int64(logEntry.OutputTokens)
 		stat.ReasoningTokens += int64(logEntry.ReasoningTokens)
@@ -2110,22 +2227,33 @@ type LogSummary struct {
 }
 
 type ProviderDailyStat struct {
-	ProviderID         string  `json:"provider_id,omitempty"`
-	Provider           string  `json:"provider"`
-	TotalRequests      int64   `json:"total_requests"`
-	SuccessfulRequests int64   `json:"successful_requests"`
-	FailedRequests     int64   `json:"failed_requests"`
-	SuccessRate        float64 `json:"success_rate"`
-	InputTokens        int64   `json:"input_tokens"`
-	OutputTokens       int64   `json:"output_tokens"`
-	ReasoningTokens    int64   `json:"reasoning_tokens"`
-	CacheCreateTokens  int64   `json:"cache_create_tokens"`
-	CacheReadTokens    int64   `json:"cache_read_tokens"`
-	CostTotal          float64 `json:"cost_total"`
-	AvgFirstTokenSec   float64 `json:"avg_first_token_sec"`
-	AvgTokensPerSec    float64 `json:"avg_tokens_per_sec"`
-	TTFTSampleCount    int64   `json:"ttft_sample_count"`
-	TPSSampleCount     int64   `json:"tps_sample_count"`
+	ProviderID           string  `json:"provider_id,omitempty"`
+	Provider             string  `json:"provider"`
+	TotalRequests        int64   `json:"total_requests"`
+	SuccessfulRequests   int64   `json:"successful_requests"`
+	FailedRequests       int64   `json:"failed_requests"`
+	UnreadFailedRequests int64   `json:"unread_failed_requests"`
+	SuccessRate          float64 `json:"success_rate"`
+	InputTokens          int64   `json:"input_tokens"`
+	OutputTokens         int64   `json:"output_tokens"`
+	ReasoningTokens      int64   `json:"reasoning_tokens"`
+	CacheCreateTokens    int64   `json:"cache_create_tokens"`
+	CacheReadTokens      int64   `json:"cache_read_tokens"`
+	CostTotal            float64 `json:"cost_total"`
+	AvgFirstTokenSec     float64 `json:"avg_first_token_sec"`
+	AvgTokensPerSec      float64 `json:"avg_tokens_per_sec"`
+	TTFTSampleCount      int64   `json:"ttft_sample_count"`
+	TPSSampleCount       int64   `json:"tps_sample_count"`
+}
+
+type ProviderUnreadFailedCountResult struct {
+	UnreadFailedRequests int64 `json:"unread_failed_requests"`
+}
+
+type ProviderUnreadFailedStat struct {
+	ProviderID           string `json:"provider_id,omitempty"`
+	Provider             string `json:"provider"`
+	UnreadFailedRequests int64  `json:"unread_failed_requests"`
 }
 
 type ModelUsageStat struct {
