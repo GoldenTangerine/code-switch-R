@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -315,6 +316,52 @@ func main() {
 	var mainWindowCentered bool
 	var trayWindow application.Window
 	var systray *application.SystemTray
+	var fitWindowsMainWindowOnce sync.Once
+	var showMainWindow func(withFocus bool)
+	calculateWindowsMainWindowBounds := func() (application.Rect, bool) {
+		if runtime.GOOS != "windows" {
+			return application.Rect{}, false
+		}
+		screen := app.Screen.GetPrimary()
+		if screen == nil {
+			return application.Rect{}, false
+		}
+		workArea := screen.WorkArea
+		width := int(float64(workArea.Width) * 0.9)
+		height := int(float64(workArea.Height) * 0.88)
+
+		if width > 1440 {
+			width = 1440
+		}
+		if height > 900 {
+			height = 900
+		}
+		if workArea.Width > 0 && width > workArea.Width-120 {
+			width = workArea.Width - 120
+		}
+		if workArea.Height > 0 && height > workArea.Height-120 {
+			height = workArea.Height - 120
+		}
+		if workArea.Width > 960 && width < 960 {
+			width = 960
+		}
+		if workArea.Height > 640 && height < 640 {
+			height = 640
+		}
+		if width <= 0 {
+			width = 960
+		}
+		if height <= 0 {
+			height = 600
+		}
+
+		return application.Rect{
+			X:      workArea.X + max(0, (workArea.Width-width)/2),
+			Y:      workArea.Y + max(0, (workArea.Height-height)/2),
+			Width:  width,
+			Height: height,
+		}, true
+	}
 	createMainWindowOptions := func() application.WebviewWindowOptions {
 		options := application.WebviewWindowOptions{
 			Title:     "Code Switch R",
@@ -339,47 +386,30 @@ func main() {
 			return options
 		}
 
+		options.Width = 960
+		options.Height = 600
 		options.Hidden = false
-		options.InitialPosition = application.WindowXY
+		options.InitialPosition = application.WindowCentered
 
-		if screen := app.Screen.GetPrimary(); screen != nil {
-			workArea := screen.WorkArea
-			width := int(float64(workArea.Width) * 0.9)
-			height := int(float64(workArea.Height) * 0.88)
-
-			if width > 1440 {
-				width = 1440
-			}
-			if height > 900 {
-				height = 900
-			}
-			if workArea.Width > 0 && width > workArea.Width-120 {
-				width = workArea.Width - 120
-			}
-			if workArea.Height > 0 && height > workArea.Height-120 {
-				height = workArea.Height - 120
-			}
-			if workArea.Width > 960 && width < 960 {
-				width = 960
-			}
-			if workArea.Height > 640 && height < 640 {
-				height = 640
-			}
-			if width <= 0 {
-				width = 1280
-			}
-			if height <= 0 {
-				height = 800
-			}
-
-			options.Width = width
-			options.Height = height
-			options.X = workArea.X + max(0, (workArea.Width-width)/2)
-			options.Y = workArea.Y + max(0, (workArea.Height-height)/2)
+		if bounds, ok := calculateWindowsMainWindowBounds(); ok {
+			options.Width = bounds.Width
+			options.Height = bounds.Height
+			options.InitialPosition = application.WindowXY
+			options.X = bounds.X
+			options.Y = bounds.Y
 			mainWindowCentered = true
 		}
 
 		return options
+	}
+	fitMainWindowToWindowsWorkArea := func(win application.Window) {
+		if runtime.GOOS != "windows" || win == nil {
+			return
+		}
+		if bounds, ok := calculateWindowsMainWindowBounds(); ok {
+			win.SetBounds(bounds)
+			mainWindowCentered = true
+		}
 	}
 	createMainWindow := func() application.Window {
 		if mainWindow != nil {
@@ -391,6 +421,17 @@ func main() {
 			handleDockVisibility(dockService, false)
 			e.Cancel()
 		})
+		if runtime.GOOS == "windows" {
+			mainWindow.OnWindowEvent(events.Windows.WebViewNavigationCompleted, func(event *application.WindowEvent) {
+				fitWindowsMainWindowOnce.Do(func() {
+					go func() {
+						time.Sleep(80 * time.Millisecond)
+						fitMainWindowToWindowsWorkArea(mainWindow)
+						showMainWindow(true)
+					}()
+				})
+			})
+		}
 		return mainWindow
 	}
 	focusMainWindow := func() {
@@ -406,7 +447,7 @@ func main() {
 		}
 		win.Focus()
 	}
-	showMainWindow := func(withFocus bool) {
+	showMainWindow = func(withFocus bool) {
 		win := createMainWindow()
 		if !mainWindowCentered {
 			win.Center()
@@ -498,7 +539,7 @@ func main() {
 		showMainWindow(true)
 	})
 
-	if runtime.GOOS != "darwin" {
+	if runtime.GOOS == "linux" {
 		app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(event *application.ApplicationEvent) {
 			showMainWindow(true)
 		})
@@ -568,6 +609,11 @@ func main() {
 	}
 
 	appservice.SetApp(app)
+
+	if runtime.GOOS == "windows" {
+		createMainWindow()
+		mainWindowCentered = true
+	}
 
 	// Create a goroutine that emits an event containing the current time every second.
 	// The frontend can listen to this event and update the UI accordingly.
