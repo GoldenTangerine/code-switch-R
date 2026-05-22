@@ -317,6 +317,7 @@ func main() {
 	var trayWindow application.Window
 	var systray *application.SystemTray
 	var fitWindowsMainWindowOnce sync.Once
+	var showStartupMainWindowOnce sync.Once
 	var showMainWindow func(withFocus bool)
 	calculateWindowsMainWindowBounds := func() (application.Rect, bool) {
 		if runtime.GOOS != "windows" {
@@ -539,9 +540,11 @@ func main() {
 		showMainWindow(true)
 	})
 
-	if runtime.GOOS == "linux" {
+	if runtime.GOOS != "windows" {
 		app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(event *application.ApplicationEvent) {
-			showMainWindow(true)
+			showStartupMainWindowOnce.Do(func() {
+				showMainWindow(true)
+			})
 		})
 	}
 
