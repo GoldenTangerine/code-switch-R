@@ -315,11 +315,8 @@ func main() {
 	var mainWindowCentered bool
 	var trayWindow application.Window
 	var systray *application.SystemTray
-	createMainWindow := func() application.Window {
-		if mainWindow != nil {
-			return mainWindow
-		}
-		mainWindow = app.Window.NewWithOptions(application.WebviewWindowOptions{
+	createMainWindowOptions := func() application.WebviewWindowOptions {
+		options := application.WebviewWindowOptions{
 			Title:     "Code Switch R",
 			Width:     1700,
 			Height:    1040,
@@ -331,9 +328,64 @@ func main() {
 				Backdrop:                application.MacBackdropTranslucent,
 				TitleBar:                application.MacTitleBarHiddenInset,
 			},
-			BackgroundColour: application.NewRGB(27, 38, 54),
-			URL:              "/",
-		})
+			BackgroundColour:    application.NewRGB(27, 38, 54),
+			URL:                 "/",
+			MinimiseButtonState: application.ButtonEnabled,
+			MaximiseButtonState: application.ButtonEnabled,
+			CloseButtonState:    application.ButtonEnabled,
+		}
+
+		if runtime.GOOS != "windows" {
+			return options
+		}
+
+		options.Hidden = false
+		options.InitialPosition = application.WindowXY
+
+		if screen := app.Screen.GetPrimary(); screen != nil {
+			workArea := screen.WorkArea
+			width := int(float64(workArea.Width) * 0.9)
+			height := int(float64(workArea.Height) * 0.88)
+
+			if width > 1440 {
+				width = 1440
+			}
+			if height > 900 {
+				height = 900
+			}
+			if workArea.Width > 0 && width > workArea.Width-120 {
+				width = workArea.Width - 120
+			}
+			if workArea.Height > 0 && height > workArea.Height-120 {
+				height = workArea.Height - 120
+			}
+			if workArea.Width > 960 && width < 960 {
+				width = 960
+			}
+			if workArea.Height > 640 && height < 640 {
+				height = 640
+			}
+			if width <= 0 {
+				width = 1280
+			}
+			if height <= 0 {
+				height = 800
+			}
+
+			options.Width = width
+			options.Height = height
+			options.X = workArea.X + max(0, (workArea.Width-width)/2)
+			options.Y = workArea.Y + max(0, (workArea.Height-height)/2)
+			mainWindowCentered = true
+		}
+
+		return options
+	}
+	createMainWindow := func() application.Window {
+		if mainWindow != nil {
+			return mainWindow
+		}
+		mainWindow = app.Window.NewWithOptions(createMainWindowOptions())
 		mainWindow.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
 			mainWindow.Hide()
 			handleDockVisibility(dockService, false)
@@ -445,6 +497,12 @@ func main() {
 	app.Event.OnApplicationEvent(events.Mac.ApplicationShouldHandleReopen, func(event *application.ApplicationEvent) {
 		showMainWindow(true)
 	})
+
+	if runtime.GOOS != "darwin" {
+		app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(event *application.ApplicationEvent) {
+			showMainWindow(true)
+		})
+	}
 
 	app.Event.OnApplicationEvent(events.Mac.ApplicationDidBecomeActive, func(event *application.ApplicationEvent) {
 		if runtime.GOOS == "darwin" {
