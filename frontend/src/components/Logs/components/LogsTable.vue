@@ -199,3 +199,35 @@ defineProps<{
 
 const { t } = useI18n()
 </script>
+
+<style scoped>
+.reasoning-effort {
+  margin-left: 0.35rem;
+  flex: 0 0 auto;
+  font-weight: 700;
+}
+
+.reasoning-effort--low {
+  color: #f5c344;
+}
+
+.reasoning-effort--medium {
+  color: #6cb86e;
+}
+
+.reasoning-effort--high {
+  color: #f97316;
+}
+
+.reasoning-effort--xhigh {
+  color: #ef4444;
+}
+
+.reasoning-effort--max {
+  color: #442082;
+}
+
+.reasoning-effort--unknown {
+  color: #94a3b8;
+}
+</style>
