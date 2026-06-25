@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   getLatestResults,
@@ -299,7 +299,6 @@ function setAvailabilityMode(mode: AvailabilityMode) {
   if (typeof window !== 'undefined') {
     window.localStorage.setItem(AVAILABILITY_MODE_STORAGE_KEY, mode)
   }
-  loading.value = true
   nextRefreshIn.value = REFRESH_INTERVAL_SECONDS
   void loadData()
 }
@@ -311,7 +310,6 @@ function setLogAvailabilityRange(range: LogAvailabilityRange) {
     window.localStorage.setItem(LOG_AVAILABILITY_RANGE_STORAGE_KEY, range)
   }
   if (isLogAvailabilityMode.value) {
-    loading.value = true
     nextRefreshIn.value = REFRESH_INTERVAL_SECONDS
     void loadData()
   }
@@ -764,23 +762,51 @@ function stopTimers() {
   }
 }
 
-onMounted(async () => {
-  startThemeObserver()
+let isFirstActivation = true
+
+function attachActiveListeners() {
   window.addEventListener(PROVIDERS_UPDATED_EVENT, handleProvidersUpdated)
   window.addEventListener('keydown', handleEscape)
-  await loadData()
+  startThemeObserver()
   startRefreshTimer()
+}
+
+function detachActiveListeners() {
+  window.removeEventListener(PROVIDERS_UPDATED_EVENT, handleProvidersUpdated)
+  window.removeEventListener('keydown', handleEscape)
+  themeObserver?.disconnect()
+  themeObserver = null
+  stopTimers()
+}
+
+function closeConfigModalIfOpen() {
+  if (!showConfigModal.value) return
+  closeConfigModal()
+  unlockScroll()
+}
+
+onMounted(async () => {
+  attachActiveListeners()
+  await loadData()
+})
+
+onActivated(() => {
+  if (isFirstActivation) {
+    isFirstActivation = false
+    return
+  }
+  attachActiveListeners()
+  void loadData()
+})
+
+onDeactivated(() => {
+  detachActiveListeners()
+  closeConfigModalIfOpen()
 })
 
 onUnmounted(() => {
-  if (showConfigModal.value) {
-    unlockScroll()
-  }
-  themeObserver?.disconnect()
-  themeObserver = null
-  window.removeEventListener(PROVIDERS_UPDATED_EVENT, handleProvidersUpdated)
-  window.removeEventListener('keydown', handleEscape)
-  stopTimers()
+  detachActiveListeners()
+  closeConfigModalIfOpen()
 })
 </script>
 
@@ -914,7 +940,7 @@ onUnmounted(() => {
         </article>
       </section>
 
-      <div v-if="loading" class="availability-state-panel">
+      <div v-if="loading && providerCards.length === 0" class="availability-state-panel">
         <span class="availability-loader" aria-hidden="true"></span>
         <p>{{ t('availability.loading') }}</p>
       </div>

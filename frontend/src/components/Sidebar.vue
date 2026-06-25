@@ -333,6 +333,9 @@ function navigate(path: string) {
 
 <style scoped>
 .mac-sidebar {
+  position: relative;
+  z-index: 10;
+
   --sidebar-shell-bg: linear-gradient(
     180deg,
     color-mix(in srgb, var(--mac-surface) 82%, #05070c 18%) 0%,
