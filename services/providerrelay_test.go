@@ -564,6 +564,95 @@ func TestProviderConfigValidation(t *testing.T) {
 	}
 }
 
+func TestExtractRequestLogReasoningEffort(t *testing.T) {
+	tests := []struct {
+		name           string
+		body           string
+		requestedModel string
+		want           string
+	}{
+		{
+			name: "nested reasoning effort",
+			body: `{"reasoning":{"effort":"HIGH"}}`,
+			want: "high",
+		},
+		{
+			name: "flat x-high effort",
+			body: `{"reasoning_effort":"x-high"}`,
+			want: "xhigh",
+		},
+		{
+			name: "claude output config max",
+			body: `{"output_config":{"effort":"max"}}`,
+			want: "max",
+		},
+		{
+			name: "thinking adaptive",
+			body: `{"thinking":{"type":"adaptive"}}`,
+			want: "xhigh",
+		},
+		{
+			name: "thinking budget",
+			body: `{"thinking":{"type":"enabled","budget_tokens":5000}}`,
+			want: "medium",
+		},
+		{
+			name:           "model suffix fallback",
+			body:           `{}`,
+			requestedModel: "gpt-5.5-high",
+			want:           "high",
+		},
+		{
+			name: "gemini thinking level",
+			body: `{"generationConfig":{"thinkingConfig":{"thinkingLevel":"x-high"}}}`,
+			want: "xhigh",
+		},
+		{
+			name: "snake case thinking budget",
+			body: `{"generation_config":{"thinking_config":{"thinkingBudget":22000}}}`,
+			want: "high",
+		},
+		{
+			name: "gemini no thinking budget",
+			body: `{"thinkingConfig":{"thinkingBudget":0}}`,
+			want: "",
+		},
+		{
+			name: "unknown effort",
+			body: `{"reasoning_effort":"ultra"}`,
+			want: "ultra",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractRequestLogReasoningEffort([]byte(tt.body), tt.requestedModel)
+			if got != tt.want {
+				t.Fatalf("extractRequestLogReasoningEffort() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExtractRequestLogReasoningEffortAfterGeminiOverrides(t *testing.T) {
+	body, err := buildGeminiRequestBody([]byte(`{"contents":[{"parts":[{"text":"hi"}]}]}`), GeminiProvider{
+		RequestBodyOverrides: map[string]any{
+			"thinkingConfig": map[string]any{
+				"includeThoughts": true,
+				"thinkingBudget":  22000,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildGeminiRequestBody failed: %v", err)
+	}
+
+	got := extractRequestLogReasoningEffort(body, "gemini-2.5-pro")
+	if got != "high" {
+		t.Fatalf("extractRequestLogReasoningEffort() = %q, want %q", got, "high")
+	}
+}
+
 // ==================== 性能测试 ====================
 
 func BenchmarkIsModelSupported(b *testing.B) {

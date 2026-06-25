@@ -8,6 +8,7 @@ export type RequestLog = {
   model: string
   requested_model?: string
   response_model?: string
+  reasoning_effort?: string
   provider_id?: string
   provider: string
   http_code: number

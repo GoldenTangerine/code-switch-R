@@ -1058,6 +1058,7 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 		Provider:         provider.Name,
 		Model:            model,
 		RequestedModel:   strings.TrimSpace(requestedModel),
+		ReasoningEffort:  extractRequestLogReasoningEffort(bodyBytes, requestedModel),
 		IsStream:         isStream,
 		CapturePayload:   capturePayloadEnabled,
 		SanitizePayload:  sanitizePayloadEnabled,
@@ -1116,6 +1117,7 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 		err := GlobalDBQueueLogs.ExecBatchCtx(ctx, `
 				INSERT INTO request_log (
 					platform, model, requested_model, response_model, provider_id, provider, http_code,
+					reasoning_effort,
 					input_tokens, output_tokens, cache_create_tokens, ephemeral_5m_tokens, ephemeral_1h_tokens, cache_read_tokens,
 					reasoning_tokens, is_stream, duration_sec, first_token_sec, total_cost, group_multiplier, price_source,
 					input_cost, output_cost, reasoning_cost, cache_create_cost, cache_read_cost,
@@ -1124,7 +1126,7 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 					provider_per_call_unified, provider_per_call_input, provider_per_call_output,
 					provider_per_call_unified_set, provider_per_call_input_set, provider_per_call_output_set,
 					request_body, response_body, request_body_truncated, response_body_truncated, payload_bytes, payload_captured
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			`,
 			requestLog.Platform,
 			requestLog.Model,
@@ -1133,6 +1135,7 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 			requestLog.ProviderID,
 			requestLog.Provider,
 			requestLog.HttpCode,
+			requestLog.ReasoningEffort,
 			requestLog.InputTokens,
 			requestLog.OutputTokens,
 			requestLog.CacheCreateTokens,
@@ -1560,6 +1563,137 @@ func boolToInt(b bool) int {
 	return 0
 }
 
+func normalizeRequestLogReasoningEffort(raw string) string {
+	return normalizeRequestLogReasoningEffortValue(raw, true)
+}
+
+func normalizeKnownRequestLogReasoningEffort(raw string) string {
+	return normalizeRequestLogReasoningEffortValue(raw, false)
+}
+
+func normalizeRequestLogReasoningEffortValue(raw string, allowUnknown bool) string {
+	value := strings.ToLower(strings.TrimSpace(raw))
+	if value == "" {
+		return ""
+	}
+	compactValue := strings.NewReplacer("-", "", "_", "", " ", "").Replace(value)
+	switch compactValue {
+	case "none", "minimal":
+		return ""
+	case "low", "medium", "high", "xhigh", "max":
+		return compactValue
+	case "extrahigh":
+		return "xhigh"
+	default:
+		if allowUnknown {
+			return value
+		}
+		return ""
+	}
+}
+
+func deriveRequestLogReasoningEffortFromModel(model string) string {
+	modelID := strings.TrimSpace(model)
+	if modelID == "" {
+		return ""
+	}
+	if strings.Contains(modelID, "/") {
+		parts := strings.Split(modelID, "/")
+		modelID = parts[len(parts)-1]
+	}
+	parts := strings.FieldsFunc(strings.ToLower(modelID), func(r rune) bool {
+		return r == '-' || r == '_' || r == ' '
+	})
+	if len(parts) == 0 {
+		return ""
+	}
+	return normalizeKnownRequestLogReasoningEffort(parts[len(parts)-1])
+}
+
+func resolveReasoningEffortFromThinkingBudget(budget int64) string {
+	switch {
+	case budget == 0:
+		return "medium"
+	case budget < 0:
+		return "high"
+	case budget < 4000:
+		return "low"
+	case budget < 16000:
+		return "medium"
+	default:
+		return "high"
+	}
+}
+
+func resolveReasoningEffortFromGeminiThinkingBudget(budget int64) string {
+	if budget == 0 {
+		return ""
+	}
+	return resolveReasoningEffortFromThinkingBudget(budget)
+}
+
+func extractRequestLogReasoningEffort(body []byte, requestedModel string) string {
+	for _, path := range []string{
+		"reasoning.effort",
+		"reasoning_effort",
+		"output_config.effort",
+		"thinkingConfig.thinkingLevel",
+		"generationConfig.thinkingConfig.thinkingLevel",
+		"generationConfig.thinkingConfig.thinking_level",
+		"generation_config.thinking_config.thinking_level",
+		"generation_config.thinking_config.thinkingLevel",
+	} {
+		if effort := normalizeRequestLogReasoningEffort(gjson.GetBytes(body, path).String()); effort != "" {
+			return effort
+		}
+	}
+
+	thinkingType := strings.ToLower(strings.TrimSpace(gjson.GetBytes(body, "thinking.type").String()))
+	switch thinkingType {
+	case "adaptive":
+		return "xhigh"
+	case "enabled":
+		return resolveReasoningEffortFromThinkingBudget(gjson.GetBytes(body, "thinking.budget_tokens").Int())
+	}
+
+	for _, path := range []string{
+		"thinkingConfig.thinkingBudget",
+		"thinkingConfig.thinking_budget",
+		"generationConfig.thinkingConfig.thinkingBudget",
+		"generationConfig.thinkingConfig.thinking_budget",
+		"generation_config.thinking_config.thinkingBudget",
+		"generation_config.thinking_config.thinking_budget",
+	} {
+		if budget := gjson.GetBytes(body, path); budget.Exists() {
+			return resolveReasoningEffortFromGeminiThinkingBudget(budget.Int())
+		}
+	}
+
+	for _, path := range []string{"thinkingConfig", "generationConfig.thinkingConfig", "generation_config.thinking_config"} {
+		thinkingConfig := gjson.GetBytes(body, path)
+		if !thinkingConfig.Exists() {
+			continue
+		}
+		if thinkingConfig.Get("includeThoughts").Bool() {
+			if budget := thinkingConfig.Get("thinkingBudget"); budget.Exists() {
+				return resolveReasoningEffortFromGeminiThinkingBudget(budget.Int())
+			}
+			if budget := thinkingConfig.Get("thinking_budget"); budget.Exists() {
+				return resolveReasoningEffortFromGeminiThinkingBudget(budget.Int())
+			}
+			if level := normalizeRequestLogReasoningEffort(thinkingConfig.Get("thinkingLevel").String()); level != "" {
+				return level
+			}
+			if level := normalizeRequestLogReasoningEffort(thinkingConfig.Get("thinking_level").String()); level != "" {
+				return level
+			}
+			return "high"
+		}
+	}
+
+	return deriveRequestLogReasoningEffortFromModel(requestedModel)
+}
+
 func truncateText(value string, maxBytes int) string {
 	if maxBytes <= 0 {
 		return ""
@@ -1764,6 +1898,7 @@ func ensureRequestLogTableWithDB(db *sql.DB) error {
 		model TEXT,
 		requested_model TEXT DEFAULT '',
 		response_model TEXT DEFAULT '',
+		reasoning_effort TEXT DEFAULT '',
 		provider_id TEXT DEFAULT '',
 		provider TEXT,
 		http_code INTEGER,
@@ -1845,6 +1980,9 @@ func ensureRequestLogTableWithDB(db *sql.DB) error {
 		return err
 	}
 	if err := ensureRequestLogColumn(db, "response_model", "TEXT DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "reasoning_effort", "TEXT DEFAULT ''"); err != nil {
 		return err
 	}
 	if err := ensureRequestLogColumn(db, "provider_id", "TEXT DEFAULT ''"); err != nil {
@@ -2526,6 +2664,7 @@ type ReqeustLog struct {
 	Model                     string  `json:"model"`
 	RequestedModel            string  `json:"requested_model,omitempty"`
 	ResponseModel             string  `json:"response_model,omitempty"`
+	ReasoningEffort           string  `json:"reasoning_effort,omitempty"`
 	ProviderID                string  `json:"provider_id,omitempty"`
 	Provider                  string  `json:"provider"` // provider name
 	PriceSource               string  `json:"price_source,omitempty"`
@@ -4018,6 +4157,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 			_ = GlobalDBQueueLogs.ExecBatchCtx(ctx, `
 					INSERT INTO request_log (
 						platform, model, requested_model, response_model, provider_id, provider, http_code,
+						reasoning_effort,
 						input_tokens, output_tokens, cache_create_tokens, ephemeral_5m_tokens, ephemeral_1h_tokens, cache_read_tokens,
 						reasoning_tokens, is_stream, duration_sec, first_token_sec, total_cost, group_multiplier, price_source,
 						input_cost, output_cost, reasoning_cost, cache_create_cost, cache_read_cost,
@@ -4026,9 +4166,10 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 						provider_per_call_unified, provider_per_call_input, provider_per_call_output,
 						provider_per_call_unified_set, provider_per_call_input_set, provider_per_call_output_set,
 						request_body, response_body, request_body_truncated, response_body_truncated, payload_bytes, payload_captured
-					) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+					) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 				`,
 				requestLog.Platform, requestLog.Model, requestLog.RequestedModel, requestLog.ResponseModel, requestLog.ProviderID, requestLog.Provider, requestLog.HttpCode,
+				requestLog.ReasoningEffort,
 				requestLog.InputTokens, requestLog.OutputTokens, requestLog.CacheCreateTokens, requestLog.Ephemeral5mTokens, requestLog.Ephemeral1hTokens,
 				requestLog.CacheReadTokens, requestLog.ReasoningTokens,
 				boolToInt(requestLog.IsStream), requestLog.DurationSec, requestLog.FirstTokenSec, requestLog.TotalCost, requestLog.GroupMultiplier, requestLog.PriceSource,
@@ -4084,6 +4225,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 						lastProvider = provider.Name
 						continue
 					}
+					requestLog.ReasoningEffort = extractRequestLogReasoningEffort(currentBodyBytes, requestLog.RequestedModel)
 
 					// 同 Provider 内重试循环
 					for retryCount := 0; retryCount < maxRetryPerProvider; retryCount++ {
@@ -4202,6 +4344,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 					lastError = err
 					continue
 				}
+				requestLog.ReasoningEffort = extractRequestLogReasoningEffort(currentBodyBytes, requestLog.RequestedModel)
 
 				ok, err, responseWritten := prs.forwardGeminiRequest(c, &provider, endpoint, currentBodyBytes, isStream, requestLog)
 				if ok {

@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import type { ModelUsageStat } from '../../services/logs'
-import { buildModelShareRows, formatCurrencyParts, formatModelShareTooltipLabel } from './utils'
+import {
+  buildModelShareRows,
+  formatCurrencyParts,
+  formatModelShareTooltipLabel,
+  normalizeReasoningEffortDisplay,
+  resolveReasoningEffortTone,
+} from './utils'
 
 const MODEL_SHARE_COLORS = ['#818cf8', '#fb923c', '#34d399', '#60a5fa'] as const
 
@@ -83,5 +89,14 @@ describe('formatCurrencyParts', () => {
       fraction: '0042',
       formatted: '$0.0042',
     })
+  })
+})
+
+describe('reasoning effort helpers', () => {
+  it('normalizes and tones reasoning effort values', () => {
+    expect(normalizeReasoningEffortDisplay('x-high')).toBe('xhigh')
+    expect(normalizeReasoningEffortDisplay('MAX')).toBe('max')
+    expect(resolveReasoningEffortTone('low')).toBe('low')
+    expect(resolveReasoningEffortTone('unknown')).toBe('unknown')
   })
 })

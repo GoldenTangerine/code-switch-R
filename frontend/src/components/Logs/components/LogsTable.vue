@@ -35,7 +35,15 @@
               @blur="handlers.hideLogInfoTooltip"
               @keydown.esc="handlers.hideLogInfoTooltipImmediately"
             >
-              {{ item.model || '—' }}
+              <span class="model-name__text">{{ item.model || '—' }}</span>
+              <template v-for="reasoningEffort in [formatters.formatReasoningEffort(item)]" :key="`${item.id}-reasoning-effort`">
+                <span
+                  v-if="reasoningEffort"
+                  :class="['reasoning-effort', `reasoning-effort--${formatters.formatReasoningEffortTone(reasoningEffort)}`]"
+                >
+                  {{ reasoningEffort }}
+                </span>
+              </template>
             </span>
           </td>
           <td class="verify-cell">
@@ -144,6 +152,8 @@ type TooltipPointerEvent = MouseEvent | FocusEvent
 type LogsTableFormatters = {
   formatTime: (value?: string) => string
   formatModelInfoAriaLabel: (item: RequestLog) => string
+  formatReasoningEffort: (item: RequestLog) => string
+  formatReasoningEffortTone: (value?: string) => string
   formatVerifyInfoAriaLabel: (item: RequestLog) => string
   resolveModelVerifyStatus: (item: RequestLog) => string
   formatModelVerifyStatus: (item: RequestLog) => string

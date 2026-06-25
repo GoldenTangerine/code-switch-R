@@ -106,6 +106,8 @@ export type LogsTableTextFormatters = {
   formatPayloadDetailAriaLabel: (item: RequestLog) => string
   formatModelVerifyStatus: (item: RequestLog) => string
   formatModelInfoAriaLabel: (item: RequestLog) => string
+  formatReasoningEffort: (item: RequestLog) => string
+  formatReasoningEffortTone: (value?: string) => string
   formatVerifyInfoAriaLabel: (item: RequestLog) => string
   formatCostAriaLabel: (item: RequestLog) => string
 }
@@ -264,6 +266,33 @@ export const formatTokensPerSecond = (item: RequestLog) => {
   if (!Number.isFinite(tokensPerSecond) || tokensPerSecond <= 0) return '—'
   const precision = tokensPerSecond >= 100 ? 1 : 2
   return `${tokensPerSecond.toFixed(precision)} tokens/s`
+}
+
+export const normalizeReasoningEffortDisplay = (value?: string) => {
+  const raw = String(value ?? '').trim()
+  const normalized = raw.toLowerCase().replace(/[-_\s]/g, '')
+  switch (normalized) {
+    case 'low':
+    case 'medium':
+    case 'high':
+    case 'xhigh':
+    case 'max':
+      return normalized
+    case 'extrahigh':
+      return 'xhigh'
+    default:
+      return raw.toLowerCase()
+  }
+}
+
+export const resolveReasoningEffortTone = (value?: string) => {
+  const normalized = normalizeReasoningEffortDisplay(value)
+  if (normalized === 'low') return 'low'
+  if (normalized === 'medium') return 'medium'
+  if (normalized === 'high') return 'high'
+  if (normalized === 'xhigh') return 'xhigh'
+  if (normalized === 'max') return 'max'
+  return 'unknown'
 }
 
 export const httpCodeClass = (code: number) => {
@@ -836,7 +865,9 @@ export const buildLogsTableTextFormatters = (translate: LogsTranslate): LogsTabl
   formatModelVerifyStatus: (item: RequestLog) =>
     translate(`components.logs.table.verifyValues.${resolveModelVerifyStatus(item)}`),
   formatModelInfoAriaLabel: (item: RequestLog) =>
-    `${translate('components.logs.table.model')}: ${item.model || '—'}`,
+    `${translate('components.logs.table.model')}: ${[item.model || '—', normalizeReasoningEffortDisplay(item.reasoning_effort)].filter(Boolean).join(' ')}`,
+  formatReasoningEffort: (item: RequestLog) => normalizeReasoningEffortDisplay(item.reasoning_effort),
+  formatReasoningEffortTone: (value?: string) => resolveReasoningEffortTone(value),
   formatVerifyInfoAriaLabel: (item: RequestLog) =>
     `${translate('components.logs.table.verify')}: ${translate(`components.logs.table.verifyValues.${resolveModelVerifyStatus(item)}`)}`,
   formatCostAriaLabel: (item: RequestLog) =>

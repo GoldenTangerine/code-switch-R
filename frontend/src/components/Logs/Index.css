@@ -290,6 +290,42 @@ html.dark .log-info-tooltip__value.tone-source-builtin {
   white-space: nowrap;
 }
 
+.model-name__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.reasoning-effort {
+  margin-left: 0.35rem;
+  flex: 0 0 auto;
+  font-weight: 700;
+}
+
+.reasoning-effort--low {
+  color: #f5c344;
+}
+
+.reasoning-effort--medium {
+  color: #6cb86e;
+}
+
+.reasoning-effort--high {
+  color: #f97316;
+}
+
+.reasoning-effort--xhigh {
+  color: #ef4444;
+}
+
+.reasoning-effort--max {
+  color: #442082;
+}
+
+.reasoning-effort--unknown {
+  color: #94a3b8;
+}
+
 .model-meta-trigger,
 .verify-meta-trigger {
   cursor: help;
