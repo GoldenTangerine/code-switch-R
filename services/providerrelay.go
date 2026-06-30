@@ -1342,13 +1342,13 @@ func orderProvidersForSessionAffinity(
 	full := make([]Provider, 0, len(providers))
 	for _, provider := range providers {
 		load := providerSessionLoadFor(providerRefFromProvider(provider), providerSessionMaxSessions(provider), loads)
-		if load.LoadRate < 1 {
+		if load.BoundSessions < load.MaxSessions {
 			underCapacity = append(underCapacity, provider)
 		} else {
 			full = append(full, provider)
 		}
 	}
-	sortProvidersBySessionLoad(underCapacity, loads, func(provider Provider) (string, int) {
+	sortProvidersBySessionCapacity(underCapacity, loads, func(provider Provider) (string, int) {
 		return providerRefFromProvider(provider), providerSessionMaxSessions(provider)
 	})
 	sortProvidersBySessionLoad(full, loads, func(provider Provider) (string, int) {
@@ -1369,6 +1369,34 @@ func providerSessionLoadFor(providerID string, maxSessions int, loads map[string
 		load.LoadRate = float64(load.LoadUnits) / float64(load.MaxSessions)
 	}
 	return load
+}
+
+func providerSessionCapacityRate(load providerSessionLoad) float64 {
+	if load.MaxSessions <= 0 {
+		return 0
+	}
+	return float64(load.BoundSessions) / float64(load.MaxSessions)
+}
+
+func sortProvidersBySessionCapacity(providers []Provider, loads map[string]providerSessionLoad, identity func(Provider) (string, int)) {
+	sort.SliceStable(providers, func(i, j int) bool {
+		leftProviderID, leftMaxSessions := identity(providers[i])
+		rightProviderID, rightMaxSessions := identity(providers[j])
+		left := providerSessionLoadFor(leftProviderID, leftMaxSessions, loads)
+		right := providerSessionLoadFor(rightProviderID, rightMaxSessions, loads)
+		leftCapacityRate := providerSessionCapacityRate(left)
+		rightCapacityRate := providerSessionCapacityRate(right)
+		if leftCapacityRate != rightCapacityRate {
+			return leftCapacityRate < rightCapacityRate
+		}
+		if left.BoundSessions != right.BoundSessions {
+			return left.BoundSessions < right.BoundSessions
+		}
+		if left.ActiveRequests != right.ActiveRequests {
+			return left.ActiveRequests < right.ActiveRequests
+		}
+		return false
+	})
 }
 
 func sortProvidersBySessionLoad(providers []Provider, loads map[string]providerSessionLoad, identity func(Provider) (string, int)) {
@@ -1425,18 +1453,37 @@ func orderGeminiProvidersForSessionAffinity(
 	full := make([]GeminiProvider, 0, len(providers))
 	for _, provider := range providers {
 		load := providerSessionLoadFor(providerRefFromGeminiProvider(provider), geminiProviderSessionMaxSessions(provider), loads)
-		if load.LoadRate < 1 {
+		if load.BoundSessions < load.MaxSessions {
 			underCapacity = append(underCapacity, provider)
 		} else {
 			full = append(full, provider)
 		}
 	}
-	sortGeminiProvidersBySessionLoad(underCapacity, loads)
+	sortGeminiProvidersBySessionCapacity(underCapacity, loads)
 	sortGeminiProvidersBySessionLoad(full, loads)
 	if len(underCapacity) > 0 {
 		return append(underCapacity, full...)
 	}
 	return full
+}
+
+func sortGeminiProvidersBySessionCapacity(providers []GeminiProvider, loads map[string]providerSessionLoad) {
+	sort.SliceStable(providers, func(i, j int) bool {
+		left := providerSessionLoadFor(providerRefFromGeminiProvider(providers[i]), geminiProviderSessionMaxSessions(providers[i]), loads)
+		right := providerSessionLoadFor(providerRefFromGeminiProvider(providers[j]), geminiProviderSessionMaxSessions(providers[j]), loads)
+		leftCapacityRate := providerSessionCapacityRate(left)
+		rightCapacityRate := providerSessionCapacityRate(right)
+		if leftCapacityRate != rightCapacityRate {
+			return leftCapacityRate < rightCapacityRate
+		}
+		if left.BoundSessions != right.BoundSessions {
+			return left.BoundSessions < right.BoundSessions
+		}
+		if left.ActiveRequests != right.ActiveRequests {
+			return left.ActiveRequests < right.ActiveRequests
+		}
+		return false
+	})
 }
 
 func sortGeminiProvidersBySessionLoad(providers []GeminiProvider, loads map[string]providerSessionLoad) {

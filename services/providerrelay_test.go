@@ -1026,20 +1026,21 @@ func TestProviderSessionLoadsIncludesBoundSessionsAndActiveRequests(t *testing.T
 	}
 }
 
-func TestOrderProvidersForSessionAffinityUsesWeightedLoadRate(t *testing.T) {
+func TestOrderProvidersForSessionAffinityUsesBoundSessionCapacity(t *testing.T) {
 	providers := []Provider{
 		{ID: 1, Name: "A", SessionMaxSessions: 5},
 		{ID: 2, Name: "B", SessionMaxSessions: 5},
 		{ID: 3, Name: "C", SessionMaxSessions: 5},
 	}
 	loads := map[string]providerSessionLoad{
-		"1": {ProviderID: "1", BoundSessions: 1, ActiveRequests: 3},
-		"2": {ProviderID: "2", BoundSessions: 2},
+		"1": {ProviderID: "1", BoundSessions: 4, ActiveRequests: 3},
+		"2": {ProviderID: "2", BoundSessions: 5},
+		"3": {ProviderID: "3", BoundSessions: 4},
 	}
 
 	ordered := orderProvidersForSessionAffinity(providers, loads)
 	got := []string{providerRefFromProvider(ordered[0]), providerRefFromProvider(ordered[1]), providerRefFromProvider(ordered[2])}
-	want := []string{"3", "2", "1"}
+	want := []string{"3", "1", "2"}
 	for i := range want {
 		if got[i] != want[i] {
 			t.Fatalf("order = %v, want %v", got, want)
@@ -1092,14 +1093,14 @@ func TestReorderProviderAttemptsForSessionKeepsExistingBindingFirst(t *testing.T
 	}
 }
 
-func TestOrderGeminiProvidersForSessionAffinityUsesWeightedLoadRate(t *testing.T) {
+func TestOrderGeminiProvidersForSessionAffinityUsesBoundSessionCapacity(t *testing.T) {
 	providers := []GeminiProvider{
 		{ID: "a", Name: "A", SessionMaxSessions: 2},
 		{ID: "b", Name: "B", SessionMaxSessions: 4},
 		{ID: "c", Name: "C", SessionMaxSessions: 2},
 	}
 	loads := map[string]providerSessionLoad{
-		"a": {ProviderID: "a", BoundSessions: 1, ActiveRequests: 1},
+		"a": {ProviderID: "a", BoundSessions: 1, ActiveRequests: 3},
 		"b": {ProviderID: "b", BoundSessions: 1},
 		"c": {ProviderID: "c", BoundSessions: 2},
 	}
