@@ -160,17 +160,54 @@
               v-for="session in selectedSessionStatus.sessions"
               :key="session.sessionNumber"
               class="provider-session-row"
+              :class="{
+                'provider-session-row--calling': session.status === 'calling',
+                'provider-session-row--overflow': session.overflow,
+              }"
             >
-              <div>
-                <strong>#{{ session.sessionNumber }}</strong>
-                <span>{{ session.status === 'calling' ? t('components.main.sessionAffinity.calling') : t('components.main.sessionAffinity.idle') }}</span>
+              <div class="provider-session-row__header">
+                <div class="provider-session-row__identity">
+                  <strong>#{{ session.sessionNumber }}</strong>
+                  <span
+                    class="provider-session-status"
+                    :class="session.status === 'calling' ? 'provider-session-status--calling' : 'provider-session-status--idle'"
+                  >
+                    {{ session.status === 'calling' ? t('components.main.sessionAffinity.calling') : t('components.main.sessionAffinity.idle') }}
+                  </span>
+                </div>
+                <span
+                  v-if="session.overflow"
+                  class="provider-session-overflow"
+                >
+                  {{ t('components.main.sessionAffinity.overflow') }}
+                </span>
               </div>
-              <div>{{ t('components.main.sessionAffinity.activeRequests', { count: session.activeRequests }) }}</div>
-              <div>{{ t('components.main.sessionAffinity.provider') }}：{{ session.providerName || '-' }}</div>
-              <div>{{ t('components.main.sessionAffinity.createdAt') }}：{{ formatSessionTime(session.createdAt) }}</div>
-              <div>{{ t('components.main.sessionAffinity.lastSeen') }}：{{ formatSessionTime(session.lastSeen) }}</div>
-              <div>{{ t('components.main.sessionAffinity.remaining') }}：{{ formatSessionRemaining(session.remainingSeconds) }}</div>
-              <div>{{ t('components.main.sessionAffinity.overflow') }}：{{ session.overflow ? t('components.main.sessionAffinity.yes') : t('components.main.sessionAffinity.no') }}</div>
+              <div class="provider-session-grid">
+                <div class="provider-session-field">
+                  <span>{{ t('components.main.sessionAffinity.activeRequestsLabel') }}</span>
+                  <strong>{{ session.activeRequests }}</strong>
+                </div>
+                <div class="provider-session-field">
+                  <span>{{ t('components.main.sessionAffinity.provider') }}</span>
+                  <strong>{{ session.providerName || '-' }}</strong>
+                </div>
+                <div class="provider-session-field">
+                  <span>{{ t('components.main.sessionAffinity.createdAt') }}</span>
+                  <strong>{{ formatSessionTime(session.createdAt) }}</strong>
+                </div>
+                <div class="provider-session-field">
+                  <span>{{ t('components.main.sessionAffinity.lastSeen') }}</span>
+                  <strong>{{ formatSessionTime(session.lastSeen) }}</strong>
+                </div>
+                <div class="provider-session-field">
+                  <span>{{ t('components.main.sessionAffinity.remaining') }}</span>
+                  <strong>{{ formatSessionRemaining(session.remainingSeconds) }}</strong>
+                </div>
+                <div class="provider-session-field">
+                  <span>{{ t('components.main.sessionAffinity.overflow') }}</span>
+                  <strong>{{ session.overflow ? t('components.main.sessionAffinity.yes') : t('components.main.sessionAffinity.no') }}</strong>
+                </div>
+              </div>
             </div>
           </div>
           <div v-else class="provider-session-empty">
@@ -928,56 +965,197 @@ watch(() => providerModalState.open, (open) => {
 <style scoped>
 .provider-session-modal {
   display: grid;
-  gap: 12px;
+  gap: 14px;
 }
 
 .provider-session-list {
   display: grid;
-  gap: 10px;
+  gap: 12px;
 }
 
 .provider-session-row {
   display: grid;
-  grid-template-columns: 1.2fr 1fr 1.5fr;
-  gap: 8px 12px;
-  padding: 12px;
-  border: 1px solid rgba(148, 163, 184, 0.18);
-  border-radius: 14px;
-  background: rgba(248, 250, 252, 0.72);
-  color: rgba(15, 23, 42, 0.72);
-  font-size: 13px;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 18px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.9), rgba(248, 250, 252, 0.78)),
+    radial-gradient(circle at 0 0, rgba(20, 184, 166, 0.12), transparent 32%);
+  color: rgba(15, 23, 42, 0.76);
+  font-size: 12px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.7),
+    0 14px 32px rgba(15, 23, 42, 0.08);
+}
+
+.provider-session-row--calling {
+  border-color: rgba(20, 184, 166, 0.34);
+}
+
+.provider-session-row--overflow {
+  border-color: rgba(245, 158, 11, 0.38);
+  background:
+    linear-gradient(135deg, rgba(255, 251, 235, 0.9), rgba(248, 250, 252, 0.78)),
+    radial-gradient(circle at 0 0, rgba(245, 158, 11, 0.16), transparent 34%);
+}
+
+.provider-session-row__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.provider-session-row__identity {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .provider-session-row strong {
-  margin-right: 8px;
   color: #0f172a;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.provider-session-status,
+.provider-session-overflow {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0.04em;
+}
+
+.provider-session-status--calling {
+  color: #047857;
+  background: rgba(16, 185, 129, 0.12);
+  border-color: rgba(16, 185, 129, 0.22);
+}
+
+.provider-session-status--idle {
+  color: #475569;
+  background: rgba(148, 163, 184, 0.12);
+  border-color: rgba(148, 163, 184, 0.22);
+}
+
+.provider-session-overflow {
+  color: #b45309;
+  background: rgba(245, 158, 11, 0.14);
+  border-color: rgba(245, 158, 11, 0.3);
+}
+
+.provider-session-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.provider-session-field {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.58);
+  border: 1px solid rgba(226, 232, 240, 0.72);
+}
+
+.provider-session-field span {
+  color: rgba(71, 85, 105, 0.72);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.provider-session-field strong {
+  overflow-wrap: anywhere;
+  color: rgba(15, 23, 42, 0.92);
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .provider-session-empty {
   padding: 20px;
-  border-radius: 14px;
-  background: rgba(148, 163, 184, 0.1);
-  color: rgba(71, 85, 105, 0.82);
+  border-radius: 18px;
+  border: 1px dashed rgba(148, 163, 184, 0.28);
+  background: rgba(248, 250, 252, 0.64);
+  color: rgba(71, 85, 105, 0.78);
+  font-size: 13px;
+  font-weight: 700;
   text-align: center;
 }
 
 :global(.dark) .provider-session-row {
-  background: rgba(15, 23, 42, 0.48);
-  border-color: rgba(71, 85, 105, 0.72);
+  background:
+    linear-gradient(135deg, rgba(15, 23, 42, 0.72), rgba(2, 6, 23, 0.62)),
+    radial-gradient(circle at 0 0, rgba(45, 212, 191, 0.12), transparent 34%);
+  border-color: rgba(71, 85, 105, 0.64);
   color: rgba(255, 255, 255, 0.72);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 16px 34px rgba(0, 0, 0, 0.2);
+}
+
+:global(.dark) .provider-session-row--calling {
+  border-color: rgba(45, 212, 191, 0.36);
+}
+
+:global(.dark) .provider-session-row--overflow {
+  border-color: rgba(251, 191, 36, 0.38);
+  background:
+    linear-gradient(135deg, rgba(30, 24, 12, 0.82), rgba(2, 6, 23, 0.62)),
+    radial-gradient(circle at 0 0, rgba(251, 191, 36, 0.14), transparent 34%);
 }
 
 :global(.dark) .provider-session-row strong {
   color: rgba(255, 255, 255, 0.92);
 }
 
+:global(.dark) .provider-session-status--calling {
+  color: #a7f3d0;
+  background: rgba(16, 185, 129, 0.16);
+  border-color: rgba(52, 211, 153, 0.26);
+}
+
+:global(.dark) .provider-session-status--idle {
+  color: #cbd5e1;
+  background: rgba(148, 163, 184, 0.12);
+  border-color: rgba(148, 163, 184, 0.2);
+}
+
+:global(.dark) .provider-session-overflow {
+  color: #fde68a;
+  background: rgba(245, 158, 11, 0.16);
+  border-color: rgba(251, 191, 36, 0.28);
+}
+
+:global(.dark) .provider-session-field {
+  background: rgba(15, 23, 42, 0.52);
+  border-color: rgba(71, 85, 105, 0.42);
+}
+
+:global(.dark) .provider-session-field span {
+  color: rgba(203, 213, 225, 0.62);
+}
+
+:global(.dark) .provider-session-field strong {
+  color: rgba(248, 250, 252, 0.92);
+}
+
 :global(.dark) .provider-session-empty {
   background: rgba(15, 23, 42, 0.52);
+  border-color: rgba(71, 85, 105, 0.58);
   color: rgba(255, 255, 255, 0.62);
 }
 
 @media (max-width: 720px) {
-  .provider-session-row {
+  .provider-session-grid {
     grid-template-columns: 1fr;
   }
 }

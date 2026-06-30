@@ -50,6 +50,21 @@ func TestCaptureRequestLogRequestBody_RespectsSanitizeSwitch(t *testing.T) {
 	}
 }
 
+func TestCaptureRequestLogRequestBody_AlwaysRedactsSessionIdentifiers(t *testing.T) {
+	body := []byte(`{"metadata":{"user_id":"user-secret","thread_id":"thread-secret"},"messages":[{"tool_calls":[{"id":"call-secret","type":"function","function":{"name":"x"}}]},{"role":"tool","tool_call_id":"call-secret","content":"ok"}]}`)
+
+	rawLog := &ReqeustLog{
+		CapturePayload:  true,
+		SanitizePayload: false,
+	}
+	captureRequestLogRequestBody(rawLog, body)
+	for _, secret := range []string{"user-secret", "thread-secret", "call-secret"} {
+		if strings.Contains(rawLog.RequestBody, secret) {
+			t.Fatalf("关闭通用脱敏时仍必须隐藏会话标识 %q: %s", secret, rawLog.RequestBody)
+		}
+	}
+}
+
 func TestMaterializeRequestLogResponseBody_RespectsSanitizeSwitch(t *testing.T) {
 	chunk := []byte(`{"authorization":"Bearer xyz-token","ok":true}`)
 

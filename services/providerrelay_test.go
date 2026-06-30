@@ -3,6 +3,7 @@ package services
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/tidwall/gjson"
 )
@@ -653,6 +654,165 @@ func TestExtractRequestLogReasoningEffortAfterGeminiOverrides(t *testing.T) {
 	}
 }
 
+func TestDeriveCodexThreadSessionHash(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{
+			name: "thread id",
+			body: `{"thread_id":"thread-a"}`,
+			want: shortSHA256Hex("codex.thread_id=thread-a"),
+		},
+		{
+			name: "thread context id",
+			body: `{"id":"thread-a","cwd":"/repo"}`,
+			want: shortSHA256Hex("codex.thread_context.id=thread-a"),
+		},
+		{
+			name: "response id is ignored",
+			body: `{"id":"resp_abc","output":[]}`,
+			want: "",
+		},
+		{
+			name: "thread id before session id",
+			body: `{"session_id":"sess-a","thread_id":"thread-a"}`,
+			want: shortSHA256Hex("codex.thread_id=thread-a"),
+		},
+		{
+			name: "nested params cwd",
+			body: `{"params":{"cwd":"/repo","archived":false}}`,
+			want: shortSHA256Hex("codex.cwd=/repo"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := deriveCodexThreadSessionHash([]byte(tt.body))
+			if got != tt.want {
+				t.Fatalf("deriveCodexThreadSessionHash() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDeriveToolPairSessionHash(t *testing.T) {
+	tests := []struct {
+		name     string
+		platform string
+		body     string
+		want     string
+	}{
+		{
+			name:     "claude tool use and result pair",
+			platform: "claude",
+			body:     `{"messages":[{"role":"assistant","content":[{"type":"tool_use","id":"toolu_1","name":"Read"}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"ok"}]}]}`,
+			want:     toolSessionHash("claude", []string{"toolu_1"}),
+		},
+		{
+			name:     "claude only tool use ignored",
+			platform: "claude",
+			body:     `{"messages":[{"role":"assistant","content":[{"type":"tool_use","id":"toolu_1","name":"Read"}]}]}`,
+			want:     "",
+		},
+		{
+			name:     "claude only tool result ignored",
+			platform: "claude",
+			body:     `{"messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"ok"}]}]}`,
+			want:     "",
+		},
+		{
+			name:     "responses function call and output pair",
+			platform: "codex",
+			body:     `{"input":[{"type":"function_call","call_id":"call_1","name":"shell"},{"type":"function_call_output","call_id":"call_1","output":"ok"}]}`,
+			want:     toolSessionHash("codex", []string{"call_1"}),
+		},
+		{
+			name:     "chat tool call and role tool pair",
+			platform: "codex",
+			body:     `{"messages":[{"role":"assistant","tool_calls":[{"id":"call_2","type":"function","function":{"name":"shell"}}]},{"role":"tool","tool_call_id":"call_2","content":"ok"}]}`,
+			want:     toolSessionHash("codex", []string{"call_2"}),
+		},
+		{
+			name:     "nested body tool pair",
+			platform: "claude",
+			body:     `{"body":{"messages":[{"content":[{"type":"tool_use","id":"toolu_2"},{"type":"tool_result","tool_use_id":"toolu_2"}]}]}}`,
+			want:     toolSessionHash("claude", []string{"toolu_2"}),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := deriveToolPairSessionHash(tt.platform, []byte(tt.body))
+			if got != tt.want {
+				t.Fatalf("deriveToolPairSessionHash() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestToolResponseSessionBinding(t *testing.T) {
+	relay := NewProviderRelayService(nil, nil, nil, nil, nil, nil, "")
+	provider := Provider{
+		ID:                 1,
+		Name:               "Provider A",
+		SessionMaxSessions: 5,
+		SessionTTLMinutes:  5,
+	}
+	response := `{"output":[{"type":"function_call","call_id":"call_1","name":"shell"}]}`
+
+	collector := &sessionAffinityToolResponseCollector{
+		prs:      relay,
+		kind:     "codex",
+		provider: provider,
+		callIDs:  map[string]bool{},
+	}
+	collector.observePayload(response)
+	sessionHash := toolSessionHash("codex", []string{"call_1"})
+	if binding := relay.sessionAffinity[sessionAffinityStateKey("codex", sessionHash)]; binding != nil {
+		t.Fatalf("响应完成前不应写入 confirmed binding，got %#v", binding)
+	}
+	collector.commit()
+
+	binding := relay.sessionAffinity[sessionAffinityStateKey("codex", sessionHash)]
+	if binding == nil || !binding.Confirmed || binding.ProviderID != "1" {
+		t.Fatalf("响应侧工具调用应补充 confirmed binding，got %#v", binding)
+	}
+
+	body := []byte(`{"input":[{"type":"function_call_output","call_id":"call_1","output":"ok"}]}`)
+	got := relay.deriveRelaySessionHash("codex", body)
+	if got != sessionHash {
+		t.Fatalf("后续工具结果应命中响应侧注册的会话 hash，got %q want %q", got, sessionHash)
+	}
+}
+
+func TestToolResponseCollectorSkipsWhenOriginalRequestHasSession(t *testing.T) {
+	appSettings := &AppSettingsService{path: t.TempDir() + "/settings.json"}
+	if _, err := appSettings.SaveAppSettings(AppSettings{
+		SessionAffinity: map[string]bool{"claude": true},
+	}); err != nil {
+		t.Fatalf("保存测试设置失败: %v", err)
+	}
+	relay := NewProviderRelayService(nil, nil, nil, nil, appSettings, nil, "")
+	plan := providerRequestPlan{
+		OriginalBodyBytes: []byte(`{"metadata":{"session_id":"session-a"}}`),
+		BodyBytes:         []byte(`{"input":[]}`),
+	}
+
+	collector := relay.newSessionAffinityToolResponseCollector("claude", Provider{ID: 1, Name: "Provider A"}, plan)
+	if collector != nil {
+		t.Fatalf("原始请求已有 sessionHash 时不应创建响应侧工具会话 collector")
+	}
+}
+
+func TestExtractResponseToolCallIDsIgnoresPlainResponseID(t *testing.T) {
+	got := extractResponseToolCallIDs(`{"id":"resp_abc","output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}`)
+	if len(got) != 0 {
+		t.Fatalf("普通响应 id 不应被当作工具调用会话，got %#v", got)
+	}
+}
+
 // ==================== 性能测试 ====================
 
 func BenchmarkIsModelSupported(b *testing.B) {
@@ -827,6 +987,130 @@ func TestBeginSessionProviderRequestSkipsDifferentProviderDuringActiveMigration(
 	binding := relay.sessionAffinity[sessionAffinityStateKey(platform, sessionHash)]
 	if binding == nil || binding.ProviderID != "provider-a" || binding.ActiveRequests != 1 {
 		t.Fatalf("不应把计数或 provider 改到错误 provider，got %#v", binding)
+	}
+}
+
+func TestProviderSessionLoadsIncludesBoundSessionsAndActiveRequests(t *testing.T) {
+	relay := NewProviderRelayService(nil, nil, nil, nil, nil, nil, "")
+	platform := "claude"
+	relay.sessionAffinity[sessionAffinityStateKey(platform, "session-a")] = &providerSessionBinding{
+		Platform:       platform,
+		SessionHash:    "session-a",
+		ProviderID:     "provider-a",
+		LastSeen:       time.Now(),
+		ActiveRequests: 2,
+		Confirmed:      true,
+	}
+	relay.sessionAffinity[sessionAffinityStateKey(platform, "session-b")] = &providerSessionBinding{
+		Platform:    platform,
+		SessionHash: "session-b",
+		ProviderID:  "provider-a",
+		LastSeen:    time.Now(),
+		Pending:     true,
+	}
+	relay.sessionAffinity[sessionAffinityStateKey(platform, "session-c")] = &providerSessionBinding{
+		Platform:       platform,
+		SessionHash:    "session-c",
+		ProviderID:     "provider-b",
+		LastSeen:       time.Now(),
+		ActiveRequests: 1,
+		Confirmed:      true,
+	}
+
+	loads := relay.providerSessionLoads(platform)
+	if got := loads["provider-a"]; got.BoundSessions != 2 || got.ActiveRequests != 2 {
+		t.Fatalf("provider-a load = %#v, want bound=2 active=2", got)
+	}
+	if got := loads["provider-b"]; got.BoundSessions != 1 || got.ActiveRequests != 1 {
+		t.Fatalf("provider-b load = %#v, want bound=1 active=1", got)
+	}
+}
+
+func TestOrderProvidersForSessionAffinityUsesWeightedLoadRate(t *testing.T) {
+	providers := []Provider{
+		{ID: 1, Name: "A", SessionMaxSessions: 5},
+		{ID: 2, Name: "B", SessionMaxSessions: 5},
+		{ID: 3, Name: "C", SessionMaxSessions: 5},
+	}
+	loads := map[string]providerSessionLoad{
+		"1": {ProviderID: "1", BoundSessions: 1, ActiveRequests: 3},
+		"2": {ProviderID: "2", BoundSessions: 2},
+	}
+
+	ordered := orderProvidersForSessionAffinity(providers, loads)
+	got := []string{providerRefFromProvider(ordered[0]), providerRefFromProvider(ordered[1]), providerRefFromProvider(ordered[2])}
+	want := []string{"3", "2", "1"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("order = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestOrderProvidersForSessionAffinityFallsBackToLowestLoadRateWhenAllFull(t *testing.T) {
+	providers := []Provider{
+		{ID: 1, Name: "A", SessionMaxSessions: 2},
+		{ID: 2, Name: "B", SessionMaxSessions: 4},
+		{ID: 3, Name: "C", SessionMaxSessions: 3},
+	}
+	loads := map[string]providerSessionLoad{
+		"1": {ProviderID: "1", BoundSessions: 2, ActiveRequests: 1},
+		"2": {ProviderID: "2", BoundSessions: 4, ActiveRequests: 1},
+		"3": {ProviderID: "3", BoundSessions: 3, ActiveRequests: 3},
+	}
+
+	ordered := orderProvidersForSessionAffinity(providers, loads)
+	got := []string{providerRefFromProvider(ordered[0]), providerRefFromProvider(ordered[1]), providerRefFromProvider(ordered[2])}
+	want := []string{"2", "1", "3"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("order = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestReorderProviderAttemptsForSessionKeepsExistingBindingFirst(t *testing.T) {
+	relay := NewProviderRelayService(nil, nil, nil, nil, nil, nil, "")
+	platform := "claude"
+	sessionHash := "session-existing"
+	relay.sessionAffinity[sessionAffinityStateKey(platform, sessionHash)] = &providerSessionBinding{
+		Platform:    platform,
+		SessionHash: sessionHash,
+		ProviderID:  "2",
+		LastSeen:    time.Now(),
+		Confirmed:   true,
+	}
+	providers := []Provider{
+		{ID: 1, Name: "A", SessionMaxSessions: 1},
+		{ID: 2, Name: "B", SessionMaxSessions: 1},
+		{ID: 3, Name: "C", SessionMaxSessions: 1},
+	}
+
+	ordered := relay.reorderProviderAttemptsForSession(platform, providers, sessionHash, true)
+	if providerRefFromProvider(ordered[0]) != "2" {
+		t.Fatalf("已绑定会话应优先原 provider，got %s", ordered[0].Name)
+	}
+}
+
+func TestOrderGeminiProvidersForSessionAffinityUsesWeightedLoadRate(t *testing.T) {
+	providers := []GeminiProvider{
+		{ID: "a", Name: "A", SessionMaxSessions: 2},
+		{ID: "b", Name: "B", SessionMaxSessions: 4},
+		{ID: "c", Name: "C", SessionMaxSessions: 2},
+	}
+	loads := map[string]providerSessionLoad{
+		"a": {ProviderID: "a", BoundSessions: 1, ActiveRequests: 1},
+		"b": {ProviderID: "b", BoundSessions: 1},
+		"c": {ProviderID: "c", BoundSessions: 2},
+	}
+
+	ordered := orderGeminiProvidersForSessionAffinity(providers, loads)
+	got := []string{providerRefFromGeminiProvider(ordered[0]), providerRefFromGeminiProvider(ordered[1]), providerRefFromGeminiProvider(ordered[2])}
+	want := []string{"b", "a", "c"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("gemini order = %v, want %v", got, want)
+		}
 	}
 }
 

@@ -1221,9 +1221,16 @@
 
 .provider-session-pill {
   cursor: pointer;
+  min-height: 20px;
+  padding: 0 8px;
+  border-radius: 7px;
   color: #0f766e;
   background: rgba(20, 184, 166, 0.1);
   border-color: rgba(20, 184, 166, 0.2);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.04em;
 }
 
 .provider-session-pill:hover {

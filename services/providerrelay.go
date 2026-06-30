@@ -56,6 +56,8 @@ type ProviderRelayService struct {
 	sessionAffinity     map[string]*providerSessionBinding
 	nextSessionNumber   int64
 	nextSessionAttempt  int64
+	toolSessionMu       sync.Mutex
+	toolSessions        map[string]toolSessionBinding
 }
 
 // errClientAbort 表示客户端中断连接，不应计入 provider 失败次数
@@ -100,6 +102,8 @@ var (
 	requestLogAuthorizationBearerPattern   = regexp.MustCompile(`(?i)(authorization\s*[:=]\s*bearer\s+)[^\s",]+`)
 	requestLogSensitiveQueryValuePattern   = regexp.MustCompile(`(?i)((?:api[_-]?key|x-api-key|x-goog-api-key|auth[_-]?token|access[_-]?token)=)[^&\s]+`)
 	requestLogSensitiveKeywordQuickPattern = regexp.MustCompile(`(?i)(api[_-]?key|x-api-key|x-goog-api-key|authorization|auth[_-]?token|access[_-]?token|refresh[_-]?token|password|secret)`)
+	requestLogSessionIDJSONValuePattern    = regexp.MustCompile(`(?i)("(?:id|user_id|userId|session_id|sessionId|conversation_id|conversationId|thread_id|threadId|parent_thread_id|parentThreadId|rollout_path|rolloutPath|tool_call_id|toolCallId|call_id|callId|tool_use_id|toolUseId|previous_response_id|previousResponseId|response_id|responseId)"\s*:\s*)("[^"]*"|-?\d+|true|false|null)`)
+	requestLogSessionIDQuickPattern        = regexp.MustCompile(`(?i)(user_id|userId|session_id|sessionId|conversation_id|conversationId|thread_id|threadId|parent_thread_id|parentThreadId|rollout_path|rolloutPath|tool_call_id|toolCallId|call_id|callId|tool_use_id|toolUseId|previous_response_id|previousResponseId|response_id|responseId|"id"\s*:)`)
 )
 
 var (
@@ -165,6 +169,27 @@ type ProviderSessionStatus struct {
 	ActiveSessions int                     `json:"activeSessions"`
 	MaxSessions    int                     `json:"maxSessions"`
 	Sessions       []ProviderSessionDetail `json:"sessions"`
+}
+
+type providerSessionLoad struct {
+	ProviderID     string
+	BoundSessions  int
+	ActiveRequests int
+	MaxSessions    int
+	LoadUnits      int
+	LoadRate       float64
+}
+
+type toolSessionBinding struct {
+	SessionHash string
+	ExpiresAt   time.Time
+}
+
+type sessionAffinityToolResponseCollector struct {
+	prs      *ProviderRelayService
+	kind     string
+	provider Provider
+	callIDs  map[string]bool
 }
 
 // upstreamErrorResponse 保存上游非 2xx 响应，供“最终失败”场景透传给客户端
@@ -291,6 +316,7 @@ func NewProviderRelayService(providerService *ProviderService, geminiService *Ge
 		rrLastStart:     make(map[string]string),
 		claudeResponses: make(map[string]claudeResponsesSessionBinding),
 		sessionAffinity: make(map[string]*providerSessionBinding),
+		toolSessions:    make(map[string]toolSessionBinding),
 	}
 }
 
@@ -632,6 +658,10 @@ func providerSessionStatusKey(platform string, providerID string) string {
 }
 
 func deriveRelaySessionHash(bodyBytes []byte) string {
+	return deriveMetadataRelaySessionHash(bodyBytes)
+}
+
+func deriveMetadataRelaySessionHash(bodyBytes []byte) string {
 	metadata := gjson.GetBytes(bodyBytes, "metadata")
 	if !metadata.Exists() {
 		return ""
@@ -662,6 +692,268 @@ func deriveRelaySessionHash(bodyBytes []byte) string {
 	return ""
 }
 
+func (prs *ProviderRelayService) deriveRelaySessionHash(platform string, bodyBytes []byte) string {
+	if hash := deriveMetadataRelaySessionHash(bodyBytes); hash != "" {
+		return hash
+	}
+	platform = strings.TrimSpace(platform)
+	if platform == "codex" {
+		if hash := deriveCodexThreadSessionHash(bodyBytes); hash != "" {
+			return hash
+		}
+	}
+	if hash := deriveToolPairSessionHash(platform, bodyBytes); hash != "" {
+		return hash
+	}
+	if prs != nil {
+		if hash := prs.lookupToolSessionHash(platform, extractToolOutputCallIDs(bodyBytes)); hash != "" {
+			return hash
+		}
+	}
+	return ""
+}
+
+func deriveCodexThreadSessionHash(bodyBytes []byte) string {
+	root := gjson.ParseBytes(bodyBytes)
+	for _, candidate := range relayStructuredSessionRoots(root) {
+		if !candidate.Exists() || !candidate.IsObject() {
+			continue
+		}
+		if hash := deriveCodexThreadSessionHashFromObject(candidate); hash != "" {
+			return hash
+		}
+	}
+	return ""
+}
+
+func relayStructuredSessionRoots(root gjson.Result) []gjson.Result {
+	return []gjson.Result{
+		root,
+		root.Get("metadata"),
+		root.Get("thread"),
+		root.Get("session"),
+		root.Get("conversation"),
+		root.Get("extra"),
+		root.Get("body"),
+		root.Get("params"),
+		root.Get("thread_metadata"),
+		root.Get("request"),
+		root.Get("payload"),
+	}
+}
+
+func deriveCodexThreadSessionHashFromObject(obj gjson.Result) string {
+	if value := firstNonEmptyGJSON(obj, "thread_id", "threadId"); value != "" {
+		return shortSHA256Hex("codex.thread_id=" + value)
+	}
+	if id := strings.TrimSpace(obj.Get("id").String()); id != "" && codexObjectLooksLikeThreadContext(obj) {
+		return shortSHA256Hex("codex.thread_context.id=" + id)
+	}
+	if value := firstNonEmptyGJSON(obj, "session_id", "sessionId"); value != "" {
+		return shortSHA256Hex("codex.session_id=" + value)
+	}
+	if value := firstNonEmptyGJSON(obj, "parent_thread_id", "parentThreadId"); value != "" {
+		return shortSHA256Hex("codex.parent_thread_id=" + value)
+	}
+	if value := strings.TrimSpace(obj.Get("cwd").String()); value != "" && codexObjectLooksLikeThreadContext(obj) {
+		return shortSHA256Hex("codex.cwd=" + value)
+	}
+	if value := firstNonEmptyGJSON(obj, "rollout_path", "rolloutPath"); value != "" {
+		return shortSHA256Hex("codex.rollout_path=" + value)
+	}
+	return ""
+}
+
+func codexObjectLooksLikeThreadContext(obj gjson.Result) bool {
+	for _, path := range []string{
+		"thread_id",
+		"threadId",
+		"session_id",
+		"sessionId",
+		"parent_thread_id",
+		"parentThreadId",
+		"cwd",
+		"rollout_path",
+		"rolloutPath",
+		"archived",
+		"archived_at",
+		"archivedAt",
+	} {
+		if obj.Get(path).Exists() {
+			return true
+		}
+	}
+	return false
+}
+
+func firstNonEmptyGJSON(obj gjson.Result, paths ...string) string {
+	for _, path := range paths {
+		if value := strings.TrimSpace(obj.Get(path).String()); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func deriveToolPairSessionHash(platform string, bodyBytes []byte) string {
+	callIDs := intersectStringSets(extractToolCallIDs(bodyBytes), extractToolOutputCallIDs(bodyBytes))
+	if len(callIDs) == 0 {
+		return ""
+	}
+	return toolSessionHash(platform, callIDs)
+}
+
+func extractToolCallIDs(bodyBytes []byte) []string {
+	root := gjson.ParseBytes(bodyBytes)
+	ids := make([]string, 0)
+	for _, candidate := range relayStructuredSessionRoots(root) {
+		collectToolCallIDs(candidate.Get("messages"), &ids)
+		collectToolCallIDs(candidate.Get("input"), &ids)
+		collectToolCallIDs(candidate.Get("output"), &ids)
+	}
+	return normalizedUniqueStrings(ids)
+}
+
+func collectToolCallIDs(value gjson.Result, ids *[]string) {
+	if !value.Exists() {
+		return
+	}
+	switch {
+	case value.IsArray():
+		for _, item := range value.Array() {
+			collectToolCallIDs(item, ids)
+		}
+	case value.IsObject():
+		itemType := strings.TrimSpace(value.Get("type").String())
+		switch itemType {
+		case "tool_use", "function_call":
+			if id := firstNonEmptyGJSON(value, "call_id", "id"); id != "" {
+				*ids = append(*ids, id)
+			}
+		case "function":
+			if value.Get("function").Exists() {
+				if id := firstNonEmptyGJSON(value, "call_id", "id"); id != "" {
+					*ids = append(*ids, id)
+				}
+			}
+		}
+		collectToolCallIDs(value.Get("content"), ids)
+		collectToolCallIDs(value.Get("tool_calls"), ids)
+	}
+}
+
+func extractToolOutputCallIDs(bodyBytes []byte) []string {
+	root := gjson.ParseBytes(bodyBytes)
+	ids := make([]string, 0)
+	for _, candidate := range relayStructuredSessionRoots(root) {
+		collectToolOutputCallIDs(candidate.Get("messages"), &ids)
+		collectToolOutputCallIDs(candidate.Get("input"), &ids)
+		collectToolOutputCallIDs(candidate.Get("output"), &ids)
+	}
+	return normalizedUniqueStrings(ids)
+}
+
+func collectToolOutputCallIDs(value gjson.Result, ids *[]string) {
+	if !value.Exists() {
+		return
+	}
+	switch {
+	case value.IsArray():
+		for _, item := range value.Array() {
+			collectToolOutputCallIDs(item, ids)
+		}
+	case value.IsObject():
+		itemType := strings.TrimSpace(value.Get("type").String())
+		switch itemType {
+		case "tool_result":
+			if id := firstNonEmptyGJSON(value, "tool_use_id", "call_id", "id"); id != "" {
+				*ids = append(*ids, id)
+			}
+		case "function_call_output":
+			if id := firstNonEmptyGJSON(value, "call_id", "id"); id != "" {
+				*ids = append(*ids, id)
+			}
+		}
+		if strings.TrimSpace(value.Get("role").String()) == "tool" {
+			if id := strings.TrimSpace(value.Get("tool_call_id").String()); id != "" {
+				*ids = append(*ids, id)
+			}
+		}
+		collectToolOutputCallIDs(value.Get("content"), ids)
+	}
+}
+
+func extractResponseToolCallIDs(payload string) []string {
+	trimmed := strings.TrimSpace(payload)
+	if trimmed == "" || !gjson.Valid(trimmed) {
+		return nil
+	}
+	root := gjson.Parse(trimmed)
+	ids := make([]string, 0)
+	collectToolCallIDs(root.Get("output"), &ids)
+	collectToolCallIDs(root.Get("response.output"), &ids)
+	collectToolCallIDs(root.Get("message.content"), &ids)
+	collectToolCallIDs(root.Get("content"), &ids)
+	collectToolCallIDs(root.Get("content_block"), &ids)
+	collectToolCallIDs(root.Get("item"), &ids)
+	for _, choice := range root.Get("choices").Array() {
+		collectToolCallIDs(choice.Get("delta.tool_calls"), &ids)
+		collectToolCallIDs(choice.Get("message.tool_calls"), &ids)
+	}
+	return normalizedUniqueStrings(ids)
+}
+
+func normalizedUniqueStrings(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		result = append(result, value)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func intersectStringSets(left []string, right []string) []string {
+	if len(left) == 0 || len(right) == 0 {
+		return nil
+	}
+	rightSet := make(map[string]bool, len(right))
+	for _, value := range right {
+		rightSet[value] = true
+	}
+	matched := make([]string, 0, len(left))
+	for _, value := range left {
+		if rightSet[value] {
+			matched = append(matched, value)
+		}
+	}
+	return normalizedUniqueStrings(matched)
+}
+
+func toolSessionHash(platform string, callIDs []string) string {
+	ids := normalizedUniqueStrings(callIDs)
+	if len(ids) == 0 {
+		return ""
+	}
+	return shortSHA256Hex("tool-session:" + strings.TrimSpace(platform) + ":" + strings.Join(ids, "|"))
+}
+
+func toolSessionCallKey(platform string, callID string) string {
+	callID = strings.TrimSpace(callID)
+	if callID == "" {
+		return ""
+	}
+	return strings.TrimSpace(platform) + "\x00" + shortSHA256Hex("tool-call-id="+callID)
+}
+
 func (prs *ProviderRelayService) isSessionAffinityEnabled(platform string) bool {
 	if prs == nil || prs.appSettings == nil {
 		return false
@@ -684,6 +976,90 @@ func (prs *ProviderRelayService) sweepExpiredSessionAffinityLocked(now time.Time
 			delete(prs.sessionAffinity, key)
 		}
 	}
+}
+
+func (prs *ProviderRelayService) sweepExpiredToolSessionsLocked(now time.Time) {
+	for key, binding := range prs.toolSessions {
+		if binding.SessionHash == "" || (!binding.ExpiresAt.IsZero() && now.After(binding.ExpiresAt)) {
+			delete(prs.toolSessions, key)
+		}
+	}
+}
+
+func (prs *ProviderRelayService) lookupToolSessionHash(platform string, callIDs []string) string {
+	if prs == nil || len(callIDs) == 0 {
+		return ""
+	}
+	now := time.Now()
+	prs.toolSessionMu.Lock()
+	defer prs.toolSessionMu.Unlock()
+	prs.sweepExpiredToolSessionsLocked(now)
+	for _, callID := range normalizedUniqueStrings(callIDs) {
+		key := toolSessionCallKey(platform, callID)
+		if key == "" {
+			continue
+		}
+		if binding := prs.toolSessions[key]; binding.SessionHash != "" {
+			return binding.SessionHash
+		}
+	}
+	return ""
+}
+
+func (prs *ProviderRelayService) registerToolSessionCalls(platform string, sessionHash string, callIDs []string, ttlMinutes int) {
+	if prs == nil || strings.TrimSpace(sessionHash) == "" || len(callIDs) == 0 {
+		return
+	}
+	now := time.Now()
+	expiresAt := now.Add(time.Duration(normalizeSessionTTLMinutes(ttlMinutes)) * time.Minute)
+	prs.toolSessionMu.Lock()
+	defer prs.toolSessionMu.Unlock()
+	if prs.toolSessions == nil {
+		prs.toolSessions = make(map[string]toolSessionBinding)
+	}
+	prs.sweepExpiredToolSessionsLocked(now)
+	for _, callID := range normalizedUniqueStrings(callIDs) {
+		key := toolSessionCallKey(platform, callID)
+		if key == "" {
+			continue
+		}
+		prs.toolSessions[key] = toolSessionBinding{
+			SessionHash: sessionHash,
+			ExpiresAt:   expiresAt,
+		}
+	}
+}
+
+func (prs *ProviderRelayService) upsertConfirmedSessionBinding(platform string, sessionHash string, providerID string, providerName string, maxSessions int, ttlMinutes int) {
+	if prs == nil || strings.TrimSpace(sessionHash) == "" || strings.TrimSpace(providerID) == "" {
+		return
+	}
+	now := time.Now()
+	prs.sessionAffinityMu.Lock()
+	defer prs.sessionAffinityMu.Unlock()
+	prs.sweepExpiredSessionAffinityLocked(now)
+	key := sessionAffinityStateKey(platform, sessionHash)
+	binding := prs.sessionAffinity[key]
+	if binding == nil {
+		prs.nextSessionNumber++
+		binding = &providerSessionBinding{
+			Platform:      platform,
+			SessionHash:   sessionHash,
+			SessionNumber: prs.nextSessionNumber,
+			CreatedAt:     now,
+		}
+		prs.sessionAffinity[key] = binding
+	}
+	if binding.ActiveRequests > 0 && binding.ProviderID != providerID {
+		return
+	}
+	binding.ProviderID = providerID
+	binding.ProviderName = providerName
+	binding.MaxSessions = normalizeSessionMaxSessions(maxSessions)
+	binding.TTLMinutes = normalizeSessionTTLMinutes(ttlMinutes)
+	binding.LastSeen = now
+	binding.Pending = false
+	binding.Confirmed = true
 }
 
 func (prs *ProviderRelayService) getSessionBindingSnapshot(platform string, sessionHash string) *providerSessionBinding {
@@ -869,10 +1245,10 @@ func (prs *ProviderRelayService) releaseProviderSessionsIfBlacklisted(platform s
 	}
 }
 
-func (prs *ProviderRelayService) providerSessionCounts(platform string) map[string]int {
-	counts := map[string]int{}
+func (prs *ProviderRelayService) providerSessionLoads(platform string) map[string]providerSessionLoad {
+	loads := map[string]providerSessionLoad{}
 	if prs == nil {
-		return counts
+		return loads
 	}
 	now := time.Now()
 	prs.sessionAffinityMu.Lock()
@@ -882,9 +1258,15 @@ func (prs *ProviderRelayService) providerSessionCounts(platform string) map[stri
 		if binding == nil || binding.Platform != platform || binding.ProviderID == "" {
 			continue
 		}
-		counts[binding.ProviderID]++
+		load := loads[binding.ProviderID]
+		load.ProviderID = binding.ProviderID
+		load.BoundSessions++
+		if binding.ActiveRequests > 0 {
+			load.ActiveRequests += binding.ActiveRequests
+		}
+		loads[binding.ProviderID] = load
 	}
-	return counts
+	return loads
 }
 
 func (prs *ProviderRelayService) isProviderSessionBindingUsable(kind string, providers []Provider, binding *providerSessionBinding) bool {
@@ -951,7 +1333,7 @@ func (prs *ProviderRelayService) isStoredProviderSessionBindingUsable(platform s
 
 func orderProvidersForSessionAffinity(
 	providers []Provider,
-	counts map[string]int,
+	loads map[string]providerSessionLoad,
 ) []Provider {
 	if len(providers) <= 1 {
 		return providers
@@ -959,33 +1341,50 @@ func orderProvidersForSessionAffinity(
 	underCapacity := make([]Provider, 0, len(providers))
 	full := make([]Provider, 0, len(providers))
 	for _, provider := range providers {
-		maxSessions := providerSessionMaxSessions(provider)
-		if counts[providerRefFromProvider(provider)] < maxSessions {
+		load := providerSessionLoadFor(providerRefFromProvider(provider), providerSessionMaxSessions(provider), loads)
+		if load.LoadRate < 1 {
 			underCapacity = append(underCapacity, provider)
 		} else {
 			full = append(full, provider)
 		}
 	}
+	sortProvidersBySessionLoad(underCapacity, loads, func(provider Provider) (string, int) {
+		return providerRefFromProvider(provider), providerSessionMaxSessions(provider)
+	})
+	sortProvidersBySessionLoad(full, loads, func(provider Provider) (string, int) {
+		return providerRefFromProvider(provider), providerSessionMaxSessions(provider)
+	})
 	if len(underCapacity) > 0 {
 		return append(underCapacity, full...)
 	}
-	sort.SliceStable(full, func(i, j int) bool {
-		left := full[i]
-		right := full[j]
-		leftMax := providerSessionMaxSessions(left)
-		rightMax := providerSessionMaxSessions(right)
-		leftNext := counts[providerRefFromProvider(left)] + 1
-		rightNext := counts[providerRefFromProvider(right)] + 1
-		leftRatio := float64(leftNext) / float64(leftMax)
-		rightRatio := float64(rightNext) / float64(rightMax)
-		if leftRatio != rightRatio {
-			return leftRatio < rightRatio
-		}
-		leftOverflow := leftNext - leftMax
-		rightOverflow := rightNext - rightMax
-		return leftOverflow < rightOverflow
-	})
 	return full
+}
+
+func providerSessionLoadFor(providerID string, maxSessions int, loads map[string]providerSessionLoad) providerSessionLoad {
+	load := loads[providerID]
+	load.ProviderID = providerID
+	load.MaxSessions = normalizeSessionMaxSessions(maxSessions)
+	load.LoadUnits = load.BoundSessions + load.ActiveRequests
+	if load.MaxSessions > 0 {
+		load.LoadRate = float64(load.LoadUnits) / float64(load.MaxSessions)
+	}
+	return load
+}
+
+func sortProvidersBySessionLoad(providers []Provider, loads map[string]providerSessionLoad, identity func(Provider) (string, int)) {
+	sort.SliceStable(providers, func(i, j int) bool {
+		leftProviderID, leftMaxSessions := identity(providers[i])
+		rightProviderID, rightMaxSessions := identity(providers[j])
+		left := providerSessionLoadFor(leftProviderID, leftMaxSessions, loads)
+		right := providerSessionLoadFor(rightProviderID, rightMaxSessions, loads)
+		if left.LoadRate != right.LoadRate {
+			return left.LoadRate < right.LoadRate
+		}
+		if left.LoadUnits != right.LoadUnits {
+			return left.LoadUnits < right.LoadUnits
+		}
+		return false
+	})
 }
 
 func (prs *ProviderRelayService) reorderProviderAttemptsForSession(platform string, providers []Provider, sessionHash string, canCreateBinding bool) []Provider {
@@ -1012,12 +1411,12 @@ func (prs *ProviderRelayService) reorderProviderAttemptsForSession(platform stri
 	if !canCreateBinding {
 		return providers
 	}
-	return orderProvidersForSessionAffinity(providers, prs.providerSessionCounts(platform))
+	return orderProvidersForSessionAffinity(providers, prs.providerSessionLoads(platform))
 }
 
 func orderGeminiProvidersForSessionAffinity(
 	providers []GeminiProvider,
-	counts map[string]int,
+	loads map[string]providerSessionLoad,
 ) []GeminiProvider {
 	if len(providers) <= 1 {
 		return providers
@@ -1025,33 +1424,33 @@ func orderGeminiProvidersForSessionAffinity(
 	underCapacity := make([]GeminiProvider, 0, len(providers))
 	full := make([]GeminiProvider, 0, len(providers))
 	for _, provider := range providers {
-		maxSessions := geminiProviderSessionMaxSessions(provider)
-		if counts[providerRefFromGeminiProvider(provider)] < maxSessions {
+		load := providerSessionLoadFor(providerRefFromGeminiProvider(provider), geminiProviderSessionMaxSessions(provider), loads)
+		if load.LoadRate < 1 {
 			underCapacity = append(underCapacity, provider)
 		} else {
 			full = append(full, provider)
 		}
 	}
+	sortGeminiProvidersBySessionLoad(underCapacity, loads)
+	sortGeminiProvidersBySessionLoad(full, loads)
 	if len(underCapacity) > 0 {
 		return append(underCapacity, full...)
 	}
-	sort.SliceStable(full, func(i, j int) bool {
-		left := full[i]
-		right := full[j]
-		leftMax := geminiProviderSessionMaxSessions(left)
-		rightMax := geminiProviderSessionMaxSessions(right)
-		leftNext := counts[providerRefFromGeminiProvider(left)] + 1
-		rightNext := counts[providerRefFromGeminiProvider(right)] + 1
-		leftRatio := float64(leftNext) / float64(leftMax)
-		rightRatio := float64(rightNext) / float64(rightMax)
-		if leftRatio != rightRatio {
-			return leftRatio < rightRatio
-		}
-		leftOverflow := leftNext - leftMax
-		rightOverflow := rightNext - rightMax
-		return leftOverflow < rightOverflow
-	})
 	return full
+}
+
+func sortGeminiProvidersBySessionLoad(providers []GeminiProvider, loads map[string]providerSessionLoad) {
+	sort.SliceStable(providers, func(i, j int) bool {
+		left := providerSessionLoadFor(providerRefFromGeminiProvider(providers[i]), geminiProviderSessionMaxSessions(providers[i]), loads)
+		right := providerSessionLoadFor(providerRefFromGeminiProvider(providers[j]), geminiProviderSessionMaxSessions(providers[j]), loads)
+		if left.LoadRate != right.LoadRate {
+			return left.LoadRate < right.LoadRate
+		}
+		if left.LoadUnits != right.LoadUnits {
+			return left.LoadUnits < right.LoadUnits
+		}
+		return false
+	})
 }
 
 func (prs *ProviderRelayService) reorderGeminiProviderAttemptsForSession(providers []GeminiProvider, sessionHash string, canCreateBinding bool) []GeminiProvider {
@@ -1078,7 +1477,7 @@ func (prs *ProviderRelayService) reorderGeminiProviderAttemptsForSession(provide
 	if !canCreateBinding {
 		return providers
 	}
-	return orderGeminiProvidersForSessionAffinity(providers, prs.providerSessionCounts("gemini"))
+	return orderGeminiProvidersForSessionAffinity(providers, prs.providerSessionLoads("gemini"))
 }
 
 func (prs *ProviderRelayService) GetSessionAffinityStatuses(platform string) []ProviderSessionStatus {
@@ -1400,7 +1799,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 		// 获取拉黑功能开关状态
 		blacklistEnabled := prs.blacklistService.ShouldUseFixedMode()
 		roundRobinEnabled := prs.isRoundRobinEnabled()
-		sessionHash := deriveRelaySessionHash(bodyBytes)
+		sessionHash := prs.deriveRelaySessionHash(kind, bodyBytes)
 		originalSessionBinding := prs.getSessionBindingSnapshot(kind, sessionHash)
 		if originalSessionBinding != nil && !prs.isProviderSessionBindingUsable(kind, active, originalSessionBinding) {
 			prs.releaseSessionBinding(kind, sessionHash)
@@ -1923,6 +2322,7 @@ func (prs *ProviderRelayService) forwardRequest(
 	requestedModel string,
 ) (bool, error) {
 	return prs.forwardRequestWithPlan(c, kind, provider, endpoint, query, clientHeaders, bodyBytes, isStream, model, requestedModel, providerRequestPlan{
+		OriginalBodyBytes: bodyBytes,
 		BodyBytes:         bodyBytes,
 		EffectiveModel:    model,
 		EffectiveEndpoint: endpoint,
@@ -2158,9 +2558,13 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 		// 状态码为 0 且无错误：当作成功处理
 		if status == 0 {
 			fmt.Printf("[WARN] Provider %s 返回状态码 0，但无错误，当作成功处理\n", provider.Name)
-			hooks := buildClaudeProviderResponseHooks(prs, c, kind, provider, currentPlan, isStream, requestLog)
+			toolCollector := prs.newSessionAffinityToolResponseCollector(kind, provider, currentPlan)
+			hooks := buildClaudeProviderResponseHooks(prs, c, kind, provider, currentPlan, isStream, requestLog, toolCollector)
 			writtenBytes, copyErr := resp.ToHttpResponseWriter(c.Writer, hooks...)
 			ok, forwardErr := finalizeForwardSuccess(c, kind, requestLog, writtenBytes, copyErr)
+			if ok && forwardErr == nil {
+				toolCollector.commit()
+			}
 			return ok, forwardErr, false, false
 		}
 
@@ -2172,9 +2576,13 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 					return false, protocolErr, false, false
 				}
 			}
-			hooks := buildClaudeProviderResponseHooks(prs, c, kind, provider, currentPlan, isStream, requestLog)
+			toolCollector := prs.newSessionAffinityToolResponseCollector(kind, provider, currentPlan)
+			hooks := buildClaudeProviderResponseHooks(prs, c, kind, provider, currentPlan, isStream, requestLog, toolCollector)
 			writtenBytes, copyErr := resp.ToHttpResponseWriter(c.Writer, hooks...)
 			ok, forwardErr := finalizeForwardSuccess(c, kind, requestLog, writtenBytes, copyErr)
+			if ok && forwardErr == nil {
+				toolCollector.commit()
+			}
 			return ok, forwardErr, false, false
 		}
 
@@ -2310,8 +2718,12 @@ func buildClaudeProviderResponseHooks(
 	plan providerRequestPlan,
 	isStream bool,
 	requestLog *ReqeustLog,
+	toolCollector *sessionAffinityToolResponseCollector,
 ) []xrequest.ResponseHook {
 	hooks := make([]xrequest.ResponseHook, 0, 4)
+	if hook := toolCollector.hook(isStream); hook != nil {
+		hooks = append(hooks, hook)
+	}
 	if hook := prs.newClaudeResponsesSessionHook(kind, provider, plan, isStream); hook != nil {
 		hooks = append(hooks, hook)
 	}
@@ -2323,6 +2735,152 @@ func buildClaudeProviderResponseHooks(
 	}
 	hooks = append(hooks, ReqeustLogHook(c, kind, requestLog))
 	return hooks
+}
+
+func (prs *ProviderRelayService) newSessionAffinityToolResponseCollector(kind string, provider Provider, plan providerRequestPlan) *sessionAffinityToolResponseCollector {
+	if prs == nil || strings.TrimSpace(kind) == "" || !prs.isSessionAffinityEnabled(kind) {
+		return nil
+	}
+	bodyForSessionCheck := plan.OriginalBodyBytes
+	if len(bodyForSessionCheck) == 0 {
+		bodyForSessionCheck = plan.BodyBytes
+	}
+	if strings.TrimSpace(prs.deriveRelaySessionHash(kind, bodyForSessionCheck)) != "" {
+		return nil
+	}
+	return &sessionAffinityToolResponseCollector{
+		prs:      prs,
+		kind:     kind,
+		provider: provider,
+		callIDs:  map[string]bool{},
+	}
+}
+
+func (collector *sessionAffinityToolResponseCollector) hook(isStream bool) xrequest.ResponseHook {
+	if collector == nil {
+		return nil
+	}
+	if isStream {
+		return collector.streamHook()
+	}
+	return func(data []byte) (bool, []byte) {
+		collector.observePayload(string(data))
+		return true, data
+	}
+}
+
+func (collector *sessionAffinityToolResponseCollector) streamHook() xrequest.ResponseHook {
+	var pendingEventType string
+	var pendingDataLines []string
+	var rawJSONBuffer strings.Builder
+	var sseRemainder strings.Builder
+	processSSELine := func(line string) {
+		line = strings.TrimSpace(line)
+		switch {
+		case line == "":
+			if len(pendingDataLines) > 0 {
+				payload := combineOpenAIResponsesDataLines(pendingDataLines)
+				collector.observePayload(payload)
+				pendingDataLines = nil
+			}
+			pendingEventType = ""
+		case strings.HasPrefix(line, "event:"):
+			pendingEventType = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+		case strings.HasPrefix(line, "data:"):
+			payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+			if payload == "" || payload == "[DONE]" {
+				return
+			}
+			if len(pendingDataLines) > 0 {
+				pendingDataLines = append(pendingDataLines, payload)
+				combinedPayload := combineOpenAIResponsesDataLines(pendingDataLines)
+				if gjson.Valid(combinedPayload) {
+					collector.observePayload(combinedPayload)
+					pendingDataLines = nil
+					pendingEventType = ""
+				}
+				return
+			}
+			if !gjson.Valid(payload) {
+				pendingDataLines = append(pendingDataLines, payload)
+				return
+			}
+			if pendingEventType != "" {
+				if withType, err := sjson.Set(payload, "type", pendingEventType); err == nil {
+					payload = withType
+				}
+			}
+			collector.observePayload(payload)
+			pendingEventType = ""
+		}
+	}
+	return func(data []byte) (bool, []byte) {
+		payload := string(data)
+		if sseRemainder.Len() > 0 || looksLikeSSEPayload(payload) {
+			sseRemainder.WriteString(payload)
+			combined := sseRemainder.String()
+			sseRemainder.Reset()
+			lines := strings.SplitAfter(combined, "\n")
+			if !strings.HasSuffix(combined, "\n") {
+				tail := lines[len(lines)-1]
+				lines = lines[:len(lines)-1]
+				if strings.TrimSpace(tail) != "" {
+					sseRemainder.WriteString(tail)
+				}
+			}
+			for _, line := range lines {
+				processSSELine(line)
+			}
+			return true, data
+		}
+		rawJSONBuffer.WriteString(payload)
+		combined := strings.TrimSpace(rawJSONBuffer.String())
+		if combined != "" && gjson.Valid(combined) {
+			collector.observePayload(combined)
+			rawJSONBuffer.Reset()
+		}
+		return true, data
+	}
+}
+
+func (collector *sessionAffinityToolResponseCollector) observePayload(payload string) {
+	if collector == nil {
+		return
+	}
+	callIDs := extractResponseToolCallIDs(payload)
+	if len(callIDs) == 0 {
+		return
+	}
+	for _, callID := range normalizedUniqueStrings(callIDs) {
+		collector.callIDs[callID] = true
+	}
+}
+
+func (collector *sessionAffinityToolResponseCollector) commit() {
+	if collector == nil || len(collector.callIDs) == 0 {
+		return
+	}
+	callIDs := make([]string, 0, len(collector.callIDs))
+	for callID := range collector.callIDs {
+		callIDs = append(callIDs, callID)
+	}
+	collector.prs.commitToolResponseSession(collector.kind, collector.provider, callIDs)
+}
+
+func (prs *ProviderRelayService) commitToolResponseSession(kind string, provider Provider, callIDs []string) {
+	sessionHash := toolSessionHash(kind, callIDs)
+	if sessionHash == "" {
+		return
+	}
+	prs.registerToolSessionCalls(kind, sessionHash, callIDs, providerSessionTTLMinutes(provider))
+	prs.upsertConfirmedSessionBinding(
+		kind,
+		sessionHash,
+		providerRefFromProvider(provider),
+		provider.Name,
+		providerSessionMaxSessions(provider),
+		providerSessionTTLMinutes(provider),
+	)
 }
 
 func openAIResponsesStreamLifecycleHook(reqLog *ReqeustLog) xrequest.ResponseHook {
@@ -2661,6 +3219,7 @@ func sanitizeRequestLogPayload(payload string) string {
 	if strings.TrimSpace(payload) == "" {
 		return payload
 	}
+	payload = redactRequestLogSessionIdentifiers(payload)
 	// 快速短路：多数 payload 不含敏感键，避免每次都跑重正则。
 	if !requestLogSensitiveKeywordQuickPattern.MatchString(payload) {
 		return payload
@@ -2671,7 +3230,15 @@ func sanitizeRequestLogPayload(payload string) string {
 	return sanitized
 }
 
+func redactRequestLogSessionIdentifiers(payload string) string {
+	if strings.TrimSpace(payload) == "" || !requestLogSessionIDQuickPattern.MatchString(payload) {
+		return payload
+	}
+	return requestLogSessionIDJSONValuePattern.ReplaceAllString(payload, `${1}"`+requestLogPayloadRedactedValue+`"`)
+}
+
 func maybeSanitizeRequestLogPayload(reqLog *ReqeustLog, payload string) string {
+	payload = redactRequestLogSessionIdentifiers(payload)
 	if reqLog == nil || !reqLog.SanitizePayload {
 		return payload
 	}
@@ -4066,6 +4633,7 @@ func resolveModelFromRequestBody(bodyBytes []byte, fallback string) string {
 }
 
 type providerRequestPlan struct {
+	OriginalBodyBytes          []byte
 	BodyBytes                  []byte
 	ContinuationRetryBodyBytes []byte
 	EffectiveModel             string
@@ -4138,6 +4706,7 @@ func (prs *ProviderRelayService) buildProviderRequestPlan(provider Provider, bod
 					currentBodyBytes = baseResponsesBodyBytes
 				}
 				return providerRequestPlan{
+					OriginalBodyBytes:          bodyBytes,
 					BodyBytes:                  currentBodyBytes,
 					ContinuationRetryBodyBytes: continuationRetryBodyBytes,
 					EffectiveModel:             resolveModelFromRequestBody(currentBodyBytes, effectiveModel),
@@ -4151,6 +4720,7 @@ func (prs *ProviderRelayService) buildProviderRequestPlan(provider Provider, bod
 	}
 
 	return providerRequestPlan{
+		OriginalBodyBytes:          bodyBytes,
 		BodyBytes:                  currentBodyBytes,
 		ContinuationRetryBodyBytes: nil,
 		EffectiveModel:             resolveModelFromRequestBody(currentBodyBytes, effectiveModel),
@@ -5119,7 +5689,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 		// 获取拉黑功能开关状态
 		blacklistEnabled := prs.blacklistService.ShouldUseFixedMode()
 		roundRobinEnabled := prs.isRoundRobinEnabled()
-		sessionHash := deriveRelaySessionHash(bodyBytes)
+		sessionHash := prs.deriveRelaySessionHash("gemini", bodyBytes)
 		originalSessionBinding := prs.getSessionBindingSnapshot("gemini", sessionHash)
 		if originalSessionBinding != nil && !prs.isGeminiProviderSessionBindingUsable(activeProviders, originalSessionBinding) {
 			prs.releaseSessionBinding("gemini", sessionHash)
@@ -5805,7 +6375,7 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 		// 获取拉黑功能开关状态
 		blacklistEnabled := prs.blacklistService.ShouldUseFixedMode()
 		roundRobinEnabled := prs.isRoundRobinEnabled()
-		sessionHash := deriveRelaySessionHash(bodyBytes)
+		sessionHash := prs.deriveRelaySessionHash(kind, bodyBytes)
 		originalSessionBinding := prs.getSessionBindingSnapshot(kind, sessionHash)
 		if originalSessionBinding != nil && !prs.isProviderSessionBindingUsable(kind, active, originalSessionBinding) {
 			prs.releaseSessionBinding(kind, sessionHash)
