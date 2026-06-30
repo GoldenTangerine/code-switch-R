@@ -31,6 +31,7 @@
       @open-model-list="$emit('open-model-list', viewModel.card)"
       @open-provider-logs="$emit('open-provider-logs', viewModel.card)"
       @open-provider-cost-trend="$emit('open-provider-cost-trend', viewModel.card)"
+      @open-provider-sessions="$emit('open-provider-sessions', viewModel.card)"
       @refresh-provider-quota="$emit('refresh-provider-quota', viewModel.card)"
       @duplicate="$emit('duplicate', viewModel.card)"
       @remove="$emit('remove', viewModel.card)"
@@ -78,6 +79,7 @@ const emit = defineEmits<{
   'open-model-list': [card: AutomationCard]
   'open-provider-logs': [card: AutomationCard]
   'open-provider-cost-trend': [card: AutomationCard]
+  'open-provider-sessions': [card: AutomationCard]
   'refresh-provider-quota': [card: AutomationCard]
   duplicate: [card: AutomationCard]
   remove: [card: AutomationCard]

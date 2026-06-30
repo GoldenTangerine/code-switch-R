@@ -55,6 +55,8 @@ export type VendorForm = {
   modelMappingMissPolicy?: ModelMappingMissPolicy
   requestBodyOverrides?: Record<string, any>
   level?: number
+  sessionMaxSessions?: number
+  sessionTTLMinutes?: number
   apiEndpoint?: string
   opencodeNpm?: string
   opencodeSettingsConfig?: Record<string, any>
@@ -140,11 +142,35 @@ export type ProviderCardViewModel = {
   connectivityClass: string
   connectivityTooltip: string
   stats: ProviderStatDisplay
+  sessionStatus?: ProviderSessionStatusView
   quotaDisplay: ProviderQuotaDisplayItem[]
   quotaRefreshing: boolean
   formattedOfficialSite: string
   iconSvg: string
   vendorInitials: string
+}
+
+export type ProviderSessionDetailView = {
+  sessionNumber: number
+  status: string
+  activeRequests: number
+  providerId: string
+  providerName: string
+  createdAt: number
+  lastSeen: number
+  expiresAt: number
+  remainingSeconds: number
+  overflow: boolean
+}
+
+export type ProviderSessionStatusView = {
+  platform: string
+  providerId: string
+  providerName: string
+  activeRequests: number
+  activeSessions: number
+  maxSessions: number
+  sessions: ProviderSessionDetailView[]
 }
 
 export type CustomCliToolDraft = {

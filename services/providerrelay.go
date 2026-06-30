@@ -52,6 +52,10 @@ type ProviderRelayService struct {
 	rrLastStart         map[string]string            // 轮询状态：key="platform:level" → value=上次起始 Provider ID（回退为 Name）
 	claudeResponsesMu   sync.Mutex
 	claudeResponses     map[string]claudeResponsesSessionBinding
+	sessionAffinityMu   sync.Mutex
+	sessionAffinity     map[string]*providerSessionBinding
+	nextSessionNumber   int64
+	nextSessionAttempt  int64
 }
 
 // errClientAbort 表示客户端中断连接，不应计入 provider 失败次数
@@ -122,6 +126,45 @@ type claudeResponsesSessionBinding struct {
 	ResponseID string
 	Disabled   bool
 	ExpiresAt  time.Time
+}
+
+type providerSessionBinding struct {
+	Platform       string
+	SessionHash    string
+	SessionNumber  int64
+	ProviderID     string
+	ProviderName   string
+	MaxSessions    int
+	TTLMinutes     int
+	CreatedAt      time.Time
+	LastSeen       time.Time
+	ActiveRequests int
+	Pending        bool
+	Confirmed      bool
+	AttemptID      int64
+}
+
+type ProviderSessionDetail struct {
+	SessionNumber  int64  `json:"sessionNumber"`
+	Status         string `json:"status"`
+	ActiveRequests int    `json:"activeRequests"`
+	ProviderID     string `json:"providerId"`
+	ProviderName   string `json:"providerName"`
+	CreatedAt      int64  `json:"createdAt"`
+	LastSeen       int64  `json:"lastSeen"`
+	ExpiresAt      int64  `json:"expiresAt"`
+	RemainingSec   int64  `json:"remainingSeconds"`
+	Overflow       bool   `json:"overflow"`
+}
+
+type ProviderSessionStatus struct {
+	Platform       string                  `json:"platform"`
+	ProviderID     string                  `json:"providerId"`
+	ProviderName   string                  `json:"providerName"`
+	ActiveRequests int                     `json:"activeRequests"`
+	ActiveSessions int                     `json:"activeSessions"`
+	MaxSessions    int                     `json:"maxSessions"`
+	Sessions       []ProviderSessionDetail `json:"sessions"`
 }
 
 // upstreamErrorResponse 保存上游非 2xx 响应，供“最终失败”场景透传给客户端
@@ -247,6 +290,7 @@ func NewProviderRelayService(providerService *ProviderService, geminiService *Ge
 		},
 		rrLastStart:     make(map[string]string),
 		claudeResponses: make(map[string]claudeResponsesSessionBinding),
+		sessionAffinity: make(map[string]*providerSessionBinding),
 	}
 }
 
@@ -396,6 +440,38 @@ func (prs *ProviderRelayService) roundRobinOrder(platform string, level int, pro
 	return result
 }
 
+func (prs *ProviderRelayService) roundRobinOrderPreview(platform string, level int, providers []Provider) []Provider {
+	if len(providers) <= 1 {
+		return providers
+	}
+	key := fmt.Sprintf("%s:%d", platform, level)
+	prs.rrMu.Lock()
+	defer prs.rrMu.Unlock()
+	return rotateProvidersFromLastStart(providers, prs.rrLastStart[key])
+}
+
+func rotateProvidersFromLastStart(providers []Provider, lastStart string) []Provider {
+	if lastStart == "" {
+		return providers
+	}
+	lastIdx := -1
+	for i, provider := range providers {
+		if providerRefFromProvider(provider) == lastStart {
+			lastIdx = i
+			break
+		}
+	}
+	if lastIdx == -1 {
+		return providers
+	}
+	result := make([]Provider, len(providers))
+	for i := 0; i < len(providers); i++ {
+		idx := (lastIdx + 1 + i) % len(providers)
+		result[i] = providers[idx]
+	}
+	return result
+}
+
 // roundRobinOrderGemini 对 Gemini providers 进行轮询排序（复用相同逻辑）
 func (prs *ProviderRelayService) roundRobinOrderGemini(level int, providers []GeminiProvider) []GeminiProvider {
 	if len(providers) <= 1 {
@@ -442,6 +518,628 @@ func (prs *ProviderRelayService) roundRobinOrderGemini(level int, providers []Ge
 	// 更新本次起始 provider 标识
 	prs.rrLastStart[key] = providerRefFromGeminiProvider(result[0])
 
+	return result
+}
+
+func (prs *ProviderRelayService) roundRobinOrderGeminiPreview(level int, providers []GeminiProvider) []GeminiProvider {
+	if len(providers) <= 1 {
+		return providers
+	}
+	key := fmt.Sprintf("gemini:%d", level)
+	prs.rrMu.Lock()
+	defer prs.rrMu.Unlock()
+	return rotateGeminiProvidersFromLastStart(providers, prs.rrLastStart[key])
+}
+
+func rotateGeminiProvidersFromLastStart(providers []GeminiProvider, lastStart string) []GeminiProvider {
+	if lastStart == "" {
+		return providers
+	}
+	lastIdx := -1
+	for i, provider := range providers {
+		if providerRefFromGeminiProvider(provider) == lastStart {
+			lastIdx = i
+			break
+		}
+	}
+	if lastIdx == -1 {
+		return providers
+	}
+	result := make([]GeminiProvider, len(providers))
+	for i := 0; i < len(providers); i++ {
+		idx := (lastIdx + 1 + i) % len(providers)
+		result[i] = providers[idx]
+	}
+	return result
+}
+
+func (prs *ProviderRelayService) markRoundRobinProviderAttempt(platform string, provider Provider) {
+	if prs == nil {
+		return
+	}
+	level := provider.Level
+	if level <= 0 {
+		level = 1
+	}
+	key := fmt.Sprintf("%s:%d", platform, level)
+	prs.rrMu.Lock()
+	defer prs.rrMu.Unlock()
+	prs.rrLastStart[key] = providerRefFromProvider(provider)
+}
+
+func (prs *ProviderRelayService) markRoundRobinGeminiProviderAttempt(provider GeminiProvider) {
+	if prs == nil {
+		return
+	}
+	level := provider.Level
+	if level <= 0 {
+		level = 1
+	}
+	key := fmt.Sprintf("gemini:%d", level)
+	prs.rrMu.Lock()
+	defer prs.rrMu.Unlock()
+	prs.rrLastStart[key] = providerRefFromGeminiProvider(provider)
+}
+
+func normalizeSessionMaxSessions(value int) int {
+	if value <= 0 {
+		return 5
+	}
+	if value < 1 {
+		return 1
+	}
+	if value > 999 {
+		return 999
+	}
+	return value
+}
+
+func normalizeSessionTTLMinutes(value int) int {
+	if value <= 0 {
+		return 5
+	}
+	if value < 1 {
+		return 1
+	}
+	if value > 1440 {
+		return 1440
+	}
+	return value
+}
+
+func providerSessionMaxSessions(provider Provider) int {
+	return normalizeSessionMaxSessions(provider.SessionMaxSessions)
+}
+
+func providerSessionTTLMinutes(provider Provider) int {
+	return normalizeSessionTTLMinutes(provider.SessionTTLMinutes)
+}
+
+func geminiProviderSessionMaxSessions(provider GeminiProvider) int {
+	return normalizeSessionMaxSessions(provider.SessionMaxSessions)
+}
+
+func geminiProviderSessionTTLMinutes(provider GeminiProvider) int {
+	return normalizeSessionTTLMinutes(provider.SessionTTLMinutes)
+}
+
+func sessionAffinityStateKey(platform string, sessionHash string) string {
+	return strings.TrimSpace(platform) + "\x00" + strings.TrimSpace(sessionHash)
+}
+
+func providerSessionStatusKey(platform string, providerID string) string {
+	return strings.TrimSpace(platform) + "\x00" + strings.TrimSpace(providerID)
+}
+
+func deriveRelaySessionHash(bodyBytes []byte) string {
+	metadata := gjson.GetBytes(bodyBytes, "metadata")
+	if !metadata.Exists() {
+		return ""
+	}
+	if userID := strings.TrimSpace(metadata.Get("user_id").String()); userID != "" {
+		if parsed := parseClaudeMetadataUserID(userID); parsed != nil {
+			seed := strings.Join([]string{
+				strings.TrimSpace(parsed.DeviceID),
+				strings.TrimSpace(parsed.AccountUUID),
+				strings.TrimSpace(parsed.SessionID),
+			}, "|")
+			return shortSHA256Hex("metadata.user_id.parsed=" + seed)
+		}
+		return shortSHA256Hex("metadata.user_id=" + userID)
+	}
+	for _, path := range []string{
+		"session_id",
+		"sessionId",
+		"conversation_id",
+		"conversationId",
+		"thread_id",
+		"threadId",
+	} {
+		if value := strings.TrimSpace(metadata.Get(path).String()); value != "" {
+			return shortSHA256Hex("metadata." + path + "=" + value)
+		}
+	}
+	return ""
+}
+
+func (prs *ProviderRelayService) isSessionAffinityEnabled(platform string) bool {
+	if prs == nil || prs.appSettings == nil {
+		return false
+	}
+	settings, err := prs.appSettings.GetAppSettings()
+	if err != nil || settings.SessionAffinity == nil {
+		return false
+	}
+	return settings.SessionAffinity[strings.TrimSpace(platform)]
+}
+
+func (prs *ProviderRelayService) sweepExpiredSessionAffinityLocked(now time.Time) {
+	for key, binding := range prs.sessionAffinity {
+		if binding == nil {
+			delete(prs.sessionAffinity, key)
+			continue
+		}
+		ttl := time.Duration(normalizeSessionTTLMinutes(binding.TTLMinutes)) * time.Minute
+		if binding.ActiveRequests <= 0 && now.Sub(binding.LastSeen) > ttl {
+			delete(prs.sessionAffinity, key)
+		}
+	}
+}
+
+func (prs *ProviderRelayService) getSessionBindingSnapshot(platform string, sessionHash string) *providerSessionBinding {
+	if prs == nil || strings.TrimSpace(sessionHash) == "" {
+		return nil
+	}
+	now := time.Now()
+	prs.sessionAffinityMu.Lock()
+	defer prs.sessionAffinityMu.Unlock()
+	prs.sweepExpiredSessionAffinityLocked(now)
+	binding := prs.sessionAffinity[sessionAffinityStateKey(platform, sessionHash)]
+	if binding == nil || !binding.Confirmed {
+		return nil
+	}
+	copied := *binding
+	return &copied
+}
+
+func (prs *ProviderRelayService) beginSessionProviderRequest(platform string, sessionHash string, providerID string, providerName string, maxSessions int, ttlMinutes int, pending bool) int64 {
+	if prs == nil || strings.TrimSpace(sessionHash) == "" || strings.TrimSpace(providerID) == "" {
+		return -1
+	}
+	now := time.Now()
+	prs.sessionAffinityMu.Lock()
+	defer prs.sessionAffinityMu.Unlock()
+	prs.sweepExpiredSessionAffinityLocked(now)
+	key := sessionAffinityStateKey(platform, sessionHash)
+	binding := prs.sessionAffinity[key]
+	if binding == nil {
+		prs.nextSessionNumber++
+		binding = &providerSessionBinding{
+			Platform:      platform,
+			SessionHash:   sessionHash,
+			SessionNumber: prs.nextSessionNumber,
+			CreatedAt:     now,
+		}
+		prs.sessionAffinity[key] = binding
+	} else if binding.Confirmed && binding.ProviderID == providerID {
+		binding.LastSeen = now
+		binding.ActiveRequests++
+		return 0
+	} else if binding.Confirmed && binding.ActiveRequests > 0 {
+		binding.LastSeen = now
+		return -1
+	} else if !binding.Confirmed && binding.ProviderID == providerID {
+		binding.LastSeen = now
+		binding.ActiveRequests++
+		return binding.AttemptID
+	} else if !binding.Confirmed && binding.ActiveRequests > 0 {
+		binding.LastSeen = now
+		return -1
+	}
+	prs.nextSessionAttempt++
+	attemptID := prs.nextSessionAttempt
+	binding.ProviderID = providerID
+	binding.ProviderName = providerName
+	binding.MaxSessions = normalizeSessionMaxSessions(maxSessions)
+	binding.TTLMinutes = normalizeSessionTTLMinutes(ttlMinutes)
+	binding.LastSeen = now
+	binding.ActiveRequests++
+	binding.Pending = true
+	binding.Confirmed = false
+	binding.AttemptID = attemptID
+	return attemptID
+}
+
+func (prs *ProviderRelayService) finishSessionProviderRequest(platform string, sessionHash string) {
+	if prs == nil || strings.TrimSpace(sessionHash) == "" {
+		return
+	}
+	now := time.Now()
+	prs.sessionAffinityMu.Lock()
+	defer prs.sessionAffinityMu.Unlock()
+	binding := prs.sessionAffinity[sessionAffinityStateKey(platform, sessionHash)]
+	if binding == nil {
+		return
+	}
+	if binding.ActiveRequests > 0 {
+		binding.ActiveRequests--
+	}
+	binding.LastSeen = now
+}
+
+func (prs *ProviderRelayService) releaseSessionBinding(platform string, sessionHash string) {
+	if prs == nil || strings.TrimSpace(sessionHash) == "" {
+		return
+	}
+	prs.sessionAffinityMu.Lock()
+	defer prs.sessionAffinityMu.Unlock()
+	delete(prs.sessionAffinity, sessionAffinityStateKey(platform, sessionHash))
+}
+
+func (prs *ProviderRelayService) confirmSessionProviderBinding(platform string, sessionHash string, attemptID int64) {
+	if prs == nil || strings.TrimSpace(sessionHash) == "" || attemptID == 0 {
+		return
+	}
+	prs.sessionAffinityMu.Lock()
+	defer prs.sessionAffinityMu.Unlock()
+	if binding := prs.sessionAffinity[sessionAffinityStateKey(platform, sessionHash)]; binding != nil && binding.AttemptID == attemptID {
+		binding.Pending = false
+		binding.Confirmed = true
+		binding.LastSeen = time.Now()
+	}
+}
+
+func (prs *ProviderRelayService) restoreOrReleaseSessionBinding(platform string, sessionHash string, original *providerSessionBinding, attemptID int64) {
+	if prs == nil || strings.TrimSpace(sessionHash) == "" || attemptID == 0 {
+		return
+	}
+	prs.sessionAffinityMu.Lock()
+	defer prs.sessionAffinityMu.Unlock()
+	key := sessionAffinityStateKey(platform, sessionHash)
+	current := prs.sessionAffinity[key]
+	if original == nil || !original.Confirmed {
+		if current != nil && current.AttemptID == attemptID && !current.Confirmed && current.ActiveRequests <= 0 {
+			delete(prs.sessionAffinity, key)
+		}
+		return
+	}
+	if current == nil || current.AttemptID != attemptID {
+		if current == nil {
+			copied := *original
+			copied.Pending = false
+			copied.Confirmed = true
+			copied.ActiveRequests = 0
+			prs.sessionAffinity[key] = &copied
+		}
+		return
+	}
+	if current.ActiveRequests > 0 {
+		return
+	}
+	copied := *original
+	copied.Pending = false
+	copied.Confirmed = true
+	copied.ActiveRequests = current.ActiveRequests
+	prs.sessionAffinity[key] = &copied
+}
+
+func (prs *ProviderRelayService) releaseSessionBindingIfAttempt(platform string, sessionHash string, attemptID int64) {
+	if prs == nil || strings.TrimSpace(sessionHash) == "" || attemptID == 0 {
+		return
+	}
+	prs.sessionAffinityMu.Lock()
+	defer prs.sessionAffinityMu.Unlock()
+	key := sessionAffinityStateKey(platform, sessionHash)
+	if current := prs.sessionAffinity[key]; current != nil && current.AttemptID == attemptID {
+		delete(prs.sessionAffinity, key)
+	}
+}
+
+func (prs *ProviderRelayService) restoreOrReleaseProviderSessionBinding(platform string, sessionHash string, original *providerSessionBinding, attemptID int64) {
+	if original != nil && !prs.isStoredProviderSessionBindingUsable(platform, original) {
+		prs.releaseSessionBindingIfAttempt(platform, sessionHash, attemptID)
+		return
+	}
+	prs.restoreOrReleaseSessionBinding(platform, sessionHash, original, attemptID)
+}
+
+func (prs *ProviderRelayService) releaseProviderSessions(platform string, providerID string) {
+	if prs == nil || strings.TrimSpace(providerID) == "" {
+		return
+	}
+	prs.sessionAffinityMu.Lock()
+	defer prs.sessionAffinityMu.Unlock()
+	for key, binding := range prs.sessionAffinity {
+		if binding != nil && binding.Platform == platform && binding.ProviderID == providerID {
+			delete(prs.sessionAffinity, key)
+		}
+	}
+}
+
+func (prs *ProviderRelayService) ReleaseProviderSessions(platform string, providerID string) {
+	prs.releaseProviderSessions(platform, providerID)
+}
+
+func (prs *ProviderRelayService) releaseProviderSessionsIfBlacklisted(platform string, providerID string, providerName string) {
+	if prs == nil || prs.blacklistService == nil {
+		return
+	}
+	if blacklisted, _ := prs.blacklistService.IsBlacklistedByID(platform, providerID, providerName); blacklisted {
+		prs.releaseProviderSessions(platform, providerID)
+	}
+}
+
+func (prs *ProviderRelayService) providerSessionCounts(platform string) map[string]int {
+	counts := map[string]int{}
+	if prs == nil {
+		return counts
+	}
+	now := time.Now()
+	prs.sessionAffinityMu.Lock()
+	defer prs.sessionAffinityMu.Unlock()
+	prs.sweepExpiredSessionAffinityLocked(now)
+	for _, binding := range prs.sessionAffinity {
+		if binding == nil || binding.Platform != platform || binding.ProviderID == "" {
+			continue
+		}
+		counts[binding.ProviderID]++
+	}
+	return counts
+}
+
+func (prs *ProviderRelayService) isProviderSessionBindingUsable(kind string, providers []Provider, binding *providerSessionBinding) bool {
+	if binding == nil || !binding.Confirmed || strings.TrimSpace(binding.ProviderID) == "" {
+		return false
+	}
+	for _, provider := range providers {
+		if providerRefFromProvider(provider) != binding.ProviderID {
+			continue
+		}
+		if !provider.Enabled {
+			return false
+		}
+		if prs != nil && prs.blacklistService != nil {
+			if blacklisted, _ := prs.blacklistService.IsBlacklistedByID(kind, providerRefFromProvider(provider), provider.Name); blacklisted {
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
+
+func (prs *ProviderRelayService) isGeminiProviderSessionBindingUsable(providers []GeminiProvider, binding *providerSessionBinding) bool {
+	if binding == nil || !binding.Confirmed || strings.TrimSpace(binding.ProviderID) == "" {
+		return false
+	}
+	for _, provider := range providers {
+		if providerRefFromGeminiProvider(provider) != binding.ProviderID {
+			continue
+		}
+		if !provider.Enabled {
+			return false
+		}
+		if prs != nil && prs.blacklistService != nil {
+			if blacklisted, _ := prs.blacklistService.IsBlacklistedByID("gemini", providerRefFromGeminiProvider(provider), provider.Name); blacklisted {
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
+
+func (prs *ProviderRelayService) isStoredProviderSessionBindingUsable(platform string, binding *providerSessionBinding) bool {
+	if binding == nil {
+		return false
+	}
+	if platform == "gemini" {
+		if prs == nil || prs.geminiService == nil {
+			return false
+		}
+		return prs.isGeminiProviderSessionBindingUsable(prs.geminiService.GetProviders(), binding)
+	}
+	if prs == nil || prs.providerService == nil {
+		return false
+	}
+	providers, err := prs.providerService.LoadProviders(platform)
+	if err != nil {
+		return false
+	}
+	return prs.isProviderSessionBindingUsable(platform, providers, binding)
+}
+
+func orderProvidersForSessionAffinity(
+	providers []Provider,
+	counts map[string]int,
+) []Provider {
+	if len(providers) <= 1 {
+		return providers
+	}
+	underCapacity := make([]Provider, 0, len(providers))
+	full := make([]Provider, 0, len(providers))
+	for _, provider := range providers {
+		maxSessions := providerSessionMaxSessions(provider)
+		if counts[providerRefFromProvider(provider)] < maxSessions {
+			underCapacity = append(underCapacity, provider)
+		} else {
+			full = append(full, provider)
+		}
+	}
+	if len(underCapacity) > 0 {
+		return append(underCapacity, full...)
+	}
+	sort.SliceStable(full, func(i, j int) bool {
+		left := full[i]
+		right := full[j]
+		leftMax := providerSessionMaxSessions(left)
+		rightMax := providerSessionMaxSessions(right)
+		leftNext := counts[providerRefFromProvider(left)] + 1
+		rightNext := counts[providerRefFromProvider(right)] + 1
+		leftRatio := float64(leftNext) / float64(leftMax)
+		rightRatio := float64(rightNext) / float64(rightMax)
+		if leftRatio != rightRatio {
+			return leftRatio < rightRatio
+		}
+		leftOverflow := leftNext - leftMax
+		rightOverflow := rightNext - rightMax
+		return leftOverflow < rightOverflow
+	})
+	return full
+}
+
+func (prs *ProviderRelayService) reorderProviderAttemptsForSession(platform string, providers []Provider, sessionHash string, canCreateBinding bool) []Provider {
+	if len(providers) <= 1 || strings.TrimSpace(sessionHash) == "" {
+		return providers
+	}
+	if binding := prs.getSessionBindingSnapshot(platform, sessionHash); binding != nil {
+		result := make([]Provider, 0, len(providers))
+		for _, provider := range providers {
+			if providerRefFromProvider(provider) == binding.ProviderID {
+				result = append(result, provider)
+				break
+			}
+		}
+		for _, provider := range providers {
+			if providerRefFromProvider(provider) != binding.ProviderID {
+				result = append(result, provider)
+			}
+		}
+		if len(result) == len(providers) {
+			return result
+		}
+	}
+	if !canCreateBinding {
+		return providers
+	}
+	return orderProvidersForSessionAffinity(providers, prs.providerSessionCounts(platform))
+}
+
+func orderGeminiProvidersForSessionAffinity(
+	providers []GeminiProvider,
+	counts map[string]int,
+) []GeminiProvider {
+	if len(providers) <= 1 {
+		return providers
+	}
+	underCapacity := make([]GeminiProvider, 0, len(providers))
+	full := make([]GeminiProvider, 0, len(providers))
+	for _, provider := range providers {
+		maxSessions := geminiProviderSessionMaxSessions(provider)
+		if counts[providerRefFromGeminiProvider(provider)] < maxSessions {
+			underCapacity = append(underCapacity, provider)
+		} else {
+			full = append(full, provider)
+		}
+	}
+	if len(underCapacity) > 0 {
+		return append(underCapacity, full...)
+	}
+	sort.SliceStable(full, func(i, j int) bool {
+		left := full[i]
+		right := full[j]
+		leftMax := geminiProviderSessionMaxSessions(left)
+		rightMax := geminiProviderSessionMaxSessions(right)
+		leftNext := counts[providerRefFromGeminiProvider(left)] + 1
+		rightNext := counts[providerRefFromGeminiProvider(right)] + 1
+		leftRatio := float64(leftNext) / float64(leftMax)
+		rightRatio := float64(rightNext) / float64(rightMax)
+		if leftRatio != rightRatio {
+			return leftRatio < rightRatio
+		}
+		leftOverflow := leftNext - leftMax
+		rightOverflow := rightNext - rightMax
+		return leftOverflow < rightOverflow
+	})
+	return full
+}
+
+func (prs *ProviderRelayService) reorderGeminiProviderAttemptsForSession(providers []GeminiProvider, sessionHash string, canCreateBinding bool) []GeminiProvider {
+	if len(providers) <= 1 || strings.TrimSpace(sessionHash) == "" {
+		return providers
+	}
+	if binding := prs.getSessionBindingSnapshot("gemini", sessionHash); binding != nil {
+		result := make([]GeminiProvider, 0, len(providers))
+		for _, provider := range providers {
+			if providerRefFromGeminiProvider(provider) == binding.ProviderID {
+				result = append(result, provider)
+				break
+			}
+		}
+		for _, provider := range providers {
+			if providerRefFromGeminiProvider(provider) != binding.ProviderID {
+				result = append(result, provider)
+			}
+		}
+		if len(result) == len(providers) {
+			return result
+		}
+	}
+	if !canCreateBinding {
+		return providers
+	}
+	return orderGeminiProvidersForSessionAffinity(providers, prs.providerSessionCounts("gemini"))
+}
+
+func (prs *ProviderRelayService) GetSessionAffinityStatuses(platform string) []ProviderSessionStatus {
+	now := time.Now()
+	prs.sessionAffinityMu.Lock()
+	defer prs.sessionAffinityMu.Unlock()
+	prs.sweepExpiredSessionAffinityLocked(now)
+	statusMap := map[string]*ProviderSessionStatus{}
+	for _, binding := range prs.sessionAffinity {
+		if binding == nil || binding.ProviderID == "" || binding.Platform != platform {
+			continue
+		}
+		key := providerSessionStatusKey(binding.Platform, binding.ProviderID)
+		status := statusMap[key]
+		if status == nil {
+			status = &ProviderSessionStatus{
+				Platform:     binding.Platform,
+				ProviderID:   binding.ProviderID,
+				ProviderName: binding.ProviderName,
+				MaxSessions:  normalizeSessionMaxSessions(binding.MaxSessions),
+				Sessions:     []ProviderSessionDetail{},
+			}
+			statusMap[key] = status
+		}
+		status.ActiveSessions++
+		status.ActiveRequests += binding.ActiveRequests
+		ttl := time.Duration(normalizeSessionTTLMinutes(binding.TTLMinutes)) * time.Minute
+		expiresAt := binding.LastSeen.Add(ttl)
+		remaining := int64(math.Ceil(expiresAt.Sub(now).Seconds()))
+		if remaining < 0 {
+			remaining = 0
+		}
+		status.Sessions = append(status.Sessions, ProviderSessionDetail{
+			SessionNumber:  binding.SessionNumber,
+			Status:         map[bool]string{true: "calling", false: "idle"}[binding.ActiveRequests > 0],
+			ActiveRequests: binding.ActiveRequests,
+			ProviderID:     binding.ProviderID,
+			ProviderName:   binding.ProviderName,
+			CreatedAt:      binding.CreatedAt.UnixMilli(),
+			LastSeen:       binding.LastSeen.UnixMilli(),
+			ExpiresAt:      expiresAt.UnixMilli(),
+			RemainingSec:   remaining,
+		})
+	}
+	result := make([]ProviderSessionStatus, 0, len(statusMap))
+	for _, status := range statusMap {
+		overflow := status.ActiveSessions > status.MaxSessions
+		for i := range status.Sessions {
+			status.Sessions[i].Overflow = overflow
+		}
+		sort.Slice(status.Sessions, func(i, j int) bool {
+			return status.Sessions[i].SessionNumber < status.Sessions[j].SessionNumber
+		})
+		result = append(result, *status)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Platform != result[j].Platform {
+			return result[i].Platform < result[j].Platform
+		}
+		return result[i].ProviderID < result[j].ProviderID
+	})
 	return result
 }
 
@@ -701,6 +1399,16 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 
 		// 获取拉黑功能开关状态
 		blacklistEnabled := prs.blacklistService.ShouldUseFixedMode()
+		roundRobinEnabled := prs.isRoundRobinEnabled()
+		sessionHash := deriveRelaySessionHash(bodyBytes)
+		originalSessionBinding := prs.getSessionBindingSnapshot(kind, sessionHash)
+		if originalSessionBinding != nil && !prs.isProviderSessionBindingUsable(kind, active, originalSessionBinding) {
+			prs.releaseSessionBinding(kind, sessionHash)
+			originalSessionBinding = nil
+		}
+		sessionAffinityEnabled := prs.isSessionAffinityEnabled(kind)
+		sessionCanBind := strings.TrimSpace(sessionHash) != "" && (originalSessionBinding != nil || sessionAffinityEnabled)
+		var sessionAttemptID int64
 
 		// 【拉黑模式】：同 Provider 重试直到被拉黑，然后切换到下一个 Provider
 		// 设计目标：Claude Code 单次请求最多重试 3 次，但拉黑阈值可能是 5
@@ -718,6 +1426,115 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 			var lastError error
 			var lastProvider string
 			totalAttempts := 0
+			if sessionCanBind {
+				orderedProviders := make([]Provider, 0, len(active))
+				for _, level := range levels {
+					providersInLevel := levelGroups[level]
+					if roundRobinEnabled {
+						providersInLevel = prs.roundRobinOrderPreview(kind, level, providersInLevel)
+					}
+					orderedProviders = append(orderedProviders, providersInLevel...)
+				}
+				orderedProviders = prs.reorderProviderAttemptsForSession(kind, orderedProviders, sessionHash, originalSessionBinding == nil && sessionAffinityEnabled)
+
+				for _, provider := range orderedProviders {
+					plan, err := prs.getProviderRequestPlan(requestPlans, provider, bodyBytes, endpoint, requestedModel)
+					if err != nil {
+						fmt.Printf("[ERROR] Provider %s 请求体预处理失败: %v，跳过此 Provider\n", provider.Name, err)
+						continue
+					}
+
+					for retryCount := 0; retryCount < maxRetryPerProvider; retryCount++ {
+						totalAttempts++
+						if blacklisted, _ := prs.blacklistService.IsBlacklistedByID(kind, providerRefFromProvider(provider), provider.Name); blacklisted {
+							prs.releaseProviderSessions(kind, providerRefFromProvider(provider))
+							fmt.Printf("[INFO] 🚫 Provider %s 已被拉黑，切换到下一个\n", provider.Name)
+							break
+						}
+
+						fmt.Printf("[INFO] [会话隔离/拉黑模式] Provider: %s | 重试 %d/%d | Model: %s\n",
+							provider.Name, retryCount+1, maxRetryPerProvider, plan.EffectiveModel)
+						sessionAttemptID = prs.beginSessionProviderRequest(kind, sessionHash, providerRefFromProvider(provider), provider.Name, providerSessionMaxSessions(provider), providerSessionTTLMinutes(provider), originalSessionBinding == nil)
+						if sessionAttemptID < 0 {
+							continue
+						}
+						if roundRobinEnabled && originalSessionBinding == nil && sessionAffinityEnabled {
+							prs.markRoundRobinProviderAttempt(kind, provider)
+						}
+						startTime := time.Now()
+						ok, err := prs.forwardRequestWithPlan(c, kind, provider, plan.EffectiveEndpoint, query, clientHeaders, plan.BodyBytes, isStream, plan.EffectiveModel, requestedModel, plan)
+						duration := time.Since(startTime)
+						prs.finishSessionProviderRequest(kind, sessionHash)
+
+						if ok {
+							prs.confirmSessionProviderBinding(kind, sessionHash, sessionAttemptID)
+							fmt.Printf("[INFO] ✓ 会话隔离成功: %s | 重试 %d 次 | 耗时: %.2fs\n",
+								provider.Name, retryCount+1, duration.Seconds())
+							if err := prs.blacklistService.RecordSuccessByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
+								fmt.Printf("[WARN] 清零失败计数失败: %v\n", err)
+							}
+							prs.setLastUsedProvider(kind, providerRefFromProvider(provider), provider.Name)
+							return
+						}
+
+						lastError = err
+						lastProvider = provider.Name
+						errorMsg := "未知错误"
+						if err != nil {
+							errorMsg = err.Error()
+						}
+						if errors.Is(err, errResponseStarted) {
+							prs.restoreOrReleaseProviderSessionBinding(kind, sessionHash, originalSessionBinding, sessionAttemptID)
+							fmt.Printf("[WARN] ⚠️ 响应已部分写入，无法重试: %s | 错误: %s | 耗时: %.2fs\n",
+								provider.Name, errorMsg, duration.Seconds())
+							if errors.Is(err, errClientAbort) {
+								return
+							}
+							if err := prs.blacklistService.RecordFailureByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
+								fmt.Printf("[ERROR] 记录失败到黑名单失败: %v\n", err)
+							}
+							if blacklisted, _ := prs.blacklistService.IsBlacklistedByID(kind, providerRefFromProvider(provider), provider.Name); blacklisted {
+								prs.releaseProviderSessions(kind, providerRefFromProvider(provider))
+							}
+							return
+						}
+						if errors.Is(err, errClientAbort) {
+							prs.restoreOrReleaseProviderSessionBinding(kind, sessionHash, originalSessionBinding, sessionAttemptID)
+							return
+						}
+						if err := prs.blacklistService.RecordFailureByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
+							fmt.Printf("[ERROR] 记录失败到黑名单失败: %v\n", err)
+						}
+						if blacklisted, _ := prs.blacklistService.IsBlacklistedByID(kind, providerRefFromProvider(provider), provider.Name); blacklisted {
+							prs.releaseProviderSessions(kind, providerRefFromProvider(provider))
+							fmt.Printf("[INFO] 🚫 Provider %s 达到失败阈值，已被拉黑，切换到下一个\n", provider.Name)
+							prs.restoreOrReleaseProviderSessionBinding(kind, sessionHash, originalSessionBinding, sessionAttemptID)
+							break
+						}
+						prs.restoreOrReleaseProviderSessionBinding(kind, sessionHash, originalSessionBinding, sessionAttemptID)
+						if retryCount < maxRetryPerProvider-1 {
+							time.Sleep(time.Duration(retryWaitSeconds) * time.Second)
+						}
+					}
+				}
+
+				prs.restoreOrReleaseProviderSessionBinding(kind, sessionHash, originalSessionBinding, sessionAttemptID)
+				if writeLastUpstreamErrorIfAny(c, lastError) {
+					return
+				}
+				errorMsg := "未知错误"
+				if lastError != nil {
+					errorMsg = lastError.Error()
+				}
+				c.JSON(http.StatusBadGateway, gin.H{
+					"error":         fmt.Sprintf("所有 Provider 都失败或被拉黑，最后尝试: %s - %s", lastProvider, errorMsg),
+					"lastProvider":  lastProvider,
+					"totalAttempts": totalAttempts,
+					"mode":          "blacklist_retry_session_affinity",
+					"hint":          "拉黑模式已开启，同 Provider 重试到拉黑再切换",
+				})
+				return
+			}
 
 			// 遍历所有 Level 和 Provider
 			for _, level := range levels {
@@ -782,6 +1599,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 							if err := prs.blacklistService.RecordFailureByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
 								fmt.Printf("[ERROR] 记录失败到黑名单失败: %v\n", err)
 							}
+							prs.releaseProviderSessionsIfBlacklisted(kind, providerRefFromProvider(provider), provider.Name)
 							return
 						}
 						fmt.Printf("[WARN] ✗ 失败: %s | 重试 %d/%d | 错误: %s | 耗时: %.2fs\n",
@@ -797,6 +1615,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 						if err := prs.blacklistService.RecordFailureByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
 							fmt.Printf("[ERROR] 记录失败到黑名单失败: %v\n", err)
 						}
+						prs.releaseProviderSessionsIfBlacklisted(kind, providerRefFromProvider(provider), provider.Name)
 
 						// 检查是否刚被拉黑
 						if blacklisted, _ := prs.blacklistService.IsBlacklistedByID(kind, providerRefFromProvider(provider), provider.Name); blacklisted {
@@ -836,11 +1655,122 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 		}
 
 		// 【降级模式】：拉黑功能关闭，失败自动尝试下一个 provider
-		roundRobinEnabled := prs.isRoundRobinEnabled()
 		if roundRobinEnabled {
 			fmt.Printf("[INFO] 🔄 降级模式 + 轮询负载均衡\n")
 		} else {
 			fmt.Printf("[INFO] 🔄 降级模式（顺序降级）\n")
+		}
+
+		if sessionCanBind {
+			orderedProviders := make([]Provider, 0, len(active))
+			for _, level := range levels {
+				providersInLevel := levelGroups[level]
+				if roundRobinEnabled {
+					providersInLevel = prs.roundRobinOrderPreview(kind, level, providersInLevel)
+				}
+				orderedProviders = append(orderedProviders, providersInLevel...)
+			}
+			orderedProviders = prs.reorderProviderAttemptsForSession(kind, orderedProviders, sessionHash, originalSessionBinding == nil && sessionAffinityEnabled)
+
+			var lastError error
+			var lastProvider string
+			var lastDuration time.Duration
+			totalAttempts := 0
+
+			for i, provider := range orderedProviders {
+				totalAttempts++
+				plan, err := prs.getProviderRequestPlan(requestPlans, provider, bodyBytes, endpoint, requestedModel)
+				if err != nil {
+					fmt.Printf("[ERROR] Provider %s 请求体预处理失败: %v\n", provider.Name, err)
+					continue
+				}
+
+				fmt.Printf("[INFO]   [会话隔离 %d/%d] Provider: %s | Model: %s\n", i+1, len(orderedProviders), provider.Name, plan.EffectiveModel)
+				sessionAttemptID = prs.beginSessionProviderRequest(
+					kind,
+					sessionHash,
+					providerRefFromProvider(provider),
+					provider.Name,
+					providerSessionMaxSessions(provider),
+					providerSessionTTLMinutes(provider),
+					originalSessionBinding == nil,
+				)
+				if sessionAttemptID < 0 {
+					continue
+				}
+				if roundRobinEnabled && originalSessionBinding == nil && sessionAffinityEnabled {
+					prs.markRoundRobinProviderAttempt(kind, provider)
+				}
+
+				startTime := time.Now()
+				ok, err := prs.forwardRequestWithPlan(c, kind, provider, plan.EffectiveEndpoint, query, clientHeaders, plan.BodyBytes, isStream, plan.EffectiveModel, requestedModel, plan)
+				duration := time.Since(startTime)
+				prs.finishSessionProviderRequest(kind, sessionHash)
+
+				if ok {
+					fmt.Printf("[INFO]   ✓ 会话隔离成功: %s | 耗时: %.2fs\n", provider.Name, duration.Seconds())
+					prs.confirmSessionProviderBinding(kind, sessionHash, sessionAttemptID)
+					if err := prs.blacklistService.RecordSuccessByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
+						fmt.Printf("[WARN] 清零失败计数失败: %v\n", err)
+					}
+					prs.setLastUsedProvider(kind, providerRefFromProvider(provider), provider.Name)
+					return
+				}
+
+				lastError = err
+				lastProvider = provider.Name
+				lastDuration = duration
+				errorMsg := "未知错误"
+				if err != nil {
+					errorMsg = err.Error()
+				}
+				if errors.Is(err, errResponseStarted) {
+					prs.restoreOrReleaseProviderSessionBinding(kind, sessionHash, originalSessionBinding, sessionAttemptID)
+					fmt.Printf("[WARN]   ⚠️ 响应已部分写入，会话隔离停止降级: %s | 错误: %s | 耗时: %.2fs\n",
+						provider.Name, errorMsg, duration.Seconds())
+					if errors.Is(err, errClientAbort) {
+						return
+					}
+					if err := prs.blacklistService.RecordFailureByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
+						fmt.Printf("[ERROR] 记录失败到黑名单失败: %v\n", err)
+					}
+					if blacklisted, _ := prs.blacklistService.IsBlacklistedByID(kind, providerRefFromProvider(provider), provider.Name); blacklisted {
+						prs.releaseProviderSessions(kind, providerRefFromProvider(provider))
+					}
+					return
+				}
+				fmt.Printf("[WARN]   ✗ 会话隔离失败: %s | 错误: %s | 耗时: %.2fs\n",
+					provider.Name, errorMsg, duration.Seconds())
+				if errors.Is(err, errClientAbort) {
+					prs.restoreOrReleaseProviderSessionBinding(kind, sessionHash, originalSessionBinding, sessionAttemptID)
+					return
+				}
+				if !errors.Is(err, errClientAbort) {
+					if err := prs.blacklistService.RecordFailureByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
+						fmt.Printf("[ERROR] 记录失败到黑名单失败: %v\n", err)
+					}
+					if blacklisted, _ := prs.blacklistService.IsBlacklistedByID(kind, providerRefFromProvider(provider), provider.Name); blacklisted {
+						prs.releaseProviderSessions(kind, providerRefFromProvider(provider))
+					}
+				}
+				prs.restoreOrReleaseProviderSessionBinding(kind, sessionHash, originalSessionBinding, sessionAttemptID)
+			}
+
+			prs.restoreOrReleaseProviderSessionBinding(kind, sessionHash, originalSessionBinding, sessionAttemptID)
+			if writeLastUpstreamErrorIfAny(c, lastError) {
+				return
+			}
+			errorMsg := "未知错误"
+			if lastError != nil {
+				errorMsg = lastError.Error()
+			}
+			c.JSON(http.StatusBadGateway, gin.H{
+				"error":          fmt.Sprintf("所有 %d 个 provider 均失败，最后错误: %s", totalAttempts, errorMsg),
+				"last_provider":  lastProvider,
+				"last_duration":  fmt.Sprintf("%.2fs", lastDuration.Seconds()),
+				"total_attempts": totalAttempts,
+			})
+			return
 		}
 
 		var lastError error
@@ -907,6 +1837,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 					if err := prs.blacklistService.RecordFailureByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
 						fmt.Printf("[ERROR] 记录失败到黑名单失败: %v\n", err)
 					}
+					prs.releaseProviderSessionsIfBlacklisted(kind, providerRefFromProvider(provider), provider.Name)
 					return
 				}
 				fmt.Printf("[WARN]   ✗ Level %d 失败: %s | 错误: %s | 耗时: %.2fs\n",
@@ -917,6 +1848,9 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 					fmt.Printf("[INFO] 客户端中断，跳过失败计数: %s\n", provider.Name)
 				} else if err := prs.blacklistService.RecordFailureByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
 					fmt.Printf("[ERROR] 记录失败到黑名单失败: %v\n", err)
+				}
+				if !errors.Is(err, errClientAbort) {
+					prs.releaseProviderSessionsIfBlacklisted(kind, providerRefFromProvider(provider), provider.Name)
 				}
 
 				// 发送切换通知：检查是否有下一个可用的 provider
@@ -4184,6 +5118,16 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 
 		// 获取拉黑功能开关状态
 		blacklistEnabled := prs.blacklistService.ShouldUseFixedMode()
+		roundRobinEnabled := prs.isRoundRobinEnabled()
+		sessionHash := deriveRelaySessionHash(bodyBytes)
+		originalSessionBinding := prs.getSessionBindingSnapshot("gemini", sessionHash)
+		if originalSessionBinding != nil && !prs.isGeminiProviderSessionBindingUsable(activeProviders, originalSessionBinding) {
+			prs.releaseSessionBinding("gemini", sessionHash)
+			originalSessionBinding = nil
+		}
+		sessionAffinityEnabled := prs.isSessionAffinityEnabled("gemini")
+		sessionCanBind := strings.TrimSpace(sessionHash) != "" && (originalSessionBinding != nil || sessionAffinityEnabled)
+		var sessionAttemptID int64
 
 		// 【拉黑模式】：同 Provider 重试直到被拉黑，然后切换到下一个 Provider
 		if blacklistEnabled {
@@ -4199,6 +5143,102 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 			var lastError error
 			var lastProvider string
 			totalAttempts := 0
+			if sessionCanBind {
+				orderedProviders := make([]GeminiProvider, 0, len(activeProviders))
+				for _, level := range sortedLevels {
+					providersInLevel := levelGroups[level]
+					if roundRobinEnabled {
+						providersInLevel = prs.roundRobinOrderGeminiPreview(level, providersInLevel)
+					}
+					orderedProviders = append(orderedProviders, providersInLevel...)
+				}
+				orderedProviders = prs.reorderGeminiProviderAttemptsForSession(orderedProviders, sessionHash, originalSessionBinding == nil && sessionAffinityEnabled)
+
+				for _, provider := range orderedProviders {
+					requestLog.ProviderID = providerRefFromGeminiProvider(provider)
+					requestLog.Provider = provider.Name
+					requestLog.Model = provider.Model
+					requestLog.ProviderAPIURL = provider.BaseURL
+					requestLog.ProviderAPIKey = provider.APIKey
+					currentBodyBytes, err := buildGeminiRequestBody(bodyBytes, provider)
+					if err != nil {
+						lastError = err
+						lastProvider = provider.Name
+						continue
+					}
+					requestLog.ReasoningEffort = extractRequestLogReasoningEffort(currentBodyBytes, requestLog.RequestedModel)
+
+					for retryCount := 0; retryCount < maxRetryPerProvider; retryCount++ {
+						totalAttempts++
+						if blacklisted, _ := prs.blacklistService.IsBlacklistedByID("gemini", providerRefFromGeminiProvider(provider), provider.Name); blacklisted {
+							prs.releaseProviderSessions("gemini", providerRefFromGeminiProvider(provider))
+							fmt.Printf("[Gemini] 🚫 Provider %s 已被拉黑，切换到下一个\n", provider.Name)
+							break
+						}
+
+						fmt.Printf("[Gemini] [会话隔离/拉黑模式] Provider: %s | 重试 %d/%d\n",
+							provider.Name, retryCount+1, maxRetryPerProvider)
+						sessionAttemptID = prs.beginSessionProviderRequest("gemini", sessionHash, providerRefFromGeminiProvider(provider), provider.Name, geminiProviderSessionMaxSessions(provider), geminiProviderSessionTTLMinutes(provider), originalSessionBinding == nil)
+						if sessionAttemptID < 0 {
+							continue
+						}
+						if roundRobinEnabled && originalSessionBinding == nil && sessionAffinityEnabled {
+							prs.markRoundRobinGeminiProviderAttempt(provider)
+						}
+						ok, err, responseWritten := prs.forwardGeminiRequest(c, &provider, endpoint, currentBodyBytes, isStream, requestLog)
+						prs.finishSessionProviderRequest("gemini", sessionHash)
+						if ok {
+							prs.confirmSessionProviderBinding("gemini", sessionHash, sessionAttemptID)
+							_ = prs.blacklistService.RecordSuccessByID("gemini", providerRefFromGeminiProvider(provider), provider.Name)
+							prs.setLastUsedProvider("gemini", providerRefFromGeminiProvider(provider), provider.Name)
+							return
+						}
+						errorMsg := "未知错误"
+						if err != nil {
+							errorMsg = err.Error()
+						}
+						if responseWritten {
+							prs.restoreOrReleaseProviderSessionBinding("gemini", sessionHash, originalSessionBinding, sessionAttemptID)
+							_ = prs.blacklistService.RecordFailureByID("gemini", providerRefFromGeminiProvider(provider), provider.Name)
+							if blacklisted, _ := prs.blacklistService.IsBlacklistedByID("gemini", providerRefFromGeminiProvider(provider), provider.Name); blacklisted {
+								prs.releaseProviderSessions("gemini", providerRefFromGeminiProvider(provider))
+							}
+							fmt.Printf("[Gemini] ⚠️ 响应已部分写入，无法重试: %s | 错误: %s\n", provider.Name, errorMsg)
+							return
+						}
+						lastError = err
+						lastProvider = provider.Name
+						_ = prs.blacklistService.RecordFailureByID("gemini", providerRefFromGeminiProvider(provider), provider.Name)
+						if blacklisted, _ := prs.blacklistService.IsBlacklistedByID("gemini", providerRefFromGeminiProvider(provider), provider.Name); blacklisted {
+							prs.releaseProviderSessions("gemini", providerRefFromGeminiProvider(provider))
+							prs.restoreOrReleaseProviderSessionBinding("gemini", sessionHash, originalSessionBinding, sessionAttemptID)
+							break
+						}
+						prs.restoreOrReleaseProviderSessionBinding("gemini", sessionHash, originalSessionBinding, sessionAttemptID)
+						if retryCount < maxRetryPerProvider-1 {
+							time.Sleep(time.Duration(retryWaitSeconds) * time.Second)
+						}
+					}
+				}
+
+				prs.restoreOrReleaseProviderSessionBinding("gemini", sessionHash, originalSessionBinding, sessionAttemptID)
+				if writeLastUpstreamErrorIfAny(c, lastError) {
+					return
+				}
+				errorMsg := "未知错误"
+				if lastError != nil {
+					errorMsg = lastError.Error()
+				}
+				if requestLog.HttpCode == 0 {
+					requestLog.HttpCode = http.StatusBadGateway
+				}
+				c.JSON(http.StatusBadGateway, gin.H{
+					"error":        "all gemini providers failed",
+					"details":      errorMsg,
+					"lastProvider": lastProvider,
+				})
+				return
+			}
 
 			// 遍历所有 Level 和 Provider
 			for _, level := range sortedLevels {
@@ -4256,6 +5296,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 						if responseWritten {
 							fmt.Printf("[Gemini] ⚠️ 响应已部分写入，无法重试: %s | 错误: %s\n", provider.Name, errorMsg)
 							_ = prs.blacklistService.RecordFailureByID("gemini", providerRefFromGeminiProvider(provider), provider.Name)
+							prs.releaseProviderSessionsIfBlacklisted("gemini", providerRefFromGeminiProvider(provider), provider.Name)
 							return
 						}
 
@@ -4268,6 +5309,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 
 						// 记录失败次数（可能触发拉黑）
 						_ = prs.blacklistService.RecordFailureByID("gemini", providerRefFromGeminiProvider(provider), provider.Name)
+						prs.releaseProviderSessionsIfBlacklisted("gemini", providerRefFromGeminiProvider(provider), provider.Name)
 
 						// 检查是否刚被拉黑
 						if blacklisted, _ := prs.blacklistService.IsBlacklistedByID("gemini", providerRefFromGeminiProvider(provider), provider.Name); blacklisted {
@@ -4311,11 +5353,92 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 		}
 
 		// 【降级模式】：按 Level 顺序尝试所有 provider
-		roundRobinEnabled := prs.isRoundRobinEnabled()
 		if roundRobinEnabled {
 			fmt.Printf("[Gemini] 🔄 降级模式 + 轮询负载均衡\n")
 		} else {
 			fmt.Printf("[Gemini] 🔄 降级模式（顺序降级）\n")
+		}
+
+		if sessionCanBind {
+			orderedProviders := make([]GeminiProvider, 0, len(activeProviders))
+			for _, level := range sortedLevels {
+				providersInLevel := levelGroups[level]
+				if roundRobinEnabled {
+					providersInLevel = prs.roundRobinOrderGeminiPreview(level, providersInLevel)
+				}
+				orderedProviders = append(orderedProviders, providersInLevel...)
+			}
+			orderedProviders = prs.reorderGeminiProviderAttemptsForSession(orderedProviders, sessionHash, originalSessionBinding == nil && sessionAffinityEnabled)
+
+			var lastError error
+			for idx, provider := range orderedProviders {
+				fmt.Printf("[Gemini] [会话隔离 %d/%d] Provider: %s\n", idx+1, len(orderedProviders), provider.Name)
+				requestLog.ProviderID = providerRefFromGeminiProvider(provider)
+				requestLog.Provider = provider.Name
+				requestLog.Model = provider.Model
+				requestLog.ProviderAPIURL = provider.BaseURL
+				requestLog.ProviderAPIKey = provider.APIKey
+				currentBodyBytes, err := buildGeminiRequestBody(bodyBytes, provider)
+				if err != nil {
+					lastError = err
+					continue
+				}
+				requestLog.ReasoningEffort = extractRequestLogReasoningEffort(currentBodyBytes, requestLog.RequestedModel)
+				sessionAttemptID = prs.beginSessionProviderRequest(
+					"gemini",
+					sessionHash,
+					providerRefFromGeminiProvider(provider),
+					provider.Name,
+					geminiProviderSessionMaxSessions(provider),
+					geminiProviderSessionTTLMinutes(provider),
+					originalSessionBinding == nil,
+				)
+				if sessionAttemptID < 0 {
+					continue
+				}
+				if roundRobinEnabled && originalSessionBinding == nil && sessionAffinityEnabled {
+					prs.markRoundRobinGeminiProviderAttempt(provider)
+				}
+				ok, err, responseWritten := prs.forwardGeminiRequest(c, &provider, endpoint, currentBodyBytes, isStream, requestLog)
+				prs.finishSessionProviderRequest("gemini", sessionHash)
+				if ok {
+					prs.confirmSessionProviderBinding("gemini", sessionHash, sessionAttemptID)
+					_ = prs.blacklistService.RecordSuccessByID("gemini", providerRefFromGeminiProvider(provider), provider.Name)
+					prs.setLastUsedProvider("gemini", providerRefFromGeminiProvider(provider), provider.Name)
+					fmt.Printf("[Gemini] ✓ 会话隔离请求完成 | Provider: %s | 总耗时: %.2fs\n", provider.Name, time.Since(start).Seconds())
+					return
+				}
+				if responseWritten {
+					prs.restoreOrReleaseProviderSessionBinding("gemini", sessionHash, originalSessionBinding, sessionAttemptID)
+					_ = prs.blacklistService.RecordFailureByID("gemini", providerRefFromGeminiProvider(provider), provider.Name)
+					if blacklisted, _ := prs.blacklistService.IsBlacklistedByID("gemini", providerRefFromGeminiProvider(provider), provider.Name); blacklisted {
+						prs.releaseProviderSessions("gemini", providerRefFromGeminiProvider(provider))
+					}
+					return
+				}
+				lastError = err
+				_ = prs.blacklistService.RecordFailureByID("gemini", providerRefFromGeminiProvider(provider), provider.Name)
+				if blacklisted, _ := prs.blacklistService.IsBlacklistedByID("gemini", providerRefFromGeminiProvider(provider), provider.Name); blacklisted {
+					prs.releaseProviderSessions("gemini", providerRefFromGeminiProvider(provider))
+				}
+				prs.restoreOrReleaseProviderSessionBinding("gemini", sessionHash, originalSessionBinding, sessionAttemptID)
+			}
+			prs.restoreOrReleaseProviderSessionBinding("gemini", sessionHash, originalSessionBinding, sessionAttemptID)
+			if writeLastUpstreamErrorIfAny(c, lastError) {
+				return
+			}
+			errorMsg := "未知错误"
+			if lastError != nil {
+				errorMsg = lastError.Error()
+			}
+			if requestLog.HttpCode == 0 {
+				requestLog.HttpCode = http.StatusBadGateway
+			}
+			c.JSON(http.StatusBadGateway, gin.H{
+				"error":   "all gemini providers failed",
+				"details": errorMsg,
+			})
+			return
 		}
 
 		var lastError error
@@ -4363,6 +5486,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 				if responseWritten {
 					fmt.Printf("[Gemini] ⚠️ 响应已部分写入，无法降级: %s | 错误: %s\n", provider.Name, errorMsg)
 					_ = prs.blacklistService.RecordFailureByID("gemini", providerRefFromGeminiProvider(provider), provider.Name)
+					prs.releaseProviderSessionsIfBlacklisted("gemini", providerRefFromGeminiProvider(provider), provider.Name)
 					return
 				}
 
@@ -4370,6 +5494,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 				lastError = err
 				fmt.Printf("[Gemini] ✗ 失败: %s | 错误: %s\n", provider.Name, errorMsg)
 				_ = prs.blacklistService.RecordFailureByID("gemini", providerRefFromGeminiProvider(provider), provider.Name)
+				prs.releaseProviderSessionsIfBlacklisted("gemini", providerRefFromGeminiProvider(provider), provider.Name)
 			}
 
 			fmt.Printf("[Gemini] Level %d 的所有 %d 个 provider 均失败，尝试下一 Level\n", level, len(providersInLevel))
@@ -4679,6 +5804,16 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 
 		// 获取拉黑功能开关状态
 		blacklistEnabled := prs.blacklistService.ShouldUseFixedMode()
+		roundRobinEnabled := prs.isRoundRobinEnabled()
+		sessionHash := deriveRelaySessionHash(bodyBytes)
+		originalSessionBinding := prs.getSessionBindingSnapshot(kind, sessionHash)
+		if originalSessionBinding != nil && !prs.isProviderSessionBindingUsable(kind, active, originalSessionBinding) {
+			prs.releaseSessionBinding(kind, sessionHash)
+			originalSessionBinding = nil
+		}
+		sessionAffinityEnabled := prs.isSessionAffinityEnabled(kind)
+		sessionCanBind := strings.TrimSpace(sessionHash) != "" && (originalSessionBinding != nil || sessionAffinityEnabled)
+		var sessionAttemptID int64
 
 		// 【拉黑模式】：同 Provider 重试直到被拉黑，然后切换到下一个 Provider
 		if blacklistEnabled {
@@ -4694,6 +5829,110 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 			var lastError error
 			var lastProvider string
 			totalAttempts := 0
+			if sessionCanBind {
+				orderedProviders := make([]Provider, 0, len(active))
+				for _, level := range levels {
+					providersInLevel := levelGroups[level]
+					if roundRobinEnabled {
+						providersInLevel = prs.roundRobinOrderPreview(kind, level, providersInLevel)
+					}
+					orderedProviders = append(orderedProviders, providersInLevel...)
+				}
+				orderedProviders = prs.reorderProviderAttemptsForSession(kind, orderedProviders, sessionHash, originalSessionBinding == nil && sessionAffinityEnabled)
+
+				for _, provider := range orderedProviders {
+					plan, err := prs.getProviderRequestPlan(requestPlans, provider, bodyBytes, endpoint, requestedModel)
+					if err != nil {
+						fmt.Printf("[CustomCLI][ERROR] Provider %s 请求体预处理失败: %v，跳过此 Provider\n", provider.Name, err)
+						continue
+					}
+
+					for retryCount := 0; retryCount < maxRetryPerProvider; retryCount++ {
+						totalAttempts++
+						if blacklisted, _ := prs.blacklistService.IsBlacklistedByID(kind, providerRefFromProvider(provider), provider.Name); blacklisted {
+							prs.releaseProviderSessions(kind, providerRefFromProvider(provider))
+							fmt.Printf("[CustomCLI][INFO] 🚫 Provider %s 已被拉黑，切换到下一个\n", provider.Name)
+							break
+						}
+
+						fmt.Printf("[CustomCLI][INFO] [会话隔离/拉黑模式] Provider: %s | 重试 %d/%d | Model: %s\n",
+							provider.Name, retryCount+1, maxRetryPerProvider, plan.EffectiveModel)
+						sessionAttemptID = prs.beginSessionProviderRequest(kind, sessionHash, providerRefFromProvider(provider), provider.Name, providerSessionMaxSessions(provider), providerSessionTTLMinutes(provider), originalSessionBinding == nil)
+						if sessionAttemptID < 0 {
+							continue
+						}
+						if roundRobinEnabled && originalSessionBinding == nil && sessionAffinityEnabled {
+							prs.markRoundRobinProviderAttempt(kind, provider)
+						}
+						startTime := time.Now()
+						ok, err := prs.forwardRequestWithPlan(c, kind, provider, plan.EffectiveEndpoint, query, clientHeaders, plan.BodyBytes, isStream, plan.EffectiveModel, requestedModel, plan)
+						duration := time.Since(startTime)
+						prs.finishSessionProviderRequest(kind, sessionHash)
+						if ok {
+							prs.confirmSessionProviderBinding(kind, sessionHash, sessionAttemptID)
+							if err := prs.blacklistService.RecordSuccessByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
+								fmt.Printf("[CustomCLI][WARN] 清零失败计数失败: %v\n", err)
+							}
+							prs.setLastUsedProvider(kind, providerRefFromProvider(provider), provider.Name)
+							return
+						}
+
+						lastError = err
+						lastProvider = provider.Name
+						errorMsg := "未知错误"
+						if err != nil {
+							errorMsg = err.Error()
+						}
+						if errors.Is(err, errResponseStarted) {
+							prs.restoreOrReleaseProviderSessionBinding(kind, sessionHash, originalSessionBinding, sessionAttemptID)
+							fmt.Printf("[CustomCLI][WARN] ⚠️ 响应已部分写入，无法重试: %s | 错误: %s | 耗时: %.2fs\n",
+								provider.Name, errorMsg, duration.Seconds())
+							if errors.Is(err, errClientAbort) {
+								return
+							}
+							if err := prs.blacklistService.RecordFailureByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
+								fmt.Printf("[CustomCLI][ERROR] 记录失败到黑名单失败: %v\n", err)
+							}
+							if blacklisted, _ := prs.blacklistService.IsBlacklistedByID(kind, providerRefFromProvider(provider), provider.Name); blacklisted {
+								prs.releaseProviderSessions(kind, providerRefFromProvider(provider))
+							}
+							return
+						}
+						if errors.Is(err, errClientAbort) {
+							prs.restoreOrReleaseProviderSessionBinding(kind, sessionHash, originalSessionBinding, sessionAttemptID)
+							return
+						}
+						if err := prs.blacklistService.RecordFailureByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
+							fmt.Printf("[CustomCLI][ERROR] 记录失败到黑名单失败: %v\n", err)
+						}
+						if blacklisted, _ := prs.blacklistService.IsBlacklistedByID(kind, providerRefFromProvider(provider), provider.Name); blacklisted {
+							prs.releaseProviderSessions(kind, providerRefFromProvider(provider))
+							prs.restoreOrReleaseProviderSessionBinding(kind, sessionHash, originalSessionBinding, sessionAttemptID)
+							break
+						}
+						prs.restoreOrReleaseProviderSessionBinding(kind, sessionHash, originalSessionBinding, sessionAttemptID)
+						if retryCount < maxRetryPerProvider-1 {
+							time.Sleep(time.Duration(retryWaitSeconds) * time.Second)
+						}
+					}
+				}
+
+				prs.restoreOrReleaseProviderSessionBinding(kind, sessionHash, originalSessionBinding, sessionAttemptID)
+				if writeLastUpstreamErrorIfAny(c, lastError) {
+					return
+				}
+				errorMsg := "未知错误"
+				if lastError != nil {
+					errorMsg = lastError.Error()
+				}
+				c.JSON(http.StatusBadGateway, gin.H{
+					"error":         fmt.Sprintf("所有 Provider 都失败或被拉黑，最后尝试: %s - %s", lastProvider, errorMsg),
+					"lastProvider":  lastProvider,
+					"totalAttempts": totalAttempts,
+					"mode":          "blacklist_retry_session_affinity",
+				})
+				return
+			}
 
 			// 遍历所有 Level 和 Provider
 			for _, level := range levels {
@@ -4758,6 +5997,7 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 							if err := prs.blacklistService.RecordFailureByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
 								fmt.Printf("[CustomCLI][ERROR] 记录失败到黑名单失败: %v\n", err)
 							}
+							prs.releaseProviderSessionsIfBlacklisted(kind, providerRefFromProvider(provider), provider.Name)
 							return
 						}
 						fmt.Printf("[CustomCLI][WARN] ✗ 失败: %s | 重试 %d/%d | 错误: %s | 耗时: %.2fs\n",
@@ -4773,6 +6013,7 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 						if err := prs.blacklistService.RecordFailureByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
 							fmt.Printf("[CustomCLI][ERROR] 记录失败到黑名单失败: %v\n", err)
 						}
+						prs.releaseProviderSessionsIfBlacklisted(kind, providerRefFromProvider(provider), provider.Name)
 
 						// 检查是否刚被拉黑
 						if blacklisted, _ := prs.blacklistService.IsBlacklistedByID(kind, providerRefFromProvider(provider), provider.Name); blacklisted {
@@ -4812,11 +6053,104 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 		}
 
 		// 【降级模式】：失败自动尝试下一个 provider
-		roundRobinEnabled := prs.isRoundRobinEnabled()
 		if roundRobinEnabled {
 			fmt.Printf("[CustomCLI][INFO] 🔄 降级模式 + 轮询负载均衡\n")
 		} else {
 			fmt.Printf("[CustomCLI][INFO] 🔄 降级模式（顺序降级）\n")
+		}
+
+		if sessionCanBind {
+			orderedProviders := make([]Provider, 0, len(active))
+			for _, level := range levels {
+				providersInLevel := levelGroups[level]
+				if roundRobinEnabled {
+					providersInLevel = prs.roundRobinOrderPreview(kind, level, providersInLevel)
+				}
+				orderedProviders = append(orderedProviders, providersInLevel...)
+			}
+			orderedProviders = prs.reorderProviderAttemptsForSession(kind, orderedProviders, sessionHash, originalSessionBinding == nil && sessionAffinityEnabled)
+
+			var lastError error
+			var lastProvider string
+			var lastDuration time.Duration
+			totalAttempts := 0
+			for i, provider := range orderedProviders {
+				totalAttempts++
+				plan, err := prs.getProviderRequestPlan(requestPlans, provider, bodyBytes, endpoint, requestedModel)
+				if err != nil {
+					fmt.Printf("[CustomCLI][ERROR] Provider %s 请求体预处理失败: %v\n", provider.Name, err)
+					continue
+				}
+				fmt.Printf("[CustomCLI][INFO]   [会话隔离 %d/%d] Provider: %s | Model: %s\n", i+1, len(orderedProviders), provider.Name, plan.EffectiveModel)
+				sessionAttemptID = prs.beginSessionProviderRequest(kind, sessionHash, providerRefFromProvider(provider), provider.Name, providerSessionMaxSessions(provider), providerSessionTTLMinutes(provider), originalSessionBinding == nil)
+				if sessionAttemptID < 0 {
+					continue
+				}
+				if roundRobinEnabled && originalSessionBinding == nil && sessionAffinityEnabled {
+					prs.markRoundRobinProviderAttempt(kind, provider)
+				}
+				startTime := time.Now()
+				ok, err := prs.forwardRequestWithPlan(c, kind, provider, plan.EffectiveEndpoint, query, clientHeaders, plan.BodyBytes, isStream, plan.EffectiveModel, requestedModel, plan)
+				duration := time.Since(startTime)
+				prs.finishSessionProviderRequest(kind, sessionHash)
+				if ok {
+					prs.confirmSessionProviderBinding(kind, sessionHash, sessionAttemptID)
+					if err := prs.blacklistService.RecordSuccessByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
+						fmt.Printf("[CustomCLI][WARN] 清零失败计数失败: %v\n", err)
+					}
+					prs.setLastUsedProvider(kind, providerRefFromProvider(provider), provider.Name)
+					return
+				}
+				lastError = err
+				lastProvider = provider.Name
+				lastDuration = duration
+				errorMsg := "未知错误"
+				if err != nil {
+					errorMsg = err.Error()
+				}
+				if errors.Is(err, errResponseStarted) {
+					prs.restoreOrReleaseProviderSessionBinding(kind, sessionHash, originalSessionBinding, sessionAttemptID)
+					if errors.Is(err, errClientAbort) {
+						return
+					}
+					if err := prs.blacklistService.RecordFailureByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
+						fmt.Printf("[CustomCLI][ERROR] 记录失败到黑名单失败: %v\n", err)
+					}
+					if blacklisted, _ := prs.blacklistService.IsBlacklistedByID(kind, providerRefFromProvider(provider), provider.Name); blacklisted {
+						prs.releaseProviderSessions(kind, providerRefFromProvider(provider))
+					}
+					return
+				}
+				fmt.Printf("[CustomCLI][WARN]   ✗ 会话隔离失败: %s | 错误: %s | 耗时: %.2fs\n", provider.Name, errorMsg, duration.Seconds())
+				if errors.Is(err, errClientAbort) {
+					prs.restoreOrReleaseProviderSessionBinding(kind, sessionHash, originalSessionBinding, sessionAttemptID)
+					return
+				}
+				if !errors.Is(err, errClientAbort) {
+					if err := prs.blacklistService.RecordFailureByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
+						fmt.Printf("[CustomCLI][ERROR] 记录失败到黑名单失败: %v\n", err)
+					}
+					if blacklisted, _ := prs.blacklistService.IsBlacklistedByID(kind, providerRefFromProvider(provider), provider.Name); blacklisted {
+						prs.releaseProviderSessions(kind, providerRefFromProvider(provider))
+					}
+				}
+				prs.restoreOrReleaseProviderSessionBinding(kind, sessionHash, originalSessionBinding, sessionAttemptID)
+			}
+			prs.restoreOrReleaseProviderSessionBinding(kind, sessionHash, originalSessionBinding, sessionAttemptID)
+			if writeLastUpstreamErrorIfAny(c, lastError) {
+				return
+			}
+			errorMsg := "未知错误"
+			if lastError != nil {
+				errorMsg = lastError.Error()
+			}
+			c.JSON(http.StatusBadGateway, gin.H{
+				"error":          fmt.Sprintf("所有 %d 个 provider 均失败，最后错误: %s", totalAttempts, errorMsg),
+				"last_provider":  lastProvider,
+				"last_duration":  fmt.Sprintf("%.2fs", lastDuration.Seconds()),
+				"total_attempts": totalAttempts,
+			})
+			return
 		}
 
 		var lastError error
@@ -4877,6 +6211,7 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 					if err := prs.blacklistService.RecordFailureByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
 						fmt.Printf("[CustomCLI][ERROR] 记录失败到黑名单失败: %v\n", err)
 					}
+					prs.releaseProviderSessionsIfBlacklisted(kind, providerRefFromProvider(provider), provider.Name)
 					return
 				}
 				fmt.Printf("[CustomCLI][WARN]   ✗ Level %d 失败: %s | 错误: %s | 耗时: %.2fs\n",
@@ -4886,6 +6221,9 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 					fmt.Printf("[CustomCLI][INFO] 客户端中断，跳过失败计数: %s\n", provider.Name)
 				} else if err := prs.blacklistService.RecordFailureByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
 					fmt.Printf("[CustomCLI][ERROR] 记录失败到黑名单失败: %v\n", err)
+				}
+				if !errors.Is(err, errClientAbort) {
+					prs.releaseProviderSessionsIfBlacklisted(kind, providerRefFromProvider(provider), provider.Name)
 				}
 
 				// 发送切换通知

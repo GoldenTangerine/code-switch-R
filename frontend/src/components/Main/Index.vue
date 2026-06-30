@@ -38,9 +38,13 @@
           :show-proxy-toggle="shouldShowProviderProxyToggle(activeTab)"
           :active-proxy-state="activeProxyState"
           :active-proxy-busy="activeProxyBusy"
+          :active-session-affinity-state="activeSessionAffinityState"
+          :session-affinity-busy="sessionAffinityBusy"
+          :show-session-affinity-toggle="shouldShowProviderProxyToggle(activeTab)"
           :refreshing="refreshing"
           @change="onTabChange"
           @toggle-proxy="onProxyToggle"
+          @toggle-session-affinity="onSessionAffinityToggle"
           @create="openCreateModal"
           @refresh="refreshAllData"
         />
@@ -79,6 +83,7 @@
           @open-model-list="openModelList"
           @open-provider-logs="openProviderLogs"
           @open-provider-cost-trend="openProviderCostTrend"
+          @open-provider-sessions="openProviderSessions"
           @refresh-provider-quota="handleRefreshProviderQuota"
           @duplicate="handleDuplicate"
           @remove="requestRemove"
@@ -144,6 +149,37 @@
       />
 
       <BaseModal
+        :open="sessionModalState.open"
+        :title="sessionModalTitle"
+        panel-width="720px"
+        @close="closeSessionModal"
+      >
+        <div class="provider-session-modal">
+          <div v-if="selectedSessionStatus?.sessions.length" class="provider-session-list">
+            <div
+              v-for="session in selectedSessionStatus.sessions"
+              :key="session.sessionNumber"
+              class="provider-session-row"
+            >
+              <div>
+                <strong>#{{ session.sessionNumber }}</strong>
+                <span>{{ session.status === 'calling' ? t('components.main.sessionAffinity.calling') : t('components.main.sessionAffinity.idle') }}</span>
+              </div>
+              <div>{{ t('components.main.sessionAffinity.activeRequests', { count: session.activeRequests }) }}</div>
+              <div>{{ t('components.main.sessionAffinity.provider') }}：{{ session.providerName || '-' }}</div>
+              <div>{{ t('components.main.sessionAffinity.createdAt') }}：{{ formatSessionTime(session.createdAt) }}</div>
+              <div>{{ t('components.main.sessionAffinity.lastSeen') }}：{{ formatSessionTime(session.lastSeen) }}</div>
+              <div>{{ t('components.main.sessionAffinity.remaining') }}：{{ formatSessionRemaining(session.remainingSeconds) }}</div>
+              <div>{{ t('components.main.sessionAffinity.overflow') }}：{{ session.overflow ? t('components.main.sessionAffinity.yes') : t('components.main.sessionAffinity.no') }}</div>
+            </div>
+          </div>
+          <div v-else class="provider-session-empty">
+            {{ t('components.main.sessionAffinity.empty') }}
+          </div>
+        </div>
+      </BaseModal>
+
+      <BaseModal
         :open="confirmState.open"
         :title="t('components.main.form.confirmDeleteTitle')"
         variant="confirm"
@@ -182,9 +218,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref, watch, type ComponentPublicInstance } from 'vue'
+import { computed, onUnmounted, reactive, ref, watch, type ComponentPublicInstance } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Browser } from '@wailsio/runtime'
+import { Browser, Call } from '@wailsio/runtime'
 import { useRouter } from 'vue-router'
 import BaseButton from '../common/BaseButton.vue'
 import BaseModal from '../common/BaseModal.vue'
@@ -220,12 +256,12 @@ import { useProviderForm } from './composables/useProviderForm'
 import { useProviderQuotas } from './composables/useProviderQuotas'
 import { useProviderStats } from './composables/useProviderStats'
 import { useUpdatePolling } from './composables/useUpdatePolling'
-import { cardProviderRef } from './adapters/providerCardMappers'
+import { cardProviderRef, normalizeProviderRef } from './adapters/providerCardMappers'
 import { shouldAutoRefreshProviderQuota } from './utils/providerQuotaAutoRefresh'
 import { shouldShowProviderProxyToggle } from './utils/providerProxyToggleVisibility'
 import { getDefaultHostedProviderRef, isHostedRouteActive } from './utils/providerRoutingState'
 import { hasProviderQuotaQueryType } from '../../utils/providerQuotaQuery'
-import type { CustomCliToolDraft, ProviderCardViewModel, ProviderTab, VendorForm } from './types'
+import type { CustomCliToolDraft, ProviderCardViewModel, ProviderSessionStatusView, ProviderTab, VendorForm } from './types'
 import type { AutomationCard } from '../../data/cards'
 
 type MainUsageHeatmapExpose = {
@@ -246,6 +282,11 @@ const selectedIndex = ref(0)
 const activeTab = computed<ProviderTab>(() => tabs.value[selectedIndex.value]?.id ?? tabs.value[0]?.id ?? 'claude')
 const heatmapRef = ref<MainUsageHeatmapExpose | null>(null)
 const providerEditModalRef = ref<ProviderEditModalExpose | null>(null)
+const sessionStatuses = ref<ProviderSessionStatusView[]>([])
+const sessionModalState = reactive<{ open: boolean; card: AutomationCard | null }>({
+  open: false,
+  card: null,
+})
 
 const {
   hasUpdateAvailable,
@@ -453,6 +494,7 @@ const {
   t,
   showToast,
   getActiveTab: () => activeTab.value,
+  getSelectedToolId: () => selectedToolId.value,
   cards,
   normalizeLevel,
   persistProviders,
@@ -521,7 +563,10 @@ const {
   handleImportClick,
   activeProxyState,
   activeProxyBusy,
+  activeSessionAffinityState,
+  sessionAffinityBusy,
   onProxyToggle,
+  onSessionAffinityToggle,
   refreshing,
   refreshAllData,
   currentProxyLabel,
@@ -632,6 +677,87 @@ const defaultHostedProviderRef = computed(() => {
   )
 })
 
+const sessionStatusMap = computed(() => {
+  const map = new Map<string, ProviderSessionStatusView>()
+  sessionStatuses.value.forEach((status) => {
+    map.set(`${status.platform}:${normalizeProviderRef(status.providerId)}`, status)
+  })
+  return map
+})
+
+const activeSessionPlatform = computed(() => (
+  activeTab.value === 'others' && selectedToolId.value
+    ? `custom:${selectedToolId.value}`
+    : activeTab.value
+))
+
+const loadSessionStatuses = async () => {
+  try {
+    const result = await Call.ByName('codeswitch/services.SessionAffinityService.GetSessionAffinityStatuses', activeSessionPlatform.value)
+    sessionStatuses.value = Array.isArray(result) ? result as ProviderSessionStatusView[] : []
+  } catch (error) {
+    console.error('Failed to load session affinity statuses', error)
+    sessionStatuses.value = []
+  }
+}
+
+const getSessionStatusForCard = (card: AutomationCard): ProviderSessionStatusView | undefined => {
+  const providerRef = cardProviderRef(card)
+  const platform = activeSessionPlatform.value
+  const existing = sessionStatusMap.value.get(`${platform}:${providerRef}`)
+  if (existing) {
+    return existing
+  }
+  if (!activeProxyState.value || !activeSessionAffinityState.value || !card.enabled || !card.apiUrl) {
+    return undefined
+  }
+  if (getProviderBlacklistStatus(card)?.isBlacklisted === true) {
+    return undefined
+  }
+  return {
+    platform,
+    providerId: providerRef,
+    providerName: card.name,
+    activeRequests: 0,
+    activeSessions: 0,
+    maxSessions: card.sessionMaxSessions || 5,
+    sessions: [],
+  }
+}
+
+const selectedSessionStatus = computed(() => (
+  sessionModalState.card ? getSessionStatusForCard(sessionModalState.card) : undefined
+))
+
+const sessionModalTitle = computed(() => (
+  sessionModalState.card
+    ? t('components.main.sessionAffinity.modalTitle', { name: sessionModalState.card.name })
+    : t('components.main.sessionAffinity.modalTitleFallback')
+))
+
+const openProviderSessions = (card: AutomationCard) => {
+  sessionModalState.card = card
+  sessionModalState.open = true
+  void loadSessionStatuses()
+}
+
+const closeSessionModal = () => {
+  sessionModalState.open = false
+  sessionModalState.card = null
+}
+
+const formatSessionTime = (value: number) => {
+  if (!value) return '-'
+  return new Date(value).toLocaleString()
+}
+
+const formatSessionRemaining = (seconds: number) => {
+  const safeSeconds = Math.max(0, Math.floor(seconds || 0))
+  const minutes = Math.floor(safeSeconds / 60)
+  const restSeconds = safeSeconds % 60
+  return `${minutes}:${String(restSeconds).padStart(2, '0')}`
+}
+
 const activeCardViewModels = computed<ProviderCardViewModel[]>(() =>
   activeCards.value.map((card) => ({
     card,
@@ -645,6 +771,7 @@ const activeCardViewModels = computed<ProviderCardViewModel[]>(() =>
     connectivityClass: getConnectivityIndicatorClass(card.id),
     connectivityTooltip: getConnectivityTooltip(card.id),
     stats: providerStatDisplay(card),
+    sessionStatus: getSessionStatusForCard(card),
     quotaDisplay: getQuotaDisplay(card),
     quotaRefreshing: isQuotaRefreshing(card),
     formattedOfficialSite: formatOfficialSite(card.officialSite),
@@ -689,6 +816,25 @@ watch(
 
 watch(selectedToolId, () => {
   void loadLastUsedProviders()
+  void loadSessionStatuses()
+})
+
+watch(activeTab, () => {
+  void loadSessionStatuses()
+})
+
+let sessionStatusTimer: number | undefined
+if (typeof window !== 'undefined') {
+  sessionStatusTimer = window.setInterval(() => {
+    void loadSessionStatuses()
+  }, 2000)
+}
+
+onUnmounted(() => {
+  if (sessionStatusTimer !== undefined) {
+    window.clearInterval(sessionStatusTimer)
+    sessionStatusTimer = undefined
+  }
 })
 
 const bindCardRef = (card: AutomationCard) => (element: Element | ComponentPublicInstance | null) => {
@@ -778,3 +924,61 @@ watch(() => providerModalState.open, (open) => {
   }
 })
 </script>
+
+<style scoped>
+.provider-session-modal {
+  display: grid;
+  gap: 12px;
+}
+
+.provider-session-list {
+  display: grid;
+  gap: 10px;
+}
+
+.provider-session-row {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 1.5fr;
+  gap: 8px 12px;
+  padding: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 14px;
+  background: rgba(248, 250, 252, 0.72);
+  color: rgba(15, 23, 42, 0.72);
+  font-size: 13px;
+}
+
+.provider-session-row strong {
+  margin-right: 8px;
+  color: #0f172a;
+}
+
+.provider-session-empty {
+  padding: 20px;
+  border-radius: 14px;
+  background: rgba(148, 163, 184, 0.1);
+  color: rgba(71, 85, 105, 0.82);
+  text-align: center;
+}
+
+:global(.dark) .provider-session-row {
+  background: rgba(15, 23, 42, 0.48);
+  border-color: rgba(71, 85, 105, 0.72);
+  color: rgba(255, 255, 255, 0.72);
+}
+
+:global(.dark) .provider-session-row strong {
+  color: rgba(255, 255, 255, 0.92);
+}
+
+:global(.dark) .provider-session-empty {
+  background: rgba(15, 23, 42, 0.52);
+  color: rgba(255, 255, 255, 0.62);
+}
+
+@media (max-width: 720px) {
+  .provider-session-row {
+    grid-template-columns: 1fr;
+  }
+}
+</style>

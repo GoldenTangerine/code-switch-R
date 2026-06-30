@@ -35,6 +35,10 @@ export type AutomationCard = {
   requestBodyOverrides?: Record<string, any>
   // 优先级分组：数字越小优先级越高（1-10，默认 1）
   level?: number
+  // 会话隔离：供应商最多承载的会话数
+  sessionMaxSessions?: number
+  // 会话隔离：会话空闲释放时间（分钟）
+  sessionTTLMinutes?: number
   // API 端点路径（可选）：覆盖平台默认端点
   apiEndpoint?: string
   // OpenCode AI SDK 包名，例如 @ai-sdk/openai-compatible

@@ -153,6 +153,16 @@
             </span>
           </span>
           <button
+            v-if="sessionStatusBadge"
+            class="provider-state-pill provider-session-pill"
+            :class="{ 'provider-session-pill--overflow': sessionStatusBadge.overflow }"
+            type="button"
+            :title="sessionStatusBadge.title"
+            @click.stop="$emit('open-provider-sessions')"
+          >
+            {{ sessionStatusBadge.label }}
+          </button>
+          <button
             v-if="viewModel.card.officialSite"
             class="card-site"
             type="button"
@@ -859,6 +869,7 @@ const emit = defineEmits<{
   'open-model-list': []
   'open-provider-logs': []
   'open-provider-cost-trend': []
+  'open-provider-sessions': []
   'refresh-provider-quota': []
   duplicate: []
   remove: []
@@ -1149,6 +1160,32 @@ const relayStatusTitle = computed(() => (
       ? t('components.main.providers.defaultRoutedHint')
     : t('components.main.providers.recentRoutedHint')
 ))
+
+const sessionStatusBadge = computed(() => {
+  const status = props.viewModel.sessionStatus
+  if (!status) return null
+  const maxSessions = status.maxSessions || props.viewModel.card.sessionMaxSessions || 5
+  const activeSessions = status.activeSessions || 0
+  const activeRequests = status.activeRequests || 0
+  const overflow = activeSessions > maxSessions
+  return {
+    label: t('components.main.sessionAffinity.badge', {
+      current: activeSessions,
+      max: maxSessions,
+    }),
+    title: activeRequests > 0
+      ? t('components.main.sessionAffinity.badgeCallingHint', {
+          requests: activeRequests,
+          current: activeSessions,
+          max: maxSessions,
+        })
+      : t('components.main.sessionAffinity.badgeIdleHint', {
+          current: activeSessions,
+          max: maxSessions,
+        }),
+    overflow,
+  }
+})
 
 const handleToggleEnabled = (event: Event) => {
   emit('toggle-enabled', (event.target as HTMLInputElement).checked)

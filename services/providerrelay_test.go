@@ -702,3 +702,149 @@ func BenchmarkReplaceModelInRequestBody(b *testing.B) {
 		_, _ = ReplaceModelInRequestBody(bodyBytes, "anthropic/claude-sonnet-4")
 	}
 }
+
+func TestSessionAffinityConcurrentPendingFailuresReleaseBinding(t *testing.T) {
+	relay := NewProviderRelayService(nil, nil, nil, nil, nil, nil, "")
+	platform := "claude"
+	sessionHash := "session-a"
+
+	attemptA := relay.beginSessionProviderRequest(platform, sessionHash, "provider-a", "Provider A", 5, 5, true)
+	attemptB := relay.beginSessionProviderRequest(platform, sessionHash, "provider-a", "Provider A", 5, 5, true)
+	if attemptA == 0 || attemptB == 0 || attemptA != attemptB {
+		t.Fatalf("pending 并发应共享同一次临时绑定 attempt，got A=%d B=%d", attemptA, attemptB)
+	}
+
+	relay.finishSessionProviderRequest(platform, sessionHash)
+	relay.restoreOrReleaseSessionBinding(platform, sessionHash, nil, attemptA)
+	if binding := relay.sessionAffinity[sessionAffinityStateKey(platform, sessionHash)]; binding == nil || binding.ActiveRequests != 1 {
+		t.Fatalf("仍有 in-flight 请求时不应释放 binding，got %#v", binding)
+	}
+
+	relay.finishSessionProviderRequest(platform, sessionHash)
+	relay.restoreOrReleaseSessionBinding(platform, sessionHash, nil, attemptB)
+	if binding := relay.sessionAffinity[sessionAffinityStateKey(platform, sessionHash)]; binding != nil {
+		t.Fatalf("全部失败后应释放新会话临时 binding，got %#v", binding)
+	}
+}
+
+func TestSessionAffinityConcurrentPendingSuccessAndFailureKeepsConfirmedBinding(t *testing.T) {
+	relay := NewProviderRelayService(nil, nil, nil, nil, nil, nil, "")
+	platform := "claude"
+	sessionHash := "session-b"
+
+	attemptA := relay.beginSessionProviderRequest(platform, sessionHash, "provider-a", "Provider A", 5, 5, true)
+	attemptB := relay.beginSessionProviderRequest(platform, sessionHash, "provider-a", "Provider A", 5, 5, true)
+	relay.finishSessionProviderRequest(platform, sessionHash)
+	relay.confirmSessionProviderBinding(platform, sessionHash, attemptA)
+	relay.finishSessionProviderRequest(platform, sessionHash)
+	relay.restoreOrReleaseSessionBinding(platform, sessionHash, nil, attemptB)
+
+	binding := relay.sessionAffinity[sessionAffinityStateKey(platform, sessionHash)]
+	if binding == nil || !binding.Confirmed || binding.Pending || binding.ProviderID != "provider-a" {
+		t.Fatalf("应保留成功确认的 binding，got %#v", binding)
+	}
+}
+
+func TestSessionAffinityNewSessionFailoverRebindsToNextProvider(t *testing.T) {
+	relay := NewProviderRelayService(nil, nil, nil, nil, nil, nil, "")
+	platform := "claude"
+	sessionHash := "session-c"
+
+	attemptA := relay.beginSessionProviderRequest(platform, sessionHash, "provider-a", "Provider A", 5, 5, true)
+	if attemptA <= 0 {
+		t.Fatalf("新会话首次 provider 应创建 pending attempt，got %d", attemptA)
+	}
+	relay.finishSessionProviderRequest(platform, sessionHash)
+	relay.restoreOrReleaseSessionBinding(platform, sessionHash, nil, attemptA)
+
+	attemptB := relay.beginSessionProviderRequest(platform, sessionHash, "provider-b", "Provider B", 5, 5, true)
+	if attemptB <= 0 || attemptB == attemptA {
+		t.Fatalf("A 失败后应允许 B 创建新 attempt，got A=%d B=%d", attemptA, attemptB)
+	}
+	relay.finishSessionProviderRequest(platform, sessionHash)
+	relay.confirmSessionProviderBinding(platform, sessionHash, attemptB)
+	binding := relay.sessionAffinity[sessionAffinityStateKey(platform, sessionHash)]
+	if binding == nil || !binding.Confirmed || binding.ProviderID != "provider-b" {
+		t.Fatalf("B 成功后应绑定到 B，got %#v", binding)
+	}
+}
+
+func TestSessionAffinityConfirmedSessionFailoverMigratesProvider(t *testing.T) {
+	relay := NewProviderRelayService(nil, nil, nil, nil, nil, nil, "")
+	platform := "claude"
+	sessionHash := "session-d"
+
+	attemptA := relay.beginSessionProviderRequest(platform, sessionHash, "provider-a", "Provider A", 5, 5, true)
+	relay.confirmSessionProviderBinding(platform, sessionHash, attemptA)
+	relay.finishSessionProviderRequest(platform, sessionHash)
+	original := relay.getSessionBindingSnapshot(platform, sessionHash)
+
+	attemptB := relay.beginSessionProviderRequest(platform, sessionHash, "provider-b", "Provider B", 5, 5, false)
+	if attemptB <= 0 {
+		t.Fatalf("老会话 A 失败后应允许创建迁移 attempt，got %d", attemptB)
+	}
+	relay.finishSessionProviderRequest(platform, sessionHash)
+	relay.confirmSessionProviderBinding(platform, sessionHash, attemptB)
+
+	binding := relay.sessionAffinity[sessionAffinityStateKey(platform, sessionHash)]
+	if original == nil || binding == nil || !binding.Confirmed || binding.ProviderID != "provider-b" {
+		t.Fatalf("迁移成功后应绑定到 B，original=%#v binding=%#v", original, binding)
+	}
+}
+
+func TestSessionAffinityConfirmedSessionAllFailKeepsOriginalProvider(t *testing.T) {
+	relay := NewProviderRelayService(nil, nil, nil, nil, nil, nil, "")
+	platform := "claude"
+	sessionHash := "session-e"
+
+	attemptA := relay.beginSessionProviderRequest(platform, sessionHash, "provider-a", "Provider A", 5, 5, true)
+	relay.confirmSessionProviderBinding(platform, sessionHash, attemptA)
+	relay.finishSessionProviderRequest(platform, sessionHash)
+	original := relay.getSessionBindingSnapshot(platform, sessionHash)
+
+	attemptB := relay.beginSessionProviderRequest(platform, sessionHash, "provider-b", "Provider B", 5, 5, false)
+	relay.finishSessionProviderRequest(platform, sessionHash)
+	relay.restoreOrReleaseSessionBinding(platform, sessionHash, original, attemptB)
+
+	binding := relay.sessionAffinity[sessionAffinityStateKey(platform, sessionHash)]
+	if binding == nil || !binding.Confirmed || binding.ProviderID != "provider-a" || binding.ActiveRequests != 0 {
+		t.Fatalf("全部失败后应恢复原 Provider A，got %#v", binding)
+	}
+}
+
+func TestBeginSessionProviderRequestSkipsDifferentProviderDuringActiveMigration(t *testing.T) {
+	relay := NewProviderRelayService(nil, nil, nil, nil, nil, nil, "")
+	platform := "claude"
+	sessionHash := "session-f"
+
+	attemptA := relay.beginSessionProviderRequest(platform, sessionHash, "provider-a", "Provider A", 5, 5, true)
+	relay.confirmSessionProviderBinding(platform, sessionHash, attemptA)
+
+	wrongAttempt := relay.beginSessionProviderRequest(platform, sessionHash, "provider-b", "Provider B", 5, 5, false)
+	if wrongAttempt >= 0 {
+		t.Fatalf("原 Provider 仍有 in-flight 时不同 provider 应跳过，got attempt=%d", wrongAttempt)
+	}
+	binding := relay.sessionAffinity[sessionAffinityStateKey(platform, sessionHash)]
+	if binding == nil || binding.ProviderID != "provider-a" || binding.ActiveRequests != 1 {
+		t.Fatalf("不应把计数或 provider 改到错误 provider，got %#v", binding)
+	}
+}
+
+func TestRoundRobinOrderPreviewDoesNotAdvanceState(t *testing.T) {
+	relay := NewProviderRelayService(nil, nil, nil, nil, nil, nil, "")
+	providers := []Provider{{ID: 1, Name: "A"}, {ID: 2, Name: "B"}, {ID: 3, Name: "C"}}
+
+	first := relay.roundRobinOrder("claude", 1, providers)
+	preview := relay.roundRobinOrderPreview("claude", 1, providers)
+	second := relay.roundRobinOrder("claude", 1, providers)
+
+	if providerRefFromProvider(first[0]) != "1" {
+		t.Fatalf("首次轮询应从原始第一个开始，got %s", first[0].Name)
+	}
+	if providerRefFromProvider(preview[0]) != "2" {
+		t.Fatalf("preview 应基于当前状态预览下一位，got %s", preview[0].Name)
+	}
+	if providerRefFromProvider(second[0]) != "2" {
+		t.Fatalf("preview 不应推进状态，下一次真实轮询仍应为第二位，got %s", second[0].Name)
+	}
+}

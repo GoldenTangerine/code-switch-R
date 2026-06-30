@@ -71,6 +71,31 @@
         </div>
       </div>
 
+      <div v-if="showSessionAffinityToggle" class="relay-toggle" :aria-label="t('components.main.sessionAffinity.label')">
+        <div class="relay-switch">
+          <button
+            type="button"
+            class="relay-toggle-switch session-affinity-toggle"
+            :class="{ 'is-active': activeSessionAffinityState, 'is-busy': sessionAffinityBusy }"
+            role="switch"
+            :aria-checked="activeSessionAffinityState"
+            :aria-label="`${t('components.main.sessionAffinity.label')} · ${activeSessionAffinityState ? t('components.main.relayToggle.statusOn') : t('components.main.relayToggle.statusOff')}`"
+            :disabled="sessionAffinityBusy"
+            @click="$emit('toggle-session-affinity')"
+          >
+            <span class="relay-toggle-switch__thumb" aria-hidden="true">
+              <span class="relay-toggle-switch__dot"></span>
+            </span>
+            <span class="sr-only">
+              {{ activeSessionAffinityState ? t('components.main.relayToggle.statusOn') : t('components.main.relayToggle.statusOff') }}
+            </span>
+          </button>
+          <span class="relay-tooltip-content">
+            {{ activeSessionAffinityState ? t('components.main.sessionAffinity.tooltipOn') : t('components.main.sessionAffinity.tooltipOff') }}
+          </span>
+        </div>
+      </div>
+
       <button
         class="ghost-icon"
         :data-tooltip="t('components.main.tabs.addCard')"
@@ -128,14 +153,19 @@ const props = withDefaults(defineProps<{
   showProxyToggle?: boolean
   activeProxyState: boolean
   activeProxyBusy: boolean
+  activeSessionAffinityState: boolean
+  sessionAffinityBusy: boolean
+  showSessionAffinityToggle?: boolean
   refreshing: boolean
 }>(), {
   showProxyToggle: true,
+  showSessionAffinityToggle: true,
 })
 
 defineEmits<{
   change: [index: number]
   'toggle-proxy': []
+  'toggle-session-affinity': []
   create: []
   refresh: []
 }>()

@@ -543,6 +543,33 @@
           <span class="field-hint">{{ t('components.main.form.hints.level') }}</span>
         </div>
 
+        <div v-if="tabId !== 'opencode'" class="form-field">
+          <span>{{ t('components.main.form.labels.sessionAffinity') }}</span>
+          <div class="session-affinity-grid">
+            <label class="session-affinity-field">
+              <span>{{ t('components.main.form.labels.sessionMaxSessions') }}</span>
+              <BaseInput
+                v-model="form.sessionMaxSessions"
+                type="number"
+                min="1"
+                max="999"
+                step="1"
+              />
+            </label>
+            <label class="session-affinity-field">
+              <span>{{ t('components.main.form.labels.sessionTTLMinutes') }}</span>
+              <BaseInput
+                v-model="form.sessionTTLMinutes"
+                type="number"
+                min="1"
+                max="1440"
+                step="1"
+              />
+            </label>
+          </div>
+          <span class="field-hint">{{ t('components.main.form.hints.sessionAffinity') }}</span>
+        </div>
+
         <div class="form-field">
           <span>{{ t('components.main.form.labels.budgetQuota') }}</span>
           <div v-if="form.budgetQuotaSettings" class="budget-quota-grid provider-budget-quota-grid">

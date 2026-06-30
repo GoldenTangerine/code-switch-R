@@ -636,6 +636,7 @@
         "currentRoutedHint": "托管已开启，最新请求当前命中这个供应商。",
         "defaultRoutedHint": "托管已开启，在还没有实时命中记录前，会先按当前顺序尝试这个供应商。",
         "recentRoutedHint": "最近一次托管请求命中了这个供应商。",
+        "sessionBadge": "会话 {current}/{max}",
         "apiFormatOpenAIChatBadge": "Chat",
         "apiFormatOpenAIChatHint": "接口转换说明：当前供应商采用 OpenAI Chat Completions 接口，系统将在请求转发前自动完成 Claude 请求格式转换。",
         "apiFormatOpenAIResponsesBadge": "Resp",
@@ -758,6 +759,9 @@
           "icon": "图标",
           "enabled": "启用状态",
           "level": "优先级分组",
+          "sessionAffinity": "会话隔离",
+          "sessionMaxSessions": "会话上限",
+          "sessionTTLMinutes": "释放时间（分钟）",
           "availabilityMonitor": "可用性监控",
           "connectivityAutoBlacklist": "失败自动拉黑",
           "availabilityConfig": "高级可用性配置",
@@ -841,6 +845,7 @@
         "noOpenCodePresetResults": "未找到匹配的 OpenCode 预设",
         "hints": {
           "level": "数字越小优先级越高，Level 1 会被优先尝试，失败后依次尝试 Level 2、Level 3 等",
+          "sessionAffinity": "同一会话优先固定到该供应商。仅带稳定 metadata 会话字段的请求参与会话隔离。",
           "apiEndpoint": "覆盖平台默认端点。留空使用默认（claude: /v1/messages, codex: /responses）。GLM 模型请使用 /v1/chat/completions",
           "advancedOptions": "默认使用 Anthropic Messages。只有 Claude 供应商要接 OpenAI 兼容端点时，才需要展开这里改协议。",
           "apiFormat": "选择供应商 API 的输入格式",
@@ -1073,8 +1078,30 @@
         "levelHint": "有失败记录",
         "levelTitle": "黑名单等级 L{level}"
       },
+      "sessionAffinity": {
+        "label": "会话隔离",
+        "tooltipOn": "同一会话固定使用同一供应商",
+        "tooltipOff": "按现有顺序或轮询路由",
+        "badge": "会话 {current}/{max}",
+        "badgeCallingHint": "调用中，请求 {requests}，会话 {current}/{max}",
+        "badgeIdleHint": "空闲，会话 {current}/{max}",
+        "modalTitle": "{name} · 会话详情",
+        "modalTitleFallback": "会话详情",
+        "calling": "调用中",
+        "idle": "空闲",
+        "activeRequests": "当前请求：{count}",
+        "provider": "绑定供应商",
+        "createdAt": "首次绑定",
+        "lastSeen": "最近调用",
+        "remaining": "剩余释放",
+        "overflow": "是否溢出",
+        "yes": "是",
+        "no": "否",
+        "empty": "暂无会话"
+      },
       "errors": {
         "loadAppSettingsFailed": "加载应用设置失败",
+        "saveSettingsFailed": "保存设置失败",
         "loadHeatmapFailed": "加载使用热力图失败",
         "loadProvidersFailed": "加载 {tab} 标签页的供应商失败"
       }

@@ -14,6 +14,7 @@ type UseProviderFormOptions = {
   t: TranslateFn
   showToast: (message: string, type?: ToastType) => void
   getActiveTab: () => ProviderTab
+  getSelectedToolId?: () => string | null
   cards: Record<ProviderTab, AutomationCard[]>
   normalizeLevel: (level: number | string | undefined) => number
   persistProviders: (tabId: ProviderTab) => Promise<void>
@@ -45,12 +46,33 @@ const restoreCards = (target: AutomationCard[], snapshot: AutomationCard[]) => {
   target.splice(0, target.length, ...snapshot)
 }
 
+const resolveSessionPlatform = (tabId: ProviderTab, selectedToolId?: string | null) => (
+  tabId === 'others' && selectedToolId
+    ? `custom:${selectedToolId}`
+    : tabId === 'opencode'
+      ? ''
+      : tabId
+)
+
+const releaseProviderSessions = async (tabId: ProviderTab, card: AutomationCard, selectedToolId?: string | null) => {
+  const platform = resolveSessionPlatform(tabId, selectedToolId)
+  if (!platform) return
+  const providerRef = normalizeProviderRef(card.providerRef)
+  if (!providerRef) return
+  try {
+    await Call.ByName('codeswitch/services.SessionAffinityService.ReleaseProviderSessions', platform, providerRef)
+  } catch (error) {
+    console.error('Failed to release provider sessions', error)
+  }
+}
+
 export function useProviderForm(options: UseProviderFormOptions) {
   const {
     initialTab,
     t,
     showToast,
     getActiveTab,
+    getSelectedToolId,
     cards,
     normalizeLevel,
     persistProviders,
@@ -286,7 +308,10 @@ export function useProviderForm(options: UseProviderFormOptions) {
 
   const confirmRemove = async () => {
     if (!confirmState.card) return
+    const card = confirmState.card
+    const tabId = confirmState.tabId
     await removeProvider(confirmState.card.id, confirmState.tabId)
+    await releaseProviderSessions(tabId, card, getSelectedToolId?.())
     closeConfirm()
   }
 
@@ -307,6 +332,9 @@ export function useProviderForm(options: UseProviderFormOptions) {
     }
     try {
       await persistProviders(tabId)
+      if (!enabled) {
+        await releaseProviderSessions(tabId, card, getSelectedToolId?.())
+      }
     } catch (error) {
       restoreCards(cards[tabId], previousCards)
       throw error

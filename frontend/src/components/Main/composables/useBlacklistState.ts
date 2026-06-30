@@ -154,7 +154,7 @@ export function useBlacklistState(options: UseBlacklistStateOptions) {
         lastUsedProviders[platform] = null
       })
 
-      const result = await Call.ByName('codeswitch/services.ProviderRelayService.GetAllLastUsedProviders')
+      const result = await Call.ByName('codeswitch/services.ProviderRelayStateService.GetAllLastUsedProviders')
       if (!result) return
 
       Object.keys(result).forEach((platform) => {

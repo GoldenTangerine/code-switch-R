@@ -1219,6 +1219,23 @@
   border-color: rgba(99, 102, 241, 0.18);
 }
 
+.provider-session-pill {
+  cursor: pointer;
+  color: #0f766e;
+  background: rgba(20, 184, 166, 0.1);
+  border-color: rgba(20, 184, 166, 0.2);
+}
+
+.provider-session-pill:hover {
+  background: rgba(20, 184, 166, 0.16);
+}
+
+.provider-session-pill--overflow {
+  color: #b45309;
+  background: rgba(245, 158, 11, 0.14);
+  border-color: rgba(245, 158, 11, 0.28);
+}
+
 .provider-state-indicator {
   width: 7px;
   height: 7px;
@@ -1310,6 +1327,18 @@
   color: #c7d2fe;
   background: rgba(67, 56, 202, 0.24);
   border-color: rgba(129, 140, 248, 0.28);
+}
+
+.automation-card.theme-dark .provider-session-pill {
+  color: #5eead4;
+  background: rgba(15, 118, 110, 0.24);
+  border-color: rgba(45, 212, 191, 0.28);
+}
+
+.automation-card.theme-dark .provider-session-pill--overflow {
+  color: #fcd34d;
+  background: rgba(146, 64, 14, 0.34);
+  border-color: rgba(245, 158, 11, 0.34);
 }
 
 .automation-card.theme-dark .provider-state-pulse {

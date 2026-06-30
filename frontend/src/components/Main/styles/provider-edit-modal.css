@@ -1027,7 +1027,29 @@
   background: rgba(15, 23, 42, 0.5);
 }
 
+.session-affinity-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.session-affinity-field {
+  display: grid;
+  gap: 6px;
+  color: rgba(15, 23, 42, 0.68);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+:global(.dark) .session-affinity-field {
+  color: rgba(255, 255, 255, 0.62);
+}
+
 @media (max-width: 720px) {
+  .session-affinity-grid {
+    grid-template-columns: 1fr;
+  }
+
   .opencode-editor-card__header {
     flex-direction: column;
   }

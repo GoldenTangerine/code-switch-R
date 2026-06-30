@@ -93,6 +93,7 @@ type AppSettings struct {
 	AutoConnectivityTest            bool                   `json:"auto_connectivity_test"`
 	EnableSwitchNotify              bool                   `json:"enable_switch_notify"` // 供应商切换通知开关
 	EnableRoundRobin                bool                   `json:"enable_round_robin"`   // 同 Level 轮询负载均衡开关（默认关闭）
+	SessionAffinity                 map[string]bool        `json:"session_affinity"`     // 各平台会话隔离开关
 	CaptureRequestLogPayload        bool                   `json:"capture_request_log_payload"`
 	SanitizeRequestLogPayload       bool                   `json:"sanitize_request_log_payload"`
 }
@@ -316,6 +317,7 @@ func (as *AppSettingsService) defaultSettings() AppSettings {
 		AutoConnectivityTest:            true,  // 默认开启自动可用性监控（开箱即用）
 		EnableSwitchNotify:              true,  // 默认开启切换通知
 		EnableRoundRobin:                false, // 默认关闭轮询（使用顺序降级）
+		SessionAffinity:                 map[string]bool{},
 		CaptureRequestLogPayload:        false, // 默认关闭 payload 采集，降低隐私与存储风险
 		SanitizeRequestLogPayload:       true,  // 默认开启 payload 脱敏，避免敏感信息明文落库
 	}
@@ -355,6 +357,22 @@ func normalizeHomeProviderTabs(tabs []string) []string {
 	return normalizedTabs
 }
 
+func normalizeSessionAffinity(settings *AppSettings) {
+	if settings.SessionAffinity == nil {
+		settings.SessionAffinity = map[string]bool{}
+		return
+	}
+	normalized := make(map[string]bool, len(settings.SessionAffinity))
+	for key, enabled := range settings.SessionAffinity {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		normalized[key] = enabled
+	}
+	settings.SessionAffinity = normalized
+}
+
 // GetAppSettings returns the persisted app settings or defaults if the file does not exist.
 func (as *AppSettingsService) GetAppSettings() (AppSettings, error) {
 	as.mu.Lock()
@@ -371,6 +389,7 @@ func (as *AppSettingsService) SaveAppSettings(settings AppSettings) (AppSettings
 	normalizeHeatmapDisplaySettings(&settings)
 	normalizeBudgetSettings(&settings)
 	settings.UpdateHistoryKeepCount = normalizeUpdateHistoryKeepCount(settings.UpdateHistoryKeepCount)
+	normalizeSessionAffinity(&settings)
 
 	// 同步开机自启动状态
 	if as.autoStartService != nil {
@@ -411,6 +430,7 @@ func (as *AppSettingsService) loadLocked() (AppSettings, error) {
 	settings.HomeProviderTabs = normalizeHomeProviderTabs(settings.HomeProviderTabs)
 	normalizeBudgetSettings(&settings)
 	settings.UpdateHistoryKeepCount = normalizeUpdateHistoryKeepCount(settings.UpdateHistoryKeepCount)
+	normalizeSessionAffinity(&settings)
 	return settings, nil
 }
 
@@ -424,6 +444,7 @@ func (as *AppSettingsService) saveLocked(settings AppSettings) error {
 	settings.HomeProviderTabs = normalizeHomeProviderTabs(settings.HomeProviderTabs)
 	normalizeBudgetSettings(&settings)
 	settings.UpdateHistoryKeepCount = normalizeUpdateHistoryKeepCount(settings.UpdateHistoryKeepCount)
+	normalizeSessionAffinity(&settings)
 	data, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		return err

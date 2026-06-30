@@ -75,6 +75,12 @@ type Provider struct {
 	// 使用 omitempty 确保零值不序列化，向后兼容
 	Level int `json:"level,omitempty"`
 
+	// 会话隔离：供应商最多承载的会话数（默认 5，范围 1-999）
+	SessionMaxSessions int `json:"sessionMaxSessions,omitempty"`
+
+	// 会话隔离：会话空闲释放时间，单位分钟（默认 5，范围 1-1440）
+	SessionTTLMinutes int `json:"sessionTTLMinutes,omitempty"`
+
 	// ========== 可用性监控字段（新增 v0.5.0） ==========
 
 	// 可用性监控开关 - 在可用性页面配置
