@@ -760,9 +760,6 @@
           "enabled": "启用状态",
           "providerConcurrencyLimit": "实时并发上限",
           "level": "优先级分组",
-          "sessionAffinity": "会话隔离",
-          "sessionMaxSessions": "会话上限",
-          "sessionTTLMinutes": "释放时间（分钟）",
           "availabilityMonitor": "可用性监控",
           "connectivityAutoBlacklist": "失败自动拉黑",
           "availabilityConfig": "高级可用性配置",
@@ -846,8 +843,7 @@
         "noOpenCodePresetResults": "未找到匹配的 OpenCode 预设",
         "hints": {
           "level": "数字越小优先级越高，Level 1 会被优先尝试，失败后依次尝试 Level 2、Level 3 等",
-          "providerConcurrencyLimit": "限制该供应商同时处理的请求数，默认 5，超过后自动尝试下一个供应商。",
-          "sessionAffinity": "同一会话优先固定到该供应商。仅带稳定 metadata 会话字段的请求参与会话隔离。",
+          "providerConcurrencyLimit": "留空表示不限制并发；超过上限后自动尝试下一个供应商。",
           "apiEndpoint": "覆盖平台默认端点。留空使用默认（claude: /v1/messages, codex: /responses）。GLM 模型请使用 /v1/chat/completions",
           "advancedOptions": "默认使用 Anthropic Messages。只有 Claude 供应商要接 OpenAI 兼容端点时，才需要展开这里改协议。",
           "apiFormat": "选择供应商 API 的输入格式",
@@ -1080,28 +1076,9 @@
         "levelHint": "有失败记录",
         "levelTitle": "黑名单等级 L{level}"
       },
-      "sessionAffinity": {
-        "label": "会话隔离",
-        "tooltipOn": "同一会话固定使用同一供应商",
-        "tooltipOff": "按现有顺序或轮询路由",
+      "concurrency": {
         "badge": "{current}/{max}",
-        "badgeCallingHint": "调用中，请求 {requests}，会话 {current}/{max}",
-        "badgeIdleHint": "空闲，会话 {current}/{max}",
-        "modalTitle": "{name} · 会话详情",
-        "modalTitleFallback": "会话详情",
-        "calling": "调用中",
-        "idle": "空闲",
-        "activeRequests": "当前请求：{count}",
-        "activeRequestsLabel": "当前请求",
-        "provider": "绑定供应商",
-        "createdAt": "首次绑定",
-        "lastSeen": "最近调用",
-        "remaining": "剩余释放",
-        "overflow": "是否溢出",
-        "userAgent": "User-Agent",
-        "yes": "是",
-        "no": "否",
-        "empty": "暂无会话"
+        "badgeHint": "当前并发：{current}/{max}"
       },
       "errors": {
         "loadAppSettingsFailed": "加载应用设置失败",

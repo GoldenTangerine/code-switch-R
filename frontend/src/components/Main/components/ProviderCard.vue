@@ -152,16 +152,14 @@
               {{ relayStatusLabel }}
             </span>
           </span>
-          <button
-            v-if="sessionStatusBadge"
-            class="provider-state-pill provider-session-pill"
-            :class="{ 'provider-session-pill--overflow': sessionStatusBadge.overflow }"
-            type="button"
-            :title="sessionStatusBadge.title"
-            @click.stop="$emit('open-provider-sessions')"
+          <span
+            v-if="concurrencyStatusBadge"
+            class="provider-state-pill provider-concurrency-pill"
+            :class="{ 'provider-concurrency-pill--overflow': concurrencyStatusBadge.overflow }"
+            :title="concurrencyStatusBadge.title"
           >
-            {{ sessionStatusBadge.label }}
-          </button>
+            {{ concurrencyStatusBadge.label }}
+          </span>
           <button
             v-if="viewModel.card.officialSite"
             class="card-site"
@@ -869,7 +867,6 @@ const emit = defineEmits<{
   'open-model-list': []
   'open-provider-logs': []
   'open-provider-cost-trend': []
-  'open-provider-sessions': []
   'refresh-provider-quota': []
   duplicate: []
   remove: []
@@ -1161,29 +1158,22 @@ const relayStatusTitle = computed(() => (
     : t('components.main.providers.recentRoutedHint')
 ))
 
-const sessionStatusBadge = computed(() => {
-  const status = props.viewModel.sessionStatus
+const concurrencyStatusBadge = computed(() => {
+  const status = props.viewModel.concurrencyStatus
   if (!status) return null
-  const maxSessions = status.maxSessions || props.viewModel.card.sessionMaxSessions || 5
-  const activeSessions = status.activeSessions || 0
   const activeRequests = status.activeRequests || 0
-  const overflow = activeSessions > maxSessions
+  const limit = status.limit || 0
+  const maxLabel = limit > 0 ? `${limit}` : '∞'
   return {
-    label: t('components.main.sessionAffinity.badge', {
-      current: activeSessions,
-      max: maxSessions,
+    label: t('components.main.concurrency.badge', {
+      current: activeRequests,
+      max: maxLabel,
     }),
-    title: activeRequests > 0
-      ? t('components.main.sessionAffinity.badgeCallingHint', {
-          requests: activeRequests,
-          current: activeSessions,
-          max: maxSessions,
-        })
-      : t('components.main.sessionAffinity.badgeIdleHint', {
-          current: activeSessions,
-          max: maxSessions,
-        }),
-    overflow,
+    title: t('components.main.concurrency.badgeHint', {
+      current: activeRequests,
+      max: maxLabel,
+    }),
+    overflow: limit > 0 && activeRequests >= limit,
   }
 })
 

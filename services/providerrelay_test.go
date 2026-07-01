@@ -794,11 +794,6 @@ func TestToolResponseSessionBinding(t *testing.T) {
 
 func TestToolResponseCollectorSkipsWhenOriginalRequestHasSession(t *testing.T) {
 	appSettings := &AppSettingsService{path: t.TempDir() + "/settings.json"}
-	if _, err := appSettings.SaveAppSettings(AppSettings{
-		SessionAffinity: map[string]bool{"claude": true},
-	}); err != nil {
-		t.Fatalf("保存测试设置失败: %v", err)
-	}
 	relay := NewProviderRelayService(nil, nil, nil, nil, appSettings, nil, "")
 	plan := providerRequestPlan{
 		OriginalBodyBytes: []byte(`{"metadata":{"session_id":"session-a"}}`),
@@ -1234,6 +1229,29 @@ func TestProviderConcurrencySlotLimitAndRelease(t *testing.T) {
 		t.Fatalf("provider concurrency slot should be reusable after release")
 	} else {
 		releaseAgain()
+	}
+}
+
+func TestProviderConcurrencySlotUnlimitedWhenLimitEmpty(t *testing.T) {
+	relay := NewProviderRelayService(nil, nil, nil, nil, nil, nil, "")
+	providerID := "provider-a"
+	releases := make([]func(), 0, 3)
+
+	for i := 0; i < 3; i++ {
+		release, ok := relay.acquireProviderConcurrencySlot("claude", providerID, 0)
+		if !ok {
+			t.Fatalf("unlimited provider concurrency slot should be acquired")
+		}
+		releases = append(releases, release)
+	}
+	if got := relay.providerConcurrencyCount("claude", providerID); got != 3 {
+		t.Fatalf("unlimited slot should be tracked, got %d", got)
+	}
+	for _, release := range releases {
+		release()
+	}
+	if got := relay.providerConcurrencyCount("claude", providerID); got != 0 {
+		t.Fatalf("unlimited slot should be released, got %d", got)
 	}
 }
 

@@ -8,8 +8,6 @@ import {
   normalizeClaudeAPIFormatValue,
   normalizeModelMappingMissPolicy,
   normalizeProviderConcurrencyLimit,
-  normalizeSessionMaxSessions,
-  normalizeSessionTTLMinutes,
   resolvePersistedAnthropicCacheTTL,
 } from './providerFormMappers'
 import {
@@ -37,8 +35,6 @@ export type GeminiProvider = Awaited<ReturnType<typeof GetGeminiProviders>> exte
   providerQuotaQueryType?: unknown | null
   providerQuotaQueryConfig?: unknown | null
   providerConcurrencyLimit?: number
-  sessionMaxSessions?: number
-  sessionTTLMinutes?: number
 }) : any
 
 export type OpenCodeProvider = OpenCodeProviderModel & {
@@ -62,8 +58,6 @@ export type PersistedProvider = PersistedProviderModel & {
   providerQuotaQueryConfig?: unknown | null
   anthropicCacheTTL?: unknown | null
   providerConcurrencyLimit?: number
-  sessionMaxSessions?: number
-  sessionTTLMinutes?: number
   modelMappingMissPolicy?: ModelMappingMissPolicy
   opencodeNpm?: string
   opencodeSettingsConfig?: Record<string, any>
@@ -256,8 +250,6 @@ export const providerToCard = (
   requestBodyOverrides: cloneCardValue(provider.requestBodyOverrides || {}),
   level: provider.level || 1,
   providerConcurrencyLimit: normalizeProviderConcurrencyLimit(provider.providerConcurrencyLimit),
-  sessionMaxSessions: normalizeSessionMaxSessions(provider.sessionMaxSessions),
-  sessionTTLMinutes: normalizeSessionTTLMinutes(provider.sessionTTLMinutes),
   apiEndpoint: provider.apiEndpoint || '',
   opencodeNpm: provider.opencodeNpm || '',
   opencodeSettingsConfig: cloneCardValue(provider.opencodeSettingsConfig || {}),
@@ -309,8 +301,6 @@ export const geminiToCard = (provider: GeminiProvider, index: number): Automatio
   disabledSortOrder: provider.disabledSortOrder || (!provider.enabled ? (provider.sortOrder || index + 1) : undefined),
   level: provider.level || 1,
   providerConcurrencyLimit: normalizeProviderConcurrencyLimit(provider.providerConcurrencyLimit),
-  sessionMaxSessions: normalizeSessionMaxSessions(provider.sessionMaxSessions),
-  sessionTTLMinutes: normalizeSessionTTLMinutes(provider.sessionTTLMinutes),
   cliConfig: extractGeminiCliConfig(provider),
   requestBodyOverrides: cloneCardValue(provider.requestBodyOverrides || {}),
   budgetQuotaSettings: provider.budgetQuotaSettings == null
@@ -388,8 +378,6 @@ export const cardToGemini = (card: AutomationCard, original: GeminiProvider): Ge
   disabledSortOrder: card.disabledSortOrder || 0,
   level: card.level || 1,
   providerConcurrencyLimit: normalizeProviderConcurrencyLimit(card.providerConcurrencyLimit),
-  sessionMaxSessions: normalizeSessionMaxSessions(card.sessionMaxSessions),
-  sessionTTLMinutes: normalizeSessionTTLMinutes(card.sessionTTLMinutes),
   envConfig: buildGeminiEnvConfig(card, original),
   requestBodyOverrides: cloneCardValue(card.requestBodyOverrides || {}),
   budgetQuotaSettings: serializeOptionalBudgetQuotaSettings(card.budgetQuotaSettings),
@@ -417,8 +405,6 @@ export const createGeminiFromCard = (
   disabledSortOrder: card.disabledSortOrder || 0,
   level: card.level || 1,
   providerConcurrencyLimit: normalizeProviderConcurrencyLimit(card.providerConcurrencyLimit),
-  sessionMaxSessions: normalizeSessionMaxSessions(card.sessionMaxSessions),
-  sessionTTLMinutes: normalizeSessionTTLMinutes(card.sessionTTLMinutes),
   envConfig: buildGeminiEnvConfig(card, {} as GeminiProvider),
   requestBodyOverrides: cloneCardValue(card.requestBodyOverrides || {}),
   budgetQuotaSettings: serializeOptionalBudgetQuotaSettings(card.budgetQuotaSettings),
@@ -510,8 +496,6 @@ export const serializeProviders = (
       enabledSortOrder: provider.enabledSortOrder || 0,
       disabledSortOrder: provider.disabledSortOrder || 0,
       providerConcurrencyLimit: normalizeProviderConcurrencyLimit(provider.providerConcurrencyLimit),
-      sessionMaxSessions: normalizeSessionMaxSessions(provider.sessionMaxSessions),
-      sessionTTLMinutes: normalizeSessionTTLMinutes(provider.sessionTTLMinutes),
       requestBodyOverrides: cloneCardValue(provider.requestBodyOverrides || {}),
       opencodeNpm: provider.opencodeNpm || '',
       opencodeSettingsConfig: cloneCardValue(provider.opencodeSettingsConfig || {}),

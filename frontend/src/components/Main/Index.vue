@@ -38,13 +38,9 @@
           :show-proxy-toggle="shouldShowProviderProxyToggle(activeTab)"
           :active-proxy-state="activeProxyState"
           :active-proxy-busy="activeProxyBusy"
-          :active-session-affinity-state="activeSessionAffinityState"
-          :session-affinity-busy="sessionAffinityBusy"
-          :show-session-affinity-toggle="shouldShowProviderProxyToggle(activeTab)"
           :refreshing="refreshing"
           @change="onTabChange"
           @toggle-proxy="onProxyToggle"
-          @toggle-session-affinity="onSessionAffinityToggle"
           @create="openCreateModal"
           @refresh="refreshAllData"
         />
@@ -83,7 +79,6 @@
           @open-model-list="openModelList"
           @open-provider-logs="openProviderLogs"
           @open-provider-cost-trend="openProviderCostTrend"
-          @open-provider-sessions="openProviderSessions"
           @refresh-provider-quota="handleRefreshProviderQuota"
           @duplicate="handleDuplicate"
           @remove="requestRemove"
@@ -148,77 +143,6 @@
         @save="handleProviderQuotaQueryConfigModalSave"
       />
 
-      <BaseModal
-        :open="sessionModalState.open"
-        :title="sessionModalTitle"
-        panel-width="720px"
-        @close="closeSessionModal"
-      >
-        <div class="provider-session-modal">
-          <div v-if="selectedSessionStatus?.sessions.length" class="provider-session-list">
-            <div
-              v-for="session in selectedSessionStatus.sessions"
-              :key="session.sessionNumber"
-              class="provider-session-row"
-              :class="{
-                'provider-session-row--calling': session.status === 'calling',
-                'provider-session-row--overflow': session.overflow,
-              }"
-            >
-              <div class="provider-session-row__header">
-                <div class="provider-session-row__identity">
-                  <strong>#{{ session.sessionNumber }}</strong>
-                  <span
-                    class="provider-session-status"
-                    :class="session.status === 'calling' ? 'provider-session-status--calling' : 'provider-session-status--idle'"
-                  >
-                    {{ session.status === 'calling' ? t('components.main.sessionAffinity.calling') : t('components.main.sessionAffinity.idle') }}
-                  </span>
-                </div>
-                <span
-                  v-if="session.overflow"
-                  class="provider-session-overflow"
-                >
-                  {{ t('components.main.sessionAffinity.overflow') }}
-                </span>
-              </div>
-              <div class="provider-session-grid">
-                <div class="provider-session-field">
-                  <span>{{ t('components.main.sessionAffinity.activeRequestsLabel') }}</span>
-                  <strong>{{ session.activeRequests }}</strong>
-                </div>
-                <div class="provider-session-field">
-                  <span>{{ t('components.main.sessionAffinity.provider') }}</span>
-                  <strong>{{ session.providerName || '-' }}</strong>
-                </div>
-                <div class="provider-session-field">
-                  <span>{{ t('components.main.sessionAffinity.createdAt') }}</span>
-                  <strong>{{ formatSessionTime(session.createdAt) }}</strong>
-                </div>
-                <div class="provider-session-field">
-                  <span>{{ t('components.main.sessionAffinity.lastSeen') }}</span>
-                  <strong>{{ formatSessionTime(session.lastSeen) }}</strong>
-                </div>
-                <div class="provider-session-field">
-                  <span>{{ t('components.main.sessionAffinity.remaining') }}</span>
-                  <strong>{{ formatSessionRemaining(session.remainingSeconds) }}</strong>
-                </div>
-                <div class="provider-session-field">
-                  <span>{{ t('components.main.sessionAffinity.overflow') }}</span>
-                  <strong>{{ session.overflow ? t('components.main.sessionAffinity.yes') : t('components.main.sessionAffinity.no') }}</strong>
-                </div>
-                <div class="provider-session-field provider-session-field--wide">
-                  <span>{{ t('components.main.sessionAffinity.userAgent') }}</span>
-                  <strong class="provider-session-user-agent" :title="session.userAgent || '-'">{{ session.userAgent || '-' }}</strong>
-                </div>
-              </div>
-            </div>
-          </div>
-          <div v-else class="provider-session-empty">
-            {{ t('components.main.sessionAffinity.empty') }}
-          </div>
-        </div>
-      </BaseModal>
 
       <BaseModal
         :open="confirmState.open"
@@ -302,7 +226,7 @@ import { shouldAutoRefreshProviderQuota } from './utils/providerQuotaAutoRefresh
 import { shouldShowProviderProxyToggle } from './utils/providerProxyToggleVisibility'
 import { getDefaultHostedProviderRef, isHostedRouteActive } from './utils/providerRoutingState'
 import { hasProviderQuotaQueryType } from '../../utils/providerQuotaQuery'
-import type { CustomCliToolDraft, ProviderCardViewModel, ProviderSessionStatusView, ProviderTab, VendorForm } from './types'
+import type { CustomCliToolDraft, ProviderCardViewModel, ProviderConcurrencyStatusView, ProviderTab, VendorForm } from './types'
 import type { AutomationCard } from '../../data/cards'
 
 type MainUsageHeatmapExpose = {
@@ -323,12 +247,7 @@ const selectedIndex = ref(0)
 const activeTab = computed<ProviderTab>(() => tabs.value[selectedIndex.value]?.id ?? tabs.value[0]?.id ?? 'claude')
 const heatmapRef = ref<MainUsageHeatmapExpose | null>(null)
 const providerEditModalRef = ref<ProviderEditModalExpose | null>(null)
-const sessionStatuses = ref<ProviderSessionStatusView[]>([])
-const sessionModalState = reactive<{ open: boolean; card: AutomationCard | null }>({
-  open: false,
-  card: null,
-})
-
+const concurrencyStatuses = ref<ProviderConcurrencyStatusView[]>([])
 const {
   hasUpdateAvailable,
   updateReady,
@@ -604,10 +523,7 @@ const {
   handleImportClick,
   activeProxyState,
   activeProxyBusy,
-  activeSessionAffinityState,
-  sessionAffinityBusy,
   onProxyToggle,
-  onSessionAffinityToggle,
   refreshing,
   refreshAllData,
   currentProxyLabel,
@@ -718,85 +634,44 @@ const defaultHostedProviderRef = computed(() => {
   )
 })
 
-const sessionStatusMap = computed(() => {
-  const map = new Map<string, ProviderSessionStatusView>()
-  sessionStatuses.value.forEach((status) => {
+const concurrencyStatusMap = computed(() => {
+  const map = new Map<string, ProviderConcurrencyStatusView>()
+  concurrencyStatuses.value.forEach((status) => {
     map.set(`${status.platform}:${normalizeProviderRef(status.providerId)}`, status)
   })
   return map
 })
 
-const activeSessionPlatform = computed(() => (
+const activeConcurrencyPlatform = computed(() => (
   activeTab.value === 'others' && selectedToolId.value
     ? `custom:${selectedToolId.value}`
     : activeTab.value
 ))
 
-const loadSessionStatuses = async () => {
+const loadConcurrencyStatuses = async () => {
   try {
-    const result = await Call.ByName('codeswitch/services.SessionAffinityService.GetSessionAffinityStatuses', activeSessionPlatform.value)
-    sessionStatuses.value = Array.isArray(result) ? result as ProviderSessionStatusView[] : []
+    const result = await Call.ByName('codeswitch/services.ProviderConcurrencyService.GetProviderConcurrencyStatuses', activeConcurrencyPlatform.value)
+    concurrencyStatuses.value = Array.isArray(result) ? result as ProviderConcurrencyStatusView[] : []
   } catch (error) {
-    console.error('Failed to load session affinity statuses', error)
-    sessionStatuses.value = []
+    console.error('Failed to load provider concurrency statuses', error)
+    concurrencyStatuses.value = []
   }
 }
 
-const getSessionStatusForCard = (card: AutomationCard): ProviderSessionStatusView | undefined => {
+const getConcurrencyStatusForCard = (card: AutomationCard): ProviderConcurrencyStatusView | undefined => {
   const providerRef = cardProviderRef(card)
-  const platform = activeSessionPlatform.value
-  const existing = sessionStatusMap.value.get(`${platform}:${providerRef}`)
+  const platform = activeConcurrencyPlatform.value
+  const existing = concurrencyStatusMap.value.get(`${platform}:${providerRef}`)
   if (existing) {
     return existing
-  }
-  if (!activeProxyState.value || !activeSessionAffinityState.value || !card.enabled || !card.apiUrl) {
-    return undefined
-  }
-  if (getProviderBlacklistStatus(card)?.isBlacklisted === true) {
-    return undefined
   }
   return {
     platform,
     providerId: providerRef,
     providerName: card.name,
     activeRequests: 0,
-    activeSessions: 0,
-    maxSessions: card.sessionMaxSessions || 5,
-    sessions: [],
+    limit: card.providerConcurrencyLimit || 0,
   }
-}
-
-const selectedSessionStatus = computed(() => (
-  sessionModalState.card ? getSessionStatusForCard(sessionModalState.card) : undefined
-))
-
-const sessionModalTitle = computed(() => (
-  sessionModalState.card
-    ? t('components.main.sessionAffinity.modalTitle', { name: sessionModalState.card.name })
-    : t('components.main.sessionAffinity.modalTitleFallback')
-))
-
-const openProviderSessions = (card: AutomationCard) => {
-  sessionModalState.card = card
-  sessionModalState.open = true
-  void loadSessionStatuses()
-}
-
-const closeSessionModal = () => {
-  sessionModalState.open = false
-  sessionModalState.card = null
-}
-
-const formatSessionTime = (value: number) => {
-  if (!value) return '-'
-  return new Date(value).toLocaleString()
-}
-
-const formatSessionRemaining = (seconds: number) => {
-  const safeSeconds = Math.max(0, Math.floor(seconds || 0))
-  const minutes = Math.floor(safeSeconds / 60)
-  const restSeconds = safeSeconds % 60
-  return `${minutes}:${String(restSeconds).padStart(2, '0')}`
 }
 
 const activeCardViewModels = computed<ProviderCardViewModel[]>(() =>
@@ -812,7 +687,7 @@ const activeCardViewModels = computed<ProviderCardViewModel[]>(() =>
     connectivityClass: getConnectivityIndicatorClass(card.id),
     connectivityTooltip: getConnectivityTooltip(card.id),
     stats: providerStatDisplay(card),
-    sessionStatus: getSessionStatusForCard(card),
+    concurrencyStatus: getConcurrencyStatusForCard(card),
     quotaDisplay: getQuotaDisplay(card),
     quotaRefreshing: isQuotaRefreshing(card),
     formattedOfficialSite: formatOfficialSite(card.officialSite),
@@ -857,24 +732,24 @@ watch(
 
 watch(selectedToolId, () => {
   void loadLastUsedProviders()
-  void loadSessionStatuses()
+  void loadConcurrencyStatuses()
 })
 
 watch(activeTab, () => {
-  void loadSessionStatuses()
+  void loadConcurrencyStatuses()
 })
 
-let sessionStatusTimer: number | undefined
+let concurrencyStatusTimer: number | undefined
 if (typeof window !== 'undefined') {
-  sessionStatusTimer = window.setInterval(() => {
-    void loadSessionStatuses()
+  concurrencyStatusTimer = window.setInterval(() => {
+    void loadConcurrencyStatuses()
   }, 2000)
 }
 
 onUnmounted(() => {
-  if (sessionStatusTimer !== undefined) {
-    window.clearInterval(sessionStatusTimer)
-    sessionStatusTimer = undefined
+  if (concurrencyStatusTimer !== undefined) {
+    window.clearInterval(concurrencyStatusTimer)
+    concurrencyStatusTimer = undefined
   }
 })
 
@@ -965,211 +840,3 @@ watch(() => providerModalState.open, (open) => {
   }
 })
 </script>
-
-<style scoped>
-.provider-session-modal {
-  display: grid;
-  gap: 14px;
-}
-
-.provider-session-list {
-  display: grid;
-  gap: 12px;
-}
-
-.provider-session-row {
-  display: grid;
-  gap: 14px;
-  padding: 16px;
-  border: 1px solid rgba(148, 163, 184, 0.2);
-  border-radius: 18px;
-  background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.9), rgba(248, 250, 252, 0.78)),
-    radial-gradient(circle at 0 0, rgba(20, 184, 166, 0.12), transparent 32%);
-  color: rgba(15, 23, 42, 0.76);
-  font-size: 12px;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.7),
-    0 14px 32px rgba(15, 23, 42, 0.08);
-}
-
-.provider-session-row--calling {
-  border-color: rgba(20, 184, 166, 0.34);
-}
-
-.provider-session-row--overflow {
-  border-color: rgba(245, 158, 11, 0.38);
-  background:
-    linear-gradient(135deg, rgba(255, 251, 235, 0.9), rgba(248, 250, 252, 0.78)),
-    radial-gradient(circle at 0 0, rgba(245, 158, 11, 0.16), transparent 34%);
-}
-
-.provider-session-row__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.provider-session-row__identity {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.provider-session-row strong {
-  color: #0f172a;
-  font-size: 13px;
-  font-weight: 800;
-}
-
-.provider-session-status,
-.provider-session-overflow {
-  display: inline-flex;
-  align-items: center;
-  min-height: 20px;
-  padding: 0 8px;
-  border-radius: 999px;
-  border: 1px solid transparent;
-  font-size: 10px;
-  font-weight: 800;
-  line-height: 1;
-  letter-spacing: 0.04em;
-}
-
-.provider-session-status--calling {
-  color: #047857;
-  background: rgba(16, 185, 129, 0.12);
-  border-color: rgba(16, 185, 129, 0.22);
-}
-
-.provider-session-status--idle {
-  color: #475569;
-  background: rgba(148, 163, 184, 0.12);
-  border-color: rgba(148, 163, 184, 0.22);
-}
-
-.provider-session-overflow {
-  color: #b45309;
-  background: rgba(245, 158, 11, 0.14);
-  border-color: rgba(245, 158, 11, 0.3);
-}
-
-.provider-session-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.provider-session-field {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-  padding: 10px 12px;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.58);
-  border: 1px solid rgba(226, 232, 240, 0.72);
-}
-
-.provider-session-field--wide {
-  grid-column: 1 / -1;
-}
-
-.provider-session-field span {
-  color: rgba(71, 85, 105, 0.72);
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.provider-session-field strong {
-  overflow-wrap: anywhere;
-  color: rgba(15, 23, 42, 0.92);
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.provider-session-user-agent {
-  white-space: normal;
-  word-break: break-word;
-}
-
-.provider-session-empty {
-  padding: 20px;
-  border-radius: 18px;
-  border: 1px dashed rgba(148, 163, 184, 0.28);
-  background: rgba(248, 250, 252, 0.64);
-  color: rgba(71, 85, 105, 0.78);
-  font-size: 13px;
-  font-weight: 700;
-  text-align: center;
-}
-
-:global(.dark) .provider-session-row {
-  background:
-    linear-gradient(135deg, rgba(15, 23, 42, 0.72), rgba(2, 6, 23, 0.62)),
-    radial-gradient(circle at 0 0, rgba(45, 212, 191, 0.12), transparent 34%);
-  border-color: rgba(71, 85, 105, 0.64);
-  color: rgba(255, 255, 255, 0.72);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.08),
-    0 16px 34px rgba(0, 0, 0, 0.2);
-}
-
-:global(.dark) .provider-session-row--calling {
-  border-color: rgba(45, 212, 191, 0.36);
-}
-
-:global(.dark) .provider-session-row--overflow {
-  border-color: rgba(251, 191, 36, 0.38);
-  background:
-    linear-gradient(135deg, rgba(30, 24, 12, 0.82), rgba(2, 6, 23, 0.62)),
-    radial-gradient(circle at 0 0, rgba(251, 191, 36, 0.14), transparent 34%);
-}
-
-:global(.dark) .provider-session-row strong {
-  color: rgba(255, 255, 255, 0.92);
-}
-
-:global(.dark) .provider-session-status--calling {
-  color: #a7f3d0;
-  background: rgba(16, 185, 129, 0.16);
-  border-color: rgba(52, 211, 153, 0.26);
-}
-
-:global(.dark) .provider-session-status--idle {
-  color: #cbd5e1;
-  background: rgba(148, 163, 184, 0.12);
-  border-color: rgba(148, 163, 184, 0.2);
-}
-
-:global(.dark) .provider-session-overflow {
-  color: #fde68a;
-  background: rgba(245, 158, 11, 0.16);
-  border-color: rgba(251, 191, 36, 0.28);
-}
-
-:global(.dark) .provider-session-field {
-  background: rgba(15, 23, 42, 0.52);
-  border-color: rgba(71, 85, 105, 0.42);
-}
-
-:global(.dark) .provider-session-field span {
-  color: rgba(203, 213, 225, 0.62);
-}
-
-:global(.dark) .provider-session-field strong {
-  color: rgba(248, 250, 252, 0.92);
-}
-
-:global(.dark) .provider-session-empty {
-  background: rgba(15, 23, 42, 0.52);
-  border-color: rgba(71, 85, 105, 0.58);
-  color: rgba(255, 255, 255, 0.62);
-}
-
-@media (max-width: 720px) {
-  .provider-session-grid {
-    grid-template-columns: 1fr;
-  }
-}
-</style>

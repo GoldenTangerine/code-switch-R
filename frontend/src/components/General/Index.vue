@@ -165,7 +165,6 @@ const updateHistoryKeepCount = ref(getCachedNumber('updateHistoryKeepCount', def
 const autoConnectivityTestEnabled = ref(getCachedValue('autoConnectivityTest', false))
 const switchNotifyEnabled = ref(getCachedValue('switchNotify', true)) // 切换通知开关
 const roundRobinEnabled = ref(getCachedValue('roundRobin', false))    // 同 Level 轮询开关
-const sessionAffinitySettings = ref<Record<string, boolean>>({})
 const captureRequestLogPayloadEnabled = ref(getCachedValue('captureRequestLogPayload', false))
 const sanitizeRequestLogPayloadEnabled = ref(getCachedValue('sanitizeRequestLogPayload', true))
 const budgetQuotaUsedAdjustments = ref<BudgetQuotaAdjustments>(normalizeBudgetQuotaAdjustments(
@@ -1127,7 +1126,6 @@ const loadAppSettings = async () => {
     autoConnectivityTestEnabled.value = data?.auto_connectivity_test ?? false
     switchNotifyEnabled.value = data?.enable_switch_notify ?? true
     roundRobinEnabled.value = data?.enable_round_robin ?? false
-    sessionAffinitySettings.value = data?.session_affinity ?? {}
     captureRequestLogPayloadEnabled.value = data?.capture_request_log_payload ?? false
     sanitizeRequestLogPayloadEnabled.value = data?.sanitize_request_log_payload ?? true
     syncBudgetQuotaCurrentUsedForPlatform('claude')
@@ -1188,7 +1186,6 @@ const persistAppSettingsNow = async () => {
   saveBusy.value = true
   try {
     const latestSettings = await fetchAppSettings()
-    sessionAffinitySettings.value = latestSettings?.session_affinity ?? {}
     const normalizedBudgetQuotaUsedAdjustments = normalizeBudgetQuotaAdjustments(budgetQuotaUsedAdjustments.value)
     budgetQuotaUsedAdjustments.value = cloneBudgetQuotaAdjustments(normalizedBudgetQuotaUsedAdjustments)
     const normalizedBudgetQuotaSettings = normalizeBudgetQuotaSettings(budgetQuotaSettings.value)
@@ -1269,7 +1266,6 @@ const persistAppSettingsNow = async () => {
       auto_connectivity_test: autoConnectivityTestEnabled.value,
       enable_switch_notify: switchNotifyEnabled.value,
       enable_round_robin: roundRobinEnabled.value,
-      session_affinity: sessionAffinitySettings.value,
       capture_request_log_payload: captureRequestLogPayloadEnabled.value,
       sanitize_request_log_payload: sanitizeRequestLogPayloadEnabled.value,
     }

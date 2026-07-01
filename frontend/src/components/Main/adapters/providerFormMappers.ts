@@ -42,22 +42,13 @@ export const normalizeModelMappingMissPolicy = (value: unknown): ModelMappingMis
 }
 
 export const normalizeProviderConcurrencyLimit = (value: unknown): number => {
-  const numeric = Math.floor(Number(value))
-  if (!Number.isFinite(numeric) || numeric <= 0) return 5
+  const raw = `${value ?? ''}`.trim()
+  if (raw === '') return 0
+  const numeric = Math.floor(Number(raw))
+  if (!Number.isFinite(numeric) || numeric <= 0) return 0
   return Math.min(999, Math.max(1, numeric))
 }
 
-export const normalizeSessionMaxSessions = (value: unknown): number => {
-  const numeric = Math.floor(Number(value))
-  if (!Number.isFinite(numeric) || numeric <= 0) return 5
-  return Math.min(999, Math.max(1, numeric))
-}
-
-export const normalizeSessionTTLMinutes = (value: unknown): number => {
-  const numeric = Math.floor(Number(value))
-  if (!Number.isFinite(numeric) || numeric <= 0) return 5
-  return Math.min(1440, Math.max(1, numeric))
-}
 
 export const resolvePersistedAnthropicCacheTTL = (
   tabId: ProviderTab,
@@ -117,9 +108,7 @@ export const createDefaultVendorForm = (
   apiKeyUrl: '',
   icon: defaultIconKey,
   level: 1,
-  providerConcurrencyLimit: 5,
-  sessionMaxSessions: 5,
-  sessionTTLMinutes: 5,
+  providerConcurrencyLimit: undefined,
   enabled: true,
   apiFormat: platform === 'claude' ? 'anthropic' : undefined,
   anthropicCacheTTL: '',
@@ -166,9 +155,7 @@ export const createVendorFormFromCard = (
   apiKeyUrl: card.apiKeyUrl || '',
   icon: card.icon,
   level: card.level || 1,
-  providerConcurrencyLimit: card.providerConcurrencyLimit || 5,
-  sessionMaxSessions: card.sessionMaxSessions || 5,
-  sessionTTLMinutes: card.sessionTTLMinutes || 5,
+  providerConcurrencyLimit: card.providerConcurrencyLimit || undefined,
   enabled: card.enabled,
   apiFormat: tabId === 'claude' ? normalizeClaudeAPIFormatValue(card.apiFormat) : undefined,
   anthropicCacheTTL: resolvePersistedAnthropicCacheTTL(tabId, card.apiFormat, card.anthropicCacheTTL),
@@ -255,9 +242,7 @@ export const buildNormalizedVendorForm = ({
     apiKeyUrl: `${form.apiKeyUrl ?? ''}`.trim(),
     icon: (form.icon || defaultIconKey).toString().trim().toLowerCase() || defaultIconKey,
     level: form.level || 1,
-    providerConcurrencyLimit: form.providerConcurrencyLimit || 5,
-    sessionMaxSessions: form.sessionMaxSessions || 5,
-    sessionTTLMinutes: form.sessionTTLMinutes || 5,
+    providerConcurrencyLimit: normalizeProviderConcurrencyLimit(form.providerConcurrencyLimit),
     enabled: form.enabled,
     apiFormat,
     anthropicCacheTTL: resolvePersistedAnthropicCacheTTL(tabId, apiFormat, form.anthropicCacheTTL),
@@ -310,8 +295,6 @@ export const buildPersistedProviderFieldsFromForm = (
     icon: form.icon,
     level: normalizeLevel(form.level),
     providerConcurrencyLimit: normalizeProviderConcurrencyLimit(form.providerConcurrencyLimit),
-    sessionMaxSessions: normalizeSessionMaxSessions(form.sessionMaxSessions),
-    sessionTTLMinutes: normalizeSessionTTLMinutes(form.sessionTTLMinutes),
     enabled: form.enabled,
     apiFormat,
     anthropicCacheTTL: resolvePersistedAnthropicCacheTTL(tabId, apiFormat, form.anthropicCacheTTL),

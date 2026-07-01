@@ -133,7 +133,7 @@ func main() {
 	geminiService := services.NewGeminiService("127.0.0.1:18100")
 	openCodeService := services.NewOpenCodeService()
 	providerRelay := services.NewProviderRelayService(providerService, geminiService, blacklistService, notificationService, appSettings, modelPricingService, ":18100")
-	sessionAffinityService := services.NewSessionAffinityService(providerRelay)
+	providerConcurrencyService := services.NewProviderConcurrencyService(providerRelay)
 	providerRelayStateService := services.NewProviderRelayStateService(providerRelay)
 	claudeSettings := services.NewClaudeSettingsService(providerRelay.Addr())
 	codexSettings := services.NewCodexSettingsService(providerRelay.Addr())
@@ -240,7 +240,7 @@ func main() {
 			application.NewService(providerService),
 			application.NewService(settingsService),
 			application.NewService(blacklistService),
-			application.NewService(sessionAffinityService),
+			application.NewService(providerConcurrencyService),
 			application.NewService(providerRelayStateService),
 			application.NewService(claudeSettings),
 			application.NewService(codexSettings),

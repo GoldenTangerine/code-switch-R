@@ -176,6 +176,14 @@ type ProviderSessionStatus struct {
 	Sessions       []ProviderSessionDetail `json:"sessions"`
 }
 
+type ProviderConcurrencyStatus struct {
+	Platform       string `json:"platform"`
+	ProviderID     string `json:"providerId"`
+	ProviderName   string `json:"providerName"`
+	ActiveRequests int    `json:"activeRequests"`
+	Limit          int    `json:"limit"`
+}
+
 type providerSessionLoad struct {
 	ProviderID     string
 	BoundSessions  int
@@ -653,7 +661,7 @@ func normalizeSessionTTLMinutes(value int) int {
 
 func normalizeProviderConcurrencyLimit(value int) int {
 	if value <= 0 {
-		return 5
+		return 0
 	}
 	if value > 999 {
 		return 999
@@ -699,7 +707,7 @@ func (prs *ProviderRelayService) acquireProviderConcurrencySlot(platform string,
 	if prs.providerConcurrency == nil {
 		prs.providerConcurrency = map[string]int{}
 	}
-	if prs.providerConcurrency[key] >= limit {
+	if limit > 0 && prs.providerConcurrency[key] >= limit {
 		prs.providerConcurrencyMu.Unlock()
 		return nil, false
 	}
@@ -1051,14 +1059,7 @@ func toolSessionCallKey(platform string, callID string) string {
 }
 
 func (prs *ProviderRelayService) isSessionAffinityEnabled(platform string) bool {
-	if prs == nil || prs.appSettings == nil {
-		return false
-	}
-	settings, err := prs.appSettings.GetAppSettings()
-	if err != nil || settings.SessionAffinity == nil {
-		return false
-	}
-	return settings.SessionAffinity[strings.TrimSpace(platform)]
+	return false
 }
 
 func (prs *ProviderRelayService) sweepExpiredSessionAffinityLocked(now time.Time) {
@@ -1685,6 +1686,50 @@ func (prs *ProviderRelayService) GetSessionAffinityStatuses(platform string) []P
 	return result
 }
 
+func (prs *ProviderRelayService) GetProviderConcurrencyStatuses(platform string) []ProviderConcurrencyStatus {
+	platform = strings.TrimSpace(platform)
+	result := []ProviderConcurrencyStatus{}
+	if prs == nil || platform == "" {
+		return result
+	}
+
+	if platform == "gemini" {
+		if prs.geminiService == nil {
+			return result
+		}
+		for _, provider := range prs.geminiService.GetProviders() {
+			providerID := providerRefFromGeminiProvider(provider)
+			result = append(result, ProviderConcurrencyStatus{
+				Platform:       platform,
+				ProviderID:     providerID,
+				ProviderName:   provider.Name,
+				ActiveRequests: prs.providerConcurrencyCount(platform, providerID),
+				Limit:          geminiProviderConcurrencyLimit(provider),
+			})
+		}
+		return result
+	}
+
+	if prs.providerService == nil {
+		return result
+	}
+	providers, err := prs.providerService.LoadProviders(platform)
+	if err != nil {
+		return result
+	}
+	for _, provider := range providers {
+		providerID := providerRefFromProvider(provider)
+		result = append(result, ProviderConcurrencyStatus{
+			Platform:       platform,
+			ProviderID:     providerID,
+			ProviderName:   provider.Name,
+			ActiveRequests: prs.providerConcurrencyCount(platform, providerID),
+			Limit:          providerConcurrencyLimit(provider),
+		})
+	}
+	return result
+}
+
 func (prs *ProviderRelayService) Start() error {
 	// 启动前验证配置
 	if warnings := prs.validateConfig(); len(warnings) > 0 {
@@ -1949,8 +1994,8 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 			prs.releaseSessionBinding(kind, sessionHash)
 			originalSessionBinding = nil
 		}
-		sessionAffinityEnabled := prs.isSessionAffinityEnabled(kind)
-		sessionCanBind := strings.TrimSpace(sessionHash) != "" && (originalSessionBinding != nil || sessionAffinityEnabled)
+		sessionAffinityEnabled := false
+		sessionCanBind := false
 		var sessionAttemptID int64
 
 		// 【拉黑模式】：同 Provider 重试直到被拉黑，然后切换到下一个 Provider
@@ -2912,23 +2957,7 @@ func buildClaudeProviderResponseHooks(
 }
 
 func (prs *ProviderRelayService) newSessionAffinityToolResponseCollector(kind string, provider Provider, plan providerRequestPlan, userAgent string) *sessionAffinityToolResponseCollector {
-	if prs == nil || strings.TrimSpace(kind) == "" || !prs.isSessionAffinityEnabled(kind) {
-		return nil
-	}
-	bodyForSessionCheck := plan.OriginalBodyBytes
-	if len(bodyForSessionCheck) == 0 {
-		bodyForSessionCheck = plan.BodyBytes
-	}
-	if strings.TrimSpace(prs.deriveRelaySessionHash(kind, bodyForSessionCheck)) != "" {
-		return nil
-	}
-	return &sessionAffinityToolResponseCollector{
-		prs:       prs,
-		kind:      kind,
-		provider:  provider,
-		userAgent: strings.TrimSpace(userAgent),
-		callIDs:   map[string]bool{},
-	}
+	return nil
 }
 
 func (collector *sessionAffinityToolResponseCollector) hook(isStream bool) xrequest.ResponseHook {
@@ -5879,8 +5908,8 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 			prs.releaseSessionBinding("gemini", sessionHash)
 			originalSessionBinding = nil
 		}
-		sessionAffinityEnabled := prs.isSessionAffinityEnabled("gemini")
-		sessionCanBind := strings.TrimSpace(sessionHash) != "" && (originalSessionBinding != nil || sessionAffinityEnabled)
+		sessionAffinityEnabled := false
+		sessionCanBind := false
 		var sessionAttemptID int64
 
 		// 【拉黑模式】：同 Provider 重试直到被拉黑，然后切换到下一个 Provider
@@ -6581,8 +6610,8 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 			prs.releaseSessionBinding(kind, sessionHash)
 			originalSessionBinding = nil
 		}
-		sessionAffinityEnabled := prs.isSessionAffinityEnabled(kind)
-		sessionCanBind := strings.TrimSpace(sessionHash) != "" && (originalSessionBinding != nil || sessionAffinityEnabled)
+		sessionAffinityEnabled := false
+		sessionCanBind := false
 		var sessionAttemptID int64
 
 		// 【拉黑模式】：同 Provider 重试直到被拉黑，然后切换到下一个 Provider

@@ -143,7 +143,7 @@ export type ProviderCardViewModel = {
   connectivityClass: string
   connectivityTooltip: string
   stats: ProviderStatDisplay
-  sessionStatus?: ProviderSessionStatusView
+  concurrencyStatus?: ProviderConcurrencyStatusView
   quotaDisplay: ProviderQuotaDisplayItem[]
   quotaRefreshing: boolean
   formattedOfficialSite: string
@@ -151,29 +151,14 @@ export type ProviderCardViewModel = {
   vendorInitials: string
 }
 
-export type ProviderSessionDetailView = {
-  sessionNumber: number
-  status: string
-  activeRequests: number
-  providerId: string
-  providerName: string
-  userAgent?: string
-  createdAt: number
-  lastSeen: number
-  expiresAt: number
-  remainingSeconds: number
-  overflow: boolean
-}
-
-export type ProviderSessionStatusView = {
+export type ProviderConcurrencyStatusView = {
   platform: string
   providerId: string
   providerName: string
   activeRequests: number
-  activeSessions: number
-  maxSessions: number
-  sessions: ProviderSessionDetailView[]
+  limit: number
 }
+
 
 export type CustomCliToolDraft = {
   name: string

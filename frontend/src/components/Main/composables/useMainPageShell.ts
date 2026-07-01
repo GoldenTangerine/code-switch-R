@@ -165,14 +165,6 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
       : proxyStates[activeTab.value]
   ))
   const activeProxyBusy = computed(() => proxyBusy[activeTab.value])
-  const sessionAffinityStates = reactive<Record<string, boolean>>({})
-  const sessionAffinityBusy = ref(false)
-  const resolveSessionAffinityKey = (tab: ProviderTab = activeTab.value) => (
-    tab === 'others' && selectedToolId.value
-      ? `custom:${selectedToolId.value}`
-      : tab
-  )
-  const activeSessionAffinityState = computed(() => sessionAffinityStates[resolveSessionAffinityKey()] === true)
 
   const syncOthersProxyState = (enabled: boolean) => {
     proxyStates.others = enabled
@@ -237,12 +229,6 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
       showHomeTitle.value = data?.show_home_title ?? true
       visibleProviderTabs.value = normalizeHomeProviderTabs(data?.home_provider_tabs) as ProviderTab[]
       enableRoundRobin.value = data?.enable_round_robin ?? false
-      Object.keys(sessionAffinityStates).forEach((key) => {
-        delete sessionAffinityStates[key]
-      })
-      Object.entries(data?.session_affinity ?? {}).forEach(([key, enabled]) => {
-        sessionAffinityStates[key] = enabled === true
-      })
     } catch (error) {
       console.error('failed to load app settings', error)
       showHeatmap.value = true
@@ -255,9 +241,6 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
       showHomeTitle.value = true
       visibleProviderTabs.value = normalizeHomeProviderTabs(null) as ProviderTab[]
       enableRoundRobin.value = false
-      Object.keys(sessionAffinityStates).forEach((key) => {
-        delete sessionAffinityStates[key]
-      })
       showToast(t('components.main.errors.loadAppSettingsFailed'), 'warning')
     }
   }
@@ -383,37 +366,6 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
       console.error(`Failed to toggle proxy for ${tab}`, error)
     } finally {
       proxyBusy[tab] = false
-    }
-  }
-
-  const onSessionAffinityToggle = async () => {
-    const tab = activeTab.value
-    if (tab === 'opencode' || sessionAffinityBusy.value) return
-    if (tab === 'others' && !selectedToolId.value) {
-      showToast(t('components.main.customCli.selectToolFirst'), 'error')
-      return
-    }
-
-    sessionAffinityBusy.value = true
-    const key = resolveSessionAffinityKey(tab)
-    const nextState = !sessionAffinityStates[key]
-    try {
-      const settings = await fetchAppSettings()
-      const nextAffinity = {
-        ...(settings.session_affinity ?? {}),
-        [key]: nextState,
-      }
-      await saveAppSettings({
-        ...settings,
-        session_affinity: nextAffinity,
-      })
-      sessionAffinityStates[key] = nextState
-      window.dispatchEvent(new CustomEvent('app-settings-updated'))
-    } catch (error) {
-      console.error('Failed to toggle session affinity', error)
-      showToast(t('components.main.errors.saveSettingsFailed'), 'error')
-    } finally {
-      sessionAffinityBusy.value = false
     }
   }
 
@@ -606,11 +558,8 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
     handleImportClick,
     activeProxyState,
     activeProxyBusy,
-    activeSessionAffinityState,
-    sessionAffinityBusy,
     syncOthersProxyState,
     onProxyToggle,
-    onSessionAffinityToggle,
     refreshing,
     refreshAllData,
     currentProxyLabel,
