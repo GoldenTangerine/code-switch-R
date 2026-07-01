@@ -1211,21 +1211,21 @@ func TestProviderConcurrencySlotLimitAndRelease(t *testing.T) {
 	relay := NewProviderRelayService(nil, nil, nil, nil, nil, nil, "")
 	providerID := "provider-a"
 
-	release, ok := relay.acquireProviderConcurrencySlot("claude", providerID, 1, true)
+	release, ok := relay.acquireProviderConcurrencySlot("claude", providerID, 1, true, providerConcurrencyRequestMeta{})
 	if !ok {
 		t.Fatalf("first provider concurrency slot should be acquired")
 	}
 	if got := relay.providerConcurrencyCount("claude", providerID); got != 1 {
 		t.Fatalf("active concurrency = %d, want 1", got)
 	}
-	if _, ok := relay.acquireProviderConcurrencySlot("claude", providerID, 1, true); ok {
+	if _, ok := relay.acquireProviderConcurrencySlot("claude", providerID, 1, true, providerConcurrencyRequestMeta{}); ok {
 		t.Fatalf("second provider concurrency slot should be rejected")
 	}
 	release()
 	if got := relay.providerConcurrencyCount("claude", providerID); got != 0 {
 		t.Fatalf("active concurrency after release = %d, want 0", got)
 	}
-	if releaseAgain, ok := relay.acquireProviderConcurrencySlot("claude", providerID, 1, true); !ok {
+	if releaseAgain, ok := relay.acquireProviderConcurrencySlot("claude", providerID, 1, true, providerConcurrencyRequestMeta{}); !ok {
 		t.Fatalf("provider concurrency slot should be reusable after release")
 	} else {
 		releaseAgain()
@@ -1238,7 +1238,7 @@ func TestProviderConcurrencySlotUnlimitedWhenLimitEmpty(t *testing.T) {
 	releases := make([]func(), 0, 3)
 
 	for i := 0; i < 3; i++ {
-		release, ok := relay.acquireProviderConcurrencySlot("claude", providerID, 0, true)
+		release, ok := relay.acquireProviderConcurrencySlot("claude", providerID, 0, true, providerConcurrencyRequestMeta{})
 		if !ok {
 			t.Fatalf("unlimited provider concurrency slot should be acquired")
 		}
@@ -1261,7 +1261,7 @@ func TestProviderConcurrencySlotTracksWithoutEnforcingLimit(t *testing.T) {
 	releases := make([]func(), 0, 3)
 
 	for i := 0; i < 3; i++ {
-		release, ok := relay.acquireProviderConcurrencySlot("claude", providerID, 1, false)
+		release, ok := relay.acquireProviderConcurrencySlot("claude", providerID, 1, false, providerConcurrencyRequestMeta{})
 		if !ok {
 			t.Fatalf("provider concurrency slot should be acquired when limit is disabled")
 		}
@@ -1275,6 +1275,75 @@ func TestProviderConcurrencySlotTracksWithoutEnforcingLimit(t *testing.T) {
 	}
 	if got := relay.providerConcurrencyCount("claude", providerID); got != 0 {
 		t.Fatalf("disabled limit slots should be released, got %d", got)
+	}
+}
+
+func TestProviderConcurrencySlotTracksRequestDetails(t *testing.T) {
+	relay := NewProviderRelayService(nil, nil, nil, nil, nil, nil, "")
+	providerID := "provider-a"
+
+	release, ok := relay.acquireProviderConcurrencySlot("claude", providerID, 1, false, providerConcurrencyRequestMeta{
+		ProviderName: "Provider A",
+		UserAgent:    "Codex-CLI/1.0",
+		Model:        "claude-sonnet",
+		Endpoint:     "/v1/messages",
+		IsStream:     true,
+	})
+	if !ok {
+		t.Fatalf("provider concurrency slot should be acquired")
+	}
+
+	details := relay.providerConcurrencyRequestDetails("claude", providerID)
+	if len(details) != 1 {
+		t.Fatalf("active request details = %d, want 1", len(details))
+	}
+	if details[0].UserAgent != "Codex-CLI/1.0" {
+		t.Fatalf("user agent = %q, want Codex-CLI/1.0", details[0].UserAgent)
+	}
+	if details[0].Model != "claude-sonnet" {
+		t.Fatalf("model = %q, want claude-sonnet", details[0].Model)
+	}
+	if details[0].Endpoint != "/v1/messages" {
+		t.Fatalf("endpoint = %q, want /v1/messages", details[0].Endpoint)
+	}
+	if !details[0].IsStream {
+		t.Fatalf("is stream = false, want true")
+	}
+
+	release()
+	if details := relay.providerConcurrencyRequestDetails("claude", providerID); len(details) != 0 {
+		t.Fatalf("active request details after release = %d, want 0", len(details))
+	}
+}
+
+func TestNextProviderSwitchTargetAfterSkipsUnavailableProviders(t *testing.T) {
+	targets := []providerSwitchTarget{
+		{ProviderID: "a", ProviderName: "Provider A"},
+		{ProviderID: "b", ProviderName: "Provider B"},
+		{ProviderID: "c", ProviderName: "Provider C"},
+	}
+
+	next, ok := nextProviderSwitchTargetAfter(targets, 0, func(target providerSwitchTarget) bool {
+		return target.ProviderID == "b"
+	})
+	if !ok {
+		t.Fatalf("expected next provider switch target")
+	}
+	if next.ProviderID != "c" {
+		t.Fatalf("next provider id = %q, want c", next.ProviderID)
+	}
+}
+
+func TestNextProviderSwitchTargetAfterReturnsFalseWithoutCandidate(t *testing.T) {
+	targets := []providerSwitchTarget{
+		{ProviderID: "a", ProviderName: "Provider A"},
+		{ProviderID: "b", ProviderName: "Provider B"},
+	}
+
+	if next, ok := nextProviderSwitchTargetAfter(targets, 0, func(providerSwitchTarget) bool {
+		return true
+	}); ok {
+		t.Fatalf("unexpected next provider switch target: %+v", next)
 	}
 }
 

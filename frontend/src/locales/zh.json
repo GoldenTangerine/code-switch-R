@@ -392,7 +392,7 @@
         }
       },
       "relayToggle": {
-        "label": "Claude proxy",
+        "label": "代理托管",
         "hostClaude": "托管 Claude Code",
         "hostCodex": "托管 Codex",
         "hostGemini": "托管 Gemini CLI",
@@ -576,6 +576,7 @@
       },
       "providerLogs": {
         "buttonTooltip": "供应商日志",
+        "buttonTooltipWithUnread": "单击查看日志，双击标记已读",
         "modalTitle": "{name} · 供应商日志",
         "modalTitleFallback": "供应商日志",
         "platformClaude": "Claude Code",
@@ -1093,6 +1094,23 @@
       "concurrency": {
         "badge": "{current}/{max}",
         "badgeHint": "当前并发：{current}/{max}"
+      },
+      "concurrencyDetails": {
+        "modalTitle": "{name} · 连接详情",
+        "providerFallback": "供应商",
+        "summary": "查看当前活跃连接与最近连接历史。",
+        "activeCount": "活跃 {count}",
+        "historyCount": "历史 {count}",
+        "activeTitle": "当前活跃连接",
+        "historyTitle": "最近连接历史",
+        "emptyActive": "暂无活跃连接",
+        "emptyHistory": "暂无连接历史",
+        "loadingHistory": "正在加载连接历史...",
+        "loadHistoryFailed": "加载连接历史失败：{error}",
+        "emptyUserAgent": "无 User-Agent",
+        "stream": "流式",
+        "nonStream": "非流式",
+        "durationNow": "刚刚"
       },
       "errors": {
         "loadAppSettingsFailed": "加载应用设置失败",

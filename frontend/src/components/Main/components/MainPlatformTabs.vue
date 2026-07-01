@@ -53,6 +53,9 @@
     <div class="section-controls">
       <div v-if="showProxyToggle" class="relay-toggle" :aria-label="currentProxyLabel">
         <div class="relay-switch">
+          <span class="relay-toggle-caption">
+            {{ t('components.main.relayToggle.label') }}
+          </span>
           <button
             type="button"
             class="relay-toggle-switch"
@@ -466,8 +469,63 @@ onBeforeUnmount(() => {
   justify-self: auto;
 }
 
-.main-platform-tabs .relay-toggle--concurrency .relay-switch {
-  gap: 6px;
+.main-platform-tabs .relay-toggle {
+  gap: 0;
+}
+
+.main-platform-tabs .relay-switch {
+  gap: 8px;
+  min-height: 40px;
+  padding: 7px 12px;
+  border: 1px solid var(--main-home-action-border);
+  border-radius: 12px;
+  background: var(--main-home-action-bg);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  box-sizing: border-box;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.main-platform-tabs .relay-switch:hover,
+.main-platform-tabs .relay-switch:focus-within {
+  border-color: var(--main-home-action-hover-border);
+  background: var(--main-home-action-hover-bg);
+}
+
+.main-platform-tabs .relay-toggle-switch {
+  width: 44px;
+  height: 24px;
+  transform: none;
+  transition:
+    background 0.3s ease,
+    box-shadow 0.3s ease,
+    opacity 0.2s ease;
+}
+
+.main-platform-tabs .relay-toggle-switch:hover:not(:disabled) {
+  transform: none;
+}
+
+.main-platform-tabs .relay-toggle-switch__thumb {
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.main-platform-tabs .relay-toggle-switch.is-active .relay-toggle-switch__thumb {
+  transform: translateX(20px);
+}
+
+.main-platform-tabs .relay-toggle-switch__icon {
+  width: 11px;
+  height: 11px;
+}
+
+.main-platform-tabs .relay-toggle-switch__dot {
+  width: 5px;
+  height: 5px;
 }
 
 .relay-toggle-caption {

@@ -82,7 +82,9 @@
           @open-provider-data="openProviderDataOverview"
           @open-model-list="openModelList"
           @open-provider-logs="openProviderLogs"
+          @mark-provider-logs-read="markProviderLogsReadFromCard"
           @open-provider-cost-trend="openProviderCostTrend"
+          @open-concurrency-details="openConcurrencyDetails"
           @refresh-provider-quota="handleRefreshProviderQuota"
           @duplicate="handleDuplicate"
           @remove="requestRemove"
@@ -124,6 +126,14 @@
         :platform="providerCostTrendModalPlatform"
         :resolved-theme="resolvedTheme"
         @close="closeProviderCostTrendModal"
+      />
+      <ProviderConcurrencyDetailsModal
+        :open="concurrencyDetailsModalOpen"
+        :provider="concurrencyDetailsModalProvider"
+        :platform="concurrencyDetailsModalPlatform"
+        :status="concurrencyDetailsModalStatus"
+        :resolved-theme="resolvedTheme"
+        @close="closeConcurrencyDetails"
       />
 
       <ProviderEditModal
@@ -199,6 +209,7 @@ import CliDeleteConfirmModal from './modals/CliDeleteConfirmModal.vue'
 import ProviderEditModal from './modals/ProviderEditModal.vue'
 import ProviderLogsModal from './modals/ProviderLogsModal.vue'
 import ProviderCostTrendModal from './modals/ProviderCostTrendModal.vue'
+import ProviderConcurrencyDetailsModal from './modals/ProviderConcurrencyDetailsModal.vue'
 import ProviderDataOverviewModal from './modals/ProviderDataOverviewModal.vue'
 import ProviderModelListModal from './modals/ProviderModelListModal.vue'
 import ProviderQuotaQueryConfigModal from './modals/ProviderQuotaQueryConfigModal.vue'
@@ -208,6 +219,7 @@ import MainPlatformTabs from './components/MainPlatformTabs.vue'
 import MainToolbar from './components/MainToolbar.vue'
 import MainUsageHeatmap from './components/MainUsageHeatmap.vue'
 import ProviderCardGrid from './components/ProviderCardGrid.vue'
+import { extractErrorMessage } from '../../utils/error'
 import { showToast } from '../../utils/toast'
 import {
   getProviderDisplayIconSvg,
@@ -215,6 +227,7 @@ import {
 } from '../../utils/providerIconAssets'
 import { DEFAULT_HOME_PROVIDER_TABS } from '../../data/homeProviderTabs'
 import type { CustomCliTool } from '../../services/customCliService'
+import { markProviderFailedRequestLogsRead, type RequestLogPlatform } from '../../services/logs'
 import { MAIN_TABS } from './constants'
 import { useAvailabilityState } from './composables/useAvailabilityState'
 import { useBlacklistState } from './composables/useBlacklistState'
@@ -253,6 +266,10 @@ const activeTab = computed<ProviderTab>(() => tabs.value[selectedIndex.value]?.i
 const heatmapRef = ref<MainUsageHeatmapExpose | null>(null)
 const providerEditModalRef = ref<ProviderEditModalExpose | null>(null)
 const concurrencyStatuses = ref<ProviderConcurrencyStatusView[]>([])
+const concurrencyDetailsModalOpen = ref(false)
+const concurrencyDetailsModalProvider = ref<AutomationCard | null>(null)
+const concurrencyDetailsModalPlatform = ref<RequestLogPlatform | null>(null)
+const markingProviderLogsReadKeys = ref<Set<string>>(new Set())
 const {
   hasUpdateAvailable,
   updateReady,
@@ -476,6 +493,46 @@ const {
 const handleProviderLogsMarkedRead = () => {
   if (!providerLogsModalPlatform.value) return
   void loadProviderStats(providerLogsModalPlatform.value)
+}
+
+const markProviderLogsReadFromCard = async (card: AutomationCard) => {
+  const platform = activeTab.value
+  if (platform === 'others' || platform === 'opencode') return
+
+  const providerRef = cardProviderRef(card)
+  const markingKey = `${platform}:${providerRef || card.name}`
+  if (markingProviderLogsReadKeys.value.has(markingKey)) return
+
+  markingProviderLogsReadKeys.value = new Set(markingProviderLogsReadKeys.value).add(markingKey)
+  try {
+    const result = await markProviderFailedRequestLogsRead(platform, providerRef, card.name)
+    const markedLogs = Number(result?.marked_request_logs ?? 0)
+    void loadProviderStats(platform)
+
+    if (markedLogs > 0) {
+      showToast(
+        t('components.main.providerLogs.markReadSuccess', {
+          provider: card.name,
+          logs: markedLogs,
+        }),
+        'success',
+      )
+      return
+    }
+
+    showToast(
+      t('components.main.providerLogs.markReadEmpty', {
+        provider: card.name,
+      }),
+      'warning',
+    )
+  } catch (error) {
+    showToast(t('components.main.providerLogs.markReadFailed', { error: extractErrorMessage(error) }), 'error')
+  } finally {
+    const nextKeys = new Set(markingProviderLogsReadKeys.value)
+    nextKeys.delete(markingKey)
+    markingProviderLogsReadKeys.value = nextKeys
+  }
 }
 
 pageShell = useMainPageShell({
@@ -713,6 +770,21 @@ const activeConcurrencyPlatform = computed(() => (
     : activeTab.value
 ))
 
+const concurrencyDetailsModalStatus = computed(() => {
+  const provider = concurrencyDetailsModalProvider.value
+  if (!provider) return null
+  const platform = concurrencyDetailsModalPlatform.value || activeConcurrencyPlatform.value
+  const providerRef = cardProviderRef(provider)
+  return concurrencyStatusMap.value.get(`${platform}:${providerRef}`) ?? {
+    platform,
+    providerId: providerRef,
+    providerName: provider.name,
+    activeRequests: 0,
+    limit: provider.providerConcurrencyLimit || 0,
+    requests: [],
+  }
+})
+
 const loadConcurrencyStatuses = async () => {
   try {
     const result = await Call.ByName('codeswitch/services.ProviderConcurrencyService.GetProviderConcurrencyStatuses', activeConcurrencyPlatform.value)
@@ -721,6 +793,19 @@ const loadConcurrencyStatuses = async () => {
     console.error('Failed to load provider concurrency statuses', error)
     concurrencyStatuses.value = []
   }
+}
+
+const openConcurrencyDetails = (card: AutomationCard) => {
+  concurrencyDetailsModalProvider.value = card
+  concurrencyDetailsModalPlatform.value = activeConcurrencyPlatform.value as RequestLogPlatform
+  concurrencyDetailsModalOpen.value = true
+  void loadConcurrencyStatuses()
+}
+
+const closeConcurrencyDetails = () => {
+  concurrencyDetailsModalOpen.value = false
+  concurrencyDetailsModalProvider.value = null
+  concurrencyDetailsModalPlatform.value = null
 }
 
 const getConcurrencyStatusForCard = (card: AutomationCard): ProviderConcurrencyStatusView | undefined => {
@@ -736,6 +821,7 @@ const getConcurrencyStatusForCard = (card: AutomationCard): ProviderConcurrencyS
     providerName: card.name,
     activeRequests: 0,
     limit: card.providerConcurrencyLimit || 0,
+    requests: [],
   }
 }
 

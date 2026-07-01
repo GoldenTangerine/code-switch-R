@@ -164,6 +164,20 @@ export type ProviderConcurrencyStatusView = {
   providerName: string
   activeRequests: number
   limit: number
+  requests?: ProviderConcurrencyRequestView[]
+}
+
+export type ProviderConcurrencyRequestView = {
+  id: string
+  platform: string
+  providerId: string
+  providerName: string
+  userAgent?: string
+  model?: string
+  endpoint?: string
+  isStream?: boolean
+  startedAt: number
+  durationMs: number
 }
 
 

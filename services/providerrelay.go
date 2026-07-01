@@ -38,28 +38,30 @@ type LastUsedProvider struct {
 }
 
 type ProviderRelayService struct {
-	providerService       *ProviderService
-	geminiService         *GeminiService
-	blacklistService      *BlacklistService
-	notificationService   *NotificationService
-	appSettings           *AppSettingsService // 应用设置服务（用于获取轮询开关状态）
-	modelPricing          *ModelPricingService
-	server                *http.Server
-	addr                  string
-	lastUsed              map[string]*LastUsedProvider // 各平台最后使用的供应商
-	lastUsedMu            sync.RWMutex                 // 保护 lastUsed 的锁
-	rrMu                  sync.Mutex                   // 轮询状态锁
-	rrLastStart           map[string]string            // 轮询状态：key="platform:level" → value=上次起始 Provider ID（回退为 Name）
-	claudeResponsesMu     sync.Mutex
-	claudeResponses       map[string]claudeResponsesSessionBinding
-	sessionAffinityMu     sync.Mutex
-	sessionAffinity       map[string]*providerSessionBinding
-	nextSessionNumber     int64
-	nextSessionAttempt    int64
-	toolSessionMu         sync.Mutex
-	toolSessions          map[string]toolSessionBinding
-	providerConcurrencyMu sync.Mutex
-	providerConcurrency   map[string]int
+	providerService                *ProviderService
+	geminiService                  *GeminiService
+	blacklistService               *BlacklistService
+	notificationService            *NotificationService
+	appSettings                    *AppSettingsService // 应用设置服务（用于获取轮询开关状态）
+	modelPricing                   *ModelPricingService
+	server                         *http.Server
+	addr                           string
+	lastUsed                       map[string]*LastUsedProvider // 各平台最后使用的供应商
+	lastUsedMu                     sync.RWMutex                 // 保护 lastUsed 的锁
+	rrMu                           sync.Mutex                   // 轮询状态锁
+	rrLastStart                    map[string]string            // 轮询状态：key="platform:level" → value=上次起始 Provider ID（回退为 Name）
+	claudeResponsesMu              sync.Mutex
+	claudeResponses                map[string]claudeResponsesSessionBinding
+	sessionAffinityMu              sync.Mutex
+	sessionAffinity                map[string]*providerSessionBinding
+	nextSessionNumber              int64
+	nextSessionAttempt             int64
+	toolSessionMu                  sync.Mutex
+	toolSessions                   map[string]toolSessionBinding
+	providerConcurrencyMu          sync.Mutex
+	providerConcurrency            map[string]int
+	providerConcurrencyRequests    map[string]map[string]ProviderConcurrencyRequestDetail
+	nextProviderConcurrencyRequest int64
 }
 
 // errClientAbort 表示客户端中断连接，不应计入 provider 失败次数
@@ -177,11 +179,33 @@ type ProviderSessionStatus struct {
 }
 
 type ProviderConcurrencyStatus struct {
-	Platform       string `json:"platform"`
-	ProviderID     string `json:"providerId"`
-	ProviderName   string `json:"providerName"`
-	ActiveRequests int    `json:"activeRequests"`
-	Limit          int    `json:"limit"`
+	Platform       string                             `json:"platform"`
+	ProviderID     string                             `json:"providerId"`
+	ProviderName   string                             `json:"providerName"`
+	ActiveRequests int                                `json:"activeRequests"`
+	Limit          int                                `json:"limit"`
+	Requests       []ProviderConcurrencyRequestDetail `json:"requests"`
+}
+
+type ProviderConcurrencyRequestDetail struct {
+	ID           string `json:"id"`
+	Platform     string `json:"platform"`
+	ProviderID   string `json:"providerId"`
+	ProviderName string `json:"providerName"`
+	UserAgent    string `json:"userAgent,omitempty"`
+	Model        string `json:"model,omitempty"`
+	Endpoint     string `json:"endpoint,omitempty"`
+	IsStream     bool   `json:"isStream"`
+	StartedAt    int64  `json:"startedAt"`
+	DurationMs   int64  `json:"durationMs"`
+}
+
+type providerConcurrencyRequestMeta struct {
+	ProviderName string
+	UserAgent    string
+	Model        string
+	Endpoint     string
+	IsStream     bool
 }
 
 type providerSessionLoad struct {
@@ -338,11 +362,12 @@ func NewProviderRelayService(providerService *ProviderService, geminiService *Ge
 			"codex":  nil,
 			"gemini": nil,
 		},
-		rrLastStart:         make(map[string]string),
-		claudeResponses:     make(map[string]claudeResponsesSessionBinding),
-		sessionAffinity:     make(map[string]*providerSessionBinding),
-		toolSessions:        make(map[string]toolSessionBinding),
-		providerConcurrency: make(map[string]int),
+		rrLastStart:                 make(map[string]string),
+		claudeResponses:             make(map[string]claudeResponsesSessionBinding),
+		sessionAffinity:             make(map[string]*providerSessionBinding),
+		toolSessions:                make(map[string]toolSessionBinding),
+		providerConcurrency:         make(map[string]int),
+		providerConcurrencyRequests: make(map[string]map[string]ProviderConcurrencyRequestDetail),
 	}
 }
 
@@ -352,6 +377,90 @@ func providerRefFromProvider(provider Provider) string {
 
 func providerRefFromGeminiProvider(provider GeminiProvider) string {
 	return providerRefFromStringID(provider.ID, provider.Name)
+}
+
+type providerSwitchTarget struct {
+	ProviderID   string
+	ProviderName string
+}
+
+func providerSwitchTargetsFromProviders(providers []Provider) []providerSwitchTarget {
+	targets := make([]providerSwitchTarget, 0, len(providers))
+	for _, provider := range providers {
+		targets = append(targets, providerSwitchTarget{
+			ProviderID:   providerRefFromProvider(provider),
+			ProviderName: provider.Name,
+		})
+	}
+	return targets
+}
+
+func providerSwitchTargetsFromProviderLevels(levels []int, levelGroups map[int][]Provider) []providerSwitchTarget {
+	targets := []providerSwitchTarget{}
+	for _, level := range levels {
+		targets = append(targets, providerSwitchTargetsFromProviders(levelGroups[level])...)
+	}
+	return targets
+}
+
+func providerSwitchTargetsFromGeminiProviders(providers []GeminiProvider) []providerSwitchTarget {
+	targets := make([]providerSwitchTarget, 0, len(providers))
+	for _, provider := range providers {
+		targets = append(targets, providerSwitchTarget{
+			ProviderID:   providerRefFromGeminiProvider(provider),
+			ProviderName: provider.Name,
+		})
+	}
+	return targets
+}
+
+func providerSwitchTargetsFromGeminiLevels(levels []int, levelGroups map[int][]GeminiProvider) []providerSwitchTarget {
+	targets := []providerSwitchTarget{}
+	for _, level := range levels {
+		targets = append(targets, providerSwitchTargetsFromGeminiProviders(levelGroups[level])...)
+	}
+	return targets
+}
+
+func nextProviderSwitchTargetAfter(targets []providerSwitchTarget, currentIndex int, isUnavailable func(providerSwitchTarget) bool) (providerSwitchTarget, bool) {
+	for i := currentIndex + 1; i < len(targets); i++ {
+		target := targets[i]
+		if target.ProviderName == "" {
+			continue
+		}
+		if isUnavailable != nil && isUnavailable(target) {
+			continue
+		}
+		return target, true
+	}
+	return providerSwitchTarget{}, false
+}
+
+func (prs *ProviderRelayService) notifyProviderSwitchAfterProvider(platform, fromProviderID, fromProviderName, reason string, targets []providerSwitchTarget, currentIndex int) {
+	if prs == nil || prs.notificationService == nil {
+		return
+	}
+
+	// 只通知真正会继续尝试的下一个可用供应商，避免拉黑链路发出误导提示。
+	next, ok := nextProviderSwitchTargetAfter(targets, currentIndex, func(target providerSwitchTarget) bool {
+		if prs.blacklistService == nil {
+			return false
+		}
+		blacklisted, _ := prs.blacklistService.IsBlacklistedByID(platform, target.ProviderID, target.ProviderName)
+		return blacklisted
+	})
+	if !ok {
+		return
+	}
+
+	prs.notificationService.NotifyProviderSwitch(SwitchNotification{
+		FromProviderID: fromProviderID,
+		FromProvider:   fromProviderName,
+		ToProviderID:   next.ProviderID,
+		ToProvider:     next.ProviderName,
+		Reason:         reason,
+		Platform:       platform,
+	})
 }
 
 // setLastUsedProvider 记录最后使用的供应商
@@ -708,7 +817,7 @@ func (prs *ProviderRelayService) isProviderConcurrencyLimitEnabled(platform stri
 	return settings.ProviderConcurrencyLimits[strings.TrimSpace(platform)]
 }
 
-func (prs *ProviderRelayService) acquireProviderConcurrencySlot(platform string, providerID string, limit int, enforceLimit bool) (func(), bool) {
+func (prs *ProviderRelayService) acquireProviderConcurrencySlot(platform string, providerID string, limit int, enforceLimit bool, meta providerConcurrencyRequestMeta) (func(), bool) {
 	if prs == nil || strings.TrimSpace(providerID) == "" {
 		return func() {}, true
 	}
@@ -718,11 +827,32 @@ func (prs *ProviderRelayService) acquireProviderConcurrencySlot(platform string,
 	if prs.providerConcurrency == nil {
 		prs.providerConcurrency = map[string]int{}
 	}
+	if prs.providerConcurrencyRequests == nil {
+		prs.providerConcurrencyRequests = map[string]map[string]ProviderConcurrencyRequestDetail{}
+	}
 	if enforceLimit && limit > 0 && prs.providerConcurrency[key] >= limit {
 		prs.providerConcurrencyMu.Unlock()
 		return nil, false
 	}
 	prs.providerConcurrency[key]++
+	prs.nextProviderConcurrencyRequest++
+	requestID := fmt.Sprintf("%s-%d", strings.ReplaceAll(strings.TrimSpace(platform), ":", "-"), prs.nextProviderConcurrencyRequest)
+	startedAt := time.Now()
+	if prs.providerConcurrencyRequests[key] == nil {
+		prs.providerConcurrencyRequests[key] = map[string]ProviderConcurrencyRequestDetail{}
+	}
+	prs.providerConcurrencyRequests[key][requestID] = ProviderConcurrencyRequestDetail{
+		ID:           requestID,
+		Platform:     strings.TrimSpace(platform),
+		ProviderID:   strings.TrimSpace(providerID),
+		ProviderName: strings.TrimSpace(meta.ProviderName),
+		UserAgent:    strings.TrimSpace(meta.UserAgent),
+		Model:        strings.TrimSpace(meta.Model),
+		Endpoint:     strings.TrimSpace(meta.Endpoint),
+		IsStream:     meta.IsStream,
+		StartedAt:    startedAt.UnixMilli(),
+		DurationMs:   0,
+	}
 	prs.providerConcurrencyMu.Unlock()
 
 	var once sync.Once
@@ -730,6 +860,12 @@ func (prs *ProviderRelayService) acquireProviderConcurrencySlot(platform string,
 		once.Do(func() {
 			prs.providerConcurrencyMu.Lock()
 			defer prs.providerConcurrencyMu.Unlock()
+			if requests := prs.providerConcurrencyRequests[key]; requests != nil {
+				delete(requests, requestID)
+				if len(requests) == 0 {
+					delete(prs.providerConcurrencyRequests, key)
+				}
+			}
 			if prs.providerConcurrency[key] <= 1 {
 				delete(prs.providerConcurrency, key)
 				return
@@ -747,6 +883,43 @@ func (prs *ProviderRelayService) providerConcurrencyCount(platform string, provi
 	prs.providerConcurrencyMu.Lock()
 	defer prs.providerConcurrencyMu.Unlock()
 	return prs.providerConcurrency[providerConcurrencyStateKey(platform, providerID)]
+}
+
+func (prs *ProviderRelayService) providerConcurrencySnapshot(platform string, providerID string) (int, []ProviderConcurrencyRequestDetail) {
+	if prs == nil || strings.TrimSpace(providerID) == "" {
+		return 0, []ProviderConcurrencyRequestDetail{}
+	}
+	key := providerConcurrencyStateKey(platform, providerID)
+	now := time.Now().UnixMilli()
+	prs.providerConcurrencyMu.Lock()
+	defer prs.providerConcurrencyMu.Unlock()
+	count := prs.providerConcurrency[key]
+	source := prs.providerConcurrencyRequests[key]
+	if len(source) == 0 {
+		return count, []ProviderConcurrencyRequestDetail{}
+	}
+	result := make([]ProviderConcurrencyRequestDetail, 0, len(source))
+	for _, request := range source {
+		if request.StartedAt > 0 {
+			request.DurationMs = now - request.StartedAt
+			if request.DurationMs < 0 {
+				request.DurationMs = 0
+			}
+		}
+		result = append(result, request)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].StartedAt != result[j].StartedAt {
+			return result[i].StartedAt < result[j].StartedAt
+		}
+		return result[i].ID < result[j].ID
+	})
+	return count, result
+}
+
+func (prs *ProviderRelayService) providerConcurrencyRequestDetails(platform string, providerID string) []ProviderConcurrencyRequestDetail {
+	_, requests := prs.providerConcurrencySnapshot(platform, providerID)
+	return requests
 }
 
 func isProviderConcurrencyLimitError(err error) bool {
@@ -1710,12 +1883,14 @@ func (prs *ProviderRelayService) GetProviderConcurrencyStatuses(platform string)
 		}
 		for _, provider := range prs.geminiService.GetProviders() {
 			providerID := providerRefFromGeminiProvider(provider)
+			activeRequests, requests := prs.providerConcurrencySnapshot(platform, providerID)
 			result = append(result, ProviderConcurrencyStatus{
 				Platform:       platform,
 				ProviderID:     providerID,
 				ProviderName:   provider.Name,
-				ActiveRequests: prs.providerConcurrencyCount(platform, providerID),
+				ActiveRequests: activeRequests,
 				Limit:          geminiProviderConcurrencyLimit(provider),
+				Requests:       requests,
 			})
 		}
 		return result
@@ -1730,12 +1905,14 @@ func (prs *ProviderRelayService) GetProviderConcurrencyStatuses(platform string)
 	}
 	for _, provider := range providers {
 		providerID := providerRefFromProvider(provider)
+		activeRequests, requests := prs.providerConcurrencySnapshot(platform, providerID)
 		result = append(result, ProviderConcurrencyStatus{
 			Platform:       platform,
 			ProviderID:     providerID,
 			ProviderName:   provider.Name,
-			ActiveRequests: prs.providerConcurrencyCount(platform, providerID),
+			ActiveRequests: activeRequests,
 			Limit:          providerConcurrencyLimit(provider),
+			Requests:       requests,
 		})
 	}
 	return result
@@ -2034,8 +2211,9 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 				}
 				sessionLoads := prs.providerSessionLoads(kind)
 				orderedProviders = prs.reorderProviderAttemptsForSession(kind, orderedProviders, sessionHash, originalSessionBinding == nil && sessionAffinityEnabled, sessionLoads)
+				orderedSwitchTargets := providerSwitchTargetsFromProviders(orderedProviders)
 
-				for _, provider := range orderedProviders {
+				for providerIndex, provider := range orderedProviders {
 					plan, err := prs.getProviderRequestPlan(requestPlans, provider, bodyBytes, endpoint, requestedModel)
 					if err != nil {
 						fmt.Printf("[ERROR] Provider %s 请求体预处理失败: %v，跳过此 Provider\n", provider.Name, err)
@@ -2103,6 +2281,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 						if blacklisted, _ := prs.blacklistService.IsBlacklistedByID(kind, providerRefFromProvider(provider), provider.Name); blacklisted {
 							prs.releaseProviderSessions(kind, providerRefFromProvider(provider))
 							fmt.Printf("[INFO] 🚫 Provider %s 达到失败阈值，已被拉黑，切换到下一个\n", provider.Name)
+							prs.notifyProviderSwitchAfterProvider(kind, providerRefFromProvider(provider), provider.Name, errorMsg, orderedSwitchTargets, providerIndex)
 							prs.restoreOrReleaseProviderSessionBinding(kind, sessionHash, originalSessionBinding, sessionAttemptID)
 							break
 						}
@@ -2138,11 +2317,15 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 			}
 
 			// 遍历所有 Level 和 Provider
+			orderedSwitchTargets := providerSwitchTargetsFromProviderLevels(levels, levelGroups)
+			providerIndex := 0
 			for _, level := range levels {
 				providersInLevel := levelGroups[level]
 				fmt.Printf("[INFO] === 尝试 Level %d（%d 个 provider）===\n", level, len(providersInLevel))
 
 				for _, provider := range providersInLevel {
+					currentProviderIndex := providerIndex
+					providerIndex++
 					// 检查是否已被拉黑（跳过已拉黑的 provider）
 					if blacklisted, until := prs.blacklistService.IsBlacklistedByID(kind, providerRefFromProvider(provider), provider.Name); blacklisted {
 						fmt.Printf("[INFO] ⏭️ 跳过已拉黑的 Provider: %s (解禁时间: %v)\n", provider.Name, until)
@@ -2221,6 +2404,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 						// 检查是否刚被拉黑
 						if blacklisted, _ := prs.blacklistService.IsBlacklistedByID(kind, providerRefFromProvider(provider), provider.Name); blacklisted {
 							fmt.Printf("[INFO] 🚫 Provider %s 达到失败阈值，已被拉黑，切换到下一个\n", provider.Name)
+							prs.notifyProviderSwitchAfterProvider(kind, providerRefFromProvider(provider), provider.Name, errorMsg, orderedSwitchTargets, currentProviderIndex)
 							break
 						}
 
@@ -2570,7 +2754,13 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 	targetURL := joinURL(provider.APIURL, endpoint)
 	headers := cloneMap(clientHeaders)
 	requestUserAgent := getHeaderValueCaseInsensitive(headers, "User-Agent")
-	releaseProviderSlot, acquiredProviderSlot := prs.acquireProviderConcurrencySlot(kind, providerRefFromProvider(provider), providerConcurrencyLimit(provider), providerConcurrencyLimitEnabled)
+	releaseProviderSlot, acquiredProviderSlot := prs.acquireProviderConcurrencySlot(kind, providerRefFromProvider(provider), providerConcurrencyLimit(provider), providerConcurrencyLimitEnabled, providerConcurrencyRequestMeta{
+		ProviderName: provider.Name,
+		UserAgent:    requestUserAgent,
+		Model:        model,
+		Endpoint:     endpoint,
+		IsStream:     isStream,
+	})
 	if !acquiredProviderSlot {
 		return false, errProviderConcurrencyLimit
 	}
@@ -5948,8 +6138,9 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 				}
 				sessionLoads := prs.providerSessionLoads("gemini")
 				orderedProviders = prs.reorderGeminiProviderAttemptsForSession(orderedProviders, sessionHash, originalSessionBinding == nil && sessionAffinityEnabled, sessionLoads)
+				orderedSwitchTargets := providerSwitchTargetsFromGeminiProviders(orderedProviders)
 
-				for _, provider := range orderedProviders {
+				for providerIndex, provider := range orderedProviders {
 					requestLog.ProviderID = providerRefFromGeminiProvider(provider)
 					requestLog.Provider = provider.Name
 					requestLog.Model = provider.Model
@@ -6003,6 +6194,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 						_ = prs.recordProviderFailureIfNeeded("gemini", providerRefFromGeminiProvider(provider), provider.Name, err)
 						if blacklisted, _ := prs.blacklistService.IsBlacklistedByID("gemini", providerRefFromGeminiProvider(provider), provider.Name); blacklisted {
 							prs.releaseProviderSessions("gemini", providerRefFromGeminiProvider(provider))
+							prs.notifyProviderSwitchAfterProvider("gemini", providerRefFromGeminiProvider(provider), provider.Name, errorMsg, orderedSwitchTargets, providerIndex)
 							prs.restoreOrReleaseProviderSessionBinding("gemini", sessionHash, originalSessionBinding, sessionAttemptID)
 							break
 						}
@@ -6039,11 +6231,15 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 			}
 
 			// 遍历所有 Level 和 Provider
+			orderedSwitchTargets := providerSwitchTargetsFromGeminiLevels(sortedLevels, levelGroups)
+			providerIndex := 0
 			for _, level := range sortedLevels {
 				providersInLevel := levelGroups[level]
 				fmt.Printf("[Gemini] === 尝试 Level %d（%d 个 provider）===\n", level, len(providersInLevel))
 
 				for _, provider := range providersInLevel {
+					currentProviderIndex := providerIndex
+					providerIndex++
 					// 检查是否已被拉黑（跳过已拉黑的 provider）
 					if blacklisted, until := prs.blacklistService.IsBlacklistedByID("gemini", providerRefFromGeminiProvider(provider), provider.Name); blacklisted {
 						fmt.Printf("[Gemini] ⏭️ 跳过已拉黑的 Provider: %s (解禁时间: %v)\n", provider.Name, until)
@@ -6112,6 +6308,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 						// 检查是否刚被拉黑
 						if blacklisted, _ := prs.blacklistService.IsBlacklistedByID("gemini", providerRefFromGeminiProvider(provider), provider.Name); blacklisted {
 							fmt.Printf("[Gemini] 🚫 Provider %s 达到失败阈值，已被拉黑，切换到下一个\n", provider.Name)
+							prs.notifyProviderSwitchAfterProvider("gemini", providerRefFromGeminiProvider(provider), provider.Name, errorMsg, orderedSwitchTargets, currentProviderIndex)
 							break
 						}
 
@@ -6370,7 +6567,19 @@ func (prs *ProviderRelayService) forwardGeminiRequest(
 
 	// 构建目标 URL
 	targetURL := strings.TrimSuffix(provider.BaseURL, "/") + endpoint
-	releaseProviderSlot, acquiredProviderSlot := prs.acquireProviderConcurrencySlot("gemini", providerRefFromGeminiProvider(*provider), geminiProviderConcurrencyLimit(*provider), providerConcurrencyLimitEnabled)
+	concurrencyModel := requestLog.RequestedModel
+	if extractedModel := extractGeminiModelFromEndpoint(endpoint); extractedModel != "" {
+		concurrencyModel = extractedModel
+	} else if strings.TrimSpace(concurrencyModel) == "" {
+		concurrencyModel = provider.Model
+	}
+	releaseProviderSlot, acquiredProviderSlot := prs.acquireProviderConcurrencySlot("gemini", providerRefFromGeminiProvider(*provider), geminiProviderConcurrencyLimit(*provider), providerConcurrencyLimitEnabled, providerConcurrencyRequestMeta{
+		ProviderName: provider.Name,
+		UserAgent:    requestLog.UserAgent,
+		Model:        concurrencyModel,
+		Endpoint:     endpoint,
+		IsStream:     isStream,
+	})
 	if !acquiredProviderSlot {
 		return false, errProviderConcurrencyLimit, false
 	}
@@ -6652,8 +6861,9 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 				}
 				sessionLoads := prs.providerSessionLoads(kind)
 				orderedProviders = prs.reorderProviderAttemptsForSession(kind, orderedProviders, sessionHash, originalSessionBinding == nil && sessionAffinityEnabled, sessionLoads)
+				orderedSwitchTargets := providerSwitchTargetsFromProviders(orderedProviders)
 
-				for _, provider := range orderedProviders {
+				for providerIndex, provider := range orderedProviders {
 					plan, err := prs.getProviderRequestPlan(requestPlans, provider, bodyBytes, endpoint, requestedModel)
 					if err != nil {
 						fmt.Printf("[CustomCLI][ERROR] Provider %s 请求体预处理失败: %v，跳过此 Provider\n", provider.Name, err)
@@ -6717,6 +6927,7 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 						}
 						if blacklisted, _ := prs.blacklistService.IsBlacklistedByID(kind, providerRefFromProvider(provider), provider.Name); blacklisted {
 							prs.releaseProviderSessions(kind, providerRefFromProvider(provider))
+							prs.notifyProviderSwitchAfterProvider(kind, providerRefFromProvider(provider), provider.Name, errorMsg, orderedSwitchTargets, providerIndex)
 							prs.restoreOrReleaseProviderSessionBinding(kind, sessionHash, originalSessionBinding, sessionAttemptID)
 							break
 						}
@@ -6751,11 +6962,15 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 			}
 
 			// 遍历所有 Level 和 Provider
+			orderedSwitchTargets := providerSwitchTargetsFromProviderLevels(levels, levelGroups)
+			providerIndex := 0
 			for _, level := range levels {
 				providersInLevel := levelGroups[level]
 				fmt.Printf("[CustomCLI][INFO] === 尝试 Level %d（%d 个 provider）===\n", level, len(providersInLevel))
 
 				for _, provider := range providersInLevel {
+					currentProviderIndex := providerIndex
+					providerIndex++
 					// 检查是否已被拉黑（跳过已拉黑的 provider）
 					if blacklisted, until := prs.blacklistService.IsBlacklistedByID(kind, providerRefFromProvider(provider), provider.Name); blacklisted {
 						fmt.Printf("[CustomCLI][INFO] ⏭️ 跳过已拉黑的 Provider: %s (解禁时间: %v)\n", provider.Name, until)
@@ -6834,6 +7049,7 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 						// 检查是否刚被拉黑
 						if blacklisted, _ := prs.blacklistService.IsBlacklistedByID(kind, providerRefFromProvider(provider), provider.Name); blacklisted {
 							fmt.Printf("[CustomCLI][INFO] 🚫 Provider %s 达到失败阈值，已被拉黑，切换到下一个\n", provider.Name)
+							prs.notifyProviderSwitchAfterProvider(kind, providerRefFromProvider(provider), provider.Name, errorMsg, orderedSwitchTargets, currentProviderIndex)
 							break
 						}
 

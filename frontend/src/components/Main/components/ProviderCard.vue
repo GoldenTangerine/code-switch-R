@@ -152,17 +152,19 @@
               {{ relayStatusLabel }}
             </span>
           </span>
-          <span
+          <button
             v-if="concurrencyStatusBadge"
+            type="button"
             class="provider-state-pill provider-concurrency-pill"
             :class="{
               'provider-concurrency-pill--limited': concurrencyStatusBadge.limited,
               'provider-concurrency-pill--overflow': concurrencyStatusBadge.overflow,
             }"
             :title="concurrencyStatusBadge.title"
+            @click.stop="$emit('open-concurrency-details')"
           >
             {{ concurrencyStatusBadge.label }}
-          </span>
+          </button>
           <button
             v-if="viewModel.card.officialSite"
             class="card-site"
@@ -757,9 +759,10 @@
         <button
           v-if="activeTab !== 'others' && activeTab !== 'opencode'"
           :class="['ghost-icon', 'provider-log-btn', { 'ghost-icon-alert': hasUnreadErrorLogs }]"
-          :data-tooltip="t('components.main.providerLogs.buttonTooltip')"
+          :data-tooltip="providerLogsButtonTooltip"
           type="button"
-          @click="$emit('open-provider-logs')"
+          @click="handleProviderLogsClick"
+          @dblclick="handleProviderLogsDoubleClick"
         >
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path
@@ -869,7 +872,9 @@ const emit = defineEmits<{
   'open-provider-data': []
   'open-model-list': []
   'open-provider-logs': []
+  'mark-provider-logs-read': []
   'open-provider-cost-trend': []
+  'open-concurrency-details': []
   'refresh-provider-quota': []
   duplicate: []
   remove: []
@@ -1022,7 +1027,10 @@ watch(hasQuotaStatusPanelItems, (enabled) => {
   stopBalanceQuotaTimeTicker()
 }, { immediate: true })
 
-onUnmounted(stopBalanceQuotaTimeTicker)
+onUnmounted(() => {
+  stopBalanceQuotaTimeTicker()
+  clearProviderLogsClickTimer()
+})
 
 const quotaTooltip = (item: ProviderQuotaDisplayItem) => {
   const invalidMessage = `${item.invalidMessage ?? ''}`.trim()
@@ -1130,6 +1138,37 @@ const isCurrentlyActive = computed(() => (
 const hasUnreadErrorLogs = computed(() => (
   props.viewModel.stats.hasUnreadErrorLogs
 ))
+
+const providerLogsButtonTooltip = computed(() => (
+  hasUnreadErrorLogs.value
+    ? t('components.main.providerLogs.buttonTooltipWithUnread')
+    : t('components.main.providerLogs.buttonTooltip')
+))
+
+let providerLogsClickTimer: number | undefined
+
+const clearProviderLogsClickTimer = () => {
+  if (providerLogsClickTimer === undefined) return
+  window.clearTimeout(providerLogsClickTimer)
+  providerLogsClickTimer = undefined
+}
+
+const handleProviderLogsClick = () => {
+  clearProviderLogsClickTimer()
+  providerLogsClickTimer = window.setTimeout(() => {
+    providerLogsClickTimer = undefined
+    emit('open-provider-logs')
+  }, 220)
+}
+
+const handleProviderLogsDoubleClick = () => {
+  clearProviderLogsClickTimer()
+  if (!hasUnreadErrorLogs.value) {
+    emit('open-provider-logs')
+    return
+  }
+  emit('mark-provider-logs-read')
+}
 
 const showHostedStateBadges = computed(() => props.viewModel.isLastUsed || props.viewModel.isDefaultHostedProvider)
 

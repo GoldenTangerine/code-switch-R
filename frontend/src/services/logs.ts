@@ -1,6 +1,7 @@
 import { Call } from '@wailsio/runtime'
 
 export type LogPlatform = 'claude' | 'codex' | 'gemini'
+export type RequestLogPlatform = LogPlatform | `custom:${string}`
 
 export type RequestLog = {
   id: number
@@ -52,7 +53,7 @@ export type RequestLog = {
 }
 
 type RequestLogQuery = {
-  platform?: LogPlatform | ''
+  platform?: RequestLogPlatform | ''
   provider?: string
   limit?: number
   offset?: number

@@ -391,7 +391,7 @@
         }
       },
       "relayToggle": {
-        "label": "Claude proxy",
+        "label": "Proxy hosting",
         "hostClaude": "Host Claude Code",
         "hostCodex": "Host Codex",
         "hostGemini": "Host Gemini CLI",
@@ -575,6 +575,7 @@
       },
       "providerLogs": {
         "buttonTooltip": "Provider logs",
+        "buttonTooltipWithUnread": "Click to view logs, double-click to mark read",
         "modalTitle": "{name} · Provider logs",
         "modalTitleFallback": "Provider logs",
         "platformClaude": "Claude Code",
@@ -1092,6 +1093,23 @@
       "concurrency": {
         "badge": "{current}/{max}",
         "badgeHint": "Current concurrency: {current}/{max}"
+      },
+      "concurrencyDetails": {
+        "modalTitle": "{name} · Connection details",
+        "providerFallback": "Provider",
+        "summary": "View active connections and recent connection history.",
+        "activeCount": "Active {count}",
+        "historyCount": "History {count}",
+        "activeTitle": "Active connections",
+        "historyTitle": "Recent connection history",
+        "emptyActive": "No active connections",
+        "emptyHistory": "No connection history",
+        "loadingHistory": "Loading connection history...",
+        "loadHistoryFailed": "Failed to load connection history: {error}",
+        "emptyUserAgent": "No User-Agent",
+        "stream": "Stream",
+        "nonStream": "Non-stream",
+        "durationNow": "Just now"
       },
       "errors": {
         "loadAppSettingsFailed": "Failed to load application settings",
