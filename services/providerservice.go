@@ -75,6 +75,9 @@ type Provider struct {
 	// 使用 omitempty 确保零值不序列化，向后兼容
 	Level int `json:"level,omitempty"`
 
+	// 实时并发：供应商最多同时处理的请求数（默认 5，范围 1-999）
+	ProviderConcurrencyLimit int `json:"providerConcurrencyLimit,omitempty"`
+
 	// 会话隔离：供应商最多承载的会话数（默认 5，范围 1-999）
 	SessionMaxSessions int `json:"sessionMaxSessions,omitempty"`
 

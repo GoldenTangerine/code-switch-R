@@ -55,6 +55,7 @@ export type VendorForm = {
   modelMappingMissPolicy?: ModelMappingMissPolicy
   requestBodyOverrides?: Record<string, any>
   level?: number
+  providerConcurrencyLimit?: number
   sessionMaxSessions?: number
   sessionTTLMinutes?: number
   apiEndpoint?: string
@@ -156,6 +157,7 @@ export type ProviderSessionDetailView = {
   activeRequests: number
   providerId: string
   providerName: string
+  userAgent?: string
   createdAt: number
   lastSeen: number
   expiresAt: number

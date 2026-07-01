@@ -544,6 +544,18 @@
         </div>
 
         <div v-if="tabId !== 'opencode'" class="form-field">
+          <span>{{ t('components.main.form.labels.providerConcurrencyLimit') }}</span>
+          <BaseInput
+            v-model="form.providerConcurrencyLimit"
+            type="number"
+            min="1"
+            max="999"
+            step="1"
+          />
+          <span class="field-hint">{{ t('components.main.form.hints.providerConcurrencyLimit') }}</span>
+        </div>
+
+        <div v-if="tabId !== 'opencode'" class="form-field">
           <span>{{ t('components.main.form.labels.sessionAffinity') }}</span>
           <div class="session-affinity-grid">
             <label class="session-affinity-field">

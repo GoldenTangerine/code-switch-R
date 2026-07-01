@@ -757,6 +757,7 @@
           "officialSite": "Official site",
           "icon": "Icon",
           "enabled": "Enabled",
+          "providerConcurrencyLimit": "Concurrency limit",
           "level": "Priority Level",
           "sessionAffinity": "Session Affinity",
           "sessionMaxSessions": "Session limit",
@@ -844,6 +845,7 @@
         "noOpenCodePresetResults": "No matching OpenCode presets found",
         "hints": {
           "level": "Lower numbers = higher priority. Level 1 providers are tried first, then Level 2, etc.",
+          "providerConcurrencyLimit": "Limit simultaneous requests for this provider. Default is 5; overflow attempts use the next provider.",
           "sessionAffinity": "Keep each session on this provider when possible. Only requests with stable metadata session fields participate.",
           "apiEndpoint": "Override platform default endpoint. Leave blank for default (claude: /v1/messages, codex: /responses). For GLM models use /v1/chat/completions",
           "advancedOptions": "Anthropic Messages is used by default. Expand this only when a Claude provider needs to talk to an OpenAI-compatible upstream.",
@@ -1095,6 +1097,7 @@
         "lastSeen": "Last seen",
         "remaining": "Release in",
         "overflow": "Overflow",
+        "userAgent": "User-Agent",
         "yes": "Yes",
         "no": "No",
         "empty": "No sessions"
@@ -1233,7 +1236,8 @@
           "pricingHint": "Note",
           "recordedCost": "Recorded cost",
           "requestedModel": "Requested model",
-          "responseModel": "Returned model"
+          "responseModel": "Returned model",
+          "userAgent": "User-Agent"
         },
         "tooltipValues": {
           "missing": "Not recorded",

@@ -25,26 +25,27 @@ const (
 
 // GeminiProvider Gemini 供应商配置
 type GeminiProvider struct {
-	ID                   string            `json:"id"`
-	Name                 string            `json:"name"`
-	WebsiteURL           string            `json:"websiteUrl,omitempty"`
-	APIKeyURL            string            `json:"apiKeyUrl,omitempty"`
-	BaseURL              string            `json:"baseUrl,omitempty"`
-	APIKey               string            `json:"apiKey,omitempty"`
-	Model                string            `json:"model,omitempty"`
-	Description          string            `json:"description,omitempty"`
-	Category             string            `json:"category,omitempty"`            // official, third_party, custom
-	PartnerPromotionKey  string            `json:"partnerPromotionKey,omitempty"` // 用于识别供应商类型
-	Enabled              bool              `json:"enabled"`
-	SortOrder            int               `json:"sortOrder,omitempty"`          // 隐藏排序字段：仅控制启用 / 未启用组内顺序
-	EnabledSortOrder     int               `json:"enabledSortOrder,omitempty"`   // 记忆启用组内顺序，切回启用时优先恢复
-	DisabledSortOrder    int               `json:"disabledSortOrder,omitempty"`  // 记忆未启用组内顺序，切回未启用时优先恢复
-	Level                int               `json:"level,omitempty"`              // 优先级分组 (1-10, 默认 1)
-	SessionMaxSessions   int               `json:"sessionMaxSessions,omitempty"` // 会话隔离最多承载会话数
-	SessionTTLMinutes    int               `json:"sessionTTLMinutes,omitempty"`  // 会话隔离空闲释放时间（分钟）
-	EnvConfig            map[string]string `json:"envConfig,omitempty"`          // .env 配置
-	SettingsConfig       map[string]any    `json:"settingsConfig,omitempty"`     // settings.json 配置
-	RequestBodyOverrides map[string]any    `json:"requestBodyOverrides,omitempty"`
+	ID                       string            `json:"id"`
+	Name                     string            `json:"name"`
+	WebsiteURL               string            `json:"websiteUrl,omitempty"`
+	APIKeyURL                string            `json:"apiKeyUrl,omitempty"`
+	BaseURL                  string            `json:"baseUrl,omitempty"`
+	APIKey                   string            `json:"apiKey,omitempty"`
+	Model                    string            `json:"model,omitempty"`
+	Description              string            `json:"description,omitempty"`
+	Category                 string            `json:"category,omitempty"`            // official, third_party, custom
+	PartnerPromotionKey      string            `json:"partnerPromotionKey,omitempty"` // 用于识别供应商类型
+	Enabled                  bool              `json:"enabled"`
+	SortOrder                int               `json:"sortOrder,omitempty"`                // 隐藏排序字段：仅控制启用 / 未启用组内顺序
+	EnabledSortOrder         int               `json:"enabledSortOrder,omitempty"`         // 记忆启用组内顺序，切回启用时优先恢复
+	DisabledSortOrder        int               `json:"disabledSortOrder,omitempty"`        // 记忆未启用组内顺序，切回未启用时优先恢复
+	Level                    int               `json:"level,omitempty"`                    // 优先级分组 (1-10, 默认 1)
+	ProviderConcurrencyLimit int               `json:"providerConcurrencyLimit,omitempty"` // 实时并发最多同时处理请求数
+	SessionMaxSessions       int               `json:"sessionMaxSessions,omitempty"`       // 会话隔离最多承载会话数
+	SessionTTLMinutes        int               `json:"sessionTTLMinutes,omitempty"`        // 会话隔离空闲释放时间（分钟）
+	EnvConfig                map[string]string `json:"envConfig,omitempty"`                // .env 配置
+	SettingsConfig           map[string]any    `json:"settingsConfig,omitempty"`           // settings.json 配置
+	RequestBodyOverrides     map[string]any    `json:"requestBodyOverrides,omitempty"`
 	// 供应商级别预算额度配置（5 小时 / 日 / 周 / 月 / 总额度）
 	BudgetQuotaSettings *BudgetQuotaSettings `json:"budgetQuotaSettings,omitempty"`
 	// 供应商级别预算额度当前已使用校准值（5 小时 / 日 / 周 / 月 / 总额度）

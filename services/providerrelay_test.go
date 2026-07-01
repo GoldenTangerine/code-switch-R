@@ -2,9 +2,14 @@ package services
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 )
 
@@ -800,9 +805,31 @@ func TestToolResponseCollectorSkipsWhenOriginalRequestHasSession(t *testing.T) {
 		BodyBytes:         []byte(`{"input":[]}`),
 	}
 
-	collector := relay.newSessionAffinityToolResponseCollector("claude", Provider{ID: 1, Name: "Provider A"}, plan)
+	collector := relay.newSessionAffinityToolResponseCollector("claude", Provider{ID: 1, Name: "Provider A"}, plan, "claude-cli/1.0.0")
 	if collector != nil {
 		t.Fatalf("原始请求已有 sessionHash 时不应创建响应侧工具会话 collector")
+	}
+}
+
+func TestSessionAffinityStatusesIncludeUserAgent(t *testing.T) {
+	relay := NewProviderRelayService(nil, nil, nil, nil, nil, nil, "")
+	platform := "claude"
+	sessionHash := "session-user-agent"
+	userAgent := "claude-cli/2.1.84 (external, cli)"
+
+	attemptID := relay.beginSessionProviderRequest(platform, sessionHash, "provider-a", "Provider A", userAgent, 5, 5, true, false)
+	if attemptID <= 0 {
+		t.Fatalf("应创建会话绑定 attempt，got %d", attemptID)
+	}
+	relay.finishSessionProviderRequest(platform, sessionHash)
+	relay.confirmSessionProviderBinding(platform, sessionHash, attemptID)
+
+	statuses := relay.GetSessionAffinityStatuses(platform)
+	if len(statuses) != 1 || len(statuses[0].Sessions) != 1 {
+		t.Fatalf("会话状态数量不匹配: %#v", statuses)
+	}
+	if got := statuses[0].Sessions[0].UserAgent; got != userAgent {
+		t.Fatalf("user agent = %q，期望 %q", got, userAgent)
 	}
 }
 
@@ -868,8 +895,8 @@ func TestSessionAffinityConcurrentPendingFailuresReleaseBinding(t *testing.T) {
 	platform := "claude"
 	sessionHash := "session-a"
 
-	attemptA := relay.beginSessionProviderRequest(platform, sessionHash, "provider-a", "Provider A", 5, 5, true, false)
-	attemptB := relay.beginSessionProviderRequest(platform, sessionHash, "provider-a", "Provider A", 5, 5, true, false)
+	attemptA := relay.beginSessionProviderRequest(platform, sessionHash, "provider-a", "Provider A", "", 5, 5, true, false)
+	attemptB := relay.beginSessionProviderRequest(platform, sessionHash, "provider-a", "Provider A", "", 5, 5, true, false)
 	if attemptA == 0 || attemptB == 0 || attemptA != attemptB {
 		t.Fatalf("pending 并发应共享同一次临时绑定 attempt，got A=%d B=%d", attemptA, attemptB)
 	}
@@ -892,8 +919,8 @@ func TestSessionAffinityConcurrentPendingSuccessAndFailureKeepsConfirmedBinding(
 	platform := "claude"
 	sessionHash := "session-b"
 
-	attemptA := relay.beginSessionProviderRequest(platform, sessionHash, "provider-a", "Provider A", 5, 5, true, false)
-	attemptB := relay.beginSessionProviderRequest(platform, sessionHash, "provider-a", "Provider A", 5, 5, true, false)
+	attemptA := relay.beginSessionProviderRequest(platform, sessionHash, "provider-a", "Provider A", "", 5, 5, true, false)
+	attemptB := relay.beginSessionProviderRequest(platform, sessionHash, "provider-a", "Provider A", "", 5, 5, true, false)
 	relay.finishSessionProviderRequest(platform, sessionHash)
 	relay.confirmSessionProviderBinding(platform, sessionHash, attemptA)
 	relay.finishSessionProviderRequest(platform, sessionHash)
@@ -910,14 +937,14 @@ func TestSessionAffinityNewSessionFailoverRebindsToNextProvider(t *testing.T) {
 	platform := "claude"
 	sessionHash := "session-c"
 
-	attemptA := relay.beginSessionProviderRequest(platform, sessionHash, "provider-a", "Provider A", 5, 5, true, false)
+	attemptA := relay.beginSessionProviderRequest(platform, sessionHash, "provider-a", "Provider A", "", 5, 5, true, false)
 	if attemptA <= 0 {
 		t.Fatalf("新会话首次 provider 应创建 pending attempt，got %d", attemptA)
 	}
 	relay.finishSessionProviderRequest(platform, sessionHash)
 	relay.restoreOrReleaseSessionBinding(platform, sessionHash, nil, attemptA)
 
-	attemptB := relay.beginSessionProviderRequest(platform, sessionHash, "provider-b", "Provider B", 5, 5, true, false)
+	attemptB := relay.beginSessionProviderRequest(platform, sessionHash, "provider-b", "Provider B", "", 5, 5, true, false)
 	if attemptB <= 0 || attemptB == attemptA {
 		t.Fatalf("A 失败后应允许 B 创建新 attempt，got A=%d B=%d", attemptA, attemptB)
 	}
@@ -934,12 +961,12 @@ func TestSessionAffinityConfirmedSessionFailoverMigratesProvider(t *testing.T) {
 	platform := "claude"
 	sessionHash := "session-d"
 
-	attemptA := relay.beginSessionProviderRequest(platform, sessionHash, "provider-a", "Provider A", 5, 5, true, false)
+	attemptA := relay.beginSessionProviderRequest(platform, sessionHash, "provider-a", "Provider A", "", 5, 5, true, false)
 	relay.confirmSessionProviderBinding(platform, sessionHash, attemptA)
 	relay.finishSessionProviderRequest(platform, sessionHash)
 	original := relay.getSessionBindingSnapshot(platform, sessionHash)
 
-	attemptB := relay.beginSessionProviderRequest(platform, sessionHash, "provider-b", "Provider B", 5, 5, false, false)
+	attemptB := relay.beginSessionProviderRequest(platform, sessionHash, "provider-b", "Provider B", "", 5, 5, false, false)
 	if attemptB <= 0 {
 		t.Fatalf("老会话 A 失败后应允许创建迁移 attempt，got %d", attemptB)
 	}
@@ -957,12 +984,12 @@ func TestSessionAffinityConfirmedSessionAllFailKeepsOriginalProvider(t *testing.
 	platform := "claude"
 	sessionHash := "session-e"
 
-	attemptA := relay.beginSessionProviderRequest(platform, sessionHash, "provider-a", "Provider A", 5, 5, true, false)
+	attemptA := relay.beginSessionProviderRequest(platform, sessionHash, "provider-a", "Provider A", "", 5, 5, true, false)
 	relay.confirmSessionProviderBinding(platform, sessionHash, attemptA)
 	relay.finishSessionProviderRequest(platform, sessionHash)
 	original := relay.getSessionBindingSnapshot(platform, sessionHash)
 
-	attemptB := relay.beginSessionProviderRequest(platform, sessionHash, "provider-b", "Provider B", 5, 5, false, false)
+	attemptB := relay.beginSessionProviderRequest(platform, sessionHash, "provider-b", "Provider B", "", 5, 5, false, false)
 	relay.finishSessionProviderRequest(platform, sessionHash)
 	relay.restoreOrReleaseSessionBinding(platform, sessionHash, original, attemptB)
 
@@ -977,10 +1004,10 @@ func TestBeginSessionProviderRequestSkipsDifferentProviderDuringActiveMigration(
 	platform := "claude"
 	sessionHash := "session-f"
 
-	attemptA := relay.beginSessionProviderRequest(platform, sessionHash, "provider-a", "Provider A", 5, 5, true, false)
+	attemptA := relay.beginSessionProviderRequest(platform, sessionHash, "provider-a", "Provider A", "", 5, 5, true, false)
 	relay.confirmSessionProviderBinding(platform, sessionHash, attemptA)
 
-	wrongAttempt := relay.beginSessionProviderRequest(platform, sessionHash, "provider-b", "Provider B", 5, 5, false, false)
+	wrongAttempt := relay.beginSessionProviderRequest(platform, sessionHash, "provider-b", "Provider B", "", 5, 5, false, false)
 	if wrongAttempt >= 0 {
 		t.Fatalf("原 Provider 仍有 in-flight 时不同 provider 应跳过，got attempt=%d", wrongAttempt)
 	}
@@ -1001,7 +1028,7 @@ func TestBeginSessionProviderRequestRejectsFullProviderUnlessOverflowAllowed(t *
 		Confirmed:   true,
 	}
 
-	rejected := relay.beginSessionProviderRequest(platform, "session-new", "provider-a", "Provider A", 1, 5, true, false)
+	rejected := relay.beginSessionProviderRequest(platform, "session-new", "provider-a", "Provider A", "", 1, 5, true, false)
 	if rejected != -1 {
 		t.Fatalf("full provider must reject new non-overflow binding, got %d", rejected)
 	}
@@ -1009,7 +1036,7 @@ func TestBeginSessionProviderRequestRejectsFullProviderUnlessOverflowAllowed(t *
 		t.Fatalf("rejected binding should not create session state: %#v", binding)
 	}
 
-	accepted := relay.beginSessionProviderRequest(platform, "session-overflow", "provider-a", "Provider A", 1, 5, true, true)
+	accepted := relay.beginSessionProviderRequest(platform, "session-overflow", "provider-a", "Provider A", "", 1, 5, true, true)
 	if accepted <= 0 {
 		t.Fatalf("overflow fallback should allow full provider, got %d", accepted)
 	}
@@ -1182,6 +1209,62 @@ func TestOrderGeminiProvidersForSessionAffinityUsesBoundSessionCapacity(t *testi
 		if got[i] != want[i] {
 			t.Fatalf("gemini order = %v, want %v", got, want)
 		}
+	}
+}
+
+func TestProviderConcurrencySlotLimitAndRelease(t *testing.T) {
+	relay := NewProviderRelayService(nil, nil, nil, nil, nil, nil, "")
+	providerID := "provider-a"
+
+	release, ok := relay.acquireProviderConcurrencySlot("claude", providerID, 1)
+	if !ok {
+		t.Fatalf("first provider concurrency slot should be acquired")
+	}
+	if got := relay.providerConcurrencyCount("claude", providerID); got != 1 {
+		t.Fatalf("active concurrency = %d, want 1", got)
+	}
+	if _, ok := relay.acquireProviderConcurrencySlot("claude", providerID, 1); ok {
+		t.Fatalf("second provider concurrency slot should be rejected")
+	}
+	release()
+	if got := relay.providerConcurrencyCount("claude", providerID); got != 0 {
+		t.Fatalf("active concurrency after release = %d, want 0", got)
+	}
+	if releaseAgain, ok := relay.acquireProviderConcurrencySlot("claude", providerID, 1); !ok {
+		t.Fatalf("provider concurrency slot should be reusable after release")
+	} else {
+		releaseAgain()
+	}
+}
+
+func TestProviderConcurrencyLimitErrorDoesNotCountAsProviderFailure(t *testing.T) {
+	if shouldRecordProviderFailure(errProviderConcurrencyLimit) {
+		t.Fatalf("provider concurrency limit should not count as provider failure")
+	}
+	if shouldRecordProviderFailure(fmt.Errorf("wrapped: %w", errProviderConcurrencyLimit)) {
+		t.Fatalf("wrapped provider concurrency limit should not count as provider failure")
+	}
+	if shouldRecordProviderFailure(errClientAbort) {
+		t.Fatalf("client abort should not count as provider failure")
+	}
+	if !shouldRecordProviderFailure(errors.New("upstream failed")) {
+		t.Fatalf("ordinary upstream error should count as provider failure")
+	}
+}
+
+func TestProviderConcurrencyLimitErrorWrites429(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	if !writeProviderConcurrencyLimitErrorIfAny(c, errProviderConcurrencyLimit) {
+		t.Fatalf("provider concurrency limit should be handled")
+	}
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want %d, body=%s", w.Code, http.StatusTooManyRequests, w.Body.String())
+	}
+	if got := gjson.Get(w.Body.String(), "error").String(); got != "all providers are busy" {
+		t.Fatalf("error = %q, want all providers are busy", got)
 	}
 }
 

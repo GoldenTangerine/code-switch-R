@@ -758,6 +758,7 @@
           "officialSite": "官网地址",
           "icon": "图标",
           "enabled": "启用状态",
+          "providerConcurrencyLimit": "实时并发上限",
           "level": "优先级分组",
           "sessionAffinity": "会话隔离",
           "sessionMaxSessions": "会话上限",
@@ -845,6 +846,7 @@
         "noOpenCodePresetResults": "未找到匹配的 OpenCode 预设",
         "hints": {
           "level": "数字越小优先级越高，Level 1 会被优先尝试，失败后依次尝试 Level 2、Level 3 等",
+          "providerConcurrencyLimit": "限制该供应商同时处理的请求数，默认 5，超过后自动尝试下一个供应商。",
           "sessionAffinity": "同一会话优先固定到该供应商。仅带稳定 metadata 会话字段的请求参与会话隔离。",
           "apiEndpoint": "覆盖平台默认端点。留空使用默认（claude: /v1/messages, codex: /responses）。GLM 模型请使用 /v1/chat/completions",
           "advancedOptions": "默认使用 Anthropic Messages。只有 Claude 供应商要接 OpenAI 兼容端点时，才需要展开这里改协议。",
@@ -1096,6 +1098,7 @@
         "lastSeen": "最近调用",
         "remaining": "剩余释放",
         "overflow": "是否溢出",
+        "userAgent": "User-Agent",
         "yes": "是",
         "no": "否",
         "empty": "暂无会话"
@@ -1234,7 +1237,8 @@
           "pricingHint": "备注",
           "recordedCost": "日志金额",
           "requestedModel": "选中模型",
-          "responseModel": "返回模型"
+          "responseModel": "返回模型",
+          "userAgent": "User-Agent"
         },
         "tooltipValues": {
           "missing": "未记录",

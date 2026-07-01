@@ -41,6 +41,12 @@ export const normalizeModelMappingMissPolicy = (value: unknown): ModelMappingMis
   return normalized === 'passthrough' ? 'passthrough' : 'block'
 }
 
+export const normalizeProviderConcurrencyLimit = (value: unknown): number => {
+  const numeric = Math.floor(Number(value))
+  if (!Number.isFinite(numeric) || numeric <= 0) return 5
+  return Math.min(999, Math.max(1, numeric))
+}
+
 export const normalizeSessionMaxSessions = (value: unknown): number => {
   const numeric = Math.floor(Number(value))
   if (!Number.isFinite(numeric) || numeric <= 0) return 5
@@ -111,6 +117,7 @@ export const createDefaultVendorForm = (
   apiKeyUrl: '',
   icon: defaultIconKey,
   level: 1,
+  providerConcurrencyLimit: 5,
   sessionMaxSessions: 5,
   sessionTTLMinutes: 5,
   enabled: true,
@@ -159,6 +166,7 @@ export const createVendorFormFromCard = (
   apiKeyUrl: card.apiKeyUrl || '',
   icon: card.icon,
   level: card.level || 1,
+  providerConcurrencyLimit: card.providerConcurrencyLimit || 5,
   sessionMaxSessions: card.sessionMaxSessions || 5,
   sessionTTLMinutes: card.sessionTTLMinutes || 5,
   enabled: card.enabled,
@@ -247,6 +255,7 @@ export const buildNormalizedVendorForm = ({
     apiKeyUrl: `${form.apiKeyUrl ?? ''}`.trim(),
     icon: (form.icon || defaultIconKey).toString().trim().toLowerCase() || defaultIconKey,
     level: form.level || 1,
+    providerConcurrencyLimit: form.providerConcurrencyLimit || 5,
     sessionMaxSessions: form.sessionMaxSessions || 5,
     sessionTTLMinutes: form.sessionTTLMinutes || 5,
     enabled: form.enabled,
@@ -300,6 +309,7 @@ export const buildPersistedProviderFieldsFromForm = (
     apiKeyUrl: form.apiKeyUrl || '',
     icon: form.icon,
     level: normalizeLevel(form.level),
+    providerConcurrencyLimit: normalizeProviderConcurrencyLimit(form.providerConcurrencyLimit),
     sessionMaxSessions: normalizeSessionMaxSessions(form.sessionMaxSessions),
     sessionTTLMinutes: normalizeSessionTTLMinutes(form.sessionTTLMinutes),
     enabled: form.enabled,

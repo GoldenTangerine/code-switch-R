@@ -207,6 +207,10 @@
                   <span>{{ t('components.main.sessionAffinity.overflow') }}</span>
                   <strong>{{ session.overflow ? t('components.main.sessionAffinity.yes') : t('components.main.sessionAffinity.no') }}</strong>
                 </div>
+                <div class="provider-session-field provider-session-field--wide">
+                  <span>{{ t('components.main.sessionAffinity.userAgent') }}</span>
+                  <strong class="provider-session-user-agent" :title="session.userAgent || '-'">{{ session.userAgent || '-' }}</strong>
+                </div>
               </div>
             </div>
           </div>
@@ -1067,6 +1071,10 @@ watch(() => providerModalState.open, (open) => {
   border: 1px solid rgba(226, 232, 240, 0.72);
 }
 
+.provider-session-field--wide {
+  grid-column: 1 / -1;
+}
+
 .provider-session-field span {
   color: rgba(71, 85, 105, 0.72);
   font-size: 11px;
@@ -1078,6 +1086,11 @@ watch(() => providerModalState.open, (open) => {
   color: rgba(15, 23, 42, 0.92);
   font-size: 12px;
   font-weight: 800;
+}
+
+.provider-session-user-agent {
+  white-space: normal;
+  word-break: break-word;
 }
 
 .provider-session-empty {

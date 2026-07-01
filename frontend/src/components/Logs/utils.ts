@@ -97,6 +97,7 @@ export type LogsInfoTooltipLabels = {
   recordedCostLabel: string
   requestedModelLabel: string
   responseModelLabel: string
+  userAgentLabel: string
   pricingUnavailableValue: string
   priceSourceLabels: Record<LogPriceSource, string>
 }
@@ -845,6 +846,7 @@ export const buildLogsInfoTooltipLabels = (translate: LogsTranslate): LogsInfoTo
   recordedCostLabel: translate('components.logs.table.tooltipLabels.recordedCost'),
   requestedModelLabel: translate('components.logs.table.tooltipLabels.requestedModel'),
   responseModelLabel: translate('components.logs.table.tooltipLabels.responseModel'),
+  userAgentLabel: translate('components.logs.table.tooltipLabels.userAgent'),
   pricingUnavailableValue: translate('components.logs.table.tooltipValues.pricingUnavailable'),
   priceSourceLabels: {
     provider_api: translate('components.logs.table.priceSourceValues.providerApi'),
@@ -978,12 +980,15 @@ export const buildModelInfoTooltipDetailData = ({
 export const buildVerifyInfoTooltipDetailData = ({
   requestedModel,
   responseModel,
+  userAgent,
 }: {
   requestedModel?: string | null
   responseModel?: string | null
+  userAgent?: string | null
 }, labels: LogsInfoTooltipLabels): LogInfoTooltipDetail => {
   const requested = resolveTooltipModelDisplayValue(requestedModel, labels.tooltipValueMissing)
   const response = resolveTooltipModelDisplayValue(responseModel, labels.tooltipValueMissing)
+  const ua = resolveTooltipModelDisplayValue(userAgent, labels.tooltipValueMissing)
 
   return {
     title: labels.verifyTitle,
@@ -1000,6 +1005,12 @@ export const buildVerifyInfoTooltipDetailData = ({
         label: labels.responseModelLabel,
         value: response.value,
         tone: response.tone,
+      },
+      {
+        key: 'user-agent',
+        label: labels.userAgentLabel,
+        value: ua.value,
+        tone: ua.tone,
       },
     ],
   }

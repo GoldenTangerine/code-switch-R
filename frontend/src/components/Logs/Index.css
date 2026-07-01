@@ -149,6 +149,11 @@ html.dark .cost-breakdown-tooltip__note {
   padding: 0.82rem 0.95rem;
 }
 
+.log-info-tooltip--verify {
+  width: min(520px, calc(100vw - 20px));
+  max-width: 520px;
+}
+
 .log-info-tooltip::after {
   content: '';
   position: absolute;

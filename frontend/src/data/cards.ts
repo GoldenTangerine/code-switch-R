@@ -35,6 +35,8 @@ export type AutomationCard = {
   requestBodyOverrides?: Record<string, any>
   // 优先级分组：数字越小优先级越高（1-10，默认 1）
   level?: number
+  // 实时并发：供应商最多同时处理的请求数
+  providerConcurrencyLimit?: number
   // 会话隔离：供应商最多承载的会话数
   sessionMaxSessions?: number
   // 会话隔离：会话空闲释放时间（分钟）

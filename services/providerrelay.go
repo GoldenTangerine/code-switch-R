@@ -38,30 +38,33 @@ type LastUsedProvider struct {
 }
 
 type ProviderRelayService struct {
-	providerService     *ProviderService
-	geminiService       *GeminiService
-	blacklistService    *BlacklistService
-	notificationService *NotificationService
-	appSettings         *AppSettingsService // 应用设置服务（用于获取轮询开关状态）
-	modelPricing        *ModelPricingService
-	server              *http.Server
-	addr                string
-	lastUsed            map[string]*LastUsedProvider // 各平台最后使用的供应商
-	lastUsedMu          sync.RWMutex                 // 保护 lastUsed 的锁
-	rrMu                sync.Mutex                   // 轮询状态锁
-	rrLastStart         map[string]string            // 轮询状态：key="platform:level" → value=上次起始 Provider ID（回退为 Name）
-	claudeResponsesMu   sync.Mutex
-	claudeResponses     map[string]claudeResponsesSessionBinding
-	sessionAffinityMu   sync.Mutex
-	sessionAffinity     map[string]*providerSessionBinding
-	nextSessionNumber   int64
-	nextSessionAttempt  int64
-	toolSessionMu       sync.Mutex
-	toolSessions        map[string]toolSessionBinding
+	providerService       *ProviderService
+	geminiService         *GeminiService
+	blacklistService      *BlacklistService
+	notificationService   *NotificationService
+	appSettings           *AppSettingsService // 应用设置服务（用于获取轮询开关状态）
+	modelPricing          *ModelPricingService
+	server                *http.Server
+	addr                  string
+	lastUsed              map[string]*LastUsedProvider // 各平台最后使用的供应商
+	lastUsedMu            sync.RWMutex                 // 保护 lastUsed 的锁
+	rrMu                  sync.Mutex                   // 轮询状态锁
+	rrLastStart           map[string]string            // 轮询状态：key="platform:level" → value=上次起始 Provider ID（回退为 Name）
+	claudeResponsesMu     sync.Mutex
+	claudeResponses       map[string]claudeResponsesSessionBinding
+	sessionAffinityMu     sync.Mutex
+	sessionAffinity       map[string]*providerSessionBinding
+	nextSessionNumber     int64
+	nextSessionAttempt    int64
+	toolSessionMu         sync.Mutex
+	toolSessions          map[string]toolSessionBinding
+	providerConcurrencyMu sync.Mutex
+	providerConcurrency   map[string]int
 }
 
 // errClientAbort 表示客户端中断连接，不应计入 provider 失败次数
 var errClientAbort = errors.New("client aborted, skip failure count")
+var errProviderConcurrencyLimit = errors.New("provider concurrency limit exceeded")
 var errResponseStarted = errors.New("response already started")
 var errIncompleteStream = errors.New("stream ended before completion")
 
@@ -138,6 +141,7 @@ type providerSessionBinding struct {
 	SessionNumber  int64
 	ProviderID     string
 	ProviderName   string
+	UserAgent      string
 	MaxSessions    int
 	TTLMinutes     int
 	CreatedAt      time.Time
@@ -154,6 +158,7 @@ type ProviderSessionDetail struct {
 	ActiveRequests int    `json:"activeRequests"`
 	ProviderID     string `json:"providerId"`
 	ProviderName   string `json:"providerName"`
+	UserAgent      string `json:"userAgent,omitempty"`
 	CreatedAt      int64  `json:"createdAt"`
 	LastSeen       int64  `json:"lastSeen"`
 	ExpiresAt      int64  `json:"expiresAt"`
@@ -186,10 +191,11 @@ type toolSessionBinding struct {
 }
 
 type sessionAffinityToolResponseCollector struct {
-	prs      *ProviderRelayService
-	kind     string
-	provider Provider
-	callIDs  map[string]bool
+	prs       *ProviderRelayService
+	kind      string
+	provider  Provider
+	userAgent string
+	callIDs   map[string]bool
 }
 
 // upstreamErrorResponse 保存上游非 2xx 响应，供“最终失败”场景透传给客户端
@@ -292,6 +298,17 @@ func writeLastUpstreamErrorIfAny(c *gin.Context, err error) bool {
 	return true
 }
 
+func writeProviderConcurrencyLimitErrorIfAny(c *gin.Context, err error) bool {
+	if !isProviderConcurrencyLimitError(err) {
+		return false
+	}
+	c.JSON(http.StatusTooManyRequests, gin.H{
+		"error":   "all providers are busy",
+		"details": errProviderConcurrencyLimit.Error(),
+	})
+	return true
+}
+
 func NewProviderRelayService(providerService *ProviderService, geminiService *GeminiService, blacklistService *BlacklistService, notificationService *NotificationService, appSettings *AppSettingsService, modelPricing *ModelPricingService, addr string) *ProviderRelayService {
 	if addr == "" {
 		addr = "127.0.0.1:18100" // 【安全修复】仅监听本地回环地址，防止 API Key 暴露到局域网
@@ -313,10 +330,11 @@ func NewProviderRelayService(providerService *ProviderService, geminiService *Ge
 			"codex":  nil,
 			"gemini": nil,
 		},
-		rrLastStart:     make(map[string]string),
-		claudeResponses: make(map[string]claudeResponsesSessionBinding),
-		sessionAffinity: make(map[string]*providerSessionBinding),
-		toolSessions:    make(map[string]toolSessionBinding),
+		rrLastStart:         make(map[string]string),
+		claudeResponses:     make(map[string]claudeResponsesSessionBinding),
+		sessionAffinity:     make(map[string]*providerSessionBinding),
+		toolSessions:        make(map[string]toolSessionBinding),
+		providerConcurrency: make(map[string]int),
 	}
 }
 
@@ -633,8 +651,22 @@ func normalizeSessionTTLMinutes(value int) int {
 	return value
 }
 
+func normalizeProviderConcurrencyLimit(value int) int {
+	if value <= 0 {
+		return 5
+	}
+	if value > 999 {
+		return 999
+	}
+	return value
+}
+
 func providerSessionMaxSessions(provider Provider) int {
 	return normalizeSessionMaxSessions(provider.SessionMaxSessions)
+}
+
+func providerConcurrencyLimit(provider Provider) int {
+	return normalizeProviderConcurrencyLimit(provider.ProviderConcurrencyLimit)
 }
 
 func providerSessionTTLMinutes(provider Provider) int {
@@ -645,8 +677,72 @@ func geminiProviderSessionMaxSessions(provider GeminiProvider) int {
 	return normalizeSessionMaxSessions(provider.SessionMaxSessions)
 }
 
+func geminiProviderConcurrencyLimit(provider GeminiProvider) int {
+	return normalizeProviderConcurrencyLimit(provider.ProviderConcurrencyLimit)
+}
+
 func geminiProviderSessionTTLMinutes(provider GeminiProvider) int {
 	return normalizeSessionTTLMinutes(provider.SessionTTLMinutes)
+}
+
+func providerConcurrencyStateKey(platform string, providerID string) string {
+	return strings.TrimSpace(platform) + "\x00" + strings.TrimSpace(providerID)
+}
+
+func (prs *ProviderRelayService) acquireProviderConcurrencySlot(platform string, providerID string, limit int) (func(), bool) {
+	if prs == nil || strings.TrimSpace(providerID) == "" {
+		return func() {}, true
+	}
+	limit = normalizeProviderConcurrencyLimit(limit)
+	key := providerConcurrencyStateKey(platform, providerID)
+	prs.providerConcurrencyMu.Lock()
+	if prs.providerConcurrency == nil {
+		prs.providerConcurrency = map[string]int{}
+	}
+	if prs.providerConcurrency[key] >= limit {
+		prs.providerConcurrencyMu.Unlock()
+		return nil, false
+	}
+	prs.providerConcurrency[key]++
+	prs.providerConcurrencyMu.Unlock()
+
+	var once sync.Once
+	release := func() {
+		once.Do(func() {
+			prs.providerConcurrencyMu.Lock()
+			defer prs.providerConcurrencyMu.Unlock()
+			if prs.providerConcurrency[key] <= 1 {
+				delete(prs.providerConcurrency, key)
+				return
+			}
+			prs.providerConcurrency[key]--
+		})
+	}
+	return release, true
+}
+
+func (prs *ProviderRelayService) providerConcurrencyCount(platform string, providerID string) int {
+	if prs == nil || strings.TrimSpace(providerID) == "" {
+		return 0
+	}
+	prs.providerConcurrencyMu.Lock()
+	defer prs.providerConcurrencyMu.Unlock()
+	return prs.providerConcurrency[providerConcurrencyStateKey(platform, providerID)]
+}
+
+func isProviderConcurrencyLimitError(err error) bool {
+	return errors.Is(err, errProviderConcurrencyLimit)
+}
+
+func shouldRecordProviderFailure(err error) bool {
+	return !errors.Is(err, errClientAbort) && !isProviderConcurrencyLimitError(err)
+}
+
+func (prs *ProviderRelayService) recordProviderFailureIfNeeded(platform string, providerID string, providerName string, err error) error {
+	if prs == nil || prs.blacklistService == nil || !shouldRecordProviderFailure(err) {
+		return nil
+	}
+	return prs.blacklistService.RecordFailureByID(platform, providerID, providerName)
 }
 
 func sessionAffinityStateKey(platform string, sessionHash string) string {
@@ -1030,11 +1126,12 @@ func (prs *ProviderRelayService) registerToolSessionCalls(platform string, sessi
 	}
 }
 
-func (prs *ProviderRelayService) upsertConfirmedSessionBinding(platform string, sessionHash string, providerID string, providerName string, maxSessions int, ttlMinutes int) {
+func (prs *ProviderRelayService) upsertConfirmedSessionBinding(platform string, sessionHash string, providerID string, providerName string, userAgent string, maxSessions int, ttlMinutes int) {
 	if prs == nil || strings.TrimSpace(sessionHash) == "" || strings.TrimSpace(providerID) == "" {
 		return
 	}
 	now := time.Now()
+	userAgent = strings.TrimSpace(userAgent)
 	prs.sessionAffinityMu.Lock()
 	defer prs.sessionAffinityMu.Unlock()
 	prs.sweepExpiredSessionAffinityLocked(now)
@@ -1055,6 +1152,9 @@ func (prs *ProviderRelayService) upsertConfirmedSessionBinding(platform string, 
 	}
 	binding.ProviderID = providerID
 	binding.ProviderName = providerName
+	if userAgent != "" {
+		binding.UserAgent = userAgent
+	}
 	binding.MaxSessions = normalizeSessionMaxSessions(maxSessions)
 	binding.TTLMinutes = normalizeSessionTTLMinutes(ttlMinutes)
 	binding.LastSeen = now
@@ -1078,11 +1178,12 @@ func (prs *ProviderRelayService) getSessionBindingSnapshot(platform string, sess
 	return &copied
 }
 
-func (prs *ProviderRelayService) beginSessionProviderRequest(platform string, sessionHash string, providerID string, providerName string, maxSessions int, ttlMinutes int, pending bool, allowOverflow bool) int64 {
+func (prs *ProviderRelayService) beginSessionProviderRequest(platform string, sessionHash string, providerID string, providerName string, userAgent string, maxSessions int, ttlMinutes int, pending bool, allowOverflow bool) int64 {
 	if prs == nil || strings.TrimSpace(sessionHash) == "" || strings.TrimSpace(providerID) == "" {
 		return -1
 	}
 	now := time.Now()
+	userAgent = strings.TrimSpace(userAgent)
 	prs.sessionAffinityMu.Lock()
 	defer prs.sessionAffinityMu.Unlock()
 	prs.sweepExpiredSessionAffinityLocked(now)
@@ -1091,20 +1192,32 @@ func (prs *ProviderRelayService) beginSessionProviderRequest(platform string, se
 	if binding != nil {
 		if binding.Confirmed && binding.ProviderID == providerID {
 			binding.LastSeen = now
+			if userAgent != "" {
+				binding.UserAgent = userAgent
+			}
 			binding.ActiveRequests++
 			return 0
 		}
 		if binding.Confirmed && binding.ActiveRequests > 0 {
 			binding.LastSeen = now
+			if userAgent != "" {
+				binding.UserAgent = userAgent
+			}
 			return -1
 		}
 		if !binding.Confirmed && binding.ProviderID == providerID {
 			binding.LastSeen = now
+			if userAgent != "" {
+				binding.UserAgent = userAgent
+			}
 			binding.ActiveRequests++
 			return binding.AttemptID
 		}
 		if !binding.Confirmed && binding.ActiveRequests > 0 {
 			binding.LastSeen = now
+			if userAgent != "" {
+				binding.UserAgent = userAgent
+			}
 			return -1
 		}
 	}
@@ -1125,6 +1238,9 @@ func (prs *ProviderRelayService) beginSessionProviderRequest(platform string, se
 	attemptID := prs.nextSessionAttempt
 	binding.ProviderID = providerID
 	binding.ProviderName = providerName
+	if userAgent != "" {
+		binding.UserAgent = userAgent
+	}
 	binding.MaxSessions = normalizeSessionMaxSessions(maxSessions)
 	binding.TTLMinutes = normalizeSessionTTLMinutes(ttlMinutes)
 	binding.LastSeen = now
@@ -1542,6 +1658,7 @@ func (prs *ProviderRelayService) GetSessionAffinityStatuses(platform string) []P
 			ActiveRequests: binding.ActiveRequests,
 			ProviderID:     binding.ProviderID,
 			ProviderName:   binding.ProviderName,
+			UserAgent:      binding.UserAgent,
 			CreatedAt:      binding.CreatedAt.UnixMilli(),
 			LastSeen:       binding.LastSeen.UnixMilli(),
 			ExpiresAt:      expiresAt.UnixMilli(),
@@ -1821,6 +1938,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 
 		query := flattenQuery(c.Request.URL.Query())
 		clientHeaders := cloneHeaders(c.Request.Header)
+		clientUserAgent := strings.TrimSpace(c.GetHeader("User-Agent"))
 
 		// 获取拉黑功能开关状态
 		blacklistEnabled := prs.blacklistService.ShouldUseFixedMode()
@@ -1877,7 +1995,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 
 						fmt.Printf("[INFO] [会话隔离/拉黑模式] Provider: %s | 重试 %d/%d | Model: %s\n",
 							provider.Name, retryCount+1, maxRetryPerProvider, plan.EffectiveModel)
-						sessionAttemptID = prs.beginSessionProviderRequest(kind, sessionHash, providerRefFromProvider(provider), provider.Name, providerSessionMaxSessions(provider), providerSessionTTLMinutes(provider), originalSessionBinding == nil, isProviderSessionOverflowAttempt(provider, sessionLoads))
+						sessionAttemptID = prs.beginSessionProviderRequest(kind, sessionHash, providerRefFromProvider(provider), provider.Name, clientUserAgent, providerSessionMaxSessions(provider), providerSessionTTLMinutes(provider), originalSessionBinding == nil, isProviderSessionOverflowAttempt(provider, sessionLoads))
 						if sessionAttemptID < 0 {
 							continue
 						}
@@ -1910,7 +2028,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 							if errors.Is(err, errClientAbort) {
 								return
 							}
-							if err := prs.blacklistService.RecordFailureByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
+							if err := prs.recordProviderFailureIfNeeded(kind, providerRefFromProvider(provider), provider.Name, err); err != nil {
 								fmt.Printf("[ERROR] 记录失败到黑名单失败: %v\n", err)
 							}
 							if blacklisted, _ := prs.blacklistService.IsBlacklistedByID(kind, providerRefFromProvider(provider), provider.Name); blacklisted {
@@ -1922,7 +2040,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 							prs.restoreOrReleaseProviderSessionBinding(kind, sessionHash, originalSessionBinding, sessionAttemptID)
 							return
 						}
-						if err := prs.blacklistService.RecordFailureByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
+						if err := prs.recordProviderFailureIfNeeded(kind, providerRefFromProvider(provider), provider.Name, err); err != nil {
 							fmt.Printf("[ERROR] 记录失败到黑名单失败: %v\n", err)
 						}
 						if blacklisted, _ := prs.blacklistService.IsBlacklistedByID(kind, providerRefFromProvider(provider), provider.Name); blacklisted {
@@ -1932,6 +2050,9 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 							break
 						}
 						prs.restoreOrReleaseProviderSessionBinding(kind, sessionHash, originalSessionBinding, sessionAttemptID)
+						if isProviderConcurrencyLimitError(err) {
+							break
+						}
 						if retryCount < maxRetryPerProvider-1 {
 							time.Sleep(time.Duration(retryWaitSeconds) * time.Second)
 						}
@@ -1939,6 +2060,9 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 				}
 
 				prs.restoreOrReleaseProviderSessionBinding(kind, sessionHash, originalSessionBinding, sessionAttemptID)
+				if writeProviderConcurrencyLimitErrorIfAny(c, lastError) {
+					return
+				}
 				if writeLastUpstreamErrorIfAny(c, lastError) {
 					return
 				}
@@ -2016,7 +2140,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 								fmt.Printf("[INFO] 客户端中断，停止重试\n")
 								return
 							}
-							if err := prs.blacklistService.RecordFailureByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
+							if err := prs.recordProviderFailureIfNeeded(kind, providerRefFromProvider(provider), provider.Name, err); err != nil {
 								fmt.Printf("[ERROR] 记录失败到黑名单失败: %v\n", err)
 							}
 							prs.releaseProviderSessionsIfBlacklisted(kind, providerRefFromProvider(provider), provider.Name)
@@ -2032,7 +2156,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 						}
 
 						// 记录失败次数（可能触发拉黑）
-						if err := prs.blacklistService.RecordFailureByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
+						if err := prs.recordProviderFailureIfNeeded(kind, providerRefFromProvider(provider), provider.Name, err); err != nil {
 							fmt.Printf("[ERROR] 记录失败到黑名单失败: %v\n", err)
 						}
 						prs.releaseProviderSessionsIfBlacklisted(kind, providerRefFromProvider(provider), provider.Name)
@@ -2044,6 +2168,9 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 						}
 
 						// 等待后重试（除非是最后一次）
+						if isProviderConcurrencyLimitError(err) {
+							break
+						}
 						if retryCount < maxRetryPerProvider-1 {
 							fmt.Printf("[INFO] ⏳ 等待 %d 秒后重试...\n", retryWaitSeconds)
 							time.Sleep(time.Duration(retryWaitSeconds) * time.Second)
@@ -2056,6 +2183,9 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 			fmt.Printf("[ERROR] 💥 拉黑模式：所有 Provider 都失败或被拉黑（共尝试 %d 次）\n", totalAttempts)
 
 			// 按用户要求：仅在所有重试/降级都失败后，透传最后一次上游错误
+			if writeProviderConcurrencyLimitErrorIfAny(c, lastError) {
+				return
+			}
 			if writeLastUpstreamErrorIfAny(c, lastError) {
 				return
 			}
@@ -2109,6 +2239,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 					sessionHash,
 					providerRefFromProvider(provider),
 					provider.Name,
+					clientUserAgent,
 					providerSessionMaxSessions(provider),
 					providerSessionTTLMinutes(provider),
 					originalSessionBinding == nil,
@@ -2147,7 +2278,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 					if errors.Is(err, errClientAbort) {
 						return
 					}
-					if err := prs.blacklistService.RecordFailureByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
+					if err := prs.recordProviderFailureIfNeeded(kind, providerRefFromProvider(provider), provider.Name, err); err != nil {
 						fmt.Printf("[ERROR] 记录失败到黑名单失败: %v\n", err)
 					}
 					if blacklisted, _ := prs.blacklistService.IsBlacklistedByID(kind, providerRefFromProvider(provider), provider.Name); blacklisted {
@@ -2162,7 +2293,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 					return
 				}
 				if !errors.Is(err, errClientAbort) {
-					if err := prs.blacklistService.RecordFailureByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
+					if err := prs.recordProviderFailureIfNeeded(kind, providerRefFromProvider(provider), provider.Name, err); err != nil {
 						fmt.Printf("[ERROR] 记录失败到黑名单失败: %v\n", err)
 					}
 					if blacklisted, _ := prs.blacklistService.IsBlacklistedByID(kind, providerRefFromProvider(provider), provider.Name); blacklisted {
@@ -2173,6 +2304,9 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 			}
 
 			prs.restoreOrReleaseProviderSessionBinding(kind, sessionHash, originalSessionBinding, sessionAttemptID)
+			if writeProviderConcurrencyLimitErrorIfAny(c, lastError) {
+				return
+			}
 			if writeLastUpstreamErrorIfAny(c, lastError) {
 				return
 			}
@@ -2250,7 +2384,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 						fmt.Printf("[INFO] 客户端中断，跳过失败计数: %s\n", provider.Name)
 						return
 					}
-					if err := prs.blacklistService.RecordFailureByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
+					if err := prs.recordProviderFailureIfNeeded(kind, providerRefFromProvider(provider), provider.Name, err); err != nil {
 						fmt.Printf("[ERROR] 记录失败到黑名单失败: %v\n", err)
 					}
 					prs.releaseProviderSessionsIfBlacklisted(kind, providerRefFromProvider(provider), provider.Name)
@@ -2262,7 +2396,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 				// 客户端中断不计入失败次数
 				if errors.Is(err, errClientAbort) {
 					fmt.Printf("[INFO] 客户端中断，跳过失败计数: %s\n", provider.Name)
-				} else if err := prs.blacklistService.RecordFailureByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
+				} else if err := prs.recordProviderFailureIfNeeded(kind, providerRefFromProvider(provider), provider.Name, err); err != nil {
 					fmt.Printf("[ERROR] 记录失败到黑名单失败: %v\n", err)
 				}
 				if !errors.Is(err, errClientAbort) {
@@ -2306,6 +2440,9 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 		}
 
 		// 所有 provider 都失败：优先透传最后一次上游错误，否则返回 502 聚合信息
+		if writeProviderConcurrencyLimitErrorIfAny(c, lastError) {
+			return
+		}
 		if writeLastUpstreamErrorIfAny(c, lastError) {
 			return
 		}
@@ -2374,6 +2511,12 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 
 	targetURL := joinURL(provider.APIURL, endpoint)
 	headers := cloneMap(clientHeaders)
+	requestUserAgent := getHeaderValueCaseInsensitive(headers, "User-Agent")
+	releaseProviderSlot, acquiredProviderSlot := prs.acquireProviderConcurrencySlot(kind, providerRefFromProvider(provider), providerConcurrencyLimit(provider))
+	if !acquiredProviderSlot {
+		return false, errProviderConcurrencyLimit
+	}
+	defer releaseProviderSlot()
 
 	// 根据认证方式设置请求头（默认 Bearer，与 v2.2.x 保持一致）
 	authType := strings.ToLower(strings.TrimSpace(provider.ConnectivityAuthType))
@@ -2410,6 +2553,7 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 		Model:            model,
 		RequestedModel:   strings.TrimSpace(requestedModel),
 		ReasoningEffort:  extractRequestLogReasoningEffort(bodyBytes, requestedModel),
+		UserAgent:        requestUserAgent,
 		IsStream:         isStream,
 		CapturePayload:   capturePayloadEnabled,
 		SanitizePayload:  sanitizePayloadEnabled,
@@ -2468,7 +2612,7 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 		err := GlobalDBQueueLogs.ExecBatchCtx(ctx, `
 				INSERT INTO request_log (
 					platform, model, requested_model, response_model, provider_id, provider, http_code,
-					reasoning_effort,
+					reasoning_effort, user_agent,
 					input_tokens, output_tokens, cache_create_tokens, ephemeral_5m_tokens, ephemeral_1h_tokens, cache_read_tokens,
 					reasoning_tokens, is_stream, duration_sec, first_token_sec, total_cost, group_multiplier, price_source,
 					input_cost, output_cost, reasoning_cost, cache_create_cost, cache_read_cost,
@@ -2477,7 +2621,7 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 					provider_per_call_unified, provider_per_call_input, provider_per_call_output,
 					provider_per_call_unified_set, provider_per_call_input_set, provider_per_call_output_set,
 					request_body, response_body, request_body_truncated, response_body_truncated, payload_bytes, payload_captured
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			`,
 			requestLog.Platform,
 			requestLog.Model,
@@ -2487,6 +2631,7 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 			requestLog.Provider,
 			requestLog.HttpCode,
 			requestLog.ReasoningEffort,
+			requestLog.UserAgent,
 			requestLog.InputTokens,
 			requestLog.OutputTokens,
 			requestLog.CacheCreateTokens,
@@ -2575,7 +2720,7 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 		// 状态码为 0 且无错误：当作成功处理
 		if status == 0 {
 			fmt.Printf("[WARN] Provider %s 返回状态码 0，但无错误，当作成功处理\n", provider.Name)
-			toolCollector := prs.newSessionAffinityToolResponseCollector(kind, provider, currentPlan)
+			toolCollector := prs.newSessionAffinityToolResponseCollector(kind, provider, currentPlan, requestUserAgent)
 			hooks := buildClaudeProviderResponseHooks(prs, c, kind, provider, currentPlan, isStream, requestLog, toolCollector)
 			writtenBytes, copyErr := resp.ToHttpResponseWriter(c.Writer, hooks...)
 			ok, forwardErr := finalizeForwardSuccess(c, kind, requestLog, writtenBytes, copyErr)
@@ -2593,7 +2738,7 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 					return false, protocolErr, false, false
 				}
 			}
-			toolCollector := prs.newSessionAffinityToolResponseCollector(kind, provider, currentPlan)
+			toolCollector := prs.newSessionAffinityToolResponseCollector(kind, provider, currentPlan, requestUserAgent)
 			hooks := buildClaudeProviderResponseHooks(prs, c, kind, provider, currentPlan, isStream, requestLog, toolCollector)
 			writtenBytes, copyErr := resp.ToHttpResponseWriter(c.Writer, hooks...)
 			ok, forwardErr := finalizeForwardSuccess(c, kind, requestLog, writtenBytes, copyErr)
@@ -2700,6 +2845,18 @@ func cloneMap(m map[string]string) map[string]string {
 	return cloned
 }
 
+func getHeaderValueCaseInsensitive(headers map[string]string, key string) string {
+	if headers == nil {
+		return ""
+	}
+	for existingKey, value := range headers {
+		if strings.EqualFold(existingKey, key) {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
 func setHeaderIfAbsentCaseInsensitive(headers map[string]string, key string, value string) {
 	if headers == nil {
 		return
@@ -2754,7 +2911,7 @@ func buildClaudeProviderResponseHooks(
 	return hooks
 }
 
-func (prs *ProviderRelayService) newSessionAffinityToolResponseCollector(kind string, provider Provider, plan providerRequestPlan) *sessionAffinityToolResponseCollector {
+func (prs *ProviderRelayService) newSessionAffinityToolResponseCollector(kind string, provider Provider, plan providerRequestPlan, userAgent string) *sessionAffinityToolResponseCollector {
 	if prs == nil || strings.TrimSpace(kind) == "" || !prs.isSessionAffinityEnabled(kind) {
 		return nil
 	}
@@ -2766,10 +2923,11 @@ func (prs *ProviderRelayService) newSessionAffinityToolResponseCollector(kind st
 		return nil
 	}
 	return &sessionAffinityToolResponseCollector{
-		prs:      prs,
-		kind:     kind,
-		provider: provider,
-		callIDs:  map[string]bool{},
+		prs:       prs,
+		kind:      kind,
+		provider:  provider,
+		userAgent: strings.TrimSpace(userAgent),
+		callIDs:   map[string]bool{},
 	}
 }
 
@@ -2881,10 +3039,10 @@ func (collector *sessionAffinityToolResponseCollector) commit() {
 	for callID := range collector.callIDs {
 		callIDs = append(callIDs, callID)
 	}
-	collector.prs.commitToolResponseSession(collector.kind, collector.provider, callIDs)
+	collector.prs.commitToolResponseSession(collector.kind, collector.provider, collector.userAgent, callIDs)
 }
 
-func (prs *ProviderRelayService) commitToolResponseSession(kind string, provider Provider, callIDs []string) {
+func (prs *ProviderRelayService) commitToolResponseSession(kind string, provider Provider, userAgent string, callIDs []string) {
 	sessionHash := toolSessionHash(kind, callIDs)
 	if sessionHash == "" {
 		return
@@ -2895,6 +3053,7 @@ func (prs *ProviderRelayService) commitToolResponseSession(kind string, provider
 		sessionHash,
 		providerRefFromProvider(provider),
 		provider.Name,
+		userAgent,
 		providerSessionMaxSessions(provider),
 		providerSessionTTLMinutes(provider),
 	)
@@ -3417,6 +3576,7 @@ func ensureRequestLogTableWithDB(db *sql.DB) error {
 		requested_model TEXT DEFAULT '',
 		response_model TEXT DEFAULT '',
 		reasoning_effort TEXT DEFAULT '',
+		user_agent TEXT DEFAULT '',
 		provider_id TEXT DEFAULT '',
 		provider TEXT,
 		http_code INTEGER,
@@ -3501,6 +3661,9 @@ func ensureRequestLogTableWithDB(db *sql.DB) error {
 		return err
 	}
 	if err := ensureRequestLogColumn(db, "reasoning_effort", "TEXT DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "user_agent", "TEXT DEFAULT ''"); err != nil {
 		return err
 	}
 	if err := ensureRequestLogColumn(db, "provider_id", "TEXT DEFAULT ''"); err != nil {
@@ -4183,6 +4346,7 @@ type ReqeustLog struct {
 	RequestedModel            string  `json:"requested_model,omitempty"`
 	ResponseModel             string  `json:"response_model,omitempty"`
 	ReasoningEffort           string  `json:"reasoning_effort,omitempty"`
+	UserAgent                 string  `json:"user_agent,omitempty"`
 	ProviderID                string  `json:"provider_id,omitempty"`
 	Provider                  string  `json:"provider"` // provider name
 	PriceSource               string  `json:"price_source,omitempty"`
@@ -5621,12 +5785,15 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 
 		fmt.Printf("[Gemini] 共 %d 个 Level 分组: %v\n", len(sortedLevels), sortedLevels)
 
+		clientUserAgent := strings.TrimSpace(c.GetHeader("User-Agent"))
+
 		// 请求日志
 		start := time.Now()
 		capturePayloadEnabled, sanitizePayloadEnabled := prs.resolveRequestLogPayloadCaptureAndSanitization()
 		requestLog := &ReqeustLog{
 			Platform:         "gemini",
 			RequestedModel:   requestedModel,
+			UserAgent:        clientUserAgent,
 			IsStream:         isStream,
 			CapturePayload:   capturePayloadEnabled,
 			SanitizePayload:  sanitizePayloadEnabled,
@@ -5678,7 +5845,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 			_ = GlobalDBQueueLogs.ExecBatchCtx(ctx, `
 					INSERT INTO request_log (
 						platform, model, requested_model, response_model, provider_id, provider, http_code,
-						reasoning_effort,
+						reasoning_effort, user_agent,
 						input_tokens, output_tokens, cache_create_tokens, ephemeral_5m_tokens, ephemeral_1h_tokens, cache_read_tokens,
 						reasoning_tokens, is_stream, duration_sec, first_token_sec, total_cost, group_multiplier, price_source,
 						input_cost, output_cost, reasoning_cost, cache_create_cost, cache_read_cost,
@@ -5687,10 +5854,10 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 						provider_per_call_unified, provider_per_call_input, provider_per_call_output,
 						provider_per_call_unified_set, provider_per_call_input_set, provider_per_call_output_set,
 						request_body, response_body, request_body_truncated, response_body_truncated, payload_bytes, payload_captured
-					) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+					) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 				`,
 				requestLog.Platform, requestLog.Model, requestLog.RequestedModel, requestLog.ResponseModel, requestLog.ProviderID, requestLog.Provider, requestLog.HttpCode,
-				requestLog.ReasoningEffort,
+				requestLog.ReasoningEffort, requestLog.UserAgent,
 				requestLog.InputTokens, requestLog.OutputTokens, requestLog.CacheCreateTokens, requestLog.Ephemeral5mTokens, requestLog.Ephemeral1hTokens,
 				requestLog.CacheReadTokens, requestLog.ReasoningTokens,
 				boolToInt(requestLog.IsStream), requestLog.DurationSec, requestLog.FirstTokenSec, requestLog.TotalCost, requestLog.GroupMultiplier, requestLog.PriceSource,
@@ -5763,7 +5930,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 
 						fmt.Printf("[Gemini] [会话隔离/拉黑模式] Provider: %s | 重试 %d/%d\n",
 							provider.Name, retryCount+1, maxRetryPerProvider)
-						sessionAttemptID = prs.beginSessionProviderRequest("gemini", sessionHash, providerRefFromGeminiProvider(provider), provider.Name, geminiProviderSessionMaxSessions(provider), geminiProviderSessionTTLMinutes(provider), originalSessionBinding == nil, isGeminiProviderSessionOverflowAttempt(provider, sessionLoads))
+						sessionAttemptID = prs.beginSessionProviderRequest("gemini", sessionHash, providerRefFromGeminiProvider(provider), provider.Name, clientUserAgent, geminiProviderSessionMaxSessions(provider), geminiProviderSessionTTLMinutes(provider), originalSessionBinding == nil, isGeminiProviderSessionOverflowAttempt(provider, sessionLoads))
 						if sessionAttemptID < 0 {
 							continue
 						}
@@ -5781,7 +5948,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 						}
 						if responseWritten {
 							prs.restoreOrReleaseProviderSessionBinding("gemini", sessionHash, originalSessionBinding, sessionAttemptID)
-							_ = prs.blacklistService.RecordFailureByID("gemini", providerRefFromGeminiProvider(provider), provider.Name)
+							_ = prs.recordProviderFailureIfNeeded("gemini", providerRefFromGeminiProvider(provider), provider.Name, err)
 							if blacklisted, _ := prs.blacklistService.IsBlacklistedByID("gemini", providerRefFromGeminiProvider(provider), provider.Name); blacklisted {
 								prs.releaseProviderSessions("gemini", providerRefFromGeminiProvider(provider))
 							}
@@ -5790,13 +5957,16 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 						}
 						lastError = err
 						lastProvider = provider.Name
-						_ = prs.blacklistService.RecordFailureByID("gemini", providerRefFromGeminiProvider(provider), provider.Name)
+						_ = prs.recordProviderFailureIfNeeded("gemini", providerRefFromGeminiProvider(provider), provider.Name, err)
 						if blacklisted, _ := prs.blacklistService.IsBlacklistedByID("gemini", providerRefFromGeminiProvider(provider), provider.Name); blacklisted {
 							prs.releaseProviderSessions("gemini", providerRefFromGeminiProvider(provider))
 							prs.restoreOrReleaseProviderSessionBinding("gemini", sessionHash, originalSessionBinding, sessionAttemptID)
 							break
 						}
 						prs.restoreOrReleaseProviderSessionBinding("gemini", sessionHash, originalSessionBinding, sessionAttemptID)
+						if isProviderConcurrencyLimitError(err) {
+							break
+						}
 						if retryCount < maxRetryPerProvider-1 {
 							time.Sleep(time.Duration(retryWaitSeconds) * time.Second)
 						}
@@ -5804,6 +5974,9 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 				}
 
 				prs.restoreOrReleaseProviderSessionBinding("gemini", sessionHash, originalSessionBinding, sessionAttemptID)
+				if writeProviderConcurrencyLimitErrorIfAny(c, lastError) {
+					return
+				}
 				if writeLastUpstreamErrorIfAny(c, lastError) {
 					return
 				}
@@ -5877,7 +6050,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 						}
 						if responseWritten {
 							fmt.Printf("[Gemini] ⚠️ 响应已部分写入，无法重试: %s | 错误: %s\n", provider.Name, errorMsg)
-							_ = prs.blacklistService.RecordFailureByID("gemini", providerRefFromGeminiProvider(provider), provider.Name)
+							_ = prs.recordProviderFailureIfNeeded("gemini", providerRefFromGeminiProvider(provider), provider.Name, err)
 							prs.releaseProviderSessionsIfBlacklisted("gemini", providerRefFromGeminiProvider(provider), provider.Name)
 							return
 						}
@@ -5890,7 +6063,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 							provider.Name, retryCount+1, maxRetryPerProvider, errorMsg)
 
 						// 记录失败次数（可能触发拉黑）
-						_ = prs.blacklistService.RecordFailureByID("gemini", providerRefFromGeminiProvider(provider), provider.Name)
+						_ = prs.recordProviderFailureIfNeeded("gemini", providerRefFromGeminiProvider(provider), provider.Name, err)
 						prs.releaseProviderSessionsIfBlacklisted("gemini", providerRefFromGeminiProvider(provider), provider.Name)
 
 						// 检查是否刚被拉黑
@@ -5900,6 +6073,9 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 						}
 
 						// 等待后重试（除非是最后一次）
+						if isProviderConcurrencyLimitError(err) {
+							break
+						}
 						if retryCount < maxRetryPerProvider-1 {
 							fmt.Printf("[Gemini] ⏳ 等待 %d 秒后重试...\n", retryWaitSeconds)
 							time.Sleep(time.Duration(retryWaitSeconds) * time.Second)
@@ -5912,6 +6088,9 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 			fmt.Printf("[Gemini] 💥 拉黑模式：所有 Provider 都失败或被拉黑（共尝试 %d 次）\n", totalAttempts)
 
 			// 按用户要求：仅在所有重试/降级都失败后，透传最后一次上游错误
+			if writeProviderConcurrencyLimitErrorIfAny(c, lastError) {
+				return
+			}
 			if writeLastUpstreamErrorIfAny(c, lastError) {
 				return
 			}
@@ -5969,6 +6148,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 					sessionHash,
 					providerRefFromGeminiProvider(provider),
 					provider.Name,
+					clientUserAgent,
 					geminiProviderSessionMaxSessions(provider),
 					geminiProviderSessionTTLMinutes(provider),
 					originalSessionBinding == nil,
@@ -5988,20 +6168,23 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 				}
 				if responseWritten {
 					prs.restoreOrReleaseProviderSessionBinding("gemini", sessionHash, originalSessionBinding, sessionAttemptID)
-					_ = prs.blacklistService.RecordFailureByID("gemini", providerRefFromGeminiProvider(provider), provider.Name)
+					_ = prs.recordProviderFailureIfNeeded("gemini", providerRefFromGeminiProvider(provider), provider.Name, err)
 					if blacklisted, _ := prs.blacklistService.IsBlacklistedByID("gemini", providerRefFromGeminiProvider(provider), provider.Name); blacklisted {
 						prs.releaseProviderSessions("gemini", providerRefFromGeminiProvider(provider))
 					}
 					return
 				}
 				lastError = err
-				_ = prs.blacklistService.RecordFailureByID("gemini", providerRefFromGeminiProvider(provider), provider.Name)
+				_ = prs.recordProviderFailureIfNeeded("gemini", providerRefFromGeminiProvider(provider), provider.Name, err)
 				if blacklisted, _ := prs.blacklistService.IsBlacklistedByID("gemini", providerRefFromGeminiProvider(provider), provider.Name); blacklisted {
 					prs.releaseProviderSessions("gemini", providerRefFromGeminiProvider(provider))
 				}
 				prs.restoreOrReleaseProviderSessionBinding("gemini", sessionHash, originalSessionBinding, sessionAttemptID)
 			}
 			prs.restoreOrReleaseProviderSessionBinding("gemini", sessionHash, originalSessionBinding, sessionAttemptID)
+			if writeProviderConcurrencyLimitErrorIfAny(c, lastError) {
+				return
+			}
 			if writeLastUpstreamErrorIfAny(c, lastError) {
 				return
 			}
@@ -6063,7 +6246,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 				}
 				if responseWritten {
 					fmt.Printf("[Gemini] ⚠️ 响应已部分写入，无法降级: %s | 错误: %s\n", provider.Name, errorMsg)
-					_ = prs.blacklistService.RecordFailureByID("gemini", providerRefFromGeminiProvider(provider), provider.Name)
+					_ = prs.recordProviderFailureIfNeeded("gemini", providerRefFromGeminiProvider(provider), provider.Name, err)
 					prs.releaseProviderSessionsIfBlacklisted("gemini", providerRefFromGeminiProvider(provider), provider.Name)
 					return
 				}
@@ -6071,7 +6254,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 				// 失败，记录并继续
 				lastError = err
 				fmt.Printf("[Gemini] ✗ 失败: %s | 错误: %s\n", provider.Name, errorMsg)
-				_ = prs.blacklistService.RecordFailureByID("gemini", providerRefFromGeminiProvider(provider), provider.Name)
+				_ = prs.recordProviderFailureIfNeeded("gemini", providerRefFromGeminiProvider(provider), provider.Name, err)
 				prs.releaseProviderSessionsIfBlacklisted("gemini", providerRefFromGeminiProvider(provider), provider.Name)
 			}
 
@@ -6079,6 +6262,9 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 		}
 
 		// 所有 Level 都失败：优先透传最后一次上游错误，否则返回 502 聚合信息
+		if writeProviderConcurrencyLimitErrorIfAny(c, lastError) {
+			return
+		}
 		if writeLastUpstreamErrorIfAny(c, lastError) {
 			return
 		}
@@ -6140,6 +6326,11 @@ func (prs *ProviderRelayService) forwardGeminiRequest(
 
 	// 构建目标 URL
 	targetURL := strings.TrimSuffix(provider.BaseURL, "/") + endpoint
+	releaseProviderSlot, acquiredProviderSlot := prs.acquireProviderConcurrencySlot("gemini", providerRefFromGeminiProvider(*provider), geminiProviderConcurrencyLimit(*provider))
+	if !acquiredProviderSlot {
+		return false, errProviderConcurrencyLimit, false
+	}
+	defer releaseProviderSlot()
 
 	// 预先填充日志，保证失败也能记录 provider 和模型
 	requestLog.ProviderID = providerRefFromGeminiProvider(*provider)
@@ -6379,6 +6570,7 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 
 		query := flattenQuery(c.Request.URL.Query())
 		clientHeaders := cloneHeaders(c.Request.Header)
+		clientUserAgent := strings.TrimSpace(c.GetHeader("User-Agent"))
 
 		// 获取拉黑功能开关状态
 		blacklistEnabled := prs.blacklistService.ShouldUseFixedMode()
@@ -6433,7 +6625,7 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 
 						fmt.Printf("[CustomCLI][INFO] [会话隔离/拉黑模式] Provider: %s | 重试 %d/%d | Model: %s\n",
 							provider.Name, retryCount+1, maxRetryPerProvider, plan.EffectiveModel)
-						sessionAttemptID = prs.beginSessionProviderRequest(kind, sessionHash, providerRefFromProvider(provider), provider.Name, providerSessionMaxSessions(provider), providerSessionTTLMinutes(provider), originalSessionBinding == nil, isProviderSessionOverflowAttempt(provider, sessionLoads))
+						sessionAttemptID = prs.beginSessionProviderRequest(kind, sessionHash, providerRefFromProvider(provider), provider.Name, clientUserAgent, providerSessionMaxSessions(provider), providerSessionTTLMinutes(provider), originalSessionBinding == nil, isProviderSessionOverflowAttempt(provider, sessionLoads))
 						if sessionAttemptID < 0 {
 							continue
 						}
@@ -6463,7 +6655,7 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 							if errors.Is(err, errClientAbort) {
 								return
 							}
-							if err := prs.blacklistService.RecordFailureByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
+							if err := prs.recordProviderFailureIfNeeded(kind, providerRefFromProvider(provider), provider.Name, err); err != nil {
 								fmt.Printf("[CustomCLI][ERROR] 记录失败到黑名单失败: %v\n", err)
 							}
 							if blacklisted, _ := prs.blacklistService.IsBlacklistedByID(kind, providerRefFromProvider(provider), provider.Name); blacklisted {
@@ -6475,7 +6667,7 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 							prs.restoreOrReleaseProviderSessionBinding(kind, sessionHash, originalSessionBinding, sessionAttemptID)
 							return
 						}
-						if err := prs.blacklistService.RecordFailureByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
+						if err := prs.recordProviderFailureIfNeeded(kind, providerRefFromProvider(provider), provider.Name, err); err != nil {
 							fmt.Printf("[CustomCLI][ERROR] 记录失败到黑名单失败: %v\n", err)
 						}
 						if blacklisted, _ := prs.blacklistService.IsBlacklistedByID(kind, providerRefFromProvider(provider), provider.Name); blacklisted {
@@ -6484,6 +6676,9 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 							break
 						}
 						prs.restoreOrReleaseProviderSessionBinding(kind, sessionHash, originalSessionBinding, sessionAttemptID)
+						if isProviderConcurrencyLimitError(err) {
+							break
+						}
 						if retryCount < maxRetryPerProvider-1 {
 							time.Sleep(time.Duration(retryWaitSeconds) * time.Second)
 						}
@@ -6491,6 +6686,9 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 				}
 
 				prs.restoreOrReleaseProviderSessionBinding(kind, sessionHash, originalSessionBinding, sessionAttemptID)
+				if writeProviderConcurrencyLimitErrorIfAny(c, lastError) {
+					return
+				}
 				if writeLastUpstreamErrorIfAny(c, lastError) {
 					return
 				}
@@ -6567,7 +6765,7 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 								fmt.Printf("[CustomCLI][INFO] 客户端中断，停止重试\n")
 								return
 							}
-							if err := prs.blacklistService.RecordFailureByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
+							if err := prs.recordProviderFailureIfNeeded(kind, providerRefFromProvider(provider), provider.Name, err); err != nil {
 								fmt.Printf("[CustomCLI][ERROR] 记录失败到黑名单失败: %v\n", err)
 							}
 							prs.releaseProviderSessionsIfBlacklisted(kind, providerRefFromProvider(provider), provider.Name)
@@ -6583,7 +6781,7 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 						}
 
 						// 记录失败次数（可能触发拉黑）
-						if err := prs.blacklistService.RecordFailureByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
+						if err := prs.recordProviderFailureIfNeeded(kind, providerRefFromProvider(provider), provider.Name, err); err != nil {
 							fmt.Printf("[CustomCLI][ERROR] 记录失败到黑名单失败: %v\n", err)
 						}
 						prs.releaseProviderSessionsIfBlacklisted(kind, providerRefFromProvider(provider), provider.Name)
@@ -6595,6 +6793,9 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 						}
 
 						// 等待后重试（除非是最后一次）
+						if isProviderConcurrencyLimitError(err) {
+							break
+						}
 						if retryCount < maxRetryPerProvider-1 {
 							fmt.Printf("[CustomCLI][INFO] ⏳ 等待 %d 秒后重试...\n", retryWaitSeconds)
 							time.Sleep(time.Duration(retryWaitSeconds) * time.Second)
@@ -6607,6 +6808,9 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 			fmt.Printf("[CustomCLI][ERROR] 💥 拉黑模式：所有 Provider 都失败或被拉黑（共尝试 %d 次）\n", totalAttempts)
 
 			// 按用户要求：仅在所有重试/降级都失败后，透传最后一次上游错误
+			if writeProviderConcurrencyLimitErrorIfAny(c, lastError) {
+				return
+			}
 			if writeLastUpstreamErrorIfAny(c, lastError) {
 				return
 			}
@@ -6653,7 +6857,7 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 					continue
 				}
 				fmt.Printf("[CustomCLI][INFO]   [会话隔离 %d/%d] Provider: %s | Model: %s\n", i+1, len(orderedProviders), provider.Name, plan.EffectiveModel)
-				sessionAttemptID = prs.beginSessionProviderRequest(kind, sessionHash, providerRefFromProvider(provider), provider.Name, providerSessionMaxSessions(provider), providerSessionTTLMinutes(provider), originalSessionBinding == nil, isProviderSessionOverflowAttempt(provider, sessionLoads))
+				sessionAttemptID = prs.beginSessionProviderRequest(kind, sessionHash, providerRefFromProvider(provider), provider.Name, clientUserAgent, providerSessionMaxSessions(provider), providerSessionTTLMinutes(provider), originalSessionBinding == nil, isProviderSessionOverflowAttempt(provider, sessionLoads))
 				if sessionAttemptID < 0 {
 					continue
 				}
@@ -6681,7 +6885,7 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 					if errors.Is(err, errClientAbort) {
 						return
 					}
-					if err := prs.blacklistService.RecordFailureByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
+					if err := prs.recordProviderFailureIfNeeded(kind, providerRefFromProvider(provider), provider.Name, err); err != nil {
 						fmt.Printf("[CustomCLI][ERROR] 记录失败到黑名单失败: %v\n", err)
 					}
 					if blacklisted, _ := prs.blacklistService.IsBlacklistedByID(kind, providerRefFromProvider(provider), provider.Name); blacklisted {
@@ -6695,7 +6899,7 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 					return
 				}
 				if !errors.Is(err, errClientAbort) {
-					if err := prs.blacklistService.RecordFailureByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
+					if err := prs.recordProviderFailureIfNeeded(kind, providerRefFromProvider(provider), provider.Name, err); err != nil {
 						fmt.Printf("[CustomCLI][ERROR] 记录失败到黑名单失败: %v\n", err)
 					}
 					if blacklisted, _ := prs.blacklistService.IsBlacklistedByID(kind, providerRefFromProvider(provider), provider.Name); blacklisted {
@@ -6705,6 +6909,9 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 				prs.restoreOrReleaseProviderSessionBinding(kind, sessionHash, originalSessionBinding, sessionAttemptID)
 			}
 			prs.restoreOrReleaseProviderSessionBinding(kind, sessionHash, originalSessionBinding, sessionAttemptID)
+			if writeProviderConcurrencyLimitErrorIfAny(c, lastError) {
+				return
+			}
 			if writeLastUpstreamErrorIfAny(c, lastError) {
 				return
 			}
@@ -6776,7 +6983,7 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 						fmt.Printf("[CustomCLI][INFO] 客户端中断，跳过失败计数: %s\n", provider.Name)
 						return
 					}
-					if err := prs.blacklistService.RecordFailureByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
+					if err := prs.recordProviderFailureIfNeeded(kind, providerRefFromProvider(provider), provider.Name, err); err != nil {
 						fmt.Printf("[CustomCLI][ERROR] 记录失败到黑名单失败: %v\n", err)
 					}
 					prs.releaseProviderSessionsIfBlacklisted(kind, providerRefFromProvider(provider), provider.Name)
@@ -6787,7 +6994,7 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 
 				if errors.Is(err, errClientAbort) {
 					fmt.Printf("[CustomCLI][INFO] 客户端中断，跳过失败计数: %s\n", provider.Name)
-				} else if err := prs.blacklistService.RecordFailureByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
+				} else if err := prs.recordProviderFailureIfNeeded(kind, providerRefFromProvider(provider), provider.Name, err); err != nil {
 					fmt.Printf("[CustomCLI][ERROR] 记录失败到黑名单失败: %v\n", err)
 				}
 				if !errors.Is(err, errClientAbort) {
@@ -6829,6 +7036,9 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 		}
 
 		// 所有 provider 都失败：优先透传最后一次上游错误，否则返回 502 聚合信息
+		if writeProviderConcurrencyLimitErrorIfAny(c, lastError) {
+			return
+		}
 		if writeLastUpstreamErrorIfAny(c, lastError) {
 			return
 		}

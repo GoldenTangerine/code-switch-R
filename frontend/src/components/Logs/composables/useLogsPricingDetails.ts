@@ -306,6 +306,7 @@ export function useLogsPricingDetails(options: UseLogsPricingDetailsOptions) {
     buildVerifyInfoTooltipDetailData({
       requestedModel: item.requested_model,
       responseModel: item.response_model,
+      userAgent: item.user_agent,
     }, buildInfoTooltipLabels())
 
   const markModelPricingStale = () => {

@@ -1220,6 +1220,12 @@
 }
 
 .provider-session-pill {
+  box-sizing: border-box;
+  height: 20px;
+  min-height: 20px;
+  padding: 0 8px;
+  appearance: none;
+  font-family: inherit;
   cursor: pointer;
   color: #0f766e;
   background: rgba(20, 184, 166, 0.1);
