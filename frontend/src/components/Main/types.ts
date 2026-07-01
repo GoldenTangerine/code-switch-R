@@ -150,6 +150,7 @@ export type ProviderCardViewModel = {
   connectivityTooltip: string
   stats: ProviderStatDisplay
   concurrencyStatus?: ProviderConcurrencyStatusView
+  concurrencyLimitEnabled: boolean
   quotaDisplay: ProviderQuotaDisplayItem[]
   quotaRefreshing: boolean
   formattedOfficialSite: string

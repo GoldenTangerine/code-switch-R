@@ -155,7 +155,10 @@
           <span
             v-if="concurrencyStatusBadge"
             class="provider-state-pill provider-concurrency-pill"
-            :class="{ 'provider-concurrency-pill--overflow': concurrencyStatusBadge.overflow }"
+            :class="{
+              'provider-concurrency-pill--limited': concurrencyStatusBadge.limited,
+              'provider-concurrency-pill--overflow': concurrencyStatusBadge.overflow,
+            }"
             :title="concurrencyStatusBadge.title"
           >
             {{ concurrencyStatusBadge.label }}
@@ -1164,6 +1167,7 @@ const concurrencyStatusBadge = computed(() => {
   const activeRequests = status.activeRequests || 0
   const limit = status.limit || 0
   const maxLabel = limit > 0 ? `${limit}` : '∞'
+  const limited = props.viewModel.concurrencyLimitEnabled && limit > 0
   return {
     label: t('components.main.concurrency.badge', {
       current: activeRequests,
@@ -1173,7 +1177,8 @@ const concurrencyStatusBadge = computed(() => {
       current: activeRequests,
       max: maxLabel,
     }),
-    overflow: limit > 0 && activeRequests >= limit,
+    limited,
+    overflow: limited && activeRequests >= limit,
   }
 })
 

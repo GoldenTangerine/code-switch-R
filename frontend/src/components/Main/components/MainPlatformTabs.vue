@@ -90,6 +90,33 @@
         </div>
       </div>
 
+      <div v-if="showProxyToggle" class="relay-toggle relay-toggle--concurrency" :aria-label="t('components.main.concurrencyLimitToggle.label')">
+        <div class="relay-switch">
+          <span class="relay-toggle-caption">
+            {{ t('components.main.concurrencyLimitToggle.label') }}
+          </span>
+          <button
+            type="button"
+            class="relay-toggle-switch concurrency-limit-toggle"
+            :class="{ 'is-active': activeProviderConcurrencyLimitState, 'is-busy': providerConcurrencyLimitBusy }"
+            role="switch"
+            :aria-checked="activeProviderConcurrencyLimitState"
+            :aria-label="`${t('components.main.concurrencyLimitToggle.label')} · ${activeProviderConcurrencyLimitState ? t('components.main.concurrencyLimitToggle.statusOn') : t('components.main.concurrencyLimitToggle.statusOff')}`"
+            :disabled="providerConcurrencyLimitBusy"
+            @click="$emit('toggle-provider-concurrency-limit')"
+          >
+            <span class="relay-toggle-switch__thumb" aria-hidden="true">
+              <span class="relay-toggle-switch__dot"></span>
+            </span>
+            <span class="sr-only">
+              {{ activeProviderConcurrencyLimitState ? t('components.main.concurrencyLimitToggle.statusOn') : t('components.main.concurrencyLimitToggle.statusOff') }}
+            </span>
+          </button>
+          <span class="relay-tooltip-content">
+            {{ activeProviderConcurrencyLimitState ? t('components.main.concurrencyLimitToggle.tooltipOn') : t('components.main.concurrencyLimitToggle.tooltipOff') }}
+          </span>
+        </div>
+      </div>
 
       <button
         class="ghost-icon"
@@ -148,6 +175,8 @@ const props = withDefaults(defineProps<{
   showProxyToggle?: boolean
   activeProxyState: boolean
   activeProxyBusy: boolean
+  activeProviderConcurrencyLimitState: boolean
+  providerConcurrencyLimitBusy: boolean
   refreshing: boolean
   tabStatuses?: Partial<Record<ProviderTab, MainTabStatus>>
 }>(), {
@@ -158,6 +187,7 @@ const props = withDefaults(defineProps<{
 defineEmits<{
   change: [index: number]
   'toggle-proxy': []
+  'toggle-provider-concurrency-limit': []
   create: []
   refresh: []
 }>()
@@ -434,6 +464,18 @@ onBeforeUnmount(() => {
   min-width: max-content;
   margin-left: auto;
   justify-self: auto;
+}
+
+.main-platform-tabs .relay-toggle--concurrency .relay-switch {
+  gap: 6px;
+}
+
+.relay-toggle-caption {
+  color: var(--mac-text-secondary);
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 @media (max-width: 700px) {

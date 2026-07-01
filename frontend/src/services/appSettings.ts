@@ -73,6 +73,7 @@ export type AppSettings = {
   auto_connectivity_test: boolean
   enable_switch_notify: boolean // 供应商切换通知开关
   enable_round_robin: boolean   // 同 Level 轮询负载均衡开关
+  provider_concurrency_limits: Record<string, boolean>
   capture_request_log_payload: boolean
   sanitize_request_log_payload: boolean
 }
@@ -120,6 +121,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   auto_connectivity_test: false,
   enable_switch_notify: true,  // 默认开启
   enable_round_robin: false,   // 默认关闭轮询
+  provider_concurrency_limits: {},
   capture_request_log_payload: false,
   sanitize_request_log_payload: true,
 }
@@ -129,6 +131,7 @@ type AppSettingsResponse = Partial<AppSettings> & {
   budget_quota_settings?: unknown
   budget_quota_used_adjustments_codex?: unknown
   budget_quota_settings_codex?: unknown
+  provider_concurrency_limits?: unknown
 }
 
 type SerializedBudgetQuotaAdjustments = {
@@ -137,6 +140,17 @@ type SerializedBudgetQuotaAdjustments = {
   weekly: number
   monthly: number
   total: number
+}
+
+const normalizeBooleanMap = (value: unknown): Record<string, boolean> => {
+  if (!value || typeof value !== 'object') return {}
+  const normalized: Record<string, boolean> = {}
+  Object.entries(value as Record<string, unknown>).forEach(([key, enabled]) => {
+    const normalizedKey = key.trim()
+    if (!normalizedKey) return
+    normalized[normalizedKey] = enabled === true
+  })
+  return normalized
 }
 
 const normalizeAppSettingsResponse = (value: unknown): AppSettings => {
@@ -198,6 +212,7 @@ const normalizeAppSettingsResponse = (value: unknown): AppSettings => {
       refreshWeekday: data?.budget_refresh_day_codex,
       refreshMonthDay: data?.budget_refresh_month_day_codex,
     }),
+    provider_concurrency_limits: normalizeBooleanMap(data?.provider_concurrency_limits),
   }
 }
 
@@ -241,6 +256,7 @@ const serializeAppSettings = (settings: AppSettings) => {
     budget_refresh_day_codex: budgetLegacyCodex.refreshWeekday,
     budget_refresh_month_day_codex: budgetLegacyCodex.refreshMonthDay,
     home_provider_tabs: normalizeHomeProviderTabs(settings.home_provider_tabs),
+    provider_concurrency_limits: normalizeBooleanMap(settings.provider_concurrency_limits),
     budget_quota_used_adjustments_codex: serializeBudgetQuotaAdjustments(settings.budget_quota_used_adjustments_codex),
     budget_quota_settings_codex: serializeBudgetQuotaSettings(settings.budget_quota_settings_codex),
   }

@@ -1266,6 +1266,7 @@ const persistAppSettingsNow = async () => {
       auto_connectivity_test: autoConnectivityTestEnabled.value,
       enable_switch_notify: switchNotifyEnabled.value,
       enable_round_robin: roundRobinEnabled.value,
+      provider_concurrency_limits: latestSettings?.provider_concurrency_limits ?? {},
       capture_request_log_payload: captureRequestLogPayloadEnabled.value,
       sanitize_request_log_payload: sanitizeRequestLogPayloadEnabled.value,
     }

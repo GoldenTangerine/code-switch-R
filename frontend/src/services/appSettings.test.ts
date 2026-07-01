@@ -50,6 +50,23 @@ describe('appSettings', () => {
     expect(settings.home_provider_tabs).toEqual(['opencode', 'others'])
   })
 
+  it('normalizes provider concurrency limit switches', async () => {
+    vi.mocked(Call.ByName).mockResolvedValueOnce({
+      provider_concurrency_limits: {
+        claude: true,
+        codex: false,
+        '  ': true,
+      },
+    })
+
+    const settings = await fetchAppSettings()
+
+    expect(settings.provider_concurrency_limits).toEqual({
+      claude: true,
+      codex: false,
+    })
+  })
+
   it('uses the provided fallback for invalid granularity values', () => {
     expect(normalizeHeatmapGranularity('weird-value')).toBe('daily')
     expect(normalizeHeatmapGranularity('weird-value', 'hourly')).toBe('hourly')

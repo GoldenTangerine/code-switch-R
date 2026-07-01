@@ -400,6 +400,13 @@
         "statusOn": "Managed",
         "statusOff": "Not managed"
       },
+      "concurrencyLimitToggle": {
+        "label": "Concurrency limit",
+        "statusOn": "Enabled",
+        "statusOff": "Disabled",
+        "tooltipOn": "Limiting by each provider cap",
+        "tooltipOff": "Off · live concurrency only"
+      },
       "customCli": {
         "selectToolFirst": "Please select a CLI tool first",
         "noTools": "No custom CLI tools yet",

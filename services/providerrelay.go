@@ -697,7 +697,18 @@ func providerConcurrencyStateKey(platform string, providerID string) string {
 	return strings.TrimSpace(platform) + "\x00" + strings.TrimSpace(providerID)
 }
 
-func (prs *ProviderRelayService) acquireProviderConcurrencySlot(platform string, providerID string, limit int) (func(), bool) {
+func (prs *ProviderRelayService) isProviderConcurrencyLimitEnabled(platform string) bool {
+	if prs == nil || prs.appSettings == nil {
+		return false
+	}
+	settings, err := prs.appSettings.GetAppSettings()
+	if err != nil || settings.ProviderConcurrencyLimits == nil {
+		return false
+	}
+	return settings.ProviderConcurrencyLimits[strings.TrimSpace(platform)]
+}
+
+func (prs *ProviderRelayService) acquireProviderConcurrencySlot(platform string, providerID string, limit int, enforceLimit bool) (func(), bool) {
 	if prs == nil || strings.TrimSpace(providerID) == "" {
 		return func() {}, true
 	}
@@ -707,7 +718,7 @@ func (prs *ProviderRelayService) acquireProviderConcurrencySlot(platform string,
 	if prs.providerConcurrency == nil {
 		prs.providerConcurrency = map[string]int{}
 	}
-	if limit > 0 && prs.providerConcurrency[key] >= limit {
+	if enforceLimit && limit > 0 && prs.providerConcurrency[key] >= limit {
 		prs.providerConcurrencyMu.Unlock()
 		return nil, false
 	}
@@ -1988,6 +1999,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 		// 获取拉黑功能开关状态
 		blacklistEnabled := prs.blacklistService.ShouldUseFixedMode()
 		roundRobinEnabled := prs.isRoundRobinEnabled()
+		providerConcurrencyLimitEnabled := prs.isProviderConcurrencyLimitEnabled(kind)
 		sessionHash := prs.deriveRelaySessionHash(kind, bodyBytes)
 		originalSessionBinding := prs.getSessionBindingSnapshot(kind, sessionHash)
 		if originalSessionBinding != nil && !prs.isProviderSessionBindingUsable(kind, active, originalSessionBinding) {
@@ -2045,7 +2057,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 							continue
 						}
 						startTime := time.Now()
-						ok, err := prs.forwardRequestWithPlan(c, kind, provider, plan.EffectiveEndpoint, query, clientHeaders, plan.BodyBytes, isStream, plan.EffectiveModel, requestedModel, plan)
+						ok, err := prs.forwardRequestWithPlan(c, kind, provider, plan.EffectiveEndpoint, query, clientHeaders, plan.BodyBytes, isStream, plan.EffectiveModel, requestedModel, plan, providerConcurrencyLimitEnabled)
 						duration := time.Since(startTime)
 						prs.finishSessionProviderRequest(kind, sessionHash)
 
@@ -2157,7 +2169,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 							provider.Name, level, retryCount+1, maxRetryPerProvider, plan.EffectiveModel)
 
 						startTime := time.Now()
-						ok, err := prs.forwardRequestWithPlan(c, kind, provider, plan.EffectiveEndpoint, query, clientHeaders, plan.BodyBytes, isStream, plan.EffectiveModel, requestedModel, plan)
+						ok, err := prs.forwardRequestWithPlan(c, kind, provider, plan.EffectiveEndpoint, query, clientHeaders, plan.BodyBytes, isStream, plan.EffectiveModel, requestedModel, plan, providerConcurrencyLimitEnabled)
 						duration := time.Since(startTime)
 
 						if ok {
@@ -2295,7 +2307,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 				}
 
 				startTime := time.Now()
-				ok, err := prs.forwardRequestWithPlan(c, kind, provider, plan.EffectiveEndpoint, query, clientHeaders, plan.BodyBytes, isStream, plan.EffectiveModel, requestedModel, plan)
+				ok, err := prs.forwardRequestWithPlan(c, kind, provider, plan.EffectiveEndpoint, query, clientHeaders, plan.BodyBytes, isStream, plan.EffectiveModel, requestedModel, plan, providerConcurrencyLimitEnabled)
 				duration := time.Since(startTime)
 				prs.finishSessionProviderRequest(kind, sessionHash)
 
@@ -2396,7 +2408,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 
 				// 尝试发送请求
 				startTime := time.Now()
-				ok, err := prs.forwardRequestWithPlan(c, kind, provider, plan.EffectiveEndpoint, query, clientHeaders, plan.BodyBytes, isStream, plan.EffectiveModel, requestedModel, plan)
+				ok, err := prs.forwardRequestWithPlan(c, kind, provider, plan.EffectiveEndpoint, query, clientHeaders, plan.BodyBytes, isStream, plan.EffectiveModel, requestedModel, plan, providerConcurrencyLimitEnabled)
 				duration := time.Since(startTime)
 
 				if ok {
@@ -2525,7 +2537,7 @@ func (prs *ProviderRelayService) forwardRequest(
 		BodyBytes:         bodyBytes,
 		EffectiveModel:    model,
 		EffectiveEndpoint: endpoint,
-	})
+	}, prs.isProviderConcurrencyLimitEnabled(kind))
 }
 
 func (prs *ProviderRelayService) forwardRequestWithPlan(
@@ -2540,6 +2552,7 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 	model string,
 	requestedModel string,
 	plan providerRequestPlan,
+	providerConcurrencyLimitEnabled bool,
 ) (bool, error) {
 	if kind == "claude" &&
 		resolveClaudeAPIFormat(provider) == claudeAPIFormatOpenAIResponse &&
@@ -2557,7 +2570,7 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 	targetURL := joinURL(provider.APIURL, endpoint)
 	headers := cloneMap(clientHeaders)
 	requestUserAgent := getHeaderValueCaseInsensitive(headers, "User-Agent")
-	releaseProviderSlot, acquiredProviderSlot := prs.acquireProviderConcurrencySlot(kind, providerRefFromProvider(provider), providerConcurrencyLimit(provider))
+	releaseProviderSlot, acquiredProviderSlot := prs.acquireProviderConcurrencySlot(kind, providerRefFromProvider(provider), providerConcurrencyLimit(provider), providerConcurrencyLimitEnabled)
 	if !acquiredProviderSlot {
 		return false, errProviderConcurrencyLimit
 	}
@@ -5902,6 +5915,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 		// 获取拉黑功能开关状态
 		blacklistEnabled := prs.blacklistService.ShouldUseFixedMode()
 		roundRobinEnabled := prs.isRoundRobinEnabled()
+		providerConcurrencyLimitEnabled := prs.isProviderConcurrencyLimitEnabled("gemini")
 		sessionHash := prs.deriveRelaySessionHash("gemini", bodyBytes)
 		originalSessionBinding := prs.getSessionBindingSnapshot("gemini", sessionHash)
 		if originalSessionBinding != nil && !prs.isGeminiProviderSessionBindingUsable(activeProviders, originalSessionBinding) {
@@ -5963,7 +5977,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 						if sessionAttemptID < 0 {
 							continue
 						}
-						ok, err, responseWritten := prs.forwardGeminiRequest(c, &provider, endpoint, currentBodyBytes, isStream, requestLog)
+						ok, err, responseWritten := prs.forwardGeminiRequest(c, &provider, endpoint, currentBodyBytes, isStream, requestLog, providerConcurrencyLimitEnabled)
 						prs.finishSessionProviderRequest("gemini", sessionHash)
 						if ok {
 							prs.confirmSessionProviderBinding("gemini", sessionHash, sessionAttemptID)
@@ -6064,7 +6078,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 						fmt.Printf("[Gemini] [拉黑模式] Provider: %s (Level %d) | 重试 %d/%d\n",
 							provider.Name, level, retryCount+1, maxRetryPerProvider)
 
-						ok, err, responseWritten := prs.forwardGeminiRequest(c, &provider, endpoint, currentBodyBytes, isStream, requestLog)
+						ok, err, responseWritten := prs.forwardGeminiRequest(c, &provider, endpoint, currentBodyBytes, isStream, requestLog, providerConcurrencyLimitEnabled)
 						if ok {
 							fmt.Printf("[Gemini] ✓ 成功: %s | 重试 %d 次\n", provider.Name, retryCount+1)
 							_ = prs.blacklistService.RecordSuccessByID("gemini", providerRefFromGeminiProvider(provider), provider.Name)
@@ -6186,7 +6200,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 				if sessionAttemptID < 0 {
 					continue
 				}
-				ok, err, responseWritten := prs.forwardGeminiRequest(c, &provider, endpoint, currentBodyBytes, isStream, requestLog)
+				ok, err, responseWritten := prs.forwardGeminiRequest(c, &provider, endpoint, currentBodyBytes, isStream, requestLog, providerConcurrencyLimitEnabled)
 				prs.finishSessionProviderRequest("gemini", sessionHash)
 				if ok {
 					prs.confirmSessionProviderBinding("gemini", sessionHash, sessionAttemptID)
@@ -6259,7 +6273,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 				}
 				requestLog.ReasoningEffort = extractRequestLogReasoningEffort(currentBodyBytes, requestLog.RequestedModel)
 
-				ok, err, responseWritten := prs.forwardGeminiRequest(c, &provider, endpoint, currentBodyBytes, isStream, requestLog)
+				ok, err, responseWritten := prs.forwardGeminiRequest(c, &provider, endpoint, currentBodyBytes, isStream, requestLog, providerConcurrencyLimitEnabled)
 				if ok {
 					_ = prs.blacklistService.RecordSuccessByID("gemini", providerRefFromGeminiProvider(provider), provider.Name)
 					// 记录最后使用的供应商
@@ -6350,12 +6364,13 @@ func (prs *ProviderRelayService) forwardGeminiRequest(
 	bodyBytes []byte,
 	isStream bool,
 	requestLog *ReqeustLog,
+	providerConcurrencyLimitEnabled bool,
 ) (success bool, err error, responseWritten bool) {
 	providerStart := time.Now()
 
 	// 构建目标 URL
 	targetURL := strings.TrimSuffix(provider.BaseURL, "/") + endpoint
-	releaseProviderSlot, acquiredProviderSlot := prs.acquireProviderConcurrencySlot("gemini", providerRefFromGeminiProvider(*provider), geminiProviderConcurrencyLimit(*provider))
+	releaseProviderSlot, acquiredProviderSlot := prs.acquireProviderConcurrencySlot("gemini", providerRefFromGeminiProvider(*provider), geminiProviderConcurrencyLimit(*provider), providerConcurrencyLimitEnabled)
 	if !acquiredProviderSlot {
 		return false, errProviderConcurrencyLimit, false
 	}
@@ -6604,6 +6619,7 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 		// 获取拉黑功能开关状态
 		blacklistEnabled := prs.blacklistService.ShouldUseFixedMode()
 		roundRobinEnabled := prs.isRoundRobinEnabled()
+		providerConcurrencyLimitEnabled := prs.isProviderConcurrencyLimitEnabled(kind)
 		sessionHash := prs.deriveRelaySessionHash(kind, bodyBytes)
 		originalSessionBinding := prs.getSessionBindingSnapshot(kind, sessionHash)
 		if originalSessionBinding != nil && !prs.isProviderSessionBindingUsable(kind, active, originalSessionBinding) {
@@ -6659,7 +6675,7 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 							continue
 						}
 						startTime := time.Now()
-						ok, err := prs.forwardRequestWithPlan(c, kind, provider, plan.EffectiveEndpoint, query, clientHeaders, plan.BodyBytes, isStream, plan.EffectiveModel, requestedModel, plan)
+						ok, err := prs.forwardRequestWithPlan(c, kind, provider, plan.EffectiveEndpoint, query, clientHeaders, plan.BodyBytes, isStream, plan.EffectiveModel, requestedModel, plan, providerConcurrencyLimitEnabled)
 						duration := time.Since(startTime)
 						prs.finishSessionProviderRequest(kind, sessionHash)
 						if ok {
@@ -6766,7 +6782,7 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 							provider.Name, level, retryCount+1, maxRetryPerProvider, plan.EffectiveModel)
 
 						startTime := time.Now()
-						ok, err := prs.forwardRequestWithPlan(c, kind, provider, plan.EffectiveEndpoint, query, clientHeaders, plan.BodyBytes, isStream, plan.EffectiveModel, requestedModel, plan)
+						ok, err := prs.forwardRequestWithPlan(c, kind, provider, plan.EffectiveEndpoint, query, clientHeaders, plan.BodyBytes, isStream, plan.EffectiveModel, requestedModel, plan, providerConcurrencyLimitEnabled)
 						duration := time.Since(startTime)
 
 						if ok {
@@ -6891,7 +6907,7 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 					continue
 				}
 				startTime := time.Now()
-				ok, err := prs.forwardRequestWithPlan(c, kind, provider, plan.EffectiveEndpoint, query, clientHeaders, plan.BodyBytes, isStream, plan.EffectiveModel, requestedModel, plan)
+				ok, err := prs.forwardRequestWithPlan(c, kind, provider, plan.EffectiveEndpoint, query, clientHeaders, plan.BodyBytes, isStream, plan.EffectiveModel, requestedModel, plan, providerConcurrencyLimitEnabled)
 				duration := time.Since(startTime)
 				prs.finishSessionProviderRequest(kind, sessionHash)
 				if ok {
@@ -6985,7 +7001,7 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 				// 获取有效的端点（用户配置优先）
 
 				startTime := time.Now()
-				ok, err := prs.forwardRequestWithPlan(c, kind, provider, plan.EffectiveEndpoint, query, clientHeaders, plan.BodyBytes, isStream, plan.EffectiveModel, requestedModel, plan)
+				ok, err := prs.forwardRequestWithPlan(c, kind, provider, plan.EffectiveEndpoint, query, clientHeaders, plan.BodyBytes, isStream, plan.EffectiveModel, requestedModel, plan, providerConcurrencyLimitEnabled)
 				duration := time.Since(startTime)
 
 				if ok {

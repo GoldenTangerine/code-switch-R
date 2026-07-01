@@ -38,10 +38,13 @@
           :show-proxy-toggle="shouldShowProviderProxyToggle(activeTab)"
           :active-proxy-state="activeProxyState"
           :active-proxy-busy="activeProxyBusy"
+          :active-provider-concurrency-limit-state="activeProviderConcurrencyLimitState"
+          :provider-concurrency-limit-busy="providerConcurrencyLimitBusy"
           :refreshing="refreshing"
           :tab-statuses="tabStatuses"
           @change="onTabChange"
           @toggle-proxy="onProxyToggle"
+          @toggle-provider-concurrency-limit="onProviderConcurrencyLimitToggle"
           @create="openCreateModal"
           @refresh="refreshAllData"
         />
@@ -527,7 +530,11 @@ const {
   handleImportClick,
   activeProxyState,
   activeProxyBusy,
+  providerConcurrencyLimitStates,
+  activeProviderConcurrencyLimitState,
+  providerConcurrencyLimitBusy,
   onProxyToggle,
+  onProviderConcurrencyLimitToggle,
   refreshing,
   refreshAllData,
   currentProxyLabel,
@@ -668,10 +675,10 @@ const defaultHostedProviderRef = computed(() => {
   return resolveDefaultHostedProviderRefForTab(activeTab.value, true)
 })
 
-function hasConcurrencyLimitForHostedProvider(tab: ProviderTab, hostedProviderRef: string | null): boolean {
-  if (!hostedProviderRef) return false
-  const hostedCard = (cards[tab] ?? []).find((card) => cardProviderRef(card) === hostedProviderRef)
-  return Boolean(hostedCard && (hostedCard.providerConcurrencyLimit || 0) > 0)
+function resolveProviderConcurrencyLimitKey(tab: ProviderTab): string {
+  return tab === 'others' && selectedToolId.value
+    ? `custom:${selectedToolId.value}`
+    : tab
 }
 
 const tabStatuses = computed<Partial<Record<ProviderTab, MainTabStatus>>>(() => {
@@ -680,12 +687,12 @@ const tabStatuses = computed<Partial<Record<ProviderTab, MainTabStatus>>>(() => 
   tabs.value.forEach((tab) => {
     const proxySupported = shouldShowProviderProxyToggle(tab.id)
     const proxyEnabled = proxySupported && (tab.id === activeTab.value ? activeProxyState.value : pageShell.proxyStates[tab.id])
-    const hostedProviderRef = resolveHostedProviderRefForTab(tab.id, proxyEnabled)
+    const concurrencyKey = resolveProviderConcurrencyLimitKey(tab.id)
 
     result[tab.id] = {
       proxyEnabled,
       proxySupported,
-      concurrencyLimited: hasConcurrencyLimitForHostedProvider(tab.id, hostedProviderRef),
+      concurrencyLimited: providerConcurrencyLimitStates[concurrencyKey] === true,
     }
   })
 
@@ -746,6 +753,7 @@ const activeCardViewModels = computed<ProviderCardViewModel[]>(() =>
     connectivityTooltip: getConnectivityTooltip(card.id),
     stats: providerStatDisplay(card),
     concurrencyStatus: getConcurrencyStatusForCard(card),
+    concurrencyLimitEnabled: activeProviderConcurrencyLimitState.value,
     quotaDisplay: getQuotaDisplay(card),
     quotaRefreshing: isQuotaRefreshing(card),
     formattedOfficialSite: formatOfficialSite(card.officialSite),

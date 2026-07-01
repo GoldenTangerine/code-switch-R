@@ -30,6 +30,55 @@ func TestNormalizeHomeProviderTabsFiltersInvalidAndDuplicateValues(t *testing.T)
 	}
 }
 
+func TestNormalizeProviderConcurrencyLimitsFiltersEmptyKeys(t *testing.T) {
+	settings := AppSettings{
+		ProviderConcurrencyLimits: map[string]bool{
+			" claude ":      true,
+			"custom:tool-a": true,
+			" ":             true,
+			"":              true,
+			"codex":         false,
+		},
+	}
+
+	normalizeProviderConcurrencyLimits(&settings)
+
+	if settings.ProviderConcurrencyLimits == nil {
+		t.Fatalf("ProviderConcurrencyLimits should be initialized")
+	}
+	if len(settings.ProviderConcurrencyLimits) != 3 {
+		t.Fatalf("len = %d, want 3: %+v", len(settings.ProviderConcurrencyLimits), settings.ProviderConcurrencyLimits)
+	}
+	if !settings.ProviderConcurrencyLimits["claude"] {
+		t.Fatalf("trimmed claude key should be enabled")
+	}
+	if !settings.ProviderConcurrencyLimits["custom:tool-a"] {
+		t.Fatalf("custom tool key should be preserved")
+	}
+	if settings.ProviderConcurrencyLimits["codex"] {
+		t.Fatalf("false switch state should be preserved")
+	}
+	if _, ok := settings.ProviderConcurrencyLimits[" "]; ok {
+		t.Fatalf("blank key should be removed")
+	}
+	if _, ok := settings.ProviderConcurrencyLimits[""]; ok {
+		t.Fatalf("empty key should be removed")
+	}
+}
+
+func TestNormalizeProviderConcurrencyLimitsInitializesNilMap(t *testing.T) {
+	settings := AppSettings{}
+
+	normalizeProviderConcurrencyLimits(&settings)
+
+	if settings.ProviderConcurrencyLimits == nil {
+		t.Fatalf("ProviderConcurrencyLimits should not be nil")
+	}
+	if len(settings.ProviderConcurrencyLimits) != 0 {
+		t.Fatalf("len = %d, want 0", len(settings.ProviderConcurrencyLimits))
+	}
+}
+
 func TestNormalizeHeatmapDisplaySettingsIntensityMetricDefaultsToRequests(t *testing.T) {
 	settings := AppSettings{
 		HeatmapDailyScaleFactor:   defaultHeatmapDailyScale,

@@ -157,6 +157,8 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
     opencode: false,
     others: false,
   })
+  const providerConcurrencyLimitStates = reactive<Record<string, boolean>>({})
+  const providerConcurrencyLimitBusy = ref(false)
   const activeProxyState = computed(() => (
     activeTab.value === 'others'
       ? selectedToolId.value
@@ -165,6 +167,14 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
       : proxyStates[activeTab.value]
   ))
   const activeProxyBusy = computed(() => proxyBusy[activeTab.value])
+  const resolveProviderConcurrencyLimitKey = (tab: ProviderTab = activeTab.value) => (
+    tab === 'others' && selectedToolId.value
+      ? `custom:${selectedToolId.value}`
+      : tab
+  )
+  const activeProviderConcurrencyLimitState = computed(() => (
+    providerConcurrencyLimitStates[resolveProviderConcurrencyLimitKey()] === true
+  ))
 
   const syncOthersProxyState = (enabled: boolean) => {
     proxyStates.others = enabled
@@ -229,6 +239,12 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
       showHomeTitle.value = data?.show_home_title ?? true
       visibleProviderTabs.value = normalizeHomeProviderTabs(data?.home_provider_tabs) as ProviderTab[]
       enableRoundRobin.value = data?.enable_round_robin ?? false
+      Object.keys(providerConcurrencyLimitStates).forEach((key) => {
+        delete providerConcurrencyLimitStates[key]
+      })
+      Object.entries(data?.provider_concurrency_limits ?? {}).forEach(([key, enabled]) => {
+        providerConcurrencyLimitStates[key] = enabled === true
+      })
     } catch (error) {
       console.error('failed to load app settings', error)
       showHeatmap.value = true
@@ -241,6 +257,9 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
       showHomeTitle.value = true
       visibleProviderTabs.value = normalizeHomeProviderTabs(null) as ProviderTab[]
       enableRoundRobin.value = false
+      Object.keys(providerConcurrencyLimitStates).forEach((key) => {
+        delete providerConcurrencyLimitStates[key]
+      })
       showToast(t('components.main.errors.loadAppSettingsFailed'), 'warning')
     }
   }
@@ -366,6 +385,37 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
       console.error(`Failed to toggle proxy for ${tab}`, error)
     } finally {
       proxyBusy[tab] = false
+    }
+  }
+
+  const onProviderConcurrencyLimitToggle = async () => {
+    const tab = activeTab.value
+    if (tab === 'opencode' || providerConcurrencyLimitBusy.value) return
+    if (tab === 'others' && !selectedToolId.value) {
+      showToast(t('components.main.customCli.selectToolFirst'), 'error')
+      return
+    }
+
+    providerConcurrencyLimitBusy.value = true
+    const key = resolveProviderConcurrencyLimitKey(tab)
+    const nextState = !providerConcurrencyLimitStates[key]
+    try {
+      const settings = await fetchAppSettings()
+      const nextLimits = {
+        ...(settings.provider_concurrency_limits ?? {}),
+        [key]: nextState,
+      }
+      await saveAppSettings({
+        ...settings,
+        provider_concurrency_limits: nextLimits,
+      })
+      providerConcurrencyLimitStates[key] = nextState
+      window.dispatchEvent(new CustomEvent('app-settings-updated'))
+    } catch (error) {
+      console.error('Failed to toggle provider concurrency limit', error)
+      showToast(t('components.main.errors.saveSettingsFailed'), 'error')
+    } finally {
+      providerConcurrencyLimitBusy.value = false
     }
   }
 
@@ -559,8 +609,12 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
     handleImportClick,
     activeProxyState,
     activeProxyBusy,
+    providerConcurrencyLimitStates,
+    activeProviderConcurrencyLimitState,
+    providerConcurrencyLimitBusy,
     syncOthersProxyState,
     onProxyToggle,
+    onProviderConcurrencyLimitToggle,
     refreshing,
     refreshAllData,
     currentProxyLabel,

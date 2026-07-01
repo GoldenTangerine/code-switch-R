@@ -401,6 +401,13 @@
         "statusOn": "已托管",
         "statusOff": "未托管"
       },
+      "concurrencyLimitToggle": {
+        "label": "并发限制",
+        "statusOn": "已开启",
+        "statusOff": "未开启",
+        "tooltipOn": "已按供应商并发上限限流",
+        "tooltipOff": "未开启，仅显示实时并发"
+      },
       "customCli": {
         "selectToolFirst": "请先选择一个 CLI 工具",
         "noTools": "暂无自定义 CLI 工具",

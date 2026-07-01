@@ -1211,21 +1211,21 @@ func TestProviderConcurrencySlotLimitAndRelease(t *testing.T) {
 	relay := NewProviderRelayService(nil, nil, nil, nil, nil, nil, "")
 	providerID := "provider-a"
 
-	release, ok := relay.acquireProviderConcurrencySlot("claude", providerID, 1)
+	release, ok := relay.acquireProviderConcurrencySlot("claude", providerID, 1, true)
 	if !ok {
 		t.Fatalf("first provider concurrency slot should be acquired")
 	}
 	if got := relay.providerConcurrencyCount("claude", providerID); got != 1 {
 		t.Fatalf("active concurrency = %d, want 1", got)
 	}
-	if _, ok := relay.acquireProviderConcurrencySlot("claude", providerID, 1); ok {
+	if _, ok := relay.acquireProviderConcurrencySlot("claude", providerID, 1, true); ok {
 		t.Fatalf("second provider concurrency slot should be rejected")
 	}
 	release()
 	if got := relay.providerConcurrencyCount("claude", providerID); got != 0 {
 		t.Fatalf("active concurrency after release = %d, want 0", got)
 	}
-	if releaseAgain, ok := relay.acquireProviderConcurrencySlot("claude", providerID, 1); !ok {
+	if releaseAgain, ok := relay.acquireProviderConcurrencySlot("claude", providerID, 1, true); !ok {
 		t.Fatalf("provider concurrency slot should be reusable after release")
 	} else {
 		releaseAgain()
@@ -1238,7 +1238,7 @@ func TestProviderConcurrencySlotUnlimitedWhenLimitEmpty(t *testing.T) {
 	releases := make([]func(), 0, 3)
 
 	for i := 0; i < 3; i++ {
-		release, ok := relay.acquireProviderConcurrencySlot("claude", providerID, 0)
+		release, ok := relay.acquireProviderConcurrencySlot("claude", providerID, 0, true)
 		if !ok {
 			t.Fatalf("unlimited provider concurrency slot should be acquired")
 		}
@@ -1252,6 +1252,29 @@ func TestProviderConcurrencySlotUnlimitedWhenLimitEmpty(t *testing.T) {
 	}
 	if got := relay.providerConcurrencyCount("claude", providerID); got != 0 {
 		t.Fatalf("unlimited slot should be released, got %d", got)
+	}
+}
+
+func TestProviderConcurrencySlotTracksWithoutEnforcingLimit(t *testing.T) {
+	relay := NewProviderRelayService(nil, nil, nil, nil, nil, nil, "")
+	providerID := "provider-a"
+	releases := make([]func(), 0, 3)
+
+	for i := 0; i < 3; i++ {
+		release, ok := relay.acquireProviderConcurrencySlot("claude", providerID, 1, false)
+		if !ok {
+			t.Fatalf("provider concurrency slot should be acquired when limit is disabled")
+		}
+		releases = append(releases, release)
+	}
+	if got := relay.providerConcurrencyCount("claude", providerID); got != 3 {
+		t.Fatalf("disabled limit should still track active concurrency, got %d", got)
+	}
+	for _, release := range releases {
+		release()
+	}
+	if got := relay.providerConcurrencyCount("claude", providerID); got != 0 {
+		t.Fatalf("disabled limit slots should be released, got %d", got)
 	}
 }
 
