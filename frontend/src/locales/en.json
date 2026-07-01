@@ -381,7 +381,14 @@
       "tabs": {
         "ariaLabel": "AI vendor switcher",
         "addCard": "Add vendor card",
-        "refresh": "Refresh data"
+        "refresh": "Refresh data",
+        "status": {
+          "proxyOn": "Proxy hosting on",
+          "proxyOff": "Proxy hosting off",
+          "proxyUnsupported": "Proxy hosting unavailable",
+          "concurrencyOn": "Concurrency limit on",
+          "concurrencyOff": "Concurrency limit off"
+        }
       },
       "relayToggle": {
         "label": "Claude proxy",

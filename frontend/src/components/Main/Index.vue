@@ -39,6 +39,7 @@
           :active-proxy-state="activeProxyState"
           :active-proxy-busy="activeProxyBusy"
           :refreshing="refreshing"
+          :tab-statuses="tabStatuses"
           @change="onTabChange"
           @toggle-proxy="onProxyToggle"
           @create="openCreateModal"
@@ -221,12 +222,13 @@ import { useProviderForm } from './composables/useProviderForm'
 import { useProviderQuotas } from './composables/useProviderQuotas'
 import { useProviderStats } from './composables/useProviderStats'
 import { useUpdatePolling } from './composables/useUpdatePolling'
-import { cardProviderRef, normalizeProviderRef } from './adapters/providerCardMappers'
+import { blacklistStatusKeyFromCard, cardProviderRef, normalizeProviderRef } from './adapters/providerCardMappers'
 import { shouldAutoRefreshProviderQuota } from './utils/providerQuotaAutoRefresh'
 import { shouldShowProviderProxyToggle } from './utils/providerProxyToggleVisibility'
+import { shouldUseLastUsedProviderForTool } from './utils/lastUsedProvider'
 import { getDefaultHostedProviderRef, isHostedRouteActive } from './utils/providerRoutingState'
 import { hasProviderQuotaQueryType } from '../../utils/providerQuotaQuery'
-import type { CustomCliToolDraft, ProviderCardViewModel, ProviderConcurrencyStatusView, ProviderTab, VendorForm } from './types'
+import type { CustomCliToolDraft, MainTabStatus, ProviderCardViewModel, ProviderConcurrencyStatusView, ProviderTab, VendorForm } from './types'
 import type { AutomationCard } from '../../data/cards'
 
 type MainUsageHeatmapExpose = {
@@ -322,6 +324,8 @@ const switchToPlatform = (platform: ProviderTab) => {
 }
 
 const {
+  blacklistStatusMap,
+  lastUsedProviders,
   loadBlacklistStatus,
   handleUnblockAndReset,
   handleResetLevel,
@@ -607,14 +611,31 @@ const vendorInitials = (name: string) => {
     .toUpperCase()
 }
 
-const activeHostedProviderRef = computed(() => {
-  if (!activeProxyState.value) return null
+function getProviderBlacklistStatusForTab(tab: ProviderTab, card: AutomationCard) {
+  const map = blacklistStatusMap[tab] ?? {}
+  const statusKey = blacklistStatusKeyFromCard(card)
+  return map[statusKey] || map[card.name.trim().toLowerCase()] || null
+}
 
-  const hostedCard = activeCards.value.find((card) => {
-    const blacklistStatus = getProviderBlacklistStatus(card)
+function isLastUsedProviderForTab(tab: ProviderTab, card: AutomationCard): boolean {
+  const lastUsed = lastUsedProviders[tab]
+  if (!lastUsed) return false
+  if (!shouldUseLastUsedProviderForTool(lastUsed, selectedToolId.value)) return false
+  const cardRef = cardProviderRef(card)
+  if (cardRef && normalizeProviderRef(lastUsed.provider_id) !== '') {
+    return normalizeProviderRef(lastUsed.provider_id) === cardRef
+  }
+  return lastUsed.provider_name === card.name
+}
+
+function resolveLastUsedHostedProviderRefForTab(tab: ProviderTab, proxyEnabled: boolean): string | null {
+  if (!proxyEnabled) return null
+
+  const hostedCard = (cards[tab] ?? []).find((card) => {
+    const blacklistStatus = getProviderBlacklistStatusForTab(tab, card)
     return isHostedRouteActive({
       activeProxyState: true,
-      isLastUsed: isLastUsedProvider(card),
+      isLastUsed: isLastUsedProviderForTab(tab, card),
       enabled: card.enabled,
       apiUrl: card.apiUrl,
       apiKey: card.apiKey,
@@ -623,15 +644,52 @@ const activeHostedProviderRef = computed(() => {
   })
 
   return hostedCard ? cardProviderRef(hostedCard) : null
-})
+}
+
+function resolveDefaultHostedProviderRefForTab(tab: ProviderTab, proxyEnabled: boolean): string | null {
+  if (!proxyEnabled) return null
+
+  return getDefaultHostedProviderRef(
+    cards[tab] ?? [],
+    (card) => getProviderBlacklistStatusForTab(tab, card)?.isBlacklisted === true,
+  )
+}
+
+function resolveHostedProviderRefForTab(tab: ProviderTab, proxyEnabled: boolean): string | null {
+  const lastUsedProviderRef = resolveLastUsedHostedProviderRefForTab(tab, proxyEnabled)
+  if (lastUsedProviderRef || enableRoundRobin.value) return lastUsedProviderRef
+  return resolveDefaultHostedProviderRefForTab(tab, proxyEnabled)
+}
+
+const activeHostedProviderRef = computed(() => resolveLastUsedHostedProviderRefForTab(activeTab.value, activeProxyState.value))
 
 const defaultHostedProviderRef = computed(() => {
   if (!activeProxyState.value || activeHostedProviderRef.value || enableRoundRobin.value) return null
+  return resolveDefaultHostedProviderRefForTab(activeTab.value, true)
+})
 
-  return getDefaultHostedProviderRef(
-    activeCards.value,
-    (card) => getProviderBlacklistStatus(card)?.isBlacklisted === true,
-  )
+function hasConcurrencyLimitForHostedProvider(tab: ProviderTab, hostedProviderRef: string | null): boolean {
+  if (!hostedProviderRef) return false
+  const hostedCard = (cards[tab] ?? []).find((card) => cardProviderRef(card) === hostedProviderRef)
+  return Boolean(hostedCard && (hostedCard.providerConcurrencyLimit || 0) > 0)
+}
+
+const tabStatuses = computed<Partial<Record<ProviderTab, MainTabStatus>>>(() => {
+  const result: Partial<Record<ProviderTab, MainTabStatus>> = {}
+
+  tabs.value.forEach((tab) => {
+    const proxySupported = shouldShowProviderProxyToggle(tab.id)
+    const proxyEnabled = proxySupported && (tab.id === activeTab.value ? activeProxyState.value : pageShell.proxyStates[tab.id])
+    const hostedProviderRef = resolveHostedProviderRefForTab(tab.id, proxyEnabled)
+
+    result[tab.id] = {
+      proxyEnabled,
+      proxySupported,
+      concurrencyLimited: hasConcurrencyLimitForHostedProvider(tab.id, hostedProviderRef),
+    }
+  })
+
+  return result
 })
 
 const concurrencyStatusMap = computed(() => {

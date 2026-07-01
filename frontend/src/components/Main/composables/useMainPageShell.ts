@@ -541,6 +541,7 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
   })
 
   return {
+    proxyStates,
     resolvedTheme,
     themeIcon,
     toggleTheme,

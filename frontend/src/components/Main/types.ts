@@ -14,6 +14,12 @@ export type MainTabOption = {
   icon: string
 }
 
+export interface MainTabStatus {
+  proxyEnabled: boolean
+  concurrencyLimited: boolean
+  proxySupported: boolean
+}
+
 export type ResolvedTheme = 'light' | 'dark'
 
 export type ProviderDragTargetPosition = 'before' | 'after'

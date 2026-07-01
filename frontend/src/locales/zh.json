@@ -382,7 +382,14 @@
       "tabs": {
         "ariaLabel": "AI 供应商切换",
         "addCard": "新增供应商卡片",
-        "refresh": "刷新数据"
+        "refresh": "刷新数据",
+        "status": {
+          "proxyOn": "代理托管已开启",
+          "proxyOff": "代理托管已关闭",
+          "proxyUnsupported": "不支持代理托管",
+          "concurrencyOn": "并发限制已开启",
+          "concurrencyOff": "并发限制已关闭"
+        }
       },
       "relayToggle": {
         "label": "Claude proxy",

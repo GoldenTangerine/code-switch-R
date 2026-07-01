@@ -28,6 +28,25 @@
           </span>
         </span>
         <span class="tab-pill__label">{{ tab.label }}</span>
+        <span
+          class="tab-pill__status-group"
+          :aria-label="getTabStatusLabel(tab.id)"
+          :title="getTabStatusLabel(tab.id)"
+        >
+          <span
+            class="tab-pill__status-dot tab-pill__status-dot--proxy"
+            :class="{
+              'is-active': getTabStatus(tab.id).proxyEnabled,
+              'is-disabled': !getTabStatus(tab.id).proxySupported,
+            }"
+            aria-hidden="true"
+          ></span>
+          <span
+            class="tab-pill__status-dot tab-pill__status-dot--concurrency"
+            :class="{ 'is-active': getTabStatus(tab.id).concurrencyLimited }"
+            aria-hidden="true"
+          ></span>
+        </span>
       </button>
     </div>
 
@@ -120,7 +139,7 @@ import {
   getProviderDisplayIconSvg,
   preloadProviderDisplayIcons,
 } from '../../../utils/providerIconAssets'
-import type { MainTabOption } from '../types'
+import type { MainTabOption, MainTabStatus, ProviderTab } from '../types'
 
 const props = withDefaults(defineProps<{
   tabs: readonly MainTabOption[]
@@ -130,8 +149,10 @@ const props = withDefaults(defineProps<{
   activeProxyState: boolean
   activeProxyBusy: boolean
   refreshing: boolean
+  tabStatuses?: Partial<Record<ProviderTab, MainTabStatus>>
 }>(), {
   showProxyToggle: true,
+  tabStatuses: () => ({}),
 })
 
 defineEmits<{
@@ -155,6 +176,28 @@ const getTabInitials = (label: string) => {
     .join('')
     .slice(0, 2)
     .toUpperCase()
+}
+
+function getTabStatus(tab: ProviderTab): MainTabStatus {
+  return props.tabStatuses[tab] ?? {
+    proxyEnabled: false,
+    concurrencyLimited: false,
+    proxySupported: false,
+  }
+}
+
+function getTabStatusLabel(tab: ProviderTab) {
+  const status = getTabStatus(tab)
+  const proxyLabel = status.proxySupported
+    ? status.proxyEnabled
+      ? t('components.main.tabs.status.proxyOn')
+      : t('components.main.tabs.status.proxyOff')
+    : t('components.main.tabs.status.proxyUnsupported')
+  const concurrencyLabel = status.concurrencyLimited
+    ? t('components.main.tabs.status.concurrencyOn')
+    : t('components.main.tabs.status.concurrencyOff')
+
+  return `${proxyLabel} · ${concurrencyLabel}`
 }
 
 let tabGroupResizeObserver: ResizeObserver | null = null
@@ -325,6 +368,66 @@ onBeforeUnmount(() => {
 
 .tab-pill__label {
   line-height: 1.1;
+}
+
+.tab-pill__status-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 2px;
+  flex-shrink: 0;
+}
+
+.tab-pill__status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(100, 116, 139, 0.72);
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.12);
+  opacity: 0.78;
+  transition: background 0.22s ease, box-shadow 0.22s ease, opacity 0.22s ease, transform 0.22s ease;
+}
+
+.tab-pill__status-dot.is-active {
+  opacity: 1;
+  transform: scale(1.08);
+  animation: tab-status-breathe 1.8s ease-in-out infinite;
+}
+
+.tab-pill__status-dot--proxy.is-active {
+  background: #34d399;
+  box-shadow:
+    0 0 0 1px rgba(52, 211, 153, 0.28),
+    0 0 8px rgba(16, 185, 129, 0.82);
+}
+
+.tab-pill__status-dot--concurrency.is-active {
+  background: #a78bfa;
+  box-shadow:
+    0 0 0 1px rgba(167, 139, 250, 0.28),
+    0 0 8px rgba(139, 92, 246, 0.82);
+}
+
+.tab-pill__status-dot.is-disabled {
+  opacity: 0.38;
+}
+
+@keyframes tab-status-breathe {
+  0%,
+  100% {
+    filter: saturate(1);
+  }
+
+  50% {
+    filter: saturate(1.25);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tab-pill__status-dot.is-active {
+    animation: none;
+    transform: none;
+  }
 }
 
 .main-platform-tabs .section-controls {
