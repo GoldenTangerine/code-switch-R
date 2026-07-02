@@ -1101,6 +1101,8 @@
         "summary": "查看当前活跃连接与最近连接历史。",
         "activeCount": "活跃 {count}",
         "historyCount": "历史 {count}",
+        "activeTab": "活跃 {count}",
+        "historyTab": "历史 {count}",
         "activeTitle": "当前活跃连接",
         "historyTitle": "最近连接历史",
         "emptyActive": "暂无活跃连接",

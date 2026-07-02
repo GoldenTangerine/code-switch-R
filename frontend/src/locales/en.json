@@ -1100,6 +1100,8 @@
         "summary": "View active connections and recent connection history.",
         "activeCount": "Active {count}",
         "historyCount": "History {count}",
+        "activeTab": "Active {count}",
+        "historyTab": "History {count}",
         "activeTitle": "Active connections",
         "historyTitle": "Recent connection history",
         "emptyActive": "No active connections",

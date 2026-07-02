@@ -15,61 +15,84 @@
         </div>
         <div class="provider-concurrency-modal__stats">
           <span class="provider-concurrency-modal__stat">{{ t('components.main.concurrencyDetails.activeCount', { count: activeRequests.length }) }}</span>
-          <span class="provider-concurrency-modal__stat">{{ t('components.main.concurrencyDetails.historyCount', { count: historyLogs.length }) }}</span>
+          <span class="provider-concurrency-modal__stat">{{ t('components.main.concurrencyDetails.historyCount', { count: historyCountDisplay }) }}</span>
         </div>
       </section>
 
-      <section class="provider-concurrency-modal__section">
-        <h4 class="provider-concurrency-modal__section-title">{{ t('components.main.concurrencyDetails.activeTitle') }}</h4>
-        <div v-if="activeRequests.length === 0" class="provider-concurrency-modal__state">
-          {{ t('components.main.concurrencyDetails.emptyActive') }}
-        </div>
-        <article
-          v-for="request in activeRequests"
-          v-else
-          :key="request.id"
-          class="provider-concurrency-row"
+      <div class="provider-concurrency-modal__tabs">
+        <button
+          type="button"
+          class="provider-concurrency-modal__tab"
+          :class="{ 'is-active': activeTab === 'active' }"
+          :aria-pressed="activeTab === 'active'"
+          @click="selectTab('active')"
         >
-          <div class="provider-concurrency-row__main">
-            <strong>{{ displayModel(request.model) }}</strong>
-            <span>{{ request.endpoint || '-' }}</span>
-          </div>
-          <div class="provider-concurrency-row__meta">
-            <span>{{ request.isStream ? t('components.main.concurrencyDetails.stream') : t('components.main.concurrencyDetails.nonStream') }}</span>
-            <span>{{ formatDurationMs(request.durationMs) }}</span>
-          </div>
-          <p class="provider-concurrency-row__ua">{{ request.userAgent || t('components.main.concurrencyDetails.emptyUserAgent') }}</p>
-        </article>
-      </section>
+          {{ t('components.main.concurrencyDetails.activeTab', { count: activeRequests.length }) }}
+        </button>
+        <button
+          type="button"
+          class="provider-concurrency-modal__tab"
+          :class="{ 'is-active': activeTab === 'history' }"
+          :aria-pressed="activeTab === 'history'"
+          @click="selectTab('history')"
+        >
+          {{ t('components.main.concurrencyDetails.historyTab', { count: historyCountDisplay }) }}
+        </button>
+      </div>
 
       <section class="provider-concurrency-modal__section">
-        <h4 class="provider-concurrency-modal__section-title">{{ t('components.main.concurrencyDetails.historyTitle') }}</h4>
-        <div v-if="historyLoading" class="provider-concurrency-modal__state">
-          {{ t('components.main.concurrencyDetails.loadingHistory') }}
-        </div>
-        <div v-else-if="historyError" class="provider-concurrency-modal__state provider-concurrency-modal__state--error">
-          {{ t('components.main.concurrencyDetails.loadHistoryFailed', { error: historyError }) }}
-        </div>
-        <div v-else-if="historyLogs.length === 0" class="provider-concurrency-modal__state">
-          {{ t('components.main.concurrencyDetails.emptyHistory') }}
-        </div>
-        <article
-          v-for="log in historyLogs"
-          v-else
-          :key="log.id"
-          class="provider-concurrency-row"
-        >
-          <div class="provider-concurrency-row__main">
-            <strong>{{ displayModel(log.requested_model || log.model || log.response_model) }}</strong>
-            <span>HTTP {{ log.http_code || 0 }}</span>
+        <template v-if="activeTab === 'active'">
+          <h4 class="provider-concurrency-modal__section-title">{{ t('components.main.concurrencyDetails.activeTitle') }}</h4>
+          <div v-if="activeRequests.length === 0" class="provider-concurrency-modal__state">
+            {{ t('components.main.concurrencyDetails.emptyActive') }}
           </div>
-          <div class="provider-concurrency-row__meta">
-            <span>{{ log.is_stream ? t('components.main.concurrencyDetails.stream') : t('components.main.concurrencyDetails.nonStream') }}</span>
-            <span>{{ formatDurationSec(log.duration_sec) }}</span>
-            <time :datetime="log.created_at">{{ formatDateTime(log.created_at) }}</time>
+          <article
+            v-for="request in activeRequests"
+            v-else
+            :key="request.id"
+            class="provider-concurrency-row"
+          >
+            <div class="provider-concurrency-row__main">
+              <strong>{{ displayModel(request.model) }}</strong>
+              <span>{{ request.endpoint || '-' }}</span>
+            </div>
+            <div class="provider-concurrency-row__meta">
+              <span>{{ request.isStream ? t('components.main.concurrencyDetails.stream') : t('components.main.concurrencyDetails.nonStream') }}</span>
+              <span>{{ formatDurationMs(request.durationMs) }}</span>
+            </div>
+            <p class="provider-concurrency-row__ua">{{ request.userAgent || t('components.main.concurrencyDetails.emptyUserAgent') }}</p>
+          </article>
+        </template>
+
+        <template v-else>
+          <h4 class="provider-concurrency-modal__section-title">{{ t('components.main.concurrencyDetails.historyTitle') }}</h4>
+          <div v-if="historyLoading" class="provider-concurrency-modal__state">
+            {{ t('components.main.concurrencyDetails.loadingHistory') }}
           </div>
-          <p class="provider-concurrency-row__ua">{{ log.user_agent || t('components.main.concurrencyDetails.emptyUserAgent') }}</p>
-        </article>
+          <div v-else-if="historyError" class="provider-concurrency-modal__state provider-concurrency-modal__state--error">
+            {{ t('components.main.concurrencyDetails.loadHistoryFailed', { error: historyError }) }}
+          </div>
+          <div v-else-if="historyLogs.length === 0" class="provider-concurrency-modal__state">
+            {{ t('components.main.concurrencyDetails.emptyHistory') }}
+          </div>
+          <article
+            v-for="log in historyLogs"
+            v-else
+            :key="log.id"
+            class="provider-concurrency-row"
+          >
+            <div class="provider-concurrency-row__main">
+              <strong>{{ displayModel(log.requested_model || log.model || log.response_model) }}</strong>
+              <span>HTTP {{ log.http_code || 0 }}</span>
+            </div>
+            <div class="provider-concurrency-row__meta">
+              <span>{{ log.is_stream ? t('components.main.concurrencyDetails.stream') : t('components.main.concurrencyDetails.nonStream') }}</span>
+              <span>{{ formatDurationSec(log.duration_sec) }}</span>
+              <time :datetime="log.created_at">{{ formatDateTime(log.created_at) }}</time>
+            </div>
+            <p class="provider-concurrency-row__ua">{{ log.user_agent || t('components.main.concurrencyDetails.emptyUserAgent') }}</p>
+          </article>
+        </template>
       </section>
     </div>
   </InlineModal>
@@ -95,6 +118,7 @@ import { cardProviderRef } from '../adapters/providerCardMappers'
 import type { ProviderConcurrencyStatusView, ResolvedTheme } from '../types'
 
 const HISTORY_LIMIT = 10
+type ConcurrencyDetailsTab = 'active' | 'history'
 
 const props = defineProps<{
   open: boolean
@@ -113,12 +137,18 @@ const { t, locale } = useI18n()
 const historyLoading = ref(false)
 const historyError = ref('')
 const historyLogs = ref<RequestLog[]>([])
+const historyLoaded = ref(false)
+const activeTab = ref<ConcurrencyDetailsTab>('active')
 let activeLoadRequestId = 0
 
 const isDarkTheme = computed(() => props.resolvedTheme === 'dark')
 const providerName = computed(() => props.provider?.name || props.status?.providerName || '')
 const providerRef = computed(() => props.provider ? cardProviderRef(props.provider) : props.status?.providerId || '')
 const activeRequests = computed(() => props.status?.requests ?? [])
+const historyCountDisplay = computed(() => {
+  if (historyLoading.value) return '…'
+  return historyLoaded.value ? `${historyLogs.value.length}` : '-'
+})
 const modalTitle = computed(() => t('components.main.concurrencyDetails.modalTitle', { name: providerName.value || t('components.main.concurrencyDetails.providerFallback') }))
 const modalPanelClass = computed(() => ({
   'provider-concurrency-modal-shell': true,
@@ -172,9 +202,20 @@ function formatDateTime(value?: string) {
   return dateTimeFormatter.value.format(date)
 }
 
+function resetHistoryState() {
+  activeLoadRequestId += 1
+  historyLoading.value = false
+  historyError.value = ''
+  historyLogs.value = []
+  historyLoaded.value = false
+}
+
+function selectTab(tab: ConcurrencyDetailsTab) {
+  activeTab.value = tab
+}
+
 async function loadHistory() {
-  if (!props.open || !props.platform || !providerRef.value) {
-    historyLogs.value = []
+  if (!props.open || activeTab.value !== 'history' || !props.platform || !providerRef.value) {
     return
   }
   const requestId = ++activeLoadRequestId
@@ -189,10 +230,12 @@ async function loadHistory() {
     })
     if (requestId !== activeLoadRequestId) return
     historyLogs.value = Array.isArray(page.items) ? page.items : []
+    historyLoaded.value = true
   } catch (error) {
     if (requestId !== activeLoadRequestId) return
     historyError.value = extractErrorMessage(error)
     historyLogs.value = []
+    historyLoaded.value = false
   } finally {
     if (requestId === activeLoadRequestId) {
       historyLoading.value = false
@@ -203,7 +246,18 @@ async function loadHistory() {
 watch(
   () => [props.open, props.platform, providerRef.value],
   () => {
-    void loadHistory()
+    activeTab.value = 'active'
+    resetHistoryState()
+  },
+  { immediate: true },
+)
+
+watch(
+  () => [props.open, activeTab.value, props.platform, providerRef.value],
+  () => {
+    if (activeTab.value === 'history') {
+      void loadHistory()
+    }
   },
   { immediate: true },
 )
@@ -268,6 +322,46 @@ watch(
   background: rgba(20, 184, 166, 0.1);
   font-size: 12px;
   font-weight: 700;
+}
+
+.provider-concurrency-modal__tabs {
+  display: inline-flex;
+  align-self: flex-start;
+  gap: 6px;
+  padding: 4px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.1);
+}
+
+.provider-concurrency-modal--dark .provider-concurrency-modal__tabs {
+  border-color: rgba(148, 163, 184, 0.16);
+  background: rgba(15, 23, 42, 0.66);
+}
+
+.provider-concurrency-modal__tab {
+  border: 0;
+  border-radius: 999px;
+  padding: 8px 14px;
+  color: #64748b;
+  background: transparent;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.provider-concurrency-modal__tab:hover,
+.provider-concurrency-modal__tab.is-active {
+  color: #0f172a;
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+}
+
+.provider-concurrency-modal--dark .provider-concurrency-modal__tab:hover,
+.provider-concurrency-modal--dark .provider-concurrency-modal__tab.is-active {
+  color: #f8fafc;
+  background: rgba(30, 41, 59, 0.9);
+  box-shadow: none;
 }
 
 .provider-concurrency-modal__section {
