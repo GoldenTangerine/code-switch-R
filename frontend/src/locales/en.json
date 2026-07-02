@@ -1723,7 +1723,7 @@
         "remoteFilePlaceholder": "e.g. codeswitch-config.zip",
         "timeoutSeconds": "Timeout (seconds)",
         "timeoutPlaceholder": "e.g. 20",
-        "timeoutHint": "1–120, default 20",
+        "timeoutHint": "Base timeout 1–120s; large files extend automatically",
         "actions": "Actions",
         "includes": "Includes",
         "includesHint": "Providers, app settings, MCP, request logs, blacklist, availability history, etc. (excludes update cache and WebDAV password)",

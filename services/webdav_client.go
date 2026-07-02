@@ -75,12 +75,10 @@ func (p *progressReadSeeker) Seek(offset int64, whence int) (int64, error) {
 	return pos, nil
 }
 
-func newWebDAVClient(username, password string, timeout time.Duration) *webdavClient {
-	if timeout <= 0 {
-		timeout = 20 * time.Second
-	}
+func newWebDAVClient(username, password string, _ time.Duration) *webdavClient {
 	return &webdavClient{
-		httpClient: &http.Client{Timeout: timeout},
+		// 具体超时由每次请求的 context 控制，避免大文件同步被 http.Client 的固定超时提前截断。
+		httpClient: &http.Client{},
 		username:   username,
 		password:   password,
 	}

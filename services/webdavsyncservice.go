@@ -26,10 +26,15 @@ import (
 )
 
 const (
-	webdavConfigFileName     = "webdav.json"
-	webdavBackupZipName      = "codeswitch-config.zip"
-	webdavBackupZipSchemaVer = 1
-	webdavZipRootDir         = "code-switch"
+	webdavConfigFileName            = "webdav.json"
+	webdavBackupZipName             = "codeswitch-config.zip"
+	webdavBackupZipSchemaVer        = 1
+	webdavZipRootDir                = "code-switch"
+	webdavDefaultTimeoutSec         = 20
+	webdavMaxConfigTimeoutSec       = 120
+	webdavTransferMinBytesPerSecond = 256 * 1024
+	webdavTransferTimeoutGrace      = 30 * time.Second
+	webdavMaxTransferTimeout        = 30 * time.Minute
 )
 
 type WebDAVSyncConfig struct {
@@ -397,7 +402,8 @@ func (s *WebDAVSyncService) SyncToWebDAV(cfg WebDAVSyncConfig) (WebDAVSyncResult
 			reader = bytes.NewReader(entry.Data)
 		}
 
-		putCtx, putCancel := context.WithTimeout(context.Background(), time.Duration(cfg.TimeoutSeconds)*time.Second)
+		putTimeout := webdavTransferTimeout(cfg.TimeoutSeconds, entry.Size)
+		putCtx, putCancel := context.WithTimeout(context.Background(), putTimeout)
 		putErr := client.putWithProgress(putCtx, targetURL, entry.ContentType, reader, func(sent int64, _ int64) {
 			now := time.Now()
 			if sent == 0 || sent >= entry.Size || now.Sub(lastProgressEmit) >= 200*time.Millisecond {
@@ -416,6 +422,9 @@ func (s *WebDAVSyncService) SyncToWebDAV(cfg WebDAVSyncConfig) (WebDAVSyncResult
 			_ = closer.Close()
 		}
 		if putErr != nil {
+			if errors.Is(putErr, context.DeadlineExceeded) {
+				putErr = fmt.Errorf("上传超时: %s（大小 %s，已等待 %s）: %w", display, formatWebDAVBytes(entry.Size), putTimeout.Truncate(time.Second), putErr)
+			}
 			s.emitSyncEvent(map[string]interface{}{
 				"type":       "upload",
 				"stage":      "error",
@@ -916,7 +925,7 @@ func (s *WebDAVSyncService) loadConfigLocked() (WebDAVSyncConfig, error) {
 		Password:       "",
 		RemoteDir:      "",
 		RemoteFile:     webdavBackupZipName,
-		TimeoutSeconds: 20,
+		TimeoutSeconds: webdavDefaultTimeoutSec,
 	}
 	data, err := os.ReadFile(s.configPath)
 	if err != nil {
@@ -1003,10 +1012,10 @@ func normalizeWebDAVSyncConfig(cfg WebDAVSyncConfig) (WebDAVSyncConfig, error) {
 		return WebDAVSyncConfig{}, fmt.Errorf("远程文件名不应包含路径分隔符")
 	}
 	if cfg.TimeoutSeconds <= 0 {
-		cfg.TimeoutSeconds = 20
+		cfg.TimeoutSeconds = webdavDefaultTimeoutSec
 	}
-	if cfg.TimeoutSeconds > 120 {
-		cfg.TimeoutSeconds = 120
+	if cfg.TimeoutSeconds > webdavMaxConfigTimeoutSec {
+		cfg.TimeoutSeconds = webdavMaxConfigTimeoutSec
 	}
 
 	if cfg.Endpoint == "" {
@@ -1020,6 +1029,41 @@ func normalizeWebDAVSyncConfig(cfg WebDAVSyncConfig) (WebDAVSyncConfig, error) {
 		return WebDAVSyncConfig{}, fmt.Errorf("WebDAV 地址必须以 http:// 或 https:// 开头")
 	}
 	return cfg, nil
+}
+
+func webdavTransferTimeout(timeoutSeconds int, size int64) time.Duration {
+	base := time.Duration(timeoutSeconds) * time.Second
+	if base <= 0 {
+		base = webdavDefaultTimeoutSec * time.Second
+	}
+	if size <= 0 {
+		return base
+	}
+
+	seconds := (size + webdavTransferMinBytesPerSecond - 1) / webdavTransferMinBytesPerSecond
+	calculated := time.Duration(seconds)*time.Second + webdavTransferTimeoutGrace
+	if calculated < base {
+		return base
+	}
+	if calculated > webdavMaxTransferTimeout {
+		return webdavMaxTransferTimeout
+	}
+	return calculated
+}
+
+func formatWebDAVBytes(size int64) string {
+	if size < 1024 {
+		return fmt.Sprintf("%d B", size)
+	}
+	units := []string{"KiB", "MiB", "GiB", "TiB"}
+	value := float64(size)
+	for _, unit := range units {
+		value = value / 1024
+		if value < 1024 {
+			return fmt.Sprintf("%.1f %s", value, unit)
+		}
+	}
+	return fmt.Sprintf("%.1f PiB", value/1024)
 }
 
 func urlParseHTTP(raw string) (*url.URL, error) {
