@@ -93,6 +93,9 @@ type AppSettings struct {
 	AutoConnectivityTest            bool                   `json:"auto_connectivity_test"`
 	EnableSwitchNotify              bool                   `json:"enable_switch_notify"` // 供应商切换通知开关
 	EnableRoundRobin                bool                   `json:"enable_round_robin"`   // 同 Level 轮询负载均衡开关（默认关闭）
+	PreserveCodexOfficialAuth       bool                   `json:"preserve_codex_official_auth_on_switch"`
+	UnifyCodexSessionHistory        bool                   `json:"unify_codex_session_history"`
+	UnifyCodexMigrateExisting       bool                   `json:"unify_codex_migrate_existing"`
 	ProviderConcurrencyLimits       map[string]bool        `json:"provider_concurrency_limits"`
 	CaptureRequestLogPayload        bool                   `json:"capture_request_log_payload"`
 	SanitizeRequestLogPayload       bool                   `json:"sanitize_request_log_payload"`
@@ -169,6 +172,7 @@ type AppSettingsService struct {
 	path             string
 	mu               sync.Mutex
 	autoStartService *AutoStartService
+	codexSettings    *CodexSettingsService
 }
 
 func NewAppSettingsService(autoStartService *AutoStartService) *AppSettingsService {
@@ -198,6 +202,12 @@ func NewAppSettingsService(autoStartService *AutoStartService) *AppSettingsServi
 		path:             newPath,
 		autoStartService: autoStartService,
 	}
+}
+
+func (as *AppSettingsService) BindCodexSettingsService(codexSettings *CodexSettingsService) {
+	as.mu.Lock()
+	defer as.mu.Unlock()
+	as.codexSettings = codexSettings
 }
 
 // migrateSettings 完整的配置迁移
@@ -317,6 +327,9 @@ func (as *AppSettingsService) defaultSettings() AppSettings {
 		AutoConnectivityTest:            true,  // 默认开启自动可用性监控（开箱即用）
 		EnableSwitchNotify:              true,  // 默认开启切换通知
 		EnableRoundRobin:                false, // 默认关闭轮询（使用顺序降级）
+		PreserveCodexOfficialAuth:       false,
+		UnifyCodexSessionHistory:        false,
+		UnifyCodexMigrateExisting:       false,
 		ProviderConcurrencyLimits:       map[string]bool{},
 		CaptureRequestLogPayload:        false, // 默认关闭 payload 采集，降低隐私与存储风险
 		SanitizeRequestLogPayload:       true,  // 默认开启 payload 脱敏，避免敏感信息明文落库
@@ -384,6 +397,7 @@ func (as *AppSettingsService) GetAppSettings() (AppSettings, error) {
 func (as *AppSettingsService) SaveAppSettings(settings AppSettings) (AppSettings, error) {
 	as.mu.Lock()
 	defer as.mu.Unlock()
+	previous, _ := as.loadLocked()
 	settings.HeatmapGranularity = normalizeHeatmapGranularity(settings.HeatmapGranularity)
 	settings.HomeProviderTabs = normalizeHomeProviderTabs(settings.HomeProviderTabs)
 	normalizeHeatmapDisplaySettings(&settings)
@@ -407,7 +421,28 @@ func (as *AppSettingsService) SaveAppSettings(settings AppSettings) (AppSettings
 	if err := as.saveLocked(settings); err != nil {
 		return settings, err
 	}
+	if as.codexSettings != nil && codexRuntimeSettingsChanged(previous, settings) {
+		if err := as.codexSettings.ReapplyCurrentConfigForSettings(settings); err != nil {
+			if rollbackErr := as.saveLocked(previous); rollbackErr != nil {
+				return settings, fmt.Errorf("%w；回滚应用设置失败: %v", err, rollbackErr)
+			}
+			return settings, err
+		}
+		if settings.UnifyCodexSessionHistory && settings.UnifyCodexMigrateExisting {
+			go func() {
+				if _, err := MigrateCodexHistoryToUnifiedBucket(false); err != nil {
+					fmt.Printf("[CodexHistory] 统一历史迁移失败: %v\n", err)
+				}
+			}()
+		}
+	}
 	return settings, nil
+}
+
+func codexRuntimeSettingsChanged(previous AppSettings, next AppSettings) bool {
+	return previous.PreserveCodexOfficialAuth != next.PreserveCodexOfficialAuth ||
+		previous.UnifyCodexSessionHistory != next.UnifyCodexSessionHistory ||
+		previous.UnifyCodexMigrateExisting != next.UnifyCodexMigrateExisting
 }
 
 func (as *AppSettingsService) loadLocked() (AppSettings, error) {

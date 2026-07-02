@@ -35,6 +35,7 @@ import { fetchCurrentVersion } from '../../services/version'
 import { getBlacklistSettings, updateBlacklistSettings, getLevelBlacklistEnabled, setLevelBlacklistEnabled, getBlacklistEnabled, setBlacklistEnabled, type BlacklistSettings } from '../../services/settings'
 import { fetchConfigImportStatus, importFromPath, type ConfigImportStatus } from '../../services/configImport'
 import { fetchWebDAVConfig, previewWebDAVContent, saveWebDAVConfig, testWebDAVConfig, syncToWebDAV, loadFromWebDAV, type WebDAVSyncConfig } from '../../services/webdavSync'
+import { hasCodexUnifiedHistoryBackup, restoreCodexUnifiedHistory } from '../../services/claudeSettings'
 import { fetchCostSince, fetchFiveHourQuotaStatus } from '../../services/logs'
 import { useI18n } from 'vue-i18n'
 import { extractErrorMessage } from '../../utils/error'
@@ -165,6 +166,14 @@ const updateHistoryKeepCount = ref(getCachedNumber('updateHistoryKeepCount', def
 const autoConnectivityTestEnabled = ref(getCachedValue('autoConnectivityTest', false))
 const switchNotifyEnabled = ref(getCachedValue('switchNotify', true)) // 切换通知开关
 const roundRobinEnabled = ref(getCachedValue('roundRobin', false))    // 同 Level 轮询开关
+const preserveCodexOfficialAuthOnSwitch = ref(getCachedValue('preserveCodexOfficialAuthOnSwitch', false))
+const unifyCodexSessionHistory = ref(getCachedValue('unifyCodexSessionHistory', false))
+const unifyCodexMigrateExisting = ref(false)
+const codexUnifyEnableConfirmOpen = ref(false)
+const codexUnifyDisableConfirmOpen = ref(false)
+const codexUnifyRestoreBackup = ref(true)
+const codexUnifyHasBackup = ref(false)
+const codexUnifyRestoreBusy = ref(false)
 const captureRequestLogPayloadEnabled = ref(getCachedValue('captureRequestLogPayload', false))
 const sanitizeRequestLogPayloadEnabled = ref(getCachedValue('sanitizeRequestLogPayload', true))
 const budgetQuotaUsedAdjustments = ref<BudgetQuotaAdjustments>(normalizeBudgetQuotaAdjustments(
@@ -483,6 +492,8 @@ const syncAppSettingsCache = () => {
   localStorage.setItem('app-settings-autoConnectivityTest', String(autoConnectivityTestEnabled.value))
   localStorage.setItem('app-settings-switchNotify', String(switchNotifyEnabled.value))
   localStorage.setItem('app-settings-roundRobin', String(roundRobinEnabled.value))
+  localStorage.setItem('app-settings-preserveCodexOfficialAuthOnSwitch', String(preserveCodexOfficialAuthOnSwitch.value))
+  localStorage.setItem('app-settings-unifyCodexSessionHistory', String(unifyCodexSessionHistory.value))
   localStorage.setItem('app-settings-captureRequestLogPayload', String(captureRequestLogPayloadEnabled.value))
   localStorage.setItem('app-settings-sanitizeRequestLogPayload', String(sanitizeRequestLogPayloadEnabled.value))
   localStorage.removeItem('app-settings-budgetQuotaTrackedUsage')
@@ -1126,6 +1137,9 @@ const loadAppSettings = async () => {
     autoConnectivityTestEnabled.value = data?.auto_connectivity_test ?? false
     switchNotifyEnabled.value = data?.enable_switch_notify ?? true
     roundRobinEnabled.value = data?.enable_round_robin ?? false
+    preserveCodexOfficialAuthOnSwitch.value = data?.preserve_codex_official_auth_on_switch ?? false
+    unifyCodexSessionHistory.value = data?.unify_codex_session_history ?? false
+    unifyCodexMigrateExisting.value = data?.unify_codex_migrate_existing ?? false
     captureRequestLogPayloadEnabled.value = data?.capture_request_log_payload ?? false
     sanitizeRequestLogPayloadEnabled.value = data?.sanitize_request_log_payload ?? true
     syncBudgetQuotaCurrentUsedForPlatform('claude')
@@ -1165,6 +1179,9 @@ const loadAppSettings = async () => {
     autoConnectivityTestEnabled.value = false
     switchNotifyEnabled.value = true
     roundRobinEnabled.value = false
+    preserveCodexOfficialAuthOnSwitch.value = false
+    unifyCodexSessionHistory.value = false
+    unifyCodexMigrateExisting.value = false
     captureRequestLogPayloadEnabled.value = false
     sanitizeRequestLogPayloadEnabled.value = true
     syncAppSettingsCache()
@@ -1266,6 +1283,9 @@ const persistAppSettingsNow = async () => {
       auto_connectivity_test: autoConnectivityTestEnabled.value,
       enable_switch_notify: switchNotifyEnabled.value,
       enable_round_robin: roundRobinEnabled.value,
+      preserve_codex_official_auth_on_switch: preserveCodexOfficialAuthOnSwitch.value,
+      unify_codex_session_history: unifyCodexSessionHistory.value,
+      unify_codex_migrate_existing: unifyCodexMigrateExisting.value,
       provider_concurrency_limits: latestSettings?.provider_concurrency_limits ?? {},
       capture_request_log_payload: captureRequestLogPayloadEnabled.value,
       sanitize_request_log_payload: sanitizeRequestLogPayloadEnabled.value,
@@ -1317,6 +1337,64 @@ const flushPendingPersist = () => {
   window.clearTimeout(persistTimer)
   persistTimer = undefined
   void persistAppSettingsNow()
+}
+
+const handleCodexUnifyToggleChange = async (event: Event) => {
+  const checked = (event.target as HTMLInputElement | null)?.checked === true
+  if (checked) {
+    unifyCodexMigrateExisting.value = false
+    codexUnifyEnableConfirmOpen.value = true
+    return
+  }
+  try {
+    codexUnifyHasBackup.value = await hasCodexUnifiedHistoryBackup()
+  } catch (error) {
+    console.error('failed to check codex unified history backup', error)
+    codexUnifyHasBackup.value = false
+  }
+  codexUnifyRestoreBackup.value = codexUnifyHasBackup.value
+  codexUnifyDisableConfirmOpen.value = true
+}
+
+const cancelCodexUnifyEnable = () => {
+  codexUnifyEnableConfirmOpen.value = false
+  unifyCodexMigrateExisting.value = false
+}
+
+const confirmCodexUnifyEnable = async () => {
+  unifyCodexSessionHistory.value = true
+  codexUnifyEnableConfirmOpen.value = false
+  await persistAppSettingsNow()
+}
+
+const cancelCodexUnifyDisable = () => {
+  if (codexUnifyRestoreBusy.value) return
+  codexUnifyDisableConfirmOpen.value = false
+  codexUnifyRestoreBackup.value = codexUnifyHasBackup.value
+}
+
+const confirmCodexUnifyDisable = async () => {
+  codexUnifyRestoreBusy.value = true
+  try {
+    const shouldRestore = codexUnifyRestoreBackup.value && codexUnifyHasBackup.value
+    unifyCodexSessionHistory.value = false
+    unifyCodexMigrateExisting.value = false
+    await persistAppSettingsNow()
+    if (shouldRestore) {
+      const result = await restoreCodexUnifiedHistory()
+      if (result.skipped_reason) {
+        showToast(t('components.general.label.unifyCodexHistoryRestoreSkipped'), 'warning')
+      } else {
+        showToast(t('components.general.label.unifyCodexHistoryRestoreCompleted'), 'success')
+      }
+    }
+    codexUnifyDisableConfirmOpen.value = false
+  } catch (error) {
+    console.error('failed to restore codex unified history', error)
+    showToast(t('components.general.label.unifyCodexHistoryRestoreFailed'), 'error')
+  } finally {
+    codexUnifyRestoreBusy.value = false
+  }
 }
 
 const loadUpdateState = async () => {
@@ -1868,6 +1946,35 @@ onBeforeUnmount(() => {
                 <span></span>
               </label>
               <span class="hint-text">{{ $t('components.general.label.roundRobinHint') }}</span>
+            </div>
+          </ListItem>
+          <p class="panel-title">{{ $t('components.general.label.codexAuthSection') }}</p>
+          <ListItem :label="$t('components.general.label.preserveCodexOfficialAuthOnSwitch')">
+            <div class="toggle-with-hint">
+              <label class="mac-switch">
+                <input
+                  type="checkbox"
+                  :disabled="settingsLoading || saveBusy"
+                  v-model="preserveCodexOfficialAuthOnSwitch"
+                  @change="persistAppSettings"
+                />
+                <span></span>
+              </label>
+              <span class="hint-text">{{ $t('components.general.label.preserveCodexOfficialAuthOnSwitchHint') }}</span>
+            </div>
+          </ListItem>
+          <ListItem :label="$t('components.general.label.unifyCodexSessionHistory')">
+            <div class="toggle-with-hint">
+              <label class="mac-switch">
+                <input
+                  type="checkbox"
+                  :disabled="settingsLoading || saveBusy || codexUnifyRestoreBusy"
+                  :checked="unifyCodexSessionHistory"
+                  @change="handleCodexUnifyToggleChange"
+                />
+                <span></span>
+              </label>
+              <span class="hint-text">{{ $t('components.general.label.unifyCodexSessionHistoryHint') }}</span>
             </div>
           </ListItem>
           <ListItem :label="$t('components.general.label.captureRequestLogPayload')">
@@ -2427,6 +2534,72 @@ onBeforeUnmount(() => {
           </ListItem>
         </div>
       </section>
+
+      <InlineModal
+        :open="codexUnifyEnableConfirmOpen"
+        :title="$t('components.general.label.unifyCodexHistoryEnableTitle')"
+        variant="confirm"
+        @close="cancelCodexUnifyEnable"
+      >
+        <div class="webdav-sync-modal">
+          <p class="webdav-sync-hint">{{ $t('components.general.label.unifyCodexHistoryEnableMessage') }}</p>
+          <label class="codex-unify-option">
+            <input
+              v-model="unifyCodexMigrateExisting"
+              type="checkbox"
+              :disabled="settingsLoading || saveBusy"
+            />
+            <span>{{ $t('components.general.label.unifyCodexHistoryMigrateExisting') }}</span>
+          </label>
+        </div>
+        <footer class="webdav-sync-actions">
+          <button class="action-btn" type="button" :disabled="saveBusy" @click="cancelCodexUnifyEnable">
+            {{ $t('common.cancel') }}
+          </button>
+          <button class="primary-btn" type="button" :disabled="saveBusy" @click="confirmCodexUnifyEnable">
+            {{ $t('common.save') }}
+          </button>
+        </footer>
+      </InlineModal>
+
+      <InlineModal
+        :open="codexUnifyDisableConfirmOpen"
+        :title="$t('components.general.label.unifyCodexHistoryDisableTitle')"
+        variant="confirm"
+        :close-disabled="codexUnifyRestoreBusy"
+        @close="cancelCodexUnifyDisable"
+      >
+        <div class="webdav-sync-modal">
+          <p class="webdav-sync-hint">{{ $t('components.general.label.unifyCodexHistoryDisableMessage') }}</p>
+          <label v-if="codexUnifyHasBackup" class="codex-unify-option">
+            <input
+              v-model="codexUnifyRestoreBackup"
+              type="checkbox"
+              :disabled="settingsLoading || saveBusy || codexUnifyRestoreBusy"
+            />
+            <span>{{ $t('components.general.label.unifyCodexHistoryRestoreBackup') }}</span>
+          </label>
+          <p v-else class="info-text">{{ $t('components.general.label.unifyCodexHistoryRestoreSkipped') }}</p>
+        </div>
+        <footer class="webdav-sync-actions">
+          <button
+            class="action-btn"
+            type="button"
+            :disabled="codexUnifyRestoreBusy"
+            @click="cancelCodexUnifyDisable"
+          >
+            {{ $t('common.cancel') }}
+          </button>
+          <button
+            class="primary-btn"
+            type="button"
+            :disabled="saveBusy || codexUnifyRestoreBusy"
+            @click="confirmCodexUnifyDisable"
+          >
+            {{ codexUnifyRestoreBusy ? $t('components.general.label.saving') : $t('common.save') }}
+          </button>
+        </footer>
+      </InlineModal>
 
       <InlineModal
         :open="heatmapDisplayModalOpen"
@@ -3342,6 +3515,15 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
   padding-top: 12px;
   border-top: 1px solid var(--mac-divider);
+}
+
+.codex-unify-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--mac-text);
+  font-size: 13px;
+  line-height: 1.4;
 }
 
 .webdav-sync-modal {

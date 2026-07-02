@@ -151,7 +151,7 @@
             v-model="form.apiUrl"
             type="text"
             :placeholder="t('components.main.form.placeholders.apiUrl')"
-            :required="tabId !== 'opencode'"
+            :required="tabId !== 'opencode' && !isCodexOfficialProvider"
             :class="{ 'has-error': !!errors.apiUrl }"
           />
         </label>
@@ -1019,6 +1019,9 @@ const saveAndApplyTooltip = computed(() => (
   saveAndApplyBlockedByProvider.value
     ? t('components.main.directApply.requiresHostedRouting')
     : t('components.main.directApply.title')
+))
+const isCodexOfficialProvider = computed(() => (
+  props.tabId === 'codex' && props.card?.id === 200 && form.category === 'official'
 ))
 const normalizedProviderQuotaQueryType = computed(() => normalizeProviderQuotaQueryType(form.providerQuotaQueryType))
 const normalizedProviderQuotaQueryConfig = computed(() => (
@@ -2730,7 +2733,7 @@ const buildFormPayload = async (): Promise<VendorForm | null> => {
       errors.apiUrl = t('components.main.form.errors.invalidUrl')
       return null
     }
-  } else if (props.tabId !== 'opencode') {
+  } else if (props.tabId !== 'opencode' && !isCodexOfficialProvider.value) {
     errors.apiUrl = t('components.main.form.errors.invalidUrl')
     return null
   }

@@ -6,6 +6,12 @@ export interface ClaudeProxyStatus {
   base_url: string
 }
 
+export interface CodexUnifiedHistoryRestoreResult {
+  restored_jsonl_files: number
+  restored_state_rows: number
+  skipped_reason?: string
+}
+
 type Platform = 'claude' | 'codex'
 
 const serviceNames: Record<Platform, string> = {
@@ -42,4 +48,19 @@ export const enableProxy = async (platform: Platform): Promise<void> => {
 
 export const disableProxy = async (platform: Platform): Promise<void> => {
   await callByPlatform(platform, 'DisableProxy')
+}
+
+export const hasCodexUnifiedHistoryBackup = async (): Promise<boolean> => {
+  const raw = await callByPlatform<boolean>('codex', 'HasCodexUnifiedHistoryBackup')
+  return raw === true
+}
+
+export const restoreCodexUnifiedHistory = async (): Promise<CodexUnifiedHistoryRestoreResult> => {
+  const raw = await callByPlatform<any>('codex', 'RestoreCodexUnifiedHistory')
+  const result = raw ?? {}
+  return {
+    restored_jsonl_files: Number(result.RestoredJSONLFiles ?? result.restored_jsonl_files ?? 0),
+    restored_state_rows: Number(result.RestoredStateRows ?? result.restored_state_rows ?? 0),
+    skipped_reason: result.SkippedReason ?? result.skipped_reason,
+  }
 }

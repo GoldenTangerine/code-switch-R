@@ -275,6 +275,7 @@ func (cts *ConnectivityTestService) TestAll(platform string) []ConnectivityResul
 		log.Printf("[ConnectivityTest] 加载 %s 供应商失败: %v", platform, err)
 		return nil
 	}
+	providers = filterRuntimeProviders(platform, providers)
 
 	var results []ConnectivityResult
 	var wg sync.WaitGroup
@@ -381,6 +382,7 @@ func (cts *ConnectivityTestService) RunSingleTest(platform string, providerID in
 	if err != nil {
 		return nil, fmt.Errorf("加载供应商失败: %w", err)
 	}
+	providers = filterRuntimeProviders(platform, providers)
 
 	var targetProvider *Provider
 	for i := range providers {

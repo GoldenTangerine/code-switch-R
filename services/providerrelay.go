@@ -1649,6 +1649,7 @@ func (prs *ProviderRelayService) isStoredProviderSessionBindingUsable(platform s
 	if err != nil {
 		return false
 	}
+	providers = filterRuntimeProviders(platform, providers)
 	return prs.isProviderSessionBindingUsable(platform, providers, binding)
 }
 
@@ -1903,6 +1904,7 @@ func (prs *ProviderRelayService) GetProviderConcurrencyStatuses(platform string)
 	if err != nil {
 		return result
 	}
+	providers = filterRuntimeProviders(platform, providers)
 	for _, provider := range providers {
 		providerID := providerRefFromProvider(provider)
 		activeRequests, requests := prs.providerConcurrencySnapshot(platform, providerID)
@@ -1966,6 +1968,7 @@ func (prs *ProviderRelayService) validateConfig() []string {
 			warnings = append(warnings, fmt.Sprintf("[%s] 加载配置失败: %v", kind, err))
 			continue
 		}
+		providers = filterRuntimeProviders(kind, providers)
 
 		enabledCount := 0
 		for _, p := range providers {
@@ -2088,6 +2091,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load providers"})
 			return
 		}
+		providers = filterRuntimeProviders(kind, providers)
 
 		active := make([]Provider, 0, len(providers))
 		requestPlans := make(map[string]providerRequestPlan, len(providers))
@@ -6742,6 +6746,7 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to load providers for %s: %v", kind, err)})
 			return
 		}
+		providers = filterRuntimeProviders(kind, providers)
 
 		// 过滤可用的 providers
 		active := make([]Provider, 0, len(providers))
@@ -7335,6 +7340,7 @@ func (prs *ProviderRelayService) forwardModelsRequest(
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load providers"})
 		return fmt.Errorf("failed to load providers: %w", err)
 	}
+	providers = filterRuntimeProviders(kind, providers)
 
 	// 过滤可用的 providers（启用 + URL + APIKey）
 	var activeProviders []Provider

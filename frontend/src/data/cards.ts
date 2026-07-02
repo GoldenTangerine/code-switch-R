@@ -139,6 +139,18 @@ export const automationCardGroups: Record<'claude' | 'codex', AutomationCard[]> 
   ],
   codex: [
     {
+      id: 200,
+      name: 'Codex 官方登录',
+      apiUrl: '',
+      apiKey: '',
+      officialSite: 'https://chatgpt.com/codex',
+      icon: 'openai',
+      tint: 'rgba(16, 185, 129, 0.16)',
+      accent: '#10b981',
+      enabled: true,
+      category: 'official',
+    },
+    {
       id: 201,
       name: 'AICoding.sh',
       apiUrl: 'https://api.aicoding.sh',

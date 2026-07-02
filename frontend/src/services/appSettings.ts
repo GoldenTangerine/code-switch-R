@@ -73,6 +73,9 @@ export type AppSettings = {
   auto_connectivity_test: boolean
   enable_switch_notify: boolean // 供应商切换通知开关
   enable_round_robin: boolean   // 同 Level 轮询负载均衡开关
+  preserve_codex_official_auth_on_switch: boolean
+  unify_codex_session_history: boolean
+  unify_codex_migrate_existing: boolean
   provider_concurrency_limits: Record<string, boolean>
   capture_request_log_payload: boolean
   sanitize_request_log_payload: boolean
@@ -121,6 +124,9 @@ const DEFAULT_SETTINGS: AppSettings = {
   auto_connectivity_test: false,
   enable_switch_notify: true,  // 默认开启
   enable_round_robin: false,   // 默认关闭轮询
+  preserve_codex_official_auth_on_switch: false,
+  unify_codex_session_history: false,
+  unify_codex_migrate_existing: false,
   provider_concurrency_limits: {},
   capture_request_log_payload: false,
   sanitize_request_log_payload: true,

@@ -42,6 +42,8 @@ type ProxyState struct {
 	InjectedProviderKey string `json:"injected_provider_key,omitempty"`
 	// ModelProvidersKeyExisted: model_providers.{key} 是否在启用前存在
 	ModelProvidersKeyExisted bool `json:"model_providers_key_existed,omitempty"`
+	// OriginalProviderConfig: 启用前同名 provider 配置，用于代理关闭时恢复共享 key。
+	OriginalProviderConfig map[string]any `json:"original_provider_config,omitempty"`
 }
 
 // normalizeProxyPlatform 对 platform 做最小安全校验，避免路径穿越等问题。

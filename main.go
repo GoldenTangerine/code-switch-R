@@ -137,6 +137,7 @@ func main() {
 	providerRelayStateService := services.NewProviderRelayStateService(providerRelay)
 	claudeSettings := services.NewClaudeSettingsService(providerRelay.Addr())
 	codexSettings := services.NewCodexSettingsService(providerRelay.Addr())
+	appSettings.BindCodexSettingsService(codexSettings)
 	cliConfigService := services.NewCliConfigService(providerRelay.Addr())
 	logService := services.NewLogService(modelPricingService)
 	updateService := services.NewUpdateService(AppVersion)

@@ -23,6 +23,9 @@ const (
 	codexEnvKey           = "OPENAI_API_KEY"
 	codexWireAPI          = "responses"
 	codexTokenValue       = "code-switch-r"
+	codexOfficialCategory = "official"
+	codexOfficialName     = "OpenAI"
+	codexOfficialProvider = "openai"
 )
 
 type CodexSettingsService struct {
@@ -131,9 +134,13 @@ func (css *CodexSettingsService) EnableProxy() error {
 
 		// 检查 model_providers.code-switch-r 是否已存在
 		modelProvidersKeyExisted := false
+		var originalProviderConfig map[string]any
 		if mpRaw, ok := raw["model_providers"]; ok {
 			if mp, ok := mpRaw.(map[string]any); ok {
-				_, modelProvidersKeyExisted = mp[codexProviderKey]
+				if existing, exists := mp[codexProviderKey]; exists {
+					modelProvidersKeyExisted = true
+					originalProviderConfig = cloneStringAnyMap(existing)
+				}
 			}
 		}
 
@@ -146,6 +153,7 @@ func (css *CodexSettingsService) EnableProxy() error {
 			AuthFileExisted:          authFileExisted,
 			InjectedProviderKey:      codexProviderKey,
 			ModelProvidersKeyExisted: modelProvidersKeyExisted,
+			OriginalProviderConfig:   originalProviderConfig,
 		}
 
 		// 记录原始 model_provider
@@ -183,6 +191,13 @@ func (css *CodexSettingsService) EnableProxy() error {
 	provider["base_url"] = css.baseURL()
 	provider["wire_api"] = codexWireAPI
 	provider["requires_openai_auth"] = false
+	delete(provider, "supports_websockets")
+	runtimeSettings := loadCodexRuntimeSettings()
+	if runtimeSettings.PreserveCodexOfficialAuth {
+		provider["experimental_bearer_token"] = codexTokenValue
+	} else {
+		delete(provider, "experimental_bearer_token")
+	}
 	modelProviders[codexProviderKey] = provider
 
 	data, err := toml.Marshal(raw)
@@ -194,6 +209,9 @@ func (css *CodexSettingsService) EnableProxy() error {
 	// 原子写入
 	if err := AtomicWriteBytes(settingsPath, cleaned); err != nil {
 		return err
+	}
+	if runtimeSettings.PreserveCodexOfficialAuth {
+		return css.clearDirectApplyAuthKey()
 	}
 	return css.writeAuthFile()
 }
@@ -257,17 +275,25 @@ func (css *CodexSettingsService) DisableProxy() error {
 		delete(raw, "preferred_auth_method")
 	}
 
-	// 3. 删除注入的 model_providers.{key} 段（如果启用前不存在）
-	if !state.ModelProvidersKeyExisted && state.InjectedProviderKey != "" {
+	// 3. 删除或恢复注入的 model_providers.{key} 段
+	if state.InjectedProviderKey != "" {
 		if mpRaw, ok := raw["model_providers"]; ok {
 			if mp, ok := mpRaw.(map[string]any); ok {
-				delete(mp, state.InjectedProviderKey)
+				if state.ModelProvidersKeyExisted && state.OriginalProviderConfig != nil {
+					mp[state.InjectedProviderKey] = state.OriginalProviderConfig
+				} else if !state.ModelProvidersKeyExisted {
+					delete(mp, state.InjectedProviderKey)
+				}
 				// 如果 model_providers 变空，删除整个段
 				if len(mp) == 0 {
 					delete(raw, "model_providers")
 				}
 			} else if mpTyped, ok := mpRaw.(map[string]map[string]any); ok {
-				delete(mpTyped, state.InjectedProviderKey)
+				if state.ModelProvidersKeyExisted && state.OriginalProviderConfig != nil {
+					mpTyped[state.InjectedProviderKey] = state.OriginalProviderConfig
+				} else if !state.ModelProvidersKeyExisted {
+					delete(mpTyped, state.InjectedProviderKey)
+				}
 				if len(mpTyped) == 0 {
 					delete(raw, "model_providers")
 				}
@@ -495,11 +521,12 @@ type codexConfig struct {
 }
 
 type codexProvider struct {
-	Name               string `toml:"name"`
-	BaseURL            string `toml:"base_url"`
-	EnvKey             string `toml:"env_key"`
-	WireAPI            string `toml:"wire_api"`
-	RequiresOpenAIAuth bool   `toml:"requires_openai_auth"`
+	Name                    string `toml:"name"`
+	BaseURL                 string `toml:"base_url"`
+	EnvKey                  string `toml:"env_key"`
+	WireAPI                 string `toml:"wire_api"`
+	RequiresOpenAIAuth      bool   `toml:"requires_openai_auth"`
+	ExperimentalBearerToken string `toml:"experimental_bearer_token"`
 }
 
 func ensureTomlTable(raw map[string]any, key string) map[string]map[string]any {
@@ -531,6 +558,144 @@ func ensureProviderTable(mp map[string]map[string]any, key string) map[string]an
 	provider := make(map[string]any)
 	mp[key] = provider
 	return provider
+}
+
+func cloneStringAnyMap(value any) map[string]any {
+	source, ok := value.(map[string]any)
+	if !ok || source == nil {
+		return nil
+	}
+	cloned := make(map[string]any, len(source))
+	for key, item := range source {
+		cloned[key] = item
+	}
+	return cloned
+}
+
+func applyCodexOfficialUnifiedBucket(raw map[string]any) bool {
+	changed := false
+	if raw["model_provider"] != codexProviderKey {
+		raw["model_provider"] = codexProviderKey
+		changed = true
+	}
+	modelProviders := ensureTomlTable(raw, "model_providers")
+	provider := ensureProviderTable(modelProviders, codexProviderKey)
+	next := map[string]any{
+		"name":                 codexOfficialName,
+		"requires_openai_auth": true,
+		"supports_websockets":  true,
+		"wire_api":             codexWireAPI,
+	}
+	for key, value := range next {
+		if provider[key] != value {
+			provider[key] = value
+			changed = true
+		}
+	}
+	for _, key := range []string{"base_url", "env_key", "experimental_bearer_token"} {
+		if _, exists := provider[key]; exists {
+			delete(provider, key)
+			changed = true
+		}
+	}
+	modelProviders[codexProviderKey] = provider
+	raw["model_providers"] = modelProviders
+	return changed
+}
+
+func stripCodexOfficialUnifiedBucket(raw map[string]any) bool {
+	changed := false
+	if raw["model_provider"] == codexProviderKey {
+		delete(raw, "model_provider")
+		changed = true
+	}
+	mpRaw, ok := raw["model_providers"]
+	if !ok {
+		return changed
+	}
+	modelProviders, ok := mpRaw.(map[string]map[string]any)
+	if !ok {
+		modelProviders = ensureTomlTable(raw, "model_providers")
+	}
+	if provider, ok := modelProviders[codexProviderKey]; ok && isCodexOfficialUnifiedProvider(provider) {
+		delete(modelProviders, codexProviderKey)
+		changed = true
+	}
+	if len(modelProviders) == 0 {
+		delete(raw, "model_providers")
+	}
+	return changed
+}
+
+func stripCodexOfficialProviderOverride(raw map[string]any) bool {
+	mpRaw, ok := raw["model_providers"]
+	if !ok {
+		return false
+	}
+	modelProviders, ok := mpRaw.(map[string]map[string]any)
+	if !ok {
+		modelProviders = ensureTomlTable(raw, "model_providers")
+	}
+	provider, ok := modelProviders[codexOfficialProvider]
+	if !ok || !hasCodexThirdPartyUnifiedProviderMarker(provider) {
+		return false
+	}
+	delete(modelProviders, codexOfficialProvider)
+	if len(modelProviders) == 0 {
+		delete(raw, "model_providers")
+	}
+	return true
+}
+
+func isCodexOfficialUnifiedProvider(provider map[string]any) bool {
+	if provider == nil {
+		return false
+	}
+	return anyToString(provider["name"]) == codexOfficialName &&
+		provider["requires_openai_auth"] == true &&
+		provider["supports_websockets"] == true &&
+		anyToString(provider["wire_api"]) == codexWireAPI &&
+		strings.TrimSpace(anyToString(provider["base_url"])) == "" &&
+		strings.TrimSpace(anyToString(provider["experimental_bearer_token"])) == ""
+}
+
+func getCodexProviderTable(raw map[string]any, key string) map[string]any {
+	mpRaw, ok := raw["model_providers"]
+	if !ok {
+		return nil
+	}
+	if modelProviders, ok := mpRaw.(map[string]map[string]any); ok {
+		return modelProviders[key]
+	}
+	modelProviders, ok := mpRaw.(map[string]any)
+	if !ok {
+		return nil
+	}
+	provider, _ := modelProviders[key].(map[string]any)
+	return provider
+}
+
+func hasCodexThirdPartyUnifiedProviderMarker(provider map[string]any) bool {
+	if provider == nil {
+		return false
+	}
+	return strings.TrimSpace(anyToString(provider["base_url"])) != "" ||
+		strings.TrimSpace(anyToString(provider["experimental_bearer_token"])) != "" ||
+		provider["requires_openai_auth"] == false
+}
+
+func loadCodexRuntimeSettings() AppSettings {
+	settings := AppSettings{}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return settings
+	}
+	data, err := os.ReadFile(filepath.Join(home, appSettingsDir, appSettingsFile))
+	if err != nil {
+		return settings
+	}
+	_ = json.Unmarshal(data, &settings)
+	return settings
 }
 
 func stripModelProvidersHeader(data []byte) []byte {
@@ -616,15 +781,20 @@ func (css *CodexSettingsService) ApplySingleProvider(providerID int) error {
 
 	// 3. 查找目标 provider
 	provider, found := findProviderByID(providers, int64(providerID))
+	if !found && providerID == int(codexOfficialProviderCard().ID) {
+		provider = codexOfficialProviderCard()
+		found = true
+	}
 	if !found {
 		return fmt.Errorf("未找到 ID 为 %d 的供应商", providerID)
 	}
 
 	// 4. 验证 provider 配置
-	if provider.APIURL == "" {
+	isOfficial := isCodexOfficialProviderCard(provider)
+	if !isOfficial && provider.APIURL == "" {
 		return fmt.Errorf("供应商 '%s' 未配置 API 地址", provider.Name)
 	}
-	if provider.APIKey == "" {
+	if !isOfficial && provider.APIKey == "" {
 		return fmt.Errorf("供应商 '%s' 未配置 API 密钥", provider.Name)
 	}
 
@@ -650,9 +820,36 @@ func (css *CodexSettingsService) ApplySingleProvider(providerID int) error {
 		raw = make(map[string]any)
 	}
 	raw = mergeCodexCLIConfig(raw, provider.CLIConfig)
+	runtimeSettings := loadCodexRuntimeSettings()
+
+	if isOfficial {
+		delete(raw, "preferred_auth_method")
+		delete(raw, "model_provider")
+		if runtimeSettings.UnifyCodexSessionHistory {
+			applyCodexOfficialUnifiedBucket(raw)
+		} else {
+			stripCodexOfficialUnifiedBucket(raw)
+			stripCodexOfficialProviderOverride(raw)
+		}
+		data, err := toml.Marshal(raw)
+		if err != nil {
+			return fmt.Errorf("序列化配置失败: %w", err)
+		}
+		cleaned := stripModelProvidersHeader(data)
+		if err := AtomicWriteBytes(configPath, cleaned); err != nil {
+			return fmt.Errorf("写入配置失败: %w", err)
+		}
+		if err := css.clearDirectApplyAuthKey(); err != nil {
+			return fmt.Errorf("清理直连认证文件失败: %w", err)
+		}
+		return nil
+	}
 
 	// 8. 使用供应商名称作为 provider key（处理特殊字符）
 	providerKey := sanitizeProviderKey(provider.Name, int(provider.ID))
+	if runtimeSettings.UnifyCodexSessionHistory {
+		providerKey = codexProviderKey
+	}
 
 	// 9. 设置 model_provider 和认证方式
 	raw["preferred_auth_method"] = codexPreferredAuth
@@ -665,6 +862,12 @@ func (css *CodexSettingsService) ApplySingleProvider(providerID int) error {
 	providerConfig["base_url"] = normalizeURLTrimSlash(provider.APIURL)
 	providerConfig["wire_api"] = codexWireAPI
 	providerConfig["requires_openai_auth"] = false
+	delete(providerConfig, "supports_websockets")
+	if runtimeSettings.PreserveCodexOfficialAuth {
+		providerConfig["experimental_bearer_token"] = provider.APIKey
+	} else {
+		delete(providerConfig, "experimental_bearer_token")
+	}
 	modelProviders[providerKey] = providerConfig
 
 	// 11. 序列化并写入 config.toml
@@ -678,6 +881,9 @@ func (css *CodexSettingsService) ApplySingleProvider(providerID int) error {
 	}
 
 	// 12. 写入 auth.json
+	if runtimeSettings.PreserveCodexOfficialAuth {
+		return css.clearDirectApplyAuthKey()
+	}
 	if err := css.writeDirectApplyAuthFile(provider.APIKey); err != nil {
 		return fmt.Errorf("写入认证文件失败: %w", err)
 	}
@@ -701,6 +907,42 @@ func (css *CodexSettingsService) writeDirectApplyAuthFile(apiKey string) error {
 		codexEnvKey: apiKey,
 	}
 
+	return AtomicWriteJSON(authPath, payload)
+}
+
+func (css *CodexSettingsService) clearDirectApplyAuthKey() error {
+	authPath, _, err := css.authPaths()
+	if err != nil {
+		return err
+	}
+
+	data, err := os.ReadFile(authPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+
+	// 备份后只移除 OPENAI_API_KEY，避免破坏官方登录保存的其他认证字段。
+	if _, err := CreateBackup(authPath); err != nil {
+		fmt.Printf("[CodexSettingsService] auth.json 备份失败（非阻塞）: %v\n", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return nil
+	}
+	if payload == nil {
+		return nil
+	}
+	if _, exists := payload[codexEnvKey]; !exists {
+		return nil
+	}
+	delete(payload, codexEnvKey)
+	if len(payload) == 0 {
+		return os.Remove(authPath)
+	}
 	return AtomicWriteJSON(authPath, payload)
 }
 
@@ -770,20 +1012,47 @@ func (css *CodexSettingsService) GetDirectAppliedProviderID() (*int64, error) {
 
 	// 3. 获取当前 model_provider
 	currentProviderKey := config.ModelProvider
-	if currentProviderKey == "" || currentProviderKey == codexProviderKey {
-		// 指向代理或未配置
-		return nil, nil
+	if currentProviderKey == "" {
+		if provider, ok := config.ModelProviders[codexOfficialProvider]; ok && strings.TrimSpace(provider.BaseURL) != "" {
+			return css.getDirectAppliedProviderIDByConfig(provider)
+		}
+		id := codexOfficialProviderCard().ID
+		return &id, nil
+	}
+	if currentProviderKey == codexOfficialProvider {
+		if provider, ok := config.ModelProviders[currentProviderKey]; ok && strings.TrimSpace(provider.BaseURL) != "" {
+			return css.getDirectAppliedProviderIDByConfig(provider)
+		}
+		id := codexOfficialProviderCard().ID
+		return &id, nil
 	}
 
-	// 4. 获取对应的 base_url
+	return css.getDirectAppliedProviderIDByKey(config, currentProviderKey)
+}
+
+func (css *CodexSettingsService) getDirectAppliedProviderIDByKey(config *codexConfig, currentProviderKey string) (*int64, error) {
 	provider, ok := config.ModelProviders[currentProviderKey]
 	if !ok {
 		return nil, nil
 	}
-	currentURL := provider.BaseURL
+	return css.getDirectAppliedProviderIDByConfig(provider)
+}
 
-	// 5. 读取 auth.json 获取 API Key
-	currentKey := css.readAuthKey()
+func (css *CodexSettingsService) getDirectAppliedProviderIDByConfig(provider codexProvider) (*int64, error) {
+	if isCodexOfficialUnifiedProviderConfig(provider) {
+		id := codexOfficialProviderCard().ID
+		return &id, nil
+	}
+	currentURL := provider.BaseURL
+	if strings.TrimSpace(currentURL) == "" {
+		return nil, nil
+	}
+
+	// 5. 读取当前 API Key；保留官方登录时优先来自 provider 级 bearer token
+	currentKey := provider.ExperimentalBearerToken
+	if currentKey == "" {
+		currentKey = css.readAuthKey()
+	}
 
 	// 6. 加载 provider 列表并匹配
 	providers, err := loadProviderSnapshot("codex")
@@ -800,6 +1069,80 @@ func (css *CodexSettingsService) GetDirectAppliedProviderID() (*int64, error) {
 	}
 
 	return nil, nil
+}
+
+func isCodexOfficialUnifiedProviderConfig(provider codexProvider) bool {
+	return strings.TrimSpace(provider.BaseURL) == "" &&
+		strings.TrimSpace(provider.ExperimentalBearerToken) == "" &&
+		provider.RequiresOpenAIAuth &&
+		anyToString(provider.Name) == codexOfficialName &&
+		anyToString(provider.WireAPI) == codexWireAPI
+}
+
+func (css *CodexSettingsService) ReapplyCurrentConfigForSettings(settings AppSettings) error {
+	proxyStatus, err := css.ProxyStatus()
+	if err != nil {
+		return err
+	}
+	if proxyStatus.Enabled {
+		return css.EnableProxy()
+	}
+	if id, err := css.GetDirectAppliedProviderID(); err != nil {
+		return err
+	} else if id != nil {
+		return css.ApplySingleProvider(int(*id))
+	}
+	return css.rewritePossibleOfficialLiveConfig(settings)
+}
+
+func (css *CodexSettingsService) rewritePossibleOfficialLiveConfig(settings AppSettings) error {
+	configPath, _, err := css.paths()
+	if err != nil {
+		return err
+	}
+	content, err := os.ReadFile(configPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	var raw map[string]any
+	if len(content) > 0 {
+		if err := toml.Unmarshal(content, &raw); err != nil {
+			return err
+		}
+	}
+	if raw == nil {
+		raw = make(map[string]any)
+	}
+	currentProvider, _ := raw["model_provider"].(string)
+	currentProvider = strings.TrimSpace(currentProvider)
+	if currentProvider != "" && currentProvider != codexOfficialProvider && currentProvider != codexProviderKey {
+		return nil
+	}
+	if currentProvider == codexOfficialProvider {
+		provider := getCodexProviderTable(raw, codexOfficialProvider)
+		if hasCodexThirdPartyUnifiedProviderMarker(provider) {
+			return nil
+		}
+	}
+	if currentProvider == codexProviderKey {
+		provider := getCodexProviderTable(raw, codexProviderKey)
+		if !isCodexOfficialUnifiedProvider(provider) && hasCodexThirdPartyUnifiedProviderMarker(provider) {
+			return nil
+		}
+	}
+	changed := false
+	if settings.UnifyCodexSessionHistory {
+		changed = applyCodexOfficialUnifiedBucket(raw)
+	} else {
+		changed = stripCodexOfficialUnifiedBucket(raw)
+	}
+	if !changed {
+		return nil
+	}
+	return css.writeConfigToml(configPath, raw)
 }
 
 // readAuthKey 读取 auth.json 中的 API Key

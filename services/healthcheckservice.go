@@ -209,6 +209,8 @@ func (hcs *HealthCheckService) GetLatestResults() (map[string][]ProviderTimeline
 			continue
 		}
 
+		providers = filterAvailabilityProviders(platform, providers)
+
 		// 批量查询该平台的所有历史记录
 		historiesMap, err := hcs.batchGetHistories(platform)
 		if err != nil {
@@ -258,6 +260,8 @@ func (hcs *HealthCheckService) GetLogBasedResults(rangeKey string) (map[string][
 			continue
 		}
 
+		providers = filterAvailabilityProviders(platform, providers)
+
 		historiesMap, err := hcs.batchGetLogBasedHistories(platform, providers, rangeSpec, operationalThresholdMs)
 		if err != nil {
 			log.Printf("[HealthCheck] 批量聚合 %s 日志可用性失败: %v", platform, err)
@@ -288,6 +292,17 @@ func (hcs *HealthCheckService) GetLogBasedResults(rangeKey string) (map[string][
 	}
 
 	return results, nil
+}
+
+func filterAvailabilityProviders(platform string, providers []Provider) []Provider {
+	filtered := make([]Provider, 0, len(providers))
+	for _, provider := range providers {
+		if platform == "codex" && isCodexOfficialProviderCard(provider) {
+			continue
+		}
+		filtered = append(filtered, provider)
+	}
+	return filtered
 }
 
 type logAvailabilityBucket struct {
@@ -881,6 +896,7 @@ func (hcs *HealthCheckService) checkAllProviders(platform string) []HealthCheckR
 		log.Printf("[HealthCheck] 加载 %s 供应商失败: %v", platform, err)
 		return nil
 	}
+	providers = filterAvailabilityProviders(platform, providers)
 
 	var results []HealthCheckResult
 	var wg sync.WaitGroup

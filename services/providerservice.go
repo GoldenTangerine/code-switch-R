@@ -31,6 +31,8 @@ type Provider struct {
 	Tint    string `json:"tint"`
 	Accent  string `json:"accent"`
 	Enabled bool   `json:"enabled"`
+	// 供应商分类：official / third_party / custom 等；Codex 官方登录依赖 official。
+	Category string `json:"category,omitempty"`
 	// Claude API 格式（仅 Claude 供应商使用）
 	// - anthropic: 原生 Anthropic Messages API，直接透传
 	// - openai_chat: OpenAI Chat Completions，需要格式转换
@@ -359,6 +361,7 @@ func (ps *ProviderService) saveProvidersLocked(kind string, providers []Provider
 	if err != nil {
 		return err
 	}
+	providers = filterPersistentProviders(kind, providers)
 	originalFileData, originalFileExists, err := snapshotProviderFile(path)
 	if err != nil {
 		return err
@@ -370,6 +373,7 @@ func (ps *ProviderService) saveProvidersLocked(kind string, providers []Provider
 	if err != nil {
 		return err
 	}
+	existingProviders = filterPersistentProviders(kind, existingProviders)
 	nameByID := make(map[int64]string, len(existingProviders))
 	for _, p := range existingProviders {
 		nameByID[p.ID] = p.Name
@@ -461,6 +465,34 @@ func (ps *ProviderService) saveProvidersLocked(kind string, providers []Provider
 	return nil
 }
 
+func filterPersistentProviders(kind string, providers []Provider) []Provider {
+	if kind != "codex" {
+		return providers
+	}
+	filtered := make([]Provider, 0, len(providers))
+	for _, provider := range providers {
+		if isCodexOfficialProviderCard(provider) {
+			continue
+		}
+		filtered = append(filtered, provider)
+	}
+	return filtered
+}
+
+func filterRuntimeProviders(kind string, providers []Provider) []Provider {
+	if kind != "codex" {
+		return providers
+	}
+	filtered := make([]Provider, 0, len(providers))
+	for _, provider := range providers {
+		if isCodexOfficialProviderCard(provider) {
+			continue
+		}
+		filtered = append(filtered, provider)
+	}
+	return filtered
+}
+
 func (ps *ProviderService) LoadProviders(kind string) ([]Provider, error) {
 	path, err := resolveProviderReadPath(kind)
 	if err != nil {
@@ -486,6 +518,7 @@ func (ps *ProviderService) LoadProviders(kind string) ([]Provider, error) {
 
 	// 执行字段迁移：将旧字段值迁移到新字段
 	migrated := false
+	envelope.Providers, migrated = ensureBuiltInProviders(kind, envelope.Providers, migrated)
 	for i := range envelope.Providers {
 		if envelope.Providers[i].migrateFromLegacy() {
 			migrated = true
@@ -538,6 +571,7 @@ func (ps *ProviderService) loadProvidersNoLock(kind string) ([]Provider, error) 
 
 	// 执行字段迁移（但不保存，避免在持锁时再次加锁）
 	migrated := false
+	envelope.Providers, migrated = ensureBuiltInProviders(kind, envelope.Providers, migrated)
 	for i := range envelope.Providers {
 		if envelope.Providers[i].migrateFromLegacy() {
 			migrated = true
@@ -553,6 +587,40 @@ func (ps *ProviderService) loadProvidersNoLock(kind string) ([]Provider, error) 
 	}
 
 	return envelope.Providers, nil
+}
+
+func ensureBuiltInProviders(kind string, providers []Provider, migrated bool) ([]Provider, bool) {
+	if kind != "codex" || hasCodexOfficialProvider(providers) {
+		return providers, migrated
+	}
+	providers = append([]Provider{codexOfficialProviderCard()}, providers...)
+	return providers, migrated
+}
+
+func hasCodexOfficialProvider(providers []Provider) bool {
+	for _, provider := range providers {
+		if isCodexOfficialProviderCard(provider) {
+			return true
+		}
+	}
+	return false
+}
+
+func codexOfficialProviderCard() Provider {
+	return Provider{
+		ID:       200,
+		Name:     "Codex 官方登录",
+		Site:     "https://chatgpt.com/codex",
+		Icon:     "openai",
+		Tint:     "rgba(16, 185, 129, 0.16)",
+		Accent:   "#10b981",
+		Enabled:  true,
+		Category: "official",
+	}
+}
+
+func isCodexOfficialProviderCard(provider Provider) bool {
+	return provider.ID == 200 && provider.Category == "official"
 }
 
 // migrateFromLegacy 将旧连通性字段迁移到新可用性字段
