@@ -36,16 +36,6 @@ import { getBlacklistSettings, updateBlacklistSettings, getLevelBlacklistEnabled
 import { fetchConfigImportStatus, importFromPath, type ConfigImportStatus } from '../../services/configImport'
 import { fetchWebDAVConfig, previewWebDAVContent, saveWebDAVConfig, testWebDAVConfig, syncToWebDAV, loadFromWebDAV, type WebDAVSyncConfig } from '../../services/webdavSync'
 import { hasCodexUnifiedHistoryBackup, restoreCodexUnifiedHistory } from '../../services/claudeSettings'
-import {
-  fetchCodexOAuthStatus,
-  logoutCodexOAuth,
-  pollCodexOAuthLogin,
-  removeCodexOAuthAccount,
-  setDefaultCodexOAuthAccount,
-  startCodexOAuthLogin,
-  type CodexOAuthDeviceCodeResponse,
-  type CodexOAuthStatus,
-} from '../../services/codexOAuth'
 import { fetchCostSince, fetchFiveHourQuotaStatus } from '../../services/logs'
 import { useI18n } from 'vue-i18n'
 import { extractErrorMessage } from '../../utils/error'
@@ -226,12 +216,6 @@ const budgetQuotaUsageLoading = ref(false)
 const budgetQuotaUsageLoadingCodex = ref(false)
 const settingsLoading = ref(true)
 const saveBusy = ref(false)
-const codexOAuthStatus = ref<CodexOAuthStatus | null>(null)
-const codexOAuthLoading = ref(false)
-const codexOAuthBusy = ref(false)
-const codexOAuthDevice = ref<CodexOAuthDeviceCodeResponse | null>(null)
-const codexOAuthPollingMessage = ref('')
-let codexOAuthPollTimer: number | null = null
 let saveQueued = false
 let persistTimer: number | undefined
 let budgetQuotaUsageRequestSeq = 0
@@ -1089,121 +1073,6 @@ const normalizeUpdateHistoryKeepCount = (value: number) => {
   return normalized
 }
 
-const stopCodexOAuthPolling = () => {
-  if (codexOAuthPollTimer) {
-    window.clearTimeout(codexOAuthPollTimer)
-    codexOAuthPollTimer = null
-  }
-}
-
-const resetCodexOAuthDevice = () => {
-  stopCodexOAuthPolling()
-  codexOAuthDevice.value = null
-  codexOAuthPollingMessage.value = ''
-}
-
-const loadCodexOAuthStatus = async () => {
-  codexOAuthLoading.value = true
-  try {
-    codexOAuthStatus.value = await fetchCodexOAuthStatus()
-  } catch (error) {
-    console.error('failed to load Codex OAuth status', error)
-  } finally {
-    codexOAuthLoading.value = false
-  }
-}
-
-const scheduleCodexOAuthPoll = () => {
-  stopCodexOAuthPolling()
-  const device = codexOAuthDevice.value
-  if (!device) return
-  const interval = Math.max(3, Number(device.interval) || 5) * 1000
-  codexOAuthPollTimer = window.setTimeout(() => {
-    void pollCodexOAuthOnce()
-  }, interval)
-}
-
-const pollCodexOAuthOnce = async () => {
-  const device = codexOAuthDevice.value
-  if (!device) return
-  try {
-    const account = await pollCodexOAuthLogin(device.deviceCode)
-    if (account) {
-      stopCodexOAuthPolling()
-      codexOAuthDevice.value = null
-      codexOAuthPollingMessage.value = ''
-      await loadCodexOAuthStatus()
-      window.dispatchEvent(new CustomEvent('providers-updated'))
-      showToast(t('components.general.codexOAuth.loginSuccess'), 'success')
-      return
-    }
-  } catch (error) {
-    const message = extractErrorMessage(error)
-    if (!message.includes('authorization_pending')) {
-      resetCodexOAuthDevice()
-      showToast(t('components.general.codexOAuth.loginFailed', { error: message }), 'error')
-      return
-    }
-  }
-  codexOAuthPollingMessage.value = t('components.general.codexOAuth.waiting')
-  scheduleCodexOAuthPoll()
-}
-
-const startCodexOAuth = async () => {
-  codexOAuthBusy.value = true
-  codexOAuthPollingMessage.value = ''
-  try {
-    const device = await startCodexOAuthLogin()
-    codexOAuthDevice.value = device
-    codexOAuthPollingMessage.value = t('components.general.codexOAuth.waiting')
-    scheduleCodexOAuthPoll()
-  } catch (error) {
-    showToast(t('components.general.codexOAuth.loginFailed', { error: extractErrorMessage(error) }), 'error')
-  } finally {
-    codexOAuthBusy.value = false
-  }
-}
-
-const setCodexOAuthDefault = async (accountId: string) => {
-  codexOAuthBusy.value = true
-  try {
-    await setDefaultCodexOAuthAccount(accountId)
-    await loadCodexOAuthStatus()
-    window.dispatchEvent(new CustomEvent('providers-updated'))
-  } catch (error) {
-    showToast(extractErrorMessage(error), 'error')
-  } finally {
-    codexOAuthBusy.value = false
-  }
-}
-
-const removeCodexOAuth = async (accountId: string) => {
-  codexOAuthBusy.value = true
-  try {
-    await removeCodexOAuthAccount(accountId)
-    await loadCodexOAuthStatus()
-    window.dispatchEvent(new CustomEvent('providers-updated'))
-  } catch (error) {
-    showToast(extractErrorMessage(error), 'error')
-  } finally {
-    codexOAuthBusy.value = false
-  }
-}
-
-const logoutAllCodexOAuth = async () => {
-  codexOAuthBusy.value = true
-  try {
-    resetCodexOAuthDevice()
-    await logoutCodexOAuth()
-    await loadCodexOAuthStatus()
-    window.dispatchEvent(new CustomEvent('providers-updated'))
-  } catch (error) {
-    showToast(extractErrorMessage(error), 'error')
-  } finally {
-    codexOAuthBusy.value = false
-  }
-}
-
 const loadAppSettings = async () => {
   settingsLoading.value = true
   try {
@@ -1924,9 +1793,6 @@ onMounted(async () => {
   // 加载导入状态
   await loadImportStatus()
 
-  // 加载 Codex OAuth 状态
-  await loadCodexOAuthStatus()
-
   // 加载 WebDAV 配置
   await loadWebDAV()
 
@@ -1935,7 +1801,6 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
-  stopCodexOAuthPolling()
   flushPendingPersist()
   if (unsubscribeWebdavSync) {
     unsubscribeWebdavSync()
@@ -2084,65 +1949,6 @@ onBeforeUnmount(() => {
             </div>
           </ListItem>
           <p class="panel-title">{{ $t('components.general.label.codexAuthSection') }}</p>
-          <ListItem :label="$t('components.general.codexOAuth.title')">
-            <div class="codex-oauth-panel">
-              <div class="codex-oauth-panel__status">
-                <span>{{ codexOAuthStatus?.authenticated ? $t('components.general.codexOAuth.loggedIn') : $t('components.general.codexOAuth.notLoggedIn') }}</span>
-                <button
-                  class="action-btn"
-                  type="button"
-                  :disabled="codexOAuthBusy || codexOAuthLoading"
-                  @click="startCodexOAuth"
-                >
-                  {{ $t('components.general.codexOAuth.login') }}
-                </button>
-                <button
-                  v-if="codexOAuthStatus?.authenticated"
-                  class="action-btn"
-                  type="button"
-                  :disabled="codexOAuthBusy || codexOAuthLoading"
-                  @click="logoutAllCodexOAuth"
-                >
-                  {{ $t('components.general.codexOAuth.logout') }}
-                </button>
-              </div>
-              <div v-if="codexOAuthDevice" class="codex-oauth-device">
-                <span>{{ $t('components.general.codexOAuth.userCode') }}：<strong>{{ codexOAuthDevice.userCode }}</strong></span>
-                <a :href="codexOAuthDevice.verificationUri" target="_blank" rel="noreferrer">
-                  {{ $t('components.general.codexOAuth.openVerify') }}
-                </a>
-                <span class="hint-text">{{ codexOAuthPollingMessage }}</span>
-              </div>
-              <div v-if="codexOAuthStatus?.accounts?.length" class="codex-oauth-accounts">
-                <div v-for="account in codexOAuthStatus.accounts" :key="account.id" class="codex-oauth-account">
-                  <span>
-                    {{ account.login }}
-                    <em v-if="account.isDefault">{{ $t('components.general.codexOAuth.defaultAccount') }}</em>
-                  </span>
-                  <div class="codex-oauth-account__actions">
-                    <button
-                      v-if="!account.isDefault"
-                      class="action-btn"
-                      type="button"
-                      :disabled="codexOAuthBusy"
-                      @click="setCodexOAuthDefault(account.id)"
-                    >
-                      {{ $t('components.general.codexOAuth.setDefault') }}
-                    </button>
-                    <button
-                      class="action-btn"
-                      type="button"
-                      :disabled="codexOAuthBusy"
-                      @click="removeCodexOAuth(account.id)"
-                    >
-                      {{ $t('components.general.codexOAuth.remove') }}
-                    </button>
-                  </div>
-                </div>
-              </div>
-              <span class="hint-text">{{ $t('components.general.codexOAuth.hint') }}</span>
-            </div>
-          </ListItem>
           <ListItem :label="$t('components.general.label.preserveCodexOfficialAuthOnSwitch')">
             <div class="toggle-with-hint">
               <label class="mac-switch">
@@ -3880,50 +3686,6 @@ onBeforeUnmount(() => {
   color: #f39c12;
 }
 
-.codex-oauth-panel,
-.codex-oauth-device,
-.codex-oauth-accounts {
-  display: grid;
-  gap: 8px;
-}
-
-.codex-oauth-panel__status,
-.codex-oauth-account,
-.codex-oauth-account__actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.codex-oauth-panel__status {
-  justify-content: space-between;
-}
-
-.codex-oauth-device strong {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-  letter-spacing: 0.08em;
-}
-
-.codex-oauth-device a {
-  color: var(--mac-accent);
-  text-decoration: none;
-}
-
-.codex-oauth-account {
-  justify-content: space-between;
-  padding: 8px 10px;
-  border: 1px solid var(--mac-border);
-  border-radius: 12px;
-  background: var(--mac-surface-strong);
-}
-
-.codex-oauth-account em {
-  margin-left: 6px;
-  color: var(--mac-text-secondary);
-  font-style: normal;
-  font-size: 12px;
-}
 
 :global(.dark) .mac-input {
   background: var(--mac-surface-strong);

@@ -24,6 +24,7 @@ const homeItem: NavItem = { path: '/', icon: 'grid', labelKey: 'sidebar.home' }
 const promptsItem: NavItem = { path: '/prompts', icon: 'message', labelKey: 'sidebar.prompts', isNew: true }
 const mcpItem: NavItem = { path: '/mcp', icon: 'cube', labelKey: 'sidebar.mcp' }
 const skillItem: NavItem = { path: '/skill', icon: 'spark', labelKey: 'sidebar.skill' }
+const authItem: NavItem = { path: '/auth', icon: 'lock', labelKey: 'sidebar.auth' }
 const availabilityItem: NavItem = { path: '/availability', icon: 'activity', labelKey: 'sidebar.availability', isNew: true }
 const speedtestItem: NavItem = { path: '/speedtest', icon: 'zap', labelKey: 'sidebar.speedtest', isNew: true }
 const envItem: NavItem = { path: '/env', icon: 'compass', labelKey: 'sidebar.env', isNew: true }
@@ -34,7 +35,7 @@ const settingsItem: NavItem = { path: '/settings', icon: 'settings', labelKey: '
 const navSections: NavSection[] = [
   {
     labelKey: 'sidebar.sections.workspace',
-    items: [homeItem, promptsItem, mcpItem, skillItem],
+    items: [homeItem, promptsItem, mcpItem, skillItem, authItem],
   },
   {
     labelKey: 'sidebar.sections.monitoring',
@@ -225,6 +226,20 @@ function navigate(path: string) {
                 >
                   <path d="M12 3.5 13.7 8.3 18.5 10 13.7 11.7 12 16.5 10.3 11.7 5.5 10 10.3 8.3 12 3.5Z" />
                   <path d="M18.5 15.5 19.3 17.7 21.5 18.5 19.3 19.3 18.5 21.5 17.7 19.3 15.5 18.5 17.7 17.7 18.5 15.5Z" />
+                </svg>
+
+                <svg
+                  v-else-if="item.icon === 'lock'"
+                  class="nav-icon"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <rect x="5" y="10" width="14" height="10" rx="2" />
+                  <path d="M8.5 10V7.5a3.5 3.5 0 0 1 7 0V10" />
+                  <path d="M12 14v2" />
                 </svg>
 
                 <svg

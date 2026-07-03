@@ -5,6 +5,7 @@ const LogsPage = () => import('../components/Logs/Index.vue')
 const GeneralPage = () => import('../components/General/Index.vue')
 const McpPage = () => import('../components/Mcp/index.vue')
 const SkillPage = () => import('../components/Skill/Index.vue')
+const AuthPage = () => import('../components/Auth/Index.vue')
 const PromptsPage = () => import('../components/Prompts/Index.vue')
 const SpeedTestPage = () => import('../components/SpeedTest/Index.vue')
 const EnvCheckPage = () => import('../components/EnvCheck/Index.vue')
@@ -17,6 +18,7 @@ const routes = [
   { path: '/prompts', component: PromptsPage },
   { path: '/mcp', component: McpPage },
   { path: '/skill', component: SkillPage },
+  { path: '/auth', component: AuthPage },
   { path: '/availability', component: AvailabilityPage },
   { path: '/speedtest', component: SpeedTestPage },
   { path: '/env', component: EnvCheckPage },

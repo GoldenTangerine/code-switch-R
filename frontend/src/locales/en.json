@@ -69,6 +69,7 @@
     "prompts": "Prompts",
     "mcp": "MCP",
     "skill": "Skills",
+    "auth": "Auth",
     "gemini": "Gemini",
     "availability": "Availability",
     "speedtest": "Speed Test",
@@ -1816,6 +1817,21 @@
         "hint": "A Codex OAuth provider is created after sign-in.",
         "loginSuccess": "Codex OAuth signed in",
         "loginFailed": "Codex OAuth sign-in failed: {error}"
+      }
+    },
+    "auth": {
+      "hero": {
+        "eyebrow": "Auth Center",
+        "badge": "Managed login",
+        "title": "Auth",
+        "lead": "Manage official Codex sign-in while keeping third-party API routing under control."
+      },
+      "actions": {
+        "back": "Back home"
+      },
+      "codex": {
+        "title": "Codex",
+        "description": "Sign in with ChatGPT (Codex OAuth) to keep official plugins, mobile remote control, and Codex capabilities available."
       }
     },
     "mcp": {

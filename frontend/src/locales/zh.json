@@ -69,6 +69,7 @@
     "prompts": "提示词",
     "mcp": "MCP",
     "skill": "技能",
+    "auth": "认证",
     "gemini": "Gemini",
     "availability": "可用性",
     "speedtest": "测速",
@@ -1817,6 +1818,21 @@
         "hint": "登录后会自动创建 Codex OAuth 供应商。",
         "loginSuccess": "Codex OAuth 登录成功",
         "loginFailed": "Codex OAuth 登录失败：{error}"
+      }
+    },
+    "auth": {
+      "hero": {
+        "eyebrow": "认证中心",
+        "badge": "托管登录",
+        "title": "认证",
+        "lead": "管理 Codex 官方登录状态，让第三方 API 与官方能力各自保持可控。"
+      },
+      "actions": {
+        "back": "返回首页"
+      },
+      "codex": {
+        "title": "Codex",
+        "description": "使用 ChatGPT(Codex OAuth) 登录后，可保留官方插件、手机远程等 Codex 能力。"
       }
     },
     "mcp": {
