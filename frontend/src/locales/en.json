@@ -1800,6 +1800,22 @@
         "nothingToImport": "Nothing to import (all may have been imported)",
         "failed": "Import failed",
         "fileNotFound": "Config file not found, please check the path"
+      },
+      "codexOAuth": {
+        "title": "ChatGPT (Codex OAuth)",
+        "loggedIn": "Signed in",
+        "notLoggedIn": "Not signed in",
+        "login": "Sign in",
+        "logout": "Sign out",
+        "userCode": "Code",
+        "openVerify": "Open verification",
+        "waiting": "Waiting for authorization…",
+        "defaultAccount": "Default",
+        "setDefault": "Set default",
+        "remove": "Remove",
+        "hint": "A Codex OAuth provider is created after sign-in.",
+        "loginSuccess": "Codex OAuth signed in",
+        "loginFailed": "Codex OAuth sign-in failed: {error}"
       }
     },
     "mcp": {

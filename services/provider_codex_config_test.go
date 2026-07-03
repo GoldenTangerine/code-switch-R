@@ -48,7 +48,7 @@ func TestProviderService_SaveCodexProvidersUsesNestedConfigAndPreservesCLIConfig
 	if err != nil {
 		t.Fatalf("读取 Codex providers 失败: %v", err)
 	}
-	assertCodexOfficialProviderLoaded(t, loaded)
+	assertCodexOfficialProviderNotLoaded(t, loaded)
 	loadedProvider := findLoadedProviderByName(t, loaded, "Test Codex")
 
 	if got := loadedProvider.CLIConfig["model"]; got != "gpt-5-codex" {
@@ -97,7 +97,7 @@ func TestProviderService_LoadCodexProvidersFallsBackToLegacyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("读取旧路径 Codex providers 失败: %v", err)
 	}
-	assertCodexOfficialProviderLoaded(t, loaded)
+	assertCodexOfficialProviderNotLoaded(t, loaded)
 	_ = findLoadedProviderByName(t, loaded, "Legacy Codex")
 
 	snapshot, err := loadProviderSnapshot("codex")
@@ -162,7 +162,7 @@ func TestProviderService_LoadProvidersSupportsTotalQuotaFieldAfterInitDatabase(t
 	if err != nil {
 		t.Fatalf("读取 provider 配置失败: %v", err)
 	}
-	assertCodexOfficialProviderLoaded(t, loaded)
+	assertCodexOfficialProviderNotLoaded(t, loaded)
 	loadedProvider := findLoadedProviderByName(t, loaded, "Quota Total Codex")
 	if loadedProvider.BudgetQuotaSettings == nil || loadedProvider.BudgetQuotaSettings.Total.Total != 512 {
 		t.Fatalf("total quota 反序列化失败: %+v", loadedProvider.BudgetQuotaSettings)
@@ -189,7 +189,7 @@ func TestProviderServiceLoadCodexMissingConfigReturnsNilForDefaultPresets(t *tes
 	}
 }
 
-func TestProviderServiceCustomOfficialCategoryDoesNotReplaceBuiltInCard(t *testing.T) {
+func TestProviderServiceCustomOfficialCategoryDoesNotGetFiltered(t *testing.T) {
 	homeDir := useIsolatedHomeDir(t)
 	configPath := filepath.Join(homeDir, ".code-switch", "providers", "codex.json")
 	payload, err := json.Marshal(providerEnvelope{Providers: []Provider{{
@@ -214,7 +214,7 @@ func TestProviderServiceCustomOfficialCategoryDoesNotReplaceBuiltInCard(t *testi
 	if err != nil {
 		t.Fatalf("读取 Codex provider 失败: %v", err)
 	}
-	assertCodexOfficialProviderLoaded(t, loaded)
+	assertCodexOfficialProviderNotLoaded(t, loaded)
 	_ = findLoadedProviderByName(t, loaded, "Custom Official Channel")
 
 	runtimeProviders := filterRuntimeProviders("codex", loaded)
@@ -244,47 +244,15 @@ func TestProviderServiceCustomOfficialCategoryDoesNotReplaceBuiltInCard(t *testi
 	}
 }
 
-func TestCodexSettingsServiceApplyOfficialProviderUsesBuiltInCard(t *testing.T) {
-	homeDir := useIsolatedHomeDir(t)
-	writeCodexAppSettingsForTest(t, homeDir, AppSettings{UnifyCodexSessionHistory: true})
-
-	service := NewCodexSettingsService(":18100")
-	if err := service.ApplySingleProvider(200); err != nil {
-		t.Fatalf("应用 Codex 官方登录失败: %v", err)
-	}
-
-	config := readCodexConfigMapForTest(t, homeDir)
-	if got := config["model_provider"]; got != codexProviderKey {
-		t.Fatalf("期望官方统一历史写入共享 provider，实际为 %#v", got)
-	}
-	provider := readCodexProviderConfigForTest(t, config, codexProviderKey)
-	if got := provider["name"]; got != codexOfficialName {
-		t.Fatalf("期望写入官方 provider，实际为 %#v", provider)
-	}
-	if _, exists := provider["base_url"]; exists {
-		t.Fatalf("官方登录不应写入第三方 base_url，实际为 %#v", provider)
-	}
-	if _, exists := provider["experimental_bearer_token"]; exists {
-		t.Fatalf("官方登录不应写入第三方 token，实际为 %#v", provider)
-	}
-}
-
-func TestCodexSettingsServiceApplyOfficialProviderWithoutUnifiedHistoryReportsApplied(t *testing.T) {
+func TestCodexSettingsServiceApplyOfficialProviderIsRemoved(t *testing.T) {
 	_ = useIsolatedHomeDir(t)
 	service := NewCodexSettingsService(":18100")
-	if err := service.ApplySingleProvider(200); err != nil {
-		t.Fatalf("应用 Codex 官方登录失败: %v", err)
-	}
-	id, err := service.GetDirectAppliedProviderID()
-	if err != nil {
-		t.Fatalf("读取直连应用状态失败: %v", err)
-	}
-	if id == nil || *id != codexOfficialProviderCard().ID {
-		t.Fatalf("期望官方登录显示为已应用，实际为 %#v", id)
+	if err := service.ApplySingleProvider(200); err == nil {
+		t.Fatalf("旧 Codex 官方登录卡片已移除，不应允许直连应用")
 	}
 }
 
-func TestCodexSettingsServiceApplyOfficialProviderClearsOpenAIOverride(t *testing.T) {
+func TestCodexSettingsServiceApplyRemovedOfficialProviderDoesNotClearAuth(t *testing.T) {
 	homeDir := useIsolatedHomeDir(t)
 	writeCodexConfigForTest(t, homeDir, `
 model_provider = 'openai'
@@ -298,54 +266,12 @@ wire_api = 'responses'
 `)
 
 	service := NewCodexSettingsService(":18100")
-	id, err := service.GetDirectAppliedProviderID()
-	if err != nil {
-		t.Fatalf("读取直连应用状态失败: %v", err)
-	}
-	if id != nil {
-		t.Fatalf("未知 openai 覆盖不应被误判为官方登录，实际为 %#v", id)
-	}
-	if err := service.ApplySingleProvider(200); err != nil {
-		t.Fatalf("应用 Codex 官方登录失败: %v", err)
+	if err := service.ApplySingleProvider(200); err == nil {
+		t.Fatalf("旧 Codex 官方登录卡片已移除，不应清理现有配置")
 	}
 	config := readCodexConfigMapForTest(t, homeDir)
-	if _, exists := config["model_provider"]; exists {
-		t.Fatalf("未开启统一历史时官方登录不应保留 model_provider，实际为 %#v", config)
-	}
-	modelProviders, _ := config["model_providers"].(map[string]any)
-	if _, exists := modelProviders[codexOfficialProvider]; exists {
-		t.Fatalf("切回官方登录应清理第三方 openai 覆盖，实际为 %#v", modelProviders)
-	}
-}
-
-func TestCodexSettingsServiceApplyOfficialProviderClearsDirectAuthKey(t *testing.T) {
-	homeDir := useIsolatedHomeDir(t)
-	provider := Provider{
-		ID:      7,
-		Name:    "Third Party",
-		APIURL:  "https://third.example.com/v1",
-		APIKey:  "sk-third",
-		Enabled: true,
-	}
-	if err := NewProviderService().SaveProviders("codex", []Provider{provider}); err != nil {
-		t.Fatalf("保存 Codex provider 失败: %v", err)
-	}
-
-	service := NewCodexSettingsService(":18100")
-	if err := service.ApplySingleProvider(int(provider.ID)); err != nil {
-		t.Fatalf("应用第三方 provider 失败: %v", err)
-	}
-	authPayload := readCodexAuthForTest(t, homeDir)
-	if got := authPayload[codexEnvKey]; got != "sk-third" {
-		t.Fatalf("期望第三方直连写入 auth key，实际为 %#v", authPayload)
-	}
-
-	if err := service.ApplySingleProvider(200); err != nil {
-		t.Fatalf("切回 Codex 官方登录失败: %v", err)
-	}
-	authPayload = readCodexAuthForTest(t, homeDir)
-	if got := authPayload[codexEnvKey]; got != nil {
-		t.Fatalf("切回官方登录应清理 OPENAI_API_KEY，实际为 %#v", authPayload)
+	if got := config["model_provider"]; got != "openai" {
+		t.Fatalf("失败的旧官方应用不应修改配置，实际为 %#v", config)
 	}
 }
 
@@ -550,7 +476,7 @@ wire_api = 'responses'
 	}
 }
 
-func TestProviderServiceLoadCodexBuiltInCardDoesNotRewriteConfig(t *testing.T) {
+func TestProviderServiceLoadCodexDoesNotInjectRemovedBuiltInCard(t *testing.T) {
 	homeDir := useIsolatedHomeDir(t)
 	configPath := filepath.Join(homeDir, ".code-switch", "providers", "codex.json")
 	payload, err := json.Marshal(providerEnvelope{Providers: []Provider{{
@@ -579,7 +505,7 @@ func TestProviderServiceLoadCodexBuiltInCardDoesNotRewriteConfig(t *testing.T) {
 		t.Fatalf("读取 provider 配置失败: %v", err)
 	}
 	if string(current) != string(payload) {
-		t.Fatalf("仅注入内置官方卡片不应重写磁盘配置\n原始: %s\n当前: %s", string(payload), string(current))
+		t.Fatalf("加载 Codex provider 不应重写磁盘配置\n原始: %s\n当前: %s", string(payload), string(current))
 	}
 }
 
@@ -673,14 +599,13 @@ func readCodexAuthForTest(t *testing.T, homeDir string) map[string]any {
 	return payload
 }
 
-func assertCodexOfficialProviderLoaded(t *testing.T, providers []Provider) {
+func assertCodexOfficialProviderNotLoaded(t *testing.T, providers []Provider) {
 	t.Helper()
 	for _, provider := range providers {
 		if isCodexOfficialProviderCard(provider) {
-			return
+			t.Fatalf("加载结果不应包含已移除的 Codex 官方登录卡片: %#v", providers)
 		}
 	}
-	t.Fatalf("期望加载结果包含 Codex 官方登录卡片: %#v", providers)
 }
 
 func findLoadedProviderByName(t *testing.T, providers []Provider, name string) Provider {
@@ -718,4 +643,68 @@ func readJSONLRecordsForTest(t *testing.T, path string) map[string]map[string]an
 		records[anyToString(payload["id"])] = payload
 	}
 	return records
+}
+
+func TestProviderServiceEnsureCodexOAuthProviderCreatesManagedProvider(t *testing.T) {
+	_ = useIsolatedHomeDir(t)
+	service := NewProviderService()
+	provider, err := service.EnsureCodexOAuthProvider("acct_123", "user@example.com")
+	if err != nil {
+		t.Fatalf("创建 Codex OAuth provider 失败: %v", err)
+	}
+	if provider.APIKey != "" {
+		t.Fatalf("Codex OAuth provider 不应持久化 API Key: %#v", provider)
+	}
+	if provider.APIURL != codexOAuthBackendAPIBaseURL || provider.AuthProvider != CodexOAuthProviderName || provider.AuthAccountID != "acct_123" {
+		t.Fatalf("Codex OAuth provider 字段不正确: %#v", provider)
+	}
+	if provider.Enabled {
+		t.Fatalf("EnsureCodexOAuthProvider 不应自动启用非默认账号 provider: %#v", provider)
+	}
+
+	loaded, err := service.LoadProviders("codex")
+	if err != nil {
+		t.Fatalf("读取 Codex providers 失败: %v", err)
+	}
+	assertCodexOfficialProviderNotLoaded(t, loaded)
+	if len(filterRuntimeProviders("codex", loaded)) != 1 {
+		t.Fatalf("Codex OAuth provider 应参与运行时候选: %#v", loaded)
+	}
+	if !providerHasRelayAuth("codex", loaded[0]) {
+		t.Fatalf("Codex OAuth provider 无 API Key 时仍应具备 relay 认证能力: %#v", loaded[0])
+	}
+	if providerHasRelayAuth("custom:tool", loaded[0]) {
+		t.Fatalf("Codex OAuth 托管认证不应泄漏到自定义 CLI: %#v", loaded[0])
+	}
+}
+
+func TestProviderServiceSelectCodexOAuthProviderDisablesOtherOAuthProviders(t *testing.T) {
+	_ = useIsolatedHomeDir(t)
+	service := NewProviderService()
+	if _, err := service.EnsureCodexOAuthProvider("acct_old", "old@example.com"); err != nil {
+		t.Fatalf("创建旧账号 provider 失败: %v", err)
+	}
+	selected, err := service.SelectCodexOAuthProvider("acct_new", "new@example.com")
+	if err != nil {
+		t.Fatalf("选择默认 Codex OAuth provider 失败: %v", err)
+	}
+	if !selected.Enabled || selected.AuthAccountID != "acct_new" {
+		t.Fatalf("默认账号 provider 应启用并绑定新账号: %#v", selected)
+	}
+
+	loaded, err := service.LoadProviders("codex")
+	if err != nil {
+		t.Fatalf("读取 Codex providers 失败: %v", err)
+	}
+	for _, provider := range loaded {
+		if !isCodexOAuthProvider(provider) {
+			continue
+		}
+		if provider.AuthAccountID == "acct_new" && !provider.Enabled {
+			t.Fatalf("新默认账号 provider 应保持启用: %#v", provider)
+		}
+		if provider.AuthAccountID == "acct_old" && provider.Enabled {
+			t.Fatalf("旧 OAuth provider 应被禁用: %#v", provider)
+		}
+	}
 }

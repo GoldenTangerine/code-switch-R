@@ -781,20 +781,18 @@ func (css *CodexSettingsService) ApplySingleProvider(providerID int) error {
 
 	// 3. 查找目标 provider
 	provider, found := findProviderByID(providers, int64(providerID))
-	if !found && providerID == int(codexOfficialProviderCard().ID) {
-		provider = codexOfficialProviderCard()
-		found = true
-	}
 	if !found {
 		return fmt.Errorf("未找到 ID 为 %d 的供应商", providerID)
 	}
 
 	// 4. 验证 provider 配置
-	isOfficial := isCodexOfficialProviderCard(provider)
-	if !isOfficial && provider.APIURL == "" {
+	if isCodexOfficialProviderCard(provider) || isCodexOAuthProvider(provider) {
+		return fmt.Errorf("供应商 '%s' 使用托管认证，只能通过本地代理使用", provider.Name)
+	}
+	if provider.APIURL == "" {
 		return fmt.Errorf("供应商 '%s' 未配置 API 地址", provider.Name)
 	}
-	if !isOfficial && provider.APIKey == "" {
+	if provider.APIKey == "" {
 		return fmt.Errorf("供应商 '%s' 未配置 API 密钥", provider.Name)
 	}
 
@@ -821,29 +819,6 @@ func (css *CodexSettingsService) ApplySingleProvider(providerID int) error {
 	}
 	raw = mergeCodexCLIConfig(raw, provider.CLIConfig)
 	runtimeSettings := loadCodexRuntimeSettings()
-
-	if isOfficial {
-		delete(raw, "preferred_auth_method")
-		delete(raw, "model_provider")
-		if runtimeSettings.UnifyCodexSessionHistory {
-			applyCodexOfficialUnifiedBucket(raw)
-		} else {
-			stripCodexOfficialUnifiedBucket(raw)
-			stripCodexOfficialProviderOverride(raw)
-		}
-		data, err := toml.Marshal(raw)
-		if err != nil {
-			return fmt.Errorf("序列化配置失败: %w", err)
-		}
-		cleaned := stripModelProvidersHeader(data)
-		if err := AtomicWriteBytes(configPath, cleaned); err != nil {
-			return fmt.Errorf("写入配置失败: %w", err)
-		}
-		if err := css.clearDirectApplyAuthKey(); err != nil {
-			return fmt.Errorf("清理直连认证文件失败: %w", err)
-		}
-		return nil
-	}
 
 	// 8. 使用供应商名称作为 provider key（处理特殊字符）
 	providerKey := sanitizeProviderKey(provider.Name, int(provider.ID))

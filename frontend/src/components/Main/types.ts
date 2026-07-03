@@ -68,6 +68,8 @@ export type VendorForm = {
   opencodeNpm?: string
   opencodeSettingsConfig?: Record<string, any>
   category?: string
+  authProvider?: string
+  authAccountId?: string
   partnerPromotionKey?: string
   liveConfigManaged?: boolean
   isInConfig?: boolean

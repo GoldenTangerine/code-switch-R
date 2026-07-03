@@ -1,3 +1,28 @@
+# Code Switch v2.8.84
+
+## 新增
+- **ChatGPT(Codex OAuth) 认证**：设置页新增 Codex 官方 OAuth 登录入口，支持设备码登录、多账号列表、默认账号切换、移除与退出。
+- **Codex OAuth 托管转发**：Codex 代理可使用 ChatGPT OAuth access token 调用官方 Codex 后端，并注入官方会话所需请求头。
+
+## 变更
+- **移除旧官方登录卡片**：不再注入不可删除、不可关闭的“Codex 官方登录”内置供应商卡片，历史残留卡片会被过滤。
+- **默认账号影响路由**：切换默认 ChatGPT 账号时，仅启用对应 OAuth provider，避免继续误走旧账号。
+
+## 修复
+- **修复官方登录抢占路由**：OAuth provider 不再因登录新账号自动抢占第三方 Codex provider。
+- **修复退出后重新登录问题**：退出登录会清理设备码轮询和后端 pending 状态，避免授权回调重新创建账号。
+- **修复账号移除后卡片状态滞后**：移除账号或退出登录后会刷新供应商列表。
+
+## 优化
+- **托管认证表单精简**：Codex OAuth provider 隐藏 API Key，并锁定官方后端地址，避免误编辑导致不可用。
+- **补充 Codex 模型路由**：新增 `/models` 路由用于 Codex 官方 OAuth 模型列表转发。
+- **补充回归测试**：覆盖 OAuth provider 创建、默认账号选择和旧 OAuth provider 禁用。
+
+## 发布
+- **本次发版版本号推进到 `v2.8.84`**：同步更新应用常量、Wails 构建配置和发布说明，并准备推送 `v2.8.84` tag 触发 GitHub 自动打包。
+
+---
+
 # Code Switch v2.8.83
 
 ## 新增

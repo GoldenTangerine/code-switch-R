@@ -44,6 +44,7 @@ type ProviderRelayService struct {
 	notificationService            *NotificationService
 	appSettings                    *AppSettingsService // 应用设置服务（用于获取轮询开关状态）
 	modelPricing                   *ModelPricingService
+	codexOAuth                     *CodexOAuthService
 	server                         *http.Server
 	addr                           string
 	lastUsed                       map[string]*LastUsedProvider // 各平台最后使用的供应商
@@ -369,6 +370,13 @@ func NewProviderRelayService(providerService *ProviderService, geminiService *Ge
 		providerConcurrency:         make(map[string]int),
 		providerConcurrencyRequests: make(map[string]map[string]ProviderConcurrencyRequestDetail),
 	}
+}
+
+func (prs *ProviderRelayService) BindCodexOAuthService(codexOAuth *CodexOAuthService) {
+	if prs == nil {
+		return
+	}
+	prs.codexOAuth = codexOAuth
 }
 
 func providerRefFromProvider(provider Provider) string {
@@ -2045,8 +2053,9 @@ func (prs *ProviderRelayService) registerRoutes(router gin.IRouter) {
 	router.POST("/responses", prs.proxyHandler("codex", "/responses"))
 
 	// /v1/models 端点（OpenAI-compatible API）
-	// 支持 Claude 和 Codex 平台
 	router.GET("/v1/models", prs.modelsHandler("claude"))
+	// Codex 官方 OAuth 后端使用 /models。
+	router.GET("/models", prs.modelsHandler("codex"))
 
 	// Gemini API 端点（使用专门的路径前缀避免与 Claude 冲突）
 	router.POST("/gemini/v1beta/*any", prs.geminiProxyHandler("/v1beta"))
@@ -2098,7 +2107,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 		skippedCount := 0
 		for _, provider := range providers {
 			// 基础过滤：enabled、URL、APIKey
-			if !provider.Enabled || provider.APIURL == "" || provider.APIKey == "" {
+			if !provider.Enabled || provider.APIURL == "" || !providerHasRelayAuth(kind, provider) {
 				continue
 			}
 
@@ -2755,8 +2764,16 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 		plan.ContinuationRetryBodyBytes = nil
 	}
 
-	targetURL := joinURL(provider.APIURL, endpoint)
 	headers := cloneMap(clientHeaders)
+	if isCodexOAuthProvider(provider) {
+		var err error
+		endpoint, err = prs.prepareCodexOAuthForwarding(provider, headers, endpoint)
+		if err != nil {
+			return false, err
+		}
+		addCodexOAuthSessionHeaders(headers, prs.deriveRelaySessionHash(kind, bodyBytes))
+	}
+	targetURL := joinURL(provider.APIURL, endpoint)
 	requestUserAgent := getHeaderValueCaseInsensitive(headers, "User-Agent")
 	releaseProviderSlot, acquiredProviderSlot := prs.acquireProviderConcurrencySlot(kind, providerRefFromProvider(provider), providerConcurrencyLimit(provider), providerConcurrencyLimitEnabled, providerConcurrencyRequestMeta{
 		ProviderName: provider.Name,
@@ -2770,23 +2787,25 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 	}
 	defer releaseProviderSlot()
 
-	// 根据认证方式设置请求头（默认 Bearer，与 v2.2.x 保持一致）
-	authType := strings.ToLower(strings.TrimSpace(provider.ConnectivityAuthType))
-	switch authType {
-	case "x-api-key":
-		// 仅当用户显式选择 x-api-key 时使用（Anthropic 官方 API）
-		headers["x-api-key"] = provider.APIKey
-		headers["anthropic-version"] = "2023-06-01"
-	case "", "bearer":
-		// 默认使用 Bearer token（兼容所有第三方中转）
-		headers["Authorization"] = fmt.Sprintf("Bearer %s", provider.APIKey)
-	default:
-		// 自定义 Header 名
-		headerName := strings.TrimSpace(provider.ConnectivityAuthType)
-		if headerName == "" || strings.EqualFold(headerName, "custom") {
-			headerName = "Authorization"
+	if !isCodexOAuthProvider(provider) {
+		// 根据认证方式设置请求头（默认 Bearer，与 v2.2.x 保持一致）
+		authType := strings.ToLower(strings.TrimSpace(provider.ConnectivityAuthType))
+		switch authType {
+		case "x-api-key":
+			// 仅当用户显式选择 x-api-key 时使用（Anthropic 官方 API）
+			headers["x-api-key"] = provider.APIKey
+			headers["anthropic-version"] = "2023-06-01"
+		case "", "bearer":
+			// 默认使用 Bearer token（兼容所有第三方中转）
+			headers["Authorization"] = fmt.Sprintf("Bearer %s", provider.APIKey)
+		default:
+			// 自定义 Header 名
+			headerName := strings.TrimSpace(provider.ConnectivityAuthType)
+			if headerName == "" || strings.EqualFold(headerName, "custom") {
+				headerName = "Authorization"
+			}
+			headers[headerName] = provider.APIKey
 		}
-		headers[headerName] = provider.APIKey
 	}
 
 	if _, ok := headers["Accept"]; !ok {
@@ -3119,6 +3138,17 @@ func setHeaderIfAbsentCaseInsensitive(headers map[string]string, key string, val
 		}
 	}
 	headers[key] = value
+}
+
+func deleteHeaderCaseInsensitive(headers map[string]string, key string) {
+	if headers == nil {
+		return
+	}
+	for existingKey := range headers {
+		if strings.EqualFold(existingKey, key) {
+			delete(headers, existingKey)
+		}
+	}
 }
 
 func removeJSONFieldBytes(bodyBytes []byte, path string) []byte {
@@ -3458,6 +3488,39 @@ func joinURL(base string, endpoint string) string {
 	base = strings.TrimSuffix(base, "/")
 	endpoint = "/" + strings.TrimPrefix(endpoint, "/")
 	return base + endpoint
+}
+
+func providerHasRelayAuth(kind string, provider Provider) bool {
+	return strings.TrimSpace(provider.APIKey) != "" || (strings.TrimSpace(kind) == "codex" && isCodexOAuthProvider(provider))
+}
+
+func (prs *ProviderRelayService) prepareCodexOAuthForwarding(provider Provider, headers map[string]string, endpoint string) (string, error) {
+	deleteHeaderCaseInsensitive(headers, "Authorization")
+	deleteHeaderCaseInsensitive(headers, "x-api-key")
+	deleteHeaderCaseInsensitive(headers, "x-goog-api-key")
+	deleteHeaderCaseInsensitive(headers, "chatgpt-account-id")
+	if prs == nil || prs.codexOAuth == nil {
+		return endpoint, fmt.Errorf("Codex OAuth 服务未初始化，请重启应用")
+	}
+	token, accountID, err := prs.codexOAuth.GetValidToken(provider.AuthAccountID)
+	if err != nil {
+		return endpoint, err
+	}
+	headers["Authorization"] = fmt.Sprintf("Bearer %s", token)
+	if strings.TrimSpace(accountID) != "" {
+		headers["chatgpt-account-id"] = accountID
+	}
+	return endpoint, nil
+}
+
+func addCodexOAuthSessionHeaders(headers map[string]string, sessionID string) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return
+	}
+	headers["session_id"] = sessionID
+	headers["x-client-request-id"] = sessionID
+	headers["x-codex-window-id"] = sessionID + ":0"
 }
 
 func boolToInt(b bool) int {
@@ -6753,7 +6816,7 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 		requestPlans := make(map[string]providerRequestPlan, len(providers))
 		skippedCount := 0
 		for _, provider := range providers {
-			if !provider.Enabled || provider.APIURL == "" || provider.APIKey == "" {
+			if !provider.Enabled || provider.APIURL == "" || !providerHasRelayAuth(kind, provider) {
 				continue
 			}
 
@@ -7345,7 +7408,7 @@ func (prs *ProviderRelayService) forwardModelsRequest(
 	// 过滤可用的 providers（启用 + URL + APIKey）
 	var activeProviders []Provider
 	for _, provider := range providers {
-		if !provider.Enabled || provider.APIURL == "" || provider.APIKey == "" {
+		if !provider.Enabled || provider.APIURL == "" || !providerHasRelayAuth(kind, provider) {
 			continue
 		}
 
@@ -7396,8 +7459,13 @@ func (prs *ProviderRelayService) forwardModelsRequest(
 
 	fmt.Printf("[%s] 使用 Provider: %s | URL: %s\n", logPrefix, selectedProvider.Name, selectedProvider.APIURL)
 
-	// 构建目标 URL（拼接 provider 的 APIURL 和 /v1/models）
-	targetURL := joinURL(selectedProvider.APIURL, "/v1/models")
+	modelsEndpoint := "/v1/models"
+	if isCodexOAuthProvider(*selectedProvider) {
+		modelsEndpoint = "/models"
+	}
+
+	// 构建目标 URL（拼接 provider 的 APIURL 和模型列表端点）
+	targetURL := joinURL(selectedProvider.APIURL, modelsEndpoint)
 
 	// 创建 HTTP 请求
 	req, err := http.NewRequest("GET", targetURL, nil)
@@ -7413,20 +7481,40 @@ func (prs *ProviderRelayService) forwardModelsRequest(
 		}
 	}
 
-	// 根据认证方式设置请求头（默认 Bearer，与 v2.2.x 保持一致）
-	authType := strings.ToLower(strings.TrimSpace(selectedProvider.ConnectivityAuthType))
-	switch authType {
-	case "x-api-key":
-		req.Header.Set("x-api-key", selectedProvider.APIKey)
-		req.Header.Set("anthropic-version", "2023-06-01")
-	case "", "bearer":
-		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", selectedProvider.APIKey))
-	default:
-		headerName := strings.TrimSpace(selectedProvider.ConnectivityAuthType)
-		if headerName == "" || strings.EqualFold(headerName, "custom") {
-			headerName = "Authorization"
+	if isCodexOAuthProvider(*selectedProvider) {
+		req.Header.Del("Authorization")
+		req.Header.Del("x-api-key")
+		req.Header.Del("x-goog-api-key")
+		req.Header.Del("chatgpt-account-id")
+		if prs.codexOAuth == nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Codex OAuth 服务未初始化，请重启应用"})
+			return fmt.Errorf("Codex OAuth 服务未初始化")
 		}
-		req.Header.Set(headerName, selectedProvider.APIKey)
+		token, accountID, err := prs.codexOAuth.GetValidToken(selectedProvider.AuthAccountID)
+		if err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": fmt.Sprintf("Codex OAuth 认证失败: %v", err)})
+			return err
+		}
+		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
+		if strings.TrimSpace(accountID) != "" {
+			req.Header.Set("chatgpt-account-id", accountID)
+		}
+	} else {
+		// 根据认证方式设置请求头（默认 Bearer，与 v2.2.x 保持一致）
+		authType := strings.ToLower(strings.TrimSpace(selectedProvider.ConnectivityAuthType))
+		switch authType {
+		case "x-api-key":
+			req.Header.Set("x-api-key", selectedProvider.APIKey)
+			req.Header.Set("anthropic-version", "2023-06-01")
+		case "", "bearer":
+			req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", selectedProvider.APIKey))
+		default:
+			headerName := strings.TrimSpace(selectedProvider.ConnectivityAuthType)
+			if headerName == "" || strings.EqualFold(headerName, "custom") {
+				headerName = "Authorization"
+			}
+			req.Header.Set(headerName, selectedProvider.APIKey)
+		}
 	}
 
 	// 设置默认 Accept 头

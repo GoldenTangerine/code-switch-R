@@ -1801,6 +1801,22 @@
         "nothingToImport": "没有需要导入的配置（可能已全部导入）",
         "failed": "导入失败",
         "fileNotFound": "配置文件不存在，请检查路径是否正确"
+      },
+      "codexOAuth": {
+        "title": "ChatGPT(Codex OAuth) 认证",
+        "loggedIn": "已登录",
+        "notLoggedIn": "未登录",
+        "login": "登录",
+        "logout": "退出",
+        "userCode": "验证码",
+        "openVerify": "打开验证页",
+        "waiting": "等待授权完成…",
+        "defaultAccount": "默认",
+        "setDefault": "设为默认",
+        "remove": "移除",
+        "hint": "登录后会自动创建 Codex OAuth 供应商。",
+        "loginSuccess": "Codex OAuth 登录成功",
+        "loginFailed": "Codex OAuth 登录失败：{error}"
       }
     },
     "mcp": {

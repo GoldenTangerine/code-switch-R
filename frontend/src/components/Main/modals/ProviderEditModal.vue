@@ -151,7 +151,8 @@
             v-model="form.apiUrl"
             type="text"
             :placeholder="t('components.main.form.placeholders.apiUrl')"
-            :required="tabId !== 'opencode' && !isCodexOfficialProvider"
+            :required="tabId !== 'opencode' && !isManagedCodexAuthProvider"
+            :disabled="isManagedCodexAuthProvider"
             :class="{ 'has-error': !!errors.apiUrl }"
           />
         </label>
@@ -179,7 +180,7 @@
           />
         </label>
 
-        <label class="form-field">
+        <label v-if="!isManagedCodexAuthProvider" class="form-field">
           <span class="label-row">
             {{ t('components.main.form.labels.apiKey') }}
             <a
@@ -1023,6 +1024,11 @@ const saveAndApplyTooltip = computed(() => (
 const isCodexOfficialProvider = computed(() => (
   props.tabId === 'codex' && props.card?.id === 200 && form.category === 'official'
 ))
+const isCodexOAuthProvider = computed(() => (
+  props.tabId === 'codex' && `${form.authProvider || props.card?.authProvider || ''}`.trim() === 'codex_oauth'
+))
+const isManagedCodexAuthProvider = computed(() => isCodexOfficialProvider.value || isCodexOAuthProvider.value)
+const CODEX_OAUTH_API_URL = 'https://chatgpt.com/backend-api/codex'
 const normalizedProviderQuotaQueryType = computed(() => normalizeProviderQuotaQueryType(form.providerQuotaQueryType))
 const normalizedProviderQuotaQueryConfig = computed(() => (
   normalizeProviderQuotaQueryConfig(form.providerQuotaQueryConfig, form.providerQuotaQueryType)
@@ -2698,7 +2704,10 @@ const buildFormPayload = async (): Promise<VendorForm | null> => {
   const cliConfigReady = await (cliConfigEditorRef.value?.applyPendingJsonChanges?.() ?? true)
   if (!cliConfigReady) return null
 
-  const apiUrl = form.apiUrl.trim()
+  let apiUrl = form.apiUrl.trim()
+  if (isCodexOAuthProvider.value && !apiUrl) {
+    apiUrl = CODEX_OAUTH_API_URL
+  }
   errors.apiUrl = ''
   errors.providerRef = ''
 
@@ -2733,7 +2742,7 @@ const buildFormPayload = async (): Promise<VendorForm | null> => {
       errors.apiUrl = t('components.main.form.errors.invalidUrl')
       return null
     }
-  } else if (props.tabId !== 'opencode' && !isCodexOfficialProvider.value) {
+  } else if (props.tabId !== 'opencode' && !isManagedCodexAuthProvider.value) {
     errors.apiUrl = t('components.main.form.errors.invalidUrl')
     return null
   }

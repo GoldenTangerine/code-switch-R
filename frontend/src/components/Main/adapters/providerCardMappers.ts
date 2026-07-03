@@ -63,6 +63,8 @@ export type PersistedProvider = PersistedProviderModel & {
   opencodeSettingsConfig?: Record<string, any>
   apiKeyUrl?: string
   category?: string
+  authProvider?: string
+  authAccountId?: string
   partnerPromotionKey?: string
   liveConfigManaged?: boolean
   isInConfig?: boolean
@@ -254,6 +256,8 @@ export const providerToCard = (
   opencodeNpm: provider.opencodeNpm || '',
   opencodeSettingsConfig: cloneCardValue(provider.opencodeSettingsConfig || {}),
   category: provider.category || '',
+  authProvider: provider.authProvider || '',
+  authAccountId: provider.authAccountId || '',
   partnerPromotionKey: provider.partnerPromotionKey || '',
   cliConfig: cloneCardValue(provider.cliConfig || {}),
   availabilityMonitorEnabled: !!provider.availabilityMonitorEnabled,
@@ -501,6 +505,8 @@ export const serializeProviders = (
       opencodeSettingsConfig: cloneCardValue(provider.opencodeSettingsConfig || {}),
       apiKeyUrl: provider.apiKeyUrl || '',
       category: provider.category || '',
+      authProvider: provider.authProvider || '',
+      authAccountId: provider.authAccountId || '',
       partnerPromotionKey: provider.partnerPromotionKey || '',
       liveConfigManaged: provider.liveConfigManaged,
       isInConfig: provider.isInConfig,

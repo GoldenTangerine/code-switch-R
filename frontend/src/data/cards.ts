@@ -49,6 +49,10 @@ export type AutomationCard = {
   opencodeSettingsConfig?: Record<string, any>
   // OpenCode 供应商分类 / 合作伙伴元数据。
   category?: string
+  // 托管认证来源，例如 codex_oauth。
+  authProvider?: string
+  // 托管认证绑定账号 ID。
+  authAccountId?: string
   partnerPromotionKey?: string
   // OpenCode additive mode：是否由本应用管理 live config 中的 provider key
   liveConfigManaged?: boolean
@@ -138,18 +142,6 @@ export const automationCardGroups: Record<'claude' | 'codex', AutomationCard[]> 
     },
   ],
   codex: [
-    {
-      id: 200,
-      name: 'Codex 官方登录',
-      apiUrl: '',
-      apiKey: '',
-      officialSite: 'https://chatgpt.com/codex',
-      icon: 'openai',
-      tint: 'rgba(16, 185, 129, 0.16)',
-      accent: '#10b981',
-      enabled: true,
-      category: 'official',
-    },
     {
       id: 201,
       name: 'AICoding.sh',

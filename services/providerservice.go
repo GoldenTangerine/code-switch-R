@@ -31,8 +31,12 @@ type Provider struct {
 	Tint    string `json:"tint"`
 	Accent  string `json:"accent"`
 	Enabled bool   `json:"enabled"`
-	// 供应商分类：official / third_party / custom 等；Codex 官方登录依赖 official。
+	// 供应商分类：official / third_party / custom 等。
 	Category string `json:"category,omitempty"`
+	// 托管认证来源，例如 codex_oauth。为空时使用 APIKey。
+	AuthProvider string `json:"authProvider,omitempty"`
+	// 托管认证绑定账号 ID。为空时使用该认证来源的默认账号。
+	AuthAccountID string `json:"authAccountId,omitempty"`
 	// Claude API 格式（仅 Claude 供应商使用）
 	// - anthropic: 原生 Anthropic Messages API，直接透传
 	// - openai_chat: OpenAI Chat Completions，需要格式转换
@@ -590,11 +594,10 @@ func (ps *ProviderService) loadProvidersNoLock(kind string) ([]Provider, error) 
 }
 
 func ensureBuiltInProviders(kind string, providers []Provider, migrated bool) ([]Provider, bool) {
-	if kind != "codex" || hasCodexOfficialProvider(providers) {
+	if kind != "codex" {
 		return providers, migrated
 	}
-	providers = append([]Provider{codexOfficialProviderCard()}, providers...)
-	return providers, migrated
+	return filterPersistentProviders(kind, providers), migrated
 }
 
 func hasCodexOfficialProvider(providers []Provider) bool {
@@ -620,7 +623,10 @@ func codexOfficialProviderCard() Provider {
 }
 
 func isCodexOfficialProviderCard(provider Provider) bool {
-	return provider.ID == 200 && provider.Category == "official"
+	if provider.ID != 200 {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(provider.Category), "official") || strings.EqualFold(strings.TrimSpace(provider.Name), "Codex 官方登录")
 }
 
 // migrateFromLegacy 将旧连通性字段迁移到新可用性字段
@@ -710,6 +716,8 @@ func (ps *ProviderService) DuplicateProvider(kind string, sourceID int64) (*Prov
 		Accent:                 source.Accent,
 		Enabled:                false, // 默认禁用，避免与源供应商冲突
 		APIFormat:              source.APIFormat,
+		AuthProvider:           source.AuthProvider,
+		AuthAccountID:          source.AuthAccountID,
 		Level:                  source.Level,
 		APIEndpoint:            source.APIEndpoint, // 复制端点配置
 		ModelMappingMissPolicy: normalizeModelMappingMissPolicy(source.ModelMappingMissPolicy),
@@ -1019,4 +1027,196 @@ func applyWildcardMapping(pattern, replacement, input string) string {
 
 	// 替换 replacement 中的 *
 	return strings.Replace(replacement, "*", wildcardPart, 1)
+}
+
+// EnsureCodexOAuthProvider 确保 ChatGPT Codex OAuth 登录后有一个可管理的 provider。
+func (ps *ProviderService) EnsureCodexOAuthProvider(accountID string, login string) (*Provider, error) {
+	if ps == nil {
+		return nil, fmt.Errorf("provider service 未初始化")
+	}
+	accountID = strings.TrimSpace(accountID)
+	if accountID == "" {
+		return nil, fmt.Errorf("accountID 不能为空")
+	}
+
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+
+	providers, err := ps.loadProvidersNoLock("codex")
+	if err != nil {
+		return nil, err
+	}
+	providers = filterPersistentProviders("codex", providers)
+
+	for i := range providers {
+		if !isCodexOAuthProvider(providers[i]) {
+			continue
+		}
+		if strings.TrimSpace(providers[i].AuthAccountID) != "" && strings.TrimSpace(providers[i].AuthAccountID) != accountID {
+			continue
+		}
+		normalizeCodexOAuthProvider(&providers[i], accountID, login)
+		providers[i].Enabled = false
+		if err := ps.saveProvidersLocked("codex", providers); err != nil {
+			return nil, err
+		}
+		provider := providers[i]
+		return &provider, nil
+	}
+
+	maxID := codexOAuthDefaultProviderID - 1
+	for _, provider := range providers {
+		if provider.ID > maxID {
+			maxID = provider.ID
+		}
+	}
+	provider := Provider{
+		ID:            maxID + 1,
+		Name:          codexOAuthProviderDisplayName(login),
+		APIURL:        codexOAuthBackendAPIBaseURL,
+		APIKey:        "",
+		Site:          "https://chatgpt.com/codex",
+		Icon:          "openai",
+		Tint:          "rgba(16, 185, 129, 0.16)",
+		Accent:        "#10b981",
+		Enabled:       false,
+		Category:      "official",
+		AuthProvider:  CodexOAuthProviderName,
+		AuthAccountID: accountID,
+		Level:         1,
+	}
+	providers = append(providers, provider)
+	if err := ps.saveProvidersLocked("codex", providers); err != nil {
+		return nil, err
+	}
+	return &provider, nil
+}
+
+// SelectCodexOAuthProvider 将指定 ChatGPT 账号对应的 OAuth provider 设为唯一启用项。
+func (ps *ProviderService) SelectCodexOAuthProvider(accountID string, login string) (*Provider, error) {
+	if ps == nil {
+		return nil, fmt.Errorf("provider service 未初始化")
+	}
+	accountID = strings.TrimSpace(accountID)
+	if accountID == "" {
+		return nil, fmt.Errorf("accountID 不能为空")
+	}
+
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+
+	providers, err := ps.loadProvidersNoLock("codex")
+	if err != nil {
+		return nil, err
+	}
+	providers = filterPersistentProviders("codex", providers)
+
+	selectedIndex := -1
+	maxID := codexOAuthDefaultProviderID - 1
+	for i := range providers {
+		if providers[i].ID > maxID {
+			maxID = providers[i].ID
+		}
+		if !isCodexOAuthProvider(providers[i]) {
+			continue
+		}
+		boundAccountID := strings.TrimSpace(providers[i].AuthAccountID)
+		if boundAccountID == accountID {
+			if selectedIndex >= 0 {
+				providers[selectedIndex].Enabled = false
+			}
+			selectedIndex = i
+			continue
+		}
+		if boundAccountID == "" && selectedIndex == -1 {
+			selectedIndex = i
+			continue
+		}
+		providers[i].Enabled = false
+	}
+
+	if selectedIndex >= 0 {
+		normalizeCodexOAuthProvider(&providers[selectedIndex], accountID, login)
+		providers[selectedIndex].Enabled = true
+		if err := ps.saveProvidersLocked("codex", providers); err != nil {
+			return nil, err
+		}
+		provider := providers[selectedIndex]
+		return &provider, nil
+	}
+
+	provider := Provider{
+		ID:            maxID + 1,
+		Name:          codexOAuthProviderDisplayName(login),
+		APIURL:        codexOAuthBackendAPIBaseURL,
+		APIKey:        "",
+		Site:          "https://chatgpt.com/codex",
+		Icon:          "openai",
+		Tint:          "rgba(16, 185, 129, 0.16)",
+		Accent:        "#10b981",
+		Enabled:       true,
+		Category:      "official",
+		AuthProvider:  CodexOAuthProviderName,
+		AuthAccountID: accountID,
+		Level:         1,
+	}
+	providers = append(providers, provider)
+	if err := ps.saveProvidersLocked("codex", providers); err != nil {
+		return nil, err
+	}
+	return &provider, nil
+}
+
+// DisableCodexOAuthProviders 禁用已失效账号绑定的 Codex OAuth provider。
+func (ps *ProviderService) DisableCodexOAuthProviders(accountID string) error {
+	if ps == nil {
+		return nil
+	}
+	accountID = strings.TrimSpace(accountID)
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	providers, err := ps.loadProvidersNoLock("codex")
+	if err != nil {
+		return err
+	}
+	changed := false
+	for i := range providers {
+		if !isCodexOAuthProvider(providers[i]) {
+			continue
+		}
+		if accountID != "" && strings.TrimSpace(providers[i].AuthAccountID) != accountID {
+			continue
+		}
+		if providers[i].Enabled {
+			providers[i].Enabled = false
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	return ps.saveProvidersLocked("codex", providers)
+}
+
+func normalizeCodexOAuthProvider(provider *Provider, accountID string, login string) {
+	provider.AuthAccountID = accountID
+	provider.AuthProvider = CodexOAuthProviderName
+	provider.APIURL = codexOAuthBackendAPIBaseURL
+	provider.APIKey = ""
+	provider.Site = "https://chatgpt.com/codex"
+	if strings.TrimSpace(provider.Name) == "" {
+		provider.Name = codexOAuthProviderDisplayName(login)
+	}
+	if strings.TrimSpace(provider.Icon) == "" {
+		provider.Icon = "openai"
+	}
+	if strings.TrimSpace(provider.Tint) == "" {
+		provider.Tint = "rgba(16, 185, 129, 0.16)"
+	}
+	if strings.TrimSpace(provider.Accent) == "" {
+		provider.Accent = "#10b981"
+	}
+	if provider.Level <= 0 {
+		provider.Level = 1
+	}
 }
