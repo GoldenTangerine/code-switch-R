@@ -1810,13 +1810,21 @@
         "logout": "Sign out",
         "userCode": "Code",
         "openVerify": "Open verification",
+        "copyVerify": "Copy link",
+        "pasteCallback": "Paste done",
         "waiting": "Waiting for authorization…",
         "defaultAccount": "Default",
         "setDefault": "Set default",
         "remove": "Remove",
         "hint": "A Codex OAuth provider is created after sign-in.",
         "loginSuccess": "Codex OAuth signed in",
-        "loginFailed": "Codex OAuth sign-in failed: {error}"
+        "loginFailed": "Codex OAuth sign-in failed: {error}",
+        "openVerifyFailed": "Unable to open verification",
+        "copyVerifySuccess": "Verification link copied",
+        "copyVerifyFailed": "Unable to copy verification link",
+        "callbackURLMissing": "Copy the completed URL first",
+        "callbackURLInvalid": "Completed URL is invalid",
+        "callbackURLReadFailed": "Unable to read clipboard"
       }
     },
     "auth": {

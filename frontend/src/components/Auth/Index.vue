@@ -11,6 +11,7 @@
 import { onActivated, onBeforeUnmount, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import { Browser, Clipboard } from '@wailsio/runtime'
 import ListItem from '../Setting/ListRow.vue'
 import {
   fetchCodexOAuthStatus,
@@ -22,6 +23,7 @@ import {
   type CodexOAuthDeviceCodeResponse,
   type CodexOAuthStatus,
 } from '../../services/codexOAuth'
+import { writeTextToClipboard } from '../../utils/clipboard'
 import { extractErrorMessage } from '../../utils/error'
 import { showToast } from '../../utils/toast'
 
@@ -107,6 +109,75 @@ const startCodexOAuth = async () => {
     scheduleCodexOAuthPoll()
   } catch (error) {
     showToast(t('components.general.codexOAuth.loginFailed', { error: extractErrorMessage(error) }), 'error')
+  } finally {
+    codexOAuthBusy.value = false
+  }
+}
+
+const copyText = async (payload: string) => {
+  try {
+    await Clipboard.SetText(payload)
+  } catch {
+    await writeTextToClipboard(payload)
+  }
+}
+
+const readTextFromClipboard = async () => {
+  try {
+    return await Clipboard.Text()
+  } catch {
+    const clipboardReadText = typeof navigator === 'undefined'
+      ? undefined
+      : navigator.clipboard?.readText?.bind(navigator.clipboard)
+    if (clipboardReadText == null) throw new Error('clipboard read unavailable')
+    return clipboardReadText()
+  }
+}
+
+const openCodexOAuthVerification = () => {
+  const target = codexOAuthDevice.value?.verificationUri
+  if (!target) return
+
+  Browser.OpenURL(target).catch((error) => {
+    console.error('failed to open Codex OAuth verification link', error)
+    showToast(t('components.general.codexOAuth.openVerifyFailed'), 'error')
+  })
+}
+
+const copyCodexOAuthVerificationURL = async () => {
+  const target = codexOAuthDevice.value?.verificationUri
+  if (!target) return
+
+  try {
+    await copyText(target)
+    showToast(t('components.general.codexOAuth.copyVerifySuccess'), 'success')
+  } catch (error) {
+    console.error('failed to copy Codex OAuth verification link', error)
+    showToast(t('components.general.codexOAuth.copyVerifyFailed'), 'error')
+  }
+}
+
+const completeCodexOAuthFromClipboard = async () => {
+  const device = codexOAuthDevice.value
+  if (!device) return
+
+  codexOAuthBusy.value = true
+  try {
+    const callbackURL = (await readTextFromClipboard()).trim()
+    if (!callbackURL) {
+      showToast(t('components.general.codexOAuth.callbackURLMissing'), 'warning')
+      return
+    }
+    try {
+      new URL(callbackURL)
+    } catch {
+      showToast(t('components.general.codexOAuth.callbackURLInvalid'), 'warning')
+      return
+    }
+    await pollCodexOAuthOnce()
+  } catch (error) {
+    console.error('failed to complete Codex OAuth from clipboard', error)
+    showToast(t('components.general.codexOAuth.callbackURLReadFailed'), 'error')
   } finally {
     codexOAuthBusy.value = false
   }
@@ -221,9 +292,17 @@ onBeforeUnmount(() => {
 
               <div v-if="codexOAuthDevice" class="codex-oauth-device">
                 <span>{{ t('components.general.codexOAuth.userCode') }}：<strong>{{ codexOAuthDevice.userCode }}</strong></span>
-                <a :href="codexOAuthDevice.verificationUri" target="_blank" rel="noreferrer">
-                  {{ t('components.general.codexOAuth.openVerify') }}
-                </a>
+                <div class="codex-oauth-device__actions">
+                  <a :href="codexOAuthDevice.verificationUri" target="_blank" rel="noreferrer" @click.prevent="openCodexOAuthVerification">
+                    {{ t('components.general.codexOAuth.openVerify') }}
+                  </a>
+                  <button class="codex-oauth-link-btn" type="button" @click="copyCodexOAuthVerificationURL">
+                    {{ t('components.general.codexOAuth.copyVerify') }}
+                  </button>
+                  <button class="codex-oauth-link-btn" type="button" :disabled="codexOAuthBusy" @click="completeCodexOAuthFromClipboard">
+                    {{ t('components.general.codexOAuth.pasteCallback') }}
+                  </button>
+                </div>
                 <span class="auth-hint">{{ codexOAuthPollingMessage }}</span>
               </div>
 
@@ -358,6 +437,27 @@ onBeforeUnmount(() => {
 .codex-oauth-device a {
   color: var(--mac-accent);
   text-decoration: none;
+}
+
+.codex-oauth-device__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.codex-oauth-link-btn {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--mac-accent);
+  cursor: pointer;
+  font: inherit;
+}
+
+.codex-oauth-link-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .codex-oauth-account {

@@ -1811,13 +1811,21 @@
         "logout": "退出",
         "userCode": "验证码",
         "openVerify": "打开验证页",
+        "copyVerify": "复制链接",
+        "pasteCallback": "粘贴完成",
         "waiting": "等待授权完成…",
         "defaultAccount": "默认",
         "setDefault": "设为默认",
         "remove": "移除",
         "hint": "登录后会自动创建 Codex OAuth 供应商。",
         "loginSuccess": "Codex OAuth 登录成功",
-        "loginFailed": "Codex OAuth 登录失败：{error}"
+        "loginFailed": "Codex OAuth 登录失败：{error}",
+        "openVerifyFailed": "无法打开验证页",
+        "copyVerifySuccess": "验证链接已复制",
+        "copyVerifyFailed": "无法复制验证链接",
+        "callbackURLMissing": "请先复制认证后的 URL",
+        "callbackURLInvalid": "认证后的 URL 无效",
+        "callbackURLReadFailed": "无法读取剪贴板"
       }
     },
     "auth": {
