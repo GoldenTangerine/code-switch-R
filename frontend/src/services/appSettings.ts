@@ -78,9 +78,24 @@ export type AppSettings = {
   unify_codex_migrate_existing: boolean
   provider_concurrency_limits: Record<string, boolean>
   provider_quota_query_preset_codes: Record<string, string>
+  provider_quota_query_presets: ProviderQuotaQueryPresetGroups
   capture_request_log_payload: boolean
   sanitize_request_log_payload: boolean
 }
+
+export type ProviderQuotaQueryPresetEntry = {
+  id: string
+  name: string
+  code: string
+  updatedAt?: number
+}
+
+export type ProviderQuotaQueryPresetGroup = {
+  defaultId?: string
+  items: ProviderQuotaQueryPresetEntry[]
+}
+
+export type ProviderQuotaQueryPresetGroups = Record<string, ProviderQuotaQueryPresetGroup>
 
 const DEFAULT_SETTINGS: AppSettings = {
   show_heatmap: true,
@@ -130,6 +145,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   unify_codex_migrate_existing: false,
   provider_concurrency_limits: {},
   provider_quota_query_preset_codes: {},
+  provider_quota_query_presets: {},
   capture_request_log_payload: false,
   sanitize_request_log_payload: true,
 }
@@ -141,6 +157,7 @@ type AppSettingsResponse = Partial<AppSettings> & {
   budget_quota_settings_codex?: unknown
   provider_concurrency_limits?: unknown
   provider_quota_query_preset_codes?: unknown
+  provider_quota_query_presets?: unknown
 }
 
 type SerializedBudgetQuotaAdjustments = {
@@ -175,6 +192,66 @@ const normalizeProviderQuotaQueryPresetCodes = (value: unknown): Record<string, 
   return normalized
 }
 
+const providerQuotaQueryPresetTypeSet = new Set(['custom', 'general', 'newapi'])
+
+const normalizeProviderQuotaQueryPresetGroups = (
+  value: unknown,
+  legacyCodes: Record<string, string> = {},
+): ProviderQuotaQueryPresetGroups => {
+  const normalized: ProviderQuotaQueryPresetGroups = {}
+  const source = value && typeof value === 'object'
+    ? value as Record<string, unknown>
+    : {}
+
+  Object.entries(source).forEach(([key, groupValue]) => {
+    const normalizedKey = key.trim().toLowerCase()
+    if (!providerQuotaQueryPresetTypeSet.has(normalizedKey) || !groupValue || typeof groupValue !== 'object') return
+
+    const rawGroup = groupValue as Record<string, unknown>
+    const seenIds = new Set<string>()
+    const rawItems = Array.isArray(rawGroup.items) ? rawGroup.items : []
+    const items: ProviderQuotaQueryPresetEntry[] = rawItems.flatMap((item, index) => {
+      if (!item || typeof item !== 'object') return []
+      const rawItem = item as Record<string, unknown>
+      const code = `${rawItem.code ?? ''}`.trim()
+      if (!code) return []
+      const fallbackId = `${normalizedKey}-${index + 1}`
+      const id = `${rawItem.id ?? fallbackId}`.trim() || fallbackId
+      if (seenIds.has(id)) return []
+      seenIds.add(id)
+      return [{
+        id,
+        name: `${rawItem.name ?? ''}`.trim() || '自定义预设',
+        code,
+        updatedAt: Number.isFinite(Number(rawItem.updatedAt)) ? Number(rawItem.updatedAt) : undefined,
+      }]
+    })
+
+    const defaultId = `${rawGroup.defaultId ?? ''}`.trim()
+    if (items.length > 0) {
+      normalized[normalizedKey] = {
+        defaultId: defaultId && seenIds.has(defaultId) ? defaultId : items[0]?.id,
+        items,
+      }
+    }
+  })
+
+  Object.entries(legacyCodes).forEach(([key, code]) => {
+    if (normalized[key]?.items.length) return
+    const id = `legacy-${key}`
+    normalized[key] = {
+      defaultId: id,
+      items: [{
+        id,
+        name: '自定义预设',
+        code,
+      }],
+    }
+  })
+
+  return normalized
+}
+
 const normalizeAppSettingsResponse = (value: unknown): AppSettings => {
   const data = value && typeof value === 'object'
     ? value as AppSettingsResponse
@@ -188,6 +265,9 @@ const normalizeAppSettingsResponse = (value: unknown): AppSettings => {
     intensityStopL3: data?.heatmap_intensity_stop_l3,
   })
   const normalizedHomeProviderTabs = normalizeHomeProviderTabs(data?.home_provider_tabs)
+  const normalizedProviderQuotaQueryPresetCodes = normalizeProviderQuotaQueryPresetCodes(
+    data?.provider_quota_query_preset_codes,
+  )
   return {
     ...DEFAULT_SETTINGS,
     ...data,
@@ -235,8 +315,10 @@ const normalizeAppSettingsResponse = (value: unknown): AppSettings => {
       refreshMonthDay: data?.budget_refresh_month_day_codex,
     }),
     provider_concurrency_limits: normalizeBooleanMap(data?.provider_concurrency_limits),
-    provider_quota_query_preset_codes: normalizeProviderQuotaQueryPresetCodes(
-      data?.provider_quota_query_preset_codes,
+    provider_quota_query_preset_codes: normalizedProviderQuotaQueryPresetCodes,
+    provider_quota_query_presets: normalizeProviderQuotaQueryPresetGroups(
+      data?.provider_quota_query_presets,
+      normalizedProviderQuotaQueryPresetCodes,
     ),
   }
 }
@@ -284,6 +366,9 @@ const serializeAppSettings = (settings: AppSettings) => {
     provider_concurrency_limits: normalizeBooleanMap(settings.provider_concurrency_limits),
     provider_quota_query_preset_codes: normalizeProviderQuotaQueryPresetCodes(
       settings.provider_quota_query_preset_codes,
+    ),
+    provider_quota_query_presets: normalizeProviderQuotaQueryPresetGroups(
+      settings.provider_quota_query_presets,
     ),
     budget_quota_used_adjustments_codex: serializeBudgetQuotaAdjustments(settings.budget_quota_used_adjustments_codex),
     budget_quota_settings_codex: serializeBudgetQuotaSettings(settings.budget_quota_settings_codex),

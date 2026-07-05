@@ -1288,6 +1288,7 @@ const persistAppSettingsNow = async () => {
       unify_codex_migrate_existing: unifyCodexMigrateExisting.value,
       provider_concurrency_limits: latestSettings?.provider_concurrency_limits ?? {},
       provider_quota_query_preset_codes: latestSettings?.provider_quota_query_preset_codes ?? {},
+      provider_quota_query_presets: latestSettings?.provider_quota_query_presets ?? {},
       capture_request_log_payload: captureRequestLogPayloadEnabled.value,
       sanitize_request_log_payload: sanitizeRequestLogPayloadEnabled.value,
     }

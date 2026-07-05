@@ -67,6 +67,25 @@ describe('appSettings', () => {
     })
   })
 
+  it('migrates legacy provider quota query preset codes to named presets', async () => {
+    vi.mocked(Call.ByName).mockResolvedValueOnce({
+      provider_quota_query_preset_codes: {
+        general: '({ request: { url: "{{baseUrl}}/usage" }, extractor: function() {} })',
+      },
+    })
+
+    const settings = await fetchAppSettings()
+
+    expect(settings.provider_quota_query_presets.general).toEqual({
+      defaultId: 'legacy-general',
+      items: [{
+        id: 'legacy-general',
+        name: '自定义预设',
+        code: '({ request: { url: "{{baseUrl}}/usage" }, extractor: function() {} })',
+      }],
+    })
+  })
+
   it('uses the provided fallback for invalid granularity values', () => {
     expect(normalizeHeatmapGranularity('weird-value')).toBe('daily')
     expect(normalizeHeatmapGranularity('weird-value', 'hourly')).toBe('hourly')
