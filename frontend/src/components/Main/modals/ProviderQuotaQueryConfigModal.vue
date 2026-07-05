@@ -227,9 +227,14 @@
               {{ t('components.main.form.hints.providerQuotaQueryCodeHint') }}
             </p>
           </div>
-          <BaseButton variant="outline" type="button" @click="handleLoadPresetCode">
-            {{ t('components.main.form.actions.providerQuotaQueryLoadPreset') }}
-          </BaseButton>
+          <div class="provider-quota-query-config-modal__section-actions">
+            <BaseButton variant="outline" type="button" @click="handleLoadPresetCode">
+              {{ t('components.main.form.actions.providerQuotaQueryLoadPreset') }}
+            </BaseButton>
+            <BaseButton variant="outline" type="button" @click="openPresetEditor">
+              {{ t('components.main.form.actions.providerQuotaQueryEditPreset') }}
+            </BaseButton>
+          </div>
         </div>
 
         <JsonCodeEditor
@@ -258,6 +263,62 @@
       </footer>
     </form>
   </InlineModal>
+
+  <InlineModal
+    :open="presetEditorOpen"
+    :title="t('components.main.form.labels.providerQuotaQueryPresetEditor')"
+    :body-scrollable="true"
+    :panel-width="'min(860px, 92vw)'"
+    @close="closePresetEditor"
+  >
+    <form class="provider-quota-query-preset-editor" @submit.prevent="handleSavePresetCode">
+      <section class="provider-quota-query-config-modal__section">
+        <div class="provider-quota-query-config-modal__section-header">
+          <div>
+            <p class="provider-quota-query-config-modal__title">
+              {{ selectedTemplateLabel }}
+            </p>
+            <p class="provider-quota-query-config-modal__hint">
+              {{ t('components.main.form.hints.providerQuotaQueryPresetEditor') }}
+            </p>
+          </div>
+        </div>
+
+        <JsonCodeEditor
+          v-model="presetEditorText"
+          mode="plain"
+          :rows="20"
+          :show-validation="false"
+          :surface-height="'360px'"
+          :placeholder="t('components.main.form.placeholders.providerQuotaQueryCode')"
+        />
+        <p v-if="presetEditorError" class="provider-quota-query-preset-editor__error">
+          {{ presetEditorError }}
+        </p>
+      </section>
+
+      <footer class="provider-quota-query-config-modal__actions">
+        <BaseButton variant="outline" type="button" @click="closePresetEditor">
+          {{ t('components.main.form.actions.cancel') }}
+        </BaseButton>
+        <BaseButton
+          type="button"
+          variant="outline"
+          :disabled="presetEditorSaving || presetEditorRestoring"
+          @click="handleRestorePresetCode"
+        >
+          {{ presetEditorRestoring
+            ? t('components.main.form.actions.providerQuotaQueryRestoringPreset')
+            : t('components.main.form.actions.providerQuotaQueryRestorePreset') }}
+        </BaseButton>
+        <BaseButton type="submit" :disabled="presetEditorSaving || presetEditorRestoring">
+          {{ presetEditorSaving
+            ? t('components.main.form.actions.providerQuotaQuerySavingPreset')
+            : t('components.main.form.actions.save') }}
+        </BaseButton>
+      </footer>
+    </form>
+  </InlineModal>
 </template>
 
 <script setup lang="ts">
@@ -267,7 +328,8 @@ import BaseButton from '../../common/BaseButton.vue'
 import BaseInput from '../../common/BaseInput.vue'
 import InlineModal from '../../common/InlineModal.vue'
 import JsonCodeEditor from '../../common/JsonCodeEditor.vue'
-import { queryProviderQuota } from '../../../services/providerQuotaQuery'
+import { fetchAppSettings, saveAppSettings } from '../../../services/appSettings'
+import { queryProviderQuota, validateProviderQuotaScriptPreset } from '../../../services/providerQuotaQuery'
 import { showToast } from '../../../utils/toast'
 import {
   detectProviderQuotaBalanceProvider,
@@ -288,6 +350,7 @@ import {
 
 const DEFAULT_TIMEOUT = 10
 const DEFAULT_AUTO_QUERY_INTERVAL = 5
+const editablePresetTemplateTypes = new Set<ProviderQuotaTemplateType>(['custom', 'general', 'newapi'])
 
 const props = defineProps<{
   open: boolean
@@ -316,6 +379,12 @@ const draft = reactive<ProviderQuotaQueryConfig>({
   autoQueryInterval: DEFAULT_AUTO_QUERY_INTERVAL,
 })
 const testing = ref(false)
+const presetCodes = ref<Record<string, string>>({})
+const presetEditorOpen = ref(false)
+const presetEditorText = ref('')
+const presetEditorError = ref('')
+const presetEditorSaving = ref(false)
+const presetEditorRestoring = ref(false)
 
 const detectedTokenPlanProvider = computed(() => (
   detectProviderQuotaTokenPlanProvider(props.providerApiUrl)
@@ -338,6 +407,7 @@ const detectedBalanceProviderOption = computed(() => (
 const selectedTemplate = computed<ProviderQuotaTemplateType>(() => (
   draft.templateType ?? 'general'
 ))
+const selectedTemplateLabel = computed(() => t(providerQuotaTemplateLabelKeyMap[selectedTemplate.value]))
 const showScriptSection = computed(() => (
   selectedTemplate.value === 'custom'
     || selectedTemplate.value === 'general'
@@ -449,6 +519,14 @@ function buildPresetCode(templateType: ProviderQuotaTemplateType): string {
     default:
       return ''
   }
+}
+
+function resolvePresetCode(templateType: ProviderQuotaTemplateType): string {
+  if (editablePresetTemplateTypes.has(templateType)) {
+    const customCode = `${presetCodes.value[templateType] ?? ''}`.trim()
+    if (customCode) return customCode
+  }
+  return buildPresetCode(templateType)
 }
 
 function createDefaultConfig(): ProviderQuotaQueryConfig {
@@ -636,8 +714,84 @@ function handleSelectTemplate(templateType: ProviderQuotaTemplateType) {
 
 function handleLoadPresetCode() {
   if (!showScriptTemplate(selectedTemplate.value)) return
-  draft.code = buildPresetCode(selectedTemplate.value)
+  draft.code = resolvePresetCode(selectedTemplate.value)
   showToast(t('components.main.form.toast.providerQuotaQueryPresetLoaded'), 'success')
+}
+
+async function loadPresetCodes() {
+  try {
+    const settings = await fetchAppSettings()
+    presetCodes.value = {
+      ...(settings.provider_quota_query_preset_codes ?? {}),
+    }
+  } catch (error) {
+    console.error('failed to load provider quota query presets', error)
+    presetCodes.value = {}
+  }
+}
+
+function openPresetEditor() {
+  if (!showScriptTemplate(selectedTemplate.value)) return
+  presetEditorError.value = ''
+  presetEditorText.value = resolvePresetCode(selectedTemplate.value)
+  presetEditorOpen.value = true
+}
+
+function closePresetEditor() {
+  presetEditorOpen.value = false
+  presetEditorError.value = ''
+}
+
+async function persistPresetCodes(nextCodes: Record<string, string>) {
+  const settings = await fetchAppSettings()
+  const savedSettings = await saveAppSettings({
+    ...settings,
+    provider_quota_query_preset_codes: nextCodes,
+  })
+  presetCodes.value = {
+    ...(savedSettings.provider_quota_query_preset_codes ?? {}),
+  }
+}
+
+async function handleSavePresetCode() {
+  if (!showScriptTemplate(selectedTemplate.value)) return
+  presetEditorError.value = ''
+  presetEditorSaving.value = true
+  try {
+    const nextCode = presetEditorText.value.trim()
+    const validation = await validateProviderQuotaScriptPreset(selectedTemplate.value, nextCode)
+    if (!validation.valid) {
+      presetEditorError.value = validation.error || t('components.main.form.errors.providerQuotaQueryPresetInvalid')
+      return
+    }
+    await persistPresetCodes({
+      ...presetCodes.value,
+      [selectedTemplate.value]: nextCode,
+    })
+    showToast(t('components.main.form.toast.providerQuotaQueryPresetSaved'), 'success')
+    closePresetEditor()
+  } catch (error) {
+    presetEditorError.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    presetEditorSaving.value = false
+  }
+}
+
+async function handleRestorePresetCode() {
+  if (!showScriptTemplate(selectedTemplate.value)) return
+  presetEditorError.value = ''
+  presetEditorRestoring.value = true
+  try {
+    const nextCodes = { ...presetCodes.value }
+    delete nextCodes[selectedTemplate.value]
+    await persistPresetCodes(nextCodes)
+    presetEditorText.value = buildPresetCode(selectedTemplate.value)
+    showToast(t('components.main.form.toast.providerQuotaQueryPresetRestored'), 'success')
+  } catch (error) {
+    presetEditorError.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    presetEditorRestoring.value = false
+  }
 }
 
 async function handleTest() {
@@ -711,6 +865,9 @@ watch(
   (open) => {
     if (open) {
       resetDraft()
+      void loadPresetCodes()
+    } else {
+      closePresetEditor()
     }
   },
 )
@@ -751,6 +908,14 @@ watch(
 
 .provider-quota-query-config-modal__section-header--with-action {
   align-items: center;
+}
+
+.provider-quota-query-config-modal__section-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .provider-quota-query-config-modal__switch-row {
@@ -932,6 +1097,22 @@ watch(
   flex-shrink: 0;
 }
 
+.provider-quota-query-preset-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+  min-width: 0;
+}
+
+.provider-quota-query-preset-editor__error {
+  margin: 10px 0 0;
+  color: #dc2626;
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
 :global(.dark) .provider-quota-query-config-modal__section {
   background: color-mix(in srgb, rgba(255, 255, 255, 0.04) 70%, rgba(17, 24, 39, 0.92));
   border-color: rgba(255, 255, 255, 0.08);
@@ -987,6 +1168,10 @@ watch(
   .provider-quota-query-config-modal__section-header--with-action {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .provider-quota-query-config-modal__section-actions {
+    justify-content: stretch;
   }
 
   .provider-quota-query-config-modal__template-grid,

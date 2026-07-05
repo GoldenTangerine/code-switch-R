@@ -77,6 +77,7 @@ export type AppSettings = {
   unify_codex_session_history: boolean
   unify_codex_migrate_existing: boolean
   provider_concurrency_limits: Record<string, boolean>
+  provider_quota_query_preset_codes: Record<string, string>
   capture_request_log_payload: boolean
   sanitize_request_log_payload: boolean
 }
@@ -128,6 +129,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   unify_codex_session_history: false,
   unify_codex_migrate_existing: false,
   provider_concurrency_limits: {},
+  provider_quota_query_preset_codes: {},
   capture_request_log_payload: false,
   sanitize_request_log_payload: true,
 }
@@ -138,6 +140,7 @@ type AppSettingsResponse = Partial<AppSettings> & {
   budget_quota_used_adjustments_codex?: unknown
   budget_quota_settings_codex?: unknown
   provider_concurrency_limits?: unknown
+  provider_quota_query_preset_codes?: unknown
 }
 
 type SerializedBudgetQuotaAdjustments = {
@@ -155,6 +158,19 @@ const normalizeBooleanMap = (value: unknown): Record<string, boolean> => {
     const normalizedKey = key.trim()
     if (!normalizedKey) return
     normalized[normalizedKey] = enabled === true
+  })
+  return normalized
+}
+
+const normalizeProviderQuotaQueryPresetCodes = (value: unknown): Record<string, string> => {
+  if (!value || typeof value !== 'object') return {}
+  const allowedKeys = new Set(['custom', 'general', 'newapi'])
+  const normalized: Record<string, string> = {}
+  Object.entries(value as Record<string, unknown>).forEach(([key, code]) => {
+    const normalizedKey = key.trim().toLowerCase()
+    const normalizedCode = `${code ?? ''}`.trim()
+    if (!allowedKeys.has(normalizedKey) || !normalizedCode) return
+    normalized[normalizedKey] = normalizedCode
   })
   return normalized
 }
@@ -219,6 +235,9 @@ const normalizeAppSettingsResponse = (value: unknown): AppSettings => {
       refreshMonthDay: data?.budget_refresh_month_day_codex,
     }),
     provider_concurrency_limits: normalizeBooleanMap(data?.provider_concurrency_limits),
+    provider_quota_query_preset_codes: normalizeProviderQuotaQueryPresetCodes(
+      data?.provider_quota_query_preset_codes,
+    ),
   }
 }
 
@@ -263,6 +282,9 @@ const serializeAppSettings = (settings: AppSettings) => {
     budget_refresh_month_day_codex: budgetLegacyCodex.refreshMonthDay,
     home_provider_tabs: normalizeHomeProviderTabs(settings.home_provider_tabs),
     provider_concurrency_limits: normalizeBooleanMap(settings.provider_concurrency_limits),
+    provider_quota_query_preset_codes: normalizeProviderQuotaQueryPresetCodes(
+      settings.provider_quota_query_preset_codes,
+    ),
     budget_quota_used_adjustments_codex: serializeBudgetQuotaAdjustments(settings.budget_quota_used_adjustments_codex),
     budget_quota_settings_codex: serializeBudgetQuotaSettings(settings.budget_quota_settings_codex),
   }

@@ -97,6 +97,7 @@ type AppSettings struct {
 	UnifyCodexSessionHistory        bool                   `json:"unify_codex_session_history"`
 	UnifyCodexMigrateExisting       bool                   `json:"unify_codex_migrate_existing"`
 	ProviderConcurrencyLimits       map[string]bool        `json:"provider_concurrency_limits"`
+	ProviderQuotaQueryPresetCodes   map[string]string      `json:"provider_quota_query_preset_codes,omitempty"`
 	CaptureRequestLogPayload        bool                   `json:"capture_request_log_payload"`
 	SanitizeRequestLogPayload       bool                   `json:"sanitize_request_log_payload"`
 }
@@ -331,6 +332,7 @@ func (as *AppSettingsService) defaultSettings() AppSettings {
 		UnifyCodexSessionHistory:        false,
 		UnifyCodexMigrateExisting:       false,
 		ProviderConcurrencyLimits:       map[string]bool{},
+		ProviderQuotaQueryPresetCodes:   map[string]string{},
 		CaptureRequestLogPayload:        false, // 默认关闭 payload 采集，降低隐私与存储风险
 		SanitizeRequestLogPayload:       true,  // 默认开启 payload 脱敏，避免敏感信息明文落库
 	}
@@ -386,6 +388,24 @@ func normalizeProviderConcurrencyLimits(settings *AppSettings) {
 	settings.ProviderConcurrencyLimits = normalized
 }
 
+func normalizeProviderQuotaQueryPresetCodes(settings *AppSettings) {
+	allowedTypes := map[string]bool{
+		"custom":  true,
+		"general": true,
+		"newapi":  true,
+	}
+	normalized := map[string]string{}
+	for key, code := range settings.ProviderQuotaQueryPresetCodes {
+		normalizedKey := strings.TrimSpace(strings.ToLower(key))
+		normalizedCode := strings.TrimSpace(code)
+		if !allowedTypes[normalizedKey] || normalizedCode == "" {
+			continue
+		}
+		normalized[normalizedKey] = normalizedCode
+	}
+	settings.ProviderQuotaQueryPresetCodes = normalized
+}
+
 // GetAppSettings returns the persisted app settings or defaults if the file does not exist.
 func (as *AppSettingsService) GetAppSettings() (AppSettings, error) {
 	as.mu.Lock()
@@ -404,6 +424,7 @@ func (as *AppSettingsService) SaveAppSettings(settings AppSettings) (AppSettings
 	normalizeBudgetSettings(&settings)
 	settings.UpdateHistoryKeepCount = normalizeUpdateHistoryKeepCount(settings.UpdateHistoryKeepCount)
 	normalizeProviderConcurrencyLimits(&settings)
+	normalizeProviderQuotaQueryPresetCodes(&settings)
 
 	// 同步开机自启动状态
 	if as.autoStartService != nil {
@@ -466,6 +487,7 @@ func (as *AppSettingsService) loadLocked() (AppSettings, error) {
 	normalizeBudgetSettings(&settings)
 	settings.UpdateHistoryKeepCount = normalizeUpdateHistoryKeepCount(settings.UpdateHistoryKeepCount)
 	normalizeProviderConcurrencyLimits(&settings)
+	normalizeProviderQuotaQueryPresetCodes(&settings)
 	return settings, nil
 }
 
@@ -480,6 +502,7 @@ func (as *AppSettingsService) saveLocked(settings AppSettings) error {
 	normalizeBudgetSettings(&settings)
 	settings.UpdateHistoryKeepCount = normalizeUpdateHistoryKeepCount(settings.UpdateHistoryKeepCount)
 	normalizeProviderConcurrencyLimits(&settings)
+	normalizeProviderQuotaQueryPresetCodes(&settings)
 	data, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		return err

@@ -30,6 +30,11 @@ export type ProviderQuotaQueryResult = {
   queriedAt?: number
 }
 
+export type ProviderQuotaScriptValidationResult = {
+  valid: boolean
+  error?: string
+}
+
 export async function queryProviderQuota(
   queryTypeOrConfig: ProviderQuotaQueryType | ProviderQuotaQueryConfig,
   apiUrl: string,
@@ -43,5 +48,16 @@ export async function queryProviderQuota(
     apiUrl.trim(),
     apiKey.trim(),
     normalizedConfig ?? null,
+  )
+}
+
+export async function validateProviderQuotaScriptPreset(
+  templateType: string,
+  code: string,
+): Promise<ProviderQuotaScriptValidationResult> {
+  return Call.ByName(
+    `${PROVIDER_QUOTA_QUERY_SERVICE}.ValidateScriptPreset`,
+    templateType,
+    code,
   )
 }

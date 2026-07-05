@@ -511,11 +511,17 @@ onUnmounted(() => {
 }
 
 .json-code-editor__surface {
+  position: relative;
+  z-index: 1;
   min-height: 280px;
+  overflow: hidden;
 }
 
 .json-code-editor__footer {
+  position: relative;
+  z-index: 3;
   display: flex;
+  flex-shrink: 0;
   justify-content: flex-end;
   padding: 10px 12px 12px;
   border-top: 1px solid var(--mac-border);
@@ -523,6 +529,8 @@ onUnmounted(() => {
 }
 
 .json-code-editor__format-btn {
+  position: relative;
+  z-index: 4;
   display: inline-flex;
   align-items: center;
   justify-content: center;

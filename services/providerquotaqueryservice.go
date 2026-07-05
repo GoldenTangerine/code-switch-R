@@ -81,6 +81,11 @@ type ProviderQuotaQueryResult struct {
 	QueriedAt int64                    `json:"queriedAt,omitempty"`
 }
 
+type ProviderQuotaScriptValidationResult struct {
+	Valid bool   `json:"valid"`
+	Error string `json:"error,omitempty"`
+}
+
 type ProviderQuotaQueryService struct {
 	client *http.Client
 }
@@ -101,6 +106,19 @@ func NewProviderQuotaQueryService() *ProviderQuotaQueryService {
 	return &ProviderQuotaQueryService{
 		client: &http.Client{Timeout: 10 * time.Second},
 	}
+}
+
+func (s *ProviderQuotaQueryService) ValidateScriptPreset(
+	templateType string,
+	scriptCode string,
+) *ProviderQuotaScriptValidationResult {
+	if err := validateProviderQuotaScriptPreset(templateType, scriptCode); err != nil {
+		return &ProviderQuotaScriptValidationResult{
+			Valid: false,
+			Error: err.Error(),
+		}
+	}
+	return &ProviderQuotaScriptValidationResult{Valid: true}
 }
 
 func (s *ProviderQuotaQueryService) QueryQuota(
@@ -521,6 +539,65 @@ func (s *ProviderQuotaQueryService) executeScriptQuotaQuery(
 		return nil, fmt.Errorf("脚本未返回可展示的额度数据")
 	}
 	return normalizeProviderQuotaQueryItems(items), nil
+}
+
+func validateProviderQuotaScriptPreset(templateType string, scriptCode string) error {
+	switch ProviderQuotaTemplateType(strings.TrimSpace(strings.ToLower(templateType))) {
+	case ProviderQuotaTemplateTypeCustom, ProviderQuotaTemplateTypeGeneral, ProviderQuotaTemplateTypeNewAPI:
+	default:
+		return fmt.Errorf("当前模版不支持编辑脚本预设")
+	}
+
+	scriptCode = strings.TrimSpace(scriptCode)
+	if scriptCode == "" {
+		return fmt.Errorf("查询脚本不能为空")
+	}
+
+	vm := goja.New()
+	timer := time.AfterFunc(2*time.Second, func() {
+		vm.Interrupt("额度查询脚本校验超时")
+	})
+	defer timer.Stop()
+
+	compiledValue, err := vm.RunString(scriptCode)
+	if err != nil {
+		return fmt.Errorf("解析额度查询脚本失败: %w", err)
+	}
+
+	configObject := compiledValue.ToObject(vm)
+	if configObject == nil {
+		return fmt.Errorf("额度查询脚本必须返回配置对象")
+	}
+
+	requestValue := configObject.Get("request")
+	if goja.IsUndefined(requestValue) || goja.IsNull(requestValue) {
+		return fmt.Errorf("缺少 request 配置")
+	}
+
+	var requestConfig providerQuotaScriptRequestConfig
+	requestPayload, err := json.Marshal(requestValue.Export())
+	if err != nil {
+		return fmt.Errorf("序列化 request 配置失败: %w", err)
+	}
+	if err := json.Unmarshal(requestPayload, &requestConfig); err != nil {
+		return fmt.Errorf("解析 request 配置失败: %w", err)
+	}
+	requestConfig.URL = strings.TrimSpace(requestConfig.URL)
+	requestConfig.Method = strings.TrimSpace(requestConfig.Method)
+	if requestConfig.URL == "" {
+		return fmt.Errorf("request.url 不能为空")
+	}
+	if requestConfig.Method != "" {
+		method := strings.ToUpper(requestConfig.Method)
+		if _, err := http.NewRequest(method, "http://localhost", nil); err != nil {
+			return fmt.Errorf("request.method 不合法: %w", err)
+		}
+	}
+
+	if _, ok := goja.AssertFunction(configObject.Get("extractor")); !ok {
+		return fmt.Errorf("缺少 extractor 函数")
+	}
+	return nil
 }
 
 func buildProviderQuotaScriptWithVars(

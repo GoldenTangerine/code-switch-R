@@ -1098,6 +1098,9 @@ watch(
   position: absolute;
   right: 0;
   top: calc(100% + 6px);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   min-width: 150px;
   border: 1px solid var(--mac-border);
   border-radius: 10px;
@@ -1108,14 +1111,19 @@ watch(
 }
 
 .sync-menu-btn {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
   width: 100%;
+  min-width: 0 !important;
   border: 1px solid rgba(148, 163, 184, 0.32);
   border-radius: 8px;
-  padding: 7px 10px;
+  padding: 8px 12px !important;
   background: rgba(59, 130, 246, 0.1);
   color: var(--mac-text);
   cursor: pointer;
-  text-align: left;
+  text-align: center;
+  line-height: 1.2 !important;
   transition: background 0.15s ease, border-color 0.15s ease;
 }
 

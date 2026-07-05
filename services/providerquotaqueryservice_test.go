@@ -718,3 +718,41 @@ func TestProviderQuotaQueryService_QueryQuotaReturnsInvalidItemForOfficialBalanc
 		t.Fatalf("期望失败态已用/总量为 0 / 0，实际为 %f / %f", item.Used, item.Total)
 	}
 }
+
+func TestProviderQuotaQueryService_ValidateScriptPreset(t *testing.T) {
+	service := NewProviderQuotaQueryService()
+	result := service.ValidateScriptPreset(string(ProviderQuotaTemplateTypeGeneral), `({
+  request: {
+    url: "{{baseUrl}}/v1/usage",
+    method: "GET",
+    headers: { "Authorization": "Bearer {{apiKey}}" }
+  },
+  extractor: function(response) {
+    return {
+      remaining: response?.remaining ?? 0,
+      unit: response?.unit ?? "USD"
+    };
+  }
+})`)
+
+	if !result.Valid {
+		t.Fatalf("期望脚本预设校验通过，实际失败：%s", result.Error)
+	}
+}
+
+func TestProviderQuotaQueryService_ValidateScriptPresetRejectsMissingExtractor(t *testing.T) {
+	service := NewProviderQuotaQueryService()
+	result := service.ValidateScriptPreset(string(ProviderQuotaTemplateTypeGeneral), `({
+  request: {
+    url: "{{baseUrl}}/v1/usage",
+    method: "GET"
+  }
+})`)
+
+	if result.Valid {
+		t.Fatal("缺少 extractor 时不应校验通过")
+	}
+	if result.Error == "" {
+		t.Fatal("缺少 extractor 时应返回错误信息")
+	}
+}
