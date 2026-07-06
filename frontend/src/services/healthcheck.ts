@@ -28,6 +28,10 @@ export interface HealthCheckResult {
   latencyMs: number
   errorMessage: string
   checkedAt: string
+  totalRequests?: number
+  failedRequests?: number
+  slowRequests?: number
+  errorRate?: number
 }
 
 // Provider 时间线类型
@@ -338,10 +342,24 @@ const cloneLogProviderTimeline = (
   const bucketDurationMs = LOG_AVAILABILITY_RANGE_MS[range] / MOCK_HISTORY_LIMIT
   const now = Date.now()
   cloned.availabilityMonitorEnabled = true
-  cloned.items = cloned.items.slice(0, MOCK_HISTORY_LIMIT).map((item, index) => ({
-    ...item,
-    checkedAt: new Date(now - index * bucketDurationMs).toISOString(),
-  }))
+  cloned.items = cloned.items.slice(0, MOCK_HISTORY_LIMIT).map((item, index) => {
+    const totalRequests = item.status ? 12 : 0
+    const failedRequests = item.status === HealthStatus.FAILED || item.status === HealthStatus.VALIDATION_ERROR
+      ? 4
+      : item.status === HealthStatus.DEGRADED
+        ? 2
+        : 0
+    const slowRequests = item.status === HealthStatus.OPERATIONAL ? 1 : 0
+
+    return {
+      ...item,
+      checkedAt: new Date(now - index * bucketDurationMs).toISOString(),
+      totalRequests,
+      failedRequests,
+      slowRequests,
+      errorRate: totalRequests > 0 ? (failedRequests / totalRequests) * 100 : 0,
+    }
+  })
   cloned.latest = cloned.items.find((item) => item.status) ?? null
   return cloned
 }

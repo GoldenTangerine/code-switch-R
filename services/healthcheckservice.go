@@ -36,6 +36,8 @@ const (
 	MaxConcurrentChecks           = 5     // 最大并发检测数
 	MaxHistoryPerProvider         = 60    // 每个 Provider 最多保留历史数
 	LogAvailabilityHistoryLimit   = 72    // 日志模式最多返回的时间桶数量
+	LogAvailabilityWarningRate    = 5.0   // 日志模式黄色错误率阈值（%）
+	LogAvailabilityFailedRate     = 20.0  // 日志模式红色错误率阈值（%）
 )
 
 const (
@@ -51,16 +53,20 @@ var availabilityPlatforms = []string{"claude", "codex"}
 
 // HealthCheckResult 健康检查结果
 type HealthCheckResult struct {
-	ID           int64     `json:"id"`
-	ProviderID   int64     `json:"providerId"`
-	ProviderName string    `json:"providerName"`
-	Platform     string    `json:"platform"`
-	Model        string    `json:"model,omitempty"`
-	Endpoint     string    `json:"endpoint,omitempty"`
-	Status       string    `json:"status"`       // operational/degraded/failed/validation_failed
-	LatencyMs    int       `json:"latencyMs"`    // 响应延迟（毫秒）
-	ErrorMessage string    `json:"errorMessage"` // 错误消息
-	CheckedAt    time.Time `json:"checkedAt"`    // 检测时间
+	ID             int64     `json:"id"`
+	ProviderID     int64     `json:"providerId"`
+	ProviderName   string    `json:"providerName"`
+	Platform       string    `json:"platform"`
+	Model          string    `json:"model,omitempty"`
+	Endpoint       string    `json:"endpoint,omitempty"`
+	Status         string    `json:"status"`                   // operational/degraded/failed/validation_failed
+	LatencyMs      int       `json:"latencyMs"`                // 响应延迟（毫秒）
+	ErrorMessage   string    `json:"errorMessage"`             // 错误消息
+	CheckedAt      time.Time `json:"checkedAt"`                // 检测时间
+	TotalRequests  int       `json:"totalRequests,omitempty"`  // 日志聚合请求数
+	FailedRequests int       `json:"failedRequests,omitempty"` // 日志聚合失败请求数
+	SlowRequests   int       `json:"slowRequests,omitempty"`   // 日志聚合慢请求数
+	ErrorRate      float64   `json:"errorRate,omitempty"`      // 日志聚合错误占比（%）
 }
 
 // HealthCheckHistory 健康检查历史（单个 Provider 的时间线）
@@ -397,8 +403,10 @@ func (hcs *HealthCheckService) batchGetLogBasedHistories(platform string, provid
 		latestIndex := -1
 		for index, bucket := range buckets {
 			status := resolveLogAvailabilityStatus(bucket)
-			if status == HealthStatusOperational || status == HealthStatusDegraded {
+			if status == HealthStatusOperational {
 				successBuckets++
+			}
+			if status == HealthStatusOperational || status == HealthStatusDegraded {
 				totalLatency += bucket.LatencyTotalMs
 				totalLatencySamples += bucket.LatencySamples
 			}
@@ -410,16 +418,20 @@ func (hcs *HealthCheckService) batchGetLogBasedHistories(platform string, provid
 			}
 
 			history.Items = append(history.Items, HealthCheckResult{
-				ID:           int64(index + 1),
-				ProviderID:   bucket.ProviderID,
-				ProviderName: bucket.ProviderName,
-				Platform:     platform,
-				Model:        bucket.LatestModel,
-				Endpoint:     "request_log",
-				Status:       status,
-				LatencyMs:    bucket.AvgLatencyMs,
-				ErrorMessage: formatLogAvailabilityError(bucket, operationalThresholdMs),
-				CheckedAt:    bucket.BucketStart,
+				ID:             int64(index + 1),
+				ProviderID:     bucket.ProviderID,
+				ProviderName:   bucket.ProviderName,
+				Platform:       platform,
+				Model:          bucket.LatestModel,
+				Endpoint:       "request_log",
+				Status:         status,
+				LatencyMs:      bucket.AvgLatencyMs,
+				ErrorMessage:   formatLogAvailabilityError(bucket, operationalThresholdMs),
+				CheckedAt:      bucket.BucketStart,
+				TotalRequests:  bucket.TotalRequests,
+				FailedRequests: bucket.FailedCount,
+				SlowRequests:   bucket.WarningCount,
+				ErrorRate:      logAvailabilityErrorRate(bucket),
 			})
 		}
 
@@ -602,14 +614,22 @@ func isLogAvailabilityFailure(httpCode int) bool {
 	return httpCode <= 0 || httpCode >= 400
 }
 
+func logAvailabilityErrorRate(bucket logAvailabilityBucket) float64 {
+	if bucket.TotalRequests <= 0 {
+		return 0
+	}
+	return float64(bucket.FailedCount) / float64(bucket.TotalRequests) * 100
+}
+
 func resolveLogAvailabilityStatus(bucket logAvailabilityBucket) string {
 	if bucket.TotalRequests <= 0 {
 		return ""
 	}
-	if bucket.FailedCount > 0 {
+	errorRate := logAvailabilityErrorRate(bucket)
+	if errorRate > LogAvailabilityFailedRate {
 		return HealthStatusFailed
 	}
-	if bucket.WarningCount > 0 {
+	if errorRate > LogAvailabilityWarningRate {
 		return HealthStatusDegraded
 	}
 	return HealthStatusOperational
@@ -619,14 +639,20 @@ func formatLogAvailabilityError(bucket logAvailabilityBucket, operationalThresho
 	if bucket.TotalRequests <= 0 {
 		return ""
 	}
+	var parts []string
 	if bucket.FailedCount > 0 {
+		errorRate := logAvailabilityErrorRate(bucket)
 		if bucket.LastStatusCode >= 400 {
-			return fmt.Sprintf("日志聚合：%d/%d 请求失败，最近 HTTP %d", bucket.FailedCount, bucket.TotalRequests, bucket.LastStatusCode)
+			parts = append(parts, fmt.Sprintf("%d/%d 请求失败（%.2f%%），最近 HTTP %d", bucket.FailedCount, bucket.TotalRequests, errorRate, bucket.LastStatusCode))
+		} else {
+			parts = append(parts, fmt.Sprintf("%d/%d 请求失败（%.2f%%）", bucket.FailedCount, bucket.TotalRequests, errorRate))
 		}
-		return fmt.Sprintf("日志聚合：%d/%d 请求失败", bucket.FailedCount, bucket.TotalRequests)
 	}
 	if bucket.WarningCount > 0 {
-		return fmt.Sprintf("日志聚合：%d/%d 请求延迟超过 %dms", bucket.WarningCount, bucket.TotalRequests, operationalThresholdMs)
+		parts = append(parts, fmt.Sprintf("%d/%d 请求延迟超过 %dms", bucket.WarningCount, bucket.TotalRequests, operationalThresholdMs))
+	}
+	if len(parts) > 0 {
+		return "日志聚合：" + strings.Join(parts, "；")
 	}
 	return ""
 }

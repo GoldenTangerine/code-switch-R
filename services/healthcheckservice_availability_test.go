@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"io"
 	"math"
 	"net/http"
@@ -222,6 +223,81 @@ func TestHealthCheckServiceGetLogBasedResultsAggregatesRequestLogs(t *testing.T)
 
 }
 
+func TestHealthCheckServiceGetLogBasedResultsColorsByErrorRatio(t *testing.T) {
+	useIsolatedHomeDir(t)
+
+	if err := InitDatabase(); err != nil {
+		t.Fatalf("初始化数据库失败: %v", err)
+	}
+
+	providerService := NewProviderService()
+	if err := providerService.SaveProviders("codex", []Provider{
+		{
+			ID:      44,
+			Name:    "RatioProbe",
+			Enabled: true,
+		},
+	}); err != nil {
+		t.Fatalf("保存供应商失败: %v", err)
+	}
+
+	db, err := xdb.DB("default")
+	if err != nil {
+		t.Fatalf("获取数据库连接失败: %v", err)
+	}
+
+	rangeSpec := resolveLogAvailabilityRange(LogAvailabilityRange24H, time.Now())
+	greenBucketAt := rangeSpec.Start.Add(rangeSpec.BucketDuration*8 + time.Second)
+	yellowBucketAt := rangeSpec.Start.Add(rangeSpec.BucketDuration*16 + time.Second)
+	redBucketAt := rangeSpec.Start.Add(rangeSpec.BucketDuration*24 + time.Second)
+	slowBucketAt := rangeSpec.Start.Add(rangeSpec.BucketDuration*32 + time.Second)
+
+	insertAvailabilityRequestLogsForRatio(t, db, "codex", "44", "RatioProbe", greenBucketAt, 20, 1, 0)
+	insertAvailabilityRequestLogsForRatio(t, db, "codex", "44", "RatioProbe", yellowBucketAt, 20, 2, 0)
+	insertAvailabilityRequestLogsForRatio(t, db, "codex", "44", "RatioProbe", redBucketAt, 20, 5, 0)
+	insertAvailabilityRequestLogsForRatio(t, db, "codex", "44", "RatioProbe", slowBucketAt, 20, 0, 20)
+
+	hcs := NewHealthCheckService(providerService, nil, NewSettingsService())
+	results, err := hcs.GetLogBasedResults(LogAvailabilityRange24H)
+	if err != nil {
+		t.Fatalf("GetLogBasedResults 调用失败: %v", err)
+	}
+
+	timeline := findAvailabilityTimelineByProvider(t, results["codex"], 44)
+	greenBucket := findAvailabilityBucketByRequestStats(t, timeline.Items, 20, 1, 0)
+	if greenBucket.Status != HealthStatusOperational {
+		t.Fatalf("5%% 错误率应为绿色，实际 %+v", greenBucket)
+	}
+	if math.Abs(greenBucket.ErrorRate-5) > 0.0001 {
+		t.Fatalf("绿色 bucket ErrorRate = %.4f，期望 5", greenBucket.ErrorRate)
+	}
+
+	yellowBucket := findAvailabilityBucketByRequestStats(t, timeline.Items, 20, 2, 0)
+	if yellowBucket.Status != HealthStatusDegraded {
+		t.Fatalf("10%% 错误率应为黄色，实际 %+v", yellowBucket)
+	}
+
+	redBucket := findAvailabilityBucketByRequestStats(t, timeline.Items, 20, 5, 0)
+	if redBucket.Status != HealthStatusFailed {
+		t.Fatalf("25%% 错误率应为红色，实际 %+v", redBucket)
+	}
+
+	slowBucket := findAvailabilityBucketByRequestStats(t, timeline.Items, 20, 0, 20)
+	if slowBucket.Status != HealthStatusOperational {
+		t.Fatalf("无错误的高延迟 bucket 应保持绿色，实际 %+v", slowBucket)
+	}
+	if !strings.Contains(slowBucket.ErrorMessage, "20/20 请求延迟超过 6000ms") {
+		t.Fatalf("高延迟应保留为单独提示，实际 %q", slowBucket.ErrorMessage)
+	}
+
+	if math.Abs(timeline.Uptime-50) > 0.0001 {
+		t.Fatalf("期望仅绿色 bucket 计入可用率 50%%，实际 %.8f", timeline.Uptime)
+	}
+	if timeline.AvgLatencyMs != 2405 {
+		t.Fatalf("期望黄色 bucket 继续参与平均延迟且红色 bucket 不参与，实际 %d", timeline.AvgLatencyMs)
+	}
+}
+
 func findAvailabilityTimelineByProvider(t *testing.T, timelines []ProviderTimeline, providerID int64) ProviderTimeline {
 	t.Helper()
 	for _, timeline := range timelines {
@@ -250,6 +326,52 @@ func findOptionalAvailabilityBucketByStatus(items []HealthCheckResult, status st
 		}
 	}
 	return nil
+}
+
+func findAvailabilityBucketByRequestStats(t *testing.T, items []HealthCheckResult, totalRequests, failedRequests, slowRequests int) HealthCheckResult {
+	t.Helper()
+	for _, item := range items {
+		if item.TotalRequests == totalRequests && item.FailedRequests == failedRequests && item.SlowRequests == slowRequests {
+			return item
+		}
+	}
+	t.Fatalf("未找到请求统计为 total=%d failed=%d slow=%d 的 bucket", totalRequests, failedRequests, slowRequests)
+	return HealthCheckResult{}
+}
+
+func insertAvailabilityRequestLogsForRatio(
+	t *testing.T,
+	db *sql.DB,
+	platform string,
+	providerID string,
+	provider string,
+	bucketAt time.Time,
+	totalRequests int,
+	failedRequests int,
+	slowRequests int,
+) {
+	t.Helper()
+	for index := 0; index < totalRequests; index++ {
+		httpCode := 200
+		durationSec := 0.1
+		if index < failedRequests {
+			httpCode = 500
+			durationSec = 0.2
+		} else if index < failedRequests+slowRequests {
+			durationSec = 7.0
+		}
+		insertAvailabilityRequestLog(
+			t,
+			db,
+			platform,
+			providerID,
+			provider,
+			fmt.Sprintf("ratio-%d-%d-%d-%d", totalRequests, failedRequests, slowRequests, index),
+			httpCode,
+			durationSec,
+			bucketAt.Add(time.Duration(index)*time.Second).Format(timeLayout),
+		)
+	}
 }
 
 func insertAvailabilityRequestLog(

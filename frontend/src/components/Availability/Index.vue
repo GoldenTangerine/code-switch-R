@@ -27,6 +27,11 @@ type HistorySegment = {
   checkedAtLabel: string
   checkedAtFullLabel: string
   latencyLabel: string
+  failedRequestsLabel: string
+  errorRateLabel: string
+  slowRequestsLabel: string
+  hasLogStats: boolean
+  hasSlowRequests: boolean
   isPlaceholder: boolean
 }
 
@@ -143,19 +148,19 @@ const summaryCards = computed(() => [
   {
     key: 'operational',
     tone: 'operational' as const,
-    label: t('availability.stats.operational'),
+    label: isLogAvailabilityMode.value ? t('availability.logStatus.operational') : t('availability.stats.operational'),
     value: statusStats.value.operational,
   },
   {
     key: 'degraded',
     tone: 'degraded' as const,
-    label: t('availability.stats.degraded'),
+    label: isLogAvailabilityMode.value ? t('availability.logStatus.degraded') : t('availability.stats.degraded'),
     value: statusStats.value.degraded,
   },
   {
     key: 'failed',
     tone: 'failed' as const,
-    label: t('availability.stats.failed'),
+    label: isLogAvailabilityMode.value ? t('availability.logStatus.failed') : t('availability.stats.failed'),
     value: statusStats.value.failed,
   },
   {
@@ -422,6 +427,23 @@ function formatLatency(value?: number | null) {
   return `${Math.round(Number(value))} ms`
 }
 
+function formatLogErrorRate(value?: number | null) {
+  if (!Number.isFinite(value) || Number(value) < 0) {
+    return '--'
+  }
+  if (Number(value) >= 100) {
+    return '100%'
+  }
+  return `${Number(value).toFixed(2)}%`
+}
+
+function formatLogRequestRatio(value?: number | null, total?: number | null) {
+  if (!Number.isFinite(value) || !Number.isFinite(total) || Number(total) <= 0) {
+    return '--'
+  }
+  return `${Math.max(Math.round(Number(value)), 0)} / ${Math.max(Math.round(Number(total)), 0)}`
+}
+
 function formatUptime(timeline: ProviderTimeline) {
   if (!hasTimelineSamples(timeline)) {
     return '--'
@@ -461,6 +483,20 @@ function resolveStatusLabel(timeline: ProviderTimeline) {
     return t('availability.statusChip.disabled')
   }
 
+  if (isLogAvailabilityMode.value) {
+    switch (timeline.latest?.status) {
+      case HealthStatus.OPERATIONAL:
+        return t('availability.logStatus.operational')
+      case HealthStatus.DEGRADED:
+        return t('availability.logStatus.degraded')
+      case HealthStatus.FAILED:
+      case HealthStatus.VALIDATION_ERROR:
+        return t('availability.logStatus.failed')
+      default:
+        return t('availability.history.noData')
+    }
+  }
+
   switch (timeline.latest?.status) {
     case HealthStatus.OPERATIONAL:
       return t('availability.statusChip.operational')
@@ -477,6 +513,20 @@ function resolveStatusLabel(timeline: ProviderTimeline) {
 function resolveStatusDescription(timeline: ProviderTimeline) {
   if (!canDisplayTimeline(timeline)) {
     return t('availability.statusDescription.disabled')
+  }
+
+  if (isLogAvailabilityMode.value) {
+    switch (timeline.latest?.status) {
+      case HealthStatus.OPERATIONAL:
+        return t('availability.logStatusDescription.operational')
+      case HealthStatus.DEGRADED:
+        return t('availability.logStatusDescription.degraded')
+      case HealthStatus.FAILED:
+      case HealthStatus.VALIDATION_ERROR:
+        return t('availability.logStatusDescription.failed')
+      default:
+        return t('availability.history.noData')
+    }
   }
 
   switch (timeline.latest?.status) {
@@ -512,21 +562,38 @@ function buildHistorySegments(timeline: ProviderTimeline): HistorySegment[] {
     ? [...(timeline.items ?? [])].slice(0, HISTORY_SEGMENT_LIMIT).reverse()
     : []
 
-  const segments = recentItems.map((item, index) => ({
-    key: `${timeline.providerId}-${item.checkedAt}-${index}`,
-    tone: resolveHistoryTone(item.status),
-    statusLabel: resolveStatusLabel({
-      ...timeline,
-      latest: item,
-      items: [item],
-      availabilityMonitorEnabled: true,
-    }),
-    checkedAtDateLabel: formatHistoryTooltipDate(item.checkedAt),
-    checkedAtLabel: formatShortDateTime(item.checkedAt),
-    checkedAtFullLabel: formatFullDateTime(item.checkedAt),
-    latencyLabel: formatLatency(item.latencyMs),
-    isPlaceholder: false,
-  }))
+  const segments = recentItems.map((item, index) => {
+    const totalRequests = Number(item.totalRequests ?? 0)
+    const failedRequests = Number(item.failedRequests ?? 0)
+    const slowRequests = Number(item.slowRequests ?? 0)
+    const errorRate = Number.isFinite(item.errorRate)
+      ? Number(item.errorRate)
+      : totalRequests > 0
+        ? (failedRequests / totalRequests) * 100
+        : 0
+    const hasLogStats = isLogAvailabilityMode.value && totalRequests > 0
+
+    return {
+      key: `${timeline.providerId}-${item.checkedAt}-${index}`,
+      tone: resolveHistoryTone(item.status),
+      statusLabel: resolveStatusLabel({
+        ...timeline,
+        latest: item,
+        items: [item],
+        availabilityMonitorEnabled: true,
+      }),
+      checkedAtDateLabel: formatHistoryTooltipDate(item.checkedAt),
+      checkedAtLabel: formatShortDateTime(item.checkedAt),
+      checkedAtFullLabel: formatFullDateTime(item.checkedAt),
+      latencyLabel: formatLatency(item.latencyMs),
+      failedRequestsLabel: formatLogRequestRatio(failedRequests, totalRequests),
+      errorRateLabel: formatLogErrorRate(errorRate),
+      slowRequestsLabel: formatLogRequestRatio(slowRequests, totalRequests),
+      hasLogStats,
+      hasSlowRequests: hasLogStats && slowRequests > 0,
+      isPlaceholder: false,
+    }
+  })
 
   const placeholderCount = Math.max(HISTORY_SEGMENT_LIMIT - segments.length, 0)
   const placeholderLabel = hasTimelineData ? t('availability.history.noSample') : t('availability.notMonitored')
@@ -540,6 +607,11 @@ function buildHistorySegments(timeline: ProviderTimeline): HistorySegment[] {
     checkedAtLabel: placeholderTime,
     checkedAtFullLabel: placeholderTime,
     latencyLabel: '--',
+    failedRequestsLabel: '--',
+    errorRateLabel: '--',
+    slowRequestsLabel: '--',
+    hasLogStats: false,
+    hasSlowRequests: false,
     isPlaceholder: true,
   }))
 
@@ -1136,6 +1208,30 @@ onUnmounted(() => {
                         <span class="availability-history__tooltip-label">{{ t('availability.history.tooltip.latency') }}</span>
                         <span class="availability-history__tooltip-value availability-history__tooltip-value--latency">
                           {{ segment.latencyLabel }}
+                        </span>
+                      </span>
+
+                      <span v-if="segment.hasLogStats" class="availability-history__tooltip-row">
+                        <span class="availability-history__tooltip-label">{{ t('availability.history.tooltip.errorRate') }}</span>
+                        <strong
+                          class="availability-history__tooltip-value"
+                          :class="`availability-history__tooltip-value--${segment.tone}`"
+                        >
+                          {{ segment.errorRateLabel }}
+                        </strong>
+                      </span>
+
+                      <span v-if="segment.hasLogStats" class="availability-history__tooltip-row">
+                        <span class="availability-history__tooltip-label">{{ t('availability.history.tooltip.failedRequests') }}</span>
+                        <span class="availability-history__tooltip-value availability-history__tooltip-value--latency">
+                          {{ segment.failedRequestsLabel }}
+                        </span>
+                      </span>
+
+                      <span v-if="segment.hasSlowRequests" class="availability-history__tooltip-row">
+                        <span class="availability-history__tooltip-label">{{ t('availability.history.tooltip.slowRequests') }}</span>
+                        <span class="availability-history__tooltip-value availability-history__tooltip-value--latency">
+                          {{ segment.slowRequestsLabel }}
                         </span>
                       </span>
                     </span>

@@ -135,6 +135,16 @@
       "failed": "最近一次检测失败，建议尽快排查上游链路。",
       "disabled": "该节点当前未参与自动健康检测。"
     },
+    "logStatus": {
+      "operational": "稳定",
+      "degraded": "少量错误",
+      "failed": "错误偏高"
+    },
+    "logStatusDescription": {
+      "operational": "错误占比处于稳定范围。",
+      "degraded": "错误占比轻微升高。",
+      "failed": "错误占比偏高，建议排查上游链路。"
+    },
     "history": {
       "title": "近 90 天可用性",
       "logTitle": "近 {range} 日志可用性",
@@ -146,7 +156,10 @@
       "noData": "暂无历史采样",
       "tooltip": {
         "status": "状态",
-        "latency": "延迟"
+        "latency": "延迟",
+        "errorRate": "错误率",
+        "failedRequests": "失败请求",
+        "slowRequests": "慢请求"
       }
     },
     "card": {

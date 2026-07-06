@@ -135,6 +135,16 @@
       "failed": "The latest health check failed. Investigate the upstream path.",
       "disabled": "This node is currently excluded from automatic health checks."
     },
+    "logStatus": {
+      "operational": "Stable",
+      "degraded": "Minor Errors",
+      "failed": "High Errors"
+    },
+    "logStatusDescription": {
+      "operational": "The error ratio is within the stable range.",
+      "degraded": "The error ratio is slightly elevated.",
+      "failed": "The error ratio is high. Check the upstream path."
+    },
     "history": {
       "title": "90-day uptime history",
       "logTitle": "Last {range} log uptime",
@@ -146,7 +156,10 @@
       "noData": "No historical sample",
       "tooltip": {
         "status": "Status",
-        "latency": "Latency"
+        "latency": "Latency",
+        "errorRate": "Error rate",
+        "failedRequests": "Failed requests",
+        "slowRequests": "Slow requests"
       }
     },
     "card": {
