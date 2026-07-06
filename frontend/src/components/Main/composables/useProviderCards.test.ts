@@ -34,11 +34,16 @@ vi.mock('@wailsio/runtime', () => ({
   },
 }))
 
+vi.mock('../../../utils/toast', () => ({
+  showToast: vi.fn(),
+}))
+
 import { Call } from '@wailsio/runtime'
 import { SaveProviders } from '../../../../bindings/codeswitch/services/providerservice'
 import { LoadProviders } from '../../../../bindings/codeswitch/services/providerservice'
 import { AddProvider as AddGeminiProvider, GetProviders as GetGeminiProviders } from '../../../../bindings/codeswitch/services/geminiservice'
 import { GetProviders as GetOpenCodeProviders, SaveProviders as SaveOpenCodeProviders } from '../../../../bindings/codeswitch/services/opencodeservice'
+import { showToast } from '../../../utils/toast'
 import { useProviderCards } from './useProviderCards'
 
 const createCard = (
@@ -133,6 +138,26 @@ describe('useProviderCards drag sort', () => {
     const saved = vi.mocked(SaveProviders).mock.calls[0]?.[1] as AutomationCard[]
     expect(saved[0]?.anthropicCacheTTL).toBe('1h')
     expect(saved[1]?.anthropicCacheTTL).toBe('')
+  })
+
+  it('shows backend error details when provider persistence fails', async () => {
+    const providerCards = useProviderCards({
+      t: (key: string, params?: Record<string, string>) => (
+        params?.error ? `${key}: ${params.error}` : key
+      ),
+      getActiveTab: () => 'codex',
+      isActiveProxyEnabled: () => false,
+      getSelectedToolId: () => null,
+    })
+    providerCards.cards.codex.splice(0, providerCards.cards.codex.length, createCard(1))
+    vi.mocked(SaveProviders).mockRejectedValueOnce(new Error('rename sync failed'))
+
+    await expect(providerCards.persistProviders('codex')).rejects.toThrow('rename sync failed')
+
+    expect(vi.mocked(showToast)).toHaveBeenCalledWith(
+      'components.main.form.saveFailed: rename sync failed',
+      'error',
+    )
   })
 
   it('persists dragged order when existing cards already have distinct sortOrder values', async () => {

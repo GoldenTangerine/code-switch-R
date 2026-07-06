@@ -1060,7 +1060,7 @@
           "providerQuotaQueryPresetNameRequired": "请填写预设名称",
           "opencodeModelsRequired": "请至少添加一个 OpenCode 模型配置"
         },
-        "saveFailed": "保存供应商配置失败",
+        "saveFailed": "保存供应商配置失败：{error}",
         "toast": {
           "providerQuotaQueryTestSuccess": "额度查询成功：",
           "providerQuotaQueryTestFailed": "额度查询失败",

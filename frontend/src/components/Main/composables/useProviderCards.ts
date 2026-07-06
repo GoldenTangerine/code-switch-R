@@ -10,6 +10,7 @@ import {
   UpdateProvider as UpdateGeminiProvider,
 } from '../../../../bindings/codeswitch/services/geminiservice'
 import { showToast } from '../../../utils/toast'
+import { extractErrorMessage } from '../../../utils/error'
 import {
   cardToGemini,
   cardToOpenCode,
@@ -499,7 +500,7 @@ export function useProviderCards(options: UseProviderCardsOptions) {
       await SaveProviders(tabId, serializeProviders(cards[tabId], tabId))
     } catch (error) {
       console.error('Failed to save providers', error)
-      showToast(t('components.main.form.saveFailed'), 'error')
+      showToast(t('components.main.form.saveFailed', { error: extractErrorMessage(error) }), 'error')
       throw error
     }
   }

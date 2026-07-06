@@ -1,7 +1,6 @@
 package services
 
 import (
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -139,6 +138,12 @@ type Provider struct {
 
 type providerEnvelope struct {
 	Providers []Provider `json:"providers"`
+}
+
+type providerRename struct {
+	ProviderID string
+	OldName    string
+	NewName    string
 }
 
 const (
@@ -366,10 +371,6 @@ func (ps *ProviderService) saveProvidersLocked(kind string, providers []Provider
 		return err
 	}
 	providers = filterPersistentProviders(kind, providers)
-	originalFileData, originalFileExists, err := snapshotProviderFile(path)
-	if err != nil {
-		return err
-	}
 
 	// 加载现有配置，用于检查 name 是否被修改
 	// 使用原样读取，避免触发迁移导致死锁
@@ -381,11 +382,6 @@ func (ps *ProviderService) saveProvidersLocked(kind string, providers []Provider
 	nameByID := make(map[int64]string, len(existingProviders))
 	for _, p := range existingProviders {
 		nameByID[p.ID] = p.Name
-	}
-	type providerRename struct {
-		ProviderID string
-		OldName    string
-		NewName    string
 	}
 	renames := make([]providerRename, 0)
 
@@ -423,50 +419,70 @@ func (ps *ProviderService) saveProvidersLocked(kind string, providers []Provider
 		return err
 	}
 
-	var renameTx *sql.Tx
-	if len(renames) > 0 {
-		db, err := xdb.DB("default")
-		if err != nil {
-			return fmt.Errorf("获取数据库连接失败: %w", err)
-		}
-		tx, beginErr := db.Begin()
-		if beginErr != nil {
-			return beginErr
-		}
-		renameTx = tx
-		for _, rename := range renames {
-			if err := syncProviderIdentityRenameTx(renameTx, kind, rename.ProviderID, rename.OldName, rename.NewName); err != nil {
-				_ = renameTx.Rollback()
-				return fmt.Errorf("同步供应商改名关联数据失败 (kind=%s,id=%s,%q->%q): %w",
-					kind, rename.ProviderID, rename.OldName, rename.NewName, err)
-			}
-		}
-	}
-
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		if renameTx != nil {
-			_ = renameTx.Rollback()
-		}
 		return err
 	}
 	if err := os.Rename(tmp, path); err != nil {
-		if renameTx != nil {
-			_ = renameTx.Rollback()
-		}
 		return err
 	}
-	if renameTx != nil {
-		if err := renameTx.Commit(); err != nil {
-			restoreErr := restoreProviderFile(path, originalFileExists, originalFileData)
-			if restoreErr != nil {
-				return fmt.Errorf("提交供应商改名事务失败: %w；且回滚配置文件失败: %v", err, restoreErr)
-			}
-			return fmt.Errorf("提交供应商改名事务失败: %w", err)
-		}
+	if len(renames) > 0 {
+		syncProviderIdentityRenamesBestEffort(kind, renames)
 	}
 
 	return nil
+}
+
+func syncProviderIdentityRenamesBestEffort(kind string, renames []providerRename) {
+	db, err := xdb.DB("default")
+	if err != nil {
+		log.Printf("[ProviderService] 跳过供应商改名关联数据同步: %v", err)
+		return
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		log.Printf("[ProviderService] 启动供应商改名关联数据同步事务失败: %v", err)
+		return
+	}
+
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	synced := false
+	for _, rename := range renames {
+		hasAssociatedData, err := providerRenameHasAssociatedDataWithExec(tx, kind, rename.ProviderID, rename.OldName, rename.NewName)
+		if err != nil {
+			log.Printf("[ProviderService] 检查供应商改名关联数据失败 (kind=%s,id=%s,%q->%q): %v",
+				kind, rename.ProviderID, rename.OldName, rename.NewName, err)
+			continue
+		}
+		if !hasAssociatedData {
+			continue
+		}
+
+		if err := syncProviderIdentityRenameTx(tx, kind, rename.ProviderID, rename.OldName, rename.NewName); err != nil {
+			log.Printf("[ProviderService] 同步供应商改名关联数据失败 (kind=%s,id=%s,%q->%q): %v",
+				kind, rename.ProviderID, rename.OldName, rename.NewName, err)
+			return
+		}
+		synced = true
+	}
+
+	if !synced {
+		_ = tx.Rollback()
+		committed = true
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		log.Printf("[ProviderService] 提交供应商改名关联数据同步事务失败: %v", err)
+		return
+	}
+	committed = true
 }
 
 func filterPersistentProviders(kind string, providers []Provider) []Provider {

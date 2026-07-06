@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"sort"
 	"testing"
+
+	"github.com/daodao97/xgo/xdb"
 )
 
 // ==================== 通配符匹配测试 ====================
@@ -874,5 +876,147 @@ func TestDuplicateProvider(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestDuplicateProviderRenameSaveIgnoresBrokenAuxiliaryStatsWithoutHistory(t *testing.T) {
+	useIsolatedHomeDir(t)
+
+	if err := InitDatabase(); err != nil {
+		t.Fatalf("初始化数据库失败: %v", err)
+	}
+
+	service := NewProviderService()
+	if err := service.SaveProviders("codex", []Provider{
+		{
+			ID:      1,
+			Name:    "Source Provider",
+			APIURL:  "https://api.example.com",
+			APIKey:  "sk-test",
+			Enabled: true,
+			Level:   1,
+		},
+	}); err != nil {
+		t.Fatalf("保存源供应商失败: %v", err)
+	}
+
+	duplicated, err := service.DuplicateProvider("codex", 1)
+	if err != nil {
+		t.Fatalf("复制供应商失败: %v", err)
+	}
+
+	db, err := xdb.DB("default")
+	if err != nil {
+		t.Fatalf("获取数据库连接失败: %v", err)
+	}
+	if _, err := db.Exec(`DROP TABLE IF EXISTS request_log_stats_daily`); err != nil {
+		t.Fatalf("删除统计表失败: %v", err)
+	}
+	if _, err := db.Exec(`CREATE TABLE request_log_stats_daily (
+		bucket_start TEXT NOT NULL,
+		platform TEXT NOT NULL,
+		provider TEXT NOT NULL
+	)`); err != nil {
+		t.Fatalf("创建旧结构统计表失败: %v", err)
+	}
+
+	providers, err := service.LoadProviders("codex")
+	if err != nil {
+		t.Fatalf("加载供应商失败: %v", err)
+	}
+
+	found := false
+	for i := range providers {
+		if providers[i].ID == duplicated.ID {
+			providers[i].Name = "Renamed Copy"
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("未找到复制后的供应商 ID: %d", duplicated.ID)
+	}
+
+	if err := service.SaveProviders("codex", providers); err != nil {
+		t.Fatalf("保存改名后的复制供应商失败: %v", err)
+	}
+
+	saved, err := service.LoadProviders("codex")
+	if err != nil {
+		t.Fatalf("重新加载供应商失败: %v", err)
+	}
+	for _, provider := range saved {
+		if provider.ID == duplicated.ID {
+			if provider.Name != "Renamed Copy" {
+				t.Fatalf("期望复制供应商名称已保存，实际 %q", provider.Name)
+			}
+			return
+		}
+	}
+	t.Fatalf("重新加载后未找到复制后的供应商 ID: %d", duplicated.ID)
+}
+
+func TestSaveProvidersRenameSyncsAssociatedRequestLogs(t *testing.T) {
+	useIsolatedHomeDir(t)
+
+	if err := InitDatabase(); err != nil {
+		t.Fatalf("初始化数据库失败: %v", err)
+	}
+
+	service := NewProviderService()
+	if err := service.SaveProviders("codex", []Provider{
+		{
+			ID:      42,
+			Name:    "Old Provider",
+			APIURL:  "https://api.example.com",
+			APIKey:  "sk-test",
+			Enabled: true,
+			Level:   1,
+		},
+	}); err != nil {
+		t.Fatalf("保存源供应商失败: %v", err)
+	}
+
+	db, err := xdb.DB("default")
+	if err != nil {
+		t.Fatalf("获取数据库连接失败: %v", err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO request_log (
+			platform, model, provider_id, provider, http_code, created_at
+		) VALUES (?, ?, ?, ?, ?, ?)
+	`, "codex", "gpt-5", "42", "Old Provider", 200, "2026-02-25 10:00:00"); err != nil {
+		t.Fatalf("插入请求日志失败: %v", err)
+	}
+	if _, err := db.Exec(`DROP TABLE IF EXISTS request_log_stats_daily`); err != nil {
+		t.Fatalf("删除统计表失败: %v", err)
+	}
+	if _, err := db.Exec(`CREATE TABLE request_log_stats_daily (
+		bucket_start TEXT NOT NULL,
+		platform TEXT NOT NULL,
+		provider TEXT NOT NULL
+	)`); err != nil {
+		t.Fatalf("创建旧结构统计表失败: %v", err)
+	}
+
+	providers, err := service.LoadProviders("codex")
+	if err != nil {
+		t.Fatalf("加载供应商失败: %v", err)
+	}
+	providers[0].Name = "New Provider"
+	if err := service.SaveProviders("codex", providers); err != nil {
+		t.Fatalf("保存改名供应商失败: %v", err)
+	}
+
+	var providerName string
+	if err := db.QueryRow(`
+		SELECT provider FROM request_log
+		WHERE platform = ? AND provider_id = ?
+		LIMIT 1
+	`, "codex", "42").Scan(&providerName); err != nil {
+		t.Fatalf("查询请求日志供应商名称失败: %v", err)
+	}
+	if providerName != "New Provider" {
+		t.Fatalf("期望请求日志供应商名称同步为 New Provider，实际 %q", providerName)
 	}
 }

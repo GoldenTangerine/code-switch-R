@@ -1059,7 +1059,7 @@
           "providerQuotaQueryPresetNameRequired": "Enter a preset name",
           "opencodeModelsRequired": "Add at least one OpenCode model configuration."
         },
-        "saveFailed": "Failed to save provider configuration",
+        "saveFailed": "Failed to save provider configuration: {error}",
         "toast": {
           "providerQuotaQueryTestSuccess": "Quota query succeeded: ",
           "providerQuotaQueryTestFailed": "Quota query failed",

@@ -3,6 +3,7 @@ package services
 import (
 	"database/sql"
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 
@@ -12,6 +13,11 @@ import (
 type providerIdentitySyncExecer interface {
 	Exec(query string, args ...interface{}) (sql.Result, error)
 	QueryRow(query string, args ...interface{}) *sql.Row
+}
+
+type providerIdentityProbe struct {
+	Query string
+	Args  []interface{}
 }
 
 func normalizeProviderIdentityRenameInput(kind, providerID, oldName, newName string) (string, string, string, string) {
@@ -86,17 +92,167 @@ func syncProviderIdentityRenameWithExec(exec providerIdentitySyncExecer, kind, p
 	if err := syncHealthCheckIdentityWithExec(exec, kind, providerID, oldName, newName); err != nil && !isNoSuchTableErr(err) {
 		return err
 	}
-	if err := syncRequestLogStatsIdentityWithExec(exec, requestLogStatsHourlyTable, kind, providerID, oldName, newName); err != nil && !isNoSuchTableErr(err) {
-		return err
-	}
-	if err := syncRequestLogStatsIdentityWithExec(exec, requestLogStatsDailyTable, kind, providerID, oldName, newName); err != nil && !isNoSuchTableErr(err) {
-		return err
-	}
-	if err := syncRequestLogProviderQuotaCycleIdentityWithExec(exec, kind, providerID, oldName, newName); err != nil && !isNoSuchTableErr(err) {
-		return err
+
+	syncOptionalProviderIdentityRename(exec, kind, providerID, oldName, newName)
+	return nil
+}
+
+func syncOptionalProviderIdentityRename(exec providerIdentitySyncExecer, kind, providerID, oldName, newName string) {
+	optionalSyncs := []struct {
+		name string
+		run  func() error
+	}{
+		{
+			name: requestLogStatsHourlyTable,
+			run: func() error {
+				return syncRequestLogStatsIdentityWithExec(exec, requestLogStatsHourlyTable, kind, providerID, oldName, newName)
+			},
+		},
+		{
+			name: requestLogStatsDailyTable,
+			run: func() error {
+				return syncRequestLogStatsIdentityWithExec(exec, requestLogStatsDailyTable, kind, providerID, oldName, newName)
+			},
+		},
+		{
+			name: requestLogProviderQuotaCycleStateTable,
+			run: func() error {
+				return syncRequestLogProviderQuotaCycleIdentityWithExec(exec, kind, providerID, oldName, newName)
+			},
+		},
 	}
 
-	return nil
+	for _, syncTask := range optionalSyncs {
+		if err := syncTask.run(); err != nil {
+			log.Printf("[ProviderIdentity] 跳过可选改名同步 %s (kind=%s,id=%s,%q->%q): %v",
+				syncTask.name, kind, providerID, oldName, newName, err)
+		}
+	}
+}
+
+func providerRenameHasAssociatedDataWithExec(exec providerIdentitySyncExecer, kind, providerID, oldName, newName string) (bool, error) {
+	if exec == nil {
+		return false, nil
+	}
+	kind, providerID, oldName, newName = normalizeProviderIdentityRenameInput(kind, providerID, oldName, newName)
+	if kind == "" || newName == "" {
+		return false, nil
+	}
+
+	legacyName := oldName
+	if legacyName == "" {
+		legacyName = newName
+	}
+	targetRef := providerRefFromStringID(providerID, newName)
+	refs := []string{targetRef}
+	if legacyName != "" && legacyName != targetRef {
+		refs = append(refs, legacyName)
+	}
+	if newName != "" && newName != targetRef && newName != legacyName {
+		refs = append(refs, newName)
+	}
+
+	checks := []providerIdentityProbe{
+		{
+			Query: `
+				SELECT 1 FROM provider_blacklist
+				WHERE platform = ?
+				  AND (provider_id = ? OR provider_name = ? OR provider_name = ?)
+				LIMIT 1
+			`,
+			Args: []interface{}{kind, targetRef, legacyName, newName},
+		},
+		{
+			Query: `
+				SELECT 1 FROM request_log
+				WHERE platform = ?
+				  AND (provider_id = ? OR provider = ? OR provider = ?)
+				LIMIT 1
+			`,
+			Args: []interface{}{kind, targetRef, legacyName, newName},
+		},
+		{
+			Query: `
+				SELECT 1 FROM request_log_stats_hourly
+				WHERE platform = ?
+				  AND (provider_id = ? OR provider_id = ? OR provider = ? OR provider = ?)
+				LIMIT 1
+			`,
+			Args: []interface{}{kind, targetRef, legacyName, legacyName, newName},
+		},
+		{
+			Query: `
+				SELECT 1 FROM request_log_stats_daily
+				WHERE platform = ?
+				  AND (provider_id = ? OR provider_id = ? OR provider = ? OR provider = ?)
+				LIMIT 1
+			`,
+			Args: []interface{}{kind, targetRef, legacyName, legacyName, newName},
+		},
+	}
+
+	if numericID, parseErr := strconv.ParseInt(providerID, 10, 64); parseErr == nil {
+		checks = append(checks, providerIdentityProbe{
+			Query: `
+				SELECT 1 FROM health_check_history
+				WHERE platform = ?
+				  AND (provider_id = ? OR provider_name = ? OR provider_name = ?)
+				LIMIT 1
+			`,
+			Args: []interface{}{kind, numericID, legacyName, newName},
+		})
+	} else {
+		checks = append(checks, providerIdentityProbe{
+			Query: `
+				SELECT 1 FROM health_check_history
+				WHERE platform = ?
+				  AND (provider_name = ? OR provider_name = ?)
+				LIMIT 1
+			`,
+			Args: []interface{}{kind, legacyName, newName},
+		})
+	}
+
+	for _, ref := range refs {
+		checks = append(checks, providerIdentityProbe{
+			Query: `
+				SELECT 1 FROM request_log_provider_quota_cycle_state
+				WHERE platform = ? AND provider_ref = ?
+				LIMIT 1
+			`,
+			Args: []interface{}{kind, ref},
+		})
+	}
+
+	for _, check := range checks {
+		exists, err := providerIdentityRowExists(exec, check.Query, check.Args...)
+		if err != nil {
+			return false, err
+		}
+		if exists {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+func providerIdentityRowExists(exec providerIdentitySyncExecer, query string, args ...interface{}) (bool, error) {
+	var value int
+	if err := exec.QueryRow(query, args...).Scan(&value); err != nil {
+		if err == sql.ErrNoRows || isNoSuchTableErr(err) || isNoSuchColumnErr(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+func isNoSuchColumnErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "no such column")
 }
 
 func syncBlacklistIdentityWithExec(exec providerIdentitySyncExecer, kind, providerID, oldName, newName string) error {
