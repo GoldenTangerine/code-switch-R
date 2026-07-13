@@ -43,7 +43,7 @@ func TestProviderStatsRangeV2_PerformanceAggregatesByStableProviderKey(t *testin
 		OutputTokens:  60,
 		CreatedAt:     "2026-02-25 11:00:00",
 	})
-	// first_token_sec 无效，不应参与性能均值。
+	// first_token_sec 无效，不参与首字均值，但总耗时和输出 Tokens 有效时仍参与速度。
 	insertRequestLogForProviderStats(t, db, providerStatsLogEntry{
 		Platform:      "codex",
 		ProviderID:    "pid-1",
@@ -88,16 +88,16 @@ func TestProviderStatsRangeV2_PerformanceAggregatesByStableProviderKey(t *testin
 		t.Fatalf("期望 ttft_sample_count=2，实际 %d", stat.TTFTSampleCount)
 	}
 
-	expectedTPS := (100.0 + 60.0) / ((2.0 - 0.2) + (1.4 - 0.4))
+	expectedTPS := (100.0/2.0 + 60.0/1.4 + 30.0/1.2) / 3
 	if !almostEqualFloatProviderStat(stat.AvgTokensPerSec, expectedTPS) {
 		t.Fatalf("期望 avg_tokens_per_sec=%f，实际 %f", expectedTPS, stat.AvgTokensPerSec)
 	}
-	if stat.TPSSampleCount != 2 {
-		t.Fatalf("期望 tps_sample_count=2，实际 %d", stat.TPSSampleCount)
+	if stat.TPSSampleCount != 3 {
+		t.Fatalf("期望 tps_sample_count=3，实际 %d", stat.TPSSampleCount)
 	}
 }
 
-func TestProviderStatsRangeV2_PerformanceIgnoresTinyGenerationWindowOutlier(t *testing.T) {
+func TestProviderStatsRangeV2_PerformanceUsesTotalDurationWithoutMinimumWindow(t *testing.T) {
 	useIsolatedHomeDir(t)
 
 	if err := InitDatabase(); err != nil {
@@ -119,7 +119,7 @@ func TestProviderStatsRangeV2_PerformanceIgnoresTinyGenerationWindowOutlier(t *t
 		OutputTokens:  200,
 		CreatedAt:     "2026-02-25 14:00:00",
 	})
-	// 极小生成窗口（1ms）理论速率会非常夸张，应被过滤掉。
+	// 即使首字接近总耗时，速度仍应使用完整总耗时。
 	insertRequestLogForProviderStats(t, db, providerStatsLogEntry{
 		Platform:      "codex",
 		ProviderID:    "pid-3",
@@ -141,19 +141,19 @@ func TestProviderStatsRangeV2_PerformanceIgnoresTinyGenerationWindowOutlier(t *t
 	if stat == nil {
 		t.Fatalf("未找到 provider_id=pid-3 的统计")
 	}
-	expectedTPS := 200.0 / (2.2 - 0.2)
+	expectedTPS := (200.0/2.2 + 5000.0/0.401) / 2
 	if !almostEqualFloatProviderStat(stat.AvgTokensPerSec, expectedTPS) {
 		t.Fatalf("期望 avg_tokens_per_sec=%f，实际 %f", expectedTPS, stat.AvgTokensPerSec)
 	}
 	if stat.TTFTSampleCount != 2 {
 		t.Fatalf("期望 ttft_sample_count=2，实际 %d", stat.TTFTSampleCount)
 	}
-	if stat.TPSSampleCount != 1 {
-		t.Fatalf("期望 tps_sample_count=1，实际 %d", stat.TPSSampleCount)
+	if stat.TPSSampleCount != 2 {
+		t.Fatalf("期望 tps_sample_count=2，实际 %d", stat.TPSSampleCount)
 	}
 }
 
-func TestProviderStatsRangeV2_PerformanceReturnsZeroWhenNoValidStreamingSamples(t *testing.T) {
+func TestProviderStatsRangeV2_PerformanceSeparatesTTFTAndTPSSamples(t *testing.T) {
 	useIsolatedHomeDir(t)
 
 	if err := InitDatabase(); err != nil {
@@ -199,14 +199,14 @@ func TestProviderStatsRangeV2_PerformanceReturnsZeroWhenNoValidStreamingSamples(
 	if stat.AvgFirstTokenSec != 0 {
 		t.Fatalf("无有效样本时 avg_first_token_sec 应为 0，实际 %f", stat.AvgFirstTokenSec)
 	}
-	if stat.AvgTokensPerSec != 0 {
-		t.Fatalf("无有效样本时 avg_tokens_per_sec 应为 0，实际 %f", stat.AvgTokensPerSec)
+	if !almostEqualFloatProviderStat(stat.AvgTokensPerSec, 25) {
+		t.Fatalf("速度不依赖首字，期望 avg_tokens_per_sec=25，实际 %f", stat.AvgTokensPerSec)
 	}
 	if stat.TTFTSampleCount != 0 {
 		t.Fatalf("无有效样本时 ttft_sample_count 应为 0，实际 %d", stat.TTFTSampleCount)
 	}
-	if stat.TPSSampleCount != 0 {
-		t.Fatalf("无有效样本时 tps_sample_count 应为 0，实际 %d", stat.TPSSampleCount)
+	if stat.TPSSampleCount != 1 {
+		t.Fatalf("期望 tps_sample_count=1，实际 %d", stat.TPSSampleCount)
 	}
 }
 
@@ -247,14 +247,101 @@ func TestProviderStatsRangeV2_FallbackToProviderNameWhenProviderIDNotFound(t *te
 	if !almostEqualFloatProviderStat(stats[0].AvgFirstTokenSec, 0.2) {
 		t.Fatalf("期望 avg_first_token_sec=0.2，实际 %f", stats[0].AvgFirstTokenSec)
 	}
-	if !almostEqualFloatProviderStat(stats[0].AvgTokensPerSec, 50.0) {
-		t.Fatalf("期望 avg_tokens_per_sec=50，实际 %f", stats[0].AvgTokensPerSec)
+	if !almostEqualFloatProviderStat(stats[0].AvgTokensPerSec, 40.0) {
+		t.Fatalf("期望 avg_tokens_per_sec=40，实际 %f", stats[0].AvgTokensPerSec)
 	}
 	if stats[0].TTFTSampleCount != 1 {
 		t.Fatalf("期望 ttft_sample_count=1，实际 %d", stats[0].TTFTSampleCount)
 	}
 	if stats[0].TPSSampleCount != 1 {
 		t.Fatalf("期望 tps_sample_count=1，实际 %d", stats[0].TPSSampleCount)
+	}
+}
+
+func TestProviderDailyStats_UsesLatestFiveSuccessfulStreamingSamplesAcrossDays(t *testing.T) {
+	useIsolatedHomeDir(t)
+
+	if err := InitDatabase(); err != nil {
+		t.Fatalf("初始化数据库失败: %v", err)
+	}
+	db, err := xdb.DB("default")
+	if err != nil {
+		t.Fatalf("获取数据库连接失败: %v", err)
+	}
+
+	now := time.Now().UTC()
+	for index := 0; index < 6; index++ {
+		insertRequestLogForProviderStats(t, db, providerStatsLogEntry{
+			Platform:      "codex",
+			ProviderID:    "pid-latest",
+			Provider:      "Latest Provider",
+			IsStream:      1,
+			DurationSec:   float64(index + 1),
+			FirstTokenSec: float64(index+1) / 10,
+			OutputTokens:  100,
+			CreatedAt:     now.AddDate(0, 0, -(index + 1)).Format(timeLayout),
+		})
+	}
+	insertRequestLogForProviderStats(t, db, providerStatsLogEntry{
+		Platform:      "codex",
+		ProviderID:    "pid-latest",
+		Provider:      "Latest Provider",
+		HttpCode:      500,
+		IsStream:      1,
+		DurationSec:   0.1,
+		FirstTokenSec: 0.01,
+		OutputTokens:  1000,
+		CreatedAt:     now.Add(-2 * time.Hour).Format(timeLayout),
+	})
+	insertRequestLogForProviderStats(t, db, providerStatsLogEntry{
+		Platform:     "codex",
+		ProviderID:   "pid-latest",
+		Provider:     "Latest Provider",
+		IsStream:     0,
+		DurationSec:  1,
+		OutputTokens: 25,
+		CreatedAt:    now.Add(-time.Hour).Format(timeLayout),
+	})
+	insertRequestLogForProviderStats(t, db, providerStatsLogEntry{
+		Platform:      "codex",
+		ProviderID:    "pid-failed-only",
+		Provider:      "Failed Only",
+		HttpCode:      500,
+		IsStream:      1,
+		DurationSec:   1,
+		FirstTokenSec: 0.2,
+		OutputTokens:  50,
+		CreatedAt:     now.Add(-30 * time.Minute).Format(timeLayout),
+	})
+
+	ls := NewLogService(nil)
+	stats, err := ls.ProviderDailyStats("codex")
+	if err != nil {
+		t.Fatalf("ProviderDailyStats 调用失败: %v", err)
+	}
+	stat := findProviderStatByID(stats, "pid-latest")
+	if stat == nil {
+		t.Fatalf("未找到 provider_id=pid-latest 的统计")
+	}
+	if stat.TotalRequests != 2 {
+		t.Fatalf("当日请求统计不应受跨天性能样本影响，期望 2，实际 %d", stat.TotalRequests)
+	}
+	if !almostEqualFloatProviderStat(stat.AvgFirstTokenSec, 0.3) {
+		t.Fatalf("期望最近 5 条首字平均为 0.3，实际 %f", stat.AvgFirstTokenSec)
+	}
+	expectedTPS := (100.0/1 + 100.0/2 + 100.0/3 + 100.0/4 + 100.0/5) / 5
+	if !almostEqualFloatProviderStat(stat.AvgTokensPerSec, expectedTPS) {
+		t.Fatalf("期望最近 5 条单条速度平均为 %f，实际 %f", expectedTPS, stat.AvgTokensPerSec)
+	}
+	if stat.TTFTSampleCount != 5 || stat.TPSSampleCount != 5 {
+		t.Fatalf("期望首速样本数均为 5，实际 ttft=%d tps=%d", stat.TTFTSampleCount, stat.TPSSampleCount)
+	}
+	failedOnlyStat := findProviderStatByID(stats, "pid-failed-only")
+	if failedOnlyStat == nil {
+		t.Fatalf("未找到 provider_id=pid-failed-only 的当日统计")
+	}
+	if failedOnlyStat.AvgFirstTokenSec != 0 || failedOnlyStat.AvgTokensPerSec != 0 {
+		t.Fatalf("失败请求不应进入首页性能样本，实际 ttft=%f tps=%f", failedOnlyStat.AvgFirstTokenSec, failedOnlyStat.AvgTokensPerSec)
 	}
 }
 
@@ -334,6 +421,7 @@ type providerStatsLogEntry struct {
 	ResponseModel  string
 	ProviderID     string
 	Provider       string
+	HttpCode       int
 	InputTokens    int
 	IsStream       int
 	DurationSec    float64
@@ -345,6 +433,10 @@ type providerStatsLogEntry struct {
 
 func insertRequestLogForProviderStats(t *testing.T, db *sql.DB, entry providerStatsLogEntry) {
 	t.Helper()
+	httpCode := entry.HttpCode
+	if httpCode == 0 {
+		httpCode = 200
+	}
 	_, err := db.Exec(`
 		INSERT INTO request_log (
 			platform,
@@ -372,7 +464,7 @@ func insertRequestLogForProviderStats(t *testing.T, db *sql.DB, entry providerSt
 		entry.ResponseModel,
 		entry.ProviderID,
 		entry.Provider,
-		200,
+		httpCode,
 		entry.InputTokens,
 		entry.OutputTokens,
 		0,

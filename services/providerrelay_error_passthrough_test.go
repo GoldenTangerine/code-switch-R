@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/daodao97/xgo/xdb"
 	"github.com/gin-gonic/gin"
@@ -448,6 +449,270 @@ func TestClaudeResponsesPromptCacheKeyUnsupportedRetriesAndDisablesAutoInjection
 	}
 	if strings.Contains(requestBodies[2], "prompt_cache_key") {
 		t.Fatalf("同 provider/session 短期内应禁用自动 prompt_cache_key 注入: %s", requestBodies[2])
+	}
+}
+
+func TestExtractUnsupportedOptionalParamsRequiresExplicitUnsupportedMeaning(t *testing.T) {
+	provider := Provider{APIFormat: claudeAPIFormatOpenAIResponse}
+	got := extractUnsupportedOptionalParams("claude", provider, http.StatusBadRequest, []byte(`{
+		"error":{"message":"Unsupported parameters: temperature, reasoning.effort and top_p"}
+	}`))
+	if strings.Join(got, ",") != "reasoning,temperature,top_p" {
+		t.Fatalf("不支持字段解析结果=%v", got)
+	}
+
+	got = extractUnsupportedOptionalParams("claude", provider, http.StatusBadRequest, []byte(`{
+		"error":{"message":"temperature must be between 0 and 2","param":"temperature","type":"invalid_request_error"}
+	}`))
+	if len(got) != 0 {
+		t.Fatalf("普通值校验错误不应触发删字段: %v", got)
+	}
+
+	got = extractUnsupportedOptionalParams("claude", provider, http.StatusBadRequest, []byte(`{
+		"error":{"message":"Unsupported model. The request also contained temperature."}
+	}`))
+	if len(got) != 0 {
+		t.Fatalf("字段未与不支持语义绑定时不应触发删除: %v", got)
+	}
+
+	got = extractUnsupportedOptionalParams("claude", provider, http.StatusBadRequest, []byte(`{
+		"error":{"message":"Unsupported parameter: reasoning.effort. Supported parameters: temperature and top_p"}
+	}`))
+	if strings.Join(got, ",") != "reasoning" {
+		t.Fatalf("支持字段不应被误判为不支持字段: %v", got)
+	}
+}
+
+func TestClaudeResponsesUnsupportedOptionalParamsRetryOnceAndRemember(t *testing.T) {
+	useIsolatedHomeDir(t)
+	gin.SetMode(gin.TestMode)
+	disableBlacklistForTest(t)
+
+	var callCount int32
+	requestBodies := make([]string, 0, 3)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		requestBodies = append(requestBodies, string(body))
+		call := atomic.AddInt32(&callCount, 1)
+		w.Header().Set("Content-Type", "application/json")
+		if call == 1 {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":{"message":"Unsupported parameters: prompt_cache_key, temperature and reasoning.effort"}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"id":"resp_ok","status":"completed","model":"gpt-5.4","output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":2,"output_tokens":1}}`))
+	}))
+	defer upstream.Close()
+
+	providerService := NewProviderService()
+	settingsService := NewSettingsService()
+	blacklistService := NewBlacklistService(settingsService, nil)
+	provider := Provider{
+		ID:        71,
+		Name:      "Optional Params",
+		APIURL:    upstream.URL,
+		APIKey:    "test-key",
+		Enabled:   true,
+		Level:     1,
+		APIFormat: claudeAPIFormatOpenAIResponse,
+		RequestBodyOverrides: map[string]interface{}{
+			"temperature": float64(0.2),
+			"output_config": map[string]interface{}{
+				"effort": "high",
+			},
+		},
+	}
+	if err := providerService.SaveProviders("claude", []Provider{provider}); err != nil {
+		t.Fatalf("保存 providers 失败: %v", err)
+	}
+	relay := NewProviderRelayService(providerService, nil, blacklistService, nil, nil, nil, "")
+	router := gin.New()
+	relay.registerRoutes(router)
+
+	body := `{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`
+	for i := 0; i < 2; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("第 %d 轮状态码=%d body=%s", i+1, w.Code, w.Body.String())
+		}
+	}
+
+	if got := atomic.LoadInt32(&callCount); got != 3 {
+		t.Fatalf("上游调用次数=%d，期望首次重试一次、后续直接应用记忆，共 3 次", got)
+	}
+	if !strings.Contains(requestBodies[0], `"temperature"`) || !strings.Contains(requestBodies[0], `"reasoning"`) {
+		t.Fatalf("首次请求应包含待探测参数: %s", requestBodies[0])
+	}
+	for i, requestBody := range requestBodies[1:] {
+		if strings.Contains(requestBody, `"temperature"`) || strings.Contains(requestBody, `"reasoning"`) || strings.Contains(requestBody, `"prompt_cache_key"`) {
+			t.Fatalf("第 %d 个兼容请求仍包含已拒绝字段: %s", i+2, requestBody)
+		}
+	}
+}
+
+func TestUnsupportedOptionalParamsMemoryKeyIncludesEndpointAndFormat(t *testing.T) {
+	relay := &ProviderRelayService{unsupportedOptionalParams: make(map[string]unsupportedOptionalParamsMemory)}
+	provider := Provider{ID: 9, Name: "same", APIURL: "https://example.com/", APIFormat: claudeAPIFormatOpenAIResponse}
+	relay.rememberUnsupportedOptionalParams(provider, "/responses", []string{"temperature"})
+	body := []byte(`{"temperature":0.2,"messages":[]}`)
+
+	if got := relay.removeRememberedUnsupportedOptionalParams(provider, "/responses", body); gjson.GetBytes(got, "temperature").Exists() {
+		t.Fatalf("相同能力键应移除已记忆字段: %s", got)
+	}
+	if got := relay.removeRememberedUnsupportedOptionalParams(provider, "/v1/responses", body); !gjson.GetBytes(got, "temperature").Exists() {
+		t.Fatalf("不同最终端点不应共享能力记忆: %s", got)
+	}
+	provider.APIFormat = claudeAPIFormatOpenAIChat
+	if got := relay.removeRememberedUnsupportedOptionalParams(provider, "/responses", body); !gjson.GetBytes(got, "temperature").Exists() {
+		t.Fatalf("不同 API 格式不应共享能力记忆: %s", got)
+	}
+}
+
+func TestUnsupportedOptionalParamsMemoryNormalizesAPIURLAndExpires(t *testing.T) {
+	relay := &ProviderRelayService{unsupportedOptionalParams: make(map[string]unsupportedOptionalParamsMemory)}
+	provider := Provider{ID: 10, Name: "same", APIURL: "HTTPS://EXAMPLE.COM:443/v1/", APIFormat: claudeAPIFormatOpenAIResponse}
+	relay.rememberUnsupportedOptionalParams(provider, "/responses", []string{"temperature"})
+	body := []byte(`{"temperature":0.2,"messages":[]}`)
+
+	equivalentProvider := provider
+	equivalentProvider.APIURL = "https://example.com/v1"
+	if got := relay.removeRememberedUnsupportedOptionalParams(equivalentProvider, "/responses", body); gjson.GetBytes(got, "temperature").Exists() {
+		t.Fatalf("等价 API URL 应共享能力记忆: %s", got)
+	}
+
+	key := relay.unsupportedOptionalParamsKey(equivalentProvider, "/responses")
+	entry := relay.unsupportedOptionalParams[key]
+	entry.ExpiresAt = time.Now().Add(-time.Minute)
+	relay.unsupportedOptionalParams[key] = entry
+	if got := relay.removeRememberedUnsupportedOptionalParams(equivalentProvider, "/responses", body); !gjson.GetBytes(got, "temperature").Exists() {
+		t.Fatalf("过期能力记忆应恢复参数探测: %s", got)
+	}
+}
+
+func TestClaudeChatUnsupportedOptionalParamsRetryOnceAndRemember(t *testing.T) {
+	useIsolatedHomeDir(t)
+	gin.SetMode(gin.TestMode)
+	disableBlacklistForTest(t)
+
+	var callCount int32
+	requestBodies := make([]string, 0, 3)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		requestBodies = append(requestBodies, string(body))
+		call := atomic.AddInt32(&callCount, 1)
+		w.Header().Set("Content-Type", "application/json")
+		if call == 1 {
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			_, _ = w.Write([]byte(`{"error":{"message":"Unknown parameters: temperature and reasoning_effort"}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"id":"chatcmpl_ok","model":"gpt-5.4","choices":[{"finish_reason":"stop","message":{"content":"ok"}}],"usage":{"prompt_tokens":2,"completion_tokens":1}}`))
+	}))
+	defer upstream.Close()
+
+	providerService := NewProviderService()
+	settingsService := NewSettingsService()
+	blacklistService := NewBlacklistService(settingsService, nil)
+	provider := Provider{
+		ID:        72,
+		Name:      "Chat Optional Params",
+		APIURL:    upstream.URL,
+		APIKey:    "test-key",
+		Enabled:   true,
+		Level:     1,
+		APIFormat: claudeAPIFormatOpenAIChat,
+		RequestBodyOverrides: map[string]interface{}{
+			"temperature": float64(0.2),
+			"output_config": map[string]interface{}{
+				"effort": "high",
+			},
+		},
+	}
+	if err := providerService.SaveProviders("claude", []Provider{provider}); err != nil {
+		t.Fatalf("保存 providers 失败: %v", err)
+	}
+	relay := NewProviderRelayService(providerService, nil, blacklistService, nil, nil, nil, "")
+	router := gin.New()
+	relay.registerRoutes(router)
+
+	body := `{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`
+	for i := 0; i < 2; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("第 %d 轮状态码=%d body=%s", i+1, w.Code, w.Body.String())
+		}
+	}
+
+	if got := atomic.LoadInt32(&callCount); got != 3 {
+		t.Fatalf("上游调用次数=%d，期望 3", got)
+	}
+	if !strings.Contains(requestBodies[0], `"temperature"`) || !strings.Contains(requestBodies[0], `"reasoning_effort"`) {
+		t.Fatalf("首次 Chat 请求应包含待探测参数: %s", requestBodies[0])
+	}
+	for i, requestBody := range requestBodies[1:] {
+		if strings.Contains(requestBody, `"temperature"`) || strings.Contains(requestBody, `"reasoning_effort"`) {
+			t.Fatalf("第 %d 个 Chat 兼容请求仍包含已拒绝字段: %s", i+2, requestBody)
+		}
+	}
+}
+
+func TestUnsupportedOptionalParamsSecondFailureDoesNotRetryAgain(t *testing.T) {
+	useIsolatedHomeDir(t)
+	gin.SetMode(gin.TestMode)
+	disableBlacklistForTest(t)
+
+	var callCount int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		call := atomic.AddInt32(&callCount, 1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		if call == 1 {
+			_, _ = w.Write([]byte(`{"error":{"message":"Unsupported parameter: temperature"}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"error":{"message":"Unsupported parameter: top_p"}}`))
+	}))
+	defer upstream.Close()
+
+	providerService := NewProviderService()
+	settingsService := NewSettingsService()
+	blacklistService := NewBlacklistService(settingsService, nil)
+	provider := Provider{
+		ID:        73,
+		Name:      "Retry Once",
+		APIURL:    upstream.URL,
+		APIKey:    "test-key",
+		Enabled:   true,
+		Level:     1,
+		APIFormat: claudeAPIFormatOpenAIChat,
+		RequestBodyOverrides: map[string]interface{}{
+			"temperature": float64(0.2),
+			"top_p":       float64(0.9),
+		},
+	}
+	if err := providerService.SaveProviders("claude", []Provider{provider}); err != nil {
+		t.Fatalf("保存 providers 失败: %v", err)
+	}
+	relay := NewProviderRelayService(providerService, nil, blacklistService, nil, nil, nil, "")
+	router := gin.New()
+	relay.registerRoutes(router)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"gpt-4o","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if got := atomic.LoadInt32(&callCount); got != 2 {
+		t.Fatalf("兼容重试次数失控，上游调用=%d，期望 2", got)
+	}
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "top_p") {
+		t.Fatalf("应透传第二次最终错误，status=%d body=%s", w.Code, w.Body.String())
 	}
 }
 

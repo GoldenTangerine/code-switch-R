@@ -11,6 +11,7 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"net/url"
 	"regexp"
 	"runtime"
 	"sort"
@@ -63,6 +64,8 @@ type ProviderRelayService struct {
 	providerConcurrency            map[string]int
 	providerConcurrencyRequests    map[string]map[string]ProviderConcurrencyRequestDetail
 	nextProviderConcurrencyRequest int64
+	unsupportedOptionalParamsMu    sync.RWMutex
+	unsupportedOptionalParams      map[string]unsupportedOptionalParamsMemory
 }
 
 // errClientAbort 表示客户端中断连接，不应计入 provider 失败次数
@@ -123,6 +126,8 @@ const claudeResponsesSessionTTL = 30 * time.Minute
 const claudeResponsesMaxSessionBindings = 4096
 const claudeResponsesTailReplayMaxInputItems = 80
 const openAICompatPromptCacheDisableTTL = 30 * time.Minute
+const unsupportedOptionalParamsTTL = 30 * time.Minute
+const unsupportedOptionalParamsMaxEntries = 4096
 
 type claudeResponsesContinuationRejection int
 
@@ -131,6 +136,21 @@ const (
 	claudeResponsesContinuationRejectionNotFound
 	claudeResponsesContinuationRejectionUnsupported
 )
+
+type claudeCompatibilityRetry struct {
+	WithoutContinuation   bool
+	WithoutPromptCacheKey bool
+	UnsupportedFields     []string
+}
+
+type unsupportedOptionalParamsMemory struct {
+	Fields    map[string]struct{}
+	ExpiresAt time.Time
+}
+
+func (retry claudeCompatibilityRetry) needed() bool {
+	return retry.WithoutContinuation || retry.WithoutPromptCacheKey || len(retry.UnsupportedFields) > 0
+}
 
 type claudeResponsesSessionBinding struct {
 	ResponseID string
@@ -369,6 +389,7 @@ func NewProviderRelayService(providerService *ProviderService, geminiService *Ge
 		toolSessions:                make(map[string]toolSessionBinding),
 		providerConcurrency:         make(map[string]int),
 		providerConcurrencyRequests: make(map[string]map[string]ProviderConcurrencyRequestDetail),
+		unsupportedOptionalParams:   make(map[string]unsupportedOptionalParamsMemory),
 	}
 }
 
@@ -2948,7 +2969,7 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 		}
 	}()
 
-	doForward := func(currentBody []byte, currentPlan providerRequestPlan) (bool, error, bool, bool) {
+	doForward := func(currentBody []byte, currentPlan providerRequestPlan) (bool, error, claudeCompatibilityRetry) {
 		req := xrequest.New().
 			SetHeaders(headers).
 			SetQueryParams(query).
@@ -2974,18 +2995,18 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 			// resp 存在但 err != nil：可能是客户端中断，不计入失败
 			if resp != nil && status == 0 {
 				fmt.Printf("[INFO] Provider %s 响应存在但状态码为0，判定为客户端中断\n", provider.Name)
-				return false, fmt.Errorf("%w: %v", errClientAbort, err), false, false
+				return false, fmt.Errorf("%w: %v", errClientAbort, err), claudeCompatibilityRetry{}
 			}
 
 			// xrequest 在 5xx 重试耗尽后会同时返回 resp 和 err。
 			// 这里不能直接丢弃 resp，否则上游原始错误 body 会被吞掉，只剩一个笼统的 retry 错误。
 			if resp == nil || status < http.StatusMultipleChoices {
-				return false, err, false, false
+				return false, err, claudeCompatibilityRetry{}
 			}
 		}
 
 		if resp == nil {
-			return false, fmt.Errorf("empty response"), false, false
+			return false, fmt.Errorf("empty response"), claudeCompatibilityRetry{}
 		}
 
 		// 状态码为 0 且无错误：当作成功处理
@@ -2998,7 +3019,7 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 			if ok && forwardErr == nil {
 				toolCollector.commit()
 			}
-			return ok, forwardErr, false, false
+			return ok, forwardErr, claudeCompatibilityRetry{}
 		}
 
 		if status >= http.StatusOK && status < http.StatusMultipleChoices {
@@ -3006,7 +3027,7 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 				if protocolErr := newClaudeResponsesNonStreamTerminalErrorResponse(resp.Bytes(), resp.RawResponse); protocolErr != nil {
 					requestLog.HttpCode = protocolErr.statusCode
 					setRequestLogResponseBody(requestLog, protocolErr.body)
-					return false, protocolErr, false, false
+					return false, protocolErr, claudeCompatibilityRetry{}
 				}
 			}
 			toolCollector := prs.newSessionAffinityToolResponseCollector(kind, provider, currentPlan, requestUserAgent)
@@ -3016,7 +3037,7 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 			if ok && forwardErr == nil {
 				toolCollector.commit()
 			}
-			return ok, forwardErr, false, false
+			return ok, forwardErr, claudeCompatibilityRetry{}
 		}
 
 		// 非 2xx：打印上游错误信息，便于在控制台追踪原因
@@ -3026,19 +3047,22 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 		}
 		upstreamBody := resp.Bytes()
 		setRequestLogResponseBody(requestLog, upstreamBody)
-		retryWithoutContinuation := false
-		retryWithoutPromptCacheKey := false
+		compatibilityRetry := claudeCompatibilityRetry{}
 		switch prs.classifyClaudeResponsesContinuationRejection(kind, provider, currentPlan, status, upstreamBody) {
 		case claudeResponsesContinuationRejectionNotFound:
 			prs.deleteClaudeResponsesPreviousResponseID(provider, currentPlan.ContinuationSessionKey)
-			retryWithoutContinuation = claudeResponsesCanRetryWithoutContinuation(currentPlan)
+			compatibilityRetry.WithoutContinuation = claudeResponsesCanRetryWithoutContinuation(currentPlan)
 		case claudeResponsesContinuationRejectionUnsupported:
 			prs.disableClaudeResponsesContinuation(provider, currentPlan.ContinuationSessionKey)
-			retryWithoutContinuation = claudeResponsesCanRetryWithoutContinuation(currentPlan)
+			compatibilityRetry.WithoutContinuation = claudeResponsesCanRetryWithoutContinuation(currentPlan)
 		}
-		if !retryWithoutContinuation && prs.isOpenAICompatPromptCacheKeyUnsupported(kind, provider, currentPlan, status, upstreamBody) {
+		if prs.isOpenAICompatPromptCacheKeyUnsupported(kind, provider, currentPlan, status, upstreamBody) {
 			prs.disableOpenAICompatPromptCache(provider, currentPlan.ContinuationSessionKey)
-			retryWithoutPromptCacheKey = true
+			compatibilityRetry.WithoutPromptCacheKey = true
+		}
+		compatibilityRetry.UnsupportedFields = extractUnsupportedOptionalParams(kind, provider, status, upstreamBody)
+		if len(compatibilityRetry.UnsupportedFields) > 0 {
+			prs.rememberUnsupportedOptionalParams(provider, currentPlan.EffectiveEndpoint, compatibilityRetry.UnsupportedFields)
 		}
 		body := strings.TrimSpace(string(upstreamBody))
 		if body != "" {
@@ -3069,32 +3093,38 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 		if resp.RawResponse != nil && resp.RawResponse.Header != nil {
 			upstreamHeaders = resp.RawResponse.Header
 		}
-		return false, newUpstreamErrorResponse(status, contentType, upstreamHeaders, upstreamBody), retryWithoutContinuation, retryWithoutPromptCacheKey
+		return false, newUpstreamErrorResponse(status, contentType, upstreamHeaders, upstreamBody), compatibilityRetry
 	}
 
-	ok, err, retryWithoutContinuation, retryWithoutPromptCacheKey := doForward(bodyBytes, plan)
-	if (!retryWithoutContinuation && !retryWithoutPromptCacheKey) || responseHasStarted(c) {
+	ok, err, compatibilityRetry := doForward(bodyBytes, plan)
+	if !compatibilityRetry.needed() || responseHasStarted(c) {
 		return ok, err
 	}
 	retryPlan := plan
-	retryMessage := ""
-	if retryWithoutContinuation {
+	retryReasons := make([]string, 0, 3)
+	if compatibilityRetry.WithoutContinuation {
 		retryPlan.BodyBytes = plan.ContinuationRetryBodyBytes
 		retryPlan.PreviousResponseID = ""
 		retryPlan.ContinuationRetryBodyBytes = nil
-		retryMessage = "previous_response_id 失效"
-	} else {
-		retryPlan.BodyBytes = removeJSONFieldBytes(plan.BodyBytes, "prompt_cache_key")
+		retryReasons = append(retryReasons, "previous_response_id 失效")
+	}
+	if compatibilityRetry.WithoutPromptCacheKey {
+		retryPlan.BodyBytes = removeJSONFieldBytes(retryPlan.BodyBytes, "prompt_cache_key")
 		retryPlan.ContinuationRetryBodyBytes = removeJSONFieldBytes(plan.ContinuationRetryBodyBytes, "prompt_cache_key")
 		retryPlan.PromptCacheKey = ""
-		retryMessage = "prompt_cache_key 不兼容"
+		retryReasons = append(retryReasons, "prompt_cache_key 不兼容")
+	}
+	if len(compatibilityRetry.UnsupportedFields) > 0 {
+		retryPlan.BodyBytes = removeJSONFieldsBytes(retryPlan.BodyBytes, compatibilityRetry.UnsupportedFields)
+		retryPlan.ContinuationRetryBodyBytes = removeJSONFieldsBytes(retryPlan.ContinuationRetryBodyBytes, compatibilityRetry.UnsupportedFields)
+		retryReasons = append(retryReasons, "可选参数不兼容: "+strings.Join(compatibilityRetry.UnsupportedFields, ","))
 	}
 	captureRequestLogRequestBody(requestLog, retryPlan.BodyBytes)
 	requestLog.ResponseBody = ""
 	requestLog.ResponseBodyTruncated = false
 	requestLog.responseBodyBuffer = nil
-	fmt.Printf("[INFO] Claude Responses %s，Provider %s 已回退请求重试一次\n", retryMessage, provider.Name)
-	ok, err, _, _ = doForward(retryPlan.BodyBytes, retryPlan)
+	fmt.Printf("[INFO] Claude API %s，Provider %s 已回退请求重试一次\n", strings.Join(retryReasons, "；"), provider.Name)
+	ok, err, _ = doForward(retryPlan.BodyBytes, retryPlan)
 	return ok, err
 }
 
@@ -3160,6 +3190,14 @@ func removeJSONFieldBytes(bodyBytes []byte, path string) []byte {
 		return bodyBytes
 	}
 	return updated
+}
+
+func removeJSONFieldsBytes(bodyBytes []byte, paths []string) []byte {
+	result := bodyBytes
+	for _, path := range paths {
+		result = removeJSONFieldBytes(result, path)
+	}
+	return result
 }
 
 func responseHasStarted(c *gin.Context) bool {
@@ -3402,7 +3440,7 @@ func updateOpenAIResponsesStreamLifecyclePayload(payload string, eventType strin
 		}
 	}
 	updateResponseModelFromPayload(payload, reqLog)
-	updateFirstTokenFromPayload(payload, reqLog)
+	updateFirstTokenFromPayload(payload, "codex", reqLog)
 	updateStreamLifecycleFromPayload("claude", payload, reqLog)
 }
 
@@ -4174,7 +4212,7 @@ func parseSSEDataLine(line string, parser func(string, *ReqeustLog), usage *Reqe
 	}
 	parser(dataLine, usage)
 	updateResponseModelFromPayload(dataLine, usage)
-	updateFirstTokenFromPayload(dataLine, usage)
+	updateFirstTokenFromPayload(dataLine, kind, usage)
 	updateStreamLifecycleFromPayload(kind, dataLine, usage)
 }
 
@@ -4251,16 +4289,16 @@ func parseRawJSONPayload(payload string, parser func(string, *ReqeustLog), usage
 	}
 	parser(buffered, usage)
 	updateResponseModelFromPayload(buffered, usage)
-	updateFirstTokenFromPayload(buffered, usage)
+	updateFirstTokenFromPayload(buffered, kind, usage)
 	updateStreamLifecycleFromPayload(kind, buffered, usage)
 	rawJSONBuffer.Reset()
 }
 
-func updateFirstTokenFromPayload(payload string, reqLog *ReqeustLog) {
+func updateFirstTokenFromPayload(payload string, kind string, reqLog *ReqeustLog) {
 	if reqLog == nil || !reqLog.IsStream || reqLog.FirstTokenSec > 0 {
 		return
 	}
-	if payloadHasGeneratedToken(payload) {
+	if payloadStartsStreamOutput(payload, kind) {
 		markFirstTokenTimestamp(reqLog)
 	}
 }
@@ -4470,74 +4508,44 @@ func markFirstTokenTimestamp(reqLog *ReqeustLog) {
 	reqLog.FirstTokenSec = elapsed
 }
 
-func payloadHasGeneratedToken(payload string) bool {
+func payloadStartsStreamOutput(payload string, kind string) bool {
 	trimmed := strings.TrimSpace(payload)
 	if trimmed == "" || !gjson.Valid(trimmed) {
 		return false
 	}
 
 	eventType := strings.TrimSpace(gjson.Get(trimmed, "type").String())
-	if strings.EqualFold(eventType, "response.output_text.delta") {
-		if delta := strings.TrimSpace(gjson.Get(trimmed, "delta").String()); delta != "" {
+	if strings.HasPrefix(eventType, "response.") {
+		switch eventType {
+		case "response.created", "response.in_progress", "response.completed", "response.done",
+			"response.failed", "response.incomplete", "response.cancelled", "response.canceled", "response.error":
+			return false
+		default:
 			return true
 		}
 	}
 
-	for _, path := range []string{
-		"delta.text",
-		"delta.content",
-		"content_block.delta.text",
-		"content_block.text",
-		"response.output_text",
-		"response.output_text.delta",
-		"output_text",
-	} {
-		if value := strings.TrimSpace(gjson.Get(trimmed, path).String()); value != "" {
+	choices := gjson.Get(trimmed, "choices")
+	if choices.Exists() {
+		if len(choices.Array()) > 0 {
 			return true
 		}
+		return !gjson.Get(trimmed, "usage").Exists()
 	}
 
-	for _, choice := range gjson.Get(trimmed, "choices").Array() {
-		if value := strings.TrimSpace(choice.Get("delta.content").String()); value != "" {
-			return true
-		}
-		if value := strings.TrimSpace(choice.Get("text").String()); value != "" {
-			return true
-		}
-	}
-
-	for _, output := range gjson.Get(trimmed, "response.output").Array() {
-		for _, content := range output.Get("content").Array() {
-			if value := strings.TrimSpace(content.Get("text").String()); value != "" {
-				return true
-			}
-			if value := strings.TrimSpace(content.Get("delta").String()); value != "" {
+	candidates := gjson.Get(trimmed, "candidates")
+	if candidates.Exists() {
+		for _, candidate := range candidates.Array() {
+			if candidate.Get("content").Exists() {
 				return true
 			}
 		}
+		return false
 	}
 
-	for _, block := range gjson.Get(trimmed, "content").Array() {
-		if value := strings.TrimSpace(block.Get("text").String()); value != "" {
-			return true
-		}
-	}
-
-	for _, block := range gjson.Get(trimmed, "message.content").Array() {
-		if value := strings.TrimSpace(block.Get("text").String()); value != "" {
-			return true
-		}
-	}
-
-	for _, candidate := range gjson.Get(trimmed, "candidates").Array() {
-		for _, part := range candidate.Get("content.parts").Array() {
-			if value := strings.TrimSpace(part.Get("text").String()); value != "" {
-				return true
-			}
-		}
-	}
-
-	return false
+	// Anthropic 透传口径以首个非空 data 事件作为首字，与 sub2api 保持一致。
+	normalizedKind := strings.ToLower(strings.TrimSpace(kind))
+	return normalizedKind == "claude" || strings.HasPrefix(normalizedKind, "custom:")
 }
 
 // normalizeRequestLogInputTokens 将 input_tokens 规范化为“非缓存输入”。
@@ -5014,7 +5022,7 @@ func parseGeminiSSELine(event string, requestLog *ReqeustLog) {
 			continue
 		}
 		updateResponseModelFromPayload(data, requestLog)
-		updateFirstTokenFromPayload(data, requestLog)
+		updateFirstTokenFromPayload(data, "gemini", requestLog)
 		// 【优化】快速检查是否包含 usageMetadata，避免无效解析
 		if !strings.Contains(data, "usageMetadata") {
 			continue
@@ -5159,6 +5167,7 @@ func (prs *ProviderRelayService) buildProviderRequestPlan(provider Provider, bod
 				return providerRequestPlan{}, err
 			}
 			currentBodyBytes = modifiedBody
+			currentBodyBytes = prs.removeRememberedUnsupportedOptionalParams(provider, effectiveEndpoint, currentBodyBytes)
 			if resolveClaudeAPIFormat(provider) == claudeAPIFormatOpenAIResponse {
 				continuationSessionKey = deriveClaudeResponsesContinuationSessionKey(claudeBodyBytes)
 				if !hasExplicitPromptCacheKey && prs != nil && prs.isOpenAICompatPromptCacheDisabled(provider, continuationSessionKey) {
@@ -5712,6 +5721,214 @@ func isOpenAICompatPromptCacheKeyUnsupportedStatus(status int, body []byte) bool
 		strings.Contains(bodyText, "unknown parameter") ||
 		strings.Contains(bodyText, "unrecognized parameter") ||
 		strings.Contains(bodyText, "invalid parameter")
+}
+
+var claudeOptionalParamNames = map[string]struct{}{
+	"temperature":         {},
+	"top_p":               {},
+	"stop":                {},
+	"store":               {},
+	"include":             {},
+	"parallel_tool_calls": {},
+	"reasoning":           {},
+	"reasoning_effort":    {},
+	"text":                {},
+}
+
+var (
+	unsupportedParamTokenPattern    = regexp.MustCompile(`(?i)[a-z_][a-z0-9_]*(?:\.[a-z_][a-z0-9_]*)*`)
+	unsupportedParamListPattern     = regexp.MustCompile(`(?i)(?:unsupported|unknown|unrecognized)\s+(?:request\s+)?(?:parameter|parameters|argument|arguments)(?:\s+supplied)?\s*[:=]?\s*([^\n;]+)`)
+	unsupportedParamBoundaryPattern = regexp.MustCompile(`(?i)\.\s+(?:supported|valid|allowed|available)\b`)
+	unsupportedNamedParamPattern    = regexp.MustCompile(`(?i)(?:parameter|argument)\s+['"` + "`" + `]?([a-z_][a-z0-9_]*(?:\.[a-z_][a-z0-9_]*)*)['"` + "`" + `]?\s+(?:is|are)\s+(?:not supported|unsupported|unknown|unrecognized)`)
+	unsupportedTrailingParamPattern = regexp.MustCompile(`(?i)([a-z_][a-z0-9_]*(?:\.[a-z_][a-z0-9_]*)*)\s+(?:is|are)\s+(?:not supported|unsupported|unknown|unrecognized)`)
+)
+
+func extractUnsupportedOptionalParams(kind string, provider Provider, status int, body []byte) []string {
+	if kind != "claude" || !claudeAPIFormatNeedsTransform(resolveClaudeAPIFormat(provider)) || status < http.StatusBadRequest || status >= http.StatusInternalServerError {
+		return nil
+	}
+
+	message, param := unsupportedParameterErrorDetails(body)
+	if !containsUnsupportedParameterMeaning(message) {
+		return nil
+	}
+
+	fields := make(map[string]struct{})
+	if root := allowedOptionalParamRoot(param); root != "" {
+		fields[root] = struct{}{}
+	}
+	for _, match := range unsupportedParamListPattern.FindAllStringSubmatch(message, -1) {
+		if len(match) < 2 {
+			continue
+		}
+		list := match[1]
+		if boundary := unsupportedParamBoundaryPattern.FindStringIndex(list); boundary != nil {
+			list = list[:boundary[0]]
+		}
+		for _, token := range unsupportedParamTokenPattern.FindAllString(list, -1) {
+			if root := allowedOptionalParamRoot(token); root != "" {
+				fields[root] = struct{}{}
+			}
+		}
+	}
+	for _, pattern := range []*regexp.Regexp{unsupportedNamedParamPattern, unsupportedTrailingParamPattern} {
+		for _, match := range pattern.FindAllStringSubmatch(message, -1) {
+			if len(match) >= 2 {
+				if root := allowedOptionalParamRoot(match[1]); root != "" {
+					fields[root] = struct{}{}
+				}
+			}
+		}
+	}
+
+	result := make([]string, 0, len(fields))
+	for field := range fields {
+		result = append(result, field)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func unsupportedParameterErrorDetails(body []byte) (string, string) {
+	trimmed := strings.TrimSpace(string(body))
+	if trimmed == "" {
+		return "", ""
+	}
+	parsed, err := decodeJSONMap(body)
+	if err != nil {
+		return trimmed, ""
+	}
+	message := firstNonEmptyString(
+		getNestedString(parsed, "error", "message"),
+		getString(parsed, "message"),
+	)
+	param := firstNonEmptyString(
+		getNestedString(parsed, "error", "param"),
+		getString(parsed, "param"),
+	)
+	return message, param
+}
+
+func containsUnsupportedParameterMeaning(message string) bool {
+	lower := strings.ToLower(strings.TrimSpace(message))
+	return strings.Contains(lower, "unsupported") ||
+		strings.Contains(lower, "not supported") ||
+		strings.Contains(lower, "unknown parameter") ||
+		strings.Contains(lower, "unrecognized parameter") ||
+		strings.Contains(lower, "unrecognized argument")
+}
+
+func allowedOptionalParamRoot(value string) string {
+	value = strings.ToLower(strings.Trim(strings.TrimSpace(value), "'\"`[](){}:,"))
+	root, _, _ := strings.Cut(value, ".")
+	if _, ok := claudeOptionalParamNames[root]; ok {
+		return root
+	}
+	return ""
+}
+
+func (prs *ProviderRelayService) unsupportedOptionalParamsKey(provider Provider, effectiveEndpoint string) string {
+	return strings.Join([]string{
+		providerRefFromProvider(provider),
+		normalizeProviderAPIURLForCapabilityKey(provider.APIURL),
+		strings.TrimSpace(effectiveEndpoint),
+		resolveClaudeAPIFormat(provider),
+	}, "\x00")
+}
+
+func normalizeProviderAPIURLForCapabilityKey(value string) string {
+	value = strings.TrimSpace(value)
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return strings.TrimRight(value, "/")
+	}
+	parsed.Scheme = strings.ToLower(parsed.Scheme)
+	hostname := strings.ToLower(parsed.Hostname())
+	port := parsed.Port()
+	if (parsed.Scheme == "https" && port == "443") || (parsed.Scheme == "http" && port == "80") {
+		port = ""
+	}
+	if port != "" {
+		parsed.Host = net.JoinHostPort(hostname, port)
+	} else if strings.Contains(hostname, ":") {
+		parsed.Host = "[" + hostname + "]"
+	} else {
+		parsed.Host = hostname
+	}
+	parsed.Path = strings.TrimRight(parsed.Path, "/")
+	parsed.RawPath = strings.TrimRight(parsed.RawPath, "/")
+	parsed.Fragment = ""
+	return parsed.String()
+}
+
+func (prs *ProviderRelayService) rememberUnsupportedOptionalParams(provider Provider, effectiveEndpoint string, fields []string) {
+	if prs == nil || len(fields) == 0 {
+		return
+	}
+	key := prs.unsupportedOptionalParamsKey(provider, effectiveEndpoint)
+	prs.unsupportedOptionalParamsMu.Lock()
+	defer prs.unsupportedOptionalParamsMu.Unlock()
+	if prs.unsupportedOptionalParams == nil {
+		prs.unsupportedOptionalParams = make(map[string]unsupportedOptionalParamsMemory)
+	}
+	now := time.Now()
+	prs.sweepUnsupportedOptionalParamsLocked(now)
+	remembered := prs.unsupportedOptionalParams[key]
+	if remembered.Fields == nil {
+		if len(prs.unsupportedOptionalParams) >= unsupportedOptionalParamsMaxEntries {
+			prs.deleteOldestUnsupportedOptionalParamsLocked()
+		}
+		remembered.Fields = make(map[string]struct{})
+	}
+	for _, field := range fields {
+		if _, ok := claudeOptionalParamNames[field]; ok {
+			remembered.Fields[field] = struct{}{}
+		}
+	}
+	remembered.ExpiresAt = now.Add(unsupportedOptionalParamsTTL)
+	prs.unsupportedOptionalParams[key] = remembered
+}
+
+func (prs *ProviderRelayService) removeRememberedUnsupportedOptionalParams(provider Provider, effectiveEndpoint string, body []byte) []byte {
+	if prs == nil || len(body) == 0 {
+		return body
+	}
+	key := prs.unsupportedOptionalParamsKey(provider, effectiveEndpoint)
+	prs.unsupportedOptionalParamsMu.Lock()
+	defer prs.unsupportedOptionalParamsMu.Unlock()
+	prs.sweepUnsupportedOptionalParamsLocked(time.Now())
+	remembered := prs.unsupportedOptionalParams[key]
+	fields := make([]string, 0, len(remembered.Fields))
+	for field := range remembered.Fields {
+		fields = append(fields, field)
+	}
+	if len(fields) == 0 {
+		return body
+	}
+	sort.Strings(fields)
+	return removeJSONFieldsBytes(body, fields)
+}
+
+func (prs *ProviderRelayService) sweepUnsupportedOptionalParamsLocked(now time.Time) {
+	for key, remembered := range prs.unsupportedOptionalParams {
+		if !remembered.ExpiresAt.After(now) {
+			delete(prs.unsupportedOptionalParams, key)
+		}
+	}
+}
+
+func (prs *ProviderRelayService) deleteOldestUnsupportedOptionalParamsLocked() {
+	oldestKey := ""
+	var oldestExpiry time.Time
+	for key, remembered := range prs.unsupportedOptionalParams {
+		if oldestKey == "" || remembered.ExpiresAt.Before(oldestExpiry) {
+			oldestKey = key
+			oldestExpiry = remembered.ExpiresAt
+		}
+	}
+	if oldestKey != "" {
+		delete(prs.unsupportedOptionalParams, oldestKey)
+	}
 }
 
 func isClaudeResponsesPreviousResponseNotFound(status int, body []byte) bool {
@@ -6758,7 +6975,7 @@ func parseGeminiUsageMetadata(body []byte, reqLog *ReqeustLog) {
 		return
 	}
 	updateResponseModelFromPayload(string(body), reqLog)
-	updateFirstTokenFromPayload(string(body), reqLog)
+	updateFirstTokenFromPayload(string(body), "gemini", reqLog)
 	usage := gjson.GetBytes(body, "usageMetadata")
 	if !usage.Exists() {
 		return

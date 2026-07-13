@@ -346,3 +346,58 @@ func TestResponseContainsExpectedFieldChecksJSONFieldExistence(t *testing.T) {
 		t.Fatalf("应识别顶层 choices 字段")
 	}
 }
+
+func TestClaudeChatStreamTransformHookUsesReasoningAliasFallback(t *testing.T) {
+	hook := newClaudeResponseTransformHook(claudeAPIFormatOpenAIChat, true)
+
+	flush, data := hook([]byte(`data: {"id":"chatcmpl_1","model":"gpt-5.4","choices":[{"delta":{"reasoning_content":"fallback"}}]}`))
+	if !flush {
+		t.Fatalf("reasoning_content 应输出 thinking 事件")
+	}
+	if got := string(data); !strings.Contains(got, `"type":"thinking_delta"`) || !strings.Contains(got, `"thinking":"fallback"`) {
+		t.Fatalf("reasoning_content 未正确映射: %s", got)
+	}
+}
+
+func TestClaudeResponsesStreamTransformHookSupportsReasoningTextLifecycle(t *testing.T) {
+	hook := newClaudeResponseTransformHook(claudeAPIFormatOpenAIResponse, true)
+
+	_, _ = hook([]byte("event: response.reasoning_text.delta"))
+	flush, deltaData := hook([]byte(`data: {"output_index":0,"item_id":"rs_1","delta":"thinking"}`))
+	if !flush {
+		t.Fatalf("reasoning_text.delta 应输出 thinking 生命周期")
+	}
+	if got := string(deltaData); !strings.Contains(got, `"type":"thinking_delta"`) || !strings.Contains(got, `"thinking":"thinking"`) {
+		t.Fatalf("reasoning_text.delta 映射异常: %s", got)
+	}
+
+	_, _ = hook([]byte("event: response.reasoning_text.done"))
+	flush, doneData := hook([]byte(`data: {"output_index":0,"item_id":"rs_1"}`))
+	if !flush || !strings.Contains(string(doneData), `"type":"content_block_stop"`) {
+		t.Fatalf("reasoning_text.done 应关闭 thinking block: %s", doneData)
+	}
+}
+
+func TestClaudeResponsesStreamTransformHookMapsWebSearchOnce(t *testing.T) {
+	hook := newClaudeResponseTransformHook(claudeAPIFormatOpenAIResponse, true)
+	payload := `data: {"output_index":1,"item":{"id":"ws_1","type":"web_search_call","status":"completed","action":{"query":"golang"}}}`
+
+	_, _ = hook([]byte("event: response.output_item.done"))
+	flush, first := hook([]byte(payload))
+	if !flush {
+		t.Fatalf("web_search_call done 应输出配对内容块")
+	}
+	got := string(first)
+	if strings.Count(got, `"type":"server_tool_use"`) != 1 || strings.Count(got, `"type":"web_search_tool_result"`) != 1 {
+		t.Fatalf("Web Search 配对事件异常: %s", got)
+	}
+	if !strings.Contains(got, `"id":"srvtoolu_ws_1"`) || !strings.Contains(got, `"tool_use_id":"srvtoolu_ws_1"`) {
+		t.Fatalf("Web Search 配对 ID 异常: %s", got)
+	}
+
+	_, _ = hook([]byte("event: response.output_item.done"))
+	flush, duplicate := hook([]byte(payload))
+	if flush || len(duplicate) != 0 {
+		t.Fatalf("重复 web_search_call done 不应再次输出，flush=%v data=%s", flush, duplicate)
+	}
+}

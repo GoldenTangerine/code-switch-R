@@ -20,7 +20,7 @@ const requestLogUnreadWhereClause = "TRIM(COALESCE(error_read_at, '')) = ''"
 
 const providerPerformanceCacheTTL = 20 * time.Second
 const providerPerformanceCacheMaxEntries = 512
-const providerTokensPerSecondMinWindowSec = 0.05
+const providerLatestPerformanceSampleLimit = 5
 const fiveHourQuotaWindowDuration = 5 * time.Hour
 
 var requestLogListSelectFields = []string{
@@ -92,6 +92,8 @@ type LogService struct {
 }
 
 type providerPerformanceStat struct {
+	ProviderID       string
+	Provider         string
 	AvgFirstTokenSec float64
 	AvgTokensPerSec  float64
 	TTFTSampleCount  int64
@@ -1628,7 +1630,168 @@ func (ls *LogService) SummaryRangeV2(platform string, provider string, startAt s
 func (ls *LogService) ProviderDailyStats(platform string) ([]ProviderDailyStat, error) {
 	start := startOfDay(time.Now())
 	end := start.AddDate(0, 0, 1)
-	return ls.ProviderStatsRangeV2(platform, "", start.Format(timeLayout), end.Format(timeLayout))
+	stats, err := ls.ProviderStatsRangeV2(platform, "", start.Format(timeLayout), end.Format(timeLayout))
+	if err != nil {
+		return nil, err
+	}
+	for i := range stats {
+		stats[i].AvgFirstTokenSec = 0
+		stats[i].AvgTokensPerSec = 0
+		stats[i].TTFTSampleCount = 0
+		stats[i].TPSSampleCount = 0
+	}
+
+	latestPerformance, err := ls.latestProviderPerformance(platform)
+	if err != nil {
+		return nil, err
+	}
+
+	statsByProvider := make(map[string]int, len(stats)+len(latestPerformance))
+	for i := range stats {
+		statsByProvider[providerStatMapKey(stats[i].ProviderID, stats[i].Provider)] = i
+	}
+	for statKey, performance := range latestPerformance {
+		statIndex, exists := statsByProvider[statKey]
+		if !exists {
+			stats = append(stats, ProviderDailyStat{
+				ProviderID: performance.ProviderID,
+				Provider:   normalizedProviderDisplayName(performance.Provider),
+			})
+			statIndex = len(stats) - 1
+			statsByProvider[statKey] = statIndex
+		}
+		stat := &stats[statIndex]
+		stat.AvgFirstTokenSec = performance.AvgFirstTokenSec
+		stat.AvgTokensPerSec = performance.AvgTokensPerSec
+		stat.TTFTSampleCount = performance.TTFTSampleCount
+		stat.TPSSampleCount = performance.TPSSampleCount
+	}
+
+	sort.Slice(stats, func(i, j int) bool {
+		if stats[i].TotalRequests == stats[j].TotalRequests {
+			return stats[i].Provider < stats[j].Provider
+		}
+		return stats[i].TotalRequests > stats[j].TotalRequests
+	})
+	return stats, nil
+}
+
+func (ls *LogService) latestProviderPerformance(platform string) (map[string]providerPerformanceStat, error) {
+	platformKey := strings.TrimSpace(platform)
+	cacheKey := "latest-provider-performance|" + platformKey
+	now := time.Now()
+	if cached, ok := ls.getProviderPerformanceCache(cacheKey, now); ok {
+		return cached, nil
+	}
+
+	db, err := xdb.DB("default")
+	if err != nil {
+		return nil, err
+	}
+
+	query := `
+		WITH valid_samples AS (
+			SELECT
+				id,
+				created_at,
+				TRIM(COALESCE(provider_id, '')) AS provider_id,
+				CASE
+					WHEN TRIM(COALESCE(provider, '')) = '' THEN '(unknown)'
+					ELSE TRIM(provider)
+				END AS provider_name,
+				CASE
+					WHEN TRIM(COALESCE(provider_id, '')) <> '' THEN 'id:' || TRIM(provider_id)
+					ELSE 'name:' || LOWER(CASE
+						WHEN TRIM(COALESCE(provider, '')) = '' THEN '(unknown)'
+						ELSE TRIM(provider)
+					END)
+				END AS provider_stat_key,
+				first_token_sec,
+				CAST(output_tokens AS REAL) / duration_sec AS tokens_per_sec
+			FROM request_log
+			WHERE COALESCE(is_stream, 0) = 1
+				AND COALESCE(http_code, 0) >= 200
+				AND COALESCE(http_code, 0) < 400
+				AND first_token_sec > 0
+				AND output_tokens > 0
+				AND duration_sec > 0
+				AND (TRIM(COALESCE(provider_id, '')) <> '' OR TRIM(COALESCE(provider, '')) <> '')
+	`
+	args := make([]interface{}, 0, 2)
+	if platformKey != "" {
+		query += " AND platform = ?"
+		args = append(args, platformKey)
+	}
+	query += `
+		), ranked_samples AS (
+			SELECT
+				*,
+				ROW_NUMBER() OVER (
+					PARTITION BY provider_stat_key
+					ORDER BY created_at DESC, id DESC
+				) AS sample_rank
+			FROM valid_samples
+		)
+		SELECT
+			provider_stat_key,
+			MAX(CASE WHEN sample_rank = 1 THEN provider_id ELSE '' END) AS provider_id,
+			MAX(CASE WHEN sample_rank = 1 THEN provider_name ELSE '' END) AS provider_name,
+			AVG(first_token_sec) AS avg_first_token_sec,
+			AVG(tokens_per_sec) AS avg_tokens_per_sec,
+			COUNT(*) AS sample_count
+		FROM ranked_samples
+		WHERE sample_rank <= ?
+		GROUP BY provider_stat_key
+	`
+	args = append(args, providerLatestPerformanceSampleLimit)
+
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		if isNoSuchTableErr(err) || strings.Contains(err.Error(), "no such column") {
+			return map[string]providerPerformanceStat{}, nil
+		}
+		return nil, err
+	}
+	defer rows.Close()
+
+	statsByProvider := make(map[string]providerPerformanceStat, 16)
+	for rows.Next() {
+		var statKey sql.NullString
+		var providerID sql.NullString
+		var providerName sql.NullString
+		var avgFirstTokenSec sql.NullFloat64
+		var avgTokensPerSec sql.NullFloat64
+		var sampleCount sql.NullInt64
+		if err := rows.Scan(
+			&statKey,
+			&providerID,
+			&providerName,
+			&avgFirstTokenSec,
+			&avgTokensPerSec,
+			&sampleCount,
+		); err != nil {
+			return nil, err
+		}
+
+		normalizedKey := strings.TrimSpace(statKey.String)
+		if normalizedKey == "" {
+			continue
+		}
+		statsByProvider[normalizedKey] = providerPerformanceStat{
+			ProviderID:       strings.TrimSpace(providerID.String),
+			Provider:         normalizedProviderDisplayName(providerName.String),
+			AvgFirstTokenSec: avgFirstTokenSec.Float64,
+			AvgTokensPerSec:  avgTokensPerSec.Float64,
+			TTFTSampleCount:  sampleCount.Int64,
+			TPSSampleCount:   sampleCount.Int64,
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	ls.setProviderPerformanceCache(cacheKey, statsByProvider, now)
+	return statsByProvider, nil
 }
 
 func (ls *LogService) CountProviderUnreadFailedRequestLogs(platform string, providerID string, provider string) (ProviderUnreadFailedCountResult, error) {
@@ -1803,8 +1966,8 @@ func (ls *LogService) ProviderStatsRangeV2(platform string, provider string, sta
 			}
 
 			queryProviderPerformance := func(providerColumn string, providerValue string) (map[string]providerPerformanceStat, error) {
-				query := fmt.Sprintf(`
-					SELECT
+				query := `
+						SELECT
 						CASE
 							WHEN TRIM(COALESCE(provider_id, '')) <> '' THEN 'id:' || TRIM(provider_id)
 							ELSE 'name:' || LOWER(CASE
@@ -1824,58 +1987,27 @@ func (ls *LogService) ProviderStatsRangeV2(platform string, provider string, sta
 									ELSE 0
 								END
 							), 0) AS ttft_sample_count,
-							CASE
-								WHEN COALESCE(SUM(
-									CASE
-										WHEN COALESCE(is_stream, 0) = 1
-											AND output_tokens > 0
-											AND first_token_sec > 0
-											AND duration_sec > first_token_sec
-											AND (duration_sec - first_token_sec) >= %.6f
-										THEN (duration_sec - first_token_sec)
-										ELSE 0
-									END
-								), 0) > 0
-								THEN
-									COALESCE(SUM(
-										CASE
-											WHEN COALESCE(is_stream, 0) = 1
-												AND output_tokens > 0
-												AND first_token_sec > 0
-												AND duration_sec > first_token_sec
-												AND (duration_sec - first_token_sec) >= %.6f
-											THEN output_tokens
-											ELSE 0
-										END
-									), 0)
-									/
-									SUM(
-										CASE
-											WHEN COALESCE(is_stream, 0) = 1
-												AND output_tokens > 0
-												AND first_token_sec > 0
-												AND duration_sec > first_token_sec
-												AND (duration_sec - first_token_sec) >= %.6f
-											THEN (duration_sec - first_token_sec)
-											ELSE 0
-										END
-									)
-								ELSE 0
-							END AS avg_tokens_per_sec,
+							COALESCE(AVG(
+								CASE
+									WHEN COALESCE(is_stream, 0) = 1
+										AND output_tokens > 0
+										AND duration_sec > 0
+									THEN CAST(output_tokens AS REAL) / duration_sec
+									ELSE NULL
+								END
+							), 0) AS avg_tokens_per_sec,
 							COALESCE(SUM(
 								CASE
 									WHEN COALESCE(is_stream, 0) = 1
 										AND output_tokens > 0
-										AND first_token_sec > 0
-										AND duration_sec > first_token_sec
-										AND (duration_sec - first_token_sec) >= %.6f
+										AND duration_sec > 0
 									THEN 1
 									ELSE 0
 								END
 							), 0) AS tps_sample_count
-					FROM request_log
-					WHERE created_at >= ? AND created_at < ?
-				`, providerTokensPerSecondMinWindowSec, providerTokensPerSecondMinWindowSec, providerTokensPerSecondMinWindowSec, providerTokensPerSecondMinWindowSec)
+						FROM request_log
+						WHERE created_at >= ? AND created_at < ?
+					`
 				args := make([]interface{}, 0, 4)
 				args = append(args, startUTCKey, endUTCKey)
 				if platformKey != "" {

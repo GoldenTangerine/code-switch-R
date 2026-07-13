@@ -237,7 +237,7 @@ func TestUpdateFirstTokenFromPayloadSkipsNonStreamRequest(t *testing.T) {
 		RequestStartedAt: time.Now().Add(-1 * time.Second),
 	}
 
-	updateFirstTokenFromPayload(`{"choices":[{"delta":{"content":"hello"}}]}`, reqLog)
+	updateFirstTokenFromPayload(`{"choices":[{"delta":{"content":"hello"}}]}`, "codex", reqLog)
 
 	if reqLog.FirstTokenSec != 0 {
 		t.Fatalf("非流式请求不应记录 TTFT，当前 first_token_sec=%.6f", reqLog.FirstTokenSec)
@@ -250,7 +250,7 @@ func TestUpdateFirstTokenFromPayloadDetectsCodexRootDeltaEvent(t *testing.T) {
 		RequestStartedAt: time.Now().Add(-1200 * time.Millisecond),
 	}
 
-	updateFirstTokenFromPayload(`{"type":"response.output_text.delta","delta":"hello"}`, reqLog)
+	updateFirstTokenFromPayload(`{"type":"response.output_text.delta","delta":"hello"}`, "codex", reqLog)
 
 	if reqLog.FirstTokenSec <= 0 {
 		t.Fatalf("Codex root delta 事件应触发 TTFT 记录，当前 first_token_sec=%.6f", reqLog.FirstTokenSec)
@@ -266,10 +266,23 @@ func TestUpdateFirstTokenFromPayloadDetectsClaudeTextDelta(t *testing.T) {
 		RequestStartedAt: time.Now().Add(-900 * time.Millisecond),
 	}
 
-	updateFirstTokenFromPayload(`{"type":"content_block_delta","delta":{"text":"hi"}}`, reqLog)
+	updateFirstTokenFromPayload(`{"type":"content_block_delta","delta":{"text":"hi"}}`, "claude", reqLog)
 
 	if reqLog.FirstTokenSec <= 0 {
 		t.Fatalf("Claude delta 文本应触发 TTFT 记录，当前 first_token_sec=%.6f", reqLog.FirstTokenSec)
+	}
+}
+
+func TestUpdateFirstTokenFromPayloadDetectsCustomAnthropicData(t *testing.T) {
+	reqLog := &ReqeustLog{
+		IsStream:         true,
+		RequestStartedAt: time.Now().Add(-900 * time.Millisecond),
+	}
+
+	updateFirstTokenFromPayload(`{"type":"message_start","message":{"id":"msg_1"}}`, "custom:tool-a", reqLog)
+
+	if reqLog.FirstTokenSec <= 0 {
+		t.Fatalf("自定义 Anthropic data 事件应触发 TTFT，当前 first_token_sec=%.6f", reqLog.FirstTokenSec)
 	}
 }
 
@@ -279,10 +292,68 @@ func TestUpdateFirstTokenFromPayloadDetectsGeminiCandidateText(t *testing.T) {
 		RequestStartedAt: time.Now().Add(-900 * time.Millisecond),
 	}
 
-	updateFirstTokenFromPayload(`{"candidates":[{"content":{"parts":[{"text":"hello"}]}}]}`, reqLog)
+	updateFirstTokenFromPayload(`{"candidates":[{"content":{"parts":[{"text":"hello"}]}}]}`, "gemini", reqLog)
 
 	if reqLog.FirstTokenSec <= 0 {
 		t.Fatalf("Gemini candidates 文本应触发 TTFT 记录，当前 first_token_sec=%.6f", reqLog.FirstTokenSec)
+	}
+}
+
+func TestUpdateFirstTokenFromPayloadSkipsCodexPreambleAndTerminalEvents(t *testing.T) {
+	reqLog := &ReqeustLog{
+		IsStream:         true,
+		RequestStartedAt: time.Now().Add(-1 * time.Second),
+	}
+
+	for _, payload := range []string{
+		`{"type":"response.created"}`,
+		`{"type":"response.in_progress"}`,
+		`{"type":"response.completed","response":{"usage":{"output_tokens":10}}}`,
+	} {
+		updateFirstTokenFromPayload(payload, "codex", reqLog)
+	}
+
+	if reqLog.FirstTokenSec != 0 {
+		t.Fatalf("Codex 前置或终态事件不应触发 TTFT，当前 first_token_sec=%.6f", reqLog.FirstTokenSec)
+	}
+}
+
+func TestUpdateFirstTokenFromPayloadDetectsCodexToolOutputEvent(t *testing.T) {
+	reqLog := &ReqeustLog{
+		IsStream:         true,
+		RequestStartedAt: time.Now().Add(-1 * time.Second),
+	}
+
+	updateFirstTokenFromPayload(`{"type":"response.output_item.added","item":{"type":"function_call"}}`, "codex", reqLog)
+
+	if reqLog.FirstTokenSec <= 0 {
+		t.Fatalf("Codex 工具调用输出事件应触发 TTFT，当前 first_token_sec=%.6f", reqLog.FirstTokenSec)
+	}
+}
+
+func TestUpdateFirstTokenFromPayloadSkipsOpenAIUsageOnlyChunk(t *testing.T) {
+	reqLog := &ReqeustLog{
+		IsStream:         true,
+		RequestStartedAt: time.Now().Add(-1 * time.Second),
+	}
+
+	updateFirstTokenFromPayload(`{"choices":[],"usage":{"prompt_tokens":1,"completion_tokens":2}}`, "codex", reqLog)
+
+	if reqLog.FirstTokenSec != 0 {
+		t.Fatalf("OpenAI usage-only chunk 不应触发 TTFT，当前 first_token_sec=%.6f", reqLog.FirstTokenSec)
+	}
+}
+
+func TestUpdateFirstTokenFromPayloadDetectsGeminiFunctionCall(t *testing.T) {
+	reqLog := &ReqeustLog{
+		IsStream:         true,
+		RequestStartedAt: time.Now().Add(-1 * time.Second),
+	}
+
+	updateFirstTokenFromPayload(`{"candidates":[{"content":{"parts":[{"functionCall":{"name":"lookup"}}]}}]}`, "gemini", reqLog)
+
+	if reqLog.FirstTokenSec <= 0 {
+		t.Fatalf("Gemini 工具调用内容应触发 TTFT，当前 first_token_sec=%.6f", reqLog.FirstTokenSec)
 	}
 }
 

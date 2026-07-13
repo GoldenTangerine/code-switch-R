@@ -168,25 +168,7 @@ func anthropicToOpenAIRequest(body map[string]interface{}) (map[string]interface
 	}
 
 	if tools, ok := body["tools"].([]interface{}); ok {
-		openAITools := make([]interface{}, 0, len(tools))
-		for _, entry := range tools {
-			tool, ok := entry.(map[string]interface{})
-			if !ok {
-				continue
-			}
-			if getString(tool, "type") == "BatchTool" {
-				continue
-			}
-			openAITool := map[string]interface{}{
-				"type": "function",
-				"function": map[string]interface{}{
-					"name":        getString(tool, "name"),
-					"description": tool["description"],
-					"parameters":  normalizeOpenAIToolParameters(tool["input_schema"]),
-				},
-			}
-			openAITools = append(openAITools, openAITool)
-		}
+		openAITools := convertAnthropicToolsForOpenAI(tools, claudeAPIFormatOpenAIChat)
 		if len(openAITools) > 0 {
 			result["tools"] = openAITools
 			result["parallel_tool_calls"] = !toolChoiceDisablesParallelToolUse(body["tool_choice"])
@@ -194,7 +176,9 @@ func anthropicToOpenAIRequest(body map[string]interface{}) (map[string]interface
 	}
 
 	if toolChoice, ok := body["tool_choice"]; ok {
-		result["tool_choice"] = mapToolChoiceToOpenAIChat(toolChoice)
+		if mappedToolChoice := mapToolChoiceToOpenAIChat(toolChoice); mappedToolChoice != nil {
+			result["tool_choice"] = mappedToolChoice
+		}
 	}
 
 	return result, nil
@@ -246,23 +230,7 @@ func anthropicToResponsesRequest(body map[string]interface{}, cacheKey string) (
 	}
 
 	if tools, ok := body["tools"].([]interface{}); ok {
-		responseTools := make([]interface{}, 0, len(tools))
-		for _, entry := range tools {
-			tool, ok := entry.(map[string]interface{})
-			if !ok {
-				continue
-			}
-			if getString(tool, "type") == "BatchTool" {
-				continue
-			}
-			responseTools = append(responseTools, map[string]interface{}{
-				"type":        "function",
-				"name":        getString(tool, "name"),
-				"description": tool["description"],
-				"parameters":  normalizeOpenAIToolParameters(tool["input_schema"]),
-				"strict":      false,
-			})
-		}
+		responseTools := convertAnthropicToolsForOpenAI(tools, claudeAPIFormatOpenAIResponse)
 		if len(responseTools) > 0 {
 			result["tools"] = responseTools
 			result["parallel_tool_calls"] = !toolChoiceDisablesParallelToolUse(body["tool_choice"])
@@ -270,7 +238,9 @@ func anthropicToResponsesRequest(body map[string]interface{}, cacheKey string) (
 	}
 
 	if toolChoice, ok := body["tool_choice"]; ok {
-		result["tool_choice"] = mapToolChoiceToResponses(toolChoice)
+		if mappedToolChoice := mapToolChoiceToResponses(toolChoice); mappedToolChoice != nil {
+			result["tool_choice"] = mappedToolChoice
+		}
 	}
 
 	promptCacheKey := strings.TrimSpace(cacheKey)
@@ -305,6 +275,12 @@ func openAIToAnthropicResponse(body map[string]interface{}) (map[string]interfac
 
 	content := make([]interface{}, 0)
 	hasToolUse := false
+	if reasoning := firstNonEmptyString(getString(message, "reasoning"), getString(message, "reasoning_content")); reasoning != "" {
+		content = append(content, map[string]interface{}{
+			"type":     "thinking",
+			"thinking": reasoning,
+		})
+	}
 
 	switch msgContent := message["content"].(type) {
 	case string:
@@ -420,8 +396,9 @@ func responsesToAnthropicResponse(body map[string]interface{}) (map[string]inter
 
 	content := make([]interface{}, 0)
 	hasToolUse := false
+	webSearchResults := extractResponsesWebSearchResults(output)
 
-	for _, entry := range output {
+	for outputIndex, entry := range output {
 		item, ok := entry.(map[string]interface{})
 		if !ok {
 			continue
@@ -482,6 +459,24 @@ func responsesToAnthropicResponse(body map[string]interface{}) (map[string]inter
 					})
 				}
 			}
+		case "web_search_call":
+			toolUseID := webSearchToolUseID(item, outputIndex)
+			query := getNestedString(item, "action", "query")
+			content = append(content,
+				map[string]interface{}{
+					"type": "server_tool_use",
+					"id":   toolUseID,
+					"name": "web_search",
+					"input": map[string]interface{}{
+						"query": query,
+					},
+				},
+				map[string]interface{}{
+					"type":        "web_search_tool_result",
+					"tool_use_id": toolUseID,
+					"content":     webSearchResults,
+				},
+			)
 		}
 	}
 
@@ -561,6 +556,7 @@ func convertAnthropicMessageToOpenAI(role string, content interface{}) ([]interf
 	case []interface{}:
 		contentParts := make([]interface{}, 0)
 		toolCalls := make([]interface{}, 0)
+		toolResultImages := make([]interface{}, 0)
 
 		for _, entry := range value {
 			block, ok := entry.(map[string]interface{})
@@ -580,15 +576,14 @@ func convertAnthropicMessageToOpenAI(role string, content interface{}) ([]interf
 				contentParts = append(contentParts, part)
 			case "image":
 				source, _ := block["source"].(map[string]interface{})
-				mediaType := getString(source, "media_type")
-				if mediaType == "" {
-					mediaType = "image/png"
+				imageURL := anthropicImageSourceToDataURI(source)
+				if imageURL == "" {
+					continue
 				}
-				data := getString(source, "data")
 				contentParts = append(contentParts, map[string]interface{}{
 					"type": "image_url",
 					"image_url": map[string]interface{}{
-						"url": fmt.Sprintf("data:%s;base64,%s", mediaType, data),
+						"url": imageURL,
 					},
 				})
 			case "tool_use":
@@ -606,15 +601,20 @@ func convertAnthropicMessageToOpenAI(role string, content interface{}) ([]interf
 				})
 			case "tool_result":
 				toolCallID := getString(block, "tool_use_id")
-				contentString, err := stringifyJSONContent(block["content"])
-				if err != nil {
-					return nil, err
-				}
+				contentString, imageURLs := convertAnthropicToolResultOutput(block["content"])
 				result = append(result, map[string]interface{}{
 					"role":         "tool",
 					"tool_call_id": toolCallID,
 					"content":      contentString,
 				})
+				for _, imageURL := range imageURLs {
+					toolResultImages = append(toolResultImages, map[string]interface{}{
+						"type": "image_url",
+						"image_url": map[string]interface{}{
+							"url": imageURL,
+						},
+					})
+				}
 			case "thinking":
 				continue
 			}
@@ -641,6 +641,12 @@ func convertAnthropicMessageToOpenAI(role string, content interface{}) ([]interf
 				msg["tool_calls"] = toolCalls
 			}
 			result = append(result, msg)
+		}
+		if len(toolResultImages) > 0 {
+			result = append(result, map[string]interface{}{
+				"role":    "user",
+				"content": toolResultImages,
+			})
 		}
 		return result, nil
 	default:
@@ -711,14 +717,13 @@ func convertAnthropicToResponsesInput(system interface{}, messages []interface{}
 					})
 				case "image":
 					source, _ := block["source"].(map[string]interface{})
-					mediaType := getString(source, "media_type")
-					if mediaType == "" {
-						mediaType = "image/png"
+					imageURL := anthropicImageSourceToDataURI(source)
+					if imageURL == "" {
+						continue
 					}
-					data := getString(source, "data")
 					messageContent = append(messageContent, map[string]interface{}{
 						"type":      "input_image",
-						"image_url": fmt.Sprintf("data:%s;base64,%s", mediaType, data),
+						"image_url": imageURL,
 					})
 				case "tool_use":
 					if len(messageContent) > 0 {
@@ -748,13 +753,20 @@ func convertAnthropicToResponsesInput(system interface{}, messages []interface{}
 						})
 						messageContent = make([]interface{}, 0)
 					}
-					output, imageParts := convertAnthropicToolResultOutput(block["content"])
+					output, imageURLs := convertAnthropicToolResultOutput(block["content"])
 					input = append(input, map[string]interface{}{
 						"type":    "function_call_output",
 						"call_id": getString(block, "tool_use_id"),
 						"output":  output,
 					})
-					if len(imageParts) > 0 {
+					if len(imageURLs) > 0 {
+						imageParts := make([]interface{}, 0, len(imageURLs))
+						for _, imageURL := range imageURLs {
+							imageParts = append(imageParts, map[string]interface{}{
+								"type":      "input_image",
+								"image_url": imageURL,
+							})
+						}
 						input = append(input, map[string]interface{}{
 							"type":    "message",
 							"role":    "user",
@@ -827,7 +839,7 @@ func isAnthropicBillingHeaderText(text string) bool {
 	return strings.HasPrefix(strings.TrimSpace(text), "x-anthropic-billing-header: ")
 }
 
-func convertAnthropicToolResultOutput(content interface{}) (string, []interface{}) {
+func convertAnthropicToolResultOutput(content interface{}) (string, []string) {
 	if content == nil {
 		return "(empty)", nil
 	}
@@ -839,7 +851,7 @@ func convertAnthropicToolResultOutput(content interface{}) (string, []interface{
 		return value, nil
 	case []interface{}:
 		textParts := make([]string, 0, len(value))
-		imageParts := make([]interface{}, 0)
+		imageURLs := make([]string, 0)
 		for _, entry := range value {
 			block, ok := entry.(map[string]interface{})
 			if !ok {
@@ -853,10 +865,7 @@ func convertAnthropicToolResultOutput(content interface{}) (string, []interface{
 			case "image":
 				source, _ := block["source"].(map[string]interface{})
 				if imageURL := anthropicImageSourceToDataURI(source); imageURL != "" {
-					imageParts = append(imageParts, map[string]interface{}{
-						"type":      "input_image",
-						"image_url": imageURL,
-					})
+					imageURLs = append(imageURLs, imageURL)
 				}
 			}
 		}
@@ -864,7 +873,7 @@ func convertAnthropicToolResultOutput(content interface{}) (string, []interface{
 		if strings.TrimSpace(output) == "" {
 			output = "(empty)"
 		}
-		return output, imageParts
+		return output, imageURLs
 	default:
 		text, err := stringifyJSONContent(value)
 		if err != nil || strings.TrimSpace(text) == "" {
@@ -887,6 +896,105 @@ func anthropicImageSourceToDataURI(source map[string]interface{}) string {
 		mediaType = "image/png"
 	}
 	return fmt.Sprintf("data:%s;base64,%s", mediaType, data)
+}
+
+func convertAnthropicToolsForOpenAI(tools []interface{}, apiFormat string) []interface{} {
+	result := make([]interface{}, 0, len(tools))
+	for _, entry := range tools {
+		tool, ok := entry.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		toolType := strings.TrimSpace(getString(tool, "type"))
+		if toolType == "BatchTool" {
+			continue
+		}
+		if strings.HasPrefix(strings.ToLower(toolType), "web_search") {
+			if normalizeClaudeAPIFormat(apiFormat) == claudeAPIFormatOpenAIResponse {
+				result = append(result, map[string]interface{}{"type": "web_search"})
+			}
+			continue
+		}
+
+		if normalizeClaudeAPIFormat(apiFormat) == claudeAPIFormatOpenAIChat {
+			result = append(result, map[string]interface{}{
+				"type": "function",
+				"function": map[string]interface{}{
+					"name":        getString(tool, "name"),
+					"description": tool["description"],
+					"parameters":  normalizeOpenAIToolParameters(tool["input_schema"]),
+				},
+			})
+			continue
+		}
+
+		result = append(result, map[string]interface{}{
+			"type":        "function",
+			"name":        getString(tool, "name"),
+			"description": tool["description"],
+			"parameters":  normalizeOpenAIToolParameters(tool["input_schema"]),
+			"strict":      false,
+		})
+	}
+	return result
+}
+
+func webSearchToolUseID(item map[string]interface{}, fallbackIndex int) string {
+	itemID := strings.TrimSpace(getString(item, "id"))
+	if itemID == "" {
+		itemID = strings.TrimSpace(getString(item, "call_id"))
+	}
+	if itemID == "" {
+		itemID = fmt.Sprintf("%d", fallbackIndex)
+	}
+	return "srvtoolu_" + itemID
+}
+
+func extractResponsesWebSearchResults(output []interface{}) []interface{} {
+	results := make([]interface{}, 0)
+	seen := make(map[string]struct{})
+	for _, entry := range output {
+		item, ok := entry.(map[string]interface{})
+		if !ok || getString(item, "type") != "message" {
+			continue
+		}
+		content, _ := item["content"].([]interface{})
+		for _, contentEntry := range content {
+			block, ok := contentEntry.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			annotations, _ := block["annotations"].([]interface{})
+			for _, annotationEntry := range annotations {
+				annotation, ok := annotationEntry.(map[string]interface{})
+				if !ok || getString(annotation, "type") != "url_citation" {
+					continue
+				}
+				citationURL := strings.TrimSpace(getString(annotation, "url"))
+				if citationURL == "" {
+					continue
+				}
+				title := strings.TrimSpace(getString(annotation, "title"))
+				key := citationURL + "\x00" + title
+				if _, exists := seen[key]; exists {
+					continue
+				}
+				seen[key] = struct{}{}
+				result := map[string]interface{}{
+					"type":  "web_search_result",
+					"url":   citationURL,
+					"title": title,
+				}
+				for _, optionalKey := range []string{"encrypted_content", "page_age"} {
+					if value := strings.TrimSpace(getString(annotation, optionalKey)); value != "" {
+						result[optionalKey] = value
+					}
+				}
+				results = append(results, result)
+			}
+		}
+	}
+	return results
 }
 
 func extractAnthropicSystemInstructions(system interface{}) string {
@@ -1020,6 +1128,11 @@ func mapToolChoiceToResponses(toolChoice interface{}) interface{} {
 		case "none":
 			return "none"
 		case "tool":
+			if strings.EqualFold(strings.TrimSpace(getString(value, "name")), "web_search") {
+				return map[string]interface{}{
+					"type": "web_search",
+				}
+			}
 			return map[string]interface{}{
 				"type": "function",
 				"name": getString(value, "name"),
@@ -1122,6 +1235,9 @@ func mapToolChoiceToOpenAIChat(toolChoice interface{}) interface{} {
 		case "none":
 			return "none"
 		case "tool":
+			if strings.EqualFold(strings.TrimSpace(getString(value, "name")), "web_search") {
+				return nil
+			}
 			return map[string]interface{}{
 				"type": "function",
 				"function": map[string]interface{}{
@@ -1165,8 +1281,11 @@ func buildAnthropicUsageFromOpenAI(raw interface{}) map[string]interface{} {
 			result["input_tokens"] = max(0, inputTokens-cacheReadTokens)
 		}
 	}
-	if created := numberFromValue(usage["cache_creation_input_tokens"]); created > 0 {
+	if created, exists := resolveCacheCreationInputTokens(usage); exists {
 		result["cache_creation_input_tokens"] = created
+		if currentInput := numberFromValue(result["input_tokens"]); currentInput > 0 {
+			result["input_tokens"] = max(0, currentInput-created)
+		}
 	}
 	return result
 }
@@ -1207,10 +1326,56 @@ func buildAnthropicUsageFromResponses(raw interface{}) map[string]interface{} {
 			result["input_tokens"] = max(0, inputTokens-cacheReadTokens)
 		}
 	}
-	if created := numberFromValue(usage["cache_creation_input_tokens"]); created > 0 {
+	if created, exists := resolveCacheCreationInputTokens(usage); exists {
 		result["cache_creation_input_tokens"] = created
+		if currentInput := numberFromValue(result["input_tokens"]); currentInput > 0 {
+			result["input_tokens"] = max(0, currentInput-created)
+		}
 	}
 	return result
+}
+
+func resolveCacheCreationInputTokens(usage map[string]interface{}) (int64, bool) {
+	if value, exists := numericJSONField(usage, "cache_creation_input_tokens"); exists {
+		return value, true
+	}
+	for _, detailsKey := range []string{"input_tokens_details", "prompt_tokens_details"} {
+		if details, ok := usage[detailsKey].(map[string]interface{}); ok {
+			if value, exists := numericJSONField(details, "cache_creation_tokens"); exists {
+				return value, true
+			}
+		}
+	}
+	for _, key := range []string{"cache_write_input_tokens", "cache_creation_tokens", "cache_write_tokens"} {
+		if value, exists := numericJSONField(usage, key); exists {
+			return value, true
+		}
+	}
+	for _, detailsKey := range []string{"input_tokens_details", "prompt_tokens_details"} {
+		if details, ok := usage[detailsKey].(map[string]interface{}); ok {
+			if value, exists := numericJSONField(details, "cache_write_tokens"); exists {
+				return value, true
+			}
+		}
+	}
+	return 0, false
+}
+
+func numericJSONField(source map[string]interface{}, key string) (int64, bool) {
+	value, exists := source[key]
+	if !exists || value == nil {
+		return 0, false
+	}
+	return max(0, numberFromValue(value)), true
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func mapOpenAIFinishReasonToAnthropic(finishReason string, hasToolUse bool) string {

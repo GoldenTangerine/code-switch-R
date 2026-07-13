@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import type { ModelUsageStat } from '../../services/logs'
+import type { ModelUsageStat, RequestLog } from '../../services/logs'
 import {
   buildModelShareRows,
   formatCurrencyParts,
   formatModelShareTooltipLabel,
+  formatTokensPerSecond,
   normalizeReasoningEffortDisplay,
   resolveReasoningEffortTone,
 } from './utils'
@@ -98,5 +99,36 @@ describe('reasoning effort helpers', () => {
     expect(normalizeReasoningEffortDisplay('MAX')).toBe('max')
     expect(resolveReasoningEffortTone('low')).toBe('low')
     expect(resolveReasoningEffortTone('unknown')).toBe('unknown')
+  })
+})
+
+describe('formatTokensPerSecond', () => {
+  it('uses total request duration without subtracting first-token latency', () => {
+    const item = {
+      is_stream: true,
+      output_tokens: 100,
+      duration_sec: 2,
+      first_token_sec: 1.5,
+    } as RequestLog
+
+    expect(formatTokensPerSecond(item)).toBe('50.00 tokens/s')
+  })
+
+  it('does not require first-token latency but rejects non-streaming or invalid duration rows', () => {
+    expect(formatTokensPerSecond({
+      is_stream: true,
+      output_tokens: 30,
+      duration_sec: 1.5,
+    } as RequestLog)).toBe('20.00 tokens/s')
+    expect(formatTokensPerSecond({
+      is_stream: false,
+      output_tokens: 30,
+      duration_sec: 1.5,
+    } as RequestLog)).toBe('—')
+    expect(formatTokensPerSecond({
+      is_stream: true,
+      output_tokens: 30,
+      duration_sec: 0,
+    } as RequestLog)).toBe('—')
   })
 })

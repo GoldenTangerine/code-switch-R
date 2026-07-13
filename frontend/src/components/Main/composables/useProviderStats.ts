@@ -315,7 +315,8 @@ export function useProviderStats(options: UseProviderStatsOptions) {
     const outputTokens = Number.isFinite(Number(stat.output_tokens)) ? Number(stat.output_tokens) : 0
     const cacheReadTokens = Number.isFinite(Number(stat.cache_read_tokens)) ? Number(stat.cache_read_tokens) : 0
     const totalTokens = Math.max(0, inputTokens + outputTokens + cacheReadTokens)
-    const successRateValue = Number.isFinite(stat.success_rate) ? clamp(stat.success_rate, 0, 1) : null
+    const totalRequests = Number(stat.total_requests ?? 0)
+    const successRateValue = totalRequests > 0 && Number.isFinite(stat.success_rate) ? clamp(stat.success_rate, 0, 1) : null
     const successRateLabel = successRateValue !== null ? formatSuccessRateLabel(successRateValue) : ''
     const successRateClass = successRateValue !== null ? successRateClassName(successRateValue) : ''
     const ttftSampleCountRaw = Number(stat.ttft_sample_count ?? 0)
@@ -330,7 +331,6 @@ export function useProviderStats(options: UseProviderStatsOptions) {
     const performanceHint = t('components.main.providers.performanceHint', {
       ttftSamples: formatMetric(ttftSampleCount),
       tpsSamples: formatMetric(tpsSampleCount),
-      minWindowMs: 50,
     })
 
     return {

@@ -1,3 +1,25 @@
+# Code Switch v2.8.91
+
+## 变更
+- **补全 Claude API 格式兼容**：完善 OpenAI Chat Completions、Responses 与 SSE 的推理内容、图片、工具结果、Web Search 和缓存 usage 转换。
+- **调整供应商性能统计口径**：首页跨天选取最近 5 条成功流式请求计算首字与速度，日志速度统一使用输出 Token 除以总耗时。
+
+## 修复
+- **修复可选参数兼容重试误删字段**：仅删除上游明确拒绝的安全白名单参数，并与 `prompt_cache_key`、`previous_response_id` 共用一次重试预算。
+- **修复强制 Web Search 工具选择**：Responses 使用原生 Web Search 工具选择，Chat 路径不再发送不存在的函数选择。
+- **修复浏览器复制假成功**：浏览器开发环境跳过不可用的 Wails Clipboard 调用，可靠降级到标准 Clipboard API。
+- **修复流式首字统计偏差**：按协议识别首个有效输出，排除前置、usage-only 和终态事件。
+
+## 优化
+- **优化供应商能力记忆**：按规范化 API URL、最终端点和格式记忆不支持字段，并增加 30 分钟有效期与容量限制。
+- **保留 Web Search 引用**：非流式 Responses 转换会保留并去重 URL 引用结果。
+- **补充回归测试**：覆盖 Claude 格式转换、兼容重试、首字统计、供应商性能聚合和剪贴板降级。
+
+## 发布
+- **本次发版版本号推进到 `v2.8.91`**：同步应用常量、Wails 构建配置、平台构建元数据和发布说明，并推送 `v2.8.91` tag 触发 GitHub 自动打包。
+
+---
+
 # Code Switch v2.8.90
 
 ## 修复

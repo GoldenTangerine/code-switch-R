@@ -682,3 +682,300 @@ func TestAnthropicToOpenAIRequestMapsToolChoice(t *testing.T) {
 		})
 	}
 }
+
+func TestAnthropicToResponsesRequestMapsWebSearchAndSkipsEmptyImages(t *testing.T) {
+	body, err := decodeJSONMap([]byte(`{
+		"model":"gpt-5.4",
+		"messages":[{"role":"user","content":[
+			{"type":"image","source":{"media_type":"image/png","data":"   "}},
+			{"type":"text","text":"search"}
+		]}],
+		"tools":[
+			{"type":"web_search_20250305","name":"web_search","max_uses":3},
+			{"name":"Read","input_schema":{"type":"object"}}
+		]
+	}`))
+	if err != nil {
+		t.Fatalf("decodeJSONMap 失败: %v", err)
+	}
+
+	out, err := anthropicToResponsesRequest(body, "")
+	if err != nil {
+		t.Fatalf("anthropicToResponsesRequest 失败: %v", err)
+	}
+	data, err := encodeJSONMap(out)
+	if err != nil {
+		t.Fatalf("encodeJSONMap 失败: %v", err)
+	}
+
+	if strings.Contains(string(data), "data:image/png;base64,") {
+		t.Fatalf("空白 Base64 图片不应生成无效 data URI: %s", data)
+	}
+	if got := gjson.GetBytes(data, "tools.0.type").String(); got != "web_search" {
+		t.Fatalf("tools.0.type=%q，期望 web_search，body=%s", got, data)
+	}
+	if gjson.GetBytes(data, "tools.0.max_uses").Exists() {
+		t.Fatalf("不应猜测映射 Anthropic Web Search 专属参数: %s", data)
+	}
+	if got := gjson.GetBytes(data, "tools.1.type").String(); got != "function" {
+		t.Fatalf("普通工具仍应映射为 function，got=%q body=%s", got, data)
+	}
+}
+
+func TestAnthropicToResponsesRequestMapsForcedWebSearchToolChoice(t *testing.T) {
+	body, err := decodeJSONMap([]byte(`{
+		"model":"gpt-5.4",
+		"messages":[{"role":"user","content":"search"}],
+		"tools":[{"type":"web_search_20250305","name":"web_search"}],
+		"tool_choice":{"type":"tool","name":"web_search"}
+	}`))
+	if err != nil {
+		t.Fatalf("decodeJSONMap 失败: %v", err)
+	}
+
+	out, err := anthropicToResponsesRequest(body, "")
+	if err != nil {
+		t.Fatalf("anthropicToResponsesRequest 失败: %v", err)
+	}
+	data, err := encodeJSONMap(out)
+	if err != nil {
+		t.Fatalf("encodeJSONMap 失败: %v", err)
+	}
+
+	if got := gjson.GetBytes(data, "tool_choice.type").String(); got != "web_search" {
+		t.Fatalf("强制 Web Search 应映射为原生工具选择，got=%q body=%s", got, data)
+	}
+	if gjson.GetBytes(data, "tool_choice.name").Exists() {
+		t.Fatalf("原生 Web Search 工具选择不应携带 function name: %s", data)
+	}
+}
+
+func TestAnthropicToOpenAIRequestSkipsWebSearchAndEmptyImages(t *testing.T) {
+	body, err := decodeJSONMap([]byte(`{
+		"model":"gpt-4o",
+		"messages":[{"role":"user","content":[
+			{"type":"image","source":{"media_type":"image/png","data":""}},
+			{"type":"text","text":"hello"}
+		]}],
+		"tools":[
+			{"type":"web_search_20250305","name":"web_search"},
+			{"name":"Read","input_schema":{"type":"object"}}
+		]
+	}`))
+	if err != nil {
+		t.Fatalf("decodeJSONMap 失败: %v", err)
+	}
+
+	out, err := anthropicToOpenAIRequest(body)
+	if err != nil {
+		t.Fatalf("anthropicToOpenAIRequest 失败: %v", err)
+	}
+	data, err := encodeJSONMap(out)
+	if err != nil {
+		t.Fatalf("encodeJSONMap 失败: %v", err)
+	}
+
+	if strings.Contains(string(data), "data:image/png;base64,") {
+		t.Fatalf("空图片不应生成无效 data URI: %s", data)
+	}
+	if got := gjson.GetBytes(data, "tools.#").Int(); got != 1 {
+		t.Fatalf("Chat 不模拟服务端 Web Search，tools 数量=%d body=%s", got, data)
+	}
+	if got := gjson.GetBytes(data, "tools.0.function.name").String(); got != "Read" {
+		t.Fatalf("普通工具未保留: %s", data)
+	}
+}
+
+func TestAnthropicToOpenAIRequestDropsForcedWebSearchToolChoice(t *testing.T) {
+	body, err := decodeJSONMap([]byte(`{
+		"model":"gpt-4o",
+		"messages":[{"role":"user","content":"search"}],
+		"tools":[{"type":"web_search_20250305","name":"web_search"}],
+		"tool_choice":{"type":"tool","name":"web_search"}
+	}`))
+	if err != nil {
+		t.Fatalf("decodeJSONMap 失败: %v", err)
+	}
+
+	out, err := anthropicToOpenAIRequest(body)
+	if err != nil {
+		t.Fatalf("anthropicToOpenAIRequest 失败: %v", err)
+	}
+	data, err := encodeJSONMap(out)
+	if err != nil {
+		t.Fatalf("encodeJSONMap 失败: %v", err)
+	}
+
+	if gjson.GetBytes(data, "tool_choice").Exists() {
+		t.Fatalf("Chat 未转发 Web Search 时不应保留无效强制工具选择: %s", data)
+	}
+}
+
+func TestAnthropicToOpenAIRequestExtractsToolResultImages(t *testing.T) {
+	body, err := decodeJSONMap([]byte(`{
+		"model":"gpt-4o",
+		"messages":[
+			{"role":"assistant","content":[{"type":"tool_use","id":"toolu_1","name":"Read","input":{}}]},
+			{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":[
+				{"type":"text","text":"result"},
+				{"type":"image","source":{"media_type":"image/png","data":"abc"}}
+			]}]}
+		]
+	}`))
+	if err != nil {
+		t.Fatalf("decodeJSONMap 失败: %v", err)
+	}
+
+	out, err := anthropicToOpenAIRequest(body)
+	if err != nil {
+		t.Fatalf("anthropicToOpenAIRequest 失败: %v", err)
+	}
+	data, err := encodeJSONMap(out)
+	if err != nil {
+		t.Fatalf("encodeJSONMap 失败: %v", err)
+	}
+
+	if got := gjson.GetBytes(data, "messages.1.content").String(); got != "result" {
+		t.Fatalf("tool_result 文本未规范化，got=%q body=%s", got, data)
+	}
+	if got := gjson.GetBytes(data, "messages.2.content.0.image_url.url").String(); got != "data:image/png;base64,abc" {
+		t.Fatalf("tool_result 图片未拆分为 user 图片消息，got=%q body=%s", got, data)
+	}
+}
+
+func TestOpenAIToAnthropicResponseMapsReasoningAliasesBeforeTextAndTools(t *testing.T) {
+	body, err := decodeJSONMap([]byte(`{
+		"id":"chatcmpl_1",
+		"model":"gpt-5.4",
+		"choices":[{"finish_reason":"tool_calls","message":{
+			"reasoning":"primary",
+			"reasoning_content":"duplicate",
+			"content":"answer",
+			"tool_calls":[{"id":"call_1","function":{"name":"Read","arguments":"{}"}}]
+		}}],
+		"usage":{"prompt_tokens":10,"completion_tokens":2}
+	}`))
+	if err != nil {
+		t.Fatalf("decodeJSONMap 失败: %v", err)
+	}
+
+	out, err := openAIToAnthropicResponse(body)
+	if err != nil {
+		t.Fatalf("openAIToAnthropicResponse 失败: %v", err)
+	}
+	data, err := encodeJSONMap(out)
+	if err != nil {
+		t.Fatalf("encodeJSONMap 失败: %v", err)
+	}
+
+	if got := gjson.GetBytes(data, "content.0.type").String(); got != "thinking" {
+		t.Fatalf("首块应为 thinking，got=%q body=%s", got, data)
+	}
+	if got := gjson.GetBytes(data, "content.0.thinking").String(); got != "primary" {
+		t.Fatalf("reasoning 应优先于 reasoning_content，got=%q", got)
+	}
+	if got := gjson.GetBytes(data, "content.1.type").String(); got != "text" {
+		t.Fatalf("第二块应为 text，got=%q body=%s", got, data)
+	}
+	if got := gjson.GetBytes(data, "content.2.type").String(); got != "tool_use" {
+		t.Fatalf("第三块应为 tool_use，got=%q body=%s", got, data)
+	}
+}
+
+func TestResponsesToAnthropicResponseMapsWebSearchPair(t *testing.T) {
+	body, err := decodeJSONMap([]byte(`{
+		"id":"resp_1","model":"gpt-5.4","status":"completed",
+		"output":[{"id":"ws_1","type":"web_search_call","action":{"query":"golang"}}],
+		"usage":{"input_tokens":1,"output_tokens":1}
+	}`))
+	if err != nil {
+		t.Fatalf("decodeJSONMap 失败: %v", err)
+	}
+
+	out, err := responsesToAnthropicResponse(body)
+	if err != nil {
+		t.Fatalf("responsesToAnthropicResponse 失败: %v", err)
+	}
+	data, err := encodeJSONMap(out)
+	if err != nil {
+		t.Fatalf("encodeJSONMap 失败: %v", err)
+	}
+
+	if got := gjson.GetBytes(data, "content.0.type").String(); got != "server_tool_use" {
+		t.Fatalf("首块应为 server_tool_use，got=%q body=%s", got, data)
+	}
+	if got := gjson.GetBytes(data, "content.1.type").String(); got != "web_search_tool_result" {
+		t.Fatalf("第二块应为 web_search_tool_result，got=%q body=%s", got, data)
+	}
+	if first, second := gjson.GetBytes(data, "content.0.id").String(), gjson.GetBytes(data, "content.1.tool_use_id").String(); first == "" || first != second {
+		t.Fatalf("Web Search 配对 ID 不一致: %q vs %q body=%s", first, second, data)
+	}
+}
+
+func TestResponsesToAnthropicResponsePreservesWebSearchCitations(t *testing.T) {
+	body, err := decodeJSONMap([]byte(`{
+		"id":"resp_1","model":"gpt-5.4","status":"completed",
+		"output":[
+			{"id":"ws_1","type":"web_search_call","action":{"query":"golang"}},
+			{"type":"message","content":[{"type":"output_text","text":"answer","annotations":[
+				{"type":"url_citation","url":"https://go.dev/","title":"The Go Programming Language"},
+				{"type":"url_citation","url":"https://go.dev/","title":"The Go Programming Language"}
+			]}]}
+		],
+		"usage":{"input_tokens":1,"output_tokens":1}
+	}`))
+	if err != nil {
+		t.Fatalf("decodeJSONMap 失败: %v", err)
+	}
+
+	out, err := responsesToAnthropicResponse(body)
+	if err != nil {
+		t.Fatalf("responsesToAnthropicResponse 失败: %v", err)
+	}
+	data, err := encodeJSONMap(out)
+	if err != nil {
+		t.Fatalf("encodeJSONMap 失败: %v", err)
+	}
+
+	if got := gjson.GetBytes(data, "content.1.content.#").Int(); got != 1 {
+		t.Fatalf("Web Search 引用应去重保留，got=%d body=%s", got, data)
+	}
+	if got := gjson.GetBytes(data, "content.1.content.0.type").String(); got != "web_search_result" {
+		t.Fatalf("引用类型=%q，期望 web_search_result，body=%s", got, data)
+	}
+	if got := gjson.GetBytes(data, "content.1.content.0.url").String(); got != "https://go.dev/" {
+		t.Fatalf("引用 URL=%q，body=%s", got, data)
+	}
+}
+
+func TestAnthropicUsageCacheCreationAliasesUsePresencePriority(t *testing.T) {
+	usage := buildAnthropicUsageFromResponses(map[string]interface{}{
+		"input_tokens":                float64(20),
+		"output_tokens":               float64(2),
+		"cache_creation_input_tokens": float64(0),
+		"input_tokens_details": map[string]interface{}{
+			"cache_creation_tokens": float64(7),
+			"cache_write_tokens":    float64(8),
+		},
+		"cache_write_tokens": float64(9),
+	})
+	if got, exists := usage["cache_creation_input_tokens"]; !exists || got != int64(0) {
+		t.Fatalf("标准字段显式 0 应覆盖别名，got=%v exists=%v", got, exists)
+	}
+
+	usage = buildAnthropicUsageFromOpenAI(map[string]interface{}{
+		"prompt_tokens":     float64(20),
+		"completion_tokens": float64(2),
+		"prompt_tokens_details": map[string]interface{}{
+			"cache_creation_tokens": float64(7),
+			"cache_write_tokens":    float64(8),
+		},
+		"cache_write_tokens": float64(9),
+	})
+	if got := usage["cache_creation_input_tokens"]; got != int64(7) {
+		t.Fatalf("OpenAI 明细字段应优先于第三方别名，got=%v", got)
+	}
+	if got := usage["input_tokens"]; got != int64(13) {
+		t.Fatalf("Anthropic input_tokens 应扣除缓存写入 token，got=%v", got)
+	}
+}

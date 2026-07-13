@@ -2,7 +2,7 @@ import type { ModelUsageStat, RequestLog } from '../../services/logs'
 import type { ModelPricingRow } from '../../services/modelPricing'
 import type { Chart } from 'chart.js'
 import type { CostTooltipDetail, CostTooltipPriceLine, LogInfoTooltipDetail, LogInfoTooltipRow, LogInfoTooltipTone, ModelShareRow } from './types'
-import { COST_TOOLTIP_DIFF_EPSILON, PER_MILLION_TOKENS, TOKENS_PER_SECOND_MIN_WINDOW_SEC } from './constants'
+import { COST_TOOLTIP_DIFF_EPSILON, PER_MILLION_TOKENS } from './constants'
 
 export type CacheCreateTokenSplit = {
   totalTokens: number
@@ -259,11 +259,8 @@ export const formatTokensPerSecond = (item: RequestLog) => {
   const outputTokens = Number(item.output_tokens ?? 0)
   if (!Number.isFinite(outputTokens) || outputTokens <= 0) return '—'
   const totalDuration = toPositiveFinite(item.duration_sec)
-  const firstToken = toPositiveFinite(item.first_token_sec)
-  if (firstToken <= 0) return '—'
-  const generationWindow = totalDuration - firstToken
-  if (generationWindow < TOKENS_PER_SECOND_MIN_WINDOW_SEC) return '—'
-  const tokensPerSecond = outputTokens / generationWindow
+  if (totalDuration <= 0) return '—'
+  const tokensPerSecond = outputTokens / totalDuration
   if (!Number.isFinite(tokensPerSecond) || tokensPerSecond <= 0) return '—'
   const precision = tokensPerSecond >= 100 ? 1 : 2
   return `${tokensPerSecond.toFixed(precision)} tokens/s`

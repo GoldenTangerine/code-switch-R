@@ -57,19 +57,20 @@ type claudeResponsesStreamState struct {
 	HasMessageStopSent  bool
 	HasToolUse          bool
 
-	NextContentIndex     int
-	IndexByKey           map[string]int
-	OpenIndices          map[int]bool
-	CurrentTextIndex     int
-	HasCurrentTextIndex  bool
-	FallbackOpenIndex    int
-	HasFallbackOpenIndex bool
-	ToolIndexByItemID    map[string]int
-	ToolArgsByIndex      map[int]string
-	ToolNameByIndex      map[int]string
-	FinishedToolKeys     map[string]bool
-	LastToolIndex        int
-	HasLastToolIndex     bool
+	NextContentIndex      int
+	IndexByKey            map[string]int
+	OpenIndices           map[int]bool
+	CurrentTextIndex      int
+	HasCurrentTextIndex   bool
+	FallbackOpenIndex     int
+	HasFallbackOpenIndex  bool
+	ToolIndexByItemID     map[string]int
+	ToolArgsByIndex       map[int]string
+	ToolNameByIndex       map[int]string
+	FinishedToolKeys      map[string]bool
+	FinishedWebSearchKeys map[string]bool
+	LastToolIndex         int
+	HasLastToolIndex      bool
 }
 
 func newClaudeResponseTransformHook(apiFormat string, isStream bool) xrequest.ResponseHook {
@@ -81,12 +82,13 @@ func newClaudeResponseTransformHook(apiFormat string, isStream bool) xrequest.Re
 			OpenToolBlockIndices: make(map[int]bool),
 		},
 		responses: claudeResponsesStreamState{
-			IndexByKey:        make(map[string]int),
-			OpenIndices:       make(map[int]bool),
-			ToolIndexByItemID: make(map[string]int),
-			ToolArgsByIndex:   make(map[int]string),
-			ToolNameByIndex:   make(map[int]string),
-			FinishedToolKeys:  make(map[string]bool),
+			IndexByKey:            make(map[string]int),
+			OpenIndices:           make(map[int]bool),
+			ToolIndexByItemID:     make(map[string]int),
+			ToolArgsByIndex:       make(map[int]string),
+			ToolNameByIndex:       make(map[int]string),
+			FinishedToolKeys:      make(map[string]bool),
+			FinishedWebSearchKeys: make(map[string]bool),
 		},
 	}
 
@@ -241,7 +243,7 @@ func (state *claudeChatStreamState) transformChunk(chunk map[string]interface{})
 		}))
 	}
 
-	if reasoning := getString(delta, "reasoning"); reasoning != "" {
+	if reasoning := firstNonEmptyString(getString(delta, "reasoning"), getString(delta, "reasoning_content")); reasoning != "" {
 		events = append(events, state.openNonToolBlock("thinking")...)
 		if state.HasCurrentBlock {
 			events = append(events, newAnthropicSSEEvent("content_block_delta", map[string]interface{}{
@@ -544,6 +546,10 @@ func (state *claudeResponsesStreamState) transformChunk(data map[string]interfac
 		}
 	case "response.output_item.done":
 		item, _ := data["item"].(map[string]interface{})
+		if getString(item, "type") == "web_search_call" {
+			events = append(events, state.finishWebSearchItem(data, item)...)
+			break
+		}
 		if getString(item, "type") != "function_call" {
 			break
 		}
@@ -630,7 +636,7 @@ func (state *claudeResponsesStreamState) transformChunk(data map[string]interfac
 				delete(state.ToolIndexByItemID, itemID)
 			}
 		}
-	case "response.reasoning.delta", "response.reasoning_summary_text.delta":
+	case "response.reasoning.delta", "response.reasoning_summary_text.delta", "response.reasoning_text.delta":
 		delta := getString(data, "delta")
 		if delta == "" {
 			delta = getString(data, "text")
@@ -659,7 +665,7 @@ func (state *claudeResponsesStreamState) transformChunk(data map[string]interfac
 				"thinking": delta,
 			},
 		}))
-	case "response.reasoning.done", "response.reasoning_summary_text.done":
+	case "response.reasoning.done", "response.reasoning_summary_text.done", "response.reasoning_text.done":
 		index, ok := state.lookupContentIndex(data)
 		if ok && state.OpenIndices[index] {
 			delete(state.OpenIndices, index)
@@ -675,6 +681,64 @@ func (state *claudeResponsesStreamState) transformChunk(data map[string]interfac
 		events = append(events, state.finishResponseMessage(data)...)
 	}
 
+	return events
+}
+
+func (state *claudeResponsesStreamState) finishWebSearchItem(data map[string]interface{}, item map[string]interface{}) []anthropicSSEEvent {
+	itemKey := strings.TrimSpace(getString(item, "id"))
+	if itemKey == "" {
+		itemKey = strings.TrimSpace(getString(data, "item_id"))
+	}
+	if itemKey == "" {
+		itemKey = fmt.Sprintf("output-%d", numberFromValue(data["output_index"]))
+	}
+	if state.FinishedWebSearchKeys[itemKey] {
+		return nil
+	}
+	state.FinishedWebSearchKeys[itemKey] = true
+
+	events := make([]anthropicSSEEvent, 0, 5)
+	events = append(events, state.closeCurrentTextIndex(nil)...)
+	events = append(events, state.ensureMessageStart()...)
+	toolUseID := webSearchToolUseID(item, int(numberFromValue(data["output_index"])))
+	query := getNestedString(item, "action", "query")
+	serverIndex := state.NextContentIndex
+	state.NextContentIndex++
+	events = append(events,
+		newAnthropicSSEEvent("content_block_start", map[string]interface{}{
+			"type":  "content_block_start",
+			"index": serverIndex,
+			"content_block": map[string]interface{}{
+				"type": "server_tool_use",
+				"id":   toolUseID,
+				"name": "web_search",
+				"input": map[string]interface{}{
+					"query": query,
+				},
+			},
+		}),
+		newAnthropicSSEEvent("content_block_stop", map[string]interface{}{
+			"type":  "content_block_stop",
+			"index": serverIndex,
+		}),
+	)
+	resultIndex := state.NextContentIndex
+	state.NextContentIndex++
+	events = append(events,
+		newAnthropicSSEEvent("content_block_start", map[string]interface{}{
+			"type":  "content_block_start",
+			"index": resultIndex,
+			"content_block": map[string]interface{}{
+				"type":        "web_search_tool_result",
+				"tool_use_id": toolUseID,
+				"content":     []interface{}{},
+			},
+		}),
+		newAnthropicSSEEvent("content_block_stop", map[string]interface{}{
+			"type":  "content_block_stop",
+			"index": resultIndex,
+		}),
+	)
 	return events
 }
 
