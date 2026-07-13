@@ -69,7 +69,7 @@
           <td class="performance-cell">
             <div>
               <span class="performance-badge performance-badge--ttft">首</span>
-              <span class="token-value">{{ formatters.formatFirstTokenMs(item) }}</span>
+              <span class="token-value">{{ formatters.formatFirstTokenDuration(item) }}</span>
             </div>
             <div>
               <button
@@ -161,7 +161,7 @@ type LogsTableFormatters = {
   formatStream: (value?: boolean | number) => string
   durationColor: (value?: number) => string
   formatDuration: (value?: number) => string
-  formatFirstTokenMs: (item: RequestLog) => string
+  formatFirstTokenDuration: (item: RequestLog) => string
   formatPayloadDetailAriaLabel: (item: RequestLog) => string
   formatTokensPerSecond: (item: RequestLog) => string
   formatCostAriaLabel: (item: RequestLog) => string

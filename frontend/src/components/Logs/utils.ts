@@ -3,6 +3,7 @@ import type { ModelPricingRow } from '../../services/modelPricing'
 import type { Chart } from 'chart.js'
 import type { CostTooltipDetail, CostTooltipPriceLine, LogInfoTooltipDetail, LogInfoTooltipRow, LogInfoTooltipTone, ModelShareRow } from './types'
 import { COST_TOOLTIP_DIFF_EPSILON, PER_MILLION_TOKENS } from './constants'
+import { formatAdaptiveDurationSeconds } from '../../utils/durationFormat'
 
 export type CacheCreateTokenSplit = {
   totalTokens: number
@@ -245,13 +246,9 @@ export const toPositiveFinite = (value?: number) => {
   return numeric
 }
 
-export const formatFirstTokenMs = (item: RequestLog) => {
+export const formatFirstTokenDuration = (item: RequestLog) => {
   if (!isStreamingLog(item.is_stream)) return '—'
-  const seconds = toPositiveFinite(item.first_token_sec)
-  if (seconds <= 0) return '—'
-  const milliseconds = seconds * 1000
-  const precision = milliseconds >= 100 ? 0 : milliseconds >= 10 ? 1 : 2
-  return `${milliseconds.toFixed(precision)} ms`
+  return formatAdaptiveDurationSeconds(item.first_token_sec)
 }
 
 export const formatTokensPerSecond = (item: RequestLog) => {

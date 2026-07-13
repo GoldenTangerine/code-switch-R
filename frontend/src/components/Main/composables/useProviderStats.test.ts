@@ -1,12 +1,32 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { AutomationCard } from '../../../data/cards'
-import { resolveProviderUnreadFailedRequestsForCard } from './useProviderStats'
+
+const {
+  fetchProviderDailyStatsMock,
+  fetchProviderUnreadFailedStatsMock,
+  fetchProviderModelPricingMock,
+} = vi.hoisted(() => ({
+  fetchProviderDailyStatsMock: vi.fn(),
+  fetchProviderUnreadFailedStatsMock: vi.fn(),
+  fetchProviderModelPricingMock: vi.fn(),
+}))
+
+vi.mock('../../../services/logs', () => ({
+  fetchProviderDailyStats: fetchProviderDailyStatsMock,
+  fetchProviderUnreadFailedStats: fetchProviderUnreadFailedStatsMock,
+}))
+
+vi.mock('../../../services/providerModelPricing', () => ({
+  fetchProviderModelPricing: fetchProviderModelPricingMock,
+}))
 
 vi.mock('@wailsio/runtime', () => ({
   Call: {
     ByName: vi.fn(),
   },
 }))
+
+import { resolveProviderUnreadFailedRequestsForCard, useProviderStats } from './useProviderStats'
 
 const buildCard = (overrides: Partial<AutomationCard> = {}): AutomationCard => ({
   id: 102,
@@ -33,5 +53,52 @@ describe('resolveProviderUnreadFailedRequestsForCard', () => {
     const card = buildCard({ id: Number.NaN, providerRef: '', name: 'kimi' })
 
     expect(resolveProviderUnreadFailedRequestsForCard(card, { kimi: 1 })).toBe(1)
+  })
+})
+
+describe('useProviderStats duration display', () => {
+  it('formats minute, hour, and empty TTFT values through the provider display flow', async () => {
+    const card = buildCard()
+    const cards = {
+      claude: [card],
+      codex: [],
+      gemini: [],
+      opencode: [],
+      others: [],
+    }
+    const stats = useProviderStats({
+      t: (key: string) => key,
+      getLocale: () => 'en',
+      getActiveTab: () => 'claude',
+      cards,
+      refreshAvailabilityResults: vi.fn().mockResolvedValue(undefined),
+    })
+    fetchProviderUnreadFailedStatsMock.mockResolvedValue([])
+
+    for (const [seconds, expected] of [
+      [65, '1m 05s'],
+      [3665, '1h 01m 05s'],
+      [0, '—'],
+    ] as const) {
+      fetchProviderDailyStatsMock.mockResolvedValue([{
+        provider_id: '102',
+        provider: 'kimi',
+        total_requests: 1,
+        input_tokens: 0,
+        output_tokens: 0,
+        cache_read_tokens: 0,
+        avg_first_token_sec: seconds,
+        avg_tokens_per_sec: 0,
+      }])
+
+      await stats.loadProviderStats('claude')
+
+      const display = stats.providerStatDisplay(card)
+      expect(display.state).toBe('ready')
+      if (display.state !== 'ready') {
+        throw new Error(`provider stat display state = ${display.state}`)
+      }
+      expect(display.ttft).toBe(expected)
+    }
   })
 })

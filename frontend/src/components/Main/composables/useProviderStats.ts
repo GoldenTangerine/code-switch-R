@@ -21,6 +21,7 @@ import {
 } from '../adapters/providerCardMappers'
 import type { ProviderStatDisplay, ProviderTab, TranslateFn } from '../types'
 import { buildProviderCostDisplay } from '../utils/providerCostDisplay'
+import { formatAdaptiveDurationSeconds } from '../../../utils/durationFormat'
 
 type UseProviderStatsOptions = {
   t: TranslateFn
@@ -61,13 +62,7 @@ const toPositiveFiniteNumber = (value: unknown) => {
   return numeric
 }
 
-const formatAverageFirstTokenMs = (value: unknown) => {
-  const seconds = toPositiveFiniteNumber(value)
-  if (seconds <= 0) return '—'
-  const milliseconds = seconds * 1000
-  const precision = milliseconds >= 100 ? 0 : milliseconds >= 10 ? 1 : 2
-  return `${milliseconds.toFixed(precision)} ms`
-}
+const formatAverageFirstTokenDuration = (value: unknown) => formatAdaptiveDurationSeconds(value)
 
 const formatAverageTokensPerSecond = (value: unknown) => {
   const tokensPerSecond = toPositiveFiniteNumber(value)
@@ -341,7 +336,7 @@ export function useProviderStats(options: UseProviderStatsOptions) {
       costParts: costDisplay.parts,
       costFormatted: costDisplay.formatted,
       costValue: normalizedCost,
-      ttft: formatAverageFirstTokenMs(stat.avg_first_token_sec),
+      ttft: formatAverageFirstTokenDuration(stat.avg_first_token_sec),
       tps: formatAverageTokensPerSecond(stat.avg_tokens_per_sec),
       performanceHint,
       successRateLabel,

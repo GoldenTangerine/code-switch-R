@@ -3,6 +3,7 @@ import type { ModelUsageStat, RequestLog } from '../../services/logs'
 import {
   buildModelShareRows,
   formatCurrencyParts,
+  formatFirstTokenDuration,
   formatModelShareTooltipLabel,
   formatTokensPerSecond,
   normalizeReasoningEffortDisplay,
@@ -129,6 +130,22 @@ describe('formatTokensPerSecond', () => {
       is_stream: true,
       output_tokens: 30,
       duration_sec: 0,
+    } as RequestLog)).toBe('—')
+  })
+})
+
+describe('formatFirstTokenDuration', () => {
+  it('uses adaptive duration units for streaming logs', () => {
+    expect(formatFirstTokenDuration({
+      is_stream: true,
+      first_token_sec: 65,
+    } as RequestLog)).toBe('1m 05s')
+  })
+
+  it('keeps non-streaming logs empty', () => {
+    expect(formatFirstTokenDuration({
+      is_stream: false,
+      first_token_sec: 1.23,
     } as RequestLog)).toBe('—')
   })
 })
