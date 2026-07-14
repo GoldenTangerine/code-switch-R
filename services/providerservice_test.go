@@ -553,6 +553,45 @@ func TestProvider_ValidateConfiguration(t *testing.T) {
 	}
 }
 
+func TestProviderValidateConfigurationForKindTrustsClaudeMappingsOnly(t *testing.T) {
+	provider := Provider{
+		Name: "test-provider",
+		SupportedModels: map[string]bool{
+			"kimi-for-coding": true,
+		},
+		ModelMapping: map[string]string{
+			"claude-opus-*": "kimi-k2.7",
+		},
+	}
+	if errors := provider.validateConfigurationForKind("claude"); len(errors) != 0 {
+		t.Fatalf("Claude 显式映射不应校验目标白名单: %v", errors)
+	}
+	if errors := provider.validateConfigurationForKind("codex"); len(errors) == 0 {
+		t.Fatal("Codex 映射目标不在白名单时仍应返回配置错误")
+	}
+}
+
+func TestProviderServiceSaveProvidersTrustsClaudeMappingsOnly(t *testing.T) {
+	useIsolatedHomeDir(t)
+	provider := Provider{
+		ID:   1,
+		Name: "test-provider",
+		SupportedModels: map[string]bool{
+			"kimi-for-coding": true,
+		},
+		ModelMapping: map[string]string{
+			"claude-opus-*": "kimi-k2.7",
+		},
+	}
+	service := NewProviderService()
+	if err := service.SaveProviders("claude", []Provider{provider}); err != nil {
+		t.Fatalf("Claude 显式映射配置应允许保存: %v", err)
+	}
+	if err := service.SaveProviders("codex", []Provider{provider}); err == nil {
+		t.Fatal("Codex 映射目标不在白名单时不应允许保存")
+	}
+}
+
 // ==================== Level 分组测试 ====================
 
 func TestProviderLevelGrouping(t *testing.T) {

@@ -2015,7 +2015,7 @@ func (prs *ProviderRelayService) validateConfig() []string {
 			enabledCount++
 
 			// 验证每个启用的 provider
-			if errs := p.ValidateConfiguration(); len(errs) > 0 {
+			if errs := p.validateConfigurationForKind(kind); len(errs) > 0 {
 				for _, errMsg := range errs {
 					warnings = append(warnings, fmt.Sprintf("[%s/%s] %s", kind, p.Name, errMsg))
 				}
@@ -2146,7 +2146,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 
 			// Claude 模型路由关闭时不使用模型配置筛选供应商。
 			if kind != "claude" || claudeModelRoutingEnabled {
-				if errs := provider.ValidateConfiguration(); len(errs) > 0 {
+				if errs := provider.validateConfigurationForKind(kind); len(errs) > 0 {
 					fmt.Printf("[WARN] Provider %s 配置验证失败，已自动跳过: %v\n", provider.Name, errs)
 					skippedCount++
 					continue
@@ -2167,7 +2167,13 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 				continue
 			}
 
-			if (kind != "claude" || claudeModelRoutingEnabled) && !provider.IsResolvedModelSupported(requestedModel, plan.EffectiveModel) {
+			modelSupported := true
+			if kind == "claude" && claudeModelRoutingEnabled {
+				modelSupported = provider.isClaudeRoutedModelSupported(requestedModel, plan.EffectiveModel)
+			} else if kind != "claude" {
+				modelSupported = provider.IsResolvedModelSupported(requestedModel, plan.EffectiveModel)
+			}
+			if !modelSupported {
 				fmt.Printf("[INFO] Provider %s 不支持最终模型 %s（原始请求模型: %s），已跳过\n",
 					provider.Name,
 					displayModelForLog(plan.EffectiveModel),

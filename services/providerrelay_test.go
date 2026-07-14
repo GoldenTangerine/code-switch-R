@@ -4,8 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -406,6 +409,98 @@ func TestProviderResolvedModelSupport(t *testing.T) {
 					tt.requestedModel, tt.effectiveModel, allowed, tt.expectAllowed)
 			}
 		})
+	}
+}
+
+func TestClaudeRoutedModelSupportTrustsExplicitMapping(t *testing.T) {
+	provider := Provider{
+		SupportedModels: map[string]bool{
+			"kimi-for-coding": true,
+		},
+		ModelMapping: map[string]string{
+			"claude-opus-*": "kimi-k2.7",
+		},
+		RequestBodyOverrides: map[string]interface{}{
+			"model": "forced-provider-model",
+		},
+	}
+	if !provider.isClaudeRoutedModelSupported("claude-opus-4.8", "forced-provider-model") {
+		t.Fatal("Claude 映射命中后应信任最终模型，包括请求体强制覆盖")
+	}
+	if provider.isClaudeRoutedModelSupported("claude-sonnet-4.8", "forced-provider-model") {
+		t.Fatal("未命中映射时不应绕过最终模型白名单")
+	}
+	if provider.IsResolvedModelSupported("claude-opus-4.8", "forced-provider-model") {
+		t.Fatal("通用模型校验必须保持严格，避免影响 Codex 和自定义 CLI")
+	}
+}
+
+func TestClaudeProxyTrustsExplicitMappingEndToEnd(t *testing.T) {
+	useIsolatedHomeDir(t)
+	gin.SetMode(gin.TestMode)
+	disableBlacklistForTest(t)
+
+	var upstreamCalls int32
+	var upstreamModel string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&upstreamCalls, 1)
+		body, _ := io.ReadAll(r.Body)
+		upstreamModel = gjson.GetBytes(body, "model").String()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"msg_test","type":"message","role":"assistant","model":"kimi-k2.7","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
+	}))
+	defer upstream.Close()
+
+	appSettings := NewAppSettingsService(nil)
+	settings, err := appSettings.GetAppSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings.ClaudeModelRoutingEnabled = true
+	if _, err := appSettings.SaveAppSettings(settings); err != nil {
+		t.Fatal(err)
+	}
+
+	providerService := NewProviderService()
+	provider := Provider{
+		ID:      1,
+		Name:    "Trusted Mapping",
+		APIURL:  upstream.URL,
+		APIKey:  "test-key",
+		Enabled: true,
+		Level:   1,
+		SupportedModels: map[string]bool{
+			"kimi-for-coding": true,
+		},
+		ModelMapping: map[string]string{
+			"claude-opus-*": "kimi-k2.7",
+		},
+	}
+	if err := providerService.SaveProviders("claude", []Provider{provider}); err != nil {
+		t.Fatalf("保存供应商失败: %v", err)
+	}
+
+	blacklistService := NewBlacklistService(NewSettingsService(), nil)
+	routing := NewClaudeModelRoutingService(providerService, appSettings, nil)
+	relay := NewProviderRelayService(providerService, nil, blacklistService, nil, appSettings, nil, "")
+	relay.BindClaudeModelRoutingService(routing)
+	router := gin.New()
+	relay.registerRoutes(router)
+
+	requestBody := `{"model":"claude-opus-4.8","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(requestBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("状态码 = %d, body=%s", w.Code, w.Body.String())
+	}
+	if atomic.LoadInt32(&upstreamCalls) != 1 {
+		t.Fatalf("上游调用次数 = %d，期望 1", upstreamCalls)
+	}
+	if upstreamModel != "kimi-k2.7" {
+		t.Fatalf("上游模型 = %q，期望 kimi-k2.7", upstreamModel)
 	}
 }
 

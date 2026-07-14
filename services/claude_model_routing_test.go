@@ -44,6 +44,37 @@ func TestBuildClaudeProviderRoutesUsesRequestedAndActualModels(t *testing.T) {
 	}
 }
 
+func TestBuildClaudeProviderRoutesTrustsExplicitMappingWithoutActualTarget(t *testing.T) {
+	provider := Provider{
+		ID:      1,
+		Name:    "Trusted Mapping",
+		Enabled: true,
+		ModelMapping: map[string]string{
+			"claude-opus-*": "kimi-k2.7",
+		},
+	}
+	actual := map[string]ProviderModelPricingItem{
+		"kimi-for-coding": {Model: "kimi-for-coding", DisplayName: "Kimi for Coding"},
+	}
+	localModels := map[string]ProviderModelPricingItem{
+		"claude-opus-4.8": {Model: "claude-opus-4.8", DisplayName: "Claude Opus 4.8", MaxInputTokens: 200000},
+	}
+	routes := buildClaudeProviderRoutes(provider, actual, localModels, 0)
+	route, ok := routes["claude-opus-4.8"]
+	if !ok {
+		t.Fatal("显式映射不应依赖供应商真实模型列表")
+	}
+	if route.EffectiveModel != "kimi-k2.7" {
+		t.Fatalf("实际模型 = %q，期望 kimi-k2.7", route.EffectiveModel)
+	}
+	if route.Metadata.DisplayName != "Claude Opus 4.8" || route.Metadata.MaxInputTokens != 200000 {
+		t.Fatalf("缺少目标模型元数据时应回退到请求模型元数据: %#v", route.Metadata)
+	}
+	if _, exists := routes["claude-opus-*"]; exists {
+		t.Fatal("聚合路由不应暴露通配符模型名")
+	}
+}
+
 func TestResolveClaudeProviderActualModelsFallsBackToMappingTargets(t *testing.T) {
 	provider := Provider{ModelMapping: map[string]string{
 		"claude-5": "vendor/claude-5",
@@ -84,7 +115,37 @@ func TestClaudeModelRoutingResolveProvidersHonorsSwitch(t *testing.T) {
 	}
 }
 
-func TestBuildClaudeProviderRoutesExpandsWildcardFromActualModels(t *testing.T) {
+func TestClaudeModelRoutingResolveProvidersMatchesMappingOutsideRouteIndex(t *testing.T) {
+	useIsolatedHomeDir(t)
+	appSettings := NewAppSettingsService(nil)
+	settings, err := appSettings.GetAppSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings.ClaudeModelRoutingEnabled = true
+	if _, err := appSettings.SaveAppSettings(settings); err != nil {
+		t.Fatal(err)
+	}
+	service := NewClaudeModelRoutingService(nil, appSettings, nil)
+	providers := []Provider{
+		{ID: 1, Name: "No Match", ModelMapping: map[string]string{"claude-sonnet-*": "vendor-sonnet"}},
+		{ID: 2, Name: "Match", ModelMapping: map[string]string{"claude-opus-*": "kimi-k2.7"}},
+		{ID: 3, Name: "Verified", SupportedModels: map[string]bool{"claude-opus-4.8": true}},
+	}
+	service.routes = map[string][]claudeModelRouteProvider{
+		"claude-opus-4.8": {{ProviderRef: "3"}},
+	}
+	resolved := service.ResolveProviders("claude-opus-4.9-unlisted", providers)
+	if len(resolved) != 1 || resolved[0].Name != "Match" {
+		t.Fatalf("模型库外请求应按映射动态匹配供应商: %#v", resolved)
+	}
+	resolved = service.ResolveProviders("claude-opus-4.8", providers)
+	if len(resolved) != 2 || resolved[0].Name != "Match" || resolved[1].Name != "Verified" {
+		t.Fatalf("动态映射与已验证路由应合并并保留供应商顺序: %#v", resolved)
+	}
+}
+
+func TestBuildClaudeProviderRoutesExpandsWildcardFromLocalModels(t *testing.T) {
 	provider := Provider{
 		ID:      2,
 		Name:    "Wildcard",
@@ -93,12 +154,13 @@ func TestBuildClaudeProviderRoutesExpandsWildcardFromActualModels(t *testing.T) 
 			"claude-*": "anthropic/claude-*",
 		},
 	}
-	actual := map[string]ProviderModelPricingItem{
-		"anthropic/claude-opus-5": {Model: "anthropic/claude-opus-5"},
+	actual := map[string]ProviderModelPricingItem{}
+	localModels := map[string]ProviderModelPricingItem{
+		"claude-opus-5": {Model: "claude-opus-5"},
 	}
-	routes := buildClaudeProviderRoutes(provider, actual, nil, 0)
+	routes := buildClaudeProviderRoutes(provider, actual, localModels, 0)
 	if got := routes["claude-opus-5"].EffectiveModel; got != "anthropic/claude-opus-5" {
-		t.Fatalf("通配符反向展开结果 = %q", got)
+		t.Fatalf("通配符模型库展开结果 = %q", got)
 	}
 }
 
@@ -160,7 +222,10 @@ func TestBuildClaudeProviderRoutesUsesSameWildcardPrecedenceAsForwarding(t *test
 	actual := map[string]ProviderModelPricingItem{
 		"vendor-b/-sonnet": {Model: "vendor-b/-sonnet"},
 	}
-	routes := buildClaudeProviderRoutes(provider, actual, nil, 0)
+	localModels := map[string]ProviderModelPricingItem{
+		"claude-5-sonnet": {Model: "claude-5-sonnet"},
+	}
+	routes := buildClaudeProviderRoutes(provider, actual, localModels, 0)
 	route, ok := routes["claude-5-sonnet"]
 	if !ok {
 		t.Fatal("重叠通配符未生成路由")

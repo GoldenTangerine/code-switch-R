@@ -514,20 +514,27 @@ func claudeProviderConfigFingerprint(provider Provider) string {
 }
 
 func (s *ClaudeModelRoutingService) ResolveProviders(requestedModel string, providers []Provider) []Provider {
-	if s == nil || !s.routingEnabled() || strings.TrimSpace(requestedModel) == "" {
+	requestedModel = strings.TrimSpace(requestedModel)
+	if s == nil || !s.routingEnabled() || requestedModel == "" {
 		return providers
 	}
 	s.mu.RLock()
-	routes := append([]claudeModelRouteProvider(nil), s.routes[strings.TrimSpace(requestedModel)]...)
+	routes := append([]claudeModelRouteProvider(nil), s.routes[requestedModel]...)
 	s.mu.RUnlock()
-	if len(routes) == 0 {
-		return nil
-	}
 	allowed := make(map[string]bool, len(routes))
 	for _, route := range routes {
 		allowed[route.ProviderRef] = true
 	}
-	filtered := make([]Provider, 0, len(routes))
+	// 显式映射按请求实时匹配，避免模型库尚未收录的新模型被索引拒绝。
+	for _, provider := range providers {
+		if mappedModel, matched := provider.resolveModelMapping(requestedModel); matched && strings.TrimSpace(mappedModel) != "" {
+			allowed[providerRefFromProvider(provider)] = true
+		}
+	}
+	if len(allowed) == 0 {
+		return nil
+	}
+	filtered := make([]Provider, 0, len(allowed))
 	for _, provider := range providers {
 		if allowed[providerRefFromProvider(provider)] {
 			filtered = append(filtered, provider)
@@ -956,7 +963,7 @@ func resolveClaudeProviderActualModels(provider Provider, cache claudeProviderMo
 
 func buildClaudeProviderRoutes(provider Provider, actual map[string]ProviderModelPricingItem, localModels map[string]ProviderModelPricingItem, order int) map[string]claudeModelRouteProvider {
 	routes := map[string]claudeModelRouteProvider{}
-	addRoute := func(requestedModel string, mappedModel string) {
+	addRoute := func(requestedModel string, mappedModel string, trustMapping bool) {
 		requestedModel = strings.TrimSpace(requestedModel)
 		mappedModel = strings.TrimSpace(mappedModel)
 		if requestedModel == "" || mappedModel == "" {
@@ -968,7 +975,14 @@ func buildClaudeProviderRoutes(provider Provider, actual map[string]ProviderMode
 		}
 		metadata, supported := actual[finalModel]
 		if !supported {
-			return
+			if !trustMapping {
+				return
+			}
+			// 映射资格不依赖真实模型列表，缺少元数据时仅回退展示信息。
+			metadata = localModels[requestedModel]
+			if metadata.Model == "" {
+				metadata = ProviderModelPricingItem{Model: requestedModel, DisplayName: requestedModel}
+			}
 		}
 		level := provider.Level
 		if level <= 0 {
@@ -1002,19 +1016,9 @@ func buildClaudeProviderRoutes(provider Provider, actual map[string]ProviderMode
 			if strings.Count(requestedPattern, "*") != 1 || strings.Count(actualPattern, "*") > 1 {
 				continue
 			}
-			if strings.Contains(actualPattern, "*") {
-				for actualModel := range actual {
-					if requestedModel, ok := reverseWildcardMapping(requestedPattern, actualPattern, actualModel); ok {
-						candidates[requestedModel] = true
-					}
-				}
-				continue
-			}
-			if _, supported := actual[actualPattern]; supported {
-				for requestedModel := range localModels {
-					if matchWildcard(requestedPattern, requestedModel) {
-						candidates[requestedModel] = true
-					}
+			for requestedModel := range localModels {
+				if matchWildcard(requestedPattern, requestedModel) {
+					candidates[requestedModel] = true
 				}
 			}
 		}
@@ -1025,12 +1029,12 @@ func buildClaudeProviderRoutes(provider Provider, actual map[string]ProviderMode
 		sort.Strings(requestedModels)
 		for _, requestedModel := range requestedModels {
 			if mappedModel, matched := provider.resolveModelMapping(requestedModel); matched {
-				addRoute(requestedModel, mappedModel)
+				addRoute(requestedModel, mappedModel, true)
 			}
 		}
 	} else {
 		for model := range actual {
-			addRoute(model, model)
+			addRoute(model, model, false)
 		}
 	}
 
@@ -1042,26 +1046,12 @@ func buildClaudeProviderRoutes(provider Provider, actual map[string]ProviderMode
 		for _, pattern := range patterns {
 			for model := range actual {
 				if !provider.hasModelMappingForModel(model) && matchModelPassthroughPattern(pattern, model) {
-					addRoute(model, model)
+					addRoute(model, model, false)
 				}
 			}
 		}
 	}
 	return routes
-}
-
-func reverseWildcardMapping(requestedPattern string, actualPattern string, actualModel string) (string, bool) {
-	parts := strings.Split(actualPattern, "*")
-	if len(parts) != 2 || !strings.HasPrefix(actualModel, parts[0]) || !strings.HasSuffix(actualModel, parts[1]) {
-		return "", false
-	}
-	end := len(actualModel) - len(parts[1])
-	if end < len(parts[0]) {
-		return "", false
-	}
-	capture := actualModel[len(parts[0]):end]
-	requested := strings.Replace(requestedPattern, "*", capture, 1)
-	return requested, applyWildcardMapping(requestedPattern, actualPattern, requested) == actualModel
 }
 
 func normalizeModelPassthroughPatterns(patterns []string) []string {

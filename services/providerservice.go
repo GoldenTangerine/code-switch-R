@@ -415,7 +415,7 @@ func (ps *ProviderService) saveProvidersLocked(kind string, providers []Provider
 
 		// 验证模型配置
 		p.ModelPassthroughPatterns = normalizeModelPassthroughPatterns(p.ModelPassthroughPatterns)
-		if errs := p.ValidateConfiguration(); len(errs) > 0 {
+		if errs := p.validateConfigurationForKind(kind); len(errs) > 0 {
 			for _, errMsg := range errs {
 				validationErrors = append(validationErrors, fmt.Sprintf("[%s] %s", p.Name, errMsg))
 			}
@@ -894,6 +894,14 @@ func (p *Provider) IsResolvedModelSupported(requestedModel, effectiveModel strin
 	return p.IsNativeModelSupported(effectiveModel)
 }
 
+func (p *Provider) isClaudeRoutedModelSupported(requestedModel, effectiveModel string) bool {
+	// Claude 显式映射代表用户确认，映射命中后不再校验最终模型白名单。
+	if mappedModel, matched := p.resolveModelMapping(strings.TrimSpace(requestedModel)); matched && strings.TrimSpace(mappedModel) != "" {
+		return true
+	}
+	return p.IsResolvedModelSupported(requestedModel, effectiveModel)
+}
+
 // GetEffectiveModel 获取实际应该使用的模型名
 // 如果存在映射（精确或通配符），返回映射后的模型名；否则返回原模型名
 func (p *Provider) GetEffectiveModel(requestedModel string) string {
@@ -988,11 +996,19 @@ func (p *Provider) GetEffectiveEndpoint(defaultEndpoint string) string {
 // ValidateConfiguration 验证 provider 的模型配置
 // 返回验证错误列表（空则表示验证通过）
 func (p *Provider) ValidateConfiguration() []string {
+	return p.validateConfiguration(true)
+}
+
+func (p *Provider) validateConfigurationForKind(kind string) []string {
+	return p.validateConfiguration(!strings.EqualFold(strings.TrimSpace(kind), "claude"))
+}
+
+func (p *Provider) validateConfiguration(validateMappingTargets bool) []string {
 	errors := make([]string, 0)
 
 	// 规则 1：ModelMapping 的 value 必须在 SupportedModels 中
 	// 仅当两者都有实际内容时才校验（空 map 不触发校验）
-	if len(p.ModelMapping) > 0 && len(p.SupportedModels) > 0 {
+	if validateMappingTargets && len(p.ModelMapping) > 0 && len(p.SupportedModels) > 0 {
 		for externalModel, internalModel := range p.ModelMapping {
 			// 检查是否为通配符映射
 			if strings.Contains(internalModel, "*") {

@@ -323,7 +323,7 @@
       "modelMapping": {
         "label": "Model Mapping",
         "description": "Configure conversion rules from CLI aliases to provider API models",
-        "tooltip": "Map CLI requested model names to provider-specific names. Supports wildcard expansion and miss policy",
+        "tooltip": "With Claude model routing enabled, matched mappings skip provider model-list checks; unsupported targets return the upstream error",
         "ruleCount": "{count} rules configured",
         "empty": "No model mapping rules yet",
         "keyPlaceholder": "CLI model (e.g., claude-*)",
