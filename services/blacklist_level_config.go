@@ -93,6 +93,7 @@ func (ss *SettingsService) SaveBlacklistLevelConfig(config *BlacklistLevelConfig
 		return fmt.Errorf("重命名配置文件失败: %w", err)
 	}
 
+	ss.notifyBlacklistChanged()
 	return nil
 }
 

@@ -1,20 +1,38 @@
 package services
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/daodao97/xgo/xdb"
+	"github.com/daodao97/xgo/xrequest"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 )
+
+type blockingGinResponseWriter struct {
+	gin.ResponseWriter
+	entered chan time.Time
+	release chan struct{}
+}
+
+func (writer *blockingGinResponseWriter) Write(data []byte) (int, error) {
+	writer.entered <- time.Now()
+	<-writer.release
+	return writer.ResponseWriter.Write(data)
+}
 
 // ==================== ReplaceModelInRequestBody 测试 ====================
 
@@ -977,6 +995,326 @@ func BenchmarkReplaceModelInRequestBody(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, _ = ReplaceModelInRequestBody(bodyBytes, "anthropic/claude-sonnet-4")
+	}
+}
+
+func BenchmarkXRequestCurlPreparation(b *testing.B) {
+	for _, size := range []int{4 << 10, 256 << 10, 2 << 20} {
+		body := `{"model":"claude-opus-4-6","input":"` + strings.Repeat("x", size) + `"}`
+		prepare := func() error {
+			request, err := http.NewRequest(http.MethodPost, "https://example.com/v1/messages", strings.NewReader(body))
+			if err != nil {
+				return err
+			}
+			_, err = xrequest.GetCurlCommand(request)
+			return err
+		}
+		b.Run(fmt.Sprintf("%dKB/serial", size>>10), func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				if err := prepare(); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+		b.Run(fmt.Sprintf("%dKB/parallel16", size>>10), func(b *testing.B) {
+			b.ReportAllocs()
+			jobs := make(chan struct{}, 16)
+			var workers sync.WaitGroup
+			workers.Add(16)
+			for worker := 0; worker < 16; worker++ {
+				go func() {
+					defer workers.Done()
+					for range jobs {
+						if err := prepare(); err != nil {
+							b.Error(err)
+						}
+					}
+				}()
+			}
+			for i := 0; i < b.N; i++ {
+				jobs <- struct{}{}
+			}
+			close(jobs)
+			workers.Wait()
+		})
+	}
+}
+
+type firstWriteRecorder struct {
+	*httptest.ResponseRecorder
+	once       sync.Once
+	firstWrite chan struct{}
+}
+
+func (writer *firstWriteRecorder) Write(data []byte) (int, error) {
+	written, err := writer.ResponseRecorder.Write(data)
+	writer.once.Do(func() { close(writer.firstWrite) })
+	return written, err
+}
+
+func (writer *firstWriteRecorder) Flush() {
+	writer.ResponseRecorder.Flush()
+}
+
+func TestForwardRelayResponseFlushesFirstSSELineImmediately(t *testing.T) {
+	reader, upstreamWriter := io.Pipe()
+	response := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       reader,
+	}
+	writer := &firstWriteRecorder{
+		ResponseRecorder: httptest.NewRecorder(),
+		firstWrite:       make(chan struct{}),
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := forwardRelayResponse(response, writer, true)
+		done <- err
+	}()
+
+	if _, err := upstreamWriter.Write([]byte("data: first\n")); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-writer.firstWrite:
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("首个 SSE 行未及时转发")
+	}
+	if got := writer.Body.String(); got != "data: first\n" {
+		t.Fatalf("首个 SSE 行 = %q", got)
+	}
+	_ = upstreamWriter.Close()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestForwardRelayResponseTreatsSingleLineStreamBodyAsJSON(t *testing.T) {
+	response := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader(`{"ok":true}`)),
+	}
+	writer := httptest.NewRecorder()
+	if _, err := forwardRelayResponse(response, writer, true); err != nil {
+		t.Fatal(err)
+	}
+	if got := writer.Header().Get("Content-Type"); got != "application/json" {
+		t.Fatalf("Content-Type = %q", got)
+	}
+	if got := writer.Body.String(); got != `{"ok":true}` {
+		t.Fatalf("body = %q", got)
+	}
+}
+
+func TestRelayPerformanceTraceAccumulatesCompatibilityAttempts(t *testing.T) {
+	base := time.Now()
+	requestLog := &ReqeustLog{}
+	first := &relayPerformanceTrace{
+		requestStartedAt:  base,
+		getConnAt:         base.Add(2 * time.Millisecond),
+		firstResponseByte: base.Add(12 * time.Millisecond),
+		dnsDuration:       3 * time.Millisecond,
+		connectDuration:   4 * time.Millisecond,
+		tlsDuration:       5 * time.Millisecond,
+	}
+	first.apply(requestLog, time.Time{})
+
+	secondStart := base.Add(20 * time.Millisecond)
+	second := &relayPerformanceTrace{
+		requestStartedAt:  secondStart,
+		getConnAt:         secondStart.Add(3 * time.Millisecond),
+		firstResponseByte: secondStart.Add(11 * time.Millisecond),
+		connectionReused:  true,
+	}
+	second.apply(requestLog, secondStart.Add(12*time.Millisecond))
+
+	if requestLog.ProxyPrepareMs != 5 || requestLog.UpstreamTTFBMs != 18 {
+		t.Fatalf("兼容重试耗时未累计: prepare=%v, ttfb=%v", requestLog.ProxyPrepareMs, requestLog.UpstreamTTFBMs)
+	}
+	if requestLog.DNSMs != 3 || requestLog.ConnectMs != 4 || requestLog.TLSMs != 5 || requestLog.ProxyStreamDelayMs != 1 {
+		t.Fatalf("网络阶段耗时异常: %#v", requestLog)
+	}
+	if !requestLog.ConnectionReused {
+		t.Fatalf("连接复用状态应反映最后一次尝试")
+	}
+}
+
+func TestRelayTimedResponseWriterRecordsWriteStart(t *testing.T) {
+	context, _ := gin.CreateTestContext(httptest.NewRecorder())
+	blockingWriter := &blockingGinResponseWriter{
+		ResponseWriter: context.Writer,
+		entered:        make(chan time.Time, 1),
+		release:        make(chan struct{}),
+	}
+	timedWriter := &relayTimedResponseWriter{ResponseWriter: blockingWriter}
+	done := make(chan struct{})
+	go func() {
+		_, _ = timedWriter.Write([]byte("data"))
+		close(done)
+	}()
+
+	<-blockingWriter.entered
+	time.Sleep(20 * time.Millisecond)
+	releasedAt := time.Now()
+	close(blockingWriter.release)
+	<-done
+	if firstWrite := timedWriter.firstWriteAt(); firstWrite.IsZero() || !firstWrite.Before(releasedAt) {
+		t.Fatalf("首写时间应记录调用开始而不是阻塞结束: %v >= %v", firstWrite, releasedAt)
+	}
+}
+
+func TestProviderRelaySharedTransportReusesConnection(t *testing.T) {
+	var newConnections atomic.Int32
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`{"ok":true}`))
+	}))
+	server.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+		if state == http.StateNew {
+			newConnections.Add(1)
+		}
+	}
+	server.Start()
+	defer server.Close()
+
+	relay := NewProviderRelayService(nil, nil, nil, nil, nil, nil, "")
+	defer relay.upstreamTransport.CloseIdleConnections()
+	client := &http.Client{Transport: relay.upstreamTransport}
+	for i := 0; i < 2; i++ {
+		response, err := client.Get(server.URL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = io.Copy(io.Discard, response.Body)
+		_ = response.Body.Close()
+	}
+	if got := newConnections.Load(); got != 1 {
+		t.Fatalf("新建连接数 = %d，期望 1", got)
+	}
+}
+
+func TestForwardRequestCancelsUpstreamWhenClientDisconnects(t *testing.T) {
+	upstreamStarted := make(chan struct{})
+	releaseUpstream := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		close(upstreamStarted)
+		select {
+		case <-request.Context().Done():
+		case <-releaseUpstream:
+		}
+	}))
+	defer func() {
+		close(releaseUpstream)
+		server.Close()
+	}()
+
+	requestContext, cancel := context.WithCancel(context.Background())
+	request := httptest.NewRequest(http.MethodPost, "/responses", strings.NewReader(`{"model":"gpt-5.4"}`)).WithContext(requestContext)
+	responseRecorder := httptest.NewRecorder()
+	ginContext, _ := gin.CreateTestContext(responseRecorder)
+	ginContext.Request = request
+	relay := NewProviderRelayService(nil, nil, nil, nil, nil, nil, "")
+	provider := Provider{ID: 1, Name: "Cancelable", APIURL: server.URL, APIKey: "key", Enabled: true}
+
+	result := make(chan error, 1)
+	go func() {
+		_, err := relay.forwardRequest(
+			ginContext,
+			"codex",
+			provider,
+			"/responses",
+			nil,
+			nil,
+			[]byte(`{"model":"gpt-5.4"}`),
+			false,
+			"gpt-5.4",
+			"gpt-5.4",
+		)
+		result <- err
+	}()
+
+	select {
+	case <-upstreamStarted:
+	case <-time.After(time.Second):
+		t.Fatal("上游请求未启动")
+	}
+	cancel()
+	select {
+	case err := <-result:
+		if !errors.Is(err, errClientAbort) {
+			t.Fatalf("返回错误 = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("转发请求未及时返回")
+	}
+}
+
+func TestBlacklistSuccessNeedsWrite(t *testing.T) {
+	now := time.Now()
+	config := *DefaultBlacklistLevelConfig()
+	config.EnableLevelBlacklist = true
+	if blacklistSuccessNeedsWrite(config, 0, 0, sql.NullTime{}, 0, sql.NullTime{}, now) {
+		t.Fatal("健康记录不应反复写入")
+	}
+	if !blacklistSuccessNeedsWrite(config, 1, 0, sql.NullTime{}, 0, sql.NullTime{}, now) {
+		t.Fatal("失败计数未清零时应写入")
+	}
+	recoveredAt := sql.NullTime{Time: now.Add(-2 * time.Hour), Valid: true}
+	if !blacklistSuccessNeedsWrite(config, 0, 2, recoveredAt, 1, sql.NullTime{}, now) {
+		t.Fatal("跨过新的降级小时时应写入")
+	}
+}
+
+func TestBlacklistSnapshotKeepsPreviousStateWhenRowScanFails(t *testing.T) {
+	useIsolatedHomeDir(t)
+	if err := InitDatabase(); err != nil {
+		t.Fatal(err)
+	}
+	db, err := xdb.DB("default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`DELETE FROM provider_blacklist`); err != nil {
+		t.Fatal(err)
+	}
+	until := time.Now().Add(time.Hour)
+	if _, err := db.Exec(`
+		INSERT INTO provider_blacklist (
+			platform, provider_id, provider_name, failure_count, blacklist_level, blacklisted_until
+		) VALUES (?, ?, ?, ?, ?, ?)
+	`, "claude", "1", "Provider", 0, 1, until); err != nil {
+		t.Fatal(err)
+	}
+
+	service := NewBlacklistService(NewSettingsService(), nil)
+	defer service.Stop()
+	if blacklisted, _ := service.IsBlacklistedByID("claude", "1", "Provider"); !blacklisted {
+		t.Fatalf("初始黑名单状态未加载")
+	}
+	if _, err := db.Exec(`UPDATE provider_blacklist SET failure_count = 'invalid' WHERE provider_id = '1'`); err != nil {
+		t.Fatal(err)
+	}
+
+	service.RefreshRuntimeSnapshot()
+	if blacklisted, _ := service.IsBlacklistedByID("claude", "1", "Provider"); !blacklisted {
+		t.Fatalf("扫描异常不应发布缺失供应商的不完整快照")
+	}
+}
+
+func TestResolveProviderModelWithoutBodyCopyMatchesOverrides(t *testing.T) {
+	provider := Provider{
+		ModelMapping:         map[string]string{"claude-*": "vendor-*"},
+		RequestBodyOverrides: map[string]interface{}{"model": "override-model"},
+	}
+	if got := resolveProviderModelWithoutBodyCopy(provider, "claude-opus"); got != "override-model" {
+		t.Fatalf("顶层 model 覆盖结果 = %q", got)
+	}
+	provider.RequestBodyOverrides["model"] = nil
+	if got := resolveProviderModelWithoutBodyCopy(provider, "claude-opus"); got != "vendor-opus" {
+		t.Fatalf("null model 覆盖应回退到映射模型，实际 %q", got)
 	}
 }
 

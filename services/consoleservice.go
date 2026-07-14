@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -25,7 +26,20 @@ type ConsoleService struct {
 	writer       *consoleWriter
 	oldStdout    *os.File
 	oldStderr    *os.File
-	pauseLogging bool // 暂停日志捕获标志
+	pauseLogging atomic.Bool // 暂停日志捕获标志
+	stdoutWriter *os.File
+	stderrWriter *os.File
+	writeQueue   chan consoleChunk
+	readWG       sync.WaitGroup
+	writeWG      sync.WaitGroup
+	stopOnce     sync.Once
+}
+
+type consoleChunk struct {
+	level  string
+	data   []byte
+	output *os.File
+	final  bool
 }
 
 // consoleWriter 自定义 writer，同时写入控制台和缓存
@@ -47,8 +61,9 @@ func (w *consoleWriter) Write(p []byte) (n int, err error) {
 
 func NewConsoleService() *ConsoleService {
 	cs := &ConsoleService{
-		logs:    make([]ConsoleLog, 0, 1000),
-		maxLogs: 1000, // 最多保留 1000 条日志
+		logs:       make([]ConsoleLog, 0, 1000),
+		maxLogs:    1000, // 最多保留 1000 条日志
+		writeQueue: make(chan consoleChunk, 4096),
 	}
 
 	// 捕获标准输出和标准错误
@@ -66,6 +81,8 @@ func (cs *ConsoleService) captureStdout() {
 	// 创建管道
 	stdoutReader, stdoutWriter, _ := os.Pipe()
 	stderrReader, stderrWriter, _ := os.Pipe()
+	cs.stdoutWriter = stdoutWriter
+	cs.stderrWriter = stderrWriter
 
 	// 替换标准输出
 	os.Stdout = stdoutWriter
@@ -73,36 +90,67 @@ func (cs *ConsoleService) captureStdout() {
 	log.SetOutput(stdoutWriter)
 
 	// 启动 goroutine 读取管道内容
+	cs.writeWG.Add(1)
+	go cs.writeConsoleChunks()
+	cs.readWG.Add(2)
 	go cs.readPipe(stdoutReader, "INFO", cs.oldStdout)
 	go cs.readPipe(stderrReader, "ERROR", cs.oldStderr)
 }
 
 // readPipe 读取管道内容
 func (cs *ConsoleService) readPipe(reader *os.File, level string, output *os.File) {
+	defer cs.readWG.Done()
+	defer reader.Close()
 	buf := make([]byte, 1024)
-	var pendingBuffer string
 
 	for {
 		n, err := reader.Read(buf)
 		if n > 0 {
-			chunk := buf[:n]
-			// 写入原始输出
-			if _, writeErr := output.Write(chunk); writeErr != nil {
-				fmt.Fprintf(output, "写入原始输出失败: %v\n", writeErr)
-			}
-
-			// 按行切分，避免多个级别混在同一条日志里
-			pendingBuffer = cs.captureLogLines(level, pendingBuffer, string(chunk), false)
+			chunk := append([]byte(nil), buf[:n]...)
+			cs.writeQueue <- consoleChunk{level: level, data: chunk, output: output}
 		}
 
 		if err != nil {
 			if err != io.EOF {
 				fmt.Fprintf(output, "读取管道失败: %v\n", err)
 			}
-			cs.captureLogLines(level, pendingBuffer, "", true)
+			cs.writeQueue <- consoleChunk{level: level, output: output, final: true}
 			return
 		}
 	}
+}
+
+func (cs *ConsoleService) writeConsoleChunks() {
+	defer cs.writeWG.Done()
+	pending := make(map[string]string)
+	for chunk := range cs.writeQueue {
+		if len(chunk.data) > 0 {
+			if _, err := chunk.output.Write(chunk.data); err != nil {
+				fmt.Fprintf(chunk.output, "写入原始输出失败: %v\n", err)
+			}
+			pending[chunk.level] = cs.captureLogLines(chunk.level, pending[chunk.level], string(chunk.data), false)
+		}
+		if chunk.final {
+			pending[chunk.level] = cs.captureLogLines(chunk.level, pending[chunk.level], "", true)
+		}
+	}
+}
+
+func (cs *ConsoleService) Stop() error {
+	if cs == nil {
+		return nil
+	}
+	cs.stopOnce.Do(func() {
+		os.Stdout = cs.oldStdout
+		os.Stderr = cs.oldStderr
+		log.SetOutput(cs.oldStdout)
+		_ = cs.stdoutWriter.Close()
+		_ = cs.stderrWriter.Close()
+		cs.readWG.Wait()
+		close(cs.writeQueue)
+		cs.writeWG.Wait()
+	})
+	return nil
 }
 
 func (cs *ConsoleService) captureLogLines(level, pending, chunk string, flushRemainder bool) string {
@@ -134,7 +182,7 @@ func (cs *ConsoleService) captureLogLines(level, pending, chunk string, flushRem
 // addLog 添加日志到缓存
 func (cs *ConsoleService) addLog(level, message string) {
 	// 如果暂停日志捕获，直接返回
-	if cs.pauseLogging {
+	if cs.pauseLogging.Load() {
 		return
 	}
 
@@ -226,8 +274,8 @@ func (cs *ConsoleService) cleanOldLogs() {
 // GetLogs 获取所有日志
 func (cs *ConsoleService) GetLogs() []ConsoleLog {
 	// 暂停日志捕获，避免 GetLogs 本身产生的日志被记录（导致递归）
-	cs.pauseLogging = true
-	defer func() { cs.pauseLogging = false }()
+	cs.pauseLogging.Store(true)
+	defer cs.pauseLogging.Store(false)
 
 	cs.mutex.RLock()
 	defer cs.mutex.RUnlock()
@@ -241,8 +289,8 @@ func (cs *ConsoleService) GetLogs() []ConsoleLog {
 // GetRecentLogs 获取最近 N 条日志
 func (cs *ConsoleService) GetRecentLogs(count int) []ConsoleLog {
 	// 暂停日志捕获，避免递归
-	cs.pauseLogging = true
-	defer func() { cs.pauseLogging = false }()
+	cs.pauseLogging.Store(true)
+	defer cs.pauseLogging.Store(false)
 
 	cs.mutex.RLock()
 	defer cs.mutex.RUnlock()
@@ -264,8 +312,8 @@ func (cs *ConsoleService) GetRecentLogs(count int) []ConsoleLog {
 // ClearLogs 清空日志
 func (cs *ConsoleService) ClearLogs() {
 	// 暂停日志捕获，避免递归
-	cs.pauseLogging = true
-	defer func() { cs.pauseLogging = false }()
+	cs.pauseLogging.Store(true)
+	defer cs.pauseLogging.Store(false)
 
 	cs.mutex.Lock()
 	defer cs.mutex.Unlock()

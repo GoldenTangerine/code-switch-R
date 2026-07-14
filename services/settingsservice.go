@@ -5,12 +5,16 @@ import (
 	"fmt"
 	"log"
 	"strconv"
+	"sync"
 
 	"github.com/daodao97/xgo/xdb"
 )
 
 // SettingsService 管理全局配置
-type SettingsService struct{}
+type SettingsService struct {
+	blacklistInvalidatorMu sync.RWMutex
+	blacklistInvalidator   func()
+}
 
 // BlacklistSettings 黑名单配置（基础配置，向后兼容）
 type BlacklistSettings struct {
@@ -72,6 +76,21 @@ func NewSettingsService() *SettingsService {
 		fmt.Printf("[SettingsService] 初始化数据库表失败: %v\n", err)
 	}
 	return &SettingsService{}
+}
+
+func (ss *SettingsService) BindBlacklistInvalidator(invalidator func()) {
+	ss.blacklistInvalidatorMu.Lock()
+	ss.blacklistInvalidator = invalidator
+	ss.blacklistInvalidatorMu.Unlock()
+}
+
+func (ss *SettingsService) notifyBlacklistChanged() {
+	ss.blacklistInvalidatorMu.RLock()
+	invalidator := ss.blacklistInvalidator
+	ss.blacklistInvalidatorMu.RUnlock()
+	if invalidator != nil {
+		invalidator()
+	}
 }
 
 // GetBlacklistSettings 获取黑名单配置
@@ -166,6 +185,7 @@ func (ss *SettingsService) UpdateBlacklistEnabled(enabled bool) error {
 	}
 
 	log.Printf("✅ 拉黑功能开关已更新: %v", enabled)
+	ss.notifyBlacklistChanged()
 	return nil
 }
 
@@ -259,6 +279,7 @@ func (ss *SettingsService) UpdateBlacklistSettings(threshold int, durationSecond
 		return fmt.Errorf("更新拉黑时长失败，已回滚: %w", err)
 	}
 
+	ss.notifyBlacklistChanged()
 	return nil
 }
 
@@ -312,6 +333,7 @@ func (ss *SettingsService) SetLevelBlacklistEnabled(enabled bool) error {
 		return fmt.Errorf("设置等级拉黑开关失败: %w", err)
 	}
 
+	ss.notifyBlacklistChanged()
 	return nil
 }
 

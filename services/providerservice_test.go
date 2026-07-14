@@ -2,11 +2,113 @@ package services
 
 import (
 	"encoding/json"
+	"os"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/daodao97/xgo/xdb"
 )
+
+func TestProviderServiceSnapshotSaveAndExternalRefresh(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	service := NewProviderService()
+	defer service.Stop()
+	if err := service.Start(); err != nil {
+		t.Fatal(err)
+	}
+
+	initial := []Provider{{ID: 1, Name: "Initial", APIURL: "https://example.com", APIKey: "key", Enabled: true}}
+	if err := service.SaveProviders("claude", initial); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := service.LoadProviders("claude")
+	if err != nil || len(loaded) != 1 || loaded[0].Name != "Initial" {
+		t.Fatalf("保存后快照未立即生效: %#v, %v", loaded, err)
+	}
+
+	path, err := providerFilePath("claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{"providers":`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(1100 * time.Millisecond)
+	loaded, err = service.LoadProviders("claude")
+	if err != nil || len(loaded) != 1 || loaded[0].Name != "Initial" {
+		t.Fatalf("无效外部配置不应覆盖有效快照: %#v, %v", loaded, err)
+	}
+
+	updated := providerEnvelope{Providers: []Provider{{ID: 2, Name: "External", APIURL: "https://example.com", APIKey: "key", Enabled: true}}}
+	data, err := json.Marshal(updated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		loaded, err = service.LoadProviders("claude")
+		if err == nil && len(loaded) == 1 && loaded[0].Name == "External" {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("外部配置未在一秒轮询周期内生效: %#v, %v", loaded, err)
+}
+
+func TestProviderServiceSnapshotDoesNotShareMutableFields(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	service := NewProviderService()
+	defer service.Stop()
+
+	providers := []Provider{{
+		ID:                       1,
+		Name:                     "Isolated",
+		APIURL:                   "https://example.com",
+		APIKey:                   "key",
+		Enabled:                  true,
+		SupportedModels:          map[string]bool{"claude-opus-4": true},
+		ModelMapping:             map[string]string{"claude-*": "vendor-*"},
+		ModelPassthroughPatterns: []string{"glm-*"},
+		RequestBodyOverrides: map[string]interface{}{
+			"metadata": map[string]interface{}{"region": "a"},
+		},
+		AvailabilityConfig: &AvailabilityConfig{TestModel: "claude-opus-4"},
+	}}
+	if err := service.SaveProviders("claude", providers); err != nil {
+		t.Fatal(err)
+	}
+
+	providers[0].SupportedModels["claude-opus-4"] = false
+	providers[0].ModelMapping["claude-*"] = "changed-*"
+	providers[0].ModelPassthroughPatterns[0] = "changed-*"
+	providers[0].RequestBodyOverrides["metadata"].(map[string]interface{})["region"] = "b"
+	providers[0].AvailabilityConfig.TestModel = "changed"
+
+	loaded, err := service.LoadProviders("claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !loaded[0].SupportedModels["claude-opus-4"] || loaded[0].ModelMapping["claude-*"] != "vendor-*" || loaded[0].ModelPassthroughPatterns[0] != "glm-*" {
+		t.Fatalf("保存参数修改污染供应商快照: %#v", loaded[0])
+	}
+	if loaded[0].RequestBodyOverrides["metadata"].(map[string]interface{})["region"] != "a" || loaded[0].AvailabilityConfig.TestModel != "claude-opus-4" {
+		t.Fatalf("嵌套字段修改污染供应商快照: %#v", loaded[0])
+	}
+
+	loaded[0].SupportedModels["claude-opus-4"] = false
+	loaded[0].RequestBodyOverrides["metadata"].(map[string]interface{})["region"] = "c"
+	loadedAgain, err := service.LoadProviders("claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !loadedAgain[0].SupportedModels["claude-opus-4"] || loadedAgain[0].RequestBodyOverrides["metadata"].(map[string]interface{})["region"] != "a" {
+		t.Fatalf("读取结果修改污染供应商快照: %#v", loadedAgain[0])
+	}
+}
 
 // ==================== 通配符匹配测试 ====================
 

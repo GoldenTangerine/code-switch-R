@@ -1,6 +1,7 @@
 package services
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -9,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/daodao97/xgo/xdb"
 )
@@ -184,6 +186,72 @@ type ProviderService struct {
 
 	providerPricingOverridesMu sync.RWMutex
 	providerPricingOverrides   providerPricingOverrideStore
+
+	snapshotMu          sync.RWMutex
+	snapshots           map[string]providerConfigSnapshot
+	snapshotStop        chan struct{}
+	snapshotDone        chan struct{}
+	snapshotLifecycleMu sync.Mutex
+	snapshotStarted     bool
+	snapshotStopped     bool
+}
+
+type providerConfigSnapshot struct {
+	providers   []Provider
+	fingerprint [sha256.Size]byte
+	exists      bool
+}
+
+func cloneProvider(provider Provider) Provider {
+	cloned := provider
+	if provider.CLIConfig != nil {
+		cloned.CLIConfig = cloneJSONLikeMap(provider.CLIConfig)
+	}
+	if provider.SupportedModels != nil {
+		cloned.SupportedModels = make(map[string]bool, len(provider.SupportedModels))
+		for key, value := range provider.SupportedModels {
+			cloned.SupportedModels[key] = value
+		}
+	}
+	if provider.ModelMapping != nil {
+		cloned.ModelMapping = make(map[string]string, len(provider.ModelMapping))
+		for key, value := range provider.ModelMapping {
+			cloned.ModelMapping[key] = value
+		}
+	}
+	cloned.ModelPassthroughPatterns = append([]string(nil), provider.ModelPassthroughPatterns...)
+	if provider.RequestBodyOverrides != nil {
+		cloned.RequestBodyOverrides = cloneJSONLikeMap(provider.RequestBodyOverrides)
+	}
+	if provider.AvailabilityConfig != nil {
+		availability := *provider.AvailabilityConfig
+		cloned.AvailabilityConfig = &availability
+	}
+	if provider.BudgetQuotaSettings != nil {
+		budget := *provider.BudgetQuotaSettings
+		cloned.BudgetQuotaSettings = &budget
+	}
+	if provider.BudgetQuotaUsedAdjustments != nil {
+		adjustments := *provider.BudgetQuotaUsedAdjustments
+		cloned.BudgetQuotaUsedAdjustments = &adjustments
+	}
+	if provider.ProviderQuotaQueryConfig != nil {
+		quotaConfig := *provider.ProviderQuotaQueryConfig
+		cloned.ProviderQuotaQueryConfig = &quotaConfig
+	}
+	cloned.configErrors = append([]string(nil), provider.configErrors...)
+	return cloned
+}
+
+func cloneProviders(providers []Provider) []Provider {
+	if providers == nil {
+		return nil
+	}
+	cloned := make([]Provider, len(providers))
+	for index, provider := range providers {
+		cloned[index] = cloneProvider(provider)
+	}
+	return cloned
 }
 
 func snapshotProviderFile(path string) ([]byte, bool, error) {
@@ -215,8 +283,10 @@ func NewProviderService() *ProviderService {
 	svc := &ProviderService{
 		pricingCache:             make(map[string]providerModelPricingCacheEntry),
 		providerPricingOverrides: newProviderPricingOverrideStore(),
+		snapshots:                make(map[string]providerConfigSnapshot),
+		snapshotStop:             make(chan struct{}),
+		snapshotDone:             make(chan struct{}),
 	}
-
 	overrides, err := loadProviderPricingOverridesFromDB()
 	if err != nil {
 		log.Printf("provider pricing overrides load failed: %v", err)
@@ -244,8 +314,37 @@ func (ps *ProviderService) BindClaudeModelRoutingService(routing *ClaudeModelRou
 	ps.claudeModelRouting = routing
 }
 
-func (ps *ProviderService) Start() error { return nil }
-func (ps *ProviderService) Stop() error  { return nil }
+func (ps *ProviderService) Start() error {
+	if ps == nil {
+		return nil
+	}
+	ps.snapshotLifecycleMu.Lock()
+	defer ps.snapshotLifecycleMu.Unlock()
+	if ps.snapshotStarted || ps.snapshotStopped {
+		return nil
+	}
+	ps.snapshotStarted = true
+	go ps.watchProviderSnapshots()
+	return nil
+}
+func (ps *ProviderService) Stop() error {
+	if ps == nil || ps.snapshotStop == nil {
+		return nil
+	}
+	ps.snapshotLifecycleMu.Lock()
+	started := ps.snapshotStarted
+	if !ps.snapshotStopped {
+		ps.snapshotStopped = true
+		if started {
+			close(ps.snapshotStop)
+		}
+	}
+	ps.snapshotLifecycleMu.Unlock()
+	if started {
+		<-ps.snapshotDone
+	}
+	return nil
+}
 
 func providerFilePath(kind string) (string, error) {
 	return providerConfigPath(kind, true)
@@ -381,6 +480,7 @@ func (ps *ProviderService) loadProvidersRaw(kind string) ([]Provider, error) {
 
 // saveProvidersLocked 内部保存方法，调用方必须已持有锁
 func (ps *ProviderService) saveProvidersLocked(kind string, providers []Provider) error {
+	providers = append([]Provider(nil), providers...)
 	path, err := providerFilePath(kind)
 	if err != nil {
 		return err
@@ -442,12 +542,13 @@ func (ps *ProviderService) saveProvidersLocked(kind string, providers []Provider
 	if err := os.Rename(tmp, path); err != nil {
 		return err
 	}
+	ps.storeProviderSnapshot(kind, providers, sha256.Sum256(data), true)
 	if len(renames) > 0 {
 		syncProviderIdentityRenamesBestEffort(kind, renames)
 	}
 	if strings.EqualFold(strings.TrimSpace(kind), "claude") && ps.claudeModelRouting != nil {
-		previousSnapshot := append([]Provider(nil), existingProviders...)
-		nextSnapshot := append([]Provider(nil), providers...)
+		previousSnapshot := cloneProviders(existingProviders)
+		nextSnapshot := cloneProviders(providers)
 		ps.claudeModelRouting.HandleProvidersChanged(previousSnapshot, nextSnapshot)
 	}
 
@@ -535,6 +636,27 @@ func filterRuntimeProviders(kind string, providers []Provider) []Provider {
 }
 
 func (ps *ProviderService) LoadProviders(kind string) ([]Provider, error) {
+	kind = strings.ToLower(strings.TrimSpace(kind))
+	ps.snapshotMu.RLock()
+	snapshot, ok := ps.snapshots[kind]
+	ps.snapshotMu.RUnlock()
+	if ok {
+		return cloneProviders(snapshot.providers), nil
+	}
+
+	providers, err := ps.loadProvidersFromDisk(kind)
+	if err != nil {
+		return nil, err
+	}
+	fingerprint, exists, fingerprintErr := providerConfigFingerprint(kind)
+	if fingerprintErr != nil {
+		return nil, fingerprintErr
+	}
+	ps.storeProviderSnapshot(kind, providers, fingerprint, exists)
+	return cloneProviders(providers), nil
+}
+
+func (ps *ProviderService) loadProvidersFromDisk(kind string) ([]Provider, error) {
 	path, err := resolveProviderReadPath(kind)
 	if err != nil {
 		return nil, err
@@ -582,6 +704,87 @@ func (ps *ProviderService) LoadProviders(kind string) ([]Provider, error) {
 	}
 
 	return envelope.Providers, nil
+}
+
+func providerConfigFingerprint(kind string) ([sha256.Size]byte, bool, error) {
+	path, err := resolveProviderReadPath(kind)
+	if err != nil {
+		return [sha256.Size]byte{}, false, err
+	}
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return [sha256.Size]byte{}, false, nil
+	}
+	if err != nil {
+		return [sha256.Size]byte{}, false, err
+	}
+	return sha256.Sum256(data), true, nil
+}
+
+func (ps *ProviderService) storeProviderSnapshot(kind string, providers []Provider, fingerprint [sha256.Size]byte, exists bool) {
+	ps.snapshotMu.Lock()
+	ps.snapshots[kind] = providerConfigSnapshot{
+		providers:   cloneProviders(providers),
+		fingerprint: fingerprint,
+		exists:      exists,
+	}
+	ps.snapshotMu.Unlock()
+}
+
+func (ps *ProviderService) watchProviderSnapshots() {
+	defer close(ps.snapshotDone)
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			ps.refreshProviderSnapshots()
+		case <-ps.snapshotStop:
+			return
+		}
+	}
+}
+
+func (ps *ProviderService) refreshProviderSnapshots() {
+	ps.snapshotMu.RLock()
+	kinds := make([]string, 0, len(ps.snapshots))
+	for kind := range ps.snapshots {
+		kinds = append(kinds, kind)
+	}
+	ps.snapshotMu.RUnlock()
+
+	for _, kind := range kinds {
+		fingerprint, exists, err := providerConfigFingerprint(kind)
+		if err != nil {
+			log.Printf("[ProviderService] 检查供应商快照失败 (kind=%s): %v", kind, err)
+			continue
+		}
+		ps.snapshotMu.RLock()
+		current, ok := ps.snapshots[kind]
+		ps.snapshotMu.RUnlock()
+		if ok && current.exists == exists && current.fingerprint == fingerprint {
+			continue
+		}
+		providers, err := ps.loadProvidersFromDisk(kind)
+		if err != nil {
+			log.Printf("[ProviderService] 外部供应商配置解析失败，继续使用上一份快照 (kind=%s): %v", kind, err)
+			continue
+		}
+		latestFingerprint, latestExists, latestErr := providerConfigFingerprint(kind)
+		if latestErr != nil || latestExists != exists || latestFingerprint != fingerprint {
+			continue
+		}
+		ps.storeProviderSnapshot(kind, providers, fingerprint, exists)
+		ps.mu.Lock()
+		routing := ps.claudeModelRouting
+		ps.mu.Unlock()
+		if kind == "claude" && routing != nil {
+			routing.HandleProvidersChanged(
+				cloneProviders(current.providers),
+				cloneProviders(providers),
+			)
+		}
+	}
 }
 
 // loadProvidersNoLock 内部加载方法，在持有锁的情况下调用（避免递归加锁）

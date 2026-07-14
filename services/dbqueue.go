@@ -35,7 +35,7 @@ func InitGlobalDBQueue() error {
 
 	// 队列 2：批量写入队列（启用批量，仅用于 request_log）
 	// 用途：高频 request_log INSERT（同表同操作，严格同构）
-	// 批量配置：50 条/批，100ms 超时提交
+	// 批量配置：50 条/批，10ms 超时提交
 	GlobalDBQueueLogs = NewDBWriteQueue(db, 5000, true)
 
 	return nil
@@ -257,7 +257,7 @@ func (q *DBWriteQueue) batchWorker() {
 		}
 	}()
 
-	ticker := time.NewTicker(100 * time.Millisecond) // 每100ms批量提交一次
+	ticker := time.NewTicker(10 * time.Millisecond) // 缩短低流量请求的日志收尾等待
 	defer ticker.Stop()
 
 	var batch []*WriteTask

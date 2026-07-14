@@ -24,6 +24,13 @@ export type RequestLog = {
   is_stream?: boolean | number
   duration_sec?: number
   first_token_sec?: number
+  proxy_prepare_ms?: number
+  dns_ms?: number
+  connect_ms?: number
+  tls_ms?: number
+  upstream_ttfb_ms?: number
+  proxy_stream_delay_ms?: number
+  connection_reused?: boolean
   created_at: string
   error_read_at?: string
   total_cost?: number

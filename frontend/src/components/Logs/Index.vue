@@ -216,6 +216,7 @@
           :open="payloadDetailModal.open"
           :loading="payloadDetailModal.loading"
           :log-id="payloadDetailModal.logId"
+          :log="payloadDetailModal.log"
           :detail="payloadDetailModal.detail"
           :request-payload-preview="requestPayloadPreview"
           :response-payload-preview="responsePayloadPreview"

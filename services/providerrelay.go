@@ -1,8 +1,10 @@
 package services
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"crypto/tls"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -11,6 +13,7 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"regexp"
 	"runtime"
@@ -67,6 +70,7 @@ type ProviderRelayService struct {
 	nextProviderConcurrencyRequest int64
 	unsupportedOptionalParamsMu    sync.RWMutex
 	unsupportedOptionalParams      map[string]unsupportedOptionalParamsMemory
+	upstreamTransport              *http.Transport
 }
 
 // errClientAbort 表示客户端中断连接，不应计入 provider 失败次数
@@ -77,6 +81,145 @@ var errIncompleteStream = errors.New("stream ended before completion")
 
 type responseStartedError struct {
 	cause error
+}
+
+type relayPerformanceTrace struct {
+	mu                sync.Mutex
+	requestStartedAt  time.Time
+	getConnAt         time.Time
+	firstResponseByte time.Time
+	dnsStartedAt      time.Time
+	connectStartedAt  time.Time
+	tlsStartedAt      time.Time
+	dnsDuration       time.Duration
+	connectDuration   time.Duration
+	tlsDuration       time.Duration
+	connectionReused  bool
+}
+
+func newRelayPerformanceTrace(requestStartedAt time.Time) *relayPerformanceTrace {
+	return &relayPerformanceTrace{requestStartedAt: requestStartedAt}
+}
+
+func (trace *relayPerformanceTrace) clientTrace() *httptrace.ClientTrace {
+	return &httptrace.ClientTrace{
+		GetConn: func(string) {
+			trace.mu.Lock()
+			trace.getConnAt = time.Now()
+			trace.mu.Unlock()
+		},
+		DNSStart: func(httptrace.DNSStartInfo) {
+			trace.mu.Lock()
+			trace.dnsStartedAt = time.Now()
+			trace.mu.Unlock()
+		},
+		DNSDone: func(httptrace.DNSDoneInfo) {
+			trace.mu.Lock()
+			if !trace.dnsStartedAt.IsZero() {
+				trace.dnsDuration += time.Since(trace.dnsStartedAt)
+				trace.dnsStartedAt = time.Time{}
+			}
+			trace.mu.Unlock()
+		},
+		ConnectStart: func(_, _ string) {
+			trace.mu.Lock()
+			if trace.connectStartedAt.IsZero() {
+				trace.connectStartedAt = time.Now()
+			}
+			trace.mu.Unlock()
+		},
+		ConnectDone: func(_, _ string, _ error) {
+			trace.mu.Lock()
+			if !trace.connectStartedAt.IsZero() {
+				trace.connectDuration += time.Since(trace.connectStartedAt)
+				trace.connectStartedAt = time.Time{}
+			}
+			trace.mu.Unlock()
+		},
+		TLSHandshakeStart: func() {
+			trace.mu.Lock()
+			trace.tlsStartedAt = time.Now()
+			trace.mu.Unlock()
+		},
+		TLSHandshakeDone: func(tls.ConnectionState, error) {
+			trace.mu.Lock()
+			if !trace.tlsStartedAt.IsZero() {
+				trace.tlsDuration += time.Since(trace.tlsStartedAt)
+				trace.tlsStartedAt = time.Time{}
+			}
+			trace.mu.Unlock()
+		},
+		GotConn: func(info httptrace.GotConnInfo) {
+			trace.mu.Lock()
+			trace.connectionReused = info.Reused
+			trace.mu.Unlock()
+		},
+		GotFirstResponseByte: func() {
+			trace.mu.Lock()
+			trace.firstResponseByte = time.Now()
+			trace.mu.Unlock()
+		},
+	}
+}
+
+func durationMilliseconds(value time.Duration) float64 {
+	if value <= 0 {
+		return 0
+	}
+	return float64(value) / float64(time.Millisecond)
+}
+
+func (trace *relayPerformanceTrace) apply(reqLog *ReqeustLog, firstDownstreamWrite time.Time) {
+	if trace == nil || reqLog == nil {
+		return
+	}
+	trace.mu.Lock()
+	defer trace.mu.Unlock()
+	if !trace.requestStartedAt.IsZero() && !trace.getConnAt.IsZero() {
+		reqLog.ProxyPrepareMs += durationMilliseconds(trace.getConnAt.Sub(trace.requestStartedAt))
+	}
+	if !trace.getConnAt.IsZero() && !trace.firstResponseByte.IsZero() {
+		reqLog.UpstreamTTFBMs += durationMilliseconds(trace.firstResponseByte.Sub(trace.getConnAt))
+	}
+	if !trace.firstResponseByte.IsZero() && !firstDownstreamWrite.IsZero() {
+		reqLog.ProxyStreamDelayMs += durationMilliseconds(firstDownstreamWrite.Sub(trace.firstResponseByte))
+	}
+	reqLog.DNSMs += durationMilliseconds(trace.dnsDuration)
+	reqLog.ConnectMs += durationMilliseconds(trace.connectDuration)
+	reqLog.TLSMs += durationMilliseconds(trace.tlsDuration)
+	reqLog.ConnectionReused = trace.connectionReused
+}
+
+type relayTimedResponseWriter struct {
+	gin.ResponseWriter
+	mu         sync.Mutex
+	firstWrite time.Time
+}
+
+func (writer *relayTimedResponseWriter) Write(data []byte) (int, error) {
+	writeStartedAt := time.Now()
+	n, err := writer.ResponseWriter.Write(data)
+	if n > 0 {
+		writer.mu.Lock()
+		if writer.firstWrite.IsZero() {
+			writer.firstWrite = writeStartedAt
+		}
+		writer.mu.Unlock()
+	}
+	return n, err
+}
+
+func (writer *relayTimedResponseWriter) firstWriteAt() time.Time {
+	writer.mu.Lock()
+	defer writer.mu.Unlock()
+	return writer.firstWrite
+}
+
+func relayRequestContext(c *gin.Context) context.Context {
+	if c != nil && c.Request != nil {
+		return c.Request.Context()
+	}
+	return context.Background()
 }
 
 func (e *responseStartedError) Error() string {
@@ -371,6 +514,12 @@ func NewProviderRelayService(providerService *ProviderService, geminiService *Ge
 	// 【修复】数据库初始化已移至 main.go 的 InitDatabase()
 	// 此处不再调用 xdb.Inits()、ensureRequestLogTable()、ensureBlacklistTables()
 
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.MaxIdleConns = 256
+	transport.MaxIdleConnsPerHost = 64
+	transport.IdleConnTimeout = 90 * time.Second
+	transport.ForceAttemptHTTP2 = true
+
 	return &ProviderRelayService{
 		providerService:     providerService,
 		geminiService:       geminiService,
@@ -391,6 +540,7 @@ func NewProviderRelayService(providerService *ProviderService, geminiService *Ge
 		providerConcurrency:         make(map[string]int),
 		providerConcurrencyRequests: make(map[string]map[string]ProviderConcurrencyRequestDetail),
 		unsupportedOptionalParams:   make(map[string]unsupportedOptionalParamsMemory),
+		upstreamTransport:           transport,
 	}
 }
 
@@ -2046,6 +2196,9 @@ func (prs *ProviderRelayService) validateConfig() []string {
 }
 
 func (prs *ProviderRelayService) Stop() error {
+	if prs.upstreamTransport != nil {
+		prs.upstreamTransport.CloseIdleConnections()
+	}
 	if prs.server == nil {
 		return nil
 	}
@@ -2160,30 +2313,23 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 				continue
 			}
 
-			plan, err := prs.buildProviderRequestPlan(provider, bodyBytes, endpoint, requestedModel)
-			if err != nil {
-				fmt.Printf("[WARN] Provider %s 请求体预处理失败，已自动跳过: %v\n", provider.Name, err)
-				skippedCount++
-				continue
-			}
-
+			effectiveModel := resolveProviderModelWithoutBodyCopy(provider, requestedModel)
 			modelSupported := true
 			if kind == "claude" && claudeModelRoutingEnabled {
-				modelSupported = provider.isClaudeRoutedModelSupported(requestedModel, plan.EffectiveModel)
+				modelSupported = provider.isClaudeRoutedModelSupported(requestedModel, effectiveModel)
 			} else if kind != "claude" {
-				modelSupported = provider.IsResolvedModelSupported(requestedModel, plan.EffectiveModel)
+				modelSupported = provider.IsResolvedModelSupported(requestedModel, effectiveModel)
 			}
 			if !modelSupported {
 				fmt.Printf("[INFO] Provider %s 不支持最终模型 %s（原始请求模型: %s），已跳过\n",
 					provider.Name,
-					displayModelForLog(plan.EffectiveModel),
+					displayModelForLog(effectiveModel),
 					displayModelForLog(requestedModel),
 				)
 				skippedCount++
 				continue
 			}
 
-			requestPlans[providerRefFromProvider(provider)] = plan
 			active = append(active, provider)
 		}
 
@@ -2792,6 +2938,7 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 	plan providerRequestPlan,
 	providerConcurrencyLimitEnabled bool,
 ) (bool, error) {
+	start := time.Now()
 	if kind == "claude" &&
 		resolveClaudeAPIFormat(provider) == claudeAPIFormatOpenAIResponse &&
 		strings.TrimSpace(plan.ContinuationSessionKey) != "" &&
@@ -2856,7 +3003,6 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 		setHeaderIfAbsentCaseInsensitive(headers, "openai-beta", "responses=experimental")
 	}
 
-	start := time.Now()
 	capturePayloadEnabled, sanitizePayloadEnabled := prs.resolveRequestLogPayloadCaptureAndSanitization()
 	requestLog := &ReqeustLog{
 		Platform:         kind,
@@ -2877,7 +3023,7 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 	requestLog.streamCompletionRequired = kind == "claude" &&
 		isStream &&
 		resolveClaudeAPIFormat(provider) == claudeAPIFormatOpenAIResponse
-	captureRequestLogRequestBody(requestLog, bodyBytes)
+	requestLog.requestBodyBytes = bodyBytes
 	pricingSnapshot := (*modelpricing.Service)(nil)
 	if prs != nil && prs.modelPricing != nil {
 		pricingSnapshot = prs.modelPricing.Service()
@@ -2927,13 +3073,14 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 					reasoning_effort, user_agent,
 					input_tokens, output_tokens, cache_create_tokens, ephemeral_5m_tokens, ephemeral_1h_tokens, cache_read_tokens,
 					reasoning_tokens, is_stream, duration_sec, first_token_sec, total_cost, group_multiplier, price_source,
+					proxy_prepare_ms, dns_ms, connect_ms, tls_ms, upstream_ttfb_ms, proxy_stream_delay_ms, connection_reused,
 					input_cost, output_cost, reasoning_cost, cache_create_cost, cache_read_cost,
 					ephemeral_5m_cost, ephemeral_1h_cost, has_pricing, matched_pricing_model,
 					provider_pricing_available, provider_quota_type, provider_input_usd_per_m, provider_output_usd_per_m,
 					provider_per_call_unified, provider_per_call_input, provider_per_call_output,
 					provider_per_call_unified_set, provider_per_call_input_set, provider_per_call_output_set,
 					request_body, response_body, request_body_truncated, response_body_truncated, payload_bytes, payload_captured
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			`,
 			requestLog.Platform,
 			requestLog.Model,
@@ -2957,6 +3104,13 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 			requestLog.TotalCost,
 			requestLog.GroupMultiplier,
 			requestLog.PriceSource,
+			requestLog.ProxyPrepareMs,
+			requestLog.DNSMs,
+			requestLog.ConnectMs,
+			requestLog.TLSMs,
+			requestLog.UpstreamTTFBMs,
+			requestLog.ProxyStreamDelayMs,
+			boolToInt(requestLog.ConnectionReused),
 			requestLog.InputCost,
 			requestLog.OutputCost,
 			requestLog.ReasoningCost,
@@ -2990,16 +3144,36 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 	}()
 
 	doForward := func(currentBody []byte, currentPlan providerRequestPlan) (bool, error, claudeCompatibilityRetry) {
+		performanceTrace := newRelayPerformanceTrace(time.Now())
+		timedWriter := &relayTimedResponseWriter{ResponseWriter: c.Writer}
+		requestContext := relayRequestContext(c)
+		defer func() {
+			performanceTrace.apply(requestLog, timedWriter.firstWriteAt())
+		}()
+
+		client := &http.Client{
+			Transport: prs.upstreamTransport,
+			Timeout:   32 * time.Hour,
+		}
 		req := xrequest.New().
 			SetHeaders(headers).
 			SetQueryParams(query).
 			SetRetry(1, 500*time.Millisecond).
-			SetTimeout(32 * time.Hour) // 32小时超时，适配超大型项目分析
+			SetClient(client).
+			WithContext(requestContext).
+			AddReqHook(func(req *http.Request) error {
+				tracedContext := httptrace.WithClientTrace(req.Context(), performanceTrace.clientTrace())
+				*req = *req.WithContext(tracedContext)
+				return nil
+			})
 
 		reqBody := bytes.NewReader(currentBody)
 		req = req.SetBody(reqBody)
 
 		resp, err := req.Post(targetURL)
+		if err != nil && requestContext.Err() != nil {
+			return false, fmt.Errorf("%w: %v", errClientAbort, requestContext.Err()), claudeCompatibilityRetry{}
+		}
 
 		// 无论成功失败，先尝试记录 HttpCode
 		if resp != nil {
@@ -3034,7 +3208,7 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 			fmt.Printf("[WARN] Provider %s 返回状态码 0，但无错误，当作成功处理\n", provider.Name)
 			toolCollector := prs.newSessionAffinityToolResponseCollector(kind, provider, currentPlan, requestUserAgent)
 			hooks := buildClaudeProviderResponseHooks(prs, c, kind, provider, currentPlan, isStream, requestLog, toolCollector)
-			writtenBytes, copyErr := resp.ToHttpResponseWriter(c.Writer, hooks...)
+			writtenBytes, copyErr := forwardRelayResponse(resp.RawResponse, timedWriter, isStream, hooks...)
 			ok, forwardErr := finalizeForwardSuccess(c, kind, requestLog, writtenBytes, copyErr)
 			if ok && forwardErr == nil {
 				toolCollector.commit()
@@ -3052,7 +3226,7 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 			}
 			toolCollector := prs.newSessionAffinityToolResponseCollector(kind, provider, currentPlan, requestUserAgent)
 			hooks := buildClaudeProviderResponseHooks(prs, c, kind, provider, currentPlan, isStream, requestLog, toolCollector)
-			writtenBytes, copyErr := resp.ToHttpResponseWriter(c.Writer, hooks...)
+			writtenBytes, copyErr := forwardRelayResponse(resp.RawResponse, timedWriter, isStream, hooks...)
 			ok, forwardErr := finalizeForwardSuccess(c, kind, requestLog, writtenBytes, copyErr)
 			if ok && forwardErr == nil {
 				toolCollector.commit()
@@ -3139,13 +3313,144 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 		retryPlan.ContinuationRetryBodyBytes = removeJSONFieldsBytes(retryPlan.ContinuationRetryBodyBytes, compatibilityRetry.UnsupportedFields)
 		retryReasons = append(retryReasons, "可选参数不兼容: "+strings.Join(compatibilityRetry.UnsupportedFields, ","))
 	}
-	captureRequestLogRequestBody(requestLog, retryPlan.BodyBytes)
+	requestLog.requestBodyBytes = retryPlan.BodyBytes
 	requestLog.ResponseBody = ""
 	requestLog.ResponseBodyTruncated = false
 	requestLog.responseBodyBuffer = nil
 	fmt.Printf("[INFO] Claude API %s，Provider %s 已回退请求重试一次\n", strings.Join(retryReasons, "；"), provider.Name)
 	ok, err, _ = doForward(retryPlan.BodyBytes, retryPlan)
 	return ok, err
+}
+
+func forwardRelayResponse(response *http.Response, writer http.ResponseWriter, isStream bool, hooks ...xrequest.ResponseHook) (int64, error) {
+	if response == nil {
+		return 0, fmt.Errorf("raw response is nil")
+	}
+	if response.Body != nil {
+		defer response.Body.Close()
+	}
+
+	writeHeaders := func() {
+		for key, values := range response.Header {
+			writer.Header()[key] = append([]string(nil), values...)
+		}
+		writer.WriteHeader(response.StatusCode)
+	}
+	contentType := response.Header.Get("Content-Type")
+	streamResponse := response.Body != nil && (strings.Contains(contentType, "text/event-stream") || isStream)
+	if streamResponse && response.StatusCode < http.StatusBadRequest {
+		reader := bufio.NewReader(response.Body)
+		firstLine, readErr := reader.ReadBytes('\n')
+		if readErr != nil && readErr != io.EOF {
+			return 0, fmt.Errorf("error reading first response line: %w", readErr)
+		}
+		if readErr == io.EOF && !bytes.Contains(firstLine, []byte("\n")) {
+			response.Header.Set("Content-Type", "application/json")
+			response.Header.Del("Content-Length")
+			writeHeaders()
+			return writeRelayResponseChunk(writer, firstLine, hooks)
+		}
+
+		response.Header.Del("Content-Length")
+		writeHeaders()
+		totalBytes, err := writeRelayStreamLine(writer, firstLine, hooks)
+		if err != nil {
+			return totalBytes, err
+		}
+		for {
+			line, err := reader.ReadBytes('\n')
+			if len(line) > 0 {
+				written, writeErr := writeRelayStreamLine(writer, line, hooks)
+				totalBytes += written
+				if writeErr != nil {
+					return totalBytes, writeErr
+				}
+			}
+			if err == io.EOF {
+				return totalBytes, nil
+			}
+			if err != nil {
+				return totalBytes, fmt.Errorf("error streaming response: %w", err)
+			}
+		}
+	}
+
+	if len(hooks) == 0 {
+		writeHeaders()
+		if response.Body == nil {
+			return 0, nil
+		}
+		written, err := io.Copy(writer, response.Body)
+		if err != nil {
+			return written, fmt.Errorf("error copying response: %w", err)
+		}
+		return written, nil
+	}
+
+	body := []byte(nil)
+	if response.Body != nil {
+		var err error
+		body, err = io.ReadAll(response.Body)
+		if err != nil {
+			return 0, fmt.Errorf("error reading response: %w", err)
+		}
+	}
+	response.Header.Del("Content-Length")
+	writeHeaders()
+	return writeRelayResponseChunk(writer, body, hooks)
+}
+
+func writeRelayStreamLine(writer http.ResponseWriter, line []byte, hooks []xrequest.ResponseHook) (int64, error) {
+	if len(bytes.TrimRight(line, "\n")) == 0 {
+		written, err := writer.Write(line)
+		if err != nil {
+			return int64(written), fmt.Errorf("error writing response: %w", err)
+		}
+		flushRelayResponse(writer)
+		return int64(written), nil
+	}
+
+	hasNewline := bytes.HasSuffix(line, []byte("\n"))
+	processed := bytes.TrimRight(line, "\n")
+	flush := true
+	for _, hook := range hooks {
+		flush, processed = hook(processed)
+	}
+	if !flush {
+		return 0, nil
+	}
+	if hasNewline {
+		processed = append(processed, '\n')
+	}
+	written, err := writer.Write(processed)
+	if err != nil {
+		return int64(written), fmt.Errorf("error writing response: %w", err)
+	}
+	flushRelayResponse(writer)
+	return int64(written), nil
+}
+
+func writeRelayResponseChunk(writer http.ResponseWriter, body []byte, hooks []xrequest.ResponseHook) (int64, error) {
+	processed := body
+	flush := true
+	for _, hook := range hooks {
+		flush, processed = hook(processed)
+	}
+	if !flush || len(processed) == 0 {
+		return 0, nil
+	}
+	written, err := writer.Write(processed)
+	if err != nil {
+		return int64(written), fmt.Errorf("error writing response: %w", err)
+	}
+	flushRelayResponse(writer)
+	return int64(written), nil
+}
+
+func flushRelayResponse(writer http.ResponseWriter) {
+	if flusher, ok := writer.(http.Flusher); ok {
+		flusher.Flush()
+	}
 }
 
 func cloneHeaders(header http.Header) map[string]string {
@@ -3869,7 +4174,12 @@ func prepareRequestLogPayloadForPersistence(reqLog *ReqeustLog) {
 		reqLog.PayloadBytes = 0
 		reqLog.PayloadCaptured = false
 		reqLog.responseBodyBuffer = nil
+		reqLog.requestBodyBytes = nil
 		return
+	}
+	if len(reqLog.requestBodyBytes) > 0 {
+		captureRequestLogRequestBody(reqLog, reqLog.requestBodyBytes)
+		reqLog.requestBodyBytes = nil
 	}
 	reqLog.RequestBody = maybeSanitizeRequestLogPayload(reqLog, reqLog.RequestBody)
 	materializeRequestLogResponseBody(reqLog)
@@ -3947,6 +4257,13 @@ func ensureRequestLogTableWithDB(db *sql.DB) error {
 		is_stream INTEGER DEFAULT 0,
 		duration_sec REAL DEFAULT 0,
 		first_token_sec REAL DEFAULT 0,
+		proxy_prepare_ms REAL DEFAULT 0,
+		dns_ms REAL DEFAULT 0,
+		connect_ms REAL DEFAULT 0,
+		tls_ms REAL DEFAULT 0,
+		upstream_ttfb_ms REAL DEFAULT 0,
+		proxy_stream_delay_ms REAL DEFAULT 0,
+		connection_reused INTEGER DEFAULT 0,
 		total_cost REAL DEFAULT 0,
 		group_multiplier REAL DEFAULT 1,
 		price_source TEXT DEFAULT '',
@@ -4000,6 +4317,27 @@ func ensureRequestLogTableWithDB(db *sql.DB) error {
 		return err
 	}
 	if err := ensureRequestLogColumn(db, "first_token_sec", "REAL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "proxy_prepare_ms", "REAL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "dns_ms", "REAL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "connect_ms", "REAL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "tls_ms", "REAL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "upstream_ttfb_ms", "REAL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "proxy_stream_delay_ms", "REAL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "connection_reused", "INTEGER DEFAULT 0"); err != nil {
 		return err
 	}
 	if err := ensureRequestLogColumn(db, "total_cost", "REAL DEFAULT 0"); err != nil {
@@ -4688,6 +5026,13 @@ type ReqeustLog struct {
 	IsStream                  bool    `json:"is_stream"`
 	DurationSec               float64 `json:"duration_sec"`
 	FirstTokenSec             float64 `json:"first_token_sec"`
+	ProxyPrepareMs            float64 `json:"proxy_prepare_ms"`
+	DNSMs                     float64 `json:"dns_ms"`
+	ConnectMs                 float64 `json:"connect_ms"`
+	TLSMs                     float64 `json:"tls_ms"`
+	UpstreamTTFBMs            float64 `json:"upstream_ttfb_ms"`
+	ProxyStreamDelayMs        float64 `json:"proxy_stream_delay_ms"`
+	ConnectionReused          bool    `json:"connection_reused"`
 	CreatedAt                 string  `json:"created_at"`
 	ErrorReadAt               string  `json:"error_read_at,omitempty"`
 	InputCost                 float64 `json:"input_cost"`
@@ -4727,6 +5072,7 @@ type ReqeustLog struct {
 	RequestStartedAt time.Time `json:"-"`
 
 	responseBodyBuffer       []byte
+	requestBodyBytes         []byte
 	streamCompletionRequired bool
 	streamTerminalEvent      string
 	streamFailureMessage     string
@@ -5138,6 +5484,17 @@ func resolveModelFromRequestBody(bodyBytes []byte, fallback string) string {
 		return model
 	}
 	return fallback
+}
+
+func resolveProviderModelWithoutBodyCopy(provider Provider, requestedModel string) string {
+	effectiveModel := provider.GetEffectiveModel(requestedModel)
+	if override, ok := provider.RequestBodyOverrides["model"]; ok {
+		modelOnlyBody, err := sjson.SetBytes([]byte(`{"model":""}`), "model", override)
+		if err == nil {
+			return resolveModelFromRequestBody(modelOnlyBody, effectiveModel)
+		}
+	}
+	return effectiveModel
 }
 
 type providerRequestPlan struct {
@@ -6222,12 +6579,20 @@ func (prs *ProviderRelayService) getProviderRequestPlan(
 				strings.TrimSpace(plan.ContinuationSessionKey) != "" &&
 				strings.TrimSpace(plan.PreviousResponseID) != "" &&
 				prs.isClaudeResponsesContinuationDisabled(provider, plan.ContinuationSessionKey) {
-				return prs.buildProviderRequestPlan(provider, bodyBytes, endpoint, requestedModel)
+				refreshed, err := prs.buildProviderRequestPlan(provider, bodyBytes, endpoint, requestedModel)
+				if err == nil {
+					plans[providerRefFromProvider(provider)] = refreshed
+				}
+				return refreshed, err
 			}
 			return plan, nil
 		}
 	}
-	return prs.buildProviderRequestPlan(provider, bodyBytes, endpoint, requestedModel)
+	plan, err := prs.buildProviderRequestPlan(provider, bodyBytes, endpoint, requestedModel)
+	if err == nil && plans != nil {
+		plans[providerRefFromProvider(provider)] = plan
+	}
+	return plan, err
 }
 
 func displayModelForLog(model string) string {
@@ -7070,24 +7435,17 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 				continue
 			}
 
-			plan, err := prs.buildProviderRequestPlan(provider, bodyBytes, endpoint, requestedModel)
-			if err != nil {
-				fmt.Printf("[CustomCLI][WARN] Provider %s 请求体预处理失败，已自动跳过: %v\n", provider.Name, err)
-				skippedCount++
-				continue
-			}
-
-			if !provider.IsResolvedModelSupported(requestedModel, plan.EffectiveModel) {
+			effectiveModel := resolveProviderModelWithoutBodyCopy(provider, requestedModel)
+			if !provider.IsResolvedModelSupported(requestedModel, effectiveModel) {
 				fmt.Printf("[CustomCLI][INFO] Provider %s 不支持最终模型 %s（原始请求模型: %s），已跳过\n",
 					provider.Name,
-					displayModelForLog(plan.EffectiveModel),
+					displayModelForLog(effectiveModel),
 					displayModelForLog(requestedModel),
 				)
 				skippedCount++
 				continue
 			}
 
-			requestPlans[providerRefFromProvider(provider)] = plan
 			active = append(active, provider)
 		}
 

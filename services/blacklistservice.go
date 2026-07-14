@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/daodao97/xgo/xdb"
@@ -14,6 +16,25 @@ import (
 type BlacklistService struct {
 	settingsService     *SettingsService
 	notificationService *NotificationService
+	runtimeSnapshot     atomic.Value
+	snapshotStop        chan struct{}
+	snapshotDone        chan struct{}
+	snapshotLifecycleMu sync.Mutex
+	snapshotStarted     bool
+	snapshotStopped     bool
+	identityMu          sync.Mutex
+	boundIdentities     map[string]string
+	refreshMu           sync.Mutex
+}
+
+const blacklistRuntimeSnapshotRefreshInterval = time.Minute
+
+type blacklistRuntimeSnapshot struct {
+	enabled              bool
+	levelConfig          BlacklistLevelConfig
+	blacklistedUntil     map[string]time.Time
+	recoveryPendingUntil map[string]time.Time
+	successNeedsWrite    map[string]bool
 }
 
 // BlacklistStatus 黑名单状态（用于前端展示）
@@ -35,10 +56,205 @@ type BlacklistStatus struct {
 }
 
 func NewBlacklistService(settingsService *SettingsService, notificationService *NotificationService) *BlacklistService {
-	return &BlacklistService{
+	service := &BlacklistService{
 		settingsService:     settingsService,
 		notificationService: notificationService,
+		snapshotStop:        make(chan struct{}),
+		snapshotDone:        make(chan struct{}),
+		boundIdentities:     make(map[string]string),
 	}
+	service.refreshRuntimeSnapshot()
+	return service
+}
+
+func blacklistRuntimeKey(platform, providerID string) string {
+	return strings.TrimSpace(platform) + "\x00" + strings.TrimSpace(providerID)
+}
+
+func (bs *BlacklistService) runtime() blacklistRuntimeSnapshot {
+	if value := bs.runtimeSnapshot.Load(); value != nil {
+		return value.(blacklistRuntimeSnapshot)
+	}
+	return blacklistRuntimeSnapshot{
+		enabled:              true,
+		levelConfig:          *DefaultBlacklistLevelConfig(),
+		blacklistedUntil:     map[string]time.Time{},
+		recoveryPendingUntil: map[string]time.Time{},
+		successNeedsWrite:    map[string]bool{},
+	}
+}
+
+func (bs *BlacklistService) refreshRuntimeSnapshot() {
+	bs.refreshMu.Lock()
+	defer bs.refreshMu.Unlock()
+	previous := bs.runtime()
+	next := blacklistRuntimeSnapshot{
+		enabled:              bs.settingsService.IsBlacklistEnabled(),
+		levelConfig:          previous.levelConfig,
+		blacklistedUntil:     make(map[string]time.Time),
+		recoveryPendingUntil: make(map[string]time.Time),
+		successNeedsWrite:    make(map[string]bool),
+	}
+	if config, err := bs.settingsService.GetBlacklistLevelConfig(); err == nil && config != nil {
+		next.levelConfig = *config
+	} else if err != nil {
+		log.Printf("[BlacklistService] 刷新配置快照失败，保留上一份配置: %v", err)
+	}
+	db, err := xdb.DB("default")
+	if err == nil {
+		rows, queryErr := db.Query(`
+			SELECT platform, provider_id, failure_count, blacklist_level,
+				last_recovered_at, last_degrade_hour, blacklisted_until
+			FROM provider_blacklist
+		`)
+		if queryErr == nil {
+			defer rows.Close()
+			stateComplete := true
+			now := time.Now()
+			for rows.Next() {
+				var platform string
+				var providerID string
+				var failureCount int
+				var blacklistLevel int
+				var lastRecoveredAt sql.NullTime
+				var lastDegradeHour int
+				var until sql.NullTime
+				if scanErr := rows.Scan(
+					&platform,
+					&providerID,
+					&failureCount,
+					&blacklistLevel,
+					&lastRecoveredAt,
+					&lastDegradeHour,
+					&until,
+				); scanErr != nil {
+					log.Printf("[BlacklistService] 读取黑名单快照失败，保留上一份状态: %v", scanErr)
+					stateComplete = false
+					break
+				}
+				key := blacklistRuntimeKey(platform, providerID)
+				next.successNeedsWrite[key] = blacklistSuccessNeedsWrite(
+					next.levelConfig,
+					failureCount,
+					blacklistLevel,
+					lastRecoveredAt,
+					lastDegradeHour,
+					until,
+					now,
+				)
+				if until.Valid {
+					next.blacklistedUntil[key] = until.Time
+					if next.levelConfig.EnableLevelBlacklist && !lastRecoveredAt.Valid {
+						next.recoveryPendingUntil[key] = until.Time
+					}
+				}
+			}
+			if rowsErr := rows.Err(); rowsErr != nil {
+				log.Printf("[BlacklistService] 遍历黑名单快照失败，保留上一份状态: %v", rowsErr)
+				stateComplete = false
+			}
+			if !stateComplete {
+				next.blacklistedUntil = previous.blacklistedUntil
+				next.recoveryPendingUntil = previous.recoveryPendingUntil
+				next.successNeedsWrite = previous.successNeedsWrite
+			}
+		} else {
+			next.blacklistedUntil = previous.blacklistedUntil
+			next.recoveryPendingUntil = previous.recoveryPendingUntil
+			next.successNeedsWrite = previous.successNeedsWrite
+		}
+	} else {
+		next.blacklistedUntil = previous.blacklistedUntil
+		next.recoveryPendingUntil = previous.recoveryPendingUntil
+		next.successNeedsWrite = previous.successNeedsWrite
+	}
+	bs.runtimeSnapshot.Store(next)
+}
+
+func blacklistSuccessNeedsWrite(
+	config BlacklistLevelConfig,
+	failureCount int,
+	blacklistLevel int,
+	lastRecoveredAt sql.NullTime,
+	lastDegradeHour int,
+	blacklistedUntil sql.NullTime,
+	now time.Time,
+) bool {
+	if failureCount != 0 {
+		return true
+	}
+	if !config.EnableLevelBlacklist {
+		return false
+	}
+	if blacklistedUntil.Valid && blacklistedUntil.Time.Before(now) && !lastRecoveredAt.Valid {
+		return true
+	}
+	if !lastRecoveredAt.Valid || blacklistLevel <= 0 {
+		return false
+	}
+	timeSinceRecovery := now.Sub(lastRecoveredAt.Time)
+	if timeSinceRecovery >= time.Duration(config.ForgivenessHours*float64(time.Hour)) && blacklistLevel >= 3 {
+		return true
+	}
+	return int(timeSinceRecovery.Hours()) > lastDegradeHour
+}
+
+func (bs *BlacklistService) RefreshRuntimeSnapshot() {
+	if bs != nil {
+		bs.refreshRuntimeSnapshot()
+	}
+}
+
+func (bs *BlacklistService) watchRuntimeSnapshot() {
+	defer close(bs.snapshotDone)
+	ticker := time.NewTicker(blacklistRuntimeSnapshotRefreshInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			bs.refreshRuntimeSnapshot()
+		case <-bs.snapshotStop:
+			return
+		}
+	}
+}
+
+func (bs *BlacklistService) Start() error {
+	if bs == nil {
+		return nil
+	}
+	bs.snapshotLifecycleMu.Lock()
+	defer bs.snapshotLifecycleMu.Unlock()
+	if bs.snapshotStarted || bs.snapshotStopped {
+		return nil
+	}
+	bs.snapshotStarted = true
+	go bs.watchRuntimeSnapshot()
+	return nil
+}
+
+func (bs *BlacklistService) Stop() error {
+	if bs == nil || bs.snapshotStop == nil {
+		return nil
+	}
+	bs.snapshotLifecycleMu.Lock()
+	started := bs.snapshotStarted
+	if !bs.snapshotStopped {
+		bs.snapshotStopped = true
+		if started {
+			close(bs.snapshotStop)
+		}
+	}
+	bs.snapshotLifecycleMu.Unlock()
+	if started {
+		<-bs.snapshotDone
+	}
+	return nil
+}
+
+func (bs *BlacklistService) levelConfig() *BlacklistLevelConfig {
+	config := bs.runtime().levelConfig
+	return &config
 }
 
 func normalizeBlacklistIdentity(providerID, providerName string) (string, string) {
@@ -58,6 +274,14 @@ func (bs *BlacklistService) bindProviderIdentity(platform, providerID, providerN
 	if providerID == "" {
 		return
 	}
+	identityKey := blacklistRuntimeKey(platform, providerID)
+	bs.identityMu.Lock()
+	if bs.boundIdentities[identityKey] == providerName {
+		bs.identityMu.Unlock()
+		return
+	}
+	bs.identityMu.Unlock()
+	bindSucceeded := true
 	execSQL := func(statement string, args ...interface{}) error {
 		if GlobalDBQueue != nil {
 			return GlobalDBQueue.Exec(statement, args...)
@@ -75,6 +299,7 @@ func (bs *BlacklistService) bindProviderIdentity(platform, providerID, providerN
 		SET provider_name = ?
 		WHERE platform = ? AND provider_id = ?
 	`, providerName, platform, providerID); err != nil {
+		bindSucceeded = false
 		log.Printf("⚠️  绑定 provider_id（按 id 更新名称）失败: %v", err)
 	}
 	// 再补齐当前名称对应记录的 provider_id（历史数据兼容）
@@ -84,17 +309,41 @@ func (bs *BlacklistService) bindProviderIdentity(platform, providerID, providerN
 			SET provider_id = ?
 			WHERE platform = ? AND provider_name = ? AND (provider_id IS NULL OR provider_id = '')
 		`, providerID, platform, providerName); err != nil {
+			bindSucceeded = false
 			log.Printf("⚠️  绑定 provider_id（按名称回填 id）失败: %v", err)
 		}
 	}
+	if bindSucceeded {
+		bs.identityMu.Lock()
+		bs.boundIdentities[identityKey] = providerName
+		bs.identityMu.Unlock()
+	}
+}
+
+func (bs *BlacklistService) isProviderIdentityBound(platform, providerID, providerName string) bool {
+	providerID, providerName = normalizeBlacklistIdentity(providerID, providerName)
+	bs.identityMu.Lock()
+	defer bs.identityMu.Unlock()
+	return bs.boundIdentities[blacklistRuntimeKey(platform, providerID)] == providerName
 }
 
 func (bs *BlacklistService) RecordSuccessByID(platform, providerID, providerName string) error {
 	providerID, providerName = normalizeBlacklistIdentity(providerID, providerName)
+	wasBound := bs.isProviderIdentityBound(platform, providerID, providerName)
 	bs.bindProviderIdentity(platform, providerID, providerName)
+	snapshot := bs.runtime()
+	key := blacklistRuntimeKey(platform, providerID)
+	needsWrite := snapshot.successNeedsWrite[key]
+	if until, exists := snapshot.recoveryPendingUntil[key]; snapshot.levelConfig.EnableLevelBlacklist && exists && !until.After(time.Now()) {
+		needsWrite = true
+	}
+	if wasBound && !needsWrite {
+		return nil
+	}
 	if err := bs.recordSuccessByIdentity(platform, providerID, providerName); err != nil {
 		return err
 	}
+	bs.refreshRuntimeSnapshot()
 	bs.bindProviderIdentity(platform, providerID, providerName)
 	return nil
 }
@@ -105,12 +354,14 @@ func (bs *BlacklistService) RecordFailureByID(platform, providerID, providerName
 	if err := bs.recordFailureByIdentity(platform, providerID, providerName); err != nil {
 		return err
 	}
+	bs.refreshRuntimeSnapshot()
 	bs.bindProviderIdentity(platform, providerID, providerName)
 	return nil
 }
 
 func (bs *BlacklistService) IsBlacklistedByID(platform, providerID, providerName string) (bool, *time.Time) {
-	if !bs.settingsService.IsBlacklistEnabled() {
+	snapshot := bs.runtime()
+	if !snapshot.enabled {
 		return false, nil
 	}
 
@@ -119,27 +370,9 @@ func (bs *BlacklistService) IsBlacklistedByID(platform, providerID, providerName
 		return false, nil
 	}
 
-	db, err := xdb.DB("default")
-	if err != nil {
-		log.Printf("⚠️  获取数据库连接失败: %v", err)
-		return false, nil
-	}
-
-	var blacklistedUntil sql.NullTime
-	err = db.QueryRow(`
-		SELECT blacklisted_until
-		FROM provider_blacklist
-		WHERE platform = ? AND provider_id = ? AND blacklisted_until IS NOT NULL
-	`, platform, providerID).Scan(&blacklistedUntil)
-
-	if err == sql.ErrNoRows {
-		return false, nil
-	} else if err != nil {
-		log.Printf("⚠️  查询黑名单状态失败: %v", err)
-		return false, nil
-	}
-	if blacklistedUntil.Valid && blacklistedUntil.Time.After(time.Now()) {
-		return true, &blacklistedUntil.Time
+	if blacklistedUntil, ok := snapshot.blacklistedUntil[blacklistRuntimeKey(platform, providerID)]; ok && blacklistedUntil.After(time.Now()) {
+		until := blacklistedUntil
+		return true, &until
 	}
 	return false, nil
 }
@@ -150,6 +383,7 @@ func (bs *BlacklistService) ManualUnblockAndResetByID(platform, providerID, prov
 	if err := bs.manualUnblockAndResetByIdentity(platform, providerID, providerName); err != nil {
 		return err
 	}
+	bs.refreshRuntimeSnapshot()
 	bs.bindProviderIdentity(platform, providerID, providerName)
 	return nil
 }
@@ -160,6 +394,7 @@ func (bs *BlacklistService) ManualResetLevelByID(platform, providerID, providerN
 	if err := bs.manualResetLevelByIdentity(platform, providerID, providerName); err != nil {
 		return err
 	}
+	bs.refreshRuntimeSnapshot()
 	bs.bindProviderIdentity(platform, providerID, providerName)
 	return nil
 }
@@ -178,11 +413,7 @@ func (bs *BlacklistService) recordSuccessByIdentity(platform, providerID, provid
 	}
 
 	// 获取等级拉黑配置
-	levelConfig, err := bs.settingsService.GetBlacklistLevelConfig()
-	if err != nil {
-		log.Printf("⚠️  获取等级拉黑配置失败: %v", err)
-		levelConfig = DefaultBlacklistLevelConfig()
-	}
+	levelConfig := bs.levelConfig()
 
 	// 查询现有记录
 	var id int
@@ -307,7 +538,7 @@ func (bs *BlacklistService) RecordFailure(platform string, providerName string) 
 
 func (bs *BlacklistService) recordFailureByIdentity(platform, providerID, providerName string) error {
 	// 检查拉黑功能是否启用
-	if !bs.settingsService.IsBlacklistEnabled() {
+	if !bs.runtime().enabled {
 		log.Printf("🚫 拉黑功能已关闭，跳过 provider %s/%s 的失败记录", platform, providerName)
 		return nil
 	}
@@ -318,11 +549,7 @@ func (bs *BlacklistService) recordFailureByIdentity(platform, providerID, provid
 	}
 
 	// 获取等级拉黑配置
-	levelConfig, err := bs.settingsService.GetBlacklistLevelConfig()
-	if err != nil {
-		log.Printf("⚠️  获取等级拉黑配置失败: %v", err)
-		levelConfig = DefaultBlacklistLevelConfig()
-	}
+	levelConfig := bs.levelConfig()
 
 	// 如果功能关闭，使用旧的固定拉黑模式
 	if !levelConfig.EnableLevelBlacklist {
@@ -780,6 +1007,7 @@ func (bs *BlacklistService) AutoRecoverExpired() error {
 
 	if len(recovered) > 0 {
 		log.Printf("✅ 自动恢复 %d 个过期拉黑（等级保留，等待降级）: %v", len(recovered), recovered)
+		bs.refreshRuntimeSnapshot()
 	}
 
 	if len(failed) > 0 {
@@ -797,10 +1025,7 @@ func (bs *BlacklistService) GetBlacklistStatus(platform string) ([]BlacklistStat
 	}
 
 	// 获取等级拉黑配置（用于计算宽恕倒计时）
-	levelConfig, err := bs.settingsService.GetBlacklistLevelConfig()
-	if err != nil {
-		levelConfig = DefaultBlacklistLevelConfig()
-	}
+	levelConfig := bs.levelConfig()
 
 	rows, err := db.Query(`
 		SELECT
@@ -891,17 +1116,12 @@ func (bs *BlacklistService) GetBlacklistStatus(platform string) ([]BlacklistStat
 //   - 等级拉黑关闭但 fallbackMode="fixed"
 func (bs *BlacklistService) ShouldUseFixedMode() bool {
 	// 首先检查全局开关
-	if !bs.settingsService.IsBlacklistEnabled() {
+	snapshot := bs.runtime()
+	if !snapshot.enabled {
 		return false // 全局拉黑关闭 → 始终降级
 	}
 
-	config, err := bs.settingsService.GetBlacklistLevelConfig()
-	if err != nil {
-		// 读取失败：使用默认配置
-		log.Printf("[BlacklistService] 读取配置失败，使用默认值: %v", err)
-		defaultConfig := DefaultBlacklistLevelConfig()
-		return defaultConfig.FallbackMode == "fixed"
-	}
+	config := &snapshot.levelConfig
 
 	// 等级拉黑开启 → 固定模式
 	if config.EnableLevelBlacklist {
@@ -923,17 +1143,13 @@ func (bs *BlacklistService) ShouldUseFixedMode() bool {
 
 // IsBlacklistEnabled 返回拉黑总开关状态（用于固定拉黑模式判断）
 func (bs *BlacklistService) IsBlacklistEnabled() bool {
-	return bs.settingsService.IsBlacklistEnabled()
+	return bs.runtime().enabled
 }
 
 // IsLevelBlacklistEnabled 返回等级拉黑功能是否开启
 // 用于 proxyHandler 判断是否启用自动降级
 func (bs *BlacklistService) IsLevelBlacklistEnabled() bool {
-	config, err := bs.settingsService.GetBlacklistLevelConfig()
-	if err != nil {
-		return false // 出错时默认关闭（保持降级行为）
-	}
-	return config.EnableLevelBlacklist
+	return bs.runtime().levelConfig.EnableLevelBlacklist
 }
 
 // RetryConfig 重试配置（供 proxyHandler 使用）
@@ -946,22 +1162,7 @@ type RetryConfig struct {
 // GetRetryConfig 获取重试相关配置
 // 用于 proxyHandler 实现同 Provider 重试机制
 func (bs *BlacklistService) GetRetryConfig() *RetryConfig {
-	config, err := bs.settingsService.GetBlacklistLevelConfig()
-	if err != nil {
-		// 【修复】读取配置失败时，也尝试从数据库读取阈值
-		// 确保内层重试次数与实际拉黑阈值一致
-		defaultConfig := DefaultBlacklistLevelConfig()
-		result := &RetryConfig{
-			FailureThreshold:    defaultConfig.FailureThreshold,
-			RetryWaitSeconds:    defaultConfig.RetryWaitSeconds,
-			DedupeWindowSeconds: defaultConfig.DedupeWindowSeconds,
-		}
-		// 尝试从数据库读取阈值
-		if dbThreshold, _, dbErr := bs.settingsService.GetBlacklistSettings(); dbErr == nil && dbThreshold > 0 {
-			result.FailureThreshold = dbThreshold
-		}
-		return result
-	}
+	config := bs.levelConfig()
 	return &RetryConfig{
 		FailureThreshold:    config.FailureThreshold,
 		RetryWaitSeconds:    config.RetryWaitSeconds,

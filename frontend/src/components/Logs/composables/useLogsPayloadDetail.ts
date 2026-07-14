@@ -36,11 +36,13 @@ export function useLogsPayloadDetail(options: UseLogsPayloadDetailOptions) {
     open: boolean
     loading: boolean
     logId: number
+    log: RequestLog | null
     detail: RequestLogPayloadDetail | null
   }>({
     open: false,
     loading: false,
     logId: 0,
+    log: null,
     detail: null,
   })
   const payloadDetailRequestSeq = ref(0)
@@ -89,6 +91,7 @@ export function useLogsPayloadDetail(options: UseLogsPayloadDetailOptions) {
     payloadDetailModal.open = true
     payloadDetailModal.loading = true
     payloadDetailModal.logId = logId
+    payloadDetailModal.log = item
     payloadDetailModal.detail = null
 
     const requestSeq = ++payloadDetailRequestSeq.value
@@ -115,6 +118,7 @@ export function useLogsPayloadDetail(options: UseLogsPayloadDetailOptions) {
     payloadDetailRequestSeq.value += 1
     payloadDetailModal.open = false
     payloadDetailModal.loading = false
+    payloadDetailModal.log = null
   }
 
   return {

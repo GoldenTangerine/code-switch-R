@@ -14,6 +14,25 @@
         <div class="payload-detail-meta">
           {{ t('components.logs.payloadDetail.logId', { id: logId || '—' }) }}
         </div>
+        <section v-if="hasPerformanceMetrics" class="payload-performance" :aria-label="t('components.logs.payloadDetail.performance')">
+          <div class="payload-performance__header">
+            <span>{{ t('components.logs.payloadDetail.performance') }}</span>
+            <span class="payload-performance__connection">
+              {{ log?.connection_reused
+                ? t('components.logs.payloadDetail.connectionReused')
+                : t('components.logs.payloadDetail.connectionNew') }}
+            </span>
+          </div>
+          <dl class="payload-performance__grid">
+            <div v-for="metric in performanceMetrics" :key="metric.key" class="payload-performance__metric">
+              <dt>{{ metric.label }}</dt>
+              <dd>{{ metric.value }}</dd>
+            </div>
+          </dl>
+        </section>
+        <p v-else class="payload-performance-empty">
+          {{ t('components.logs.payloadDetail.performanceUnavailable') }}
+        </p>
         <div class="payload-detail-grid">
           <section class="payload-detail-panel">
             <header class="payload-detail-panel__header">
@@ -99,29 +118,56 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { PayloadPreview } from '../../../utils/payloadPreview'
 import BaseModal from '../../common/BaseModal.vue'
-import type { RequestLogPayloadDetail } from '../../../services/logs'
+import type { RequestLog, RequestLogPayloadDetail } from '../../../services/logs'
 
 type PayloadDetailKind = 'request' | 'response'
 type PayloadCopyMode = 'raw' | 'formatted'
-
-defineProps<{
-  open: boolean
-  loading: boolean
-  logId: number
-  detail: RequestLogPayloadDetail | null
-  requestPayloadPreview: PayloadPreview
-  responsePayloadPreview: PayloadPreview
-  copyPayloadDetail: (kind: PayloadDetailKind, mode: PayloadCopyMode) => void | Promise<void>
-}>()
 
 const emit = defineEmits<{
   (event: 'close'): void
 }>()
 
 const { t } = useI18n()
+
+const props = defineProps<{
+  open: boolean
+  loading: boolean
+  logId: number
+  log: RequestLog | null
+  detail: RequestLogPayloadDetail | null
+  requestPayloadPreview: PayloadPreview
+  responsePayloadPreview: PayloadPreview
+  copyPayloadDetail: (kind: PayloadDetailKind, mode: PayloadCopyMode) => void | Promise<void>
+}>()
+
+function formatMilliseconds(value?: number) {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return '—'
+  if (value === 0) return '0 ms'
+  if (value < 1) return `${value.toFixed(2)} ms`
+  return `${value.toFixed(1)} ms`
+}
+
+const hasPerformanceMetrics = computed(() => [
+  props.log?.proxy_prepare_ms,
+  props.log?.dns_ms,
+  props.log?.connect_ms,
+  props.log?.tls_ms,
+  props.log?.upstream_ttfb_ms,
+  props.log?.proxy_stream_delay_ms,
+].some(value => typeof value === 'number' && Number.isFinite(value) && value > 0))
+
+const performanceMetrics = computed(() => [
+  { key: 'prepare', label: t('components.logs.payloadDetail.proxyPrepare'), value: formatMilliseconds(props.log?.proxy_prepare_ms) },
+  { key: 'dns', label: t('components.logs.payloadDetail.dns'), value: formatMilliseconds(props.log?.dns_ms) },
+  { key: 'connect', label: t('components.logs.payloadDetail.connect'), value: formatMilliseconds(props.log?.connect_ms) },
+  { key: 'tls', label: t('components.logs.payloadDetail.tls'), value: formatMilliseconds(props.log?.tls_ms) },
+  { key: 'ttfb', label: t('components.logs.payloadDetail.upstreamTtfb'), value: formatMilliseconds(props.log?.upstream_ttfb_ms) },
+  { key: 'stream', label: t('components.logs.payloadDetail.streamDelay'), value: formatMilliseconds(props.log?.proxy_stream_delay_ms) },
+])
 </script>
 
 <style scoped>
@@ -135,6 +181,89 @@ const { t } = useI18n()
 .payload-detail-meta {
   font-size: 0.8rem;
   color: #64748b;
+}
+
+.payload-performance {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 8px;
+  background: rgba(248, 250, 252, 0.78);
+}
+
+.payload-performance__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #334155;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.payload-performance__connection {
+  color: #0f766e;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.payload-performance__grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.payload-performance__metric {
+  min-width: 0;
+}
+
+.payload-performance__metric dt {
+  color: #64748b;
+  font-size: 0.68rem;
+  line-height: 1.35;
+}
+
+.payload-performance__metric dd {
+  margin: 2px 0 0;
+  color: #0f172a;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+}
+
+.payload-performance-empty {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.76rem;
+}
+
+html.dark .payload-performance {
+  border-color: rgba(148, 163, 184, 0.22);
+  background: rgba(15, 23, 42, 0.42);
+}
+
+html.dark .payload-performance__header,
+html.dark .payload-performance__metric dd {
+  color: #e2e8f0;
+}
+
+html.dark .payload-performance__connection {
+  color: #5eead4;
+}
+
+@media (max-width: 900px) {
+  .payload-performance__grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .payload-performance__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .payload-detail-grid {

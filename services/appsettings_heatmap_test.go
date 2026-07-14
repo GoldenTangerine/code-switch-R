@@ -1,6 +1,103 @@
 package services
 
-import "testing"
+import (
+	"encoding/json"
+	"os"
+	"testing"
+	"time"
+)
+
+func TestAppSettingsSnapshotSaveAndExternalRefresh(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	service := NewAppSettingsService(nil)
+	defer service.Stop()
+	if err := service.Start(); err != nil {
+		t.Fatal(err)
+	}
+
+	settings := service.defaultSettings()
+	settings.EnableRoundRobin = true
+	if _, err := service.SaveAppSettings(settings); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := service.GetAppSettings()
+	if err != nil || !loaded.EnableRoundRobin {
+		t.Fatalf("保存后快照未立即生效: %#v, %v", loaded, err)
+	}
+
+	if err := os.WriteFile(service.path, []byte(`{"enable_round_robin":`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(1100 * time.Millisecond)
+	loaded, err = service.GetAppSettings()
+	if err != nil || !loaded.EnableRoundRobin {
+		t.Fatalf("无效外部设置不应覆盖有效快照: %#v, %v", loaded, err)
+	}
+
+	settings.EnableRoundRobin = false
+	data, err := json.Marshal(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(service.path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		loaded, err = service.GetAppSettings()
+		if err == nil && !loaded.EnableRoundRobin {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("外部设置未在一秒轮询周期内生效: %#v, %v", loaded, err)
+}
+
+func TestAppSettingsSnapshotDoesNotShareMutableFields(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	service := NewAppSettingsService(nil)
+	defer service.Stop()
+
+	settings := service.defaultSettings()
+	settings.HomeProviderTabs = []string{"claude", "codex"}
+	settings.ProviderConcurrencyLimits = map[string]bool{"claude": true}
+	settings.ProviderQuotaQueryPresets = map[string]ProviderQuotaQueryPresetGroup{
+		"custom": {
+			DefaultID: "default",
+			Items:     []ProviderQuotaQueryPresetEntry{{ID: "default", Name: "默认", Code: "return 1"}},
+		},
+	}
+	if _, err := service.SaveAppSettings(settings); err != nil {
+		t.Fatal(err)
+	}
+
+	settings.HomeProviderTabs[0] = "gemini"
+	settings.ProviderConcurrencyLimits["claude"] = false
+	modifiedPreset := settings.ProviderQuotaQueryPresets["custom"]
+	modifiedPreset.Items[0].Code = "return 2"
+	settings.ProviderQuotaQueryPresets["custom"] = modifiedPreset
+
+	loaded, err := service.GetAppSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.HomeProviderTabs[0] != "claude" || !loaded.ProviderConcurrencyLimits["claude"] {
+		t.Fatalf("保存参数修改污染快照: %#v", loaded)
+	}
+	if loaded.ProviderQuotaQueryPresets["custom"].Items[0].Code != "return 1" {
+		t.Fatalf("嵌套切片修改污染快照: %#v", loaded.ProviderQuotaQueryPresets)
+	}
+
+	loaded.HomeProviderTabs[0] = "opencode"
+	loaded.ProviderConcurrencyLimits["claude"] = false
+	loadedAgain, err := service.GetAppSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loadedAgain.HomeProviderTabs[0] != "claude" || !loadedAgain.ProviderConcurrencyLimits["claude"] {
+		t.Fatalf("读取结果修改污染快照: %#v", loadedAgain)
+	}
+}
 
 func TestNormalizeHomeProviderTabsDefaultsWhenEmpty(t *testing.T) {
 	got := normalizeHomeProviderTabs(nil)

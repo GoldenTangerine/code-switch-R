@@ -134,6 +134,9 @@ func main() {
 	modelPricingService.BindClaudeModelRoutingService(claudeModelRoutingService)
 	notificationService := services.NewNotificationService(appSettings) // 通知服务
 	blacklistService := services.NewBlacklistService(settingsService, notificationService)
+	settingsService.BindBlacklistInvalidator(func() {
+		blacklistService.RefreshRuntimeSnapshot()
+	})
 	geminiService := services.NewGeminiService("127.0.0.1:18100")
 	openCodeService := services.NewOpenCodeService()
 	codexOAuthService := services.NewCodexOAuthService(providerService)
@@ -145,6 +148,15 @@ func main() {
 	claudeSettings := services.NewClaudeSettingsService(providerRelay.Addr())
 	codexSettings := services.NewCodexSettingsService(providerRelay.Addr())
 	appSettings.BindCodexSettingsService(codexSettings)
+	if err := providerService.Start(); err != nil {
+		log.Fatalf("供应商快照服务启动失败: %v", err)
+	}
+	if err := appSettings.Start(); err != nil {
+		log.Fatalf("应用设置快照服务启动失败: %v", err)
+	}
+	if err := blacklistService.Start(); err != nil {
+		log.Fatalf("黑名单快照服务启动失败: %v", err)
+	}
 	cliConfigService := services.NewCliConfigService(providerRelay.Addr())
 	logService := services.NewLogService(modelPricingService)
 	updateService := services.NewUpdateService(AppVersion)
@@ -311,6 +323,9 @@ func main() {
 		// 4. 停止代理服务器
 		_ = providerRelay.Stop()
 		claudeModelRoutingService.Stop()
+		_ = blacklistService.Stop()
+		_ = appSettings.Stop()
+		_ = providerService.Stop()
 
 		// 5. 优雅关闭数据库写入队列（10秒超时，双队列架构）
 		if err := services.ShutdownGlobalDBQueue(10 * time.Second); err != nil {
@@ -327,6 +342,7 @@ func main() {
 				stats2.SuccessWrites, stats2.FailedWrites, stats2.AvgLatencyMs, stats2.BatchCommits)
 		}
 
+		_ = consoleService.Stop()
 		log.Println("✅ 所有后台服务已停止")
 	})
 

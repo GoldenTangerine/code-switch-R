@@ -2,6 +2,7 @@ package services
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -186,11 +188,45 @@ type BudgetQuotaAdjustments struct {
 }
 
 type AppSettingsService struct {
-	path               string
-	mu                 sync.Mutex
-	autoStartService   *AutoStartService
-	codexSettings      *CodexSettingsService
-	claudeModelRouting *ClaudeModelRoutingService
+	path                string
+	mu                  sync.Mutex
+	autoStartService    *AutoStartService
+	codexSettings       *CodexSettingsService
+	claudeModelRouting  *ClaudeModelRoutingService
+	snapshot            atomic.Value
+	fingerprintMu       sync.Mutex
+	fingerprint         [sha256.Size]byte
+	fingerprintExists   bool
+	snapshotStop        chan struct{}
+	snapshotDone        chan struct{}
+	snapshotLifecycleMu sync.Mutex
+	snapshotStarted     bool
+	snapshotStopped     bool
+}
+
+func cloneAppSettings(settings AppSettings) AppSettings {
+	cloned := settings
+	cloned.HomeProviderTabs = append([]string(nil), settings.HomeProviderTabs...)
+	if settings.ProviderConcurrencyLimits != nil {
+		cloned.ProviderConcurrencyLimits = make(map[string]bool, len(settings.ProviderConcurrencyLimits))
+		for key, value := range settings.ProviderConcurrencyLimits {
+			cloned.ProviderConcurrencyLimits[key] = value
+		}
+	}
+	if settings.ProviderQuotaQueryPresetCodes != nil {
+		cloned.ProviderQuotaQueryPresetCodes = make(map[string]string, len(settings.ProviderQuotaQueryPresetCodes))
+		for key, value := range settings.ProviderQuotaQueryPresetCodes {
+			cloned.ProviderQuotaQueryPresetCodes[key] = value
+		}
+	}
+	if settings.ProviderQuotaQueryPresets != nil {
+		cloned.ProviderQuotaQueryPresets = make(map[string]ProviderQuotaQueryPresetGroup, len(settings.ProviderQuotaQueryPresets))
+		for key, group := range settings.ProviderQuotaQueryPresets {
+			group.Items = append([]ProviderQuotaQueryPresetEntry(nil), group.Items...)
+			cloned.ProviderQuotaQueryPresets[key] = group
+		}
+	}
+	return cloned
 }
 
 func NewAppSettingsService(autoStartService *AutoStartService) *AppSettingsService {
@@ -216,9 +252,111 @@ func NewAppSettingsService(autoStartService *AutoStartService) *AppSettingsServi
 		}
 	}
 
-	return &AppSettingsService{
+	service := &AppSettingsService{
 		path:             newPath,
 		autoStartService: autoStartService,
+		snapshotStop:     make(chan struct{}),
+		snapshotDone:     make(chan struct{}),
+	}
+	service.mu.Lock()
+	settings, loadErr := service.loadLocked()
+	service.mu.Unlock()
+	if loadErr != nil {
+		fmt.Printf("[AppSettings] 加载设置快照失败，使用默认值: %v\n", loadErr)
+		settings = service.defaultSettings()
+	}
+	service.snapshot.Store(cloneAppSettings(settings))
+	service.refreshFingerprint()
+	return service
+}
+
+func (as *AppSettingsService) Start() error {
+	if as == nil {
+		return nil
+	}
+	as.snapshotLifecycleMu.Lock()
+	defer as.snapshotLifecycleMu.Unlock()
+	if as.snapshotStarted || as.snapshotStopped {
+		return nil
+	}
+	as.snapshotStarted = true
+	go as.watchSnapshot()
+	return nil
+}
+
+func (as *AppSettingsService) Stop() error {
+	if as == nil || as.snapshotStop == nil {
+		return nil
+	}
+	as.snapshotLifecycleMu.Lock()
+	started := as.snapshotStarted
+	if !as.snapshotStopped {
+		as.snapshotStopped = true
+		if started {
+			close(as.snapshotStop)
+		}
+	}
+	as.snapshotLifecycleMu.Unlock()
+	if started {
+		<-as.snapshotDone
+	}
+	return nil
+}
+
+func (as *AppSettingsService) refreshFingerprint() {
+	data, err := os.ReadFile(as.path)
+	exists := err == nil
+	if err != nil && !os.IsNotExist(err) {
+		return
+	}
+	fingerprint := sha256.Sum256(data)
+	as.fingerprintMu.Lock()
+	as.fingerprint = fingerprint
+	as.fingerprintExists = exists
+	as.fingerprintMu.Unlock()
+}
+
+func (as *AppSettingsService) watchSnapshot() {
+	defer close(as.snapshotDone)
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			as.reloadSnapshotIfChanged()
+		case <-as.snapshotStop:
+			return
+		}
+	}
+}
+
+func (as *AppSettingsService) reloadSnapshotIfChanged() {
+	data, err := os.ReadFile(as.path)
+	exists := err == nil
+	if err != nil && !os.IsNotExist(err) {
+		return
+	}
+	fingerprint := sha256.Sum256(data)
+	as.fingerprintMu.Lock()
+	unchanged := as.fingerprintExists == exists && as.fingerprint == fingerprint
+	as.fingerprintMu.Unlock()
+	if unchanged {
+		return
+	}
+	previous, _ := as.GetAppSettings()
+
+	as.mu.Lock()
+	settings, loadErr := as.loadLocked()
+	routing := as.claudeModelRouting
+	as.mu.Unlock()
+	if loadErr != nil {
+		fmt.Printf("[AppSettings] 外部设置解析失败，继续使用上一份快照: %v\n", loadErr)
+		return
+	}
+	as.snapshot.Store(cloneAppSettings(settings))
+	as.refreshFingerprint()
+	if routing != nil && claudeModelRoutingSettingsChanged(previous, settings) {
+		routing.HandleSettingsChanged(previous, settings)
 	}
 }
 
@@ -557,16 +695,17 @@ func normalizeProviderQuotaQueryPresets(settings *AppSettings) {
 
 // GetAppSettings returns the persisted app settings or defaults if the file does not exist.
 func (as *AppSettingsService) GetAppSettings() (AppSettings, error) {
-	as.mu.Lock()
-	defer as.mu.Unlock()
-	return as.loadLocked()
+	if value := as.snapshot.Load(); value != nil {
+		return cloneAppSettings(value.(AppSettings)), nil
+	}
+	return as.defaultSettings(), nil
 }
 
 // SaveAppSettings persists the provided settings to disk.
 func (as *AppSettingsService) SaveAppSettings(settings AppSettings) (AppSettings, error) {
 	as.mu.Lock()
 	defer as.mu.Unlock()
-	previous, _ := as.loadLocked()
+	previous, _ := as.GetAppSettings()
 	settings.HeatmapGranularity = normalizeHeatmapGranularity(settings.HeatmapGranularity)
 	settings.HomeProviderTabs = normalizeHomeProviderTabs(settings.HomeProviderTabs)
 	normalizeHeatmapDisplaySettings(&settings)
@@ -610,6 +749,8 @@ func (as *AppSettingsService) SaveAppSettings(settings AppSettings) (AppSettings
 	if as.claudeModelRouting != nil && claudeModelRoutingSettingsChanged(previous, settings) {
 		as.claudeModelRouting.HandleSettingsChanged(previous, settings)
 	}
+	as.snapshot.Store(cloneAppSettings(settings))
+	as.refreshFingerprint()
 	return settings, nil
 }
 
