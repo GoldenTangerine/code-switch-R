@@ -13,7 +13,13 @@ import {
   saveAppSettings,
   normalizeHeatmapGranularity,
   type AppSettings,
+  type ClaudeModelMetadataMergeStrategy,
 } from '../../services/appSettings'
+import {
+  getClaudeModelRoutingStatus,
+  refreshClaudeModelRoutes,
+  type ClaudeModelRoutingStatus,
+} from '../../services/claudeModelRouting'
 import {
   DEFAULT_HEATMAP_DISPLAY_SETTINGS,
   normalizeHeatmapDailyIntensityMode,
@@ -166,6 +172,16 @@ const updateHistoryKeepCount = ref(getCachedNumber('updateHistoryKeepCount', def
 const autoConnectivityTestEnabled = ref(getCachedValue('autoConnectivityTest', false))
 const switchNotifyEnabled = ref(getCachedValue('switchNotify', true)) // 切换通知开关
 const roundRobinEnabled = ref(getCachedValue('roundRobin', false))    // 同 Level 轮询开关
+const claudeModelRoutingEnabled = ref(getCachedValue('claudeModelRouting', false))
+const claudeModelAggregationEnabled = ref(getCachedValue('claudeModelAggregation', false))
+const claudeModelMetadataMergeStrategy = ref<ClaudeModelMetadataMergeStrategy>(
+  getCachedString('claudeModelMetadataMergeStrategy', 'aggressive') === 'conservative'
+    ? 'conservative'
+    : 'aggressive',
+)
+const claudeModelRoutingStatus = ref<ClaudeModelRoutingStatus | null>(null)
+const claudeModelRefreshBusy = ref(false)
+const claudeModelMetadataStrategies: ClaudeModelMetadataMergeStrategy[] = ['aggressive', 'conservative']
 const preserveCodexOfficialAuthOnSwitch = ref(getCachedValue('preserveCodexOfficialAuthOnSwitch', false))
 const unifyCodexSessionHistory = ref(getCachedValue('unifyCodexSessionHistory', false))
 const unifyCodexMigrateExisting = ref(false)
@@ -492,6 +508,9 @@ const syncAppSettingsCache = () => {
   localStorage.setItem('app-settings-autoConnectivityTest', String(autoConnectivityTestEnabled.value))
   localStorage.setItem('app-settings-switchNotify', String(switchNotifyEnabled.value))
   localStorage.setItem('app-settings-roundRobin', String(roundRobinEnabled.value))
+  localStorage.setItem('app-settings-claudeModelRouting', String(claudeModelRoutingEnabled.value))
+  localStorage.setItem('app-settings-claudeModelAggregation', String(claudeModelAggregationEnabled.value))
+  localStorage.setItem('app-settings-claudeModelMetadataMergeStrategy', claudeModelMetadataMergeStrategy.value)
   localStorage.setItem('app-settings-preserveCodexOfficialAuthOnSwitch', String(preserveCodexOfficialAuthOnSwitch.value))
   localStorage.setItem('app-settings-unifyCodexSessionHistory', String(unifyCodexSessionHistory.value))
   localStorage.setItem('app-settings-captureRequestLogPayload', String(captureRequestLogPayloadEnabled.value))
@@ -1137,6 +1156,11 @@ const loadAppSettings = async () => {
     autoConnectivityTestEnabled.value = data?.auto_connectivity_test ?? false
     switchNotifyEnabled.value = data?.enable_switch_notify ?? true
     roundRobinEnabled.value = data?.enable_round_robin ?? false
+    claudeModelRoutingEnabled.value = data?.claude_model_routing_enabled ?? false
+    claudeModelAggregationEnabled.value = claudeModelRoutingEnabled.value && (data?.claude_model_aggregation_enabled ?? false)
+    claudeModelMetadataMergeStrategy.value = data?.claude_model_metadata_merge_strategy === 'conservative'
+      ? 'conservative'
+      : 'aggressive'
     preserveCodexOfficialAuthOnSwitch.value = data?.preserve_codex_official_auth_on_switch ?? false
     unifyCodexSessionHistory.value = data?.unify_codex_session_history ?? false
     unifyCodexMigrateExisting.value = data?.unify_codex_migrate_existing ?? false
@@ -1179,6 +1203,9 @@ const loadAppSettings = async () => {
     autoConnectivityTestEnabled.value = false
     switchNotifyEnabled.value = true
     roundRobinEnabled.value = false
+    claudeModelRoutingEnabled.value = false
+    claudeModelAggregationEnabled.value = false
+    claudeModelMetadataMergeStrategy.value = 'aggressive'
     preserveCodexOfficialAuthOnSwitch.value = false
     unifyCodexSessionHistory.value = false
     unifyCodexMigrateExisting.value = false
@@ -1283,6 +1310,10 @@ const persistAppSettingsNow = async () => {
       auto_connectivity_test: autoConnectivityTestEnabled.value,
       enable_switch_notify: switchNotifyEnabled.value,
       enable_round_robin: roundRobinEnabled.value,
+      claude_model_routing_enabled: claudeModelRoutingEnabled.value,
+      claude_model_aggregation_enabled:
+        claudeModelRoutingEnabled.value && claudeModelAggregationEnabled.value,
+      claude_model_metadata_merge_strategy: claudeModelMetadataMergeStrategy.value,
       preserve_codex_official_auth_on_switch: preserveCodexOfficialAuthOnSwitch.value,
       unify_codex_session_history: unifyCodexSessionHistory.value,
       unify_codex_migrate_existing: unifyCodexMigrateExisting.value,
@@ -1339,6 +1370,66 @@ const flushPendingPersist = () => {
   window.clearTimeout(persistTimer)
   persistTimer = undefined
   void persistAppSettingsNow()
+}
+
+const claudeModelRefreshHint = computed(() => {
+  const status = claudeModelRoutingStatus.value
+  if (!status) return t('components.general.label.claudeModelRefreshIdle')
+  if (status.refreshing) return t('components.general.label.claudeModelRefreshing')
+  if (status.lastSuccessAt) {
+    return t('components.general.label.claudeModelRefreshStatus', {
+      time: formatLocalDateTime(new Date(status.lastSuccessAt)),
+      success: status.successCount,
+      failure: status.failureCount,
+    })
+  }
+  return t('components.general.label.claudeModelRefreshIdle')
+})
+
+const loadClaudeModelRoutingStatus = async () => {
+  try {
+    claudeModelRoutingStatus.value = await getClaudeModelRoutingStatus()
+  } catch (error) {
+    console.error('failed to load Claude model routing status', error)
+  }
+}
+
+const handleClaudeModelRoutingToggle = async () => {
+  if (!claudeModelRoutingEnabled.value) {
+    claudeModelAggregationEnabled.value = false
+  }
+  await persistAppSettingsNow()
+  await loadClaudeModelRoutingStatus()
+}
+
+const handleClaudeModelAggregationToggle = async () => {
+  if (!claudeModelRoutingEnabled.value) {
+    claudeModelAggregationEnabled.value = false
+  }
+  await persistAppSettingsNow()
+}
+
+const handleClaudeModelStrategyChange = async () => {
+  await persistAppSettingsNow()
+}
+
+const handleClaudeModelRefresh = async () => {
+  if (!claudeModelRoutingEnabled.value || claudeModelRefreshBusy.value) return
+  claudeModelRefreshBusy.value = true
+  try {
+    await persistAppSettingsNow()
+    const result = await refreshClaudeModelRoutes()
+    await loadClaudeModelRoutingStatus()
+    const message = t('components.general.label.claudeModelRefreshResult', {
+      success: result.successCount,
+      failure: result.failureCount,
+    })
+    showToast(message, result.failureCount > 0 ? 'warning' : 'success')
+  } catch (error) {
+    showToast(t('components.general.label.claudeModelRefreshFailed', { error: extractErrorMessage(error) }), 'error')
+  } finally {
+    claudeModelRefreshBusy.value = false
+  }
 }
 
 const handleCodexUnifyToggleChange = async (event: Event) => {
@@ -1778,6 +1869,7 @@ onMounted(async () => {
   void preloadProviderDisplayIcons(HOME_PROVIDER_TAB_OPTIONS.map((tab) => tab.icon))
 
   await loadAppSettings()
+  await loadClaudeModelRoutingStatus()
 
   // 加载当前版本号
   try {
@@ -1948,6 +2040,63 @@ onBeforeUnmount(() => {
                 <span></span>
               </label>
               <span class="hint-text">{{ $t('components.general.label.roundRobinHint') }}</span>
+            </div>
+          </ListItem>
+          <ListItem :label="$t('components.general.label.claudeModelRouting')">
+            <div class="toggle-with-hint">
+              <label class="mac-switch">
+                <input
+                  v-model="claudeModelRoutingEnabled"
+                  type="checkbox"
+                  :disabled="settingsLoading || saveBusy"
+                  @change="handleClaudeModelRoutingToggle"
+                />
+                <span></span>
+              </label>
+              <span class="hint-text">{{ $t('components.general.label.claudeModelRoutingHint') }}</span>
+            </div>
+          </ListItem>
+          <ListItem :label="$t('components.general.label.claudeModelAggregation')">
+            <div class="claude-model-setting">
+              <div class="toggle-with-hint">
+                <label class="mac-switch">
+                  <input
+                    v-model="claudeModelAggregationEnabled"
+                    type="checkbox"
+                    :disabled="settingsLoading || saveBusy || !claudeModelRoutingEnabled"
+                    @change="handleClaudeModelAggregationToggle"
+                  />
+                  <span></span>
+                </label>
+                <span class="hint-text">{{ $t('components.general.label.claudeModelAggregationHint') }}</span>
+              </div>
+              <div v-if="claudeModelRoutingEnabled" class="claude-model-tools">
+                <div v-if="claudeModelAggregationEnabled" class="metadata-strategy" role="group" :aria-label="$t('components.general.label.claudeModelMetadataStrategy')">
+                  <button
+                    v-for="strategy in claudeModelMetadataStrategies"
+                    :key="strategy"
+                    type="button"
+                    :class="{ active: claudeModelMetadataMergeStrategy === strategy }"
+                    :disabled="settingsLoading || saveBusy"
+                    @click="claudeModelMetadataMergeStrategy = strategy; handleClaudeModelStrategyChange()"
+                  >
+                    {{ $t(`components.general.label.claudeModelMetadata${strategy === 'aggressive' ? 'Aggressive' : 'Conservative'}`) }}
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  class="claude-model-refresh"
+                  :disabled="settingsLoading || saveBusy || claudeModelRefreshBusy"
+                  :title="$t('components.general.label.claudeModelRefresh')"
+                  @click="handleClaudeModelRefresh"
+                >
+                  <svg viewBox="0 0 20 20" aria-hidden="true">
+                    <path d="M16 6V2.8M16 2.8h-3.2M16 2.8A7 7 0 104.4 15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                  </svg>
+                  {{ $t('components.general.label.claudeModelRefresh') }}
+                </button>
+              </div>
+              <span v-if="claudeModelRoutingEnabled" class="hint-text hint-text--single-line">{{ claudeModelRefreshHint }}</span>
             </div>
           </ListItem>
           <p class="panel-title">{{ $t('components.general.label.codexAuthSection') }}</p>
@@ -3116,6 +3265,87 @@ onBeforeUnmount(() => {
   flex-direction: column;
   align-items: flex-end;
   gap: 4px;
+}
+
+.claude-model-setting {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 7px;
+  min-width: min(100%, 360px);
+}
+
+.claude-model-tools {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.metadata-strategy {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(54px, 1fr));
+  min-width: 122px;
+  padding: 2px;
+  border: 1px solid var(--mac-border);
+  border-radius: 8px;
+  background: var(--mac-surface);
+}
+
+.metadata-strategy button {
+  min-height: 26px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--mac-text-secondary);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.metadata-strategy button.active {
+  background: var(--mac-accent);
+  color: #fff;
+}
+
+.metadata-strategy button:focus-visible,
+.claude-model-refresh:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--mac-accent) 42%, transparent);
+  outline-offset: 2px;
+}
+
+.claude-model-refresh {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--mac-border);
+  border-radius: 8px;
+  background: var(--mac-surface);
+  color: var(--mac-text);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.claude-model-refresh svg {
+  width: 14px;
+  height: 14px;
+}
+
+.claude-model-refresh:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--mac-accent) 45%, var(--mac-border));
+  color: var(--mac-accent);
+}
+
+.claude-model-refresh:disabled,
+.metadata-strategy button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .hint-text {

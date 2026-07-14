@@ -20,6 +20,7 @@ import {
 } from '../utils/budgetUsage'
 
 export type HeatmapGranularity = 'hourly' | 'daily'
+export type ClaudeModelMetadataMergeStrategy = 'aggressive' | 'conservative'
 
 export const normalizeHeatmapGranularity = (
   value?: string | null,
@@ -73,6 +74,9 @@ export type AppSettings = {
   auto_connectivity_test: boolean
   enable_switch_notify: boolean // 供应商切换通知开关
   enable_round_robin: boolean   // 同 Level 轮询负载均衡开关
+  claude_model_routing_enabled: boolean
+  claude_model_aggregation_enabled: boolean
+  claude_model_metadata_merge_strategy: ClaudeModelMetadataMergeStrategy
   preserve_codex_official_auth_on_switch: boolean
   unify_codex_session_history: boolean
   unify_codex_migrate_existing: boolean
@@ -140,6 +144,9 @@ const DEFAULT_SETTINGS: AppSettings = {
   auto_connectivity_test: false,
   enable_switch_notify: true,  // 默认开启
   enable_round_robin: false,   // 默认关闭轮询
+  claude_model_routing_enabled: false,
+  claude_model_aggregation_enabled: false,
+  claude_model_metadata_merge_strategy: 'aggressive',
   preserve_codex_official_auth_on_switch: false,
   unify_codex_session_history: false,
   unify_codex_migrate_existing: false,
@@ -268,6 +275,10 @@ const normalizeAppSettingsResponse = (value: unknown): AppSettings => {
   const normalizedProviderQuotaQueryPresetCodes = normalizeProviderQuotaQueryPresetCodes(
     data?.provider_quota_query_preset_codes,
   )
+  const routingEnabled = data?.claude_model_routing_enabled === true
+  const mergeStrategy: ClaudeModelMetadataMergeStrategy = data?.claude_model_metadata_merge_strategy === 'conservative'
+    ? 'conservative'
+    : 'aggressive'
   return {
     ...DEFAULT_SETTINGS,
     ...data,
@@ -282,6 +293,9 @@ const normalizeAppSettingsResponse = (value: unknown): AppSettings => {
     heatmap_intensity_stop_l2: normalizedHeatmapDisplay.intensityStopL2,
     heatmap_intensity_stop_l3: normalizedHeatmapDisplay.intensityStopL3,
     home_provider_tabs: normalizedHomeProviderTabs,
+    claude_model_routing_enabled: routingEnabled,
+    claude_model_aggregation_enabled: routingEnabled && data?.claude_model_aggregation_enabled === true,
+    claude_model_metadata_merge_strategy: mergeStrategy,
     budget_quota_used_adjustments: normalizeBudgetQuotaAdjustments(
       data?.budget_quota_used_adjustments,
       {
@@ -346,6 +360,10 @@ const serializeAppSettings = (settings: AppSettings) => {
 
   return {
     ...settings,
+    claude_model_aggregation_enabled:
+      settings.claude_model_routing_enabled && settings.claude_model_aggregation_enabled,
+    claude_model_metadata_merge_strategy:
+      settings.claude_model_metadata_merge_strategy === 'conservative' ? 'conservative' : 'aggressive',
     budget_total: budgetLegacy.total,
     budget_used_adjustment: budgetLegacy.adjustment,
     budget_cycle_enabled: budgetLegacy.cycleEnabled,

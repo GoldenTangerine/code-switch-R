@@ -126,8 +126,12 @@ func main() {
 	autoStartService := services.NewAutoStartService()
 	appSettings := services.NewAppSettingsService(autoStartService)
 	modelPricingService := services.NewModelPricingService()
+	claudeModelRoutingService := services.NewClaudeModelRoutingService(providerService, appSettings, modelPricingService)
 	providerQuotaQueryService := services.NewProviderQuotaQueryService()
 	providerService.BindModelPricingService(modelPricingService)
+	providerService.BindClaudeModelRoutingService(claudeModelRoutingService)
+	appSettings.BindClaudeModelRoutingService(claudeModelRoutingService)
+	modelPricingService.BindClaudeModelRoutingService(claudeModelRoutingService)
 	notificationService := services.NewNotificationService(appSettings) // 通知服务
 	blacklistService := services.NewBlacklistService(settingsService, notificationService)
 	geminiService := services.NewGeminiService("127.0.0.1:18100")
@@ -135,6 +139,7 @@ func main() {
 	codexOAuthService := services.NewCodexOAuthService(providerService)
 	providerRelay := services.NewProviderRelayService(providerService, geminiService, blacklistService, notificationService, appSettings, modelPricingService, ":18100")
 	providerRelay.BindCodexOAuthService(codexOAuthService)
+	providerRelay.BindClaudeModelRoutingService(claudeModelRoutingService)
 	providerConcurrencyService := services.NewProviderConcurrencyService(providerRelay)
 	providerRelayStateService := services.NewProviderRelayStateService(providerRelay)
 	claudeSettings := services.NewClaudeSettingsService(providerRelay.Addr())
@@ -181,6 +186,9 @@ func main() {
 	}
 
 	go func() {
+		if err := claudeModelRoutingService.Start(); err != nil {
+			log.Printf("Claude 模型路由服务启动失败: %v", err)
+		}
 		if err := providerRelay.Start(); err != nil {
 			log.Printf("provider relay start error: %v", err)
 		}
@@ -252,6 +260,7 @@ func main() {
 			application.NewService(logService),
 			application.NewService(appSettings),
 			application.NewService(modelPricingService),
+			application.NewService(claudeModelRoutingService),
 			application.NewService(providerQuotaQueryService),
 			application.NewService(updateService),
 			application.NewService(mcpService),
@@ -301,6 +310,7 @@ func main() {
 
 		// 4. 停止代理服务器
 		_ = providerRelay.Stop()
+		claudeModelRoutingService.Stop()
 
 		// 5. 优雅关闭数据库写入队列（10秒超时，双队列架构）
 		if err := services.ShutdownGlobalDBQueue(10 * time.Second); err != nil {

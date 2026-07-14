@@ -31,6 +31,8 @@ export type AutomationCard = {
   modelMapping?: Record<string, string>
   // 模型映射未命中策略：默认拦截；也可按原模型名透传
   modelMappingMissPolicy?: ModelMappingMissPolicy
+  // 模型路由开启时允许原样透传的请求模型规则
+  modelPassthroughPatterns?: string[]
   // 请求体强制字段：仅在命中当前供应商转发时应用
   requestBodyOverrides?: Record<string, any>
   // 优先级分组：数字越小优先级越高（1-10，默认 1）

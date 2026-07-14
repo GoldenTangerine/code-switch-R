@@ -690,6 +690,7 @@
             :key="cliConfigEditorKey"
             v-model="form.modelMapping"
             v-model:miss-policy="form.modelMappingMissPolicy"
+            v-model:passthrough-patterns="form.modelPassthroughPatterns"
             :platform="builtinModelPlatform"
           />
         </div>

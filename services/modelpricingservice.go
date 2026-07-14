@@ -64,6 +64,7 @@ type ModelPricingService struct {
 	localOverrides       modelPricingOverrides
 	cloudOverrides       modelPricingOverrides
 	overrides            modelPricingOverrides
+	claudeModelRouting   *ClaudeModelRoutingService
 	claudePricingPreview claudePricingPreviewCache
 	cloudPricingPreview  cloudPricingPreviewCache
 }
@@ -99,6 +100,27 @@ func (mps *ModelPricingService) Service() *modelpricing.Service {
 	svc := mps.effective
 	mps.mu.RUnlock()
 	return svc
+}
+
+func (mps *ModelPricingService) BindClaudeModelRoutingService(routing *ClaudeModelRoutingService) {
+	if mps == nil {
+		return
+	}
+	mps.mu.Lock()
+	mps.claudeModelRouting = routing
+	mps.mu.Unlock()
+}
+
+func (mps *ModelPricingService) notifyClaudeModelRoutingChanged() {
+	if mps == nil {
+		return
+	}
+	mps.mu.RLock()
+	routing := mps.claudeModelRouting
+	mps.mu.RUnlock()
+	if routing != nil {
+		routing.HandleModelLibraryChanged()
+	}
 }
 
 func (mps *ModelPricingService) ListModelPricing() ([]ModelPricingRow, error) {
@@ -210,7 +232,13 @@ func (mps *ModelPricingService) UpsertModelPricing(row ModelPricingRow) error {
 	}
 
 	mps.mu.Lock()
-	defer mps.mu.Unlock()
+	notifyRouting := false
+	defer func() {
+		mps.mu.Unlock()
+		if notifyRouting {
+			mps.notifyClaudeModelRoutingChanged()
+		}
+	}()
 
 	newOverrides := cloneModelPricingOverrides(mps.localOverrides)
 	if mps.hasRenameConflictLocked(originalModel, model) {
@@ -240,6 +268,7 @@ func (mps *ModelPricingService) UpsertModelPricing(row ModelPricingRow) error {
 
 	mps.localOverrides = newOverrides
 	mps.rebuildLocked()
+	notifyRouting = true
 	return nil
 }
 
@@ -253,7 +282,13 @@ func (mps *ModelPricingService) DeleteModelPricing(model string) error {
 	}
 
 	mps.mu.Lock()
-	defer mps.mu.Unlock()
+	notifyRouting := false
+	defer func() {
+		mps.mu.Unlock()
+		if notifyRouting {
+			mps.notifyClaudeModelRoutingChanged()
+		}
+	}()
 
 	newOverrides := cloneModelPricingOverrides(mps.localOverrides)
 	delete(newOverrides.Pricing, key)
@@ -266,6 +301,7 @@ func (mps *ModelPricingService) DeleteModelPricing(model string) error {
 
 	mps.localOverrides = newOverrides
 	mps.rebuildLocked()
+	notifyRouting = true
 	return nil
 }
 

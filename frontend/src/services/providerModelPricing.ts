@@ -13,6 +13,11 @@ export type ProviderModelPerCallPrice = {
 
 export type ProviderModelPricingItem = {
   model: string
+  displayName?: string
+  createdAt?: string
+  maxInputTokens?: number
+  maxTokens?: number
+  capabilities?: Record<string, unknown>
   description?: string
   // 0=token pricing, 1=per-call, -1=unknown (fallback /v1/models)
   quotaType: number

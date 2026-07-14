@@ -243,6 +243,43 @@
         </div>
       </div>
     </div>
+
+    <div v-if="selectedMissPolicy === 'passthrough'" class="passthrough-panel">
+      <div class="passthrough-heading">
+        <span>{{ $t('components.provider.modelMapping.passthroughRules.label') }}</span>
+        <span>{{ $t('components.provider.modelMapping.passthroughRules.count', { count: normalizedPassthroughPatterns.length }) }}</span>
+      </div>
+      <div v-if="normalizedPassthroughPatterns.length > 0" class="passthrough-tags">
+        <span v-for="pattern in normalizedPassthroughPatterns" :key="pattern" class="passthrough-tag">
+          <code>{{ pattern }}</code>
+          <button
+            type="button"
+            :aria-label="$t('components.provider.modelMapping.passthroughRules.remove')"
+            @click="removePassthroughPattern(pattern)"
+          >
+            <svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true">
+              <path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+            </svg>
+          </button>
+        </span>
+      </div>
+      <div class="passthrough-input-row">
+        <BaseInput
+          v-model="newPassthroughPattern"
+          type="text"
+          :placeholder="$t('components.provider.modelMapping.passthroughRules.placeholder')"
+          @keydown.enter.prevent="addPassthroughPattern"
+        />
+        <button
+          type="button"
+          class="passthrough-add"
+          :disabled="!newPassthroughPattern.trim()"
+          @click="addPassthroughPattern"
+        >
+          {{ $t('components.provider.modelMapping.passthroughRules.add') }}
+        </button>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -261,12 +298,14 @@ type MappingKind = 'exact' | 'prefix' | 'wildcard'
 interface Props {
   modelValue?: Record<string, string>
   missPolicy?: ModelMappingMissPolicy
+  passthroughPatterns?: string[]
   platform?: CLIPlatform
 }
 
 interface Emits {
   (e: 'update:modelValue', value: Record<string, string>): void
   (e: 'update:missPolicy', value: ModelMappingMissPolicy): void
+  (e: 'update:passthroughPatterns', value: string[]): void
 }
 
 const props = defineProps<Props>()
@@ -280,6 +319,7 @@ const mappingList = computed(() => {
 
 const newKey = ref('')
 const newValue = ref('')
+const newPassthroughPattern = ref('')
 const editingOriginalKey = ref('')
 const inputError = ref('')
 const builtinModelRows = ref<ModelPricingRow[]>([])
@@ -309,6 +349,9 @@ const selectedMissPolicy = computed<ModelMappingMissPolicy>({
   get: () => props.missPolicy === 'passthrough' ? 'passthrough' : 'block',
   set: (value) => emit('update:missPolicy', value === 'passthrough' ? 'passthrough' : 'block'),
 })
+const normalizedPassthroughPatterns = computed(() => Array.from(new Set(
+  (props.passthroughPatterns || []).map((pattern) => pattern.trim()).filter(Boolean),
+)))
 const builtinModelOptions = computed(() => buildBuiltinModelOptions(builtinModelRows.value, props.platform))
 const builtinPickerHint = computed(() => {
   if (!props.platform) return ''
@@ -485,6 +528,20 @@ function removeMapping(key: string): void {
   if (!hasConflictingKey(newKey.value.trim())) {
     inputError.value = ''
   }
+}
+
+function addPassthroughPattern(): void {
+  const pattern = newPassthroughPattern.value.trim()
+  if (!pattern || normalizedPassthroughPatterns.value.includes(pattern)) {
+    newPassthroughPattern.value = ''
+    return
+  }
+  emit('update:passthroughPatterns', [...normalizedPassthroughPatterns.value, pattern])
+  newPassthroughPattern.value = ''
+}
+
+function removePassthroughPattern(pattern: string): void {
+  emit('update:passthroughPatterns', normalizedPassthroughPatterns.value.filter((item) => item !== pattern))
 }
 
 async function loadBuiltinModelRows(): Promise<void> {
@@ -957,6 +1014,91 @@ html.dark .mapping-type--wildcard {
   padding: 0 2px;
 }
 
+.passthrough-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--mac-border) 82%, transparent);
+  border-radius: 10px;
+  background: var(--mapping-panel);
+}
+
+.passthrough-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--mac-text-secondary);
+  font-size: 0.75rem;
+  font-weight: 650;
+}
+
+.passthrough-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.passthrough-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 26px;
+  padding: 3px 6px 3px 9px;
+  border: 1px solid color-mix(in srgb, var(--mac-accent) 24%, var(--mac-border));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--mac-accent) 7%, transparent);
+  color: var(--mac-text);
+}
+
+.passthrough-tag code {
+  font-size: 0.6875rem;
+}
+
+.passthrough-tag button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--mac-text-secondary);
+  cursor: pointer;
+}
+
+.passthrough-tag button:hover,
+.passthrough-tag button:focus-visible {
+  color: #ef4444;
+  background: color-mix(in srgb, #ef4444 10%, transparent);
+  outline: none;
+}
+
+.passthrough-input-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.passthrough-add {
+  min-width: 72px;
+  border: 1px solid var(--mac-border);
+  border-radius: 8px;
+  background: var(--mapping-panel-strong);
+  color: var(--mac-text);
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-weight: 650;
+}
+
+.passthrough-add:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
 .mapping-hints {
   display: flex;
   align-items: center;
@@ -1084,6 +1226,10 @@ html.dark .mapping-type--wildcard {
   .miss-policy-inline,
   .miss-policy-select {
     width: 100%;
+  }
+
+  .passthrough-input-row {
+    grid-template-columns: 1fr;
   }
 
   .mapping-submit,

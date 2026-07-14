@@ -163,7 +163,13 @@ func (mps *ModelPricingService) SyncClaudeOfficialPricing() (ModelPricingSyncRes
 	}
 
 	mps.mu.Lock()
-	defer mps.mu.Unlock()
+	notifyRouting := false
+	defer func() {
+		mps.mu.Unlock()
+		if notifyRouting {
+			mps.notifyClaudeModelRoutingChanged()
+		}
+	}()
 
 	newOverrides := cloneModelPricingOverrides(mps.localOverrides)
 	if newOverrides.Meta == nil {
@@ -242,6 +248,7 @@ func (mps *ModelPricingService) SyncClaudeOfficialPricing() (ModelPricingSyncRes
 
 	mps.localOverrides = newOverrides
 	mps.rebuildLocked()
+	notifyRouting = true
 	return result, nil
 }
 

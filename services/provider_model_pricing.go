@@ -47,6 +47,11 @@ type ProviderModelPerCallPrice struct {
 
 type ProviderModelPricingItem struct {
 	Model                         string                     `json:"model"`
+	DisplayName                   string                     `json:"displayName,omitempty"`
+	CreatedAt                     string                     `json:"createdAt,omitempty"`
+	MaxInputTokens                int64                      `json:"maxInputTokens,omitempty"`
+	MaxTokens                     int64                      `json:"maxTokens,omitempty"`
+	Capabilities                  map[string]interface{}     `json:"capabilities,omitempty"`
 	Description                   string                     `json:"description,omitempty"`
 	QuotaType                     int                        `json:"quotaType"` // 0=按量，1=按次
 	ModelRatio                    float64                    `json:"modelRatio"`
@@ -116,21 +121,26 @@ type providerPricingResponse struct {
 }
 
 type providerModelPricing struct {
-	ModelName              string          `json:"model_name"`
-	ModelDescription       string          `json:"model_description,omitempty"`
-	QuotaType              int             `json:"quota_type"`
-	ModelRatio             float64         `json:"model_ratio"`
-	ModelPrice             json.RawMessage `json:"model_price"`
-	CacheCreationRatio     float64         `json:"cache_creation_ratio"`
-	CacheCreateRatio       float64         `json:"cache_create_ratio"`
-	CacheCreateMultiplier  float64         `json:"cache_create_multiplier"`
-	CacheRatio             float64         `json:"cache_ratio"`
-	CacheReadRatio         float64         `json:"cache_read_ratio"`
-	CacheReadMultiplier    float64         `json:"cache_read_multiplier"`
-	OwnerBy                string          `json:"owner_by,omitempty"`
-	CompletionRatio        float64         `json:"completion_ratio"`
-	EnableGroups           []string        `json:"enable_groups"`
-	SupportedEndpointTypes []string        `json:"supported_endpoint_types"`
+	ModelName              string                 `json:"model_name"`
+	ModelDescription       string                 `json:"model_description,omitempty"`
+	QuotaType              int                    `json:"quota_type"`
+	ModelRatio             float64                `json:"model_ratio"`
+	ModelPrice             json.RawMessage        `json:"model_price"`
+	CacheCreationRatio     float64                `json:"cache_creation_ratio"`
+	CacheCreateRatio       float64                `json:"cache_create_ratio"`
+	CacheCreateMultiplier  float64                `json:"cache_create_multiplier"`
+	CacheRatio             float64                `json:"cache_ratio"`
+	CacheReadRatio         float64                `json:"cache_read_ratio"`
+	CacheReadMultiplier    float64                `json:"cache_read_multiplier"`
+	OwnerBy                string                 `json:"owner_by,omitempty"`
+	CompletionRatio        float64                `json:"completion_ratio"`
+	EnableGroups           []string               `json:"enable_groups"`
+	SupportedEndpointTypes []string               `json:"supported_endpoint_types"`
+	DisplayName            string                 `json:"display_name,omitempty"`
+	CreatedAt              string                 `json:"created_at,omitempty"`
+	MaxInputTokens         int64                  `json:"max_input_tokens,omitempty"`
+	MaxTokens              int64                  `json:"max_tokens,omitempty"`
+	Capabilities           map[string]interface{} `json:"capabilities,omitempty"`
 }
 
 type providerApiEnvelope[T any] struct {
@@ -158,7 +168,13 @@ type oneHubUserGroupMap map[string]struct {
 
 type openAIModelList struct {
 	Data []struct {
-		ID string `json:"id"`
+		ID             string                 `json:"id"`
+		DisplayName    string                 `json:"display_name"`
+		CreatedAt      interface{}            `json:"created_at"`
+		Created        int64                  `json:"created"`
+		MaxInputTokens int64                  `json:"max_input_tokens"`
+		MaxTokens      int64                  `json:"max_tokens"`
+		Capabilities   map[string]interface{} `json:"capabilities"`
 	} `json:"data"`
 }
 
@@ -695,6 +711,19 @@ func (ps *ProviderService) enrichProviderModelPricingResponse(response *Provider
 
 	for index := range response.Models {
 		item := &response.Models[index]
+		if pricing != nil {
+			if entry, ok := pricing.PricingEntryExact(item.Model); ok {
+				if item.MaxInputTokens <= 0 {
+					item.MaxInputTokens = entry.MaxInputTokens
+				}
+				if item.MaxTokens <= 0 {
+					item.MaxTokens = entry.MaxTokens
+				}
+				if len(item.Capabilities) == 0 {
+					item.Capabilities = pricingEntryCapabilities(entry)
+				}
+			}
+		}
 		groupMultiplier, groupSource := resolveProviderGroupMultiplierDetails(ps, apiURL, apiKey, authType, item.Model)
 		item.GroupMultiplier = groupMultiplier
 		item.GroupMultiplierSource = groupSource
@@ -720,6 +749,25 @@ func (ps *ProviderService) enrichProviderModelPricingResponse(response *Provider
 			item.CacheCreate1hUSDPerM = cacheCreate1hPerToken * 1_000_000
 		}
 	}
+}
+
+func pricingEntryCapabilities(entry modelpricing.PricingEntry) map[string]interface{} {
+	capabilities := map[string]interface{}{}
+	values := map[string]bool{
+		"computer_use":       entry.SupportsComputerUse,
+		"tool_use":           entry.SupportsFunctionCalling,
+		"pdf_input":          entry.SupportsPDFInput,
+		"prompt_caching":     entry.SupportsPromptCaching,
+		"thinking":           entry.SupportsReasoning,
+		"structured_outputs": entry.SupportsResponseSchema,
+		"image_input":        entry.SupportsVision,
+	}
+	for key, supported := range values {
+		if supported {
+			capabilities[key] = map[string]interface{}{"supported": true}
+		}
+	}
+	return capabilities
 }
 
 // ResolveCachedProviderModelPricing 尝试从本地缓存里按模型名获取供应商接口价格条目。
@@ -824,20 +872,8 @@ func (ps *ProviderService) FetchProviderModelPricingWithSource(apiURL, apiKey, p
 	fetchFromOpenAIModelList := func() (*ProviderModelPricingResponse, error) {
 		var modelErr error
 		for _, candidate := range authCandidates {
-			models, err := fetchOpenAIModels(client, apiURL, apiKey, candidate, debug)
-			if err == nil && len(models) > 0 {
-				items := make([]ProviderModelPricingItem, 0, len(models))
-				for _, model := range models {
-					model = strings.TrimSpace(model)
-					if model == "" {
-						continue
-					}
-					items = append(items, ProviderModelPricingItem{
-						Model:     model,
-						QuotaType: -1,
-					})
-				}
-
+			items, err := fetchOpenAIModels(client, apiURL, apiKey, candidate, debug)
+			if err == nil && len(items) > 0 {
 				sort.Slice(items, func(i, j int) bool {
 					return items[i].Model < items[j].Model
 				})
@@ -1376,6 +1412,11 @@ func buildProviderModelPricingResponse(siteType SiteType, pricingSource string, 
 	for _, model := range pricing.Data {
 		item := ProviderModelPricingItem{
 			Model:           model.ModelName,
+			DisplayName:     model.DisplayName,
+			CreatedAt:       model.CreatedAt,
+			MaxInputTokens:  model.MaxInputTokens,
+			MaxTokens:       model.MaxTokens,
+			Capabilities:    model.Capabilities,
 			Description:     model.ModelDescription,
 			QuotaType:       model.QuotaType,
 			ModelRatio:      model.ModelRatio,
@@ -1447,7 +1488,7 @@ func parsePerCallPrice(raw json.RawMessage, groupMultiplier float64) *ProviderMo
 	return &ProviderModelPerCallPrice{Input: &input, Output: &output}
 }
 
-func fetchOpenAIModels(client *http.Client, apiURL, apiKey, authType string, debug *ProviderModelPricingDebug) ([]string, error) {
+func fetchOpenAIModels(client *http.Client, apiURL, apiKey, authType string, debug *ProviderModelPricingDebug) ([]ProviderModelPricingItem, error) {
 	targetURL := joinURL(apiURL, "/v1/models")
 	attempt := newProviderModelPricingDebugAttempt(providerModelPricingSourceOpenAIList, "/v1/models", "GET", targetURL, authType)
 	req, err := http.NewRequest("GET", targetURL, nil)
@@ -1509,12 +1550,31 @@ func fetchOpenAIModels(client *http.Client, apiURL, apiKey, authType string, deb
 		return nil, apiErr
 	}
 
-	models := make([]string, 0, len(list.Data))
+	models := make([]ProviderModelPricingItem, 0, len(list.Data))
 	for _, item := range list.Data {
-		if strings.TrimSpace(item.ID) == "" {
+		modelID := strings.TrimSpace(item.ID)
+		if modelID == "" {
 			continue
 		}
-		models = append(models, item.ID)
+		createdAt := ""
+		switch value := item.CreatedAt.(type) {
+		case string:
+			createdAt = strings.TrimSpace(value)
+		case float64:
+			createdAt = time.Unix(int64(value), 0).UTC().Format(time.RFC3339)
+		}
+		if createdAt == "" && item.Created > 0 {
+			createdAt = time.Unix(item.Created, 0).UTC().Format(time.RFC3339)
+		}
+		models = append(models, ProviderModelPricingItem{
+			Model:          modelID,
+			DisplayName:    strings.TrimSpace(item.DisplayName),
+			CreatedAt:      createdAt,
+			MaxInputTokens: item.MaxInputTokens,
+			MaxTokens:      item.MaxTokens,
+			Capabilities:   item.Capabilities,
+			QuotaType:      -1,
+		})
 	}
 	appendProviderModelPricingDebugAttempt(debug, attempt)
 	return models, nil

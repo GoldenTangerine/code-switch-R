@@ -292,3 +292,43 @@ func TestModelsHandler_NoProviders(t *testing.T) {
 		t.Error("响应缺少 'error' 字段")
 	}
 }
+
+func TestModelsHandler_AggregatesClaudeRoutingModels(t *testing.T) {
+	useIsolatedHomeDir(t)
+	gin.SetMode(gin.TestMode)
+
+	appSettings := NewAppSettingsService(nil)
+	settings, err := appSettings.GetAppSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings.ClaudeModelRoutingEnabled = true
+	settings.ClaudeModelAggregationEnabled = true
+	if _, err := appSettings.SaveAppSettings(settings); err != nil {
+		t.Fatal(err)
+	}
+
+	routing := NewClaudeModelRoutingService(nil, appSettings, nil)
+	routing.routes = map[string][]claudeModelRouteProvider{
+		"claude-4-5": {{Metadata: ProviderModelPricingItem{Model: "vendor-a", DisplayName: "Claude 4.5"}}},
+		"claude-5":   {{Metadata: ProviderModelPricingItem{Model: "vendor-b", DisplayName: "Claude 5"}}},
+	}
+	relay := NewProviderRelayService(NewProviderService(), nil, NewBlacklistService(&SettingsService{}, nil), nil, appSettings, nil, "")
+	relay.BindClaudeModelRoutingService(routing)
+	router := gin.New()
+	relay.registerRoutes(router)
+
+	req := httptest.NewRequest("GET", "/v1/models?limit=1", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("状态码 = %d, body=%s", w.Code, w.Body.String())
+	}
+	var response ClaudeModelListResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Data) != 1 || response.Data[0].ID != "claude-4-5" || !response.HasMore {
+		t.Fatalf("聚合响应错误: %#v", response)
+	}
+}

@@ -356,6 +356,13 @@
           "blockHint": "未命中的模型会跳过这个供应商。",
           "passthroughHint": "未命中的模型会按原名称继续转发给这个供应商。"
         },
+        "passthroughRules": {
+          "label": "放过规则",
+          "count": "{count} 条",
+          "placeholder": "如 glm-* 或 *glm*",
+          "add": "添加",
+          "remove": "删除规则"
+        },
         "examples": {
           "title": "示例：",
           "exact": "精确映射",
@@ -1547,6 +1554,19 @@
         "switchNotifyHint": "供应商切换或拉黑时发送系统通知",
         "roundRobin": "同 Level 轮询",
         "roundRobinHint": "启用后同 Level 的供应商轮流处理请求，关闭则始终从第一个开始",
+        "claudeModelRouting": "按模型路由",
+        "claudeModelRoutingHint": "按请求模型选择兼容的 Claude 供应商",
+        "claudeModelAggregation": "聚合 Claude 模型",
+        "claudeModelAggregationHint": "合并已启用供应商的可路由模型",
+        "claudeModelMetadataStrategy": "元数据策略",
+        "claudeModelMetadataAggressive": "激进",
+        "claudeModelMetadataConservative": "保守",
+        "claudeModelRefresh": "刷新模型",
+        "claudeModelRefreshIdle": "尚未刷新",
+        "claudeModelRefreshing": "模型刷新中",
+        "claudeModelRefreshStatus": "{time} · 成功 {success}，失败 {failure}",
+        "claudeModelRefreshResult": "模型刷新完成：成功 {success}，失败 {failure}",
+        "claudeModelRefreshFailed": "模型刷新失败：{error}",
         "codexAuthSection": "Codex 官方能力",
         "preserveCodexOfficialAuthOnSwitch": "保留官方登录",
         "preserveCodexOfficialAuthOnSwitchHint": "使用第三方 API 时保留官方插件、手机远程和会话历史。",

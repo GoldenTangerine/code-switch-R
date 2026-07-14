@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 
@@ -71,6 +72,10 @@ type Provider struct {
 	// - block: 未命中映射时跳过该 Provider（默认）
 	// - passthrough: 未命中映射时按原模型名转发给该 Provider
 	ModelMappingMissPolicy string `json:"modelMappingMissPolicy,omitempty"`
+
+	// 模型映射未命中时允许透传的请求模型规则。
+	// 仅在 Claude 模型路由开启且 miss policy=passthrough 时参与路由。
+	ModelPassthroughPatterns []string `json:"modelPassthroughPatterns,omitempty"`
 
 	// 请求体强制覆盖字段 - 仅在命中当前 Provider 转发时生效
 	// 同名字段会覆盖，不存在的字段会新增；嵌套对象按层级递归写入
@@ -170,7 +175,8 @@ func cloneJSONLikeMap(value map[string]interface{}) map[string]interface{} {
 }
 
 type ProviderService struct {
-	mu sync.Mutex
+	mu                 sync.Mutex
+	claudeModelRouting *ClaudeModelRoutingService
 
 	pricingCacheMu sync.RWMutex
 	pricingCache   map[string]providerModelPricingCacheEntry
@@ -227,6 +233,15 @@ func (ps *ProviderService) BindModelPricingService(modelPricing *ModelPricingSer
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
 	ps.modelPricing = modelPricing
+}
+
+func (ps *ProviderService) BindClaudeModelRoutingService(routing *ClaudeModelRoutingService) {
+	if ps == nil {
+		return
+	}
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	ps.claudeModelRouting = routing
 }
 
 func (ps *ProviderService) Start() error { return nil }
@@ -399,6 +414,7 @@ func (ps *ProviderService) saveProvidersLocked(kind string, providers []Provider
 		}
 
 		// 验证模型配置
+		p.ModelPassthroughPatterns = normalizeModelPassthroughPatterns(p.ModelPassthroughPatterns)
 		if errs := p.ValidateConfiguration(); len(errs) > 0 {
 			for _, errMsg := range errs {
 				validationErrors = append(validationErrors, fmt.Sprintf("[%s] %s", p.Name, errMsg))
@@ -428,6 +444,11 @@ func (ps *ProviderService) saveProvidersLocked(kind string, providers []Provider
 	}
 	if len(renames) > 0 {
 		syncProviderIdentityRenamesBestEffort(kind, renames)
+	}
+	if strings.EqualFold(strings.TrimSpace(kind), "claude") && ps.claudeModelRouting != nil {
+		previousSnapshot := append([]Provider(nil), existingProviders...)
+		nextSnapshot := append([]Provider(nil), providers...)
+		ps.claudeModelRouting.HandleProvidersChanged(previousSnapshot, nextSnapshot)
 	}
 
 	return nil
@@ -769,6 +790,9 @@ func (ps *ProviderService) DuplicateProvider(kind string, sourceID int64) (*Prov
 			cloned.ModelMapping[k] = v
 		}
 	}
+	if source.ModelPassthroughPatterns != nil {
+		cloned.ModelPassthroughPatterns = append([]string(nil), source.ModelPassthroughPatterns...)
+	}
 
 	if source.RequestBodyOverrides != nil {
 		cloned.RequestBodyOverrides = cloneJSONLikeMap(source.RequestBodyOverrides)
@@ -873,24 +897,51 @@ func (p *Provider) IsResolvedModelSupported(requestedModel, effectiveModel strin
 // GetEffectiveModel 获取实际应该使用的模型名
 // 如果存在映射（精确或通配符），返回映射后的模型名；否则返回原模型名
 func (p *Provider) GetEffectiveModel(requestedModel string) string {
-	if p.ModelMapping == nil || len(p.ModelMapping) == 0 {
-		return requestedModel
+	if mappedModel, matched := p.resolveModelMapping(requestedModel); matched {
+		return mappedModel
+	}
+	return requestedModel
+}
+
+func (p *Provider) resolveModelMapping(requestedModel string) (string, bool) {
+	if p == nil || len(p.ModelMapping) == 0 {
+		return requestedModel, false
 	}
 
 	// 优先查找精确映射
 	if mappedModel, exists := p.ModelMapping[requestedModel]; exists {
-		return mappedModel
+		return mappedModel, true
 	}
 
 	// 查找通配符映射
-	for pattern, replacement := range p.ModelMapping {
-		if matchWildcard(pattern, requestedModel) {
-			return applyWildcardMapping(pattern, replacement, requestedModel)
-		}
+	type wildcardMapping struct {
+		pattern     string
+		replacement string
+		literalSize int
 	}
-
-	// 无映射，返回原模型名
-	return requestedModel
+	matches := make([]wildcardMapping, 0)
+	for pattern, replacement := range p.ModelMapping {
+		if strings.Count(pattern, "*") != 1 || strings.Count(replacement, "*") > 1 || !matchWildcard(pattern, requestedModel) {
+			continue
+		}
+		matches = append(matches, wildcardMapping{
+			pattern:     pattern,
+			replacement: replacement,
+			literalSize: len(strings.ReplaceAll(pattern, "*", "")),
+		})
+	}
+	if len(matches) == 0 {
+		// 无映射，返回原模型名
+		return requestedModel, false
+	}
+	sort.Slice(matches, func(i, j int) bool {
+		if matches[i].literalSize != matches[j].literalSize {
+			return matches[i].literalSize > matches[j].literalSize
+		}
+		return matches[i].pattern < matches[j].pattern
+	})
+	selected := matches[0]
+	return applyWildcardMapping(selected.pattern, selected.replacement, requestedModel), true
 }
 
 func normalizeModelMappingMissPolicy(policy string) string {
@@ -908,21 +959,8 @@ func (p *Provider) shouldPassthroughModelMappingMiss() bool {
 }
 
 func (p *Provider) hasModelMappingForModel(modelName string) bool {
-	if p.ModelMapping == nil || len(p.ModelMapping) == 0 {
-		return false
-	}
-
-	if _, exists := p.ModelMapping[modelName]; exists {
-		return true
-	}
-
-	for pattern := range p.ModelMapping {
-		if matchWildcard(pattern, modelName) {
-			return true
-		}
-	}
-
-	return false
+	_, matched := p.resolveModelMapping(modelName)
+	return matched
 }
 
 // GetEffectiveEndpoint 获取有效的 API 端点

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 	"sync"
 	"unicode"
@@ -42,6 +43,15 @@ type PricingEntry struct {
 	OutputCostPerTokenAbove200k         float64 `json:"output_cost_per_token_above_200k_tokens"`
 	GroupMultiplier                     float64 `json:"group_multiplier,omitempty"`
 	HasGroupMultiplier                  bool    `json:"has_group_multiplier,omitempty"`
+	MaxInputTokens                      int64   `json:"-"`
+	MaxTokens                           int64   `json:"-"`
+	SupportsComputerUse                 bool    `json:"-"`
+	SupportsFunctionCalling             bool    `json:"-"`
+	SupportsPDFInput                    bool    `json:"-"`
+	SupportsPromptCaching               bool    `json:"-"`
+	SupportsReasoning                   bool    `json:"-"`
+	SupportsResponseSchema              bool    `json:"-"`
+	SupportsVision                      bool    `json:"-"`
 	HasInputCostPerToken                bool    `json:"-"`
 	HasOutputCostPerToken               bool    `json:"-"`
 	HasOutputCostPerReasoningToken      bool    `json:"-"`
@@ -53,13 +63,22 @@ func (p *PricingEntry) UnmarshalJSON(data []byte) error {
 	type alias PricingEntry
 	type rawPricingEntry struct {
 		alias
-		InputCostPerToken           *float64 `json:"input_cost_per_token"`
-		OutputCostPerToken          *float64 `json:"output_cost_per_token"`
-		OutputCostPerReasoningToken *float64 `json:"output_cost_per_reasoning_token"`
-		CacheCreationInputTokenCost *float64 `json:"cache_creation_input_token_cost"`
-		CacheReadInputTokenCost     *float64 `json:"cache_read_input_token_cost"`
-		GroupMultiplier             *float64 `json:"group_multiplier"`
-		HasGroupMultiplier          *bool    `json:"has_group_multiplier"`
+		InputCostPerToken           *float64        `json:"input_cost_per_token"`
+		OutputCostPerToken          *float64        `json:"output_cost_per_token"`
+		OutputCostPerReasoningToken *float64        `json:"output_cost_per_reasoning_token"`
+		CacheCreationInputTokenCost *float64        `json:"cache_creation_input_token_cost"`
+		CacheReadInputTokenCost     *float64        `json:"cache_read_input_token_cost"`
+		GroupMultiplier             *float64        `json:"group_multiplier"`
+		HasGroupMultiplier          *bool           `json:"has_group_multiplier"`
+		MaxInputTokens              json.RawMessage `json:"max_input_tokens"`
+		MaxTokens                   json.RawMessage `json:"max_tokens"`
+		SupportsComputerUse         json.RawMessage `json:"supports_computer_use"`
+		SupportsFunctionCalling     json.RawMessage `json:"supports_function_calling"`
+		SupportsPDFInput            json.RawMessage `json:"supports_pdf_input"`
+		SupportsPromptCaching       json.RawMessage `json:"supports_prompt_caching"`
+		SupportsReasoning           json.RawMessage `json:"supports_reasoning"`
+		SupportsResponseSchema      json.RawMessage `json:"supports_response_schema"`
+		SupportsVision              json.RawMessage `json:"supports_vision"`
 	}
 
 	var raw rawPricingEntry
@@ -95,7 +114,44 @@ func (p *PricingEntry) UnmarshalJSON(data []byte) error {
 	if raw.HasGroupMultiplier != nil {
 		p.HasGroupMultiplier = *raw.HasGroupMultiplier || raw.GroupMultiplier != nil
 	}
+	p.MaxInputTokens = parseFlexibleInt64(raw.MaxInputTokens)
+	p.MaxTokens = parseFlexibleInt64(raw.MaxTokens)
+	p.SupportsComputerUse = parseFlexibleBool(raw.SupportsComputerUse)
+	p.SupportsFunctionCalling = parseFlexibleBool(raw.SupportsFunctionCalling)
+	p.SupportsPDFInput = parseFlexibleBool(raw.SupportsPDFInput)
+	p.SupportsPromptCaching = parseFlexibleBool(raw.SupportsPromptCaching)
+	p.SupportsReasoning = parseFlexibleBool(raw.SupportsReasoning)
+	p.SupportsResponseSchema = parseFlexibleBool(raw.SupportsResponseSchema)
+	p.SupportsVision = parseFlexibleBool(raw.SupportsVision)
 	return nil
+}
+
+func parseFlexibleInt64(raw json.RawMessage) int64 {
+	if len(raw) == 0 || string(raw) == "null" {
+		return 0
+	}
+	var value int64
+	if json.Unmarshal(raw, &value) == nil {
+		return value
+	}
+	var text string
+	if json.Unmarshal(raw, &text) != nil {
+		return 0
+	}
+	value, _ = strconv.ParseInt(strings.TrimSpace(text), 10, 64)
+	return value
+}
+
+func parseFlexibleBool(raw json.RawMessage) bool {
+	if len(raw) == 0 || string(raw) == "null" {
+		return false
+	}
+	var value bool
+	if json.Unmarshal(raw, &value) == nil {
+		return value
+	}
+	var text string
+	return json.Unmarshal(raw, &text) == nil && strings.EqualFold(strings.TrimSpace(text), "true")
 }
 
 // UsageSnapshot 描述一次请求的 token 用量。

@@ -59,6 +59,7 @@ export type PersistedProvider = PersistedProviderModel & {
   anthropicCacheTTL?: unknown | null
   providerConcurrencyLimit?: number
   modelMappingMissPolicy?: ModelMappingMissPolicy
+  modelPassthroughPatterns?: string[]
   opencodeNpm?: string
   opencodeSettingsConfig?: Record<string, any>
   apiKeyUrl?: string
@@ -249,6 +250,7 @@ export const providerToCard = (
   supportedModels: cloneCardValue(provider.supportedModels || {}),
   modelMapping: cloneCardValue(provider.modelMapping || {}),
   modelMappingMissPolicy: normalizeModelMappingMissPolicy(provider.modelMappingMissPolicy),
+  modelPassthroughPatterns: cloneCardValue(provider.modelPassthroughPatterns || []),
   requestBodyOverrides: cloneCardValue(provider.requestBodyOverrides || {}),
   level: provider.level || 1,
   providerConcurrencyLimit: normalizeProviderConcurrencyLimit(provider.providerConcurrencyLimit),

@@ -355,6 +355,13 @@
           "blockHint": "Unmatched models skip this provider.",
           "passthroughHint": "Unmatched models are forwarded to this provider with the original name."
         },
+        "passthroughRules": {
+          "label": "Pass Rules",
+          "count": "{count}",
+          "placeholder": "e.g. glm-* or *glm*",
+          "add": "Add",
+          "remove": "Remove rule"
+        },
         "examples": {
           "title": "Examples:",
           "exact": "Exact mapping",
@@ -1548,6 +1555,19 @@
         "switchNotifyHint": "Send system notification when provider switches or gets blacklisted",
         "roundRobin": "Same-Level Round Robin",
         "roundRobinHint": "When enabled, providers at the same Level take turns handling requests; when disabled, always starts from the first",
+        "claudeModelRouting": "Model Routing",
+        "claudeModelRoutingHint": "Select compatible Claude providers by requested model",
+        "claudeModelAggregation": "Aggregate Claude Models",
+        "claudeModelAggregationHint": "Merge routable models from enabled providers",
+        "claudeModelMetadataStrategy": "Metadata strategy",
+        "claudeModelMetadataAggressive": "Aggressive",
+        "claudeModelMetadataConservative": "Conservative",
+        "claudeModelRefresh": "Refresh",
+        "claudeModelRefreshIdle": "Not refreshed yet",
+        "claudeModelRefreshing": "Refreshing models",
+        "claudeModelRefreshStatus": "{time} · {success} succeeded, {failure} failed",
+        "claudeModelRefreshResult": "Model refresh complete: {success} succeeded, {failure} failed",
+        "claudeModelRefreshFailed": "Model refresh failed: {error}",
         "codexAuthSection": "Codex official features",
         "preserveCodexOfficialAuthOnSwitch": "Keep official login",
         "preserveCodexOfficialAuthOnSwitchHint": "Keep official plugins, mobile remote control, and session history while using third-party APIs.",

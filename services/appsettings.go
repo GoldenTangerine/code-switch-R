@@ -51,56 +51,59 @@ const (
 )
 
 type AppSettings struct {
-	ShowHeatmap                     bool                                     `json:"show_heatmap"`
-	HeatmapGranularity              string                                   `json:"heatmap_granularity"`
-	HeatmapDailyScaleFactor         int                                      `json:"heatmap_daily_scale_factor"`
-	HeatmapDailyIntensityMode       string                                   `json:"heatmap_daily_intensity_mode"`
-	HeatmapIntensityMetric          string                                   `json:"heatmap_intensity_metric"`
-	HeatmapIntensityStopL1          int                                      `json:"heatmap_intensity_stop_l1"`
-	HeatmapIntensityStopL2          int                                      `json:"heatmap_intensity_stop_l2"`
-	HeatmapIntensityStopL3          int                                      `json:"heatmap_intensity_stop_l3"`
-	ShowHomeTitle                   bool                                     `json:"show_home_title"`
-	HomeProviderTabs                []string                                 `json:"home_provider_tabs"`
-	BudgetTotal                     float64                                  `json:"budget_total"`
-	BudgetUsedAdjustment            float64                                  `json:"budget_used_adjustment"`
-	BudgetCycleEnabled              bool                                     `json:"budget_cycle_enabled"`
-	BudgetCycleMode                 string                                   `json:"budget_cycle_mode"`
-	BudgetRefreshTime               string                                   `json:"budget_refresh_time"`
-	BudgetRefreshDay                int                                      `json:"budget_refresh_day"`
-	BudgetRefreshMonthDay           int                                      `json:"budget_refresh_month_day"`
-	BudgetQuotaUsedAdjustments      BudgetQuotaAdjustments                   `json:"budget_quota_used_adjustments"`
-	BudgetQuotaSettings             BudgetQuotaSettings                      `json:"budget_quota_settings"`
-	BudgetShowCountdown             bool                                     `json:"budget_show_countdown"`
-	BudgetShowForecast              bool                                     `json:"budget_show_forecast"`
-	BudgetForecastMethod            string                                   `json:"budget_forecast_method"`
-	BudgetForecastDisplay           string                                   `json:"budget_forecast_display"`
-	BudgetTotalCodex                float64                                  `json:"budget_total_codex"`
-	BudgetUsedAdjustmentCodex       float64                                  `json:"budget_used_adjustment_codex"`
-	BudgetCycleEnabledCodex         bool                                     `json:"budget_cycle_enabled_codex"`
-	BudgetCycleModeCodex            string                                   `json:"budget_cycle_mode_codex"`
-	BudgetRefreshTimeCodex          string                                   `json:"budget_refresh_time_codex"`
-	BudgetRefreshDayCodex           int                                      `json:"budget_refresh_day_codex"`
-	BudgetRefreshMonthDayCodex      int                                      `json:"budget_refresh_month_day_codex"`
-	BudgetQuotaUsedAdjustmentsCodex BudgetQuotaAdjustments                   `json:"budget_quota_used_adjustments_codex"`
-	BudgetQuotaSettingsCodex        BudgetQuotaSettings                      `json:"budget_quota_settings_codex"`
-	BudgetShowCountdownCodex        bool                                     `json:"budget_show_countdown_codex"`
-	BudgetShowForecastCodex         bool                                     `json:"budget_show_forecast_codex"`
-	BudgetForecastMethodCodex       string                                   `json:"budget_forecast_method_codex"`
-	BudgetForecastDisplayCodex      string                                   `json:"budget_forecast_display_codex"`
-	AutoStart                       bool                                     `json:"auto_start"`
-	AutoUpdate                      bool                                     `json:"auto_update"`
-	UpdateHistoryKeepCount          int                                      `json:"update_history_keep_count"` // 更新包历史保留数量
-	AutoConnectivityTest            bool                                     `json:"auto_connectivity_test"`
-	EnableSwitchNotify              bool                                     `json:"enable_switch_notify"` // 供应商切换通知开关
-	EnableRoundRobin                bool                                     `json:"enable_round_robin"`   // 同 Level 轮询负载均衡开关（默认关闭）
-	PreserveCodexOfficialAuth       bool                                     `json:"preserve_codex_official_auth_on_switch"`
-	UnifyCodexSessionHistory        bool                                     `json:"unify_codex_session_history"`
-	UnifyCodexMigrateExisting       bool                                     `json:"unify_codex_migrate_existing"`
-	ProviderConcurrencyLimits       map[string]bool                          `json:"provider_concurrency_limits"`
-	ProviderQuotaQueryPresetCodes   map[string]string                        `json:"provider_quota_query_preset_codes,omitempty"`
-	ProviderQuotaQueryPresets       map[string]ProviderQuotaQueryPresetGroup `json:"provider_quota_query_presets,omitempty"`
-	CaptureRequestLogPayload        bool                                     `json:"capture_request_log_payload"`
-	SanitizeRequestLogPayload       bool                                     `json:"sanitize_request_log_payload"`
+	ShowHeatmap                      bool                                     `json:"show_heatmap"`
+	HeatmapGranularity               string                                   `json:"heatmap_granularity"`
+	HeatmapDailyScaleFactor          int                                      `json:"heatmap_daily_scale_factor"`
+	HeatmapDailyIntensityMode        string                                   `json:"heatmap_daily_intensity_mode"`
+	HeatmapIntensityMetric           string                                   `json:"heatmap_intensity_metric"`
+	HeatmapIntensityStopL1           int                                      `json:"heatmap_intensity_stop_l1"`
+	HeatmapIntensityStopL2           int                                      `json:"heatmap_intensity_stop_l2"`
+	HeatmapIntensityStopL3           int                                      `json:"heatmap_intensity_stop_l3"`
+	ShowHomeTitle                    bool                                     `json:"show_home_title"`
+	HomeProviderTabs                 []string                                 `json:"home_provider_tabs"`
+	BudgetTotal                      float64                                  `json:"budget_total"`
+	BudgetUsedAdjustment             float64                                  `json:"budget_used_adjustment"`
+	BudgetCycleEnabled               bool                                     `json:"budget_cycle_enabled"`
+	BudgetCycleMode                  string                                   `json:"budget_cycle_mode"`
+	BudgetRefreshTime                string                                   `json:"budget_refresh_time"`
+	BudgetRefreshDay                 int                                      `json:"budget_refresh_day"`
+	BudgetRefreshMonthDay            int                                      `json:"budget_refresh_month_day"`
+	BudgetQuotaUsedAdjustments       BudgetQuotaAdjustments                   `json:"budget_quota_used_adjustments"`
+	BudgetQuotaSettings              BudgetQuotaSettings                      `json:"budget_quota_settings"`
+	BudgetShowCountdown              bool                                     `json:"budget_show_countdown"`
+	BudgetShowForecast               bool                                     `json:"budget_show_forecast"`
+	BudgetForecastMethod             string                                   `json:"budget_forecast_method"`
+	BudgetForecastDisplay            string                                   `json:"budget_forecast_display"`
+	BudgetTotalCodex                 float64                                  `json:"budget_total_codex"`
+	BudgetUsedAdjustmentCodex        float64                                  `json:"budget_used_adjustment_codex"`
+	BudgetCycleEnabledCodex          bool                                     `json:"budget_cycle_enabled_codex"`
+	BudgetCycleModeCodex             string                                   `json:"budget_cycle_mode_codex"`
+	BudgetRefreshTimeCodex           string                                   `json:"budget_refresh_time_codex"`
+	BudgetRefreshDayCodex            int                                      `json:"budget_refresh_day_codex"`
+	BudgetRefreshMonthDayCodex       int                                      `json:"budget_refresh_month_day_codex"`
+	BudgetQuotaUsedAdjustmentsCodex  BudgetQuotaAdjustments                   `json:"budget_quota_used_adjustments_codex"`
+	BudgetQuotaSettingsCodex         BudgetQuotaSettings                      `json:"budget_quota_settings_codex"`
+	BudgetShowCountdownCodex         bool                                     `json:"budget_show_countdown_codex"`
+	BudgetShowForecastCodex          bool                                     `json:"budget_show_forecast_codex"`
+	BudgetForecastMethodCodex        string                                   `json:"budget_forecast_method_codex"`
+	BudgetForecastDisplayCodex       string                                   `json:"budget_forecast_display_codex"`
+	AutoStart                        bool                                     `json:"auto_start"`
+	AutoUpdate                       bool                                     `json:"auto_update"`
+	UpdateHistoryKeepCount           int                                      `json:"update_history_keep_count"` // 更新包历史保留数量
+	AutoConnectivityTest             bool                                     `json:"auto_connectivity_test"`
+	EnableSwitchNotify               bool                                     `json:"enable_switch_notify"` // 供应商切换通知开关
+	EnableRoundRobin                 bool                                     `json:"enable_round_robin"`   // 同 Level 轮询负载均衡开关（默认关闭）
+	ClaudeModelRoutingEnabled        bool                                     `json:"claude_model_routing_enabled"`
+	ClaudeModelAggregationEnabled    bool                                     `json:"claude_model_aggregation_enabled"`
+	ClaudeModelMetadataMergeStrategy string                                   `json:"claude_model_metadata_merge_strategy"`
+	PreserveCodexOfficialAuth        bool                                     `json:"preserve_codex_official_auth_on_switch"`
+	UnifyCodexSessionHistory         bool                                     `json:"unify_codex_session_history"`
+	UnifyCodexMigrateExisting        bool                                     `json:"unify_codex_migrate_existing"`
+	ProviderConcurrencyLimits        map[string]bool                          `json:"provider_concurrency_limits"`
+	ProviderQuotaQueryPresetCodes    map[string]string                        `json:"provider_quota_query_preset_codes,omitempty"`
+	ProviderQuotaQueryPresets        map[string]ProviderQuotaQueryPresetGroup `json:"provider_quota_query_presets,omitempty"`
+	CaptureRequestLogPayload         bool                                     `json:"capture_request_log_payload"`
+	SanitizeRequestLogPayload        bool                                     `json:"sanitize_request_log_payload"`
 }
 
 type ProviderQuotaQueryPresetEntry struct {
@@ -183,10 +186,11 @@ type BudgetQuotaAdjustments struct {
 }
 
 type AppSettingsService struct {
-	path             string
-	mu               sync.Mutex
-	autoStartService *AutoStartService
-	codexSettings    *CodexSettingsService
+	path               string
+	mu                 sync.Mutex
+	autoStartService   *AutoStartService
+	codexSettings      *CodexSettingsService
+	claudeModelRouting *ClaudeModelRoutingService
 }
 
 func NewAppSettingsService(autoStartService *AutoStartService) *AppSettingsService {
@@ -222,6 +226,12 @@ func (as *AppSettingsService) BindCodexSettingsService(codexSettings *CodexSetti
 	as.mu.Lock()
 	defer as.mu.Unlock()
 	as.codexSettings = codexSettings
+}
+
+func (as *AppSettingsService) BindClaudeModelRoutingService(routing *ClaudeModelRoutingService) {
+	as.mu.Lock()
+	defer as.mu.Unlock()
+	as.claudeModelRouting = routing
 }
 
 // migrateSettings 完整的配置迁移
@@ -299,56 +309,59 @@ func (as *AppSettingsService) defaultSettings() AppSettings {
 	}
 
 	return AppSettings{
-		ShowHeatmap:                     true,
-		HeatmapGranularity:              heatmapGranularityDaily,
-		HeatmapDailyScaleFactor:         defaultHeatmapDailyScale,
-		HeatmapDailyIntensityMode:       heatmapDailyModeHourlyScaled,
-		HeatmapIntensityMetric:          defaultHeatmapIntensityMetric,
-		HeatmapIntensityStopL1:          defaultHeatmapIntensityL1,
-		HeatmapIntensityStopL2:          defaultHeatmapIntensityL2,
-		HeatmapIntensityStopL3:          defaultHeatmapIntensityL3,
-		ShowHomeTitle:                   true,
-		HomeProviderTabs:                defaultHomeProviderTabs(),
-		BudgetTotal:                     0,
-		BudgetUsedAdjustment:            0,
-		BudgetCycleEnabled:              false,
-		BudgetCycleMode:                 budgetCycleModeDaily,
-		BudgetRefreshTime:               "00:00",
-		BudgetRefreshDay:                defaultBudgetRefreshWeekday,
-		BudgetRefreshMonthDay:           defaultBudgetRefreshMonthDay,
-		BudgetQuotaUsedAdjustments:      defaultBudgetQuotaAdjustments(),
-		BudgetQuotaSettings:             defaultBudgetQuotaSettings(),
-		BudgetShowCountdown:             false,
-		BudgetShowForecast:              false,
-		BudgetForecastMethod:            "cycle",
-		BudgetForecastDisplay:           "datetime",
-		BudgetTotalCodex:                0,
-		BudgetUsedAdjustmentCodex:       0,
-		BudgetCycleEnabledCodex:         false,
-		BudgetCycleModeCodex:            budgetCycleModeDaily,
-		BudgetRefreshTimeCodex:          "00:00",
-		BudgetRefreshDayCodex:           defaultBudgetRefreshWeekday,
-		BudgetRefreshMonthDayCodex:      defaultBudgetRefreshMonthDay,
-		BudgetQuotaUsedAdjustmentsCodex: defaultBudgetQuotaAdjustments(),
-		BudgetQuotaSettingsCodex:        defaultBudgetQuotaSettings(),
-		BudgetShowCountdownCodex:        false,
-		BudgetShowForecastCodex:         false,
-		BudgetForecastMethodCodex:       "cycle",
-		BudgetForecastDisplayCodex:      "datetime",
-		AutoStart:                       autoStartEnabled,
-		AutoUpdate:                      true, // 默认开启自动更新
-		UpdateHistoryKeepCount:          defaultUpdateHistoryKeepCount,
-		AutoConnectivityTest:            true,  // 默认开启自动可用性监控（开箱即用）
-		EnableSwitchNotify:              true,  // 默认开启切换通知
-		EnableRoundRobin:                false, // 默认关闭轮询（使用顺序降级）
-		PreserveCodexOfficialAuth:       false,
-		UnifyCodexSessionHistory:        false,
-		UnifyCodexMigrateExisting:       false,
-		ProviderConcurrencyLimits:       map[string]bool{},
-		ProviderQuotaQueryPresetCodes:   map[string]string{},
-		ProviderQuotaQueryPresets:       map[string]ProviderQuotaQueryPresetGroup{},
-		CaptureRequestLogPayload:        false, // 默认关闭 payload 采集，降低隐私与存储风险
-		SanitizeRequestLogPayload:       true,  // 默认开启 payload 脱敏，避免敏感信息明文落库
+		ShowHeatmap:                      true,
+		HeatmapGranularity:               heatmapGranularityDaily,
+		HeatmapDailyScaleFactor:          defaultHeatmapDailyScale,
+		HeatmapDailyIntensityMode:        heatmapDailyModeHourlyScaled,
+		HeatmapIntensityMetric:           defaultHeatmapIntensityMetric,
+		HeatmapIntensityStopL1:           defaultHeatmapIntensityL1,
+		HeatmapIntensityStopL2:           defaultHeatmapIntensityL2,
+		HeatmapIntensityStopL3:           defaultHeatmapIntensityL3,
+		ShowHomeTitle:                    true,
+		HomeProviderTabs:                 defaultHomeProviderTabs(),
+		BudgetTotal:                      0,
+		BudgetUsedAdjustment:             0,
+		BudgetCycleEnabled:               false,
+		BudgetCycleMode:                  budgetCycleModeDaily,
+		BudgetRefreshTime:                "00:00",
+		BudgetRefreshDay:                 defaultBudgetRefreshWeekday,
+		BudgetRefreshMonthDay:            defaultBudgetRefreshMonthDay,
+		BudgetQuotaUsedAdjustments:       defaultBudgetQuotaAdjustments(),
+		BudgetQuotaSettings:              defaultBudgetQuotaSettings(),
+		BudgetShowCountdown:              false,
+		BudgetShowForecast:               false,
+		BudgetForecastMethod:             "cycle",
+		BudgetForecastDisplay:            "datetime",
+		BudgetTotalCodex:                 0,
+		BudgetUsedAdjustmentCodex:        0,
+		BudgetCycleEnabledCodex:          false,
+		BudgetCycleModeCodex:             budgetCycleModeDaily,
+		BudgetRefreshTimeCodex:           "00:00",
+		BudgetRefreshDayCodex:            defaultBudgetRefreshWeekday,
+		BudgetRefreshMonthDayCodex:       defaultBudgetRefreshMonthDay,
+		BudgetQuotaUsedAdjustmentsCodex:  defaultBudgetQuotaAdjustments(),
+		BudgetQuotaSettingsCodex:         defaultBudgetQuotaSettings(),
+		BudgetShowCountdownCodex:         false,
+		BudgetShowForecastCodex:          false,
+		BudgetForecastMethodCodex:        "cycle",
+		BudgetForecastDisplayCodex:       "datetime",
+		AutoStart:                        autoStartEnabled,
+		AutoUpdate:                       true, // 默认开启自动更新
+		UpdateHistoryKeepCount:           defaultUpdateHistoryKeepCount,
+		AutoConnectivityTest:             true,  // 默认开启自动可用性监控（开箱即用）
+		EnableSwitchNotify:               true,  // 默认开启切换通知
+		EnableRoundRobin:                 false, // 默认关闭轮询（使用顺序降级）
+		ClaudeModelRoutingEnabled:        false,
+		ClaudeModelAggregationEnabled:    false,
+		ClaudeModelMetadataMergeStrategy: "aggressive",
+		PreserveCodexOfficialAuth:        false,
+		UnifyCodexSessionHistory:         false,
+		UnifyCodexMigrateExisting:        false,
+		ProviderConcurrencyLimits:        map[string]bool{},
+		ProviderQuotaQueryPresetCodes:    map[string]string{},
+		ProviderQuotaQueryPresets:        map[string]ProviderQuotaQueryPresetGroup{},
+		CaptureRequestLogPayload:         false, // 默认关闭 payload 采集，降低隐私与存储风险
+		SanitizeRequestLogPayload:        true,  // 默认开启 payload 脱敏，避免敏感信息明文落库
 	}
 }
 
@@ -400,6 +413,42 @@ func normalizeProviderConcurrencyLimits(settings *AppSettings) {
 		normalized[key] = enabled
 	}
 	settings.ProviderConcurrencyLimits = normalized
+}
+
+func normalizeClaudeModelRoutingSettings(settings *AppSettings) {
+	if settings == nil {
+		return
+	}
+	if !settings.ClaudeModelRoutingEnabled {
+		settings.ClaudeModelAggregationEnabled = false
+	}
+	switch strings.ToLower(strings.TrimSpace(settings.ClaudeModelMetadataMergeStrategy)) {
+	case "conservative":
+		settings.ClaudeModelMetadataMergeStrategy = "conservative"
+	default:
+		settings.ClaudeModelMetadataMergeStrategy = "aggressive"
+	}
+}
+
+func hasConfiguredClaudeModelRouting() bool {
+	path, err := resolveProviderReadPath("claude")
+	if err != nil {
+		return false
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || len(data) == 0 {
+		return false
+	}
+	var envelope providerEnvelope
+	if json.Unmarshal(data, &envelope) != nil {
+		return false
+	}
+	for _, provider := range envelope.Providers {
+		if len(provider.SupportedModels) > 0 || len(provider.ModelMapping) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func allowedProviderQuotaQueryPresetTypes() map[string]bool {
@@ -525,6 +574,7 @@ func (as *AppSettingsService) SaveAppSettings(settings AppSettings) (AppSettings
 	settings.UpdateHistoryKeepCount = normalizeUpdateHistoryKeepCount(settings.UpdateHistoryKeepCount)
 	normalizeProviderConcurrencyLimits(&settings)
 	normalizeProviderQuotaQueryPresets(&settings)
+	normalizeClaudeModelRoutingSettings(&settings)
 
 	// 同步开机自启动状态
 	if as.autoStartService != nil {
@@ -557,7 +607,16 @@ func (as *AppSettingsService) SaveAppSettings(settings AppSettings) (AppSettings
 			}()
 		}
 	}
+	if as.claudeModelRouting != nil && claudeModelRoutingSettingsChanged(previous, settings) {
+		as.claudeModelRouting.HandleSettingsChanged(previous, settings)
+	}
 	return settings, nil
+}
+
+func claudeModelRoutingSettingsChanged(previous AppSettings, next AppSettings) bool {
+	return previous.ClaudeModelRoutingEnabled != next.ClaudeModelRoutingEnabled ||
+		previous.ClaudeModelAggregationEnabled != next.ClaudeModelAggregationEnabled ||
+		previous.ClaudeModelMetadataMergeStrategy != next.ClaudeModelMetadataMergeStrategy
 }
 
 func codexRuntimeSettingsChanged(previous AppSettings, next AppSettings) bool {
@@ -571,15 +630,37 @@ func (as *AppSettingsService) loadLocked() (AppSettings, error) {
 	data, err := os.ReadFile(as.path)
 	if err != nil {
 		if os.IsNotExist(err) {
+			if hasConfiguredClaudeModelRouting() {
+				settings.ClaudeModelRoutingEnabled = true
+				normalizeClaudeModelRoutingSettings(&settings)
+				if err := as.saveLocked(settings); err != nil {
+					return settings, err
+				}
+			}
 			return settings, nil
 		}
 		return settings, err
 	}
 	if len(data) == 0 {
+		if hasConfiguredClaudeModelRouting() {
+			settings.ClaudeModelRoutingEnabled = true
+			normalizeClaudeModelRoutingSettings(&settings)
+			if err := as.saveLocked(settings); err != nil {
+				return settings, err
+			}
+		}
 		return settings, nil
+	}
+	var rawSettings map[string]json.RawMessage
+	if err := json.Unmarshal(data, &rawSettings); err != nil {
+		return settings, err
 	}
 	if err := json.Unmarshal(data, &settings); err != nil {
 		return settings, err
+	}
+	_, routingSettingExists := rawSettings["claude_model_routing_enabled"]
+	if !routingSettingExists && hasConfiguredClaudeModelRouting() {
+		settings.ClaudeModelRoutingEnabled = true
 	}
 	settings.HeatmapGranularity = normalizeHeatmapGranularity(settings.HeatmapGranularity)
 	normalizeHeatmapDisplaySettings(&settings)
@@ -588,6 +669,12 @@ func (as *AppSettingsService) loadLocked() (AppSettings, error) {
 	settings.UpdateHistoryKeepCount = normalizeUpdateHistoryKeepCount(settings.UpdateHistoryKeepCount)
 	normalizeProviderConcurrencyLimits(&settings)
 	normalizeProviderQuotaQueryPresets(&settings)
+	normalizeClaudeModelRoutingSettings(&settings)
+	if !routingSettingExists {
+		if err := as.saveLocked(settings); err != nil {
+			return settings, err
+		}
+	}
 	return settings, nil
 }
 
@@ -603,6 +690,7 @@ func (as *AppSettingsService) saveLocked(settings AppSettings) error {
 	settings.UpdateHistoryKeepCount = normalizeUpdateHistoryKeepCount(settings.UpdateHistoryKeepCount)
 	normalizeProviderConcurrencyLimits(&settings)
 	normalizeProviderQuotaQueryPresets(&settings)
+	normalizeClaudeModelRoutingSettings(&settings)
 	data, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		return err

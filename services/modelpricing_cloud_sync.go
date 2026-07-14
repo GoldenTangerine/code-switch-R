@@ -150,7 +150,13 @@ func (mps *ModelPricingService) SyncCloudPriceTable(overwriteManualModels []stri
 	}
 
 	mps.mu.Lock()
-	defer mps.mu.Unlock()
+	notifyRouting := false
+	defer func() {
+		mps.mu.Unlock()
+		if notifyRouting {
+			mps.notifyClaudeModelRoutingChanged()
+		}
+	}()
 
 	newLocalOverrides := cloneModelPricingOverrides(mps.localOverrides)
 	newCloudOverrides := cloneModelPricingOverrides(mps.cloudOverrides)
@@ -232,6 +238,7 @@ func (mps *ModelPricingService) SyncCloudPriceTable(overwriteManualModels []stri
 	mps.localOverrides = newLocalOverrides
 	mps.cloudOverrides = newCloudOverrides
 	mps.rebuildLocked()
+	notifyRouting = true
 	return result, nil
 }
 

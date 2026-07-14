@@ -45,6 +45,7 @@ type ProviderRelayService struct {
 	notificationService            *NotificationService
 	appSettings                    *AppSettingsService // 应用设置服务（用于获取轮询开关状态）
 	modelPricing                   *ModelPricingService
+	claudeModelRouting             *ClaudeModelRoutingService
 	codexOAuth                     *CodexOAuthService
 	server                         *http.Server
 	addr                           string
@@ -398,6 +399,13 @@ func (prs *ProviderRelayService) BindCodexOAuthService(codexOAuth *CodexOAuthSer
 		return
 	}
 	prs.codexOAuth = codexOAuth
+}
+
+func (prs *ProviderRelayService) BindClaudeModelRoutingService(routing *ClaudeModelRoutingService) {
+	if prs == nil {
+		return
+	}
+	prs.claudeModelRouting = routing
 }
 
 func providerRefFromProvider(provider Provider) string {
@@ -2122,6 +2130,10 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 			return
 		}
 		providers = filterRuntimeProviders(kind, providers)
+		claudeModelRoutingEnabled := kind == "claude" && prs.claudeModelRouting != nil && prs.claudeModelRouting.routingEnabled()
+		if claudeModelRoutingEnabled {
+			providers = prs.claudeModelRouting.ResolveProviders(requestedModel, providers)
+		}
 
 		active := make([]Provider, 0, len(providers))
 		requestPlans := make(map[string]providerRequestPlan, len(providers))
@@ -2132,11 +2144,13 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 				continue
 			}
 
-			// 配置验证：失败则自动跳过
-			if errs := provider.ValidateConfiguration(); len(errs) > 0 {
-				fmt.Printf("[WARN] Provider %s 配置验证失败，已自动跳过: %v\n", provider.Name, errs)
-				skippedCount++
-				continue
+			// Claude 模型路由关闭时不使用模型配置筛选供应商。
+			if kind != "claude" || claudeModelRoutingEnabled {
+				if errs := provider.ValidateConfiguration(); len(errs) > 0 {
+					fmt.Printf("[WARN] Provider %s 配置验证失败，已自动跳过: %v\n", provider.Name, errs)
+					skippedCount++
+					continue
+				}
 			}
 
 			// 黑名单检查：跳过已拉黑的 provider
@@ -2153,7 +2167,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 				continue
 			}
 
-			if !provider.IsResolvedModelSupported(requestedModel, plan.EffectiveModel) {
+			if (kind != "claude" || claudeModelRoutingEnabled) && !provider.IsResolvedModelSupported(requestedModel, plan.EffectiveModel) {
 				fmt.Printf("[INFO] Provider %s 不支持最终模型 %s（原始请求模型: %s），已跳过\n",
 					provider.Name,
 					displayModelForLog(plan.EffectiveModel),
@@ -7775,6 +7789,23 @@ func (prs *ProviderRelayService) forwardModelsRequest(
 // 将请求转发到第一个可用的 provider 并注入 API Key
 func (prs *ProviderRelayService) modelsHandler(kind string) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if kind == "claude" && prs.claudeModelRouting != nil {
+			aggregationEnabled, _ := prs.claudeModelRouting.aggregationSettings()
+			if aggregationEnabled {
+				limit, err := parseClaudeModelListLimit(c.Query("limit"))
+				if err != nil {
+					c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+					return
+				}
+				response, err := prs.claudeModelRouting.ListModels(limit, c.Query("before_id"), c.Query("after_id"))
+				if err != nil {
+					c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+					return
+				}
+				c.JSON(http.StatusOK, response)
+				return
+			}
+		}
 		_ = prs.forwardModelsRequest(c, kind, "Models")
 	}
 }

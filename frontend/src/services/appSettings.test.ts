@@ -67,6 +67,31 @@ describe('appSettings', () => {
     })
   })
 
+  it('disables Claude model aggregation when model routing is off', async () => {
+    vi.mocked(Call.ByName).mockResolvedValueOnce({
+      claude_model_routing_enabled: false,
+      claude_model_aggregation_enabled: true,
+    })
+
+    const settings = await fetchAppSettings()
+
+    expect(settings.claude_model_routing_enabled).toBe(false)
+    expect(settings.claude_model_aggregation_enabled).toBe(false)
+  })
+
+  it('normalizes Claude model metadata strategy', async () => {
+    vi.mocked(Call.ByName).mockResolvedValueOnce({
+      claude_model_routing_enabled: true,
+      claude_model_aggregation_enabled: true,
+      claude_model_metadata_merge_strategy: 'invalid',
+    })
+
+    const settings = await fetchAppSettings()
+
+    expect(settings.claude_model_aggregation_enabled).toBe(true)
+    expect(settings.claude_model_metadata_merge_strategy).toBe('aggressive')
+  })
+
   it('migrates legacy provider quota query preset codes to named presets', async () => {
     vi.mocked(Call.ByName).mockResolvedValueOnce({
       provider_quota_query_preset_codes: {
