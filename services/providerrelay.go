@@ -354,22 +354,30 @@ type ProviderConcurrencyStatus struct {
 }
 
 type ProviderConcurrencyRequestDetail struct {
-	ID                  string `json:"id"`
-	Platform            string `json:"platform"`
-	ProviderID          string `json:"providerId"`
-	ProviderName        string `json:"providerName"`
-	UserAgent           string `json:"userAgent,omitempty"`
-	RequestedModel      string `json:"requestedModel,omitempty"`
-	Model               string `json:"model,omitempty"`
-	MappedModel         string `json:"mappedModel,omitempty"`
-	ModelMappingPattern string `json:"modelMappingPattern,omitempty"`
-	ModelMappingTarget  string `json:"modelMappingTarget,omitempty"`
-	ModelOverride       string `json:"modelOverride,omitempty"`
-	ModelRouteCaptured  bool   `json:"modelRouteCaptured"`
-	Endpoint            string `json:"endpoint,omitempty"`
-	IsStream            bool   `json:"isStream"`
-	StartedAt           int64  `json:"startedAt"`
-	DurationMs          int64  `json:"durationMs"`
+	ID                  string                                `json:"id"`
+	Platform            string                                `json:"platform"`
+	ProviderID          string                                `json:"providerId"`
+	ProviderName        string                                `json:"providerName"`
+	UserAgent           string                                `json:"userAgent,omitempty"`
+	RequestedModel      string                                `json:"requestedModel,omitempty"`
+	Model               string                                `json:"model,omitempty"`
+	MappedModel         string                                `json:"mappedModel,omitempty"`
+	ModelMappingPattern string                                `json:"modelMappingPattern,omitempty"`
+	ModelMappingTarget  string                                `json:"modelMappingTarget,omitempty"`
+	ModelOverride       string                                `json:"modelOverride,omitempty"`
+	ModelRouteCaptured  bool                                  `json:"modelRouteCaptured"`
+	Parameters          []ProviderConcurrencyRequestParameter `json:"parameters"`
+	Endpoint            string                                `json:"endpoint,omitempty"`
+	IsStream            bool                                  `json:"isStream"`
+	StartedAt           int64                                 `json:"startedAt"`
+	DurationMs          int64                                 `json:"durationMs"`
+}
+
+type ProviderConcurrencyRequestParameter struct {
+	Key            string `json:"key"`
+	RequestedValue string `json:"requestedValue"`
+	ActualValue    string `json:"actualValue"`
+	Source         string `json:"source"`
 }
 
 type providerConcurrencyRequestMeta struct {
@@ -382,6 +390,7 @@ type providerConcurrencyRequestMeta struct {
 	ModelMappingTarget  string
 	ModelOverride       string
 	ModelRouteCaptured  bool
+	Parameters          []ProviderConcurrencyRequestParameter
 	Endpoint            string
 	IsStream            bool
 }
@@ -1017,9 +1026,13 @@ func (prs *ProviderRelayService) isProviderConcurrencyLimitEnabled(platform stri
 	return settings.ProviderConcurrencyLimits[strings.TrimSpace(platform)]
 }
 
-func (prs *ProviderRelayService) acquireProviderConcurrencySlot(platform string, providerID string, limit int, enforceLimit bool, meta providerConcurrencyRequestMeta) (func(), bool) {
+func cloneProviderConcurrencyRequestParameters(parameters []ProviderConcurrencyRequestParameter) []ProviderConcurrencyRequestParameter {
+	return append([]ProviderConcurrencyRequestParameter(nil), parameters...)
+}
+
+func (prs *ProviderRelayService) acquireProviderConcurrencySlot(platform string, providerID string, limit int, enforceLimit bool, meta providerConcurrencyRequestMeta) (func([]ProviderConcurrencyRequestParameter), func(), bool) {
 	if prs == nil || strings.TrimSpace(providerID) == "" {
-		return func() {}, true
+		return func([]ProviderConcurrencyRequestParameter) {}, func() {}, true
 	}
 	limit = normalizeProviderConcurrencyLimit(limit)
 	key := providerConcurrencyStateKey(platform, providerID)
@@ -1032,7 +1045,7 @@ func (prs *ProviderRelayService) acquireProviderConcurrencySlot(platform string,
 	}
 	if enforceLimit && limit > 0 && prs.providerConcurrency[key] >= limit {
 		prs.providerConcurrencyMu.Unlock()
-		return nil, false
+		return nil, nil, false
 	}
 	prs.providerConcurrency[key]++
 	prs.nextProviderConcurrencyRequest++
@@ -1054,12 +1067,25 @@ func (prs *ProviderRelayService) acquireProviderConcurrencySlot(platform string,
 		ModelMappingTarget:  strings.TrimSpace(meta.ModelMappingTarget),
 		ModelOverride:       strings.TrimSpace(meta.ModelOverride),
 		ModelRouteCaptured:  meta.ModelRouteCaptured,
+		Parameters:          cloneProviderConcurrencyRequestParameters(meta.Parameters),
 		Endpoint:            strings.TrimSpace(meta.Endpoint),
 		IsStream:            meta.IsStream,
 		StartedAt:           startedAt.UnixMilli(),
 		DurationMs:          0,
 	}
 	prs.providerConcurrencyMu.Unlock()
+
+	updateParameters := func(parameters []ProviderConcurrencyRequestParameter) {
+		prs.providerConcurrencyMu.Lock()
+		defer prs.providerConcurrencyMu.Unlock()
+		requests := prs.providerConcurrencyRequests[key]
+		request, ok := requests[requestID]
+		if !ok {
+			return
+		}
+		request.Parameters = cloneProviderConcurrencyRequestParameters(parameters)
+		requests[requestID] = request
+	}
 
 	var once sync.Once
 	release := func() {
@@ -1079,7 +1105,7 @@ func (prs *ProviderRelayService) acquireProviderConcurrencySlot(platform string,
 			prs.providerConcurrency[key]--
 		})
 	}
-	return release, true
+	return updateParameters, release, true
 }
 
 func (prs *ProviderRelayService) providerConcurrencyCount(platform string, providerID string) int {
@@ -1106,6 +1132,7 @@ func (prs *ProviderRelayService) providerConcurrencySnapshot(platform string, pr
 	}
 	result := make([]ProviderConcurrencyRequestDetail, 0, len(source))
 	for _, request := range source {
+		request.Parameters = cloneProviderConcurrencyRequestParameters(request.Parameters)
 		if request.StartedAt > 0 {
 			request.DurationMs = now - request.StartedAt
 			if request.DurationMs < 0 {
@@ -2937,7 +2964,10 @@ func (prs *ProviderRelayService) forwardRequest(
 ) (bool, error) {
 	mappingDetail := provider.resolveModelMappingDetail(requestedModel)
 	modelOverride, _ := resolveProviderModelOverride(provider)
-	return prs.forwardRequestWithPlan(c, kind, provider, endpoint, query, clientHeaders, bodyBytes, isStream, model, requestedModel, providerRequestPlan{
+	reasoning := buildProviderRequestReasoningMetadata(bodyBytes, requestedModel, false, "")
+	inputProtocol := providerRequestProtocolForInput(endpoint)
+	actualProtocol := providerRequestProtocolForOutput(endpoint, resolveClaudeAPIFormat(provider))
+	plan := providerRequestPlan{
 		OriginalBodyBytes:   bodyBytes,
 		BodyBytes:           bodyBytes,
 		EffectiveModel:      model,
@@ -2946,9 +2976,12 @@ func (prs *ProviderRelayService) forwardRequest(
 		ModelMappingTarget:  mappingDetail.TargetPattern,
 		ModelOverride:       modelOverride,
 		ModelRouteCaptured:  true,
-		Reasoning:           buildProviderRequestReasoningMetadata(bodyBytes, requestedModel, false, ""),
+		Reasoning:           reasoning,
+		Parameters:          buildProviderRequestParameters(bodyBytes, bodyBytes, requestedModel, reasoning, false, inputProtocol, actualProtocol),
+		ParameterProtocol:   actualProtocol,
 		EffectiveEndpoint:   endpoint,
-	}, prs.isProviderConcurrencyLimitEnabled(kind))
+	}
+	return prs.forwardRequestWithPlan(c, kind, provider, endpoint, query, clientHeaders, bodyBytes, isStream, model, requestedModel, plan, prs.isProviderConcurrencyLimitEnabled(kind))
 }
 
 func (prs *ProviderRelayService) forwardRequestWithPlan(
@@ -2990,7 +3023,7 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 	}
 	targetURL := joinURL(provider.APIURL, endpoint)
 	requestUserAgent := getHeaderValueCaseInsensitive(headers, "User-Agent")
-	releaseProviderSlot, acquiredProviderSlot := prs.acquireProviderConcurrencySlot(kind, providerRefFromProvider(provider), providerConcurrencyLimit(provider), providerConcurrencyLimitEnabled, providerConcurrencyRequestMeta{
+	updateProviderSlotParameters, releaseProviderSlot, acquiredProviderSlot := prs.acquireProviderConcurrencySlot(kind, providerRefFromProvider(provider), providerConcurrencyLimit(provider), providerConcurrencyLimitEnabled, providerConcurrencyRequestMeta{
 		ProviderName:        provider.Name,
 		UserAgent:           requestUserAgent,
 		RequestedModel:      requestedModel,
@@ -3000,6 +3033,7 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 		ModelMappingTarget:  plan.ModelMappingTarget,
 		ModelOverride:       plan.ModelOverride,
 		ModelRouteCaptured:  plan.ModelRouteCaptured,
+		Parameters:          plan.Parameters,
 		Endpoint:            endpoint,
 		IsStream:            isStream,
 	})
@@ -3354,6 +3388,7 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 		return ok, err
 	}
 	retryPlan, retryReasons := buildClaudeCompatibilityRetryPlan(plan, compatibilityRetry, requestedModel)
+	updateProviderSlotParameters(retryPlan.Parameters)
 	requestLog.requestBodyBytes = retryPlan.BodyBytes
 	requestLog.ReasoningEffort = retryPlan.Reasoning.Effort
 	requestLog.ReasoningEffortSource = retryPlan.Reasoning.Source
@@ -3386,6 +3421,7 @@ func buildClaudeCompatibilityRetryPlan(plan providerRequestPlan, retry claudeCom
 		retryReasons = append(retryReasons, "可选参数不兼容: "+strings.Join(retry.UnsupportedFields, ","))
 	}
 	retryPlan.Reasoning = refreshProviderRequestReasoningMetadata(retryPlan.BodyBytes, requestedModel, plan.Reasoning)
+	retryPlan.Parameters = refreshProviderRequestParameters(plan.Parameters, retryPlan.BodyBytes, retryPlan.Reasoning, plan.ParameterProtocol)
 	return retryPlan, retryReasons
 }
 
@@ -5753,6 +5789,8 @@ type providerRequestPlan struct {
 	ModelOverride              string
 	ModelRouteCaptured         bool
 	Reasoning                  providerRequestReasoningMetadata
+	Parameters                 []ProviderConcurrencyRequestParameter
+	ParameterProtocol          string
 	EffectiveEndpoint          string
 	PromptCacheKey             string
 	ContinuationSessionKey     string
@@ -5770,7 +5808,167 @@ const (
 	reasoningEffortSourceRequest             = "request"
 	reasoningEffortSourceRequestBodyOverride = "request_body_override"
 	reasoningEffortSourceModelMapping        = "model_mapping"
+	providerRequestParameterReasoningEffort  = "reasoning_effort"
+	providerRequestParameterMaxOutputTokens  = "max_output_tokens"
+	providerRequestProtocolAnthropic         = "anthropic"
+	providerRequestProtocolOpenAIChat        = "openai_chat"
+	providerRequestProtocolOpenAIResponses   = "openai_responses"
+	providerRequestProtocolGemini            = "gemini"
 )
+
+type providerRequestScalarMetadata struct {
+	Value      string
+	TargetPath string
+}
+
+func providerRequestProtocolForInput(endpoint string) string {
+	switch strings.TrimSpace(endpoint) {
+	case "/responses":
+		return providerRequestProtocolOpenAIResponses
+	case "/v1/chat/completions":
+		return providerRequestProtocolOpenAIChat
+	default:
+		return providerRequestProtocolAnthropic
+	}
+}
+
+func providerRequestProtocolForOutput(endpoint string, apiFormat string) string {
+	if strings.TrimSpace(endpoint) == "/responses" {
+		return providerRequestProtocolOpenAIResponses
+	}
+	switch normalizeClaudeAPIFormat(apiFormat) {
+	case claudeAPIFormatOpenAIResponse:
+		return providerRequestProtocolOpenAIResponses
+	case claudeAPIFormatOpenAIChat:
+		return providerRequestProtocolOpenAIChat
+	default:
+		return providerRequestProtocolAnthropic
+	}
+}
+
+func requestMaxOutputPaths(protocol string) []string {
+	switch protocol {
+	case providerRequestProtocolOpenAIResponses:
+		return []string{"max_output_tokens", "max_completion_tokens", "max_tokens"}
+	case providerRequestProtocolOpenAIChat:
+		return []string{"max_completion_tokens", "max_tokens", "max_output_tokens"}
+	case providerRequestProtocolGemini:
+		return []string{
+			"generationConfig.maxOutputTokens",
+			"generationConfig.max_output_tokens",
+			"generation_config.maxOutputTokens",
+			"generation_config.max_output_tokens",
+			"maxOutputTokens",
+			"max_output_tokens",
+		}
+	default:
+		return []string{"max_tokens", "max_output_tokens", "max_completion_tokens"}
+	}
+}
+
+func normalizeRequestParameterScalar(result gjson.Result) string {
+	if !result.Exists() {
+		return ""
+	}
+	switch result.Type {
+	case gjson.Number:
+		return strings.TrimSpace(result.Raw)
+	case gjson.String:
+		return strings.TrimSpace(result.String())
+	default:
+		return ""
+	}
+}
+
+func requestMaxOutputMetadata(body []byte, protocol string) providerRequestScalarMetadata {
+	for _, path := range requestMaxOutputPaths(protocol) {
+		if value := normalizeRequestParameterScalar(gjson.GetBytes(body, path)); value != "" {
+			return providerRequestScalarMetadata{Value: value, TargetPath: path}
+		}
+	}
+	return providerRequestScalarMetadata{}
+}
+
+func requestBodyOverridesMaxOutput(originalBody []byte, mergedBody []byte, overrides map[string]interface{}, protocol string) bool {
+	if len(overrides) == 0 {
+		return false
+	}
+	original := requestMaxOutputMetadata(originalBody, protocol)
+	merged := requestMaxOutputMetadata(mergedBody, protocol)
+	if merged.Value == "" {
+		return false
+	}
+	if original.Value != merged.Value || original.TargetPath != merged.TargetPath {
+		return true
+	}
+	paths := make(map[string]struct{})
+	collectRequestBodyOverridePaths(overrides, "", paths)
+	for path := range paths {
+		if path == merged.TargetPath || strings.HasPrefix(merged.TargetPath, path+".") {
+			return true
+		}
+	}
+	return false
+}
+
+func buildProviderRequestParameters(
+	originalBody []byte,
+	actualBody []byte,
+	requestedModel string,
+	reasoning providerRequestReasoningMetadata,
+	maxOutputOverridden bool,
+	inputProtocol string,
+	actualProtocol string,
+) []ProviderConcurrencyRequestParameter {
+	requestedReasoning := requestReasoningMetadata(originalBody, requestedModel)
+	requestedMaxOutput := requestMaxOutputMetadata(originalBody, inputProtocol)
+	actualMaxOutput := requestMaxOutputMetadata(actualBody, actualProtocol)
+	maxOutputSource := ""
+	if actualMaxOutput.Value != "" {
+		if maxOutputOverridden {
+			maxOutputSource = reasoningEffortSourceRequestBodyOverride
+		} else {
+			maxOutputSource = reasoningEffortSourceRequest
+		}
+	}
+	return []ProviderConcurrencyRequestParameter{
+		{
+			Key:            providerRequestParameterReasoningEffort,
+			RequestedValue: requestedReasoning.Effort,
+			ActualValue:    reasoning.Effort,
+			Source:         reasoning.Source,
+		},
+		{
+			Key:            providerRequestParameterMaxOutputTokens,
+			RequestedValue: requestedMaxOutput.Value,
+			ActualValue:    actualMaxOutput.Value,
+			Source:         maxOutputSource,
+		},
+	}
+}
+
+func refreshProviderRequestParameters(
+	parameters []ProviderConcurrencyRequestParameter,
+	actualBody []byte,
+	reasoning providerRequestReasoningMetadata,
+	actualProtocol string,
+) []ProviderConcurrencyRequestParameter {
+	refreshed := cloneProviderConcurrencyRequestParameters(parameters)
+	actualMaxOutput := requestMaxOutputMetadata(actualBody, actualProtocol)
+	for index := range refreshed {
+		switch refreshed[index].Key {
+		case providerRequestParameterReasoningEffort:
+			refreshed[index].ActualValue = reasoning.Effort
+			refreshed[index].Source = reasoning.Source
+		case providerRequestParameterMaxOutputTokens:
+			refreshed[index].ActualValue = actualMaxOutput.Value
+			if actualMaxOutput.Value == "" {
+				refreshed[index].Source = ""
+			}
+		}
+	}
+	return refreshed
+}
 
 func requestReasoningMetadata(bodyBytes []byte, requestedModel string) providerRequestReasoningMetadata {
 	for _, path := range []string{
@@ -5953,6 +6151,9 @@ func (prs *ProviderRelayService) buildProviderRequestPlan(provider Provider, bod
 		currentBodyBytes = modifiedBody
 	}
 	hasRequestBodyReasoningOverride := requestBodyOverridesReasoningEffort(bodyBeforeOverrides, currentBodyBytes, provider.RequestBodyOverrides)
+	inputProtocol := providerRequestProtocolForInput(endpoint)
+	actualProtocol := providerRequestProtocolForOutput(endpoint, resolveClaudeAPIFormat(provider))
+	hasRequestBodyMaxOutputOverride := requestBodyOverridesMaxOutput(bodyBeforeOverrides, currentBodyBytes, provider.RequestBodyOverrides, inputProtocol)
 	shouldApplyMappedReasoningEffort := mappingDetail.Matched &&
 		mappingDetail.ReasoningEffort != "" &&
 		requestHasReasoningEffortSignal(currentBodyBytes, endpoint)
@@ -6008,6 +6209,7 @@ func (prs *ProviderRelayService) buildProviderRequestPlan(provider Provider, bod
 				if previousResponseID == "" {
 					currentBodyBytes = baseResponsesBodyBytes
 				}
+				reasoning := buildProviderRequestReasoningMetadata(currentBodyBytes, requestedModel, hasRequestBodyReasoningOverride, mappedReasoningEffortTarget)
 				return providerRequestPlan{
 					OriginalBodyBytes:          bodyBytes,
 					BodyBytes:                  currentBodyBytes,
@@ -6018,7 +6220,9 @@ func (prs *ProviderRelayService) buildProviderRequestPlan(provider Provider, bod
 					ModelMappingTarget:         mappingDetail.TargetPattern,
 					ModelOverride:              modelOverride,
 					ModelRouteCaptured:         true,
-					Reasoning:                  buildProviderRequestReasoningMetadata(currentBodyBytes, requestedModel, hasRequestBodyReasoningOverride, mappedReasoningEffortTarget),
+					Reasoning:                  reasoning,
+					Parameters:                 buildProviderRequestParameters(bodyBytes, currentBodyBytes, requestedModel, reasoning, hasRequestBodyMaxOutputOverride, inputProtocol, actualProtocol),
+					ParameterProtocol:          actualProtocol,
 					EffectiveEndpoint:          effectiveEndpoint,
 					PromptCacheKey:             promptCacheKey,
 					ContinuationSessionKey:     continuationSessionKey,
@@ -6036,6 +6240,7 @@ func (prs *ProviderRelayService) buildProviderRequestPlan(provider Provider, bod
 		mappedReasoningEffortTarget = mappedReasoningEffortTargetPath(endpoint, resolveClaudeAPIFormat(provider))
 	}
 
+	reasoning := buildProviderRequestReasoningMetadata(currentBodyBytes, requestedModel, hasRequestBodyReasoningOverride, mappedReasoningEffortTarget)
 	return providerRequestPlan{
 		OriginalBodyBytes:          bodyBytes,
 		BodyBytes:                  currentBodyBytes,
@@ -6046,7 +6251,9 @@ func (prs *ProviderRelayService) buildProviderRequestPlan(provider Provider, bod
 		ModelMappingTarget:         mappingDetail.TargetPattern,
 		ModelOverride:              modelOverride,
 		ModelRouteCaptured:         true,
-		Reasoning:                  buildProviderRequestReasoningMetadata(currentBodyBytes, requestedModel, hasRequestBodyReasoningOverride, mappedReasoningEffortTarget),
+		Reasoning:                  reasoning,
+		Parameters:                 buildProviderRequestParameters(bodyBytes, currentBodyBytes, requestedModel, reasoning, hasRequestBodyMaxOutputOverride, inputProtocol, actualProtocol),
+		ParameterProtocol:          actualProtocol,
 		EffectiveEndpoint:          effectiveEndpoint,
 		PromptCacheKey:             promptCacheKey,
 		ContinuationSessionKey:     continuationSessionKey,
@@ -7415,7 +7622,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 						if sessionAttemptID < 0 {
 							continue
 						}
-						ok, err, responseWritten := prs.forwardGeminiRequest(c, &provider, endpoint, currentBodyBytes, isStream, requestLog, providerConcurrencyLimitEnabled)
+						ok, err, responseWritten := prs.forwardGeminiRequest(c, &provider, endpoint, bodyBytes, currentBodyBytes, isStream, requestLog, providerConcurrencyLimitEnabled)
 						prs.finishSessionProviderRequest("gemini", sessionHash)
 						if ok {
 							prs.confirmSessionProviderBinding("gemini", sessionHash, sessionAttemptID)
@@ -7521,7 +7728,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 						fmt.Printf("[Gemini] [拉黑模式] Provider: %s (Level %d) | 重试 %d/%d\n",
 							provider.Name, level, retryCount+1, maxRetryPerProvider)
 
-						ok, err, responseWritten := prs.forwardGeminiRequest(c, &provider, endpoint, currentBodyBytes, isStream, requestLog, providerConcurrencyLimitEnabled)
+						ok, err, responseWritten := prs.forwardGeminiRequest(c, &provider, endpoint, bodyBytes, currentBodyBytes, isStream, requestLog, providerConcurrencyLimitEnabled)
 						if ok {
 							fmt.Printf("[Gemini] ✓ 成功: %s | 重试 %d 次\n", provider.Name, retryCount+1)
 							_ = prs.blacklistService.RecordSuccessByID("gemini", providerRefFromGeminiProvider(provider), provider.Name)
@@ -7644,7 +7851,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 				if sessionAttemptID < 0 {
 					continue
 				}
-				ok, err, responseWritten := prs.forwardGeminiRequest(c, &provider, endpoint, currentBodyBytes, isStream, requestLog, providerConcurrencyLimitEnabled)
+				ok, err, responseWritten := prs.forwardGeminiRequest(c, &provider, endpoint, bodyBytes, currentBodyBytes, isStream, requestLog, providerConcurrencyLimitEnabled)
 				prs.finishSessionProviderRequest("gemini", sessionHash)
 				if ok {
 					prs.confirmSessionProviderBinding("gemini", sessionHash, sessionAttemptID)
@@ -7717,7 +7924,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 				}
 				applyGeminiRequestLogReasoning(requestLog, bodyBytes, currentBodyBytes, provider.RequestBodyOverrides)
 
-				ok, err, responseWritten := prs.forwardGeminiRequest(c, &provider, endpoint, currentBodyBytes, isStream, requestLog, providerConcurrencyLimitEnabled)
+				ok, err, responseWritten := prs.forwardGeminiRequest(c, &provider, endpoint, bodyBytes, currentBodyBytes, isStream, requestLog, providerConcurrencyLimitEnabled)
 				if ok {
 					_ = prs.blacklistService.RecordSuccessByID("gemini", providerRefFromGeminiProvider(provider), provider.Name)
 					// 记录最后使用的供应商
@@ -7805,6 +8012,7 @@ func (prs *ProviderRelayService) forwardGeminiRequest(
 	c *gin.Context,
 	provider *GeminiProvider,
 	endpoint string,
+	originalBodyBytes []byte,
 	bodyBytes []byte,
 	isStream bool,
 	requestLog *ReqeustLog,
@@ -7820,10 +8028,24 @@ func (prs *ProviderRelayService) forwardGeminiRequest(
 	} else if strings.TrimSpace(concurrencyModel) == "" {
 		concurrencyModel = provider.Model
 	}
-	releaseProviderSlot, acquiredProviderSlot := prs.acquireProviderConcurrencySlot("gemini", providerRefFromGeminiProvider(*provider), geminiProviderConcurrencyLimit(*provider), providerConcurrencyLimitEnabled, providerConcurrencyRequestMeta{
+	reasoning := providerRequestReasoningMetadata{
+		Effort: requestLog.ReasoningEffort,
+		Source: requestLog.ReasoningEffortSource,
+	}
+	parameters := buildProviderRequestParameters(
+		originalBodyBytes,
+		bodyBytes,
+		requestLog.RequestedModel,
+		reasoning,
+		requestBodyOverridesMaxOutput(originalBodyBytes, bodyBytes, provider.RequestBodyOverrides, providerRequestProtocolGemini),
+		providerRequestProtocolGemini,
+		providerRequestProtocolGemini,
+	)
+	_, releaseProviderSlot, acquiredProviderSlot := prs.acquireProviderConcurrencySlot("gemini", providerRefFromGeminiProvider(*provider), geminiProviderConcurrencyLimit(*provider), providerConcurrencyLimitEnabled, providerConcurrencyRequestMeta{
 		ProviderName: provider.Name,
 		UserAgent:    requestLog.UserAgent,
 		Model:        concurrencyModel,
+		Parameters:   parameters,
 		Endpoint:     endpoint,
 		IsStream:     isStream,
 	})

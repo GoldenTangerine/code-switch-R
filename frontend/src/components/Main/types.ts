@@ -184,10 +184,18 @@ export type ProviderConcurrencyRequestView = {
   modelMappingTarget?: string
   modelOverride?: string
   modelRouteCaptured?: boolean
+  parameters?: ProviderConcurrencyRequestParameterView[]
   endpoint?: string
   isStream?: boolean
   startedAt: number
   durationMs: number
+}
+
+export type ProviderConcurrencyRequestParameterView = {
+  key: 'reasoning_effort' | 'max_output_tokens'
+  requestedValue?: string
+  actualValue?: string
+  source?: 'request' | 'request_body_override' | 'model_mapping' | ''
 }
 
 

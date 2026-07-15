@@ -9,8 +9,12 @@
  */
 import { describe, expect, it } from 'vitest'
 import {
+  buildConnectionParameterTooltipLines,
+  buildConnectionModelRows,
   buildModelRouteAriaLabel,
   buildModelRouteTooltipLines,
+  connectionParameterDisplayValue,
+  type ConnectionParameterSnapshot,
   type ModelRouteTranslate,
 } from './providerModelRoute'
 
@@ -26,6 +30,22 @@ const translate: ModelRouteTranslate = (key, params = {}) => {
       return 'unchanged'
     case 'components.main.concurrencyDetails.routeDetailsAria':
       return `actual:${params.model};details:${params.details}`
+    case 'components.main.concurrencyDetails.parameterReasoningEffort':
+      return 'reasoning'
+    case 'components.main.concurrencyDetails.parameterMaxOutputTokens':
+      return 'output'
+    case 'components.main.concurrencyDetails.parameterValue':
+      return `${params.label}:${params.value}`
+    case 'components.main.concurrencyDetails.parameterSource':
+      return `${params.label}-source:${params.source}`
+    case 'components.main.concurrencyDetails.parameterSourceRequest':
+      return 'request'
+    case 'components.main.concurrencyDetails.parameterSourceRequestBodyOverride':
+      return 'override'
+    case 'components.main.concurrencyDetails.parameterSourceModelMapping':
+      return 'mapping'
+    case 'components.main.concurrencyDetails.parameterValueMissing':
+      return '-'
     default:
       return key
   }
@@ -79,5 +99,82 @@ describe('provider model route display', () => {
   it('includes the actual model in the accessible label', () => {
     expect(buildModelRouteAriaLabel('forced-opus-model', ['mapped', 'override'], translate))
       .toBe('actual:forced-opus-model;details:mapped; override')
+  })
+
+  it('formats connection parameter chips with stable empty values', () => {
+    expect(connectionParameterDisplayValue('reasoning_effort', 'Extra-High')).toBe('xhigh')
+    expect(connectionParameterDisplayValue('max_output_tokens', '16384')).toBe('16K')
+    expect(connectionParameterDisplayValue('max_output_tokens', '')).toBe('-')
+  })
+
+  it('builds exact values and sources for the actual model tooltip', () => {
+    const parameters: ConnectionParameterSnapshot[] = [
+      {
+        key: 'reasoning_effort',
+        requestedValue: 'low',
+        actualValue: 'vendor-ultra',
+        source: 'model_mapping',
+      },
+      {
+        key: 'max_output_tokens',
+        requestedValue: '8192',
+        actualValue: '16384',
+        source: 'request_body_override',
+      },
+    ]
+
+    expect(buildConnectionParameterTooltipLines(parameters, 'actual', translate)).toEqual([
+      'reasoning:vendor-ultra',
+      'reasoning-source:mapping',
+      'output:16384',
+      'output-source:override',
+    ])
+  })
+
+  it('keeps requested tooltip values without final sources', () => {
+    const parameters: ConnectionParameterSnapshot[] = []
+    expect(buildConnectionParameterTooltipLines(parameters, 'requested', translate)).toEqual([
+      'reasoning:-',
+      'output:-',
+    ])
+  })
+
+  it('builds dual model rows with route details only on the actual model', () => {
+    const parameters: ConnectionParameterSnapshot[] = [
+      {
+        key: 'reasoning_effort',
+        requestedValue: 'low',
+        actualValue: 'high',
+        source: 'model_mapping',
+      },
+    ]
+    const rows = buildConnectionModelRows({
+      showModelRouteDetails: true,
+      requestedModel: 'claude-opus-4.8',
+      actualModel: 'vendor-opus-4.8',
+      parameters,
+      actualRouteLines: ['mapped-route'],
+    }, translate)
+
+    expect(rows.map((row) => [row.key, row.stage, row.model, row.emphasized])).toEqual([
+      ['requested', 'requested', 'claude-opus-4.8', false],
+      ['actual', 'actual', 'vendor-opus-4.8', true],
+    ])
+    expect(rows[0].tooltipLines).not.toContain('mapped-route')
+    expect(rows[1].tooltipLines[0]).toBe('mapped-route')
+  })
+
+  it('builds one actual row without route details for single model mode', () => {
+    const rows = buildConnectionModelRows({
+      showModelRouteDetails: false,
+      requestedModel: 'gpt-5.4',
+      actualModel: 'gpt-5.4',
+      parameters: [],
+      actualRouteLines: ['must-not-render'],
+    }, translate)
+
+    expect(rows).toHaveLength(1)
+    expect(rows[0].key).toBe('actual')
+    expect(rows[0].tooltipLines).not.toContain('must-not-render')
   })
 })

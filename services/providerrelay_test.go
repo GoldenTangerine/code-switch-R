@@ -564,6 +564,132 @@ func TestBuildProviderRequestPlanAppliesModelMappingReasoningEffort(t *testing.T
 	}
 }
 
+func TestBuildProviderRequestPlanCapturesConnectionParameters(t *testing.T) {
+	provider := Provider{
+		APIFormat:                    claudeAPIFormatOpenAIResponse,
+		ModelMapping:                 map[string]string{"claude-*": "vendor-*"},
+		ModelMappingReasoningEfforts: map[string]string{"claude-*": "high"},
+		RequestBodyOverrides: map[string]interface{}{
+			"max_tokens": 32768,
+		},
+	}
+	plan, err := buildProviderRequestPlan(
+		provider,
+		[]byte(`{"model":"claude-opus-4.8","thinking":{"type":"adaptive"},"max_tokens":16384,"messages":[]}`),
+		"/v1/messages",
+		"claude-opus-4.8",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	reasoning := providerRequestParameterByKey(plan.Parameters, providerRequestParameterReasoningEffort)
+	if reasoning.RequestedValue != "xhigh" || reasoning.ActualValue != "high" || reasoning.Source != reasoningEffortSourceModelMapping {
+		t.Fatalf("思考强度参数快照错误: %#v", reasoning)
+	}
+	maxOutput := providerRequestParameterByKey(plan.Parameters, providerRequestParameterMaxOutputTokens)
+	if maxOutput.RequestedValue != "16384" || maxOutput.ActualValue != "32768" || maxOutput.Source != reasoningEffortSourceRequestBodyOverride {
+		t.Fatalf("最大输出参数快照错误: %#v", maxOutput)
+	}
+}
+
+func TestBuildProviderRequestPlanKeepsRequestSourceAcrossProtocolTransform(t *testing.T) {
+	plan, err := buildProviderRequestPlan(
+		Provider{APIFormat: claudeAPIFormatOpenAIResponse},
+		[]byte(`{"model":"claude-opus-4.8","max_tokens":4096,"messages":[]}`),
+		"/v1/messages",
+		"claude-opus-4.8",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	maxOutput := providerRequestParameterByKey(plan.Parameters, providerRequestParameterMaxOutputTokens)
+	if maxOutput.RequestedValue != "4096" || maxOutput.ActualValue != "4096" || maxOutput.Source != reasoningEffortSourceRequest {
+		t.Fatalf("协议转换不应改变最大输出来源: %#v", maxOutput)
+	}
+}
+
+func TestBuildProviderRequestPlanUsesActualProtocolForMaxOutput(t *testing.T) {
+	plan, err := buildProviderRequestPlan(
+		Provider{
+			RequestBodyOverrides: map[string]interface{}{
+				"max_output_tokens": 8192,
+			},
+		},
+		[]byte(`{"model":"claude-opus-4.8","max_tokens":4096,"messages":[]}`),
+		"/v1/messages",
+		"claude-opus-4.8",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	maxOutput := providerRequestParameterByKey(plan.Parameters, providerRequestParameterMaxOutputTokens)
+	if maxOutput.RequestedValue != "4096" || maxOutput.ActualValue != "4096" || maxOutput.Source != reasoningEffortSourceRequest {
+		t.Fatalf("实际 Anthropic 协议应选择 max_tokens: %#v", maxOutput)
+	}
+}
+
+func TestRequestMaxOutputMetadataSupportsProtocolAliases(t *testing.T) {
+	tests := []struct {
+		name     string
+		body     string
+		protocol string
+		want     string
+	}{
+		{name: "anthropic", body: `{"max_tokens":4096}`, protocol: providerRequestProtocolAnthropic, want: "4096"},
+		{name: "openai-responses", body: `{"max_output_tokens":8192}`, protocol: providerRequestProtocolOpenAIResponses, want: "8192"},
+		{name: "openai-chat", body: `{"max_completion_tokens":12288}`, protocol: providerRequestProtocolOpenAIChat, want: "12288"},
+		{name: "gemini", body: `{"generationConfig":{"maxOutputTokens":16384}}`, protocol: providerRequestProtocolGemini, want: "16384"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := requestMaxOutputMetadata([]byte(test.body), test.protocol).Value; got != test.want {
+				t.Fatalf("max output=%q，期望 %q", got, test.want)
+			}
+		})
+	}
+}
+
+func TestBuildGeminiRequestParametersCapturesMaxOutputOverride(t *testing.T) {
+	originalBody := []byte(`{"generationConfig":{"thinkingConfig":{"thinkingLevel":"low"},"maxOutputTokens":8192}}`)
+	actualBody := []byte(`{"generationConfig":{"thinkingConfig":{"thinkingLevel":"high"},"maxOutputTokens":16384}}`)
+	overrides := map[string]interface{}{
+		"generationConfig": map[string]interface{}{
+			"maxOutputTokens": 16384,
+		},
+	}
+	parameters := buildProviderRequestParameters(
+		originalBody,
+		actualBody,
+		"gemini-2.5-pro",
+		providerRequestReasoningMetadata{Effort: "high", Source: reasoningEffortSourceRequestBodyOverride},
+		requestBodyOverridesMaxOutput(originalBody, actualBody, overrides, providerRequestProtocolGemini),
+		providerRequestProtocolGemini,
+		providerRequestProtocolGemini,
+	)
+
+	reasoning := providerRequestParameterByKey(parameters, providerRequestParameterReasoningEffort)
+	if reasoning.RequestedValue != "low" || reasoning.ActualValue != "high" || reasoning.Source != reasoningEffortSourceRequestBodyOverride {
+		t.Fatalf("Gemini 思考强度参数错误: %#v", reasoning)
+	}
+	maxOutput := providerRequestParameterByKey(parameters, providerRequestParameterMaxOutputTokens)
+	if maxOutput.RequestedValue != "8192" || maxOutput.ActualValue != "16384" || maxOutput.Source != reasoningEffortSourceRequestBodyOverride {
+		t.Fatalf("Gemini 最大输出参数错误: %#v", maxOutput)
+	}
+}
+
+func providerRequestParameterByKey(parameters []ProviderConcurrencyRequestParameter, key string) ProviderConcurrencyRequestParameter {
+	for _, parameter := range parameters {
+		if parameter.Key == key {
+			return parameter
+		}
+	}
+	return ProviderConcurrencyRequestParameter{}
+}
+
 func TestBuildProviderRequestPlanDoesNotReinjectRememberedUnsupportedReasoning(t *testing.T) {
 	relay := NewProviderRelayService(nil, nil, nil, nil, nil, nil, "")
 	provider := Provider{
@@ -605,6 +731,20 @@ func TestBuildClaudeCompatibilityRetryPlanRefreshesReasoningMetadata(t *testing.
 			TargetPath:          "reasoning.effort",
 			ModelMappingApplied: true,
 		},
+		Parameters: []ProviderConcurrencyRequestParameter{
+			{
+				Key:            providerRequestParameterReasoningEffort,
+				RequestedValue: "xhigh",
+				ActualValue:    "high",
+				Source:         reasoningEffortSourceModelMapping,
+			},
+			{
+				Key:            providerRequestParameterMaxOutputTokens,
+				RequestedValue: "4096",
+				ActualValue:    "4096",
+				Source:         reasoningEffortSourceRequest,
+			},
+		},
 	}
 	retryPlan, _ := buildClaudeCompatibilityRetryPlan(plan, claudeCompatibilityRetry{
 		UnsupportedFields: []string{"reasoning"},
@@ -618,6 +758,14 @@ func TestBuildClaudeCompatibilityRetryPlanRefreshesReasoningMetadata(t *testing.
 	}
 	if retryPlan.Reasoning.ModelMappingApplied {
 		t.Fatal("兼容重试删除强度后不应标记为已应用")
+	}
+	reasoning := providerRequestParameterByKey(retryPlan.Parameters, providerRequestParameterReasoningEffort)
+	if reasoning.RequestedValue != "xhigh" || reasoning.ActualValue != "" || reasoning.Source != "" {
+		t.Fatalf("兼容重试后的思考强度参数错误: %#v", reasoning)
+	}
+	maxOutput := providerRequestParameterByKey(retryPlan.Parameters, providerRequestParameterMaxOutputTokens)
+	if maxOutput.RequestedValue != "4096" || maxOutput.ActualValue != "" || maxOutput.Source != "" {
+		t.Fatalf("请求体中不存在最大输出时应刷新为空: %#v", maxOutput)
 	}
 }
 
@@ -2150,21 +2298,21 @@ func TestProviderConcurrencySlotLimitAndRelease(t *testing.T) {
 	relay := NewProviderRelayService(nil, nil, nil, nil, nil, nil, "")
 	providerID := "provider-a"
 
-	release, ok := relay.acquireProviderConcurrencySlot("claude", providerID, 1, true, providerConcurrencyRequestMeta{})
+	_, release, ok := relay.acquireProviderConcurrencySlot("claude", providerID, 1, true, providerConcurrencyRequestMeta{})
 	if !ok {
 		t.Fatalf("first provider concurrency slot should be acquired")
 	}
 	if got := relay.providerConcurrencyCount("claude", providerID); got != 1 {
 		t.Fatalf("active concurrency = %d, want 1", got)
 	}
-	if _, ok := relay.acquireProviderConcurrencySlot("claude", providerID, 1, true, providerConcurrencyRequestMeta{}); ok {
+	if _, _, ok := relay.acquireProviderConcurrencySlot("claude", providerID, 1, true, providerConcurrencyRequestMeta{}); ok {
 		t.Fatalf("second provider concurrency slot should be rejected")
 	}
 	release()
 	if got := relay.providerConcurrencyCount("claude", providerID); got != 0 {
 		t.Fatalf("active concurrency after release = %d, want 0", got)
 	}
-	if releaseAgain, ok := relay.acquireProviderConcurrencySlot("claude", providerID, 1, true, providerConcurrencyRequestMeta{}); !ok {
+	if _, releaseAgain, ok := relay.acquireProviderConcurrencySlot("claude", providerID, 1, true, providerConcurrencyRequestMeta{}); !ok {
 		t.Fatalf("provider concurrency slot should be reusable after release")
 	} else {
 		releaseAgain()
@@ -2177,7 +2325,7 @@ func TestProviderConcurrencySlotUnlimitedWhenLimitEmpty(t *testing.T) {
 	releases := make([]func(), 0, 3)
 
 	for i := 0; i < 3; i++ {
-		release, ok := relay.acquireProviderConcurrencySlot("claude", providerID, 0, true, providerConcurrencyRequestMeta{})
+		_, release, ok := relay.acquireProviderConcurrencySlot("claude", providerID, 0, true, providerConcurrencyRequestMeta{})
 		if !ok {
 			t.Fatalf("unlimited provider concurrency slot should be acquired")
 		}
@@ -2200,7 +2348,7 @@ func TestProviderConcurrencySlotTracksWithoutEnforcingLimit(t *testing.T) {
 	releases := make([]func(), 0, 3)
 
 	for i := 0; i < 3; i++ {
-		release, ok := relay.acquireProviderConcurrencySlot("claude", providerID, 1, false, providerConcurrencyRequestMeta{})
+		_, release, ok := relay.acquireProviderConcurrencySlot("claude", providerID, 1, false, providerConcurrencyRequestMeta{})
 		if !ok {
 			t.Fatalf("provider concurrency slot should be acquired when limit is disabled")
 		}
@@ -2221,7 +2369,7 @@ func TestProviderConcurrencySlotTracksRequestDetails(t *testing.T) {
 	relay := NewProviderRelayService(nil, nil, nil, nil, nil, nil, "")
 	providerID := "provider-a"
 
-	release, ok := relay.acquireProviderConcurrencySlot("claude", providerID, 1, false, providerConcurrencyRequestMeta{
+	updateParameters, release, ok := relay.acquireProviderConcurrencySlot("claude", providerID, 1, false, providerConcurrencyRequestMeta{
 		ProviderName:        "Provider A",
 		UserAgent:           "Codex-CLI/1.0",
 		RequestedModel:      "claude-sonnet-4.8",
@@ -2230,8 +2378,11 @@ func TestProviderConcurrencySlotTracksRequestDetails(t *testing.T) {
 		ModelMappingPattern: "claude-sonnet-*",
 		ModelMappingTarget:  "vendor-sonnet-*",
 		ModelRouteCaptured:  true,
-		Endpoint:            "/v1/messages",
-		IsStream:            true,
+		Parameters: []ProviderConcurrencyRequestParameter{
+			{Key: providerRequestParameterReasoningEffort, RequestedValue: "medium", ActualValue: "high", Source: reasoningEffortSourceModelMapping},
+		},
+		Endpoint: "/v1/messages",
+		IsStream: true,
 	})
 	if !ok {
 		t.Fatalf("provider concurrency slot should be acquired")
@@ -2255,6 +2406,16 @@ func TestProviderConcurrencySlotTracksRequestDetails(t *testing.T) {
 	}
 	if !details[0].IsStream {
 		t.Fatalf("is stream = false, want true")
+	}
+	if parameter := providerRequestParameterByKey(details[0].Parameters, providerRequestParameterReasoningEffort); parameter.ActualValue != "high" {
+		t.Fatalf("active request parameters = %#v", details[0].Parameters)
+	}
+	updateParameters([]ProviderConcurrencyRequestParameter{
+		{Key: providerRequestParameterReasoningEffort, RequestedValue: "medium"},
+	})
+	details = relay.providerConcurrencyRequestDetails("claude", providerID)
+	if parameter := providerRequestParameterByKey(details[0].Parameters, providerRequestParameterReasoningEffort); parameter.RequestedValue != "medium" || parameter.ActualValue != "" {
+		t.Fatalf("updated active request parameters = %#v", details[0].Parameters)
 	}
 
 	release()

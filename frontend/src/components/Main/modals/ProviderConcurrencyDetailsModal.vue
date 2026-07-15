@@ -41,106 +41,72 @@
       </div>
 
       <section class="provider-concurrency-modal__section">
-        <template v-if="activeTab === 'active'">
-          <h4 class="provider-concurrency-modal__section-title">{{ t('components.main.concurrencyDetails.activeTitle') }}</h4>
-          <div v-if="activeRequests.length === 0" class="provider-concurrency-modal__state">
-            {{ t('components.main.concurrencyDetails.emptyActive') }}
-          </div>
-          <article
-            v-for="request in activeRequests"
-            v-else
-            :key="request.id"
-            class="provider-concurrency-row"
+        <h4 class="provider-concurrency-modal__section-title">{{ sectionTitle }}</h4>
+        <div
+          v-if="sectionState"
+          class="provider-concurrency-modal__state"
+          :class="{ 'provider-concurrency-modal__state--error': sectionState.isError }"
+        >
+          {{ sectionState.message }}
+        </div>
+        <article
+          v-for="entry in displayEntries"
+          v-else
+          :key="entry.id"
+          class="provider-concurrency-row"
+        >
+          <div
+            class="provider-concurrency-row__main"
+            :class="{ 'provider-concurrency-row__main--route': entry.modelRows.length > 1 }"
           >
             <div
-              class="provider-concurrency-row__main"
-              :class="{ 'provider-concurrency-row__main--route': showModelRouteDetails }"
+              class="provider-concurrency-row__models"
+              :class="{ 'provider-concurrency-row__models--single': entry.modelRows.length === 1 }"
             >
-              <div v-if="showModelRouteDetails" class="provider-concurrency-row__models">
-                <div class="provider-concurrency-row__model-line">
-                  <span class="provider-concurrency-row__model-label">{{ t('components.main.concurrencyDetails.requestedModel') }}</span>
-                  <span class="provider-concurrency-row__model-value">{{ activeRequestedModel(request) }}</span>
-                </div>
-                <div class="provider-concurrency-row__model-line">
-                  <span class="provider-concurrency-row__model-label">{{ t('components.main.concurrencyDetails.actualModel') }}</span>
-                  <span
-                    class="provider-concurrency-row__route-trigger"
-                    tabindex="0"
-                    :aria-label="routeTriggerAriaLabel(activeActualModel(request), activeRouteTooltipLines(request))"
-                    @mouseenter="showRouteTooltip($event, activeRouteTooltipLines(request))"
-                    @mouseleave="hideRouteTooltip($event)"
-                    @focus="showRouteTooltip($event, activeRouteTooltipLines(request))"
-                    @blur="hideRouteTooltip($event)"
-                    @keydown.esc="hideRouteTooltip()"
-                  >
-                    <strong>{{ activeActualModel(request) }}</strong>
+              <div
+                v-for="modelRow in entry.modelRows"
+                :key="modelRow.key"
+                class="provider-concurrency-row__model-line"
+                :class="{ 'provider-concurrency-row__model-line--single': entry.modelRows.length === 1 }"
+              >
+                <span v-if="entry.modelRows.length > 1" class="provider-concurrency-row__model-label">
+                  {{ modelRow.key === 'requested' ? t('components.main.concurrencyDetails.requestedModel') : t('components.main.concurrencyDetails.actualModel') }}
+                </span>
+                <span
+                  class="provider-concurrency-row__route-trigger provider-concurrency-row__model-details"
+                  tabindex="0"
+                  :aria-label="modelRowAriaLabel(modelRow, entry.modelRows.length > 1)"
+                  @mouseenter="showRouteTooltip($event, modelRow.tooltipLines)"
+                  @mouseleave="hideRouteTooltip($event)"
+                  @focus="showRouteTooltip($event, modelRow.tooltipLines)"
+                  @blur="hideRouteTooltip($event)"
+                  @keydown.esc="hideRouteTooltip()"
+                >
+                  <strong v-if="modelRow.emphasized">{{ modelRow.model }}</strong>
+                  <span v-else class="provider-concurrency-row__model-value">{{ modelRow.model }}</span>
+                  <span class="provider-concurrency-row__parameters">
+                    <span
+                      v-for="key in connectionParameterKeys"
+                      :key="key"
+                      :class="['provider-parameter-chip', `provider-parameter-chip--${parameterTone(modelRow.parameters, key, modelRow.stage)}`]"
+                    >
+                      <span class="provider-parameter-chip__label">{{ parameterShortLabel(key) }}</span>
+                      <span class="provider-parameter-chip__value">{{ parameterValue(modelRow.parameters, key, modelRow.stage) }}</span>
+                    </span>
                   </span>
-                </div>
+                </span>
               </div>
-              <strong v-else>{{ displayModel(request.model) }}</strong>
-              <span class="provider-concurrency-row__context">{{ request.endpoint || '-' }}</span>
             </div>
-            <div class="provider-concurrency-row__meta">
-              <span>{{ request.isStream ? t('components.main.concurrencyDetails.stream') : t('components.main.concurrencyDetails.nonStream') }}</span>
-              <span>{{ formatDurationMs(request.durationMs) }}</span>
-            </div>
-            <p class="provider-concurrency-row__ua">{{ request.userAgent || t('components.main.concurrencyDetails.emptyUserAgent') }}</p>
-          </article>
-        </template>
-
-        <template v-else>
-          <h4 class="provider-concurrency-modal__section-title">{{ t('components.main.concurrencyDetails.historyTitle') }}</h4>
-          <div v-if="historyLoading" class="provider-concurrency-modal__state">
-            {{ t('components.main.concurrencyDetails.loadingHistory') }}
+            <span class="provider-concurrency-row__context">{{ entry.context }}</span>
           </div>
-          <div v-else-if="historyError" class="provider-concurrency-modal__state provider-concurrency-modal__state--error">
-            {{ t('components.main.concurrencyDetails.loadHistoryFailed', { error: historyError }) }}
+          <div class="provider-concurrency-row__meta">
+            <template v-for="item in entry.meta" :key="item.key">
+              <time v-if="item.dateTime" :datetime="item.dateTime">{{ item.label }}</time>
+              <span v-else>{{ item.label }}</span>
+            </template>
           </div>
-          <div v-else-if="historyLogs.length === 0" class="provider-concurrency-modal__state">
-            {{ t('components.main.concurrencyDetails.emptyHistory') }}
-          </div>
-          <article
-            v-for="log in historyLogs"
-            v-else
-            :key="log.id"
-            class="provider-concurrency-row"
-          >
-            <div
-              class="provider-concurrency-row__main"
-              :class="{ 'provider-concurrency-row__main--route': showModelRouteDetails }"
-            >
-              <div v-if="showModelRouteDetails" class="provider-concurrency-row__models">
-                <div class="provider-concurrency-row__model-line">
-                  <span class="provider-concurrency-row__model-label">{{ t('components.main.concurrencyDetails.requestedModel') }}</span>
-                  <span class="provider-concurrency-row__model-value">{{ historyRequestedModel(log) }}</span>
-                </div>
-                <div class="provider-concurrency-row__model-line">
-                  <span class="provider-concurrency-row__model-label">{{ t('components.main.concurrencyDetails.actualModel') }}</span>
-                  <span
-                    class="provider-concurrency-row__route-trigger"
-                    tabindex="0"
-                    :aria-label="routeTriggerAriaLabel(historyActualModel(log), historyRouteTooltipLines(log))"
-                    @mouseenter="showRouteTooltip($event, historyRouteTooltipLines(log))"
-                    @mouseleave="hideRouteTooltip($event)"
-                    @focus="showRouteTooltip($event, historyRouteTooltipLines(log))"
-                    @blur="hideRouteTooltip($event)"
-                    @keydown.esc="hideRouteTooltip()"
-                  >
-                    <strong>{{ historyActualModel(log) }}</strong>
-                  </span>
-                </div>
-              </div>
-              <strong v-else>{{ displayModel(log.requested_model || log.model || log.response_model) }}</strong>
-              <span class="provider-concurrency-row__context">HTTP {{ log.http_code || 0 }}</span>
-            </div>
-            <div class="provider-concurrency-row__meta">
-              <span>{{ log.is_stream ? t('components.main.concurrencyDetails.stream') : t('components.main.concurrencyDetails.nonStream') }}</span>
-              <span>{{ formatDurationSec(log.duration_sec) }}</span>
-              <time :datetime="log.created_at">{{ formatDateTime(log.created_at) }}</time>
-            </div>
-            <p class="provider-concurrency-row__ua">{{ log.user_agent || t('components.main.concurrencyDetails.emptyUserAgent') }}</p>
-          </article>
-        </template>
+          <p class="provider-concurrency-row__ua">{{ entry.userAgent }}</p>
+        </article>
       </section>
     </div>
 
@@ -180,15 +146,40 @@ import { fetchRequestLogsPage, type RequestLog, type RequestLogPlatform } from '
 import { extractErrorMessage } from '../../../utils/error'
 import InlineModal from '../../common/InlineModal.vue'
 import { cardProviderRef } from '../adapters/providerCardMappers'
-import type { ProviderConcurrencyRequestView, ProviderConcurrencyStatusView, ResolvedTheme } from '../types'
+import type {
+  ProviderConcurrencyRequestParameterView,
+  ProviderConcurrencyRequestView,
+  ProviderConcurrencyStatusView,
+  ResolvedTheme,
+} from '../types'
 import {
+  buildConnectionModelRows,
   buildModelRouteAriaLabel,
   buildModelRouteTooltipLines,
+  connectionParameterKeys,
+  connectionParameterTone,
+  connectionParameterValue,
+  type ConnectionParameterKey,
+  type ConnectionParameterSnapshot,
+  type ConnectionParameterStage,
+  type ConnectionModelRow,
   type ModelRouteSnapshot,
 } from './providerModelRoute'
 
 const HISTORY_LIMIT = 10
 type ConcurrencyDetailsTab = 'active' | 'history'
+type ConnectionDisplayMetaItem = {
+  key: string
+  label: string
+  dateTime?: string
+}
+type ConnectionDisplayEntry = {
+  id: string | number
+  modelRows: ConnectionModelRow[]
+  context: string
+  meta: ConnectionDisplayMetaItem[]
+  userAgent: string
+}
 
 const props = defineProps<{
   open: boolean
@@ -262,6 +253,82 @@ const dateTimeFormatter = computed(() => new Intl.DateTimeFormat(locale.value ||
   second: '2-digit',
   hour12: false,
 }))
+const sectionTitle = computed(() => activeTab.value === 'active'
+  ? t('components.main.concurrencyDetails.activeTitle')
+  : t('components.main.concurrencyDetails.historyTitle'))
+const sectionState = computed(() => {
+  if (activeTab.value === 'active') {
+    return activeRequests.value.length === 0
+      ? { message: t('components.main.concurrencyDetails.emptyActive'), isError: false }
+      : null
+  }
+  if (historyLoading.value) {
+    return { message: t('components.main.concurrencyDetails.loadingHistory'), isError: false }
+  }
+  if (historyError.value) {
+    return {
+      message: t('components.main.concurrencyDetails.loadHistoryFailed', { error: historyError.value }),
+      isError: true,
+    }
+  }
+  return historyLogs.value.length === 0
+    ? { message: t('components.main.concurrencyDetails.emptyHistory'), isError: false }
+    : null
+})
+const displayEntries = computed<ConnectionDisplayEntry[]>(() => {
+  if (activeTab.value === 'active') {
+    return activeRequests.value.map((request) => {
+      const parameters = activeConnectionParameters(request)
+      return {
+        id: request.id,
+        modelRows: buildConnectionModelRows({
+          showModelRouteDetails: props.showModelRouteDetails,
+          requestedModel: activeRequestedModel(request),
+          actualModel: activeActualModel(request),
+          parameters,
+          actualRouteLines: activeRouteTooltipLines(request),
+        }, t),
+        context: request.endpoint || '-',
+        meta: [
+          {
+            key: 'stream',
+            label: request.isStream
+              ? t('components.main.concurrencyDetails.stream')
+              : t('components.main.concurrencyDetails.nonStream'),
+          },
+          { key: 'duration', label: formatDurationMs(request.durationMs) },
+        ],
+        userAgent: request.userAgent || t('components.main.concurrencyDetails.emptyUserAgent'),
+      }
+    })
+  }
+
+  return historyLogs.value.map((log) => {
+    const parameters = historyConnectionParameters(log)
+    return {
+      id: log.id,
+      modelRows: buildConnectionModelRows({
+        showModelRouteDetails: props.showModelRouteDetails,
+        requestedModel: historyRequestedModel(log),
+        actualModel: historyActualModel(log),
+        parameters,
+        actualRouteLines: historyRouteTooltipLines(log),
+      }, t),
+      context: `HTTP ${log.http_code || 0}`,
+      meta: [
+        {
+          key: 'stream',
+          label: log.is_stream
+            ? t('components.main.concurrencyDetails.stream')
+            : t('components.main.concurrencyDetails.nonStream'),
+        },
+        { key: 'duration', label: formatDurationSec(log.duration_sec) },
+        { key: 'created-at', label: formatDateTime(log.created_at), dateTime: log.created_at },
+      ],
+      userAgent: log.user_agent || t('components.main.concurrencyDetails.emptyUserAgent'),
+    }
+  })
+})
 
 function displayModel(value?: string) {
   return `${value ?? ''}`.trim() || '-'
@@ -281,6 +348,53 @@ function historyRequestedModel(log: RequestLog) {
 
 function historyActualModel(log: RequestLog) {
   return displayModel(log.model || log.response_model || log.requested_model)
+}
+
+function activeConnectionParameters(request: ProviderConcurrencyRequestView): ConnectionParameterSnapshot[] {
+  return Array.isArray(request.parameters)
+    ? request.parameters as ProviderConcurrencyRequestParameterView[]
+    : []
+}
+
+function historyConnectionParameters(log: RequestLog): ConnectionParameterSnapshot[] {
+  return [
+    {
+      key: 'reasoning_effort',
+      requestedValue: '',
+      actualValue: log.reasoning_effort || '',
+      source: log.reasoning_effort_source || '',
+    },
+    {
+      key: 'max_output_tokens',
+      requestedValue: '',
+      actualValue: '',
+      source: '',
+    },
+  ]
+}
+
+function parameterShortLabel(key: ConnectionParameterKey) {
+  return key === 'reasoning_effort'
+    ? t('components.main.concurrencyDetails.parameterReasoningEffortShort')
+    : t('components.main.concurrencyDetails.parameterMaxOutputTokensShort')
+}
+
+function parameterValue(
+  parameters: ConnectionParameterSnapshot[],
+  key: ConnectionParameterKey,
+  stage: ConnectionParameterStage,
+) {
+  return connectionParameterValue(parameters, key, stage)
+}
+
+function parameterTone(
+  parameters: ConnectionParameterSnapshot[],
+  key: ConnectionParameterKey,
+  stage: ConnectionParameterStage,
+) {
+  const parameter = parameters.find((item) => item.key === key)
+  const value = stage === 'requested' ? parameter?.requestedValue : parameter?.actualValue
+  return connectionParameterTone(key, value)
 }
 
 function modelRouteTooltipLines(route: ModelRouteSnapshot, unavailableMessage: string) {
@@ -309,8 +423,14 @@ function historyRouteTooltipLines(log: RequestLog) {
   }, t('components.main.concurrencyDetails.routeUnavailable'))
 }
 
-function routeTriggerAriaLabel(actualModel: string, lines: string[]) {
-  return buildModelRouteAriaLabel(actualModel, lines, t)
+function modelRowAriaLabel(row: ConnectionModelRow, isDual: boolean) {
+  if (isDual && row.key === 'actual') {
+    return buildModelRouteAriaLabel(row.model, row.tooltipLines, t)
+  }
+  return t('components.main.concurrencyDetails.modelDetailsAria', {
+    model: row.model,
+    details: row.tooltipLines.join('; '),
+  })
 }
 
 function showRouteTooltip(event: MouseEvent | FocusEvent, lines: string[]) {
@@ -639,11 +759,20 @@ onBeforeUnmount(() => {
   gap: 6px;
 }
 
+.provider-concurrency-row__models--single {
+  flex: 0 1 auto;
+}
+
 .provider-concurrency-row__model-line {
   display: grid;
   grid-template-columns: minmax(56px, auto) minmax(0, 1fr);
   align-items: baseline;
   gap: 10px;
+}
+
+.provider-concurrency-row__model-line--single {
+  display: flex;
+  min-width: 0;
 }
 
 .provider-concurrency-row__model-label {
@@ -656,6 +785,133 @@ onBeforeUnmount(() => {
 .provider-concurrency-row__route-trigger strong {
   color: #0f172a;
   overflow-wrap: anywhere;
+}
+
+.provider-concurrency-row__model-details {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  width: fit-content;
+  max-width: 100%;
+  gap: 7px;
+}
+
+.provider-concurrency-row__parameters {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  min-width: 0;
+  gap: 5px;
+}
+
+.provider-parameter-chip {
+  display: inline-grid;
+  grid-template-columns: auto minmax(0, auto);
+  align-items: center;
+  max-width: 150px;
+  min-height: 22px;
+  padding: 2px 6px;
+  border: 1px solid rgba(100, 116, 139, 0.24);
+  border-radius: 5px;
+  color: #334155;
+  background: rgba(241, 245, 249, 0.94);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.provider-parameter-chip__label {
+  margin-right: 4px;
+  color: #64748b;
+  font-weight: 600;
+}
+
+.provider-parameter-chip__value {
+  min-width: 0;
+  max-width: 84px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.provider-parameter-chip--low {
+  color: #166534;
+  border-color: rgba(34, 197, 94, 0.3);
+  background: rgba(220, 252, 231, 0.72);
+}
+
+.provider-parameter-chip--medium,
+.provider-parameter-chip--output {
+  color: #1d4ed8;
+  border-color: rgba(59, 130, 246, 0.28);
+  background: rgba(219, 234, 254, 0.72);
+}
+
+.provider-parameter-chip--high {
+  color: #a16207;
+  border-color: rgba(234, 179, 8, 0.32);
+  background: rgba(254, 249, 195, 0.76);
+}
+
+.provider-parameter-chip--xhigh,
+.provider-parameter-chip--max {
+  color: #be123c;
+  border-color: rgba(244, 63, 94, 0.3);
+  background: rgba(255, 228, 230, 0.78);
+}
+
+.provider-parameter-chip--custom {
+  color: #6d28d9;
+  border-color: rgba(139, 92, 246, 0.28);
+  background: rgba(237, 233, 254, 0.74);
+}
+
+.provider-parameter-chip--empty {
+  color: #64748b;
+  border-color: rgba(148, 163, 184, 0.24);
+  background: rgba(241, 245, 249, 0.76);
+}
+
+.provider-concurrency-modal--dark .provider-parameter-chip {
+  color: #cbd5e1;
+  border-color: rgba(148, 163, 184, 0.22);
+  background: rgba(30, 41, 59, 0.86);
+}
+
+.provider-concurrency-modal--dark .provider-parameter-chip__label {
+  color: #94a3b8;
+}
+
+.provider-concurrency-modal--dark .provider-parameter-chip--low {
+  color: #86efac;
+  border-color: rgba(74, 222, 128, 0.28);
+  background: rgba(20, 83, 45, 0.38);
+}
+
+.provider-concurrency-modal--dark .provider-parameter-chip--medium,
+.provider-concurrency-modal--dark .provider-parameter-chip--output {
+  color: #93c5fd;
+  border-color: rgba(96, 165, 250, 0.3);
+  background: rgba(30, 64, 175, 0.3);
+}
+
+.provider-concurrency-modal--dark .provider-parameter-chip--high {
+  color: #fde047;
+  border-color: rgba(250, 204, 21, 0.28);
+  background: rgba(113, 63, 18, 0.34);
+}
+
+.provider-concurrency-modal--dark .provider-parameter-chip--xhigh,
+.provider-concurrency-modal--dark .provider-parameter-chip--max {
+  color: #fda4af;
+  border-color: rgba(251, 113, 133, 0.3);
+  background: rgba(136, 19, 55, 0.3);
+}
+
+.provider-concurrency-modal--dark .provider-parameter-chip--custom {
+  color: #c4b5fd;
+  border-color: rgba(167, 139, 250, 0.3);
+  background: rgba(76, 29, 149, 0.3);
 }
 
 .provider-concurrency-modal--dark .provider-concurrency-row__model-value,
@@ -733,5 +989,30 @@ onBeforeUnmount(() => {
 .provider-concurrency-modal--dark .provider-concurrency-row__ua {
   color: #cbd5e1;
   background: rgba(30, 41, 59, 0.82);
+}
+
+@media (max-width: 640px) {
+  .provider-concurrency-modal__hero {
+    flex-direction: column;
+  }
+
+  .provider-concurrency-modal__stats {
+    justify-content: flex-start;
+  }
+
+  .provider-concurrency-row__model-line {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
+
+  .provider-concurrency-row__models--single {
+    flex-basis: 100%;
+    width: 100%;
+  }
+
+  .provider-concurrency-row__model-details,
+  .provider-concurrency-row__parameters {
+    width: 100%;
+  }
 }
 </style>
