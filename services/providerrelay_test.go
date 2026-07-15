@@ -372,6 +372,255 @@ func TestBuildProviderRequestPlanCapturesCompleteModelRoute(t *testing.T) {
 	}
 }
 
+func TestBuildProviderRequestPlanAppliesModelMappingReasoningEffort(t *testing.T) {
+	tests := []struct {
+		name           string
+		provider       Provider
+		body           string
+		endpoint       string
+		requestedModel string
+		effortPath     string
+		wantEffort     string
+		wantSource     string
+	}{
+		{
+			name: "anthropic-thinking-enabled",
+			provider: Provider{
+				ModelMapping:                 map[string]string{"claude-*": "vendor-*"},
+				ModelMappingReasoningEfforts: map[string]string{"claude-*": "high"},
+			},
+			body:           `{"model":"claude-opus-4.8","thinking":{"type":"adaptive"},"messages":[]}`,
+			endpoint:       "/v1/messages",
+			requestedModel: "claude-opus-4.8",
+			effortPath:     "output_config.effort",
+			wantEffort:     "high",
+			wantSource:     reasoningEffortSourceModelMapping,
+		},
+		{
+			name: "anthropic-existing-effort-without-thinking",
+			provider: Provider{
+				ModelMapping:                 map[string]string{"claude-*": "vendor-*"},
+				ModelMappingReasoningEfforts: map[string]string{"claude-*": "xhigh"},
+			},
+			body:           `{"model":"claude-opus-4.8","output_config":{"effort":"low"},"messages":[]}`,
+			endpoint:       "/v1/messages",
+			requestedModel: "claude-opus-4.8",
+			effortPath:     "output_config.effort",
+			wantEffort:     "xhigh",
+			wantSource:     reasoningEffortSourceModelMapping,
+		},
+		{
+			name: "anthropic-does-not-enable-thinking",
+			provider: Provider{
+				ModelMapping:                 map[string]string{"claude-*": "vendor-*"},
+				ModelMappingReasoningEfforts: map[string]string{"claude-*": "high"},
+			},
+			body:           `{"model":"claude-opus-4.8","messages":[]}`,
+			endpoint:       "/v1/messages",
+			requestedModel: "claude-opus-4.8",
+			effortPath:     "output_config.effort",
+			wantSource:     "",
+		},
+		{
+			name: "openai-chat-max-normalized",
+			provider: Provider{
+				APIFormat:                    claudeAPIFormatOpenAIChat,
+				ModelMapping:                 map[string]string{"claude-*": "vendor-*"},
+				ModelMappingReasoningEfforts: map[string]string{"claude-*": "max"},
+			},
+			body:           `{"model":"claude-opus-4.8","thinking":{"type":"enabled","budget_tokens":8000},"messages":[]}`,
+			endpoint:       "/v1/messages",
+			requestedModel: "claude-opus-4.8",
+			effortPath:     "reasoning_effort",
+			wantEffort:     "xhigh",
+			wantSource:     reasoningEffortSourceModelMapping,
+		},
+		{
+			name: "openai-responses-custom-effort",
+			provider: Provider{
+				APIFormat:                    claudeAPIFormatOpenAIResponse,
+				ModelMapping:                 map[string]string{"claude-*": "vendor-*"},
+				ModelMappingReasoningEfforts: map[string]string{"claude-*": "vendor-ultra"},
+			},
+			body:           `{"model":"claude-opus-4.8","thinking":{"type":"adaptive"},"messages":[]}`,
+			endpoint:       "/v1/messages",
+			requestedModel: "claude-opus-4.8",
+			effortPath:     "reasoning.effort",
+			wantEffort:     "vendor-ultra",
+			wantSource:     reasoningEffortSourceModelMapping,
+		},
+		{
+			name: "codex-responses-existing-effort",
+			provider: Provider{
+				ModelMapping:                 map[string]string{"gpt-*": "vendor-*"},
+				ModelMappingReasoningEfforts: map[string]string{"gpt-*": "max"},
+				RequestBodyOverrides: map[string]interface{}{
+					"reasoning": map[string]interface{}{"effort": "medium"},
+				},
+			},
+			body:           `{"model":"gpt-5.4","reasoning":{"effort":"low"},"input":[]}`,
+			endpoint:       "/responses",
+			requestedModel: "gpt-5.4",
+			effortPath:     "reasoning.effort",
+			wantEffort:     "xhigh",
+			wantSource:     reasoningEffortSourceModelMapping,
+		},
+		{
+			name: "codex-responses-minimal-effort",
+			provider: Provider{
+				ModelMapping:                 map[string]string{"gpt-*": "vendor-*"},
+				ModelMappingReasoningEfforts: map[string]string{"gpt-*": "minimal"},
+			},
+			body:           `{"model":"gpt-5.4","reasoning":{"effort":"minimal"},"input":[]}`,
+			endpoint:       "/responses",
+			requestedModel: "gpt-5.4",
+			effortPath:     "reasoning.effort",
+			wantEffort:     "minimal",
+			wantSource:     reasoningEffortSourceModelMapping,
+		},
+		{
+			name: "request-source",
+			provider: Provider{
+				ModelMapping: map[string]string{"gpt-*": "vendor-*"},
+			},
+			body:           `{"model":"gpt-5.4","reasoning":{"effort":"low"},"input":[]}`,
+			endpoint:       "/responses",
+			requestedModel: "gpt-5.4",
+			effortPath:     "reasoning.effort",
+			wantEffort:     "low",
+			wantSource:     reasoningEffortSourceRequest,
+		},
+		{
+			name: "request-body-override-source",
+			provider: Provider{
+				ModelMapping: map[string]string{"gpt-*": "vendor-*"},
+				RequestBodyOverrides: map[string]interface{}{
+					"reasoning": map[string]interface{}{"effort": "medium"},
+				},
+			},
+			body:           `{"model":"gpt-5.4","reasoning":{"effort":"low"},"input":[]}`,
+			endpoint:       "/responses",
+			requestedModel: "gpt-5.4",
+			effortPath:     "reasoning.effort",
+			wantEffort:     "medium",
+			wantSource:     reasoningEffortSourceRequestBodyOverride,
+		},
+		{
+			name: "thinking-budget-override-source",
+			provider: Provider{
+				ModelMapping: map[string]string{"claude-*": "vendor-*"},
+				RequestBodyOverrides: map[string]interface{}{
+					"thinking": map[string]interface{}{"budget_tokens": 20000},
+				},
+			},
+			body:           `{"model":"claude-opus-4.8","thinking":{"type":"enabled","budget_tokens":1000},"messages":[]}`,
+			endpoint:       "/v1/messages",
+			requestedModel: "claude-opus-4.8",
+			effortPath:     "thinking.budget_tokens",
+			wantEffort:     "20000",
+			wantSource:     reasoningEffortSourceRequestBodyOverride,
+		},
+		{
+			name: "lower-priority-thinking-override-does-not-own-source",
+			provider: Provider{
+				ModelMapping: map[string]string{"claude-*": "vendor-*"},
+				RequestBodyOverrides: map[string]interface{}{
+					"thinking": map[string]interface{}{"type": "adaptive"},
+				},
+			},
+			body:           `{"model":"claude-opus-4.8","output_config":{"effort":"low"},"messages":[]}`,
+			endpoint:       "/v1/messages",
+			requestedModel: "claude-opus-4.8",
+			effortPath:     "output_config.effort",
+			wantEffort:     "low",
+			wantSource:     reasoningEffortSourceRequest,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			plan, err := buildProviderRequestPlan(test.provider, []byte(test.body), test.endpoint, test.requestedModel)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := gjson.GetBytes(plan.BodyBytes, test.effortPath).String(); got != test.wantEffort {
+				t.Fatalf("%s=%q，期望 %q，body=%s", test.effortPath, got, test.wantEffort, plan.BodyBytes)
+			}
+			if plan.Reasoning.Source != test.wantSource {
+				t.Fatalf("Reasoning.Source=%q，期望 %q", plan.Reasoning.Source, test.wantSource)
+			}
+			wantTargetPath := ""
+			if test.wantSource != "" {
+				wantTargetPath = test.effortPath
+			}
+			if plan.Reasoning.TargetPath != wantTargetPath {
+				t.Fatalf("Reasoning.TargetPath=%q，期望 %q", plan.Reasoning.TargetPath, wantTargetPath)
+			}
+			wantModelMappingApplied := test.wantSource == reasoningEffortSourceModelMapping
+			if plan.Reasoning.ModelMappingApplied != wantModelMappingApplied {
+				t.Fatalf("Reasoning.ModelMappingApplied=%t，期望 %t", plan.Reasoning.ModelMappingApplied, wantModelMappingApplied)
+			}
+		})
+	}
+}
+
+func TestBuildProviderRequestPlanDoesNotReinjectRememberedUnsupportedReasoning(t *testing.T) {
+	relay := NewProviderRelayService(nil, nil, nil, nil, nil, nil, "")
+	provider := Provider{
+		ID:                           7,
+		APIURL:                       "https://provider.example.com",
+		APIFormat:                    claudeAPIFormatOpenAIResponse,
+		ModelMapping:                 map[string]string{"claude-*": "vendor-*"},
+		ModelMappingReasoningEfforts: map[string]string{"claude-*": "high"},
+	}
+	effectiveEndpoint := resolveProviderEffectiveEndpoint("claude", provider, "/v1/messages")
+	relay.rememberUnsupportedOptionalParams(provider, effectiveEndpoint, []string{"reasoning"})
+
+	plan, err := relay.buildProviderRequestPlan(
+		provider,
+		[]byte(`{"model":"claude-opus-4.8","thinking":{"type":"adaptive"},"messages":[]}`),
+		"/v1/messages",
+		"claude-opus-4.8",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gjson.GetBytes(plan.BodyBytes, "reasoning").Exists() {
+		t.Fatalf("已记忆不支持 reasoning 后不应重新注入，body=%s", plan.BodyBytes)
+	}
+	if plan.Reasoning.Source != "" {
+		t.Fatalf("未发送思考强度时来源应为空，got=%q", plan.Reasoning.Source)
+	}
+	if plan.Reasoning.ModelMappingApplied {
+		t.Fatal("已清理模型映射强度时不应标记为已应用")
+	}
+}
+
+func TestBuildClaudeCompatibilityRetryPlanRefreshesReasoningMetadata(t *testing.T) {
+	plan := providerRequestPlan{
+		BodyBytes: []byte(`{"model":"vendor-opus","reasoning":{"effort":"high"},"input":[]}`),
+		Reasoning: providerRequestReasoningMetadata{
+			Effort:              "high",
+			Source:              reasoningEffortSourceModelMapping,
+			TargetPath:          "reasoning.effort",
+			ModelMappingApplied: true,
+		},
+	}
+	retryPlan, _ := buildClaudeCompatibilityRetryPlan(plan, claudeCompatibilityRetry{
+		UnsupportedFields: []string{"reasoning"},
+	}, "claude-opus-4.8")
+
+	if gjson.GetBytes(retryPlan.BodyBytes, "reasoning").Exists() {
+		t.Fatalf("兼容重试应删除 reasoning，body=%s", retryPlan.BodyBytes)
+	}
+	if retryPlan.Reasoning.Source != "" {
+		t.Fatalf("兼容重试删除强度后来源应为空，got=%q", retryPlan.Reasoning.Source)
+	}
+	if retryPlan.Reasoning.ModelMappingApplied {
+		t.Fatal("兼容重试删除强度后不应标记为已应用")
+	}
+}
+
 func TestForwardRequestPersistsModelRouteDetails(t *testing.T) {
 	useIsolatedHomeDir(t)
 	gin.SetMode(gin.TestMode)
@@ -399,6 +648,9 @@ func TestForwardRequestPersistsModelRouteDetails(t *testing.T) {
 		if got := gjson.GetBytes(body, "model").String(); got != "forced-opus-model" {
 			t.Errorf("上游实际模型 = %q, 期望 forced-opus-model", got)
 		}
+		if got := gjson.GetBytes(body, "output_config.effort").String(); got != "high" {
+			t.Errorf("上游思考强度 = %q, 期望 high", got)
+		}
 		writer.Header().Set("Content-Type", "application/json")
 		_, _ = writer.Write([]byte(`{"id":"msg_route","type":"message","model":"forced-opus-model","content":[],"usage":{"input_tokens":1,"output_tokens":1}}`))
 	}))
@@ -413,12 +665,15 @@ func TestForwardRequestPersistsModelRouteDetails(t *testing.T) {
 		ModelMapping: map[string]string{
 			"claude-opus-*": "vendor-opus-*",
 		},
+		ModelMappingReasoningEfforts: map[string]string{
+			"claude-opus-*": "high",
+		},
 		RequestBodyOverrides: map[string]interface{}{
 			"model": "forced-opus-model",
 		},
 	}
 	requestedModel := "claude-opus-4.8"
-	bodyBytes := []byte(`{"model":"claude-opus-4.8","messages":[],"stream":false}`)
+	bodyBytes := []byte(`{"model":"claude-opus-4.8","thinking":{"type":"adaptive"},"messages":[],"stream":false}`)
 	relay := NewProviderRelayService(nil, nil, nil, nil, nil, nil, "")
 	plan, err := relay.buildProviderRequestPlan(provider, bodyBytes, "/v1/messages", requestedModel)
 	if err != nil {
@@ -460,6 +715,9 @@ func TestForwardRequestPersistsModelRouteDetails(t *testing.T) {
 	}
 	if !logEntry.ModelRouteCaptured || logEntry.MappedModel != "vendor-opus-4.8" || logEntry.ModelMappingPattern != "claude-opus-*" || logEntry.ModelMappingTarget != "vendor-opus-*" || logEntry.ModelOverride != "forced-opus-model" {
 		t.Fatalf("持久化模型路由详情错误: %#v", logEntry)
+	}
+	if logEntry.ReasoningEffort != "high" || logEntry.ReasoningEffortSource != reasoningEffortSourceModelMapping {
+		t.Fatalf("持久化思考强度错误: %#v", logEntry)
 	}
 }
 
@@ -969,6 +1227,32 @@ func TestExtractRequestLogReasoningEffortAfterGeminiOverrides(t *testing.T) {
 	got := extractRequestLogReasoningEffort(body, "gemini-2.5-pro")
 	if got != "high" {
 		t.Fatalf("extractRequestLogReasoningEffort() = %q, want %q", got, "high")
+	}
+}
+
+func TestApplyGeminiRequestLogReasoningTracksOverrideSource(t *testing.T) {
+	originalBody := []byte(`{"generationConfig":{"thinkingConfig":{"thinkingBudget":1000}}}`)
+	provider := GeminiProvider{
+		RequestBodyOverrides: map[string]interface{}{
+			"generationConfig": map[string]interface{}{
+				"thinkingConfig": map[string]interface{}{
+					"thinkingBudget": 20000,
+				},
+			},
+		},
+	}
+	currentBody, err := buildGeminiRequestBody(originalBody, provider)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requestLog := &ReqeustLog{RequestedModel: "gemini-2.5-pro"}
+	applyGeminiRequestLogReasoning(requestLog, originalBody, currentBody, provider.RequestBodyOverrides)
+
+	if requestLog.ReasoningEffort != "high" {
+		t.Fatalf("ReasoningEffort=%q，期望 high", requestLog.ReasoningEffort)
+	}
+	if requestLog.ReasoningEffortSource != reasoningEffortSourceRequestBodyOverride {
+		t.Fatalf("ReasoningEffortSource=%q，期望 %q", requestLog.ReasoningEffortSource, reasoningEffortSourceRequestBodyOverride)
 	}
 }
 

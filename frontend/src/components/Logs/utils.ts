@@ -98,9 +98,12 @@ export type LogsInfoTooltipLabels = {
   recordedCostLabel: string
   requestedModelLabel: string
   responseModelLabel: string
+  reasoningEffortLabel: string
+  reasoningEffortSourceLabel: string
   userAgentLabel: string
   pricingUnavailableValue: string
   priceSourceLabels: Record<LogPriceSource, string>
+  reasoningEffortSourceLabels: Record<string, string>
 }
 
 export type StreamDiagnosticTooltipLabels = {
@@ -305,6 +308,11 @@ export const resolveReasoningEffortTone = (value?: string) => {
   if (normalized === 'max') return 'max'
   return 'unknown'
 }
+
+export const formatReasoningEffortSource = (
+  source: string | undefined,
+  labels: LogsInfoTooltipLabels,
+) => labels.reasoningEffortSourceLabels[String(source ?? '').trim()] || labels.tooltipValueMissing
 
 export const httpCodeClass = (code: number) => {
   if (code >= 500) return 'http-server-error'
@@ -856,12 +864,19 @@ export const buildLogsInfoTooltipLabels = (translate: LogsTranslate): LogsInfoTo
   recordedCostLabel: translate('components.logs.table.tooltipLabels.recordedCost'),
   requestedModelLabel: translate('components.logs.table.tooltipLabels.requestedModel'),
   responseModelLabel: translate('components.logs.table.tooltipLabels.responseModel'),
+  reasoningEffortLabel: translate('components.logs.table.tooltipLabels.reasoningEffort'),
+  reasoningEffortSourceLabel: translate('components.logs.table.tooltipLabels.reasoningEffortSource'),
   userAgentLabel: translate('components.logs.table.tooltipLabels.userAgent'),
   pricingUnavailableValue: translate('components.logs.table.tooltipValues.pricingUnavailable'),
   priceSourceLabels: {
     provider_api: translate('components.logs.table.priceSourceValues.providerApi'),
     builtin: translate('components.logs.table.priceSourceValues.builtin'),
     none: translate('components.logs.table.priceSourceValues.none'),
+  },
+  reasoningEffortSourceLabels: {
+    request: translate('components.logs.table.reasoningEffortSourceValues.request'),
+    request_body_override: translate('components.logs.table.reasoningEffortSourceValues.requestBodyOverride'),
+    model_mapping: translate('components.logs.table.reasoningEffortSourceValues.modelMapping'),
   },
 })
 
@@ -958,12 +973,16 @@ export const buildModelInfoTooltipDetailData = ({
   currentModel,
   costDetail,
   recordedCost,
+  reasoningEffort,
+  reasoningEffortSource,
 }: {
   source: LogPriceSource
   matchedModel: string
   currentModel: string
   costDetail: CostTooltipDetail
   recordedCost: number
+  reasoningEffort?: string
+  reasoningEffortSource?: string
 }, labels: LogsInfoTooltipLabels): LogInfoTooltipDetail => {
   const rows: LogInfoTooltipRow[] = [
     {
@@ -973,6 +992,23 @@ export const buildModelInfoTooltipDetailData = ({
       tone: resolveLogInfoTooltipSourceTone(source),
     },
   ]
+
+  const normalizedReasoningEffort = normalizeReasoningEffortDisplay(reasoningEffort)
+  if (normalizedReasoningEffort) {
+    rows.push(
+      {
+        key: 'reasoning-effort',
+        label: labels.reasoningEffortLabel,
+        value: normalizedReasoningEffort,
+      },
+      {
+        key: 'reasoning-effort-source',
+        label: labels.reasoningEffortSourceLabel,
+        value: formatReasoningEffortSource(reasoningEffortSource, labels),
+        tone: reasoningEffortSource ? undefined : 'muted',
+      },
+    )
+  }
 
   if (matchedModel && normalizeModelName(matchedModel) !== normalizeModelName(currentModel)) {
     rows.push({

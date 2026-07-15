@@ -7,6 +7,7 @@ import {
   isDefaultOpenCodeModels,
   normalizeClaudeAPIFormatValue,
   normalizeModelMappingMissPolicy,
+  normalizeModelMappingReasoningEfforts,
   normalizeProviderConcurrencyLimit,
   resolvePersistedAnthropicCacheTTL,
 } from './providerFormMappers'
@@ -59,6 +60,7 @@ export type PersistedProvider = PersistedProviderModel & {
   anthropicCacheTTL?: unknown | null
   providerConcurrencyLimit?: number
   modelMappingMissPolicy?: ModelMappingMissPolicy
+  modelMappingReasoningEfforts?: Record<string, string>
   modelPassthroughPatterns?: string[]
   opencodeNpm?: string
   opencodeSettingsConfig?: Record<string, any>
@@ -249,6 +251,10 @@ export const providerToCard = (
   disabledSortOrder: provider.disabledSortOrder || (!provider.enabled ? (provider.sortOrder || 0) : undefined),
   supportedModels: cloneCardValue(provider.supportedModels || {}),
   modelMapping: cloneCardValue(provider.modelMapping || {}),
+  modelMappingReasoningEfforts: normalizeModelMappingReasoningEfforts(
+    provider.modelMappingReasoningEfforts,
+    provider.modelMapping,
+  ),
   modelMappingMissPolicy: normalizeModelMappingMissPolicy(provider.modelMappingMissPolicy),
   modelPassthroughPatterns: cloneCardValue(provider.modelPassthroughPatterns || []),
   requestBodyOverrides: cloneCardValue(provider.requestBodyOverrides || {}),

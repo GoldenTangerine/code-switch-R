@@ -84,6 +84,13 @@
                 {{ mapping.value }}
               </code>
             </div>
+            <span
+              class="mapping-effort"
+              :class="{ 'is-passthrough': !mapping.reasoningEffort }"
+              :title="mapping.reasoningEffort || $t('components.provider.modelMapping.reasoningEffort.passthrough')"
+            >
+              {{ mapping.reasoningEffort || $t('components.provider.modelMapping.reasoningEffort.passthrough') }}
+            </span>
           </div>
 
           <div class="mapping-row-actions">
@@ -91,7 +98,7 @@
               type="button"
               class="mapping-action"
               :aria-label="$t('components.provider.modelMapping.edit')"
-              @click="startEditing(mapping.key, mapping.value)"
+              @click="startEditing(mapping.key, mapping.value, mapping.reasoningEffort)"
             >
               <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
                 <path
@@ -160,6 +167,17 @@
             type="text"
             :placeholder="$t('components.provider.modelMapping.valuePlaceholder')"
             @keydown.enter.prevent="submitMapping"
+          />
+        </div>
+
+        <div class="mapping-field mapping-field--effort">
+          <SearchableModelInput
+            v-model="newReasoningEffort"
+            :options="reasoningEffortOptions"
+            :placeholder="$t('components.provider.modelMapping.reasoningEffort.placeholder')"
+            :empty-text="$t('components.provider.modelMapping.reasoningEffort.customHint')"
+            :aria-label="$t('components.provider.modelMapping.reasoningEffort.label')"
+            max-height="220px"
           />
         </div>
 
@@ -291,12 +309,14 @@ import type { CLIPlatform } from '../../services/cliConfig'
 import { listModelPricing, type ModelPricingRow } from '../../services/modelPricing'
 import { buildBuiltinModelOptions } from '../../utils/builtinModels'
 import BaseInput from './BaseInput.vue'
+import { removeModelMappingRule, upsertModelMappingRule } from './modelMappingState'
 import SearchableModelInput from './SearchableModelInput.vue'
 
 type MappingKind = 'exact' | 'prefix' | 'wildcard'
 
 interface Props {
   modelValue?: Record<string, string>
+  reasoningEfforts?: Record<string, string>
   missPolicy?: ModelMappingMissPolicy
   passthroughPatterns?: string[]
   platform?: CLIPlatform
@@ -304,6 +324,7 @@ interface Props {
 
 interface Emits {
   (e: 'update:modelValue', value: Record<string, string>): void
+  (e: 'update:reasoningEfforts', value: Record<string, string>): void
   (e: 'update:missPolicy', value: ModelMappingMissPolicy): void
   (e: 'update:passthroughPatterns', value: string[]): void
 }
@@ -314,11 +335,16 @@ const { t } = useI18n()
 
 const mappingList = computed(() => {
   if (!props.modelValue) return []
-  return Object.entries(props.modelValue).map(([key, value]) => ({ key, value }))
+  return Object.entries(props.modelValue).map(([key, value]) => ({
+    key,
+    value,
+    reasoningEffort: `${props.reasoningEfforts?.[key] ?? ''}`.trim(),
+  }))
 })
 
 const newKey = ref('')
 const newValue = ref('')
+const newReasoningEffort = ref('')
 const newPassthroughPattern = ref('')
 const editingOriginalKey = ref('')
 const inputError = ref('')
@@ -344,6 +370,7 @@ const HELP_TOOLTIP_VIEWPORT_MARGIN = 12
 let isHelpTooltipListening = false
 
 const isEditing = computed(() => editingOriginalKey.value !== '')
+const reasoningEffortOptions = ['low', 'medium', 'high', 'xhigh', 'max']
 const canSubmitMapping = computed(() => newKey.value.trim() !== '' && newValue.value.trim() !== '')
 const selectedMissPolicy = computed<ModelMappingMissPolicy>({
   get: () => props.missPolicy === 'passthrough' ? 'passthrough' : 'block',
@@ -470,6 +497,7 @@ function hasConflictingKey(key: string): boolean {
 function resetDraft(): void {
   newKey.value = ''
   newValue.value = ''
+  newReasoningEffort.value = ''
   editingOriginalKey.value = ''
   inputError.value = ''
 }
@@ -484,10 +512,11 @@ function handleBuiltinModelSelect(): void {
   focusValueInput()
 }
 
-function startEditing(key: string, value: string): void {
+function startEditing(key: string, value: string, reasoningEffort: string): void {
   editingOriginalKey.value = key
   newKey.value = key
   newValue.value = value
+  newReasoningEffort.value = reasoningEffort
   inputError.value = ''
 }
 
@@ -498,6 +527,7 @@ function cancelEditing(): void {
 function submitMapping(): void {
   const key = newKey.value.trim()
   const value = newValue.value.trim()
+  const reasoningEffort = newReasoningEffort.value.trim()
 
   if (!key || !value) return
 
@@ -506,19 +536,23 @@ function submitMapping(): void {
     return
   }
 
-  const updated = { ...(props.modelValue || {}) }
-  if (isEditing.value && editingOriginalKey.value !== key) {
-    delete updated[editingOriginalKey.value]
-  }
-  updated[key] = value
-  emit('update:modelValue', updated)
+  const updated = upsertModelMappingRule(
+    props.modelValue || {},
+    props.reasoningEfforts || {},
+    editingOriginalKey.value,
+    key,
+    value,
+    reasoningEffort,
+  )
+  emit('update:modelValue', updated.modelMappings)
+  emit('update:reasoningEfforts', updated.reasoningEfforts)
   resetDraft()
 }
 
 function removeMapping(key: string): void {
-  const updated = { ...(props.modelValue || {}) }
-  delete updated[key]
-  emit('update:modelValue', updated)
+  const updated = removeModelMappingRule(props.modelValue || {}, props.reasoningEfforts || {}, key)
+  emit('update:modelValue', updated.modelMappings)
+  emit('update:reasoningEfforts', updated.reasoningEfforts)
 
   if (editingOriginalKey.value === key) {
     resetDraft()
@@ -561,7 +595,7 @@ async function loadBuiltinModelRows(): Promise<void> {
   }
 }
 
-watch([newKey, newValue], () => {
+watch([newKey, newValue, newReasoningEffort], () => {
   inputError.value = ''
 })
 
@@ -833,6 +867,31 @@ html.dark .mapping-type--wildcard {
   color: var(--mac-accent);
 }
 
+.mapping-effort {
+  flex-shrink: 0;
+  min-width: 68px;
+  max-width: min(180px, 35%);
+  overflow: hidden;
+  padding: 4px 8px;
+  border: 1px solid color-mix(in srgb, var(--mac-accent) 34%, var(--mac-border));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--mac-accent) 10%, transparent);
+  color: var(--mac-accent);
+  font-family: 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  line-height: 1.2;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mapping-effort.is-passthrough {
+  border-color: color-mix(in srgb, var(--mac-border) 86%, transparent);
+  background: color-mix(in srgb, var(--mac-surface-strong) 72%, transparent);
+  color: var(--mapping-muted);
+}
+
 .mapping-arrow,
 .input-arrow {
   flex-shrink: 0;
@@ -914,7 +973,7 @@ html.dark .mapping-type--wildcard {
 
 .mapping-input-row {
   display: grid;
-  grid-template-columns: minmax(0, 1.1fr) auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1.05fr) auto minmax(0, 0.95fr) minmax(128px, 0.55fr) auto;
   gap: 12px;
   align-items: center;
 }
@@ -945,6 +1004,16 @@ html.dark .mapping-type--wildcard {
 
 .mapping-field--key :deep(.searchable-model-input__field) {
   padding-right: 34px;
+}
+
+.mapping-field--effort :deep(.searchable-model-input__field) {
+  padding-right: 34px;
+}
+
+.mapping-field--effort :deep(.searchable-model-input__button) {
+  width: 24px;
+  height: 24px;
+  right: 7px;
 }
 
 .mapping-actions {
@@ -1193,6 +1262,10 @@ html.dark .mapping-type--wildcard {
     align-items: flex-start;
     flex-direction: column;
     gap: 8px;
+  }
+
+  .mapping-effort {
+    max-width: 100%;
   }
 
   .mapping-models {

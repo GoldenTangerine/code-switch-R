@@ -58,6 +58,7 @@ export type VendorForm = {
   anthropicCacheTTL?: '' | '5m' | '1h'
   supportedModels?: Record<string, boolean>
   modelMapping?: Record<string, string>
+  modelMappingReasoningEfforts?: Record<string, string>
   modelMappingMissPolicy?: ModelMappingMissPolicy
   modelPassthroughPatterns?: string[]
   requestBodyOverrides?: Record<string, any>

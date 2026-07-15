@@ -328,6 +328,12 @@
         "empty": "No model mapping rules yet",
         "keyPlaceholder": "CLI model (e.g., claude-*)",
         "valuePlaceholder": "Provider model (e.g., kimi-k2-thinking)",
+        "reasoningEffort": {
+          "label": "Reasoning effort",
+          "placeholder": "Passthrough or custom",
+          "passthrough": "Passthrough",
+          "customHint": "Enter a custom effort value"
+        },
         "add": "Add",
         "save": "Save mapping",
         "cancel": "Cancel edit",
@@ -1301,7 +1307,14 @@
           "recordedCost": "Recorded cost",
           "requestedModel": "Requested model",
           "responseModel": "Returned model",
+          "reasoningEffort": "Reasoning effort",
+          "reasoningEffortSource": "Effort source",
           "userAgent": "User-Agent"
+        },
+        "reasoningEffortSourceValues": {
+          "request": "Request",
+          "requestBodyOverride": "Request body override",
+          "modelMapping": "Model mapping"
         },
         "tooltipValues": {
           "missing": "Not recorded",

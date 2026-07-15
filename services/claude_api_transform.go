@@ -1612,11 +1612,12 @@ func shortSHA256Hex(value string) string {
 
 func resolveReasoningEffort(body map[string]interface{}) string {
 	if outputConfig, ok := body["output_config"].(map[string]interface{}); ok {
-		switch getString(outputConfig, "effort") {
-		case "low", "medium", "high":
-			return getString(outputConfig, "effort")
-		case "max":
-			return "xhigh"
+		effort := strings.TrimSpace(getString(outputConfig, "effort"))
+		if effort != "" {
+			if strings.EqualFold(effort, "max") {
+				return "xhigh"
+			}
+			return effort
 		}
 	}
 

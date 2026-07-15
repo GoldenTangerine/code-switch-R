@@ -41,6 +41,21 @@ export const normalizeModelMappingMissPolicy = (value: unknown): ModelMappingMis
   return normalized === 'passthrough' ? 'passthrough' : 'block'
 }
 
+export const normalizeModelMappingReasoningEfforts = (
+  value: unknown,
+  modelMapping: Record<string, string> | undefined,
+): Record<string, string> => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  const normalized: Record<string, string> = {}
+  Object.entries(value as Record<string, unknown>).forEach(([key, effort]) => {
+    const normalizedEffort = `${effort ?? ''}`.trim()
+    if (normalizedEffort && Object.prototype.hasOwnProperty.call(modelMapping || {}, key)) {
+      normalized[key] = normalizedEffort
+    }
+  })
+  return normalized
+}
+
 export const normalizeProviderConcurrencyLimit = (value: unknown): number => {
   const raw = `${value ?? ''}`.trim()
   if (raw === '') return 0
@@ -114,6 +129,7 @@ export const createDefaultVendorForm = (
   anthropicCacheTTL: '',
   supportedModels: {},
   modelMapping: {},
+  modelMappingReasoningEfforts: {},
   modelMappingMissPolicy: 'block',
   modelPassthroughPatterns: [],
   requestBodyOverrides: {},
@@ -164,6 +180,10 @@ export const createVendorFormFromCard = (
   anthropicCacheTTL: resolvePersistedAnthropicCacheTTL(tabId, card.apiFormat, card.anthropicCacheTTL),
   supportedModels: cloneProviderValue(card.supportedModels || {}),
   modelMapping: cloneProviderValue(card.modelMapping || {}),
+  modelMappingReasoningEfforts: normalizeModelMappingReasoningEfforts(
+    card.modelMappingReasoningEfforts,
+    card.modelMapping,
+  ),
   modelMappingMissPolicy: normalizeModelMappingMissPolicy(card.modelMappingMissPolicy),
   modelPassthroughPatterns: cloneProviderValue(card.modelPassthroughPatterns || []),
   requestBodyOverrides: cloneProviderValue(card.requestBodyOverrides || {}),
@@ -254,6 +274,10 @@ export const buildNormalizedVendorForm = ({
     anthropicCacheTTL: resolvePersistedAnthropicCacheTTL(tabId, apiFormat, form.anthropicCacheTTL),
     supportedModels: cloneProviderValue(form.supportedModels || {}),
     modelMapping: cloneProviderValue(form.modelMapping || {}),
+    modelMappingReasoningEfforts: normalizeModelMappingReasoningEfforts(
+      form.modelMappingReasoningEfforts,
+      form.modelMapping,
+    ),
     modelMappingMissPolicy: normalizeModelMappingMissPolicy(form.modelMappingMissPolicy),
     modelPassthroughPatterns: cloneProviderValue(form.modelPassthroughPatterns || []),
     requestBodyOverrides: cloneProviderValue(form.requestBodyOverrides || {}),
@@ -309,6 +333,10 @@ export const buildPersistedProviderFieldsFromForm = (
     anthropicCacheTTL: resolvePersistedAnthropicCacheTTL(tabId, apiFormat, form.anthropicCacheTTL),
     supportedModels: cloneProviderValue(form.supportedModels || {}),
     modelMapping: cloneProviderValue(form.modelMapping || {}),
+    modelMappingReasoningEfforts: normalizeModelMappingReasoningEfforts(
+      form.modelMappingReasoningEfforts,
+      form.modelMapping,
+    ),
     modelMappingMissPolicy: normalizeModelMappingMissPolicy(form.modelMappingMissPolicy),
     modelPassthroughPatterns: cloneProviderValue(form.modelPassthroughPatterns || []),
     requestBodyOverrides: cloneProviderValue(form.requestBodyOverrides || {}),

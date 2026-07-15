@@ -63,6 +63,15 @@ func TestRequestLogListSelectFieldsIncludeModelRouteColumns(t *testing.T) {
 	}
 }
 
+func TestRequestLogListSelectFieldsIncludeReasoningEffortSource(t *testing.T) {
+	for _, field := range requestLogListSelectFields {
+		if field == "reasoning_effort_source" {
+			return
+		}
+	}
+	t.Fatal("日志列表缺少思考强度来源字段: reasoning_effort_source")
+}
+
 func TestRequestLogListSelectFieldsIncludeStreamDiagnosticColumns(t *testing.T) {
 	required := map[string]bool{
 		"stream_last_event":           false,

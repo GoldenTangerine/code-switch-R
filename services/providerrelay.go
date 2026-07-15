@@ -2946,6 +2946,7 @@ func (prs *ProviderRelayService) forwardRequest(
 		ModelMappingTarget:  mappingDetail.TargetPattern,
 		ModelOverride:       modelOverride,
 		ModelRouteCaptured:  true,
+		Reasoning:           buildProviderRequestReasoningMetadata(bodyBytes, requestedModel, false, ""),
 		EffectiveEndpoint:   endpoint,
 	}, prs.isProviderConcurrencyLimitEnabled(kind))
 }
@@ -3047,7 +3048,8 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 		ModelMappingTarget:        strings.TrimSpace(plan.ModelMappingTarget),
 		ModelOverride:             strings.TrimSpace(plan.ModelOverride),
 		ModelRouteCaptured:        plan.ModelRouteCaptured,
-		ReasoningEffort:           extractRequestLogReasoningEffort(bodyBytes, requestedModel),
+		ReasoningEffort:           plan.Reasoning.Effort,
+		ReasoningEffortSource:     plan.Reasoning.Source,
 		UserAgent:                 requestUserAgent,
 		IsStream:                  isStream,
 		CapturePayload:            capturePayloadEnabled,
@@ -3119,8 +3121,9 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 					provider_pricing_available, provider_quota_type, provider_input_usd_per_m, provider_output_usd_per_m,
 					provider_per_call_unified, provider_per_call_input, provider_per_call_output,
 					provider_per_call_unified_set, provider_per_call_input_set, provider_per_call_output_set,
-					request_body, response_body, request_body_truncated, response_body_truncated, payload_bytes, payload_captured
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+					request_body, response_body, request_body_truncated, response_body_truncated, payload_bytes, payload_captured,
+					reasoning_effort_source
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			`,
 			requestLog.Platform,
 			requestLog.Model,
@@ -3188,6 +3191,7 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 			boolToInt(requestLog.ResponseBodyTruncated),
 			requestLog.PayloadBytes,
 			boolToInt(requestLog.PayloadCaptured),
+			requestLog.ReasoningEffortSource,
 		)
 
 		if err != nil {
@@ -3349,32 +3353,40 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 	if !compatibilityRetry.needed() || responseHasStarted(c) {
 		return ok, err
 	}
-	retryPlan := plan
-	retryReasons := make([]string, 0, 3)
-	if compatibilityRetry.WithoutContinuation {
-		retryPlan.BodyBytes = plan.ContinuationRetryBodyBytes
-		retryPlan.PreviousResponseID = ""
-		retryPlan.ContinuationRetryBodyBytes = nil
-		retryReasons = append(retryReasons, "previous_response_id 失效")
-	}
-	if compatibilityRetry.WithoutPromptCacheKey {
-		retryPlan.BodyBytes = removeJSONFieldBytes(retryPlan.BodyBytes, "prompt_cache_key")
-		retryPlan.ContinuationRetryBodyBytes = removeJSONFieldBytes(plan.ContinuationRetryBodyBytes, "prompt_cache_key")
-		retryPlan.PromptCacheKey = ""
-		retryReasons = append(retryReasons, "prompt_cache_key 不兼容")
-	}
-	if len(compatibilityRetry.UnsupportedFields) > 0 {
-		retryPlan.BodyBytes = removeJSONFieldsBytes(retryPlan.BodyBytes, compatibilityRetry.UnsupportedFields)
-		retryPlan.ContinuationRetryBodyBytes = removeJSONFieldsBytes(retryPlan.ContinuationRetryBodyBytes, compatibilityRetry.UnsupportedFields)
-		retryReasons = append(retryReasons, "可选参数不兼容: "+strings.Join(compatibilityRetry.UnsupportedFields, ","))
-	}
+	retryPlan, retryReasons := buildClaudeCompatibilityRetryPlan(plan, compatibilityRetry, requestedModel)
 	requestLog.requestBodyBytes = retryPlan.BodyBytes
+	requestLog.ReasoningEffort = retryPlan.Reasoning.Effort
+	requestLog.ReasoningEffortSource = retryPlan.Reasoning.Source
 	requestLog.ResponseBody = ""
 	requestLog.ResponseBodyTruncated = false
 	requestLog.responseBodyBuffer = nil
 	fmt.Printf("[INFO] Claude API %s，Provider %s 已回退请求重试一次\n", strings.Join(retryReasons, "；"), provider.Name)
 	ok, err, _ = doForward(retryPlan.BodyBytes, retryPlan)
 	return ok, err
+}
+
+func buildClaudeCompatibilityRetryPlan(plan providerRequestPlan, retry claudeCompatibilityRetry, requestedModel string) (providerRequestPlan, []string) {
+	retryPlan := plan
+	retryReasons := make([]string, 0, 3)
+	if retry.WithoutContinuation {
+		retryPlan.BodyBytes = plan.ContinuationRetryBodyBytes
+		retryPlan.PreviousResponseID = ""
+		retryPlan.ContinuationRetryBodyBytes = nil
+		retryReasons = append(retryReasons, "previous_response_id 失效")
+	}
+	if retry.WithoutPromptCacheKey {
+		retryPlan.BodyBytes = removeJSONFieldBytes(retryPlan.BodyBytes, "prompt_cache_key")
+		retryPlan.ContinuationRetryBodyBytes = removeJSONFieldBytes(retryPlan.ContinuationRetryBodyBytes, "prompt_cache_key")
+		retryPlan.PromptCacheKey = ""
+		retryReasons = append(retryReasons, "prompt_cache_key 不兼容")
+	}
+	if len(retry.UnsupportedFields) > 0 {
+		retryPlan.BodyBytes = removeJSONFieldsBytes(retryPlan.BodyBytes, retry.UnsupportedFields)
+		retryPlan.ContinuationRetryBodyBytes = removeJSONFieldsBytes(retryPlan.ContinuationRetryBodyBytes, retry.UnsupportedFields)
+		retryReasons = append(retryReasons, "可选参数不兼容: "+strings.Join(retry.UnsupportedFields, ","))
+	}
+	retryPlan.Reasoning = refreshProviderRequestReasoningMetadata(retryPlan.BodyBytes, requestedModel, plan.Reasoning)
+	return retryPlan, retryReasons
 }
 
 func forwardRelayResponse(response *http.Response, writer http.ResponseWriter, isStream bool, hooks ...xrequest.ResponseHook) (int64, error) {
@@ -3976,9 +3988,9 @@ func normalizeRequestLogReasoningEffortValue(raw string, allowUnknown bool) stri
 	}
 	compactValue := strings.NewReplacer("-", "", "_", "", " ", "").Replace(value)
 	switch compactValue {
-	case "none", "minimal":
+	case "none":
 		return ""
-	case "low", "medium", "high", "xhigh", "max":
+	case "minimal", "low", "medium", "high", "xhigh", "max":
 		return compactValue
 	case "extrahigh":
 		return "xhigh"
@@ -4316,6 +4328,7 @@ func ensureRequestLogTableWithDB(db *sql.DB) error {
 		model_route_captured INTEGER DEFAULT 0,
 		response_model TEXT DEFAULT '',
 		reasoning_effort TEXT DEFAULT '',
+		reasoning_effort_source TEXT DEFAULT '',
 		user_agent TEXT DEFAULT '',
 		provider_id TEXT DEFAULT '',
 		provider TEXT,
@@ -4472,6 +4485,9 @@ func ensureRequestLogTableWithDB(db *sql.DB) error {
 		return err
 	}
 	if err := ensureRequestLogColumn(db, "reasoning_effort", "TEXT DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "reasoning_effort_source", "TEXT DEFAULT ''"); err != nil {
 		return err
 	}
 	if err := ensureRequestLogColumn(db, "user_agent", "TEXT DEFAULT ''"); err != nil {
@@ -5222,6 +5238,7 @@ type ReqeustLog struct {
 	ModelRouteCaptured        bool    `json:"model_route_captured"`
 	ResponseModel             string  `json:"response_model,omitempty"`
 	ReasoningEffort           string  `json:"reasoning_effort,omitempty"`
+	ReasoningEffortSource     string  `json:"reasoning_effort_source,omitempty"`
 	UserAgent                 string  `json:"user_agent,omitempty"`
 	ProviderID                string  `json:"provider_id,omitempty"`
 	Provider                  string  `json:"provider"` // provider name
@@ -5735,10 +5752,182 @@ type providerRequestPlan struct {
 	ModelMappingTarget         string
 	ModelOverride              string
 	ModelRouteCaptured         bool
+	Reasoning                  providerRequestReasoningMetadata
 	EffectiveEndpoint          string
 	PromptCacheKey             string
 	ContinuationSessionKey     string
 	PreviousResponseID         string
+}
+
+type providerRequestReasoningMetadata struct {
+	Effort              string
+	Source              string
+	TargetPath          string
+	ModelMappingApplied bool
+}
+
+const (
+	reasoningEffortSourceRequest             = "request"
+	reasoningEffortSourceRequestBodyOverride = "request_body_override"
+	reasoningEffortSourceModelMapping        = "model_mapping"
+)
+
+func requestReasoningMetadata(bodyBytes []byte, requestedModel string) providerRequestReasoningMetadata {
+	for _, path := range []string{
+		"reasoning.effort",
+		"reasoning_effort",
+		"output_config.effort",
+		"thinkingConfig.thinkingLevel",
+		"generationConfig.thinkingConfig.thinkingLevel",
+		"generationConfig.thinkingConfig.thinking_level",
+		"generation_config.thinking_config.thinking_level",
+		"generation_config.thinking_config.thinkingLevel",
+	} {
+		if effort := normalizeRequestLogReasoningEffort(gjson.GetBytes(bodyBytes, path).String()); effort != "" {
+			return providerRequestReasoningMetadata{Effort: effort, TargetPath: path}
+		}
+	}
+
+	thinkingType := strings.ToLower(strings.TrimSpace(gjson.GetBytes(bodyBytes, "thinking.type").String()))
+	switch thinkingType {
+	case "adaptive":
+		return providerRequestReasoningMetadata{Effort: "xhigh", TargetPath: "thinking.type"}
+	case "enabled":
+		path := "thinking.type"
+		budget := gjson.GetBytes(bodyBytes, "thinking.budget_tokens")
+		if budget.Exists() {
+			path = "thinking.budget_tokens"
+		}
+		return providerRequestReasoningMetadata{Effort: resolveReasoningEffortFromThinkingBudget(budget.Int()), TargetPath: path}
+	}
+
+	for _, path := range []string{
+		"thinkingConfig.thinkingBudget",
+		"thinkingConfig.thinking_budget",
+		"generationConfig.thinkingConfig.thinkingBudget",
+		"generationConfig.thinkingConfig.thinking_budget",
+		"generation_config.thinking_config.thinkingBudget",
+		"generation_config.thinking_config.thinking_budget",
+	} {
+		if budget := gjson.GetBytes(bodyBytes, path); budget.Exists() {
+			if effort := resolveReasoningEffortFromGeminiThinkingBudget(budget.Int()); effort != "" {
+				return providerRequestReasoningMetadata{Effort: effort, TargetPath: path}
+			}
+			return providerRequestReasoningMetadata{}
+		}
+	}
+
+	if effort := extractRequestLogReasoningEffort(bodyBytes, requestedModel); effort != "" {
+		return providerRequestReasoningMetadata{Effort: effort, TargetPath: "model"}
+	}
+	return providerRequestReasoningMetadata{}
+}
+
+func requestHasReasoningEffortSignal(bodyBytes []byte, endpoint string) bool {
+	metadata := requestReasoningMetadata(bodyBytes, "")
+	if endpoint == "/responses" {
+		return metadata.TargetPath == "reasoning.effort"
+	}
+	return metadata.Effort != ""
+}
+
+func collectRequestBodyOverridePaths(overrides map[string]interface{}, prefix string, paths map[string]struct{}) {
+	for key, value := range overrides {
+		if strings.TrimSpace(key) == "" {
+			continue
+		}
+		path := key
+		if prefix != "" {
+			path = prefix + "." + key
+		}
+		if nested, ok := value.(map[string]interface{}); ok && len(nested) > 0 {
+			collectRequestBodyOverridePaths(nested, path, paths)
+			continue
+		}
+		paths[path] = struct{}{}
+	}
+}
+
+func requestBodyOverridesReasoningEffort(originalBody []byte, mergedBody []byte, overrides map[string]interface{}) bool {
+	if len(overrides) == 0 {
+		return false
+	}
+	original := requestReasoningMetadata(originalBody, "")
+	merged := requestReasoningMetadata(mergedBody, "")
+	if merged.Effort == "" {
+		return false
+	}
+	if original.Effort != merged.Effort || original.TargetPath != merged.TargetPath {
+		return true
+	}
+	paths := make(map[string]struct{})
+	collectRequestBodyOverridePaths(overrides, "", paths)
+	for path := range paths {
+		if path == merged.TargetPath || strings.HasPrefix(merged.TargetPath, path+".") {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeMappedReasoningEffort(effort string, endpoint string, apiFormat string) string {
+	normalized := strings.TrimSpace(effort)
+	if strings.EqualFold(normalized, "max") && (endpoint == "/responses" || normalizeClaudeAPIFormat(apiFormat) != claudeAPIFormatAnthropic) {
+		return "xhigh"
+	}
+	return normalized
+}
+
+func applyMappedReasoningEffort(bodyBytes []byte, endpoint string, apiFormat string, effort string) ([]byte, error) {
+	normalizedEffort := normalizeMappedReasoningEffort(effort, endpoint, apiFormat)
+	if normalizedEffort == "" {
+		return bodyBytes, nil
+	}
+
+	path := mappedReasoningEffortTargetPath(endpoint, apiFormat)
+	modified, err := sjson.SetBytes(bodyBytes, path, normalizedEffort)
+	if err != nil {
+		return bodyBytes, fmt.Errorf("设置模型映射思考强度失败: %w", err)
+	}
+	return modified, nil
+}
+
+func mappedReasoningEffortTargetPath(endpoint string, apiFormat string) string {
+	if endpoint == "/responses" || normalizeClaudeAPIFormat(apiFormat) == claudeAPIFormatOpenAIResponse {
+		return "reasoning.effort"
+	}
+	if normalizeClaudeAPIFormat(apiFormat) == claudeAPIFormatOpenAIChat {
+		return "reasoning_effort"
+	}
+	return "output_config.effort"
+}
+
+func buildProviderRequestReasoningMetadata(bodyBytes []byte, requestedModel string, hasRequestBodyOverride bool, modelMappingTargetPath string) providerRequestReasoningMetadata {
+	metadata := requestReasoningMetadata(bodyBytes, requestedModel)
+	if metadata.Effort == "" {
+		return metadata
+	}
+	if modelMappingTargetPath != "" && metadata.TargetPath == modelMappingTargetPath && gjson.GetBytes(bodyBytes, modelMappingTargetPath).Exists() {
+		metadata.Source = reasoningEffortSourceModelMapping
+		metadata.ModelMappingApplied = true
+		return metadata
+	}
+	if hasRequestBodyOverride {
+		metadata.Source = reasoningEffortSourceRequestBodyOverride
+	} else {
+		metadata.Source = reasoningEffortSourceRequest
+	}
+	return metadata
+}
+
+func refreshProviderRequestReasoningMetadata(bodyBytes []byte, requestedModel string, previous providerRequestReasoningMetadata) providerRequestReasoningMetadata {
+	metadata := requestReasoningMetadata(bodyBytes, requestedModel)
+	if metadata.Effort == "" || metadata.TargetPath != previous.TargetPath {
+		return metadata
+	}
+	metadata.Source = previous.Source
+	metadata.ModelMappingApplied = previous.ModelMappingApplied
+	return metadata
 }
 
 func (prs *ProviderRelayService) buildProviderRequestPlan(provider Provider, bodyBytes []byte, endpoint string, requestedModel string) (providerRequestPlan, error) {
@@ -5755,6 +5944,7 @@ func (prs *ProviderRelayService) buildProviderRequestPlan(provider Provider, bod
 		currentBodyBytes = modifiedBody
 	}
 
+	bodyBeforeOverrides := currentBodyBytes
 	if len(provider.RequestBodyOverrides) > 0 {
 		modifiedBody, err := ApplyRequestBodyOverrides(currentBodyBytes, provider.RequestBodyOverrides)
 		if err != nil {
@@ -5762,6 +5952,11 @@ func (prs *ProviderRelayService) buildProviderRequestPlan(provider Provider, bod
 		}
 		currentBodyBytes = modifiedBody
 	}
+	hasRequestBodyReasoningOverride := requestBodyOverridesReasoningEffort(bodyBeforeOverrides, currentBodyBytes, provider.RequestBodyOverrides)
+	shouldApplyMappedReasoningEffort := mappingDetail.Matched &&
+		mappingDetail.ReasoningEffort != "" &&
+		requestHasReasoningEffortSignal(currentBodyBytes, endpoint)
+	mappedReasoningEffortTarget := ""
 
 	currentBodyBytes = applyProviderAnthropicCacheTTLOverride(provider, endpoint, currentBodyBytes)
 
@@ -5779,6 +5974,13 @@ func (prs *ProviderRelayService) buildProviderRequestPlan(provider Provider, bod
 				return providerRequestPlan{}, err
 			}
 			currentBodyBytes = modifiedBody
+			if shouldApplyMappedReasoningEffort {
+				currentBodyBytes, err = applyMappedReasoningEffort(currentBodyBytes, endpoint, resolveClaudeAPIFormat(provider), mappingDetail.ReasoningEffort)
+				if err != nil {
+					return providerRequestPlan{}, err
+				}
+				mappedReasoningEffortTarget = mappedReasoningEffortTargetPath(endpoint, resolveClaudeAPIFormat(provider))
+			}
 			currentBodyBytes = prs.removeRememberedUnsupportedOptionalParams(provider, effectiveEndpoint, currentBodyBytes)
 			if resolveClaudeAPIFormat(provider) == claudeAPIFormatOpenAIResponse {
 				continuationSessionKey = deriveClaudeResponsesContinuationSessionKey(claudeBodyBytes)
@@ -5816,6 +6018,7 @@ func (prs *ProviderRelayService) buildProviderRequestPlan(provider Provider, bod
 					ModelMappingTarget:         mappingDetail.TargetPattern,
 					ModelOverride:              modelOverride,
 					ModelRouteCaptured:         true,
+					Reasoning:                  buildProviderRequestReasoningMetadata(currentBodyBytes, requestedModel, hasRequestBodyReasoningOverride, mappedReasoningEffortTarget),
 					EffectiveEndpoint:          effectiveEndpoint,
 					PromptCacheKey:             promptCacheKey,
 					ContinuationSessionKey:     continuationSessionKey,
@@ -5823,6 +6026,14 @@ func (prs *ProviderRelayService) buildProviderRequestPlan(provider Provider, bod
 				}, nil
 			}
 		}
+	}
+	if shouldApplyMappedReasoningEffort && mappedReasoningEffortTarget == "" {
+		var err error
+		currentBodyBytes, err = applyMappedReasoningEffort(currentBodyBytes, endpoint, resolveClaudeAPIFormat(provider), mappingDetail.ReasoningEffort)
+		if err != nil {
+			return providerRequestPlan{}, err
+		}
+		mappedReasoningEffortTarget = mappedReasoningEffortTargetPath(endpoint, resolveClaudeAPIFormat(provider))
 	}
 
 	return providerRequestPlan{
@@ -5835,6 +6046,7 @@ func (prs *ProviderRelayService) buildProviderRequestPlan(provider Provider, bod
 		ModelMappingTarget:         mappingDetail.TargetPattern,
 		ModelOverride:              modelOverride,
 		ModelRouteCaptured:         true,
+		Reasoning:                  buildProviderRequestReasoningMetadata(currentBodyBytes, requestedModel, hasRequestBodyReasoningOverride, mappedReasoningEffortTarget),
 		EffectiveEndpoint:          effectiveEndpoint,
 		PromptCacheKey:             promptCacheKey,
 		ContinuationSessionKey:     continuationSessionKey,
@@ -6959,6 +7171,23 @@ func buildGeminiRequestBody(bodyBytes []byte, provider GeminiProvider) ([]byte, 
 	return ApplyRequestBodyOverrides(bodyBytes, provider.RequestBodyOverrides)
 }
 
+func applyGeminiRequestLogReasoning(requestLog *ReqeustLog, originalBody []byte, currentBody []byte, overrides map[string]interface{}) {
+	if requestLog == nil {
+		return
+	}
+	metadata := requestReasoningMetadata(currentBody, requestLog.RequestedModel)
+	requestLog.ReasoningEffort = metadata.Effort
+	requestLog.ReasoningEffortSource = ""
+	if metadata.Effort == "" {
+		return
+	}
+	if requestBodyOverridesReasoningEffort(originalBody, currentBody, overrides) {
+		requestLog.ReasoningEffortSource = reasoningEffortSourceRequestBodyOverride
+	} else {
+		requestLog.ReasoningEffortSource = reasoningEffortSourceRequest
+	}
+}
+
 // geminiProxyHandler 处理 Gemini API 请求（支持 Level 分组降级和黑名单）
 func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -7095,7 +7324,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 			_ = GlobalDBQueueLogs.ExecBatchCtx(ctx, `
 					INSERT INTO request_log (
 						platform, model, requested_model, response_model, provider_id, provider, http_code,
-						reasoning_effort, user_agent,
+						reasoning_effort, reasoning_effort_source, user_agent,
 						input_tokens, output_tokens, cache_create_tokens, ephemeral_5m_tokens, ephemeral_1h_tokens, cache_read_tokens,
 						reasoning_tokens, is_stream, duration_sec, first_token_sec, total_cost, group_multiplier, price_source,
 						input_cost, output_cost, reasoning_cost, cache_create_cost, cache_read_cost,
@@ -7104,10 +7333,10 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 						provider_per_call_unified, provider_per_call_input, provider_per_call_output,
 						provider_per_call_unified_set, provider_per_call_input_set, provider_per_call_output_set,
 						request_body, response_body, request_body_truncated, response_body_truncated, payload_bytes, payload_captured
-					) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+					) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 				`,
 				requestLog.Platform, requestLog.Model, requestLog.RequestedModel, requestLog.ResponseModel, requestLog.ProviderID, requestLog.Provider, requestLog.HttpCode,
-				requestLog.ReasoningEffort, requestLog.UserAgent,
+				requestLog.ReasoningEffort, requestLog.ReasoningEffortSource, requestLog.UserAgent,
 				requestLog.InputTokens, requestLog.OutputTokens, requestLog.CacheCreateTokens, requestLog.Ephemeral5mTokens, requestLog.Ephemeral1hTokens,
 				requestLog.CacheReadTokens, requestLog.ReasoningTokens,
 				boolToInt(requestLog.IsStream), requestLog.DurationSec, requestLog.FirstTokenSec, requestLog.TotalCost, requestLog.GroupMultiplier, requestLog.PriceSource,
@@ -7170,7 +7399,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 						lastProvider = provider.Name
 						continue
 					}
-					requestLog.ReasoningEffort = extractRequestLogReasoningEffort(currentBodyBytes, requestLog.RequestedModel)
+					applyGeminiRequestLogReasoning(requestLog, bodyBytes, currentBodyBytes, provider.RequestBodyOverrides)
 
 					for retryCount := 0; retryCount < maxRetryPerProvider; retryCount++ {
 						totalAttempts++
@@ -7277,7 +7506,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 						lastProvider = provider.Name
 						continue
 					}
-					requestLog.ReasoningEffort = extractRequestLogReasoningEffort(currentBodyBytes, requestLog.RequestedModel)
+					applyGeminiRequestLogReasoning(requestLog, bodyBytes, currentBodyBytes, provider.RequestBodyOverrides)
 
 					// 同 Provider 内重试循环
 					for retryCount := 0; retryCount < maxRetryPerProvider; retryCount++ {
@@ -7400,7 +7629,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 					lastError = err
 					continue
 				}
-				requestLog.ReasoningEffort = extractRequestLogReasoningEffort(currentBodyBytes, requestLog.RequestedModel)
+				applyGeminiRequestLogReasoning(requestLog, bodyBytes, currentBodyBytes, provider.RequestBodyOverrides)
 				sessionAttemptID = prs.beginSessionProviderRequest(
 					"gemini",
 					sessionHash,
@@ -7486,7 +7715,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 					lastError = err
 					continue
 				}
-				requestLog.ReasoningEffort = extractRequestLogReasoningEffort(currentBodyBytes, requestLog.RequestedModel)
+				applyGeminiRequestLogReasoning(requestLog, bodyBytes, currentBodyBytes, provider.RequestBodyOverrides)
 
 				ok, err, responseWritten := prs.forwardGeminiRequest(c, &provider, endpoint, currentBodyBytes, isStream, requestLog, providerConcurrencyLimitEnabled)
 				if ok {

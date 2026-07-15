@@ -329,6 +329,12 @@
         "empty": "暂无模型映射规则",
         "keyPlaceholder": "CLI 模型（如 claude-*）",
         "valuePlaceholder": "供应商模型（如 kimi-k2-thinking）",
+        "reasoningEffort": {
+          "label": "思考强度",
+          "placeholder": "透传或输入强度",
+          "passthrough": "透传",
+          "customHint": "可输入自定义强度"
+        },
         "add": "添加",
         "save": "保存映射",
         "cancel": "取消编辑",
@@ -1302,7 +1308,14 @@
           "recordedCost": "日志金额",
           "requestedModel": "选中模型",
           "responseModel": "返回模型",
+          "reasoningEffort": "思考强度",
+          "reasoningEffortSource": "强度来源",
           "userAgent": "User-Agent"
+        },
+        "reasoningEffortSourceValues": {
+          "request": "请求自带",
+          "requestBodyOverride": "请求体强制字段",
+          "modelMapping": "模型映射"
         },
         "tooltipValues": {
           "missing": "未记录",

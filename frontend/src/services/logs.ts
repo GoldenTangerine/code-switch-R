@@ -2,6 +2,7 @@ import { Call } from '@wailsio/runtime'
 
 export type LogPlatform = 'claude' | 'codex' | 'gemini'
 export type RequestLogPlatform = LogPlatform | `custom:${string}`
+export type ReasoningEffortSource = 'request' | 'request_body_override' | 'model_mapping' | ''
 
 export type RequestLog = {
   id: number
@@ -14,7 +15,8 @@ export type RequestLog = {
   model_override?: string
   model_route_captured?: boolean
   response_model?: string
-  reasoning_effort?: string
+	reasoning_effort?: string
+	reasoning_effort_source?: ReasoningEffortSource
   user_agent?: string
   provider_id?: string
   provider: string

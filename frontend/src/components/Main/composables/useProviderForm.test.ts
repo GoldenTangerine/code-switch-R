@@ -10,7 +10,23 @@ vi.mock('@wailsio/runtime', () => ({
 }))
 
 import { Call } from '@wailsio/runtime'
+import { normalizeModelMappingReasoningEfforts } from '../adapters/providerFormMappers'
 import { useProviderForm } from './useProviderForm'
+
+describe('model mapping reasoning effort normalization', () => {
+  it('keeps configured values only for existing mapping rules', () => {
+    expect(normalizeModelMappingReasoningEfforts({
+      'claude-*': ' high ',
+      orphan: 'low',
+      empty: ' ',
+    }, {
+      'claude-*': 'vendor-*',
+      empty: 'vendor-empty',
+    })).toEqual({
+      'claude-*': 'high',
+    })
+  })
+})
 
 const createCard = (
   id: number,

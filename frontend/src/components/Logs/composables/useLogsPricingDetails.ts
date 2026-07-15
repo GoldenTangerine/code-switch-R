@@ -299,6 +299,8 @@ export function useLogsPricingDetails(options: UseLogsPricingDetailsOptions) {
       currentModel,
       costDetail,
       recordedCost: safeNumber(item.total_cost),
+      reasoningEffort: item.reasoning_effort,
+      reasoningEffortSource: item.reasoning_effort_source,
     }, buildInfoTooltipLabels())
   }
 

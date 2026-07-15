@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest'
 import type { ModelUsageStat, RequestLog } from '../../services/logs'
 import {
   buildModelShareRows,
+  buildLogsInfoTooltipLabels,
   buildStreamDiagnosticTooltipDetailData,
   formatCurrencyParts,
   formatFirstTokenDuration,
   formatModelShareTooltipLabel,
+  formatReasoningEffortSource,
   formatTokensPerSecond,
   normalizeReasoningEffortDisplay,
   resolveReasoningEffortTone,
@@ -101,6 +103,16 @@ describe('reasoning effort helpers', () => {
     expect(normalizeReasoningEffortDisplay('MAX')).toBe('max')
     expect(resolveReasoningEffortTone('low')).toBe('low')
     expect(resolveReasoningEffortTone('unknown')).toBe('unknown')
+  })
+
+  it('formats reasoning effort sources and historical missing values', () => {
+    const labels = buildLogsInfoTooltipLabels((key) => key)
+    expect(formatReasoningEffortSource('model_mapping', labels)).toBe(
+      'components.logs.table.reasoningEffortSourceValues.modelMapping',
+    )
+    expect(formatReasoningEffortSource('', labels)).toBe(
+      'components.logs.table.tooltipValues.missing',
+    )
   })
 })
 

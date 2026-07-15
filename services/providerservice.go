@@ -70,6 +70,10 @@ type Provider struct {
 	// 支持精确匹配和通配符（如 "claude-*" -> "anthropic/claude-*"）
 	ModelMapping map[string]string `json:"modelMapping,omitempty"`
 
+	// 模型映射思考强度 - 模型映射 key -> 强制思考强度
+	// 空值或未配置表示保留请求原有强度
+	ModelMappingReasoningEfforts map[string]string `json:"modelMappingReasoningEfforts,omitempty"`
+
 	// 模型映射未命中策略：
 	// - block: 未命中映射时跳过该 Provider（默认）
 	// - passthrough: 未命中映射时按原模型名转发给该 Provider
@@ -217,6 +221,12 @@ func cloneProvider(provider Provider) Provider {
 		cloned.ModelMapping = make(map[string]string, len(provider.ModelMapping))
 		for key, value := range provider.ModelMapping {
 			cloned.ModelMapping[key] = value
+		}
+	}
+	if provider.ModelMappingReasoningEfforts != nil {
+		cloned.ModelMappingReasoningEfforts = make(map[string]string, len(provider.ModelMappingReasoningEfforts))
+		for key, value := range provider.ModelMappingReasoningEfforts {
+			cloned.ModelMappingReasoningEfforts[key] = value
 		}
 	}
 	cloned.ModelPassthroughPatterns = append([]string(nil), provider.ModelPassthroughPatterns...)
@@ -993,6 +1003,12 @@ func (ps *ProviderService) DuplicateProvider(kind string, sourceID int64) (*Prov
 			cloned.ModelMapping[k] = v
 		}
 	}
+	if source.ModelMappingReasoningEfforts != nil {
+		cloned.ModelMappingReasoningEfforts = make(map[string]string, len(source.ModelMappingReasoningEfforts))
+		for k, v := range source.ModelMappingReasoningEfforts {
+			cloned.ModelMappingReasoningEfforts[k] = v
+		}
+	}
 	if source.ModelPassthroughPatterns != nil {
 		cloned.ModelPassthroughPatterns = append([]string(nil), source.ModelPassthroughPatterns...)
 	}
@@ -1116,10 +1132,11 @@ func (p *Provider) GetEffectiveModel(requestedModel string) string {
 }
 
 type providerModelMappingDetail struct {
-	MappedModel   string
-	Pattern       string
-	TargetPattern string
-	Matched       bool
+	MappedModel     string
+	Pattern         string
+	TargetPattern   string
+	ReasoningEffort string
+	Matched         bool
 }
 
 func (p *Provider) resolveModelMapping(requestedModel string) (string, bool) {
@@ -1135,10 +1152,11 @@ func (p *Provider) resolveModelMappingDetail(requestedModel string) providerMode
 	// 优先查找精确映射
 	if mappedModel, exists := p.ModelMapping[requestedModel]; exists {
 		return providerModelMappingDetail{
-			MappedModel:   mappedModel,
-			Pattern:       requestedModel,
-			TargetPattern: mappedModel,
-			Matched:       true,
+			MappedModel:     mappedModel,
+			Pattern:         requestedModel,
+			TargetPattern:   mappedModel,
+			ReasoningEffort: strings.TrimSpace(p.ModelMappingReasoningEfforts[requestedModel]),
+			Matched:         true,
 		}
 	}
 
@@ -1171,10 +1189,11 @@ func (p *Provider) resolveModelMappingDetail(requestedModel string) providerMode
 	})
 	selected := matches[0]
 	return providerModelMappingDetail{
-		MappedModel:   applyWildcardMapping(selected.pattern, selected.replacement, requestedModel),
-		Pattern:       selected.pattern,
-		TargetPattern: selected.replacement,
-		Matched:       true,
+		MappedModel:     applyWildcardMapping(selected.pattern, selected.replacement, requestedModel),
+		Pattern:         selected.pattern,
+		TargetPattern:   selected.replacement,
+		ReasoningEffort: strings.TrimSpace(p.ModelMappingReasoningEfforts[selected.pattern]),
+		Matched:         true,
 	}
 }
 

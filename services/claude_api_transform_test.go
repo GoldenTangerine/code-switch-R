@@ -492,6 +492,19 @@ func TestAnthropicToResponsesRequestMapsZeroThinkingBudgetToMedium(t *testing.T)
 	}
 }
 
+func TestResolveReasoningEffortPreservesCustomOutputConfigValue(t *testing.T) {
+	body := map[string]interface{}{
+		"output_config": map[string]interface{}{"effort": "vendor-ultra"},
+	}
+	if got := resolveReasoningEffort(body); got != "vendor-ultra" {
+		t.Fatalf("自定义思考强度=%q，期望 vendor-ultra", got)
+	}
+	body["output_config"] = map[string]interface{}{"effort": "max"}
+	if got := resolveReasoningEffort(body); got != "xhigh" {
+		t.Fatalf("max 转换=%q，期望 xhigh", got)
+	}
+}
+
 func TestAnthropicToResponsesRequestRespectsDisableParallelToolUse(t *testing.T) {
 	body := map[string]interface{}{
 		"model": "gpt-5.4",
