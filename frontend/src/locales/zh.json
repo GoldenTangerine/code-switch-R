@@ -1018,6 +1018,7 @@
           "providerQuotaQueryAddPreset": "新增预设",
           "providerQuotaQueryDeletePreset": "删除",
           "providerQuotaQueryDeletingPreset": "删除中...",
+          "providerQuotaQueryDiscardChanges": "放弃",
           "providerQuotaQuerySetDefaultPreset": "设为默认",
           "providerQuotaQuerySettingDefaultPreset": "设置中...",
           "providerQuotaQuerySavingPreset": "保存中...",
@@ -1045,6 +1046,8 @@
         },
         "confirmDeleteTitle": "删除供应商",
         "confirmDeleteMessage": "确认删除 {name} 吗？操作不可撤销",
+        "providerQuotaQueryPresetDeleteTitle": "删除预设",
+        "providerQuotaQueryPresetDiscardTitle": "放弃修改",
         "confirmProviderQuotaQueryPresetDiscard": "当前预设有未保存修改，确定要放弃吗？",
         "confirmProviderQuotaQueryPresetDelete": "确认删除当前预设吗？操作不可撤销。",
         "errors": {
@@ -1153,7 +1156,16 @@
         "emptyUserAgent": "无 User-Agent",
         "stream": "流式",
         "nonStream": "非流式",
-        "durationNow": "刚刚"
+        "durationNow": "刚刚",
+        "requestedModel": "请求模型",
+        "actualModel": "实际模型",
+        "routeDetailsAria": "实际模型 {model}。{details}",
+        "mappingRule": "映射规则：{source} → {target}",
+        "mappingResult": "映射结果：{model}",
+        "modelOverride": "请求体覆盖：{source} → {target}",
+        "routeUnchanged": "本次请求未发生模型改写",
+        "routeUnavailable": "该条历史记录未记录模型路由信息",
+        "activeRouteUnavailable": "当前连接未记录模型路由信息"
       },
       "errors": {
         "loadAppSettingsFailed": "加载应用设置失败",
@@ -1295,6 +1307,29 @@
         "tooltipValues": {
           "missing": "未记录",
           "pricingUnavailable": "暂无可拆解价格"
+        },
+        "streamDiagnostics": {
+          "title": "流诊断",
+          "status": "状态",
+          "lastEvent": "最后事件",
+          "compaction": "压缩",
+          "protocol": "协议",
+          "bytes": "字节数",
+          "requested": "已请求",
+          "observed": "已返回",
+          "notObserved": "未返回",
+          "errorKinds": {
+            "emptyStream": "空响应流",
+            "missingTerminal": "缺少完成事件",
+            "unexpectedEof": "流意外结束",
+            "connectionReset": "连接被重置",
+            "timeout": "连接超时",
+            "clientAbort": "客户端已中断",
+            "terminalFailure": "上游终止失败",
+            "upstreamRead": "上游读取失败",
+            "downstreamWrite": "客户端写入失败",
+            "streamError": "流传输失败"
+          }
         },
         "httpCode": "HTTP",
         "stream": "传输",

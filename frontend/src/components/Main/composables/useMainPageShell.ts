@@ -187,6 +187,7 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
   const showHeatmap = ref(true)
   const showHomeTitle = ref(true)
   const enableRoundRobin = ref(false)
+  const claudeModelRoutingEnabled = ref(false)
   const showFirstRunPrompt = ref(false)
   const importStatus = ref<ConfigImportStatus | null>(null)
   const importBusy = ref(false)
@@ -239,6 +240,7 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
       showHomeTitle.value = data?.show_home_title ?? true
       visibleProviderTabs.value = normalizeHomeProviderTabs(data?.home_provider_tabs) as ProviderTab[]
       enableRoundRobin.value = data?.enable_round_robin ?? false
+      claudeModelRoutingEnabled.value = data?.claude_model_routing_enabled === true
       Object.keys(providerConcurrencyLimitStates).forEach((key) => {
         delete providerConcurrencyLimitStates[key]
       })
@@ -257,6 +259,7 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
       showHomeTitle.value = true
       visibleProviderTabs.value = normalizeHomeProviderTabs(null) as ProviderTab[]
       enableRoundRobin.value = false
+      claudeModelRoutingEnabled.value = false
       Object.keys(providerConcurrencyLimitStates).forEach((key) => {
         delete providerConcurrencyLimitStates[key]
       })
@@ -598,6 +601,7 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
     showHeatmap,
     showHomeTitle,
     enableRoundRobin,
+    claudeModelRoutingEnabled,
     heatmapGranularity,
     heatmapDisplaySettings,
     showFirstRunPrompt,

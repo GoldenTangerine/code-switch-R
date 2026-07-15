@@ -103,6 +103,20 @@ export type LogsInfoTooltipLabels = {
   priceSourceLabels: Record<LogPriceSource, string>
 }
 
+export type StreamDiagnosticTooltipLabels = {
+  title: string
+  statusLabel: string
+  lastEventLabel: string
+  compactionLabel: string
+  protocolLabel: string
+  bytesLabel: string
+  missingValue: string
+  compactionRequested: string
+  compactionObserved: string
+  compactionNotObserved: string
+  errorKindLabels: Record<string, string>
+}
+
 export type LogsTableTextFormatters = {
   formatStream: (value?: boolean | number) => string
   formatPayloadDetailAriaLabel: (item: RequestLog) => string
@@ -111,6 +125,8 @@ export type LogsTableTextFormatters = {
   formatReasoningEffort: (item: RequestLog) => string
   formatReasoningEffortTone: (value?: string) => string
   formatVerifyInfoAriaLabel: (item: RequestLog) => string
+  hasStreamDiagnosticData: (item: RequestLog) => boolean
+  formatStreamDiagnosticAriaLabel: (item: RequestLog) => string
   formatCostAriaLabel: (item: RequestLog) => string
 }
 
@@ -849,6 +865,44 @@ export const buildLogsInfoTooltipLabels = (translate: LogsTranslate): LogsInfoTo
   },
 })
 
+export const buildStreamDiagnosticTooltipLabels = (translate: LogsTranslate): StreamDiagnosticTooltipLabels => ({
+  title: translate('components.logs.table.streamDiagnostics.title'),
+  statusLabel: translate('components.logs.table.streamDiagnostics.status'),
+  lastEventLabel: translate('components.logs.table.streamDiagnostics.lastEvent'),
+  compactionLabel: translate('components.logs.table.streamDiagnostics.compaction'),
+  protocolLabel: translate('components.logs.table.streamDiagnostics.protocol'),
+  bytesLabel: translate('components.logs.table.streamDiagnostics.bytes'),
+  missingValue: translate('components.logs.table.tooltipValues.missing'),
+  compactionRequested: translate('components.logs.table.streamDiagnostics.requested'),
+  compactionObserved: translate('components.logs.table.streamDiagnostics.observed'),
+  compactionNotObserved: translate('components.logs.table.streamDiagnostics.notObserved'),
+  errorKindLabels: {
+    empty_stream: translate('components.logs.table.streamDiagnostics.errorKinds.emptyStream'),
+    missing_terminal: translate('components.logs.table.streamDiagnostics.errorKinds.missingTerminal'),
+    unexpected_eof: translate('components.logs.table.streamDiagnostics.errorKinds.unexpectedEof'),
+    connection_reset: translate('components.logs.table.streamDiagnostics.errorKinds.connectionReset'),
+    timeout: translate('components.logs.table.streamDiagnostics.errorKinds.timeout'),
+    client_abort: translate('components.logs.table.streamDiagnostics.errorKinds.clientAbort'),
+    terminal_failure: translate('components.logs.table.streamDiagnostics.errorKinds.terminalFailure'),
+    upstream_read: translate('components.logs.table.streamDiagnostics.errorKinds.upstreamRead'),
+    downstream_write: translate('components.logs.table.streamDiagnostics.errorKinds.downstreamWrite'),
+    stream_error: translate('components.logs.table.streamDiagnostics.errorKinds.streamError'),
+  },
+})
+
+export const hasStreamDiagnosticData = (item: RequestLog): boolean => {
+  if (!item.is_stream) return false
+  return Boolean(
+    String(item.stream_last_event ?? '').trim()
+    || String(item.stream_terminal_event ?? '').trim()
+    || String(item.stream_error_kind ?? '').trim()
+    || item.stream_compaction_requested
+    || item.stream_compaction_observed
+    || safeNumber(item.stream_bytes) > 0
+    || String(item.upstream_protocol ?? '').trim(),
+  )
+}
+
 export const buildLogsTableTextFormatters = (translate: LogsTranslate): LogsTableTextFormatters => ({
   formatStream: (value?: boolean | number) => formatStream(
     value,
@@ -866,6 +920,9 @@ export const buildLogsTableTextFormatters = (translate: LogsTranslate): LogsTabl
   formatReasoningEffortTone: (value?: string) => resolveReasoningEffortTone(value),
   formatVerifyInfoAriaLabel: (item: RequestLog) =>
     `${translate('components.logs.table.verify')}: ${translate(`components.logs.table.verifyValues.${resolveModelVerifyStatus(item)}`)}`,
+  hasStreamDiagnosticData,
+  formatStreamDiagnosticAriaLabel: (item: RequestLog) =>
+    `${translate('components.logs.table.streamDiagnostics.title')}: ${item.http_code}`,
   formatCostAriaLabel: (item: RequestLog) =>
     `${translate('components.logs.table.cost')}: ${formatCurrency(item.total_cost)}`,
 })
@@ -1005,6 +1062,58 @@ export const buildVerifyInfoTooltipDetailData = ({
         label: labels.userAgentLabel,
         value: ua.value,
         tone: ua.tone,
+      },
+    ],
+  }
+}
+
+export const buildStreamDiagnosticTooltipDetailData = (
+  item: RequestLog,
+  labels: StreamDiagnosticTooltipLabels,
+): LogInfoTooltipDetail | null => {
+  if (!hasStreamDiagnosticData(item)) return null
+
+  const errorKind = String(item.stream_error_kind ?? '').trim()
+  const terminalEvent = String(item.stream_terminal_event ?? '').trim()
+  const lastEvent = String(item.stream_last_event ?? '').trim()
+  const protocol = String(item.upstream_protocol ?? '').trim()
+  const streamBytes = Math.max(0, Math.round(safeNumber(item.stream_bytes)))
+  const compactionRequested = Boolean(item.stream_compaction_requested)
+  const compactionObserved = Boolean(item.stream_compaction_observed)
+  const compactionStatus = compactionRequested
+    ? `${labels.compactionRequested} · ${compactionObserved ? labels.compactionObserved : labels.compactionNotObserved}`
+    : compactionObserved
+      ? labels.compactionObserved
+      : labels.missingValue
+
+  return {
+    title: labels.title,
+    variant: 'stream',
+    rows: [
+      {
+        key: 'stream-status',
+        label: labels.statusLabel,
+        value: errorKind ? (labels.errorKindLabels[errorKind] ?? errorKind) : (terminalEvent || labels.missingValue),
+      },
+      {
+        key: 'stream-last-event',
+        label: labels.lastEventLabel,
+        value: lastEvent || labels.missingValue,
+      },
+      {
+        key: 'stream-compaction',
+        label: labels.compactionLabel,
+        value: compactionStatus,
+      },
+      {
+        key: 'stream-protocol',
+        label: labels.protocolLabel,
+        value: protocol || labels.missingValue,
+      },
+      {
+        key: 'stream-bytes',
+        label: labels.bytesLabel,
+        value: streamBytes.toLocaleString(),
       },
     ],
   }

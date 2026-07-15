@@ -1,6 +1,7 @@
 package services
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -339,6 +340,205 @@ func TestRequestBodyOverridesOverrideMappedModel(t *testing.T) {
 	}
 	if gjson.GetBytes(modifiedBody, "metadata.route").String() != "vendor-a" {
 		t.Fatalf("metadata.route = %q, 期望 %q", gjson.GetBytes(modifiedBody, "metadata.route").String(), "vendor-a")
+	}
+}
+
+func TestBuildProviderRequestPlanCapturesCompleteModelRoute(t *testing.T) {
+	provider := Provider{
+		ModelMapping: map[string]string{
+			"claude-opus-*": "vendor-opus-*",
+		},
+		RequestBodyOverrides: map[string]interface{}{
+			"model": "forced-opus-model",
+		},
+	}
+	plan, err := buildProviderRequestPlan(
+		provider,
+		[]byte(`{"model":"claude-opus-4.8","messages":[]}`),
+		"/v1/messages",
+		"claude-opus-4.8",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !plan.ModelRouteCaptured {
+		t.Fatalf("模型路由详情应标记为已记录")
+	}
+	if plan.ModelMappingPattern != "claude-opus-*" || plan.ModelMappingTarget != "vendor-opus-*" {
+		t.Fatalf("模型映射规则错误: %#v", plan)
+	}
+	if plan.MappedModel != "vendor-opus-4.8" || plan.ModelOverride != "forced-opus-model" || plan.EffectiveModel != "forced-opus-model" {
+		t.Fatalf("模型改写链错误: %#v", plan)
+	}
+}
+
+func TestForwardRequestPersistsModelRouteDetails(t *testing.T) {
+	useIsolatedHomeDir(t)
+	gin.SetMode(gin.TestMode)
+	if err := InitDatabase(); err != nil {
+		t.Fatalf("初始化数据库失败: %v", err)
+	}
+	db, err := xdb.DB("default")
+	if err != nil {
+		t.Fatalf("获取数据库连接失败: %v", err)
+	}
+
+	previousLogQueue := GlobalDBQueueLogs
+	logQueue := NewDBWriteQueue(db, 32, true)
+	GlobalDBQueueLogs = logQueue
+	t.Cleanup(func() {
+		_ = logQueue.Shutdown(2 * time.Second)
+		GlobalDBQueueLogs = previousLogQueue
+	})
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		body, readErr := io.ReadAll(request.Body)
+		if readErr != nil {
+			t.Errorf("读取上游请求失败: %v", readErr)
+		}
+		if got := gjson.GetBytes(body, "model").String(); got != "forced-opus-model" {
+			t.Errorf("上游实际模型 = %q, 期望 forced-opus-model", got)
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`{"id":"msg_route","type":"message","model":"forced-opus-model","content":[],"usage":{"input_tokens":1,"output_tokens":1}}`))
+	}))
+	defer upstream.Close()
+
+	provider := Provider{
+		ID:      88,
+		Name:    "Route Persistence",
+		APIURL:  upstream.URL,
+		APIKey:  "test-key",
+		Enabled: true,
+		ModelMapping: map[string]string{
+			"claude-opus-*": "vendor-opus-*",
+		},
+		RequestBodyOverrides: map[string]interface{}{
+			"model": "forced-opus-model",
+		},
+	}
+	requestedModel := "claude-opus-4.8"
+	bodyBytes := []byte(`{"model":"claude-opus-4.8","messages":[],"stream":false}`)
+	relay := NewProviderRelayService(nil, nil, nil, nil, nil, nil, "")
+	plan, err := relay.buildProviderRequestPlan(provider, bodyBytes, "/v1/messages", requestedModel)
+	if err != nil {
+		t.Fatalf("构建请求计划失败: %v", err)
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(bodyBytes))
+	response := httptest.NewRecorder()
+	ginContext, _ := gin.CreateTestContext(response)
+	ginContext.Request = request
+	ok, err := relay.forwardRequestWithPlan(
+		ginContext,
+		"claude",
+		provider,
+		plan.EffectiveEndpoint,
+		map[string]string{},
+		map[string]string{"Content-Type": "application/json"},
+		plan.BodyBytes,
+		false,
+		plan.EffectiveModel,
+		requestedModel,
+		plan,
+		false,
+	)
+	if err != nil || !ok {
+		t.Fatalf("转发请求失败: ok=%v err=%v", ok, err)
+	}
+
+	page, err := NewLogService(nil).ListRequestLogsPageV2("claude", providerRefFromProvider(provider), 10, 0, "", "")
+	if err != nil {
+		t.Fatalf("读取请求日志失败: %v", err)
+	}
+	if len(page.Items) != 1 {
+		t.Fatalf("请求日志数量 = %d, 期望 1", len(page.Items))
+	}
+	logEntry := page.Items[0]
+	if logEntry.RequestedModel != requestedModel || logEntry.Model != "forced-opus-model" {
+		t.Fatalf("持久化模型路由 = %q -> %q", logEntry.RequestedModel, logEntry.Model)
+	}
+	if !logEntry.ModelRouteCaptured || logEntry.MappedModel != "vendor-opus-4.8" || logEntry.ModelMappingPattern != "claude-opus-*" || logEntry.ModelMappingTarget != "vendor-opus-*" || logEntry.ModelOverride != "forced-opus-model" {
+		t.Fatalf("持久化模型路由详情错误: %#v", logEntry)
+	}
+}
+
+func TestForwardRequestPersistsStreamDiagnostics(t *testing.T) {
+	useIsolatedHomeDir(t)
+	gin.SetMode(gin.TestMode)
+	if err := InitDatabase(); err != nil {
+		t.Fatalf("初始化数据库失败: %v", err)
+	}
+	db, err := xdb.DB("default")
+	if err != nil {
+		t.Fatalf("获取数据库连接失败: %v", err)
+	}
+
+	previousLogQueue := GlobalDBQueueLogs
+	logQueue := NewDBWriteQueue(db, 32, true)
+	GlobalDBQueueLogs = logQueue
+	t.Cleanup(func() {
+		_ = logQueue.Shutdown(2 * time.Second)
+		GlobalDBQueueLogs = previousLogQueue
+	})
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "text/event-stream")
+		_, _ = writer.Write([]byte("data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"context_compaction\",\"encrypted_content\":\"opaque\"}}\n\n"))
+		_, _ = writer.Write([]byte("data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n"))
+	}))
+	defer upstream.Close()
+
+	provider := Provider{
+		ID:      89,
+		Name:    "Stream Diagnostics",
+		APIURL:  upstream.URL,
+		APIKey:  "test-key",
+		Enabled: true,
+	}
+	bodyBytes := []byte(`{"model":"gpt-5.3-codex","stream":true,"input":[{"type":"context_compaction"}]}`)
+	plan := providerRequestPlan{
+		OriginalBodyBytes: bodyBytes,
+		BodyBytes:         bodyBytes,
+		EffectiveModel:    "gpt-5.3-codex",
+		EffectiveEndpoint: "/responses",
+	}
+	relay := NewProviderRelayService(nil, nil, nil, nil, nil, nil, "")
+	request := httptest.NewRequest(http.MethodPost, "/responses", bytes.NewReader(bodyBytes))
+	response := httptest.NewRecorder()
+	ginContext, _ := gin.CreateTestContext(response)
+	ginContext.Request = request
+	ok, err := relay.forwardRequestWithPlan(
+		ginContext,
+		"codex",
+		provider,
+		plan.EffectiveEndpoint,
+		map[string]string{},
+		map[string]string{"Content-Type": "application/json"},
+		plan.BodyBytes,
+		true,
+		plan.EffectiveModel,
+		"gpt-5.3-codex",
+		plan,
+		false,
+	)
+	if err != nil || !ok {
+		t.Fatalf("转发请求失败: ok=%v err=%v", ok, err)
+	}
+
+	page, err := NewLogService(nil).ListRequestLogsPageV2("codex", providerRefFromProvider(provider), 10, 0, "", "")
+	if err != nil {
+		t.Fatalf("读取请求日志失败: %v", err)
+	}
+	if len(page.Items) != 1 {
+		t.Fatalf("请求日志数量 = %d, 期望 1", len(page.Items))
+	}
+	logEntry := page.Items[0]
+	if logEntry.StreamLastEvent != "response.completed" || logEntry.StreamTerminalEvent != "response.completed" || logEntry.StreamErrorKind != "" {
+		t.Fatalf("持久化流生命周期错误: %#v", logEntry)
+	}
+	if !logEntry.StreamCompactionRequested || !logEntry.StreamCompactionObserved || logEntry.StreamBytes == 0 || logEntry.UpstreamProtocol == "" {
+		t.Fatalf("持久化流诊断错误: %#v", logEntry)
 	}
 }
 
@@ -1109,6 +1309,28 @@ func TestForwardRelayResponseTreatsSingleLineStreamBodyAsJSON(t *testing.T) {
 	}
 }
 
+func TestForwardRelayResponseDoesNotCommitHeadersForEmptyStream(t *testing.T) {
+	response := &http.Response{
+		StatusCode: http.StatusOK,
+		Header: http.Header{
+			"Content-Type": []string{"text/event-stream"},
+			"X-Upstream":   []string{"empty-stream"},
+		},
+		Body: io.NopCloser(strings.NewReader("")),
+	}
+	writer := httptest.NewRecorder()
+	written, err := forwardRelayResponse(response, writer, true)
+	if !errors.Is(err, errIncompleteStream) {
+		t.Fatalf("空流错误 = %v，期望包含 errIncompleteStream", err)
+	}
+	if written != 0 || writer.Body.Len() != 0 {
+		t.Fatalf("空流不应写入客户端，written=%d body=%q", written, writer.Body.String())
+	}
+	if got := writer.Header().Get("X-Upstream"); got != "" {
+		t.Fatalf("空流不应提交上游响应头，X-Upstream=%q", got)
+	}
+}
+
 func TestRelayPerformanceTraceAccumulatesCompatibilityAttempts(t *testing.T) {
 	base := time.Now()
 	requestLog := &ReqeustLog{}
@@ -1716,11 +1938,16 @@ func TestProviderConcurrencySlotTracksRequestDetails(t *testing.T) {
 	providerID := "provider-a"
 
 	release, ok := relay.acquireProviderConcurrencySlot("claude", providerID, 1, false, providerConcurrencyRequestMeta{
-		ProviderName: "Provider A",
-		UserAgent:    "Codex-CLI/1.0",
-		Model:        "claude-sonnet",
-		Endpoint:     "/v1/messages",
-		IsStream:     true,
+		ProviderName:        "Provider A",
+		UserAgent:           "Codex-CLI/1.0",
+		RequestedModel:      "claude-sonnet-4.8",
+		Model:               "vendor-sonnet-4.8",
+		MappedModel:         "vendor-sonnet-4.8",
+		ModelMappingPattern: "claude-sonnet-*",
+		ModelMappingTarget:  "vendor-sonnet-*",
+		ModelRouteCaptured:  true,
+		Endpoint:            "/v1/messages",
+		IsStream:            true,
 	})
 	if !ok {
 		t.Fatalf("provider concurrency slot should be acquired")
@@ -1733,8 +1960,11 @@ func TestProviderConcurrencySlotTracksRequestDetails(t *testing.T) {
 	if details[0].UserAgent != "Codex-CLI/1.0" {
 		t.Fatalf("user agent = %q, want Codex-CLI/1.0", details[0].UserAgent)
 	}
-	if details[0].Model != "claude-sonnet" {
-		t.Fatalf("model = %q, want claude-sonnet", details[0].Model)
+	if details[0].RequestedModel != "claude-sonnet-4.8" || details[0].Model != "vendor-sonnet-4.8" {
+		t.Fatalf("model route = %q -> %q", details[0].RequestedModel, details[0].Model)
+	}
+	if !details[0].ModelRouteCaptured || details[0].MappedModel != "vendor-sonnet-4.8" || details[0].ModelMappingPattern != "claude-sonnet-*" || details[0].ModelMappingTarget != "vendor-sonnet-*" {
+		t.Fatalf("model route details = %#v", details[0])
 	}
 	if details[0].Endpoint != "/v1/messages" {
 		t.Fatalf("endpoint = %q, want /v1/messages", details[0].Endpoint)

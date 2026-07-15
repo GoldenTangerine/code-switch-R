@@ -372,6 +372,42 @@
       </footer>
     </form>
   </InlineModal>
+
+  <InlineModal
+    :open="presetEditorConfirmAction !== null"
+    :title="presetEditorConfirmTitle"
+    variant="confirm"
+    :body-scrollable="false"
+    :close-disabled="presetEditorDeleting"
+    :panel-width="'min(420px, 92vw)'"
+    @close="closePresetEditorConfirm"
+  >
+    <div class="confirm-body">
+      <p>{{ presetEditorConfirmMessage }}</p>
+    </div>
+    <footer class="form-actions confirm-actions">
+      <BaseButton
+        variant="outline"
+        type="button"
+        :disabled="presetEditorDeleting"
+        @click="closePresetEditorConfirm"
+      >
+        {{ t('components.main.form.actions.cancel') }}
+      </BaseButton>
+      <BaseButton
+        variant="danger"
+        type="button"
+        :disabled="presetEditorDeleting"
+        @click="confirmPresetEditorAction"
+      >
+        {{ presetEditorDeleting
+          ? t('components.main.form.actions.providerQuotaQueryDeletingPreset')
+          : presetEditorConfirmAction?.kind === 'delete'
+            ? t('components.main.form.actions.providerQuotaQueryDeletePreset')
+            : t('components.main.form.actions.providerQuotaQueryDiscardChanges') }}
+      </BaseButton>
+    </footer>
+  </InlineModal>
 </template>
 
 <script setup lang="ts">
@@ -411,6 +447,12 @@ const DEFAULT_TIMEOUT = 10
 const DEFAULT_AUTO_QUERY_INTERVAL = 5
 const editablePresetTemplateTypes = new Set<ProviderQuotaTemplateType>(['custom', 'general', 'newapi'])
 
+type PresetEditorConfirmAction =
+  | { kind: 'delete', presetId: string }
+  | { kind: 'discard-close' }
+  | { kind: 'discard-create' }
+  | { kind: 'discard-select', presetId: string }
+
 const props = defineProps<{
   open: boolean
   modelValue?: ProviderQuotaQueryConfig
@@ -449,6 +491,7 @@ const presetEditorError = ref('')
 const presetEditorSaving = ref(false)
 const presetEditorDeleting = ref(false)
 const presetEditorDefaulting = ref(false)
+const presetEditorConfirmAction = ref<PresetEditorConfirmAction | null>(null)
 
 const detectedTokenPlanProvider = computed(() => (
   detectProviderQuotaTokenPlanProvider(props.providerApiUrl)
@@ -479,6 +522,16 @@ const presetEditorItems = computed(() => currentPresetGroup.value.items ?? [])
 const hasPresetEditorUnsavedChanges = computed(() => (
   presetEditorName.value !== presetEditorSnapshotName.value
     || presetEditorText.value !== presetEditorSnapshotText.value
+))
+const presetEditorConfirmTitle = computed(() => t(
+  presetEditorConfirmAction.value?.kind === 'delete'
+    ? 'components.main.form.providerQuotaQueryPresetDeleteTitle'
+    : 'components.main.form.providerQuotaQueryPresetDiscardTitle',
+))
+const presetEditorConfirmMessage = computed(() => t(
+  presetEditorConfirmAction.value?.kind === 'delete'
+    ? 'components.main.form.confirmProviderQuotaQueryPresetDelete'
+    : 'components.main.form.confirmProviderQuotaQueryPresetDiscard',
 ))
 const showScriptSection = computed(() => (
   selectedTemplate.value === 'custom'
@@ -831,6 +884,7 @@ async function loadPresetGroups() {
 async function openPresetEditor() {
   if (!showScriptTemplate(selectedTemplate.value)) return
   presetEditorError.value = ''
+  presetEditorConfirmAction.value = null
   await loadPresetGroups()
   const group = resolvePresetGroup(selectedTemplate.value)
   const preset = group.items.find((item) => item.id === group.defaultId) ?? group.items[0]
@@ -841,20 +895,23 @@ async function openPresetEditor() {
 function closePresetEditor() {
   presetEditorOpen.value = false
   presetEditorError.value = ''
+  presetEditorConfirmAction.value = null
 }
 
-function confirmDiscardPresetEditorChanges(): boolean {
-  if (!hasPresetEditorUnsavedChanges.value) return true
-  return confirm(t('components.main.form.confirmProviderQuotaQueryPresetDiscard'))
+function closePresetEditorConfirm() {
+  if (presetEditorDeleting.value) return
+  presetEditorConfirmAction.value = null
 }
 
 function requestClosePresetEditor() {
-  if (!confirmDiscardPresetEditorChanges()) return
+  if (hasPresetEditorUnsavedChanges.value) {
+    presetEditorConfirmAction.value = { kind: 'discard-close' }
+    return
+  }
   closePresetEditor()
 }
 
-function createPresetDraft() {
-  if (!confirmDiscardPresetEditorChanges()) return
+function applyCreatePresetDraft() {
   selectedPresetId.value = ''
   presetEditorName.value = t('components.main.form.placeholders.providerQuotaQueryPresetName')
   presetEditorText.value = buildPresetCode(selectedTemplate.value)
@@ -863,11 +920,26 @@ function createPresetDraft() {
   presetEditorError.value = ''
 }
 
-function selectPresetDraft(presetId: string) {
-  if (selectedPresetId.value === presetId) return
-  if (!confirmDiscardPresetEditorChanges()) return
+function createPresetDraft() {
+  if (hasPresetEditorUnsavedChanges.value) {
+    presetEditorConfirmAction.value = { kind: 'discard-create' }
+    return
+  }
+  applyCreatePresetDraft()
+}
+
+function applySelectPresetDraft(presetId: string) {
   presetEditorError.value = ''
   updatePresetDraftFromId(presetId)
+}
+
+function selectPresetDraft(presetId: string) {
+  if (selectedPresetId.value === presetId) return
+  if (hasPresetEditorUnsavedChanges.value) {
+    presetEditorConfirmAction.value = { kind: 'discard-select', presetId }
+    return
+  }
+  applySelectPresetDraft(presetId)
 }
 
 async function persistPresetGroups(nextGroups: ProviderQuotaQueryPresetGroups) {
@@ -929,16 +1001,22 @@ async function handleSavePresetCode() {
   }
 }
 
-async function handleDeletePresetCode() {
+function handleDeletePresetCode() {
   if (!showScriptTemplate(selectedTemplate.value)) return
   if (!selectedPresetId.value) return
-  if (!confirm(t('components.main.form.confirmProviderQuotaQueryPresetDelete'))) return
+  presetEditorConfirmAction.value = {
+    kind: 'delete',
+    presetId: selectedPresetId.value,
+  }
+}
+
+async function executeDeletePresetCode(presetId: string): Promise<void> {
   presetEditorError.value = ''
   presetEditorDeleting.value = true
   try {
     const group = resolvePresetGroup(selectedTemplate.value)
-    const nextItems = group.items.filter((item) => item.id !== selectedPresetId.value)
-    const nextDefaultId = group.defaultId === selectedPresetId.value ? nextItems[0]?.id ?? '' : group.defaultId
+    const nextItems = group.items.filter((item) => item.id !== presetId)
+    const nextDefaultId = group.defaultId === presetId ? nextItems[0]?.id ?? '' : group.defaultId
     const nextGroups = {
       ...presetGroups.value,
       [selectedTemplate.value]: {
@@ -957,6 +1035,30 @@ async function handleDeletePresetCode() {
     presetEditorError.value = error instanceof Error ? error.message : String(error)
   } finally {
     presetEditorDeleting.value = false
+  }
+}
+
+async function confirmPresetEditorAction() {
+  const action = presetEditorConfirmAction.value
+  if (!action || presetEditorDeleting.value) return
+
+  if (action.kind === 'delete') {
+    await executeDeletePresetCode(action.presetId)
+    presetEditorConfirmAction.value = null
+    return
+  }
+
+  presetEditorConfirmAction.value = null
+  switch (action.kind) {
+    case 'discard-close':
+      closePresetEditor()
+      break
+    case 'discard-create':
+      applyCreatePresetDraft()
+      break
+    case 'discard-select':
+      applySelectPresetDraft(action.presetId)
+      break
   }
 }
 

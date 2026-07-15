@@ -545,6 +545,29 @@ func TestProvider_GetEffectiveModel(t *testing.T) {
 	}
 }
 
+func TestProviderResolveModelMappingDetailPreservesSelectedRule(t *testing.T) {
+	provider := Provider{ModelMapping: map[string]string{
+		"claude-*":        "vendor-*",
+		"claude-opus-*":   "vendor-opus-*",
+		"claude-opus-4.8": "vendor-opus-exact",
+	}}
+
+	exact := provider.resolveModelMappingDetail("claude-opus-4.8")
+	if !exact.Matched || exact.Pattern != "claude-opus-4.8" || exact.TargetPattern != "vendor-opus-exact" || exact.MappedModel != "vendor-opus-exact" {
+		t.Fatalf("精确映射详情错误: %#v", exact)
+	}
+
+	wildcard := provider.resolveModelMappingDetail("claude-opus-5")
+	if !wildcard.Matched || wildcard.Pattern != "claude-opus-*" || wildcard.TargetPattern != "vendor-opus-*" || wildcard.MappedModel != "vendor-opus-5" {
+		t.Fatalf("通配符映射详情错误: %#v", wildcard)
+	}
+
+	miss := provider.resolveModelMappingDetail("gpt-5")
+	if miss.Matched || miss.MappedModel != "gpt-5" || miss.Pattern != "" || miss.TargetPattern != "" {
+		t.Fatalf("未命中映射详情错误: %#v", miss)
+	}
+}
+
 // ==================== ValidateConfiguration 测试 ====================
 
 func TestProvider_ValidateConfiguration(t *testing.T) {

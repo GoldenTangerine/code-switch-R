@@ -1,7 +1,9 @@
 package services
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -35,6 +37,60 @@ func TestParseEventPayloadSupportsChunkedSSEWithoutSpaceAfterDataPrefix(t *testi
 	}
 	if remainder.Len() != 0 {
 		t.Fatalf("chunk2 完成后不应残留未解析数据，剩余长度=%d", remainder.Len())
+	}
+}
+
+func TestResponsesStreamDiagnosticsCaptureRemoteCompactionLifecycle(t *testing.T) {
+	reqLog := &ReqeustLog{IsStream: true}
+	hook := ReqeustLogHook(nil, "codex", reqLog)
+
+	_, _ = hook([]byte("data: {\"type\":\"response.created\"}\n"))
+	_, _ = hook([]byte("data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"context_compaction\",\"encrypted_content\":\"opaque\"}}\n"))
+	_, _ = hook([]byte("data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n"))
+
+	if reqLog.StreamLastEvent != "response.completed" || reqLog.StreamTerminalEvent != "response.completed" {
+		t.Fatalf("流生命周期记录错误: %#v", reqLog)
+	}
+	if !reqLog.StreamCompactionObserved {
+		t.Fatalf("应识别 context_compaction 输出项")
+	}
+}
+
+func TestResponsesCompactionRequestDetection(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want bool
+	}{
+		{name: "remote-v2-trigger", body: `{"input":[{"type":"context_compaction"}]}`, want: true},
+		{name: "new-trigger", body: `{"input":[{"type":"compaction"}]}`, want: true},
+		{name: "retained-compaction", body: `{"input":[{"type":"context_compaction","encrypted_content":"opaque"}]}`, want: false},
+		{name: "server-side", body: `{"context_management":[{"type":"compaction","compact_threshold":200000}]}`, want: true},
+		{name: "normal", body: `{"input":[{"type":"message","role":"user"}]}`, want: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := isResponsesCompactionRequest([]byte(test.body)); got != test.want {
+				t.Fatalf("isResponsesCompactionRequest()=%v，期望 %v", got, test.want)
+			}
+		})
+	}
+}
+
+func TestClassifyStreamErrorKind(t *testing.T) {
+	tests := []struct {
+		err  error
+		want string
+	}{
+		{err: fmt.Errorf("error streaming response: %w", io.ErrUnexpectedEOF), want: "unexpected_eof"},
+		{err: errors.New("error streaming response: read: connection reset by peer"), want: "connection_reset"},
+		{err: errors.New("error streaming response: i/o timeout"), want: "timeout"},
+		{err: fmt.Errorf("%w: empty upstream stream", errIncompleteStream), want: "empty_stream"},
+	}
+	for _, test := range tests {
+		if got := classifyStreamErrorKind(test.err); got != test.want {
+			t.Fatalf("classifyStreamErrorKind(%q)=%q，期望 %q", test.err, got, test.want)
+		}
 	}
 }
 

@@ -251,6 +251,7 @@ var (
 	responseModelRegex                     = regexp.MustCompile(`"model"\s*:\s*"([^"]+)"`)
 	responseModelVersionRegex              = regexp.MustCompile(`"modelVersion"\s*:\s*"([^"]+)"`)
 	claudeMetadataLegacyUserIDRegex        = regexp.MustCompile(`^user_([a-fA-F0-9]{64})_account_([a-fA-F0-9-]*)_session_([a-fA-F0-9-]{36})$`)
+	claudeSubagentSystemPattern            = regexp.MustCompile(`(?i)\byou are (?:an?|the) [^.\n]{0,80}\bagent\b`)
 	requestLogSensitiveJSONValuePattern    = regexp.MustCompile(`(?i)("(?:api[_-]?key|x-api-key|x-goog-api-key|authorization|auth[_-]?token|access[_-]?token|refresh[_-]?token|password|secret)"\s*:\s*)"[^"]*"`)
 	requestLogAuthorizationBearerPattern   = regexp.MustCompile(`(?i)(authorization\s*[:=]\s*bearer\s+)[^\s",]+`)
 	requestLogSensitiveQueryValuePattern   = regexp.MustCompile(`(?i)((?:api[_-]?key|x-api-key|x-goog-api-key|auth[_-]?token|access[_-]?token)=)[^&\s]+`)
@@ -353,24 +354,36 @@ type ProviderConcurrencyStatus struct {
 }
 
 type ProviderConcurrencyRequestDetail struct {
-	ID           string `json:"id"`
-	Platform     string `json:"platform"`
-	ProviderID   string `json:"providerId"`
-	ProviderName string `json:"providerName"`
-	UserAgent    string `json:"userAgent,omitempty"`
-	Model        string `json:"model,omitempty"`
-	Endpoint     string `json:"endpoint,omitempty"`
-	IsStream     bool   `json:"isStream"`
-	StartedAt    int64  `json:"startedAt"`
-	DurationMs   int64  `json:"durationMs"`
+	ID                  string `json:"id"`
+	Platform            string `json:"platform"`
+	ProviderID          string `json:"providerId"`
+	ProviderName        string `json:"providerName"`
+	UserAgent           string `json:"userAgent,omitempty"`
+	RequestedModel      string `json:"requestedModel,omitempty"`
+	Model               string `json:"model,omitempty"`
+	MappedModel         string `json:"mappedModel,omitempty"`
+	ModelMappingPattern string `json:"modelMappingPattern,omitempty"`
+	ModelMappingTarget  string `json:"modelMappingTarget,omitempty"`
+	ModelOverride       string `json:"modelOverride,omitempty"`
+	ModelRouteCaptured  bool   `json:"modelRouteCaptured"`
+	Endpoint            string `json:"endpoint,omitempty"`
+	IsStream            bool   `json:"isStream"`
+	StartedAt           int64  `json:"startedAt"`
+	DurationMs          int64  `json:"durationMs"`
 }
 
 type providerConcurrencyRequestMeta struct {
-	ProviderName string
-	UserAgent    string
-	Model        string
-	Endpoint     string
-	IsStream     bool
+	ProviderName        string
+	UserAgent           string
+	RequestedModel      string
+	Model               string
+	MappedModel         string
+	ModelMappingPattern string
+	ModelMappingTarget  string
+	ModelOverride       string
+	ModelRouteCaptured  bool
+	Endpoint            string
+	IsStream            bool
 }
 
 type providerSessionLoad struct {
@@ -1029,16 +1042,22 @@ func (prs *ProviderRelayService) acquireProviderConcurrencySlot(platform string,
 		prs.providerConcurrencyRequests[key] = map[string]ProviderConcurrencyRequestDetail{}
 	}
 	prs.providerConcurrencyRequests[key][requestID] = ProviderConcurrencyRequestDetail{
-		ID:           requestID,
-		Platform:     strings.TrimSpace(platform),
-		ProviderID:   strings.TrimSpace(providerID),
-		ProviderName: strings.TrimSpace(meta.ProviderName),
-		UserAgent:    strings.TrimSpace(meta.UserAgent),
-		Model:        strings.TrimSpace(meta.Model),
-		Endpoint:     strings.TrimSpace(meta.Endpoint),
-		IsStream:     meta.IsStream,
-		StartedAt:    startedAt.UnixMilli(),
-		DurationMs:   0,
+		ID:                  requestID,
+		Platform:            strings.TrimSpace(platform),
+		ProviderID:          strings.TrimSpace(providerID),
+		ProviderName:        strings.TrimSpace(meta.ProviderName),
+		UserAgent:           strings.TrimSpace(meta.UserAgent),
+		RequestedModel:      strings.TrimSpace(meta.RequestedModel),
+		Model:               strings.TrimSpace(meta.Model),
+		MappedModel:         strings.TrimSpace(meta.MappedModel),
+		ModelMappingPattern: strings.TrimSpace(meta.ModelMappingPattern),
+		ModelMappingTarget:  strings.TrimSpace(meta.ModelMappingTarget),
+		ModelOverride:       strings.TrimSpace(meta.ModelOverride),
+		ModelRouteCaptured:  meta.ModelRouteCaptured,
+		Endpoint:            strings.TrimSpace(meta.Endpoint),
+		IsStream:            meta.IsStream,
+		StartedAt:           startedAt.UnixMilli(),
+		DurationMs:          0,
 	}
 	prs.providerConcurrencyMu.Unlock()
 
@@ -2916,11 +2935,18 @@ func (prs *ProviderRelayService) forwardRequest(
 	model string,
 	requestedModel string,
 ) (bool, error) {
+	mappingDetail := provider.resolveModelMappingDetail(requestedModel)
+	modelOverride, _ := resolveProviderModelOverride(provider)
 	return prs.forwardRequestWithPlan(c, kind, provider, endpoint, query, clientHeaders, bodyBytes, isStream, model, requestedModel, providerRequestPlan{
-		OriginalBodyBytes: bodyBytes,
-		BodyBytes:         bodyBytes,
-		EffectiveModel:    model,
-		EffectiveEndpoint: endpoint,
+		OriginalBodyBytes:   bodyBytes,
+		BodyBytes:           bodyBytes,
+		EffectiveModel:      model,
+		MappedModel:         mappedModelForRoute(mappingDetail),
+		ModelMappingPattern: mappingDetail.Pattern,
+		ModelMappingTarget:  mappingDetail.TargetPattern,
+		ModelOverride:       modelOverride,
+		ModelRouteCaptured:  true,
+		EffectiveEndpoint:   endpoint,
 	}, prs.isProviderConcurrencyLimitEnabled(kind))
 }
 
@@ -2964,11 +2990,17 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 	targetURL := joinURL(provider.APIURL, endpoint)
 	requestUserAgent := getHeaderValueCaseInsensitive(headers, "User-Agent")
 	releaseProviderSlot, acquiredProviderSlot := prs.acquireProviderConcurrencySlot(kind, providerRefFromProvider(provider), providerConcurrencyLimit(provider), providerConcurrencyLimitEnabled, providerConcurrencyRequestMeta{
-		ProviderName: provider.Name,
-		UserAgent:    requestUserAgent,
-		Model:        model,
-		Endpoint:     endpoint,
-		IsStream:     isStream,
+		ProviderName:        provider.Name,
+		UserAgent:           requestUserAgent,
+		RequestedModel:      requestedModel,
+		Model:               model,
+		MappedModel:         plan.MappedModel,
+		ModelMappingPattern: plan.ModelMappingPattern,
+		ModelMappingTarget:  plan.ModelMappingTarget,
+		ModelOverride:       plan.ModelOverride,
+		ModelRouteCaptured:  plan.ModelRouteCaptured,
+		Endpoint:            endpoint,
+		IsStream:            isStream,
 	})
 	if !acquiredProviderSlot {
 		return false, errProviderConcurrencyLimit
@@ -3005,20 +3037,26 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 
 	capturePayloadEnabled, sanitizePayloadEnabled := prs.resolveRequestLogPayloadCaptureAndSanitization()
 	requestLog := &ReqeustLog{
-		Platform:         kind,
-		ProviderID:       providerRefFromProvider(provider),
-		Provider:         provider.Name,
-		Model:            model,
-		RequestedModel:   strings.TrimSpace(requestedModel),
-		ReasoningEffort:  extractRequestLogReasoningEffort(bodyBytes, requestedModel),
-		UserAgent:        requestUserAgent,
-		IsStream:         isStream,
-		CapturePayload:   capturePayloadEnabled,
-		SanitizePayload:  sanitizePayloadEnabled,
-		RequestStartedAt: start,
-		ProviderAPIURL:   provider.APIURL,
-		ProviderAPIKey:   provider.APIKey,
-		ProviderAuthType: provider.ConnectivityAuthType,
+		Platform:                  kind,
+		ProviderID:                providerRefFromProvider(provider),
+		Provider:                  provider.Name,
+		Model:                     model,
+		RequestedModel:            strings.TrimSpace(requestedModel),
+		MappedModel:               strings.TrimSpace(plan.MappedModel),
+		ModelMappingPattern:       strings.TrimSpace(plan.ModelMappingPattern),
+		ModelMappingTarget:        strings.TrimSpace(plan.ModelMappingTarget),
+		ModelOverride:             strings.TrimSpace(plan.ModelOverride),
+		ModelRouteCaptured:        plan.ModelRouteCaptured,
+		ReasoningEffort:           extractRequestLogReasoningEffort(bodyBytes, requestedModel),
+		UserAgent:                 requestUserAgent,
+		IsStream:                  isStream,
+		CapturePayload:            capturePayloadEnabled,
+		SanitizePayload:           sanitizePayloadEnabled,
+		RequestStartedAt:          start,
+		ProviderAPIURL:            provider.APIURL,
+		ProviderAPIKey:            provider.APIKey,
+		ProviderAuthType:          provider.ConnectivityAuthType,
+		StreamCompactionRequested: kind == "codex" && isResponsesCompactionRequest(bodyBytes),
 	}
 	requestLog.streamCompletionRequired = kind == "claude" &&
 		isStream &&
@@ -3069,22 +3107,29 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 
 		err := GlobalDBQueueLogs.ExecBatchCtx(ctx, `
 				INSERT INTO request_log (
-					platform, model, requested_model, response_model, provider_id, provider, http_code,
+					platform, model, requested_model, mapped_model, model_mapping_pattern, model_mapping_target, model_override, model_route_captured,
+					response_model, provider_id, provider, http_code,
 					reasoning_effort, user_agent,
 					input_tokens, output_tokens, cache_create_tokens, ephemeral_5m_tokens, ephemeral_1h_tokens, cache_read_tokens,
 					reasoning_tokens, is_stream, duration_sec, first_token_sec, total_cost, group_multiplier, price_source,
 					proxy_prepare_ms, dns_ms, connect_ms, tls_ms, upstream_ttfb_ms, proxy_stream_delay_ms, connection_reused,
+					stream_last_event, stream_terminal_event, stream_error_kind, stream_compaction_requested, stream_compaction_observed, stream_bytes, upstream_protocol,
 					input_cost, output_cost, reasoning_cost, cache_create_cost, cache_read_cost,
 					ephemeral_5m_cost, ephemeral_1h_cost, has_pricing, matched_pricing_model,
 					provider_pricing_available, provider_quota_type, provider_input_usd_per_m, provider_output_usd_per_m,
 					provider_per_call_unified, provider_per_call_input, provider_per_call_output,
 					provider_per_call_unified_set, provider_per_call_input_set, provider_per_call_output_set,
 					request_body, response_body, request_body_truncated, response_body_truncated, payload_bytes, payload_captured
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			`,
 			requestLog.Platform,
 			requestLog.Model,
 			requestLog.RequestedModel,
+			requestLog.MappedModel,
+			requestLog.ModelMappingPattern,
+			requestLog.ModelMappingTarget,
+			requestLog.ModelOverride,
+			boolToInt(requestLog.ModelRouteCaptured),
 			requestLog.ResponseModel,
 			requestLog.ProviderID,
 			requestLog.Provider,
@@ -3111,6 +3156,13 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 			requestLog.UpstreamTTFBMs,
 			requestLog.ProxyStreamDelayMs,
 			boolToInt(requestLog.ConnectionReused),
+			requestLog.StreamLastEvent,
+			requestLog.StreamTerminalEvent,
+			requestLog.StreamErrorKind,
+			boolToInt(requestLog.StreamCompactionRequested),
+			boolToInt(requestLog.StreamCompactionObserved),
+			requestLog.StreamBytes,
+			requestLog.UpstreamProtocol,
 			requestLog.InputCost,
 			requestLog.OutputCost,
 			requestLog.ReasoningCost,
@@ -3201,6 +3253,9 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 
 		if resp == nil {
 			return false, fmt.Errorf("empty response"), claudeCompatibilityRetry{}
+		}
+		if resp.RawResponse != nil {
+			requestLog.UpstreamProtocol = strings.TrimSpace(resp.RawResponse.Proto)
 		}
 
 		// 状态码为 0 且无错误：当作成功处理
@@ -3338,11 +3393,17 @@ func forwardRelayResponse(response *http.Response, writer http.ResponseWriter, i
 	}
 	contentType := response.Header.Get("Content-Type")
 	streamResponse := response.Body != nil && (strings.Contains(contentType, "text/event-stream") || isStream)
+	if isStream && response.StatusCode < http.StatusBadRequest && response.Body == nil {
+		return 0, fmt.Errorf("%w: empty upstream stream", errIncompleteStream)
+	}
 	if streamResponse && response.StatusCode < http.StatusBadRequest {
 		reader := bufio.NewReader(response.Body)
 		firstLine, readErr := reader.ReadBytes('\n')
 		if readErr != nil && readErr != io.EOF {
 			return 0, fmt.Errorf("error reading first response line: %w", readErr)
+		}
+		if readErr == io.EOF && len(firstLine) == 0 {
+			return 0, fmt.Errorf("%w: empty upstream stream", errIncompleteStream)
 		}
 		if readErr == io.EOF && !bytes.Contains(firstLine, []byte("\n")) {
 			response.Header.Set("Content-Type", "application/json")
@@ -3810,16 +3871,21 @@ func newClaudeResponsesNonStreamTerminalErrorResponse(upstreamBody []byte, rawRe
 }
 
 func finalizeForwardSuccess(c *gin.Context, kind string, requestLog *ReqeustLog, writtenBytes int64, copyErr error) (bool, error) {
+	if requestLog.IsStream {
+		requestLog.StreamBytes = writtenBytes
+	}
 	if copyErr != nil {
 		if isClientWriteAbortError(copyErr) {
 			requestLog.HttpCode = 499
 			clientErr := fmt.Errorf("%w: %v", errClientAbort, copyErr)
+			requestLog.StreamErrorKind = classifyStreamErrorKind(clientErr)
 			if responseHasStarted(c) || writtenBytes > 0 {
 				return false, markResponseStarted(clientErr)
 			}
 			return false, clientErr
 		}
 		requestLog.HttpCode = http.StatusBadGateway
+		requestLog.StreamErrorKind = classifyStreamErrorKind(copyErr)
 		streamErr := fmt.Errorf("%w: %v", errIncompleteStream, copyErr)
 		if responseHasStarted(c) || writtenBytes > 0 {
 			return false, markResponseStarted(streamErr)
@@ -3828,11 +3894,13 @@ func finalizeForwardSuccess(c *gin.Context, kind string, requestLog *ReqeustLog,
 	}
 	if err := validateStreamCompletion(kind, requestLog); err != nil {
 		requestLog.HttpCode = http.StatusBadGateway
+		requestLog.StreamErrorKind = classifyStreamErrorKind(err)
 		if responseHasStarted(c) || writtenBytes > 0 {
 			return false, markResponseStarted(err)
 		}
 		return false, err
 	}
+	requestLog.StreamErrorKind = ""
 	// 2xx 只是“上游接受请求”，流式请求还要确认复制过程未中断且收到了协议级完成事件。
 	return true, nil
 }
@@ -4241,6 +4309,11 @@ func ensureRequestLogTableWithDB(db *sql.DB) error {
 		platform TEXT,
 		model TEXT,
 		requested_model TEXT DEFAULT '',
+		mapped_model TEXT DEFAULT '',
+		model_mapping_pattern TEXT DEFAULT '',
+		model_mapping_target TEXT DEFAULT '',
+		model_override TEXT DEFAULT '',
+		model_route_captured INTEGER DEFAULT 0,
 		response_model TEXT DEFAULT '',
 		reasoning_effort TEXT DEFAULT '',
 		user_agent TEXT DEFAULT '',
@@ -4264,6 +4337,13 @@ func ensureRequestLogTableWithDB(db *sql.DB) error {
 		upstream_ttfb_ms REAL DEFAULT 0,
 		proxy_stream_delay_ms REAL DEFAULT 0,
 		connection_reused INTEGER DEFAULT 0,
+		stream_last_event TEXT DEFAULT '',
+		stream_terminal_event TEXT DEFAULT '',
+		stream_error_kind TEXT DEFAULT '',
+		stream_compaction_requested INTEGER DEFAULT 0,
+		stream_compaction_observed INTEGER DEFAULT 0,
+		stream_bytes INTEGER DEFAULT 0,
+		upstream_protocol TEXT DEFAULT '',
 		total_cost REAL DEFAULT 0,
 		group_multiplier REAL DEFAULT 1,
 		price_source TEXT DEFAULT '',
@@ -4340,6 +4420,27 @@ func ensureRequestLogTableWithDB(db *sql.DB) error {
 	if err := ensureRequestLogColumn(db, "connection_reused", "INTEGER DEFAULT 0"); err != nil {
 		return err
 	}
+	if err := ensureRequestLogColumn(db, "stream_last_event", "TEXT DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "stream_terminal_event", "TEXT DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "stream_error_kind", "TEXT DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "stream_compaction_requested", "INTEGER DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "stream_compaction_observed", "INTEGER DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "stream_bytes", "INTEGER DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "upstream_protocol", "TEXT DEFAULT ''"); err != nil {
+		return err
+	}
 	if err := ensureRequestLogColumn(db, "total_cost", "REAL DEFAULT 0"); err != nil {
 		return err
 	}
@@ -4350,6 +4451,21 @@ func ensureRequestLogTableWithDB(db *sql.DB) error {
 		return err
 	}
 	if err := ensureRequestLogColumn(db, "requested_model", "TEXT DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "mapped_model", "TEXT DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "model_mapping_pattern", "TEXT DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "model_mapping_target", "TEXT DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "model_override", "TEXT DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "model_route_captured", "INTEGER DEFAULT 0"); err != nil {
 		return err
 	}
 	if err := ensureRequestLogColumn(db, "response_model", "TEXT DEFAULT ''"); err != nil {
@@ -4661,6 +4777,42 @@ func updateFirstTokenFromPayload(payload string, kind string, reqLog *ReqeustLog
 	}
 }
 
+func isResponsesCompactionRequest(body []byte) bool {
+	if len(body) == 0 || !gjson.ValidBytes(body) {
+		return false
+	}
+
+	for _, item := range gjson.GetBytes(body, "input").Array() {
+		itemType := strings.TrimSpace(item.Get("type").String())
+		if (itemType == "context_compaction" || itemType == "compaction") && !item.Get("encrypted_content").Exists() {
+			return true
+		}
+	}
+	for _, item := range gjson.GetBytes(body, "context_management").Array() {
+		if strings.TrimSpace(item.Get("type").String()) == "compaction" {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeStreamEventType(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" || len(value) > 128 {
+		return ""
+	}
+	for _, char := range value {
+		if (char >= 'a' && char <= 'z') ||
+			(char >= 'A' && char <= 'Z') ||
+			(char >= '0' && char <= '9') ||
+			char == '.' || char == '_' || char == '-' {
+			continue
+		}
+		return ""
+	}
+	return value
+}
+
 func updateStreamLifecycleFromPayload(kind string, payload string, reqLog *ReqeustLog) {
 	if reqLog == nil || !reqLog.IsStream {
 		return
@@ -4669,11 +4821,24 @@ func updateStreamLifecycleFromPayload(kind string, payload string, reqLog *Reqeu
 		return
 	}
 
+	eventType := normalizeStreamEventType(gjson.Get(payload, "type").String())
+	if eventType == "" {
+		return
+	}
+	reqLog.StreamLastEvent = eventType
+	if eventType == "response.output_item.done" {
+		itemType := strings.TrimSpace(gjson.Get(payload, "item.type").String())
+		if itemType == "context_compaction" || itemType == "compaction" {
+			reqLog.StreamCompactionObserved = true
+		}
+	}
+
 	eventType, completed, failureMessage, terminal := detectOpenAIResponsesStreamTerminalState(payload)
 	if !terminal {
 		return
 	}
 
+	reqLog.StreamTerminalEvent = eventType
 	reqLog.streamTerminalEvent = eventType
 	if completed {
 		reqLog.streamFailureMessage = ""
@@ -4826,6 +4991,47 @@ func validateStreamCompletion(kind string, reqLog *ReqeustLog) error {
 			return fmt.Errorf("%w: %s (%s)", errIncompleteStream, reqLog.streamTerminalEvent, msg)
 		}
 		return fmt.Errorf("%w: %s", errIncompleteStream, reqLog.streamTerminalEvent)
+	}
+}
+
+func classifyStreamErrorKind(err error) string {
+	if err == nil {
+		return ""
+	}
+	if errors.Is(err, errClientAbort) || errors.Is(err, context.Canceled) || isClientWriteAbortError(err) {
+		return "client_abort"
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "timeout"
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return "timeout"
+	}
+	if errors.Is(err, io.ErrUnexpectedEOF) {
+		return "unexpected_eof"
+	}
+
+	message := strings.ToLower(strings.TrimSpace(err.Error()))
+	switch {
+	case errors.Is(err, errIncompleteStream) && strings.Contains(message, "empty upstream stream"):
+		return "empty_stream"
+	case errors.Is(err, errIncompleteStream) && strings.Contains(message, "missing response.completed"):
+		return "missing_terminal"
+	case strings.Contains(message, "connection reset by peer"), strings.Contains(message, "connection reset"):
+		return "connection_reset"
+	case strings.Contains(message, "timeout"), strings.Contains(message, "timed out"):
+		return "timeout"
+	case strings.Contains(message, "unexpected eof"):
+		return "unexpected_eof"
+	case errors.Is(err, errIncompleteStream):
+		return "terminal_failure"
+	case strings.Contains(message, "error writing response"), strings.Contains(message, "error copying response"):
+		return "downstream_write"
+	case strings.Contains(message, "error streaming response"), strings.Contains(message, "error reading"):
+		return "upstream_read"
+	default:
+		return "stream_error"
 	}
 }
 
@@ -5009,6 +5215,11 @@ type ReqeustLog struct {
 	Platform                  string  `json:"platform"` // claude、codex 或 gemini
 	Model                     string  `json:"model"`
 	RequestedModel            string  `json:"requested_model,omitempty"`
+	MappedModel               string  `json:"mapped_model,omitempty"`
+	ModelMappingPattern       string  `json:"model_mapping_pattern,omitempty"`
+	ModelMappingTarget        string  `json:"model_mapping_target,omitempty"`
+	ModelOverride             string  `json:"model_override,omitempty"`
+	ModelRouteCaptured        bool    `json:"model_route_captured"`
 	ResponseModel             string  `json:"response_model,omitempty"`
 	ReasoningEffort           string  `json:"reasoning_effort,omitempty"`
 	UserAgent                 string  `json:"user_agent,omitempty"`
@@ -5033,6 +5244,13 @@ type ReqeustLog struct {
 	UpstreamTTFBMs            float64 `json:"upstream_ttfb_ms"`
 	ProxyStreamDelayMs        float64 `json:"proxy_stream_delay_ms"`
 	ConnectionReused          bool    `json:"connection_reused"`
+	StreamLastEvent           string  `json:"stream_last_event,omitempty"`
+	StreamTerminalEvent       string  `json:"stream_terminal_event,omitempty"`
+	StreamErrorKind           string  `json:"stream_error_kind,omitempty"`
+	StreamCompactionRequested bool    `json:"stream_compaction_requested"`
+	StreamCompactionObserved  bool    `json:"stream_compaction_observed"`
+	StreamBytes               int64   `json:"stream_bytes"`
+	UpstreamProtocol          string  `json:"upstream_protocol,omitempty"`
 	CreatedAt                 string  `json:"created_at"`
 	ErrorReadAt               string  `json:"error_read_at,omitempty"`
 	InputCost                 float64 `json:"input_cost"`
@@ -5488,13 +5706,23 @@ func resolveModelFromRequestBody(bodyBytes []byte, fallback string) string {
 
 func resolveProviderModelWithoutBodyCopy(provider Provider, requestedModel string) string {
 	effectiveModel := provider.GetEffectiveModel(requestedModel)
-	if override, ok := provider.RequestBodyOverrides["model"]; ok {
-		modelOnlyBody, err := sjson.SetBytes([]byte(`{"model":""}`), "model", override)
-		if err == nil {
-			return resolveModelFromRequestBody(modelOnlyBody, effectiveModel)
-		}
+	if override, ok := resolveProviderModelOverride(provider); ok {
+		return override
 	}
 	return effectiveModel
+}
+
+func resolveProviderModelOverride(provider Provider) (string, bool) {
+	override, exists := provider.RequestBodyOverrides["model"]
+	if !exists {
+		return "", false
+	}
+	modelOnlyBody, err := sjson.SetBytes([]byte(`{"model":""}`), "model", override)
+	if err != nil {
+		return "", false
+	}
+	model := strings.TrimSpace(gjson.GetBytes(modelOnlyBody, "model").String())
+	return model, model != ""
 }
 
 type providerRequestPlan struct {
@@ -5502,6 +5730,11 @@ type providerRequestPlan struct {
 	BodyBytes                  []byte
 	ContinuationRetryBodyBytes []byte
 	EffectiveModel             string
+	MappedModel                string
+	ModelMappingPattern        string
+	ModelMappingTarget         string
+	ModelOverride              string
+	ModelRouteCaptured         bool
 	EffectiveEndpoint          string
 	PromptCacheKey             string
 	ContinuationSessionKey     string
@@ -5509,7 +5742,9 @@ type providerRequestPlan struct {
 }
 
 func (prs *ProviderRelayService) buildProviderRequestPlan(provider Provider, bodyBytes []byte, endpoint string, requestedModel string) (providerRequestPlan, error) {
-	effectiveModel := provider.GetEffectiveModel(requestedModel)
+	mappingDetail := provider.resolveModelMappingDetail(requestedModel)
+	effectiveModel := mappingDetail.MappedModel
+	modelOverride, _ := resolveProviderModelOverride(provider)
 	currentBodyBytes := bodyBytes
 
 	if effectiveModel != requestedModel && requestedModel != "" {
@@ -5576,6 +5811,11 @@ func (prs *ProviderRelayService) buildProviderRequestPlan(provider Provider, bod
 					BodyBytes:                  currentBodyBytes,
 					ContinuationRetryBodyBytes: continuationRetryBodyBytes,
 					EffectiveModel:             resolveModelFromRequestBody(currentBodyBytes, effectiveModel),
+					MappedModel:                mappedModelForRoute(mappingDetail),
+					ModelMappingPattern:        mappingDetail.Pattern,
+					ModelMappingTarget:         mappingDetail.TargetPattern,
+					ModelOverride:              modelOverride,
+					ModelRouteCaptured:         true,
 					EffectiveEndpoint:          effectiveEndpoint,
 					PromptCacheKey:             promptCacheKey,
 					ContinuationSessionKey:     continuationSessionKey,
@@ -5590,11 +5830,23 @@ func (prs *ProviderRelayService) buildProviderRequestPlan(provider Provider, bod
 		BodyBytes:                  currentBodyBytes,
 		ContinuationRetryBodyBytes: nil,
 		EffectiveModel:             resolveModelFromRequestBody(currentBodyBytes, effectiveModel),
+		MappedModel:                mappedModelForRoute(mappingDetail),
+		ModelMappingPattern:        mappingDetail.Pattern,
+		ModelMappingTarget:         mappingDetail.TargetPattern,
+		ModelOverride:              modelOverride,
+		ModelRouteCaptured:         true,
 		EffectiveEndpoint:          effectiveEndpoint,
 		PromptCacheKey:             promptCacheKey,
 		ContinuationSessionKey:     continuationSessionKey,
 		PreviousResponseID:         previousResponseID,
 	}, nil
+}
+
+func mappedModelForRoute(detail providerModelMappingDetail) string {
+	if !detail.Matched {
+		return ""
+	}
+	return strings.TrimSpace(detail.MappedModel)
 }
 
 func buildProviderRequestPlan(provider Provider, bodyBytes []byte, endpoint string, requestedModel string) (providerRequestPlan, error) {
@@ -5607,28 +5859,125 @@ func deriveClaudeResponsesContinuationSessionKey(bodyBytes []byte) string {
 		return ""
 	}
 
+	metadataKey := ""
 	if parsed := parseClaudeMetadataUserID(metadata.Get("user_id").String()); parsed != nil {
 		seed := strings.Join([]string{
 			strings.TrimSpace(parsed.DeviceID),
 			strings.TrimSpace(parsed.AccountUUID),
 			strings.TrimSpace(parsed.SessionID),
 		}, "|")
-		return "metadata-user-" + shortSHA256Hex(seed)
+		metadataKey = "metadata-user-" + shortSHA256Hex(seed)
 	}
 
-	for _, path := range []string{
-		"session_id",
-		"sessionId",
-		"conversation_id",
-		"conversationId",
-		"thread_id",
-		"threadId",
-	} {
-		if value := strings.TrimSpace(metadata.Get(path).String()); value != "" {
-			return "metadata-session-" + shortSHA256Hex(path+"="+value)
+	if metadataKey == "" {
+		for _, path := range []string{
+			"session_id",
+			"sessionId",
+			"conversation_id",
+			"conversationId",
+			"thread_id",
+			"threadId",
+		} {
+			if value := strings.TrimSpace(metadata.Get(path).String()); value != "" {
+				metadataKey = "metadata-session-" + shortSHA256Hex(path+"="+value)
+				break
+			}
+		}
+	}
+	if metadataKey == "" {
+		return ""
+	}
+	if agentIdentityKey := deriveClaudeResponsesAgentIdentityKey(bodyBytes); agentIdentityKey != "" {
+		return metadataKey + "-agent-id-" + agentIdentityKey
+	}
+	if isClaudeResponsesSubagentContext(bodyBytes) {
+		return ""
+	}
+
+	contextKey := deriveClaudeResponsesAgentContextKey(bodyBytes)
+	if contextKey == "" {
+		return ""
+	}
+	return metadataKey + "-agent-" + contextKey
+}
+
+func deriveClaudeResponsesAgentIdentityKey(bodyBytes []byte) string {
+	root := gjson.ParseBytes(bodyBytes)
+	for _, candidate := range []gjson.Result{root.Get("metadata"), root} {
+		if !candidate.Exists() || !candidate.IsObject() {
+			continue
+		}
+		for _, path := range []string{
+			"agent_id",
+			"agentId",
+			"subagent_id",
+			"subagentId",
+			"task_id",
+			"taskId",
+			"invocation_id",
+			"invocationId",
+			"parent_tool_use_id",
+			"parentToolUseId",
+		} {
+			if value := strings.TrimSpace(candidate.Get(path).String()); value != "" {
+				return shortSHA256Hex(path + "=" + value)
+			}
 		}
 	}
 	return ""
+}
+
+func isClaudeResponsesSubagentContext(bodyBytes []byte) bool {
+	body, err := decodeJSONMap(bodyBytes)
+	if err != nil {
+		return false
+	}
+	system := convertAnthropicSystemToResponsesContent(body["system"])
+	if len(system) == 0 {
+		return false
+	}
+	matched := strings.ToLower(claudeSubagentSystemPattern.FindString(canonicalJSONForSeed(system)))
+	return matched != "" && !strings.Contains(matched, "main")
+}
+
+func deriveClaudeResponsesAgentContextKey(bodyBytes []byte) string {
+	body, err := decodeJSONMap(bodyBytes)
+	if err != nil {
+		return ""
+	}
+
+	seedParts := make([]string, 0, 4)
+	if model := strings.TrimSpace(getString(body, "model")); model != "" {
+		seedParts = append(seedParts, "model="+model)
+	}
+
+	hasStableContext := false
+	if system := convertAnthropicSystemToResponsesContent(body["system"]); len(system) > 0 {
+		seedParts = append(seedParts, "system="+canonicalJSONForSeed(system))
+		hasStableContext = true
+	}
+	if tools, ok := body["tools"].([]interface{}); ok {
+		if normalizedTools := convertAnthropicToolsForOpenAI(tools, claudeAPIFormatOpenAIResponse); len(normalizedTools) > 0 {
+			seedParts = append(seedParts, "tools="+canonicalJSONForSeed(normalizedTools))
+			hasStableContext = true
+		}
+	}
+	if firstUser := firstClaudeUserMessageContent(body["messages"]); firstUser != nil {
+		normalizedInput, normalizeErr := convertAnthropicToResponsesInput(nil, []interface{}{
+			map[string]interface{}{
+				"role":    "user",
+				"content": firstUser,
+			},
+		})
+		if normalizeErr == nil && len(normalizedInput) > 0 {
+			seedParts = append(seedParts, "first_user="+canonicalJSONForSeed(normalizedInput))
+			hasStableContext = true
+		}
+	}
+	if !hasStableContext {
+		return ""
+	}
+	return shortSHA256Hex(strings.Join(seedParts, "|"))
 }
 
 type claudeMetadataUserIDParts struct {

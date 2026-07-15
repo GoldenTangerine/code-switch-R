@@ -265,7 +265,14 @@ import { useLogsPayloadDetail } from './composables/useLogsPayloadDetail'
 import { useLogsPricingDetails } from './composables/useLogsPricingDetails'
 import { useLogsStorageModalController } from './composables/useLogsStorageModalController'
 import { MODEL_PRICING_CHANGED_EVENT } from '../../services/modelPricing'
-import { formatCurrency, formatNumber, formatTokenNumber } from './utils'
+import type { RequestLog } from '../../services/logs'
+import {
+  buildStreamDiagnosticTooltipDetailData,
+  buildStreamDiagnosticTooltipLabels,
+  formatCurrency,
+  formatNumber,
+  formatTokenNumber,
+} from './utils'
 
 Chart.register(CategoryScale, LinearScale, ArcElement, PointElement, LineElement, Tooltip, Legend)
 
@@ -420,6 +427,9 @@ const {
   buildVerifyInfoTooltipDetail,
 } = useLogsPricingDetails({ t })
 
+const buildStreamInfoTooltipDetail = (item: RequestLog) =>
+  buildStreamDiagnosticTooltipDetailData(item, buildStreamDiagnosticTooltipLabels(t))
+
 const {
   countdown,
   resetTimer,
@@ -468,8 +478,10 @@ const {
   logInfoTooltip,
   showModelInfoTooltip,
   showVerifyInfoTooltip,
+  showStreamInfoTooltip,
   scheduleShowModelInfoTooltip,
   scheduleShowVerifyInfoTooltip,
+  scheduleShowStreamInfoTooltip,
   moveLogInfoTooltip,
   hideLogInfoTooltip,
   hideLogInfoTooltipImmediately,
@@ -478,6 +490,7 @@ const {
 } = useLogsInfoTooltip({
   buildModelInfoTooltipDetail,
   buildVerifyInfoTooltipDetail,
+  buildStreamInfoTooltipDetail,
   ensureModelPricingLoaded: loadModelPricingRows,
   modelPricingLoaded,
   modelPricingStale,
@@ -523,6 +536,8 @@ const logsTableHandlers = {
   hideLogInfoTooltipImmediately,
   scheduleShowVerifyInfoTooltip,
   showVerifyInfoTooltip,
+  scheduleShowStreamInfoTooltip,
+  showStreamInfoTooltip,
   openPayloadDetailModal,
   scheduleShowCostTooltip,
   moveCostTooltip,

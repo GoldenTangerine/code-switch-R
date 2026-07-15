@@ -8,6 +8,11 @@ export type RequestLog = {
   platform: LogPlatform | ''
   model: string
   requested_model?: string
+  mapped_model?: string
+  model_mapping_pattern?: string
+  model_mapping_target?: string
+  model_override?: string
+  model_route_captured?: boolean
   response_model?: string
   reasoning_effort?: string
   user_agent?: string
@@ -31,6 +36,13 @@ export type RequestLog = {
   upstream_ttfb_ms?: number
   proxy_stream_delay_ms?: number
   connection_reused?: boolean
+  stream_last_event?: string
+  stream_terminal_event?: string
+  stream_error_kind?: string
+  stream_compaction_requested?: boolean | number
+  stream_compaction_observed?: boolean | number
+  stream_bytes?: number
+  upstream_protocol?: string
   created_at: string
   error_read_at?: string
   total_cost?: number

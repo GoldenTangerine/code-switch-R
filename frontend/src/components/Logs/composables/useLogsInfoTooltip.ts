@@ -5,6 +5,7 @@ import type { LogInfoTooltipDetail, TooltipPlacement } from '../types'
 type UseLogsInfoTooltipOptions = {
   buildModelInfoTooltipDetail: (item: RequestLog) => LogInfoTooltipDetail
   buildVerifyInfoTooltipDetail: (item: RequestLog) => LogInfoTooltipDetail
+  buildStreamInfoTooltipDetail: (item: RequestLog) => LogInfoTooltipDetail | null
   ensureModelPricingLoaded: (force?: boolean) => Promise<void>
   modelPricingLoaded: Ref<boolean>
   modelPricingStale: Ref<boolean>
@@ -173,6 +174,14 @@ export function useLogsInfoTooltip(options: UseLogsInfoTooltipOptions) {
     void showLogInfoTooltip(options.buildVerifyInfoTooltipDetail(item), target)
   }
 
+  const showStreamInfoTooltip = (item: RequestLog, event: MouseEvent | FocusEvent) => {
+    const detail = options.buildStreamInfoTooltipDetail(item)
+    if (!detail) return
+    const target = resolveTooltipAnchor(event)
+    logInfoTooltipRequestId.value += 1
+    void showLogInfoTooltip(detail, target)
+  }
+
   const scheduleShowModelInfoTooltip = (item: RequestLog, event: MouseEvent) => {
     const target = resolveTooltipAnchor(event)
     if (!target) return
@@ -198,6 +207,19 @@ export function useLogsInfoTooltip(options: UseLogsInfoTooltipOptions) {
       logInfoTooltipShowTimer = null
       logInfoTooltipRequestId.value += 1
       void showLogInfoTooltip(options.buildVerifyInfoTooltipDetail(item), target)
+    }, LOG_TOOLTIP_SHOW_DELAY_MS)
+  }
+
+  const scheduleShowStreamInfoTooltip = (item: RequestLog, event: MouseEvent) => {
+    const detail = options.buildStreamInfoTooltipDetail(item)
+    const target = resolveTooltipAnchor(event)
+    if (!detail || !target) return
+    clearLogInfoTooltipHideTimer()
+    clearLogInfoTooltipShowTimer()
+    logInfoTooltipShowTimer = window.setTimeout(() => {
+      logInfoTooltipShowTimer = null
+      logInfoTooltipRequestId.value += 1
+      void showLogInfoTooltip(detail, target)
     }, LOG_TOOLTIP_SHOW_DELAY_MS)
   }
 
@@ -227,8 +249,10 @@ export function useLogsInfoTooltip(options: UseLogsInfoTooltipOptions) {
     logInfoTooltip,
     showModelInfoTooltip,
     showVerifyInfoTooltip,
+    showStreamInfoTooltip,
     scheduleShowModelInfoTooltip,
     scheduleShowVerifyInfoTooltip,
+    scheduleShowStreamInfoTooltip,
     moveLogInfoTooltip,
     hideLogInfoTooltip,
     hideLogInfoTooltipImmediately,

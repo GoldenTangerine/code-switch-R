@@ -111,7 +111,7 @@ export type TooltipPlacement = 'above' | 'below'
 
 export type LogInfoTooltipTone = 'muted' | 'source-provider-api' | 'source-builtin' | 'source-none'
 
-export type LogInfoTooltipVariant = 'model' | 'verify'
+export type LogInfoTooltipVariant = 'model' | 'verify' | 'stream'
 
 export type LogInfoTooltipRow = {
   key: string

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { ModelUsageStat, RequestLog } from '../../services/logs'
 import {
   buildModelShareRows,
+  buildStreamDiagnosticTooltipDetailData,
   formatCurrencyParts,
   formatFirstTokenDuration,
   formatModelShareTooltipLabel,
@@ -147,5 +148,50 @@ describe('formatFirstTokenDuration', () => {
       is_stream: false,
       first_token_sec: 1.23,
     } as RequestLog)).toBe('—')
+  })
+})
+
+describe('buildStreamDiagnosticTooltipDetailData', () => {
+  const labels = {
+    title: 'Stream diagnostics',
+    statusLabel: 'Status',
+    lastEventLabel: 'Last event',
+    compactionLabel: 'Compaction',
+    protocolLabel: 'Protocol',
+    bytesLabel: 'Bytes',
+    missingValue: 'Not recorded',
+    compactionRequested: 'Requested',
+    compactionObserved: 'Observed',
+    compactionNotObserved: 'Not observed',
+    errorKindLabels: {
+      missing_terminal: 'Missing terminal event',
+      empty_stream: 'Empty stream',
+    },
+  }
+
+  it('builds a diagnostic tooltip for an incomplete compaction stream', () => {
+    expect(buildStreamDiagnosticTooltipDetailData({
+      is_stream: true,
+      stream_error_kind: 'missing_terminal',
+      stream_last_event: 'response.output_item.done',
+      stream_compaction_requested: true,
+      stream_compaction_observed: true,
+      stream_bytes: 2048,
+      upstream_protocol: 'HTTP/2.0',
+    } as RequestLog, labels)).toEqual({
+      title: 'Stream diagnostics',
+      variant: 'stream',
+      rows: [
+        { key: 'stream-status', label: 'Status', value: 'Missing terminal event' },
+        { key: 'stream-last-event', label: 'Last event', value: 'response.output_item.done' },
+        { key: 'stream-compaction', label: 'Compaction', value: 'Requested · Observed' },
+        { key: 'stream-protocol', label: 'Protocol', value: 'HTTP/2.0' },
+        { key: 'stream-bytes', label: 'Bytes', value: '2,048' },
+      ],
+    })
+  })
+
+  it('returns null for legacy rows without stream diagnostics', () => {
+    expect(buildStreamDiagnosticTooltipDetailData({} as RequestLog, labels)).toBeNull()
   })
 })

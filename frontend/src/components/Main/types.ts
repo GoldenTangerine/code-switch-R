@@ -176,7 +176,13 @@ export type ProviderConcurrencyRequestView = {
   providerId: string
   providerName: string
   userAgent?: string
+  requestedModel?: string
   model?: string
+  mappedModel?: string
+  modelMappingPattern?: string
+  modelMappingTarget?: string
+  modelOverride?: string
+  modelRouteCaptured?: boolean
   endpoint?: string
   isStream?: boolean
   startedAt: number

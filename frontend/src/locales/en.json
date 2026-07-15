@@ -1017,6 +1017,7 @@
           "providerQuotaQueryAddPreset": "Add preset",
           "providerQuotaQueryDeletePreset": "Delete",
           "providerQuotaQueryDeletingPreset": "Deleting...",
+          "providerQuotaQueryDiscardChanges": "Discard",
           "providerQuotaQuerySetDefaultPreset": "Set default",
           "providerQuotaQuerySettingDefaultPreset": "Setting...",
           "providerQuotaQuerySavingPreset": "Saving...",
@@ -1044,6 +1045,8 @@
         },
         "confirmDeleteTitle": "Remove vendor",
         "confirmDeleteMessage": "Are you sure you want to remove {name}? This action cannot be undone.",
+        "providerQuotaQueryPresetDeleteTitle": "Delete preset",
+        "providerQuotaQueryPresetDiscardTitle": "Discard changes",
         "confirmProviderQuotaQueryPresetDiscard": "This preset has unsaved changes. Discard them?",
         "confirmProviderQuotaQueryPresetDelete": "Delete the current preset? This cannot be undone.",
         "errors": {
@@ -1152,7 +1155,16 @@
         "emptyUserAgent": "No User-Agent",
         "stream": "Stream",
         "nonStream": "Non-stream",
-        "durationNow": "Just now"
+        "durationNow": "Just now",
+        "requestedModel": "Requested model",
+        "actualModel": "Actual model",
+        "routeDetailsAria": "Actual model {model}. {details}",
+        "mappingRule": "Mapping rule: {source} → {target}",
+        "mappingResult": "Mapping result: {model}",
+        "modelOverride": "Request body override: {source} → {target}",
+        "routeUnchanged": "The model was not rewritten for this request",
+        "routeUnavailable": "Model route details were not recorded for this history entry",
+        "activeRouteUnavailable": "Model route details were not recorded for this connection"
       },
       "errors": {
         "loadAppSettingsFailed": "Failed to load application settings",
@@ -1294,6 +1306,29 @@
         "tooltipValues": {
           "missing": "Not recorded",
           "pricingUnavailable": "No detailed pricing available"
+        },
+        "streamDiagnostics": {
+          "title": "Stream diagnostics",
+          "status": "Status",
+          "lastEvent": "Last event",
+          "compaction": "Compaction",
+          "protocol": "Protocol",
+          "bytes": "Bytes",
+          "requested": "Requested",
+          "observed": "Observed",
+          "notObserved": "Not observed",
+          "errorKinds": {
+            "emptyStream": "Empty stream",
+            "missingTerminal": "Missing completion event",
+            "unexpectedEof": "Unexpected stream end",
+            "connectionReset": "Connection reset",
+            "timeout": "Connection timeout",
+            "clientAbort": "Client aborted",
+            "terminalFailure": "Upstream terminal failure",
+            "upstreamRead": "Upstream read failed",
+            "downstreamWrite": "Client write failed",
+            "streamError": "Stream transfer failed"
+          }
         },
         "httpCode": "HTTP",
         "stream": "Stream",

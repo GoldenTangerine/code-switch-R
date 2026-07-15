@@ -95,6 +95,112 @@ func TestClaudeResponsesContinuationBindsPreviousResponseID(t *testing.T) {
 	}
 }
 
+func TestClaudeResponsesContinuationSessionKeySeparatesAgentContexts(t *testing.T) {
+	mainBody := []byte(`{"model":"gpt-5.4","system":"You are the main coding agent","metadata":{"user_id":"` + claudeMetadataSessionA + `"},"messages":[{"role":"user","content":"fix the login route"}],"tools":[{"name":"Read","input_schema":{"type":"object"}}]}`)
+	mainFollowUpBody := []byte(`{"model":"gpt-5.4","system":"You are the main coding agent","metadata":{"user_id":"` + claudeMetadataSessionA + `"},"messages":[{"role":"user","content":"fix the login route"},{"role":"assistant","content":"checking"},{"role":"user","content":"continue"}],"tools":[{"name":"Read","input_schema":{"type":"object"}}]}`)
+	exploreABody := []byte(`{"model":"gpt-5.4","system":"You are an Explore agent","metadata":{"user_id":"` + claudeMetadataSessionA + `","agent_id":"explore-a"},"messages":[{"role":"user","content":"inspect router files"}],"tools":[{"name":"Read","input_schema":{"type":"object"}}]}`)
+	exploreBBody := []byte(`{"model":"gpt-5.4","system":"You are an Explore agent","metadata":{"user_id":"` + claudeMetadataSessionA + `","agent_id":"explore-b"},"messages":[{"role":"user","content":"inspect router files"}],"tools":[{"name":"Read","input_schema":{"type":"object"}}]}`)
+
+	mainKey := deriveClaudeResponsesContinuationSessionKey(mainBody)
+	mainFollowUpKey := deriveClaudeResponsesContinuationSessionKey(mainFollowUpBody)
+	exploreAKey := deriveClaudeResponsesContinuationSessionKey(exploreABody)
+	exploreBKey := deriveClaudeResponsesContinuationSessionKey(exploreBBody)
+
+	if mainKey == "" || exploreAKey == "" || exploreBKey == "" {
+		t.Fatalf("完整代理上下文应生成续链键，main=%q exploreA=%q exploreB=%q", mainKey, exploreAKey, exploreBKey)
+	}
+	if mainKey != mainFollowUpKey {
+		t.Fatalf("同一代理后续轮次应保持续链键稳定，first=%q follow_up=%q", mainKey, mainFollowUpKey)
+	}
+	if mainKey == exploreAKey || mainKey == exploreBKey || exploreAKey == exploreBKey {
+		t.Fatalf("同 session 的不同代理上下文必须隔离，main=%q exploreA=%q exploreB=%q", mainKey, exploreAKey, exploreBKey)
+	}
+}
+
+func TestClaudeResponsesContinuationSessionKeyUsesStableAgentIdentity(t *testing.T) {
+	firstBody := []byte(`{"model":"gpt-5.4","system":"You are an Explore agent","metadata":{"user_id":"` + claudeMetadataSessionA + `","agent_id":"explore-a"},"messages":[{"role":"user","content":"inspect router files"}],"tools":[{"name":"Read","input_schema":{"type":"object"}}]}`)
+	followUpBody := []byte(`{"model":"gpt-5.4","system":"You are an Explore agent with an updated instruction","metadata":{"user_id":"` + claudeMetadataSessionA + `","agent_id":"explore-a"},"messages":[{"role":"user","content":"inspect router files"},{"role":"assistant","content":"checking"},{"role":"user","content":"continue"}],"tools":[{"name":"Read","input_schema":{"type":"object"}},{"name":"Glob","input_schema":{"type":"object"}}]}`)
+
+	firstKey := deriveClaudeResponsesContinuationSessionKey(firstBody)
+	followUpKey := deriveClaudeResponsesContinuationSessionKey(followUpBody)
+	if firstKey == "" || firstKey != followUpKey {
+		t.Fatalf("显式 agent_id 应生成稳定续链键，first=%q follow_up=%q", firstKey, followUpKey)
+	}
+}
+
+func TestClaudeResponsesContinuationDisablesSubagentWithoutStableIdentity(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.4","system":"You are an agent for Claude Code, acting as an Explore agent","metadata":{"user_id":"` + claudeMetadataSessionA + `"},"messages":[{"role":"user","content":"inspect router files"}],"tools":[{"name":"Read","input_schema":{"type":"object"}}]}`)
+
+	if got := deriveClaudeResponsesContinuationSessionKey(body); got != "" {
+		t.Fatalf("缺少唯一代理标识的子代理不应启用续链，got=%q", got)
+	}
+}
+
+func TestClaudeResponsesContinuationRequiresStableAgentContext(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.4","metadata":{"user_id":"` + claudeMetadataSessionA + `"}}`)
+
+	if got := deriveClaudeResponsesContinuationSessionKey(body); got != "" {
+		t.Fatalf("缺少 system、tools 和首条 user 内容时不应启用续链，got=%q", got)
+	}
+}
+
+func TestClaudeResponsesContinuationBindingsStayWithinAgentContext(t *testing.T) {
+	provider := Provider{
+		ID:        1,
+		Name:      "OpenAI Responses",
+		APIURL:    "https://example.com",
+		APIKey:    "test-key",
+		APIFormat: claudeAPIFormatOpenAIResponse,
+	}
+	relay := &ProviderRelayService{claudeResponses: make(map[string]claudeResponsesSessionBinding)}
+	mainBody := []byte(`{"model":"gpt-5.4","max_tokens":16,"system":"You are the main coding agent","metadata":{"user_id":"` + claudeMetadataSessionA + `"},"messages":[{"role":"user","content":"fix the login route"}],"tools":[{"name":"Read","input_schema":{"type":"object"}}]}`)
+	exploreABody := []byte(`{"model":"gpt-5.4","max_tokens":16,"system":"You are an Explore agent","metadata":{"user_id":"` + claudeMetadataSessionA + `","agent_id":"explore-a"},"messages":[{"role":"user","content":"inspect router files"}],"tools":[{"name":"Read","input_schema":{"type":"object"}}]}`)
+	exploreBBody := []byte(`{"model":"gpt-5.4","max_tokens":16,"system":"You are an Explore agent","metadata":{"user_id":"` + claudeMetadataSessionA + `","agent_id":"explore-b"},"messages":[{"role":"user","content":"inspect router files"}],"tools":[{"name":"Read","input_schema":{"type":"object"}}]}`)
+
+	mainPlan, err := relay.buildProviderRequestPlan(provider, mainBody, "/v1/messages", "gpt-5.4")
+	if err != nil {
+		t.Fatalf("构建主代理请求失败: %v", err)
+	}
+	relay.bindClaudeResponsesPreviousResponseID(provider, mainPlan.ContinuationSessionKey, "resp_main")
+
+	exploreAPlan, err := relay.buildProviderRequestPlan(provider, exploreABody, "/v1/messages", "gpt-5.4")
+	if err != nil {
+		t.Fatalf("构建 Explore A 请求失败: %v", err)
+	}
+	if exploreAPlan.PreviousResponseID != "" {
+		t.Fatalf("Explore A 不应续接主代理 response，got=%q", exploreAPlan.PreviousResponseID)
+	}
+	relay.bindClaudeResponsesPreviousResponseID(provider, exploreAPlan.ContinuationSessionKey, "resp_explore_a")
+
+	exploreBPlan, err := relay.buildProviderRequestPlan(provider, exploreBBody, "/v1/messages", "gpt-5.4")
+	if err != nil {
+		t.Fatalf("构建 Explore B 请求失败: %v", err)
+	}
+	if exploreBPlan.PreviousResponseID != "" {
+		t.Fatalf("Explore B 不应续接其他代理 response，got=%q", exploreBPlan.PreviousResponseID)
+	}
+	relay.bindClaudeResponsesPreviousResponseID(provider, exploreBPlan.ContinuationSessionKey, "resp_explore_b")
+
+	mainFollowUpPlan, err := relay.buildProviderRequestPlan(provider, mainBody, "/v1/messages", "gpt-5.4")
+	if err != nil {
+		t.Fatalf("构建主代理后续请求失败: %v", err)
+	}
+	if mainFollowUpPlan.PreviousResponseID != "resp_main" {
+		t.Fatalf("主代理应续接自身 response，got=%q", mainFollowUpPlan.PreviousResponseID)
+	}
+	if got := gjson.GetBytes(mainFollowUpPlan.BodyBytes, "previous_response_id").String(); got != "resp_main" {
+		t.Fatalf("主代理出站请求 previous_response_id=%q，期望 resp_main", got)
+	}
+
+	exploreAFollowUpPlan, err := relay.buildProviderRequestPlan(provider, exploreABody, "/v1/messages", "gpt-5.4")
+	if err != nil {
+		t.Fatalf("构建 Explore A 后续请求失败: %v", err)
+	}
+	if exploreAFollowUpPlan.PreviousResponseID != "resp_explore_a" {
+		t.Fatalf("Explore A 应续接自身 response，got=%q", exploreAFollowUpPlan.PreviousResponseID)
+	}
+}
+
 func TestClaudeResponsesForwardAddsOpenAIBetaHeader(t *testing.T) {
 	useIsolatedHomeDir(t)
 	gin.SetMode(gin.TestMode)
@@ -1047,7 +1153,7 @@ func TestClaudeResponsesStreamToolCallBindsContinuationWithoutDuplicateToolUse(t
 		t.Fatalf("标准 Responses 工具流不应重复 tool_use，count=%d body=%s", got, w1.Body.String())
 	}
 
-	toolResultBody := `{"model":"gpt-5.4","max_tokens":16,"metadata":{"user_id":"` + claudeMetadataSessionA + `"},"messages":[{"role":"user","content":"call tool"},{"role":"assistant","content":[{"type":"tool_use","id":"toolu_stream","name":"Read","input":{"file_path":"a.go"}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_stream","content":"ok"}]}]}`
+	toolResultBody := `{"model":"gpt-5.4","max_tokens":16,"metadata":{"user_id":"` + claudeMetadataSessionA + `"},"messages":[{"role":"user","content":"call tool"},{"role":"assistant","content":[{"type":"tool_use","id":"toolu_stream","name":"Read","input":{"file_path":"a.go"}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_stream","content":"ok"}]}],"tools":[{"name":"Read","input_schema":{"type":"object"}}]}`
 	req2 := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(toolResultBody))
 	req2.Header.Set("Content-Type", "application/json")
 	w2 := httptest.NewRecorder()
@@ -1695,5 +1801,56 @@ func TestProxyHandlerIncompleteCodexStreamDoesNotFallbackAfterResponseStarted(t 
 	}
 	if got := w.Body.String(); !strings.Contains(got, "response.output_text.delta") {
 		t.Fatalf("响应体未保留首个 provider 的流内容: %s", got)
+	}
+}
+
+func TestProxyHandlerEmptyCodexStreamFallsBackBeforeResponseStarted(t *testing.T) {
+	useIsolatedHomeDir(t)
+	gin.SetMode(gin.TestMode)
+	disableBlacklistForTest(t)
+
+	var emptyProviderCalls int32
+	upstreamEmpty := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&emptyProviderCalls, 1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstreamEmpty.Close()
+
+	var fallbackProviderCalls int32
+	upstreamCompleted := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&fallbackProviderCalls, 1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("data: {\"type\":\"response.created\"}\n\n"))
+		_, _ = w.Write([]byte("data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n"))
+	}))
+	defer upstreamCompleted.Close()
+
+	providerService := NewProviderService()
+	settingsService := NewSettingsService()
+	blacklistService := NewBlacklistService(settingsService, nil)
+	providers := []Provider{
+		{ID: 1, Name: "EmptyStream", APIURL: upstreamEmpty.URL, APIKey: "test-key-1", Enabled: true, Level: 1},
+		{ID: 2, Name: "FallbackCompleted", APIURL: upstreamCompleted.URL, APIKey: "test-key-2", Enabled: true, Level: 1},
+	}
+	if err := providerService.SaveProviders("codex", providers); err != nil {
+		t.Fatalf("保存 providers 失败: %v", err)
+	}
+
+	relay := NewProviderRelayService(providerService, nil, blacklistService, nil, nil, nil, "")
+	router := gin.New()
+	relay.registerRoutes(router)
+
+	req := httptest.NewRequest(http.MethodPost, "/responses", strings.NewReader(`{"model":"gpt-5.3-codex","stream":true,"input":[{"type":"context_compaction"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if atomic.LoadInt32(&emptyProviderCalls) != 1 || atomic.LoadInt32(&fallbackProviderCalls) != 1 {
+		t.Fatalf("provider 调用次数异常: empty=%d fallback=%d", emptyProviderCalls, fallbackProviderCalls)
+	}
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "response.completed") {
+		t.Fatalf("应仅返回 fallback 完整流，status=%d body=%s", w.Code, w.Body.String())
 	}
 }

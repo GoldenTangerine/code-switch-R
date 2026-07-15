@@ -52,9 +52,33 @@
             :key="request.id"
             class="provider-concurrency-row"
           >
-            <div class="provider-concurrency-row__main">
-              <strong>{{ displayModel(request.model) }}</strong>
-              <span>{{ request.endpoint || '-' }}</span>
+            <div
+              class="provider-concurrency-row__main"
+              :class="{ 'provider-concurrency-row__main--route': showModelRouteDetails }"
+            >
+              <div v-if="showModelRouteDetails" class="provider-concurrency-row__models">
+                <div class="provider-concurrency-row__model-line">
+                  <span class="provider-concurrency-row__model-label">{{ t('components.main.concurrencyDetails.requestedModel') }}</span>
+                  <span class="provider-concurrency-row__model-value">{{ activeRequestedModel(request) }}</span>
+                </div>
+                <div class="provider-concurrency-row__model-line">
+                  <span class="provider-concurrency-row__model-label">{{ t('components.main.concurrencyDetails.actualModel') }}</span>
+                  <span
+                    class="provider-concurrency-row__route-trigger"
+                    tabindex="0"
+                    :aria-label="routeTriggerAriaLabel(activeActualModel(request), activeRouteTooltipLines(request))"
+                    @mouseenter="showRouteTooltip($event, activeRouteTooltipLines(request))"
+                    @mouseleave="hideRouteTooltip($event)"
+                    @focus="showRouteTooltip($event, activeRouteTooltipLines(request))"
+                    @blur="hideRouteTooltip($event)"
+                    @keydown.esc="hideRouteTooltip()"
+                  >
+                    <strong>{{ activeActualModel(request) }}</strong>
+                  </span>
+                </div>
+              </div>
+              <strong v-else>{{ displayModel(request.model) }}</strong>
+              <span class="provider-concurrency-row__context">{{ request.endpoint || '-' }}</span>
             </div>
             <div class="provider-concurrency-row__meta">
               <span>{{ request.isStream ? t('components.main.concurrencyDetails.stream') : t('components.main.concurrencyDetails.nonStream') }}</span>
@@ -81,9 +105,33 @@
             :key="log.id"
             class="provider-concurrency-row"
           >
-            <div class="provider-concurrency-row__main">
-              <strong>{{ displayModel(log.requested_model || log.model || log.response_model) }}</strong>
-              <span>HTTP {{ log.http_code || 0 }}</span>
+            <div
+              class="provider-concurrency-row__main"
+              :class="{ 'provider-concurrency-row__main--route': showModelRouteDetails }"
+            >
+              <div v-if="showModelRouteDetails" class="provider-concurrency-row__models">
+                <div class="provider-concurrency-row__model-line">
+                  <span class="provider-concurrency-row__model-label">{{ t('components.main.concurrencyDetails.requestedModel') }}</span>
+                  <span class="provider-concurrency-row__model-value">{{ historyRequestedModel(log) }}</span>
+                </div>
+                <div class="provider-concurrency-row__model-line">
+                  <span class="provider-concurrency-row__model-label">{{ t('components.main.concurrencyDetails.actualModel') }}</span>
+                  <span
+                    class="provider-concurrency-row__route-trigger"
+                    tabindex="0"
+                    :aria-label="routeTriggerAriaLabel(historyActualModel(log), historyRouteTooltipLines(log))"
+                    @mouseenter="showRouteTooltip($event, historyRouteTooltipLines(log))"
+                    @mouseleave="hideRouteTooltip($event)"
+                    @focus="showRouteTooltip($event, historyRouteTooltipLines(log))"
+                    @blur="hideRouteTooltip($event)"
+                    @keydown.esc="hideRouteTooltip()"
+                  >
+                    <strong>{{ historyActualModel(log) }}</strong>
+                  </span>
+                </div>
+              </div>
+              <strong v-else>{{ displayModel(log.requested_model || log.model || log.response_model) }}</strong>
+              <span class="provider-concurrency-row__context">HTTP {{ log.http_code || 0 }}</span>
             </div>
             <div class="provider-concurrency-row__meta">
               <span>{{ log.is_stream ? t('components.main.concurrencyDetails.stream') : t('components.main.concurrencyDetails.nonStream') }}</span>
@@ -95,6 +143,23 @@
         </template>
       </section>
     </div>
+
+    <Teleport to="body">
+      <div
+        v-if="routeTooltip.visible"
+        ref="routeTooltipRef"
+        class="provider-model-route-tooltip"
+        :class="{ 'provider-model-route-tooltip--dark': isDarkTheme }"
+        :style="routeTooltipStyle"
+        role="tooltip"
+      >
+        <span
+          v-for="(line, index) in routeTooltip.lines"
+          :key="index"
+          class="provider-model-route-tooltip__line"
+        >{{ line }}</span>
+      </div>
+    </Teleport>
   </InlineModal>
 </template>
 
@@ -108,14 +173,19 @@
  * @LastEditTime: 2026-07-01 17:16:36
  * @FilePath: frontend/src/components/Main/modals/ProviderConcurrencyDetailsModal.vue
  */
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch, type CSSProperties } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { AutomationCard } from '../../../data/cards'
 import { fetchRequestLogsPage, type RequestLog, type RequestLogPlatform } from '../../../services/logs'
 import { extractErrorMessage } from '../../../utils/error'
 import InlineModal from '../../common/InlineModal.vue'
 import { cardProviderRef } from '../adapters/providerCardMappers'
-import type { ProviderConcurrencyStatusView, ResolvedTheme } from '../types'
+import type { ProviderConcurrencyRequestView, ProviderConcurrencyStatusView, ResolvedTheme } from '../types'
+import {
+  buildModelRouteAriaLabel,
+  buildModelRouteTooltipLines,
+  type ModelRouteSnapshot,
+} from './providerModelRoute'
 
 const HISTORY_LIMIT = 10
 type ConcurrencyDetailsTab = 'active' | 'history'
@@ -126,6 +196,7 @@ const props = defineProps<{
   platform: RequestLogPlatform | null
   status: ProviderConcurrencyStatusView | null
   resolvedTheme: ResolvedTheme
+  showModelRouteDetails: boolean
 }>()
 
 const emit = defineEmits<{
@@ -139,7 +210,17 @@ const historyError = ref('')
 const historyLogs = ref<RequestLog[]>([])
 const historyLoaded = ref(false)
 const activeTab = ref<ConcurrencyDetailsTab>('active')
+const routeTooltipRef = ref<HTMLElement | null>(null)
+const routeTooltip = ref({
+  visible: false,
+  positioned: false,
+  left: 0,
+  top: 0,
+  lines: [] as string[],
+})
 let activeLoadRequestId = 0
+let routeTooltipRequestId = 0
+let routeTooltipViewportListenersActive = false
 
 const isDarkTheme = computed(() => props.resolvedTheme === 'dark')
 const providerName = computed(() => props.provider?.name || props.status?.providerName || '')
@@ -153,6 +234,11 @@ const modalTitle = computed(() => t('components.main.concurrencyDetails.modalTit
 const modalPanelClass = computed(() => ({
   'provider-concurrency-modal-shell': true,
   'provider-concurrency-modal-shell--dark': isDarkTheme.value,
+}))
+const routeTooltipStyle = computed<CSSProperties>(() => ({
+  left: `${routeTooltip.value.left}px`,
+  top: `${routeTooltip.value.top}px`,
+  visibility: routeTooltip.value.positioned ? 'visible' : 'hidden',
 }))
 const platformLabel = computed(() => {
   switch (props.platform) {
@@ -179,6 +265,115 @@ const dateTimeFormatter = computed(() => new Intl.DateTimeFormat(locale.value ||
 
 function displayModel(value?: string) {
   return `${value ?? ''}`.trim() || '-'
+}
+
+function activeRequestedModel(request: ProviderConcurrencyRequestView) {
+  return displayModel(request.requestedModel || request.model)
+}
+
+function activeActualModel(request: ProviderConcurrencyRequestView) {
+  return displayModel(request.model || request.requestedModel)
+}
+
+function historyRequestedModel(log: RequestLog) {
+  return displayModel(log.requested_model || log.model || log.response_model)
+}
+
+function historyActualModel(log: RequestLog) {
+  return displayModel(log.model || log.response_model || log.requested_model)
+}
+
+function modelRouteTooltipLines(route: ModelRouteSnapshot, unavailableMessage: string) {
+  return buildModelRouteTooltipLines(route, unavailableMessage, t)
+}
+
+function activeRouteTooltipLines(request: ProviderConcurrencyRequestView) {
+  return modelRouteTooltipLines({
+    requestedModel: request.requestedModel || request.model,
+    mappedModel: request.mappedModel,
+    modelMappingPattern: request.modelMappingPattern,
+    modelMappingTarget: request.modelMappingTarget,
+    modelOverride: request.modelOverride,
+    modelRouteCaptured: request.modelRouteCaptured,
+  }, t('components.main.concurrencyDetails.activeRouteUnavailable'))
+}
+
+function historyRouteTooltipLines(log: RequestLog) {
+  return modelRouteTooltipLines({
+    requestedModel: log.requested_model || log.model || log.response_model,
+    mappedModel: log.mapped_model,
+    modelMappingPattern: log.model_mapping_pattern,
+    modelMappingTarget: log.model_mapping_target,
+    modelOverride: log.model_override,
+    modelRouteCaptured: log.model_route_captured,
+  }, t('components.main.concurrencyDetails.routeUnavailable'))
+}
+
+function routeTriggerAriaLabel(actualModel: string, lines: string[]) {
+  return buildModelRouteAriaLabel(actualModel, lines, t)
+}
+
+function showRouteTooltip(event: MouseEvent | FocusEvent, lines: string[]) {
+  const target = event.currentTarget
+  if (!(target instanceof HTMLElement)) return
+
+  const requestId = ++routeTooltipRequestId
+  const anchorRect = target.getBoundingClientRect()
+  routeTooltip.value = {
+    visible: true,
+    positioned: false,
+    left: anchorRect.left,
+    top: anchorRect.bottom + 8,
+    lines,
+  }
+
+  void nextTick(() => {
+    if (requestId !== routeTooltipRequestId || !routeTooltip.value.visible) return
+    const tooltipRect = routeTooltipRef.value?.getBoundingClientRect()
+    if (!tooltipRect) return
+
+    const viewportMargin = 12
+    const preferredLeft = Math.min(
+      Math.max(anchorRect.left, viewportMargin),
+      Math.max(viewportMargin, window.innerWidth - tooltipRect.width - viewportMargin),
+    )
+    const belowTop = anchorRect.bottom + 8
+    const aboveTop = anchorRect.top - tooltipRect.height - 8
+    const preferredTop = belowTop + tooltipRect.height <= window.innerHeight - viewportMargin
+      ? belowTop
+      : Math.max(viewportMargin, aboveTop)
+
+    routeTooltip.value = {
+      ...routeTooltip.value,
+      positioned: true,
+      left: preferredLeft,
+      top: preferredTop,
+    }
+  })
+}
+
+function hideRouteTooltip(event?: MouseEvent | FocusEvent) {
+  if (event?.type === 'mouseleave' && document.activeElement === event.currentTarget) {
+    return
+  }
+  routeTooltipRequestId += 1
+  routeTooltip.value.visible = false
+}
+
+function hideRouteTooltipOnViewportChange() {
+  hideRouteTooltip()
+}
+
+function setRouteTooltipViewportListeners(active: boolean) {
+  if (routeTooltipViewportListenersActive === active) return
+  routeTooltipViewportListenersActive = active
+  if (active) {
+    window.addEventListener('resize', hideRouteTooltipOnViewportChange)
+    window.addEventListener('scroll', hideRouteTooltipOnViewportChange, true)
+    return
+  }
+  window.removeEventListener('resize', hideRouteTooltipOnViewportChange)
+  window.removeEventListener('scroll', hideRouteTooltipOnViewportChange, true)
 }
 
 function formatDurationMs(value?: number) {
@@ -261,6 +456,22 @@ watch(
   },
   { immediate: true },
 )
+
+watch(
+  () => props.open,
+  (open) => {
+    if (!open) hideRouteTooltip()
+  },
+)
+
+watch(
+  () => routeTooltip.value.visible,
+  setRouteTooltipViewportListeners,
+)
+
+onBeforeUnmount(() => {
+  setRouteTooltipViewportListeners(false)
+})
 </script>
 
 <style scoped>
@@ -416,6 +627,83 @@ watch(
   gap: 8px;
 }
 
+.provider-concurrency-row__main--route {
+  justify-content: space-between;
+}
+
+.provider-concurrency-row__models {
+  display: grid;
+  flex: 1 1 520px;
+  min-width: 0;
+  max-width: 100%;
+  gap: 6px;
+}
+
+.provider-concurrency-row__model-line {
+  display: grid;
+  grid-template-columns: minmax(56px, auto) minmax(0, 1fr);
+  align-items: baseline;
+  gap: 10px;
+}
+
+.provider-concurrency-row__model-label {
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.provider-concurrency-row__model-value,
+.provider-concurrency-row__route-trigger strong {
+  color: #0f172a;
+  overflow-wrap: anywhere;
+}
+
+.provider-concurrency-modal--dark .provider-concurrency-row__model-value,
+.provider-concurrency-modal--dark .provider-concurrency-row__route-trigger strong {
+  color: #f8fafc;
+}
+
+.provider-concurrency-row__route-trigger {
+  min-width: 0;
+  border-radius: 6px;
+  outline: none;
+  cursor: help;
+}
+
+.provider-concurrency-row__route-trigger:focus-visible {
+  box-shadow: 0 0 0 2px rgba(20, 184, 166, 0.35);
+}
+
+.provider-model-route-tooltip {
+  position: fixed;
+  z-index: 10000;
+  display: grid;
+  width: max-content;
+  max-width: min(440px, 72vw);
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 10px;
+  color: #e2e8f0;
+  background: #0f172a;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.2);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.45;
+  pointer-events: none;
+}
+
+.provider-model-route-tooltip__line {
+  overflow-wrap: anywhere;
+}
+
+.provider-model-route-tooltip--dark {
+  border-color: rgba(148, 163, 184, 0.24);
+  color: #0f172a;
+  background: #f8fafc;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.32);
+}
+
 .provider-concurrency-row__main strong {
   color: #0f172a;
 }
@@ -424,7 +712,7 @@ watch(
   color: #f8fafc;
 }
 
-.provider-concurrency-row__main span,
+.provider-concurrency-row__context,
 .provider-concurrency-row__meta {
   color: #64748b;
   font-size: 12px;

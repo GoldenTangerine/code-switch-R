@@ -63,7 +63,25 @@
               {{ formatters.formatModelVerifyStatus(item) }}
             </span>
           </td>
-          <td :class="['code', formatters.httpCodeClass(item.http_code)]">{{ item.http_code }}</td>
+          <td :class="['code', formatters.httpCodeClass(item.http_code)]">
+            <span
+              v-if="formatters.hasStreamDiagnosticData(item)"
+              class="http-diagnostic-trigger"
+              tabindex="0"
+              aria-haspopup="true"
+              :aria-label="formatters.formatStreamDiagnosticAriaLabel(item)"
+              :aria-describedby="logInfoTooltipVisible ? 'logs-table-info-tooltip' : undefined"
+              @mouseenter="handlers.scheduleShowStreamInfoTooltip(item, $event)"
+              @mousemove="handlers.moveLogInfoTooltip($event)"
+              @mouseleave="handlers.hideLogInfoTooltip"
+              @focus="handlers.showStreamInfoTooltip(item, $event)"
+              @blur="handlers.hideLogInfoTooltip"
+              @keydown.esc="handlers.hideLogInfoTooltipImmediately"
+            >
+              {{ item.http_code }}
+            </span>
+            <template v-else>{{ item.http_code }}</template>
+          </td>
           <td><span :class="['stream-tag', item.is_stream ? 'on' : 'off']">{{ formatters.formatStream(item.is_stream) }}</span></td>
           <td><span :class="['duration-tag', formatters.durationColor(item.duration_sec)]">{{ formatters.formatDuration(item.duration_sec) }}</span></td>
           <td class="performance-cell">
@@ -155,6 +173,8 @@ type LogsTableFormatters = {
   formatReasoningEffort: (item: RequestLog) => string
   formatReasoningEffortTone: (value?: string) => string
   formatVerifyInfoAriaLabel: (item: RequestLog) => string
+  hasStreamDiagnosticData: (item: RequestLog) => boolean
+  formatStreamDiagnosticAriaLabel: (item: RequestLog) => string
   resolveModelVerifyStatus: (item: RequestLog) => string
   formatModelVerifyStatus: (item: RequestLog) => string
   httpCodeClass: (code: number) => string
@@ -180,6 +200,8 @@ type LogsTableHandlers = {
   hideLogInfoTooltipImmediately: () => void
   scheduleShowVerifyInfoTooltip: (item: RequestLog, event: MouseEvent) => void
   showVerifyInfoTooltip: (item: RequestLog, event: TooltipPointerEvent) => void
+  scheduleShowStreamInfoTooltip: (item: RequestLog, event: MouseEvent) => void
+  showStreamInfoTooltip: (item: RequestLog, event: TooltipPointerEvent) => void
   openPayloadDetailModal: (item: RequestLog) => void | Promise<void>
   scheduleShowCostTooltip: (item: RequestLog, event: MouseEvent) => void
   moveCostTooltip: (event: MouseEvent) => void
@@ -201,6 +223,31 @@ const { t } = useI18n()
 </script>
 
 <style scoped>
+.http-diagnostic-trigger {
+  display: inline-flex;
+  cursor: help;
+  border-radius: 6px;
+  padding: 1px 4px;
+  margin: -1px -4px;
+}
+
+.http-diagnostic-trigger:hover {
+  background: rgba(59, 130, 246, 0.12);
+}
+
+.http-diagnostic-trigger:focus-visible {
+  outline: 2px solid rgba(59, 130, 246, 0.52);
+  outline-offset: 1px;
+}
+
+:global(html.dark) .http-diagnostic-trigger:hover {
+  background: rgba(59, 130, 246, 0.24);
+}
+
+:global(html.dark) .http-diagnostic-trigger:focus-visible {
+  outline-color: rgba(96, 165, 250, 0.7);
+}
+
 .reasoning-effort {
   margin-left: 0.35rem;
   flex: 0 0 auto;

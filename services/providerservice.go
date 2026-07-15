@@ -1108,20 +1108,38 @@ func (p *Provider) isClaudeRoutedModelSupported(requestedModel, effectiveModel s
 // GetEffectiveModel 获取实际应该使用的模型名
 // 如果存在映射（精确或通配符），返回映射后的模型名；否则返回原模型名
 func (p *Provider) GetEffectiveModel(requestedModel string) string {
-	if mappedModel, matched := p.resolveModelMapping(requestedModel); matched {
-		return mappedModel
+	detail := p.resolveModelMappingDetail(requestedModel)
+	if detail.Matched {
+		return detail.MappedModel
 	}
 	return requestedModel
 }
 
+type providerModelMappingDetail struct {
+	MappedModel   string
+	Pattern       string
+	TargetPattern string
+	Matched       bool
+}
+
 func (p *Provider) resolveModelMapping(requestedModel string) (string, bool) {
+	detail := p.resolveModelMappingDetail(requestedModel)
+	return detail.MappedModel, detail.Matched
+}
+
+func (p *Provider) resolveModelMappingDetail(requestedModel string) providerModelMappingDetail {
 	if p == nil || len(p.ModelMapping) == 0 {
-		return requestedModel, false
+		return providerModelMappingDetail{MappedModel: requestedModel}
 	}
 
 	// 优先查找精确映射
 	if mappedModel, exists := p.ModelMapping[requestedModel]; exists {
-		return mappedModel, true
+		return providerModelMappingDetail{
+			MappedModel:   mappedModel,
+			Pattern:       requestedModel,
+			TargetPattern: mappedModel,
+			Matched:       true,
+		}
 	}
 
 	// 查找通配符映射
@@ -1143,7 +1161,7 @@ func (p *Provider) resolveModelMapping(requestedModel string) (string, bool) {
 	}
 	if len(matches) == 0 {
 		// 无映射，返回原模型名
-		return requestedModel, false
+		return providerModelMappingDetail{MappedModel: requestedModel}
 	}
 	sort.Slice(matches, func(i, j int) bool {
 		if matches[i].literalSize != matches[j].literalSize {
@@ -1152,7 +1170,12 @@ func (p *Provider) resolveModelMapping(requestedModel string) (string, bool) {
 		return matches[i].pattern < matches[j].pattern
 	})
 	selected := matches[0]
-	return applyWildcardMapping(selected.pattern, selected.replacement, requestedModel), true
+	return providerModelMappingDetail{
+		MappedModel:   applyWildcardMapping(selected.pattern, selected.replacement, requestedModel),
+		Pattern:       selected.pattern,
+		TargetPattern: selected.replacement,
+		Matched:       true,
+	}
 }
 
 func normalizeModelMappingMissPolicy(policy string) string {

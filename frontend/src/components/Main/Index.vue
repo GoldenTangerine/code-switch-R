@@ -133,6 +133,7 @@
         :platform="concurrencyDetailsModalPlatform"
         :status="concurrencyDetailsModalStatus"
         :resolved-theme="resolvedTheme"
+        :show-model-route-details="concurrencyDetailsModalPlatform === 'claude' && claudeModelRoutingEnabled"
         @close="closeConcurrencyDetails"
       />
 
@@ -576,6 +577,7 @@ const {
   showHeatmap,
   showHomeTitle,
   enableRoundRobin,
+  claudeModelRoutingEnabled,
   heatmapGranularity,
   heatmapDisplaySettings,
   showFirstRunPrompt,
