@@ -70,6 +70,10 @@ type Provider struct {
 	// 支持精确匹配和通配符（如 "claude-*" -> "anthropic/claude-*"）
 	ModelMapping map[string]string `json:"modelMapping,omitempty"`
 
+	// 已关闭的模型映射 - 模型映射 key -> true
+	// 未配置或不存在的 key 默认开启，确保兼容历史配置
+	ModelMappingDisabled map[string]bool `json:"modelMappingDisabled,omitempty"`
+
 	// 模型映射思考强度 - 模型映射 key -> 强制思考强度
 	// 空值或未配置表示保留请求原有强度
 	ModelMappingReasoningEfforts map[string]string `json:"modelMappingReasoningEfforts,omitempty"`
@@ -221,6 +225,12 @@ func cloneProvider(provider Provider) Provider {
 		cloned.ModelMapping = make(map[string]string, len(provider.ModelMapping))
 		for key, value := range provider.ModelMapping {
 			cloned.ModelMapping[key] = value
+		}
+	}
+	if provider.ModelMappingDisabled != nil {
+		cloned.ModelMappingDisabled = make(map[string]bool, len(provider.ModelMappingDisabled))
+		for key, value := range provider.ModelMappingDisabled {
+			cloned.ModelMappingDisabled[key] = value
 		}
 	}
 	if provider.ModelMappingReasoningEfforts != nil {
@@ -525,6 +535,7 @@ func (ps *ProviderService) saveProvidersLocked(kind string, providers []Provider
 
 		// 验证模型配置
 		p.ModelPassthroughPatterns = normalizeModelPassthroughPatterns(p.ModelPassthroughPatterns)
+		p.ModelMappingDisabled = normalizeModelMappingDisabled(p.ModelMappingDisabled, p.ModelMapping)
 		if errs := p.validateConfigurationForKind(kind); len(errs) > 0 {
 			for _, errMsg := range errs {
 				validationErrors = append(validationErrors, fmt.Sprintf("[%s] %s", p.Name, errMsg))
@@ -1003,6 +1014,12 @@ func (ps *ProviderService) DuplicateProvider(kind string, sourceID int64) (*Prov
 			cloned.ModelMapping[k] = v
 		}
 	}
+	if source.ModelMappingDisabled != nil {
+		cloned.ModelMappingDisabled = make(map[string]bool, len(source.ModelMappingDisabled))
+		for k, v := range source.ModelMappingDisabled {
+			cloned.ModelMappingDisabled[k] = v
+		}
+	}
 	if source.ModelMappingReasoningEfforts != nil {
 		cloned.ModelMappingReasoningEfforts = make(map[string]string, len(source.ModelMappingReasoningEfforts))
 		for k, v := range source.ModelMappingReasoningEfforts {
@@ -1150,7 +1167,7 @@ func (p *Provider) resolveModelMappingDetail(requestedModel string) providerMode
 	}
 
 	// 优先查找精确映射
-	if mappedModel, exists := p.ModelMapping[requestedModel]; exists {
+	if mappedModel, exists := p.ModelMapping[requestedModel]; exists && p.isModelMappingEnabled(requestedModel) {
 		return providerModelMappingDetail{
 			MappedModel:     mappedModel,
 			Pattern:         requestedModel,
@@ -1168,6 +1185,9 @@ func (p *Provider) resolveModelMappingDetail(requestedModel string) providerMode
 	}
 	matches := make([]wildcardMapping, 0)
 	for pattern, replacement := range p.ModelMapping {
+		if !p.isModelMappingEnabled(pattern) {
+			continue
+		}
 		if strings.Count(pattern, "*") != 1 || strings.Count(replacement, "*") > 1 || !matchWildcard(pattern, requestedModel) {
 			continue
 		}
@@ -1195,6 +1215,42 @@ func (p *Provider) resolveModelMappingDetail(requestedModel string) providerMode
 		ReasoningEffort: strings.TrimSpace(p.ModelMappingReasoningEfforts[selected.pattern]),
 		Matched:         true,
 	}
+}
+
+func normalizeModelMappingDisabled(disabled map[string]bool, modelMapping map[string]string) map[string]bool {
+	if len(disabled) == 0 || len(modelMapping) == 0 {
+		return nil
+	}
+	normalized := make(map[string]bool)
+	for key, isDisabled := range disabled {
+		if !isDisabled {
+			continue
+		}
+		if _, exists := modelMapping[key]; exists {
+			normalized[key] = true
+		}
+	}
+	if len(normalized) == 0 {
+		return nil
+	}
+	return normalized
+}
+
+func (p *Provider) isModelMappingEnabled(key string) bool {
+	return p == nil || !p.ModelMappingDisabled[key]
+}
+
+func (p *Provider) activeModelMappingCount() int {
+	if p == nil {
+		return 0
+	}
+	count := 0
+	for key := range p.ModelMapping {
+		if p.isModelMappingEnabled(key) {
+			count++
+		}
+	}
+	return count
 }
 
 func normalizeModelMappingMissPolicy(policy string) string {
@@ -1255,6 +1311,9 @@ func (p *Provider) validateConfiguration(validateMappingTargets bool) []string {
 	// 仅当两者都有实际内容时才校验（空 map 不触发校验）
 	if validateMappingTargets && len(p.ModelMapping) > 0 && len(p.SupportedModels) > 0 {
 		for externalModel, internalModel := range p.ModelMapping {
+			if !p.isModelMappingEnabled(externalModel) {
+				continue
+			}
 			// 检查是否为通配符映射
 			if strings.Contains(internalModel, "*") {
 				// 通配符映射暂不验证（需要具体请求才能展开）

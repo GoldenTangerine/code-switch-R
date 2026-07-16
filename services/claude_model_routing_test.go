@@ -75,6 +75,32 @@ func TestBuildClaudeProviderRoutesTrustsExplicitMappingWithoutActualTarget(t *te
 	}
 }
 
+func TestBuildClaudeProviderRoutesExcludesDisabledMappings(t *testing.T) {
+	provider := Provider{
+		ID:      1,
+		Name:    "Disabled Mapping",
+		Enabled: true,
+		ModelMapping: map[string]string{
+			"claude-opus-*":   "vendor-opus-*",
+			"claude-sonnet-*": "vendor-sonnet-*",
+		},
+		ModelMappingDisabled: map[string]bool{
+			"claude-opus-*": true,
+		},
+	}
+	localModels := map[string]ProviderModelPricingItem{
+		"claude-opus-4.8":   {Model: "claude-opus-4.8"},
+		"claude-sonnet-4.8": {Model: "claude-sonnet-4.8"},
+	}
+	routes := buildClaudeProviderRoutes(provider, nil, localModels, 0)
+	if _, exists := routes["claude-opus-4.8"]; exists {
+		t.Fatal("关闭的映射不应生成 Claude 路由")
+	}
+	if _, exists := routes["claude-sonnet-4.8"]; !exists {
+		t.Fatal("开启的映射应继续生成 Claude 路由")
+	}
+}
+
 func TestResolveClaudeProviderActualModelsFallsBackToMappingTargets(t *testing.T) {
 	provider := Provider{ModelMapping: map[string]string{
 		"claude-5": "vendor/claude-5",
@@ -82,6 +108,26 @@ func TestResolveClaudeProviderActualModelsFallsBackToMappingTargets(t *testing.T
 	actual := resolveClaudeProviderActualModels(provider, claudeProviderModelCacheEntry{}, nil)
 	if _, ok := actual["vendor/claude-5"]; !ok {
 		t.Fatal("映射目标应在远端缓存缺失时生成临时实际模型")
+	}
+}
+
+func TestResolveClaudeProviderActualModelsExcludesDisabledMappingTargets(t *testing.T) {
+	provider := Provider{
+		ModelMapping: map[string]string{
+			"claude-opus-*":   "vendor-opus-*",
+			"claude-sonnet-*": "vendor-sonnet-*",
+		},
+		ModelMappingDisabled: map[string]bool{"claude-opus-*": true},
+	}
+	actual := resolveClaudeProviderActualModels(provider, claudeProviderModelCacheEntry{}, map[string]ProviderModelPricingItem{
+		"vendor-opus-4.8":   {Model: "vendor-opus-4.8"},
+		"vendor-sonnet-4.8": {Model: "vendor-sonnet-4.8"},
+	})
+	if _, exists := actual["vendor-opus-4.8"]; exists {
+		t.Fatal("关闭映射的目标模型不应进入实际模型集合")
+	}
+	if _, exists := actual["vendor-sonnet-4.8"]; !exists {
+		t.Fatal("开启映射的目标模型应进入实际模型集合")
 	}
 }
 
@@ -142,6 +188,49 @@ func TestClaudeModelRoutingResolveProvidersMatchesMappingOutsideRouteIndex(t *te
 	resolved = service.ResolveProviders("claude-opus-4.8", providers)
 	if len(resolved) != 2 || resolved[0].Name != "Match" || resolved[1].Name != "Verified" {
 		t.Fatalf("动态映射与已验证路由应合并并保留供应商顺序: %#v", resolved)
+	}
+}
+
+func TestClaudeModelRoutingResolveProvidersHonorsPassthroughWhenMappingsDisabled(t *testing.T) {
+	useIsolatedHomeDir(t)
+	appSettings := NewAppSettingsService(nil)
+	settings, err := appSettings.GetAppSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings.ClaudeModelRoutingEnabled = true
+	if _, err := appSettings.SaveAppSettings(settings); err != nil {
+		t.Fatal(err)
+	}
+	service := NewClaudeModelRoutingService(nil, appSettings, nil)
+	providers := []Provider{
+		{
+			ID:                     1,
+			Name:                   "Passthrough",
+			ModelMapping:           map[string]string{"claude-*": "vendor-*"},
+			ModelMappingDisabled:   map[string]bool{"claude-*": true},
+			ModelMappingMissPolicy: ModelMappingMissPolicyPassthrough,
+		},
+		{
+			ID:                       2,
+			Name:                     "Pattern Miss",
+			ModelMapping:             map[string]string{"claude-*": "vendor-*"},
+			ModelMappingDisabled:     map[string]bool{"claude-*": true},
+			ModelMappingMissPolicy:   ModelMappingMissPolicyPassthrough,
+			ModelPassthroughPatterns: []string{"glm-*"},
+		},
+		{
+			ID:                     3,
+			Name:                   "Blocked",
+			ModelMapping:           map[string]string{"claude-*": "vendor-*"},
+			ModelMappingDisabled:   map[string]bool{"claude-*": true},
+			ModelMappingMissPolicy: ModelMappingMissPolicyBlock,
+		},
+	}
+
+	resolved := service.ResolveProviders("claude-opus-4.8", providers)
+	if len(resolved) != 1 || resolved[0].Name != "Passthrough" {
+		t.Fatalf("全部映射关闭后应继续按未命中透传策略筛选供应商: %#v", resolved)
 	}
 }
 

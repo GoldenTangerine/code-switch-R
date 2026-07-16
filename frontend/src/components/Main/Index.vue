@@ -144,6 +144,7 @@
         :card="providerModalState.card"
         :cards="cards[providerModalState.tabId] ?? []"
         :active-proxy-state="activeProxyState"
+        :persist-model-mapping-rule-enabled="persistModelMappingRuleEnabled"
         @close="closeProviderModal"
         @submit="submitProviderModal"
         @submit-and-apply="submitAndApplyProviderModal"
@@ -474,6 +475,7 @@ const {
   confirmRemove,
   handleDuplicate,
   handleProviderEnabledChange,
+  persistModelMappingRuleEnabled,
 } = useProviderForm({
   initialTab: activeTab.value,
   t,

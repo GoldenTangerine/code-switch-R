@@ -29,6 +29,8 @@ export type AutomationCard = {
   supportedModels?: Record<string, boolean>
   // 模型映射：external model -> internal model
   modelMapping?: Record<string, string>
+  // 已关闭的模型映射：模型映射 key -> true
+  modelMappingDisabled?: Record<string, boolean>
   // 模型映射思考强度：模型映射 key -> 强制思考强度
   modelMappingReasoningEfforts?: Record<string, string>
   // 模型映射未命中策略：默认拦截；也可按原模型名透传

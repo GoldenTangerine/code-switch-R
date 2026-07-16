@@ -5,7 +5,7 @@
     :body-scrollable="false"
     :panel-width="'min(980px, 96vw)'"
     :close-on-backdrop="false"
-    @close="$emit('close')"
+    @close="requestClose"
   >
     <form class="vendor-form vendor-form--provider-modal" @submit.prevent="submit()">
       <div class="vendor-form__scroll-body">
@@ -689,10 +689,13 @@
           <ModelMappingEditor
             :key="cliConfigEditorKey"
             v-model="form.modelMapping"
+            v-model:disabled-rules="form.modelMappingDisabled"
             v-model:reasoning-efforts="form.modelMappingReasoningEfforts"
             v-model:miss-policy="form.modelMappingMissPolicy"
             v-model:passthrough-patterns="form.modelPassthroughPatterns"
             :platform="builtinModelPlatform"
+            :toggle-saving="modelMappingToggleSaving"
+            @toggle-rule="handleModelMappingRuleToggle"
           />
         </div>
 
@@ -775,17 +778,22 @@
       </div>
 
       <footer class="form-actions form-actions--provider-modal">
-        <BaseButton variant="outline" type="button" @click="$emit('close')">
+        <BaseButton
+          variant="outline"
+          type="button"
+          :disabled="modelMappingToggleSaving"
+          @click="requestClose"
+        >
           {{ t('components.main.form.actions.cancel') }}
         </BaseButton>
-        <BaseButton type="submit">
+        <BaseButton type="submit" :disabled="modelMappingToggleSaving">
           {{ t('components.main.form.actions.save') }}
         </BaseButton>
         <BaseButton
           v-if="isEditing && tabId !== 'others' && tabId !== 'opencode' && !activeProxyState"
           type="button"
           variant="primary"
-          :disabled="saveAndApplyBlockedByProvider"
+          :disabled="modelMappingToggleSaving || saveAndApplyBlockedByProvider"
           :title="saveAndApplyTooltip"
           @click="submit(true)"
         >
@@ -902,6 +910,7 @@ import {
   type PresetModelVariant,
   type TemplateValueConfig,
 } from '../config/opencodeProviderPresets'
+import { useModelMappingRuleToggle } from './useModelMappingRuleToggle'
 
 type CLIConfigEditorExposed = InstanceType<typeof CLIConfigEditor> & {
   applyPendingJsonChanges?: () => boolean | Promise<boolean>
@@ -959,6 +968,7 @@ const props = defineProps<{
   card: AutomationCard | null
   cards: AutomationCard[]
   activeProxyState: boolean
+  persistModelMappingRuleEnabled?: (key: string, enabled: boolean) => Promise<void>
 }>()
 
 const emit = defineEmits<{
@@ -979,6 +989,15 @@ const ICON_PRELOAD_BATCH_SIZE = 80
 const defaultIconKey = iconOptions.find((iconKey) => iconKey === 'aicoding') ?? iconOptions[0] ?? 'aicoding'
 
 const form = reactive<VendorForm>(createDefaultVendorForm(props.tabId, defaultIconKey))
+const {
+  isSaving: modelMappingToggleSaving,
+  invalidatePending: invalidatePendingModelMappingToggle,
+  toggleRule: handleModelMappingRuleToggle,
+} = useModelMappingRuleToggle({
+  form,
+  getCard: () => props.card,
+  getPersistRule: () => props.persistModelMappingRuleEnabled,
+})
 const cliConfigEditorRef = ref<CLIConfigEditorExposed | null>(null)
 const cliConfigEditorKey = ref(0)
 const errors = reactive({
@@ -1740,6 +1759,7 @@ const updateOpenCodeTemplateValue = (key: string, value: string) => {
 }
 
 const resetForm = () => {
+  invalidatePendingModelMappingToggle()
   errors.apiUrl = ''
   errors.providerRef = ''
   iconSearchQuery.value = ''
@@ -1796,6 +1816,7 @@ watch(() => props.open, (open) => {
   if (open) {
     resetForm()
   } else {
+    invalidatePendingModelMappingToggle()
     closeOpenCodeModelDetail()
   }
 })
@@ -2682,6 +2703,11 @@ const iconSvg = (name: string) => {
   return getProviderDisplayIconSvg(name)
 }
 
+const requestClose = () => {
+  if (modelMappingToggleSaving.value) return
+  emit('close')
+}
+
 const warmupIcon = (name: string) => {
   void preloadProviderDisplayIcons([name])
 }
@@ -2802,6 +2828,7 @@ const buildFormPayload = async (): Promise<VendorForm | null> => {
 }
 
 const submit = async (applyAfterSave = false) => {
+  if (modelMappingToggleSaving.value) return
   const payload = await buildFormPayload()
   if (!payload) return
 

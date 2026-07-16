@@ -56,6 +56,20 @@ export const normalizeModelMappingReasoningEfforts = (
   return normalized
 }
 
+export const normalizeModelMappingDisabled = (
+  value: unknown,
+  modelMapping: Record<string, string> | undefined,
+): Record<string, boolean> => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  const normalized: Record<string, boolean> = {}
+  Object.entries(value as Record<string, unknown>).forEach(([key, disabled]) => {
+    if (disabled === true && Object.prototype.hasOwnProperty.call(modelMapping || {}, key)) {
+      normalized[key] = true
+    }
+  })
+  return normalized
+}
+
 export const normalizeProviderConcurrencyLimit = (value: unknown): number => {
   const raw = `${value ?? ''}`.trim()
   if (raw === '') return 0
@@ -129,6 +143,7 @@ export const createDefaultVendorForm = (
   anthropicCacheTTL: '',
   supportedModels: {},
   modelMapping: {},
+  modelMappingDisabled: {},
   modelMappingReasoningEfforts: {},
   modelMappingMissPolicy: 'block',
   modelPassthroughPatterns: [],
@@ -180,6 +195,10 @@ export const createVendorFormFromCard = (
   anthropicCacheTTL: resolvePersistedAnthropicCacheTTL(tabId, card.apiFormat, card.anthropicCacheTTL),
   supportedModels: cloneProviderValue(card.supportedModels || {}),
   modelMapping: cloneProviderValue(card.modelMapping || {}),
+  modelMappingDisabled: normalizeModelMappingDisabled(
+    card.modelMappingDisabled,
+    card.modelMapping,
+  ),
   modelMappingReasoningEfforts: normalizeModelMappingReasoningEfforts(
     card.modelMappingReasoningEfforts,
     card.modelMapping,
@@ -274,6 +293,10 @@ export const buildNormalizedVendorForm = ({
     anthropicCacheTTL: resolvePersistedAnthropicCacheTTL(tabId, apiFormat, form.anthropicCacheTTL),
     supportedModels: cloneProviderValue(form.supportedModels || {}),
     modelMapping: cloneProviderValue(form.modelMapping || {}),
+    modelMappingDisabled: normalizeModelMappingDisabled(
+      form.modelMappingDisabled,
+      form.modelMapping,
+    ),
     modelMappingReasoningEfforts: normalizeModelMappingReasoningEfforts(
       form.modelMappingReasoningEfforts,
       form.modelMapping,
@@ -333,6 +356,10 @@ export const buildPersistedProviderFieldsFromForm = (
     anthropicCacheTTL: resolvePersistedAnthropicCacheTTL(tabId, apiFormat, form.anthropicCacheTTL),
     supportedModels: cloneProviderValue(form.supportedModels || {}),
     modelMapping: cloneProviderValue(form.modelMapping || {}),
+    modelMappingDisabled: normalizeModelMappingDisabled(
+      form.modelMappingDisabled,
+      form.modelMapping,
+    ),
     modelMappingReasoningEfforts: normalizeModelMappingReasoningEfforts(
       form.modelMappingReasoningEfforts,
       form.modelMapping,

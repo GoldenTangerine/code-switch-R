@@ -10,11 +10,13 @@
 
 export interface ModelMappingState {
   modelMappings: Record<string, string>
+  disabledRules: Record<string, boolean>
   reasoningEfforts: Record<string, string>
 }
 
 export function upsertModelMappingRule(
   modelMappings: Record<string, string>,
+  disabledRules: Record<string, boolean>,
   reasoningEfforts: Record<string, string>,
   originalKey: string,
   key: string,
@@ -22,10 +24,15 @@ export function upsertModelMappingRule(
   reasoningEffort: string,
 ): ModelMappingState {
   const nextModelMappings = { ...modelMappings }
+  const nextDisabledRules = { ...disabledRules }
   const nextReasoningEfforts = { ...reasoningEfforts }
 
   if (originalKey && originalKey !== key) {
     delete nextModelMappings[originalKey]
+    if (nextDisabledRules[originalKey]) {
+      nextDisabledRules[key] = true
+    }
+    delete nextDisabledRules[originalKey]
     delete nextReasoningEfforts[originalKey]
   }
 
@@ -38,22 +45,27 @@ export function upsertModelMappingRule(
 
   return {
     modelMappings: nextModelMappings,
+    disabledRules: nextDisabledRules,
     reasoningEfforts: nextReasoningEfforts,
   }
 }
 
 export function removeModelMappingRule(
   modelMappings: Record<string, string>,
+  disabledRules: Record<string, boolean>,
   reasoningEfforts: Record<string, string>,
   key: string,
 ): ModelMappingState {
   const nextModelMappings = { ...modelMappings }
+  const nextDisabledRules = { ...disabledRules }
   const nextReasoningEfforts = { ...reasoningEfforts }
   delete nextModelMappings[key]
+  delete nextDisabledRules[key]
   delete nextReasoningEfforts[key]
 
   return {
     modelMappings: nextModelMappings,
+    disabledRules: nextDisabledRules,
     reasoningEfforts: nextReasoningEfforts,
   }
 }

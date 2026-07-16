@@ -2226,7 +2226,7 @@ func (prs *ProviderRelayService) validateConfig() []string {
 			}
 
 			// 检查是否只配置了映射但没有白名单
-			if len(p.ModelMapping) > 0 && len(p.SupportedModels) == 0 {
+			if p.activeModelMappingCount() > 0 && len(p.SupportedModels) == 0 {
 				warnings = append(warnings, fmt.Sprintf(
 					"[%s/%s] 配置了 modelMapping 但未配置 supportedModels，映射目标将不做校验，请确认目标模型在供应商处可用",
 					kind, p.Name))

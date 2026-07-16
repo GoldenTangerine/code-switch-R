@@ -529,6 +529,10 @@ func (s *ClaudeModelRoutingService) ResolveProviders(requestedModel string, prov
 	for _, provider := range providers {
 		if mappedModel, matched := provider.resolveModelMapping(requestedModel); matched && strings.TrimSpace(mappedModel) != "" {
 			allowed[providerRefFromProvider(provider)] = true
+			continue
+		}
+		if shouldPassthroughClaudeModel(provider, requestedModel, claudeModelPassthroughPatterns(provider)) {
+			allowed[providerRefFromProvider(provider)] = true
 		}
 	}
 	if len(allowed) == 0 {
@@ -928,7 +932,10 @@ func resolveClaudeProviderActualModels(provider Provider, cache claudeProviderMo
 		}
 	}
 	if len(provider.SupportedModels) == 0 {
-		for _, pattern := range provider.ModelMapping {
+		for key, pattern := range provider.ModelMapping {
+			if !provider.isModelMappingEnabled(key) {
+				continue
+			}
 			pattern = strings.TrimSpace(pattern)
 			if pattern == "" {
 				continue
@@ -1004,6 +1011,9 @@ func buildClaudeProviderRoutes(provider Provider, actual map[string]ProviderMode
 		candidates := map[string]bool{}
 		keys := make([]string, 0, len(provider.ModelMapping))
 		for key := range provider.ModelMapping {
+			if !provider.isModelMappingEnabled(key) {
+				continue
+			}
 			keys = append(keys, key)
 		}
 		sort.Strings(keys)
@@ -1038,20 +1048,36 @@ func buildClaudeProviderRoutes(provider Provider, actual map[string]ProviderMode
 		}
 	}
 
-	if normalizeModelMappingMissPolicy(provider.ModelMappingMissPolicy) == ModelMappingMissPolicyPassthrough {
-		patterns := normalizeModelPassthroughPatterns(provider.ModelPassthroughPatterns)
-		if len(patterns) == 0 {
-			patterns = []string{"*"}
-		}
-		for _, pattern := range patterns {
-			for model := range actual {
-				if !provider.hasModelMappingForModel(model) && matchModelPassthroughPattern(pattern, model) {
-					addRoute(model, model, false)
-				}
-			}
+	passthroughPatterns := claudeModelPassthroughPatterns(provider)
+	for model := range actual {
+		if shouldPassthroughClaudeModel(provider, model, passthroughPatterns) {
+			addRoute(model, model, false)
 		}
 	}
 	return routes
+}
+
+func claudeModelPassthroughPatterns(provider Provider) []string {
+	if !provider.shouldPassthroughModelMappingMiss() {
+		return nil
+	}
+	patterns := normalizeModelPassthroughPatterns(provider.ModelPassthroughPatterns)
+	if len(patterns) == 0 {
+		return []string{"*"}
+	}
+	return patterns
+}
+
+func shouldPassthroughClaudeModel(provider Provider, model string, patterns []string) bool {
+	if len(patterns) == 0 || provider.hasModelMappingForModel(model) {
+		return false
+	}
+	for _, pattern := range patterns {
+		if matchModelPassthroughPattern(pattern, model) {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeModelPassthroughPatterns(patterns []string) []string {

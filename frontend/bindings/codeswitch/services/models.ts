@@ -1600,6 +1600,7 @@ export class Provider {
      * 支持精确匹配和通配符（如 "claude-*" -> "anthropic/claude-*"）
      */
     "modelMapping"?: { [_: string]: string };
+    "modelMappingDisabled"?: { [_: string]: boolean };
 
     /**
      * 模型映射未命中策略：

@@ -18,6 +18,7 @@ describe('modelMappingState', () => {
 
     const result = upsertModelMappingRule(
       modelMappings,
+      { 'claude-*': true },
       reasoningEfforts,
       'claude-*',
       'claude-opus-*',
@@ -27,6 +28,7 @@ describe('modelMappingState', () => {
 
     expect(result).toEqual({
       modelMappings: { 'claude-opus-*': 'vendor-opus-*', 'gpt-*': 'openai-*' },
+      disabledRules: { 'claude-opus-*': true },
       reasoningEfforts: { 'claude-opus-*': 'xhigh', 'gpt-*': 'medium' },
     })
     expect(modelMappings).toEqual({ 'claude-*': 'vendor-*', 'gpt-*': 'openai-*' })
@@ -36,6 +38,7 @@ describe('modelMappingState', () => {
   it('清空思考强度时删除对应配置', () => {
     const result = upsertModelMappingRule(
       { 'claude-*': 'vendor-*' },
+      {},
       { 'claude-*': 'high' },
       'claude-*',
       'claude-*',
@@ -44,16 +47,23 @@ describe('modelMappingState', () => {
     )
 
     expect(result.reasoningEfforts).toEqual({})
+    expect(result.disabledRules).toEqual({})
   })
 
   it('删除映射时同步删除思考强度且不修改原对象', () => {
     const modelMappings = { 'claude-*': 'vendor-*', 'gpt-*': 'openai-*' }
     const reasoningEfforts = { 'claude-*': 'high', 'gpt-*': 'medium' }
 
-    const result = removeModelMappingRule(modelMappings, reasoningEfforts, 'claude-*')
+    const result = removeModelMappingRule(
+      modelMappings,
+      { 'claude-*': true },
+      reasoningEfforts,
+      'claude-*',
+    )
 
     expect(result).toEqual({
       modelMappings: { 'gpt-*': 'openai-*' },
+      disabledRules: {},
       reasoningEfforts: { 'gpt-*': 'medium' },
     })
     expect(modelMappings).toEqual({ 'claude-*': 'vendor-*', 'gpt-*': 'openai-*' })

@@ -72,6 +72,7 @@ func TestProviderServiceSnapshotDoesNotShareMutableFields(t *testing.T) {
 		Enabled:                      true,
 		SupportedModels:              map[string]bool{"claude-opus-4": true},
 		ModelMapping:                 map[string]string{"claude-*": "vendor-*"},
+		ModelMappingDisabled:         map[string]bool{"claude-*": true},
 		ModelMappingReasoningEfforts: map[string]string{"claude-*": "high"},
 		ModelPassthroughPatterns:     []string{"glm-*"},
 		RequestBodyOverrides: map[string]interface{}{
@@ -85,6 +86,7 @@ func TestProviderServiceSnapshotDoesNotShareMutableFields(t *testing.T) {
 
 	providers[0].SupportedModels["claude-opus-4"] = false
 	providers[0].ModelMapping["claude-*"] = "changed-*"
+	providers[0].ModelMappingDisabled["claude-*"] = false
 	providers[0].ModelMappingReasoningEfforts["claude-*"] = "low"
 	providers[0].ModelPassthroughPatterns[0] = "changed-*"
 	providers[0].RequestBodyOverrides["metadata"].(map[string]interface{})["region"] = "b"
@@ -94,7 +96,7 @@ func TestProviderServiceSnapshotDoesNotShareMutableFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !loaded[0].SupportedModels["claude-opus-4"] || loaded[0].ModelMapping["claude-*"] != "vendor-*" || loaded[0].ModelMappingReasoningEfforts["claude-*"] != "high" || loaded[0].ModelPassthroughPatterns[0] != "glm-*" {
+	if !loaded[0].SupportedModels["claude-opus-4"] || loaded[0].ModelMapping["claude-*"] != "vendor-*" || !loaded[0].ModelMappingDisabled["claude-*"] || loaded[0].ModelMappingReasoningEfforts["claude-*"] != "high" || loaded[0].ModelPassthroughPatterns[0] != "glm-*" {
 		t.Fatalf("保存参数修改污染供应商快照: %#v", loaded[0])
 	}
 	if loaded[0].RequestBodyOverrides["metadata"].(map[string]interface{})["region"] != "a" || loaded[0].AvailabilityConfig.TestModel != "claude-opus-4" {
@@ -102,13 +104,14 @@ func TestProviderServiceSnapshotDoesNotShareMutableFields(t *testing.T) {
 	}
 
 	loaded[0].SupportedModels["claude-opus-4"] = false
+	loaded[0].ModelMappingDisabled["claude-*"] = false
 	loaded[0].ModelMappingReasoningEfforts["claude-*"] = "max"
 	loaded[0].RequestBodyOverrides["metadata"].(map[string]interface{})["region"] = "c"
 	loadedAgain, err := service.LoadProviders("claude")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !loadedAgain[0].SupportedModels["claude-opus-4"] || loadedAgain[0].ModelMappingReasoningEfforts["claude-*"] != "high" || loadedAgain[0].RequestBodyOverrides["metadata"].(map[string]interface{})["region"] != "a" {
+	if !loadedAgain[0].SupportedModels["claude-opus-4"] || !loadedAgain[0].ModelMappingDisabled["claude-*"] || loadedAgain[0].ModelMappingReasoningEfforts["claude-*"] != "high" || loadedAgain[0].RequestBodyOverrides["metadata"].(map[string]interface{})["region"] != "a" {
 		t.Fatalf("读取结果修改污染供应商快照: %#v", loadedAgain[0])
 	}
 }
@@ -577,6 +580,56 @@ func TestProviderResolveModelMappingDetailPreservesSelectedRule(t *testing.T) {
 	}
 }
 
+func TestProviderResolveModelMappingSkipsDisabledRules(t *testing.T) {
+	provider := Provider{
+		ModelMapping: map[string]string{
+			"claude-opus-4.8": "vendor-exact",
+			"claude-*":        "vendor-*",
+		},
+		ModelMappingDisabled: map[string]bool{
+			"claude-opus-4.8": true,
+		},
+		ModelMappingReasoningEfforts: map[string]string{
+			"claude-opus-4.8": "xhigh",
+			"claude-*":        "high",
+		},
+	}
+
+	detail := provider.resolveModelMappingDetail("claude-opus-4.8")
+	if !detail.Matched || detail.Pattern != "claude-*" || detail.MappedModel != "vendor-opus-4.8" || detail.ReasoningEffort != "high" {
+		t.Fatalf("关闭精确规则后应回退到开启的通配符规则: %#v", detail)
+	}
+}
+
+func TestProviderAllModelMappingsDisabledStillUsesMissPolicy(t *testing.T) {
+	provider := Provider{
+		ModelMapping:         map[string]string{"claude-*": "vendor-*"},
+		ModelMappingDisabled: map[string]bool{"claude-*": true},
+	}
+	if provider.IsModelSupported("claude-opus-4.8") {
+		t.Fatal("全部映射关闭且未命中策略为 block 时不应支持请求模型")
+	}
+
+	provider.ModelMappingMissPolicy = ModelMappingMissPolicyPassthrough
+	if !provider.IsModelSupported("claude-opus-4.8") {
+		t.Fatal("全部映射关闭且未命中策略为 passthrough 时应支持原样透传")
+	}
+}
+
+func TestNormalizeModelMappingDisabledDropsStaleEntries(t *testing.T) {
+	normalized := normalizeModelMappingDisabled(map[string]bool{
+		"claude-*": true,
+		"gpt-*":    false,
+		"orphan":   true,
+	}, map[string]string{
+		"claude-*": "vendor-*",
+		"gpt-*":    "openai-*",
+	})
+	if len(normalized) != 1 || !normalized["claude-*"] {
+		t.Fatalf("关闭状态归一化错误: %#v", normalized)
+	}
+}
+
 // ==================== ValidateConfiguration 测试 ====================
 
 func TestProvider_ValidateConfiguration(t *testing.T) {
@@ -624,6 +677,19 @@ func TestProvider_ValidateConfiguration(t *testing.T) {
 				Name: "test-provider",
 				ModelMapping: map[string]string{
 					"external": "internal",
+				},
+			},
+			expectErrors: false,
+		},
+
+		{
+			name: "允许-关闭规则目标不在白名单",
+			provider: Provider{
+				Name:            "test-provider",
+				SupportedModels: map[string]bool{"model-a": true},
+				ModelMapping:    map[string]string{"external": "model-b"},
+				ModelMappingDisabled: map[string]bool{
+					"external": true,
 				},
 			},
 			expectErrors: false,

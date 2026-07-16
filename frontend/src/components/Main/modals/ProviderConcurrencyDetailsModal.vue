@@ -940,8 +940,8 @@ onBeforeUnmount(() => {
   padding: 10px 12px;
   border: 1px solid rgba(15, 23, 42, 0.12);
   border-radius: 10px;
-  color: #e2e8f0;
-  background: #0f172a;
+  color: #0f172a;
+  background: #f8fafc;
   box-shadow: 0 12px 30px rgba(15, 23, 42, 0.2);
   font-size: 12px;
   font-weight: 500;
@@ -955,8 +955,8 @@ onBeforeUnmount(() => {
 
 .provider-model-route-tooltip--dark {
   border-color: rgba(148, 163, 184, 0.24);
-  color: #0f172a;
-  background: #f8fafc;
+  color: #e2e8f0;
+  background: #0f172a;
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.32);
 }
 

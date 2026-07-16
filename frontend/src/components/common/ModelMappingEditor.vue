@@ -29,7 +29,7 @@
         </p>
       </div>
       <div class="mapping-count">
-        {{ $t('components.provider.modelMapping.ruleCount', { count: mappingList.length }) }}
+        {{ $t('components.provider.modelMapping.ruleCount', { enabled: enabledMappingCount, total: mappingList.length }) }}
       </div>
     </div>
 
@@ -56,7 +56,10 @@
           v-for="mapping in mappingList"
           :key="mapping.key"
           class="mapping-row"
-          :class="{ 'is-editing': editingOriginalKey === mapping.key }"
+          :class="{
+            'is-editing': editingOriginalKey === mapping.key,
+            'is-disabled': !mapping.enabled,
+          }"
         >
           <div class="mapping-content">
             <span
@@ -93,41 +96,57 @@
             </span>
           </div>
 
-          <div class="mapping-row-actions">
-            <button
-              type="button"
-              class="mapping-action"
-              :aria-label="$t('components.provider.modelMapping.edit')"
-              @click="startEditing(mapping.key, mapping.value, mapping.reasoningEffort)"
+          <div class="mapping-row-controls">
+            <label
+              class="mac-switch sm mapping-rule-switch"
+              :title="$t(mapping.enabled ? 'components.provider.modelMapping.disable' : 'components.provider.modelMapping.enable')"
             >
-              <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-                <path
-                  d="M11.5 2.5l2 2L6 12l-3 .5.5-3 7.5-7z"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.35"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                />
-              </svg>
-            </button>
-            <button
-              type="button"
-              class="mapping-remove"
-              :aria-label="$t('components.provider.modelMapping.remove')"
-              @click="removeMapping(mapping.key)"
-            >
-              <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-                <path
-                  d="M3.5 4.5h9M6.25 4.5V3.25h3.5V4.5m-5 2v6m3.25-6v6m3.25-6l-.4 6.25a1 1 0 01-1 .94H6.15a1 1 0 01-1-.94L4.75 6.5"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.25"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                />
-              </svg>
-            </button>
+              <input
+                type="checkbox"
+                :checked="mapping.enabled"
+                :disabled="toggleSaving"
+                :aria-label="$t(mapping.enabled ? 'components.provider.modelMapping.disableRule' : 'components.provider.modelMapping.enableRule', { key: mapping.key })"
+                @change="toggleMapping(mapping.key, ($event.target as HTMLInputElement).checked)"
+              />
+              <span></span>
+            </label>
+
+            <div class="mapping-row-actions">
+              <button
+                type="button"
+                class="mapping-action"
+                :aria-label="$t('components.provider.modelMapping.edit')"
+                @click="startEditing(mapping.key, mapping.value, mapping.reasoningEffort)"
+              >
+                <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                  <path
+                    d="M11.5 2.5l2 2L6 12l-3 .5.5-3 7.5-7z"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.35"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+              </button>
+              <button
+                type="button"
+                class="mapping-remove"
+                :aria-label="$t('components.provider.modelMapping.remove')"
+                @click="removeMapping(mapping.key)"
+              >
+                <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                  <path
+                    d="M3.5 4.5h9M6.25 4.5V3.25h3.5V4.5m-5 2v6m3.25-6v6m3.25-6l-.4 6.25a1 1 0 01-1 .94H6.15a1 1 0 01-1-.94L4.75 6.5"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.25"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+              </button>
+            </div>
           </div>
         </div>
       </template>
@@ -161,12 +180,13 @@
         </svg>
 
         <div class="mapping-field">
-          <BaseInput
+          <SearchableModelInput
             ref="valueInputRef"
             v-model="newValue"
-            type="text"
             :placeholder="$t('components.provider.modelMapping.valuePlaceholder')"
-            @keydown.enter.prevent="submitMapping"
+            :options="providerModelOptions"
+            :empty-text="$t('components.provider.modelMapping.providerNoResults')"
+            @keydown.enter="handleProviderModelEnter"
           />
         </div>
 
@@ -307,26 +327,31 @@ import { useI18n } from 'vue-i18n'
 import type { ModelMappingMissPolicy } from '../../data/cards'
 import type { CLIPlatform } from '../../services/cliConfig'
 import { listModelPricing, type ModelPricingRow } from '../../services/modelPricing'
-import { buildBuiltinModelOptions } from '../../utils/builtinModels'
+import { buildBuiltinModelOptions, buildBuiltinProviderModelOptions } from '../../utils/builtinModels'
 import BaseInput from './BaseInput.vue'
 import { removeModelMappingRule, upsertModelMappingRule } from './modelMappingState'
+import { handleSearchableInputEnter } from './searchableInputKeyboard'
 import SearchableModelInput from './SearchableModelInput.vue'
 
 type MappingKind = 'exact' | 'prefix' | 'wildcard'
 
 interface Props {
   modelValue?: Record<string, string>
+  disabledRules?: Record<string, boolean>
   reasoningEfforts?: Record<string, string>
   missPolicy?: ModelMappingMissPolicy
   passthroughPatterns?: string[]
   platform?: CLIPlatform
+  toggleSaving?: boolean
 }
 
 interface Emits {
   (e: 'update:modelValue', value: Record<string, string>): void
+  (e: 'update:disabledRules', value: Record<string, boolean>): void
   (e: 'update:reasoningEfforts', value: Record<string, string>): void
   (e: 'update:missPolicy', value: ModelMappingMissPolicy): void
   (e: 'update:passthroughPatterns', value: string[]): void
+  (e: 'toggleRule', key: string, enabled: boolean): void
 }
 
 const props = defineProps<Props>()
@@ -338,6 +363,7 @@ const mappingList = computed(() => {
   return Object.entries(props.modelValue).map(([key, value]) => ({
     key,
     value,
+    enabled: props.disabledRules?.[key] !== true,
     reasoningEffort: `${props.reasoningEfforts?.[key] ?? ''}`.trim(),
   }))
 })
@@ -351,7 +377,7 @@ const inputError = ref('')
 const builtinModelRows = ref<ModelPricingRow[]>([])
 const builtinModelLoading = ref(false)
 const builtinModelLoadFailed = ref(false)
-const valueInputRef = ref<InstanceType<typeof BaseInput> | null>(null)
+const valueInputRef = ref<InstanceType<typeof SearchableModelInput> | null>(null)
 const helpIconRef = ref<HTMLButtonElement | null>(null)
 const helpTooltipRef = ref<HTMLElement | null>(null)
 const helpTooltipId = `model-mapping-help-tooltip-${Math.random().toString(36).slice(2, 9)}`
@@ -370,6 +396,7 @@ const HELP_TOOLTIP_VIEWPORT_MARGIN = 12
 let isHelpTooltipListening = false
 
 const isEditing = computed(() => editingOriginalKey.value !== '')
+const enabledMappingCount = computed(() => mappingList.value.filter((mapping) => mapping.enabled).length)
 const reasoningEffortOptions = ['low', 'medium', 'high', 'xhigh', 'max']
 const canSubmitMapping = computed(() => newKey.value.trim() !== '' && newValue.value.trim() !== '')
 const selectedMissPolicy = computed<ModelMappingMissPolicy>({
@@ -380,6 +407,7 @@ const normalizedPassthroughPatterns = computed(() => Array.from(new Set(
   (props.passthroughPatterns || []).map((pattern) => pattern.trim()).filter(Boolean),
 )))
 const builtinModelOptions = computed(() => buildBuiltinModelOptions(builtinModelRows.value, props.platform))
+const providerModelOptions = computed(() => buildBuiltinProviderModelOptions(builtinModelRows.value))
 const builtinPickerHint = computed(() => {
   if (!props.platform) return ''
   if (builtinModelLoading.value) {
@@ -503,13 +531,16 @@ function resetDraft(): void {
 }
 
 function focusValueInput(): void {
-  const inputElement = (valueInputRef.value as any)?.$el as HTMLInputElement | undefined
-  inputElement?.focus()
+  valueInputRef.value?.focus()
 }
 
 function handleBuiltinModelSelect(): void {
   inputError.value = ''
   focusValueInput()
+}
+
+function handleProviderModelEnter(event: KeyboardEvent): void {
+  handleSearchableInputEnter(event, submitMapping)
 }
 
 function startEditing(key: string, value: string, reasoningEffort: string): void {
@@ -538,6 +569,7 @@ function submitMapping(): void {
 
   const updated = upsertModelMappingRule(
     props.modelValue || {},
+    props.disabledRules || {},
     props.reasoningEfforts || {},
     editingOriginalKey.value,
     key,
@@ -545,13 +577,20 @@ function submitMapping(): void {
     reasoningEffort,
   )
   emit('update:modelValue', updated.modelMappings)
+  emit('update:disabledRules', updated.disabledRules)
   emit('update:reasoningEfforts', updated.reasoningEfforts)
   resetDraft()
 }
 
 function removeMapping(key: string): void {
-  const updated = removeModelMappingRule(props.modelValue || {}, props.reasoningEfforts || {}, key)
+  const updated = removeModelMappingRule(
+    props.modelValue || {},
+    props.disabledRules || {},
+    props.reasoningEfforts || {},
+    key,
+  )
   emit('update:modelValue', updated.modelMappings)
+  emit('update:disabledRules', updated.disabledRules)
   emit('update:reasoningEfforts', updated.reasoningEfforts)
 
   if (editingOriginalKey.value === key) {
@@ -562,6 +601,10 @@ function removeMapping(key: string): void {
   if (!hasConflictingKey(newKey.value.trim())) {
     inputError.value = ''
   }
+}
+
+function toggleMapping(key: string, enabled: boolean): void {
+  emit('toggleRule', key, enabled)
 }
 
 function addPassthroughPattern(): void {
@@ -610,10 +653,8 @@ watch(() => props.modelValue, () => {
   }
 }, { deep: true })
 
-watch(() => props.platform, (platform) => {
-  if (platform) {
-    void loadBuiltinModelRows()
-  }
+watch(() => props.platform, () => {
+  void loadBuiltinModelRows()
 }, { immediate: true })
 
 onBeforeUnmount(() => {
@@ -776,6 +817,10 @@ html.dark .model-mapping-help-tooltip {
   box-shadow: inset 3px 0 0 var(--mac-accent);
 }
 
+.mapping-row.is-disabled .mapping-content {
+  opacity: 0.52;
+}
+
 .mapping-content {
   display: flex;
   align-items: center;
@@ -896,6 +941,22 @@ html.dark .mapping-type--wildcard {
 .input-arrow {
   flex-shrink: 0;
   color: color-mix(in srgb, var(--mac-text-secondary) 62%, transparent);
+}
+
+.mapping-row-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.mapping-rule-switch {
+  flex-shrink: 0;
+}
+
+.mapping-rule-switch:has(input:disabled) {
+  cursor: wait;
+  opacity: 0.58;
 }
 
 .mapping-row-actions {

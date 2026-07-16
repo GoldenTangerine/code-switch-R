@@ -73,3 +73,24 @@ export function buildBuiltinModelOptions(
       return left.localeCompare(right)
     })
 }
+
+export function buildBuiltinProviderModelOptions(rows: ModelPricingRow[]): string[] {
+  const seen = new Set<string>()
+
+  return rows
+    .filter((row) => {
+      const source = `${row.source || ''}`.trim().toLowerCase()
+      if (source && source !== 'builtin' && source !== 'claude_sync' && source !== 'cloud_sync') {
+        return false
+      }
+
+      return isDirectCliModelCandidate(row.model)
+    })
+    .map((row) => row.model.trim())
+    .filter((model) => {
+      if (!model || seen.has(model)) return false
+      seen.add(model)
+      return true
+    })
+    .sort((left, right) => left.localeCompare(right))
+}

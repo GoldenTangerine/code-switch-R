@@ -3,6 +3,7 @@
     <div class="searchable-model-input">
       <div class="searchable-model-input__control">
         <ComboboxInput
+          ref="inputRef"
           v-bind="forwardedInputAttrs"
           :id="inputId || undefined"
           class="mac-input searchable-model-input__field"
@@ -83,6 +84,7 @@ const emit = defineEmits<{
 
 const attrs = useAttrs()
 const searchQuery = ref('')
+const inputRef = ref<InstanceType<typeof ComboboxInput> | null>(null)
 
 const forwardedInputAttrs = computed(() => {
   const {
@@ -126,6 +128,13 @@ const clearSearchQuery = () => {
     })
   })
 }
+
+const focus = () => {
+  const inputElement = inputRef.value?.$el as HTMLInputElement | undefined
+  inputElement?.focus()
+}
+
+defineExpose({ focus })
 </script>
 
 <style scoped>

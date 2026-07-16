@@ -320,6 +320,27 @@ export function useProviderForm(options: UseProviderFormOptions) {
     }
   }
 
+  const persistModelMappingRuleEnabled = async (key: string, enabled: boolean) => {
+    const card = providerModalState.card
+    if (!card?.modelMapping || !Object.prototype.hasOwnProperty.call(card.modelMapping, key)) return
+
+    const previousDisabled = { ...(card.modelMappingDisabled || {}) }
+    const nextDisabled = { ...previousDisabled }
+    if (enabled) {
+      delete nextDisabled[key]
+    } else {
+      nextDisabled[key] = true
+    }
+    card.modelMappingDisabled = nextDisabled
+
+    try {
+      await persistProviders(providerModalState.tabId)
+    } catch (error) {
+      card.modelMappingDisabled = previousDisabled
+      throw error
+    }
+  }
+
   return {
     modelListModalOpen,
     modelListModalProvider,
@@ -353,5 +374,6 @@ export function useProviderForm(options: UseProviderFormOptions) {
     confirmRemove,
     handleDuplicate,
     handleProviderEnabledChange,
+    persistModelMappingRuleEnabled,
   }
 }

@@ -10,7 +10,10 @@ vi.mock('@wailsio/runtime', () => ({
 }))
 
 import { Call } from '@wailsio/runtime'
-import { normalizeModelMappingReasoningEfforts } from '../adapters/providerFormMappers'
+import {
+  normalizeModelMappingDisabled,
+  normalizeModelMappingReasoningEfforts,
+} from '../adapters/providerFormMappers'
 import { useProviderForm } from './useProviderForm'
 
 describe('model mapping reasoning effort normalization', () => {
@@ -24,6 +27,21 @@ describe('model mapping reasoning effort normalization', () => {
       empty: 'vendor-empty',
     })).toEqual({
       'claude-*': 'high',
+    })
+  })
+})
+
+describe('model mapping disabled state normalization', () => {
+  it('keeps only disabled entries that still have mapping rules', () => {
+    expect(normalizeModelMappingDisabled({
+      'claude-*': true,
+      'gpt-*': false,
+      orphan: true,
+    }, {
+      'claude-*': 'vendor-*',
+      'gpt-*': 'openai-*',
+    })).toEqual({
+      'claude-*': true,
     })
   })
 })
@@ -557,5 +575,68 @@ describe('useProviderForm order preservation', () => {
 
     expect(cards.claude[1]?.apiFormat).toBe('openai_chat')
     expect(cards.claude[1]?.anthropicCacheTTL).toBe('')
+  })
+
+  it('persists only the selected model mapping disabled state immediately', async () => {
+    const cards = createCardRecord()
+    const card = createCard(1, {
+      modelMapping: { 'claude-*': 'vendor-*' },
+      modelMappingDisabled: {},
+    })
+    cards.claude.push(card)
+    const persistProviders = vi.fn().mockResolvedValue(undefined)
+    const providerForm = useProviderForm({
+      initialTab: 'claude',
+      t: (key: string) => key,
+      showToast: vi.fn(),
+      getActiveTab: () => 'claude',
+      cards,
+      normalizeLevel,
+      persistProviders,
+      refreshDirectAppliedStatus: vi.fn().mockResolvedValue(undefined),
+      removeProvider: vi.fn().mockResolvedValue(undefined),
+      duplicateProvider: vi.fn().mockResolvedValue(false),
+      reloadProviders: vi.fn().mockResolvedValue(undefined),
+      moveCardToStatusGroup: (tabId, target, enabled) => moveProviderToStatusGroup(cards[tabId], target, enabled),
+      appendCardToGroup: (tabId, target) => insertProviderToStatusGroup(cards[tabId], target),
+    })
+
+    providerForm.openEditModal(card)
+    await providerForm.persistModelMappingRuleEnabled('claude-*', false)
+
+    expect(card.modelMappingDisabled).toEqual({ 'claude-*': true })
+    expect(persistProviders).toHaveBeenCalledWith('claude')
+
+    await providerForm.persistModelMappingRuleEnabled('claude-*', true)
+    expect(card.modelMappingDisabled).toEqual({})
+  })
+
+  it('rolls back model mapping disabled state when immediate persistence fails', async () => {
+    const cards = createCardRecord()
+    const card = createCard(1, {
+      modelMapping: { 'claude-*': 'vendor-*' },
+      modelMappingDisabled: {},
+    })
+    cards.claude.push(card)
+    const persistProviders = vi.fn().mockRejectedValue(new Error('save failed'))
+    const providerForm = useProviderForm({
+      initialTab: 'claude',
+      t: (key: string) => key,
+      showToast: vi.fn(),
+      getActiveTab: () => 'claude',
+      cards,
+      normalizeLevel,
+      persistProviders,
+      refreshDirectAppliedStatus: vi.fn().mockResolvedValue(undefined),
+      removeProvider: vi.fn().mockResolvedValue(undefined),
+      duplicateProvider: vi.fn().mockResolvedValue(false),
+      reloadProviders: vi.fn().mockResolvedValue(undefined),
+      moveCardToStatusGroup: (tabId, target, enabled) => moveProviderToStatusGroup(cards[tabId], target, enabled),
+      appendCardToGroup: (tabId, target) => insertProviderToStatusGroup(cards[tabId], target),
+    })
+
+    providerForm.openEditModal(card)
+    await expect(providerForm.persistModelMappingRuleEnabled('claude-*', false)).rejects.toThrow('save failed')
+    expect(card.modelMappingDisabled).toEqual({})
   })
 })
