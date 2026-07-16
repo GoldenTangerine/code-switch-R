@@ -6,5 +6,6 @@ bin
 CLAUDE.md
 /.cache/
 /codeswitch
+/test_*.exe
 ONBOARDING.md
 .idea/

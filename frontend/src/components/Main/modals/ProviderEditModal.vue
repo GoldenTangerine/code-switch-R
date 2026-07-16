@@ -556,6 +556,20 @@
           <span class="field-hint">{{ t('components.main.form.hints.providerConcurrencyLimit') }}</span>
         </div>
 
+        <div v-if="supportsProviderModelRouting" class="form-field">
+          <ModelMappingEditor
+            :key="cliConfigEditorKey"
+            v-model="form.modelMapping"
+            v-model:disabled-rules="form.modelMappingDisabled"
+            v-model:reasoning-efforts="form.modelMappingReasoningEfforts"
+            v-model:miss-policy="form.modelMappingMissPolicy"
+            v-model:passthrough-patterns="form.modelPassthroughPatterns"
+            :platform="builtinModelPlatform"
+            :toggle-saving="modelMappingToggleSaving"
+            @toggle-rule="handleModelMappingRuleToggle"
+          />
+        </div>
+
         <div class="form-field">
           <span>{{ t('components.main.form.labels.budgetQuota') }}</span>
           <div v-if="form.budgetQuotaSettings" class="budget-quota-grid provider-budget-quota-grid">
@@ -683,20 +697,6 @@
 
         <div v-if="supportsProviderModelRouting" class="form-field">
           <ModelWhitelistEditor v-model="form.supportedModels" />
-        </div>
-
-        <div v-if="supportsProviderModelRouting" class="form-field">
-          <ModelMappingEditor
-            :key="cliConfigEditorKey"
-            v-model="form.modelMapping"
-            v-model:disabled-rules="form.modelMappingDisabled"
-            v-model:reasoning-efforts="form.modelMappingReasoningEfforts"
-            v-model:miss-policy="form.modelMappingMissPolicy"
-            v-model:passthrough-patterns="form.modelPassthroughPatterns"
-            :platform="builtinModelPlatform"
-            :toggle-saving="modelMappingToggleSaving"
-            @toggle-rule="handleModelMappingRuleToggle"
-          />
         </div>
 
         <div v-if="tabId !== 'opencode'" class="form-field">
