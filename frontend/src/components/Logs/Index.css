@@ -395,3 +395,29 @@ html.dark .verify-tag.verify-unknown {
   color: #cbd5e1;
   background: rgba(148, 163, 184, 0.22);
 }
+.logs-session-sync-notice {
+  margin: -4px 2px 0;
+  color: var(--mac-text-secondary);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.logs-session-sync-notice.is-error {
+  color: var(--mac-danger, #dc2626);
+}
+
+.logs-reimport-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 12px;
+  color: var(--mac-text-secondary);
+  font-size: 0.82rem;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.logs-reimport-option input {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}

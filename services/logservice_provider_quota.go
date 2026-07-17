@@ -126,6 +126,9 @@ func buildProviderQuotaCostQuery(
 
 	whereClauses := []string{"1=1"}
 	args := make([]any, 0, 5)
+	if !useStatsTable && table == "request_log" {
+		whereClauses = append(whereClauses, requestLogSourceWhereClause(LogDataSourceModeProxy, "request_log"))
+	}
 
 	if startTime != nil {
 		whereClauses = append(whereClauses, "created_at >= ?")

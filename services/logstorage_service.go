@@ -122,6 +122,10 @@ func (ls *LogService) GetLogStorageStats() (LogStorageStats, error) {
 }
 
 func (ls *LogService) ClearRequestLogs() error {
+	return ls.ClearRequestLogsV2(false)
+}
+
+func (ls *LogService) ClearRequestLogsV2(reimportSessions bool) error {
 	db, err := xdb.DB("default")
 	if err != nil {
 		return err
@@ -140,8 +144,16 @@ func (ls *LogService) ClearRequestLogs() error {
 		return err
 	}
 	triggersCleaned = true
-	if _, err := db.Exec("DELETE FROM request_log"); err != nil {
+	if GlobalDBQueue == nil {
+		return fmt.Errorf("database write queue is not initialized")
+	}
+	if err := GlobalDBQueue.Exec("DELETE FROM request_log"); err != nil {
 		return err
+	}
+	if reimportSessions {
+		if err := resetSessionUsageSyncState(); err != nil {
+			return err
+		}
 	}
 	_, _ = db.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
 	return nil
@@ -366,26 +378,36 @@ func (ls *LogService) RequestLogDailyHeatmapStats(days int) ([]HeatmapStat, erro
 }
 
 func (ls *LogService) RequestLogDailyHeatmapStatsByYear(year int) ([]HeatmapStat, error) {
+	return ls.RequestLogDailyHeatmapStatsByYearV2(year, string(LogDataSourceModeProxy))
+}
+
+func (ls *LogService) RequestLogDailyHeatmapStatsByYearV2(year int, sourceMode string) ([]HeatmapStat, error) {
 	if year <= 0 {
 		year = time.Now().Year()
 	}
 	startDay := time.Date(year, time.January, 1, 0, 0, 0, 0, time.Local)
 	endDay := startDay.AddDate(1, 0, 0)
-	return ls.requestLogDailyHeatmapStatsBetween(startDay, endDay)
+	return ls.requestLogDailyHeatmapStatsBetweenV2(startDay, endDay, normalizeLogDataSourceMode(sourceMode))
 }
 
 func (ls *LogService) ListRequestLogHeatmapYears() ([]int, error) {
+	return ls.ListRequestLogHeatmapYearsV2(string(LogDataSourceModeProxy))
+}
+
+func (ls *LogService) ListRequestLogHeatmapYearsV2(sourceMode string) ([]int, error) {
 	db, err := xdb.DB("default")
 	if err != nil {
 		return nil, err
 	}
 
-	rows, err := db.Query(`
+	query := `
 		SELECT DISTINCT CAST(strftime('%Y', datetime(created_at, 'localtime')) AS INTEGER) AS year
 		FROM request_log
-		WHERE TRIM(COALESCE(created_at, '')) != ''
+		WHERE TRIM(COALESCE(created_at, '')) != '' AND ` +
+		requestLogSourceWhereClause(normalizeLogDataSourceMode(sourceMode), "request_log") + `
 		ORDER BY year DESC
-	`)
+	`
+	rows, err := db.Query(query)
 	if err != nil {
 		if isNoSuchTableErr(err) {
 			return []int{}, nil
@@ -411,11 +433,16 @@ func (ls *LogService) ListRequestLogHeatmapYears() ([]int, error) {
 }
 
 func (ls *LogService) requestLogDailyHeatmapStatsBetween(startDay time.Time, endDay time.Time) ([]HeatmapStat, error) {
+	return ls.requestLogDailyHeatmapStatsBetweenV2(startDay, endDay, LogDataSourceModeProxy)
+}
+
+func (ls *LogService) requestLogDailyHeatmapStatsBetweenV2(startDay time.Time, endDay time.Time, sourceMode LogDataSourceMode) ([]HeatmapStat, error) {
 	db, err := xdb.DB("default")
 	if err != nil {
 		return nil, err
 	}
 
+	sourceWhere := requestLogSourceWhereClause(sourceMode, "request_log")
 	queryWithStoredPayloadColumns := `
 			SELECT
 				strftime('%Y-%m-%d', datetime(created_at, 'localtime')) AS day,
@@ -423,7 +450,7 @@ func (ls *LogService) requestLogDailyHeatmapStatsBetween(startDay time.Time, end
 				SUM(COALESCE(payload_bytes, 0)) AS payload_bytes,
 				SUM(CASE WHEN payload_captured != 0 THEN 1 ELSE 0 END) AS payload_captured_requests
 			FROM request_log
-			WHERE created_at >= ? AND created_at < ?
+			WHERE created_at >= ? AND created_at < ? AND ` + sourceWhere + `
 			GROUP BY day
 			ORDER BY day DESC
 	`
@@ -442,7 +469,7 @@ func (ls *LogService) requestLogDailyHeatmapStatsBetween(startDay time.Time, end
 					END
 				) AS payload_captured_requests
 			FROM request_log
-			WHERE created_at >= ? AND created_at < ?
+			WHERE created_at >= ? AND created_at < ? AND ` + sourceWhere + `
 			GROUP BY day
 			ORDER BY day DESC
 	`

@@ -2,6 +2,7 @@ import { Call } from '@wailsio/runtime'
 
 export type LogPlatform = 'claude' | 'codex' | 'gemini'
 export type RequestLogPlatform = LogPlatform | `custom:${string}`
+export type LogDataSourceMode = 'proxy' | 'session' | 'all'
 export type ReasoningEffortSource = 'request' | 'request_body_override' | 'model_mapping' | ''
 
 export type RequestLog = {
@@ -72,6 +73,9 @@ export type RequestLog = {
   provider_per_call_output_set?: boolean
   response_body?: string
   response_body_truncated?: boolean
+  data_source?: 'proxy' | 'session_log' | 'codex_session' | 'gemini_session' | string
+  source_record_id?: string
+  session_id?: string
 }
 
 type RequestLogQuery = {
@@ -83,6 +87,7 @@ type RequestLogQuery = {
   startAt?: string
   endAt?: string
   unreadOnly?: boolean
+  sourceMode?: LogDataSourceMode
 }
 
 export const fetchRequestLogs = async (query: RequestLogQuery = {}): Promise<RequestLog[]> => {
@@ -109,7 +114,8 @@ export const fetchRequestLogsPage = async (query: RequestLogQuery = {}): Promise
   const offset = query.offset ?? 0
   const startAt = query.startAt ?? ''
   const endAt = query.endAt ?? ''
-  return Call.ByName('codeswitch/services.LogService.ListRequestLogsPageV2', platform, provider, model, limit, offset, startAt, endAt)
+  const sourceMode = query.sourceMode ?? 'proxy'
+  return Call.ByName('codeswitch/services.LogService.ListRequestLogsPageV3', platform, provider, model, sourceMode, limit, offset, startAt, endAt)
 }
 
 export const fetchFailedRequestLogsPage = async (query: RequestLogQuery = {}): Promise<RequestLogPageResult> => {
@@ -143,8 +149,11 @@ export type LogProviderRef = {
   provider: string
 }
 
-export const fetchLogProviderRefs = async (platform: LogPlatform | '' = ''): Promise<LogProviderRef[]> => {
-  return Call.ByName('codeswitch/services.LogService.ListProviderRefs', platform)
+export const fetchLogProviderRefs = async (
+  platform: LogPlatform | '' = '',
+  sourceMode: LogDataSourceMode = 'proxy',
+): Promise<LogProviderRef[]> => {
+  return Call.ByName('codeswitch/services.LogService.ListProviderRefsV2', platform, sourceMode)
 }
 
 export const fetchLogProviders = async (platform: LogPlatform | '' = ''): Promise<string[]> => {
@@ -209,6 +218,7 @@ type LogStatsQuery = {
   model?: string
   startAt?: string
   endAt?: string
+  sourceMode?: LogDataSourceMode
 }
 
 export const fetchLogStatsV2 = async (query: LogStatsQuery = {}): Promise<LogStats> => {
@@ -217,7 +227,8 @@ export const fetchLogStatsV2 = async (query: LogStatsQuery = {}): Promise<LogSta
   const model = query.model ?? ''
   const startAt = query.startAt ?? ''
   const endAt = query.endAt ?? ''
-  return Call.ByName('codeswitch/services.LogService.StatsRangeV2', platform, provider, model, startAt, endAt)
+  const sourceMode = query.sourceMode ?? 'proxy'
+  return Call.ByName('codeswitch/services.LogService.StatsRangeV3', platform, provider, model, sourceMode, startAt, endAt)
 }
 
 export const fetchLogSummaryV2 = async (query: LogStatsQuery = {}): Promise<LogSummary> => {
@@ -226,7 +237,8 @@ export const fetchLogSummaryV2 = async (query: LogStatsQuery = {}): Promise<LogS
   const model = query.model ?? ''
   const startAt = query.startAt ?? ''
   const endAt = query.endAt ?? ''
-  return Call.ByName('codeswitch/services.LogService.SummaryRangeV2', platform, provider, model, startAt, endAt)
+  const sourceMode = query.sourceMode ?? 'proxy'
+  return Call.ByName('codeswitch/services.LogService.SummaryRangeV3', platform, provider, model, sourceMode, startAt, endAt)
 }
 
 export const fetchCostSince = async (start: string, platform: LogPlatform | '' = ''): Promise<number> => {
@@ -322,8 +334,34 @@ export const fetchProviderLogStorageStats = async (): Promise<ProviderLogStorage
   return Call.ByName('codeswitch/services.LogService.ListProviderLogStorageStats')
 }
 
-export const clearRequestLogs = async (): Promise<void> => {
-  await Call.ByName('codeswitch/services.LogService.ClearRequestLogs')
+export const clearRequestLogs = async (reimportSessions = false): Promise<void> => {
+  await Call.ByName('codeswitch/services.LogService.ClearRequestLogsV2', reimportSessions)
+}
+
+export type SessionSyncSourceResult = {
+  scope: string
+  platform: LogPlatform
+  imported: number
+  skipped: number
+  files_scanned: number
+  error?: string
+}
+
+export type SessionSyncResult = {
+  imported: number
+  skipped: number
+  files_scanned: number
+  matches_created: number
+  sources: SessionSyncSourceResult[]
+  errors: string[]
+}
+
+export const syncLocalSessionUsage = async (): Promise<SessionSyncResult> => {
+  return Call.ByName('codeswitch/services.LogService.SyncLocalSessionUsage')
+}
+
+export const syncWSLSessionUsage = async (): Promise<SessionSyncResult> => {
+  return Call.ByName('codeswitch/services.LogService.SyncWSLSessionUsage')
 }
 
 export type DeleteRequestLogsByDateResult = {
@@ -434,6 +472,7 @@ type ProviderStatsQuery = {
   model?: string
   startAt?: string
   endAt?: string
+  sourceMode?: LogDataSourceMode
 }
 
 export const fetchProviderStatsV2 = async (
@@ -444,7 +483,8 @@ export const fetchProviderStatsV2 = async (
   const model = query.model ?? ''
   const startAt = query.startAt ?? ''
   const endAt = query.endAt ?? ''
-  return Call.ByName('codeswitch/services.LogService.ProviderStatsRangeV2', platform, provider, model, startAt, endAt)
+  const sourceMode = query.sourceMode ?? 'proxy'
+  return Call.ByName('codeswitch/services.LogService.ProviderStatsRangeV3', platform, provider, model, sourceMode, startAt, endAt)
 }
 
 export type ModelUsageStat = {
@@ -463,6 +503,7 @@ type ModelStatsQuery = {
   model?: string
   startAt?: string
   endAt?: string
+  sourceMode?: LogDataSourceMode
 }
 
 export const fetchModelStatsV2 = async (
@@ -473,7 +514,8 @@ export const fetchModelStatsV2 = async (
   const model = query.model ?? ''
   const startAt = query.startAt ?? ''
   const endAt = query.endAt ?? ''
-  return Call.ByName('codeswitch/services.LogService.ModelStatsRangeV2', platform, provider, model, startAt, endAt)
+  const sourceMode = query.sourceMode ?? 'proxy'
+  return Call.ByName('codeswitch/services.LogService.ModelStatsRangeV3', platform, provider, model, sourceMode, startAt, endAt)
 }
 
 export type HeatmapStat = {
@@ -499,11 +541,14 @@ export const fetchRequestLogDailyHeatmapStats = async (days: number): Promise<He
   return Call.ByName('codeswitch/services.LogService.RequestLogDailyHeatmapStats', range)
 }
 
-export const fetchRequestLogDailyHeatmapStatsByYear = async (year: number): Promise<HeatmapStat[]> => {
+export const fetchRequestLogDailyHeatmapStatsByYear = async (
+  year: number,
+  sourceMode: LogDataSourceMode = 'proxy',
+): Promise<HeatmapStat[]> => {
   const normalized = Number.isFinite(year) && year > 0 ? Math.floor(year) : new Date().getFullYear()
-  return Call.ByName('codeswitch/services.LogService.RequestLogDailyHeatmapStatsByYear', normalized)
+  return Call.ByName('codeswitch/services.LogService.RequestLogDailyHeatmapStatsByYearV2', normalized, sourceMode)
 }
 
-export const fetchRequestLogHeatmapYears = async (): Promise<number[]> => {
-  return Call.ByName('codeswitch/services.LogService.ListRequestLogHeatmapYears')
+export const fetchRequestLogHeatmapYears = async (sourceMode: LogDataSourceMode = 'proxy'): Promise<number[]> => {
+  return Call.ByName('codeswitch/services.LogService.ListRequestLogHeatmapYearsV2', sourceMode)
 }

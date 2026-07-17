@@ -27,7 +27,12 @@
         :range-picker-value="rangePickerValue"
         :is-dark-theme="isDarkTheme"
         :summary-scope-hint="draftSummaryScopeHint"
+        :source-mode="sourceMode"
+        :session-syncing="sessionSyncing"
+        :show-w-s-l-scan="showWSLScan"
         @submit="applyFilters"
+        @update:source-mode="handleSourceModeChange"
+        @scan-wsl="handleWSLScan"
         @update:platform="updateFilterPlatform"
         @update:provider="updateFilterProvider"
         @update:model="updateFilterModel"
@@ -37,6 +42,15 @@
         @update:day-picker-value="updateDayPickerValue"
         @update:range-picker-value="updateRangePickerValue"
       />
+
+      <p
+        v-if="sessionSyncNotice"
+        class="logs-session-sync-notice"
+        :class="{ 'is-error': sessionSyncHasError }"
+        :role="sessionSyncHasError ? 'alert' : 'status'"
+      >
+        {{ sessionSyncNotice }}
+      </p>
 
       <LogsSummaryCards
         :stats-cards="statsCards"
@@ -169,6 +183,10 @@
         >
           <div class="confirm-body">
             <p>{{ storageClearConfirmMessage }}</p>
+            <label v-if="storageClearConfirm.target === 'requestLogs'" class="logs-reimport-option">
+              <input v-model="storageClearConfirm.reimportSessions" type="checkbox" :disabled="storageClearing" />
+              <span>{{ t('components.logs.storage.reimportSessions') }}</span>
+            </label>
           </div>
           <footer class="form-actions confirm-actions">
             <BaseButton variant="outline" type="button" :disabled="storageClearing" @click="closeStorageClearConfirm">
@@ -251,7 +269,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { Events } from '@wailsio/runtime'
+import { Events, System } from '@wailsio/runtime'
 import {
   Chart,
   CategoryScale,
@@ -286,7 +304,13 @@ import { useLogsPayloadDetail } from './composables/useLogsPayloadDetail'
 import { useLogsPricingDetails } from './composables/useLogsPricingDetails'
 import { useLogsStorageModalController } from './composables/useLogsStorageModalController'
 import { MODEL_PRICING_CHANGED_EVENT } from '../../services/modelPricing'
-import type { RequestLog } from '../../services/logs'
+import {
+  syncLocalSessionUsage,
+  syncWSLSessionUsage,
+  type LogDataSourceMode,
+  type RequestLog,
+  type SessionSyncResult,
+} from '../../services/logs'
 import {
   fetchAppSettings,
   LOGS_REFRESH_INTERVAL_OPTIONS,
@@ -310,6 +334,14 @@ const router = useRouter()
 const isDarkTheme = ref(document.documentElement.classList.contains('dark'))
 const refreshIntervalSeconds = ref<LogsRefreshIntervalSeconds>(30)
 const refreshSaving = ref(false)
+const LOGS_SOURCE_MODE_STORAGE_KEY = 'code-switch-logs-source-mode'
+const validSourceModes: readonly LogDataSourceMode[] = ['proxy', 'session', 'all']
+const storedSourceMode = window.localStorage.getItem(LOGS_SOURCE_MODE_STORAGE_KEY) as LogDataSourceMode | null
+const sourceMode = ref<LogDataSourceMode>(storedSourceMode && validSourceModes.includes(storedSourceMode) ? storedSourceMode : 'proxy')
+const sessionSyncing = ref(false)
+const sessionSyncNotice = ref('')
+const sessionSyncHasError = ref(false)
+const showWSLScan = System.IsWindows()
 const LOGS_ACTIVE_TAB_STORAGE_KEY = 'code-switch-logs-active-data-tab'
 const validDataTabs: readonly LogsDataTab[] = ['requests', 'providers', 'models']
 const storedDataTab = window.localStorage.getItem(LOGS_ACTIVE_TAB_STORAGE_KEY) as LogsDataTab | null
@@ -363,7 +395,9 @@ const {
   totalPages,
   appliedFilters,
   appliedDateRange,
+  appliedSourceMode,
   applyDashboardFilters,
+  applyDashboardSourceMode,
   loadDashboard,
   loadAppliedProviderStats,
   setPage,
@@ -372,6 +406,7 @@ const {
 } = useLogsPageData({
   filters,
   computeDateRange,
+  sourceMode,
   shouldLoadProviderStats: () => activeDataTab.value === 'providers',
 })
 
@@ -405,6 +440,7 @@ const {
 } = useLogsDetailModals({
   appliedFilters,
   appliedDateRange,
+  sourceMode: appliedSourceMode,
 })
 
 const {
@@ -452,6 +488,7 @@ const {
 } = useLogsStorageModalController({
   locale,
   t,
+  sourceMode: appliedSourceMode,
   loadDashboard,
   openPayloadDetailModal,
 })
@@ -479,9 +516,79 @@ const {
   resetTimer,
   startCountdown,
   stopCountdown,
-  manualRefresh,
+  manualRefresh: refreshDashboard,
   restartCountdown,
 } = useLogsAutoRefresh(loadDashboardIfIdle, { intervalSeconds: refreshIntervalSeconds })
+
+const formatSessionSyncNotice = (result: SessionSyncResult) => {
+  if (result.errors?.length) {
+    return t('components.logs.source.syncPartial', {
+      imported: result.imported ?? 0,
+      errors: result.errors.length,
+    })
+  }
+  if ((result.imported ?? 0) > 0) {
+    return t('components.logs.source.syncImported', { count: result.imported })
+  }
+  return t('components.logs.source.syncCurrent')
+}
+
+const runLocalSessionSync = async (showNotice = true) => {
+  if (sessionSyncing.value) return
+  sessionSyncing.value = true
+  try {
+    const result = await syncLocalSessionUsage()
+    if (showNotice) {
+      sessionSyncHasError.value = Boolean(result.errors?.length)
+      sessionSyncNotice.value = formatSessionSyncNotice(result)
+    }
+  } catch (error) {
+    console.error('failed to sync local session usage', error)
+    if (showNotice) {
+      sessionSyncHasError.value = true
+      sessionSyncNotice.value = t('components.logs.source.syncFailed')
+    }
+  } finally {
+    sessionSyncing.value = false
+  }
+}
+
+const manualRefresh = async () => {
+  await runLocalSessionSync(true)
+  await refreshDashboard()
+}
+
+const handleSourceModeChange = async (value: LogDataSourceMode) => {
+  if (!validSourceModes.includes(value) || sourceMode.value === value || loading.value) return
+  sourceMode.value = value
+  window.localStorage.setItem(LOGS_SOURCE_MODE_STORAGE_KEY, value)
+  updateFilterProvider('')
+  updateFilterModel('')
+  resetPage()
+  if (value !== 'proxy') {
+    await runLocalSessionSync(false)
+  }
+  await applyDashboardSourceMode(value)
+  resetTimer()
+}
+
+const handleWSLScan = async () => {
+  if (sessionSyncing.value) return
+  sessionSyncing.value = true
+  try {
+    const result = await syncWSLSessionUsage()
+    sessionSyncHasError.value = Boolean(result.errors?.length)
+    sessionSyncNotice.value = formatSessionSyncNotice(result)
+    await loadDashboard()
+    resetTimer()
+  } catch (error) {
+    console.error('failed to sync WSL session usage', error)
+    sessionSyncHasError.value = true
+    sessionSyncNotice.value = t('components.logs.source.wslFailed')
+  } finally {
+    sessionSyncing.value = false
+  }
+}
 
 const setActiveDataTab = async (value: LogsDataTab) => {
   if (!validDataTabs.includes(value) || activeDataTab.value === value) return
@@ -615,7 +722,10 @@ const logsTableHandlers = {
   showVerifyInfoTooltip,
   scheduleShowStreamInfoTooltip,
   showStreamInfoTooltip,
-  openPayloadDetailModal,
+  openPayloadDetailModal: (item: RequestLog) => {
+    if (item.data_source && item.data_source !== 'proxy') return
+    return openPayloadDetailModal(item)
+  },
   scheduleShowCostTooltip,
   moveCostTooltip,
   hideCostTooltip,

@@ -1,5 +1,5 @@
 import { reactive, type Ref } from 'vue'
-import { fetchProviderStatsV2, type ProviderDailyStat } from '../../../services/logs'
+import { fetchProviderStatsV2, type LogDataSourceMode, type ProviderDailyStat } from '../../../services/logs'
 import { extractErrorMessage } from '../../../utils/error'
 import type { LogsFiltersState } from '../types'
 import type { LogsDateRange } from './useLogsFilters'
@@ -7,6 +7,7 @@ import type { LogsDateRange } from './useLogsFilters'
 type UseLogsDetailModalsOptions = {
   appliedFilters: Ref<LogsFiltersState>
   appliedDateRange: Ref<LogsDateRange>
+  sourceMode: Ref<LogDataSourceMode>
 }
 
 type BrowserWindowWithWailsBridge = Window & {
@@ -29,6 +30,7 @@ type ResolveLogsCostDetailStatsOptions = {
   range: LogsDateRange
   useDevMock?: boolean
   fetchProviderStats?: typeof fetchProviderStatsV2
+  sourceMode?: LogDataSourceMode
 }
 
 function hasDesktopRuntimeBridge() {
@@ -191,6 +193,7 @@ export async function resolveLogsCostDetailStats(
     range,
     useDevMock = false,
     fetchProviderStats = fetchProviderStatsV2,
+    sourceMode = 'proxy',
   } = options
 
   if (useDevMock) {
@@ -203,11 +206,12 @@ export async function resolveLogsCostDetailStats(
     model: filters.model,
     startAt: range.startAt,
     endAt: range.endAt,
+    sourceMode,
   })
 }
 
 export function useLogsDetailModals(options: UseLogsDetailModalsOptions) {
-  const { appliedFilters, appliedDateRange } = options
+  const { appliedFilters, appliedDateRange, sourceMode } = options
 
   const costDetailModal = reactive<{
     open: boolean
@@ -245,6 +249,7 @@ export function useLogsDetailModals(options: UseLogsDetailModalsOptions) {
       const stats = await resolveLogsCostDetailStats({
         filters,
         range,
+        sourceMode: sourceMode.value,
         useDevMock: shouldUseFrontendDevLogsCostDetailMock(),
       })
       if (requestId !== activeCostDetailRequestId) return

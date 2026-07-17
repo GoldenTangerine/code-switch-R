@@ -272,6 +272,7 @@ func ensureRequestLogStatsTriggersWithDB(db *sql.DB) error {
 	createHourlyTrigger := fmt.Sprintf(`
 CREATE TRIGGER IF NOT EXISTS request_log_stats_hourly_ai
 AFTER INSERT ON request_log
+WHEN COALESCE(NULLIF(TRIM(NEW.data_source), ''), 'proxy') = 'proxy'
 BEGIN
   INSERT INTO %s (
     bucket_start, platform, provider_id, provider,
@@ -313,6 +314,7 @@ END;`, requestLogStatsHourlyTable)
 	createDailyTrigger := fmt.Sprintf(`
 CREATE TRIGGER IF NOT EXISTS request_log_stats_daily_ai
 AFTER INSERT ON request_log
+WHEN COALESCE(NULLIF(TRIM(NEW.data_source), ''), 'proxy') = 'proxy'
 BEGIN
   INSERT INTO %s (
     bucket_start, platform, provider_id, provider,
@@ -509,6 +511,7 @@ func backfillRequestLogStatsWithDB(db *sql.DB) error {
 			xdb.Limit(batchSize),
 			xdb.Field(
 				"id",
+				"data_source",
 				"platform",
 				"provider_id",
 				"provider",
@@ -540,6 +543,10 @@ func backfillRequestLogStatsWithDB(db *sql.DB) error {
 			id := record.GetInt64("id")
 			if id > lastID {
 				lastID = id
+			}
+			if strings.TrimSpace(record.GetString("data_source")) != "" &&
+				!strings.EqualFold(strings.TrimSpace(record.GetString("data_source")), requestLogDataSourceProxy) {
+				continue
 			}
 
 			platform := strings.TrimSpace(record.GetString("platform"))

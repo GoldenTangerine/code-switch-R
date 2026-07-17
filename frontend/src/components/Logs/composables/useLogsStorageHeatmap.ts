@@ -1,5 +1,5 @@
 import { computed, nextTick, reactive, ref, unref, watch, type ComponentPublicInstance, type Ref } from 'vue'
-import { fetchRequestLogsPage, type RequestLog } from '../../../services/logs'
+import { fetchRequestLogsPage, type LogDataSourceMode, type RequestLog } from '../../../services/logs'
 import { type UsageHeatmapDay } from '../../../data/usageHeatmap'
 import { showToast } from '../../../utils/toast'
 import { extractErrorMessage } from '../../../utils/error'
@@ -14,6 +14,7 @@ type UseLogsStorageHeatmapOptions = {
   storageModalOpen: Ref<boolean>
   locale: Ref<string>
   t: TranslateFn
+  sourceMode: Ref<LogDataSourceMode>
   formatNumber: (value?: number) => string
 }
 
@@ -48,7 +49,7 @@ const getViewportSize = () => {
 }
 
 export function useLogsStorageHeatmap(options: UseLogsStorageHeatmapOptions) {
-  const { storageHeatmap, storageModalOpen, locale, t, formatNumber } = options
+  const { storageHeatmap, storageModalOpen, locale, t, sourceMode, formatNumber } = options
 
   const selectedStorageHeatmapDate = ref('')
   const storageDayLogs = ref<RequestLog[]>([])
@@ -206,6 +207,7 @@ export function useLogsStorageHeatmap(options: UseLogsStorageHeatmapOptions) {
         offset: (normalizedPage - 1) * pageSize,
         startAt: range.startAt,
         endAt: range.endAt,
+        sourceMode: sourceMode.value,
       })
       if (requestId !== storageDayLogsRequestId.value) return
       const total = Math.max(0, Number(result?.total ?? 0))

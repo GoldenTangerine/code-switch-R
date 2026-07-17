@@ -13,6 +13,10 @@ export type CacheCreateTokenSplit = {
 
 export type CacheCreateTier = '5m' | '1h'
 
+export const isSessionRequestLog = (item: Pick<RequestLog, 'data_source'>) => (
+  item.data_source != null && item.data_source !== '' && item.data_source !== 'proxy'
+)
+
 export type CacheCreatePriceRate = {
   tier?: CacheCreateTier
   perToken: number

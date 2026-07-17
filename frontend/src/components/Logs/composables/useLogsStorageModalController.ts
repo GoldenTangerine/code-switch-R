@@ -14,6 +14,7 @@ import {
   fetchProviderLogStorageStats,
   fetchRequestLogDailyHeatmapStatsByYear,
   fetchRequestLogHeatmapYears,
+  type LogDataSourceMode,
   type LogStorageStats,
   type ProviderLogStorageStat,
   type RequestLog,
@@ -40,6 +41,7 @@ type TranslateFn = (key: string, params?: Record<string, unknown>) => string
 type UseLogsStorageModalControllerOptions = {
   locale: Ref<string>
   t: TranslateFn
+  sourceMode: Ref<LogDataSourceMode>
   loadDashboard: () => Promise<void>
   openPayloadDetailModal: (item: RequestLog) => void | Promise<void>
 }
@@ -66,7 +68,7 @@ const buildStorageHeatmapYearRange = (year: number) => {
 }
 
 export function useLogsStorageModalController(options: UseLogsStorageModalControllerOptions) {
-  const { locale, t, loadDashboard, openPayloadDetailModal } = options
+  const { locale, t, sourceMode, loadDashboard, openPayloadDetailModal } = options
 
   const storageStats = ref<LogStorageStats | null>(null)
   const providerStorageStats = ref<ProviderLogStorageStat[]>([])
@@ -138,6 +140,7 @@ export function useLogsStorageModalController(options: UseLogsStorageModalContro
     storageModalOpen,
     locale,
     t,
+    sourceMode,
     formatNumber,
   })
 
@@ -192,7 +195,7 @@ export function useLogsStorageModalController(options: UseLogsStorageModalContro
   const loadStorageHeatmapYears = async () => {
     const requestId = ++storageHeatmapYearsRequestId.value
     try {
-      const years = await fetchRequestLogHeatmapYears()
+      const years = await fetchRequestLogHeatmapYears(sourceMode.value)
       if (requestId !== storageHeatmapYearsRequestId.value) return
       storageHeatmapFetchedYears.value = (Array.isArray(years) ? years : [])
         .map((year) => normalizeStorageHeatmapYear(year))
@@ -215,7 +218,7 @@ export function useLogsStorageModalController(options: UseLogsStorageModalContro
       storageHeatmapDisplaySettings,
     )
     try {
-      const stats = await fetchRequestLogDailyHeatmapStatsByYear(normalizedYear)
+      const stats = await fetchRequestLogDailyHeatmapStatsByYear(normalizedYear, sourceMode.value)
       if (requestId !== storageHeatmapRequestId.value || storageHeatmapYear.value !== normalizedYear) {
         return
       }
@@ -279,11 +282,13 @@ export function useLogsStorageModalController(options: UseLogsStorageModalContro
     target: StorageClearTarget | null
     date: string
     providerTarget: ProviderLogStorageStat | null
+    reimportSessions: boolean
   }>({
     open: false,
     target: null,
     date: '',
     providerTarget: null,
+    reimportSessions: false,
   })
 
   const resetStorageClearConfirm = () => {
@@ -291,6 +296,7 @@ export function useLogsStorageModalController(options: UseLogsStorageModalContro
     storageClearConfirm.target = null
     storageClearConfirm.date = ''
     storageClearConfirm.providerTarget = null
+    storageClearConfirm.reimportSessions = false
   }
 
   const closeStorageModal = () => {
@@ -405,7 +411,7 @@ export function useLogsStorageModalController(options: UseLogsStorageModalContro
       let successMessage = t('components.logs.storage.success')
       let successTone: 'success' | 'warning' = 'success'
       if (target === 'requestLogs') {
-        await clearRequestLogs()
+        await clearRequestLogs(storageClearConfirm.reimportSessions)
       } else if (target === 'requestLogsByDate') {
         const result = await deleteRequestLogsByDate(targetDate)
         const deletedStats = Number(result?.deleted_stats_hour ?? 0) + Number(result?.deleted_stats_day ?? 0)

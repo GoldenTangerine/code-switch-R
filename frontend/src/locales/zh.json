@@ -1205,6 +1205,22 @@
       "applyFilters": "应用筛选",
       "empty": "暂无日志记录",
       "lastUpdated": "最近更新：{time}",
+      "source": {
+        "label": "数据来源",
+        "proxy": "代理",
+        "session": "会话",
+        "all": "全部",
+        "claudeSession": "Claude 会话",
+        "codexSession": "Codex 会话",
+        "geminiSession": "Gemini 会话",
+        "scanWsl": "扫描 WSL",
+        "scanning": "扫描中",
+        "syncImported": "已导入 {count} 条会话记录",
+        "syncCurrent": "会话记录已是最新",
+        "syncPartial": "已导入 {imported} 条，{errors} 个来源失败",
+        "syncFailed": "会话同步失败",
+        "wslFailed": "WSL 扫描失败"
+      },
       "filters": {
         "platform": "平台",
         "allPlatforms": "全部平台",
@@ -1319,6 +1335,7 @@
       "table": {
         "time": "时间",
         "platform": "平台",
+        "source": "来源",
         "provider": "供应商",
         "model": "模型",
         "verify": "验证",
@@ -1456,6 +1473,7 @@
         "confirmTitle": "确认清理",
         "clearing": "清理中...",
         "confirmClearRequestLog": "确认清除所有请求明细日志？（统计汇总不会被清除）",
+        "reimportSessions": "下次同步重新导入会话历史",
         "confirmClearByDate": "确认删除 {date} 的请求明细日志？对应日期的统计汇总也会一并移除。",
         "confirmClearProvider": "确认清除 {provider} 的请求明细与统计汇总？这会直接影响首页供应商日志与日志页相关聚合。",
         "confirmClearStats": "确认清除所有统计汇总数据？（请求明细不会被清除）",

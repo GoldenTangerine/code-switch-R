@@ -124,6 +124,7 @@ CREATE TRIGGER IF NOT EXISTS %[1]s
 AFTER INSERT ON request_log
 WHEN TRIM(COALESCE(NEW.platform, '')) <> ''
   AND (TRIM(COALESCE(NEW.provider_id, '')) <> '' OR TRIM(COALESCE(NEW.provider, '')) <> '')
+  AND COALESCE(NULLIF(TRIM(NEW.data_source), ''), 'proxy') = 'proxy'
 BEGIN
   INSERT INTO %[2]s (
     platform,
@@ -302,6 +303,7 @@ func listRequestLogProviderRefsWithDB(db *sql.DB) ([]requestLogProviderRefRecord
 		FROM request_log
 		WHERE TRIM(COALESCE(platform, '')) <> ''
 		  AND (TRIM(COALESCE(provider_id, '')) <> '' OR TRIM(COALESCE(provider, '')) <> '')
+		  AND COALESCE(NULLIF(TRIM(data_source), ''), 'proxy') = 'proxy'
 	`)
 	if err != nil {
 		return nil, err
@@ -365,18 +367,18 @@ func queryLatestFiveHourQuotaWindowStartByProvider(queryer requestLogQueryRower,
 	}
 
 	providerWhere := ` AND (TRIM(COALESCE(provider_id,'')) = ? OR TRIM(COALESCE(provider,'')) = ?)`
-	initialWhere := providerWhere
-	nextWhere := providerWhere
+	proxyWhere := ` WHERE ` + requestLogSourceWhereClause(LogDataSourceModeProxy, "request_log")
+	proxyAnd := ` AND ` + requestLogSourceWhereClause(LogDataSourceModeProxy, "request_log")
+	initialWhere := proxyWhere + providerWhere
+	nextWhere := proxyAnd + providerWhere
 	args := make([]interface{}, 0, 6)
 	args = append(args, providerRef, providerRef)
 
 	if strings.TrimSpace(platform) != "" {
-		initialWhere = ` WHERE platform = ?` + providerWhere
-		nextWhere = ` AND platform = ?` + providerWhere
+		initialWhere = proxyWhere + ` AND platform = ?` + providerWhere
+		nextWhere = proxyAnd + ` AND platform = ?` + providerWhere
 		args = []interface{}{platform, providerRef, providerRef, platform, providerRef, providerRef}
 	} else {
-		initialWhere = ` WHERE 1=1` + providerWhere
-		nextWhere = providerWhere
 		args = []interface{}{providerRef, providerRef, providerRef, providerRef}
 	}
 
@@ -412,7 +414,7 @@ func queryRequestLogCostBetweenByProvider(queryer requestLogQueryRower, platform
 		return 0, nil
 	}
 
-	query := `SELECT COALESCE(SUM(total_cost), 0) FROM request_log WHERE created_at >= ? AND created_at < ?`
+	query := `SELECT COALESCE(SUM(total_cost), 0) FROM request_log WHERE created_at >= ? AND created_at < ? AND ` + requestLogSourceWhereClause(LogDataSourceModeProxy, "request_log")
 	args := []interface{}{start.UTC().Format(timeLayout), end.UTC().Format(timeLayout)}
 
 	if strings.TrimSpace(platform) != "" {

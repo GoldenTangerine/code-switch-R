@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { nextTick, reactive } from 'vue'
+import { nextTick, reactive, ref } from 'vue'
 import type { LogSummary, ProviderDailyStat, RequestLog, RequestLogPageResult } from '../../../services/logs'
 import type { LogsFiltersState } from '../types'
 
@@ -148,6 +148,7 @@ describe('useLogsPageData', () => {
       model: '',
       limit: 15,
       offset: 0,
+      sourceMode: 'proxy',
       startAt: '2026-03-01 00:00:00',
       endAt: '2026-03-31 23:59:59',
     })
@@ -170,6 +171,7 @@ describe('useLogsPageData', () => {
       platform: '',
       provider: '',
       model: '',
+      sourceMode: 'proxy',
       startAt: '2026-03-01 00:00:00',
       endAt: '2026-03-31 23:59:59',
     })
@@ -194,6 +196,7 @@ describe('useLogsPageData', () => {
       platform: '',
       provider: 'provider-applied',
       model: '',
+      sourceMode: 'proxy',
       startAt: '2026-03-01 00:00:00',
       endAt: '2026-03-31 23:59:59',
     })
@@ -201,6 +204,7 @@ describe('useLogsPageData', () => {
       platform: '',
       provider: 'provider-applied',
       model: '',
+      sourceMode: 'proxy',
       startAt: '2026-03-01 00:00:00',
       endAt: '2026-03-31 23:59:59',
     })
@@ -210,6 +214,7 @@ describe('useLogsPageData', () => {
       model: '',
       limit: 15,
       offset: 0,
+      sourceMode: 'proxy',
       startAt: '2026-03-01 00:00:00',
       endAt: '2026-03-31 23:59:59',
     })
@@ -235,6 +240,7 @@ describe('useLogsPageData', () => {
       model: '',
       limit: 15,
       offset: 15,
+      sourceMode: 'proxy',
       startAt: '2026-03-01 00:00:00',
       endAt: '2026-03-31 23:59:59',
     })
@@ -264,6 +270,7 @@ describe('useLogsPageData', () => {
       model: '',
       limit: 30,
       offset: 0,
+      sourceMode: 'proxy',
       startAt: '2026-03-01 00:00:00',
       endAt: '2026-03-31 23:59:59',
     })
@@ -295,6 +302,7 @@ describe('useLogsPageData', () => {
       model: '',
       limit: 15,
       offset: 45,
+      sourceMode: 'proxy',
       startAt: '2026-03-01 00:00:00',
       endAt: '2026-03-31 23:59:59',
     })
@@ -304,6 +312,7 @@ describe('useLogsPageData', () => {
       model: '',
       limit: 15,
       offset: 15,
+      sourceMode: 'proxy',
       startAt: '2026-03-01 00:00:00',
       endAt: '2026-03-31 23:59:59',
     })
@@ -345,6 +354,7 @@ describe('useLogsPageData', () => {
       platform: '',
       provider: '',
       model: '',
+      sourceMode: 'proxy',
       startAt: '2026-03-01 00:00:00',
       endAt: '2026-03-31 23:59:59',
     })
@@ -352,6 +362,7 @@ describe('useLogsPageData', () => {
       platform: '',
       provider: 'provider-new',
       model: '',
+      sourceMode: 'proxy',
       startAt: '2026-03-01 00:00:00',
       endAt: '2026-03-31 23:59:59',
     })
@@ -391,6 +402,7 @@ describe('useLogsPageData', () => {
       platform: '',
       provider: '',
       model: selectedModelStat.model,
+      sourceMode: 'proxy',
       startAt: '2026-03-01 00:00:00',
       endAt: '2026-03-31 23:59:59',
     }
@@ -401,6 +413,7 @@ describe('useLogsPageData', () => {
     expect(fetchModelStatsV2).toHaveBeenNthCalledWith(2, {
       platform: '',
       provider: '',
+      sourceMode: 'proxy',
       startAt: '2026-03-01 00:00:00',
       endAt: '2026-03-31 23:59:59',
     })
@@ -455,6 +468,7 @@ describe('useLogsPageData', () => {
     expect(fetchModelStatsV2).toHaveBeenLastCalledWith({
       platform: '',
       provider: 'provider-next',
+      sourceMode: 'proxy',
       startAt: '2026-03-01 00:00:00',
       endAt: '2026-03-31 23:59:59',
     })
@@ -502,5 +516,57 @@ describe('useLogsPageData', () => {
 
     await loadAppliedProviderStats()
     expect(fetchProviderStatsV2).toHaveBeenCalledTimes(1)
+  })
+
+  it('uses one applied source mode for details and every dashboard aggregation', async () => {
+    const filters = createFilters()
+    const sourceMode = ref<'proxy' | 'session' | 'all'>('session')
+    const { applyDashboardFilters } = useLogsPageData({
+      filters,
+      sourceMode,
+      computeDateRange: () => ({ startAt: '2026-03-01 00:00:00', endAt: '2026-03-31 23:59:59' }),
+    })
+
+    await applyDashboardFilters()
+
+    const query = expect.objectContaining({ sourceMode: 'session' })
+    expect(fetchRequestLogsPage).toHaveBeenCalledWith(query)
+    expect(fetchLogSummaryV2).toHaveBeenCalledWith(query)
+    expect(fetchLogStatsV2).toHaveBeenCalledWith(query)
+    expect(fetchModelStatsV2).toHaveBeenCalledWith(query)
+    expect(fetchProviderStatsV2).toHaveBeenCalledWith(query)
+    expect(fetchLogProviderRefs).toHaveBeenCalledWith('', 'session')
+  })
+
+  it('applies a source change with the last valid range when the date draft is invalid', async () => {
+    const filters = createFilters()
+    const sourceMode = ref<'proxy' | 'session' | 'all'>('proxy')
+    let isRangeValid = true
+    const { appliedSourceMode, applyDashboardFilters, applyDashboardSourceMode } = useLogsPageData({
+      filters,
+      sourceMode,
+      computeDateRange: () => isRangeValid
+        ? { startAt: '2026-03-01 00:00:00', endAt: '2026-03-31 23:59:59' }
+        : null,
+    })
+
+    await applyDashboardFilters()
+    isRangeValid = false
+    sourceMode.value = 'session'
+    filters.provider = 'draft-provider'
+    filters.model = 'draft-model'
+    vi.clearAllMocks()
+
+    await applyDashboardSourceMode('session')
+
+    expect(appliedSourceMode.value).toBe('session')
+    expect(fetchRequestLogsPage).toHaveBeenCalledWith(expect.objectContaining({
+      provider: '',
+      model: '',
+      sourceMode: 'session',
+      startAt: '2026-03-01 00:00:00',
+      endAt: '2026-03-31 23:59:59',
+    }))
+    expect(fetchLogProviderRefs).toHaveBeenCalledWith('', 'session')
   })
 })

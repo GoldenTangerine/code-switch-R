@@ -5,6 +5,7 @@
         <tr>
           <th class="col-time">{{ t('components.logs.table.time') }}</th>
           <th class="col-platform">{{ t('components.logs.table.platform') }}</th>
+          <th class="col-source">{{ t('components.logs.table.source') }}</th>
           <th class="col-provider">{{ t('components.logs.table.provider') }}</th>
           <th class="col-model">{{ t('components.logs.table.model') }}</th>
           <th class="col-verify">{{ t('components.logs.table.verify') }}</th>
@@ -20,6 +21,7 @@
         <tr v-for="item in items" :key="item.id">
           <td>{{ formatters.formatTime(item.created_at) }}</td>
           <td>{{ item.platform || '—' }}</td>
+          <td><span class="source-tag">{{ sourceLabel(item) }}</span></td>
           <td>{{ item.provider || '—' }}</td>
           <td class="model-cell">
             <span
@@ -66,9 +68,10 @@
               {{ formatters.formatModelVerifyStatus(item) }}
             </span>
           </td>
-          <td :class="['code', formatters.httpCodeClass(item.http_code)]">
+          <td :class="['code', { 'is-session': isSessionLog(item) }, formatters.httpCodeClass(item.http_code)]">
+            <template v-if="isSessionLog(item)">—</template>
             <span
-              v-if="formatters.hasStreamDiagnosticData(item)"
+              v-else-if="formatters.hasStreamDiagnosticData(item)"
               class="http-diagnostic-trigger"
               tabindex="0"
               aria-haspopup="true"
@@ -98,6 +101,7 @@
                 class="performance-trigger"
                 :title="t('components.logs.payloadDetail.openHint')"
                 :aria-label="formatters.formatPayloadDetailAriaLabel(item)"
+                :disabled="isSessionLog(item)"
                 @click="handlers.openPayloadDetailModal(item)"
               >
                 <span class="performance-badge performance-badge--tps">速</span>
@@ -156,7 +160,7 @@
           </td>
         </tr>
         <tr v-if="!items.length && !loading">
-          <td colspan="11" class="empty">{{ t('components.logs.empty') }}</td>
+          <td colspan="12" class="empty">{{ t('components.logs.empty') }}</td>
         </tr>
       </tbody>
     </table>
@@ -167,6 +171,7 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
 import type { RequestLog } from '../../../services/logs'
+import { isSessionRequestLog } from '../utils'
 
 type TooltipPointerEvent = MouseEvent | FocusEvent
 
@@ -234,9 +239,37 @@ const resolveModelTrail = (item: RequestLog) => {
     .filter((value, index, values) => value && value !== pricingModel && values.indexOf(value) === index)
   return route.join(' → ')
 }
+
+const isSessionLog = isSessionRequestLog
+
+const sourceLabel = (item: RequestLog) => {
+  if (item.data_source === 'session_log') return t('components.logs.source.claudeSession')
+  if (item.data_source === 'codex_session') return t('components.logs.source.codexSession')
+  if (item.data_source === 'gemini_session') return t('components.logs.source.geminiSession')
+  return t('components.logs.source.proxy')
+}
 </script>
 
 <style scoped>
+.source-tag {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  border: 1px solid color-mix(in srgb, var(--mac-border) 82%, transparent);
+  border-radius: 6px;
+  padding: 1px 7px;
+  background: color-mix(in srgb, var(--mac-surface-strong) 78%, transparent);
+  color: var(--mac-text-secondary);
+  font-size: 0.72rem;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.performance-trigger:disabled {
+  cursor: default;
+  opacity: 0.58;
+}
+
 .model-route-trail {
   display: block;
   max-width: 220px;

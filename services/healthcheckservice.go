@@ -461,6 +461,7 @@ func (hcs *HealthCheckService) applyLogAvailabilityRequests(db *sql.DB, platform
 		WHERE platform = ?
 		  AND created_at >= ?
 		  AND created_at <= ?
+		  AND COALESCE(NULLIF(TRIM(data_source), ''), 'proxy') = 'proxy'
 		ORDER BY created_at ASC
 	`
 

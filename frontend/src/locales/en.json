@@ -1204,6 +1204,22 @@
       "applyFilters": "Apply filters",
       "empty": "No logs yet",
       "lastUpdated": "Last updated {time}",
+      "source": {
+        "label": "Data source",
+        "proxy": "Proxy",
+        "session": "Sessions",
+        "all": "All",
+        "claudeSession": "Claude session",
+        "codexSession": "Codex session",
+        "geminiSession": "Gemini session",
+        "scanWsl": "Scan WSL",
+        "scanning": "Scanning",
+        "syncImported": "Imported {count} session records",
+        "syncCurrent": "Session records are up to date",
+        "syncPartial": "Imported {imported}; {errors} sources failed",
+        "syncFailed": "Session sync failed",
+        "wslFailed": "WSL scan failed"
+      },
       "filters": {
         "platform": "Platform",
         "allPlatforms": "All platforms",
@@ -1318,6 +1334,7 @@
       "table": {
         "time": "Time",
         "platform": "Platform",
+        "source": "Source",
         "provider": "Provider",
         "model": "Model",
         "verify": "Verify",
@@ -1455,6 +1472,7 @@
         "confirmTitle": "Confirm clear",
         "clearing": "Clearing...",
         "confirmClearRequestLog": "Clear all request detail logs? (Aggregated stats will be kept)",
+        "reimportSessions": "Re-import session history on the next sync",
         "confirmClearByDate": "Delete request detail logs for {date}? Matching aggregated stats for that day will also be removed.",
         "confirmClearProvider": "Clear request details and aggregated stats for {provider}? This also affects provider logs on the home page.",
         "confirmClearStats": "Clear all aggregated stats? (Request detail logs will be kept)",

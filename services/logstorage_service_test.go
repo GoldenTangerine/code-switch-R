@@ -14,7 +14,6 @@ func TestDeleteRequestLogsByDate_RemovesRequestLogsAndStatsBuckets(t *testing.T)
 	if err := InitDatabase(); err != nil {
 		t.Fatalf("初始化数据库失败: %v", err)
 	}
-
 	db, err := xdb.DB("default")
 	if err != nil {
 		t.Fatalf("获取数据库连接失败: %v", err)
@@ -100,6 +99,14 @@ func TestRequestLogDailyHeatmapStats_UsesExistingRequestLogsOnly(t *testing.T) {
 	if err := InitDatabase(); err != nil {
 		t.Fatalf("初始化数据库失败: %v", err)
 	}
+	if err := InitGlobalDBQueue(); err != nil {
+		t.Fatalf("初始化数据库写队列失败: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = ShutdownGlobalDBQueue(5 * time.Second)
+		GlobalDBQueue = nil
+		GlobalDBQueueLogs = nil
+	})
 
 	db, err := xdb.DB("default")
 	if err != nil {
@@ -138,6 +145,45 @@ func TestRequestLogDailyHeatmapStats_UsesExistingRequestLogsOnly(t *testing.T) {
 		targetDay.Format(timeLayout),
 		targetDay.AddDate(0, 0, 1).Format(timeLayout),
 	)
+}
+
+func TestRequestLogDailyHeatmapStats_FiltersDataSource(t *testing.T) {
+	useIsolatedHomeDir(t)
+
+	if err := InitDatabase(); err != nil {
+		t.Fatalf("初始化数据库失败: %v", err)
+	}
+	db, err := xdb.DB("default")
+	if err != nil {
+		t.Fatalf("获取数据库连接失败: %v", err)
+	}
+
+	targetDay := startOfDay(time.Now()).AddDate(0, 0, -1)
+	insertRequestLogForHeatmap(t, db, targetDay.Add(2*time.Hour).UTC().Format(timeLayout), 10, 20, 3, 1, 0.2)
+	if _, err := db.Exec(`
+		INSERT INTO request_log (
+			platform, model, provider_id, provider, http_code, input_tokens, output_tokens,
+			cache_read_tokens, reasoning_tokens, total_cost, data_source, created_at
+		) VALUES ('gemini', 'gemini-2.5-pro', '_gemini_session', 'Gemini 会话', 200, 8, 10, 2, 5, 0.1, 'gemini_session', ?)
+	`, targetDay.Add(3*time.Hour).UTC().Format(timeLayout)); err != nil {
+		t.Fatalf("插入会话 request_log 失败: %v", err)
+	}
+
+	ls := NewLogService(nil)
+	assertSourceCount := func(mode LogDataSourceMode, want int64) {
+		t.Helper()
+		stats, err := ls.RequestLogDailyHeatmapStatsByYearV2(targetDay.Year(), string(mode))
+		if err != nil {
+			t.Fatalf("RequestLogDailyHeatmapStatsByYearV2(%s): %v", mode, err)
+		}
+		stat := findHeatmapStatByDay(stats, targetDay.Format("2006-01-02"))
+		if stat == nil || stat.TotalRequests != want {
+			t.Fatalf("source %s heatmap = %+v, want %d", mode, stat, want)
+		}
+	}
+	assertSourceCount(LogDataSourceModeProxy, 1)
+	assertSourceCount(LogDataSourceModeSession, 1)
+	assertSourceCount(LogDataSourceModeAll, 2)
 }
 
 func TestRequestLogDailyHeatmapStats_IncludesPayloadBytes(t *testing.T) {

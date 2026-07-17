@@ -3,6 +3,33 @@
     <div class="logs-controls-orb logs-controls-orb--primary" aria-hidden="true"></div>
     <div class="logs-controls-orb logs-controls-orb--secondary" aria-hidden="true"></div>
 
+    <div class="logs-source-toolbar">
+      <div class="logs-source-switch" role="group" :aria-label="t('components.logs.source.label')">
+        <button
+          v-for="option in sourceOptions"
+          :key="option.value"
+          type="button"
+          class="logs-source-switch__item"
+          :class="{ 'is-active': sourceMode === option.value }"
+          :aria-pressed="sourceMode === option.value"
+          :disabled="loading || sessionSyncing"
+          @click="emit('update:source-mode', option.value)"
+        >
+          {{ option.label }}
+        </button>
+      </div>
+      <BaseButton
+        v-if="showWSLScan"
+        variant="outline"
+        size="sm"
+        type="button"
+        :disabled="sessionSyncing"
+        @click="emit('scan-wsl')"
+      >
+        {{ sessionSyncing ? t('components.logs.source.scanning') : t('components.logs.source.scanWsl') }}
+      </BaseButton>
+    </div>
+
     <form class="logs-filter-form" @submit.prevent="emit('submit')">
       <div class="logs-filter-primary">
         <div class="logs-filter-field logs-filter-field--platform">
@@ -501,6 +528,7 @@ import { VueDatePicker, type MonthModel } from '@vuepic/vue-datepicker'
 import { enUS, zhCN } from 'date-fns/locale'
 import { useI18n } from 'vue-i18n'
 import BaseButton from '../../common/BaseButton.vue'
+import type { LogDataSourceMode } from '../../../services/logs'
 import type { LogDateFilterType, LogProviderOption, LogsFiltersState } from '../types'
 import { scoreStringOption } from '../../../utils/fuzzyOptionSearch'
 import { getLogsYearPickerRange } from '../utils'
@@ -529,6 +557,9 @@ const props = defineProps<{
   rangePickerValue: Date[] | null
   isDarkTheme: boolean
   summaryScopeHint?: string
+  sourceMode: LogDataSourceMode
+  sessionSyncing?: boolean
+  showWSLScan?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -541,6 +572,8 @@ const emit = defineEmits<{
   (event: 'update:month-picker-value', value: MonthModel | null): void
   (event: 'update:day-picker-value', value: Date | null): void
   (event: 'update:range-picker-value', value: Date[] | null): void
+  (event: 'update:source-mode', value: LogDataSourceMode): void
+  (event: 'scan-wsl'): void
 }>()
 
 const { t, locale } = useI18n()
@@ -567,6 +600,11 @@ const datePickerInputAttrs = {
 
 const yearPickerRange = computed<[number, number]>(() => getLogsYearPickerRange())
 const rangePickerConfig = { partialRange: false } as const
+const sourceOptions = computed<Array<{ value: LogDataSourceMode; label: string }>>(() => [
+  { value: 'proxy', label: t('components.logs.source.proxy') },
+  { value: 'session', label: t('components.logs.source.session') },
+  { value: 'all', label: t('components.logs.source.all') },
+])
 
 const platformOptions = computed<Array<FilterOption<LogsFiltersState['platform']>>>(() => [
   { value: '', label: t('components.logs.filters.allPlatforms') },
@@ -993,6 +1031,59 @@ html.dark .logs-controls::before {
   display: flex;
   flex-direction: column;
   gap: 18px;
+}
+
+.logs-source-toolbar {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.logs-source-switch {
+  display: inline-grid;
+  grid-template-columns: repeat(3, minmax(72px, 1fr));
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid var(--mac-divider);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--mac-surface-strong) 88%, transparent);
+}
+
+.logs-source-switch__item {
+  min-height: 32px;
+  border: 0;
+  border-radius: 6px;
+  padding: 0 14px;
+  background: transparent;
+  color: var(--mac-text-secondary);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 160ms ease, background-color 160ms ease, box-shadow 160ms ease;
+}
+
+.logs-source-switch__item:hover:not(:disabled) {
+  color: var(--mac-text);
+  background: color-mix(in srgb, var(--mac-surface) 82%, transparent);
+}
+
+.logs-source-switch__item.is-active {
+  color: var(--mac-text);
+  background: var(--mac-surface);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.14);
+}
+
+.logs-source-switch__item:focus-visible {
+  outline: 2px solid rgba(59, 130, 246, 0.58);
+  outline-offset: 1px;
+}
+
+.logs-source-switch__item:disabled {
+  cursor: wait;
+  opacity: 0.58;
 }
 
 .logs-filter-primary {
@@ -1656,6 +1747,15 @@ html.dark .logs-filter-date-picker-menu {
   .logs-filter-secondary,
   .logs-filter-secondary.is-range {
     grid-template-columns: 1fr;
+  }
+
+  .logs-source-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .logs-source-switch {
+    width: 100%;
   }
 
   .logs-select-options {

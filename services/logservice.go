@@ -87,6 +87,10 @@ var requestLogListSelectFields = []string{
 	"provider_per_call_input_set",
 	"provider_per_call_output_set",
 	"error_read_at",
+	"data_source",
+	"source_record_id",
+	"session_id",
+	"dedup_core",
 	"created_at",
 }
 
@@ -171,7 +175,7 @@ func (ls *LogService) CostSince(start string, platform string) (float64, error) 
 		return 0, err
 	}
 
-	query := `SELECT COALESCE(SUM(total_cost), 0) FROM request_log WHERE created_at >= ?`
+	query := `SELECT COALESCE(SUM(total_cost), 0) FROM request_log WHERE created_at >= ? AND ` + requestLogSourceWhereClause(LogDataSourceModeProxy, "request_log")
 	args := []interface{}{startTime.UTC().Format(timeLayout)}
 	if platform != "" {
 		query += ` AND platform = ?`
@@ -223,10 +227,10 @@ func (ls *LogService) resolveFiveHourQuotaStatusAt(platform string, now time.Tim
 }
 
 func queryLatestRequestLogCreatedAt(db *sql.DB, platform string) (time.Time, error) {
-	query := `SELECT MAX(created_at) FROM request_log`
+	query := `SELECT MAX(created_at) FROM request_log WHERE ` + requestLogSourceWhereClause(LogDataSourceModeProxy, "request_log")
 	args := make([]interface{}, 0, 1)
 	if strings.TrimSpace(platform) != "" {
-		query += ` WHERE platform = ?`
+		query += ` AND platform = ?`
 		args = append(args, platform)
 	}
 
@@ -238,12 +242,12 @@ func queryLatestRequestLogCreatedAt(db *sql.DB, platform string) (time.Time, err
 }
 
 func queryLatestFiveHourQuotaWindowStart(db *sql.DB, platform string) (time.Time, error) {
-	initialWhere := ""
-	nextWhere := ""
+	initialWhere := ` WHERE ` + requestLogSourceWhereClause(LogDataSourceModeProxy, "request_log")
+	nextWhere := ` AND ` + requestLogSourceWhereClause(LogDataSourceModeProxy, "request_log")
 	args := make([]interface{}, 0, 2)
 	if strings.TrimSpace(platform) != "" {
-		initialWhere = ` WHERE platform = ?`
-		nextWhere = ` AND platform = ?`
+		initialWhere += ` AND platform = ?`
+		nextWhere += ` AND platform = ?`
 		args = append(args, platform, platform)
 	}
 
@@ -274,7 +278,7 @@ func queryLatestFiveHourQuotaWindowStart(db *sql.DB, platform string) (time.Time
 }
 
 func queryRequestLogCostBetween(db *sql.DB, platform string, start time.Time, end time.Time) (float64, error) {
-	query := `SELECT COALESCE(SUM(total_cost), 0) FROM request_log WHERE created_at >= ? AND created_at < ?`
+	query := `SELECT COALESCE(SUM(total_cost), 0) FROM request_log WHERE created_at >= ? AND created_at < ? AND ` + requestLogSourceWhereClause(LogDataSourceModeProxy, "request_log")
 	args := []interface{}{start.UTC().Format(timeLayout), end.UTC().Format(timeLayout)}
 	if strings.TrimSpace(platform) != "" {
 		query += ` AND platform = ?`
@@ -458,7 +462,12 @@ func buildPricingModelFilterOption(pricingModel string) xdb.Option {
 }
 
 func buildRequestLogFilterOptions(platform string, pricingModel string, startAt string, endAt string) ([]xdb.Option, error) {
+	return buildRequestLogFilterOptionsV3(platform, pricingModel, startAt, endAt, LogDataSourceModeProxy)
+}
+
+func buildRequestLogFilterOptionsV3(platform string, pricingModel string, startAt string, endAt string, sourceMode LogDataSourceMode) ([]xdb.Option, error) {
 	options := make([]xdb.Option, 0, 4)
+	options = append(options, requestLogSourceFilterOption(sourceMode))
 	if platform != "" {
 		options = append(options, xdb.WhereEq("platform", platform))
 	}
@@ -564,6 +573,10 @@ func buildRequestLogList(records []xdb.Record, pricingSnapshot *modelpricing.Ser
 			ProviderPerCallInputSet:   record.GetBool("provider_per_call_input_set"),
 			ProviderPerCallOutputSet:  record.GetBool("provider_per_call_output_set"),
 			ErrorReadAt:               record.GetString("error_read_at"),
+			DataSource:                record.GetString("data_source"),
+			SourceRecordID:            record.GetString("source_record_id"),
+			SessionID:                 record.GetString("session_id"),
+			DedupCore:                 record.GetString("dedup_core"),
 			ResponseBody:              record.GetString("response_body"),
 			ResponseBodyTruncated:     record.GetBool("response_body_truncated"),
 		}
@@ -588,11 +601,23 @@ func (ls *LogService) loadRequestLogsForAggregation(
 	start time.Time,
 	end time.Time,
 ) ([]ReqeustLog, error) {
+	return ls.loadRequestLogsForAggregationV3(platform, provider, pricingModel, start, end, LogDataSourceModeProxy)
+}
+
+func (ls *LogService) loadRequestLogsForAggregationV3(
+	platform string,
+	provider string,
+	pricingModel string,
+	start time.Time,
+	end time.Time,
+	sourceMode LogDataSourceMode,
+) ([]ReqeustLog, error) {
 	model := xdb.New("request_log")
 	options := []xdb.Option{
 		xdb.Field(requestLogListSelectFields...),
 		xdb.WhereGte("created_at", start.UTC().Format(timeLayout)),
 		xdb.WhereLt("created_at", end.UTC().Format(timeLayout)),
+		requestLogSourceFilterOption(sourceMode),
 	}
 	if strings.TrimSpace(platform) != "" {
 		options = append(options, xdb.WhereEq("platform", strings.TrimSpace(platform)))
@@ -840,6 +865,10 @@ func (ls *LogService) ListRequestLogsV2(platform string, provider string, limit 
 }
 
 func (ls *LogService) ListRequestLogsPageV2(platform string, provider string, pricingModel string, limit int, offset int, startAt string, endAt string) (RequestLogPageResult, error) {
+	return ls.ListRequestLogsPageV3(platform, provider, pricingModel, string(LogDataSourceModeProxy), limit, offset, startAt, endAt)
+}
+
+func (ls *LogService) ListRequestLogsPageV3(platform string, provider string, pricingModel string, sourceMode string, limit int, offset int, startAt string, endAt string) (RequestLogPageResult, error) {
 	result := RequestLogPageResult{
 		Items:  []ReqeustLog{},
 		Limit:  normalizeRequestLogListLimit(limit),
@@ -847,7 +876,7 @@ func (ls *LogService) ListRequestLogsPageV2(platform string, provider string, pr
 	}
 
 	model := xdb.New("request_log")
-	filterOptions, err := buildRequestLogFilterOptions(platform, pricingModel, startAt, endAt)
+	filterOptions, err := buildRequestLogFilterOptionsV3(platform, pricingModel, startAt, endAt, normalizeLogDataSourceMode(sourceMode))
 	if err != nil {
 		return result, err
 	}
@@ -1137,6 +1166,10 @@ type logProviderRefCandidate struct {
 }
 
 func (ls *LogService) ListProviderRefs(platform string) ([]LogProviderRef, error) {
+	return ls.ListProviderRefsV2(platform, string(LogDataSourceModeProxy))
+}
+
+func (ls *LogService) ListProviderRefsV2(platform string, sourceMode string) ([]LogProviderRef, error) {
 	db, err := xdb.DB("default")
 	if err != nil {
 		return nil, err
@@ -1148,6 +1181,7 @@ func (ls *LogService) ListProviderRefs(platform string) ([]LogProviderRef, error
 		WHERE TRIM(COALESCE(provider, '')) <> ''
 	`
 	args := make([]interface{}, 0, 1)
+	query += " AND " + requestLogSourceWhereClause(normalizeLogDataSourceMode(sourceMode), "request_log")
 	if strings.TrimSpace(platform) != "" {
 		query += " AND platform = ?"
 		args = append(args, platform)
@@ -1452,6 +1486,10 @@ func (ls *LogService) StatsSince(platform string) (LogStats, error) {
 }
 
 func (ls *LogService) StatsRangeV2(platform string, provider string, pricingModel string, startAt string, endAt string) (LogStats, error) {
+	return ls.StatsRangeV3(platform, provider, pricingModel, string(LogDataSourceModeProxy), startAt, endAt)
+}
+
+func (ls *LogService) StatsRangeV3(platform string, provider string, pricingModel string, sourceMode string, startAt string, endAt string) (LogStats, error) {
 	stats := LogStats{
 		Series: make([]LogStatsSeries, 0),
 	}
@@ -1501,7 +1539,7 @@ func (ls *LogService) StatsRangeV2(platform string, provider string, pricingMode
 		}
 	}
 
-	logs, err := ls.loadRequestLogsForAggregation(platform, provider, pricingModel, start, end)
+	logs, err := ls.loadRequestLogsForAggregationV3(platform, provider, pricingModel, start, end, normalizeLogDataSourceMode(sourceMode))
 	if err != nil {
 		return stats, err
 	}
@@ -1572,6 +1610,10 @@ func (ls *LogService) StatsRangeV2(platform string, provider string, pricingMode
 }
 
 func (ls *LogService) SummaryRangeV2(platform string, provider string, pricingModel string, startAt string, endAt string) (LogSummary, error) {
+	return ls.SummaryRangeV3(platform, provider, pricingModel, string(LogDataSourceModeProxy), startAt, endAt)
+}
+
+func (ls *LogService) SummaryRangeV3(platform string, provider string, pricingModel string, sourceMode string, startAt string, endAt string) (LogSummary, error) {
 	const activityBucketCount = 12
 
 	summary := LogSummary{
@@ -1586,7 +1628,8 @@ func (ls *LogService) SummaryRangeV2(platform string, provider string, pricingMo
 		return summary, nil
 	}
 
-	logs, err := ls.loadRequestLogsForAggregation(platform, provider, pricingModel, start, end)
+	normalizedSourceMode := normalizeLogDataSourceMode(sourceMode)
+	logs, err := ls.loadRequestLogsForAggregationV3(platform, provider, pricingModel, start, end, normalizedSourceMode)
 	if err != nil {
 		return summary, err
 	}
@@ -1641,7 +1684,7 @@ func (ls *LogService) SummaryRangeV2(platform string, provider string, pricingMo
 	}
 
 	if compareStart, compareEnd, ok := buildSummaryComparisonRange(start, end, visibleEnd); ok && compareStart.Before(compareEnd) {
-		previousLogs, compareErr := ls.loadRequestLogsForAggregation(platform, provider, pricingModel, compareStart, compareEnd)
+		previousLogs, compareErr := ls.loadRequestLogsForAggregationV3(platform, provider, pricingModel, compareStart, compareEnd, normalizedSourceMode)
 		if compareErr != nil {
 			return summary, compareErr
 		}
@@ -1973,6 +2016,10 @@ func (ls *LogService) ProviderUnreadFailedStats(platform string) ([]ProviderUnre
 }
 
 func (ls *LogService) ProviderStatsRangeV2(platform string, provider string, pricingModel string, startAt string, endAt string) ([]ProviderDailyStat, error) {
+	return ls.ProviderStatsRangeV3(platform, provider, pricingModel, string(LogDataSourceModeProxy), startAt, endAt)
+}
+
+func (ls *LogService) ProviderStatsRangeV3(platform string, provider string, pricingModel string, sourceMode string, startAt string, endAt string) ([]ProviderDailyStat, error) {
 	start, end, err := resolveAggregationRange(startAt, endAt)
 	if err != nil {
 		return nil, err
@@ -1986,7 +2033,8 @@ func (ls *LogService) ProviderStatsRangeV2(platform string, provider string, pri
 	startUTCKey := start.UTC().Format(timeLayout)
 	endUTCKey := end.UTC().Format(timeLayout)
 	platformKey := strings.TrimSpace(platform)
-	logs, err := ls.loadRequestLogsForAggregation(platform, provider, pricingModel, start, end)
+	normalizedSourceMode := normalizeLogDataSourceMode(sourceMode)
+	logs, err := ls.loadRequestLogsForAggregationV3(platform, provider, pricingModel, start, end, normalizedSourceMode)
 	if err != nil {
 		return nil, err
 	}
@@ -2039,7 +2087,7 @@ func (ls *LogService) ProviderStatsRangeV2(platform string, provider string, pri
 
 	if duration <= 48*time.Hour {
 		providerRef := strings.TrimSpace(provider)
-		cacheKey := buildProviderPerformanceCacheKey(platformKey, providerRef, pricingModel, startUTCKey, endUTCKey)
+		cacheKey := buildProviderPerformanceCacheKey(platformKey, providerRef, pricingModel+"|source:"+string(normalizedSourceMode), startUTCKey, endUTCKey)
 		now := time.Now()
 		performanceMap, cached := ls.getProviderPerformanceCache(cacheKey, now)
 		if !cached {
@@ -2093,6 +2141,7 @@ func (ls *LogService) ProviderStatsRangeV2(platform string, provider string, pri
 					`
 				args := make([]interface{}, 0, 4)
 				args = append(args, startUTCKey, endUTCKey)
+				query += " AND " + requestLogSourceWhereClause(normalizedSourceMode, "request_log")
 				if platformKey != "" {
 					query += " AND platform = ?"
 					args = append(args, platformKey)
@@ -2214,6 +2263,10 @@ func (ls *LogService) ProviderStatsRangeV2(platform string, provider string, pri
 }
 
 func (ls *LogService) ModelStatsRangeV2(platform string, provider string, pricingModel string, startAt string, endAt string) ([]ModelUsageStat, error) {
+	return ls.ModelStatsRangeV3(platform, provider, pricingModel, string(LogDataSourceModeProxy), startAt, endAt)
+}
+
+func (ls *LogService) ModelStatsRangeV3(platform string, provider string, pricingModel string, sourceMode string, startAt string, endAt string) ([]ModelUsageStat, error) {
 	start, end, err := resolveAggregationRange(startAt, endAt)
 	if err != nil {
 		return nil, err
@@ -2223,7 +2276,7 @@ func (ls *LogService) ModelStatsRangeV2(platform string, provider string, pricin
 		return []ModelUsageStat{}, nil
 	}
 
-	logs, err := ls.loadRequestLogsForAggregation(platform, provider, pricingModel, start, end)
+	logs, err := ls.loadRequestLogsForAggregationV3(platform, provider, pricingModel, start, end, normalizeLogDataSourceMode(sourceMode))
 	if err != nil {
 		return nil, err
 	}

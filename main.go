@@ -210,6 +210,32 @@ func main() {
 		}
 	}()
 
+	// 会话用量首次异步同步，之后每分钟仅处理发生变化的文件。
+	sessionUsageStopChan := make(chan struct{})
+	go func() {
+		runSync := func() {
+			result, err := logService.SyncLocalSessionUsage()
+			if err != nil {
+				log.Printf("会话用量同步失败: %v", err)
+				return
+			}
+			for _, syncErr := range result.Errors {
+				log.Printf("会话用量部分同步失败: %s", syncErr)
+			}
+		}
+		runSync()
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				runSync()
+			case <-sessionUsageStopChan:
+				return
+			}
+		}
+	}()
+
 	// 启动黑名单自动恢复定时器（每分钟检查一次）
 	blacklistStopChan := make(chan struct{})
 	go func() {
@@ -315,6 +341,7 @@ func main() {
 
 		// 1. 停止黑名单定时器
 		close(blacklistStopChan)
+		close(sessionUsageStopChan)
 
 		// 2. 停止健康检查轮询
 		healthCheckService.StopBackgroundPolling()

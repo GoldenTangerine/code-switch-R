@@ -1,4 +1,4 @@
-import { computed, ref, watch } from 'vue'
+import { computed, ref, watch, type Ref } from 'vue'
 import { LoadProviders } from '../../../../bindings/codeswitch/services/providerservice'
 import { GetProviders as GetGeminiProviders } from '../../../../bindings/codeswitch/services/geminiservice'
 import {
@@ -15,6 +15,7 @@ import {
   type ModelUsageStat,
   type ProviderDailyStat,
   type LogProviderRef,
+  type LogDataSourceMode,
 } from '../../../services/logs'
 import type { LogProviderOption, LogsFiltersState } from '../types'
 import { cloneLogsFiltersState, createLogsFiltersState, type LogsDateRange } from './useLogsFilters'
@@ -22,12 +23,14 @@ import { cloneLogsFiltersState, createLogsFiltersState, type LogsDateRange } fro
 type UseLogsPageDataOptions = {
   filters: LogsFiltersState
   computeDateRange: () => LogsDateRange | null
+  sourceMode?: Ref<LogDataSourceMode>
   shouldLoadProviderStats?: () => boolean
 }
 
 type AppliedLogsQuery = {
   filters: LogsFiltersState
   range: LogsDateRange
+  sourceMode: LogDataSourceMode
 }
 
 const DEFAULT_PAGE_SIZE = 15
@@ -117,6 +120,7 @@ const mergeProviderOptions = (options: LogProviderOption[]): LogProviderOption[]
 
 export function useLogsPageData(options: UseLogsPageDataOptions) {
   const { filters, computeDateRange } = options
+  const sourceMode = options.sourceMode ?? ref<LogDataSourceMode>('proxy')
   const shouldLoadProviderStats = options.shouldLoadProviderStats ?? (() => true)
 
   const logs = ref<RequestLog[]>([])
@@ -145,6 +149,7 @@ export function useLogsPageData(options: UseLogsPageDataOptions) {
   const pagedLogs = computed(() => logs.value)
   const appliedFilters = computed(() => appliedQuery.value.filters)
   const appliedDateRange = computed(() => appliedQuery.value.range)
+  const appliedSourceMode = computed(() => appliedQuery.value.sourceMode)
 
   const withLoading = async <T>(task: () => Promise<T>): Promise<T> => {
     loadingRequestCount += 1
@@ -164,6 +169,7 @@ export function useLogsPageData(options: UseLogsPageDataOptions) {
         startAt: '',
         endAt: '',
       },
+      sourceMode: sourceMode.value,
     }
   }
 
@@ -174,6 +180,7 @@ export function useLogsPageData(options: UseLogsPageDataOptions) {
         startAt: query.range.startAt,
         endAt: query.range.endAt,
       },
+      sourceMode: query.sourceMode,
     }
   }
 
@@ -186,6 +193,7 @@ export function useLogsPageData(options: UseLogsPageDataOptions) {
         startAt: range.startAt,
         endAt: range.endAt,
       },
+      sourceMode: sourceMode.value,
     }
   }
 
@@ -194,6 +202,7 @@ export function useLogsPageData(options: UseLogsPageDataOptions) {
     return current != null
       && current.filters.platform === query.filters.platform
       && current.filters.provider === query.filters.provider
+      && current.sourceMode === query.sourceMode
       && current.range.startAt === query.range.startAt
       && current.range.endAt === query.range.endAt
   }
@@ -279,14 +288,14 @@ export function useLogsPageData(options: UseLogsPageDataOptions) {
     providerOptions.value = mergeProviderOptions(nextOptions)
   }
 
-  const loadProviderOptions = async () => {
+  const loadProviderOptions = async (query: AppliedLogsQuery) => {
     const requestId = ++providerOptionsRequestId.value
     const [fromLogs, fromConfig] = await Promise.all([
-      fetchLogProviderRefs(filters.platform).catch((error) => {
+      fetchLogProviderRefs(query.filters.platform, query.sourceMode).catch((error) => {
         console.error('failed to load provider refs from request logs', error)
         return [] as LogProviderRef[]
       }),
-      loadProviderNamesFromConfig(filters.platform).catch((error) => {
+      (query.sourceMode === 'session' ? Promise.resolve([]) : loadProviderNamesFromConfig(query.filters.platform)).catch((error) => {
         console.error('failed to load providers from config', error)
         return [] as LogProviderOption[]
       }),
@@ -312,6 +321,7 @@ export function useLogsPageData(options: UseLogsPageDataOptions) {
         offset: (normalizedPage - 1) * limit,
         startAt: query.range.startAt,
         endAt: query.range.endAt,
+        sourceMode: query.sourceMode,
       })
       if (requestId !== logsRequestId.value) return
       const total = Math.max(0, Number(result?.total ?? 0))
@@ -344,6 +354,7 @@ export function useLogsPageData(options: UseLogsPageDataOptions) {
         model: query.filters.model,
         startAt: query.range.startAt,
         endAt: query.range.endAt,
+        sourceMode: query.sourceMode,
       })
       if (requestId !== statsRequestId.value) return
       stats.value = data ?? null
@@ -363,6 +374,7 @@ export function useLogsPageData(options: UseLogsPageDataOptions) {
         model: query.filters.model,
         startAt: query.range.startAt,
         endAt: query.range.endAt,
+        sourceMode: query.sourceMode,
       })
       if (requestId !== summaryRequestId.value) return
       summary.value = data ?? null
@@ -384,6 +396,7 @@ export function useLogsPageData(options: UseLogsPageDataOptions) {
         model: query.filters.model,
         startAt: query.range.startAt,
         endAt: query.range.endAt,
+        sourceMode: query.sourceMode,
       })
       if (requestId !== modelStatsRequestId.value) return
       modelStats.value = data ?? []
@@ -409,6 +422,7 @@ export function useLogsPageData(options: UseLogsPageDataOptions) {
         model: query.filters.model,
         startAt: query.range.startAt,
         endAt: query.range.endAt,
+        sourceMode: query.sourceMode,
       })
       if (requestId !== providerStatsRequestId.value) return
       providerStats.value = data ?? []
@@ -427,6 +441,7 @@ export function useLogsPageData(options: UseLogsPageDataOptions) {
         provider: query.filters.provider,
         startAt: query.range.startAt,
         endAt: query.range.endAt,
+        sourceMode: query.sourceMode,
       })
       if (requestId !== modelOptionsRequestId.value) return
       modelOptions.value = Array.from(new Set((data ?? []).map((item) => item.model.trim()).filter(Boolean)))
@@ -446,7 +461,7 @@ export function useLogsPageData(options: UseLogsPageDataOptions) {
         loadModelStats(query),
         shouldLoadProviderStats() ? loadProviderStats(query) : Promise.resolve(),
         query.filters.model && matchesCurrentModelOptionsScope(query) ? loadModelOptions(query) : Promise.resolve(),
-        loadProviderOptions(),
+        loadProviderOptions(query),
       ])
       syncProviderOptionsFromLogs(logs.value)
     })
@@ -465,6 +480,16 @@ export function useLogsPageData(options: UseLogsPageDataOptions) {
     if (nextQuery == null) {
       return
     }
+    appliedQuery.value = cloneAppliedQuery(nextQuery)
+    await loadDashboardByQuery(nextQuery)
+  }
+
+  const applyDashboardSourceMode = async (value: LogDataSourceMode) => {
+    const nextQuery = buildCurrentAppliedQuery() ?? cloneAppliedQuery(appliedQuery.value)
+    nextQuery.sourceMode = value
+    nextQuery.filters.provider = ''
+    nextQuery.filters.model = ''
+    page.value = 1
     appliedQuery.value = cloneAppliedQuery(nextQuery)
     await loadDashboardByQuery(nextQuery)
   }
@@ -492,13 +517,15 @@ export function useLogsPageData(options: UseLogsPageDataOptions) {
   watch(
     () => [filters.platform, filters.provider] as const,
     async ([platform], [previousPlatform]) => {
+      const query = buildCurrentAppliedQuery()
       if (platform !== previousPlatform) {
-        await loadProviderOptions()
+        if (query != null) {
+          await loadProviderOptions(query)
+        }
         if (filters.provider && !providerOptions.value.some((option) => option.value === filters.provider)) {
           filters.provider = ''
         }
       }
-      const query = buildCurrentAppliedQuery()
       if (query != null) {
         await loadModelOptions(query)
       }
@@ -526,7 +553,9 @@ export function useLogsPageData(options: UseLogsPageDataOptions) {
     totalPages,
     appliedFilters,
     appliedDateRange,
+    appliedSourceMode,
     applyDashboardFilters,
+    applyDashboardSourceMode,
     loadDashboard,
     loadAppliedProviderStats,
     setPage,

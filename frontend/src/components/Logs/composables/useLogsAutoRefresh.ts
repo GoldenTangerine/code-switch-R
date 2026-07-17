@@ -60,9 +60,7 @@ export function useLogsAutoRefresh(
     }
   }
 
-  const manualRefresh = () => {
-    void triggerRefresh()
-  }
+  const manualRefresh = () => triggerRefresh()
 
   const restartCountdown = () => {
     resetTimer()

@@ -10,11 +10,22 @@ import {
   formatModelShareTooltipLabel,
   formatReasoningEffortSource,
   formatTokensPerSecond,
+  isSessionRequestLog,
   normalizeReasoningEffortDisplay,
   resolveReasoningEffortTone,
 } from './utils'
 
 const MODEL_SHARE_COLORS = ['#818cf8', '#fb923c', '#34d399', '#60a5fa'] as const
+
+describe('isSessionRequestLog', () => {
+  it('only disables payload details for imported session records', () => {
+    expect(isSessionRequestLog({ data_source: 'session_log' })).toBe(true)
+    expect(isSessionRequestLog({ data_source: 'codex_session' })).toBe(true)
+    expect(isSessionRequestLog({ data_source: 'gemini_session' })).toBe(true)
+    expect(isSessionRequestLog({ data_source: 'proxy' })).toBe(false)
+    expect(isSessionRequestLog({})).toBe(false)
+  })
+})
 
 const createModelUsageStat = (overrides: Partial<ModelUsageStat> = {}): ModelUsageStat => ({
   model: 'model-a',

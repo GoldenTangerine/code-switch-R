@@ -105,6 +105,7 @@ func ensureRequestLogQuotaCycleTriggerWithDB(db *sql.DB) error {
 CREATE TRIGGER IF NOT EXISTS %[1]s
 AFTER INSERT ON request_log
 WHEN TRIM(COALESCE(NEW.platform, '')) <> ''
+  AND COALESCE(NULLIF(TRIM(NEW.data_source), ''), 'proxy') = 'proxy'
 BEGIN
   INSERT INTO %[2]s (
     platform,
@@ -249,6 +250,7 @@ func listRequestLogPlatformsWithDB(db *sql.DB) ([]string, error) {
 		SELECT DISTINCT TRIM(COALESCE(platform, '')) AS platform
 		FROM request_log
 		WHERE TRIM(COALESCE(platform, '')) <> ''
+		  AND COALESCE(NULLIF(TRIM(data_source), ''), 'proxy') = 'proxy'
 	`)
 	if err != nil {
 		return nil, err
