@@ -193,6 +193,63 @@
           </div>
         </div>
 
+        <div class="logs-filter-field logs-filter-field--model">
+          <span class="logs-filter-label">
+            <svg class="logs-filter-label-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="m12 4 7 4-7 4-7-4 7-4Zm-7 8 7 4 7-4M5 16l7 4 7-4"
+                fill="none"
+                stroke="currentColor"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="1.6"
+              />
+            </svg>
+            <span>{{ t('components.logs.filters.model') }}</span>
+          </span>
+
+          <div class="logs-select" :class="{ 'is-open': activeSelect === 'model' }">
+            <button
+              type="button"
+              class="logs-select-button"
+              :class="{ 'is-open': activeSelect === 'model' }"
+              :aria-expanded="activeSelect === 'model'"
+              :aria-label="t('components.logs.filters.model')"
+              @click="toggleSelect('model')"
+            >
+              <span class="logs-select-value" :title="modelLabel">{{ modelLabel }}</span>
+              <svg class="logs-select-chevron" viewBox="0 0 20 20" aria-hidden="true">
+                <path
+                  d="M6 8.5 10 12.5 14 8.5"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="1.6"
+                />
+              </svg>
+            </button>
+
+            <Transition name="logs-select-pop">
+              <div v-if="activeSelect === 'model'" class="logs-select-options logs-select-options--model" role="listbox">
+                <button
+                  v-for="option in modelSelectOptions"
+                  :key="option.value || option.label"
+                  type="button"
+                  class="logs-select-option"
+                  :class="{ 'is-selected': modelValue === option.value }"
+                  :aria-selected="modelValue === option.value"
+                  :title="option.label"
+                  @click="selectDropdownOption('model', option.value)"
+                >
+                  <span class="logs-select-option-label">{{ option.label }}</span>
+                  <span v-if="modelValue === option.value" class="logs-select-option-indicator"></span>
+                </button>
+              </div>
+            </Transition>
+          </div>
+        </div>
+
         <div class="logs-filter-field logs-filter-field--date-type">
           <span class="logs-filter-label">
             <svg class="logs-filter-label-icon" viewBox="0 0 24 24" aria-hidden="true">
@@ -457,11 +514,12 @@ type ProviderFilterOption = FilterOption<string> & {
   providerName?: string
 }
 
-type SelectName = 'platform' | 'provider' | 'dateType'
+type SelectName = 'platform' | 'provider' | 'model' | 'dateType'
 
 const props = defineProps<{
   filters: LogsFiltersState
   providerOptions: LogProviderOption[]
+  modelOptions: string[]
   loading: boolean
   isFilterValid: boolean
   hasPendingChanges?: boolean
@@ -477,6 +535,7 @@ const emit = defineEmits<{
   (event: 'submit'): void
   (event: 'update:platform', value: LogsFiltersState['platform']): void
   (event: 'update:provider', value: string): void
+  (event: 'update:model', value: string): void
   (event: 'update:date-type', value: LogDateFilterType): void
   (event: 'update:year-picker-value', value: number | null): void
   (event: 'update:month-picker-value', value: MonthModel | null): void
@@ -530,6 +589,11 @@ const providerSelectOptions = computed<ProviderFilterOption[]>(() => [
   })),
 ])
 
+const modelSelectOptions = computed<Array<FilterOption<string>>>(() => [
+  { value: '', label: t('components.logs.filters.allModels') },
+  ...props.modelOptions.map((model) => ({ value: model, label: model })),
+])
+
 const filteredProviderSearchOptions = computed<ProviderFilterOption[]>(() => {
   const query = providerSearchQuery.value.trim()
   const options = providerSelectOptions.value.filter((option) => option.value)
@@ -581,6 +645,11 @@ const providerValue = computed<string>({
   set: (value) => emit('update:provider', value),
 })
 
+const modelValue = computed<string>({
+  get: () => props.filters.model,
+  set: (value) => emit('update:model', value),
+})
+
 const dateTypeValue = computed<LogDateFilterType>({
   get: () => props.filters.dateType,
   set: (value) => emit('update:date-type', value),
@@ -598,6 +667,10 @@ const platformLabel = computed(() =>
 
 const providerLabel = computed(() =>
   resolveOptionLabel(providerSelectOptions.value, providerValue.value, providerValue.value),
+)
+
+const modelLabel = computed(() =>
+  resolveOptionLabel(modelSelectOptions.value, modelValue.value, modelValue.value),
 )
 
 const dateTypeLabel = computed(() =>
@@ -738,6 +811,8 @@ const selectDropdownOption = (name: SelectName, value: string) => {
   } else if (name === 'provider') {
     providerSearchQuery.value = ''
     emit('update:provider', value)
+  } else if (name === 'model') {
+    emit('update:model', value)
   } else {
     emit('update:date-type', value as LogDateFilterType)
   }
@@ -922,7 +997,7 @@ html.dark .logs-controls::before {
 
 .logs-filter-primary {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr)) var(--logs-filter-action-width);
+  grid-template-columns: repeat(4, minmax(0, 1fr)) var(--logs-filter-action-width);
   gap: 18px;
   align-items: end;
 }
@@ -952,6 +1027,10 @@ html.dark .logs-controls::before {
 
 .logs-filter-field--provider {
   --logs-filter-accent: 168 85 247;
+}
+
+.logs-filter-field--model {
+  --logs-filter-accent: 59 130 246;
 }
 
 .logs-filter-field--date-type,
@@ -1541,6 +1620,11 @@ html.dark .logs-filter-date-picker-menu {
 .logs-select-options--provider.logs-select-pop-enter-from,
 .logs-select-options--provider.logs-select-pop-leave-to {
   transform: translateX(var(--logs-provider-popup-shift, 0px)) translateY(-6px);
+}
+
+.logs-select-options--model {
+  max-height: 280px;
+  overflow-y: auto;
 }
 
 @media (max-width: 1080px) {

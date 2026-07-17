@@ -58,6 +58,7 @@ export type RequestLog = {
   group_multiplier?: number
   has_pricing?: boolean
   matched_pricing_model?: string
+  effective_pricing_model?: string
   price_source?: string
   provider_pricing_available?: boolean
   provider_quota_type?: number
@@ -76,6 +77,7 @@ export type RequestLog = {
 type RequestLogQuery = {
   platform?: RequestLogPlatform | ''
   provider?: string
+  model?: string
   limit?: number
   offset?: number
   startAt?: string
@@ -102,11 +104,12 @@ export type RequestLogPageResult = {
 export const fetchRequestLogsPage = async (query: RequestLogQuery = {}): Promise<RequestLogPageResult> => {
   const platform = query.platform ?? ''
   const provider = query.provider ?? ''
+  const model = query.model ?? ''
   const limit = query.limit ?? 100
   const offset = query.offset ?? 0
   const startAt = query.startAt ?? ''
   const endAt = query.endAt ?? ''
-  return Call.ByName('codeswitch/services.LogService.ListRequestLogsPageV2', platform, provider, limit, offset, startAt, endAt)
+  return Call.ByName('codeswitch/services.LogService.ListRequestLogsPageV2', platform, provider, model, limit, offset, startAt, endAt)
 }
 
 export const fetchFailedRequestLogsPage = async (query: RequestLogQuery = {}): Promise<RequestLogPageResult> => {
@@ -203,6 +206,7 @@ export const fetchLogStats = async (platform: LogPlatform | '' = ''): Promise<Lo
 type LogStatsQuery = {
   platform?: LogPlatform | ''
   provider?: string
+  model?: string
   startAt?: string
   endAt?: string
 }
@@ -210,17 +214,19 @@ type LogStatsQuery = {
 export const fetchLogStatsV2 = async (query: LogStatsQuery = {}): Promise<LogStats> => {
   const platform = query.platform ?? ''
   const provider = query.provider ?? ''
+  const model = query.model ?? ''
   const startAt = query.startAt ?? ''
   const endAt = query.endAt ?? ''
-  return Call.ByName('codeswitch/services.LogService.StatsRangeV2', platform, provider, startAt, endAt)
+  return Call.ByName('codeswitch/services.LogService.StatsRangeV2', platform, provider, model, startAt, endAt)
 }
 
 export const fetchLogSummaryV2 = async (query: LogStatsQuery = {}): Promise<LogSummary> => {
   const platform = query.platform ?? ''
   const provider = query.provider ?? ''
+  const model = query.model ?? ''
   const startAt = query.startAt ?? ''
   const endAt = query.endAt ?? ''
-  return Call.ByName('codeswitch/services.LogService.SummaryRangeV2', platform, provider, startAt, endAt)
+  return Call.ByName('codeswitch/services.LogService.SummaryRangeV2', platform, provider, model, startAt, endAt)
 }
 
 export const fetchCostSince = async (start: string, platform: LogPlatform | '' = ''): Promise<number> => {
@@ -408,6 +414,8 @@ export type ProviderDailyStat = {
   cache_create_tokens: number
   cache_read_tokens: number
   cost_total: number
+  avg_duration_sec?: number
+  duration_sample_count?: number
   avg_first_token_sec?: number
   avg_tokens_per_sec?: number
   ttft_sample_count?: number
@@ -423,6 +431,7 @@ export const fetchProviderDailyStats = async (
 type ProviderStatsQuery = {
   platform?: LogPlatform | ''
   provider?: string
+  model?: string
   startAt?: string
   endAt?: string
 }
@@ -432,9 +441,10 @@ export const fetchProviderStatsV2 = async (
 ): Promise<ProviderDailyStat[]> => {
   const platform = query.platform ?? ''
   const provider = query.provider ?? ''
+  const model = query.model ?? ''
   const startAt = query.startAt ?? ''
   const endAt = query.endAt ?? ''
-  return Call.ByName('codeswitch/services.LogService.ProviderStatsRangeV2', platform, provider, startAt, endAt)
+  return Call.ByName('codeswitch/services.LogService.ProviderStatsRangeV2', platform, provider, model, startAt, endAt)
 }
 
 export type ModelUsageStat = {
@@ -450,6 +460,7 @@ export type ModelUsageStat = {
 type ModelStatsQuery = {
   platform?: LogPlatform | ''
   provider?: string
+  model?: string
   startAt?: string
   endAt?: string
 }
@@ -459,9 +470,10 @@ export const fetchModelStatsV2 = async (
 ): Promise<ModelUsageStat[]> => {
   const platform = query.platform ?? ''
   const provider = query.provider ?? ''
+  const model = query.model ?? ''
   const startAt = query.startAt ?? ''
   const endAt = query.endAt ?? ''
-  return Call.ByName('codeswitch/services.LogService.ModelStatsRangeV2', platform, provider, startAt, endAt)
+  return Call.ByName('codeswitch/services.LogService.ModelStatsRangeV2', platform, provider, model, startAt, endAt)
 }
 
 export type HeatmapStat = {

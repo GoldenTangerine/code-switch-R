@@ -5,6 +5,7 @@ export type LogDateFilterType = 'all' | 'today' | 'year' | 'month' | 'day' | 'ra
 export type LogsFiltersState = {
   platform: LogPlatform | ''
   provider: string
+  model: string
   dateType: LogDateFilterType
   year: string
   month: string
@@ -19,6 +20,8 @@ export type LogProviderOption = {
   providerId?: string
   providerName: string
 }
+
+export type LogsDataTab = 'requests' | 'providers' | 'models'
 
 export type LogsSummaryCardTone = 'blue' | 'purple' | 'amber' | 'green'
 

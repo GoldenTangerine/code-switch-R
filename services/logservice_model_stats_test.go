@@ -85,7 +85,7 @@ func TestModelStatsRangeV2_UsesProviderIDFirstAndKeepsCostSign(t *testing.T) {
 	})
 
 	ls := NewLogService(nil)
-	stats, err := ls.ModelStatsRangeV2("codex", "pid-1", "2026-02-25 00:00:00", "2026-02-26 00:00:00")
+	stats, err := ls.ModelStatsRangeV2("codex", "pid-1", "", "2026-02-25 00:00:00", "2026-02-26 00:00:00")
 	if err != nil {
 		t.Fatalf("ModelStatsRangeV2 调用失败: %v", err)
 	}
@@ -148,7 +148,7 @@ func TestModelStatsRangeV2_FallbackToProviderNameWhenIDNotFound(t *testing.T) {
 	})
 
 	ls := NewLogService(nil)
-	stats, err := ls.ModelStatsRangeV2("codex", "legacy-provider", "2026-02-25 00:00:00", "2026-02-26 00:00:00")
+	stats, err := ls.ModelStatsRangeV2("codex", "legacy-provider", "", "2026-02-25 00:00:00", "2026-02-26 00:00:00")
 	if err != nil {
 		t.Fatalf("ModelStatsRangeV2 调用失败: %v", err)
 	}
@@ -210,7 +210,7 @@ func TestModelStatsRangeV2_PreservesStoredCostSnapshot(t *testing.T) {
 	})
 
 	ls := NewLogService(nil)
-	stats, err := ls.ModelStatsRangeV2("codex", "pid-response", "2026-02-25 00:00:00", "2026-02-26 00:00:00")
+	stats, err := ls.ModelStatsRangeV2("codex", "pid-response", "", "2026-02-25 00:00:00", "2026-02-26 00:00:00")
 	if err != nil {
 		t.Fatalf("ModelStatsRangeV2 调用失败: %v", err)
 	}
@@ -225,19 +225,123 @@ func TestModelStatsRangeV2_PreservesStoredCostSnapshot(t *testing.T) {
 	}
 }
 
+func TestModelStatsRangeV2_GroupsAndFiltersByEffectivePricingModel(t *testing.T) {
+	useIsolatedHomeDir(t)
+
+	if err := InitDatabase(); err != nil {
+		t.Fatalf("初始化数据库失败: %v", err)
+	}
+	db, err := xdb.DB("default")
+	if err != nil {
+		t.Fatalf("获取数据库连接失败: %v", err)
+	}
+
+	insertRequestLogForModelStats(t, db, modelStatsLogEntry{
+		Platform:            "codex",
+		Model:               "client-alias",
+		MatchedPricingModel: "gpt-5",
+		ProviderID:          "pid-pricing",
+		Provider:            "Acme",
+		InputTokens:         10,
+		OutputTokens:        5,
+		TotalCost:           2,
+		CreatedAt:           "2026-02-25 10:00:00",
+	})
+	insertRequestLogForModelStats(t, db, modelStatsLogEntry{
+		Platform:     "codex",
+		Model:        "gpt-5",
+		ProviderID:   "pid-pricing",
+		Provider:     "Acme",
+		InputTokens:  20,
+		OutputTokens: 10,
+		TotalCost:    3,
+		CreatedAt:    "2026-02-25 11:00:00",
+	})
+
+	stats, err := NewLogService(nil).ModelStatsRangeV2(
+		"codex",
+		"pid-pricing",
+		"gpt-5",
+		"2026-02-25 00:00:00",
+		"2026-02-26 00:00:00",
+	)
+	if err != nil {
+		t.Fatalf("按计价模型聚合失败: %v", err)
+	}
+	if len(stats) != 1 || stats[0].Model != "gpt-5" {
+		t.Fatalf("期望统一归类为 gpt-5，实际 %+v", stats)
+	}
+	if stats[0].TotalRequests != 2 || stats[0].TotalTokens != 45 || !almostEqualFloat(stats[0].CostTotal, 5) {
+		t.Fatalf("计价模型聚合结果错误: %+v", stats[0])
+	}
+}
+
+func TestModelStatsRangeV2_KeepsStoredEffectiveModelWhenPricingIsRecomputed(t *testing.T) {
+	useIsolatedHomeDir(t)
+
+	if err := InitDatabase(); err != nil {
+		t.Fatalf("初始化数据库失败: %v", err)
+	}
+	db, err := xdb.DB("default")
+	if err != nil {
+		t.Fatalf("获取数据库连接失败: %v", err)
+	}
+
+	insertRequestLogForModelStats(t, db, modelStatsLogEntry{
+		Platform:      "codex",
+		Model:         "client-alias",
+		ResponseModel: "claude-sonnet-4",
+		ProviderID:    "pid-dynamic-pricing",
+		Provider:      "Acme",
+		InputTokens:   1800,
+		OutputTokens:  600,
+		CreatedAt:     "2026-02-25 10:00:00",
+	})
+
+	service := NewLogService(nil)
+	stats, err := service.ModelStatsRangeV2(
+		"codex",
+		"pid-dynamic-pricing",
+		"",
+		"2026-02-25 00:00:00",
+		"2026-02-26 00:00:00",
+	)
+	if err != nil {
+		t.Fatalf("查询动态补价模型统计失败: %v", err)
+	}
+	if len(stats) != 1 || stats[0].Model != "client-alias" {
+		t.Fatalf("模型统计必须保持存储口径 client-alias，实际 %+v", stats)
+	}
+
+	filtered, err := service.ModelStatsRangeV2(
+		"codex",
+		"pid-dynamic-pricing",
+		"client-alias",
+		"2026-02-25 00:00:00",
+		"2026-02-26 00:00:00",
+	)
+	if err != nil {
+		t.Fatalf("按存储有效计价模型过滤失败: %v", err)
+	}
+	if len(filtered) != 1 || filtered[0].Model != "client-alias" {
+		t.Fatalf("筛选与分组口径不一致: %+v", filtered)
+	}
+}
+
 type modelStatsLogEntry struct {
-	Platform       string
-	Model          string
-	RequestedModel string
-	ResponseModel  string
-	ProviderID     string
-	Provider       string
-	InputTokens    int
-	OutputTokens   int
-	CacheRead      int
-	Reasoning      int
-	TotalCost      float64
-	CreatedAt      string
+	Platform            string
+	Model               string
+	RequestedModel      string
+	ResponseModel       string
+	MatchedPricingModel string
+	ProviderID          string
+	Provider            string
+	InputTokens         int
+	OutputTokens        int
+	CacheRead           int
+	Reasoning           int
+	TotalCost           float64
+	CreatedAt           string
 }
 
 func insertRequestLogForModelStats(t *testing.T, db *sql.DB, entry modelStatsLogEntry) {
@@ -246,8 +350,9 @@ func insertRequestLogForModelStats(t *testing.T, db *sql.DB, entry modelStatsLog
 		INSERT INTO request_log (
 			platform,
 			model,
-			requested_model,
-			response_model,
+				requested_model,
+				response_model,
+				matched_pricing_model,
 			provider_id,
 			provider,
 			http_code,
@@ -258,12 +363,13 @@ func insertRequestLogForModelStats(t *testing.T, db *sql.DB, entry modelStatsLog
 			reasoning_tokens,
 			total_cost,
 			created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		entry.Platform,
 		entry.Model,
 		entry.RequestedModel,
 		entry.ResponseModel,
+		entry.MatchedPricingModel,
 		entry.ProviderID,
 		entry.Provider,
 		200,

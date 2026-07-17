@@ -7,11 +7,13 @@ import {
   fetchLogSummaryV2,
   fetchLogStatsV2,
   fetchModelStatsV2,
+  fetchProviderStatsV2,
   type RequestLog,
   type LogSummary,
   type LogStats,
   type LogPlatform,
   type ModelUsageStat,
+  type ProviderDailyStat,
   type LogProviderRef,
 } from '../../../services/logs'
 import type { LogProviderOption, LogsFiltersState } from '../types'
@@ -20,6 +22,7 @@ import { cloneLogsFiltersState, createLogsFiltersState, type LogsDateRange } fro
 type UseLogsPageDataOptions = {
   filters: LogsFiltersState
   computeDateRange: () => LogsDateRange | null
+  shouldLoadProviderStats?: () => boolean
 }
 
 type AppliedLogsQuery = {
@@ -114,12 +117,16 @@ const mergeProviderOptions = (options: LogProviderOption[]): LogProviderOption[]
 
 export function useLogsPageData(options: UseLogsPageDataOptions) {
   const { filters, computeDateRange } = options
+  const shouldLoadProviderStats = options.shouldLoadProviderStats ?? (() => true)
 
   const logs = ref<RequestLog[]>([])
   const summary = ref<LogSummary | null>(null)
   const stats = ref<LogStats | null>(null)
   const modelStats = ref<ModelUsageStat[]>([])
+  const providerStats = ref<ProviderDailyStat[]>([])
+  const modelOptions = ref<string[]>([])
   const loading = ref(false)
+  let loadingRequestCount = 0
   const page = ref(1)
   const pageSize = ref(DEFAULT_PAGE_SIZE)
   const logsTotalCount = ref(0)
@@ -127,6 +134,8 @@ export function useLogsPageData(options: UseLogsPageDataOptions) {
   const summaryRequestId = ref(0)
   const statsRequestId = ref(0)
   const modelStatsRequestId = ref(0)
+  const providerStatsRequestId = ref(0)
+  const modelOptionsRequestId = ref(0)
   const providerOptionsRequestId = ref(0)
   const providerOptions = ref<LogProviderOption[]>([])
   const providerConfigCache = new Map<string, { loadedAt: number; options: LogProviderOption[] }>()
@@ -136,6 +145,17 @@ export function useLogsPageData(options: UseLogsPageDataOptions) {
   const pagedLogs = computed(() => logs.value)
   const appliedFilters = computed(() => appliedQuery.value.filters)
   const appliedDateRange = computed(() => appliedQuery.value.range)
+
+  const withLoading = async <T>(task: () => Promise<T>): Promise<T> => {
+    loadingRequestCount += 1
+    loading.value = true
+    try {
+      return await task()
+    } finally {
+      loadingRequestCount = Math.max(0, loadingRequestCount - 1)
+      loading.value = loadingRequestCount > 0
+    }
+  }
 
   function buildFallbackAppliedQuery(): AppliedLogsQuery {
     return {
@@ -167,6 +187,15 @@ export function useLogsPageData(options: UseLogsPageDataOptions) {
         endAt: range.endAt,
       },
     }
+  }
+
+  function matchesCurrentModelOptionsScope(query: AppliedLogsQuery): boolean {
+    const current = buildCurrentAppliedQuery()
+    return current != null
+      && current.filters.platform === query.filters.platform
+      && current.filters.provider === query.filters.provider
+      && current.range.startAt === query.range.startAt
+      && current.range.endAt === query.range.endAt
   }
 
   const loadProviderNamesFromConfig = async (platform: LogPlatform | ''): Promise<LogProviderOption[]> => {
@@ -274,11 +303,11 @@ export function useLogsPageData(options: UseLogsPageDataOptions) {
     const requestId = ++logsRequestId.value
     const normalizedPage = Math.max(1, Math.floor(Number(targetPage) || 1))
     const limit = pageSize.value
-    loading.value = true
     try {
       const result = await fetchRequestLogsPage({
         platform: query.filters.platform,
         provider: query.filters.provider,
+        model: query.filters.model,
         limit,
         offset: (normalizedPage - 1) * limit,
         startAt: query.range.startAt,
@@ -291,7 +320,7 @@ export function useLogsPageData(options: UseLogsPageDataOptions) {
       if (total > 0 && normalizedPage > nextTotalPages) {
         page.value = nextTotalPages
         logsTotalCount.value = total
-        void loadLogs(query, nextTotalPages)
+        await loadLogs(query, nextTotalPages)
         return
       }
       logsTotalCount.value = total
@@ -303,10 +332,6 @@ export function useLogsPageData(options: UseLogsPageDataOptions) {
       logsTotalCount.value = 0
       page.value = 1
       console.error('failed to load request logs', error)
-    } finally {
-      if (requestId === logsRequestId.value) {
-        loading.value = false
-      }
     }
   }
 
@@ -316,6 +341,7 @@ export function useLogsPageData(options: UseLogsPageDataOptions) {
       const data = await fetchLogStatsV2({
         platform: query.filters.platform,
         provider: query.filters.provider,
+        model: query.filters.model,
         startAt: query.range.startAt,
         endAt: query.range.endAt,
       })
@@ -334,6 +360,7 @@ export function useLogsPageData(options: UseLogsPageDataOptions) {
       const data = await fetchLogSummaryV2({
         platform: query.filters.platform,
         provider: query.filters.provider,
+        model: query.filters.model,
         startAt: query.range.startAt,
         endAt: query.range.endAt,
       })
@@ -348,6 +375,52 @@ export function useLogsPageData(options: UseLogsPageDataOptions) {
 
   const loadModelStats = async (query: AppliedLogsQuery) => {
     const requestId = ++modelStatsRequestId.value
+    const shouldSyncModelOptions = !query.filters.model && matchesCurrentModelOptionsScope(query)
+    const optionsRequestId = shouldSyncModelOptions ? ++modelOptionsRequestId.value : 0
+    try {
+      const data = await fetchModelStatsV2({
+        platform: query.filters.platform,
+        provider: query.filters.provider,
+        model: query.filters.model,
+        startAt: query.range.startAt,
+        endAt: query.range.endAt,
+      })
+      if (requestId !== modelStatsRequestId.value) return
+      modelStats.value = data ?? []
+      if (optionsRequestId > 0 && optionsRequestId === modelOptionsRequestId.value && matchesCurrentModelOptionsScope(query)) {
+        modelOptions.value = Array.from(new Set(modelStats.value.map((item) => item.model.trim()).filter(Boolean)))
+      }
+    } catch (error) {
+      if (requestId !== modelStatsRequestId.value) return
+      console.error('failed to load model stats', error)
+      modelStats.value = []
+      if (optionsRequestId > 0 && optionsRequestId === modelOptionsRequestId.value && matchesCurrentModelOptionsScope(query)) {
+        modelOptions.value = []
+      }
+    }
+  }
+
+  const loadProviderStats = async (query: AppliedLogsQuery) => {
+    const requestId = ++providerStatsRequestId.value
+    try {
+      const data = await fetchProviderStatsV2({
+        platform: query.filters.platform,
+        provider: query.filters.provider,
+        model: query.filters.model,
+        startAt: query.range.startAt,
+        endAt: query.range.endAt,
+      })
+      if (requestId !== providerStatsRequestId.value) return
+      providerStats.value = data ?? []
+    } catch (error) {
+      if (requestId !== providerStatsRequestId.value) return
+      console.error('failed to load provider stats', error)
+      providerStats.value = []
+    }
+  }
+
+  const loadModelOptions = async (query: AppliedLogsQuery) => {
+    const requestId = ++modelOptionsRequestId.value
     try {
       const data = await fetchModelStatsV2({
         platform: query.filters.platform,
@@ -355,28 +428,36 @@ export function useLogsPageData(options: UseLogsPageDataOptions) {
         startAt: query.range.startAt,
         endAt: query.range.endAt,
       })
-      if (requestId !== modelStatsRequestId.value) return
-      modelStats.value = data ?? []
+      if (requestId !== modelOptionsRequestId.value) return
+      modelOptions.value = Array.from(new Set((data ?? []).map((item) => item.model.trim()).filter(Boolean)))
     } catch (error) {
-      if (requestId !== modelStatsRequestId.value) return
-      console.error('failed to load model stats', error)
-      modelStats.value = []
+      if (requestId !== modelOptionsRequestId.value) return
+      console.error('failed to load model options', error)
+      modelOptions.value = []
     }
   }
 
   const loadDashboardByQuery = async (query: AppliedLogsQuery) => {
-    await Promise.all([
-      loadLogs(query),
-      loadSummary(query),
-      loadStats(query),
-      loadModelStats(query),
-      loadProviderOptions(),
-    ])
-    syncProviderOptionsFromLogs(logs.value)
+    await withLoading(async () => {
+      await Promise.all([
+        loadLogs(query),
+        loadSummary(query),
+        loadStats(query),
+        loadModelStats(query),
+        shouldLoadProviderStats() ? loadProviderStats(query) : Promise.resolve(),
+        query.filters.model && matchesCurrentModelOptionsScope(query) ? loadModelOptions(query) : Promise.resolve(),
+        loadProviderOptions(),
+      ])
+      syncProviderOptionsFromLogs(logs.value)
+    })
   }
 
   const loadDashboard = async () => {
     await loadDashboardByQuery(cloneAppliedQuery(appliedQuery.value))
+  }
+
+  const loadAppliedProviderStats = async () => {
+    await withLoading(() => loadProviderStats(cloneAppliedQuery(appliedQuery.value)))
   }
 
   const applyDashboardFilters = async () => {
@@ -396,7 +477,7 @@ export function useLogsPageData(options: UseLogsPageDataOptions) {
     const normalized = Math.max(1, Math.floor(Number(value) || 1))
     const nextPage = Math.min(normalized, totalPages.value)
     if (nextPage === page.value) return
-    await loadLogs(cloneAppliedQuery(appliedQuery.value), nextPage)
+    await withLoading(() => loadLogs(cloneAppliedQuery(appliedQuery.value), nextPage))
   }
 
   const setPageSize = async (value: number) => {
@@ -405,15 +486,21 @@ export function useLogsPageData(options: UseLogsPageDataOptions) {
     if (nextPageSize === pageSize.value) return
     pageSize.value = nextPageSize
     page.value = 1
-    await loadLogs(cloneAppliedQuery(appliedQuery.value), 1)
+    await withLoading(() => loadLogs(cloneAppliedQuery(appliedQuery.value), 1))
   }
 
   watch(
-    () => filters.platform,
-    async () => {
-      await loadProviderOptions()
-      if (filters.provider && !providerOptions.value.some((option) => option.value === filters.provider)) {
-        filters.provider = ''
+    () => [filters.platform, filters.provider] as const,
+    async ([platform], [previousPlatform]) => {
+      if (platform !== previousPlatform) {
+        await loadProviderOptions()
+        if (filters.provider && !providerOptions.value.some((option) => option.value === filters.provider)) {
+          filters.provider = ''
+        }
+      }
+      const query = buildCurrentAppliedQuery()
+      if (query != null) {
+        await loadModelOptions(query)
       }
     },
   )
@@ -428,6 +515,8 @@ export function useLogsPageData(options: UseLogsPageDataOptions) {
     summary,
     stats,
     modelStats,
+    providerStats,
+    modelOptions,
     loading,
     page,
     pageSize,
@@ -439,6 +528,7 @@ export function useLogsPageData(options: UseLogsPageDataOptions) {
     appliedDateRange,
     applyDashboardFilters,
     loadDashboard,
+    loadAppliedProviderStats,
     setPage,
     setPageSize,
     resetPage,

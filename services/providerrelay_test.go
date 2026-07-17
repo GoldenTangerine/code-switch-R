@@ -850,7 +850,7 @@ func TestForwardRequestPersistsModelRouteDetails(t *testing.T) {
 		t.Fatalf("转发请求失败: ok=%v err=%v", ok, err)
 	}
 
-	page, err := NewLogService(nil).ListRequestLogsPageV2("claude", providerRefFromProvider(provider), 10, 0, "", "")
+	page, err := NewLogService(nil).ListRequestLogsPageV2("claude", providerRefFromProvider(provider), "", 10, 0, "", "")
 	if err != nil {
 		t.Fatalf("读取请求日志失败: %v", err)
 	}
@@ -932,7 +932,7 @@ func TestForwardRequestPersistsStreamDiagnostics(t *testing.T) {
 		t.Fatalf("转发请求失败: ok=%v err=%v", ok, err)
 	}
 
-	page, err := NewLogService(nil).ListRequestLogsPageV2("codex", providerRefFromProvider(provider), 10, 0, "", "")
+	page, err := NewLogService(nil).ListRequestLogsPageV2("codex", providerRefFromProvider(provider), "", 10, 0, "", "")
 	if err != nil {
 		t.Fatalf("读取请求日志失败: %v", err)
 	}

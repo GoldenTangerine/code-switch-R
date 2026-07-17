@@ -7,7 +7,12 @@ vi.mock('@wailsio/runtime', () => ({
 }))
 
 import { Call } from '@wailsio/runtime'
-import { fetchAppSettings, normalizeHeatmapGranularity } from './appSettings'
+import {
+  fetchAppSettings,
+  normalizeHeatmapGranularity,
+  normalizeLogsRefreshIntervalSeconds,
+  saveLogsRefreshInterval,
+} from './appSettings'
 
 describe('appSettings', () => {
   beforeEach(() => {
@@ -131,5 +136,28 @@ describe('appSettings', () => {
   it('uses the provided fallback for invalid granularity values', () => {
     expect(normalizeHeatmapGranularity('weird-value')).toBe('daily')
     expect(normalizeHeatmapGranularity('weird-value', 'hourly')).toBe('hourly')
+  })
+
+  it('defaults missing and invalid logs refresh intervals to 30 seconds', async () => {
+    vi.mocked(Call.ByName)
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({ logs_refresh_interval_seconds: 12 })
+
+    expect((await fetchAppSettings()).logs_refresh_interval_seconds).toBe(30)
+    expect((await fetchAppSettings()).logs_refresh_interval_seconds).toBe(30)
+    expect(normalizeLogsRefreshIntervalSeconds(0)).toBe(0)
+    expect(normalizeLogsRefreshIntervalSeconds(60)).toBe(60)
+  })
+
+  it('saves the logs refresh interval through the dedicated settings method', async () => {
+    vi.mocked(Call.ByName).mockResolvedValueOnce({ logs_refresh_interval_seconds: 10 })
+
+    const settings = await saveLogsRefreshInterval(10)
+
+    expect(Call.ByName).toHaveBeenCalledWith(
+      'codeswitch/services.AppSettingsService.SetLogsRefreshInterval',
+      10,
+    )
+    expect(settings.logs_refresh_interval_seconds).toBe(10)
   })
 })

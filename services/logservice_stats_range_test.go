@@ -71,7 +71,7 @@ func TestStatsRangeV2_PreservesStoredAggregatedCostSnapshot(t *testing.T) {
 	})
 
 	ls := NewLogService(nil)
-	stats, err := ls.StatsRangeV2("codex", "", "2026-02-25 00:00:00", "2026-02-26 00:00:00")
+	stats, err := ls.StatsRangeV2("codex", "", "", "2026-02-25 00:00:00", "2026-02-26 00:00:00")
 	if err != nil {
 		t.Fatalf("StatsRangeV2 调用失败: %v", err)
 	}

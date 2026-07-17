@@ -45,7 +45,7 @@ func TestListRequestLogsPageV2_UsesProviderIDFirstAndReturnsPagedItems(t *testin
 	})
 
 	ls := NewLogService(nil)
-	page, err := ls.ListRequestLogsPageV2("codex", "pid-1", 1, 0, "2026-02-25 00:00:00", "2026-02-26 00:00:00")
+	page, err := ls.ListRequestLogsPageV2("codex", "pid-1", "", 1, 0, "2026-02-25 00:00:00", "2026-02-26 00:00:00")
 	if err != nil {
 		t.Fatalf("ListRequestLogsPageV2 调用失败: %v", err)
 	}
@@ -60,7 +60,7 @@ func TestListRequestLogsPageV2_UsesProviderIDFirstAndReturnsPagedItems(t *testin
 		t.Fatalf("期望按 created_at 倒序返回最新一条，实际 %s", page.Items[0].Model)
 	}
 
-	nextPage, err := ls.ListRequestLogsPageV2("codex", "pid-1", 1, 1, "2026-02-25 00:00:00", "2026-02-26 00:00:00")
+	nextPage, err := ls.ListRequestLogsPageV2("codex", "pid-1", "", 1, 1, "2026-02-25 00:00:00", "2026-02-26 00:00:00")
 	if err != nil {
 		t.Fatalf("第二页查询失败: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestListRequestLogsPageV2_FallbackToProviderNameWhenProviderIDMissing(t *te
 	})
 
 	ls := NewLogService(nil)
-	page, err := ls.ListRequestLogsPageV2("codex", "legacy-provider", 20, 0, "2026-02-25 00:00:00", "2026-02-26 00:00:00")
+	page, err := ls.ListRequestLogsPageV2("codex", "legacy-provider", "", 20, 0, "2026-02-25 00:00:00", "2026-02-26 00:00:00")
 	if err != nil {
 		t.Fatalf("ListRequestLogsPageV2 回退 provider 名称查询失败: %v", err)
 	}
@@ -107,6 +107,71 @@ func TestListRequestLogsPageV2_FallbackToProviderNameWhenProviderIDMissing(t *te
 	}
 	if page.Items[0].Model != "legacy-model" {
 		t.Fatalf("期望命中 legacy-model，实际 %s", page.Items[0].Model)
+	}
+}
+
+func TestListRequestLogsPageV2_FiltersByEffectivePricingModel(t *testing.T) {
+	useIsolatedHomeDir(t)
+
+	if err := InitDatabase(); err != nil {
+		t.Fatalf("初始化数据库失败: %v", err)
+	}
+	db, err := xdb.DB("default")
+	if err != nil {
+		t.Fatalf("获取数据库连接失败: %v", err)
+	}
+
+	insertRequestLogForPageTest(t, db, requestLogPageEntry{
+		Platform:            "codex",
+		Model:               "client-alias",
+		MatchedPricingModel: "gpt-5",
+		ProviderID:          "pid-model",
+		Provider:            "Acme",
+		CreatedAt:           "2026-02-25 10:00:00",
+	})
+	insertRequestLogForPageTest(t, db, requestLogPageEntry{
+		Platform:   "codex",
+		Model:      "gpt-5",
+		ProviderID: "pid-model",
+		Provider:   "Acme",
+		CreatedAt:  "2026-02-25 11:00:00",
+	})
+	insertRequestLogForPageTest(t, db, requestLogPageEntry{
+		Platform:            "codex",
+		Model:               "gpt-5",
+		MatchedPricingModel: "gpt-5-mini",
+		ProviderID:          "pid-model",
+		Provider:            "Acme",
+		CreatedAt:           "2026-02-25 12:00:00",
+	})
+	insertRequestLogForPageTest(t, db, requestLogPageEntry{
+		Platform:            "codex",
+		Model:               "client-space-alias",
+		MatchedPricingModel: "  gpt-5  ",
+		ProviderID:          "pid-model",
+		Provider:            "Acme",
+		CreatedAt:           "2026-02-25 13:00:00",
+	})
+
+	page, err := NewLogService(nil).ListRequestLogsPageV2(
+		"codex",
+		"pid-model",
+		"gpt-5",
+		20,
+		0,
+		"2026-02-25 00:00:00",
+		"2026-02-26 00:00:00",
+	)
+	if err != nil {
+		t.Fatalf("按计价模型查询失败: %v", err)
+	}
+	if page.Total != 3 || len(page.Items) != 3 {
+		t.Fatalf("期望命中计价模型、旧日志回退和空白归一化记录共3条，实际 total=%d items=%d", page.Total, len(page.Items))
+	}
+	for _, item := range page.Items {
+		if resolveLogPricingModel(item) != "gpt-5" {
+			t.Fatalf("过滤结果混入其他计价模型: %+v", item)
+		}
 	}
 }
 
@@ -316,16 +381,17 @@ func TestListUnreadFailedRequestLogsPageV2_ExcludesReadFailures(t *testing.T) {
 }
 
 type requestLogPageEntry struct {
-	Platform      string
-	Model         string
-	ProviderID    string
-	Provider      string
-	HttpCode      int
-	ResponseBody  string
-	ResponseTrunc bool
-	CreatedAt     string
-	TotalCost     float64
-	ErrorReadAt   string
+	Platform            string
+	Model               string
+	MatchedPricingModel string
+	ProviderID          string
+	Provider            string
+	HttpCode            int
+	ResponseBody        string
+	ResponseTrunc       bool
+	CreatedAt           string
+	TotalCost           float64
+	ErrorReadAt         string
 }
 
 func insertRequestLogForPageTest(t *testing.T, db *sql.DB, entry requestLogPageEntry) int64 {
@@ -336,9 +402,10 @@ func insertRequestLogForPageTest(t *testing.T, db *sql.DB, entry requestLogPageE
 	}
 	result, err := db.Exec(`
 		INSERT INTO request_log (
-			platform,
-			model,
-			provider_id,
+				platform,
+				model,
+				matched_pricing_model,
+				provider_id,
 			provider,
 			http_code,
 			input_tokens,
@@ -351,10 +418,11 @@ func insertRequestLogForPageTest(t *testing.T, db *sql.DB, entry requestLogPageE
 			response_body_truncated,
 			error_read_at,
 			created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`,
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`,
 		entry.Platform,
 		entry.Model,
+		entry.MatchedPricingModel,
 		entry.ProviderID,
 		entry.Provider,
 		httpCode,

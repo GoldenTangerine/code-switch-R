@@ -4,15 +4,20 @@
       :countdown="countdown"
       :loading="loading"
       :storage-loading="storageLoading"
+      :refresh-interval="refreshIntervalSeconds"
+      :refresh-options="LOGS_REFRESH_INTERVAL_OPTIONS"
+      :refresh-saving="refreshSaving"
       @back="backToHome"
       @open-storage="openStorageModal"
       @refresh="manualRefresh"
+      @update:refresh-interval="handleRefreshIntervalChange"
     />
 
     <div class="logs-content">
       <LogsFilterBar
         :filters="filters"
         :provider-options="providerOptions"
+        :model-options="modelOptions"
         :loading="loading"
         :is-filter-valid="isFilterValid"
         :has-pending-changes="hasPendingFilters"
@@ -25,6 +30,7 @@
         @submit="applyFilters"
         @update:platform="updateFilterPlatform"
         @update:provider="updateFilterProvider"
+        @update:model="updateFilterModel"
         @update:date-type="updateFilterDateType"
         @update:year-picker-value="updateYearPickerValue"
         @update:month-picker-value="updateMonthPickerValue"
@@ -48,14 +54,28 @@
         :format-currency="formatCurrency"
       />
 
-      <LogsTable
-        :items="pagedLogs"
+      <LogsDataTabs
+        :active-tab="activeDataTab"
+        :provider-stats="providerStats"
+        :model-stats="modelStats"
         :loading="loading"
-        :log-info-tooltip-visible="logInfoTooltip.visible"
-        :cost-tooltip-visible="costTooltip.visible"
-        :formatters="logsTableFormatters"
-        :handlers="logsTableHandlers"
-      />
+        :format-number="formatNumber"
+        :format-token-number="formatTokenNumber"
+        :format-currency="formatCurrency"
+        :format-duration="logsTableFormatters.formatDuration"
+        @update:active-tab="setActiveDataTab"
+      >
+        <template #requests>
+          <LogsTable
+            :items="pagedLogs"
+            :loading="loading"
+            :log-info-tooltip-visible="logInfoTooltip.visible"
+            :cost-tooltip-visible="costTooltip.visible"
+            :formatters="logsTableFormatters"
+            :handlers="logsTableHandlers"
+          />
+        </template>
+      </LogsDataTabs>
 
       <Teleport to="body">
         <div
@@ -127,7 +147,7 @@
       </Teleport>
 
       <BasePagination
-        v-if="logs.length > 0"
+        v-if="activeDataTab === 'requests' && logs.length > 0"
         class="logs-pagination-bar"
         :page="page"
         :total-pages="totalPages"
@@ -246,6 +266,7 @@ import BaseButton from '../common/BaseButton.vue'
 import BaseModal from '../common/BaseModal.vue'
 import BasePagination from '../common/BasePagination.vue'
 import LogsChartsPanel from './components/LogsChartsPanel.vue'
+import LogsDataTabs from './components/LogsDataTabs.vue'
 import LogsFilterBar from './components/LogsFilterBar.vue'
 import LogsHeaderBar from './components/LogsHeaderBar.vue'
 import LogsSummaryCards from './components/LogsSummaryCards.vue'
@@ -267,6 +288,13 @@ import { useLogsStorageModalController } from './composables/useLogsStorageModal
 import { MODEL_PRICING_CHANGED_EVENT } from '../../services/modelPricing'
 import type { RequestLog } from '../../services/logs'
 import {
+  fetchAppSettings,
+  LOGS_REFRESH_INTERVAL_OPTIONS,
+  saveLogsRefreshInterval,
+  type LogsRefreshIntervalSeconds,
+} from '../../services/appSettings'
+import type { LogsDataTab } from './types'
+import {
   buildStreamDiagnosticTooltipDetailData,
   buildStreamDiagnosticTooltipLabels,
   formatCurrency,
@@ -280,6 +308,12 @@ const { t, locale } = useI18n()
 const router = useRouter()
 
 const isDarkTheme = ref(document.documentElement.classList.contains('dark'))
+const refreshIntervalSeconds = ref<LogsRefreshIntervalSeconds>(30)
+const refreshSaving = ref(false)
+const LOGS_ACTIVE_TAB_STORAGE_KEY = 'code-switch-logs-active-data-tab'
+const validDataTabs: readonly LogsDataTab[] = ['requests', 'providers', 'models']
+const storedDataTab = window.localStorage.getItem(LOGS_ACTIVE_TAB_STORAGE_KEY) as LogsDataTab | null
+const activeDataTab = ref<LogsDataTab>(storedDataTab && validDataTabs.includes(storedDataTab) ? storedDataTab : 'requests')
 let themeObserver: MutationObserver | null = null
 let unsubscribeModelPricingChanged: (() => void) | null = null
 
@@ -302,6 +336,7 @@ const {
   rangePickerValue,
   updateFilterPlatform,
   updateFilterProvider,
+  updateFilterModel,
   updateFilterDateType,
   updateYearPickerValue,
   updateMonthPickerValue,
@@ -317,6 +352,8 @@ const {
   summary,
   stats,
   modelStats,
+  providerStats,
+  modelOptions,
   loading,
   page,
   pageSize,
@@ -328,12 +365,14 @@ const {
   appliedDateRange,
   applyDashboardFilters,
   loadDashboard,
+  loadAppliedProviderStats,
   setPage,
   setPageSize,
   resetPage,
 } = useLogsPageData({
   filters,
   computeDateRange,
+  shouldLoadProviderStats: () => activeDataTab.value === 'providers',
 })
 
 const appliedSummaryScopeHint = computed(() => buildLogsSummaryScopeHint(appliedFilters.value, t))
@@ -430,13 +469,51 @@ const {
 const buildStreamInfoTooltipDetail = (item: RequestLog) =>
   buildStreamDiagnosticTooltipDetailData(item, buildStreamDiagnosticTooltipLabels(t))
 
+const loadDashboardIfIdle = async () => {
+  if (loading.value) return
+  await loadDashboard()
+}
+
 const {
   countdown,
   resetTimer,
   startCountdown,
   stopCountdown,
   manualRefresh,
-} = useLogsAutoRefresh(loadDashboard)
+  restartCountdown,
+} = useLogsAutoRefresh(loadDashboardIfIdle, { intervalSeconds: refreshIntervalSeconds })
+
+const setActiveDataTab = async (value: LogsDataTab) => {
+  if (!validDataTabs.includes(value) || activeDataTab.value === value) return
+  activeDataTab.value = value
+  window.localStorage.setItem(LOGS_ACTIVE_TAB_STORAGE_KEY, value)
+  if (value === 'providers') {
+    await loadAppliedProviderStats()
+  }
+}
+
+const loadRefreshPreference = async () => {
+  try {
+    const settings = await fetchAppSettings()
+    refreshIntervalSeconds.value = settings.logs_refresh_interval_seconds
+  } catch (error) {
+    console.error('failed to load logs refresh interval', error)
+  }
+}
+
+const handleRefreshIntervalChange = async (value: LogsRefreshIntervalSeconds) => {
+  if (refreshSaving.value || refreshIntervalSeconds.value === value) return
+  refreshSaving.value = true
+  try {
+    const settings = await saveLogsRefreshInterval(value)
+    refreshIntervalSeconds.value = settings.logs_refresh_interval_seconds
+    restartCountdown()
+  } catch (error) {
+    console.error('failed to save logs refresh interval', error)
+  } finally {
+    refreshSaving.value = false
+  }
+}
 
 const applyFilters = async () => {
   if (!isFilterValid.value) {
@@ -566,6 +643,7 @@ onMounted(async () => {
     MODEL_PRICING_CHANGED_EVENT,
     handleModelPricingChanged as Events.Callback,
   )
+  await loadRefreshPreference()
   await Promise.all([applyDashboardFilters(), loadModelPricingRows()])
   startCountdown()
 })

@@ -26,6 +26,7 @@ export function createLogsFiltersState(): LogsFiltersState {
   return {
     platform: '',
     provider: '',
+    model: '',
     dateType: 'all',
     year: '',
     month: '',
@@ -39,6 +40,7 @@ export function cloneLogsFiltersState(filters: LogsFiltersState): LogsFiltersSta
   return {
     platform: filters.platform,
     provider: filters.provider,
+    model: filters.model,
     dateType: filters.dateType,
     year: filters.year,
     month: filters.month,
@@ -51,6 +53,7 @@ export function cloneLogsFiltersState(filters: LogsFiltersState): LogsFiltersSta
 export function areLogsFiltersEqual(left: LogsFiltersState, right: LogsFiltersState): boolean {
   return left.platform === right.platform
     && left.provider === right.provider
+    && left.model === right.model
     && left.dateType === right.dateType
     && left.year === right.year
     && left.month === right.month
@@ -220,10 +223,16 @@ export function useLogsFilters(options: UseLogsFiltersOptions) {
 
   const updateFilterPlatform = (value: LogsFiltersState['platform']) => {
     filters.platform = value
+    filters.model = ''
   }
 
   const updateFilterProvider = (value: string) => {
     filters.provider = value
+    filters.model = ''
+  }
+
+  const updateFilterModel = (value: string) => {
+    filters.model = value
   }
 
   const resetDateFilterFields = () => {
@@ -277,6 +286,7 @@ export function useLogsFilters(options: UseLogsFiltersOptions) {
     rangePickerValue,
     updateFilterPlatform,
     updateFilterProvider,
+    updateFilterModel,
     updateFilterDateType,
     updateYearPickerValue,
     updateMonthPickerValue,

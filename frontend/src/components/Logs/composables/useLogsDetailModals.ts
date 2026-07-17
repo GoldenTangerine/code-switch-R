@@ -200,6 +200,7 @@ export async function resolveLogsCostDetailStats(
   return fetchProviderStats({
     platform: filters.platform,
     provider: filters.provider,
+    model: filters.model,
     startAt: range.startAt,
     endAt: range.endAt,
   })

@@ -1316,6 +1316,7 @@ const persistAppSettingsNow = async () => {
       auto_start: autoStartEnabled.value,
       auto_update: autoUpdateEnabled.value,
       update_history_keep_count: normalizedUpdateHistoryKeepCount,
+      logs_refresh_interval_seconds: latestSettings.logs_refresh_interval_seconds,
       auto_connectivity_test: autoConnectivityTestEnabled.value,
       enable_switch_notify: switchNotifyEnabled.value,
       enable_round_robin: roundRobinEnabled.value,

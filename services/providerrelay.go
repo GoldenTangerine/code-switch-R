@@ -5331,6 +5331,7 @@ type ReqeustLog struct {
 	GroupMultiplier           float64 `json:"group_multiplier"`
 	HasPricing                bool    `json:"has_pricing"`
 	MatchedPricingModel       string  `json:"matched_pricing_model,omitempty"`
+	EffectivePricingModel     string  `json:"effective_pricing_model,omitempty"`
 	ProviderPricingAvailable  bool    `json:"provider_pricing_available"`
 	ProviderQuotaType         int     `json:"provider_quota_type"`
 	ProviderInputUSDPerM      float64 `json:"provider_input_usd_per_m"`

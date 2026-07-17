@@ -22,6 +22,15 @@ import {
 export type HeatmapGranularity = 'hourly' | 'daily'
 export type ClaudeModelMetadataMergeStrategy = 'aggressive' | 'conservative'
 export type ClaudeProxyAuthField = 'auth_token' | 'api_key'
+export type LogsRefreshIntervalSeconds = 0 | 5 | 10 | 30 | 60
+
+export const LOGS_REFRESH_INTERVAL_OPTIONS: readonly LogsRefreshIntervalSeconds[] = [0, 5, 10, 30, 60]
+
+export const normalizeLogsRefreshIntervalSeconds = (value?: number | null): LogsRefreshIntervalSeconds => (
+  LOGS_REFRESH_INTERVAL_OPTIONS.includes(value as LogsRefreshIntervalSeconds)
+    ? value as LogsRefreshIntervalSeconds
+    : 30
+)
 
 export const normalizeClaudeProxyAuthField = (value?: string | null): ClaudeProxyAuthField => (
   value === 'api_key' ? 'api_key' : 'auth_token'
@@ -76,6 +85,7 @@ export type AppSettings = {
   auto_start: boolean
   auto_update: boolean
   update_history_keep_count: number
+  logs_refresh_interval_seconds: LogsRefreshIntervalSeconds
   auto_connectivity_test: boolean
   enable_switch_notify: boolean // 供应商切换通知开关
   enable_round_robin: boolean   // 同 Level 轮询负载均衡开关
@@ -147,6 +157,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   auto_start: false,
   auto_update: true,
   update_history_keep_count: 3,
+  logs_refresh_interval_seconds: 30,
   auto_connectivity_test: false,
   enable_switch_notify: true,  // 默认开启
   enable_round_robin: false,   // 默认关闭轮询
@@ -304,6 +315,7 @@ const normalizeAppSettingsResponse = (value: unknown): AppSettings => {
     claude_model_aggregation_enabled: routingEnabled && data?.claude_model_aggregation_enabled === true,
     claude_model_metadata_merge_strategy: mergeStrategy,
     claude_proxy_auth_field: normalizeClaudeProxyAuthField(data?.claude_proxy_auth_field),
+    logs_refresh_interval_seconds: normalizeLogsRefreshIntervalSeconds(data?.logs_refresh_interval_seconds),
     budget_quota_used_adjustments: normalizeBudgetQuotaAdjustments(
       data?.budget_quota_used_adjustments,
       {
@@ -410,6 +422,16 @@ export const saveAppSettings = async (settings: AppSettings): Promise<AppSetting
   const data = await Call.ByName(
     'codeswitch/services.AppSettingsService.SaveAppSettings',
     serializeAppSettings(settings),
+  )
+  return normalizeAppSettingsResponse(data)
+}
+
+export const saveLogsRefreshInterval = async (
+  seconds: LogsRefreshIntervalSeconds,
+): Promise<AppSettings> => {
+  const data = await Call.ByName(
+    'codeswitch/services.AppSettingsService.SetLogsRefreshInterval',
+    normalizeLogsRefreshIntervalSeconds(seconds),
   )
   return normalizeAppSettingsResponse(data)
 }

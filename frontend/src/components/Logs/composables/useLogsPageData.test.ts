@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { reactive } from 'vue'
-import type { LogSummary, RequestLog, RequestLogPageResult } from '../../../services/logs'
+import { nextTick, reactive } from 'vue'
+import type { LogSummary, ProviderDailyStat, RequestLog, RequestLogPageResult } from '../../../services/logs'
 import type { LogsFiltersState } from '../types'
 
 vi.mock('../../../../bindings/codeswitch/services/providerservice', () => ({
@@ -17,6 +17,7 @@ vi.mock('../../../services/logs', () => ({
   fetchLogSummaryV2: vi.fn(),
   fetchLogStatsV2: vi.fn(),
   fetchModelStatsV2: vi.fn(),
+  fetchProviderStatsV2: vi.fn(),
 }))
 
 import { LoadProviders } from '../../../../bindings/codeswitch/services/providerservice'
@@ -27,6 +28,7 @@ import {
   fetchLogSummaryV2,
   fetchLogStatsV2,
   fetchModelStatsV2,
+  fetchProviderStatsV2,
 } from '../../../services/logs'
 import { useLogsPageData } from './useLogsPageData'
 
@@ -34,6 +36,7 @@ const createFilters = (): LogsFiltersState =>
   reactive({
     platform: '',
     provider: '',
+    model: '',
     dateType: 'all',
     year: '',
     month: '',
@@ -123,6 +126,7 @@ describe('useLogsPageData', () => {
       series: [],
     })
     vi.mocked(fetchModelStatsV2).mockResolvedValue([])
+    vi.mocked(fetchProviderStatsV2).mockResolvedValue([])
   })
 
   it('loads main logs through backend pagination and derives total pages from total count', async () => {
@@ -141,6 +145,7 @@ describe('useLogsPageData', () => {
     expect(fetchRequestLogsPage).toHaveBeenCalledWith({
       platform: '',
       provider: '',
+      model: '',
       limit: 15,
       offset: 0,
       startAt: '2026-03-01 00:00:00',
@@ -164,6 +169,7 @@ describe('useLogsPageData', () => {
     expect(fetchLogSummaryV2).toHaveBeenCalledWith({
       platform: '',
       provider: '',
+      model: '',
       startAt: '2026-03-01 00:00:00',
       endAt: '2026-03-31 23:59:59',
     })
@@ -187,18 +193,21 @@ describe('useLogsPageData', () => {
     expect(fetchLogSummaryV2).toHaveBeenNthCalledWith(1, {
       platform: '',
       provider: 'provider-applied',
+      model: '',
       startAt: '2026-03-01 00:00:00',
       endAt: '2026-03-31 23:59:59',
     })
     expect(fetchLogSummaryV2).toHaveBeenNthCalledWith(2, {
       platform: '',
       provider: 'provider-applied',
+      model: '',
       startAt: '2026-03-01 00:00:00',
       endAt: '2026-03-31 23:59:59',
     })
     expect(fetchRequestLogsPage).toHaveBeenNthCalledWith(2, {
       platform: '',
       provider: 'provider-applied',
+      model: '',
       limit: 15,
       offset: 0,
       startAt: '2026-03-01 00:00:00',
@@ -223,6 +232,7 @@ describe('useLogsPageData', () => {
     expect(fetchRequestLogsPage).toHaveBeenNthCalledWith(2, {
       platform: '',
       provider: '',
+      model: '',
       limit: 15,
       offset: 15,
       startAt: '2026-03-01 00:00:00',
@@ -251,6 +261,7 @@ describe('useLogsPageData', () => {
     expect(fetchRequestLogsPage).toHaveBeenNthCalledWith(3, {
       platform: '',
       provider: '',
+      model: '',
       limit: 30,
       offset: 0,
       startAt: '2026-03-01 00:00:00',
@@ -281,6 +292,7 @@ describe('useLogsPageData', () => {
     expect(fetchRequestLogsPage).toHaveBeenNthCalledWith(3, {
       platform: '',
       provider: '',
+      model: '',
       limit: 15,
       offset: 45,
       startAt: '2026-03-01 00:00:00',
@@ -289,6 +301,7 @@ describe('useLogsPageData', () => {
     expect(fetchRequestLogsPage).toHaveBeenNthCalledWith(4, {
       platform: '',
       provider: '',
+      model: '',
       limit: 15,
       offset: 15,
       startAt: '2026-03-01 00:00:00',
@@ -331,14 +344,163 @@ describe('useLogsPageData', () => {
     expect(fetchLogSummaryV2).toHaveBeenNthCalledWith(1, {
       platform: '',
       provider: '',
+      model: '',
       startAt: '2026-03-01 00:00:00',
       endAt: '2026-03-31 23:59:59',
     })
     expect(fetchLogSummaryV2).toHaveBeenNthCalledWith(2, {
       platform: '',
       provider: 'provider-new',
+      model: '',
       startAt: '2026-03-01 00:00:00',
       endAt: '2026-03-31 23:59:59',
     })
+  })
+
+  it('applies the pricing model filter while keeping model options unfiltered by that model', async () => {
+    const selectedModelStat = {
+      model: 'claude-sonnet-4-5',
+      total_requests: 2,
+      input_tokens: 100,
+      output_tokens: 50,
+      cache_read_tokens: 0,
+      total_tokens: 150,
+      cost_total: 0.25,
+    }
+    const otherModelStat = {
+      ...selectedModelStat,
+      model: 'claude-opus-4-1',
+      total_requests: 1,
+      total_tokens: 75,
+      cost_total: 0.5,
+    }
+    vi.mocked(fetchModelStatsV2)
+      .mockResolvedValueOnce([selectedModelStat])
+      .mockResolvedValueOnce([selectedModelStat, otherModelStat])
+
+    const filters = createFilters()
+    filters.model = selectedModelStat.model
+    const { applyDashboardFilters, modelOptions, modelStats } = useLogsPageData({
+      filters,
+      computeDateRange: () => ({ startAt: '2026-03-01 00:00:00', endAt: '2026-03-31 23:59:59' }),
+    })
+
+    await applyDashboardFilters()
+
+    const filteredQuery = {
+      platform: '',
+      provider: '',
+      model: selectedModelStat.model,
+      startAt: '2026-03-01 00:00:00',
+      endAt: '2026-03-31 23:59:59',
+    }
+    expect(fetchLogSummaryV2).toHaveBeenCalledWith(filteredQuery)
+    expect(fetchLogStatsV2).toHaveBeenCalledWith(filteredQuery)
+    expect(fetchProviderStatsV2).toHaveBeenCalledWith(filteredQuery)
+    expect(fetchModelStatsV2).toHaveBeenNthCalledWith(1, filteredQuery)
+    expect(fetchModelStatsV2).toHaveBeenNthCalledWith(2, {
+      platform: '',
+      provider: '',
+      startAt: '2026-03-01 00:00:00',
+      endAt: '2026-03-31 23:59:59',
+    })
+    expect(fetchRequestLogsPage).toHaveBeenCalledWith({
+      ...filteredQuery,
+      limit: 15,
+      offset: 0,
+    })
+    expect(modelStats.value).toEqual([selectedModelStat])
+    expect(modelOptions.value).toEqual([selectedModelStat.model, otherModelStat.model])
+  })
+
+  it('keeps dashboard loading active until provider stats finish', async () => {
+    const logsDeferred = createDeferred<RequestLogPageResult>()
+    const providerStatsDeferred = createDeferred<ProviderDailyStat[]>()
+    vi.mocked(fetchRequestLogsPage).mockReturnValueOnce(logsDeferred.promise)
+    vi.mocked(fetchProviderStatsV2).mockReturnValueOnce(providerStatsDeferred.promise)
+
+    const filters = createFilters()
+    const { loadDashboard, loading } = useLogsPageData({
+      filters,
+      computeDateRange: () => ({ startAt: '2026-03-01 00:00:00', endAt: '2026-03-31 23:59:59' }),
+    })
+
+    const pendingLoad = loadDashboard()
+    await vi.waitFor(() => {
+      expect(fetchRequestLogsPage).toHaveBeenCalledTimes(1)
+      expect(fetchProviderStatsV2).toHaveBeenCalledTimes(1)
+    })
+    logsDeferred.resolve(createPageResult([], 0, 15, 0))
+    for (let index = 0; index < 10; index += 1) {
+      await Promise.resolve()
+    }
+    expect(loading.value).toBe(true)
+
+    providerStatsDeferred.resolve([])
+    await pendingLoad
+    expect(loading.value).toBe(false)
+  })
+
+  it('reloads model options for the pending provider selection', async () => {
+    const filters = createFilters()
+    useLogsPageData({
+      filters,
+      computeDateRange: () => ({ startAt: '2026-03-01 00:00:00', endAt: '2026-03-31 23:59:59' }),
+    })
+
+    filters.provider = 'provider-next'
+    await nextTick()
+    await vi.waitFor(() => expect(fetchModelStatsV2).toHaveBeenCalled())
+
+    expect(fetchModelStatsV2).toHaveBeenLastCalledWith({
+      platform: '',
+      provider: 'provider-next',
+      startAt: '2026-03-01 00:00:00',
+      endAt: '2026-03-31 23:59:59',
+    })
+  })
+
+  it('does not let an applied-query refresh overwrite pending provider model options', async () => {
+    const providerAModel = {
+      model: 'model-a',
+      total_requests: 1,
+      input_tokens: 10,
+      output_tokens: 5,
+      cache_read_tokens: 0,
+      total_tokens: 15,
+      cost_total: 0.1,
+    }
+    const providerBModel = { ...providerAModel, model: 'model-b' }
+    const filters = createFilters()
+    filters.provider = 'provider-a'
+    const { loadDashboard, modelOptions } = useLogsPageData({
+      filters,
+      computeDateRange: () => ({ startAt: '2026-03-01 00:00:00', endAt: '2026-03-31 23:59:59' }),
+    })
+
+    vi.mocked(fetchModelStatsV2).mockResolvedValueOnce([providerBModel])
+    filters.provider = 'provider-b'
+    await nextTick()
+    await vi.waitFor(() => expect(modelOptions.value).toEqual(['model-b']))
+
+    vi.mocked(fetchModelStatsV2).mockResolvedValueOnce([providerAModel])
+    await loadDashboard()
+
+    expect(modelOptions.value).toEqual(['model-b'])
+  })
+
+  it('skips provider aggregation until it is explicitly requested', async () => {
+    const filters = createFilters()
+    const { loadAppliedProviderStats, loadDashboard } = useLogsPageData({
+      filters,
+      computeDateRange: () => ({ startAt: '2026-03-01 00:00:00', endAt: '2026-03-31 23:59:59' }),
+      shouldLoadProviderStats: () => false,
+    })
+
+    await loadDashboard()
+    expect(fetchProviderStatsV2).not.toHaveBeenCalled()
+
+    await loadAppliedProviderStats()
+    expect(fetchProviderStatsV2).toHaveBeenCalledTimes(1)
   })
 })

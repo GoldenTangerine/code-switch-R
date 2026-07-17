@@ -50,4 +50,16 @@ describe('useLogsFilters', () => {
   it('builds the selectable year range around the current year', () => {
     expect(getLogsYearPickerRange()).toEqual([2016, 2036])
   })
+
+  it('clears the model filter when the platform or provider changes', () => {
+    const { filters, updateFilterPlatform, updateFilterProvider } = createFiltersComposable()
+
+    filters.model = 'claude-sonnet-4-5'
+    updateFilterPlatform('codex')
+    expect(filters.model).toBe('')
+
+    filters.model = 'gpt-5.1-codex'
+    updateFilterProvider('provider-1')
+    expect(filters.model).toBe('')
+  })
 })

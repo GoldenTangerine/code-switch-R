@@ -39,6 +39,7 @@ const (
 	defaultHeatmapIntensityL1             = 25
 	defaultHeatmapIntensityL2             = 50
 	defaultHeatmapIntensityL3             = 75
+	defaultLogsRefreshIntervalSeconds     = 30
 	claudeProxyAuthFieldAuthToken         = "auth_token"
 	claudeProxyAuthFieldAPIKey            = "api_key"
 	minHeatmapIntensityStop               = 1
@@ -94,6 +95,7 @@ type AppSettings struct {
 	AutoStart                        bool                                     `json:"auto_start"`
 	AutoUpdate                       bool                                     `json:"auto_update"`
 	UpdateHistoryKeepCount           int                                      `json:"update_history_keep_count"` // 更新包历史保留数量
+	LogsRefreshIntervalSeconds       int                                      `json:"logs_refresh_interval_seconds"`
 	AutoConnectivityTest             bool                                     `json:"auto_connectivity_test"`
 	EnableSwitchNotify               bool                                     `json:"enable_switch_notify"` // 供应商切换通知开关
 	EnableRoundRobin                 bool                                     `json:"enable_round_robin"`   // 同 Level 轮询负载均衡开关（默认关闭）
@@ -496,6 +498,7 @@ func (as *AppSettingsService) defaultSettings() AppSettings {
 		AutoStart:                        autoStartEnabled,
 		AutoUpdate:                       true, // 默认开启自动更新
 		UpdateHistoryKeepCount:           defaultUpdateHistoryKeepCount,
+		LogsRefreshIntervalSeconds:       defaultLogsRefreshIntervalSeconds,
 		AutoConnectivityTest:             true,  // 默认开启自动可用性监控（开箱即用）
 		EnableSwitchNotify:               true,  // 默认开启切换通知
 		EnableRoundRobin:                 false, // 默认关闭轮询（使用顺序降级）
@@ -585,6 +588,15 @@ func normalizeClaudeProxyAuthField(value string) string {
 		return claudeProxyAuthFieldAPIKey
 	default:
 		return claudeProxyAuthFieldAuthToken
+	}
+}
+
+func normalizeLogsRefreshIntervalSeconds(seconds int) int {
+	switch seconds {
+	case 0, 5, 10, 30, 60:
+		return seconds
+	default:
+		return defaultLogsRefreshIntervalSeconds
 	}
 }
 
@@ -731,6 +743,7 @@ func (as *AppSettingsService) SaveAppSettings(settings AppSettings) (AppSettings
 	normalizeHeatmapDisplaySettings(&settings)
 	normalizeBudgetSettings(&settings)
 	settings.UpdateHistoryKeepCount = normalizeUpdateHistoryKeepCount(settings.UpdateHistoryKeepCount)
+	settings.LogsRefreshIntervalSeconds = normalizeLogsRefreshIntervalSeconds(settings.LogsRefreshIntervalSeconds)
 	normalizeProviderConcurrencyLimits(&settings)
 	normalizeProviderQuotaQueryPresets(&settings)
 	normalizeClaudeModelRoutingSettings(&settings)
@@ -777,6 +790,21 @@ func (as *AppSettingsService) SaveAppSettings(settings AppSettings) (AppSettings
 	}
 	if as.claudeModelRouting != nil && claudeModelRoutingSettingsChanged(previous, settings) {
 		as.claudeModelRouting.HandleSettingsChanged(previous, settings)
+	}
+	as.snapshot.Store(cloneAppSettings(settings))
+	as.refreshFingerprint()
+	return settings, nil
+}
+
+// SetLogsRefreshInterval persists only the logs refresh preference.
+func (as *AppSettingsService) SetLogsRefreshInterval(seconds int) (AppSettings, error) {
+	as.mu.Lock()
+	defer as.mu.Unlock()
+
+	settings, _ := as.GetAppSettings()
+	settings.LogsRefreshIntervalSeconds = normalizeLogsRefreshIntervalSeconds(seconds)
+	if err := as.saveLocked(settings); err != nil {
+		return settings, err
 	}
 	as.snapshot.Store(cloneAppSettings(settings))
 	as.refreshFingerprint()
@@ -837,6 +865,7 @@ func (as *AppSettingsService) loadLocked() (AppSettings, error) {
 	settings.HomeProviderTabs = normalizeHomeProviderTabs(settings.HomeProviderTabs)
 	normalizeBudgetSettings(&settings)
 	settings.UpdateHistoryKeepCount = normalizeUpdateHistoryKeepCount(settings.UpdateHistoryKeepCount)
+	settings.LogsRefreshIntervalSeconds = normalizeLogsRefreshIntervalSeconds(settings.LogsRefreshIntervalSeconds)
 	normalizeProviderConcurrencyLimits(&settings)
 	normalizeProviderQuotaQueryPresets(&settings)
 	normalizeClaudeModelRoutingSettings(&settings)
@@ -859,6 +888,7 @@ func (as *AppSettingsService) saveLocked(settings AppSettings) error {
 	settings.HomeProviderTabs = normalizeHomeProviderTabs(settings.HomeProviderTabs)
 	normalizeBudgetSettings(&settings)
 	settings.UpdateHistoryKeepCount = normalizeUpdateHistoryKeepCount(settings.UpdateHistoryKeepCount)
+	settings.LogsRefreshIntervalSeconds = normalizeLogsRefreshIntervalSeconds(settings.LogsRefreshIntervalSeconds)
 	normalizeProviderConcurrencyLimits(&settings)
 	normalizeProviderQuotaQueryPresets(&settings)
 	normalizeClaudeModelRoutingSettings(&settings)

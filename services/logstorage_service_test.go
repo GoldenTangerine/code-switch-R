@@ -551,7 +551,7 @@ func TestMarkProviderFailedRequestLogsRead_PreservesLogsStatsAndAllFailureQuery(
 	successID := insertProviderRequestLogForStorageWithStatus(t, db, "codex", "pid-read", "provider-read", 200, targetDay.Add(4*time.Hour), "req-ok", "resp-ok")
 
 	ls := NewLogService(nil)
-	beforeStats, err := ls.ProviderStatsRangeV2("codex", "pid-read", "2026-02-25 00:00:00", "2026-02-26 00:00:00")
+	beforeStats, err := ls.ProviderStatsRangeV2("codex", "pid-read", "", "2026-02-25 00:00:00", "2026-02-26 00:00:00")
 	if err != nil {
 		t.Fatalf("标记前 ProviderStatsRangeV2 调用失败: %v", err)
 	}
@@ -599,7 +599,7 @@ func TestMarkProviderFailedRequestLogsRead_PreservesLogsStatsAndAllFailureQuery(
 		failedID2,
 	)
 
-	afterStats, err := ls.ProviderStatsRangeV2("codex", "pid-read", "2026-02-25 00:00:00", "2026-02-26 00:00:00")
+	afterStats, err := ls.ProviderStatsRangeV2("codex", "pid-read", "", "2026-02-25 00:00:00", "2026-02-26 00:00:00")
 	if err != nil {
 		t.Fatalf("标记后 ProviderStatsRangeV2 调用失败: %v", err)
 	}

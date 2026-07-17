@@ -1699,6 +1699,11 @@ export const formatCurrency = (value?: number) => {
   return `$${value.toFixed(4)}`
 }
 
+export const formatPreciseCurrency = (value?: number) => {
+  const normalized = Number(value ?? 0)
+  return `$${(Number.isFinite(normalized) ? normalized : 0).toFixed(6)}`
+}
+
 export const formatCurrencyParts = (value?: number) => {
   const formatted = formatCurrency(value)
   const normalized = formatted.startsWith('$') ? formatted.slice(1) : formatted

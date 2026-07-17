@@ -12,6 +12,7 @@ const createFilters = (overrides: Partial<LogsFiltersState> = {}): LogsFiltersSt
   reactive({
     platform: '',
     provider: '',
+    model: '',
     dateType: 'all',
     year: '',
     month: '',

@@ -35,7 +35,7 @@
               @blur="handlers.hideLogInfoTooltip"
               @keydown.esc="handlers.hideLogInfoTooltipImmediately"
             >
-              <span class="model-name__text">{{ item.model || '—' }}</span>
+              <span class="model-name__text">{{ resolvePricingModel(item) }}</span>
               <template v-for="reasoningEffort in [formatters.formatReasoningEffort(item)]" :key="`${item.id}-reasoning-effort`">
                 <span
                   v-if="reasoningEffort"
@@ -44,6 +44,9 @@
                   {{ reasoningEffort }}
                 </span>
               </template>
+            </span>
+            <span v-if="resolveModelTrail(item)" class="model-route-trail" :title="resolveModelTrail(item)">
+              {{ resolveModelTrail(item) }}
             </span>
           </td>
           <td class="verify-cell">
@@ -220,9 +223,32 @@ defineProps<{
 }>()
 
 const { t } = useI18n()
+
+const resolvePricingModel = (item: RequestLog) =>
+  item.effective_pricing_model?.trim() || item.matched_pricing_model?.trim() || item.model?.trim() || '—'
+
+const resolveModelTrail = (item: RequestLog) => {
+  const pricingModel = resolvePricingModel(item)
+  const route = [item.requested_model, item.mapped_model, item.response_model, item.model]
+    .map((value) => value?.trim() || '')
+    .filter((value, index, values) => value && value !== pricingModel && values.indexOf(value) === index)
+  return route.join(' → ')
+}
 </script>
 
 <style scoped>
+.model-route-trail {
+  display: block;
+  max-width: 220px;
+  margin-top: 3px;
+  overflow: hidden;
+  color: var(--mac-text-secondary);
+  font-size: 0.7rem;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .http-diagnostic-trigger {
   display: inline-flex;
   cursor: help;

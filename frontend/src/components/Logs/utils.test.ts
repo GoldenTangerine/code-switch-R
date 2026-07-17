@@ -5,6 +5,7 @@ import {
   buildLogsInfoTooltipLabels,
   buildStreamDiagnosticTooltipDetailData,
   formatCurrencyParts,
+  formatPreciseCurrency,
   formatFirstTokenDuration,
   formatModelShareTooltipLabel,
   formatReasoningEffortSource,
@@ -94,6 +95,13 @@ describe('formatCurrencyParts', () => {
       fraction: '0042',
       formatted: '$0.0042',
     })
+  })
+})
+
+describe('formatPreciseCurrency', () => {
+  it('keeps six decimal places for small per-request costs', () => {
+    expect(formatPreciseCurrency(0.0000124)).toBe('$0.000012')
+    expect(formatPreciseCurrency(undefined)).toBe('$0.000000')
   })
 })
 

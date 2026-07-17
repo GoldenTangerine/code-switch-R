@@ -1,9 +1,9 @@
-import { ref } from 'vue'
+import { ref, unref, type Ref } from 'vue'
 
 type AsyncTask = () => Promise<void>
 
 type UseLogsAutoRefreshOptions = {
-  intervalSeconds?: number
+  intervalSeconds?: number | Ref<number>
 }
 
 const DEFAULT_REFRESH_INTERVAL = 30
@@ -12,23 +12,39 @@ export function useLogsAutoRefresh(
   loadDashboard: AsyncTask,
   options: UseLogsAutoRefreshOptions = {},
 ) {
-  const refreshInterval = Math.max(1, Math.floor(options.intervalSeconds ?? DEFAULT_REFRESH_INTERVAL))
-  const countdown = ref(refreshInterval)
+  const resolveRefreshInterval = () => Math.max(
+    0,
+    Math.floor(Number(unref(options.intervalSeconds ?? DEFAULT_REFRESH_INTERVAL)) || 0),
+  )
+  const countdown = ref(resolveRefreshInterval())
   let timer: number | undefined
+  let isRefreshing = false
 
   const resetTimer = () => {
-    countdown.value = refreshInterval
+    countdown.value = resolveRefreshInterval()
   }
 
   const triggerRefresh = async () => {
+    if (isRefreshing) return
+    isRefreshing = true
     resetTimer()
-    await loadDashboard()
+    try {
+      await loadDashboard()
+    } finally {
+      isRefreshing = false
+      resetTimer()
+    }
   }
 
   const startCountdown = () => {
     stopCountdown()
     if (typeof window === 'undefined') return
+    if (resolveRefreshInterval() === 0) {
+      resetTimer()
+      return
+    }
     timer = window.setInterval(() => {
+      if (isRefreshing) return
       if (countdown.value <= 1) {
         void triggerRefresh()
       } else {
@@ -48,11 +64,17 @@ export function useLogsAutoRefresh(
     void triggerRefresh()
   }
 
+  const restartCountdown = () => {
+    resetTimer()
+    startCountdown()
+  }
+
   return {
     countdown,
     resetTimer,
     startCountdown,
     stopCountdown,
     manualRefresh,
+    restartCountdown,
   }
 }

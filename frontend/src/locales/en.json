@@ -1209,6 +1209,8 @@
         "allPlatforms": "All platforms",
         "provider": "Provider",
         "allProviders": "All providers",
+        "model": "Pricing model",
+        "allModels": "All models",
         "dateType": "Date type",
         "dateTypeAll": "All",
         "dateTypeToday": "Today",
@@ -1236,7 +1238,22 @@
       },
       "tabs": {
         "all": "All logs",
-        "errors": "Errors only"
+        "errors": "Errors only",
+        "label": "Log data views",
+        "requests": "Requests",
+        "providers": "Provider stats",
+        "models": "Model stats"
+      },
+      "stats": {
+        "provider": "Provider",
+        "pricingModel": "Pricing model",
+        "requests": "Requests",
+        "tokens": "Tokens",
+        "cost": "Cost",
+        "successRate": "Success rate",
+        "averageDuration": "Avg duration",
+        "averageCost": "Avg cost",
+        "empty": "No usage statistics"
       },
       "summary": {
         "total": "Requests",
@@ -1416,6 +1433,10 @@
       "streamOff": "Single response",
       "back": "Back to home",
       "nextRefresh": "Next refresh in {seconds}s",
+      "refreshInterval": "Auto refresh",
+      "refreshOff": "Off",
+      "refreshSeconds": "{seconds}s",
+      "refreshPaused": "Auto refresh is off",
       "query": "Query",
       "storage": {
         "title": "Log storage",

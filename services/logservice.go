@@ -448,10 +448,22 @@ func normalizeRequestLogListOffset(offset int) int {
 	return offset
 }
 
-func buildRequestLogFilterOptions(platform string, startAt string, endAt string) ([]xdb.Option, error) {
-	options := make([]xdb.Option, 0, 3)
+func buildPricingModelFilterOption(pricingModel string) xdb.Option {
+	pricingModel = strings.TrimSpace(pricingModel)
+	return xdb.Where(
+		"COALESCE(NULLIF(TRIM(matched_pricing_model), ''), TRIM(model))",
+		"=",
+		pricingModel,
+	)
+}
+
+func buildRequestLogFilterOptions(platform string, pricingModel string, startAt string, endAt string) ([]xdb.Option, error) {
+	options := make([]xdb.Option, 0, 4)
 	if platform != "" {
 		options = append(options, xdb.WhereEq("platform", platform))
+	}
+	if strings.TrimSpace(pricingModel) != "" {
+		options = append(options, buildPricingModelFilterOption(pricingModel))
 	}
 	if strings.TrimSpace(startAt) != "" {
 		parsed, err := parseTimeInput(startAt)
@@ -471,7 +483,7 @@ func buildRequestLogFilterOptions(platform string, startAt string, endAt string)
 }
 
 func buildFailedRequestLogFilterOptions(platform string, startAt string, endAt string) ([]xdb.Option, error) {
-	options, err := buildRequestLogFilterOptions(platform, startAt, endAt)
+	options, err := buildRequestLogFilterOptions(platform, "", startAt, endAt)
 	if err != nil {
 		return nil, err
 	}
@@ -540,6 +552,7 @@ func buildRequestLogList(records []xdb.Record, pricingSnapshot *modelpricing.Ser
 			GroupMultiplier:           record.GetFloat64("group_multiplier"),
 			HasPricing:                record.GetBool("has_pricing"),
 			MatchedPricingModel:       record.GetString("matched_pricing_model"),
+			EffectivePricingModel:     resolveStoredPricingModel(record.GetString("matched_pricing_model"), record.GetString("model")),
 			ProviderPricingAvailable:  record.GetBool("provider_pricing_available"),
 			ProviderQuotaType:         record.GetInt("provider_quota_type"),
 			ProviderInputUSDPerM:      record.GetFloat64("provider_input_usd_per_m"),
@@ -571,6 +584,7 @@ func parseRequestLogLocalTime(value string) (time.Time, bool) {
 func (ls *LogService) loadRequestLogsForAggregation(
 	platform string,
 	provider string,
+	pricingModel string,
 	start time.Time,
 	end time.Time,
 ) ([]ReqeustLog, error) {
@@ -582,6 +596,9 @@ func (ls *LogService) loadRequestLogsForAggregation(
 	}
 	if strings.TrimSpace(platform) != "" {
 		options = append(options, xdb.WhereEq("platform", strings.TrimSpace(platform)))
+	}
+	if strings.TrimSpace(pricingModel) != "" {
+		options = append(options, buildPricingModelFilterOption(pricingModel))
 	}
 	records, err := selectRecordsByProviderRef(model, options, provider)
 	if err != nil {
@@ -682,10 +699,31 @@ func calculateLogTotalTokens(logEntry ReqeustLog) int64 {
 	return int64(logEntry.InputTokens) + int64(logEntry.OutputTokens) + int64(logEntry.CacheReadTokens)
 }
 
-func buildProviderPerformanceCacheKey(platformKey string, providerRef string, startUTCKey string, endUTCKey string) string {
+func resolveStoredPricingModel(matchedPricingModel string, model string) string {
+	if pricingModel := strings.TrimSpace(matchedPricingModel); pricingModel != "" {
+		return pricingModel
+	}
+	return strings.TrimSpace(model)
+}
+
+func resolveLogPricingModel(logEntry ReqeustLog) string {
+	if pricingModel := strings.TrimSpace(logEntry.EffectivePricingModel); pricingModel != "" {
+		return pricingModel
+	}
+	if pricingModel := strings.TrimSpace(logEntry.MatchedPricingModel); pricingModel != "" {
+		return pricingModel
+	}
+	if model := strings.TrimSpace(logEntry.Model); model != "" {
+		return model
+	}
+	return "—"
+}
+
+func buildProviderPerformanceCacheKey(platformKey string, providerRef string, pricingModel string, startUTCKey string, endUTCKey string) string {
 	return strings.Join([]string{
 		platformKey,
 		strings.TrimSpace(providerRef),
+		strings.TrimSpace(pricingModel),
 		startUTCKey,
 		endUTCKey,
 	}, "|")
@@ -783,7 +821,7 @@ func (ls *LogService) ListRequestLogs(platform string, provider string, limit in
 func (ls *LogService) ListRequestLogsV2(platform string, provider string, limit int, startAt string, endAt string) ([]ReqeustLog, error) {
 	limit = normalizeRequestLogListLimit(limit)
 	model := xdb.New("request_log")
-	filterOptions, err := buildRequestLogFilterOptions(platform, startAt, endAt)
+	filterOptions, err := buildRequestLogFilterOptions(platform, "", startAt, endAt)
 	if err != nil {
 		return nil, err
 	}
@@ -801,7 +839,7 @@ func (ls *LogService) ListRequestLogsV2(platform string, provider string, limit 
 	return buildRequestLogList(records, pricingSnapshot), nil
 }
 
-func (ls *LogService) ListRequestLogsPageV2(platform string, provider string, limit int, offset int, startAt string, endAt string) (RequestLogPageResult, error) {
+func (ls *LogService) ListRequestLogsPageV2(platform string, provider string, pricingModel string, limit int, offset int, startAt string, endAt string) (RequestLogPageResult, error) {
 	result := RequestLogPageResult{
 		Items:  []ReqeustLog{},
 		Limit:  normalizeRequestLogListLimit(limit),
@@ -809,7 +847,7 @@ func (ls *LogService) ListRequestLogsPageV2(platform string, provider string, li
 	}
 
 	model := xdb.New("request_log")
-	filterOptions, err := buildRequestLogFilterOptions(platform, startAt, endAt)
+	filterOptions, err := buildRequestLogFilterOptions(platform, pricingModel, startAt, endAt)
 	if err != nil {
 		return result, err
 	}
@@ -1410,10 +1448,10 @@ func (ls *LogService) heatmapStatsFromRequestLog(
 func (ls *LogService) StatsSince(platform string) (LogStats, error) {
 	seriesStart := startOfDay(time.Now())
 	seriesEnd := seriesStart.AddDate(0, 0, 1)
-	return ls.StatsRangeV2(platform, "", seriesStart.Format(timeLayout), seriesEnd.Format(timeLayout))
+	return ls.StatsRangeV2(platform, "", "", seriesStart.Format(timeLayout), seriesEnd.Format(timeLayout))
 }
 
-func (ls *LogService) StatsRangeV2(platform string, provider string, startAt string, endAt string) (LogStats, error) {
+func (ls *LogService) StatsRangeV2(platform string, provider string, pricingModel string, startAt string, endAt string) (LogStats, error) {
 	stats := LogStats{
 		Series: make([]LogStatsSeries, 0),
 	}
@@ -1463,7 +1501,7 @@ func (ls *LogService) StatsRangeV2(platform string, provider string, startAt str
 		}
 	}
 
-	logs, err := ls.loadRequestLogsForAggregation(platform, provider, start, end)
+	logs, err := ls.loadRequestLogsForAggregation(platform, provider, pricingModel, start, end)
 	if err != nil {
 		return stats, err
 	}
@@ -1533,7 +1571,7 @@ func (ls *LogService) StatsRangeV2(platform string, provider string, startAt str
 	return stats, nil
 }
 
-func (ls *LogService) SummaryRangeV2(platform string, provider string, startAt string, endAt string) (LogSummary, error) {
+func (ls *LogService) SummaryRangeV2(platform string, provider string, pricingModel string, startAt string, endAt string) (LogSummary, error) {
 	const activityBucketCount = 12
 
 	summary := LogSummary{
@@ -1548,7 +1586,7 @@ func (ls *LogService) SummaryRangeV2(platform string, provider string, startAt s
 		return summary, nil
 	}
 
-	logs, err := ls.loadRequestLogsForAggregation(platform, provider, start, end)
+	logs, err := ls.loadRequestLogsForAggregation(platform, provider, pricingModel, start, end)
 	if err != nil {
 		return summary, err
 	}
@@ -1603,7 +1641,7 @@ func (ls *LogService) SummaryRangeV2(platform string, provider string, startAt s
 	}
 
 	if compareStart, compareEnd, ok := buildSummaryComparisonRange(start, end, visibleEnd); ok && compareStart.Before(compareEnd) {
-		previousLogs, compareErr := ls.loadRequestLogsForAggregation(platform, provider, compareStart, compareEnd)
+		previousLogs, compareErr := ls.loadRequestLogsForAggregation(platform, provider, pricingModel, compareStart, compareEnd)
 		if compareErr != nil {
 			return summary, compareErr
 		}
@@ -1670,7 +1708,7 @@ func (ls *LogService) SummaryRangeV2(platform string, provider string, startAt s
 func (ls *LogService) ProviderDailyStats(platform string) ([]ProviderDailyStat, error) {
 	start := startOfDay(time.Now())
 	end := start.AddDate(0, 0, 1)
-	stats, err := ls.ProviderStatsRangeV2(platform, "", start.Format(timeLayout), end.Format(timeLayout))
+	stats, err := ls.ProviderStatsRangeV2(platform, "", "", start.Format(timeLayout), end.Format(timeLayout))
 	if err != nil {
 		return nil, err
 	}
@@ -1934,7 +1972,7 @@ func (ls *LogService) ProviderUnreadFailedStats(platform string) ([]ProviderUnre
 	return stats, nil
 }
 
-func (ls *LogService) ProviderStatsRangeV2(platform string, provider string, startAt string, endAt string) ([]ProviderDailyStat, error) {
+func (ls *LogService) ProviderStatsRangeV2(platform string, provider string, pricingModel string, startAt string, endAt string) ([]ProviderDailyStat, error) {
 	start, end, err := resolveAggregationRange(startAt, endAt)
 	if err != nil {
 		return nil, err
@@ -1948,12 +1986,13 @@ func (ls *LogService) ProviderStatsRangeV2(platform string, provider string, sta
 	startUTCKey := start.UTC().Format(timeLayout)
 	endUTCKey := end.UTC().Format(timeLayout)
 	platformKey := strings.TrimSpace(platform)
-	logs, err := ls.loadRequestLogsForAggregation(platform, provider, start, end)
+	logs, err := ls.loadRequestLogsForAggregation(platform, provider, pricingModel, start, end)
 	if err != nil {
 		return nil, err
 	}
 
 	statMap := map[string]*ProviderDailyStat{}
+	durationSums := map[string]float64{}
 	for _, logEntry := range logs {
 		providerID := strings.TrimSpace(logEntry.ProviderID)
 		providerName := normalizedProviderDisplayName(logEntry.Provider)
@@ -1992,11 +2031,15 @@ func (ls *LogService) ProviderStatsRangeV2(platform string, provider string, sta
 		stat.CacheCreateTokens += int64(logEntry.CacheCreateTokens)
 		stat.CacheReadTokens += int64(logEntry.CacheReadTokens)
 		stat.CostTotal += logEntry.TotalCost
+		if logEntry.DurationSec > 0 {
+			durationSums[statKey] += logEntry.DurationSec
+			stat.DurationSampleCount++
+		}
 	}
 
 	if duration <= 48*time.Hour {
 		providerRef := strings.TrimSpace(provider)
-		cacheKey := buildProviderPerformanceCacheKey(platformKey, providerRef, startUTCKey, endUTCKey)
+		cacheKey := buildProviderPerformanceCacheKey(platformKey, providerRef, pricingModel, startUTCKey, endUTCKey)
 		now := time.Now()
 		performanceMap, cached := ls.getProviderPerformanceCache(cacheKey, now)
 		if !cached {
@@ -2057,6 +2100,10 @@ func (ls *LogService) ProviderStatsRangeV2(platform string, provider string, sta
 				if providerColumn != "" {
 					query += " AND " + providerColumn + " = ?"
 					args = append(args, providerValue)
+				}
+				if pricingModelKey := strings.TrimSpace(pricingModel); pricingModelKey != "" {
+					query += " AND COALESCE(NULLIF(TRIM(matched_pricing_model), ''), TRIM(model)) = ?"
+					args = append(args, pricingModelKey)
 				}
 				query += " GROUP BY provider_stat_key"
 
@@ -2150,6 +2197,9 @@ func (ls *LogService) ProviderStatsRangeV2(platform string, provider string, sta
 		if stat.TotalRequests > 0 {
 			stat.SuccessRate = float64(stat.SuccessfulRequests) / float64(stat.TotalRequests)
 		}
+		if stat.DurationSampleCount > 0 {
+			stat.AvgDurationSec = durationSums[providerStatMapKey(stat.ProviderID, stat.Provider)] / float64(stat.DurationSampleCount)
+		}
 		stats = append(stats, *stat)
 	}
 
@@ -2163,7 +2213,7 @@ func (ls *LogService) ProviderStatsRangeV2(platform string, provider string, sta
 	return stats, nil
 }
 
-func (ls *LogService) ModelStatsRangeV2(platform string, provider string, startAt string, endAt string) ([]ModelUsageStat, error) {
+func (ls *LogService) ModelStatsRangeV2(platform string, provider string, pricingModel string, startAt string, endAt string) ([]ModelUsageStat, error) {
 	start, end, err := resolveAggregationRange(startAt, endAt)
 	if err != nil {
 		return nil, err
@@ -2173,17 +2223,14 @@ func (ls *LogService) ModelStatsRangeV2(platform string, provider string, startA
 		return []ModelUsageStat{}, nil
 	}
 
-	logs, err := ls.loadRequestLogsForAggregation(platform, provider, start, end)
+	logs, err := ls.loadRequestLogsForAggregation(platform, provider, pricingModel, start, end)
 	if err != nil {
 		return nil, err
 	}
 
 	grouped := make(map[string]*ModelUsageStat, 16)
 	for _, logEntry := range logs {
-		modelName := strings.TrimSpace(logEntry.Model)
-		if modelName == "" {
-			modelName = "—"
-		}
+		modelName := resolveLogPricingModel(logEntry)
 		stat := grouped[modelName]
 		if stat == nil {
 			stat = &ModelUsageStat{Model: modelName}
@@ -2416,6 +2463,8 @@ type ProviderDailyStat struct {
 	CacheCreateTokens    int64   `json:"cache_create_tokens"`
 	CacheReadTokens      int64   `json:"cache_read_tokens"`
 	CostTotal            float64 `json:"cost_total"`
+	AvgDurationSec       float64 `json:"avg_duration_sec"`
+	DurationSampleCount  int64   `json:"duration_sample_count"`
 	AvgFirstTokenSec     float64 `json:"avg_first_token_sec"`
 	AvgTokensPerSec      float64 `json:"avg_tokens_per_sec"`
 	TTFTSampleCount      int64   `json:"ttft_sample_count"`

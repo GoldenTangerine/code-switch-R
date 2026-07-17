@@ -67,7 +67,7 @@ func TestProviderStatsRangeV2_PerformanceAggregatesByStableProviderKey(t *testin
 	})
 
 	ls := NewLogService(nil)
-	stats, err := ls.ProviderStatsRangeV2("codex", "", "2026-02-25 00:00:00", "2026-02-26 00:00:00")
+	stats, err := ls.ProviderStatsRangeV2("codex", "", "", "2026-02-25 00:00:00", "2026-02-26 00:00:00")
 	if err != nil {
 		t.Fatalf("ProviderStatsRangeV2 调用失败: %v", err)
 	}
@@ -78,6 +78,9 @@ func TestProviderStatsRangeV2_PerformanceAggregatesByStableProviderKey(t *testin
 	}
 	if stat.TotalRequests != 4 {
 		t.Fatalf("期望 total_requests=4，实际 %d", stat.TotalRequests)
+	}
+	if stat.DurationSampleCount != 4 || !almostEqualFloatProviderStat(stat.AvgDurationSec, 1.4) {
+		t.Fatalf("平均耗时统计错误: samples=%d avg=%f", stat.DurationSampleCount, stat.AvgDurationSec)
 	}
 
 	expectedTTFT := 0.3 // (0.2 + 0.4) / 2
@@ -132,7 +135,7 @@ func TestProviderStatsRangeV2_PerformanceUsesTotalDurationWithoutMinimumWindow(t
 	})
 
 	ls := NewLogService(nil)
-	stats, err := ls.ProviderStatsRangeV2("codex", "", "2026-02-25 00:00:00", "2026-02-26 00:00:00")
+	stats, err := ls.ProviderStatsRangeV2("codex", "", "", "2026-02-25 00:00:00", "2026-02-26 00:00:00")
 	if err != nil {
 		t.Fatalf("ProviderStatsRangeV2 调用失败: %v", err)
 	}
@@ -187,7 +190,7 @@ func TestProviderStatsRangeV2_PerformanceSeparatesTTFTAndTPSSamples(t *testing.T
 	})
 
 	ls := NewLogService(nil)
-	stats, err := ls.ProviderStatsRangeV2("codex", "", "2026-02-25 00:00:00", "2026-02-26 00:00:00")
+	stats, err := ls.ProviderStatsRangeV2("codex", "", "", "2026-02-25 00:00:00", "2026-02-26 00:00:00")
 	if err != nil {
 		t.Fatalf("ProviderStatsRangeV2 调用失败: %v", err)
 	}
@@ -234,7 +237,7 @@ func TestProviderStatsRangeV2_FallbackToProviderNameWhenProviderIDNotFound(t *te
 	})
 
 	ls := NewLogService(nil)
-	stats, err := ls.ProviderStatsRangeV2("codex", "legacy-provider", "2026-02-25 00:00:00", "2026-02-26 00:00:00")
+	stats, err := ls.ProviderStatsRangeV2("codex", "legacy-provider", "", "2026-02-25 00:00:00", "2026-02-26 00:00:00")
 	if err != nil {
 		t.Fatalf("ProviderStatsRangeV2 调用失败: %v", err)
 	}
@@ -388,7 +391,7 @@ func TestProviderStatsRangeV2_PreservesStoredCostSnapshot(t *testing.T) {
 	})
 
 	ls := NewLogService(nil)
-	stats, err := ls.ProviderStatsRangeV2("codex", "pid-cost", "2026-02-25 00:00:00", "2026-02-26 00:00:00")
+	stats, err := ls.ProviderStatsRangeV2("codex", "pid-cost", "", "2026-02-25 00:00:00", "2026-02-26 00:00:00")
 	if err != nil {
 		t.Fatalf("ProviderStatsRangeV2 调用失败: %v", err)
 	}

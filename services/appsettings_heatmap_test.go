@@ -113,6 +113,32 @@ func TestNormalizeHomeProviderTabsDefaultsWhenEmpty(t *testing.T) {
 	}
 }
 
+func TestLogsRefreshIntervalNormalizationAndDedicatedSave(t *testing.T) {
+	for _, seconds := range []int{0, 5, 10, 30, 60} {
+		if got := normalizeLogsRefreshIntervalSeconds(seconds); got != seconds {
+			t.Fatalf("合法刷新间隔 %d 被改写为 %d", seconds, got)
+		}
+	}
+	if got := normalizeLogsRefreshIntervalSeconds(15); got != defaultLogsRefreshIntervalSeconds {
+		t.Fatalf("非法刷新间隔应回退为 %d，实际 %d", defaultLogsRefreshIntervalSeconds, got)
+	}
+
+	t.Setenv("HOME", t.TempDir())
+	service := NewAppSettingsService(nil)
+	settings := service.defaultSettings()
+	settings.EnableRoundRobin = true
+	if _, err := service.SaveAppSettings(settings); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := service.SetLogsRefreshInterval(5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.LogsRefreshIntervalSeconds != 5 || !updated.EnableRoundRobin {
+		t.Fatalf("专用保存不应覆盖其他设置: %+v", updated)
+	}
+}
+
 func TestNormalizeHomeProviderTabsFiltersInvalidAndDuplicateValues(t *testing.T) {
 	got := normalizeHomeProviderTabs([]string{" opencode ", "invalid", "others", "opencode", "gemini"})
 	want := []string{"opencode", "others", "gemini"}
