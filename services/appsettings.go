@@ -39,6 +39,8 @@ const (
 	defaultHeatmapIntensityL1             = 25
 	defaultHeatmapIntensityL2             = 50
 	defaultHeatmapIntensityL3             = 75
+	claudeProxyAuthFieldAuthToken         = "auth_token"
+	claudeProxyAuthFieldAPIKey            = "api_key"
 	minHeatmapIntensityStop               = 1
 	maxHeatmapIntensityStop               = 99
 	budgetCycleModeDaily                  = "daily"
@@ -98,6 +100,7 @@ type AppSettings struct {
 	ClaudeModelRoutingEnabled        bool                                     `json:"claude_model_routing_enabled"`
 	ClaudeModelAggregationEnabled    bool                                     `json:"claude_model_aggregation_enabled"`
 	ClaudeModelMetadataMergeStrategy string                                   `json:"claude_model_metadata_merge_strategy"`
+	ClaudeProxyAuthField             string                                   `json:"claude_proxy_auth_field"`
 	PreserveCodexOfficialAuth        bool                                     `json:"preserve_codex_official_auth_on_switch"`
 	UnifyCodexSessionHistory         bool                                     `json:"unify_codex_session_history"`
 	UnifyCodexMigrateExisting        bool                                     `json:"unify_codex_migrate_existing"`
@@ -192,6 +195,7 @@ type AppSettingsService struct {
 	mu                  sync.Mutex
 	autoStartService    *AutoStartService
 	codexSettings       *CodexSettingsService
+	claudeSettings      *ClaudeSettingsService
 	claudeModelRouting  *ClaudeModelRoutingService
 	snapshot            atomic.Value
 	fingerprintMu       sync.Mutex
@@ -366,6 +370,12 @@ func (as *AppSettingsService) BindCodexSettingsService(codexSettings *CodexSetti
 	as.codexSettings = codexSettings
 }
 
+func (as *AppSettingsService) BindClaudeSettingsService(claudeSettings *ClaudeSettingsService) {
+	as.mu.Lock()
+	defer as.mu.Unlock()
+	as.claudeSettings = claudeSettings
+}
+
 func (as *AppSettingsService) BindClaudeModelRoutingService(routing *ClaudeModelRoutingService) {
 	as.mu.Lock()
 	defer as.mu.Unlock()
@@ -492,6 +502,7 @@ func (as *AppSettingsService) defaultSettings() AppSettings {
 		ClaudeModelRoutingEnabled:        false,
 		ClaudeModelAggregationEnabled:    false,
 		ClaudeModelMetadataMergeStrategy: "aggressive",
+		ClaudeProxyAuthField:             claudeProxyAuthFieldAuthToken,
 		PreserveCodexOfficialAuth:        false,
 		UnifyCodexSessionHistory:         false,
 		UnifyCodexMigrateExisting:        false,
@@ -565,6 +576,15 @@ func normalizeClaudeModelRoutingSettings(settings *AppSettings) {
 		settings.ClaudeModelMetadataMergeStrategy = "conservative"
 	default:
 		settings.ClaudeModelMetadataMergeStrategy = "aggressive"
+	}
+}
+
+func normalizeClaudeProxyAuthField(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case claudeProxyAuthFieldAPIKey:
+		return claudeProxyAuthFieldAPIKey
+	default:
+		return claudeProxyAuthFieldAuthToken
 	}
 }
 
@@ -714,6 +734,7 @@ func (as *AppSettingsService) SaveAppSettings(settings AppSettings) (AppSettings
 	normalizeProviderConcurrencyLimits(&settings)
 	normalizeProviderQuotaQueryPresets(&settings)
 	normalizeClaudeModelRoutingSettings(&settings)
+	settings.ClaudeProxyAuthField = normalizeClaudeProxyAuthField(settings.ClaudeProxyAuthField)
 
 	// 同步开机自启动状态
 	if as.autoStartService != nil {
@@ -744,6 +765,14 @@ func (as *AppSettingsService) SaveAppSettings(settings AppSettings) (AppSettings
 					fmt.Printf("[CodexHistory] 统一历史迁移失败: %v\n", err)
 				}
 			}()
+		}
+	}
+	if as.claudeSettings != nil && previous.ClaudeProxyAuthField != settings.ClaudeProxyAuthField {
+		if err := as.claudeSettings.ReapplyProxyAuthField(settings.ClaudeProxyAuthField); err != nil {
+			if rollbackErr := as.saveLocked(previous); rollbackErr != nil {
+				return settings, fmt.Errorf("%w；回滚应用设置失败: %v", err, rollbackErr)
+			}
+			return settings, err
 		}
 	}
 	if as.claudeModelRouting != nil && claudeModelRoutingSettingsChanged(previous, settings) {
@@ -811,6 +840,7 @@ func (as *AppSettingsService) loadLocked() (AppSettings, error) {
 	normalizeProviderConcurrencyLimits(&settings)
 	normalizeProviderQuotaQueryPresets(&settings)
 	normalizeClaudeModelRoutingSettings(&settings)
+	settings.ClaudeProxyAuthField = normalizeClaudeProxyAuthField(settings.ClaudeProxyAuthField)
 	if !routingSettingExists {
 		if err := as.saveLocked(settings); err != nil {
 			return settings, err
@@ -832,6 +862,7 @@ func (as *AppSettingsService) saveLocked(settings AppSettings) error {
 	normalizeProviderConcurrencyLimits(&settings)
 	normalizeProviderQuotaQueryPresets(&settings)
 	normalizeClaudeModelRoutingSettings(&settings)
+	settings.ClaudeProxyAuthField = normalizeClaudeProxyAuthField(settings.ClaudeProxyAuthField)
 	data, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		return err

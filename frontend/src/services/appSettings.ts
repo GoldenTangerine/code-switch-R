@@ -21,6 +21,11 @@ import {
 
 export type HeatmapGranularity = 'hourly' | 'daily'
 export type ClaudeModelMetadataMergeStrategy = 'aggressive' | 'conservative'
+export type ClaudeProxyAuthField = 'auth_token' | 'api_key'
+
+export const normalizeClaudeProxyAuthField = (value?: string | null): ClaudeProxyAuthField => (
+  value === 'api_key' ? 'api_key' : 'auth_token'
+)
 
 export const normalizeHeatmapGranularity = (
   value?: string | null,
@@ -77,6 +82,7 @@ export type AppSettings = {
   claude_model_routing_enabled: boolean
   claude_model_aggregation_enabled: boolean
   claude_model_metadata_merge_strategy: ClaudeModelMetadataMergeStrategy
+  claude_proxy_auth_field: ClaudeProxyAuthField
   preserve_codex_official_auth_on_switch: boolean
   unify_codex_session_history: boolean
   unify_codex_migrate_existing: boolean
@@ -147,6 +153,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   claude_model_routing_enabled: false,
   claude_model_aggregation_enabled: false,
   claude_model_metadata_merge_strategy: 'aggressive',
+  claude_proxy_auth_field: 'auth_token',
   preserve_codex_official_auth_on_switch: false,
   unify_codex_session_history: false,
   unify_codex_migrate_existing: false,
@@ -296,6 +303,7 @@ const normalizeAppSettingsResponse = (value: unknown): AppSettings => {
     claude_model_routing_enabled: routingEnabled,
     claude_model_aggregation_enabled: routingEnabled && data?.claude_model_aggregation_enabled === true,
     claude_model_metadata_merge_strategy: mergeStrategy,
+    claude_proxy_auth_field: normalizeClaudeProxyAuthField(data?.claude_proxy_auth_field),
     budget_quota_used_adjustments: normalizeBudgetQuotaAdjustments(
       data?.budget_quota_used_adjustments,
       {

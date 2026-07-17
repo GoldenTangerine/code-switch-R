@@ -145,9 +145,13 @@ func main() {
 	providerRelay.BindClaudeModelRoutingService(claudeModelRoutingService)
 	providerConcurrencyService := services.NewProviderConcurrencyService(providerRelay)
 	providerRelayStateService := services.NewProviderRelayStateService(providerRelay)
-	claudeSettings := services.NewClaudeSettingsService(providerRelay.Addr())
+	claudeSettings := services.NewClaudeSettingsService(providerRelay.Addr(), appSettings)
 	codexSettings := services.NewCodexSettingsService(providerRelay.Addr())
+	appSettings.BindClaudeSettingsService(claudeSettings)
 	appSettings.BindCodexSettingsService(codexSettings)
+	if err := claudeSettings.ReconcileProxyAuthField(); err != nil {
+		log.Printf("修复 Claude 代理认证字段失败: %v", err)
+	}
 	if err := providerService.Start(); err != nil {
 		log.Fatalf("供应商快照服务启动失败: %v", err)
 	}
@@ -157,7 +161,7 @@ func main() {
 	if err := blacklistService.Start(); err != nil {
 		log.Fatalf("黑名单快照服务启动失败: %v", err)
 	}
-	cliConfigService := services.NewCliConfigService(providerRelay.Addr())
+	cliConfigService := services.NewCliConfigService(providerRelay.Addr(), appSettings)
 	logService := services.NewLogService(modelPricingService)
 	updateService := services.NewUpdateService(AppVersion)
 	mcpService := services.NewMCPService()

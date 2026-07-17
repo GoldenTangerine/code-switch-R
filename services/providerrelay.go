@@ -3013,6 +3013,9 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 	}
 
 	headers := cloneMap(clientHeaders)
+	if kind == "claude" {
+		removeClaudeClientAuthHeaders(headers, provider.ConnectivityAuthType)
+	}
 	if isCodexOAuthProvider(provider) {
 		var err error
 		endpoint, err = prs.prepareCodexOAuthForwarding(provider, headers, endpoint)
@@ -3612,6 +3615,17 @@ func deleteHeaderCaseInsensitive(headers map[string]string, key string) {
 		if strings.EqualFold(existingKey, key) {
 			delete(headers, existingKey)
 		}
+	}
+}
+
+func removeClaudeClientAuthHeaders(headers map[string]string, authType string) {
+	deleteHeaderCaseInsensitive(headers, "Authorization")
+	deleteHeaderCaseInsensitive(headers, "x-api-key")
+	deleteHeaderCaseInsensitive(headers, "x-goog-api-key")
+
+	normalizedAuthType := strings.ToLower(strings.TrimSpace(authType))
+	if normalizedAuthType != "" && normalizedAuthType != "bearer" && normalizedAuthType != "x-api-key" && normalizedAuthType != "custom" {
+		deleteHeaderCaseInsensitive(headers, strings.TrimSpace(authType))
 	}
 }
 
@@ -8873,6 +8887,15 @@ func (prs *ProviderRelayService) forwardModelsRequest(
 	for key, values := range c.Request.Header {
 		for _, value := range values {
 			req.Header.Add(key, value)
+		}
+	}
+	if kind == "claude" {
+		req.Header.Del("Authorization")
+		req.Header.Del("x-api-key")
+		req.Header.Del("x-goog-api-key")
+		normalizedAuthType := strings.ToLower(strings.TrimSpace(selectedProvider.ConnectivityAuthType))
+		if normalizedAuthType != "" && normalizedAuthType != "bearer" && normalizedAuthType != "x-api-key" && normalizedAuthType != "custom" {
+			req.Header.Del(strings.TrimSpace(selectedProvider.ConnectivityAuthType))
 		}
 	}
 

@@ -7,13 +7,16 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
 const (
 	claudeSettingsDir      = ".claude"
 	claudeSettingsFileName = "settings.json"
 	claudeBackupFileName   = "code-switch.back.settings.json"
-	claudeAuthTokenValue   = "code-switch-r"
+	claudeProxyAuthValue   = "code-switch-r"
+	claudeAuthTokenEnvKey  = "ANTHROPIC_AUTH_TOKEN"
+	claudeAPIKeyEnvKey     = "ANTHROPIC_API_KEY"
 )
 
 type ClaudeProxyStatus struct {
@@ -22,14 +25,46 @@ type ClaudeProxyStatus struct {
 }
 
 type ClaudeSettingsService struct {
-	relayAddr string
+	relayAddr   string
+	appSettings *AppSettingsService
+	mu          sync.Mutex
 }
 
-func NewClaudeSettingsService(relayAddr string) *ClaudeSettingsService {
-	return &ClaudeSettingsService{relayAddr: relayAddr}
+func NewClaudeSettingsService(relayAddr string, appSettings *AppSettingsService) *ClaudeSettingsService {
+	return &ClaudeSettingsService{relayAddr: relayAddr, appSettings: appSettings}
+}
+
+func claudeProxyAuthEnvKey(authField string) string {
+	if normalizeClaudeProxyAuthField(authField) == claudeProxyAuthFieldAPIKey {
+		return claudeAPIKeyEnvKey
+	}
+	return claudeAuthTokenEnvKey
+}
+
+func applyClaudeProxyAuthEnv(env map[string]interface{}, authField string) {
+	delete(env, claudeAuthTokenEnvKey)
+	delete(env, claudeAPIKeyEnvKey)
+	env[claudeProxyAuthEnvKey(authField)] = claudeProxyAuthValue
+}
+
+func (css *ClaudeSettingsService) proxyAuthField() string {
+	if css.appSettings == nil {
+		return claudeProxyAuthFieldAuthToken
+	}
+	settings, err := css.appSettings.GetAppSettings()
+	if err != nil {
+		return claudeProxyAuthFieldAuthToken
+	}
+	return normalizeClaudeProxyAuthField(settings.ClaudeProxyAuthField)
 }
 
 func (css *ClaudeSettingsService) ProxyStatus() (ClaudeProxyStatus, error) {
+	css.mu.Lock()
+	defer css.mu.Unlock()
+	return css.proxyStatusLocked()
+}
+
+func (css *ClaudeSettingsService) proxyStatusLocked() (ClaudeProxyStatus, error) {
 	status := ClaudeProxyStatus{Enabled: false, BaseURL: css.baseURL()}
 	settingsPath, _, err := css.paths()
 	if err != nil {
@@ -67,6 +102,12 @@ func (css *ClaudeSettingsService) ProxyStatus() (ClaudeProxyStatus, error) {
 }
 
 func (css *ClaudeSettingsService) EnableProxy() error {
+	css.mu.Lock()
+	defer css.mu.Unlock()
+	return css.enableProxyWithAuthField(css.proxyAuthField())
+}
+
+func (css *ClaudeSettingsService) enableProxyWithAuthField(authField string) error {
 	settingsPath, backupPath, err := css.paths()
 	if err != nil {
 		return err
@@ -123,18 +164,38 @@ func (css *ClaudeSettingsService) EnableProxy() error {
 			FileExisted:       fileExisted,
 			EnvExisted:        envRaw != nil,
 			InjectedBaseURL:   css.baseURL(),
-			InjectedAuthToken: claudeAuthTokenValue,
+			InjectedAuthToken: claudeProxyAuthValue,
+			InjectedAuthField: normalizeClaudeProxyAuthField(authField),
 		}
 		if envRaw != nil {
 			if v, ok := envRaw["ANTHROPIC_BASE_URL"]; ok {
 				s := anyToString(v)
 				state.OriginalBaseURL = &s
 			}
-			if v, ok := envRaw["ANTHROPIC_AUTH_TOKEN"]; ok {
+			if v, ok := envRaw[claudeAuthTokenEnvKey]; ok {
 				s := anyToString(v)
 				state.OriginalAuthToken = &s
 			}
+			if v, ok := envRaw[claudeAPIKeyEnvKey]; ok {
+				s := anyToString(v)
+				state.OriginalAPIKey = &s
+			}
 		}
+		if err := SaveProxyState("claude", state); err != nil {
+			return err
+		}
+	} else if state, loadErr := LoadProxyState("claude"); loadErr == nil {
+		if state.Version < proxyStateVersion {
+			envRaw, _ := existingData["env"].(map[string]interface{})
+			if envRaw != nil {
+				if v, ok := envRaw[claudeAPIKeyEnvKey]; ok {
+					s := anyToString(v)
+					state.OriginalAPIKey = &s
+				}
+			}
+		}
+		state.Version = proxyStateVersion
+		state.InjectedAuthField = normalizeClaudeProxyAuthField(authField)
 		if err := SaveProxyState("claude", state); err != nil {
 			return err
 		}
@@ -145,7 +206,7 @@ func (css *ClaudeSettingsService) EnableProxy() error {
 	if !ok {
 		env = make(map[string]interface{})
 	}
-	env["ANTHROPIC_AUTH_TOKEN"] = claudeAuthTokenValue
+	applyClaudeProxyAuthEnv(env, authField)
 	env["ANTHROPIC_BASE_URL"] = css.baseURL()
 	existingData["env"] = env
 
@@ -153,7 +214,35 @@ func (css *ClaudeSettingsService) EnableProxy() error {
 	return AtomicWriteJSON(settingsPath, existingData)
 }
 
+func (css *ClaudeSettingsService) ReapplyProxyAuthField(authField string) error {
+	css.mu.Lock()
+	defer css.mu.Unlock()
+
+	status, err := css.proxyStatusLocked()
+	if err != nil || !status.Enabled {
+		return err
+	}
+	stateExists, err := ProxyStateExists("claude")
+	if err != nil || !stateExists {
+		return err
+	}
+	if _, err := LoadProxyState("claude"); err != nil {
+		return fmt.Errorf("Claude 代理状态无效，跳过认证字段重写: %w", err)
+	}
+	return css.enableProxyWithAuthField(authField)
+}
+
+func (css *ClaudeSettingsService) ReconcileProxyAuthField() error {
+	return css.ReapplyProxyAuthField(css.proxyAuthField())
+}
+
 func (css *ClaudeSettingsService) DisableProxy() error {
+	css.mu.Lock()
+	defer css.mu.Unlock()
+	return css.disableProxyLocked()
+}
+
+func (css *ClaudeSettingsService) disableProxyLocked() error {
 	settingsPath, _, err := css.paths()
 	if err != nil {
 		return err
@@ -199,8 +288,12 @@ func (css *ClaudeSettingsService) DisableProxy() error {
 			delete(env, "ANTHROPIC_BASE_URL")
 			changed = true
 		}
-		if anyToString(env["ANTHROPIC_AUTH_TOKEN"]) == claudeAuthTokenValue {
-			delete(env, "ANTHROPIC_AUTH_TOKEN")
+		if anyToString(env[claudeAuthTokenEnvKey]) == claudeProxyAuthValue {
+			delete(env, claudeAuthTokenEnvKey)
+			changed = true
+		}
+		if anyToString(env[claudeAPIKeyEnvKey]) == claudeProxyAuthValue {
+			delete(env, claudeAPIKeyEnvKey)
 			changed = true
 		}
 
@@ -220,6 +313,16 @@ func (css *ClaudeSettingsService) DisableProxy() error {
 	if env == nil {
 		env = make(map[string]interface{})
 	}
+	if state.Version < proxyStateVersion {
+		if v, ok := env[claudeAPIKeyEnvKey]; ok {
+			s := anyToString(v)
+			state.OriginalAPIKey = &s
+		}
+		state.Version = proxyStateVersion
+		if err := SaveProxyState("claude", state); err != nil {
+			return err
+		}
+	}
 
 	// 恢复或删除 ANTHROPIC_BASE_URL
 	if state.OriginalBaseURL != nil {
@@ -230,9 +333,14 @@ func (css *ClaudeSettingsService) DisableProxy() error {
 
 	// 恢复或删除 ANTHROPIC_AUTH_TOKEN
 	if state.OriginalAuthToken != nil {
-		env["ANTHROPIC_AUTH_TOKEN"] = *state.OriginalAuthToken
+		env[claudeAuthTokenEnvKey] = *state.OriginalAuthToken
 	} else {
-		delete(env, "ANTHROPIC_AUTH_TOKEN")
+		delete(env, claudeAuthTokenEnvKey)
+	}
+	if state.OriginalAPIKey != nil {
+		env[claudeAPIKeyEnvKey] = *state.OriginalAPIKey
+	} else {
+		delete(env, claudeAPIKeyEnvKey)
 	}
 
 	// 若 env 变空且启用前不存在 env，则移除整个 env 对象
@@ -324,8 +432,11 @@ func mergeClaudeCLIConfig(raw map[string]interface{}, editable map[string]interf
 // ApplySingleProvider 直连应用单一供应商（仅在代理关闭时可用）
 // 将指定 provider 的配置直接写入 Claude Code 的 settings.json
 func (css *ClaudeSettingsService) ApplySingleProvider(providerID int) error {
+	css.mu.Lock()
+	defer css.mu.Unlock()
+
 	// 1. 检查代理状态：代理启用时禁止直连应用
-	proxyStatus, err := css.ProxyStatus()
+	proxyStatus, err := css.proxyStatusLocked()
 	if err != nil {
 		return fmt.Errorf("检查代理状态失败: %w", err)
 	}
@@ -401,8 +512,11 @@ func (css *ClaudeSettingsService) ApplySingleProvider(providerID int) error {
 //   - nil: 配置指向本地代理 或 无法匹配到 provider
 //   - *int64: 匹配到的 provider ID
 func (css *ClaudeSettingsService) GetDirectAppliedProviderID() (*int64, error) {
+	css.mu.Lock()
+	defer css.mu.Unlock()
+
 	// 1. 检查代理状态
-	proxyStatus, err := css.ProxyStatus()
+	proxyStatus, err := css.proxyStatusLocked()
 	if err != nil {
 		return nil, fmt.Errorf("检查代理状态失败: %w", err)
 	}

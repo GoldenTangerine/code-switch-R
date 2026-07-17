@@ -32,6 +32,23 @@ describe('appSettings', () => {
     expect(settings.heatmap_granularity).toBe('hourly')
   })
 
+  it('defaults Claude proxy auth to AUTH_TOKEN', async () => {
+    vi.mocked(Call.ByName).mockResolvedValueOnce({})
+
+    const settings = await fetchAppSettings()
+
+    expect(settings.claude_proxy_auth_field).toBe('auth_token')
+  })
+
+  it('preserves API_KEY and normalizes invalid Claude proxy auth values', async () => {
+    vi.mocked(Call.ByName)
+      .mockResolvedValueOnce({ claude_proxy_auth_field: 'api_key' })
+      .mockResolvedValueOnce({ claude_proxy_auth_field: 'invalid' })
+
+    expect((await fetchAppSettings()).claude_proxy_auth_field).toBe('api_key')
+    expect((await fetchAppSettings()).claude_proxy_auth_field).toBe('auth_token')
+  })
+
   it('defaults home provider tabs to Claude Code, Codex, and Gemini', async () => {
     vi.mocked(Call.ByName).mockResolvedValueOnce({})
 

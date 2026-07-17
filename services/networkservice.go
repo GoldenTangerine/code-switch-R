@@ -404,7 +404,8 @@ func bashSingleQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
 }
 
-func buildWSLClaudeConfigScript(proxyURL string) string {
+func buildWSLClaudeConfigScript(proxyURL string, authField string) string {
+	authEnvKey := claudeProxyAuthEnvKey(authField)
 	return fmt.Sprintf(`
 set -euo pipefail
 
@@ -424,7 +425,8 @@ if [ -L "$config_path" ]; then
 fi
 
 base_url=%s
-auth_token='code-switch-r'
+auth_field=%s
+auth_value='code-switch-r'
 
 create_backup "$config_path" "$backup_path"
 
@@ -439,25 +441,28 @@ if command -v jq >/dev/null 2>&1; then
       exit 2
     fi
 
-    jq --arg base_url "$base_url" --arg auth_token "$auth_token" '
+    jq --arg base_url "$base_url" --arg auth_field "$auth_field" --arg auth_value "$auth_value" '
       .env = (.env // {})
       | .env.ANTHROPIC_BASE_URL = $base_url
-      | .env.ANTHROPIC_AUTH_TOKEN = $auth_token
+      | del(.env.ANTHROPIC_AUTH_TOKEN, .env.ANTHROPIC_API_KEY)
+      | .env[$auth_field] = $auth_value
     ' "$config_path" > "$tmp_path"
   else
-    jq -n --arg base_url "$base_url" --arg auth_token "$auth_token" '{env:{ANTHROPIC_BASE_URL:$base_url, ANTHROPIC_AUTH_TOKEN:$auth_token}}' > "$tmp_path"
+    jq -n --arg base_url "$base_url" --arg auth_field "$auth_field" --arg auth_value "$auth_value" '{env:{ANTHROPIC_BASE_URL:$base_url, ($auth_field):$auth_value}}' > "$tmp_path"
   fi
 
-  jq -e --arg base_url "$base_url" --arg auth_token "$auth_token" '
-    .env.ANTHROPIC_BASE_URL == $base_url and .env.ANTHROPIC_AUTH_TOKEN == $auth_token
+  jq -e --arg base_url "$base_url" --arg auth_field "$auth_field" --arg auth_value "$auth_value" '
+    .env.ANTHROPIC_BASE_URL == $base_url
+    and .env[$auth_field] == $auth_value
+    and (if $auth_field == "ANTHROPIC_AUTH_TOKEN" then (.env | has("ANTHROPIC_API_KEY") | not) else (.env | has("ANTHROPIC_AUTH_TOKEN") | not) end)
   ' "$tmp_path" >/dev/null
 elif command -v python3 >/dev/null 2>&1; then
-  python3 - "$base_url" "$auth_token" "$config_path" "$tmp_path" <<'PY'
+  python3 - "$base_url" "$auth_field" "$auth_value" "$config_path" "$tmp_path" <<'PY'
 import json
 import sys
 from pathlib import Path
 
-base_url, auth_token, src, dst = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+base_url, auth_field, auth_value, src, dst = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]
 
 data = {}
 try:
@@ -482,24 +487,28 @@ if not isinstance(env, dict):
     sys.exit(2)
 
 env["ANTHROPIC_BASE_URL"] = base_url
-env["ANTHROPIC_AUTH_TOKEN"] = auth_token
+env.pop("ANTHROPIC_AUTH_TOKEN", None)
+env.pop("ANTHROPIC_API_KEY", None)
+env[auth_field] = auth_value
 data["env"] = env
 
 Path(dst).write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 PY
 
-  python3 - "$base_url" "$auth_token" "$tmp_path" <<'PY'
+  python3 - "$base_url" "$auth_field" "$auth_value" "$tmp_path" <<'PY'
 import json
 import sys
 from pathlib import Path
 
-base_url, auth_token, path = sys.argv[1], sys.argv[2], sys.argv[3]
+base_url, auth_field, auth_value, path = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 payload = json.loads(Path(path).read_text(encoding="utf-8"))
+other_auth_field = "ANTHROPIC_API_KEY" if auth_field == "ANTHROPIC_AUTH_TOKEN" else "ANTHROPIC_AUTH_TOKEN"
 ok = (
     isinstance(payload, dict)
     and isinstance(payload.get("env"), dict)
     and payload["env"].get("ANTHROPIC_BASE_URL") == base_url
-    and payload["env"].get("ANTHROPIC_AUTH_TOKEN") == auth_token
+    and payload["env"].get(auth_field) == auth_value
+    and other_auth_field not in payload["env"]
 )
 if not ok:
     sys.stderr.write("Sanity check failed for generated settings.json\n")
@@ -515,7 +524,7 @@ else
 {
   "env": {
     "ANTHROPIC_BASE_URL": "$base_url",
-    "ANTHROPIC_AUTH_TOKEN": "$auth_token"
+    "$auth_field": "$auth_value"
   }
 }
 EOF
@@ -532,12 +541,16 @@ fi
 
 mv -f "$tmp_path" "$config_path"
 trap - EXIT
-`, wslBackupShellHelpers, bashSingleQuote(proxyURL))
+`, wslBackupShellHelpers, bashSingleQuote(proxyURL), bashSingleQuote(authEnvKey))
 }
 
 // configureWSLClaude 在 WSL 中配置 Claude Code（字段级合并）
 func (ns *NetworkService) configureWSLClaude(distro, proxyURL string) error {
-	return ns.runWSLCommand(distro, buildWSLClaudeConfigScript(proxyURL))
+	authField := claudeProxyAuthFieldAuthToken
+	if ns.claudeService != nil {
+		authField = ns.claudeService.proxyAuthField()
+	}
+	return ns.runWSLCommand(distro, buildWSLClaudeConfigScript(proxyURL, authField))
 }
 
 func buildWSLCodexConfigScript(proxyURL string) string {

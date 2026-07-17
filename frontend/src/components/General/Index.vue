@@ -14,6 +14,8 @@ import {
   normalizeHeatmapGranularity,
   type AppSettings,
   type ClaudeModelMetadataMergeStrategy,
+  type ClaudeProxyAuthField,
+  normalizeClaudeProxyAuthField,
 } from '../../services/appSettings'
 import {
   getClaudeModelRoutingStatus,
@@ -182,6 +184,10 @@ const claudeModelMetadataMergeStrategy = ref<ClaudeModelMetadataMergeStrategy>(
 const claudeModelRoutingStatus = ref<ClaudeModelRoutingStatus | null>(null)
 const claudeModelRefreshBusy = ref(false)
 const claudeModelMetadataStrategies: ClaudeModelMetadataMergeStrategy[] = ['aggressive', 'conservative']
+const claudeProxyAuthField = ref<ClaudeProxyAuthField>(
+  normalizeClaudeProxyAuthField(getCachedString('claudeProxyAuthField', 'auth_token')),
+)
+const claudeProxyAuthFields: ClaudeProxyAuthField[] = ['auth_token', 'api_key']
 const preserveCodexOfficialAuthOnSwitch = ref(getCachedValue('preserveCodexOfficialAuthOnSwitch', false))
 const unifyCodexSessionHistory = ref(getCachedValue('unifyCodexSessionHistory', false))
 const unifyCodexMigrateExisting = ref(false)
@@ -511,6 +517,7 @@ const syncAppSettingsCache = () => {
   localStorage.setItem('app-settings-claudeModelRouting', String(claudeModelRoutingEnabled.value))
   localStorage.setItem('app-settings-claudeModelAggregation', String(claudeModelAggregationEnabled.value))
   localStorage.setItem('app-settings-claudeModelMetadataMergeStrategy', claudeModelMetadataMergeStrategy.value)
+  localStorage.setItem('app-settings-claudeProxyAuthField', claudeProxyAuthField.value)
   localStorage.setItem('app-settings-preserveCodexOfficialAuthOnSwitch', String(preserveCodexOfficialAuthOnSwitch.value))
   localStorage.setItem('app-settings-unifyCodexSessionHistory', String(unifyCodexSessionHistory.value))
   localStorage.setItem('app-settings-captureRequestLogPayload', String(captureRequestLogPayloadEnabled.value))
@@ -1161,6 +1168,7 @@ const loadAppSettings = async () => {
     claudeModelMetadataMergeStrategy.value = data?.claude_model_metadata_merge_strategy === 'conservative'
       ? 'conservative'
       : 'aggressive'
+    claudeProxyAuthField.value = normalizeClaudeProxyAuthField(data?.claude_proxy_auth_field)
     preserveCodexOfficialAuthOnSwitch.value = data?.preserve_codex_official_auth_on_switch ?? false
     unifyCodexSessionHistory.value = data?.unify_codex_session_history ?? false
     unifyCodexMigrateExisting.value = data?.unify_codex_migrate_existing ?? false
@@ -1206,6 +1214,7 @@ const loadAppSettings = async () => {
     claudeModelRoutingEnabled.value = false
     claudeModelAggregationEnabled.value = false
     claudeModelMetadataMergeStrategy.value = 'aggressive'
+    claudeProxyAuthField.value = 'auth_token'
     preserveCodexOfficialAuthOnSwitch.value = false
     unifyCodexSessionHistory.value = false
     unifyCodexMigrateExisting.value = false
@@ -1314,6 +1323,7 @@ const persistAppSettingsNow = async () => {
       claude_model_aggregation_enabled:
         claudeModelRoutingEnabled.value && claudeModelAggregationEnabled.value,
       claude_model_metadata_merge_strategy: claudeModelMetadataMergeStrategy.value,
+      claude_proxy_auth_field: claudeProxyAuthField.value,
       preserve_codex_official_auth_on_switch: preserveCodexOfficialAuthOnSwitch.value,
       unify_codex_session_history: unifyCodexSessionHistory.value,
       unify_codex_migrate_existing: unifyCodexMigrateExisting.value,
@@ -1345,6 +1355,8 @@ const persistAppSettingsNow = async () => {
     window.dispatchEvent(new CustomEvent('app-settings-updated'))
   } catch (error) {
     console.error('failed to save app settings', error)
+    showToast(t('components.general.label.settingsSaveFailed'), 'error')
+    await loadAppSettings()
   } finally {
     saveBusy.value = false
     if (saveQueued) {
@@ -2487,6 +2499,23 @@ onBeforeUnmount(() => {
       <section>
         <h2 class="mac-section-title">{{ $t('components.general.title.connectivity') }}</h2>
         <div class="mac-panel">
+          <ListItem :label="$t('components.general.label.claudeProxyAuthField')">
+            <div class="claude-proxy-auth-setting">
+              <div class="auth-field-selector" role="group" :aria-label="$t('components.general.label.claudeProxyAuthField')">
+                <button
+                  v-for="authField in claudeProxyAuthFields"
+                  :key="authField"
+                  type="button"
+                  :class="{ active: claudeProxyAuthField === authField }"
+                  :disabled="settingsLoading || saveBusy"
+                  @click="claudeProxyAuthField = authField; persistAppSettings()"
+                >
+                  {{ $t(`components.general.label.claudeProxyAuth${authField === 'auth_token' ? 'Token' : 'APIKey'}`) }}
+                </button>
+              </div>
+              <span class="hint-text">{{ $t('components.general.label.claudeProxyAuthFieldHint') }}</span>
+            </div>
+          </ListItem>
           <ListItem :label="$t('components.general.label.autoConnectivityTest')">
             <div class="toggle-with-hint">
               <label class="mac-switch">
@@ -3346,6 +3375,50 @@ onBeforeUnmount(() => {
 .metadata-strategy button:disabled {
   cursor: not-allowed;
   opacity: 0.5;
+}
+
+.claude-proxy-auth-setting {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 7px;
+  min-width: min(100%, 330px);
+}
+
+.auth-field-selector {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(118px, 1fr));
+  padding: 2px;
+  border: 1px solid var(--mac-border);
+  border-radius: 8px;
+  background: var(--mac-surface);
+}
+
+.auth-field-selector button {
+  min-height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--mac-text-secondary);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.auth-field-selector button.active {
+  background: var(--mac-accent);
+  color: #fff;
+}
+
+.auth-field-selector button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--mac-accent) 42%, transparent);
+  outline-offset: 2px;
+}
+
+.auth-field-selector button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .hint-text {

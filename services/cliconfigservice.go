@@ -17,19 +17,32 @@ const legacyCodexBackupConfigName = "cc" + "-studio" + ".back.config.toml"
 // CliConfigService CLI 配置管理服务
 // 管理 Claude Code、Codex、Gemini 的 CLI 配置文件
 type CliConfigService struct {
-	relayAddr string
-	homeDir   string // 缓存的用户家目录（已校验）
-	homeErr   error  // 家目录获取错误
+	relayAddr   string
+	homeDir     string // 缓存的用户家目录（已校验）
+	homeErr     error  // 家目录获取错误
+	appSettings *AppSettingsService
 }
 
 // NewCliConfigService 创建 CLI 配置服务
-func NewCliConfigService(relayAddr string) *CliConfigService {
+func NewCliConfigService(relayAddr string, appSettings *AppSettingsService) *CliConfigService {
 	home, err := getUserHomeDir()
 	return &CliConfigService{
-		relayAddr: relayAddr,
-		homeDir:   home,
-		homeErr:   err,
+		relayAddr:   relayAddr,
+		homeDir:     home,
+		homeErr:     err,
+		appSettings: appSettings,
 	}
+}
+
+func (s *CliConfigService) proxyAuthField() string {
+	if s.appSettings == nil {
+		return claudeProxyAuthFieldAuthToken
+	}
+	settings, err := s.appSettings.GetAppSettings()
+	if err != nil {
+		return claudeProxyAuthFieldAuthToken
+	}
+	return normalizeClaudeProxyAuthField(settings.ClaudeProxyAuthField)
 }
 
 // requireHome 校验家目录是否可用
@@ -228,7 +241,7 @@ func stripClaudeLockedEditableFields(value map[string]interface{}) map[string]in
 	envValue, ok := nextValue["env"].(map[string]interface{})
 	if ok && envValue != nil {
 		delete(envValue, "ANTHROPIC_BASE_URL")
-		delete(envValue, "ANTHROPIC_AUTH_TOKEN")
+		delete(envValue, claudeAuthTokenEnvKey)
 		if len(envValue) == 0 {
 			delete(nextValue, "env")
 		} else {
@@ -352,7 +365,7 @@ func lookupCodexProviderTable(raw map[string]interface{}, providerKey string) ma
 	return normalizeTomlGenericMap(modelProvidersValue[providerKey])
 }
 
-func buildClaudeEditorLockedFields(value map[string]interface{}) []CLIConfigField {
+func buildClaudeEditorLockedFields(value map[string]interface{}, proxyBaseURL string) []CLIConfigField {
 	envValue, _ := value["env"].(map[string]interface{})
 	if envValue == nil {
 		return []CLIConfigField{}
@@ -367,7 +380,7 @@ func buildClaudeEditorLockedFields(value map[string]interface{}) []CLIConfigFiel
 			"string",
 		))
 	}
-	if authToken := anyToString(envValue["ANTHROPIC_AUTH_TOKEN"]); strings.TrimSpace(authToken) != "" {
+	if authToken := anyToString(envValue[claudeAuthTokenEnvKey]); strings.TrimSpace(authToken) != "" {
 		lockedFields = append(lockedFields, buildLockedField(
 			"env.ANTHROPIC_AUTH_TOKEN",
 			authToken,
@@ -375,8 +388,25 @@ func buildClaudeEditorLockedFields(value map[string]interface{}) []CLIConfigFiel
 			"string",
 		))
 	}
+	if apiKey := anyToString(envValue[claudeAPIKeyEnvKey]); strings.TrimSpace(apiKey) != "" && isClaudeProxyBaseURL(envValue, proxyBaseURL) {
+		lockedFields = append(lockedFields, buildLockedField(
+			"env.ANTHROPIC_API_KEY",
+			apiKey,
+			"由系统管理，当前 API Key 只读展示",
+			"string",
+		))
+	}
 
 	return lockedFields
+}
+
+func isClaudeProxyBaseURL(env map[string]interface{}, proxyBaseURL string) bool {
+	if env == nil {
+		return false
+	}
+	currentBaseURL := strings.TrimSuffix(strings.TrimSpace(anyToString(env["ANTHROPIC_BASE_URL"])), "/")
+	normalizedProxyBaseURL := strings.TrimSuffix(strings.TrimSpace(proxyBaseURL), "/")
+	return currentBaseURL != "" && strings.EqualFold(currentBaseURL, normalizedProxyBaseURL)
 }
 
 func buildCodexEditorLockedFields(raw map[string]interface{}) []CLIConfigField {
@@ -656,10 +686,10 @@ func (s *CliConfigService) GetConfigSnapshots(platform string, apiUrl string, ap
 		}
 		if previewDirect {
 			env["ANTHROPIC_BASE_URL"] = normalizeURLTrimSlash(apiUrl)
-			env["ANTHROPIC_AUTH_TOKEN"] = apiKey
+			env[claudeAuthTokenEnvKey] = apiKey
 		} else {
 			env["ANTHROPIC_BASE_URL"] = s.baseURL()
-			env["ANTHROPIC_AUTH_TOKEN"] = "code-switch-r"
+			applyClaudeProxyAuthEnv(env, s.proxyAuthField())
 		}
 		previewData["env"] = env
 
@@ -932,10 +962,10 @@ func (s *CliConfigService) GetConfigSnapshotsWithEditable(
 		switch effectiveMode {
 		case "direct":
 			env["ANTHROPIC_BASE_URL"] = normalizeURLTrimSlash(apiUrl)
-			env["ANTHROPIC_AUTH_TOKEN"] = apiKey
+			env[claudeAuthTokenEnvKey] = apiKey
 		case "proxy":
 			env["ANTHROPIC_BASE_URL"] = s.baseURL()
-			env["ANTHROPIC_AUTH_TOKEN"] = "code-switch-r"
+			applyClaudeProxyAuthEnv(env, s.proxyAuthField())
 		case "current":
 			currentData := make(map[string]interface{})
 			if strings.TrimSpace(currentContent) != "" {
@@ -945,8 +975,10 @@ func (s *CliConfigService) GetConfigSnapshotsWithEditable(
 						if baseURL := anyToString(currentEnv["ANTHROPIC_BASE_URL"]); baseURL != "" {
 							env["ANTHROPIC_BASE_URL"] = baseURL
 						}
-						if authToken := anyToString(currentEnv["ANTHROPIC_AUTH_TOKEN"]); authToken != "" {
-							env["ANTHROPIC_AUTH_TOKEN"] = authToken
+						for _, key := range []string{claudeAuthTokenEnvKey, claudeAPIKeyEnvKey} {
+							if value := anyToString(currentEnv[key]); value != "" {
+								env[key] = value
+							}
 						}
 					}
 				}
@@ -954,8 +986,10 @@ func (s *CliConfigService) GetConfigSnapshotsWithEditable(
 			if _, ok := env["ANTHROPIC_BASE_URL"]; !ok {
 				env["ANTHROPIC_BASE_URL"] = s.baseURL()
 			}
-			if _, ok := env["ANTHROPIC_AUTH_TOKEN"]; !ok {
-				env["ANTHROPIC_AUTH_TOKEN"] = "code-switch-r"
+			if _, hasAuthToken := env[claudeAuthTokenEnvKey]; !hasAuthToken {
+				if _, hasAPIKey := env[claudeAPIKeyEnvKey]; !hasAPIKey {
+					applyClaudeProxyAuthEnv(env, s.proxyAuthField())
+				}
 			}
 		}
 
@@ -1344,7 +1378,7 @@ func (s *CliConfigService) RenderEditorContent(
 
 		if hasCLIEditorProviderInput(PlatformClaude, apiURL, apiKey) {
 			envValue["ANTHROPIC_BASE_URL"] = normalizeURLTrimSlash(apiURL)
-			envValue["ANTHROPIC_AUTH_TOKEN"] = apiKey
+			envValue[claudeAuthTokenEnvKey] = apiKey
 		} else {
 			currentContent, err := os.ReadFile(s.getClaudeConfigPath())
 			if err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -1359,8 +1393,10 @@ func (s *CliConfigService) RenderEditorContent(
 					if baseURL := anyToString(currentEnv["ANTHROPIC_BASE_URL"]); baseURL != "" {
 						envValue["ANTHROPIC_BASE_URL"] = baseURL
 					}
-					if token := anyToString(currentEnv["ANTHROPIC_AUTH_TOKEN"]); token != "" {
-						envValue["ANTHROPIC_AUTH_TOKEN"] = token
+					for _, key := range []string{claudeAuthTokenEnvKey, claudeAPIKeyEnvKey} {
+						if value := anyToString(currentEnv[key]); value != "" {
+							envValue[key] = value
+						}
 					}
 				}
 			}
@@ -1379,7 +1415,7 @@ func (s *CliConfigService) RenderEditorContent(
 		return &CLIEditorContent{
 			Format:       "json",
 			Content:      string(rendered),
-			LockedFields: buildClaudeEditorLockedFields(value),
+			LockedFields: buildClaudeEditorLockedFields(value, s.baseURL()),
 		}, nil
 
 	case PlatformCodex:
@@ -1678,7 +1714,7 @@ func (s *CliConfigService) getClaudeConfig() (*CLIConfig, error) {
 	}
 
 	// 构建字段列表
-	config.Fields = append(config.Fields, buildClaudeEditorLockedFields(data)...)
+	config.Fields = append(config.Fields, buildClaudeEditorLockedFields(data, s.baseURL())...)
 
 	// 可编辑字段
 	env, _ := data["env"].(map[string]interface{})
@@ -1722,8 +1758,9 @@ func (s *CliConfigService) getClaudeConfig() (*CLIConfig, error) {
 
 	// 检查是否有其他未知的 env 变量（排除锁定的）
 	if env != nil {
+		proxyMode := isClaudeProxyBaseURL(env, s.baseURL())
 		for k, v := range env {
-			if k != "ANTHROPIC_BASE_URL" && k != "ANTHROPIC_AUTH_TOKEN" {
+			if k != "ANTHROPIC_BASE_URL" && k != claudeAuthTokenEnvKey && (!proxyMode || k != claudeAPIKeyEnvKey) {
 				config.Fields = append(config.Fields, CLIConfigField{
 					Key:    "env." + k,
 					Value:  fmt.Sprintf("%v", v),
@@ -1759,18 +1796,22 @@ func (s *CliConfigService) saveClaudeConfig(editable map[string]interface{}, api
 	}
 
 	env := make(map[string]interface{})
-	if hasCLIEditorProviderInput(PlatformClaude, apiURL, apiKey) {
+	directMode := hasCLIEditorProviderInput(PlatformClaude, apiURL, apiKey)
+	if directMode {
 		env["ANTHROPIC_BASE_URL"] = normalizeURLTrimSlash(apiURL)
-		env["ANTHROPIC_AUTH_TOKEN"] = apiKey
+		env[claudeAuthTokenEnvKey] = apiKey
 	} else {
 		env["ANTHROPIC_BASE_URL"] = s.baseURL()
-		env["ANTHROPIC_AUTH_TOKEN"] = "code-switch-r"
+		applyClaudeProxyAuthEnv(env, s.proxyAuthField())
 	}
 
 	// 锁定字段列表（这些字段不允许用户覆盖）
 	lockedFields := map[string]bool{
 		"env.ANTHROPIC_BASE_URL":   true,
 		"env.ANTHROPIC_AUTH_TOKEN": true,
+	}
+	if !directMode {
+		lockedFields["env.ANTHROPIC_API_KEY"] = true
 	}
 
 	// 合并用户编辑的所有字段（除了锁定字段）
@@ -1784,7 +1825,7 @@ func (s *CliConfigService) saveClaudeConfig(editable map[string]interface{}, api
 		if k == "env" {
 			if customEnv, ok := v.(map[string]interface{}); ok {
 				for ek, ev := range customEnv {
-					if ek != "ANTHROPIC_BASE_URL" && ek != "ANTHROPIC_AUTH_TOKEN" {
+					if ek != "ANTHROPIC_BASE_URL" && ek != claudeAuthTokenEnvKey && (directMode || ek != claudeAPIKeyEnvKey) {
 						env[ek] = ev
 					}
 				}
@@ -1826,7 +1867,7 @@ func (s *CliConfigService) saveClaudeConfigContent(configPath string, content st
 		env = make(map[string]interface{})
 	}
 	env["ANTHROPIC_BASE_URL"] = s.baseURL()
-	env["ANTHROPIC_AUTH_TOKEN"] = "code-switch-r"
+	applyClaudeProxyAuthEnv(env, s.proxyAuthField())
 	data["env"] = env
 
 	// 创建备份（文件不存在时 CreateBackup 会返回空路径并忽略）

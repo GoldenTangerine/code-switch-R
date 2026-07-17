@@ -6,7 +6,7 @@ import (
 )
 
 func TestBuildWSLClaudeConfigScriptUsesRollingBackupAndProtectsBackupSymlink(t *testing.T) {
-	script := buildWSLClaudeConfigScript("http://127.0.0.1:18100")
+	script := buildWSLClaudeConfigScript("http://127.0.0.1:18100", claudeProxyAuthFieldAuthToken)
 
 	containsAll(t, script,
 		`backup_path="$config_path.bak"`,
@@ -17,6 +17,21 @@ func TestBuildWSLClaudeConfigScriptUsesRollingBackupAndProtectsBackupSymlink(t *
 	if strings.Contains(script, `.bak.$ts`) {
 		t.Fatalf("Claude 脚本不应再生成时间戳备份: %s", script)
 	}
+}
+
+func TestBuildWSLClaudeConfigScriptUsesSingleSelectedAuthField(t *testing.T) {
+	tokenScript := buildWSLClaudeConfigScript("http://127.0.0.1:18100", claudeProxyAuthFieldAuthToken)
+	containsAll(t, tokenScript,
+		`auth_field='ANTHROPIC_AUTH_TOKEN'`,
+		`del(.env.ANTHROPIC_AUTH_TOKEN, .env.ANTHROPIC_API_KEY)`,
+	)
+
+	apiKeyScript := buildWSLClaudeConfigScript("http://127.0.0.1:18100", claudeProxyAuthFieldAPIKey)
+	containsAll(t, apiKeyScript,
+		`auth_field='ANTHROPIC_API_KEY'`,
+		`env.pop("ANTHROPIC_AUTH_TOKEN", None)`,
+		`env.pop("ANTHROPIC_API_KEY", None)`,
+	)
 }
 
 func TestBuildWSLCodexConfigScriptUsesRollingBackupAndProtectsBackupSymlink(t *testing.T) {

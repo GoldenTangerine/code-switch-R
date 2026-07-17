@@ -56,6 +56,12 @@ func TestModelsHandler(t *testing.T) {
 		if authHeader != "Bearer test-api-key" {
 			t.Errorf("Authorization 头不正确，期望 'Bearer test-api-key'，收到 '%s'", authHeader)
 		}
+		if value := r.Header.Get("x-api-key"); value != "" {
+			t.Errorf("客户端 x-api-key 不应转发到 Claude 上游，收到 %q", value)
+		}
+		if value := r.Header.Get("x-goog-api-key"); value != "" {
+			t.Errorf("客户端 x-goog-api-key 不应转发到 Claude 上游，收到 %q", value)
+		}
 
 		// 返回模拟的模型列表
 		response := map[string]interface{}{
@@ -113,6 +119,9 @@ func TestModelsHandler(t *testing.T) {
 
 	// 创建测试请求
 	req := httptest.NewRequest("GET", "/v1/models", nil)
+	req.Header.Set("Authorization", "Bearer client-placeholder")
+	req.Header.Set("x-api-key", "client-placeholder")
+	req.Header.Set("x-goog-api-key", "client-placeholder")
 	w := httptest.NewRecorder()
 
 	// 执行请求

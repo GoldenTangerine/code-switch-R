@@ -2504,3 +2504,24 @@ func TestRoundRobinOrderPreviewDoesNotAdvanceState(t *testing.T) {
 		t.Fatalf("preview 不应推进状态，下一次真实轮询仍应为第二位，got %s", second[0].Name)
 	}
 }
+
+func TestRemoveClaudeClientAuthHeadersRemovesStandardAndSelectedCustomHeader(t *testing.T) {
+	headers := map[string]string{
+		"authorization":  "Bearer client-token",
+		"X-Api-Key":      "client-key",
+		"X-Goog-Api-Key": "client-google-key",
+		"X-Custom-Auth":  "client-custom-key",
+		"User-Agent":     "claude-code",
+	}
+
+	removeClaudeClientAuthHeaders(headers, "X-Custom-Auth")
+
+	for _, key := range []string{"Authorization", "x-api-key", "x-goog-api-key", "x-custom-auth"} {
+		if value := getHeaderValueCaseInsensitive(headers, key); value != "" {
+			t.Fatalf("认证头 %s 未清理: %q", key, value)
+		}
+	}
+	if got := headers["User-Agent"]; got != "claude-code" {
+		t.Fatalf("无关请求头被修改: %#v", headers)
+	}
+}
