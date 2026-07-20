@@ -70,6 +70,20 @@ export const normalizeModelMappingDisabled = (
   return normalized
 }
 
+export const normalizeModelMappingSupports1M = (
+  value: unknown,
+  modelMapping: Record<string, string> | undefined,
+): Record<string, boolean> => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  const normalized: Record<string, boolean> = {}
+  Object.entries(value as Record<string, unknown>).forEach(([key, supports1M]) => {
+    if (supports1M === true && Object.prototype.hasOwnProperty.call(modelMapping || {}, key)) {
+      normalized[key] = true
+    }
+  })
+  return normalized
+}
+
 export const normalizeProviderConcurrencyLimit = (value: unknown): number => {
   const raw = `${value ?? ''}`.trim()
   if (raw === '') return 0
@@ -145,6 +159,7 @@ export const createDefaultVendorForm = (
   modelMapping: {},
   modelMappingDisabled: {},
   modelMappingReasoningEfforts: {},
+  modelMappingSupports1M: {},
   modelMappingMissPolicy: 'block',
   modelPassthroughPatterns: [],
   requestBodyOverrides: {},
@@ -201,6 +216,10 @@ export const createVendorFormFromCard = (
   ),
   modelMappingReasoningEfforts: normalizeModelMappingReasoningEfforts(
     card.modelMappingReasoningEfforts,
+    card.modelMapping,
+  ),
+  modelMappingSupports1M: normalizeModelMappingSupports1M(
+    card.modelMappingSupports1M,
     card.modelMapping,
   ),
   modelMappingMissPolicy: normalizeModelMappingMissPolicy(card.modelMappingMissPolicy),
@@ -301,6 +320,10 @@ export const buildNormalizedVendorForm = ({
       form.modelMappingReasoningEfforts,
       form.modelMapping,
     ),
+    modelMappingSupports1M: normalizeModelMappingSupports1M(
+      form.modelMappingSupports1M,
+      form.modelMapping,
+    ),
     modelMappingMissPolicy: normalizeModelMappingMissPolicy(form.modelMappingMissPolicy),
     modelPassthroughPatterns: cloneProviderValue(form.modelPassthroughPatterns || []),
     requestBodyOverrides: cloneProviderValue(form.requestBodyOverrides || {}),
@@ -362,6 +385,10 @@ export const buildPersistedProviderFieldsFromForm = (
     ),
     modelMappingReasoningEfforts: normalizeModelMappingReasoningEfforts(
       form.modelMappingReasoningEfforts,
+      form.modelMapping,
+    ),
+    modelMappingSupports1M: normalizeModelMappingSupports1M(
+      form.modelMappingSupports1M,
       form.modelMapping,
     ),
     modelMappingMissPolicy: normalizeModelMappingMissPolicy(form.modelMappingMissPolicy),

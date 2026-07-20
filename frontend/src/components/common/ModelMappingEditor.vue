@@ -94,6 +94,9 @@
             >
               {{ mapping.reasoningEffort || $t('components.provider.modelMapping.reasoningEffort.passthrough') }}
             </span>
+            <span v-if="showSupportsOneM && mapping.supportsOneM" class="mapping-one-m-badge">
+              {{ $t('components.provider.modelMapping.supports1MShort') }}
+            </span>
           </div>
 
           <div class="mapping-row-controls">
@@ -116,7 +119,7 @@
                 type="button"
                 class="mapping-action"
                 :aria-label="$t('components.provider.modelMapping.edit')"
-                @click="startEditing(mapping.key, mapping.value, mapping.reasoningEffort)"
+                @click="startEditing(mapping.key, mapping.value, mapping.reasoningEffort, mapping.supportsOneM)"
               >
                 <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
                   <path
@@ -156,7 +159,7 @@
     </div>
 
     <div class="mapping-input-panel" :class="{ 'is-editing': isEditing }">
-      <div class="mapping-input-row">
+      <div class="mapping-input-row" :class="{ 'has-one-m': showSupportsOneM }">
         <div class="mapping-field mapping-field--key">
           <SearchableModelInput
             v-model="newKey"
@@ -200,6 +203,11 @@
             max-height="220px"
           />
         </div>
+
+        <label v-if="showSupportsOneM" class="mapping-one-m-option">
+          <input v-model="newSupportsOneM" type="checkbox" />
+          <span>{{ $t('components.provider.modelMapping.supports1MLabel') }}</span>
+        </label>
 
         <div class="mapping-actions">
           <button
@@ -329,7 +337,11 @@ import type { CLIPlatform } from '../../services/cliConfig'
 import { listModelPricing, type ModelPricingRow } from '../../services/modelPricing'
 import { buildBuiltinModelOptions, buildBuiltinProviderModelOptions } from '../../utils/builtinModels'
 import BaseInput from './BaseInput.vue'
-import { removeModelMappingRule, upsertModelMappingRule } from './modelMappingState'
+import {
+  removeModelMappingRule,
+  resolveSubmittedModelMappingSupportsOneM,
+  upsertModelMappingRule,
+} from './modelMappingState'
 import { handleSearchableInputEnter } from './searchableInputKeyboard'
 import SearchableModelInput from './SearchableModelInput.vue'
 
@@ -339,16 +351,19 @@ interface Props {
   modelValue?: Record<string, string>
   disabledRules?: Record<string, boolean>
   reasoningEfforts?: Record<string, string>
+  supportsOneM?: Record<string, boolean>
   missPolicy?: ModelMappingMissPolicy
   passthroughPatterns?: string[]
   platform?: CLIPlatform
   toggleSaving?: boolean
+  showSupportsOneM?: boolean
 }
 
 interface Emits {
   (e: 'update:modelValue', value: Record<string, string>): void
   (e: 'update:disabledRules', value: Record<string, boolean>): void
   (e: 'update:reasoningEfforts', value: Record<string, string>): void
+  (e: 'update:supportsOneM', value: Record<string, boolean>): void
   (e: 'update:missPolicy', value: ModelMappingMissPolicy): void
   (e: 'update:passthroughPatterns', value: string[]): void
   (e: 'toggleRule', key: string, enabled: boolean): void
@@ -365,12 +380,14 @@ const mappingList = computed(() => {
     value,
     enabled: props.disabledRules?.[key] !== true,
     reasoningEffort: `${props.reasoningEfforts?.[key] ?? ''}`.trim(),
+    supportsOneM: props.supportsOneM?.[key] === true,
   }))
 })
 
 const newKey = ref('')
 const newValue = ref('')
 const newReasoningEffort = ref('')
+const newSupportsOneM = ref(false)
 const newPassthroughPattern = ref('')
 const editingOriginalKey = ref('')
 const inputError = ref('')
@@ -526,6 +543,7 @@ function resetDraft(): void {
   newKey.value = ''
   newValue.value = ''
   newReasoningEffort.value = ''
+  newSupportsOneM.value = false
   editingOriginalKey.value = ''
   inputError.value = ''
 }
@@ -543,11 +561,12 @@ function handleProviderModelEnter(event: KeyboardEvent): void {
   handleSearchableInputEnter(event, submitMapping)
 }
 
-function startEditing(key: string, value: string, reasoningEffort: string): void {
+function startEditing(key: string, value: string, reasoningEffort: string, supportsOneM: boolean): void {
   editingOriginalKey.value = key
   newKey.value = key
   newValue.value = value
   newReasoningEffort.value = reasoningEffort
+  newSupportsOneM.value = supportsOneM
   inputError.value = ''
 }
 
@@ -567,18 +586,29 @@ function submitMapping(): void {
     return
   }
 
+  const supportsOneM = props.supportsOneM || {}
+  const declaresOneM = resolveSubmittedModelMappingSupportsOneM(
+    props.showSupportsOneM === true,
+    newSupportsOneM.value,
+    editingOriginalKey.value,
+    supportsOneM,
+  )
+
   const updated = upsertModelMappingRule(
     props.modelValue || {},
     props.disabledRules || {},
     props.reasoningEfforts || {},
+    supportsOneM,
     editingOriginalKey.value,
     key,
     value,
     reasoningEffort,
+    declaresOneM,
   )
   emit('update:modelValue', updated.modelMappings)
   emit('update:disabledRules', updated.disabledRules)
   emit('update:reasoningEfforts', updated.reasoningEfforts)
+  emit('update:supportsOneM', updated.supportsOneM)
   resetDraft()
 }
 
@@ -587,11 +617,13 @@ function removeMapping(key: string): void {
     props.modelValue || {},
     props.disabledRules || {},
     props.reasoningEfforts || {},
+    props.supportsOneM || {},
     key,
   )
   emit('update:modelValue', updated.modelMappings)
   emit('update:disabledRules', updated.disabledRules)
   emit('update:reasoningEfforts', updated.reasoningEfforts)
+  emit('update:supportsOneM', updated.supportsOneM)
 
   if (editingOriginalKey.value === key) {
     resetDraft()
@@ -638,7 +670,7 @@ async function loadBuiltinModelRows(): Promise<void> {
   }
 }
 
-watch([newKey, newValue, newReasoningEffort], () => {
+watch([newKey, newValue, newReasoningEffort, newSupportsOneM], () => {
   inputError.value = ''
 })
 
@@ -937,6 +969,29 @@ html.dark .mapping-type--wildcard {
   color: var(--mapping-muted);
 }
 
+.mapping-one-m-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  min-width: 34px;
+  min-height: 24px;
+  padding: 4px 8px;
+  border: 1px solid color-mix(in srgb, #059669 38%, var(--mac-border));
+  border-radius: 6px;
+  background: color-mix(in srgb, #10b981 11%, transparent);
+  color: #047857;
+  font-size: 0.6875rem;
+  font-weight: 750;
+  line-height: 1;
+}
+
+html.dark .mapping-one-m-badge {
+  color: #6ee7b7;
+  border-color: rgba(52, 211, 153, 0.34);
+  background: rgba(16, 185, 129, 0.1);
+}
+
 .mapping-arrow,
 .input-arrow {
   flex-shrink: 0;
@@ -1037,6 +1092,36 @@ html.dark .mapping-type--wildcard {
   grid-template-columns: minmax(0, 1.05fr) auto minmax(0, 0.95fr) minmax(128px, 0.55fr) auto;
   gap: 12px;
   align-items: center;
+}
+
+.mapping-input-row.has-one-m {
+  grid-template-columns: minmax(0, 1.05fr) auto minmax(0, 0.95fr) minmax(128px, 0.55fr) minmax(128px, auto) auto;
+}
+
+.mapping-one-m-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 128px;
+  min-height: 36px;
+  color: var(--mac-text-secondary);
+  font-size: 0.75rem;
+  font-weight: 650;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.mapping-one-m-option input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--mac-accent);
+  cursor: pointer;
+}
+
+.mapping-one-m-option input:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--mac-accent) 72%, transparent);
+  outline-offset: 2px;
 }
 
 .mapping-field {
@@ -1348,6 +1433,14 @@ html.dark .mapping-type--wildcard {
 @media (max-width: 720px) {
   .mapping-input-row {
     grid-template-columns: 1fr;
+  }
+
+  .mapping-input-row.has-one-m {
+    grid-template-columns: 1fr;
+  }
+
+  .mapping-one-m-option {
+    width: 100%;
   }
 
   .input-arrow {

@@ -78,6 +78,9 @@ type Provider struct {
 	// 空值或未配置表示保留请求原有强度
 	ModelMappingReasoningEfforts map[string]string `json:"modelMappingReasoningEfforts,omitempty"`
 
+	// 模型映射 1M 上下文声明 - 模型映射 key -> true
+	ModelMappingSupports1M map[string]bool `json:"modelMappingSupports1M,omitempty"`
+
 	// 模型映射未命中策略：
 	// - block: 未命中映射时跳过该 Provider（默认）
 	// - passthrough: 未命中映射时按原模型名转发给该 Provider
@@ -237,6 +240,12 @@ func cloneProvider(provider Provider) Provider {
 		cloned.ModelMappingReasoningEfforts = make(map[string]string, len(provider.ModelMappingReasoningEfforts))
 		for key, value := range provider.ModelMappingReasoningEfforts {
 			cloned.ModelMappingReasoningEfforts[key] = value
+		}
+	}
+	if provider.ModelMappingSupports1M != nil {
+		cloned.ModelMappingSupports1M = make(map[string]bool, len(provider.ModelMappingSupports1M))
+		for key, value := range provider.ModelMappingSupports1M {
+			cloned.ModelMappingSupports1M[key] = value
 		}
 	}
 	cloned.ModelPassthroughPatterns = append([]string(nil), provider.ModelPassthroughPatterns...)
@@ -536,6 +545,7 @@ func (ps *ProviderService) saveProvidersLocked(kind string, providers []Provider
 		// 验证模型配置
 		p.ModelPassthroughPatterns = normalizeModelPassthroughPatterns(p.ModelPassthroughPatterns)
 		p.ModelMappingDisabled = normalizeModelMappingDisabled(p.ModelMappingDisabled, p.ModelMapping)
+		p.ModelMappingSupports1M = normalizeModelMappingSupports1M(p.ModelMappingSupports1M, p.ModelMapping)
 		if errs := p.validateConfigurationForKind(kind); len(errs) > 0 {
 			for _, errMsg := range errs {
 				validationErrors = append(validationErrors, fmt.Sprintf("[%s] %s", p.Name, errMsg))
@@ -1026,6 +1036,12 @@ func (ps *ProviderService) DuplicateProvider(kind string, sourceID int64) (*Prov
 			cloned.ModelMappingReasoningEfforts[k] = v
 		}
 	}
+	if source.ModelMappingSupports1M != nil {
+		cloned.ModelMappingSupports1M = make(map[string]bool, len(source.ModelMappingSupports1M))
+		for k, v := range source.ModelMappingSupports1M {
+			cloned.ModelMappingSupports1M[k] = v
+		}
+	}
 	if source.ModelPassthroughPatterns != nil {
 		cloned.ModelPassthroughPatterns = append([]string(nil), source.ModelPassthroughPatterns...)
 	}
@@ -1153,6 +1169,7 @@ type providerModelMappingDetail struct {
 	Pattern         string
 	TargetPattern   string
 	ReasoningEffort string
+	Supports1M      bool
 	Matched         bool
 }
 
@@ -1173,6 +1190,7 @@ func (p *Provider) resolveModelMappingDetail(requestedModel string) providerMode
 			Pattern:         requestedModel,
 			TargetPattern:   mappedModel,
 			ReasoningEffort: strings.TrimSpace(p.ModelMappingReasoningEfforts[requestedModel]),
+			Supports1M:      p.ModelMappingSupports1M[requestedModel],
 			Matched:         true,
 		}
 	}
@@ -1213,6 +1231,7 @@ func (p *Provider) resolveModelMappingDetail(requestedModel string) providerMode
 		Pattern:         selected.pattern,
 		TargetPattern:   selected.replacement,
 		ReasoningEffort: strings.TrimSpace(p.ModelMappingReasoningEfforts[selected.pattern]),
+		Supports1M:      p.ModelMappingSupports1M[selected.pattern],
 		Matched:         true,
 	}
 }
@@ -1228,6 +1247,24 @@ func normalizeModelMappingDisabled(disabled map[string]bool, modelMapping map[st
 		}
 		if _, exists := modelMapping[key]; exists {
 			normalized[key] = true
+		}
+	}
+	if len(normalized) == 0 {
+		return nil
+	}
+	return normalized
+}
+
+func normalizeModelMappingSupports1M(supports1M map[string]bool, modelMapping map[string]string) map[string]bool {
+	if len(supports1M) == 0 || len(modelMapping) == 0 {
+		return nil
+	}
+	normalized := make(map[string]bool)
+	for key, enabled := range supports1M {
+		if enabled {
+			if _, exists := modelMapping[key]; exists {
+				normalized[key] = true
+			}
 		}
 	}
 	if len(normalized) == 0 {

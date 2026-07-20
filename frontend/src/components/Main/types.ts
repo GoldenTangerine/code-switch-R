@@ -60,6 +60,7 @@ export type VendorForm = {
   modelMapping?: Record<string, string>
   modelMappingDisabled?: Record<string, boolean>
   modelMappingReasoningEfforts?: Record<string, string>
+  modelMappingSupports1M?: Record<string, boolean>
   modelMappingMissPolicy?: ModelMappingMissPolicy
   modelPassthroughPatterns?: string[]
   requestBodyOverrides?: Record<string, any>

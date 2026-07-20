@@ -336,6 +336,8 @@
           "passthrough": "透传",
           "customHint": "可输入自定义强度"
         },
+        "supports1MLabel": "声明支持 1M",
+        "supports1MShort": "1M",
         "add": "添加",
         "save": "保存映射",
         "cancel": "取消编辑",

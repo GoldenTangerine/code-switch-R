@@ -14,6 +14,7 @@ import { Call } from '@wailsio/runtime'
 import {
   normalizeModelMappingDisabled,
   normalizeModelMappingReasoningEfforts,
+  normalizeModelMappingSupports1M,
 } from '../adapters/providerFormMappers'
 import { useProviderForm } from './useProviderForm'
 
@@ -35,6 +36,21 @@ describe('model mapping reasoning effort normalization', () => {
 describe('model mapping disabled state normalization', () => {
   it('keeps only disabled entries that still have mapping rules', () => {
     expect(normalizeModelMappingDisabled({
+      'claude-*': true,
+      'gpt-*': false,
+      orphan: true,
+    }, {
+      'claude-*': 'vendor-*',
+      'gpt-*': 'openai-*',
+    })).toEqual({
+      'claude-*': true,
+    })
+  })
+})
+
+describe('model mapping 1M state normalization', () => {
+  it('keeps only enabled entries that still have mapping rules', () => {
+    expect(normalizeModelMappingSupports1M({
       'claude-*': true,
       'gpt-*': false,
       orphan: true,
@@ -570,6 +586,8 @@ describe('useProviderForm order preservation', () => {
       name: 'Claude Routed Provider',
       apiFormat: 'openai_responses',
       apiKey: 'claude-key',
+      modelMapping: { 'claude-*': 'vendor-*' },
+      modelMappingSupports1M: { 'claude-*': true },
     }))
 
     expect(persistProviders).toHaveBeenCalledWith('claude')
@@ -577,6 +595,7 @@ describe('useProviderForm order preservation', () => {
     expect(refreshDirectAppliedStatus).not.toHaveBeenCalled()
     expect(showToast).toHaveBeenCalledWith('components.main.directApply.requiresHostedRouting', 'warning')
     expect(cards.claude[0]?.apiFormat).toBe('openai_responses')
+    expect(cards.claude[0]?.modelMappingSupports1M).toEqual({ 'claude-*': true })
   })
 
   it('persists Anthropic cache TTL only for native Claude providers', async () => {

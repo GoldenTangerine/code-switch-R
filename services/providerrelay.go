@@ -2968,18 +2968,19 @@ func (prs *ProviderRelayService) forwardRequest(
 	inputProtocol := providerRequestProtocolForInput(endpoint)
 	actualProtocol := providerRequestProtocolForOutput(endpoint, resolveClaudeAPIFormat(provider))
 	plan := providerRequestPlan{
-		OriginalBodyBytes:   bodyBytes,
-		BodyBytes:           bodyBytes,
-		EffectiveModel:      model,
-		MappedModel:         mappedModelForRoute(mappingDetail),
-		ModelMappingPattern: mappingDetail.Pattern,
-		ModelMappingTarget:  mappingDetail.TargetPattern,
-		ModelOverride:       modelOverride,
-		ModelRouteCaptured:  true,
-		Reasoning:           reasoning,
-		Parameters:          buildProviderRequestParameters(bodyBytes, bodyBytes, requestedModel, reasoning, false, inputProtocol, actualProtocol),
-		ParameterProtocol:   actualProtocol,
-		EffectiveEndpoint:   endpoint,
+		OriginalBodyBytes:      bodyBytes,
+		BodyBytes:              bodyBytes,
+		EffectiveModel:         model,
+		MappedModel:            mappedModelForRoute(mappingDetail),
+		ModelMappingPattern:    mappingDetail.Pattern,
+		ModelMappingTarget:     mappingDetail.TargetPattern,
+		ModelMappingSupports1M: mappingDetail.Supports1M,
+		ModelOverride:          modelOverride,
+		ModelRouteCaptured:     true,
+		Reasoning:              reasoning,
+		Parameters:             buildProviderRequestParameters(bodyBytes, bodyBytes, requestedModel, reasoning, false, inputProtocol, actualProtocol),
+		ParameterProtocol:      actualProtocol,
+		EffectiveEndpoint:      endpoint,
 	}
 	return prs.forwardRequestWithPlan(c, kind, provider, endpoint, query, clientHeaders, bodyBytes, isStream, model, requestedModel, plan, prs.isProviderConcurrencyLimitEnabled(kind))
 }
@@ -3072,6 +3073,7 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 	if kind == "claude" && resolveClaudeAPIFormat(provider) == claudeAPIFormatOpenAIResponse {
 		setHeaderIfAbsentCaseInsensitive(headers, "openai-beta", "responses=experimental")
 	}
+	applyModelMappingOneMHeader(headers, kind, resolveClaudeAPIFormat(provider), plan.ModelMappingSupports1M)
 
 	capturePayloadEnabled, sanitizePayloadEnabled := prs.resolveRequestLogPayloadCaptureAndSanitization()
 	requestLog := &ReqeustLog{
@@ -3607,6 +3609,42 @@ func setHeaderIfAbsentCaseInsensitive(headers map[string]string, key string, val
 		}
 	}
 	headers[key] = value
+}
+
+func appendHeaderTokenCaseInsensitive(headers map[string]string, key string, token string) {
+	if headers == nil {
+		return
+	}
+	headerKey := strings.TrimSpace(key)
+	headerToken := strings.TrimSpace(token)
+	if headerKey == "" || headerToken == "" {
+		return
+	}
+	existingValue := ""
+	for existingKey, value := range headers {
+		if strings.EqualFold(existingKey, headerKey) {
+			headerKey = existingKey
+			existingValue = value
+			break
+		}
+	}
+	for _, existingToken := range strings.Split(existingValue, ",") {
+		if strings.EqualFold(strings.TrimSpace(existingToken), headerToken) {
+			return
+		}
+	}
+	if strings.TrimSpace(existingValue) == "" {
+		headers[headerKey] = headerToken
+		return
+	}
+	headers[headerKey] = strings.TrimSpace(existingValue) + "," + headerToken
+}
+
+func applyModelMappingOneMHeader(headers map[string]string, kind string, apiFormat string, enabled bool) {
+	if !enabled || !strings.EqualFold(strings.TrimSpace(kind), "claude") || normalizeClaudeAPIFormat(apiFormat) != claudeAPIFormatAnthropic {
+		return
+	}
+	appendHeaderTokenCaseInsensitive(headers, "anthropic-beta", claudeOneMContextBeta)
 }
 
 func deleteHeaderCaseInsensitive(headers map[string]string, key string) {
@@ -5826,6 +5864,7 @@ type providerRequestPlan struct {
 	MappedModel                string
 	ModelMappingPattern        string
 	ModelMappingTarget         string
+	ModelMappingSupports1M     bool
 	ModelOverride              string
 	ModelRouteCaptured         bool
 	Reasoning                  providerRequestReasoningMetadata
@@ -5854,6 +5893,7 @@ const (
 	providerRequestProtocolOpenAIChat        = "openai_chat"
 	providerRequestProtocolOpenAIResponses   = "openai_responses"
 	providerRequestProtocolGemini            = "gemini"
+	claudeOneMContextBeta                    = "context-1m-2025-08-07"
 )
 
 type providerRequestScalarMetadata struct {
@@ -6258,6 +6298,7 @@ func (prs *ProviderRelayService) buildProviderRequestPlan(provider Provider, bod
 					MappedModel:                mappedModelForRoute(mappingDetail),
 					ModelMappingPattern:        mappingDetail.Pattern,
 					ModelMappingTarget:         mappingDetail.TargetPattern,
+					ModelMappingSupports1M:     mappingDetail.Supports1M,
 					ModelOverride:              modelOverride,
 					ModelRouteCaptured:         true,
 					Reasoning:                  reasoning,
@@ -6289,6 +6330,7 @@ func (prs *ProviderRelayService) buildProviderRequestPlan(provider Provider, bod
 		MappedModel:                mappedModelForRoute(mappingDetail),
 		ModelMappingPattern:        mappingDetail.Pattern,
 		ModelMappingTarget:         mappingDetail.TargetPattern,
+		ModelMappingSupports1M:     mappingDetail.Supports1M,
 		ModelOverride:              modelOverride,
 		ModelRouteCaptured:         true,
 		Reasoning:                  reasoning,

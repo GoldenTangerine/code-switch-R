@@ -9,6 +9,7 @@ import {
   normalizeModelMappingMissPolicy,
   normalizeModelMappingDisabled,
   normalizeModelMappingReasoningEfforts,
+  normalizeModelMappingSupports1M,
   normalizeProviderConcurrencyLimit,
   resolvePersistedAnthropicCacheTTL,
 } from './providerFormMappers'
@@ -63,6 +64,7 @@ export type PersistedProvider = PersistedProviderModel & {
   modelMappingMissPolicy?: ModelMappingMissPolicy
   modelMappingDisabled?: Record<string, boolean>
   modelMappingReasoningEfforts?: Record<string, string>
+  modelMappingSupports1M?: Record<string, boolean>
   modelPassthroughPatterns?: string[]
   opencodeNpm?: string
   opencodeSettingsConfig?: Record<string, any>
@@ -259,6 +261,10 @@ export const providerToCard = (
   ),
   modelMappingReasoningEfforts: normalizeModelMappingReasoningEfforts(
     provider.modelMappingReasoningEfforts,
+    provider.modelMapping,
+  ),
+  modelMappingSupports1M: normalizeModelMappingSupports1M(
+    provider.modelMappingSupports1M,
     provider.modelMapping,
   ),
   modelMappingMissPolicy: normalizeModelMappingMissPolicy(provider.modelMappingMissPolicy),

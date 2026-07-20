@@ -348,6 +348,9 @@ func TestBuildProviderRequestPlanCapturesCompleteModelRoute(t *testing.T) {
 		ModelMapping: map[string]string{
 			"claude-opus-*": "vendor-opus-*",
 		},
+		ModelMappingSupports1M: map[string]bool{
+			"claude-opus-*": true,
+		},
 		RequestBodyOverrides: map[string]interface{}{
 			"model": "forced-opus-model",
 		},
@@ -367,8 +370,64 @@ func TestBuildProviderRequestPlanCapturesCompleteModelRoute(t *testing.T) {
 	if plan.ModelMappingPattern != "claude-opus-*" || plan.ModelMappingTarget != "vendor-opus-*" {
 		t.Fatalf("模型映射规则错误: %#v", plan)
 	}
+	if !plan.ModelMappingSupports1M {
+		t.Fatalf("模型映射应声明支持 1M: %#v", plan)
+	}
 	if plan.MappedModel != "vendor-opus-4.8" || plan.ModelOverride != "forced-opus-model" || plan.EffectiveModel != "forced-opus-model" {
 		t.Fatalf("模型改写链错误: %#v", plan)
+	}
+}
+
+func TestApplyModelMappingOneMHeader(t *testing.T) {
+	tests := []struct {
+		name      string
+		headers   map[string]string
+		kind      string
+		apiFormat string
+		enabled   bool
+		expected  string
+	}{
+		{
+			name:      "原生 Anthropic 合并现有 beta",
+			headers:   map[string]string{"Anthropic-Beta": "claude-code-20250219"},
+			kind:      "claude",
+			apiFormat: claudeAPIFormatAnthropic,
+			enabled:   true,
+			expected:  "claude-code-20250219,context-1m-2025-08-07",
+		},
+		{
+			name:      "已有 1M beta 时不重复",
+			headers:   map[string]string{"anthropic-beta": "claude-code-20250219, context-1m-2025-08-07"},
+			kind:      "claude",
+			apiFormat: claudeAPIFormatAnthropic,
+			enabled:   true,
+			expected:  "claude-code-20250219, context-1m-2025-08-07",
+		},
+		{
+			name:      "OpenAI 格式不注入",
+			headers:   map[string]string{},
+			kind:      "claude",
+			apiFormat: claudeAPIFormatOpenAIChat,
+			enabled:   true,
+			expected:  "",
+		},
+		{
+			name:      "未声明时不注入",
+			headers:   map[string]string{},
+			kind:      "claude",
+			apiFormat: claudeAPIFormatAnthropic,
+			enabled:   false,
+			expected:  "",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			applyModelMappingOneMHeader(test.headers, test.kind, test.apiFormat, test.enabled)
+			if actual := getHeaderValueCaseInsensitive(test.headers, "anthropic-beta"); actual != test.expected {
+				t.Fatalf("anthropic-beta = %q, 期望 %q", actual, test.expected)
+			}
+		})
 	}
 }
 
@@ -799,6 +858,9 @@ func TestForwardRequestPersistsModelRouteDetails(t *testing.T) {
 		if got := gjson.GetBytes(body, "output_config.effort").String(); got != "high" {
 			t.Errorf("上游思考强度 = %q, 期望 high", got)
 		}
+		if got := request.Header.Get("anthropic-beta"); got != "claude-code-20250219,context-1m-2025-08-07" {
+			t.Errorf("上游 anthropic-beta = %q", got)
+		}
 		writer.Header().Set("Content-Type", "application/json")
 		_, _ = writer.Write([]byte(`{"id":"msg_route","type":"message","model":"forced-opus-model","content":[],"usage":{"input_tokens":1,"output_tokens":1}}`))
 	}))
@@ -815,6 +877,9 @@ func TestForwardRequestPersistsModelRouteDetails(t *testing.T) {
 		},
 		ModelMappingReasoningEfforts: map[string]string{
 			"claude-opus-*": "high",
+		},
+		ModelMappingSupports1M: map[string]bool{
+			"claude-opus-*": true,
 		},
 		RequestBodyOverrides: map[string]interface{}{
 			"model": "forced-opus-model",
@@ -838,7 +903,7 @@ func TestForwardRequestPersistsModelRouteDetails(t *testing.T) {
 		provider,
 		plan.EffectiveEndpoint,
 		map[string]string{},
-		map[string]string{"Content-Type": "application/json"},
+		map[string]string{"Content-Type": "application/json", "anthropic-beta": "claude-code-20250219"},
 		plan.BodyBytes,
 		false,
 		plan.EffectiveModel,

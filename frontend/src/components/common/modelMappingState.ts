@@ -12,20 +12,34 @@ export interface ModelMappingState {
   modelMappings: Record<string, string>
   disabledRules: Record<string, boolean>
   reasoningEfforts: Record<string, string>
+  supportsOneM: Record<string, boolean>
+}
+
+export function resolveSubmittedModelMappingSupportsOneM(
+  isOptionVisible: boolean,
+  draftValue: boolean,
+  originalKey: string,
+  supportsOneM: Record<string, boolean>,
+): boolean {
+  if (isOptionVisible) return draftValue
+  return originalKey !== '' && supportsOneM[originalKey] === true
 }
 
 export function upsertModelMappingRule(
   modelMappings: Record<string, string>,
   disabledRules: Record<string, boolean>,
   reasoningEfforts: Record<string, string>,
+  supportsOneM: Record<string, boolean>,
   originalKey: string,
   key: string,
   value: string,
   reasoningEffort: string,
+  declaresOneM: boolean,
 ): ModelMappingState {
   const nextModelMappings = { ...modelMappings }
   const nextDisabledRules = { ...disabledRules }
   const nextReasoningEfforts = { ...reasoningEfforts }
+  const nextSupportsOneM = { ...supportsOneM }
 
   if (originalKey && originalKey !== key) {
     delete nextModelMappings[originalKey]
@@ -34,6 +48,7 @@ export function upsertModelMappingRule(
     }
     delete nextDisabledRules[originalKey]
     delete nextReasoningEfforts[originalKey]
+    delete nextSupportsOneM[originalKey]
   }
 
   nextModelMappings[key] = value
@@ -42,11 +57,17 @@ export function upsertModelMappingRule(
   } else {
     delete nextReasoningEfforts[key]
   }
+  if (declaresOneM) {
+    nextSupportsOneM[key] = true
+  } else {
+    delete nextSupportsOneM[key]
+  }
 
   return {
     modelMappings: nextModelMappings,
     disabledRules: nextDisabledRules,
     reasoningEfforts: nextReasoningEfforts,
+    supportsOneM: nextSupportsOneM,
   }
 }
 
@@ -54,18 +75,22 @@ export function removeModelMappingRule(
   modelMappings: Record<string, string>,
   disabledRules: Record<string, boolean>,
   reasoningEfforts: Record<string, string>,
+  supportsOneM: Record<string, boolean>,
   key: string,
 ): ModelMappingState {
   const nextModelMappings = { ...modelMappings }
   const nextDisabledRules = { ...disabledRules }
   const nextReasoningEfforts = { ...reasoningEfforts }
+  const nextSupportsOneM = { ...supportsOneM }
   delete nextModelMappings[key]
   delete nextDisabledRules[key]
   delete nextReasoningEfforts[key]
+  delete nextSupportsOneM[key]
 
   return {
     modelMappings: nextModelMappings,
     disabledRules: nextDisabledRules,
     reasoningEfforts: nextReasoningEfforts,
+    supportsOneM: nextSupportsOneM,
   }
 }

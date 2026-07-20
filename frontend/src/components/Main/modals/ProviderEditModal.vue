@@ -562,9 +562,11 @@
             v-model="form.modelMapping"
             v-model:disabled-rules="form.modelMappingDisabled"
             v-model:reasoning-efforts="form.modelMappingReasoningEfforts"
+            v-model:supports-one-m="form.modelMappingSupports1M"
             v-model:miss-policy="form.modelMappingMissPolicy"
             v-model:passthrough-patterns="form.modelPassthroughPatterns"
             :platform="builtinModelPlatform"
+            :show-supports-one-m="tabId === 'claude' && (form.apiFormat || 'anthropic') === 'anthropic'"
             :toggle-saving="modelMappingToggleSaving"
             @toggle-rule="handleModelMappingRuleToggle"
           />

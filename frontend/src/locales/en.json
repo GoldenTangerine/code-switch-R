@@ -335,6 +335,8 @@
           "passthrough": "Passthrough",
           "customHint": "Enter a custom effort value"
         },
+        "supports1MLabel": "Declare 1M",
+        "supports1MShort": "1M",
         "add": "Add",
         "save": "Save mapping",
         "cancel": "Cancel edit",

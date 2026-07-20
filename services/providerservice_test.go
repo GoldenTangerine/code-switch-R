@@ -74,6 +74,7 @@ func TestProviderServiceSnapshotDoesNotShareMutableFields(t *testing.T) {
 		ModelMapping:                 map[string]string{"claude-*": "vendor-*"},
 		ModelMappingDisabled:         map[string]bool{"claude-*": true},
 		ModelMappingReasoningEfforts: map[string]string{"claude-*": "high"},
+		ModelMappingSupports1M:       map[string]bool{"claude-*": true},
 		ModelPassthroughPatterns:     []string{"glm-*"},
 		RequestBodyOverrides: map[string]interface{}{
 			"metadata": map[string]interface{}{"region": "a"},
@@ -88,6 +89,7 @@ func TestProviderServiceSnapshotDoesNotShareMutableFields(t *testing.T) {
 	providers[0].ModelMapping["claude-*"] = "changed-*"
 	providers[0].ModelMappingDisabled["claude-*"] = false
 	providers[0].ModelMappingReasoningEfforts["claude-*"] = "low"
+	providers[0].ModelMappingSupports1M["claude-*"] = false
 	providers[0].ModelPassthroughPatterns[0] = "changed-*"
 	providers[0].RequestBodyOverrides["metadata"].(map[string]interface{})["region"] = "b"
 	providers[0].AvailabilityConfig.TestModel = "changed"
@@ -96,7 +98,7 @@ func TestProviderServiceSnapshotDoesNotShareMutableFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !loaded[0].SupportedModels["claude-opus-4"] || loaded[0].ModelMapping["claude-*"] != "vendor-*" || !loaded[0].ModelMappingDisabled["claude-*"] || loaded[0].ModelMappingReasoningEfforts["claude-*"] != "high" || loaded[0].ModelPassthroughPatterns[0] != "glm-*" {
+	if !loaded[0].SupportedModels["claude-opus-4"] || loaded[0].ModelMapping["claude-*"] != "vendor-*" || !loaded[0].ModelMappingDisabled["claude-*"] || loaded[0].ModelMappingReasoningEfforts["claude-*"] != "high" || !loaded[0].ModelMappingSupports1M["claude-*"] || loaded[0].ModelPassthroughPatterns[0] != "glm-*" {
 		t.Fatalf("保存参数修改污染供应商快照: %#v", loaded[0])
 	}
 	if loaded[0].RequestBodyOverrides["metadata"].(map[string]interface{})["region"] != "a" || loaded[0].AvailabilityConfig.TestModel != "claude-opus-4" {
@@ -106,12 +108,13 @@ func TestProviderServiceSnapshotDoesNotShareMutableFields(t *testing.T) {
 	loaded[0].SupportedModels["claude-opus-4"] = false
 	loaded[0].ModelMappingDisabled["claude-*"] = false
 	loaded[0].ModelMappingReasoningEfforts["claude-*"] = "max"
+	loaded[0].ModelMappingSupports1M["claude-*"] = false
 	loaded[0].RequestBodyOverrides["metadata"].(map[string]interface{})["region"] = "c"
 	loadedAgain, err := service.LoadProviders("claude")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !loadedAgain[0].SupportedModels["claude-opus-4"] || !loadedAgain[0].ModelMappingDisabled["claude-*"] || loadedAgain[0].ModelMappingReasoningEfforts["claude-*"] != "high" || loadedAgain[0].RequestBodyOverrides["metadata"].(map[string]interface{})["region"] != "a" {
+	if !loadedAgain[0].SupportedModels["claude-opus-4"] || !loadedAgain[0].ModelMappingDisabled["claude-*"] || loadedAgain[0].ModelMappingReasoningEfforts["claude-*"] != "high" || !loadedAgain[0].ModelMappingSupports1M["claude-*"] || loadedAgain[0].RequestBodyOverrides["metadata"].(map[string]interface{})["region"] != "a" {
 		t.Fatalf("读取结果修改污染供应商快照: %#v", loadedAgain[0])
 	}
 }
@@ -562,15 +565,19 @@ func TestProviderResolveModelMappingDetailPreservesSelectedRule(t *testing.T) {
 			"claude-opus-*":   "high",
 			"claude-opus-4.8": "xhigh",
 		},
+		ModelMappingSupports1M: map[string]bool{
+			"claude-opus-*":   true,
+			"claude-opus-4.8": true,
+		},
 	}
 
 	exact := provider.resolveModelMappingDetail("claude-opus-4.8")
-	if !exact.Matched || exact.Pattern != "claude-opus-4.8" || exact.TargetPattern != "vendor-opus-exact" || exact.MappedModel != "vendor-opus-exact" || exact.ReasoningEffort != "xhigh" {
+	if !exact.Matched || exact.Pattern != "claude-opus-4.8" || exact.TargetPattern != "vendor-opus-exact" || exact.MappedModel != "vendor-opus-exact" || exact.ReasoningEffort != "xhigh" || !exact.Supports1M {
 		t.Fatalf("精确映射详情错误: %#v", exact)
 	}
 
 	wildcard := provider.resolveModelMappingDetail("claude-opus-5")
-	if !wildcard.Matched || wildcard.Pattern != "claude-opus-*" || wildcard.TargetPattern != "vendor-opus-*" || wildcard.MappedModel != "vendor-opus-5" || wildcard.ReasoningEffort != "high" {
+	if !wildcard.Matched || wildcard.Pattern != "claude-opus-*" || wildcard.TargetPattern != "vendor-opus-*" || wildcard.MappedModel != "vendor-opus-5" || wildcard.ReasoningEffort != "high" || !wildcard.Supports1M {
 		t.Fatalf("通配符映射详情错误: %#v", wildcard)
 	}
 
@@ -627,6 +634,20 @@ func TestNormalizeModelMappingDisabledDropsStaleEntries(t *testing.T) {
 	})
 	if len(normalized) != 1 || !normalized["claude-*"] {
 		t.Fatalf("关闭状态归一化错误: %#v", normalized)
+	}
+}
+
+func TestNormalizeModelMappingSupports1MDropsDisabledAndStaleEntries(t *testing.T) {
+	normalized := normalizeModelMappingSupports1M(map[string]bool{
+		"claude-*": true,
+		"gpt-*":    false,
+		"orphan":   true,
+	}, map[string]string{
+		"claude-*": "vendor-*",
+		"gpt-*":    "openai-*",
+	})
+	if len(normalized) != 1 || !normalized["claude-*"] {
+		t.Fatalf("1M 状态归一化错误: %#v", normalized)
 	}
 }
 
