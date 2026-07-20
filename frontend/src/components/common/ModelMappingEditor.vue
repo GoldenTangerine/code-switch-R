@@ -166,7 +166,7 @@
             :placeholder="$t('components.provider.modelMapping.keyPlaceholder')"
             :options="builtinModelOptions"
             :empty-text="$t('components.provider.modelMapping.builtinNoResults')"
-            @keydown.enter.prevent="focusValueInput"
+            @custom-enter="focusValueInput"
             @select="handleBuiltinModelSelect"
           />
         </div>
@@ -189,7 +189,7 @@
             :placeholder="$t('components.provider.modelMapping.valuePlaceholder')"
             :options="providerModelOptions"
             :empty-text="$t('components.provider.modelMapping.providerNoResults')"
-            @keydown.enter="handleProviderModelEnter"
+            @custom-enter="submitMapping"
           />
         </div>
 
@@ -342,7 +342,6 @@ import {
   resolveSubmittedModelMappingSupportsOneM,
   upsertModelMappingRule,
 } from './modelMappingState'
-import { handleSearchableInputEnter } from './searchableInputKeyboard'
 import SearchableModelInput from './SearchableModelInput.vue'
 
 type MappingKind = 'exact' | 'prefix' | 'wildcard'
@@ -555,10 +554,6 @@ function focusValueInput(): void {
 function handleBuiltinModelSelect(): void {
   inputError.value = ''
   focusValueInput()
-}
-
-function handleProviderModelEnter(event: KeyboardEvent): void {
-  handleSearchableInputEnter(event, submitMapping)
 }
 
 function startEditing(key: string, value: string, reasoningEffort: string, supportsOneM: boolean): void {

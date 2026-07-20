@@ -100,7 +100,7 @@
                 :options="builtinCliModelOptions"
                 :placeholder="t('components.cliConfig.modelPicker.placeholder')"
                 :empty-text="t('components.cliConfig.modelPicker.noResults')"
-                @keydown.enter.prevent="handleCliModelDraftEnter"
+                @custom-enter="handleCliModelDraftEnter"
               />
             </div>
             <div class="cli-model-picker-row">

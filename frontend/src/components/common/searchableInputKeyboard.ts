@@ -8,19 +8,82 @@
  * @FilePath: frontend/src/components/common/searchableInputKeyboard.ts
  */
 
-interface SearchableInputTarget {
-  getAttribute(name: string): string | null
+interface SearchableInputCompositionEvent {
+  isComposing?: boolean
+  keyCode?: number
 }
 
-export interface SearchableInputEnterEvent {
-  currentTarget: EventTarget | null
+export interface SearchableInputEnterEvent extends SearchableInputCompositionEvent {
   preventDefault(): void
 }
 
-function getActiveOptionId(target: EventTarget | null): string {
-  const inputTarget = target as SearchableInputTarget | null
-  if (!inputTarget || typeof inputTarget.getAttribute !== 'function') return ''
-  return inputTarget.getAttribute('aria-activedescendant') || ''
+export interface SearchableInputSelectionKeyEvent extends SearchableInputCompositionEvent {
+  key: string
+  shiftKey?: boolean
+}
+
+export interface SearchableInputSelectionState {
+  hasKeyboardNavigation: boolean
+  canSelectOption: boolean
+}
+
+export function createSearchableInputSelectionState(): SearchableInputSelectionState {
+  return {
+    hasKeyboardNavigation: false,
+    canSelectOption: false,
+  }
+}
+
+export function resetSearchableInputSelectionState(state: SearchableInputSelectionState): void {
+  state.hasKeyboardNavigation = false
+  state.canSelectOption = false
+}
+
+export function handleSearchableInputSelectionKeydown(
+  state: SearchableInputSelectionState,
+  event: SearchableInputSelectionKeyEvent,
+): boolean {
+  if (
+    event.key === 'ArrowDown'
+    || event.key === 'ArrowUp'
+    || event.key === 'PageDown'
+    || event.key === 'PageUp'
+    || ((event.key === 'Home' || event.key === 'End') && !event.shiftKey)
+  ) {
+    state.hasKeyboardNavigation = true
+    return false
+  }
+
+  if (event.key === 'Enter') {
+    if (isSearchableInputComposing(event)) {
+      resetSearchableInputSelectionState(state)
+      return false
+    }
+
+    state.canSelectOption = state.hasKeyboardNavigation
+    state.hasKeyboardNavigation = false
+    return !state.canSelectOption
+  }
+
+  if (event.key === 'Tab' || event.key === 'Escape') {
+    resetSearchableInputSelectionState(state)
+  }
+
+  return false
+}
+
+export function allowSearchableInputPointerSelection(state: SearchableInputSelectionState): void {
+  state.canSelectOption = true
+}
+
+export function consumeSearchableInputSelection(state: SearchableInputSelectionState): boolean {
+  const canSelectOption = state.canSelectOption
+  resetSearchableInputSelectionState(state)
+  return canSelectOption
+}
+
+function isSearchableInputComposing(event: SearchableInputCompositionEvent): boolean {
+  return event.isComposing === true || event.keyCode === 229
 }
 
 export function handleSearchableInputEnter(
@@ -28,7 +91,7 @@ export function handleSearchableInputEnter(
   submit: () => void,
 ): boolean {
   // Headless UI 会跳过已被前置监听器 preventDefault 的内部按键处理。
-  if (getActiveOptionId(event.currentTarget)) return false
+  if (isSearchableInputComposing(event)) return false
 
   event.preventDefault()
   submit()

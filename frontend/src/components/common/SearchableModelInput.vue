@@ -14,7 +14,8 @@
           autocapitalize="off"
           spellcheck="false"
           @change="handleInputChange"
-          @blur="clearSearchQuery"
+          @keydown="handleInputKeydown"
+          @blur="handleInputBlur"
         />
         <ComboboxButton class="searchable-model-input__button">
           <svg viewBox="0 0 20 20" aria-hidden="true">
@@ -35,6 +36,7 @@
           v-for="option in filteredOptions"
           :key="option"
           :value="option"
+          @mousedown="allowPointerSelection"
           v-slot="{ active, selected }"
         >
           <div :class="['searchable-model-input__option', { active, selected }]">
@@ -52,8 +54,16 @@
 
 <script setup lang="ts">
 import { Combobox, ComboboxButton, ComboboxInput, ComboboxOption, ComboboxOptions } from '@headlessui/vue'
-import { computed, nextTick, ref, useAttrs } from 'vue'
+import { computed, nextTick, reactive, ref, useAttrs } from 'vue'
 import { filterAndSortStringOptions } from '../../utils/fuzzyOptionSearch'
+import {
+  allowSearchableInputPointerSelection,
+  consumeSearchableInputSelection,
+  createSearchableInputSelectionState,
+  handleSearchableInputEnter,
+  handleSearchableInputSelectionKeydown,
+  resetSearchableInputSelectionState,
+} from './searchableInputKeyboard'
 
 defineOptions({ inheritAttrs: false })
 
@@ -80,11 +90,13 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{
   (e: 'update:modelValue', value: string): void
   (e: 'select', value: string): void
+  (e: 'customEnter'): void
 }>()
 
 const attrs = useAttrs()
 const searchQuery = ref('')
 const inputRef = ref<InstanceType<typeof ComboboxInput> | null>(null)
+const selectionState = reactive(createSearchableInputSelectionState())
 
 const forwardedInputAttrs = computed(() => {
   const {
@@ -102,6 +114,8 @@ const filteredOptions = computed(() => (
 const selectedValue = computed({
   get: () => props.modelValue ?? '',
   set: (value: string) => {
+    if (!consumeSearchableInputSelection(selectionState)) return
+
     const nextValue = String(value ?? '')
     emit('update:modelValue', nextValue)
     emit('select', nextValue)
@@ -113,6 +127,7 @@ const displayValue = (value: unknown) => (typeof value === 'string' ? value : ''
 
 const handleInputChange = (event: Event) => {
   const nextValue = (event.target as HTMLInputElement).value
+  resetSearchableInputSelectionState(selectionState)
   searchQuery.value = nextValue
   if (!props.selectOnly) {
     emit('update:modelValue', nextValue)
@@ -121,12 +136,34 @@ const handleInputChange = (event: Event) => {
   }
 }
 
+const handleInputKeydown = (event: KeyboardEvent) => {
+  if (!handleSearchableInputSelectionKeydown(selectionState, event)) {
+    if (event.key === 'Enter') {
+      nextTick(() => consumeSearchableInputSelection(selectionState))
+    }
+    return
+  }
+
+  handleSearchableInputEnter(event, () => emit('customEnter'))
+}
+
+const allowPointerSelection = (event: MouseEvent) => {
+  if (event.button !== 0) return
+  allowSearchableInputPointerSelection(selectionState)
+  nextTick(() => consumeSearchableInputSelection(selectionState))
+}
+
 const clearSearchQuery = () => {
   nextTick(() => {
     nextTick(() => {
       searchQuery.value = ''
     })
   })
+}
+
+const handleInputBlur = () => {
+  resetSearchableInputSelectionState(selectionState)
+  clearSearchQuery()
 }
 
 const focus = () => {
