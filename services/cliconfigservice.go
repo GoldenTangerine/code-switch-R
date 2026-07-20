@@ -242,6 +242,7 @@ func stripClaudeLockedEditableFields(value map[string]interface{}) map[string]in
 	if ok && envValue != nil {
 		delete(envValue, "ANTHROPIC_BASE_URL")
 		delete(envValue, claudeAuthTokenEnvKey)
+		delete(envValue, claudeAPIKeyEnvKey)
 		if len(envValue) == 0 {
 			delete(nextValue, "env")
 		} else {
@@ -388,7 +389,7 @@ func buildClaudeEditorLockedFields(value map[string]interface{}, proxyBaseURL st
 			"string",
 		))
 	}
-	if apiKey := anyToString(envValue[claudeAPIKeyEnvKey]); strings.TrimSpace(apiKey) != "" && isClaudeProxyBaseURL(envValue, proxyBaseURL) {
+	if apiKey := anyToString(envValue[claudeAPIKeyEnvKey]); strings.TrimSpace(apiKey) != "" {
 		lockedFields = append(lockedFields, buildLockedField(
 			"env.ANTHROPIC_API_KEY",
 			apiKey,
@@ -686,7 +687,7 @@ func (s *CliConfigService) GetConfigSnapshots(platform string, apiUrl string, ap
 		}
 		if previewDirect {
 			env["ANTHROPIC_BASE_URL"] = normalizeURLTrimSlash(apiUrl)
-			env[claudeAuthTokenEnvKey] = apiKey
+			applyClaudeProviderAuthEnv(env, apiKey, "bearer")
 		} else {
 			env["ANTHROPIC_BASE_URL"] = s.baseURL()
 			applyClaudeProxyAuthEnv(env, s.proxyAuthField())
@@ -962,7 +963,7 @@ func (s *CliConfigService) GetConfigSnapshotsWithEditable(
 		switch effectiveMode {
 		case "direct":
 			env["ANTHROPIC_BASE_URL"] = normalizeURLTrimSlash(apiUrl)
-			env[claudeAuthTokenEnvKey] = apiKey
+			applyClaudeProviderAuthEnv(env, apiKey, "bearer")
 		case "proxy":
 			env["ANTHROPIC_BASE_URL"] = s.baseURL()
 			applyClaudeProxyAuthEnv(env, s.proxyAuthField())
@@ -1166,6 +1167,7 @@ func (s *CliConfigService) SaveConfig(
 	apiURL string,
 	apiKey string,
 	providerName string,
+	authType string,
 ) error {
 	if err := s.requireHome(); err != nil {
 		return err
@@ -1174,7 +1176,7 @@ func (s *CliConfigService) SaveConfig(
 	p := CLIPlatform(platform)
 	switch p {
 	case PlatformClaude:
-		return s.saveClaudeConfig(editable, apiURL, apiKey)
+		return s.saveClaudeConfig(editable, apiURL, apiKey, authType)
 	case PlatformCodex:
 		return s.saveCodexConfig(editable, apiURL, apiKey, providerName)
 	case PlatformGemini:
@@ -1363,6 +1365,8 @@ func (s *CliConfigService) RenderEditorContent(
 	apiURL string,
 	apiKey string,
 	providerName string,
+	authType string,
+	previewMode string,
 ) (*CLIEditorContent, error) {
 	if err := s.requireHome(); err != nil {
 		return nil, err
@@ -1376,10 +1380,28 @@ func (s *CliConfigService) RenderEditorContent(
 			envValue = make(map[string]interface{})
 		}
 
-		if hasCLIEditorProviderInput(PlatformClaude, apiURL, apiKey) {
+		effectiveMode := strings.ToLower(strings.TrimSpace(previewMode))
+		if effectiveMode == "" {
+			if hasCLIEditorProviderInput(PlatformClaude, apiURL, apiKey) {
+				effectiveMode = "direct"
+			} else {
+				effectiveMode = "current"
+			}
+		}
+		if effectiveMode != "direct" && effectiveMode != "proxy" && effectiveMode != "current" {
+			return nil, fmt.Errorf("无效的 previewMode: %s（允许值: current, direct, proxy）", previewMode)
+		}
+
+		switch effectiveMode {
+		case "direct":
 			envValue["ANTHROPIC_BASE_URL"] = normalizeURLTrimSlash(apiURL)
-			envValue[claudeAuthTokenEnvKey] = apiKey
-		} else {
+			if !applyClaudeProviderAuthEnv(envValue, apiKey, authType) {
+				return nil, fmt.Errorf("自定义 Claude 认证 Header 仅支持托管路由")
+			}
+		case "proxy":
+			envValue["ANTHROPIC_BASE_URL"] = s.baseURL()
+			applyClaudeProxyAuthEnv(envValue, s.proxyAuthField())
+		case "current":
 			currentContent, err := os.ReadFile(s.getClaudeConfigPath())
 			if err != nil && !errors.Is(err, os.ErrNotExist) {
 				return nil, fmt.Errorf("读取 Claude 配置失败: %w", err)
@@ -1531,6 +1553,8 @@ func (s *CliConfigService) NormalizeEditorContent(
 	apiURL string,
 	apiKey string,
 	providerName string,
+	authType string,
+	previewMode string,
 ) (*CLINormalizedEditorContent, error) {
 	if err := s.requireHome(); err != nil {
 		return nil, err
@@ -1544,7 +1568,7 @@ func (s *CliConfigService) NormalizeEditorContent(
 		}
 
 		editable := stripClaudeLockedEditableFields(value)
-		rendered, err := s.RenderEditorContent(platform, editable, apiURL, apiKey, providerName)
+		rendered, err := s.RenderEditorContent(platform, editable, apiURL, apiKey, providerName, authType, previewMode)
 		if err != nil {
 			return nil, err
 		}
@@ -1570,7 +1594,7 @@ func (s *CliConfigService) NormalizeEditorContent(
 			providerKey := resolveCodexEditorProviderKey(providerName, apiURL, apiKey)
 			editable = stripCodexEditorManagedFields(raw, providerKey)
 		}
-		rendered, err := s.RenderEditorContent(platform, editable, apiURL, apiKey, providerName)
+		rendered, err := s.RenderEditorContent(platform, editable, apiURL, apiKey, providerName, authType, previewMode)
 		if err != nil {
 			return nil, err
 		}
@@ -1589,7 +1613,7 @@ func (s *CliConfigService) NormalizeEditorContent(
 		}
 
 		editable := stripGeminiLockedEditableFields(envValue)
-		rendered, err := s.RenderEditorContent(platform, editable, apiURL, apiKey, providerName)
+		rendered, err := s.RenderEditorContent(platform, editable, apiURL, apiKey, providerName, authType, previewMode)
 		if err != nil {
 			return nil, err
 		}
@@ -1758,9 +1782,8 @@ func (s *CliConfigService) getClaudeConfig() (*CLIConfig, error) {
 
 	// 检查是否有其他未知的 env 变量（排除锁定的）
 	if env != nil {
-		proxyMode := isClaudeProxyBaseURL(env, s.baseURL())
 		for k, v := range env {
-			if k != "ANTHROPIC_BASE_URL" && k != claudeAuthTokenEnvKey && (!proxyMode || k != claudeAPIKeyEnvKey) {
+			if k != "ANTHROPIC_BASE_URL" && k != claudeAuthTokenEnvKey && k != claudeAPIKeyEnvKey {
 				config.Fields = append(config.Fields, CLIConfigField{
 					Key:    "env." + k,
 					Value:  fmt.Sprintf("%v", v),
@@ -1785,7 +1808,7 @@ func (s *CliConfigService) getClaudeConfig() (*CLIConfig, error) {
 	return config, nil
 }
 
-func (s *CliConfigService) saveClaudeConfig(editable map[string]interface{}, apiURL string, apiKey string) error {
+func (s *CliConfigService) saveClaudeConfig(editable map[string]interface{}, apiURL string, apiKey string, authType string) error {
 	configPath := s.getClaudeConfigPath()
 	data := make(map[string]interface{})
 
@@ -1799,7 +1822,9 @@ func (s *CliConfigService) saveClaudeConfig(editable map[string]interface{}, api
 	directMode := hasCLIEditorProviderInput(PlatformClaude, apiURL, apiKey)
 	if directMode {
 		env["ANTHROPIC_BASE_URL"] = normalizeURLTrimSlash(apiURL)
-		env[claudeAuthTokenEnvKey] = apiKey
+		if !applyClaudeProviderAuthEnv(env, apiKey, authType) {
+			return fmt.Errorf("自定义 Claude 认证 Header 仅支持托管路由")
+		}
 	} else {
 		env["ANTHROPIC_BASE_URL"] = s.baseURL()
 		applyClaudeProxyAuthEnv(env, s.proxyAuthField())
@@ -1809,9 +1834,7 @@ func (s *CliConfigService) saveClaudeConfig(editable map[string]interface{}, api
 	lockedFields := map[string]bool{
 		"env.ANTHROPIC_BASE_URL":   true,
 		"env.ANTHROPIC_AUTH_TOKEN": true,
-	}
-	if !directMode {
-		lockedFields["env.ANTHROPIC_API_KEY"] = true
+		"env.ANTHROPIC_API_KEY":    true,
 	}
 
 	// 合并用户编辑的所有字段（除了锁定字段）
@@ -1825,7 +1848,7 @@ func (s *CliConfigService) saveClaudeConfig(editable map[string]interface{}, api
 		if k == "env" {
 			if customEnv, ok := v.(map[string]interface{}); ok {
 				for ek, ev := range customEnv {
-					if ek != "ANTHROPIC_BASE_URL" && ek != claudeAuthTokenEnvKey && (directMode || ek != claudeAPIKeyEnvKey) {
+					if ek != "ANTHROPIC_BASE_URL" && ek != claudeAuthTokenEnvKey && ek != claudeAPIKeyEnvKey {
 						env[ek] = ev
 					}
 				}

@@ -195,46 +195,16 @@ func applyProviderAuthHeaders(headers http.Header, provider *Provider, platform 
 
 	apiKey := strings.TrimSpace(provider.APIKey)
 	authTypeRaw := strings.TrimSpace(provider.ConnectivityAuthType)
-	authType := strings.ToLower(authTypeRaw)
 	isClaude := strings.EqualFold(platform, "claude")
-
-	setAnthropicVersion := func() {
-		if isClaude {
-			headers.Set("anthropic-version", "2023-06-01")
-		}
+	if isClaude {
+		authTypeRaw = normalizeClaudeProviderAuthType(authTypeRaw)
+		headers.Del("Authorization")
+		headers.Del("x-api-key")
 	}
-	setClaudeCompatibilityHeaders := func() {
-		headers.Set("x-api-key", apiKey)
-		headers.Set("Authorization", "Bearer "+apiKey)
-		setAnthropicVersion()
-	}
-
-	switch authType {
-	case "":
-		if isClaude {
-			setClaudeCompatibilityHeaders()
-			return
-		}
-		headers.Set("Authorization", "Bearer "+apiKey)
-	case "x-api-key":
-		headers.Set("x-api-key", apiKey)
-		setAnthropicVersion()
-		if isClaude {
-			headers.Set("Authorization", "Bearer "+apiKey)
-		}
-	case "bearer":
-		headers.Set("Authorization", "Bearer "+apiKey)
-		if isClaude {
-			headers.Set("x-api-key", apiKey)
-			setAnthropicVersion()
-		}
-	default:
-		headerName := authTypeRaw
-		if headerName == "" || strings.EqualFold(headerName, "custom") {
-			headerName = "Authorization"
-		}
-		headers.Set(headerName, apiKey)
-		setAnthropicVersion()
+	headerName, headerValue := resolveProviderAuthHeader(apiKey, authTypeRaw)
+	headers.Set(headerName, headerValue)
+	if isClaude && resolveClaudeAPIFormat(*provider) == claudeAPIFormatAnthropic {
+		headers.Set("anthropic-version", "2023-06-01")
 	}
 }
 

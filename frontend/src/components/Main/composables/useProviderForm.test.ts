@@ -598,6 +598,44 @@ describe('useProviderForm order preservation', () => {
     expect(cards.claude[0]?.modelMappingSupports1M).toEqual({ 'claude-*': true })
   })
 
+  it('saves claude providers with custom auth headers without attempting direct apply', async () => {
+    const cards = createCardRecord()
+    const showToast = vi.fn()
+    const persistProviders = vi.fn().mockResolvedValue(undefined)
+    const refreshDirectAppliedStatus = vi.fn().mockResolvedValue(undefined)
+    const providerForm = useProviderForm({
+      initialTab: 'claude',
+      t: (key: string) => key,
+      showToast,
+      getActiveTab: () => 'claude',
+      cards,
+      normalizeLevel,
+      persistProviders,
+      refreshDirectAppliedStatus,
+      removeProvider: vi.fn().mockResolvedValue(undefined),
+      duplicateProvider: vi.fn().mockResolvedValue(false),
+      reloadProviders: vi.fn().mockResolvedValue(undefined),
+      moveCardToStatusGroup: (tabId, card, enabled) => moveProviderToStatusGroup(cards[tabId], card, enabled),
+      appendCardToGroup: (tabId, card) => insertProviderToStatusGroup(cards[tabId], card),
+    })
+
+    vi.spyOn(Date, 'now').mockReturnValue(1000)
+    providerForm.openCreateModal()
+
+    await providerForm.submitAndApplyProviderModal(createForm({
+      name: 'Claude Custom Auth',
+      apiFormat: 'anthropic',
+      apiKey: 'claude-key',
+      connectivityAuthType: 'X-Custom-Auth',
+    }))
+
+    expect(persistProviders).toHaveBeenCalledWith('claude')
+    expect(vi.mocked(Call.ByName)).not.toHaveBeenCalled()
+    expect(refreshDirectAppliedStatus).not.toHaveBeenCalled()
+    expect(showToast).toHaveBeenCalledWith('components.main.directApply.requiresHostedRouting', 'warning')
+    expect(cards.claude[0]?.connectivityAuthType).toBe('X-Custom-Auth')
+  })
+
   it('persists Anthropic cache TTL only for native Claude providers', async () => {
     const cards = createCardRecord()
     const persistProviders = vi.fn().mockResolvedValue(undefined)

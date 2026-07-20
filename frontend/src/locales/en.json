@@ -787,7 +787,7 @@
         "success": "{name} applied",
         "failed": "Failed to apply",
         "proxyEnabled": "Disable proxy first",
-        "requiresHostedRouting": "This API format only works through hosted routing and cannot be directly applied"
+        "requiresHostedRouting": "This configuration only works through hosted routing and cannot be directly applied"
       },
       "form": {
         "createTitle": "Add vendor",
@@ -802,6 +802,7 @@
           "apiFormatAnthropic": "Anthropic Messages (Native)",
           "apiFormatOpenAIChat": "OpenAI Chat Completions (Requires routing)",
           "apiFormatOpenAIResponses": "OpenAI Responses API (Requires routing)",
+          "claudeAuthField": "Claude auth field",
           "anthropicCacheTTL": "Cache TTL",
           "officialSite": "Official site",
           "icon": "Icon",
@@ -897,7 +898,7 @@
           "level": "Lower numbers = higher priority. Level 1 providers are tried first, then Level 2, etc.",
           "providerConcurrencyLimit": "Leave empty for unlimited concurrency. Overflow attempts use the next provider.",
           "apiEndpoint": "Override platform default endpoint. Leave blank for default (claude: /v1/messages, codex: /responses). For GLM models use /v1/chat/completions",
-          "advancedOptions": "Anthropic Messages is used by default. Expand this only when a Claude provider needs to talk to an OpenAI-compatible upstream.",
+          "advancedOptions": "Defaults to Anthropic Messages and ANTHROPIC_AUTH_TOKEN.",
           "apiFormat": "Select the input format for the provider's API",
           "anthropicCacheTTL": "Only overrides existing ephemeral cache_control blocks. It does not add cache breakpoints. Default means no override.",
           "availabilityMonitor": "Enable background health checks for this provider. Checks are performed periodically to monitor availability.",
@@ -910,6 +911,7 @@
           "connectivityTestModel": "Select a model for connectivity testing, or leave empty to use platform default",
           "connectivityTestEndpoint": "Select or enter API endpoint path",
           "connectivityAuthType": "Default is Bearer. Use X-API-Key for Anthropic-style APIs. Enter custom header name in the text field if needed.",
+          "claudeAuthField": "Custom Headers require hosted routing",
           "requestBodyOverrides": "Only applies when the request is actually routed to this provider. Provide a JSON object: matching fields are overwritten, missing fields are added, and nested objects are merged recursively.",
           "budgetQuota": "Set independent budget quotas for this provider. Enter 0 or leave blank for unlimited. Only tracks this provider's usage.",
           "providerQuotaQueryType": "Choose a quota query type for this provider. The home card will reuse the provider's API URL and API key to fetch quota; cycle-based quota stays as progress, while non-cyclic balance shows the remaining amount directly.",
@@ -968,6 +970,9 @@
           "opencodeCategoryOmoSlim": "OMO Slim is a lightweight agent model assignment preset for smaller setups."
         },
         "options": {
+          "claudeAuthToken": "ANTHROPIC_AUTH_TOKEN (Default)",
+          "claudeAPIKey": "ANTHROPIC_API_KEY",
+          "claudeCustomHeader": "Custom Header",
           "anthropicCacheTTLDefault": "Default",
           "anthropicCacheTTL5m": "5 minutes",
           "anthropicCacheTTL1h": "1 hour",
@@ -1063,6 +1068,7 @@
         "confirmProviderQuotaQueryPresetDiscard": "This preset has unsaved changes. Discard them?",
         "confirmProviderQuotaQueryPresetDelete": "Delete the current preset? This cannot be undone.",
         "errors": {
+          "invalidCustomAuthHeader": "Enter a valid custom Header name",
           "invalidUrl": "Please enter a valid API URL",
           "requestBodyOverridesInvalid": "Failed to parse forced request body JSON: {error}",
           "requestBodyOverridesMustBeObject": "Forced request body fields must be a JSON object",
@@ -1707,7 +1713,7 @@
         "updateHistoryKeepCountHint": "Keep only the most recent update packages (range 1 - 20)",
         "autoConnectivityTest": "Auto Availability Monitoring",
         "autoConnectivityTestHint": "Automatically check availability of monitored providers every minute",
-        "claudeProxyAuthField": "Claude Proxy Auth",
+        "claudeProxyAuthField": "Local proxy auth field",
         "claudeProxyAuthToken": "AUTH_TOKEN",
         "claudeProxyAuthAPIKey": "API_KEY",
         "claudeProxyAuthFieldHint": "Match the auth field used by --settings; API_KEY may trigger Claude approval",

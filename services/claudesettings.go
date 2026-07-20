@@ -47,6 +47,55 @@ func applyClaudeProxyAuthEnv(env map[string]interface{}, authField string) {
 	env[claudeProxyAuthEnvKey(authField)] = claudeProxyAuthValue
 }
 
+func normalizeClaudeProviderAuthType(authType string) string {
+	normalized := strings.ToLower(strings.TrimSpace(authType))
+	switch normalized {
+	case "", "bearer", strings.ToLower(claudeAuthTokenEnvKey):
+		return "bearer"
+	case "x-api-key", strings.ToLower(claudeAPIKeyEnvKey):
+		return "x-api-key"
+	default:
+		return strings.TrimSpace(authType)
+	}
+}
+
+func resolveProviderAuthHeader(apiKey string, authType string) (string, string) {
+	authTypeRaw := strings.TrimSpace(authType)
+	switch strings.ToLower(authTypeRaw) {
+	case "x-api-key":
+		return "x-api-key", apiKey
+	case "", "bearer":
+		return "Authorization", "Bearer " + apiKey
+	default:
+		if strings.EqualFold(authTypeRaw, "custom") {
+			return "Authorization", apiKey
+		}
+		return authTypeRaw, apiKey
+	}
+}
+
+func claudeProviderAuthEnvKey(authType string) (string, bool) {
+	switch normalizeClaudeProviderAuthType(authType) {
+	case "bearer":
+		return claudeAuthTokenEnvKey, true
+	case "x-api-key":
+		return claudeAPIKeyEnvKey, true
+	default:
+		return "", false
+	}
+}
+
+func applyClaudeProviderAuthEnv(env map[string]interface{}, apiKey string, authType string) bool {
+	authEnvKey, supported := claudeProviderAuthEnvKey(authType)
+	if !supported {
+		return false
+	}
+	delete(env, claudeAuthTokenEnvKey)
+	delete(env, claudeAPIKeyEnvKey)
+	env[authEnvKey] = apiKey
+	return true
+}
+
 func (css *ClaudeSettingsService) proxyAuthField() string {
 	if css.appSettings == nil {
 		return claudeProxyAuthFieldAuthToken
@@ -410,7 +459,7 @@ func mergeClaudeCLIConfig(raw map[string]interface{}, editable map[string]interf
 		if key == "env" {
 			if customEnv, ok := value.(map[string]interface{}); ok {
 				for envKey, envValue := range customEnv {
-					if envKey == "ANTHROPIC_BASE_URL" || envKey == "ANTHROPIC_AUTH_TOKEN" {
+					if envKey == "ANTHROPIC_BASE_URL" || envKey == claudeAuthTokenEnvKey || envKey == claudeAPIKeyEnvKey {
 						continue
 					}
 					env[envKey] = envValue
@@ -467,6 +516,10 @@ func (css *ClaudeSettingsService) ApplySingleProvider(providerID int) error {
 	if provider.APIKey == "" {
 		return fmt.Errorf("供应商 '%s' 未配置 API 密钥", provider.Name)
 	}
+	authEnvKey, directAuthSupported := claudeProviderAuthEnvKey(provider.ConnectivityAuthType)
+	if !directAuthSupported {
+		return fmt.Errorf("供应商 '%s' 使用自定义认证 Header，仅支持托管路由", provider.Name)
+	}
 
 	// 5. 获取配置文件路径
 	settingsPath, _, err := css.paths()
@@ -495,7 +548,9 @@ func (css *ClaudeSettingsService) ApplySingleProvider(providerID int) error {
 		env = make(map[string]interface{})
 	}
 	env["ANTHROPIC_BASE_URL"] = normalizeURLTrimSlash(provider.APIURL)
-	env["ANTHROPIC_AUTH_TOKEN"] = provider.APIKey
+	delete(env, claudeAuthTokenEnvKey)
+	delete(env, claudeAPIKeyEnvKey)
+	env[authEnvKey] = provider.APIKey
 	existingData["env"] = env
 
 	// 9. 原子写入
@@ -550,8 +605,6 @@ func (css *ClaudeSettingsService) GetDirectAppliedProviderID() (*int64, error) {
 	}
 
 	currentURL := anyToString(env["ANTHROPIC_BASE_URL"])
-	currentKey := anyToString(env["ANTHROPIC_AUTH_TOKEN"])
-
 	if currentURL == "" {
 		return nil, nil
 	}
@@ -564,6 +617,11 @@ func (css *ClaudeSettingsService) GetDirectAppliedProviderID() (*int64, error) {
 
 	// 4. 按 URL + Key 匹配 provider
 	for _, p := range providers {
+		authEnvKey, supported := claudeProviderAuthEnvKey(p.ConnectivityAuthType)
+		if !supported {
+			continue
+		}
+		currentKey := anyToString(env[authEnvKey])
 		if urlsEqualFold(p.APIURL, currentURL) && p.APIKey == currentKey {
 			id := p.ID
 			return &id, nil

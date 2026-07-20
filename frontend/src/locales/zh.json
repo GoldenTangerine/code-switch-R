@@ -788,7 +788,7 @@
         "success": "{name} 已应用",
         "failed": "应用失败",
         "proxyEnabled": "请先关闭代理",
-        "requiresHostedRouting": "当前 API 格式仅支持托管路由，不能直接应用"
+        "requiresHostedRouting": "当前配置仅支持托管路由，不能直接应用"
       },
       "form": {
         "createTitle": "新增供应商",
@@ -803,6 +803,7 @@
           "apiFormatAnthropic": "Anthropic Messages (原生)",
           "apiFormatOpenAIChat": "OpenAI Chat Completions (需开启路由)",
           "apiFormatOpenAIResponses": "OpenAI Responses API (需开启路由)",
+          "claudeAuthField": "Claude 认证字段",
           "anthropicCacheTTL": "缓存 TTL",
           "officialSite": "官网地址",
           "icon": "图标",
@@ -898,7 +899,7 @@
           "level": "数字越小优先级越高，Level 1 会被优先尝试，失败后依次尝试 Level 2、Level 3 等",
           "providerConcurrencyLimit": "留空表示不限制并发；超过上限后自动尝试下一个供应商。",
           "apiEndpoint": "覆盖平台默认端点。留空使用默认（claude: /v1/messages, codex: /responses）。GLM 模型请使用 /v1/chat/completions",
-          "advancedOptions": "默认使用 Anthropic Messages。只有 Claude 供应商要接 OpenAI 兼容端点时，才需要展开这里改协议。",
+          "advancedOptions": "默认使用 Anthropic Messages 和 ANTHROPIC_AUTH_TOKEN。",
           "apiFormat": "选择供应商 API 的输入格式",
           "anthropicCacheTTL": "仅覆盖请求中已存在的 ephemeral cache_control，不会新增缓存断点。默认表示不覆盖，由请求或系统默认决定。",
           "availabilityMonitor": "启用后会定期进行健康检查，监控此供应商的可用性状态",
@@ -911,6 +912,7 @@
           "connectivityTestModel": "选择用于连通性测试的模型，留空则使用平台默认模型",
           "connectivityTestEndpoint": "选择或输入 API 端点路径",
           "connectivityAuthType": "默认使用 Bearer。Anthropic 官方 API 请选择 X-API-Key。如需自定义请在下方输入 Header 名称。",
+          "claudeAuthField": "自定义 Header 仅支持托管路由",
           "requestBodyOverrides": "仅在请求实际转发到当前供应商时生效。这里填写 JSON 对象；同名字段会覆盖，不存在则新增，嵌套对象会递归写入。",
           "budgetQuota": "为此供应商设置独立预算额度。填 0 或留空表示不限额。仅统计当前供应商的使用量。",
           "providerQuotaQueryType": "给当前供应商选一个额度查询类型，首页卡片会自动复用此供应商的 API 地址和 API 密钥去查额度；周期额度显示进度，非周期余额直接显示剩余金额。",
@@ -969,6 +971,9 @@
           "opencodeCategoryOmoSlim": "OMO Slim 是精简版 Agent 模型分配配置，适合轻量场景。"
         },
         "options": {
+          "claudeAuthToken": "ANTHROPIC_AUTH_TOKEN（默认）",
+          "claudeAPIKey": "ANTHROPIC_API_KEY",
+          "claudeCustomHeader": "自定义 Header",
           "anthropicCacheTTLDefault": "默认",
           "anthropicCacheTTL5m": "5 分钟",
           "anthropicCacheTTL1h": "1 小时",
@@ -1064,6 +1069,7 @@
         "confirmProviderQuotaQueryPresetDiscard": "当前预设有未保存修改，确定要放弃吗？",
         "confirmProviderQuotaQueryPresetDelete": "确认删除当前预设吗？操作不可撤销。",
         "errors": {
+          "invalidCustomAuthHeader": "请输入合法的自定义 Header 名称",
           "invalidUrl": "请输入合法的 API 地址",
           "requestBodyOverridesInvalid": "请求体强制字段 JSON 解析失败：{error}",
           "requestBodyOverridesMustBeObject": "请求体强制字段必须是 JSON 对象",
@@ -1713,7 +1719,7 @@
         "next_up": "下次启动自动检查更新",
         "autoConnectivityTest": "自动可用性监控",
         "autoConnectivityTestHint": "启用后会每分钟自动检测已启用监控的供应商可用性",
-        "claudeProxyAuthField": "Claude 代理认证",
+        "claudeProxyAuthField": "本地代理认证字段",
         "claudeProxyAuthToken": "AUTH_TOKEN",
         "claudeProxyAuthAPIKey": "API_KEY",
         "claudeProxyAuthFieldHint": "需与 --settings 中的认证字段一致；API_KEY 可能触发 Claude 授权确认",

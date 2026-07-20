@@ -308,3 +308,20 @@ func TestShouldCacheProviderModelPricingResponse(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildAuthCandidatesClaudeUsesOnlySelectedAuthType(t *testing.T) {
+	tests := []struct {
+		configured string
+		want       string
+	}{
+		{configured: "", want: "bearer"},
+		{configured: "x-api-key", want: "x-api-key"},
+		{configured: "X-Custom-Auth", want: "X-Custom-Auth"},
+	}
+	for _, tt := range tests {
+		got := buildAuthCandidates(tt.configured, "claude")
+		if len(got) != 1 || got[0] != tt.want {
+			t.Fatalf("buildAuthCandidates(%q, claude) = %#v, 期望 [%q]", tt.configured, got, tt.want)
+		}
+	}
+}

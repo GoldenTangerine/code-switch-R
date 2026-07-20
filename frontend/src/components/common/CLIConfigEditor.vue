@@ -271,6 +271,8 @@ const props = defineProps<{
   providerConfig?: {
     apiKey?: string
     baseUrl?: string
+    authType?: string
+    previewMode?: 'current' | 'direct' | 'proxy'
   }
 }>()
 
@@ -426,6 +428,8 @@ const platformLabel = computed(() => platformLabels[props.platform] || props.pla
 const providerName = computed(() => props.providerName?.trim() || '')
 const providerApiKey = computed(() => props.providerConfig?.apiKey?.trim() || '')
 const providerApiUrl = computed(() => props.providerConfig?.baseUrl?.trim() || '')
+const providerAuthType = computed(() => props.providerConfig?.authType?.trim() || '')
+const providerPreviewMode = computed(() => props.providerConfig?.previewMode || '')
 const cliEditorMode = computed<'json' | 'plain'>(() => (
   cliEditorFormat.value === 'json' ? 'json' : 'plain'
 ))
@@ -754,6 +758,8 @@ const renderCliEditorContent = async (value: Record<string, any>) => (
     providerApiUrl.value,
     providerApiKey.value,
     providerName.value,
+    providerAuthType.value,
+    providerPreviewMode.value,
   )
 )
 
@@ -764,6 +770,8 @@ const normalizeCliEditorContent = async (content: string) => (
     providerApiUrl.value,
     providerApiKey.value,
     providerName.value,
+    providerAuthType.value,
+    providerPreviewMode.value,
   )
 )
 
@@ -1356,7 +1364,13 @@ watch(() => props.platform, () => {
 })
 
 watch(
-  () => [props.providerName, props.providerConfig?.apiKey, props.providerConfig?.baseUrl],
+  () => [
+    props.providerName,
+    props.providerConfig?.apiKey,
+    props.providerConfig?.baseUrl,
+    props.providerConfig?.authType,
+    props.providerConfig?.previewMode,
+  ],
   async () => {
     if (!config.value) {
       return

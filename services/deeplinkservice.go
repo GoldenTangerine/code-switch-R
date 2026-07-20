@@ -20,6 +20,7 @@ type DeepLinkImportRequest struct {
 	Homepage     string  `json:"homepage"`               // 供应商主页
 	Endpoint     string  `json:"endpoint"`               // API 端点
 	APIKey       string  `json:"apiKey"`                 // API 密钥
+	AuthType     string  `json:"authType,omitempty"`     // Claude 认证字段
 	Model        *string `json:"model,omitempty"`        // 可选模型名称
 	Notes        *string `json:"notes,omitempty"`        // 可选备注
 	HaikuModel   *string `json:"haikuModel,omitempty"`   // Claude Haiku 模型
@@ -155,6 +156,7 @@ func (s *DeepLinkService) ParseDeepLinkURL(urlStr string) (*DeepLinkImportReques
 		Homepage:     homepage,
 		Endpoint:     endpoint,
 		APIKey:       apiKey,
+		AuthType:     params.Get("authType"),
 		Model:        model,
 		Notes:        notes,
 		HaikuModel:   haikuModel,
@@ -228,13 +230,17 @@ func (s *DeepLinkService) buildProviderFromRequest(request *DeepLinkImportReques
 	id := time.Now().UnixNano()
 
 	provider := &Provider{
-		ID:      id,
-		Name:    request.Name,
-		APIURL:  request.Endpoint,
-		APIKey:  request.APIKey,
-		Site:    request.Homepage,
-		Enabled: false, // 默认禁用，用户需手动启用
-		Level:   1,     // 默认最高优先级
+		ID:                   id,
+		Name:                 request.Name,
+		APIURL:               request.Endpoint,
+		APIKey:               request.APIKey,
+		Site:                 request.Homepage,
+		Enabled:              false, // 默认禁用，用户需手动启用
+		Level:                1,     // 默认最高优先级
+		ConnectivityAuthType: normalizeClaudeProviderAuthType(request.AuthType),
+	}
+	if request.App != "claude" {
+		provider.ConnectivityAuthType = strings.TrimSpace(request.AuthType)
 	}
 
 	// 如果提供了模型信息，可以设置到 SupportedModels
@@ -311,10 +317,20 @@ func (s *DeepLinkService) mergeClaudeConfig(request *DeepLinkImportRequest, conf
 		return
 	}
 
-	// 自动填充 API key
-	if request.APIKey == "" {
-		if token, ok := env["ANTHROPIC_AUTH_TOKEN"].(string); ok {
+	// 自动填充 API key；两个字段并存时优先 AUTH_TOKEN
+	if token, ok := env[claudeAuthTokenEnvKey].(string); ok && strings.TrimSpace(token) != "" {
+		if request.APIKey == "" {
 			request.APIKey = token
+		}
+		if request.AuthType == "" {
+			request.AuthType = "bearer"
+		}
+	} else if apiKey, ok := env[claudeAPIKeyEnvKey].(string); ok && strings.TrimSpace(apiKey) != "" {
+		if request.APIKey == "" {
+			request.APIKey = apiKey
+		}
+		if request.AuthType == "" {
+			request.AuthType = "x-api-key"
 		}
 	}
 

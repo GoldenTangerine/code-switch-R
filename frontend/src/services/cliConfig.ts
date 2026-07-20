@@ -62,8 +62,9 @@ export async function saveCLIConfig(
   apiUrl: string = '',
   apiKey: string = '',
   providerName: string = '',
+  authType: string = '',
 ): Promise<void> {
-  return Call.ByName(`${SERVICE_PATH}.SaveConfig`, platform, editable, apiUrl, apiKey, providerName)
+  return Call.ByName(`${SERVICE_PATH}.SaveConfig`, platform, editable, apiUrl, apiKey, providerName, authType)
 }
 
 // 获取指定平台的全局模板
@@ -108,6 +109,8 @@ export async function renderCLIConfigEditorContent(
   apiUrl: string = '',
   apiKey: string = '',
   providerName: string = '',
+  authType: string = '',
+  previewMode: 'current' | 'direct' | 'proxy' | '' = '',
 ): Promise<CLIEditorContent> {
   return Call.ByName(
     `${SERVICE_PATH}.RenderEditorContent`,
@@ -116,6 +119,8 @@ export async function renderCLIConfigEditorContent(
     apiUrl,
     apiKey,
     providerName,
+    authType,
+    previewMode,
   )
 }
 
@@ -125,6 +130,8 @@ export async function normalizeCLIConfigEditorContent(
   apiUrl: string = '',
   apiKey: string = '',
   providerName: string = '',
+  authType: string = '',
+  previewMode: 'current' | 'direct' | 'proxy' | '' = '',
 ): Promise<CLINormalizedEditorContent> {
   return Call.ByName(
     `${SERVICE_PATH}.NormalizeEditorContent`,
@@ -133,6 +140,8 @@ export async function normalizeCLIConfigEditorContent(
     apiUrl,
     apiKey,
     providerName,
+    authType,
+    previewMode,
   )
 }
 

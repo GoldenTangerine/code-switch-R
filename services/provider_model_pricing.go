@@ -266,6 +266,11 @@ func defaultProviderPricingAuthType(platform string) string {
 
 func buildAuthCandidates(configured, platform string) []string {
 	configured = strings.TrimSpace(configured)
+	if strings.EqualFold(strings.TrimSpace(platform), "claude") ||
+		strings.EqualFold(strings.TrimSpace(platform), "claude-code") ||
+		strings.EqualFold(strings.TrimSpace(platform), "claude_code") {
+		return []string{normalizeClaudeProviderAuthType(configured)}
+	}
 	candidates := make([]string, 0, 3)
 	if configured != "" {
 		candidates = append(candidates, configured)
@@ -1382,19 +1387,10 @@ func attachAuthHeader(req *http.Request, apiKey, authType string) {
 		return
 	}
 
-	authTypeLower := strings.ToLower(strings.TrimSpace(authType))
-	switch authTypeLower {
-	case "x-api-key":
-		req.Header.Set("x-api-key", apiKey)
+	headerName, headerValue := resolveProviderAuthHeader(apiKey, authType)
+	req.Header.Set(headerName, headerValue)
+	if strings.EqualFold(headerName, "x-api-key") {
 		req.Header.Set("anthropic-version", "2023-06-01")
-	case "", "bearer":
-		req.Header.Set("Authorization", "Bearer "+apiKey)
-	default:
-		headerName := strings.TrimSpace(authType)
-		if headerName == "" || strings.EqualFold(headerName, "custom") {
-			headerName = "Authorization"
-		}
-		req.Header.Set(headerName, apiKey)
 	}
 }
 

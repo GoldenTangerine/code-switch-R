@@ -401,6 +401,39 @@
               </select>
               <span class="field-hint">{{ t('components.main.form.hints.apiFormat') }}</span>
             </label>
+            <div class="form-field">
+              <span>{{ t('components.main.form.labels.claudeAuthField') }}</span>
+              <Listbox v-model="selectedAuthType" v-slot="{ open: authTypeOpen }">
+                <div class="level-select">
+                  <ListboxButton class="level-select-button">
+                    <span class="level-label">{{ claudeAuthTypeLabel }}</span>
+                    <svg viewBox="0 0 20 20" aria-hidden="true">
+                      <path d="M6 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+                    </svg>
+                  </ListboxButton>
+                  <ListboxOptions v-if="authTypeOpen" class="level-select-options">
+                    <ListboxOption
+                      v-for="option in claudeAuthTypeOptions"
+                      :key="option.value"
+                      :value="option.value"
+                      v-slot="{ active, selected }"
+                    >
+                      <div :class="['level-option', { active, selected }]">
+                        <span class="level-name">{{ option.label }}</span>
+                      </div>
+                    </ListboxOption>
+                  </ListboxOptions>
+                </div>
+              </Listbox>
+              <BaseInput
+                v-if="selectedAuthType === 'custom'"
+                v-model="customAuthHeader"
+                type="text"
+                :placeholder="t('components.main.form.placeholders.customAuthHeader')"
+                class="mt-2"
+              />
+              <span class="field-hint">{{ t('components.main.form.hints.claudeAuthField') }}</span>
+            </div>
             <label v-if="showAnthropicCacheTTLField" class="form-field">
               <span>{{ t('components.main.form.labels.anthropicCacheTTL') }}</span>
               <select v-model="form.anthropicCacheTTL" class="mac-select">
@@ -435,7 +468,7 @@
           <span class="field-hint">{{ t('components.main.form.hints.opencodeSettingsConfig') }}</span>
         </div>
 
-        <div v-if="tabId !== 'opencode'" class="form-field">
+        <div v-if="tabId !== 'opencode' && tabId !== 'claude'" class="form-field">
           <span>{{ t('components.main.form.labels.connectivityAuthType') }}</span>
           <Listbox v-model="selectedAuthType" v-slot="{ open: authTypeOpen }">
             <div class="level-select">
@@ -727,6 +760,8 @@
             :provider-config="{
               apiKey: form.apiKey,
               baseUrl: form.apiUrl,
+              authType: effectiveAuthType,
+              previewMode: claudeCLIConfigPreviewMode,
             }"
           />
         </div>
@@ -897,6 +932,7 @@ import type { AutomationCard } from '../../../data/cards'
 import type { CLIPlatform } from '../../../services/cliConfig'
 import { fetchProviderModelPricing } from '../../../services/providerModelPricing'
 import { isBuiltinModelPlatform } from '../../../utils/builtinModels'
+import { showToast } from '../../../utils/toast'
 import {
   buildProviderIconOptionKeys,
   getProviderDisplayIconSvg,
@@ -1008,6 +1044,14 @@ const errors = reactive({
 })
 const selectedAuthType = ref<string>(getDefaultAuthType(props.tabId))
 const customAuthHeader = ref('')
+const effectiveAuthType = computed(() => {
+  if (props.tabId === 'claude') {
+    return selectedAuthType.value === 'custom'
+      ? customAuthHeader.value.trim()
+      : selectedAuthType.value || 'bearer'
+  }
+  return customAuthHeader.value.trim() || selectedAuthType.value || getDefaultAuthType(props.tabId)
+})
 const iconSearchQuery = ref('')
 const openCodePresetSearchQuery = ref('')
 const openCodePresetSearchInputRef = ref<HTMLInputElement | null>(null)
@@ -1037,7 +1081,10 @@ const isFetchingOpenCodeModels = ref(false)
 const opencodeModelFetchError = ref('')
 const claudeAdvancedExpanded = ref(false)
 const saveAndApplyBlockedByProvider = computed(() => (
-  isDirectApplyBlockedForProvider(props.tabId, form)
+  isDirectApplyBlockedForProvider(props.tabId, {
+    apiFormat: form.apiFormat,
+    connectivityAuthType: effectiveAuthType.value,
+  })
 ))
 const saveAndApplyTooltip = computed(() => (
   saveAndApplyBlockedByProvider.value
@@ -1226,6 +1273,11 @@ const budgetQuotaUsageStatuses = ref<BudgetQuotaUsageStatuses>(createDefaultBudg
 let budgetQuotaUsageRequestSeq = 0
 
 const authTypeOptions = AUTH_TYPE_OPTIONS
+const claudeAuthTypeOptions = computed(() => [
+  { value: 'bearer', label: t('components.main.form.options.claudeAuthToken') },
+  { value: 'x-api-key', label: t('components.main.form.options.claudeAPIKey') },
+  { value: 'custom', label: t('components.main.form.options.claudeCustomHeader') },
+])
 
 const isEditing = computed(() => props.card !== null)
 const modalTitle = computed(() => (
@@ -1236,6 +1288,17 @@ const modalTitle = computed(() => (
 const authTypeLabel = computed(() => (
   authTypeOptions.find((option) => option.value === selectedAuthType.value)?.label || selectedAuthType.value
 ))
+const claudeAuthTypeLabel = computed(() => (
+  claudeAuthTypeOptions.value.find((option) => option.value === selectedAuthType.value)?.label
+  || selectedAuthType.value
+))
+const claudeCLIConfigPreviewMode = computed<'current' | 'direct' | 'proxy' | undefined>(() => {
+  if (props.tabId !== 'claude') return undefined
+  if ((form.apiFormat || 'anthropic') !== 'anthropic' || selectedAuthType.value === 'custom') {
+    return 'proxy'
+  }
+  return form.apiUrl.trim() && form.apiKey.trim() ? 'direct' : 'current'
+})
 const builtinModelPlatform = computed<CLIPlatform | undefined>(() => (
   isBuiltinModelPlatform(props.tabId) ? props.tabId : undefined
 ))
@@ -1253,7 +1316,8 @@ const showAnthropicCacheTTLField = computed(() => (
 const hasClaudeAdvancedValue = computed(() => (
   props.tabId === 'claude' && (
     (form.apiFormat || 'anthropic') !== 'anthropic' ||
-    !!form.anthropicCacheTTL
+    !!form.anthropicCacheTTL ||
+    selectedAuthType.value !== 'bearer'
   )
 ))
 const iconPreviewOptions = computed(() => {
@@ -1786,7 +1850,7 @@ const resetForm = () => {
     form.budgetQuotaUsedAdjustments = createDefaultBudgetQuotaAdjustments()
     selectedAuthType.value = getDefaultAuthType(props.tabId)
     customAuthHeader.value = ''
-    claudeAdvancedExpanded.value = props.tabId === 'claude' && (form.apiFormat || 'anthropic') !== 'anthropic'
+    claudeAdvancedExpanded.value = props.tabId === 'claude' && hasClaudeAdvancedValue.value
     requestBodyOverridesText.value = formatJsonObject(form.requestBodyOverrides)
     if (props.tabId === 'opencode') {
       form.icon = 'opencode'
@@ -1801,7 +1865,6 @@ const resetForm = () => {
   Object.assign(form, createVendorFormFromCard(props.card, props.tabId))
   form.budgetQuotaSettings = normalizeBudgetQuotaSettings(props.card.budgetQuotaSettings)
   form.budgetQuotaUsedAdjustments = cloneBudgetQuotaAdjustments(props.card.budgetQuotaUsedAdjustments)
-  claudeAdvancedExpanded.value = props.tabId === 'claude' && (form.apiFormat || 'anthropic') !== 'anthropic'
   requestBodyOverridesText.value = formatJsonObject(form.requestBodyOverrides)
   if (props.tabId === 'opencode') {
     syncOpenCodeSettingsConfigText()
@@ -1811,6 +1874,10 @@ const resetForm = () => {
   const authState = resolveProviderAuthState(props.card.connectivityAuthType, props.tabId)
   selectedAuthType.value = authState.selectedAuthType
   customAuthHeader.value = authState.customAuthHeader
+  if (props.tabId === 'claude' && customAuthHeader.value) {
+    selectedAuthType.value = 'custom'
+  }
+  claudeAdvancedExpanded.value = props.tabId === 'claude' && hasClaudeAdvancedValue.value
   void refreshBudgetQuotaUsage()
 }
 
@@ -1871,8 +1938,7 @@ defineExpose<{
   applyProviderQuotaQueryConfig: handleProviderQuotaQueryConfigSave,
 })
 
-const resolveEffectiveAuthType = () =>
-  customAuthHeader.value.trim() || selectedAuthType.value || getDefaultAuthType(props.tabId)
+const resolveEffectiveAuthType = () => effectiveAuthType.value
 
 const toSortedJsonValue = (value: unknown): unknown => {
   if (Array.isArray(value)) {
@@ -2731,6 +2797,13 @@ const getLevelDescription = (level: number) => {
 }
 
 const buildFormPayload = async (): Promise<VendorForm | null> => {
+  if (props.tabId === 'claude' && selectedAuthType.value === 'custom') {
+    const headerName = customAuthHeader.value.trim()
+    if (!headerName || !/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(headerName)) {
+      showToast(t('components.main.form.errors.invalidCustomAuthHeader'), 'error')
+      return null
+    }
+  }
   const cliConfigReady = await (cliConfigEditorRef.value?.applyPendingJsonChanges?.() ?? true)
   if (!cliConfigReady) return null
 

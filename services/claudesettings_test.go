@@ -247,6 +247,13 @@ func TestClaudeSettingsServiceApplySingleProviderRejectsTransformedAPIFormat(t *
 				APIKey:    "test-key",
 				APIFormat: claudeAPIFormatOpenAIChat,
 			},
+			{
+				ID:                   44,
+				Name:                 "Custom Header Claude",
+				APIURL:               "https://example.com",
+				APIKey:               "test-key",
+				ConnectivityAuthType: "X-Custom-Auth",
+			},
 		},
 	})
 	if err != nil {
@@ -264,5 +271,54 @@ func TestClaudeSettingsServiceApplySingleProviderRejectsTransformedAPIFormat(t *
 	}
 	if !strings.Contains(err.Error(), "仅支持托管路由") {
 		t.Fatalf("错误信息未命中托管路由限制，err=%v", err)
+	}
+	err = service.ApplySingleProvider(44)
+	if err == nil || !strings.Contains(err.Error(), "仅支持托管路由") {
+		t.Fatalf("自定义 Header 直连应用应被拒绝，err=%v", err)
+	}
+}
+
+func TestClaudeSettingsServiceApplySingleProviderUsesSelectedAuthField(t *testing.T) {
+	homeDir := useIsolatedHomeDir(t)
+	writeClaudeSettingsForTest(t, homeDir, map[string]interface{}{
+		"env": map[string]interface{}{
+			claudeAuthTokenEnvKey: "old-token",
+		},
+	})
+
+	providerPath, err := providerFilePath("claude")
+	if err != nil {
+		t.Fatalf("获取 provider 配置路径失败: %v", err)
+	}
+	payload, err := json.Marshal(providerEnvelope{Providers: []Provider{
+		{
+			ID:                   43,
+			Name:                 "Claude API Key",
+			APIURL:               "https://example.com",
+			APIKey:               "new-key",
+			ConnectivityAuthType: "x-api-key",
+		},
+	}})
+	if err != nil {
+		t.Fatalf("序列化 provider 配置失败: %v", err)
+	}
+	if err := os.WriteFile(providerPath, payload, 0o600); err != nil {
+		t.Fatalf("写入 provider 配置失败: %v", err)
+	}
+
+	service := NewClaudeSettingsService(":18100", nil)
+	if err := service.ApplySingleProvider(43); err != nil {
+		t.Fatalf("应用 Claude API Key 供应商失败: %v", err)
+	}
+	env := readClaudeSettingsForTest(t, homeDir)["env"].(map[string]interface{})
+	if anyToString(env[claudeAPIKeyEnvKey]) != "new-key" {
+		t.Fatalf("未写入 API Key: %#v", env)
+	}
+	if _, exists := env[claudeAuthTokenEnvKey]; exists {
+		t.Fatalf("API Key 模式不应保留 AUTH_TOKEN: %#v", env)
+	}
+	appliedID, err := service.GetDirectAppliedProviderID()
+	if err != nil || appliedID == nil || *appliedID != 43 {
+		t.Fatalf("直连供应商识别错误: id=%v err=%v", appliedID, err)
 	}
 }

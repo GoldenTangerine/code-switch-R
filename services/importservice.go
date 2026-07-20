@@ -548,11 +548,12 @@ type ccMCPServerConfig struct {
 }
 
 type providerCandidate struct {
-	Name   string
-	APIURL string
-	APIKey string
-	Site   string
-	Icon   string
+	Name                 string
+	APIURL               string
+	APIKey               string
+	Site                 string
+	Icon                 string
+	ConnectivityAuthType string
 }
 
 func (is *ImportService) pendingProviders(cfg *legacyImportConfig) (map[string][]providerCandidate, error) {
@@ -621,11 +622,16 @@ func parseProviderEntry(kind, key string, entry ccProviderEntry) (providerCandid
 	case "claude":
 		apiURL := strings.TrimSpace(entry.Settings.Env["ANTHROPIC_BASE_URL"])
 		apiKey := strings.TrimSpace(entry.Settings.Env["ANTHROPIC_AUTH_TOKEN"])
+		authType := "bearer"
+		if apiKey == "" {
+			apiKey = strings.TrimSpace(entry.Settings.Env["ANTHROPIC_API_KEY"])
+			authType = "x-api-key"
+		}
 		if apiURL == "" || apiKey == "" {
-			log.Printf("ℹ️  code switch: 跳过 claude provider [%s]: 缺少 ANTHROPIC_BASE_URL 或 ANTHROPIC_AUTH_TOKEN", key)
+			log.Printf("ℹ️  code switch: 跳过 claude provider [%s]: 缺少 ANTHROPIC_BASE_URL 或认证字段", key)
 			return providerCandidate{}, false
 		}
-		return providerCandidate{Name: name, APIURL: apiURL, APIKey: apiKey, Site: site}, true
+		return providerCandidate{Name: name, APIURL: apiURL, APIKey: apiKey, Site: site, ConnectivityAuthType: authType}, true
 	case "codex":
 		apiKey := pickFirstNonEmpty(
 			entry.Settings.Auth["OPENAI_API_KEY"],
@@ -752,15 +758,16 @@ func (is *ImportService) saveProviders(kind string, candidates []providerCandida
 	accent, tint := defaultVisual(kind)
 	for _, candidate := range candidates {
 		provider := Provider{
-			ID:      nextID,
-			Name:    candidate.Name,
-			APIURL:  candidate.APIURL,
-			APIKey:  candidate.APIKey,
-			Site:    candidate.Site,
-			Icon:    candidate.Icon,
-			Tint:    tint,
-			Accent:  accent,
-			Enabled: true,
+			ID:                   nextID,
+			Name:                 candidate.Name,
+			APIURL:               candidate.APIURL,
+			APIKey:               candidate.APIKey,
+			Site:                 candidate.Site,
+			Icon:                 candidate.Icon,
+			Tint:                 tint,
+			Accent:               accent,
+			Enabled:              true,
+			ConnectivityAuthType: candidate.ConnectivityAuthType,
 		}
 		merged = append(merged, provider)
 		nextID++

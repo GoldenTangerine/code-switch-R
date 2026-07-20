@@ -27,6 +27,7 @@ func TestCliConfigServiceSaveConfigCodexUsesProviderContext(t *testing.T) {
 		"https://api.vendor.example/v1/",
 		"sk-provider",
 		"My Codex Provider",
+		"",
 	); err != nil {
 		t.Fatalf("SaveConfig 返回错误: %v", err)
 	}
@@ -108,7 +109,7 @@ func TestCliConfigServiceClaudeProxyPreviewUsesSelectedAuthField(t *testing.T) {
 	}
 }
 
-func TestCliConfigServiceClaudeDirectModePreservesExistingAPIKey(t *testing.T) {
+func TestCliConfigServiceClaudeDirectModeKeepsOnlySelectedAuthField(t *testing.T) {
 	homeDir := useIsolatedHomeDir(t)
 	writeClaudeSettingsForTest(t, homeDir, map[string]interface{}{
 		"env": map[string]interface{}{
@@ -126,8 +127,8 @@ func TestCliConfigServiceClaudeDirectModePreservesExistingAPIKey(t *testing.T) {
 		t.Fatalf("解析 Claude 直连预览失败: %v", err)
 	}
 	previewEnv := preview["env"].(map[string]interface{})
-	if anyToString(previewEnv[claudeAPIKeyEnvKey]) != "existing-api-key" {
-		t.Fatalf("直连预览不应删除既有 API Key: %#v", previewEnv)
+	if _, exists := previewEnv[claudeAPIKeyEnvKey]; exists {
+		t.Fatalf("AUTH_TOKEN 直连预览不应保留 API Key: %#v", previewEnv)
 	}
 
 	editable := map[string]interface{}{
@@ -135,19 +136,95 @@ func TestCliConfigServiceClaudeDirectModePreservesExistingAPIKey(t *testing.T) {
 			claudeAPIKeyEnvKey: "existing-api-key",
 		},
 	}
-	if err := service.SaveConfig(string(PlatformClaude), editable, "https://direct.example.com", "direct-token", ""); err != nil {
+	if err := service.SaveConfig(string(PlatformClaude), editable, "https://direct.example.com", "direct-token", "", "bearer"); err != nil {
 		t.Fatalf("保存 Claude 直连配置失败: %v", err)
 	}
 	savedEnv := readClaudeSettingsForTest(t, homeDir)["env"].(map[string]interface{})
-	if anyToString(savedEnv[claudeAPIKeyEnvKey]) != "existing-api-key" {
-		t.Fatalf("直连保存不应删除既有 API Key: %#v", savedEnv)
+	if _, exists := savedEnv[claudeAPIKeyEnvKey]; exists {
+		t.Fatalf("AUTH_TOKEN 直连保存不应保留 API Key: %#v", savedEnv)
 	}
 	config, err := service.getClaudeConfig()
 	if err != nil {
 		t.Fatalf("读取 Claude 直连高级配置失败: %v", err)
 	}
 	editableEnv, _ := config.Editable["env"].(map[string]interface{})
-	if anyToString(editableEnv[claudeAPIKeyEnvKey]) != "existing-api-key" {
-		t.Fatalf("直连 API Key 应保持可编辑: %#v", config.Editable)
+	if _, exists := editableEnv[claudeAPIKeyEnvKey]; exists {
+		t.Fatalf("认证字段不应出现在可编辑配置中: %#v", config.Editable)
+	}
+}
+
+func TestCliConfigServiceClaudeEditorPreviewUsesProviderAuthField(t *testing.T) {
+	useIsolatedHomeDir(t)
+	service := NewCliConfigService(":18100", nil)
+
+	rendered, err := service.RenderEditorContent(
+		string(PlatformClaude),
+		map[string]interface{}{},
+		"https://direct.example.com",
+		"direct-key",
+		"Claude API Key",
+		"x-api-key",
+		"direct",
+	)
+	if err != nil {
+		t.Fatalf("渲染 Claude 直连预览失败: %v", err)
+	}
+	var payload map[string]interface{}
+	if err := json.Unmarshal([]byte(rendered.Content), &payload); err != nil {
+		t.Fatalf("解析 Claude 直连预览失败: %v", err)
+	}
+	env := payload["env"].(map[string]interface{})
+	if anyToString(env[claudeAPIKeyEnvKey]) != "direct-key" {
+		t.Fatalf("直连预览未写入 API Key: %#v", env)
+	}
+	if _, exists := env[claudeAuthTokenEnvKey]; exists {
+		t.Fatalf("API Key 直连预览不应保留 AUTH_TOKEN: %#v", env)
+	}
+
+	if _, err := service.RenderEditorContent(
+		string(PlatformClaude),
+		map[string]interface{}{},
+		"https://direct.example.com",
+		"direct-key",
+		"Claude Custom",
+		"X-Custom-Auth",
+		"direct",
+	); err == nil {
+		t.Fatal("自定义 Header 直连预览应被拒绝")
+	}
+}
+
+func TestCliConfigServiceClaudeDirectAPIKeyIsLocked(t *testing.T) {
+	homeDir := useIsolatedHomeDir(t)
+	writeClaudeSettingsForTest(t, homeDir, map[string]interface{}{
+		"env": map[string]interface{}{
+			"ANTHROPIC_BASE_URL": "https://direct.example.com",
+			claudeAPIKeyEnvKey:   "direct-key",
+			"KEEP_ME":            "yes",
+		},
+	})
+	service := NewCliConfigService(":18100", nil)
+
+	config, err := service.getClaudeConfig()
+	if err != nil {
+		t.Fatalf("读取 Claude 配置失败: %v", err)
+	}
+	editableEnv, _ := config.Editable["env"].(map[string]interface{})
+	if _, exists := editableEnv[claudeAPIKeyEnvKey]; exists {
+		t.Fatalf("API Key 不应进入可编辑配置: %#v", editableEnv)
+	}
+	if anyToString(editableEnv["KEEP_ME"]) != "yes" {
+		t.Fatalf("自定义环境变量应保持可编辑: %#v", editableEnv)
+	}
+
+	foundLockedAPIKey := false
+	for _, field := range config.Fields {
+		if field.Key == "env."+claudeAPIKeyEnvKey && field.Locked {
+			foundLockedAPIKey = true
+			break
+		}
+	}
+	if !foundLockedAPIKey {
+		t.Fatalf("API Key 应作为锁定字段展示: %#v", config.Fields)
 	}
 }

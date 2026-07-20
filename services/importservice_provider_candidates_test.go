@@ -100,3 +100,89 @@ func TestDiffProviderCandidates_DedupWithinImportBatchByURLAndKey(t *testing.T) 
 		t.Fatalf("expected 1 deduplicated candidate, got %d", len(candidates))
 	}
 }
+
+func TestParseProviderEntryClaudeRecognizesAuthFields(t *testing.T) {
+	tests := []struct {
+		name         string
+		env          stringMap
+		wantKey      string
+		wantAuthType string
+	}{
+		{
+			name: "auth_token",
+			env: stringMap{
+				"ANTHROPIC_BASE_URL":   "https://token.example.com",
+				"ANTHROPIC_AUTH_TOKEN": "token-key",
+			},
+			wantKey: "token-key", wantAuthType: "bearer",
+		},
+		{
+			name: "api_key",
+			env: stringMap{
+				"ANTHROPIC_BASE_URL": "https://api-key.example.com",
+				"ANTHROPIC_API_KEY":  "api-key",
+			},
+			wantKey: "api-key", wantAuthType: "x-api-key",
+		},
+		{
+			name: "auth_token_preferred",
+			env: stringMap{
+				"ANTHROPIC_BASE_URL":   "https://both.example.com",
+				"ANTHROPIC_AUTH_TOKEN": "token-key",
+				"ANTHROPIC_API_KEY":    "api-key",
+			},
+			wantKey: "token-key", wantAuthType: "bearer",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			candidate, ok := parseProviderEntry("claude", tt.name, ccProviderEntry{
+				Name:     tt.name,
+				Settings: ccProviderSetting{Env: tt.env},
+			})
+			if !ok {
+				t.Fatal("Claude provider 应被识别")
+			}
+			if candidate.APIKey != tt.wantKey || candidate.ConnectivityAuthType != tt.wantAuthType {
+				t.Fatalf("认证字段识别错误: %#v", candidate)
+			}
+		})
+	}
+}
+
+func TestDeepLinkClaudeConfigInfersAuthField(t *testing.T) {
+	tests := []struct {
+		name         string
+		env          map[string]interface{}
+		wantKey      string
+		wantAuthType string
+	}{
+		{
+			name: "api_key",
+			env: map[string]interface{}{
+				claudeAPIKeyEnvKey: "api-key",
+			},
+			wantKey: "api-key", wantAuthType: "x-api-key",
+		},
+		{
+			name: "auth_token_preferred",
+			env: map[string]interface{}{
+				claudeAuthTokenEnvKey: "token-key",
+				claudeAPIKeyEnvKey:    "api-key",
+			},
+			wantKey: "token-key", wantAuthType: "bearer",
+		},
+	}
+
+	service := &DeepLinkService{}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			request := &DeepLinkImportRequest{App: "claude"}
+			service.mergeClaudeConfig(request, map[string]interface{}{"env": tt.env})
+			if request.APIKey != tt.wantKey || request.AuthType != tt.wantAuthType {
+				t.Fatalf("深链认证字段识别错误: %#v", request)
+			}
+		})
+	}
+}

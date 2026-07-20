@@ -3047,23 +3047,15 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 	defer releaseProviderSlot()
 
 	if !isCodexOAuthProvider(provider) {
-		// 根据认证方式设置请求头（默认 Bearer，与 v2.2.x 保持一致）
-		authType := strings.ToLower(strings.TrimSpace(provider.ConnectivityAuthType))
-		switch authType {
-		case "x-api-key":
-			// 仅当用户显式选择 x-api-key 时使用（Anthropic 官方 API）
-			headers["x-api-key"] = provider.APIKey
-			headers["anthropic-version"] = "2023-06-01"
-		case "", "bearer":
-			// 默认使用 Bearer token（兼容所有第三方中转）
-			headers["Authorization"] = fmt.Sprintf("Bearer %s", provider.APIKey)
-		default:
-			// 自定义 Header 名
-			headerName := strings.TrimSpace(provider.ConnectivityAuthType)
-			if headerName == "" || strings.EqualFold(headerName, "custom") {
-				headerName = "Authorization"
-			}
-			headers[headerName] = provider.APIKey
+		authType := provider.ConnectivityAuthType
+		if kind == "claude" {
+			authType = normalizeClaudeProviderAuthType(authType)
+		}
+		headerName, headerValue := resolveProviderAuthHeader(provider.APIKey, authType)
+		headers[headerName] = headerValue
+		if (kind == "claude" && resolveClaudeAPIFormat(provider) == claudeAPIFormatAnthropic) ||
+			(kind != "claude" && strings.EqualFold(headerName, "x-api-key")) {
+			setHeaderIfAbsentCaseInsensitive(headers, "anthropic-version", "2023-06-01")
 		}
 	}
 
@@ -8988,20 +8980,15 @@ func (prs *ProviderRelayService) forwardModelsRequest(
 			req.Header.Set("chatgpt-account-id", accountID)
 		}
 	} else {
-		// 根据认证方式设置请求头（默认 Bearer，与 v2.2.x 保持一致）
-		authType := strings.ToLower(strings.TrimSpace(selectedProvider.ConnectivityAuthType))
-		switch authType {
-		case "x-api-key":
-			req.Header.Set("x-api-key", selectedProvider.APIKey)
+		authType := selectedProvider.ConnectivityAuthType
+		if kind == "claude" {
+			authType = normalizeClaudeProviderAuthType(authType)
+		}
+		headerName, headerValue := resolveProviderAuthHeader(selectedProvider.APIKey, authType)
+		req.Header.Set(headerName, headerValue)
+		if ((kind == "claude" && resolveClaudeAPIFormat(*selectedProvider) == claudeAPIFormatAnthropic) ||
+			(kind != "claude" && strings.EqualFold(headerName, "x-api-key"))) && req.Header.Get("anthropic-version") == "" {
 			req.Header.Set("anthropic-version", "2023-06-01")
-		case "", "bearer":
-			req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", selectedProvider.APIKey))
-		default:
-			headerName := strings.TrimSpace(selectedProvider.ConnectivityAuthType)
-			if headerName == "" || strings.EqualFold(headerName, "custom") {
-				headerName = "Authorization"
-			}
-			req.Header.Set(headerName, selectedProvider.APIKey)
 		}
 	}
 

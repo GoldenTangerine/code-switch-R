@@ -8,6 +8,7 @@ export interface DeepLinkImportRequest {
   homepage: string
   endpoint: string
   apiKey: string
+  authType?: string
   model?: string | null
   notes?: string | null
   haikuModel?: string | null

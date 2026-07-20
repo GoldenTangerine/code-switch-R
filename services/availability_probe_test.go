@@ -190,59 +190,93 @@ func TestResponseContainsExpectedTextIgnoresResponsesRefusal(t *testing.T) {
 	}
 }
 
-func TestExecuteAvailabilityProbeAddsClaudeCompatibilityHeaders(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if got := r.Header.Get("x-api-key"); got != "sk-claude" {
-			t.Fatalf("x-api-key = %q, 期望 sk-claude", got)
-		}
-		if got := r.Header.Get("Authorization"); got != "Bearer sk-claude" {
-			t.Fatalf("Authorization = %q, 期望 Bearer sk-claude", got)
-		}
-		if got := r.Header.Get("anthropic-version"); got != "2023-06-01" {
-			t.Fatalf("anthropic-version = %q, 期望 2023-06-01", got)
-		}
-
-		bodyBytes, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Fatalf("读取请求体失败: %v", err)
-		}
-		if !strings.Contains(string(bodyBytes), `"messages"`) {
-			t.Fatalf("Claude 探测请求体应包含 messages: %s", string(bodyBytes))
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"content":[{"type":"text","text":"pong"}]}`))
-	}))
-	defer server.Close()
-
-	provider := &Provider{
-		ID:     9,
-		Name:   "Claude Dual Auth",
-		APIURL: server.URL,
-		APIKey: "sk-claude",
-		AvailabilityConfig: &AvailabilityConfig{
-			TestModel:    "claude-sonnet-4-5",
-			TestEndpoint: "/v1/messages",
-			Timeout:      5000,
-		},
+func TestExecuteAvailabilityProbeUsesSelectedClaudeAuthHeader(t *testing.T) {
+	tests := []struct {
+		name          string
+		authType      string
+		wantHeader    string
+		wantValue     string
+		wantVersion   bool
+		absentHeaders []string
+	}{
+		{name: "default_auth_token", authType: "", wantHeader: "Authorization", wantValue: "Bearer sk-claude", wantVersion: true, absentHeaders: []string{"x-api-key"}},
+		{name: "api_key", authType: "x-api-key", wantHeader: "x-api-key", wantValue: "sk-claude", wantVersion: true, absentHeaders: []string{"Authorization"}},
+		{name: "custom", authType: "X-Custom-Auth", wantHeader: "X-Custom-Auth", wantValue: "sk-claude", wantVersion: true, absentHeaders: []string{"Authorization", "x-api-key"}},
 	}
 
-	result, err := executeAvailabilityProbe(
-		context.Background(),
-		&http.Client{Timeout: 0},
-		provider,
-		"claude",
-		resolveProviderAvailabilityModel(provider, "claude"),
-		resolveProviderAvailabilityEndpoint(provider, "claude"),
-		resolveProviderAvailabilityTimeout(provider),
-	)
-	if err != nil {
-		t.Fatalf("executeAvailabilityProbe 失败: %v", err)
-	}
-	if result.HTTPStatusCode != 200 {
-		t.Fatalf("HTTPStatusCode = %d, 期望 200", result.HTTPStatusCode)
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if got := r.Header.Get(tt.wantHeader); got != tt.wantValue {
+					t.Errorf("%s = %q, 期望 %q", tt.wantHeader, got, tt.wantValue)
+				}
+				for _, header := range tt.absentHeaders {
+					if got := r.Header.Get(header); got != "" {
+						t.Errorf("%s 应为空，实际为 %q", header, got)
+					}
+				}
+				if got := r.Header.Get("anthropic-version"); (got != "") != tt.wantVersion {
+					t.Errorf("anthropic-version = %q, wantVersion=%v", got, tt.wantVersion)
+				}
 
+				bodyBytes, err := io.ReadAll(r.Body)
+				if err != nil {
+					t.Errorf("读取请求体失败: %v", err)
+				}
+				if !strings.Contains(string(bodyBytes), `"messages"`) {
+					t.Errorf("Claude 探测请求体应包含 messages: %s", string(bodyBytes))
+				}
+
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"content":[{"type":"text","text":"pong"}]}`))
+			}))
+			defer server.Close()
+
+			provider := &Provider{
+				ID:                   9,
+				Name:                 "Claude Auth",
+				APIURL:               server.URL,
+				APIKey:               "sk-claude",
+				ConnectivityAuthType: tt.authType,
+				AvailabilityConfig: &AvailabilityConfig{
+					TestModel:    "claude-sonnet-4-5",
+					TestEndpoint: "/v1/messages",
+					Timeout:      5000,
+				},
+			}
+
+			result, err := executeAvailabilityProbe(
+				context.Background(),
+				&http.Client{Timeout: 0},
+				provider,
+				"claude",
+				resolveProviderAvailabilityModel(provider, "claude"),
+				resolveProviderAvailabilityEndpoint(provider, "claude"),
+				resolveProviderAvailabilityTimeout(provider),
+			)
+			if err != nil {
+				t.Fatalf("executeAvailabilityProbe 失败: %v", err)
+			}
+			if result.HTTPStatusCode != 200 {
+				t.Fatalf("HTTPStatusCode = %d, 期望 200", result.HTTPStatusCode)
+			}
+		})
+	}
+}
+
+func TestApplyProviderAuthHeadersSkipsAnthropicVersionForTransformedClaudeAPI(t *testing.T) {
+	headers := make(http.Header)
+	applyProviderAuthHeaders(headers, &Provider{
+		APIKey:    "test-key",
+		APIFormat: claudeAPIFormatOpenAIChat,
+	}, "claude")
+
+	if got := headers.Get("Authorization"); got != "Bearer test-key" {
+		t.Fatalf("Authorization = %q, 期望 Bearer test-key", got)
+	}
+	if got := headers.Get("anthropic-version"); got != "" {
+		t.Fatalf("OpenAI 转换格式不应添加 anthropic-version，实际为 %q", got)
+	}
 }
 
 func TestExecuteAvailabilityProbeFallsBackToNextResponsesPresetOnInvalidRequest(t *testing.T) {
