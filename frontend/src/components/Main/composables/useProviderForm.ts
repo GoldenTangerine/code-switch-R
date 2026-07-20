@@ -205,7 +205,7 @@ export function useProviderForm(options: UseProviderFormOptions) {
 
     if (editingCard) {
       const previousEnabled = editingCard.enabled
-      const previousSnapshot = JSON.parse(JSON.stringify(editingCard)) as AutomationCard
+      const previousCards = cloneAutomationCards(list)
 
       Object.assign(editingCard, {
         name: form.name || editingCard.name,
@@ -221,10 +221,8 @@ export function useProviderForm(options: UseProviderFormOptions) {
       try {
         await persistProviders(tabId)
       } catch (error) {
-        Object.assign(editingCard, previousSnapshot)
-        if (previousEnabled !== providerFields.enabled) {
-          moveCardToStatusGroup(tabId, editingCard, previousEnabled)
-        }
+        restoreCards(list, previousCards)
+        providerModalState.card = list.find((card) => card.id === editingCard.id) ?? null
         throw error
       }
     } else {

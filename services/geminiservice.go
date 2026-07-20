@@ -37,8 +37,8 @@ type GeminiProvider struct {
 	PartnerPromotionKey      string            `json:"partnerPromotionKey,omitempty"` // 用于识别供应商类型
 	Enabled                  bool              `json:"enabled"`
 	SortOrder                int               `json:"sortOrder,omitempty"`                // 隐藏排序字段：仅控制启用 / 未启用组内顺序
-	EnabledSortOrder         int               `json:"enabledSortOrder,omitempty"`         // 记忆启用组内顺序，切回启用时优先恢复
-	DisabledSortOrder        int               `json:"disabledSortOrder,omitempty"`        // 记忆未启用组内顺序，切回未启用时优先恢复
+	EnabledSortOrder         int               `json:"enabledSortOrder,omitempty"`         // 持久化启用组内顺序
+	DisabledSortOrder        int               `json:"disabledSortOrder,omitempty"`        // 持久化未启用组内顺序
 	Level                    int               `json:"level,omitempty"`                    // 优先级分组 (1-10, 默认 1)
 	ProviderConcurrencyLimit int               `json:"providerConcurrencyLimit,omitempty"` // 实时并发最多同时处理请求数
 	SessionMaxSessions       int               `json:"sessionMaxSessions,omitempty"`       // 会话隔离最多承载会话数

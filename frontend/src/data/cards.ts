@@ -21,9 +21,9 @@ export type AutomationCard = {
   anthropicCacheTTL?: '' | '5m' | '1h'
   // 隐藏排序字段：仅控制启用组 / 未启用组内部顺序
   sortOrder?: number
-  // 记忆启用组内顺序，切回启用时优先恢复到这里
+  // 持久化启用组内顺序
   enabledSortOrder?: number
-  // 记忆未启用组内顺序，切回未启用时优先恢复到这里
+  // 持久化未启用组内顺序
   disabledSortOrder?: number
   // 模型白名单：声明 provider 支持的模型（精确或通配符）
   supportedModels?: Record<string, boolean>

@@ -75,7 +75,7 @@ describe('providerOrder', () => {
     expect(list[1]?.disabledSortOrder).toBe(2)
   })
 
-  it('restores previous disabled position when toggled back off', () => {
+  it('prepends providers to the target status group when toggled', () => {
     const list = [
       createCard(1, { enabled: true, sortOrder: 1, enabledSortOrder: 1 }),
       createCard(2, { enabled: false, sortOrder: 1, disabledSortOrder: 1 }),
@@ -84,11 +84,27 @@ describe('providerOrder', () => {
     ]
 
     expect(moveProviderToStatusGroup(list, list[2]!, true)).toBe(true)
+    expect(list.map((card) => card.id)).toEqual([3, 1, 2, 4])
+
+    expect(moveProviderToStatusGroup(list, list[0]!, false)).toBe(true)
+    expect(list.map((card) => card.id)).toEqual([1, 3, 2, 4])
+    expect(list.map((card) => card.disabledSortOrder ?? null)).toEqual([null, 1, 2, 3])
+  })
+
+  it('keeps the most recently disabled provider first', () => {
+    const list = [
+      createCard(1, { enabled: true, sortOrder: 1, enabledSortOrder: 1 }),
+      createCard(2, { enabled: true, sortOrder: 2, enabledSortOrder: 2 }),
+      createCard(3, { enabled: true, sortOrder: 3, enabledSortOrder: 3 }),
+      createCard(4, { enabled: false, sortOrder: 1, disabledSortOrder: 1 }),
+    ]
+
+    expect(moveProviderToStatusGroup(list, list[1]!, false)).toBe(true)
     expect(list.map((card) => card.id)).toEqual([1, 3, 2, 4])
 
     expect(moveProviderToStatusGroup(list, list[1]!, false)).toBe(true)
-    expect(list.map((card) => card.id)).toEqual([1, 2, 3, 4])
-    expect(list.map((card) => card.disabledSortOrder ?? null)).toEqual([null, 1, 2, 3])
+    expect(list.map((card) => card.id)).toEqual([1, 3, 2, 4])
+    expect(list.slice(1).map((card) => card.disabledSortOrder)).toEqual([1, 2, 3])
   })
 
   it('prepends new disabled providers to the top of disabled group', () => {

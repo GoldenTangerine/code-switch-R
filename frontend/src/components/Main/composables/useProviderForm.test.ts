@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { toRaw } from 'vue'
 import type { AutomationCard } from '../../../data/cards'
 import type { ProviderTab, VendorForm } from '../types'
 import { insertProviderToStatusGroup, moveProviderToStatusGroup } from '../utils/providerOrder'
@@ -344,6 +345,47 @@ describe('useProviderForm order preservation', () => {
     expect(window.dispatchEvent).not.toHaveBeenCalled()
   })
 
+  it('restores provider order when status edit persistence fails', async () => {
+    const cards = createCardRecord()
+    const first = createCard(1, { enabled: true, sortOrder: 1, enabledSortOrder: 1 })
+    const editing = createCard(2, { enabled: true, sortOrder: 2, enabledSortOrder: 2 })
+    const third = createCard(3, { enabled: true, sortOrder: 3, enabledSortOrder: 3 })
+    const disabled = createCard(4, { enabled: false, sortOrder: 1, disabledSortOrder: 1 })
+    cards.codex.push(first, editing, third, disabled)
+    const persistProviders = vi.fn().mockRejectedValue(new Error('save failed'))
+
+    const providerForm = useProviderForm({
+      initialTab: 'codex',
+      t: (key: string) => key,
+      showToast: vi.fn(),
+      getActiveTab: () => 'codex',
+      cards,
+      normalizeLevel,
+      persistProviders,
+      refreshDirectAppliedStatus: vi.fn().mockResolvedValue(undefined),
+      removeProvider: vi.fn().mockResolvedValue(undefined),
+      duplicateProvider: vi.fn().mockResolvedValue(false),
+      reloadProviders: vi.fn().mockResolvedValue(undefined),
+      moveCardToStatusGroup: (tabId, card, enabled) => moveProviderToStatusGroup(cards[tabId], card, enabled),
+      appendCardToGroup: (tabId, card) => insertProviderToStatusGroup(cards[tabId], card),
+    })
+
+    providerForm.configure(editing)
+    await expect(providerForm.submitProviderModal(createForm({
+      name: editing.name,
+      apiUrl: editing.apiUrl,
+      apiKey: editing.apiKey,
+      enabled: false,
+    }))).rejects.toThrow('save failed')
+
+    expect(cards.codex.map((card) => card.id)).toEqual([1, 2, 3, 4])
+    expect(cards.codex.map((card) => card.enabled)).toEqual([true, true, true, false])
+    expect(cards.codex.map((card) => card.sortOrder)).toEqual([1, 2, 3, 1])
+    expect(cards.codex.map((card) => card.enabledSortOrder ?? null)).toEqual([1, 2, 3, null])
+    expect(cards.codex.map((card) => card.disabledSortOrder ?? null)).toEqual([null, null, null, 1])
+    expect(toRaw(providerForm.providerModalState.card!)).toBe(cards.codex[1])
+  })
+
   it('preserves hidden OpenCode request overrides and syncs live flags from enabled on edit', async () => {
     const cards = createCardRecord()
     const original = createCard(1, {
@@ -433,7 +475,7 @@ describe('useProviderForm order preservation', () => {
     expect(persistProviders).toHaveBeenCalledWith('opencode')
   })
 
-  it('moves provider to the end of enabled group when toggled on', async () => {
+  it('moves provider to the start of enabled group when toggled on', async () => {
     const cards = createCardRecord()
     const first = createCard(1, { enabled: true, sortOrder: 1 })
     const second = createCard(2, { enabled: true, sortOrder: 2 })
@@ -459,13 +501,13 @@ describe('useProviderForm order preservation', () => {
 
     await providerForm.handleProviderEnabledChange(third, true)
 
-    expect(cards.codex.map((card) => card.id)).toEqual([1, 2, 3])
+    expect(cards.codex.map((card) => card.id)).toEqual([3, 1, 2])
     expect(cards.codex.map((card) => card.enabled)).toEqual([true, true, true])
     expect(cards.codex.map((card) => card.sortOrder)).toEqual([1, 2, 3])
     expect(persistProviders).toHaveBeenCalledWith('codex')
   })
 
-  it('restores provider to its previous disabled position when toggled off again', async () => {
+  it('moves provider to the start of disabled group when toggled off again', async () => {
     const cards = createCardRecord()
     const first = createCard(1, { enabled: true, sortOrder: 1, enabledSortOrder: 1 })
     const second = createCard(2, { enabled: false, sortOrder: 1, disabledSortOrder: 1 })
@@ -491,11 +533,11 @@ describe('useProviderForm order preservation', () => {
     })
 
     await providerForm.handleProviderEnabledChange(third, true)
-    expect(cards.codex.map((card) => card.id)).toEqual([1, 3, 2, 4])
+    expect(cards.codex.map((card) => card.id)).toEqual([3, 1, 2, 4])
 
     await providerForm.handleProviderEnabledChange(third, false)
 
-    expect(cards.codex.map((card) => card.id)).toEqual([1, 2, 3, 4])
+    expect(cards.codex.map((card) => card.id)).toEqual([1, 3, 2, 4])
     expect(cards.codex.map((card) => card.disabledSortOrder ?? null)).toEqual([null, 1, 2, 3])
     expect(persistProviders).toHaveBeenCalledTimes(2)
   })

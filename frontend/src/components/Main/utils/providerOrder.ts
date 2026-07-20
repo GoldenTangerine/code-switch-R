@@ -15,12 +15,6 @@ const normalizeSortOrder = (value: number | undefined, fallback: number) => {
   return Math.floor(numeric)
 }
 
-const normalizeStoredGroupSortOrder = (value: number | undefined): number | null => {
-  const numeric = Number(value)
-  if (!Number.isFinite(numeric) || numeric < 1) return null
-  return Math.floor(numeric)
-}
-
 const compareOrderedEntries = <T extends AutomationCard>(left: OrderedEntry<T>, right: OrderedEntry<T>) => {
   if (left.sortOrder !== right.sortOrder) {
     return left.sortOrder - right.sortOrder
@@ -37,11 +31,6 @@ const getGroupOrderKey = (group: ProviderStatusGroup): ProviderGroupOrderKey => 
 const getDisplaySortOrder = <T extends AutomationCard>(card: T, group: ProviderStatusGroup, fallback: number) => {
   const key = getGroupOrderKey(group)
   return normalizeSortOrder(card[key] ?? card.sortOrder, fallback)
-}
-
-const getRememberedGroupSortOrder = <T extends AutomationCard>(card: T, group: ProviderStatusGroup) => {
-  const key = getGroupOrderKey(group)
-  return normalizeStoredGroupSortOrder(card[key])
 }
 
 const setGroupSortOrder = <T extends AutomationCard>(card: T, group: ProviderStatusGroup, value: number) => {
@@ -133,19 +122,10 @@ export const moveProviderToStatusGroup = <T extends AutomationCard>(
   if (currentIndex < 0) return false
 
   const [moved] = list.splice(currentIndex, 1)
-  const targetGroup = resolveStatusGroup(enabled)
-  const targetCards = list.filter((item) => item.enabled === enabled)
-  const rememberedSortOrder = getRememberedGroupSortOrder(moved, targetGroup)
-  const targetIndexWithinGroup = rememberedSortOrder === null
-    ? targetCards.length
-    : Math.min(Math.max(rememberedSortOrder - 1, 0), targetCards.length)
-
   moved.enabled = enabled
 
   const enabledCount = countEnabledCards(list)
-  const insertIndex = enabled
-    ? targetIndexWithinGroup
-    : enabledCount + targetIndexWithinGroup
+  const insertIndex = enabled ? 0 : enabledCount
 
   list.splice(insertIndex, 0, moved)
 
