@@ -36,7 +36,7 @@
           v-for="option in filteredOptions"
           :key="option"
           :value="option"
-          @mousedown="allowPointerSelection"
+          @mousedown.capture="allowPointerSelection"
           v-slot="{ active, selected }"
         >
           <div :class="['searchable-model-input__option', { active, selected }]">
@@ -148,9 +148,7 @@ const handleInputKeydown = (event: KeyboardEvent) => {
 }
 
 const allowPointerSelection = (event: MouseEvent) => {
-  if (event.button !== 0) return
-  allowSearchableInputPointerSelection(selectionState)
-  nextTick(() => consumeSearchableInputSelection(selectionState))
+  allowSearchableInputPointerSelection(selectionState, event)
 }
 
 const clearSearchQuery = () => {

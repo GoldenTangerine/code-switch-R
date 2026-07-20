@@ -22,6 +22,10 @@ export interface SearchableInputSelectionKeyEvent extends SearchableInputComposi
   shiftKey?: boolean
 }
 
+export interface SearchableInputPointerEvent {
+  button: number
+}
+
 export interface SearchableInputSelectionState {
   hasKeyboardNavigation: boolean
   canSelectOption: boolean
@@ -72,8 +76,14 @@ export function handleSearchableInputSelectionKeydown(
   return false
 }
 
-export function allowSearchableInputPointerSelection(state: SearchableInputSelectionState): void {
+export function allowSearchableInputPointerSelection(
+  state: SearchableInputSelectionState,
+  event: SearchableInputPointerEvent,
+): boolean {
+  if (event.button !== 0) return false
+
   state.canSelectOption = true
+  return true
 }
 
 export function consumeSearchableInputSelection(state: SearchableInputSelectionState): boolean {

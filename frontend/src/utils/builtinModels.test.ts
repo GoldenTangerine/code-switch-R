@@ -61,8 +61,10 @@ describe('buildBuiltinProviderModelOptions', () => {
       createRow('claude-sonnet-4-5', 'builtin'),
       createRow('gpt-5-codex', 'builtin'),
       createRow('kimi-k2-thinking', 'builtin'),
+      createRow('kimi-k3', 'builtin'),
     ])
 
     expect(filterAndSortStringOptions(options, 'k2think')).toEqual(['kimi-k2-thinking'])
+    expect(filterAndSortStringOptions(options, 'k3')).toEqual(['kimi-k3'])
   })
 })

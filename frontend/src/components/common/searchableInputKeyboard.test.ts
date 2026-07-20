@@ -109,10 +109,17 @@ describe('SearchableModelInput selection intent', () => {
     const state = createSearchableInputSelectionState()
 
     handleSearchableInputSelectionKeydown(state, { key: 'ArrowDown' })
-    allowSearchableInputPointerSelection(state)
+    expect(allowSearchableInputPointerSelection(state, { button: 0 })).toBe(true)
 
     expect(consumeSearchableInputSelection(state)).toBe(true)
     expect(handleSearchableInputSelectionKeydown(state, { key: 'Enter' })).toBe(true)
+  })
+
+  it('鼠标非左键不允许选择候选', () => {
+    const state = createSearchableInputSelectionState()
+
+    expect(allowSearchableInputPointerSelection(state, { button: 2 })).toBe(false)
+    expect(consumeSearchableInputSelection(state)).toBe(false)
   })
 
   it('失焦重置后直接 Enter 仍保留输入值', () => {
@@ -134,7 +141,7 @@ describe('SearchableModelInput selection intent', () => {
 
   it('输入内容变化后清除之前的选择许可', () => {
     const state = createSearchableInputSelectionState()
-    allowSearchableInputPointerSelection(state)
+    allowSearchableInputPointerSelection(state, { button: 0 })
 
     resetSearchableInputSelectionState(state)
 
