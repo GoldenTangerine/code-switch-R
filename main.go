@@ -147,8 +147,12 @@ func main() {
 	providerRelayStateService := services.NewProviderRelayStateService(providerRelay)
 	claudeSettings := services.NewClaudeSettingsService(providerRelay.Addr(), appSettings)
 	codexSettings := services.NewCodexSettingsService(providerRelay.Addr())
+	providerService.BindClaudeSettingsService(claudeSettings)
 	appSettings.BindClaudeSettingsService(claudeSettings)
 	appSettings.BindCodexSettingsService(codexSettings)
+	if err := providerService.ReconcileClaudeSubagentModel(); err != nil {
+		log.Printf("协调 Claude Subagent 模型失败: %v", err)
+	}
 	if err := claudeSettings.ReconcileProxyAuthField(); err != nil {
 		log.Printf("修复 Claude 代理认证字段失败: %v", err)
 	}

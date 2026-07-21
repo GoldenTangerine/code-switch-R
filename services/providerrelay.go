@@ -2343,6 +2343,12 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 				continue
 			}
 
+			// 内部 Subagent 别名不能按未命中透传，必须有专用映射或默认兜底。
+			if kind == "claude" && requestedModel == claudeManagedSubagentModel && !provider.supportsManagedClaudeSubagentModel() {
+				skippedCount++
+				continue
+			}
+
 			// Claude 模型路由关闭时不使用模型配置筛选供应商。
 			if kind != "claude" || claudeModelRoutingEnabled {
 				if errs := provider.validateConfigurationForKind(kind); len(errs) > 0 {

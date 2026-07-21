@@ -119,6 +119,71 @@ func TestProviderServiceSnapshotDoesNotShareMutableFields(t *testing.T) {
 	}
 }
 
+func TestProviderServiceConcurrentSavesReconcileLatestClaudeSubagentModel(t *testing.T) {
+	homeDir := useIsolatedHomeDir(t)
+	writeClaudeSettingsForTest(t, homeDir, map[string]interface{}{"env": map[string]interface{}{}})
+
+	claudeSettings := NewClaudeSettingsService(":18100", nil)
+	if err := claudeSettings.EnableProxy(); err != nil {
+		t.Fatal(err)
+	}
+	service := NewProviderService()
+	service.BindClaudeSettingsService(claudeSettings)
+	service.claudeSubagentReconcileMu.Lock()
+
+	withSubagentDone := make(chan error, 1)
+	go func() {
+		withSubagentDone <- service.SaveProviders("claude", []Provider{{
+			ID:      1,
+			Name:    "With Subagent",
+			APIURL:  "https://example.com",
+			APIKey:  "key",
+			Enabled: true,
+			ModelMapping: map[string]string{
+				claudeManagedSubagentModel: "vendor-subagent",
+			},
+		}})
+	}()
+	waitForProviderName(t, service, "With Subagent")
+
+	withoutSubagentDone := make(chan error, 1)
+	go func() {
+		withoutSubagentDone <- service.SaveProviders("claude", []Provider{{
+			ID:      1,
+			Name:    "Without Subagent",
+			APIURL:  "https://example.com",
+			APIKey:  "key",
+			Enabled: true,
+		}})
+	}()
+	waitForProviderName(t, service, "Without Subagent")
+	service.claudeSubagentReconcileMu.Unlock()
+
+	if err := <-withSubagentDone; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-withoutSubagentDone; err != nil {
+		t.Fatal(err)
+	}
+	env := readClaudeSettingsForTest(t, homeDir)["env"].(map[string]interface{})
+	if _, exists := env[claudeSubagentModelEnvKey]; exists {
+		t.Fatalf("并发保存后未按最新供应商配置恢复 Subagent 模型: %#v", env)
+	}
+}
+
+func waitForProviderName(t *testing.T, service *ProviderService, expected string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		providers, err := service.LoadProviders("claude")
+		if err == nil && len(providers) == 1 && providers[0].Name == expected {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("等待供应商保存超时: %s", expected)
+}
+
 // ==================== 通配符匹配测试 ====================
 
 func TestMatchWildcard(t *testing.T) {
@@ -584,6 +649,83 @@ func TestProviderResolveModelMappingDetailPreservesSelectedRule(t *testing.T) {
 	miss := provider.resolveModelMappingDetail("gpt-5")
 	if miss.Matched || miss.MappedModel != "gpt-5" || miss.Pattern != "" || miss.TargetPattern != "" {
 		t.Fatalf("未命中映射详情错误: %#v", miss)
+	}
+}
+
+func TestProviderResolveManagedSubagentMappingUsesDedicatedRuleBeforeFallback(t *testing.T) {
+	provider := Provider{
+		ModelMapping: map[string]string{
+			claudeManagedSubagentModel:   "vendor-subagent",
+			claudeDefaultModelMappingKey: "vendor-fallback",
+			"code-switch-*":              "vendor-generic",
+		},
+		ModelMappingReasoningEfforts: map[string]string{
+			claudeManagedSubagentModel:   "high",
+			claudeDefaultModelMappingKey: "medium",
+		},
+		ModelMappingSupports1M: map[string]bool{
+			claudeManagedSubagentModel: true,
+		},
+	}
+
+	detail := provider.resolveModelMappingDetail(claudeManagedSubagentModel)
+	if !detail.Matched || detail.Pattern != claudeManagedSubagentModel || detail.MappedModel != "vendor-subagent" || detail.ReasoningEffort != "high" || !detail.Supports1M {
+		t.Fatalf("Subagent 专用映射详情错误: %#v", detail)
+	}
+
+	provider.ModelMappingDisabled = map[string]bool{claudeManagedSubagentModel: true}
+	detail = provider.resolveModelMappingDetail(claudeManagedSubagentModel)
+	if !detail.Matched || detail.Pattern != claudeDefaultModelMappingKey || detail.MappedModel != "vendor-fallback" || detail.ReasoningEffort != "medium" {
+		t.Fatalf("Subagent 应回退到默认模型: %#v", detail)
+	}
+}
+
+func TestProviderDefaultMappingStaysBehindSpecificRules(t *testing.T) {
+	provider := Provider{
+		ModelMapping: map[string]string{
+			"claude-*":                   "vendor-claude-*",
+			claudeDefaultModelMappingKey: "vendor-fallback",
+		},
+		ModelMappingReasoningEfforts: map[string]string{
+			claudeDefaultModelMappingKey: "max",
+		},
+		ModelMappingSupports1M: map[string]bool{
+			claudeDefaultModelMappingKey: true,
+		},
+	}
+
+	specific := provider.resolveModelMappingDetail("claude-sonnet-4")
+	if !specific.Matched || specific.Pattern != "claude-*" || specific.MappedModel != "vendor-claude-sonnet-4" {
+		t.Fatalf("具体映射应优先于默认兜底: %#v", specific)
+	}
+	fallback := provider.resolveModelMappingDetail("unknown-model")
+	if !fallback.Matched || fallback.Pattern != claudeDefaultModelMappingKey || fallback.MappedModel != "vendor-fallback" || fallback.ReasoningEffort != "max" || !fallback.Supports1M {
+		t.Fatalf("默认兜底映射详情错误: %#v", fallback)
+	}
+}
+
+func TestProviderManagedSubagentMappingRejectsGenericWildcardAndPassthrough(t *testing.T) {
+	provider := Provider{
+		Enabled:                true,
+		ModelMapping:           map[string]string{"code-switch-*": "vendor-*"},
+		ModelMappingMissPolicy: ModelMappingMissPolicyPassthrough,
+	}
+
+	detail := provider.resolveModelMappingDetail(claudeManagedSubagentModel)
+	if detail.Matched || provider.supportsManagedClaudeSubagentModel() {
+		t.Fatalf("内部 Subagent 别名不应命中普通通配符或未命中透传: %#v", detail)
+	}
+	if claudeProvidersRequireManagedSubagentModel([]Provider{provider}) {
+		t.Fatal("无 Subagent 或默认兜底映射时不应注入 Claude Subagent 环境变量")
+	}
+
+	provider.ModelMapping[claudeDefaultModelMappingKey] = "vendor-fallback"
+	if !provider.supportsManagedClaudeSubagentModel() || !claudeProvidersRequireManagedSubagentModel([]Provider{provider}) {
+		t.Fatal("启用供应商配置默认兜底后应支持并注入 Subagent 别名")
+	}
+	provider.Enabled = false
+	if claudeProvidersRequireManagedSubagentModel([]Provider{provider}) {
+		t.Fatal("停用供应商不应触发 Subagent 别名注入")
 	}
 }
 

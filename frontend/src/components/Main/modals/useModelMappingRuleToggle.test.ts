@@ -98,6 +98,27 @@ describe('useModelMappingRuleToggle', () => {
     expect(controller.isSaving.value).toBe(false)
   })
 
+  it('保存失败时只回滚当前规则并保留其他映射修改', async () => {
+    const card = createCard(1, 'claude-*')
+    const form = createForm('claude-*')
+    const deferred = createDeferred()
+    const controller = useModelMappingRuleToggle({
+      form,
+      getCard: () => card,
+      getPersistRule: () => () => deferred.promise,
+    })
+
+    const pending = controller.toggleRule('claude-*', false)
+    form.modelMappingDisabled = {
+      ...form.modelMappingDisabled,
+      '*': true,
+    }
+    deferred.reject(new Error('save failed'))
+    await pending
+
+    expect(form.modelMappingDisabled).toEqual({ '*': true })
+  })
+
   it('忽略弹窗切换后到达的旧请求失败结果', async () => {
     const firstCard = createCard(1, 'claude-*')
     const secondCard = createCard(2, 'gpt-*')

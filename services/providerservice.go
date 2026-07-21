@@ -15,6 +15,11 @@ import (
 	"github.com/daodao97/xgo/xdb"
 )
 
+const (
+	claudeManagedSubagentModel   = "code-switch-r-subagent"
+	claudeDefaultModelMappingKey = "*"
+)
+
 // AvailabilityConfig 可用性监控高级配置
 // 在可用性页面的"高级配置"弹窗中设置，可选
 type AvailabilityConfig struct {
@@ -188,8 +193,10 @@ func cloneJSONLikeMap(value map[string]interface{}) map[string]interface{} {
 }
 
 type ProviderService struct {
-	mu                 sync.Mutex
-	claudeModelRouting *ClaudeModelRoutingService
+	mu                        sync.Mutex
+	claudeModelRouting        *ClaudeModelRoutingService
+	claudeSettings            *ClaudeSettingsService
+	claudeSubagentReconcileMu sync.Mutex
 
 	pricingCacheMu sync.RWMutex
 	pricingCache   map[string]providerModelPricingCacheEntry
@@ -343,6 +350,35 @@ func (ps *ProviderService) BindClaudeModelRoutingService(routing *ClaudeModelRou
 	ps.claudeModelRouting = routing
 }
 
+func (ps *ProviderService) BindClaudeSettingsService(settings *ClaudeSettingsService) {
+	if ps == nil {
+		return
+	}
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	ps.claudeSettings = settings
+}
+
+func (ps *ProviderService) ReconcileClaudeSubagentModel() error {
+	if ps == nil {
+		return nil
+	}
+	ps.claudeSubagentReconcileMu.Lock()
+	defer ps.claudeSubagentReconcileMu.Unlock()
+
+	providers, err := ps.LoadProviders("claude")
+	if err != nil {
+		return err
+	}
+	ps.mu.Lock()
+	settings := ps.claudeSettings
+	ps.mu.Unlock()
+	if settings == nil {
+		return nil
+	}
+	return settings.SetSubagentModelRequired(claudeProvidersRequireManagedSubagentModel(providers))
+}
+
 func (ps *ProviderService) Start() error {
 	if ps == nil {
 		return nil
@@ -475,8 +511,17 @@ func providerConfigFileExists(path string) bool {
 
 func (ps *ProviderService) SaveProviders(kind string, providers []Provider) error {
 	ps.mu.Lock()
-	defer ps.mu.Unlock()
-	return ps.saveProvidersLocked(kind, providers)
+	err := ps.saveProvidersLocked(kind, providers)
+	ps.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	if strings.EqualFold(strings.TrimSpace(kind), "claude") {
+		if err := ps.ReconcileClaudeSubagentModel(); err != nil {
+			log.Printf("[ProviderService] 协调 Claude Subagent 模型失败: %v", err)
+		}
+	}
+	return nil
 }
 
 // loadProvidersRaw 原样读取配置文件（不迁移、不保存）
@@ -582,7 +627,6 @@ func (ps *ProviderService) saveProvidersLocked(kind string, providers []Provider
 		nextSnapshot := cloneProviders(providers)
 		ps.claudeModelRouting.HandleProvidersChanged(previousSnapshot, nextSnapshot)
 	}
-
 	return nil
 }
 
@@ -814,6 +858,11 @@ func (ps *ProviderService) refreshProviderSnapshots() {
 				cloneProviders(current.providers),
 				cloneProviders(providers),
 			)
+		}
+		if kind == "claude" {
+			if err := ps.ReconcileClaudeSubagentModel(); err != nil {
+				log.Printf("[ProviderService] 协调外部 Claude Subagent 模型配置失败: %v", err)
+			}
 		}
 	}
 }
@@ -1184,7 +1233,8 @@ func (p *Provider) resolveModelMappingDetail(requestedModel string) providerMode
 	}
 
 	// 优先查找精确映射
-	if mappedModel, exists := p.ModelMapping[requestedModel]; exists && p.isModelMappingEnabled(requestedModel) {
+	if mappedModel, exists := p.ModelMapping[requestedModel]; exists && p.isModelMappingEnabled(requestedModel) &&
+		(requestedModel != claudeManagedSubagentModel || strings.TrimSpace(mappedModel) != "") {
 		return providerModelMappingDetail{
 			MappedModel:     mappedModel,
 			Pattern:         requestedModel,
@@ -1193,6 +1243,22 @@ func (p *Provider) resolveModelMappingDetail(requestedModel string) providerMode
 			Supports1M:      p.ModelMappingSupports1M[requestedModel],
 			Matched:         true,
 		}
+	}
+
+	// 内部 Subagent 别名仅允许命中专用配置或默认兜底，避免被普通通配符意外转发。
+	if requestedModel == claudeManagedSubagentModel {
+		if mappedModel, exists := p.ModelMapping[claudeDefaultModelMappingKey]; exists &&
+			strings.TrimSpace(mappedModel) != "" && p.isModelMappingEnabled(claudeDefaultModelMappingKey) {
+			return providerModelMappingDetail{
+				MappedModel:     mappedModel,
+				Pattern:         claudeDefaultModelMappingKey,
+				TargetPattern:   mappedModel,
+				ReasoningEffort: strings.TrimSpace(p.ModelMappingReasoningEfforts[claudeDefaultModelMappingKey]),
+				Supports1M:      p.ModelMappingSupports1M[claudeDefaultModelMappingKey],
+				Matched:         true,
+			}
+		}
+		return providerModelMappingDetail{MappedModel: requestedModel}
 	}
 
 	// 查找通配符映射
@@ -1234,6 +1300,25 @@ func (p *Provider) resolveModelMappingDetail(requestedModel string) providerMode
 		Supports1M:      p.ModelMappingSupports1M[selected.pattern],
 		Matched:         true,
 	}
+}
+
+func (p *Provider) supportsManagedClaudeSubagentModel() bool {
+	if p == nil {
+		return false
+	}
+	detail := p.resolveModelMappingDetail(claudeManagedSubagentModel)
+	return detail.Matched &&
+		(detail.Pattern == claudeManagedSubagentModel || detail.Pattern == claudeDefaultModelMappingKey) &&
+		strings.TrimSpace(detail.MappedModel) != ""
+}
+
+func claudeProvidersRequireManagedSubagentModel(providers []Provider) bool {
+	for i := range providers {
+		if providers[i].Enabled && providers[i].supportsManagedClaudeSubagentModel() {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeModelMappingDisabled(disabled map[string]bool, modelMapping map[string]string) map[string]bool {

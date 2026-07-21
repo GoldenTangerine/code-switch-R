@@ -600,6 +600,7 @@
             v-model:passthrough-patterns="form.modelPassthroughPatterns"
             :platform="builtinModelPlatform"
             :show-supports-one-m="tabId === 'claude' && (form.apiFormat || 'anthropic') === 'anthropic'"
+            :show-claude-special-mappings="tabId === 'claude'"
             :toggle-saving="modelMappingToggleSaving"
             @toggle-rule="handleModelMappingRuleToggle"
           />

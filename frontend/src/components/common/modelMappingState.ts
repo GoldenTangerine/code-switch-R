@@ -15,6 +15,17 @@ export interface ModelMappingState {
   supportsOneM: Record<string, boolean>
 }
 
+export const CLAUDE_SUBAGENT_MODEL_MAPPING_KEY = 'code-switch-r-subagent'
+export const DEFAULT_MODEL_MAPPING_KEY = '*'
+
+export function isReservedModelMappingKey(key: string): boolean {
+  return key === CLAUDE_SUBAGENT_MODEL_MAPPING_KEY || key === DEFAULT_MODEL_MAPPING_KEY
+}
+
+export function filterRegularModelMappings(modelMappings: Record<string, string>): Array<[string, string]> {
+  return Object.entries(modelMappings).filter(([key]) => !isReservedModelMappingKey(key))
+}
+
 export function resolveSubmittedModelMappingSupportsOneM(
   isOptionVisible: boolean,
   draftValue: boolean,
@@ -93,4 +104,39 @@ export function removeModelMappingRule(
     reasoningEfforts: nextReasoningEfforts,
     supportsOneM: nextSupportsOneM,
   }
+}
+
+export function updateFixedModelMappingRule(
+  modelMappings: Record<string, string>,
+  disabledRules: Record<string, boolean>,
+  reasoningEfforts: Record<string, string>,
+  supportsOneM: Record<string, boolean>,
+  key: string,
+  value: string,
+  reasoningEffort: string,
+  declaresOneM: boolean,
+): ModelMappingState {
+  if (!value.trim()) {
+    return removeModelMappingRule(
+      modelMappings,
+      disabledRules,
+      reasoningEfforts,
+      supportsOneM,
+      key,
+    )
+  }
+
+  const updated = upsertModelMappingRule(
+    modelMappings,
+    disabledRules,
+    reasoningEfforts,
+    supportsOneM,
+    key,
+    key,
+    value.trim(),
+    reasoningEffort.trim(),
+    declaresOneM,
+  )
+  delete updated.disabledRules[key]
+  return updated
 }

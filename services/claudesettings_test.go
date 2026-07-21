@@ -230,6 +230,277 @@ func TestClaudeSettingsServiceMigratesV1StateBeforeRestore(t *testing.T) {
 	}
 }
 
+func TestClaudeSettingsServiceManagesSubagentModelWithProxyLifecycle(t *testing.T) {
+	homeDir := useIsolatedHomeDir(t)
+	writeClaudeSettingsForTest(t, homeDir, map[string]interface{}{
+		"env": map[string]interface{}{
+			claudeSubagentModelEnvKey: "original-subagent",
+		},
+	})
+
+	service := NewClaudeSettingsService(":18100", nil)
+	if err := service.SetSubagentModelRequired(true); err != nil {
+		t.Fatalf("记录 Subagent 配置需求失败: %v", err)
+	}
+	if err := service.EnableProxy(); err != nil {
+		t.Fatalf("启用 Claude 代理失败: %v", err)
+	}
+	env := readClaudeSettingsForTest(t, homeDir)["env"].(map[string]interface{})
+	if anyToString(env[claudeSubagentModelEnvKey]) != claudeManagedSubagentModel {
+		t.Fatalf("未注入托管 Subagent 模型: %#v", env)
+	}
+
+	if err := service.SetSubagentModelRequired(false); err != nil {
+		t.Fatalf("清空 Subagent 配置后协调失败: %v", err)
+	}
+	env = readClaudeSettingsForTest(t, homeDir)["env"].(map[string]interface{})
+	if anyToString(env[claudeSubagentModelEnvKey]) != "original-subagent" {
+		t.Fatalf("清空配置后未恢复原始 Subagent 模型: %#v", env)
+	}
+
+	if err := service.SetSubagentModelRequired(true); err != nil {
+		t.Fatalf("重新启用 Subagent 配置失败: %v", err)
+	}
+	if err := service.DisableProxy(); err != nil {
+		t.Fatalf("关闭 Claude 代理失败: %v", err)
+	}
+	env = readClaudeSettingsForTest(t, homeDir)["env"].(map[string]interface{})
+	if anyToString(env[claudeSubagentModelEnvKey]) != "original-subagent" {
+		t.Fatalf("关闭代理后未恢复原始 Subagent 模型: %#v", env)
+	}
+}
+
+func TestClaudeSettingsServiceDoesNotOverwriteManualSubagentModelChange(t *testing.T) {
+	homeDir := useIsolatedHomeDir(t)
+	writeClaudeSettingsForTest(t, homeDir, map[string]interface{}{"env": map[string]interface{}{}})
+
+	service := NewClaudeSettingsService(":18100", nil)
+	if err := service.SetSubagentModelRequired(true); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.EnableProxy(); err != nil {
+		t.Fatal(err)
+	}
+	payload := readClaudeSettingsForTest(t, homeDir)
+	env := payload["env"].(map[string]interface{})
+	env[claudeSubagentModelEnvKey] = "manual-subagent"
+	writeClaudeSettingsForTest(t, homeDir, payload)
+
+	if err := service.SetSubagentModelRequired(false); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.DisableProxy(); err != nil {
+		t.Fatal(err)
+	}
+	env = readClaudeSettingsForTest(t, homeDir)["env"].(map[string]interface{})
+	if anyToString(env[claudeSubagentModelEnvKey]) != "manual-subagent" {
+		t.Fatalf("用户手动修改的 Subagent 模型不应被覆盖: %#v", env)
+	}
+}
+
+func TestClaudeSettingsServiceMigratesV2StateWithoutChangingSubagentModel(t *testing.T) {
+	homeDir := useIsolatedHomeDir(t)
+	originalAPIKey := "original-v2-api-key"
+	writeClaudeSettingsForTest(t, homeDir, map[string]interface{}{
+		"env": map[string]interface{}{
+			"ANTHROPIC_BASE_URL":      "http://127.0.0.1:18100",
+			"ANTHROPIC_AUTH_TOKEN":    claudeProxyAuthValue,
+			"ANTHROPIC_API_KEY":       claudeProxyAuthValue,
+			claudeSubagentModelEnvKey: "existing-subagent",
+		},
+	})
+	if err := SaveProxyState("claude", &ProxyState{
+		Version:           2,
+		TargetPath:        filepath.Join(homeDir, ".claude", "settings.json"),
+		FileExisted:       true,
+		EnvExisted:        true,
+		OriginalAPIKey:    &originalAPIKey,
+		InjectedBaseURL:   "http://127.0.0.1:18100",
+		InjectedAuthToken: claudeProxyAuthValue,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	service := NewClaudeSettingsService(":18100", nil)
+	if err := service.DisableProxy(); err != nil {
+		t.Fatal(err)
+	}
+	env := readClaudeSettingsForTest(t, homeDir)["env"].(map[string]interface{})
+	if anyToString(env[claudeSubagentModelEnvKey]) != "existing-subagent" {
+		t.Fatalf("v2 状态迁移不应修改已有 Subagent 模型: %#v", env)
+	}
+	if anyToString(env[claudeAPIKeyEnvKey]) != originalAPIKey {
+		t.Fatalf("v2 状态迁移不应覆盖已保存的原始 API Key: %#v", env)
+	}
+}
+
+func TestClaudeSettingsServiceReapplyV2StatePreservesOriginalAPIKey(t *testing.T) {
+	homeDir := useIsolatedHomeDir(t)
+	originalAPIKey := "original-v2-api-key"
+	writeClaudeSettingsForTest(t, homeDir, map[string]interface{}{
+		"env": map[string]interface{}{
+			"ANTHROPIC_BASE_URL": "http://127.0.0.1:18100",
+			"ANTHROPIC_API_KEY":  claudeProxyAuthValue,
+		},
+	})
+	if err := SaveProxyState("claude", &ProxyState{
+		Version:           2,
+		TargetPath:        filepath.Join(homeDir, ".claude", "settings.json"),
+		FileExisted:       true,
+		EnvExisted:        true,
+		OriginalAPIKey:    &originalAPIKey,
+		InjectedBaseURL:   "http://127.0.0.1:18100",
+		InjectedAuthToken: claudeProxyAuthValue,
+		InjectedAuthField: claudeProxyAuthFieldAPIKey,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	service := NewClaudeSettingsService(":18100", nil)
+	if err := service.ReapplyProxyAuthField(claudeProxyAuthFieldAPIKey); err != nil {
+		t.Fatal(err)
+	}
+	state, err := LoadProxyState("claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.OriginalAPIKey == nil || *state.OriginalAPIKey != originalAPIKey {
+		t.Fatalf("v2 重应用覆盖了原始 API Key: %#v", state)
+	}
+	if err := service.DisableProxy(); err != nil {
+		t.Fatal(err)
+	}
+	env := readClaudeSettingsForTest(t, homeDir)["env"].(map[string]interface{})
+	if anyToString(env[claudeAPIKeyEnvKey]) != originalAPIKey {
+		t.Fatalf("v2 重应用后无法恢复原始 API Key: %#v", env)
+	}
+}
+
+func TestReconcileClaudeSubagentModelRecoversInterruptedTransitions(t *testing.T) {
+	t.Run("完成已写入设置的注入", func(t *testing.T) {
+		env := map[string]interface{}{claudeSubagentModelEnvKey: claudeManagedSubagentModel}
+		state := &ProxyState{
+			InjectedSubagentModel:   claudeManagedSubagentModel,
+			SubagentModelTransition: claudeSubagentTransitionInject,
+		}
+
+		if changed := reconcileClaudeSubagentModelEnv(env, state, true); changed {
+			t.Fatal("恢复已完成的注入不应重复修改设置")
+		}
+		if !state.SubagentModelManaged || state.SubagentModelTransition != "" {
+			t.Fatalf("注入过渡状态未正确收敛: %#v", state)
+		}
+	})
+
+	t.Run("完成已写入设置的恢复", func(t *testing.T) {
+		original := "original-subagent"
+		env := map[string]interface{}{claudeSubagentModelEnvKey: original}
+		state := &ProxyState{
+			OriginalSubagentModel:   &original,
+			InjectedSubagentModel:   claudeManagedSubagentModel,
+			SubagentModelManaged:    true,
+			SubagentModelTransition: claudeSubagentTransitionRestore,
+		}
+
+		if changed := reconcileClaudeSubagentModelEnv(env, state, false); changed {
+			t.Fatal("恢复已完成的原值写入不应重复修改设置")
+		}
+		if state.SubagentModelManaged || state.SubagentModelTransition != "" || state.SubagentModelUserOverridden {
+			t.Fatalf("恢复过渡状态未正确收敛: %#v", state)
+		}
+	})
+
+	t.Run("恢复重试继续记录过渡状态", func(t *testing.T) {
+		original := "original-subagent"
+		env := map[string]interface{}{claudeSubagentModelEnvKey: claudeManagedSubagentModel}
+		state := &ProxyState{
+			OriginalSubagentModel:   &original,
+			InjectedSubagentModel:   claudeManagedSubagentModel,
+			SubagentModelTransition: claudeSubagentTransitionRestore,
+		}
+
+		changed := reconcileClaudeSubagentModelEnv(env, state, false)
+		transition := claudeSubagentTransition(state.SubagentModelManaged, changed)
+		if !changed || transition != claudeSubagentTransitionRestore || anyToString(env[claudeSubagentModelEnvKey]) != original {
+			t.Fatalf("恢复重试未保持可续接状态: changed=%v transition=%q env=%#v state=%#v", changed, transition, env, state)
+		}
+	})
+}
+
+func TestClaudeSettingsServiceDisableRecoversInterruptedSubagentRestore(t *testing.T) {
+	homeDir := useIsolatedHomeDir(t)
+	original := "original-subagent"
+	writeClaudeSettingsForTest(t, homeDir, map[string]interface{}{
+		"env": map[string]interface{}{
+			"ANTHROPIC_BASE_URL":      "http://127.0.0.1:18100",
+			"ANTHROPIC_AUTH_TOKEN":    claudeProxyAuthValue,
+			claudeSubagentModelEnvKey: claudeManagedSubagentModel,
+		},
+	})
+	if err := SaveProxyState("claude", &ProxyState{
+		Version:                     proxyStateVersion,
+		TargetPath:                  filepath.Join(homeDir, ".claude", "settings.json"),
+		FileExisted:                 true,
+		EnvExisted:                  true,
+		InjectedBaseURL:             "http://127.0.0.1:18100",
+		InjectedAuthToken:           claudeProxyAuthValue,
+		OriginalSubagentModel:       &original,
+		InjectedSubagentModel:       claudeManagedSubagentModel,
+		SubagentModelManaged:        false,
+		SubagentModelTransition:     claudeSubagentTransitionRestore,
+		SubagentModelUserOverridden: false,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	service := NewClaudeSettingsService(":18100", nil)
+	if err := service.DisableProxy(); err != nil {
+		t.Fatal(err)
+	}
+	env := readClaudeSettingsForTest(t, homeDir)["env"].(map[string]interface{})
+	if anyToString(env[claudeSubagentModelEnvKey]) != original {
+		t.Fatalf("关闭代理未恢复中断过渡的原始 Subagent 模型: %#v", env)
+	}
+}
+
+func TestProviderSaveReconcilesClaudeSubagentModelOutsideProxySetup(t *testing.T) {
+	homeDir := useIsolatedHomeDir(t)
+	writeClaudeSettingsForTest(t, homeDir, map[string]interface{}{"env": map[string]interface{}{}})
+
+	claudeSettings := NewClaudeSettingsService(":18100", nil)
+	if err := claudeSettings.EnableProxy(); err != nil {
+		t.Fatal(err)
+	}
+	providerService := NewProviderService()
+	providerService.BindClaudeSettingsService(claudeSettings)
+	provider := Provider{
+		ID:      1,
+		Name:    "Subagent Provider",
+		APIURL:  "https://example.com",
+		APIKey:  "test-key",
+		Enabled: true,
+		ModelMapping: map[string]string{
+			claudeDefaultModelMappingKey: "vendor-fallback",
+		},
+	}
+	if err := providerService.SaveProviders("claude", []Provider{provider}); err != nil {
+		t.Fatal(err)
+	}
+	env := readClaudeSettingsForTest(t, homeDir)["env"].(map[string]interface{})
+	if anyToString(env[claudeSubagentModelEnvKey]) != claudeManagedSubagentModel {
+		t.Fatalf("保存供应商后未注入 Subagent 模型: %#v", env)
+	}
+
+	provider.ModelMapping = nil
+	if err := providerService.SaveProviders("claude", []Provider{provider}); err != nil {
+		t.Fatal(err)
+	}
+	env = readClaudeSettingsForTest(t, homeDir)["env"].(map[string]interface{})
+	if _, exists := env[claudeSubagentModelEnvKey]; exists {
+		t.Fatalf("清空供应商映射后未恢复 Subagent 模型: %#v", env)
+	}
+}
+
 func TestClaudeSettingsServiceApplySingleProviderRejectsTransformedAPIFormat(t *testing.T) {
 	useIsolatedHomeDir(t)
 

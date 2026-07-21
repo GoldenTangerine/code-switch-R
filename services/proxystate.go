@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-const proxyStateVersion = 2
+const proxyStateVersion = 3
 
 // ProxyState 记录代理启用前的基线信息，用于禁用代理时做"手术式"恢复，避免回滚整文件导致用户配置丢失。
 // 设计原则：
@@ -17,17 +17,22 @@ const proxyStateVersion = 2
 // 2. 记录注入值用于禁用时判断"当前值是否仍为我们注入的"
 // 3. 存储在 ~/.code-switch/proxy-state/{platform}.json，与 CLI 配置文件隔离
 type ProxyState struct {
-	Version           int     `json:"version"`
-	CreatedAt         string  `json:"created_at"`
-	TargetPath        string  `json:"target_path"`
-	FileExisted       bool    `json:"file_existed"`
-	EnvExisted        bool    `json:"env_existed"`
-	OriginalBaseURL   *string `json:"original_base_url,omitempty"`
-	OriginalAuthToken *string `json:"original_auth_token,omitempty"`
-	OriginalAPIKey    *string `json:"original_api_key,omitempty"`
-	InjectedBaseURL   string  `json:"injected_base_url"`
-	InjectedAuthToken string  `json:"injected_auth_token"`
-	InjectedAuthField string  `json:"injected_auth_field,omitempty"`
+	Version                     int     `json:"version"`
+	CreatedAt                   string  `json:"created_at"`
+	TargetPath                  string  `json:"target_path"`
+	FileExisted                 bool    `json:"file_existed"`
+	EnvExisted                  bool    `json:"env_existed"`
+	OriginalBaseURL             *string `json:"original_base_url,omitempty"`
+	OriginalAuthToken           *string `json:"original_auth_token,omitempty"`
+	OriginalAPIKey              *string `json:"original_api_key,omitempty"`
+	InjectedBaseURL             string  `json:"injected_base_url"`
+	InjectedAuthToken           string  `json:"injected_auth_token"`
+	InjectedAuthField           string  `json:"injected_auth_field,omitempty"`
+	OriginalSubagentModel       *string `json:"original_subagent_model,omitempty"`
+	InjectedSubagentModel       string  `json:"injected_subagent_model,omitempty"`
+	SubagentModelManaged        bool    `json:"subagent_model_managed,omitempty"`
+	SubagentModelUserOverridden bool    `json:"subagent_model_user_overridden,omitempty"`
+	SubagentModelTransition     string  `json:"subagent_model_transition,omitempty"`
 
 	// ========== Codex 专用字段 ==========
 	// Codex 使用 TOML 配置，结构更复杂，需要额外字段

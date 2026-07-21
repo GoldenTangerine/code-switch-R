@@ -53,7 +53,13 @@ export function useModelMappingRuleToggle(options: UseModelMappingRuleToggleOpti
       await persistRule(key, enabled)
     } catch {
       if (requestID === requestSequence && options.getCard() === card) {
-        options.form.modelMappingDisabled = previousDisabled
+        const rollbackDisabled = { ...(options.form.modelMappingDisabled || {}) }
+        if (previousDisabled[key] === true) {
+          rollbackDisabled[key] = true
+        } else {
+          delete rollbackDisabled[key]
+        }
+        options.form.modelMappingDisabled = rollbackDisabled
       }
     } finally {
       if (requestID === requestSequence) {

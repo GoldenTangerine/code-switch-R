@@ -327,8 +327,10 @@
         "tooltip": "Claude 按模型路由开启时，命中映射后不校验供应商模型列表；上游不支持时返回原始错误",
         "ruleCount": "已启用 {enabled} / {total} 条",
         "empty": "暂无模型映射规则",
+        "emptyRegular": "暂无常规模型映射规则",
         "keyPlaceholder": "CLI 模型（如 claude-*）",
         "valuePlaceholder": "供应商模型（如 kimi-k2-thinking）",
+        "specialTargetPlaceholder": "选择或输入目标模型",
         "providerNoResults": "没搜到匹配的供应商模型，直接手动输入也行。",
         "reasoningEffort": {
           "label": "思考强度",
@@ -348,6 +350,17 @@
         "enableRule": "开启映射 {key}",
         "disableRule": "关闭映射 {key}",
         "duplicateError": "这个 CLI 模型已经有别的映射占着了，不能重名；要改就换个没占用的键。",
+        "reservedKeyError": "该模型键由 Subagent 或默认兜底设置管理。",
+        "subagent": {
+          "label": "Subagent",
+          "hint": "Claude 子代理请求使用此模型；留空时使用默认兜底。",
+          "targetLabel": "Subagent 目标模型"
+        },
+        "fallback": {
+          "label": "默认兜底模型",
+          "hint": "常规映射与 Subagent 均未命中时使用；清空即停用。",
+          "targetLabel": "默认兜底目标模型"
+        },
         "builtinPickerLabel": "内置 CLI 模型",
         "builtinSelectPlaceholder": "从内置模型表选择",
         "builtinNoResults": "没搜到匹配的内置 CLI 模型，直接手动输也行。",

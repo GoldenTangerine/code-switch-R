@@ -326,8 +326,10 @@
         "tooltip": "With Claude model routing enabled, matched mappings skip provider model-list checks; unsupported targets return the upstream error",
         "ruleCount": "{enabled} / {total} enabled",
         "empty": "No model mapping rules yet",
+        "emptyRegular": "No regular model mapping rules yet",
         "keyPlaceholder": "CLI model (e.g., claude-*)",
         "valuePlaceholder": "Provider model (e.g., kimi-k2-thinking)",
+        "specialTargetPlaceholder": "Select or enter a target model",
         "providerNoResults": "No matching provider models found. You can still type the model manually.",
         "reasoningEffort": {
           "label": "Reasoning effort",
@@ -347,6 +349,17 @@
         "enableRule": "Enable mapping {key}",
         "disableRule": "Disable mapping {key}",
         "duplicateError": "This CLI model key is already used by another mapping. Pick a different key before saving.",
+        "reservedKeyError": "This model key is managed by the Subagent or default fallback setting.",
+        "subagent": {
+          "label": "Subagent",
+          "hint": "Used for Claude subagent requests; falls back to the default when empty.",
+          "targetLabel": "Subagent target model"
+        },
+        "fallback": {
+          "label": "Default fallback model",
+          "hint": "Used when regular mappings and Subagent do not match; clear to disable.",
+          "targetLabel": "Default fallback target model"
+        },
         "builtinPickerLabel": "Builtin CLI models",
         "builtinSelectPlaceholder": "Choose from builtin models",
         "builtinNoResults": "No matching builtin CLI models found. You can still type the key manually.",

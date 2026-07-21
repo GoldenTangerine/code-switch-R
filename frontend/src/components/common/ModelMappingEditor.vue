@@ -154,7 +154,46 @@
         </div>
       </template>
       <div v-else class="mapping-empty">
-        {{ $t('components.provider.modelMapping.empty') }}
+        {{ $t(showClaudeSpecialMappings ? 'components.provider.modelMapping.emptyRegular' : 'components.provider.modelMapping.empty') }}
+      </div>
+
+      <div v-if="showClaudeSpecialMappings" class="fixed-mapping-row fixed-mapping-row--subagent">
+        <div class="fixed-mapping-heading">
+          <div>
+            <strong>{{ $t('components.provider.modelMapping.subagent.label') }}</strong>
+            <p>{{ $t('components.provider.modelMapping.subagent.hint') }}</p>
+          </div>
+        </div>
+        <div class="fixed-mapping-fields" :class="{ 'has-one-m': showSupportsOneM }">
+          <SearchableModelInput
+            :model-value="subagentMapping.value"
+            :options="providerModelOptions"
+            :disabled="toggleSaving"
+            :placeholder="$t('components.provider.modelMapping.specialTargetPlaceholder')"
+            :empty-text="$t('components.provider.modelMapping.providerNoResults')"
+            :aria-label="$t('components.provider.modelMapping.subagent.targetLabel')"
+            @update:model-value="updateFixedMappingTarget(CLAUDE_SUBAGENT_MODEL_MAPPING_KEY, $event)"
+          />
+          <SearchableModelInput
+            :model-value="subagentMapping.reasoningEffort"
+            :options="reasoningEffortOptions"
+            :disabled="toggleSaving || !subagentMapping.value"
+            :placeholder="$t('components.provider.modelMapping.reasoningEffort.placeholder')"
+            :empty-text="$t('components.provider.modelMapping.reasoningEffort.customHint')"
+            :aria-label="$t('components.provider.modelMapping.reasoningEffort.label')"
+            max-height="220px"
+            @update:model-value="updateFixedMappingEffort(CLAUDE_SUBAGENT_MODEL_MAPPING_KEY, $event)"
+          />
+          <label v-if="showSupportsOneM" class="mapping-one-m-option fixed-mapping-one-m">
+            <input
+              type="checkbox"
+              :checked="subagentMapping.supportsOneM"
+              :disabled="toggleSaving || !subagentMapping.value"
+              @change="updateFixedMappingSupportsOneM(CLAUDE_SUBAGENT_MODEL_MAPPING_KEY, ($event.target as HTMLInputElement).checked)"
+            />
+            <span>{{ $t('components.provider.modelMapping.supports1MLabel') }}</span>
+          </label>
+        </div>
       </div>
     </div>
 
@@ -290,6 +329,49 @@
       </div>
     </div>
 
+    <section
+      v-if="showClaudeSpecialMappings"
+      class="fallback-mapping-panel"
+      :aria-label="$t('components.provider.modelMapping.fallback.label')"
+    >
+      <div class="fixed-mapping-heading">
+        <div>
+          <strong>{{ $t('components.provider.modelMapping.fallback.label') }}</strong>
+          <p>{{ $t('components.provider.modelMapping.fallback.hint') }}</p>
+        </div>
+      </div>
+      <div class="fixed-mapping-fields" :class="{ 'has-one-m': showSupportsOneM }">
+        <SearchableModelInput
+          :model-value="fallbackMapping.value"
+          :options="providerModelOptions"
+          :disabled="toggleSaving"
+          :placeholder="$t('components.provider.modelMapping.specialTargetPlaceholder')"
+          :empty-text="$t('components.provider.modelMapping.providerNoResults')"
+          :aria-label="$t('components.provider.modelMapping.fallback.targetLabel')"
+          @update:model-value="updateFixedMappingTarget(DEFAULT_MODEL_MAPPING_KEY, $event)"
+        />
+        <SearchableModelInput
+          :model-value="fallbackMapping.reasoningEffort"
+          :options="reasoningEffortOptions"
+          :disabled="toggleSaving || !fallbackMapping.value"
+          :placeholder="$t('components.provider.modelMapping.reasoningEffort.placeholder')"
+          :empty-text="$t('components.provider.modelMapping.reasoningEffort.customHint')"
+          :aria-label="$t('components.provider.modelMapping.reasoningEffort.label')"
+          max-height="220px"
+          @update:model-value="updateFixedMappingEffort(DEFAULT_MODEL_MAPPING_KEY, $event)"
+        />
+        <label v-if="showSupportsOneM" class="mapping-one-m-option fixed-mapping-one-m">
+          <input
+            type="checkbox"
+            :checked="fallbackMapping.supportsOneM"
+            :disabled="toggleSaving || !fallbackMapping.value"
+            @change="updateFixedMappingSupportsOneM(DEFAULT_MODEL_MAPPING_KEY, ($event.target as HTMLInputElement).checked)"
+          />
+          <span>{{ $t('components.provider.modelMapping.supports1MLabel') }}</span>
+        </label>
+      </div>
+    </section>
+
     <div v-if="selectedMissPolicy === 'passthrough'" class="passthrough-panel">
       <div class="passthrough-heading">
         <span>{{ $t('components.provider.modelMapping.passthroughRules.label') }}</span>
@@ -338,8 +420,13 @@ import { listModelPricing, type ModelPricingRow } from '../../services/modelPric
 import { buildBuiltinModelOptions, buildBuiltinProviderModelOptions } from '../../utils/builtinModels'
 import BaseInput from './BaseInput.vue'
 import {
+  CLAUDE_SUBAGENT_MODEL_MAPPING_KEY,
+  DEFAULT_MODEL_MAPPING_KEY,
+  filterRegularModelMappings,
+  isReservedModelMappingKey,
   removeModelMappingRule,
   resolveSubmittedModelMappingSupportsOneM,
+  updateFixedModelMappingRule,
   upsertModelMappingRule,
 } from './modelMappingState'
 import SearchableModelInput from './SearchableModelInput.vue'
@@ -356,6 +443,7 @@ interface Props {
   platform?: CLIPlatform
   toggleSaving?: boolean
   showSupportsOneM?: boolean
+  showClaudeSpecialMappings?: boolean
 }
 
 interface Emits {
@@ -374,7 +462,10 @@ const { t } = useI18n()
 
 const mappingList = computed(() => {
   if (!props.modelValue) return []
-  return Object.entries(props.modelValue).map(([key, value]) => ({
+  const entries = props.showClaudeSpecialMappings
+    ? filterRegularModelMappings(props.modelValue)
+    : Object.entries(props.modelValue)
+  return entries.map(([key, value]) => ({
     key,
     value,
     enabled: props.disabledRules?.[key] !== true,
@@ -424,6 +515,8 @@ const normalizedPassthroughPatterns = computed(() => Array.from(new Set(
 )))
 const builtinModelOptions = computed(() => buildBuiltinModelOptions(builtinModelRows.value, props.platform))
 const providerModelOptions = computed(() => buildBuiltinProviderModelOptions(builtinModelRows.value))
+const subagentMapping = computed(() => getFixedMapping(CLAUDE_SUBAGENT_MODEL_MAPPING_KEY))
+const fallbackMapping = computed(() => getFixedMapping(DEFAULT_MODEL_MAPPING_KEY))
 const builtinPickerHint = computed(() => {
   if (!props.platform) return ''
   if (builtinModelLoading.value) {
@@ -529,6 +622,62 @@ function hideHelpTooltip(): void {
   removeHelpTooltipListeners()
 }
 
+function getFixedMapping(key: string) {
+  const enabled = props.disabledRules?.[key] !== true
+  return {
+    key,
+    value: enabled ? `${props.modelValue?.[key] ?? ''}` : '',
+    reasoningEffort: enabled ? `${props.reasoningEfforts?.[key] ?? ''}`.trim() : '',
+    supportsOneM: enabled && props.supportsOneM?.[key] === true,
+  }
+}
+
+function emitMappingState(updated: ReturnType<typeof updateFixedModelMappingRule>): void {
+  emit('update:modelValue', updated.modelMappings)
+  emit('update:disabledRules', updated.disabledRules)
+  emit('update:reasoningEfforts', updated.reasoningEfforts)
+  emit('update:supportsOneM', updated.supportsOneM)
+}
+
+function updateFixedMapping(
+  key: string,
+  value: string,
+  reasoningEffort: string,
+  supportsOneM: boolean,
+): void {
+  emitMappingState(updateFixedModelMappingRule(
+    props.modelValue || {},
+    props.disabledRules || {},
+    props.reasoningEfforts || {},
+    props.supportsOneM || {},
+    key,
+    value,
+    reasoningEffort,
+    supportsOneM,
+  ))
+}
+
+function updateFixedMappingTarget(key: string, value: string): void {
+  updateFixedMapping(
+    key,
+    value,
+    `${props.reasoningEfforts?.[key] ?? ''}`.trim(),
+    props.supportsOneM?.[key] === true,
+  )
+}
+
+function updateFixedMappingEffort(key: string, reasoningEffort: string): void {
+  const current = getFixedMapping(key)
+  if (!current.value) return
+  updateFixedMapping(key, current.value, reasoningEffort, current.supportsOneM)
+}
+
+function updateFixedMappingSupportsOneM(key: string, supportsOneM: boolean): void {
+  const current = getFixedMapping(key)
+  if (!current.value) return
+  updateFixedMapping(key, current.value, current.reasoningEffort, supportsOneM)
+}
+
 function hasMappingKey(key: string): boolean {
   return Object.prototype.hasOwnProperty.call(props.modelValue || {}, key)
 }
@@ -575,6 +724,11 @@ function submitMapping(): void {
   const reasoningEffort = newReasoningEffort.value.trim()
 
   if (!key || !value) return
+
+  if (props.showClaudeSpecialMappings && isReservedModelMappingKey(key)) {
+    inputError.value = t('components.provider.modelMapping.reservedKeyError')
+    return
+  }
 
   if (hasConflictingKey(key)) {
     inputError.value = t('components.provider.modelMapping.duplicateError')
@@ -819,6 +973,69 @@ html.dark .model-mapping-help-tooltip {
   border: 1px solid color-mix(in srgb, var(--mac-border) 86%, transparent);
   border-radius: 12px;
   background: var(--mapping-panel);
+}
+
+.fixed-mapping-row,
+.fallback-mapping-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+}
+
+.fixed-mapping-row {
+  border-top: 1px solid color-mix(in srgb, var(--mac-border) 72%, transparent);
+  background: color-mix(in srgb, var(--mac-accent) 5%, var(--mapping-panel));
+}
+
+.fallback-mapping-panel {
+  border: 1px solid color-mix(in srgb, var(--mac-accent) 24%, var(--mac-border));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--mac-accent) 4%, var(--mapping-panel-strong));
+}
+
+.fixed-mapping-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.fixed-mapping-heading strong {
+  display: block;
+  color: var(--mac-text);
+  font-size: 0.8125rem;
+  line-height: 1.4;
+}
+
+.fixed-mapping-heading p {
+  margin: 2px 0 0;
+  color: var(--mapping-muted);
+  font-size: 0.6875rem;
+  line-height: 1.45;
+}
+
+.fixed-mapping-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(128px, 0.48fr);
+  gap: 10px;
+  align-items: center;
+}
+
+.fixed-mapping-fields.has-one-m {
+  grid-template-columns: minmax(0, 1fr) minmax(128px, 0.48fr) minmax(128px, auto);
+}
+
+.fixed-mapping-fields :deep(.searchable-model-input__field) {
+  height: 36px;
+  border-radius: 9px;
+  background: var(--mapping-code-bg);
+  font-family: 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
+  font-size: 0.75rem;
+}
+
+.fixed-mapping-one-m {
+  min-width: 0;
 }
 
 .mapping-row {
@@ -1436,6 +1653,16 @@ html.dark .mapping-one-m-badge {
 
   .mapping-one-m-option {
     width: 100%;
+  }
+
+  .fixed-mapping-heading,
+  .fixed-mapping-fields,
+  .fixed-mapping-fields.has-one-m {
+    grid-template-columns: 1fr;
+  }
+
+  .fixed-mapping-heading {
+    flex-direction: column;
   }
 
   .input-arrow {

@@ -11,12 +11,15 @@ import (
 )
 
 const (
-	claudeSettingsDir      = ".claude"
-	claudeSettingsFileName = "settings.json"
-	claudeBackupFileName   = "code-switch.back.settings.json"
-	claudeProxyAuthValue   = "code-switch-r"
-	claudeAuthTokenEnvKey  = "ANTHROPIC_AUTH_TOKEN"
-	claudeAPIKeyEnvKey     = "ANTHROPIC_API_KEY"
+	claudeSettingsDir               = ".claude"
+	claudeSettingsFileName          = "settings.json"
+	claudeBackupFileName            = "code-switch.back.settings.json"
+	claudeProxyAuthValue            = "code-switch-r"
+	claudeAuthTokenEnvKey           = "ANTHROPIC_AUTH_TOKEN"
+	claudeAPIKeyEnvKey              = "ANTHROPIC_API_KEY"
+	claudeSubagentModelEnvKey       = "CLAUDE_CODE_SUBAGENT_MODEL"
+	claudeSubagentTransitionInject  = "inject"
+	claudeSubagentTransitionRestore = "restore"
 )
 
 type ClaudeProxyStatus struct {
@@ -25,9 +28,10 @@ type ClaudeProxyStatus struct {
 }
 
 type ClaudeSettingsService struct {
-	relayAddr   string
-	appSettings *AppSettingsService
-	mu          sync.Mutex
+	relayAddr             string
+	appSettings           *AppSettingsService
+	subagentModelRequired bool
+	mu                    sync.Mutex
 }
 
 func NewClaudeSettingsService(relayAddr string, appSettings *AppSettingsService) *ClaudeSettingsService {
@@ -111,6 +115,115 @@ func (css *ClaudeSettingsService) ProxyStatus() (ClaudeProxyStatus, error) {
 	css.mu.Lock()
 	defer css.mu.Unlock()
 	return css.proxyStatusLocked()
+}
+
+func (css *ClaudeSettingsService) SetSubagentModelRequired(required bool) error {
+	css.mu.Lock()
+	defer css.mu.Unlock()
+	css.subagentModelRequired = required
+
+	status, err := css.proxyStatusLocked()
+	if err != nil || !status.Enabled {
+		return err
+	}
+	stateExists, err := ProxyStateExists("claude")
+	if err != nil || !stateExists {
+		return err
+	}
+	return css.enableProxyWithAuthField(css.proxyAuthField())
+}
+
+func captureClaudeSubagentModelBaseline(state *ProxyState, env map[string]interface{}) {
+	if state == nil {
+		return
+	}
+	if value, exists := env[claudeSubagentModelEnvKey]; exists {
+		original := anyToString(value)
+		state.OriginalSubagentModel = &original
+	}
+	state.InjectedSubagentModel = claudeManagedSubagentModel
+}
+
+func claudeSubagentModelMatchesBaseline(state *ProxyState, env map[string]interface{}) bool {
+	value, exists := env[claudeSubagentModelEnvKey]
+	if state.OriginalSubagentModel == nil {
+		return !exists
+	}
+	return exists && anyToString(value) == *state.OriginalSubagentModel
+}
+
+func reconcileClaudeSubagentModelEnv(env map[string]interface{}, state *ProxyState, required bool) bool {
+	if state == nil {
+		return false
+	}
+	injected := strings.TrimSpace(state.InjectedSubagentModel)
+	if injected == "" {
+		injected = claudeManagedSubagentModel
+		state.InjectedSubagentModel = injected
+	}
+	current, exists := env[claudeSubagentModelEnvKey]
+	currentValue := anyToString(current)
+	baselineMatches := claudeSubagentModelMatchesBaseline(state, env)
+
+	switch state.SubagentModelTransition {
+	case claudeSubagentTransitionInject:
+		if exists && currentValue == injected {
+			state.SubagentModelManaged = true
+		} else if baselineMatches {
+			state.SubagentModelManaged = false
+		} else {
+			state.SubagentModelManaged = false
+			state.SubagentModelUserOverridden = true
+		}
+		state.SubagentModelTransition = ""
+	case claudeSubagentTransitionRestore:
+		if baselineMatches {
+			state.SubagentModelManaged = false
+		} else if exists && currentValue == injected {
+			state.SubagentModelManaged = true
+		} else {
+			state.SubagentModelManaged = false
+			state.SubagentModelUserOverridden = true
+		}
+		state.SubagentModelTransition = ""
+	}
+
+	if state.SubagentModelManaged && (!exists || currentValue != injected) {
+		state.SubagentModelManaged = false
+		state.SubagentModelUserOverridden = true
+	}
+	if required {
+		if state.SubagentModelManaged || state.SubagentModelUserOverridden {
+			return false
+		}
+		if !claudeSubagentModelMatchesBaseline(state, env) {
+			state.SubagentModelUserOverridden = true
+			return false
+		}
+		env[claudeSubagentModelEnvKey] = injected
+		state.SubagentModelManaged = true
+		return true
+	}
+	if !state.SubagentModelManaged {
+		return false
+	}
+	if state.OriginalSubagentModel != nil {
+		env[claudeSubagentModelEnvKey] = *state.OriginalSubagentModel
+	} else {
+		delete(env, claudeSubagentModelEnvKey)
+	}
+	state.SubagentModelManaged = false
+	return true
+}
+
+func claudeSubagentTransition(nextManaged bool, envChanged bool) string {
+	if !envChanged {
+		return ""
+	}
+	if nextManaged {
+		return claudeSubagentTransitionInject
+	}
+	return claudeSubagentTransitionRestore
 }
 
 func (css *ClaudeSettingsService) proxyStatusLocked() (ClaudeProxyStatus, error) {
@@ -205,6 +318,7 @@ func (css *ClaudeSettingsService) enableProxyWithAuthField(authField string) err
 		return fmt.Errorf("无法读取 settings.json: %w", statErr)
 	}
 
+	var proxyState *ProxyState
 	// 首次启用：记录启用前的关键字段基线到状态文件
 	if !stateExists {
 		envRaw, _ := existingData["env"].(map[string]interface{})
@@ -215,6 +329,9 @@ func (css *ClaudeSettingsService) enableProxyWithAuthField(authField string) err
 			InjectedBaseURL:   css.baseURL(),
 			InjectedAuthToken: claudeProxyAuthValue,
 			InjectedAuthField: normalizeClaudeProxyAuthField(authField),
+		}
+		if envRaw == nil {
+			envRaw = make(map[string]interface{})
 		}
 		if envRaw != nil {
 			if v, ok := envRaw["ANTHROPIC_BASE_URL"]; ok {
@@ -230,24 +347,34 @@ func (css *ClaudeSettingsService) enableProxyWithAuthField(authField string) err
 				state.OriginalAPIKey = &s
 			}
 		}
+		captureClaudeSubagentModelBaseline(state, envRaw)
 		if err := SaveProxyState("claude", state); err != nil {
 			return err
 		}
+		proxyState = state
 	} else if state, loadErr := LoadProxyState("claude"); loadErr == nil {
 		if state.Version < proxyStateVersion {
 			envRaw, _ := existingData["env"].(map[string]interface{})
-			if envRaw != nil {
+			if envRaw == nil {
+				envRaw = make(map[string]interface{})
+			}
+			if state.Version < 2 {
 				if v, ok := envRaw[claudeAPIKeyEnvKey]; ok {
 					s := anyToString(v)
 					state.OriginalAPIKey = &s
 				}
 			}
+			if state.Version < 3 {
+				captureClaudeSubagentModelBaseline(state, envRaw)
+			}
 		}
 		state.Version = proxyStateVersion
 		state.InjectedAuthField = normalizeClaudeProxyAuthField(authField)
+		state.InjectedSubagentModel = claudeManagedSubagentModel
 		if err := SaveProxyState("claude", state); err != nil {
 			return err
 		}
+		proxyState = state
 	}
 
 	// 仅更新代理相关字段，保留其他配置（如 model, alwaysThinkingEnabled, enabledPlugins）
@@ -257,10 +384,29 @@ func (css *ClaudeSettingsService) enableProxyWithAuthField(authField string) err
 	}
 	applyClaudeProxyAuthEnv(env, authField)
 	env["ANTHROPIC_BASE_URL"] = css.baseURL()
+	subagentEnvChanged := reconcileClaudeSubagentModelEnv(env, proxyState, css.subagentModelRequired)
 	existingData["env"] = env
+	if proxyState != nil {
+		proxyState.SubagentModelTransition = claudeSubagentTransition(
+			proxyState.SubagentModelManaged,
+			subagentEnvChanged,
+		)
+		if err := SaveProxyState("claude", proxyState); err != nil {
+			return err
+		}
+	}
 
 	// 原子写入
-	return AtomicWriteJSON(settingsPath, existingData)
+	if err := AtomicWriteJSON(settingsPath, existingData); err != nil {
+		return err
+	}
+	if proxyState != nil && proxyState.SubagentModelTransition != "" {
+		proxyState.SubagentModelTransition = ""
+		if err := SaveProxyState("claude", proxyState); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (css *ClaudeSettingsService) ReapplyProxyAuthField(authField string) error {
@@ -345,6 +491,10 @@ func (css *ClaudeSettingsService) disableProxyLocked() error {
 			delete(env, claudeAPIKeyEnvKey)
 			changed = true
 		}
+		if anyToString(env[claudeSubagentModelEnvKey]) == claudeManagedSubagentModel {
+			delete(env, claudeSubagentModelEnvKey)
+			changed = true
+		}
 
 		if changed {
 			payload["env"] = env
@@ -363,9 +513,14 @@ func (css *ClaudeSettingsService) disableProxyLocked() error {
 		env = make(map[string]interface{})
 	}
 	if state.Version < proxyStateVersion {
-		if v, ok := env[claudeAPIKeyEnvKey]; ok {
-			s := anyToString(v)
-			state.OriginalAPIKey = &s
+		if state.Version < 2 {
+			if v, ok := env[claudeAPIKeyEnvKey]; ok {
+				s := anyToString(v)
+				state.OriginalAPIKey = &s
+			}
+		}
+		if state.Version < 3 {
+			captureClaudeSubagentModelBaseline(state, env)
 		}
 		state.Version = proxyStateVersion
 		if err := SaveProxyState("claude", state); err != nil {
@@ -391,6 +546,9 @@ func (css *ClaudeSettingsService) disableProxyLocked() error {
 	} else {
 		delete(env, claudeAPIKeyEnvKey)
 	}
+
+	// 同时收敛可能中断的过渡状态；用户手动修改后保持其最新值。
+	reconcileClaudeSubagentModelEnv(env, state, false)
 
 	// 若 env 变空且启用前不存在 env，则移除整个 env 对象
 	if len(env) == 0 && !state.EnvExisted {

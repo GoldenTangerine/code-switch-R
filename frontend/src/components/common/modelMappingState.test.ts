@@ -10,12 +10,30 @@
 
 import { describe, expect, it } from 'vitest'
 import {
+  CLAUDE_SUBAGENT_MODEL_MAPPING_KEY,
+  DEFAULT_MODEL_MAPPING_KEY,
+  filterRegularModelMappings,
+  isReservedModelMappingKey,
   removeModelMappingRule,
   resolveSubmittedModelMappingSupportsOneM,
+  updateFixedModelMappingRule,
   upsertModelMappingRule,
 } from './modelMappingState'
 
 describe('modelMappingState', () => {
+  it('保留键不进入普通映射列表和计数', () => {
+    const mappings = {
+      'claude-*': 'vendor-*',
+      [CLAUDE_SUBAGENT_MODEL_MAPPING_KEY]: 'vendor-subagent',
+      [DEFAULT_MODEL_MAPPING_KEY]: 'vendor-fallback',
+    }
+
+    expect(filterRegularModelMappings(mappings)).toEqual([['claude-*', 'vendor-*']])
+    expect(isReservedModelMappingKey(CLAUDE_SUBAGENT_MODEL_MAPPING_KEY)).toBe(true)
+    expect(isReservedModelMappingKey(DEFAULT_MODEL_MAPPING_KEY)).toBe(true)
+    expect(isReservedModelMappingKey('claude-*')).toBe(false)
+  })
+
   it('1M 选项隐藏时新增规则不继承草稿状态', () => {
     expect(resolveSubmittedModelMappingSupportsOneM(false, true, '', {})).toBe(false)
   })
@@ -102,5 +120,45 @@ describe('modelMappingState', () => {
     expect(modelMappings).toEqual({ 'claude-*': 'vendor-*', 'gpt-*': 'openai-*' })
     expect(reasoningEfforts).toEqual({ 'claude-*': 'high', 'gpt-*': 'medium' })
     expect(supportsOneM).toEqual({ 'claude-*': true, 'gpt-*': true })
+  })
+
+  it('固定映射清空目标时同步删除全部元数据', () => {
+    const result = updateFixedModelMappingRule(
+      { [CLAUDE_SUBAGENT_MODEL_MAPPING_KEY]: 'vendor-subagent' },
+      { [CLAUDE_SUBAGENT_MODEL_MAPPING_KEY]: true },
+      { [CLAUDE_SUBAGENT_MODEL_MAPPING_KEY]: 'high' },
+      { [CLAUDE_SUBAGENT_MODEL_MAPPING_KEY]: true },
+      CLAUDE_SUBAGENT_MODEL_MAPPING_KEY,
+      '',
+      'high',
+      true,
+    )
+
+    expect(result).toEqual({
+      modelMappings: {},
+      disabledRules: {},
+      reasoningEfforts: {},
+      supportsOneM: {},
+    })
+  })
+
+  it('固定映射更新时启用规则并保留隐藏的 1M 配置', () => {
+    const result = updateFixedModelMappingRule(
+      { [DEFAULT_MODEL_MAPPING_KEY]: 'vendor-old' },
+      { [DEFAULT_MODEL_MAPPING_KEY]: true },
+      { [DEFAULT_MODEL_MAPPING_KEY]: 'medium' },
+      { [DEFAULT_MODEL_MAPPING_KEY]: true },
+      DEFAULT_MODEL_MAPPING_KEY,
+      'vendor-new',
+      'high',
+      true,
+    )
+
+    expect(result).toEqual({
+      modelMappings: { [DEFAULT_MODEL_MAPPING_KEY]: 'vendor-new' },
+      disabledRules: {},
+      reasoningEfforts: { [DEFAULT_MODEL_MAPPING_KEY]: 'high' },
+      supportsOneM: { [DEFAULT_MODEL_MAPPING_KEY]: true },
+    })
   })
 })

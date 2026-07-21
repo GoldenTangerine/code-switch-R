@@ -1193,6 +1193,52 @@ func TestClaudeProxyTrustsExplicitMappingEndToEnd(t *testing.T) {
 	}
 }
 
+func TestClaudeProxyNeverPassesManagedSubagentAliasThrough(t *testing.T) {
+	useIsolatedHomeDir(t)
+	gin.SetMode(gin.TestMode)
+	disableBlacklistForTest(t)
+
+	var upstreamCalls int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&upstreamCalls, 1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	providerService := NewProviderService()
+	provider := Provider{
+		ID:                     1,
+		Name:                   "Passthrough Only",
+		APIURL:                 upstream.URL,
+		APIKey:                 "test-key",
+		Enabled:                true,
+		Level:                  1,
+		ModelMapping:           map[string]string{"code-switch-*": "vendor-*"},
+		ModelMappingMissPolicy: ModelMappingMissPolicyPassthrough,
+	}
+	if err := providerService.SaveProviders("claude", []Provider{provider}); err != nil {
+		t.Fatal(err)
+	}
+
+	blacklistService := NewBlacklistService(NewSettingsService(), nil)
+	relay := NewProviderRelayService(providerService, nil, blacklistService, nil, nil, nil, "")
+	router := gin.New()
+	relay.registerRoutes(router)
+
+	body := fmt.Sprintf(`{"model":%q,"max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`, claudeManagedSubagentModel)
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("状态码=%d body=%s，期望内部别名被拦截", w.Code, w.Body.String())
+	}
+	if atomic.LoadInt32(&upstreamCalls) != 0 {
+		t.Fatalf("内部 Subagent 别名不应到达上游，调用次数=%d", upstreamCalls)
+	}
+}
+
 func TestBuildProviderRequestPlanUsesOverrideModelForFiltering(t *testing.T) {
 	provider := Provider{
 		Name: "Filterable Provider",
