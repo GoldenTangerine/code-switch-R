@@ -14,6 +14,7 @@ import {
   consumeSearchableInputSelection,
   createSearchableInputSelectionState,
   handleSearchableInputEnter,
+  handleSearchableInputBeforeInput,
   handleSearchableInputSelectionKeydown,
   resetSearchableInputSelectionState,
   type SearchableInputEnterEvent,
@@ -57,6 +58,24 @@ describe('handleSearchableInputEnter', () => {
     expect(handleSearchableInputEnter(event, submit)).toBe(false)
     expect(preventDefault).not.toHaveBeenCalled()
     expect(submit).not.toHaveBeenCalled()
+  })
+})
+
+describe('handleSearchableInputBeforeInput', () => {
+  it('阻止系统或写作工具替换模型文本', () => {
+    const preventDefault = vi.fn()
+
+    expect(handleSearchableInputBeforeInput({ inputType: 'insertReplacementText', preventDefault })).toBe(true)
+    expect(preventDefault).toHaveBeenCalledOnce()
+  })
+
+  it('允许普通输入、粘贴和删除', () => {
+    for (const inputType of ['insertText', 'insertFromPaste', 'deleteContentBackward']) {
+      const preventDefault = vi.fn()
+
+      expect(handleSearchableInputBeforeInput({ inputType, preventDefault })).toBe(false)
+      expect(preventDefault).not.toHaveBeenCalled()
+    }
   })
 })
 

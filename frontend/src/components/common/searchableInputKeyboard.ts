@@ -26,6 +26,11 @@ export interface SearchableInputPointerEvent {
   button: number
 }
 
+export interface SearchableInputBeforeInputEvent {
+  inputType?: string
+  preventDefault(): void
+}
+
 export interface SearchableInputSelectionState {
   hasKeyboardNavigation: boolean
   canSelectOption: boolean
@@ -105,5 +110,12 @@ export function handleSearchableInputEnter(
 
   event.preventDefault()
   submit()
+  return true
+}
+
+export function handleSearchableInputBeforeInput(event: SearchableInputBeforeInputEvent): boolean {
+  if (event.inputType !== 'insertReplacementText') return false
+
+  event.preventDefault()
   return true
 }
