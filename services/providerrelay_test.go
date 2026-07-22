@@ -1013,6 +1013,165 @@ func TestForwardRequestPersistsStreamDiagnostics(t *testing.T) {
 	}
 }
 
+func TestGeminiProxyPersistsErrorMessage(t *testing.T) {
+	useIsolatedHomeDir(t)
+	gin.SetMode(gin.TestMode)
+	if err := InitDatabase(); err != nil {
+		t.Fatalf("初始化数据库失败: %v", err)
+	}
+	db, err := xdb.DB("default")
+	if err != nil {
+		t.Fatalf("获取数据库连接失败: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE app_settings SET value = 'false' WHERE key = 'enable_blacklist'`); err != nil {
+		t.Fatalf("关闭黑名单失败: %v", err)
+	}
+
+	previousWriteQueue := GlobalDBQueue
+	previousLogQueue := GlobalDBQueueLogs
+	writeQueue := NewDBWriteQueue(db, 32, false)
+	logQueue := NewDBWriteQueue(db, 32, true)
+	GlobalDBQueue = writeQueue
+	GlobalDBQueueLogs = logQueue
+	t.Cleanup(func() {
+		_ = writeQueue.Shutdown(2 * time.Second)
+		_ = logQueue.Shutdown(2 * time.Second)
+		GlobalDBQueue = previousWriteQueue
+		GlobalDBQueueLogs = previousLogQueue
+	})
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		writer.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = writer.Write([]byte(`{"error":{"message":"gemini upstream unavailable"}}`))
+	}))
+	defer upstream.Close()
+
+	geminiService := NewGeminiService("")
+	provider := GeminiProvider{
+		ID:      "gemini-error-log",
+		Name:    "Gemini Error Log",
+		BaseURL: upstream.URL,
+		APIKey:  "test-key",
+		Model:   "gemini-test",
+		Enabled: true,
+		Level:   1,
+	}
+	if err := geminiService.AddProvider(provider); err != nil {
+		t.Fatalf("保存 Gemini provider 失败: %v", err)
+	}
+	settingsService := NewSettingsService()
+	blacklistService := NewBlacklistService(settingsService, nil)
+	relay := NewProviderRelayService(NewProviderService(), geminiService, blacklistService, nil, nil, nil, "")
+	router := gin.New()
+	relay.registerRoutes(router)
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/gemini/v1beta/models/gemini-test:generateContent",
+		strings.NewReader(`{"contents":[{"parts":[{"text":"hello"}]}]}`),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("Gemini 上游错误状态码=%d body=%s", response.Code, response.Body.String())
+	}
+	page, err := NewLogService(nil).ListRequestLogsPageV2("gemini", provider.ID, "", 10, 0, "", "")
+	if err != nil {
+		t.Fatalf("读取 Gemini 请求日志失败: %v", err)
+	}
+	if len(page.Items) != 1 {
+		t.Fatalf("Gemini 请求日志数量=%d，期望 1", len(page.Items))
+	}
+	logEntry := page.Items[0]
+	if logEntry.HttpCode != http.StatusServiceUnavailable || !strings.Contains(logEntry.ErrorMessage, "status 503") {
+		t.Fatalf("Gemini 错误诊断未正确落库: %#v", logEntry)
+	}
+}
+
+func TestGeminiProxyPersistsFailedAttemptBeforeFallbackSuccess(t *testing.T) {
+	useIsolatedHomeDir(t)
+	gin.SetMode(gin.TestMode)
+	if err := InitDatabase(); err != nil {
+		t.Fatalf("初始化数据库失败: %v", err)
+	}
+	db, err := xdb.DB("default")
+	if err != nil {
+		t.Fatalf("获取数据库连接失败: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE app_settings SET value = 'false' WHERE key = 'enable_blacklist'`); err != nil {
+		t.Fatalf("关闭黑名单失败: %v", err)
+	}
+
+	previousWriteQueue := GlobalDBQueue
+	previousLogQueue := GlobalDBQueueLogs
+	writeQueue := NewDBWriteQueue(db, 32, false)
+	logQueue := NewDBWriteQueue(db, 32, true)
+	GlobalDBQueue = writeQueue
+	GlobalDBQueueLogs = logQueue
+	t.Cleanup(func() {
+		_ = writeQueue.Shutdown(2 * time.Second)
+		_ = logQueue.Shutdown(2 * time.Second)
+		GlobalDBQueue = previousWriteQueue
+		GlobalDBQueueLogs = previousLogQueue
+	})
+
+	failedUpstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		writer.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = writer.Write([]byte(`{"error":{"message":"first provider unavailable"}}`))
+	}))
+	defer failedUpstream.Close()
+	successUpstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`{"candidates":[{"content":{"parts":[{"text":"ok"}]}}]}`))
+	}))
+	defer successUpstream.Close()
+
+	geminiService := NewGeminiService("")
+	failedProvider := GeminiProvider{ID: "gemini-failed", Name: "Gemini Failed", BaseURL: failedUpstream.URL, APIKey: "test-key-1", Model: "gemini-test", Enabled: true, Level: 1}
+	successProvider := GeminiProvider{ID: "gemini-success", Name: "Gemini Success", BaseURL: successUpstream.URL, APIKey: "test-key-2", Model: "gemini-test", Enabled: true, Level: 2}
+	for _, provider := range []GeminiProvider{failedProvider, successProvider} {
+		if err := geminiService.AddProvider(provider); err != nil {
+			t.Fatalf("保存 Gemini provider 失败: %v", err)
+		}
+	}
+
+	settingsService := NewSettingsService()
+	blacklistService := NewBlacklistService(settingsService, nil)
+	relay := NewProviderRelayService(NewProviderService(), geminiService, blacklistService, nil, nil, nil, "")
+	router := gin.New()
+	relay.registerRoutes(router)
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/gemini/v1beta/models/gemini-test:generateContent",
+		strings.NewReader(`{"contents":[{"parts":[{"text":"hello"}]}]}`),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("Gemini 降级请求状态码=%d body=%s", response.Code, response.Body.String())
+	}
+
+	failedPage, err := NewLogService(nil).ListRequestLogsPageV2("gemini", failedProvider.ID, "", 10, 0, "", "")
+	if err != nil {
+		t.Fatalf("读取失败供应商日志失败: %v", err)
+	}
+	if len(failedPage.Items) != 1 || failedPage.Items[0].HttpCode != http.StatusServiceUnavailable || !strings.Contains(failedPage.Items[0].ErrorMessage, "first provider unavailable") {
+		t.Fatalf("失败供应商日志未保留: %#v", failedPage.Items)
+	}
+	successPage, err := NewLogService(nil).ListRequestLogsPageV2("gemini", successProvider.ID, "", 10, 0, "", "")
+	if err != nil {
+		t.Fatalf("读取成功供应商日志失败: %v", err)
+	}
+	if len(successPage.Items) != 1 || successPage.Items[0].HttpCode != http.StatusOK || successPage.Items[0].ErrorMessage != "" {
+		t.Fatalf("成功供应商日志错误: %#v", successPage.Items)
+	}
+}
+
 func TestProviderResolvedModelSupport(t *testing.T) {
 	tests := []struct {
 		name           string

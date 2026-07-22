@@ -1366,6 +1366,100 @@ func TestProxyHandlerAllProvidersFailedReturnsLastUpstreamErrorRaw(t *testing.T)
 	}
 }
 
+func TestProxyHandlerBlacklistModeAttemptsEachProviderOnceAndFallsBack(t *testing.T) {
+	useIsolatedHomeDir(t)
+	gin.SetMode(gin.TestMode)
+	if err := InitDatabase(); err != nil {
+		t.Fatalf("初始化数据库失败: %v", err)
+	}
+	db, err := xdb.DB("default")
+	if err != nil {
+		t.Fatalf("获取数据库连接失败: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE app_settings SET value = 'true' WHERE key = 'enable_blacklist'`); err != nil {
+		t.Fatalf("开启黑名单失败: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE app_settings SET value = '5' WHERE key = 'blacklist_failure_threshold'`); err != nil {
+		t.Fatalf("设置拉黑阈值失败: %v", err)
+	}
+
+	previousWriteQueue := GlobalDBQueue
+	previousLogQueue := GlobalDBQueueLogs
+	writeQueue := NewDBWriteQueue(db, 32, false)
+	logQueue := NewDBWriteQueue(db, 32, true)
+	GlobalDBQueue = writeQueue
+	GlobalDBQueueLogs = logQueue
+	t.Cleanup(func() {
+		_ = writeQueue.Shutdown(2 * time.Second)
+		_ = logQueue.Shutdown(2 * time.Second)
+		GlobalDBQueue = previousWriteQueue
+		GlobalDBQueueLogs = previousLogQueue
+	})
+
+	var failedProviderCalls int32
+	failedUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&failedProviderCalls, 1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"error":"temporary upstream failure"}`))
+	}))
+	defer failedUpstream.Close()
+
+	var fallbackProviderCalls int32
+	fallbackUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&fallbackProviderCalls, 1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_ok","status":"completed"}`))
+	}))
+	defer fallbackUpstream.Close()
+
+	providerService := NewProviderService()
+	settingsService := NewSettingsService()
+	blacklistService := NewBlacklistService(settingsService, nil)
+	providers := []Provider{
+		{ID: 1, Name: "Failed Once", APIURL: failedUpstream.URL, APIKey: "test-key-1", Enabled: true, Level: 1},
+		{ID: 2, Name: "Fallback", APIURL: fallbackUpstream.URL, APIKey: "test-key-2", Enabled: true, Level: 1},
+	}
+	if err := providerService.SaveProviders("codex", providers); err != nil {
+		t.Fatalf("保存 providers 失败: %v", err)
+	}
+
+	relay := NewProviderRelayService(providerService, nil, blacklistService, nil, nil, nil, "")
+	router := gin.New()
+	relay.registerRoutes(router)
+	req := httptest.NewRequest(http.MethodPost, "/responses", strings.NewReader(`{"model":"gpt-5.3-codex","input":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("降级请求状态码=%d body=%s", w.Code, w.Body.String())
+	}
+	if got := atomic.LoadInt32(&failedProviderCalls); got != 1 {
+		t.Fatalf("失败 provider 调用次数=%d，期望 1", got)
+	}
+	if got := atomic.LoadInt32(&fallbackProviderCalls); got != 1 {
+		t.Fatalf("后备 provider 调用次数=%d，期望 1", got)
+	}
+
+	var failureCount int
+	if err := db.QueryRow(`SELECT failure_count FROM provider_blacklist WHERE platform = 'codex' AND provider_id = '1'`).Scan(&failureCount); err != nil {
+		t.Fatalf("读取失败计数失败: %v", err)
+	}
+	if failureCount != 1 {
+		t.Fatalf("单次请求应只累计一次失败，当前=%d", failureCount)
+	}
+
+	var httpCode int
+	var errorMessage string
+	if err := db.QueryRow(`SELECT http_code, error_message FROM request_log WHERE platform = 'codex' AND provider_id = '1' ORDER BY id DESC LIMIT 1`).Scan(&httpCode, &errorMessage); err != nil {
+		t.Fatalf("读取失败请求日志失败: %v", err)
+	}
+	if httpCode != http.StatusInternalServerError || !strings.Contains(errorMessage, "status 500") {
+		t.Fatalf("失败请求诊断未正确落库: http_code=%d error_message=%q", httpCode, errorMessage)
+	}
+}
+
 func TestProxyHandlerSingleProvider503ReturnsRawUpstreamError(t *testing.T) {
 	useIsolatedHomeDir(t)
 	gin.SetMode(gin.TestMode)

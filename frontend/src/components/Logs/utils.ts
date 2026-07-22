@@ -113,6 +113,7 @@ export type LogsInfoTooltipLabels = {
 export type StreamDiagnosticTooltipLabels = {
   title: string
   statusLabel: string
+  errorReasonLabel: string
   lastEventLabel: string
   compactionLabel: string
   protocolLabel: string
@@ -887,6 +888,7 @@ export const buildLogsInfoTooltipLabels = (translate: LogsTranslate): LogsInfoTo
 export const buildStreamDiagnosticTooltipLabels = (translate: LogsTranslate): StreamDiagnosticTooltipLabels => ({
   title: translate('components.logs.table.streamDiagnostics.title'),
   statusLabel: translate('components.logs.table.streamDiagnostics.status'),
+  errorReasonLabel: translate('components.logs.table.streamDiagnostics.errorReason'),
   lastEventLabel: translate('components.logs.table.streamDiagnostics.lastEvent'),
   compactionLabel: translate('components.logs.table.streamDiagnostics.compaction'),
   protocolLabel: translate('components.logs.table.streamDiagnostics.protocol'),
@@ -915,6 +917,7 @@ export const hasStreamDiagnosticData = (item: RequestLog): boolean => {
     String(item.stream_last_event ?? '').trim()
     || String(item.stream_terminal_event ?? '').trim()
     || String(item.stream_error_kind ?? '').trim()
+    || String(item.error_message ?? '').trim()
     || item.stream_compaction_requested
     || item.stream_compaction_observed
     || safeNumber(item.stream_bytes) > 0
@@ -1114,6 +1117,7 @@ export const buildStreamDiagnosticTooltipDetailData = (
   if (!hasStreamDiagnosticData(item)) return null
 
   const errorKind = String(item.stream_error_kind ?? '').trim()
+  const errorMessage = String(item.error_message ?? '').trim()
   const terminalEvent = String(item.stream_terminal_event ?? '').trim()
   const lastEvent = String(item.stream_last_event ?? '').trim()
   const protocol = String(item.upstream_protocol ?? '').trim()
@@ -1135,6 +1139,11 @@ export const buildStreamDiagnosticTooltipDetailData = (
         label: labels.statusLabel,
         value: errorKind ? (labels.errorKindLabels[errorKind] ?? errorKind) : (terminalEvent || labels.missingValue),
       },
+      ...(errorMessage ? [{
+        key: 'stream-error-reason',
+        label: labels.errorReasonLabel,
+        value: errorMessage,
+      }] : []),
       {
         key: 'stream-last-event',
         label: labels.lastEventLabel,

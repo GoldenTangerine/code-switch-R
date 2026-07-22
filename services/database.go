@@ -162,7 +162,7 @@ func ensureBlacklistTables() error {
 		value string
 	}{
 		{"enable_blacklist", "true"},
-		{"blacklist_failure_threshold", "3"},
+		{"blacklist_failure_threshold", "5"},
 		{"blacklist_duration_minutes", "30"},
 	}
 

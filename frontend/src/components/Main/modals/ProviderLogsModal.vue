@@ -199,7 +199,13 @@
                 <span class="provider-log-terminal__label">{{ entry.detailLabel }}</span>
                 <div class="provider-log-terminal__badges">
                   <span
-                    v-if="entry.detailSource === 'console'"
+                    v-if="entry.detailSource === 'diagnostic'"
+                    class="provider-log-terminal__badge provider-log-terminal__badge--diagnostic"
+                  >
+                    {{ t('components.main.providerLogs.detailFromDiagnostic') }}
+                  </span>
+                  <span
+                    v-else-if="entry.detailSource === 'console'"
                     class="provider-log-terminal__badge provider-log-terminal__badge--console"
                   >
                     {{ t('components.main.providerLogs.detailFromConsole') }}
@@ -338,7 +344,7 @@ import {
   type ConsoleProviderErrorCandidate,
 } from './providerLogsConsoleMatch'
 
-type DetailSource = 'payload' | 'console' | 'none'
+type DetailSource = 'diagnostic' | 'payload' | 'console' | 'none'
 
 type ProviderLogEntry = {
   log: RequestLog
@@ -694,20 +700,32 @@ const buildLogEntry = (
     hasMeaningfulDetail: payloadHasMeaningfulDetail,
   } = payloadState
   const consoleParsedError = matchedConsoleCandidate?.providerError ?? null
+  const diagnosticMessage = log.error_message?.trim() || ''
+  const diagnosticParsedError = diagnosticMessage
+    ? parseProviderErrorFromConsoleMessage(`status ${log.http_code}: ${diagnosticMessage}`)
+    : null
 
-  const fallbackSummary = payloadHasMeaningfulDetail ? responseBody : `HTTP ${log.http_code}`
-  const detailSource: DetailSource = payloadHasMeaningfulDetail ? 'payload' : consoleParsedError ? 'console' : 'none'
-  const activeDetail = detailSource === 'console' ? consoleParsedError : payloadParsedError
-  const detailText = detailSource === 'payload'
-    ? payloadParsedError?.copyText?.trim() || responseBody
-    : detailSource === 'console'
-      ? consoleParsedError?.copyText?.trim() || consoleParsedError?.rawPayload?.trim() || consoleParsedError?.summary?.trim() || ''
-      : ''
-  const summaryText = detailSource === 'console'
-    ? consoleParsedError?.summary || (payloadHasMeaningfulDetail ? payloadParsedError?.summary : '') || fallbackSummary
+  const fallbackSummary = diagnosticMessage || (payloadHasMeaningfulDetail ? responseBody : `HTTP ${log.http_code}`)
+  const detailSource: DetailSource = diagnosticMessage
+    ? 'diagnostic'
     : payloadHasMeaningfulDetail
-      ? payloadParsedError?.summary || fallbackSummary
-      : fallbackSummary
+      ? 'payload'
+      : consoleParsedError
+        ? 'console'
+        : 'none'
+  const activeDetail = detailSource === 'diagnostic'
+    ? diagnosticParsedError
+    : detailSource === 'console'
+      ? consoleParsedError
+      : payloadParsedError
+  const detailText = detailSource === 'diagnostic'
+    ? diagnosticParsedError?.copyText?.trim() || diagnosticMessage
+    : detailSource === 'payload'
+      ? payloadParsedError?.copyText?.trim() || responseBody
+      : detailSource === 'console'
+        ? consoleParsedError?.copyText?.trim() || consoleParsedError?.rawPayload?.trim() || consoleParsedError?.summary?.trim() || ''
+        : ''
+  const summaryText = activeDetail?.summary || fallbackSummary
 
   return {
     log,
@@ -715,14 +733,16 @@ const buildLogEntry = (
     errorSummary: truncateText(summaryText),
     semanticTag: activeDetail?.semanticTag || payloadParsedError?.semanticTag || '',
     errorCode: activeDetail?.errorCode || payloadParsedError?.errorCode || '',
-    errorType: activeDetail?.errorType || payloadParsedError?.errorType || '',
+    errorType: activeDetail?.errorType || payloadParsedError?.errorType || log.stream_error_kind || '',
     detailSource,
     detailLabel: t('components.main.providerLogs.providerErrorDetail'),
-    sourceLabel: detailSource === 'console'
-      ? t('components.main.providerLogs.detailFromConsole')
-      : detailSource === 'payload'
-        ? t('components.main.providerLogs.detailFromRequest')
-        : '',
+    sourceLabel: detailSource === 'diagnostic'
+      ? t('components.main.providerLogs.detailFromDiagnostic')
+      : detailSource === 'console'
+        ? t('components.main.providerLogs.detailFromConsole')
+        : detailSource === 'payload'
+          ? t('components.main.providerLogs.detailFromRequest')
+          : '',
     copyText: detailText,
   }
 }
@@ -733,7 +753,9 @@ const resolveEntries = (logs: RequestLog[], candidates: ConsoleProviderErrorCand
 
   const resolvedEntries = logs.map((item) => {
     const payloadState = getPayloadErrorState(item)
-    const matched = payloadState.hasMeaningfulDetail ? null : matchConsoleCandidate(item, availableCandidates)
+    const matched = item.error_message?.trim() || payloadState.hasMeaningfulDetail
+      ? null
+      : matchConsoleCandidate(item, availableCandidates)
     if (matched) {
       availableCandidates.splice(matched.index, 1)
     }
@@ -1767,6 +1789,12 @@ watch(
 .provider-log-terminal__badge--console {
   color: #bfdbfe;
   background: rgba(59, 130, 246, 0.16);
+}
+
+.provider-log-terminal__badge--diagnostic {
+  color: #fef3c7;
+  border-color: rgba(245, 158, 11, 0.38);
+  background: rgba(180, 83, 9, 0.28);
 }
 
 .provider-log-terminal__badge--payload {

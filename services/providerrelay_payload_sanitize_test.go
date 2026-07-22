@@ -28,6 +28,17 @@ func TestSanitizeRequestLogPayload_LeavesCleanPayloadUntouched(t *testing.T) {
 	}
 }
 
+func TestSanitizeRequestLogPayload_RedactsPlainTextCredentials(t *testing.T) {
+	input := "Authorization: Basic basic-secret\nx-api-key: api-secret\npassword='password-secret'"
+	output := sanitizeRequestLogPayload(input)
+
+	for _, secret := range []string{"basic-secret", "api-secret", "password-secret"} {
+		if strings.Contains(output, secret) {
+			t.Fatalf("纯文本敏感值未脱敏 %q: %s", secret, output)
+		}
+	}
+}
+
 func TestCaptureRequestLogRequestBody_RespectsSanitizeSwitch(t *testing.T) {
 	body := []byte(`{"api_key":"secret-1","content":"hi"}`)
 

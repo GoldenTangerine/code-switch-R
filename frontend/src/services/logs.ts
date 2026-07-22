@@ -42,6 +42,7 @@ export type RequestLog = {
   stream_last_event?: string
   stream_terminal_event?: string
   stream_error_kind?: string
+  error_message?: string
   stream_compaction_requested?: boolean | number
   stream_compaction_observed?: boolean | number
   stream_bytes?: number

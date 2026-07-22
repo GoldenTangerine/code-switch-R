@@ -53,7 +53,7 @@ type BlacklistLevelConfig struct {
 func DefaultBlacklistLevelConfig() *BlacklistLevelConfig {
 	return &BlacklistLevelConfig{
 		EnableLevelBlacklist:       false, // 默认关闭，向后兼容
-		FailureThreshold:           3,
+		FailureThreshold:           5,
 		DedupeWindowSeconds:        2,
 		RetryWaitSeconds:           3, // 必须 > DedupeWindowSeconds，否则重试不会计入失败次数
 		NormalDegradeIntervalHours: 1.0,

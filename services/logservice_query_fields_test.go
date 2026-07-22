@@ -74,6 +74,7 @@ func TestRequestLogListSelectFieldsIncludeReasoningEffortSource(t *testing.T) {
 
 func TestRequestLogListSelectFieldsIncludeStreamDiagnosticColumns(t *testing.T) {
 	required := map[string]bool{
+		"error_message":               false,
 		"stream_last_event":           false,
 		"stream_terminal_event":       false,
 		"stream_error_kind":           false,
@@ -98,6 +99,7 @@ func TestBuildRequestLogListMapsStreamDiagnostics(t *testing.T) {
 	logs := buildRequestLogList([]xdb.Record{{
 		"id":                          int64(7),
 		"is_stream":                   1,
+		"error_message":               "stream ended before completion",
 		"stream_last_event":           "response.output_item.done",
 		"stream_terminal_event":       "",
 		"stream_error_kind":           "missing_terminal",
@@ -113,6 +115,9 @@ func TestBuildRequestLogListMapsStreamDiagnostics(t *testing.T) {
 	got := logs[0]
 	if got.StreamLastEvent != "response.output_item.done" || got.StreamErrorKind != "missing_terminal" {
 		t.Fatalf("流事件映射错误: %#v", got)
+	}
+	if got.ErrorMessage != "stream ended before completion" {
+		t.Fatalf("错误详情映射错误: %#v", got)
 	}
 	if !got.StreamCompactionRequested || !got.StreamCompactionObserved || got.StreamBytes != 2048 || got.UpstreamProtocol != "HTTP/2.0" {
 		t.Fatalf("流诊断映射错误: %#v", got)

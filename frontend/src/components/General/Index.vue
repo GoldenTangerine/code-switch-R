@@ -571,7 +571,7 @@ const updateModalActionText = computed(() => {
 
 // 拉黑配置相关状态
 const blacklistEnabled = ref(true)  // 拉黑功能总开关
-const blacklistThreshold = ref(3)
+const blacklistThreshold = ref(5)
 const blacklistDurationSeconds = ref(1800)
 const levelBlacklistEnabled = ref(false)
 const blacklistLoading = ref(false)
@@ -1673,7 +1673,7 @@ const loadBlacklistSettings = async () => {
     console.error('failed to load blacklist settings', error)
     // 使用默认值
     blacklistEnabled.value = true
-    blacklistThreshold.value = 3
+    blacklistThreshold.value = 5
     blacklistDurationSeconds.value = 1800
     levelBlacklistEnabled.value = false
   } finally {

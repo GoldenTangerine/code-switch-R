@@ -186,6 +186,7 @@ describe('buildStreamDiagnosticTooltipDetailData', () => {
   const labels = {
     title: 'Stream diagnostics',
     statusLabel: 'Status',
+    errorReasonLabel: 'Error reason',
     lastEventLabel: 'Last event',
     compactionLabel: 'Compaction',
     protocolLabel: 'Protocol',
@@ -204,6 +205,7 @@ describe('buildStreamDiagnosticTooltipDetailData', () => {
     expect(buildStreamDiagnosticTooltipDetailData({
       is_stream: true,
       stream_error_kind: 'missing_terminal',
+      error_message: 'stream ended before completion: missing response.completed event',
       stream_last_event: 'response.output_item.done',
       stream_compaction_requested: true,
       stream_compaction_observed: true,
@@ -214,6 +216,7 @@ describe('buildStreamDiagnosticTooltipDetailData', () => {
       variant: 'stream',
       rows: [
         { key: 'stream-status', label: 'Status', value: 'Missing terminal event' },
+        { key: 'stream-error-reason', label: 'Error reason', value: 'stream ended before completion: missing response.completed event' },
         { key: 'stream-last-event', label: 'Last event', value: 'response.output_item.done' },
         { key: 'stream-compaction', label: 'Compaction', value: 'Requested · Observed' },
         { key: 'stream-protocol', label: 'Protocol', value: 'HTTP/2.0' },

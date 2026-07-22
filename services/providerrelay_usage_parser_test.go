@@ -1,13 +1,24 @@
 package services
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/gin-gonic/gin"
 )
+
+type brokenPipeWriter struct{}
+
+func (brokenPipeWriter) Write([]byte) (int, error) {
+	return 0, errors.New("broken pipe")
+}
 
 func TestParseEventPayloadSupportsChunkedSSEWithoutSpaceAfterDataPrefix(t *testing.T) {
 	reqLog := &ReqeustLog{IsStream: true}
@@ -91,6 +102,62 @@ func TestClassifyStreamErrorKind(t *testing.T) {
 		if got := classifyStreamErrorKind(test.err); got != test.want {
 			t.Fatalf("classifyStreamErrorKind(%q)=%q，期望 %q", test.err, got, test.want)
 		}
+	}
+}
+
+func TestFinalizeForwardSuccessTreatsCanceledRequestAsClientAbort(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	requestContext, cancel := context.WithCancel(context.Background())
+	request := httptest.NewRequest(http.MethodPost, "/responses", nil).WithContext(requestContext)
+	response := httptest.NewRecorder()
+	ginContext, _ := gin.CreateTestContext(response)
+	ginContext.Request = request
+	cancel()
+
+	requestLog := &ReqeustLog{IsStream: true}
+	ok, err := finalizeForwardSuccess(
+		ginContext,
+		"codex",
+		requestLog,
+		128,
+		errors.New("error streaming response: context canceled"),
+	)
+
+	if ok || !errors.Is(err, errClientAbort) || !errors.Is(err, errResponseStarted) {
+		t.Fatalf("取消请求应返回已开始的客户端中断错误，ok=%v err=%v", ok, err)
+	}
+	if requestLog.HttpCode != 499 || requestLog.StreamErrorKind != "client_abort" {
+		t.Fatalf("取消请求诊断错误: %#v", requestLog)
+	}
+	if !strings.Contains(requestLog.ErrorMessage, "context canceled") {
+		t.Fatalf("取消请求应保存具体错误，当前=%q", requestLog.ErrorMessage)
+	}
+}
+
+func TestFinalizeForwardSuccessKeepsUpstreamStreamFailureAsBadGateway(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	request := httptest.NewRequest(http.MethodPost, "/responses", nil)
+	response := httptest.NewRecorder()
+	ginContext, _ := gin.CreateTestContext(response)
+	ginContext.Request = request
+
+	requestLog := &ReqeustLog{IsStream: true}
+	ok, err := finalizeForwardSuccess(
+		ginContext,
+		"codex",
+		requestLog,
+		128,
+		errors.New("error streaming response: connection reset by peer"),
+	)
+
+	if ok || errors.Is(err, errClientAbort) || !errors.Is(err, errResponseStarted) {
+		t.Fatalf("真实上游断流应返回已开始的流错误，ok=%v err=%v", ok, err)
+	}
+	if requestLog.HttpCode != http.StatusBadGateway || requestLog.StreamErrorKind != "connection_reset" {
+		t.Fatalf("上游断流诊断错误: %#v", requestLog)
+	}
+	if !strings.Contains(requestLog.ErrorMessage, "connection reset by peer") {
+		t.Fatalf("上游断流应保存具体错误，当前=%q", requestLog.ErrorMessage)
 	}
 }
 
@@ -284,6 +351,17 @@ func TestIsClientWriteAbortErrorOnlyTreatsDownstreamWriteFailuresAsClientAbort(t
 				t.Fatalf("isClientWriteAbortError(%v) = %v, 期望 %v", tt.err, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestStreamGeminiResponseWrapsDownstreamWriteAbort(t *testing.T) {
+	err := streamGeminiResponseWithHook(
+		strings.NewReader("data: {\"text\":\"hello\"}\n\n"),
+		brokenPipeWriter{},
+		&ReqeustLog{CapturePayload: true},
+	)
+	if !isClientWriteAbortError(err) {
+		t.Fatalf("Gemini 下游写入中断应识别为客户端取消，当前错误=%v", err)
 	}
 }
 

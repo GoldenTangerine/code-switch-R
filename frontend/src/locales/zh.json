@@ -655,6 +655,7 @@
         "logId": "日志 #{id}",
         "responseBody": "错误返回体",
         "providerErrorDetail": "供应商错误详情",
+        "detailFromDiagnostic": "代理诊断",
         "detailFromRequest": "详情来自请求日志",
         "detailFromConsole": "详情来自控制台",
         "consoleMatched": "这条详情是从控制台错误日志里兜底匹配回来的。",
@@ -1395,6 +1396,7 @@
         "streamDiagnostics": {
           "title": "流诊断",
           "status": "状态",
+          "errorReason": "错误原因",
           "lastEvent": "最后事件",
           "compaction": "压缩",
           "protocol": "协议",

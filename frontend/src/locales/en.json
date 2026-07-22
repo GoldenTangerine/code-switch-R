@@ -654,6 +654,7 @@
         "logId": "Log #{id}",
         "responseBody": "Error response body",
         "providerErrorDetail": "Provider error detail",
+        "detailFromDiagnostic": "Proxy diagnostic",
         "detailFromRequest": "Detail from request log",
         "detailFromConsole": "Detail from console log",
         "consoleMatched": "This detail was recovered by matching the recent console error log.",
@@ -1394,6 +1395,7 @@
         "streamDiagnostics": {
           "title": "Stream diagnostics",
           "status": "Status",
+          "errorReason": "Error reason",
           "lastEvent": "Last event",
           "compaction": "Compaction",
           "protocol": "Protocol",
