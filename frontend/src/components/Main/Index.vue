@@ -110,8 +110,11 @@
         :provider="providerLogsModalProvider"
         :platform="providerLogsModalPlatform"
         :resolved-theme="resolvedTheme"
+        :log-badge-enabled="providerLogsModalProvider?.hideLogBadge !== true"
+        :saving-log-badge="providerLogBadgeSaving"
         @close="closeProviderLogsModal"
         @marked-read="handleProviderLogsMarkedRead"
+        @update-log-badge-enabled="updateProviderLogBadgeEnabled"
       />
       <ProviderDataOverviewModal
         :open="providerDataOverviewModalOpen"
@@ -449,6 +452,7 @@ const {
   providerLogsModalOpen,
   providerLogsModalProvider,
   providerLogsModalPlatform,
+  providerLogBadgeSaving,
   providerDataOverviewModalOpen,
   providerDataOverviewModalProvider,
   providerDataOverviewModalPlatform,
@@ -461,6 +465,7 @@ const {
   closeModelListModal,
   openProviderLogs,
   closeProviderLogsModal,
+  updateProviderLogBadgeEnabled,
   openProviderDataOverview,
   closeProviderDataOverviewModal,
   openProviderCostTrend,

@@ -41,6 +41,28 @@
             </span>
           </div>
           <div class="provider-logs-hero__actions">
+            <div class="provider-logs-badge-control">
+              <span class="provider-logs-badge-control__copy">
+                <strong>{{ t('components.main.providerLogs.badgeToggleLabel') }}</strong>
+                <small>{{ t('components.main.providerLogs.badgeToggleHint') }}</small>
+              </span>
+              <button
+                type="button"
+                class="provider-logs-badge-toggle"
+                :class="{ 'is-active': logBadgeEnabled, 'is-busy': savingLogBadge }"
+                role="switch"
+                :aria-checked="logBadgeEnabled"
+                :aria-label="t('components.main.providerLogs.badgeToggleAria', {
+                  status: logBadgeEnabled
+                    ? t('components.main.providerLogs.badgeToggleOn')
+                    : t('components.main.providerLogs.badgeToggleOff'),
+                })"
+                :disabled="savingLogBadge"
+                @click="emit('updateLogBadgeEnabled', !logBadgeEnabled)"
+              >
+                <span class="provider-logs-badge-toggle__thumb" aria-hidden="true"></span>
+              </button>
+            </div>
             <div class="provider-logs-scope" role="tablist" :aria-label="t('components.main.providerLogs.scopeLabel')">
               <button
                 type="button"
@@ -529,11 +551,14 @@ const props = defineProps<{
   provider: AutomationCard | null
   platform: LogPlatform | null
   resolvedTheme: ResolvedTheme
+  logBadgeEnabled: boolean
+  savingLogBadge: boolean
 }>()
 
 const emit = defineEmits<{
   close: []
   markedRead: []
+  updateLogBadgeEnabled: [enabled: boolean]
 }>()
 
 const { t, locale } = useI18n()
@@ -1424,6 +1449,81 @@ watch(
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.provider-logs-badge-control {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 8px 5px 11px;
+  border: 1px solid var(--provider-log-toolbar-border);
+  border-radius: 12px;
+  background: var(--provider-log-toolbar-bg);
+}
+
+.provider-logs-badge-control__copy {
+  display: grid;
+  gap: 1px;
+  color: var(--provider-log-pill-text);
+  line-height: 1.25;
+}
+
+.provider-logs-badge-control__copy strong {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.provider-logs-badge-control__copy small {
+  color: var(--provider-log-meta-text);
+  font-size: 10px;
+}
+
+.provider-logs-badge-toggle {
+  position: relative;
+  width: 40px;
+  height: 22px;
+  flex: 0 0 40px;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--provider-log-pill-text) 24%, transparent);
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--provider-log-pill-text) 18%, transparent);
+  cursor: pointer;
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease,
+    opacity 0.18s ease;
+}
+
+.provider-logs-badge-toggle__thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.26);
+  transition: transform 0.18s ease;
+}
+
+.provider-logs-badge-toggle.is-active {
+  border-color: color-mix(in srgb, var(--provider-log-accent) 58%, transparent);
+  background: color-mix(in srgb, var(--provider-log-accent) 74%, #4f46e5);
+}
+
+.provider-logs-badge-toggle.is-active .provider-logs-badge-toggle__thumb {
+  transform: translateX(18px);
+}
+
+.provider-logs-badge-toggle:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--provider-log-accent) 72%, #4f46e5);
+  outline-offset: 2px;
+}
+
+.provider-logs-badge-toggle:disabled {
+  cursor: wait;
+  opacity: 0.58;
 }
 
 .provider-logs-pill {

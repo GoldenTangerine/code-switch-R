@@ -70,6 +70,7 @@ export function useProviderForm(options: UseProviderFormOptions) {
   const providerLogsModalOpen = ref(false)
   const providerLogsModalProvider = ref<AutomationCard | null>(null)
   const providerLogsModalPlatform = ref<LogPlatform | null>(null)
+  const providerLogBadgeSaving = ref(false)
   const providerDataOverviewModalOpen = ref(false)
   const providerDataOverviewModalProvider = ref<AutomationCard | null>(null)
   const providerDataOverviewModalPlatform = ref<LogPlatform | null>(null)
@@ -118,6 +119,24 @@ export function useProviderForm(options: UseProviderFormOptions) {
     providerLogsModalOpen.value = false
     providerLogsModalProvider.value = null
     providerLogsModalPlatform.value = null
+  }
+
+  const updateProviderLogBadgeEnabled = async (enabled: boolean) => {
+    const card = providerLogsModalProvider.value
+    const platform = providerLogsModalPlatform.value
+    if (!card || !platform || providerLogBadgeSaving.value) return
+
+    const previousHideLogBadge = card.hideLogBadge
+    card.hideLogBadge = !enabled
+    providerLogBadgeSaving.value = true
+
+    try {
+      await persistProviders(platform)
+    } catch {
+      card.hideLogBadge = previousHideLogBadge
+    } finally {
+      providerLogBadgeSaving.value = false
+    }
   }
 
   const openProviderDataOverview = (card: AutomationCard) => {
@@ -345,6 +364,7 @@ export function useProviderForm(options: UseProviderFormOptions) {
     providerLogsModalOpen,
     providerLogsModalProvider,
     providerLogsModalPlatform,
+    providerLogBadgeSaving,
     providerDataOverviewModalOpen,
     providerDataOverviewModalProvider,
     providerDataOverviewModalPlatform,
@@ -357,6 +377,7 @@ export function useProviderForm(options: UseProviderFormOptions) {
     closeModelListModal,
     openProviderLogs,
     closeProviderLogsModal,
+    updateProviderLogBadgeEnabled,
     openProviderDataOverview,
     closeProviderDataOverviewModal,
     openProviderCostTrend,

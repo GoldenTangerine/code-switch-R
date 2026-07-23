@@ -36,6 +36,7 @@ type GeminiProvider struct {
 	Category                 string            `json:"category,omitempty"`            // official, third_party, custom
 	PartnerPromotionKey      string            `json:"partnerPromotionKey,omitempty"` // 用于识别供应商类型
 	Enabled                  bool              `json:"enabled"`
+	HideLogBadge             bool              `json:"hideLogBadge,omitempty"`             // 首页供应商日志图标是否隐藏未读红点
 	SortOrder                int               `json:"sortOrder,omitempty"`                // 隐藏排序字段：仅控制启用 / 未启用组内顺序
 	EnabledSortOrder         int               `json:"enabledSortOrder,omitempty"`         // 持久化启用组内顺序
 	DisabledSortOrder        int               `json:"disabledSortOrder,omitempty"`        // 持久化未启用组内顺序

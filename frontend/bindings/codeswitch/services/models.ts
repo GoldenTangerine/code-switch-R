@@ -989,6 +989,7 @@ export class GeminiProvider {
      */
     "partnerPromotionKey"?: string;
     "enabled": boolean;
+    "hideLogBadge"?: boolean;
     "sortOrder"?: number;
     "enabledSortOrder"?: number;
     "disabledSortOrder"?: number;
@@ -1582,6 +1583,7 @@ export class Provider {
     "tint": string;
     "accent": string;
     "enabled": boolean;
+    "hideLogBadge"?: boolean;
     "apiFormat"?: string;
     "sortOrder"?: number;
     "enabledSortOrder"?: number;

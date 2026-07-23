@@ -38,6 +38,7 @@ export type GeminiProvider = Awaited<ReturnType<typeof GetGeminiProviders>> exte
   providerQuotaQueryType?: unknown | null
   providerQuotaQueryConfig?: unknown | null
   providerConcurrencyLimit?: number
+  hideLogBadge?: boolean
 }) : any
 
 export type OpenCodeProvider = OpenCodeProviderModel & {
@@ -75,6 +76,7 @@ export type PersistedProvider = PersistedProviderModel & {
   partnerPromotionKey?: string
   liveConfigManaged?: boolean
   isInConfig?: boolean
+  hideLogBadge?: boolean
 }
 
 const GEMINI_LOCKED_ENV_KEYS = new Set(['GOOGLE_GEMINI_BASE_URL', 'GEMINI_API_KEY'])
@@ -244,6 +246,7 @@ export const providerToCard = (
   tint: provider.tint || '',
   accent: provider.accent || '',
   enabled: provider.enabled,
+  hideLogBadge: provider.hideLogBadge === true,
   apiFormat: platform === 'claude'
     ? normalizeClaudeAPIFormatValue(provider.apiFormat)
     : undefined,
@@ -320,6 +323,7 @@ export const geminiToCard = (provider: GeminiProvider, index: number): Automatio
   tint: 'rgba(251, 146, 60, 0.18)',
   accent: '#fb923c',
   enabled: provider.enabled,
+  hideLogBadge: provider.hideLogBadge === true,
   sortOrder: provider.sortOrder || index + 1,
   enabledSortOrder: provider.enabledSortOrder || (provider.enabled ? (provider.sortOrder || index + 1) : undefined),
   disabledSortOrder: provider.disabledSortOrder || (!provider.enabled ? (provider.sortOrder || index + 1) : undefined),
@@ -397,6 +401,7 @@ export const cardToGemini = (card: AutomationCard, original: GeminiProvider): Ge
   model: `${card.cliConfig?.GEMINI_MODEL ?? ''}`.trim() || original.model || '',
   websiteUrl: card.officialSite,
   enabled: card.enabled,
+  hideLogBadge: card.hideLogBadge === true,
   sortOrder: card.sortOrder || 0,
   enabledSortOrder: card.enabledSortOrder || 0,
   disabledSortOrder: card.disabledSortOrder || 0,
@@ -424,6 +429,7 @@ export const createGeminiFromCard = (
   model: `${card.cliConfig?.GEMINI_MODEL ?? ''}`.trim(),
   websiteUrl: card.officialSite,
   enabled: card.enabled,
+  hideLogBadge: card.hideLogBadge === true,
   sortOrder: card.sortOrder || 0,
   enabledSortOrder: card.enabledSortOrder || 0,
   disabledSortOrder: card.disabledSortOrder || 0,

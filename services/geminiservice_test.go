@@ -277,11 +277,12 @@ func TestGeminiService_LoadProvidersSupportsTotalQuotaFieldAfterInitDatabase(t *
 
 	payload, err := json.Marshal([]GeminiProvider{
 		{
-			ID:      "gemini-total",
-			Name:    "Gemini Total",
-			BaseURL: "https://gemini.example.com",
-			APIKey:  "gm-key",
-			Enabled: true,
+			ID:           "gemini-total",
+			Name:         "Gemini Total",
+			BaseURL:      "https://gemini.example.com",
+			APIKey:       "gm-key",
+			Enabled:      true,
+			HideLogBadge: true,
 			BudgetQuotaSettings: &BudgetQuotaSettings{
 				Total: BudgetQuotaSetting{
 					Total:           1024,
@@ -326,5 +327,8 @@ func TestGeminiService_LoadProvidersSupportsTotalQuotaFieldAfterInitDatabase(t *
 	}
 	if providers[0].ProviderQuotaQueryConfig == nil || providers[0].ProviderQuotaQueryConfig.TokenPlanProvider != "minimax" {
 		t.Fatalf("Gemini providerQuotaQueryConfig 反序列化失败: %+v", providers[0].ProviderQuotaQueryConfig)
+	}
+	if !providers[0].HideLogBadge {
+		t.Fatal("Gemini hideLogBadge 反序列化失败")
 	}
 }

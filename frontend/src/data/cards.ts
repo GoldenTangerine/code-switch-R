@@ -15,6 +15,8 @@ export type AutomationCard = {
   tint: string
   accent: string
   enabled: boolean
+  // 是否隐藏供应商日志图标的未读红点；缺省时默认显示。
+  hideLogBadge?: boolean
   // Claude API 格式（仅 Claude 供应商使用）
   apiFormat?: 'anthropic' | 'openai_chat' | 'openai_responses'
   // Anthropic cache_control TTL 覆盖（仅 Claude 原生 Anthropic Messages 使用）

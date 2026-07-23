@@ -738,4 +738,61 @@ describe('useProviderForm order preservation', () => {
     await expect(providerForm.persistModelMappingRuleEnabled('claude-*', false)).rejects.toThrow('save failed')
     expect(card.modelMappingDisabled).toEqual({})
   })
+
+  it('persists the current provider log badge preference immediately', async () => {
+    const cards = createCardRecord()
+    const card = createCard(1)
+    cards.codex.push(card)
+    const persistProviders = vi.fn().mockResolvedValue(undefined)
+    const providerForm = useProviderForm({
+      initialTab: 'codex',
+      t: (key: string) => key,
+      showToast: vi.fn(),
+      getActiveTab: () => 'codex',
+      cards,
+      normalizeLevel,
+      persistProviders,
+      refreshDirectAppliedStatus: vi.fn().mockResolvedValue(undefined),
+      removeProvider: vi.fn().mockResolvedValue(undefined),
+      duplicateProvider: vi.fn().mockResolvedValue(false),
+      reloadProviders: vi.fn().mockResolvedValue(undefined),
+      moveCardToStatusGroup: (tabId, target, enabled) => moveProviderToStatusGroup(cards[tabId], target, enabled),
+      appendCardToGroup: (tabId, target) => insertProviderToStatusGroup(cards[tabId], target),
+    })
+
+    providerForm.openProviderLogs(card)
+    await providerForm.updateProviderLogBadgeEnabled(false)
+
+    expect(card.hideLogBadge).toBe(true)
+    expect(persistProviders).toHaveBeenCalledWith('codex')
+    expect(providerForm.providerLogBadgeSaving.value).toBe(false)
+  })
+
+  it('rolls back the log badge preference when immediate persistence fails', async () => {
+    const cards = createCardRecord()
+    const card = createCard(1, { hideLogBadge: false })
+    cards.gemini.push(card)
+    const persistProviders = vi.fn().mockRejectedValue(new Error('save failed'))
+    const providerForm = useProviderForm({
+      initialTab: 'gemini',
+      t: (key: string) => key,
+      showToast: vi.fn(),
+      getActiveTab: () => 'gemini',
+      cards,
+      normalizeLevel,
+      persistProviders,
+      refreshDirectAppliedStatus: vi.fn().mockResolvedValue(undefined),
+      removeProvider: vi.fn().mockResolvedValue(undefined),
+      duplicateProvider: vi.fn().mockResolvedValue(false),
+      reloadProviders: vi.fn().mockResolvedValue(undefined),
+      moveCardToStatusGroup: (tabId, target, enabled) => moveProviderToStatusGroup(cards[tabId], target, enabled),
+      appendCardToGroup: (tabId, target) => insertProviderToStatusGroup(cards[tabId], target),
+    })
+
+    providerForm.openProviderLogs(card)
+    await providerForm.updateProviderLogBadgeEnabled(false)
+
+    expect(card.hideLogBadge).toBe(false)
+    expect(providerForm.providerLogBadgeSaving.value).toBe(false)
+  })
 })

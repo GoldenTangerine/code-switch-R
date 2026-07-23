@@ -54,6 +54,7 @@ export type VendorForm = {
   apiKeyUrl?: string
   icon: string
   enabled: boolean
+  hideLogBadge?: boolean
   apiFormat?: 'anthropic' | 'openai_chat' | 'openai_responses'
   anthropicCacheTTL?: '' | '5m' | '1h'
   supportedModels?: Record<string, boolean>

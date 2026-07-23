@@ -885,6 +885,7 @@ import {
 } from '../utils/providerQuotaCardDisplay'
 import { isDirectApplyBlockedForProvider } from '../utils/providerDirectApply'
 import { isHostedRouteActive } from '../utils/providerRoutingState'
+import { shouldShowProviderLogBadge } from '../utils/providerLogBadge'
 
 const props = defineProps<{
   viewModel: ProviderCardViewModel
@@ -1179,7 +1180,10 @@ const isCurrentlyActive = computed(() => (
 ))
 
 const hasUnreadErrorLogs = computed(() => (
-  props.viewModel.stats.hasUnreadErrorLogs
+  shouldShowProviderLogBadge(
+    props.viewModel.card.hideLogBadge,
+    props.viewModel.stats.hasUnreadErrorLogs,
+  )
 ))
 
 const providerLogsButtonTooltip = computed(() => (

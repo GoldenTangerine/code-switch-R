@@ -18,12 +18,12 @@ func TestProviderServiceSnapshotSaveAndExternalRefresh(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	initial := []Provider{{ID: 1, Name: "Initial", APIURL: "https://example.com", APIKey: "key", Enabled: true}}
+	initial := []Provider{{ID: 1, Name: "Initial", APIURL: "https://example.com", APIKey: "key", Enabled: true, HideLogBadge: true}}
 	if err := service.SaveProviders("claude", initial); err != nil {
 		t.Fatal(err)
 	}
 	loaded, err := service.LoadProviders("claude")
-	if err != nil || len(loaded) != 1 || loaded[0].Name != "Initial" {
+	if err != nil || len(loaded) != 1 || loaded[0].Name != "Initial" || !loaded[0].HideLogBadge {
 		t.Fatalf("保存后快照未立即生效: %#v, %v", loaded, err)
 	}
 

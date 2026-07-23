@@ -38,6 +38,8 @@ type Provider struct {
 	Tint    string `json:"tint"`
 	Accent  string `json:"accent"`
 	Enabled bool   `json:"enabled"`
+	// 首页供应商日志图标是否隐藏未读红点；缺省为 false，兼容旧配置默认显示。
+	HideLogBadge bool `json:"hideLogBadge,omitempty"`
 	// 供应商分类：official / third_party / custom 等。
 	Category string `json:"category,omitempty"`
 	// 托管认证来源，例如 codex_oauth。为空时使用 APIKey。
