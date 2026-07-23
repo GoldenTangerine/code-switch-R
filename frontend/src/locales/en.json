@@ -1714,6 +1714,8 @@
         "modelPricing": "Model pricing",
         "modelPricingHint": "Used for cost stats; supports custom input/output/cache rates",
         "autoStart": "Launch at login",
+        "mainWindowDestroyDelay": "Main window release delay",
+        "mainWindowDestroyDelayHint": "Use 0 for immediate release, up to 300 seconds",
         "switchNotify": "Switch Notification",
         "switchNotifyHint": "Send system notification when provider switches or gets blacklisted",
         "roundRobin": "Same-Level Round Robin",

@@ -1713,6 +1713,8 @@
         "modelPricing": "模型价格",
         "modelPricingHint": "用于消费统计，支持自定义 input/output/cache 单价",
         "autoStart": "开机自启动",
+        "mainWindowDestroyDelay": "主窗口释放延迟",
+        "mainWindowDestroyDelayHint": "0 表示立即释放，最长 300 秒",
         "switchNotify": "切换通知",
         "switchNotifyHint": "供应商切换或拉黑时发送系统通知",
         "roundRobin": "同 Level 轮询",

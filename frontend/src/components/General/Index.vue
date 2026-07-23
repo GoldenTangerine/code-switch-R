@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Call, Events } from '@wailsio/runtime'
+import { Call, Events, System } from '@wailsio/runtime'
 import ListItem from '../Setting/ListRow.vue'
 import LanguageSwitcher from '../Setting/LanguageSwitcher.vue'
 import ThemeSetting from '../Setting/ThemeSetting.vue'
@@ -11,7 +11,12 @@ import InlineModal from '../common/InlineModal.vue'
 import {
   fetchAppSettings,
   saveAppSettings,
+  saveMainWindowDestroyDelay,
+  DEFAULT_MAIN_WINDOW_DESTROY_DELAY_SECONDS,
+  MAX_MAIN_WINDOW_DESTROY_DELAY_SECONDS,
+  MIN_MAIN_WINDOW_DESTROY_DELAY_SECONDS,
   normalizeHeatmapGranularity,
+  normalizeMainWindowDestroyDelaySeconds,
   type AppSettings,
   type ClaudeModelMetadataMergeStrategy,
   type ClaudeProxyAuthField,
@@ -169,6 +174,10 @@ const heatmapIntensityStopL3 = ref(initialHeatmapDisplaySettings.intensityStopL3
 const homeTitleVisible = ref(getCachedValue('homeTitle', true))
 const homeProviderTabs = ref<HomeProviderTab[]>(getCachedHomeProviderTabs())
 const autoStartEnabled = ref(getCachedValue('autoStart', false))
+const isMacPlatform = System.IsMac()
+const mainWindowDestroyDelaySeconds = ref(
+  normalizeMainWindowDestroyDelaySeconds(getCachedNumber('mainWindowDestroyDelaySeconds', DEFAULT_MAIN_WINDOW_DESTROY_DELAY_SECONDS))
+)
 const autoUpdateEnabled = ref(getCachedValue('autoUpdate', true))
 const updateHistoryKeepCount = ref(getCachedNumber('updateHistoryKeepCount', defaultUpdateHistoryKeepCount))
 const autoConnectivityTestEnabled = ref(getCachedValue('autoConnectivityTest', false))
@@ -240,6 +249,7 @@ const settingsLoading = ref(true)
 const saveBusy = ref(false)
 let saveQueued = false
 let persistTimer: number | undefined
+let mainWindowDestroyDelayRequestSeq = 0
 let budgetQuotaUsageRequestSeq = 0
 let budgetQuotaUsageRequestSeqCodex = 0
 const defaultPersistDebounceMs = 150
@@ -509,6 +519,7 @@ const syncAppSettingsCache = () => {
   localStorage.setItem('app-settings-budgetShowCountdownCodex', String(budgetShowCountdownCodex.value))
   localStorage.setItem('app-settings-budgetShowForecastCodex', String(budgetShowForecastCodex.value))
   localStorage.setItem('app-settings-autoStart', String(autoStartEnabled.value))
+  localStorage.setItem('app-settings-mainWindowDestroyDelaySeconds', String(mainWindowDestroyDelaySeconds.value))
   localStorage.setItem('app-settings-autoUpdate', String(autoUpdateEnabled.value))
   localStorage.setItem('app-settings-updateHistoryKeepCount', String(updateHistoryKeepCount.value))
   localStorage.setItem('app-settings-autoConnectivityTest', String(autoConnectivityTestEnabled.value))
@@ -1100,6 +1111,8 @@ const normalizeUpdateHistoryKeepCount = (value: number) => {
   return normalized
 }
 
+const normalizeMainWindowDestroyDelayInput = (value: number) => normalizeMainWindowDestroyDelaySeconds(value)
+
 const loadAppSettings = async () => {
   settingsLoading.value = true
   try {
@@ -1157,6 +1170,9 @@ const loadAppSettings = async () => {
     budgetShowCountdownCodex.value = data?.budget_show_countdown_codex ?? false
     budgetShowForecastCodex.value = data?.budget_show_forecast_codex ?? false
     autoStartEnabled.value = data?.auto_start ?? false
+    mainWindowDestroyDelaySeconds.value = normalizeMainWindowDestroyDelayInput(
+      Number(data?.main_window_destroy_delay_seconds ?? DEFAULT_MAIN_WINDOW_DESTROY_DELAY_SECONDS)
+    )
     autoUpdateEnabled.value = data?.auto_update ?? true
     updateHistoryKeepCount.value = normalizeUpdateHistoryKeepCount(
       Number(data?.update_history_keep_count ?? defaultUpdateHistoryKeepCount)
@@ -1207,6 +1223,7 @@ const loadAppSettings = async () => {
     budgetShowCountdownCodex.value = false
     budgetShowForecastCodex.value = false
     autoStartEnabled.value = false
+    mainWindowDestroyDelaySeconds.value = DEFAULT_MAIN_WINDOW_DESTROY_DELAY_SECONDS
     autoUpdateEnabled.value = true
     updateHistoryKeepCount.value = defaultUpdateHistoryKeepCount
     autoConnectivityTestEnabled.value = false
@@ -1260,6 +1277,8 @@ const persistAppSettingsNow = async () => {
     syncBudgetQuotaCurrentUsedForPlatform('codex')
     const normalizedUpdateHistoryKeepCount = normalizeUpdateHistoryKeepCount(updateHistoryKeepCount.value)
     updateHistoryKeepCount.value = normalizedUpdateHistoryKeepCount
+    const normalizedMainWindowDestroyDelaySeconds = normalizeMainWindowDestroyDelayInput(mainWindowDestroyDelaySeconds.value)
+    mainWindowDestroyDelaySeconds.value = normalizedMainWindowDestroyDelaySeconds
     const normalizedHeatmapDisplay = getHeatmapDisplaySettingsFromState()
     heatmapDailyScaleFactor.value = normalizedHeatmapDisplay.dailyScaleFactor
     heatmapDailyIntensityMode.value = normalizedHeatmapDisplay.dailyIntensityMode
@@ -1318,6 +1337,7 @@ const persistAppSettingsNow = async () => {
       auto_update: autoUpdateEnabled.value,
       update_history_keep_count: normalizedUpdateHistoryKeepCount,
       logs_refresh_interval_seconds: latestSettings.logs_refresh_interval_seconds,
+      main_window_destroy_delay_seconds: normalizedMainWindowDestroyDelaySeconds,
       auto_connectivity_test: autoConnectivityTestEnabled.value,
       enable_switch_notify: switchNotifyEnabled.value,
       enable_round_robin: roundRobinEnabled.value,
@@ -1377,6 +1397,26 @@ const persistAppSettings = () => {
     persistTimer = undefined
     void persistAppSettingsNow()
   }, persistDebounceMs)
+}
+
+const persistMainWindowDestroyDelay = async (event: Event) => {
+  if (settingsLoading.value) return
+  const rawValue = (event.target as HTMLInputElement | null)?.value.trim() ?? ''
+  if (rawValue === '') return
+  const seconds = normalizeMainWindowDestroyDelayInput(Number(rawValue))
+  const requestSeq = ++mainWindowDestroyDelayRequestSeq
+  mainWindowDestroyDelaySeconds.value = seconds
+  try {
+    const settings = await saveMainWindowDestroyDelay(seconds)
+    if (requestSeq !== mainWindowDestroyDelayRequestSeq) return
+    mainWindowDestroyDelaySeconds.value = settings.main_window_destroy_delay_seconds
+    localStorage.setItem('app-settings-mainWindowDestroyDelaySeconds', String(mainWindowDestroyDelaySeconds.value))
+  } catch (error) {
+    if (requestSeq !== mainWindowDestroyDelayRequestSeq) return
+    console.error('failed to save main window destroy delay', error)
+    showToast(t('components.general.label.settingsSaveFailed'), 'error')
+    await loadAppSettings()
+  }
 }
 
 const flushPendingPersist = () => {
@@ -2034,6 +2074,25 @@ onBeforeUnmount(() => {
               />
               <span></span>
             </label>
+          </ListItem>
+          <ListItem v-if="isMacPlatform" :label="$t('components.general.label.mainWindowDestroyDelay')">
+            <div class="toggle-with-hint">
+              <div class="budget-input">
+                <input
+                  v-model.number="mainWindowDestroyDelaySeconds"
+                  type="number"
+                  inputmode="numeric"
+                  :min="MIN_MAIN_WINDOW_DESTROY_DELAY_SECONDS"
+                  :max="MAX_MAIN_WINDOW_DESTROY_DELAY_SECONDS"
+                  step="1"
+                  :disabled="settingsLoading || saveBusy"
+                  class="mac-input budget-input-field"
+                  @input="persistMainWindowDestroyDelay"
+                />
+                <span class="budget-unit">{{ $t('components.general.label.seconds') }}</span>
+              </div>
+              <span class="hint-text">{{ $t('components.general.label.mainWindowDestroyDelayHint') }}</span>
+            </div>
           </ListItem>
           <ListItem :label="$t('components.general.label.switchNotify')">
             <div class="toggle-with-hint">

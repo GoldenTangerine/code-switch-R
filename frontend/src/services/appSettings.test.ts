@@ -10,8 +10,10 @@ import { Call } from '@wailsio/runtime'
 import {
   fetchAppSettings,
   normalizeHeatmapGranularity,
+  normalizeMainWindowDestroyDelaySeconds,
   normalizeLogsRefreshIntervalSeconds,
   saveLogsRefreshInterval,
+  saveMainWindowDestroyDelay,
 } from './appSettings'
 
 describe('appSettings', () => {
@@ -159,5 +161,32 @@ describe('appSettings', () => {
       10,
     )
     expect(settings.logs_refresh_interval_seconds).toBe(10)
+  })
+
+  it('normalizes the main window destroy delay to 0-300 seconds', async () => {
+    vi.mocked(Call.ByName)
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({ main_window_destroy_delay_seconds: -1 })
+      .mockResolvedValueOnce({ main_window_destroy_delay_seconds: 301 })
+      .mockResolvedValueOnce({ main_window_destroy_delay_seconds: 45.9 })
+
+    expect((await fetchAppSettings()).main_window_destroy_delay_seconds).toBe(30)
+    expect((await fetchAppSettings()).main_window_destroy_delay_seconds).toBe(0)
+    expect((await fetchAppSettings()).main_window_destroy_delay_seconds).toBe(300)
+    expect((await fetchAppSettings()).main_window_destroy_delay_seconds).toBe(45)
+    expect(normalizeMainWindowDestroyDelaySeconds(Number.NaN)).toBe(30)
+  })
+
+  it('saves the main window destroy delay through the dedicated versioned method', async () => {
+    vi.mocked(Call.ByName).mockResolvedValueOnce({ main_window_destroy_delay_seconds: 45 })
+
+    const settings = await saveMainWindowDestroyDelay(45.9)
+
+    expect(Call.ByName).toHaveBeenCalledWith(
+      'codeswitch/services.AppSettingsService.SetMainWindowDestroyDelay',
+      45,
+      expect.any(Number),
+    )
+    expect(settings.main_window_destroy_delay_seconds).toBe(45)
   })
 })

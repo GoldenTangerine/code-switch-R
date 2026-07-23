@@ -22,6 +22,9 @@ const (
 	defaultUpdateHistoryKeepCount         = 3
 	minUpdateHistoryKeepCount             = 1
 	maxUpdateHistoryKeepCount             = 20
+	DefaultMainWindowDestroyDelaySeconds  = 30
+	minMainWindowDestroyDelaySeconds      = 0
+	maxMainWindowDestroyDelaySeconds      = 300
 	heatmapGranularityHourly              = "hourly"
 	heatmapGranularityDaily               = "daily"
 	heatmapDailyModeHourlyScaled          = "hourly_scaled"
@@ -96,6 +99,7 @@ type AppSettings struct {
 	AutoUpdate                       bool                                     `json:"auto_update"`
 	UpdateHistoryKeepCount           int                                      `json:"update_history_keep_count"` // 更新包历史保留数量
 	LogsRefreshIntervalSeconds       int                                      `json:"logs_refresh_interval_seconds"`
+	MainWindowDestroyDelaySeconds    int                                      `json:"main_window_destroy_delay_seconds"`
 	AutoConnectivityTest             bool                                     `json:"auto_connectivity_test"`
 	EnableSwitchNotify               bool                                     `json:"enable_switch_notify"` // 供应商切换通知开关
 	EnableRoundRobin                 bool                                     `json:"enable_round_robin"`   // 同 Level 轮询负载均衡开关（默认关闭）
@@ -193,21 +197,22 @@ type BudgetQuotaAdjustments struct {
 }
 
 type AppSettingsService struct {
-	path                string
-	mu                  sync.Mutex
-	autoStartService    *AutoStartService
-	codexSettings       *CodexSettingsService
-	claudeSettings      *ClaudeSettingsService
-	claudeModelRouting  *ClaudeModelRoutingService
-	snapshot            atomic.Value
-	fingerprintMu       sync.Mutex
-	fingerprint         [sha256.Size]byte
-	fingerprintExists   bool
-	snapshotStop        chan struct{}
-	snapshotDone        chan struct{}
-	snapshotLifecycleMu sync.Mutex
-	snapshotStarted     bool
-	snapshotStopped     bool
+	path                           string
+	mu                             sync.Mutex
+	autoStartService               *AutoStartService
+	codexSettings                  *CodexSettingsService
+	claudeSettings                 *ClaudeSettingsService
+	claudeModelRouting             *ClaudeModelRoutingService
+	snapshot                       atomic.Value
+	fingerprintMu                  sync.Mutex
+	fingerprint                    [sha256.Size]byte
+	fingerprintExists              bool
+	snapshotStop                   chan struct{}
+	snapshotDone                   chan struct{}
+	snapshotLifecycleMu            sync.Mutex
+	snapshotStarted                bool
+	snapshotStopped                bool
+	mainWindowDestroyDelayRevision int64
 }
 
 func cloneAppSettings(settings AppSettings) AppSettings {
@@ -499,6 +504,7 @@ func (as *AppSettingsService) defaultSettings() AppSettings {
 		AutoUpdate:                       true, // 默认开启自动更新
 		UpdateHistoryKeepCount:           defaultUpdateHistoryKeepCount,
 		LogsRefreshIntervalSeconds:       defaultLogsRefreshIntervalSeconds,
+		MainWindowDestroyDelaySeconds:    DefaultMainWindowDestroyDelaySeconds,
 		AutoConnectivityTest:             true,  // 默认开启自动可用性监控（开箱即用）
 		EnableSwitchNotify:               true,  // 默认开启切换通知
 		EnableRoundRobin:                 false, // 默认关闭轮询（使用顺序降级）
@@ -744,6 +750,7 @@ func (as *AppSettingsService) SaveAppSettings(settings AppSettings) (AppSettings
 	normalizeBudgetSettings(&settings)
 	settings.UpdateHistoryKeepCount = normalizeUpdateHistoryKeepCount(settings.UpdateHistoryKeepCount)
 	settings.LogsRefreshIntervalSeconds = normalizeLogsRefreshIntervalSeconds(settings.LogsRefreshIntervalSeconds)
+	settings.MainWindowDestroyDelaySeconds = normalizeMainWindowDestroyDelaySeconds(settings.MainWindowDestroyDelaySeconds)
 	normalizeProviderConcurrencyLimits(&settings)
 	normalizeProviderQuotaQueryPresets(&settings)
 	normalizeClaudeModelRoutingSettings(&settings)
@@ -811,6 +818,31 @@ func (as *AppSettingsService) SetLogsRefreshInterval(seconds int) (AppSettings, 
 	return settings, nil
 }
 
+// SetMainWindowDestroyDelay persists the main-window release delay without saving unrelated settings.
+func (as *AppSettingsService) SetMainWindowDestroyDelay(seconds int, revision int64) (AppSettings, error) {
+	as.mu.Lock()
+	defer as.mu.Unlock()
+
+	previous, _ := as.GetAppSettings()
+	if revision < as.mainWindowDestroyDelayRevision {
+		return previous, nil
+	}
+	settings := cloneAppSettings(previous)
+	settings.MainWindowDestroyDelaySeconds = normalizeMainWindowDestroyDelaySeconds(seconds)
+
+	// Publish first so a concurrent native close observes the latest delay while disk persistence completes.
+	previousRevision := as.mainWindowDestroyDelayRevision
+	as.mainWindowDestroyDelayRevision = revision
+	as.snapshot.Store(cloneAppSettings(settings))
+	if err := as.saveLocked(settings); err != nil {
+		as.mainWindowDestroyDelayRevision = previousRevision
+		as.snapshot.Store(previous)
+		return previous, err
+	}
+	as.refreshFingerprint()
+	return settings, nil
+}
+
 func claudeModelRoutingSettingsChanged(previous AppSettings, next AppSettings) bool {
 	return previous.ClaudeModelRoutingEnabled != next.ClaudeModelRoutingEnabled ||
 		previous.ClaudeModelAggregationEnabled != next.ClaudeModelAggregationEnabled ||
@@ -866,6 +898,7 @@ func (as *AppSettingsService) loadLocked() (AppSettings, error) {
 	normalizeBudgetSettings(&settings)
 	settings.UpdateHistoryKeepCount = normalizeUpdateHistoryKeepCount(settings.UpdateHistoryKeepCount)
 	settings.LogsRefreshIntervalSeconds = normalizeLogsRefreshIntervalSeconds(settings.LogsRefreshIntervalSeconds)
+	settings.MainWindowDestroyDelaySeconds = normalizeMainWindowDestroyDelaySeconds(settings.MainWindowDestroyDelaySeconds)
 	normalizeProviderConcurrencyLimits(&settings)
 	normalizeProviderQuotaQueryPresets(&settings)
 	normalizeClaudeModelRoutingSettings(&settings)
@@ -889,6 +922,7 @@ func (as *AppSettingsService) saveLocked(settings AppSettings) error {
 	normalizeBudgetSettings(&settings)
 	settings.UpdateHistoryKeepCount = normalizeUpdateHistoryKeepCount(settings.UpdateHistoryKeepCount)
 	settings.LogsRefreshIntervalSeconds = normalizeLogsRefreshIntervalSeconds(settings.LogsRefreshIntervalSeconds)
+	settings.MainWindowDestroyDelaySeconds = normalizeMainWindowDestroyDelaySeconds(settings.MainWindowDestroyDelaySeconds)
 	normalizeProviderConcurrencyLimits(&settings)
 	normalizeProviderQuotaQueryPresets(&settings)
 	normalizeClaudeModelRoutingSettings(&settings)
@@ -908,6 +942,16 @@ func normalizeUpdateHistoryKeepCount(count int) int {
 		return maxUpdateHistoryKeepCount
 	}
 	return count
+}
+
+func normalizeMainWindowDestroyDelaySeconds(seconds int) int {
+	if seconds < minMainWindowDestroyDelaySeconds {
+		return minMainWindowDestroyDelaySeconds
+	}
+	if seconds > maxMainWindowDestroyDelaySeconds {
+		return maxMainWindowDestroyDelaySeconds
+	}
+	return seconds
 }
 
 func normalizeBudgetCycleMode(value string) string {

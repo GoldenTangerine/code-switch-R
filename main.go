@@ -39,6 +39,126 @@ type AppService struct {
 	TrayWindow application.Window
 }
 
+type mainWindowDestroyTimer interface {
+	Stop() bool
+}
+
+type mainWindowLifecycleState[T comparable] struct {
+	mu           sync.Mutex
+	afterFunc    func(time.Duration, func()) mainWindowDestroyTimer
+	timer        mainWindowDestroyTimer
+	generation   uint64
+	window       T
+	hasWindow    bool
+	centered     bool
+	pendingClose map[uint]struct{}
+	shuttingDown bool
+}
+
+func newMainWindowLifecycleState[T comparable](
+	afterFunc func(time.Duration, func()) mainWindowDestroyTimer,
+) *mainWindowLifecycleState[T] {
+	return &mainWindowLifecycleState[T]{
+		afterFunc:    afterFunc,
+		pendingClose: make(map[uint]struct{}),
+	}
+}
+
+func (state *mainWindowLifecycleState[T]) current() (T, bool) {
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	return state.window, state.hasWindow
+}
+
+func (state *mainWindowLifecycleState[T]) setWindow(window T) {
+	state.mu.Lock()
+	state.window = window
+	state.hasWindow = true
+	state.mu.Unlock()
+}
+
+func (state *mainWindowLifecycleState[T]) setCentered() {
+	state.mu.Lock()
+	state.centered = true
+	state.mu.Unlock()
+}
+
+func (state *mainWindowLifecycleState[T]) markCenteredIfNeeded() bool {
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.centered {
+		return false
+	}
+	state.centered = true
+	return true
+}
+
+func (state *mainWindowLifecycleState[T]) cancelDestroy() {
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	state.generation++
+	if state.timer != nil {
+		state.timer.Stop()
+		state.timer = nil
+	}
+}
+
+func (state *mainWindowLifecycleState[T]) scheduleDestroy(
+	window T,
+	windowID uint,
+	delay time.Duration,
+	closeWindow func(T),
+) {
+	state.mu.Lock()
+	if state.shuttingDown || !state.hasWindow || state.window != window {
+		state.mu.Unlock()
+		return
+	}
+	if state.timer != nil {
+		state.timer.Stop()
+	}
+	state.generation++
+	generation := state.generation
+	state.timer = state.afterFunc(delay, func() {
+		state.mu.Lock()
+		if state.shuttingDown || !state.hasWindow || state.window != window || state.generation != generation {
+			state.mu.Unlock()
+			return
+		}
+		var zero T
+		state.timer = nil
+		state.window = zero
+		state.hasWindow = false
+		state.centered = false
+		state.pendingClose[windowID] = struct{}{}
+		state.mu.Unlock()
+
+		closeWindow(window)
+	})
+	state.mu.Unlock()
+}
+
+func (state *mainWindowLifecycleState[T]) allowClose(windowID uint) bool {
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	_, pendingClose := state.pendingClose[windowID]
+	if pendingClose {
+		delete(state.pendingClose, windowID)
+	}
+	return state.shuttingDown || pendingClose
+}
+
+func (state *mainWindowLifecycleState[T]) shutdown() {
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	state.shuttingDown = true
+	state.generation++
+	if state.timer != nil {
+		state.timer.Stop()
+		state.timer = nil
+	}
+}
+
 func (a *AppService) SetApp(app *application.App) {
 	a.App = app
 }
@@ -340,7 +460,16 @@ func main() {
 	// WebDAV 同步进度事件
 	webdavSyncService.SetApp(app)
 
+	mainWindowLifecycle := newMainWindowLifecycleState[application.Window](
+		func(delay time.Duration, callback func()) mainWindowDestroyTimer {
+			return time.AfterFunc(delay, callback)
+		},
+	)
+	var mainWindowCreateMu sync.Mutex
+
 	app.OnShutdown(func() {
+		mainWindowLifecycle.shutdown()
+
 		log.Println("🛑 应用正在关闭，停止后台服务...")
 
 		// 1. 停止黑名单定时器
@@ -381,13 +510,21 @@ func main() {
 		log.Println("✅ 所有后台服务已停止")
 	})
 
-	var mainWindow application.Window
-	var mainWindowCentered bool
 	var trayWindow application.Window
 	var systray *application.SystemTray
 	var fitWindowsMainWindowOnce sync.Once
 	var showStartupMainWindowOnce sync.Once
 	var showMainWindow func(withFocus bool)
+	scheduleMainWindowDestroy := func(win application.Window) {
+		settings, err := appSettings.GetAppSettings()
+		delay := time.Duration(services.DefaultMainWindowDestroyDelaySeconds) * time.Second
+		if err == nil {
+			delay = time.Duration(settings.MainWindowDestroyDelaySeconds) * time.Second
+		}
+		mainWindowLifecycle.scheduleDestroy(win, win.ID(), delay, func(window application.Window) {
+			window.Close()
+		})
+	}
 	calculateWindowsMainWindowBounds := func() (application.Rect, bool) {
 		if runtime.GOOS != "windows" {
 			return application.Rect{}, false
@@ -467,7 +604,7 @@ func main() {
 			options.InitialPosition = application.WindowXY
 			options.X = bounds.X
 			options.Y = bounds.Y
-			mainWindowCentered = true
+			mainWindowLifecycle.setCentered()
 		}
 
 		return options
@@ -478,31 +615,41 @@ func main() {
 		}
 		if bounds, ok := calculateWindowsMainWindowBounds(); ok {
 			win.SetBounds(bounds)
-			mainWindowCentered = true
+			mainWindowLifecycle.setCentered()
 		}
 	}
 	createMainWindow := func() application.Window {
-		if mainWindow != nil {
-			return mainWindow
+		mainWindowCreateMu.Lock()
+		defer mainWindowCreateMu.Unlock()
+		if win, exists := mainWindowLifecycle.current(); exists {
+			return win
 		}
-		mainWindow = app.Window.NewWithOptions(createMainWindowOptions())
-		mainWindow.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
-			mainWindow.Hide()
+		win := app.Window.NewWithOptions(createMainWindowOptions())
+		win.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
+			if mainWindowLifecycle.allowClose(win.ID()) {
+				return
+			}
+
+			win.Hide()
 			handleDockVisibility(dockService, false)
+			if runtime.GOOS == "darwin" {
+				scheduleMainWindowDestroy(win)
+			}
 			e.Cancel()
 		})
 		if runtime.GOOS == "windows" {
-			mainWindow.OnWindowEvent(events.Windows.WebViewNavigationCompleted, func(event *application.WindowEvent) {
+			win.OnWindowEvent(events.Windows.WebViewNavigationCompleted, func(event *application.WindowEvent) {
 				fitWindowsMainWindowOnce.Do(func() {
 					go func() {
 						time.Sleep(80 * time.Millisecond)
-						fitMainWindowToWindowsWorkArea(mainWindow)
+						fitMainWindowToWindowsWorkArea(win)
 						showMainWindow(true)
 					}()
 				})
 			})
 		}
-		return mainWindow
+		mainWindowLifecycle.setWindow(win)
+		return win
 	}
 	focusMainWindow := func() {
 		win := createMainWindow()
@@ -518,10 +665,10 @@ func main() {
 		win.Focus()
 	}
 	showMainWindow = func(withFocus bool) {
+		mainWindowLifecycle.cancelDestroy()
 		win := createMainWindow()
-		if !mainWindowCentered {
+		if mainWindowLifecycle.markCenteredIfNeeded() {
 			win.Center()
-			mainWindowCentered = true
 		}
 		if win.IsMinimised() {
 			win.UnMinimise()
@@ -533,10 +680,12 @@ func main() {
 		handleDockVisibility(dockService, true)
 	}
 	isMainWindowVisible := func() bool {
-		return mainWindow != nil && mainWindow.IsVisible()
+		win, exists := mainWindowLifecycle.current()
+		return exists && win.IsVisible()
 	}
 	isMainWindowFocused := func() bool {
-		return mainWindow != nil && mainWindow.IsFocused()
+		win, exists := mainWindowLifecycle.current()
+		return exists && win.IsFocused()
 	}
 	createTrayWindow := func() application.Window {
 		if runtime.GOOS != "darwin" {
@@ -623,7 +772,7 @@ func main() {
 			return
 		}
 		if isMainWindowVisible() {
-			mainWindow.Focus()
+			focusMainWindow()
 			return
 		}
 		showMainWindow(true)
@@ -684,7 +833,7 @@ func main() {
 
 	if runtime.GOOS == "windows" {
 		createMainWindow()
-		mainWindowCentered = true
+		mainWindowLifecycle.setCentered()
 	}
 
 	// Create a goroutine that emits an event containing the current time every second.

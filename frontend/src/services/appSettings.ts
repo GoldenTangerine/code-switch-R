@@ -24,6 +24,25 @@ export type ClaudeModelMetadataMergeStrategy = 'aggressive' | 'conservative'
 export type ClaudeProxyAuthField = 'auth_token' | 'api_key'
 export type LogsRefreshIntervalSeconds = 0 | 5 | 10 | 30 | 60
 
+export const DEFAULT_MAIN_WINDOW_DESTROY_DELAY_SECONDS = 30
+export const MIN_MAIN_WINDOW_DESTROY_DELAY_SECONDS = 0
+export const MAX_MAIN_WINDOW_DESTROY_DELAY_SECONDS = 300
+
+let mainWindowDestroyDelayRevision = Date.now() * 1000
+
+const nextMainWindowDestroyDelayRevision = (): number => {
+  mainWindowDestroyDelayRevision = Math.max(mainWindowDestroyDelayRevision + 1, Date.now() * 1000)
+  return mainWindowDestroyDelayRevision
+}
+
+export const normalizeMainWindowDestroyDelaySeconds = (value?: number | null): number => {
+  if (!Number.isFinite(value)) return DEFAULT_MAIN_WINDOW_DESTROY_DELAY_SECONDS
+  const normalized = Math.floor(value as number)
+  if (normalized < MIN_MAIN_WINDOW_DESTROY_DELAY_SECONDS) return MIN_MAIN_WINDOW_DESTROY_DELAY_SECONDS
+  if (normalized > MAX_MAIN_WINDOW_DESTROY_DELAY_SECONDS) return MAX_MAIN_WINDOW_DESTROY_DELAY_SECONDS
+  return normalized
+}
+
 export const LOGS_REFRESH_INTERVAL_OPTIONS: readonly LogsRefreshIntervalSeconds[] = [0, 5, 10, 30, 60]
 
 export const normalizeLogsRefreshIntervalSeconds = (value?: number | null): LogsRefreshIntervalSeconds => (
@@ -86,6 +105,7 @@ export type AppSettings = {
   auto_update: boolean
   update_history_keep_count: number
   logs_refresh_interval_seconds: LogsRefreshIntervalSeconds
+  main_window_destroy_delay_seconds: number
   auto_connectivity_test: boolean
   enable_switch_notify: boolean // 供应商切换通知开关
   enable_round_robin: boolean   // 同 Level 轮询负载均衡开关
@@ -158,6 +178,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   auto_update: true,
   update_history_keep_count: 3,
   logs_refresh_interval_seconds: 30,
+  main_window_destroy_delay_seconds: DEFAULT_MAIN_WINDOW_DESTROY_DELAY_SECONDS,
   auto_connectivity_test: false,
   enable_switch_notify: true,  // 默认开启
   enable_round_robin: false,   // 默认关闭轮询
@@ -316,6 +337,7 @@ const normalizeAppSettingsResponse = (value: unknown): AppSettings => {
     claude_model_metadata_merge_strategy: mergeStrategy,
     claude_proxy_auth_field: normalizeClaudeProxyAuthField(data?.claude_proxy_auth_field),
     logs_refresh_interval_seconds: normalizeLogsRefreshIntervalSeconds(data?.logs_refresh_interval_seconds),
+    main_window_destroy_delay_seconds: normalizeMainWindowDestroyDelaySeconds(data?.main_window_destroy_delay_seconds),
     budget_quota_used_adjustments: normalizeBudgetQuotaAdjustments(
       data?.budget_quota_used_adjustments,
       {
@@ -432,6 +454,15 @@ export const saveLogsRefreshInterval = async (
   const data = await Call.ByName(
     'codeswitch/services.AppSettingsService.SetLogsRefreshInterval',
     normalizeLogsRefreshIntervalSeconds(seconds),
+  )
+  return normalizeAppSettingsResponse(data)
+}
+
+export const saveMainWindowDestroyDelay = async (seconds: number): Promise<AppSettings> => {
+  const data = await Call.ByName(
+    'codeswitch/services.AppSettingsService.SetMainWindowDestroyDelay',
+    normalizeMainWindowDestroyDelaySeconds(seconds),
+    nextMainWindowDestroyDelayRevision(),
   )
   return normalizeAppSettingsResponse(data)
 }
