@@ -1703,6 +1703,19 @@
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
+.blacklist-banner.is-pending {
+  border-color: rgba(245, 158, 11, 0.22);
+  background: rgba(255, 251, 235, 0.92);
+  color: #b45309;
+}
+
+.blacklist-banner.is-pending.dark,
+.automation-card.theme-dark .blacklist-banner.is-pending {
+  border-color: rgba(245, 158, 11, 0.22);
+  background: rgba(120, 53, 15, 0.24);
+  color: #fbbf24;
+}
+
 .blacklist-info {
   display: flex;
   align-items: center;
@@ -1727,10 +1740,26 @@
 }
 
 .blacklist-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   min-width: 0;
   font-size: 0.78rem;
   font-weight: 600;
   line-height: 1.45;
+}
+
+.blacklist-counts,
+.blacklist-detail {
+  font-weight: 500;
+  opacity: 0.9;
+}
+
+.blacklist-reason {
+  max-width: 520px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .blacklist-actions {

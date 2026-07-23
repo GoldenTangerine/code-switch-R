@@ -4,6 +4,7 @@ export type LogPlatform = 'claude' | 'codex' | 'gemini'
 export type RequestLogPlatform = LogPlatform | `custom:${string}`
 export type LogDataSourceMode = 'proxy' | 'session' | 'all'
 export type ReasoningEffortSource = 'request' | 'request_body_override' | 'model_mapping' | ''
+export type RequestErrorSource = 'provider_response' | 'upstream_network' | 'upstream_stream' | 'proxy' | 'client_abort' | ''
 
 export type RequestLog = {
   id: number
@@ -43,6 +44,7 @@ export type RequestLog = {
   stream_terminal_event?: string
   stream_error_kind?: string
   error_message?: string
+  error_source?: RequestErrorSource
   stream_compaction_requested?: boolean | number
   stream_compaction_observed?: boolean | number
   stream_bytes?: number

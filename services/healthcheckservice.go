@@ -59,9 +59,10 @@ type HealthCheckResult struct {
 	Platform       string    `json:"platform"`
 	Model          string    `json:"model,omitempty"`
 	Endpoint       string    `json:"endpoint,omitempty"`
-	Status         string    `json:"status"`                   // operational/degraded/failed/validation_failed
-	LatencyMs      int       `json:"latencyMs"`                // 响应延迟（毫秒）
-	ErrorMessage   string    `json:"errorMessage"`             // 错误消息
+	Status         string    `json:"status"`       // operational/degraded/failed/validation_failed
+	LatencyMs      int       `json:"latencyMs"`    // 响应延迟（毫秒）
+	ErrorMessage   string    `json:"errorMessage"` // 错误消息
+	HTTPStatusCode int       `json:"httpStatusCode,omitempty"`
 	CheckedAt      time.Time `json:"checkedAt"`                // 检测时间
 	TotalRequests  int       `json:"totalRequests,omitempty"`  // 日志聚合请求数
 	FailedRequests int       `json:"failedRequests,omitempty"` // 日志聚合失败请求数
@@ -899,7 +900,7 @@ func (hcs *HealthCheckService) RunSingleCheck(platform string, providerID int64)
 	hcs.updateCache(result)
 
 	// 处理拉黑联动
-	hcs.handleBlacklistIntegration(targetProvider, result)
+	hcs.handleBlacklistIntegration(targetProvider, result, false)
 
 	return result, nil
 }
@@ -909,7 +910,7 @@ func (hcs *HealthCheckService) RunAllChecks() (map[string][]HealthCheckResult, e
 	results := make(map[string][]HealthCheckResult)
 
 	for _, platform := range availabilityPlatforms {
-		platformResults := hcs.checkAllProviders(platform)
+		platformResults := hcs.checkAllProviders(platform, false)
 		results[platform] = platformResults
 	}
 
@@ -917,7 +918,7 @@ func (hcs *HealthCheckService) RunAllChecks() (map[string][]HealthCheckResult, e
 }
 
 // checkAllProviders 检测指定平台的所有启用监控的供应商
-func (hcs *HealthCheckService) checkAllProviders(platform string) []HealthCheckResult {
+func (hcs *HealthCheckService) checkAllProviders(platform string, affectBlacklist bool) []HealthCheckResult {
 	providers, err := hcs.providerService.LoadProviders(platform)
 	if err != nil {
 		log.Printf("[HealthCheck] 加载 %s 供应商失败: %v", platform, err)
@@ -956,7 +957,7 @@ func (hcs *HealthCheckService) checkAllProviders(platform string) []HealthCheckR
 			hcs.updateCache(result)
 
 			// 处理拉黑联动
-			hcs.handleBlacklistIntegration(&p, result)
+			hcs.handleBlacklistIntegration(&p, result, affectBlacklist)
 
 			mu.Lock()
 			results = append(results, *result)
@@ -997,6 +998,7 @@ func (hcs *HealthCheckService) checkProvider(ctx context.Context, provider Provi
 		result.Endpoint = probeResult.Plan.EffectiveEndpoint
 	}
 	result.LatencyMs = probeResult.LatencyMs
+	result.HTTPStatusCode = probeResult.HTTPStatusCode
 
 	if err != nil {
 		var buildErr availabilityProbeBuildError
@@ -1125,82 +1127,42 @@ func (hcs *HealthCheckService) updateCache(result *HealthCheckResult) {
 }
 
 // handleBlacklistIntegration 处理与拉黑服务的联动
-func (hcs *HealthCheckService) handleBlacklistIntegration(provider *Provider, result *HealthCheckResult) {
+func (hcs *HealthCheckService) handleBlacklistIntegration(provider *Provider, result *HealthCheckResult, affectBlacklist bool) {
 	// 未启用自动拉黑则跳过
-	if !provider.ConnectivityAutoBlacklist {
+	if !provider.ConnectivityAutoBlacklist || !affectBlacklist || hcs.blacklistService == nil {
 		return
 	}
 
 	// 获取失败阈值（全局配置）
-	failureThreshold := DefaultFailureThreshold
+	failureThreshold := DefaultHealthBlacklistThreshold
 	if hcs.settingsService != nil {
-		if threshold := hcs.settingsService.GetIntSetting("availability_failure_threshold"); threshold > 0 {
-			failureThreshold = threshold
-		}
+		failureThreshold = hcs.settingsService.GetHealthBlacklistThreshold()
 	}
 
 	// 获取或创建失败计数器（统一与黑名单相同的 providerRef 规则）
 	providerRef := providerRefFromNumericID(provider.ID, provider.Name)
-	counterKey := fmt.Sprintf("%s:%s", result.Platform, providerRef)
-	hcs.mu.Lock()
-	counter, exists := hcs.failCounters[counterKey]
-	if !exists {
-		counter = &AvailabilityFailureCounter{
-			Platform:     result.Platform,
-			ProviderName: provider.Name,
+	if isHealthBlacklistFailure(result) {
+		if err := hcs.blacklistService.RecordHealthCheckFailureByID(result.Platform, providerRef, provider.Name, result.ErrorMessage, failureThreshold); err != nil {
+			log.Printf("[HealthCheck] 记录健康检查失败计数失败: %v", err)
 		}
-		hcs.failCounters[counterKey] = counter
+		return
 	}
-
-	// 在锁内更新计数器，避免并发竞态
-	var shouldTriggerBlacklist bool
-	var shouldRecordSuccess bool
-	var prevFails int
-
-	if result.Status == HealthStatusFailed || result.Status == HealthStatusValidationError {
-		counter.ConsecutiveFails++
-		counter.LastFailedAt = time.Now()
-		prevFails = counter.ConsecutiveFails
-
-		log.Printf("[HealthCheck] Provider %s 检测失败，连续失败: %d/%d",
-			provider.Name, prevFails, failureThreshold)
-
-		// 检查是否达到拉黑阈值
-		if prevFails >= failureThreshold && hcs.blacklistService != nil {
-			shouldTriggerBlacklist = true
-		}
-	} else if result.Status == HealthStatusOperational {
-		// 成功，清零失败计数
-		prevFails = counter.ConsecutiveFails
-		counter.ConsecutiveFails = 0
-
-		if prevFails > 0 {
-			log.Printf("[HealthCheck] Provider %s 恢复正常，清零失败计数（之前: %d）",
-				provider.Name, prevFails)
-		}
-
-		// 标记需要通知拉黑服务恢复
-		if hcs.blacklistService != nil {
-			shouldRecordSuccess = true
-		}
-	}
-	hcs.mu.Unlock()
-
-	// 在锁外执行耗时的 RPC 调用，避免阻塞其他检测
-	if shouldTriggerBlacklist {
-		if err := hcs.blacklistService.RecordFailureByID(result.Platform, providerRef, provider.Name); err != nil {
-			log.Printf("[HealthCheck] 触发拉黑失败: %v", err)
-		} else {
-			log.Printf("[HealthCheck] Provider %s 连续失败 %d 次，已触发拉黑！", provider.Name, failureThreshold)
-		}
-	}
-
-	if shouldRecordSuccess {
-		if err := hcs.blacklistService.RecordSuccessByID(result.Platform, providerRef, provider.Name); err != nil {
-			log.Printf("[HealthCheck] RecordSuccess 失败: %v", err)
+	if result.Status == HealthStatusOperational {
+		if err := hcs.blacklistService.RecordHealthCheckSuccessByID(result.Platform, providerRef, provider.Name); err != nil {
+			log.Printf("[HealthCheck] 清零健康检查失败计数失败: %v", err)
 		}
 	}
 	// degraded 状态不触发拉黑，也不清零计数
+}
+
+func isHealthBlacklistFailure(result *HealthCheckResult) bool {
+	if result == nil || result.Status != HealthStatusFailed {
+		return false
+	}
+	if strings.Contains(result.ErrorMessage, "无法构建测试请求") {
+		return false
+	}
+	return result.HTTPStatusCode == 0 || result.HTTPStatusCode == http.StatusTooManyRequests || result.HTTPStatusCode >= http.StatusInternalServerError
 }
 
 // StartBackgroundPolling 启动后台定时巡检
@@ -1286,7 +1248,7 @@ func (hcs *HealthCheckService) SetAutoAvailabilityPolling(enabled bool) {
 // runAllPlatformChecks 执行所有平台的检测
 func (hcs *HealthCheckService) runAllPlatformChecks() {
 	for _, platform := range availabilityPlatforms {
-		hcs.checkAllProviders(platform)
+		hcs.checkAllProviders(platform, true)
 	}
 }
 
@@ -1326,6 +1288,7 @@ func (hcs *HealthCheckService) SetConnectivityAutoBlacklist(platform string, pro
 	}
 
 	found := false
+	providerName := ""
 	for i := range providers {
 		if providers[i].ID == providerID {
 			// 前置条件检查：必须先启用可用性监控
@@ -1333,6 +1296,7 @@ func (hcs *HealthCheckService) SetConnectivityAutoBlacklist(platform string, pro
 				return fmt.Errorf("请先在可用性页面启用监控")
 			}
 			providers[i].ConnectivityAutoBlacklist = enabled
+			providerName = providers[i].Name
 			found = true
 			break
 		}
@@ -1344,6 +1308,12 @@ func (hcs *HealthCheckService) SetConnectivityAutoBlacklist(platform string, pro
 
 	if err := hcs.providerService.SaveProviders(platform, providers); err != nil {
 		return fmt.Errorf("保存供应商配置失败: %w", err)
+	}
+	if !enabled && hcs.blacklistService != nil {
+		providerRef := providerRefFromNumericID(providerID, providerName)
+		if err := hcs.blacklistService.RecordHealthCheckSuccessByID(platform, providerRef, providerName); err != nil {
+			log.Printf("[HealthCheck] 自动拉黑已关闭，但清零健康检查失败计数失败: %v", err)
+		}
 	}
 
 	log.Printf("[HealthCheck] Provider %d 自动拉黑已%s", providerID, map[bool]string{true: "启用", false: "禁用"}[enabled])

@@ -25,34 +25,48 @@ type BlacklistService struct {
 	identityMu          sync.Mutex
 	boundIdentities     map[string]string
 	refreshMu           sync.Mutex
+	operationMu         sync.RWMutex
 }
 
 const blacklistRuntimeSnapshotRefreshInterval = time.Minute
 
+const (
+	BlacklistTriggerSourceRequest = "request"
+	BlacklistTriggerSourceHealth  = "health"
+	BlacklistTriggerSourceLegacy  = "legacy"
+	blacklistReasonMaxBytes       = 2 * 1024
+)
+
 type blacklistRuntimeSnapshot struct {
-	enabled              bool
-	levelConfig          BlacklistLevelConfig
-	blacklistedUntil     map[string]time.Time
-	recoveryPendingUntil map[string]time.Time
-	successNeedsWrite    map[string]bool
+	enabled                 bool
+	levelConfig             BlacklistLevelConfig
+	blacklistedUntil        map[string]time.Time
+	recoveryPendingUntil    map[string]time.Time
+	successNeedsWrite       map[string]bool
+	healthSuccessNeedsWrite map[string]bool
 }
 
 // BlacklistStatus 黑名单状态（用于前端展示）
 type BlacklistStatus struct {
-	Platform         string     `json:"platform"`
-	ProviderID       string     `json:"providerId"`
-	ProviderName     string     `json:"providerName"`
-	FailureCount     int        `json:"failureCount"`
-	BlacklistedAt    *time.Time `json:"blacklistedAt"`
-	BlacklistedUntil *time.Time `json:"blacklistedUntil"`
-	LastFailureAt    *time.Time `json:"lastFailureAt"`
-	IsBlacklisted    bool       `json:"isBlacklisted"`
-	RemainingSeconds int        `json:"remainingSeconds"` // 剩余拉黑时间（秒）
+	Platform               string     `json:"platform"`
+	ProviderID             string     `json:"providerId"`
+	ProviderName           string     `json:"providerName"`
+	FailureCount           int        `json:"failureCount"`
+	FailureThreshold       int        `json:"failureThreshold"`
+	HealthFailureCount     int        `json:"healthFailureCount"`
+	HealthFailureThreshold int        `json:"healthFailureThreshold"`
+	BlacklistedAt          *time.Time `json:"blacklistedAt"`
+	BlacklistedUntil       *time.Time `json:"blacklistedUntil"`
+	LastFailureAt          *time.Time `json:"lastFailureAt"`
+	IsBlacklisted          bool       `json:"isBlacklisted"`
+	RemainingSeconds       int        `json:"remainingSeconds"` // 剩余拉黑时间（秒）
 
 	// v0.4.0 新增：等级拉黑相关字段
-	BlacklistLevel       int        `json:"blacklistLevel"`       // 当前黑名单等级 (0-5)
-	LastRecoveredAt      *time.Time `json:"lastRecoveredAt"`      // 最后恢复时间
-	ForgivenessRemaining int        `json:"forgivenessRemaining"` // 距离宽恕还剩多少秒（3小时倒计时）
+	BlacklistLevel         int        `json:"blacklistLevel"` // 当前黑名单等级 (0-5)
+	BlacklistTriggerSource string     `json:"blacklistTriggerSource,omitempty"`
+	BlacklistReason        string     `json:"blacklistReason,omitempty"`
+	LastRecoveredAt        *time.Time `json:"lastRecoveredAt"`      // 最后恢复时间
+	ForgivenessRemaining   int        `json:"forgivenessRemaining"` // 距离宽恕还剩多少秒（3小时倒计时）
 }
 
 func NewBlacklistService(settingsService *SettingsService, notificationService *NotificationService) *BlacklistService {
@@ -76,11 +90,12 @@ func (bs *BlacklistService) runtime() blacklistRuntimeSnapshot {
 		return value.(blacklistRuntimeSnapshot)
 	}
 	return blacklistRuntimeSnapshot{
-		enabled:              true,
-		levelConfig:          *DefaultBlacklistLevelConfig(),
-		blacklistedUntil:     map[string]time.Time{},
-		recoveryPendingUntil: map[string]time.Time{},
-		successNeedsWrite:    map[string]bool{},
+		enabled:                 true,
+		levelConfig:             *DefaultBlacklistLevelConfig(),
+		blacklistedUntil:        map[string]time.Time{},
+		recoveryPendingUntil:    map[string]time.Time{},
+		successNeedsWrite:       map[string]bool{},
+		healthSuccessNeedsWrite: map[string]bool{},
 	}
 }
 
@@ -89,11 +104,12 @@ func (bs *BlacklistService) refreshRuntimeSnapshot() {
 	defer bs.refreshMu.Unlock()
 	previous := bs.runtime()
 	next := blacklistRuntimeSnapshot{
-		enabled:              bs.settingsService.IsBlacklistEnabled(),
-		levelConfig:          previous.levelConfig,
-		blacklistedUntil:     make(map[string]time.Time),
-		recoveryPendingUntil: make(map[string]time.Time),
-		successNeedsWrite:    make(map[string]bool),
+		enabled:                 bs.settingsService.IsBlacklistEnabled(),
+		levelConfig:             previous.levelConfig,
+		blacklistedUntil:        make(map[string]time.Time),
+		recoveryPendingUntil:    make(map[string]time.Time),
+		successNeedsWrite:       make(map[string]bool),
+		healthSuccessNeedsWrite: make(map[string]bool),
 	}
 	if config, err := bs.settingsService.GetBlacklistLevelConfig(); err == nil && config != nil {
 		next.levelConfig = *config
@@ -103,7 +119,7 @@ func (bs *BlacklistService) refreshRuntimeSnapshot() {
 	db, err := xdb.DB("default")
 	if err == nil {
 		rows, queryErr := db.Query(`
-			SELECT platform, provider_id, failure_count, blacklist_level,
+			SELECT platform, provider_id, failure_count, health_failure_count, blacklist_level,
 				last_recovered_at, last_degrade_hour, blacklisted_until
 			FROM provider_blacklist
 		`)
@@ -115,6 +131,7 @@ func (bs *BlacklistService) refreshRuntimeSnapshot() {
 				var platform string
 				var providerID string
 				var failureCount int
+				var healthFailureCount int
 				var blacklistLevel int
 				var lastRecoveredAt sql.NullTime
 				var lastDegradeHour int
@@ -123,6 +140,7 @@ func (bs *BlacklistService) refreshRuntimeSnapshot() {
 					&platform,
 					&providerID,
 					&failureCount,
+					&healthFailureCount,
 					&blacklistLevel,
 					&lastRecoveredAt,
 					&lastDegradeHour,
@@ -136,12 +154,14 @@ func (bs *BlacklistService) refreshRuntimeSnapshot() {
 				next.successNeedsWrite[key] = blacklistSuccessNeedsWrite(
 					next.levelConfig,
 					failureCount,
+					healthFailureCount,
 					blacklistLevel,
 					lastRecoveredAt,
 					lastDegradeHour,
 					until,
 					now,
 				)
+				next.healthSuccessNeedsWrite[key] = healthFailureCount != 0
 				if until.Valid {
 					next.blacklistedUntil[key] = until.Time
 					if next.levelConfig.EnableLevelBlacklist && !lastRecoveredAt.Valid {
@@ -157,16 +177,19 @@ func (bs *BlacklistService) refreshRuntimeSnapshot() {
 				next.blacklistedUntil = previous.blacklistedUntil
 				next.recoveryPendingUntil = previous.recoveryPendingUntil
 				next.successNeedsWrite = previous.successNeedsWrite
+				next.healthSuccessNeedsWrite = previous.healthSuccessNeedsWrite
 			}
 		} else {
 			next.blacklistedUntil = previous.blacklistedUntil
 			next.recoveryPendingUntil = previous.recoveryPendingUntil
 			next.successNeedsWrite = previous.successNeedsWrite
+			next.healthSuccessNeedsWrite = previous.healthSuccessNeedsWrite
 		}
 	} else {
 		next.blacklistedUntil = previous.blacklistedUntil
 		next.recoveryPendingUntil = previous.recoveryPendingUntil
 		next.successNeedsWrite = previous.successNeedsWrite
+		next.healthSuccessNeedsWrite = previous.healthSuccessNeedsWrite
 	}
 	bs.runtimeSnapshot.Store(next)
 }
@@ -174,13 +197,14 @@ func (bs *BlacklistService) refreshRuntimeSnapshot() {
 func blacklistSuccessNeedsWrite(
 	config BlacklistLevelConfig,
 	failureCount int,
+	healthFailureCount int,
 	blacklistLevel int,
 	lastRecoveredAt sql.NullTime,
 	lastDegradeHour int,
 	blacklistedUntil sql.NullTime,
 	now time.Time,
 ) bool {
-	if failureCount != 0 {
+	if failureCount != 0 || healthFailureCount != 0 {
 		return true
 	}
 	if !config.EnableLevelBlacklist {
@@ -269,6 +293,12 @@ func normalizeBlacklistIdentity(providerID, providerName string) (string, string
 	return providerID, providerName
 }
 
+func normalizeBlacklistReason(reason string) string {
+	reason = sanitizeRequestLogPayload(strings.TrimSpace(reason))
+	reason, _ = truncateRequestLogPayload(reason, blacklistReasonMaxBytes)
+	return reason
+}
+
 func (bs *BlacklistService) bindProviderIdentity(platform, providerID, providerName string) {
 	providerID, providerName = normalizeBlacklistIdentity(providerID, providerName)
 	if providerID == "" {
@@ -329,11 +359,36 @@ func (bs *BlacklistService) isProviderIdentityBound(platform, providerID, provid
 
 func (bs *BlacklistService) RecordSuccessByID(platform, providerID, providerName string) error {
 	providerID, providerName = normalizeBlacklistIdentity(providerID, providerName)
-	wasBound := bs.isProviderIdentityBound(platform, providerID, providerName)
-	bs.bindProviderIdentity(platform, providerID, providerName)
+	bs.operationMu.RLock()
 	snapshot := bs.runtime()
 	key := blacklistRuntimeKey(platform, providerID)
+	now := time.Now()
+	if until, exists := snapshot.blacklistedUntil[key]; exists && until.After(now) {
+		bs.operationMu.RUnlock()
+		return nil
+	}
+	wasBound := bs.isProviderIdentityBound(platform, providerID, providerName)
 	needsWrite := snapshot.successNeedsWrite[key]
+	if until, exists := snapshot.recoveryPendingUntil[key]; snapshot.levelConfig.EnableLevelBlacklist && exists && !until.After(now) {
+		needsWrite = true
+	}
+	if wasBound && !needsWrite {
+		bs.operationMu.RUnlock()
+		return nil
+	}
+	bs.operationMu.RUnlock()
+
+	bs.operationMu.Lock()
+	defer bs.operationMu.Unlock()
+
+	snapshot = bs.runtime()
+	if until, exists := snapshot.blacklistedUntil[key]; exists && until.After(time.Now()) {
+		return nil
+	}
+	wasBound = bs.isProviderIdentityBound(platform, providerID, providerName)
+	bs.bindProviderIdentity(platform, providerID, providerName)
+	snapshot = bs.runtime()
+	needsWrite = snapshot.successNeedsWrite[key]
 	if until, exists := snapshot.recoveryPendingUntil[key]; snapshot.levelConfig.EnableLevelBlacklist && exists && !until.After(time.Now()) {
 		needsWrite = true
 	}
@@ -349,13 +404,198 @@ func (bs *BlacklistService) RecordSuccessByID(platform, providerID, providerName
 }
 
 func (bs *BlacklistService) RecordFailureByID(platform, providerID, providerName string) error {
+	return bs.RecordFailureWithReasonByID(platform, providerID, providerName, "")
+}
+
+func (bs *BlacklistService) RecordFailureWithReasonByID(platform, providerID, providerName, reason string) error {
+	bs.operationMu.Lock()
+	defer bs.operationMu.Unlock()
+
 	providerID, providerName = normalizeBlacklistIdentity(providerID, providerName)
 	bs.bindProviderIdentity(platform, providerID, providerName)
-	if err := bs.recordFailureByIdentity(platform, providerID, providerName); err != nil {
+	if err := bs.recordFailureByIdentityWithReason(platform, providerID, providerName, reason); err != nil {
 		return err
 	}
 	bs.refreshRuntimeSnapshot()
 	bs.bindProviderIdentity(platform, providerID, providerName)
+	return nil
+}
+
+func (bs *BlacklistService) RecordHealthCheckSuccessByID(platform, providerID, providerName string) error {
+	providerID, providerName = normalizeBlacklistIdentity(providerID, providerName)
+	key := blacklistRuntimeKey(platform, providerID)
+	bs.operationMu.RLock()
+	if !bs.runtime().healthSuccessNeedsWrite[key] {
+		bs.operationMu.RUnlock()
+		return nil
+	}
+	bs.operationMu.RUnlock()
+
+	bs.operationMu.Lock()
+	defer bs.operationMu.Unlock()
+
+	if !bs.runtime().healthSuccessNeedsWrite[key] {
+		return nil
+	}
+	bs.bindProviderIdentity(platform, providerID, providerName)
+	if GlobalDBQueue == nil {
+		return fmt.Errorf("数据库写入队列未初始化")
+	}
+	if err := GlobalDBQueue.Exec(`
+		UPDATE provider_blacklist
+		SET health_failure_count = 0,
+			last_health_failure_at = NULL,
+			provider_name = ?
+		WHERE platform = ? AND provider_id = ?
+	`, providerName, platform, providerID); err != nil {
+		return fmt.Errorf("清零健康检查失败计数失败: %w", err)
+	}
+	bs.refreshRuntimeSnapshot()
+	return nil
+}
+
+func (bs *BlacklistService) RecordHealthCheckFailureByID(platform, providerID, providerName, reason string, failureThreshold int) error {
+	bs.operationMu.Lock()
+	defer bs.operationMu.Unlock()
+
+	providerID, providerName = normalizeBlacklistIdentity(providerID, providerName)
+	bs.bindProviderIdentity(platform, providerID, providerName)
+	if failureThreshold < 2 || failureThreshold > 9 {
+		failureThreshold = DefaultHealthBlacklistThreshold
+	}
+	if err := bs.recordHealthCheckFailureByIdentity(platform, providerID, providerName, reason, failureThreshold); err != nil {
+		return err
+	}
+	bs.refreshRuntimeSnapshot()
+	bs.bindProviderIdentity(platform, providerID, providerName)
+	return nil
+}
+
+func (bs *BlacklistService) recordHealthCheckFailureByIdentity(platform, providerID, providerName, reason string, failureThreshold int) error {
+	if !bs.runtime().enabled {
+		return nil
+	}
+	levelConfig := bs.levelConfig()
+	if !levelConfig.EnableLevelBlacklist && levelConfig.FallbackMode == "none" {
+		return nil
+	}
+	db, err := xdb.DB("default")
+	if err != nil {
+		return fmt.Errorf("获取数据库连接失败: %w", err)
+	}
+
+	now := time.Now()
+	var id int
+	var healthFailureCount int
+	var blacklistedUntil sql.NullTime
+	var blacklistLevel int
+	var lastRecoveredAt sql.NullTime
+	err = db.QueryRow(`
+		SELECT id, health_failure_count, blacklisted_until, blacklist_level, last_recovered_at
+		FROM provider_blacklist
+		WHERE platform = ? AND provider_id = ?
+	`, platform, providerID).Scan(&id, &healthFailureCount, &blacklistedUntil, &blacklistLevel, &lastRecoveredAt)
+	if err == sql.ErrNoRows {
+		if GlobalDBQueue == nil {
+			return fmt.Errorf("数据库写入队列未初始化")
+		}
+		if err := GlobalDBQueue.Exec(`
+			INSERT INTO provider_blacklist (
+				platform, provider_name, provider_id, health_failure_count,
+				last_failure_at, last_health_failure_at, blacklist_level
+			) VALUES (?, ?, ?, 1, ?, ?, 0)
+		`, platform, providerName, providerID, now, now); err != nil {
+			return fmt.Errorf("插入健康检查失败记录失败: %w", err)
+		}
+		log.Printf("📊 Provider %s/%s 健康检查失败计数: 1/%d", platform, providerName, failureThreshold)
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("查询健康检查失败记录失败: %w", err)
+	}
+	if blacklistedUntil.Valid && blacklistedUntil.Time.After(now) {
+		return nil
+	}
+
+	healthFailureCount++
+	if healthFailureCount < failureThreshold {
+		if err := GlobalDBQueue.Exec(`
+			UPDATE provider_blacklist
+			SET health_failure_count = ?,
+				provider_name = ?,
+				last_failure_at = ?,
+				last_health_failure_at = ?
+			WHERE id = ?
+		`, healthFailureCount, providerName, now, now, id); err != nil {
+			return fmt.Errorf("更新健康检查失败计数失败: %w", err)
+		}
+		log.Printf("📊 Provider %s/%s 健康检查失败计数: %d/%d", platform, providerName, healthFailureCount, failureThreshold)
+		return nil
+	}
+
+	blacklistedAt := now
+	triggerReason := normalizeBlacklistReason(reason)
+	if levelConfig.EnableLevelBlacklist {
+		levelIncrease := 1
+		if lastRecoveredAt.Valid {
+			jumpPenaltyWindow := time.Duration(levelConfig.JumpPenaltyWindowHours * float64(time.Hour))
+			if now.Sub(lastRecoveredAt.Time) <= jumpPenaltyWindow {
+				levelIncrease = 2
+			}
+		}
+		newLevel := blacklistLevel + levelIncrease
+		if newLevel > 5 {
+			newLevel = 5
+		}
+		durationMinutes := bs.getLevelDuration(newLevel, levelConfig)
+		blacklistedUntil := now.Add(time.Duration(durationMinutes) * time.Minute)
+		if err := GlobalDBQueue.Exec(`
+			UPDATE provider_blacklist
+			SET failure_count = 0,
+				health_failure_count = ?,
+				provider_name = ?,
+				last_failure_at = ?,
+				last_health_failure_at = ?,
+				blacklisted_at = ?,
+				blacklisted_until = ?,
+				blacklist_level = ?,
+				blacklist_trigger_source = ?,
+				blacklist_reason = ?,
+				auto_recovered = 0
+			WHERE id = ?
+		`, healthFailureCount, providerName, now, now, blacklistedAt, blacklistedUntil, newLevel, BlacklistTriggerSourceHealth, triggerReason, id); err != nil {
+			return fmt.Errorf("更新健康检查拉黑状态失败: %w", err)
+		}
+		if bs.notificationService != nil {
+			bs.notificationService.NotifyProviderBlacklisted(platform, providerID, providerName, newLevel, durationMinutes)
+		}
+		return nil
+	}
+
+	_, durationSeconds, err := bs.settingsService.GetBlacklistSettings()
+	if err != nil {
+		durationSeconds = levelConfig.FallbackDurationMinutes * 60
+	}
+	blacklistedUntil = sql.NullTime{Time: now.Add(time.Duration(durationSeconds) * time.Second), Valid: true}
+	if err := GlobalDBQueue.Exec(`
+		UPDATE provider_blacklist
+		SET failure_count = 0,
+			health_failure_count = ?,
+			provider_name = ?,
+			last_failure_at = ?,
+			last_health_failure_at = ?,
+			blacklisted_at = ?,
+			blacklisted_until = ?,
+			blacklist_trigger_source = ?,
+			blacklist_reason = ?,
+			auto_recovered = 0
+		WHERE id = ?
+	`, healthFailureCount, providerName, now, now, blacklistedAt, blacklistedUntil.Time, BlacklistTriggerSourceHealth, triggerReason, id); err != nil {
+		return fmt.Errorf("更新健康检查拉黑状态失败: %w", err)
+	}
+	if bs.notificationService != nil {
+		bs.notificationService.NotifyProviderBlacklisted(platform, providerID, providerName, blacklistLevel, (durationSeconds+59)/60)
+	}
 	return nil
 }
 
@@ -378,6 +618,9 @@ func (bs *BlacklistService) IsBlacklistedByID(platform, providerID, providerName
 }
 
 func (bs *BlacklistService) ManualUnblockAndResetByID(platform, providerID, providerName string) error {
+	bs.operationMu.Lock()
+	defer bs.operationMu.Unlock()
+
 	providerID, providerName = normalizeBlacklistIdentity(providerID, providerName)
 	bs.bindProviderIdentity(platform, providerID, providerName)
 	if err := bs.manualUnblockAndResetByIdentity(platform, providerID, providerName); err != nil {
@@ -389,6 +632,9 @@ func (bs *BlacklistService) ManualUnblockAndResetByID(platform, providerID, prov
 }
 
 func (bs *BlacklistService) ManualResetLevelByID(platform, providerID, providerName string) error {
+	bs.operationMu.Lock()
+	defer bs.operationMu.Unlock()
+
 	providerID, providerName = normalizeBlacklistIdentity(providerID, providerName)
 	bs.bindProviderIdentity(platform, providerID, providerName)
 	if err := bs.manualResetLevelByIdentity(platform, providerID, providerName); err != nil {
@@ -401,6 +647,9 @@ func (bs *BlacklistService) ManualResetLevelByID(platform, providerID, providerN
 
 // RecordSuccess 记录 provider 成功，清零连续失败计数，执行降级和宽恕逻辑
 func (bs *BlacklistService) RecordSuccess(platform string, providerName string) error {
+	bs.operationMu.Lock()
+	defer bs.operationMu.Unlock()
+
 	providerID, resolvedName := normalizeBlacklistIdentity(providerName, providerName)
 	bs.bindProviderIdentity(platform, providerID, resolvedName)
 	return bs.recordSuccessByIdentity(platform, providerID, resolvedName)
@@ -436,6 +685,9 @@ func (bs *BlacklistService) recordSuccessByIdentity(platform, providerID, provid
 	}
 
 	now := time.Now()
+	if blacklistedUntil.Valid && blacklistedUntil.Time.After(now) {
+		return nil
+	}
 
 	// 检查是否刚从拉黑中恢复（blacklisted_until 刚过期且 last_recovered_at 未设置）
 	justRecovered := false
@@ -449,7 +701,11 @@ func (bs *BlacklistService) recordSuccessByIdentity(platform, providerID, provid
 	if !levelConfig.EnableLevelBlacklist {
 		err = GlobalDBQueue.Exec(`
 			UPDATE provider_blacklist
-			SET failure_count = 0
+			SET failure_count = 0,
+				health_failure_count = 0,
+				last_health_failure_at = NULL,
+				blacklist_trigger_source = '',
+				blacklist_reason = ''
 			WHERE id = ?
 		`, id)
 
@@ -498,10 +754,14 @@ func (bs *BlacklistService) recordSuccessByIdentity(platform, providerID, provid
 	updateSQL := `
 		UPDATE provider_blacklist
 		SET failure_count = 0,
+			health_failure_count = 0,
 			provider_name = ?,
 			blacklist_level = ?,
 			last_recovered_at = ?,
-			last_degrade_hour = ?
+			last_degrade_hour = ?,
+			last_health_failure_at = NULL,
+			blacklist_trigger_source = '',
+			blacklist_reason = ''
 		WHERE id = ?
 	`
 
@@ -531,12 +791,19 @@ func (bs *BlacklistService) recordSuccessByIdentity(platform, providerID, provid
 
 // RecordFailure 记录 provider 失败，连续失败次数达到阈值时自动拉黑（支持等级拉黑）
 func (bs *BlacklistService) RecordFailure(platform string, providerName string) error {
+	bs.operationMu.Lock()
+	defer bs.operationMu.Unlock()
+
 	providerID, resolvedName := normalizeBlacklistIdentity(providerName, providerName)
 	bs.bindProviderIdentity(platform, providerID, resolvedName)
 	return bs.recordFailureByIdentity(platform, providerID, resolvedName)
 }
 
 func (bs *BlacklistService) recordFailureByIdentity(platform, providerID, providerName string) error {
+	return bs.recordFailureByIdentityWithReason(platform, providerID, providerName, "")
+}
+
+func (bs *BlacklistService) recordFailureByIdentityWithReason(platform, providerID, providerName, reason string) error {
 	// 检查拉黑功能是否启用
 	if !bs.runtime().enabled {
 		log.Printf("🚫 拉黑功能已关闭，跳过 provider %s/%s 的失败记录", platform, providerName)
@@ -560,7 +827,7 @@ func (bs *BlacklistService) recordFailureByIdentity(platform, providerID, provid
 			threshold = levelConfig.FailureThreshold
 			durationSeconds = levelConfig.FallbackDurationMinutes * 60
 		}
-		return bs.recordFailureFixedModeByIdentity(platform, providerID, providerName, levelConfig.FallbackMode, durationSeconds, threshold)
+		return bs.recordFailureFixedModeByIdentityWithReason(platform, providerID, providerName, levelConfig.FallbackMode, durationSeconds, threshold, reason)
 	}
 
 	now := time.Now()
@@ -654,16 +921,19 @@ func (bs *BlacklistService) recordFailureByIdentity(platform, providerID, provid
 
 		err = GlobalDBQueue.Exec(`
 				UPDATE provider_blacklist
-				SET failure_count = 0,
+				SET failure_count = ?,
+					health_failure_count = 0,
 					provider_name = ?,
 					last_failure_at = ?,
 					blacklisted_at = ?,
 					blacklisted_until = ?,
 					blacklist_level = ?,
+					blacklist_trigger_source = ?,
+					blacklist_reason = ?,
 					auto_recovered = 0,
 					last_failure_window_start = ?
 				WHERE id = ?
-			`, providerName, now, blacklistedAt, blacklistedUntil, newLevel, now, id)
+			`, failureCount, providerName, now, blacklistedAt, blacklistedUntil, newLevel, BlacklistTriggerSourceRequest, normalizeBlacklistReason(reason), now, id)
 
 		if err != nil {
 			return fmt.Errorf("更新拉黑状态失败: %w", err)
@@ -704,6 +974,10 @@ func (bs *BlacklistService) recordFailureFixedMode(platform string, providerName
 }
 
 func (bs *BlacklistService) recordFailureFixedModeByIdentity(platform, providerID, providerName string, fallbackMode string, fallbackDurationSeconds int, failureThreshold int) error {
+	return bs.recordFailureFixedModeByIdentityWithReason(platform, providerID, providerName, fallbackMode, fallbackDurationSeconds, failureThreshold, "")
+}
+
+func (bs *BlacklistService) recordFailureFixedModeByIdentityWithReason(platform, providerID, providerName string, fallbackMode string, fallbackDurationSeconds int, failureThreshold int, reason string) error {
 	if fallbackMode == "none" {
 		log.Printf("🚫 Provider %s/%s 失败，但等级拉黑已关闭且 fallbackMode=none，不拉黑", platform, providerName)
 		return nil
@@ -761,15 +1035,18 @@ func (bs *BlacklistService) recordFailureFixedModeByIdentity(platform, providerI
 		blacklistedUntil := now.Add(time.Duration(fallbackDurationSeconds) * time.Second)
 
 		err = GlobalDBQueue.Exec(`
-			UPDATE provider_blacklist
-			SET failure_count = ?,
-				provider_name = ?,
+				UPDATE provider_blacklist
+				SET failure_count = ?,
+					health_failure_count = 0,
+					provider_name = ?,
 				last_failure_at = ?,
 				blacklisted_at = ?,
-				blacklisted_until = ?,
-				auto_recovered = 0
-			WHERE id = ?
-		`, failureCount, providerName, now, blacklistedAt, blacklistedUntil, id)
+					blacklisted_until = ?,
+					blacklist_trigger_source = ?,
+					blacklist_reason = ?,
+					auto_recovered = 0
+				WHERE id = ?
+			`, failureCount, providerName, now, blacklistedAt, blacklistedUntil, BlacklistTriggerSourceRequest, normalizeBlacklistReason(reason), id)
 
 		if err != nil {
 			return fmt.Errorf("更新拉黑状态失败: %w", err)
@@ -827,6 +1104,9 @@ func (bs *BlacklistService) IsBlacklisted(platform string, providerName string) 
 
 // ManualUnblockAndReset 手动解除拉黑（保留等级，如需清零请调用 ManualResetLevel）
 func (bs *BlacklistService) ManualUnblockAndReset(platform string, providerName string) error {
+	bs.operationMu.Lock()
+	defer bs.operationMu.Unlock()
+
 	providerID, resolvedName := normalizeBlacklistIdentity(providerName, providerName)
 	bs.bindProviderIdentity(platform, providerID, resolvedName)
 	return bs.manualUnblockAndResetByIdentity(platform, providerID, resolvedName)
@@ -859,9 +1139,13 @@ func (bs *BlacklistService) manualUnblockAndResetByIdentity(platform, providerID
 		SET blacklisted_at = NULL,
 			blacklisted_until = NULL,
 			failure_count = 0,
+			health_failure_count = 0,
 			provider_name = ?,
 			last_recovered_at = ?,
 			last_degrade_hour = 0,
+			last_health_failure_at = NULL,
+			blacklist_trigger_source = '',
+			blacklist_reason = '',
 			auto_recovered = 0
 		WHERE platform = ? AND provider_id = ?
 	`, providerName, now, platform, providerID)
@@ -881,6 +1165,9 @@ func (bs *BlacklistService) ManualUnblock(platform string, providerName string) 
 
 // ManualResetLevel 手动清零等级（不解除拉黑，仅重置等级）
 func (bs *BlacklistService) ManualResetLevel(platform string, providerName string) error {
+	bs.operationMu.Lock()
+	defer bs.operationMu.Unlock()
+
 	providerID, resolvedName := normalizeBlacklistIdentity(providerName, providerName)
 	bs.bindProviderIdentity(platform, providerID, resolvedName)
 	return bs.manualResetLevelByIdentity(platform, providerID, resolvedName)
@@ -924,6 +1211,9 @@ func (bs *BlacklistService) manualResetLevelByIdentity(platform, providerID, pro
 // AutoRecoverExpired 自动恢复过期的黑名单（由定时器调用）
 // 使用事务批量处理，避免多次单独写入导致的并发锁冲突
 func (bs *BlacklistService) AutoRecoverExpired() error {
+	bs.operationMu.Lock()
+	defer bs.operationMu.Unlock()
+
 	db, err := xdb.DB("default")
 	if err != nil {
 		return fmt.Errorf("获取数据库连接失败: %w", err)
@@ -991,9 +1281,13 @@ func (bs *BlacklistService) AutoRecoverExpired() error {
 			UPDATE provider_blacklist
 			SET auto_recovered = 1,
 				failure_count = 0,
+				health_failure_count = 0,
 				provider_name = ?,
 				last_recovered_at = ?,
-				last_degrade_hour = 0
+				last_degrade_hour = 0,
+				last_health_failure_at = NULL,
+				blacklist_trigger_source = '',
+				blacklist_reason = ''
 			WHERE platform = ? AND provider_id = ?
 		`, item.ProviderName, now, item.Platform, item.ProviderID)
 
@@ -1026,6 +1320,7 @@ func (bs *BlacklistService) GetBlacklistStatus(platform string) ([]BlacklistStat
 
 	// 获取等级拉黑配置（用于计算宽恕倒计时）
 	levelConfig := bs.levelConfig()
+	healthFailureThreshold := bs.settingsService.GetHealthBlacklistThreshold()
 
 	rows, err := db.Query(`
 		SELECT
@@ -1033,9 +1328,12 @@ func (bs *BlacklistService) GetBlacklistStatus(platform string) ([]BlacklistStat
 			provider_id,
 			provider_name,
 			failure_count,
+			health_failure_count,
 			blacklisted_at,
 			blacklisted_until,
 			last_failure_at,
+			blacklist_trigger_source,
+			blacklist_reason,
 			blacklist_level,
 			last_recovered_at
 		FROM provider_blacklist
@@ -1060,9 +1358,12 @@ func (bs *BlacklistService) GetBlacklistStatus(platform string) ([]BlacklistStat
 			&s.ProviderID,
 			&s.ProviderName,
 			&s.FailureCount,
+			&s.HealthFailureCount,
 			&blacklistedAt,
 			&blacklistedUntil,
 			&lastFailureAt,
+			&s.BlacklistTriggerSource,
+			&s.BlacklistReason,
 			&s.BlacklistLevel,
 			&lastRecoveredAt,
 		)
@@ -1089,6 +1390,8 @@ func (bs *BlacklistService) GetBlacklistStatus(platform string) ([]BlacklistStat
 		if lastRecoveredAt.Valid {
 			s.LastRecoveredAt = &lastRecoveredAt.Time
 		}
+		s.FailureThreshold = levelConfig.FailureThreshold
+		s.HealthFailureThreshold = healthFailureThreshold
 
 		// 计算宽恕倒计时（如果正在降级计时中）
 		if levelConfig.EnableLevelBlacklist && lastRecoveredAt.Valid && s.BlacklistLevel >= 3 {

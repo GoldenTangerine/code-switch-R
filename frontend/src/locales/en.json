@@ -654,6 +654,14 @@
         "logId": "Log #{id}",
         "responseBody": "Error response body",
         "providerErrorDetail": "Provider error detail",
+        "errorSource": {
+          "provider_response": "Provider response",
+          "upstream_network": "Upstream network",
+          "upstream_stream": "Upstream stream",
+          "proxy": "Proxy internal",
+          "client_abort": "Client canceled",
+          "unknown": "Unknown source"
+        },
         "detailFromDiagnostic": "Proxy diagnostic",
         "detailFromRequest": "Detail from request log",
         "detailFromConsole": "Detail from console log",
@@ -664,7 +672,7 @@
         "copyUnavailableShort": "No detail to copy",
         "copySuccess": "Provider error detail copied",
         "copyFailed": "Copy failed: {error}",
-        "noPayload": "No response body was captured for this row, and no matching provider error detail was recovered from recent console logs.",
+        "noPayload": "No response body or error summary is available for this row.",
         "responseTruncated": "Truncated",
         "payloadLarge": "Large payload, JSON formatting highlight skipped"
       },
@@ -1152,7 +1160,17 @@
       },
       "blacklist": {
         "blocked": "Blocked",
+        "pending": "Failure counts",
         "remaining": "Remaining",
+        "requestCount": "Requests {current}/{threshold}",
+        "healthCount": "Checks {current}/{threshold}",
+        "reason": "Reason: {reason}",
+        "trigger": {
+          "request": "Triggered by requests",
+          "health": "Triggered by background checks",
+          "legacy": "Triggered by an earlier version",
+          "unknown": "Unknown trigger"
+        },
         "minutes": "m",
         "seconds": "s",
         "unblock": "Unblock",
@@ -1738,7 +1756,10 @@
         "latestVersion": "Latest version",
         "checkNow": "Check now",
         "manualUpdate": "Manual update",
-        "blacklistThreshold": "Failure threshold",
+        "blacklistThreshold": "Request failure threshold",
+        "blacklistThresholdHint": "Counts network errors, stream interruptions, 429, and 5xx only",
+        "healthBlacklistThreshold": "Health check threshold",
+        "healthBlacklistThresholdHint": "Background checks only; manual checks do not count",
         "blacklistDuration": "Blacklist duration",
         "saveBlacklist": "Save settings",
         "enableBlacklist": "Enable blacklist",

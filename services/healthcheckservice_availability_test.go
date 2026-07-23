@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -96,29 +97,322 @@ func TestHealthCheckServiceCheckProviderMarksValidationFailureWhenResponseIsNotP
 	}
 }
 
-func TestHealthCheckServiceHandleBlacklistIntegrationTreatsValidationFailureAsFailure(t *testing.T) {
-	hcs := NewHealthCheckService(nil, nil, nil)
+func TestHealthCheckServiceValidationFailureDoesNotAffectBlacklist(t *testing.T) {
+	result := &HealthCheckResult{
+		Status:         HealthStatusValidationError,
+		HTTPStatusCode: http.StatusOK,
+	}
+
+	if isHealthBlacklistFailure(result) {
+		t.Fatal("响应内容校验失败不应参与健康检查拉黑计数")
+	}
+}
+
+func TestHealthCheckBlacklistCountersAreIndependentAndManualChecksDoNotCount(t *testing.T) {
+	useIsolatedHomeDir(t)
+	if err := InitDatabase(); err != nil {
+		t.Fatalf("初始化数据库失败: %v", err)
+	}
+	db, err := xdb.DB("default")
+	if err != nil {
+		t.Fatalf("获取数据库连接失败: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE app_settings SET value = 'true' WHERE key = 'enable_blacklist'`); err != nil {
+		t.Fatalf("开启黑名单失败: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE app_settings SET value = '9' WHERE key = 'blacklist_failure_threshold'`); err != nil {
+		t.Fatalf("设置真实请求阈值失败: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE app_settings SET value = '2' WHERE key = 'availability_failure_threshold'`); err != nil {
+		t.Fatalf("设置健康检查阈值失败: %v", err)
+	}
+
+	previousQueue := GlobalDBQueue
+	writeQueue := NewDBWriteQueue(db, 32, false)
+	GlobalDBQueue = writeQueue
+	t.Cleanup(func() {
+		_ = writeQueue.Shutdown(2 * time.Second)
+		GlobalDBQueue = previousQueue
+	})
+
+	settingsService := NewSettingsService()
+	blacklistService := NewBlacklistService(settingsService, nil)
+	healthCheckService := NewHealthCheckService(nil, blacklistService, settingsService)
 	provider := &Provider{
-		ID:                        3,
-		Name:                      "ValidationFailProvider",
+		ID:                        9,
+		Name:                      "CounterProvider",
 		ConnectivityAutoBlacklist: true,
 	}
-	result := &HealthCheckResult{
-		ProviderID:   provider.ID,
-		ProviderName: provider.Name,
-		Platform:     "codex",
-		Status:       HealthStatusValidationError,
+	failedResult := &HealthCheckResult{
+		ProviderID:     provider.ID,
+		ProviderName:   provider.Name,
+		Platform:       "codex",
+		Status:         HealthStatusFailed,
+		HTTPStatusCode: http.StatusBadGateway,
+		ErrorMessage:   "upstream health status 502",
 	}
 
-	hcs.handleBlacklistIntegration(provider, result)
-
-	counterKey := "codex:" + providerRefFromNumericID(provider.ID, provider.Name)
-	counter := hcs.failCounters[counterKey]
-	if counter == nil {
-		t.Fatalf("应创建失败计数器")
+	healthCheckService.handleBlacklistIntegration(provider, failedResult, false)
+	var rowCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM provider_blacklist WHERE platform = 'codex' AND provider_id = '9'`).Scan(&rowCount); err != nil {
+		t.Fatalf("查询手动检测计数失败: %v", err)
 	}
-	if counter.ConsecutiveFails != 1 {
-		t.Fatalf("ConsecutiveFails = %d, 期望 1", counter.ConsecutiveFails)
+	if rowCount != 0 {
+		t.Fatalf("手动健康检查不应创建失败计数，记录数=%d", rowCount)
+	}
+
+	healthCheckService.handleBlacklistIntegration(provider, failedResult, true)
+	if err := blacklistService.RecordFailureWithReasonByID("codex", "9", provider.Name, "upstream status 502"); err != nil {
+		t.Fatalf("记录真实请求失败失败: %v", err)
+	}
+
+	statuses, err := blacklistService.GetBlacklistStatus("codex")
+	if err != nil {
+		t.Fatalf("读取黑名单状态失败: %v", err)
+	}
+	if len(statuses) != 1 {
+		t.Fatalf("黑名单状态数量=%d，期望 1", len(statuses))
+	}
+	status := statuses[0]
+	if status.FailureCount != 1 || status.FailureThreshold != 9 {
+		t.Fatalf("真实请求计数=%d/%d，期望 1/9", status.FailureCount, status.FailureThreshold)
+	}
+	if status.HealthFailureCount != 1 || status.HealthFailureThreshold != 2 {
+		t.Fatalf("健康检查计数=%d/%d，期望 1/2", status.HealthFailureCount, status.HealthFailureThreshold)
+	}
+	if status.IsBlacklisted {
+		t.Fatal("两套计数均未达到各自阈值时不应拉黑")
+	}
+
+	if err := blacklistService.RecordSuccessByID("codex", "9", provider.Name); err != nil {
+		t.Fatalf("记录真实请求成功失败: %v", err)
+	}
+	statuses, err = blacklistService.GetBlacklistStatus("codex")
+	if err != nil {
+		t.Fatalf("重新读取黑名单状态失败: %v", err)
+	}
+	if len(statuses) != 1 || statuses[0].FailureCount != 0 || statuses[0].HealthFailureCount != 0 {
+		t.Fatalf("真实请求成功应清零两套计数: %#v", statuses)
+	}
+
+	healthCheckService.handleBlacklistIntegration(provider, failedResult, true)
+	healthCheckService.handleBlacklistIntegration(provider, failedResult, true)
+	statuses, err = blacklistService.GetBlacklistStatus("codex")
+	if err != nil {
+		t.Fatalf("读取健康检查拉黑状态失败: %v", err)
+	}
+	if len(statuses) != 1 || !statuses[0].IsBlacklisted {
+		t.Fatalf("连续两次后台健康检查 502 应触发拉黑: %#v", statuses)
+	}
+	if statuses[0].FailureCount != 0 || statuses[0].HealthFailureCount != 2 {
+		t.Fatalf("健康检查触发时应保留 2/2 计数: %#v", statuses[0])
+	}
+	if statuses[0].BlacklistTriggerSource != BlacklistTriggerSourceHealth || !strings.Contains(statuses[0].BlacklistReason, "status 502") {
+		t.Fatalf("健康检查触发来源或原因不正确: %#v", statuses[0])
+	}
+}
+
+func TestBlacklistActiveSuccessPreservesTriggerDetails(t *testing.T) {
+	useIsolatedHomeDir(t)
+	if err := InitDatabase(); err != nil {
+		t.Fatalf("初始化数据库失败: %v", err)
+	}
+	db, err := xdb.DB("default")
+	if err != nil {
+		t.Fatalf("获取数据库连接失败: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE app_settings SET value = 'true' WHERE key = 'enable_blacklist'`); err != nil {
+		t.Fatalf("开启黑名单失败: %v", err)
+	}
+
+	until := time.Now().Add(time.Hour)
+	if _, err := db.Exec(`
+		INSERT INTO provider_blacklist (
+			platform, provider_id, provider_name, failure_count, health_failure_count,
+			blacklisted_at, blacklisted_until, blacklist_trigger_source, blacklist_reason
+		) VALUES ('codex', 'active-success', 'Active Success', 9, 2, ?, ?, ?, ?)
+	`, time.Now(), until, BlacklistTriggerSourceHealth, "upstream status 502"); err != nil {
+		t.Fatalf("插入活动黑名单失败: %v", err)
+	}
+
+	previousQueue := GlobalDBQueue
+	writeQueue := NewDBWriteQueue(db, 32, false)
+	GlobalDBQueue = writeQueue
+	t.Cleanup(func() {
+		_ = writeQueue.Shutdown(2 * time.Second)
+		GlobalDBQueue = previousQueue
+	})
+
+	service := NewBlacklistService(NewSettingsService(), nil)
+	if err := service.RecordSuccessByID("codex", "active-success", "Active Success"); err != nil {
+		t.Fatalf("记录成功失败: %v", err)
+	}
+
+	var requestCount, healthCount int
+	var source, reason string
+	if err := db.QueryRow(`
+		SELECT failure_count, health_failure_count, blacklist_trigger_source, blacklist_reason
+		FROM provider_blacklist WHERE provider_id = 'active-success'
+	`).Scan(&requestCount, &healthCount, &source, &reason); err != nil {
+		t.Fatalf("读取活动黑名单失败: %v", err)
+	}
+	if requestCount != 9 || healthCount != 2 || source != BlacklistTriggerSourceHealth || reason != "upstream status 502" {
+		t.Fatalf("活动黑名单详情被成功请求清空: request=%d health=%d source=%q reason=%q", requestCount, healthCount, source, reason)
+	}
+}
+
+func TestHealthCheckSuccessWithoutFailuresDoesNotWriteDatabase(t *testing.T) {
+	useIsolatedHomeDir(t)
+	if err := InitDatabase(); err != nil {
+		t.Fatalf("初始化数据库失败: %v", err)
+	}
+	db, err := xdb.DB("default")
+	if err != nil {
+		t.Fatalf("获取数据库连接失败: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE app_settings SET value = 'true' WHERE key = 'enable_blacklist'`); err != nil {
+		t.Fatalf("开启黑名单失败: %v", err)
+	}
+
+	previousQueue := GlobalDBQueue
+	writeQueue := NewDBWriteQueue(db, 32, false)
+	GlobalDBQueue = writeQueue
+	t.Cleanup(func() {
+		_ = writeQueue.Shutdown(2 * time.Second)
+		GlobalDBQueue = previousQueue
+	})
+
+	service := NewBlacklistService(NewSettingsService(), nil)
+	before := writeQueue.GetStats().TotalWrites
+	if err := service.RecordHealthCheckSuccessByID("codex", "never-failed", "Never Failed"); err != nil {
+		t.Fatalf("记录健康检查成功失败: %v", err)
+	}
+	if after := writeQueue.GetStats().TotalWrites; after != before {
+		t.Fatalf("无健康失败计数时不应写数据库: before=%d after=%d", before, after)
+	}
+}
+
+func TestBlacklistSuccessWaitsForRunningMutation(t *testing.T) {
+	useIsolatedHomeDir(t)
+	if err := InitDatabase(); err != nil {
+		t.Fatalf("初始化数据库失败: %v", err)
+	}
+	service := NewBlacklistService(NewSettingsService(), nil)
+	key := blacklistRuntimeKey("codex", "waits-for-mutation")
+	service.identityMu.Lock()
+	service.boundIdentities[key] = "Waits For Mutation"
+	service.identityMu.Unlock()
+
+	service.operationMu.Lock()
+	done := make(chan error, 1)
+	go func() {
+		done <- service.RecordSuccessByID("codex", "waits-for-mutation", "Waits For Mutation")
+	}()
+
+	select {
+	case err := <-done:
+		service.operationMu.Unlock()
+		t.Fatalf("成功记录不应越过正在执行的失败写入: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	service.operationMu.Unlock()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("记录成功失败: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("失败写入结束后成功记录未继续执行")
+	}
+}
+
+func TestHealthCheckFailureCounterIsSerialized(t *testing.T) {
+	useIsolatedHomeDir(t)
+	if err := InitDatabase(); err != nil {
+		t.Fatalf("初始化数据库失败: %v", err)
+	}
+	db, err := xdb.DB("default")
+	if err != nil {
+		t.Fatalf("获取数据库连接失败: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE app_settings SET value = 'true' WHERE key = 'enable_blacklist'`); err != nil {
+		t.Fatalf("开启黑名单失败: %v", err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO provider_blacklist (platform, provider_id, provider_name, health_failure_count)
+		VALUES ('codex', 'serialized', 'Serialized', 0)
+	`); err != nil {
+		t.Fatalf("插入计数记录失败: %v", err)
+	}
+
+	previousQueue := GlobalDBQueue
+	writeQueue := NewDBWriteQueue(db, 128, false)
+	GlobalDBQueue = writeQueue
+	t.Cleanup(func() {
+		_ = writeQueue.Shutdown(2 * time.Second)
+		GlobalDBQueue = previousQueue
+	})
+
+	service := NewBlacklistService(NewSettingsService(), nil)
+	const attempts = 9
+	var wg sync.WaitGroup
+	errs := make(chan error, attempts)
+	for i := 0; i < attempts; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs <- service.RecordHealthCheckFailureByID("codex", "serialized", "Serialized", "upstream status 502", attempts)
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for callErr := range errs {
+		if callErr != nil {
+			t.Fatalf("记录健康检查失败失败: %v", callErr)
+		}
+	}
+
+	var count int
+	if err := db.QueryRow(`SELECT health_failure_count FROM provider_blacklist WHERE provider_id = 'serialized'`).Scan(&count); err != nil {
+		t.Fatalf("读取健康失败计数失败: %v", err)
+	}
+	if count != attempts {
+		t.Fatalf("并发健康失败计数=%d，期望=%d", count, attempts)
+	}
+}
+
+func TestSettingsServiceSavesBlacklistThresholdsTogether(t *testing.T) {
+	useIsolatedHomeDir(t)
+	if err := InitDatabase(); err != nil {
+		t.Fatalf("初始化数据库失败: %v", err)
+	}
+	db, err := xdb.DB("default")
+	if err != nil {
+		t.Fatalf("获取数据库连接失败: %v", err)
+	}
+	previousQueue := GlobalDBQueue
+	writeQueue := NewDBWriteQueue(db, 32, false)
+	GlobalDBQueue = writeQueue
+	t.Cleanup(func() {
+		_ = writeQueue.Shutdown(2 * time.Second)
+		GlobalDBQueue = previousQueue
+	})
+
+	settings := NewSettingsService()
+	if err := settings.UpdateBlacklistSettingsWithHealthThreshold(9, 1800, 7); err != nil {
+		t.Fatalf("保存双阈值失败: %v", err)
+	}
+
+	var requestThreshold, healthThreshold string
+	if err := db.QueryRow(`SELECT value FROM app_settings WHERE key = 'blacklist_failure_threshold'`).Scan(&requestThreshold); err != nil {
+		t.Fatalf("读取请求阈值失败: %v", err)
+	}
+	if err := db.QueryRow(`SELECT value FROM app_settings WHERE key = 'availability_failure_threshold'`).Scan(&healthThreshold); err != nil {
+		t.Fatalf("读取健康阈值失败: %v", err)
+	}
+	if requestThreshold != "9" || healthThreshold != "7" {
+		t.Fatalf("双阈值保存结果错误: request=%q health=%q", requestThreshold, healthThreshold)
 	}
 }
 

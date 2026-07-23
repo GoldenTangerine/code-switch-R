@@ -6,6 +6,9 @@ export interface BlacklistStatus {
   providerId?: string
   providerName: string
   failureCount: number
+  failureThreshold: number
+  healthFailureCount: number
+  healthFailureThreshold: number
   blacklistedAt?: string  // ISO 时间字符串
   blacklistedUntil?: string  // ISO 时间字符串
   lastFailureAt?: string  // ISO 时间字符串
@@ -14,6 +17,8 @@ export interface BlacklistStatus {
 
   // v0.4.0 新增：等级拉黑相关字段
   blacklistLevel: number          // 当前黑名单等级 (0-5)
+  blacklistTriggerSource?: 'request' | 'health' | 'legacy'
+  blacklistReason?: string
   lastRecoveredAt?: string        // 最后恢复时间（ISO 时间字符串）
   forgivenessRemaining: number    // 距离宽恕还剩多少秒（3小时倒计时）
 }

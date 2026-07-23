@@ -655,6 +655,14 @@
         "logId": "日志 #{id}",
         "responseBody": "错误返回体",
         "providerErrorDetail": "供应商错误详情",
+        "errorSource": {
+          "provider_response": "供应商响应",
+          "upstream_network": "上游网络",
+          "upstream_stream": "上游断流",
+          "proxy": "代理内部",
+          "client_abort": "客户端取消",
+          "unknown": "来源未知"
+        },
         "detailFromDiagnostic": "代理诊断",
         "detailFromRequest": "详情来自请求日志",
         "detailFromConsole": "详情来自控制台",
@@ -665,7 +673,7 @@
         "copyUnavailableShort": "暂无可复制详情",
         "copySuccess": "供应商错误详情已复制",
         "copyFailed": "复制失败：{error}",
-        "noPayload": "这条日志既没采集到返回体，最近控制台里也没匹配到它的供应商错误详情，先看上面的状态码和摘要定位。",
+        "noPayload": "这条日志未采集到返回体，也没有可用的错误摘要。",
         "responseTruncated": "已截断",
         "payloadLarge": "内容较大，已跳过 JSON 格式化高亮"
       },
@@ -1153,7 +1161,17 @@
       },
       "blacklist": {
         "blocked": "已拉黑",
+        "pending": "失败计数",
         "remaining": "剩余",
+        "requestCount": "请求 {current}/{threshold}",
+        "healthCount": "巡检 {current}/{threshold}",
+        "reason": "原因：{reason}",
+        "trigger": {
+          "request": "真实请求触发",
+          "health": "后台巡检触发",
+          "legacy": "历史版本触发",
+          "unknown": "触发来源未知"
+        },
         "minutes": "分",
         "seconds": "秒",
         "unblock": "立即解禁",
@@ -1739,7 +1757,10 @@
         "claudeProxyAuthAPIKey": "API_KEY",
         "claudeProxyAuthFieldHint": "需与 --settings 中的认证字段一致；API_KEY 可能触发 Claude 授权确认",
         "settingsSaveFailed": "设置保存失败，已恢复原值",
-        "blacklistThreshold": "失败次数阈值",
+        "blacklistThreshold": "真实请求失败阈值",
+        "blacklistThresholdHint": "仅统计网络、断流、429 和 5xx",
+        "healthBlacklistThreshold": "巡检失败阈值",
+        "healthBlacklistThresholdHint": "仅后台巡检计数，手动检测不计数",
         "blacklistDuration": "拉黑时长",
         "saveBlacklist": "保存配置",
         "enableBlacklist": "启用拉黑功能",

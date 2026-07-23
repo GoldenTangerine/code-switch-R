@@ -16,6 +16,8 @@ type SettingsService struct {
 	blacklistInvalidator   func()
 }
 
+const DefaultHealthBlacklistThreshold = 3
+
 // BlacklistSettings 黑名单配置（基础配置，向后兼容）
 type BlacklistSettings struct {
 	FailureThreshold int `json:"failureThreshold"` // 失败次数阈值
@@ -283,6 +285,34 @@ func (ss *SettingsService) UpdateBlacklistSettings(threshold int, durationSecond
 	return nil
 }
 
+func (ss *SettingsService) UpdateBlacklistSettingsWithHealthThreshold(threshold int, durationSeconds int, healthThreshold int) error {
+	if healthThreshold < 2 || healthThreshold > 9 {
+		return fmt.Errorf("健康检查失败阈值必须在 2-9 之间")
+	}
+
+	oldThreshold, oldDurationSeconds, err := ss.GetBlacklistSettings()
+	if err != nil {
+		return fmt.Errorf("读取旧黑名单配置失败: %w", err)
+	}
+	oldHealthThreshold := ss.GetHealthBlacklistThreshold()
+
+	if err := ss.UpdateBlacklistSettings(threshold, durationSeconds); err != nil {
+		return err
+	}
+	if err := ss.UpdateHealthBlacklistThreshold(healthThreshold); err != nil {
+		rollbackErr := ss.UpdateBlacklistSettings(oldThreshold, oldDurationSeconds)
+		if rollbackErr != nil {
+			return fmt.Errorf("更新健康检查失败阈值失败: %v；回滚黑名单配置失败: %w", err, rollbackErr)
+		}
+		if restoreErr := ss.UpdateHealthBlacklistThreshold(oldHealthThreshold); restoreErr != nil {
+			return fmt.Errorf("更新健康检查失败阈值失败: %v；恢复旧健康检查阈值失败: %w", err, restoreErr)
+		}
+		return fmt.Errorf("更新健康检查失败阈值失败，已回滚黑名单配置: %w", err)
+	}
+
+	return nil
+}
+
 // GetBlacklistSettingsStruct 获取黑名单配置（结构体形式，用于前端）
 func (ss *SettingsService) GetBlacklistSettingsStruct() (*BlacklistSettings, error) {
 	threshold, duration, err := ss.GetBlacklistSettings()
@@ -370,5 +400,24 @@ func (ss *SettingsService) SetIntSetting(key string, value int) error {
 		return fmt.Errorf("设置 %s 失败: %w", key, err)
 	}
 
+	return nil
+}
+
+func (ss *SettingsService) GetHealthBlacklistThreshold() int {
+	threshold := ss.GetIntSetting("availability_failure_threshold")
+	if threshold < 2 || threshold > 9 {
+		return DefaultHealthBlacklistThreshold
+	}
+	return threshold
+}
+
+func (ss *SettingsService) UpdateHealthBlacklistThreshold(threshold int) error {
+	if threshold < 2 || threshold > 9 {
+		return fmt.Errorf("健康检查失败阈值必须在 2-9 之间")
+	}
+	if err := ss.SetIntSetting("availability_failure_threshold", threshold); err != nil {
+		return err
+	}
+	ss.notifyBlacklistChanged()
 	return nil
 }

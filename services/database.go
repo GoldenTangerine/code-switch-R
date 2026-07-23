@@ -115,9 +115,13 @@ func ensureBlacklistTables() error {
 		provider_id TEXT NOT NULL DEFAULT '',
 		provider_name TEXT NOT NULL,
 		failure_count INTEGER DEFAULT 0,
+		health_failure_count INTEGER DEFAULT 0,
 		blacklisted_at DATETIME,
 		blacklisted_until DATETIME,
 		last_failure_at DATETIME,
+		last_health_failure_at DATETIME,
+		blacklist_trigger_source TEXT DEFAULT '',
+		blacklist_reason TEXT DEFAULT '',
 		blacklist_level INTEGER DEFAULT 0,
 		last_recovered_at DATETIME,
 		last_degrade_hour INTEGER DEFAULT 0,
@@ -142,6 +146,19 @@ func ensureBlacklistTables() error {
 	if err := migrateBlacklistIdentityKeyWithDB(db); err != nil {
 		return fmt.Errorf("迁移 provider_blacklist 标识结构失败: %w", err)
 	}
+	for _, column := range []struct {
+		name       string
+		definition string
+	}{
+		{name: "health_failure_count", definition: "INTEGER DEFAULT 0"},
+		{name: "last_health_failure_at", definition: "DATETIME"},
+		{name: "blacklist_trigger_source", definition: "TEXT DEFAULT ''"},
+		{name: "blacklist_reason", definition: "TEXT DEFAULT ''"},
+	} {
+		if err := ensureBlacklistColumn(db, column.name, column.definition); err != nil {
+			return err
+		}
+	}
 
 	if _, err := db.Exec("UPDATE provider_blacklist SET provider_id = CASE WHEN TRIM(COALESCE(provider_name,'')) <> '' THEN TRIM(provider_name) ELSE printf('legacy-%d', id) END WHERE TRIM(COALESCE(provider_id,'')) = ''"); err != nil {
 		return fmt.Errorf("回填 provider_blacklist.provider_id 失败: %w", err)
@@ -164,6 +181,7 @@ func ensureBlacklistTables() error {
 		{"enable_blacklist", "true"},
 		{"blacklist_failure_threshold", "5"},
 		{"blacklist_duration_minutes", "30"},
+		{"availability_failure_threshold", "3"},
 	}
 
 	for _, s := range defaultSettings {
@@ -193,6 +211,105 @@ func ensureBlacklistTables() error {
 		return fmt.Errorf("初始化 blacklist_duration_seconds 失败: %w", err)
 	}
 
+	if err := migrateBlacklistFailureSourcesWithDB(db); err != nil {
+		return fmt.Errorf("迁移黑名单失败来源失败: %w", err)
+	}
+
+	return nil
+}
+
+func ensureBlacklistColumn(db *sql.DB, column string, definition string) error {
+	var count int
+	query := fmt.Sprintf("SELECT COUNT(*) FROM pragma_table_info('provider_blacklist') WHERE name = '%s'", column)
+	if err := db.QueryRow(query).Scan(&count); err != nil {
+		return fmt.Errorf("检查 provider_blacklist.%s 字段失败: %w", column, err)
+	}
+	if count > 0 {
+		return nil
+	}
+	if _, err := db.Exec(fmt.Sprintf("ALTER TABLE provider_blacklist ADD COLUMN %s %s", column, definition)); err != nil {
+		return fmt.Errorf("新增 provider_blacklist.%s 字段失败: %w", column, err)
+	}
+	return nil
+}
+
+func migrateBlacklistFailureSourcesWithDB(db *sql.DB) error {
+	const migrationKey = "blacklist_failure_sources_v1"
+	var applied int
+	if err := db.QueryRow("SELECT COUNT(*) FROM app_settings WHERE key = ?", migrationKey).Scan(&applied); err != nil {
+		return err
+	}
+	if applied > 0 {
+		return nil
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	rows, err := tx.Query(`SELECT id, blacklisted_until, blacklist_trigger_source FROM provider_blacklist`)
+	if err != nil {
+		return err
+	}
+	var staleIDs []int64
+	var activeLegacyIDs []int64
+	now := time.Now()
+	for rows.Next() {
+		var id int64
+		var blacklistedUntil sql.NullTime
+		var triggerSource sql.NullString
+		if err := rows.Scan(&id, &blacklistedUntil, &triggerSource); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		if !blacklistedUntil.Valid || !blacklistedUntil.Time.After(now) {
+			staleIDs = append(staleIDs, id)
+		} else if strings.TrimSpace(triggerSource.String) == "" {
+			activeLegacyIDs = append(activeLegacyIDs, id)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, id := range staleIDs {
+		if _, err := tx.Exec(`
+			UPDATE provider_blacklist
+			SET failure_count = 0,
+				health_failure_count = 0,
+				last_failure_window_start = NULL
+			WHERE id = ?
+		`, id); err != nil {
+			return err
+		}
+	}
+	for _, id := range activeLegacyIDs {
+		if _, err := tx.Exec(`
+			UPDATE provider_blacklist
+			SET blacklist_trigger_source = 'legacy',
+				blacklist_reason = '历史版本触发，未记录具体原因'
+			WHERE id = ?
+		`, id); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec("INSERT INTO app_settings (key, value) VALUES (?, 'done')", migrationKey); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	committed = true
 	return nil
 }
 

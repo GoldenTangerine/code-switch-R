@@ -40,7 +40,7 @@ import {
 } from '../../utils/providerIconAssets'
 import { checkUpdate, downloadUpdate, restartApp, getUpdateState, setAutoCheckEnabled, type UpdateInfo, type UpdateState } from '../../services/update'
 import { fetchCurrentVersion } from '../../services/version'
-import { getBlacklistSettings, updateBlacklistSettings, getLevelBlacklistEnabled, setLevelBlacklistEnabled, getBlacklistEnabled, setBlacklistEnabled, type BlacklistSettings } from '../../services/settings'
+import { getBlacklistSettings, updateBlacklistSettingsWithHealthThreshold, getHealthBlacklistThreshold, getLevelBlacklistEnabled, setLevelBlacklistEnabled, getBlacklistEnabled, setBlacklistEnabled, type BlacklistSettings } from '../../services/settings'
 import { fetchConfigImportStatus, importFromPath, type ConfigImportStatus } from '../../services/configImport'
 import { fetchWebDAVConfig, previewWebDAVContent, saveWebDAVConfig, testWebDAVConfig, syncToWebDAV, loadFromWebDAV, type WebDAVSyncConfig } from '../../services/webdavSync'
 import { hasCodexUnifiedHistoryBackup, restoreCodexUnifiedHistory } from '../../services/claudeSettings'
@@ -572,6 +572,7 @@ const updateModalActionText = computed(() => {
 // 拉黑配置相关状态
 const blacklistEnabled = ref(true)  // 拉黑功能总开关
 const blacklistThreshold = ref(5)
+const healthBlacklistThreshold = ref(3)
 const blacklistDurationSeconds = ref(1800)
 const levelBlacklistEnabled = ref(false)
 const blacklistLoading = ref(false)
@@ -1661,6 +1662,7 @@ const loadBlacklistSettings = async () => {
     const settings = await getBlacklistSettings()
     blacklistThreshold.value = settings.failureThreshold
     blacklistDurationSeconds.value = settings.durationSeconds
+    healthBlacklistThreshold.value = await getHealthBlacklistThreshold()
 
     // 加载拉黑功能总开关
     const enabled = await getBlacklistEnabled()
@@ -1674,6 +1676,7 @@ const loadBlacklistSettings = async () => {
     // 使用默认值
     blacklistEnabled.value = true
     blacklistThreshold.value = 5
+    healthBlacklistThreshold.value = 3
     blacklistDurationSeconds.value = 1800
     levelBlacklistEnabled.value = false
   } finally {
@@ -1686,10 +1689,15 @@ const saveBlacklistSettings = async () => {
   if (blacklistLoading.value || blacklistSaving.value) return
   blacklistSaving.value = true
   try {
-    await updateBlacklistSettings(blacklistThreshold.value, blacklistDurationSeconds.value)
+    await updateBlacklistSettingsWithHealthThreshold(
+      blacklistThreshold.value,
+      blacklistDurationSeconds.value,
+      healthBlacklistThreshold.value,
+    )
     showToast(t('components.general.toast.blacklistSaveSuccess'), 'success')
   } catch (error) {
     console.error('failed to save blacklist settings', error)
+    await loadBlacklistSettings()
     showToast(
       t('components.general.toast.blacklistSaveFailed', { error: extractErrorMessage(error) }),
       'error'
@@ -2569,20 +2577,36 @@ onBeforeUnmount(() => {
             </div>
           </ListItem>
           <ListItem :label="$t('components.general.label.blacklistThreshold')">
-            <select
-              v-model.number="blacklistThreshold"
-              :disabled="blacklistLoading || blacklistSaving"
-              class="mac-select">
-              <option :value="1">1 {{ $t('components.general.label.times') }}</option>
-              <option :value="2">2 {{ $t('components.general.label.times') }}</option>
-              <option :value="3">3 {{ $t('components.general.label.times') }}</option>
-              <option :value="4">4 {{ $t('components.general.label.times') }}</option>
-              <option :value="5">5 {{ $t('components.general.label.times') }}</option>
-              <option :value="6">6 {{ $t('components.general.label.times') }}</option>
-              <option :value="7">7 {{ $t('components.general.label.times') }}</option>
-              <option :value="8">8 {{ $t('components.general.label.times') }}</option>
-              <option :value="9">9 {{ $t('components.general.label.times') }}</option>
-            </select>
+            <div class="toggle-with-hint">
+              <select
+                v-model.number="blacklistThreshold"
+                :disabled="blacklistLoading || blacklistSaving"
+                class="mac-select">
+                <option :value="1">1 {{ $t('components.general.label.times') }}</option>
+                <option :value="2">2 {{ $t('components.general.label.times') }}</option>
+                <option :value="3">3 {{ $t('components.general.label.times') }}</option>
+                <option :value="4">4 {{ $t('components.general.label.times') }}</option>
+                <option :value="5">5 {{ $t('components.general.label.times') }}</option>
+                <option :value="6">6 {{ $t('components.general.label.times') }}</option>
+                <option :value="7">7 {{ $t('components.general.label.times') }}</option>
+                <option :value="8">8 {{ $t('components.general.label.times') }}</option>
+                <option :value="9">9 {{ $t('components.general.label.times') }}</option>
+              </select>
+              <span class="hint-text">{{ $t('components.general.label.blacklistThresholdHint') }}</span>
+            </div>
+          </ListItem>
+          <ListItem :label="$t('components.general.label.healthBlacklistThreshold')">
+            <div class="toggle-with-hint">
+              <select
+                v-model.number="healthBlacklistThreshold"
+                :disabled="blacklistLoading || blacklistSaving"
+                class="mac-select">
+                <option v-for="count in 8" :key="count + 1" :value="count + 1">
+                  {{ count + 1 }} {{ $t('components.general.label.times') }}
+                </option>
+              </select>
+              <span class="hint-text">{{ $t('components.general.label.healthBlacklistThresholdHint') }}</span>
+            </div>
           </ListItem>
           <ListItem :label="$t('components.general.label.blacklistDuration')">
             <select

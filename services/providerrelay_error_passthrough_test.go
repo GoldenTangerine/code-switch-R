@@ -1,6 +1,7 @@
 package services
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"io"
@@ -1366,7 +1367,7 @@ func TestProxyHandlerAllProvidersFailedReturnsLastUpstreamErrorRaw(t *testing.T)
 	}
 }
 
-func TestProxyHandlerBlacklistModeAttemptsEachProviderOnceAndFallsBack(t *testing.T) {
+func TestProxyHandlerSingle502CountsOnceAtThresholdNineAndPersistsDiagnostic(t *testing.T) {
 	useIsolatedHomeDir(t)
 	gin.SetMode(gin.TestMode)
 	if err := InitDatabase(); err != nil {
@@ -1379,7 +1380,7 @@ func TestProxyHandlerBlacklistModeAttemptsEachProviderOnceAndFallsBack(t *testin
 	if _, err := db.Exec(`UPDATE app_settings SET value = 'true' WHERE key = 'enable_blacklist'`); err != nil {
 		t.Fatalf("开启黑名单失败: %v", err)
 	}
-	if _, err := db.Exec(`UPDATE app_settings SET value = '5' WHERE key = 'blacklist_failure_threshold'`); err != nil {
+	if _, err := db.Exec(`UPDATE app_settings SET value = '9' WHERE key = 'blacklist_failure_threshold'`); err != nil {
 		t.Fatalf("设置拉黑阈值失败: %v", err)
 	}
 
@@ -1400,8 +1401,8 @@ func TestProxyHandlerBlacklistModeAttemptsEachProviderOnceAndFallsBack(t *testin
 	failedUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&failedProviderCalls, 1)
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = w.Write([]byte(`{"error":"temporary upstream failure"}`))
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte(`{"error":{"message":"temporary upstream failure","api_key":"secret-value"}}`))
 	}))
 	defer failedUpstream.Close()
 
@@ -1447,16 +1448,30 @@ func TestProxyHandlerBlacklistModeAttemptsEachProviderOnceAndFallsBack(t *testin
 		t.Fatalf("读取失败计数失败: %v", err)
 	}
 	if failureCount != 1 {
-		t.Fatalf("单次请求应只累计一次失败，当前=%d", failureCount)
+		t.Fatalf("单次 502 应只累计一次失败，当前=%d，期望 1/9", failureCount)
+	}
+	var blacklistedUntil sql.NullTime
+	if err := db.QueryRow(`SELECT blacklisted_until FROM provider_blacklist WHERE platform = 'codex' AND provider_id = '1'`).Scan(&blacklistedUntil); err != nil {
+		t.Fatalf("读取拉黑状态失败: %v", err)
+	}
+	if blacklistedUntil.Valid {
+		t.Fatalf("单次 502 不应在阈值 9 时拉黑，blacklisted_until=%v", blacklistedUntil.Time)
 	}
 
 	var httpCode int
 	var errorMessage string
-	if err := db.QueryRow(`SELECT http_code, error_message FROM request_log WHERE platform = 'codex' AND provider_id = '1' ORDER BY id DESC LIMIT 1`).Scan(&httpCode, &errorMessage); err != nil {
+	var errorSource string
+	if err := db.QueryRow(`SELECT http_code, error_message, error_source FROM request_log WHERE platform = 'codex' AND provider_id = '1' ORDER BY id DESC LIMIT 1`).Scan(&httpCode, &errorMessage, &errorSource); err != nil {
 		t.Fatalf("读取失败请求日志失败: %v", err)
 	}
-	if httpCode != http.StatusInternalServerError || !strings.Contains(errorMessage, "status 500") {
+	if httpCode != http.StatusBadGateway || !strings.Contains(errorMessage, "status 502") || !strings.Contains(errorMessage, "temporary upstream failure") {
 		t.Fatalf("失败请求诊断未正确落库: http_code=%d error_message=%q", httpCode, errorMessage)
+	}
+	if strings.Contains(errorMessage, "secret-value") || !strings.Contains(errorMessage, requestLogPayloadRedactedValue) {
+		t.Fatalf("失败摘要未脱敏: %q", errorMessage)
+	}
+	if errorSource != requestErrorSourceProviderResponse {
+		t.Fatalf("错误来源=%q，期望 %q", errorSource, requestErrorSourceProviderResponse)
 	}
 }
 

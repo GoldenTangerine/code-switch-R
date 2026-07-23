@@ -111,6 +111,9 @@
               <span class="provider-log-entry__tag">
                 {{ entry.errorType || (entry.log.http_code >= 500 ? 'HTTP 5xx' : 'HTTP 4xx') }}
               </span>
+              <span v-if="entry.log.error_source" class="provider-log-entry__tag provider-log-entry__tag--source">
+                {{ errorSourceLabel(entry.log.error_source) }}
+              </span>
               <span v-if="entry.semanticTag" class="provider-log-entry__tag provider-log-entry__tag--semantic">
                 {{ entry.semanticTag }}
               </span>
@@ -668,6 +671,13 @@ const mergeLogsById = (current: RequestLog[], incoming: RequestLog[]) => {
 }
 
 const displayModel = (log: RequestLog) => log.requested_model || log.model || log.response_model || '-'
+
+const errorSourceLabel = (source: string) => {
+  if (source === 'provider_response' || source === 'upstream_network' || source === 'upstream_stream' || source === 'proxy' || source === 'client_abort') {
+    return t(`components.main.providerLogs.errorSource.${source}`)
+  }
+  return t('components.main.providerLogs.errorSource.unknown')
+}
 
 const getPayloadErrorState = (log: RequestLog): PayloadErrorState => {
   const responseBody = log.response_body?.trim() || ''

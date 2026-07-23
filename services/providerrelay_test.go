@@ -2180,14 +2180,17 @@ func TestBlacklistSuccessNeedsWrite(t *testing.T) {
 	now := time.Now()
 	config := *DefaultBlacklistLevelConfig()
 	config.EnableLevelBlacklist = true
-	if blacklistSuccessNeedsWrite(config, 0, 0, sql.NullTime{}, 0, sql.NullTime{}, now) {
+	if blacklistSuccessNeedsWrite(config, 0, 0, 0, sql.NullTime{}, 0, sql.NullTime{}, now) {
 		t.Fatal("健康记录不应反复写入")
 	}
-	if !blacklistSuccessNeedsWrite(config, 1, 0, sql.NullTime{}, 0, sql.NullTime{}, now) {
+	if !blacklistSuccessNeedsWrite(config, 1, 0, 0, sql.NullTime{}, 0, sql.NullTime{}, now) {
 		t.Fatal("失败计数未清零时应写入")
 	}
+	if !blacklistSuccessNeedsWrite(config, 0, 1, 0, sql.NullTime{}, 0, sql.NullTime{}, now) {
+		t.Fatal("健康检查失败计数未清零时应写入")
+	}
 	recoveredAt := sql.NullTime{Time: now.Add(-2 * time.Hour), Valid: true}
-	if !blacklistSuccessNeedsWrite(config, 0, 2, recoveredAt, 1, sql.NullTime{}, now) {
+	if !blacklistSuccessNeedsWrite(config, 0, 0, 2, recoveredAt, 1, sql.NullTime{}, now) {
 		t.Fatal("跨过新的降级小时时应写入")
 	}
 }
@@ -2225,6 +2228,53 @@ func TestBlacklistSnapshotKeepsPreviousStateWhenRowScanFails(t *testing.T) {
 	service.RefreshRuntimeSnapshot()
 	if blacklisted, _ := service.IsBlacklistedByID("claude", "1", "Provider"); !blacklisted {
 		t.Fatalf("扫描异常不应发布缺失供应商的不完整快照")
+	}
+}
+
+func TestBlacklistFailureSourceMigrationClearsStaleCountsAndMarksActiveRows(t *testing.T) {
+	useIsolatedHomeDir(t)
+	if err := InitDatabase(); err != nil {
+		t.Fatal(err)
+	}
+	db, err := xdb.DB("default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`DELETE FROM app_settings WHERE key = 'blacklist_failure_sources_v1'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`DELETE FROM provider_blacklist`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO provider_blacklist (
+			platform, provider_id, provider_name, failure_count, health_failure_count, blacklisted_until
+		) VALUES
+			('codex', 'stale', 'Stale', 7, 2, ?),
+			('codex', 'active', 'Active', 9, 3, ?)
+	`, time.Now().Add(-time.Minute), time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := migrateBlacklistFailureSourcesWithDB(db); err != nil {
+		t.Fatal(err)
+	}
+
+	var requestCount int
+	var healthCount int
+	if err := db.QueryRow(`SELECT failure_count, health_failure_count FROM provider_blacklist WHERE provider_id = 'stale'`).Scan(&requestCount, &healthCount); err != nil {
+		t.Fatal(err)
+	}
+	if requestCount != 0 || healthCount != 0 {
+		t.Fatalf("未拉黑旧计数未清零: request=%d health=%d", requestCount, healthCount)
+	}
+	var source string
+	var reason string
+	if err := db.QueryRow(`SELECT blacklist_trigger_source, blacklist_reason FROM provider_blacklist WHERE provider_id = 'active'`).Scan(&source, &reason); err != nil {
+		t.Fatal(err)
+	}
+	if source != BlacklistTriggerSourceLegacy || reason == "" {
+		t.Fatalf("活动旧黑名单未标记来源: source=%q reason=%q", source, reason)
 	}
 }
 
@@ -2725,7 +2775,7 @@ func TestNextProviderSwitchTargetAfterReturnsFalseWithoutCandidate(t *testing.T)
 	}
 }
 
-func TestProviderConcurrencyLimitErrorDoesNotCountAsProviderFailure(t *testing.T) {
+func TestProviderFailureCountingOnlyIncludesAvailabilityFailures(t *testing.T) {
 	if shouldRecordProviderFailure(errProviderConcurrencyLimit) {
 		t.Fatalf("provider concurrency limit should not count as provider failure")
 	}
@@ -2735,8 +2785,20 @@ func TestProviderConcurrencyLimitErrorDoesNotCountAsProviderFailure(t *testing.T
 	if shouldRecordProviderFailure(errClientAbort) {
 		t.Fatalf("client abort should not count as provider failure")
 	}
-	if !shouldRecordProviderFailure(errors.New("upstream failed")) {
-		t.Fatalf("ordinary upstream error should count as provider failure")
+	if shouldRecordProviderFailure(errors.New("proxy conversion failed")) {
+		t.Fatalf("proxy internal error should not count as provider failure")
+	}
+	if shouldRecordProviderFailure(newUpstreamErrorResponse(http.StatusBadRequest, "application/json", nil, nil)) {
+		t.Fatalf("HTTP 4xx should not count as provider failure")
+	}
+	if !shouldRecordProviderFailure(newUpstreamErrorResponse(http.StatusTooManyRequests, "application/json", nil, nil)) {
+		t.Fatalf("HTTP 429 should count as provider failure")
+	}
+	if !shouldRecordProviderFailure(newUpstreamErrorResponse(http.StatusBadGateway, "application/json", nil, nil)) {
+		t.Fatalf("HTTP 5xx should count as provider failure")
+	}
+	if !shouldRecordProviderFailure(&net.DNSError{Err: "temporary failure", Name: "provider.example"}) {
+		t.Fatalf("network error should count as provider failure")
 	}
 }
 

@@ -278,6 +278,14 @@ const openAICompatPromptCacheDisableTTL = 30 * time.Minute
 const unsupportedOptionalParamsTTL = 30 * time.Minute
 const unsupportedOptionalParamsMaxEntries = 4096
 
+const (
+	requestErrorSourceProviderResponse = "provider_response"
+	requestErrorSourceUpstreamNetwork  = "upstream_network"
+	requestErrorSourceUpstreamStream   = "upstream_stream"
+	requestErrorSourceProxy            = "proxy"
+	requestErrorSourceClientAbort      = "client_abort"
+)
+
 type claudeResponsesContinuationRejection int
 
 const (
@@ -1164,7 +1172,17 @@ func isProviderConcurrencyLimitError(err error) bool {
 }
 
 func shouldRecordProviderFailure(err error) bool {
-	return !errors.Is(err, errClientAbort) && !isProviderConcurrencyLimitError(err)
+	if err == nil || errors.Is(err, errClientAbort) || isProviderConcurrencyLimitError(err) {
+		return false
+	}
+	var upstreamErr *upstreamErrorResponse
+	if errors.As(err, &upstreamErr) {
+		return upstreamErr.statusCode == http.StatusTooManyRequests || upstreamErr.statusCode >= http.StatusInternalServerError
+	}
+	if errors.Is(err, errIncompleteStream) {
+		return true
+	}
+	return classifyRequestErrorSource(err, nil) == requestErrorSourceUpstreamNetwork
 }
 
 func logRelayClientAbort(prefix string, providerName string, err error) {
@@ -1175,7 +1193,11 @@ func (prs *ProviderRelayService) recordProviderFailureIfNeeded(platform string, 
 	if prs == nil || prs.blacklistService == nil || !shouldRecordProviderFailure(err) {
 		return nil
 	}
-	return prs.blacklistService.RecordFailureByID(platform, providerID, providerName)
+	reason := ""
+	if err != nil {
+		reason = err.Error()
+	}
+	return prs.blacklistService.RecordFailureWithReasonByID(platform, providerID, providerName, reason)
 }
 
 func sessionAffinityStateKey(platform string, sessionHash string) string {
@@ -3161,7 +3183,7 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 		err := GlobalDBQueueLogs.ExecBatchCtx(ctx, `
 				INSERT INTO request_log (
 					platform, model, requested_model, mapped_model, model_mapping_pattern, model_mapping_target, model_override, model_route_captured,
-					response_model, provider_id, provider, http_code, error_message,
+					response_model, provider_id, provider, http_code, error_message, error_source,
 					reasoning_effort, user_agent,
 					input_tokens, output_tokens, cache_create_tokens, ephemeral_5m_tokens, ephemeral_1h_tokens, cache_read_tokens,
 					reasoning_tokens, is_stream, duration_sec, first_token_sec, total_cost, group_multiplier, price_source,
@@ -3174,7 +3196,7 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 					provider_per_call_unified_set, provider_per_call_input_set, provider_per_call_output_set,
 					request_body, response_body, request_body_truncated, response_body_truncated, payload_bytes, payload_captured,
 					reasoning_effort_source, data_source, dedup_core
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			`,
 			requestLog.Platform,
 			requestLog.Model,
@@ -3189,6 +3211,7 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 			requestLog.Provider,
 			requestLog.HttpCode,
 			requestLog.ErrorMessage,
+			requestLog.ErrorSource,
 			requestLog.ReasoningEffort,
 			requestLog.UserAgent,
 			requestLog.InputTokens,
@@ -4262,6 +4285,40 @@ func setRequestLogErrorMessage(reqLog *ReqeustLog, err error) {
 	message := sanitizeRequestLogPayload(strings.TrimSpace(err.Error()))
 	message, _ = truncateRequestLogPayload(message, requestLogErrorMessageMaxBytes)
 	reqLog.ErrorMessage = message
+	reqLog.ErrorSource = classifyRequestErrorSource(err, reqLog)
+}
+
+func classifyRequestErrorSource(err error, reqLog *ReqeustLog) string {
+	if err == nil {
+		return ""
+	}
+	if errors.Is(err, errClientAbort) || (reqLog != nil && reqLog.StreamErrorKind == "client_abort") {
+		return requestErrorSourceClientAbort
+	}
+	var upstreamErr *upstreamErrorResponse
+	if errors.As(err, &upstreamErr) {
+		return requestErrorSourceProviderResponse
+	}
+	if errors.Is(err, errIncompleteStream) || (reqLog != nil && reqLog.StreamErrorKind != "") {
+		return requestErrorSourceUpstreamStream
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return requestErrorSourceUpstreamNetwork
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return requestErrorSourceUpstreamNetwork
+	}
+	message := strings.ToLower(err.Error())
+	for _, marker := range []string{
+		"dial tcp", "connection refused", "no such host", "network is unreachable",
+		"tls handshake", "connection reset", "unexpected eof", "timeout", "timed out",
+	} {
+		if strings.Contains(message, marker) {
+			return requestErrorSourceUpstreamNetwork
+		}
+	}
+	return requestErrorSourceProxy
 }
 
 func redactRequestLogSessionIdentifiers(payload string) string {
@@ -4470,6 +4527,7 @@ func ensureRequestLogTableWithDB(db *sql.DB) error {
 		stream_terminal_event TEXT DEFAULT '',
 		stream_error_kind TEXT DEFAULT '',
 		error_message TEXT DEFAULT '',
+		error_source TEXT DEFAULT '',
 		stream_compaction_requested INTEGER DEFAULT 0,
 		stream_compaction_observed INTEGER DEFAULT 0,
 		stream_bytes INTEGER DEFAULT 0,
@@ -4564,6 +4622,9 @@ func ensureRequestLogTableWithDB(db *sql.DB) error {
 		return err
 	}
 	if err := ensureRequestLogColumn(db, "error_message", "TEXT DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "error_source", "TEXT DEFAULT ''"); err != nil {
 		return err
 	}
 	if err := ensureRequestLogColumn(db, "stream_compaction_requested", "INTEGER DEFAULT 0"); err != nil {
@@ -5404,6 +5465,7 @@ type ReqeustLog struct {
 	StreamTerminalEvent       string  `json:"stream_terminal_event,omitempty"`
 	StreamErrorKind           string  `json:"stream_error_kind,omitempty"`
 	ErrorMessage              string  `json:"error_message,omitempty"`
+	ErrorSource               string  `json:"error_source,omitempty"`
 	StreamCompactionRequested bool    `json:"stream_compaction_requested"`
 	StreamCompactionObserved  bool    `json:"stream_compaction_observed"`
 	StreamBytes               int64   `json:"stream_bytes"`
@@ -8117,6 +8179,7 @@ func resetGeminiRequestLogAttempt(requestLog *ReqeustLog, startedAt time.Time) {
 	requestLog.StreamTerminalEvent = ""
 	requestLog.StreamErrorKind = ""
 	requestLog.ErrorMessage = ""
+	requestLog.ErrorSource = ""
 	requestLog.StreamCompactionRequested = false
 	requestLog.StreamCompactionObserved = false
 	requestLog.StreamBytes = 0
@@ -8167,7 +8230,7 @@ func (prs *ProviderRelayService) persistGeminiRequestLog(requestLog *ReqeustLog,
 	defer cancel()
 	err := GlobalDBQueueLogs.ExecBatchCtx(ctx, `
 		INSERT INTO request_log (
-			platform, model, requested_model, response_model, provider_id, provider, http_code, error_message,
+			platform, model, requested_model, response_model, provider_id, provider, http_code, error_message, error_source,
 			reasoning_effort, reasoning_effort_source, user_agent,
 			input_tokens, output_tokens, cache_create_tokens, ephemeral_5m_tokens, ephemeral_1h_tokens, cache_read_tokens,
 			reasoning_tokens, is_stream, duration_sec, first_token_sec, total_cost, group_multiplier, price_source,
@@ -8178,9 +8241,9 @@ func (prs *ProviderRelayService) persistGeminiRequestLog(requestLog *ReqeustLog,
 			provider_per_call_unified_set, provider_per_call_input_set, provider_per_call_output_set,
 			request_body, response_body, request_body_truncated, response_body_truncated, payload_bytes, payload_captured,
 			data_source, dedup_core
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
-		requestLog.Platform, requestLog.Model, requestLog.RequestedModel, requestLog.ResponseModel, requestLog.ProviderID, requestLog.Provider, requestLog.HttpCode, requestLog.ErrorMessage,
+		requestLog.Platform, requestLog.Model, requestLog.RequestedModel, requestLog.ResponseModel, requestLog.ProviderID, requestLog.Provider, requestLog.HttpCode, requestLog.ErrorMessage, requestLog.ErrorSource,
 		requestLog.ReasoningEffort, requestLog.ReasoningEffortSource, requestLog.UserAgent,
 		requestLog.InputTokens, requestLog.OutputTokens, requestLog.CacheCreateTokens, requestLog.Ephemeral5mTokens, requestLog.Ephemeral1hTokens,
 		requestLog.CacheReadTokens, requestLog.ReasoningTokens,

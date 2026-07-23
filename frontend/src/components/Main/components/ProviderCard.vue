@@ -574,8 +574,16 @@
         </div>
 
         <div
-          v-if="viewModel.blacklistStatus?.isBlacklisted"
-          :class="['blacklist-banner', { dark: resolvedTheme === 'dark' }]"
+          v-if="viewModel.blacklistStatus && (
+            viewModel.blacklistStatus.isBlacklisted
+            || viewModel.blacklistStatus.failureCount > 0
+            || viewModel.blacklistStatus.healthFailureCount > 0
+          )"
+          :class="[
+            'blacklist-banner',
+            { dark: resolvedTheme === 'dark' },
+            { 'is-pending': !viewModel.blacklistStatus.isBlacklisted },
+          ]"
         >
           <div class="blacklist-info">
             <span class="blacklist-icon" aria-hidden="true">
@@ -595,12 +603,39 @@
               L{{ viewModel.blacklistStatus.blacklistLevel }}
             </span>
             <span class="blacklist-text">
-              {{ t('components.main.blacklist.blocked') }} |
-              {{ t('components.main.blacklist.remaining') }}:
-              {{ formatBlacklistCountdown(viewModel.blacklistStatus.remainingSeconds) }}
+              <strong>
+                {{ viewModel.blacklistStatus.isBlacklisted
+                  ? t('components.main.blacklist.blocked')
+                  : t('components.main.blacklist.pending') }}
+              </strong>
+              <span class="blacklist-counts">
+                {{ t('components.main.blacklist.requestCount', {
+                  current: viewModel.blacklistStatus.failureCount,
+                  threshold: viewModel.blacklistStatus.failureThreshold,
+                }) }}
+                ·
+                {{ t('components.main.blacklist.healthCount', {
+                  current: viewModel.blacklistStatus.healthFailureCount,
+                  threshold: viewModel.blacklistStatus.healthFailureThreshold,
+                }) }}
+              </span>
+              <span v-if="viewModel.blacklistStatus.isBlacklisted" class="blacklist-detail">
+                {{ t('components.main.blacklist.remaining') }}：
+                {{ formatBlacklistCountdown(viewModel.blacklistStatus.remainingSeconds) }}
+                <template v-if="viewModel.blacklistStatus.blacklistTriggerSource">
+                  · {{ blacklistTriggerLabel(viewModel.blacklistStatus.blacklistTriggerSource) }}
+                </template>
+              </span>
+              <span
+                v-if="viewModel.blacklistStatus.blacklistReason"
+                class="blacklist-detail blacklist-reason"
+                :title="viewModel.blacklistStatus.blacklistReason"
+              >
+                {{ t('components.main.blacklist.reason', { reason: viewModel.blacklistStatus.blacklistReason }) }}
+              </span>
             </span>
           </div>
-          <div class="blacklist-actions">
+          <div v-if="viewModel.blacklistStatus.isBlacklisted" class="blacklist-actions">
             <button
               class="unblock-btn primary"
               type="button"
@@ -902,6 +937,13 @@ const quotaProgressWidth = (item: ProviderQuotaDisplayItem) => getQuotaProgressP
 const quotaUsagePercent = (item: ProviderQuotaDisplayItem) => formatQuotaUsagePercent(item)
 
 const showQuotaCountdown = (item: ProviderQuotaDisplayItem) => Boolean(item.countdownLabel)
+
+const blacklistTriggerLabel = (source?: string) => {
+  if (source === 'request' || source === 'health' || source === 'legacy') {
+    return t(`components.main.blacklist.trigger.${source}`)
+  }
+  return t('components.main.blacklist.trigger.unknown')
+}
 
 const progressQuotaItems = computed(() => (
   props.viewModel.quotaDisplay.filter((item) => (

@@ -30,6 +30,28 @@ export const updateBlacklistSettings = async (
   await Call.ByName(`${SETTINGS_SERVICE}.UpdateBlacklistSettings`, threshold, durationSeconds)
 }
 
+export const updateBlacklistSettingsWithHealthThreshold = async (
+  threshold: number,
+  durationSeconds: number,
+  healthThreshold: number,
+): Promise<void> => {
+  await Call.ByName(
+    `${SETTINGS_SERVICE}.UpdateBlacklistSettingsWithHealthThreshold`,
+    threshold,
+    durationSeconds,
+    healthThreshold,
+  )
+}
+
+export const getHealthBlacklistThreshold = async (): Promise<number> => {
+  const result = await Call.ByName(`${SETTINGS_SERVICE}.GetHealthBlacklistThreshold`)
+  return result as number
+}
+
+export const updateHealthBlacklistThreshold = async (threshold: number): Promise<void> => {
+  await Call.ByName(`${SETTINGS_SERVICE}.UpdateHealthBlacklistThreshold`, threshold)
+}
+
 /**
  * 获取等级拉黑开关状态
  * @returns 是否启用等级拉黑机制
