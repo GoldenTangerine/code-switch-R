@@ -1166,16 +1166,18 @@
       },
       "blacklist": {
         "blocked": "Blocked",
+        "detailsTitle": "Blacklist details",
         "pending": "Failure counts",
         "remaining": "Remaining",
+        "triggerLabel": "Source",
         "requestCount": "Requests {current}/{threshold}",
         "healthCount": "Checks {current}/{threshold}",
         "reason": "Reason: {reason}",
         "trigger": {
-          "request": "Triggered by requests",
-          "health": "Triggered by background checks",
-          "legacy": "Triggered by an earlier version",
-          "unknown": "Unknown trigger"
+          "request": "Requests",
+          "health": "Background checks",
+          "legacy": "Earlier version",
+          "unknown": "Unknown"
         },
         "minutes": "m",
         "seconds": "s",

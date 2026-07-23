@@ -1,6 +1,7 @@
 import { reactive, ref } from 'vue'
 import { Call, Events } from '@wailsio/runtime'
 import { getBlacklistStatus, type BlacklistStatus } from '../../../services/blacklist'
+import { getBlacklistSettings, getHealthBlacklistThreshold } from '../../../services/settings'
 import { showToast } from '../../../utils/toast'
 import {
   blacklistStatusKeyFromCard,
@@ -9,7 +10,7 @@ import {
   normalizeProviderRef,
 } from '../adapters/providerCardMappers'
 import { PROVIDER_TAB_IDS } from '../constants'
-import type { LastUsedProvider, ProviderTab, TranslateFn } from '../types'
+import type { LastUsedProvider, ProviderBlacklistCounters, ProviderTab, TranslateFn } from '../types'
 import type { AutomationCard } from '../../../data/cards'
 import { normalizeLastUsedProvider, shouldUseLastUsedProviderForTool } from '../utils/lastUsedProvider'
 
@@ -19,6 +20,28 @@ type UseBlacklistStateOptions = {
   getSelectedToolId: () => string | null
   switchToPlatform: (platform: ProviderTab) => void
 }
+
+const BLACKLIST_THRESHOLD_CACHE_TTL_MS = 60_000
+
+const toNonNegativeInteger = (value: unknown): number => {
+  const numeric = Number(value)
+  return Number.isFinite(numeric) ? Math.max(0, Math.floor(numeric)) : 0
+}
+
+const toPositiveInteger = (value: unknown): number | null => {
+  const numeric = Number(value)
+  return Number.isFinite(numeric) && numeric > 0 ? Math.floor(numeric) : null
+}
+
+export const resolveProviderBlacklistCounters = (
+  status: BlacklistStatus | null,
+  defaults: Pick<ProviderBlacklistCounters, 'failureThreshold' | 'healthFailureThreshold'>,
+): ProviderBlacklistCounters => ({
+  failureCount: toNonNegativeInteger(status?.failureCount),
+  failureThreshold: toPositiveInteger(status?.failureThreshold) ?? toPositiveInteger(defaults.failureThreshold),
+  healthFailureCount: toNonNegativeInteger(status?.healthFailureCount),
+  healthFailureThreshold: toPositiveInteger(status?.healthFailureThreshold) ?? toPositiveInteger(defaults.healthFailureThreshold),
+})
 
 const createBlacklistMap = (): Record<ProviderTab, Record<string, BlacklistStatus>> => ({
   claude: {},
@@ -46,6 +69,8 @@ export function useBlacklistState(options: UseBlacklistStateOptions) {
   const lastUsedProviders = reactive(createLastUsedMap())
   const highlightedProviderRef = ref<string | null>(null)
   const highlightedProviderName = ref<string | null>(null)
+  const blacklistFailureThreshold = ref<number | null>(null)
+  const healthFailureThreshold = ref<number | null>(null)
 
   let blacklistTimer: number | undefined
   let blacklistPollingTimer: number | undefined
@@ -54,6 +79,49 @@ export function useBlacklistState(options: UseBlacklistStateOptions) {
   let unsubscribeBlacklisted: (() => void) | undefined
   let unsubscribeRouted: (() => void) | undefined
   let handleWindowFocus: (() => void) | undefined
+  let blacklistThresholdLoadPromise: Promise<void> | null = null
+  let blacklistThresholdLoadedAt = 0
+
+  const loadBlacklistThresholds = (): Promise<void> => {
+    if (blacklistThresholdLoadPromise) return blacklistThresholdLoadPromise
+    if (blacklistThresholdLoadedAt > 0 && Date.now() - blacklistThresholdLoadedAt < BLACKLIST_THRESHOLD_CACHE_TTL_MS) {
+      return Promise.resolve()
+    }
+
+    const task = (async () => {
+      const [requestResult, healthResult] = await Promise.allSettled([
+        getBlacklistSettings(),
+        getHealthBlacklistThreshold(),
+      ])
+      let hasValidRequestThreshold = false
+      let hasValidHealthThreshold = false
+
+      if (requestResult.status === 'fulfilled') {
+        const threshold = toPositiveInteger(requestResult.value?.failureThreshold)
+        if (threshold !== null) {
+          blacklistFailureThreshold.value = threshold
+          hasValidRequestThreshold = true
+        }
+      }
+
+      if (healthResult.status === 'fulfilled') {
+        const threshold = toPositiveInteger(healthResult.value)
+        if (threshold !== null) {
+          healthFailureThreshold.value = threshold
+          hasValidHealthThreshold = true
+        }
+      }
+
+      if (hasValidRequestThreshold && hasValidHealthThreshold) {
+        blacklistThresholdLoadedAt = Date.now()
+      }
+    })()
+
+    blacklistThresholdLoadPromise = task.finally(() => {
+      blacklistThresholdLoadPromise = null
+    })
+    return blacklistThresholdLoadPromise
+  }
 
   const applyHighlightedProvider = (provider: LastUsedProvider) => {
     highlightedProviderRef.value = normalizeProviderRef(provider.provider_id)
@@ -75,7 +143,10 @@ export function useBlacklistState(options: UseBlacklistStateOptions) {
     }
 
     try {
-      const statuses = await getBlacklistStatus(tab)
+      const [statuses] = await Promise.all([
+        getBlacklistStatus(tab),
+        loadBlacklistThresholds(),
+      ])
       const map: Record<string, BlacklistStatus> = {}
       statuses.forEach((status) => {
         map[blacklistStatusKeyFromStatus(status)] = status
@@ -147,6 +218,16 @@ export function useBlacklistState(options: UseBlacklistStateOptions) {
     const statusKey = blacklistStatusKeyFromCard(card)
     return map[statusKey] || map[card.name.trim().toLowerCase()] || null
   }
+
+  const getProviderBlacklistCounters = (card: AutomationCard): ProviderBlacklistCounters => (
+    resolveProviderBlacklistCounters(
+      getProviderBlacklistStatus(card),
+      {
+        failureThreshold: blacklistFailureThreshold.value,
+        healthFailureThreshold: healthFailureThreshold.value,
+      },
+    )
+  )
 
   const loadLastUsedProviders = async () => {
     try {
@@ -316,6 +397,7 @@ export function useBlacklistState(options: UseBlacklistStateOptions) {
     handleResetLevel,
     formatBlacklistCountdown,
     getProviderBlacklistStatus,
+    getProviderBlacklistCounters,
     loadLastUsedProviders,
     isLastUsedProvider,
     isHighlightedCard,

@@ -1167,8 +1167,10 @@
       },
       "blacklist": {
         "blocked": "已拉黑",
+        "detailsTitle": "拉黑详情",
         "pending": "失败计数",
         "remaining": "剩余",
+        "triggerLabel": "触发来源",
         "requestCount": "请求 {current}/{threshold}",
         "healthCount": "巡检 {current}/{threshold}",
         "reason": "原因：{reason}",

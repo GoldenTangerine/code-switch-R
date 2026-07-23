@@ -145,6 +145,13 @@ export type ProviderCostDisplayPart = {
   value: string
 }
 
+export interface ProviderBlacklistCounters {
+  failureCount: number
+  failureThreshold: number | null
+  healthFailureCount: number
+  healthFailureThreshold: number | null
+}
+
 export type ProviderCardViewModel = {
   card: AutomationCard
   dragging: boolean
@@ -154,6 +161,7 @@ export type ProviderCardViewModel = {
   isHighlighted: boolean
   isDirectApplied: boolean
   blacklistStatus: BlacklistStatus | null
+  blacklistCounters: ProviderBlacklistCounters
   connectivityClass: string
   connectivityTooltip: string
   stats: ProviderStatDisplay

@@ -180,28 +180,35 @@
           :key="`metrics-${viewModel.card.id}`"
           class="card-metrics"
         >
-          <template v-if="stats.state !== 'ready'">
-            <div class="card-metrics-line">
+          <div class="card-metrics-line">
+            <template v-if="stats.state === 'loading'">
               {{ stats.message }}
-            </div>
-          </template>
-          <template v-else>
-            <div class="card-metrics-line">
+            </template>
+            <template v-else-if="stats.state === 'empty'">
+              <template v-if="activeTab !== 'others' && activeTab !== 'opencode'">
+                <span
+                  class="card-success-rate"
+                  :title="successRateTooltip"
+                  :aria-label="successRateTooltip"
+                  tabindex="0"
+                >
+                  {{ t('components.main.providers.successRate') }}: —
+                </span>
+                <span class="card-metric-separator" aria-hidden="true">·</span>
+              </template>
+              <span>{{ stats.message }}</span>
+            </template>
+            <template v-else-if="stats.state === 'ready'">
               <span
-                v-if="stats.successRateLabel"
                 class="card-success-rate"
                 :class="stats.successRateClass"
-                :title="stats.successRateHint"
+                :title="successRateTooltip"
+                :aria-label="successRateTooltip"
+                tabindex="0"
               >
                 {{ stats.successRateLabel }}
               </span>
-              <span
-                v-if="stats.successRateLabel"
-                class="card-metric-separator"
-                aria-hidden="true"
-              >
-                ·
-              </span>
+              <span class="card-metric-separator" aria-hidden="true">·</span>
               <span>{{ stats.requests }}</span>
               <span class="card-metric-separator" aria-hidden="true">·</span>
               <span>{{ stats.tokens }}</span>
@@ -228,7 +235,66 @@
                   </span>
                 </button>
               </span>
-            </div>
+            </template>
+            <template v-if="viewModel.blacklistStatus?.isBlacklisted">
+              <span class="card-metric-separator" aria-hidden="true">·</span>
+              <span ref="blacklistPopoverRef" class="card-blacklist-inline">
+                <button
+                  type="button"
+                  class="card-blacklist-trigger"
+                  :aria-expanded="blacklistPopoverOpen"
+                  :aria-controls="`blacklist-actions-${viewModel.card.id}`"
+                  aria-haspopup="dialog"
+                  @click.stop="blacklistPopoverOpen = !blacklistPopoverOpen"
+                >
+                  {{ t('components.main.blacklist.blocked') }}
+                  {{ formatBlacklistCountdown(viewModel.blacklistStatus.remainingSeconds) }}
+                </button>
+                <div
+                  v-if="blacklistPopoverOpen"
+                  :id="`blacklist-actions-${viewModel.card.id}`"
+                  class="card-blacklist-popover"
+                  role="dialog"
+                  :aria-label="t('components.main.blacklist.detailsTitle')"
+                  @click.stop
+                >
+                  <div class="card-blacklist-popover__row">
+                    <span>{{ t('components.main.blacklist.remaining') }}</span>
+                    <strong>{{ formatBlacklistCountdown(viewModel.blacklistStatus.remainingSeconds) }}</strong>
+                  </div>
+                  <div class="card-blacklist-popover__row">
+                    <span>{{ t('components.main.blacklist.triggerLabel') }}</span>
+                    <strong>{{ blacklistTriggerLabel(viewModel.blacklistStatus.blacklistTriggerSource) }}</strong>
+                  </div>
+                  <div
+                    v-if="viewModel.blacklistStatus.blacklistReason"
+                    class="card-blacklist-popover__reason"
+                  >
+                    {{ t('components.main.blacklist.reason', { reason: viewModel.blacklistStatus.blacklistReason }) }}
+                  </div>
+                  <div class="card-blacklist-popover__actions">
+                    <button
+                      type="button"
+                      class="unblock-btn primary"
+                      :title="t('components.main.blacklist.unblockAndResetHint')"
+                      @click.stop="handleUnblockAndReset"
+                    >
+                      {{ t('components.main.blacklist.unblockAndReset') }}
+                    </button>
+                    <button
+                      type="button"
+                      class="unblock-btn secondary"
+                      :title="t('components.main.blacklist.resetLevelHint')"
+                      @click.stop="handleResetLevel"
+                    >
+                      {{ t('components.main.blacklist.resetLevel') }}
+                    </button>
+                  </div>
+                </div>
+              </span>
+            </template>
+          </div>
+          <template v-if="stats.state === 'ready'">
             <div
               class="card-metrics-line card-metrics-line-performance"
               :title="stats.performanceHint"
@@ -575,88 +641,7 @@
         </div>
 
         <div
-          v-if="viewModel.blacklistStatus && (
-            viewModel.blacklistStatus.isBlacklisted
-            || viewModel.blacklistStatus.failureCount > 0
-            || viewModel.blacklistStatus.healthFailureCount > 0
-          )"
-          :class="[
-            'blacklist-banner',
-            { dark: resolvedTheme === 'dark' },
-            { 'is-pending': !viewModel.blacklistStatus.isBlacklisted },
-          ]"
-        >
-          <div class="blacklist-info">
-            <span class="blacklist-icon" aria-hidden="true">
-              <svg viewBox="0 0 20 20">
-                <circle cx="10" cy="10" r="7.5" fill="none" stroke="currentColor" stroke-width="1.6" />
-                <path d="M6.9 13.1l6.2-6.2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
-              </svg>
-            </span>
-            <span
-              v-if="viewModel.blacklistStatus.blacklistLevel > 0"
-              :class="[
-                'level-badge',
-                `level-${viewModel.blacklistStatus.blacklistLevel}`,
-                { dark: resolvedTheme === 'dark' },
-              ]"
-            >
-              L{{ viewModel.blacklistStatus.blacklistLevel }}
-            </span>
-            <span class="blacklist-text">
-              <strong>
-                {{ viewModel.blacklistStatus.isBlacklisted
-                  ? t('components.main.blacklist.blocked')
-                  : t('components.main.blacklist.pending') }}
-              </strong>
-              <span class="blacklist-counts">
-                {{ t('components.main.blacklist.requestCount', {
-                  current: viewModel.blacklistStatus.failureCount,
-                  threshold: viewModel.blacklistStatus.failureThreshold,
-                }) }}
-                ·
-                {{ t('components.main.blacklist.healthCount', {
-                  current: viewModel.blacklistStatus.healthFailureCount,
-                  threshold: viewModel.blacklistStatus.healthFailureThreshold,
-                }) }}
-              </span>
-              <span v-if="viewModel.blacklistStatus.isBlacklisted" class="blacklist-detail">
-                {{ t('components.main.blacklist.remaining') }}：
-                {{ formatBlacklistCountdown(viewModel.blacklistStatus.remainingSeconds) }}
-                <template v-if="viewModel.blacklistStatus.blacklistTriggerSource">
-                  · {{ blacklistTriggerLabel(viewModel.blacklistStatus.blacklistTriggerSource) }}
-                </template>
-              </span>
-              <span
-                v-if="viewModel.blacklistStatus.blacklistReason"
-                class="blacklist-detail blacklist-reason"
-                :title="viewModel.blacklistStatus.blacklistReason"
-              >
-                {{ t('components.main.blacklist.reason', { reason: viewModel.blacklistStatus.blacklistReason }) }}
-              </span>
-            </span>
-          </div>
-          <div v-if="viewModel.blacklistStatus.isBlacklisted" class="blacklist-actions">
-            <button
-              class="unblock-btn primary"
-              type="button"
-              :title="t('components.main.blacklist.unblockAndResetHint')"
-              @click.stop="$emit('unblock-and-reset')"
-            >
-              {{ t('components.main.blacklist.unblockAndReset') }}
-            </button>
-            <button
-              class="unblock-btn secondary"
-              type="button"
-              :title="t('components.main.blacklist.resetLevelHint')"
-              @click.stop="$emit('reset-level')"
-            >
-              {{ t('components.main.blacklist.resetLevel') }}
-            </button>
-          </div>
-        </div>
-        <div
-          v-else-if="viewModel.blacklistStatus && viewModel.blacklistStatus.blacklistLevel > 0"
+          v-if="viewModel.blacklistStatus && !viewModel.blacklistStatus.isBlacklisted && viewModel.blacklistStatus.blacklistLevel > 0"
           class="level-badge-standalone"
         >
           <span
@@ -886,6 +871,7 @@ import {
 import { isDirectApplyBlockedForProvider } from '../utils/providerDirectApply'
 import { isHostedRouteActive } from '../utils/providerRoutingState'
 import { shouldShowProviderLogBadge } from '../utils/providerLogBadge'
+import { buildProviderSuccessRateTooltip } from '../utils/providerBlacklistDisplay'
 
 const props = defineProps<{
   viewModel: ProviderCardViewModel
@@ -945,6 +931,66 @@ const blacklistTriggerLabel = (source?: string) => {
     return t(`components.main.blacklist.trigger.${source}`)
   }
   return t('components.main.blacklist.trigger.unknown')
+}
+
+const successRateTooltip = computed(() => {
+  const stats = props.viewModel.stats
+  const counters = props.viewModel.blacklistCounters
+  const summary = stats.state === 'ready'
+    ? stats.successRateHint
+    : stats.state === 'empty'
+      ? t('components.main.providers.noData')
+      : ''
+
+  return buildProviderSuccessRateTooltip(summary, counters, t)
+})
+
+const blacklistPopoverOpen = ref(false)
+const blacklistPopoverRef = ref<HTMLElement | null>(null)
+
+const closeBlacklistPopover = () => {
+  blacklistPopoverOpen.value = false
+}
+
+const handleBlacklistPopoverPointerDown = (event: PointerEvent) => {
+  if (!blacklistPopoverRef.value?.contains(event.target as Node)) {
+    closeBlacklistPopover()
+  }
+}
+
+const handleBlacklistPopoverKeydown = (event: KeyboardEvent) => {
+  if (event.key === 'Escape') {
+    closeBlacklistPopover()
+  }
+}
+
+const stopBlacklistPopoverListeners = () => {
+  document.removeEventListener('pointerdown', handleBlacklistPopoverPointerDown)
+  document.removeEventListener('keydown', handleBlacklistPopoverKeydown)
+}
+
+watch(blacklistPopoverOpen, (open) => {
+  stopBlacklistPopoverListeners()
+  if (open) {
+    document.addEventListener('pointerdown', handleBlacklistPopoverPointerDown)
+    document.addEventListener('keydown', handleBlacklistPopoverKeydown)
+  }
+})
+
+watch(() => props.viewModel.blacklistStatus?.isBlacklisted, (isBlacklisted) => {
+  if (!isBlacklisted) {
+    closeBlacklistPopover()
+  }
+})
+
+const handleUnblockAndReset = () => {
+  closeBlacklistPopover()
+  emit('unblock-and-reset')
+}
+
+const handleResetLevel = () => {
+  closeBlacklistPopover()
+  emit('reset-level')
 }
 
 const progressQuotaItems = computed(() => (
@@ -1072,6 +1118,7 @@ watch(hasQuotaStatusPanelItems, (enabled) => {
 }, { immediate: true })
 
 onUnmounted(() => {
+  stopBlacklistPopoverListeners()
   stopBalanceQuotaTimeTicker()
   clearProviderLogsClickTimer()
 })

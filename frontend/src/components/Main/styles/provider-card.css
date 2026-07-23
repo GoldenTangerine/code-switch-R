@@ -426,6 +426,7 @@
 }
 
 .card-metrics {
+  position: relative;
   margin: 10px 0 0;
   display: flex;
   flex-direction: column;
@@ -457,7 +458,13 @@
 }
 
 .card-success-rate {
+  border-radius: 5px;
   font-weight: 700;
+}
+
+.card-success-rate:focus-visible {
+  outline: 2px solid color-mix(in srgb, currentColor 36%, transparent);
+  outline-offset: 3px;
 }
 
 .card-success-rate.success-good {
@@ -561,6 +568,112 @@
 
 .card-cost-trigger--zero:hover .card-cost-trigger__part--amount {
   color: #475569;
+}
+
+.card-blacklist-inline {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.card-blacklist-trigger {
+  display: inline-flex;
+  align-items: center;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: #dc2626;
+  font: inherit;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 180ms ease, background 180ms ease;
+}
+
+.card-blacklist-trigger:hover {
+  color: #b91c1c;
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.card-blacklist-trigger:focus-visible {
+  outline: 2px solid rgba(239, 68, 68, 0.36);
+  outline-offset: 3px;
+}
+
+.automation-card.theme-dark .card-blacklist-trigger {
+  color: #fca5a5;
+}
+
+.automation-card.theme-dark .card-blacklist-trigger:hover {
+  color: #fecaca;
+  background: rgba(248, 113, 113, 0.12);
+}
+
+.card-blacklist-popover {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 9px);
+  right: 0;
+  width: min(300px, calc(100vw - 36px));
+  padding: 12px;
+  border: 1px solid var(--provider-tooltip-border);
+  border-radius: 10px;
+  background: var(--provider-tooltip-bg);
+  color: var(--provider-text-color);
+  box-shadow: var(--provider-tooltip-shadow);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+.card-blacklist-popover__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.card-blacklist-popover__row + .card-blacklist-popover__row {
+  margin-top: 5px;
+}
+
+.card-blacklist-popover__row span {
+  color: var(--provider-muted-color);
+}
+
+.card-blacklist-popover__row strong {
+  color: #dc2626;
+  font-weight: 700;
+  text-align: right;
+}
+
+.automation-card.theme-dark .card-blacklist-popover__row strong {
+  color: #fca5a5;
+}
+
+.card-blacklist-popover__reason {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--provider-tooltip-border);
+  color: var(--provider-muted-color);
+  overflow-wrap: anywhere;
+}
+
+.card-blacklist-popover__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 10px;
+}
+
+.card-blacklist-popover .unblock-btn {
+  min-height: 28px;
+  padding: 0 9px;
+  border-radius: 7px;
+  font-size: 0.7rem;
 }
 
 .automation-card.theme-dark .card-cost-trigger__part--currency {
@@ -1680,95 +1793,6 @@
   border-color: rgba(251, 113, 133, 0.24);
 }
 
-.blacklist-banner {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px 14px;
-  margin-top: 12px;
-  padding: 12px 14px;
-  border-radius: 16px;
-  border: 1px solid rgba(248, 113, 113, 0.22);
-  background: linear-gradient(135deg, rgba(254, 242, 242, 0.95) 0%, rgba(255, 237, 213, 0.88) 100%);
-  color: #dc2626;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5);
-}
-
-.blacklist-banner.dark,
-.automation-card.theme-dark .blacklist-banner {
-  border-color: rgba(248, 113, 113, 0.22);
-  background: linear-gradient(135deg, rgba(127, 29, 29, 0.36) 0%, rgba(120, 53, 15, 0.28) 100%);
-  color: #fca5a5;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
-}
-
-.blacklist-banner.is-pending {
-  border-color: rgba(245, 158, 11, 0.22);
-  background: rgba(255, 251, 235, 0.92);
-  color: #b45309;
-}
-
-.blacklist-banner.is-pending.dark,
-.automation-card.theme-dark .blacklist-banner.is-pending {
-  border-color: rgba(245, 158, 11, 0.22);
-  background: rgba(120, 53, 15, 0.24);
-  color: #fbbf24;
-}
-
-.blacklist-info {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-  flex: 1 1 auto;
-}
-
-.blacklist-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  flex-shrink: 0;
-  color: currentColor;
-}
-
-.blacklist-icon svg {
-  width: 100%;
-  height: 100%;
-}
-
-.blacklist-text {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-  font-size: 0.78rem;
-  font-weight: 600;
-  line-height: 1.45;
-}
-
-.blacklist-counts,
-.blacklist-detail {
-  font-weight: 500;
-  opacity: 0.9;
-}
-
-.blacklist-reason {
-  max-width: 520px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.blacklist-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
 .unblock-btn {
   display: inline-flex;
   align-items: center;
@@ -2299,6 +2323,18 @@
   }
 
   .card-site {
+    max-width: 100%;
+  }
+
+  .card-blacklist-inline {
+    position: static;
+  }
+
+  .card-blacklist-popover {
+    top: calc(100% + 8px);
+    right: 0;
+    left: 0;
+    width: auto;
     max-width: 100%;
   }
 
