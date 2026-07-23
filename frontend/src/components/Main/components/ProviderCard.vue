@@ -191,6 +191,7 @@
                 v-if="stats.successRateLabel"
                 class="card-success-rate"
                 :class="stats.successRateClass"
+                :title="stats.successRateHint"
               >
                 {{ stats.successRateLabel }}
               </span>

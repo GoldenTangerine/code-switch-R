@@ -2,6 +2,7 @@ package services
 
 import (
 	"database/sql"
+	"fmt"
 	"testing"
 
 	modelpricing "codeswitch/resources/model-pricing"
@@ -95,6 +96,66 @@ func TestStatsRangeV2_PreservesStoredAggregatedCostSnapshot(t *testing.T) {
 	}
 	if !floatEquals(nonZeroBuckets[1].TotalCost, modelBreakdownB.TotalCost) {
 		t.Fatalf("第二个非空桶 TotalCost = %.12f, 期望 %.12f", nonZeroBuckets[1].TotalCost, modelBreakdownB.TotalCost)
+	}
+}
+
+func TestRequestOutcomeControlsSuccessRateAndFailureLists(t *testing.T) {
+	useIsolatedHomeDir(t)
+
+	if err := InitDatabase(); err != nil {
+		t.Fatalf("初始化数据库失败: %v", err)
+	}
+	db, err := xdb.DB("default")
+	if err != nil {
+		t.Fatalf("获取数据库连接失败: %v", err)
+	}
+
+	rows := []struct {
+		httpCode int
+		outcome  string
+		reason   string
+	}{
+		{httpCode: 200, outcome: requestOutcomeSuccess, reason: requestOutcomeReasonProtocolCompleted},
+		{httpCode: 502, outcome: requestOutcomeFailure, reason: requestOutcomeReasonUpstreamStreamError},
+		{httpCode: 499, outcome: requestOutcomeExcluded, reason: requestOutcomeReasonClientAbort},
+		{httpCode: 502},
+		{httpCode: 503, outcome: "unknown"},
+		{httpCode: 503, outcome: "  " + requestOutcomeSuccess + "  "},
+	}
+	for index, row := range rows {
+		if _, err := db.Exec(`
+			INSERT INTO request_log (
+				platform, model, provider_id, provider, http_code,
+				request_outcome, outcome_reason, created_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		`, "codex", "gpt-5", "outcome-provider", "Outcome Provider", row.httpCode, row.outcome, row.reason, fmt.Sprintf("2026-02-25 10:0%d:00", index)); err != nil {
+			t.Fatalf("插入测试日志失败: %v", err)
+		}
+	}
+
+	ls := NewLogService(nil)
+	summary, err := ls.SummaryRangeV2("codex", "outcome-provider", "", "2026-02-25 00:00:00", "2026-02-26 00:00:00")
+	if err != nil {
+		t.Fatalf("SummaryRangeV2 调用失败: %v", err)
+	}
+	if summary.TotalRequests != 6 || summary.SuccessfulRequests != 2 || summary.FailedRequests != 3 || summary.ExcludedRequests != 1 {
+		t.Fatalf("三态汇总错误: %#v", summary)
+	}
+	if !floatEquals(summary.SuccessRate, 2.0/5.0) {
+		t.Fatalf("成功率=%f，期望 %f", summary.SuccessRate, 2.0/5.0)
+	}
+
+	providerStats, err := ls.ProviderStatsRangeV2("codex", "outcome-provider", "", "2026-02-25 00:00:00", "2026-02-26 00:00:00")
+	if err != nil || len(providerStats) != 1 {
+		t.Fatalf("ProviderStatsRangeV2 结果错误: stats=%#v err=%v", providerStats, err)
+	}
+	if providerStats[0].ExcludedRequests != 1 || !floatEquals(providerStats[0].SuccessRate, 2.0/5.0) {
+		t.Fatalf("供应商三态统计错误: %#v", providerStats[0])
+	}
+
+	failedPage, err := ls.ListFailedRequestLogsPageV2("codex", "outcome-provider", 20, 0, "2026-02-25 00:00:00", "2026-02-26 00:00:00")
+	if err != nil || failedPage.Total != 3 {
+		t.Fatalf("失败列表应包含显式失败、旧日志失败和未知结果失败: total=%d err=%v", failedPage.Total, err)
 	}
 }
 

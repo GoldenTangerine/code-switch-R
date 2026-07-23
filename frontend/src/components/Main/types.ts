@@ -133,6 +133,7 @@ export type ProviderStatDisplay =
       performanceHint: string
       successRateLabel: string
       successRateClass: string
+      successRateHint: string
       failedRequests: number
       unreadFailedRequests: number
       hasUnreadErrorLogs: boolean

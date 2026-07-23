@@ -310,16 +310,25 @@ export function useProviderStats(options: UseProviderStatsOptions) {
     const outputTokens = Number.isFinite(Number(stat.output_tokens)) ? Number(stat.output_tokens) : 0
     const cacheReadTokens = Number.isFinite(Number(stat.cache_read_tokens)) ? Number(stat.cache_read_tokens) : 0
     const totalTokens = Math.max(0, inputTokens + outputTokens + cacheReadTokens)
-    const totalRequests = Number(stat.total_requests ?? 0)
-    const successRateValue = totalRequests > 0 && Number.isFinite(stat.success_rate) ? clamp(stat.success_rate, 0, 1) : null
-    const successRateLabel = successRateValue !== null ? formatSuccessRateLabel(successRateValue) : ''
+    const successfulRequests = Math.max(0, Math.floor(Number(stat.successful_requests || 0)))
+    const failedRequestsRaw = Number(stat.failed_requests ?? 0)
+    const failedRequests = Number.isFinite(failedRequestsRaw) ? Math.max(0, Math.floor(failedRequestsRaw)) : 0
+    const excludedRequests = Math.max(0, Math.floor(Number(stat.excluded_requests || 0)))
+    const evaluatedRequests = successfulRequests + failedRequests
+    const successRateValue = evaluatedRequests > 0 && Number.isFinite(stat.success_rate) ? clamp(stat.success_rate, 0, 1) : null
+    const successRateLabel = successRateValue !== null
+      ? formatSuccessRateLabel(successRateValue)
+      : `${t('components.main.providers.successRate')}: —`
     const successRateClass = successRateValue !== null ? successRateClassName(successRateValue) : ''
+    const successRateHint = t('components.main.providers.successRateHint', {
+      successful: formatMetric(successfulRequests),
+      failed: formatMetric(failedRequests),
+      excluded: formatMetric(excludedRequests),
+    })
     const ttftSampleCountRaw = Number(stat.ttft_sample_count ?? 0)
     const tpsSampleCountRaw = Number(stat.tps_sample_count ?? 0)
     const ttftSampleCount = Number.isFinite(ttftSampleCountRaw) ? Math.max(0, Math.floor(ttftSampleCountRaw)) : 0
     const tpsSampleCount = Number.isFinite(tpsSampleCountRaw) ? Math.max(0, Math.floor(tpsSampleCountRaw)) : 0
-    const failedRequestsRaw = Number(stat.failed_requests ?? 0)
-    const failedRequests = Number.isFinite(failedRequestsRaw) ? Math.max(0, Math.floor(failedRequestsRaw)) : 0
     const costTotalRaw = Number(stat.cost_total ?? 0)
     const normalizedCost = Number.isFinite(costTotalRaw) ? Math.max(costTotalRaw, 0) : 0
     const costDisplay = buildProviderCostDisplay(normalizedCost, getLocale() || 'en')
@@ -341,6 +350,7 @@ export function useProviderStats(options: UseProviderStatsOptions) {
       performanceHint,
       successRateLabel,
       successRateClass,
+      successRateHint,
       failedRequests,
       unreadFailedRequests,
       hasUnreadErrorLogs,

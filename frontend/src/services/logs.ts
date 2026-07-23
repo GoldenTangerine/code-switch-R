@@ -5,6 +5,7 @@ export type RequestLogPlatform = LogPlatform | `custom:${string}`
 export type LogDataSourceMode = 'proxy' | 'session' | 'all'
 export type ReasoningEffortSource = 'request' | 'request_body_override' | 'model_mapping' | ''
 export type RequestErrorSource = 'provider_response' | 'upstream_network' | 'upstream_stream' | 'proxy' | 'client_abort' | ''
+export type RequestOutcome = 'success' | 'failure' | 'excluded' | ''
 
 export type RequestLog = {
   id: number
@@ -23,6 +24,8 @@ export type RequestLog = {
   provider_id?: string
   provider: string
   http_code: number
+  request_outcome?: RequestOutcome
+  outcome_reason?: string
   input_tokens: number
   output_tokens: number
   cache_create_tokens: number
@@ -191,7 +194,9 @@ export type LogStats = {
 
 export type LogSummary = {
   total_requests: number
+  successful_requests?: number
   failed_requests: number
+  excluded_requests?: number
   success_rate: number
   input_tokens: number
   output_tokens: number
@@ -447,6 +452,7 @@ export type ProviderDailyStat = {
   total_requests: number
   successful_requests: number
   failed_requests: number
+  excluded_requests?: number
   unread_failed_requests?: number
   success_rate: number
   input_tokens: number

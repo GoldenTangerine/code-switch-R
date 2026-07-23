@@ -101,4 +101,42 @@ describe('useProviderStats duration display', () => {
       expect(display.ttft).toBe(expected)
     }
   })
+
+  it('shows an unavailable rate when all requests are excluded', async () => {
+    const card = buildCard()
+    const stats = useProviderStats({
+      t: (key: string) => key,
+      getLocale: () => 'en',
+      getActiveTab: () => 'claude',
+      cards: {
+        claude: [card],
+        codex: [],
+        gemini: [],
+        opencode: [],
+        others: [],
+      },
+      refreshAvailabilityResults: vi.fn().mockResolvedValue(undefined),
+    })
+    fetchProviderUnreadFailedStatsMock.mockResolvedValue([])
+    fetchProviderDailyStatsMock.mockResolvedValue([{
+      provider_id: '102',
+      provider: 'kimi',
+      total_requests: 3,
+      successful_requests: 0,
+      failed_requests: 0,
+      excluded_requests: 3,
+      success_rate: 0,
+      input_tokens: 0,
+      output_tokens: 0,
+      cache_read_tokens: 0,
+    }])
+
+    await stats.loadProviderStats('claude')
+
+    const display = stats.providerStatDisplay(card)
+    expect(display.state).toBe('ready')
+    if (display.state !== 'ready') throw new Error(`provider stat display state = ${display.state}`)
+    expect(display.successRateLabel).toContain('—')
+    expect(display.successRateClass).toBe('')
+  })
 })

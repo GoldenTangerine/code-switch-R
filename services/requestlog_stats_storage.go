@@ -27,6 +27,7 @@ type requestLogStatsAgg struct {
 	TotalRequests      int64
 	SuccessfulRequests int64
 	FailedRequests     int64
+	ExcludedRequests   int64
 	InputTokens        int64
 	OutputTokens       int64
 	ReasoningTokens    int64
@@ -78,6 +79,7 @@ func ensureRequestLogStatsTablesWithDB(db *sql.DB) error {
 		total_requests INTEGER NOT NULL DEFAULT 0,
 		successful_requests INTEGER NOT NULL DEFAULT 0,
 		failed_requests INTEGER NOT NULL DEFAULT 0,
+		excluded_requests INTEGER NOT NULL DEFAULT 0,
 		input_tokens INTEGER NOT NULL DEFAULT 0,
 		output_tokens INTEGER NOT NULL DEFAULT 0,
 		reasoning_tokens INTEGER NOT NULL DEFAULT 0,
@@ -93,6 +95,9 @@ func ensureRequestLogStatsTablesWithDB(db *sql.DB) error {
 	if err := ensureRequestLogStatsColumnWithDB(db, requestLogStatsHourlyTable, "provider_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
+	if err := ensureRequestLogStatsColumnWithDB(db, requestLogStatsHourlyTable, "excluded_requests", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
 	if err := ensureRequestLogStatsIdentityKeyWithDB(db, requestLogStatsHourlyTable); err != nil {
 		return err
 	}
@@ -105,6 +110,7 @@ func ensureRequestLogStatsTablesWithDB(db *sql.DB) error {
 		total_requests INTEGER NOT NULL DEFAULT 0,
 		successful_requests INTEGER NOT NULL DEFAULT 0,
 		failed_requests INTEGER NOT NULL DEFAULT 0,
+		excluded_requests INTEGER NOT NULL DEFAULT 0,
 		input_tokens INTEGER NOT NULL DEFAULT 0,
 		output_tokens INTEGER NOT NULL DEFAULT 0,
 		reasoning_tokens INTEGER NOT NULL DEFAULT 0,
@@ -118,6 +124,9 @@ func ensureRequestLogStatsTablesWithDB(db *sql.DB) error {
 		return err
 	}
 	if err := ensureRequestLogStatsColumnWithDB(db, requestLogStatsDailyTable, "provider_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogStatsColumnWithDB(db, requestLogStatsDailyTable, "excluded_requests", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
 	}
 	if err := ensureRequestLogStatsIdentityKeyWithDB(db, requestLogStatsDailyTable); err != nil {
@@ -202,6 +211,7 @@ func ensureRequestLogStatsIdentityKeyWithDB(db *sql.DB, table string) error {
 		total_requests INTEGER NOT NULL DEFAULT 0,
 		successful_requests INTEGER NOT NULL DEFAULT 0,
 		failed_requests INTEGER NOT NULL DEFAULT 0,
+		excluded_requests INTEGER NOT NULL DEFAULT 0,
 		input_tokens INTEGER NOT NULL DEFAULT 0,
 		output_tokens INTEGER NOT NULL DEFAULT 0,
 		reasoning_tokens INTEGER NOT NULL DEFAULT 0,
@@ -216,7 +226,7 @@ func ensureRequestLogStatsIdentityKeyWithDB(db *sql.DB, table string) error {
 	insertSQL := fmt.Sprintf(`
 		INSERT INTO %s (
 			bucket_start, platform, provider_id, provider,
-			total_requests, successful_requests, failed_requests,
+			total_requests, successful_requests, failed_requests, excluded_requests,
 			input_tokens, output_tokens, reasoning_tokens, cache_create_tokens, cache_read_tokens,
 			total_cost
 		)
@@ -234,6 +244,7 @@ func ensureRequestLogStatsIdentityKeyWithDB(db *sql.DB, table string) error {
 			SUM(total_requests),
 			SUM(successful_requests),
 			SUM(failed_requests),
+			SUM(excluded_requests),
 			SUM(input_tokens),
 			SUM(output_tokens),
 			SUM(reasoning_tokens),
@@ -276,7 +287,7 @@ WHEN COALESCE(NULLIF(TRIM(NEW.data_source), ''), 'proxy') = 'proxy'
 BEGIN
   INSERT INTO %s (
     bucket_start, platform, provider_id, provider,
-    total_requests, successful_requests, failed_requests,
+    total_requests, successful_requests, failed_requests, excluded_requests,
     input_tokens, output_tokens, reasoning_tokens, cache_create_tokens, cache_read_tokens,
     total_cost
 	  ) VALUES (
@@ -285,8 +296,9 @@ BEGIN
 	    COALESCE(NULLIF(TRIM(NEW.provider_id), ''), COALESCE(NEW.provider, ''), '__unknown__'),
 	    COALESCE(NEW.provider, ''),
 	    1,
-	    CASE WHEN COALESCE(NEW.http_code, 0) >= 200 AND COALESCE(NEW.http_code, 0) < 300 THEN 1 ELSE 0 END,
-	    CASE WHEN COALESCE(NEW.http_code, 0) >= 200 AND COALESCE(NEW.http_code, 0) < 300 THEN 0 ELSE 1 END,
+	    CASE WHEN TRIM(COALESCE(NEW.request_outcome, '')) = 'success' OR (TRIM(COALESCE(NEW.request_outcome, '')) NOT IN ('success', 'failure', 'excluded') AND COALESCE(NEW.http_code, 0) >= 200 AND COALESCE(NEW.http_code, 0) < 300) THEN 1 ELSE 0 END,
+	    CASE WHEN TRIM(COALESCE(NEW.request_outcome, '')) = 'failure' OR (TRIM(COALESCE(NEW.request_outcome, '')) NOT IN ('success', 'failure', 'excluded') AND NOT (COALESCE(NEW.http_code, 0) >= 200 AND COALESCE(NEW.http_code, 0) < 300)) THEN 1 ELSE 0 END,
+	    CASE WHEN TRIM(COALESCE(NEW.request_outcome, '')) = 'excluded' THEN 1 ELSE 0 END,
     COALESCE(NEW.input_tokens, 0),
     COALESCE(NEW.output_tokens, 0),
     COALESCE(NEW.reasoning_tokens, 0),
@@ -299,6 +311,7 @@ BEGIN
 	    total_requests = total_requests + excluded.total_requests,
 	    successful_requests = successful_requests + excluded.successful_requests,
 	    failed_requests = failed_requests + excluded.failed_requests,
+	    excluded_requests = excluded_requests + excluded.excluded_requests,
 	    input_tokens = input_tokens + excluded.input_tokens,
 	    output_tokens = output_tokens + excluded.output_tokens,
     reasoning_tokens = reasoning_tokens + excluded.reasoning_tokens,
@@ -318,7 +331,7 @@ WHEN COALESCE(NULLIF(TRIM(NEW.data_source), ''), 'proxy') = 'proxy'
 BEGIN
   INSERT INTO %s (
     bucket_start, platform, provider_id, provider,
-    total_requests, successful_requests, failed_requests,
+    total_requests, successful_requests, failed_requests, excluded_requests,
     input_tokens, output_tokens, reasoning_tokens, cache_create_tokens, cache_read_tokens,
     total_cost
 	  ) VALUES (
@@ -327,8 +340,9 @@ BEGIN
 	    COALESCE(NULLIF(TRIM(NEW.provider_id), ''), COALESCE(NEW.provider, ''), '__unknown__'),
 	    COALESCE(NEW.provider, ''),
 	    1,
-	    CASE WHEN COALESCE(NEW.http_code, 0) >= 200 AND COALESCE(NEW.http_code, 0) < 300 THEN 1 ELSE 0 END,
-	    CASE WHEN COALESCE(NEW.http_code, 0) >= 200 AND COALESCE(NEW.http_code, 0) < 300 THEN 0 ELSE 1 END,
+	    CASE WHEN TRIM(COALESCE(NEW.request_outcome, '')) = 'success' OR (TRIM(COALESCE(NEW.request_outcome, '')) NOT IN ('success', 'failure', 'excluded') AND COALESCE(NEW.http_code, 0) >= 200 AND COALESCE(NEW.http_code, 0) < 300) THEN 1 ELSE 0 END,
+	    CASE WHEN TRIM(COALESCE(NEW.request_outcome, '')) = 'failure' OR (TRIM(COALESCE(NEW.request_outcome, '')) NOT IN ('success', 'failure', 'excluded') AND NOT (COALESCE(NEW.http_code, 0) >= 200 AND COALESCE(NEW.http_code, 0) < 300)) THEN 1 ELSE 0 END,
+	    CASE WHEN TRIM(COALESCE(NEW.request_outcome, '')) = 'excluded' THEN 1 ELSE 0 END,
     COALESCE(NEW.input_tokens, 0),
     COALESCE(NEW.output_tokens, 0),
     COALESCE(NEW.reasoning_tokens, 0),
@@ -341,6 +355,7 @@ BEGIN
 	    total_requests = total_requests + excluded.total_requests,
 	    successful_requests = successful_requests + excluded.successful_requests,
 	    failed_requests = failed_requests + excluded.failed_requests,
+	    excluded_requests = excluded_requests + excluded.excluded_requests,
 	    input_tokens = input_tokens + excluded.input_tokens,
 	    output_tokens = output_tokens + excluded.output_tokens,
     reasoning_tokens = reasoning_tokens + excluded.reasoning_tokens,
@@ -467,15 +482,16 @@ func backfillRequestLogStatsWithDB(db *sql.DB) error {
 	hourlyUpsert := fmt.Sprintf(`
 	INSERT INTO %s (
 	  bucket_start, platform, provider_id, provider,
-	  total_requests, successful_requests, failed_requests,
+	  total_requests, successful_requests, failed_requests, excluded_requests,
 	  input_tokens, output_tokens, reasoning_tokens, cache_create_tokens, cache_read_tokens,
 	  total_cost
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(bucket_start, platform, provider_id) DO UPDATE SET
 	  provider = CASE WHEN excluded.provider <> '' THEN excluded.provider ELSE provider END,
 	  total_requests = total_requests + excluded.total_requests,
 	  successful_requests = successful_requests + excluded.successful_requests,
 	  failed_requests = failed_requests + excluded.failed_requests,
+	  excluded_requests = excluded_requests + excluded.excluded_requests,
 	  input_tokens = input_tokens + excluded.input_tokens,
 	  output_tokens = output_tokens + excluded.output_tokens,
   reasoning_tokens = reasoning_tokens + excluded.reasoning_tokens,
@@ -487,15 +503,16 @@ func backfillRequestLogStatsWithDB(db *sql.DB) error {
 	dailyUpsert := fmt.Sprintf(`
 	INSERT INTO %s (
 	  bucket_start, platform, provider_id, provider,
-	  total_requests, successful_requests, failed_requests,
+	  total_requests, successful_requests, failed_requests, excluded_requests,
 	  input_tokens, output_tokens, reasoning_tokens, cache_create_tokens, cache_read_tokens,
 	  total_cost
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(bucket_start, platform, provider_id) DO UPDATE SET
 	  provider = CASE WHEN excluded.provider <> '' THEN excluded.provider ELSE provider END,
 	  total_requests = total_requests + excluded.total_requests,
 	  successful_requests = successful_requests + excluded.successful_requests,
 	  failed_requests = failed_requests + excluded.failed_requests,
+	  excluded_requests = excluded_requests + excluded.excluded_requests,
 	  input_tokens = input_tokens + excluded.input_tokens,
 	  output_tokens = output_tokens + excluded.output_tokens,
   reasoning_tokens = reasoning_tokens + excluded.reasoning_tokens,
@@ -517,6 +534,7 @@ func backfillRequestLogStatsWithDB(db *sql.DB) error {
 				"provider",
 				"model",
 				"http_code",
+				"request_outcome",
 				"input_tokens",
 				"output_tokens",
 				"reasoning_tokens",
@@ -586,9 +604,20 @@ func backfillRequestLogStatsWithDB(db *sql.DB) error {
 			httpCode := record.GetInt("http_code")
 			success := int64(0)
 			fail := int64(1)
-			if httpCode >= 200 && httpCode < 300 {
+			excluded := int64(0)
+			switch normalizedRequestLogOutcome(record.GetString("request_outcome")) {
+			case requestOutcomeSuccess:
 				success = 1
 				fail = 0
+			case requestOutcomeFailure:
+			case requestOutcomeExcluded:
+				fail = 0
+				excluded = 1
+			default:
+				if httpCode >= 200 && httpCode < 300 {
+					success = 1
+					fail = 0
+				}
 			}
 
 			hourKey := fmt.Sprintf("%s|%s|%s", hourBucket, platform, providerID)
@@ -596,6 +625,7 @@ func backfillRequestLogStatsWithDB(db *sql.DB) error {
 				agg.TotalRequests++
 				agg.SuccessfulRequests += success
 				agg.FailedRequests += fail
+				agg.ExcludedRequests += excluded
 				agg.InputTokens += int64(input)
 				agg.OutputTokens += int64(output)
 				agg.ReasoningTokens += int64(reasoning)
@@ -611,6 +641,7 @@ func backfillRequestLogStatsWithDB(db *sql.DB) error {
 					TotalRequests:      1,
 					SuccessfulRequests: success,
 					FailedRequests:     fail,
+					ExcludedRequests:   excluded,
 					InputTokens:        int64(input),
 					OutputTokens:       int64(output),
 					ReasoningTokens:    int64(reasoning),
@@ -625,6 +656,7 @@ func backfillRequestLogStatsWithDB(db *sql.DB) error {
 				agg.TotalRequests++
 				agg.SuccessfulRequests += success
 				agg.FailedRequests += fail
+				agg.ExcludedRequests += excluded
 				agg.InputTokens += int64(input)
 				agg.OutputTokens += int64(output)
 				agg.ReasoningTokens += int64(reasoning)
@@ -640,6 +672,7 @@ func backfillRequestLogStatsWithDB(db *sql.DB) error {
 					TotalRequests:      1,
 					SuccessfulRequests: success,
 					FailedRequests:     fail,
+					ExcludedRequests:   excluded,
 					InputTokens:        int64(input),
 					OutputTokens:       int64(output),
 					ReasoningTokens:    int64(reasoning),
@@ -665,6 +698,7 @@ func backfillRequestLogStatsWithDB(db *sql.DB) error {
 				agg.TotalRequests,
 				agg.SuccessfulRequests,
 				agg.FailedRequests,
+				agg.ExcludedRequests,
 				agg.InputTokens,
 				agg.OutputTokens,
 				agg.ReasoningTokens,
@@ -686,6 +720,7 @@ func backfillRequestLogStatsWithDB(db *sql.DB) error {
 				agg.TotalRequests,
 				agg.SuccessfulRequests,
 				agg.FailedRequests,
+				agg.ExcludedRequests,
 				agg.InputTokens,
 				agg.OutputTokens,
 				agg.ReasoningTokens,

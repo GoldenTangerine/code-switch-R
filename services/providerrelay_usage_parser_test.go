@@ -134,6 +134,53 @@ func TestFinalizeForwardSuccessTreatsCanceledRequestAsClientAbort(t *testing.T) 
 	}
 }
 
+func TestFinalizeForwardSuccessKeepsCompletedResponseSuccessfulAfterClientAbort(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	requestContext, cancel := context.WithCancel(context.Background())
+	request := httptest.NewRequest(http.MethodPost, "/responses", nil).WithContext(requestContext)
+	response := httptest.NewRecorder()
+	ginContext, _ := gin.CreateTestContext(response)
+	ginContext.Request = request
+	cancel()
+
+	requestLog := &ReqeustLog{
+		IsStream:            true,
+		HttpCode:            http.StatusOK,
+		StreamTerminalEvent: "response.completed",
+		streamTerminalEvent: "response.completed",
+	}
+	ok, err := finalizeForwardSuccess(
+		ginContext,
+		"codex",
+		requestLog,
+		256,
+		errors.New("error streaming response: context canceled"),
+	)
+
+	if !ok || err != nil {
+		t.Fatalf("已完成响应不应被客户端关闭覆盖，ok=%v err=%v", ok, err)
+	}
+	if requestLog.HttpCode != http.StatusOK || requestLog.ErrorSource != requestErrorSourceClientAbort {
+		t.Fatalf("已完成响应诊断错误: %#v", requestLog)
+	}
+	applyRequestLogOutcome(requestLog, nil)
+	if requestLog.RequestOutcome != requestOutcomeSuccess || requestLog.OutcomeReason != requestOutcomeReasonProtocolCompleted {
+		t.Fatalf("已完成响应结果错误: %#v", requestLog)
+	}
+}
+
+func TestApplyRequestLogOutcomeExcludesAbortBeforeCompletion(t *testing.T) {
+	requestLog := &ReqeustLog{
+		HttpCode:    499,
+		ErrorSource: requestErrorSourceClientAbort,
+	}
+	applyRequestLogOutcome(requestLog, errClientAbort)
+
+	if requestLog.RequestOutcome != requestOutcomeExcluded || requestLog.OutcomeReason != requestOutcomeReasonClientAbort {
+		t.Fatalf("完成前客户端取消应被排除: %#v", requestLog)
+	}
+}
+
 func TestFinalizeForwardSuccessKeepsUpstreamStreamFailureAsBadGateway(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	request := httptest.NewRequest(http.MethodPost, "/responses", nil)

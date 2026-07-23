@@ -41,6 +41,8 @@ var requestLogListSelectFields = []string{
 	"provider",
 	"price_source",
 	"http_code",
+	"request_outcome",
+	"outcome_reason",
 	"input_tokens",
 	"output_tokens",
 	"cache_create_tokens",
@@ -498,7 +500,57 @@ func buildFailedRequestLogFilterOptions(platform string, startAt string, endAt s
 	if err != nil {
 		return nil, err
 	}
-	return append(options, xdb.WhereGte("http_code", 400)), nil
+	return append(options, xdb.WhereRaw(requestLogFailureWhereClause(""))), nil
+}
+
+func requestLogFailureWhereClause(tableAlias string) string {
+	prefix := ""
+	if strings.TrimSpace(tableAlias) != "" {
+		prefix = strings.TrimSpace(tableAlias) + "."
+	}
+	outcome, fallback := requestLogOutcomeSQLParts(prefix + "request_outcome")
+	return "(" + outcome + " = '" + requestOutcomeFailure + "' OR (" + fallback + " AND COALESCE(" + prefix + "http_code, 0) >= 400))"
+}
+
+func requestLogSuccessWhereClause(tableAlias string, legacyMinimumCode int) string {
+	prefix := ""
+	if strings.TrimSpace(tableAlias) != "" {
+		prefix = strings.TrimSpace(tableAlias) + "."
+	}
+	outcome, fallback := requestLogOutcomeSQLParts(prefix + "request_outcome")
+	return fmt.Sprintf("(%s = '%s' OR (%s AND COALESCE(%shttp_code, 0) >= %d AND COALESCE(%shttp_code, 0) < 400))", outcome, requestOutcomeSuccess, fallback, prefix, legacyMinimumCode, prefix)
+}
+
+func requestLogOutcomeSQLParts(column string) (string, string) {
+	outcome := "TRIM(COALESCE(" + column + ", ''))"
+	fallback := outcome + " NOT IN ('" + requestOutcomeSuccess + "', '" + requestOutcomeFailure + "', '" + requestOutcomeExcluded + "')"
+	return outcome, fallback
+}
+
+func normalizedRequestLogOutcome(value string) string {
+	switch strings.TrimSpace(value) {
+	case requestOutcomeSuccess:
+		return requestOutcomeSuccess
+	case requestOutcomeFailure:
+		return requestOutcomeFailure
+	case requestOutcomeExcluded:
+		return requestOutcomeExcluded
+	default:
+		return ""
+	}
+}
+
+func resolvedRequestLogOutcome(logEntry ReqeustLog) string {
+	outcome := normalizedRequestLogOutcome(logEntry.RequestOutcome)
+	switch outcome {
+	case requestOutcomeSuccess, requestOutcomeFailure, requestOutcomeExcluded:
+		return outcome
+	default:
+		if logEntry.HttpCode >= 400 {
+			return requestOutcomeFailure
+		}
+		return requestOutcomeSuccess
+	}
 }
 
 func buildRequestLogList(records []xdb.Record, pricingSnapshot *modelpricing.Service) []ReqeustLog {
@@ -527,6 +579,8 @@ func buildRequestLogList(records []xdb.Record, pricingSnapshot *modelpricing.Ser
 			Provider:                  record.GetString("provider"),
 			PriceSource:               record.GetString("price_source"),
 			HttpCode:                  record.GetInt("http_code"),
+			RequestOutcome:            record.GetString("request_outcome"),
+			OutcomeReason:             record.GetString("outcome_reason"),
 			InputTokens:               record.GetInt("input_tokens"),
 			OutputTokens:              record.GetInt("output_tokens"),
 			CacheCreateTokens:         record.GetInt("cache_create_tokens"),
@@ -1638,7 +1692,6 @@ func (ls *LogService) SummaryRangeV3(platform string, provider string, pricingMo
 		return summary, err
 	}
 
-	var successCount int64
 	for _, logEntry := range logs {
 		totalTokens := calculateLogTotalTokens(logEntry)
 
@@ -1651,10 +1704,13 @@ func (ls *LogService) SummaryRangeV3(platform string, provider string, pricingMo
 		summary.CostInput += logEntry.InputCost
 		summary.CostCacheRead += logEntry.CacheReadCost
 
-		if logEntry.HttpCode >= 400 {
+		switch resolvedRequestLogOutcome(logEntry) {
+		case requestOutcomeFailure:
 			summary.FailedRequests++
-		} else {
-			successCount++
+		case requestOutcomeExcluded:
+			summary.ExcludedRequests++
+		default:
+			summary.SuccessfulRequests++
 		}
 
 		if totalTokens > summary.PeakTokens {
@@ -1662,8 +1718,11 @@ func (ls *LogService) SummaryRangeV3(platform string, provider string, pricingMo
 		}
 	}
 
+	evaluatedRequests := summary.SuccessfulRequests + summary.FailedRequests
+	if evaluatedRequests > 0 {
+		summary.SuccessRate = float64(summary.SuccessfulRequests) / float64(evaluatedRequests)
+	}
 	if summary.TotalRequests > 0 {
-		summary.SuccessRate = float64(successCount) / float64(summary.TotalRequests)
 		summary.AvgTokensPerRequest = float64(summary.TotalTokens) / float64(summary.TotalRequests)
 	}
 
@@ -1835,8 +1894,7 @@ func (ls *LogService) latestProviderPerformance(platform string) (map[string]pro
 				CAST(output_tokens AS REAL) / duration_sec AS tokens_per_sec
 			FROM request_log
 			WHERE COALESCE(is_stream, 0) = 1
-				AND COALESCE(http_code, 0) >= 200
-				AND COALESCE(http_code, 0) < 400
+				AND ` + requestLogSuccessWhereClause("", 200) + `
 				AND first_token_sec > 0
 				AND output_tokens > 0
 				AND duration_sec > 0
@@ -1965,7 +2023,7 @@ func (ls *LogService) ProviderUnreadFailedStats(platform string) ([]ProviderUnre
 			MAX(` + providerNameExpr + `) AS provider,
 			COUNT(*) AS unread_failed_requests
 		FROM request_log
-		WHERE COALESCE(http_code, 0) >= 400
+		WHERE ` + requestLogFailureWhereClause("") + `
 			AND ` + requestLogUnreadWhereClause + `
 			AND (TRIM(COALESCE(provider_id, '')) <> '' OR TRIM(COALESCE(provider, '')) <> '')
 	`
@@ -2065,17 +2123,17 @@ func (ls *LogService) ProviderStatsRangeV3(platform string, provider string, pri
 			stat.Provider = providerName
 		}
 
-		total := int64(1)
-		success := int64(0)
-		if logEntry.HttpCode < 400 {
-			success = 1
-		}
-		fail := total - success
-		stat.TotalRequests += total
-		stat.SuccessfulRequests += success
-		stat.FailedRequests += fail
-		if fail > 0 && strings.TrimSpace(logEntry.ErrorReadAt) == "" {
-			stat.UnreadFailedRequests += fail
+		stat.TotalRequests++
+		switch resolvedRequestLogOutcome(logEntry) {
+		case requestOutcomeFailure:
+			stat.FailedRequests++
+			if strings.TrimSpace(logEntry.ErrorReadAt) == "" {
+				stat.UnreadFailedRequests++
+			}
+		case requestOutcomeExcluded:
+			stat.ExcludedRequests++
+		default:
+			stat.SuccessfulRequests++
 		}
 		stat.InputTokens += int64(logEntry.InputTokens)
 		stat.OutputTokens += int64(logEntry.OutputTokens)
@@ -2145,6 +2203,7 @@ func (ls *LogService) ProviderStatsRangeV3(platform string, provider string, pri
 					`
 				args := make([]interface{}, 0, 4)
 				args = append(args, startUTCKey, endUTCKey)
+				query += " AND " + requestLogSuccessWhereClause("", 0)
 				query += " AND " + requestLogSourceWhereClause(normalizedSourceMode, "request_log")
 				if platformKey != "" {
 					query += " AND platform = ?"
@@ -2247,8 +2306,9 @@ func (ls *LogService) ProviderStatsRangeV3(platform string, provider string, pri
 
 	stats := make([]ProviderDailyStat, 0, len(statMap))
 	for _, stat := range statMap {
-		if stat.TotalRequests > 0 {
-			stat.SuccessRate = float64(stat.SuccessfulRequests) / float64(stat.TotalRequests)
+		evaluatedRequests := stat.SuccessfulRequests + stat.FailedRequests
+		if evaluatedRequests > 0 {
+			stat.SuccessRate = float64(stat.SuccessfulRequests) / float64(evaluatedRequests)
 		}
 		if stat.DurationSampleCount > 0 {
 			stat.AvgDurationSec = durationSums[providerStatMapKey(stat.ProviderID, stat.Provider)] / float64(stat.DurationSampleCount)
@@ -2486,7 +2546,9 @@ type LogStats struct {
 
 type LogSummary struct {
 	TotalRequests       int64     `json:"total_requests"`
+	SuccessfulRequests  int64     `json:"successful_requests"`
 	FailedRequests      int64     `json:"failed_requests"`
+	ExcludedRequests    int64     `json:"excluded_requests"`
 	SuccessRate         float64   `json:"success_rate"`
 	InputTokens         int64     `json:"input_tokens"`
 	OutputTokens        int64     `json:"output_tokens"`
@@ -2512,6 +2574,7 @@ type ProviderDailyStat struct {
 	TotalRequests        int64   `json:"total_requests"`
 	SuccessfulRequests   int64   `json:"successful_requests"`
 	FailedRequests       int64   `json:"failed_requests"`
+	ExcludedRequests     int64   `json:"excluded_requests"`
 	UnreadFailedRequests int64   `json:"unread_failed_requests"`
 	SuccessRate          float64 `json:"success_rate"`
 	InputTokens          int64   `json:"input_tokens"`

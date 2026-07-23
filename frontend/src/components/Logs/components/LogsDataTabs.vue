@@ -61,9 +61,10 @@
           <tr v-for="item in sortedProviderStats" :key="item.provider_id || item.provider">
             <td class="logs-stats-name">{{ item.provider || '—' }}</td>
             <td>{{ formatNumber(item.total_requests) }}</td>
+            <td>{{ formatNumber(item.excluded_requests) }}</td>
             <td>{{ formatTokenNumber(providerTotalTokens(item)) }}</td>
             <td>{{ formatCurrency(item.cost_total) }}</td>
-            <td>{{ formatSuccessRate(item.success_rate) }}</td>
+            <td>{{ formatSuccessRate(item) }}</td>
             <td>{{ formatAverageDuration(item) }}</td>
           </tr>
           <tr v-if="!sortedProviderStats.length && !loading">
@@ -119,7 +120,7 @@ import type { LogsDataTab } from '../types'
 import { formatPreciseCurrency } from '../utils'
 
 type SortDirection = 'asc' | 'desc'
-type ProviderSortKey = 'requests' | 'tokens' | 'cost' | 'success' | 'duration'
+type ProviderSortKey = 'requests' | 'excluded' | 'tokens' | 'cost' | 'success' | 'duration'
 type ModelSortKey = 'requests' | 'tokens' | 'cost' | 'average'
 
 const props = defineProps<{
@@ -151,6 +152,7 @@ const tabs = computed<Array<{ key: LogsDataTab; label: string }>>(() => [
 
 const providerColumns = computed<Array<{ key: ProviderSortKey; label: string }>>(() => [
   { key: 'requests', label: t('components.logs.stats.requests') },
+  { key: 'excluded', label: t('components.logs.stats.excludedRequests') },
   { key: 'tokens', label: t('components.logs.stats.tokens') },
   { key: 'cost', label: t('components.logs.stats.cost') },
   { key: 'success', label: t('components.logs.stats.successRate') },
@@ -172,6 +174,7 @@ const modelAverageCost = (item: ModelUsageStat) =>
 
 const providerSortValue = (item: ProviderDailyStat, key: ProviderSortKey) => {
   if (key === 'requests') return Number(item.total_requests || 0)
+  if (key === 'excluded') return Number(item.excluded_requests || 0)
   if (key === 'tokens') return providerTotalTokens(item)
   if (key === 'success') return Number(item.success_rate || 0)
   if (key === 'duration') return Number(item.avg_duration_sec || 0)
@@ -227,7 +230,11 @@ const providerSortIndicator = (key: ProviderSortKey) =>
 const modelSortIndicator = (key: ModelSortKey) =>
   modelSortKey.value === key ? (modelSortDirection.value === 'asc' ? '↑' : '↓') : '↕'
 
-const formatSuccessRate = (value?: number) => `${Math.max(0, Math.min(100, Number(value || 0) * 100)).toFixed(1)}%`
+const formatSuccessRate = (item: ProviderDailyStat) => {
+  const evaluatedRequests = Number(item.successful_requests || 0) + Number(item.failed_requests || 0)
+  if (evaluatedRequests <= 0) return '—'
+  return `${Math.max(0, Math.min(100, Number(item.success_rate || 0) * 100)).toFixed(1)}%`
+}
 
 const formatAverageDuration = (item: ProviderDailyStat) =>
   Number(item.duration_sample_count || 0) > 0 ? props.formatDuration(item.avg_duration_sec) : '—'

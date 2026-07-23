@@ -360,9 +360,12 @@ export function useLogsChartsPresentation(options: UseLogsChartsPresentationOpti
     const summaryData = summary.value
     const scopeHint = summaryScopeHint.value
     const totalRequests = Math.max(0, Math.round(safeNumber(summaryData?.total_requests)))
+    const evaluatedRequests = Math.max(0, Math.round(
+      safeNumber(summaryData?.successful_requests) + safeNumber(summaryData?.failed_requests),
+    ))
     const totalTokens = Math.max(0, Math.round(safeNumber(summaryData?.total_tokens)))
     const recentActivityPoints = buildActivityPoints(summaryData?.activity_points)
-    const successRate = totalRequests > 0
+    const successRate = evaluatedRequests > 0
       ? clamp(safeNumber(summaryData?.success_rate) * 100, 0, 100)
       : null
     const inputTokens = Math.max(0, safeNumber(summaryData?.input_tokens))

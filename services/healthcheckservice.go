@@ -338,6 +338,7 @@ type logAvailabilityRequestLog struct {
 	ProviderRef string
 	Model       string
 	HTTPCode    int
+	Outcome     string
 	DurationMs  int
 	CreatedAt   time.Time
 }
@@ -457,7 +458,7 @@ func (hcs *HealthCheckService) applyLogAvailabilityRequests(db *sql.DB, platform
 	}
 
 	query := `
-		SELECT provider_id, provider, model, http_code, duration_sec, created_at
+		SELECT provider_id, provider, model, http_code, request_outcome, duration_sec, created_at
 		FROM request_log
 		WHERE platform = ?
 		  AND created_at >= ?
@@ -542,9 +543,10 @@ func scanLogAvailabilityRequest(rows *sql.Rows) (logAvailabilityRequestLog, erro
 	var providerID, providerName sql.NullString
 	var model sql.NullString
 	var httpCode sql.NullInt64
+	var outcome sql.NullString
 	var durationSec sql.NullFloat64
 	var createdAtRaw sql.NullString
-	if err := rows.Scan(&providerID, &providerName, &model, &httpCode, &durationSec, &createdAtRaw); err != nil {
+	if err := rows.Scan(&providerID, &providerName, &model, &httpCode, &outcome, &durationSec, &createdAtRaw); err != nil {
 		return logAvailabilityRequestLog{}, err
 	}
 
@@ -562,6 +564,7 @@ func scanLogAvailabilityRequest(rows *sql.Rows) (logAvailabilityRequestLog, erro
 		ProviderRef: providerRefFromStringID(providerID.String, providerName.String),
 		Model:       strings.TrimSpace(model.String),
 		HTTPCode:    int(httpCode.Int64),
+		Outcome:     strings.TrimSpace(outcome.String),
 		DurationMs:  durationMs,
 		CreatedAt:   createdAt,
 	}, nil
@@ -569,6 +572,10 @@ func scanLogAvailabilityRequest(rows *sql.Rows) (logAvailabilityRequestLog, erro
 
 func applyLogAvailabilityRequest(buckets []logAvailabilityBucket, rangeSpec logAvailabilityRangeSpec, logItem logAvailabilityRequestLog, operationalThresholdMs int) {
 	if logItem.CreatedAt.IsZero() || logItem.CreatedAt.Before(rangeSpec.Start) || logItem.CreatedAt.After(rangeSpec.End) {
+		return
+	}
+	outcome := normalizedRequestLogOutcome(logItem.Outcome)
+	if outcome == requestOutcomeExcluded {
 		return
 	}
 
@@ -582,7 +589,7 @@ func applyLogAvailabilityRequest(buckets []logAvailabilityBucket, rangeSpec logA
 
 	bucket := &buckets[bucketIndex]
 	bucket.TotalRequests++
-	if isLogAvailabilityFailure(logItem.HTTPCode) {
+	if outcome == requestOutcomeFailure || (outcome == "" && isLogAvailabilityFailure(logItem.HTTPCode)) {
 		bucket.FailedCount++
 	} else if logItem.DurationMs > operationalThresholdMs {
 		bucket.WarningCount++

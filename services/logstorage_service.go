@@ -672,7 +672,7 @@ func buildProviderFailedRequestLogWhereClause(target deleteProviderLogsTarget) (
 	baseWhereClause, baseArgs := buildProviderLogStorageWhereClause(target)
 	whereClause := strings.Join([]string{
 		baseWhereClause,
-		"COALESCE(http_code, 0) >= 400",
+		requestLogFailureWhereClause(""),
 	}, " AND ")
 	return whereClause, baseArgs
 }

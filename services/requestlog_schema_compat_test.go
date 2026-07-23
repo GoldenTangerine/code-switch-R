@@ -2,6 +2,7 @@ package services
 
 import (
 	"database/sql"
+	"fmt"
 	"testing"
 
 	"github.com/daodao97/xgo/xdb"
@@ -93,6 +94,8 @@ func TestEnsureRequestLogTableWithDB_RepairsDanglingStatsTrigger(t *testing.T) {
 	assertRequestLogColumnExists(t, db, "stream_terminal_event")
 	assertRequestLogColumnExists(t, db, "stream_error_kind")
 	assertRequestLogColumnExists(t, db, "error_message")
+	assertRequestLogColumnExists(t, db, "request_outcome")
+	assertRequestLogColumnExists(t, db, "outcome_reason")
 	assertRequestLogColumnExists(t, db, "stream_compaction_requested")
 	assertRequestLogColumnExists(t, db, "stream_compaction_observed")
 	assertRequestLogColumnExists(t, db, "stream_bytes")
@@ -120,6 +123,8 @@ func TestEnsureRequestLogTableWithDB_RepairsDanglingStatsTrigger(t *testing.T) {
 	assertSQLiteObjectExists(t, db, "table", requestLogStatsDailyTable)
 	assertSQLiteObjectExists(t, db, "trigger", "request_log_stats_hourly_ai")
 	assertSQLiteObjectExists(t, db, "trigger", "request_log_stats_daily_ai")
+	assertTableColumnExists(t, db, requestLogStatsHourlyTable, "excluded_requests")
+	assertTableColumnExists(t, db, requestLogStatsDailyTable, "excluded_requests")
 
 	if _, err := db.Exec(`
 		INSERT INTO request_log (
@@ -127,6 +132,47 @@ func TestEnsureRequestLogTableWithDB_RepairsDanglingStatsTrigger(t *testing.T) {
 		) VALUES (?, ?, ?, ?, ?, ?, ?)
 	`, "codex", "gpt-5", "compat-provider", 200, 10, 5, 2); err != nil {
 		t.Fatalf("插入 request_log 失败: %v", err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO request_log (
+			platform, model, provider, http_code, request_outcome, outcome_reason
+		) VALUES (?, ?, ?, ?, ?, ?)
+	`, "codex", "gpt-5", "compat-provider", 499, requestOutcomeExcluded, requestOutcomeReasonClientAbort); err != nil {
+		t.Fatalf("插入 excluded request_log 失败: %v", err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO request_log (
+			platform, model, provider, http_code, request_outcome
+		) VALUES (?, ?, ?, ?, ?), (?, ?, ?, ?, ?)
+	`,
+		"codex", "gpt-5", "compat-provider", 503, "unknown",
+		"codex", "gpt-5", "compat-provider", 503, "  "+requestOutcomeSuccess+"  ",
+	); err != nil {
+		t.Fatalf("插入结果回退 request_log 失败: %v", err)
+	}
+
+	var total, successful, failed, excluded int64
+	if err := db.QueryRow(`
+		SELECT total_requests, successful_requests, failed_requests, excluded_requests
+		FROM request_log_stats_daily
+		WHERE provider_id = ?
+	`, "compat-provider").Scan(&total, &successful, &failed, &excluded); err != nil {
+		t.Fatalf("查询聚合结果失败: %v", err)
+	}
+	if total != 4 || successful != 2 || failed != 1 || excluded != 1 {
+		t.Fatalf("聚合三态错误: total=%d successful=%d failed=%d excluded=%d", total, successful, failed, excluded)
+	}
+}
+
+func assertTableColumnExists(t *testing.T, db *sql.DB, table string, column string) {
+	t.Helper()
+	var count int
+	query := fmt.Sprintf("SELECT COUNT(*) FROM pragma_table_info('%s') WHERE name = ?", table)
+	if err := db.QueryRow(query, column).Scan(&count); err != nil {
+		t.Fatalf("查询 %s 字段失败: %v", table, err)
+	}
+	if count != 1 {
+		t.Fatalf("%s 缺少字段 %s", table, column)
 	}
 }
 

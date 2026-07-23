@@ -633,6 +633,36 @@ func findAvailabilityBucketByRequestStats(t *testing.T, items []HealthCheckResul
 	return HealthCheckResult{}
 }
 
+func TestApplyLogAvailabilityRequestFallsBackForUnknownOutcome(t *testing.T) {
+	start := time.Date(2026, time.July, 23, 10, 0, 0, 0, time.UTC)
+	rangeSpec := logAvailabilityRangeSpec{
+		Start:          start,
+		End:            start.Add(time.Minute),
+		BucketDuration: time.Minute,
+	}
+	buckets := make([]logAvailabilityBucket, 1)
+
+	applyLogAvailabilityRequest(buckets, rangeSpec, logAvailabilityRequestLog{
+		HTTPCode:  503,
+		Outcome:   "unknown",
+		CreatedAt: start.Add(time.Second),
+	}, 5000)
+	applyLogAvailabilityRequest(buckets, rangeSpec, logAvailabilityRequestLog{
+		HTTPCode:  503,
+		Outcome:   "  " + requestOutcomeSuccess + "  ",
+		CreatedAt: start.Add(2 * time.Second),
+	}, 5000)
+	applyLogAvailabilityRequest(buckets, rangeSpec, logAvailabilityRequestLog{
+		HTTPCode:  503,
+		Outcome:   "  " + requestOutcomeExcluded + "  ",
+		CreatedAt: start.Add(3 * time.Second),
+	}, 5000)
+
+	if buckets[0].TotalRequests != 2 || buckets[0].FailedCount != 1 {
+		t.Fatalf("可用性三态回退错误: %#v", buckets[0])
+	}
+}
+
 func insertAvailabilityRequestLogsForRatio(
 	t *testing.T,
 	db *sql.DB,

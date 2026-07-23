@@ -402,13 +402,13 @@ func syncRequestLogStatsIdentityWithExec(exec providerIdentitySyncExecer, table,
 			upsertSQL := fmt.Sprintf(`
 				INSERT INTO %s (
 					bucket_start, platform, provider_id, provider,
-					total_requests, successful_requests, failed_requests,
+					total_requests, successful_requests, failed_requests, excluded_requests,
 					input_tokens, output_tokens, reasoning_tokens, cache_create_tokens, cache_read_tokens,
 					total_cost
 				)
 				SELECT
 					bucket_start, platform, ?, ?,
-					total_requests, successful_requests, failed_requests,
+					total_requests, successful_requests, failed_requests, excluded_requests,
 					input_tokens, output_tokens, reasoning_tokens, cache_create_tokens, cache_read_tokens,
 					total_cost
 				FROM %s
@@ -418,6 +418,7 @@ func syncRequestLogStatsIdentityWithExec(exec providerIdentitySyncExecer, table,
 					total_requests = total_requests + excluded.total_requests,
 					successful_requests = successful_requests + excluded.successful_requests,
 					failed_requests = failed_requests + excluded.failed_requests,
+					excluded_requests = excluded_requests + excluded.excluded_requests,
 					input_tokens = input_tokens + excluded.input_tokens,
 					output_tokens = output_tokens + excluded.output_tokens,
 					reasoning_tokens = reasoning_tokens + excluded.reasoning_tokens,
