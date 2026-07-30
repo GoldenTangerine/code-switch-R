@@ -261,6 +261,10 @@ func main() {
 	openCodeService := services.NewOpenCodeService()
 	codexOAuthService := services.NewCodexOAuthService(providerService)
 	providerRelay := services.NewProviderRelayService(providerService, geminiService, blacklistService, notificationService, appSettings, modelPricingService, ":18100")
+	customCliService := services.NewCustomCliService(providerRelay.Addr())
+	providerQuotaAutomationService := services.NewProviderQuotaAutomationService(providerQuotaQueryService, providerService, geminiService, openCodeService, appSettings, notificationService, customCliService)
+	appSettings.BindProviderQuotaAutomationService(providerQuotaAutomationService)
+	providerRelay.BindProviderQuotaAutomationService(providerQuotaAutomationService)
 	providerRelay.BindCodexOAuthService(codexOAuthService)
 	providerRelay.BindClaudeModelRoutingService(claudeModelRoutingService)
 	providerConcurrencyService := services.NewProviderConcurrencyService(providerRelay)
@@ -304,7 +308,6 @@ func main() {
 	dockService := dock.New()
 	versionService := NewVersionService()
 	consoleService := services.NewConsoleService()
-	customCliService := services.NewCustomCliService(providerRelay.Addr())
 	networkService := services.NewNetworkService(providerRelay.Addr(), claudeSettings, codexSettings, geminiService)
 	webdavSyncService := services.NewWebDAVSyncService()
 
@@ -428,6 +431,7 @@ func main() {
 			application.NewService(modelPricingService),
 			application.NewService(claudeModelRoutingService),
 			application.NewService(providerQuotaQueryService),
+			application.NewService(providerQuotaAutomationService),
 			application.NewService(updateService),
 			application.NewService(mcpService),
 			application.NewService(skillService),

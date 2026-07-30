@@ -25,6 +25,8 @@
       @unblock-and-reset="$emit('unblock-and-reset', viewModel.card)"
       @reset-level="$emit('reset-level', viewModel.card)"
       @toggle-enabled="(enabled) => $emit('toggle-enabled', viewModel.card, enabled)"
+      @temporarily-enable-quota-provider="$emit('temporarily-enable-quota-provider', viewModel.card)"
+      @resume-quota-automation="$emit('resume-quota-automation', viewModel.card)"
       @direct-apply="$emit('direct-apply', viewModel.card)"
       @configure="$emit('configure', viewModel.card)"
       @open-provider-data="$emit('open-provider-data', viewModel.card)"
@@ -74,6 +76,8 @@ const emit = defineEmits<{
   'unblock-and-reset': [card: AutomationCard]
   'reset-level': [card: AutomationCard]
   'toggle-enabled': [card: AutomationCard, enabled: boolean]
+  'temporarily-enable-quota-provider': [card: AutomationCard]
+  'resume-quota-automation': [card: AutomationCard]
   'direct-apply': [card: AutomationCard]
   configure: [card: AutomationCard]
   'open-provider-data': [card: AutomationCard]

@@ -119,6 +119,7 @@ export type AppSettings = {
   provider_concurrency_limits: Record<string, boolean>
   provider_quota_query_preset_codes: Record<string, string>
   provider_quota_query_presets: ProviderQuotaQueryPresetGroups
+  provider_quota_auto_disable_enabled: boolean
   capture_request_log_payload: boolean
   sanitize_request_log_payload: boolean
 }
@@ -192,6 +193,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   provider_concurrency_limits: {},
   provider_quota_query_preset_codes: {},
   provider_quota_query_presets: {},
+  provider_quota_auto_disable_enabled: false,
   capture_request_log_payload: false,
   sanitize_request_log_payload: true,
 }

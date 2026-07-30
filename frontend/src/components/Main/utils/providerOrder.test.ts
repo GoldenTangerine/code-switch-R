@@ -126,4 +126,23 @@ describe('providerOrder', () => {
     expect(list.map((card) => card.disabledSortOrder ?? null)).toEqual([null, 1, 2, 3])
     expect(list[1]?.sortOrder).toBe(1)
   })
+
+  it('projects quota auto-disabled providers to the end of the enabled group without changing their saved order', () => {
+    const list = [
+      createCard(3, { enabled: true, sortOrder: 3, enabledSortOrder: 3 }),
+      createCard(2, { enabled: false, quotaAutoDisabled: true, sortOrder: 2, enabledSortOrder: 2 }),
+      createCard(4, { enabled: false, sortOrder: 1, disabledSortOrder: 1 }),
+      createCard(1, { enabled: true, sortOrder: 1, enabledSortOrder: 1 }),
+    ]
+
+    applyNormalizedProviderOrder(list)
+
+    expect(list.map((card) => card.id)).toEqual([1, 3, 2, 4])
+    expect(list.slice(0, 3).map((card) => card.enabledSortOrder)).toEqual([1, 3, 2])
+
+    list[2]!.enabled = true
+    list[2]!.quotaAutoDisabled = false
+    applyNormalizedProviderOrder(list)
+    expect(list.map((card) => card.id)).toEqual([1, 2, 3, 4])
+  })
 })

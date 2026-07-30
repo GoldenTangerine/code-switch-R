@@ -16,13 +16,20 @@ const normalizeSortOrder = (value: number | undefined, fallback: number) => {
 }
 
 const compareOrderedEntries = <T extends AutomationCard>(left: OrderedEntry<T>, right: OrderedEntry<T>) => {
+  const leftAutoDisabled = left.card.quotaAutoDisabled === true
+  const rightAutoDisabled = right.card.quotaAutoDisabled === true
+  if (leftAutoDisabled !== rightAutoDisabled) {
+    return leftAutoDisabled ? 1 : -1
+  }
   if (left.sortOrder !== right.sortOrder) {
     return left.sortOrder - right.sortOrder
   }
   return left.originalIndex - right.originalIndex
 }
 
-const resolveStatusGroup = (enabled: boolean): ProviderStatusGroup => (enabled ? 'enabled' : 'disabled')
+const resolveStatusGroup = (card: AutomationCard): ProviderStatusGroup => (
+  card.enabled || card.quotaAutoDisabled ? 'enabled' : 'disabled'
+)
 
 const getGroupOrderKey = (group: ProviderStatusGroup): ProviderGroupOrderKey => (
   group === 'enabled' ? 'enabledSortOrder' : 'disabledSortOrder'
@@ -36,38 +43,58 @@ const getDisplaySortOrder = <T extends AutomationCard>(card: T, group: ProviderS
 const setGroupSortOrder = <T extends AutomationCard>(card: T, group: ProviderStatusGroup, value: number) => {
   const key = getGroupOrderKey(group)
   card[key] = value
-  if (resolveStatusGroup(card.enabled) === group) {
+  if (resolveStatusGroup(card) === group) {
     card.sortOrder = value
   }
 }
 
-const buildOrderedEntries = <T extends AutomationCard>(list: T[], enabled: boolean): OrderedEntry<T>[] => (
+const buildOrderedEntries = <T extends AutomationCard>(list: T[], group: ProviderStatusGroup): OrderedEntry<T>[] => (
   list
     .map((card, originalIndex) => ({
       card,
       originalIndex,
-      sortOrder: getDisplaySortOrder(card, resolveStatusGroup(enabled), originalIndex + 1),
+      sortOrder: getDisplaySortOrder(card, group, originalIndex + 1),
     }))
-    .filter((entry) => entry.card.enabled === enabled)
+    .filter((entry) => resolveStatusGroup(entry.card) === group)
     .sort(compareOrderedEntries)
 )
 
-const countEnabledCards = <T extends AutomationCard>(list: T[]) => list.filter((card) => card.enabled).length
+const countEnabledCards = <T extends AutomationCard>(list: T[]) => list.filter((card) => resolveStatusGroup(card) === 'enabled').length
 
 const splitProviderGroupsPreservingOrder = <T extends AutomationCard>(list: T[]) => ({
-  enabledCards: list.filter((card) => card.enabled),
-  disabledCards: list.filter((card) => !card.enabled),
+  enabledCards: list.filter((card) => card.enabled && !card.quotaAutoDisabled),
+  autoDisabledCards: list.filter((card) => card.quotaAutoDisabled),
+  disabledCards: list.filter((card) => resolveStatusGroup(card) === 'disabled'),
 })
+
+const assignEnabledOrderPreservingAutoDisabled = <T extends AutomationCard>(
+  enabledCards: T[],
+  autoDisabledCards: T[],
+) => {
+  const reservedOrders = new Set(
+    autoDisabledCards.map((card, index) => getDisplaySortOrder(card, 'enabled', enabledCards.length + index + 1)),
+  )
+  let nextOrder = 1
+  enabledCards.forEach((card) => {
+    while (reservedOrders.has(nextOrder)) {
+      nextOrder += 1
+    }
+    setGroupSortOrder(card, 'enabled', nextOrder)
+    nextOrder += 1
+  })
+}
 
 export const applyNormalizedProviderOrder = <T extends AutomationCard>(list: T[]) => {
   if (!Array.isArray(list) || list.length === 0) return
 
-  const enabledEntries = buildOrderedEntries(list, true)
-  const disabledEntries = buildOrderedEntries(list, false)
+  const enabledEntries = buildOrderedEntries(list, 'enabled')
+  const disabledEntries = buildOrderedEntries(list, 'disabled')
 
-  enabledEntries.forEach((entry, index) => {
-    setGroupSortOrder(entry.card, 'enabled', index + 1)
-  })
+  if (!enabledEntries.some((entry) => entry.card.quotaAutoDisabled)) {
+    enabledEntries.forEach((entry, index) => {
+      setGroupSortOrder(entry.card, 'enabled', index + 1)
+    })
+  }
   disabledEntries.forEach((entry, index) => {
     setGroupSortOrder(entry.card, 'disabled', index + 1)
   })
@@ -83,23 +110,21 @@ export const applyNormalizedProviderOrder = <T extends AutomationCard>(list: T[]
 export const commitProviderOrder = <T extends AutomationCard>(list: T[]) => {
   if (!Array.isArray(list) || list.length === 0) return
 
-  const { enabledCards, disabledCards } = splitProviderGroupsPreservingOrder(list)
+  const { enabledCards, autoDisabledCards, disabledCards } = splitProviderGroupsPreservingOrder(list)
 
-  enabledCards.forEach((card, index) => {
-    setGroupSortOrder(card, 'enabled', index + 1)
-  })
+  assignEnabledOrderPreservingAutoDisabled(enabledCards, autoDisabledCards)
   disabledCards.forEach((card, index) => {
     setGroupSortOrder(card, 'disabled', index + 1)
   })
 
-  list.splice(0, list.length, ...enabledCards, ...disabledCards)
+  list.splice(0, list.length, ...enabledCards, ...autoDisabledCards, ...disabledCards)
 }
 
 export const insertProviderToStatusGroup = <T extends AutomationCard>(list: T[], card: T) => {
   applyNormalizedProviderOrder(list)
 
   const enabledCount = countEnabledCards(list)
-  const targetGroup = resolveStatusGroup(card.enabled)
+  const targetGroup = resolveStatusGroup(card)
   const insertIndex = enabledCount
   const nextSortOrder = card.enabled
     ? list.filter((item) => item.enabled).length + 1

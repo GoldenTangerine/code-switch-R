@@ -178,6 +178,22 @@ func (ns *NotificationService) EmitProviderRouted(platform, providerID, provider
 	})
 }
 
+// EmitProviderQuotaStateChanged 向前端广播额度自动停用状态变化，不触发系统通知。
+func (ns *NotificationService) EmitProviderQuotaStateChanged(platform, providerID, providerName string, enabled, autoDisabled, paused bool) {
+	if ns.app == nil {
+		return
+	}
+	ns.app.Event.Emit("provider:quota-state-changed", map[string]interface{}{
+		"platform":               platform,
+		"providerId":             providerID,
+		"providerName":           providerName,
+		"enabled":                enabled,
+		"quotaAutoDisabled":      autoDisabled,
+		"quotaAutoDisablePaused": paused,
+		"timestamp":              time.Now().UnixMilli(),
+	})
+}
+
 // NotifyProviderBlacklisted 发送供应商被拉黑通知
 func (ns *NotificationService) NotifyProviderBlacklisted(platform, providerID, providerName string, level int, durationMinutes int) {
 	if !ns.isEnabled() {

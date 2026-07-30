@@ -27,6 +27,7 @@ type UseProviderQuotasOptions = {
   getActiveTab: () => ProviderTab
   cards: Record<ProviderTab, AutomationCard[]>
   resolveAutoRefreshRemoteQuotaRefs?: () => Set<string>
+  resolveProviderKind?: (tab: ProviderTab) => string
 }
 
 const QUOTA_REFRESH_INTERVAL_MS = 30_000
@@ -104,7 +105,7 @@ function resolveRemoteQuotaCacheTTL(card: AutomationCard): number {
  * 定时获取每个供应商各周期的已用金额，计算进度和倒计时
  */
 export function useProviderQuotas(options: UseProviderQuotasOptions) {
-  const { t, getActiveTab, cards, resolveAutoRefreshRemoteQuotaRefs } = options
+  const { t, getActiveTab, cards, resolveAutoRefreshRemoteQuotaRefs, resolveProviderKind } = options
 
   // tab -> providerRef -> ProviderQuotaDisplayItem[]
   const quotaDisplayMap = reactive(createQuotaDisplayMap())
@@ -212,6 +213,8 @@ export function useProviderQuotas(options: UseProviderQuotasOptions) {
       card,
       now,
       t,
+      providerKind: resolveProviderKind?.(tab),
+      providerID: ref,
     })
     const fetchedItems = queryResult.items
     const failureMessage = `${queryResult.failureMessage ?? ''}`.trim()

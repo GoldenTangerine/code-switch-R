@@ -48,6 +48,7 @@ type ProviderRelayService struct {
 	notificationService            *NotificationService
 	appSettings                    *AppSettingsService // 应用设置服务（用于获取轮询开关状态）
 	modelPricing                   *ModelPricingService
+	providerQuotaAutomation        *ProviderQuotaAutomationService
 	claudeModelRouting             *ClaudeModelRoutingService
 	codexOAuth                     *CodexOAuthService
 	server                         *http.Server
@@ -608,6 +609,13 @@ func (prs *ProviderRelayService) BindClaudeModelRoutingService(routing *ClaudeMo
 		return
 	}
 	prs.claudeModelRouting = routing
+}
+
+func (prs *ProviderRelayService) BindProviderQuotaAutomationService(service *ProviderQuotaAutomationService) {
+	if prs == nil {
+		return
+	}
+	prs.providerQuotaAutomation = service
 }
 
 func providerRefFromProvider(provider Provider) string {
@@ -1208,6 +1216,12 @@ func logRelayClientAbort(prefix string, providerName string, err error) {
 }
 
 func (prs *ProviderRelayService) recordProviderFailureIfNeeded(platform string, providerID string, providerName string, err error) error {
+	if prs != nil && prs.providerQuotaAutomation != nil {
+		var upstreamErr *upstreamErrorResponse
+		if errors.As(err, &upstreamErr) {
+			prs.providerQuotaAutomation.triggerProviderQuotaCheck(platform, providerID)
+		}
+	}
 	if prs == nil || prs.blacklistService == nil || !shouldRecordProviderFailure(err) {
 		return nil
 	}

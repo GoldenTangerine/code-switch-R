@@ -39,6 +39,8 @@ export type GeminiProvider = Awaited<ReturnType<typeof GetGeminiProviders>> exte
   providerQuotaQueryConfig?: unknown | null
   providerConcurrencyLimit?: number
   hideLogBadge?: boolean
+  quotaAutoDisabled?: boolean
+  quotaAutoDisablePaused?: boolean
 }) : any
 
 export type OpenCodeProvider = OpenCodeProviderModel & {
@@ -50,6 +52,8 @@ export type OpenCodeProvider = OpenCodeProviderModel & {
   budgetQuotaUsedAdjustments?: unknown | null
   providerQuotaQueryType?: unknown | null
   providerQuotaQueryConfig?: unknown | null
+  quotaAutoDisabled?: boolean
+  quotaAutoDisablePaused?: boolean
 }
 
 export type PersistedProvider = PersistedProviderModel & {
@@ -77,6 +81,8 @@ export type PersistedProvider = PersistedProviderModel & {
   liveConfigManaged?: boolean
   isInConfig?: boolean
   hideLogBadge?: boolean
+  quotaAutoDisabled?: boolean
+  quotaAutoDisablePaused?: boolean
 }
 
 const GEMINI_LOCKED_ENV_KEYS = new Set(['GOOGLE_GEMINI_BASE_URL', 'GEMINI_API_KEY'])
@@ -246,6 +252,8 @@ export const providerToCard = (
   tint: provider.tint || '',
   accent: provider.accent || '',
   enabled: provider.enabled,
+  quotaAutoDisabled: provider.quotaAutoDisabled === true,
+  quotaAutoDisablePaused: provider.quotaAutoDisablePaused === true,
   hideLogBadge: provider.hideLogBadge === true,
   apiFormat: platform === 'claude'
     ? normalizeClaudeAPIFormatValue(provider.apiFormat)
@@ -254,8 +262,8 @@ export const providerToCard = (
     ? resolvePersistedAnthropicCacheTTL('claude', provider.apiFormat, provider.anthropicCacheTTL)
     : '',
   sortOrder: provider.sortOrder || 0,
-  enabledSortOrder: provider.enabledSortOrder || (provider.enabled ? (provider.sortOrder || 0) : undefined),
-  disabledSortOrder: provider.disabledSortOrder || (!provider.enabled ? (provider.sortOrder || 0) : undefined),
+  enabledSortOrder: provider.enabledSortOrder || ((provider.enabled || provider.quotaAutoDisabled) ? (provider.sortOrder || 0) : undefined),
+  disabledSortOrder: provider.disabledSortOrder || ((!provider.enabled && !provider.quotaAutoDisabled) ? (provider.sortOrder || 0) : undefined),
   supportedModels: cloneCardValue(provider.supportedModels || {}),
   modelMapping: cloneCardValue(provider.modelMapping || {}),
   modelMappingDisabled: normalizeModelMappingDisabled(
@@ -323,10 +331,12 @@ export const geminiToCard = (provider: GeminiProvider, index: number): Automatio
   tint: 'rgba(251, 146, 60, 0.18)',
   accent: '#fb923c',
   enabled: provider.enabled,
+  quotaAutoDisabled: provider.quotaAutoDisabled === true,
+  quotaAutoDisablePaused: provider.quotaAutoDisablePaused === true,
   hideLogBadge: provider.hideLogBadge === true,
   sortOrder: provider.sortOrder || index + 1,
-  enabledSortOrder: provider.enabledSortOrder || (provider.enabled ? (provider.sortOrder || index + 1) : undefined),
-  disabledSortOrder: provider.disabledSortOrder || (!provider.enabled ? (provider.sortOrder || index + 1) : undefined),
+  enabledSortOrder: provider.enabledSortOrder || ((provider.enabled || provider.quotaAutoDisabled) ? (provider.sortOrder || index + 1) : undefined),
+  disabledSortOrder: provider.disabledSortOrder || ((!provider.enabled && !provider.quotaAutoDisabled) ? (provider.sortOrder || index + 1) : undefined),
   level: provider.level || 1,
   providerConcurrencyLimit: normalizeProviderConcurrencyLimit(provider.providerConcurrencyLimit),
   cliConfig: extractGeminiCliConfig(provider),
@@ -363,9 +373,11 @@ export const opencodeToCard = (provider: OpenCodeProvider, index: number): Autom
     tint: 'rgba(14, 165, 233, 0.16)',
     accent: '#0ea5e9',
     enabled: provider.enabled,
+    quotaAutoDisabled: provider.quotaAutoDisabled === true,
+    quotaAutoDisablePaused: provider.quotaAutoDisablePaused === true,
     sortOrder: provider.sortOrder || index + 1,
-    enabledSortOrder: provider.enabledSortOrder || (provider.enabled ? (provider.sortOrder || index + 1) : undefined),
-    disabledSortOrder: provider.disabledSortOrder || (!provider.enabled ? (provider.sortOrder || index + 1) : undefined),
+    enabledSortOrder: provider.enabledSortOrder || ((provider.enabled || provider.quotaAutoDisabled) ? (provider.sortOrder || index + 1) : undefined),
+    disabledSortOrder: provider.disabledSortOrder || ((!provider.enabled && !provider.quotaAutoDisabled) ? (provider.sortOrder || index + 1) : undefined),
     level: provider.level || 1,
     opencodeNpm: extractOpenCodeNpm(provider),
     opencodeSettingsConfig: settingsConfig,
@@ -401,6 +413,8 @@ export const cardToGemini = (card: AutomationCard, original: GeminiProvider): Ge
   model: `${card.cliConfig?.GEMINI_MODEL ?? ''}`.trim() || original.model || '',
   websiteUrl: card.officialSite,
   enabled: card.enabled,
+  quotaAutoDisabled: card.quotaAutoDisabled === true,
+  quotaAutoDisablePaused: card.quotaAutoDisablePaused === true,
   hideLogBadge: card.hideLogBadge === true,
   sortOrder: card.sortOrder || 0,
   enabledSortOrder: card.enabledSortOrder || 0,
@@ -429,6 +443,8 @@ export const createGeminiFromCard = (
   model: `${card.cliConfig?.GEMINI_MODEL ?? ''}`.trim(),
   websiteUrl: card.officialSite,
   enabled: card.enabled,
+  quotaAutoDisabled: card.quotaAutoDisabled === true,
+  quotaAutoDisablePaused: card.quotaAutoDisablePaused === true,
   hideLogBadge: card.hideLogBadge === true,
   sortOrder: card.sortOrder || 0,
   enabledSortOrder: card.enabledSortOrder || 0,
@@ -459,6 +475,8 @@ export const cardToOpenCode = (card: AutomationCard, original: OpenCodeProvider)
   category: card.category || original.category || '',
   partnerPromotionKey: card.partnerPromotionKey || original.partnerPromotionKey || '',
   enabled: card.enabled,
+  quotaAutoDisabled: card.quotaAutoDisabled === true,
+  quotaAutoDisablePaused: card.quotaAutoDisablePaused === true,
   liveConfigManaged: card.enabled,
   isInConfig: card.enabled,
   sortOrder: card.sortOrder || 0,
@@ -491,6 +509,8 @@ export const createOpenCodeFromCard = (
   category: card.category || '',
   partnerPromotionKey: card.partnerPromotionKey || '',
   enabled: card.enabled,
+  quotaAutoDisabled: card.quotaAutoDisabled === true,
+  quotaAutoDisablePaused: card.quotaAutoDisablePaused === true,
   liveConfigManaged: card.enabled,
   isInConfig: card.enabled,
   sortOrder: card.sortOrder || 0,

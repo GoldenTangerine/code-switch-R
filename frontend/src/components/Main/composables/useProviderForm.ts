@@ -189,7 +189,12 @@ export function useProviderForm(options: UseProviderFormOptions) {
 
   const applySavedProvider = async (savedCard: AutomationCard, tabId: ProviderTab) => {
     if (isDirectApplyBlockedForProvider(tabId, savedCard)) {
-      showToast(t('components.main.directApply.requiresHostedRouting'), 'warning')
+      showToast(
+        t(savedCard.quotaAutoDisabled
+          ? 'components.main.providers.quotaAutoDisabledHint'
+          : 'components.main.directApply.requiresHostedRouting'),
+        'warning',
+      )
       return
     }
 
@@ -322,6 +327,8 @@ export function useProviderForm(options: UseProviderFormOptions) {
   const handleProviderEnabledChange = async (card: AutomationCard, enabled: boolean) => {
     const tabId = getActiveTab()
     const previousCards = cloneAutomationCards(cards[tabId])
+    card.quotaAutoDisabled = false
+    card.quotaAutoDisablePaused = false
     moveCardToStatusGroup(tabId, card, enabled)
     if (tabId === 'opencode') {
       card.liveConfigManaged = enabled

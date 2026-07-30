@@ -624,6 +624,22 @@ describe('useProviderCards drag sort', () => {
     expect(vi.mocked(Call.ByName)).not.toHaveBeenCalled()
   })
 
+  it('blocks direct apply for quota-auto-disabled providers', async () => {
+    const providerCards = useProviderCards({
+      t: (key: string) => key,
+      getActiveTab: () => 'codex',
+      isActiveProxyEnabled: () => false,
+      getSelectedToolId: () => null,
+    })
+
+    await providerCards.handleDirectApply(createCard(102, {
+      enabled: false,
+      quotaAutoDisabled: true,
+    }))
+
+    expect(vi.mocked(Call.ByName)).not.toHaveBeenCalled()
+  })
+
   it('hydrates OpenCode dev mock cards for browser dev preview', async () => {
     vi.stubGlobal('window', {})
     vi.mocked(GetOpenCodeProviders).mockRejectedValue(new Error('no bridge'))

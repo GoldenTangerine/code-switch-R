@@ -1,6 +1,7 @@
 import type { AutomationCard, ModelMappingMissPolicy } from '../../../data/cards'
 import { cloneBudgetQuotaAdjustments } from '../../../utils/budgetUsage'
 import {
+  hasProviderQuotaQueryType,
   normalizeProviderQuotaQueryConfig,
   normalizeProviderQuotaQueryType,
   sanitizeProviderQuotaQueryConfigForSave,
@@ -191,6 +192,8 @@ export const createDefaultVendorForm = (
   budgetQuotaUsedAdjustments: undefined,
   providerQuotaQueryType: 'none',
   providerQuotaQueryConfig: undefined,
+  quotaAutoDisabled: false,
+  quotaAutoDisablePaused: false,
 })
 
 export const createVendorFormFromCard = (
@@ -207,7 +210,9 @@ export const createVendorFormFromCard = (
   level: card.level || 1,
   hideLogBadge: card.hideLogBadge === true,
   providerConcurrencyLimit: card.providerConcurrencyLimit || undefined,
-  enabled: card.enabled,
+  enabled: card.quotaAutoDisabled ? true : card.enabled,
+  quotaAutoDisabled: card.quotaAutoDisabled === true,
+  quotaAutoDisablePaused: card.quotaAutoDisablePaused === true,
   apiFormat: tabId === 'claude' ? normalizeClaudeAPIFormatValue(card.apiFormat) : undefined,
   anthropicCacheTTL: resolvePersistedAnthropicCacheTTL(tabId, card.apiFormat, card.anthropicCacheTTL),
   supportedModels: cloneProviderValue(card.supportedModels || {}),
@@ -300,6 +305,10 @@ export const buildNormalizedVendorForm = ({
   resolveAuthType: () => string
 }): VendorForm => {
   const apiFormat = tabId === 'claude' ? normalizeClaudeAPIFormatValue(form.apiFormat) : undefined
+  const hasRemoteQuota = hasProviderQuotaQueryType(form.providerQuotaQueryConfig ?? form.providerQuotaQueryType, form.providerQuotaQueryType)
+  const preserveAutoDisabled = hasRemoteQuota && form.enabled && form.quotaAutoDisabled === true
+  const preservePaused = hasRemoteQuota && form.enabled && form.quotaAutoDisablePaused === true
+  const persistedEnabled = preserveAutoDisabled ? false : form.enabled
   return {
     name: form.name.trim(),
     apiUrl: form.apiUrl.trim(),
@@ -310,7 +319,9 @@ export const buildNormalizedVendorForm = ({
     level: form.level || 1,
     hideLogBadge: form.hideLogBadge === true,
     providerConcurrencyLimit: normalizeProviderConcurrencyLimit(form.providerConcurrencyLimit),
-    enabled: form.enabled,
+    enabled: persistedEnabled,
+    quotaAutoDisabled: preserveAutoDisabled,
+    quotaAutoDisablePaused: preservePaused,
     apiFormat,
     anthropicCacheTTL: resolvePersistedAnthropicCacheTTL(tabId, apiFormat, form.anthropicCacheTTL),
     supportedModels: cloneProviderValue(form.supportedModels || {}),
@@ -339,8 +350,8 @@ export const buildNormalizedVendorForm = ({
     authProvider: form.authProvider || '',
     authAccountId: form.authAccountId || '',
     partnerPromotionKey: form.partnerPromotionKey || '',
-    liveConfigManaged: tabId === 'opencode' ? form.enabled : form.liveConfigManaged,
-    isInConfig: tabId === 'opencode' ? form.enabled : form.isInConfig,
+    liveConfigManaged: tabId === 'opencode' ? persistedEnabled : form.liveConfigManaged,
+    isInConfig: tabId === 'opencode' ? persistedEnabled : form.isInConfig,
     availabilityMonitorEnabled: tabId === 'opencode' ? false : !!form.availabilityMonitorEnabled,
     connectivityAutoBlacklist: tabId === 'opencode' ? false : !!form.connectivityAutoBlacklist,
     availabilityConfig: tabId === 'opencode'
@@ -370,6 +381,10 @@ export const buildPersistedProviderFieldsFromForm = (
   normalizeLevel: NormalizeLevelFn,
 ) => {
   const apiFormat = tabId === 'claude' ? normalizeClaudeAPIFormatValue(form.apiFormat) : undefined
+  const hasRemoteQuota = hasProviderQuotaQueryType(form.providerQuotaQueryConfig ?? form.providerQuotaQueryType, form.providerQuotaQueryType)
+  const preserveAutoDisabled = hasRemoteQuota && form.enabled && form.quotaAutoDisabled === true
+  const preservePaused = hasRemoteQuota && form.enabled && form.quotaAutoDisablePaused === true
+  const persistedEnabled = preserveAutoDisabled ? false : form.enabled
   return {
     apiKey: form.apiKey,
     officialSite: form.officialSite,
@@ -378,7 +393,9 @@ export const buildPersistedProviderFieldsFromForm = (
     level: normalizeLevel(form.level),
     hideLogBadge: form.hideLogBadge === true,
     providerConcurrencyLimit: normalizeProviderConcurrencyLimit(form.providerConcurrencyLimit),
-    enabled: form.enabled,
+    enabled: persistedEnabled,
+    quotaAutoDisabled: preserveAutoDisabled,
+    quotaAutoDisablePaused: preservePaused,
     apiFormat,
     anthropicCacheTTL: resolvePersistedAnthropicCacheTTL(tabId, apiFormat, form.anthropicCacheTTL),
     supportedModels: cloneProviderValue(form.supportedModels || {}),
@@ -407,8 +424,8 @@ export const buildPersistedProviderFieldsFromForm = (
     authProvider: form.authProvider || '',
     authAccountId: form.authAccountId || '',
     partnerPromotionKey: form.partnerPromotionKey || '',
-    liveConfigManaged: tabId === 'opencode' ? form.enabled : form.liveConfigManaged,
-    isInConfig: tabId === 'opencode' ? form.enabled : form.isInConfig,
+    liveConfigManaged: tabId === 'opencode' ? persistedEnabled : form.liveConfigManaged,
+    isInConfig: tabId === 'opencode' ? persistedEnabled : form.isInConfig,
     availabilityMonitorEnabled: tabId === 'opencode' ? false : !!form.availabilityMonitorEnabled,
     connectivityAutoBlacklist: tabId === 'opencode' ? false : !!form.connectivityAutoBlacklist,
     availabilityConfig: tabId === 'opencode'

@@ -1,5 +1,5 @@
 import type { AutomationCard } from '../../../data/cards'
-import { queryProviderQuota } from '../../../services/providerQuotaQuery'
+import { checkProviderQuota, queryProviderQuota } from '../../../services/providerQuotaQuery'
 import { roundBudgetValue } from '../../../utils/budgetUsage'
 import {
   hasProviderQuotaQueryType,
@@ -34,10 +34,14 @@ export async function resolveProviderQuotaQueryDisplay({
   card,
   now,
   t,
+  providerKind,
+  providerID,
 }: {
   card: AutomationCard
   now: Date
   t: TranslateFn
+  providerKind?: string
+  providerID?: string
 }): Promise<ProviderQuotaQueryDisplayResult> {
   const queryConfig = normalizeProviderQuotaQueryConfig(
     card.providerQuotaQueryConfig,
@@ -49,7 +53,9 @@ export async function resolveProviderQuotaQueryDisplay({
 
   const queryType = resolveProviderQuotaQueryType(queryConfig ?? card.providerQuotaQueryType)
   try {
-    const response = await queryProviderQuota(queryConfig ?? queryType, card.apiUrl, card.apiKey)
+    const response = providerKind && providerID
+      ? await checkProviderQuota(providerKind, providerID)
+      : await queryProviderQuota(queryConfig ?? queryType, card.apiUrl, card.apiKey)
     const responseItems = Array.isArray(response?.items) ? response.items : []
     const queriedAt = Number(response?.queriedAt)
     const normalizedQueriedAt = Number.isFinite(queriedAt) ? queriedAt : now.getTime()

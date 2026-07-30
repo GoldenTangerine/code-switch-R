@@ -7,6 +7,7 @@ import {
 } from '../utils/providerQuotaQuery'
 
 const PROVIDER_QUOTA_QUERY_SERVICE = 'codeswitch/services.ProviderQuotaQueryService'
+const PROVIDER_QUOTA_AUTOMATION_SERVICE = 'codeswitch/services.ProviderQuotaAutomationService'
 
 export type ProviderQuotaQueryItem = {
   key: string
@@ -28,6 +29,13 @@ export type ProviderQuotaQueryResult = {
   items: ProviderQuotaQueryItem[]
   error?: string
   queriedAt?: number
+}
+
+export type ProviderQuotaAutomationResult = ProviderQuotaQueryResult & {
+  providerEnabled: boolean
+  quotaAutoDisabled: boolean
+  quotaAutoDisablePaused: boolean
+  stateChanged: boolean
 }
 
 export type ProviderQuotaScriptValidationResult = {
@@ -61,3 +69,30 @@ export async function validateProviderQuotaScriptPreset(
     code,
   )
 }
+
+export const checkProviderQuota = (
+  kind: string,
+  providerID: string,
+): Promise<ProviderQuotaAutomationResult> => Call.ByName(
+  `${PROVIDER_QUOTA_AUTOMATION_SERVICE}.CheckProviderQuota`,
+  kind,
+  providerID,
+)
+
+export const temporarilyEnableQuotaProvider = (
+  kind: string,
+  providerID: string,
+): Promise<ProviderQuotaAutomationResult> => Call.ByName(
+  `${PROVIDER_QUOTA_AUTOMATION_SERVICE}.TemporarilyEnableProvider`,
+  kind,
+  providerID,
+)
+
+export const resumeProviderQuotaAutomation = (
+  kind: string,
+  providerID: string,
+): Promise<ProviderQuotaAutomationResult> => Call.ByName(
+  `${PROVIDER_QUOTA_AUTOMATION_SERVICE}.ResumeProviderQuotaAutomation`,
+  kind,
+  providerID,
+)

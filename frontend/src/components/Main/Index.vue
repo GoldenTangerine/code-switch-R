@@ -77,6 +77,8 @@
           @unblock-and-reset="handleUnblockAndReset"
           @reset-level="handleResetLevel"
           @toggle-enabled="handleProviderEnabledChange"
+          @temporarily-enable-quota-provider="handleTemporarilyEnableQuotaProvider"
+          @resume-quota-automation="handleResumeQuotaAutomation"
           @direct-apply="handleDirectApply"
           @configure="configure"
           @open-provider-data="openProviderDataOverview"
@@ -204,7 +206,7 @@
 <script setup lang="ts">
 import { computed, onUnmounted, reactive, ref, watch, type ComponentPublicInstance } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Browser, Call } from '@wailsio/runtime'
+import { Browser, Call, Events } from '@wailsio/runtime'
 import { useRouter } from 'vue-router'
 import BaseButton from '../common/BaseButton.vue'
 import BaseModal from '../common/BaseModal.vue'
@@ -244,13 +246,22 @@ import { useProviderQuotas } from './composables/useProviderQuotas'
 import { useProviderStats } from './composables/useProviderStats'
 import { useUpdatePolling } from './composables/useUpdatePolling'
 import { blacklistStatusKeyFromCard, cardProviderRef, normalizeProviderRef } from './adapters/providerCardMappers'
-import { shouldAutoRefreshProviderQuota } from './utils/providerQuotaAutoRefresh'
+import {
+  applyProviderQuotaStateChange,
+  shouldAutoRefreshProviderQuota,
+  type ProviderQuotaStateChange,
+} from './utils/providerQuotaAutoRefresh'
 import { shouldShowProviderProxyToggle } from './utils/providerProxyToggleVisibility'
 import { shouldUseLastUsedProviderForTool } from './utils/lastUsedProvider'
 import { getDefaultHostedProviderRef, isHostedRouteActive } from './utils/providerRoutingState'
 import { hasProviderQuotaQueryType } from '../../utils/providerQuotaQuery'
 import type { CustomCliToolDraft, MainTabStatus, ProviderCardViewModel, ProviderConcurrencyStatusView, ProviderTab, VendorForm } from './types'
 import type { AutomationCard } from '../../data/cards'
+import {
+  resumeProviderQuotaAutomation,
+  temporarilyEnableQuotaProvider,
+  type ProviderQuotaAutomationResult,
+} from '../../services/providerQuotaQuery'
 
 type MainUsageHeatmapExpose = {
   reload: () => Promise<void>
@@ -399,6 +410,9 @@ const {
   t,
   getActiveTab: () => activeTab.value,
   cards,
+  resolveProviderKind: (tab) => tab === 'others' && selectedToolId.value
+    ? `custom:${selectedToolId.value}`
+    : tab,
   resolveAutoRefreshRemoteQuotaRefs: () => {
     const refs = new Set<string>()
     const tab = activeTab.value
@@ -498,6 +512,82 @@ const {
   moveCardToStatusGroup,
   appendCardToGroup,
 })
+
+type ProviderQuotaStateChangedEvent = {
+  data?: ProviderQuotaStateChange & { platform: string }
+}
+
+const resolveQuotaProviderKind = (tab: ProviderTab) => tab === 'others' && selectedToolId.value
+  ? `custom:${selectedToolId.value}`
+  : tab
+
+const resolveQuotaStateTab = (platform: string): ProviderTab | null => {
+  const normalized = `${platform ?? ''}`.trim().toLowerCase()
+  if (normalized.startsWith('custom:')) {
+    const selectedKind = `custom:${selectedToolId.value ?? ''}`.trim().toLowerCase()
+    return normalized === selectedKind ? 'others' : null
+  }
+  return MAIN_TABS.some((tab) => tab.id === normalized)
+    ? normalized as ProviderTab
+    : null
+}
+
+const applyQuotaAutomationResult = (
+  platform: string,
+  providerId: string,
+  result: ProviderQuotaAutomationResult,
+) => {
+  const tab = resolveQuotaStateTab(platform)
+  if (!tab) return false
+  return applyProviderQuotaStateChange(cards[tab], {
+    providerId,
+    enabled: result.providerEnabled,
+    quotaAutoDisabled: result.quotaAutoDisabled,
+    quotaAutoDisablePaused: result.quotaAutoDisablePaused,
+  })
+}
+
+const handleProviderQuotaStateChanged = (event: ProviderQuotaStateChangedEvent) => {
+  const change = event.data
+  if (!change) return
+  const tab = resolveQuotaStateTab(change.platform)
+  if (!tab) return
+  applyProviderQuotaStateChange(cards[tab], change)
+}
+
+const handleTemporarilyEnableQuotaProvider = async (card: AutomationCard) => {
+  const tab = activeTab.value
+  const providerKind = resolveQuotaProviderKind(tab)
+  const providerRef = cardProviderRef(card)
+  if (!providerRef) return
+  try {
+    const result = await temporarilyEnableQuotaProvider(providerKind, providerRef)
+    applyQuotaAutomationResult(providerKind, providerRef, result)
+  } catch (error) {
+    showToast(extractErrorMessage(error), 'error')
+  }
+}
+
+const handleResumeQuotaAutomation = async (card: AutomationCard) => {
+  const tab = activeTab.value
+  const providerKind = resolveQuotaProviderKind(tab)
+  const providerRef = cardProviderRef(card)
+  if (!providerRef) return
+  try {
+    const result = await resumeProviderQuotaAutomation(providerKind, providerRef)
+    applyQuotaAutomationResult(providerKind, providerRef, result)
+    if (activeTab.value === tab) {
+      void refreshProviderQuotas({ forceRemoteRefs: new Set([providerRef]), targetRefs: new Set([providerRef]) })
+    }
+  } catch (error) {
+    showToast(extractErrorMessage(error), 'error')
+  }
+}
+
+const unsubscribeQuotaStateChanged = Events.On(
+  'provider:quota-state-changed',
+  handleProviderQuotaStateChanged as Events.Callback,
+)
 
 const handleProviderLogsMarkedRead = () => {
   if (!providerLogsModalPlatform.value) return
@@ -910,6 +1000,7 @@ if (typeof window !== 'undefined') {
 }
 
 onUnmounted(() => {
+  unsubscribeQuotaStateChanged()
   if (concurrencyStatusTimer !== undefined) {
     window.clearInterval(concurrencyStatusTimer)
     concurrencyStatusTimer = undefined

@@ -756,3 +756,71 @@ func TestProviderQuotaQueryService_ValidateScriptPresetRejectsMissingExtractor(t
 		t.Fatal("缺少 extractor 时应返回错误信息")
 	}
 }
+
+func TestQuotaItemsExhaustedIgnoresInvalidItems(t *testing.T) {
+	exhausted, valid := quotaItemsExhausted([]ProviderQuotaQueryItem{
+		{Key: "invalid", Active: true, Total: 0, InvalidMessage: "expired"},
+	})
+	if exhausted || valid {
+		t.Fatalf("无有效额度项时不应改变状态: exhausted=%v valid=%v", exhausted, valid)
+	}
+}
+
+func TestQuotaItemsExhaustedRecognizesInactiveZeroBalance(t *testing.T) {
+	exhausted, valid := quotaItemsExhausted([]ProviderQuotaQueryItem{
+		{Key: "balance", Active: false, Total: 0},
+	})
+	if !exhausted || !valid {
+		t.Fatalf("官方零余额项应判定为额度耗尽: exhausted=%v valid=%v", exhausted, valid)
+	}
+}
+
+func TestQuotaItemsExhaustedWhenAnyValidItemHasNoRemainingQuota(t *testing.T) {
+	exhausted, valid := quotaItemsExhausted([]ProviderQuotaQueryItem{
+		{Key: "daily", Active: true, Used: 1, Total: 10},
+		{Key: "monthly", Active: true, Used: 20, Total: 20},
+	})
+	if !exhausted || !valid {
+		t.Fatalf("任一有效额度项耗尽时应判定耗尽: exhausted=%v valid=%v", exhausted, valid)
+	}
+}
+
+func TestResolveProviderQuotaAutomationState(t *testing.T) {
+	tests := []struct {
+		name                                  string
+		enabled, autoDisabled, paused         bool
+		exhausted                             bool
+		wantEnabled, wantDisabled, wantPaused bool
+	}{
+		{name: "enabled provider is auto disabled", enabled: true, exhausted: true, wantDisabled: true},
+		{name: "manually disabled provider stays disabled", exhausted: true},
+		{name: "auto disabled provider recovers", autoDisabled: true, wantEnabled: true},
+		{name: "temporary enable stays enabled while exhausted", enabled: true, paused: true, exhausted: true, wantEnabled: true, wantPaused: true},
+		{name: "temporary enable clears after recovery", enabled: true, paused: true, wantEnabled: true},
+	}
+
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			enabled, autoDisabled, paused := resolveProviderQuotaAutomationState(testCase.enabled, testCase.autoDisabled, testCase.paused, testCase.exhausted)
+			if enabled != testCase.wantEnabled || autoDisabled != testCase.wantDisabled || paused != testCase.wantPaused {
+				t.Fatalf("状态不符合预期: got=(%v,%v,%v) want=(%v,%v,%v)", enabled, autoDisabled, paused, testCase.wantEnabled, testCase.wantDisabled, testCase.wantPaused)
+			}
+		})
+	}
+}
+
+func TestNormalizeProviderQuotaAutomationOnSaveClearsStateWhenConfigRemoved(t *testing.T) {
+	enabled := false
+	autoDisabled := true
+	paused := false
+	normalizeProviderQuotaAutomationOnSave(&enabled, &autoDisabled, &paused, "none", nil)
+	if !enabled || autoDisabled || paused {
+		t.Fatalf("移除额度配置后应恢复自动停用项: enabled=%v autoDisabled=%v paused=%v", enabled, autoDisabled, paused)
+	}
+
+	enabled = false
+	normalizeProviderQuotaAutomationOnSave(&enabled, &autoDisabled, &paused, "none", nil)
+	if enabled {
+		t.Fatal("手动关闭的供应商不应因移除额度配置而自动启用")
+	}
+}

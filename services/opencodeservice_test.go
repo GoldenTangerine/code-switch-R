@@ -363,12 +363,14 @@ func TestOpenCodeDuplicateProviderClearsLiveFlags(t *testing.T) {
 	service := &OpenCodeService{
 		providers: []OpenCodeProvider{
 			{
-				ID:                "managed",
-				Name:              "Managed",
-				Enabled:           true,
-				LiveConfigManaged: boolPtr(true),
-				IsInConfig:        boolPtr(true),
-				SettingsConfig:    map[string]any{"npm": "@ai-sdk/openai-compatible"},
+				ID:                     "managed",
+				Name:                   "Managed",
+				Enabled:                true,
+				LiveConfigManaged:      boolPtr(true),
+				IsInConfig:             boolPtr(true),
+				SettingsConfig:         map[string]any{"npm": "@ai-sdk/openai-compatible"},
+				QuotaAutoDisabled:      true,
+				QuotaAutoDisablePaused: true,
 			},
 		},
 	}
@@ -380,7 +382,7 @@ func TestOpenCodeDuplicateProviderClearsLiveFlags(t *testing.T) {
 	if duplicated == nil {
 		t.Fatal("期望返回复制后的 OpenCode provider")
 	}
-	if duplicated.Enabled || shouldManageOpenCodeLiveProvider(*duplicated) {
+	if duplicated.Enabled || duplicated.QuotaAutoDisabled || duplicated.QuotaAutoDisablePaused || shouldManageOpenCodeLiveProvider(*duplicated) {
 		t.Fatalf("复制后的 OpenCode provider 应为禁用且 DB-only，实际=%#v", duplicated)
 	}
 }

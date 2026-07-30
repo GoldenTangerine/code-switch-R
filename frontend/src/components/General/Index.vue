@@ -181,6 +181,7 @@ const mainWindowDestroyDelaySeconds = ref(
 const autoUpdateEnabled = ref(getCachedValue('autoUpdate', true))
 const updateHistoryKeepCount = ref(getCachedNumber('updateHistoryKeepCount', defaultUpdateHistoryKeepCount))
 const autoConnectivityTestEnabled = ref(getCachedValue('autoConnectivityTest', false))
+const providerQuotaAutoDisableEnabled = ref(getCachedValue('providerQuotaAutoDisable', false))
 const switchNotifyEnabled = ref(getCachedValue('switchNotify', true)) // 切换通知开关
 const roundRobinEnabled = ref(getCachedValue('roundRobin', false))    // 同 Level 轮询开关
 const claudeModelRoutingEnabled = ref(getCachedValue('claudeModelRouting', false))
@@ -523,6 +524,7 @@ const syncAppSettingsCache = () => {
   localStorage.setItem('app-settings-autoUpdate', String(autoUpdateEnabled.value))
   localStorage.setItem('app-settings-updateHistoryKeepCount', String(updateHistoryKeepCount.value))
   localStorage.setItem('app-settings-autoConnectivityTest', String(autoConnectivityTestEnabled.value))
+  localStorage.setItem('app-settings-providerQuotaAutoDisable', String(providerQuotaAutoDisableEnabled.value))
   localStorage.setItem('app-settings-switchNotify', String(switchNotifyEnabled.value))
   localStorage.setItem('app-settings-roundRobin', String(roundRobinEnabled.value))
   localStorage.setItem('app-settings-claudeModelRouting', String(claudeModelRoutingEnabled.value))
@@ -1178,6 +1180,7 @@ const loadAppSettings = async () => {
       Number(data?.update_history_keep_count ?? defaultUpdateHistoryKeepCount)
     )
     autoConnectivityTestEnabled.value = data?.auto_connectivity_test ?? false
+    providerQuotaAutoDisableEnabled.value = data?.provider_quota_auto_disable_enabled ?? false
     switchNotifyEnabled.value = data?.enable_switch_notify ?? true
     roundRobinEnabled.value = data?.enable_round_robin ?? false
     claudeModelRoutingEnabled.value = data?.claude_model_routing_enabled ?? false
@@ -1227,6 +1230,7 @@ const loadAppSettings = async () => {
     autoUpdateEnabled.value = true
     updateHistoryKeepCount.value = defaultUpdateHistoryKeepCount
     autoConnectivityTestEnabled.value = false
+    providerQuotaAutoDisableEnabled.value = false
     switchNotifyEnabled.value = true
     roundRobinEnabled.value = false
     claudeModelRoutingEnabled.value = false
@@ -1339,6 +1343,7 @@ const persistAppSettingsNow = async () => {
       logs_refresh_interval_seconds: latestSettings.logs_refresh_interval_seconds,
       main_window_destroy_delay_seconds: normalizedMainWindowDestroyDelaySeconds,
       auto_connectivity_test: autoConnectivityTestEnabled.value,
+      provider_quota_auto_disable_enabled: providerQuotaAutoDisableEnabled.value,
       enable_switch_notify: switchNotifyEnabled.value,
       enable_round_robin: roundRobinEnabled.value,
       claude_model_routing_enabled: claudeModelRoutingEnabled.value,
@@ -2596,6 +2601,20 @@ onBeforeUnmount(() => {
                 <span></span>
               </label>
               <span class="hint-text">{{ $t('components.general.label.autoConnectivityTestHint') }}</span>
+            </div>
+          </ListItem>
+          <ListItem :label="$t('components.general.label.providerQuotaAutoDisable')">
+            <div class="toggle-with-hint">
+              <label class="mac-switch">
+                <input
+                  v-model="providerQuotaAutoDisableEnabled"
+                  type="checkbox"
+                  :disabled="settingsLoading || saveBusy"
+                  @change="persistAppSettings"
+                />
+                <span></span>
+              </label>
+              <span class="hint-text">{{ $t('components.general.label.providerQuotaAutoDisableHint') }}</span>
             </div>
           </ListItem>
         </div>

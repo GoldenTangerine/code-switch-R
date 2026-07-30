@@ -140,4 +140,31 @@ describe('ProviderCard display states', () => {
     expect(html).toContain('已拉黑 1分5秒')
     expect(html).not.toContain('blacklist-banner')
   })
+
+  it('replaces the normal switch with quota exhaustion actions when auto-disabled', async () => {
+    const html = await renderCard(baseViewModel({
+      card: {
+        ...card,
+        enabled: false,
+        quotaAutoDisabled: true,
+      },
+    }))
+
+    expect(html).toContain('额度用完')
+    expect(html).toContain('临时启用')
+    expect(html).not.toContain('mac-switch sm')
+  })
+
+  it('keeps the normal switch and shows resume automation while temporarily enabled', async () => {
+    const html = await renderCard(baseViewModel({
+      card: {
+        ...card,
+        quotaAutoDisablePaused: true,
+      },
+    }))
+
+    expect(html).toContain('额度用完·临时启用')
+    expect(html).toContain('恢复自动')
+    expect(html).toContain('mac-switch sm')
+  })
 })

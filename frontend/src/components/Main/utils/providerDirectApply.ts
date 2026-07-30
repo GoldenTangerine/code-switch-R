@@ -2,8 +2,8 @@ import type { AutomationCard } from '../../../data/cards'
 import type { ProviderTab, VendorForm } from '../types'
 
 type DirectApplyProviderLike =
-  | Pick<AutomationCard, 'apiFormat' | 'connectivityAuthType'>
-  | Pick<VendorForm, 'apiFormat' | 'connectivityAuthType'>
+  | Pick<AutomationCard, 'apiFormat' | 'connectivityAuthType' | 'quotaAutoDisabled'>
+  | Pick<VendorForm, 'apiFormat' | 'connectivityAuthType' | 'quotaAutoDisabled'>
 
 const claudeAuthRequiresHostedRouting = (authType: string | undefined): boolean => {
   const normalized = `${authType ?? ''}`.trim().toLowerCase()
@@ -21,6 +21,7 @@ export const isDirectApplyBlockedForProvider = (
   tabId: ProviderTab,
   provider: DirectApplyProviderLike,
 ): boolean => (
-  tabId === 'opencode' ||
-  (tabId === 'claude' && claudeDirectApplyRequiresHostedRouting(provider))
+  provider.quotaAutoDisabled === true
+  || tabId === 'opencode'
+  || (tabId === 'claude' && claudeDirectApplyRequiresHostedRouting(provider))
 )

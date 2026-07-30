@@ -15,6 +15,10 @@ export type AutomationCard = {
   tint: string
   accent: string
   enabled: boolean
+  // 由远端额度耗尽触发的自动停用状态，与手动关闭区分。
+  quotaAutoDisabled?: boolean
+  // 临时启用额度耗尽供应商时暂停自动停用。
+  quotaAutoDisablePaused?: boolean
   // 是否隐藏供应商日志图标的未读红点；缺省时默认显示。
   hideLogBadge?: boolean
   // Claude API 格式（仅 Claude 供应商使用）

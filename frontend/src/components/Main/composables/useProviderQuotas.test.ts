@@ -11,10 +11,11 @@ vi.mock('../../../services/logs', () => ({
 
 vi.mock('../../../services/providerQuotaQuery', () => ({
   queryProviderQuota: vi.fn(),
+  checkProviderQuota: vi.fn(),
 }))
 
 import { fetchCostByProvider, fetchCostSinceByProvider, fetchFiveHourQuotaStatusByProvider } from '../../../services/logs'
-import { queryProviderQuota, type ProviderQuotaQueryResult } from '../../../services/providerQuotaQuery'
+import { checkProviderQuota, queryProviderQuota, type ProviderQuotaQueryResult } from '../../../services/providerQuotaQuery'
 import { shouldAutoRefreshProviderQuota } from '../utils/providerQuotaAutoRefresh'
 import { useProviderQuotas } from './useProviderQuotas'
 
@@ -70,6 +71,15 @@ describe('useProviderQuotas', () => {
       success: false,
       queryType: 'none',
       items: [],
+    })
+    vi.mocked(checkProviderQuota).mockResolvedValue({
+      success: false,
+      queryType: 'none',
+      items: [],
+      providerEnabled: true,
+      quotaAutoDisabled: false,
+      quotaAutoDisablePaused: false,
+      stateChanged: false,
     })
   })
 
@@ -427,6 +437,33 @@ describe('useProviderQuotas', () => {
         valueMode: 'count',
       }),
     ])
+  })
+
+  it('uses provider-aware quota checks when a provider kind resolver is supplied', async () => {
+    const cards = createCardRecord()
+    const card = createCard(29, { providerQuotaQueryType: 'balance' })
+    cards.others.push(card)
+    vi.mocked(checkProviderQuota).mockResolvedValue({
+      success: true,
+      queryType: 'balance',
+      items: [{ key: 'balance', used: 2, total: 10, active: true }],
+      providerEnabled: true,
+      quotaAutoDisabled: false,
+      quotaAutoDisablePaused: false,
+      stateChanged: false,
+    })
+
+    const quotaState = useProviderQuotas({
+      t: (key: string) => key,
+      getActiveTab: () => 'others',
+      cards,
+      resolveProviderKind: () => 'custom:test-cli',
+    })
+
+    await quotaState.refreshProviderQuotas()
+
+    expect(checkProviderQuota).toHaveBeenCalledWith('custom:test-cli', '29')
+    expect(queryProviderQuota).not.toHaveBeenCalled()
   })
 
   it('preserves invalid messages and extra details from remote quota items', async () => {

@@ -55,6 +55,10 @@ type GeminiProvider struct {
 	ProviderQuotaQueryType string `json:"providerQuotaQueryType,omitempty"`
 	// 供应商额度查询完整配置：兼容旧类型字段，并承载脚本/官方余额/NewAPI 等模板能力
 	ProviderQuotaQueryConfig *ProviderQuotaQueryConfig `json:"providerQuotaQueryConfig,omitempty"`
+	// 额度耗尽后由自动化服务停用；与用户手动关闭区分。
+	QuotaAutoDisabled bool `json:"quotaAutoDisabled,omitempty"`
+	// 临时启用额度耗尽的供应商时暂停自动停用。
+	QuotaAutoDisablePaused bool `json:"quotaAutoDisablePaused,omitempty"`
 }
 
 // GeminiPreset 预设供应商
@@ -167,6 +171,7 @@ func (s *GeminiService) GetProviders() []GeminiProvider {
 func (s *GeminiService) AddProvider(provider GeminiProvider) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	normalizeProviderQuotaAutomationOnSave(&provider.Enabled, &provider.QuotaAutoDisabled, &provider.QuotaAutoDisablePaused, provider.ProviderQuotaQueryType, provider.ProviderQuotaQueryConfig)
 
 	// 检查 ID 是否重复
 	for _, p := range s.providers {
@@ -192,6 +197,7 @@ func (s *GeminiService) AddProvider(provider GeminiProvider) error {
 func (s *GeminiService) UpdateProvider(provider GeminiProvider) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	normalizeProviderQuotaAutomationOnSave(&provider.Enabled, &provider.QuotaAutoDisabled, &provider.QuotaAutoDisablePaused, provider.ProviderQuotaQueryType, provider.ProviderQuotaQueryConfig)
 
 	for i, p := range s.providers {
 		if p.ID == provider.ID {

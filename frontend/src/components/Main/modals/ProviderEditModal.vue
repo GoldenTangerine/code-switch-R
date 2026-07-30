@@ -1085,11 +1085,14 @@ const saveAndApplyBlockedByProvider = computed(() => (
   isDirectApplyBlockedForProvider(props.tabId, {
     apiFormat: form.apiFormat,
     connectivityAuthType: effectiveAuthType.value,
+    quotaAutoDisabled: form.quotaAutoDisabled,
   })
 ))
 const saveAndApplyTooltip = computed(() => (
   saveAndApplyBlockedByProvider.value
-    ? t('components.main.directApply.requiresHostedRouting')
+    ? form.quotaAutoDisabled
+      ? t('components.main.providers.quotaAutoDisabledHint')
+      : t('components.main.directApply.requiresHostedRouting')
     : t('components.main.directApply.title')
 ))
 const isCodexOfficialProvider = computed(() => (
@@ -2905,6 +2908,7 @@ const buildFormPayload = async (): Promise<VendorForm | null> => {
 
 const submit = async (applyAfterSave = false) => {
   if (modelMappingToggleSaving.value) return
+  if (applyAfterSave && saveAndApplyBlockedByProvider.value) return
   const payload = await buildFormPayload()
   if (!payload) return
 

@@ -45,6 +45,8 @@ type OpenCodeProvider struct {
 	BudgetQuotaUsedAdjustments *BudgetQuotaAdjustments   `json:"budgetQuotaUsedAdjustments,omitempty"`
 	ProviderQuotaQueryType     string                    `json:"providerQuotaQueryType,omitempty"`
 	ProviderQuotaQueryConfig   *ProviderQuotaQueryConfig `json:"providerQuotaQueryConfig,omitempty"`
+	QuotaAutoDisabled          bool                      `json:"quotaAutoDisabled,omitempty"`
+	QuotaAutoDisablePaused     bool                      `json:"quotaAutoDisablePaused,omitempty"`
 }
 
 type opencodeProviderEnvelope struct {
@@ -111,6 +113,9 @@ func (s *OpenCodeService) GetLiveProviderIds() ([]string, error) {
 func (s *OpenCodeService) SaveProviders(providers []OpenCodeProvider) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	for i := range providers {
+		normalizeProviderQuotaAutomationOnSave(&providers[i].Enabled, &providers[i].QuotaAutoDisabled, &providers[i].QuotaAutoDisablePaused, providers[i].ProviderQuotaQueryType, providers[i].ProviderQuotaQueryConfig)
+	}
 
 	nextProviders, syncLive, err := s.prepareOpenCodeProvidersSnapshot(providers)
 	if err != nil {
@@ -129,6 +134,7 @@ func (s *OpenCodeService) SaveProviders(providers []OpenCodeProvider) error {
 func (s *OpenCodeService) AddProvider(provider OpenCodeProvider) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	normalizeProviderQuotaAutomationOnSave(&provider.Enabled, &provider.QuotaAutoDisabled, &provider.QuotaAutoDisablePaused, provider.ProviderQuotaQueryType, provider.ProviderQuotaQueryConfig)
 
 	provider.ID = normalizeOpenCodeProviderIDForCreate(provider.ID)
 	if provider.ID == "" {
@@ -168,6 +174,7 @@ func (s *OpenCodeService) AddProvider(provider OpenCodeProvider) error {
 func (s *OpenCodeService) UpdateProvider(provider OpenCodeProvider) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	normalizeProviderQuotaAutomationOnSave(&provider.Enabled, &provider.QuotaAutoDisabled, &provider.QuotaAutoDisablePaused, provider.ProviderQuotaQueryType, provider.ProviderQuotaQueryConfig)
 
 	provider.ID = normalizeOpenCodeProviderID(provider.ID)
 	for i, existing := range s.providers {
@@ -295,6 +302,8 @@ func (s *OpenCodeService) DuplicateProvider(sourceID string) (*OpenCodeProvider,
 	}
 	clone.Name = source.Name + " (副本)"
 	clone.Enabled = false
+	clone.QuotaAutoDisabled = false
+	clone.QuotaAutoDisablePaused = false
 	clone.LiveConfigManaged = boolPtr(false)
 	clone.IsInConfig = boolPtr(false)
 	clone.SettingsConfig = cloneAnyMap(source.SettingsConfig)

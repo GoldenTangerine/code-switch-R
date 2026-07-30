@@ -9,12 +9,13 @@
       { dragging: viewModel.dragging },
       { 'drag-over': viewModel.dragOver },
       { 'is-enabled': viewModel.card.enabled },
+      { 'is-quota-auto-disabled': viewModel.card.quotaAutoDisabled },
       { 'is-currently-active': isCurrentlyActive },
       { 'is-last-used': viewModel.isLastUsed },
       { 'is-hosted-active': hostedSelectionActive },
       { 'is-highlighted': viewModel.isHighlighted },
     ]"
-    draggable="true"
+    :draggable="!viewModel.card.quotaAutoDisabled"
     @click="$emit('card-click')"
     @dragstart="handleDragStart"
     @dragend="handleDragEnd"
@@ -667,14 +668,32 @@
     </div>
 
     <div class="card-actions" @click.stop>
-      <label class="mac-switch sm">
-        <input
-          type="checkbox"
-          :checked="viewModel.card.enabled"
-          @change="handleToggleEnabled"
-        />
-        <span></span>
-      </label>
+      <div
+        v-if="viewModel.card.quotaAutoDisabled"
+        class="quota-auto-action"
+        :title="t('components.main.providers.quotaAutoDisabledHint')"
+      >
+        <span class="quota-auto-status">{{ t('components.main.providers.quotaAutoDisabled') }}</span>
+        <button type="button" class="quota-auto-button" @click.stop="$emit('temporarily-enable-quota-provider')">
+          {{ t('components.main.providers.quotaTemporarilyEnable') }}
+        </button>
+      </div>
+      <template v-else>
+        <label class="mac-switch sm">
+          <input
+            type="checkbox"
+            :checked="viewModel.card.enabled"
+            @change="handleToggleEnabled"
+          />
+          <span></span>
+        </label>
+        <div v-if="viewModel.card.quotaAutoDisablePaused" class="quota-auto-action quota-auto-action--paused">
+          <span class="quota-auto-status">{{ t('components.main.providers.quotaTemporarilyEnabled') }}</span>
+          <button type="button" class="quota-auto-button" @click.stop="$emit('resume-quota-automation')">
+            {{ t('components.main.providers.quotaResumeAutomation') }}
+          </button>
+        </div>
+      </template>
 
       <span class="card-actions-divider" aria-hidden="true"></span>
 
@@ -890,6 +909,8 @@ const emit = defineEmits<{
   'unblock-and-reset': []
   'reset-level': []
   'toggle-enabled': [enabled: boolean]
+  'temporarily-enable-quota-provider': []
+  'resume-quota-automation': []
   'direct-apply': []
   configure: []
   'open-provider-data': []
@@ -1163,6 +1184,9 @@ type AnthropicCacheTTLBadgeMeta = {
 }
 
 const directApplyTooltip = computed(() => {
+  if (props.viewModel.card.quotaAutoDisabled) {
+    return t('components.main.providers.quotaAutoDisabledHint')
+  }
   if (props.activeProxyState) {
     return t('components.main.directApply.proxyEnabled')
   }
@@ -1179,7 +1203,9 @@ const directApplyBlockedByProvider = computed(() => (
   isDirectApplyBlockedForProvider(props.activeTab, props.viewModel.card)
 ))
 
-const directApplyDisabled = computed(() => props.activeProxyState || directApplyBlockedByProvider.value)
+const directApplyDisabled = computed(() => (
+  props.activeProxyState || directApplyBlockedByProvider.value
+))
 
 const apiFormatBadge = computed<ApiFormatBadgeMeta | null>(() => {
   if (props.activeTab !== 'claude') return null
@@ -1320,6 +1346,10 @@ const handleToggleEnabled = (event: Event) => {
 }
 
 const handleDragStart = (event: DragEvent) => {
+  if (props.viewModel.card.quotaAutoDisabled) {
+    event.preventDefault()
+    return
+  }
   if (event.dataTransfer) {
     event.dataTransfer.effectAllowed = 'move'
     event.dataTransfer.setData('text/plain', `${props.viewModel.card.id}`)

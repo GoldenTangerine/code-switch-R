@@ -113,6 +113,7 @@ type AppSettings struct {
 	ProviderConcurrencyLimits        map[string]bool                          `json:"provider_concurrency_limits"`
 	ProviderQuotaQueryPresetCodes    map[string]string                        `json:"provider_quota_query_preset_codes,omitempty"`
 	ProviderQuotaQueryPresets        map[string]ProviderQuotaQueryPresetGroup `json:"provider_quota_query_presets,omitempty"`
+	ProviderQuotaAutoDisableEnabled  bool                                     `json:"provider_quota_auto_disable_enabled"`
 	CaptureRequestLogPayload         bool                                     `json:"capture_request_log_payload"`
 	SanitizeRequestLogPayload        bool                                     `json:"sanitize_request_log_payload"`
 }
@@ -203,6 +204,7 @@ type AppSettingsService struct {
 	codexSettings                  *CodexSettingsService
 	claudeSettings                 *ClaudeSettingsService
 	claudeModelRouting             *ClaudeModelRoutingService
+	providerQuotaAutomation        *ProviderQuotaAutomationService
 	snapshot                       atomic.Value
 	fingerprintMu                  sync.Mutex
 	fingerprint                    [sha256.Size]byte
@@ -359,6 +361,7 @@ func (as *AppSettingsService) reloadSnapshotIfChanged() {
 	as.mu.Lock()
 	settings, loadErr := as.loadLocked()
 	routing := as.claudeModelRouting
+	quotaAutomation := as.providerQuotaAutomation
 	as.mu.Unlock()
 	if loadErr != nil {
 		fmt.Printf("[AppSettings] 外部设置解析失败，继续使用上一份快照: %v\n", loadErr)
@@ -368,6 +371,9 @@ func (as *AppSettingsService) reloadSnapshotIfChanged() {
 	as.refreshFingerprint()
 	if routing != nil && claudeModelRoutingSettingsChanged(previous, settings) {
 		routing.HandleSettingsChanged(previous, settings)
+	}
+	if previous.ProviderQuotaAutoDisableEnabled && !settings.ProviderQuotaAutoDisableEnabled && quotaAutomation != nil {
+		quotaAutomation.restoreAllProviders()
 	}
 }
 
@@ -387,6 +393,17 @@ func (as *AppSettingsService) BindClaudeModelRoutingService(routing *ClaudeModel
 	as.mu.Lock()
 	defer as.mu.Unlock()
 	as.claudeModelRouting = routing
+}
+
+func (as *AppSettingsService) BindProviderQuotaAutomationService(service *ProviderQuotaAutomationService) {
+	as.mu.Lock()
+	as.providerQuotaAutomation = service
+	settings, _ := as.GetAppSettings()
+	as.mu.Unlock()
+
+	if service != nil && !settings.ProviderQuotaAutoDisableEnabled {
+		service.restoreAllProviders()
+	}
 }
 
 // migrateSettings 完整的配置迁移
@@ -800,6 +817,9 @@ func (as *AppSettingsService) SaveAppSettings(settings AppSettings) (AppSettings
 	}
 	as.snapshot.Store(cloneAppSettings(settings))
 	as.refreshFingerprint()
+	if previous.ProviderQuotaAutoDisableEnabled && !settings.ProviderQuotaAutoDisableEnabled && as.providerQuotaAutomation != nil {
+		as.providerQuotaAutomation.restoreAllProviders()
+	}
 	return settings, nil
 }
 

@@ -636,6 +636,50 @@ describe('useProviderForm order preservation', () => {
     expect(cards.claude[0]?.connectivityAuthType).toBe('X-Custom-Auth')
   })
 
+  it('saves quota-auto-disabled providers without attempting direct apply', async () => {
+    const cards = createCardRecord()
+    const card = createCard(1001, {
+      enabled: false,
+      quotaAutoDisabled: true,
+      providerQuotaQueryType: 'balance',
+    })
+    cards.codex.push(card)
+    const showToast = vi.fn()
+    const persistProviders = vi.fn().mockResolvedValue(undefined)
+    const refreshDirectAppliedStatus = vi.fn().mockResolvedValue(undefined)
+    const providerForm = useProviderForm({
+      initialTab: 'codex',
+      t: (key: string) => key,
+      showToast,
+      getActiveTab: () => 'codex',
+      cards,
+      normalizeLevel,
+      persistProviders,
+      refreshDirectAppliedStatus,
+      removeProvider: vi.fn().mockResolvedValue(undefined),
+      duplicateProvider: vi.fn().mockResolvedValue(false),
+      reloadProviders: vi.fn().mockResolvedValue(undefined),
+      moveCardToStatusGroup: (tabId, target, enabled) => moveProviderToStatusGroup(cards[tabId], target, enabled),
+      appendCardToGroup: (tabId, target) => insertProviderToStatusGroup(cards[tabId], target),
+    })
+
+    providerForm.configure(card)
+    await providerForm.submitAndApplyProviderModal(createForm({
+      name: card.name,
+      apiUrl: card.apiUrl,
+      apiKey: card.apiKey,
+      enabled: true,
+      quotaAutoDisabled: true,
+      providerQuotaQueryType: 'balance',
+    }))
+
+    expect(persistProviders).toHaveBeenCalledWith('codex')
+    expect(card).toMatchObject({ enabled: false, quotaAutoDisabled: true })
+    expect(vi.mocked(Call.ByName)).not.toHaveBeenCalled()
+    expect(refreshDirectAppliedStatus).not.toHaveBeenCalled()
+    expect(showToast).toHaveBeenCalledWith('components.main.providers.quotaAutoDisabledHint', 'warning')
+  })
+
   it('persists Anthropic cache TTL only for native Claude providers', async () => {
     const cards = createCardRecord()
     const persistProviders = vi.fn().mockResolvedValue(undefined)

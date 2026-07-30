@@ -54,6 +54,8 @@ export type VendorForm = {
   apiKeyUrl?: string
   icon: string
   enabled: boolean
+  quotaAutoDisabled?: boolean
+  quotaAutoDisablePaused?: boolean
   hideLogBadge?: boolean
   apiFormat?: 'anthropic' | 'openai_chat' | 'openai_responses'
   anthropicCacheTTL?: '' | '5m' | '1h'

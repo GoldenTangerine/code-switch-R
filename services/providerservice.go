@@ -144,6 +144,10 @@ type Provider struct {
 	ProviderQuotaQueryType string `json:"providerQuotaQueryType,omitempty"`
 	// 供应商额度查询完整配置：兼容旧类型字段，并承载脚本/官方余额/NewAPI 等模板能力
 	ProviderQuotaQueryConfig *ProviderQuotaQueryConfig `json:"providerQuotaQueryConfig,omitempty"`
+	// 额度耗尽后由自动化服务停用；与用户手动关闭区分。
+	QuotaAutoDisabled bool `json:"quotaAutoDisabled,omitempty"`
+	// 用户临时启用额度耗尽的供应商时，暂停自动停用直到额度恢复或手动恢复自动化。
+	QuotaAutoDisablePaused bool `json:"quotaAutoDisablePaused,omitempty"`
 
 	// ========== 旧字段（已废弃，仅用于读取迁移） ==========
 	// 这些字段在保存时不再写入，但读取时会自动迁移到新字段
@@ -512,6 +516,15 @@ func providerConfigFileExists(path string) bool {
 }
 
 func (ps *ProviderService) SaveProviders(kind string, providers []Provider) error {
+	for i := range providers {
+		normalizeProviderQuotaAutomationOnSave(
+			&providers[i].Enabled,
+			&providers[i].QuotaAutoDisabled,
+			&providers[i].QuotaAutoDisablePaused,
+			providers[i].ProviderQuotaQueryType,
+			providers[i].ProviderQuotaQueryConfig,
+		)
+	}
 	ps.mu.Lock()
 	err := ps.saveProvidersLocked(kind, providers)
 	ps.mu.Unlock()
