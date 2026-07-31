@@ -64,6 +64,12 @@ type ProviderQuotaAutomationService struct {
 	calls              map[string]*providerQuotaAutomationCall
 	triggerMu          sync.Mutex
 	lastErrorTriggered map[string]time.Time
+	recoveryMu         sync.Mutex
+	recoveryStarted    bool
+	recoveryStopped    bool
+	recoveryWake       chan struct{}
+	recoveryStop       chan struct{}
+	recoveryDone       chan struct{}
 }
 
 func NewProviderQuotaAutomationService(
@@ -85,6 +91,166 @@ func NewProviderQuotaAutomationService(
 		customCliService:   customCliService,
 		calls:              make(map[string]*providerQuotaAutomationCall),
 		lastErrorTriggered: make(map[string]time.Time),
+	}
+}
+
+func (s *ProviderQuotaAutomationService) Start() error {
+	if s == nil {
+		return nil
+	}
+	s.recoveryMu.Lock()
+	defer s.recoveryMu.Unlock()
+	if s.recoveryStarted || s.recoveryStopped {
+		return nil
+	}
+	s.recoveryStarted = true
+	s.recoveryWake = make(chan struct{}, 1)
+	s.recoveryStop = make(chan struct{})
+	s.recoveryDone = make(chan struct{})
+	go s.runRecoveryScheduler()
+	return nil
+}
+
+func (s *ProviderQuotaAutomationService) Stop() error {
+	if s == nil {
+		return nil
+	}
+	s.recoveryMu.Lock()
+	if !s.recoveryStarted || s.recoveryStopped {
+		s.recoveryMu.Unlock()
+		return nil
+	}
+	s.recoveryStopped = true
+	close(s.recoveryStop)
+	done := s.recoveryDone
+	s.recoveryMu.Unlock()
+	<-done
+	return nil
+}
+
+func (s *ProviderQuotaAutomationService) HandleSettingsChanged(previous AppSettings, next AppSettings) {
+	if previous.ProviderQuotaAutoDisableEnabled && !next.ProviderQuotaAutoDisableEnabled {
+		s.restoreAllProviders()
+	}
+	s.signalRecoveryScheduler()
+}
+
+func (s *ProviderQuotaAutomationService) runRecoveryScheduler() {
+	defer close(s.recoveryDone)
+	for {
+		settings, err := s.appSettings.GetAppSettings()
+		if err != nil || !settings.ProviderQuotaAutoDisableEnabled {
+			if !s.waitForRecoverySignal() {
+				return
+			}
+			continue
+		}
+
+		snapshots, scanErr := s.listManagedProviderSnapshots()
+		if scanErr != nil {
+			fmt.Printf("[ProviderQuotaRecovery] 扫描额度状态失败: %v\n", scanErr)
+		}
+		managedCount := len(snapshots)
+		snapshots = nil
+		if managedCount == 0 && scanErr == nil {
+			if !s.waitForRecoverySignal() {
+				return
+			}
+			continue
+		}
+
+		interval := time.Duration(normalizeProviderQuotaRecoveryIntervalSeconds(settings.QuotaRecoveryIntervalSeconds)) * time.Second
+		timer := time.NewTimer(interval)
+		select {
+		case <-timer.C:
+			currentSnapshots, currentScanErr := s.listManagedProviderSnapshots()
+			if currentScanErr != nil {
+				fmt.Printf("[ProviderQuotaRecovery] 刷新额度状态失败: %v\n", currentScanErr)
+			}
+			recoveredNames := s.runRecoveryPass(currentSnapshots)
+			if len(recoveredNames) > 0 && s.notification != nil {
+				s.notification.NotifyProviderQuotaRecovered(recoveredNames)
+			}
+		case <-s.recoveryWake:
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+		case <-s.recoveryStop:
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			return
+		}
+	}
+}
+
+func (s *ProviderQuotaAutomationService) waitForRecoverySignal() bool {
+	select {
+	case <-s.recoveryWake:
+		return true
+	case <-s.recoveryStop:
+		return false
+	}
+}
+
+func (s *ProviderQuotaAutomationService) runRecoveryPass(snapshots []providerQuotaAutomationSnapshot) []string {
+	recoveredNames := make([]string, 0, len(snapshots))
+	for _, snapshot := range snapshots {
+		select {
+		case <-s.recoveryStop:
+			return nil
+		default:
+		}
+		result := s.CheckProviderQuota(snapshot.Kind, snapshot.ProviderID)
+		if result.Success && result.StateChanged && !result.QuotaAutoDisabled && !result.QuotaAutoDisablePaused {
+			recoveredNames = append(recoveredNames, snapshot.ProviderName)
+		}
+	}
+	select {
+	case <-s.recoveryStop:
+		return nil
+	default:
+	}
+	return recoveredNames
+}
+
+func (s *ProviderQuotaAutomationService) listManagedProviderSnapshots() ([]providerQuotaAutomationSnapshot, error) {
+	result := make([]providerQuotaAutomationSnapshot, 0)
+	var firstErr error
+	for _, kind := range s.allProviderKinds() {
+		snapshots, err := s.listProviderSnapshots(kind)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		for _, snapshot := range snapshots {
+			if snapshot.QuotaAutoDisabled || snapshot.QuotaAutoDisablePaused {
+				result = append(result, snapshot)
+			}
+		}
+	}
+	return result, firstErr
+}
+
+func (s *ProviderQuotaAutomationService) signalRecoveryScheduler() {
+	s.recoveryMu.Lock()
+	wake := s.recoveryWake
+	started := s.recoveryStarted && !s.recoveryStopped
+	s.recoveryMu.Unlock()
+	if !started {
+		return
+	}
+	select {
+	case wake <- struct{}{}:
+	default:
 	}
 }
 
@@ -154,6 +320,7 @@ func (s *ProviderQuotaAutomationService) TemporarilyEnableProvider(kind string, 
 	}
 	if changed {
 		s.emitStateChanged(updated)
+		s.signalRecoveryScheduler()
 	}
 	return resultFromSnapshot(updated, changed), nil
 }
@@ -171,6 +338,7 @@ func (s *ProviderQuotaAutomationService) ResumeProviderQuotaAutomation(kind stri
 	}
 	if changed {
 		s.emitStateChanged(updated)
+		s.signalRecoveryScheduler()
 	}
 	return s.CheckProviderQuota(snapshot.Kind, snapshot.ProviderID), nil
 }
@@ -196,6 +364,7 @@ func (s *ProviderQuotaAutomationService) restoreAllProviders() {
 			}
 		}
 	}
+	s.signalRecoveryScheduler()
 }
 
 func (s *ProviderQuotaAutomationService) checkProviderQuota(kind string, providerID string) *ProviderQuotaAutomationResult {
@@ -231,6 +400,7 @@ func (s *ProviderQuotaAutomationService) checkProviderQuota(kind string, provide
 	result.StateChanged = changed
 	if changed {
 		s.emitStateChanged(updated)
+		s.signalRecoveryScheduler()
 	}
 	return result
 }

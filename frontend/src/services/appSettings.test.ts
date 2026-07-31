@@ -12,6 +12,7 @@ import {
   normalizeHeatmapGranularity,
   normalizeMainWindowDestroyDelaySeconds,
   normalizeLogsRefreshIntervalSeconds,
+  normalizeProviderQuotaRecoveryIntervalSeconds,
   saveLogsRefreshInterval,
   saveMainWindowDestroyDelay,
 } from './appSettings'
@@ -149,6 +150,26 @@ describe('appSettings', () => {
     expect((await fetchAppSettings()).logs_refresh_interval_seconds).toBe(30)
     expect(normalizeLogsRefreshIntervalSeconds(0)).toBe(0)
     expect(normalizeLogsRefreshIntervalSeconds(60)).toBe(60)
+  })
+
+  it('normalizes the provider quota recovery interval to 10-3600 seconds', async () => {
+    vi.mocked(Call.ByName)
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({ provider_quota_recovery_interval_seconds: 1 })
+      .mockResolvedValueOnce({ provider_quota_recovery_interval_seconds: 3601 })
+      .mockResolvedValueOnce({ provider_quota_recovery_interval_seconds: 120.9 })
+
+    expect((await fetchAppSettings()).provider_quota_recovery_interval_seconds).toBe(60)
+    expect((await fetchAppSettings()).provider_quota_recovery_interval_seconds).toBe(10)
+    expect((await fetchAppSettings()).provider_quota_recovery_interval_seconds).toBe(3600)
+    expect((await fetchAppSettings()).provider_quota_recovery_interval_seconds).toBe(120)
+    expect(normalizeProviderQuotaRecoveryIntervalSeconds(Number.NaN)).toBe(60)
+  })
+
+  it('keeps provider quota recovery notifications disabled by default', async () => {
+    vi.mocked(Call.ByName).mockResolvedValueOnce({})
+
+    expect((await fetchAppSettings()).provider_quota_recovery_notify_enabled).toBe(false)
   })
 
   it('saves the logs refresh interval through the dedicated settings method', async () => {

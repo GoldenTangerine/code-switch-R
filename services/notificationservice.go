@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -192,6 +193,41 @@ func (ns *NotificationService) EmitProviderQuotaStateChanged(platform, providerI
 		"quotaAutoDisablePaused": paused,
 		"timestamp":              time.Now().UnixMilli(),
 	})
+}
+
+// NotifyProviderQuotaRecovered 合并发送后台额度恢复通知。
+func (ns *NotificationService) NotifyProviderQuotaRecovered(providerNames []string) {
+	if ns == nil || len(providerNames) == 0 || ns.appSettings == nil {
+		return
+	}
+	settings, err := ns.appSettings.GetAppSettings()
+	if err != nil || !settings.QuotaRecoveryNotifyEnabled {
+		return
+	}
+
+	names := make([]string, 0, len(providerNames))
+	for _, name := range providerNames {
+		if normalized := strings.TrimSpace(name); normalized != "" {
+			names = append(names, normalized)
+		}
+	}
+	if len(names) == 0 {
+		return
+	}
+
+	go func() {
+		body := providerQuotaRecoveryNotificationBody(names)
+		if err := beeep.Notify("Code Switch", body, ns.iconPath); err != nil {
+			log.Printf("[Notification] 发送额度恢复通知失败: %v", err)
+		}
+	}()
+}
+
+func providerQuotaRecoveryNotificationBody(providerNames []string) string {
+	if len(providerNames) == 1 {
+		return fmt.Sprintf("%s 额度已恢复", providerNames[0])
+	}
+	return fmt.Sprintf("%d 个供应商额度已恢复", len(providerNames))
 }
 
 // NotifyProviderBlacklisted 发送供应商被拉黑通知

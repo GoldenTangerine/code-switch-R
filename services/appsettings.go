@@ -43,6 +43,9 @@ const (
 	defaultHeatmapIntensityL2             = 50
 	defaultHeatmapIntensityL3             = 75
 	defaultLogsRefreshIntervalSeconds     = 30
+	defaultQuotaRecoveryIntervalSeconds   = 60
+	minQuotaRecoveryIntervalSeconds       = 10
+	maxQuotaRecoveryIntervalSeconds       = 3600
 	claudeProxyAuthFieldAuthToken         = "auth_token"
 	claudeProxyAuthFieldAPIKey            = "api_key"
 	minHeatmapIntensityStop               = 1
@@ -114,6 +117,8 @@ type AppSettings struct {
 	ProviderQuotaQueryPresetCodes    map[string]string                        `json:"provider_quota_query_preset_codes,omitempty"`
 	ProviderQuotaQueryPresets        map[string]ProviderQuotaQueryPresetGroup `json:"provider_quota_query_presets,omitempty"`
 	ProviderQuotaAutoDisableEnabled  bool                                     `json:"provider_quota_auto_disable_enabled"`
+	QuotaRecoveryIntervalSeconds     int                                      `json:"provider_quota_recovery_interval_seconds"`
+	QuotaRecoveryNotifyEnabled       bool                                     `json:"provider_quota_recovery_notify_enabled"`
 	CaptureRequestLogPayload         bool                                     `json:"capture_request_log_payload"`
 	SanitizeRequestLogPayload        bool                                     `json:"sanitize_request_log_payload"`
 }
@@ -372,8 +377,8 @@ func (as *AppSettingsService) reloadSnapshotIfChanged() {
 	if routing != nil && claudeModelRoutingSettingsChanged(previous, settings) {
 		routing.HandleSettingsChanged(previous, settings)
 	}
-	if previous.ProviderQuotaAutoDisableEnabled && !settings.ProviderQuotaAutoDisableEnabled && quotaAutomation != nil {
-		quotaAutomation.restoreAllProviders()
+	if quotaAutomation != nil {
+		quotaAutomation.HandleSettingsChanged(previous, settings)
 	}
 }
 
@@ -535,6 +540,8 @@ func (as *AppSettingsService) defaultSettings() AppSettings {
 		ProviderConcurrencyLimits:        map[string]bool{},
 		ProviderQuotaQueryPresetCodes:    map[string]string{},
 		ProviderQuotaQueryPresets:        map[string]ProviderQuotaQueryPresetGroup{},
+		QuotaRecoveryIntervalSeconds:     defaultQuotaRecoveryIntervalSeconds,
+		QuotaRecoveryNotifyEnabled:       false,
 		CaptureRequestLogPayload:         false, // 默认关闭 payload 采集，降低隐私与存储风险
 		SanitizeRequestLogPayload:        true,  // 默认开启 payload 脱敏，避免敏感信息明文落库
 	}
@@ -621,6 +628,19 @@ func normalizeLogsRefreshIntervalSeconds(seconds int) int {
 	default:
 		return defaultLogsRefreshIntervalSeconds
 	}
+}
+
+func normalizeProviderQuotaRecoveryIntervalSeconds(seconds int) int {
+	if seconds == 0 {
+		return defaultQuotaRecoveryIntervalSeconds
+	}
+	if seconds < minQuotaRecoveryIntervalSeconds {
+		return minQuotaRecoveryIntervalSeconds
+	}
+	if seconds > maxQuotaRecoveryIntervalSeconds {
+		return maxQuotaRecoveryIntervalSeconds
+	}
+	return seconds
 }
 
 func hasConfiguredClaudeModelRouting() bool {
@@ -767,6 +787,7 @@ func (as *AppSettingsService) SaveAppSettings(settings AppSettings) (AppSettings
 	normalizeBudgetSettings(&settings)
 	settings.UpdateHistoryKeepCount = normalizeUpdateHistoryKeepCount(settings.UpdateHistoryKeepCount)
 	settings.LogsRefreshIntervalSeconds = normalizeLogsRefreshIntervalSeconds(settings.LogsRefreshIntervalSeconds)
+	settings.QuotaRecoveryIntervalSeconds = normalizeProviderQuotaRecoveryIntervalSeconds(settings.QuotaRecoveryIntervalSeconds)
 	settings.MainWindowDestroyDelaySeconds = normalizeMainWindowDestroyDelaySeconds(settings.MainWindowDestroyDelaySeconds)
 	normalizeProviderConcurrencyLimits(&settings)
 	normalizeProviderQuotaQueryPresets(&settings)
@@ -817,8 +838,8 @@ func (as *AppSettingsService) SaveAppSettings(settings AppSettings) (AppSettings
 	}
 	as.snapshot.Store(cloneAppSettings(settings))
 	as.refreshFingerprint()
-	if previous.ProviderQuotaAutoDisableEnabled && !settings.ProviderQuotaAutoDisableEnabled && as.providerQuotaAutomation != nil {
-		as.providerQuotaAutomation.restoreAllProviders()
+	if as.providerQuotaAutomation != nil {
+		as.providerQuotaAutomation.HandleSettingsChanged(previous, settings)
 	}
 	return settings, nil
 }
@@ -918,6 +939,7 @@ func (as *AppSettingsService) loadLocked() (AppSettings, error) {
 	normalizeBudgetSettings(&settings)
 	settings.UpdateHistoryKeepCount = normalizeUpdateHistoryKeepCount(settings.UpdateHistoryKeepCount)
 	settings.LogsRefreshIntervalSeconds = normalizeLogsRefreshIntervalSeconds(settings.LogsRefreshIntervalSeconds)
+	settings.QuotaRecoveryIntervalSeconds = normalizeProviderQuotaRecoveryIntervalSeconds(settings.QuotaRecoveryIntervalSeconds)
 	settings.MainWindowDestroyDelaySeconds = normalizeMainWindowDestroyDelaySeconds(settings.MainWindowDestroyDelaySeconds)
 	normalizeProviderConcurrencyLimits(&settings)
 	normalizeProviderQuotaQueryPresets(&settings)
@@ -942,6 +964,7 @@ func (as *AppSettingsService) saveLocked(settings AppSettings) error {
 	normalizeBudgetSettings(&settings)
 	settings.UpdateHistoryKeepCount = normalizeUpdateHistoryKeepCount(settings.UpdateHistoryKeepCount)
 	settings.LogsRefreshIntervalSeconds = normalizeLogsRefreshIntervalSeconds(settings.LogsRefreshIntervalSeconds)
+	settings.QuotaRecoveryIntervalSeconds = normalizeProviderQuotaRecoveryIntervalSeconds(settings.QuotaRecoveryIntervalSeconds)
 	settings.MainWindowDestroyDelaySeconds = normalizeMainWindowDestroyDelaySeconds(settings.MainWindowDestroyDelaySeconds)
 	normalizeProviderConcurrencyLimits(&settings)
 	normalizeProviderQuotaQueryPresets(&settings)

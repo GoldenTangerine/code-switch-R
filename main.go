@@ -286,6 +286,9 @@ func main() {
 	if err := appSettings.Start(); err != nil {
 		log.Fatalf("应用设置快照服务启动失败: %v", err)
 	}
+	if err := providerQuotaAutomationService.Start(); err != nil {
+		log.Fatalf("额度恢复服务启动失败: %v", err)
+	}
 	if err := blacklistService.Start(); err != nil {
 		log.Fatalf("黑名单快照服务启动失败: %v", err)
 	}
@@ -491,6 +494,7 @@ func main() {
 		// 4. 停止代理服务器
 		_ = providerRelay.Stop()
 		claudeModelRoutingService.Stop()
+		_ = providerQuotaAutomationService.Stop()
 		_ = blacklistService.Stop()
 		_ = appSettings.Stop()
 		_ = providerService.Stop()

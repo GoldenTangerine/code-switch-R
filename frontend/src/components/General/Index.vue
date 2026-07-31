@@ -15,8 +15,12 @@ import {
   DEFAULT_MAIN_WINDOW_DESTROY_DELAY_SECONDS,
   MAX_MAIN_WINDOW_DESTROY_DELAY_SECONDS,
   MIN_MAIN_WINDOW_DESTROY_DELAY_SECONDS,
+  DEFAULT_PROVIDER_QUOTA_RECOVERY_INTERVAL_SECONDS,
+  MAX_PROVIDER_QUOTA_RECOVERY_INTERVAL_SECONDS,
+  MIN_PROVIDER_QUOTA_RECOVERY_INTERVAL_SECONDS,
   normalizeHeatmapGranularity,
   normalizeMainWindowDestroyDelaySeconds,
+  normalizeProviderQuotaRecoveryIntervalSeconds,
   type AppSettings,
   type ClaudeModelMetadataMergeStrategy,
   type ClaudeProxyAuthField,
@@ -182,6 +186,12 @@ const autoUpdateEnabled = ref(getCachedValue('autoUpdate', true))
 const updateHistoryKeepCount = ref(getCachedNumber('updateHistoryKeepCount', defaultUpdateHistoryKeepCount))
 const autoConnectivityTestEnabled = ref(getCachedValue('autoConnectivityTest', false))
 const providerQuotaAutoDisableEnabled = ref(getCachedValue('providerQuotaAutoDisable', false))
+const providerQuotaRecoveryIntervalSeconds = ref(
+  normalizeProviderQuotaRecoveryIntervalSeconds(
+    getCachedNumber('providerQuotaRecoveryIntervalSeconds', DEFAULT_PROVIDER_QUOTA_RECOVERY_INTERVAL_SECONDS),
+  ),
+)
+const providerQuotaRecoveryNotifyEnabled = ref(getCachedValue('providerQuotaRecoveryNotify', false))
 const switchNotifyEnabled = ref(getCachedValue('switchNotify', true)) // 切换通知开关
 const roundRobinEnabled = ref(getCachedValue('roundRobin', false))    // 同 Level 轮询开关
 const claudeModelRoutingEnabled = ref(getCachedValue('claudeModelRouting', false))
@@ -525,6 +535,8 @@ const syncAppSettingsCache = () => {
   localStorage.setItem('app-settings-updateHistoryKeepCount', String(updateHistoryKeepCount.value))
   localStorage.setItem('app-settings-autoConnectivityTest', String(autoConnectivityTestEnabled.value))
   localStorage.setItem('app-settings-providerQuotaAutoDisable', String(providerQuotaAutoDisableEnabled.value))
+  localStorage.setItem('app-settings-providerQuotaRecoveryIntervalSeconds', String(providerQuotaRecoveryIntervalSeconds.value))
+  localStorage.setItem('app-settings-providerQuotaRecoveryNotify', String(providerQuotaRecoveryNotifyEnabled.value))
   localStorage.setItem('app-settings-switchNotify', String(switchNotifyEnabled.value))
   localStorage.setItem('app-settings-roundRobin', String(roundRobinEnabled.value))
   localStorage.setItem('app-settings-claudeModelRouting', String(claudeModelRoutingEnabled.value))
@@ -1181,6 +1193,10 @@ const loadAppSettings = async () => {
     )
     autoConnectivityTestEnabled.value = data?.auto_connectivity_test ?? false
     providerQuotaAutoDisableEnabled.value = data?.provider_quota_auto_disable_enabled ?? false
+    providerQuotaRecoveryIntervalSeconds.value = normalizeProviderQuotaRecoveryIntervalSeconds(
+      data?.provider_quota_recovery_interval_seconds,
+    )
+    providerQuotaRecoveryNotifyEnabled.value = data?.provider_quota_recovery_notify_enabled ?? false
     switchNotifyEnabled.value = data?.enable_switch_notify ?? true
     roundRobinEnabled.value = data?.enable_round_robin ?? false
     claudeModelRoutingEnabled.value = data?.claude_model_routing_enabled ?? false
@@ -1231,6 +1247,8 @@ const loadAppSettings = async () => {
     updateHistoryKeepCount.value = defaultUpdateHistoryKeepCount
     autoConnectivityTestEnabled.value = false
     providerQuotaAutoDisableEnabled.value = false
+    providerQuotaRecoveryIntervalSeconds.value = DEFAULT_PROVIDER_QUOTA_RECOVERY_INTERVAL_SECONDS
+    providerQuotaRecoveryNotifyEnabled.value = false
     switchNotifyEnabled.value = true
     roundRobinEnabled.value = false
     claudeModelRoutingEnabled.value = false
@@ -1283,6 +1301,11 @@ const persistAppSettingsNow = async () => {
     updateHistoryKeepCount.value = normalizedUpdateHistoryKeepCount
     const normalizedMainWindowDestroyDelaySeconds = normalizeMainWindowDestroyDelayInput(mainWindowDestroyDelaySeconds.value)
     mainWindowDestroyDelaySeconds.value = normalizedMainWindowDestroyDelaySeconds
+    const providerQuotaRecoveryIntervalInput = `${providerQuotaRecoveryIntervalSeconds.value ?? ''}`.trim()
+    const normalizedProviderQuotaRecoveryIntervalSeconds = normalizeProviderQuotaRecoveryIntervalSeconds(
+      providerQuotaRecoveryIntervalInput === '' ? Number.NaN : Number(providerQuotaRecoveryIntervalInput),
+    )
+    providerQuotaRecoveryIntervalSeconds.value = normalizedProviderQuotaRecoveryIntervalSeconds
     const normalizedHeatmapDisplay = getHeatmapDisplaySettingsFromState()
     heatmapDailyScaleFactor.value = normalizedHeatmapDisplay.dailyScaleFactor
     heatmapDailyIntensityMode.value = normalizedHeatmapDisplay.dailyIntensityMode
@@ -1344,6 +1367,8 @@ const persistAppSettingsNow = async () => {
       main_window_destroy_delay_seconds: normalizedMainWindowDestroyDelaySeconds,
       auto_connectivity_test: autoConnectivityTestEnabled.value,
       provider_quota_auto_disable_enabled: providerQuotaAutoDisableEnabled.value,
+      provider_quota_recovery_interval_seconds: normalizedProviderQuotaRecoveryIntervalSeconds,
+      provider_quota_recovery_notify_enabled: providerQuotaRecoveryNotifyEnabled.value,
       enable_switch_notify: switchNotifyEnabled.value,
       enable_round_robin: roundRobinEnabled.value,
       claude_model_routing_enabled: claudeModelRoutingEnabled.value,
@@ -2615,6 +2640,39 @@ onBeforeUnmount(() => {
                 <span></span>
               </label>
               <span class="hint-text">{{ $t('components.general.label.providerQuotaAutoDisableHint') }}</span>
+            </div>
+          </ListItem>
+          <ListItem :label="$t('components.general.label.providerQuotaRecoveryInterval')">
+            <div class="toggle-with-hint">
+              <div class="budget-input">
+                <input
+                  v-model.number="providerQuotaRecoveryIntervalSeconds"
+                  type="number"
+                  inputmode="numeric"
+                  :min="MIN_PROVIDER_QUOTA_RECOVERY_INTERVAL_SECONDS"
+                  :max="MAX_PROVIDER_QUOTA_RECOVERY_INTERVAL_SECONDS"
+                  step="1"
+                  :disabled="settingsLoading || saveBusy || !providerQuotaAutoDisableEnabled"
+                  class="mac-input budget-input-field"
+                  @change="persistAppSettings"
+                />
+                <span class="budget-unit">{{ $t('components.general.label.seconds') }}</span>
+              </div>
+              <span class="hint-text">{{ $t('components.general.label.providerQuotaRecoveryIntervalHint') }}</span>
+            </div>
+          </ListItem>
+          <ListItem :label="$t('components.general.label.providerQuotaRecoveryNotify')">
+            <div class="toggle-with-hint">
+              <label class="mac-switch">
+                <input
+                  v-model="providerQuotaRecoveryNotifyEnabled"
+                  type="checkbox"
+                  :disabled="settingsLoading || saveBusy || !providerQuotaAutoDisableEnabled"
+                  @change="persistAppSettings"
+                />
+                <span></span>
+              </label>
+              <span class="hint-text">{{ $t('components.general.label.providerQuotaRecoveryNotifyHint') }}</span>
             </div>
           </ListItem>
         </div>

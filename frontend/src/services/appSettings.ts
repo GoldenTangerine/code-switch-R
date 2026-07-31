@@ -27,6 +27,9 @@ export type LogsRefreshIntervalSeconds = 0 | 5 | 10 | 30 | 60
 export const DEFAULT_MAIN_WINDOW_DESTROY_DELAY_SECONDS = 30
 export const MIN_MAIN_WINDOW_DESTROY_DELAY_SECONDS = 0
 export const MAX_MAIN_WINDOW_DESTROY_DELAY_SECONDS = 300
+export const DEFAULT_PROVIDER_QUOTA_RECOVERY_INTERVAL_SECONDS = 60
+export const MIN_PROVIDER_QUOTA_RECOVERY_INTERVAL_SECONDS = 10
+export const MAX_PROVIDER_QUOTA_RECOVERY_INTERVAL_SECONDS = 3600
 
 let mainWindowDestroyDelayRevision = Date.now() * 1000
 
@@ -40,6 +43,14 @@ export const normalizeMainWindowDestroyDelaySeconds = (value?: number | null): n
   const normalized = Math.floor(value as number)
   if (normalized < MIN_MAIN_WINDOW_DESTROY_DELAY_SECONDS) return MIN_MAIN_WINDOW_DESTROY_DELAY_SECONDS
   if (normalized > MAX_MAIN_WINDOW_DESTROY_DELAY_SECONDS) return MAX_MAIN_WINDOW_DESTROY_DELAY_SECONDS
+  return normalized
+}
+
+export const normalizeProviderQuotaRecoveryIntervalSeconds = (value?: number | null): number => {
+  if (!Number.isFinite(value)) return DEFAULT_PROVIDER_QUOTA_RECOVERY_INTERVAL_SECONDS
+  const normalized = Math.floor(value as number)
+  if (normalized < MIN_PROVIDER_QUOTA_RECOVERY_INTERVAL_SECONDS) return MIN_PROVIDER_QUOTA_RECOVERY_INTERVAL_SECONDS
+  if (normalized > MAX_PROVIDER_QUOTA_RECOVERY_INTERVAL_SECONDS) return MAX_PROVIDER_QUOTA_RECOVERY_INTERVAL_SECONDS
   return normalized
 }
 
@@ -120,6 +131,8 @@ export type AppSettings = {
   provider_quota_query_preset_codes: Record<string, string>
   provider_quota_query_presets: ProviderQuotaQueryPresetGroups
   provider_quota_auto_disable_enabled: boolean
+  provider_quota_recovery_interval_seconds: number
+  provider_quota_recovery_notify_enabled: boolean
   capture_request_log_payload: boolean
   sanitize_request_log_payload: boolean
 }
@@ -194,6 +207,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   provider_quota_query_preset_codes: {},
   provider_quota_query_presets: {},
   provider_quota_auto_disable_enabled: false,
+  provider_quota_recovery_interval_seconds: DEFAULT_PROVIDER_QUOTA_RECOVERY_INTERVAL_SECONDS,
+  provider_quota_recovery_notify_enabled: false,
   capture_request_log_payload: false,
   sanitize_request_log_payload: true,
 }
@@ -339,6 +354,9 @@ const normalizeAppSettingsResponse = (value: unknown): AppSettings => {
     claude_model_metadata_merge_strategy: mergeStrategy,
     claude_proxy_auth_field: normalizeClaudeProxyAuthField(data?.claude_proxy_auth_field),
     logs_refresh_interval_seconds: normalizeLogsRefreshIntervalSeconds(data?.logs_refresh_interval_seconds),
+    provider_quota_recovery_interval_seconds: normalizeProviderQuotaRecoveryIntervalSeconds(
+      data?.provider_quota_recovery_interval_seconds,
+    ),
     main_window_destroy_delay_seconds: normalizeMainWindowDestroyDelaySeconds(data?.main_window_destroy_delay_seconds),
     budget_quota_used_adjustments: normalizeBudgetQuotaAdjustments(
       data?.budget_quota_used_adjustments,
