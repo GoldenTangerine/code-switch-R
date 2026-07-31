@@ -1,6 +1,15 @@
 # Code Switch
 
-> 一站式管理你的 AI 编程助手（Claude Code / Codex / Gemini CLI）
+> 一站式管理你的 AI 编程助手
+
+**简体中文** | [English](README_EN.md)
+
+## 界面预览
+
+| 亮色主题 | 暗色主题 |
+|---------|---------|
+| ![亮色主界面](resources/images/code-switch.png) | ![暗色主界面](resources/images/code-swtich-dark.png) |
+| ![日志亮色](resources/images/code-switch-logs.png) | ![日志暗色](resources/images/code-switch-logs-dark.png) |
 
 ## 这是什么？
 
@@ -8,53 +17,74 @@
 
 - 有多个 AI API 密钥，想灵活切换？
 - API 挂了想自动切换到备用服务？
+- 供应商额度快用完时，想自动停用防止超支？
 - 想统计每天用了多少 Token、花了多少钱？
-- 想集中管理 MCP 服务器配置？
+- 想用一家供应商的 API 跑另一家协议的模型，不想手动转换格式？
+- 想集中管理 MCP 服务器、系统提示词和 Skills？
 
-**一句话总结**：装上它，打开开关，Claude Code / Codex / Gemini CLI 的请求就会自动走你配置的供应商，支持自动降级、用量统计、成本追踪。
+**一句话总结**：装上它，打开开关，你的 AI 编程 CLI 请求就会自动走你配置的供应商——支持自动降级、协议转换、额度保护、用量统计和成本追踪。
+
+## 支持哪些 CLI？
+
+| CLI | 接入方式 |
+|-----|---------|
+| Claude Code | 本地代理接管（`/v1/messages`），自动改写环境配置 |
+| Codex | 本地代理接管（`/responses`） |
+| Gemini CLI | 本地代理接管（`/gemini/*`） |
+| OpenCode | 供应商直接同步到 OpenCode 配置文件（openai-compatible 格式） |
+| 自定义 CLI | 本地代理接管（`/custom/:toolId/*`），可接入任意兼容 Anthropic Messages 接口的工具 |
 
 ## 快速开始
 
 ### 1. 下载安装
 
-前往 [Releases](https://github.com/GoldenTangerine/code-switch-R/releases) 下载对应系统的安装包：
+前往 [Releases](https://github.com/GoldenTangerine/code-switch-R/releases) 下载对应系统的安装包（文件名中的 `vX.X.X` 为版本号）：
 
 | 系统 | 推荐下载 |
 |------|---------|
-| Windows | `CodeSwitch-amd64-installer.exe` |
-| macOS (M1/M2/M3) | `codeswitch-macos-arm64.zip` |
-| macOS (Intel) | `codeswitch-macos-amd64.zip` |
-| Linux | `CodeSwitch.AppImage` |
+| Windows | `CodeSwitch-vX.X.X-amd64-installer.exe` |
+| macOS (Apple Silicon) | `CodeSwitch-vX.X.X-macos-arm64.zip` |
+| macOS (Intel) | `CodeSwitch-vX.X.X-macos-amd64.zip` |
+| Linux | `CodeSwitch-vX.X.X.AppImage` |
 
 ### 2. 添加供应商
 
 打开应用后：
 
-1. 点击右上角 **+** 按钮
-2. 填写供应商信息：
+1. 在首页选择你要配置的平台标签页（Claude / Codex / Gemini / OpenCode）
+2. 点击 **新建** 按钮
+3. 填写供应商信息：
    - **名称**：随便起，比如 "官方 API"
    - **API URL**：供应商的接口地址
    - **API Key**：你的密钥
-3. 点击保存
+4. 点击保存
 
 ### 3. 打开代理开关
 
-在供应商列表上方，打开 **代理开关**（蓝色表示开启）。
+在对应平台标签页上方，打开 **代理开关**（蓝色表示开启）。每个平台的开关相互独立。
 
-完成！现在你的 Claude Code / Codex / Gemini CLI 请求会自动走 Code Switch 代理。
+完成！现在对应平台的 CLI 请求会自动走 Code Switch 代理。
 
 ## 功能介绍
 
 ### 供应商管理
 
+每个平台独立管理自己的供应商列表：
+
 | 功能 | 说明 |
 |------|------|
-| 多供应商配置 | 可以添加多个 API 供应商 |
+| 多供应商配置 | 每个平台可添加多个 API 供应商 |
 | 拖拽排序 | 拖动卡片调整优先级 |
-| 一键启用/禁用 | 每个供应商独立开关 |
+| 一键启用/禁用 | 每个供应商独立开关，关闭的卡片自动移到未启用组首位，方便找回 |
+| 一键应用 | 把供应商直接写入 CLI 的原生配置文件 |
 | 复制供应商 | 快速复制现有配置 |
+| 数据总览 | 单供应商的请求量、成功率、Token、成本汇总 |
+| 成本趋势 | 单供应商的费用变化曲线 |
+| 模型列表 | 查看供应商的可用模型（带 24 小时缓存） |
 
-### 智能降级
+供应商编辑还支持：独立认证字段（`ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_API_KEY` / 自定义 Header）、并发限制、预算额度、模型白名单等。
+
+### 智能代理与自动降级
 
 当你配置了多个供应商时：
 
@@ -74,80 +104,159 @@
 - Level 1：最高优先级（首选）
 - Level 2-9：备选
 - Level 10：最低优先级（兜底）
+- 同级内按顺序尝试，支持轮询模式
 
-### 模型映射
+**协议自动转换**：内置 Anthropic Messages 与 OpenAI Chat / Responses 格式的双向转换。供应商用哪种协议都能接入，模型名称不一致时还可以通过模型映射自动改写。
 
-不同供应商可能使用不同的模型名称，比如：
-- 官方 API：`claude-sonnet-4`
-- OpenRouter：`anthropic/claude-sonnet-4`
+**流式断流保护**：流式请求每个供应商只尝试一次，断流立即切换下一个；你主动取消的请求（记为 client_abort）不会误伤供应商、不会触发拉黑。
 
-配置模型映射后，Code Switch 会自动转换，你不需要改代码。
+### Claude 模型路由与映射
 
-### 用量统计
+针对 Claude Code 的一套完整路由体系：
 
-- **热力图**：可视化每日使用量
-- **请求统计**：请求次数、成功率
-- **Token 统计**：输入/输出 Token 数量
-- **成本核算**：基于官方定价计算费用
+- **按模型路由**：根据请求的模型名选择支持它的供应商（默认关闭，可在设置中开启）
+- **映射独立开关**：每条映射规则可单独启停，卡片显示"启用数/总数"
+- **强制思考强度**：每条映射可指定 low / medium / high / xhigh / max，按上游协议自动写入对应字段
+- **1M 上下文声明**：原生 Anthropic 格式映射可声明支持 1M 上下文，命中后自动注入对应 beta 标识
+- **Subagent 模型**：独立指定 Claude Code 子代理（Subagent）使用的模型
+- **默认兜底模型**：所有映射都不命中时的退路
+- **模型聚合**：`/v1/models` 返回各供应商去重排序后的模型列表
+- **连接详情**：首页实时展示"请求模型 → 实际模型"的路由链路，悬停可见命中的映射规则
+
+### 可靠性与黑名单
+
+- **双计数双阈值**：真实请求失败与后台健康巡检分开连续计数、独立阈值（真实失败默认 5 次，巡检阈值 2-9 次可配）
+- **拉黑时长**：默认固定 30 分钟；可选开启等级拉黑，时长随等级累进（L1 5 分钟 → L5 24 小时）
+- **成功率三态口径**：客户端主动取消、本地并发限制、代理内部错误不计入成功率分母，数据更真实
+- **拉黑可见可控**：卡片显示拉黑剩余倒计时、触发来源和原因，支持一键解除拉黑、清零等级
+- **自动恢复**：每分钟自动检查到期的拉黑并恢复
+
+### 配额保护与预算
+
+防止供应商额度跑超的一条完整链路：
+
+- **远端配额查询**：内置 GLM / Kimi / MiniMax 查询预设，也支持自定义 JS 脚本查询任意供应商
+- **额度耗尽自动停用**：开启后（默认关闭），配置了配额查询的供应商额度见底时自动停用，恢复后自动启用
+- **后台自动恢复**：应用存活期间持续复查（默认 60 秒，可配 10-3600 秒），驻留托盘时也照常工作
+- **恢复通知**：可选系统通知（默认关闭），同一轮多个恢复合并为一条
+- **手动优先**：你手动关闭的供应商不会被自动开启；被自动停用的供应商可"临时启用"或"恢复自动管理"
+- **五档预算**：5 小时 / 每日 / 每周 / 每月 / 总额度，支持校准调整
+- **托盘仪表盘**：点击系统托盘图标即可查看配额余量、使用成本、耗尽预测和重置倒计时
+
+### 用量统计与成本核算
+
+- **双数据源**：代理日志 + CLI 本地会话扫描（启动一次 + 每分钟增量同步，Windows 可扫描 WSL）。即使某些请求绕过代理直连，只要 CLI 本地留有会话记录，用量照样统计；"全部"模式下两种来源自动一对一去重
+- **三个数据视图**：请求明细 / 供应商统计 / 模型统计，支持按核心指标排序
+- **计价模型链路**：全局计价模型筛选，展示"计价模型 → 路由模型"的完整链路
+- **用量热力图**：首页"绿砖墙"直观展示每日消耗趋势，粒度可调
+- **成本核算**：内置模型定价表（支持云端同步最新价格、自定义覆盖），按官方定价计算费用
+- **自动刷新**：关闭 / 5 / 10 / 30 / 60 秒档位可调
+
+### 可用性监控
+
+- **双模式**：主动探测 / 基于请求日志统计（默认日志模式，不发额外请求）
+- **历史状态条**：每个供应商 72 段状态时间线，悬停查看延迟、失败率、错误率、慢请求
+- **状态分级**：正常 / 降级 / 故障 / 未监控
+- **时间范围**：15 分钟 / 1 小时 / 6 小时 / 24 小时 / 7 天
+- **监控配置**：每个供应商可独立设置测试模型、端点、超时，或停用监控
+
+### 认证中心
+
+- **Codex 官方 OAuth 登录**：设备码授权流程，登录官方订阅账号
+- **多账户管理**：添加多个账号、设置默认账户、单个移除或全部登出
+- **互不干扰**：官方订阅与第三方 API 供应商各自独立可控
 
 ### MCP 服务器管理
 
-集中管理 Claude Code 和 Codex 的 MCP Server：
-- 可视化添加/编辑/删除
-- 支持 URL 和命令两种类型
-- 自动同步到两个平台
+- 集中管理 Claude Code / Codex / Gemini 三平台的 MCP Server
+- 按平台独立启用/禁用，自动同步到对应 CLI 配置
+- 可视化编辑环境变量
+- 支持批量导入
 
-### CLI 配置编辑器
+### 技能市场
 
-可视化编辑 CLI 配置文件：
-- 查看当前配置
-- 修改可编辑字段（模型、插件等）
-- 添加自定义配置
-- 支持解锁直接编辑原始配置
+- 从 Skill 仓库一键安装 Claude Skills
+- 项目级 / 用户级分组展示与管理
+- 支持添加自定义 Skill 仓库源
+- 可直接打开本地 Skill 文件夹、跳转 GitHub 来源
+
+### 提示词管理
+
+- 为 Claude Code / Codex / Gemini 分别配置自定义系统提示词
+- Markdown 编辑器，启用即写入对应 CLI 的提示词文件
+- 支持从现有文件导入，可随时查看当前生效的文件内容
+
+### API 测速
+
+- 批量并发测试端点延迟（10 秒超时）
+- 一键同步已配置的 Claude / Codex / Gemini 供应商端点
+- 延迟分色显示：<300ms 绿 / <500ms 黄 / <800ms 橙 / 更高为红
+
+### 环境变量检测
+
+- 扫描系统环境变量和 CLI 配置文件
+- 发现可能影响 AI 编程工具的变量冲突（比如残留的代理地址、认证 Key）
+- 标注每个变量的来源：系统环境 or 具体配置文件路径
+
+### 控制台
+
+- 应用运行日志实时查看，用于诊断代理运行状况
+- 级别过滤（错误/警告/信息/调试）+ 关键词搜索
+- 供应商错误智能解析，提取诊断标签并命中错误链接
+
+### WebDAV 云同步
+
+- 把配置备份到 WebDAV 网盘（坚果云、Nextcloud 等）
+- 支持连接测试、上传、下载、同步内容预览
+- 换机迁移配置一键搞定
 
 ### 其他功能
 
-- **技能市场**：一键安装 Claude Skills
-- **速度测试**：测试供应商延迟
-- **自定义提示词**：管理系统提示词
-- **深度链接**：通过 `codeswitch://` 链接导入配置
-- **自动更新**：内置更新检查
+- **自动更新**：内置更新检查、下载与重启
+- **开机自启**：登录系统后自动运行
+- **明暗双主题**：跟随系统或手动切换
+- **中英双语**：界面语言随时切换
+- **WSL 支持**：Windows 下可扫描 WSL 内的 CLI 配置与会话记录
+- **macOS 内存优化**：关闭主窗口后按设定延迟释放 WebView（默认 30 秒），后台驻留更省内存
 
 ## 工作原理
 
 ```
-Claude Code / Codex / Gemini CLI
-            ↓
-    Code Switch 代理 (:18100)
-            ↓
-    ┌───────────────────┐
-    │  选择供应商        │
-    │  (按优先级尝试)    │
-    └───────────────────┘
-            ↓
-      实际 API 服务器
+Claude Code / Codex / Gemini CLI / 自定义 CLI
+                    ↓
+    Code Switch 本地代理 (127.0.0.1:18100)
+                    ↓
+        ┌───────────────────────┐
+        │  选择供应商            │
+        │  (按优先级尝试)        │
+        └───────────────────────┘
+                    ↓
+              实际 API 服务器
 ```
 
 **原理简述**：
-1. Code Switch 在本地 18100 端口启动代理服务
-2. 自动修改 Claude Code / Codex / Gemini CLI 配置，让它们的请求发到本地代理
-3. 代理根据你的配置，将请求转发到对应的供应商
-4. 如果供应商失败，自动尝试下一个
 
-## 界面预览
+1. Code Switch 在本地 18100 端口启动代理服务（仅监听回环地址，API Key 不会暴露到局域网）
+2. 打开代理开关后，自动修改对应 CLI 的配置，让请求发到本地代理
+3. 代理按平台路由请求：
 
-| 亮色主题 | 暗色主题 |
-|---------|---------|
-| ![亮色主界面](resources/images/code-switch.png) | ![暗色主界面](resources/images/code-swtich-dark.png) |
-| ![日志亮色](resources/images/code-switch-logs.png) | ![日志暗色](resources/images/code-switch-logs-dark.png) |
+   | 端点 | 路由到 |
+   |------|--------|
+   | `/v1/messages` | Claude 供应商 |
+   | `/responses` | Codex 供应商 |
+   | `/gemini/v1/*`、`/gemini/v1beta/*` | Gemini 供应商 |
+   | `/custom/:toolId/v1/messages` | 自定义 CLI 供应商 |
+   | `/v1/models`、`/models` | 聚合的模型列表 |
+
+4. 供应商失败时自动尝试下一个；OpenCode 不走代理，而是将启用的供应商直接同步到它的配置文件
 
 ## 常见问题
 
 ### 打开开关后 CLI 没反应？
 
-1. 确认代理开关已打开（蓝色状态）
+1. 确认对应平台的代理开关已打开（蓝色状态）
 2. 重启 Claude Code / Codex / Gemini CLI
-3. 检查供应商配置是否正确
+3. 检查供应商配置是否正确（可用内置的"可用性"页面做一次手动检查）
 
 ### 如何查看代理是否生效？
 
@@ -157,39 +266,51 @@ Claude Code / Codex / Gemini CLI
 
 ### 关闭应用后 CLI 还能用吗？
 
-不能。Code Switch 关闭后代理服务停止，CLI 请求会失败。
+分两种情况：
+
+- **只是关闭主窗口**：应用会驻留系统托盘，代理服务继续运行，CLI 不受影响
+- **在托盘菜单选择"退出"**：代理服务停止，走代理的 CLI 请求会失败
 
 **解决方案**：
-- 保持 Code Switch 运行
-- 或者关闭代理开关（会恢复 CLI 原始配置）
+
+- 保持 Code Switch 运行（关窗即可，不影响使用）
+- 或者在退出前关闭代理开关（会自动恢复 CLI 的原始配置）
 
 ### 如何备份配置？
 
-配置文件位置：
+配置目录位置：
+
 - Windows: `%USERPROFILE%\.code-switch\`
 - macOS/Linux: `~/.code-switch/`
 
-主要文件：
-- `claude-code.json` - Claude Code 供应商配置
-- `codex.json` - Codex 供应商配置
-- `mcp.json` - MCP 服务器配置
+| 文件 | 内容 |
+|------|------|
+| `app.db` | SQLite 数据库：请求日志、用量统计、应用设置 |
+| `app.json` | 应用偏好设置 |
+| `claude-code.json` | Claude 供应商配置 |
+| `providers/` | Codex / OpenCode / 自定义 CLI 供应商配置 |
+| `mcp.json` | MCP 服务器配置 |
+| `skill.json` | 技能仓库配置 |
+| `webdav.json` | WebDAV 同步配置 |
+
+最省事的备份方式：整个目录复制一份；或者直接用内置的 WebDAV 云同步。
 
 ## 安装详细说明
 
 ### Windows
 
 **安装器方式（推荐）**：
-1. 下载 `CodeSwitch-amd64-installer.exe`
+1. 下载 `CodeSwitch-vX.X.X-amd64-installer.exe`
 2. 双击运行，按提示安装
 3. 从开始菜单启动
 
 **便携版**：
-1. 下载 `CodeSwitch.exe`
+1. 下载 `CodeSwitch-vX.X.X.exe`
 2. 放到任意目录，双击运行
 
 ### macOS
 
-1. 下载对应芯片的 zip 文件
+1. 下载对应芯片的 zip 文件（Apple Silicon 选 `macos-arm64`，Intel 选 `macos-amd64`）
 2. 解压得到 `Code Switch.app`
 3. 拖到"应用程序"文件夹
 4. 首次打开如提示"无法验证开发者"，在"系统设置 → 隐私与安全性"中允许
@@ -198,8 +319,8 @@ Claude Code / Codex / Gemini CLI
 
 **AppImage（推荐）**：
 ```bash
-chmod +x CodeSwitch.AppImage
-./CodeSwitch.AppImage
+chmod +x CodeSwitch-vX.X.X.AppImage
+./CodeSwitch-vX.X.X.AppImage
 ```
 
 **DEB 包（Ubuntu/Debian）**：
@@ -263,8 +384,8 @@ wails3 task package
 |------|------|
 | 框架 | [Wails 3](https://v3.wails.io) |
 | 后端 | Go 1.24 + Gin + SQLite |
-| 前端 | Vue 3 + TypeScript + Tailwind CSS |
-| 打包 | NSIS (Windows) / nFPM (Linux) |
+| 前端 | Vue 3 + TypeScript + Tailwind CSS 4 |
+| 打包 | NSIS (Windows) / AppImage + nFPM (Linux) |
 
 ## 开源协议
 
