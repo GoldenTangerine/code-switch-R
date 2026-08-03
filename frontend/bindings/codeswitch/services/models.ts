@@ -1000,6 +1000,11 @@ export class GeminiProvider {
     "level"?: number;
 
     /**
+     * nil 表示无限制，0 表示满载，1-999 表示并发上限
+     */
+    "providerConcurrencyLimit"?: number | null;
+
+    /**
      * .env 配置
      */
     "envConfig"?: { [_: string]: string };
@@ -1622,6 +1627,11 @@ export class Provider {
      * 使用 omitempty 确保零值不序列化，向后兼容
      */
     "level"?: number;
+
+    /**
+     * 实时并发：nil 表示无限制，0 表示满载，1-999 表示并发上限
+     */
+    "providerConcurrencyLimit"?: number | null;
 
     /**
      * 连通性检测开关 - 是否启用自动连通性检测

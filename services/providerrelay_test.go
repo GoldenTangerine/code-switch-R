@@ -2617,22 +2617,23 @@ func TestOrderGeminiProvidersForSessionAffinityUsesBoundSessionCapacity(t *testi
 func TestProviderConcurrencySlotLimitAndRelease(t *testing.T) {
 	relay := NewProviderRelayService(nil, nil, nil, nil, nil, nil, "")
 	providerID := "provider-a"
+	limit := 1
 
-	_, release, ok := relay.acquireProviderConcurrencySlot("claude", providerID, 1, true, providerConcurrencyRequestMeta{})
+	_, release, ok := relay.acquireProviderConcurrencySlot("claude", providerID, &limit, true, providerConcurrencyRequestMeta{})
 	if !ok {
 		t.Fatalf("first provider concurrency slot should be acquired")
 	}
 	if got := relay.providerConcurrencyCount("claude", providerID); got != 1 {
 		t.Fatalf("active concurrency = %d, want 1", got)
 	}
-	if _, _, ok := relay.acquireProviderConcurrencySlot("claude", providerID, 1, true, providerConcurrencyRequestMeta{}); ok {
+	if _, _, ok := relay.acquireProviderConcurrencySlot("claude", providerID, &limit, true, providerConcurrencyRequestMeta{}); ok {
 		t.Fatalf("second provider concurrency slot should be rejected")
 	}
 	release()
 	if got := relay.providerConcurrencyCount("claude", providerID); got != 0 {
 		t.Fatalf("active concurrency after release = %d, want 0", got)
 	}
-	if _, releaseAgain, ok := relay.acquireProviderConcurrencySlot("claude", providerID, 1, true, providerConcurrencyRequestMeta{}); !ok {
+	if _, releaseAgain, ok := relay.acquireProviderConcurrencySlot("claude", providerID, &limit, true, providerConcurrencyRequestMeta{}); !ok {
 		t.Fatalf("provider concurrency slot should be reusable after release")
 	} else {
 		releaseAgain()
@@ -2645,7 +2646,7 @@ func TestProviderConcurrencySlotUnlimitedWhenLimitEmpty(t *testing.T) {
 	releases := make([]func(), 0, 3)
 
 	for i := 0; i < 3; i++ {
-		_, release, ok := relay.acquireProviderConcurrencySlot("claude", providerID, 0, true, providerConcurrencyRequestMeta{})
+		_, release, ok := relay.acquireProviderConcurrencySlot("claude", providerID, nil, true, providerConcurrencyRequestMeta{})
 		if !ok {
 			t.Fatalf("unlimited provider concurrency slot should be acquired")
 		}
@@ -2662,13 +2663,57 @@ func TestProviderConcurrencySlotUnlimitedWhenLimitEmpty(t *testing.T) {
 	}
 }
 
+func TestProviderConcurrencySlotRejectsZeroLimit(t *testing.T) {
+	relay := NewProviderRelayService(nil, nil, nil, nil, nil, nil, "")
+	limit := 0
+
+	if _, _, ok := relay.acquireProviderConcurrencySlot("claude", "provider-a", &limit, true, providerConcurrencyRequestMeta{}); ok {
+		t.Fatalf("zero provider concurrency limit should reject new slots")
+	}
+	if got := relay.providerConcurrencyCount("claude", "provider-a"); got != 0 {
+		t.Fatalf("active concurrency = %d, want 0", got)
+	}
+}
+
+func TestProviderConcurrencyLimitJSONDistinguishesEmptyAndZero(t *testing.T) {
+	var empty Provider
+	if err := json.Unmarshal([]byte(`{"name":"empty"}`), &empty); err != nil {
+		t.Fatalf("decode empty provider concurrency limit: %v", err)
+	}
+	if empty.ProviderConcurrencyLimit != nil {
+		t.Fatalf("empty provider concurrency limit = %v, want nil", *empty.ProviderConcurrencyLimit)
+	}
+
+	var full Provider
+	if err := json.Unmarshal([]byte(`{"name":"full","providerConcurrencyLimit":0}`), &full); err != nil {
+		t.Fatalf("decode zero provider concurrency limit: %v", err)
+	}
+	if full.ProviderConcurrencyLimit == nil || *full.ProviderConcurrencyLimit != 0 {
+		t.Fatalf("zero provider concurrency limit = %v, want 0", full.ProviderConcurrencyLimit)
+	}
+
+	encoded, err := json.Marshal(full)
+	if err != nil {
+		t.Fatalf("encode zero provider concurrency limit: %v", err)
+	}
+	if !strings.Contains(string(encoded), `"providerConcurrencyLimit":0`) {
+		t.Fatalf("encoded provider should preserve zero concurrency limit: %s", encoded)
+	}
+
+	negative := -1
+	if normalized := normalizeProviderConcurrencyLimit(&negative); normalized != nil {
+		t.Fatalf("negative provider concurrency limit = %d, want nil", *normalized)
+	}
+}
+
 func TestProviderConcurrencySlotTracksWithoutEnforcingLimit(t *testing.T) {
 	relay := NewProviderRelayService(nil, nil, nil, nil, nil, nil, "")
 	providerID := "provider-a"
+	limit := 0
 	releases := make([]func(), 0, 3)
 
 	for i := 0; i < 3; i++ {
-		_, release, ok := relay.acquireProviderConcurrencySlot("claude", providerID, 1, false, providerConcurrencyRequestMeta{})
+		_, release, ok := relay.acquireProviderConcurrencySlot("claude", providerID, &limit, false, providerConcurrencyRequestMeta{})
 		if !ok {
 			t.Fatalf("provider concurrency slot should be acquired when limit is disabled")
 		}
@@ -2688,8 +2733,9 @@ func TestProviderConcurrencySlotTracksWithoutEnforcingLimit(t *testing.T) {
 func TestProviderConcurrencySlotTracksRequestDetails(t *testing.T) {
 	relay := NewProviderRelayService(nil, nil, nil, nil, nil, nil, "")
 	providerID := "provider-a"
+	limit := 1
 
-	updateParameters, release, ok := relay.acquireProviderConcurrencySlot("claude", providerID, 1, false, providerConcurrencyRequestMeta{
+	updateParameters, release, ok := relay.acquireProviderConcurrencySlot("claude", providerID, &limit, false, providerConcurrencyRequestMeta{
 		ProviderName:        "Provider A",
 		UserAgent:           "Codex-CLI/1.0",
 		RequestedModel:      "claude-sonnet-4.8",

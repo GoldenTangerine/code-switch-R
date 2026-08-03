@@ -232,6 +232,45 @@ func TestGeminiProvider_DeepCopyMaps(t *testing.T) {
 	}
 }
 
+func TestGeminiDuplicateProviderPreservesConcurrencyLimit(t *testing.T) {
+	zero := 0
+	tests := []struct {
+		name  string
+		limit *int
+	}{
+		{name: "未配置保持无限制"},
+		{name: "显式零保持满载", limit: &zero},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			useIsolatedHomeDir(t)
+			svc := &GeminiService{
+				providers: []GeminiProvider{{
+					ID:                       "source",
+					Name:                     "Source Provider",
+					ProviderConcurrencyLimit: tt.limit,
+				}},
+				relayAddr: ":18100",
+			}
+
+			duplicated, err := svc.DuplicateProvider("source")
+			if err != nil {
+				t.Fatalf("复制 Gemini 供应商失败: %v", err)
+			}
+			if tt.limit == nil {
+				if duplicated.ProviderConcurrencyLimit != nil {
+					t.Fatalf("复制后的并发上限 = %d，期望 nil", *duplicated.ProviderConcurrencyLimit)
+				}
+				return
+			}
+			if duplicated.ProviderConcurrencyLimit == nil || *duplicated.ProviderConcurrencyLimit != *tt.limit {
+				t.Fatalf("复制后的并发上限 = %v，期望 %d", duplicated.ProviderConcurrencyLimit, *tt.limit)
+			}
+		})
+	}
+}
+
 func TestGeminiPreset_Fields(t *testing.T) {
 	svc := NewGeminiService("127.0.0.1:18100")
 	presets := svc.GetPresets()

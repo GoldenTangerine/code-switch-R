@@ -167,4 +167,87 @@ describe('ProviderCard display states', () => {
     expect(html).toContain('恢复自动')
     expect(html).toContain('mac-switch sm')
   })
+
+  it('highlights active concurrency without marking it as full', async () => {
+    const html = await renderCard(baseViewModel({
+      concurrencyStatus: {
+        platform: 'claude',
+        providerId: '102',
+        providerName: 'kimi',
+        activeRequests: 1,
+        limit: 5,
+      },
+      concurrencyLimitEnabled: true,
+    }))
+
+    expect(html).toContain('1/5')
+    expect(html).toContain('provider-concurrency-pill--active')
+    expect(html).not.toContain('provider-concurrency-pill--overflow')
+  })
+
+  it('uses the full state when active concurrency reaches its limit', async () => {
+    const html = await renderCard(baseViewModel({
+      concurrencyStatus: {
+        platform: 'claude',
+        providerId: '102',
+        providerName: 'kimi',
+        activeRequests: 5,
+        limit: 5,
+      },
+      concurrencyLimitEnabled: true,
+    }))
+
+    expect(html).toContain('provider-concurrency-pill--active')
+    expect(html).toContain('provider-concurrency-pill--overflow')
+  })
+
+  it('renders zero capacity as a static full state when limiting is enabled', async () => {
+    const html = await renderCard(baseViewModel({
+      concurrencyStatus: {
+        platform: 'claude',
+        providerId: '102',
+        providerName: 'kimi',
+        activeRequests: 0,
+        limit: 0,
+      },
+      concurrencyLimitEnabled: true,
+    }))
+
+    expect(html).toContain('0/0')
+    expect(html).toContain('provider-concurrency-pill--overflow')
+    expect(html).not.toContain('provider-concurrency-pill--active')
+  })
+
+  it('keeps zero capacity informational when limiting is disabled', async () => {
+    const html = await renderCard(baseViewModel({
+      concurrencyStatus: {
+        platform: 'claude',
+        providerId: '102',
+        providerName: 'kimi',
+        activeRequests: 1,
+        limit: 0,
+      },
+      concurrencyLimitEnabled: false,
+    }))
+
+    expect(html).toContain('1/0')
+    expect(html).toContain('provider-concurrency-pill--active')
+    expect(html).not.toContain('provider-concurrency-pill--overflow')
+  })
+
+  it('uses infinity only when the concurrency limit is empty', async () => {
+    const html = await renderCard(baseViewModel({
+      concurrencyStatus: {
+        platform: 'claude',
+        providerId: '102',
+        providerName: 'kimi',
+        activeRequests: 0,
+      },
+      concurrencyLimitEnabled: true,
+    }))
+
+    expect(html).toContain('0/∞')
+    expect(html).not.toContain('provider-concurrency-pill--active')
+    expect(html).not.toContain('provider-concurrency-pill--overflow')
+  })
 })

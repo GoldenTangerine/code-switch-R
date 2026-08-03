@@ -12,9 +12,11 @@ vi.mock('@wailsio/runtime', () => ({
 
 import { Call } from '@wailsio/runtime'
 import {
+  createVendorFormFromCard,
   normalizeModelMappingDisabled,
   normalizeModelMappingReasoningEfforts,
   normalizeModelMappingSupports1M,
+  normalizeProviderConcurrencyLimit,
 } from '../adapters/providerFormMappers'
 import { useProviderForm } from './useProviderForm'
 
@@ -63,6 +65,18 @@ describe('model mapping 1M state normalization', () => {
   })
 })
 
+describe('provider concurrency limit normalization', () => {
+  it('distinguishes unlimited, full, and bounded concurrency', () => {
+    expect(normalizeProviderConcurrencyLimit(undefined)).toBeUndefined()
+    expect(normalizeProviderConcurrencyLimit('')).toBeUndefined()
+    expect(normalizeProviderConcurrencyLimit(-1)).toBeUndefined()
+    expect(normalizeProviderConcurrencyLimit(0)).toBe(0)
+    expect(normalizeProviderConcurrencyLimit('0')).toBe(0)
+    expect(normalizeProviderConcurrencyLimit(2.9)).toBe(2)
+    expect(normalizeProviderConcurrencyLimit(1000)).toBe(999)
+  })
+})
+
 const createCard = (
   id: number,
   overrides: Partial<AutomationCard> = {},
@@ -104,6 +118,14 @@ const createCardRecord = (): Record<ProviderTab, AutomationCard[]> => ({
   gemini: [],
   opencode: [],
   others: [],
+})
+
+describe('provider concurrency limit form mapping', () => {
+  it('preserves an explicit zero limit when editing a provider', () => {
+    const form = createVendorFormFromCard(createCard(1, { providerConcurrencyLimit: 0 }), 'codex')
+
+    expect(form.providerConcurrencyLimit).toBe(0)
+  })
 })
 
 const createForm = (overrides: Partial<VendorForm> = {}): VendorForm => ({

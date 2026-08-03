@@ -1281,6 +1281,48 @@ func TestDuplicateProvider(t *testing.T) {
 	}
 }
 
+func TestDuplicateProviderPreservesConcurrencyLimit(t *testing.T) {
+	zero := 0
+	tests := []struct {
+		name  string
+		limit *int
+	}{
+		{name: "未配置保持无限制"},
+		{name: "显式零保持满载", limit: &zero},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			useIsolatedHomeDir(t)
+			service := NewProviderService()
+			if err := service.SaveProviders("codex", []Provider{{
+				ID:                       1,
+				Name:                     "Source Provider",
+				APIURL:                   "https://api.example.com",
+				APIKey:                   "sk-test",
+				Enabled:                  true,
+				ProviderConcurrencyLimit: tt.limit,
+			}}); err != nil {
+				t.Fatalf("保存源供应商失败: %v", err)
+			}
+
+			duplicated, err := service.DuplicateProvider("codex", 1)
+			if err != nil {
+				t.Fatalf("复制供应商失败: %v", err)
+			}
+			if tt.limit == nil {
+				if duplicated.ProviderConcurrencyLimit != nil {
+					t.Fatalf("复制后的并发上限 = %d，期望 nil", *duplicated.ProviderConcurrencyLimit)
+				}
+				return
+			}
+			if duplicated.ProviderConcurrencyLimit == nil || *duplicated.ProviderConcurrencyLimit != *tt.limit {
+				t.Fatalf("复制后的并发上限 = %v，期望 %d", duplicated.ProviderConcurrencyLimit, *tt.limit)
+			}
+		})
+	}
+}
+
 func TestDuplicateProviderRenameSaveIgnoresBrokenAuxiliaryStatsWithoutHistory(t *testing.T) {
 	useIsolatedHomeDir(t)
 

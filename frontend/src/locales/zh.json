@@ -930,7 +930,7 @@
         "noOpenCodePresetResults": "未找到匹配的 OpenCode 预设",
         "hints": {
           "level": "数字越小优先级越高，Level 1 会被优先尝试，失败后依次尝试 Level 2、Level 3 等",
-          "providerConcurrencyLimit": "留空表示不限制并发；超过上限后自动尝试下一个供应商。",
+          "providerConcurrencyLimit": "留空表示不限制并发；设为 0 表示满载；超过上限后自动尝试下一个供应商。",
           "apiEndpoint": "覆盖平台默认端点。留空使用默认（claude: /v1/messages, codex: /responses）。GLM 模型请使用 /v1/chat/completions",
           "advancedOptions": "默认使用 Anthropic Messages 和 ANTHROPIC_AUTH_TOKEN。",
           "apiFormat": "选择供应商 API 的输入格式",

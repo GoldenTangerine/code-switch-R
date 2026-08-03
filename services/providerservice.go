@@ -105,8 +105,8 @@ type Provider struct {
 	// 使用 omitempty 确保零值不序列化，向后兼容
 	Level int `json:"level,omitempty"`
 
-	// 实时并发：供应商最多同时处理的请求数（默认 5，范围 1-999）
-	ProviderConcurrencyLimit int `json:"providerConcurrencyLimit,omitempty"`
+	// 实时并发：nil 表示无限制，0 表示满载，1-999 表示并发上限
+	ProviderConcurrencyLimit *int `json:"providerConcurrencyLimit,omitempty"`
 
 	// 会话隔离：供应商最多承载的会话数（默认 5，范围 1-999）
 	SessionMaxSessions int `json:"sessionMaxSessions,omitempty"`
@@ -226,8 +226,17 @@ type providerConfigSnapshot struct {
 	exists      bool
 }
 
+func cloneOptionalInt(value *int) *int {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
+}
+
 func cloneProvider(provider Provider) Provider {
 	cloned := provider
+	cloned.ProviderConcurrencyLimit = cloneOptionalInt(provider.ProviderConcurrencyLimit)
 	if provider.CLIConfig != nil {
 		cloned.CLIConfig = cloneJSONLikeMap(provider.CLIConfig)
 	}
@@ -1041,21 +1050,22 @@ func (ps *ProviderService) DuplicateProvider(kind string, sourceID int64) (*Prov
 
 	// 5. 克隆配置（深拷贝）
 	cloned := &Provider{
-		ID:                     newID,
-		Name:                   source.Name + " (副本)",
-		APIURL:                 source.APIURL,
-		APIKey:                 source.APIKey,
-		Site:                   source.Site,
-		Icon:                   source.Icon,
-		Tint:                   source.Tint,
-		Accent:                 source.Accent,
-		Enabled:                false, // 默认禁用，避免与源供应商冲突
-		APIFormat:              source.APIFormat,
-		AuthProvider:           source.AuthProvider,
-		AuthAccountID:          source.AuthAccountID,
-		Level:                  source.Level,
-		APIEndpoint:            source.APIEndpoint, // 复制端点配置
-		ModelMappingMissPolicy: normalizeModelMappingMissPolicy(source.ModelMappingMissPolicy),
+		ID:                       newID,
+		Name:                     source.Name + " (副本)",
+		APIURL:                   source.APIURL,
+		APIKey:                   source.APIKey,
+		Site:                     source.Site,
+		Icon:                     source.Icon,
+		Tint:                     source.Tint,
+		Accent:                   source.Accent,
+		Enabled:                  false, // 默认禁用，避免与源供应商冲突
+		APIFormat:                source.APIFormat,
+		AuthProvider:             source.AuthProvider,
+		AuthAccountID:            source.AuthAccountID,
+		Level:                    source.Level,
+		ProviderConcurrencyLimit: cloneOptionalInt(source.ProviderConcurrencyLimit),
+		APIEndpoint:              source.APIEndpoint, // 复制端点配置
+		ModelMappingMissPolicy:   normalizeModelMappingMissPolicy(source.ModelMappingMissPolicy),
 		// 可用性监控配置
 		AvailabilityMonitorEnabled: source.AvailabilityMonitorEnabled,
 		ConnectivityAutoBlacklist:  false, // 副本默认关闭自动拉黑

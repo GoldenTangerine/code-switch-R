@@ -158,7 +158,7 @@
             type="button"
             class="provider-state-pill provider-concurrency-pill"
             :class="{
-              'provider-concurrency-pill--limited': concurrencyStatusBadge.limited,
+              'provider-concurrency-pill--active': concurrencyStatusBadge.active,
               'provider-concurrency-pill--overflow': concurrencyStatusBadge.overflow,
             }"
             :title="concurrencyStatusBadge.title"
@@ -1324,9 +1324,11 @@ const concurrencyStatusBadge = computed(() => {
   const status = props.viewModel.concurrencyStatus
   if (!status) return null
   const activeRequests = status.activeRequests || 0
-  const limit = status.limit || 0
-  const maxLabel = limit > 0 ? `${limit}` : '∞'
-  const limited = props.viewModel.concurrencyLimitEnabled && limit > 0
+  const limit = typeof status.limit === 'number' && Number.isFinite(status.limit)
+    ? Math.max(0, status.limit)
+    : undefined
+  const maxLabel = limit === undefined ? '∞' : `${limit}`
+  const limited = props.viewModel.concurrencyLimitEnabled && limit !== undefined
   return {
     label: t('components.main.concurrency.badge', {
       current: activeRequests,
@@ -1336,7 +1338,7 @@ const concurrencyStatusBadge = computed(() => {
       current: activeRequests,
       max: maxLabel,
     }),
-    limited,
+    active: activeRequests > 0,
     overflow: limited && activeRequests >= limit,
   }
 })

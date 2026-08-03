@@ -582,7 +582,7 @@
           <BaseInput
             v-model="form.providerConcurrencyLimit"
             type="number"
-            min="1"
+            min="0"
             max="999"
             step="1"
           />

@@ -37,7 +37,6 @@ export type GeminiProvider = Awaited<ReturnType<typeof GetGeminiProviders>> exte
   budgetQuotaUsedAdjustments?: unknown | null
   providerQuotaQueryType?: unknown | null
   providerQuotaQueryConfig?: unknown | null
-  providerConcurrencyLimit?: number
   hideLogBadge?: boolean
   quotaAutoDisabled?: boolean
   quotaAutoDisablePaused?: boolean
@@ -65,7 +64,6 @@ export type PersistedProvider = PersistedProviderModel & {
   providerQuotaQueryType?: unknown | null
   providerQuotaQueryConfig?: unknown | null
   anthropicCacheTTL?: unknown | null
-  providerConcurrencyLimit?: number
   modelMappingMissPolicy?: ModelMappingMissPolicy
   modelMappingDisabled?: Record<string, boolean>
   modelMappingReasoningEfforts?: Record<string, string>

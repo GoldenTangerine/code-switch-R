@@ -929,7 +929,7 @@
         "noOpenCodePresetResults": "No matching OpenCode presets found",
         "hints": {
           "level": "Lower numbers = higher priority. Level 1 providers are tried first, then Level 2, etc.",
-          "providerConcurrencyLimit": "Leave empty for unlimited concurrency. Overflow attempts use the next provider.",
+          "providerConcurrencyLimit": "Leave empty for unlimited concurrency. Set to 0 for full capacity. Overflow attempts use the next provider.",
           "apiEndpoint": "Override platform default endpoint. Leave blank for default (claude: /v1/messages, codex: /responses). For GLM models use /v1/chat/completions",
           "advancedOptions": "Defaults to Anthropic Messages and ANTHROPIC_AUTH_TOKEN.",
           "apiFormat": "Select the input format for the provider's API",

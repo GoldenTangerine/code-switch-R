@@ -880,7 +880,7 @@ const concurrencyDetailsModalStatus = computed(() => {
     providerId: providerRef,
     providerName: provider.name,
     activeRequests: 0,
-    limit: provider.providerConcurrencyLimit || 0,
+    limit: provider.providerConcurrencyLimit,
     requests: [],
   }
 })
@@ -920,7 +920,7 @@ const getConcurrencyStatusForCard = (card: AutomationCard): ProviderConcurrencyS
     providerId: providerRef,
     providerName: card.name,
     activeRequests: 0,
-    limit: card.providerConcurrencyLimit || 0,
+    limit: card.providerConcurrencyLimit,
     requests: [],
   }
 }

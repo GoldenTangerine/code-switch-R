@@ -85,12 +85,12 @@ export const normalizeModelMappingSupports1M = (
   return normalized
 }
 
-export const normalizeProviderConcurrencyLimit = (value: unknown): number => {
+export const normalizeProviderConcurrencyLimit = (value: unknown): number | undefined => {
   const raw = `${value ?? ''}`.trim()
-  if (raw === '') return 0
-  const numeric = Math.floor(Number(raw))
-  if (!Number.isFinite(numeric) || numeric <= 0) return 0
-  return Math.min(999, Math.max(1, numeric))
+  if (raw === '') return undefined
+  const numeric = Number(raw)
+  if (!Number.isFinite(numeric) || numeric < 0) return undefined
+  return Math.min(999, Math.floor(numeric))
 }
 
 
@@ -209,7 +209,7 @@ export const createVendorFormFromCard = (
   icon: card.icon,
   level: card.level || 1,
   hideLogBadge: card.hideLogBadge === true,
-  providerConcurrencyLimit: card.providerConcurrencyLimit || undefined,
+  providerConcurrencyLimit: card.providerConcurrencyLimit ?? undefined,
   enabled: card.quotaAutoDisabled ? true : card.enabled,
   quotaAutoDisabled: card.quotaAutoDisabled === true,
   quotaAutoDisablePaused: card.quotaAutoDisablePaused === true,

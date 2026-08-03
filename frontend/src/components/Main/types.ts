@@ -181,7 +181,7 @@ export type ProviderConcurrencyStatusView = {
   providerId: string
   providerName: string
   activeRequests: number
-  limit: number
+  limit?: number
   requests?: ProviderConcurrencyRequestView[]
 }
 

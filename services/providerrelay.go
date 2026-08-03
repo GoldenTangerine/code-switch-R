@@ -380,7 +380,7 @@ type ProviderConcurrencyStatus struct {
 	ProviderID     string                             `json:"providerId"`
 	ProviderName   string                             `json:"providerName"`
 	ActiveRequests int                                `json:"activeRequests"`
-	Limit          int                                `json:"limit"`
+	Limit          *int                               `json:"limit,omitempty"`
 	Requests       []ProviderConcurrencyRequestDetail `json:"requests"`
 }
 
@@ -1015,21 +1015,25 @@ func normalizeSessionTTLMinutes(value int) int {
 	return value
 }
 
-func normalizeProviderConcurrencyLimit(value int) int {
-	if value <= 0 {
-		return 0
+func normalizeProviderConcurrencyLimit(value *int) *int {
+	if value == nil {
+		return nil
 	}
-	if value > 999 {
-		return 999
+	normalized := *value
+	if normalized < 0 {
+		return nil
 	}
-	return value
+	if normalized > 999 {
+		normalized = 999
+	}
+	return &normalized
 }
 
 func providerSessionMaxSessions(provider Provider) int {
 	return normalizeSessionMaxSessions(provider.SessionMaxSessions)
 }
 
-func providerConcurrencyLimit(provider Provider) int {
+func providerConcurrencyLimit(provider Provider) *int {
 	return normalizeProviderConcurrencyLimit(provider.ProviderConcurrencyLimit)
 }
 
@@ -1041,7 +1045,7 @@ func geminiProviderSessionMaxSessions(provider GeminiProvider) int {
 	return normalizeSessionMaxSessions(provider.SessionMaxSessions)
 }
 
-func geminiProviderConcurrencyLimit(provider GeminiProvider) int {
+func geminiProviderConcurrencyLimit(provider GeminiProvider) *int {
 	return normalizeProviderConcurrencyLimit(provider.ProviderConcurrencyLimit)
 }
 
@@ -1068,7 +1072,7 @@ func cloneProviderConcurrencyRequestParameters(parameters []ProviderConcurrencyR
 	return append([]ProviderConcurrencyRequestParameter(nil), parameters...)
 }
 
-func (prs *ProviderRelayService) acquireProviderConcurrencySlot(platform string, providerID string, limit int, enforceLimit bool, meta providerConcurrencyRequestMeta) (func([]ProviderConcurrencyRequestParameter), func(), bool) {
+func (prs *ProviderRelayService) acquireProviderConcurrencySlot(platform string, providerID string, limit *int, enforceLimit bool, meta providerConcurrencyRequestMeta) (func([]ProviderConcurrencyRequestParameter), func(), bool) {
 	if prs == nil || strings.TrimSpace(providerID) == "" {
 		return func([]ProviderConcurrencyRequestParameter) {}, func() {}, true
 	}
@@ -1081,7 +1085,7 @@ func (prs *ProviderRelayService) acquireProviderConcurrencySlot(platform string,
 	if prs.providerConcurrencyRequests == nil {
 		prs.providerConcurrencyRequests = map[string]map[string]ProviderConcurrencyRequestDetail{}
 	}
-	if enforceLimit && limit > 0 && prs.providerConcurrency[key] >= limit {
+	if enforceLimit && limit != nil && prs.providerConcurrency[key] >= *limit {
 		prs.providerConcurrencyMu.Unlock()
 		return nil, nil, false
 	}

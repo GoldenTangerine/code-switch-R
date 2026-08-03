@@ -41,7 +41,7 @@ type GeminiProvider struct {
 	EnabledSortOrder         int               `json:"enabledSortOrder,omitempty"`         // 持久化启用组内顺序
 	DisabledSortOrder        int               `json:"disabledSortOrder,omitempty"`        // 持久化未启用组内顺序
 	Level                    int               `json:"level,omitempty"`                    // 优先级分组 (1-10, 默认 1)
-	ProviderConcurrencyLimit int               `json:"providerConcurrencyLimit,omitempty"` // 实时并发最多同时处理请求数
+	ProviderConcurrencyLimit *int              `json:"providerConcurrencyLimit,omitempty"` // nil 表示无限制，0 表示满载，1-999 表示并发上限
 	SessionMaxSessions       int               `json:"sessionMaxSessions,omitempty"`       // 会话隔离最多承载会话数
 	SessionTTLMinutes        int               `json:"sessionTTLMinutes,omitempty"`        // 会话隔离空闲释放时间（分钟）
 	EnvConfig                map[string]string `json:"envConfig,omitempty"`                // .env 配置
@@ -1045,18 +1045,19 @@ func (s *GeminiService) DuplicateProvider(sourceID string) (*GeminiProvider, err
 
 	// 3. 克隆配置（深拷贝）
 	cloned := GeminiProvider{
-		ID:                  newID,
-		Name:                source.Name + " (副本)",
-		WebsiteURL:          source.WebsiteURL,
-		APIKeyURL:           source.APIKeyURL,
-		BaseURL:             source.BaseURL,
-		APIKey:              source.APIKey,
-		Model:               source.Model,
-		Description:         source.Description,
-		Category:            source.Category,
-		PartnerPromotionKey: source.PartnerPromotionKey,
-		Enabled:             false, // 默认禁用，避免与源供应商冲突
-		Level:               source.Level,
+		ID:                       newID,
+		Name:                     source.Name + " (副本)",
+		WebsiteURL:               source.WebsiteURL,
+		APIKeyURL:                source.APIKeyURL,
+		BaseURL:                  source.BaseURL,
+		APIKey:                   source.APIKey,
+		Model:                    source.Model,
+		Description:              source.Description,
+		Category:                 source.Category,
+		PartnerPromotionKey:      source.PartnerPromotionKey,
+		Enabled:                  false, // 默认禁用，避免与源供应商冲突
+		Level:                    source.Level,
+		ProviderConcurrencyLimit: cloneOptionalInt(source.ProviderConcurrencyLimit),
 	}
 
 	// 4. 深拷贝 map（避免共享引用）
