@@ -77,10 +77,20 @@ describe('trayProviderStats', () => {
       successRateTone: 'warning',
       requests: '21',
       tokens: '513.79k',
+      cost: '$0.60',
       firstToken: '3.92s',
       speed: '26.17 t/s',
     })
-    expect(display.cost).toContain('0.60')
+  })
+
+  it('uses the compact dollar symbol and preserves the full amount', () => {
+    const display = buildTrayProviderStatsDisplay(
+      createProvider(),
+      [createStat({ cost_total: 12_345.67 })],
+      'zh-CN',
+    )
+
+    expect(display.cost).toBe('$12,345.67')
   })
 
   it.each([
@@ -103,6 +113,7 @@ describe('trayProviderStats', () => {
       successRateTone: 'neutral',
       requests: '0',
       tokens: '0',
+      cost: '$0.00',
       firstToken: '—',
       speed: '—',
     })

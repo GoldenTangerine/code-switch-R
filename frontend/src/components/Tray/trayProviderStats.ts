@@ -63,7 +63,8 @@ function resolveSuccessRateTone(value: number): TraySuccessRateTone {
 
 function formatCost(value: unknown, locale: string) {
   const display = buildProviderCostDisplay(normalizeNumber(value), locale || 'en')
-  return display.parts.map((part) => part.value).join(' ')
+  const amount = display.parts.find((part) => part.type === 'amount')?.value ?? '0.00'
+  return `$${amount}`
 }
 
 export function getTrayProviderStatsKey(provider: AutomationCard) {

@@ -1177,13 +1177,13 @@ onUnmounted(() => {
 
 .tray-provider-metrics__grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 0.85fr) minmax(0, 1.1fr) minmax(0, 1.3fr);
   margin: 0;
 }
 
 .tray-provider-metric {
   min-width: 0;
-  padding: 2px 6px;
+  padding: 2px 4px;
   text-align: center;
 }
 
@@ -1230,6 +1230,7 @@ onUnmounted(() => {
 
 .tray-provider-metric--cost dd {
   color: #925500;
+  font-size: 11px;
 }
 
 .tray-provider-performance {
