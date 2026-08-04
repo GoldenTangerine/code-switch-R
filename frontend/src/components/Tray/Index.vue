@@ -3,7 +3,12 @@ import { computed, nextTick, onMounted, onUnmounted, proxyRefs, ref } from 'vue'
 import { Call } from '@wailsio/runtime'
 import { useI18n } from 'vue-i18n'
 import { LoadProviders } from '../../../bindings/codeswitch/services/providerservice'
-import { fetchCostSince, fetchFiveHourQuotaStatus, fetchLogStats } from '../../services/logs'
+import {
+  fetchCostSince,
+  fetchFiveHourQuotaStatus,
+  fetchLogStats,
+  fetchProviderDailyStats,
+} from '../../services/logs'
 import { fetchAppSettings, type AppSettings } from '../../services/appSettings'
 import { fetchProxyStatus } from '../../services/claudeSettings'
 import type { AutomationCard } from '../../data/cards'
@@ -63,6 +68,12 @@ import {
   type TrayAmountPart,
   type TrayQuotaValueMode,
 } from './trayAmountFormatter'
+import {
+  buildTrayProviderStatsDisplay,
+  prepareTrayProviderStatsRefresh,
+  type TrayProviderStatsDisplay,
+} from './trayProviderStats'
+import { createTrayRefreshLifecycle } from './trayRefreshLifecycle'
 
 type Platform = 'claude' | 'codex'
 type ForecastMethod = 'cycle' | '10m' | '1h' | 'yesterday' | 'last24h'
@@ -97,12 +108,12 @@ type TrayQuotaState = {
 const rootRef = ref<HTMLElement | null>(null)
 const FULL_REFRESH_INTERVAL_MS = 60_000
 const RESET_REFRESH_COOLDOWN_MS = 5_000
-let ticker: number | undefined
 let refreshBusy = false
 let storageRefreshTimer: number | undefined
 let lastWindowHeight = 0
 let lastFullRefreshAt = 0
 let lastRefreshAttemptAt = 0
+let refreshLifecycle: ReturnType<typeof createTrayRefreshLifecycle> | undefined
 
 const quotaTitleKeys: Record<BudgetQuotaKey, string> = {
   five_hour: 'tray.quotaFiveHour',
@@ -255,6 +266,8 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
   const visibleQuotaKeys = ref<BudgetQuotaKey[]>([])
   const fallbackProviderName = ref('')
   const fallbackProviderIconKey = ref('')
+  const providerStatsDisplay = ref<TrayProviderStatsDisplay | null>(null)
+  let providerStatsKey = ''
   const fallbackProviderIconSvg = computed(() => getProviderDisplayIconSvg(fallbackProviderIconKey.value))
   const fallbackProviderInitials = computed(() => getTrayProviderInitials(fallbackProviderName.value))
   const brandIconSvg = computed(() => getTrayPlatformIconSvg(platform))
@@ -540,6 +553,29 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
     }
   }
 
+  const loadProviderStats = async (provider: AutomationCard) => {
+    const prepared = prepareTrayProviderStatsRefresh(
+      provider,
+      providerStatsKey,
+      providerStatsDisplay.value,
+      currentLocale(),
+    )
+    providerStatsKey = prepared.providerKey
+    providerStatsDisplay.value = prepared.display
+    try {
+      const stats = await fetchProviderDailyStats(platform)
+      if (providerStatsKey !== prepared.providerKey) return
+      providerStatsDisplay.value = buildTrayProviderStatsDisplay(provider, stats, currentLocale())
+    } catch (error) {
+      console.error(`failed to load ${platform} tray provider stats`, error)
+    }
+  }
+
+  const clearProviderStats = () => {
+    providerStatsKey = ''
+    providerStatsDisplay.value = null
+  }
+
   const applySettings = (settings: AppSettings) => {
     if (platform === 'codex') {
       showCountdown.value = settings?.budget_show_countdown_codex ?? false
@@ -578,6 +614,7 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
             fallbackProviderIconKey.value = fallbackProvider.icon
             displayMode.value = 'provider-quotas'
             totalUsage.value = 0
+            await loadProviderStats(fallbackProvider)
             return
           }
         }
@@ -585,6 +622,7 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
         visibleQuotaKeys.value = []
         fallbackProviderName.value = ''
         fallbackProviderIconKey.value = ''
+        clearProviderStats()
         displayMode.value = 'summary'
         await loadTotalUsage()
         return
@@ -635,6 +673,7 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
       visibleQuotaKeys.value = nextVisibleQuotaKeys
       fallbackProviderName.value = ''
       fallbackProviderIconKey.value = ''
+      clearProviderStats()
       displayMode.value = 'quotas'
       totalUsage.value = 0
     } catch (error) {
@@ -661,6 +700,7 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
     fallbackProviderName,
     fallbackProviderIconSvg,
     fallbackProviderInitials,
+    providerStatsDisplay,
     showProviderSource,
     hostingEnabled,
     hostingLabel,
@@ -681,8 +721,14 @@ const getTickerIntervalMs = () => (
   cards.some((card) => card.hasSecondPrecisionCountdown) ? 1000 : FULL_REFRESH_INTERVAL_MS
 )
 
+const isTrayWindowActive = () => !document.hidden && document.hasFocus()
+
 const triggerRefreshAll = () => {
-  if (refreshBusy) return
+  if (!isTrayWindowActive()) {
+    refreshLifecycle?.deactivate()
+    return
+  }
+  if (!refreshLifecycle?.isActive() || refreshBusy) return
   lastRefreshAttemptAt = Date.now()
   void refreshAll()
 }
@@ -705,16 +751,7 @@ const updateAllDerivedLabels = () => {
   }
 }
 
-const setupTicker = () => {
-  if (ticker) {
-    window.clearInterval(ticker)
-  }
-  ticker = window.setInterval(() => {
-    if (document.hidden) return
-    updateAllDerivedLabels()
-    refreshAllIfDue()
-  }, getTickerIntervalMs())
-}
+const setupTicker = () => refreshLifecycle?.restartTicker()
 
 const resizeToContent = async () => {
   await nextTick()
@@ -734,7 +771,7 @@ const resizeToContent = async () => {
 }
 
 const refreshAll = async () => {
-  if (refreshBusy) return
+  if (!refreshLifecycle?.isActive() || refreshBusy) return
   refreshBusy = true
   lastRefreshAttemptAt = Date.now()
   try {
@@ -752,21 +789,49 @@ const refreshAll = async () => {
   }
 }
 
-const handleFocus = () => {
-  triggerRefreshAll()
+refreshLifecycle = createTrayRefreshLifecycle({
+  onActivate: triggerRefreshAll,
+  onTick: () => {
+    if (!isTrayWindowActive()) {
+      refreshLifecycle?.deactivate()
+      return
+    }
+    updateAllDerivedLabels()
+    refreshAllIfDue()
+  },
+  getIntervalMs: getTickerIntervalMs,
+})
+
+const clearStorageRefreshTimer = () => {
+  if (storageRefreshTimer === undefined) return
+  window.clearTimeout(storageRefreshTimer)
+  storageRefreshTimer = undefined
+}
+
+const activateTray = () => {
+  if (!isTrayWindowActive()) return
+  refreshLifecycle?.activate()
+}
+
+const deactivateTray = () => {
+  refreshLifecycle?.deactivate()
+  clearStorageRefreshTimer()
 }
 
 const handleVisibilityChange = () => {
-  if (document.hidden || refreshBusy) return
-  triggerRefreshAll()
+  if (document.hidden) {
+    deactivateTray()
+    return
+  }
+  activateTray()
 }
 
 const scheduleRefreshAll = () => {
-  if (storageRefreshTimer) {
-    window.clearTimeout(storageRefreshTimer)
-  }
+  if (!isTrayWindowActive() || !refreshLifecycle?.isActive()) return
+  clearStorageRefreshTimer()
   storageRefreshTimer = window.setTimeout(() => {
     storageRefreshTimer = undefined
+    if (!refreshLifecycle?.isActive()) return
     if (refreshBusy) {
       scheduleRefreshAll()
       return
@@ -781,28 +846,26 @@ const handleStorageChange = (event: StorageEvent) => {
   scheduleRefreshAll()
 }
 
+const handleExternalRefresh = () => scheduleRefreshAll()
+
 onMounted(() => {
   lastWindowHeight = 0
-  triggerRefreshAll()
-  window.addEventListener('focus', handleFocus)
-  window.addEventListener('visibilitychange', handleVisibilityChange)
-  window.addEventListener('app-settings-updated', handleFocus)
+  window.addEventListener('focus', activateTray)
+  window.addEventListener('blur', deactivateTray)
+  document.addEventListener('visibilitychange', handleVisibilityChange)
+  window.addEventListener('app-settings-updated', handleExternalRefresh)
   window.addEventListener('storage', handleStorageChange)
+  activateTray()
 })
 
 onUnmounted(() => {
-  if (ticker) {
-    window.clearInterval(ticker)
-    ticker = undefined
-  }
-  if (storageRefreshTimer) {
-    window.clearTimeout(storageRefreshTimer)
-    storageRefreshTimer = undefined
-  }
+  refreshLifecycle?.dispose()
+  clearStorageRefreshTimer()
   lastWindowHeight = 0
-  window.removeEventListener('focus', handleFocus)
-  window.removeEventListener('visibilitychange', handleVisibilityChange)
-  window.removeEventListener('app-settings-updated', handleFocus)
+  window.removeEventListener('focus', activateTray)
+  window.removeEventListener('blur', deactivateTray)
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
+  window.removeEventListener('app-settings-updated', handleExternalRefresh)
   window.removeEventListener('storage', handleStorageChange)
 })
 </script>
@@ -881,6 +944,45 @@ onUnmounted(() => {
               </span>
               <span class="tray-provider-source__name">{{ card.fallbackProviderName }}</span>
             </strong>
+          </div>
+          <div
+            v-if="card.showProviderSource && card.providerStatsDisplay"
+            class="tray-provider-metrics"
+            :class="{ loading: card.loading }"
+          >
+            <dl class="tray-provider-metrics__grid">
+              <div class="tray-provider-metric">
+                <dt>{{ t('tray.successRate') }}</dt>
+                <dd
+                  :class="`tray-provider-metric__value--${card.providerStatsDisplay.successRateTone}`"
+                  :title="card.providerStatsDisplay.successRate"
+                >{{ card.providerStatsDisplay.successRate }}</dd>
+              </div>
+              <div class="tray-provider-metric">
+                <dt>{{ t('tray.requests') }}</dt>
+                <dd :title="card.providerStatsDisplay.requests">{{ card.providerStatsDisplay.requests }}</dd>
+              </div>
+              <div class="tray-provider-metric">
+                <dt>{{ t('tray.tokens') }}</dt>
+                <dd :title="card.providerStatsDisplay.tokens">{{ card.providerStatsDisplay.tokens }}</dd>
+              </div>
+              <div class="tray-provider-metric tray-provider-metric--cost">
+                <dt>{{ t('tray.cost') }}</dt>
+                <dd :title="card.providerStatsDisplay.cost">{{ card.providerStatsDisplay.cost }}</dd>
+              </div>
+            </dl>
+            <div class="tray-provider-performance">
+              <div class="tray-provider-performance__item tray-provider-performance__item--first-token">
+                <span class="tray-provider-performance__icon" aria-hidden="true">{{ t('tray.firstTokenShort') }}</span>
+                <span class="tray-provider-performance__label">{{ t('tray.firstToken') }}</span>
+                <strong :title="card.providerStatsDisplay.firstToken">{{ card.providerStatsDisplay.firstToken }}</strong>
+              </div>
+              <div class="tray-provider-performance__item tray-provider-performance__item--speed">
+                <span class="tray-provider-performance__icon" aria-hidden="true">{{ t('tray.speedShort') }}</span>
+                <span class="tray-provider-performance__label">{{ t('tray.speed') }}</span>
+                <strong :title="card.providerStatsDisplay.speed">{{ card.providerStatsDisplay.speed }}</strong>
+              </div>
+            </div>
           </div>
           <div
             v-for="quota in card.providerQuotas"
@@ -1044,9 +1146,142 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 
-.tray-provider-source + .tray-item {
+.tray-provider-source + .tray-provider-metrics,
+.tray-provider-metrics + .tray-item {
   padding-top: 10px;
   border-top: 1px solid var(--mac-divider);
+}
+
+.tray-provider-metrics {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  min-width: 0;
+  transition: opacity 0.2s ease;
+}
+
+.tray-provider-metrics.loading {
+  opacity: 0.6;
+}
+
+.tray-provider-metrics__grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 0;
+}
+
+.tray-provider-metric {
+  min-width: 0;
+  padding: 2px 6px;
+  text-align: center;
+}
+
+.tray-provider-metric + .tray-provider-metric {
+  border-left: 1px solid var(--mac-divider);
+}
+
+.tray-provider-metric dt {
+  overflow: hidden;
+  color: var(--mac-text-secondary);
+  font-size: 10px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tray-provider-metric dd {
+  overflow: hidden;
+  margin: 5px 0 0;
+  color: var(--mac-text);
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tray-provider-metric dd.tray-provider-metric__value--good {
+  color: #11745a;
+}
+
+.tray-provider-metric dd.tray-provider-metric__value--warning {
+  color: #925500;
+}
+
+.tray-provider-metric dd.tray-provider-metric__value--bad {
+  color: #c93632;
+}
+
+.tray-provider-metric dd.tray-provider-metric__value--neutral {
+  color: var(--mac-text-secondary);
+}
+
+.tray-provider-metric--cost dd {
+  color: #925500;
+}
+
+.tray-provider-performance {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.tray-provider-performance__item {
+  min-width: 0;
+  min-height: 28px;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 5px;
+  padding: 0 7px;
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  font-size: 10px;
+}
+
+.tray-provider-performance__item--first-token {
+  --tray-performance-accent: #7950b8;
+  color: var(--tray-performance-accent);
+  background: rgba(121, 80, 184, 0.07);
+}
+
+.tray-provider-performance__item--speed {
+  --tray-performance-accent: #0f7466;
+  color: var(--tray-performance-accent);
+  background: rgba(15, 116, 102, 0.07);
+}
+
+.tray-provider-performance__icon {
+  width: 18px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  background: var(--tray-performance-accent);
+  color: white;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.tray-provider-performance__label {
+  overflow: hidden;
+  color: currentColor;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tray-provider-performance strong {
+  overflow: hidden;
+  color: var(--mac-text);
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tray-header {
@@ -1274,8 +1509,32 @@ onUnmounted(() => {
   border-top-color: var(--mac-divider);
 }
 
-:global(.dark) .tray-provider-source + .tray-item {
+:global(.dark) .tray-provider-source + .tray-provider-metrics,
+:global(.dark) .tray-provider-metrics + .tray-item {
   border-top-color: var(--mac-divider);
+}
+
+:global(.dark) .tray-provider-metric dd.tray-provider-metric__value--good {
+  color: #65d6ad;
+}
+
+:global(.dark) .tray-provider-metric dd.tray-provider-metric__value--warning,
+:global(.dark) .tray-provider-metric--cost dd {
+  color: #f6c453;
+}
+
+:global(.dark) .tray-provider-metric dd.tray-provider-metric__value--bad {
+  color: #ff8a82;
+}
+
+:global(.dark) .tray-provider-performance__item--first-token {
+  --tray-performance-accent: #b794f4;
+  background: rgba(183, 148, 244, 0.08);
+}
+
+:global(.dark) .tray-provider-performance__item--speed {
+  --tray-performance-accent: #55d6c2;
+  background: rgba(85, 214, 194, 0.08);
 }
 
 :global(.dark) .tray-brand__icon {

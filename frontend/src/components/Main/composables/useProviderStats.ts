@@ -22,6 +22,11 @@ import {
 import type { ProviderStatDisplay, ProviderTab, TranslateFn } from '../types'
 import { buildProviderCostDisplay } from '../utils/providerCostDisplay'
 import { formatAdaptiveDurationSeconds } from '../../../utils/durationFormat'
+import {
+  formatProviderSuccessRate,
+  formatProviderTokenCount,
+  formatProviderTokensPerSecond,
+} from '../../../utils/providerStatsFormat'
 
 type UseProviderStatsOptions = {
   t: TranslateFn
@@ -42,34 +47,6 @@ const clamp = (value: number, min: number, max: number) => {
 }
 
 const formatMetric = (value: number) => value.toLocaleString()
-
-const formatTokenNumber = (value: number) => {
-  if (value >= 1_000_000_000) {
-    return `${(value / 1_000_000_000).toFixed(2)}B`
-  }
-  if (value >= 1_000_000) {
-    return `${(value / 1_000_000).toFixed(2)}M`
-  }
-  if (value >= 1_000) {
-    return `${(value / 1_000).toFixed(2)}k`
-  }
-  return value.toLocaleString()
-}
-
-const toPositiveFiniteNumber = (value: unknown) => {
-  const numeric = Number(value ?? 0)
-  if (!Number.isFinite(numeric) || numeric <= 0) return 0
-  return numeric
-}
-
-const formatAverageFirstTokenDuration = (value: unknown) => formatAdaptiveDurationSeconds(value)
-
-const formatAverageTokensPerSecond = (value: unknown) => {
-  const tokensPerSecond = toPositiveFiniteNumber(value)
-  if (tokensPerSecond <= 0) return '—'
-  const precision = tokensPerSecond >= 100 ? 1 : 2
-  return `${tokensPerSecond.toFixed(precision)} tokens/s`
-}
 
 const normalizeUnreadFailedRequests = (value: unknown) => {
   const numeric = Number(value ?? 0)
@@ -265,9 +242,7 @@ export function useProviderStats(options: UseProviderStatsOptions) {
   }
 
   const formatSuccessRateLabel = (value: number) => {
-    const percent = clamp(value, 0, 1) * 100
-    const decimals = percent >= 99.5 || percent === 0 ? 0 : 1
-    return `${t('components.main.providers.successRate')}: ${percent.toFixed(decimals)}%`
+    return `${t('components.main.providers.successRate')}: ${formatProviderSuccessRate(value)}`
   }
 
   const successRateClassName = (value: number) => {
@@ -340,13 +315,13 @@ export function useProviderStats(options: UseProviderStatsOptions) {
     return {
       state: 'ready',
       requests: `${t('components.main.providers.requests')}: ${formatMetric(stat.total_requests)}`,
-      tokens: `${t('components.main.providers.tokens')}: ${formatTokenNumber(totalTokens)}`,
+      tokens: `${t('components.main.providers.tokens')}: ${formatProviderTokenCount(totalTokens)}`,
       costLabel: t('components.main.providers.cost'),
       costParts: costDisplay.parts,
       costFormatted: costDisplay.formatted,
       costValue: normalizedCost,
-      ttft: formatAverageFirstTokenDuration(stat.avg_first_token_sec),
-      tps: formatAverageTokensPerSecond(stat.avg_tokens_per_sec),
+      ttft: formatAdaptiveDurationSeconds(stat.avg_first_token_sec),
+      tps: formatProviderTokensPerSecond(stat.avg_tokens_per_sec),
       performanceHint,
       successRateLabel,
       successRateClass,
