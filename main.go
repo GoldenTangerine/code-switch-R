@@ -35,8 +35,9 @@ var assets embed.FS
 var trayIcons embed.FS
 
 type AppService struct {
-	App        *application.App
-	TrayWindow application.Window
+	App                  *application.App
+	TrayWindow           application.Window
+	RepositionTrayWindow func()
 }
 
 type mainWindowDestroyTimer interface {
@@ -167,13 +168,24 @@ func (a *AppService) SetTrayWindowHeight(height int) {
 	if runtime.GOOS != "darwin" || a.TrayWindow == nil {
 		return
 	}
-	if height < trayWindowMinHeight {
-		height = trayWindowMinHeight
+	workAreaHeight := 0
+	if screen, err := a.TrayWindow.GetScreen(); err == nil && screen != nil {
+		workAreaHeight = screen.WorkArea.Height
 	}
-	if height > trayWindowMaxHeight {
-		height = trayWindowMaxHeight
-	}
+	height, maxHeight := resolveTrayWindowHeight(height, workAreaHeight)
+	a.TrayWindow.SetMaxSize(trayWindowWidth, maxHeight)
 	a.TrayWindow.SetSize(trayWindowWidth, height)
+	if a.RepositionTrayWindow != nil {
+		a.RepositionTrayWindow()
+	}
+}
+
+func (a *AppService) fitTrayWindowToCurrentScreen() {
+	if runtime.GOOS != "darwin" || a.TrayWindow == nil {
+		return
+	}
+	_, currentHeight := a.TrayWindow.Size()
+	a.SetTrayWindowHeight(currentHeight)
 }
 
 func (a *AppService) OpenSecondWindow() {
@@ -710,7 +722,7 @@ func main() {
 			MinWidth:         trayWindowWidth,
 			MaxWidth:         trayWindowWidth,
 			MinHeight:        trayWindowMinHeight,
-			MaxHeight:        trayWindowMaxHeight,
+			MaxHeight:        trayWindowFallbackMaxHeight,
 			AlwaysOnTop:      true,
 			DisableResize:    true,
 			Frameless:        true,
@@ -735,6 +747,12 @@ func main() {
 		appservice.TrayWindow = trayWindow
 		return trayWindow
 	}
+	repositionTrayWindow := func() {
+		if systray != nil && trayWindow != nil {
+			_ = systray.PositionWindow(trayWindow, trayWindowOffset)
+		}
+	}
+	appservice.RepositionTrayWindow = repositionTrayWindow
 	hideTrayWindow := func() {
 		if trayWindow == nil || !trayWindow.IsVisible() {
 			return
@@ -749,9 +767,8 @@ func main() {
 		if win == nil {
 			return
 		}
-		if systray != nil {
-			_ = systray.PositionWindow(win, trayWindowOffset)
-		}
+		repositionTrayWindow()
+		appservice.fitTrayWindowToCurrentScreen()
 		win.Show().Focus()
 	}
 	toggleTrayWindow := func() {
@@ -884,12 +901,21 @@ func handleDockVisibility(service *dock.DockService, show bool) {
 }
 
 const (
-	trayWindowWidth      = 360
-	trayWindowMinHeight  = 120
-	trayWindowMaxHeight  = 640
-	trayWindowOffset     = 8
-	trayProgressBarWidth = 28
+	trayWindowWidth             = 360
+	trayWindowMinHeight         = 120
+	trayWindowFallbackMaxHeight = 1200
+	trayWindowScreenMargin      = 24
+	trayWindowOffset            = 8
+	trayProgressBarWidth        = 28
 )
+
+func resolveTrayWindowHeight(contentHeight int, workAreaHeight int) (int, int) {
+	maxHeight := trayWindowFallbackMaxHeight
+	if workAreaHeight > 0 {
+		maxHeight = max(workAreaHeight-trayWindowScreenMargin, trayWindowMinHeight)
+	}
+	return min(max(contentHeight, trayWindowMinHeight), maxHeight), maxHeight
+}
 
 func getTrayUsage(logService *services.LogService, appSettings *services.AppSettingsService) (float64, float64) {
 	used := 0.0

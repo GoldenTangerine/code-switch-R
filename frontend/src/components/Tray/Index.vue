@@ -754,7 +754,9 @@ const updateAllDerivedLabels = () => {
 const setupTicker = () => refreshLifecycle?.restartTicker()
 
 const resizeToContent = async () => {
+  if (!isTrayWindowActive() || !refreshLifecycle?.isActive()) return
   await nextTick()
+  if (!isTrayWindowActive() || !refreshLifecycle?.isActive()) return
   if (!rootRef.value) return
   const height = Math.ceil(Math.max(
     rootRef.value.getBoundingClientRect().height,
@@ -810,7 +812,9 @@ const clearStorageRefreshTimer = () => {
 
 const activateTray = () => {
   if (!isTrayWindowActive()) return
+  if (!refreshLifecycle?.isActive()) lastWindowHeight = 0
   refreshLifecycle?.activate()
+  void resizeToContent()
 }
 
 const deactivateTray = () => {
@@ -1052,7 +1056,14 @@ onUnmounted(() => {
   overflow-y: auto;
   overflow-x: hidden;
   overscroll-behavior: contain;
-  scrollbar-gutter: stable;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.tray-root::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
 }
 
 .tray-list {

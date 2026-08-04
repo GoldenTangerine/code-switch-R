@@ -95,3 +95,29 @@ func TestMainWindowLifecycleStateReopenCancelsDestroy(t *testing.T) {
 		t.Fatalf("重开取消销毁后的状态异常: closed=%v, exists=%v, window=%q", closed, exists, window)
 	}
 }
+
+func TestResolveTrayWindowHeightUsesContentAndScreenBounds(t *testing.T) {
+	tests := []struct {
+		name           string
+		contentHeight  int
+		workAreaHeight int
+		wantHeight     int
+		wantMaxHeight  int
+	}{
+		{name: "content", contentHeight: 760, workAreaHeight: 900, wantHeight: 760, wantMaxHeight: 876},
+		{name: "screen limit", contentHeight: 920, workAreaHeight: 900, wantHeight: 876, wantMaxHeight: 876},
+		{name: "minimum", contentHeight: 80, workAreaHeight: 900, wantHeight: 120, wantMaxHeight: 876},
+		{name: "small screen", contentHeight: 760, workAreaHeight: 100, wantHeight: 120, wantMaxHeight: 120},
+		{name: "fallback", contentHeight: 760, workAreaHeight: 0, wantHeight: 760, wantMaxHeight: 1200},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			height, maxHeight := resolveTrayWindowHeight(test.contentHeight, test.workAreaHeight)
+			if height != test.wantHeight || maxHeight != test.wantMaxHeight {
+				t.Fatalf("resolveTrayWindowHeight(%d, %d) = (%d, %d), want (%d, %d)",
+					test.contentHeight, test.workAreaHeight, height, maxHeight, test.wantHeight, test.wantMaxHeight)
+			}
+		})
+	}
+}
