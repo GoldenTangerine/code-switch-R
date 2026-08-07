@@ -213,6 +213,93 @@ func TestProviderStatsRangeV2_PerformanceSeparatesTTFTAndTPSSamples(t *testing.T
 	}
 }
 
+func TestProviderPerformanceTrend15m_AggregatesIndependentSamplesAndPartialBucket(t *testing.T) {
+	useIsolatedHomeDir(t)
+
+	if err := InitDatabase(); err != nil {
+		t.Fatalf("初始化数据库失败: %v", err)
+	}
+	db, err := xdb.DB("default")
+	if err != nil {
+		t.Fatalf("获取数据库连接失败: %v", err)
+	}
+	localStart := time.Date(2026, 2, 25, 0, 0, 0, 0, time.Local)
+	storedTime := func(offset time.Duration) string {
+		return localStart.Add(offset).UTC().Format(timeLayout)
+	}
+
+	entries := []providerStatsLogEntry{
+		{Platform: "codex", ProviderID: "trend-provider", Provider: "Trend Provider", IsStream: 1, DurationSec: 2, FirstTokenSec: 0.2, OutputTokens: 100, CreatedAt: storedTime(time.Minute)},
+		{Platform: "codex", ProviderID: "trend-provider", Provider: "Trend Provider", IsStream: 1, DurationSec: 1, FirstTokenSec: 0.4, OutputTokens: 40, CreatedAt: storedTime(14*time.Minute + 59*time.Second)},
+		{Platform: "codex", ProviderID: "trend-provider", Provider: "Trend Provider", IsStream: 1, DurationSec: 1.2, FirstTokenSec: 0, OutputTokens: 30, CreatedAt: storedTime(16 * time.Minute)},
+		{Platform: "codex", ProviderID: "trend-provider", Provider: "Trend Provider", IsStream: 0, DurationSec: 1, FirstTokenSec: 0.1, OutputTokens: 80, CreatedAt: storedTime(17 * time.Minute)},
+		{Platform: "codex", ProviderID: "trend-provider", Provider: "Trend Provider", HttpCode: 500, IsStream: 1, DurationSec: 1, FirstTokenSec: 0.1, OutputTokens: 80, CreatedAt: storedTime(31 * time.Minute)},
+		{Platform: "codex", ProviderID: "other-provider", Provider: "Other Provider", IsStream: 1, DurationSec: 1, FirstTokenSec: 0.1, OutputTokens: 80, CreatedAt: storedTime(5 * time.Minute)},
+		{Platform: "codex", Provider: "Legacy Trend", IsStream: 1, DurationSec: 2, FirstTokenSec: 0.5, OutputTokens: 60, CreatedAt: storedTime(6 * time.Minute)},
+	}
+	for _, entry := range entries {
+		insertRequestLogForProviderStats(t, db, entry)
+	}
+
+	ls := NewLogService(nil)
+	points, err := ls.ProviderPerformanceTrend15m(
+		"codex",
+		"trend-provider",
+		localStart.Format(timeLayout),
+		localStart.Add(37*time.Minute).Format(timeLayout),
+	)
+	if err != nil {
+		t.Fatalf("ProviderPerformanceTrend15m 调用失败: %v", err)
+	}
+	if len(points) != 3 {
+		t.Fatalf("期望返回 3 个 15 分钟桶，实际 %d", len(points))
+	}
+	if points[0].BucketStart != "2026-02-25 00:00:00" || points[2].BucketStart != "2026-02-25 00:30:00" {
+		t.Fatalf("分桶起点错误: %#v", points)
+	}
+	if points[0].TTFTSampleCount != 2 || !almostEqualFloatProviderStat(points[0].AvgFirstTokenSec, 0.3) {
+		t.Fatalf("首个桶首字均值错误: %#v", points[0])
+	}
+	if points[0].TPSSampleCount != 2 || !almostEqualFloatProviderStat(points[0].AvgTokensPerSec, 45) {
+		t.Fatalf("首个桶生成速度均值错误: %#v", points[0])
+	}
+	if points[1].TTFTSampleCount != 0 || points[1].AvgFirstTokenSec != 0 {
+		t.Fatalf("无有效首字样本时应保持空均值: %#v", points[1])
+	}
+	if points[1].TPSSampleCount != 1 || !almostEqualFloatProviderStat(points[1].AvgTokensPerSec, 25) {
+		t.Fatalf("生成速度不应依赖首字样本: %#v", points[1])
+	}
+	if points[2].TTFTSampleCount != 0 || points[2].TPSSampleCount != 0 {
+		t.Fatalf("失败请求不应进入末尾不完整桶: %#v", points[2])
+	}
+
+	legacyPoints, err := ls.ProviderPerformanceTrend15m(
+		"codex",
+		"Legacy Trend",
+		localStart.Format(timeLayout),
+		localStart.Add(37*time.Minute).Format(timeLayout),
+	)
+	if err != nil {
+		t.Fatalf("名称回退查询失败: %v", err)
+	}
+	if legacyPoints[0].TTFTSampleCount != 1 || !almostEqualFloatProviderStat(legacyPoints[0].AvgTokensPerSec, 30) {
+		t.Fatalf("名称回退性能统计错误: %#v", legacyPoints[0])
+	}
+}
+
+func TestProviderPerformanceTrend15m_RejectsRangesOverMaximumBucketCount(t *testing.T) {
+	start := time.Date(2026, 2, 25, 0, 0, 0, 0, time.Local)
+	_, err := NewLogService(nil).ProviderPerformanceTrend15m(
+		"codex",
+		"trend-provider",
+		start.Format(timeLayout),
+		start.Add(26*time.Hour).Format(timeLayout),
+	)
+	if err == nil {
+		t.Fatal("超过最大桶数的性能趋势范围应返回错误")
+	}
+}
+
 func TestProviderStatsRangeV2_FallbackToProviderNameWhenProviderIDNotFound(t *testing.T) {
 	useIsolatedHomeDir(t)
 

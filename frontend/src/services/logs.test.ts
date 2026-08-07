@@ -20,6 +20,7 @@ import { Call } from '@wailsio/runtime'
 import {
   clearRequestLogs,
   fetchLogStatsV2,
+  fetchProviderPerformanceTrend15m,
   fetchRequestLogDailyHeatmapStatsByYear,
   fetchRequestLogHeatmapYears,
   fetchRequestLogsPage,
@@ -68,6 +69,25 @@ describe('logs service', () => {
     expect(Call.ByName).toHaveBeenCalledWith(
       'codeswitch/services.LogService.ClearRequestLogsV2',
       true,
+    )
+  })
+
+  it('passes the provider and local range to the 15-minute performance trend', async () => {
+    vi.mocked(Call.ByName).mockResolvedValue([])
+
+    await fetchProviderPerformanceTrend15m({
+      platform: 'codex',
+      provider: 'provider-id',
+      startAt: '2026-08-07 00:00:00',
+      endAt: '2026-08-07 16:05:50',
+    })
+
+    expect(Call.ByName).toHaveBeenCalledWith(
+      'codeswitch/services.LogService.ProviderPerformanceTrend15m',
+      'codex',
+      'provider-id',
+      '2026-08-07 00:00:00',
+      '2026-08-07 16:05:50',
     )
   })
 

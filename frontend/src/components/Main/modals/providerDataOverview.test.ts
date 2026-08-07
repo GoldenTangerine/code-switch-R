@@ -3,6 +3,8 @@ import {
   buildProviderOverviewDays,
   buildProviderOverviewFallbackRows,
   buildProviderOverviewRange,
+  buildProviderPerformancePoints,
+  buildProviderPerformanceRange,
   sumLogStatsTokens,
 } from './providerDataOverview'
 
@@ -89,5 +91,46 @@ describe('providerDataOverview', () => {
       cache_create_tokens: 10,
       cache_read_tokens: 5,
     })).toBe(215)
+  })
+
+  it('builds the local today range through the current partial interval', () => {
+    expect(buildProviderPerformanceRange(new Date('2026-08-07T16:05:50'))).toEqual({
+      startAt: '2026-08-07 00:00:00',
+      endAt: '2026-08-07 16:05:50',
+    })
+  })
+
+  it('maps empty performance samples to chart gaps', () => {
+    expect(buildProviderPerformancePoints([
+      {
+        bucket_start: '2026-08-07 00:00:00',
+        avg_first_token_sec: 0.32,
+        avg_tokens_per_sec: 45.5,
+        ttft_sample_count: 2,
+        tps_sample_count: 3,
+      },
+      {
+        bucket_start: '2026-08-07 00:15:00',
+        avg_first_token_sec: 0,
+        avg_tokens_per_sec: 0,
+        ttft_sample_count: 0,
+        tps_sample_count: 0,
+      },
+    ])).toEqual([
+      expect.objectContaining({
+        label: '00:00',
+        avgFirstTokenSec: 0.32,
+        avgTokensPerSec: 45.5,
+        ttftSampleCount: 2,
+        tpsSampleCount: 3,
+      }),
+      expect.objectContaining({
+        label: '00:15',
+        avgFirstTokenSec: null,
+        avgTokensPerSec: null,
+        ttftSampleCount: 0,
+        tpsSampleCount: 0,
+      }),
+    ])
   })
 })

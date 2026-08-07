@@ -192,6 +192,14 @@ export type LogStats = {
   series: LogStatsSeries[]
 }
 
+export type ProviderPerformanceTrendPoint = {
+  bucket_start: string
+  avg_first_token_sec: number
+  avg_tokens_per_sec: number
+  ttft_sample_count: number
+  tps_sample_count: number
+}
+
 export type LogSummary = {
   total_requests: number
   successful_requests?: number
@@ -237,6 +245,16 @@ export const fetchLogStatsV2 = async (query: LogStatsQuery = {}): Promise<LogSta
   const endAt = query.endAt ?? ''
   const sourceMode = query.sourceMode ?? 'proxy'
   return Call.ByName('codeswitch/services.LogService.StatsRangeV3', platform, provider, model, sourceMode, startAt, endAt)
+}
+
+export const fetchProviderPerformanceTrend15m = async (
+  query: Pick<LogStatsQuery, 'platform' | 'provider' | 'startAt' | 'endAt'> = {},
+): Promise<ProviderPerformanceTrendPoint[]> => {
+  const platform = query.platform ?? ''
+  const provider = query.provider ?? ''
+  const startAt = query.startAt ?? ''
+  const endAt = query.endAt ?? ''
+  return Call.ByName('codeswitch/services.LogService.ProviderPerformanceTrend15m', platform, provider, startAt, endAt)
 }
 
 export const fetchLogSummaryV2 = async (query: LogStatsQuery = {}): Promise<LogSummary> => {

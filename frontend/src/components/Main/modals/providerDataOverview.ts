@@ -1,4 +1,4 @@
-import type { LogStats, LogStatsSeries } from '../../../services/logs'
+import type { LogStats, LogStatsSeries, ProviderPerformanceTrendPoint } from '../../../services/logs'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
@@ -13,6 +13,13 @@ const parseDay = (value: string) => {
   const raw = String(value ?? '').trim()
   if (!raw) return Number.NaN
   const timestamp = Date.parse(raw.includes('T') ? raw : `${raw}T00:00:00`)
+  return Number.isFinite(timestamp) ? timestamp : Number.NaN
+}
+
+const parseLocalDateTime = (value: string) => {
+  const raw = String(value ?? '').trim()
+  if (!raw) return Number.NaN
+  const timestamp = Date.parse(raw.includes('T') ? raw : raw.replace(' ', 'T'))
   return Number.isFinite(timestamp) ? timestamp : Number.NaN
 }
 
@@ -37,6 +44,16 @@ export type ProviderOverviewDayPoint = {
   cost: number
   requests: number
   totalTokens: number
+}
+
+export type ProviderPerformancePoint = {
+  bucketStart: string
+  label: string
+  timestamp: number
+  avgFirstTokenSec: number | null
+  avgTokensPerSec: number | null
+  ttftSampleCount: number
+  tpsSampleCount: number
 }
 
 export const sumLogStatsSeriesTokens = (
@@ -115,6 +132,29 @@ export const buildProviderOverviewFallbackRows = (
     .slice(0, limit)
 }
 
+export const buildProviderPerformancePoints = (
+  points: ProviderPerformanceTrendPoint[],
+): ProviderPerformancePoint[] => (points ?? []).flatMap((point) => {
+  const timestamp = parseLocalDateTime(point.bucket_start)
+  if (!Number.isFinite(timestamp)) return []
+
+  const ttftSampleCount = Math.max(0, Math.floor(toSafeNumber(point.ttft_sample_count)))
+  const tpsSampleCount = Math.max(0, Math.floor(toSafeNumber(point.tps_sample_count)))
+  const date = new Date(timestamp)
+  const hours = `${date.getHours()}`.padStart(2, '0')
+  const minutes = `${date.getMinutes()}`.padStart(2, '0')
+
+  return [{
+    bucketStart: point.bucket_start,
+    label: `${hours}:${minutes}`,
+    timestamp,
+    avgFirstTokenSec: ttftSampleCount > 0 ? toSafeNumber(point.avg_first_token_sec) : null,
+    avgTokensPerSec: tpsSampleCount > 0 ? toSafeNumber(point.avg_tokens_per_sec) : null,
+    ttftSampleCount,
+    tpsSampleCount,
+  }]
+})
+
 export const buildProviderOverviewRange = (days: number, now = new Date()) => {
   const end = new Date(startOfDay(now))
   end.setDate(end.getDate() + 1)
@@ -129,3 +169,8 @@ export const buildProviderOverviewRange = (days: number, now = new Date()) => {
     endAt: formatLocalDateTime(end),
   }
 }
+
+export const buildProviderPerformanceRange = (now = new Date()) => ({
+  startAt: formatLocalDateTime(startOfDay(now)),
+  endAt: formatLocalDateTime(now),
+})

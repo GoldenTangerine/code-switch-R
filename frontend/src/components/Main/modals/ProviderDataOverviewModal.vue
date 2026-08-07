@@ -62,6 +62,57 @@
           </article>
         </section>
 
+        <section class="provider-data-panel provider-data-panel--performance">
+          <header class="provider-data-panel__header">
+            <div>
+              <h4 class="provider-data-panel__title">{{ t('components.main.providerDataOverview.performanceTitle') }}</h4>
+              <p class="provider-data-panel__hint">{{ t('components.main.providerDataOverview.performanceHint') }}</p>
+            </div>
+            <span class="provider-data-panel__legend">{{ t('components.main.providerDataOverview.performanceLegend') }}</span>
+          </header>
+          <div
+            v-if="performanceError"
+            class="provider-data-panel__empty provider-data-panel__empty--error"
+            role="alert"
+          >
+            <strong>{{ t('components.main.providerDataOverview.performanceLoadFailed', { error: performanceError }) }}</strong>
+          </div>
+          <template v-else-if="hasPerformanceData">
+            <div
+              ref="performanceChartRef"
+              class="provider-data-chart provider-data-chart--performance"
+              aria-hidden="true"
+            ></div>
+            <table class="sr-only">
+              <caption>{{ t('components.main.providerDataOverview.performanceTitle') }}</caption>
+              <thead>
+                <tr>
+                  <th scope="col">{{ t('components.main.providerDataOverview.performanceTime') }}</th>
+                  <th scope="col">{{ t('components.main.providerDataOverview.firstTokenSeries') }}</th>
+                  <th scope="col">{{ t('components.main.providerDataOverview.speedSeries') }}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="point in performanceAccessiblePoints" :key="point.bucketStart">
+                  <th scope="row">{{ point.label }}</th>
+                  <td>
+                    {{ formatPerformanceValue(point.avgFirstTokenSec, 's') }} ·
+                    {{ t('components.main.providerDataOverview.sampleCount', { count: formatCount(point.ttftSampleCount) }) }}
+                  </td>
+                  <td>
+                    {{ formatPerformanceValue(point.avgTokensPerSec, 't/s') }} ·
+                    {{ t('components.main.providerDataOverview.sampleCount', { count: formatCount(point.tpsSampleCount) }) }}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </template>
+          <div v-else class="provider-data-panel__empty provider-data-panel__empty--performance">
+            <strong>{{ t('components.main.providerDataOverview.performanceEmpty') }}</strong>
+            <p>{{ t('components.main.providerDataOverview.performanceEmptyHint') }}</p>
+          </div>
+        </section>
+
         <div class="provider-data-modal__grid">
           <section class="provider-data-panel provider-data-panel--wide">
             <header class="provider-data-panel__header">
@@ -272,7 +323,12 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { AutomationCard } from '../../../data/cards'
-import { fetchLogStatsV2, type LogPlatform, type LogStats } from '../../../services/logs'
+import {
+  fetchLogStatsV2,
+  fetchProviderPerformanceTrend15m,
+  type LogPlatform,
+  type LogStats,
+} from '../../../services/logs'
 import { extractErrorMessage } from '../../../utils/error'
 import { ensureEChartsLoaded, type EChartsInstanceLike, type EChartsStaticLike } from '../../../utils/echarts'
 import { hasProviderQuotaQueryType } from '../../../utils/providerQuotaQuery'
@@ -294,8 +350,11 @@ import {
   buildProviderOverviewFallbackRows,
   buildProviderOverviewDays,
   buildProviderOverviewRange,
+  buildProviderPerformancePoints,
+  buildProviderPerformanceRange,
   sumLogStatsTokens,
   type ProviderOverviewDayPoint,
+  type ProviderPerformancePoint,
 } from './providerDataOverview'
 
 const LOOKBACK_DAYS = 7
@@ -318,12 +377,16 @@ const loading = ref(false)
 const error = ref('')
 const aggregatedStats = ref<LogStats | null>(null)
 const dailyPoints = ref<ProviderOverviewDayPoint[]>([])
+const performancePoints = ref<ProviderPerformancePoint[]>([])
+const performanceError = ref('')
 const quotaItems = ref<ProviderQuotaSnapshotItem[]>([])
 
+const performanceChartRef = ref<HTMLElement | null>(null)
 const costChartRef = ref<HTMLElement | null>(null)
 const activityChartRef = ref<HTMLElement | null>(null)
 const quotaChartRef = ref<HTMLElement | null>(null)
 
+let performanceChartInstance: EChartsInstanceLike | null = null
 let costChartInstance: EChartsInstanceLike | null = null
 let activityChartInstance: EChartsInstanceLike | null = null
 let quotaChartInstance: EChartsInstanceLike | null = null
@@ -339,6 +402,8 @@ type ProviderOverviewFallbackColumn = {
 }
 
 const isDarkTheme = computed(() => props.resolvedTheme === 'dark')
+const firstTokenChartColor = computed(() => (isDarkTheme.value ? '#b794f4' : '#7950b8'))
+const speedChartColor = computed(() => (isDarkTheme.value ? '#55d6c2' : '#0f7466'))
 const providerName = computed(() => props.provider?.name ?? '')
 const providerAccent = computed(() => props.provider?.accent ?? '#2563eb')
 const modalTitle = computed(() => t('components.main.providerDataOverview.modalTitle', { name: providerName.value }))
@@ -380,6 +445,10 @@ const compactCountFormatter = computed(() => new Intl.NumberFormat(locale.value 
   maximumFractionDigits: 1,
 }))
 
+const performanceNumberFormatter = computed(() => new Intl.NumberFormat(locale.value || 'en', {
+  maximumFractionDigits: 2,
+}))
+
 const dateFormatter = computed(() => new Intl.DateTimeFormat(locale.value || 'en', {
   month: 'short',
   day: 'numeric',
@@ -389,6 +458,11 @@ const formatCurrency = (value: number) => currencyFormatter.value.format(Number.
 const formatCount = (value: number) => countFormatter.value.format(Number.isFinite(value) ? value : 0)
 const formatCompactCount = (value: number) => compactCountFormatter.value.format(Number.isFinite(value) ? value : 0)
 const formatChartDate = (timestamp: number) => dateFormatter.value.format(timestamp)
+const formatPerformanceValue = (value: number | null, unit: string) => (
+  value === null || !Number.isFinite(value)
+    ? '—'
+    : `${performanceNumberFormatter.value.format(value)} ${unit}`
+)
 const resolveQuotaCurrencyFormatter = (unit?: string) => {
   const currencyCode = resolveProviderQuotaCurrencyCode(unit)
   if (currencyCode) {
@@ -421,6 +495,10 @@ const formatQuotaValue = (
 }
 
 const hasTrafficData = computed(() => dailyPoints.value.some((point) => point.cost > 0 || point.requests > 0 || point.totalTokens > 0))
+const performanceAccessiblePoints = computed(() => performancePoints.value.filter((point) => (
+  point.ttftSampleCount > 0 || point.tpsSampleCount > 0
+)))
+const hasPerformanceData = computed(() => performanceAccessiblePoints.value.length > 0)
 const todayPoint = computed(() => dailyPoints.value[dailyPoints.value.length - 1] ?? {
   dayKey: '',
   label: '',
@@ -513,6 +591,8 @@ const formatFallbackCell = (point: ProviderOverviewDayPoint, key: ProviderOvervi
 }
 
 const disposeCharts = () => {
+  performanceChartInstance?.dispose()
+  performanceChartInstance = null
   costChartInstance?.dispose()
   costChartInstance = null
   activityChartInstance?.dispose()
@@ -523,10 +603,153 @@ const disposeCharts = () => {
 
 const resizeCharts = () => {
   if (!props.open) return
+  performanceChartInstance?.resize()
   costChartInstance?.resize()
   activityChartInstance?.resize()
   quotaChartInstance?.resize()
 }
+
+const buildPerformanceChartOption = (echarts: EChartsStaticLike) => ({
+  color: [firstTokenChartColor.value, speedChartColor.value],
+  grid: {
+    top: 50,
+    right: 72,
+    bottom: 44,
+    left: 72,
+  },
+  legend: {
+    top: 0,
+    textStyle: {
+      color: isDarkTheme.value ? '#cbd5e1' : '#475569',
+    },
+  },
+  tooltip: {
+    trigger: 'axis',
+    axisPointer: {
+      type: 'line',
+      lineStyle: {
+        color: isDarkTheme.value ? 'rgba(148, 163, 184, 0.42)' : 'rgba(100, 116, 139, 0.32)',
+      },
+    },
+    backgroundColor: isDarkTheme.value ? 'rgba(2, 6, 23, 0.94)' : 'rgba(15, 23, 42, 0.94)',
+    borderWidth: 0,
+    padding: 14,
+    textStyle: {
+      color: '#e2e8f0',
+      fontFamily: 'Inter Local, "PingFang SC", "Microsoft YaHei", sans-serif',
+    },
+    formatter(params: Array<{ dataIndex: number }>) {
+      const point = performancePoints.value[params[0]?.dataIndex ?? -1]
+      if (!point) return ''
+      return `
+        <div style="min-width: 230px;">
+          <div style="margin-bottom: 10px; color: #94a3b8; font-size: 12px;">${point.label}</div>
+          <div style="display: flex; justify-content: space-between; gap: 16px; margin-bottom: 6px;">
+            <span style="color: ${firstTokenChartColor.value};">${t('components.main.providerDataOverview.firstTokenSeries')}</span>
+            <strong style="color: #ffffff;">${formatPerformanceValue(point.avgFirstTokenSec, 's')}</strong>
+          </div>
+          <div style="margin-bottom: 10px; color: #94a3b8; font-size: 11px; text-align: right;">${t('components.main.providerDataOverview.sampleCount', { count: formatCount(point.ttftSampleCount) })}</div>
+          <div style="display: flex; justify-content: space-between; gap: 16px; margin-bottom: 6px;">
+            <span style="color: ${speedChartColor.value};">${t('components.main.providerDataOverview.speedSeries')}</span>
+            <strong style="color: #ffffff;">${formatPerformanceValue(point.avgTokensPerSec, 't/s')}</strong>
+          </div>
+          <div style="color: #94a3b8; font-size: 11px; text-align: right;">${t('components.main.providerDataOverview.sampleCount', { count: formatCount(point.tpsSampleCount) })}</div>
+        </div>
+      `
+    },
+  },
+  xAxis: {
+    type: 'category',
+    boundaryGap: false,
+    data: performancePoints.value.map((point) => point.label),
+    axisLine: {
+      lineStyle: {
+        color: isDarkTheme.value ? 'rgba(148, 163, 184, 0.32)' : 'rgba(100, 116, 139, 0.22)',
+      },
+    },
+    axisLabel: {
+      color: isDarkTheme.value ? '#94a3b8' : '#64748b',
+      hideOverlap: true,
+    },
+  },
+  yAxis: [
+    {
+      type: 'value',
+      min: 0,
+      name: t('components.main.providerDataOverview.firstTokenUnit'),
+      nameTextStyle: {
+        color: firstTokenChartColor.value,
+      },
+      axisLabel: {
+        color: isDarkTheme.value ? '#94a3b8' : '#64748b',
+        formatter: (value: number) => `${performanceNumberFormatter.value.format(value)}s`,
+      },
+      splitLine: {
+        lineStyle: {
+          color: isDarkTheme.value ? 'rgba(51, 65, 85, 0.56)' : 'rgba(226, 232, 240, 0.92)',
+        },
+      },
+    },
+    {
+      type: 'value',
+      min: 0,
+      name: t('components.main.providerDataOverview.speedUnit'),
+      nameTextStyle: {
+        color: speedChartColor.value,
+      },
+      axisLabel: {
+        color: isDarkTheme.value ? '#94a3b8' : '#64748b',
+        formatter: (value: number) => `${performanceNumberFormatter.value.format(value)} t/s`,
+      },
+      splitLine: {
+        show: false,
+      },
+    },
+  ],
+  series: [
+    {
+      name: t('components.main.providerDataOverview.firstTokenSeries'),
+      type: 'line',
+      smooth: true,
+      smoothMonotone: 'x',
+      connectNulls: true,
+      symbol: 'none',
+      showSymbol: false,
+      data: performancePoints.value.map((point) => point.avgFirstTokenSec),
+      lineStyle: {
+        width: 2.5,
+        color: firstTokenChartColor.value,
+      },
+      areaStyle: {
+        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+          { offset: 0, color: toChartRgba(firstTokenChartColor.value, isDarkTheme.value ? 0.3 : 0.22) },
+          { offset: 1, color: toChartRgba(firstTokenChartColor.value, 0) },
+        ]),
+      },
+    },
+    {
+      name: t('components.main.providerDataOverview.speedSeries'),
+      type: 'line',
+      yAxisIndex: 1,
+      smooth: true,
+      smoothMonotone: 'x',
+      connectNulls: true,
+      symbol: 'none',
+      showSymbol: false,
+      data: performancePoints.value.map((point) => point.avgTokensPerSec),
+      lineStyle: {
+        width: 2.5,
+        color: speedChartColor.value,
+      },
+      areaStyle: {
+        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+          { offset: 0, color: toChartRgba(speedChartColor.value, isDarkTheme.value ? 0.3 : 0.22) },
+          { offset: 1, color: toChartRgba(speedChartColor.value, 0) },
+        ]),
+      },
+    },
+  ],
+})
 
 const buildCostChartOption = (echarts: EChartsStaticLike) => ({
   color: [providerAccent.value || '#2563eb'],
@@ -833,6 +1056,26 @@ const renderCharts = async (requestId: number) => {
   const echarts = await ensureEChartsLoaded()
   if (!isCurrentLoad(requestId) || !props.open) return
 
+  if (!performanceError.value && hasPerformanceData.value && performanceChartRef.value) {
+    try {
+      if (!performanceChartInstance) {
+        performanceChartInstance = echarts.init(performanceChartRef.value)
+      }
+      performanceChartInstance.setOption(buildPerformanceChartOption(echarts), true)
+      performanceChartInstance.resize()
+    } catch (chartError) {
+      performanceChartInstance?.dispose()
+      performanceChartInstance = null
+      performanceError.value = extractErrorMessage(
+        chartError,
+        t('components.main.providerDataOverview.performanceLoadFailedFallback'),
+      )
+    }
+  } else {
+    performanceChartInstance?.dispose()
+    performanceChartInstance = null
+  }
+
   if (hasTrafficData.value && costChartRef.value) {
     if (!costChartInstance) {
       costChartInstance = echarts.init(costChartRef.value)
@@ -919,12 +1162,15 @@ const loadOverview = async () => {
     error.value = ''
     aggregatedStats.value = null
     dailyPoints.value = []
+    performancePoints.value = []
+    performanceError.value = ''
     quotaItems.value = []
     disposeCharts()
     return
   }
 
   const requestId = nextLoadRequestId()
+  disposeCharts()
   loading.value = true
   error.value = ''
 
@@ -932,6 +1178,7 @@ const loadOverview = async () => {
     const providerRef = cardProviderRef(props.provider) || props.provider.name
     const range = buildProviderOverviewRange(LOOKBACK_DAYS)
     const now = new Date()
+    const performanceRange = buildProviderPerformanceRange(now)
     const quotaPromise = hasProviderQuotaQueryType(
       props.provider.providerQuotaQueryConfig ?? props.provider.providerQuotaQueryType,
       props.provider.providerQuotaQueryType,
@@ -948,7 +1195,23 @@ const loadOverview = async () => {
           t,
         })
 
-    const [stats, quotas] = await Promise.all([
+    const performancePromise = fetchProviderPerformanceTrend15m({
+      platform: props.platform,
+      provider: providerRef,
+      startAt: performanceRange.startAt,
+      endAt: performanceRange.endAt,
+    }).then((points) => ({
+      points,
+      error: '',
+    })).catch((performanceLoadError) => ({
+      points: [],
+      error: extractErrorMessage(
+        performanceLoadError,
+        t('components.main.providerDataOverview.performanceLoadFailedFallback'),
+      ),
+    }))
+
+    const [stats, quotas, performance] = await Promise.all([
       fetchLogStatsV2({
         platform: props.platform,
         provider: providerRef,
@@ -956,6 +1219,7 @@ const loadOverview = async () => {
         endAt: range.endAt,
       }),
       quotaPromise,
+      performancePromise,
     ])
 
     if (!isCurrentLoad(requestId)) return
@@ -966,6 +1230,8 @@ const loadOverview = async () => {
       startDate: range.start,
       days: LOOKBACK_DAYS,
     })
+    performancePoints.value = buildProviderPerformancePoints(performance.points)
+    performanceError.value = performance.error
     quotaItems.value = quotas
     lastCountdownTickAt = now
     loading.value = false
@@ -976,6 +1242,8 @@ const loadOverview = async () => {
     if (!isCurrentLoad(requestId)) return
     loading.value = false
     error.value = extractErrorMessage(loadError, t('components.main.providerDataOverview.loadFailedFallback'))
+    performancePoints.value = []
+    performanceError.value = ''
     disposeCharts()
   }
 }
@@ -1187,6 +1455,10 @@ onBeforeUnmount(() => {
   min-height: 330px;
 }
 
+.provider-data-panel--performance {
+  min-height: 330px;
+}
+
 .provider-data-panel--quota {
   grid-row: span 2;
   display: flex;
@@ -1231,6 +1503,10 @@ onBeforeUnmount(() => {
 
 .provider-data-chart--quota {
   min-height: 168px;
+}
+
+.provider-data-chart--performance {
+  min-height: 258px;
 }
 
 .provider-data-fallback {
@@ -1357,6 +1633,12 @@ onBeforeUnmount(() => {
 .provider-data-panel__empty p {
   margin: 6px 0 0;
   line-height: 1.6;
+}
+
+.provider-data-panel__empty--error {
+  color: #b91c1c;
+  background: rgba(254, 242, 242, 0.88);
+  border-color: rgba(248, 113, 113, 0.34);
 }
 
 .provider-data-panel__empty--quota {
@@ -1656,6 +1938,12 @@ onBeforeUnmount(() => {
   background: rgba(15, 23, 42, 0.72);
   border-color: rgba(71, 85, 105, 0.54);
   color: #cbd5e1;
+}
+
+.provider-data-modal--dark .provider-data-panel__empty--error {
+  color: #fecaca;
+  background: rgba(69, 10, 10, 0.62);
+  border-color: rgba(248, 113, 113, 0.34);
 }
 
 .provider-data-modal--dark .provider-data-quota-card {

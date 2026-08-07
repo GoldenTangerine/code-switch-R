@@ -21,6 +21,9 @@ const requestLogUnreadWhereClause = "TRIM(COALESCE(error_read_at, '')) = ''"
 const providerPerformanceCacheTTL = 20 * time.Second
 const providerPerformanceCacheMaxEntries = 512
 const providerLatestPerformanceSampleLimit = 5
+const providerPerformanceTrendBucketSize = 15 * time.Minute
+// 兼容夏令时回拨产生的 25 小时自然日，同时限制异常范围的内存占用。
+const providerPerformanceTrendMaxBucketCount = 100
 const fiveHourQuotaWindowDuration = 5 * time.Hour
 
 var requestLogListSelectFields = []string{
@@ -1667,6 +1670,123 @@ func (ls *LogService) StatsRangeV3(platform string, provider string, pricingMode
 	return stats, nil
 }
 
+// ProviderPerformanceTrend15m 返回指定时间范围内的供应商 15 分钟性能均值。
+func (ls *LogService) ProviderPerformanceTrend15m(platform string, provider string, startAt string, endAt string) ([]ProviderPerformanceTrendPoint, error) {
+	start, end, err := resolveAggregationRange(startAt, endAt)
+	if err != nil {
+		return nil, err
+	}
+	if !start.Before(end) {
+		return []ProviderPerformanceTrendPoint{}, nil
+	}
+
+	bucketCount := int(end.Sub(start) / providerPerformanceTrendBucketSize)
+	if end.Sub(start)%providerPerformanceTrendBucketSize != 0 {
+		bucketCount++
+	}
+	if bucketCount <= 0 {
+		return []ProviderPerformanceTrendPoint{}, nil
+	}
+	if bucketCount > providerPerformanceTrendMaxBucketCount {
+		return nil, fmt.Errorf("provider performance trend range exceeds %d buckets", providerPerformanceTrendMaxBucketCount)
+	}
+
+	points := make([]ProviderPerformanceTrendPoint, bucketCount)
+	for index := range points {
+		points[index].BucketStart = start.Add(time.Duration(index) * providerPerformanceTrendBucketSize).Format(timeLayout)
+	}
+
+	db, err := xdb.DB("default")
+	if err != nil {
+		return nil, err
+	}
+
+	startUTCKey := start.UTC().Format(timeLayout)
+	endUTCKey := end.UTC().Format(timeLayout)
+	platformKey := strings.TrimSpace(platform)
+	providerRef := strings.TrimSpace(provider)
+	providerColumn := ""
+	if providerRef != "" {
+		existsQuery := `SELECT 1 FROM request_log WHERE created_at >= ? AND created_at < ? AND ` + requestLogSourceWhereClause(LogDataSourceModeProxy, "request_log")
+		existsArgs := []interface{}{startUTCKey, endUTCKey}
+		if platformKey != "" {
+			existsQuery += " AND platform = ?"
+			existsArgs = append(existsArgs, platformKey)
+		}
+		existsQuery += " AND provider_id = ? LIMIT 1"
+		existsArgs = append(existsArgs, providerRef)
+
+		var exists int
+		switch existsErr := db.QueryRow(existsQuery, existsArgs...).Scan(&exists); {
+		case existsErr == nil:
+			providerColumn = "provider_id"
+		case errors.Is(existsErr, sql.ErrNoRows):
+			providerColumn = "provider"
+		case isNoSuchTableErr(existsErr) || strings.Contains(existsErr.Error(), "no such column"):
+			return points, nil
+		default:
+			return nil, existsErr
+		}
+	}
+
+	bucketSeconds := int64(providerPerformanceTrendBucketSize / time.Second)
+	query := `
+		SELECT
+			CAST((CAST(strftime('%s', created_at) AS INTEGER) - CAST(strftime('%s', ?) AS INTEGER)) / ? AS INTEGER) AS bucket_index,
+			COALESCE(AVG(CASE WHEN first_token_sec > 0 THEN first_token_sec END), 0) AS avg_first_token_sec,
+			COALESCE(AVG(CASE WHEN output_tokens > 0 AND duration_sec > 0 THEN CAST(output_tokens AS REAL) / duration_sec END), 0) AS avg_tokens_per_sec,
+			COALESCE(SUM(CASE WHEN first_token_sec > 0 THEN 1 ELSE 0 END), 0) AS ttft_sample_count,
+			COALESCE(SUM(CASE WHEN output_tokens > 0 AND duration_sec > 0 THEN 1 ELSE 0 END), 0) AS tps_sample_count
+		FROM request_log
+		WHERE created_at >= ? AND created_at < ?
+			AND ` + requestLogSourceWhereClause(LogDataSourceModeProxy, "request_log") + `
+			AND COALESCE(is_stream, 0) = 1
+			AND ` + requestLogSuccessWhereClause("", 0)
+	queryArgs := []interface{}{startUTCKey, bucketSeconds, startUTCKey, endUTCKey}
+	if platformKey != "" {
+		query += " AND platform = ?"
+		queryArgs = append(queryArgs, platformKey)
+	}
+	if providerColumn != "" {
+		query += " AND " + providerColumn + " = ?"
+		queryArgs = append(queryArgs, providerRef)
+	}
+	query += " GROUP BY bucket_index ORDER BY bucket_index"
+
+	rows, err := db.Query(query, queryArgs...)
+	if err != nil {
+		if isNoSuchTableErr(err) || strings.Contains(err.Error(), "no such column") {
+			return points, nil
+		}
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var bucketIndex int
+		point := ProviderPerformanceTrendPoint{}
+		if err := rows.Scan(
+			&bucketIndex,
+			&point.AvgFirstTokenSec,
+			&point.AvgTokensPerSec,
+			&point.TTFTSampleCount,
+			&point.TPSSampleCount,
+		); err != nil {
+			return nil, err
+		}
+		if bucketIndex < 0 || bucketIndex >= bucketCount {
+			continue
+		}
+		point.BucketStart = points[bucketIndex].BucketStart
+		points[bucketIndex] = point
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return points, nil
+}
+
 func (ls *LogService) SummaryRangeV2(platform string, provider string, pricingModel string, startAt string, endAt string) (LogSummary, error) {
 	return ls.SummaryRangeV3(platform, provider, pricingModel, string(LogDataSourceModeProxy), startAt, endAt)
 }
@@ -2620,4 +2740,12 @@ type LogStatsSeries struct {
 	CacheCreateTokens int64   `json:"cache_create_tokens"`
 	CacheReadTokens   int64   `json:"cache_read_tokens"`
 	TotalCost         float64 `json:"total_cost"`
+}
+
+type ProviderPerformanceTrendPoint struct {
+	BucketStart      string  `json:"bucket_start"`
+	AvgFirstTokenSec float64 `json:"avg_first_token_sec"`
+	AvgTokensPerSec  float64 `json:"avg_tokens_per_sec"`
+	TTFTSampleCount  int64   `json:"ttft_sample_count"`
+	TPSSampleCount   int64   `json:"tps_sample_count"`
 }
