@@ -229,7 +229,7 @@ ok      codeswitch/services     0.XXXs
 ## 🐛 常见问题
 
 ### 问题 1：`go: command not found`
-**解决**：确保已安装 Go 1.24+ 并配置环境变量。
+**解决**：确保已安装 Go 1.25+ 并配置环境变量。
 
 ### 问题 2：依赖缺失
 **解决**：运行 `go mod tidy` 安装依赖。

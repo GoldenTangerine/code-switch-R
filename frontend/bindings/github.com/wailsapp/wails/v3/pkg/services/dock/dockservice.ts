@@ -15,6 +15,13 @@ import { Call as $Call, CancellablePromise as $CancellablePromise, Create as $Cr
 import * as $models from "./models.js";
 
 /**
+ * GetBadge returns the badge label on the application icon.
+ */
+export function GetBadge(): $CancellablePromise<string | null> {
+    return $Call.ByID(1150236961);
+}
+
+/**
  * HideAppIcon hides the app icon in the dock/taskbar.
  */
 export function HideAppIcon(): $CancellablePromise<void> {

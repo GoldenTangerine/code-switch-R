@@ -90,7 +90,7 @@ build-linux:
 
     - uses: actions/setup-go@v5
       with:
-        go-version: '1.24'
+        go-version: '1.25'
 
     - uses: actions/setup-node@v4
       with:

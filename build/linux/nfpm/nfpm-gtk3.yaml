@@ -1,0 +1,47 @@
+# /**
+#  * @name: Linux GTK3 打包配置
+#  * @Descripttion: 为 Wails beta.6 的 GTK3 兼容构建定义 Linux 安装包依赖
+#  * @version: 1.0.0
+#  * @Author: sm
+#  * @Date: 2026-08-10 10:51:45
+#  * @LastEditTime: 2026-08-10 10:51:45
+#  * @FilePath: build/linux/nfpm/nfpm-gtk3.yaml
+#  */
+
+name: "CodeSwitch"
+arch: ${GOARCH}
+platform: "linux"
+version: ${PACKAGE_VERSION}
+section: "default"
+priority: "extra"
+maintainer: ${GIT_COMMITTER_NAME} <${GIT_COMMITTER_EMAIL}>
+description: "Manage Claude & Codex relays, providers, and request logs."
+vendor: "Code Switch"
+homepage: "https://wails.io"
+license: "MIT"
+release: "1"
+
+contents:
+  - src: "./bin/CodeSwitch"
+    dst: "/usr/local/bin/CodeSwitch"
+  - src: "./build/appicon.png"
+    dst: "/usr/share/icons/hicolor/128x128/apps/CodeSwitch.png"
+  - src: "./build/linux/CodeSwitch.desktop"
+    dst: "/usr/share/applications/CodeSwitch.desktop"
+
+depends:
+  - libgtk-3-0
+  - libwebkit2gtk-4.1-0
+
+overrides:
+  rpm:
+    depends:
+      - gtk3
+      - webkit2gtk4.1
+  archlinux:
+    depends:
+      - gtk3
+      - webkit2gtk-4.1
+
+scripts:
+  postinstall: "./build/linux/nfpm/scripts/postinstall.sh"

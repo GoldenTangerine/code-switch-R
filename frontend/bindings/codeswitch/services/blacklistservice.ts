@@ -12,10 +12,6 @@ import { Call as $Call, CancellablePromise as $CancellablePromise, Create as $Cr
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
-import * as time$0 from "../../time/models.js";
-
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore: Unused imports
 import * as $models from "./models.js";
 
 /**
@@ -36,10 +32,31 @@ export function GetBlacklistStatus(platform: string): $CancellablePromise<$model
 }
 
 /**
+ * GetRetryConfig 获取重试相关配置
+ * 用于 proxyHandler 实现同 Provider 重试机制
+ */
+export function GetRetryConfig(): $CancellablePromise<$models.RetryConfig | null> {
+    return $Call.ByID(240149871).then(($result: any) => {
+        return $$createType3($result);
+    });
+}
+
+/**
+ * IsBlacklistEnabled 返回拉黑总开关状态（用于固定拉黑模式判断）
+ */
+export function IsBlacklistEnabled(): $CancellablePromise<boolean> {
+    return $Call.ByID(744595243);
+}
+
+/**
  * IsBlacklisted 检查 provider 是否在黑名单中
  */
-export function IsBlacklisted(platform: string, providerName: string): $CancellablePromise<[boolean, time$0.Time | null]> {
+export function IsBlacklisted(platform: string, providerName: string): $CancellablePromise<[boolean, string | null]> {
     return $Call.ByID(237122095, platform, providerName);
+}
+
+export function IsBlacklistedByID(platform: string, providerID: string, providerName: string): $CancellablePromise<[boolean, string | null]> {
+    return $Call.ByID(2958949799, platform, providerID, providerName);
 }
 
 /**
@@ -57,6 +74,10 @@ export function ManualResetLevel(platform: string, providerName: string): $Cance
     return $Call.ByID(1066300442, platform, providerName);
 }
 
+export function ManualResetLevelByID(platform: string, providerID: string, providerName: string): $CancellablePromise<void> {
+    return $Call.ByID(1481246894, platform, providerID, providerName);
+}
+
 /**
  * ManualUnblock 手动解除拉黑（向后兼容，调用 ManualUnblockAndReset）
  */
@@ -71,11 +92,31 @@ export function ManualUnblockAndReset(platform: string, providerName: string): $
     return $Call.ByID(3733422827, platform, providerName);
 }
 
+export function ManualUnblockAndResetByID(platform: string, providerID: string, providerName: string): $CancellablePromise<void> {
+    return $Call.ByID(3313334603, platform, providerID, providerName);
+}
+
 /**
  * RecordFailure 记录 provider 失败，连续失败次数达到阈值时自动拉黑（支持等级拉黑）
  */
 export function RecordFailure(platform: string, providerName: string): $CancellablePromise<void> {
     return $Call.ByID(640211172, platform, providerName);
+}
+
+export function RecordFailureByID(platform: string, providerID: string, providerName: string): $CancellablePromise<void> {
+    return $Call.ByID(1813610820, platform, providerID, providerName);
+}
+
+export function RecordFailureWithReasonByID(platform: string, providerID: string, providerName: string, reason: string): $CancellablePromise<void> {
+    return $Call.ByID(1732819016, platform, providerID, providerName, reason);
+}
+
+export function RecordHealthCheckFailureByID(platform: string, providerID: string, providerName: string, reason: string, failureThreshold: number): $CancellablePromise<void> {
+    return $Call.ByID(90120874, platform, providerID, providerName, reason, failureThreshold);
+}
+
+export function RecordHealthCheckSuccessByID(platform: string, providerID: string, providerName: string): $CancellablePromise<void> {
+    return $Call.ByID(2171589127, platform, providerID, providerName);
 }
 
 /**
@@ -85,6 +126,36 @@ export function RecordSuccess(platform: string, providerName: string): $Cancella
     return $Call.ByID(555083369, platform, providerName);
 }
 
+export function RecordSuccessByID(platform: string, providerID: string, providerName: string): $CancellablePromise<void> {
+    return $Call.ByID(1971759109, platform, providerID, providerName);
+}
+
+export function RefreshRuntimeSnapshot(): $CancellablePromise<void> {
+    return $Call.ByID(4241895022);
+}
+
+/**
+ * ShouldUseFixedMode 返回是否应该使用固定拉黑模式（禁用自动降级）
+ * 满足以下所有条件时返回 true：
+ * 1. 黑名单总开关已启用
+ * 2. 且满足以下任一：
+ *   - 等级拉黑开启
+ *   - 等级拉黑关闭但 fallbackMode="fixed"
+ */
+export function ShouldUseFixedMode(): $CancellablePromise<boolean> {
+    return $Call.ByID(4011954676);
+}
+
+export function Start(): $CancellablePromise<void> {
+    return $Call.ByID(3420748397);
+}
+
+export function Stop(): $CancellablePromise<void> {
+    return $Call.ByID(1161987743);
+}
+
 // Private type creation functions
 const $$createType0 = $models.BlacklistStatus.createFrom;
 const $$createType1 = $Create.Array($$createType0);
+const $$createType2 = $models.RetryConfig.createFrom;
+const $$createType3 = $Create.Nullable($$createType2);

@@ -586,7 +586,7 @@ const handleResumeQuotaAutomation = async (card: AutomationCard) => {
 
 const unsubscribeQuotaStateChanged = Events.On(
   'provider:quota-state-changed',
-  handleProviderQuotaStateChanged as Events.Callback,
+  handleProviderQuotaStateChanged as Events.WailsEventCallback,
 )
 
 const handleProviderLogsMarkedRead = () => {

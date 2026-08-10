@@ -25,11 +25,29 @@ export function GetConfig(platform: string): $CancellablePromise<$models.CLIConf
 }
 
 /**
- * GetLockedFields 获取指定平台的锁定字段列表
+ * GetConfigSnapshots 获取指定平台的配置快照，用于前端展示"当前(磁盘)"与"预览(激活后)"对比。
+ * 这是纯 dry-run 接口：不会对任何文件进行写入。
+ *
+ * previewMode 参数：
+ *   - "current": Preview = Current（不做任何注入，适用于新建供应商空输入）
+ *   - "direct": 模拟直连应用 ApplySingleProvider() 的写入结果
+ *   - "proxy": 模拟启用代理 EnableProxy() 的写入结果
+ *   - "" (空字符串): 兼容旧逻辑，若 apiUrl/apiKey 任一非空则为 direct，否则为 proxy
  */
-export function GetLockedFields(platform: string): $CancellablePromise<string[]> {
-    return $Call.ByID(1393452899, platform).then(($result: any) => {
-        return $$createType2($result);
+export function GetConfigSnapshots(platform: string, apiUrl: string, apiKey: string, previewMode: string): $CancellablePromise<$models.CLIConfigSnapshots | null> {
+    return $Call.ByID(3022973011, platform, apiUrl, apiKey, previewMode).then(($result: any) => {
+        return $$createType3($result);
+    });
+}
+
+/**
+ * GetConfigSnapshotsWithEditable 基于当前编辑中的 editable 生成预览快照。
+ * CurrentFiles 始终来自磁盘真实内容；PreviewFiles 则基于 editable 进行 dry-run 生成，
+ * 这样前端 JSON 编辑器和“预览效果”可以共享同一份逻辑来源。
+ */
+export function GetConfigSnapshotsWithEditable(platform: string, editable: { [_ in string]?: any }, apiUrl: string, apiKey: string, previewMode: string): $CancellablePromise<$models.CLIConfigSnapshots | null> {
+    return $Call.ByID(2781232323, platform, editable, apiUrl, apiKey, previewMode).then(($result: any) => {
+        return $$createType3($result);
     });
 }
 
@@ -38,7 +56,31 @@ export function GetLockedFields(platform: string): $CancellablePromise<string[]>
  */
 export function GetTemplate(platform: string): $CancellablePromise<$models.CLITemplate | null> {
     return $Call.ByID(2146148202, platform).then(($result: any) => {
-        return $$createType4($result);
+        return $$createType5($result);
+    });
+}
+
+export function NormalizeEditorContent(platform: string, content: string, apiURL: string, apiKey: string, providerName: string, authType: string, previewMode: string): $CancellablePromise<$models.CLINormalizedEditorContent | null> {
+    return $Call.ByID(3235666555, platform, content, apiURL, apiKey, providerName, authType, previewMode).then(($result: any) => {
+        return $$createType7($result);
+    });
+}
+
+export function NormalizeTemplateEditorContent(platform: string, content: string): $CancellablePromise<$models.CLINormalizedEditorContent | null> {
+    return $Call.ByID(1837126885, platform, content).then(($result: any) => {
+        return $$createType7($result);
+    });
+}
+
+export function RenderEditorContent(platform: string, editable: { [_ in string]?: any }, apiURL: string, apiKey: string, providerName: string, authType: string, previewMode: string): $CancellablePromise<$models.CLIEditorContent | null> {
+    return $Call.ByID(748945466, platform, editable, apiURL, apiKey, providerName, authType, previewMode).then(($result: any) => {
+        return $$createType9($result);
+    });
+}
+
+export function RenderTemplateEditorContent(platform: string, template: { [_ in string]?: any }): $CancellablePromise<$models.CLIEditorContent | null> {
+    return $Call.ByID(4008909496, platform, template).then(($result: any) => {
+        return $$createType9($result);
     });
 }
 
@@ -52,20 +94,33 @@ export function RestoreDefault(platform: string): $CancellablePromise<void> {
 /**
  * SaveConfig 保存 CLI 配置
  */
-export function SaveConfig(platform: string, editable: { [_: string]: any }): $CancellablePromise<void> {
-    return $Call.ByID(3461150403, platform, editable);
+export function SaveConfig(platform: string, editable: { [_ in string]?: any }, apiURL: string, apiKey: string, providerName: string, authType: string): $CancellablePromise<void> {
+    return $Call.ByID(3461150403, platform, editable, apiURL, apiKey, providerName, authType);
+}
+
+/**
+ * SaveConfigFileContent 保存指定配置文件内容（预览区高级编辑）
+ * 为避免越权写文件，只允许写入本服务管理的固定路径文件
+ */
+export function SaveConfigFileContent(platform: string, filePath: string, content: string): $CancellablePromise<void> {
+    return $Call.ByID(4072402714, platform, filePath, content);
 }
 
 /**
  * SetTemplate 设置指定平台的全局模板
  */
-export function SetTemplate(platform: string, template: { [_: string]: any }, isGlobalDefault: boolean): $CancellablePromise<void> {
+export function SetTemplate(platform: string, template: { [_ in string]?: any }, isGlobalDefault: boolean): $CancellablePromise<void> {
     return $Call.ByID(768927510, platform, template, isGlobalDefault);
 }
 
 // Private type creation functions
 const $$createType0 = $models.CLIConfig.createFrom;
 const $$createType1 = $Create.Nullable($$createType0);
-const $$createType2 = $Create.Array($Create.Any);
-const $$createType3 = $models.CLITemplate.createFrom;
-const $$createType4 = $Create.Nullable($$createType3);
+const $$createType2 = $models.CLIConfigSnapshots.createFrom;
+const $$createType3 = $Create.Nullable($$createType2);
+const $$createType4 = $models.CLITemplate.createFrom;
+const $$createType5 = $Create.Nullable($$createType4);
+const $$createType6 = $models.CLINormalizedEditorContent.createFrom;
+const $$createType7 = $Create.Nullable($$createType6);
+const $$createType8 = $models.CLIEditorContent.createFrom;
+const $$createType9 = $Create.Nullable($$createType8);

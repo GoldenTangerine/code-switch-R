@@ -1,27 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
-    <dict>
-        <key>CFBundlePackageType</key>
-            <string>APPL</string>
-        <key>CFBundleName</key>
-            <string>Code Switch</string>
-        <key>CFBundleExecutable</key>
-            <string>CodeSwitch</string>
-        <key>CFBundleIdentifier</key>
-            <string>com.codeswitch.app</string>
-        <key>CFBundleVersion</key>
-            <string>2.9.22</string>
-        <key>CFBundleGetInfoString</key>
-            <string>Code Switch desktop relay controller</string>
-        <key>CFBundleShortVersionString</key>
-            <string>2.9.22</string>
-        <key>CFBundleIconFile</key>
-            <string>icons</string>
-        <key>LSMinimumSystemVersion</key>
-            <string>10.15.0</string>
-        <key>NSHighResolutionCapable</key>
-            <string>true</string>
-        <key>NSHumanReadableCopyright</key>
-            <string>(c) 2025, Code Switch</string>
-    </dict>
+	<dict>
+		<key>CFBundleExecutable</key>
+		<string>CodeSwitch</string>
+		<key>CFBundleGetInfoString</key>
+		<string>Code Switch desktop relay controller</string>
+		<key>CFBundleIconFile</key>
+		<string>icons</string>
+		<key>CFBundleIdentifier</key>
+		<string>com.codeswitch.app</string>
+		<key>CFBundleName</key>
+		<string>Code Switch</string>
+		<key>CFBundlePackageType</key>
+		<string>APPL</string>
+		<key>CFBundleShortVersionString</key>
+		<string>2.9.23</string>
+		<key>CFBundleVersion</key>
+		<string>2.9.23</string>
+		<key>LSMinimumSystemVersion</key>
+		<string>12.0.0</string>
+		<key>NSHighResolutionCapable</key>
+		<string>true</string>
+		<key>NSHumanReadableCopyright</key>
+		<string>(c) 2025, Code Switch</string>
+	</dict>
 </plist>

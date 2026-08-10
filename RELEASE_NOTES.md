@@ -1,3 +1,21 @@
+# Code Switch v2.9.23
+
+## 修复
+- **修复 macOS 27 托盘弹窗无法打开**：升级 Wails 后恢复状态栏托盘窗口的置顶与显示行为，保持现有点击打开、失焦关闭和主窗口生命周期逻辑不变。
+
+## 兼容
+- **保留 Linux GTK3 支持**：开发与生产构建继续使用 GTK3，DEB、RPM 与 AUR 改用独立 nFPM 配置并声明 GTK3/WebKit2GTK 4.1 运行时依赖。
+- **同步 Wails 运行环境**：升级至 Wails `v3.0.0-beta.6`、Go 1.25，并将前端 runtime 锁定为 `3.0.0-beta.5`，同步重新生成前端绑定。
+
+## 构建
+- **完善 GitHub 自动打包**：Release 工作流同步 Go/Wails 版本，并在 Linux 打包前校验 GTK3 构建标签、独立 nFPM 配置和运行时依赖，继续生成 macOS、Windows、AppImage、DEB 与 RPM 产物。
+
+## 测试
+- **完成兼容性回归验证**：通过 60 个前端测试文件、456 项测试、TypeScript 类型检查、Go 编译检查、模型定价资源测试及 Linux GTK3 打包 dry-run。
+
+## 发布
+- **本次发版版本号推进到 `v2.9.23`**：同步应用常量、Wails 构建配置、全平台构建元数据和发布说明，并推送 `v2.9.23` Tag 触发 GitHub 全平台自动打包。
+
 # Code Switch v2.9.22
 
 ## 新增

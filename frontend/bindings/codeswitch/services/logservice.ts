@@ -9,42 +9,299 @@ import { Call as $Call, CancellablePromise as $CancellablePromise, Create as $Cr
 // @ts-ignore: Unused imports
 import * as $models from "./models.js";
 
+export function ClearLogStats(): $CancellablePromise<void> {
+    return $Call.ByID(3151165826);
+}
+
+export function ClearProviderLogStorage(platform: string, providerID: string, provider: string): $CancellablePromise<$models.DeleteRequestLogsByDateResult> {
+    return $Call.ByID(4029956509, platform, providerID, provider).then(($result: any) => {
+        return $$createType0($result);
+    });
+}
+
+export function ClearRequestLogs(): $CancellablePromise<void> {
+    return $Call.ByID(3013574339);
+}
+
+export function ClearRequestLogsV2(reimportSessions: boolean): $CancellablePromise<void> {
+    return $Call.ByID(4159190407, reimportSessions);
+}
+
+/**
+ * CostByProvider 查询指定供应商的累计总费用。
+ * 优先使用 request_log_stats_daily 聚合表，兼容老库时回退 request_log 明细表。
+ */
+export function CostByProvider(platform: string, providerID: string, providerName: string): $CancellablePromise<number> {
+    return $Call.ByID(377504711, platform, providerID, providerName);
+}
+
+export function CostSince(start: string, platform: string): $CancellablePromise<number> {
+    return $Call.ByID(445919367, start, platform);
+}
+
+/**
+ * CostSinceByProvider 查询指定供应商从 start 时间起的累计费用。
+ * providerID 优先命中新身份；providerName 兜底兼容历史无 provider_id 的旧日志。
+ */
+export function CostSinceByProvider(start: string, platform: string, providerID: string, providerName: string): $CancellablePromise<number> {
+    return $Call.ByID(700494767, start, platform, providerID, providerName);
+}
+
+export function CountProviderUnreadFailedRequestLogs(platform: string, providerID: string, provider: string): $CancellablePromise<$models.ProviderUnreadFailedCountResult> {
+    return $Call.ByID(333865160, platform, providerID, provider).then(($result: any) => {
+        return $$createType1($result);
+    });
+}
+
+export function DeleteRequestLogsByDate(day: string): $CancellablePromise<$models.DeleteRequestLogsByDateResult> {
+    return $Call.ByID(4129435984, day).then(($result: any) => {
+        return $$createType0($result);
+    });
+}
+
+export function GetLogStorageStats(): $CancellablePromise<$models.LogStorageStats> {
+    return $Call.ByID(4172380032).then(($result: any) => {
+        return $$createType2($result);
+    });
+}
+
+export function GetRequestLogPayload(id: number): $CancellablePromise<$models.RequestLogPayloadDetail> {
+    return $Call.ByID(2916939591, id).then(($result: any) => {
+        return $$createType3($result);
+    });
+}
+
 export function HeatmapStats(days: number): $CancellablePromise<$models.HeatmapStat[]> {
     return $Call.ByID(1056815029, days).then(($result: any) => {
-        return $$createType1($result);
+        return $$createType5($result);
+    });
+}
+
+export function ListFailedRequestLogsPageV2(platform: string, provider: string, limit: number, offset: number, startAt: string, endAt: string): $CancellablePromise<$models.RequestLogPageResult> {
+    return $Call.ByID(2089216796, platform, provider, limit, offset, startAt, endAt).then(($result: any) => {
+        return $$createType6($result);
+    });
+}
+
+export function ListProviderLogStorageStats(): $CancellablePromise<$models.ProviderLogStorageStat[]> {
+    return $Call.ByID(3227068711).then(($result: any) => {
+        return $$createType8($result);
+    });
+}
+
+export function ListProviderRefs(platform: string): $CancellablePromise<$models.LogProviderRef[]> {
+    return $Call.ByID(1745670769, platform).then(($result: any) => {
+        return $$createType10($result);
+    });
+}
+
+export function ListProviderRefsV2(platform: string, sourceMode: string): $CancellablePromise<$models.LogProviderRef[]> {
+    return $Call.ByID(699838965, platform, sourceMode).then(($result: any) => {
+        return $$createType10($result);
     });
 }
 
 export function ListProviders(platform: string): $CancellablePromise<string[]> {
     return $Call.ByID(790916236, platform).then(($result: any) => {
-        return $$createType2($result);
+        return $$createType11($result);
+    });
+}
+
+export function ListRequestLogHeatmapYears(): $CancellablePromise<number[]> {
+    return $Call.ByID(2498693249).then(($result: any) => {
+        return $$createType12($result);
+    });
+}
+
+export function ListRequestLogHeatmapYearsV2(sourceMode: string): $CancellablePromise<number[]> {
+    return $Call.ByID(3454979525, sourceMode).then(($result: any) => {
+        return $$createType12($result);
     });
 }
 
 export function ListRequestLogs(platform: string, provider: string, limit: number): $CancellablePromise<$models.ReqeustLog[]> {
     return $Call.ByID(1199056012, platform, provider, limit).then(($result: any) => {
-        return $$createType4($result);
+        return $$createType14($result);
+    });
+}
+
+export function ListRequestLogsPageV2(platform: string, provider: string, pricingModel: string, limit: number, offset: number, startAt: string, endAt: string): $CancellablePromise<$models.RequestLogPageResult> {
+    return $Call.ByID(1726496867, platform, provider, pricingModel, limit, offset, startAt, endAt).then(($result: any) => {
+        return $$createType6($result);
+    });
+}
+
+export function ListRequestLogsPageV3(platform: string, provider: string, pricingModel: string, sourceMode: string, limit: number, offset: number, startAt: string, endAt: string): $CancellablePromise<$models.RequestLogPageResult> {
+    return $Call.ByID(1709719248, platform, provider, pricingModel, sourceMode, limit, offset, startAt, endAt).then(($result: any) => {
+        return $$createType6($result);
+    });
+}
+
+export function ListRequestLogsV2(platform: string, provider: string, limit: number, startAt: string, endAt: string): $CancellablePromise<$models.ReqeustLog[]> {
+    return $Call.ByID(629859604, platform, provider, limit, startAt, endAt).then(($result: any) => {
+        return $$createType14($result);
+    });
+}
+
+export function ListUnreadFailedRequestLogsPageV2(platform: string, provider: string, limit: number, offset: number, startAt: string, endAt: string): $CancellablePromise<$models.RequestLogPageResult> {
+    return $Call.ByID(1896556653, platform, provider, limit, offset, startAt, endAt).then(($result: any) => {
+        return $$createType6($result);
+    });
+}
+
+export function MarkProviderFailedRequestLogsRead(platform: string, providerID: string, provider: string): $CancellablePromise<$models.MarkRequestLogsReadResult> {
+    return $Call.ByID(2721783239, platform, providerID, provider).then(($result: any) => {
+        return $$createType15($result);
+    });
+}
+
+export function ModelStatsRangeV2(platform: string, provider: string, pricingModel: string, startAt: string, endAt: string): $CancellablePromise<$models.ModelUsageStat[]> {
+    return $Call.ByID(1109920951, platform, provider, pricingModel, startAt, endAt).then(($result: any) => {
+        return $$createType17($result);
+    });
+}
+
+export function ModelStatsRangeV3(platform: string, provider: string, pricingModel: string, sourceMode: string, startAt: string, endAt: string): $CancellablePromise<$models.ModelUsageStat[]> {
+    return $Call.ByID(1093143332, platform, provider, pricingModel, sourceMode, startAt, endAt).then(($result: any) => {
+        return $$createType17($result);
     });
 }
 
 export function ProviderDailyStats(platform: string): $CancellablePromise<$models.ProviderDailyStat[]> {
     return $Call.ByID(974013659, platform).then(($result: any) => {
-        return $$createType6($result);
+        return $$createType19($result);
+    });
+}
+
+/**
+ * ProviderPerformanceTrend15m 返回指定时间范围内的供应商 15 分钟性能均值。
+ */
+export function ProviderPerformanceTrend15m(platform: string, provider: string, startAt: string, endAt: string): $CancellablePromise<$models.ProviderPerformanceTrendPoint[]> {
+    return $Call.ByID(3929088423, platform, provider, startAt, endAt).then(($result: any) => {
+        return $$createType21($result);
+    });
+}
+
+export function ProviderStatsRangeV2(platform: string, provider: string, pricingModel: string, startAt: string, endAt: string): $CancellablePromise<$models.ProviderDailyStat[]> {
+    return $Call.ByID(967888103, platform, provider, pricingModel, startAt, endAt).then(($result: any) => {
+        return $$createType19($result);
+    });
+}
+
+export function ProviderStatsRangeV3(platform: string, provider: string, pricingModel: string, sourceMode: string, startAt: string, endAt: string): $CancellablePromise<$models.ProviderDailyStat[]> {
+    return $Call.ByID(951110484, platform, provider, pricingModel, sourceMode, startAt, endAt).then(($result: any) => {
+        return $$createType19($result);
+    });
+}
+
+export function ProviderUnreadFailedStats(platform: string): $CancellablePromise<$models.ProviderUnreadFailedStat[]> {
+    return $Call.ByID(4138664716, platform).then(($result: any) => {
+        return $$createType23($result);
+    });
+}
+
+export function RequestLogDailyHeatmapStats(days: number): $CancellablePromise<$models.HeatmapStat[]> {
+    return $Call.ByID(720832391, days).then(($result: any) => {
+        return $$createType5($result);
+    });
+}
+
+export function RequestLogDailyHeatmapStatsByYear(year: number): $CancellablePromise<$models.HeatmapStat[]> {
+    return $Call.ByID(3180670703, year).then(($result: any) => {
+        return $$createType5($result);
+    });
+}
+
+export function RequestLogDailyHeatmapStatsByYearV2(year: number, sourceMode: string): $CancellablePromise<$models.HeatmapStat[]> {
+    return $Call.ByID(2078672171, year, sourceMode).then(($result: any) => {
+        return $$createType5($result);
+    });
+}
+
+export function ResolveFiveHourQuotaStatus(platform: string): $CancellablePromise<$models.FiveHourQuotaStatus> {
+    return $Call.ByID(3986952558, platform).then(($result: any) => {
+        return $$createType24($result);
+    });
+}
+
+/**
+ * ResolveFiveHourQuotaStatusByProvider 解析指定供应商的 5 小时额度周期状态。
+ * 运行时优先读取 provider 级持久化周期状态，保持与全局 tray 的 5 小时额度口径一致。
+ */
+export function ResolveFiveHourQuotaStatusByProvider(platform: string, providerID: string, providerName: string): $CancellablePromise<$models.FiveHourQuotaStatus> {
+    return $Call.ByID(3743512182, platform, providerID, providerName).then(($result: any) => {
+        return $$createType24($result);
+    });
+}
+
+export function StatsRangeV2(platform: string, provider: string, pricingModel: string, startAt: string, endAt: string): $CancellablePromise<$models.LogStats> {
+    return $Call.ByID(1931405930, platform, provider, pricingModel, startAt, endAt).then(($result: any) => {
+        return $$createType25($result);
+    });
+}
+
+export function StatsRangeV3(platform: string, provider: string, pricingModel: string, sourceMode: string, startAt: string, endAt: string): $CancellablePromise<$models.LogStats> {
+    return $Call.ByID(1948183549, platform, provider, pricingModel, sourceMode, startAt, endAt).then(($result: any) => {
+        return $$createType25($result);
     });
 }
 
 export function StatsSince(platform: string): $CancellablePromise<$models.LogStats> {
     return $Call.ByID(2831143405, platform).then(($result: any) => {
-        return $$createType7($result);
+        return $$createType25($result);
+    });
+}
+
+export function SummaryRangeV2(platform: string, provider: string, pricingModel: string, startAt: string, endAt: string): $CancellablePromise<$models.LogSummary> {
+    return $Call.ByID(3282932339, platform, provider, pricingModel, startAt, endAt).then(($result: any) => {
+        return $$createType26($result);
+    });
+}
+
+export function SummaryRangeV3(platform: string, provider: string, pricingModel: string, sourceMode: string, startAt: string, endAt: string): $CancellablePromise<$models.LogSummary> {
+    return $Call.ByID(3266154720, platform, provider, pricingModel, sourceMode, startAt, endAt).then(($result: any) => {
+        return $$createType26($result);
+    });
+}
+
+export function SyncLocalSessionUsage(): $CancellablePromise<$models.SessionSyncResult> {
+    return $Call.ByID(2581779891).then(($result: any) => {
+        return $$createType27($result);
+    });
+}
+
+export function SyncWSLSessionUsage(): $CancellablePromise<$models.SessionSyncResult> {
+    return $Call.ByID(2272505106).then(($result: any) => {
+        return $$createType27($result);
     });
 }
 
 // Private type creation functions
-const $$createType0 = $models.HeatmapStat.createFrom;
-const $$createType1 = $Create.Array($$createType0);
-const $$createType2 = $Create.Array($Create.Any);
-const $$createType3 = $models.ReqeustLog.createFrom;
-const $$createType4 = $Create.Array($$createType3);
-const $$createType5 = $models.ProviderDailyStat.createFrom;
-const $$createType6 = $Create.Array($$createType5);
-const $$createType7 = $models.LogStats.createFrom;
+const $$createType0 = $models.DeleteRequestLogsByDateResult.createFrom;
+const $$createType1 = $models.ProviderUnreadFailedCountResult.createFrom;
+const $$createType2 = $models.LogStorageStats.createFrom;
+const $$createType3 = $models.RequestLogPayloadDetail.createFrom;
+const $$createType4 = $models.HeatmapStat.createFrom;
+const $$createType5 = $Create.Array($$createType4);
+const $$createType6 = $models.RequestLogPageResult.createFrom;
+const $$createType7 = $models.ProviderLogStorageStat.createFrom;
+const $$createType8 = $Create.Array($$createType7);
+const $$createType9 = $models.LogProviderRef.createFrom;
+const $$createType10 = $Create.Array($$createType9);
+const $$createType11 = $Create.Array($Create.Any);
+const $$createType12 = $Create.Array($Create.Any);
+const $$createType13 = $models.ReqeustLog.createFrom;
+const $$createType14 = $Create.Array($$createType13);
+const $$createType15 = $models.MarkRequestLogsReadResult.createFrom;
+const $$createType16 = $models.ModelUsageStat.createFrom;
+const $$createType17 = $Create.Array($$createType16);
+const $$createType18 = $models.ProviderDailyStat.createFrom;
+const $$createType19 = $Create.Array($$createType18);
+const $$createType20 = $models.ProviderPerformanceTrendPoint.createFrom;
+const $$createType21 = $Create.Array($$createType20);
+const $$createType22 = $models.ProviderUnreadFailedStat.createFrom;
+const $$createType23 = $Create.Array($$createType22);
+const $$createType24 = $models.FiveHourQuotaStatus.createFrom;
+const $$createType25 = $models.LogStats.createFrom;
+const $$createType26 = $models.LogSummary.createFrom;
+const $$createType27 = $models.SessionSyncResult.createFrom;

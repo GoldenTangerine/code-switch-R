@@ -100,6 +100,16 @@ const normalizeStringRecord = (source: Record<string, unknown> | null | undefine
   return normalized
 }
 
+const normalizeBooleanRecord = (source: Record<string, unknown> | null | undefined): Record<string, boolean> => {
+  const normalized: Record<string, boolean> = {}
+  Object.entries(source ?? {}).forEach(([key, value]) => {
+    if (typeof value === 'boolean') {
+      normalized[key] = value
+    }
+  })
+  return normalized
+}
+
 const extractGeminiCliConfig = (provider: GeminiProvider): Record<string, any> => {
   const envConfig = provider?.envConfig ?? {}
   const cliConfig: Record<string, any> = {}
@@ -262,19 +272,19 @@ export const providerToCard = (
   sortOrder: provider.sortOrder || 0,
   enabledSortOrder: provider.enabledSortOrder || ((provider.enabled || provider.quotaAutoDisabled) ? (provider.sortOrder || 0) : undefined),
   disabledSortOrder: provider.disabledSortOrder || ((!provider.enabled && !provider.quotaAutoDisabled) ? (provider.sortOrder || 0) : undefined),
-  supportedModels: cloneCardValue(provider.supportedModels || {}),
-  modelMapping: cloneCardValue(provider.modelMapping || {}),
+  supportedModels: normalizeBooleanRecord(provider.supportedModels),
+  modelMapping: normalizeStringRecord(provider.modelMapping),
   modelMappingDisabled: normalizeModelMappingDisabled(
     provider.modelMappingDisabled,
-    provider.modelMapping,
+    normalizeStringRecord(provider.modelMapping),
   ),
   modelMappingReasoningEfforts: normalizeModelMappingReasoningEfforts(
     provider.modelMappingReasoningEfforts,
-    provider.modelMapping,
+    normalizeStringRecord(provider.modelMapping),
   ),
   modelMappingSupports1M: normalizeModelMappingSupports1M(
     provider.modelMappingSupports1M,
-    provider.modelMapping,
+    normalizeStringRecord(provider.modelMapping),
   ),
   modelMappingMissPolicy: normalizeModelMappingMissPolicy(provider.modelMappingMissPolicy),
   modelPassthroughPatterns: cloneCardValue(provider.modelPassthroughPatterns || []),

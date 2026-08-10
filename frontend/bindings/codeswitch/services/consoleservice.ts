@@ -39,6 +39,10 @@ export function GetRecentLogs(count: number): $CancellablePromise<$models.Consol
     });
 }
 
+export function Stop(): $CancellablePromise<void> {
+    return $Call.ByID(3179517665);
+}
+
 // Private type creation functions
 const $$createType0 = $models.ConsoleLog.createFrom;
 const $$createType1 = $Create.Array($$createType0);

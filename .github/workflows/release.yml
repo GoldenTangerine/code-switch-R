@@ -9,8 +9,8 @@ permissions:
   contents: write
 
 env:
-  GO_VERSION: '1.24'
-  WAILS_VERSION: 'v3.0.0-alpha.38'
+  GO_VERSION: '1.25'
+  WAILS_VERSION: 'v3.0.0-beta.6'
 
 jobs:
   build-macos:
@@ -541,6 +541,13 @@ jobs:
             libgtk-3-dev \
             libwebkit2gtk-4.1-dev
 
+      - name: Verify Linux GTK3 Packaging Configuration
+        run: |
+          grep -Fq -- '-tags production,gtk3' build/linux/Taskfile.yml
+          grep -Fq -- '-config ./build/linux/nfpm/nfpm-gtk3.yaml' build/linux/Taskfile.yml
+          grep -Fq -- '- libgtk-3-0' build/linux/nfpm/nfpm-gtk3.yaml
+          grep -Fq -- '- libwebkit2gtk-4.1-0' build/linux/nfpm/nfpm-gtk3.yaml
+
       - name: Install Wails
         run: go install github.com/wailsapp/wails/v3/cmd/wails3@${{ env.WAILS_VERSION }}
 
@@ -553,7 +560,7 @@ jobs:
       - name: Generate bindings
         run: wails3 task common:generate:bindings
 
-      - name: Build Linux Binary
+      - name: Build Linux GTK3 Binary
         run: wails3 task linux:build
         env:
           PRODUCTION: "true"
@@ -561,7 +568,7 @@ jobs:
       - name: Generate Desktop File
         run: wails3 task linux:generate:dotdesktop
 
-      - name: Create AppImage
+      - name: Create GTK3 AppImage
         run: wails3 task linux:create:appimage
 
       - name: Rename AppImage
@@ -585,16 +592,16 @@ jobs:
           chmod +x build/linux/nfpm/scripts/postinstall.sh
           chmod +x build/linux/nfpm/scripts/postremove.sh
 
-      - name: Update nfpm version
+      - name: Prepare GTK3 Package Version
         run: |
           VERSION=${GITHUB_REF#refs/tags/v}
           sed -i "s/^version:.*/version: \"$VERSION\"/" build/linux/nfpm/nfpm.yaml
           echo "Updated nfpm version to: $VERSION"
 
-      - name: Create DEB Package
+      - name: Create GTK3 DEB Package
         run: wails3 task linux:create:deb
 
-      - name: Create RPM Package
+      - name: Create GTK3 RPM Package
         run: wails3 task linux:create:rpm
 
       - name: Generate SHA256 Checksums

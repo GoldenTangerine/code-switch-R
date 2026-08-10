@@ -43,8 +43,8 @@
 | 系统 | 推荐下载 |
 |------|---------|
 | Windows | `CodeSwitch-vX.X.X-amd64-installer.exe` |
-| macOS (Apple Silicon) | `CodeSwitch-vX.X.X-macos-arm64.zip` |
-| macOS (Intel) | `CodeSwitch-vX.X.X-macos-amd64.zip` |
+| macOS 12+ (Apple Silicon) | `CodeSwitch-vX.X.X-macos-arm64.zip` |
+| macOS 12+ (Intel) | `CodeSwitch-vX.X.X-macos-amd64.zip` |
 | Linux | `CodeSwitch-vX.X.X.AppImage` |
 
 ### 2. 添加供应商
@@ -339,11 +339,11 @@ sudo rpm -i codeswitch-*.rpm
 ### 环境准备
 
 ```bash
-# 安装 Go 1.24+
+# 安装 Go 1.25+
 # 安装 Node.js 20.19+（或 22.12+）
 
 # 安装 Wails CLI
-go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-alpha.38
+go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.6
 ```
 
 ### 开发运行
@@ -383,7 +383,7 @@ wails3 task package
 | 层级 | 技术 |
 |------|------|
 | 框架 | [Wails 3](https://v3.wails.io) |
-| 后端 | Go 1.24 + Gin + SQLite |
+| 后端 | Go 1.25 + Gin + SQLite |
 | 前端 | Vue 3 + TypeScript + Tailwind CSS 4 |
 | 打包 | NSIS (Windows) / AppImage + nFPM (Linux) |
 

@@ -43,8 +43,8 @@ Go to [Releases](https://github.com/GoldenTangerine/code-switch-R/releases) and 
 | OS | Recommended download |
 |------|---------|
 | Windows | `CodeSwitch-vX.X.X-amd64-installer.exe` |
-| macOS (Apple Silicon) | `CodeSwitch-vX.X.X-macos-arm64.zip` |
-| macOS (Intel) | `CodeSwitch-vX.X.X-macos-amd64.zip` |
+| macOS 12+ (Apple Silicon) | `CodeSwitch-vX.X.X-macos-arm64.zip` |
+| macOS 12+ (Intel) | `CodeSwitch-vX.X.X-macos-amd64.zip` |
 | Linux | `CodeSwitch-vX.X.X.AppImage` |
 
 ### 2. Add a Provider
@@ -339,11 +339,11 @@ sudo rpm -i codeswitch-*.rpm
 ### Prerequisites
 
 ```bash
-# Install Go 1.24+
+# Install Go 1.25+
 # Install Node.js 20.19+ (or 22.12+)
 
 # Install the Wails CLI
-go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-alpha.38
+go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.6
 ```
 
 ### Run in Development
@@ -383,7 +383,7 @@ wails3 task package
 | Layer | Technology |
 |------|------|
 | Framework | [Wails 3](https://v3.wails.io) |
-| Backend | Go 1.24 + Gin + SQLite |
+| Backend | Go 1.25 + Gin + SQLite |
 | Frontend | Vue 3 + TypeScript + Tailwind CSS 4 |
 | Packaging | NSIS (Windows) / AppImage + nFPM (Linux) |
 

@@ -751,7 +751,7 @@ onMounted(() => {
   window.addEventListener('resize', onWindowResize)
   unsubscribeModelPricingChanged = Events.On(
     MODEL_PRICING_CHANGED_EVENT,
-    handleModelPricingChanged as Events.Callback,
+    handleModelPricingChanged as Events.WailsEventCallback,
   )
 })
 

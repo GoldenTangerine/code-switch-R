@@ -1982,7 +1982,7 @@ onMounted(async () => {
   await loadWebDAV()
 
   // WebDAV 同步进度事件
-  unsubscribeWebdavSync = Events.On('webdav:sync', handleWebdavSyncEvent as Events.Callback)
+  unsubscribeWebdavSync = Events.On('webdav:sync', handleWebdavSyncEvent as Events.WailsEventCallback)
 })
 
 onBeforeUnmount(() => {

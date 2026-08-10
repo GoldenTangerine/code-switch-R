@@ -18,7 +18,7 @@ tasks:
     cmds:
       - go build {{.BUILD_FLAGS}} -o {{.BIN_DIR}}/{{.APP_NAME}}
     vars:
-      BUILD_FLAGS: '{{if eq .PRODUCTION "true"}}-tags production -trimpath -buildvcs=false -ldflags="-w -s"{{else}}-buildvcs=false -gcflags=all="-l"{{end}}'
+      BUILD_FLAGS: '{{if eq .PRODUCTION "true"}}-tags production,gtk3 -trimpath -buildvcs=false -ldflags="-w -s"{{else}}-tags gtk3 -buildvcs=false -gcflags=all="-l"{{end}}'
     env:
       GOOS: linux
       CGO_ENABLED: 1
@@ -89,17 +89,26 @@ tasks:
   generate:deb:
     summary: Creates a deb package
     cmds:
-      - wails3 tool package -name {{.APP_NAME}} -format deb -config ./build/linux/nfpm/nfpm.yaml -out {{.ROOT_DIR}}/bin
+      - env PACKAGE_VERSION="{{.PACKAGE_VERSION}}" wails3 tool package -name {{.APP_NAME}} -format deb -config ./build/linux/nfpm/nfpm-gtk3.yaml -out {{.ROOT_DIR}}/bin
+    vars:
+      PACKAGE_VERSION:
+        sh: awk -F '"' '/^version:/ { print $2; exit }' ./build/linux/nfpm/nfpm.yaml
 
   generate:rpm:
     summary: Creates a rpm package
     cmds:
-      - wails3 tool package -name {{.APP_NAME}} -format rpm -config ./build/linux/nfpm/nfpm.yaml -out {{.ROOT_DIR}}/bin
+      - env PACKAGE_VERSION="{{.PACKAGE_VERSION}}" wails3 tool package -name {{.APP_NAME}} -format rpm -config ./build/linux/nfpm/nfpm-gtk3.yaml -out {{.ROOT_DIR}}/bin
+    vars:
+      PACKAGE_VERSION:
+        sh: awk -F '"' '/^version:/ { print $2; exit }' ./build/linux/nfpm/nfpm.yaml
 
   generate:aur:
     summary: Creates a arch linux packager package
     cmds:
-      - wails3 tool package -name {{.APP_NAME}} -format archlinux -config ./build/linux/nfpm/nfpm.yaml -out {{.ROOT_DIR}}/bin
+      - env PACKAGE_VERSION="{{.PACKAGE_VERSION}}" wails3 tool package -name {{.APP_NAME}} -format archlinux -config ./build/linux/nfpm/nfpm-gtk3.yaml -out {{.ROOT_DIR}}/bin
+    vars:
+      PACKAGE_VERSION:
+        sh: awk -F '"' '/^version:/ { print $2; exit }' ./build/linux/nfpm/nfpm.yaml
 
   generate:dotdesktop:
     summary: Generates a `.desktop` file

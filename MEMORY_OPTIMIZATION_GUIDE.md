@@ -31,7 +31,7 @@
 - `frontend/src/components/Tray/Index.vue`
 - `frontend/src/components/Main/composables/useMainPageShell.ts`
 
-当前项目依赖的 Wails 版本为 `github.com/wailsapp/wails/v3 v3.0.0-alpha.38`，因此所有窗口生命周期相关方案都需要按这个版本的真实能力来判断，不能拿高版本 API 想当然套过来。
+当前项目依赖的 Wails 版本为 `github.com/wailsapp/wails/v3 v3.0.0-beta.6`，所有窗口生命周期相关方案都必须按该版本的实际 API 和平台行为验证。
 
 ---
 

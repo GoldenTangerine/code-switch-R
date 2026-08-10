@@ -351,9 +351,9 @@ export function useBlacklistState(options: UseBlacklistStateOptions) {
       void loadLastUsedProviders()
     }, 10_000)
 
-    unsubscribeSwitched = Events.On('provider:switched', handleProviderSwitched as Events.Callback)
-    unsubscribeBlacklisted = Events.On('provider:blacklisted', handleProviderBlacklisted as Events.Callback)
-    unsubscribeRouted = Events.On('provider:routed', handleProviderRouted as Events.Callback)
+    unsubscribeSwitched = Events.On('provider:switched', handleProviderSwitched as Events.WailsEventCallback)
+    unsubscribeBlacklisted = Events.On('provider:blacklisted', handleProviderBlacklisted as Events.WailsEventCallback)
+    unsubscribeRouted = Events.On('provider:routed', handleProviderRouted as Events.WailsEventCallback)
   }
 
   const stopStatusSync = () => {

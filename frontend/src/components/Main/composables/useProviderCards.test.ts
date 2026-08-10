@@ -44,6 +44,7 @@ import { LoadProviders } from '../../../../bindings/codeswitch/services/provider
 import { AddProvider as AddGeminiProvider, GetProviders as GetGeminiProviders } from '../../../../bindings/codeswitch/services/geminiservice'
 import { GetProviders as GetOpenCodeProviders, SaveProviders as SaveOpenCodeProviders } from '../../../../bindings/codeswitch/services/opencodeservice'
 import { showToast } from '../../../utils/toast'
+import { providerToCard, type PersistedProvider } from '../adapters/providerCardMappers'
 import { useProviderCards } from './useProviderCards'
 
 const createCard = (
@@ -76,6 +77,27 @@ const createDragEndPayload = (overrides: Partial<{
   clientY: 240,
   endedInsideList: null as boolean | null,
   ...overrides,
+})
+
+describe('providerToCard', () => {
+  it('removes undefined entries from generated map bindings', () => {
+    const card = providerToCard({
+      id: 1,
+      name: 'Provider 1',
+      apiUrl: '',
+      apiKey: '',
+      officialSite: '',
+      icon: '',
+      tint: '',
+      accent: '',
+      enabled: true,
+      supportedModels: { keep: true, remove: undefined },
+      modelMapping: { keep: 'mapped-model', remove: undefined },
+    } as PersistedProvider)
+
+    expect(card.supportedModels).toEqual({ keep: true })
+    expect(card.modelMapping).toEqual({ keep: 'mapped-model' })
+  })
 })
 
 describe('useProviderCards drag sort', () => {

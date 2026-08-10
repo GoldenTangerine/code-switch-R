@@ -5,17 +5,52 @@
 // @ts-ignore: Unused imports
 import { Create as $Create } from "@wailsio/runtime";
 
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore: Unused imports
-import * as time$0 from "../../time/models.js";
-
 export class AppSettings {
     "show_heatmap": boolean;
+    "heatmap_granularity": string;
+    "heatmap_daily_scale_factor": number;
+    "heatmap_daily_intensity_mode": string;
+    "heatmap_intensity_metric": string;
+    "heatmap_intensity_stop_l1": number;
+    "heatmap_intensity_stop_l2": number;
+    "heatmap_intensity_stop_l3": number;
     "show_home_title": boolean;
     "home_provider_tabs": string[];
+    "budget_total": number;
+    "budget_used_adjustment": number;
+    "budget_cycle_enabled": boolean;
+    "budget_cycle_mode": string;
+    "budget_refresh_time": string;
+    "budget_refresh_day": number;
+    "budget_refresh_month_day": number;
+    "budget_quota_used_adjustments": BudgetQuotaAdjustments;
+    "budget_quota_settings": BudgetQuotaSettings;
+    "budget_show_countdown": boolean;
+    "budget_show_forecast": boolean;
+    "budget_forecast_method": string;
+    "budget_forecast_display": string;
+    "budget_total_codex": number;
+    "budget_used_adjustment_codex": number;
+    "budget_cycle_enabled_codex": boolean;
+    "budget_cycle_mode_codex": string;
+    "budget_refresh_time_codex": string;
+    "budget_refresh_day_codex": number;
+    "budget_refresh_month_day_codex": number;
+    "budget_quota_used_adjustments_codex": BudgetQuotaAdjustments;
+    "budget_quota_settings_codex": BudgetQuotaSettings;
+    "budget_show_countdown_codex": boolean;
+    "budget_show_forecast_codex": boolean;
+    "budget_forecast_method_codex": string;
+    "budget_forecast_display_codex": string;
     "auto_start": boolean;
     "auto_update": boolean;
+
+    /**
+     * 更新包历史保留数量
+     */
     "update_history_keep_count": number;
+    "logs_refresh_interval_seconds": number;
+    "main_window_destroy_delay_seconds": number;
     "auto_connectivity_test": boolean;
 
     /**
@@ -23,16 +58,135 @@ export class AppSettings {
      */
     "enable_switch_notify": boolean;
 
+    /**
+     * 同 Level 轮询负载均衡开关（默认关闭）
+     */
+    "enable_round_robin": boolean;
+    "claude_model_routing_enabled": boolean;
+    "claude_model_aggregation_enabled": boolean;
+    "claude_model_metadata_merge_strategy": string;
+    "claude_proxy_auth_field": string;
+    "preserve_codex_official_auth_on_switch": boolean;
+    "unify_codex_session_history": boolean;
+    "unify_codex_migrate_existing": boolean;
+    "provider_concurrency_limits": { [_ in string]?: boolean };
+    "provider_quota_query_preset_codes"?: { [_ in string]?: string };
+    "provider_quota_query_presets"?: { [_ in string]?: ProviderQuotaQueryPresetGroup };
+    "provider_quota_auto_disable_enabled": boolean;
+    "provider_quota_recovery_interval_seconds": number;
+    "provider_quota_recovery_notify_enabled": boolean;
+    "capture_request_log_payload": boolean;
+    "sanitize_request_log_payload": boolean;
+
     /** Creates a new AppSettings instance. */
     constructor($$source: Partial<AppSettings> = {}) {
         if (!("show_heatmap" in $$source)) {
             this["show_heatmap"] = false;
+        }
+        if (!("heatmap_granularity" in $$source)) {
+            this["heatmap_granularity"] = "";
+        }
+        if (!("heatmap_daily_scale_factor" in $$source)) {
+            this["heatmap_daily_scale_factor"] = 0;
+        }
+        if (!("heatmap_daily_intensity_mode" in $$source)) {
+            this["heatmap_daily_intensity_mode"] = "";
+        }
+        if (!("heatmap_intensity_metric" in $$source)) {
+            this["heatmap_intensity_metric"] = "";
+        }
+        if (!("heatmap_intensity_stop_l1" in $$source)) {
+            this["heatmap_intensity_stop_l1"] = 0;
+        }
+        if (!("heatmap_intensity_stop_l2" in $$source)) {
+            this["heatmap_intensity_stop_l2"] = 0;
+        }
+        if (!("heatmap_intensity_stop_l3" in $$source)) {
+            this["heatmap_intensity_stop_l3"] = 0;
         }
         if (!("show_home_title" in $$source)) {
             this["show_home_title"] = false;
         }
         if (!("home_provider_tabs" in $$source)) {
             this["home_provider_tabs"] = [];
+        }
+        if (!("budget_total" in $$source)) {
+            this["budget_total"] = 0;
+        }
+        if (!("budget_used_adjustment" in $$source)) {
+            this["budget_used_adjustment"] = 0;
+        }
+        if (!("budget_cycle_enabled" in $$source)) {
+            this["budget_cycle_enabled"] = false;
+        }
+        if (!("budget_cycle_mode" in $$source)) {
+            this["budget_cycle_mode"] = "";
+        }
+        if (!("budget_refresh_time" in $$source)) {
+            this["budget_refresh_time"] = "";
+        }
+        if (!("budget_refresh_day" in $$source)) {
+            this["budget_refresh_day"] = 0;
+        }
+        if (!("budget_refresh_month_day" in $$source)) {
+            this["budget_refresh_month_day"] = 0;
+        }
+        if (!("budget_quota_used_adjustments" in $$source)) {
+            this["budget_quota_used_adjustments"] = (new BudgetQuotaAdjustments());
+        }
+        if (!("budget_quota_settings" in $$source)) {
+            this["budget_quota_settings"] = (new BudgetQuotaSettings());
+        }
+        if (!("budget_show_countdown" in $$source)) {
+            this["budget_show_countdown"] = false;
+        }
+        if (!("budget_show_forecast" in $$source)) {
+            this["budget_show_forecast"] = false;
+        }
+        if (!("budget_forecast_method" in $$source)) {
+            this["budget_forecast_method"] = "";
+        }
+        if (!("budget_forecast_display" in $$source)) {
+            this["budget_forecast_display"] = "";
+        }
+        if (!("budget_total_codex" in $$source)) {
+            this["budget_total_codex"] = 0;
+        }
+        if (!("budget_used_adjustment_codex" in $$source)) {
+            this["budget_used_adjustment_codex"] = 0;
+        }
+        if (!("budget_cycle_enabled_codex" in $$source)) {
+            this["budget_cycle_enabled_codex"] = false;
+        }
+        if (!("budget_cycle_mode_codex" in $$source)) {
+            this["budget_cycle_mode_codex"] = "";
+        }
+        if (!("budget_refresh_time_codex" in $$source)) {
+            this["budget_refresh_time_codex"] = "";
+        }
+        if (!("budget_refresh_day_codex" in $$source)) {
+            this["budget_refresh_day_codex"] = 0;
+        }
+        if (!("budget_refresh_month_day_codex" in $$source)) {
+            this["budget_refresh_month_day_codex"] = 0;
+        }
+        if (!("budget_quota_used_adjustments_codex" in $$source)) {
+            this["budget_quota_used_adjustments_codex"] = (new BudgetQuotaAdjustments());
+        }
+        if (!("budget_quota_settings_codex" in $$source)) {
+            this["budget_quota_settings_codex"] = (new BudgetQuotaSettings());
+        }
+        if (!("budget_show_countdown_codex" in $$source)) {
+            this["budget_show_countdown_codex"] = false;
+        }
+        if (!("budget_show_forecast_codex" in $$source)) {
+            this["budget_show_forecast_codex"] = false;
+        }
+        if (!("budget_forecast_method_codex" in $$source)) {
+            this["budget_forecast_method_codex"] = "";
+        }
+        if (!("budget_forecast_display_codex" in $$source)) {
+            this["budget_forecast_display_codex"] = "";
         }
         if (!("auto_start" in $$source)) {
             this["auto_start"] = false;
@@ -41,13 +195,61 @@ export class AppSettings {
             this["auto_update"] = false;
         }
         if (!("update_history_keep_count" in $$source)) {
-            this["update_history_keep_count"] = 3;
+            this["update_history_keep_count"] = 0;
+        }
+        if (!("logs_refresh_interval_seconds" in $$source)) {
+            this["logs_refresh_interval_seconds"] = 0;
+        }
+        if (!("main_window_destroy_delay_seconds" in $$source)) {
+            this["main_window_destroy_delay_seconds"] = 0;
         }
         if (!("auto_connectivity_test" in $$source)) {
             this["auto_connectivity_test"] = false;
         }
         if (!("enable_switch_notify" in $$source)) {
             this["enable_switch_notify"] = false;
+        }
+        if (!("enable_round_robin" in $$source)) {
+            this["enable_round_robin"] = false;
+        }
+        if (!("claude_model_routing_enabled" in $$source)) {
+            this["claude_model_routing_enabled"] = false;
+        }
+        if (!("claude_model_aggregation_enabled" in $$source)) {
+            this["claude_model_aggregation_enabled"] = false;
+        }
+        if (!("claude_model_metadata_merge_strategy" in $$source)) {
+            this["claude_model_metadata_merge_strategy"] = "";
+        }
+        if (!("claude_proxy_auth_field" in $$source)) {
+            this["claude_proxy_auth_field"] = "";
+        }
+        if (!("preserve_codex_official_auth_on_switch" in $$source)) {
+            this["preserve_codex_official_auth_on_switch"] = false;
+        }
+        if (!("unify_codex_session_history" in $$source)) {
+            this["unify_codex_session_history"] = false;
+        }
+        if (!("unify_codex_migrate_existing" in $$source)) {
+            this["unify_codex_migrate_existing"] = false;
+        }
+        if (!("provider_concurrency_limits" in $$source)) {
+            this["provider_concurrency_limits"] = {};
+        }
+        if (!("provider_quota_auto_disable_enabled" in $$source)) {
+            this["provider_quota_auto_disable_enabled"] = false;
+        }
+        if (!("provider_quota_recovery_interval_seconds" in $$source)) {
+            this["provider_quota_recovery_interval_seconds"] = 0;
+        }
+        if (!("provider_quota_recovery_notify_enabled" in $$source)) {
+            this["provider_quota_recovery_notify_enabled"] = false;
+        }
+        if (!("capture_request_log_payload" in $$source)) {
+            this["capture_request_log_payload"] = false;
+        }
+        if (!("sanitize_request_log_payload" in $$source)) {
+            this["sanitize_request_log_payload"] = false;
         }
 
         Object.assign(this, $$source);
@@ -57,8 +259,75 @@ export class AppSettings {
      * Creates a new AppSettings instance from a string or object.
      */
     static createFrom($$source: any = {}): AppSettings {
+        const $$createField9_0 = $$createType0;
+        const $$createField17_0 = $$createType1;
+        const $$createField18_0 = $$createType2;
+        const $$createField30_0 = $$createType1;
+        const $$createField31_0 = $$createType2;
+        const $$createField51_0 = $$createType3;
+        const $$createField52_0 = $$createType4;
+        const $$createField53_0 = $$createType6;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("home_provider_tabs" in $$parsedSource) {
+            $$parsedSource["home_provider_tabs"] = $$createField9_0($$parsedSource["home_provider_tabs"]);
+        }
+        if ("budget_quota_used_adjustments" in $$parsedSource) {
+            $$parsedSource["budget_quota_used_adjustments"] = $$createField17_0($$parsedSource["budget_quota_used_adjustments"]);
+        }
+        if ("budget_quota_settings" in $$parsedSource) {
+            $$parsedSource["budget_quota_settings"] = $$createField18_0($$parsedSource["budget_quota_settings"]);
+        }
+        if ("budget_quota_used_adjustments_codex" in $$parsedSource) {
+            $$parsedSource["budget_quota_used_adjustments_codex"] = $$createField30_0($$parsedSource["budget_quota_used_adjustments_codex"]);
+        }
+        if ("budget_quota_settings_codex" in $$parsedSource) {
+            $$parsedSource["budget_quota_settings_codex"] = $$createField31_0($$parsedSource["budget_quota_settings_codex"]);
+        }
+        if ("provider_concurrency_limits" in $$parsedSource) {
+            $$parsedSource["provider_concurrency_limits"] = $$createField51_0($$parsedSource["provider_concurrency_limits"]);
+        }
+        if ("provider_quota_query_preset_codes" in $$parsedSource) {
+            $$parsedSource["provider_quota_query_preset_codes"] = $$createField52_0($$parsedSource["provider_quota_query_preset_codes"]);
+        }
+        if ("provider_quota_query_presets" in $$parsedSource) {
+            $$parsedSource["provider_quota_query_presets"] = $$createField53_0($$parsedSource["provider_quota_query_presets"]);
+        }
         return new AppSettings($$parsedSource as Partial<AppSettings>);
+    }
+}
+
+/**
+ * AvailabilityConfig 可用性监控高级配置
+ * 在可用性页面的"高级配置"弹窗中设置，可选
+ */
+export class AvailabilityConfig {
+    /**
+     * 覆盖默认测试模型
+     */
+    "testModel"?: string;
+
+    /**
+     * 覆盖默认测试端点
+     */
+    "testEndpoint"?: string;
+
+    /**
+     * 覆盖默认超时（毫秒）
+     */
+    "timeout"?: number;
+
+    /** Creates a new AvailabilityConfig instance. */
+    constructor($$source: Partial<AvailabilityConfig> = {}) {
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new AvailabilityConfig instance from a string or object.
+     */
+    static createFrom($$source: any = {}): AvailabilityConfig {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new AvailabilityConfig($$parsedSource as Partial<AvailabilityConfig>);
     }
 }
 
@@ -82,6 +351,11 @@ export class BlacklistLevelConfig {
      * 去重窗口（秒）
      */
     "dedupeWindowSeconds": number;
+
+    /**
+     * 同 Provider 重试等待时间（秒），必须 > DedupeWindowSeconds
+     */
+    "retryWaitSeconds": number;
 
     /**
      * 降级配置
@@ -147,6 +421,9 @@ export class BlacklistLevelConfig {
         if (!("dedupeWindowSeconds" in $$source)) {
             this["dedupeWindowSeconds"] = 0;
         }
+        if (!("retryWaitSeconds" in $$source)) {
+            this["retryWaitSeconds"] = 0;
+        }
         if (!("normalDegradeIntervalHours" in $$source)) {
             this["normalDegradeIntervalHours"] = 0;
         }
@@ -200,17 +477,17 @@ export class BlacklistSettings {
     "failureThreshold": number;
 
     /**
-     * 拉黑时长（分钟）
+     * 拉黑时长（秒）
      */
-    "durationMinutes": number;
+    "durationSeconds": number;
 
     /** Creates a new BlacklistSettings instance. */
     constructor($$source: Partial<BlacklistSettings> = {}) {
         if (!("failureThreshold" in $$source)) {
             this["failureThreshold"] = 0;
         }
-        if (!("durationMinutes" in $$source)) {
-            this["durationMinutes"] = 0;
+        if (!("durationSeconds" in $$source)) {
+            this["durationSeconds"] = 0;
         }
 
         Object.assign(this, $$source);
@@ -230,11 +507,15 @@ export class BlacklistSettings {
  */
 export class BlacklistStatus {
     "platform": string;
+    "providerId": string;
     "providerName": string;
     "failureCount": number;
-    "blacklistedAt": time$0.Time | null;
-    "blacklistedUntil": time$0.Time | null;
-    "lastFailureAt": time$0.Time | null;
+    "failureThreshold": number;
+    "healthFailureCount": number;
+    "healthFailureThreshold": number;
+    "blacklistedAt": string | null;
+    "blacklistedUntil": string | null;
+    "lastFailureAt": string | null;
     "isBlacklisted": boolean;
 
     /**
@@ -247,11 +528,13 @@ export class BlacklistStatus {
      * 当前黑名单等级 (0-5)
      */
     "blacklistLevel": number;
+    "blacklistTriggerSource"?: string;
+    "blacklistReason"?: string;
 
     /**
      * 最后恢复时间
      */
-    "lastRecoveredAt": time$0.Time | null;
+    "lastRecoveredAt": string | null;
 
     /**
      * 距离宽恕还剩多少秒（3小时倒计时）
@@ -263,11 +546,23 @@ export class BlacklistStatus {
         if (!("platform" in $$source)) {
             this["platform"] = "";
         }
+        if (!("providerId" in $$source)) {
+            this["providerId"] = "";
+        }
         if (!("providerName" in $$source)) {
             this["providerName"] = "";
         }
         if (!("failureCount" in $$source)) {
             this["failureCount"] = 0;
+        }
+        if (!("failureThreshold" in $$source)) {
+            this["failureThreshold"] = 0;
+        }
+        if (!("healthFailureCount" in $$source)) {
+            this["healthFailureCount"] = 0;
+        }
+        if (!("healthFailureThreshold" in $$source)) {
+            this["healthFailureThreshold"] = 0;
         }
         if (!("blacklistedAt" in $$source)) {
             this["blacklistedAt"] = null;
@@ -306,6 +601,133 @@ export class BlacklistStatus {
     }
 }
 
+export class BudgetQuotaAdjustments {
+    "five_hour": number;
+    "daily": number;
+    "weekly": number;
+    "monthly": number;
+    "total": number;
+
+    /** Creates a new BudgetQuotaAdjustments instance. */
+    constructor($$source: Partial<BudgetQuotaAdjustments> = {}) {
+        if (!("five_hour" in $$source)) {
+            this["five_hour"] = 0;
+        }
+        if (!("daily" in $$source)) {
+            this["daily"] = 0;
+        }
+        if (!("weekly" in $$source)) {
+            this["weekly"] = 0;
+        }
+        if (!("monthly" in $$source)) {
+            this["monthly"] = 0;
+        }
+        if (!("total" in $$source)) {
+            this["total"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new BudgetQuotaAdjustments instance from a string or object.
+     */
+    static createFrom($$source: any = {}): BudgetQuotaAdjustments {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new BudgetQuotaAdjustments($$parsedSource as Partial<BudgetQuotaAdjustments>);
+    }
+}
+
+export class BudgetQuotaSetting {
+    "total": number;
+    "refresh_time": string;
+    "refresh_day": number;
+    "refresh_month_day": number;
+
+    /** Creates a new BudgetQuotaSetting instance. */
+    constructor($$source: Partial<BudgetQuotaSetting> = {}) {
+        if (!("total" in $$source)) {
+            this["total"] = 0;
+        }
+        if (!("refresh_time" in $$source)) {
+            this["refresh_time"] = "";
+        }
+        if (!("refresh_day" in $$source)) {
+            this["refresh_day"] = 0;
+        }
+        if (!("refresh_month_day" in $$source)) {
+            this["refresh_month_day"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new BudgetQuotaSetting instance from a string or object.
+     */
+    static createFrom($$source: any = {}): BudgetQuotaSetting {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new BudgetQuotaSetting($$parsedSource as Partial<BudgetQuotaSetting>);
+    }
+}
+
+export class BudgetQuotaSettings {
+    "five_hour": BudgetQuotaSetting;
+    "daily": BudgetQuotaSetting;
+    "weekly": BudgetQuotaSetting;
+    "monthly": BudgetQuotaSetting;
+    "total": BudgetQuotaSetting;
+
+    /** Creates a new BudgetQuotaSettings instance. */
+    constructor($$source: Partial<BudgetQuotaSettings> = {}) {
+        if (!("five_hour" in $$source)) {
+            this["five_hour"] = (new BudgetQuotaSetting());
+        }
+        if (!("daily" in $$source)) {
+            this["daily"] = (new BudgetQuotaSetting());
+        }
+        if (!("weekly" in $$source)) {
+            this["weekly"] = (new BudgetQuotaSetting());
+        }
+        if (!("monthly" in $$source)) {
+            this["monthly"] = (new BudgetQuotaSetting());
+        }
+        if (!("total" in $$source)) {
+            this["total"] = (new BudgetQuotaSetting());
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new BudgetQuotaSettings instance from a string or object.
+     */
+    static createFrom($$source: any = {}): BudgetQuotaSettings {
+        const $$createField0_0 = $$createType7;
+        const $$createField1_0 = $$createType7;
+        const $$createField2_0 = $$createType7;
+        const $$createField3_0 = $$createType7;
+        const $$createField4_0 = $$createType7;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("five_hour" in $$parsedSource) {
+            $$parsedSource["five_hour"] = $$createField0_0($$parsedSource["five_hour"]);
+        }
+        if ("daily" in $$parsedSource) {
+            $$parsedSource["daily"] = $$createField1_0($$parsedSource["daily"]);
+        }
+        if ("weekly" in $$parsedSource) {
+            $$parsedSource["weekly"] = $$createField2_0($$parsedSource["weekly"]);
+        }
+        if ("monthly" in $$parsedSource) {
+            $$parsedSource["monthly"] = $$createField3_0($$parsedSource["monthly"]);
+        }
+        if ("total" in $$parsedSource) {
+            $$parsedSource["total"] = $$createField4_0($$parsedSource["total"]);
+        }
+        return new BudgetQuotaSettings($$parsedSource as Partial<BudgetQuotaSettings>);
+    }
+}
+
 /**
  * CLIConfig CLI 配置数据
  */
@@ -331,7 +753,7 @@ export class CLIConfig {
     /**
      * Gemini .env 内容
      */
-    "envContent"?: { [_: string]: string };
+    "envContent"?: { [_ in string]?: string };
 
     /**
      * 配置文件路径
@@ -341,7 +763,7 @@ export class CLIConfig {
     /**
      * 可编辑字段的当前值
      */
-    "editable"?: { [_: string]: any };
+    "editable"?: { [_ in string]?: any };
 
     /** Creates a new CLIConfig instance. */
     constructor($$source: Partial<CLIConfig> = {}) {
@@ -359,10 +781,10 @@ export class CLIConfig {
      * Creates a new CLIConfig instance from a string or object.
      */
     static createFrom($$source: any = {}): CLIConfig {
-        const $$createField1_0 = $$createType1;
-        const $$createField3_0 = $$createType3;
+        const $$createField1_0 = $$createType9;
+        const $$createField3_0 = $$createType11;
         const $$createField5_0 = $$createType4;
-        const $$createField7_0 = $$createType5;
+        const $$createField7_0 = $$createType12;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("fields" in $$parsedSource) {
             $$parsedSource["fields"] = $$createField1_0($$parsedSource["fields"]);
@@ -456,6 +878,112 @@ export class CLIConfigFile {
 }
 
 /**
+ * CLIConfigSnapshots CLI 配置快照（用于旧预览链路）
+ */
+export class CLIConfigSnapshots {
+    "currentFiles": CLIConfigFile[];
+    "previewFiles": CLIConfigFile[];
+
+    /**
+     * "proxy" | "direct"
+     */
+    "mode": string;
+
+    /** Creates a new CLIConfigSnapshots instance. */
+    constructor($$source: Partial<CLIConfigSnapshots> = {}) {
+        if (!("currentFiles" in $$source)) {
+            this["currentFiles"] = [];
+        }
+        if (!("previewFiles" in $$source)) {
+            this["previewFiles"] = [];
+        }
+        if (!("mode" in $$source)) {
+            this["mode"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new CLIConfigSnapshots instance from a string or object.
+     */
+    static createFrom($$source: any = {}): CLIConfigSnapshots {
+        const $$createField0_0 = $$createType11;
+        const $$createField1_0 = $$createType11;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("currentFiles" in $$parsedSource) {
+            $$parsedSource["currentFiles"] = $$createField0_0($$parsedSource["currentFiles"]);
+        }
+        if ("previewFiles" in $$parsedSource) {
+            $$parsedSource["previewFiles"] = $$createField1_0($$parsedSource["previewFiles"]);
+        }
+        return new CLIConfigSnapshots($$parsedSource as Partial<CLIConfigSnapshots>);
+    }
+}
+
+export class CLIEditorContent {
+    "format"?: string;
+    "content": string;
+    "lockedFields"?: CLIConfigField[];
+
+    /** Creates a new CLIEditorContent instance. */
+    constructor($$source: Partial<CLIEditorContent> = {}) {
+        if (!("content" in $$source)) {
+            this["content"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new CLIEditorContent instance from a string or object.
+     */
+    static createFrom($$source: any = {}): CLIEditorContent {
+        const $$createField2_0 = $$createType9;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("lockedFields" in $$parsedSource) {
+            $$parsedSource["lockedFields"] = $$createField2_0($$parsedSource["lockedFields"]);
+        }
+        return new CLIEditorContent($$parsedSource as Partial<CLIEditorContent>);
+    }
+}
+
+export class CLINormalizedEditorContent {
+    "editable": { [_ in string]?: any };
+    "format"?: string;
+    "content": string;
+    "lockedFields"?: CLIConfigField[];
+
+    /** Creates a new CLINormalizedEditorContent instance. */
+    constructor($$source: Partial<CLINormalizedEditorContent> = {}) {
+        if (!("editable" in $$source)) {
+            this["editable"] = {};
+        }
+        if (!("content" in $$source)) {
+            this["content"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new CLINormalizedEditorContent instance from a string or object.
+     */
+    static createFrom($$source: any = {}): CLINormalizedEditorContent {
+        const $$createField0_0 = $$createType12;
+        const $$createField3_0 = $$createType9;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("editable" in $$parsedSource) {
+            $$parsedSource["editable"] = $$createField0_0($$parsedSource["editable"]);
+        }
+        if ("lockedFields" in $$parsedSource) {
+            $$parsedSource["lockedFields"] = $$createField3_0($$parsedSource["lockedFields"]);
+        }
+        return new CLINormalizedEditorContent($$parsedSource as Partial<CLINormalizedEditorContent>);
+    }
+}
+
+/**
  * CLIPlatform CLI 平台类型
  */
 export enum CLIPlatform {
@@ -473,7 +1001,7 @@ export enum CLIPlatform {
  * CLITemplate CLI 配置模板
  */
 export class CLITemplate {
-    "template": { [_: string]: any };
+    "template": { [_ in string]?: any };
     "isGlobalDefault": boolean;
 
     /** Creates a new CLITemplate instance. */
@@ -492,12 +1020,280 @@ export class CLITemplate {
      * Creates a new CLITemplate instance from a string or object.
      */
     static createFrom($$source: any = {}): CLITemplate {
-        const $$createField0_0 = $$createType5;
+        const $$createField0_0 = $$createType12;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("template" in $$parsedSource) {
             $$parsedSource["template"] = $$createField0_0($$parsedSource["template"]);
         }
         return new CLITemplate($$parsedSource as Partial<CLITemplate>);
+    }
+}
+
+export class ClaudeAggregatedModel {
+    "id": string;
+    "type": string;
+    "display_name": string;
+    "created_at": string;
+    "max_input_tokens": number;
+    "max_tokens": number;
+    "capabilities": { [_ in string]?: any };
+
+    /** Creates a new ClaudeAggregatedModel instance. */
+    constructor($$source: Partial<ClaudeAggregatedModel> = {}) {
+        if (!("id" in $$source)) {
+            this["id"] = "";
+        }
+        if (!("type" in $$source)) {
+            this["type"] = "";
+        }
+        if (!("display_name" in $$source)) {
+            this["display_name"] = "";
+        }
+        if (!("created_at" in $$source)) {
+            this["created_at"] = "";
+        }
+        if (!("max_input_tokens" in $$source)) {
+            this["max_input_tokens"] = 0;
+        }
+        if (!("max_tokens" in $$source)) {
+            this["max_tokens"] = 0;
+        }
+        if (!("capabilities" in $$source)) {
+            this["capabilities"] = {};
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ClaudeAggregatedModel instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ClaudeAggregatedModel {
+        const $$createField6_0 = $$createType12;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("capabilities" in $$parsedSource) {
+            $$parsedSource["capabilities"] = $$createField6_0($$parsedSource["capabilities"]);
+        }
+        return new ClaudeAggregatedModel($$parsedSource as Partial<ClaudeAggregatedModel>);
+    }
+}
+
+export class ClaudeModelListResponse {
+    "data": ClaudeAggregatedModel[];
+    "has_more": boolean;
+    "first_id": string | null;
+    "last_id": string | null;
+
+    /** Creates a new ClaudeModelListResponse instance. */
+    constructor($$source: Partial<ClaudeModelListResponse> = {}) {
+        if (!("data" in $$source)) {
+            this["data"] = [];
+        }
+        if (!("has_more" in $$source)) {
+            this["has_more"] = false;
+        }
+        if (!("first_id" in $$source)) {
+            this["first_id"] = null;
+        }
+        if (!("last_id" in $$source)) {
+            this["last_id"] = null;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ClaudeModelListResponse instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ClaudeModelListResponse {
+        const $$createField0_0 = $$createType14;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("data" in $$parsedSource) {
+            $$parsedSource["data"] = $$createField0_0($$parsedSource["data"]);
+        }
+        return new ClaudeModelListResponse($$parsedSource as Partial<ClaudeModelListResponse>);
+    }
+}
+
+export class ClaudeModelRefreshResult {
+    "successCount": number;
+    "failureCount": number;
+    "failedProviders"?: string[];
+    "finishedAt": string;
+
+    /** Creates a new ClaudeModelRefreshResult instance. */
+    constructor($$source: Partial<ClaudeModelRefreshResult> = {}) {
+        if (!("successCount" in $$source)) {
+            this["successCount"] = 0;
+        }
+        if (!("failureCount" in $$source)) {
+            this["failureCount"] = 0;
+        }
+        if (!("finishedAt" in $$source)) {
+            this["finishedAt"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ClaudeModelRefreshResult instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ClaudeModelRefreshResult {
+        const $$createField2_0 = $$createType0;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("failedProviders" in $$parsedSource) {
+            $$parsedSource["failedProviders"] = $$createField2_0($$parsedSource["failedProviders"]);
+        }
+        return new ClaudeModelRefreshResult($$parsedSource as Partial<ClaudeModelRefreshResult>);
+    }
+}
+
+export class ClaudeModelRoutingService {
+
+    /** Creates a new ClaudeModelRoutingService instance. */
+    constructor($$source: Partial<ClaudeModelRoutingService> = {}) {
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ClaudeModelRoutingService instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ClaudeModelRoutingService {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new ClaudeModelRoutingService($$parsedSource as Partial<ClaudeModelRoutingService>);
+    }
+}
+
+export class ClaudeModelRoutingStatus {
+    "refreshing": boolean;
+    "lastSuccessAt"?: string;
+    "providerCount": number;
+    "successCount": number;
+    "failureCount": number;
+    "staleCount": number;
+    "lastFailedNames"?: string[];
+
+    /** Creates a new ClaudeModelRoutingStatus instance. */
+    constructor($$source: Partial<ClaudeModelRoutingStatus> = {}) {
+        if (!("refreshing" in $$source)) {
+            this["refreshing"] = false;
+        }
+        if (!("providerCount" in $$source)) {
+            this["providerCount"] = 0;
+        }
+        if (!("successCount" in $$source)) {
+            this["successCount"] = 0;
+        }
+        if (!("failureCount" in $$source)) {
+            this["failureCount"] = 0;
+        }
+        if (!("staleCount" in $$source)) {
+            this["staleCount"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ClaudeModelRoutingStatus instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ClaudeModelRoutingStatus {
+        const $$createField6_0 = $$createType0;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("lastFailedNames" in $$parsedSource) {
+            $$parsedSource["lastFailedNames"] = $$createField6_0($$parsedSource["lastFailedNames"]);
+        }
+        return new ClaudeModelRoutingStatus($$parsedSource as Partial<ClaudeModelRoutingStatus>);
+    }
+}
+
+export class ClaudeOfficialPricingPreviewResult {
+    "provider": string;
+    "fetched_at": string;
+    "rows": ClaudeOfficialPricingPreviewRow[];
+    "unrecognized_models"?: string[];
+
+    /** Creates a new ClaudeOfficialPricingPreviewResult instance. */
+    constructor($$source: Partial<ClaudeOfficialPricingPreviewResult> = {}) {
+        if (!("provider" in $$source)) {
+            this["provider"] = "";
+        }
+        if (!("fetched_at" in $$source)) {
+            this["fetched_at"] = "";
+        }
+        if (!("rows" in $$source)) {
+            this["rows"] = [];
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ClaudeOfficialPricingPreviewResult instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ClaudeOfficialPricingPreviewResult {
+        const $$createField2_0 = $$createType16;
+        const $$createField3_0 = $$createType0;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("rows" in $$parsedSource) {
+            $$parsedSource["rows"] = $$createField2_0($$parsedSource["rows"]);
+        }
+        if ("unrecognized_models" in $$parsedSource) {
+            $$parsedSource["unrecognized_models"] = $$createField3_0($$parsedSource["unrecognized_models"]);
+        }
+        return new ClaudeOfficialPricingPreviewResult($$parsedSource as Partial<ClaudeOfficialPricingPreviewResult>);
+    }
+}
+
+export class ClaudeOfficialPricingPreviewRow {
+    "display_name": string;
+    "target_models"?: string[];
+    "input_cost_per_token": number;
+    "output_cost_per_token": number;
+    "cache_creation_input_token_cost": number;
+    "cache_read_input_token_cost": number;
+    "ephemeral_1h_cost_per_token": number;
+    "is_recognized": boolean;
+
+    /** Creates a new ClaudeOfficialPricingPreviewRow instance. */
+    constructor($$source: Partial<ClaudeOfficialPricingPreviewRow> = {}) {
+        if (!("display_name" in $$source)) {
+            this["display_name"] = "";
+        }
+        if (!("input_cost_per_token" in $$source)) {
+            this["input_cost_per_token"] = 0;
+        }
+        if (!("output_cost_per_token" in $$source)) {
+            this["output_cost_per_token"] = 0;
+        }
+        if (!("cache_creation_input_token_cost" in $$source)) {
+            this["cache_creation_input_token_cost"] = 0;
+        }
+        if (!("cache_read_input_token_cost" in $$source)) {
+            this["cache_read_input_token_cost"] = 0;
+        }
+        if (!("ephemeral_1h_cost_per_token" in $$source)) {
+            this["ephemeral_1h_cost_per_token"] = 0;
+        }
+        if (!("is_recognized" in $$source)) {
+            this["is_recognized"] = false;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ClaudeOfficialPricingPreviewRow instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ClaudeOfficialPricingPreviewRow {
+        const $$createField1_0 = $$createType0;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("target_models" in $$parsedSource) {
+            $$parsedSource["target_models"] = $$createField1_0($$parsedSource["target_models"]);
+        }
+        return new ClaudeOfficialPricingPreviewRow($$parsedSource as Partial<ClaudeOfficialPricingPreviewRow>);
     }
 }
 
@@ -526,6 +1322,351 @@ export class ClaudeProxyStatus {
     }
 }
 
+export class ClaudeSettingsService {
+
+    /** Creates a new ClaudeSettingsService instance. */
+    constructor($$source: Partial<ClaudeSettingsService> = {}) {
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ClaudeSettingsService instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ClaudeSettingsService {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new ClaudeSettingsService($$parsedSource as Partial<ClaudeSettingsService>);
+    }
+}
+
+export class CloudPriceTableConflictPricing {
+    "input_cost_per_token": number;
+    "output_cost_per_token": number;
+    "output_cost_per_reasoning_token": number;
+    "cache_creation_input_token_cost": number;
+    "cache_read_input_token_cost": number;
+    "ephemeral_1h_cost_per_token": number;
+    "group_multiplier": number;
+
+    /** Creates a new CloudPriceTableConflictPricing instance. */
+    constructor($$source: Partial<CloudPriceTableConflictPricing> = {}) {
+        if (!("input_cost_per_token" in $$source)) {
+            this["input_cost_per_token"] = 0;
+        }
+        if (!("output_cost_per_token" in $$source)) {
+            this["output_cost_per_token"] = 0;
+        }
+        if (!("output_cost_per_reasoning_token" in $$source)) {
+            this["output_cost_per_reasoning_token"] = 0;
+        }
+        if (!("cache_creation_input_token_cost" in $$source)) {
+            this["cache_creation_input_token_cost"] = 0;
+        }
+        if (!("cache_read_input_token_cost" in $$source)) {
+            this["cache_read_input_token_cost"] = 0;
+        }
+        if (!("ephemeral_1h_cost_per_token" in $$source)) {
+            this["ephemeral_1h_cost_per_token"] = 0;
+        }
+        if (!("group_multiplier" in $$source)) {
+            this["group_multiplier"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new CloudPriceTableConflictPricing instance from a string or object.
+     */
+    static createFrom($$source: any = {}): CloudPriceTableConflictPricing {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new CloudPriceTableConflictPricing($$parsedSource as Partial<CloudPriceTableConflictPricing>);
+    }
+}
+
+export class CloudPriceTableSyncConflictResult {
+    "provider": string;
+    "fetched_at": string;
+    "conflicts": CloudPriceTableSyncConflictRow[];
+
+    /** Creates a new CloudPriceTableSyncConflictResult instance. */
+    constructor($$source: Partial<CloudPriceTableSyncConflictResult> = {}) {
+        if (!("provider" in $$source)) {
+            this["provider"] = "";
+        }
+        if (!("fetched_at" in $$source)) {
+            this["fetched_at"] = "";
+        }
+        if (!("conflicts" in $$source)) {
+            this["conflicts"] = [];
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new CloudPriceTableSyncConflictResult instance from a string or object.
+     */
+    static createFrom($$source: any = {}): CloudPriceTableSyncConflictResult {
+        const $$createField2_0 = $$createType18;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("conflicts" in $$parsedSource) {
+            $$parsedSource["conflicts"] = $$createField2_0($$parsedSource["conflicts"]);
+        }
+        return new CloudPriceTableSyncConflictResult($$parsedSource as Partial<CloudPriceTableSyncConflictResult>);
+    }
+}
+
+export class CloudPriceTableSyncConflictRow {
+    "model": string;
+    "display_name"?: string;
+    "litellm_provider"?: string;
+    "mode"?: string;
+    "current": CloudPriceTableConflictPricing;
+    "incoming": CloudPriceTableConflictPricing;
+
+    /** Creates a new CloudPriceTableSyncConflictRow instance. */
+    constructor($$source: Partial<CloudPriceTableSyncConflictRow> = {}) {
+        if (!("model" in $$source)) {
+            this["model"] = "";
+        }
+        if (!("current" in $$source)) {
+            this["current"] = (new CloudPriceTableConflictPricing());
+        }
+        if (!("incoming" in $$source)) {
+            this["incoming"] = (new CloudPriceTableConflictPricing());
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new CloudPriceTableSyncConflictRow instance from a string or object.
+     */
+    static createFrom($$source: any = {}): CloudPriceTableSyncConflictRow {
+        const $$createField4_0 = $$createType19;
+        const $$createField5_0 = $$createType19;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("current" in $$parsedSource) {
+            $$parsedSource["current"] = $$createField4_0($$parsedSource["current"]);
+        }
+        if ("incoming" in $$parsedSource) {
+            $$parsedSource["incoming"] = $$createField5_0($$parsedSource["incoming"]);
+        }
+        return new CloudPriceTableSyncConflictRow($$parsedSource as Partial<CloudPriceTableSyncConflictRow>);
+    }
+}
+
+export class CodexHistoryRestoreResult {
+    "restored_jsonl_files": number;
+    "restored_state_rows": number;
+    "skipped_reason"?: string;
+
+    /** Creates a new CodexHistoryRestoreResult instance. */
+    constructor($$source: Partial<CodexHistoryRestoreResult> = {}) {
+        if (!("restored_jsonl_files" in $$source)) {
+            this["restored_jsonl_files"] = 0;
+        }
+        if (!("restored_state_rows" in $$source)) {
+            this["restored_state_rows"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new CodexHistoryRestoreResult instance from a string or object.
+     */
+    static createFrom($$source: any = {}): CodexHistoryRestoreResult {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new CodexHistoryRestoreResult($$parsedSource as Partial<CodexHistoryRestoreResult>);
+    }
+}
+
+/**
+ * CodexOAuthAccount 是前端可见的 ChatGPT 账号信息，不包含 token。
+ */
+export class CodexOAuthAccount {
+    "id": string;
+    "provider": string;
+    "login": string;
+    "authenticatedAt": number;
+    "isDefault": boolean;
+
+    /** Creates a new CodexOAuthAccount instance. */
+    constructor($$source: Partial<CodexOAuthAccount> = {}) {
+        if (!("id" in $$source)) {
+            this["id"] = "";
+        }
+        if (!("provider" in $$source)) {
+            this["provider"] = "";
+        }
+        if (!("login" in $$source)) {
+            this["login"] = "";
+        }
+        if (!("authenticatedAt" in $$source)) {
+            this["authenticatedAt"] = 0;
+        }
+        if (!("isDefault" in $$source)) {
+            this["isDefault"] = false;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new CodexOAuthAccount instance from a string or object.
+     */
+    static createFrom($$source: any = {}): CodexOAuthAccount {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new CodexOAuthAccount($$parsedSource as Partial<CodexOAuthAccount>);
+    }
+}
+
+/**
+ * CodexOAuthDeviceCodeResponse 是前端展示设备码登录时需要的数据。
+ */
+export class CodexOAuthDeviceCodeResponse {
+    "provider": string;
+    "deviceCode": string;
+    "userCode": string;
+    "verificationUri": string;
+    "expiresIn": number;
+    "interval": number;
+
+    /** Creates a new CodexOAuthDeviceCodeResponse instance. */
+    constructor($$source: Partial<CodexOAuthDeviceCodeResponse> = {}) {
+        if (!("provider" in $$source)) {
+            this["provider"] = "";
+        }
+        if (!("deviceCode" in $$source)) {
+            this["deviceCode"] = "";
+        }
+        if (!("userCode" in $$source)) {
+            this["userCode"] = "";
+        }
+        if (!("verificationUri" in $$source)) {
+            this["verificationUri"] = "";
+        }
+        if (!("expiresIn" in $$source)) {
+            this["expiresIn"] = 0;
+        }
+        if (!("interval" in $$source)) {
+            this["interval"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new CodexOAuthDeviceCodeResponse instance from a string or object.
+     */
+    static createFrom($$source: any = {}): CodexOAuthDeviceCodeResponse {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new CodexOAuthDeviceCodeResponse($$parsedSource as Partial<CodexOAuthDeviceCodeResponse>);
+    }
+}
+
+/**
+ * CodexOAuthStatus 汇总当前 OAuth 登录状态。
+ */
+export class CodexOAuthStatus {
+    "provider": string;
+    "authenticated": boolean;
+    "defaultAccountId"?: string;
+    "accounts": CodexOAuthAccount[];
+    "providerCard"?: Provider | null;
+
+    /** Creates a new CodexOAuthStatus instance. */
+    constructor($$source: Partial<CodexOAuthStatus> = {}) {
+        if (!("provider" in $$source)) {
+            this["provider"] = "";
+        }
+        if (!("authenticated" in $$source)) {
+            this["authenticated"] = false;
+        }
+        if (!("accounts" in $$source)) {
+            this["accounts"] = [];
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new CodexOAuthStatus instance from a string or object.
+     */
+    static createFrom($$source: any = {}): CodexOAuthStatus {
+        const $$createField3_0 = $$createType21;
+        const $$createField4_0 = $$createType23;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("accounts" in $$parsedSource) {
+            $$parsedSource["accounts"] = $$createField3_0($$parsedSource["accounts"]);
+        }
+        if ("providerCard" in $$parsedSource) {
+            $$parsedSource["providerCard"] = $$createField4_0($$parsedSource["providerCard"]);
+        }
+        return new CodexOAuthStatus($$parsedSource as Partial<CodexOAuthStatus>);
+    }
+}
+
+export class CodexSettingsService {
+
+    /** Creates a new CodexSettingsService instance. */
+    constructor($$source: Partial<CodexSettingsService> = {}) {
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new CodexSettingsService instance from a string or object.
+     */
+    static createFrom($$source: any = {}): CodexSettingsService {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new CodexSettingsService($$parsedSource as Partial<CodexSettingsService>);
+    }
+}
+
+/**
+ * ConfigFile 配置文件信息
+ */
+export class ConfigFile {
+    "id": string;
+    "label": string;
+    "path": string;
+
+    /**
+     * json | toml | env
+     */
+    "format": string;
+    "isPrimary"?: boolean;
+
+    /** Creates a new ConfigFile instance. */
+    constructor($$source: Partial<ConfigFile> = {}) {
+        if (!("id" in $$source)) {
+            this["id"] = "";
+        }
+        if (!("label" in $$source)) {
+            this["label"] = "";
+        }
+        if (!("path" in $$source)) {
+            this["path"] = "";
+        }
+        if (!("format" in $$source)) {
+            this["format"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ConfigFile instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ConfigFile {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new ConfigFile($$parsedSource as Partial<ConfigFile>);
+    }
+}
+
 export class ConfigImportResult {
     "status": ConfigImportStatus;
     "imported_providers": number;
@@ -550,7 +1691,7 @@ export class ConfigImportResult {
      * Creates a new ConfigImportResult instance from a string or object.
      */
     static createFrom($$source: any = {}): ConfigImportResult {
-        const $$createField0_0 = $$createType6;
+        const $$createField0_0 = $$createType24;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("status" in $$parsedSource) {
             $$parsedSource["status"] = $$createField0_0($$parsedSource["status"]);
@@ -598,6 +1739,31 @@ export class ConfigImportStatus {
 }
 
 /**
+ * ConfigureResult 配置结果
+ */
+export class ConfigureResult {
+    "success": boolean;
+    "message"?: string;
+
+    /** Creates a new ConfigureResult instance. */
+    constructor($$source: Partial<ConfigureResult> = {}) {
+        if (!("success" in $$source)) {
+            this["success"] = false;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ConfigureResult instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ConfigureResult {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new ConfigureResult($$parsedSource as Partial<ConfigureResult>);
+    }
+}
+
+/**
  * ConnectivityResult 连通性测试结果
  */
 export class ConnectivityResult {
@@ -607,7 +1773,7 @@ export class ConnectivityResult {
     "status": number;
     "subStatus": string;
     "latencyMs": number;
-    "lastChecked": time$0.Time;
+    "lastChecked": string;
     "message"?: string;
     "httpCode"?: number;
 
@@ -632,7 +1798,7 @@ export class ConnectivityResult {
             this["latencyMs"] = 0;
         }
         if (!("lastChecked" in $$source)) {
-            this["lastChecked"] = null;
+            this["lastChecked"] = "0001-01-01T00:00:00.000Z";
         }
 
         Object.assign(this, $$source);
@@ -651,7 +1817,7 @@ export class ConnectivityResult {
  * ConsoleLog 控制台日志条目
  */
 export class ConsoleLog {
-    "timestamp": time$0.Time;
+    "timestamp": string;
 
     /**
      * INFO, WARN, ERROR
@@ -662,7 +1828,7 @@ export class ConsoleLog {
     /** Creates a new ConsoleLog instance. */
     constructor($$source: Partial<ConsoleLog> = {}) {
         if (!("timestamp" in $$source)) {
-            this["timestamp"] = null;
+            this["timestamp"] = "0001-01-01T00:00:00.000Z";
         }
         if (!("level" in $$source)) {
             this["level"] = "";
@@ -680,6 +1846,75 @@ export class ConsoleLog {
     static createFrom($$source: any = {}): ConsoleLog {
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         return new ConsoleLog($$parsedSource as Partial<ConsoleLog>);
+    }
+}
+
+/**
+ * CustomCliProxyStatus 代理状态
+ */
+export class CustomCliProxyStatus {
+    "enabled": boolean;
+    "baseUrl": string;
+
+    /** Creates a new CustomCliProxyStatus instance. */
+    constructor($$source: Partial<CustomCliProxyStatus> = {}) {
+        if (!("enabled" in $$source)) {
+            this["enabled"] = false;
+        }
+        if (!("baseUrl" in $$source)) {
+            this["baseUrl"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new CustomCliProxyStatus instance from a string or object.
+     */
+    static createFrom($$source: any = {}): CustomCliProxyStatus {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new CustomCliProxyStatus($$parsedSource as Partial<CustomCliProxyStatus>);
+    }
+}
+
+/**
+ * CustomCliTool 自定义 CLI 工具配置
+ */
+export class CustomCliTool {
+    "id": string;
+    "name": string;
+    "configFiles": ConfigFile[];
+    "proxyInjection"?: ProxyInjection[];
+
+    /** Creates a new CustomCliTool instance. */
+    constructor($$source: Partial<CustomCliTool> = {}) {
+        if (!("id" in $$source)) {
+            this["id"] = "";
+        }
+        if (!("name" in $$source)) {
+            this["name"] = "";
+        }
+        if (!("configFiles" in $$source)) {
+            this["configFiles"] = [];
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new CustomCliTool instance from a string or object.
+     */
+    static createFrom($$source: any = {}): CustomCliTool {
+        const $$createField2_0 = $$createType26;
+        const $$createField3_0 = $$createType28;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("configFiles" in $$parsedSource) {
+            $$parsedSource["configFiles"] = $$createField2_0($$parsedSource["configFiles"]);
+        }
+        if ("proxyInjection" in $$parsedSource) {
+            $$parsedSource["proxyInjection"] = $$createField3_0($$parsedSource["proxyInjection"]);
+        }
+        return new CustomCliTool($$parsedSource as Partial<CustomCliTool>);
     }
 }
 
@@ -721,6 +1956,11 @@ export class DeepLinkImportRequest {
      * API 密钥
      */
     "apiKey": string;
+
+    /**
+     * Claude 认证字段
+     */
+    "authType"?: string;
 
     /**
      * 可选模型名称
@@ -795,6 +2035,35 @@ export class DeepLinkImportRequest {
     static createFrom($$source: any = {}): DeepLinkImportRequest {
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         return new DeepLinkImportRequest($$parsedSource as Partial<DeepLinkImportRequest>);
+    }
+}
+
+export class DeleteRequestLogsByDateResult {
+    "deleted_request_logs": number;
+    "deleted_stats_hour": number;
+    "deleted_stats_day": number;
+
+    /** Creates a new DeleteRequestLogsByDateResult instance. */
+    constructor($$source: Partial<DeleteRequestLogsByDateResult> = {}) {
+        if (!("deleted_request_logs" in $$source)) {
+            this["deleted_request_logs"] = 0;
+        }
+        if (!("deleted_stats_hour" in $$source)) {
+            this["deleted_stats_hour"] = 0;
+        }
+        if (!("deleted_stats_day" in $$source)) {
+            this["deleted_stats_day"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new DeleteRequestLogsByDateResult instance from a string or object.
+     */
+    static createFrom($$source: any = {}): DeleteRequestLogsByDateResult {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new DeleteRequestLogsByDateResult($$parsedSource as Partial<DeleteRequestLogsByDateResult>);
     }
 }
 
@@ -894,6 +2163,39 @@ export class EnvConflict {
     }
 }
 
+export class FiveHourQuotaStatus {
+    "active": boolean;
+    "window_start": string;
+    "next_reset": string;
+    "used": number;
+
+    /** Creates a new FiveHourQuotaStatus instance. */
+    constructor($$source: Partial<FiveHourQuotaStatus> = {}) {
+        if (!("active" in $$source)) {
+            this["active"] = false;
+        }
+        if (!("window_start" in $$source)) {
+            this["window_start"] = "";
+        }
+        if (!("next_reset" in $$source)) {
+            this["next_reset"] = "";
+        }
+        if (!("used" in $$source)) {
+            this["used"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new FiveHourQuotaStatus instance from a string or object.
+     */
+    static createFrom($$source: any = {}): FiveHourQuotaStatus {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new FiveHourQuotaStatus($$parsedSource as Partial<FiveHourQuotaStatus>);
+    }
+}
+
 /**
  * GeminiAuthType 认证类型
  */
@@ -936,7 +2238,7 @@ export class GeminiPreset {
     "description"?: string;
     "category": string;
     "partnerPromotionKey"?: string;
-    "envConfig"?: { [_: string]: string };
+    "envConfig"?: { [_ in string]?: string };
 
     /** Creates a new GeminiPreset instance. */
     constructor($$source: Partial<GeminiPreset> = {}) {
@@ -989,9 +2291,25 @@ export class GeminiProvider {
      */
     "partnerPromotionKey"?: string;
     "enabled": boolean;
+
+    /**
+     * 首页供应商日志图标是否隐藏未读红点
+     */
     "hideLogBadge"?: boolean;
+
+    /**
+     * 隐藏排序字段：仅控制启用 / 未启用组内顺序
+     */
     "sortOrder"?: number;
+
+    /**
+     * 持久化启用组内顺序
+     */
     "enabledSortOrder"?: number;
+
+    /**
+     * 持久化未启用组内顺序
+     */
     "disabledSortOrder"?: number;
 
     /**
@@ -1005,19 +2323,55 @@ export class GeminiProvider {
     "providerConcurrencyLimit"?: number | null;
 
     /**
+     * 会话隔离最多承载会话数
+     */
+    "sessionMaxSessions"?: number;
+
+    /**
+     * 会话隔离空闲释放时间（分钟）
+     */
+    "sessionTTLMinutes"?: number;
+
+    /**
      * .env 配置
      */
-    "envConfig"?: { [_: string]: string };
+    "envConfig"?: { [_ in string]?: string };
 
     /**
      * settings.json 配置
      */
-    "settingsConfig"?: { [_: string]: any };
-    "requestBodyOverrides"?: { [_: string]: any };
-    "budgetQuotaSettings"?: { [_: string]: any };
-    "budgetQuotaUsedAdjustments"?: { [_: string]: number };
+    "settingsConfig"?: { [_ in string]?: any };
+    "requestBodyOverrides"?: { [_ in string]?: any };
+
+    /**
+     * 供应商级别预算额度配置（5 小时 / 日 / 周 / 月 / 总额度）
+     */
+    "budgetQuotaSettings"?: BudgetQuotaSettings | null;
+
+    /**
+     * 供应商级别预算额度当前已使用校准值（5 小时 / 日 / 周 / 月 / 总额度）
+     */
+    "budgetQuotaUsedAdjustments"?: BudgetQuotaAdjustments | null;
+
+    /**
+     * 供应商额度查询类型：启用后首页卡片会改为按远端 Token Plan 查询结果展示额度
+     */
     "providerQuotaQueryType"?: string;
-    "providerQuotaQueryConfig"?: { [_: string]: any };
+
+    /**
+     * 供应商额度查询完整配置：兼容旧类型字段，并承载脚本/官方余额/NewAPI 等模板能力
+     */
+    "providerQuotaQueryConfig"?: ProviderQuotaQueryConfig | null;
+
+    /**
+     * 额度耗尽后由自动化服务停用；与用户手动关闭区分。
+     */
+    "quotaAutoDisabled"?: boolean;
+
+    /**
+     * 临时启用额度耗尽的供应商时暂停自动停用。
+     */
+    "quotaAutoDisablePaused"?: boolean;
 
     /** Creates a new GeminiProvider instance. */
     constructor($$source: Partial<GeminiProvider> = {}) {
@@ -1038,122 +2392,32 @@ export class GeminiProvider {
      * Creates a new GeminiProvider instance from a string or object.
      */
     static createFrom($$source: any = {}): GeminiProvider {
-        const $$createField12_0 = $$createType4;
-        const $$createField13_0 = $$createType5;
+        const $$createField19_0 = $$createType4;
+        const $$createField20_0 = $$createType12;
+        const $$createField21_0 = $$createType12;
+        const $$createField22_0 = $$createType29;
+        const $$createField23_0 = $$createType30;
+        const $$createField25_0 = $$createType32;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("envConfig" in $$parsedSource) {
-            $$parsedSource["envConfig"] = $$createField12_0($$parsedSource["envConfig"]);
+            $$parsedSource["envConfig"] = $$createField19_0($$parsedSource["envConfig"]);
         }
         if ("settingsConfig" in $$parsedSource) {
-            $$parsedSource["settingsConfig"] = $$createField13_0($$parsedSource["settingsConfig"]);
-        }
-        return new GeminiProvider($$parsedSource as Partial<GeminiProvider>);
-    }
-}
-
-/**
- * OpenCodeProvider OpenCode 供应商配置。
- */
-export class OpenCodeProvider {
-    "id": string;
-    "name": string;
-    "websiteUrl"?: string;
-    "apiKeyUrl"?: string;
-    "baseUrl"?: string;
-    "apiKey"?: string;
-    "npm"?: string;
-    "icon"?: string;
-    "description"?: string;
-    "category"?: string;
-    "partnerPromotionKey"?: string;
-    "enabled": boolean;
-    "liveConfigManaged"?: boolean;
-    "isInConfig"?: boolean;
-    "sortOrder"?: number;
-    "enabledSortOrder"?: number;
-    "disabledSortOrder"?: number;
-    "level"?: number;
-    "settingsConfig"?: { [_: string]: any };
-    "requestBodyOverrides"?: { [_: string]: any };
-    "budgetQuotaSettings"?: { [_: string]: any };
-    "budgetQuotaUsedAdjustments"?: { [_: string]: number };
-    "providerQuotaQueryType"?: string;
-    "providerQuotaQueryConfig"?: { [_: string]: any };
-
-    /** Creates a new OpenCodeProvider instance. */
-    constructor($$source: Partial<OpenCodeProvider> = {}) {
-        if (!("id" in $$source)) {
-            this["id"] = "";
-        }
-        if (!("name" in $$source)) {
-            this["name"] = "";
-        }
-        if (!("enabled" in $$source)) {
-            this["enabled"] = false;
-        }
-
-        Object.assign(this, $$source);
-    }
-
-    /**
-     * Creates a new OpenCodeProvider instance from a string or object.
-     */
-    static createFrom($$source: any = {}): OpenCodeProvider {
-        const $$createField14_0 = $$createType4;
-        const $$createField15_0 = $$createType5;
-        const $$createField16_0 = $$createType4;
-        const $$createField17_0 = $$createType5;
-        const $$createField19_0 = $$createType4;
-        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
-        if ("settingsConfig" in $$parsedSource) {
-            $$parsedSource["settingsConfig"] = $$createField14_0($$parsedSource["settingsConfig"]);
+            $$parsedSource["settingsConfig"] = $$createField20_0($$parsedSource["settingsConfig"]);
         }
         if ("requestBodyOverrides" in $$parsedSource) {
-            $$parsedSource["requestBodyOverrides"] = $$createField15_0($$parsedSource["requestBodyOverrides"]);
+            $$parsedSource["requestBodyOverrides"] = $$createField21_0($$parsedSource["requestBodyOverrides"]);
         }
         if ("budgetQuotaSettings" in $$parsedSource) {
-            $$parsedSource["budgetQuotaSettings"] = $$createField16_0($$parsedSource["budgetQuotaSettings"]);
+            $$parsedSource["budgetQuotaSettings"] = $$createField22_0($$parsedSource["budgetQuotaSettings"]);
         }
         if ("budgetQuotaUsedAdjustments" in $$parsedSource) {
-            $$parsedSource["budgetQuotaUsedAdjustments"] = $$createField17_0($$parsedSource["budgetQuotaUsedAdjustments"]);
+            $$parsedSource["budgetQuotaUsedAdjustments"] = $$createField23_0($$parsedSource["budgetQuotaUsedAdjustments"]);
         }
         if ("providerQuotaQueryConfig" in $$parsedSource) {
-            $$parsedSource["providerQuotaQueryConfig"] = $$createField19_0($$parsedSource["providerQuotaQueryConfig"]);
+            $$parsedSource["providerQuotaQueryConfig"] = $$createField25_0($$parsedSource["providerQuotaQueryConfig"]);
         }
-        return new OpenCodeProvider($$parsedSource as Partial<OpenCodeProvider>);
-    }
-}
-
-export class OpenCodeProviderPreset {
-    "name": string;
-    "websiteUrl"?: string;
-    "apiKeyUrl"?: string;
-    "npm"?: string;
-    "baseUrl"?: string;
-    "description"?: string;
-    "category"?: string;
-    "partnerPromotionKey"?: string;
-    "settingsConfig"?: { [_: string]: any };
-
-    /** Creates a new OpenCodeProviderPreset instance. */
-    constructor($$source: Partial<OpenCodeProviderPreset> = {}) {
-        if (!("name" in $$source)) {
-            this["name"] = "";
-        }
-
-        Object.assign(this, $$source);
-    }
-
-    /**
-     * Creates a new OpenCodeProviderPreset instance from a string or object.
-     */
-    static createFrom($$source: any = {}): OpenCodeProviderPreset {
-        const $$createField8_0 = $$createType4;
-        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
-        if ("settingsConfig" in $$parsedSource) {
-            $$parsedSource["settingsConfig"] = $$createField8_0($$parsedSource["settingsConfig"]);
-        }
-        return new OpenCodeProviderPreset($$parsedSource as Partial<OpenCodeProviderPreset>);
+        return new GeminiProvider($$parsedSource as Partial<GeminiProvider>);
     }
 }
 
@@ -1223,13 +2487,180 @@ export class GeminiStatus {
     }
 }
 
+/**
+ * HealthCheckHistory 健康检查历史（单个 Provider 的时间线）
+ */
+export class HealthCheckHistory {
+    "providerId": number;
+    "providerName": string;
+    "platform": string;
+
+    /**
+     * 历史记录（最近 N 条）
+     */
+    "items": HealthCheckResult[];
+
+    /**
+     * 最新一条
+     */
+    "latest": HealthCheckResult | null;
+
+    /**
+     * 可用率（%）
+     */
+    "uptime": number;
+
+    /**
+     * 平均延迟
+     */
+    "avgLatencyMs": number;
+
+    /** Creates a new HealthCheckHistory instance. */
+    constructor($$source: Partial<HealthCheckHistory> = {}) {
+        if (!("providerId" in $$source)) {
+            this["providerId"] = 0;
+        }
+        if (!("providerName" in $$source)) {
+            this["providerName"] = "";
+        }
+        if (!("platform" in $$source)) {
+            this["platform"] = "";
+        }
+        if (!("items" in $$source)) {
+            this["items"] = [];
+        }
+        if (!("latest" in $$source)) {
+            this["latest"] = null;
+        }
+        if (!("uptime" in $$source)) {
+            this["uptime"] = 0;
+        }
+        if (!("avgLatencyMs" in $$source)) {
+            this["avgLatencyMs"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new HealthCheckHistory instance from a string or object.
+     */
+    static createFrom($$source: any = {}): HealthCheckHistory {
+        const $$createField3_0 = $$createType34;
+        const $$createField4_0 = $$createType35;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("items" in $$parsedSource) {
+            $$parsedSource["items"] = $$createField3_0($$parsedSource["items"]);
+        }
+        if ("latest" in $$parsedSource) {
+            $$parsedSource["latest"] = $$createField4_0($$parsedSource["latest"]);
+        }
+        return new HealthCheckHistory($$parsedSource as Partial<HealthCheckHistory>);
+    }
+}
+
+/**
+ * HealthCheckResult 健康检查结果
+ */
+export class HealthCheckResult {
+    "id": number;
+    "providerId": number;
+    "providerName": string;
+    "platform": string;
+    "model"?: string;
+    "endpoint"?: string;
+
+    /**
+     * operational/degraded/failed/validation_failed
+     */
+    "status": string;
+
+    /**
+     * 响应延迟（毫秒）
+     */
+    "latencyMs": number;
+
+    /**
+     * 错误消息
+     */
+    "errorMessage": string;
+    "httpStatusCode"?: number;
+
+    /**
+     * 检测时间
+     */
+    "checkedAt": string;
+
+    /**
+     * 日志聚合请求数
+     */
+    "totalRequests"?: number;
+
+    /**
+     * 日志聚合失败请求数
+     */
+    "failedRequests"?: number;
+
+    /**
+     * 日志聚合慢请求数
+     */
+    "slowRequests"?: number;
+
+    /**
+     * 日志聚合错误占比（%）
+     */
+    "errorRate"?: number;
+
+    /** Creates a new HealthCheckResult instance. */
+    constructor($$source: Partial<HealthCheckResult> = {}) {
+        if (!("id" in $$source)) {
+            this["id"] = 0;
+        }
+        if (!("providerId" in $$source)) {
+            this["providerId"] = 0;
+        }
+        if (!("providerName" in $$source)) {
+            this["providerName"] = "";
+        }
+        if (!("platform" in $$source)) {
+            this["platform"] = "";
+        }
+        if (!("status" in $$source)) {
+            this["status"] = "";
+        }
+        if (!("latencyMs" in $$source)) {
+            this["latencyMs"] = 0;
+        }
+        if (!("errorMessage" in $$source)) {
+            this["errorMessage"] = "";
+        }
+        if (!("checkedAt" in $$source)) {
+            this["checkedAt"] = "0001-01-01T00:00:00.000Z";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new HealthCheckResult instance from a string or object.
+     */
+    static createFrom($$source: any = {}): HealthCheckResult {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new HealthCheckResult($$parsedSource as Partial<HealthCheckResult>);
+    }
+}
+
 export class HeatmapStat {
     "day": string;
     "total_requests": number;
     "input_tokens": number;
     "output_tokens": number;
+    "cache_read_tokens": number;
     "reasoning_tokens": number;
+    "total_tokens": number;
     "total_cost": number;
+    "payload_bytes": number;
+    "payload_captured_requests": number;
 
     /** Creates a new HeatmapStat instance. */
     constructor($$source: Partial<HeatmapStat> = {}) {
@@ -1245,11 +2676,23 @@ export class HeatmapStat {
         if (!("output_tokens" in $$source)) {
             this["output_tokens"] = 0;
         }
+        if (!("cache_read_tokens" in $$source)) {
+            this["cache_read_tokens"] = 0;
+        }
         if (!("reasoning_tokens" in $$source)) {
             this["reasoning_tokens"] = 0;
         }
+        if (!("total_tokens" in $$source)) {
+            this["total_tokens"] = 0;
+        }
         if (!("total_cost" in $$source)) {
             this["total_cost"] = 0;
+        }
+        if (!("payload_bytes" in $$source)) {
+            this["payload_bytes"] = 0;
+        }
+        if (!("payload_captured_requests" in $$source)) {
+            this["payload_captured_requests"] = 0;
         }
 
         Object.assign(this, $$source);
@@ -1301,6 +2744,136 @@ export class Hotkey {
     static createFrom($$source: any = {}): Hotkey {
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         return new Hotkey($$parsedSource as Partial<Hotkey>);
+    }
+}
+
+/**
+ * LastUsedProvider 最后使用的供应商信息
+ * @author sm
+ */
+export class LastUsedProvider {
+    /**
+     * claude/codex/gemini
+     */
+    "platform": string;
+
+    /**
+     * 供应商 ID（字符串，兼容 int64/string）
+     */
+    "provider_id": string;
+
+    /**
+     * 供应商名称
+     */
+    "provider_name": string;
+
+    /**
+     * 更新时间（毫秒）
+     */
+    "updated_at": number;
+
+    /** Creates a new LastUsedProvider instance. */
+    constructor($$source: Partial<LastUsedProvider> = {}) {
+        if (!("platform" in $$source)) {
+            this["platform"] = "";
+        }
+        if (!("provider_id" in $$source)) {
+            this["provider_id"] = "";
+        }
+        if (!("provider_name" in $$source)) {
+            this["provider_name"] = "";
+        }
+        if (!("updated_at" in $$source)) {
+            this["updated_at"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new LastUsedProvider instance from a string or object.
+     */
+    static createFrom($$source: any = {}): LastUsedProvider {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new LastUsedProvider($$parsedSource as Partial<LastUsedProvider>);
+    }
+}
+
+/**
+ * ListenMode 监听模式
+ */
+export enum ListenMode {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    ListenModeLocalhost = "localhost",
+    ListenModeWSLAuto = "wsl_auto",
+    ListenModeLAN = "lan",
+    ListenModeCustom = "custom",
+};
+
+export class LogDatabaseStorageStat {
+    "file_bytes": number;
+    "wal_bytes": number;
+    "shm_bytes": number;
+    "total_bytes": number;
+    "used_bytes": number;
+    "free_bytes": number;
+
+    /** Creates a new LogDatabaseStorageStat instance. */
+    constructor($$source: Partial<LogDatabaseStorageStat> = {}) {
+        if (!("file_bytes" in $$source)) {
+            this["file_bytes"] = 0;
+        }
+        if (!("wal_bytes" in $$source)) {
+            this["wal_bytes"] = 0;
+        }
+        if (!("shm_bytes" in $$source)) {
+            this["shm_bytes"] = 0;
+        }
+        if (!("total_bytes" in $$source)) {
+            this["total_bytes"] = 0;
+        }
+        if (!("used_bytes" in $$source)) {
+            this["used_bytes"] = 0;
+        }
+        if (!("free_bytes" in $$source)) {
+            this["free_bytes"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new LogDatabaseStorageStat instance from a string or object.
+     */
+    static createFrom($$source: any = {}): LogDatabaseStorageStat {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new LogDatabaseStorageStat($$parsedSource as Partial<LogDatabaseStorageStat>);
+    }
+}
+
+export class LogProviderRef {
+    "provider_id"?: string;
+    "provider": string;
+
+    /** Creates a new LogProviderRef instance. */
+    constructor($$source: Partial<LogProviderRef> = {}) {
+        if (!("provider" in $$source)) {
+            this["provider"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new LogProviderRef instance from a string or object.
+     */
+    static createFrom($$source: any = {}): LogProviderRef {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new LogProviderRef($$parsedSource as Partial<LogProviderRef>);
     }
 }
 
@@ -1364,7 +2937,7 @@ export class LogStats {
      * Creates a new LogStats instance from a string or object.
      */
     static createFrom($$source: any = {}): LogStats {
-        const $$createField11_0 = $$createType8;
+        const $$createField11_0 = $$createType37;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("series" in $$parsedSource) {
             $$parsedSource["series"] = $$createField11_0($$parsedSource["series"]);
@@ -1422,23 +2995,195 @@ export class LogStatsSeries {
     }
 }
 
+export class LogStorageStats {
+    "database": LogDatabaseStorageStat;
+    "request_log": LogTableStorageStat;
+    "stats_hour": LogTableStorageStat;
+    "stats_day": LogTableStorageStat;
+
+    /** Creates a new LogStorageStats instance. */
+    constructor($$source: Partial<LogStorageStats> = {}) {
+        if (!("database" in $$source)) {
+            this["database"] = (new LogDatabaseStorageStat());
+        }
+        if (!("request_log" in $$source)) {
+            this["request_log"] = (new LogTableStorageStat());
+        }
+        if (!("stats_hour" in $$source)) {
+            this["stats_hour"] = (new LogTableStorageStat());
+        }
+        if (!("stats_day" in $$source)) {
+            this["stats_day"] = (new LogTableStorageStat());
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new LogStorageStats instance from a string or object.
+     */
+    static createFrom($$source: any = {}): LogStorageStats {
+        const $$createField0_0 = $$createType38;
+        const $$createField1_0 = $$createType39;
+        const $$createField2_0 = $$createType39;
+        const $$createField3_0 = $$createType39;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("database" in $$parsedSource) {
+            $$parsedSource["database"] = $$createField0_0($$parsedSource["database"]);
+        }
+        if ("request_log" in $$parsedSource) {
+            $$parsedSource["request_log"] = $$createField1_0($$parsedSource["request_log"]);
+        }
+        if ("stats_hour" in $$parsedSource) {
+            $$parsedSource["stats_hour"] = $$createField2_0($$parsedSource["stats_hour"]);
+        }
+        if ("stats_day" in $$parsedSource) {
+            $$parsedSource["stats_day"] = $$createField3_0($$parsedSource["stats_day"]);
+        }
+        return new LogStorageStats($$parsedSource as Partial<LogStorageStats>);
+    }
+}
+
+export class LogSummary {
+    "total_requests": number;
+    "successful_requests": number;
+    "failed_requests": number;
+    "excluded_requests": number;
+    "success_rate": number;
+    "input_tokens": number;
+    "output_tokens": number;
+    "cache_read_tokens": number;
+    "total_tokens": number;
+    "peak_tokens": number;
+    "avg_tokens_per_request": number;
+    "cost_total": number;
+    "cost_input": number;
+    "cost_cache_read": number;
+    "saved_cost_estimate": number;
+    "projected_daily_cost": number;
+    "previous_cost_total": number;
+    "comparison_available": boolean;
+    "activity_avg_qps": number;
+    "activity_peak_qps": number;
+    "activity_points": number[];
+
+    /** Creates a new LogSummary instance. */
+    constructor($$source: Partial<LogSummary> = {}) {
+        if (!("total_requests" in $$source)) {
+            this["total_requests"] = 0;
+        }
+        if (!("successful_requests" in $$source)) {
+            this["successful_requests"] = 0;
+        }
+        if (!("failed_requests" in $$source)) {
+            this["failed_requests"] = 0;
+        }
+        if (!("excluded_requests" in $$source)) {
+            this["excluded_requests"] = 0;
+        }
+        if (!("success_rate" in $$source)) {
+            this["success_rate"] = 0;
+        }
+        if (!("input_tokens" in $$source)) {
+            this["input_tokens"] = 0;
+        }
+        if (!("output_tokens" in $$source)) {
+            this["output_tokens"] = 0;
+        }
+        if (!("cache_read_tokens" in $$source)) {
+            this["cache_read_tokens"] = 0;
+        }
+        if (!("total_tokens" in $$source)) {
+            this["total_tokens"] = 0;
+        }
+        if (!("peak_tokens" in $$source)) {
+            this["peak_tokens"] = 0;
+        }
+        if (!("avg_tokens_per_request" in $$source)) {
+            this["avg_tokens_per_request"] = 0;
+        }
+        if (!("cost_total" in $$source)) {
+            this["cost_total"] = 0;
+        }
+        if (!("cost_input" in $$source)) {
+            this["cost_input"] = 0;
+        }
+        if (!("cost_cache_read" in $$source)) {
+            this["cost_cache_read"] = 0;
+        }
+        if (!("saved_cost_estimate" in $$source)) {
+            this["saved_cost_estimate"] = 0;
+        }
+        if (!("projected_daily_cost" in $$source)) {
+            this["projected_daily_cost"] = 0;
+        }
+        if (!("previous_cost_total" in $$source)) {
+            this["previous_cost_total"] = 0;
+        }
+        if (!("comparison_available" in $$source)) {
+            this["comparison_available"] = false;
+        }
+        if (!("activity_avg_qps" in $$source)) {
+            this["activity_avg_qps"] = 0;
+        }
+        if (!("activity_peak_qps" in $$source)) {
+            this["activity_peak_qps"] = 0;
+        }
+        if (!("activity_points" in $$source)) {
+            this["activity_points"] = [];
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new LogSummary instance from a string or object.
+     */
+    static createFrom($$source: any = {}): LogSummary {
+        const $$createField20_0 = $$createType40;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("activity_points" in $$parsedSource) {
+            $$parsedSource["activity_points"] = $$createField20_0($$parsedSource["activity_points"]);
+        }
+        return new LogSummary($$parsedSource as Partial<LogSummary>);
+    }
+}
+
+export class LogTableStorageStat {
+    "name": string;
+    "rows": number;
+    "bytes": number;
+
+    /** Creates a new LogTableStorageStat instance. */
+    constructor($$source: Partial<LogTableStorageStat> = {}) {
+        if (!("name" in $$source)) {
+            this["name"] = "";
+        }
+        if (!("rows" in $$source)) {
+            this["rows"] = 0;
+        }
+        if (!("bytes" in $$source)) {
+            this["bytes"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new LogTableStorageStat instance from a string or object.
+     */
+    static createFrom($$source: any = {}): LogTableStorageStat {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new LogTableStorageStat($$parsedSource as Partial<LogTableStorageStat>);
+    }
+}
+
 /**
- * MCPParseResult JSON 解析结果
+ * MCPParseResult MCP JSON 解析结果（供前端批量导入向导使用）
  */
 export class MCPParseResult {
-    /**
-     * 解析出的服务器列表
-     */
     "servers": MCPServer[];
-
-    /**
-     * 与现有配置冲突的名称
-     */
     "conflicts": string[];
-
-    /**
-     * 是否需要用户提供名称（单服务器无名时）
-     */
     "needName": boolean;
 
     /** Creates a new MCPParseResult instance. */
@@ -1460,8 +3205,8 @@ export class MCPParseResult {
      * Creates a new MCPParseResult instance from a string or object.
      */
     static createFrom($$source: any = {}): MCPParseResult {
-        const $$createField0_0 = $$createType10;
-        const $$createField1_0 = $$createType11;
+        const $$createField0_0 = $$createType42;
+        const $$createField1_0 = $$createType0;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("servers" in $$parsedSource) {
             $$parsedSource["servers"] = $$createField0_0($$parsedSource["servers"]);
@@ -1478,13 +3223,14 @@ export class MCPServer {
     "type": string;
     "command"?: string;
     "args"?: string[];
-    "env"?: { [_: string]: string };
+    "env"?: { [_ in string]?: string };
     "url"?: string;
     "website"?: string;
     "tips"?: string;
     "enable_platform": string[];
     "enabled_in_claude": boolean;
     "enabled_in_codex": boolean;
+    "enabled_in_gemini": boolean;
     "missing_placeholders": string[];
 
     /** Creates a new MCPServer instance. */
@@ -1504,6 +3250,9 @@ export class MCPServer {
         if (!("enabled_in_codex" in $$source)) {
             this["enabled_in_codex"] = false;
         }
+        if (!("enabled_in_gemini" in $$source)) {
+            this["enabled_in_gemini"] = false;
+        }
         if (!("missing_placeholders" in $$source)) {
             this["missing_placeholders"] = [];
         }
@@ -1515,10 +3264,10 @@ export class MCPServer {
      * Creates a new MCPServer instance from a string or object.
      */
     static createFrom($$source: any = {}): MCPServer {
-        const $$createField3_0 = $$createType11;
+        const $$createField3_0 = $$createType0;
         const $$createField4_0 = $$createType4;
-        const $$createField8_0 = $$createType11;
-        const $$createField11_0 = $$createType11;
+        const $$createField8_0 = $$createType0;
+        const $$createField12_0 = $$createType0;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("args" in $$parsedSource) {
             $$parsedSource["args"] = $$createField3_0($$parsedSource["args"]);
@@ -1530,9 +3279,404 @@ export class MCPServer {
             $$parsedSource["enable_platform"] = $$createField8_0($$parsedSource["enable_platform"]);
         }
         if ("missing_placeholders" in $$parsedSource) {
-            $$parsedSource["missing_placeholders"] = $$createField11_0($$parsedSource["missing_placeholders"]);
+            $$parsedSource["missing_placeholders"] = $$createField12_0($$parsedSource["missing_placeholders"]);
         }
         return new MCPServer($$parsedSource as Partial<MCPServer>);
+    }
+}
+
+/**
+ * ManualTestResult 手动测试结果
+ */
+export class ManualTestResult {
+    "success": boolean;
+    "latencyMs": number;
+    "httpCode": number;
+    "message": string;
+
+    /** Creates a new ManualTestResult instance. */
+    constructor($$source: Partial<ManualTestResult> = {}) {
+        if (!("success" in $$source)) {
+            this["success"] = false;
+        }
+        if (!("latencyMs" in $$source)) {
+            this["latencyMs"] = 0;
+        }
+        if (!("httpCode" in $$source)) {
+            this["httpCode"] = 0;
+        }
+        if (!("message" in $$source)) {
+            this["message"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ManualTestResult instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ManualTestResult {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new ManualTestResult($$parsedSource as Partial<ManualTestResult>);
+    }
+}
+
+export class MarkRequestLogsReadResult {
+    "marked_request_logs": number;
+
+    /** Creates a new MarkRequestLogsReadResult instance. */
+    constructor($$source: Partial<MarkRequestLogsReadResult> = {}) {
+        if (!("marked_request_logs" in $$source)) {
+            this["marked_request_logs"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new MarkRequestLogsReadResult instance from a string or object.
+     */
+    static createFrom($$source: any = {}): MarkRequestLogsReadResult {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new MarkRequestLogsReadResult($$parsedSource as Partial<MarkRequestLogsReadResult>);
+    }
+}
+
+export class ModelPricingRow {
+    "original_model"?: string;
+    "model": string;
+    "input_cost_per_token": number;
+    "output_cost_per_token": number;
+    "output_cost_per_reasoning_token": number;
+    "cache_creation_input_token_cost": number;
+    "has_cache_creation_input_token_cost": boolean;
+    "cache_read_input_token_cost": number;
+    "has_cache_read_input_token_cost": boolean;
+    "ephemeral_1h_cost_per_token": number;
+    "group_multiplier": number;
+    "is_override": boolean;
+    "is_custom": boolean;
+    "source": string;
+    "source_updated_at"?: string;
+
+    /** Creates a new ModelPricingRow instance. */
+    constructor($$source: Partial<ModelPricingRow> = {}) {
+        if (!("model" in $$source)) {
+            this["model"] = "";
+        }
+        if (!("input_cost_per_token" in $$source)) {
+            this["input_cost_per_token"] = 0;
+        }
+        if (!("output_cost_per_token" in $$source)) {
+            this["output_cost_per_token"] = 0;
+        }
+        if (!("output_cost_per_reasoning_token" in $$source)) {
+            this["output_cost_per_reasoning_token"] = 0;
+        }
+        if (!("cache_creation_input_token_cost" in $$source)) {
+            this["cache_creation_input_token_cost"] = 0;
+        }
+        if (!("has_cache_creation_input_token_cost" in $$source)) {
+            this["has_cache_creation_input_token_cost"] = false;
+        }
+        if (!("cache_read_input_token_cost" in $$source)) {
+            this["cache_read_input_token_cost"] = 0;
+        }
+        if (!("has_cache_read_input_token_cost" in $$source)) {
+            this["has_cache_read_input_token_cost"] = false;
+        }
+        if (!("ephemeral_1h_cost_per_token" in $$source)) {
+            this["ephemeral_1h_cost_per_token"] = 0;
+        }
+        if (!("group_multiplier" in $$source)) {
+            this["group_multiplier"] = 0;
+        }
+        if (!("is_override" in $$source)) {
+            this["is_override"] = false;
+        }
+        if (!("is_custom" in $$source)) {
+            this["is_custom"] = false;
+        }
+        if (!("source" in $$source)) {
+            this["source"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ModelPricingRow instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ModelPricingRow {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new ModelPricingRow($$parsedSource as Partial<ModelPricingRow>);
+    }
+}
+
+export class ModelPricingService {
+
+    /** Creates a new ModelPricingService instance. */
+    constructor($$source: Partial<ModelPricingService> = {}) {
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ModelPricingService instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ModelPricingService {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new ModelPricingService($$parsedSource as Partial<ModelPricingService>);
+    }
+}
+
+export class ModelPricingSyncResult {
+    "provider": string;
+    "synced_at": string;
+    "total_models": number;
+    "created_models": number;
+    "updated_models": number;
+    "changed_models": number;
+    "unchanged_models": number;
+    "unrecognized_models"?: string[];
+    "skipped_manual_models"?: string[];
+
+    /** Creates a new ModelPricingSyncResult instance. */
+    constructor($$source: Partial<ModelPricingSyncResult> = {}) {
+        if (!("provider" in $$source)) {
+            this["provider"] = "";
+        }
+        if (!("synced_at" in $$source)) {
+            this["synced_at"] = "";
+        }
+        if (!("total_models" in $$source)) {
+            this["total_models"] = 0;
+        }
+        if (!("created_models" in $$source)) {
+            this["created_models"] = 0;
+        }
+        if (!("updated_models" in $$source)) {
+            this["updated_models"] = 0;
+        }
+        if (!("changed_models" in $$source)) {
+            this["changed_models"] = 0;
+        }
+        if (!("unchanged_models" in $$source)) {
+            this["unchanged_models"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ModelPricingSyncResult instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ModelPricingSyncResult {
+        const $$createField7_0 = $$createType0;
+        const $$createField8_0 = $$createType0;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("unrecognized_models" in $$parsedSource) {
+            $$parsedSource["unrecognized_models"] = $$createField7_0($$parsedSource["unrecognized_models"]);
+        }
+        if ("skipped_manual_models" in $$parsedSource) {
+            $$parsedSource["skipped_manual_models"] = $$createField8_0($$parsedSource["skipped_manual_models"]);
+        }
+        return new ModelPricingSyncResult($$parsedSource as Partial<ModelPricingSyncResult>);
+    }
+}
+
+export class ModelUsageStat {
+    "model": string;
+    "total_requests": number;
+    "input_tokens": number;
+    "output_tokens": number;
+    "cache_read_tokens": number;
+    "total_tokens": number;
+    "cost_total": number;
+
+    /** Creates a new ModelUsageStat instance. */
+    constructor($$source: Partial<ModelUsageStat> = {}) {
+        if (!("model" in $$source)) {
+            this["model"] = "";
+        }
+        if (!("total_requests" in $$source)) {
+            this["total_requests"] = 0;
+        }
+        if (!("input_tokens" in $$source)) {
+            this["input_tokens"] = 0;
+        }
+        if (!("output_tokens" in $$source)) {
+            this["output_tokens"] = 0;
+        }
+        if (!("cache_read_tokens" in $$source)) {
+            this["cache_read_tokens"] = 0;
+        }
+        if (!("total_tokens" in $$source)) {
+            this["total_tokens"] = 0;
+        }
+        if (!("cost_total" in $$source)) {
+            this["cost_total"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ModelUsageStat instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ModelUsageStat {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new ModelUsageStat($$parsedSource as Partial<ModelUsageStat>);
+    }
+}
+
+/**
+ * NetworkSettings 网络设置
+ */
+export class NetworkSettings {
+    "listenMode": ListenMode;
+    "customAddress"?: string;
+    "currentAddress"?: string;
+    "wslAutoConfig": boolean;
+    "targetCli": TargetCli;
+
+    /** Creates a new NetworkSettings instance. */
+    constructor($$source: Partial<NetworkSettings> = {}) {
+        if (!("listenMode" in $$source)) {
+            this["listenMode"] = ListenMode.$zero;
+        }
+        if (!("wslAutoConfig" in $$source)) {
+            this["wslAutoConfig"] = false;
+        }
+        if (!("targetCli" in $$source)) {
+            this["targetCli"] = (new TargetCli());
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new NetworkSettings instance from a string or object.
+     */
+    static createFrom($$source: any = {}): NetworkSettings {
+        const $$createField4_0 = $$createType43;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("targetCli" in $$parsedSource) {
+            $$parsedSource["targetCli"] = $$createField4_0($$parsedSource["targetCli"]);
+        }
+        return new NetworkSettings($$parsedSource as Partial<NetworkSettings>);
+    }
+}
+
+/**
+ * OpenCodeProvider OpenCode 供应商配置。
+ *
+ * OpenCode 的 live 配置写入 ~/.config/opencode/opencode.json 的 provider.{id}，
+ * 其中 SettingsConfig 对应单个 provider fragment，典型结构：
+ * {"npm":"@ai-sdk/openai-compatible","options":{"baseURL":"...","apiKey":"..."},"models":{...}}
+ */
+export class OpenCodeProvider {
+    "id": string;
+    "name": string;
+    "websiteUrl"?: string;
+    "apiKeyUrl"?: string;
+    "baseUrl"?: string;
+    "apiKey"?: string;
+    "npm"?: string;
+    "icon"?: string;
+    "description"?: string;
+    "category"?: string;
+    "partnerPromotionKey"?: string;
+    "enabled": boolean;
+    "liveConfigManaged"?: boolean | null;
+    "isInConfig"?: boolean | null;
+    "sortOrder"?: number;
+    "enabledSortOrder"?: number;
+    "disabledSortOrder"?: number;
+    "level"?: number;
+    "settingsConfig"?: { [_ in string]?: any };
+    "requestBodyOverrides"?: { [_ in string]?: any };
+    "budgetQuotaSettings"?: BudgetQuotaSettings | null;
+    "budgetQuotaUsedAdjustments"?: BudgetQuotaAdjustments | null;
+    "providerQuotaQueryType"?: string;
+    "providerQuotaQueryConfig"?: ProviderQuotaQueryConfig | null;
+    "quotaAutoDisabled"?: boolean;
+    "quotaAutoDisablePaused"?: boolean;
+
+    /** Creates a new OpenCodeProvider instance. */
+    constructor($$source: Partial<OpenCodeProvider> = {}) {
+        if (!("id" in $$source)) {
+            this["id"] = "";
+        }
+        if (!("name" in $$source)) {
+            this["name"] = "";
+        }
+        if (!("enabled" in $$source)) {
+            this["enabled"] = false;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new OpenCodeProvider instance from a string or object.
+     */
+    static createFrom($$source: any = {}): OpenCodeProvider {
+        const $$createField18_0 = $$createType12;
+        const $$createField19_0 = $$createType12;
+        const $$createField20_0 = $$createType29;
+        const $$createField21_0 = $$createType30;
+        const $$createField23_0 = $$createType32;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("settingsConfig" in $$parsedSource) {
+            $$parsedSource["settingsConfig"] = $$createField18_0($$parsedSource["settingsConfig"]);
+        }
+        if ("requestBodyOverrides" in $$parsedSource) {
+            $$parsedSource["requestBodyOverrides"] = $$createField19_0($$parsedSource["requestBodyOverrides"]);
+        }
+        if ("budgetQuotaSettings" in $$parsedSource) {
+            $$parsedSource["budgetQuotaSettings"] = $$createField20_0($$parsedSource["budgetQuotaSettings"]);
+        }
+        if ("budgetQuotaUsedAdjustments" in $$parsedSource) {
+            $$parsedSource["budgetQuotaUsedAdjustments"] = $$createField21_0($$parsedSource["budgetQuotaUsedAdjustments"]);
+        }
+        if ("providerQuotaQueryConfig" in $$parsedSource) {
+            $$parsedSource["providerQuotaQueryConfig"] = $$createField23_0($$parsedSource["providerQuotaQueryConfig"]);
+        }
+        return new OpenCodeProvider($$parsedSource as Partial<OpenCodeProvider>);
+    }
+}
+
+export class OpenCodeProviderPreset {
+    "name": string;
+    "websiteUrl"?: string;
+    "apiKeyUrl"?: string;
+    "npm"?: string;
+    "baseUrl"?: string;
+    "description"?: string;
+    "category"?: string;
+    "partnerPromotionKey"?: string;
+    "settingsConfig"?: { [_ in string]?: any };
+
+    /** Creates a new OpenCodeProviderPreset instance. */
+    constructor($$source: Partial<OpenCodeProviderPreset> = {}) {
+        if (!("name" in $$source)) {
+            this["name"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new OpenCodeProviderPreset instance from a string or object.
+     */
+    static createFrom($$source: any = {}): OpenCodeProviderPreset {
+        const $$createField8_0 = $$createType12;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("settingsConfig" in $$parsedSource) {
+            $$parsedSource["settingsConfig"] = $$createField8_0($$parsedSource["settingsConfig"]);
+        }
+        return new OpenCodeProviderPreset($$parsedSource as Partial<OpenCodeProviderPreset>);
     }
 }
 
@@ -1588,26 +3732,96 @@ export class Provider {
     "tint": string;
     "accent": string;
     "enabled": boolean;
+
+    /**
+     * 首页供应商日志图标是否隐藏未读红点；缺省为 false，兼容旧配置默认显示。
+     */
     "hideLogBadge"?: boolean;
+
+    /**
+     * 供应商分类：official / third_party / custom 等。
+     */
+    "category"?: string;
+
+    /**
+     * 托管认证来源，例如 codex_oauth。为空时使用 APIKey。
+     */
+    "authProvider"?: string;
+
+    /**
+     * 托管认证绑定账号 ID。为空时使用该认证来源的默认账号。
+     */
+    "authAccountId"?: string;
+
+    /**
+     * Claude API 格式（仅 Claude 供应商使用）
+     * - anthropic: 原生 Anthropic Messages API，直接透传
+     * - openai_chat: OpenAI Chat Completions，需要格式转换
+     * - openai_responses: OpenAI Responses API，需要格式转换
+     */
     "apiFormat"?: string;
+
+    /**
+     * Anthropic Cache TTL 覆盖（仅 Claude 原生 Anthropic Messages 供应商使用）
+     * 空值表示不覆盖；支持 5m / 1h。
+     */
+    "anthropicCacheTTL"?: string;
+
+    /**
+     * 隐藏排序字段：仅控制启用 / 未启用组内顺序
+     */
     "sortOrder"?: number;
+
+    /**
+     * 持久化启用组内顺序
+     */
     "enabledSortOrder"?: number;
+
+    /**
+     * 持久化未启用组内顺序
+     */
     "disabledSortOrder"?: number;
-    "cliConfig"?: { [_: string]: any };
+
+    /**
+     * CLI 配置草稿 - 存储供应商关联的 CLI 可编辑配置
+     */
+    "cliConfig"?: { [_ in string]?: any };
+
+    /**
+     * API 端点路径（可选）- 覆盖平台默认端点
+     * 如：GLM 模型需要使用 /v1/chat/completions 而非 /v1/messages
+     * 留空则使用平台默认（claude: /v1/messages, codex: /responses）
+     */
     "apiEndpoint"?: string;
 
     /**
      * 模型白名单 - Provider 原生支持的模型名
      * 使用 map 实现 O(1) 查找，向后兼容（omitempty）
      */
-    "supportedModels"?: { [_: string]: boolean };
+    "supportedModels"?: { [_ in string]?: boolean };
 
     /**
      * 模型映射 - 外部模型名 -> Provider 内部模型名
      * 支持精确匹配和通配符（如 "claude-*" -> "anthropic/claude-*"）
      */
-    "modelMapping"?: { [_: string]: string };
-    "modelMappingDisabled"?: { [_: string]: boolean };
+    "modelMapping"?: { [_ in string]?: string };
+
+    /**
+     * 已关闭的模型映射 - 模型映射 key -> true
+     * 未配置或不存在的 key 默认开启，确保兼容历史配置
+     */
+    "modelMappingDisabled"?: { [_ in string]?: boolean };
+
+    /**
+     * 模型映射思考强度 - 模型映射 key -> 强制思考强度
+     * 空值或未配置表示保留请求原有强度
+     */
+    "modelMappingReasoningEfforts"?: { [_ in string]?: string };
+
+    /**
+     * 模型映射 1M 上下文声明 - 模型映射 key -> true
+     */
+    "modelMappingSupports1M"?: { [_ in string]?: boolean };
 
     /**
      * 模型映射未命中策略：
@@ -1617,10 +3831,16 @@ export class Provider {
     "modelMappingMissPolicy"?: string;
 
     /**
+     * 模型映射未命中时允许透传的请求模型规则。
+     * 仅在 Claude 模型路由开启且 miss policy=passthrough 时参与路由。
+     */
+    "modelPassthroughPatterns"?: string[];
+
+    /**
      * 请求体强制覆盖字段 - 仅在命中当前 Provider 转发时生效
      * 同名字段会覆盖，不存在的字段会新增；嵌套对象按层级递归写入
      */
-    "requestBodyOverrides"?: { [_: string]: any };
+    "requestBodyOverrides"?: { [_ in string]?: any };
 
     /**
      * 优先级分组 - 数字越小优先级越高（1-10，默认 1）
@@ -1634,19 +3854,85 @@ export class Provider {
     "providerConcurrencyLimit"?: number | null;
 
     /**
-     * 连通性检测开关 - 是否启用自动连通性检测
+     * 会话隔离：供应商最多承载的会话数（默认 5，范围 1-999）
+     */
+    "sessionMaxSessions"?: number;
+
+    /**
+     * 会话隔离：会话空闲释放时间，单位分钟（默认 5，范围 1-1440）
+     */
+    "sessionTTLMinutes"?: number;
+
+    /**
+     * 可用性监控开关 - 在可用性页面配置
+     * 启用后才会执行后台健康检查
+     */
+    "availabilityMonitorEnabled"?: boolean;
+
+    /**
+     * 连通性自动拉黑开关 - 在 Provider 编辑页面配置
+     * 前置条件：AvailabilityMonitorEnabled 必须为 true
+     * 启用后，当健康检查连续失败达到阈值时自动拉黑
+     */
+    "connectivityAutoBlacklist"?: boolean;
+
+    /**
+     * 可用性高级配置 - 可选，在可用性页面的"高级配置"中设置
+     */
+    "availabilityConfig"?: AvailabilityConfig | null;
+
+    /**
+     * 认证方式 - bearer / x-api-key / 自定义 Header 名
+     * 空值时使用平台默认（claude: x-api-key, codex: bearer）
+     */
+    "connectivityAuthType"?: string;
+
+    /**
+     * 供应商级别预算额度配置（5 小时 / 日 / 周 / 月 / 总额度）
+     * nil 表示未配置，各子项 Total 为 0 时不生效
+     */
+    "budgetQuotaSettings"?: BudgetQuotaSettings | null;
+
+    /**
+     * 供应商级别预算额度当前已使用校准值（5 小时 / 日 / 周 / 月 / 总额度）
+     * 用于在统计值基础上做手动校准，nil / 全 0 均视为未配置
+     */
+    "budgetQuotaUsedAdjustments"?: BudgetQuotaAdjustments | null;
+
+    /**
+     * 供应商额度查询类型：启用后首页卡片会改为按远端 Token Plan 查询结果展示额度
+     */
+    "providerQuotaQueryType"?: string;
+
+    /**
+     * 供应商额度查询完整配置：兼容旧类型字段，并承载脚本/官方余额/NewAPI 等模板能力
+     */
+    "providerQuotaQueryConfig"?: ProviderQuotaQueryConfig | null;
+
+    /**
+     * 额度耗尽后由自动化服务停用；与用户手动关闭区分。
+     */
+    "quotaAutoDisabled"?: boolean;
+
+    /**
+     * 用户临时启用额度耗尽的供应商时，暂停自动停用直到额度恢复或手动恢复自动化。
+     */
+    "quotaAutoDisablePaused"?: boolean;
+
+    /**
+     * [已废弃] 连通性检测开关 - 迁移到 AvailabilityMonitorEnabled
      */
     "connectivityCheck"?: boolean;
-    "availabilityMonitorEnabled"?: boolean;
-    "connectivityAutoBlacklist"?: boolean;
-    "availabilityConfig"?: { [_: string]: any };
+
+    /**
+     * [已废弃] 连通性检测模型 - 迁移到 AvailabilityConfig.TestModel
+     */
     "connectivityTestModel"?: string;
+
+    /**
+     * [已废弃] 连通性检测端点 - 迁移到 AvailabilityConfig.TestEndpoint
+     */
     "connectivityTestEndpoint"?: string;
-    "connectivityAuthType"?: string;
-    "budgetQuotaSettings"?: { [_: string]: any };
-    "budgetQuotaUsedAdjustments"?: { [_: string]: number };
-    "providerQuotaQueryType"?: string;
-    "providerQuotaQueryConfig"?: { [_: string]: any };
 
     /** Creates a new Provider instance. */
     constructor($$source: Partial<Provider> = {}) {
@@ -1685,24 +3971,207 @@ export class Provider {
      * Creates a new Provider instance from a string or object.
      */
     static createFrom($$source: any = {}): Provider {
-        const $$createField9_0 = $$createType12;
-        const $$createField10_0 = $$createType4;
+        const $$createField18_0 = $$createType12;
+        const $$createField20_0 = $$createType3;
+        const $$createField21_0 = $$createType4;
+        const $$createField22_0 = $$createType3;
+        const $$createField23_0 = $$createType4;
+        const $$createField24_0 = $$createType3;
+        const $$createField26_0 = $$createType0;
+        const $$createField27_0 = $$createType12;
+        const $$createField34_0 = $$createType45;
+        const $$createField36_0 = $$createType29;
+        const $$createField37_0 = $$createType30;
+        const $$createField39_0 = $$createType32;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("cliConfig" in $$parsedSource) {
+            $$parsedSource["cliConfig"] = $$createField18_0($$parsedSource["cliConfig"]);
+        }
         if ("supportedModels" in $$parsedSource) {
-            $$parsedSource["supportedModels"] = $$createField9_0($$parsedSource["supportedModels"]);
+            $$parsedSource["supportedModels"] = $$createField20_0($$parsedSource["supportedModels"]);
         }
         if ("modelMapping" in $$parsedSource) {
-            $$parsedSource["modelMapping"] = $$createField10_0($$parsedSource["modelMapping"]);
+            $$parsedSource["modelMapping"] = $$createField21_0($$parsedSource["modelMapping"]);
+        }
+        if ("modelMappingDisabled" in $$parsedSource) {
+            $$parsedSource["modelMappingDisabled"] = $$createField22_0($$parsedSource["modelMappingDisabled"]);
+        }
+        if ("modelMappingReasoningEfforts" in $$parsedSource) {
+            $$parsedSource["modelMappingReasoningEfforts"] = $$createField23_0($$parsedSource["modelMappingReasoningEfforts"]);
+        }
+        if ("modelMappingSupports1M" in $$parsedSource) {
+            $$parsedSource["modelMappingSupports1M"] = $$createField24_0($$parsedSource["modelMappingSupports1M"]);
+        }
+        if ("modelPassthroughPatterns" in $$parsedSource) {
+            $$parsedSource["modelPassthroughPatterns"] = $$createField26_0($$parsedSource["modelPassthroughPatterns"]);
+        }
+        if ("requestBodyOverrides" in $$parsedSource) {
+            $$parsedSource["requestBodyOverrides"] = $$createField27_0($$parsedSource["requestBodyOverrides"]);
+        }
+        if ("availabilityConfig" in $$parsedSource) {
+            $$parsedSource["availabilityConfig"] = $$createField34_0($$parsedSource["availabilityConfig"]);
+        }
+        if ("budgetQuotaSettings" in $$parsedSource) {
+            $$parsedSource["budgetQuotaSettings"] = $$createField36_0($$parsedSource["budgetQuotaSettings"]);
+        }
+        if ("budgetQuotaUsedAdjustments" in $$parsedSource) {
+            $$parsedSource["budgetQuotaUsedAdjustments"] = $$createField37_0($$parsedSource["budgetQuotaUsedAdjustments"]);
+        }
+        if ("providerQuotaQueryConfig" in $$parsedSource) {
+            $$parsedSource["providerQuotaQueryConfig"] = $$createField39_0($$parsedSource["providerQuotaQueryConfig"]);
         }
         return new Provider($$parsedSource as Partial<Provider>);
     }
 }
 
+export class ProviderConcurrencyRequestDetail {
+    "id": string;
+    "platform": string;
+    "providerId": string;
+    "providerName": string;
+    "userAgent"?: string;
+    "requestedModel"?: string;
+    "model"?: string;
+    "mappedModel"?: string;
+    "modelMappingPattern"?: string;
+    "modelMappingTarget"?: string;
+    "modelOverride"?: string;
+    "modelRouteCaptured": boolean;
+    "parameters": ProviderConcurrencyRequestParameter[];
+    "endpoint"?: string;
+    "isStream": boolean;
+    "startedAt": number;
+    "durationMs": number;
+
+    /** Creates a new ProviderConcurrencyRequestDetail instance. */
+    constructor($$source: Partial<ProviderConcurrencyRequestDetail> = {}) {
+        if (!("id" in $$source)) {
+            this["id"] = "";
+        }
+        if (!("platform" in $$source)) {
+            this["platform"] = "";
+        }
+        if (!("providerId" in $$source)) {
+            this["providerId"] = "";
+        }
+        if (!("providerName" in $$source)) {
+            this["providerName"] = "";
+        }
+        if (!("modelRouteCaptured" in $$source)) {
+            this["modelRouteCaptured"] = false;
+        }
+        if (!("parameters" in $$source)) {
+            this["parameters"] = [];
+        }
+        if (!("isStream" in $$source)) {
+            this["isStream"] = false;
+        }
+        if (!("startedAt" in $$source)) {
+            this["startedAt"] = 0;
+        }
+        if (!("durationMs" in $$source)) {
+            this["durationMs"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ProviderConcurrencyRequestDetail instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ProviderConcurrencyRequestDetail {
+        const $$createField12_0 = $$createType47;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("parameters" in $$parsedSource) {
+            $$parsedSource["parameters"] = $$createField12_0($$parsedSource["parameters"]);
+        }
+        return new ProviderConcurrencyRequestDetail($$parsedSource as Partial<ProviderConcurrencyRequestDetail>);
+    }
+}
+
+export class ProviderConcurrencyRequestParameter {
+    "key": string;
+    "requestedValue": string;
+    "actualValue": string;
+    "source": string;
+
+    /** Creates a new ProviderConcurrencyRequestParameter instance. */
+    constructor($$source: Partial<ProviderConcurrencyRequestParameter> = {}) {
+        if (!("key" in $$source)) {
+            this["key"] = "";
+        }
+        if (!("requestedValue" in $$source)) {
+            this["requestedValue"] = "";
+        }
+        if (!("actualValue" in $$source)) {
+            this["actualValue"] = "";
+        }
+        if (!("source" in $$source)) {
+            this["source"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ProviderConcurrencyRequestParameter instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ProviderConcurrencyRequestParameter {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new ProviderConcurrencyRequestParameter($$parsedSource as Partial<ProviderConcurrencyRequestParameter>);
+    }
+}
+
+export class ProviderConcurrencyStatus {
+    "platform": string;
+    "providerId": string;
+    "providerName": string;
+    "activeRequests": number;
+    "limit"?: number | null;
+    "requests": ProviderConcurrencyRequestDetail[];
+
+    /** Creates a new ProviderConcurrencyStatus instance. */
+    constructor($$source: Partial<ProviderConcurrencyStatus> = {}) {
+        if (!("platform" in $$source)) {
+            this["platform"] = "";
+        }
+        if (!("providerId" in $$source)) {
+            this["providerId"] = "";
+        }
+        if (!("providerName" in $$source)) {
+            this["providerName"] = "";
+        }
+        if (!("activeRequests" in $$source)) {
+            this["activeRequests"] = 0;
+        }
+        if (!("requests" in $$source)) {
+            this["requests"] = [];
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ProviderConcurrencyStatus instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ProviderConcurrencyStatus {
+        const $$createField5_0 = $$createType49;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("requests" in $$parsedSource) {
+            $$parsedSource["requests"] = $$createField5_0($$parsedSource["requests"]);
+        }
+        return new ProviderConcurrencyStatus($$parsedSource as Partial<ProviderConcurrencyStatus>);
+    }
+}
+
 export class ProviderDailyStat {
+    "provider_id"?: string;
     "provider": string;
     "total_requests": number;
     "successful_requests": number;
     "failed_requests": number;
+    "excluded_requests": number;
+    "unread_failed_requests": number;
     "success_rate": number;
     "input_tokens": number;
     "output_tokens": number;
@@ -1710,6 +4179,12 @@ export class ProviderDailyStat {
     "cache_create_tokens": number;
     "cache_read_tokens": number;
     "cost_total": number;
+    "avg_duration_sec": number;
+    "duration_sample_count": number;
+    "avg_first_token_sec": number;
+    "avg_tokens_per_sec": number;
+    "ttft_sample_count": number;
+    "tps_sample_count": number;
 
     /** Creates a new ProviderDailyStat instance. */
     constructor($$source: Partial<ProviderDailyStat> = {}) {
@@ -1724,6 +4199,12 @@ export class ProviderDailyStat {
         }
         if (!("failed_requests" in $$source)) {
             this["failed_requests"] = 0;
+        }
+        if (!("excluded_requests" in $$source)) {
+            this["excluded_requests"] = 0;
+        }
+        if (!("unread_failed_requests" in $$source)) {
+            this["unread_failed_requests"] = 0;
         }
         if (!("success_rate" in $$source)) {
             this["success_rate"] = 0;
@@ -1746,6 +4227,24 @@ export class ProviderDailyStat {
         if (!("cost_total" in $$source)) {
             this["cost_total"] = 0;
         }
+        if (!("avg_duration_sec" in $$source)) {
+            this["avg_duration_sec"] = 0;
+        }
+        if (!("duration_sample_count" in $$source)) {
+            this["duration_sample_count"] = 0;
+        }
+        if (!("avg_first_token_sec" in $$source)) {
+            this["avg_first_token_sec"] = 0;
+        }
+        if (!("avg_tokens_per_sec" in $$source)) {
+            this["avg_tokens_per_sec"] = 0;
+        }
+        if (!("ttft_sample_count" in $$source)) {
+            this["ttft_sample_count"] = 0;
+        }
+        if (!("tps_sample_count" in $$source)) {
+            this["tps_sample_count"] = 0;
+        }
 
         Object.assign(this, $$source);
     }
@@ -1759,6 +4258,750 @@ export class ProviderDailyStat {
     }
 }
 
+export class ProviderLogStorageStat {
+    "platform": string;
+    "provider_id"?: string;
+    "provider": string;
+    "request_log_rows": number;
+    "request_log_bytes": number;
+    "stats_rows": number;
+    "stats_bytes": number;
+    "total_bytes": number;
+    "latest_at": string;
+
+    /** Creates a new ProviderLogStorageStat instance. */
+    constructor($$source: Partial<ProviderLogStorageStat> = {}) {
+        if (!("platform" in $$source)) {
+            this["platform"] = "";
+        }
+        if (!("provider" in $$source)) {
+            this["provider"] = "";
+        }
+        if (!("request_log_rows" in $$source)) {
+            this["request_log_rows"] = 0;
+        }
+        if (!("request_log_bytes" in $$source)) {
+            this["request_log_bytes"] = 0;
+        }
+        if (!("stats_rows" in $$source)) {
+            this["stats_rows"] = 0;
+        }
+        if (!("stats_bytes" in $$source)) {
+            this["stats_bytes"] = 0;
+        }
+        if (!("total_bytes" in $$source)) {
+            this["total_bytes"] = 0;
+        }
+        if (!("latest_at" in $$source)) {
+            this["latest_at"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ProviderLogStorageStat instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ProviderLogStorageStat {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new ProviderLogStorageStat($$parsedSource as Partial<ProviderLogStorageStat>);
+    }
+}
+
+export class ProviderModelPerCallPrice {
+    "unified"?: number | null;
+    "input"?: number | null;
+    "output"?: number | null;
+
+    /** Creates a new ProviderModelPerCallPrice instance. */
+    constructor($$source: Partial<ProviderModelPerCallPrice> = {}) {
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ProviderModelPerCallPrice instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ProviderModelPerCallPrice {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new ProviderModelPerCallPrice($$parsedSource as Partial<ProviderModelPerCallPrice>);
+    }
+}
+
+export class ProviderModelPricingDebug {
+    "baseUrl": string;
+    "platform"?: string;
+    "requestedSource": string;
+    "resolvedSource"?: string;
+    "configuredAuthType": string;
+    "authCandidates"?: string[];
+    "attempts"?: ProviderModelPricingDebugAttempt[];
+
+    /** Creates a new ProviderModelPricingDebug instance. */
+    constructor($$source: Partial<ProviderModelPricingDebug> = {}) {
+        if (!("baseUrl" in $$source)) {
+            this["baseUrl"] = "";
+        }
+        if (!("requestedSource" in $$source)) {
+            this["requestedSource"] = "";
+        }
+        if (!("configuredAuthType" in $$source)) {
+            this["configuredAuthType"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ProviderModelPricingDebug instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ProviderModelPricingDebug {
+        const $$createField5_0 = $$createType0;
+        const $$createField6_0 = $$createType51;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("authCandidates" in $$parsedSource) {
+            $$parsedSource["authCandidates"] = $$createField5_0($$parsedSource["authCandidates"]);
+        }
+        if ("attempts" in $$parsedSource) {
+            $$parsedSource["attempts"] = $$createField6_0($$parsedSource["attempts"]);
+        }
+        return new ProviderModelPricingDebug($$parsedSource as Partial<ProviderModelPricingDebug>);
+    }
+}
+
+export class ProviderModelPricingDebugAttempt {
+    "source": string;
+    "endpoint": string;
+    "method": string;
+    "url": string;
+    "authType": string;
+    "requestHeaders"?: { [_ in string]?: string };
+    "statusCode"?: number;
+    "responseHeaders"?: { [_ in string]?: string };
+    "contentType"?: string;
+    "responseBody"?: string;
+    "responseBodyBytes"?: number;
+    "responseBodyTruncated"?: boolean;
+    "durationMs"?: number;
+    "error"?: string;
+
+    /** Creates a new ProviderModelPricingDebugAttempt instance. */
+    constructor($$source: Partial<ProviderModelPricingDebugAttempt> = {}) {
+        if (!("source" in $$source)) {
+            this["source"] = "";
+        }
+        if (!("endpoint" in $$source)) {
+            this["endpoint"] = "";
+        }
+        if (!("method" in $$source)) {
+            this["method"] = "";
+        }
+        if (!("url" in $$source)) {
+            this["url"] = "";
+        }
+        if (!("authType" in $$source)) {
+            this["authType"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ProviderModelPricingDebugAttempt instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ProviderModelPricingDebugAttempt {
+        const $$createField5_0 = $$createType4;
+        const $$createField7_0 = $$createType4;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("requestHeaders" in $$parsedSource) {
+            $$parsedSource["requestHeaders"] = $$createField5_0($$parsedSource["requestHeaders"]);
+        }
+        if ("responseHeaders" in $$parsedSource) {
+            $$parsedSource["responseHeaders"] = $$createField7_0($$parsedSource["responseHeaders"]);
+        }
+        return new ProviderModelPricingDebugAttempt($$parsedSource as Partial<ProviderModelPricingDebugAttempt>);
+    }
+}
+
+export class ProviderModelPricingItem {
+    "model": string;
+    "displayName"?: string;
+    "createdAt"?: string;
+    "maxInputTokens"?: number;
+    "maxTokens"?: number;
+    "capabilities"?: { [_ in string]?: any };
+    "description"?: string;
+
+    /**
+     * 0=按量，1=按次
+     */
+    "quotaType": number;
+    "modelRatio": number;
+    "completionRatio": number;
+    "groupMultiplier"?: number;
+    "groupMultiplierSource"?: string;
+    "cacheCreateMultiplier"?: number;
+    "cacheReadMultiplier"?: number;
+    "resolvedCacheCreateMultiplier"?: number;
+    "resolvedCacheReadMultiplier"?: number;
+    "cacheCreateMultiplierSource"?: string;
+    "cacheReadMultiplierSource"?: string;
+    "ownerBy"?: string;
+    "enableGroups"?: string[];
+    "supportedEndpointTypes"?: string[];
+    "inputUsdPerM"?: number;
+    "outputUsdPerM"?: number;
+    "cacheCreate1hUsdPerM"?: number;
+    "perCallPrice"?: ProviderModelPerCallPrice | null;
+
+    /** Creates a new ProviderModelPricingItem instance. */
+    constructor($$source: Partial<ProviderModelPricingItem> = {}) {
+        if (!("model" in $$source)) {
+            this["model"] = "";
+        }
+        if (!("quotaType" in $$source)) {
+            this["quotaType"] = 0;
+        }
+        if (!("modelRatio" in $$source)) {
+            this["modelRatio"] = 0;
+        }
+        if (!("completionRatio" in $$source)) {
+            this["completionRatio"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ProviderModelPricingItem instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ProviderModelPricingItem {
+        const $$createField5_0 = $$createType12;
+        const $$createField19_0 = $$createType0;
+        const $$createField20_0 = $$createType0;
+        const $$createField24_0 = $$createType53;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("capabilities" in $$parsedSource) {
+            $$parsedSource["capabilities"] = $$createField5_0($$parsedSource["capabilities"]);
+        }
+        if ("enableGroups" in $$parsedSource) {
+            $$parsedSource["enableGroups"] = $$createField19_0($$parsedSource["enableGroups"]);
+        }
+        if ("supportedEndpointTypes" in $$parsedSource) {
+            $$parsedSource["supportedEndpointTypes"] = $$createField20_0($$parsedSource["supportedEndpointTypes"]);
+        }
+        if ("perCallPrice" in $$parsedSource) {
+            $$parsedSource["perCallPrice"] = $$createField24_0($$parsedSource["perCallPrice"]);
+        }
+        return new ProviderModelPricingItem($$parsedSource as Partial<ProviderModelPricingItem>);
+    }
+}
+
+export class ProviderModelPricingResponse {
+    "siteType": SiteType;
+    "pricingSource": string;
+    "groupRatio"?: { [_ in string]?: number };
+    "usableGroup"?: { [_ in string]?: string };
+    "models": ProviderModelPricingItem[];
+    "fetchError"?: string;
+    "imported"?: boolean;
+    "challengeDetected"?: boolean;
+    "challengeMessage"?: string;
+    "debug"?: ProviderModelPricingDebug | null;
+
+    /** Creates a new ProviderModelPricingResponse instance. */
+    constructor($$source: Partial<ProviderModelPricingResponse> = {}) {
+        if (!("siteType" in $$source)) {
+            this["siteType"] = SiteType.$zero;
+        }
+        if (!("pricingSource" in $$source)) {
+            this["pricingSource"] = "";
+        }
+        if (!("models" in $$source)) {
+            this["models"] = [];
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ProviderModelPricingResponse instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ProviderModelPricingResponse {
+        const $$createField2_0 = $$createType54;
+        const $$createField3_0 = $$createType4;
+        const $$createField4_0 = $$createType56;
+        const $$createField9_0 = $$createType58;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("groupRatio" in $$parsedSource) {
+            $$parsedSource["groupRatio"] = $$createField2_0($$parsedSource["groupRatio"]);
+        }
+        if ("usableGroup" in $$parsedSource) {
+            $$parsedSource["usableGroup"] = $$createField3_0($$parsedSource["usableGroup"]);
+        }
+        if ("models" in $$parsedSource) {
+            $$parsedSource["models"] = $$createField4_0($$parsedSource["models"]);
+        }
+        if ("debug" in $$parsedSource) {
+            $$parsedSource["debug"] = $$createField9_0($$parsedSource["debug"]);
+        }
+        return new ProviderModelPricingResponse($$parsedSource as Partial<ProviderModelPricingResponse>);
+    }
+}
+
+export class ProviderPerformanceTrendPoint {
+    "bucket_start": string;
+    "avg_first_token_sec": number;
+    "avg_tokens_per_sec": number;
+    "ttft_sample_count": number;
+    "tps_sample_count": number;
+
+    /** Creates a new ProviderPerformanceTrendPoint instance. */
+    constructor($$source: Partial<ProviderPerformanceTrendPoint> = {}) {
+        if (!("bucket_start" in $$source)) {
+            this["bucket_start"] = "";
+        }
+        if (!("avg_first_token_sec" in $$source)) {
+            this["avg_first_token_sec"] = 0;
+        }
+        if (!("avg_tokens_per_sec" in $$source)) {
+            this["avg_tokens_per_sec"] = 0;
+        }
+        if (!("ttft_sample_count" in $$source)) {
+            this["ttft_sample_count"] = 0;
+        }
+        if (!("tps_sample_count" in $$source)) {
+            this["tps_sample_count"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ProviderPerformanceTrendPoint instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ProviderPerformanceTrendPoint {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new ProviderPerformanceTrendPoint($$parsedSource as Partial<ProviderPerformanceTrendPoint>);
+    }
+}
+
+export class ProviderQuotaAutomationResult {
+    "success": boolean;
+    "queryType": string;
+    "items": ProviderQuotaQueryItem[];
+    "error"?: string;
+    "queriedAt"?: number;
+    "providerEnabled": boolean;
+    "quotaAutoDisabled": boolean;
+    "quotaAutoDisablePaused": boolean;
+    "stateChanged": boolean;
+
+    /** Creates a new ProviderQuotaAutomationResult instance. */
+    constructor($$source: Partial<ProviderQuotaAutomationResult> = {}) {
+        if (!("success" in $$source)) {
+            this["success"] = false;
+        }
+        if (!("queryType" in $$source)) {
+            this["queryType"] = "";
+        }
+        if (!("items" in $$source)) {
+            this["items"] = [];
+        }
+        if (!("providerEnabled" in $$source)) {
+            this["providerEnabled"] = false;
+        }
+        if (!("quotaAutoDisabled" in $$source)) {
+            this["quotaAutoDisabled"] = false;
+        }
+        if (!("quotaAutoDisablePaused" in $$source)) {
+            this["quotaAutoDisablePaused"] = false;
+        }
+        if (!("stateChanged" in $$source)) {
+            this["stateChanged"] = false;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ProviderQuotaAutomationResult instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ProviderQuotaAutomationResult {
+        const $$createField2_0 = $$createType60;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("items" in $$parsedSource) {
+            $$parsedSource["items"] = $$createField2_0($$parsedSource["items"]);
+        }
+        return new ProviderQuotaAutomationResult($$parsedSource as Partial<ProviderQuotaAutomationResult>);
+    }
+}
+
+export class ProviderQuotaAutomationService {
+
+    /** Creates a new ProviderQuotaAutomationService instance. */
+    constructor($$source: Partial<ProviderQuotaAutomationService> = {}) {
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ProviderQuotaAutomationService instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ProviderQuotaAutomationService {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new ProviderQuotaAutomationService($$parsedSource as Partial<ProviderQuotaAutomationService>);
+    }
+}
+
+export class ProviderQuotaQueryConfig {
+    "enabled": boolean;
+    "templateType"?: string;
+    "code"?: string;
+    "timeout"?: number;
+    "apiKey"?: string;
+    "baseUrl"?: string;
+    "accessToken"?: string;
+    "userId"?: string;
+    "tokenPlanProvider"?: string;
+    "autoQueryInterval"?: number;
+    "autoIntervalMinutes"?: number;
+
+    /** Creates a new ProviderQuotaQueryConfig instance. */
+    constructor($$source: Partial<ProviderQuotaQueryConfig> = {}) {
+        if (!("enabled" in $$source)) {
+            this["enabled"] = false;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ProviderQuotaQueryConfig instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ProviderQuotaQueryConfig {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new ProviderQuotaQueryConfig($$parsedSource as Partial<ProviderQuotaQueryConfig>);
+    }
+}
+
+export class ProviderQuotaQueryItem {
+    "key": string;
+    "label"?: string;
+    "used": number;
+    "total": number;
+    "nextReset"?: string;
+    "active": boolean;
+    "valueMode"?: string;
+    "unit"?: string;
+    "extra"?: string;
+    "invalidMessage"?: string;
+
+    /** Creates a new ProviderQuotaQueryItem instance. */
+    constructor($$source: Partial<ProviderQuotaQueryItem> = {}) {
+        if (!("key" in $$source)) {
+            this["key"] = "";
+        }
+        if (!("used" in $$source)) {
+            this["used"] = 0;
+        }
+        if (!("total" in $$source)) {
+            this["total"] = 0;
+        }
+        if (!("active" in $$source)) {
+            this["active"] = false;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ProviderQuotaQueryItem instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ProviderQuotaQueryItem {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new ProviderQuotaQueryItem($$parsedSource as Partial<ProviderQuotaQueryItem>);
+    }
+}
+
+export class ProviderQuotaQueryPresetEntry {
+    "id": string;
+    "name": string;
+    "code": string;
+    "updatedAt"?: number;
+
+    /** Creates a new ProviderQuotaQueryPresetEntry instance. */
+    constructor($$source: Partial<ProviderQuotaQueryPresetEntry> = {}) {
+        if (!("id" in $$source)) {
+            this["id"] = "";
+        }
+        if (!("name" in $$source)) {
+            this["name"] = "";
+        }
+        if (!("code" in $$source)) {
+            this["code"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ProviderQuotaQueryPresetEntry instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ProviderQuotaQueryPresetEntry {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new ProviderQuotaQueryPresetEntry($$parsedSource as Partial<ProviderQuotaQueryPresetEntry>);
+    }
+}
+
+export class ProviderQuotaQueryPresetGroup {
+    "defaultId"?: string;
+    "items": ProviderQuotaQueryPresetEntry[];
+
+    /** Creates a new ProviderQuotaQueryPresetGroup instance. */
+    constructor($$source: Partial<ProviderQuotaQueryPresetGroup> = {}) {
+        if (!("items" in $$source)) {
+            this["items"] = [];
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ProviderQuotaQueryPresetGroup instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ProviderQuotaQueryPresetGroup {
+        const $$createField1_0 = $$createType62;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("items" in $$parsedSource) {
+            $$parsedSource["items"] = $$createField1_0($$parsedSource["items"]);
+        }
+        return new ProviderQuotaQueryPresetGroup($$parsedSource as Partial<ProviderQuotaQueryPresetGroup>);
+    }
+}
+
+export class ProviderQuotaQueryResult {
+    "success": boolean;
+    "queryType": string;
+    "items": ProviderQuotaQueryItem[];
+    "error"?: string;
+    "queriedAt"?: number;
+
+    /** Creates a new ProviderQuotaQueryResult instance. */
+    constructor($$source: Partial<ProviderQuotaQueryResult> = {}) {
+        if (!("success" in $$source)) {
+            this["success"] = false;
+        }
+        if (!("queryType" in $$source)) {
+            this["queryType"] = "";
+        }
+        if (!("items" in $$source)) {
+            this["items"] = [];
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ProviderQuotaQueryResult instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ProviderQuotaQueryResult {
+        const $$createField2_0 = $$createType60;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("items" in $$parsedSource) {
+            $$parsedSource["items"] = $$createField2_0($$parsedSource["items"]);
+        }
+        return new ProviderQuotaQueryResult($$parsedSource as Partial<ProviderQuotaQueryResult>);
+    }
+}
+
+export class ProviderQuotaScriptValidationResult {
+    "valid": boolean;
+    "error"?: string;
+
+    /** Creates a new ProviderQuotaScriptValidationResult instance. */
+    constructor($$source: Partial<ProviderQuotaScriptValidationResult> = {}) {
+        if (!("valid" in $$source)) {
+            this["valid"] = false;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ProviderQuotaScriptValidationResult instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ProviderQuotaScriptValidationResult {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new ProviderQuotaScriptValidationResult($$parsedSource as Partial<ProviderQuotaScriptValidationResult>);
+    }
+}
+
+/**
+ * ProviderTimeline Provider 时间线（用于前端展示）
+ */
+export class ProviderTimeline {
+    "providerId": number;
+    "providerName": string;
+    "platform": string;
+    "availabilityMonitorEnabled": boolean;
+    "connectivityAutoBlacklist": boolean;
+
+    /**
+     * 高级配置
+     */
+    "availabilityConfig"?: AvailabilityConfig | null;
+
+    /**
+     * 历史记录
+     */
+    "items": HealthCheckResult[];
+
+    /**
+     * 最新一条
+     */
+    "latest": HealthCheckResult | null;
+
+    /**
+     * 可用率
+     */
+    "uptime": number;
+
+    /**
+     * 平均延迟
+     */
+    "avgLatencyMs": number;
+
+    /** Creates a new ProviderTimeline instance. */
+    constructor($$source: Partial<ProviderTimeline> = {}) {
+        if (!("providerId" in $$source)) {
+            this["providerId"] = 0;
+        }
+        if (!("providerName" in $$source)) {
+            this["providerName"] = "";
+        }
+        if (!("platform" in $$source)) {
+            this["platform"] = "";
+        }
+        if (!("availabilityMonitorEnabled" in $$source)) {
+            this["availabilityMonitorEnabled"] = false;
+        }
+        if (!("connectivityAutoBlacklist" in $$source)) {
+            this["connectivityAutoBlacklist"] = false;
+        }
+        if (!("items" in $$source)) {
+            this["items"] = [];
+        }
+        if (!("latest" in $$source)) {
+            this["latest"] = null;
+        }
+        if (!("uptime" in $$source)) {
+            this["uptime"] = 0;
+        }
+        if (!("avgLatencyMs" in $$source)) {
+            this["avgLatencyMs"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ProviderTimeline instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ProviderTimeline {
+        const $$createField5_0 = $$createType45;
+        const $$createField6_0 = $$createType34;
+        const $$createField7_0 = $$createType35;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("availabilityConfig" in $$parsedSource) {
+            $$parsedSource["availabilityConfig"] = $$createField5_0($$parsedSource["availabilityConfig"]);
+        }
+        if ("items" in $$parsedSource) {
+            $$parsedSource["items"] = $$createField6_0($$parsedSource["items"]);
+        }
+        if ("latest" in $$parsedSource) {
+            $$parsedSource["latest"] = $$createField7_0($$parsedSource["latest"]);
+        }
+        return new ProviderTimeline($$parsedSource as Partial<ProviderTimeline>);
+    }
+}
+
+export class ProviderUnreadFailedCountResult {
+    "unread_failed_requests": number;
+
+    /** Creates a new ProviderUnreadFailedCountResult instance. */
+    constructor($$source: Partial<ProviderUnreadFailedCountResult> = {}) {
+        if (!("unread_failed_requests" in $$source)) {
+            this["unread_failed_requests"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ProviderUnreadFailedCountResult instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ProviderUnreadFailedCountResult {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new ProviderUnreadFailedCountResult($$parsedSource as Partial<ProviderUnreadFailedCountResult>);
+    }
+}
+
+export class ProviderUnreadFailedStat {
+    "provider_id"?: string;
+    "provider": string;
+    "unread_failed_requests": number;
+
+    /** Creates a new ProviderUnreadFailedStat instance. */
+    constructor($$source: Partial<ProviderUnreadFailedStat> = {}) {
+        if (!("provider" in $$source)) {
+            this["provider"] = "";
+        }
+        if (!("unread_failed_requests" in $$source)) {
+            this["unread_failed_requests"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ProviderUnreadFailedStat instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ProviderUnreadFailedStat {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new ProviderUnreadFailedStat($$parsedSource as Partial<ProviderUnreadFailedStat>);
+    }
+}
+
+/**
+ * ProxyInjection 代理注入配置
+ */
+export class ProxyInjection {
+    "targetFileId": string;
+    "baseUrlField": string;
+    "authTokenField"?: string;
+
+    /** Creates a new ProxyInjection instance. */
+    constructor($$source: Partial<ProxyInjection> = {}) {
+        if (!("targetFileId" in $$source)) {
+            this["targetFileId"] = "";
+        }
+        if (!("baseUrlField" in $$source)) {
+            this["baseUrlField"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ProxyInjection instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ProxyInjection {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new ProxyInjection($$parsedSource as Partial<ProxyInjection>);
+    }
+}
+
 export class ReqeustLog {
     "id": number;
 
@@ -1767,20 +5010,54 @@ export class ReqeustLog {
      */
     "platform": string;
     "model": string;
+    "requested_model"?: string;
+    "mapped_model"?: string;
+    "model_mapping_pattern"?: string;
+    "model_mapping_target"?: string;
+    "model_override"?: string;
+    "model_route_captured": boolean;
+    "response_model"?: string;
+    "reasoning_effort"?: string;
+    "reasoning_effort_source"?: string;
+    "user_agent"?: string;
+    "provider_id"?: string;
 
     /**
      * provider name
      */
     "provider": string;
+    "price_source"?: string;
     "http_code": number;
+    "request_outcome"?: string;
+    "outcome_reason"?: string;
     "input_tokens": number;
     "output_tokens": number;
     "cache_create_tokens": number;
+    "ephemeral_5m_tokens": number;
+    "ephemeral_1h_tokens": number;
     "cache_read_tokens": number;
     "reasoning_tokens": number;
     "is_stream": boolean;
     "duration_sec": number;
+    "first_token_sec": number;
+    "proxy_prepare_ms": number;
+    "dns_ms": number;
+    "connect_ms": number;
+    "tls_ms": number;
+    "upstream_ttfb_ms": number;
+    "proxy_stream_delay_ms": number;
+    "connection_reused": boolean;
+    "stream_last_event"?: string;
+    "stream_terminal_event"?: string;
+    "stream_error_kind"?: string;
+    "error_message"?: string;
+    "error_source"?: string;
+    "stream_compaction_requested": boolean;
+    "stream_compaction_observed": boolean;
+    "stream_bytes": number;
+    "upstream_protocol"?: string;
     "created_at": string;
+    "error_read_at"?: string;
     "input_cost": number;
     "output_cost": number;
     "reasoning_cost": number;
@@ -1789,7 +5066,29 @@ export class ReqeustLog {
     "ephemeral_5m_cost": number;
     "ephemeral_1h_cost": number;
     "total_cost": number;
+    "group_multiplier": number;
     "has_pricing": boolean;
+    "matched_pricing_model"?: string;
+    "effective_pricing_model"?: string;
+    "provider_pricing_available": boolean;
+    "provider_quota_type": number;
+    "provider_input_usd_per_m": number;
+    "provider_output_usd_per_m": number;
+    "provider_per_call_unified": number;
+    "provider_per_call_input": number;
+    "provider_per_call_output": number;
+    "provider_per_call_unified_set": boolean;
+    "provider_per_call_input_set": boolean;
+    "provider_per_call_output_set": boolean;
+    "request_body"?: string;
+    "response_body"?: string;
+    "request_body_truncated": boolean;
+    "response_body_truncated": boolean;
+    "payload_bytes": number;
+    "payload_captured": boolean;
+    "data_source"?: string;
+    "source_record_id"?: string;
+    "session_id"?: string;
 
     /** Creates a new ReqeustLog instance. */
     constructor($$source: Partial<ReqeustLog> = {}) {
@@ -1801,6 +5100,9 @@ export class ReqeustLog {
         }
         if (!("model" in $$source)) {
             this["model"] = "";
+        }
+        if (!("model_route_captured" in $$source)) {
+            this["model_route_captured"] = false;
         }
         if (!("provider" in $$source)) {
             this["provider"] = "";
@@ -1817,6 +5119,12 @@ export class ReqeustLog {
         if (!("cache_create_tokens" in $$source)) {
             this["cache_create_tokens"] = 0;
         }
+        if (!("ephemeral_5m_tokens" in $$source)) {
+            this["ephemeral_5m_tokens"] = 0;
+        }
+        if (!("ephemeral_1h_tokens" in $$source)) {
+            this["ephemeral_1h_tokens"] = 0;
+        }
         if (!("cache_read_tokens" in $$source)) {
             this["cache_read_tokens"] = 0;
         }
@@ -1828,6 +5136,39 @@ export class ReqeustLog {
         }
         if (!("duration_sec" in $$source)) {
             this["duration_sec"] = 0;
+        }
+        if (!("first_token_sec" in $$source)) {
+            this["first_token_sec"] = 0;
+        }
+        if (!("proxy_prepare_ms" in $$source)) {
+            this["proxy_prepare_ms"] = 0;
+        }
+        if (!("dns_ms" in $$source)) {
+            this["dns_ms"] = 0;
+        }
+        if (!("connect_ms" in $$source)) {
+            this["connect_ms"] = 0;
+        }
+        if (!("tls_ms" in $$source)) {
+            this["tls_ms"] = 0;
+        }
+        if (!("upstream_ttfb_ms" in $$source)) {
+            this["upstream_ttfb_ms"] = 0;
+        }
+        if (!("proxy_stream_delay_ms" in $$source)) {
+            this["proxy_stream_delay_ms"] = 0;
+        }
+        if (!("connection_reused" in $$source)) {
+            this["connection_reused"] = false;
+        }
+        if (!("stream_compaction_requested" in $$source)) {
+            this["stream_compaction_requested"] = false;
+        }
+        if (!("stream_compaction_observed" in $$source)) {
+            this["stream_compaction_observed"] = false;
+        }
+        if (!("stream_bytes" in $$source)) {
+            this["stream_bytes"] = 0;
         }
         if (!("created_at" in $$source)) {
             this["created_at"] = "";
@@ -1856,8 +5197,53 @@ export class ReqeustLog {
         if (!("total_cost" in $$source)) {
             this["total_cost"] = 0;
         }
+        if (!("group_multiplier" in $$source)) {
+            this["group_multiplier"] = 0;
+        }
         if (!("has_pricing" in $$source)) {
             this["has_pricing"] = false;
+        }
+        if (!("provider_pricing_available" in $$source)) {
+            this["provider_pricing_available"] = false;
+        }
+        if (!("provider_quota_type" in $$source)) {
+            this["provider_quota_type"] = 0;
+        }
+        if (!("provider_input_usd_per_m" in $$source)) {
+            this["provider_input_usd_per_m"] = 0;
+        }
+        if (!("provider_output_usd_per_m" in $$source)) {
+            this["provider_output_usd_per_m"] = 0;
+        }
+        if (!("provider_per_call_unified" in $$source)) {
+            this["provider_per_call_unified"] = 0;
+        }
+        if (!("provider_per_call_input" in $$source)) {
+            this["provider_per_call_input"] = 0;
+        }
+        if (!("provider_per_call_output" in $$source)) {
+            this["provider_per_call_output"] = 0;
+        }
+        if (!("provider_per_call_unified_set" in $$source)) {
+            this["provider_per_call_unified_set"] = false;
+        }
+        if (!("provider_per_call_input_set" in $$source)) {
+            this["provider_per_call_input_set"] = false;
+        }
+        if (!("provider_per_call_output_set" in $$source)) {
+            this["provider_per_call_output_set"] = false;
+        }
+        if (!("request_body_truncated" in $$source)) {
+            this["request_body_truncated"] = false;
+        }
+        if (!("response_body_truncated" in $$source)) {
+            this["response_body_truncated"] = false;
+        }
+        if (!("payload_bytes" in $$source)) {
+            this["payload_bytes"] = 0;
+        }
+        if (!("payload_captured" in $$source)) {
+            this["payload_captured"] = false;
         }
 
         Object.assign(this, $$source);
@@ -1872,6 +5258,231 @@ export class ReqeustLog {
     }
 }
 
+export class RequestLogPageResult {
+    "items": ReqeustLog[];
+    "total": number;
+    "limit": number;
+    "offset": number;
+
+    /** Creates a new RequestLogPageResult instance. */
+    constructor($$source: Partial<RequestLogPageResult> = {}) {
+        if (!("items" in $$source)) {
+            this["items"] = [];
+        }
+        if (!("total" in $$source)) {
+            this["total"] = 0;
+        }
+        if (!("limit" in $$source)) {
+            this["limit"] = 0;
+        }
+        if (!("offset" in $$source)) {
+            this["offset"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new RequestLogPageResult instance from a string or object.
+     */
+    static createFrom($$source: any = {}): RequestLogPageResult {
+        const $$createField0_0 = $$createType64;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("items" in $$parsedSource) {
+            $$parsedSource["items"] = $$createField0_0($$parsedSource["items"]);
+        }
+        return new RequestLogPageResult($$parsedSource as Partial<RequestLogPageResult>);
+    }
+}
+
+export class RequestLogPayloadDetail {
+    "id": number;
+    "request_body": string;
+    "response_body": string;
+    "request_body_truncated": boolean;
+    "response_body_truncated": boolean;
+
+    /** Creates a new RequestLogPayloadDetail instance. */
+    constructor($$source: Partial<RequestLogPayloadDetail> = {}) {
+        if (!("id" in $$source)) {
+            this["id"] = 0;
+        }
+        if (!("request_body" in $$source)) {
+            this["request_body"] = "";
+        }
+        if (!("response_body" in $$source)) {
+            this["response_body"] = "";
+        }
+        if (!("request_body_truncated" in $$source)) {
+            this["request_body_truncated"] = false;
+        }
+        if (!("response_body_truncated" in $$source)) {
+            this["response_body_truncated"] = false;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new RequestLogPayloadDetail instance from a string or object.
+     */
+    static createFrom($$source: any = {}): RequestLogPayloadDetail {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new RequestLogPayloadDetail($$parsedSource as Partial<RequestLogPayloadDetail>);
+    }
+}
+
+/**
+ * RetryConfig 重试配置（供 proxyHandler 使用）
+ */
+export class RetryConfig {
+    /**
+     * 失败阈值（达到后触发拉黑）
+     */
+    "FailureThreshold": number;
+
+    /**
+     * 重试等待时间（秒）
+     */
+    "RetryWaitSeconds": number;
+
+    /**
+     * 去重窗口（秒）
+     */
+    "DedupeWindowSeconds": number;
+
+    /** Creates a new RetryConfig instance. */
+    constructor($$source: Partial<RetryConfig> = {}) {
+        if (!("FailureThreshold" in $$source)) {
+            this["FailureThreshold"] = 0;
+        }
+        if (!("RetryWaitSeconds" in $$source)) {
+            this["RetryWaitSeconds"] = 0;
+        }
+        if (!("DedupeWindowSeconds" in $$source)) {
+            this["DedupeWindowSeconds"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new RetryConfig instance from a string or object.
+     */
+    static createFrom($$source: any = {}): RetryConfig {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new RetryConfig($$parsedSource as Partial<RetryConfig>);
+    }
+}
+
+export class SessionSyncResult {
+    "imported": number;
+    "skipped": number;
+    "files_scanned": number;
+    "matches_created": number;
+    "sources": SessionSyncSourceResult[];
+    "errors": string[];
+
+    /** Creates a new SessionSyncResult instance. */
+    constructor($$source: Partial<SessionSyncResult> = {}) {
+        if (!("imported" in $$source)) {
+            this["imported"] = 0;
+        }
+        if (!("skipped" in $$source)) {
+            this["skipped"] = 0;
+        }
+        if (!("files_scanned" in $$source)) {
+            this["files_scanned"] = 0;
+        }
+        if (!("matches_created" in $$source)) {
+            this["matches_created"] = 0;
+        }
+        if (!("sources" in $$source)) {
+            this["sources"] = [];
+        }
+        if (!("errors" in $$source)) {
+            this["errors"] = [];
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new SessionSyncResult instance from a string or object.
+     */
+    static createFrom($$source: any = {}): SessionSyncResult {
+        const $$createField4_0 = $$createType66;
+        const $$createField5_0 = $$createType0;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("sources" in $$parsedSource) {
+            $$parsedSource["sources"] = $$createField4_0($$parsedSource["sources"]);
+        }
+        if ("errors" in $$parsedSource) {
+            $$parsedSource["errors"] = $$createField5_0($$parsedSource["errors"]);
+        }
+        return new SessionSyncResult($$parsedSource as Partial<SessionSyncResult>);
+    }
+}
+
+export class SessionSyncSourceResult {
+    "scope": string;
+    "platform": string;
+    "imported": number;
+    "skipped": number;
+    "files_scanned": number;
+    "error"?: string;
+
+    /** Creates a new SessionSyncSourceResult instance. */
+    constructor($$source: Partial<SessionSyncSourceResult> = {}) {
+        if (!("scope" in $$source)) {
+            this["scope"] = "";
+        }
+        if (!("platform" in $$source)) {
+            this["platform"] = "";
+        }
+        if (!("imported" in $$source)) {
+            this["imported"] = 0;
+        }
+        if (!("skipped" in $$source)) {
+            this["skipped"] = 0;
+        }
+        if (!("files_scanned" in $$source)) {
+            this["files_scanned"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new SessionSyncSourceResult instance from a string or object.
+     */
+    static createFrom($$source: any = {}): SessionSyncSourceResult {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new SessionSyncSourceResult($$parsedSource as Partial<SessionSyncSourceResult>);
+    }
+}
+
+export enum SiteType {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    SiteTypeOneAPI = "one-api",
+    SiteTypeNewAPI = "new-api",
+    SiteTypeAnyRouter = "anyrouter",
+    SiteTypeVeloera = "Veloera",
+    SiteTypeOneHub = "one-hub",
+    SiteTypeDoneHub = "done-hub",
+    SiteTypeVoAPI = "VoAPI",
+    SiteTypeSuperAPI = "Super-API",
+    SiteTypeRixAPI = "Rix-Api",
+    SiteTypeNeoAPI = "neo-Api",
+    SiteTypeWongGongyi = "wong-gongyi",
+    SiteTypeSub2API = "sub2api",
+    SiteTypeUnknown = "unknown",
+};
+
 export class Skill {
     "key": string;
     "name": string;
@@ -1879,6 +5490,31 @@ export class Skill {
     "directory": string;
     "readme_url": string;
     "installed": boolean;
+
+    /**
+     * 新增字段
+     * 是否启用（从 SKILL.md 读取）
+     */
+    "enabled": boolean;
+
+    /**
+     * 许可证文件路径
+     */
+    "license_file"?: string;
+
+    /**
+     * "claude" | "codex"
+     */
+    "platform"?: string;
+
+    /**
+     * "user" | "project"
+     */
+    "install_location"?: string;
+
+    /**
+     * 仓库字段
+     */
     "repo_owner"?: string;
     "repo_name"?: string;
     "repo_branch"?: string;
@@ -1903,6 +5539,9 @@ export class Skill {
         if (!("installed" in $$source)) {
             this["installed"] = false;
         }
+        if (!("enabled" in $$source)) {
+            this["enabled"] = false;
+        }
 
         Object.assign(this, $$source);
     }
@@ -1913,6 +5552,38 @@ export class Skill {
     static createFrom($$source: any = {}): Skill {
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         return new Skill($$parsedSource as Partial<Skill>);
+    }
+}
+
+/**
+ * TargetCli 目标 CLI 工具配置
+ */
+export class TargetCli {
+    "claudeCode": boolean;
+    "codex": boolean;
+    "gemini": boolean;
+
+    /** Creates a new TargetCli instance. */
+    constructor($$source: Partial<TargetCli> = {}) {
+        if (!("claudeCode" in $$source)) {
+            this["claudeCode"] = false;
+        }
+        if (!("codex" in $$source)) {
+            this["codex"] = false;
+        }
+        if (!("gemini" in $$source)) {
+            this["gemini"] = false;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new TargetCli instance from a string or object.
+     */
+    static createFrom($$source: any = {}): TargetCli {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new TargetCli($$parsedSource as Partial<TargetCli>);
     }
 }
 
@@ -1964,10 +5635,11 @@ export class UpdateInfo {
  * UpdateState 更新状态
  */
 export class UpdateState {
-    "last_check_time": time$0.Time;
+    "last_check_time": string;
     "last_check_success": boolean;
     "consecutive_failures": number;
     "latest_known_version": string;
+    "latest_release_notes": string;
     "download_progress": number;
     "update_ready": boolean;
 
@@ -1979,7 +5651,7 @@ export class UpdateState {
     /** Creates a new UpdateState instance. */
     constructor($$source: Partial<UpdateState> = {}) {
         if (!("last_check_time" in $$source)) {
-            this["last_check_time"] = null;
+            this["last_check_time"] = "0001-01-01T00:00:00.000Z";
         }
         if (!("last_check_success" in $$source)) {
             this["last_check_success"] = false;
@@ -1989,6 +5661,9 @@ export class UpdateState {
         }
         if (!("latest_known_version" in $$source)) {
             this["latest_known_version"] = "";
+        }
+        if (!("latest_release_notes" in $$source)) {
+            this["latest_release_notes"] = "";
         }
         if (!("download_progress" in $$source)) {
             this["download_progress"] = 0;
@@ -2012,11 +5687,153 @@ export class UpdateState {
     }
 }
 
+/**
+ * WSLDetection WSL 检测结果
+ */
+export class WSLDetection {
+    "detected": boolean;
+    "distros": string[];
+
+    /** Creates a new WSLDetection instance. */
+    constructor($$source: Partial<WSLDetection> = {}) {
+        if (!("detected" in $$source)) {
+            this["detected"] = false;
+        }
+        if (!("distros" in $$source)) {
+            this["distros"] = [];
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new WSLDetection instance from a string or object.
+     */
+    static createFrom($$source: any = {}): WSLDetection {
+        const $$createField1_0 = $$createType0;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("distros" in $$parsedSource) {
+            $$parsedSource["distros"] = $$createField1_0($$parsedSource["distros"]);
+        }
+        return new WSLDetection($$parsedSource as Partial<WSLDetection>);
+    }
+}
+
+export class WebDAVSyncConfig {
+    "endpoint": string;
+    "username": string;
+    "password": string;
+    "remote_dir": string;
+    "remote_file": string;
+    "timeout_seconds": number;
+
+    /** Creates a new WebDAVSyncConfig instance. */
+    constructor($$source: Partial<WebDAVSyncConfig> = {}) {
+        if (!("endpoint" in $$source)) {
+            this["endpoint"] = "";
+        }
+        if (!("username" in $$source)) {
+            this["username"] = "";
+        }
+        if (!("password" in $$source)) {
+            this["password"] = "";
+        }
+        if (!("remote_dir" in $$source)) {
+            this["remote_dir"] = "";
+        }
+        if (!("remote_file" in $$source)) {
+            this["remote_file"] = "";
+        }
+        if (!("timeout_seconds" in $$source)) {
+            this["timeout_seconds"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new WebDAVSyncConfig instance from a string or object.
+     */
+    static createFrom($$source: any = {}): WebDAVSyncConfig {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new WebDAVSyncConfig($$parsedSource as Partial<WebDAVSyncConfig>);
+    }
+}
+
+export class WebDAVSyncResult {
+    "ok": boolean;
+    "message": string;
+    "remote_url"?: string;
+    "bytes"?: number;
+    "backup_path"?: string;
+    "includes"?: string[];
+
+    /** Creates a new WebDAVSyncResult instance. */
+    constructor($$source: Partial<WebDAVSyncResult> = {}) {
+        if (!("ok" in $$source)) {
+            this["ok"] = false;
+        }
+        if (!("message" in $$source)) {
+            this["message"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new WebDAVSyncResult instance from a string or object.
+     */
+    static createFrom($$source: any = {}): WebDAVSyncResult {
+        const $$createField5_0 = $$createType0;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("includes" in $$parsedSource) {
+            $$parsedSource["includes"] = $$createField5_0($$parsedSource["includes"]);
+        }
+        return new WebDAVSyncResult($$parsedSource as Partial<WebDAVSyncResult>);
+    }
+}
+
+export class WebDAVTestResult {
+    "ok": boolean;
+    "message": string;
+    "remote_url"?: string;
+
+    /** Creates a new WebDAVTestResult instance. */
+    constructor($$source: Partial<WebDAVTestResult> = {}) {
+        if (!("ok" in $$source)) {
+            this["ok"] = false;
+        }
+        if (!("message" in $$source)) {
+            this["message"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new WebDAVTestResult instance from a string or object.
+     */
+    static createFrom($$source: any = {}): WebDAVTestResult {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new WebDAVTestResult($$parsedSource as Partial<WebDAVTestResult>);
+    }
+}
+
 export class installRequest {
     "directory": string;
     "repo_owner": string;
     "repo_name": string;
     "repo_branch": string;
+
+    /**
+     * "claude" | "codex"
+     */
+    "platform": string;
+
+    /**
+     * "user" | "project"
+     */
+    "location": string;
 
     /** Creates a new installRequest instance. */
     constructor($$source: Partial<installRequest> = {}) {
@@ -2031,6 +5848,12 @@ export class installRequest {
         }
         if (!("repo_branch" in $$source)) {
             this["repo_branch"] = "";
+        }
+        if (!("platform" in $$source)) {
+            this["platform"] = "";
+        }
+        if (!("location" in $$source)) {
+            this["location"] = "";
         }
 
         Object.assign(this, $$source);
@@ -2079,16 +5902,70 @@ export class skillRepoConfig {
 }
 
 // Private type creation functions
-const $$createType0 = CLIConfigField.createFrom;
-const $$createType1 = $Create.Array($$createType0);
-const $$createType2 = CLIConfigFile.createFrom;
-const $$createType3 = $Create.Array($$createType2);
+const $$createType0 = $Create.Array($Create.Any);
+const $$createType1 = BudgetQuotaAdjustments.createFrom;
+const $$createType2 = BudgetQuotaSettings.createFrom;
+const $$createType3 = $Create.Map($Create.Any, $Create.Any);
 const $$createType4 = $Create.Map($Create.Any, $Create.Any);
-const $$createType5 = $Create.Map($Create.Any, $Create.Any);
-const $$createType6 = ConfigImportStatus.createFrom;
-const $$createType7 = LogStatsSeries.createFrom;
-const $$createType8 = $Create.Array($$createType7);
-const $$createType9 = MCPServer.createFrom;
-const $$createType10 = $Create.Array($$createType9);
-const $$createType11 = $Create.Array($Create.Any);
+const $$createType5 = ProviderQuotaQueryPresetGroup.createFrom;
+const $$createType6 = $Create.Map($Create.Any, $$createType5);
+const $$createType7 = BudgetQuotaSetting.createFrom;
+const $$createType8 = CLIConfigField.createFrom;
+const $$createType9 = $Create.Array($$createType8);
+const $$createType10 = CLIConfigFile.createFrom;
+const $$createType11 = $Create.Array($$createType10);
 const $$createType12 = $Create.Map($Create.Any, $Create.Any);
+const $$createType13 = ClaudeAggregatedModel.createFrom;
+const $$createType14 = $Create.Array($$createType13);
+const $$createType15 = ClaudeOfficialPricingPreviewRow.createFrom;
+const $$createType16 = $Create.Array($$createType15);
+const $$createType17 = CloudPriceTableSyncConflictRow.createFrom;
+const $$createType18 = $Create.Array($$createType17);
+const $$createType19 = CloudPriceTableConflictPricing.createFrom;
+const $$createType20 = CodexOAuthAccount.createFrom;
+const $$createType21 = $Create.Array($$createType20);
+const $$createType22 = Provider.createFrom;
+const $$createType23 = $Create.Nullable($$createType22);
+const $$createType24 = ConfigImportStatus.createFrom;
+const $$createType25 = ConfigFile.createFrom;
+const $$createType26 = $Create.Array($$createType25);
+const $$createType27 = ProxyInjection.createFrom;
+const $$createType28 = $Create.Array($$createType27);
+const $$createType29 = $Create.Nullable($$createType2);
+const $$createType30 = $Create.Nullable($$createType1);
+const $$createType31 = ProviderQuotaQueryConfig.createFrom;
+const $$createType32 = $Create.Nullable($$createType31);
+const $$createType33 = HealthCheckResult.createFrom;
+const $$createType34 = $Create.Array($$createType33);
+const $$createType35 = $Create.Nullable($$createType33);
+const $$createType36 = LogStatsSeries.createFrom;
+const $$createType37 = $Create.Array($$createType36);
+const $$createType38 = LogDatabaseStorageStat.createFrom;
+const $$createType39 = LogTableStorageStat.createFrom;
+const $$createType40 = $Create.Array($Create.Any);
+const $$createType41 = MCPServer.createFrom;
+const $$createType42 = $Create.Array($$createType41);
+const $$createType43 = TargetCli.createFrom;
+const $$createType44 = AvailabilityConfig.createFrom;
+const $$createType45 = $Create.Nullable($$createType44);
+const $$createType46 = ProviderConcurrencyRequestParameter.createFrom;
+const $$createType47 = $Create.Array($$createType46);
+const $$createType48 = ProviderConcurrencyRequestDetail.createFrom;
+const $$createType49 = $Create.Array($$createType48);
+const $$createType50 = ProviderModelPricingDebugAttempt.createFrom;
+const $$createType51 = $Create.Array($$createType50);
+const $$createType52 = ProviderModelPerCallPrice.createFrom;
+const $$createType53 = $Create.Nullable($$createType52);
+const $$createType54 = $Create.Map($Create.Any, $Create.Any);
+const $$createType55 = ProviderModelPricingItem.createFrom;
+const $$createType56 = $Create.Array($$createType55);
+const $$createType57 = ProviderModelPricingDebug.createFrom;
+const $$createType58 = $Create.Nullable($$createType57);
+const $$createType59 = ProviderQuotaQueryItem.createFrom;
+const $$createType60 = $Create.Array($$createType59);
+const $$createType61 = ProviderQuotaQueryPresetEntry.createFrom;
+const $$createType62 = $Create.Array($$createType61);
+const $$createType63 = ReqeustLog.createFrom;
+const $$createType64 = $Create.Array($$createType63);
+const $$createType65 = SessionSyncSourceResult.createFrom;
+const $$createType66 = $Create.Array($$createType65);

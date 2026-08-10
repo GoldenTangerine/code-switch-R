@@ -9,6 +9,29 @@ import { Call as $Call, CancellablePromise as $CancellablePromise, Create as $Cr
 // @ts-ignore: Unused imports
 import * as $models from "./models.js";
 
+export function BindClaudeModelRoutingService(routing: $models.ClaudeModelRoutingService | null): $CancellablePromise<void> {
+    return $Call.ByID(309876722, routing);
+}
+
+export function BindClaudeSettingsService(settings: $models.ClaudeSettingsService | null): $CancellablePromise<void> {
+    return $Call.ByID(523695266, settings);
+}
+
+export function BindModelPricingService(modelPricing: $models.ModelPricingService | null): $CancellablePromise<void> {
+    return $Call.ByID(3676418724, modelPricing);
+}
+
+export function DeleteProviderModelPricingOverride(apiURL: string, apiKey: string, authType: string, model: string): $CancellablePromise<void> {
+    return $Call.ByID(3290388336, apiURL, apiKey, authType, model);
+}
+
+/**
+ * DisableCodexOAuthProviders 禁用已失效账号绑定的 Codex OAuth provider。
+ */
+export function DisableCodexOAuthProviders(accountID: string): $CancellablePromise<void> {
+    return $Call.ByID(2228313511, accountID);
+}
+
 /**
  * DuplicateProvider 复制供应商配置，生成新的副本
  * 返回新创建的 Provider 对象
@@ -19,14 +42,72 @@ export function DuplicateProvider(kind: string, sourceID: number): $CancellableP
     });
 }
 
+/**
+ * EnsureCodexOAuthProvider 确保 ChatGPT Codex OAuth 登录后有一个可管理的 provider。
+ */
+export function EnsureCodexOAuthProvider(accountID: string, login: string): $CancellablePromise<$models.Provider | null> {
+    return $Call.ByID(1326864962, accountID, login).then(($result: any) => {
+        return $$createType1($result);
+    });
+}
+
+/**
+ * FetchProviderModelPricing 获取单个供应商的模型列表与价格信息。
+ * 该实现参考 all-api-hub 的站点适配逻辑：
+ * - 默认：GET /api/pricing
+ * - one-hub/done-hub：GET /api/available_model + /api/user_group_map
+ * - 均失败时兜底：GET /v1/models（仅模型名，无价格）
+ */
+export function FetchProviderModelPricing(apiURL: string, apiKey: string, platform: string, authType: string): $CancellablePromise<$models.ProviderModelPricingResponse | null> {
+    return $Call.ByID(544919533, apiURL, apiKey, platform, authType).then(($result: any) => {
+        return $$createType3($result);
+    });
+}
+
+export function FetchProviderModelPricingWithSource(apiURL: string, apiKey: string, platform: string, authType: string, source: string): $CancellablePromise<$models.ProviderModelPricingResponse | null> {
+    return $Call.ByID(4284394604, apiURL, apiKey, platform, authType, source).then(($result: any) => {
+        return $$createType3($result);
+    });
+}
+
+export function ImportProviderModelPricingJSON(apiURL: string, apiKey: string, platform: string, authType: string, raw: string): $CancellablePromise<$models.ProviderModelPricingResponse | null> {
+    return $Call.ByID(778943216, apiURL, apiKey, platform, authType, raw).then(($result: any) => {
+        return $$createType3($result);
+    });
+}
+
 export function LoadProviders(kind: string): $CancellablePromise<$models.Provider[]> {
     return $Call.ByID(3413098935, kind).then(($result: any) => {
-        return $$createType2($result);
+        return $$createType4($result);
+    });
+}
+
+export function ReconcileClaudeSubagentModel(): $CancellablePromise<void> {
+    return $Call.ByID(1439439345);
+}
+
+/**
+ * ResolveCachedProviderModelPricing 尝试从本地缓存里按模型名获取供应商接口价格条目。
+ * 匹配顺序：精确归一化匹配 -> 包含关系的相似匹配。
+ */
+export function ResolveCachedProviderModelPricing(apiURL: string, apiKey: string, authType: string, model: string): $CancellablePromise<[$models.ProviderModelPricingItem, boolean]> {
+    return $Call.ByID(4006531815, apiURL, apiKey, authType, model).then(($result: any) => {
+        $result[0] = $$createType5($result[0]);
+        return $result;
     });
 }
 
 export function SaveProviders(kind: string, providers: $models.Provider[]): $CancellablePromise<void> {
     return $Call.ByID(1034860836, kind, providers);
+}
+
+/**
+ * SelectCodexOAuthProvider 将指定 ChatGPT 账号对应的 OAuth provider 设为唯一启用项。
+ */
+export function SelectCodexOAuthProvider(accountID: string, login: string): $CancellablePromise<$models.Provider | null> {
+    return $Call.ByID(3382420192, accountID, login).then(($result: any) => {
+        return $$createType1($result);
+    });
 }
 
 export function Start(): $CancellablePromise<void> {
@@ -37,7 +118,14 @@ export function Stop(): $CancellablePromise<void> {
     return $Call.ByID(291391407);
 }
 
+export function UpsertProviderModelPricingOverride(apiURL: string, apiKey: string, authType: string, model: string, groupMultiplier: number, hasGroupMultiplier: boolean, cacheCreateMultiplier: number, hasCacheCreateMultiplier: boolean, cacheReadMultiplier: number, hasCacheReadMultiplier: boolean): $CancellablePromise<void> {
+    return $Call.ByID(3548091592, apiURL, apiKey, authType, model, groupMultiplier, hasGroupMultiplier, cacheCreateMultiplier, hasCacheCreateMultiplier, cacheReadMultiplier, hasCacheReadMultiplier);
+}
+
 // Private type creation functions
 const $$createType0 = $models.Provider.createFrom;
 const $$createType1 = $Create.Nullable($$createType0);
-const $$createType2 = $Create.Array($$createType0);
+const $$createType2 = $models.ProviderModelPricingResponse.createFrom;
+const $$createType3 = $Create.Nullable($$createType2);
+const $$createType4 = $Create.Array($$createType0);
+const $$createType5 = $models.ProviderModelPricingItem.createFrom;

@@ -9,6 +9,22 @@ import { Call as $Call, CancellablePromise as $CancellablePromise, Create as $Cr
 // @ts-ignore: Unused imports
 import * as $models from "./models.js";
 
+export function BindClaudeModelRoutingService(routing: $models.ClaudeModelRoutingService | null): $CancellablePromise<void> {
+    return $Call.ByID(186425145, routing);
+}
+
+export function BindClaudeSettingsService(claudeSettings: $models.ClaudeSettingsService | null): $CancellablePromise<void> {
+    return $Call.ByID(479665945, claudeSettings);
+}
+
+export function BindCodexSettingsService(codexSettings: $models.CodexSettingsService | null): $CancellablePromise<void> {
+    return $Call.ByID(3985493632, codexSettings);
+}
+
+export function BindProviderQuotaAutomationService(service: $models.ProviderQuotaAutomationService | null): $CancellablePromise<void> {
+    return $Call.ByID(369444294, service);
+}
+
 /**
  * GetAppSettings returns the persisted app settings or defaults if the file does not exist.
  */
@@ -25,6 +41,32 @@ export function SaveAppSettings(settings: $models.AppSettings): $CancellableProm
     return $Call.ByID(39874379, settings).then(($result: any) => {
         return $$createType0($result);
     });
+}
+
+/**
+ * SetLogsRefreshInterval persists only the logs refresh preference.
+ */
+export function SetLogsRefreshInterval(seconds: number): $CancellablePromise<$models.AppSettings> {
+    return $Call.ByID(2431707853, seconds).then(($result: any) => {
+        return $$createType0($result);
+    });
+}
+
+/**
+ * SetMainWindowDestroyDelay persists the main-window release delay without saving unrelated settings.
+ */
+export function SetMainWindowDestroyDelay(seconds: number, revision: number): $CancellablePromise<$models.AppSettings> {
+    return $Call.ByID(1971755134, seconds, revision).then(($result: any) => {
+        return $$createType0($result);
+    });
+}
+
+export function Start(): $CancellablePromise<void> {
+    return $Call.ByID(338151214);
+}
+
+export function Stop(): $CancellablePromise<void> {
+    return $Call.ByID(2634104182);
 }
 
 // Private type creation functions

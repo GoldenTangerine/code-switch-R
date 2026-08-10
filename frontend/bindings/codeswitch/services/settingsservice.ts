@@ -14,6 +14,10 @@ import { Call as $Call, CancellablePromise as $CancellablePromise, Create as $Cr
 // @ts-ignore: Unused imports
 import * as $models from "./models.js";
 
+export function BindBlacklistInvalidator(invalidator: any): $CancellablePromise<void> {
+    return $Call.ByID(1840462466, invalidator);
+}
+
 /**
  * GetBlacklistLevelConfig 获取等级拉黑配置
  * 【修复】开关状态从数据库读取，其他配置从 JSON 文件读取
@@ -40,6 +44,18 @@ export function GetBlacklistSettingsStruct(): $CancellablePromise<$models.Blackl
     });
 }
 
+export function GetHealthBlacklistThreshold(): $CancellablePromise<number> {
+    return $Call.ByID(1356491501);
+}
+
+/**
+ * GetIntSetting 获取整数类型的配置值（通用方法）
+ * 如果找不到或解析失败，返回 0
+ */
+export function GetIntSetting(key: string): $CancellablePromise<number> {
+    return $Call.ByID(900230874, key);
+}
+
 /**
  * GetLevelBlacklistEnabled 获取等级拉黑开关状态
  */
@@ -59,6 +75,13 @@ export function IsBlacklistEnabled(): $CancellablePromise<boolean> {
  */
 export function SaveBlacklistLevelConfig(config: $models.BlacklistLevelConfig | null): $CancellablePromise<void> {
     return $Call.ByID(2798699223, config);
+}
+
+/**
+ * SetIntSetting 设置整数类型的配置值（通用方法）
+ */
+export function SetIntSetting(key: string, value: number): $CancellablePromise<void> {
+    return $Call.ByID(1050634246, key, value);
 }
 
 /**
@@ -86,8 +109,16 @@ export function UpdateBlacklistLevelConfig(config: $models.BlacklistLevelConfig 
  * UpdateBlacklistSettings 更新黑名单配置
  * 使用 Saga 模式保证数据一致性（因队列无法使用事务）
  */
-export function UpdateBlacklistSettings(threshold: number, duration: number): $CancellablePromise<void> {
-    return $Call.ByID(833260620, threshold, duration);
+export function UpdateBlacklistSettings(threshold: number, durationSeconds: number): $CancellablePromise<void> {
+    return $Call.ByID(833260620, threshold, durationSeconds);
+}
+
+export function UpdateBlacklistSettingsWithHealthThreshold(threshold: number, durationSeconds: number, healthThreshold: number): $CancellablePromise<void> {
+    return $Call.ByID(1852825693, threshold, durationSeconds, healthThreshold);
+}
+
+export function UpdateHealthBlacklistThreshold(threshold: number): $CancellablePromise<void> {
+    return $Call.ByID(1561168054, threshold);
 }
 
 // Private type creation functions
