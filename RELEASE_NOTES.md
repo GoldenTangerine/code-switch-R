@@ -1,3 +1,14 @@
+# Code Switch v2.9.26
+
+## 修复
+- **修复 Linux Release 漏传 DEB/RPM**：按 Wails beta.6 实际生成的 `CodeSwitch.deb` 与 `CodeSwitch.rpm` 收集、校验并发布安装包，避免工作流成功但 Release 仅包含 AppImage。
+
+## 构建
+- **强化 Linux 产物校验**：DEB/RPM 生成后必须确认文件存在，并为两个安装包生成 SHA256；发布阶段移除静默忽略逻辑，缺少任一产物时直接失败。
+
+## 发布
+- **本次发版版本号推进到 `v2.9.26`**：同步应用常量、全平台构建元数据和发布说明，并推送 `v2.9.26` Tag 重新触发 GitHub 全平台自动打包。
+
 # Code Switch v2.9.25
 
 ## 修复

@@ -325,13 +325,13 @@ chmod +x CodeSwitch-vX.X.X.AppImage
 
 **DEB 包（Ubuntu/Debian）**：
 ```bash
-sudo dpkg -i codeswitch_*.deb
+sudo dpkg -i CodeSwitch.deb
 sudo apt-get install -f  # 如有依赖问题
 ```
 
 **RPM 包（Fedora/RHEL）**：
 ```bash
-sudo rpm -i codeswitch-*.rpm
+sudo rpm -i CodeSwitch.rpm
 ```
 
 ## 开发者指南

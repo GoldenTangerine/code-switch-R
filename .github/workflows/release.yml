@@ -610,13 +610,18 @@ jobs:
       - name: Create GTK3 RPM Package
         run: wails3 task linux:create:rpm
 
+      - name: Verify GTK3 Linux Packages
+        run: |
+          test -f bin/CodeSwitch.deb
+          test -f bin/CodeSwitch.rpm
+
       - name: Generate SHA256 Checksums
         run: |
           VERSION=${{ steps.version.outputs.VERSION }}
           cd bin
           sha256sum "CodeSwitch-v${VERSION}.AppImage" > "CodeSwitch-v${VERSION}.AppImage.sha256"
-          for f in codeswitch_*.deb; do [ -f "$f" ] && sha256sum "$f" > "${f}.sha256"; done
-          for f in codeswitch-*.rpm; do [ -f "$f" ] && sha256sum "$f" > "${f}.sha256"; done
+          sha256sum CodeSwitch.deb > CodeSwitch.deb.sha256
+          sha256sum CodeSwitch.rpm > CodeSwitch.rpm.sha256
           echo "SHA256 checksums:"
           cat *.sha256
 
@@ -627,10 +632,10 @@ jobs:
           path: |
             bin/CodeSwitch-v${{ steps.version.outputs.VERSION }}.AppImage
             bin/CodeSwitch-v${{ steps.version.outputs.VERSION }}.AppImage.sha256
-            bin/codeswitch_*.deb
-            bin/codeswitch_*.deb.sha256
-            bin/codeswitch-*.rpm
-            bin/codeswitch-*.rpm.sha256
+            bin/CodeSwitch.deb
+            bin/CodeSwitch.deb.sha256
+            bin/CodeSwitch.rpm
+            bin/CodeSwitch.rpm.sha256
 
   create-release:
     name: Create Release
@@ -669,10 +674,10 @@ jobs:
           # Linux
           cp artifacts/linux-amd64/CodeSwitch-v${VERSION}.AppImage release-assets/
           cp artifacts/linux-amd64/CodeSwitch-v${VERSION}.AppImage.sha256 release-assets/
-          cp artifacts/linux-amd64/codeswitch_*.deb release-assets/ 2>/dev/null || true
-          cp artifacts/linux-amd64/codeswitch_*.deb.sha256 release-assets/ 2>/dev/null || true
-          cp artifacts/linux-amd64/codeswitch-*.rpm release-assets/ 2>/dev/null || true
-          cp artifacts/linux-amd64/codeswitch-*.rpm.sha256 release-assets/ 2>/dev/null || true
+          cp artifacts/linux-amd64/CodeSwitch.deb release-assets/
+          cp artifacts/linux-amd64/CodeSwitch.deb.sha256 release-assets/
+          cp artifacts/linux-amd64/CodeSwitch.rpm release-assets/
+          cp artifacts/linux-amd64/CodeSwitch.rpm.sha256 release-assets/
 
           ls -lh release-assets/
       - name: Prepare release notes
@@ -872,8 +877,8 @@ jobs:
           | **macOS (ARM)** | \`CodeSwitch-v${VERSION}-macos-arm64.zip\` | Apple Silicon |
           | **macOS (Intel)** | \`CodeSwitch-v${VERSION}-macos-amd64.zip\` | Intel 芯片 |
           | **Linux (通用)** | \`CodeSwitch-v${VERSION}.AppImage\` | 跨发行版便携 |
-          | **Linux (Debian/Ubuntu)** | \`codeswitch_*.deb\` | apt 安装 |
-          | **Linux (RHEL/Fedora)** | \`codeswitch-*.rpm\` | dnf/yum 安装 |
+          | **Linux (Debian/Ubuntu)** | \`CodeSwitch.deb\` | apt 安装 |
+          | **Linux (RHEL/Fedora)** | \`CodeSwitch.rpm\` | dnf/yum 安装 |
 
           ## Linux 安装
 
@@ -886,15 +891,15 @@ jobs:
 
           ### Debian/Ubuntu
           \`\`\`bash
-          sudo dpkg -i codeswitch_*.deb
+          sudo dpkg -i CodeSwitch.deb
           sudo apt-get install -f  # 安装依赖
           \`\`\`
 
           ### RHEL/Fedora
           \`\`\`bash
-          sudo rpm -i codeswitch-*.rpm
+          sudo rpm -i CodeSwitch.rpm
           # 或
-          sudo dnf install codeswitch-*.rpm
+          sudo dnf install CodeSwitch.rpm
           \`\`\`
 
           ## 文件校验
