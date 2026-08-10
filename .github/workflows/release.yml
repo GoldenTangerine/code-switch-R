@@ -50,6 +50,9 @@ jobs:
       - name: Verify macOS 27 tray patch
         run: |
           grep -Fq 'WailsStatusItemGestureObserver' build/darwin/wails-macos27-systemtray.patch
+          grep -Fq 'systemTrayCoerceEventType' build/darwin/wails-macos27-systemtray.patch
+          grep -Fq '[NSEvent pressedMouseButtons]' build/darwin/wails-macos27-systemtray.patch
+          grep -Fq 'TestCoerceStatusItemEventType_MacOS27Regression' build/darwin/wails-macos27-systemtray.patch
           grep -Fq 'prepare:wails:macos27' build/darwin/Taskfile.yml
           grep -Fq -- '-modfile={{.WAILS_PATCHED_MODFILE}}' build/darwin/Taskfile.yml
 
@@ -71,6 +74,9 @@ jobs:
 
       - name: Build macOS ${{ matrix.arch }}
         run: env ARCH=${{ matrix.arch }} wails3 task package
+
+      - name: Test macOS 27 tray click patch
+        run: go test -modfile=.cache/codeswitch-wails-macos27.mod github.com/wailsapp/wails/v3/pkg/application -run '^TestCoerceStatusItemEventType_MacOS27Regression$'
 
       - name: Find app bundle
         id: find-app

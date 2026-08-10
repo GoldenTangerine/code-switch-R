@@ -19,6 +19,8 @@ tasks:
     generates:
       - '{{.WAILS_PATCHED_DIR}}/pkg/application/systemtray_darwin.h'
       - '{{.WAILS_PATCHED_DIR}}/pkg/application/systemtray_darwin.m'
+      - '{{.WAILS_PATCHED_DIR}}/pkg/application/systemtray_darwin.go'
+      - '{{.WAILS_PATCHED_DIR}}/pkg/application/systemtray_darwin_test.go'
       - '{{.WAILS_PATCHED_MODFILE}}'
       - .cache/codeswitch-wails-macos27.sum
     cmds:

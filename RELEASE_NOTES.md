@@ -1,3 +1,17 @@
+# Code Switch v2.9.28
+
+## 修复
+- **修复 macOS 27 托盘左键事件被丢弃**：合并 Wails 官方 PR `#5919` 的事件类型恢复逻辑；当 `NSApp.currentEvent` 不再返回鼠标按下事件时，通过 `pressedMouseButtons` 恢复左右键，使 `SystemTray.OnClick` 能正常打开托盘弹窗。
+
+## 兼容
+- **保持 macOS 26 及以下行为**：原有 `LeftMouseDown` / `RightMouseDown` 事件直接透传，右键优先规则及现有原生菜单路径保持不变。
+
+## 测试
+- **增加原生事件回归覆盖**：GitHub macOS Job 验证 `MouseMoved + 左键按下`、右键、双键与旧版事件类型映射，防止仅修复菜单路径而遗漏自定义点击回调。
+
+## 发布
+- **本次发版版本号推进到 `v2.9.28`**：同步应用常量、全平台构建元数据和发布说明，并推送 `v2.9.28` Tag 触发 GitHub 全平台自动打包。
+
 # Code Switch v2.9.27
 
 ## 修复
