@@ -20,7 +20,7 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 - Go 1.25+
 - Node.js `^20.19.0 || >=22.12.0`
 - pnpm
-- Wails 3 CLI: `go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.6`
+- Wails 3 CLI（macOS/Windows）: `go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.6`
 
 **Linux 额外依赖**：
 ```bash
@@ -29,6 +29,9 @@ sudo apt-get install build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-d
 
 # Fedora
 sudo dnf install gtk3-devel webkit2gtk4.1-devel
+
+# Wails CLI（GTK3）
+go install -tags gtk3 github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.6
 ```
 
 Linux 构建继续使用 Wails v3 的 `gtk3` 兼容标签，DEB/RPM/AUR 打包统一读取 `build/linux/nfpm/nfpm-gtk3.yaml`。

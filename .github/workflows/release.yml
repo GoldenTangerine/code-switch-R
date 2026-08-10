@@ -548,8 +548,8 @@ jobs:
           grep -Fq -- '- libgtk-3-0' build/linux/nfpm/nfpm-gtk3.yaml
           grep -Fq -- '- libwebkit2gtk-4.1-0' build/linux/nfpm/nfpm-gtk3.yaml
 
-      - name: Install Wails
-        run: go install github.com/wailsapp/wails/v3/cmd/wails3@${{ env.WAILS_VERSION }}
+      - name: Install Wails with GTK3
+        run: go install -tags gtk3 github.com/wailsapp/wails/v3/cmd/wails3@${{ env.WAILS_VERSION }}
 
       - name: Install frontend dependencies
         run: cd frontend && npm install

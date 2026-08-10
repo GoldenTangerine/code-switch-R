@@ -1,3 +1,14 @@
+# Code Switch v2.9.24
+
+## 修复
+- **修复 Linux 自动打包安装 Wails 失败**：Linux Release job 安装 Wails CLI 时显式使用 `gtk3` build tag，避免 Wails beta.6 默认检查 GTK4 与 WebKitGTK 6.0，继续兼容现有 GTK3/WebKit2GTK 4.1 构建环境。
+
+## 文档
+- **补充 Linux GTK3 安装命令**：中英文开发指南与 Linux 构建设计统一使用 `go install -tags gtk3`，避免本地开发环境复现相同错误。
+
+## 发布
+- **本次发版版本号推进到 `v2.9.24`**：同步应用常量、全平台构建元数据和发布说明，并推送 `v2.9.24` Tag 重新触发 GitHub 全平台自动打包。
+
 # Code Switch v2.9.23
 
 ## 修复

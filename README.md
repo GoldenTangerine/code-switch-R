@@ -342,8 +342,11 @@ sudo rpm -i codeswitch-*.rpm
 # 安装 Go 1.25+
 # 安装 Node.js 20.19+（或 22.12+）
 
-# 安装 Wails CLI
+# 安装 Wails CLI（macOS/Windows）
 go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.6
+
+# Linux GTK3
+go install -tags gtk3 github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.6
 ```
 
 ### 开发运行

@@ -96,9 +96,6 @@ build-linux:
       with:
         node-version: '22'
 
-    - name: Install Wails
-      run: go install github.com/wailsapp/wails/v3/cmd/wails3@latest
-
     - name: Install Linux Build Dependencies
       run: |
         sudo apt-get update
@@ -107,6 +104,9 @@ build-linux:
           pkg-config \
           libgtk-3-dev \
           libwebkit2gtk-4.1-dev
+
+    - name: Install Wails with GTK3
+      run: go install -tags gtk3 github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.6
 
     - name: Install frontend dependencies
       run: cd frontend && npm install
