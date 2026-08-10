@@ -90,10 +90,38 @@ jobs:
           ditto -c -k --sequesterRsrc --keepParent "$(basename ${{ steps.find-app.outputs.app_path }})" CodeSwitch-v${{ steps.version.outputs.VERSION }}-macos-${{ matrix.arch }}.zip
 
       - name: Upload artifact
+        id: upload_macos_artifact
+        continue-on-error: true
         uses: actions/upload-artifact@v6
         with:
           name: macos-${{ matrix.arch }}
           path: bin/CodeSwitch-v${{ steps.version.outputs.VERSION }}-macos-${{ matrix.arch }}.zip
+
+      - name: Wait before retrying artifact upload
+        if: steps.upload_macos_artifact.outcome == 'failure'
+        run: sleep 15
+
+      - name: Retry artifact upload
+        id: retry_upload_macos_artifact
+        if: steps.upload_macos_artifact.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/upload-artifact@v6
+        with:
+          name: macos-${{ matrix.arch }}
+          path: bin/CodeSwitch-v${{ steps.version.outputs.VERSION }}-macos-${{ matrix.arch }}.zip
+          overwrite: true
+
+      - name: Wait before final artifact upload
+        if: steps.upload_macos_artifact.outcome == 'failure' && steps.retry_upload_macos_artifact.outcome == 'failure'
+        run: sleep 30
+
+      - name: Final artifact upload attempt
+        if: steps.upload_macos_artifact.outcome == 'failure' && steps.retry_upload_macos_artifact.outcome == 'failure'
+        uses: actions/upload-artifact@v6
+        with:
+          name: macos-${{ matrix.arch }}
+          path: bin/CodeSwitch-v${{ steps.version.outputs.VERSION }}-macos-${{ matrix.arch }}.zip
+          overwrite: true
 
   build-windows:
     name: Build Windows

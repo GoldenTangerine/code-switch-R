@@ -1,3 +1,14 @@
+# Code Switch v2.9.27
+
+## 修复
+- **修复 macOS artifact 临时上传失败**：GitHub Runner 遇到 DNS `ENOTFOUND` 时自动等待并重试 macOS 产物上传，避免已完成构建因单次网络波动中断 Release。
+
+## 构建
+- **增加 macOS 上传容错**：artifact 最多尝试上传 3 次，重试时启用同名产物覆盖，兼容首次请求已部分创建 artifact 的情况。
+
+## 发布
+- **本次发版版本号推进到 `v2.9.27`**：同步应用常量、全平台构建元数据和发布说明，并推送 `v2.9.27` Tag 重新触发 GitHub 全平台自动打包。
+
 # Code Switch v2.9.26
 
 ## 修复
