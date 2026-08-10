@@ -47,6 +47,12 @@ jobs:
       - name: Install Wails
         run: go install github.com/wailsapp/wails/v3/cmd/wails3@${{ env.WAILS_VERSION }}
 
+      - name: Verify macOS 27 tray patch
+        run: |
+          grep -Fq 'WailsStatusItemGestureObserver' build/darwin/wails-macos27-systemtray.patch
+          grep -Fq 'prepare:wails:macos27' build/darwin/Taskfile.yml
+          grep -Fq -- '-modfile={{.WAILS_PATCHED_MODFILE}}' build/darwin/Taskfile.yml
+
       - name: Install frontend dependencies
         run: cd frontend && npm install
 

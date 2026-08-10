@@ -44,6 +44,23 @@ type mainWindowDestroyTimer interface {
 	Stop() bool
 }
 
+type trayWindowFocusGuard struct {
+	mu          sync.Mutex
+	ignoreUntil time.Time
+}
+
+func (guard *trayWindowFocusGuard) suppressFor(now time.Time, duration time.Duration) {
+	guard.mu.Lock()
+	guard.ignoreUntil = now.Add(duration)
+	guard.mu.Unlock()
+}
+
+func (guard *trayWindowFocusGuard) shouldIgnore(now time.Time) bool {
+	guard.mu.Lock()
+	defer guard.mu.Unlock()
+	return now.Before(guard.ignoreUntil)
+}
+
 type mainWindowLifecycleState[T comparable] struct {
 	mu           sync.Mutex
 	afterFunc    func(time.Duration, func()) mainWindowDestroyTimer
@@ -532,6 +549,7 @@ func main() {
 
 	var trayWindow application.Window
 	var systray *application.SystemTray
+	var trayFocusGuard trayWindowFocusGuard
 	var fitWindowsMainWindowOnce sync.Once
 	var showStartupMainWindowOnce sync.Once
 	var showMainWindow func(withFocus bool)
@@ -742,6 +760,9 @@ func main() {
 			e.Cancel()
 		})
 		trayWindow.OnWindowEvent(events.Common.WindowLostFocus, func(event *application.WindowEvent) {
+			if trayFocusGuard.shouldIgnore(time.Now()) {
+				return
+			}
 			trayWindow.Hide()
 		})
 		appservice.TrayWindow = trayWindow
@@ -769,6 +790,7 @@ func main() {
 		}
 		repositionTrayWindow()
 		appservice.fitTrayWindowToCurrentScreen()
+		trayFocusGuard.suppressFor(time.Now(), trayWindowFocusGracePeriod)
 		win.Show().Focus()
 	}
 	toggleTrayWindow := func() {
@@ -906,6 +928,7 @@ const (
 	trayWindowFallbackMaxHeight = 1200
 	trayWindowScreenMargin      = 24
 	trayWindowOffset            = 8
+	trayWindowFocusGracePeriod  = 300 * time.Millisecond
 	trayProgressBarWidth        = 28
 )
 

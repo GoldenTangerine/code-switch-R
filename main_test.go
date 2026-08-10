@@ -121,3 +121,16 @@ func TestResolveTrayWindowHeightUsesContentAndScreenBounds(t *testing.T) {
 		})
 	}
 }
+
+func TestTrayWindowFocusGuardSuppressesOpeningBlurOnly(t *testing.T) {
+	guard := &trayWindowFocusGuard{}
+	startedAt := time.Date(2026, time.August, 10, 12, 0, 0, 0, time.UTC)
+	guard.suppressFor(startedAt, trayWindowFocusGracePeriod)
+
+	if !guard.shouldIgnore(startedAt.Add(trayWindowFocusGracePeriod - time.Millisecond)) {
+		t.Fatal("打开保护期内的失焦事件不应隐藏托盘窗口")
+	}
+	if guard.shouldIgnore(startedAt.Add(trayWindowFocusGracePeriod)) {
+		t.Fatal("打开保护期结束后的失焦事件应正常隐藏托盘窗口")
+	}
+}

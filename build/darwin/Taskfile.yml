@@ -3,10 +3,42 @@ version: '3'
 includes:
   common: ../Taskfile.yml
 
+vars:
+  WAILS_PATCHED_DIR: .cache/wails-v3.0.0-beta.6-macos27
+  WAILS_PATCHED_MODFILE: .cache/codeswitch-wails-macos27.mod
+
 tasks:
+  prepare:wails:macos27:
+    summary: Applies the upstream macOS 27 system tray patch to Wails beta.6
+    internal: true
+    sources:
+      - go.mod
+      - go.sum
+      - build/darwin/Taskfile.yml
+      - build/darwin/wails-macos27-systemtray.patch
+    generates:
+      - '{{.WAILS_PATCHED_DIR}}/pkg/application/systemtray_darwin.h'
+      - '{{.WAILS_PATCHED_DIR}}/pkg/application/systemtray_darwin.m'
+      - '{{.WAILS_PATCHED_MODFILE}}'
+      - .cache/codeswitch-wails-macos27.sum
+    cmds:
+      - |
+        go mod download github.com/wailsapp/wails/v3@v3.0.0-beta.6
+        WAILS_SOURCE="$(go env GOMODCACHE)/github.com/wailsapp/wails/v3@v3.0.0-beta.6"
+        test -d "$WAILS_SOURCE"
+        mkdir -p "{{.WAILS_PATCHED_DIR}}"
+        chmod -R u+w "{{.WAILS_PATCHED_DIR}}"
+        cp -R "$WAILS_SOURCE/." "{{.WAILS_PATCHED_DIR}}"
+        chmod -R u+w "{{.WAILS_PATCHED_DIR}}"
+        patch --batch --forward -d "{{.WAILS_PATCHED_DIR}}" -p1 -i "$(pwd)/build/darwin/wails-macos27-systemtray.patch"
+        cp go.mod "{{.WAILS_PATCHED_MODFILE}}"
+        cp go.sum .cache/codeswitch-wails-macos27.sum
+        go mod edit -modfile="{{.WAILS_PATCHED_MODFILE}}" -replace=github.com/wailsapp/wails/v3=./.cache/wails-v3.0.0-beta.6-macos27
+
   build:
     summary: Creates a production build of the application
     deps:
+      - task: prepare:wails:macos27
       - task: common:go:mod:tidy
       - task: common:build:frontend
         vars:
@@ -16,7 +48,7 @@ tasks:
             ref: .PRODUCTION
       - task: common:generate:icons
     cmds:
-      - go build {{.BUILD_FLAGS}} -o {{.OUTPUT}}
+      - go build -modfile={{.WAILS_PATCHED_MODFILE}} {{.BUILD_FLAGS}} -o {{.OUTPUT}}
     vars:
       BUILD_FLAGS: '{{if eq .PRODUCTION "true"}}-tags production -trimpath -buildvcs=false -ldflags="-w -s"{{else}}-buildvcs=false -gcflags=all="-l"{{end}}'
       DEFAULT_OUTPUT: '{{.BIN_DIR}}/{{.APP_NAME}}'

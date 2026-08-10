@@ -1,3 +1,22 @@
+# Code Switch v2.9.25
+
+## 修复
+- **修复 macOS 27 托盘弹窗无法打开**：托盘窗口显示后增加短暂失焦保护，避免状态栏点击尚未结束时弹窗立即被隐藏，保护期结束后继续保持原有失焦关闭行为。
+- **修复 macOS 27 托盘原生输入兼容**：保留 Wails `v3.0.0-beta.6`，在 macOS 构建时移植 Wails 官方 PR `#5760` 的托盘补丁，使用 `NSGestureRecognizer` 和 `performClick:` 替代 macOS 27 不再支持的旧输入路径。
+
+## 兼容
+- **保持旧版 macOS 行为**：macOS 26 及以下继续使用 Wails 原有 `NSEvent` 路径，不改变现有托盘交互。
+- **保持 Linux GTK3 支持**：Linux 继续使用独立 GTK3/WebKit2GTK 4.1 构建与打包配置，不受 macOS 补丁影响。
+
+## 构建
+- **完善 macOS 自动打包**：Darwin 构建自动复制固定的 Wails beta.6、应用最小托盘补丁并通过临时 `modfile` 编译；GitHub Release 工作流增加补丁接入校验。
+
+## 测试
+- **补充托盘失焦回归测试**：覆盖打开保护期内忽略失焦、保护期结束后恢复失焦关闭；patched Wails 与应用根包均通过 macOS 27 编译检查。
+
+## 发布
+- **本次发版版本号推进到 `v2.9.25`**：同步应用常量、全平台构建元数据和发布说明，并推送 `v2.9.25` Tag 触发 GitHub 全平台自动打包。
+
 # Code Switch v2.9.24
 
 ## 修复
