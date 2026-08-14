@@ -103,6 +103,28 @@ describe('useLogsPricingDetails', () => {
     vi.clearAllMocks()
   })
 
+  it('shows session provider preference only when the log captured it', () => {
+    const { buildModelInfoTooltipDetail } = useLogsPricingDetails({ t: createTranslate() })
+    const detail = buildModelInfoTooltipDetail(createRequestLog('vendor-model', {
+      session_preferred_provider: 'Provider B',
+      session_provider_route: 'fallback',
+    }))
+
+    expect(detail.rows.find((row) => row.key === 'session-preferred-provider')).toEqual({
+      key: 'session-preferred-provider',
+      label: 'components.logs.table.tooltipLabels.sessionPreferredProvider',
+      value: 'Provider B',
+    })
+    expect(detail.rows.find((row) => row.key === 'session-provider-route')).toEqual({
+      key: 'session-provider-route',
+      label: 'components.logs.table.tooltipLabels.sessionProviderRoute',
+      value: 'components.logs.table.sessionProviderRouteValues.fallback',
+    })
+
+    const legacyDetail = buildModelInfoTooltipDetail(createRequestLog('vendor-model'))
+    expect(legacyDetail.rows.some((row) => row.key.startsWith('session-'))).toBe(false)
+  })
+
   it('reloads pricing rows after they are marked stale', async () => {
     vi.mocked(listModelPricing)
       .mockResolvedValueOnce([

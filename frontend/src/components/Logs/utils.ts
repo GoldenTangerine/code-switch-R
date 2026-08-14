@@ -104,10 +104,13 @@ export type LogsInfoTooltipLabels = {
   responseModelLabel: string
   reasoningEffortLabel: string
   reasoningEffortSourceLabel: string
+  sessionPreferredProviderLabel: string
+  sessionProviderRouteLabel: string
   userAgentLabel: string
   pricingUnavailableValue: string
   priceSourceLabels: Record<LogPriceSource, string>
   reasoningEffortSourceLabels: Record<string, string>
+  sessionProviderRouteLabels: Record<string, string>
 }
 
 export type StreamDiagnosticTooltipLabels = {
@@ -871,6 +874,8 @@ export const buildLogsInfoTooltipLabels = (translate: LogsTranslate): LogsInfoTo
   responseModelLabel: translate('components.logs.table.tooltipLabels.responseModel'),
   reasoningEffortLabel: translate('components.logs.table.tooltipLabels.reasoningEffort'),
   reasoningEffortSourceLabel: translate('components.logs.table.tooltipLabels.reasoningEffortSource'),
+  sessionPreferredProviderLabel: translate('components.logs.table.tooltipLabels.sessionPreferredProvider'),
+  sessionProviderRouteLabel: translate('components.logs.table.tooltipLabels.sessionProviderRoute'),
   userAgentLabel: translate('components.logs.table.tooltipLabels.userAgent'),
   pricingUnavailableValue: translate('components.logs.table.tooltipValues.pricingUnavailable'),
   priceSourceLabels: {
@@ -882,6 +887,10 @@ export const buildLogsInfoTooltipLabels = (translate: LogsTranslate): LogsInfoTo
     request: translate('components.logs.table.reasoningEffortSourceValues.request'),
     request_body_override: translate('components.logs.table.reasoningEffortSourceValues.requestBodyOverride'),
     model_mapping: translate('components.logs.table.reasoningEffortSourceValues.modelMapping'),
+  },
+  sessionProviderRouteLabels: {
+    preferred: translate('components.logs.table.sessionProviderRouteValues.preferred'),
+    fallback: translate('components.logs.table.sessionProviderRouteValues.fallback'),
   },
 })
 
@@ -982,6 +991,8 @@ export const buildModelInfoTooltipDetailData = ({
   recordedCost,
   reasoningEffort,
   reasoningEffortSource,
+  sessionPreferredProvider,
+  sessionProviderRoute,
 }: {
   source: LogPriceSource
   matchedModel: string
@@ -990,6 +1001,8 @@ export const buildModelInfoTooltipDetailData = ({
   recordedCost: number
   reasoningEffort?: string
   reasoningEffortSource?: string
+  sessionPreferredProvider?: string
+  sessionProviderRoute?: string
 }, labels: LogsInfoTooltipLabels): LogInfoTooltipDetail => {
   const rows: LogInfoTooltipRow[] = [
     {
@@ -999,6 +1012,24 @@ export const buildModelInfoTooltipDetailData = ({
       tone: resolveLogInfoTooltipSourceTone(source),
     },
   ]
+
+  const normalizedSessionPreferredProvider = String(sessionPreferredProvider ?? '').trim()
+  if (normalizedSessionPreferredProvider) {
+    rows.push({
+      key: 'session-preferred-provider',
+      label: labels.sessionPreferredProviderLabel,
+      value: normalizedSessionPreferredProvider,
+    })
+    const normalizedSessionProviderRoute = String(sessionProviderRoute ?? '').trim()
+    const sessionProviderRouteValue = labels.sessionProviderRouteLabels[normalizedSessionProviderRoute]
+    if (sessionProviderRouteValue) {
+      rows.push({
+        key: 'session-provider-route',
+        label: labels.sessionProviderRouteLabel,
+        value: sessionProviderRouteValue,
+      })
+    }
+  }
 
   const normalizedReasoningEffort = normalizeReasoningEffortDisplay(reasoningEffort)
   if (normalizedReasoningEffort) {

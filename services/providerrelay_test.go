@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1395,6 +1396,222 @@ func TestClaudeProxyNeverPassesManagedSubagentAliasThrough(t *testing.T) {
 	}
 	if atomic.LoadInt32(&upstreamCalls) != 0 {
 		t.Fatalf("内部 Subagent 别名不应到达上游，调用次数=%d", upstreamCalls)
+	}
+}
+
+func newClaudeRoutingTestRouter(t *testing.T, providers []Provider) (*gin.Engine, *AppSettingsService, *ProviderRelayService) {
+	t.Helper()
+	providerService := NewProviderService()
+	if err := providerService.SaveProviders("claude", providers); err != nil {
+		t.Fatalf("保存 Claude 测试供应商失败: %v", err)
+	}
+
+	appSettings := NewAppSettingsService(nil)
+	settings, err := appSettings.GetAppSettings()
+	if err != nil {
+		t.Fatalf("读取测试应用设置失败: %v", err)
+	}
+	settings.ClaudeModelRoutingEnabled = true
+	settings.ClaudeModelAggregationEnabled = true
+	if _, err := appSettings.SaveAppSettings(settings); err != nil {
+		t.Fatalf("开启 Claude 模型路由失败: %v", err)
+	}
+
+	blacklistService := NewBlacklistService(NewSettingsService(), nil)
+	routing := NewClaudeModelRoutingService(providerService, appSettings, nil)
+	relay := NewProviderRelayService(providerService, nil, blacklistService, nil, appSettings, nil, "")
+	relay.BindClaudeModelRoutingService(routing)
+	router := gin.New()
+	relay.registerRoutes(router)
+	return router, appSettings, relay
+}
+
+func sendClaudeRoutingTestRequest(t *testing.T, router http.Handler, model string, sessionID string) {
+	t.Helper()
+	metadata := ""
+	if sessionID != "" {
+		metadata = fmt.Sprintf(`,"metadata":{"session_id":%q}`, sessionID)
+	}
+	body := fmt.Sprintf(`{"model":%q,"max_tokens":16,"messages":[{"role":"user","content":"hi"}]%s}`, model, metadata)
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("Claude 测试请求状态码=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestClaudeSubagentFollowsSessionProviderAcrossLevelsAndHonorsRoutingSession(t *testing.T) {
+	useIsolatedHomeDir(t)
+	gin.SetMode(gin.TestMode)
+	disableBlacklistForTest(t)
+
+	var callsMu sync.Mutex
+	calls := make([]string, 0, 4)
+	newUpstream := func(name string) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			body, _ := io.ReadAll(r.Body)
+			model := gjson.GetBytes(body, "model").String()
+			callsMu.Lock()
+			calls = append(calls, name+":"+model)
+			callsMu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"msg_test","type":"message","role":"assistant","model":"vendor-model","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
+		}))
+	}
+	aUpstream := newUpstream("A")
+	bUpstream := newUpstream("B")
+	defer aUpstream.Close()
+	defer bUpstream.Close()
+
+	providers := []Provider{
+		{
+			ID:                     1,
+			Name:                   "A",
+			APIURL:                 aUpstream.URL,
+			APIKey:                 "a-key",
+			Enabled:                true,
+			Level:                  1,
+			ModelMapping:           map[string]string{claudeManagedSubagentModel: "a-subagent"},
+			ModelMappingMissPolicy: ModelMappingMissPolicyBlock,
+		},
+		{
+			ID:      2,
+			Name:    "B",
+			APIURL:  bUpstream.URL,
+			APIKey:  "b-key",
+			Enabled: true,
+			Level:   5,
+			ModelMapping: map[string]string{
+				"claude-main-test":         "b-main",
+				claudeManagedSubagentModel: "b-subagent",
+			},
+			ModelMappingMissPolicy: ModelMappingMissPolicyBlock,
+		},
+	}
+	router, appSettings, _ := newClaudeRoutingTestRouter(t, providers)
+
+	sendClaudeRoutingTestRequest(t, router, "claude-main-test", "session-preferred")
+	sendClaudeRoutingTestRequest(t, router, claudeManagedSubagentModel, "session-preferred")
+	sendClaudeRoutingTestRequest(t, router, claudeManagedSubagentModel, "")
+
+	settings, err := appSettings.GetAppSettings()
+	if err != nil {
+		t.Fatalf("读取 Claude 路由设置失败: %v", err)
+	}
+	settings.ClaudeModelRoutingEnabled = false
+	if _, err := appSettings.SaveAppSettings(settings); err != nil {
+		t.Fatalf("关闭 Claude 路由失败: %v", err)
+	}
+	sendClaudeRoutingTestRequest(t, router, claudeManagedSubagentModel, "session-preferred")
+
+	callsMu.Lock()
+	got := append([]string(nil), calls...)
+	callsMu.Unlock()
+	want := []string{
+		"B:b-main",
+		"B:b-subagent",
+		"A:a-subagent",
+		"A:a-subagent",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Claude 供应商调用顺序=%v，期望=%v", got, want)
+	}
+}
+
+func TestClaudeSubagentFallbackPreservesRoundRobinOrder(t *testing.T) {
+	useIsolatedHomeDir(t)
+	gin.SetMode(gin.TestMode)
+	disableBlacklistForTest(t)
+
+	var callsMu sync.Mutex
+	calls := make([]string, 0, 3)
+	var failB int32
+	newUpstream := func(name string) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			body, _ := io.ReadAll(r.Body)
+			model := gjson.GetBytes(body, "model").String()
+			callsMu.Lock()
+			calls = append(calls, name+":"+model)
+			callsMu.Unlock()
+			if name == "B" && model == "b-subagent" && atomic.LoadInt32(&failB) == 1 {
+				w.WriteHeader(http.StatusBadGateway)
+				_, _ = w.Write([]byte(`{"error":"test failure"}`))
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"msg_test","type":"message","role":"assistant","model":"vendor-model","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
+		}))
+	}
+	aUpstream := newUpstream("A")
+	bUpstream := newUpstream("B")
+	cUpstream := newUpstream("C")
+	defer aUpstream.Close()
+	defer bUpstream.Close()
+	defer cUpstream.Close()
+
+	providers := []Provider{
+		{
+			ID:                     1,
+			Name:                   "A",
+			APIURL:                 aUpstream.URL,
+			APIKey:                 "a-key",
+			Enabled:                true,
+			Level:                  1,
+			ModelMapping:           map[string]string{claudeManagedSubagentModel: "a-subagent"},
+			ModelMappingMissPolicy: ModelMappingMissPolicyBlock,
+		},
+		{
+			ID:      2,
+			Name:    "B",
+			APIURL:  bUpstream.URL,
+			APIKey:  "b-key",
+			Enabled: true,
+			Level:   1,
+			ModelMapping: map[string]string{
+				"claude-main-test":         "b-main",
+				claudeManagedSubagentModel: "b-subagent",
+			},
+			ModelMappingMissPolicy: ModelMappingMissPolicyBlock,
+		},
+		{
+			ID:                     3,
+			Name:                   "C",
+			APIURL:                 cUpstream.URL,
+			APIKey:                 "c-key",
+			Enabled:                true,
+			Level:                  1,
+			ModelMapping:           map[string]string{claudeManagedSubagentModel: "c-subagent"},
+			ModelMappingMissPolicy: ModelMappingMissPolicyBlock,
+		},
+	}
+	router, appSettings, relay := newClaudeRoutingTestRouter(t, providers)
+	settings, err := appSettings.GetAppSettings()
+	if err != nil {
+		t.Fatalf("读取 Claude 路由设置失败: %v", err)
+	}
+	settings.EnableRoundRobin = true
+	if _, err := appSettings.SaveAppSettings(settings); err != nil {
+		t.Fatalf("开启 Claude 轮询失败: %v", err)
+	}
+
+	sendClaudeRoutingTestRequest(t, router, "claude-main-test", "session-round-robin")
+	relay.markRoundRobinProviderAttempt("claude", providers[1])
+	// 预置历史轮询起点为首选 B，验证 B 失败后应从 C 继续，而不是因 B 被移出分组而回到 A。
+	sendClaudeRoutingTestRequest(t, router, claudeManagedSubagentModel, "session-round-robin")
+	atomic.StoreInt32(&failB, 1)
+	callsMu.Lock()
+	calls = calls[:0]
+	callsMu.Unlock()
+
+	sendClaudeRoutingTestRequest(t, router, claudeManagedSubagentModel, "session-round-robin")
+	callsMu.Lock()
+	got := append([]string(nil), calls...)
+	callsMu.Unlock()
+	want := []string{"B:b-subagent", "C:c-subagent"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Subagent 降级顺序=%v，期望=%v", got, want)
 	}
 }
 

@@ -50,6 +50,9 @@ func TestRequestLogListSelectFieldsIncludeModelRouteColumns(t *testing.T) {
 		"model_mapping_target":  false,
 		"model_override":        false,
 		"model_route_captured":  false,
+		"session_preferred_provider_id": false,
+		"session_preferred_provider":    false,
+		"session_provider_route":        false,
 	}
 	for _, field := range requestLogListSelectFields {
 		if _, ok := required[field]; ok {
@@ -70,6 +73,22 @@ func TestRequestLogListSelectFieldsIncludeReasoningEffortSource(t *testing.T) {
 		}
 	}
 	t.Fatal("日志列表缺少思考强度来源字段: reasoning_effort_source")
+}
+
+func TestBuildRequestLogListMapsSessionProviderRoute(t *testing.T) {
+	logs := buildRequestLogList([]xdb.Record{{
+		"id":                            int64(8),
+		"session_preferred_provider_id": "provider-b",
+		"session_preferred_provider":    "B",
+		"session_provider_route":        sessionProviderRouteFallback,
+	}}, nil)
+	if len(logs) != 1 {
+		t.Fatalf("日志数量 = %d，期望 1", len(logs))
+	}
+	got := logs[0]
+	if got.SessionPreferredProviderID != "provider-b" || got.SessionPreferredProvider != "B" || got.SessionProviderRoute != sessionProviderRouteFallback {
+		t.Fatalf("会话供应商路由映射错误: %#v", got)
+	}
 }
 
 func TestRequestLogListSelectFieldsIncludeStreamDiagnosticColumns(t *testing.T) {

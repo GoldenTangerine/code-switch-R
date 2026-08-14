@@ -4037,6 +4037,9 @@ export class ProviderConcurrencyRequestDetail {
     "modelMappingTarget"?: string;
     "modelOverride"?: string;
     "modelRouteCaptured": boolean;
+    "sessionPreferredProviderId"?: string;
+    "sessionPreferredProvider"?: string;
+    "sessionProviderRoute"?: string;
     "parameters": ProviderConcurrencyRequestParameter[];
     "endpoint"?: string;
     "isStream": boolean;
@@ -5016,6 +5019,9 @@ export class ReqeustLog {
     "model_mapping_target"?: string;
     "model_override"?: string;
     "model_route_captured": boolean;
+    "session_preferred_provider_id"?: string;
+    "session_preferred_provider"?: string;
+    "session_provider_route"?: string;
     "response_model"?: string;
     "reasoning_effort"?: string;
     "reasoning_effort_source"?: string;

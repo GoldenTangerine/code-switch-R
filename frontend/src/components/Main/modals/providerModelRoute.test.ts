@@ -26,6 +26,14 @@ const translate: ModelRouteTranslate = (key, params = {}) => {
       return `mapped:${params.model}`
     case 'components.main.concurrencyDetails.modelOverride':
       return `override:${params.source}->${params.target}`
+    case 'components.main.concurrencyDetails.sessionPreferredProvider':
+      return `preferred:${params.provider}`
+    case 'components.main.concurrencyDetails.sessionProviderRoute':
+      return `selection:${params.result}`
+    case 'components.main.concurrencyDetails.sessionProviderRouteValues.preferred':
+      return 'followed'
+    case 'components.main.concurrencyDetails.sessionProviderRouteValues.fallback':
+      return 'fallback'
     case 'components.main.concurrencyDetails.routeUnchanged':
       return 'unchanged'
     case 'components.main.concurrencyDetails.routeDetailsAria':
@@ -79,6 +87,19 @@ describe('provider model route display', () => {
       requestedModel: 'claude-sonnet-4.8',
       modelRouteCaptured: true,
     }, 'unavailable', translate)).toEqual(['unchanged'])
+  })
+
+  it('describes the preferred session provider and fallback result', () => {
+    expect(buildModelRouteTooltipLines({
+      requestedModel: 'code-switch-r-subagent',
+      modelRouteCaptured: true,
+      sessionPreferredProvider: 'Provider B',
+      sessionProviderRoute: 'fallback',
+    }, 'unavailable', translate)).toEqual([
+      'preferred:Provider B',
+      'selection:fallback',
+      'unchanged',
+    ])
   })
 
   it('does not mark a route as unchanged when rewrites return to the requested model', () => {

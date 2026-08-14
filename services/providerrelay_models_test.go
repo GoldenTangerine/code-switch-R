@@ -2,10 +2,12 @@ package services
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -340,4 +342,131 @@ func TestModelsHandler_AggregatesClaudeRoutingModels(t *testing.T) {
 	if len(response.Data) != 1 || response.Data[0].ID != "claude-4-5" || !response.HasMore {
 		t.Fatalf("聚合响应错误: %#v", response)
 	}
+}
+
+func TestSessionProviderPreferenceLatestActiveRequestWinsAndFailureRollsBack(t *testing.T) {
+	relay := &ProviderRelayService{}
+	first := relay.beginSessionProviderPreferenceRequest("claude", "session-a")
+	relay.updateSessionProviderPreferenceAttempt("claude", "session-a", first, "provider-a", "A")
+	second := relay.beginSessionProviderPreferenceRequest("claude", "session-a")
+	relay.updateSessionProviderPreferenceAttempt("claude", "session-a", second, "provider-b", "B")
+
+	preferred, ok := relay.sessionProviderPreference("claude", "session-a")
+	if !ok || preferred.ProviderID != "provider-b" {
+		t.Fatalf("最新主请求未优先: %#v, ok=%v", preferred, ok)
+	}
+
+	relay.finishSessionProviderPreferenceRequest("claude", "session-a", second, false)
+	preferred, ok = relay.sessionProviderPreference("claude", "session-a")
+	if !ok || preferred.ProviderID != "provider-a" {
+		t.Fatalf("失败后未回滚到仍在进行的请求: %#v, ok=%v", preferred, ok)
+	}
+
+	relay.finishSessionProviderPreferenceRequest("claude", "session-a", first, true)
+	preferred, ok = relay.sessionProviderPreference("claude", "session-a")
+	if !ok || preferred.ProviderID != "provider-a" {
+		t.Fatalf("成功供应商未成为会话首选: %#v, ok=%v", preferred, ok)
+	}
+}
+
+func TestSessionProviderPreferenceOlderSuccessDoesNotReplaceNewerSuccess(t *testing.T) {
+	relay := &ProviderRelayService{}
+	older := relay.beginSessionProviderPreferenceRequest("claude", "session-b")
+	relay.updateSessionProviderPreferenceAttempt("claude", "session-b", older, "provider-a", "A")
+	newer := relay.beginSessionProviderPreferenceRequest("claude", "session-b")
+	relay.updateSessionProviderPreferenceAttempt("claude", "session-b", newer, "provider-b", "B")
+
+	relay.finishSessionProviderPreferenceRequest("claude", "session-b", newer, true)
+	relay.finishSessionProviderPreferenceRequest("claude", "session-b", older, true)
+
+	preferred, ok := relay.sessionProviderPreference("claude", "session-b")
+	if !ok || preferred.ProviderID != "provider-b" {
+		t.Fatalf("旧请求覆盖了较新的成功结果: %#v, ok=%v", preferred, ok)
+	}
+}
+
+func TestSessionProviderPreferenceEvictsLeastRecentlyUsedInactiveSession(t *testing.T) {
+	relay := &ProviderRelayService{}
+	for index := 0; index <= sessionProviderPreferenceMaxInactive; index++ {
+		sessionHash := fmt.Sprintf("session-%d", index)
+		generation := relay.beginSessionProviderPreferenceRequest("claude", sessionHash)
+		relay.updateSessionProviderPreferenceAttempt("claude", sessionHash, generation, "provider-a", "A")
+		relay.finishSessionProviderPreferenceRequest("claude", sessionHash, generation, true)
+	}
+
+	if _, ok := relay.sessionProviderPreference("claude", "session-0"); ok {
+		t.Fatal("最久未使用的非活动会话未被淘汰")
+	}
+	if preferred, ok := relay.sessionProviderPreference("claude", fmt.Sprintf("session-%d", sessionProviderPreferenceMaxInactive)); !ok || preferred.ProviderID != "provider-a" {
+		t.Fatalf("最新会话被错误淘汰: %#v, ok=%v", preferred, ok)
+	}
+}
+
+func TestBuildProviderAttemptGroupsPromotesPreferredProviderAcrossLevels(t *testing.T) {
+	providers := []Provider{
+		{ID: 1, Name: "A", Level: 1},
+		{ID: 2, Name: "C", Level: 1},
+		{ID: 3, Name: "B", Level: 5},
+		{ID: 4, Name: "D", Level: 6},
+	}
+
+	levels, groups := buildProviderAttemptGroups(providers, providerRefFromProvider(providers[2]))
+	ordered := make([]string, 0, len(providers))
+	for _, level := range levels {
+		for _, provider := range groups[level] {
+			ordered = append(ordered, provider.Name)
+		}
+	}
+	want := []string{"B", "A", "C", "D"}
+	if !reflect.DeepEqual(ordered, want) {
+		t.Fatalf("供应商顺序 = %v，期望 %v", ordered, want)
+	}
+}
+
+func TestForwardRequestWithPlanDoesNotPublishPreferenceBeforeConcurrencySlot(t *testing.T) {
+	relay := NewProviderRelayService(nil, nil, nil, nil, nil, nil, "")
+	generation := relay.beginSessionProviderPreferenceRequest("claude", "session-busy")
+	limit := 0
+	provider := Provider{
+		ID:                       1,
+		Name:                     "Busy",
+		APIURL:                   "http://127.0.0.1",
+		ProviderConcurrencyLimit: &limit,
+	}
+	writer := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(writer)
+	plan := providerRequestPlan{
+		BodyBytes:                  []byte(`{"model":"claude-opus-4.8"}`),
+		EffectiveModel:             "claude-opus-4.8",
+		EffectiveEndpoint:          "/v1/messages",
+		SessionPreferenceHash:      "session-busy",
+		SessionPreferenceGeneration: generation,
+	}
+	ok, err := relay.forwardRequestWithPlan(
+		context,
+		"claude",
+		provider,
+		plan.EffectiveEndpoint,
+		map[string]string{},
+		map[string]string{},
+		plan.BodyBytes,
+		false,
+		plan.EffectiveModel,
+		plan.EffectiveModel,
+		plan,
+		true,
+	)
+	if ok || err != errProviderConcurrencyLimit {
+		t.Fatalf("满载供应商结果 = ok:%v err:%v，期望并发限制错误", ok, err)
+	}
+
+	key := sessionAffinityStateKey("claude", "session-busy")
+	relay.sessionProviderPreferenceMu.Lock()
+	state := relay.sessionProviderPreferences[key]
+	attempt := state.Active[generation]
+	relay.sessionProviderPreferenceMu.Unlock()
+	if attempt.ProviderID != "" {
+		t.Fatalf("并发槽拒绝前不应发布供应商偏好: %#v", attempt)
+	}
+	relay.finishSessionProviderPreferenceRequest("claude", "session-busy", generation, false)
 }

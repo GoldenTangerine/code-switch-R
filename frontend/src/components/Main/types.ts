@@ -198,6 +198,9 @@ export type ProviderConcurrencyRequestView = {
   modelMappingTarget?: string
   modelOverride?: string
   modelRouteCaptured?: boolean
+  sessionPreferredProviderId?: string
+  sessionPreferredProvider?: string
+  sessionProviderRoute?: 'preferred' | 'fallback' | ''
   parameters?: ProviderConcurrencyRequestParameterView[]
   endpoint?: string
   isStream?: boolean

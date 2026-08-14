@@ -301,6 +301,8 @@ export function useLogsPricingDetails(options: UseLogsPricingDetailsOptions) {
       recordedCost: safeNumber(item.total_cost),
       reasoningEffort: item.reasoning_effort,
       reasoningEffortSource: item.reasoning_effort_source,
+      sessionPreferredProvider: item.session_preferred_provider,
+      sessionProviderRoute: item.session_provider_route,
     }, buildInfoTooltipLabels())
   }
 

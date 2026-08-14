@@ -14,6 +14,8 @@ export interface ModelRouteSnapshot {
   modelMappingTarget?: string
   modelOverride?: string
   modelRouteCaptured?: boolean
+  sessionPreferredProvider?: string
+  sessionProviderRoute?: 'preferred' | 'fallback' | ''
 }
 
 export type ConnectionParameterKey = 'reasoning_effort' | 'max_output_tokens'
@@ -181,8 +183,20 @@ export function buildModelRouteTooltipLines(
   unavailableMessage: string,
   translate: ModelRouteTranslate,
 ) {
+  const sessionPreferredProvider = `${route.sessionPreferredProvider ?? ''}`.trim()
+  const sessionLines: string[] = []
+  if (sessionPreferredProvider) {
+    sessionLines.push(translate('components.main.concurrencyDetails.sessionPreferredProvider', {
+      provider: sessionPreferredProvider,
+    }))
+    if (route.sessionProviderRoute === 'preferred' || route.sessionProviderRoute === 'fallback') {
+      sessionLines.push(translate('components.main.concurrencyDetails.sessionProviderRoute', {
+        result: translate(`components.main.concurrencyDetails.sessionProviderRouteValues.${route.sessionProviderRoute}`),
+      }))
+    }
+  }
   if (!route.modelRouteCaptured) {
-    return [unavailableMessage]
+    return [...sessionLines, unavailableMessage]
   }
 
   const requestedModel = displayModel(route.requestedModel)
@@ -209,9 +223,12 @@ export function buildModelRouteTooltipLines(
     }))
   }
 
-  return lines.length > 0
-    ? lines
-    : [translate('components.main.concurrencyDetails.routeUnchanged')]
+  return [
+    ...sessionLines,
+    ...(lines.length > 0
+      ? lines
+      : [translate('components.main.concurrencyDetails.routeUnchanged')]),
+  ]
 }
 
 export function buildModelRouteAriaLabel(

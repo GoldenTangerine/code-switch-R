@@ -6,6 +6,7 @@ export type LogDataSourceMode = 'proxy' | 'session' | 'all'
 export type ReasoningEffortSource = 'request' | 'request_body_override' | 'model_mapping' | ''
 export type RequestErrorSource = 'provider_response' | 'upstream_network' | 'upstream_stream' | 'proxy' | 'client_abort' | ''
 export type RequestOutcome = 'success' | 'failure' | 'excluded' | ''
+export type SessionProviderRoute = 'preferred' | 'fallback' | ''
 
 export type RequestLog = {
   id: number
@@ -17,6 +18,9 @@ export type RequestLog = {
   model_mapping_target?: string
   model_override?: string
   model_route_captured?: boolean
+  session_preferred_provider_id?: string
+  session_preferred_provider?: string
+  session_provider_route?: SessionProviderRoute
   response_model?: string
 	reasoning_effort?: string
 	reasoning_effort_source?: ReasoningEffortSource

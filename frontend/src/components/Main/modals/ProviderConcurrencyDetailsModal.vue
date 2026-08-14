@@ -409,6 +409,8 @@ function activeRouteTooltipLines(request: ProviderConcurrencyRequestView) {
     modelMappingTarget: request.modelMappingTarget,
     modelOverride: request.modelOverride,
     modelRouteCaptured: request.modelRouteCaptured,
+    sessionPreferredProvider: request.sessionPreferredProvider,
+    sessionProviderRoute: request.sessionProviderRoute,
   }, t('components.main.concurrencyDetails.activeRouteUnavailable'))
 }
 
@@ -420,6 +422,8 @@ function historyRouteTooltipLines(log: RequestLog) {
     modelMappingTarget: log.model_mapping_target,
     modelOverride: log.model_override,
     modelRouteCaptured: log.model_route_captured,
+    sessionPreferredProvider: log.session_preferred_provider,
+    sessionProviderRoute: log.session_provider_route,
   }, t('components.main.concurrencyDetails.routeUnavailable'))
 }
 

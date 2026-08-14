@@ -59,6 +59,10 @@ type ProviderRelayService struct {
 	rrLastStart                    map[string]string            // 轮询状态：key="platform:level" → value=上次起始 Provider ID（回退为 Name）
 	claudeResponsesMu              sync.Mutex
 	claudeResponses                map[string]claudeResponsesSessionBinding
+	sessionProviderPreferenceMu     sync.Mutex
+	sessionProviderPreferences      map[string]*sessionProviderPreferenceState
+	nextSessionPreferenceGeneration uint64
+	nextSessionPreferenceUse        uint64
 	sessionAffinityMu              sync.Mutex
 	sessionAffinity                map[string]*providerSessionBinding
 	nextSessionNumber              int64
@@ -274,6 +278,7 @@ const requestLogPayloadRedactedValue = "[REDACTED]"
 const providerAttemptsPerRequest = 1
 const claudeResponsesSessionTTL = 30 * time.Minute
 const claudeResponsesMaxSessionBindings = 4096
+const sessionProviderPreferenceMaxInactive = 4096
 const claudeResponsesTailReplayMaxInputItems = 80
 const openAICompatPromptCacheDisableTTL = 30 * time.Minute
 const unsupportedOptionalParamsTTL = 30 * time.Minute
@@ -291,6 +296,12 @@ const (
 	requestOutcomeSuccess  = "success"
 	requestOutcomeFailure  = "failure"
 	requestOutcomeExcluded = "excluded"
+)
+
+const (
+	sessionProviderRoutePreferred = "preferred"
+	sessionProviderRouteFallback  = "fallback"
+	sessionPreferredProviderLevel = 0
 )
 
 const (
@@ -332,6 +343,23 @@ type claudeResponsesSessionBinding struct {
 	ResponseID string
 	Disabled   bool
 	ExpiresAt  time.Time
+}
+
+type sessionProviderPreference struct {
+	ProviderID   string
+	ProviderName string
+}
+
+type sessionProviderPreferenceAttempt struct {
+	ProviderID   string
+	ProviderName string
+}
+
+type sessionProviderPreferenceState struct {
+	Confirmed           sessionProviderPreference
+	ConfirmedGeneration uint64
+	Active              map[uint64]sessionProviderPreferenceAttempt
+	LastUsed            uint64
 }
 
 type providerSessionBinding struct {
@@ -397,6 +425,9 @@ type ProviderConcurrencyRequestDetail struct {
 	ModelMappingTarget  string                                `json:"modelMappingTarget,omitempty"`
 	ModelOverride       string                                `json:"modelOverride,omitempty"`
 	ModelRouteCaptured  bool                                  `json:"modelRouteCaptured"`
+	SessionPreferredProviderID string                                `json:"sessionPreferredProviderId,omitempty"`
+	SessionPreferredProvider   string                                `json:"sessionPreferredProvider,omitempty"`
+	SessionProviderRoute       string                                `json:"sessionProviderRoute,omitempty"`
 	Parameters          []ProviderConcurrencyRequestParameter `json:"parameters"`
 	Endpoint            string                                `json:"endpoint,omitempty"`
 	IsStream            bool                                  `json:"isStream"`
@@ -421,6 +452,9 @@ type providerConcurrencyRequestMeta struct {
 	ModelMappingTarget  string
 	ModelOverride       string
 	ModelRouteCaptured  bool
+	SessionPreferredProviderID string
+	SessionPreferredProvider   string
+	SessionProviderRoute       string
 	Parameters          []ProviderConcurrencyRequestParameter
 	Endpoint            string
 	IsStream            bool
@@ -588,6 +622,7 @@ func NewProviderRelayService(providerService *ProviderService, geminiService *Ge
 		},
 		rrLastStart:                 make(map[string]string),
 		claudeResponses:             make(map[string]claudeResponsesSessionBinding),
+		sessionProviderPreferences:  make(map[string]*sessionProviderPreferenceState),
 		sessionAffinity:             make(map[string]*providerSessionBinding),
 		toolSessions:                make(map[string]toolSessionBinding),
 		providerConcurrency:         make(map[string]int),
@@ -1109,6 +1144,9 @@ func (prs *ProviderRelayService) acquireProviderConcurrencySlot(platform string,
 		ModelMappingTarget:  strings.TrimSpace(meta.ModelMappingTarget),
 		ModelOverride:       strings.TrimSpace(meta.ModelOverride),
 		ModelRouteCaptured:  meta.ModelRouteCaptured,
+		SessionPreferredProviderID: strings.TrimSpace(meta.SessionPreferredProviderID),
+		SessionPreferredProvider:   strings.TrimSpace(meta.SessionPreferredProvider),
+		SessionProviderRoute:       strings.TrimSpace(meta.SessionProviderRoute),
 		Parameters:          cloneProviderConcurrencyRequestParameters(meta.Parameters),
 		Endpoint:            strings.TrimSpace(meta.Endpoint),
 		IsStream:            meta.IsStream,
@@ -1238,6 +1276,199 @@ func (prs *ProviderRelayService) recordProviderFailureIfNeeded(platform string, 
 
 func sessionAffinityStateKey(platform string, sessionHash string) string {
 	return strings.TrimSpace(platform) + "\x00" + strings.TrimSpace(sessionHash)
+}
+
+func (prs *ProviderRelayService) touchSessionProviderPreferenceLocked(state *sessionProviderPreferenceState) {
+	prs.nextSessionPreferenceUse++
+	state.LastUsed = prs.nextSessionPreferenceUse
+}
+
+func (prs *ProviderRelayService) trimSessionProviderPreferencesLocked() {
+	if len(prs.sessionProviderPreferences) <= sessionProviderPreferenceMaxInactive {
+		return
+	}
+	inactiveCount := 0
+	for _, state := range prs.sessionProviderPreferences {
+		if state != nil && len(state.Active) == 0 {
+			inactiveCount++
+		}
+	}
+	for inactiveCount > sessionProviderPreferenceMaxInactive {
+		oldestKey := ""
+		var oldestUse uint64
+		for key, state := range prs.sessionProviderPreferences {
+			if state == nil || len(state.Active) > 0 {
+				continue
+			}
+			if oldestKey == "" || state.LastUsed < oldestUse {
+				oldestKey = key
+				oldestUse = state.LastUsed
+			}
+		}
+		if oldestKey == "" {
+			return
+		}
+		delete(prs.sessionProviderPreferences, oldestKey)
+		inactiveCount--
+	}
+}
+
+func (prs *ProviderRelayService) beginSessionProviderPreferenceRequest(platform string, sessionHash string) uint64 {
+	if prs == nil || strings.TrimSpace(sessionHash) == "" {
+		return 0
+	}
+	prs.sessionProviderPreferenceMu.Lock()
+	defer prs.sessionProviderPreferenceMu.Unlock()
+	if prs.sessionProviderPreferences == nil {
+		prs.sessionProviderPreferences = make(map[string]*sessionProviderPreferenceState)
+	}
+	key := sessionAffinityStateKey(platform, sessionHash)
+	state := prs.sessionProviderPreferences[key]
+	if state == nil {
+		state = &sessionProviderPreferenceState{Active: make(map[uint64]sessionProviderPreferenceAttempt)}
+		prs.sessionProviderPreferences[key] = state
+	}
+	if state.Active == nil {
+		state.Active = make(map[uint64]sessionProviderPreferenceAttempt)
+	}
+	prs.nextSessionPreferenceGeneration++
+	generation := prs.nextSessionPreferenceGeneration
+	state.Active[generation] = sessionProviderPreferenceAttempt{}
+	prs.touchSessionProviderPreferenceLocked(state)
+	return generation
+}
+
+func (prs *ProviderRelayService) updateSessionProviderPreferenceAttempt(platform string, sessionHash string, generation uint64, providerID string, providerName string) {
+	if prs == nil || generation == 0 || strings.TrimSpace(sessionHash) == "" || strings.TrimSpace(providerID) == "" {
+		return
+	}
+	prs.sessionProviderPreferenceMu.Lock()
+	defer prs.sessionProviderPreferenceMu.Unlock()
+	state := prs.sessionProviderPreferences[sessionAffinityStateKey(platform, sessionHash)]
+	if state == nil {
+		return
+	}
+	if _, exists := state.Active[generation]; !exists {
+		return
+	}
+	state.Active[generation] = sessionProviderPreferenceAttempt{
+		ProviderID:   strings.TrimSpace(providerID),
+		ProviderName: strings.TrimSpace(providerName),
+	}
+	prs.touchSessionProviderPreferenceLocked(state)
+}
+
+func (prs *ProviderRelayService) finishSessionProviderPreferenceRequest(platform string, sessionHash string, generation uint64, succeeded bool) {
+	if prs == nil || generation == 0 || strings.TrimSpace(sessionHash) == "" {
+		return
+	}
+	prs.sessionProviderPreferenceMu.Lock()
+	defer prs.sessionProviderPreferenceMu.Unlock()
+	key := sessionAffinityStateKey(platform, sessionHash)
+	state := prs.sessionProviderPreferences[key]
+	if state == nil {
+		return
+	}
+	attempt, exists := state.Active[generation]
+	if !exists {
+		return
+	}
+	delete(state.Active, generation)
+	if succeeded && attempt.ProviderID != "" && generation >= state.ConfirmedGeneration {
+		state.Confirmed = sessionProviderPreference{
+			ProviderID:   attempt.ProviderID,
+			ProviderName: attempt.ProviderName,
+		}
+		state.ConfirmedGeneration = generation
+	}
+	if len(state.Active) == 0 && state.Confirmed.ProviderID == "" {
+		delete(prs.sessionProviderPreferences, key)
+		return
+	}
+	prs.touchSessionProviderPreferenceLocked(state)
+	prs.trimSessionProviderPreferencesLocked()
+}
+
+func (prs *ProviderRelayService) sessionProviderPreference(platform string, sessionHash string) (sessionProviderPreference, bool) {
+	if prs == nil || strings.TrimSpace(sessionHash) == "" {
+		return sessionProviderPreference{}, false
+	}
+	prs.sessionProviderPreferenceMu.Lock()
+	defer prs.sessionProviderPreferenceMu.Unlock()
+	state := prs.sessionProviderPreferences[sessionAffinityStateKey(platform, sessionHash)]
+	if state == nil {
+		return sessionProviderPreference{}, false
+	}
+	prs.touchSessionProviderPreferenceLocked(state)
+	var latestGeneration uint64
+	preferred := sessionProviderPreference{}
+	for generation, attempt := range state.Active {
+		if attempt.ProviderID == "" || generation < latestGeneration {
+			continue
+		}
+		latestGeneration = generation
+		preferred = sessionProviderPreference{
+			ProviderID:   attempt.ProviderID,
+			ProviderName: attempt.ProviderName,
+		}
+	}
+	if preferred.ProviderID != "" {
+		return preferred, true
+	}
+	if state.Confirmed.ProviderID == "" {
+		return sessionProviderPreference{}, false
+	}
+	return state.Confirmed, true
+}
+
+func providerAttemptLevel(provider Provider) int {
+	level := provider.Level
+	if level <= 0 {
+		return 1
+	}
+	return level
+}
+
+func providersAtAttemptLevel(providers []Provider, level int) []Provider {
+	result := make([]Provider, 0, len(providers))
+	for _, provider := range providers {
+		if providerAttemptLevel(provider) == level {
+			result = append(result, provider)
+		}
+	}
+	return result
+}
+
+func removeProviderByRef(providers []Provider, providerID string) []Provider {
+	providerID = strings.TrimSpace(providerID)
+	if providerID == "" {
+		return providers
+	}
+	result := make([]Provider, 0, len(providers))
+	for _, provider := range providers {
+		if providerRefFromProvider(provider) != providerID {
+			result = append(result, provider)
+		}
+	}
+	return result
+}
+
+func buildProviderAttemptGroups(providers []Provider, preferredProviderID string) ([]int, map[int][]Provider) {
+	levelGroups := make(map[int][]Provider)
+	preferredProviderID = strings.TrimSpace(preferredProviderID)
+	for _, provider := range providers {
+		level := providerAttemptLevel(provider)
+		if preferredProviderID != "" && providerRefFromProvider(provider) == preferredProviderID {
+			level = sessionPreferredProviderLevel
+		}
+		levelGroups[level] = append(levelGroups[level], provider)
+	}
+	levels := make([]int, 0, len(levelGroups))
+	for level := range levelGroups {
+		levels = append(levels, level)
+	}
+	sort.Ints(levels)
+	return levels, levelGroups
 }
 
 func providerSessionStatusKey(platform string, providerID string) string {
@@ -2468,22 +2699,58 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 		}
 		fmt.Println()
 
-		// 按 Level 分组
-		levelGroups := make(map[int][]Provider)
-		for _, provider := range active {
-			level := provider.Level
-			if level <= 0 {
-				level = 1 // 未配置或零值时默认为 Level 1
+		stableSessionHash := ""
+		preferredSessionProvider := sessionProviderPreference{}
+		if kind == "claude" && claudeModelRoutingEnabled {
+			stableSessionHash = deriveMetadataRelaySessionHash(bodyBytes)
+			if stableSessionHash != "" && requestedModel == claudeManagedSubagentModel {
+				preferredSessionProvider, _ = prs.sessionProviderPreference(kind, stableSessionHash)
 			}
-			levelGroups[level] = append(levelGroups[level], provider)
+		}
+		mainSessionPreferenceGeneration := uint64(0)
+		mainSessionPreferenceSucceeded := false
+		if stableSessionHash != "" && requestedModel != claudeManagedSubagentModel {
+			mainSessionPreferenceGeneration = prs.beginSessionProviderPreferenceRequest(kind, stableSessionHash)
+			if mainSessionPreferenceGeneration > 0 {
+				defer func() {
+					prs.finishSessionProviderPreferenceRequest(kind, stableSessionHash, mainSessionPreferenceGeneration, mainSessionPreferenceSucceeded)
+				}()
+			}
+		}
+		prepareSessionProviderAttempt := func(provider Provider, plan providerRequestPlan) providerRequestPlan {
+			providerID := providerRefFromProvider(provider)
+			if mainSessionPreferenceGeneration > 0 {
+				plan.SessionPreferenceHash = stableSessionHash
+				plan.SessionPreferenceGeneration = mainSessionPreferenceGeneration
+			}
+			if requestedModel == claudeManagedSubagentModel && preferredSessionProvider.ProviderID != "" {
+				plan.SessionPreferredProviderID = preferredSessionProvider.ProviderID
+				plan.SessionPreferredProvider = preferredSessionProvider.ProviderName
+				if providerID == preferredSessionProvider.ProviderID {
+					plan.SessionProviderRoute = sessionProviderRoutePreferred
+				} else {
+					plan.SessionProviderRoute = sessionProviderRouteFallback
+				}
+			}
+			return plan
+		}
+		markSessionProviderAttemptSucceeded := func() {
+			if mainSessionPreferenceGeneration > 0 {
+				mainSessionPreferenceSucceeded = true
+			}
 		}
 
-		// 获取所有 level 并升序排序
-		levels := make([]int, 0, len(levelGroups))
-		for level := range levelGroups {
-			levels = append(levels, level)
+		// 按 Level 分组；Subagent 的会话首选供应商使用独立的最高优先级。
+		levels, levelGroups := buildProviderAttemptGroups(active, preferredSessionProvider.ProviderID)
+		preferredProviderLevel := -1
+		if preferredSessionProvider.ProviderID != "" {
+			for _, provider := range active {
+				if providerRefFromProvider(provider) == preferredSessionProvider.ProviderID {
+					preferredProviderLevel = providerAttemptLevel(provider)
+					break
+				}
+			}
 		}
-		sort.Ints(levels)
 
 		fmt.Printf("[INFO] 共 %d 个 Level 分组：%v\n", len(levels), levels)
 
@@ -2553,11 +2820,13 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 							continue
 						}
 						startTime := time.Now()
+						plan = prepareSessionProviderAttempt(provider, plan)
 						ok, err := prs.forwardRequestWithPlan(c, kind, provider, plan.EffectiveEndpoint, query, clientHeaders, plan.BodyBytes, isStream, plan.EffectiveModel, requestedModel, plan, providerConcurrencyLimitEnabled)
 						duration := time.Since(startTime)
 						prs.finishSessionProviderRequest(kind, sessionHash)
 
 						if ok {
+							markSessionProviderAttemptSucceeded()
 							prs.confirmSessionProviderBinding(kind, sessionHash, sessionAttemptID)
 							fmt.Printf("[INFO] ✓ 会话隔离成功: %s | 重试 %d 次 | 耗时: %.2fs\n",
 								provider.Name, retryCount+1, duration.Seconds())
@@ -2672,10 +2941,12 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 							provider.Name, level, retryCount+1, maxRetryPerProvider, plan.EffectiveModel)
 
 						startTime := time.Now()
+						plan = prepareSessionProviderAttempt(provider, plan)
 						ok, err := prs.forwardRequestWithPlan(c, kind, provider, plan.EffectiveEndpoint, query, clientHeaders, plan.BodyBytes, isStream, plan.EffectiveModel, requestedModel, plan, providerConcurrencyLimitEnabled)
 						duration := time.Since(startTime)
 
 						if ok {
+							markSessionProviderAttemptSucceeded()
 							fmt.Printf("[INFO] ✓ 成功: %s | 重试 %d 次 | 耗时: %.2fs\n",
 								provider.Name, retryCount+1, duration.Seconds())
 							if err := prs.blacklistService.RecordSuccessByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
@@ -2810,11 +3081,13 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 				}
 
 				startTime := time.Now()
+				plan = prepareSessionProviderAttempt(provider, plan)
 				ok, err := prs.forwardRequestWithPlan(c, kind, provider, plan.EffectiveEndpoint, query, clientHeaders, plan.BodyBytes, isStream, plan.EffectiveModel, requestedModel, plan, providerConcurrencyLimitEnabled)
 				duration := time.Since(startTime)
 				prs.finishSessionProviderRequest(kind, sessionHash)
 
 				if ok {
+					markSessionProviderAttemptSucceeded()
 					fmt.Printf("[INFO]   ✓ 会话隔离成功: %s | 耗时: %.2fs\n", provider.Name, duration.Seconds())
 					prs.confirmSessionProviderBinding(kind, sessionHash, sessionAttemptID)
 					if err := prs.blacklistService.RecordSuccessByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
@@ -2895,7 +3168,15 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 
 			// 如果启用轮询，对同 Level 的 providers 进行轮询排序
 			if roundRobinEnabled {
-				providersInLevel = prs.roundRobinOrder(kind, level, providersInLevel)
+				roundRobinProviders := providersInLevel
+				if preferredProviderLevel == level {
+					// 首选供应商失败后的轮询必须基于完整原组计算，避免首选被移走后丢失轮询起点。
+					roundRobinProviders = providersAtAttemptLevel(active, level)
+				}
+				providersInLevel = prs.roundRobinOrder(kind, level, roundRobinProviders)
+				if preferredProviderLevel == level {
+					providersInLevel = removeProviderByRef(providersInLevel, preferredSessionProvider.ProviderID)
+				}
 			}
 
 			fmt.Printf("[INFO] === 尝试 Level %d（%d 个 provider）===\n", level, len(providersInLevel))
@@ -2913,10 +3194,12 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 
 				// 尝试发送请求
 				startTime := time.Now()
+				plan = prepareSessionProviderAttempt(provider, plan)
 				ok, err := prs.forwardRequestWithPlan(c, kind, provider, plan.EffectiveEndpoint, query, clientHeaders, plan.BodyBytes, isStream, plan.EffectiveModel, requestedModel, plan, providerConcurrencyLimitEnabled)
 				duration := time.Since(startTime)
 
 				if ok {
+					markSessionProviderAttemptSucceeded()
 					fmt.Printf("[INFO]   ✓ Level %d 成功: %s | 耗时: %.2fs\n", level, provider.Name, duration.Seconds())
 
 					// 成功：清零连续失败计数
@@ -3112,6 +3395,9 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 		ModelMappingTarget:  plan.ModelMappingTarget,
 		ModelOverride:       plan.ModelOverride,
 		ModelRouteCaptured:  plan.ModelRouteCaptured,
+		SessionPreferredProviderID: plan.SessionPreferredProviderID,
+		SessionPreferredProvider:   plan.SessionPreferredProvider,
+		SessionProviderRoute:       plan.SessionProviderRoute,
 		Parameters:          plan.Parameters,
 		Endpoint:            endpoint,
 		IsStream:            isStream,
@@ -3120,6 +3406,15 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 		return false, errProviderConcurrencyLimit
 	}
 	defer releaseProviderSlot()
+	if plan.SessionPreferenceGeneration > 0 && strings.TrimSpace(plan.SessionPreferenceHash) != "" {
+		prs.updateSessionProviderPreferenceAttempt(
+			kind,
+			plan.SessionPreferenceHash,
+			plan.SessionPreferenceGeneration,
+			providerRefFromProvider(provider),
+			provider.Name,
+		)
+	}
 
 	if !isCodexOAuthProvider(provider) {
 		authType := provider.ConnectivityAuthType
@@ -3154,6 +3449,9 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 		ModelMappingTarget:        strings.TrimSpace(plan.ModelMappingTarget),
 		ModelOverride:             strings.TrimSpace(plan.ModelOverride),
 		ModelRouteCaptured:        plan.ModelRouteCaptured,
+		SessionPreferredProviderID: strings.TrimSpace(plan.SessionPreferredProviderID),
+		SessionPreferredProvider:   strings.TrimSpace(plan.SessionPreferredProvider),
+		SessionProviderRoute:       strings.TrimSpace(plan.SessionProviderRoute),
 		ReasoningEffort:           plan.Reasoning.Effort,
 		ReasoningEffortSource:     plan.Reasoning.Source,
 		UserAgent:                 requestUserAgent,
@@ -3219,7 +3517,8 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 
 		err := GlobalDBQueueLogs.ExecBatchCtx(ctx, `
 				INSERT INTO request_log (
-					platform, model, requested_model, mapped_model, model_mapping_pattern, model_mapping_target, model_override, model_route_captured,
+						platform, model, requested_model, mapped_model, model_mapping_pattern, model_mapping_target, model_override, model_route_captured,
+						session_preferred_provider_id, session_preferred_provider, session_provider_route,
 					response_model, provider_id, provider, http_code, request_outcome, outcome_reason, error_message, error_source,
 					reasoning_effort, user_agent,
 					input_tokens, output_tokens, cache_create_tokens, ephemeral_5m_tokens, ephemeral_1h_tokens, cache_read_tokens,
@@ -3233,7 +3532,7 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 					provider_per_call_unified_set, provider_per_call_input_set, provider_per_call_output_set,
 					request_body, response_body, request_body_truncated, response_body_truncated, payload_bytes, payload_captured,
 					reasoning_effort_source, data_source, dedup_core
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			`,
 			requestLog.Platform,
 			requestLog.Model,
@@ -3243,6 +3542,9 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 			requestLog.ModelMappingTarget,
 			requestLog.ModelOverride,
 			boolToInt(requestLog.ModelRouteCaptured),
+			requestLog.SessionPreferredProviderID,
+			requestLog.SessionPreferredProvider,
+			requestLog.SessionProviderRoute,
 			requestLog.ResponseModel,
 			requestLog.ProviderID,
 			requestLog.Provider,
@@ -4632,6 +4934,9 @@ func ensureRequestLogTableWithDB(db *sql.DB) error {
 		model_mapping_target TEXT DEFAULT '',
 		model_override TEXT DEFAULT '',
 		model_route_captured INTEGER DEFAULT 0,
+		session_preferred_provider_id TEXT DEFAULT '',
+		session_preferred_provider TEXT DEFAULT '',
+		session_provider_route TEXT DEFAULT '',
 		response_model TEXT DEFAULT '',
 		reasoning_effort TEXT DEFAULT '',
 		reasoning_effort_source TEXT DEFAULT '',
@@ -4805,6 +5110,15 @@ func ensureRequestLogTableWithDB(db *sql.DB) error {
 		return err
 	}
 	if err := ensureRequestLogColumn(db, "model_route_captured", "INTEGER DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "session_preferred_provider_id", "TEXT DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "session_preferred_provider", "TEXT DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "session_provider_route", "TEXT DEFAULT ''"); err != nil {
 		return err
 	}
 	if err := ensureRequestLogColumn(db, "response_model", "TEXT DEFAULT ''"); err != nil {
@@ -5577,6 +5891,9 @@ type ReqeustLog struct {
 	ModelMappingTarget        string  `json:"model_mapping_target,omitempty"`
 	ModelOverride             string  `json:"model_override,omitempty"`
 	ModelRouteCaptured        bool    `json:"model_route_captured"`
+	SessionPreferredProviderID string  `json:"session_preferred_provider_id,omitempty"`
+	SessionPreferredProvider   string  `json:"session_preferred_provider,omitempty"`
+	SessionProviderRoute       string  `json:"session_provider_route,omitempty"`
 	ResponseModel             string  `json:"response_model,omitempty"`
 	ReasoningEffort           string  `json:"reasoning_effort,omitempty"`
 	ReasoningEffortSource     string  `json:"reasoning_effort_source,omitempty"`
@@ -6103,6 +6420,11 @@ type providerRequestPlan struct {
 	ModelMappingSupports1M     bool
 	ModelOverride              string
 	ModelRouteCaptured         bool
+	SessionPreferredProviderID string
+	SessionPreferredProvider   string
+	SessionProviderRoute       string
+	SessionPreferenceHash      string
+	SessionPreferenceGeneration uint64
 	Reasoning                  providerRequestReasoningMetadata
 	Parameters                 []ProviderConcurrencyRequestParameter
 	ParameterProtocol          string
