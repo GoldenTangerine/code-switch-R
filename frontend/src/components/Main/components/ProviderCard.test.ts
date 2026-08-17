@@ -168,6 +168,66 @@ describe('ProviderCard display states', () => {
     expect(html).toContain('mac-switch sm')
   })
 
+  it('keeps quota query errors behind one compact details trigger', async () => {
+    const quotaDisplay = [
+      {
+        key: 'primary-error',
+        label: 'Primary balance',
+        used: 0,
+        total: 0,
+        progressRatio: 0,
+        countdownLabel: '',
+        nextReset: null,
+        queriedAt: Date.now(),
+        valueMode: 'currency' as const,
+        invalidMessage: 'temporary upstream timeout',
+      },
+      {
+        key: 'backup-error',
+        label: 'Backup balance',
+        used: 0,
+        total: 0,
+        progressRatio: 0,
+        countdownLabel: '',
+        nextReset: null,
+        queriedAt: Date.now(),
+        valueMode: 'currency' as const,
+        invalidMessage: 'authentication failed with a long response body',
+      },
+    ]
+    const readyStats: ProviderCardViewModel['stats'] = {
+      state: 'ready',
+      requests: '请求数: 1',
+      tokens: 'Tokens: 1',
+      costLabel: '花费',
+      costParts: [{ type: 'amount', value: '0' }],
+      costFormatted: '0',
+      costValue: 0,
+      ttft: '—',
+      tps: '—',
+      performanceHint: '',
+      successRateLabel: '成功率: 100%',
+      successRateClass: 'success-good',
+      successRateHint: '成功 1 · 失败 0 · 已排除 0',
+      failedRequests: 0,
+      unreadFailedRequests: 0,
+      hasUnreadErrorLogs: false,
+    }
+    const renderedCards = await Promise.all([
+      renderCard(baseViewModel({ quotaDisplay })),
+      renderCard(baseViewModel({ quotaDisplay, stats: readyStats })),
+    ])
+
+    for (const html of renderedCards) {
+      expect(html.match(/card-balance-quota__error-trigger/g)).toHaveLength(1)
+      expect(html).toContain('aria-expanded="false"')
+      expect(html).toContain('card-balance-quota-panel__updated')
+      expect(html).toContain('card-balance-quota-panel__refresh')
+      expect(html).not.toContain('temporary upstream timeout')
+      expect(html).not.toContain('authentication failed with a long response body')
+    }
+  })
+
   it('highlights active concurrency without marking it as full', async () => {
     const html = await renderCard(baseViewModel({
       concurrencyStatus: {

@@ -14,8 +14,9 @@
       { 'is-last-used': viewModel.isLastUsed },
       { 'is-hosted-active': hostedSelectionActive },
       { 'is-highlighted': viewModel.isHighlighted },
+      { 'has-open-popover': hasOpenCardPopover },
     ]"
-    :draggable="!viewModel.card.quotaAutoDisabled"
+    :draggable="!viewModel.card.quotaAutoDisabled && !hasOpenCardPopover"
     @click="$emit('card-click')"
     @dragstart="handleDragStart"
     @dragend="handleDragEnd"
@@ -246,7 +247,7 @@
                   :aria-expanded="blacklistPopoverOpen"
                   :aria-controls="`blacklist-actions-${viewModel.card.id}`"
                   aria-haspopup="dialog"
-                  @click.stop="blacklistPopoverOpen = !blacklistPopoverOpen"
+                  @click.stop="toggleBlacklistPopover"
                 >
                   {{ t('components.main.blacklist.blocked') }}
                   {{ formatBlacklistCountdown(viewModel.blacklistStatus.remainingSeconds) }}
@@ -387,26 +388,66 @@
                 v-if="hasErrorQuotaItems"
                 class="card-balance-quota-panel card-balance-quota-panel--error"
               >
-                <div class="card-balance-quota-list">
-                  <div
-                    v-for="item in errorQuotaItems"
-                    :key="`error-${item.key}`"
-                    class="card-balance-quota card-balance-quota--error"
-                    :title="quotaTooltip(item)"
+                <div ref="quotaErrorPopoverRef" class="card-balance-quota-error">
+                  <span class="sr-only" role="status" aria-live="polite">
+                    {{ t('components.main.providers.quotaQueryFailed') }}
+                  </span>
+                  <button
+                    ref="quotaErrorTriggerRef"
+                    type="button"
+                    class="card-balance-quota__error-trigger"
+                    :title="quotaErrorDetailsAriaLabel"
+                    :aria-label="quotaErrorDetailsAriaLabel"
+                    :aria-expanded="quotaErrorPopoverOpen"
+                    :aria-controls="quotaErrorDetailsId"
+                    aria-haspopup="dialog"
+                    @click.stop="toggleQuotaErrorPopover"
                   >
                     <span
-                      v-if="showErrorItemLabel(item)"
-                      class="card-balance-quota__item-label card-balance-quota__item-label--error"
+                      class="card-balance-quota__error-icon"
+                      aria-hidden="true"
                     >
-                      {{ item.label }}
+                      !
                     </span>
-                    <div class="card-balance-quota__error-row">
-                      <span class="card-balance-quota__error-icon" aria-hidden="true">!</span>
-                      <span class="card-balance-quota__error-text">
-                        {{ quotaItemNote(item) || t('components.main.providers.quotaQueryFailed') }}
-                      </span>
+                  </button>
+                  <Teleport to="body">
+                    <div
+                      v-if="quotaErrorPopoverOpen"
+                      :id="quotaErrorDetailsId"
+                      ref="quotaErrorPopoverPanelRef"
+                      class="card-balance-quota__error-popover"
+                      :class="[
+                        `card-balance-quota__error-popover--${quotaErrorPopoverPlacement}`,
+                        { 'theme-dark': resolvedTheme === 'dark' },
+                      ]"
+                      :style="quotaErrorPopoverStyle"
+                      role="dialog"
+                      tabindex="-1"
+                      :aria-label="t('components.main.providers.quotaErrorDetails')"
+                      @click.stop
+                      @pointerdown.stop
+                      @dragstart.stop.prevent
+                    >
+                      <strong class="card-balance-quota__error-popover-title">
+                        {{ t('components.main.providers.quotaErrorDetails') }}
+                      </strong>
+                      <div
+                        v-for="item in errorQuotaItems"
+                        :key="`error-detail-${item.key}`"
+                        class="card-balance-quota__error-detail"
+                      >
+                        <span
+                          v-if="showErrorItemLabel(item)"
+                          class="card-balance-quota__item-label card-balance-quota__item-label--error"
+                        >
+                          {{ item.label }}
+                        </span>
+                        <span class="card-balance-quota__error-text">
+                          {{ quotaItemNote(item) || t('components.main.providers.quotaQueryFailed') }}
+                        </span>
+                      </div>
                     </div>
-                  </div>
+                  </Teleport>
                 </div>
                 <div class="card-balance-quota-panel__meta">
                   <span class="card-balance-quota-panel__updated">
@@ -554,26 +595,66 @@
               v-if="hasErrorQuotaItems"
               class="card-balance-quota-panel card-balance-quota-panel--standalone card-balance-quota-panel--error"
             >
-              <div class="card-balance-quota-list">
-                <div
-                  v-for="item in errorQuotaItems"
-                  :key="`error-standalone-${item.key}`"
-                  class="card-balance-quota card-balance-quota--error"
-                  :title="quotaTooltip(item)"
+              <div ref="quotaErrorPopoverRef" class="card-balance-quota-error">
+                <span class="sr-only" role="status" aria-live="polite">
+                  {{ t('components.main.providers.quotaQueryFailed') }}
+                </span>
+                <button
+                  ref="quotaErrorTriggerRef"
+                  type="button"
+                  class="card-balance-quota__error-trigger"
+                  :title="quotaErrorDetailsAriaLabel"
+                  :aria-label="quotaErrorDetailsAriaLabel"
+                  :aria-expanded="quotaErrorPopoverOpen"
+                  :aria-controls="quotaErrorDetailsId"
+                  aria-haspopup="dialog"
+                  @click.stop="toggleQuotaErrorPopover"
                 >
                   <span
-                    v-if="showErrorItemLabel(item)"
-                    class="card-balance-quota__item-label card-balance-quota__item-label--error"
+                    class="card-balance-quota__error-icon"
+                    aria-hidden="true"
                   >
-                    {{ item.label }}
+                    !
                   </span>
-                  <div class="card-balance-quota__error-row">
-                    <span class="card-balance-quota__error-icon" aria-hidden="true">!</span>
-                    <span class="card-balance-quota__error-text">
-                      {{ quotaItemNote(item) || t('components.main.providers.quotaQueryFailed') }}
-                    </span>
+                </button>
+                <Teleport to="body">
+                  <div
+                    v-if="quotaErrorPopoverOpen"
+                    :id="quotaErrorDetailsId"
+                    ref="quotaErrorPopoverPanelRef"
+                    class="card-balance-quota__error-popover"
+                    :class="[
+                      `card-balance-quota__error-popover--${quotaErrorPopoverPlacement}`,
+                      { 'theme-dark': resolvedTheme === 'dark' },
+                    ]"
+                    :style="quotaErrorPopoverStyle"
+                    role="dialog"
+                    tabindex="-1"
+                    :aria-label="t('components.main.providers.quotaErrorDetails')"
+                    @click.stop
+                    @pointerdown.stop
+                    @dragstart.stop.prevent
+                  >
+                    <strong class="card-balance-quota__error-popover-title">
+                      {{ t('components.main.providers.quotaErrorDetails') }}
+                    </strong>
+                    <div
+                      v-for="item in errorQuotaItems"
+                      :key="`error-detail-standalone-${item.key}`"
+                      class="card-balance-quota__error-detail"
+                    >
+                      <span
+                        v-if="showErrorItemLabel(item)"
+                        class="card-balance-quota__item-label card-balance-quota__item-label--error"
+                      >
+                        {{ item.label }}
+                      </span>
+                      <span class="card-balance-quota__error-text">
+                        {{ quotaItemNote(item) || t('components.main.providers.quotaQueryFailed') }}
+                      </span>
+                    </div>
                   </div>
-                </div>
+                </Teleport>
               </div>
               <div class="card-balance-quota-panel__meta">
                 <span class="card-balance-quota-panel__updated">
@@ -873,11 +954,15 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onUnmounted, ref, watch, type ComponentPublicInstance } from 'vue'
+import { computed, nextTick, onUnmounted, ref, watch, type ComponentPublicInstance, type CSSProperties } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { ProviderCardViewModel, ProviderDragEndPayload, ProviderQuotaDisplayItem, ProviderTab, ResolvedTheme } from '../types'
 import { formatQuotaUsagePercent, getQuotaProgressClass, getQuotaProgressPercent } from '../utils/providerQuotaDisplay'
 import { resolveProviderCardQuotaSectionMode } from '../utils/providerCardQuotaVisibility'
+import {
+  calculateProviderQuotaErrorPopoverLayout,
+  type ProviderQuotaErrorPopoverPlacement,
+} from '../utils/providerQuotaErrorPopover'
 import { resolveProviderQuotaCurrencyCode } from '../utils/providerQuotaValueFormat'
 import {
   formatProviderQuotaRelativeUpdatedAt,
@@ -968,9 +1053,44 @@ const successRateTooltip = computed(() => {
 
 const blacklistPopoverOpen = ref(false)
 const blacklistPopoverRef = ref<HTMLElement | null>(null)
+const quotaErrorPopoverOpen = ref(false)
+const quotaErrorPopoverRef = ref<HTMLElement | null>(null)
+const quotaErrorTriggerRef = ref<HTMLButtonElement | null>(null)
+const quotaErrorPopoverPanelRef = ref<HTMLElement | null>(null)
+const quotaErrorPopoverPlacement = ref<ProviderQuotaErrorPopoverPlacement>('below')
+const quotaErrorPopoverStyle = ref<CSSProperties>({ visibility: 'hidden' })
+const hasOpenCardPopover = computed(() => blacklistPopoverOpen.value || quotaErrorPopoverOpen.value)
+
+const quotaErrorDetailsId = computed(() => (
+  `provider-quota-error-${props.activeTab}-${props.viewModel.card.id}`
+))
+
+const quotaErrorDetailsAriaLabel = computed(() => t(
+  'components.main.providers.quotaErrorDetailsAriaLabel',
+  { name: props.viewModel.card.name },
+))
 
 const closeBlacklistPopover = () => {
   blacklistPopoverOpen.value = false
+}
+
+const closeQuotaErrorPopover = (restoreFocus = false) => {
+  const wasOpen = quotaErrorPopoverOpen.value
+  quotaErrorPopoverOpen.value = false
+  quotaErrorPopoverStyle.value = { visibility: 'hidden' }
+  if (restoreFocus && wasOpen) {
+    void nextTick(() => quotaErrorTriggerRef.value?.focus({ preventScroll: true }))
+  }
+}
+
+const toggleBlacklistPopover = () => {
+  closeQuotaErrorPopover()
+  blacklistPopoverOpen.value = !blacklistPopoverOpen.value
+}
+
+const toggleQuotaErrorPopover = () => {
+  closeBlacklistPopover()
+  quotaErrorPopoverOpen.value = !quotaErrorPopoverOpen.value
 }
 
 const handleBlacklistPopoverPointerDown = (event: PointerEvent) => {
@@ -990,6 +1110,68 @@ const stopBlacklistPopoverListeners = () => {
   document.removeEventListener('keydown', handleBlacklistPopoverKeydown)
 }
 
+const handleQuotaErrorPopoverPointerDown = (event: PointerEvent) => {
+  const target = event.target as Node
+  if (
+    !quotaErrorPopoverRef.value?.contains(target)
+    && !quotaErrorPopoverPanelRef.value?.contains(target)
+  ) {
+    closeQuotaErrorPopover()
+  }
+}
+
+const handleQuotaErrorPopoverKeydown = (event: KeyboardEvent) => {
+  if (event.key === 'Escape') {
+    closeQuotaErrorPopover(true)
+  }
+}
+
+const updateQuotaErrorPopoverPosition = () => {
+  if (!quotaErrorPopoverOpen.value || typeof window === 'undefined') return
+  const anchor = quotaErrorTriggerRef.value
+  const panel = quotaErrorPopoverPanelRef.value
+  if (!anchor?.isConnected || !panel?.isConnected) {
+    closeQuotaErrorPopover()
+    return
+  }
+
+  const anchorRect = anchor.getBoundingClientRect()
+  const panelRect = panel.getBoundingClientRect()
+  const layout = calculateProviderQuotaErrorPopoverLayout(
+    {
+      top: anchorRect.top,
+      bottom: anchorRect.bottom,
+      left: anchorRect.left,
+      width: anchorRect.width,
+      height: anchorRect.height,
+    },
+    {
+      width: panelRect.width,
+      height: panelRect.height,
+    },
+    {
+      width: window.innerWidth,
+      height: window.innerHeight,
+    },
+  )
+
+  quotaErrorPopoverPlacement.value = layout.placement
+  quotaErrorPopoverStyle.value = {
+    top: `${layout.top}px`,
+    left: `${layout.left}px`,
+    width: `${layout.width}px`,
+    maxHeight: `${layout.maxHeight}px`,
+    visibility: 'visible',
+  }
+}
+
+const stopQuotaErrorPopoverListeners = () => {
+  document.removeEventListener('pointerdown', handleQuotaErrorPopoverPointerDown)
+  document.removeEventListener('keydown', handleQuotaErrorPopoverKeydown)
+  window.removeEventListener('scroll', updateQuotaErrorPopoverPosition, true)
+  window.removeEventListener('resize', updateQuotaErrorPopoverPosition)
+}
+
 watch(blacklistPopoverOpen, (open) => {
   stopBlacklistPopoverListeners()
   if (open) {
@@ -997,6 +1179,35 @@ watch(blacklistPopoverOpen, (open) => {
     document.addEventListener('keydown', handleBlacklistPopoverKeydown)
   }
 })
+
+watch(quotaErrorPopoverOpen, async (open) => {
+  stopQuotaErrorPopoverListeners()
+  if (open) {
+    document.addEventListener('pointerdown', handleQuotaErrorPopoverPointerDown)
+    document.addEventListener('keydown', handleQuotaErrorPopoverKeydown)
+    window.addEventListener('scroll', updateQuotaErrorPopoverPosition, true)
+    window.addEventListener('resize', updateQuotaErrorPopoverPosition)
+    quotaErrorPopoverStyle.value = { visibility: 'hidden' }
+    await nextTick()
+    if (!quotaErrorPopoverOpen.value) return
+    updateQuotaErrorPopoverPosition()
+    quotaErrorPopoverPanelRef.value?.focus({ preventScroll: true })
+  }
+})
+
+watch(
+  () => [
+    props.activeTab,
+    props.viewModel.card.id,
+    props.viewModel.card.providerRef,
+    props.viewModel.card.name,
+    props.viewModel.card.apiUrl,
+  ],
+  () => {
+    closeBlacklistPopover()
+    closeQuotaErrorPopover()
+  },
+)
 
 watch(() => props.viewModel.blacklistStatus?.isBlacklisted, (isBlacklisted) => {
   if (!isBlacklisted) {
@@ -1042,6 +1253,12 @@ const hasQuotaStatusPanelItems = computed(() => (
 const showStandaloneQuotaStatusRow = computed(() => (
   props.viewModel.stats.state !== 'ready' && hasQuotaStatusPanelItems.value
 ))
+
+watch(hasErrorQuotaItems, (hasErrors) => {
+  if (!hasErrors) {
+    closeQuotaErrorPopover()
+  }
+})
 
 const formatQuotaValue = (item: ProviderQuotaDisplayItem, value: number) => {
   const normalized = Number.isFinite(value) ? value : 0
@@ -1092,6 +1309,15 @@ const balanceQuotaAmountClass = (item: ProviderQuotaDisplayItem) => (
 
 const quotaItemNote = (item: ProviderQuotaDisplayItem) => getProviderQuotaVisibleNote(item)
 
+watch(
+  () => errorQuotaItems.value.map((item) => `${item.key}:${quotaItemNote(item)}`).join('\u0000'),
+  () => {
+    if (quotaErrorPopoverOpen.value) {
+      void nextTick(updateQuotaErrorPopoverPosition)
+    }
+  },
+)
+
 const balanceQuotaNow = ref(Date.now())
 let balanceQuotaTimeTicker: ReturnType<typeof globalThis.setInterval> | undefined
 
@@ -1140,6 +1366,7 @@ watch(hasQuotaStatusPanelItems, (enabled) => {
 
 onUnmounted(() => {
   stopBlacklistPopoverListeners()
+  stopQuotaErrorPopoverListeners()
   stopBalanceQuotaTimeTicker()
   clearProviderLogsClickTimer()
 })

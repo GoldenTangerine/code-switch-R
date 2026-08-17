@@ -47,7 +47,8 @@
 }
 
 .automation-card:hover,
-.automation-card:focus-within {
+.automation-card:focus-within,
+.automation-card.has-open-popover {
   overflow: visible;
   z-index: 6;
   transform: none;
@@ -1146,10 +1147,6 @@
   padding: 0;
 }
 
-.card-balance-quota--error {
-  color: inherit;
-}
-
 .card-balance-quota__item-label {
   display: inline-flex;
   align-items: center;
@@ -1241,11 +1238,39 @@
   word-break: break-word;
 }
 
-.card-balance-quota__error-row {
+.card-balance-quota-error {
+  position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
   min-width: 0;
+}
+
+.card-balance-quota__error-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  padding: 0;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  cursor: pointer;
+  transition: background 180ms ease;
+}
+
+.card-balance-quota__error-trigger:hover {
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.card-balance-quota__error-trigger:focus-visible {
+  outline: 2px solid rgba(239, 68, 68, 0.38);
+  outline-offset: 2px;
+}
+
+.automation-card.theme-dark .card-balance-quota__error-trigger:hover {
+  background: rgba(244, 63, 94, 0.14);
 }
 
 .card-balance-quota__error-icon {
@@ -1268,16 +1293,71 @@
   color: #fb7185;
 }
 
-.card-balance-quota__error-text {
-  min-width: 0;
-  color: #b91c1c;
-  font-size: 0.68rem;
-  font-weight: 600;
-  line-height: 1.35;
-  word-break: break-word;
+.card-balance-quota__error-popover {
+  position: fixed;
+  z-index: 4300;
+  box-sizing: border-box;
+  width: min(420px, calc(100vw - 24px));
+  max-height: 240px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 12px;
+  border: 1px solid var(--mac-border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--mac-surface) 98%, transparent);
+  color: var(--mac-text-secondary);
+  box-shadow: 0 18px 38px rgba(15, 23, 42, 0.18);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 0.75rem;
+  line-height: 1.5;
 }
 
-.automation-card.theme-dark .card-balance-quota__error-text {
+.card-balance-quota__error-popover:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--mac-accent) 58%, transparent);
+  outline-offset: 2px;
+}
+
+.card-balance-quota__error-popover-title {
+  display: block;
+  margin-bottom: 8px;
+  color: #b91c1c;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.card-balance-quota__error-popover.theme-dark .card-balance-quota__error-popover-title {
+  color: #fda4af;
+}
+
+.card-balance-quota__error-detail {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.card-balance-quota__error-detail + .card-balance-quota__error-detail {
+  margin-top: 9px;
+  padding-top: 9px;
+  border-top: 1px solid var(--mac-border);
+}
+
+.card-balance-quota__error-text {
+  display: block;
+  min-width: 0;
+  color: #b91c1c;
+  font-family: 'SFMono-Regular', Menlo, Consolas, monospace;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  user-select: text;
+}
+
+.card-balance-quota__error-popover.theme-dark .card-balance-quota__error-text {
   color: #fecdd3;
 }
 

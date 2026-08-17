@@ -770,6 +770,8 @@
         "quotaRefresh": "刷新额度",
         "quotaRefreshAriaLabel": "刷新 {name} 的额度",
         "quotaQueryFailed": "额度查询失败",
+        "quotaErrorDetails": "错误详情",
+        "quotaErrorDetailsAriaLabel": "查看 {name} 的额度查询错误",
         "quotaQueryEmpty": "远端额度接口没有返回可展示的数据",
         "quotaQueryStatusLabel": "额度查询",
         "quotaRefreshFailedCached": "刷新失败（{reason}），当前仍显示上次成功获取的数据"

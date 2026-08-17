@@ -769,6 +769,8 @@
         "quotaRefresh": "Refresh quota",
         "quotaRefreshAriaLabel": "Refresh quota for {name}",
         "quotaQueryFailed": "Quota query failed",
+        "quotaErrorDetails": "Error details",
+        "quotaErrorDetailsAriaLabel": "View quota query errors for {name}",
         "quotaQueryEmpty": "The remote quota endpoint returned no displayable data",
         "quotaQueryStatusLabel": "Quota query",
         "quotaRefreshFailedCached": "Refresh failed ({reason}). Still showing the last successfully fetched data"
