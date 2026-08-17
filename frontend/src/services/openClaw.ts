@@ -9,7 +9,7 @@
  */
 import { Call } from '@wailsio/runtime'
 import type { AutomationCard } from '../data/cards'
-import { normalizeProviderRef, cardProviderRef } from '../components/Main/adapters/providerCardMappers'
+import { normalizeProviderRef, cardProviderRef } from '../utils/providerRefs'
 
 // OpenClawProvider 与后端 OpenClawService.OpenClawProvider 对齐（JSON camelCase）：
 // live 条目写入 ~/.openclaw/openclaw.json 的 models.providers.<id> 节（baseUrl/apiKey/model 托管，

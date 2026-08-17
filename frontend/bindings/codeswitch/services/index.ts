@@ -3,6 +3,7 @@
 
 import * as AppSettingsService from "./appsettingsservice.js";
 import * as BlacklistService from "./blacklistservice.js";
+import * as ClaudeDesktopSettingsService from "./claudedesktopsettingsservice.js";
 import * as ClaudeModelRoutingService from "./claudemodelroutingservice.js";
 import * as ClaudeSettingsService from "./claudesettingsservice.js";
 import * as CliConfigService from "./cliconfigservice.js";
@@ -14,13 +15,17 @@ import * as CustomCliService from "./customcliservice.js";
 import * as DeepLinkService from "./deeplinkservice.js";
 import * as EnvCheckService from "./envcheckservice.js";
 import * as GeminiService from "./geminiservice.js";
+import * as GrokSettingsService from "./groksettingsservice.js";
 import * as HealthCheckService from "./healthcheckservice.js";
+import * as HermesService from "./hermesservice.js";
 import * as ImportService from "./importservice.js";
 import * as LogService from "./logservice.js";
 import * as MCPService from "./mcpservice.js";
 import * as ModelPricingService from "./modelpricingservice.js";
 import * as NetworkService from "./networkservice.js";
+import * as OpenClawService from "./openclawservice.js";
 import * as OpenCodeService from "./opencodeservice.js";
+import * as PiService from "./piservice.js";
 import * as PromptService from "./promptservice.js";
 import * as ProviderConcurrencyService from "./providerconcurrencyservice.js";
 import * as ProviderQuotaAutomationService from "./providerquotaautomationservice.js";
@@ -33,9 +38,11 @@ import * as SpeedTestService from "./speedtestservice.js";
 import * as SuiStore from "./suistore.js";
 import * as UpdateService from "./updateservice.js";
 import * as WebDAVSyncService from "./webdavsyncservice.js";
+import * as XaiOAuthService from "./xaioauthservice.js";
 export {
     AppSettingsService,
     BlacklistService,
+    ClaudeDesktopSettingsService,
     ClaudeModelRoutingService,
     ClaudeSettingsService,
     CliConfigService,
@@ -47,13 +54,17 @@ export {
     DeepLinkService,
     EnvCheckService,
     GeminiService,
+    GrokSettingsService,
     HealthCheckService,
+    HermesService,
     ImportService,
     LogService,
     MCPService,
     ModelPricingService,
     NetworkService,
+    OpenClawService,
     OpenCodeService,
+    PiService,
     PromptService,
     ProviderConcurrencyService,
     ProviderQuotaAutomationService,
@@ -65,7 +76,8 @@ export {
     SpeedTestService,
     SuiStore,
     UpdateService,
-    WebDAVSyncService
+    WebDAVSyncService,
+    XaiOAuthService
 };
 
 export {
@@ -86,6 +98,8 @@ export {
     CLIPlatform,
     CLITemplate,
     ClaudeAggregatedModel,
+    ClaudeDesktopModelRoute,
+    ClaudeDesktopProxyStatus,
     ClaudeModelListResponse,
     ClaudeModelRefreshResult,
     ClaudeModelRoutingService,
@@ -120,9 +134,12 @@ export {
     GeminiProvider,
     GeminiProxyStatus,
     GeminiStatus,
+    GrokProxyStatus,
     HealthCheckHistory,
     HealthCheckResult,
     HeatmapStat,
+    HermesMemorySettings,
+    HermesProvider,
     Hotkey,
     LastUsedProvider,
     ListenMode,
@@ -142,8 +159,12 @@ export {
     ModelPricingSyncResult,
     ModelUsageStat,
     NetworkSettings,
+    OpenClawEnvConfig,
+    OpenClawProvider,
+    OpenClawToolsConfig,
     OpenCodeProvider,
     OpenCodeProviderPreset,
+    PiProvider,
     Prompt,
     Provider,
     ProviderConcurrencyRequestDetail,
@@ -183,5 +204,8 @@ export {
     WSLDetection,
     WebDAVSyncConfig,
     WebDAVSyncResult,
-    WebDAVTestResult
+    WebDAVTestResult,
+    XaiOAuthAccount,
+    XaiOAuthDeviceCodeResponse,
+    XaiOAuthStatus
 } from "./models.js";

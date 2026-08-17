@@ -9,7 +9,7 @@
  */
 import { Call } from '@wailsio/runtime'
 import type { AutomationCard } from '../data/cards'
-import { normalizeProviderRef, cardProviderRef } from '../components/Main/adapters/providerCardMappers'
+import { normalizeProviderRef, cardProviderRef } from '../utils/providerRefs'
 
 // PiProvider 与后端 PiService.PiProvider 对齐（JSON camelCase）：
 // live 条目写入 ~/.pi/agent/models.json 顶层 providers.<id>（displayName/baseUrl/apiKey 托管，

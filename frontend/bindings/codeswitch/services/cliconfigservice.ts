@@ -27,7 +27,7 @@ export function GetConfig(platform: string): $CancellablePromise<$models.CLIConf
 /**
  * GetConfigSnapshots 获取指定平台的配置快照，用于前端展示"当前(磁盘)"与"预览(激活后)"对比。
  * 这是纯 dry-run 接口：不会对任何文件进行写入。
- *
+ * 
  * previewMode 参数：
  *   - "current": Preview = Current（不做任何注入，适用于新建供应商空输入）
  *   - "direct": 模拟直连应用 ApplySingleProvider() 的写入结果

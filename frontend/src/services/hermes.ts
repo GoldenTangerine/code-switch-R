@@ -9,7 +9,7 @@
  */
 import { Call } from '@wailsio/runtime'
 import type { AutomationCard } from '../data/cards'
-import { normalizeProviderRef, cardProviderRef } from '../components/Main/adapters/providerCardMappers'
+import { normalizeProviderRef, cardProviderRef } from '../utils/providerRefs'
 
 // HermesProvider 与后端 HermesService.HermesProvider 对齐（JSON camelCase）：
 // live 条目写入 ~/.hermes/config.yaml 顶层 custom_providers 数组（snake_case 托管字段）

@@ -995,6 +995,17 @@ export enum CLIPlatform {
     PlatformClaude = "claude",
     PlatformCodex = "codex",
     PlatformGemini = "gemini",
+
+    /**
+     * 受管应用 platform 标识（贯穿 SQLite providers_store 表、request_log.platform、前端 tabId）
+     * claude / codex / gemini 三个常量已在 cliconfigservice.go 中定义（CLIPlatform 类型），此处仅新增应用
+     */
+    PlatformOpenCode = "opencode",
+    PlatformGrokBuild = "grokbuild",
+    PlatformClaudeDesktop = "claude-desktop",
+    PlatformOpenClaw = "openclaw",
+    PlatformHermes = "hermes",
+    PlatformPi = "pi",
 };
 
 /**
@@ -1075,6 +1086,60 @@ export class ClaudeAggregatedModel {
             $$parsedSource["capabilities"] = $$createField6_0($$parsedSource["capabilities"]);
         }
         return new ClaudeAggregatedModel($$parsedSource as Partial<ClaudeAggregatedModel>);
+    }
+}
+
+/**
+ * ClaudeDesktopModelRoute Claude Desktop 模型路由条目（profile 的 inferenceModels 元素）
+ */
+export class ClaudeDesktopModelRoute {
+    "name": string;
+    "labelOverride"?: string;
+    "supports1m"?: boolean;
+
+    /** Creates a new ClaudeDesktopModelRoute instance. */
+    constructor($$source: Partial<ClaudeDesktopModelRoute> = {}) {
+        if (!("name" in $$source)) {
+            this["name"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ClaudeDesktopModelRoute instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ClaudeDesktopModelRoute {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new ClaudeDesktopModelRoute($$parsedSource as Partial<ClaudeDesktopModelRoute>);
+    }
+}
+
+/**
+ * ClaudeDesktopProxyStatus Claude Desktop 代理状态
+ */
+export class ClaudeDesktopProxyStatus {
+    "enabled": boolean;
+    "baseURL": string;
+
+    /** Creates a new ClaudeDesktopProxyStatus instance. */
+    constructor($$source: Partial<ClaudeDesktopProxyStatus> = {}) {
+        if (!("enabled" in $$source)) {
+            this["enabled"] = false;
+        }
+        if (!("baseURL" in $$source)) {
+            this["baseURL"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ClaudeDesktopProxyStatus instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ClaudeDesktopProxyStatus {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new ClaudeDesktopProxyStatus($$parsedSource as Partial<ClaudeDesktopProxyStatus>);
     }
 }
 
@@ -2488,6 +2553,34 @@ export class GeminiStatus {
 }
 
 /**
+ * GrokProxyStatus Grok 代理状态
+ */
+export class GrokProxyStatus {
+    "enabled": boolean;
+    "baseURL": string;
+
+    /** Creates a new GrokProxyStatus instance. */
+    constructor($$source: Partial<GrokProxyStatus> = {}) {
+        if (!("enabled" in $$source)) {
+            this["enabled"] = false;
+        }
+        if (!("baseURL" in $$source)) {
+            this["baseURL"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new GrokProxyStatus instance from a string or object.
+     */
+    static createFrom($$source: any = {}): GrokProxyStatus {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new GrokProxyStatus($$parsedSource as Partial<GrokProxyStatus>);
+    }
+}
+
+/**
  * HealthCheckHistory 健康检查历史（单个 Provider 的时间线）
  */
 export class HealthCheckHistory {
@@ -2704,6 +2797,106 @@ export class HeatmapStat {
     static createFrom($$source: any = {}): HeatmapStat {
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         return new HeatmapStat($$parsedSource as Partial<HeatmapStat>);
+    }
+}
+
+/**
+ * HermesMemorySettings memory 子页设置（存于 config.yaml 顶层四键）
+ */
+export class HermesMemorySettings {
+    "memory_enabled": boolean;
+    "memory_char_limit": number;
+    "user_profile_enabled": boolean;
+    "user_char_limit": number;
+
+    /** Creates a new HermesMemorySettings instance. */
+    constructor($$source: Partial<HermesMemorySettings> = {}) {
+        if (!("memory_enabled" in $$source)) {
+            this["memory_enabled"] = false;
+        }
+        if (!("memory_char_limit" in $$source)) {
+            this["memory_char_limit"] = 0;
+        }
+        if (!("user_profile_enabled" in $$source)) {
+            this["user_profile_enabled"] = false;
+        }
+        if (!("user_char_limit" in $$source)) {
+            this["user_char_limit"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new HermesMemorySettings instance from a string or object.
+     */
+    static createFrom($$source: any = {}): HermesMemorySettings {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new HermesMemorySettings($$parsedSource as Partial<HermesMemorySettings>);
+    }
+}
+
+/**
+ * HermesProvider Hermes 供应商配置
+ * live 条目写入 ~/.hermes/config.yaml 顶层 custom_providers 数组（snake_case：
+ * {id, name, base_url, api_key, model}），CLIConfig 保存该条目的原生片段（导入时无损快照）
+ */
+export class HermesProvider {
+    "id": string;
+    "name": string;
+
+    /**
+     * 对应 live 条目的 base_url
+     */
+    "baseUrl"?: string;
+
+    /**
+     * 对应 live 条目的 api_key
+     */
+    "apiKey"?: string;
+
+    /**
+     * 该供应商的默认模型
+     */
+    "model"?: string;
+
+    /**
+     * 当前启用（additive 模式下的选中标记）
+     */
+    "enabled": boolean;
+    "level"?: number;
+    "category"?: string;
+
+    /**
+     * live 原生片段
+     */
+    "cliConfig"?: { [_ in string]?: any };
+
+    /** Creates a new HermesProvider instance. */
+    constructor($$source: Partial<HermesProvider> = {}) {
+        if (!("id" in $$source)) {
+            this["id"] = "";
+        }
+        if (!("name" in $$source)) {
+            this["name"] = "";
+        }
+        if (!("enabled" in $$source)) {
+            this["enabled"] = false;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new HermesProvider instance from a string or object.
+     */
+    static createFrom($$source: any = {}): HermesProvider {
+        const $$createField8_0 = $$createType12;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("cliConfig" in $$parsedSource) {
+            $$parsedSource["cliConfig"] = $$createField8_0($$parsedSource["cliConfig"]);
+        }
+        return new HermesProvider($$parsedSource as Partial<HermesProvider>);
     }
 }
 
@@ -3231,6 +3424,9 @@ export class MCPServer {
     "enabled_in_claude": boolean;
     "enabled_in_codex": boolean;
     "enabled_in_gemini": boolean;
+    "enabled_in_opencode": boolean;
+    "enabled_in_grok": boolean;
+    "enabled_in_hermes": boolean;
     "missing_placeholders": string[];
 
     /** Creates a new MCPServer instance. */
@@ -3253,6 +3449,15 @@ export class MCPServer {
         if (!("enabled_in_gemini" in $$source)) {
             this["enabled_in_gemini"] = false;
         }
+        if (!("enabled_in_opencode" in $$source)) {
+            this["enabled_in_opencode"] = false;
+        }
+        if (!("enabled_in_grok" in $$source)) {
+            this["enabled_in_grok"] = false;
+        }
+        if (!("enabled_in_hermes" in $$source)) {
+            this["enabled_in_hermes"] = false;
+        }
         if (!("missing_placeholders" in $$source)) {
             this["missing_placeholders"] = [];
         }
@@ -3267,7 +3472,7 @@ export class MCPServer {
         const $$createField3_0 = $$createType0;
         const $$createField4_0 = $$createType4;
         const $$createField8_0 = $$createType0;
-        const $$createField12_0 = $$createType0;
+        const $$createField15_0 = $$createType0;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("args" in $$parsedSource) {
             $$parsedSource["args"] = $$createField3_0($$parsedSource["args"]);
@@ -3279,7 +3484,7 @@ export class MCPServer {
             $$parsedSource["enable_platform"] = $$createField8_0($$parsedSource["enable_platform"]);
         }
         if ("missing_placeholders" in $$parsedSource) {
-            $$parsedSource["missing_placeholders"] = $$createField12_0($$parsedSource["missing_placeholders"]);
+            $$parsedSource["missing_placeholders"] = $$createField15_0($$parsedSource["missing_placeholders"]);
         }
         return new MCPServer($$parsedSource as Partial<MCPServer>);
     }
@@ -3569,8 +3774,148 @@ export class NetworkSettings {
 }
 
 /**
+ * OpenClawEnvConfig 顶层 env 节（vars 注入进程环境 / shellEnv 注入 shell 会话）
+ */
+export class OpenClawEnvConfig {
+    "vars": { [_ in string]?: string };
+    "shellEnv": { [_ in string]?: string };
+
+    /** Creates a new OpenClawEnvConfig instance. */
+    constructor($$source: Partial<OpenClawEnvConfig> = {}) {
+        if (!("vars" in $$source)) {
+            this["vars"] = {};
+        }
+        if (!("shellEnv" in $$source)) {
+            this["shellEnv"] = {};
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new OpenClawEnvConfig instance from a string or object.
+     */
+    static createFrom($$source: any = {}): OpenClawEnvConfig {
+        const $$createField0_0 = $$createType4;
+        const $$createField1_0 = $$createType4;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("vars" in $$parsedSource) {
+            $$parsedSource["vars"] = $$createField0_0($$parsedSource["vars"]);
+        }
+        if ("shellEnv" in $$parsedSource) {
+            $$parsedSource["shellEnv"] = $$createField1_0($$parsedSource["shellEnv"]);
+        }
+        return new OpenClawEnvConfig($$parsedSource as Partial<OpenClawEnvConfig>);
+    }
+}
+
+/**
+ * OpenClawProvider OpenClaw 供应商配置
+ * live 条目写入 ~/.openclaw/openclaw.json 的 models.providers.<id> 节（camelCase：
+ * {name, baseUrl, apiKey, model?}），CLIConfig 保存该节的原生片段（导入时无损快照）
+ */
+export class OpenClawProvider {
+    "id": string;
+    "name": string;
+
+    /**
+     * 对应 live 条目的 baseUrl
+     */
+    "baseUrl"?: string;
+
+    /**
+     * 对应 live 条目的 apiKey
+     */
+    "apiKey"?: string;
+
+    /**
+     * 可选默认模型
+     */
+    "model"?: string;
+
+    /**
+     * 当前启用（additive 模式下的选中标记）
+     */
+    "enabled": boolean;
+    "level"?: number;
+    "category"?: string;
+
+    /**
+     * live 原生片段
+     */
+    "cliConfig"?: { [_ in string]?: any };
+
+    /** Creates a new OpenClawProvider instance. */
+    constructor($$source: Partial<OpenClawProvider> = {}) {
+        if (!("id" in $$source)) {
+            this["id"] = "";
+        }
+        if (!("name" in $$source)) {
+            this["name"] = "";
+        }
+        if (!("enabled" in $$source)) {
+            this["enabled"] = false;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new OpenClawProvider instance from a string or object.
+     */
+    static createFrom($$source: any = {}): OpenClawProvider {
+        const $$createField8_0 = $$createType12;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("cliConfig" in $$parsedSource) {
+            $$parsedSource["cliConfig"] = $$createField8_0($$parsedSource["cliConfig"]);
+        }
+        return new OpenClawProvider($$parsedSource as Partial<OpenClawProvider>);
+    }
+}
+
+/**
+ * OpenClawToolsConfig 顶层 tools 节（profile + allow/deny 命令清单）
+ */
+export class OpenClawToolsConfig {
+    "profile": string;
+    "allow": string[];
+    "deny": string[];
+
+    /** Creates a new OpenClawToolsConfig instance. */
+    constructor($$source: Partial<OpenClawToolsConfig> = {}) {
+        if (!("profile" in $$source)) {
+            this["profile"] = "";
+        }
+        if (!("allow" in $$source)) {
+            this["allow"] = [];
+        }
+        if (!("deny" in $$source)) {
+            this["deny"] = [];
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new OpenClawToolsConfig instance from a string or object.
+     */
+    static createFrom($$source: any = {}): OpenClawToolsConfig {
+        const $$createField1_0 = $$createType0;
+        const $$createField2_0 = $$createType0;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("allow" in $$parsedSource) {
+            $$parsedSource["allow"] = $$createField1_0($$parsedSource["allow"]);
+        }
+        if ("deny" in $$parsedSource) {
+            $$parsedSource["deny"] = $$createField2_0($$parsedSource["deny"]);
+        }
+        return new OpenClawToolsConfig($$parsedSource as Partial<OpenClawToolsConfig>);
+    }
+}
+
+/**
  * OpenCodeProvider OpenCode 供应商配置。
- *
+ * 
  * OpenCode 的 live 配置写入 ~/.config/opencode/opencode.json 的 provider.{id}，
  * 其中 SettingsConfig 对应单个 provider fragment，典型结构：
  * {"npm":"@ai-sdk/openai-compatible","options":{"baseURL":"...","apiKey":"..."},"models":{...}}
@@ -3677,6 +4022,71 @@ export class OpenCodeProviderPreset {
             $$parsedSource["settingsConfig"] = $$createField8_0($$parsedSource["settingsConfig"]);
         }
         return new OpenCodeProviderPreset($$parsedSource as Partial<OpenCodeProviderPreset>);
+    }
+}
+
+/**
+ * PiProvider Pi 供应商配置
+ * live 条目写入 ~/.pi/agent/models.json 的顶层 providers.<id> 节（camelCase：
+ * {displayName, baseUrl, apiKey}），CLIConfig 保存该节的原生片段（api/models/compat 等导入时无损快照）
+ * Model 仅为本应用侧元数据（卡片默认模型展示），不写入 live 条目（Pi 的模型清单由 models 数组描述）
+ */
+export class PiProvider {
+    "id": string;
+    "name": string;
+
+    /**
+     * 对应 live 条目的 baseUrl
+     */
+    "baseUrl"?: string;
+
+    /**
+     * 对应 live 条目的 apiKey
+     */
+    "apiKey"?: string;
+
+    /**
+     * 应用侧默认模型（不写入 live）
+     */
+    "model"?: string;
+
+    /**
+     * 当前启用（additive 模式下的选中标记）
+     */
+    "enabled": boolean;
+    "level"?: number;
+    "category"?: string;
+
+    /**
+     * live 原生片段
+     */
+    "cliConfig"?: { [_ in string]?: any };
+
+    /** Creates a new PiProvider instance. */
+    constructor($$source: Partial<PiProvider> = {}) {
+        if (!("id" in $$source)) {
+            this["id"] = "";
+        }
+        if (!("name" in $$source)) {
+            this["name"] = "";
+        }
+        if (!("enabled" in $$source)) {
+            this["enabled"] = false;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new PiProvider instance from a string or object.
+     */
+    static createFrom($$source: any = {}): PiProvider {
+        const $$createField8_0 = $$createType12;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("cliConfig" in $$parsedSource) {
+            $$parsedSource["cliConfig"] = $$createField8_0($$parsedSource["cliConfig"]);
+        }
+        return new PiProvider($$parsedSource as Partial<PiProvider>);
     }
 }
 
@@ -3793,6 +4203,22 @@ export class Provider {
      * 留空则使用平台默认（claude: /v1/messages, codex: /responses）
      */
     "apiEndpoint"?: string;
+
+    /**
+     * Grok Build 供应商的原始 TOML 配置片段（~/.grok/config.toml 的 [model.<profile>] 内容载体）
+     * 官方条目为空串（空 TOML = xAI OAuth 官方态）
+     */
+    "configTOML"?: string;
+
+    /**
+     * Claude Desktop 接入模式：direct（直连供应商）/ proxy（本地代理复用 :18100 Claude 链路），缺省 direct
+     */
+    "claudeDesktopMode"?: string;
+
+    /**
+     * Claude Desktop 模型路由（写入 profile 的 inferenceModels），空则使用默认四模型
+     */
+    "claudeDesktopModelRoutes"?: ClaudeDesktopModelRoute[];
 
     /**
      * 模型白名单 - Provider 原生支持的模型名
@@ -3972,53 +4398,57 @@ export class Provider {
      */
     static createFrom($$source: any = {}): Provider {
         const $$createField18_0 = $$createType12;
-        const $$createField20_0 = $$createType3;
-        const $$createField21_0 = $$createType4;
-        const $$createField22_0 = $$createType3;
-        const $$createField23_0 = $$createType4;
-        const $$createField24_0 = $$createType3;
-        const $$createField26_0 = $$createType0;
-        const $$createField27_0 = $$createType12;
-        const $$createField34_0 = $$createType45;
-        const $$createField36_0 = $$createType29;
-        const $$createField37_0 = $$createType30;
-        const $$createField39_0 = $$createType32;
+        const $$createField22_0 = $$createType45;
+        const $$createField23_0 = $$createType3;
+        const $$createField24_0 = $$createType4;
+        const $$createField25_0 = $$createType3;
+        const $$createField26_0 = $$createType4;
+        const $$createField27_0 = $$createType3;
+        const $$createField29_0 = $$createType0;
+        const $$createField30_0 = $$createType12;
+        const $$createField37_0 = $$createType47;
+        const $$createField39_0 = $$createType29;
+        const $$createField40_0 = $$createType30;
+        const $$createField42_0 = $$createType32;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("cliConfig" in $$parsedSource) {
             $$parsedSource["cliConfig"] = $$createField18_0($$parsedSource["cliConfig"]);
         }
+        if ("claudeDesktopModelRoutes" in $$parsedSource) {
+            $$parsedSource["claudeDesktopModelRoutes"] = $$createField22_0($$parsedSource["claudeDesktopModelRoutes"]);
+        }
         if ("supportedModels" in $$parsedSource) {
-            $$parsedSource["supportedModels"] = $$createField20_0($$parsedSource["supportedModels"]);
+            $$parsedSource["supportedModels"] = $$createField23_0($$parsedSource["supportedModels"]);
         }
         if ("modelMapping" in $$parsedSource) {
-            $$parsedSource["modelMapping"] = $$createField21_0($$parsedSource["modelMapping"]);
+            $$parsedSource["modelMapping"] = $$createField24_0($$parsedSource["modelMapping"]);
         }
         if ("modelMappingDisabled" in $$parsedSource) {
-            $$parsedSource["modelMappingDisabled"] = $$createField22_0($$parsedSource["modelMappingDisabled"]);
+            $$parsedSource["modelMappingDisabled"] = $$createField25_0($$parsedSource["modelMappingDisabled"]);
         }
         if ("modelMappingReasoningEfforts" in $$parsedSource) {
-            $$parsedSource["modelMappingReasoningEfforts"] = $$createField23_0($$parsedSource["modelMappingReasoningEfforts"]);
+            $$parsedSource["modelMappingReasoningEfforts"] = $$createField26_0($$parsedSource["modelMappingReasoningEfforts"]);
         }
         if ("modelMappingSupports1M" in $$parsedSource) {
-            $$parsedSource["modelMappingSupports1M"] = $$createField24_0($$parsedSource["modelMappingSupports1M"]);
+            $$parsedSource["modelMappingSupports1M"] = $$createField27_0($$parsedSource["modelMappingSupports1M"]);
         }
         if ("modelPassthroughPatterns" in $$parsedSource) {
-            $$parsedSource["modelPassthroughPatterns"] = $$createField26_0($$parsedSource["modelPassthroughPatterns"]);
+            $$parsedSource["modelPassthroughPatterns"] = $$createField29_0($$parsedSource["modelPassthroughPatterns"]);
         }
         if ("requestBodyOverrides" in $$parsedSource) {
-            $$parsedSource["requestBodyOverrides"] = $$createField27_0($$parsedSource["requestBodyOverrides"]);
+            $$parsedSource["requestBodyOverrides"] = $$createField30_0($$parsedSource["requestBodyOverrides"]);
         }
         if ("availabilityConfig" in $$parsedSource) {
-            $$parsedSource["availabilityConfig"] = $$createField34_0($$parsedSource["availabilityConfig"]);
+            $$parsedSource["availabilityConfig"] = $$createField37_0($$parsedSource["availabilityConfig"]);
         }
         if ("budgetQuotaSettings" in $$parsedSource) {
-            $$parsedSource["budgetQuotaSettings"] = $$createField36_0($$parsedSource["budgetQuotaSettings"]);
+            $$parsedSource["budgetQuotaSettings"] = $$createField39_0($$parsedSource["budgetQuotaSettings"]);
         }
         if ("budgetQuotaUsedAdjustments" in $$parsedSource) {
-            $$parsedSource["budgetQuotaUsedAdjustments"] = $$createField37_0($$parsedSource["budgetQuotaUsedAdjustments"]);
+            $$parsedSource["budgetQuotaUsedAdjustments"] = $$createField40_0($$parsedSource["budgetQuotaUsedAdjustments"]);
         }
         if ("providerQuotaQueryConfig" in $$parsedSource) {
-            $$parsedSource["providerQuotaQueryConfig"] = $$createField39_0($$parsedSource["providerQuotaQueryConfig"]);
+            $$parsedSource["providerQuotaQueryConfig"] = $$createField42_0($$parsedSource["providerQuotaQueryConfig"]);
         }
         return new Provider($$parsedSource as Partial<Provider>);
     }
@@ -4083,10 +4513,10 @@ export class ProviderConcurrencyRequestDetail {
      * Creates a new ProviderConcurrencyRequestDetail instance from a string or object.
      */
     static createFrom($$source: any = {}): ProviderConcurrencyRequestDetail {
-        const $$createField12_0 = $$createType47;
+        const $$createField15_0 = $$createType49;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("parameters" in $$parsedSource) {
-            $$parsedSource["parameters"] = $$createField12_0($$parsedSource["parameters"]);
+            $$parsedSource["parameters"] = $$createField15_0($$parsedSource["parameters"]);
         }
         return new ProviderConcurrencyRequestDetail($$parsedSource as Partial<ProviderConcurrencyRequestDetail>);
     }
@@ -4158,7 +4588,7 @@ export class ProviderConcurrencyStatus {
      * Creates a new ProviderConcurrencyStatus instance from a string or object.
      */
     static createFrom($$source: any = {}): ProviderConcurrencyStatus {
-        const $$createField5_0 = $$createType49;
+        const $$createField5_0 = $$createType51;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("requests" in $$parsedSource) {
             $$parsedSource["requests"] = $$createField5_0($$parsedSource["requests"]);
@@ -4360,7 +4790,7 @@ export class ProviderModelPricingDebug {
      */
     static createFrom($$source: any = {}): ProviderModelPricingDebug {
         const $$createField5_0 = $$createType0;
-        const $$createField6_0 = $$createType51;
+        const $$createField6_0 = $$createType53;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("authCandidates" in $$parsedSource) {
             $$parsedSource["authCandidates"] = $$createField5_0($$parsedSource["authCandidates"]);
@@ -4482,7 +4912,7 @@ export class ProviderModelPricingItem {
         const $$createField5_0 = $$createType12;
         const $$createField19_0 = $$createType0;
         const $$createField20_0 = $$createType0;
-        const $$createField24_0 = $$createType53;
+        const $$createField24_0 = $$createType55;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("capabilities" in $$parsedSource) {
             $$parsedSource["capabilities"] = $$createField5_0($$parsedSource["capabilities"]);
@@ -4531,10 +4961,10 @@ export class ProviderModelPricingResponse {
      * Creates a new ProviderModelPricingResponse instance from a string or object.
      */
     static createFrom($$source: any = {}): ProviderModelPricingResponse {
-        const $$createField2_0 = $$createType54;
+        const $$createField2_0 = $$createType56;
         const $$createField3_0 = $$createType4;
-        const $$createField4_0 = $$createType56;
-        const $$createField9_0 = $$createType58;
+        const $$createField4_0 = $$createType58;
+        const $$createField9_0 = $$createType60;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("groupRatio" in $$parsedSource) {
             $$parsedSource["groupRatio"] = $$createField2_0($$parsedSource["groupRatio"]);
@@ -4631,7 +5061,7 @@ export class ProviderQuotaAutomationResult {
      * Creates a new ProviderQuotaAutomationResult instance from a string or object.
      */
     static createFrom($$source: any = {}): ProviderQuotaAutomationResult {
-        const $$createField2_0 = $$createType60;
+        const $$createField2_0 = $$createType62;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("items" in $$parsedSource) {
             $$parsedSource["items"] = $$createField2_0($$parsedSource["items"]);
@@ -4774,7 +5204,7 @@ export class ProviderQuotaQueryPresetGroup {
      * Creates a new ProviderQuotaQueryPresetGroup instance from a string or object.
      */
     static createFrom($$source: any = {}): ProviderQuotaQueryPresetGroup {
-        const $$createField1_0 = $$createType62;
+        const $$createField1_0 = $$createType64;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("items" in $$parsedSource) {
             $$parsedSource["items"] = $$createField1_0($$parsedSource["items"]);
@@ -4809,7 +5239,7 @@ export class ProviderQuotaQueryResult {
      * Creates a new ProviderQuotaQueryResult instance from a string or object.
      */
     static createFrom($$source: any = {}): ProviderQuotaQueryResult {
-        const $$createField2_0 = $$createType60;
+        const $$createField2_0 = $$createType62;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("items" in $$parsedSource) {
             $$parsedSource["items"] = $$createField2_0($$parsedSource["items"]);
@@ -4912,7 +5342,7 @@ export class ProviderTimeline {
      * Creates a new ProviderTimeline instance from a string or object.
      */
     static createFrom($$source: any = {}): ProviderTimeline {
-        const $$createField5_0 = $$createType45;
+        const $$createField5_0 = $$createType47;
         const $$createField6_0 = $$createType34;
         const $$createField7_0 = $$createType35;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
@@ -5292,7 +5722,7 @@ export class RequestLogPageResult {
      * Creates a new RequestLogPageResult instance from a string or object.
      */
     static createFrom($$source: any = {}): RequestLogPageResult {
-        const $$createField0_0 = $$createType64;
+        const $$createField0_0 = $$createType66;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("items" in $$parsedSource) {
             $$parsedSource["items"] = $$createField0_0($$parsedSource["items"]);
@@ -5417,7 +5847,7 @@ export class SessionSyncResult {
      * Creates a new SessionSyncResult instance from a string or object.
      */
     static createFrom($$source: any = {}): SessionSyncResult {
-        const $$createField4_0 = $$createType66;
+        const $$createField4_0 = $$createType68;
         const $$createField5_0 = $$createType0;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("sources" in $$parsedSource) {
@@ -5825,6 +6255,131 @@ export class WebDAVTestResult {
     }
 }
 
+/**
+ * XaiOAuthAccount 是前端可见的 xAI 账号信息，不包含 token。
+ */
+export class XaiOAuthAccount {
+    "id": string;
+    "provider": string;
+    "login": string;
+    "authenticatedAt": number;
+    "isDefault": boolean;
+    "requiresReauth": boolean;
+
+    /** Creates a new XaiOAuthAccount instance. */
+    constructor($$source: Partial<XaiOAuthAccount> = {}) {
+        if (!("id" in $$source)) {
+            this["id"] = "";
+        }
+        if (!("provider" in $$source)) {
+            this["provider"] = "";
+        }
+        if (!("login" in $$source)) {
+            this["login"] = "";
+        }
+        if (!("authenticatedAt" in $$source)) {
+            this["authenticatedAt"] = 0;
+        }
+        if (!("isDefault" in $$source)) {
+            this["isDefault"] = false;
+        }
+        if (!("requiresReauth" in $$source)) {
+            this["requiresReauth"] = false;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new XaiOAuthAccount instance from a string or object.
+     */
+    static createFrom($$source: any = {}): XaiOAuthAccount {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new XaiOAuthAccount($$parsedSource as Partial<XaiOAuthAccount>);
+    }
+}
+
+/**
+ * XaiOAuthDeviceCodeResponse 是前端展示设备码登录时需要的数据。
+ */
+export class XaiOAuthDeviceCodeResponse {
+    "provider": string;
+    "deviceCode": string;
+    "userCode": string;
+    "verificationUri": string;
+    "expiresIn": number;
+    "interval": number;
+
+    /** Creates a new XaiOAuthDeviceCodeResponse instance. */
+    constructor($$source: Partial<XaiOAuthDeviceCodeResponse> = {}) {
+        if (!("provider" in $$source)) {
+            this["provider"] = "";
+        }
+        if (!("deviceCode" in $$source)) {
+            this["deviceCode"] = "";
+        }
+        if (!("userCode" in $$source)) {
+            this["userCode"] = "";
+        }
+        if (!("verificationUri" in $$source)) {
+            this["verificationUri"] = "";
+        }
+        if (!("expiresIn" in $$source)) {
+            this["expiresIn"] = 0;
+        }
+        if (!("interval" in $$source)) {
+            this["interval"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new XaiOAuthDeviceCodeResponse instance from a string or object.
+     */
+    static createFrom($$source: any = {}): XaiOAuthDeviceCodeResponse {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new XaiOAuthDeviceCodeResponse($$parsedSource as Partial<XaiOAuthDeviceCodeResponse>);
+    }
+}
+
+/**
+ * XaiOAuthStatus 汇总当前 xAI OAuth 登录状态。
+ */
+export class XaiOAuthStatus {
+    "provider": string;
+    "authenticated": boolean;
+    "defaultAccountId"?: string;
+    "accounts": XaiOAuthAccount[];
+
+    /** Creates a new XaiOAuthStatus instance. */
+    constructor($$source: Partial<XaiOAuthStatus> = {}) {
+        if (!("provider" in $$source)) {
+            this["provider"] = "";
+        }
+        if (!("authenticated" in $$source)) {
+            this["authenticated"] = false;
+        }
+        if (!("accounts" in $$source)) {
+            this["accounts"] = [];
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new XaiOAuthStatus instance from a string or object.
+     */
+    static createFrom($$source: any = {}): XaiOAuthStatus {
+        const $$createField3_0 = $$createType70;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("accounts" in $$parsedSource) {
+            $$parsedSource["accounts"] = $$createField3_0($$parsedSource["accounts"]);
+        }
+        return new XaiOAuthStatus($$parsedSource as Partial<XaiOAuthStatus>);
+    }
+}
+
 export class installRequest {
     "directory": string;
     "repo_owner": string;
@@ -5952,26 +6507,30 @@ const $$createType40 = $Create.Array($Create.Any);
 const $$createType41 = MCPServer.createFrom;
 const $$createType42 = $Create.Array($$createType41);
 const $$createType43 = TargetCli.createFrom;
-const $$createType44 = AvailabilityConfig.createFrom;
-const $$createType45 = $Create.Nullable($$createType44);
-const $$createType46 = ProviderConcurrencyRequestParameter.createFrom;
-const $$createType47 = $Create.Array($$createType46);
-const $$createType48 = ProviderConcurrencyRequestDetail.createFrom;
+const $$createType44 = ClaudeDesktopModelRoute.createFrom;
+const $$createType45 = $Create.Array($$createType44);
+const $$createType46 = AvailabilityConfig.createFrom;
+const $$createType47 = $Create.Nullable($$createType46);
+const $$createType48 = ProviderConcurrencyRequestParameter.createFrom;
 const $$createType49 = $Create.Array($$createType48);
-const $$createType50 = ProviderModelPricingDebugAttempt.createFrom;
+const $$createType50 = ProviderConcurrencyRequestDetail.createFrom;
 const $$createType51 = $Create.Array($$createType50);
-const $$createType52 = ProviderModelPerCallPrice.createFrom;
-const $$createType53 = $Create.Nullable($$createType52);
-const $$createType54 = $Create.Map($Create.Any, $Create.Any);
-const $$createType55 = ProviderModelPricingItem.createFrom;
-const $$createType56 = $Create.Array($$createType55);
-const $$createType57 = ProviderModelPricingDebug.createFrom;
-const $$createType58 = $Create.Nullable($$createType57);
-const $$createType59 = ProviderQuotaQueryItem.createFrom;
-const $$createType60 = $Create.Array($$createType59);
-const $$createType61 = ProviderQuotaQueryPresetEntry.createFrom;
+const $$createType52 = ProviderModelPricingDebugAttempt.createFrom;
+const $$createType53 = $Create.Array($$createType52);
+const $$createType54 = ProviderModelPerCallPrice.createFrom;
+const $$createType55 = $Create.Nullable($$createType54);
+const $$createType56 = $Create.Map($Create.Any, $Create.Any);
+const $$createType57 = ProviderModelPricingItem.createFrom;
+const $$createType58 = $Create.Array($$createType57);
+const $$createType59 = ProviderModelPricingDebug.createFrom;
+const $$createType60 = $Create.Nullable($$createType59);
+const $$createType61 = ProviderQuotaQueryItem.createFrom;
 const $$createType62 = $Create.Array($$createType61);
-const $$createType63 = ReqeustLog.createFrom;
+const $$createType63 = ProviderQuotaQueryPresetEntry.createFrom;
 const $$createType64 = $Create.Array($$createType63);
-const $$createType65 = SessionSyncSourceResult.createFrom;
+const $$createType65 = ReqeustLog.createFrom;
 const $$createType66 = $Create.Array($$createType65);
+const $$createType67 = SessionSyncSourceResult.createFrom;
+const $$createType68 = $Create.Array($$createType67);
+const $$createType69 = XaiOAuthAccount.createFrom;
+const $$createType70 = $Create.Array($$createType69);

@@ -75,4 +75,17 @@ async function bootstrap(){
     await setupI18n('zh')//默认语言或从后端读取
     createApp(App).use(router).use(i18n).mount('#app')
 }
-bootstrap()
+
+// 启动兜底：初始化链任何未捕获错误不再表现为无声全白，渲染可见错误面板便于定位
+bootstrap().catch((error) => {
+    console.error('[Bootstrap] 应用启动失败:', error)
+    const container = document.getElementById('app')
+    if (container) {
+        container.innerHTML = [
+            '<div style="font-family:system-ui;padding:32px;color:#e5484d;background:#1b1e24;min-height:100vh;">',
+            '<h2 style="margin:0 0 12px;">应用启动失败</h2>',
+            `<pre style="white-space:pre-wrap;word-break:break-all;font-size:13px;line-height:1.6;">${String(error?.stack ?? error ?? '未知错误').replace(/[<>]/g, '')}</pre>`,
+            '</div>',
+        ].join('')
+    }
+})

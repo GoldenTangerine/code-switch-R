@@ -168,16 +168,16 @@ const normalizeAvailabilityConfig = (value: Record<string, any> | null | undefin
   }
 }
 
-export const normalizeProviderKey = (value: string) => value?.trim().toLowerCase() ?? ''
+// 供应商引用工具（normalizeProviderKey / normalizeProviderRef / cardProviderRef）
+// 的权威实现位于 utils/providerRefs（叶子模块，避免 services -> Main 的跨 chunk 循环依赖）；
+// 此处 re-export 保持既有 import 路径兼容
+import {
+  normalizeProviderKey,
+  normalizeProviderRef,
+  cardProviderRef,
+} from '../../../utils/providerRefs'
 
-export const normalizeProviderRef = (value: string | number | null | undefined) => `${value ?? ''}`.trim()
-
-export const cardProviderRef = (card: AutomationCard): string => {
-  const ref = normalizeProviderRef(card.providerRef)
-  if (ref) return ref
-  if (Number.isFinite(card.id)) return `${card.id}`
-  return ''
-}
+export { normalizeProviderKey, normalizeProviderRef, cardProviderRef }
 
 export const providerStatsKeyFromStat = (stat: ProviderDailyStat): string => {
   const ref = normalizeProviderRef(stat.provider_id)
