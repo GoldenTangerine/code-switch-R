@@ -5,6 +5,7 @@ export type ProviderQuotaTemplateType =
   | 'custom'
   | 'general'
   | 'newapi'
+  | 'sub2api'
   | 'token_plan'
 
 export type ProviderQuotaQueryType =
@@ -13,6 +14,7 @@ export type ProviderQuotaQueryType =
   | 'custom'
   | 'general'
   | 'newapi'
+  | 'sub2api'
   | 'token_plan_glm'
   | 'token_plan_kimi'
   | 'token_plan_minimax'
@@ -50,6 +52,7 @@ export const providerQuotaQueryTypes: ProviderQuotaQueryType[] = [
   'custom',
   'general',
   'newapi',
+  'sub2api',
   'token_plan_glm',
   'token_plan_kimi',
   'token_plan_minimax',
@@ -60,6 +63,7 @@ export const providerQuotaTemplateTypes: ProviderQuotaTemplateType[] = [
   'custom',
   'general',
   'newapi',
+  'sub2api',
   'token_plan',
 ]
 
@@ -69,6 +73,7 @@ export const providerQuotaQueryTypeLabelKeyMap: Record<ProviderQuotaQueryType, s
   custom: 'components.main.form.options.providerQuotaQueryCustom',
   general: 'components.main.form.options.providerQuotaQueryGeneral',
   newapi: 'components.main.form.options.providerQuotaQueryNewApi',
+  sub2api: 'components.main.form.options.providerQuotaQuerySub2Api',
   token_plan_glm: 'components.main.form.options.providerQuotaQueryTokenPlanGLM',
   token_plan_kimi: 'components.main.form.options.providerQuotaQueryTokenPlanKimi',
   token_plan_minimax: 'components.main.form.options.providerQuotaQueryTokenPlanMiniMax',
@@ -79,6 +84,7 @@ export const providerQuotaTemplateLabelKeyMap: Record<ProviderQuotaTemplateType,
   custom: 'components.main.form.options.providerQuotaQueryCustom',
   general: 'components.main.form.options.providerQuotaQueryGeneral',
   newapi: 'components.main.form.options.providerQuotaQueryNewApi',
+  sub2api: 'components.main.form.options.providerQuotaQuerySub2Api',
   token_plan: 'components.main.form.options.providerQuotaQueryTokenPlan',
 }
 
@@ -105,6 +111,157 @@ export const providerQuotaTokenPlanProviderOptions: Array<{
     matcher: /api\.minimaxi?\.com|api\.minimax\.io/i,
   },
 ]
+
+export function buildProviderQuotaPresetCode(templateType: ProviderQuotaTemplateType): string {
+  switch (templateType) {
+    case 'custom':
+      return `({
+  request: {
+    url: '',
+    method: 'GET',
+    headers: {},
+  },
+  extractor: function(response) {
+    return {
+      label: 'Quota',
+      remaining: 0,
+      unit: 'USD',
+      valueMode: 'currency',
+    };
+  },
+})`
+    case 'general':
+      return `({
+  request: {
+    url: '{{baseUrl}}/user/balance',
+    method: 'GET',
+    headers: {
+      'Authorization': 'Bearer {{apiKey}}',
+      'User-Agent': 'code-switch-R/1.0',
+    },
+  },
+  extractor: function(response) {
+    return {
+      label: 'Balance',
+      remaining: response.balance,
+      unit: 'USD',
+      valueMode: 'currency',
+    };
+  },
+})`
+    case 'newapi':
+      return `({
+  request: {
+    url: '{{baseUrl}}/api/user/self',
+    method: 'GET',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer {{accessToken}}',
+      'User-Agent': 'code-switch-R/1.0',
+      'New-Api-User': '{{userId}}',
+    },
+  },
+  extractor: function(response) {
+    if (response.success && response.data) {
+      return {
+        label: response.data.group || 'Default Plan',
+        remaining: response.data.quota / 500000,
+        used: response.data.used_quota / 500000,
+        total: (response.data.quota + response.data.used_quota) / 500000,
+        unit: 'USD',
+        valueMode: 'currency',
+      };
+    }
+    return {
+      label: 'NewAPI',
+      isValid: false,
+      invalidMessage: response.message || 'Query failed',
+    };
+  },
+})`
+    case 'sub2api':
+      return `({
+  request: {
+    url: '{{baseUrl}}/v1/usage',
+    method: 'GET',
+    headers: {
+      'Authorization': 'Bearer {{apiKey}}',
+    },
+  },
+  extractor: function(response) {
+    const subscription = response?.subscription ?? {};
+    const isValid = response?.is_active ?? response?.isValid ?? true;
+    const unit = response?.unit ?? response?.quota?.unit ?? 'USD';
+    const invalidMessage = isValid ? '' : (response?.message || 'Invalid subscription');
+    const items = [];
+
+    if (Number(subscription.daily_limit_usd) > 0) {
+      const nextReset = new Date();
+      nextReset.setHours(24, 0, 0, 0);
+      items.push({
+        key: 'daily',
+        used: Number(subscription.daily_usage_usd) || 0,
+        total: Number(subscription.daily_limit_usd),
+        nextReset: nextReset.toISOString(),
+        isValid,
+        invalidMessage,
+        unit,
+        valueMode: 'currency',
+      });
+    }
+
+    if (Number(subscription.weekly_limit_usd) > 0) {
+      const weeklyWindowStart = subscription.weekly_window_start;
+      const windowStart = weeklyWindowStart ? new Date(weeklyWindowStart) : null;
+      const nextReset = windowStart && !Number.isNaN(windowStart.getTime())
+        ? new Date(windowStart.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString()
+        : undefined;
+      items.push({
+        key: 'weekly',
+        used: Number(subscription.weekly_usage_usd) || 0,
+        total: Number(subscription.weekly_limit_usd),
+        nextReset,
+        isValid,
+        invalidMessage,
+        unit,
+        valueMode: 'currency',
+      });
+    }
+
+    if (Number(subscription.monthly_limit_usd) > 0) {
+      items.push({
+        key: 'monthly',
+        used: Number(subscription.monthly_usage_usd) || 0,
+        total: Number(subscription.monthly_limit_usd),
+        nextReset: subscription.expires_at,
+        isValid,
+        invalidMessage,
+        unit,
+        valueMode: 'currency',
+      });
+    }
+
+    if (items.length > 0) {
+      return items;
+    }
+
+    const remaining = response?.remaining ?? response?.quota?.remaining ?? response?.balance;
+    return {
+      key: 'balance',
+      label: response?.planName || 'Sub2API',
+      isValid,
+      invalidMessage,
+      remaining,
+      unlimited: Number(remaining) < 0,
+      unit,
+      valueMode: 'currency',
+    };
+  },
+})`
+    default:
+      return ''
+  }
+}
 
 export const providerQuotaBalanceProviderOptions: Array<{
   value: ProviderQuotaBalanceProvider
@@ -205,6 +362,8 @@ export function queryTypeToTemplateType(queryType: unknown): ProviderQuotaTempla
       return 'general'
     case 'newapi':
       return 'newapi'
+    case 'sub2api':
+      return 'sub2api'
     case 'token_plan_glm':
     case 'token_plan_kimi':
     case 'token_plan_minimax':
@@ -326,6 +485,8 @@ export function resolveProviderQuotaQueryType(
       return 'general'
     case 'newapi':
       return 'newapi'
+    case 'sub2api':
+      return 'sub2api'
     case 'token_plan':
       return tokenPlanProviderToQueryType(
         objectValue.tokenPlanProvider
@@ -461,6 +622,7 @@ export function sanitizeProviderQuotaQueryConfigForSave(
       delete sanitized.userId
       break
     case 'general':
+    case 'sub2api':
       delete sanitized.accessToken
       delete sanitized.userId
       break
@@ -494,6 +656,10 @@ export function resetProviderQuotaQueryConfigFieldsOnTemplateSwitch(
     templateType,
   }
 
+  if (normalizeProviderQuotaTemplateType(value.templateType) !== templateType) {
+    nextConfig.code = ''
+  }
+
   switch (templateType) {
     case 'custom':
       nextConfig.apiKey = ''
@@ -502,6 +668,7 @@ export function resetProviderQuotaQueryConfigFieldsOnTemplateSwitch(
       nextConfig.userId = ''
       break
     case 'general':
+    case 'sub2api':
       nextConfig.accessToken = ''
       nextConfig.userId = ''
       break
@@ -549,6 +716,7 @@ export function hasProviderQuotaQueryMissingCredentials(
   switch (templateType) {
     case 'balance':
     case 'general':
+    case 'sub2api':
     case 'token_plan':
       return !effectiveBaseURL || !effectiveAPIKey
     case 'newapi':
@@ -575,7 +743,7 @@ export function validateProviderQuotaQueryConfigForSave(
     ?? queryTypeToTemplateType(options.fallbackQueryType)
   const code = trimProviderQuotaText(normalized.code)
 
-  if ((templateType === 'custom' || templateType === 'general' || templateType === 'newapi') && !code) {
+  if ((templateType === 'custom' || templateType === 'general' || templateType === 'newapi' || templateType === 'sub2api') && !code) {
     return 'missing_script'
   }
 
@@ -583,7 +751,7 @@ export function validateProviderQuotaQueryConfigForSave(
     return 'missing_newapi_credentials'
   }
 
-  if ((templateType === 'balance' || templateType === 'general' || templateType === 'token_plan')
+  if ((templateType === 'balance' || templateType === 'general' || templateType === 'sub2api' || templateType === 'token_plan')
     && hasProviderQuotaQueryMissingCredentials(normalized, options)) {
     return 'missing_provider_credentials'
   }

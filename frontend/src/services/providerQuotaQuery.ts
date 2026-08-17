@@ -14,6 +14,7 @@ export type ProviderQuotaQueryItem = {
   label?: string
   used: number
   total: number
+  unlimited?: boolean
   nextReset?: string
   active?: boolean
   isValid?: boolean

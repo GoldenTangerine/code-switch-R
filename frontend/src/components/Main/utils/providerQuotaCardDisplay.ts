@@ -50,10 +50,14 @@ export const getProviderQuotaRemainingValue = (
 }
 
 export const getProviderQuotaBalanceTone = (
-  item: Pick<ProviderQuotaDisplayItem, 'total' | 'used' | 'invalidMessage'>,
+  item: Pick<ProviderQuotaDisplayItem, 'total' | 'used' | 'unlimited' | 'invalidMessage'>,
 ) => {
   if (`${item.invalidMessage ?? ''}`.trim()) {
     return 'invalid'
+  }
+
+  if (item.unlimited === true) {
+    return 'healthy'
   }
 
   const remaining = getProviderQuotaRemainingValue(item)

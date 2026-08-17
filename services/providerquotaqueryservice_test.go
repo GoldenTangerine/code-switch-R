@@ -420,6 +420,130 @@ func TestProviderQuotaQueryService_QueryQuotaParsesNewAPIScriptTemplate(t *testi
 	}
 }
 
+func TestProviderQuotaQueryService_QueryQuotaParsesSub2APIScriptTemplate(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/usage" {
+			t.Fatalf("期望请求 /v1/usage，实际为 %s", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer sub2api-key" {
+			t.Fatalf("期望 Authorization 为 Bearer sub2api-key，实际为 %s", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"isValid": true,
+			"remaining": 195.16573,
+			"unit": "USD",
+			"subscription": {
+				"daily_limit_usd": 0,
+				"daily_usage_usd": 4.83427,
+				"weekly_limit_usd": 200,
+				"weekly_usage_usd": 4.83427,
+				"weekly_window_start": "2026-08-17T15:58:35.941105+08:00",
+				"monthly_limit_usd": 800,
+				"monthly_usage_usd": 4.83427,
+				"expires_at": "2026-09-16T15:53:00.193234+08:00"
+			}
+		}`))
+	}))
+	defer server.Close()
+
+	service := NewProviderQuotaQueryService()
+	result := service.QueryQuota(string(ProviderQuotaQueryTypeSub2API), server.URL, "", &ProviderQuotaQueryConfig{
+		Enabled:      true,
+		TemplateType: string(ProviderQuotaTemplateTypeSub2API),
+		APIKey:       "sub2api-key",
+		Code: `({
+  request: {
+    url: "{{baseUrl}}/v1/usage",
+    method: "GET",
+    headers: { "Authorization": "Bearer {{apiKey}}" }
+  },
+  extractor: function(response) {
+    const subscription = response?.subscription ?? {};
+    const isValid = response?.is_active ?? response?.isValid ?? true;
+    const unit = response?.unit ?? response?.quota?.unit ?? "USD";
+    const invalidMessage = isValid ? "" : (response?.message || "Invalid subscription");
+    const items = [];
+    if (Number(subscription.daily_limit_usd) > 0) {
+      const nextReset = new Date();
+      nextReset.setHours(24, 0, 0, 0);
+      items.push({ key: "daily", used: Number(subscription.daily_usage_usd) || 0, total: Number(subscription.daily_limit_usd), nextReset: nextReset.toISOString(), isValid, invalidMessage, unit, valueMode: "currency" });
+    }
+    if (Number(subscription.weekly_limit_usd) > 0) {
+      const windowStart = new Date(subscription.weekly_window_start);
+      const nextReset = Number.isNaN(windowStart.getTime()) ? undefined : new Date(windowStart.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
+      items.push({ key: "weekly", used: Number(subscription.weekly_usage_usd) || 0, total: Number(subscription.weekly_limit_usd), nextReset, isValid, invalidMessage, unit, valueMode: "currency" });
+    }
+    if (Number(subscription.monthly_limit_usd) > 0) {
+      items.push({ key: "monthly", used: Number(subscription.monthly_usage_usd) || 0, total: Number(subscription.monthly_limit_usd), nextReset: subscription.expires_at, isValid, invalidMessage, unit, valueMode: "currency" });
+    }
+    if (items.length > 0) {
+      return items;
+    }
+    const remaining = response?.remaining ?? response?.quota?.remaining ?? response?.balance;
+    return { key: "balance", label: response?.planName || "Sub2API", isValid, invalidMessage, remaining, unit, valueMode: "currency" };
+  }
+})`,
+	})
+
+	if !result.Success {
+		t.Fatalf("期望 Sub2API 模版查询成功，实际失败：%s", result.Error)
+	}
+	if len(result.Items) != 2 {
+		t.Fatalf("期望过滤无限制日额度后返回 2 项，实际为 %d", len(result.Items))
+	}
+	if result.Items[0].Key != "weekly" || result.Items[0].Used != 4.83427 || result.Items[0].Total != 200 {
+		t.Fatalf("Sub2API 周额度解析异常：%+v", result.Items[0])
+	}
+	if result.Items[0].NextReset != "2026-08-24T07:58:35.941Z" {
+		t.Fatalf("Sub2API 周额度刷新时间异常：%s", result.Items[0].NextReset)
+	}
+	if result.Items[1].Key != "monthly" || result.Items[1].Used != 4.83427 || result.Items[1].Total != 800 {
+		t.Fatalf("Sub2API 月额度解析异常：%+v", result.Items[1])
+	}
+	if result.Items[1].NextReset != "2026-09-16T15:53:00.193234+08:00" {
+		t.Fatalf("Sub2API 月额度刷新时间异常：%s", result.Items[1].NextReset)
+	}
+}
+
+func TestProviderQuotaQueryService_QueryQuotaSub2APIFallsBackToBalance(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"isValid": true,
+			"planName": "Unlimited",
+			"remaining": -1,
+			"unit": "USD",
+			"subscription": {
+				"daily_limit_usd": 0,
+				"weekly_limit_usd": 0,
+				"monthly_limit_usd": 0
+			}
+		}`))
+	}))
+	defer server.Close()
+
+	service := NewProviderQuotaQueryService()
+	result := service.QueryQuota(string(ProviderQuotaQueryTypeSub2API), server.URL, "sub2api-key", &ProviderQuotaQueryConfig{
+		Enabled:      true,
+		TemplateType: string(ProviderQuotaTemplateTypeSub2API),
+		Code: `({
+  request: { url: "{{baseUrl}}/v1/usage", method: "GET" },
+  extractor: function(response) {
+    return { key: "balance", label: response.planName, remaining: response.remaining, unlimited: response.remaining < 0, unit: response.unit, valueMode: "currency", isValid: response.isValid };
+  }
+})`,
+	})
+
+	if !result.Success || len(result.Items) != 1 {
+		t.Fatalf("期望 Sub2API 无限订阅回退为余额，实际：%+v", result)
+	}
+	item := result.Items[0]
+	if item.Key != "balance" || item.Label != "Unlimited" || item.Total != 0 || item.Used != 0 || !item.Unlimited {
+		t.Fatalf("Sub2API 余额回退异常：%+v", item)
+	}
+}
+
 func TestProviderQuotaQueryService_QueryQuotaPreservesInvalidMessageForNewAPI(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/user/self" {
@@ -740,6 +864,24 @@ func TestProviderQuotaQueryService_ValidateScriptPreset(t *testing.T) {
 	}
 }
 
+func TestProviderQuotaQueryService_ValidateSub2APIScriptPreset(t *testing.T) {
+	service := NewProviderQuotaQueryService()
+	result := service.ValidateScriptPreset(string(ProviderQuotaTemplateTypeSub2API), `({
+  request: {
+    url: "{{baseUrl}}/v1/usage",
+    method: "GET",
+    headers: { "Authorization": "Bearer {{apiKey}}" }
+  },
+  extractor: function(response) {
+    return response;
+  }
+})`)
+
+	if !result.Valid {
+		t.Fatalf("期望 Sub2API 脚本预设校验通过，实际失败：%s", result.Error)
+	}
+}
+
 func TestProviderQuotaQueryService_ValidateScriptPresetRejectsMissingExtractor(t *testing.T) {
 	service := NewProviderQuotaQueryService()
 	result := service.ValidateScriptPreset(string(ProviderQuotaTemplateTypeGeneral), `({
@@ -772,6 +914,15 @@ func TestQuotaItemsExhaustedRecognizesInactiveZeroBalance(t *testing.T) {
 	})
 	if !exhausted || !valid {
 		t.Fatalf("官方零余额项应判定为额度耗尽: exhausted=%v valid=%v", exhausted, valid)
+	}
+}
+
+func TestQuotaItemsExhaustedSkipsUnlimitedSubscription(t *testing.T) {
+	exhausted, valid := quotaItemsExhausted([]ProviderQuotaQueryItem{
+		{Key: "balance", Active: true, Total: 0, Unlimited: true},
+	})
+	if exhausted || !valid {
+		t.Fatalf("无限订阅不应判定为额度耗尽: exhausted=%v valid=%v", exhausted, valid)
 	}
 }
 

@@ -1281,6 +1281,9 @@ const formatQuotaValue = (item: ProviderQuotaDisplayItem, value: number) => {
 }
 
 const formatBalanceRemainingValue = (item: ProviderQuotaDisplayItem) => {
+  if (item.unlimited === true) {
+    return t('components.main.providers.quotaUnlimited')
+  }
   const remaining = getProviderQuotaRemainingValue(item)
   const formatted = new Intl.NumberFormat(locale.value || 'en', {
     minimumFractionDigits: 2,

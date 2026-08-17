@@ -666,6 +666,7 @@ func allowedProviderQuotaQueryPresetTypes() map[string]bool {
 		"custom":  true,
 		"general": true,
 		"newapi":  true,
+		"sub2api": true,
 	}
 }
 

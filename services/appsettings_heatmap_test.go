@@ -99,6 +99,31 @@ func TestAppSettingsSnapshotDoesNotShareMutableFields(t *testing.T) {
 	}
 }
 
+func TestNormalizeProviderQuotaQueryPresetsKeepsSub2API(t *testing.T) {
+	settings := AppSettings{
+		ProviderQuotaQueryPresetCodes: map[string]string{
+			"sub2api": "legacy-sub2api-code",
+		},
+		ProviderQuotaQueryPresets: map[string]ProviderQuotaQueryPresetGroup{
+			"sub2api": {
+				DefaultID: "sub2api-default",
+				Items: []ProviderQuotaQueryPresetEntry{{
+					ID:   "sub2api-default",
+					Name: "Sub2API",
+					Code: "sub2api-code",
+				}},
+			},
+		},
+	}
+
+	normalizeProviderQuotaQueryPresets(&settings)
+
+	group, ok := settings.ProviderQuotaQueryPresets["sub2api"]
+	if !ok || group.DefaultID != "sub2api-default" || len(group.Items) != 1 || group.Items[0].Code != "sub2api-code" {
+		t.Fatalf("Sub2API 预设归一化异常: %#v", settings.ProviderQuotaQueryPresets)
+	}
+}
+
 func TestMainWindowDestroyDelayDefaultsAndNormalizes(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	service := NewAppSettingsService(nil)

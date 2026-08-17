@@ -60,6 +60,11 @@ describe('providerQuotaCardDisplay', () => {
       total: 40,
     }))).toBe('danger')
     expect(getProviderQuotaBalanceTone(createQuotaItem({
+      used: 0,
+      total: 0,
+      unlimited: true,
+    }))).toBe('healthy')
+    expect(getProviderQuotaBalanceTone(createQuotaItem({
       invalidMessage: 'Authentication failed',
       used: 0,
       total: 0,

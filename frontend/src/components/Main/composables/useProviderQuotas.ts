@@ -467,6 +467,15 @@ export function useProviderQuotas(options: UseProviderQuotasOptions) {
 
   const updateCountdowns = () => {
     const tabQuotaDisplayMap = quotaDisplayMap[getActiveTab()]
+    const tabCards = cards[getActiveTab()] ?? []
+    const remoteQuotaRefs = new Set(
+      tabCards
+        .filter((card) => hasProviderQuotaQueryType(
+          card.providerQuotaQueryConfig ?? card.providerQuotaQueryType,
+          card.providerQuotaQueryType,
+        ))
+        .map((card) => cardProviderRef(card) || card.name),
+    )
     const autoRefreshRemoteRefs = resolveAutoRefreshRemoteQuotaRefs?.()
     const now = new Date()
     const previousTickAt = lastCountdownTickAt ?? new Date(now.getTime() - COUNTDOWN_TICK_INTERVAL_MS)
@@ -482,7 +491,7 @@ export function useProviderQuotas(options: UseProviderQuotasOptions) {
         if (hasProviderQuotaCountdownCrossedReset(item.nextReset, previousTickAt, now)) {
           needsRefresh = true
           const canAutoRefreshRemote = !autoRefreshRemoteRefs || autoRefreshRemoteRefs.has(ref)
-          if (item.valueMode === 'count' && canAutoRefreshRemote) {
+          if (remoteQuotaRefs.has(ref) && canAutoRefreshRemote) {
             forceRemoteRefs.add(ref)
           }
         }

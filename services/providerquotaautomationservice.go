@@ -426,6 +426,9 @@ func quotaItemsExhausted(items []ProviderQuotaQueryItem) (bool, bool) {
 		}
 		// 官方余额查询也会用 Active=false 表示余额为零，不能将其当作无效数据跳过。
 		valid = true
+		if item.Unlimited {
+			continue
+		}
 		if item.Total-item.Used <= 0 {
 			return true, true
 		}

@@ -28,6 +28,7 @@ const (
 	ProviderQuotaQueryTypeCustom           ProviderQuotaQueryType = "custom"
 	ProviderQuotaQueryTypeGeneral          ProviderQuotaQueryType = "general"
 	ProviderQuotaQueryTypeNewAPI           ProviderQuotaQueryType = "newapi"
+	ProviderQuotaQueryTypeSub2API          ProviderQuotaQueryType = "sub2api"
 	ProviderQuotaQueryTypeTokenPlanGLM     ProviderQuotaQueryType = "token_plan_glm"
 	ProviderQuotaQueryTypeTokenPlanKimi    ProviderQuotaQueryType = "token_plan_kimi"
 	ProviderQuotaQueryTypeTokenPlanMiniMax ProviderQuotaQueryType = "token_plan_minimax"
@@ -38,6 +39,7 @@ const (
 	ProviderQuotaTemplateTypeCustom    ProviderQuotaTemplateType = "custom"
 	ProviderQuotaTemplateTypeGeneral   ProviderQuotaTemplateType = "general"
 	ProviderQuotaTemplateTypeNewAPI    ProviderQuotaTemplateType = "newapi"
+	ProviderQuotaTemplateTypeSub2API   ProviderQuotaTemplateType = "sub2api"
 	ProviderQuotaTemplateTypeTokenPlan ProviderQuotaTemplateType = "token_plan"
 )
 
@@ -65,6 +67,7 @@ type ProviderQuotaQueryItem struct {
 	Label          string  `json:"label,omitempty"`
 	Used           float64 `json:"used"`
 	Total          float64 `json:"total"`
+	Unlimited      bool    `json:"unlimited,omitempty"`
 	NextReset      string  `json:"nextReset,omitempty"`
 	Active         bool    `json:"active"`
 	ValueMode      string  `json:"valueMode,omitempty"`
@@ -177,6 +180,8 @@ func normalizeProviderQuotaQueryType(value string) ProviderQuotaQueryType {
 		return ProviderQuotaQueryTypeGeneral
 	case ProviderQuotaQueryTypeNewAPI:
 		return ProviderQuotaQueryTypeNewAPI
+	case ProviderQuotaQueryTypeSub2API:
+		return ProviderQuotaQueryTypeSub2API
 	case ProviderQuotaQueryTypeTokenPlanGLM:
 		return ProviderQuotaQueryTypeTokenPlanGLM
 	case ProviderQuotaQueryTypeTokenPlanKimi:
@@ -230,7 +235,7 @@ func sanitizeProviderQuotaQueryConfigForTemplate(config *ProviderQuotaQueryConfi
 		config.BaseURL = ""
 		config.AccessToken = ""
 		config.UserID = ""
-	case ProviderQuotaTemplateTypeGeneral:
+	case ProviderQuotaTemplateTypeGeneral, ProviderQuotaTemplateTypeSub2API:
 		config.AccessToken = ""
 		config.UserID = ""
 	case ProviderQuotaTemplateTypeNewAPI:
@@ -270,6 +275,8 @@ func queryTypeToProviderQuotaTemplateType(queryType ProviderQuotaQueryType) Prov
 		return ProviderQuotaTemplateTypeGeneral
 	case ProviderQuotaQueryTypeNewAPI:
 		return ProviderQuotaTemplateTypeNewAPI
+	case ProviderQuotaQueryTypeSub2API:
+		return ProviderQuotaTemplateTypeSub2API
 	case ProviderQuotaQueryTypeTokenPlanGLM, ProviderQuotaQueryTypeTokenPlanKimi, ProviderQuotaQueryTypeTokenPlanMiniMax:
 		return ProviderQuotaTemplateTypeTokenPlan
 	default:
@@ -390,7 +397,7 @@ func (s *ProviderQuotaQueryService) queryQuotaByType(
 	switch queryType {
 	case ProviderQuotaQueryTypeBalance:
 		return s.queryBalanceQuota(baseURL, apiKey)
-	case ProviderQuotaQueryTypeCustom, ProviderQuotaQueryTypeGeneral, ProviderQuotaQueryTypeNewAPI:
+	case ProviderQuotaQueryTypeCustom, ProviderQuotaQueryTypeGeneral, ProviderQuotaQueryTypeNewAPI, ProviderQuotaQueryTypeSub2API:
 		return s.queryScriptQuota(queryType, baseURL, apiKey, queryConfig)
 	case ProviderQuotaQueryTypeTokenPlanGLM:
 		return s.queryGLMQuota(resolveProviderQuotaQueryTargetBaseURL(queryType, baseURL), apiKey)
@@ -543,7 +550,7 @@ func (s *ProviderQuotaQueryService) executeScriptQuotaQuery(
 
 func validateProviderQuotaScriptPreset(templateType string, scriptCode string) error {
 	switch ProviderQuotaTemplateType(strings.TrimSpace(strings.ToLower(templateType))) {
-	case ProviderQuotaTemplateTypeCustom, ProviderQuotaTemplateTypeGeneral, ProviderQuotaTemplateTypeNewAPI:
+	case ProviderQuotaTemplateTypeCustom, ProviderQuotaTemplateTypeGeneral, ProviderQuotaTemplateTypeNewAPI, ProviderQuotaTemplateTypeSub2API:
 	default:
 		return fmt.Errorf("当前模版不支持编辑脚本预设")
 	}
@@ -800,8 +807,17 @@ func buildProviderQuotaItemFromScriptObject(
 	total, hasTotal := floatFromAnyOk(payload["total"])
 	used, hasUsed := floatFromAnyOk(payload["used"])
 	remaining, hasRemaining := floatFromAnyOk(payload["remaining"])
+	unlimited, _ := boolFromAny(payload["unlimited"])
+	if hasRemaining && remaining < 0 {
+		unlimited = true
+	}
 
 	switch {
+	case unlimited:
+		total = 0
+		used = 0
+		hasTotal = true
+		hasUsed = true
 	case hasTotal && hasUsed:
 	case hasTotal && hasRemaining:
 		used = total - remaining
@@ -855,6 +871,7 @@ func buildProviderQuotaItemFromScriptObject(
 		Label:          label,
 		Used:           clampNonNegativeFloat(used),
 		Total:          clampNonNegativeFloat(total),
+		Unlimited:      unlimited,
 		NextReset:      nextReset,
 		Active:         active,
 		ValueMode:      valueMode,
@@ -872,7 +889,7 @@ func buildProviderQuotaItemFallbackKey(label string, index int, templateType str
 	switch strings.TrimSpace(strings.ToLower(templateType)) {
 	case string(ProviderQuotaTemplateTypeBalance):
 		return "balance"
-	case string(ProviderQuotaTemplateTypeGeneral), string(ProviderQuotaTemplateTypeNewAPI), string(ProviderQuotaTemplateTypeCustom):
+	case string(ProviderQuotaTemplateTypeGeneral), string(ProviderQuotaTemplateTypeNewAPI), string(ProviderQuotaTemplateTypeSub2API), string(ProviderQuotaTemplateTypeCustom):
 		return fmt.Sprintf("quota_%d", index+1)
 	default:
 		return fmt.Sprintf("item_%d", index+1)
@@ -1399,6 +1416,7 @@ func mergeProviderQuotaQueryItem(existing ProviderQuotaQueryItem, candidate Prov
 	if merged.Used <= 0 && candidate.Used > 0 {
 		merged.Used = candidate.Used
 	}
+	merged.Unlimited = merged.Unlimited || candidate.Unlimited
 	if strings.TrimSpace(merged.NextReset) == "" && strings.TrimSpace(candidate.NextReset) != "" {
 		merged.NextReset = candidate.NextReset
 	}

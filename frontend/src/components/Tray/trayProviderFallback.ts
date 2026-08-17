@@ -1,6 +1,59 @@
 import type { AutomationCard } from '../../data/cards'
 import { hasConfiguredBudgetQuotaSettings } from '../../utils/budgetUsage'
 import { hasProviderQuotaQueryType } from '../../utils/providerQuotaQuery'
+import type { ProviderQuotaSnapshotItem } from '../Main/utils/providerQuotaSnapshot'
+import { providerQuotaLabelKeyMap } from '../Main/utils/providerQuotaSnapshot'
+import {
+  isProviderQuotaBalanceItem,
+  isProviderQuotaErrorItem,
+} from '../Main/utils/providerQuotaCardDisplay'
+import type { TranslateFn } from '../Main/types'
+
+export interface TrayProviderQuotaDisplay {
+  key: string
+  title: string
+  used: number
+  total: number
+  unlimited: boolean
+  valueMode: 'currency' | 'count'
+  unit?: string
+  extra: string
+  invalidMessage: string
+  displayKind: 'progress' | 'balance' | 'error'
+  countdownLabel: string
+  nextReset: Date | null
+}
+
+export function resolveTrayProviderQuotaDisplay(
+  item: ProviderQuotaSnapshotItem,
+  t: TranslateFn,
+): TrayProviderQuotaDisplay {
+  const normalizedKey = `${item.key ?? ''}`.trim()
+  const labelKey = providerQuotaLabelKeyMap[normalizedKey]
+  const title = labelKey ? t(labelKey) : `${item.label ?? ''}`.trim() || normalizedKey
+  const used = Number.isFinite(Number(item.used)) ? Math.max(Number(item.used), 0) : 0
+  const total = Number.isFinite(Number(item.total)) ? Math.max(Number(item.total), 0) : 0
+  const displayKind = isProviderQuotaErrorItem(item)
+    ? 'error'
+    : isProviderQuotaBalanceItem(item)
+      ? 'balance'
+      : 'progress'
+
+  return {
+    key: normalizedKey || title,
+    title,
+    used,
+    total,
+    unlimited: item.unlimited === true,
+    valueMode: item.valueMode === 'count' ? 'count' : 'currency',
+    unit: `${item.unit ?? ''}`.trim() || undefined,
+    extra: `${item.extra ?? ''}`.trim(),
+    invalidMessage: `${item.invalidMessage ?? ''}`.trim(),
+    displayKind,
+    countdownLabel: `${item.countdownLabel ?? ''}`.trim(),
+    nextReset: item.nextReset,
+  }
+}
 
 export function normalizeTrayProviderLevel(value: unknown): number {
   const numeric = Number(value)

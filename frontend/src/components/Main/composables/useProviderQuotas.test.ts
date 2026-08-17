@@ -1483,4 +1483,137 @@ describe('useProviderQuotas', () => {
 
     quotaState.stopTimers()
   })
+
+  it('forces sub2api currency quota refresh when countdown crosses reset', async () => {
+    vi.setSystemTime(new Date('2026-08-24T07:58:35.500Z'))
+
+    const cards = createCardRecord()
+    const card = createCard(14, {
+      providerQuotaQueryType: 'sub2api',
+      providerQuotaQueryConfig: {
+        enabled: true,
+        templateType: 'sub2api',
+        code: 'sub2api-code',
+      },
+    })
+    cards.codex.push(card)
+
+    vi.mocked(queryProviderQuota)
+      .mockResolvedValueOnce({
+        success: true,
+        queryType: 'sub2api',
+        items: [
+          {
+            key: 'weekly',
+            used: 4.8,
+            total: 200,
+            nextReset: '2026-08-24T07:58:36.000Z',
+            active: true,
+            valueMode: 'currency',
+            unit: 'USD',
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        queryType: 'sub2api',
+        items: [
+          {
+            key: 'weekly',
+            used: 0,
+            total: 200,
+            nextReset: '2026-08-31T07:58:36.000Z',
+            active: true,
+            valueMode: 'currency',
+            unit: 'USD',
+          },
+        ],
+      })
+
+    const quotaState = useProviderQuotas({
+      t: (key: string) => key,
+      getActiveTab: () => 'codex',
+      cards,
+    })
+
+    await quotaState.refreshProviderQuotas()
+    quotaState.startTimers()
+
+    await vi.advanceTimersByTimeAsync(1_000)
+
+    expect(queryProviderQuota).toHaveBeenCalledTimes(2)
+    expect(quotaState.getQuotaDisplay(card)).toEqual([
+      expect.objectContaining({
+        key: 'weekly',
+        used: 0,
+        total: 200,
+        valueMode: 'currency',
+      }),
+    ])
+
+    quotaState.stopTimers()
+  })
+
+  it('uses localized cycle labels and preserves unlimited sub2api state', async () => {
+    vi.setSystemTime(new Date('2026-08-17T08:00:00.000Z'))
+
+    const cards = createCardRecord()
+    const card = createCard(15, {
+      providerQuotaQueryType: 'sub2api',
+      providerQuotaQueryConfig: {
+        enabled: true,
+        templateType: 'sub2api',
+        code: 'sub2api-code',
+      },
+    })
+    cards.codex.push(card)
+
+    vi.mocked(queryProviderQuota).mockResolvedValue({
+      success: true,
+      queryType: 'sub2api',
+      queriedAt: Date.now(),
+      items: [
+        {
+          key: 'daily',
+          label: 'Balance',
+          used: 1,
+          total: 10,
+          nextReset: '2026-08-18T00:00:00.000Z',
+          active: true,
+          valueMode: 'currency',
+          unit: 'USD',
+        },
+        {
+          key: 'balance',
+          label: 'Unlimited',
+          used: 0,
+          total: 0,
+          active: true,
+          unlimited: true,
+          valueMode: 'currency',
+          unit: 'USD',
+        },
+      ],
+    })
+
+    const quotaState = useProviderQuotas({
+      t: (key: string) => key,
+      getActiveTab: () => 'codex',
+      cards,
+    })
+
+    await quotaState.refreshProviderQuotas()
+
+    expect(quotaState.getQuotaDisplay(card)).toEqual([
+      expect.objectContaining({
+        key: 'daily',
+        label: 'components.main.providers.quotaDaily',
+      }),
+      expect.objectContaining({
+        key: 'balance',
+        label: 'Unlimited',
+        unlimited: true,
+      }),
+    ])
+  })
 })

@@ -111,6 +111,7 @@ export type ProviderQuotaDisplayItem = {
   label: string
   used: number
   total: number
+  unlimited?: boolean
   progressRatio: number
   countdownLabel: string
   nextReset: Date | null

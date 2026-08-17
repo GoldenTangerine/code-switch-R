@@ -427,6 +427,7 @@ import {
 import { queryProviderQuota, validateProviderQuotaScriptPreset } from '../../../services/providerQuotaQuery'
 import { showToast } from '../../../utils/toast'
 import {
+  buildProviderQuotaPresetCode,
   detectProviderQuotaBalanceProvider,
   detectProviderQuotaTokenPlanProvider,
   normalizeProviderQuotaQueryConfig,
@@ -445,7 +446,7 @@ import {
 
 const DEFAULT_TIMEOUT = 10
 const DEFAULT_AUTO_QUERY_INTERVAL = 5
-const editablePresetTemplateTypes = new Set<ProviderQuotaTemplateType>(['custom', 'general', 'newapi'])
+const editablePresetTemplateTypes = new Set<ProviderQuotaTemplateType>(['custom', 'general', 'newapi', 'sub2api'])
 
 type PresetEditorConfirmAction =
   | { kind: 'delete', presetId: string }
@@ -537,11 +538,14 @@ const showScriptSection = computed(() => (
   selectedTemplate.value === 'custom'
     || selectedTemplate.value === 'general'
     || selectedTemplate.value === 'newapi'
+    || selectedTemplate.value === 'sub2api'
 ))
 const showCredentialsSection = computed(() => showScriptSection.value)
 const showBaseUrlField = computed(() => showCredentialsSection.value)
 const showApiKeyField = computed(() => (
-  selectedTemplate.value === 'custom' || selectedTemplate.value === 'general'
+  selectedTemplate.value === 'custom'
+    || selectedTemplate.value === 'general'
+    || selectedTemplate.value === 'sub2api'
 ))
 const showAccessTokenField = computed(() => (
   selectedTemplate.value === 'custom' || selectedTemplate.value === 'newapi'
@@ -564,6 +568,7 @@ const templateDescriptionKeyMap: Record<ProviderQuotaTemplateType, string> = {
   custom: 'components.main.form.hints.providerQuotaQueryTemplateCustom',
   general: 'components.main.form.hints.providerQuotaQueryTemplateGeneral',
   newapi: 'components.main.form.hints.providerQuotaQueryTemplateNewApi',
+  sub2api: 'components.main.form.hints.providerQuotaQueryTemplateSub2Api',
   token_plan: 'components.main.form.hints.providerQuotaQueryTemplateTokenPlan',
 }
 
@@ -574,81 +579,9 @@ const saveValidationMessageKeyMap: Record<ProviderQuotaQuerySaveValidationIssue,
   unsupported_balance_provider: 'components.main.form.toast.providerQuotaQueryBalanceProviderUnsupported',
 }
 
-function buildPresetCode(templateType: ProviderQuotaTemplateType): string {
-  switch (templateType) {
-    case 'custom':
-      return `({
-  request: {
-    url: '',
-    method: 'GET',
-    headers: {},
-  },
-  extractor: function(response) {
-    return {
-      label: 'Quota',
-      remaining: 0,
-      unit: 'USD',
-      valueMode: 'currency',
-    };
-  },
-})`
-    case 'general':
-      return `({
-  request: {
-    url: '{{baseUrl}}/user/balance',
-    method: 'GET',
-    headers: {
-      'Authorization': 'Bearer {{apiKey}}',
-      'User-Agent': 'code-switch-R/1.0',
-    },
-  },
-  extractor: function(response) {
-    return {
-      label: 'Balance',
-      remaining: response.balance,
-      unit: 'USD',
-      valueMode: 'currency',
-    };
-  },
-})`
-    case 'newapi':
-      return `({
-  request: {
-    url: '{{baseUrl}}/api/user/self',
-    method: 'GET',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': 'Bearer {{accessToken}}',
-      'User-Agent': 'code-switch-R/1.0',
-      'New-Api-User': '{{userId}}',
-    },
-  },
-  extractor: function(response) {
-    if (response.success && response.data) {
-      return {
-        label: response.data.group || 'Default Plan',
-        remaining: response.data.quota / 500000,
-        used: response.data.used_quota / 500000,
-        total: (response.data.quota + response.data.used_quota) / 500000,
-        unit: 'USD',
-        valueMode: 'currency',
-      };
-    }
-    return {
-      label: 'NewAPI',
-      isValid: false,
-      invalidMessage: response.message || 'Query failed',
-    };
-  },
-})`
-    default:
-      return ''
-  }
-}
-
 function resolvePresetCode(templateType: ProviderQuotaTemplateType): string {
   if (!editablePresetTemplateTypes.has(templateType)) {
-    return buildPresetCode(templateType)
+    return buildProviderQuotaPresetCode(templateType)
   }
 
   const group = presetGroups.value[templateType]
@@ -656,7 +589,7 @@ function resolvePresetCode(templateType: ProviderQuotaTemplateType): string {
   const customCode = `${defaultPreset?.code ?? ''}`.trim()
   if (customCode) return customCode
 
-  return buildPresetCode(templateType)
+  return buildProviderQuotaPresetCode(templateType)
 }
 
 function createDefaultConfig(): ProviderQuotaQueryConfig {
@@ -693,7 +626,7 @@ function createDefaultConfig(): ProviderQuotaQueryConfig {
   return {
     enabled: false,
     templateType: 'general',
-    code: buildPresetCode('general'),
+    code: buildProviderQuotaPresetCode('general'),
     timeout: DEFAULT_TIMEOUT,
     autoQueryInterval: DEFAULT_AUTO_QUERY_INTERVAL,
     apiKey: '',
@@ -732,13 +665,16 @@ function resetDraft() {
     : createDefaultConfig()
 
   if (showScriptTemplate(nextConfig.templateType) && !`${nextConfig.code ?? ''}`.trim()) {
-    nextConfig.code = buildPresetCode(nextConfig.templateType ?? 'general')
+    nextConfig.code = buildProviderQuotaPresetCode(nextConfig.templateType ?? 'general')
   }
   applyDraft(nextConfig)
 }
 
-function showScriptTemplate(templateType: ProviderQuotaTemplateType | undefined): templateType is Extract<ProviderQuotaTemplateType, 'custom' | 'general' | 'newapi'> {
-  return templateType === 'custom' || templateType === 'general' || templateType === 'newapi'
+function showScriptTemplate(templateType: ProviderQuotaTemplateType | undefined): templateType is Extract<ProviderQuotaTemplateType, 'custom' | 'general' | 'newapi' | 'sub2api'> {
+  return templateType === 'custom'
+    || templateType === 'general'
+    || templateType === 'newapi'
+    || templateType === 'sub2api'
 }
 
 function clampInteger(value: unknown, fallback: number, min: number, max: number): number {
@@ -764,7 +700,10 @@ function buildSaveConfig(forceEnable = false): ProviderQuotaQueryConfig {
   return normalized ?? createDefaultConfig()
 }
 
-function formatTestRemaining(item: { used: number, total: number, unit?: string }) {
+function formatTestRemaining(item: { used: number, total: number, unlimited?: boolean, unit?: string }) {
+  if (item.unlimited === true) {
+    return t('components.main.providers.quotaUnlimited')
+  }
   const remaining = Math.max(Number(item.total) - Number(item.used), 0)
   const formatter = new Intl.NumberFormat(undefined, {
     maximumFractionDigits: remaining >= 100 ? 0 : 2,
@@ -781,6 +720,7 @@ function formatTestItemSummary(item: {
   label?: string
   used: number
   total: number
+  unlimited?: boolean
   unit?: string
   active?: boolean
   isValid?: boolean
@@ -833,7 +773,7 @@ function handleSelectTemplate(templateType: ProviderQuotaTemplateType) {
   if (showScriptTemplate(templateType)) {
     nextConfig.code = `${nextConfig.code ?? ''}`.trim()
       ? nextConfig.code ?? ''
-      : buildPresetCode(templateType)
+      : resolvePresetCode(templateType)
   }
 
   applyDraft({
@@ -864,7 +804,7 @@ function updatePresetDraftFromId(presetId: string) {
   const preset = resolvePresetGroup(selectedTemplate.value).items.find((item) => item.id === presetId)
   selectedPresetId.value = preset?.id ?? ''
   presetEditorName.value = preset?.name ?? t('components.main.form.placeholders.providerQuotaQueryPresetName')
-  presetEditorText.value = preset?.code ?? buildPresetCode(selectedTemplate.value)
+  presetEditorText.value = preset?.code ?? buildProviderQuotaPresetCode(selectedTemplate.value)
   presetEditorSnapshotName.value = presetEditorName.value
   presetEditorSnapshotText.value = presetEditorText.value
 }
@@ -914,7 +854,7 @@ function requestClosePresetEditor() {
 function applyCreatePresetDraft() {
   selectedPresetId.value = ''
   presetEditorName.value = t('components.main.form.placeholders.providerQuotaQueryPresetName')
-  presetEditorText.value = buildPresetCode(selectedTemplate.value)
+  presetEditorText.value = buildProviderQuotaPresetCode(selectedTemplate.value)
   presetEditorSnapshotName.value = presetEditorName.value
   presetEditorSnapshotText.value = presetEditorText.value
   presetEditorError.value = ''

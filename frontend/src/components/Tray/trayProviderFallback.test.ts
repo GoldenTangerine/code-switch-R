@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { AutomationCard } from '../../data/cards'
 import { createDefaultBudgetQuotaSettings } from '../../utils/budgetUsage'
 import {
+  resolveTrayProviderQuotaDisplay,
   hasTrayFallbackProviderQuotaConfig,
   listTrayFallbackProviders,
   normalizeTrayProviderLevel,
@@ -96,5 +97,89 @@ describe('trayProviderFallback', () => {
     expect(hasTrayFallbackProviderQuotaConfig(createProvider(3, {
       providerQuotaQueryType: 'balance',
     }))).toBe(true)
+    expect(hasTrayFallbackProviderQuotaConfig(createProvider(4, {
+      providerQuotaQueryType: 'sub2api',
+      providerQuotaQueryConfig: {
+        enabled: true,
+        templateType: 'sub2api',
+        code: 'sub2api-code',
+      },
+    }))).toBe(true)
+  })
+
+  it('converts sub2api cycles and unlimited state for tray display', () => {
+    const t = (key: string) => ({
+      'components.main.providers.quotaDaily': '日',
+      'components.main.providers.quotaWeekly': '周',
+      'components.main.providers.quotaMonthly': '月',
+    })[key] ?? key
+    const nextReset = new Date('2026-08-24T07:58:35.941Z')
+
+    expect([
+      resolveTrayProviderQuotaDisplay({
+        key: 'daily',
+        label: 'Balance',
+        used: 1,
+        total: 10,
+        progressRatio: 0.1,
+        countdownLabel: '16h0m',
+        nextReset,
+        trackedUsed: 1,
+        adjustment: 0,
+        remaining: 9,
+        isActive: true,
+      }, t),
+      resolveTrayProviderQuotaDisplay({
+        key: 'weekly',
+        label: 'Balance',
+        used: 2,
+        total: 20,
+        progressRatio: 0.1,
+        countdownLabel: '6d23h',
+        nextReset,
+        trackedUsed: 2,
+        adjustment: 0,
+        remaining: 18,
+        isActive: true,
+      }, t),
+      resolveTrayProviderQuotaDisplay({
+        key: 'monthly',
+        label: 'Balance',
+        used: 3,
+        total: 30,
+        progressRatio: 0.1,
+        countdownLabel: '30d0h',
+        nextReset,
+        trackedUsed: 3,
+        adjustment: 0,
+        remaining: 27,
+        isActive: true,
+      }, t),
+    ]).toEqual([
+      expect.objectContaining({ key: 'daily', title: '日', countdownLabel: '16h0m', displayKind: 'progress' }),
+      expect.objectContaining({ key: 'weekly', title: '周', countdownLabel: '6d23h', displayKind: 'progress' }),
+      expect.objectContaining({ key: 'monthly', title: '月', countdownLabel: '30d0h', displayKind: 'progress' }),
+    ])
+
+    expect(resolveTrayProviderQuotaDisplay({
+      key: 'balance',
+      label: 'Unlimited',
+      used: 0,
+      total: 0,
+      progressRatio: 0,
+      countdownLabel: '',
+      nextReset: null,
+      queriedAt: Date.now(),
+      trackedUsed: 0,
+      adjustment: 0,
+      remaining: 0,
+      isActive: true,
+      unlimited: true,
+      valueMode: 'currency',
+    }, t)).toEqual(expect.objectContaining({
+      title: 'Unlimited',
+      displayKind: 'balance',
+      unlimited: true,
+    }))
   })
 })

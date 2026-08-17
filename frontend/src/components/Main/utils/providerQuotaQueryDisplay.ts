@@ -85,9 +85,10 @@ export async function resolveProviderQuotaQueryDisplay({
         const extra = `${item.extra ?? ''}`.trim() || undefined
         return {
           key: normalizedKey,
-          label: `${item.label ?? ''}`.trim() || (defaultLabelKey ? t(defaultLabelKey) : normalizedKey),
+          label: defaultLabelKey ? t(defaultLabelKey) : `${item.label ?? ''}`.trim() || normalizedKey,
           used,
           total,
+          unlimited: item.unlimited === true,
           progressRatio: resolveProgressRatio(used, total),
           countdownLabel: isActive
             ? formatProviderQuotaCountdownLabel(nextReset, now)

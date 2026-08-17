@@ -43,17 +43,15 @@ import {
 } from '../Main/adapters/providerCardMappers'
 import { resolveProviderQuotaQueryDisplay } from '../Main/utils/providerQuotaQueryDisplay'
 import {
-  providerQuotaLabelKeyMap,
   resolveProviderQuotaSnapshot,
   type ProviderQuotaSnapshotItem,
 } from '../Main/utils/providerQuotaSnapshot'
 import {
   getProviderQuotaRemainingValue,
-  isProviderQuotaBalanceItem,
-  isProviderQuotaErrorItem,
 } from '../Main/utils/providerQuotaCardDisplay'
 import {
   listTrayFallbackProviders,
+  resolveTrayProviderQuotaDisplay,
 } from './trayProviderFallback'
 import {
   getProviderDisplayIconSvg,
@@ -86,6 +84,7 @@ type TrayQuotaState = {
   rawUsed: number
   used: number
   total: number
+  unlimited: boolean
   usedLabel: string
   totalLabel: string
   remainingParts: TrayAmountPart[]
@@ -212,6 +211,7 @@ const createQuotaState = (key: BudgetQuotaKey): TrayQuotaState => ({
   rawUsed: 0,
   used: 0,
   total: 0,
+  unlimited: false,
   usedLabel: formatCurrency(0),
   totalLabel: '∞',
   remainingParts: formatCurrencyParts(0),
@@ -314,7 +314,9 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
   const updateQuotaStaticLabels = (quota: TrayQuotaState) => {
     const remaining = getProviderQuotaRemainingValue(quota)
     quota.usedLabel = formatQuotaValue(quota.used, quota.valueMode, quota.unit)
-    quota.remainingParts = formatQuotaValueParts(remaining, quota.valueMode, quota.unit)
+    quota.remainingParts = quota.unlimited
+      ? [{ role: 'amount', value: '∞' }]
+      : formatQuotaValueParts(remaining, quota.valueMode, quota.unit)
     quota.hasBudget = quota.displayKind === 'balance'
       ? true
       : quota.displayKind === 'error'
@@ -451,44 +453,31 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
     }
   }
 
-  const getProviderQuotaTitle = (item: ProviderQuotaSnapshotItem) => {
-    const labelKey = providerQuotaLabelKeyMap[item.key]
-    if (labelKey) return t(labelKey)
-    return `${item.label ?? ''}`.trim() || item.key
-  }
-
   const createProviderQuotaState = (item: ProviderQuotaSnapshotItem): TrayQuotaState => {
-    const valueMode = item.valueMode === 'count' ? 'count' : 'currency'
-    const normalizedUsed = Number.isFinite(Number(item.used)) ? Math.max(Number(item.used), 0) : 0
-    const normalizedTotal = Number.isFinite(Number(item.total)) ? Math.max(Number(item.total), 0) : 0
-    const displayKind = isProviderQuotaErrorItem(item)
-      ? 'error'
-      : isProviderQuotaBalanceItem(item)
-        ? 'balance'
-        : 'progress'
-    const invalidMessage = `${item.invalidMessage ?? ''}`.trim()
+    const display = resolveTrayProviderQuotaDisplay(item, t)
     const nextQuota: TrayQuotaState = {
-      key: `${item.key ?? ''}`.trim() || getProviderQuotaTitle(item),
-      title: getProviderQuotaTitle(item),
-      rawUsed: normalizedUsed,
-      used: normalizedUsed,
-      total: normalizedTotal,
+      key: display.key,
+      title: display.title,
+      rawUsed: display.used,
+      used: display.used,
+      total: display.total,
+      unlimited: display.unlimited,
       usedLabel: '',
       totalLabel: '',
       remainingParts: [],
-      valueMode,
-      unit: `${item.unit ?? ''}`.trim() || undefined,
-      extra: `${item.extra ?? ''}`.trim(),
-      invalidMessage,
+      valueMode: display.valueMode,
+      unit: display.unit,
+      extra: display.extra,
+      invalidMessage: display.invalidMessage,
       source: 'provider',
-      displayKind,
-      hasBudget: displayKind === 'error' ? false : normalizedTotal > 0,
+      displayKind: display.displayKind,
+      hasBudget: display.displayKind === 'error' ? false : display.total > 0,
       progressRatio: 0,
       progressPercentLabel: '',
-      countdownLabel: `${item.countdownLabel ?? ''}`.trim(),
+      countdownLabel: display.countdownLabel,
       forecastLabel: '',
       windowStart: null,
-      nextReset: item.nextReset,
+      nextReset: display.nextReset,
       forecastRate: 0,
     }
     updateQuotaStaticLabels(nextQuota)
@@ -512,6 +501,7 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
           rawUsed: 0,
           used: 0,
           total: 0,
+          unlimited: false,
           usedLabel: formatQuotaValue(0),
           totalLabel: '∞',
           remainingParts: formatQuotaValueParts(0),

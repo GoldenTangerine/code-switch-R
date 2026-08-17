@@ -121,6 +121,7 @@ describe('appSettings', () => {
     vi.mocked(Call.ByName).mockResolvedValueOnce({
       provider_quota_query_preset_codes: {
         general: '({ request: { url: "{{baseUrl}}/usage" }, extractor: function() {} })',
+        sub2api: '({ request: { url: "{{baseUrl}}/v1/usage" }, extractor: function() {} })',
       },
     })
 
@@ -132,6 +133,14 @@ describe('appSettings', () => {
         id: 'legacy-general',
         name: '自定义预设',
         code: '({ request: { url: "{{baseUrl}}/usage" }, extractor: function() {} })',
+      }],
+    })
+    expect(settings.provider_quota_query_presets.sub2api).toEqual({
+      defaultId: 'legacy-sub2api',
+      items: [{
+        id: 'legacy-sub2api',
+        name: '自定义预设',
+        code: '({ request: { url: "{{baseUrl}}/v1/usage" }, extractor: function() {} })',
       }],
     })
   })

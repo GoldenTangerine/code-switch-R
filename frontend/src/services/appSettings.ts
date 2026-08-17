@@ -244,7 +244,7 @@ const normalizeBooleanMap = (value: unknown): Record<string, boolean> => {
 
 const normalizeProviderQuotaQueryPresetCodes = (value: unknown): Record<string, string> => {
   if (!value || typeof value !== 'object') return {}
-  const allowedKeys = new Set(['custom', 'general', 'newapi'])
+  const allowedKeys = new Set(['custom', 'general', 'newapi', 'sub2api'])
   const normalized: Record<string, string> = {}
   Object.entries(value as Record<string, unknown>).forEach(([key, code]) => {
     const normalizedKey = key.trim().toLowerCase()
@@ -255,7 +255,7 @@ const normalizeProviderQuotaQueryPresetCodes = (value: unknown): Record<string, 
   return normalized
 }
 
-const providerQuotaQueryPresetTypeSet = new Set(['custom', 'general', 'newapi'])
+const providerQuotaQueryPresetTypeSet = new Set(['custom', 'general', 'newapi', 'sub2api'])
 
 const normalizeProviderQuotaQueryPresetGroups = (
   value: unknown,

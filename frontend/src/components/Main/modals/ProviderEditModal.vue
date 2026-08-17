@@ -1693,9 +1693,11 @@ const providerQuotaQueryHint = computed(() => (
             ? t('components.main.form.hints.providerQuotaQueryTemplateGeneral')
             : providerQuotaQueryTemplateType.value === 'newapi'
               ? t('components.main.form.hints.providerQuotaQueryTemplateNewApi')
-              : providerQuotaQueryTemplateType.value === 'token_plan'
-                ? t('components.main.form.hints.providerQuotaQueryTemplateTokenPlan')
-                : t('components.main.form.hints.providerQuotaQueryConfig')
+              : providerQuotaQueryTemplateType.value === 'sub2api'
+                ? t('components.main.form.hints.providerQuotaQueryTemplateSub2Api')
+                : providerQuotaQueryTemplateType.value === 'token_plan'
+                  ? t('components.main.form.hints.providerQuotaQueryTemplateTokenPlan')
+                  : t('components.main.form.hints.providerQuotaQueryConfig')
 ))
 
 type QuotaDefinition = {
