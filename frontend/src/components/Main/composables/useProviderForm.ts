@@ -4,6 +4,11 @@ import type { AutomationCard } from '../../../data/cards'
 import type { LogPlatform } from '../../../services/logs'
 import { createGeminiProviderRef, createOpenCodeProviderRef, normalizeProviderRef } from '../adapters/providerCardMappers'
 import { buildPersistedProviderFieldsFromForm } from '../adapters/providerFormMappers'
+import { applyGrokSingleProvider } from '../../../services/grokSettings'
+import { applyClaudeDesktopSingleProvider } from '../../../services/claudeDesktopSettings'
+import { setCurrentOpenClawProvider } from '../../../services/openClaw'
+import { setCurrentHermesProvider } from '../../../services/hermes'
+import { setCurrentPiProvider } from '../../../services/pi'
 import type { ProviderTab, TranslateFn, VendorForm } from '../types'
 import { isDirectApplyBlockedForProvider } from '../utils/providerDirectApply'
 
@@ -107,7 +112,7 @@ export function useProviderForm(options: UseProviderFormOptions) {
 
   const openProviderLogs = (card: AutomationCard) => {
     const activeTab = getActiveTab()
-    if (activeTab === 'others' || activeTab === 'opencode') {
+    if (activeTab === 'others' || activeTab === 'opencode' || activeTab === 'grokbuild' || activeTab === 'claude-desktop' || activeTab === 'openclaw' || activeTab === 'hermes' || activeTab === 'pi') {
       return
     }
     providerLogsModalProvider.value = card
@@ -141,7 +146,7 @@ export function useProviderForm(options: UseProviderFormOptions) {
 
   const openProviderDataOverview = (card: AutomationCard) => {
     const activeTab = getActiveTab()
-    if (activeTab === 'others' || activeTab === 'opencode') {
+    if (activeTab === 'others' || activeTab === 'opencode' || activeTab === 'grokbuild' || activeTab === 'claude-desktop' || activeTab === 'openclaw' || activeTab === 'hermes' || activeTab === 'pi') {
       return
     }
     providerDataOverviewModalProvider.value = card
@@ -157,7 +162,7 @@ export function useProviderForm(options: UseProviderFormOptions) {
 
   const openProviderCostTrend = (card: AutomationCard) => {
     const activeTab = getActiveTab()
-    if (activeTab === 'others' || activeTab === 'opencode') {
+    if (activeTab === 'others' || activeTab === 'opencode' || activeTab === 'grokbuild' || activeTab === 'claude-desktop' || activeTab === 'openclaw' || activeTab === 'hermes' || activeTab === 'pi') {
       return
     }
     providerCostTrendModalProvider.value = card
@@ -207,6 +212,25 @@ export function useProviderForm(options: UseProviderFormOptions) {
         const providerRef = normalizeProviderRef(savedCard.providerRef)
         if (providerRef) {
           await Call.ByName('codeswitch/services.GeminiService.ApplySingleProvider', providerRef)
+        }
+      } else if (tabId === 'grokbuild') {
+        await applyGrokSingleProvider(savedCard.id)
+      } else if (tabId === 'claude-desktop') {
+        await applyClaudeDesktopSingleProvider(savedCard.id)
+      } else if (tabId === 'openclaw') {
+        const openClawId = `${normalizeProviderRef(savedCard.providerRef) || savedCard.id}`.trim()
+        if (openClawId) {
+          await setCurrentOpenClawProvider(openClawId)
+        }
+      } else if (tabId === 'hermes') {
+        const hermesId = `${normalizeProviderRef(savedCard.providerRef) || savedCard.id}`.trim()
+        if (hermesId) {
+          await setCurrentHermesProvider(hermesId)
+        }
+      } else if (tabId === 'pi') {
+        const piId = `${normalizeProviderRef(savedCard.providerRef) || savedCard.id}`.trim()
+        if (piId) {
+          await setCurrentPiProvider(piId)
         }
       }
 

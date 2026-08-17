@@ -1,4 +1,4 @@
-import type { AutomationCard, ModelMappingMissPolicy } from '../../data/cards'
+import type { AutomationCard, ClaudeDesktopModelRoute, ModelMappingMissPolicy } from '../../data/cards'
 import type { BlacklistStatus } from '../../services/blacklist'
 import type { ConfigFile, ProxyInjection } from '../../services/customCliService'
 import type { BudgetQuotaAdjustments, BudgetQuotaKey, BudgetQuotaSettings } from '../../utils/budgetUsage'
@@ -6,7 +6,7 @@ import type { ProviderQuotaQueryConfig, ProviderQuotaQueryType } from '../../uti
 
 export type TranslateFn = (key: string, ...args: any[]) => string
 
-export type ProviderTab = 'claude' | 'codex' | 'gemini' | 'opencode' | 'others'
+export type ProviderTab = 'claude' | 'codex' | 'gemini' | 'opencode' | 'grokbuild' | 'claude-desktop' | 'openclaw' | 'hermes' | 'pi' | 'others'
 
 export type MainTabOption = {
   id: ProviderTab
@@ -74,6 +74,12 @@ export type VendorForm = {
   apiEndpoint?: string
   opencodeNpm?: string
   opencodeSettingsConfig?: Record<string, any>
+  // Grok Build：~/.grok/config.toml 的完整 TOML 片段（[model.<profile>] 表）
+  configTOML?: string
+  // Claude Desktop：接入模式（direct 直连官方/第三方 API，proxy 走本地 :18100 代理）
+  claudeDesktopMode?: string
+  // Claude Desktop：模型路由列表（name 必填、labelOverride 可选、supports1m 声明 1M 上下文）
+  claudeDesktopModelRoutes?: ClaudeDesktopModelRoute[]
   category?: string
   authProvider?: string
   authAccountId?: string

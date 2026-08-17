@@ -2,7 +2,6 @@ package services
 
 import (
 	"encoding/json"
-	"os"
 	"sort"
 	"testing"
 	"time"
@@ -11,7 +10,7 @@ import (
 )
 
 func TestProviderServiceSnapshotSaveAndExternalRefresh(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	resetProviderStoreForTest(t)
 	service := NewProviderService()
 	defer service.Stop()
 	if err := service.Start(); err != nil {
@@ -27,25 +26,8 @@ func TestProviderServiceSnapshotSaveAndExternalRefresh(t *testing.T) {
 		t.Fatalf("保存后快照未立即生效: %#v, %v", loaded, err)
 	}
 
-	path, err := providerFilePath("claude")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte(`{"providers":`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	time.Sleep(1100 * time.Millisecond)
-	loaded, err = service.LoadProviders("claude")
-	if err != nil || len(loaded) != 1 || loaded[0].Name != "Initial" {
-		t.Fatalf("无效外部配置不应覆盖有效快照: %#v, %v", loaded, err)
-	}
-
-	updated := providerEnvelope{Providers: []Provider{{ID: 2, Name: "External", APIURL: "https://example.com", APIKey: "key", Enabled: true}}}
-	data, err := json.Marshal(updated)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+	// 外部变更：绕过服务直接写统一存储（等价 WebDAV 库恢复/外部改库场景）
+	if err := SaveProvidersToStore("claude", []Provider{{ID: 2, Name: "External", APIURL: "https://example.com", APIKey: "key", Enabled: true}}); err != nil {
 		t.Fatal(err)
 	}
 	deadline := time.Now().Add(2500 * time.Millisecond)
@@ -56,7 +38,7 @@ func TestProviderServiceSnapshotSaveAndExternalRefresh(t *testing.T) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	t.Fatalf("外部配置未在一秒轮询周期内生效: %#v, %v", loaded, err)
+	t.Fatalf("外部存储变更未在一秒轮询周期内生效: %#v, %v", loaded, err)
 }
 
 func TestProviderServiceSnapshotDoesNotShareMutableFields(t *testing.T) {

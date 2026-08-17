@@ -323,11 +323,13 @@ const { t } = useI18n()
 // Platform definitions (use computed for i18n reactivity)
 const platforms = computed(() => [
   { value: 'claude' as const, label: t('components.skill.platform.claude') },
-  { value: 'codex' as const, label: t('components.skill.platform.codex') }
+  { value: 'codex' as const, label: t('components.skill.platform.codex') },
+  { value: 'opencode' as const, label: t('components.skill.platform.opencode') },
+  { value: 'grokbuild' as const, label: t('components.skill.platform.grokbuild') }
 ])
 
 // State
-const activePlatform = ref<'claude' | 'codex'>('claude')
+const activePlatform = ref<'claude' | 'codex' | 'opencode' | 'grokbuild'>('claude')
 const skills = ref<SkillSummary[]>([])
 const repoList = ref<SkillRepoConfig[]>([])
 const loading = ref(false)
@@ -379,7 +381,7 @@ const isInstallingSkill = (skill: SkillSummary) => processingSkill.value === ins
 const canInstallSkill = (skill: SkillSummary) => Boolean(skill.repo_owner && skill.repo_name)
 
 // Platform switching
-const switchPlatform = async (platform: 'claude' | 'codex') => {
+const switchPlatform = async (platform: 'claude' | 'codex' | 'opencode' | 'grokbuild') => {
   activePlatform.value = platform
   await loadSkillsForPlatform()
 }

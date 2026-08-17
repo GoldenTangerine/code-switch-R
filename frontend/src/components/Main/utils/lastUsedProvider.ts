@@ -2,7 +2,7 @@ import type { LastUsedProvider, ProviderTab } from '../types'
 
 const normalizePlatform = (platformValue: string): { platform: ProviderTab; toolId?: string } | null => {
   const platform = platformValue.trim()
-  if (platform === 'claude' || platform === 'codex' || platform === 'gemini' || platform === 'others') {
+  if (platform === 'claude' || platform === 'codex' || platform === 'gemini' || platform === 'grokbuild' || platform === 'claude-desktop' || platform === 'openclaw' || platform === 'hermes' || platform === 'pi' || platform === 'others') {
     return { platform }
   }
 

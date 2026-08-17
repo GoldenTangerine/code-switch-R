@@ -71,6 +71,64 @@
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--mac-accent) 14%, transparent);
 }
 
+/* Grok Build：config.toml 高级配置文本域 */
+.grok-toml-textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 260px;
+  resize: vertical;
+  padding: 14px 16px;
+  border: 1px solid var(--mac-border);
+  border-radius: 14px;
+  outline: none;
+  background: color-mix(in srgb, var(--mac-surface) 96%, transparent);
+  color: var(--mac-text-primary);
+  font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  tab-size: 2;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.grok-toml-textarea:focus {
+  border-color: color-mix(in srgb, var(--mac-accent) 62%, var(--mac-border));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--mac-accent) 14%, transparent);
+}
+
+/* Claude Desktop：模型路由简易编辑列表 */
+.claude-desktop-route-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.claude-desktop-route-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) 72px 40px;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.claude-desktop-route-row--head {
+  padding: 0 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--mac-text-secondary);
+}
+
+.claude-desktop-route-row > :not(.opencode-row-remove) {
+  min-width: 0;
+}
+
+.claude-desktop-route-row :deep(.base-input) {
+  box-sizing: border-box;
+  min-width: 0;
+  height: 48px;
+  padding-inline: 16px;
+}
+
 .level-badge {
   display: inline-flex;
   align-items: center;

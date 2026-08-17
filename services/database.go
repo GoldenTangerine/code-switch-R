@@ -79,6 +79,13 @@ func InitDatabase() error {
 	if err := ensureBlacklistTables(); err != nil {
 		return fmt.Errorf("初始化黑名单表失败: %w", err)
 	}
+	if err := ensureProvidersStoreTable(); err != nil {
+		return fmt.Errorf("初始化供应商统一存储表失败: %w", err)
+	}
+	// 旧 JSON 供应商存储迁移到 SQLite（队列启动前单事务执行，成功后原文件备份为 .bak）
+	if err := MigrateProviderJSONFilesToStore(db); err != nil {
+		fmt.Printf("⚠️  供应商 JSON 存储迁移失败（保留原文件，下次启动重试）: %v\n", err)
+	}
 
 	// 5. 预热连接池：强制建立数据库连接，避免首次写入时失败
 	var count int

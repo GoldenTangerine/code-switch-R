@@ -13,6 +13,7 @@ import (
 	"sync"
 
 	"github.com/pelletier/go-toml/v2"
+	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -23,9 +24,15 @@ const (
 	codexConfigFile  = "config.toml"
 	geminiDirName    = ".gemini"
 	geminiConfigFile = "settings.json"
-	platClaudeCode   = "claude-code"
-	platCodex        = "codex"
-	platGemini       = "gemini"
+	// OpenCode live 配置：~/.config/opencode/opencode.json（JSONC 读，MCP 在顶层 mcp 节点）
+	openCodeConfigDir  = ".config/opencode"
+	openCodeConfigFile = "opencode.json"
+	platClaudeCode     = "claude-code"
+	platCodex          = "codex"
+	platGemini         = "gemini"
+	platOpenCode       = "opencode"
+	platGrokBuild      = "grokbuild"
+	platHermes         = "hermes"
 )
 
 var builtInServers = map[string]rawMCPServer{
@@ -66,6 +73,9 @@ type MCPServer struct {
 	EnabledInClaude     bool              `json:"enabled_in_claude"`
 	EnabledInCodex      bool              `json:"enabled_in_codex"`
 	EnabledInGemini     bool              `json:"enabled_in_gemini"`
+	EnabledInOpenCode   bool              `json:"enabled_in_opencode"`
+	EnabledInGrok       bool              `json:"enabled_in_grok"`
+	EnabledInHermes     bool              `json:"enabled_in_hermes"`
 	MissingPlaceholders []string          `json:"missing_placeholders"`
 }
 
@@ -117,6 +127,9 @@ func (ms *MCPService) ListServers() ([]MCPServer, error) {
 	claudeEnabled := loadClaudeEnabledServers()
 	codexEnabled := loadCodexEnabledServers()
 	geminiEnabled := loadGeminiEnabledServers()
+	openCodeEnabled := loadOpenCodeEnabledServers()
+	grokEnabled := loadGrokEnabledServers()
+	hermesEnabled := loadHermesEnabledServers()
 
 	names := make([]string, 0, len(config))
 	for name := range config {
@@ -130,18 +143,21 @@ func (ms *MCPService) ListServers() ([]MCPServer, error) {
 		typ := normalizeServerType(entry.Type)
 		platforms := normalizePlatforms(entry.EnablePlatform)
 		server := MCPServer{
-			Name:            name,
-			Type:            typ,
-			Command:         strings.TrimSpace(entry.Command),
-			Args:            cloneArgs(entry.Args),
-			Env:             cloneEnv(entry.Env),
-			URL:             strings.TrimSpace(entry.URL),
-			Website:         strings.TrimSpace(entry.Website),
-			Tips:            strings.TrimSpace(entry.Tips),
-			EnablePlatform:  platforms,
-			EnabledInClaude: containsNormalized(claudeEnabled, name),
-			EnabledInCodex:  containsNormalized(codexEnabled, name),
-			EnabledInGemini: containsNormalized(geminiEnabled, name),
+			Name:              name,
+			Type:              typ,
+			Command:           strings.TrimSpace(entry.Command),
+			Args:              cloneArgs(entry.Args),
+			Env:               cloneEnv(entry.Env),
+			URL:               strings.TrimSpace(entry.URL),
+			Website:           strings.TrimSpace(entry.Website),
+			Tips:              strings.TrimSpace(entry.Tips),
+			EnablePlatform:    platforms,
+			EnabledInClaude:   containsNormalized(claudeEnabled, name),
+			EnabledInCodex:    containsNormalized(codexEnabled, name),
+			EnabledInGemini:   containsNormalized(geminiEnabled, name),
+			EnabledInOpenCode: containsNormalized(openCodeEnabled, name),
+			EnabledInGrok:     containsNormalized(grokEnabled, name),
+			EnabledInHermes:   containsNormalized(hermesEnabled, name),
 		}
 		server.MissingPlaceholders = detectPlaceholders(server.URL, server.Args)
 		servers = append(servers, server)
@@ -175,18 +191,21 @@ func (ms *MCPService) SaveServers(servers []MCPServer) error {
 			return fmt.Errorf("%s 需要提供 url", name)
 		}
 		normalized[i] = MCPServer{
-			Name:            name,
-			Type:            typ,
-			Command:         command,
-			Args:            args,
-			Env:             env,
-			URL:             url,
-			Website:         strings.TrimSpace(server.Website),
-			Tips:            strings.TrimSpace(server.Tips),
-			EnablePlatform:  platforms,
-			EnabledInClaude: server.EnabledInClaude,
-			EnabledInCodex:  server.EnabledInCodex,
-			EnabledInGemini: server.EnabledInGemini,
+			Name:              name,
+			Type:              typ,
+			Command:           command,
+			Args:              args,
+			Env:               env,
+			URL:               url,
+			Website:           strings.TrimSpace(server.Website),
+			Tips:              strings.TrimSpace(server.Tips),
+			EnablePlatform:    platforms,
+			EnabledInClaude:   server.EnabledInClaude,
+			EnabledInCodex:    server.EnabledInCodex,
+			EnabledInGemini:   server.EnabledInGemini,
+			EnabledInOpenCode: server.EnabledInOpenCode,
+			EnabledInGrok:     server.EnabledInGrok,
+			EnabledInHermes:   server.EnabledInHermes,
 		}
 		raw[name] = rawMCPServer{
 			Type:           typ,
@@ -227,6 +246,15 @@ func (ms *MCPService) SaveServers(servers []MCPServer) error {
 		return err
 	}
 	if err := ms.syncGeminiServers(normalized); err != nil {
+		return err
+	}
+	if err := ms.syncOpenCodeServers(normalized); err != nil {
+		return err
+	}
+	if err := ms.syncGrokServers(normalized); err != nil {
+		return err
+	}
+	if err := ms.syncHermesServers(normalized); err != nil {
 		return err
 	}
 	return nil
@@ -405,6 +433,12 @@ func normalizePlatform(value string) (string, bool) {
 		return "codex", true
 	case "gemini", "gemini-cli", "gemini_cli":
 		return "gemini", true
+	case "opencode", "open-code", "open_code":
+		return "opencode", true
+	case "grokbuild", "grok", "grok-build", "grok_build":
+		return "grokbuild", true
+	case "hermes":
+		return "hermes", true
 	default:
 		return "", false
 	}
@@ -709,6 +743,143 @@ func platformContains(platforms []string, target string) bool {
 		}
 	}
 	return false
+}
+
+// syncOpenCodeServers 将启用的 MCP 服务器投影到 OpenCode live 配置的 mcp 节点
+// 条目格式：local（command 数组 + environment）/ remote（url + headers），每条带 enabled: true
+func (ms *MCPService) syncOpenCodeServers(servers []MCPServer) error {
+	desired := make(map[string]map[string]any)
+	for _, server := range servers {
+		if !platformContains(server.EnablePlatform, platOpenCode) {
+			continue
+		}
+		desired[server.Name] = buildOpenCodeEntry(server)
+	}
+	config, err := readOpenCodeLiveConfig()
+	if err != nil {
+		// OpenCode live 配置目录不存在时跳过投影（未安装/未初始化 OpenCode）
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	config["mcp"] = desired
+	return writeOpenCodeLiveConfig(config)
+}
+
+// loadOpenCodeEnabledServers 从 OpenCode live 配置读回已存在的 MCP 节点名
+func loadOpenCodeEnabledServers() map[string]struct{} {
+	result := map[string]struct{}{}
+	config, err := readOpenCodeLiveConfig()
+	if err != nil {
+		return result
+	}
+	mcpNode := mapFromAny(config["mcp"])
+	if mcpNode == nil {
+		return result
+	}
+	for name := range mcpNode {
+		result[strings.ToLower(strings.TrimSpace(name))] = struct{}{}
+	}
+	return result
+}
+
+// syncGrokServers 将启用的 MCP 服务器投影到 Grok config.toml 的 [mcp_servers] 节
+// 条目格式与 Codex 一致（type/command/args/env 或 url），其余顶层键（[model.*] 等）原样保留
+func (ms *MCPService) syncGrokServers(servers []MCPServer) error {
+	desired := make(map[string]map[string]any)
+	for _, server := range servers {
+		if !platformContains(server.EnablePlatform, platGrokBuild) {
+			continue
+		}
+		desired[server.Name] = buildCodexEntry(server)
+	}
+	config, err := readGrokLiveMap()
+	if err != nil {
+		return err
+	}
+	if len(config) == 0 && len(desired) == 0 {
+		// 未初始化 Grok 时跳过投影
+		return nil
+	}
+	config["mcp_servers"] = desired
+	return writeGrokLiveMap(config)
+}
+
+// loadGrokEnabledServers 从 Grok config.toml 读回已存在的 mcp_servers 节点名
+func loadGrokEnabledServers() map[string]struct{} {
+	result := map[string]struct{}{}
+	config, err := readGrokLiveMap()
+	if err != nil {
+		return result
+	}
+	mcpNode, _ := config["mcp_servers"].(map[string]any)
+	for name := range mcpNode {
+		result[strings.ToLower(strings.TrimSpace(name))] = struct{}{}
+	}
+	return result
+}
+
+// syncHermesServers 将启用的 MCP 服务器投影到 Hermes config.yaml 的 mcp_servers 节
+// 条目格式与 Codex 一致（type/command/args/env 或 url），走「读 Node → 只改该子树 → 写回」
+// 避免覆盖 custom_providers / model / memory 等其他顶层键
+func (ms *MCPService) syncHermesServers(servers []MCPServer) error {
+	desired := make(map[string]map[string]any)
+	for _, server := range servers {
+		if !platformContains(server.EnablePlatform, platHermes) {
+			continue
+		}
+		desired[server.Name] = buildCodexEntry(server)
+	}
+	if len(desired) == 0 && !providerConfigFileExists(getHermesConfigPath()) {
+		// 未初始化 Hermes 时跳过投影，避免为未安装的应用创建配置目录
+		return nil
+	}
+	return mutateHermesConfig(func(root *yaml.Node) error {
+		hermesSetTopLevelValue(root, "mcp_servers", hermesEncodeValue(desired))
+		return nil
+	})
+}
+
+// loadHermesEnabledServers 从 Hermes config.yaml 读回已存在的 mcp_servers 节点名
+func loadHermesEnabledServers() map[string]struct{} {
+	result := map[string]struct{}{}
+	doc, err := readHermesLiveNode()
+	if err != nil {
+		return result
+	}
+	mcpNode := mapFromAny(hermesDecodeNode(hermesGetTopLevelValue(hermesRootMapping(doc), "mcp_servers")))
+	for name := range mcpNode {
+		result[strings.ToLower(strings.TrimSpace(name))] = struct{}{}
+	}
+	return result
+}
+
+// buildOpenCodeEntry 构造 OpenCode 格式的 MCP 条目
+// OpenCode 约定：type 为 local/remote；本地命令是数组（command + args 合并）；环境变量字段名 environment
+func buildOpenCodeEntry(server MCPServer) map[string]any {
+	entry := make(map[string]any)
+	if server.Type == "http" {
+		entry["type"] = "remote"
+		entry["url"] = server.URL
+	} else {
+		entry["type"] = "local"
+		command := make([]any, 0, 1+len(server.Args))
+		command = append(command, server.Command)
+		for _, arg := range server.Args {
+			command = append(command, arg)
+		}
+		entry["command"] = command
+		if len(server.Env) > 0 {
+			environment := make(map[string]any, len(server.Env))
+			for key, value := range server.Env {
+				environment[key] = value
+			}
+			entry["environment"] = environment
+		}
+	}
+	entry["enabled"] = true
+	return entry
 }
 
 func buildClaudeDesktopEntry(server MCPServer) claudeDesktopServer {

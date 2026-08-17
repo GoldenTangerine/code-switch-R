@@ -1,6 +1,6 @@
 import { Call } from '@wailsio/runtime'
 
-export type McpPlatform = 'claude-code' | 'codex' | 'gemini'
+export type McpPlatform = 'claude-code' | 'codex' | 'gemini' | 'opencode' | 'grokbuild'
 export type McpServerType = 'stdio' | 'http'
 
 export type McpServer = {
@@ -16,6 +16,8 @@ export type McpServer = {
   enabled_in_claude: boolean
   enabled_in_codex: boolean
   enabled_in_gemini: boolean
+  enabled_in_opencode: boolean
+  enabled_in_grok: boolean
   missing_placeholders: string[]
 }
 

@@ -498,6 +498,8 @@ const platformOptions = computed(() => [
   { id: 'claude-code' as McpPlatform, label: t('components.mcp.platforms.claude') },
   { id: 'codex' as McpPlatform, label: t('components.mcp.platforms.codex') },
   { id: 'gemini' as McpPlatform, label: t('components.mcp.platforms.gemini') },
+  { id: 'opencode' as McpPlatform, label: t('components.mcp.platforms.opencode') },
+  { id: 'grokbuild' as McpPlatform, label: t('components.mcp.platforms.grokbuild') },
 ])
 
 const formMissingPlaceholders = computed(() => detectPlaceholders(modalState.form.url, modalState.form.argsText))
@@ -514,6 +516,8 @@ const loadServers = async () => {
       enable_platform: item.enable_platform ?? [],
       website: item.website ?? '',
       tips: item.tips ?? '',
+      enabled_in_opencode: item.enabled_in_opencode ?? false,
+      enabled_in_grok: item.enabled_in_grok ?? false,
       missing_placeholders: item.missing_placeholders ?? [],
     }))
   } catch (error) {
@@ -585,6 +589,10 @@ const platformActive = (server: McpServer, platform: McpPlatform) => {
       return server.enabled_in_codex
     case 'gemini':
       return server.enabled_in_gemini
+    case 'opencode':
+      return server.enabled_in_opencode
+    case 'grokbuild':
+      return server.enabled_in_grok
     default:
       return false
   }
@@ -966,6 +974,14 @@ const submitModal = async () => {
       modalState.editingName === trimmedName
         ? existing?.enabled_in_gemini ?? false
         : servers.value.find((server) => server.name === modalState.editingName)?.enabled_in_gemini ?? false,
+    enabled_in_opencode:
+      modalState.editingName === trimmedName
+        ? existing?.enabled_in_opencode ?? false
+        : servers.value.find((server) => server.name === modalState.editingName)?.enabled_in_opencode ?? false,
+    enabled_in_grok:
+      modalState.editingName === trimmedName
+        ? existing?.enabled_in_grok ?? false
+        : servers.value.find((server) => server.name === modalState.editingName)?.enabled_in_grok ?? false,
     missing_placeholders: [],
   }
 

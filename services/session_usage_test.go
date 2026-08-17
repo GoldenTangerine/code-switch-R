@@ -52,6 +52,8 @@ func prepareSessionUsageTest(t *testing.T) (*LogService, *sql.DB, string) {
 		GlobalDBQueue = nil
 		GlobalDBQueueLogs = nil
 		_ = db.Close()
+		// 恢复 TestMain 的全局测试库与队列，避免污染后续测试
+		restoreGlobalTestDatabase(t)
 	})
 	return NewLogService(nil), db, scope
 }

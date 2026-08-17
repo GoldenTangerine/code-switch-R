@@ -106,6 +106,8 @@ func TestRequestLogDailyHeatmapStats_UsesExistingRequestLogsOnly(t *testing.T) {
 		_ = ShutdownGlobalDBQueue(5 * time.Second)
 		GlobalDBQueue = nil
 		GlobalDBQueueLogs = nil
+		// 恢复 TestMain 的全局测试库与队列，避免污染后续测试
+		restoreGlobalTestDatabase(t)
 	})
 
 	db, err := xdb.DB("default")

@@ -48,6 +48,11 @@ const createBlacklistMap = (): Record<ProviderTab, Record<string, BlacklistStatu
   codex: {},
   gemini: {},
   opencode: {},
+  grokbuild: {},
+  'claude-desktop': {},
+  openclaw: {},
+  hermes: {},
+  pi: {},
   others: {},
 })
 
@@ -56,6 +61,11 @@ const createLastUsedMap = (): Record<ProviderTab, LastUsedProvider | null> => ({
   codex: null,
   gemini: null,
   opencode: null,
+  grokbuild: null,
+  'claude-desktop': null,
+  openclaw: null,
+  hermes: null,
+  pi: null,
   others: null,
 })
 

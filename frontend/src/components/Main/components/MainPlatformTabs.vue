@@ -11,9 +11,11 @@
         v-for="(tab, idx) in tabs"
         :key="tab.id"
         class="tab-pill"
-        :class="{ active: selectedIndex === idx }"
+        :class="{ active: selectedIndex === idx, 'tab-pill--icon-only': !showTabLabels }"
         role="tab"
         :aria-selected="selectedIndex === idx"
+        :aria-label="showTabLabels ? undefined : tab.label"
+        :title="showTabLabels ? undefined : tab.label"
         type="button"
         @click="$emit('change', idx)"
       >
@@ -27,7 +29,7 @@
             {{ getTabInitials(tab.label) }}
           </span>
         </span>
-        <span class="tab-pill__label">{{ tab.label }}</span>
+        <span v-if="showTabLabels" class="tab-pill__label">{{ tab.label }}</span>
         <span
           class="tab-pill__status-group"
           :aria-label="getTabStatusLabel(tab.id)"
@@ -199,6 +201,10 @@ const { t } = useI18n()
 const tabGroupRef = ref<HTMLDivElement | null>(null)
 const measuredTabGroupWidth = ref<number | null>(null)
 
+// 可见 tab 不超过 4 个时展示「图标+名称」，超过后整体切换为纯图标（title 提示名称）
+const TAB_LABEL_MAX_COUNT = 4
+const showTabLabels = computed(() => props.tabs.length <= TAB_LABEL_MAX_COUNT)
+
 const getTabIconSvg = (icon: string) => getProviderDisplayIconSvg(icon)
 
 const getTabInitials = (label: string) => {
@@ -368,6 +374,11 @@ onBeforeUnmount(() => {
 
 .main-platform-tabs :deep(.tab-pill) {
   gap: 7px;
+}
+
+.main-platform-tabs :deep(.tab-pill--icon-only) {
+  padding-left: 13px;
+  padding-right: 13px;
 }
 
 .tab-pill__icon {

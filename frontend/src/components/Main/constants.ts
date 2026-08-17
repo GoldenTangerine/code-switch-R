@@ -27,6 +27,11 @@ export const getDefaultEndpoint = (platform: string) => {
     claude: '/v1/messages',
     codex: '/responses',
     opencode: '/v1/chat/completions',
+    grokbuild: '/responses',
+    'claude-desktop': '/v1/messages',
+    openclaw: '/v1/chat/completions',
+    hermes: '/v1/chat/completions',
+    pi: '/v1/chat/completions',
   }
   return defaults[platform] || '/v1/chat/completions'
 }

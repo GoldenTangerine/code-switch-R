@@ -24,6 +24,8 @@ const homeItem: NavItem = { path: '/', icon: 'grid', labelKey: 'sidebar.home' }
 const promptsItem: NavItem = { path: '/prompts', icon: 'message', labelKey: 'sidebar.prompts', isNew: true }
 const mcpItem: NavItem = { path: '/mcp', icon: 'cube', labelKey: 'sidebar.mcp' }
 const skillItem: NavItem = { path: '/skill', icon: 'spark', labelKey: 'sidebar.skill' }
+const openClawItem: NavItem = { path: '/openclaw-config', icon: 'sliders', labelKey: 'sidebar.openclawConfig', isNew: true }
+const hermesMemoryItem: NavItem = { path: '/hermes-memory', icon: 'book', labelKey: 'sidebar.hermesMemory', isNew: true }
 const authItem: NavItem = { path: '/auth', icon: 'lock', labelKey: 'sidebar.auth' }
 const availabilityItem: NavItem = { path: '/availability', icon: 'activity', labelKey: 'sidebar.availability', isNew: true }
 const speedtestItem: NavItem = { path: '/speedtest', icon: 'zap', labelKey: 'sidebar.speedtest', isNew: true }
@@ -35,7 +37,7 @@ const settingsItem: NavItem = { path: '/settings', icon: 'settings', labelKey: '
 const navSections: NavSection[] = [
   {
     labelKey: 'sidebar.sections.workspace',
-    items: [homeItem, promptsItem, mcpItem, skillItem, authItem],
+    items: [homeItem, promptsItem, mcpItem, skillItem, openClawItem, hermesMemoryItem, authItem],
   },
   {
     labelKey: 'sidebar.sections.monitoring',
@@ -226,6 +228,34 @@ function navigate(path: string) {
                 >
                   <path d="M12 3.5 13.7 8.3 18.5 10 13.7 11.7 12 16.5 10.3 11.7 5.5 10 10.3 8.3 12 3.5Z" />
                   <path d="M18.5 15.5 19.3 17.7 21.5 18.5 19.3 19.3 18.5 21.5 17.7 19.3 15.5 18.5 17.7 17.7 18.5 15.5Z" />
+                </svg>
+
+                <svg
+                  v-else-if="item.icon === 'sliders'"
+                  class="nav-icon"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M4 7h9M17 7h3" />
+                  <circle cx="15" cy="7" r="2" />
+                  <path d="M4 17h3M11 17h9" />
+                  <circle cx="9" cy="17" r="2" />
+                </svg>
+
+                <svg
+                  v-else-if="item.icon === 'book'"
+                  class="nav-icon"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H10a2 2 0 0 1 2 2v13a2 2 0 0 0-2-2H5.5A1.5 1.5 0 0 1 4 15.5Z" />
+                  <path d="M20 5.5A1.5 1.5 0 0 0 18.5 4H14a2 2 0 0 0-2 2v13a2 2 0 0 1 2-2h4.5a1.5 1.5 0 0 0 1.5-1.5Z" />
                 </svg>
 
                 <svg

@@ -305,9 +305,8 @@ func TestGeminiPreset_Fields(t *testing.T) {
 
 func TestGeminiService_LoadProvidersSupportsTotalQuotaFieldAfterInitDatabase(t *testing.T) {
 	useIsolatedHomeDir(t)
-	if err := InitDatabase(); err != nil {
-		t.Fatalf("初始化数据库失败: %v", err)
-	}
+	resetProviderStoreForTest(t)
+	// 数据库与队列已由 TestMain 初始化，此处不再重复 InitDatabase
 
 	path := getGeminiProvidersPath()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -349,6 +348,9 @@ func TestGeminiService_LoadProvidersSupportsTotalQuotaFieldAfterInitDatabase(t *
 	if err := os.WriteFile(path, payload, 0o644); err != nil {
 		t.Fatalf("写入 Gemini provider 配置失败: %v", err)
 	}
+
+	// 触发迁移器：把 fixture JSON 迁入统一存储（生产中由启动时 InitDatabase 内执行）
+	migrateFixtureProvidersToStore(t)
 
 	svc := NewGeminiService("127.0.0.1:18100")
 	providers := svc.GetProviders()

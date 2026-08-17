@@ -1,11 +1,12 @@
 import type { ProviderDailyStat } from '../../../services/logs'
 import type { BlacklistStatus } from '../../../services/blacklist'
-import type { AutomationCard, ModelMappingMissPolicy } from '../../../data/cards'
+import type { AutomationCard, ClaudeDesktopModelRoute, ModelMappingMissPolicy } from '../../../data/cards'
 import type { ProviderTab } from '../types'
 import {
   createDefaultOpenCodeSettingsConfig,
   isDefaultOpenCodeModels,
   normalizeClaudeAPIFormatValue,
+  normalizeClaudeDesktopModelRoutes,
   normalizeModelMappingMissPolicy,
   normalizeModelMappingDisabled,
   normalizeModelMappingReasoningEfforts,
@@ -71,6 +72,9 @@ export type PersistedProvider = PersistedProviderModel & {
   modelPassthroughPatterns?: string[]
   opencodeNpm?: string
   opencodeSettingsConfig?: Record<string, any>
+  configTOML?: string
+  claudeDesktopMode?: string
+  claudeDesktopModelRoutes?: ClaudeDesktopModelRoute[]
   apiKeyUrl?: string
   category?: string
   authProvider?: string
@@ -294,6 +298,9 @@ export const providerToCard = (
   apiEndpoint: provider.apiEndpoint || '',
   opencodeNpm: provider.opencodeNpm || '',
   opencodeSettingsConfig: cloneCardValue(provider.opencodeSettingsConfig || {}),
+  configTOML: provider.configTOML || '',
+  claudeDesktopMode: provider.claudeDesktopMode || '',
+  claudeDesktopModelRoutes: normalizeClaudeDesktopModelRoutes(provider.claudeDesktopModelRoutes),
   category: provider.category || '',
   authProvider: provider.authProvider || '',
   authAccountId: provider.authAccountId || '',
@@ -557,6 +564,9 @@ export const serializeProviders = (
       requestBodyOverrides: cloneCardValue(provider.requestBodyOverrides || {}),
       opencodeNpm: provider.opencodeNpm || '',
       opencodeSettingsConfig: cloneCardValue(provider.opencodeSettingsConfig || {}),
+      configTOML: provider.configTOML || '',
+      claudeDesktopMode: provider.claudeDesktopMode || '',
+      claudeDesktopModelRoutes: normalizeClaudeDesktopModelRoutes(provider.claudeDesktopModelRoutes),
       apiKeyUrl: provider.apiKeyUrl || '',
       category: provider.category || '',
       authProvider: provider.authProvider || '',

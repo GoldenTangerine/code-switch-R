@@ -20,6 +20,9 @@ func useIsolatedHomeDir(t *testing.T) string {
 	t.Setenv("USERPROFILE", homeDir)
 	t.Setenv("HOMEDRIVE", "")
 	t.Setenv("HOMEPATH", "")
+	// 同步隔离数据库：重绑 default 到隔离 HOME 的 app.db 并重建写入队列
+	// （供应商统一存储走全局连接与队列，仅隔离 HOME 会造成写读分离）
+	useIsolatedProviderTestDB(t, homeDir)
 	return homeDir
 }
 
@@ -33,7 +36,7 @@ func assertProviderConfigExists(t *testing.T, homeDir string, filename string) {
 
 // TestModelsHandler 测试 /v1/models 端点处理器
 func TestModelsHandler(t *testing.T) {
-	homeDir := useIsolatedHomeDir(t)
+	useIsolatedHomeDir(t)
 
 	// 设置测试环境
 	gin.SetMode(gin.TestMode)
@@ -105,12 +108,15 @@ func TestModelsHandler(t *testing.T) {
 		Level:   1,
 	}
 
-	// 保存 provider 配置
+	// 保存 provider 配置（写入 SQLite 统一存储）
 	err := providerService.SaveProviders("claude", []Provider{testProvider})
 	if err != nil {
 		t.Fatalf("保存 provider 配置失败: %v", err)
 	}
-	assertProviderConfigExists(t, homeDir, "claude-code.json")
+	storeLoaded, storeErr := LoadProvidersFromStore("claude")
+	if storeErr != nil || len(storeLoaded) != 1 || storeLoaded[0].Name != "TestProvider" {
+		t.Fatalf("统一存储回读失败: %#v, %v", storeLoaded, storeErr)
+	}
 
 	// 创建 ProviderRelayService
 	relayService := NewProviderRelayService(providerService, nil, blacklistService, nil, nil, nil, "")

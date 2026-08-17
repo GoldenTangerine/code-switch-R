@@ -644,19 +644,11 @@ func normalizeProviderQuotaRecoveryIntervalSeconds(seconds int) int {
 }
 
 func hasConfiguredClaudeModelRouting() bool {
-	path, err := resolveProviderReadPath("claude")
+	providers, err := LoadProvidersFromStore("claude")
 	if err != nil {
 		return false
 	}
-	data, err := os.ReadFile(path)
-	if err != nil || len(data) == 0 {
-		return false
-	}
-	var envelope providerEnvelope
-	if json.Unmarshal(data, &envelope) != nil {
-		return false
-	}
-	for _, provider := range envelope.Providers {
+	for _, provider := range providers {
 		if len(provider.SupportedModels) > 0 || len(provider.ModelMapping) > 0 {
 			return true
 		}

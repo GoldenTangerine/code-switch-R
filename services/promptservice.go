@@ -22,9 +22,14 @@ type Prompt struct {
 
 // PromptConfig 提示词配置（按平台分组）
 type PromptConfig struct {
-	Claude map[string]Prompt `json:"claude"`
-	Codex  map[string]Prompt `json:"codex"`
-	Gemini map[string]Prompt `json:"gemini"`
+	Claude   map[string]Prompt `json:"claude"`
+	Codex    map[string]Prompt `json:"codex"`
+	Gemini   map[string]Prompt `json:"gemini"`
+	OpenCode map[string]Prompt `json:"opencode"`
+	Grok     map[string]Prompt `json:"grokbuild"`
+	OpenClaw map[string]Prompt `json:"openclaw"`
+	Hermes   map[string]Prompt `json:"hermes"`
+	Pi       map[string]Prompt `json:"pi"`
 }
 
 // PromptService 提示词管理服务
@@ -38,9 +43,14 @@ type PromptService struct {
 func NewPromptService() *PromptService {
 	svc := &PromptService{
 		config: PromptConfig{
-			Claude: make(map[string]Prompt),
-			Codex:  make(map[string]Prompt),
-			Gemini: make(map[string]Prompt),
+			Claude:   make(map[string]Prompt),
+			Codex:    make(map[string]Prompt),
+			Gemini:   make(map[string]Prompt),
+			OpenCode: make(map[string]Prompt),
+			Grok:     make(map[string]Prompt),
+			OpenClaw: make(map[string]Prompt),
+			Hermes:   make(map[string]Prompt),
+			Pi:       make(map[string]Prompt),
 		},
 		lastWriteTime: make(map[string]time.Time),
 	}
@@ -87,6 +97,16 @@ func (s *PromptService) GetPrompts(platform string) (map[string]Prompt, error) {
 		return s.deepCopyMap(s.config.Codex), nil
 	case "gemini":
 		return s.deepCopyMap(s.config.Gemini), nil
+	case "openclaw":
+		return s.deepCopyMap(s.config.OpenClaw), nil
+	case "hermes":
+		return s.deepCopyMap(s.config.Hermes), nil
+	case "pi":
+		return s.deepCopyMap(s.config.Pi), nil
+	case "opencode":
+		return s.deepCopyMap(s.config.OpenCode), nil
+	case "grokbuild":
+		return s.deepCopyMap(s.config.Grok), nil
 	default:
 		return nil, fmt.Errorf("不支持的平台: %s", platform)
 	}
@@ -346,6 +366,16 @@ func (s *PromptService) getPromptsForPlatform(platform string) (*map[string]Prom
 		return &s.config.Codex, nil
 	case "gemini":
 		return &s.config.Gemini, nil
+	case "opencode":
+		return &s.config.OpenCode, nil
+	case "grokbuild":
+		return &s.config.Grok, nil
+	case "openclaw":
+		return &s.config.OpenClaw, nil
+	case "hermes":
+		return &s.config.Hermes, nil
+	case "pi":
+		return &s.config.Pi, nil
 	default:
 		return nil, fmt.Errorf("不支持的平台: %s", platform)
 	}
@@ -369,6 +399,26 @@ func (s *PromptService) getPromptFilePathReadOnly(platform string) (string, erro
 	case "gemini":
 		dir = filepath.Join(home, ".gemini")
 		filename = "GEMINI.md"
+	case "opencode":
+		// OpenCode 全局规则文件
+		dir = filepath.Join(home, ".config", "opencode")
+		filename = "AGENTS.md"
+	case "grokbuild":
+		// Grok Build 全局规则文件
+		dir = filepath.Join(home, ".grok")
+		filename = "AGENTS.md"
+	case "openclaw":
+		// OpenClaw 全局规则文件
+		dir = filepath.Join(home, ".openclaw")
+		filename = "AGENTS.md"
+	case "hermes":
+		// Hermes 全局规则文件
+		dir = filepath.Join(home, ".hermes")
+		filename = "SOUL.md"
+	case "pi":
+		// Pi 全局规则文件
+		dir = filepath.Join(home, ".pi", "agent")
+		filename = "AGENTS.md"
 	default:
 		return "", fmt.Errorf("不支持的平台: %s", platform)
 	}

@@ -661,39 +661,22 @@ func deepMerge(dst, src map[string]any) map[string]any {
 	return result
 }
 
-// loadProviders 加载供应商配置
+// loadProviders 加载供应商配置（SQLite 统一存储）
 func (s *GeminiService) loadProviders() error {
-	path := getGeminiProvidersPath()
-	data, err := os.ReadFile(path)
+	providers, err := LoadGeminiProvidersFromStore()
 	if err != nil {
-		if os.IsNotExist(err) {
-			s.providers = []GeminiProvider{}
-			return nil
-		}
 		return err
 	}
-
-	return json.Unmarshal(data, &s.providers)
+	if providers == nil {
+		providers = []GeminiProvider{}
+	}
+	s.providers = providers
+	return nil
 }
 
-// saveProviders 保存供应商配置
+// saveProviders 保存供应商配置（SQLite 统一存储，失败自动恢复原数据）
 func (s *GeminiService) saveProviders() error {
-	path := getGeminiProvidersPath()
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return err
-	}
-
-	data, err := json.MarshalIndent(s.providers, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	tmpPath := path + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
-		return err
-	}
-	return os.Rename(tmpPath, path)
+	return SaveGeminiProvidersToStore(s.providers)
 }
 
 type providerIdentityRename struct {
@@ -704,12 +687,6 @@ type providerIdentityRename struct {
 }
 
 func (s *GeminiService) saveProvidersWithIdentitySync(renames []providerIdentityRename) error {
-	path := getGeminiProvidersPath()
-	originalFileData, originalFileExists, err := snapshotProviderFile(path)
-	if err != nil {
-		return err
-	}
-
 	var renameTx *sql.Tx
 	if len(renames) > 0 {
 		db, err := xdb.DB("default")
@@ -739,10 +716,6 @@ func (s *GeminiService) saveProvidersWithIdentitySync(renames []providerIdentity
 
 	if renameTx != nil {
 		if err := renameTx.Commit(); err != nil {
-			restoreErr := restoreProviderFile(path, originalFileExists, originalFileData)
-			if restoreErr != nil {
-				return fmt.Errorf("提交供应商改名事务失败: %w；且回滚配置文件失败: %v", err, restoreErr)
-			}
 			return fmt.Errorf("提交供应商改名事务失败: %w", err)
 		}
 	}

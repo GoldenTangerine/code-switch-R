@@ -2582,6 +2582,11 @@ func (prs *ProviderRelayService) registerRoutes(router gin.IRouter) {
 	// Codex 官方 OAuth 后端使用 /models。
 	router.GET("/models", prs.modelsHandler("codex"))
 
+	// Grok Build 端点（config.toml 的 api_backend 决定子路径：responses / chat_completions）
+	router.POST("/grokbuild/v1/responses", prs.proxyHandler("grokbuild", "/responses"))
+	router.POST("/grokbuild/v1/chat/completions", prs.proxyHandler("grokbuild", "/chat/completions"))
+	router.GET("/grokbuild/v1/models", prs.modelsHandler("grokbuild"))
+
 	// Gemini API 端点（使用专门的路径前缀避免与 Claude 冲突）
 	router.POST("/gemini/v1beta/*any", prs.geminiProxyHandler("/v1beta"))
 	router.POST("/gemini/v1/*any", prs.geminiProxyHandler("/v1"))

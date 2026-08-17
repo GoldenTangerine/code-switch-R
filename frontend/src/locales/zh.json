@@ -77,6 +77,8 @@
     "prompts": "提示词",
     "mcp": "MCP",
     "skill": "技能",
+    "openclawConfig": "OpenClaw",
+    "hermesMemory": "Hermes 记忆",
     "auth": "认证",
     "gemini": "Gemini",
     "availability": "可用性",
@@ -451,6 +453,8 @@
         "hostClaude": "托管 Claude Code",
         "hostCodex": "托管 Codex",
         "hostGemini": "托管 Gemini CLI",
+        "hostGrok": "托管 Grok Build",
+        "hostClaudeDesktop": "托管 Claude Desktop",
         "hostOthers": "托管自定义 CLI",
         "tooltip": "通过本地转发托管 API 访问，统一管理密钥与配额。",
         "statusOn": "已托管",
@@ -698,7 +702,22 @@
         "opencodeTooltip": "从 ~/.config/opencode/opencode.json 导入 live provider",
         "opencodeSuccess": "已导入 {providers} 个 OpenCode live provider",
         "opencodeEmpty": "OpenCode live provider 已全部纳入管理",
-        "opencodeError": "导入 OpenCode live 配置失败"
+        "opencodeError": "导入 OpenCode live 配置失败",
+        "grokTooltip": "从 ~/.grok/config.toml 导入当前 profile 为供应商",
+        "grokSuccess": "已导入 Grok 供应商",
+        "grokEmpty": "Grok 为官方登录态或供应商已导入，无需重复导入",
+        "claudeDesktopTooltip": "从 claude_desktop_config.json 导入当前接入配置为供应商",
+        "claudeDesktopSuccess": "已导入 Claude Desktop 供应商",
+        "claudeDesktopEmpty": "Claude Desktop 为官方默认配置或供应商已导入，无需重复导入",
+        "openclawTooltip": "从 OpenClaw settings 导入现有供应商条目",
+        "openclawSuccess": "已导入 OpenClaw 供应商",
+        "openclawEmpty": "OpenClaw settings 无可导入的供应商条目",
+        "hermesTooltip": "从 Hermes config.yaml 导入现有 custom_providers 条目",
+        "hermesSuccess": "已导入 Hermes 供应商",
+        "hermesEmpty": "Hermes config.yaml 无可导入的供应商条目",
+        "piTooltip": "从 Pi models.json 导入现有 providers 条目",
+        "piSuccess": "已导入 Pi 供应商",
+        "piEmpty": "Pi models.json 无可导入的供应商条目"
       },
       "firstRun": {
         "message": "欢迎使用 Code Switch R！如果你有历史配置，可以前往设置页导入。",
@@ -911,6 +930,21 @@
           "opencodeModelExtraFields": "模型属性",
           "opencodeModelOptions": "SDK 选项",
           "opencodePreset": "OpenCode 预设",
+          "grokPreset": "Grok 预设",
+          "grokTOML": "TOML 高级配置",
+          "claudeDesktopPreset": "Claude Desktop 预设",
+          "openclawPreset": "OpenClaw 预设",
+          "hermesPreset": "Hermes 预设",
+          "hermesModel": "默认模型",
+          "piPreset": "Pi 预设",
+          "piModel": "默认模型",
+          "claudeDesktopMode": "接入模式",
+          "claudeDesktopModeDirect": "直连（Direct）",
+          "claudeDesktopModeProxy": "本地代理（Proxy）",
+          "claudeDesktopModelRoutes": "模型路由",
+          "claudeDesktopRouteName": "模型 ID",
+          "claudeDesktopRouteLabel": "展示名覆盖",
+          "claudeDesktopRoute1M": "1M 上下文",
           "opencodeTemplateValues": "模板参数",
           "opencodeModelSuggestions": "模型候选"
         },
@@ -945,7 +979,11 @@
           "opencodeModelName": "DeepSeek V4 Pro",
           "opencodeModelExtraFieldKey": "variants",
           "opencodeModelOptionKey": "provider",
-          "opencodeModelOptionValue": "{\"order\":[\"baseten\"]}"
+          "opencodeModelOptionValue": "{\"order\":[\"baseten\"]}",
+          "claudeDesktopRouteName": "例如：claude-sonnet-4-5",
+          "claudeDesktopRouteLabel": "可选，例如 Claude Sonnet 4.5",
+          "hermesModel": "例如：gpt-5.2、claude-sonnet-4-5",
+          "piModel": "例如：llama3、claude-sonnet-4-5"
         },
         "noIconResults": "未找到匹配的图标",
         "noOpenCodePresetResults": "未找到匹配的 OpenCode 预设",
@@ -1010,6 +1048,22 @@
           "opencodeNoModelOptions": "暂无模型 SDK 选项。需要 provider、region 等模型级 options 时再添加。",
           "opencodeModelDetailJson": "以 JSON 方式编辑当前模型配置。模型 ID 请在列表中修改；这里保存的是该模型对象本身，例如 name、limit、options、variants。",
           "opencodePreset": "选择完整供应商模板，会自动填充 NPM、Base URL、模型和 SDK 选项。",
+          "grokPreset": "选择供应商模板，自动填充地址、分类与 [model.<profile>] TOML 片段。",
+          "grokTOML": "直连应用时按原样写入 ~/.grok/config.toml。需包含 [model.<profile>] 表；profile 名、model、base_url、api_backend（responses）均可调整，保存时会自动把 API Key 同步到 api_key。留空表示回到官方登录态。",
+          "grokCategoryHint": "官方登录态无需 API Key；第三方预设填写 API Key 后即可直连或托管。",
+          "claudeDesktopPreset": "选择接入模板，自动填充地址、接入模式与默认模型路由。",
+          "openclawPreset": "选择接入模板，自动填充地址与分类；供应商以共存方式写入 OpenClaw settings。",
+          "openclawCategoryHint": "官方预设无需 API Key（使用官方登录态）；第三方预设填写 API Key 后保存即写入原生 settings。",
+          "hermesPreset": "选择接入模板，自动填充地址与分类；供应商以共存方式写入 Hermes config.yaml。",
+          "hermesCategoryHint": "官方预设无需 API Key（使用官方登录态）；第三方预设填写 API Key 后保存即写入原生 config.yaml。",
+          "hermesModel": "该供应商启用为当前供应商时写入顶层默认模型，留空则不更新。",
+          "piPreset": "选择接入模板，自动填充地址与分类；供应商以共存方式写入 Pi models.json。",
+          "piCategoryHint": "官方预设使用 Pi 内置供应商与官方登录态；第三方预设填写 API Key 后保存即写入原生 models.json。",
+          "piModel": "仅用于本应用展示与备注的默认模型，不会写入 models.json；实际模型清单在原生配置中维护。",
+          "claudeDesktopMode": "直连模式把供应商 API 地址直接写入 Claude Desktop；代理模式经本地 :18100 转发，支持多供应商调度与降级。",
+          "claudeDesktopModelRoutes": "声明该供应商可用的模型，应用时写入 Claude Desktop 的模型路由；展示名覆盖留空则使用模型 ID。",
+          "claudeDesktopNoRoutes": "暂无模型路由，点击上方按钮添加。",
+          "claudeDesktopCategoryHint": "官方预设无需 API Key（使用 Claude 账号登录态）；官方 API 预设填写 API Key 后即可直连或代理。",
           "opencodeTemplateValues": "这些值会替换预设里的 {'${...}'} 占位符，并同步写入 OpenCode Provider 配置。",
           "opencodePartnerPromotion": "{provider} 是合作供应商，可通过获取 API Key 链接查看优惠或开通信息。",
           "providerKeyChecking": "正在检查 live 配置中的 Provider ID...",
@@ -1041,6 +1095,11 @@
           "providerQuotaQueryNewApi": "NewApi",
           "providerQuotaQueryTokenPlan": "Token Plan",
           "opencodeCustomPreset": "自定义 / 不使用预设",
+          "grokCustomPreset": "自定义 / 不使用预设",
+          "claudeDesktopCustomPreset": "自定义 / 不使用预设",
+          "openclawCustomPreset": "自定义 / 不使用预设",
+          "hermesCustomPreset": "自定义 / 不使用预设",
+          "piCustomPreset": "自定义 / 不使用预设",
           "opencodeCategoryOfficial": "官方",
           "opencodeCategoryAggregator": "聚合服务",
           "opencodeCategoryThirdParty": "第三方",
@@ -1104,6 +1163,8 @@
           "removeOpenCodeModelOption": "移除模型选项",
           "fetchOpenCodeModels": "获取模型列表",
           "fetchingOpenCodeModels": "获取中...",
+          "addClaudeDesktopRoute": "添加模型",
+          "removeClaudeDesktopRoute": "移除模型路由",
           "getApiKey": "获取 API Key",
           "openOfficialSite": "打开官网"
         },
@@ -1125,6 +1186,8 @@
         "errors": {
           "invalidCustomAuthHeader": "请输入合法的自定义 Header 名称",
           "invalidUrl": "请输入合法的 API 地址",
+          "grokTOMLInvalid": "TOML 配置需包含至少一个 [model.<profile>] 表",
+          "claudeDesktopRouteNameRequired": "模型路由的模型 ID 不能为空",
           "requestBodyOverridesInvalid": "请求体强制字段 JSON 解析失败：{error}",
           "requestBodyOverridesMustBeObject": "请求体强制字段必须是 JSON 对象",
           "providerKeyRequired": "请填写有效的 OpenCode Provider ID",
@@ -1144,6 +1207,7 @@
           "opencodeModelsRequired": "请至少添加一个 OpenCode 模型配置"
         },
         "saveFailed": "保存供应商配置失败：{error}",
+        "saveInProgress": "当前列表正在保存，请稍后再试",
         "toast": {
           "providerQuotaQueryTestSuccess": "额度查询成功：",
           "providerQuotaQueryTestFailed": "额度查询失败",
@@ -2179,7 +2243,9 @@
       "platforms": {
         "claude": "Claude Code",
         "codex": "Codex",
-        "gemini": "Gemini CLI"
+        "gemini": "Gemini CLI",
+        "opencode": "OpenCode",
+        "grokbuild": "Grok Build"
       },
       "form": {
         "createTitle": "新增 MCP 服务器",
@@ -2299,6 +2365,130 @@
         "delete": "删除"
       }
     },
+    "openclawConfig": {
+      "hero": {
+        "eyebrow": "OpenClaw 专属配置",
+        "title": "OpenClaw 原生配置",
+        "lead": "供应商以共存方式写入 OpenClaw settings，这里管理环境变量、工具与 Agents 的原生配置。"
+      },
+      "controls": {
+        "back": "返回主页",
+        "settings": "打开设置"
+      },
+      "tabs": {
+        "ariaLabel": "OpenClaw 配置分类",
+        "env": "环境变量",
+        "tools": "工具",
+        "agents": "Agents"
+      },
+      "status": {
+        "currentProvider": "当前生效：{name}",
+        "noCurrentProvider": "暂无生效供应商",
+        "managedProviders": "受管供应商 {count} 个",
+        "settingsPath": "配置文件：{path}"
+      },
+      "common": {
+        "loading": "正在加载配置...",
+        "reload": "重新加载",
+        "save": "保存配置",
+        "saving": "保存中...",
+        "saved": "配置已写入 OpenClaw settings",
+        "loadError": "读取 OpenClaw 配置失败",
+        "saveError": "保存 OpenClaw 配置失败",
+        "unsavedTitle": "有未保存的修改",
+        "unsavedMessage": "当前面板的修改尚未保存，离开后将丢失，确定要离开吗？",
+        "unsavedStay": "继续编辑",
+        "unsavedLeave": "放弃修改"
+      },
+      "env": {
+        "title": "环境变量",
+        "hint": "写入 OpenClaw settings 的 env 配置，供应商地址与密钥由首页供应商卡片管理。",
+        "varsTitle": "vars 变量",
+        "varsHint": "注入 OpenClaw 运行时的普通环境变量。",
+        "shellEnvTitle": "shellEnv 变量",
+        "shellEnvHint": "注入 OpenClaw 执行 shell 命令时的环境变量。",
+        "keyPlaceholder": "变量名，例如 ANTHROPIC_MODEL",
+        "valuePlaceholder": "变量值",
+        "add": "添加变量",
+        "remove": "移除该行",
+        "duplicateKey": "变量名重复：{key}"
+      },
+      "tools": {
+        "title": "工具配置",
+        "hint": "控制 OpenClaw 可调用的工具集合，profile 为档位预设，allow/deny 为精确覆盖。",
+        "profile": "工具档位（profile）",
+        "profileHint": "档位决定默认启用的工具集合，保存后写回 settings。",
+        "profiles": {
+          "minimal": "minimal（最小集）",
+          "coding": "coding（编码）",
+          "messaging": "messaging（消息）",
+          "full": "full（全量）"
+        },
+        "allow": "允许列表（allow）",
+        "allowHint": "每行一个工具名，额外的允许项会与档位合并。",
+        "deny": "拒绝列表（deny）",
+        "denyHint": "每行一个工具名，优先级高于档位与允许列表。",
+        "listPlaceholder": "每行一项，例如\nBash\nRead"
+      },
+      "agents": {
+        "title": "Agents 配置",
+        "hint": "以 JSON 编辑 OpenClaw settings 的 agents defaults 对象，保存前会校验格式。",
+        "editor": "defaults JSON",
+        "fieldHints": "常用字段：model.primary（主模型）、model.fallbacks（备用模型数组）、models（模型映射）、timeoutSeconds（超时秒数）。",
+        "format": "格式化",
+        "invalidJson": "JSON 格式错误：{message}",
+        "mustBeObject": "内容必须是 JSON 对象（{}），不支持数组或纯值"
+      }
+    },
+    "hermesMemory": {
+      "hero": {
+        "eyebrow": "Hermes",
+        "title": "记忆管理",
+        "lead": "编辑 MEMORY.md 与 USER.md 的整文件 Markdown 内容，查看 § 条目数与字符预算，并管理记忆开关。"
+      },
+      "controls": {
+        "back": "返回首页",
+        "settings": "打开设置"
+      },
+      "tabs": {
+        "ariaLabel": "选择记忆文件",
+        "memory": "MEMORY",
+        "user": "USER",
+        "memoryTitle": "MEMORY.md（长期记忆）",
+        "userTitle": "USER.md（用户画像）"
+      },
+      "status": {
+        "entries": "共 {count} 条 § 条目",
+        "usage": "已用 {current} / {limit} 字符",
+        "overLimit": "已超出字符预算"
+      },
+      "editor": {
+        "hint": "以整文件 Markdown 编辑，条目之间用单独一行 § 分隔。",
+        "placeholder": "在此输入记忆内容…"
+      },
+      "settings": {
+        "title": "记忆设置",
+        "hint": "开关与字符预算写入 Hermes config.yaml 顶层键。",
+        "memoryEnabled": "启用长期记忆（memory_enabled）",
+        "memoryCharLimit": "记忆字符预算",
+        "userEnabled": "启用用户画像（user_profile_enabled）",
+        "userCharLimit": "用户画像字符预算",
+        "runtimeNote": "设置由 Hermes 运行时读取，修改后下次会话生效。"
+      },
+      "common": {
+        "loading": "正在加载记忆内容…",
+        "reload": "重新加载",
+        "save": "保存",
+        "saving": "保存中…",
+        "saved": "记忆内容已保存",
+        "loadError": "加载 Hermes 记忆失败，请确认已安装 Hermes。",
+        "saveError": "保存 Hermes 记忆失败",
+        "unsavedTitle": "有未保存的修改",
+        "unsavedMessage": "记忆内容或设置的修改尚未保存，离开后将丢失，确定要离开吗？",
+        "unsavedStay": "继续编辑",
+        "unsavedLeave": "放弃修改"
+      }
+    },
     "skill": {
       "hero": {
         "eyebrow": "Skill 仓库",
@@ -2307,7 +2497,9 @@
       },
       "platform": {
         "claude": "Claude Code",
-        "codex": "Codex"
+        "codex": "Codex",
+        "opencode": "OpenCode",
+        "grokbuild": "Grok Build"
       },
       "groups": {
         "project": "项目级技能",

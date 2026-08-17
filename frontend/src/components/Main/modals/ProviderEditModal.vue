@@ -99,6 +99,376 @@
           </p>
         </section>
 
+        <section v-if="tabId === 'grokbuild'" class="opencode-preset-panel">
+          <div class="opencode-preset-panel__header">
+            <div>
+              <h3 class="opencode-preset-panel__title">
+                {{ t('components.main.form.labels.grokPreset') }}
+              </h3>
+              <p class="opencode-preset-panel__hint">
+                {{ t('components.main.form.hints.grokPreset') }}
+              </p>
+            </div>
+            <span v-if="selectedGrokPreset" class="opencode-preset-badge">
+              {{ openCodeCategoryLabel(selectedGrokPreset.category) }}
+            </span>
+          </div>
+          <Listbox
+            v-model="selectedGrokPresetId"
+            v-slot="{ open: grokPresetSelectOpen }"
+            class="w-full"
+            @update:model-value="handleGrokPresetChange"
+          >
+            <div class="opencode-preset-select">
+              <ListboxButton class="opencode-preset-select__button">
+                <span class="opencode-preset-select__label">{{ selectedGrokPresetLabel }}</span>
+                <span v-if="selectedGrokPreset" class="opencode-preset-select__meta">
+                  {{ openCodeCategoryLabel(selectedGrokPreset.category) }}
+                </span>
+                <svg viewBox="0 0 20 20" aria-hidden="true">
+                  <path d="M6 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+                </svg>
+              </ListboxButton>
+              <ListboxOptions v-if="grokPresetSelectOpen" class="opencode-preset-select__options">
+                <ListboxOption value="custom" v-slot="{ active, selected }">
+                  <div :class="['opencode-preset-select__option', { active, selected }]">
+                    <span class="opencode-preset-select__option-name">
+                      {{ t('components.main.form.options.grokCustomPreset') }}
+                    </span>
+                    <span class="opencode-preset-select__option-meta">
+                      {{ openCodeCategoryLabel('custom') }}
+                    </span>
+                  </div>
+                </ListboxOption>
+                <ListboxOption
+                  v-for="preset in grokProviderPresets"
+                  :key="preset.profile || preset.name"
+                  :value="preset.profile || preset.name"
+                  v-slot="{ active, selected }"
+                >
+                  <div :class="['opencode-preset-select__option', { active, selected }]">
+                    <span class="opencode-preset-select__option-name">{{ preset.name }}</span>
+                    <span class="opencode-preset-select__option-meta">
+                      {{ openCodeCategoryLabel(preset.category) }}
+                      <template v-if="preset.baseUrl"> · {{ preset.baseUrl }}</template>
+                    </span>
+                  </div>
+                </ListboxOption>
+              </ListboxOptions>
+            </div>
+          </Listbox>
+          <div v-if="selectedGrokPreset" class="opencode-preset-meta">
+            <span>{{ selectedGrokPreset.description || selectedGrokPreset.name }}</span>
+            <a
+              v-if="selectedGrokPreset.websiteUrl"
+              :href="selectedGrokPreset.websiteUrl"
+              target="_blank"
+              rel="noreferrer"
+            >
+              {{ t('components.main.form.actions.openOfficialSite') }}
+            </a>
+          </div>
+          <p class="opencode-preset-category-hint">
+            {{ t('components.main.form.hints.grokCategoryHint') }}
+          </p>
+        </section>
+
+        <section v-if="tabId === 'claude-desktop'" class="opencode-preset-panel">
+          <div class="opencode-preset-panel__header">
+            <div>
+              <h3 class="opencode-preset-panel__title">
+                {{ t('components.main.form.labels.claudeDesktopPreset') }}
+              </h3>
+              <p class="opencode-preset-panel__hint">
+                {{ t('components.main.form.hints.claudeDesktopPreset') }}
+              </p>
+            </div>
+            <span v-if="selectedClaudeDesktopPreset" class="opencode-preset-badge">
+              {{ openCodeCategoryLabel(selectedClaudeDesktopPreset.category) }}
+            </span>
+          </div>
+          <Listbox
+            v-model="selectedClaudeDesktopPresetId"
+            v-slot="{ open: claudeDesktopPresetSelectOpen }"
+            class="w-full"
+            @update:model-value="handleClaudeDesktopPresetChange"
+          >
+            <div class="opencode-preset-select">
+              <ListboxButton class="opencode-preset-select__button">
+                <span class="opencode-preset-select__label">{{ selectedClaudeDesktopPresetLabel }}</span>
+                <span v-if="selectedClaudeDesktopPreset" class="opencode-preset-select__meta">
+                  {{ openCodeCategoryLabel(selectedClaudeDesktopPreset.category) }}
+                </span>
+                <svg viewBox="0 0 20 20" aria-hidden="true">
+                  <path d="M6 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+                </svg>
+              </ListboxButton>
+              <ListboxOptions v-if="claudeDesktopPresetSelectOpen" class="opencode-preset-select__options">
+                <ListboxOption value="custom" v-slot="{ active, selected }">
+                  <div :class="['opencode-preset-select__option', { active, selected }]">
+                    <span class="opencode-preset-select__option-name">
+                      {{ t('components.main.form.options.claudeDesktopCustomPreset') }}
+                    </span>
+                    <span class="opencode-preset-select__option-meta">
+                      {{ openCodeCategoryLabel('custom') }}
+                    </span>
+                  </div>
+                </ListboxOption>
+                <ListboxOption
+                  v-for="preset in claudeDesktopProviderPresets"
+                  :key="preset.name"
+                  :value="preset.name"
+                  v-slot="{ active, selected }"
+                >
+                  <div :class="['opencode-preset-select__option', { active, selected }]">
+                    <span class="opencode-preset-select__option-name">{{ preset.name }}</span>
+                    <span class="opencode-preset-select__option-meta">
+                      {{ openCodeCategoryLabel(preset.category) }}
+                      <template v-if="preset.baseUrl"> · {{ preset.baseUrl }}</template>
+                    </span>
+                  </div>
+                </ListboxOption>
+              </ListboxOptions>
+            </div>
+          </Listbox>
+          <div v-if="selectedClaudeDesktopPreset" class="opencode-preset-meta">
+            <span>{{ selectedClaudeDesktopPreset.description || selectedClaudeDesktopPreset.name }}</span>
+            <a
+              v-if="selectedClaudeDesktopPreset.websiteUrl"
+              :href="selectedClaudeDesktopPreset.websiteUrl"
+              target="_blank"
+              rel="noreferrer"
+            >
+              {{ t('components.main.form.actions.openOfficialSite') }}
+            </a>
+          </div>
+          <p class="opencode-preset-category-hint">
+            {{ t('components.main.form.hints.claudeDesktopCategoryHint') }}
+          </p>
+        </section>
+
+        <section v-if="tabId === 'openclaw'" class="opencode-preset-panel">
+          <div class="opencode-preset-panel__header">
+            <div>
+              <h3 class="opencode-preset-panel__title">
+                {{ t('components.main.form.labels.openclawPreset') }}
+              </h3>
+              <p class="opencode-preset-panel__hint">
+                {{ t('components.main.form.hints.openclawPreset') }}
+              </p>
+            </div>
+            <span v-if="selectedOpenClawPreset" class="opencode-preset-badge">
+              {{ openCodeCategoryLabel(selectedOpenClawPreset.category) }}
+            </span>
+          </div>
+          <Listbox
+            v-model="selectedOpenClawPresetId"
+            v-slot="{ open: openClawPresetSelectOpen }"
+            class="w-full"
+            @update:model-value="handleOpenClawPresetChange"
+          >
+            <div class="opencode-preset-select">
+              <ListboxButton class="opencode-preset-select__button">
+                <span class="opencode-preset-select__label">{{ selectedOpenClawPresetLabel }}</span>
+                <span v-if="selectedOpenClawPreset" class="opencode-preset-select__meta">
+                  {{ openCodeCategoryLabel(selectedOpenClawPreset.category) }}
+                </span>
+                <svg viewBox="0 0 20 20" aria-hidden="true">
+                  <path d="M6 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+                </svg>
+              </ListboxButton>
+              <ListboxOptions v-if="openClawPresetSelectOpen" class="opencode-preset-select__options">
+                <ListboxOption value="custom" v-slot="{ active, selected }">
+                  <div :class="['opencode-preset-select__option', { active, selected }]">
+                    <span class="opencode-preset-select__option-name">
+                      {{ t('components.main.form.options.openclawCustomPreset') }}
+                    </span>
+                    <span class="opencode-preset-select__option-meta">
+                      {{ openCodeCategoryLabel('custom') }}
+                    </span>
+                  </div>
+                </ListboxOption>
+                <ListboxOption
+                  v-for="preset in openClawProviderPresets"
+                  :key="preset.name"
+                  :value="preset.name"
+                  v-slot="{ active, selected }"
+                >
+                  <div :class="['opencode-preset-select__option', { active, selected }]">
+                    <span class="opencode-preset-select__option-name">{{ preset.name }}</span>
+                    <span class="opencode-preset-select__option-meta">
+                      {{ openCodeCategoryLabel(preset.category) }}
+                      <template v-if="preset.baseUrl"> · {{ preset.baseUrl }}</template>
+                    </span>
+                  </div>
+                </ListboxOption>
+              </ListboxOptions>
+            </div>
+          </Listbox>
+          <div v-if="selectedOpenClawPreset" class="opencode-preset-meta">
+            <span>{{ selectedOpenClawPreset.description || selectedOpenClawPreset.name }}</span>
+            <a
+              v-if="selectedOpenClawPreset.websiteUrl"
+              :href="selectedOpenClawPreset.websiteUrl"
+              target="_blank"
+              rel="noreferrer"
+            >
+              {{ t('components.main.form.actions.openOfficialSite') }}
+            </a>
+          </div>
+          <p class="opencode-preset-category-hint">
+            {{ t('components.main.form.hints.openclawCategoryHint') }}
+          </p>
+        </section>
+
+        <section v-if="tabId === 'hermes'" class="opencode-preset-panel">
+          <div class="opencode-preset-panel__header">
+            <div>
+              <h3 class="opencode-preset-panel__title">
+                {{ t('components.main.form.labels.hermesPreset') }}
+              </h3>
+              <p class="opencode-preset-panel__hint">
+                {{ t('components.main.form.hints.hermesPreset') }}
+              </p>
+            </div>
+            <span v-if="selectedHermesPreset" class="opencode-preset-badge">
+              {{ openCodeCategoryLabel(selectedHermesPreset.category) }}
+            </span>
+          </div>
+          <Listbox
+            v-model="selectedHermesPresetId"
+            v-slot="{ open: hermesPresetSelectOpen }"
+            class="w-full"
+            @update:model-value="handleHermesPresetChange"
+          >
+            <div class="opencode-preset-select">
+              <ListboxButton class="opencode-preset-select__button">
+                <span class="opencode-preset-select__label">{{ selectedHermesPresetLabel }}</span>
+                <span v-if="selectedHermesPreset" class="opencode-preset-select__meta">
+                  {{ openCodeCategoryLabel(selectedHermesPreset.category) }}
+                </span>
+                <svg viewBox="0 0 20 20" aria-hidden="true">
+                  <path d="M6 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+                </svg>
+              </ListboxButton>
+              <ListboxOptions v-if="hermesPresetSelectOpen" class="opencode-preset-select__options">
+                <ListboxOption value="custom" v-slot="{ active, selected }">
+                  <div :class="['opencode-preset-select__option', { active, selected }]">
+                    <span class="opencode-preset-select__option-name">
+                      {{ t('components.main.form.options.hermesCustomPreset') }}
+                    </span>
+                    <span class="opencode-preset-select__option-meta">
+                      {{ openCodeCategoryLabel('custom') }}
+                    </span>
+                  </div>
+                </ListboxOption>
+                <ListboxOption
+                  v-for="preset in hermesProviderPresets"
+                  :key="preset.name"
+                  :value="preset.name"
+                  v-slot="{ active, selected }"
+                >
+                  <div :class="['opencode-preset-select__option', { active, selected }]">
+                    <span class="opencode-preset-select__option-name">{{ preset.name }}</span>
+                    <span class="opencode-preset-select__option-meta">
+                      {{ openCodeCategoryLabel(preset.category) }}
+                      <template v-if="preset.baseUrl"> · {{ preset.baseUrl }}</template>
+                    </span>
+                  </div>
+                </ListboxOption>
+              </ListboxOptions>
+            </div>
+          </Listbox>
+          <div v-if="selectedHermesPreset" class="opencode-preset-meta">
+            <span>{{ selectedHermesPreset.description || selectedHermesPreset.name }}</span>
+            <a
+              v-if="selectedHermesPreset.websiteUrl"
+              :href="selectedHermesPreset.websiteUrl"
+              target="_blank"
+              rel="noreferrer"
+            >
+              {{ t('components.main.form.actions.openOfficialSite') }}
+            </a>
+          </div>
+          <p class="opencode-preset-category-hint">
+            {{ t('components.main.form.hints.hermesCategoryHint') }}
+          </p>
+        </section>
+
+        <section v-if="tabId === 'pi'" class="opencode-preset-panel">
+          <div class="opencode-preset-panel__header">
+            <div>
+              <h3 class="opencode-preset-panel__title">
+                {{ t('components.main.form.labels.piPreset') }}
+              </h3>
+              <p class="opencode-preset-panel__hint">
+                {{ t('components.main.form.hints.piPreset') }}
+              </p>
+            </div>
+            <span v-if="selectedPiPreset" class="opencode-preset-badge">
+              {{ openCodeCategoryLabel(selectedPiPreset.category) }}
+            </span>
+          </div>
+          <Listbox
+            v-model="selectedPiPresetId"
+            v-slot="{ open: piPresetSelectOpen }"
+            class="w-full"
+            @update:model-value="handlePiPresetChange"
+          >
+            <div class="opencode-preset-select">
+              <ListboxButton class="opencode-preset-select__button">
+                <span class="opencode-preset-select__label">{{ selectedPiPresetLabel }}</span>
+                <span v-if="selectedPiPreset" class="opencode-preset-select__meta">
+                  {{ openCodeCategoryLabel(selectedPiPreset.category) }}
+                </span>
+                <svg viewBox="0 0 20 20" aria-hidden="true">
+                  <path d="M6 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+                </svg>
+              </ListboxButton>
+              <ListboxOptions v-if="piPresetSelectOpen" class="opencode-preset-select__options">
+                <ListboxOption value="custom" v-slot="{ active, selected }">
+                  <div :class="['opencode-preset-select__option', { active, selected }]">
+                    <span class="opencode-preset-select__option-name">
+                      {{ t('components.main.form.options.piCustomPreset') }}
+                    </span>
+                    <span class="opencode-preset-select__option-meta">
+                      {{ openCodeCategoryLabel('custom') }}
+                    </span>
+                  </div>
+                </ListboxOption>
+                <ListboxOption
+                  v-for="preset in piProviderPresets"
+                  :key="preset.name"
+                  :value="preset.name"
+                  v-slot="{ active, selected }"
+                >
+                  <div :class="['opencode-preset-select__option', { active, selected }]">
+                    <span class="opencode-preset-select__option-name">{{ preset.name }}</span>
+                    <span class="opencode-preset-select__option-meta">
+                      {{ openCodeCategoryLabel(preset.category) }}
+                      <template v-if="preset.baseUrl"> · {{ preset.baseUrl }}</template>
+                    </span>
+                  </div>
+                </ListboxOption>
+              </ListboxOptions>
+            </div>
+          </Listbox>
+          <div v-if="selectedPiPreset" class="opencode-preset-meta">
+            <span>{{ selectedPiPreset.description || selectedPiPreset.name }}</span>
+            <a
+              v-if="selectedPiPreset.websiteUrl"
+              :href="selectedPiPreset.websiteUrl"
+              target="_blank"
+              rel="noreferrer"
+            >
+              {{ t('components.main.form.actions.openOfficialSite') }}
+            </a>
+          </div>
+          <p class="opencode-preset-category-hint">
+            {{ t('components.main.form.hints.piCategoryHint') }}
+          </p>
+        </section>
+
         <label v-if="tabId === 'opencode'" class="form-field">
           <span class="label-row">
             {{ t('components.main.form.labels.providerKey') }}
@@ -151,10 +521,30 @@
             v-model="form.apiUrl"
             type="text"
             :placeholder="t('components.main.form.placeholders.apiUrl')"
-            :required="tabId !== 'opencode' && !isManagedCodexAuthProvider"
+            :required="tabId !== 'opencode' && tabId !== 'grokbuild' && tabId !== 'claude-desktop' && tabId !== 'openclaw' && tabId !== 'hermes' && tabId !== 'pi' && !isManagedCodexAuthProvider"
             :disabled="isManagedCodexAuthProvider"
             :class="{ 'has-error': !!errors.apiUrl }"
           />
+        </label>
+
+        <label v-if="tabId === 'hermes'" class="form-field">
+          <span>{{ t('components.main.form.labels.hermesModel') }}</span>
+          <BaseInput
+            v-model="hermesModelValue"
+            type="text"
+            :placeholder="t('components.main.form.placeholders.hermesModel')"
+          />
+          <span class="field-hint">{{ t('components.main.form.hints.hermesModel') }}</span>
+        </label>
+
+        <label v-if="tabId === 'pi'" class="form-field">
+          <span>{{ t('components.main.form.labels.piModel') }}</span>
+          <BaseInput
+            v-model="piModelValue"
+            type="text"
+            :placeholder="t('components.main.form.placeholders.piModel')"
+          />
+          <span class="field-hint">{{ t('components.main.form.hints.piModel') }}</span>
         </label>
 
         <label v-if="tabId === 'opencode'" class="form-field">
@@ -468,6 +858,106 @@
           <span class="field-hint">{{ t('components.main.form.hints.opencodeSettingsConfig') }}</span>
         </div>
 
+        <div v-if="tabId === 'grokbuild'" class="form-field">
+          <span class="label-row">
+            {{ t('components.main.form.labels.grokTOML') }}
+            <span v-if="grokTOMLError" class="field-error">
+              {{ grokTOMLError }}
+            </span>
+          </span>
+          <textarea
+            v-model="form.configTOML"
+            class="grok-toml-textarea"
+            spellcheck="false"
+            autocomplete="off"
+          />
+          <span class="field-hint">{{ t('components.main.form.hints.grokTOML') }}</span>
+        </div>
+
+        <div v-if="tabId === 'claude-desktop'" class="form-field">
+          <span>{{ t('components.main.form.labels.claudeDesktopMode') }}</span>
+          <select v-model="form.claudeDesktopMode" class="mac-select">
+            <option value="direct">
+              {{ t('components.main.form.labels.claudeDesktopModeDirect') }}
+            </option>
+            <option value="proxy">
+              {{ t('components.main.form.labels.claudeDesktopModeProxy') }}
+            </option>
+          </select>
+          <span class="field-hint">{{ t('components.main.form.hints.claudeDesktopMode') }}</span>
+        </div>
+
+        <div v-if="tabId === 'claude-desktop'" class="form-field">
+          <section class="opencode-editor-card">
+            <div class="opencode-editor-card__header">
+              <div>
+                <h3 class="opencode-editor-card__title">
+                  {{ t('components.main.form.labels.claudeDesktopModelRoutes') }}
+                </h3>
+                <p class="opencode-editor-card__hint">
+                  {{ t('components.main.form.hints.claudeDesktopModelRoutes') }}
+                </p>
+              </div>
+              <BaseButton
+                type="button"
+                variant="outline"
+                class="opencode-editor-card__action"
+                @click="addClaudeDesktopModelRoute"
+              >
+                {{ t('components.main.form.actions.addClaudeDesktopRoute') }}
+              </BaseButton>
+            </div>
+            <p v-if="claudeDesktopRoutesError" class="field-error">{{ claudeDesktopRoutesError }}</p>
+            <p v-if="(form.claudeDesktopModelRoutes ?? []).length === 0" class="opencode-empty-state">
+              {{ t('components.main.form.hints.claudeDesktopNoRoutes') }}
+            </p>
+            <div v-else class="claude-desktop-route-list">
+              <div class="claude-desktop-route-row claude-desktop-route-row--head">
+                <span>{{ t('components.main.form.labels.claudeDesktopRouteName') }}</span>
+                <span>{{ t('components.main.form.labels.claudeDesktopRouteLabel') }}</span>
+                <span>{{ t('components.main.form.labels.claudeDesktopRoute1M') }}</span>
+                <span />
+              </div>
+              <div
+                v-for="(route, index) in form.claudeDesktopModelRoutes"
+                :key="index"
+                class="claude-desktop-route-row"
+              >
+                <BaseInput
+                  :model-value="route.name"
+                  type="text"
+                  :placeholder="t('components.main.form.placeholders.claudeDesktopRouteName')"
+                  @update:model-value="updateClaudeDesktopRouteField(index, 'name', $event)"
+                />
+                <BaseInput
+                  :model-value="route.labelOverride ?? ''"
+                  type="text"
+                  :placeholder="t('components.main.form.placeholders.claudeDesktopRouteLabel')"
+                  @update:model-value="updateClaudeDesktopRouteField(index, 'labelOverride', $event)"
+                />
+                <div class="switch-inline">
+                  <label class="mac-switch">
+                    <input
+                      type="checkbox"
+                      :checked="route.supports1m === true"
+                      @change="toggleClaudeDesktopRoute1M(index, $event)"
+                    />
+                    <span></span>
+                  </label>
+                </div>
+                <button
+                  type="button"
+                  class="opencode-row-remove"
+                  :aria-label="t('components.main.form.actions.removeClaudeDesktopRoute')"
+                  @click="removeClaudeDesktopModelRoute(index)"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+          </section>
+        </div>
+
         <div v-if="tabId !== 'opencode' && tabId !== 'claude'" class="form-field">
           <span>{{ t('components.main.form.labels.connectivityAuthType') }}</span>
           <Listbox v-model="selectedAuthType" v-slot="{ open: authTypeOpen }">
@@ -751,7 +1241,7 @@
           <span class="field-hint">{{ t('components.main.form.hints.requestBodyOverrides') }}</span>
         </div>
 
-        <div v-if="tabId !== 'opencode'" class="form-field">
+        <div v-if="tabId !== 'opencode' && tabId !== 'grokbuild' && tabId !== 'claude-desktop' && tabId !== 'openclaw' && tabId !== 'hermes' && tabId !== 'pi'" class="form-field">
           <CLIConfigEditor
             :key="cliConfigEditorKey"
             ref="cliConfigEditorRef"
@@ -949,6 +1439,30 @@ import {
   type PresetModelVariant,
   type TemplateValueConfig,
 } from '../config/opencodeProviderPresets'
+import {
+  buildGrokPresetConfigTOML,
+  grokProviderPresets,
+  syncGrokCredentialsIntoTOML,
+  validateGrokConfigTOML,
+  type GrokProviderPreset,
+} from '../config/grokProviderPresets'
+import {
+  CLAUDE_DESKTOP_DEFAULT_MODEL_ROUTES,
+  claudeDesktopProviderPresets,
+  type ClaudeDesktopProviderPreset,
+} from '../config/claudeDesktopProviderPresets'
+import {
+  openClawProviderPresets,
+  type OpenClawProviderPreset,
+} from '../config/openClawProviderPresets'
+import {
+  hermesProviderPresets,
+  type HermesProviderPreset,
+} from '../config/hermesProviderPresets'
+import {
+  piProviderPresets,
+  type PiProviderPreset,
+} from '../config/piProviderPresets'
 import { useModelMappingRuleToggle } from './useModelMappingRuleToggle'
 
 type CLIConfigEditorExposed = InstanceType<typeof CLIConfigEditor> & {
@@ -1071,6 +1585,13 @@ const opencodeModelDetailId = ref('')
 const opencodeModelDetailText = ref('{}')
 const opencodeModelDetailError = ref('')
 const selectedOpenCodePresetId = ref('custom')
+const selectedGrokPresetId = ref('custom')
+const grokTOMLError = ref('')
+const selectedClaudeDesktopPresetId = ref('custom')
+const claudeDesktopRoutesError = ref('')
+const selectedOpenClawPresetId = ref('custom')
+const selectedHermesPresetId = ref('custom')
+const selectedPiPresetId = ref('custom')
 const opencodeTemplateValues = ref<OpenCodeTemplateValueState>({})
 const openCodeLiveProviderIds = ref<string[]>([])
 const isLoadingOpenCodeLiveProviderIds = ref(false)
@@ -1406,6 +1927,50 @@ const selectedOpenCodePresetLabel = computed(() => (
     ? openCodePresetLabel(selectedOpenCodePreset.value)
     : t('components.main.form.options.opencodeCustomPreset')
 ))
+const selectedGrokPreset = computed<GrokProviderPreset | null>(() => (
+  grokProviderPresets.find((preset) => (preset.profile || preset.name) === selectedGrokPresetId.value) ?? null
+))
+const selectedGrokPresetLabel = computed(() => (
+  selectedGrokPreset.value?.name ?? t('components.main.form.options.grokCustomPreset')
+))
+const selectedClaudeDesktopPreset = computed<ClaudeDesktopProviderPreset | null>(() => (
+  claudeDesktopProviderPresets.find((preset) => preset.name === selectedClaudeDesktopPresetId.value) ?? null
+))
+const selectedClaudeDesktopPresetLabel = computed(() => (
+  selectedClaudeDesktopPreset.value?.name ?? t('components.main.form.options.claudeDesktopCustomPreset')
+))
+const selectedOpenClawPreset = computed<OpenClawProviderPreset | null>(() => (
+  openClawProviderPresets.find((preset) => preset.name === selectedOpenClawPresetId.value) ?? null
+))
+const selectedOpenClawPresetLabel = computed(() => (
+  selectedOpenClawPreset.value?.name ?? t('components.main.form.options.openclawCustomPreset')
+))
+const selectedHermesPreset = computed<HermesProviderPreset | null>(() => (
+  hermesProviderPresets.find((preset) => preset.name === selectedHermesPresetId.value) ?? null
+))
+const selectedHermesPresetLabel = computed(() => (
+  selectedHermesPreset.value?.name ?? t('components.main.form.options.hermesCustomPreset')
+))
+// Hermes 默认模型：存放在 cliConfig.model，随通用表单链路写入 HermesProvider.Model
+const hermesModelValue = computed({
+  get: () => `${form.cliConfig?.model ?? ''}`,
+  set: (value: string) => {
+    form.cliConfig = { ...(form.cliConfig || {}), model: value }
+  },
+})
+const selectedPiPreset = computed<PiProviderPreset | null>(() => (
+  piProviderPresets.find((preset) => preset.name === selectedPiPresetId.value) ?? null
+))
+const selectedPiPresetLabel = computed(() => (
+  selectedPiPreset.value?.name ?? t('components.main.form.options.piCustomPreset')
+))
+// Pi 默认模型：存放在 cliConfig.model（应用侧元数据，不写入 live 条目），随通用表单链路写入 PiProvider.Model
+const piModelValue = computed({
+  get: () => `${form.cliConfig?.model ?? ''}`,
+  set: (value: string) => {
+    form.cliConfig = { ...(form.cliConfig || {}), model: value }
+  },
+})
 const shouldShowOpenCodeApiKeyLink = computed(() => {
   if (props.tabId !== 'opencode') return false
   const category = `${form.category || selectedOpenCodePreset.value?.category || ''}`.trim()
@@ -1804,6 +2369,98 @@ const handleOpenCodePresetChange = () => {
   applyOpenCodePreset(preset)
 }
 
+// Grok 预设应用：填充基础字段并生成完整 [model.<profile>] TOML 片段
+const handleGrokPresetChange = () => {
+  grokTOMLError.value = ''
+  const preset = selectedGrokPreset.value
+  if (!preset) return
+
+  form.name = preset.name
+  form.officialSite = preset.websiteUrl || ''
+  form.apiUrl = preset.baseUrl ?? ''
+  form.category = preset.category
+  form.icon = preset.icon || 'grok'
+  form.configTOML = buildGrokPresetConfigTOML(preset)
+}
+
+// Claude Desktop 预设应用：填充基础字段、接入模式与默认官方模型路由
+const handleClaudeDesktopPresetChange = () => {
+  claudeDesktopRoutesError.value = ''
+  const preset = selectedClaudeDesktopPreset.value
+  if (!preset) return
+
+  form.name = preset.name
+  form.officialSite = preset.websiteUrl || ''
+  form.apiUrl = preset.baseUrl ?? ''
+  form.category = preset.category
+  form.icon = preset.icon || 'claude'
+  form.claudeDesktopMode = preset.mode
+  form.claudeDesktopModelRoutes = CLAUDE_DESKTOP_DEFAULT_MODEL_ROUTES.map((route) => ({ ...route }))
+}
+
+// OpenClaw 预设应用：填充基础字段（additive 模式，官方预设可留空地址）
+const handleOpenClawPresetChange = () => {
+  const preset = selectedOpenClawPreset.value
+  if (!preset) return
+
+  form.name = preset.name
+  form.officialSite = preset.websiteUrl || ''
+  form.apiUrl = preset.baseUrl ?? ''
+  form.category = preset.category
+  form.icon = preset.icon || 'claude'
+}
+
+// Hermes 预设应用：填充基础字段（additive 模式，官方预设可留空地址）
+const handleHermesPresetChange = () => {
+  const preset = selectedHermesPreset.value
+  if (!preset) return
+
+  form.name = preset.name
+  form.officialSite = preset.websiteUrl || ''
+  form.apiUrl = preset.baseUrl ?? ''
+  form.category = preset.category
+  form.icon = preset.icon || 'claude'
+}
+
+// Pi 预设应用：填充基础字段（additive 模式，官方预设可留空地址）
+const handlePiPresetChange = () => {
+  const preset = selectedPiPreset.value
+  if (!preset) return
+
+  form.name = preset.name
+  form.officialSite = preset.websiteUrl || ''
+  form.apiUrl = preset.baseUrl ?? ''
+  form.category = preset.category
+  form.icon = preset.icon || 'claude'
+}
+
+// Claude Desktop 模型路由行编辑：name 必填、labelOverride 可选、supports1m 开关
+const updateClaudeDesktopRouteField = (index: number, field: 'name' | 'labelOverride', value: string) => {
+  const route = form.claudeDesktopModelRoutes?.[index]
+  if (!route) return
+  if (field === 'name') {
+    route.name = value
+  } else {
+    route.labelOverride = value
+  }
+  if (claudeDesktopRoutesError.value) claudeDesktopRoutesError.value = ''
+}
+
+const toggleClaudeDesktopRoute1M = (index: number, event: Event) => {
+  const route = form.claudeDesktopModelRoutes?.[index]
+  if (!route) return
+  route.supports1m = (event.target as HTMLInputElement).checked
+}
+
+const addClaudeDesktopModelRoute = () => {
+  if (!form.claudeDesktopModelRoutes) form.claudeDesktopModelRoutes = []
+  form.claudeDesktopModelRoutes.push({ name: '', labelOverride: '', supports1m: false })
+}
+
+const removeClaudeDesktopModelRoute = (index: number) => {
+  form.claudeDesktopModelRoutes?.splice(index, 1)
+}
+
 const focusOpenCodePresetSearchInput = () => {
   void nextTick(() => {
     void nextTick(() => {
@@ -1845,6 +2502,13 @@ const resetForm = () => {
   selectedOpenCodePresetId.value = 'custom'
   openCodePresetSearchQuery.value = ''
   opencodeTemplateValues.value = {}
+  selectedGrokPresetId.value = 'custom'
+  grokTOMLError.value = ''
+  selectedClaudeDesktopPresetId.value = 'custom'
+  claudeDesktopRoutesError.value = ''
+  selectedOpenClawPresetId.value = 'custom'
+  selectedHermesPresetId.value = 'custom'
+  selectedPiPresetId.value = 'custom'
   fetchedOpenCodeModels.value = []
   cliConfigEditorKey.value += 1
 
@@ -1861,6 +2525,26 @@ const resetForm = () => {
       form.opencodeNpm = form.opencodeNpm || '@ai-sdk/openai-compatible'
       syncOpenCodeSettingsConfigText()
       void loadOpenCodeLiveProviderIds()
+    }
+    if (props.tabId === 'grokbuild') {
+      form.icon = 'grok'
+    }
+    if (props.tabId === 'claude-desktop') {
+      form.icon = 'claude'
+      form.claudeDesktopMode = 'direct'
+      form.claudeDesktopModelRoutes = CLAUDE_DESKTOP_DEFAULT_MODEL_ROUTES.map((route) => ({ ...route }))
+    }
+    if (props.tabId === 'openclaw') {
+      form.icon = 'claude'
+      form.category = form.category || 'custom'
+    }
+    if (props.tabId === 'hermes') {
+      form.icon = 'claude'
+      form.category = form.category || 'custom'
+    }
+    if (props.tabId === 'pi') {
+      form.icon = 'claude'
+      form.category = form.category || 'custom'
     }
     void refreshBudgetQuotaUsage()
     return
@@ -1922,6 +2606,11 @@ watch(opencodeSettingsConfigText, () => {
   if (!parsedConfig) return
   form.opencodeSettingsConfig = cloneProviderValue(parsedConfig)
   syncOpenCodeStructuredStateFromConfig(parsedConfig, { syncBasicFields: true })
+})
+
+// Grok：TOML 内容变化时清除上一次的校验错误，避免提示滞留
+watch(() => form.configTOML, () => {
+  grokTOMLError.value = ''
 })
 
 watch(hasClaudeAdvancedValue, (value) => {
@@ -2849,7 +3538,7 @@ const buildFormPayload = async (): Promise<VendorForm | null> => {
       errors.apiUrl = t('components.main.form.errors.invalidUrl')
       return null
     }
-  } else if (props.tabId !== 'opencode' && !isManagedCodexAuthProvider.value) {
+  } else if (props.tabId !== 'opencode' && props.tabId !== 'grokbuild' && props.tabId !== 'claude-desktop' && props.tabId !== 'openclaw' && props.tabId !== 'hermes' && props.tabId !== 'pi' && !isManagedCodexAuthProvider.value) {
     errors.apiUrl = t('components.main.form.errors.invalidUrl')
     return null
   }
@@ -2869,6 +3558,18 @@ const buildFormPayload = async (): Promise<VendorForm | null> => {
     return null
   }
 
+  // Grok：非空 TOML 必须包含 [model.<profile>] 表，否则后端直连应用无法定位 profile
+  if (props.tabId === 'grokbuild' && !validateGrokConfigTOML(`${form.configTOML ?? ''}`)) {
+    grokTOMLError.value = t('components.main.form.errors.grokTOMLInvalid')
+    return null
+  }
+
+  // Claude Desktop：模型路由行的模型 ID 必填
+  if (props.tabId === 'claude-desktop' && (form.claudeDesktopModelRoutes ?? []).some((route) => !route.name.trim())) {
+    claudeDesktopRoutesError.value = t('components.main.form.errors.claudeDesktopRouteNameRequired')
+    return null
+  }
+
   const payload = buildNormalizedVendorForm({
     form,
     tabId: props.tabId,
@@ -2883,6 +3584,43 @@ const buildFormPayload = async (): Promise<VendorForm | null> => {
     payload.apiKeyUrl = form.apiKeyUrl || ''
     payload.category = form.category || ''
     payload.partnerPromotionKey = form.partnerPromotionKey || ''
+  }
+  if (props.tabId === 'grokbuild') {
+    // 保存前把表单 API Key 与 baseUrl 同步进 TOML 的选中 profile，保证直连应用后 CLI 可直接鉴权与寻址
+    payload.configTOML = syncGrokCredentialsIntoTOML(`${form.configTOML ?? ''}`, form.apiKey, form.apiUrl)
+    payload.category = form.category || 'custom'
+  }
+  if (props.tabId === 'claude-desktop') {
+    // 模式与路由已由 buildNormalizedVendorForm 归一化，这里仅兜底分类默认值
+    payload.category = form.category || 'custom'
+  }
+  if (props.tabId === 'openclaw') {
+    // additive 模式无特殊字段，仅兜底分类默认值
+    payload.category = form.category || 'custom'
+  }
+  if (props.tabId === 'hermes') {
+    // additive 模式：仅兜底分类默认值，并把 cliConfig.model 归一（空值移除键）
+    payload.category = form.category || 'custom'
+    const nextCliConfig = { ...(payload.cliConfig || {}) }
+    const hermesModel = `${nextCliConfig.model ?? ''}`.trim()
+    if (hermesModel) {
+      nextCliConfig.model = hermesModel
+    } else {
+      delete nextCliConfig.model
+    }
+    payload.cliConfig = nextCliConfig
+  }
+  if (props.tabId === 'pi') {
+    // additive 模式：仅兜底分类默认值，并把 cliConfig.model 归一（空值移除键，应用侧元数据不写入 live）
+    payload.category = form.category || 'custom'
+    const nextCliConfig = { ...(payload.cliConfig || {}) }
+    const piModel = `${nextCliConfig.model ?? ''}`.trim()
+    if (piModel) {
+      nextCliConfig.model = piModel
+    } else {
+      delete nextCliConfig.model
+    }
+    payload.cliConfig = nextCliConfig
   }
 
   // 处理预算额度：仅保存 total > 0 的配置

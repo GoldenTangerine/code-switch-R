@@ -2,6 +2,19 @@ import { computed, onMounted, onUnmounted, reactive, ref, watch, type ComputedRe
 import { fetchProxyStatus, enableProxy, disableProxy } from '../../../services/claudeSettings'
 import { fetchGeminiProxyStatus, enableGeminiProxy, disableGeminiProxy } from '../../../services/geminiSettings'
 import {
+  disableGrokProxy,
+  enableGrokProxy,
+  fetchGrokProxyStatus,
+  importGrokFromLive,
+} from '../../../services/grokSettings'
+import {
+  fetchClaudeDesktopProxyStatus,
+  importClaudeDesktopFromLive,
+} from '../../../services/claudeDesktopSettings'
+import { importOpenClawFromLive } from '../../../services/openClaw'
+import { importHermesFromLive } from '../../../services/hermes'
+import { importPiFromLive } from '../../../services/pi'
+import {
   fetchAppSettings,
   normalizeHeatmapGranularity,
   saveAppSettings,
@@ -148,6 +161,11 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
     codex: false,
     gemini: false,
     opencode: false,
+    grokbuild: false,
+    'claude-desktop': false,
+    openclaw: false,
+    hermes: false,
+    pi: false,
     others: false,
   })
   const proxyBusy = reactive<Record<ProviderTab, boolean>>({
@@ -155,6 +173,11 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
     codex: false,
     gemini: false,
     opencode: false,
+    grokbuild: false,
+    'claude-desktop': false,
+    openclaw: false,
+    hermes: false,
+    pi: false,
     others: false,
   })
   const providerConcurrencyLimitStates = reactive<Record<string, boolean>>({})
@@ -197,6 +220,21 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
     if (activeTab.value === 'opencode') {
       return true
     }
+    if (activeTab.value === 'grokbuild') {
+      return true
+    }
+    if (activeTab.value === 'claude-desktop') {
+      return true
+    }
+    if (activeTab.value === 'openclaw') {
+      return true
+    }
+    if (activeTab.value === 'hermes') {
+      return true
+    }
+    if (activeTab.value === 'pi') {
+      return true
+    }
     const status = importStatus.value
     if (!status) return false
     return status.config_exists && (status.pending_providers || status.pending_mcp)
@@ -205,6 +243,21 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
   const importButtonTooltip = computed(() => {
     if (activeTab.value === 'opencode') {
       return t('components.main.importConfig.opencodeTooltip')
+    }
+    if (activeTab.value === 'grokbuild') {
+      return t('components.main.importConfig.grokTooltip')
+    }
+    if (activeTab.value === 'claude-desktop') {
+      return t('components.main.importConfig.claudeDesktopTooltip')
+    }
+    if (activeTab.value === 'openclaw') {
+      return t('components.main.importConfig.openclawTooltip')
+    }
+    if (activeTab.value === 'hermes') {
+      return t('components.main.importConfig.hermesTooltip')
+    }
+    if (activeTab.value === 'pi') {
+      return t('components.main.importConfig.piTooltip')
     }
     if (!showImportButton.value || !importStatus.value) {
       return t('components.main.controls.import')
@@ -303,7 +356,7 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
 
   const refreshProxyState = async (tab: ProviderTab) => {
     if (shouldUseBrowserPreviewProxyMock()) {
-      if (tab === 'opencode') {
+      if (tab === 'opencode' || tab === 'openclaw' || tab === 'hermes' || tab === 'pi') {
         proxyStates[tab] = false
       } else if (tab === 'others') {
         proxyStates[tab] = selectedToolId.value
@@ -314,7 +367,8 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
     }
 
     try {
-      if (tab === 'opencode') {
+      if (tab === 'opencode' || tab === 'openclaw' || tab === 'hermes' || tab === 'pi') {
+        // OpenClaw / Hermes / Pi 为 additive 共存模式：供应商直接写入原生配置，无本地代理开关
         proxyStates[tab] = false
       } else if (tab === 'others') {
         if (selectedToolId.value) {
@@ -324,6 +378,13 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
         }
       } else if (tab === 'gemini') {
         const status = await fetchGeminiProxyStatus()
+        proxyStates[tab] = Boolean(status?.enabled)
+      } else if (tab === 'grokbuild') {
+        const status = await fetchGrokProxyStatus()
+        proxyStates[tab] = Boolean(status?.enabled)
+      } else if (tab === 'claude-desktop') {
+        // Claude Desktop 无独立代理开关：ProxyStatus 反映当前是否处于本地代理模式
+        const status = await fetchClaudeDesktopProxyStatus()
         proxyStates[tab] = Boolean(status?.enabled)
       } else {
         const status = await fetchProxyStatus(tab as 'claude' | 'codex')
@@ -337,7 +398,7 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
 
   const onProxyToggle = async () => {
     const tab = activeTab.value
-    if (tab === 'opencode') {
+    if (tab === 'opencode' || tab === 'claude-desktop' || tab === 'openclaw' || tab === 'hermes' || tab === 'pi') {
       proxyStates[tab] = false
       return
     }
@@ -376,6 +437,12 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
         } else {
           await disableGeminiProxy()
         }
+      } else if (tab === 'grokbuild') {
+        if (nextState) {
+          await enableGrokProxy()
+        } else {
+          await disableGrokProxy()
+        }
       } else {
         if (nextState) {
           await enableProxy(tab as 'claude' | 'codex')
@@ -393,7 +460,7 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
 
   const onProviderConcurrencyLimitToggle = async () => {
     const tab = activeTab.value
-    if (tab === 'opencode' || providerConcurrencyLimitBusy.value) return
+    if (tab === 'opencode' || tab === 'openclaw' || tab === 'hermes' || tab === 'pi' || providerConcurrencyLimitBusy.value) return
     if (tab === 'others' && !selectedToolId.value) {
       showToast(t('components.main.customCli.selectToolFirst'), 'error')
       return
@@ -466,6 +533,21 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
     if (tab === 'opencode') {
       return 'OpenCode'
     }
+    if (tab === 'grokbuild') {
+      return t('components.main.relayToggle.hostGrok')
+    }
+    if (tab === 'claude-desktop') {
+      return t('components.main.relayToggle.hostClaudeDesktop')
+    }
+    if (tab === 'openclaw') {
+      return 'OpenClaw'
+    }
+    if (tab === 'hermes') {
+      return 'Hermes'
+    }
+    if (tab === 'pi') {
+      return 'Pi'
+    }
     const tool = customCliTools.value.find((item) => item.id === selectedToolId.value)
     return tool?.name || t('components.main.relayToggle.hostOthers')
   })
@@ -497,6 +579,61 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
           showToast(t('components.main.importConfig.opencodeSuccess', { providers: imported }))
         } else {
           showToast(t('components.main.importConfig.opencodeEmpty'))
+        }
+        return
+      }
+
+      if (activeTab.value === 'grokbuild') {
+        const imported = await importGrokFromLive()
+        if (imported) {
+          await loadProviders()
+          showToast(t('components.main.importConfig.grokSuccess'))
+        } else {
+          showToast(t('components.main.importConfig.grokEmpty'))
+        }
+        return
+      }
+
+      if (activeTab.value === 'claude-desktop') {
+        const imported = await importClaudeDesktopFromLive()
+        if (imported) {
+          await loadProviders()
+          showToast(t('components.main.importConfig.claudeDesktopSuccess'))
+        } else {
+          showToast(t('components.main.importConfig.claudeDesktopEmpty'))
+        }
+        return
+      }
+
+      if (activeTab.value === 'openclaw') {
+        const imported = await importOpenClawFromLive()
+        if (imported) {
+          await loadProviders()
+          showToast(t('components.main.importConfig.openclawSuccess'))
+        } else {
+          showToast(t('components.main.importConfig.openclawEmpty'))
+        }
+        return
+      }
+
+      if (activeTab.value === 'hermes') {
+        const imported = await importHermesFromLive()
+        if (imported) {
+          await loadProviders()
+          showToast(t('components.main.importConfig.hermesSuccess'))
+        } else {
+          showToast(t('components.main.importConfig.hermesEmpty'))
+        }
+        return
+      }
+
+      if (activeTab.value === 'pi') {
+        const imported = await importPiFromLive()
+        if (imported) {
+          await loadProviders()
+          showToast(t('components.main.importConfig.piSuccess'))
+        } else {
+          showToast(t('components.main.importConfig.piEmpty'))
         }
         return
       }

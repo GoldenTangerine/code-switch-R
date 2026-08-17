@@ -596,7 +596,7 @@ const handleProviderLogsMarkedRead = () => {
 
 const markProviderLogsReadFromCard = async (card: AutomationCard) => {
   const platform = activeTab.value
-  if (platform === 'others' || platform === 'opencode') return
+  if (platform === 'others' || platform === 'opencode' || platform === 'grokbuild' || platform === 'claude-desktop' || platform === 'openclaw' || platform === 'hermes' || platform === 'pi') return
 
   const providerRef = cardProviderRef(card)
   const markingKey = `${platform}:${providerRef || card.name}`

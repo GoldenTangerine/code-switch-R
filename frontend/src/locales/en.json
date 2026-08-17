@@ -77,6 +77,8 @@
     "prompts": "Prompts",
     "mcp": "MCP",
     "skill": "Skills",
+    "openclawConfig": "OpenClaw",
+    "hermesMemory": "Hermes Memory",
     "auth": "Auth",
     "gemini": "Gemini",
     "availability": "Availability",
@@ -450,6 +452,8 @@
         "hostClaude": "Host Claude Code",
         "hostCodex": "Host Codex",
         "hostGemini": "Host Gemini CLI",
+        "hostGrok": "Host Grok Build",
+        "hostClaudeDesktop": "Host Claude Desktop",
         "hostOthers": "Host Custom CLI",
         "tooltip": "Route traffic through the local relay to manage API keys centrally.",
         "statusOn": "Managed",
@@ -697,7 +701,22 @@
         "opencodeTooltip": "Import live providers from ~/.config/opencode/opencode.json",
         "opencodeSuccess": "Imported {providers} OpenCode live providers",
         "opencodeEmpty": "All OpenCode live providers are already managed",
-        "opencodeError": "Failed to import OpenCode live config"
+        "opencodeError": "Failed to import OpenCode live config",
+        "grokTooltip": "Import the active profile from ~/.grok/config.toml as a provider",
+        "grokSuccess": "Grok provider imported",
+        "grokEmpty": "Grok is in official mode or already imported; nothing to do",
+        "claudeDesktopTooltip": "Import the current claude_desktop_config.json setup as a provider",
+        "claudeDesktopSuccess": "Claude Desktop provider imported",
+        "claudeDesktopEmpty": "Claude Desktop is on the official default config or already imported; nothing to do",
+        "openclawTooltip": "Import existing provider entries from OpenClaw settings",
+        "openclawSuccess": "OpenClaw providers imported",
+        "openclawEmpty": "OpenClaw settings has no new provider entries to import",
+        "hermesTooltip": "Import existing custom_providers entries from Hermes config.yaml",
+        "hermesSuccess": "Hermes providers imported",
+        "hermesEmpty": "Hermes config.yaml has no new provider entries to import",
+        "piTooltip": "Import existing providers entries from Pi models.json",
+        "piSuccess": "Pi providers imported",
+        "piEmpty": "Pi models.json has no new provider entries to import"
       },
       "firstRun": {
         "message": "Welcome to Code Switch R! If you have existing config, you can import it from Settings.",
@@ -910,6 +929,21 @@
           "opencodeModelExtraFields": "Model properties",
           "opencodeModelOptions": "SDK options",
           "opencodePreset": "OpenCode preset",
+          "grokPreset": "Grok preset",
+          "grokTOML": "Advanced TOML config",
+          "claudeDesktopPreset": "Claude Desktop preset",
+          "openclawPreset": "OpenClaw preset",
+          "hermesPreset": "Hermes preset",
+          "hermesModel": "Default model",
+          "piPreset": "Pi preset",
+          "piModel": "Default model",
+          "claudeDesktopMode": "Access mode",
+          "claudeDesktopModeDirect": "Direct",
+          "claudeDesktopModeProxy": "Local proxy",
+          "claudeDesktopModelRoutes": "Model routes",
+          "claudeDesktopRouteName": "Model ID",
+          "claudeDesktopRouteLabel": "Label override",
+          "claudeDesktopRoute1M": "1M context",
           "opencodeTemplateValues": "Template values",
           "opencodeModelSuggestions": "Model suggestions"
         },
@@ -944,7 +978,11 @@
           "opencodeModelName": "DeepSeek V4 Pro",
           "opencodeModelExtraFieldKey": "variants",
           "opencodeModelOptionKey": "provider",
-          "opencodeModelOptionValue": "{\"order\":[\"baseten\"]}"
+          "opencodeModelOptionValue": "{\"order\":[\"baseten\"]}",
+          "claudeDesktopRouteName": "e.g. claude-sonnet-4-5",
+          "claudeDesktopRouteLabel": "Optional, e.g. Claude Sonnet 4.5",
+          "hermesModel": "e.g. gpt-5.2, claude-sonnet-4-5",
+          "piModel": "e.g. llama3, claude-sonnet-4-5"
         },
         "noIconResults": "No matching icons found",
         "noOpenCodePresetResults": "No matching OpenCode presets found",
@@ -1009,6 +1047,22 @@
           "opencodeNoModelOptions": "No model SDK options yet. Add provider, region, or other model-level options when needed.",
           "opencodeModelDetailJson": "Edit the current model config as JSON. Change the model ID in the list; this editor saves the model object itself, such as name, limit, options, and variants.",
           "opencodePreset": "Choose a full provider template; it fills NPM, Base URL, models and SDK options.",
+          "grokPreset": "Choose a provider template; it fills the base URL, category and the [model.<profile>] TOML fragment.",
+          "grokTOML": "Written to ~/.grok/config.toml as-is on direct apply. Must contain a [model.<profile>] table; profile name, model, base_url and api_backend (responses) are all editable. The API key is synced to api_key on save. Leave empty to return to official sign-in.",
+          "grokCategoryHint": "Official sign-in needs no API key; third-party presets work once the key is filled in.",
+          "claudeDesktopPreset": "Choose a template; it fills the base URL, access mode and default model routes.",
+          "claudeDesktopMode": "Direct mode writes the provider API URL into Claude Desktop; proxy mode routes through the local :18100 relay with multi-provider scheduling and fallback.",
+          "claudeDesktopModelRoutes": "Declare the models available on this provider; they are written into Claude Desktop model routing on apply. Empty label override falls back to the model ID.",
+          "claudeDesktopNoRoutes": "No model routes yet. Use the button above to add one.",
+          "claudeDesktopCategoryHint": "The official preset needs no API key (Claude account sign-in); the official API preset works once the key is filled in.",
+          "openclawPreset": "Pick a template to fill the base URL and category; the official OpenClaw entry uses the signed-in state and needs no API key.",
+          "openclawCategoryHint": "The official OpenClaw preset relies on the signed-in state; the direct API and aggregator presets work once the key is filled in.",
+          "hermesPreset": "Pick a template to fill the base URL and category; providers are written additively into Hermes config.yaml.",
+          "hermesCategoryHint": "The official Hermes preset relies on the signed-in state; the direct API and aggregator presets work once the key is filled in.",
+          "hermesModel": "Written as the top-level default model when this provider becomes current; leave blank to keep it unchanged.",
+          "piPreset": "Pick a template to fill the base URL and category; providers are written additively into Pi models.json.",
+          "piCategoryHint": "The official Pi preset uses the built-in catalog with signed-in state; the direct API and aggregator presets work once the key is filled in.",
+          "piModel": "A default model kept for display inside this app only; it is never written to models.json. Manage the real model list in the native config.",
           "opencodeTemplateValues": "These values replace {'${...}'} placeholders in the preset and sync into the OpenCode provider config.",
           "opencodePartnerPromotion": "{provider} is a partner provider. Use the API key link for promotion or onboarding details.",
           "providerKeyChecking": "Checking Provider ID against live config...",
@@ -1040,6 +1094,11 @@
           "providerQuotaQueryNewApi": "NewApi",
           "providerQuotaQueryTokenPlan": "Token Plan",
           "opencodeCustomPreset": "Custom / no preset",
+          "grokCustomPreset": "Custom / no preset",
+          "claudeDesktopCustomPreset": "Custom / no preset",
+          "openclawCustomPreset": "Custom / no preset",
+          "hermesCustomPreset": "Custom / no preset",
+          "piCustomPreset": "Custom / no preset",
           "opencodeCategoryOfficial": "Official",
           "opencodeCategoryAggregator": "Aggregator",
           "opencodeCategoryThirdParty": "Third party",
@@ -1103,6 +1162,8 @@
           "removeOpenCodeModelOption": "Remove model option",
           "fetchOpenCodeModels": "Fetch models",
           "fetchingOpenCodeModels": "Fetching...",
+          "addClaudeDesktopRoute": "Add model",
+          "removeClaudeDesktopRoute": "Remove model route",
           "getApiKey": "Get API key",
           "openOfficialSite": "Open site"
         },
@@ -1124,6 +1185,8 @@
         "errors": {
           "invalidCustomAuthHeader": "Enter a valid custom Header name",
           "invalidUrl": "Please enter a valid API URL",
+          "grokTOMLInvalid": "The TOML config needs at least one [model.<profile>] table",
+          "claudeDesktopRouteNameRequired": "Model routes cannot have an empty model ID",
           "requestBodyOverridesInvalid": "Failed to parse forced request body JSON: {error}",
           "requestBodyOverridesMustBeObject": "Forced request body fields must be a JSON object",
           "providerKeyRequired": "Enter a valid OpenCode Provider ID",
@@ -1143,6 +1206,7 @@
           "opencodeModelsRequired": "Add at least one OpenCode model configuration."
         },
         "saveFailed": "Failed to save provider configuration: {error}",
+        "saveInProgress": "A save is already in progress for this list, please retry later",
         "toast": {
           "providerQuotaQueryTestSuccess": "Quota query succeeded: ",
           "providerQuotaQueryTestFailed": "Quota query failed",
@@ -2178,7 +2242,9 @@
       "platforms": {
         "claude": "Claude Code",
         "codex": "Codex",
-        "gemini": "Gemini CLI"
+        "gemini": "Gemini CLI",
+        "opencode": "OpenCode",
+        "grokbuild": "Grok Build"
       },
       "form": {
         "createTitle": "Create MCP server",
@@ -2298,6 +2364,130 @@
         "delete": "Delete"
       }
     },
+    "openclawConfig": {
+      "hero": {
+        "eyebrow": "OpenClaw exclusive settings",
+        "title": "OpenClaw native settings",
+        "lead": "Providers coexist inside OpenClaw settings; manage the native env, tools, and agents configuration here."
+      },
+      "controls": {
+        "back": "Back to home",
+        "settings": "Open settings"
+      },
+      "tabs": {
+        "ariaLabel": "OpenClaw config sections",
+        "env": "Environment",
+        "tools": "Tools",
+        "agents": "Agents"
+      },
+      "status": {
+        "currentProvider": "Active: {name}",
+        "noCurrentProvider": "No active provider",
+        "managedProviders": "{count} managed providers",
+        "settingsPath": "Settings file: {path}"
+      },
+      "common": {
+        "loading": "Loading config...",
+        "reload": "Reload",
+        "save": "Save config",
+        "saving": "Saving...",
+        "saved": "Config written to OpenClaw settings",
+        "loadError": "Failed to read OpenClaw config",
+        "saveError": "Failed to save OpenClaw config",
+        "unsavedTitle": "Unsaved changes",
+        "unsavedMessage": "This panel has unsaved changes that will be lost if you leave. Leave anyway?",
+        "unsavedStay": "Keep editing",
+        "unsavedLeave": "Discard changes"
+      },
+      "env": {
+        "title": "Environment variables",
+        "hint": "Env block written to OpenClaw settings; provider endpoints and keys are managed by the provider cards on the home page.",
+        "varsTitle": "vars",
+        "varsHint": "Plain environment variables injected into the OpenClaw runtime.",
+        "shellEnvTitle": "shellEnv",
+        "shellEnvHint": "Environment variables injected when OpenClaw runs shell commands.",
+        "keyPlaceholder": "Variable name, e.g. ANTHROPIC_MODEL",
+        "valuePlaceholder": "Variable value",
+        "add": "Add variable",
+        "remove": "Remove row",
+        "duplicateKey": "Duplicate variable name: {key}"
+      },
+      "tools": {
+        "title": "Tools",
+        "hint": "Control which tools OpenClaw may call: profile is a preset tier, allow/deny are exact overrides.",
+        "profile": "Tool profile",
+        "profileHint": "The tier decides the default tool set; saving writes it back to settings.",
+        "profiles": {
+          "minimal": "minimal (core set)",
+          "coding": "coding",
+          "messaging": "messaging",
+          "full": "full (all tools)"
+        },
+        "allow": "Allow list",
+        "allowHint": "One tool name per line; extra entries merge with the profile tier.",
+        "deny": "Deny list",
+        "denyHint": "One tool name per line; takes precedence over the tier and the allow list.",
+        "listPlaceholder": "One item per line, e.g.\nBash\nRead"
+      },
+      "agents": {
+        "title": "Agents",
+        "hint": "Edit the agents defaults object of OpenClaw settings as JSON; the format is validated before saving.",
+        "editor": "defaults JSON",
+        "fieldHints": "Common fields: model.primary (main model), model.fallbacks (fallback model array), models (model mapping), timeoutSeconds (timeout in seconds).",
+        "format": "Format",
+        "invalidJson": "Invalid JSON: {message}",
+        "mustBeObject": "Content must be a JSON object ({}); arrays and bare values are not supported"
+      }
+    },
+    "hermesMemory": {
+      "hero": {
+        "eyebrow": "Hermes",
+        "title": "Memory Management",
+        "lead": "Edit MEMORY.md and USER.md as whole-file Markdown, track § entry counts and character budgets, and manage memory switches."
+      },
+      "controls": {
+        "back": "Back to home",
+        "settings": "Open settings"
+      },
+      "tabs": {
+        "ariaLabel": "Choose a memory file",
+        "memory": "MEMORY",
+        "user": "USER",
+        "memoryTitle": "MEMORY.md (long-term memory)",
+        "userTitle": "USER.md (user profile)"
+      },
+      "status": {
+        "entries": "{count} § entries",
+        "usage": "{current} / {limit} characters used",
+        "overLimit": "Over the character budget"
+      },
+      "editor": {
+        "hint": "Edit the whole Markdown file; separate entries with a single § line.",
+        "placeholder": "Type memory content here…"
+      },
+      "settings": {
+        "title": "Memory settings",
+        "hint": "Switches and character budgets are written to top-level keys in Hermes config.yaml.",
+        "memoryEnabled": "Enable long-term memory (memory_enabled)",
+        "memoryCharLimit": "Memory character budget",
+        "userEnabled": "Enable user profile (user_profile_enabled)",
+        "userCharLimit": "User profile character budget",
+        "runtimeNote": "Settings are read by the Hermes runtime and take effect in the next session."
+      },
+      "common": {
+        "loading": "Loading memory content…",
+        "reload": "Reload",
+        "save": "Save",
+        "saving": "Saving…",
+        "saved": "Memory content saved",
+        "loadError": "Failed to load Hermes memory; make sure Hermes is installed.",
+        "saveError": "Failed to save Hermes memory",
+        "unsavedTitle": "Unsaved changes",
+        "unsavedMessage": "Memory content or settings have unsaved changes that will be lost if you leave. Leave anyway?",
+        "unsavedStay": "Keep editing",
+        "unsavedLeave": "Discard changes"
+      }
+    },
     "skill": {
       "hero": {
         "eyebrow": "Skill Library",
@@ -2306,7 +2496,9 @@
       },
       "platform": {
         "claude": "Claude Code",
-        "codex": "Codex"
+        "codex": "Codex",
+        "opencode": "OpenCode",
+        "grokbuild": "Grok Build"
       },
       "groups": {
         "project": "Project Skills",

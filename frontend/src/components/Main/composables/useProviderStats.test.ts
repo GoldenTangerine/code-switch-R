@@ -64,6 +64,11 @@ describe('useProviderStats duration display', () => {
       codex: [],
       gemini: [],
       opencode: [],
+      grokbuild: [],
+      'claude-desktop': [],
+      openclaw: [],
+      hermes: [],
+      pi: [],
       others: [],
     }
     const stats = useProviderStats({
@@ -113,6 +118,11 @@ describe('useProviderStats duration display', () => {
         codex: [],
         gemini: [],
         opencode: [],
+        grokbuild: [],
+        'claude-desktop': [],
+        openclaw: [],
+        hermes: [],
+        pi: [],
         others: [],
       },
       refreshAvailabilityResults: vi.fn().mockResolvedValue(undefined),

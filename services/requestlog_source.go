@@ -26,18 +26,24 @@ const (
 	LogDataSourceModeSession LogDataSourceMode = "session"
 	LogDataSourceModeAll     LogDataSourceMode = "all"
 
-	requestLogDataSourceProxy         = "proxy"
-	requestLogDataSourceClaudeSession = "session_log"
-	requestLogDataSourceCodexSession  = "codex_session"
-	requestLogDataSourceGeminiSession = "gemini_session"
+	requestLogDataSourceProxy           = "proxy"
+	requestLogDataSourceClaudeSession   = "session_log"
+	requestLogDataSourceCodexSession    = "codex_session"
+	requestLogDataSourceGeminiSession   = "gemini_session"
+	requestLogDataSourceOpenCodeSession = "opencode_session"
+	requestLogDataSourceGrokSession     = "grok_session"
 
-	requestLogProviderIDClaudeSession = "_session"
-	requestLogProviderIDCodexSession  = "_codex_session"
-	requestLogProviderIDGeminiSession = "_gemini_session"
+	requestLogProviderIDClaudeSession   = "_session"
+	requestLogProviderIDCodexSession    = "_codex_session"
+	requestLogProviderIDGeminiSession   = "_gemini_session"
+	requestLogProviderIDOpenCodeSession = "_opencode_session"
+	requestLogProviderIDGrokSession     = "_grok_session"
 
-	requestLogProviderClaudeSession = "Claude 会话"
-	requestLogProviderCodexSession  = "Codex 会话"
-	requestLogProviderGeminiSession = "Gemini 会话"
+	requestLogProviderClaudeSession   = "Claude 会话"
+	requestLogProviderCodexSession    = "Codex 会话"
+	requestLogProviderGeminiSession   = "Gemini 会话"
+	requestLogProviderOpenCodeSession = "OpenCode 会话"
+	requestLogProviderGrokSession     = "Grok 会话"
 
 	sessionUsageDedupWindowSeconds = 10 * 60
 )
@@ -69,11 +75,13 @@ func requestLogSourceWhereClause(mode LogDataSourceMode, alias string) string {
 		prefix = trimmed + "."
 	}
 	sessionSQL := fmt.Sprintf(
-		"%s IN ('%s', '%s', '%s')",
+		"%s IN ('%s', '%s', '%s', '%s', '%s')",
 		sourceSQL,
 		requestLogDataSourceClaudeSession,
 		requestLogDataSourceCodexSession,
 		requestLogDataSourceGeminiSession,
+		requestLogDataSourceOpenCodeSession,
+		requestLogDataSourceGrokSession,
 	)
 
 	switch mode {
@@ -107,7 +115,7 @@ func buildRequestLogDedupCore(platform string, inputTokens int, outputTokens int
 
 func isSessionRequestLogSource(source string) bool {
 	switch strings.ToLower(strings.TrimSpace(source)) {
-	case requestLogDataSourceClaudeSession, requestLogDataSourceCodexSession, requestLogDataSourceGeminiSession:
+	case requestLogDataSourceClaudeSession, requestLogDataSourceCodexSession, requestLogDataSourceGeminiSession, requestLogDataSourceOpenCodeSession, requestLogDataSourceGrokSession:
 		return true
 	default:
 		return false

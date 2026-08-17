@@ -1,4 +1,4 @@
-export type HomeProviderTab = 'claude' | 'codex' | 'gemini' | 'opencode' | 'others'
+export type HomeProviderTab = 'claude' | 'codex' | 'gemini' | 'opencode' | 'grokbuild' | 'claude-desktop' | 'openclaw' | 'hermes' | 'pi' | 'others'
 
 export type HomeProviderTabOption = {
   id: HomeProviderTab
@@ -11,6 +11,11 @@ export const HOME_PROVIDER_TAB_OPTIONS = [
   { id: 'codex', label: 'Codex', icon: 'openai' },
   { id: 'gemini', label: 'Gemini', icon: 'gemini' },
   { id: 'opencode', label: 'OpenCode', icon: 'opencode' },
+  { id: 'grokbuild', label: 'Grok Build', icon: 'grok' },
+  { id: 'claude-desktop', label: 'Claude Desktop', icon: 'claude' },
+  { id: 'openclaw', label: 'OpenClaw', icon: 'openclaw' },
+  { id: 'hermes', label: 'Hermes', icon: 'hermes' },
+  { id: 'pi', label: 'Pi', icon: 'pi' },
   { id: 'others', label: '其他', icon: 'others' },
 ] as const satisfies readonly HomeProviderTabOption[]
 

@@ -1,8 +1,6 @@
 package services
 
 import (
-	"encoding/json"
-	"os"
 	"strings"
 )
 
@@ -13,34 +11,9 @@ func providerFilePathNoCreate(kind string) (string, error) {
 }
 
 // loadProviderSnapshot 只读加载 provider 列表（不触发迁移和保存）
-// 返回当前磁盘上的快照，用于直连应用的 provider 查找
+// 从统一存储读取（自定义 CLI 平台自动回退 JSON 文件），用于直连应用的 provider 查找
 func loadProviderSnapshot(kind string) ([]Provider, error) {
-	path, err := resolveProviderReadPath(kind)
-	if err != nil {
-		return nil, err
-	}
-	if path == "" {
-		return nil, nil
-	}
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-
-	if len(data) == 0 {
-		return []Provider{}, nil
-	}
-
-	var envelope providerEnvelope
-	if err := json.Unmarshal(data, &envelope); err != nil {
-		return nil, err
-	}
-
-	return envelope.Providers, nil
+	return LoadProvidersFromStore(kind)
 }
 
 // findProviderByID 在 provider 列表中按 ID 查找

@@ -3,6 +3,13 @@ import type { ProviderQuotaQueryConfig, ProviderQuotaQueryType } from '../utils/
 
 export type ModelMappingMissPolicy = 'block' | 'passthrough'
 
+// Claude Desktop 模型路由条目：name 为模型 ID，labelOverride 覆盖展示名，supports1m 声明 1M 上下文
+export type ClaudeDesktopModelRoute = {
+  name: string
+  labelOverride?: string
+  supports1m?: boolean
+}
+
 export type AutomationCard = {
   id: number
   providerRef?: string
@@ -61,6 +68,12 @@ export type AutomationCard = {
   opencodeNpm?: string
   // OpenCode provider fragment，最终写入 opencode.json 的 provider.{id}
   opencodeSettingsConfig?: Record<string, any>
+  // Grok Build：供应商对应的 ~/.grok/config.toml 完整 TOML 片段（[model.<profile>] 表）
+  configTOML?: string
+  // Claude Desktop：接入模式（direct 直连，proxy 走本地代理）
+  claudeDesktopMode?: string
+  // Claude Desktop：模型路由列表
+  claudeDesktopModelRoutes?: ClaudeDesktopModelRoute[]
   // OpenCode 供应商分类 / 合作伙伴元数据。
   category?: string
   // 托管认证来源，例如 codex_oauth。

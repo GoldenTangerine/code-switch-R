@@ -464,54 +464,38 @@ func (s *OpenCodeService) prepareOpenCodeProvidersSnapshot(providers []OpenCodeP
 }
 
 func (s *OpenCodeService) saveProviders() error {
-	path, err := providerConfigPath("opencode", true)
-	if err != nil {
-		return err
-	}
-
 	providers := cloneOpenCodeProviders(s.providers)
 	for i := range providers {
 		providers[i] = normalizeOpenCodeProvider(providers[i])
 	}
-
-	data, err := json.MarshalIndent(opencodeProviderEnvelope{Providers: providers}, "", "  ")
-	if err != nil {
-		return fmt.Errorf("序列化 OpenCode 供应商失败: %w", err)
-	}
-	return os.WriteFile(path, data, 0o644)
+	return SaveOpenCodeProvidersToStore(providers)
 }
 
 func (s *OpenCodeService) loadProviders() error {
-	path, err := providerConfigPath("opencode", true)
+	providers, err := LoadOpenCodeProvidersFromStore()
 	if err != nil {
 		return err
 	}
 
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			liveProviders, liveErr := importOpenCodeProvidersFromLiveSnapshot()
-			if liveErr != nil {
-				log.Printf("OpenCode live providers import skipped: %v", liveErr)
-				return nil
-			}
-			s.providers = liveProviders
-			if len(liveProviders) > 0 {
-				return s.saveProviders()
-			}
+	if providers == nil {
+		// 统一存储未初始化（无任何行）：尝试从 live 配置首次导入
+		// 注意区分空哨兵（已初始化但列表为空，Load 返回空切片）：用户主动清空后不应再触发导入
+		liveProviders, liveErr := importOpenCodeProvidersFromLiveSnapshot()
+		if liveErr != nil {
+			log.Printf("OpenCode live providers import skipped: %v", liveErr)
+			s.providers = []OpenCodeProvider{}
 			return nil
 		}
-		return err
+		s.providers = liveProviders
+		if len(liveProviders) > 0 {
+			return s.saveProviders()
+		}
+		return nil
 	}
 
-	var envelope opencodeProviderEnvelope
-	if err := json.Unmarshal(data, &envelope); err != nil {
-		return fmt.Errorf("解析 OpenCode 供应商配置失败: %w", err)
-	}
-
-	s.providers = make([]OpenCodeProvider, 0, len(envelope.Providers))
-	seen := make(map[string]bool, len(envelope.Providers))
-	for _, provider := range envelope.Providers {
+	s.providers = make([]OpenCodeProvider, 0, len(providers))
+	seen := make(map[string]bool, len(providers))
+	for _, provider := range providers {
 		provider = normalizeOpenCodeProvider(provider)
 		if provider.ID == "" || seen[provider.ID] {
 			continue

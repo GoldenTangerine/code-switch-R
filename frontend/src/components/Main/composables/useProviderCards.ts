@@ -12,6 +12,7 @@ import {
 import { showToast } from '../../../utils/toast'
 import { extractErrorMessage } from '../../../utils/error'
 import {
+  cardProviderRef,
   cardToGemini,
   cardToOpenCode,
   createGeminiFromCard,
@@ -33,6 +34,47 @@ import {
   importOpenCodeProvidersFromLive,
   saveOpenCodeProviders,
 } from '../../../services/opencode'
+import { applyGrokSingleProvider, getGrokStatus } from '../../../services/grokSettings'
+import {
+  applyClaudeDesktopSingleProvider,
+  getClaudeDesktopStatus,
+} from '../../../services/claudeDesktopSettings'
+import {
+  addOpenClawProvider,
+  cardToOpenClawProvider,
+  deleteOpenClawProvider,
+  duplicateOpenClawProvider,
+  getOpenClawProviders,
+  getOpenClawStatus,
+  openClawToCard,
+  setCurrentOpenClawProvider,
+  updateOpenClawProvider,
+  type OpenClawProvider,
+} from '../../../services/openClaw'
+import {
+  addHermesProvider,
+  cardToHermesProvider,
+  deleteHermesProvider,
+  duplicateHermesProvider,
+  getHermesProviders,
+  getHermesStatus,
+  hermesToCard,
+  setCurrentHermesProvider,
+  updateHermesProvider,
+  type HermesProvider,
+} from '../../../services/hermes'
+import {
+  addPiProvider,
+  cardToPiProvider,
+  deletePiProvider,
+  duplicatePiProvider,
+  getPiProviders,
+  getPiStatus,
+  piToCard,
+  setCurrentPiProvider,
+  updatePiProvider,
+  type PiProvider,
+} from '../../../services/pi'
 import { PROVIDER_TAB_IDS } from '../constants'
 import type { ProviderDragEndPayload, ProviderDragTarget, ProviderTab, TranslateFn } from '../types'
 import {
@@ -169,6 +211,11 @@ const createCardRecord = (): Record<ProviderTab, AutomationCard[]> => ({
   codex: createAutomationCards(automationCardGroups.codex),
   gemini: [],
   opencode: [],
+  grokbuild: [],
+  'claude-desktop': [],
+  openclaw: [],
+  hermes: [],
+  pi: [],
   others: [],
 })
 
@@ -177,11 +224,19 @@ const createDirectAppliedIds = (): Record<ProviderTab, string | number | null> =
   codex: null,
   gemini: null,
   opencode: null,
+  grokbuild: null,
+  'claude-desktop': null,
+  openclaw: null,
+  hermes: null,
+  pi: null,
   others: null,
 })
 
 const getCustomProviderKind = (toolId: string): string => `custom:${toolId}`
 const DRAG_FINALIZE_DELAY_MS = 24
+
+// additive 三平台（openclaw/hermes/pi）的持久化标记：进行中的 tab 集合
+const persistingTabs = new Set<ProviderTab>()
 
 export function useProviderCards(options: UseProviderCardsOptions) {
   const { t, getActiveTab, isActiveProxyEnabled, getSelectedToolId } = options
@@ -192,6 +247,9 @@ export function useProviderCards(options: UseProviderCardsOptions) {
   const directAppliedIds = reactive(createDirectAppliedIds())
   const geminiProvidersCache = ref<GeminiProvider[]>([])
   const opencodeProvidersCache = ref<OpenCodeProvider[]>([])
+  const openclawProvidersCache = ref<OpenClawProvider[]>([])
+  const hermesProvidersCache = ref<HermesProvider[]>([])
+  const piProvidersCache = ref<PiProvider[]>([])
   const isOpenCodeDevPreview = ref(false)
   const dragStartOrder = ref<number[]>([])
   const dragSourceTab = ref<ProviderTab | null>(null)
@@ -348,6 +406,70 @@ export function useProviderCards(options: UseProviderCardsOptions) {
         id = await Call.ByName('codeswitch/services.CodexSettingsService.GetDirectAppliedProviderID')
       } else if (tab === 'gemini') {
         id = await Call.ByName('codeswitch/services.GeminiService.GetDirectAppliedProviderID')
+      } else if (tab === 'grokbuild') {
+        // Grok 无独立 DirectApplied 接口，用 config.toml 当前 base_url 反查匹配的供应商卡片
+        const status = await getGrokStatus()
+        const liveBaseUrl = status.baseUrl.trim().replace(/\/+$/, '')
+        const matched = liveBaseUrl
+          ? cards.grokbuild.find((card) => card.apiUrl.trim().replace(/\/+$/, '') === liveBaseUrl)
+          : undefined
+        id = matched ? matched.id : null
+      } else if (tab === 'claude-desktop') {
+        // Claude Desktop 优先用 GetStatus 返回的后端统一存储数值 providerId 反查，缺省时退回 baseUrl 匹配
+        const status = await getClaudeDesktopStatus()
+        const numericProviderId = Number(status.providerId)
+        if (Number.isFinite(numericProviderId) && numericProviderId > 0) {
+          // 数值 providerId 对应统一存储的条目 ID：按 card.id 数值或 providerRef 字符串双路匹配
+          const matched = cards['claude-desktop'].find((card) => (
+            card.id === numericProviderId || normalizeProviderRef(card.providerRef) === status.providerId
+          ))
+          id = matched ? matched.id : null
+        } else {
+          const liveBaseUrl = status.baseUrl.trim().replace(/\/+$/, '')
+          const matched = liveBaseUrl
+            ? cards['claude-desktop'].find((card) => card.apiUrl.trim().replace(/\/+$/, '') === liveBaseUrl)
+            : undefined
+          id = matched ? matched.id : null
+        }
+      } else if (tab === 'openclaw') {
+        // OpenClaw additive 模式：GetStatus 返回 settings 中当前生效条目，按 providerRef 反查卡片
+        const status = await getOpenClawStatus()
+        const currentRef = normalizeProviderRef(status.currentProviderId)
+        const matchedByRef = currentRef
+          ? cards.openclaw.find((card) => normalizeProviderRef(card.providerRef) === currentRef)
+          : undefined
+        if (matchedByRef) {
+          id = matchedByRef.id
+        } else if (status.currentProviderName) {
+          const matchedByName = cards.openclaw.find((card) => card.name === status.currentProviderName)
+          id = matchedByName ? matchedByName.id : null
+        }
+      } else if (tab === 'hermes') {
+        // Hermes additive 模式：GetStatus 返回顶层 model 节指向的条目，按 providerRef 反查卡片
+        const status = await getHermesStatus()
+        const currentRef = normalizeProviderRef(status.currentProviderId)
+        const matchedByRef = currentRef
+          ? cards.hermes.find((card) => normalizeProviderRef(card.providerRef) === currentRef)
+          : undefined
+        if (matchedByRef) {
+          id = matchedByRef.id
+        } else if (status.currentProviderName) {
+          const matchedByName = cards.hermes.find((card) => card.name === status.currentProviderName)
+          id = matchedByName ? matchedByName.id : null
+        }
+      } else if (tab === 'pi') {
+        // Pi additive 模式：GetStatus 返回启用标记指向的条目，按 providerRef 反查卡片
+        const status = await getPiStatus()
+        const currentRef = normalizeProviderRef(status.currentProviderId)
+        const matchedByRef = currentRef
+          ? cards.pi.find((card) => normalizeProviderRef(card.providerRef) === currentRef)
+          : undefined
+        if (matchedByRef) {
+          id = matchedByRef.id
+        } else if (status.currentProviderName) {
+          const matchedByName = cards.pi.find((card) => card.name === status.currentProviderName)
+          id = matchedByName ? matchedByName.id : null
+        }
       }
       directAppliedIds[tab] = id
     } catch (error) {
@@ -368,6 +490,22 @@ export function useProviderCards(options: UseProviderCardsOptions) {
         const providerRef = normalizeProviderRef(card.providerRef)
         if (!providerRef) return
         await Call.ByName('codeswitch/services.GeminiService.ApplySingleProvider', providerRef)
+      } else if (tab === 'grokbuild') {
+        await applyGrokSingleProvider(card.id)
+      } else if (tab === 'claude-desktop') {
+        await applyClaudeDesktopSingleProvider(card.id)
+      } else if (tab === 'openclaw') {
+        const openClawId = `${normalizeProviderRef(cardProviderRef(card)) || card.id}`.trim()
+        if (!openClawId) return
+        await setCurrentOpenClawProvider(openClawId)
+      } else if (tab === 'hermes') {
+        const hermesId = `${normalizeProviderRef(cardProviderRef(card)) || card.id}`.trim()
+        if (!hermesId) return
+        await setCurrentHermesProvider(hermesId)
+      } else if (tab === 'pi') {
+        const piId = `${normalizeProviderRef(cardProviderRef(card)) || card.id}`.trim()
+        if (!piId) return
+        await setCurrentPiProvider(piId)
       }
       await refreshDirectAppliedStatus(tab)
       showToast(t('components.main.directApply.success', { name: card.name }), 'success')
@@ -412,7 +550,82 @@ export function useProviderCards(options: UseProviderCardsOptions) {
     }
   }
 
+  // 后端 Add/Update 返回的完整供应商携带最终 ID（新增时可能重新分配），直接精确回填卡片 providerRef
+  const applyPersistedProviderRef = (card: AutomationCard, saved: { id?: string } | null) => {
+    const savedRef = saved ? normalizeProviderRef(saved.id) : ''
+    if (savedRef) {
+      card.providerRef = savedRef
+    }
+  }
+
+  // OpenClaw：后端若重新分配 ID，保存后按名称把最新落盘结果回填到卡片 providerRef（仅作后端返回值缺失时的兜底；
+  // 同名条目无法消歧时跳过，避免顺序错配）
+  const syncOpenClawCardRefs = (providers: OpenClawProvider[], knownRefs: Set<string>) => {
+    const unmatched = providers.filter((provider) => !knownRefs.has(normalizeProviderRef(provider.id)))
+    for (const card of cards.openclaw) {
+      const ref = normalizeProviderRef(card.providerRef)
+      if (ref && knownRefs.has(ref)) continue
+      const sameName = unmatched.filter((provider) => provider.name === card.name)
+      if (sameName.length !== 1) continue
+      card.providerRef = normalizeProviderRef(sameName[0].id)
+      unmatched.splice(unmatched.indexOf(sameName[0]), 1)
+    }
+  }
+
+  // Hermes：后端若重新分配 ID（hermes-<unixnano>），保存后按名称把最新落盘结果回填到卡片 providerRef（同名跳过防错配）
+  const syncHermesCardRefs = (providers: HermesProvider[], knownRefs: Set<string>) => {
+    const unmatched = providers.filter((provider) => !knownRefs.has(normalizeProviderRef(provider.id)))
+    for (const card of cards.hermes) {
+      const ref = normalizeProviderRef(card.providerRef)
+      if (ref && knownRefs.has(ref)) continue
+      const sameName = unmatched.filter((provider) => provider.name === card.name)
+      if (sameName.length !== 1) continue
+      card.providerRef = normalizeProviderRef(sameName[0].id)
+      unmatched.splice(unmatched.indexOf(sameName[0]), 1)
+    }
+  }
+
+  // Pi：后端若重新分配 ID（pi-<unixnano>），保存后按名称把最新落盘结果回填到卡片 providerRef（同名跳过防错配）
+  const syncPiCardRefs = (providers: PiProvider[], knownRefs: Set<string>) => {
+    const unmatched = providers.filter((provider) => !knownRefs.has(normalizeProviderRef(provider.id)))
+    for (const card of cards.pi) {
+      const ref = normalizeProviderRef(card.providerRef)
+      if (ref && knownRefs.has(ref)) continue
+      const sameName = unmatched.filter((provider) => provider.name === card.name)
+      if (sameName.length !== 1) continue
+      card.providerRef = normalizeProviderRef(sameName[0].id)
+      unmatched.splice(unmatched.indexOf(sameName[0]), 1)
+    }
+  }
+
+  // additive 三平台保存失败时可能已部分落盘（逐条写入），从后端重拉缓存与卡片，避免 UI 快照与真实状态漂移
+  const reloadAdditiveTab = async (tabId: ProviderTab) => {
+    try {
+      if (tabId === 'openclaw') {
+        openclawProvidersCache.value = await getOpenClawProviders()
+        cards.openclaw.splice(0, cards.openclaw.length, ...openclawProvidersCache.value.map(openClawToCard))
+        applyNormalizedProviderOrder(cards.openclaw)
+      } else if (tabId === 'hermes') {
+        hermesProvidersCache.value = await getHermesProviders()
+        cards.hermes.splice(0, cards.hermes.length, ...hermesProvidersCache.value.map(hermesToCard))
+        applyNormalizedProviderOrder(cards.hermes)
+      } else if (tabId === 'pi') {
+        piProvidersCache.value = await getPiProviders()
+        cards.pi.splice(0, cards.pi.length, ...piProvidersCache.value.map(piToCard))
+        applyNormalizedProviderOrder(cards.pi)
+      }
+    } catch (reloadError) {
+      console.error(`Failed to reload providers for ${tabId} after save failure`, reloadError)
+    }
+  }
+
   const persistProviders = async (tabId: ProviderTab) => {
+    // additive 三平台逐条 Add/Update/Delete，同 tab 并发保存会基于同一缓存快照互相踩踏，加锁串行化
+    if (persistingTabs.has(tabId)) {
+      showToast(t('components.main.form.saveInProgress'), 'error')
+      return
+    }
+    persistingTabs.add(tabId)
     try {
       commitProviderOrder(cards[tabId])
 
@@ -497,11 +710,98 @@ export function useProviderCards(options: UseProviderCardsOptions) {
         return
       }
 
+      if (tabId === 'openclaw') {
+        const currentRefs = new Set(cards.openclaw.map((card) => normalizeProviderRef(card.providerRef)).filter(Boolean))
+
+        for (const cached of openclawProvidersCache.value) {
+          if (!currentRefs.has(normalizeProviderRef(cached.id))) {
+            await deleteOpenClawProvider(`${cached.id}`)
+          }
+        }
+
+        for (const card of cards.openclaw) {
+          const providerRef = normalizeProviderRef(card.providerRef)
+          const original = providerRef
+            ? openclawProvidersCache.value.find((provider) => normalizeProviderRef(provider.id) === providerRef)
+            : undefined
+
+          if (original) {
+            applyPersistedProviderRef(card, await updateOpenClawProvider(cardToOpenClawProvider(card, original)))
+          } else {
+            applyPersistedProviderRef(card, await addOpenClawProvider(cardToOpenClawProvider(card)))
+          }
+        }
+
+        const updatedProviders = await getOpenClawProviders()
+        openclawProvidersCache.value = updatedProviders
+        syncOpenClawCardRefs(updatedProviders, currentRefs)
+        return
+      }
+
+      if (tabId === 'hermes') {
+        const currentRefs = new Set(cards.hermes.map((card) => normalizeProviderRef(card.providerRef)).filter(Boolean))
+
+        for (const cached of hermesProvidersCache.value) {
+          if (!currentRefs.has(normalizeProviderRef(cached.id))) {
+            await deleteHermesProvider(`${cached.id}`)
+          }
+        }
+
+        for (const card of cards.hermes) {
+          const providerRef = normalizeProviderRef(card.providerRef)
+          const original = providerRef
+            ? hermesProvidersCache.value.find((provider) => normalizeProviderRef(provider.id) === providerRef)
+            : undefined
+
+          if (original) {
+            applyPersistedProviderRef(card, await updateHermesProvider(cardToHermesProvider(card, original)))
+          } else {
+            applyPersistedProviderRef(card, await addHermesProvider(cardToHermesProvider(card)))
+          }
+        }
+
+        const updatedProviders = await getHermesProviders()
+        hermesProvidersCache.value = updatedProviders
+        syncHermesCardRefs(updatedProviders, currentRefs)
+        return
+      }
+
+      if (tabId === 'pi') {
+        const currentRefs = new Set(cards.pi.map((card) => normalizeProviderRef(card.providerRef)).filter(Boolean))
+
+        for (const cached of piProvidersCache.value) {
+          if (!currentRefs.has(normalizeProviderRef(cached.id))) {
+            await deletePiProvider(`${cached.id}`)
+          }
+        }
+
+        for (const card of cards.pi) {
+          const providerRef = normalizeProviderRef(card.providerRef)
+          const original = providerRef
+            ? piProvidersCache.value.find((provider) => normalizeProviderRef(provider.id) === providerRef)
+            : undefined
+
+          if (original) {
+            applyPersistedProviderRef(card, await updatePiProvider(cardToPiProvider(card, original)))
+          } else {
+            applyPersistedProviderRef(card, await addPiProvider(cardToPiProvider(card)))
+          }
+        }
+
+        const updatedProviders = await getPiProviders()
+        piProvidersCache.value = updatedProviders
+        syncPiCardRefs(updatedProviders, currentRefs)
+        return
+      }
+
       await SaveProviders(tabId, serializeProviders(cards[tabId], tabId))
     } catch (error) {
       console.error('Failed to save providers', error)
       showToast(t('components.main.form.saveFailed', { error: extractErrorMessage(error) }), 'error')
+      await reloadAdditiveTab(tabId)
       throw error
+    } finally {
+      persistingTabs.delete(tabId)
     }
   }
 
@@ -537,6 +837,21 @@ export function useProviderCards(options: UseProviderCardsOptions) {
           opencodeProvidersCache.value = opencodeProviders
           cards.opencode.splice(0, cards.opencode.length, ...opencodeProviders.map(opencodeToCard))
           applyNormalizedProviderOrder(cards.opencode)
+        } else if (tab === 'openclaw') {
+          const openclawProviders = await getOpenClawProviders()
+          openclawProvidersCache.value = openclawProviders
+          cards.openclaw.splice(0, cards.openclaw.length, ...openclawProviders.map(openClawToCard))
+          applyNormalizedProviderOrder(cards.openclaw)
+        } else if (tab === 'hermes') {
+          const hermesProviders = await getHermesProviders()
+          hermesProvidersCache.value = hermesProviders
+          cards.hermes.splice(0, cards.hermes.length, ...hermesProviders.map(hermesToCard))
+          applyNormalizedProviderOrder(cards.hermes)
+        } else if (tab === 'pi') {
+          const piProviders = await getPiProviders()
+          piProvidersCache.value = piProviders
+          cards.pi.splice(0, cards.pi.length, ...piProviders.map(piToCard))
+          applyNormalizedProviderOrder(cards.pi)
         } else {
           const saved = await LoadProviders(tab)
           if (Array.isArray(saved)) {
@@ -564,7 +879,10 @@ export function useProviderCards(options: UseProviderCardsOptions) {
     try {
       await persistProviders(tabId)
     } catch (error) {
-      list.splice(0, list.length, ...previousCards)
+      // additive 平台逐条写入可能部分成功，persistProviders 已从后端重拉真实状态，回滚 UI 快照仅用于整体保存的平台
+      if (tabId !== 'openclaw' && tabId !== 'hermes' && tabId !== 'pi') {
+        list.splice(0, list.length, ...previousCards)
+      }
       throw error
     }
   }
@@ -611,6 +929,54 @@ export function useProviderCards(options: UseProviderCardsOptions) {
           return false
         }
         console.log(`[Duplicate] OpenCode Provider "${card.name}" duplicated`)
+        return true
+      }
+
+      if (tab === 'openclaw') {
+        const openClawId = `${normalizeProviderRef(card.providerRef) || card.id}`.trim()
+        if (!openClawId) {
+          console.error('[Duplicate] 未找到 OpenClaw provider')
+          return false
+        }
+
+        const newProvider = await duplicateOpenClawProvider(openClawId)
+        if (!newProvider) {
+          console.warn('[Duplicate] OpenClaw DuplicateProvider 返回空结果，已跳过刷新')
+          return false
+        }
+        console.log(`[Duplicate] OpenClaw Provider "${card.name}" duplicated`)
+        return true
+      }
+
+      if (tab === 'hermes') {
+        const hermesId = `${normalizeProviderRef(card.providerRef) || card.id}`.trim()
+        if (!hermesId) {
+          console.error('[Duplicate] 未找到 Hermes provider')
+          return false
+        }
+
+        const newProvider = await duplicateHermesProvider(hermesId)
+        if (!newProvider) {
+          console.warn('[Duplicate] Hermes DuplicateProvider 返回空结果，已跳过刷新')
+          return false
+        }
+        console.log(`[Duplicate] Hermes Provider "${card.name}" duplicated`)
+        return true
+      }
+
+      if (tab === 'pi') {
+        const piId = `${normalizeProviderRef(card.providerRef) || card.id}`.trim()
+        if (!piId) {
+          console.error('[Duplicate] 未找到 Pi provider')
+          return false
+        }
+
+        const newProvider = await duplicatePiProvider(piId)
+        if (!newProvider) {
+          console.warn('[Duplicate] Pi DuplicateProvider 返回空结果，已跳过刷新')
+          return false
+        }
+        console.log(`[Duplicate] Pi Provider "${card.name}" duplicated`)
         return true
       }
 

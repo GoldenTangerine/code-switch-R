@@ -79,6 +79,11 @@ export function useProviderStats(options: UseProviderStatsOptions) {
     codex: {},
     gemini: {},
     opencode: {},
+    grokbuild: {},
+    'claude-desktop': {},
+    openclaw: {},
+    hermes: {},
+    pi: {},
     others: {},
   })
   const providerStatsLoaded = reactive<Record<ProviderTab, boolean>>({
@@ -86,6 +91,11 @@ export function useProviderStats(options: UseProviderStatsOptions) {
     codex: false,
     gemini: false,
     opencode: false,
+    grokbuild: false,
+    'claude-desktop': false,
+    openclaw: false,
+    hermes: false,
+    pi: false,
     others: false,
   })
   const providerUnreadFailedMap = reactive<Record<ProviderTab, Record<string, number>>>({
@@ -93,6 +103,11 @@ export function useProviderStats(options: UseProviderStatsOptions) {
     codex: {},
     gemini: {},
     opencode: {},
+    grokbuild: {},
+    'claude-desktop': {},
+    openclaw: {},
+    hermes: {},
+    pi: {},
     others: {},
   })
 
@@ -200,7 +215,7 @@ export function useProviderStats(options: UseProviderStatsOptions) {
   }
 
   const loadProviderStats = async (tab: ProviderTab) => {
-    if (tab === 'others' || tab === 'opencode') {
+    if (tab === 'others' || tab === 'opencode' || tab === 'grokbuild' || tab === 'claude-desktop' || tab === 'openclaw' || tab === 'hermes' || tab === 'pi') {
       providerStatsMap[tab] = {}
       providerUnreadFailedMap[tab] = {}
       providerStatsLoaded[tab] = true

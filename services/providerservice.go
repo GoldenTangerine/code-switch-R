@@ -69,6 +69,15 @@ type Provider struct {
 	// 留空则使用平台默认（claude: /v1/messages, codex: /responses）
 	APIEndpoint string `json:"apiEndpoint,omitempty"`
 
+	// Grok Build 供应商的原始 TOML 配置片段（~/.grok/config.toml 的 [model.<profile>] 内容载体）
+	// 官方条目为空串（空 TOML = xAI OAuth 官方态）
+	ConfigTOML string `json:"configTOML,omitempty"`
+
+	// Claude Desktop 接入模式：direct（直连供应商）/ proxy（本地代理复用 :18100 Claude 链路），缺省 direct
+	ClaudeDesktopMode string `json:"claudeDesktopMode,omitempty"`
+	// Claude Desktop 模型路由（写入 profile 的 inferenceModels），空则使用默认四模型
+	ClaudeDesktopModelRoutes []ClaudeDesktopModelRoute `json:"claudeDesktopModelRoutes,omitempty"`
+
 	// 模型白名单 - Provider 原生支持的模型名
 	// 使用 map 实现 O(1) 查找，向后兼容（omitempty）
 	SupportedModels map[string]bool `json:"supportedModels,omitempty"`
@@ -271,6 +280,7 @@ func cloneProvider(provider Provider) Provider {
 		}
 	}
 	cloned.ModelPassthroughPatterns = append([]string(nil), provider.ModelPassthroughPatterns...)
+	cloned.ClaudeDesktopModelRoutes = append([]ClaudeDesktopModelRoute(nil), provider.ClaudeDesktopModelRoutes...)
 	if provider.RequestBodyOverrides != nil {
 		cloned.RequestBodyOverrides = cloneJSONLikeMap(provider.RequestBodyOverrides)
 	}
@@ -303,31 +313,6 @@ func cloneProviders(providers []Provider) []Provider {
 		cloned[index] = cloneProvider(provider)
 	}
 	return cloned
-}
-
-func snapshotProviderFile(path string) ([]byte, bool, error) {
-	data, err := os.ReadFile(path)
-	if err == nil {
-		return data, true, nil
-	}
-	if os.IsNotExist(err) {
-		return nil, false, nil
-	}
-	return nil, false, err
-}
-
-func restoreProviderFile(path string, existed bool, data []byte) error {
-	if !existed {
-		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-			return err
-		}
-		return nil
-	}
-	restoreTmp := path + ".restore.tmp"
-	if err := os.WriteFile(restoreTmp, data, 0o644); err != nil {
-		return err
-	}
-	return os.Rename(restoreTmp, path)
 }
 
 func NewProviderService() *ProviderService {
@@ -548,41 +533,15 @@ func (ps *ProviderService) SaveProviders(kind string, providers []Provider) erro
 	return nil
 }
 
-// loadProvidersRaw 原样读取配置文件（不迁移、不保存）
+// loadProvidersRaw 原样读取供应商存储（不迁移、不保存）
 // 用于内部需要读取现有配置但不触发迁移的场景（如名称校验）
 func (ps *ProviderService) loadProvidersRaw(kind string) ([]Provider, error) {
-	path, err := resolveProviderReadPath(kind)
-	if err != nil {
-		return nil, err
-	}
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-
-	var envelope providerEnvelope
-	if len(data) == 0 {
-		return []Provider{}, nil
-	}
-
-	if err := json.Unmarshal(data, &envelope); err != nil {
-		return nil, err
-	}
-
-	return envelope.Providers, nil
+	return LoadProvidersFromStore(kind)
 }
 
 // saveProvidersLocked 内部保存方法，调用方必须已持有锁
 func (ps *ProviderService) saveProvidersLocked(kind string, providers []Provider) error {
 	providers = append([]Provider(nil), providers...)
-	path, err := providerFilePath(kind)
-	if err != nil {
-		return err
-	}
 	providers = filterPersistentProviders(kind, providers)
 
 	// 加载现有配置，用于检查 name 是否被修改
@@ -630,19 +589,15 @@ func (ps *ProviderService) saveProvidersLocked(kind string, providers []Provider
 		return fmt.Errorf("配置验证失败：\n  - %s", strings.Join(validationErrors, "\n  - "))
 	}
 
-	data, err := json.MarshalIndent(providerEnvelope{Providers: providers}, "", "  ")
-	if err != nil {
+	if err := SaveProvidersToStore(kind, providers); err != nil {
 		return err
 	}
 
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+	snapshotData, err := json.Marshal(providers)
+	if err != nil {
 		return err
 	}
-	if err := os.Rename(tmp, path); err != nil {
-		return err
-	}
-	ps.storeProviderSnapshot(kind, providers, sha256.Sum256(data), true)
+	ps.storeProviderSnapshot(kind, providers, sha256.Sum256(snapshotData), true)
 	if len(renames) > 0 {
 		syncProviderIdentityRenamesBestEffort(kind, renames)
 	}
@@ -743,11 +698,11 @@ func (ps *ProviderService) LoadProviders(kind string) ([]Provider, error) {
 		return cloneProviders(snapshot.providers), nil
 	}
 
-	providers, err := ps.loadProvidersFromDisk(kind)
+	providers, err := ps.loadProvidersFromStore(kind)
 	if err != nil {
 		return nil, err
 	}
-	fingerprint, exists, fingerprintErr := providerConfigFingerprint(kind)
+	fingerprint, exists, fingerprintErr := providerStoreFingerprint(kind)
 	if fingerprintErr != nil {
 		return nil, fingerprintErr
 	}
@@ -755,65 +710,53 @@ func (ps *ProviderService) LoadProviders(kind string) ([]Provider, error) {
 	return cloneProviders(providers), nil
 }
 
-func (ps *ProviderService) loadProvidersFromDisk(kind string) ([]Provider, error) {
-	path, err := resolveProviderReadPath(kind)
+func (ps *ProviderService) loadProvidersFromStore(kind string) ([]Provider, error) {
+	providers, err := LoadProvidersFromStore(kind)
 	if err != nil {
 		return nil, err
 	}
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-
-	var envelope providerEnvelope
-	if len(data) == 0 {
-		return []Provider{}, nil
-	}
-
-	if err := json.Unmarshal(data, &envelope); err != nil {
-		return nil, err
+	// 保持 nil 语义（未初始化），供前端区分默认预设初始化路径
+	if providers == nil {
+		return nil, nil
 	}
 
 	// 执行字段迁移：将旧字段值迁移到新字段
 	migrated := false
-	envelope.Providers, migrated = ensureBuiltInProviders(kind, envelope.Providers, migrated)
-	for i := range envelope.Providers {
-		if envelope.Providers[i].migrateFromLegacy() {
+	providers, migrated = ensureBuiltInProviders(kind, providers, migrated)
+	for i := range providers {
+		if providers[i].migrateFromLegacy() {
 			migrated = true
 		}
 	}
 
-	// 如果有迁移，记录日志并持久化到磁盘
+	// 如果有迁移，记录日志并持久化到存储
 	if migrated {
 		fmt.Printf("[ProviderService] 已从旧配置迁移可用性字段 (kind=%s)\n", kind)
 		// 自动保存迁移后的配置（使用带锁的保存方法避免死锁）
 		ps.mu.Lock()
-		err := ps.saveProvidersLocked(kind, envelope.Providers)
+		err := ps.saveProvidersLocked(kind, providers)
 		ps.mu.Unlock()
 
 		if err != nil {
 			log.Printf("[ProviderService] 迁移后写入失败: %v\n", err)
 		} else {
-			fmt.Printf("[ProviderService] 迁移后的配置已保存到磁盘 (kind=%s)\n", kind)
+			fmt.Printf("[ProviderService] 迁移后的配置已保存到存储 (kind=%s)\n", kind)
 		}
 	}
 
-	return envelope.Providers, nil
+	return providers, nil
 }
 
-func providerConfigFingerprint(kind string) ([sha256.Size]byte, bool, error) {
-	path, err := resolveProviderReadPath(kind)
+// providerStoreFingerprint 基于统一存储内容计算指纹（用于快照外部变更检测）
+func providerStoreFingerprint(kind string) ([sha256.Size]byte, bool, error) {
+	providers, err := LoadProvidersFromStore(kind)
 	if err != nil {
 		return [sha256.Size]byte{}, false, err
 	}
-	data, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
+	if providers == nil {
 		return [sha256.Size]byte{}, false, nil
 	}
+	data, err := json.Marshal(providers)
 	if err != nil {
 		return [sha256.Size]byte{}, false, err
 	}
@@ -853,7 +796,7 @@ func (ps *ProviderService) refreshProviderSnapshots() {
 	ps.snapshotMu.RUnlock()
 
 	for _, kind := range kinds {
-		fingerprint, exists, err := providerConfigFingerprint(kind)
+		fingerprint, exists, err := providerStoreFingerprint(kind)
 		if err != nil {
 			log.Printf("[ProviderService] 检查供应商快照失败 (kind=%s): %v", kind, err)
 			continue
@@ -864,12 +807,12 @@ func (ps *ProviderService) refreshProviderSnapshots() {
 		if ok && current.exists == exists && current.fingerprint == fingerprint {
 			continue
 		}
-		providers, err := ps.loadProvidersFromDisk(kind)
+		providers, err := ps.loadProvidersFromStore(kind)
 		if err != nil {
 			log.Printf("[ProviderService] 外部供应商配置解析失败，继续使用上一份快照 (kind=%s): %v", kind, err)
 			continue
 		}
-		latestFingerprint, latestExists, latestErr := providerConfigFingerprint(kind)
+		latestFingerprint, latestExists, latestErr := providerStoreFingerprint(kind)
 		if latestErr != nil || latestExists != exists || latestFingerprint != fingerprint {
 			continue
 		}
@@ -895,33 +838,20 @@ func (ps *ProviderService) refreshProviderSnapshots() {
 // 执行配置加载和迁移，如有迁移则直接保存（不再加锁）
 // 仅在已持有 ps.mu 锁的上下文中调用（如 DuplicateProvider）
 func (ps *ProviderService) loadProvidersNoLock(kind string) ([]Provider, error) {
-	path, err := resolveProviderReadPath(kind)
+	providers, err := LoadProvidersFromStore(kind)
 	if err != nil {
 		return nil, err
 	}
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-
-	var envelope providerEnvelope
-	if len(data) == 0 {
-		return []Provider{}, nil
-	}
-
-	if err := json.Unmarshal(data, &envelope); err != nil {
-		return nil, err
+	// 保持 nil 语义（未初始化），供前端区分默认预设初始化路径
+	if providers == nil {
+		return nil, nil
 	}
 
 	// 执行字段迁移（但不保存，避免在持锁时再次加锁）
 	migrated := false
-	envelope.Providers, migrated = ensureBuiltInProviders(kind, envelope.Providers, migrated)
-	for i := range envelope.Providers {
-		if envelope.Providers[i].migrateFromLegacy() {
+	providers, migrated = ensureBuiltInProviders(kind, providers, migrated)
+	for i := range providers {
+		if providers[i].migrateFromLegacy() {
 			migrated = true
 		}
 	}
@@ -929,12 +859,12 @@ func (ps *ProviderService) loadProvidersNoLock(kind string) ([]Provider, error) 
 	if migrated {
 		fmt.Printf("[ProviderService] 已从旧配置迁移可用性字段 (kind=%s, 锁内模式)\n", kind)
 		// 在锁内模式下，直接保存而不再加锁
-		if err := ps.saveProvidersLocked(kind, envelope.Providers); err != nil {
+		if err := ps.saveProvidersLocked(kind, providers); err != nil {
 			log.Printf("[ProviderService] 锁内迁移保存失败: %v\n", err)
 		}
 	}
 
-	return envelope.Providers, nil
+	return providers, nil
 }
 
 func ensureBuiltInProviders(kind string, providers []Provider, migrated bool) ([]Provider, bool) {
@@ -1048,83 +978,16 @@ func (ps *ProviderService) DuplicateProvider(kind string, sourceID int64) (*Prov
 	}
 	newID := maxID + 1
 
-	// 5. 克隆配置（深拷贝）
-	cloned := &Provider{
-		ID:                       newID,
-		Name:                     source.Name + " (副本)",
-		APIURL:                   source.APIURL,
-		APIKey:                   source.APIKey,
-		Site:                     source.Site,
-		Icon:                     source.Icon,
-		Tint:                     source.Tint,
-		Accent:                   source.Accent,
-		Enabled:                  false, // 默认禁用，避免与源供应商冲突
-		APIFormat:                source.APIFormat,
-		AuthProvider:             source.AuthProvider,
-		AuthAccountID:            source.AuthAccountID,
-		Level:                    source.Level,
-		ProviderConcurrencyLimit: cloneOptionalInt(source.ProviderConcurrencyLimit),
-		APIEndpoint:              source.APIEndpoint, // 复制端点配置
-		ModelMappingMissPolicy:   normalizeModelMappingMissPolicy(source.ModelMappingMissPolicy),
-		// 可用性监控配置
-		AvailabilityMonitorEnabled: source.AvailabilityMonitorEnabled,
-		ConnectivityAutoBlacklist:  false, // 副本默认关闭自动拉黑
-	}
+	// 5. 克隆配置：复用 cloneProvider 全字段深拷贝，仅覆写副本专属字段
+	// （避免与 cloneProvider 的字段清单漂移——此前手写清单漏 ConfigTOML/ClaudeDesktopMode/ClaudeDesktopModelRoutes 等）
+	cloned := new(Provider)
+	*cloned = cloneProvider(*source)
+	cloned.ID = newID
+	cloned.Name = source.Name + " (副本)"
+	cloned.Enabled = false              // 默认禁用，避免与源供应商冲突
+	cloned.ConnectivityAutoBlacklist = false // 副本默认关闭自动拉黑
 
-	if source.CLIConfig != nil {
-		cloned.CLIConfig = cloneCLIEditableMap(source.CLIConfig)
-	}
-
-	// 6. 深拷贝 map（避免共享引用）
-	if source.SupportedModels != nil {
-		cloned.SupportedModels = make(map[string]bool, len(source.SupportedModels))
-		for k, v := range source.SupportedModels {
-			cloned.SupportedModels[k] = v
-		}
-	}
-
-	// 深拷贝 AvailabilityConfig
-	if source.AvailabilityConfig != nil {
-		cloned.AvailabilityConfig = &AvailabilityConfig{
-			TestModel:    source.AvailabilityConfig.TestModel,
-			TestEndpoint: source.AvailabilityConfig.TestEndpoint,
-			Timeout:      source.AvailabilityConfig.Timeout,
-		}
-	}
-
-	if source.ModelMapping != nil {
-		cloned.ModelMapping = make(map[string]string, len(source.ModelMapping))
-		for k, v := range source.ModelMapping {
-			cloned.ModelMapping[k] = v
-		}
-	}
-	if source.ModelMappingDisabled != nil {
-		cloned.ModelMappingDisabled = make(map[string]bool, len(source.ModelMappingDisabled))
-		for k, v := range source.ModelMappingDisabled {
-			cloned.ModelMappingDisabled[k] = v
-		}
-	}
-	if source.ModelMappingReasoningEfforts != nil {
-		cloned.ModelMappingReasoningEfforts = make(map[string]string, len(source.ModelMappingReasoningEfforts))
-		for k, v := range source.ModelMappingReasoningEfforts {
-			cloned.ModelMappingReasoningEfforts[k] = v
-		}
-	}
-	if source.ModelMappingSupports1M != nil {
-		cloned.ModelMappingSupports1M = make(map[string]bool, len(source.ModelMappingSupports1M))
-		for k, v := range source.ModelMappingSupports1M {
-			cloned.ModelMappingSupports1M[k] = v
-		}
-	}
-	if source.ModelPassthroughPatterns != nil {
-		cloned.ModelPassthroughPatterns = append([]string(nil), source.ModelPassthroughPatterns...)
-	}
-
-	if source.RequestBodyOverrides != nil {
-		cloned.RequestBodyOverrides = cloneJSONLikeMap(source.RequestBodyOverrides)
-	}
-
-	// 7. 添加到列表并保存（使用内部方法避免死锁）
+	// 6. 添加到列表并保存（使用内部方法避免死锁）
 	providers = append(providers, *cloned)
 	if err := ps.saveProvidersLocked(kind, providers); err != nil {
 		return nil, fmt.Errorf("保存副本失败: %w", err)

@@ -24,8 +24,13 @@ const (
 	skillStoreFile = "skill.json"
 
 	// 平台常量
-	skillPlatformClaude = "claude"
-	skillPlatformCodex  = "codex"
+	skillPlatformClaude    = "claude"
+	skillPlatformCodex     = "codex"
+	skillPlatformOpenCode  = "opencode"
+	skillPlatformGrokBuild = "grokbuild"
+	skillPlatformOpenClaw  = "openclaw"
+	skillPlatformHermes    = "hermes"
+	skillPlatformPi        = "pi"
 
 	// 安装位置常量
 	skillLocationUser    = "user"
@@ -49,10 +54,10 @@ type Skill struct {
 	Installed   bool   `json:"installed"`
 
 	// 新增字段
-	Enabled         bool   `json:"enabled"`                     // 是否启用（从 SKILL.md 读取）
-	LicenseFile     string `json:"license_file,omitempty"`      // 许可证文件路径
-	Platform        string `json:"platform,omitempty"`          // "claude" | "codex"
-	InstallLocation string `json:"install_location,omitempty"`  // "user" | "project"
+	Enabled         bool   `json:"enabled"`                    // 是否启用（从 SKILL.md 读取）
+	LicenseFile     string `json:"license_file,omitempty"`     // 许可证文件路径
+	Platform        string `json:"platform,omitempty"`         // "claude" | "codex"
+	InstallLocation string `json:"install_location,omitempty"` // "user" | "project"
 
 	// 仓库字段
 	RepoOwner  string `json:"repo_owner,omitempty"`
@@ -95,8 +100,8 @@ type installRequest struct {
 	RepoOwner string `json:"repo_owner"`
 	RepoName  string `json:"repo_name"`
 	Branch    string `json:"repo_branch"`
-	Platform  string `json:"platform"`  // "claude" | "codex"
-	Location  string `json:"location"`  // "user" | "project"
+	Platform  string `json:"platform"` // "claude" | "codex"
+	Location  string `json:"location"` // "user" | "project"
 }
 
 type SkillService struct {
@@ -119,7 +124,7 @@ func NewSkillService() *SkillService {
 }
 
 // getInstallPath 根据平台和位置返回 skills 目录路径
-// platform: "claude" | "codex"
+// platform: "claude" | "codex" | "opencode" | "grokbuild" | "openclaw" | "hermes" | "pi"
 // location: "user" | "project"
 func (ss *SkillService) getInstallPath(platform, location string) (string, error) {
 	var basePath string
@@ -147,6 +152,21 @@ func (ss *SkillService) getInstallPath(platform, location string) (string, error
 	switch platform {
 	case skillPlatformCodex:
 		configDir = ".codex"
+	case skillPlatformOpenCode:
+		// OpenCode 的 skills 位于 XDG 配置目录（~/.config/opencode/skills）
+		configDir = filepath.Join(".config", "opencode")
+	case skillPlatformGrokBuild:
+		// Grok Build 的 skills 位于 ~/.grok/skills
+		configDir = ".grok"
+	case skillPlatformOpenClaw:
+		// OpenClaw 的 skills 位于 ~/.openclaw/skills
+		configDir = ".openclaw"
+	case skillPlatformHermes:
+		// Hermes 的 skills 位于 ~/.hermes/skills
+		configDir = ".hermes"
+	case skillPlatformPi:
+		// Pi 的 skills 位于 ~/.pi/agent/skills
+		configDir = filepath.Join(".pi", "agent")
 	case skillPlatformClaude:
 		fallthrough
 	default:

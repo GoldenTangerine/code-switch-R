@@ -1,6 +1,6 @@
 /**
  * @name: 会话用量同步
- * @Descripttion: 增量解析 Claude、Codex 与 Gemini 本地会话并写入日志统计。
+ * @Descripttion: 增量解析 Claude、Codex、Gemini、OpenCode 与 Grok 本地会话并写入日志统计。
  * @version: 1.0.0
  * @Author: sm
  * @Date: 2026-07-17 17:01:12
@@ -186,6 +186,8 @@ func (ls *LogService) syncSessionUsageRootsLocked(scope string, home string) Ses
 		{platform: "claude", root: filepath.Join(home, ".claude"), sync: syncClaudeSessionUsage},
 		{platform: "codex", root: filepath.Join(home, ".codex"), sync: syncCodexSessionUsage},
 		{platform: "gemini", root: filepath.Join(home, ".gemini"), sync: syncGeminiSessionUsage},
+		{platform: "opencode", root: filepath.Join(home, ".local", "share", "opencode"), sync: syncOpenCodeSessionUsage},
+		{platform: "grokbuild", root: filepath.Join(home, ".grok"), sync: syncGrokSessionUsage},
 	}
 
 	for _, job := range jobs {

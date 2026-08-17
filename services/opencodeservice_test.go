@@ -237,6 +237,8 @@ func TestOpenCodeSaveProvidersRejectsLiveConflictWithoutDirtyingManagedProviders
 	if err := os.WriteFile(managedPath, originalManaged, 0o644); err != nil {
 		t.Fatalf("写入 managed providers 失败: %v", err)
 	}
+	// managed providers 已迁入 SQLite 统一存储（原 JSON 备份为 .bak）
+	migrateFixtureProvidersToStore(t)
 
 	service := &OpenCodeService{}
 	if err := service.loadProviders(); err != nil {
@@ -249,12 +251,12 @@ func TestOpenCodeSaveProvidersRejectsLiveConflictWithoutDirtyingManagedProviders
 	if err == nil {
 		t.Fatal("期望批量保存命中 unmanaged live provider 时返回错误")
 	}
-	managedData, readErr := os.ReadFile(managedPath)
+	managedProviders, readErr := LoadOpenCodeProvidersFromStore()
 	if readErr != nil {
 		t.Fatalf("读取 managed providers 失败: %v", readErr)
 	}
-	if string(managedData) != string(originalManaged) {
-		t.Fatalf("批量保存失败不应污染 managed providers，实际=%s", managedData)
+	if len(managedProviders) != 1 || managedProviders[0].ID != "stable" || managedProviders[0].Enabled {
+		t.Fatalf("批量保存失败不应污染 managed providers，实际=%#v", managedProviders)
 	}
 }
 

@@ -91,11 +91,12 @@ type WriteTask struct {
 
 // DBWriteQueue 数据库写入队列
 type DBWriteQueue struct {
-	db           *sql.DB
-	queue        chan *WriteTask
-	batchQueue   chan *WriteTask // 批量提交队列
-	shutdownChan chan struct{}
-	wg           sync.WaitGroup
+	db            *sql.DB
+	queue         chan *WriteTask
+	txGroupQueue  chan []*WriteTask // 事务组队列（一组任务单事务内原子执行）
+	batchQueue    chan *WriteTask   // 批量提交队列
+	shutdownChan  chan struct{}
+	wg            sync.WaitGroup
 
 	// 关闭状态标志（防止 Shutdown 后仍可入队）
 	closed atomic.Bool
@@ -143,6 +144,7 @@ func NewDBWriteQueue(db *sql.DB, queueSize int, enableBatch bool) *DBWriteQueue 
 	q := &DBWriteQueue{
 		db:             db,
 		queue:          make(chan *WriteTask, queueSize),
+		txGroupQueue:   make(chan []*WriteTask, queueSize),
 		shutdownChan:   make(chan struct{}),
 		stats:          &QueueStats{},
 		latencySamples: make([]float64, 1000), // 环形缓冲区容量1000
@@ -166,7 +168,8 @@ func NewDBWriteQueue(db *sql.DB, queueSize int, enableBatch bool) *DBWriteQueue 
 func (q *DBWriteQueue) worker() {
 	defer q.wg.Done()
 
-	var currentTask *WriteTask // 命名变量，用于在 panic 时返回错误
+	var currentTask *WriteTask   // 命名变量，用于在 panic 时返回错误
+	var currentGroup []*WriteTask // panic 时正在执行的事务组
 
 	// panic 保护：确保 worker 不会因未捕获的 panic 而崩溃
 	defer func() {
@@ -177,6 +180,13 @@ func (q *DBWriteQueue) worker() {
 			if currentTask != nil {
 				currentTask.Result <- fmt.Errorf("数据库写入 panic: %v", r)
 				close(currentTask.Result)
+			}
+			if len(currentGroup) > 0 {
+				panicErr := fmt.Errorf("事务组写入 panic: %v", r)
+				for _, task := range currentGroup {
+					task.Result <- panicErr
+					close(task.Result)
+				}
 			}
 
 			// 等待1秒后重启，避免快速循环（如果是系统性问题）
@@ -205,6 +215,11 @@ func (q *DBWriteQueue) worker() {
 
 			currentTask = nil // 清空当前任务（防止下一次 panic 误用）
 
+		case group := <-q.txGroupQueue:
+			currentGroup = group // 记录当前事务组，用于 panic 时返回错误
+			q.commitTxGroup(group)
+			currentGroup = nil
+
 		case <-q.shutdownChan:
 			// 排空 queue 中的所有剩余任务
 			for {
@@ -219,6 +234,10 @@ func (q *DBWriteQueue) worker() {
 					close(task.Result)
 
 					currentTask = nil
+				case group := <-q.txGroupQueue:
+					currentGroup = group
+					q.commitTxGroup(group)
+					currentGroup = nil
 				default:
 					// queue 已空，安全退出
 					return
@@ -226,6 +245,44 @@ func (q *DBWriteQueue) worker() {
 			}
 		}
 	}
+}
+
+// commitTxGroup 事务组提交：一组任务在单事务内串行执行，任一失败整体回滚
+// 适用于「DELETE + 多条 INSERT」等必须原子生效的异构写入组
+func (q *DBWriteQueue) commitTxGroup(tasks []*WriteTask) {
+	start := time.Now()
+
+	// 辅助函数：给所有任务返回相同结果（事务组同生共死）
+	sendResultToAll := func(err error) {
+		for _, task := range tasks {
+			task.Result <- err
+			close(task.Result)
+		}
+		// 更新统计（事务组提交，count=任务数，延迟按任务数分摊，与批量提交口径一致）
+		q.updateStats(len(tasks), time.Since(start), err)
+	}
+
+	tx, err := q.db.Begin()
+	if err != nil {
+		sendResultToAll(err)
+		return
+	}
+	defer tx.Rollback()
+
+	for _, task := range tasks {
+		if _, err := tx.Exec(task.SQL, task.Args...); err != nil {
+			sendResultToAll(fmt.Errorf("事务组执行失败: %w", err))
+			return
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		sendResultToAll(fmt.Errorf("事务提交失败: %w", err))
+		return
+	}
+
+	// 全部成功
+	sendResultToAll(nil)
 }
 
 // batchWorker 批量提交 worker（可选）
@@ -402,6 +459,53 @@ func (q *DBWriteQueue) Exec(sql string, args ...interface{}) error {
 	case <-timeout:
 		// 入队失败（队列满），直接返回
 		return fmt.Errorf("入队超时（30秒），队列已满")
+
+	case <-q.shutdownChan:
+		return fmt.Errorf("写入队列已关闭")
+	}
+}
+
+// ExecTxGroup 同步执行一组写入（单事务内串行执行，任一失败整体回滚，默认 30 秒超时）
+// 适用于「DELETE + 多条 INSERT」等必须原子生效的异构写入组：
+// 单队列 worker 内串行执行，天然无并发，事务组内语句顺序与传入顺序一致
+// 调用方只需填充 SQL/Args，Result 通道由本方法创建并回填
+func (q *DBWriteQueue) ExecTxGroup(tasks []WriteTask) error {
+	// 先检查关闭状态
+	if q.closed.Load() {
+		return fmt.Errorf("写入队列已关闭")
+	}
+	if len(tasks) == 0 {
+		return nil
+	}
+
+	group := make([]*WriteTask, 0, len(tasks))
+	for i := range tasks {
+		tasks[i].Result = make(chan error, 1)
+		group = append(group, &tasks[i])
+	}
+
+	// 默认 30 秒超时（防止误用导致永久阻塞，与 Exec 口径一致）
+	timeout := time.After(30 * time.Second)
+
+	select {
+	case q.txGroupQueue <- group:
+		// 成功入队，等待首个任务的结果（事务组所有任务共享同一结果）
+		select {
+		case err := <-group[0].Result:
+			return err
+		case <-timeout:
+			// 超时，但任务已入队，无法撤销，需等待结果以避免 goroutine 泄漏
+			go func() {
+				for _, task := range group {
+					<-task.Result
+				}
+			}()
+			return fmt.Errorf("事务组写入超时（30秒），队列可能积压严重")
+		}
+
+	case <-timeout:
+		// 入队失败（队列满），直接返回
+		return fmt.Errorf("事务组入队超时（30秒），队列已满")
 
 	case <-q.shutdownChan:
 		return fmt.Errorf("写入队列已关闭")

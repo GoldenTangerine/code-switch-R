@@ -503,6 +503,7 @@ func TestProviderSaveReconcilesClaudeSubagentModelOutsideProxySetup(t *testing.T
 
 func TestClaudeSettingsServiceApplySingleProviderRejectsTransformedAPIFormat(t *testing.T) {
 	useIsolatedHomeDir(t)
+	resetProviderStoreForTest(t)
 
 	providerPath, err := providerFilePath("claude")
 	if err != nil {
@@ -534,6 +535,7 @@ func TestClaudeSettingsServiceApplySingleProviderRejectsTransformedAPIFormat(t *
 	if err := os.WriteFile(providerPath, payload, 0o600); err != nil {
 		t.Fatalf("写入 provider 配置失败: %v", err)
 	}
+	migrateFixtureProvidersToStore(t)
 
 	service := NewClaudeSettingsService(":18100", nil)
 	err = service.ApplySingleProvider(42)
@@ -576,6 +578,7 @@ func TestClaudeSettingsServiceApplySingleProviderUsesSelectedAuthField(t *testin
 	if err := os.WriteFile(providerPath, payload, 0o600); err != nil {
 		t.Fatalf("写入 provider 配置失败: %v", err)
 	}
+	migrateFixtureProvidersToStore(t)
 
 	service := NewClaudeSettingsService(":18100", nil)
 	if err := service.ApplySingleProvider(43); err != nil {

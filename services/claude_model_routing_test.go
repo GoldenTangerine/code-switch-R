@@ -543,6 +543,8 @@ func TestAppSettingsMigratesExistingClaudeModelConfiguration(t *testing.T) {
 	if err := os.WriteFile(providerPath, payload, 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// 供应商已迁入 SQLite 统一存储，模型路由判定读取统一存储
+	migrateFixtureProvidersToStore(t)
 	settingsPath := filepath.Join(home, ".code-switch", appSettingsFile)
 	if err := os.WriteFile(settingsPath, []byte(`{"show_heatmap":true}`), 0o644); err != nil {
 		t.Fatal(err)
@@ -576,6 +578,8 @@ func TestAppSettingsMigratesRoutingWithoutExistingAppFile(t *testing.T) {
 	if err := os.WriteFile(providerPath, payload, 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// 供应商已迁入 SQLite 统一存储，模型路由判定读取统一存储
+	migrateFixtureProvidersToStore(t)
 	settings, err := NewAppSettingsService(nil).GetAppSettings()
 	if err != nil {
 		t.Fatal(err)

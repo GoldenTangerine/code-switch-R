@@ -1,4 +1,4 @@
-import type { AutomationCard, ModelMappingMissPolicy } from '../../../data/cards'
+import type { AutomationCard, ClaudeDesktopModelRoute, ModelMappingMissPolicy } from '../../../data/cards'
 import { cloneBudgetQuotaAdjustments } from '../../../utils/budgetUsage'
 import {
   hasProviderQuotaQueryType,
@@ -40,6 +40,33 @@ export const normalizeAnthropicCacheTTL = (value: unknown): AnthropicCacheTTL =>
 export const normalizeModelMappingMissPolicy = (value: unknown): ModelMappingMissPolicy => {
   const normalized = `${value ?? ''}`.trim().toLowerCase()
   return normalized === 'passthrough' ? 'passthrough' : 'block'
+}
+
+export const normalizeClaudeDesktopMode = (value: unknown): string => {
+  const normalized = `${value ?? ''}`.trim().toLowerCase()
+  return normalized === 'proxy' ? 'proxy' : 'direct'
+}
+
+// 归一化 Claude Desktop 模型路由：过滤空 name、按 name 去重，兼容 snake_case 键
+export const normalizeClaudeDesktopModelRoutes = (value: unknown): ClaudeDesktopModelRoute[] => {
+  if (!Array.isArray(value)) return []
+  const seen = new Set<string>()
+  const routes: ClaudeDesktopModelRoute[] = []
+  value.forEach((entry) => {
+    if (!entry || typeof entry !== 'object') return
+    const record = entry as Record<string, unknown>
+    const name = `${record.name ?? record.Name ?? ''}`.trim()
+    if (!name || seen.has(name)) return
+    seen.add(name)
+    const labelOverride = `${record.labelOverride ?? record.label_override ?? ''}`.trim()
+    const route: ClaudeDesktopModelRoute = { name }
+    if (labelOverride) route.labelOverride = labelOverride
+    if (record.supports1m === true || record.Supports1M === true || record.supports_1m === true) {
+      route.supports1m = true
+    }
+    routes.push(route)
+  })
+  return routes
 }
 
 export const normalizeModelMappingReasoningEfforts = (
@@ -171,7 +198,10 @@ export const createDefaultVendorForm = (
   opencodeSettingsConfig: platform === 'opencode'
     ? createDefaultOpenCodeSettingsConfig()
     : undefined,
-  category: platform === 'opencode' ? 'custom' : undefined,
+  configTOML: '',
+  claudeDesktopMode: platform === 'claude-desktop' ? 'direct' : undefined,
+  claudeDesktopModelRoutes: platform === 'claude-desktop' ? [] : undefined,
+  category: platform === 'opencode' || platform === 'grokbuild' || platform === 'claude-desktop' || platform === 'openclaw' || platform === 'hermes' || platform === 'pi' ? 'custom' : undefined,
   authProvider: '',
   authAccountId: '',
   partnerPromotionKey: '',
@@ -236,6 +266,11 @@ export const createVendorFormFromCard = (
   apiEndpoint: card.apiEndpoint || '',
   opencodeNpm: card.opencodeNpm || '',
   opencodeSettingsConfig: cloneProviderValue(card.opencodeSettingsConfig || {}),
+  configTOML: card.configTOML || '',
+  claudeDesktopMode: tabId === 'claude-desktop' ? normalizeClaudeDesktopMode(card.claudeDesktopMode) : undefined,
+  claudeDesktopModelRoutes: tabId === 'claude-desktop'
+    ? normalizeClaudeDesktopModelRoutes(card.claudeDesktopModelRoutes)
+    : undefined,
   category: card.category || '',
   authProvider: card.authProvider || '',
   authAccountId: card.authAccountId || '',
@@ -346,6 +381,11 @@ export const buildNormalizedVendorForm = ({
     providerRef: form.providerRef || '',
     opencodeNpm: form.opencodeNpm || '',
     opencodeSettingsConfig: cloneProviderValue(form.opencodeSettingsConfig || {}),
+    configTOML: `${form.configTOML ?? ''}`,
+    claudeDesktopMode: tabId === 'claude-desktop' ? normalizeClaudeDesktopMode(form.claudeDesktopMode) : undefined,
+    claudeDesktopModelRoutes: tabId === 'claude-desktop'
+      ? normalizeClaudeDesktopModelRoutes(form.claudeDesktopModelRoutes)
+      : undefined,
     category: form.category || '',
     authProvider: form.authProvider || '',
     authAccountId: form.authAccountId || '',
@@ -420,6 +460,11 @@ export const buildPersistedProviderFieldsFromForm = (
     providerRef: form.providerRef || '',
     opencodeNpm: form.opencodeNpm || '',
     opencodeSettingsConfig: cloneProviderValue(form.opencodeSettingsConfig || {}),
+    configTOML: `${form.configTOML ?? ''}`,
+    claudeDesktopMode: tabId === 'claude-desktop' ? normalizeClaudeDesktopMode(form.claudeDesktopMode) : undefined,
+    claudeDesktopModelRoutes: tabId === 'claude-desktop'
+      ? normalizeClaudeDesktopModelRoutes(form.claudeDesktopModelRoutes)
+      : undefined,
     category: form.category || '',
     authProvider: form.authProvider || '',
     authAccountId: form.authAccountId || '',

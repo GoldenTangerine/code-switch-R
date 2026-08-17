@@ -117,6 +117,11 @@ const createCardRecord = (): Record<ProviderTab, AutomationCard[]> => ({
   codex: [],
   gemini: [],
   opencode: [],
+  grokbuild: [],
+  'claude-desktop': [],
+  openclaw: [],
+  hermes: [],
+  pi: [],
   others: [],
 })
 

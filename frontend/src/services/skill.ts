@@ -1,5 +1,7 @@
 import { Call } from '@wailsio/runtime'
 
+export type SkillPlatform = 'claude' | 'codex' | 'opencode' | 'grokbuild'
+
 export type SkillSummary = {
   key: string
   name: string
@@ -11,7 +13,7 @@ export type SkillSummary = {
   // 新增字段
   enabled: boolean
   license_file?: string
-  platform: 'claude' | 'codex' | ''
+  platform: SkillPlatform | ''
   install_location: 'user' | 'project' | ''
 
   // 仓库字段
@@ -32,7 +34,7 @@ export type InstallSkillPayload = {
   repo_owner?: string
   repo_name?: string
   repo_branch?: string
-  platform?: 'claude' | 'codex'
+  platform?: SkillPlatform
   location?: 'user' | 'project'
 }
 
@@ -43,7 +45,7 @@ export const fetchSkills = async (): Promise<SkillSummary[]> => {
 }
 
 // 获取指定平台的技能列表（新方法）
-export const fetchSkillsForPlatform = async (platform: 'claude' | 'codex'): Promise<SkillSummary[]> => {
+export const fetchSkillsForPlatform = async (platform: SkillPlatform): Promise<SkillSummary[]> => {
   const response = await Call.ByName('codeswitch/services.SkillService.ListSkillsForPlatform', platform)
   return (response as SkillSummary[]) ?? []
 }

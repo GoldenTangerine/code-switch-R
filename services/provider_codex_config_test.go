@@ -34,9 +34,10 @@ func TestProviderService_SaveCodexProvidersUsesNestedConfigAndPreservesCLIConfig
 		t.Fatalf("保存 Codex providers 失败: %v", err)
 	}
 
-	newPath := filepath.Join(homeDir, ".code-switch", "providers", "codex.json")
-	if _, err := os.Stat(newPath); err != nil {
-		t.Fatalf("期望新路径存在: %s, err=%v", newPath, err)
+	// 供应商已写入 SQLite 统一存储（不再落 JSON 文件）
+	storeLoaded, err := LoadProvidersFromStore("codex")
+	if err != nil || len(storeLoaded) != 1 || storeLoaded[0].Name != "Test Codex" {
+		t.Fatalf("统一存储回读失败: %#v, %v", storeLoaded, err)
 	}
 
 	legacyPath := filepath.Join(homeDir, ".code-switch", "codex.json")
@@ -91,6 +92,7 @@ func TestProviderService_LoadCodexProvidersFallsBackToLegacyPath(t *testing.T) {
 	if err := os.WriteFile(legacyPath, payload, 0o644); err != nil {
 		t.Fatalf("写入旧配置失败: %v", err)
 	}
+	migrateFixtureProvidersToStore(t)
 
 	service := NewProviderService()
 	loaded, err := service.LoadProviders("codex")
@@ -156,6 +158,7 @@ func TestProviderService_LoadProvidersSupportsTotalQuotaFieldAfterInitDatabase(t
 	if err := os.WriteFile(configPath, payload, 0o644); err != nil {
 		t.Fatalf("写入 provider 配置失败: %v", err)
 	}
+	migrateFixtureProvidersToStore(t)
 
 	service := NewProviderService()
 	loaded, err := service.LoadProviders("codex")
@@ -209,6 +212,7 @@ func TestProviderServiceCustomOfficialCategoryDoesNotGetFiltered(t *testing.T) {
 	if err := os.WriteFile(configPath, payload, 0o644); err != nil {
 		t.Fatalf("写入 provider 配置失败: %v", err)
 	}
+	migrateFixtureProvidersToStore(t)
 
 	loaded, err := NewProviderService().LoadProviders("codex")
 	if err != nil {

@@ -7,6 +7,11 @@ const createAvailabilityMap = (): Record<ProviderTab, Record<number, ProviderTim
   codex: {},
   gemini: {},
   opencode: {},
+  grokbuild: {},
+  'claude-desktop': {},
+  openclaw: {},
+  hermes: {},
+  pi: {},
   others: {},
 })
 

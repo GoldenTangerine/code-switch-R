@@ -288,6 +288,21 @@ func main() {
 	})
 	geminiService := services.NewGeminiService("127.0.0.1:18100")
 	openCodeService := services.NewOpenCodeService()
+	openClawService := services.NewOpenClawService()
+	// OpenClaw 首次接入：检测 ~/.openclaw/openclaw.json 的 models.providers 并导入（不修改原生文件）
+	if _, err := openClawService.ImportFromLive(); err != nil {
+		log.Printf("OpenClaw live 配置导入检查失败: %v", err)
+	}
+	hermesService := services.NewHermesService()
+	// Hermes 首次接入：检测 ~/.hermes/config.yaml 的 custom_providers 并导入（不修改原生文件）
+	if _, err := hermesService.ImportFromLive(); err != nil {
+		log.Printf("Hermes live 配置导入检查失败: %v", err)
+	}
+	piService := services.NewPiService()
+	// Pi 首次接入：检测 ~/.pi/agent/models.json 的 providers 并导入（不修改原生文件）
+	if _, err := piService.ImportFromLive(); err != nil {
+		log.Printf("Pi live 配置导入检查失败: %v", err)
+	}
 	codexOAuthService := services.NewCodexOAuthService(providerService)
 	providerRelay := services.NewProviderRelayService(providerService, geminiService, blacklistService, notificationService, appSettings, modelPricingService, ":18100")
 	customCliService := services.NewCustomCliService(providerRelay.Addr())
@@ -300,6 +315,17 @@ func main() {
 	providerRelayStateService := services.NewProviderRelayStateService(providerRelay)
 	claudeSettings := services.NewClaudeSettingsService(providerRelay.Addr(), appSettings)
 	codexSettings := services.NewCodexSettingsService(providerRelay.Addr())
+	grokSettings := services.NewGrokSettingsService(providerRelay.Addr())
+	// Grok 首次接入：检测 ~/.grok/config.toml 的自定义模型配置并导入（不修改原生文件）
+	if _, err := grokSettings.ImportFromLive(); err != nil {
+		log.Printf("Grok live 配置导入检查失败: %v", err)
+	}
+	claudeDesktopSettings := services.NewClaudeDesktopSettingsService(providerRelay.Addr())
+	// Claude Desktop 首次接入：检测 3p profile 的网关配置并导入（不修改原生文件）
+	if _, err := claudeDesktopSettings.ImportFromLive(); err != nil {
+		log.Printf("Claude Desktop live 配置导入检查失败: %v", err)
+	}
+	xaiOAuthService := services.NewXaiOAuthService()
 	providerService.BindClaudeSettingsService(claudeSettings)
 	appSettings.BindClaudeSettingsService(claudeSettings)
 	appSettings.BindCodexSettingsService(codexSettings)
@@ -457,6 +483,9 @@ func main() {
 			application.NewService(providerRelayStateService),
 			application.NewService(claudeSettings),
 			application.NewService(codexSettings),
+			application.NewService(grokSettings),
+			application.NewService(claudeDesktopSettings),
+			application.NewService(xaiOAuthService),
 			application.NewService(cliConfigService),
 			application.NewService(logService),
 			application.NewService(appSettings),
@@ -478,6 +507,9 @@ func main() {
 			application.NewService(versionService),
 			application.NewService(geminiService),
 			application.NewService(openCodeService),
+			application.NewService(openClawService),
+			application.NewService(hermesService),
+			application.NewService(piService),
 			application.NewService(consoleService),
 			application.NewService(customCliService),
 			application.NewService(networkService),

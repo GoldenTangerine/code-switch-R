@@ -38,6 +38,11 @@ const createQuotaDisplayMap = (): Record<ProviderTab, Record<string, ProviderQuo
   codex: {},
   gemini: {},
   opencode: {},
+  grokbuild: {},
+  'claude-desktop': {},
+  openclaw: {},
+  hermes: {},
+  pi: {},
   others: {},
 })
 
@@ -46,6 +51,11 @@ const createQuotaRefreshStateMap = (): Record<ProviderTab, Record<string, boolea
   codex: {},
   gemini: {},
   opencode: {},
+  grokbuild: {},
+  'claude-desktop': {},
+  openclaw: {},
+  hermes: {},
+  pi: {},
   others: {},
 })
 
@@ -61,6 +71,11 @@ const createRemoteQuotaCacheMap = (): Record<ProviderTab, Record<string, RemoteQ
   codex: {},
   gemini: {},
   opencode: {},
+  grokbuild: {},
+  'claude-desktop': {},
+  openclaw: {},
+  hermes: {},
+  pi: {},
   others: {},
 })
 
