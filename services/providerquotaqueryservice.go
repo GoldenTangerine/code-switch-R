@@ -545,7 +545,46 @@ func (s *ProviderQuotaQueryService) executeScriptQuotaQuery(
 	if len(items) == 0 {
 		return nil, fmt.Errorf("脚本未返回可展示的额度数据")
 	}
+	applySub2APIUnlimitedSemantics(items, templateType, responsePayload)
 	return normalizeProviderQuotaQueryItems(items), nil
+}
+
+func applySub2APIUnlimitedSemantics(items []ProviderQuotaQueryItem, templateType string, responsePayload any) {
+	if !strings.EqualFold(strings.TrimSpace(templateType), string(ProviderQuotaTemplateTypeSub2API)) {
+		return
+	}
+
+	isUnlimitedSubscription := hasSub2APIUnlimitedSubscription(responsePayload)
+	for index := range items {
+		item := &items[index]
+		canDisplayUnlimited := item.Active &&
+			strings.TrimSpace(item.InvalidMessage) == "" &&
+			(item.Unlimited || strings.EqualFold(strings.TrimSpace(item.Key), "balance"))
+		item.Unlimited = isUnlimitedSubscription && canDisplayUnlimited
+		if item.Unlimited {
+			item.Used = 0
+			item.Total = 0
+		}
+	}
+}
+
+func hasSub2APIUnlimitedSubscription(responsePayload any) bool {
+	payload, ok := responsePayload.(map[string]any)
+	if !ok {
+		return false
+	}
+	subscription, ok := payload["subscription"].(map[string]any)
+	if !ok {
+		return false
+	}
+
+	for _, key := range []string{"daily_limit_usd", "weekly_limit_usd", "monthly_limit_usd"} {
+		limit, hasLimit := floatFromAnyOk(subscription[key])
+		if !hasLimit || limit != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func validateProviderQuotaScriptPreset(templateType string, scriptCode string) error {
@@ -808,16 +847,9 @@ func buildProviderQuotaItemFromScriptObject(
 	used, hasUsed := floatFromAnyOk(payload["used"])
 	remaining, hasRemaining := floatFromAnyOk(payload["remaining"])
 	unlimited, _ := boolFromAny(payload["unlimited"])
-	if hasRemaining && remaining < 0 {
-		unlimited = true
-	}
+	unlimited = unlimited && strings.EqualFold(strings.TrimSpace(templateType), string(ProviderQuotaTemplateTypeSub2API))
 
 	switch {
-	case unlimited:
-		total = 0
-		used = 0
-		hasTotal = true
-		hasUsed = true
 	case hasTotal && hasUsed:
 	case hasTotal && hasRemaining:
 		used = total - remaining
@@ -835,6 +867,11 @@ func buildProviderQuotaItemFromScriptObject(
 		hasUsed = true
 	case hasUsed:
 		total = used
+		used = 0
+		hasTotal = true
+		hasUsed = true
+	case unlimited:
+		total = 0
 		used = 0
 		hasTotal = true
 		hasUsed = true

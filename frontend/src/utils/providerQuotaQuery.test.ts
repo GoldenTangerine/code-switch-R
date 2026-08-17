@@ -180,7 +180,7 @@ describe('providerQuotaQuery utils', () => {
     expect(preset.extractor({
       isValid: true,
       planName: 'Unlimited',
-      remaining: -1,
+      remaining: 0,
       unit: 'USD',
       subscription: {
         daily_limit_usd: 0,
@@ -190,6 +190,17 @@ describe('providerQuotaQuery utils', () => {
     })).toEqual(expect.objectContaining({
       key: 'balance',
       unlimited: true,
+      remaining: 0,
+    }))
+
+    expect(preset.extractor({
+      isValid: true,
+      remaining: -1,
+      unit: 'USD',
+      subscription: {},
+    })).toEqual(expect.objectContaining({
+      key: 'balance',
+      unlimited: false,
       remaining: -1,
     }))
   })

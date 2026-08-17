@@ -228,6 +228,29 @@ describe('ProviderCard display states', () => {
     }
   })
 
+  it('exposes provider quota progress to assistive technology', async () => {
+    const html = await renderCard(baseViewModel({
+      quotaDisplay: [{
+        key: 'weekly',
+        label: '周',
+        used: 50,
+        total: 200,
+        progressRatio: 0.25,
+        countdownLabel: '6d23h',
+        nextReset: new Date('2026-08-24T07:58:35.941Z'),
+        queriedAt: Date.now(),
+        valueMode: 'currency',
+      }],
+    }))
+
+    expect(html).toContain('role="progressbar"')
+    expect(html).toContain('aria-label="周"')
+    expect(html).toContain('aria-valuemin="0"')
+    expect(html).toContain('aria-valuemax="100"')
+    expect(html).toContain('aria-valuenow="25"')
+    expect(html).toContain('aria-valuetext="25%"')
+  })
+
   it('highlights active concurrency without marking it as full', async () => {
     const html = await renderCard(baseViewModel({
       concurrencyStatus: {

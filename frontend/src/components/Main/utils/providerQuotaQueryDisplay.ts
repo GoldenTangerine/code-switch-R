@@ -88,7 +88,7 @@ export async function resolveProviderQuotaQueryDisplay({
           label: defaultLabelKey ? t(defaultLabelKey) : `${item.label ?? ''}`.trim() || normalizedKey,
           used,
           total,
-          unlimited: item.unlimited === true,
+          unlimited: queryType === 'sub2api' && item.unlimited === true,
           progressRatio: resolveProgressRatio(used, total),
           countdownLabel: isActive
             ? formatProviderQuotaCountdownLabel(nextReset, now)

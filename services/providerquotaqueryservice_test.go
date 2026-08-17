@@ -355,6 +355,26 @@ func TestProviderQuotaQueryService_QueryQuotaParsesGeneralScriptTemplate(t *test
 	}
 }
 
+func TestProviderQuotaQueryService_GeneralBalanceCannotDeclareUnlimited(t *testing.T) {
+	for _, remaining := range []float64{0, -1} {
+		item, err := buildProviderQuotaItemFromScriptObject(map[string]any{
+			"key":       "balance",
+			"remaining": remaining,
+			"unlimited": true,
+		}, 0, string(ProviderQuotaTemplateTypeGeneral))
+		if err != nil {
+			t.Fatalf("解析通用余额失败: %v", err)
+		}
+		if item.Unlimited || item.Total != 0 || item.Used != 0 {
+			t.Fatalf("通用余额 %v 不应视为无限: %+v", remaining, item)
+		}
+		exhausted, valid := quotaItemsExhausted([]ProviderQuotaQueryItem{item})
+		if !exhausted || !valid {
+			t.Fatalf("通用余额 %v 应判定为耗尽: exhausted=%v valid=%v", remaining, exhausted, valid)
+		}
+	}
+}
+
 func TestProviderQuotaQueryService_QueryQuotaParsesNewAPIScriptTemplate(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/user/self" {
@@ -512,7 +532,7 @@ func TestProviderQuotaQueryService_QueryQuotaSub2APIFallsBackToBalance(t *testin
 		_, _ = w.Write([]byte(`{
 			"isValid": true,
 			"planName": "Unlimited",
-			"remaining": -1,
+			"remaining": 0,
 			"unit": "USD",
 			"subscription": {
 				"daily_limit_usd": 0,
@@ -541,6 +561,145 @@ func TestProviderQuotaQueryService_QueryQuotaSub2APIFallsBackToBalance(t *testin
 	item := result.Items[0]
 	if item.Key != "balance" || item.Label != "Unlimited" || item.Total != 0 || item.Used != 0 || !item.Unlimited {
 		t.Fatalf("Sub2API 余额回退异常：%+v", item)
+	}
+}
+
+func TestProviderQuotaQueryService_Sub2APIMissingLimitsCannotDeclareUnlimited(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"isValid":true,"remaining":0,"subscription":{}}`))
+	}))
+	defer server.Close()
+
+	service := NewProviderQuotaQueryService()
+	result := service.QueryQuota(string(ProviderQuotaQueryTypeSub2API), server.URL, "sub2api-key", &ProviderQuotaQueryConfig{
+		Enabled:      true,
+		TemplateType: string(ProviderQuotaTemplateTypeSub2API),
+		Code: `({
+  request: { url: "{{baseUrl}}/v1/usage", method: "GET" },
+  extractor: function(response) {
+    return { key: "balance", remaining: response.remaining, unlimited: true, valueMode: "currency", isValid: response.isValid };
+  }
+})`,
+	})
+
+	if !result.Success || len(result.Items) != 1 {
+		t.Fatalf("期望 Sub2API 查询成功，实际：%+v", result)
+	}
+	item := result.Items[0]
+	if item.Unlimited || item.Total != 0 || item.Used != 0 {
+		t.Fatalf("缺少 limit 字段时不应视为无限订阅：%+v", item)
+	}
+	exhausted, valid := quotaItemsExhausted(result.Items)
+	if !exhausted || !valid {
+		t.Fatalf("缺少 limit 字段的零余额应判定为耗尽: exhausted=%v valid=%v", exhausted, valid)
+	}
+}
+
+func TestProviderQuotaQueryService_Sub2APIRejectedUnlimitedPreservesBalance(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"isValid": true,
+			"remaining": 195.16573,
+			"subscription": {
+				"daily_limit_usd": 0,
+				"weekly_limit_usd": 200,
+				"monthly_limit_usd": 800
+			}
+		}`))
+	}))
+	defer server.Close()
+
+	service := NewProviderQuotaQueryService()
+	result := service.QueryQuota(string(ProviderQuotaQueryTypeSub2API), server.URL, "sub2api-key", &ProviderQuotaQueryConfig{
+		Enabled:      true,
+		TemplateType: string(ProviderQuotaTemplateTypeSub2API),
+		Code: `({
+  request: { url: "{{baseUrl}}/v1/usage", method: "GET" },
+  extractor: function(response) {
+    return { key: "balance", remaining: response.remaining, unlimited: true, valueMode: "currency", isValid: response.isValid };
+  }
+})`,
+	})
+
+	if !result.Success || len(result.Items) != 1 {
+		t.Fatalf("期望 Sub2API 查询成功，实际：%+v", result)
+	}
+	item := result.Items[0]
+	if item.Unlimited || item.Total != 195.16573 || item.Used != 0 {
+		t.Fatalf("否决不限额后应保留真实余额：%+v", item)
+	}
+	exhausted, valid := quotaItemsExhausted(result.Items)
+	if exhausted || !valid {
+		t.Fatalf("正余额不应判定为耗尽: exhausted=%v valid=%v", exhausted, valid)
+	}
+}
+
+func TestHasSub2APIUnlimitedSubscriptionRequiresThreeExplicitZeroLimits(t *testing.T) {
+	tests := []struct {
+		name         string
+		subscription map[string]any
+		want         bool
+	}{
+		{
+			name: "numeric zero limits",
+			subscription: map[string]any{
+				"daily_limit_usd":   float64(0),
+				"weekly_limit_usd":  float64(0),
+				"monthly_limit_usd": float64(0),
+			},
+			want: true,
+		},
+		{
+			name: "string zero limits",
+			subscription: map[string]any{
+				"daily_limit_usd":   "0",
+				"weekly_limit_usd":  "0.0",
+				"monthly_limit_usd": " 0 ",
+			},
+			want: true,
+		},
+		{
+			name: "missing limit",
+			subscription: map[string]any{
+				"daily_limit_usd":  0,
+				"weekly_limit_usd": 0,
+			},
+		},
+		{
+			name: "empty limit",
+			subscription: map[string]any{
+				"daily_limit_usd":   0,
+				"weekly_limit_usd":  "",
+				"monthly_limit_usd": 0,
+			},
+		},
+		{
+			name: "negative limit",
+			subscription: map[string]any{
+				"daily_limit_usd":   0,
+				"weekly_limit_usd":  -1,
+				"monthly_limit_usd": 0,
+			},
+		},
+		{
+			name: "positive limit",
+			subscription: map[string]any{
+				"daily_limit_usd":   0,
+				"weekly_limit_usd":  200,
+				"monthly_limit_usd": 0,
+			},
+		},
+	}
+
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			payload := map[string]any{"subscription": testCase.subscription}
+			if got := hasSub2APIUnlimitedSubscription(payload); got != testCase.want {
+				t.Fatalf("无限订阅判定错误: got=%v want=%v payload=%+v", got, testCase.want, payload)
+			}
+		})
 	}
 }
 

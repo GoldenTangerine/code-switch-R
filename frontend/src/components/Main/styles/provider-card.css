@@ -1150,7 +1150,9 @@
 .card-balance-quota__item-label {
   display: inline-flex;
   align-items: center;
+  min-width: 0;
   max-width: 100%;
+  overflow: hidden;
   padding: 2px 6px;
   border-radius: 999px;
   background: rgba(99, 102, 241, 0.1);
@@ -1158,6 +1160,7 @@
   font-size: 0.58rem;
   font-weight: 700;
   letter-spacing: 0.03em;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 

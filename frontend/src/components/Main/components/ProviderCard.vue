@@ -499,7 +499,15 @@
                   :title="quotaTooltip(item)"
                 >
                   <span class="quota-badge" :class="`quota-badge--${item.key}`">{{ item.label }}</span>
-                  <span class="quota-progress-bar">
+                  <span
+                    class="quota-progress-bar"
+                    role="progressbar"
+                    :aria-label="item.label"
+                    aria-valuemin="0"
+                    aria-valuemax="100"
+                    :aria-valuenow="Math.round(quotaProgressWidth(item))"
+                    :aria-valuetext="quotaUsagePercent(item)"
+                  >
                     <span
                       class="quota-progress-fill"
                       :class="quotaProgressClass(item)"
@@ -708,7 +716,15 @@
                 :title="quotaTooltip(item)"
               >
                 <span class="quota-badge" :class="`quota-badge--${item.key}`">{{ item.label }}</span>
-                <span class="quota-progress-bar">
+                <span
+                  class="quota-progress-bar"
+                  role="progressbar"
+                  :aria-label="item.label"
+                  aria-valuemin="0"
+                  aria-valuemax="100"
+                  :aria-valuenow="Math.round(quotaProgressWidth(item))"
+                  :aria-valuetext="quotaUsagePercent(item)"
+                >
                   <span
                     class="quota-progress-fill"
                     :class="quotaProgressClass(item)"

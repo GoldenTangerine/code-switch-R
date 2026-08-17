@@ -899,9 +899,9 @@ onUnmounted(() => {
           </div>
           <div v-for="quota in card.visibleQuotas" :key="`${card.platform}-${quota.key}`" class="tray-item">
             <div class="tray-item__header">
-              <div class="tray-item__title">
+              <div class="tray-item__title" :title="quota.title">
                 <span class="tray-dot"></span>
-                <span>{{ quota.title }}</span>
+                <span class="tray-item__title-text">{{ quota.title }}</span>
               </div>
               <div class="tray-item__summary">
                 <div class="tray-item__value" :class="{ loading: card.loading }">
@@ -912,7 +912,16 @@ onUnmounted(() => {
                 <span v-if="quota.hasBudget" class="tray-item__percent">{{ quota.progressPercentLabel }}</span>
               </div>
             </div>
-            <div v-if="quota.hasBudget" class="tray-progress">
+            <div
+              v-if="quota.hasBudget"
+              class="tray-progress"
+              role="progressbar"
+              :aria-label="quota.title"
+              aria-valuemin="0"
+              aria-valuemax="100"
+              :aria-valuenow="Math.round(quota.progressRatio * 100)"
+              :aria-valuetext="quota.progressPercentLabel"
+            >
               <div class="tray-progress__bar" :style="{ width: `${quota.progressRatio * 100}%` }"></div>
             </div>
             <div v-if="quota.countdownLabel || quota.forecastLabel" class="tray-meta">
@@ -988,9 +997,9 @@ onUnmounted(() => {
             }"
           >
             <div class="tray-item__header">
-              <div class="tray-item__title">
+              <div class="tray-item__title" :title="quota.title">
                 <span class="tray-dot"></span>
-                <span>{{ quota.title }}</span>
+                <span class="tray-item__title-text">{{ quota.title }}</span>
               </div>
               <div class="tray-item__summary">
                 <div class="tray-item__value" :class="{ loading: card.loading }">
@@ -1022,7 +1031,16 @@ onUnmounted(() => {
                 </span>
               </div>
             </div>
-            <div v-if="quota.displayKind === 'progress' && quota.hasBudget" class="tray-progress">
+            <div
+              v-if="quota.displayKind === 'progress' && quota.hasBudget"
+              class="tray-progress"
+              role="progressbar"
+              :aria-label="quota.title"
+              aria-valuemin="0"
+              aria-valuemax="100"
+              :aria-valuenow="Math.round(quota.progressRatio * 100)"
+              :aria-valuetext="quota.progressPercentLabel"
+            >
               <div class="tray-progress__bar" :style="{ width: `${quota.progressRatio * 100}%` }"></div>
             </div>
             <div v-if="quota.countdownLabel || quota.extra || quota.invalidMessage" class="tray-meta">
@@ -1366,26 +1384,39 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  min-width: 0;
 }
 
 .tray-item__summary {
   display: flex;
   align-items: center;
+  flex: 0 0 auto;
   gap: 10px;
+  min-width: 0;
 }
 
 .tray-item__title {
   display: flex;
   align-items: center;
+  flex: 1 1 auto;
   gap: 8px;
+  min-width: 0;
   font-size: 13px;
   font-weight: 600;
   color: var(--mac-text);
 }
 
+.tray-item__title-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .tray-dot {
   width: 10px;
   height: 10px;
+  flex: 0 0 10px;
   border-radius: 999px;
   background: #5dbb63;
   box-shadow: 0 0 0 2px rgba(93, 187, 99, 0.2);

@@ -194,6 +194,18 @@ export function buildProviderQuotaPresetCode(templateType: ProviderQuotaTemplate
     const unit = response?.unit ?? response?.quota?.unit ?? 'USD';
     const invalidMessage = isValid ? '' : (response?.message || 'Invalid subscription');
     const items = [];
+    const limitValues = [
+      subscription.daily_limit_usd,
+      subscription.weekly_limit_usd,
+      subscription.monthly_limit_usd,
+    ];
+    const isUnlimitedSubscription = limitValues.every((limit) => (
+      limit !== null
+      && limit !== undefined
+      && String(limit).trim() !== ''
+      && Number.isFinite(Number(limit))
+      && Number(limit) === 0
+    ));
 
     if (Number(subscription.daily_limit_usd) > 0) {
       const nextReset = new Date();
@@ -252,7 +264,7 @@ export function buildProviderQuotaPresetCode(templateType: ProviderQuotaTemplate
       isValid,
       invalidMessage,
       remaining,
-      unlimited: Number(remaining) < 0,
+      unlimited: isUnlimitedSubscription,
       unit,
       valueMode: 'currency',
     };

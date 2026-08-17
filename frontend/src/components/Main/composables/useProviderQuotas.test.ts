@@ -1616,4 +1616,49 @@ describe('useProviderQuotas', () => {
       }),
     ])
   })
+
+  it('ignores unlimited flags returned for non-sub2api balance queries', async () => {
+    const cards = createCardRecord()
+    const card = createCard(16, {
+      providerQuotaQueryType: 'general',
+      providerQuotaQueryConfig: {
+        enabled: true,
+        templateType: 'general',
+        code: 'general-code',
+      },
+    })
+    cards.codex.push(card)
+
+    vi.mocked(queryProviderQuota).mockResolvedValue({
+      success: true,
+      queryType: 'general',
+      queriedAt: Date.now(),
+      items: [{
+        key: 'balance',
+        label: 'Balance',
+        used: 0,
+        total: 0,
+        unlimited: true,
+        active: false,
+        valueMode: 'currency',
+        unit: 'USD',
+      }],
+    })
+
+    const quotaState = useProviderQuotas({
+      t: (key: string) => key,
+      getActiveTab: () => 'codex',
+      cards,
+    })
+
+    await quotaState.refreshProviderQuotas()
+
+    expect(quotaState.getQuotaDisplay(card)).toEqual([
+      expect.objectContaining({
+        key: 'balance',
+        total: 0,
+        unlimited: false,
+      }),
+    ])
+  })
 })
