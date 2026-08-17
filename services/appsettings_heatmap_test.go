@@ -196,8 +196,19 @@ func TestLogsRefreshIntervalNormalizationAndDedicatedSave(t *testing.T) {
 }
 
 func TestNormalizeHomeProviderTabsFiltersInvalidAndDuplicateValues(t *testing.T) {
-	got := normalizeHomeProviderTabs([]string{" opencode ", "invalid", "others", "opencode", "gemini"})
-	want := []string{"opencode", "others", "gemini"}
+	got := normalizeHomeProviderTabs([]string{
+		" pi ",
+		"invalid",
+		"others",
+		"opencode",
+		"opencode",
+		"grokbuild",
+		"claude-desktop",
+		"openclaw",
+		"hermes",
+		"gemini",
+	})
+	want := []string{"pi", "others", "opencode", "grokbuild", "claude-desktop", "openclaw", "hermes", "gemini"}
 
 	if len(got) != len(want) {
 		t.Fatalf("len = %d, want %d: %+v", len(got), len(want), got)

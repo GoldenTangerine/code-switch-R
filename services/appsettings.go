@@ -557,11 +557,16 @@ func normalizeHomeProviderTabs(tabs []string) []string {
 	}
 
 	allowedTabs := map[string]bool{
-		"claude":   true,
-		"codex":    true,
-		"gemini":   true,
-		"opencode": true,
-		"others":   true,
+		"claude":         true,
+		"codex":          true,
+		"gemini":         true,
+		"opencode":       true,
+		"grokbuild":      true,
+		"claude-desktop": true,
+		"openclaw":       true,
+		"hermes":         true,
+		"pi":             true,
+		"others":         true,
 	}
 	seenTabs := make(map[string]bool, len(tabs))
 	normalizedTabs := make([]string, 0, len(tabs))

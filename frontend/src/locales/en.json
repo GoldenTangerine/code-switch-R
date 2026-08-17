@@ -1754,6 +1754,8 @@
         "heatmapDisplayConfig": "Heatmap display config",
         "homeTitle": "Show home title",
         "homeProviderTabs": "Home provider tabs",
+        "homeProviderTabsVisible": "Visible",
+        "homeProviderTabsHidden": "Hidden",
         "homeProviderTabsHint": "Controls which provider tabs are shown on the home page; at least one is kept. Defaults to Claude Code, Codex, and Gemini.",
         "budgetTotal": "Budget total",
         "budgetTotalHint": "Used for tray menu progress (USD)",

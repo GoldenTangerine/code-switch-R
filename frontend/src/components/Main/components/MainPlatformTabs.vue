@@ -547,21 +547,34 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
-@media (max-width: 700px) {
+@media (max-width: 1120px) {
   .main-platform-tabs {
     display: flex;
+    flex-wrap: wrap;
   }
 
   .main-platform-tabs .tab-group {
     width: 100%;
     max-width: 100%;
     min-width: 0;
+    flex: 1 1 100%;
     overflow-x: auto;
     overflow-y: hidden;
   }
 
   .main-platform-tabs .section-controls {
+    width: 100%;
+    min-width: 0;
+    margin-left: 0;
+    flex-wrap: wrap;
+    justify-content: flex-end;
     justify-self: auto;
+  }
+}
+
+@media (max-width: 700px) {
+  .main-platform-tabs .section-controls {
+    justify-content: center;
   }
 }
 </style>

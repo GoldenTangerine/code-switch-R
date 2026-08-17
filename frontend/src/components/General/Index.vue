@@ -40,7 +40,11 @@ import {
 } from '../../data/heatmapDisplaySettings'
 import {
   HOME_PROVIDER_TAB_OPTIONS,
+  moveHomeProviderTab,
   normalizeHomeProviderTabs,
+  reorderHomeProviderTabs,
+  resolveHomeProviderTabOptions,
+  setHomeProviderTabVisibility,
   type HomeProviderTab,
 } from '../../data/homeProviderTabs'
 import {
@@ -177,6 +181,91 @@ const heatmapIntensityStopL2 = ref(initialHeatmapDisplaySettings.intensityStopL2
 const heatmapIntensityStopL3 = ref(initialHeatmapDisplaySettings.intensityStopL3)
 const homeTitleVisible = ref(getCachedValue('homeTitle', true))
 const homeProviderTabs = ref<HomeProviderTab[]>(getCachedHomeProviderTabs())
+const visibleHomeProviderTabOptions = computed(() => resolveHomeProviderTabOptions(homeProviderTabs.value))
+const hiddenHomeProviderTabOptions = computed(() => HOME_PROVIDER_TAB_OPTIONS.filter((tab) => !homeProviderTabs.value.includes(tab.id)))
+const draggedHomeProviderTab = ref<HomeProviderTab | null>(null)
+const dragOverHomeProviderTab = ref<HomeProviderTab | null>(null)
+const dragOverHomeProviderTabPosition = ref<'before' | 'after' | null>(null)
+
+const commitHomeProviderTabs = (nextTabs: readonly HomeProviderTab[]) => {
+  const normalizedTabs = normalizeHomeProviderTabs(nextTabs)
+  const currentTabs = normalizeHomeProviderTabs(homeProviderTabs.value)
+  if (
+    normalizedTabs.length === currentTabs.length
+    && normalizedTabs.every((tabId, index) => tabId === currentTabs[index])
+  ) return
+
+  homeProviderTabs.value = normalizedTabs
+  persistAppSettings()
+}
+
+const toggleHomeProviderTab = (tabId: HomeProviderTab, checked: boolean) => {
+  commitHomeProviderTabs(setHomeProviderTabVisibility(homeProviderTabs.value, tabId, checked))
+}
+
+const resetHomeProviderTabDragTarget = () => {
+  dragOverHomeProviderTab.value = null
+  dragOverHomeProviderTabPosition.value = null
+}
+
+const resetHomeProviderTabDragState = () => {
+  draggedHomeProviderTab.value = null
+  resetHomeProviderTabDragTarget()
+}
+
+const handleHomeProviderTabDragStart = (event: DragEvent, tabId: HomeProviderTab) => {
+  draggedHomeProviderTab.value = tabId
+  resetHomeProviderTabDragTarget()
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', tabId)
+  }
+}
+
+const handleHomeProviderTabDragOver = (event: DragEvent, targetTabId: HomeProviderTab) => {
+  event.preventDefault()
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
+
+  const sourceTabId = draggedHomeProviderTab.value
+  if (!sourceTabId || sourceTabId === targetTabId) {
+    resetHomeProviderTabDragTarget()
+    return
+  }
+
+  const currentTabs = normalizeHomeProviderTabs(homeProviderTabs.value)
+  const sourceIndex = currentTabs.indexOf(sourceTabId)
+  const targetIndex = currentTabs.indexOf(targetTabId)
+  if (sourceIndex < 0 || targetIndex < 0) {
+    resetHomeProviderTabDragTarget()
+    return
+  }
+
+  dragOverHomeProviderTab.value = targetTabId
+  dragOverHomeProviderTabPosition.value = sourceIndex < targetIndex ? 'after' : 'before'
+}
+
+const handleHomeProviderTabDragLeave = (event: DragEvent, targetTabId: HomeProviderTab) => {
+  const currentTarget = event.currentTarget as HTMLElement | null
+  const relatedTarget = event.relatedTarget as Node | null
+  if (currentTarget && relatedTarget && currentTarget.contains(relatedTarget)) return
+  if (dragOverHomeProviderTab.value === targetTabId) resetHomeProviderTabDragTarget()
+}
+
+const handleHomeProviderTabDrop = (event: DragEvent, targetTabId: HomeProviderTab) => {
+  event.preventDefault()
+  const sourceTabId = draggedHomeProviderTab.value
+  resetHomeProviderTabDragState()
+  if (!sourceTabId || sourceTabId === targetTabId) return
+  commitHomeProviderTabs(reorderHomeProviderTabs(homeProviderTabs.value, sourceTabId, targetTabId))
+}
+
+const handleHomeProviderTabDragEnd = () => {
+  resetHomeProviderTabDragState()
+}
+
+const moveVisibleHomeProviderTab = (tabId: HomeProviderTab, offset: number) => {
+  commitHomeProviderTabs(moveHomeProviderTab(homeProviderTabs.value, tabId, offset))
+}
 const autoStartEnabled = ref(getCachedValue('autoStart', false))
 const isMacPlatform = System.IsMac()
 const mainWindowDestroyDelaySeconds = ref(
@@ -260,6 +349,7 @@ const settingsLoading = ref(true)
 const saveBusy = ref(false)
 let saveQueued = false
 let persistTimer: number | undefined
+let persistIdleWaiters: Array<() => void> = []
 let mainWindowDestroyDelayRequestSeq = 0
 let budgetQuotaUsageRequestSeq = 0
 let budgetQuotaUsageRequestSeqCodex = 0
@@ -1091,8 +1181,9 @@ const handleWebdavSyncEvent = (event: { data: Record<string, any> }) => {
   }
 }
 
-const goBack = () => {
-  router.push('/')
+const goBack = async () => {
+  await flushPendingPersist()
+  await router.push('/')
 }
 
 const normalizeBudgetForecastMethod = (value: string) => {
@@ -1266,6 +1357,19 @@ const loadAppSettings = async () => {
   }
 }
 
+const waitForPersistIdle = () => {
+  if (!saveBusy.value && !saveQueued) return Promise.resolve()
+  return new Promise<void>((resolve) => {
+    persistIdleWaiters.push(resolve)
+  })
+}
+
+const resolvePersistIdleWaiters = () => {
+  const waiters = persistIdleWaiters
+  persistIdleWaiters = []
+  waiters.forEach((resolve) => resolve())
+}
+
 const persistAppSettingsNow = async () => {
   if (persistTimer) {
     window.clearTimeout(persistTimer)
@@ -1414,6 +1518,8 @@ const persistAppSettingsNow = async () => {
     if (saveQueued) {
       saveQueued = false
       void persistAppSettingsNow()
+    } else {
+      resolvePersistIdleWaiters()
     }
   }
 }
@@ -1449,11 +1555,13 @@ const persistMainWindowDestroyDelay = async (event: Event) => {
   }
 }
 
-const flushPendingPersist = () => {
-  if (!persistTimer) return
-  window.clearTimeout(persistTimer)
-  persistTimer = undefined
-  void persistAppSettingsNow()
+const flushPendingPersist = async () => {
+  if (persistTimer) {
+    window.clearTimeout(persistTimer)
+    persistTimer = undefined
+    await persistAppSettingsNow()
+  }
+  await waitForPersistIdle()
 }
 
 const claudeModelRefreshHint = computed(() => {
@@ -1986,7 +2094,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
-  flushPendingPersist()
+  void flushPendingPersist()
   if (unsubscribeWebdavSync) {
     unsubscribeWebdavSync()
     unsubscribeWebdavSync = null
@@ -2063,33 +2171,81 @@ onBeforeUnmount(() => {
           </ListItem>
           <ListItem :label="$t('components.general.label.homeProviderTabs')">
             <div class="home-provider-tabs-setting">
-              <div class="home-provider-tabs-options">
-                <label
-                  v-for="tab in HOME_PROVIDER_TAB_OPTIONS"
-                  :key="tab.id"
-                  class="provider-tab-option"
-                  :class="{ selected: homeProviderTabs.includes(tab.id) }"
-                >
-                  <input
-                    v-model="homeProviderTabs"
-                    class="provider-tab-option-input"
-                    type="checkbox"
-                    :value="tab.id"
-                    :disabled="settingsLoading || saveBusy"
-                    @change="persistAppSettings"
-                  />
-                  <span class="provider-tab-option-icon" aria-hidden="true">
-                    <span
-                      v-if="getHomeProviderTabIconSvg(tab.icon)"
-                      class="provider-tab-option-svg"
-                      v-html="getHomeProviderTabIconSvg(tab.icon)"
-                    ></span>
-                    <span v-else class="provider-tab-option-fallback">
-                      {{ getHomeProviderTabInitials(tab.label) }}
+              <div class="home-provider-tabs-group">
+                <span class="home-provider-tabs-group-label">{{ $t('components.general.label.homeProviderTabsVisible') }}</span>
+                <div class="home-provider-tabs-options">
+                  <label
+                    v-for="tab in visibleHomeProviderTabOptions"
+                    :key="tab.id"
+                    class="provider-tab-option selected"
+                    :class="{
+                      'is-dragging': draggedHomeProviderTab === tab.id,
+                      'is-drop-before': dragOverHomeProviderTab === tab.id && dragOverHomeProviderTabPosition === 'before',
+                      'is-drop-after': dragOverHomeProviderTab === tab.id && dragOverHomeProviderTabPosition === 'after',
+                    }"
+                    :draggable="!settingsLoading && !saveBusy"
+                    @dragstart="handleHomeProviderTabDragStart($event, tab.id)"
+                    @dragover="handleHomeProviderTabDragOver($event, tab.id)"
+                    @dragenter="handleHomeProviderTabDragOver($event, tab.id)"
+                    @dragleave="handleHomeProviderTabDragLeave($event, tab.id)"
+                    @drop.stop="handleHomeProviderTabDrop($event, tab.id)"
+                    @dragend="handleHomeProviderTabDragEnd"
+                  >
+                    <span class="provider-tab-option-drag-handle" aria-hidden="true"></span>
+                    <input
+                      class="provider-tab-option-input"
+                      type="checkbox"
+                      :checked="true"
+                      :disabled="settingsLoading || saveBusy || visibleHomeProviderTabOptions.length <= 1"
+                      aria-keyshortcuts="Alt+ArrowLeft Alt+ArrowRight Alt+ArrowUp Alt+ArrowDown"
+                      @keydown.alt.left.prevent="moveVisibleHomeProviderTab(tab.id, -1)"
+                      @keydown.alt.right.prevent="moveVisibleHomeProviderTab(tab.id, 1)"
+                      @keydown.alt.up.prevent="moveVisibleHomeProviderTab(tab.id, -1)"
+                      @keydown.alt.down.prevent="moveVisibleHomeProviderTab(tab.id, 1)"
+                      @change="toggleHomeProviderTab(tab.id, false)"
+                    />
+                    <span class="provider-tab-option-icon" aria-hidden="true">
+                      <span
+                        v-if="getHomeProviderTabIconSvg(tab.icon)"
+                        class="provider-tab-option-svg"
+                        v-html="getHomeProviderTabIconSvg(tab.icon)"
+                      ></span>
+                      <span v-else class="provider-tab-option-fallback">
+                        {{ getHomeProviderTabInitials(tab.label) }}
+                      </span>
                     </span>
-                  </span>
-                  <span>{{ tab.label }}</span>
-                </label>
+                    <span>{{ tab.label }}</span>
+                  </label>
+                </div>
+              </div>
+              <div v-if="hiddenHomeProviderTabOptions.length" class="home-provider-tabs-group">
+                <span class="home-provider-tabs-group-label">{{ $t('components.general.label.homeProviderTabsHidden') }}</span>
+                <div class="home-provider-tabs-options">
+                  <label
+                    v-for="tab in hiddenHomeProviderTabOptions"
+                    :key="tab.id"
+                    class="provider-tab-option"
+                  >
+                    <input
+                      class="provider-tab-option-input"
+                      type="checkbox"
+                      :checked="false"
+                      :disabled="settingsLoading || saveBusy"
+                      @change="toggleHomeProviderTab(tab.id, true)"
+                    />
+                    <span class="provider-tab-option-icon" aria-hidden="true">
+                      <span
+                        v-if="getHomeProviderTabIconSvg(tab.icon)"
+                        class="provider-tab-option-svg"
+                        v-html="getHomeProviderTabIconSvg(tab.icon)"
+                      ></span>
+                      <span v-else class="provider-tab-option-fallback">
+                        {{ getHomeProviderTabInitials(tab.label) }}
+                      </span>
+                    </span>
+                    <span>{{ tab.label }}</span>
+                  </label>
+                </div>
               </div>
               <span class="hint-text">{{ $t('components.general.label.homeProviderTabsHint') }}</span>
             </div>
@@ -3603,6 +3759,23 @@ onBeforeUnmount(() => {
   flex-direction: column;
   align-items: flex-end;
   gap: 6px;
+  width: min(520px, 100%);
+}
+
+.home-provider-tabs-group {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  width: 100%;
+}
+
+.home-provider-tabs-group-label {
+  color: var(--mac-text-secondary);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: uppercase;
 }
 
 .home-provider-tabs-options {
@@ -3610,7 +3783,7 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
-  max-width: 520px;
+  width: 100%;
 }
 
 .provider-tab-option {
@@ -3626,12 +3799,60 @@ onBeforeUnmount(() => {
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.2s ease;
+  position: relative;
+  transition: border-color 0.2s ease, background 0.2s ease, color 0.2s ease, opacity 0.2s ease;
+}
+
+.provider-tab-option[draggable='true'] {
+  cursor: grab;
+}
+
+.provider-tab-option[draggable='true']:active {
+  cursor: grabbing;
+}
+
+.provider-tab-option.is-dragging {
+  opacity: 0.5;
+}
+
+.provider-tab-option.is-drop-before::before,
+.provider-tab-option.is-drop-after::after {
+  content: '';
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  width: 3px;
+  border-radius: 999px;
+  background: var(--mac-accent);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--mac-accent) 55%, transparent);
+}
+
+.provider-tab-option.is-drop-before::before {
+  left: -6px;
+}
+
+.provider-tab-option.is-drop-after::after {
+  right: -6px;
+}
+
+.provider-tab-option-drag-handle {
+  width: 10px;
+  height: 14px;
+  flex-shrink: 0;
+  opacity: 0.55;
+  background-image: radial-gradient(circle, currentColor 1px, transparent 1.5px);
+  background-position: 0 1px;
+  background-size: 5px 5px;
 }
 
 .provider-tab-option:hover {
   border-color: var(--mac-accent);
   color: var(--mac-text);
+}
+
+.provider-tab-option:focus-within {
+  outline: 2px solid color-mix(in srgb, var(--mac-accent) 48%, transparent);
+  outline-offset: 2px;
 }
 
 .provider-tab-option.selected {
@@ -3686,6 +3907,11 @@ onBeforeUnmount(() => {
   opacity: 0.6;
 }
 
+.provider-tab-option[draggable='true']:has(input:disabled) {
+  cursor: grab;
+  opacity: 1;
+}
+
 :global(.dark) .hint-text {
   color: rgba(255, 255, 255, 0.5);
 }
@@ -3698,6 +3924,27 @@ onBeforeUnmount(() => {
 :global(.dark) .provider-tab-option.selected {
   background: rgba(96, 165, 250, 0.16);
   border-color: rgba(96, 165, 250, 0.46);
+}
+
+@media (max-width: 760px) {
+  .home-provider-tabs-setting,
+  .home-provider-tabs-group {
+    align-items: flex-start;
+  }
+
+  .home-provider-tabs-options {
+    justify-content: flex-start;
+  }
+
+  .home-provider-tabs-setting .hint-text {
+    text-align: left;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .provider-tab-option {
+    transition: none;
+  }
 }
 
 .budget-input {

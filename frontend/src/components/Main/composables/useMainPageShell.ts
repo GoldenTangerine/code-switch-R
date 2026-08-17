@@ -268,9 +268,13 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
     })
   })
 
+  let appSettingsRequestSeq = 0
+
   const loadAppSettings = async () => {
+    const requestSeq = ++appSettingsRequestSeq
     try {
       const data: AppSettings = await fetchAppSettings()
+      if (requestSeq !== appSettingsRequestSeq) return
       showHeatmap.value = data?.show_heatmap ?? true
 
       const nextGranularity = normalizeHeatmapGranularity(data?.heatmap_granularity)
@@ -301,6 +305,7 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
         providerConcurrencyLimitStates[key] = enabled === true
       })
     } catch (error) {
+      if (requestSeq !== appSettingsRequestSeq) return
       console.error('failed to load app settings', error)
       showHeatmap.value = true
       if (heatmapGranularity.value !== 'daily') {
@@ -677,6 +682,7 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
   })
 
   onMounted(async () => {
+    window.addEventListener('app-settings-updated', handleAppSettingsUpdated)
     syncThemeState()
     await loadAppSettings()
     await loadProviders()
@@ -696,7 +702,6 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
     await loadAvailabilityResults()
     startStatusSync()
 
-    window.addEventListener('app-settings-updated', handleAppSettingsUpdated)
     handleProvidersUpdated = () => {
       void (async () => {
         try {

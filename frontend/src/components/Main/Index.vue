@@ -232,7 +232,11 @@ import {
   getProviderDisplayIconSvg,
   preloadProviderDisplayIcons,
 } from '../../utils/providerIconAssets'
-import { DEFAULT_HOME_PROVIDER_TABS } from '../../data/homeProviderTabs'
+import {
+  DEFAULT_HOME_PROVIDER_TABS,
+  resolveHomeProviderTabOptions,
+  resolveHomeProviderTabSelectionIndex,
+} from '../../data/homeProviderTabs'
 import type { CustomCliTool } from '../../services/customCliService'
 import { markProviderFailedRequestLogsRead, type RequestLogPlatform } from '../../services/logs'
 import { MAIN_TABS } from './constants'
@@ -275,8 +279,7 @@ const { t, locale } = useI18n()
 const router = useRouter()
 
 const visibleProviderTabs = ref<ProviderTab[]>([...DEFAULT_HOME_PROVIDER_TABS])
-const visibleProviderTabSet = computed(() => new Set<ProviderTab>(visibleProviderTabs.value))
-const tabs = computed(() => MAIN_TABS.filter((tab) => visibleProviderTabSet.value.has(tab.id)))
+const tabs = computed(() => resolveHomeProviderTabOptions(visibleProviderTabs.value))
 const selectedIndex = ref(0)
 const activeTab = computed<ProviderTab>(() => tabs.value[selectedIndex.value]?.id ?? tabs.value[0]?.id ?? 'claude')
 const heatmapRef = ref<MainUsageHeatmapExpose | null>(null)
@@ -952,25 +955,11 @@ const activeCardViewModels = computed<ProviderCardViewModel[]>(() =>
 watch(
   tabs,
   (nextTabs, previousTabs) => {
-    if (nextTabs.length === 0) {
-      selectedIndex.value = 0
-      return
-    }
-
-    const previousActiveTab = previousTabs?.[selectedIndex.value]?.id
-    if (previousActiveTab) {
-      const nextIndex = nextTabs.findIndex((tab) => tab.id === previousActiveTab)
-      if (nextIndex >= 0) {
-        selectedIndex.value = nextIndex
-        return
-      }
-      selectedIndex.value = 0
-      return
-    }
-
-    if (selectedIndex.value >= nextTabs.length) {
-      selectedIndex.value = 0
-    }
+    selectedIndex.value = resolveHomeProviderTabSelectionIndex(
+      previousTabs?.map((tab) => tab.id) ?? [],
+      nextTabs.map((tab) => tab.id),
+      selectedIndex.value,
+    )
   },
   { immediate: true },
 )
