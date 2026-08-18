@@ -34,3 +34,27 @@
 - `cd frontend && pnpm test:unit`：通过（67 个测试文件，506 个测试）。
 - 中英文 locale JSON 解析与 `git diff --check`：通过。
 - `cd frontend && pnpm exec vue-tsc --noEmit`：通过。
+
+## 后续修正（2026-08-18 16:30:00 CST）
+
+- 将会话编号、会话层级与“切换”按钮移至模型和接口行右侧，并保持单行显示。
+- 移除切换按钮箭头；空间不足时优先省略接口，保留模型、参数与会话操作。
+- 移除卡片内不可切换长提示，点击“切换”后仍在候选弹窗中显示完整原因。
+
+### 布局修正验证
+
+- `cd frontend && pnpm test:unit`：通过（67 个测试文件，511 个测试）。
+- `cd frontend && pnpm exec vue-tsc --noEmit`：通过。
+- 中英文 locale JSON 解析与 `git diff --check`：通过。
+
+## 后续修正（2026-08-18 17:08:21 CST）
+
+- 移除连接行的按钮角色和键盘事件，键盘切换统一通过真实“切换”按钮完成，避免嵌套交互语义。
+- 模型详情区域阻止点击冒泡，避免查看模型信息时误触会话切换；连接行仍保留鼠标快捷点击。
+- 样式回归测试改用 Vue SFC 模板 AST 定位元素和事件，并按具体 CSS 选择器校验布局规则。
+
+### 交互修正验证
+
+- `cd frontend && pnpm test:unit`：通过（67 个测试文件，513 个测试）。
+- `cd frontend && pnpm exec vue-tsc --noEmit`：通过。
+- 中英文 locale JSON 解析与 `git diff --check`：通过。

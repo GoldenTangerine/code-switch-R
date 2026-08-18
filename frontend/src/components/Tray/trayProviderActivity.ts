@@ -14,27 +14,28 @@ export type TrayProviderActivityStatus = {
   activeRequests: number
 }
 
-export type TrayRecentProvider = {
-  provider_id?: string
-  provider_name?: string
-  updated_at?: number
+export type TrayDefaultProvider = {
+  providerId: string
+  providerName: string
 }
 
 export type TrayProviderActivity = TrayProviderActivityStatus & {
-  isActive: boolean
+  status: 'active' | 'default'
+}
+
+export type TrayProviderRuntimeState = {
+  statuses: TrayProviderActivityStatus[]
+  defaultProvider: TrayDefaultProvider | null
+  error: boolean
 }
 
 export type TrayProviderActivitySnapshot = {
-  statusesByPlatform: Partial<Record<string, TrayProviderActivityStatus[]>> | null
-  recentByPlatform: Partial<Record<string, TrayRecentProvider | null>>
-  hasRecentSnapshot: boolean
-  statusesError?: unknown
-  recentError?: unknown
+  statesByPlatform: Partial<Record<string, TrayProviderRuntimeState>> | null
+  error?: unknown
 }
 
 type TrayProviderActivitySnapshotLoader = {
-  loadStatuses: () => Promise<unknown>
-  loadRecent: () => Promise<unknown>
+  loadStates: () => Promise<unknown>
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -63,13 +64,24 @@ export function normalizeTrayProviderActivityStatus(value: unknown): TrayProvide
   }
 }
 
-export function normalizeTrayRecentProvider(value: unknown): TrayRecentProvider | null {
-  const recent = asRecord(value)
-  if (!recent) return null
+export function normalizeTrayDefaultProvider(value: unknown): TrayDefaultProvider | null {
+  const provider = asRecord(value)
+  if (!provider) return null
+  const providerId = normalizeTrayProviderRef(provider.providerId ?? provider.ProviderID)
+  const providerName = String(provider.providerName ?? provider.ProviderName ?? '').trim()
+  if (!providerId && !providerName) return null
+  return { providerId, providerName }
+}
+
+export function normalizeTrayProviderRuntimeState(value: unknown): TrayProviderRuntimeState {
+  const state = asRecord(value) ?? {}
+  const statuses = state.statuses ?? state.Statuses
   return {
-    provider_id: normalizeTrayProviderRef(recent.provider_id ?? recent.providerId ?? recent.ProviderID),
-    provider_name: String(recent.provider_name ?? recent.providerName ?? recent.ProviderName ?? '').trim(),
-    updated_at: Number(recent.updated_at ?? recent.updatedAt ?? recent.UpdatedAt ?? 0),
+    statuses: Array.isArray(statuses)
+      ? statuses.map(normalizeTrayProviderActivityStatus)
+      : [],
+    defaultProvider: normalizeTrayDefaultProvider(state.defaultProvider ?? state.DefaultProvider),
+    error: Boolean(state.error ?? state.Error),
   }
 }
 
@@ -77,50 +89,33 @@ export async function loadTrayProviderActivitySnapshot(
   platforms: readonly string[],
   loaders: TrayProviderActivitySnapshotLoader,
 ): Promise<TrayProviderActivitySnapshot> {
-  const [statusesResult, recentResult] = await Promise.allSettled([
-    loaders.loadStatuses(),
-    loaders.loadRecent(),
-  ])
-
-  const rawStatuses = statusesResult.status === 'fulfilled'
-    ? asRecord(statusesResult.value)
-    : null
-  const statusesByPlatform: Partial<Record<string, TrayProviderActivityStatus[]>> | null = rawStatuses
-    ? Object.fromEntries(platforms.flatMap((platform) => {
-      if (!Object.prototype.hasOwnProperty.call(rawStatuses, platform)) return []
-      const statuses = rawStatuses[platform]
-      return [[platform, Array.isArray(statuses)
-        ? statuses.map(normalizeTrayProviderActivityStatus)
-        : []]]
-    }))
-    : null
-
-  const rawRecent = recentResult.status === 'fulfilled'
-    ? asRecord(recentResult.value)
-    : null
-  const recentByPlatform: Partial<Record<string, TrayRecentProvider | null>> = rawRecent
-    ? Object.fromEntries(platforms.map((platform) => [
-      platform,
-      normalizeTrayRecentProvider(rawRecent[platform]),
-    ]))
-    : {}
-
-  return {
-    statusesByPlatform,
-    recentByPlatform,
-    hasRecentSnapshot: Boolean(rawRecent),
-    statusesError: statusesResult.status === 'rejected'
-      ? statusesResult.reason
-      : rawStatuses ? undefined : new Error('invalid provider activity status snapshot'),
-    recentError: recentResult.status === 'rejected'
-      ? recentResult.reason
-      : rawRecent ? undefined : new Error('invalid recent provider snapshot'),
+  try {
+    const rawStates = asRecord(await loaders.loadStates())
+    if (!rawStates) {
+      return {
+        statesByPlatform: null,
+        error: new Error('invalid tray provider runtime snapshot'),
+      }
+    }
+    return {
+      statesByPlatform: Object.fromEntries(platforms.map((platform) => [
+        platform,
+        Object.prototype.hasOwnProperty.call(rawStates, platform)
+          ? normalizeTrayProviderRuntimeState(rawStates[platform])
+          : { statuses: [], defaultProvider: null, error: true },
+      ])),
+    }
+  } catch (error) {
+    return {
+      statesByPlatform: null,
+      error,
+    }
   }
 }
 
 export function resolveTrayProviderActivity(
   statuses: readonly TrayProviderActivityStatus[],
-  recentProvider: TrayRecentProvider | null | undefined,
+  defaultProvider: TrayDefaultProvider | null | undefined,
 ): TrayProviderActivity[] {
   const active = statuses
     .map((status) => ({
@@ -131,39 +126,19 @@ export function resolveTrayProviderActivity(
         : 0,
     }))
     .filter((status) => status.providerId && status.activeRequests > 0)
-    .map((status) => ({ ...status, isActive: true }))
+    .map((status): TrayProviderActivity => ({ ...status, status: 'active' }))
 
   if (active.length > 0) return active
 
-  const providerId = normalizeTrayProviderRef(recentProvider?.provider_id)
-  const providerName = String(recentProvider?.provider_name ?? '').trim()
+  const providerId = normalizeTrayProviderRef(defaultProvider?.providerId)
+  const providerName = String(defaultProvider?.providerName ?? '').trim()
   if (!providerId && !providerName) return []
 
   return [{
     providerId,
     providerName,
     activeRequests: 0,
-    isActive: false,
-  }]
-}
-
-export function resolveTrayProviderActivityWithFallback(
-  statuses: readonly TrayProviderActivityStatus[],
-  recentProvider: TrayRecentProvider | null | undefined,
-  previous: readonly TrayProviderActivity[],
-  hasRecentSnapshot: boolean,
-): TrayProviderActivity[] {
-  const active = resolveTrayProviderActivity(statuses, null)
-  if (active.length > 0) return active
-  if (hasRecentSnapshot) return resolveTrayProviderActivity(statuses, recentProvider)
-
-  const fallback = previous[0]
-  if (!fallback) return []
-  return [{
-    providerId: fallback.providerId,
-    providerName: fallback.providerName,
-    activeRequests: 0,
-    isActive: false,
+    status: 'default',
   }]
 }
 
@@ -176,6 +151,6 @@ export function hasTrayProviderActivityChanged(
     const other = next[index]
     return !other
       || item.providerId !== other.providerId
-      || item.isActive !== other.isActive
+      || item.status !== other.status
   })
 }

@@ -67,7 +67,9 @@
     "queryFailed": "Query failed",
     "providerQuotaQuery": "Quota query",
     "calling": "Calling · {count}",
-    "recentlyUsed": "Recently used"
+    "recentlyUsed": "Recently used",
+    "defaultProvider": "Default",
+    "noAvailableProviders": "No available providers"
   },
   "menus": {
     "about": "About",

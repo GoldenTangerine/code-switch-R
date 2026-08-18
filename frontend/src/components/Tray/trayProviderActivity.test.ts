@@ -12,10 +12,9 @@ import {
   buildTrayProviderActivityRefreshKey,
   hasTrayProviderActivityChanged,
   loadTrayProviderActivitySnapshot,
+  normalizeTrayDefaultProvider,
   normalizeTrayProviderActivityStatus,
-  normalizeTrayRecentProvider,
   resolveTrayProviderActivity,
-  resolveTrayProviderActivityWithFallback,
 } from './trayProviderActivity'
 
 describe('trayProviderActivity', () => {
@@ -33,17 +32,30 @@ describe('trayProviderActivity', () => {
       { providerId: 'provider-2', providerName: 'Second', activeRequests: 2 },
       { providerId: 'provider-1', providerName: 'First', activeRequests: 1 },
     ], null)).toEqual([
-      { providerId: 'provider-2', providerName: 'Second', activeRequests: 2, isActive: true },
-      { providerId: 'provider-1', providerName: 'First', activeRequests: 1, isActive: true },
+      { providerId: 'provider-2', providerName: 'Second', activeRequests: 2, status: 'active' },
+      { providerId: 'provider-1', providerName: 'First', activeRequests: 1, status: 'active' },
     ])
   })
 
-  it('falls back to the most recent provider when no request is active', () => {
+  it('falls back to the default provider when no request is active', () => {
     expect(resolveTrayProviderActivity([], {
-      provider_id: 'provider-1',
-      provider_name: 'First',
+      providerId: 'provider-1',
+      providerName: 'First',
     })).toEqual([
-      { providerId: 'provider-1', providerName: 'First', activeRequests: 0, isActive: false },
+      { providerId: 'provider-1', providerName: 'First', activeRequests: 0, status: 'default' },
+    ])
+  })
+
+  it('prefers every active provider over the default provider', () => {
+    expect(resolveTrayProviderActivity([
+      { providerId: 'provider-2', providerName: 'Second', activeRequests: 1 },
+      { providerId: 'provider-3', providerName: 'Third', activeRequests: 2 },
+    ], {
+      providerId: 'provider-1',
+      providerName: 'First',
+    })).toEqual([
+      { providerId: 'provider-2', providerName: 'Second', activeRequests: 1, status: 'active' },
+      { providerId: 'provider-3', providerName: 'Third', activeRequests: 2, status: 'active' },
     ])
   })
 
@@ -52,6 +64,10 @@ describe('trayProviderActivity', () => {
       { providerId: '', providerName: 'Missing ID', activeRequests: 3 },
       { providerId: 'idle', providerName: 'Idle', activeRequests: 0 },
     ], null)).toEqual([])
+  })
+
+  it('returns no activity when neither an active nor default provider is available', () => {
+    expect(resolveTrayProviderActivity([], null)).toEqual([])
   })
 
   it('detects active provider set transitions without reacting to count changes', () => {
@@ -69,7 +85,7 @@ describe('trayProviderActivity', () => {
     expect(hasTrayProviderActivityChanged(previous, providerChanged)).toBe(true)
   })
 
-  it('normalizes Wails field casing for status and recent provider snapshots', () => {
+  it('normalizes Wails field casing for status and default provider snapshots', () => {
     expect(normalizeTrayProviderActivityStatus({
       ProviderID: ' provider-1 ',
       ProviderName: ' First ',
@@ -79,44 +95,69 @@ describe('trayProviderActivity', () => {
       providerName: 'First',
       activeRequests: 2,
     })
-    expect(normalizeTrayRecentProvider({
+    expect(normalizeTrayDefaultProvider({
       ProviderID: 'provider-1',
       ProviderName: 'First',
-      UpdatedAt: 123,
     })).toEqual({
-      provider_id: 'provider-1',
-      provider_name: 'First',
-      updated_at: 123,
+      providerId: 'provider-1',
+      providerName: 'First',
     })
   })
 
-  it('keeps live statuses available when the recent provider query fails', async () => {
-    const recentError = new Error('recent unavailable')
+  it('normalizes a batched runtime snapshot', async () => {
     const snapshot = await loadTrayProviderActivitySnapshot(['claude'], {
-      loadStatuses: async () => ({
-        claude: [{ providerId: 'provider-2', providerName: 'Second', activeRequests: 1 }],
+      loadStates: async () => ({
+        claude: {
+          Statuses: [{ ProviderID: 'provider-2', ProviderName: 'Second', ActiveRequests: 1 }],
+          DefaultProvider: { ProviderID: 'provider-1', ProviderName: 'First' },
+        },
       }),
-      loadRecent: async () => Promise.reject(recentError),
     })
 
-    expect(snapshot.statusesByPlatform?.claude).toEqual([
-      { providerId: 'provider-2', providerName: 'Second', activeRequests: 1 },
-    ])
-    expect(snapshot.hasRecentSnapshot).toBe(false)
-    expect(snapshot.recentError).toBe(recentError)
+    expect(snapshot.statesByPlatform?.claude).toEqual({
+      statuses: [{ providerId: 'provider-2', providerName: 'Second', activeRequests: 1 }],
+      defaultProvider: { providerId: 'provider-1', providerName: 'First' },
+      error: false,
+    })
+    expect(snapshot.error).toBeUndefined()
   })
 
-  it('turns the previous provider idle when the recent provider query fails', () => {
-    expect(resolveTrayProviderActivityWithFallback([], null, [{
-      providerId: 'provider-1',
-      providerName: 'First',
-      activeRequests: 2,
-      isActive: true,
-    }], false)).toEqual([{
-      providerId: 'provider-1',
-      providerName: 'First',
-      activeRequests: 0,
-      isActive: false,
-    }])
+  it('returns an error snapshot when the batched runtime query fails', async () => {
+    const error = new Error('runtime unavailable')
+    const snapshot = await loadTrayProviderActivitySnapshot(['claude'], {
+      loadStates: async () => Promise.reject(error),
+    })
+
+    expect(snapshot.statesByPlatform).toBeNull()
+    expect(snapshot.error).toBe(error)
+  })
+
+  it('normalizes a per-platform runtime error without treating it as no providers', async () => {
+    const snapshot = await loadTrayProviderActivitySnapshot(['claude'], {
+      loadStates: async () => ({
+        claude: { Error: true },
+      }),
+    })
+
+    expect(snapshot.statesByPlatform?.claude).toEqual({
+      statuses: [],
+      defaultProvider: null,
+      error: true,
+    })
+  })
+
+  it('treats a missing platform state as a query error', async () => {
+    const snapshot = await loadTrayProviderActivitySnapshot(['claude', 'codex'], {
+      loadStates: async () => ({
+        claude: { Statuses: [] },
+      }),
+    })
+
+    expect(snapshot.statesByPlatform?.claude?.error).toBe(false)
+    expect(snapshot.statesByPlatform?.codex).toEqual({
+      statuses: [],
+      defaultProvider: null,
+      error: true,
+    })
   })
 })

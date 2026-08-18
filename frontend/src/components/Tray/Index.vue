@@ -56,7 +56,6 @@ import {
 } from '../Main/utils/providerQuotaCardDisplay'
 import {
   hasTrayFallbackProviderQuotaConfig,
-  listTrayFallbackProviders,
   resolveTrayProviderQuotaDisplay,
 } from './trayProviderFallback'
 import {
@@ -81,7 +80,7 @@ import {
   buildTrayProviderActivityRefreshKey,
   hasTrayProviderActivityChanged,
   loadTrayProviderActivitySnapshot,
-  resolveTrayProviderActivityWithFallback,
+  resolveTrayProviderActivity,
   type TrayProviderActivity,
 } from './trayProviderActivity'
 
@@ -124,7 +123,7 @@ type TrayProviderBlock = {
   providerIconSvg: string
   providerInitials: string
   activeRequests: number
-  isActive: boolean
+  activityStatus: 'active' | 'default'
   quotas: TrayQuotaState[]
   stats: TrayProviderStatsDisplay | null
 }
@@ -277,6 +276,8 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
   const quotas = ref<TrayQuotaState[]>(budgetQuotaOrder.map((key) => createQuotaState(key)))
   const providerBlocks = ref<TrayProviderBlock[]>([])
   const providerActivities = ref<TrayProviderActivity[]>([])
+  const providerActivityLoaded = ref(false)
+  const providerActivityError = ref(false)
   const providerByRef = new Map<string, AutomationCard>()
   const loading = ref(false)
   const showCountdown = ref(false)
@@ -315,9 +316,9 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
   const showTotalUsage = computed(() => displayMode.value === 'summary')
   const totalUsageLabel = computed(() => formatCurrency(totalUsage.value))
 
-  const providerActivityLabel = (block: TrayProviderBlock) => block.isActive
+  const providerActivityLabel = (block: TrayProviderBlock) => block.activityStatus === 'active'
     ? t('tray.calling', { count: block.activeRequests })
-    : t('tray.recentlyUsed')
+    : t('tray.defaultProvider')
 
   const updateProviderBlocksFromActivity = (activities: readonly TrayProviderActivity[]) => {
     const previous = providerBlocks.value
@@ -335,7 +336,7 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
         providerIconSvg: getProviderDisplayIconSvg(providerIconKey),
         providerInitials: getTrayProviderInitials(providerName),
         activeRequests: activity.activeRequests,
-        isActive: activity.isActive,
+        activityStatus: activity.status,
         quotas: previousBlock?.quotas ?? [],
         stats: previousBlock?.stats ?? null,
       }
@@ -613,6 +614,10 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
     now: Date,
     providers: readonly AutomationCard[],
   ) => {
+    if (activities.length === 0) {
+      providerBlocks.value = []
+      return
+    }
     const statsPromise = fetchProviderDailyStats(platform).catch((error) => {
       console.error(`failed to load ${platform} tray provider stats`, error)
       return []
@@ -632,7 +637,7 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
         providerIconSvg: getProviderDisplayIconSvg(providerIconKey),
         providerInitials: getTrayProviderInitials(providerName),
         activeRequests: activity.activeRequests,
-        isActive: activity.isActive,
+        activityStatus: activity.status,
         quotas,
         stats: provider ? buildTrayProviderStatsDisplay(provider, stats, currentLocale()) : null,
       }
@@ -650,8 +655,10 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
     }
   }
 
-  const setProviderActivities = (activities: readonly TrayProviderActivity[]) => {
+  const setProviderActivities = (activities: readonly TrayProviderActivity[], error = false) => {
     providerActivities.value = [...activities]
+    providerActivityLoaded.value = true
+    providerActivityError.value = error
     updateProviderBlocksFromActivity(activities)
   }
 
@@ -688,17 +695,8 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
       usedAdjustments.value = getQuotaAdjustments(settings)
       await updateHostingState()
       const providers = await loadProviders()
-      const fallbackProviders = listTrayFallbackProviders(providers)
-      const activities = providerActivities.value.length > 0
-        ? providerActivities.value
-        : fallbackProviders.slice(0, 1).map((provider) => ({
-          providerId: String(provider.providerRef ?? provider.id).trim(),
-          providerName: provider.name,
-          activeRequests: 0,
-          isActive: false,
-        }))
       void preloadProviderDisplayIcons(providers.map((provider) => provider.icon))
-      await loadProviderBlocks(activities, now, providers)
+      await loadProviderBlocks(providerActivities.value, now, providers)
       const nextDisplayMode = resolveTrayBudgetDisplayMode(quotaSettings)
 
       if (nextDisplayMode === 'summary') {
@@ -781,6 +779,8 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
     quotas,
     visibleQuotas,
     providerBlocks,
+    providerActivityLoaded,
+    providerActivityError,
     providerActivityLabel,
     showTotalUsage,
     totalUsageLabel,
@@ -879,12 +879,9 @@ const refreshProviderActivity = (): Promise<void> => {
 
   const nextRefresh = (async () => {
     const snapshot = await loadTrayProviderActivitySnapshot(platforms, {
-      loadStatuses: () => Call.ByName(
-        'codeswitch/services.ProviderConcurrencyService.GetProviderConcurrencyStatusesBatch',
+      loadStates: () => Call.ByName(
+        'codeswitch/services.ProviderConcurrencyService.GetTrayProviderRuntimeStatesBatch',
         platforms,
-      ),
-      loadRecent: () => Call.ByName(
-        'codeswitch/services.ProviderRelayStateService.GetAllLastUsedProviders',
       ),
     })
 
@@ -899,26 +896,26 @@ const refreshProviderActivity = (): Promise<void> => {
       || !refreshLifecycle?.isActive()
     ) return
 
-    if (snapshot.recentError) {
-      console.error('failed to load recent tray providers', snapshot.recentError)
-    }
-    if (snapshot.statusesError || !snapshot.statusesByPlatform) {
-      console.error('failed to load tray provider activity', snapshot.statusesError)
-      return
+    if (snapshot.error || !snapshot.statesByPlatform) {
+      console.error('failed to load tray provider activity', snapshot.error)
     }
 
     targetCards.forEach((card) => {
-      const statuses = snapshot.statusesByPlatform?.[card.platform]
-      if (!statuses) return
+      const state = snapshot.statesByPlatform?.[card.platform]
+      const activityError = Boolean(snapshot.error || !snapshot.statesByPlatform || state?.error)
+      if (state?.error) {
+        console.error(`failed to load ${card.platform} tray provider activity`)
+      }
       const previous = activityByPlatform.get(card.platform) ?? []
-      const next = resolveTrayProviderActivityWithFallback(
-        statuses,
-        snapshot.recentByPlatform[card.platform],
-        previous,
-        snapshot.hasRecentSnapshot,
-      )
+      const next = activityError
+        ? []
+        : resolveTrayProviderActivity(
+          state?.statuses ?? [],
+          state?.defaultProvider ?? null,
+        )
       activityByPlatform.set(card.platform, next)
-      card.setProviderActivities(next)
+      card.setProviderActivities(next, activityError)
+      if (activityError) return
       if (!hasTrayProviderActivityChanged(previous, next)) return
       if (refreshBusy) {
         activityNeedsFullRefresh = true
@@ -1192,12 +1189,28 @@ onUnmounted(() => {
             </div>
           </div>
           <div
+            v-if="card.providerActivityLoaded && card.providerActivityError"
+            class="tray-provider-empty tray-provider-empty--error"
+            role="status"
+          >
+            <span class="tray-provider-empty__dot" aria-hidden="true"></span>
+            <span>{{ t('tray.queryFailed') }}</span>
+          </div>
+          <div
+            v-else-if="card.providerActivityLoaded && card.providerBlocks.length === 0"
+            class="tray-provider-empty"
+            role="status"
+          >
+            <span class="tray-provider-empty__dot" aria-hidden="true"></span>
+            <span>{{ t('tray.noAvailableProviders') }}</span>
+          </div>
+          <div
             v-for="block in card.providerBlocks"
-            :key="`${card.platform}-active-${block.providerId || block.providerName}`"
+            :key="`${card.platform}-${block.activityStatus}-${block.providerId || block.providerName}`"
             class="tray-provider-block"
           >
             <div class="tray-provider-source">
-              <span class="tray-provider-source__status" :class="{ active: block.isActive }">
+              <span class="tray-provider-source__status" :class="{ active: block.activityStatus === 'active' }">
                 <span class="tray-provider-source__status-dot"></span>
                 <span>{{ card.providerActivityLabel(block) }}</span>
               </span>
@@ -1386,6 +1399,28 @@ onUnmounted(() => {
   border-top: 1px solid var(--mac-divider);
 }
 
+.tray-provider-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 28px;
+  color: var(--mac-text-secondary);
+  font-size: 11px;
+}
+
+.tray-provider-empty__dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--mac-text-secondary) 55%, transparent);
+}
+
+.tray-provider-empty--error {
+  color: var(--mac-text-secondary);
+}
+
 .tray-provider-source {
   display: flex;
   align-items: center;
@@ -1406,10 +1441,12 @@ onUnmounted(() => {
 }
 
 .tray-provider-source__provider {
-  min-width: 0;
   display: inline-flex;
   align-items: center;
   justify-content: flex-end;
+  min-width: 0;
+  max-width: 62%;
+  flex: 0 1 62%;
   gap: 5px;
 }
 
@@ -1417,8 +1454,11 @@ onUnmounted(() => {
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  flex: 1 1 auto;
   min-width: 0;
+  overflow: hidden;
   color: var(--mac-text-secondary);
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 

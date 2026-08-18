@@ -18,6 +18,24 @@ type ProviderConcurrencyService struct {
 	relay *ProviderRelayService
 }
 
+type TrayDefaultProvider struct {
+	ProviderID   string `json:"providerId"`
+	ProviderName string `json:"providerName"`
+}
+
+type TrayProviderActivityStatus struct {
+	Platform       string `json:"platform"`
+	ProviderID     string `json:"providerId"`
+	ProviderName   string `json:"providerName"`
+	ActiveRequests int    `json:"activeRequests"`
+}
+
+type TrayProviderRuntimeState struct {
+	Statuses        []TrayProviderActivityStatus `json:"statuses"`
+	DefaultProvider *TrayDefaultProvider         `json:"defaultProvider"`
+	Error           bool                         `json:"error,omitempty"`
+}
+
 func NewProviderConcurrencyService(relay *ProviderRelayService) *ProviderConcurrencyService {
 	return &ProviderConcurrencyService{relay: relay}
 }
@@ -46,6 +64,29 @@ func (s *ProviderConcurrencyService) GetProviderConcurrencyStatusesBatch(platfor
 		result[platform] = s.relay.GetProviderConcurrencyStatuses(platform)
 	}
 	return result
+}
+
+func (s *ProviderConcurrencyService) GetTrayProviderRuntimeStatesBatch(platforms []string) map[string]TrayProviderRuntimeState {
+	result := make(map[string]TrayProviderRuntimeState)
+	if s == nil || s.relay == nil {
+		return result
+	}
+
+	normalizedPlatforms := make([]string, 0, len(platforms))
+	seen := make(map[string]struct{}, len(platforms))
+	for _, rawPlatform := range platforms {
+		platform := strings.TrimSpace(rawPlatform)
+		if platform == "" {
+			continue
+		}
+		if _, exists := seen[platform]; exists {
+			continue
+		}
+		seen[platform] = struct{}{}
+		normalizedPlatforms = append(normalizedPlatforms, platform)
+	}
+
+	return s.relay.getTrayProviderRuntimeStates(normalizedPlatforms)
 }
 
 func (s *ProviderConcurrencyService) GetSessionSwitchCandidates(platform string, sessionNumber int64) []ProviderSessionSwitchCandidate {

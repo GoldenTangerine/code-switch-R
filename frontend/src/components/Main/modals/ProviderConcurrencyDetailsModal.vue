@@ -55,55 +55,64 @@
           :key="entry.id"
           class="provider-concurrency-row"
           :class="{ 'provider-concurrency-row--switchable': isEntrySwitchable(entry) }"
-          :role="isEntrySwitchable(entry) ? 'button' : undefined"
-          :tabindex="isEntrySwitchable(entry) ? 0 : undefined"
           @click="handleEntryClick(entry)"
-          @keydown.enter.prevent="handleEntryClick(entry)"
-          @keydown.space.prevent="handleEntryClick(entry)"
         >
-          <div
-            class="provider-concurrency-row__main"
-            :class="{ 'provider-concurrency-row__main--route': entry.modelRows.length > 1 }"
-          >
-            <div
-              class="provider-concurrency-row__models"
-              :class="{ 'provider-concurrency-row__models--single': entry.modelRows.length === 1 }"
-            >
-              <div
-                v-for="modelRow in entry.modelRows"
-                :key="modelRow.key"
-                class="provider-concurrency-row__model-line"
-                :class="{ 'provider-concurrency-row__model-line--single': entry.modelRows.length === 1 }"
-              >
-                <span v-if="entry.modelRows.length > 1" class="provider-concurrency-row__model-label">
-                  {{ modelRow.key === 'requested' ? t('components.main.concurrencyDetails.requestedModel') : t('components.main.concurrencyDetails.actualModel') }}
-                </span>
-                <span
-                  class="provider-concurrency-row__route-trigger provider-concurrency-row__model-details"
-                  tabindex="0"
-                  :aria-label="modelRowAriaLabel(modelRow, entry.modelRows.length > 1)"
-                  @mouseenter="showRouteTooltip($event, modelRow.tooltipLines)"
-                  @mouseleave="hideRouteTooltip($event)"
-                  @focus="showRouteTooltip($event, modelRow.tooltipLines)"
-                  @blur="hideRouteTooltip($event)"
-                  @keydown.esc="hideRouteTooltip()"
+          <div class="provider-concurrency-row__main">
+            <div class="provider-concurrency-row__content">
+              <div class="provider-concurrency-row__models">
+                <div
+                  v-for="modelRow in entry.modelRows"
+                  :key="modelRow.key"
+                  class="provider-concurrency-row__model-line"
+                  :class="{ 'provider-concurrency-row__model-line--single': entry.modelRows.length === 1 }"
                 >
-                  <strong v-if="modelRow.emphasized">{{ modelRow.model }}</strong>
-                  <span v-else class="provider-concurrency-row__model-value">{{ modelRow.model }}</span>
-                  <span class="provider-concurrency-row__parameters">
-                    <span
-                      v-for="key in connectionParameterKeys"
-                      :key="key"
-                      :class="['provider-parameter-chip', `provider-parameter-chip--${parameterTone(modelRow.parameters, key, modelRow.stage)}`]"
-                    >
-                      <span class="provider-parameter-chip__label">{{ parameterShortLabel(key) }}</span>
-                      <span class="provider-parameter-chip__value">{{ parameterValue(modelRow.parameters, key, modelRow.stage) }}</span>
+                  <span v-if="entry.modelRows.length > 1" class="provider-concurrency-row__model-label">
+                    {{ modelRow.key === 'requested' ? t('components.main.concurrencyDetails.requestedModel') : t('components.main.concurrencyDetails.actualModel') }}
+                  </span>
+                  <span
+                    class="provider-concurrency-row__route-trigger provider-concurrency-row__model-details"
+                    tabindex="0"
+                    :aria-label="modelRowAriaLabel(modelRow, entry.modelRows.length > 1)"
+                    @mouseenter="showRouteTooltip($event, modelRow.tooltipLines)"
+                    @mouseleave="hideRouteTooltip($event)"
+                    @focus="showRouteTooltip($event, modelRow.tooltipLines)"
+                    @blur="hideRouteTooltip($event)"
+                    @click.stop
+                    @keydown.esc="hideRouteTooltip()"
+                  >
+                    <strong v-if="modelRow.emphasized">{{ modelRow.model }}</strong>
+                    <span v-else class="provider-concurrency-row__model-value">{{ modelRow.model }}</span>
+                    <span class="provider-concurrency-row__parameters">
+                      <span
+                        v-for="key in connectionParameterKeys"
+                        :key="key"
+                        :class="['provider-parameter-chip', `provider-parameter-chip--${parameterTone(modelRow.parameters, key, modelRow.stage)}`]"
+                      >
+                        <span class="provider-parameter-chip__label">{{ parameterShortLabel(key) }}</span>
+                        <span class="provider-parameter-chip__value">{{ parameterValue(modelRow.parameters, key, modelRow.stage) }}</span>
+                      </span>
                     </span>
                   </span>
-                </span>
+                </div>
               </div>
+              <span class="provider-concurrency-row__context" :title="entry.context">{{ entry.context }}</span>
             </div>
-            <span class="provider-concurrency-row__context">{{ entry.context }}</span>
+            <div v-if="activeTab === 'active'" class="provider-concurrency-row__session-actions">
+              <div v-if="entry.sessionNumber && entry.sessionRole" class="provider-concurrency-row__session">
+                <span>{{ t('components.main.concurrencyDetails.sessionNumber', { number: entry.sessionNumber }) }}</span>
+                <span v-if="entry.sessionRole === 'child'">{{ entry.parentSessionNumber ? t('components.main.concurrencyDetails.parentSession', { number: entry.parentSessionNumber }) : t('components.main.concurrencyDetails.inheritedSession') }}</span>
+                <span v-else>{{ t('components.main.concurrencyDetails.rootSession') }}</span>
+              </div>
+              <button
+                type="button"
+                class="provider-concurrency-row__switch"
+                :disabled="props.switchLoading"
+                :aria-label="t('components.main.concurrencyDetails.switchProvider')"
+                @click.stop="handleEntryClick(entry)"
+              >
+                {{ t('components.main.concurrencyDetails.switchAction') }}
+              </button>
+            </div>
           </div>
           <div class="provider-concurrency-row__meta">
             <template v-for="item in entry.meta" :key="item.key">
@@ -112,29 +121,6 @@
             </template>
           </div>
           <p class="provider-concurrency-row__ua">{{ entry.userAgent }}</p>
-          <div v-if="entry.sessionNumber && entry.sessionRole" class="provider-concurrency-row__session">
-            <span>{{ t('components.main.concurrencyDetails.sessionNumber', { number: entry.sessionNumber }) }}</span>
-            <span v-if="entry.sessionRole === 'child'">{{ entry.parentSessionNumber ? t('components.main.concurrencyDetails.parentSession', { number: entry.parentSessionNumber }) : t('components.main.concurrencyDetails.inheritedSession') }}</span>
-            <span v-else>{{ t('components.main.concurrencyDetails.rootSession') }}</span>
-          </div>
-          <div v-if="activeTab === 'active'" class="provider-concurrency-row__actions">
-            <button
-              type="button"
-              class="provider-concurrency-row__switch"
-              :disabled="props.switchLoading"
-              :aria-label="t('components.main.concurrencyDetails.switchProvider')"
-              @click.stop="handleEntryClick(entry)"
-            >
-              <span aria-hidden="true">↔</span>
-              {{ t('components.main.concurrencyDetails.switchAction') }}
-            </button>
-            <span
-              v-if="props.sessionAffinityEnabled === true && !entry.sessionSwitchable"
-              class="provider-concurrency-row__switch-hint"
-            >
-              {{ t('components.main.concurrencyDetails.sessionUnavailable') }}
-            </span>
-          </div>
         </article>
       </section>
 
@@ -859,24 +845,26 @@ onBeforeUnmount(() => {
 
 .provider-concurrency-row__session {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 8px;
   color: #0f766e;
   font-size: 12px;
   font-weight: 700;
+  white-space: nowrap;
 }
 
-.provider-concurrency-row__actions {
+.provider-concurrency-row__session-actions {
   display: flex;
-  flex-wrap: wrap;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 8px;
+  white-space: nowrap;
 }
 
 .provider-concurrency-row__switch {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
   min-height: 30px;
   padding: 5px 10px;
   border: 1px solid rgba(20, 184, 166, 0.34);
@@ -904,19 +892,10 @@ onBeforeUnmount(() => {
   opacity: 0.55;
 }
 
-.provider-concurrency-row__switch-hint {
-  color: #64748b;
-  font-size: 11px;
-}
-
 .provider-concurrency-modal--dark .provider-concurrency-row__switch {
   color: #5eead4;
   border-color: rgba(45, 212, 191, 0.35);
   background: rgba(20, 184, 166, 0.14);
-}
-
-.provider-concurrency-modal--dark .provider-concurrency-row__switch-hint {
-  color: #94a3b8;
 }
 
 .provider-concurrency-switch-panel {
@@ -1035,34 +1014,44 @@ onBeforeUnmount(() => {
   border-color: rgba(148, 163, 184, 0.16);
 }
 
-.provider-concurrency-row__main,
+.provider-concurrency-row__main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  min-width: 0;
+  gap: 12px;
+}
+
+.provider-concurrency-row__content,
 .provider-concurrency-row__meta {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
 }
 
-.provider-concurrency-row__main--route {
-  justify-content: space-between;
+.provider-concurrency-row__content {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.provider-concurrency-row__meta {
+  flex-wrap: wrap;
 }
 
 .provider-concurrency-row__models {
   display: grid;
-  flex: 1 1 520px;
+  flex: 0 1 auto;
   min-width: 0;
   max-width: 100%;
   gap: 6px;
-}
-
-.provider-concurrency-row__models--single {
-  flex: 0 1 auto;
 }
 
 .provider-concurrency-row__model-line {
   display: grid;
   grid-template-columns: minmax(56px, auto) minmax(0, 1fr);
   align-items: baseline;
+  min-width: 0;
   gap: 10px;
 }
 
@@ -1079,22 +1068,28 @@ onBeforeUnmount(() => {
 
 .provider-concurrency-row__model-value,
 .provider-concurrency-row__route-trigger strong {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
   color: #0f172a;
-  overflow-wrap: anywhere;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .provider-concurrency-row__model-details {
   display: inline-flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
-  width: fit-content;
+  min-width: 0;
   max-width: 100%;
+  overflow: hidden;
   gap: 7px;
 }
 
 .provider-concurrency-row__parameters {
   display: inline-flex;
-  flex-wrap: wrap;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
   align-items: center;
   min-width: 0;
   gap: 5px;
@@ -1264,10 +1259,19 @@ onBeforeUnmount(() => {
   color: #f8fafc;
 }
 
-.provider-concurrency-row__context,
 .provider-concurrency-row__meta {
   color: #64748b;
   font-size: 12px;
+}
+
+.provider-concurrency-row__context {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  color: #64748b;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .provider-concurrency-row__ua {
@@ -1296,19 +1300,25 @@ onBeforeUnmount(() => {
     justify-content: flex-start;
   }
 
-  .provider-concurrency-row__model-line {
+  .provider-concurrency-row__main {
     grid-template-columns: minmax(0, 1fr);
-    gap: 4px;
+    align-items: stretch;
   }
 
-  .provider-concurrency-row__models--single {
-    flex-basis: 100%;
-    width: 100%;
+  .provider-concurrency-row__content {
+    flex-direction: column;
+    align-items: stretch;
+    white-space: normal;
   }
 
-  .provider-concurrency-row__model-details,
-  .provider-concurrency-row__parameters {
+  .provider-concurrency-row__session-actions {
     width: 100%;
+    justify-content: space-between;
+  }
+
+  .provider-concurrency-row__session {
+    flex-wrap: wrap;
+    white-space: normal;
   }
 }
 </style>

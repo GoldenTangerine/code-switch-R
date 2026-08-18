@@ -3360,6 +3360,211 @@ func (prs *ProviderRelayService) GetSessionAffinityStatuses(platform string) []P
 	return result
 }
 
+type trayProviderPreviewOptions struct {
+	roundRobinEnabled       bool
+	sessionAffinityEnabled  bool
+	concurrencyLimitEnabled bool
+}
+
+func (prs *ProviderRelayService) trayProviderPreviewOptions(platform string, settings *AppSettings, fixedMode bool) trayProviderPreviewOptions {
+	options := trayProviderPreviewOptions{}
+	if settings == nil {
+		return options
+	}
+	platform = strings.TrimSpace(platform)
+	options.roundRobinEnabled = settings.EnableRoundRobin && !fixedMode
+	options.sessionAffinityEnabled = settings.SessionAffinityEnabled != nil && settings.SessionAffinityEnabled[platform]
+	options.concurrencyLimitEnabled = settings.ProviderConcurrencyLimits != nil && settings.ProviderConcurrencyLimits[platform]
+	return options
+}
+
+func trayDefaultProvider(providerID string, providerName string) *TrayDefaultProvider {
+	providerID = strings.TrimSpace(providerID)
+	providerName = strings.TrimSpace(providerName)
+	if providerID == "" && providerName == "" {
+		return nil
+	}
+	return &TrayDefaultProvider{ProviderID: providerID, ProviderName: providerName}
+}
+
+func (prs *ProviderRelayService) isProviderAvailableForTrayPreview(platform string, provider Provider, options trayProviderPreviewOptions) bool {
+	if !provider.Enabled || strings.TrimSpace(provider.APIURL) == "" || !providerHasRelayAuth(platform, provider) {
+		return false
+	}
+	providerID := providerRefFromProvider(provider)
+	if prs.blacklistService != nil {
+		if blacklisted, _ := prs.blacklistService.IsBlacklistedByID(platform, providerID, provider.Name); blacklisted {
+			return false
+		}
+	}
+	limit := providerConcurrencyLimit(provider)
+	return !options.concurrencyLimitEnabled || limit == nil || prs.providerConcurrencyCount(platform, providerID) < *limit
+}
+
+func (prs *ProviderRelayService) previewNextProviderFromProviders(platform string, providers []Provider, options trayProviderPreviewOptions) *TrayDefaultProvider {
+	// 托盘没有请求模型可供匹配，只预览真实路由中的连接、黑名单、容量、负载和并发规则。
+	providers = filterRuntimeProviders(platform, providers)
+	available := make([]Provider, 0, len(providers))
+	for _, provider := range providers {
+		if prs.isProviderAvailableForTrayPreview(platform, provider, options) {
+			available = append(available, provider)
+		}
+	}
+	if len(available) == 0 {
+		return nil
+	}
+
+	sessionLoads := prs.providerSessionLoads(platform)
+	if options.sessionAffinityEnabled && len(sessionLoads) > 0 {
+		available = reorderProvidersWithinHighestSessionLevel(available, sessionLoads)
+		provider := available[0]
+		return trayDefaultProvider(providerRefFromProvider(provider), provider.Name)
+	}
+
+	levels, levelGroups := buildProviderAttemptGroups(available, "")
+	providersInLevel := levelGroups[levels[0]]
+	if options.roundRobinEnabled {
+		providersInLevel = prs.roundRobinOrderPreview(platform, levels[0], providersInLevel)
+	}
+	provider := providersInLevel[0]
+	return trayDefaultProvider(providerRefFromProvider(provider), provider.Name)
+}
+
+func (prs *ProviderRelayService) isGeminiProviderAvailableForTrayPreview(provider GeminiProvider, options trayProviderPreviewOptions) bool {
+	if !provider.Enabled || strings.TrimSpace(provider.BaseURL) == "" {
+		return false
+	}
+	providerID := providerRefFromGeminiProvider(provider)
+	if prs.blacklistService != nil {
+		if blacklisted, _ := prs.blacklistService.IsBlacklistedByID("gemini", providerID, provider.Name); blacklisted {
+			return false
+		}
+	}
+	limit := geminiProviderConcurrencyLimit(provider)
+	return !options.concurrencyLimitEnabled || limit == nil || prs.providerConcurrencyCount("gemini", providerID) < *limit
+}
+
+func (prs *ProviderRelayService) previewNextGeminiProvider(providers []GeminiProvider, options trayProviderPreviewOptions) *TrayDefaultProvider {
+	available := make([]GeminiProvider, 0, len(providers))
+	for _, provider := range providers {
+		if prs.isGeminiProviderAvailableForTrayPreview(provider, options) {
+			available = append(available, provider)
+		}
+	}
+	if len(available) == 0 {
+		return nil
+	}
+
+	sessionLoads := prs.providerSessionLoads("gemini")
+	if options.sessionAffinityEnabled && len(sessionLoads) > 0 {
+		available = reorderGeminiProvidersWithinHighestSessionLevel(available, sessionLoads)
+		provider := available[0]
+		return trayDefaultProvider(providerRefFromGeminiProvider(provider), provider.Name)
+	}
+
+	highestLevel := available[0].Level
+	if highestLevel <= 0 {
+		highestLevel = 1
+	}
+	for _, provider := range available[1:] {
+		level := provider.Level
+		if level <= 0 {
+			level = 1
+		}
+		if level < highestLevel {
+			highestLevel = level
+		}
+	}
+	providersInLevel := make([]GeminiProvider, 0, len(available))
+	for _, provider := range available {
+		level := provider.Level
+		if level <= 0 {
+			level = 1
+		}
+		if level == highestLevel {
+			providersInLevel = append(providersInLevel, provider)
+		}
+	}
+	if options.roundRobinEnabled {
+		providersInLevel = prs.roundRobinOrderGeminiPreview(highestLevel, providersInLevel)
+	}
+	provider := providersInLevel[0]
+	return trayDefaultProvider(providerRefFromGeminiProvider(provider), provider.Name)
+}
+
+func (prs *ProviderRelayService) getTrayProviderRuntimeState(platform string, options trayProviderPreviewOptions) TrayProviderRuntimeState {
+	state := TrayProviderRuntimeState{Statuses: []TrayProviderActivityStatus{}}
+	if prs == nil {
+		return state
+	}
+	if platform == "gemini" {
+		if prs.geminiService == nil {
+			state.Error = true
+			return state
+		}
+		providers := prs.geminiService.GetProviders()
+		for _, provider := range providers {
+			providerID := providerRefFromGeminiProvider(provider)
+			activeRequests := prs.providerConcurrencyCount(platform, providerID)
+			state.Statuses = append(state.Statuses, TrayProviderActivityStatus{
+				Platform:       platform,
+				ProviderID:     providerID,
+				ProviderName:   provider.Name,
+				ActiveRequests: activeRequests,
+			})
+		}
+		state.DefaultProvider = prs.previewNextGeminiProvider(providers, options)
+		return state
+	}
+	if prs.providerService == nil {
+		state.Error = true
+		return state
+	}
+	providers, err := prs.providerService.LoadProviders(platform)
+	if err != nil {
+		state.Error = true
+		return state
+	}
+	providers = filterRuntimeProviders(platform, providers)
+	for _, provider := range providers {
+		providerID := providerRefFromProvider(provider)
+		activeRequests := prs.providerConcurrencyCount(platform, providerID)
+		state.Statuses = append(state.Statuses, TrayProviderActivityStatus{
+			Platform:       platform,
+			ProviderID:     providerID,
+			ProviderName:   provider.Name,
+			ActiveRequests: activeRequests,
+		})
+	}
+	state.DefaultProvider = prs.previewNextProviderFromProviders(platform, providers, options)
+	return state
+}
+
+func (prs *ProviderRelayService) getTrayProviderRuntimeStates(platforms []string) map[string]TrayProviderRuntimeState {
+	result := make(map[string]TrayProviderRuntimeState, len(platforms))
+	if prs == nil {
+		return result
+	}
+	var settings *AppSettings
+	if prs.appSettings != nil {
+		if loaded, err := prs.appSettings.GetAppSettings(); err == nil {
+			settings = &loaded
+		}
+	}
+	fixedMode := prs.blacklistService != nil && prs.blacklistService.ShouldUseFixedMode()
+	for _, platform := range platforms {
+		platform = strings.TrimSpace(platform)
+		if platform == "" {
+			continue
+		}
+		result[platform] = prs.getTrayProviderRuntimeState(
+			platform,
+			prs.trayProviderPreviewOptions(platform, settings, fixedMode),
+		)
+	}
+	return result
+}
+
 func (prs *ProviderRelayService) GetProviderConcurrencyStatuses(platform string) []ProviderConcurrencyStatus {
 	platform = strings.TrimSpace(platform)
 	result := []ProviderConcurrencyStatus{}

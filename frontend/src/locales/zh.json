@@ -67,7 +67,9 @@
     "queryFailed": "查询失败",
     "providerQuotaQuery": "额度查询",
     "calling": "调用中 · {count}",
-    "recentlyUsed": "最近调用"
+    "recentlyUsed": "最近调用",
+    "defaultProvider": "默认",
+    "noAvailableProviders": "暂无可用供应商"
   },
   "menus": {
     "general": "通用设置",
