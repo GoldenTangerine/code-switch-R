@@ -221,6 +221,7 @@ describe('ProviderCard display states', () => {
     for (const html of renderedCards) {
       expect(html.match(/card-balance-quota__error-trigger/g)).toHaveLength(1)
       expect(html).toContain('aria-expanded="false"')
+      expect(html).toContain('card-balance-quota__error-icon')
       expect(html).toContain('card-balance-quota-panel__updated')
       expect(html).toContain('card-balance-quota-panel__refresh')
       expect(html).not.toContain('temporary upstream timeout')

@@ -1286,9 +1286,6 @@
   border-radius: 999px;
   background: rgba(239, 68, 68, 0.12);
   color: #dc2626;
-  font-size: 0.6rem;
-  font-weight: 800;
-  line-height: 1;
 }
 
 .automation-card.theme-dark .card-balance-quota__error-icon {
@@ -1350,6 +1347,7 @@
 .card-balance-quota__error-text {
   display: block;
   min-width: 0;
+  cursor: copy;
   color: #b91c1c;
   font-family: 'SFMono-Regular', Menlo, Consolas, monospace;
   font-size: 0.75rem;
@@ -1360,8 +1358,16 @@
   user-select: text;
 }
 
+.card-balance-quota__error-text.is-copied {
+  color: #047857;
+}
+
 .card-balance-quota__error-popover.theme-dark .card-balance-quota__error-text {
   color: #fecdd3;
+}
+
+.card-balance-quota__error-popover.theme-dark .card-balance-quota__error-text.is-copied {
+  color: #86efac;
 }
 
 .provider-state-inline {

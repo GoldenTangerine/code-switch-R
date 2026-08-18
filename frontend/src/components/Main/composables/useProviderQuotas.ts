@@ -63,7 +63,6 @@ type RemoteQuotaCacheEntry = {
   items: ProviderQuotaSnapshotItem[]
   fetchedAt: number
   cacheIdentity: string
-  staleFallbackCount: number
 }
 
 const createRemoteQuotaCacheMap = (): Record<ProviderTab, Record<string, RemoteQuotaCacheEntry>> => ({
@@ -178,26 +177,6 @@ export function useProviderQuotas(options: UseProviderQuotasOptions) {
     }]
   }
 
-  const attachRefreshErrorMessage = (
-    items: ProviderQuotaSnapshotItem[],
-    now: Date,
-    message: string,
-  ): ProviderQuotaSnapshotItem[] => {
-    const normalizedMessage = `${message ?? ''}`.trim() || t('components.main.providers.quotaQueryFailed')
-    const fallbackMessage = t('components.main.providers.quotaRefreshFailedCached', {
-      reason: normalizedMessage,
-    })
-
-    return cloneRemoteQuotaItems(items, now).map((item) => {
-      const existingExtra = `${item.extra ?? ''}`.trim()
-      return {
-        ...item,
-        refreshErrorMessage: fallbackMessage,
-        extra: existingExtra || undefined,
-      }
-    })
-  }
-
   const resolveRemoteQuotaForCard = async ({
     card,
     tab,
@@ -243,36 +222,14 @@ export function useProviderQuotas(options: UseProviderQuotasOptions) {
         items: cachedItems,
         fetchedAt: now.getTime(),
         cacheIdentity,
-        staleFallbackCount: 0,
       }
       return cloneRemoteQuotaItems(cachedItems, now)
     }
 
-    if (cacheEntry && cacheMatchesIdentity) {
-      if (forceRefresh) {
-        return attachRefreshErrorMessage(cacheEntry.items, now, failureMessage)
-      }
-      if (cacheEntry.staleFallbackCount >= 1) {
-        delete tabCache[ref]
-        return failureMessage
-          ? buildRemoteQuotaErrorItems({ queriedAt: failureQueriedAt, message: failureMessage })
-          : []
-      }
-      tabCache[ref] = {
-        ...cacheEntry,
-        staleFallbackCount: cacheEntry.staleFallbackCount + 1,
-      }
-      return cloneRemoteQuotaItems(cacheEntry.items, now)
-    }
-
-    if (forceRefresh || !cacheMatchesIdentity) {
-      delete tabCache[ref]
-      return failureMessage
-        ? buildRemoteQuotaErrorItems({ queriedAt: failureQueriedAt, message: failureMessage })
-        : []
-    }
-
-    return []
+    delete tabCache[ref]
+    return failureMessage
+      ? buildRemoteQuotaErrorItems({ queriedAt: failureQueriedAt, message: failureMessage })
+      : []
   }
 
   const resolveQuotaForCard = async (

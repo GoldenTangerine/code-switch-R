@@ -1017,7 +1017,7 @@ describe('useProviderQuotas', () => {
     ])
   })
 
-  it('only falls back to an expired remote quota cache once after ttl refresh failures', async () => {
+  it('clears expired remote quota cache after ttl refresh failures', async () => {
     vi.setSystemTime(new Date('2026-04-09T10:00:00.000Z'))
 
     const cards = createCardRecord()
@@ -1047,10 +1047,17 @@ describe('useProviderQuotas', () => {
         error: 'temporary upstream timeout',
       })
       .mockResolvedValueOnce({
-        success: false,
+        success: true,
         queryType: 'token_plan_kimi',
-        items: [],
-        error: 'temporary upstream timeout',
+        items: [
+          {
+            key: 'weekly',
+            used: 45,
+            total: 120,
+            nextReset: '2026-04-12T00:00:00.000Z',
+            active: true,
+          },
+        ],
       })
 
     const quotaState = useProviderQuotas({
@@ -1065,9 +1072,10 @@ describe('useProviderQuotas', () => {
     await quotaState.refreshProviderQuotas()
     expect(quotaState.getQuotaDisplay(card)).toEqual([
       expect.objectContaining({
-        key: 'weekly',
-        used: 30,
-        total: 120,
+        key: 'remote_quota_query_error',
+        invalidMessage: 'temporary upstream timeout',
+        total: 0,
+        used: 0,
       }),
     ])
 
@@ -1077,10 +1085,9 @@ describe('useProviderQuotas', () => {
     expect(queryProviderQuota).toHaveBeenCalledTimes(3)
     expect(quotaState.getQuotaDisplay(card)).toEqual([
       expect.objectContaining({
-        key: 'remote_quota_query_error',
-        invalidMessage: 'temporary upstream timeout',
-        total: 0,
-        used: 0,
+        key: 'weekly',
+        total: 120,
+        used: 45,
       }),
     ])
   })
@@ -1147,7 +1154,7 @@ describe('useProviderQuotas', () => {
     ])
   })
 
-  it('preserves cached remote balance when manual force refresh returns no items', async () => {
+  it('clears cached remote balance when manual force refresh returns no items', async () => {
     vi.setSystemTime(new Date('2026-04-09T10:00:00.000Z'))
 
     const cards = createCardRecord()
@@ -1184,15 +1191,7 @@ describe('useProviderQuotas', () => {
       })
 
     const quotaState = useProviderQuotas({
-      t: (key: string, params?: Record<string, string>) => {
-        if (key === 'components.main.providers.quotaRefreshFailedCached') {
-          return `刷新失败（${params?.reason}），当前仍显示上次成功获取的数据`
-        }
-        if (key === 'components.main.providers.quotaQueryFailed') {
-          return '额度查询失败'
-        }
-        return key
-      },
+      t: (key: string) => key,
       getActiveTab: () => 'codex',
       cards,
     })
@@ -1209,13 +1208,10 @@ describe('useProviderQuotas', () => {
     expect(queryProviderQuota).toHaveBeenCalledTimes(2)
     expect(quotaState.getQuotaDisplay(card)).toEqual([
       expect.objectContaining({
-        key: 'openrouter',
-        queriedAt: firstQueriedAt,
-        used: 8,
-        total: 50,
-        valueMode: 'currency',
-        unit: 'USD',
-        refreshErrorMessage: '刷新失败（temporary upstream timeout），当前仍显示上次成功获取的数据',
+        key: 'remote_quota_query_error',
+        invalidMessage: 'temporary upstream timeout',
+        total: 0,
+        used: 0,
       }),
     ])
   })

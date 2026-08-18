@@ -388,7 +388,12 @@
                 v-if="hasErrorQuotaItems"
                 class="card-balance-quota-panel card-balance-quota-panel--error"
               >
-                <div ref="quotaErrorPopoverRef" class="card-balance-quota-error">
+                <div
+                  ref="quotaErrorPopoverRef"
+                  class="card-balance-quota-error"
+                  @mouseenter="handleQuotaErrorPointerEnter"
+                  @mouseleave="handleQuotaErrorPointerLeave"
+                >
                   <span class="sr-only" role="status" aria-live="polite">
                     {{ t('components.main.providers.quotaQueryFailed') }}
                   </span>
@@ -403,12 +408,10 @@
                     aria-haspopup="dialog"
                     @click.stop="toggleQuotaErrorPopover"
                   >
-                    <span
-                      class="card-balance-quota__error-icon"
-                      aria-hidden="true"
-                    >
-                      !
-                    </span>
+                    <svg class="card-balance-quota__error-icon" viewBox="0 0 24 24" aria-hidden="true">
+                      <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8" />
+                      <path d="M12 7.5v5.25M12 16.25v.25" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+                    </svg>
                   </button>
                   <Teleport to="body">
                     <div
@@ -427,6 +430,8 @@
                       @click.stop
                       @pointerdown.stop
                       @dragstart.stop.prevent
+                      @mouseenter="handleQuotaErrorPointerEnter"
+                      @mouseleave="handleQuotaErrorPointerLeave"
                     >
                       <strong class="card-balance-quota__error-popover-title">
                         {{ t('components.main.providers.quotaErrorDetails') }}
@@ -442,7 +447,12 @@
                         >
                           {{ item.label }}
                         </span>
-                        <span class="card-balance-quota__error-text">
+                        <span
+                          class="card-balance-quota__error-text"
+                          :title="quotaErrorCopied ? t('components.main.providers.quotaErrorCopySuccess') : t('components.main.providers.quotaErrorCopyHint')"
+                          :class="{ 'is-copied': quotaErrorCopied }"
+                          @dblclick.stop="copyQuotaErrorDetails"
+                        >
                           {{ quotaItemNote(item) || t('components.main.providers.quotaQueryFailed') }}
                         </span>
                       </div>
@@ -603,7 +613,12 @@
               v-if="hasErrorQuotaItems"
               class="card-balance-quota-panel card-balance-quota-panel--standalone card-balance-quota-panel--error"
             >
-              <div ref="quotaErrorPopoverRef" class="card-balance-quota-error">
+              <div
+                ref="quotaErrorPopoverRef"
+                class="card-balance-quota-error"
+                @mouseenter="handleQuotaErrorPointerEnter"
+                @mouseleave="handleQuotaErrorPointerLeave"
+              >
                 <span class="sr-only" role="status" aria-live="polite">
                   {{ t('components.main.providers.quotaQueryFailed') }}
                 </span>
@@ -618,12 +633,10 @@
                   aria-haspopup="dialog"
                   @click.stop="toggleQuotaErrorPopover"
                 >
-                  <span
-                    class="card-balance-quota__error-icon"
-                    aria-hidden="true"
-                  >
-                    !
-                  </span>
+                  <svg class="card-balance-quota__error-icon" viewBox="0 0 24 24" aria-hidden="true">
+                    <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8" />
+                    <path d="M12 7.5v5.25M12 16.25v.25" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+                  </svg>
                 </button>
                 <Teleport to="body">
                   <div
@@ -642,6 +655,8 @@
                     @click.stop
                     @pointerdown.stop
                     @dragstart.stop.prevent
+                    @mouseenter="handleQuotaErrorPointerEnter"
+                    @mouseleave="handleQuotaErrorPointerLeave"
                   >
                     <strong class="card-balance-quota__error-popover-title">
                       {{ t('components.main.providers.quotaErrorDetails') }}
@@ -657,7 +672,12 @@
                       >
                         {{ item.label }}
                       </span>
-                      <span class="card-balance-quota__error-text">
+                      <span
+                        class="card-balance-quota__error-text"
+                        :title="quotaErrorCopied ? t('components.main.providers.quotaErrorCopySuccess') : t('components.main.providers.quotaErrorCopyHint')"
+                        :class="{ 'is-copied': quotaErrorCopied }"
+                        @dblclick.stop="copyQuotaErrorDetails"
+                      >
                         {{ quotaItemNote(item) || t('components.main.providers.quotaQueryFailed') }}
                       </span>
                     </div>
@@ -979,7 +999,13 @@ import {
   calculateProviderQuotaErrorPopoverLayout,
   type ProviderQuotaErrorPopoverPlacement,
 } from '../utils/providerQuotaErrorPopover'
+import {
+  buildProviderQuotaErrorCopyPayload,
+  createProviderQuotaErrorPopoverInteraction,
+} from '../utils/providerQuotaErrorInteraction'
 import { resolveProviderQuotaCurrencyCode } from '../utils/providerQuotaValueFormat'
+import { writeTextToClipboard } from '../../../utils/clipboard'
+import { showToast } from '../../../utils/toast'
 import {
   formatProviderQuotaRelativeUpdatedAt,
   getProviderQuotaBalanceTone,
@@ -1070,12 +1096,27 @@ const successRateTooltip = computed(() => {
 const blacklistPopoverOpen = ref(false)
 const blacklistPopoverRef = ref<HTMLElement | null>(null)
 const quotaErrorPopoverOpen = ref(false)
+const quotaErrorPopoverPinned = ref(false)
+const quotaErrorPopoverHovering = ref(false)
+const quotaErrorFocusOnOpen = ref(false)
+const quotaErrorCopied = ref(false)
 const quotaErrorPopoverRef = ref<HTMLElement | null>(null)
 const quotaErrorTriggerRef = ref<HTMLButtonElement | null>(null)
 const quotaErrorPopoverPanelRef = ref<HTMLElement | null>(null)
 const quotaErrorPopoverPlacement = ref<ProviderQuotaErrorPopoverPlacement>('below')
 const quotaErrorPopoverStyle = ref<CSSProperties>({ visibility: 'hidden' })
+let quotaErrorCopiedTimer: ReturnType<typeof globalThis.setTimeout> | undefined
 const hasOpenCardPopover = computed(() => blacklistPopoverOpen.value || quotaErrorPopoverOpen.value)
+
+const quotaErrorPopoverInteraction = createProviderQuotaErrorPopoverInteraction({
+  open: quotaErrorPopoverOpen,
+  pinned: quotaErrorPopoverPinned,
+  hovering: quotaErrorPopoverHovering,
+  focusOnOpen: quotaErrorFocusOnOpen,
+  onClose: () => {
+    quotaErrorPopoverStyle.value = { visibility: 'hidden' }
+  },
+})
 
 const quotaErrorDetailsId = computed(() => (
   `provider-quota-error-${props.activeTab}-${props.viewModel.card.id}`
@@ -1092,8 +1133,7 @@ const closeBlacklistPopover = () => {
 
 const closeQuotaErrorPopover = (restoreFocus = false) => {
   const wasOpen = quotaErrorPopoverOpen.value
-  quotaErrorPopoverOpen.value = false
-  quotaErrorPopoverStyle.value = { visibility: 'hidden' }
+  quotaErrorPopoverInteraction.close()
   if (restoreFocus && wasOpen) {
     void nextTick(() => quotaErrorTriggerRef.value?.focus({ preventScroll: true }))
   }
@@ -1106,7 +1146,40 @@ const toggleBlacklistPopover = () => {
 
 const toggleQuotaErrorPopover = () => {
   closeBlacklistPopover()
-  quotaErrorPopoverOpen.value = !quotaErrorPopoverOpen.value
+  quotaErrorPopoverInteraction.toggle()
+}
+
+const handleQuotaErrorPointerEnter = () => {
+  quotaErrorPopoverInteraction.enter()
+}
+
+const handleQuotaErrorPointerLeave = () => {
+  quotaErrorPopoverInteraction.leave()
+}
+
+const copyQuotaErrorDetails = async () => {
+  const payload = buildProviderQuotaErrorCopyPayload(
+    errorQuotaItems.value,
+    (item) => quotaItemNote(item),
+    t('components.main.providers.quotaQueryFailed'),
+  )
+  if (!payload) return
+
+  try {
+    await writeTextToClipboard(payload)
+    quotaErrorCopied.value = true
+    if (quotaErrorCopiedTimer !== undefined) {
+      globalThis.clearTimeout(quotaErrorCopiedTimer)
+    }
+    quotaErrorCopiedTimer = globalThis.setTimeout(() => {
+      quotaErrorCopied.value = false
+      quotaErrorCopiedTimer = undefined
+    }, 1600)
+    showToast(t('components.main.providers.quotaErrorCopySuccess'))
+  } catch (error) {
+    console.error('复制额度错误失败:', error)
+    showToast(t('components.main.providers.quotaErrorCopyFailed'), 'error')
+  }
 }
 
 const handleBlacklistPopoverPointerDown = (event: PointerEvent) => {
@@ -1207,9 +1280,28 @@ watch(quotaErrorPopoverOpen, async (open) => {
     await nextTick()
     if (!quotaErrorPopoverOpen.value) return
     updateQuotaErrorPopoverPosition()
-    quotaErrorPopoverPanelRef.value?.focus({ preventScroll: true })
+    if (quotaErrorFocusOnOpen.value) {
+      quotaErrorPopoverPanelRef.value?.focus({ preventScroll: true })
+      quotaErrorFocusOnOpen.value = false
+    }
   }
 })
+
+watch(
+  () => [
+    props.viewModel.stats.state,
+    progressQuotaSectionMode.value,
+    showStandaloneQuotaStatusRow.value,
+    hasBalanceQuotaItems.value,
+    hasErrorQuotaItems.value,
+    props.viewModel.quotaDisplay.length,
+  ],
+  () => {
+    if (quotaErrorPopoverOpen.value) {
+      void nextTick(updateQuotaErrorPopoverPosition)
+    }
+  },
+)
 
 watch(
   () => [
@@ -1386,6 +1478,11 @@ watch(hasQuotaStatusPanelItems, (enabled) => {
 onUnmounted(() => {
   stopBlacklistPopoverListeners()
   stopQuotaErrorPopoverListeners()
+  quotaErrorPopoverInteraction.dispose()
+  if (quotaErrorCopiedTimer !== undefined) {
+    globalThis.clearTimeout(quotaErrorCopiedTimer)
+    quotaErrorCopiedTimer = undefined
+  }
   stopBalanceQuotaTimeTicker()
   clearProviderLogsClickTimer()
 })
