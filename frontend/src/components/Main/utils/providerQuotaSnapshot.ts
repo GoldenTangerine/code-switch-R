@@ -3,7 +3,7 @@ import {
   fetchCostByProvider,
   fetchCostSinceByProvider,
   fetchFiveHourQuotaStatusByProvider,
-  type LogPlatform,
+  type RequestLogPlatform,
 } from '../../../services/logs'
 import {
   formatLocalDateTime,
@@ -80,7 +80,7 @@ export const resolveProviderQuotaSnapshot = async ({
   t,
 }: {
   card: AutomationCard
-  platform: LogPlatform | ''
+  platform: RequestLogPlatform | ''
   now: Date
   t: TranslateFn
 }): Promise<ProviderQuotaSnapshotItem[]> => {

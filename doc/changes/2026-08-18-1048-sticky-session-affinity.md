@@ -13,6 +13,13 @@
 - 供应商编辑表单增加会话容量和空闲释放时间配置。
 - Sticky 关闭时清理对应平台的内存绑定并恢复原有路由行为。
 
+## 后续修正（2026-08-18 15:03:59 CST）
+
+- 增加 Codex `x-codex-turn-metadata`、`x-codex-parent-thread-id` 与 `client_metadata` 显式会话字段解析，修复 Codex TUI 活跃连接缺少会话编号、无法打开供应商切换弹窗的问题。
+- 活跃连接行增加可见的“切换”按钮；未开启 Sticky 或未识别稳定会话时展示对应状态，不再依赖隐藏的整行点击入口。
+- 修复候选供应商卡片被长名称或不可用原因撑宽的问题；文字在卡片内完整换行，窄窗口自动使用单列布局。
+- 排除全局按钮强制布局对会话切换卡片和按钮的覆盖，补充悬停、键盘焦点和深浅色不可用状态，并阻止过期候选请求覆盖当前会话。
+
 ## 验证结果
 
 - `gofmt`：通过。
@@ -20,3 +27,10 @@
 - `cd frontend && pnpm test:unit`：通过（64 个测试文件，493 个测试）。
 - `cd frontend && pnpm exec vue-tsc --noEmit`：通过。
 - 中英文 locale JSON 解析与 `git diff --check`：通过。
+
+### 后续修正验证
+
+- `go test ./services/...`：通过。
+- `cd frontend && pnpm test:unit`：通过（67 个测试文件，506 个测试）。
+- 中英文 locale JSON 解析与 `git diff --check`：通过。
+- `cd frontend && pnpm exec vue-tsc --noEmit`：通过。

@@ -1934,6 +1934,79 @@ func TestDeriveCodexThreadSessionHash(t *testing.T) {
 	}
 }
 
+func TestDeriveCodexSessionIdentityFromTurnMetadata(t *testing.T) {
+	root := deriveRelaySessionIdentityWithHeaders("codex", []byte(`{"model":"gpt-5"}`), map[string]string{
+		"X-Codex-Turn-Metadata": `{"session_id":"session-root","thread_id":"thread-root"}`,
+	})
+	if root.NodeHash != shortSHA256Hex("codex.thread_id=thread-root") || root.Role != "root" {
+		t.Fatalf("Codex 根会话头解析错误: %#v", root)
+	}
+
+	child := deriveRelaySessionIdentityWithHeaders("codex", []byte(`{"model":"gpt-5"}`), map[string]string{
+		"X-Codex-Turn-Metadata":    `{"session_id":"session-child","thread_id":"thread-child","parent_thread_id":"metadata-parent"}`,
+		"X-Codex-Parent-Thread-Id": "thread-root",
+	})
+	if child.NodeHash != shortSHA256Hex("codex.thread_id=thread-child") {
+		t.Fatalf("Codex 子会话 thread hash 错误: %#v", child)
+	}
+	if child.ParentHash != root.NodeHash || child.RootHash != root.NodeHash || child.Role != "child" {
+		t.Fatalf("Codex 父子会话关系错误: root=%#v child=%#v", root, child)
+	}
+}
+
+func TestDeriveCodexSessionIdentityCanonicalizesBodyThreadRelation(t *testing.T) {
+	root := deriveRelaySessionIdentity("codex", []byte(`{"metadata":{"thread_id":"thread-root"}}`))
+	child := deriveRelaySessionIdentity("codex", []byte(`{"metadata":{"thread_id":"thread-child","parent_thread_id":"thread-root"}}`))
+	if root.NodeHash == "" || child.NodeHash == "" || child.ParentHash != root.NodeHash || child.Role != "child" {
+		t.Fatalf("Codex 请求体父子会话关系错误: root=%#v child=%#v", root, child)
+	}
+}
+
+func TestDeriveCodexSessionIdentityFromClientMetadata(t *testing.T) {
+	body := []byte(`{"model":"gpt-5","client_metadata":{"thread_id":"thread-child","x-codex-parent-thread-id":"thread-root","x-codex-turn-metadata":"{\"session_id\":\"session-child\",\"thread_id\":\"thread-child\"}"}}`)
+	identity := deriveRelaySessionIdentityWithHeaders("codex", body, nil)
+	if identity.NodeHash != shortSHA256Hex("codex.thread_id=thread-child") {
+		t.Fatalf("client_metadata thread hash 错误: %#v", identity)
+	}
+	if identity.ParentHash != shortSHA256Hex("codex.thread_id=thread-root") || identity.Role != "child" {
+		t.Fatalf("client_metadata 父子关系错误: %#v", identity)
+	}
+}
+
+func TestDecorateCodexConcurrencyMetaFromTurnMetadataHeader(t *testing.T) {
+	appSettings := &AppSettingsService{path: t.TempDir() + "/settings.json"}
+	settings, err := appSettings.GetAppSettings()
+	if err != nil {
+		t.Fatalf("读取应用设置失败: %v", err)
+	}
+	settings.SessionAffinityEnabled["codex"] = true
+	if _, err := appSettings.SaveAppSettings(settings); err != nil {
+		t.Fatalf("保存应用设置失败: %v", err)
+	}
+
+	relay := NewProviderRelayService(nil, nil, nil, nil, appSettings, nil, "")
+	headers := map[string]string{
+		"X-Codex-Turn-Metadata": `{"session_id":"session-root","thread_id":"thread-root"}`,
+	}
+	identity := deriveRelaySessionIdentityWithHeaders("codex", []byte(`{"model":"gpt-5"}`), headers)
+	relay.rememberSessionRelation("codex", identity)
+	attemptID := relay.beginSessionProviderRequest("codex", identity.NodeHash, "provider-a", "Provider A", "codex-tui/0.147.0", 5, 30, true, false)
+	relay.finishSessionProviderRequest("codex", identity.NodeHash)
+	relay.confirmSessionProviderBinding("codex", identity.NodeHash, attemptID)
+
+	meta := providerConcurrencyRequestMeta{}
+	relay.decorateSessionConcurrencyMeta("codex", []byte(`{"model":"gpt-5"}`), headers, &meta)
+	if meta.SessionNumber <= 0 || meta.RootSessionNumber != meta.SessionNumber || meta.SessionRole != "root" || !meta.SessionSwitchable {
+		t.Fatalf("Codex 活跃连接会话元数据错误: %#v", meta)
+	}
+	collector := relay.newSessionAffinityToolResponseCollector("codex", Provider{ID: 1, Name: "Provider A"}, providerRequestPlan{
+		OriginalBodyBytes: []byte(`{"model":"gpt-5","input":[]}`),
+	}, "codex-tui/0.147.0", headers)
+	if collector != nil {
+		t.Fatalf("请求头已有 Codex 会话身份时不应创建额外工具会话")
+	}
+}
+
 func TestDeriveToolPairSessionHash(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -2032,7 +2105,7 @@ func TestToolResponseCollectorSkipsWhenOriginalRequestHasSession(t *testing.T) {
 		BodyBytes:         []byte(`{"input":[]}`),
 	}
 
-	collector := relay.newSessionAffinityToolResponseCollector("claude", Provider{ID: 1, Name: "Provider A"}, plan, "claude-cli/1.0.0")
+	collector := relay.newSessionAffinityToolResponseCollector("claude", Provider{ID: 1, Name: "Provider A"}, plan, "claude-cli/1.0.0", nil)
 	if collector != nil {
 		t.Fatalf("原始请求已有 sessionHash 时不应创建响应侧工具会话 collector")
 	}
@@ -2122,7 +2195,7 @@ func TestSessionAffinityToolCollectorFactoryRegistersResponseSession(t *testing.
 	provider := Provider{ID: 1, Name: "Provider A", SessionMaxSessions: 5, SessionTTLMinutes: 5}
 	collector := relay.newSessionAffinityToolResponseCollector("claude", provider, providerRequestPlan{
 		OriginalBodyBytes: []byte(`{"model":"claude","messages":[{"role":"user","content":"run"}]}`),
-	}, "claude-cli/1.0")
+	}, "claude-cli/1.0", nil)
 	if collector == nil {
 		t.Fatal("Sticky 开启且请求无稳定会话时应创建 Collector")
 	}

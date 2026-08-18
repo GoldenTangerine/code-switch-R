@@ -9,7 +9,10 @@
  */
 package services
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 type ProviderConcurrencyService struct {
 	relay *ProviderRelayService
@@ -24,6 +27,25 @@ func (s *ProviderConcurrencyService) GetProviderConcurrencyStatuses(platform str
 		return []ProviderConcurrencyStatus{}
 	}
 	return s.relay.GetProviderConcurrencyStatuses(platform)
+}
+
+func (s *ProviderConcurrencyService) GetProviderConcurrencyStatusesBatch(platforms []string) map[string][]ProviderConcurrencyStatus {
+	result := make(map[string][]ProviderConcurrencyStatus)
+	if s == nil || s.relay == nil {
+		return result
+	}
+
+	for _, rawPlatform := range platforms {
+		platform := strings.TrimSpace(rawPlatform)
+		if platform == "" {
+			continue
+		}
+		if _, exists := result[platform]; exists {
+			continue
+		}
+		result[platform] = s.relay.GetProviderConcurrencyStatuses(platform)
+	}
+	return result
 }
 
 func (s *ProviderConcurrencyService) GetSessionSwitchCandidates(platform string, sessionNumber int64) []ProviderSessionSwitchCandidate {

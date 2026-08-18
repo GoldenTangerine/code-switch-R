@@ -65,7 +65,9 @@
     "remainingLabel": "剩余",
     "remaining": "剩余 {amount}",
     "queryFailed": "查询失败",
-    "providerQuotaQuery": "额度查询"
+    "providerQuotaQuery": "额度查询",
+    "calling": "调用中 · {count}",
+    "recentlyUsed": "最近调用"
   },
   "menus": {
     "general": "通用设置",
@@ -1358,6 +1360,7 @@
         "inheritedSession": "继承主会话",
         "sessionUnavailable": "当前连接未识别到可粘滞会话",
         "switchProvider": "切换供应商",
+        "switchAction": "切换",
         "switchCandidates": "可用供应商",
         "currentProvider": "当前供应商",
         "switchUnavailable": "暂不可用",

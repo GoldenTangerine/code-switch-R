@@ -117,6 +117,24 @@
             <span v-if="entry.sessionRole === 'child'">{{ entry.parentSessionNumber ? t('components.main.concurrencyDetails.parentSession', { number: entry.parentSessionNumber }) : t('components.main.concurrencyDetails.inheritedSession') }}</span>
             <span v-else>{{ t('components.main.concurrencyDetails.rootSession') }}</span>
           </div>
+          <div v-if="activeTab === 'active'" class="provider-concurrency-row__actions">
+            <button
+              type="button"
+              class="provider-concurrency-row__switch"
+              :disabled="props.switchLoading"
+              :aria-label="t('components.main.concurrencyDetails.switchProvider')"
+              @click.stop="handleEntryClick(entry)"
+            >
+              <span aria-hidden="true">↔</span>
+              {{ t('components.main.concurrencyDetails.switchAction') }}
+            </button>
+            <span
+              v-if="props.sessionAffinityEnabled === true && !entry.sessionSwitchable"
+              class="provider-concurrency-row__switch-hint"
+            >
+              {{ t('components.main.concurrencyDetails.sessionUnavailable') }}
+            </span>
+          </div>
         </article>
       </section>
 
@@ -131,6 +149,7 @@
           <p v-if="!props.sessionAffinityEnabled" class="provider-concurrency-modal__state">{{ t('components.main.concurrencyDetails.stickyDisabled') }}</p>
           <p v-else-if="switchLoading" class="provider-concurrency-modal__state">{{ t('components.main.concurrencyDetails.loadingCandidates') }}</p>
           <p v-else-if="selectedSessionNumber === 0" class="provider-concurrency-modal__state">{{ t('components.main.concurrencyDetails.sessionUnavailable') }}</p>
+          <p v-else-if="selectedSessionCandidates.length === 0" class="provider-concurrency-modal__state">{{ t('components.main.concurrencyDetails.sessionUnavailable') }}</p>
           <div v-else class="provider-concurrency-switch-panel__grid">
             <button
               v-for="candidate in selectedSessionCandidates"
@@ -141,7 +160,7 @@
               :disabled="switchLoading || candidate.current || !candidate.switchable || !candidate.available"
               @click="selectedSessionNumber !== null && emit('switch-session-provider', selectedSessionNumber, candidate.providerId)"
             >
-              <span>{{ candidate.providerName }}</span>
+              <span :title="candidate.providerName">{{ candidate.providerName }}</span>
               <small v-if="candidate.current">{{ t('components.main.concurrencyDetails.currentProvider') }}</small>
               <small v-else-if="candidate.available">L{{ candidate.level }} · {{ candidate.boundSessions }}/{{ candidate.maxSessions }}</small>
               <small v-else>{{ candidate.reason || t('components.main.concurrencyDetails.switchUnavailable') }}</small>
@@ -392,7 +411,12 @@ const switchPanelVisible = computed(() => selectedSessionNumber.value !== null)
 const selectedSessionCandidates = computed(() => props.switchCandidates ?? [])
 
 function handleEntryClick(entry: ConnectionDisplayEntry) {
-  if (activeTab.value !== 'active' || !isEntrySwitchable(entry)) return
+  if (activeTab.value !== 'active') return
+  if (props.sessionAffinityEnabled === true && !entry.sessionSwitchable) {
+    selectedSessionNumber.value = 0
+    return
+  }
+  if (!isEntrySwitchable(entry)) return
   selectedSessionNumber.value = entry.sessionNumber ?? 0
   emit('request-session-switch', entry.sessionNumber ?? 0)
 }
@@ -842,6 +866,59 @@ onBeforeUnmount(() => {
   font-weight: 700;
 }
 
+.provider-concurrency-row__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.provider-concurrency-row__switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 5px 10px;
+  border: 1px solid rgba(20, 184, 166, 0.34);
+  border-radius: 8px;
+  color: #0f766e;
+  background: rgba(20, 184, 166, 0.08);
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: border-color 0.2s ease, background-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.provider-concurrency-row__switch:hover:not(:disabled) {
+  border-color: rgba(20, 184, 166, 0.7);
+  background: rgba(20, 184, 166, 0.16);
+}
+
+.provider-concurrency-row__switch:focus-visible {
+  outline: 2px solid rgba(13, 148, 136, 0.55);
+  outline-offset: 2px;
+}
+
+.provider-concurrency-row__switch:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.provider-concurrency-row__switch-hint {
+  color: #64748b;
+  font-size: 11px;
+}
+
+.provider-concurrency-modal--dark .provider-concurrency-row__switch {
+  color: #5eead4;
+  border-color: rgba(45, 212, 191, 0.35);
+  background: rgba(20, 184, 166, 0.14);
+}
+
+.provider-concurrency-modal--dark .provider-concurrency-row__switch-hint {
+  color: #94a3b8;
+}
+
 .provider-concurrency-switch-panel {
   display: flex;
   flex-direction: column;
@@ -868,7 +945,7 @@ onBeforeUnmount(() => {
 
 .provider-concurrency-switch-panel__grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
   gap: 8px;
 }
 
@@ -877,7 +954,11 @@ onBeforeUnmount(() => {
   flex-direction: column;
   align-items: flex-start;
   gap: 4px;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
   min-height: 54px;
+  box-sizing: border-box;
   padding: 10px 12px;
   border: 1px solid rgba(20, 184, 166, 0.28);
   border-radius: 10px;
@@ -885,6 +966,36 @@ onBeforeUnmount(() => {
   background: rgba(255, 255, 255, 0.82);
   text-align: left;
   cursor: pointer;
+  transition: border-color 0.2s ease, background-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.provider-concurrency-switch-option > span,
+.provider-concurrency-switch-option > small {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.provider-concurrency-switch-option > span {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.provider-concurrency-switch-option > small {
+  font-size: 11px;
+}
+
+.provider-concurrency-switch-option:hover:not(:disabled) {
+  border-color: rgba(13, 148, 136, 0.68);
+  background: rgba(240, 253, 250, 0.96);
+}
+
+.provider-concurrency-switch-option:focus-visible {
+  outline: 2px solid rgba(13, 148, 136, 0.55);
+  outline-offset: 2px;
 }
 
 .provider-session-switch-modal--dark .provider-concurrency-modal__state,
@@ -894,12 +1005,29 @@ onBeforeUnmount(() => {
 }
 
 .provider-concurrency-switch-option.is-unavailable {
-  opacity: 0.48;
+  border-color: rgba(148, 163, 184, 0.28);
+  color: #475569;
+  background: rgba(241, 245, 249, 0.78);
   cursor: not-allowed;
 }
 
 .provider-concurrency-switch-option small {
   color: #64748b;
+}
+
+.provider-session-switch-modal--dark .provider-concurrency-switch-option:hover:not(:disabled) {
+  border-color: rgba(45, 212, 191, 0.62);
+  background: rgba(19, 78, 74, 0.48);
+}
+
+.provider-session-switch-modal--dark .provider-concurrency-switch-option.is-unavailable {
+  border-color: rgba(148, 163, 184, 0.22);
+  color: #cbd5e1;
+  background: rgba(30, 41, 59, 0.72);
+}
+
+.provider-session-switch-modal--dark .provider-concurrency-switch-option small {
+  color: #cbd5e1;
 }
 
 .provider-concurrency-modal--dark .provider-concurrency-row {

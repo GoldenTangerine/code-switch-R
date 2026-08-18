@@ -301,6 +301,7 @@ const concurrencyDetailsModalPlatform = ref<RequestLogPlatform | null>(null)
 const sessionSwitchCandidates = ref<ProviderSessionSwitchCandidateView[]>([])
 const sessionSwitchLoading = ref(false)
 const sessionSwitchCompletedToken = ref(0)
+let sessionSwitchCandidatesRequestId = 0
 const markingProviderLogsReadKeys = ref<Set<string>>(new Set())
 const {
   hasUpdateAvailable,
@@ -918,11 +919,23 @@ const loadConcurrencyStatuses = async () => {
   }
 }
 
+const resetSessionSwitchCandidates = () => {
+  sessionSwitchCandidatesRequestId += 1
+  sessionSwitchCandidates.value = []
+  sessionSwitchLoading.value = false
+}
+
+watch(activeSessionAffinityState, (enabled) => {
+  if (!enabled) {
+    resetSessionSwitchCandidates()
+  }
+})
+
 const openConcurrencyDetails = (card: AutomationCard) => {
   concurrencyDetailsModalProvider.value = card
   concurrencyDetailsModalPlatform.value = activeConcurrencyPlatform.value as RequestLogPlatform
   concurrencyDetailsModalOpen.value = true
-  sessionSwitchCandidates.value = []
+  resetSessionSwitchCandidates()
   sessionSwitchCompletedToken.value = 0
   void loadConcurrencyStatuses()
 }
@@ -931,24 +944,31 @@ const closeConcurrencyDetails = () => {
   concurrencyDetailsModalOpen.value = false
   concurrencyDetailsModalProvider.value = null
   concurrencyDetailsModalPlatform.value = null
-  sessionSwitchCandidates.value = []
+  resetSessionSwitchCandidates()
 }
 
 const loadSessionSwitchCandidates = async (sessionNumber: number) => {
-  if (!concurrencyDetailsModalPlatform.value || !activeSessionAffinityState.value) return
+  const platform = concurrencyDetailsModalPlatform.value
+  if (!platform || !activeSessionAffinityState.value) return
+  const requestId = ++sessionSwitchCandidatesRequestId
+  sessionSwitchCandidates.value = []
   sessionSwitchLoading.value = true
   try {
     const result = await Call.ByName(
       'codeswitch/services.ProviderConcurrencyService.GetSessionSwitchCandidates',
-      concurrencyDetailsModalPlatform.value,
+      platform,
       sessionNumber,
     )
+    if (requestId !== sessionSwitchCandidatesRequestId || platform !== concurrencyDetailsModalPlatform.value || !activeSessionAffinityState.value) return
     sessionSwitchCandidates.value = Array.isArray(result) ? result as ProviderSessionSwitchCandidateView[] : []
   } catch (error) {
+    if (requestId !== sessionSwitchCandidatesRequestId) return
     sessionSwitchCandidates.value = []
     showToast(extractErrorMessage(error), 'error')
   } finally {
-    sessionSwitchLoading.value = false
+    if (requestId === sessionSwitchCandidatesRequestId) {
+      sessionSwitchLoading.value = false
+    }
   }
 }
 

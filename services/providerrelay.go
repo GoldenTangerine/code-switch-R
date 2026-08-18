@@ -529,11 +529,11 @@ type providerConcurrencyRequestMeta struct {
 	IsStream                   bool
 }
 
-func (prs *ProviderRelayService) decorateSessionConcurrencyMeta(platform string, bodyBytes []byte, meta *providerConcurrencyRequestMeta) {
+func (prs *ProviderRelayService) decorateSessionConcurrencyMeta(platform string, bodyBytes []byte, headers map[string]string, meta *providerConcurrencyRequestMeta) {
 	if prs == nil || meta == nil || !prs.isSessionAffinityEnabled(platform) {
 		return
 	}
-	identity := deriveRelaySessionIdentity(platform, bodyBytes)
+	identity := deriveRelaySessionIdentityWithHeaders(platform, bodyBytes, headers)
 	if identity.NodeHash == "" {
 		return
 	}
@@ -1647,9 +1647,12 @@ func hashRelaySessionField(platform string, path string, value string) string {
 func deriveRelaySessionIdentity(platform string, bodyBytes []byte) relaySessionIdentity {
 	platform = strings.TrimSpace(platform)
 	identity := relaySessionIdentity{Role: "root"}
-	baseHash := deriveMetadataRelaySessionHash(bodyBytes)
-	if platform == "codex" && baseHash == "" {
+	baseHash := ""
+	if platform == "codex" {
 		baseHash = deriveCodexThreadSessionHash(bodyBytes)
+	}
+	if baseHash == "" {
+		baseHash = deriveMetadataRelaySessionHash(bodyBytes)
 	}
 	if baseHash == "" {
 		baseHash = deriveToolPairSessionHash(platform, bodyBytes)
@@ -1709,6 +1712,60 @@ func deriveRelaySessionIdentity(platform string, bodyBytes []byte) relaySessionI
 	return identity
 }
 
+func deriveRelaySessionIdentityWithHeaders(platform string, bodyBytes []byte, headers map[string]string) relaySessionIdentity {
+	identity := deriveRelaySessionIdentity(platform, bodyBytes)
+	if strings.TrimSpace(platform) != "codex" {
+		return identity
+	}
+
+	clientMetadata := gjson.GetBytes(bodyBytes, "client_metadata")
+	turnMetadataRaw := getHeaderValueCaseInsensitive(headers, "x-codex-turn-metadata")
+	if turnMetadataRaw == "" {
+		turnMetadataRaw = firstNonEmptyGJSON(clientMetadata, "x-codex-turn-metadata", "x_codex_turn_metadata")
+	}
+	turnMetadata := gjson.Parse(turnMetadataRaw)
+	threadID := firstNonEmptyGJSON(turnMetadata, "thread_id", "threadId")
+	if threadID == "" {
+		threadID = firstNonEmptyGJSON(clientMetadata, "thread_id", "threadId")
+	}
+	sessionID := firstNonEmptyGJSON(turnMetadata, "session_id", "sessionId")
+	if sessionID == "" {
+		sessionID = firstNonEmptyGJSON(clientMetadata, "session_id", "sessionId")
+	}
+	parentThreadID := firstNonEmptyGJSON(turnMetadata, "parent_thread_id", "parentThreadId", "forked_from_thread_id", "forkedFromThreadId")
+	if parentThreadID == "" {
+		parentThreadID = firstNonEmptyGJSON(clientMetadata, "x-codex-parent-thread-id", "parent_thread_id", "parentThreadId")
+	}
+	rootThreadID := firstNonEmptyGJSON(turnMetadata, "root_thread_id", "rootThreadId")
+	if directParent := getHeaderValueCaseInsensitive(headers, "x-codex-parent-thread-id"); directParent != "" {
+		parentThreadID = directParent
+	}
+	if directThread := getHeaderValueCaseInsensitive(headers, "x-codex-thread-id"); directThread != "" {
+		threadID = directThread
+	}
+	if directSession := getHeaderValueCaseInsensitive(headers, "x-codex-session-id"); directSession != "" {
+		sessionID = directSession
+	}
+
+	if threadID != "" {
+		identity.NodeHash = hashRelaySessionField("codex", "thread_id", threadID)
+	} else if sessionID != "" {
+		identity.NodeHash = hashRelaySessionField("codex", "session_id", sessionID)
+	}
+	if parentThreadID != "" {
+		identity.ParentHash = hashRelaySessionField("codex", "thread_id", parentThreadID)
+		identity.Role = "child"
+	}
+	if rootThreadID != "" {
+		identity.RootHash = hashRelaySessionField("codex", "thread_id", rootThreadID)
+	} else if identity.ParentHash != "" {
+		identity.RootHash = identity.ParentHash
+	} else if identity.NodeHash != "" {
+		identity.RootHash = identity.NodeHash
+	}
+	return identity
+}
+
 func deriveMetadataRelaySessionHash(bodyBytes []byte) string {
 	metadata := gjson.GetBytes(bodyBytes, "metadata")
 	if !metadata.Exists() {
@@ -1759,7 +1816,11 @@ func deriveClaudeStickySubagentComponent(bodyBytes []byte) string {
 }
 
 func (prs *ProviderRelayService) deriveRelaySessionHash(platform string, bodyBytes []byte) string {
-	identity := deriveRelaySessionIdentity(platform, bodyBytes)
+	return prs.deriveRelaySessionHashWithHeaders(platform, bodyBytes, nil)
+}
+
+func (prs *ProviderRelayService) deriveRelaySessionHashWithHeaders(platform string, bodyBytes []byte, headers map[string]string) string {
+	identity := deriveRelaySessionIdentityWithHeaders(platform, bodyBytes, headers)
 	if identity.NodeHash != "" {
 		return identity.NodeHash
 	}
@@ -1797,6 +1858,7 @@ func relayStructuredSessionRoots(root gjson.Result) []gjson.Result {
 		root.Get("thread_metadata"),
 		root.Get("request"),
 		root.Get("payload"),
+		root.Get("client_metadata"),
 	}
 }
 
@@ -3664,10 +3726,10 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 		blacklistEnabled := prs.blacklistService.ShouldUseFixedMode()
 		roundRobinEnabled := prs.isRoundRobinEnabled()
 		providerConcurrencyLimitEnabled := prs.isProviderConcurrencyLimitEnabled(kind)
-		sessionIdentity := deriveRelaySessionIdentity(kind, bodyBytes)
+		sessionIdentity := deriveRelaySessionIdentityWithHeaders(kind, bodyBytes, clientHeaders)
 		sessionHash := sessionIdentity.NodeHash
 		if sessionHash == "" {
-			sessionHash = prs.deriveRelaySessionHash(kind, bodyBytes)
+			sessionHash = prs.deriveRelaySessionHashWithHeaders(kind, bodyBytes, clientHeaders)
 			sessionIdentity.NodeHash = sessionHash
 		}
 		sessionAffinityEnabled := prs.isSessionAffinityEnabled(kind)
@@ -4296,7 +4358,7 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 		if err != nil {
 			return false, err
 		}
-		addCodexOAuthSessionHeaders(headers, prs.deriveRelaySessionHash(kind, bodyBytes))
+		addCodexOAuthSessionHeaders(headers, prs.deriveRelaySessionHashWithHeaders(kind, bodyBytes, headers))
 	}
 	targetURL := joinURL(provider.APIURL, endpoint)
 	requestUserAgent := getHeaderValueCaseInsensitive(headers, "User-Agent")
@@ -4317,7 +4379,7 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 		Endpoint:                   endpoint,
 		IsStream:                   isStream,
 	}
-	prs.decorateSessionConcurrencyMeta(kind, bodyBytes, &requestMeta)
+	prs.decorateSessionConcurrencyMeta(kind, bodyBytes, clientHeaders, &requestMeta)
 	updateProviderSlotParameters, releaseProviderSlot, acquiredProviderSlot := prs.acquireProviderConcurrencySlot(kind, providerRefFromProvider(provider), providerConcurrencyLimit(provider), providerConcurrencyLimitEnabled, requestMeta)
 	if !acquiredProviderSlot {
 		return false, errProviderConcurrencyLimit
@@ -4599,7 +4661,7 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 		// 状态码为 0 且无错误：当作成功处理
 		if status == 0 {
 			fmt.Printf("[WARN] Provider %s 返回状态码 0，但无错误，当作成功处理\n", provider.Name)
-			toolCollector := prs.newSessionAffinityToolResponseCollector(kind, provider, currentPlan, requestUserAgent)
+			toolCollector := prs.newSessionAffinityToolResponseCollector(kind, provider, currentPlan, requestUserAgent, headers)
 			hooks := buildClaudeProviderResponseHooks(prs, c, kind, provider, currentPlan, isStream, requestLog, toolCollector)
 			writtenBytes, copyErr := forwardRelayResponse(resp.RawResponse, timedWriter, isStream, hooks...)
 			ok, forwardErr := finalizeForwardSuccess(c, kind, requestLog, writtenBytes, copyErr)
@@ -4617,7 +4679,7 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 					return false, protocolErr, claudeCompatibilityRetry{}
 				}
 			}
-			toolCollector := prs.newSessionAffinityToolResponseCollector(kind, provider, currentPlan, requestUserAgent)
+			toolCollector := prs.newSessionAffinityToolResponseCollector(kind, provider, currentPlan, requestUserAgent, headers)
 			hooks := buildClaudeProviderResponseHooks(prs, c, kind, provider, currentPlan, isStream, requestLog, toolCollector)
 			writtenBytes, copyErr := forwardRelayResponse(resp.RawResponse, timedWriter, isStream, hooks...)
 			ok, forwardErr := finalizeForwardSuccess(c, kind, requestLog, writtenBytes, copyErr)
@@ -5012,7 +5074,7 @@ func buildClaudeProviderResponseHooks(
 	return hooks
 }
 
-func (prs *ProviderRelayService) newSessionAffinityToolResponseCollector(kind string, provider Provider, plan providerRequestPlan, userAgent string) *sessionAffinityToolResponseCollector {
+func (prs *ProviderRelayService) newSessionAffinityToolResponseCollector(kind string, provider Provider, plan providerRequestPlan, userAgent string, headers map[string]string) *sessionAffinityToolResponseCollector {
 	if prs == nil || !prs.isSessionAffinityEnabled(kind) {
 		return nil
 	}
@@ -5023,10 +5085,10 @@ func (prs *ProviderRelayService) newSessionAffinityToolResponseCollector(kind st
 	if len(originalBody) == 0 {
 		return nil
 	}
-	if identity := deriveRelaySessionIdentity(kind, originalBody); identity.NodeHash != "" {
+	if identity := deriveRelaySessionIdentityWithHeaders(kind, originalBody, headers); identity.NodeHash != "" {
 		return nil
 	}
-	if prs.deriveRelaySessionHash(kind, originalBody) != "" {
+	if prs.deriveRelaySessionHashWithHeaders(kind, originalBody, headers) != "" {
 		return nil
 	}
 	return &sessionAffinityToolResponseCollector{
@@ -9734,7 +9796,7 @@ func (prs *ProviderRelayService) forwardGeminiRequest(
 		Endpoint:     endpoint,
 		IsStream:     isStream,
 	}
-	prs.decorateSessionConcurrencyMeta("gemini", originalBodyBytes, &requestMeta)
+	prs.decorateSessionConcurrencyMeta("gemini", originalBodyBytes, nil, &requestMeta)
 	_, releaseProviderSlot, acquiredProviderSlot := prs.acquireProviderConcurrencySlot("gemini", providerRefFromGeminiProvider(*provider), geminiProviderConcurrencyLimit(*provider), providerConcurrencyLimitEnabled, requestMeta)
 	if !acquiredProviderSlot {
 		return false, errProviderConcurrencyLimit, false
@@ -10001,10 +10063,10 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 		blacklistEnabled := prs.blacklistService.ShouldUseFixedMode()
 		roundRobinEnabled := prs.isRoundRobinEnabled()
 		providerConcurrencyLimitEnabled := prs.isProviderConcurrencyLimitEnabled(kind)
-		sessionIdentity := deriveRelaySessionIdentity(kind, bodyBytes)
+		sessionIdentity := deriveRelaySessionIdentityWithHeaders(kind, bodyBytes, clientHeaders)
 		sessionHash := sessionIdentity.NodeHash
 		if sessionHash == "" {
-			sessionHash = prs.deriveRelaySessionHash(kind, bodyBytes)
+			sessionHash = prs.deriveRelaySessionHashWithHeaders(kind, bodyBytes, clientHeaders)
 			sessionIdentity.NodeHash = sessionHash
 		}
 		sessionAffinityEnabled := prs.isSessionAffinityEnabled(kind)

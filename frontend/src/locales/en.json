@@ -65,7 +65,9 @@
     "remainingLabel": "Remaining",
     "remaining": "Remaining {amount}",
     "queryFailed": "Query failed",
-    "providerQuotaQuery": "Quota query"
+    "providerQuotaQuery": "Quota query",
+    "calling": "Calling · {count}",
+    "recentlyUsed": "Recently used"
   },
   "menus": {
     "about": "About",
@@ -1357,6 +1359,7 @@
         "inheritedSession": "Inherited from root",
         "sessionUnavailable": "No sticky session was identified for this connection",
         "switchProvider": "Switch provider",
+        "switchAction": "Switch",
         "switchCandidates": "Available providers",
         "currentProvider": "Current provider",
         "switchUnavailable": "Unavailable",

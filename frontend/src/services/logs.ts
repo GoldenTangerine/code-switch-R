@@ -1,6 +1,6 @@
 import { Call } from '@wailsio/runtime'
 
-export type LogPlatform = 'claude' | 'codex' | 'gemini'
+export type LogPlatform = 'claude' | 'codex' | 'gemini' | 'grokbuild'
 export type RequestLogPlatform = LogPlatform | `custom:${string}`
 export type LogDataSourceMode = 'proxy' | 'session' | 'all'
 export type ReasoningEffortSource = 'request' | 'request_body_override' | 'model_mapping' | ''
@@ -10,7 +10,7 @@ export type SessionProviderRoute = 'preferred' | 'fallback' | ''
 
 export type RequestLog = {
   id: number
-  platform: LogPlatform | ''
+  platform: RequestLogPlatform | ''
   model: string
   requested_model?: string
   mapped_model?: string
@@ -228,7 +228,7 @@ export type LogSummary = {
   activity_points: number[]
 }
 
-export const fetchLogStats = async (platform: LogPlatform | '' = ''): Promise<LogStats> => {
+export const fetchLogStats = async (platform: RequestLogPlatform | '' = ''): Promise<LogStats> => {
   return Call.ByName('codeswitch/services.LogService.StatsSince', platform)
 }
 
@@ -271,7 +271,7 @@ export const fetchLogSummaryV2 = async (query: LogStatsQuery = {}): Promise<LogS
   return Call.ByName('codeswitch/services.LogService.SummaryRangeV3', platform, provider, model, sourceMode, startAt, endAt)
 }
 
-export const fetchCostSince = async (start: string, platform: LogPlatform | '' = ''): Promise<number> => {
+export const fetchCostSince = async (start: string, platform: RequestLogPlatform | '' = ''): Promise<number> => {
   return Call.ByName('codeswitch/services.LogService.CostSince', start, platform)
 }
 
@@ -283,14 +283,14 @@ export type FiveHourQuotaStatus = {
 }
 
 export const fetchFiveHourQuotaStatus = async (
-  platform: LogPlatform | '' = '',
+  platform: RequestLogPlatform | '' = '',
 ): Promise<FiveHourQuotaStatus> => {
   return Call.ByName('codeswitch/services.LogService.ResolveFiveHourQuotaStatus', platform)
 }
 
 export const fetchCostSinceByProvider = async (
   start: string,
-  platform: LogPlatform | '' = '',
+  platform: RequestLogPlatform | '' = '',
   providerID: string = '',
   providerName: string = '',
 ): Promise<number> => {
@@ -301,7 +301,7 @@ export const fetchCostSinceByProvider = async (
 }
 
 export const fetchCostByProvider = async (
-  platform: LogPlatform | '' = '',
+  platform: RequestLogPlatform | '' = '',
   providerID: string = '',
   providerName: string = '',
 ): Promise<number> => {
@@ -312,7 +312,7 @@ export const fetchCostByProvider = async (
 }
 
 export const fetchFiveHourQuotaStatusByProvider = async (
-  platform: LogPlatform | '' = '',
+  platform: RequestLogPlatform | '' = '',
   providerID: string = '',
   providerName: string = '',
 ): Promise<FiveHourQuotaStatus> => {
@@ -492,7 +492,7 @@ export type ProviderDailyStat = {
 }
 
 export const fetchProviderDailyStats = async (
-  platform: LogPlatform | '' = '',
+  platform: RequestLogPlatform | '' = '',
 ): Promise<ProviderDailyStat[]> => {
   return Call.ByName('codeswitch/services.LogService.ProviderDailyStats', platform)
 }

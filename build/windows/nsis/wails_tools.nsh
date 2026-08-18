@@ -14,7 +14,7 @@
     !define INFO_PRODUCTNAME "Code Switch"
 !endif
 !ifndef INFO_PRODUCTVERSION
-    !define INFO_PRODUCTVERSION "2.11.0"
+    !define INFO_PRODUCTVERSION "2.11.2"
 !endif
 !ifndef INFO_COPYRIGHT
     !define INFO_COPYRIGHT "(c) 2025, Code Switch"
