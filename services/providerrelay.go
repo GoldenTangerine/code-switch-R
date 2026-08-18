@@ -42,40 +42,42 @@ type LastUsedProvider struct {
 }
 
 type ProviderRelayService struct {
-	providerService                *ProviderService
-	geminiService                  *GeminiService
-	blacklistService               *BlacklistService
-	notificationService            *NotificationService
-	appSettings                    *AppSettingsService // 应用设置服务（用于获取轮询开关状态）
-	modelPricing                   *ModelPricingService
-	providerQuotaAutomation        *ProviderQuotaAutomationService
-	claudeModelRouting             *ClaudeModelRoutingService
-	codexOAuth                     *CodexOAuthService
-	server                         *http.Server
-	addr                           string
-	lastUsed                       map[string]*LastUsedProvider // 各平台最后使用的供应商
-	lastUsedMu                     sync.RWMutex                 // 保护 lastUsed 的锁
-	rrMu                           sync.Mutex                   // 轮询状态锁
-	rrLastStart                    map[string]string            // 轮询状态：key="platform:level" → value=上次起始 Provider ID（回退为 Name）
-	claudeResponsesMu              sync.Mutex
-	claudeResponses                map[string]claudeResponsesSessionBinding
+	providerService                 *ProviderService
+	geminiService                   *GeminiService
+	blacklistService                *BlacklistService
+	notificationService             *NotificationService
+	appSettings                     *AppSettingsService // 应用设置服务（用于获取轮询开关状态）
+	modelPricing                    *ModelPricingService
+	providerQuotaAutomation         *ProviderQuotaAutomationService
+	claudeModelRouting              *ClaudeModelRoutingService
+	codexOAuth                      *CodexOAuthService
+	server                          *http.Server
+	addr                            string
+	lastUsed                        map[string]*LastUsedProvider // 各平台最后使用的供应商
+	lastUsedMu                      sync.RWMutex                 // 保护 lastUsed 的锁
+	rrMu                            sync.Mutex                   // 轮询状态锁
+	rrLastStart                     map[string]string            // 轮询状态：key="platform:level" → value=上次起始 Provider ID（回退为 Name）
+	claudeResponsesMu               sync.Mutex
+	claudeResponses                 map[string]claudeResponsesSessionBinding
 	sessionProviderPreferenceMu     sync.Mutex
 	sessionProviderPreferences      map[string]*sessionProviderPreferenceState
 	nextSessionPreferenceGeneration uint64
 	nextSessionPreferenceUse        uint64
-	sessionAffinityMu              sync.Mutex
-	sessionAffinity                map[string]*providerSessionBinding
-	nextSessionNumber              int64
-	nextSessionAttempt             int64
-	toolSessionMu                  sync.Mutex
-	toolSessions                   map[string]toolSessionBinding
-	providerConcurrencyMu          sync.Mutex
-	providerConcurrency            map[string]int
-	providerConcurrencyRequests    map[string]map[string]ProviderConcurrencyRequestDetail
-	nextProviderConcurrencyRequest int64
-	unsupportedOptionalParamsMu    sync.RWMutex
-	unsupportedOptionalParams      map[string]unsupportedOptionalParamsMemory
-	upstreamTransport              *http.Transport
+	sessionAffinityMu               sync.Mutex
+	sessionAffinity                 map[string]*providerSessionBinding
+	sessionRelations                map[string]sessionRelation
+	nextSessionNumber               int64
+	nextSessionAttempt              int64
+	nextSessionAffinityRevision     uint64
+	toolSessionMu                   sync.Mutex
+	toolSessions                    map[string]toolSessionBinding
+	providerConcurrencyMu           sync.Mutex
+	providerConcurrency             map[string]int
+	providerConcurrencyRequests     map[string]map[string]ProviderConcurrencyRequestDetail
+	nextProviderConcurrencyRequest  int64
+	unsupportedOptionalParamsMu     sync.RWMutex
+	unsupportedOptionalParams       map[string]unsupportedOptionalParamsMemory
+	upstreamTransport               *http.Transport
 }
 
 // errClientAbort 表示客户端中断连接，不应计入 provider 失败次数
@@ -279,6 +281,8 @@ const providerAttemptsPerRequest = 1
 const claudeResponsesSessionTTL = 30 * time.Minute
 const claudeResponsesMaxSessionBindings = 4096
 const sessionProviderPreferenceMaxInactive = 4096
+const sessionAffinityMaxBindings = 4096
+const defaultSessionAffinityTTLMinutes = 30
 const claudeResponsesTailReplayMaxInputItems = 80
 const openAICompatPromptCacheDisableTTL = 30 * time.Minute
 const unsupportedOptionalParamsTTL = 30 * time.Minute
@@ -362,35 +366,63 @@ type sessionProviderPreferenceState struct {
 	LastUsed            uint64
 }
 
+type sessionRelation struct {
+	ParentHash string
+	RootHash   string
+	Role       string
+	LastSeen   time.Time
+}
+
+type relaySessionIdentity struct {
+	NodeHash   string
+	ParentHash string
+	RootHash   string
+	Role       string
+}
+
 type providerSessionBinding struct {
-	Platform       string
-	SessionHash    string
-	SessionNumber  int64
-	ProviderID     string
-	ProviderName   string
-	UserAgent      string
-	MaxSessions    int
-	TTLMinutes     int
-	CreatedAt      time.Time
-	LastSeen       time.Time
-	ActiveRequests int
-	Pending        bool
-	Confirmed      bool
-	AttemptID      int64
+	Platform                 string
+	SessionHash              string
+	ParentHash               string
+	RootHash                 string
+	SessionRole              string
+	SessionNumber            int64
+	ProviderID               string
+	ProviderName             string
+	UserAgent                string
+	MaxSessions              int
+	TTLMinutes               int
+	CreatedAt                time.Time
+	LastSeen                 time.Time
+	ActiveRequests           int
+	ActiveRequestsByProvider map[string]int
+	Pending                  bool
+	Confirmed                bool
+	AttemptID                int64
+	AttemptAffinityRevision  uint64
+	AffinityRevision         uint64
+	Inherited                bool
+	ManualOverride           bool
+	PreviousProviderID       string
 }
 
 type ProviderSessionDetail struct {
-	SessionNumber  int64  `json:"sessionNumber"`
-	Status         string `json:"status"`
-	ActiveRequests int    `json:"activeRequests"`
-	ProviderID     string `json:"providerId"`
-	ProviderName   string `json:"providerName"`
-	UserAgent      string `json:"userAgent,omitempty"`
-	CreatedAt      int64  `json:"createdAt"`
-	LastSeen       int64  `json:"lastSeen"`
-	ExpiresAt      int64  `json:"expiresAt"`
-	RemainingSec   int64  `json:"remainingSeconds"`
-	Overflow       bool   `json:"overflow"`
+	SessionNumber       int64  `json:"sessionNumber"`
+	RootSessionNumber   int64  `json:"rootSessionNumber,omitempty"`
+	ParentSessionNumber int64  `json:"parentSessionNumber,omitempty"`
+	SessionRole         string `json:"sessionRole,omitempty"`
+	Switchable          bool   `json:"switchable"`
+	ManualOverride      bool   `json:"manualOverride"`
+	Status              string `json:"status"`
+	ActiveRequests      int    `json:"activeRequests"`
+	ProviderID          string `json:"providerId"`
+	ProviderName        string `json:"providerName"`
+	UserAgent           string `json:"userAgent,omitempty"`
+	CreatedAt           int64  `json:"createdAt"`
+	LastSeen            int64  `json:"lastSeen"`
+	ExpiresAt           int64  `json:"expiresAt"`
+	RemainingSec        int64  `json:"remainingSeconds"`
+	Overflow            bool   `json:"overflow"`
 }
 
 type ProviderSessionStatus struct {
@@ -403,6 +435,31 @@ type ProviderSessionStatus struct {
 	Sessions       []ProviderSessionDetail `json:"sessions"`
 }
 
+type ProviderSessionSwitchCandidate struct {
+	ProviderID      string  `json:"providerId"`
+	ProviderName    string  `json:"providerName"`
+	Level           int     `json:"level"`
+	Current         bool    `json:"current"`
+	Available       bool    `json:"available"`
+	Switchable      bool    `json:"switchable"`
+	BoundSessions   int     `json:"boundSessions"`
+	ActiveRequests  int     `json:"activeRequests"`
+	MaxSessions     int     `json:"maxSessions"`
+	TTLMinutes      int     `json:"ttlMinutes"`
+	LoadRate        float64 `json:"loadRate"`
+	RequestedModel  string  `json:"requestedModel,omitempty"`
+	ModelCompatible bool    `json:"modelCompatible"`
+	Reason          string  `json:"reason,omitempty"`
+}
+
+type SessionSwitchResult struct {
+	Platform             string `json:"platform"`
+	SessionNumber        int64  `json:"sessionNumber"`
+	ProviderID           string `json:"providerId"`
+	ProviderName         string `json:"providerName"`
+	AffectedSessionCount int    `json:"affectedSessionCount"`
+}
+
 type ProviderConcurrencyStatus struct {
 	Platform       string                             `json:"platform"`
 	ProviderID     string                             `json:"providerId"`
@@ -413,26 +470,32 @@ type ProviderConcurrencyStatus struct {
 }
 
 type ProviderConcurrencyRequestDetail struct {
-	ID                  string                                `json:"id"`
-	Platform            string                                `json:"platform"`
-	ProviderID          string                                `json:"providerId"`
-	ProviderName        string                                `json:"providerName"`
-	UserAgent           string                                `json:"userAgent,omitempty"`
-	RequestedModel      string                                `json:"requestedModel,omitempty"`
-	Model               string                                `json:"model,omitempty"`
-	MappedModel         string                                `json:"mappedModel,omitempty"`
-	ModelMappingPattern string                                `json:"modelMappingPattern,omitempty"`
-	ModelMappingTarget  string                                `json:"modelMappingTarget,omitempty"`
-	ModelOverride       string                                `json:"modelOverride,omitempty"`
-	ModelRouteCaptured  bool                                  `json:"modelRouteCaptured"`
+	ID                         string                                `json:"id"`
+	Platform                   string                                `json:"platform"`
+	ProviderID                 string                                `json:"providerId"`
+	ProviderName               string                                `json:"providerName"`
+	UserAgent                  string                                `json:"userAgent,omitempty"`
+	RequestedModel             string                                `json:"requestedModel,omitempty"`
+	Model                      string                                `json:"model,omitempty"`
+	MappedModel                string                                `json:"mappedModel,omitempty"`
+	ModelMappingPattern        string                                `json:"modelMappingPattern,omitempty"`
+	ModelMappingTarget         string                                `json:"modelMappingTarget,omitempty"`
+	ModelOverride              string                                `json:"modelOverride,omitempty"`
+	ModelRouteCaptured         bool                                  `json:"modelRouteCaptured"`
 	SessionPreferredProviderID string                                `json:"sessionPreferredProviderId,omitempty"`
 	SessionPreferredProvider   string                                `json:"sessionPreferredProvider,omitempty"`
 	SessionProviderRoute       string                                `json:"sessionProviderRoute,omitempty"`
-	Parameters          []ProviderConcurrencyRequestParameter `json:"parameters"`
-	Endpoint            string                                `json:"endpoint,omitempty"`
-	IsStream            bool                                  `json:"isStream"`
-	StartedAt           int64                                 `json:"startedAt"`
-	DurationMs          int64                                 `json:"durationMs"`
+	SessionNumber              int64                                 `json:"sessionNumber,omitempty"`
+	RootSessionNumber          int64                                 `json:"rootSessionNumber,omitempty"`
+	ParentSessionNumber        int64                                 `json:"parentSessionNumber,omitempty"`
+	SessionRole                string                                `json:"sessionRole,omitempty"`
+	SessionSwitchable          bool                                  `json:"sessionSwitchable"`
+	SessionManualOverride      bool                                  `json:"sessionManualOverride"`
+	Parameters                 []ProviderConcurrencyRequestParameter `json:"parameters"`
+	Endpoint                   string                                `json:"endpoint,omitempty"`
+	IsStream                   bool                                  `json:"isStream"`
+	StartedAt                  int64                                 `json:"startedAt"`
+	DurationMs                 int64                                 `json:"durationMs"`
 }
 
 type ProviderConcurrencyRequestParameter struct {
@@ -443,21 +506,56 @@ type ProviderConcurrencyRequestParameter struct {
 }
 
 type providerConcurrencyRequestMeta struct {
-	ProviderName        string
-	UserAgent           string
-	RequestedModel      string
-	Model               string
-	MappedModel         string
-	ModelMappingPattern string
-	ModelMappingTarget  string
-	ModelOverride       string
-	ModelRouteCaptured  bool
+	ProviderName               string
+	UserAgent                  string
+	RequestedModel             string
+	Model                      string
+	MappedModel                string
+	ModelMappingPattern        string
+	ModelMappingTarget         string
+	ModelOverride              string
+	ModelRouteCaptured         bool
 	SessionPreferredProviderID string
 	SessionPreferredProvider   string
 	SessionProviderRoute       string
-	Parameters          []ProviderConcurrencyRequestParameter
-	Endpoint            string
-	IsStream            bool
+	SessionNumber              int64
+	RootSessionNumber          int64
+	ParentSessionNumber        int64
+	SessionRole                string
+	SessionSwitchable          bool
+	SessionManualOverride      bool
+	Parameters                 []ProviderConcurrencyRequestParameter
+	Endpoint                   string
+	IsStream                   bool
+}
+
+func (prs *ProviderRelayService) decorateSessionConcurrencyMeta(platform string, bodyBytes []byte, meta *providerConcurrencyRequestMeta) {
+	if prs == nil || meta == nil || !prs.isSessionAffinityEnabled(platform) {
+		return
+	}
+	identity := deriveRelaySessionIdentity(platform, bodyBytes)
+	if identity.NodeHash == "" {
+		return
+	}
+	prs.sessionAffinityMu.Lock()
+	defer prs.sessionAffinityMu.Unlock()
+	prs.sweepExpiredSessionAffinityLocked(time.Now())
+	binding := prs.sessionAffinity[sessionAffinityStateKey(platform, identity.NodeHash)]
+	if binding == nil || (!binding.Confirmed && binding.ActiveRequests <= 0) {
+		return
+	}
+	relation := prs.sessionRelationLocked(platform, identity.NodeHash)
+	meta.SessionNumber = binding.SessionNumber
+	meta.SessionRole = binding.SessionRole
+	meta.SessionSwitchable = true
+	meta.SessionManualOverride = binding.ManualOverride
+	meta.RootSessionNumber = binding.SessionNumber
+	if rootBinding := prs.sessionAffinity[sessionAffinityStateKey(platform, relation.RootHash)]; rootBinding != nil {
+		meta.RootSessionNumber = rootBinding.SessionNumber
+	}
+	if parentBinding := prs.sessionAffinity[sessionAffinityStateKey(platform, binding.ParentHash)]; parentBinding != nil {
+		meta.ParentSessionNumber = parentBinding.SessionNumber
+	}
 }
 
 type providerSessionLoad struct {
@@ -624,6 +722,7 @@ func NewProviderRelayService(providerService *ProviderService, geminiService *Ge
 		claudeResponses:             make(map[string]claudeResponsesSessionBinding),
 		sessionProviderPreferences:  make(map[string]*sessionProviderPreferenceState),
 		sessionAffinity:             make(map[string]*providerSessionBinding),
+		sessionRelations:            make(map[string]sessionRelation),
 		toolSessions:                make(map[string]toolSessionBinding),
 		providerConcurrency:         make(map[string]int),
 		providerConcurrencyRequests: make(map[string]map[string]ProviderConcurrencyRequestDetail),
@@ -1039,7 +1138,7 @@ func normalizeSessionMaxSessions(value int) int {
 
 func normalizeSessionTTLMinutes(value int) int {
 	if value <= 0 {
-		return 5
+		return defaultSessionAffinityTTLMinutes
 	}
 	if value < 1 {
 		return 1
@@ -1132,26 +1231,32 @@ func (prs *ProviderRelayService) acquireProviderConcurrencySlot(platform string,
 		prs.providerConcurrencyRequests[key] = map[string]ProviderConcurrencyRequestDetail{}
 	}
 	prs.providerConcurrencyRequests[key][requestID] = ProviderConcurrencyRequestDetail{
-		ID:                  requestID,
-		Platform:            strings.TrimSpace(platform),
-		ProviderID:          strings.TrimSpace(providerID),
-		ProviderName:        strings.TrimSpace(meta.ProviderName),
-		UserAgent:           strings.TrimSpace(meta.UserAgent),
-		RequestedModel:      strings.TrimSpace(meta.RequestedModel),
-		Model:               strings.TrimSpace(meta.Model),
-		MappedModel:         strings.TrimSpace(meta.MappedModel),
-		ModelMappingPattern: strings.TrimSpace(meta.ModelMappingPattern),
-		ModelMappingTarget:  strings.TrimSpace(meta.ModelMappingTarget),
-		ModelOverride:       strings.TrimSpace(meta.ModelOverride),
-		ModelRouteCaptured:  meta.ModelRouteCaptured,
+		ID:                         requestID,
+		Platform:                   strings.TrimSpace(platform),
+		ProviderID:                 strings.TrimSpace(providerID),
+		ProviderName:               strings.TrimSpace(meta.ProviderName),
+		UserAgent:                  strings.TrimSpace(meta.UserAgent),
+		RequestedModel:             strings.TrimSpace(meta.RequestedModel),
+		Model:                      strings.TrimSpace(meta.Model),
+		MappedModel:                strings.TrimSpace(meta.MappedModel),
+		ModelMappingPattern:        strings.TrimSpace(meta.ModelMappingPattern),
+		ModelMappingTarget:         strings.TrimSpace(meta.ModelMappingTarget),
+		ModelOverride:              strings.TrimSpace(meta.ModelOverride),
+		ModelRouteCaptured:         meta.ModelRouteCaptured,
 		SessionPreferredProviderID: strings.TrimSpace(meta.SessionPreferredProviderID),
 		SessionPreferredProvider:   strings.TrimSpace(meta.SessionPreferredProvider),
 		SessionProviderRoute:       strings.TrimSpace(meta.SessionProviderRoute),
-		Parameters:          cloneProviderConcurrencyRequestParameters(meta.Parameters),
-		Endpoint:            strings.TrimSpace(meta.Endpoint),
-		IsStream:            meta.IsStream,
-		StartedAt:           startedAt.UnixMilli(),
-		DurationMs:          0,
+		SessionNumber:              meta.SessionNumber,
+		RootSessionNumber:          meta.RootSessionNumber,
+		ParentSessionNumber:        meta.ParentSessionNumber,
+		SessionRole:                strings.TrimSpace(meta.SessionRole),
+		SessionSwitchable:          meta.SessionSwitchable,
+		SessionManualOverride:      meta.SessionManualOverride,
+		Parameters:                 cloneProviderConcurrencyRequestParameters(meta.Parameters),
+		Endpoint:                   strings.TrimSpace(meta.Endpoint),
+		IsStream:                   meta.IsStream,
+		StartedAt:                  startedAt.UnixMilli(),
+		DurationMs:                 0,
 	}
 	prs.providerConcurrencyMu.Unlock()
 
@@ -1479,6 +1584,131 @@ func deriveRelaySessionHash(bodyBytes []byte) string {
 	return deriveMetadataRelaySessionHash(bodyBytes)
 }
 
+func relaySessionField(bodyBytes []byte, paths ...string) string {
+	root := gjson.ParseBytes(bodyBytes)
+	for _, candidate := range relayStructuredSessionRoots(root) {
+		if !candidate.Exists() || !candidate.IsObject() {
+			continue
+		}
+		if value := firstNonEmptyGJSON(candidate, paths...); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func hashRelaySessionValue(platform string, label string, value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	return shortSHA256Hex(strings.TrimSpace(platform) + "." + strings.TrimSpace(label) + "=" + value)
+}
+
+func canonicalRelaySessionHashSeed(platform string, path string, value string) string {
+	platform = strings.TrimSpace(platform)
+	path = strings.TrimSpace(path)
+	value = strings.TrimSpace(value)
+	if path == "" || value == "" {
+		return ""
+	}
+
+	// Parent/root identifiers must use the same semantic seed as their node
+	// identifier. Otherwise session_id=S and parent_session_id=S never match.
+	switch path {
+	case "parent_session_id", "parentSessionId", "root_session_id", "rootSessionId", "session_id", "sessionId":
+		if platform == "codex" {
+			return "codex.session_id=" + value
+		}
+		return "metadata.session_id=" + value
+	case "parent_conversation_id", "parentConversationId", "root_conversation_id", "rootConversationId", "conversation_id", "conversationId":
+		if platform == "codex" {
+			return "codex.conversation_id=" + value
+		}
+		return "metadata.conversation_id=" + value
+	case "parent_thread_id", "parentThreadId", "root_thread_id", "rootThreadId", "thread_id", "threadId":
+		if platform == "codex" {
+			return "codex.thread_id=" + value
+		}
+		return "metadata.thread_id=" + value
+	default:
+		return platform + "." + path + "=" + value
+	}
+}
+
+func hashRelaySessionField(platform string, path string, value string) string {
+	seed := canonicalRelaySessionHashSeed(platform, path, value)
+	if seed == "" {
+		return ""
+	}
+	return shortSHA256Hex(seed)
+}
+
+func deriveRelaySessionIdentity(platform string, bodyBytes []byte) relaySessionIdentity {
+	platform = strings.TrimSpace(platform)
+	identity := relaySessionIdentity{Role: "root"}
+	baseHash := deriveMetadataRelaySessionHash(bodyBytes)
+	if platform == "codex" && baseHash == "" {
+		baseHash = deriveCodexThreadSessionHash(bodyBytes)
+	}
+	if baseHash == "" {
+		baseHash = deriveToolPairSessionHash(platform, bodyBytes)
+	}
+	if baseHash == "" {
+		return identity
+	}
+
+	parentPath := ""
+	parentValue := relaySessionField(bodyBytes,
+		"parent_session_id", "parentSessionId",
+		"parent_conversation_id", "parentConversationId",
+		"parent_thread_id", "parentThreadId",
+	)
+	for _, path := range []string{"parent_session_id", "parentSessionId", "parent_conversation_id", "parentConversationId", "parent_thread_id", "parentThreadId"} {
+		if value := relaySessionField(bodyBytes, path); value != "" {
+			parentPath = path
+			parentValue = value
+			break
+		}
+	}
+	rootPath := ""
+	rootValue := relaySessionField(bodyBytes,
+		"root_session_id", "rootSessionId",
+		"root_conversation_id", "rootConversationId",
+		"root_thread_id", "rootThreadId",
+	)
+	for _, path := range []string{"root_session_id", "rootSessionId", "root_conversation_id", "rootConversationId", "root_thread_id", "rootThreadId"} {
+		if value := relaySessionField(bodyBytes, path); value != "" {
+			rootPath = path
+			rootValue = value
+			break
+		}
+	}
+	identity.NodeHash = baseHash
+	identity.ParentHash = hashRelaySessionField(platform, parentPath, parentValue)
+	identity.RootHash = hashRelaySessionField(platform, rootPath, rootValue)
+	if platform == "claude" {
+		if component := deriveClaudeStickySubagentComponent(bodyBytes); component != "" {
+			identity.NodeHash = shortSHA256Hex(baseHash + "|claude-subagent=" + component)
+			if identity.ParentHash == "" {
+				identity.ParentHash = baseHash
+			}
+			identity.Role = "child"
+		}
+	}
+	if identity.ParentHash != "" {
+		identity.Role = "child"
+	}
+	if identity.RootHash == "" {
+		if identity.ParentHash != "" {
+			identity.RootHash = identity.ParentHash
+		} else {
+			identity.RootHash = identity.NodeHash
+		}
+	}
+	return identity
+}
+
 func deriveMetadataRelaySessionHash(bodyBytes []byte) string {
 	metadata := gjson.GetBytes(bodyBytes, "metadata")
 	if !metadata.Exists() {
@@ -1504,24 +1734,34 @@ func deriveMetadataRelaySessionHash(bodyBytes []byte) string {
 		"threadId",
 	} {
 		if value := strings.TrimSpace(metadata.Get(path).String()); value != "" {
-			return shortSHA256Hex("metadata." + path + "=" + value)
+			if seed := canonicalRelaySessionHashSeed("", path, value); seed != "" {
+				return shortSHA256Hex(seed)
+			}
 		}
 	}
 	return ""
 }
 
+func deriveClaudeStickySubagentComponent(bodyBytes []byte) string {
+	if agentIdentity := deriveClaudeResponsesAgentIdentityKey(bodyBytes); agentIdentity != "" {
+		return "agent:" + agentIdentity
+	}
+	model := strings.TrimSpace(gjson.GetBytes(bodyBytes, "model").String())
+	if model != claudeManagedSubagentModel && !isClaudeResponsesSubagentContext(bodyBytes) {
+		return ""
+	}
+	if context := deriveClaudeResponsesAgentContextKey(bodyBytes); context != "" {
+		return "context:" + context
+	}
+	// A managed subagent without an explicit id still needs a distinct node
+	// so it can inherit the root binding instead of merging into the root.
+	return "subagent"
+}
+
 func (prs *ProviderRelayService) deriveRelaySessionHash(platform string, bodyBytes []byte) string {
-	if hash := deriveMetadataRelaySessionHash(bodyBytes); hash != "" {
-		return hash
-	}
-	platform = strings.TrimSpace(platform)
-	if platform == "codex" {
-		if hash := deriveCodexThreadSessionHash(bodyBytes); hash != "" {
-			return hash
-		}
-	}
-	if hash := deriveToolPairSessionHash(platform, bodyBytes); hash != "" {
-		return hash
+	identity := deriveRelaySessionIdentity(platform, bodyBytes)
+	if identity.NodeHash != "" {
+		return identity.NodeHash
 	}
 	if prs != nil {
 		if hash := prs.lookupToolSessionHash(platform, extractToolOutputCallIDs(bodyBytes)); hash != "" {
@@ -1773,7 +2013,260 @@ func toolSessionCallKey(platform string, callID string) string {
 }
 
 func (prs *ProviderRelayService) isSessionAffinityEnabled(platform string) bool {
+	if prs == nil || prs.appSettings == nil {
+		return false
+	}
+	settings, err := prs.appSettings.GetAppSettings()
+	if err != nil || settings.SessionAffinityEnabled == nil {
+		return false
+	}
+	return settings.SessionAffinityEnabled[strings.TrimSpace(platform)]
+}
+
+func (prs *ProviderRelayService) rememberSessionRelation(platform string, identity relaySessionIdentity) {
+	if prs == nil || strings.TrimSpace(identity.NodeHash) == "" {
+		return
+	}
+	platform = strings.TrimSpace(platform)
+	if identity.RootHash == "" {
+		identity.RootHash = identity.NodeHash
+	}
+	prs.sessionAffinityMu.Lock()
+	defer prs.sessionAffinityMu.Unlock()
+	if prs.sessionRelations == nil {
+		prs.sessionRelations = make(map[string]sessionRelation)
+	}
+	prs.sessionRelations[sessionAffinityStateKey(platform, identity.NodeHash)] = sessionRelation{
+		ParentHash: strings.TrimSpace(identity.ParentHash),
+		RootHash:   strings.TrimSpace(identity.RootHash),
+		Role:       strings.TrimSpace(identity.Role),
+		LastSeen:   time.Now(),
+	}
+}
+
+func (prs *ProviderRelayService) sessionRelationLocked(platform string, sessionHash string) sessionRelation {
+	key := sessionAffinityStateKey(platform, sessionHash)
+	relation := prs.sessionRelations[key]
+	immediateParent := strings.TrimSpace(relation.ParentHash)
+	if relation.RootHash == "" {
+		relation.RootHash = strings.TrimSpace(sessionHash)
+	}
+	seen := map[string]bool{strings.TrimSpace(sessionHash): true}
+	parent := immediateParent
+	for depth := 0; depth < 8 && parent != ""; depth++ {
+		if seen[parent] {
+			break
+		}
+		seen[parent] = true
+		parentRelation := prs.sessionRelations[sessionAffinityStateKey(platform, parent)]
+		if parentRelation.RootHash != "" {
+			relation.RootHash = parentRelation.RootHash
+		}
+		parent = strings.TrimSpace(parentRelation.ParentHash)
+	}
+	relation.ParentHash = immediateParent
+	return relation
+}
+
+func (prs *ProviderRelayService) trimSessionAffinityLocked() {
+	if len(prs.sessionAffinity) <= sessionAffinityMaxBindings {
+		return
+	}
+	for len(prs.sessionAffinity) > sessionAffinityMaxBindings {
+		oldestKey := ""
+		var oldestSeen time.Time
+		for key, binding := range prs.sessionAffinity {
+			if binding == nil || binding.ActiveRequests > 0 {
+				continue
+			}
+			if oldestKey == "" || binding.LastSeen.Before(oldestSeen) {
+				oldestKey = key
+				oldestSeen = binding.LastSeen
+			}
+		}
+		if oldestKey == "" {
+			return
+		}
+		delete(prs.sessionAffinity, oldestKey)
+	}
+	prs.pruneSessionRelationsLocked(time.Now())
+}
+
+func (prs *ProviderRelayService) pruneSessionRelationsLocked(now time.Time) {
+	if len(prs.sessionRelations) == 0 {
+		return
+	}
+	boundKeys := make(map[string]bool, len(prs.sessionAffinity))
+	for bindingKey := range prs.sessionAffinity {
+		boundKeys[bindingKey] = true
+	}
+	for key, relation := range prs.sessionRelations {
+		if relation.LastSeen.IsZero() {
+			relation.LastSeen = now
+			prs.sessionRelations[key] = relation
+		}
+		if !boundKeys[key] && now.Sub(relation.LastSeen) > time.Duration(defaultSessionAffinityTTLMinutes)*time.Minute {
+			delete(prs.sessionRelations, key)
+		}
+	}
+	if len(prs.sessionRelations) <= sessionAffinityMaxBindings*2 {
+		return
+	}
+	for len(prs.sessionRelations) > sessionAffinityMaxBindings*2 {
+		oldestKey := ""
+		var oldestSeen time.Time
+		for key, relation := range prs.sessionRelations {
+			if boundKeys[key] {
+				continue
+			}
+			if oldestKey == "" || relation.LastSeen.Before(oldestSeen) {
+				oldestKey = key
+				oldestSeen = relation.LastSeen
+			}
+		}
+		if oldestKey == "" {
+			return
+		}
+		delete(prs.sessionRelations, oldestKey)
+	}
+}
+
+func (prs *ProviderRelayService) inheritSessionBinding(platform string, sessionHash string) {
+	if prs == nil || strings.TrimSpace(sessionHash) == "" {
+		return
+	}
+	platform = strings.TrimSpace(platform)
+	now := time.Now()
+	prs.sessionAffinityMu.Lock()
+	defer prs.sessionAffinityMu.Unlock()
+	prs.sweepExpiredSessionAffinityLocked(now)
+	key := sessionAffinityStateKey(platform, sessionHash)
+	if existing := prs.sessionAffinity[key]; existing != nil {
+		if existing.Inherited {
+			prs.syncInheritedSessionBindingLocked(platform, sessionHash, existing)
+		}
+		return
+	}
+	relation := prs.sessionRelationLocked(platform, sessionHash)
+	if relation.ParentHash == "" {
+		return
+	}
+	parent := prs.sessionAffinity[sessionAffinityStateKey(platform, relation.ParentHash)]
+	if parent == nil || !parent.Confirmed || parent.ProviderID == "" {
+		return
+	}
+	prs.nextSessionNumber++
+	prs.sessionAffinity[key] = &providerSessionBinding{
+		Platform:      platform,
+		SessionHash:   sessionHash,
+		ParentHash:    relation.ParentHash,
+		RootHash:      relation.RootHash,
+		SessionRole:   "child",
+		SessionNumber: prs.nextSessionNumber,
+		ProviderID:    parent.ProviderID,
+		ProviderName:  parent.ProviderName,
+		UserAgent:     parent.UserAgent,
+		MaxSessions:   parent.MaxSessions,
+		TTLMinutes:    parent.TTLMinutes,
+		CreatedAt:     now,
+		LastSeen:      now,
+		Inherited:     true,
+		Confirmed:     true,
+	}
+	prs.trimSessionAffinityLocked()
+}
+
+func (prs *ProviderRelayService) syncInheritedSessionBindingLocked(platform string, sessionHash string, binding *providerSessionBinding) {
+	if binding == nil || !binding.Inherited || binding.ManualOverride || binding.ActiveRequests > 0 || binding.ParentHash == "" {
+		return
+	}
+	parent := prs.sessionAffinity[sessionAffinityStateKey(platform, binding.ParentHash)]
+	if parent == nil || !parent.Confirmed || parent.ProviderID == "" {
+		return
+	}
+	binding.ProviderID = parent.ProviderID
+	binding.ProviderName = parent.ProviderName
+	binding.MaxSessions = parent.MaxSessions
+	binding.TTLMinutes = parent.TTLMinutes
+	binding.LastSeen = time.Now()
+}
+
+func cloneProviderActiveRequests(source map[string]int) map[string]int {
+	if len(source) == 0 {
+		return nil
+	}
+	cloned := make(map[string]int, len(source))
+	for providerID, count := range source {
+		if count > 0 {
+			cloned[providerID] = count
+		}
+	}
+	if len(cloned) == 0 {
+		return nil
+	}
+	return cloned
+}
+
+func cloneProviderSessionBinding(source *providerSessionBinding) *providerSessionBinding {
+	if source == nil {
+		return nil
+	}
+	cloned := *source
+	cloned.ActiveRequestsByProvider = cloneProviderActiveRequests(source.ActiveRequestsByProvider)
+	return &cloned
+}
+
+func (prs *ProviderRelayService) isSessionDescendantLocked(platform string, candidate string, ancestor string) bool {
+	candidate = strings.TrimSpace(candidate)
+	ancestor = strings.TrimSpace(ancestor)
+	if candidate == "" || ancestor == "" || candidate == ancestor {
+		return false
+	}
+	seen := map[string]bool{}
+	for depth := 0; depth < 8 && candidate != ""; depth++ {
+		if seen[candidate] {
+			return false
+		}
+		seen[candidate] = true
+		relation := prs.sessionRelations[sessionAffinityStateKey(platform, candidate)]
+		if relation.ParentHash == ancestor {
+			return true
+		}
+		candidate = relation.ParentHash
+	}
 	return false
+}
+
+func (prs *ProviderRelayService) propagateSessionProviderBindingLocked(platform string, sessionHash string, providerID string, providerName string, capacities ...int) {
+	prs.nextSessionAffinityRevision++
+	revision := prs.nextSessionAffinityRevision
+	maxSessions := 0
+	ttlMinutes := 0
+	if len(capacities) >= 2 {
+		maxSessions = normalizeSessionMaxSessions(capacities[0])
+		ttlMinutes = normalizeSessionTTLMinutes(capacities[1])
+	}
+	for _, binding := range prs.sessionAffinity {
+		if binding == nil || binding.Platform != platform {
+			continue
+		}
+		if binding.SessionHash != sessionHash && !prs.isSessionDescendantLocked(platform, binding.SessionHash, sessionHash) {
+			continue
+		}
+		binding.ProviderID = providerID
+		binding.ProviderName = providerName
+		if maxSessions > 0 {
+			binding.MaxSessions = maxSessions
+		}
+		if ttlMinutes > 0 {
+			binding.TTLMinutes = ttlMinutes
+		}
+		binding.Pending = false
+		binding.Confirmed = true
+		binding.Inherited = binding.SessionHash != sessionHash
+		binding.AffinityRevision = revision
+		binding.LastSeen = time.Now()
+	}
 }
 
 func (prs *ProviderRelayService) sweepExpiredSessionAffinityLocked(now time.Time) {
@@ -1787,6 +2280,7 @@ func (prs *ProviderRelayService) sweepExpiredSessionAffinityLocked(now time.Time
 			delete(prs.sessionAffinity, key)
 		}
 	}
+	prs.pruneSessionRelationsLocked(now)
 }
 
 func (prs *ProviderRelayService) sweepExpiredToolSessionsLocked(now time.Time) {
@@ -1854,9 +2348,13 @@ func (prs *ProviderRelayService) upsertConfirmedSessionBinding(platform string, 
 	binding := prs.sessionAffinity[key]
 	if binding == nil {
 		prs.nextSessionNumber++
+		relation := prs.sessionRelationLocked(platform, sessionHash)
 		binding = &providerSessionBinding{
 			Platform:      platform,
 			SessionHash:   sessionHash,
+			ParentHash:    relation.ParentHash,
+			RootHash:      relation.RootHash,
+			SessionRole:   relation.Role,
 			SessionNumber: prs.nextSessionNumber,
 			CreatedAt:     now,
 		}
@@ -1875,6 +2373,7 @@ func (prs *ProviderRelayService) upsertConfirmedSessionBinding(platform string, 
 	binding.LastSeen = now
 	binding.Pending = false
 	binding.Confirmed = true
+	prs.trimSessionAffinityLocked()
 }
 
 func (prs *ProviderRelayService) getSessionBindingSnapshot(platform string, sessionHash string) *providerSessionBinding {
@@ -1889,8 +2388,8 @@ func (prs *ProviderRelayService) getSessionBindingSnapshot(platform string, sess
 	if binding == nil || !binding.Confirmed {
 		return nil
 	}
-	copied := *binding
-	return &copied
+	prs.syncInheritedSessionBindingLocked(platform, sessionHash, binding)
+	return cloneProviderSessionBinding(binding)
 }
 
 func (prs *ProviderRelayService) beginSessionProviderRequest(platform string, sessionHash string, providerID string, providerName string, userAgent string, maxSessions int, ttlMinutes int, pending bool, allowOverflow bool) int64 {
@@ -1905,20 +2404,17 @@ func (prs *ProviderRelayService) beginSessionProviderRequest(platform string, se
 	key := sessionAffinityStateKey(platform, sessionHash)
 	binding := prs.sessionAffinity[key]
 	if binding != nil {
+		if binding.ActiveRequestsByProvider == nil {
+			binding.ActiveRequestsByProvider = map[string]int{}
+		}
 		if binding.Confirmed && binding.ProviderID == providerID {
 			binding.LastSeen = now
 			if userAgent != "" {
 				binding.UserAgent = userAgent
 			}
 			binding.ActiveRequests++
+			binding.ActiveRequestsByProvider[providerID]++
 			return 0
-		}
-		if binding.Confirmed && binding.ActiveRequests > 0 {
-			binding.LastSeen = now
-			if userAgent != "" {
-				binding.UserAgent = userAgent
-			}
-			return -1
 		}
 		if !binding.Confirmed && binding.ProviderID == providerID {
 			binding.LastSeen = now
@@ -1926,6 +2422,7 @@ func (prs *ProviderRelayService) beginSessionProviderRequest(platform string, se
 				binding.UserAgent = userAgent
 			}
 			binding.ActiveRequests++
+			binding.ActiveRequestsByProvider[providerID]++
 			return binding.AttemptID
 		}
 		if !binding.Confirmed && binding.ActiveRequests > 0 {
@@ -1941,9 +2438,13 @@ func (prs *ProviderRelayService) beginSessionProviderRequest(platform string, se
 	}
 	if binding == nil {
 		prs.nextSessionNumber++
+		relation := prs.sessionRelationLocked(platform, sessionHash)
 		binding = &providerSessionBinding{
 			Platform:      platform,
 			SessionHash:   sessionHash,
+			ParentHash:    relation.ParentHash,
+			RootHash:      relation.RootHash,
+			SessionRole:   relation.Role,
 			SessionNumber: prs.nextSessionNumber,
 			CreatedAt:     now,
 		}
@@ -1951,6 +2452,10 @@ func (prs *ProviderRelayService) beginSessionProviderRequest(platform string, se
 	}
 	prs.nextSessionAttempt++
 	attemptID := prs.nextSessionAttempt
+	binding.PreviousProviderID = ""
+	if binding.Confirmed {
+		binding.PreviousProviderID = binding.ProviderID
+	}
 	binding.ProviderID = providerID
 	binding.ProviderName = providerName
 	if userAgent != "" {
@@ -1960,9 +2465,15 @@ func (prs *ProviderRelayService) beginSessionProviderRequest(platform string, se
 	binding.TTLMinutes = normalizeSessionTTLMinutes(ttlMinutes)
 	binding.LastSeen = now
 	binding.ActiveRequests++
+	if binding.ActiveRequestsByProvider == nil {
+		binding.ActiveRequestsByProvider = map[string]int{}
+	}
+	binding.ActiveRequestsByProvider[providerID]++
 	binding.Pending = true
 	binding.Confirmed = false
 	binding.AttemptID = attemptID
+	binding.AttemptAffinityRevision = binding.AffinityRevision
+	prs.trimSessionAffinityLocked()
 	return attemptID
 }
 
@@ -1977,7 +2488,7 @@ func (prs *ProviderRelayService) providerBoundSessionCountLocked(platform string
 	return count
 }
 
-func (prs *ProviderRelayService) finishSessionProviderRequest(platform string, sessionHash string) {
+func (prs *ProviderRelayService) finishSessionProviderRequest(platform string, sessionHash string, providerIDs ...string) {
 	if prs == nil || strings.TrimSpace(sessionHash) == "" {
 		return
 	}
@@ -1991,6 +2502,22 @@ func (prs *ProviderRelayService) finishSessionProviderRequest(platform string, s
 	if binding.ActiveRequests > 0 {
 		binding.ActiveRequests--
 	}
+	providerID := ""
+	if len(providerIDs) > 0 {
+		providerID = strings.TrimSpace(providerIDs[0])
+	}
+	if providerID == "" && len(binding.ActiveRequestsByProvider) == 1 {
+		for candidateID := range binding.ActiveRequestsByProvider {
+			providerID = candidateID
+		}
+	}
+	if providerID != "" && binding.ActiveRequestsByProvider != nil {
+		if binding.ActiveRequestsByProvider[providerID] <= 1 {
+			delete(binding.ActiveRequestsByProvider, providerID)
+		} else {
+			binding.ActiveRequestsByProvider[providerID]--
+		}
+	}
 	binding.LastSeen = now
 }
 
@@ -2003,6 +2530,234 @@ func (prs *ProviderRelayService) releaseSessionBinding(platform string, sessionH
 	delete(prs.sessionAffinity, sessionAffinityStateKey(platform, sessionHash))
 }
 
+func (prs *ProviderRelayService) ClearSessionAffinity(platform string) {
+	if prs == nil {
+		return
+	}
+	platform = strings.TrimSpace(platform)
+	if platform == "" {
+		return
+	}
+	prs.sessionAffinityMu.Lock()
+	defer prs.sessionAffinityMu.Unlock()
+	for key, binding := range prs.sessionAffinity {
+		if binding != nil && binding.Platform == platform {
+			delete(prs.sessionAffinity, key)
+		}
+	}
+	for key := range prs.sessionRelations {
+		if strings.HasPrefix(key, platform+"\x00") {
+			delete(prs.sessionRelations, key)
+		}
+	}
+}
+
+func (prs *ProviderRelayService) sessionBindingByNumber(platform string, sessionNumber int64) (*providerSessionBinding, error) {
+	if prs == nil || sessionNumber <= 0 {
+		return nil, errors.New("会话不存在")
+	}
+	prs.sessionAffinityMu.Lock()
+	defer prs.sessionAffinityMu.Unlock()
+	prs.sweepExpiredSessionAffinityLocked(time.Now())
+	for _, binding := range prs.sessionAffinity {
+		if binding != nil && binding.Platform == platform && binding.SessionNumber == sessionNumber && (binding.Confirmed || binding.ActiveRequests > 0) {
+			return cloneProviderSessionBinding(binding), nil
+		}
+	}
+	return nil, errors.New("会话不存在或已过期")
+}
+
+func (prs *ProviderRelayService) getProviderSessionSwitchCandidates(platform string, binding *providerSessionBinding) []ProviderSessionSwitchCandidate {
+	result := make([]ProviderSessionSwitchCandidate, 0)
+	if prs == nil || binding == nil {
+		return result
+	}
+	loads := prs.providerSessionLoads(platform)
+	requestedModel := prs.latestSessionRequestedModel(platform, binding.SessionNumber)
+	concurrencyLimitEnabled := prs.isProviderConcurrencyLimitEnabled(platform)
+	addCandidate := func(providerID, providerName string, level int, maxSessions int, ttlMinutes int, enabled bool, configured bool, blacklisted bool, concurrencyFull bool, modelCompatible bool) {
+		if level <= 0 {
+			level = 1
+		}
+		load := providerSessionLoadFor(providerID, maxSessions, loads)
+		candidate := ProviderSessionSwitchCandidate{
+			ProviderID:      providerID,
+			ProviderName:    providerName,
+			Level:           level,
+			Current:         providerID == binding.ProviderID,
+			Available:       true,
+			Switchable:      providerID != binding.ProviderID,
+			BoundSessions:   load.BoundSessions,
+			ActiveRequests:  load.ActiveRequests,
+			MaxSessions:     load.MaxSessions,
+			TTLMinutes:      normalizeSessionTTLMinutes(ttlMinutes),
+			LoadRate:        load.LoadRate,
+			RequestedModel:  requestedModel,
+			ModelCompatible: modelCompatible,
+		}
+		switch {
+		case !enabled:
+			candidate.Available = false
+			candidate.Reason = "供应商已停用"
+		case !configured:
+			candidate.Available = false
+			candidate.Reason = "缺少连接配置"
+		case blacklisted:
+			candidate.Available = false
+			candidate.Reason = "供应商已拉黑"
+		case !modelCompatible && !candidate.Current:
+			candidate.Available = false
+			candidate.Reason = "不支持当前模型"
+		case concurrencyFull && !candidate.Current:
+			candidate.Available = false
+			candidate.Reason = "并发限制已满"
+		}
+		candidate.Switchable = candidate.Switchable && candidate.Available
+		result = append(result, candidate)
+	}
+	if platform == "gemini" {
+		if prs.geminiService == nil {
+			return result
+		}
+		for _, provider := range prs.geminiService.GetProviders() {
+			providerID := providerRefFromGeminiProvider(provider)
+			blacklisted := false
+			if prs.blacklistService != nil {
+				blacklisted, _ = prs.blacklistService.IsBlacklistedByID(platform, providerID, provider.Name)
+			}
+			limit := geminiProviderConcurrencyLimit(provider)
+			concurrencyFull := concurrencyLimitEnabled && limit != nil && prs.providerConcurrencyCount(platform, providerID) >= *limit
+			configured := strings.TrimSpace(provider.BaseURL) != "" && strings.TrimSpace(provider.APIKey) != ""
+			addCandidate(providerID, provider.Name, provider.Level, geminiProviderSessionMaxSessions(provider), geminiProviderSessionTTLMinutes(provider), provider.Enabled, configured, blacklisted, concurrencyFull, true)
+		}
+		return result
+	}
+	if prs.providerService == nil {
+		return result
+	}
+	providers, err := prs.providerService.LoadProviders(platform)
+	if err != nil {
+		return result
+	}
+	providers = filterRuntimeProviders(platform, providers)
+	for _, provider := range providers {
+		providerID := providerRefFromProvider(provider)
+		blacklisted := false
+		if prs.blacklistService != nil {
+			blacklisted, _ = prs.blacklistService.IsBlacklistedByID(platform, providerID, provider.Name)
+		}
+		limit := providerConcurrencyLimit(provider)
+		concurrencyFull := concurrencyLimitEnabled && limit != nil && prs.providerConcurrencyCount(platform, providerID) >= *limit
+		configured := strings.TrimSpace(provider.APIURL) != "" && providerHasRelayAuth(platform, provider)
+		modelCompatible := true
+		if requestedModel != "" {
+			effectiveModel := resolveProviderModelWithoutBodyCopy(provider, requestedModel)
+			if platform == "claude" && prs.claudeModelRouting != nil && prs.claudeModelRouting.routingEnabled() {
+				modelCompatible = provider.isClaudeRoutedModelSupported(requestedModel, effectiveModel)
+			} else {
+				modelCompatible = provider.IsResolvedModelSupported(requestedModel, effectiveModel)
+			}
+		}
+		addCandidate(providerID, provider.Name, provider.Level, providerSessionMaxSessions(provider), providerSessionTTLMinutes(provider), provider.Enabled, configured, blacklisted, concurrencyFull, modelCompatible)
+	}
+	return result
+}
+
+func (prs *ProviderRelayService) latestSessionRequestedModel(platform string, sessionNumber int64) string {
+	if prs == nil || sessionNumber <= 0 {
+		return ""
+	}
+	prs.providerConcurrencyMu.Lock()
+	defer prs.providerConcurrencyMu.Unlock()
+	latestStartedAt := int64(0)
+	latestModel := ""
+	for _, requests := range prs.providerConcurrencyRequests {
+		for _, request := range requests {
+			if request.Platform != platform || request.SessionNumber != sessionNumber || request.StartedAt < latestStartedAt {
+				continue
+			}
+			latestStartedAt = request.StartedAt
+			latestModel = strings.TrimSpace(request.RequestedModel)
+			if latestModel == "" {
+				latestModel = strings.TrimSpace(request.Model)
+			}
+		}
+	}
+	return latestModel
+}
+
+func (prs *ProviderRelayService) GetSessionSwitchCandidates(platform string, sessionNumber int64) []ProviderSessionSwitchCandidate {
+	platform = strings.TrimSpace(platform)
+	if platform == "" || !prs.isSessionAffinityEnabled(platform) {
+		return []ProviderSessionSwitchCandidate{}
+	}
+	binding, err := prs.sessionBindingByNumber(platform, sessionNumber)
+	if err != nil {
+		return []ProviderSessionSwitchCandidate{}
+	}
+	return prs.getProviderSessionSwitchCandidates(platform, binding)
+}
+
+func (prs *ProviderRelayService) SwitchSessionProvider(platform string, sessionNumber int64, targetProviderID string) (SessionSwitchResult, error) {
+	platform = strings.TrimSpace(platform)
+	targetProviderID = strings.TrimSpace(targetProviderID)
+	if platform == "" || targetProviderID == "" || !prs.isSessionAffinityEnabled(platform) {
+		return SessionSwitchResult{}, errors.New("会话粘滞未启用")
+	}
+	binding, err := prs.sessionBindingByNumber(platform, sessionNumber)
+	if err != nil {
+		return SessionSwitchResult{}, err
+	}
+	candidates := prs.getProviderSessionSwitchCandidates(platform, binding)
+	var target *ProviderSessionSwitchCandidate
+	for i := range candidates {
+		if candidates[i].ProviderID == targetProviderID {
+			target = &candidates[i]
+			break
+		}
+	}
+	if target == nil {
+		return SessionSwitchResult{}, errors.New("目标供应商不存在")
+	}
+	if !target.Available && !target.Current {
+		return SessionSwitchResult{}, errors.New(target.Reason)
+	}
+	prs.sessionAffinityMu.Lock()
+	defer prs.sessionAffinityMu.Unlock()
+	current := prs.sessionAffinity[sessionAffinityStateKey(platform, binding.SessionHash)]
+	if current == nil || (!current.Confirmed && current.ActiveRequests <= 0) {
+		return SessionSwitchResult{}, errors.New("会话不存在或已过期")
+	}
+	if target.Current {
+		return SessionSwitchResult{}, errors.New("当前供应商无需切换")
+	}
+	prs.propagateSessionProviderBindingLocked(platform, current.SessionHash, target.ProviderID, target.ProviderName, target.MaxSessions, target.TTLMinutes)
+	current.ProviderID = target.ProviderID
+	current.ProviderName = target.ProviderName
+	current.MaxSessions = target.MaxSessions
+	current.TTLMinutes = target.TTLMinutes
+	current.Pending = false
+	current.Confirmed = true
+	current.ManualOverride = true
+	current.LastSeen = time.Now()
+	affected := 0
+	for _, item := range prs.sessionAffinity {
+		if item == nil || item.Platform != platform {
+			continue
+		}
+		if item.SessionHash == current.SessionHash || prs.isSessionDescendantLocked(platform, item.SessionHash, current.SessionHash) {
+			affected++
+		}
+	}
+	return SessionSwitchResult{
+		Platform:             platform,
+		SessionNumber:        current.SessionNumber,
+		ProviderID:           target.ProviderID,
+		ProviderName:         target.ProviderName,
+		AffectedSessionCount: affected,
+	}, nil
+}
+
 func (prs *ProviderRelayService) confirmSessionProviderBinding(platform string, sessionHash string, attemptID int64) {
 	if prs == nil || strings.TrimSpace(sessionHash) == "" || attemptID == 0 {
 		return
@@ -2010,9 +2765,16 @@ func (prs *ProviderRelayService) confirmSessionProviderBinding(platform string, 
 	prs.sessionAffinityMu.Lock()
 	defer prs.sessionAffinityMu.Unlock()
 	if binding := prs.sessionAffinity[sessionAffinityStateKey(platform, sessionHash)]; binding != nil && binding.AttemptID == attemptID {
+		if binding.AttemptAffinityRevision != binding.AffinityRevision {
+			return
+		}
 		binding.Pending = false
 		binding.Confirmed = true
 		binding.LastSeen = time.Now()
+		if binding.RootHash == binding.SessionHash && binding.PreviousProviderID != "" && binding.PreviousProviderID != binding.ProviderID {
+			prs.propagateSessionProviderBindingLocked(platform, sessionHash, binding.ProviderID, binding.ProviderName, binding.MaxSessions, binding.TTLMinutes)
+		}
+		binding.PreviousProviderID = ""
 	}
 }
 
@@ -2024,6 +2786,15 @@ func (prs *ProviderRelayService) restoreOrReleaseSessionBinding(platform string,
 	defer prs.sessionAffinityMu.Unlock()
 	key := sessionAffinityStateKey(platform, sessionHash)
 	current := prs.sessionAffinity[key]
+	if current != nil && original != nil && current.AffinityRevision != original.AffinityRevision {
+		return
+	}
+	if current != nil && current.AttemptAffinityRevision != current.AffinityRevision {
+		return
+	}
+	if current != nil && current.ManualOverride {
+		return
+	}
 	if original == nil || !original.Confirmed {
 		if current != nil && current.AttemptID == attemptID && !current.Confirmed && current.ActiveRequests <= 0 {
 			delete(prs.sessionAffinity, key)
@@ -2032,22 +2803,22 @@ func (prs *ProviderRelayService) restoreOrReleaseSessionBinding(platform string,
 	}
 	if current == nil || current.AttemptID != attemptID {
 		if current == nil {
-			copied := *original
+			copied := cloneProviderSessionBinding(original)
 			copied.Pending = false
 			copied.Confirmed = true
 			copied.ActiveRequests = 0
-			prs.sessionAffinity[key] = &copied
+			copied.ActiveRequestsByProvider = nil
+			prs.sessionAffinity[key] = copied
 		}
 		return
 	}
-	if current.ActiveRequests > 0 {
-		return
-	}
-	copied := *original
+	copied := cloneProviderSessionBinding(original)
 	copied.Pending = false
 	copied.Confirmed = true
 	copied.ActiveRequests = current.ActiveRequests
-	prs.sessionAffinity[key] = &copied
+	copied.ActiveRequestsByProvider = cloneProviderActiveRequests(current.ActiveRequestsByProvider)
+	copied.AttemptAffinityRevision = current.AffinityRevision
+	prs.sessionAffinity[key] = copied
 }
 
 func (prs *ProviderRelayService) releaseSessionBindingIfAttempt(platform string, sessionHash string, attemptID int64) {
@@ -2058,6 +2829,9 @@ func (prs *ProviderRelayService) releaseSessionBindingIfAttempt(platform string,
 	defer prs.sessionAffinityMu.Unlock()
 	key := sessionAffinityStateKey(platform, sessionHash)
 	if current := prs.sessionAffinity[key]; current != nil && current.AttemptID == attemptID {
+		if current.ManualOverride {
+			return
+		}
 		delete(prs.sessionAffinity, key)
 	}
 }
@@ -2112,7 +2886,23 @@ func (prs *ProviderRelayService) providerSessionLoads(platform string) map[strin
 		load := loads[binding.ProviderID]
 		load.ProviderID = binding.ProviderID
 		load.BoundSessions++
-		if binding.ActiveRequests > 0 {
+		if len(binding.ActiveRequestsByProvider) > 0 {
+			for providerID, activeRequests := range binding.ActiveRequestsByProvider {
+				if activeRequests <= 0 {
+					continue
+				}
+				if providerID == binding.ProviderID {
+					load.ActiveRequests += activeRequests
+					continue
+				}
+				activeLoad := loads[providerID]
+				activeLoad.ProviderID = providerID
+				activeLoad.ActiveRequests += activeRequests
+				loads[providerID] = activeLoad
+			}
+		} else if binding.ActiveRequests > 0 {
+			// Backward-compatible in-memory bindings created before the
+			// per-provider counter was introduced.
 			load.ActiveRequests += binding.ActiveRequests
 		}
 		loads[binding.ProviderID] = load
@@ -2236,6 +3026,44 @@ func sortProvidersBySessionLoad(providers []Provider, loads map[string]providerS
 	})
 }
 
+func reorderProvidersWithinHighestSessionLevel(providers []Provider, loads map[string]providerSessionLoad) []Provider {
+	if len(providers) <= 1 {
+		return providers
+	}
+	highest := providerAttemptLevel(providers[0])
+	for _, provider := range providers[1:] {
+		if level := providerAttemptLevel(provider); level < highest {
+			highest = level
+		}
+	}
+	firstLevel := make([]Provider, 0, len(providers))
+	rest := make([]Provider, 0, len(providers))
+	for _, provider := range providers {
+		if providerAttemptLevel(provider) == highest {
+			firstLevel = append(firstLevel, provider)
+		} else {
+			rest = append(rest, provider)
+		}
+	}
+	underCapacity := make([]Provider, 0, len(firstLevel))
+	fullCapacity := make([]Provider, 0, len(firstLevel))
+	for _, provider := range firstLevel {
+		load := providerSessionLoadFor(providerRefFromProvider(provider), providerSessionMaxSessions(provider), loads)
+		if load.BoundSessions < load.MaxSessions {
+			underCapacity = append(underCapacity, provider)
+		} else {
+			fullCapacity = append(fullCapacity, provider)
+		}
+	}
+	sortProvidersBySessionLoad(underCapacity, loads, func(provider Provider) (string, int) {
+		return providerRefFromProvider(provider), providerSessionMaxSessions(provider)
+	})
+	sortProvidersBySessionLoad(fullCapacity, loads, func(provider Provider) (string, int) {
+		return providerRefFromProvider(provider), providerSessionMaxSessions(provider)
+	})
+	return append(append(underCapacity, fullCapacity...), rest...)
+}
+
 func isProviderSessionOverflowAttempt(provider Provider, loads map[string]providerSessionLoad) bool {
 	load := providerSessionLoadFor(providerRefFromProvider(provider), providerSessionMaxSessions(provider), loads)
 	return load.BoundSessions >= load.MaxSessions
@@ -2265,7 +3093,10 @@ func (prs *ProviderRelayService) reorderProviderAttemptsForSession(platform stri
 	if !canCreateBinding {
 		return providers
 	}
-	return orderProvidersForSessionAffinity(providers, loads)
+	if !prs.isSessionAffinityEnabled(platform) {
+		return orderProvidersForSessionAffinity(providers, loads)
+	}
+	return reorderProvidersWithinHighestSessionLevel(providers, loads)
 }
 
 func orderGeminiProvidersForSessionAffinity(
@@ -2311,6 +3142,51 @@ func sortGeminiProvidersBySessionLoad(providers []GeminiProvider, loads map[stri
 	})
 }
 
+func reorderGeminiProvidersWithinHighestSessionLevel(providers []GeminiProvider, loads map[string]providerSessionLoad) []GeminiProvider {
+	if len(providers) <= 1 {
+		return providers
+	}
+	highest := providers[0].Level
+	if highest <= 0 {
+		highest = 1
+	}
+	for _, provider := range providers[1:] {
+		level := provider.Level
+		if level <= 0 {
+			level = 1
+		}
+		if level < highest {
+			highest = level
+		}
+	}
+	firstLevel := make([]GeminiProvider, 0, len(providers))
+	rest := make([]GeminiProvider, 0, len(providers))
+	for _, provider := range providers {
+		level := provider.Level
+		if level <= 0 {
+			level = 1
+		}
+		if level == highest {
+			firstLevel = append(firstLevel, provider)
+		} else {
+			rest = append(rest, provider)
+		}
+	}
+	underCapacity := make([]GeminiProvider, 0, len(firstLevel))
+	fullCapacity := make([]GeminiProvider, 0, len(firstLevel))
+	for _, provider := range firstLevel {
+		load := providerSessionLoadFor(providerRefFromGeminiProvider(provider), geminiProviderSessionMaxSessions(provider), loads)
+		if load.BoundSessions < load.MaxSessions {
+			underCapacity = append(underCapacity, provider)
+		} else {
+			fullCapacity = append(fullCapacity, provider)
+		}
+	}
+	sortGeminiProvidersBySessionLoad(underCapacity, loads)
+	sortGeminiProvidersBySessionLoad(fullCapacity, loads)
+	return append(append(underCapacity, fullCapacity...), rest...)
+}
+
 func (prs *ProviderRelayService) reorderGeminiProviderAttemptsForSession(providers []GeminiProvider, sessionHash string, canCreateBinding bool, loads map[string]providerSessionLoad) []GeminiProvider {
 	if len(providers) <= 1 || strings.TrimSpace(sessionHash) == "" {
 		return providers
@@ -2335,7 +3211,10 @@ func (prs *ProviderRelayService) reorderGeminiProviderAttemptsForSession(provide
 	if !canCreateBinding {
 		return providers
 	}
-	return orderGeminiProvidersForSessionAffinity(providers, loads)
+	if !prs.isSessionAffinityEnabled("gemini") {
+		return orderGeminiProvidersForSessionAffinity(providers, loads)
+	}
+	return reorderGeminiProvidersWithinHighestSessionLevel(providers, loads)
 }
 
 func (prs *ProviderRelayService) GetSessionAffinityStatuses(platform string) []ProviderSessionStatus {
@@ -2361,24 +3240,42 @@ func (prs *ProviderRelayService) GetSessionAffinityStatuses(platform string) []P
 			statusMap[key] = status
 		}
 		status.ActiveSessions++
-		status.ActiveRequests += binding.ActiveRequests
+		activeRequests := binding.ActiveRequests
+		if len(binding.ActiveRequestsByProvider) > 0 {
+			activeRequests = binding.ActiveRequestsByProvider[binding.ProviderID]
+		}
+		status.ActiveRequests += activeRequests
 		ttl := time.Duration(normalizeSessionTTLMinutes(binding.TTLMinutes)) * time.Minute
 		expiresAt := binding.LastSeen.Add(ttl)
 		remaining := int64(math.Ceil(expiresAt.Sub(now).Seconds()))
 		if remaining < 0 {
 			remaining = 0
 		}
+		relation := prs.sessionRelationLocked(platform, binding.SessionHash)
+		rootSessionNumber := binding.SessionNumber
+		if rootBinding := prs.sessionAffinity[sessionAffinityStateKey(platform, relation.RootHash)]; rootBinding != nil {
+			rootSessionNumber = rootBinding.SessionNumber
+		}
+		parentSessionNumber := int64(0)
+		if parentBinding := prs.sessionAffinity[sessionAffinityStateKey(platform, binding.ParentHash)]; parentBinding != nil {
+			parentSessionNumber = parentBinding.SessionNumber
+		}
 		status.Sessions = append(status.Sessions, ProviderSessionDetail{
-			SessionNumber:  binding.SessionNumber,
-			Status:         map[bool]string{true: "calling", false: "idle"}[binding.ActiveRequests > 0],
-			ActiveRequests: binding.ActiveRequests,
-			ProviderID:     binding.ProviderID,
-			ProviderName:   binding.ProviderName,
-			UserAgent:      binding.UserAgent,
-			CreatedAt:      binding.CreatedAt.UnixMilli(),
-			LastSeen:       binding.LastSeen.UnixMilli(),
-			ExpiresAt:      expiresAt.UnixMilli(),
-			RemainingSec:   remaining,
+			SessionNumber:       binding.SessionNumber,
+			RootSessionNumber:   rootSessionNumber,
+			ParentSessionNumber: parentSessionNumber,
+			SessionRole:         binding.SessionRole,
+			Switchable:          true,
+			ManualOverride:      binding.ManualOverride,
+			Status:              map[bool]string{true: "calling", false: "idle"}[activeRequests > 0],
+			ActiveRequests:      activeRequests,
+			ProviderID:          binding.ProviderID,
+			ProviderName:        binding.ProviderName,
+			UserAgent:           binding.UserAgent,
+			CreatedAt:           binding.CreatedAt.UnixMilli(),
+			LastSeen:            binding.LastSeen.UnixMilli(),
+			ExpiresAt:           expiresAt.UnixMilli(),
+			RemainingSec:        remaining,
 		})
 	}
 	result := make([]ProviderSessionStatus, 0, len(statusMap))
@@ -2767,14 +3664,27 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 		blacklistEnabled := prs.blacklistService.ShouldUseFixedMode()
 		roundRobinEnabled := prs.isRoundRobinEnabled()
 		providerConcurrencyLimitEnabled := prs.isProviderConcurrencyLimitEnabled(kind)
-		sessionHash := prs.deriveRelaySessionHash(kind, bodyBytes)
+		sessionIdentity := deriveRelaySessionIdentity(kind, bodyBytes)
+		sessionHash := sessionIdentity.NodeHash
+		if sessionHash == "" {
+			sessionHash = prs.deriveRelaySessionHash(kind, bodyBytes)
+			sessionIdentity.NodeHash = sessionHash
+		}
+		sessionAffinityEnabled := prs.isSessionAffinityEnabled(kind)
+		if sessionAffinityEnabled && sessionIdentity.NodeHash != "" {
+			prs.rememberSessionRelation(kind, sessionIdentity)
+			prs.inheritSessionBinding(kind, sessionIdentity.NodeHash)
+		}
 		originalSessionBinding := prs.getSessionBindingSnapshot(kind, sessionHash)
 		if originalSessionBinding != nil && !prs.isProviderSessionBindingUsable(kind, active, originalSessionBinding) {
 			prs.releaseSessionBinding(kind, sessionHash)
 			originalSessionBinding = nil
 		}
-		sessionAffinityEnabled := false
-		sessionCanBind := false
+		sessionCanBind := sessionAffinityEnabled && sessionIdentity.NodeHash != ""
+		if sessionCanBind && kind == "claude" {
+			preferredSessionProvider = sessionProviderPreference{}
+			levels, levelGroups = buildProviderAttemptGroups(active, "")
+		}
 		var sessionAttemptID int64
 
 		// 【拉黑模式】：同 Provider 重试直到被拉黑，然后切换到下一个 Provider
@@ -2828,7 +3738,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 						plan = prepareSessionProviderAttempt(provider, plan)
 						ok, err := prs.forwardRequestWithPlan(c, kind, provider, plan.EffectiveEndpoint, query, clientHeaders, plan.BodyBytes, isStream, plan.EffectiveModel, requestedModel, plan, providerConcurrencyLimitEnabled)
 						duration := time.Since(startTime)
-						prs.finishSessionProviderRequest(kind, sessionHash)
+						prs.finishSessionProviderRequest(kind, sessionHash, providerRefFromProvider(provider))
 
 						if ok {
 							markSessionProviderAttemptSucceeded()
@@ -3089,7 +3999,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 				plan = prepareSessionProviderAttempt(provider, plan)
 				ok, err := prs.forwardRequestWithPlan(c, kind, provider, plan.EffectiveEndpoint, query, clientHeaders, plan.BodyBytes, isStream, plan.EffectiveModel, requestedModel, plan, providerConcurrencyLimitEnabled)
 				duration := time.Since(startTime)
-				prs.finishSessionProviderRequest(kind, sessionHash)
+				prs.finishSessionProviderRequest(kind, sessionHash, providerRefFromProvider(provider))
 
 				if ok {
 					markSessionProviderAttemptSucceeded()
@@ -3390,23 +4300,25 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 	}
 	targetURL := joinURL(provider.APIURL, endpoint)
 	requestUserAgent := getHeaderValueCaseInsensitive(headers, "User-Agent")
-	updateProviderSlotParameters, releaseProviderSlot, acquiredProviderSlot := prs.acquireProviderConcurrencySlot(kind, providerRefFromProvider(provider), providerConcurrencyLimit(provider), providerConcurrencyLimitEnabled, providerConcurrencyRequestMeta{
-		ProviderName:        provider.Name,
-		UserAgent:           requestUserAgent,
-		RequestedModel:      requestedModel,
-		Model:               model,
-		MappedModel:         plan.MappedModel,
-		ModelMappingPattern: plan.ModelMappingPattern,
-		ModelMappingTarget:  plan.ModelMappingTarget,
-		ModelOverride:       plan.ModelOverride,
-		ModelRouteCaptured:  plan.ModelRouteCaptured,
+	requestMeta := providerConcurrencyRequestMeta{
+		ProviderName:               provider.Name,
+		UserAgent:                  requestUserAgent,
+		RequestedModel:             requestedModel,
+		Model:                      model,
+		MappedModel:                plan.MappedModel,
+		ModelMappingPattern:        plan.ModelMappingPattern,
+		ModelMappingTarget:         plan.ModelMappingTarget,
+		ModelOverride:              plan.ModelOverride,
+		ModelRouteCaptured:         plan.ModelRouteCaptured,
 		SessionPreferredProviderID: plan.SessionPreferredProviderID,
 		SessionPreferredProvider:   plan.SessionPreferredProvider,
 		SessionProviderRoute:       plan.SessionProviderRoute,
-		Parameters:          plan.Parameters,
-		Endpoint:            endpoint,
-		IsStream:            isStream,
-	})
+		Parameters:                 plan.Parameters,
+		Endpoint:                   endpoint,
+		IsStream:                   isStream,
+	}
+	prs.decorateSessionConcurrencyMeta(kind, bodyBytes, &requestMeta)
+	updateProviderSlotParameters, releaseProviderSlot, acquiredProviderSlot := prs.acquireProviderConcurrencySlot(kind, providerRefFromProvider(provider), providerConcurrencyLimit(provider), providerConcurrencyLimitEnabled, requestMeta)
 	if !acquiredProviderSlot {
 		return false, errProviderConcurrencyLimit
 	}
@@ -3444,30 +4356,30 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 
 	capturePayloadEnabled, sanitizePayloadEnabled := prs.resolveRequestLogPayloadCaptureAndSanitization()
 	requestLog := &ReqeustLog{
-		Platform:                  kind,
-		ProviderID:                providerRefFromProvider(provider),
-		Provider:                  provider.Name,
-		Model:                     model,
-		RequestedModel:            strings.TrimSpace(requestedModel),
-		MappedModel:               strings.TrimSpace(plan.MappedModel),
-		ModelMappingPattern:       strings.TrimSpace(plan.ModelMappingPattern),
-		ModelMappingTarget:        strings.TrimSpace(plan.ModelMappingTarget),
-		ModelOverride:             strings.TrimSpace(plan.ModelOverride),
-		ModelRouteCaptured:        plan.ModelRouteCaptured,
+		Platform:                   kind,
+		ProviderID:                 providerRefFromProvider(provider),
+		Provider:                   provider.Name,
+		Model:                      model,
+		RequestedModel:             strings.TrimSpace(requestedModel),
+		MappedModel:                strings.TrimSpace(plan.MappedModel),
+		ModelMappingPattern:        strings.TrimSpace(plan.ModelMappingPattern),
+		ModelMappingTarget:         strings.TrimSpace(plan.ModelMappingTarget),
+		ModelOverride:              strings.TrimSpace(plan.ModelOverride),
+		ModelRouteCaptured:         plan.ModelRouteCaptured,
 		SessionPreferredProviderID: strings.TrimSpace(plan.SessionPreferredProviderID),
 		SessionPreferredProvider:   strings.TrimSpace(plan.SessionPreferredProvider),
 		SessionProviderRoute:       strings.TrimSpace(plan.SessionProviderRoute),
-		ReasoningEffort:           plan.Reasoning.Effort,
-		ReasoningEffortSource:     plan.Reasoning.Source,
-		UserAgent:                 requestUserAgent,
-		IsStream:                  isStream,
-		CapturePayload:            capturePayloadEnabled,
-		SanitizePayload:           sanitizePayloadEnabled,
-		RequestStartedAt:          start,
-		ProviderAPIURL:            provider.APIURL,
-		ProviderAPIKey:            provider.APIKey,
-		ProviderAuthType:          provider.ConnectivityAuthType,
-		StreamCompactionRequested: kind == "codex" && isResponsesCompactionRequest(bodyBytes),
+		ReasoningEffort:            plan.Reasoning.Effort,
+		ReasoningEffortSource:      plan.Reasoning.Source,
+		UserAgent:                  requestUserAgent,
+		IsStream:                   isStream,
+		CapturePayload:             capturePayloadEnabled,
+		SanitizePayload:            sanitizePayloadEnabled,
+		RequestStartedAt:           start,
+		ProviderAPIURL:             provider.APIURL,
+		ProviderAPIKey:             provider.APIKey,
+		ProviderAuthType:           provider.ConnectivityAuthType,
+		StreamCompactionRequested:  kind == "codex" && isResponsesCompactionRequest(bodyBytes),
 	}
 	requestLog.streamCompletionRequired = kind == "claude" &&
 		isStream &&
@@ -4101,7 +5013,29 @@ func buildClaudeProviderResponseHooks(
 }
 
 func (prs *ProviderRelayService) newSessionAffinityToolResponseCollector(kind string, provider Provider, plan providerRequestPlan, userAgent string) *sessionAffinityToolResponseCollector {
-	return nil
+	if prs == nil || !prs.isSessionAffinityEnabled(kind) {
+		return nil
+	}
+	originalBody := plan.OriginalBodyBytes
+	if len(originalBody) == 0 {
+		originalBody = plan.BodyBytes
+	}
+	if len(originalBody) == 0 {
+		return nil
+	}
+	if identity := deriveRelaySessionIdentity(kind, originalBody); identity.NodeHash != "" {
+		return nil
+	}
+	if prs.deriveRelaySessionHash(kind, originalBody) != "" {
+		return nil
+	}
+	return &sessionAffinityToolResponseCollector{
+		prs:       prs,
+		kind:      strings.TrimSpace(kind),
+		provider:  provider,
+		userAgent: strings.TrimSpace(userAgent),
+		callIDs:   make(map[string]bool),
+	}
 }
 
 func (collector *sessionAffinityToolResponseCollector) hook(isStream bool) xrequest.ResponseHook {
@@ -5887,88 +6821,88 @@ func applyRequestLogCostResult(reqLog *ReqeustLog, result requestLogCostResult) 
 }
 
 type ReqeustLog struct {
-	ID                        int64   `json:"id"`
-	Platform                  string  `json:"platform"` // claude、codex 或 gemini
-	Model                     string  `json:"model"`
-	RequestedModel            string  `json:"requested_model,omitempty"`
-	MappedModel               string  `json:"mapped_model,omitempty"`
-	ModelMappingPattern       string  `json:"model_mapping_pattern,omitempty"`
-	ModelMappingTarget        string  `json:"model_mapping_target,omitempty"`
-	ModelOverride             string  `json:"model_override,omitempty"`
-	ModelRouteCaptured        bool    `json:"model_route_captured"`
+	ID                         int64   `json:"id"`
+	Platform                   string  `json:"platform"` // claude、codex 或 gemini
+	Model                      string  `json:"model"`
+	RequestedModel             string  `json:"requested_model,omitempty"`
+	MappedModel                string  `json:"mapped_model,omitempty"`
+	ModelMappingPattern        string  `json:"model_mapping_pattern,omitempty"`
+	ModelMappingTarget         string  `json:"model_mapping_target,omitempty"`
+	ModelOverride              string  `json:"model_override,omitempty"`
+	ModelRouteCaptured         bool    `json:"model_route_captured"`
 	SessionPreferredProviderID string  `json:"session_preferred_provider_id,omitempty"`
 	SessionPreferredProvider   string  `json:"session_preferred_provider,omitempty"`
 	SessionProviderRoute       string  `json:"session_provider_route,omitempty"`
-	ResponseModel             string  `json:"response_model,omitempty"`
-	ReasoningEffort           string  `json:"reasoning_effort,omitempty"`
-	ReasoningEffortSource     string  `json:"reasoning_effort_source,omitempty"`
-	UserAgent                 string  `json:"user_agent,omitempty"`
-	ProviderID                string  `json:"provider_id,omitempty"`
-	Provider                  string  `json:"provider"` // provider name
-	PriceSource               string  `json:"price_source,omitempty"`
-	HttpCode                  int     `json:"http_code"`
-	RequestOutcome            string  `json:"request_outcome,omitempty"`
-	OutcomeReason             string  `json:"outcome_reason,omitempty"`
-	InputTokens               int     `json:"input_tokens"`
-	OutputTokens              int     `json:"output_tokens"`
-	CacheCreateTokens         int     `json:"cache_create_tokens"`
-	Ephemeral5mTokens         int     `json:"ephemeral_5m_tokens"`
-	Ephemeral1hTokens         int     `json:"ephemeral_1h_tokens"`
-	CacheReadTokens           int     `json:"cache_read_tokens"`
-	ReasoningTokens           int     `json:"reasoning_tokens"`
-	IsStream                  bool    `json:"is_stream"`
-	DurationSec               float64 `json:"duration_sec"`
-	FirstTokenSec             float64 `json:"first_token_sec"`
-	ProxyPrepareMs            float64 `json:"proxy_prepare_ms"`
-	DNSMs                     float64 `json:"dns_ms"`
-	ConnectMs                 float64 `json:"connect_ms"`
-	TLSMs                     float64 `json:"tls_ms"`
-	UpstreamTTFBMs            float64 `json:"upstream_ttfb_ms"`
-	ProxyStreamDelayMs        float64 `json:"proxy_stream_delay_ms"`
-	ConnectionReused          bool    `json:"connection_reused"`
-	StreamLastEvent           string  `json:"stream_last_event,omitempty"`
-	StreamTerminalEvent       string  `json:"stream_terminal_event,omitempty"`
-	StreamErrorKind           string  `json:"stream_error_kind,omitempty"`
-	ErrorMessage              string  `json:"error_message,omitempty"`
-	ErrorSource               string  `json:"error_source,omitempty"`
-	StreamCompactionRequested bool    `json:"stream_compaction_requested"`
-	StreamCompactionObserved  bool    `json:"stream_compaction_observed"`
-	StreamBytes               int64   `json:"stream_bytes"`
-	UpstreamProtocol          string  `json:"upstream_protocol,omitempty"`
-	CreatedAt                 string  `json:"created_at"`
-	ErrorReadAt               string  `json:"error_read_at,omitempty"`
-	InputCost                 float64 `json:"input_cost"`
-	OutputCost                float64 `json:"output_cost"`
-	ReasoningCost             float64 `json:"reasoning_cost"`
-	CacheCreateCost           float64 `json:"cache_create_cost"`
-	CacheReadCost             float64 `json:"cache_read_cost"`
-	Ephemeral5mCost           float64 `json:"ephemeral_5m_cost"`
-	Ephemeral1hCost           float64 `json:"ephemeral_1h_cost"`
-	TotalCost                 float64 `json:"total_cost"`
-	GroupMultiplier           float64 `json:"group_multiplier"`
-	HasPricing                bool    `json:"has_pricing"`
-	MatchedPricingModel       string  `json:"matched_pricing_model,omitempty"`
-	EffectivePricingModel     string  `json:"effective_pricing_model,omitempty"`
-	ProviderPricingAvailable  bool    `json:"provider_pricing_available"`
-	ProviderQuotaType         int     `json:"provider_quota_type"`
-	ProviderInputUSDPerM      float64 `json:"provider_input_usd_per_m"`
-	ProviderOutputUSDPerM     float64 `json:"provider_output_usd_per_m"`
-	ProviderPerCallUnified    float64 `json:"provider_per_call_unified"`
-	ProviderPerCallInput      float64 `json:"provider_per_call_input"`
-	ProviderPerCallOutput     float64 `json:"provider_per_call_output"`
-	ProviderPerCallUnifiedSet bool    `json:"provider_per_call_unified_set"`
-	ProviderPerCallInputSet   bool    `json:"provider_per_call_input_set"`
-	ProviderPerCallOutputSet  bool    `json:"provider_per_call_output_set"`
-	RequestBody               string  `json:"request_body,omitempty"`
-	ResponseBody              string  `json:"response_body,omitempty"`
-	RequestBodyTruncated      bool    `json:"request_body_truncated"`
-	ResponseBodyTruncated     bool    `json:"response_body_truncated"`
-	PayloadBytes              int64   `json:"payload_bytes"`
-	PayloadCaptured           bool    `json:"payload_captured"`
-	DataSource                string  `json:"data_source,omitempty"`
-	SourceRecordID            string  `json:"source_record_id,omitempty"`
-	SessionID                 string  `json:"session_id,omitempty"`
-	DedupCore                 string  `json:"-"`
+	ResponseModel              string  `json:"response_model,omitempty"`
+	ReasoningEffort            string  `json:"reasoning_effort,omitempty"`
+	ReasoningEffortSource      string  `json:"reasoning_effort_source,omitempty"`
+	UserAgent                  string  `json:"user_agent,omitempty"`
+	ProviderID                 string  `json:"provider_id,omitempty"`
+	Provider                   string  `json:"provider"` // provider name
+	PriceSource                string  `json:"price_source,omitempty"`
+	HttpCode                   int     `json:"http_code"`
+	RequestOutcome             string  `json:"request_outcome,omitempty"`
+	OutcomeReason              string  `json:"outcome_reason,omitempty"`
+	InputTokens                int     `json:"input_tokens"`
+	OutputTokens               int     `json:"output_tokens"`
+	CacheCreateTokens          int     `json:"cache_create_tokens"`
+	Ephemeral5mTokens          int     `json:"ephemeral_5m_tokens"`
+	Ephemeral1hTokens          int     `json:"ephemeral_1h_tokens"`
+	CacheReadTokens            int     `json:"cache_read_tokens"`
+	ReasoningTokens            int     `json:"reasoning_tokens"`
+	IsStream                   bool    `json:"is_stream"`
+	DurationSec                float64 `json:"duration_sec"`
+	FirstTokenSec              float64 `json:"first_token_sec"`
+	ProxyPrepareMs             float64 `json:"proxy_prepare_ms"`
+	DNSMs                      float64 `json:"dns_ms"`
+	ConnectMs                  float64 `json:"connect_ms"`
+	TLSMs                      float64 `json:"tls_ms"`
+	UpstreamTTFBMs             float64 `json:"upstream_ttfb_ms"`
+	ProxyStreamDelayMs         float64 `json:"proxy_stream_delay_ms"`
+	ConnectionReused           bool    `json:"connection_reused"`
+	StreamLastEvent            string  `json:"stream_last_event,omitempty"`
+	StreamTerminalEvent        string  `json:"stream_terminal_event,omitempty"`
+	StreamErrorKind            string  `json:"stream_error_kind,omitempty"`
+	ErrorMessage               string  `json:"error_message,omitempty"`
+	ErrorSource                string  `json:"error_source,omitempty"`
+	StreamCompactionRequested  bool    `json:"stream_compaction_requested"`
+	StreamCompactionObserved   bool    `json:"stream_compaction_observed"`
+	StreamBytes                int64   `json:"stream_bytes"`
+	UpstreamProtocol           string  `json:"upstream_protocol,omitempty"`
+	CreatedAt                  string  `json:"created_at"`
+	ErrorReadAt                string  `json:"error_read_at,omitempty"`
+	InputCost                  float64 `json:"input_cost"`
+	OutputCost                 float64 `json:"output_cost"`
+	ReasoningCost              float64 `json:"reasoning_cost"`
+	CacheCreateCost            float64 `json:"cache_create_cost"`
+	CacheReadCost              float64 `json:"cache_read_cost"`
+	Ephemeral5mCost            float64 `json:"ephemeral_5m_cost"`
+	Ephemeral1hCost            float64 `json:"ephemeral_1h_cost"`
+	TotalCost                  float64 `json:"total_cost"`
+	GroupMultiplier            float64 `json:"group_multiplier"`
+	HasPricing                 bool    `json:"has_pricing"`
+	MatchedPricingModel        string  `json:"matched_pricing_model,omitempty"`
+	EffectivePricingModel      string  `json:"effective_pricing_model,omitempty"`
+	ProviderPricingAvailable   bool    `json:"provider_pricing_available"`
+	ProviderQuotaType          int     `json:"provider_quota_type"`
+	ProviderInputUSDPerM       float64 `json:"provider_input_usd_per_m"`
+	ProviderOutputUSDPerM      float64 `json:"provider_output_usd_per_m"`
+	ProviderPerCallUnified     float64 `json:"provider_per_call_unified"`
+	ProviderPerCallInput       float64 `json:"provider_per_call_input"`
+	ProviderPerCallOutput      float64 `json:"provider_per_call_output"`
+	ProviderPerCallUnifiedSet  bool    `json:"provider_per_call_unified_set"`
+	ProviderPerCallInputSet    bool    `json:"provider_per_call_input_set"`
+	ProviderPerCallOutputSet   bool    `json:"provider_per_call_output_set"`
+	RequestBody                string  `json:"request_body,omitempty"`
+	ResponseBody               string  `json:"response_body,omitempty"`
+	RequestBodyTruncated       bool    `json:"request_body_truncated"`
+	ResponseBodyTruncated      bool    `json:"response_body_truncated"`
+	PayloadBytes               int64   `json:"payload_bytes"`
+	PayloadCaptured            bool    `json:"payload_captured"`
+	DataSource                 string  `json:"data_source,omitempty"`
+	SourceRecordID             string  `json:"source_record_id,omitempty"`
+	SessionID                  string  `json:"session_id,omitempty"`
+	DedupCore                  string  `json:"-"`
 
 	CapturePayload  bool `json:"-"`
 	SanitizePayload bool `json:"-"`
@@ -6415,28 +7349,28 @@ func resolveProviderModelOverride(provider Provider) (string, bool) {
 }
 
 type providerRequestPlan struct {
-	OriginalBodyBytes          []byte
-	BodyBytes                  []byte
-	ContinuationRetryBodyBytes []byte
-	EffectiveModel             string
-	MappedModel                string
-	ModelMappingPattern        string
-	ModelMappingTarget         string
-	ModelMappingSupports1M     bool
-	ModelOverride              string
-	ModelRouteCaptured         bool
-	SessionPreferredProviderID string
-	SessionPreferredProvider   string
-	SessionProviderRoute       string
-	SessionPreferenceHash      string
+	OriginalBodyBytes           []byte
+	BodyBytes                   []byte
+	ContinuationRetryBodyBytes  []byte
+	EffectiveModel              string
+	MappedModel                 string
+	ModelMappingPattern         string
+	ModelMappingTarget          string
+	ModelMappingSupports1M      bool
+	ModelOverride               string
+	ModelRouteCaptured          bool
+	SessionPreferredProviderID  string
+	SessionPreferredProvider    string
+	SessionProviderRoute        string
+	SessionPreferenceHash       string
 	SessionPreferenceGeneration uint64
-	Reasoning                  providerRequestReasoningMetadata
-	Parameters                 []ProviderConcurrencyRequestParameter
-	ParameterProtocol          string
-	EffectiveEndpoint          string
-	PromptCacheKey             string
-	ContinuationSessionKey     string
-	PreviousResponseID         string
+	Reasoning                   providerRequestReasoningMetadata
+	Parameters                  []ProviderConcurrencyRequestParameter
+	ParameterProtocol           string
+	EffectiveEndpoint           string
+	PromptCacheKey              string
+	ContinuationSessionKey      string
+	PreviousResponseID          string
 }
 
 type providerRequestReasoningMetadata struct {
@@ -8156,14 +9090,23 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 		blacklistEnabled := prs.blacklistService.ShouldUseFixedMode()
 		roundRobinEnabled := prs.isRoundRobinEnabled()
 		providerConcurrencyLimitEnabled := prs.isProviderConcurrencyLimitEnabled("gemini")
-		sessionHash := prs.deriveRelaySessionHash("gemini", bodyBytes)
+		sessionIdentity := deriveRelaySessionIdentity("gemini", bodyBytes)
+		sessionHash := sessionIdentity.NodeHash
+		if sessionHash == "" {
+			sessionHash = prs.deriveRelaySessionHash("gemini", bodyBytes)
+			sessionIdentity.NodeHash = sessionHash
+		}
+		sessionAffinityEnabled := prs.isSessionAffinityEnabled("gemini")
+		if sessionAffinityEnabled && sessionIdentity.NodeHash != "" {
+			prs.rememberSessionRelation("gemini", sessionIdentity)
+			prs.inheritSessionBinding("gemini", sessionIdentity.NodeHash)
+		}
 		originalSessionBinding := prs.getSessionBindingSnapshot("gemini", sessionHash)
 		if originalSessionBinding != nil && !prs.isGeminiProviderSessionBindingUsable(activeProviders, originalSessionBinding) {
 			prs.releaseSessionBinding("gemini", sessionHash)
 			originalSessionBinding = nil
 		}
-		sessionAffinityEnabled := false
-		sessionCanBind := false
+		sessionCanBind := sessionAffinityEnabled && sessionIdentity.NodeHash != ""
 		var sessionAttemptID int64
 
 		// 【拉黑模式】：同 Provider 重试直到被拉黑，然后切换到下一个 Provider
@@ -8220,7 +9163,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 						}
 						geminiAttempts++
 						ok, err, responseWritten := prs.forwardGeminiRequest(c, &provider, endpoint, bodyBytes, currentBodyBytes, isStream, requestLog, pricingSnapshot, providerConcurrencyLimitEnabled)
-						prs.finishSessionProviderRequest("gemini", sessionHash)
+						prs.finishSessionProviderRequest("gemini", sessionHash, providerRefFromGeminiProvider(provider))
 						if ok {
 							prs.confirmSessionProviderBinding("gemini", sessionHash, sessionAttemptID)
 							_ = prs.blacklistService.RecordSuccessByID("gemini", providerRefFromGeminiProvider(provider), provider.Name)
@@ -8460,7 +9403,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 				}
 				geminiAttempts++
 				ok, err, responseWritten := prs.forwardGeminiRequest(c, &provider, endpoint, bodyBytes, currentBodyBytes, isStream, requestLog, pricingSnapshot, providerConcurrencyLimitEnabled)
-				prs.finishSessionProviderRequest("gemini", sessionHash)
+				prs.finishSessionProviderRequest("gemini", sessionHash, providerRefFromGeminiProvider(provider))
 				if ok {
 					prs.confirmSessionProviderBinding("gemini", sessionHash, sessionAttemptID)
 					_ = prs.blacklistService.RecordSuccessByID("gemini", providerRefFromGeminiProvider(provider), provider.Name)
@@ -8783,14 +9726,16 @@ func (prs *ProviderRelayService) forwardGeminiRequest(
 		providerRequestProtocolGemini,
 		providerRequestProtocolGemini,
 	)
-	_, releaseProviderSlot, acquiredProviderSlot := prs.acquireProviderConcurrencySlot("gemini", providerRefFromGeminiProvider(*provider), geminiProviderConcurrencyLimit(*provider), providerConcurrencyLimitEnabled, providerConcurrencyRequestMeta{
+	requestMeta := providerConcurrencyRequestMeta{
 		ProviderName: provider.Name,
 		UserAgent:    requestLog.UserAgent,
 		Model:        concurrencyModel,
 		Parameters:   parameters,
 		Endpoint:     endpoint,
 		IsStream:     isStream,
-	})
+	}
+	prs.decorateSessionConcurrencyMeta("gemini", originalBodyBytes, &requestMeta)
+	_, releaseProviderSlot, acquiredProviderSlot := prs.acquireProviderConcurrencySlot("gemini", providerRefFromGeminiProvider(*provider), geminiProviderConcurrencyLimit(*provider), providerConcurrencyLimitEnabled, requestMeta)
 	if !acquiredProviderSlot {
 		return false, errProviderConcurrencyLimit, false
 	}
@@ -9056,14 +10001,23 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 		blacklistEnabled := prs.blacklistService.ShouldUseFixedMode()
 		roundRobinEnabled := prs.isRoundRobinEnabled()
 		providerConcurrencyLimitEnabled := prs.isProviderConcurrencyLimitEnabled(kind)
-		sessionHash := prs.deriveRelaySessionHash(kind, bodyBytes)
+		sessionIdentity := deriveRelaySessionIdentity(kind, bodyBytes)
+		sessionHash := sessionIdentity.NodeHash
+		if sessionHash == "" {
+			sessionHash = prs.deriveRelaySessionHash(kind, bodyBytes)
+			sessionIdentity.NodeHash = sessionHash
+		}
+		sessionAffinityEnabled := prs.isSessionAffinityEnabled(kind)
+		if sessionAffinityEnabled && sessionIdentity.NodeHash != "" {
+			prs.rememberSessionRelation(kind, sessionIdentity)
+			prs.inheritSessionBinding(kind, sessionIdentity.NodeHash)
+		}
 		originalSessionBinding := prs.getSessionBindingSnapshot(kind, sessionHash)
 		if originalSessionBinding != nil && !prs.isProviderSessionBindingUsable(kind, active, originalSessionBinding) {
 			prs.releaseSessionBinding(kind, sessionHash)
 			originalSessionBinding = nil
 		}
-		sessionAffinityEnabled := false
-		sessionCanBind := false
+		sessionCanBind := sessionAffinityEnabled && sessionIdentity.NodeHash != ""
 		var sessionAttemptID int64
 
 		// 【拉黑模式】：同 Provider 重试直到被拉黑，然后切换到下一个 Provider
@@ -9114,7 +10068,7 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 						startTime := time.Now()
 						ok, err := prs.forwardRequestWithPlan(c, kind, provider, plan.EffectiveEndpoint, query, clientHeaders, plan.BodyBytes, isStream, plan.EffectiveModel, requestedModel, plan, providerConcurrencyLimitEnabled)
 						duration := time.Since(startTime)
-						prs.finishSessionProviderRequest(kind, sessionHash)
+						prs.finishSessionProviderRequest(kind, sessionHash, providerRefFromProvider(provider))
 						if ok {
 							prs.confirmSessionProviderBinding(kind, sessionHash, sessionAttemptID)
 							if err := prs.blacklistService.RecordSuccessByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
@@ -9353,7 +10307,7 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 				startTime := time.Now()
 				ok, err := prs.forwardRequestWithPlan(c, kind, provider, plan.EffectiveEndpoint, query, clientHeaders, plan.BodyBytes, isStream, plan.EffectiveModel, requestedModel, plan, providerConcurrencyLimitEnabled)
 				duration := time.Since(startTime)
-				prs.finishSessionProviderRequest(kind, sessionHash)
+				prs.finishSessionProviderRequest(kind, sessionHash, providerRefFromProvider(provider))
 				if ok {
 					prs.confirmSessionProviderBinding(kind, sessionHash, sessionAttemptID)
 					if err := prs.blacklistService.RecordSuccessByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {

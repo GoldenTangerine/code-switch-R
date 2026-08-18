@@ -40,11 +40,15 @@
           :active-proxy-busy="activeProxyBusy"
           :active-provider-concurrency-limit-state="activeProviderConcurrencyLimitState"
           :provider-concurrency-limit-busy="providerConcurrencyLimitBusy"
+          :show-session-affinity-toggle="shouldShowSessionAffinityToggle(activeTab)"
+          :active-session-affinity-state="activeSessionAffinityState"
+          :session-affinity-busy="sessionAffinityBusy"
           :refreshing="refreshing"
           :tab-statuses="tabStatuses"
           @change="onTabChange"
           @toggle-proxy="onProxyToggle"
           @toggle-provider-concurrency-limit="onProviderConcurrencyLimitToggle"
+          @toggle-session-affinity="onSessionAffinityToggle"
           @create="openCreateModal"
           @refresh="refreshAllData"
         />
@@ -139,7 +143,13 @@
         :status="concurrencyDetailsModalStatus"
         :resolved-theme="resolvedTheme"
         :show-model-route-details="concurrencyDetailsModalPlatform === 'claude' && claudeModelRoutingEnabled"
+        :session-affinity-enabled="activeSessionAffinityState"
+        :switch-candidates="sessionSwitchCandidates"
+        :switch-loading="sessionSwitchLoading"
+        :switch-completed-token="sessionSwitchCompletedToken"
         @close="closeConcurrencyDetails"
+        @request-session-switch="loadSessionSwitchCandidates"
+        @switch-session-provider="switchSessionProvider"
       />
 
       <ProviderEditModal
@@ -259,7 +269,7 @@ import { shouldShowProviderProxyToggle } from './utils/providerProxyToggleVisibi
 import { shouldUseLastUsedProviderForTool } from './utils/lastUsedProvider'
 import { getDefaultHostedProviderRef, isHostedRouteActive } from './utils/providerRoutingState'
 import { hasProviderQuotaQueryType } from '../../utils/providerQuotaQuery'
-import type { CustomCliToolDraft, MainTabStatus, ProviderCardViewModel, ProviderConcurrencyStatusView, ProviderTab, VendorForm } from './types'
+import type { CustomCliToolDraft, MainTabStatus, ProviderCardViewModel, ProviderConcurrencyStatusView, ProviderSessionSwitchCandidateView, ProviderTab, VendorForm } from './types'
 import type { AutomationCard } from '../../data/cards'
 import {
   resumeProviderQuotaAutomation,
@@ -288,6 +298,9 @@ const concurrencyStatuses = ref<ProviderConcurrencyStatusView[]>([])
 const concurrencyDetailsModalOpen = ref(false)
 const concurrencyDetailsModalProvider = ref<AutomationCard | null>(null)
 const concurrencyDetailsModalPlatform = ref<RequestLogPlatform | null>(null)
+const sessionSwitchCandidates = ref<ProviderSessionSwitchCandidateView[]>([])
+const sessionSwitchLoading = ref(false)
+const sessionSwitchCompletedToken = ref(0)
 const markingProviderLogsReadKeys = ref<Set<string>>(new Set())
 const {
   hasUpdateAvailable,
@@ -693,8 +706,11 @@ const {
   providerConcurrencyLimitStates,
   activeProviderConcurrencyLimitState,
   providerConcurrencyLimitBusy,
+  activeSessionAffinityState,
+  sessionAffinityBusy,
   onProxyToggle,
   onProviderConcurrencyLimitToggle,
+  onSessionAffinityToggle,
   refreshing,
   refreshAllData,
   currentProxyLabel,
@@ -841,6 +857,10 @@ function resolveProviderConcurrencyLimitKey(tab: ProviderTab): string {
     : tab
 }
 
+function shouldShowSessionAffinityToggle(tab: ProviderTab): boolean {
+  return tab === 'claude' || tab === 'codex' || tab === 'gemini' || (tab === 'others' && Boolean(selectedToolId.value))
+}
+
 const tabStatuses = computed<Partial<Record<ProviderTab, MainTabStatus>>>(() => {
   const result: Partial<Record<ProviderTab, MainTabStatus>> = {}
 
@@ -902,6 +922,8 @@ const openConcurrencyDetails = (card: AutomationCard) => {
   concurrencyDetailsModalProvider.value = card
   concurrencyDetailsModalPlatform.value = activeConcurrencyPlatform.value as RequestLogPlatform
   concurrencyDetailsModalOpen.value = true
+  sessionSwitchCandidates.value = []
+  sessionSwitchCompletedToken.value = 0
   void loadConcurrencyStatuses()
 }
 
@@ -909,6 +931,45 @@ const closeConcurrencyDetails = () => {
   concurrencyDetailsModalOpen.value = false
   concurrencyDetailsModalProvider.value = null
   concurrencyDetailsModalPlatform.value = null
+  sessionSwitchCandidates.value = []
+}
+
+const loadSessionSwitchCandidates = async (sessionNumber: number) => {
+  if (!concurrencyDetailsModalPlatform.value || !activeSessionAffinityState.value) return
+  sessionSwitchLoading.value = true
+  try {
+    const result = await Call.ByName(
+      'codeswitch/services.ProviderConcurrencyService.GetSessionSwitchCandidates',
+      concurrencyDetailsModalPlatform.value,
+      sessionNumber,
+    )
+    sessionSwitchCandidates.value = Array.isArray(result) ? result as ProviderSessionSwitchCandidateView[] : []
+  } catch (error) {
+    sessionSwitchCandidates.value = []
+    showToast(extractErrorMessage(error), 'error')
+  } finally {
+    sessionSwitchLoading.value = false
+  }
+}
+
+const switchSessionProvider = async (sessionNumber: number, providerId: string) => {
+  if (!concurrencyDetailsModalPlatform.value) return
+  sessionSwitchLoading.value = true
+  try {
+    const result = await Call.ByName(
+      'codeswitch/services.ProviderConcurrencyService.SwitchSessionProvider',
+      concurrencyDetailsModalPlatform.value,
+      sessionNumber,
+      providerId,
+    ) as { providerName?: string }
+    showToast(t('components.main.concurrencyDetails.switchSuccess', { provider: result?.providerName || providerId }), 'success')
+    sessionSwitchCompletedToken.value++
+    await loadConcurrencyStatuses()
+  } catch (error) {
+    showToast(t('components.main.concurrencyDetails.switchFailed', { error: extractErrorMessage(error) }), 'error')
+  } finally {
+    sessionSwitchLoading.value = false
+  }
 }
 
 const getConcurrencyStatusForCard = (card: AutomationCard): ProviderConcurrencyStatusView | undefined => {

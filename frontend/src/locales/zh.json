@@ -467,6 +467,13 @@
         "tooltipOn": "已按供应商并发上限限流",
         "tooltipOff": "未开启，仅显示实时并发"
       },
+      "sessionAffinityToggle": {
+        "label": "会话粘滞",
+        "statusOn": "已开启",
+        "statusOff": "未开启",
+        "tooltipOn": "同一会话优先使用同一供应商",
+        "tooltipOff": "关闭后恢复原有路由"
+      },
       "customCli": {
         "selectToolFirst": "请先选择一个 CLI 工具",
         "noTools": "暂无自定义 CLI 工具",
@@ -885,6 +892,8 @@
           "icon": "图标",
           "enabled": "启用状态",
           "providerConcurrencyLimit": "实时并发上限",
+          "sessionMaxSessions": "会话容量",
+          "sessionTTLMinutes": "会话空闲释放（分钟）",
           "level": "优先级分组",
           "availabilityMonitor": "可用性监控",
           "connectivityAutoBlacklist": "失败自动拉黑",
@@ -993,6 +1002,8 @@
         "hints": {
           "level": "数字越小优先级越高，Level 1 会被优先尝试，失败后依次尝试 Level 2、Level 3 等",
           "providerConcurrencyLimit": "留空表示不限制并发；设为 0 表示满载；超过上限后自动尝试下一个供应商。",
+          "sessionMaxSessions": "同一供应商最多承载的会话数，默认 5。",
+          "sessionTTLMinutes": "会话空闲超过该时间后释放，默认 30 分钟。",
           "apiEndpoint": "覆盖平台默认端点。留空使用默认（claude: /v1/messages, codex: /responses）。GLM 模型请使用 /v1/chat/completions",
           "advancedOptions": "默认使用 Anthropic Messages 和 ANTHROPIC_AUTH_TOKEN。",
           "apiFormat": "选择供应商 API 的输入格式",
@@ -1337,6 +1348,21 @@
         "routeUnchanged": "本次请求未发生模型改写",
         "routeUnavailable": "该条历史记录未记录模型路由信息",
         "activeRouteUnavailable": "当前连接未记录模型路由信息"
+        ,"sessionNumber": "会话 #{number}",
+        "rootSession": "主会话",
+        "childSession": "子会话",
+        "parentSession": "父会话 #{number}",
+        "inheritedSession": "继承主会话",
+        "sessionUnavailable": "当前连接未识别到可粘滞会话",
+        "switchProvider": "切换供应商",
+        "switchCandidates": "可用供应商",
+        "currentProvider": "当前供应商",
+        "switchUnavailable": "暂不可用",
+        "loadingCandidates": "正在加载供应商",
+        "switchReason": "原因：{reason}",
+        "switchSuccess": "已切换到 {provider}",
+        "switchFailed": "切换失败：{error}",
+        "stickyDisabled": "请先开启会话粘滞"
       },
       "errors": {
         "loadAppSettingsFailed": "加载应用设置失败",

@@ -120,6 +120,18 @@ export const normalizeProviderConcurrencyLimit = (value: unknown): number | unde
   return Math.min(999, Math.floor(numeric))
 }
 
+export const normalizeSessionMaxSessions = (value: unknown): number => {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric) || numeric < 1) return 5
+  return Math.min(999, Math.floor(numeric))
+}
+
+export const normalizeSessionTTLMinutes = (value: unknown): number => {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric) || numeric < 1) return 30
+  return Math.min(1440, Math.floor(numeric))
+}
+
 
 export const resolvePersistedAnthropicCacheTTL = (
   tabId: ProviderTab,
@@ -181,6 +193,8 @@ export const createDefaultVendorForm = (
   level: 1,
   hideLogBadge: false,
   providerConcurrencyLimit: undefined,
+  sessionMaxSessions: 5,
+  sessionTTLMinutes: 30,
   enabled: true,
   apiFormat: platform === 'claude' ? 'anthropic' : undefined,
   anthropicCacheTTL: '',
@@ -240,6 +254,8 @@ export const createVendorFormFromCard = (
   level: card.level || 1,
   hideLogBadge: card.hideLogBadge === true,
   providerConcurrencyLimit: card.providerConcurrencyLimit ?? undefined,
+  sessionMaxSessions: normalizeSessionMaxSessions(card.sessionMaxSessions),
+  sessionTTLMinutes: normalizeSessionTTLMinutes(card.sessionTTLMinutes),
   enabled: card.quotaAutoDisabled ? true : card.enabled,
   quotaAutoDisabled: card.quotaAutoDisabled === true,
   quotaAutoDisablePaused: card.quotaAutoDisablePaused === true,
@@ -354,6 +370,8 @@ export const buildNormalizedVendorForm = ({
     level: form.level || 1,
     hideLogBadge: form.hideLogBadge === true,
     providerConcurrencyLimit: normalizeProviderConcurrencyLimit(form.providerConcurrencyLimit),
+    sessionMaxSessions: normalizeSessionMaxSessions(form.sessionMaxSessions),
+    sessionTTLMinutes: normalizeSessionTTLMinutes(form.sessionTTLMinutes),
     enabled: persistedEnabled,
     quotaAutoDisabled: preserveAutoDisabled,
     quotaAutoDisablePaused: preservePaused,
@@ -433,6 +451,8 @@ export const buildPersistedProviderFieldsFromForm = (
     level: normalizeLevel(form.level),
     hideLogBadge: form.hideLogBadge === true,
     providerConcurrencyLimit: normalizeProviderConcurrencyLimit(form.providerConcurrencyLimit),
+    sessionMaxSessions: normalizeSessionMaxSessions(form.sessionMaxSessions),
+    sessionTTLMinutes: normalizeSessionTTLMinutes(form.sessionTTLMinutes),
     enabled: persistedEnabled,
     quotaAutoDisabled: preserveAutoDisabled,
     quotaAutoDisablePaused: preservePaused,

@@ -128,6 +128,7 @@ export type AppSettings = {
   unify_codex_session_history: boolean
   unify_codex_migrate_existing: boolean
   provider_concurrency_limits: Record<string, boolean>
+  session_affinity_enabled: Record<string, boolean>
   provider_quota_query_preset_codes: Record<string, string>
   provider_quota_query_presets: ProviderQuotaQueryPresetGroups
   provider_quota_auto_disable_enabled: boolean
@@ -204,6 +205,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   unify_codex_session_history: false,
   unify_codex_migrate_existing: false,
   provider_concurrency_limits: {},
+  session_affinity_enabled: {},
   provider_quota_query_preset_codes: {},
   provider_quota_query_presets: {},
   provider_quota_auto_disable_enabled: false,
@@ -219,6 +221,7 @@ type AppSettingsResponse = Partial<AppSettings> & {
   budget_quota_used_adjustments_codex?: unknown
   budget_quota_settings_codex?: unknown
   provider_concurrency_limits?: unknown
+  session_affinity_enabled?: unknown
   provider_quota_query_preset_codes?: unknown
   provider_quota_query_presets?: unknown
 }
@@ -391,6 +394,7 @@ const normalizeAppSettingsResponse = (value: unknown): AppSettings => {
       refreshMonthDay: data?.budget_refresh_month_day_codex,
     }),
     provider_concurrency_limits: normalizeBooleanMap(data?.provider_concurrency_limits),
+    session_affinity_enabled: normalizeBooleanMap(data?.session_affinity_enabled),
     provider_quota_query_preset_codes: normalizedProviderQuotaQueryPresetCodes,
     provider_quota_query_presets: normalizeProviderQuotaQueryPresetGroups(
       data?.provider_quota_query_presets,
@@ -444,6 +448,7 @@ const serializeAppSettings = (settings: AppSettings) => {
     budget_refresh_month_day_codex: budgetLegacyCodex.refreshMonthDay,
     home_provider_tabs: normalizeHomeProviderTabs(settings.home_provider_tabs),
     provider_concurrency_limits: normalizeBooleanMap(settings.provider_concurrency_limits),
+    session_affinity_enabled: normalizeBooleanMap(settings.session_affinity_enabled),
     provider_quota_query_preset_codes: normalizeProviderQuotaQueryPresetCodes(
       settings.provider_quota_query_preset_codes,
     ),

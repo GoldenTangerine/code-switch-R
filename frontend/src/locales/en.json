@@ -466,6 +466,13 @@
         "tooltipOn": "Limiting by each provider cap",
         "tooltipOff": "Off · live concurrency only"
       },
+      "sessionAffinityToggle": {
+        "label": "Sticky session",
+        "statusOn": "Enabled",
+        "statusOff": "Disabled",
+        "tooltipOn": "Keep each session on the same provider",
+        "tooltipOff": "Restore the existing routing behavior"
+      },
       "customCli": {
         "selectToolFirst": "Please select a CLI tool first",
         "noTools": "No custom CLI tools yet",
@@ -884,6 +891,8 @@
           "icon": "Icon",
           "enabled": "Enabled",
           "providerConcurrencyLimit": "Concurrency limit",
+          "sessionMaxSessions": "Session capacity",
+          "sessionTTLMinutes": "Idle release (minutes)",
           "level": "Priority Level",
           "availabilityMonitor": "Availability Monitoring",
           "connectivityAutoBlacklist": "Auto-Blacklist on Failure",
@@ -992,6 +1001,8 @@
         "hints": {
           "level": "Lower numbers = higher priority. Level 1 providers are tried first, then Level 2, etc.",
           "providerConcurrencyLimit": "Leave empty for unlimited concurrency. Set to 0 for full capacity. Overflow attempts use the next provider.",
+          "sessionMaxSessions": "Maximum sessions on this provider. Default: 5.",
+          "sessionTTLMinutes": "Release the session after this idle period. Default: 30 minutes.",
           "apiEndpoint": "Override platform default endpoint. Leave blank for default (claude: /v1/messages, codex: /responses). For GLM models use /v1/chat/completions",
           "advancedOptions": "Defaults to Anthropic Messages and ANTHROPIC_AUTH_TOKEN.",
           "apiFormat": "Select the input format for the provider's API",
@@ -1336,6 +1347,21 @@
         "routeUnchanged": "The model was not rewritten for this request",
         "routeUnavailable": "Model route details were not recorded for this history entry",
         "activeRouteUnavailable": "Model route details were not recorded for this connection"
+        ,"sessionNumber": "Session #{number}",
+        "rootSession": "Root session",
+        "childSession": "Child session",
+        "parentSession": "Parent #{number}",
+        "inheritedSession": "Inherited from root",
+        "sessionUnavailable": "No sticky session was identified for this connection",
+        "switchProvider": "Switch provider",
+        "switchCandidates": "Available providers",
+        "currentProvider": "Current provider",
+        "switchUnavailable": "Unavailable",
+        "loadingCandidates": "Loading providers",
+        "switchReason": "Reason: {reason}",
+        "switchSuccess": "Switched to {provider}",
+        "switchFailed": "Switch failed: {error}",
+        "stickyDisabled": "Enable sticky session first"
       },
       "errors": {
         "loadAppSettingsFailed": "Failed to load application settings",

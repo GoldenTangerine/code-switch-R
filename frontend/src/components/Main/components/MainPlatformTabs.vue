@@ -123,6 +123,28 @@
         </div>
       </div>
 
+      <div v-if="showSessionAffinityToggle" class="relay-toggle relay-toggle--concurrency" :aria-label="t('components.main.sessionAffinityToggle.label')">
+        <div class="relay-switch">
+          <span class="relay-toggle-caption">{{ t('components.main.sessionAffinityToggle.label') }}</span>
+          <button
+            type="button"
+            class="relay-toggle-switch concurrency-limit-toggle"
+            :class="{ 'is-active': activeSessionAffinityState, 'is-busy': sessionAffinityBusy }"
+            role="switch"
+            :aria-checked="activeSessionAffinityState"
+            :aria-label="`${t('components.main.sessionAffinityToggle.label')} · ${activeSessionAffinityState ? t('components.main.sessionAffinityToggle.statusOn') : t('components.main.sessionAffinityToggle.statusOff')}`"
+            :disabled="sessionAffinityBusy"
+            @click="$emit('toggle-session-affinity')"
+          >
+            <span class="relay-toggle-switch__thumb"><span class="relay-toggle-switch__dot"></span></span>
+            <span class="sr-only">{{ activeSessionAffinityState ? t('components.main.sessionAffinityToggle.statusOn') : t('components.main.sessionAffinityToggle.statusOff') }}</span>
+          </button>
+          <span class="relay-tooltip-content">
+            {{ activeSessionAffinityState ? t('components.main.sessionAffinityToggle.tooltipOn') : t('components.main.sessionAffinityToggle.tooltipOff') }}
+          </span>
+        </div>
+      </div>
+
       <button
         class="ghost-icon"
         :data-tooltip="t('components.main.tabs.addCard')"
@@ -182,10 +204,14 @@ const props = withDefaults(defineProps<{
   activeProxyBusy: boolean
   activeProviderConcurrencyLimitState: boolean
   providerConcurrencyLimitBusy: boolean
+  showSessionAffinityToggle?: boolean
+  activeSessionAffinityState: boolean
+  sessionAffinityBusy: boolean
   refreshing: boolean
   tabStatuses?: Partial<Record<ProviderTab, MainTabStatus>>
 }>(), {
   showProxyToggle: true,
+  showSessionAffinityToggle: true,
   tabStatuses: () => ({}),
 })
 
@@ -193,6 +219,7 @@ defineEmits<{
   change: [index: number]
   'toggle-proxy': []
   'toggle-provider-concurrency-limit': []
+  'toggle-session-affinity': []
   create: []
   refresh: []
 }>()

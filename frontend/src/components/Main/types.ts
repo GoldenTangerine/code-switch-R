@@ -192,6 +192,23 @@ export type ProviderConcurrencyStatusView = {
   requests?: ProviderConcurrencyRequestView[]
 }
 
+export type ProviderSessionSwitchCandidateView = {
+  providerId: string
+  providerName: string
+  level: number
+  current: boolean
+  available: boolean
+  switchable: boolean
+  boundSessions: number
+  activeRequests: number
+  maxSessions: number
+  ttlMinutes: number
+  loadRate: number
+  requestedModel?: string
+  modelCompatible: boolean
+  reason?: string
+}
+
 export type ProviderConcurrencyRequestView = {
   id: string
   platform: string
@@ -208,6 +225,12 @@ export type ProviderConcurrencyRequestView = {
   sessionPreferredProviderId?: string
   sessionPreferredProvider?: string
   sessionProviderRoute?: 'preferred' | 'fallback' | ''
+  sessionNumber?: number
+  rootSessionNumber?: number
+  parentSessionNumber?: number
+  sessionRole?: string
+  sessionSwitchable?: boolean
+  sessionManualOverride?: boolean
   parameters?: ProviderConcurrencyRequestParameterView[]
   endpoint?: string
   isStream?: boolean

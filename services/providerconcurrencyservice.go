@@ -9,6 +9,8 @@
  */
 package services
 
+import "fmt"
+
 type ProviderConcurrencyService struct {
 	relay *ProviderRelayService
 }
@@ -22,4 +24,25 @@ func (s *ProviderConcurrencyService) GetProviderConcurrencyStatuses(platform str
 		return []ProviderConcurrencyStatus{}
 	}
 	return s.relay.GetProviderConcurrencyStatuses(platform)
+}
+
+func (s *ProviderConcurrencyService) GetSessionSwitchCandidates(platform string, sessionNumber int64) []ProviderSessionSwitchCandidate {
+	if s == nil || s.relay == nil {
+		return []ProviderSessionSwitchCandidate{}
+	}
+	return s.relay.GetSessionSwitchCandidates(platform, sessionNumber)
+}
+
+func (s *ProviderConcurrencyService) SwitchSessionProvider(platform string, sessionNumber int64, targetProviderID string) (SessionSwitchResult, error) {
+	if s == nil || s.relay == nil {
+		return SessionSwitchResult{}, fmt.Errorf("供应商服务未初始化")
+	}
+	return s.relay.SwitchSessionProvider(platform, sessionNumber, targetProviderID)
+}
+
+func (s *ProviderConcurrencyService) ClearSessionAffinity(platform string) {
+	if s == nil || s.relay == nil {
+		return
+	}
+	s.relay.ClearSessionAffinity(platform)
 }

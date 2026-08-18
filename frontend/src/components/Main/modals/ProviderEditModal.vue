@@ -1079,6 +1079,18 @@
           <span class="field-hint">{{ t('components.main.form.hints.providerConcurrencyLimit') }}</span>
         </div>
 
+        <div v-if="tabId !== 'opencode'" class="form-field">
+          <span>{{ t('components.main.form.labels.sessionMaxSessions') }}</span>
+          <BaseInput v-model="form.sessionMaxSessions" type="number" min="1" max="999" step="1" />
+          <span class="field-hint">{{ t('components.main.form.hints.sessionMaxSessions') }}</span>
+        </div>
+
+        <div v-if="tabId !== 'opencode'" class="form-field">
+          <span>{{ t('components.main.form.labels.sessionTTLMinutes') }}</span>
+          <BaseInput v-model="form.sessionTTLMinutes" type="number" min="1" max="1440" step="1" />
+          <span class="field-hint">{{ t('components.main.form.hints.sessionTTLMinutes') }}</span>
+        </div>
+
         <div v-if="supportsProviderModelRouting" class="form-field">
           <ModelMappingEditor
             :key="cliConfigEditorKey"

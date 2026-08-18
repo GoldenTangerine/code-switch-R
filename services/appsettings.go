@@ -114,6 +114,7 @@ type AppSettings struct {
 	UnifyCodexSessionHistory         bool                                     `json:"unify_codex_session_history"`
 	UnifyCodexMigrateExisting        bool                                     `json:"unify_codex_migrate_existing"`
 	ProviderConcurrencyLimits        map[string]bool                          `json:"provider_concurrency_limits"`
+	SessionAffinityEnabled           map[string]bool                          `json:"session_affinity_enabled"`
 	ProviderQuotaQueryPresetCodes    map[string]string                        `json:"provider_quota_query_preset_codes,omitempty"`
 	ProviderQuotaQueryPresets        map[string]ProviderQuotaQueryPresetGroup `json:"provider_quota_query_presets,omitempty"`
 	ProviderQuotaAutoDisableEnabled  bool                                     `json:"provider_quota_auto_disable_enabled"`
@@ -229,6 +230,12 @@ func cloneAppSettings(settings AppSettings) AppSettings {
 		cloned.ProviderConcurrencyLimits = make(map[string]bool, len(settings.ProviderConcurrencyLimits))
 		for key, value := range settings.ProviderConcurrencyLimits {
 			cloned.ProviderConcurrencyLimits[key] = value
+		}
+	}
+	if settings.SessionAffinityEnabled != nil {
+		cloned.SessionAffinityEnabled = make(map[string]bool, len(settings.SessionAffinityEnabled))
+		for key, value := range settings.SessionAffinityEnabled {
+			cloned.SessionAffinityEnabled[key] = value
 		}
 	}
 	if settings.ProviderQuotaQueryPresetCodes != nil {
@@ -538,6 +545,7 @@ func (as *AppSettingsService) defaultSettings() AppSettings {
 		UnifyCodexSessionHistory:         false,
 		UnifyCodexMigrateExisting:        false,
 		ProviderConcurrencyLimits:        map[string]bool{},
+		SessionAffinityEnabled:           map[string]bool{},
 		ProviderQuotaQueryPresetCodes:    map[string]string{},
 		ProviderQuotaQueryPresets:        map[string]ProviderQuotaQueryPresetGroup{},
 		QuotaRecoveryIntervalSeconds:     defaultQuotaRecoveryIntervalSeconds,
@@ -600,6 +608,22 @@ func normalizeProviderConcurrencyLimits(settings *AppSettings) {
 		normalized[key] = enabled
 	}
 	settings.ProviderConcurrencyLimits = normalized
+}
+
+func normalizeSessionAffinityEnabled(settings *AppSettings) {
+	if settings.SessionAffinityEnabled == nil {
+		settings.SessionAffinityEnabled = map[string]bool{}
+		return
+	}
+	normalized := make(map[string]bool, len(settings.SessionAffinityEnabled))
+	for key, enabled := range settings.SessionAffinityEnabled {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		normalized[key] = enabled
+	}
+	settings.SessionAffinityEnabled = normalized
 }
 
 func normalizeClaudeModelRoutingSettings(settings *AppSettings) {
@@ -788,6 +812,7 @@ func (as *AppSettingsService) SaveAppSettings(settings AppSettings) (AppSettings
 	settings.QuotaRecoveryIntervalSeconds = normalizeProviderQuotaRecoveryIntervalSeconds(settings.QuotaRecoveryIntervalSeconds)
 	settings.MainWindowDestroyDelaySeconds = normalizeMainWindowDestroyDelaySeconds(settings.MainWindowDestroyDelaySeconds)
 	normalizeProviderConcurrencyLimits(&settings)
+	normalizeSessionAffinityEnabled(&settings)
 	normalizeProviderQuotaQueryPresets(&settings)
 	normalizeClaudeModelRoutingSettings(&settings)
 	settings.ClaudeProxyAuthField = normalizeClaudeProxyAuthField(settings.ClaudeProxyAuthField)
@@ -940,6 +965,7 @@ func (as *AppSettingsService) loadLocked() (AppSettings, error) {
 	settings.QuotaRecoveryIntervalSeconds = normalizeProviderQuotaRecoveryIntervalSeconds(settings.QuotaRecoveryIntervalSeconds)
 	settings.MainWindowDestroyDelaySeconds = normalizeMainWindowDestroyDelaySeconds(settings.MainWindowDestroyDelaySeconds)
 	normalizeProviderConcurrencyLimits(&settings)
+	normalizeSessionAffinityEnabled(&settings)
 	normalizeProviderQuotaQueryPresets(&settings)
 	normalizeClaudeModelRoutingSettings(&settings)
 	settings.ClaudeProxyAuthField = normalizeClaudeProxyAuthField(settings.ClaudeProxyAuthField)
@@ -965,6 +991,7 @@ func (as *AppSettingsService) saveLocked(settings AppSettings) error {
 	settings.QuotaRecoveryIntervalSeconds = normalizeProviderQuotaRecoveryIntervalSeconds(settings.QuotaRecoveryIntervalSeconds)
 	settings.MainWindowDestroyDelaySeconds = normalizeMainWindowDestroyDelaySeconds(settings.MainWindowDestroyDelaySeconds)
 	normalizeProviderConcurrencyLimits(&settings)
+	normalizeSessionAffinityEnabled(&settings)
 	normalizeProviderQuotaQueryPresets(&settings)
 	normalizeClaudeModelRoutingSettings(&settings)
 	settings.ClaudeProxyAuthField = normalizeClaudeProxyAuthField(settings.ClaudeProxyAuthField)

@@ -2067,6 +2067,136 @@ func TestExtractResponseToolCallIDsIgnoresPlainResponseID(t *testing.T) {
 	}
 }
 
+func TestRelaySessionIdentityCanonicalizesParentAndSubagentHashes(t *testing.T) {
+	parent := deriveRelaySessionIdentity("claude", []byte(`{"metadata":{"session_id":"root-session"}}`))
+	child := deriveRelaySessionIdentity("claude", []byte(`{"metadata":{"session_id":"child-session","parent_session_id":"root-session"}}`))
+	if parent.NodeHash == "" || child.NodeHash == "" {
+		t.Fatalf("父子会话 hash 不应为空: parent=%q child=%q", parent.NodeHash, child.NodeHash)
+	}
+	if child.ParentHash != parent.NodeHash {
+		t.Fatalf("parent_session_id 应匹配 session_id: parent=%q childParent=%q", parent.NodeHash, child.ParentHash)
+	}
+	if child.Role != "child" {
+		t.Fatalf("子会话 role = %q，期望 child", child.Role)
+	}
+
+	mainIdentity := deriveRelaySessionIdentity("claude", []byte(`{"model":"claude-main","metadata":{"session_id":"root-session"}}`))
+	subagent := deriveRelaySessionIdentity("claude", []byte(`{"model":"code-switch-r-subagent","metadata":{"session_id":"root-session","agent_id":"agent-a"}}`))
+	if subagent.NodeHash == mainIdentity.NodeHash || subagent.ParentHash != mainIdentity.NodeHash || subagent.Role != "child" {
+		t.Fatalf("带 agent_id 的子代理身份错误: main=%#v subagent=%#v", mainIdentity, subagent)
+	}
+	anonymousSubagent := deriveRelaySessionIdentity("claude", []byte(`{"model":"code-switch-r-subagent","metadata":{"session_id":"root-session"}}`))
+	if anonymousSubagent.NodeHash == mainIdentity.NodeHash || anonymousSubagent.ParentHash != mainIdentity.NodeHash || anonymousSubagent.Role != "child" {
+		t.Fatalf("无独立 ID 的子代理应继承主会话: main=%#v subagent=%#v", mainIdentity, anonymousSubagent)
+	}
+}
+
+func TestSessionRelationKeepsImmediateParentForMultiLevelTree(t *testing.T) {
+	relay := NewProviderRelayService(nil, nil, nil, nil, nil, nil, "")
+	root := deriveRelaySessionIdentity("claude", []byte(`{"metadata":{"session_id":"root"}}`))
+	child := deriveRelaySessionIdentity("claude", []byte(`{"metadata":{"session_id":"child","parent_session_id":"root"}}`))
+	grandchild := deriveRelaySessionIdentity("claude", []byte(`{"metadata":{"session_id":"grandchild","parent_session_id":"child"}}`))
+	relay.rememberSessionRelation("claude", root)
+	relay.rememberSessionRelation("claude", child)
+	relay.rememberSessionRelation("claude", grandchild)
+	relation := relay.sessionRelationLocked("claude", grandchild.NodeHash)
+	if relation.ParentHash != child.NodeHash {
+		t.Fatalf("多层关系应保留最近父节点: got=%q want=%q", relation.ParentHash, child.NodeHash)
+	}
+	if relation.RootHash != root.NodeHash {
+		t.Fatalf("多层关系 root hash 错误: got=%q want=%q", relation.RootHash, root.NodeHash)
+	}
+}
+
+func TestSessionAffinityToolCollectorFactoryRegistersResponseSession(t *testing.T) {
+	appSettings := &AppSettingsService{path: t.TempDir() + "/settings.json"}
+	settings, err := appSettings.GetAppSettings()
+	if err != nil {
+		t.Fatalf("读取应用设置失败: %v", err)
+	}
+	settings.SessionAffinityEnabled["claude"] = true
+	if _, err := appSettings.SaveAppSettings(settings); err != nil {
+		t.Fatalf("保存应用设置失败: %v", err)
+	}
+	relay := NewProviderRelayService(nil, nil, nil, nil, appSettings, nil, "")
+	provider := Provider{ID: 1, Name: "Provider A", SessionMaxSessions: 5, SessionTTLMinutes: 5}
+	collector := relay.newSessionAffinityToolResponseCollector("claude", provider, providerRequestPlan{
+		OriginalBodyBytes: []byte(`{"model":"claude","messages":[{"role":"user","content":"run"}]}`),
+	}, "claude-cli/1.0")
+	if collector == nil {
+		t.Fatal("Sticky 开启且请求无稳定会话时应创建 Collector")
+	}
+	collector.observePayload(`{"content":[{"type":"tool_use","id":"toolu_1"}]}`)
+	collector.commit()
+	hash := toolSessionHash("claude", []string{"toolu_1"})
+	binding := relay.sessionAffinity[sessionAffinityStateKey("claude", hash)]
+	if binding == nil || !binding.Confirmed || binding.ProviderID != "1" {
+		t.Fatalf("真实 Collector 应注册响应工具会话: %#v", binding)
+	}
+}
+
+func TestSessionAffinityConcurrentMigrationKeepsFallbackAvailable(t *testing.T) {
+	relay := NewProviderRelayService(nil, nil, nil, nil, nil, nil, "")
+	platform := "claude"
+	sessionHash := "session-concurrent-migration"
+	first := relay.beginSessionProviderRequest(platform, sessionHash, "provider-a", "Provider A", "", 5, 5, true, false)
+	relay.confirmSessionProviderBinding(platform, sessionHash, first)
+	second := relay.beginSessionProviderRequest(platform, sessionHash, "provider-a", "Provider A", "", 5, 5, false, false)
+	if second != 0 {
+		t.Fatalf("同 provider 并发请求应复用 binding，got %d", second)
+	}
+	original := relay.getSessionBindingSnapshot(platform, sessionHash)
+	fallback := relay.beginSessionProviderRequest(platform, sessionHash, "provider-b", "Provider B", "", 5, 5, false, false)
+	if fallback <= 0 {
+		t.Fatalf("存在其他活跃请求时应允许后备 provider 迁移，got %d", fallback)
+	}
+	relay.finishSessionProviderRequest(platform, sessionHash, "provider-b")
+	relay.restoreOrReleaseSessionBinding(platform, sessionHash, original, fallback)
+	binding := relay.sessionAffinity[sessionAffinityStateKey(platform, sessionHash)]
+	if binding == nil || binding.ProviderID != "provider-a" || binding.ActiveRequests != 2 || binding.ActiveRequestsByProvider["provider-a"] != 2 {
+		t.Fatalf("后备失败后应恢复原 provider 且保留活跃计数: %#v", binding)
+	}
+}
+
+func TestSessionAffinityRevisionProtectsDescendantFailure(t *testing.T) {
+	relay := NewProviderRelayService(nil, nil, nil, nil, nil, nil, "")
+	platform := "claude"
+	rootHash := "root-revision"
+	childHash := "child-revision"
+	relay.sessionRelations[sessionAffinityStateKey(platform, childHash)] = sessionRelation{ParentHash: rootHash, RootHash: rootHash, Role: "child", LastSeen: time.Now()}
+	relay.sessionAffinity[sessionAffinityStateKey(platform, rootHash)] = &providerSessionBinding{Platform: platform, SessionHash: rootHash, RootHash: rootHash, ProviderID: "provider-a", ProviderName: "Provider A", Confirmed: true, LastSeen: time.Now(), MaxSessions: 5, TTLMinutes: 5}
+	relay.sessionAffinity[sessionAffinityStateKey(platform, childHash)] = &providerSessionBinding{Platform: platform, SessionHash: childHash, ParentHash: rootHash, RootHash: rootHash, SessionRole: "child", ProviderID: "provider-a", ProviderName: "Provider A", Confirmed: true, LastSeen: time.Now(), MaxSessions: 5, TTLMinutes: 5}
+	original := relay.getSessionBindingSnapshot(platform, childHash)
+	attempt := relay.beginSessionProviderRequest(platform, childHash, "provider-b", "Provider B", "", 5, 5, false, false)
+	if attempt <= 0 {
+		t.Fatalf("子会话应创建迁移 attempt，got %d", attempt)
+	}
+	relay.sessionAffinityMu.Lock()
+	relay.propagateSessionProviderBindingLocked(platform, rootHash, "provider-c", "Provider C", 7, 9)
+	relay.sessionAffinityMu.Unlock()
+	relay.finishSessionProviderRequest(platform, childHash, "provider-b")
+	relay.restoreOrReleaseSessionBinding(platform, childHash, original, attempt)
+	binding := relay.sessionAffinity[sessionAffinityStateKey(platform, childHash)]
+	if binding == nil || binding.ProviderID != "provider-c" || binding.MaxSessions != 7 || binding.TTLMinutes != 9 {
+		t.Fatalf("revision 变化后旧失败不得回滚后代: %#v", binding)
+	}
+}
+
+func TestReorderProvidersWithinHighestSessionLevelPutsFullProvidersLast(t *testing.T) {
+	providers := []Provider{
+		{ID: 1, Name: "Full", Level: 1, SessionMaxSessions: 1},
+		{ID: 2, Name: "Available", Level: 1, SessionMaxSessions: 2},
+	}
+	loads := map[string]providerSessionLoad{
+		"1": {ProviderID: "1", BoundSessions: 1},
+		"2": {ProviderID: "2", BoundSessions: 0},
+	}
+	ordered := reorderProvidersWithinHighestSessionLevel(providers, loads)
+	if providerRefFromProvider(ordered[0]) != "2" || providerRefFromProvider(ordered[1]) != "1" {
+		t.Fatalf("Sticky 新会话应先选未满 provider: %#v", ordered)
+	}
+}
+
 // ==================== 性能测试 ====================
 
 func BenchmarkIsModelSupported(b *testing.B) {
@@ -2618,7 +2748,7 @@ func TestSessionAffinityConfirmedSessionAllFailKeepsOriginalProvider(t *testing.
 	}
 }
 
-func TestBeginSessionProviderRequestSkipsDifferentProviderDuringActiveMigration(t *testing.T) {
+func TestBeginSessionProviderRequestAllowsDifferentProviderDuringActiveMigration(t *testing.T) {
 	relay := NewProviderRelayService(nil, nil, nil, nil, nil, nil, "")
 	platform := "claude"
 	sessionHash := "session-f"
@@ -2626,14 +2756,26 @@ func TestBeginSessionProviderRequestSkipsDifferentProviderDuringActiveMigration(
 	attemptA := relay.beginSessionProviderRequest(platform, sessionHash, "provider-a", "Provider A", "", 5, 5, true, false)
 	relay.confirmSessionProviderBinding(platform, sessionHash, attemptA)
 
-	wrongAttempt := relay.beginSessionProviderRequest(platform, sessionHash, "provider-b", "Provider B", "", 5, 5, false, false)
-	if wrongAttempt >= 0 {
-		t.Fatalf("原 Provider 仍有 in-flight 时不同 provider 应跳过，got attempt=%d", wrongAttempt)
+	fallbackAttempt := relay.beginSessionProviderRequest(platform, sessionHash, "provider-b", "Provider B", "", 5, 5, false, false)
+	if fallbackAttempt <= 0 {
+		t.Fatalf("原 Provider 仍有 in-flight 时应允许后备 provider 迁移，got attempt=%d", fallbackAttempt)
 	}
 	binding := relay.sessionAffinity[sessionAffinityStateKey(platform, sessionHash)]
-	if binding == nil || binding.ProviderID != "provider-a" || binding.ActiveRequests != 1 {
-		t.Fatalf("不应把计数或 provider 改到错误 provider，got %#v", binding)
+	if binding == nil || binding.ProviderID != "provider-b" || binding.ActiveRequests != 2 || binding.ActiveRequestsByProvider["provider-a"] != 1 || binding.ActiveRequestsByProvider["provider-b"] != 1 {
+		t.Fatalf("迁移期间应保留两个 provider 的活跃计数，got %#v", binding)
 	}
+	loads := relay.providerSessionLoads(platform)
+	if loads["provider-a"].ActiveRequests != 1 || loads["provider-b"].ActiveRequests != 1 {
+		t.Fatalf("迁移期间负载应分别统计两个 provider，got %#v", loads)
+	}
+	statuses := relay.GetSessionAffinityStatuses(platform)
+	for _, status := range statuses {
+		if status.ProviderID == "provider-b" && status.ActiveRequests != 1 {
+			t.Fatalf("会话状态不应把旧 provider 请求计入新 provider，got %#v", status)
+		}
+	}
+	relay.finishSessionProviderRequest(platform, sessionHash, "provider-a")
+	relay.finishSessionProviderRequest(platform, sessionHash, "provider-b")
 }
 
 func TestBeginSessionProviderRequestRejectsFullProviderUnlessOverflowAllowed(t *testing.T) {

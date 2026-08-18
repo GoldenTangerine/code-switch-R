@@ -54,6 +54,12 @@
           v-else
           :key="entry.id"
           class="provider-concurrency-row"
+          :class="{ 'provider-concurrency-row--switchable': isEntrySwitchable(entry) }"
+          :role="isEntrySwitchable(entry) ? 'button' : undefined"
+          :tabindex="isEntrySwitchable(entry) ? 0 : undefined"
+          @click="handleEntryClick(entry)"
+          @keydown.enter.prevent="handleEntryClick(entry)"
+          @keydown.space.prevent="handleEntryClick(entry)"
         >
           <div
             class="provider-concurrency-row__main"
@@ -106,8 +112,43 @@
             </template>
           </div>
           <p class="provider-concurrency-row__ua">{{ entry.userAgent }}</p>
+          <div v-if="entry.sessionNumber && entry.sessionRole" class="provider-concurrency-row__session">
+            <span>{{ t('components.main.concurrencyDetails.sessionNumber', { number: entry.sessionNumber }) }}</span>
+            <span v-if="entry.sessionRole === 'child'">{{ entry.parentSessionNumber ? t('components.main.concurrencyDetails.parentSession', { number: entry.parentSessionNumber }) : t('components.main.concurrencyDetails.inheritedSession') }}</span>
+            <span v-else>{{ t('components.main.concurrencyDetails.rootSession') }}</span>
+          </div>
         </article>
       </section>
+
+      <InlineModal
+        :open="switchPanelVisible"
+        :title="t('components.main.concurrencyDetails.switchCandidates')"
+        :panel-width="'min(620px, 92vw)'"
+        :panel-class="isDarkTheme ? 'provider-session-switch-modal provider-session-switch-modal--dark' : 'provider-session-switch-modal'"
+        @close="closeSwitchPanel"
+      >
+        <div class="provider-concurrency-switch-panel">
+          <p v-if="!props.sessionAffinityEnabled" class="provider-concurrency-modal__state">{{ t('components.main.concurrencyDetails.stickyDisabled') }}</p>
+          <p v-else-if="switchLoading" class="provider-concurrency-modal__state">{{ t('components.main.concurrencyDetails.loadingCandidates') }}</p>
+          <p v-else-if="selectedSessionNumber === 0" class="provider-concurrency-modal__state">{{ t('components.main.concurrencyDetails.sessionUnavailable') }}</p>
+          <div v-else class="provider-concurrency-switch-panel__grid">
+            <button
+              v-for="candidate in selectedSessionCandidates"
+              :key="candidate.providerId"
+              type="button"
+              class="provider-concurrency-switch-option"
+              :class="{ 'is-unavailable': candidate.current || !candidate.available }"
+              :disabled="switchLoading || candidate.current || !candidate.switchable || !candidate.available"
+              @click="selectedSessionNumber !== null && emit('switch-session-provider', selectedSessionNumber, candidate.providerId)"
+            >
+              <span>{{ candidate.providerName }}</span>
+              <small v-if="candidate.current">{{ t('components.main.concurrencyDetails.currentProvider') }}</small>
+              <small v-else-if="candidate.available">L{{ candidate.level }} · {{ candidate.boundSessions }}/{{ candidate.maxSessions }}</small>
+              <small v-else>{{ candidate.reason || t('components.main.concurrencyDetails.switchUnavailable') }}</small>
+            </button>
+          </div>
+        </div>
+      </InlineModal>
     </div>
 
     <Teleport to="body">
@@ -150,6 +191,7 @@ import type {
   ProviderConcurrencyRequestParameterView,
   ProviderConcurrencyRequestView,
   ProviderConcurrencyStatusView,
+  ProviderSessionSwitchCandidateView,
   ResolvedTheme,
 } from '../types'
 import {
@@ -179,6 +221,11 @@ type ConnectionDisplayEntry = {
   context: string
   meta: ConnectionDisplayMetaItem[]
   userAgent: string
+  sessionNumber?: number
+  sessionSwitchable?: boolean
+  sessionRole?: string
+  parentSessionNumber?: number
+  inherited?: boolean
 }
 
 const props = defineProps<{
@@ -188,10 +235,16 @@ const props = defineProps<{
   status: ProviderConcurrencyStatusView | null
   resolvedTheme: ResolvedTheme
   showModelRouteDetails: boolean
+  sessionAffinityEnabled?: boolean
+  switchCandidates?: ProviderSessionSwitchCandidateView[]
+  switchLoading?: boolean
+  switchCompletedToken?: number
 }>()
 
 const emit = defineEmits<{
   close: []
+  'request-session-switch': [sessionNumber: number]
+  'switch-session-provider': [sessionNumber: number, providerId: string]
 }>()
 
 const { t, locale } = useI18n()
@@ -209,6 +262,7 @@ const routeTooltip = ref({
   top: 0,
   lines: [] as string[],
 })
+const selectedSessionNumber = ref<number | null>(null)
 let activeLoadRequestId = 0
 let routeTooltipRequestId = 0
 let routeTooltipViewportListenersActive = false
@@ -299,6 +353,10 @@ const displayEntries = computed<ConnectionDisplayEntry[]>(() => {
           { key: 'duration', label: formatDurationMs(request.durationMs) },
         ],
         userAgent: request.userAgent || t('components.main.concurrencyDetails.emptyUserAgent'),
+        sessionNumber: request.sessionNumber,
+        sessionSwitchable: request.sessionSwitchable,
+        sessionRole: request.sessionRole,
+        parentSessionNumber: request.parentSessionNumber,
       }
     })
   }
@@ -329,6 +387,23 @@ const displayEntries = computed<ConnectionDisplayEntry[]>(() => {
     }
   })
 })
+
+const switchPanelVisible = computed(() => selectedSessionNumber.value !== null)
+const selectedSessionCandidates = computed(() => props.switchCandidates ?? [])
+
+function handleEntryClick(entry: ConnectionDisplayEntry) {
+  if (activeTab.value !== 'active' || !isEntrySwitchable(entry)) return
+  selectedSessionNumber.value = entry.sessionNumber ?? 0
+  emit('request-session-switch', entry.sessionNumber ?? 0)
+}
+
+function isEntrySwitchable(entry: ConnectionDisplayEntry) {
+  return activeTab.value === 'active' && (entry.sessionSwitchable === true || props.sessionAffinityEnabled !== true)
+}
+
+function closeSwitchPanel() {
+  selectedSessionNumber.value = null
+}
 
 function displayModel(value?: string) {
   return `${value ?? ''}`.trim() || '-'
@@ -584,7 +659,19 @@ watch(
 watch(
   () => props.open,
   (open) => {
-    if (!open) hideRouteTooltip()
+    if (!open) {
+      hideRouteTooltip()
+      selectedSessionNumber.value = null
+    }
+  },
+)
+
+watch(
+  () => props.switchCompletedToken,
+  (token, previousToken) => {
+    if (token !== undefined && token !== previousToken) {
+      closeSwitchPanel()
+    }
   },
 )
 
@@ -736,6 +823,83 @@ onBeforeUnmount(() => {
   border: 1px solid rgba(148, 163, 184, 0.2);
   border-radius: 16px;
   background: rgba(255, 255, 255, 0.72);
+}
+
+.provider-concurrency-row--switchable {
+  cursor: pointer;
+}
+
+.provider-concurrency-row--switchable:hover {
+  border-color: rgba(20, 184, 166, 0.56);
+}
+
+.provider-concurrency-row__session {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: #0f766e;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.provider-concurrency-switch-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid rgba(20, 184, 166, 0.3);
+  border-radius: 14px;
+  background: rgba(20, 184, 166, 0.06);
+}
+
+.provider-concurrency-switch-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.provider-concurrency-switch-panel__close {
+  border: 0;
+  color: inherit;
+  background: transparent;
+  font-size: 20px;
+  cursor: pointer;
+}
+
+.provider-concurrency-switch-panel__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px;
+}
+
+.provider-concurrency-switch-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-height: 54px;
+  padding: 10px 12px;
+  border: 1px solid rgba(20, 184, 166, 0.28);
+  border-radius: 10px;
+  color: #0f172a;
+  background: rgba(255, 255, 255, 0.82);
+  text-align: left;
+  cursor: pointer;
+}
+
+.provider-session-switch-modal--dark .provider-concurrency-modal__state,
+.provider-session-switch-modal--dark .provider-concurrency-switch-option {
+  color: #f8fafc;
+  background: rgba(15, 23, 42, 0.76);
+}
+
+.provider-concurrency-switch-option.is-unavailable {
+  opacity: 0.48;
+  cursor: not-allowed;
+}
+
+.provider-concurrency-switch-option small {
+  color: #64748b;
 }
 
 .provider-concurrency-modal--dark .provider-concurrency-row {

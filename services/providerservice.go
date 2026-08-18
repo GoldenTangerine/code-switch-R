@@ -120,7 +120,7 @@ type Provider struct {
 	// 会话隔离：供应商最多承载的会话数（默认 5，范围 1-999）
 	SessionMaxSessions int `json:"sessionMaxSessions,omitempty"`
 
-	// 会话隔离：会话空闲释放时间，单位分钟（默认 5，范围 1-1440）
+	// 会话隔离：会话空闲释放时间，单位分钟（默认 30，范围 1-1440）
 	SessionTTLMinutes int `json:"sessionTTLMinutes,omitempty"`
 
 	// ========== 可用性监控字段（新增 v0.5.0） ==========
@@ -984,7 +984,7 @@ func (ps *ProviderService) DuplicateProvider(kind string, sourceID int64) (*Prov
 	*cloned = cloneProvider(*source)
 	cloned.ID = newID
 	cloned.Name = source.Name + " (副本)"
-	cloned.Enabled = false              // 默认禁用，避免与源供应商冲突
+	cloned.Enabled = false                   // 默认禁用，避免与源供应商冲突
 	cloned.ConnectivityAutoBlacklist = false // 副本默认关闭自动拉黑
 
 	// 6. 添加到列表并保存（使用内部方法避免死锁）

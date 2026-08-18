@@ -1,4 +1,5 @@
 import { computed, onMounted, onUnmounted, reactive, ref, watch, type ComputedRef, type Ref } from 'vue'
+import { Call } from '@wailsio/runtime'
 import { fetchProxyStatus, enableProxy, disableProxy } from '../../../services/claudeSettings'
 import { fetchGeminiProxyStatus, enableGeminiProxy, disableGeminiProxy } from '../../../services/geminiSettings'
 import {
@@ -182,6 +183,8 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
   })
   const providerConcurrencyLimitStates = reactive<Record<string, boolean>>({})
   const providerConcurrencyLimitBusy = ref(false)
+  const sessionAffinityStates = reactive<Record<string, boolean>>({})
+  const sessionAffinityBusy = ref(false)
   const activeProxyState = computed(() => (
     activeTab.value === 'others'
       ? selectedToolId.value
@@ -198,6 +201,8 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
   const activeProviderConcurrencyLimitState = computed(() => (
     providerConcurrencyLimitStates[resolveProviderConcurrencyLimitKey()] === true
   ))
+  const resolveSessionAffinityKey = (tab: ProviderTab = activeTab.value) => resolveProviderConcurrencyLimitKey(tab)
+  const activeSessionAffinityState = computed(() => sessionAffinityStates[resolveSessionAffinityKey()] === true)
 
   const syncOthersProxyState = (enabled: boolean) => {
     proxyStates.others = enabled
@@ -304,6 +309,12 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
       Object.entries(data?.provider_concurrency_limits ?? {}).forEach(([key, enabled]) => {
         providerConcurrencyLimitStates[key] = enabled === true
       })
+      Object.keys(sessionAffinityStates).forEach((key) => {
+        delete sessionAffinityStates[key]
+      })
+      Object.entries(data?.session_affinity_enabled ?? {}).forEach(([key, enabled]) => {
+        sessionAffinityStates[key] = enabled === true
+      })
     } catch (error) {
       if (requestSeq !== appSettingsRequestSeq) return
       console.error('failed to load app settings', error)
@@ -320,6 +331,9 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
       claudeModelRoutingEnabled.value = false
       Object.keys(providerConcurrencyLimitStates).forEach((key) => {
         delete providerConcurrencyLimitStates[key]
+      })
+      Object.keys(sessionAffinityStates).forEach((key) => {
+        delete sessionAffinityStates[key]
       })
       showToast(t('components.main.errors.loadAppSettingsFailed'), 'warning')
     }
@@ -491,6 +505,36 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
       showToast(t('components.main.errors.saveSettingsFailed'), 'error')
     } finally {
       providerConcurrencyLimitBusy.value = false
+    }
+  }
+
+  const onSessionAffinityToggle = async () => {
+    const tab = activeTab.value
+    if (tab === 'opencode' || tab === 'grokbuild' || tab === 'claude-desktop' || tab === 'openclaw' || tab === 'hermes' || tab === 'pi' || sessionAffinityBusy.value) return
+    if (tab === 'others' && !selectedToolId.value) {
+      showToast(t('components.main.customCli.selectToolFirst'), 'error')
+      return
+    }
+    sessionAffinityBusy.value = true
+    const key = resolveSessionAffinityKey(tab)
+    const nextState = !sessionAffinityStates[key]
+    try {
+      const settings = await fetchAppSettings()
+      const nextMap = {
+        ...(settings.session_affinity_enabled ?? {}),
+        [key]: nextState,
+      }
+      await saveAppSettings({ ...settings, session_affinity_enabled: nextMap })
+      if (!nextState) {
+        await Call.ByName('codeswitch/services.ProviderConcurrencyService.ClearSessionAffinity', key)
+      }
+      sessionAffinityStates[key] = nextState
+      window.dispatchEvent(new CustomEvent('app-settings-updated'))
+    } catch (error) {
+      console.error('Failed to toggle session affinity', error)
+      showToast(t('components.main.errors.saveSettingsFailed'), 'error')
+    } finally {
+      sessionAffinityBusy.value = false
     }
   }
 
@@ -758,9 +802,13 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
     providerConcurrencyLimitStates,
     activeProviderConcurrencyLimitState,
     providerConcurrencyLimitBusy,
+    sessionAffinityStates,
+    activeSessionAffinityState,
+    sessionAffinityBusy,
     syncOthersProxyState,
     onProxyToggle,
     onProviderConcurrencyLimitToggle,
+    onSessionAffinityToggle,
     refreshing,
     refreshAllData,
     currentProxyLabel,
