@@ -2137,7 +2137,7 @@ func TestDecorateCodexConcurrencyMetaFromTurnMetadataHeader(t *testing.T) {
 	}
 	identity := deriveRelaySessionIdentityWithHeaders("codex", []byte(`{"model":"gpt-5"}`), headers)
 	relay.rememberSessionRelation("codex", identity)
-	attemptID := relay.beginSessionProviderRequest("codex", identity.NodeHash, "provider-a", "Provider A", "codex-tui/0.147.0", 5, 30, true, false)
+	attemptID := relay.beginSessionProviderRequest("codex", identity.NodeHash, "provider-a", "Provider A", "codex-tui/0.147.0", 5, 30, true, false, false)
 	relay.finishSessionProviderRequest("codex", identity.NodeHash)
 	relay.confirmSessionProviderBinding("codex", identity.NodeHash, attemptID)
 
@@ -2264,7 +2264,7 @@ func TestSessionAffinityStatusesIncludeUserAgent(t *testing.T) {
 	sessionHash := "session-user-agent"
 	userAgent := "claude-cli/2.1.84 (external, cli)"
 
-	attemptID := relay.beginSessionProviderRequest(platform, sessionHash, "provider-a", "Provider A", userAgent, 5, 5, true, false)
+	attemptID := relay.beginSessionProviderRequest(platform, sessionHash, "provider-a", "Provider A", userAgent, 5, 5, true, false, false)
 	if attemptID <= 0 {
 		t.Fatalf("应创建会话绑定 attempt，got %d", attemptID)
 	}
@@ -2359,14 +2359,14 @@ func TestSessionAffinityConcurrentMigrationKeepsFallbackAvailable(t *testing.T) 
 	relay := NewProviderRelayService(nil, nil, nil, nil, nil, nil, "")
 	platform := "claude"
 	sessionHash := "session-concurrent-migration"
-	first := relay.beginSessionProviderRequest(platform, sessionHash, "provider-a", "Provider A", "", 5, 5, true, false)
+	first := relay.beginSessionProviderRequest(platform, sessionHash, "provider-a", "Provider A", "", 5, 5, true, false, false)
 	relay.confirmSessionProviderBinding(platform, sessionHash, first)
-	second := relay.beginSessionProviderRequest(platform, sessionHash, "provider-a", "Provider A", "", 5, 5, false, false)
+	second := relay.beginSessionProviderRequest(platform, sessionHash, "provider-a", "Provider A", "", 5, 5, false, false, false)
 	if second != 0 {
 		t.Fatalf("同 provider 并发请求应复用 binding，got %d", second)
 	}
 	original := relay.getSessionBindingSnapshot(platform, sessionHash)
-	fallback := relay.beginSessionProviderRequest(platform, sessionHash, "provider-b", "Provider B", "", 5, 5, false, false)
+	fallback := relay.beginSessionProviderRequest(platform, sessionHash, "provider-b", "Provider B", "", 5, 5, false, false, false)
 	if fallback <= 0 {
 		t.Fatalf("存在其他活跃请求时应允许后备 provider 迁移，got %d", fallback)
 	}
@@ -2387,7 +2387,7 @@ func TestSessionAffinityRevisionProtectsDescendantFailure(t *testing.T) {
 	relay.sessionAffinity[sessionAffinityStateKey(platform, rootHash)] = &providerSessionBinding{Platform: platform, SessionHash: rootHash, RootHash: rootHash, ProviderID: "provider-a", ProviderName: "Provider A", Confirmed: true, LastSeen: time.Now(), MaxSessions: 5, TTLMinutes: 5}
 	relay.sessionAffinity[sessionAffinityStateKey(platform, childHash)] = &providerSessionBinding{Platform: platform, SessionHash: childHash, ParentHash: rootHash, RootHash: rootHash, SessionRole: "child", ProviderID: "provider-a", ProviderName: "Provider A", Confirmed: true, LastSeen: time.Now(), MaxSessions: 5, TTLMinutes: 5}
 	original := relay.getSessionBindingSnapshot(platform, childHash)
-	attempt := relay.beginSessionProviderRequest(platform, childHash, "provider-b", "Provider B", "", 5, 5, false, false)
+	attempt := relay.beginSessionProviderRequest(platform, childHash, "provider-b", "Provider B", "", 5, 5, false, false, false)
 	if attempt <= 0 {
 		t.Fatalf("子会话应创建迁移 attempt，got %d", attempt)
 	}
@@ -2864,8 +2864,8 @@ func TestSessionAffinityConcurrentPendingFailuresReleaseBinding(t *testing.T) {
 	platform := "claude"
 	sessionHash := "session-a"
 
-	attemptA := relay.beginSessionProviderRequest(platform, sessionHash, "provider-a", "Provider A", "", 5, 5, true, false)
-	attemptB := relay.beginSessionProviderRequest(platform, sessionHash, "provider-a", "Provider A", "", 5, 5, true, false)
+	attemptA := relay.beginSessionProviderRequest(platform, sessionHash, "provider-a", "Provider A", "", 5, 5, true, false, false)
+	attemptB := relay.beginSessionProviderRequest(platform, sessionHash, "provider-a", "Provider A", "", 5, 5, true, false, false)
 	if attemptA == 0 || attemptB == 0 || attemptA != attemptB {
 		t.Fatalf("pending 并发应共享同一次临时绑定 attempt，got A=%d B=%d", attemptA, attemptB)
 	}
@@ -2888,8 +2888,8 @@ func TestSessionAffinityConcurrentPendingSuccessAndFailureKeepsConfirmedBinding(
 	platform := "claude"
 	sessionHash := "session-b"
 
-	attemptA := relay.beginSessionProviderRequest(platform, sessionHash, "provider-a", "Provider A", "", 5, 5, true, false)
-	attemptB := relay.beginSessionProviderRequest(platform, sessionHash, "provider-a", "Provider A", "", 5, 5, true, false)
+	attemptA := relay.beginSessionProviderRequest(platform, sessionHash, "provider-a", "Provider A", "", 5, 5, true, false, false)
+	attemptB := relay.beginSessionProviderRequest(platform, sessionHash, "provider-a", "Provider A", "", 5, 5, true, false, false)
 	relay.finishSessionProviderRequest(platform, sessionHash)
 	relay.confirmSessionProviderBinding(platform, sessionHash, attemptA)
 	relay.finishSessionProviderRequest(platform, sessionHash)
@@ -2906,14 +2906,14 @@ func TestSessionAffinityNewSessionFailoverRebindsToNextProvider(t *testing.T) {
 	platform := "claude"
 	sessionHash := "session-c"
 
-	attemptA := relay.beginSessionProviderRequest(platform, sessionHash, "provider-a", "Provider A", "", 5, 5, true, false)
+	attemptA := relay.beginSessionProviderRequest(platform, sessionHash, "provider-a", "Provider A", "", 5, 5, true, false, false)
 	if attemptA <= 0 {
 		t.Fatalf("新会话首次 provider 应创建 pending attempt，got %d", attemptA)
 	}
 	relay.finishSessionProviderRequest(platform, sessionHash)
 	relay.restoreOrReleaseSessionBinding(platform, sessionHash, nil, attemptA)
 
-	attemptB := relay.beginSessionProviderRequest(platform, sessionHash, "provider-b", "Provider B", "", 5, 5, true, false)
+	attemptB := relay.beginSessionProviderRequest(platform, sessionHash, "provider-b", "Provider B", "", 5, 5, true, false, false)
 	if attemptB <= 0 || attemptB == attemptA {
 		t.Fatalf("A 失败后应允许 B 创建新 attempt，got A=%d B=%d", attemptA, attemptB)
 	}
@@ -2930,12 +2930,12 @@ func TestSessionAffinityConfirmedSessionFailoverMigratesProvider(t *testing.T) {
 	platform := "claude"
 	sessionHash := "session-d"
 
-	attemptA := relay.beginSessionProviderRequest(platform, sessionHash, "provider-a", "Provider A", "", 5, 5, true, false)
+	attemptA := relay.beginSessionProviderRequest(platform, sessionHash, "provider-a", "Provider A", "", 5, 5, true, false, false)
 	relay.confirmSessionProviderBinding(platform, sessionHash, attemptA)
 	relay.finishSessionProviderRequest(platform, sessionHash)
 	original := relay.getSessionBindingSnapshot(platform, sessionHash)
 
-	attemptB := relay.beginSessionProviderRequest(platform, sessionHash, "provider-b", "Provider B", "", 5, 5, false, false)
+	attemptB := relay.beginSessionProviderRequest(platform, sessionHash, "provider-b", "Provider B", "", 5, 5, false, false, false)
 	if attemptB <= 0 {
 		t.Fatalf("老会话 A 失败后应允许创建迁移 attempt，got %d", attemptB)
 	}
@@ -2953,12 +2953,12 @@ func TestSessionAffinityConfirmedSessionAllFailKeepsOriginalProvider(t *testing.
 	platform := "claude"
 	sessionHash := "session-e"
 
-	attemptA := relay.beginSessionProviderRequest(platform, sessionHash, "provider-a", "Provider A", "", 5, 5, true, false)
+	attemptA := relay.beginSessionProviderRequest(platform, sessionHash, "provider-a", "Provider A", "", 5, 5, true, false, false)
 	relay.confirmSessionProviderBinding(platform, sessionHash, attemptA)
 	relay.finishSessionProviderRequest(platform, sessionHash)
 	original := relay.getSessionBindingSnapshot(platform, sessionHash)
 
-	attemptB := relay.beginSessionProviderRequest(platform, sessionHash, "provider-b", "Provider B", "", 5, 5, false, false)
+	attemptB := relay.beginSessionProviderRequest(platform, sessionHash, "provider-b", "Provider B", "", 5, 5, false, false, false)
 	relay.finishSessionProviderRequest(platform, sessionHash)
 	relay.restoreOrReleaseSessionBinding(platform, sessionHash, original, attemptB)
 
@@ -2973,10 +2973,10 @@ func TestBeginSessionProviderRequestAllowsDifferentProviderDuringActiveMigration
 	platform := "claude"
 	sessionHash := "session-f"
 
-	attemptA := relay.beginSessionProviderRequest(platform, sessionHash, "provider-a", "Provider A", "", 5, 5, true, false)
+	attemptA := relay.beginSessionProviderRequest(platform, sessionHash, "provider-a", "Provider A", "", 5, 5, true, false, false)
 	relay.confirmSessionProviderBinding(platform, sessionHash, attemptA)
 
-	fallbackAttempt := relay.beginSessionProviderRequest(platform, sessionHash, "provider-b", "Provider B", "", 5, 5, false, false)
+	fallbackAttempt := relay.beginSessionProviderRequest(platform, sessionHash, "provider-b", "Provider B", "", 5, 5, false, false, false)
 	if fallbackAttempt <= 0 {
 		t.Fatalf("原 Provider 仍有 in-flight 时应允许后备 provider 迁移，got attempt=%d", fallbackAttempt)
 	}
@@ -3009,7 +3009,7 @@ func TestBeginSessionProviderRequestRejectsFullProviderUnlessOverflowAllowed(t *
 		Confirmed:   true,
 	}
 
-	rejected := relay.beginSessionProviderRequest(platform, "session-new", "provider-a", "Provider A", "", 1, 5, true, false)
+	rejected := relay.beginSessionProviderRequest(platform, "session-new", "provider-a", "Provider A", "", 1, 5, true, false, false)
 	if rejected != -1 {
 		t.Fatalf("full provider must reject new non-overflow binding, got %d", rejected)
 	}
@@ -3017,7 +3017,7 @@ func TestBeginSessionProviderRequestRejectsFullProviderUnlessOverflowAllowed(t *
 		t.Fatalf("rejected binding should not create session state: %#v", binding)
 	}
 
-	accepted := relay.beginSessionProviderRequest(platform, "session-overflow", "provider-a", "Provider A", "", 1, 5, true, true)
+	accepted := relay.beginSessionProviderRequest(platform, "session-overflow", "provider-a", "Provider A", "", 1, 5, true, true, false)
 	if accepted <= 0 {
 		t.Fatalf("overflow fallback should allow full provider, got %d", accepted)
 	}
@@ -3126,7 +3126,7 @@ func TestReorderProviderAttemptsForSessionKeepsExistingBindingFirst(t *testing.T
 		{ID: 3, Name: "C", SessionMaxSessions: 1},
 	}
 
-	ordered := relay.reorderProviderAttemptsForSession(platform, providers, sessionHash, true, relay.providerSessionLoads(platform))
+	ordered, _ := relay.reorderProviderAttemptsForSession(platform, providers, sessionHash, true, "1", relay.providerSessionLoads(platform))
 	if providerRefFromProvider(ordered[0]) != "2" {
 		t.Fatalf("已绑定会话应优先原 provider，got %s", ordered[0].Name)
 	}
@@ -3155,13 +3155,197 @@ func TestReorderProviderAttemptsForSessionFillsInProviderOrder(t *testing.T) {
 		Confirmed:   true,
 	}
 
-	ordered := relay.reorderProviderAttemptsForSession(platform, providers, "session-new", true, relay.providerSessionLoads(platform))
+	ordered, _ := relay.reorderProviderAttemptsForSession(platform, providers, "session-new", true, "1", relay.providerSessionLoads(platform))
 	got := []string{providerRefFromProvider(ordered[0]), providerRefFromProvider(ordered[1]), providerRefFromProvider(ordered[2])}
 	want := []string{"1", "2", "3"}
 	for i := range want {
 		if got[i] != want[i] {
 			t.Fatalf("order = %v, want %v", got, want)
 		}
+	}
+}
+
+func TestReorderProviderAttemptsForSessionPrioritizesFirstProviderWithoutSessionAcrossLevels(t *testing.T) {
+	providers := []Provider{
+		{ID: 2, Name: "Higher Level", Level: 1, SessionMaxSessions: 2},
+		{ID: 1, Name: "First in Home", Level: 2, SessionMaxSessions: 2},
+	}
+	loads := map[string]providerSessionLoad{
+		"2": {ProviderID: "2", BoundSessions: 1},
+	}
+
+	ordered, _ := orderProvidersForNewSession(providers, "1", loads)
+	if providerRefFromProvider(ordered[0]) != "1" {
+		t.Fatalf("首位零会话 provider 未跨 Level 优先，order=%v", []string{providerRefFromProvider(ordered[0]), providerRefFromProvider(ordered[1])})
+	}
+}
+
+func TestReorderProviderAttemptsForSessionPrioritizesFirstProviderWhenAffinityEnabled(t *testing.T) {
+	appSettings := &AppSettingsService{}
+	appSettings.snapshot.Store(AppSettings{SessionAffinityEnabled: map[string]bool{"claude": true}})
+	relay := NewProviderRelayService(nil, nil, nil, nil, appSettings, nil, "")
+	providers := []Provider{
+		{ID: 2, Name: "Higher Level", Level: 1, SessionMaxSessions: 2},
+		{ID: 1, Name: "First in Home", Level: 2, SessionMaxSessions: 2},
+	}
+
+	ordered, _ := relay.reorderProviderAttemptsForSession("claude", providers, "session-new", true, "1", relay.providerSessionLoads("claude"))
+	if providerRefFromProvider(ordered[0]) != "1" {
+		t.Fatalf("真实会话调度入口未优先首位零会话 provider，order=%v", []string{providerRefFromProvider(ordered[0]), providerRefFromProvider(ordered[1])})
+	}
+}
+
+func TestConcurrentNewSessionsOnlyOneClaimsFirstProvider(t *testing.T) {
+	appSettings := &AppSettingsService{}
+	appSettings.snapshot.Store(AppSettings{SessionAffinityEnabled: map[string]bool{"claude": true}})
+	relay := NewProviderRelayService(nil, nil, nil, nil, appSettings, nil, "")
+	providers := []Provider{
+		{ID: 2, Name: "Higher Level", Level: 1, SessionMaxSessions: 5},
+		{ID: 1, Name: "First in Home", Level: 2, SessionMaxSessions: 5},
+	}
+	ready := make(chan struct{}, 2)
+	start := make(chan struct{})
+	selected := make(chan string, 2)
+	var workers sync.WaitGroup
+
+	for index := 0; index < 2; index++ {
+		workers.Add(1)
+		go func(sessionHash string) {
+			defer workers.Done()
+			loads := relay.providerSessionLoads("claude")
+			ordered, requireFirstProviderWithoutSession := relay.reorderProviderAttemptsForSession("claude", providers, sessionHash, true, "1", loads)
+			ready <- struct{}{}
+			<-start
+			for providerIndex, provider := range ordered {
+				attemptID := relay.beginSessionProviderRequest("claude", sessionHash, providerRefFromProvider(provider), provider.Name, "", providerSessionMaxSessions(provider), providerSessionTTLMinutes(provider), true, isProviderSessionOverflowAttempt(provider, loads), requireFirstProviderWithoutSession && providerIndex == 0)
+				if attemptID >= 0 {
+					selected <- providerRefFromProvider(provider)
+					return
+				}
+			}
+		}(fmt.Sprintf("session-%d", index))
+	}
+
+	<-ready
+	<-ready
+	close(start)
+	workers.Wait()
+	close(selected)
+
+	selectionCounts := map[string]int{}
+	for providerID := range selected {
+		selectionCounts[providerID]++
+	}
+	if selectionCounts["1"] != 1 || selectionCounts["2"] != 1 {
+		t.Fatalf("并发新会话 provider 分布 = %v，期望首位和后备各 1", selectionCounts)
+	}
+}
+
+func TestReorderProviderAttemptsForSessionUsesExistingOrderWhenFirstProviderHasSession(t *testing.T) {
+	providers := []Provider{
+		{ID: 2, Name: "Higher Level", Level: 1, SessionMaxSessions: 2},
+		{ID: 1, Name: "First in Home", Level: 2, SessionMaxSessions: 2},
+	}
+	loads := map[string]providerSessionLoad{
+		"1": {ProviderID: "1", BoundSessions: 1},
+	}
+
+	ordered, _ := orderProvidersForNewSession(providers, "1", loads)
+	if providerRefFromProvider(ordered[0]) != "2" {
+		t.Fatalf("首位已有会话时应恢复现有 Level/负载顺序，order=%v", []string{providerRefFromProvider(ordered[0]), providerRefFromProvider(ordered[1])})
+	}
+}
+
+func TestOrderProvidersForNewSessionCountsPendingFirstProviderBinding(t *testing.T) {
+	relay := NewProviderRelayService(nil, nil, nil, nil, nil, nil, "")
+	providers := []Provider{
+		{ID: 2, Name: "Higher Level", Level: 1, SessionMaxSessions: 2},
+		{ID: 1, Name: "First in Home", Level: 2, SessionMaxSessions: 2},
+	}
+	attemptID := relay.beginSessionProviderRequest("claude", "session-pending", "1", "First in Home", "", 2, 30, true, false, false)
+	if attemptID <= 0 {
+		t.Fatalf("创建首位 provider 临时绑定失败，attempt=%d", attemptID)
+	}
+
+	ordered, _ := orderProvidersForNewSession(providers, "1", relay.providerSessionLoads("claude"))
+	if providerRefFromProvider(ordered[0]) != "2" {
+		t.Fatalf("首位 provider 的临时绑定应计入会话，order=%v", []string{providerRefFromProvider(ordered[0]), providerRefFromProvider(ordered[1])})
+	}
+}
+
+func TestReorderGeminiProviderAttemptsForSessionPrioritizesFirstProviderWithoutSessionAcrossLevels(t *testing.T) {
+	providers := []GeminiProvider{
+		{ID: "gemini-2", Name: "Higher Level", Level: 1, SessionMaxSessions: 2},
+		{ID: "gemini-1", Name: "First in Home", Level: 2, SessionMaxSessions: 2},
+	}
+	loads := map[string]providerSessionLoad{
+		"gemini-2": {ProviderID: "gemini-2", BoundSessions: 1},
+	}
+
+	ordered, _ := orderGeminiProvidersForNewSession(providers, "gemini-1", loads)
+	if providerRefFromGeminiProvider(ordered[0]) != "gemini-1" {
+		t.Fatalf("Gemini 首位零会话 provider 未跨 Level 优先，order=%v", []string{providerRefFromGeminiProvider(ordered[0]), providerRefFromGeminiProvider(ordered[1])})
+	}
+}
+
+func TestConcurrentNewGeminiSessionsOnlyOneClaimsFirstProvider(t *testing.T) {
+	appSettings := &AppSettingsService{}
+	appSettings.snapshot.Store(AppSettings{SessionAffinityEnabled: map[string]bool{"gemini": true}})
+	relay := NewProviderRelayService(nil, nil, nil, nil, appSettings, nil, "")
+	providers := []GeminiProvider{
+		{ID: "gemini-2", Name: "Higher Level", Level: 1, SessionMaxSessions: 5},
+		{ID: "gemini-1", Name: "First in Home", Level: 2, SessionMaxSessions: 5},
+	}
+	ready := make(chan struct{}, 2)
+	start := make(chan struct{})
+	selected := make(chan string, 2)
+	var workers sync.WaitGroup
+
+	for index := 0; index < 2; index++ {
+		workers.Add(1)
+		go func(sessionHash string) {
+			defer workers.Done()
+			loads := relay.providerSessionLoads("gemini")
+			ordered, requireFirstProviderWithoutSession := relay.reorderGeminiProviderAttemptsForSession(providers, sessionHash, true, "gemini-1", loads)
+			ready <- struct{}{}
+			<-start
+			for providerIndex, provider := range ordered {
+				attemptID := relay.beginSessionProviderRequest("gemini", sessionHash, providerRefFromGeminiProvider(provider), provider.Name, "", geminiProviderSessionMaxSessions(provider), geminiProviderSessionTTLMinutes(provider), true, isGeminiProviderSessionOverflowAttempt(provider, loads), requireFirstProviderWithoutSession && providerIndex == 0)
+				if attemptID >= 0 {
+					selected <- providerRefFromGeminiProvider(provider)
+					return
+				}
+			}
+		}(fmt.Sprintf("gemini-session-%d", index))
+	}
+
+	<-ready
+	<-ready
+	close(start)
+	workers.Wait()
+	close(selected)
+
+	selectionCounts := map[string]int{}
+	for providerID := range selected {
+		selectionCounts[providerID]++
+	}
+	if selectionCounts["gemini-1"] != 1 || selectionCounts["gemini-2"] != 1 {
+		t.Fatalf("并发 Gemini 新会话 provider 分布 = %v，期望首位和后备各 1", selectionCounts)
+	}
+}
+
+func TestOrderGeminiProvidersForNewSessionUsesExistingOrderWhenFirstProviderHasSession(t *testing.T) {
+	providers := []GeminiProvider{
+		{ID: "gemini-2", Name: "Higher Level", Level: 1, SessionMaxSessions: 2},
+		{ID: "gemini-1", Name: "First in Home", Level: 2, SessionMaxSessions: 2},
+	}
+	loads := map[string]providerSessionLoad{
+		"gemini-1": {ProviderID: "gemini-1", BoundSessions: 1},
+	}
+
+	ordered, _ := orderGeminiProvidersForNewSession(providers, "gemini-1", loads)
+	if providerRefFromGeminiProvider(ordered[0]) != "gemini-2" {
+		t.Fatalf("Gemini 首位已有会话时应恢复现有 Level/负载顺序，order=%v", []string{providerRefFromGeminiProvider(ordered[0]), providerRefFromGeminiProvider(ordered[1])})
 	}
 }
 

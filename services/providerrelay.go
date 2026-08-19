@@ -2586,7 +2586,7 @@ func (prs *ProviderRelayService) getSessionBindingSnapshot(platform string, sess
 	return cloneProviderSessionBinding(binding)
 }
 
-func (prs *ProviderRelayService) beginSessionProviderRequest(platform string, sessionHash string, providerID string, providerName string, userAgent string, maxSessions int, ttlMinutes int, pending bool, allowOverflow bool) int64 {
+func (prs *ProviderRelayService) beginSessionProviderRequest(platform string, sessionHash string, providerID string, providerName string, userAgent string, maxSessions int, ttlMinutes int, pending bool, allowOverflow bool, requireProviderWithoutSession bool) int64 {
 	if prs == nil || strings.TrimSpace(sessionHash) == "" || strings.TrimSpace(providerID) == "" {
 		return -1
 	}
@@ -2627,8 +2627,14 @@ func (prs *ProviderRelayService) beginSessionProviderRequest(platform string, se
 			return -1
 		}
 	}
-	if pending && !allowOverflow && prs.providerBoundSessionCountLocked(platform, providerID, key) >= normalizeSessionMaxSessions(maxSessions) {
-		return -1
+	if pending {
+		boundSessions := prs.providerBoundSessionCountLocked(platform, providerID, key)
+		if requireProviderWithoutSession && boundSessions > 0 {
+			return -1
+		}
+		if !allowOverflow && boundSessions >= normalizeSessionMaxSessions(maxSessions) {
+			return -1
+		}
 	}
 	if binding == nil {
 		prs.nextSessionNumber++
@@ -3263,9 +3269,46 @@ func isProviderSessionOverflowAttempt(provider Provider, loads map[string]provid
 	return load.BoundSessions >= load.MaxSessions
 }
 
-func (prs *ProviderRelayService) reorderProviderAttemptsForSession(platform string, providers []Provider, sessionHash string, canCreateBinding bool, loads map[string]providerSessionLoad) []Provider {
+func prioritizeFirstProviderWithoutSession[T any](
+	providers []T,
+	firstProviderID string,
+	loads map[string]providerSessionLoad,
+	providerID func(T) string,
+) ([]T, bool) {
+	firstProviderID = strings.TrimSpace(firstProviderID)
+	if len(providers) == 0 || firstProviderID == "" || loads[firstProviderID].BoundSessions > 0 {
+		return providers, false
+	}
+	firstIndex := -1
+	for index, provider := range providers {
+		if providerID(provider) == firstProviderID {
+			firstIndex = index
+			break
+		}
+	}
+	if firstIndex < 0 {
+		return providers, false
+	}
+	if firstIndex == 0 {
+		return providers, true
+	}
+	ordered := make([]T, 0, len(providers))
+	ordered = append(ordered, providers[firstIndex])
+	ordered = append(ordered, providers[:firstIndex]...)
+	ordered = append(ordered, providers[firstIndex+1:]...)
+	return ordered, true
+}
+
+func orderProvidersForNewSession(providers []Provider, firstProviderID string, loads map[string]providerSessionLoad) ([]Provider, bool) {
+	if ordered, prioritized := prioritizeFirstProviderWithoutSession(providers, firstProviderID, loads, providerRefFromProvider); prioritized {
+		return ordered, true
+	}
+	return reorderProvidersWithinHighestSessionLevel(providers, loads), false
+}
+
+func (prs *ProviderRelayService) reorderProviderAttemptsForSession(platform string, providers []Provider, sessionHash string, canCreateBinding bool, firstProviderID string, loads map[string]providerSessionLoad) ([]Provider, bool) {
 	if len(providers) <= 1 || strings.TrimSpace(sessionHash) == "" {
-		return providers
+		return providers, false
 	}
 	if binding := prs.getSessionBindingSnapshot(platform, sessionHash); binding != nil {
 		result := make([]Provider, 0, len(providers))
@@ -3281,16 +3324,16 @@ func (prs *ProviderRelayService) reorderProviderAttemptsForSession(platform stri
 			}
 		}
 		if len(result) == len(providers) {
-			return result
+			return result, false
 		}
 	}
 	if !canCreateBinding {
-		return providers
+		return providers, false
 	}
 	if !prs.isSessionAffinityEnabled(platform) {
-		return orderProvidersForSessionAffinity(providers, loads)
+		return orderProvidersForSessionAffinity(providers, loads), false
 	}
-	return reorderProvidersWithinHighestSessionLevel(providers, loads)
+	return orderProvidersForNewSession(providers, firstProviderID, loads)
 }
 
 func orderGeminiProvidersForSessionAffinity(
@@ -3381,9 +3424,16 @@ func reorderGeminiProvidersWithinHighestSessionLevel(providers []GeminiProvider,
 	return append(append(underCapacity, fullCapacity...), rest...)
 }
 
-func (prs *ProviderRelayService) reorderGeminiProviderAttemptsForSession(providers []GeminiProvider, sessionHash string, canCreateBinding bool, loads map[string]providerSessionLoad) []GeminiProvider {
+func orderGeminiProvidersForNewSession(providers []GeminiProvider, firstProviderID string, loads map[string]providerSessionLoad) ([]GeminiProvider, bool) {
+	if ordered, prioritized := prioritizeFirstProviderWithoutSession(providers, firstProviderID, loads, providerRefFromGeminiProvider); prioritized {
+		return ordered, true
+	}
+	return reorderGeminiProvidersWithinHighestSessionLevel(providers, loads), false
+}
+
+func (prs *ProviderRelayService) reorderGeminiProviderAttemptsForSession(providers []GeminiProvider, sessionHash string, canCreateBinding bool, firstProviderID string, loads map[string]providerSessionLoad) ([]GeminiProvider, bool) {
 	if len(providers) <= 1 || strings.TrimSpace(sessionHash) == "" {
-		return providers
+		return providers, false
 	}
 	if binding := prs.getSessionBindingSnapshot("gemini", sessionHash); binding != nil {
 		result := make([]GeminiProvider, 0, len(providers))
@@ -3399,16 +3449,16 @@ func (prs *ProviderRelayService) reorderGeminiProviderAttemptsForSession(provide
 			}
 		}
 		if len(result) == len(providers) {
-			return result
+			return result, false
 		}
 	}
 	if !canCreateBinding {
-		return providers
+		return providers, false
 	}
 	if !prs.isSessionAffinityEnabled("gemini") {
-		return orderGeminiProvidersForSessionAffinity(providers, loads)
+		return orderGeminiProvidersForSessionAffinity(providers, loads), false
 	}
-	return reorderGeminiProvidersWithinHighestSessionLevel(providers, loads)
+	return orderGeminiProvidersForNewSession(providers, firstProviderID, loads)
 }
 
 func (prs *ProviderRelayService) GetSessionAffinityStatuses(platform string) []ProviderSessionStatus {
@@ -3547,8 +3597,8 @@ func (prs *ProviderRelayService) previewNextProviderFromProviders(platform strin
 	}
 
 	sessionLoads := prs.providerSessionLoads(platform)
-	if options.sessionAffinityEnabled && len(sessionLoads) > 0 {
-		available = reorderProvidersWithinHighestSessionLevel(available, sessionLoads)
+	if options.sessionAffinityEnabled {
+		available, _ = orderProvidersForNewSession(available, providerRefFromProvider(available[0]), sessionLoads)
 		provider := available[0]
 		return trayDefaultProvider(providerRefFromProvider(provider), provider.Name)
 	}
@@ -3588,8 +3638,8 @@ func (prs *ProviderRelayService) previewNextGeminiProvider(providers []GeminiPro
 	}
 
 	sessionLoads := prs.providerSessionLoads("gemini")
-	if options.sessionAffinityEnabled && len(sessionLoads) > 0 {
-		available = reorderGeminiProvidersWithinHighestSessionLevel(available, sessionLoads)
+	if options.sessionAffinityEnabled {
+		available, _ = orderGeminiProvidersForNewSession(available, providerRefFromGeminiProvider(available[0]), sessionLoads)
 		provider := available[0]
 		return trayDefaultProvider(providerRefFromGeminiProvider(provider), provider.Name)
 	}
@@ -4109,7 +4159,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 					orderedProviders = append(orderedProviders, providersInLevel...)
 				}
 				sessionLoads := prs.providerSessionLoads(kind)
-				orderedProviders = prs.reorderProviderAttemptsForSession(kind, orderedProviders, sessionHash, originalSessionBinding == nil && sessionAffinityEnabled, sessionLoads)
+				orderedProviders, requireFirstProviderWithoutSession := prs.reorderProviderAttemptsForSession(kind, orderedProviders, sessionHash, originalSessionBinding == nil && sessionAffinityEnabled, providerRefFromProvider(active[0]), sessionLoads)
 				orderedSwitchTargets := providerSwitchTargetsFromProviders(orderedProviders)
 
 				for providerIndex, provider := range orderedProviders {
@@ -4129,7 +4179,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 
 						fmt.Printf("[INFO] [会话隔离/拉黑模式] Provider: %s | 重试 %d/%d | Model: %s\n",
 							provider.Name, retryCount+1, maxRetryPerProvider, plan.EffectiveModel)
-						sessionAttemptID = prs.beginSessionProviderRequest(kind, sessionHash, providerRefFromProvider(provider), provider.Name, clientUserAgent, providerSessionMaxSessions(provider), providerSessionTTLMinutes(provider), originalSessionBinding == nil, isProviderSessionOverflowAttempt(provider, sessionLoads))
+						sessionAttemptID = prs.beginSessionProviderRequest(kind, sessionHash, providerRefFromProvider(provider), provider.Name, clientUserAgent, providerSessionMaxSessions(provider), providerSessionTTLMinutes(provider), originalSessionBinding == nil, isProviderSessionOverflowAttempt(provider, sessionLoads), requireFirstProviderWithoutSession && providerIndex == 0)
 						if sessionAttemptID < 0 {
 							continue
 						}
@@ -4363,7 +4413,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 				orderedProviders = append(orderedProviders, providersInLevel...)
 			}
 			sessionLoads := prs.providerSessionLoads(kind)
-			orderedProviders = prs.reorderProviderAttemptsForSession(kind, orderedProviders, sessionHash, originalSessionBinding == nil && sessionAffinityEnabled, sessionLoads)
+			orderedProviders, requireFirstProviderWithoutSession := prs.reorderProviderAttemptsForSession(kind, orderedProviders, sessionHash, originalSessionBinding == nil && sessionAffinityEnabled, providerRefFromProvider(active[0]), sessionLoads)
 
 			var lastError error
 			var lastProvider string
@@ -4389,6 +4439,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 					providerSessionTTLMinutes(provider),
 					originalSessionBinding == nil,
 					isProviderSessionOverflowAttempt(provider, sessionLoads),
+					requireFirstProviderWithoutSession && i == 0,
 				)
 				if sessionAttemptID < 0 {
 					continue
@@ -9543,7 +9594,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 					orderedProviders = append(orderedProviders, providersInLevel...)
 				}
 				sessionLoads := prs.providerSessionLoads("gemini")
-				orderedProviders = prs.reorderGeminiProviderAttemptsForSession(orderedProviders, sessionHash, originalSessionBinding == nil && sessionAffinityEnabled, sessionLoads)
+				orderedProviders, requireFirstProviderWithoutSession := prs.reorderGeminiProviderAttemptsForSession(orderedProviders, sessionHash, originalSessionBinding == nil && sessionAffinityEnabled, providerRefFromGeminiProvider(activeProviders[0]), sessionLoads)
 				orderedSwitchTargets := providerSwitchTargetsFromGeminiProviders(orderedProviders)
 
 				for providerIndex, provider := range orderedProviders {
@@ -9570,7 +9621,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 
 						fmt.Printf("[Gemini] [会话隔离/拉黑模式] Provider: %s | 重试 %d/%d\n",
 							provider.Name, retryCount+1, maxRetryPerProvider)
-						sessionAttemptID = prs.beginSessionProviderRequest("gemini", sessionHash, providerRefFromGeminiProvider(provider), provider.Name, clientUserAgent, geminiProviderSessionMaxSessions(provider), geminiProviderSessionTTLMinutes(provider), originalSessionBinding == nil, isGeminiProviderSessionOverflowAttempt(provider, sessionLoads))
+						sessionAttemptID = prs.beginSessionProviderRequest("gemini", sessionHash, providerRefFromGeminiProvider(provider), provider.Name, clientUserAgent, geminiProviderSessionMaxSessions(provider), geminiProviderSessionTTLMinutes(provider), originalSessionBinding == nil, isGeminiProviderSessionOverflowAttempt(provider, sessionLoads), requireFirstProviderWithoutSession && providerIndex == 0)
 						if sessionAttemptID < 0 {
 							continue
 						}
@@ -9784,7 +9835,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 				orderedProviders = append(orderedProviders, providersInLevel...)
 			}
 			sessionLoads := prs.providerSessionLoads("gemini")
-			orderedProviders = prs.reorderGeminiProviderAttemptsForSession(orderedProviders, sessionHash, originalSessionBinding == nil && sessionAffinityEnabled, sessionLoads)
+			orderedProviders, requireFirstProviderWithoutSession := prs.reorderGeminiProviderAttemptsForSession(orderedProviders, sessionHash, originalSessionBinding == nil && sessionAffinityEnabled, providerRefFromGeminiProvider(activeProviders[0]), sessionLoads)
 
 			var lastError error
 			for idx, provider := range orderedProviders {
@@ -9810,6 +9861,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 					geminiProviderSessionTTLMinutes(provider),
 					originalSessionBinding == nil,
 					isGeminiProviderSessionOverflowAttempt(provider, sessionLoads),
+					requireFirstProviderWithoutSession && idx == 0,
 				)
 				if sessionAttemptID < 0 {
 					continue
@@ -10454,7 +10506,7 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 					orderedProviders = append(orderedProviders, providersInLevel...)
 				}
 				sessionLoads := prs.providerSessionLoads(kind)
-				orderedProviders = prs.reorderProviderAttemptsForSession(kind, orderedProviders, sessionHash, originalSessionBinding == nil && sessionAffinityEnabled, sessionLoads)
+				orderedProviders, requireFirstProviderWithoutSession := prs.reorderProviderAttemptsForSession(kind, orderedProviders, sessionHash, originalSessionBinding == nil && sessionAffinityEnabled, providerRefFromProvider(active[0]), sessionLoads)
 				orderedSwitchTargets := providerSwitchTargetsFromProviders(orderedProviders)
 
 				for providerIndex, provider := range orderedProviders {
@@ -10474,7 +10526,7 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 
 						fmt.Printf("[CustomCLI][INFO] [会话隔离/拉黑模式] Provider: %s | 重试 %d/%d | Model: %s\n",
 							provider.Name, retryCount+1, maxRetryPerProvider, plan.EffectiveModel)
-						sessionAttemptID = prs.beginSessionProviderRequest(kind, sessionHash, providerRefFromProvider(provider), provider.Name, clientUserAgent, providerSessionMaxSessions(provider), providerSessionTTLMinutes(provider), originalSessionBinding == nil, isProviderSessionOverflowAttempt(provider, sessionLoads))
+						sessionAttemptID = prs.beginSessionProviderRequest(kind, sessionHash, providerRefFromProvider(provider), provider.Name, clientUserAgent, providerSessionMaxSessions(provider), providerSessionTTLMinutes(provider), originalSessionBinding == nil, isProviderSessionOverflowAttempt(provider, sessionLoads), requireFirstProviderWithoutSession && providerIndex == 0)
 						if sessionAttemptID < 0 {
 							continue
 						}
@@ -10699,7 +10751,7 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 				orderedProviders = append(orderedProviders, providersInLevel...)
 			}
 			sessionLoads := prs.providerSessionLoads(kind)
-			orderedProviders = prs.reorderProviderAttemptsForSession(kind, orderedProviders, sessionHash, originalSessionBinding == nil && sessionAffinityEnabled, sessionLoads)
+			orderedProviders, requireFirstProviderWithoutSession := prs.reorderProviderAttemptsForSession(kind, orderedProviders, sessionHash, originalSessionBinding == nil && sessionAffinityEnabled, providerRefFromProvider(active[0]), sessionLoads)
 
 			var lastError error
 			var lastProvider string
@@ -10713,7 +10765,7 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 					continue
 				}
 				fmt.Printf("[CustomCLI][INFO]   [会话隔离 %d/%d] Provider: %s | Model: %s\n", i+1, len(orderedProviders), provider.Name, plan.EffectiveModel)
-				sessionAttemptID = prs.beginSessionProviderRequest(kind, sessionHash, providerRefFromProvider(provider), provider.Name, clientUserAgent, providerSessionMaxSessions(provider), providerSessionTTLMinutes(provider), originalSessionBinding == nil, isProviderSessionOverflowAttempt(provider, sessionLoads))
+				sessionAttemptID = prs.beginSessionProviderRequest(kind, sessionHash, providerRefFromProvider(provider), provider.Name, clientUserAgent, providerSessionMaxSessions(provider), providerSessionTTLMinutes(provider), originalSessionBinding == nil, isProviderSessionOverflowAttempt(provider, sessionLoads), requireFirstProviderWithoutSession && i == 0)
 				if sessionAttemptID < 0 {
 					continue
 				}

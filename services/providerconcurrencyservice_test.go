@@ -60,14 +60,14 @@ func TestProviderConcurrencyServiceGetTrayProviderRuntimeStatesBatchHandlesNilSe
 	}
 }
 
-func TestPreviewNextProviderUsesRoundRobinWithoutAdvancingCursor(t *testing.T) {
+func TestPreviewNextProviderPrioritizesFirstProviderWithoutSession(t *testing.T) {
 	relay := &ProviderRelayService{
 		rrLastStart:         map[string]string{"claude:1": "1"},
 		providerConcurrency: map[string]int{},
 		sessionAffinity:     map[string]*providerSessionBinding{},
 	}
 	providers := []Provider{
-		{ID: 1, Name: "First", APIURL: "https://first.example.com", APIKey: "key", Enabled: true, Level: 1},
+		{ID: 1, Name: "First", APIURL: "https://first.example.com", APIKey: "key", Enabled: true, Level: 2},
 		{ID: 2, Name: "Second", APIURL: "https://second.example.com", APIKey: "key", Enabled: true, Level: 1},
 	}
 
@@ -76,22 +76,22 @@ func TestPreviewNextProviderUsesRoundRobinWithoutAdvancingCursor(t *testing.T) {
 		sessionAffinityEnabled: true,
 	})
 
-	if preview == nil || preview.ProviderID != "2" {
-		t.Fatalf("默认供应商 = %+v，期望 Second", preview)
+	if preview == nil || preview.ProviderID != "1" {
+		t.Fatalf("默认供应商 = %+v，期望 First", preview)
 	}
 	if relay.rrLastStart["claude:1"] != "1" {
 		t.Fatalf("只读预览推进了轮询游标：%q", relay.rrLastStart["claude:1"])
 	}
 }
 
-func TestPreviewNextGeminiProviderUsesRoundRobinWhenNoSessionLoad(t *testing.T) {
+func TestPreviewNextGeminiProviderPrioritizesFirstProviderWithoutSession(t *testing.T) {
 	relay := &ProviderRelayService{
 		rrLastStart:         map[string]string{"gemini:1": "gemini-1"},
 		providerConcurrency: map[string]int{},
 		sessionAffinity:     map[string]*providerSessionBinding{},
 	}
 	providers := []GeminiProvider{
-		{ID: "gemini-1", Name: "First", BaseURL: "https://one.example.com", Enabled: true, Level: 1},
+		{ID: "gemini-1", Name: "First", BaseURL: "https://one.example.com", Enabled: true, Level: 2},
 		{ID: "gemini-2", Name: "Second", BaseURL: "https://two.example.com", Enabled: true, Level: 1},
 	}
 
@@ -100,8 +100,8 @@ func TestPreviewNextGeminiProviderUsesRoundRobinWhenNoSessionLoad(t *testing.T) 
 		sessionAffinityEnabled: true,
 	})
 
-	if preview == nil || preview.ProviderID != "gemini-2" {
-		t.Fatalf("Gemini 默认供应商 = %+v，期望 Second", preview)
+	if preview == nil || preview.ProviderID != "gemini-1" {
+		t.Fatalf("Gemini 默认供应商 = %+v，期望 First", preview)
 	}
 }
 
@@ -130,6 +130,7 @@ func TestPreviewNextProviderSkipsBlacklistedAndConcurrencyFullProviders(t *testi
 
 	preview := relay.previewNextProviderFromProviders("codex", providers, trayProviderPreviewOptions{
 		concurrencyLimitEnabled: true,
+		sessionAffinityEnabled:  true,
 	})
 
 	if preview == nil || preview.ProviderID != "3" {
