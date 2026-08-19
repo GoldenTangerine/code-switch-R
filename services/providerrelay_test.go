@@ -1922,6 +1922,11 @@ func TestDeriveCodexThreadSessionHash(t *testing.T) {
 			body: `{"params":{"cwd":"/repo","archived":false}}`,
 			want: shortSHA256Hex("codex.cwd=/repo"),
 		},
+		{
+			name: "generic id does not override parent session",
+			body: `{"id":"request-a","parent_session_id":"session-parent"}`,
+			want: shortSHA256Hex("codex.session_id=session-parent"),
+		},
 	}
 
 	for _, tt := range tests {
@@ -1962,6 +1967,88 @@ func TestDeriveCodexSessionIdentityCanonicalizesBodyThreadRelation(t *testing.T)
 	}
 }
 
+func TestDeriveCodexSessionIdentitySupportsRootAndParentFields(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{
+			name: "root thread",
+			body: `{"root_thread_id":"thread-root"}`,
+			want: shortSHA256Hex("codex.thread_id=thread-root"),
+		},
+		{
+			name: "parent conversation",
+			body: `{"parent_conversation_id":"conversation-parent"}`,
+			want: shortSHA256Hex("codex.conversation_id=conversation-parent"),
+		},
+		{
+			name: "parent session",
+			body: `{"parent_session_id":"session-parent"}`,
+			want: shortSHA256Hex("codex.session_id=session-parent"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			identity := deriveRelaySessionIdentity("codex", []byte(tt.body))
+			if identity.IdentitySource != sessionIdentitySourceCodexExplicit || identity.NodeHash != tt.want {
+				t.Fatalf("Codex 显式会话归一错误: %#v", identity)
+			}
+			if identity.ParentHash != "" || identity.RootHash != identity.NodeHash || identity.Role != "root" {
+				t.Fatalf("Codex 仅父级或根级标识不应形成自引用: %#v", identity)
+			}
+		})
+	}
+}
+
+func TestDeriveCodexSessionIdentityUsesRootAsParentFallback(t *testing.T) {
+	identity := deriveRelaySessionIdentity("codex", []byte(`{"session_id":"session-child","root_session_id":"session-root"}`))
+	rootHash := shortSHA256Hex("codex.session_id=session-root")
+	if identity.NodeHash != shortSHA256Hex("codex.session_id=session-child") || identity.ParentHash != rootHash || identity.RootHash != rootHash || identity.Role != "child" {
+		t.Fatalf("Codex 显式根会话关系错误: %#v", identity)
+	}
+}
+
+func TestDeriveCodexSessionIdentitySupportsHeaderOnlyParentOrRoot(t *testing.T) {
+	parent := deriveRelaySessionIdentityWithHeaders("codex", []byte(`{"model":"gpt-5"}`), map[string]string{
+		"X-Codex-Turn-Metadata": `{"parent_thread_id":"thread-parent"}`,
+	})
+	if parent.IdentitySource != sessionIdentitySourceCodexExplicit || parent.NodeHash != shortSHA256Hex("codex.thread_id=thread-parent") || parent.Role != "root" {
+		t.Fatalf("Codex 仅父线程头归一错误: %#v", parent)
+	}
+
+	root := deriveRelaySessionIdentityWithHeaders("codex", []byte(`{"model":"gpt-5"}`), map[string]string{
+		"X-Codex-Turn-Metadata": `{"root_thread_id":"thread-root"}`,
+	})
+	if root.IdentitySource != sessionIdentitySourceCodexExplicit || root.NodeHash != shortSHA256Hex("codex.thread_id=thread-root") || root.RootHash != root.NodeHash {
+		t.Fatalf("Codex 仅根线程头归一错误: %#v", root)
+	}
+}
+
+func TestDeriveCodexSessionIdentityPreservesBodyParentWhenHeaderProvidesNode(t *testing.T) {
+	identity := deriveRelaySessionIdentityWithHeaders("codex", []byte(`{"parent_session_id":"session-parent"}`), map[string]string{
+		"X-Codex-Session-Id": "session-child",
+	})
+	if identity.NodeHash != shortSHA256Hex("codex.session_id=session-child") {
+		t.Fatalf("Codex 请求头节点归一错误: %#v", identity)
+	}
+	if identity.ParentHash != shortSHA256Hex("codex.session_id=session-parent") || identity.RootHash != identity.ParentHash || identity.Role != "child" {
+		t.Fatalf("Codex 请求体父关系丢失: %#v", identity)
+	}
+}
+
+func TestDeriveCodexSessionIdentityPreservesBodyRootWhenHeaderProvidesNode(t *testing.T) {
+	identity := deriveRelaySessionIdentityWithHeaders("codex", []byte(`{"root_session_id":"session-root"}`), map[string]string{
+		"X-Codex-Session-Id": "session-child",
+	})
+	rootHash := shortSHA256Hex("codex.session_id=session-root")
+	if identity.NodeHash != shortSHA256Hex("codex.session_id=session-child") || identity.ParentHash != rootHash || identity.RootHash != rootHash || identity.Role != "child" {
+		t.Fatalf("Codex 请求体根关系丢失: %#v", identity)
+	}
+}
+
 func TestDeriveCodexSessionIdentityFromClientMetadata(t *testing.T) {
 	body := []byte(`{"model":"gpt-5","client_metadata":{"thread_id":"thread-child","x-codex-parent-thread-id":"thread-root","x-codex-turn-metadata":"{\"session_id\":\"session-child\",\"thread_id\":\"thread-child\"}"}}`)
 	identity := deriveRelaySessionIdentityWithHeaders("codex", body, nil)
@@ -1970,6 +2057,66 @@ func TestDeriveCodexSessionIdentityFromClientMetadata(t *testing.T) {
 	}
 	if identity.ParentHash != shortSHA256Hex("codex.thread_id=thread-root") || identity.Role != "child" {
 		t.Fatalf("client_metadata 父子关系错误: %#v", identity)
+	}
+}
+
+func TestDeriveCodexSessionIdentityPrefersCursorConversation(t *testing.T) {
+	identity := deriveRelaySessionIdentityWithHeaders("codex", []byte(`{"metadata":{"cursorConversationId":"cursor-body","thread_id":"thread-body"}}`), map[string]string{
+		"X-Cursor-Conversation-Id": "cursor-header",
+	})
+	if identity.IdentitySource != sessionIdentitySourceCursorConversation {
+		t.Fatalf("Cursor 会话来源错误: %#v", identity)
+	}
+	if identity.NodeHash != shortSHA256Hex("codex.cursor_conversation_id=cursor-header") {
+		t.Fatalf("Cursor 会话 hash 错误: %#v", identity)
+	}
+
+	bodyIdentity := deriveRelaySessionIdentityWithHeaders("codex", []byte(`{"cursorConversationId":"cursor-body"}`), nil)
+	if bodyIdentity.IdentitySource != sessionIdentitySourceCursorConversation || bodyIdentity.NodeHash != shortSHA256Hex("codex.cursor_conversation_id=cursor-body") {
+		t.Fatalf("Cursor 顶层会话标识归一错误: %#v", bodyIdentity)
+	}
+}
+
+func TestDeriveCodexSessionIdentityUsesPromptCacheKeyOnlyForResponsesInput(t *testing.T) {
+	responses := deriveRelaySessionIdentity("codex", []byte(`{"model":"gpt-5.6-sol","input":[],"prompt_cache_key":"cache-a"}`))
+	if responses.IdentitySource != sessionIdentitySourcePromptCacheKey || responses.NodeHash != shortSHA256Hex("codex.prompt_cache_key=cache-a") {
+		t.Fatalf("Responses prompt_cache_key 来源错误: %#v", responses)
+	}
+	stringInput := deriveRelaySessionIdentity("codex", []byte(`{"model":"gpt-5.6-sol","input":"hello","prompt_cache_key":"cache-a"}`))
+	if stringInput.IdentitySource != sessionIdentitySourcePromptCacheKey || stringInput.NodeHash != responses.NodeHash {
+		t.Fatalf("字符串 input 的 Responses 请求来源错误: %#v", stringInput)
+	}
+
+	chat := deriveRelaySessionIdentity("codex", []byte(`{"model":"gpt-5.6-sol","messages":[],"prompt_cache_key":"cache-a"}`))
+	if chat.IdentitySource == sessionIdentitySourcePromptCacheKey || chat.NodeHash != "" {
+		t.Fatalf("非 Responses 请求不应使用 prompt_cache_key: %#v", chat)
+	}
+
+	explicit := deriveRelaySessionIdentity("codex", []byte(`{"input":[],"prompt_cache_key":"cache-a","root_thread_id":"thread-root"}`))
+	if explicit.IdentitySource != sessionIdentitySourceCodexExplicit || explicit.NodeHash != shortSHA256Hex("codex.thread_id=thread-root") {
+		t.Fatalf("Codex 显式线程应覆盖 prompt_cache_key: %#v", explicit)
+	}
+}
+
+func TestDecorateSessionConcurrencyMetaKeepsIdentitySourceWhenAffinityDisabled(t *testing.T) {
+	appSettings := &AppSettingsService{path: t.TempDir() + "/settings.json"}
+	relay := NewProviderRelayService(nil, nil, nil, nil, appSettings, nil, "")
+	meta := providerConcurrencyRequestMeta{}
+	relay.decorateSessionConcurrencyMeta("codex", []byte(`{"input":[],"prompt_cache_key":"cache-a"}`), nil, &meta)
+	if meta.SessionIdentitySource != sessionIdentitySourcePromptCacheKey {
+		t.Fatalf("关闭粘滞时仍应记录身份来源: %#v", meta)
+	}
+}
+
+func TestSessionIdentityUsesOriginalProviderRequestBody(t *testing.T) {
+	original := []byte(`{"input":[],"prompt_cache_key":"cache-a"}`)
+	modified := []byte(`{"input":[],"prompt_cache_key":"cache-b"}`)
+	plan := providerRequestPlan{OriginalBodyBytes: original, BodyBytes: modified}
+	if got := sessionIdentityBodyBytes(plan, modified); !bytes.Equal(got, original) {
+		t.Fatalf("会话身份应使用原始请求体: got=%s want=%s", got, original)
+	}
+	if got := sessionIdentityBodyBytes(providerRequestPlan{}, modified); !bytes.Equal(got, modified) {
+		t.Fatalf("缺少原始请求体时应回退当前请求体: got=%s want=%s", got, modified)
 	}
 }
 

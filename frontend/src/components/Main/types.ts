@@ -225,6 +225,7 @@ export type ProviderConcurrencyRequestView = {
   sessionPreferredProviderId?: string
   sessionPreferredProvider?: string
   sessionProviderRoute?: 'preferred' | 'fallback' | ''
+  sessionIdentitySource?: 'cursor_conversation' | 'codex_explicit' | 'prompt_cache_key' | string
   sessionNumber?: number
   rootSessionNumber?: number
   parentSessionNumber?: number

@@ -1368,7 +1368,10 @@
         "switchReason": "Reason: {reason}",
         "switchSuccess": "Switched to {provider}",
         "switchFailed": "Switch failed: {error}",
-        "stickyDisabled": "Enable sticky session first"
+        "stickyDisabled": "Enable sticky session first",
+        "identitySourceCursor": "Cursor conversation",
+        "identitySourceCodex": "Codex session",
+        "identitySourcePromptCache": "Prompt cache key"
       },
       "errors": {
         "loadAppSettingsFailed": "Failed to load application settings",

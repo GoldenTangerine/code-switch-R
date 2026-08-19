@@ -1369,7 +1369,10 @@
         "switchReason": "原因：{reason}",
         "switchSuccess": "已切换到 {provider}",
         "switchFailed": "切换失败：{error}",
-        "stickyDisabled": "请先开启会话粘滞"
+        "stickyDisabled": "请先开启会话粘滞",
+        "identitySourceCursor": "Cursor 会话",
+        "identitySourceCodex": "Codex 会话",
+        "identitySourcePromptCache": "缓存键"
       },
       "errors": {
         "loadAppSettingsFailed": "加载应用设置失败",

@@ -147,4 +147,23 @@ describe('provider concurrency switch styles', () => {
     expect(directives(modelDetails, 'on', 'click')[0]?.modifiers?.map((modifier) => modifier.content)).toContain('stop')
     expect(directives(switchButton, 'on', 'click')[0]?.modifiers?.map((modifier) => modifier.content)).toContain('stop')
   })
+
+  it('renders session identity source for active and history entries', () => {
+    const lightIdentityRule = ruleSource(componentStyleSource, '.provider-concurrency-row__meta-item--identity')
+    const darkIdentityRule = ruleSource(
+      componentStyleSource,
+      '.provider-concurrency-modal--dark .provider-concurrency-row__meta-item--identity',
+    )
+
+    expect(componentSource).toContain('request.sessionIdentitySource')
+    expect(componentSource).toContain('log.session_identity_source')
+    expect(componentSource).toContain("identitySourceCursor")
+    expect(componentSource).toContain("identitySourceCodex")
+    expect(componentSource).toContain("identitySourcePromptCache")
+    expect(componentSource).toContain("identitySourceMeta")
+    expect(componentSource).toContain("provider-concurrency-row__meta-item--identity")
+    expect(lightIdentityRule).toContain('border-radius: 5px;')
+    expect(lightIdentityRule).toContain('color: #0f766e;')
+    expect(darkIdentityRule).toContain('color: #5eead4;')
+  })
 })

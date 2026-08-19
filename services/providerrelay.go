@@ -374,11 +374,18 @@ type sessionRelation struct {
 }
 
 type relaySessionIdentity struct {
-	NodeHash   string
-	ParentHash string
-	RootHash   string
-	Role       string
+	NodeHash       string
+	ParentHash     string
+	RootHash       string
+	Role           string
+	IdentitySource string
 }
+
+const (
+	sessionIdentitySourceCursorConversation = "cursor_conversation"
+	sessionIdentitySourceCodexExplicit      = "codex_explicit"
+	sessionIdentitySourcePromptCacheKey     = "prompt_cache_key"
+)
 
 type providerSessionBinding struct {
 	Platform                 string
@@ -489,6 +496,7 @@ type ProviderConcurrencyRequestDetail struct {
 	RootSessionNumber          int64                                 `json:"rootSessionNumber,omitempty"`
 	ParentSessionNumber        int64                                 `json:"parentSessionNumber,omitempty"`
 	SessionRole                string                                `json:"sessionRole,omitempty"`
+	SessionIdentitySource      string                                `json:"sessionIdentitySource,omitempty"`
 	SessionSwitchable          bool                                  `json:"sessionSwitchable"`
 	SessionManualOverride      bool                                  `json:"sessionManualOverride"`
 	Parameters                 []ProviderConcurrencyRequestParameter `json:"parameters"`
@@ -522,6 +530,7 @@ type providerConcurrencyRequestMeta struct {
 	RootSessionNumber          int64
 	ParentSessionNumber        int64
 	SessionRole                string
+	SessionIdentitySource      string
 	SessionSwitchable          bool
 	SessionManualOverride      bool
 	Parameters                 []ProviderConcurrencyRequestParameter
@@ -530,10 +539,14 @@ type providerConcurrencyRequestMeta struct {
 }
 
 func (prs *ProviderRelayService) decorateSessionConcurrencyMeta(platform string, bodyBytes []byte, headers map[string]string, meta *providerConcurrencyRequestMeta) {
-	if prs == nil || meta == nil || !prs.isSessionAffinityEnabled(platform) {
+	if prs == nil || meta == nil {
 		return
 	}
 	identity := deriveRelaySessionIdentityWithHeaders(platform, bodyBytes, headers)
+	meta.SessionIdentitySource = strings.TrimSpace(identity.IdentitySource)
+	if !prs.isSessionAffinityEnabled(platform) {
+		return
+	}
 	if identity.NodeHash == "" {
 		return
 	}
@@ -1250,6 +1263,7 @@ func (prs *ProviderRelayService) acquireProviderConcurrencySlot(platform string,
 		RootSessionNumber:          meta.RootSessionNumber,
 		ParentSessionNumber:        meta.ParentSessionNumber,
 		SessionRole:                strings.TrimSpace(meta.SessionRole),
+		SessionIdentitySource:      strings.TrimSpace(meta.SessionIdentitySource),
 		SessionSwitchable:          meta.SessionSwitchable,
 		SessionManualOverride:      meta.SessionManualOverride,
 		Parameters:                 cloneProviderConcurrencyRequestParameters(meta.Parameters),
@@ -1644,12 +1658,31 @@ func hashRelaySessionField(platform string, path string, value string) string {
 	return shortSHA256Hex(seed)
 }
 
+func firstRelaySessionFieldHash(platform string, bodyBytes []byte, paths ...string) string {
+	for _, path := range paths {
+		if value := relaySessionField(bodyBytes, path); value != "" {
+			return hashRelaySessionField(platform, path, value)
+		}
+	}
+	return ""
+}
+
 func deriveRelaySessionIdentity(platform string, bodyBytes []byte) relaySessionIdentity {
+	return normalizeRelaySessionIdentity(platform, deriveRelaySessionIdentityFromBody(platform, bodyBytes))
+}
+
+func deriveRelaySessionIdentityFromBody(platform string, bodyBytes []byte) relaySessionIdentity {
 	platform = strings.TrimSpace(platform)
 	identity := relaySessionIdentity{Role: "root"}
 	baseHash := ""
 	if platform == "codex" {
 		baseHash = deriveCodexThreadSessionHash(bodyBytes)
+		if codexHasExplicitSessionIdentity(bodyBytes) {
+			identity.IdentitySource = sessionIdentitySourceCodexExplicit
+		} else if promptCacheKey := deriveCodexPromptCacheKey(bodyBytes); promptCacheKey != "" {
+			baseHash = shortSHA256Hex("codex.prompt_cache_key=" + promptCacheKey)
+			identity.IdentitySource = sessionIdentitySourcePromptCacheKey
+		}
 	}
 	if baseHash == "" {
 		baseHash = deriveMetadataRelaySessionHash(bodyBytes)
@@ -1712,13 +1745,52 @@ func deriveRelaySessionIdentity(platform string, bodyBytes []byte) relaySessionI
 	return identity
 }
 
+func normalizeRelaySessionIdentity(platform string, identity relaySessionIdentity) relaySessionIdentity {
+	if strings.TrimSpace(platform) != "codex" {
+		return identity
+	}
+	parentReferencesNode := identity.ParentHash != "" && identity.ParentHash == identity.NodeHash
+	if parentReferencesNode {
+		identity.ParentHash = ""
+	}
+	if !parentReferencesNode && identity.ParentHash == "" && identity.RootHash != "" && identity.RootHash != identity.NodeHash {
+		identity.ParentHash = identity.RootHash
+	}
+	if identity.ParentHash != "" {
+		identity.Role = "child"
+	} else {
+		identity.Role = "root"
+	}
+	return identity
+}
+
 func deriveRelaySessionIdentityWithHeaders(platform string, bodyBytes []byte, headers map[string]string) relaySessionIdentity {
-	identity := deriveRelaySessionIdentity(platform, bodyBytes)
+	identity := deriveRelaySessionIdentityFromBody(platform, bodyBytes)
 	if strings.TrimSpace(platform) != "codex" {
 		return identity
 	}
 
+	cursorConversationID := relaySessionField(bodyBytes, "cursorConversationId", "cursor_conversation_id")
+	if headerValue := getHeaderValueCaseInsensitive(headers, "x-cursor-conversation-id"); headerValue != "" {
+		cursorConversationID = headerValue
+	}
+	if cursorConversationID != "" {
+		identity.NodeHash = hashRelaySessionField("codex", "cursor_conversation_id", cursorConversationID)
+		identity.ParentHash = ""
+		identity.RootHash = identity.NodeHash
+		identity.Role = "root"
+		identity.IdentitySource = sessionIdentitySourceCursorConversation
+		return normalizeRelaySessionIdentity(platform, identity)
+	}
+
 	clientMetadata := gjson.GetBytes(bodyBytes, "client_metadata")
+	bodyRootHash := firstRelaySessionFieldHash(
+		"codex",
+		bodyBytes,
+		"root_session_id", "rootSessionId",
+		"root_conversation_id", "rootConversationId",
+		"root_thread_id", "rootThreadId",
+	)
 	turnMetadataRaw := getHeaderValueCaseInsensitive(headers, "x-codex-turn-metadata")
 	if turnMetadataRaw == "" {
 		turnMetadataRaw = firstNonEmptyGJSON(clientMetadata, "x-codex-turn-metadata", "x_codex_turn_metadata")
@@ -1746,6 +1818,9 @@ func deriveRelaySessionIdentityWithHeaders(platform string, bodyBytes []byte, he
 	if directSession := getHeaderValueCaseInsensitive(headers, "x-codex-session-id"); directSession != "" {
 		sessionID = directSession
 	}
+	if threadID != "" || sessionID != "" || parentThreadID != "" || rootThreadID != "" {
+		identity.IdentitySource = sessionIdentitySourceCodexExplicit
+	}
 
 	if threadID != "" {
 		identity.NodeHash = hashRelaySessionField("codex", "thread_id", threadID)
@@ -1753,17 +1828,56 @@ func deriveRelaySessionIdentityWithHeaders(platform string, bodyBytes []byte, he
 		identity.NodeHash = hashRelaySessionField("codex", "session_id", sessionID)
 	}
 	if parentThreadID != "" {
-		identity.ParentHash = hashRelaySessionField("codex", "thread_id", parentThreadID)
-		identity.Role = "child"
+		parentHash := hashRelaySessionField("codex", "thread_id", parentThreadID)
+		if identity.NodeHash == "" {
+			identity.NodeHash = parentHash
+		} else {
+			identity.ParentHash = parentHash
+			identity.Role = "child"
+		}
 	}
 	if rootThreadID != "" {
 		identity.RootHash = hashRelaySessionField("codex", "thread_id", rootThreadID)
+		if identity.NodeHash == "" {
+			identity.NodeHash = identity.RootHash
+		}
+	} else if bodyRootHash != "" {
+		identity.RootHash = bodyRootHash
 	} else if identity.ParentHash != "" {
 		identity.RootHash = identity.ParentHash
 	} else if identity.NodeHash != "" {
 		identity.RootHash = identity.NodeHash
 	}
-	return identity
+	return normalizeRelaySessionIdentity(platform, identity)
+}
+
+func codexHasExplicitSessionIdentity(bodyBytes []byte) bool {
+	root := gjson.ParseBytes(bodyBytes)
+	for _, candidate := range relayStructuredSessionRoots(root) {
+		if !candidate.Exists() || !candidate.IsObject() {
+			continue
+		}
+		for _, path := range []string{
+			"thread_id", "threadId", "session_id", "sessionId",
+			"conversation_id", "conversationId", "parent_thread_id", "parentThreadId",
+			"root_thread_id", "rootThreadId", "parent_session_id", "parentSessionId",
+			"root_session_id", "rootSessionId", "parent_conversation_id", "parentConversationId",
+			"root_conversation_id", "rootConversationId",
+		} {
+			if strings.TrimSpace(candidate.Get(path).String()) != "" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func deriveCodexPromptCacheKey(bodyBytes []byte) string {
+	root := gjson.ParseBytes(bodyBytes)
+	if !root.Get("input").Exists() {
+		return ""
+	}
+	return strings.TrimSpace(root.Get("prompt_cache_key").String())
 }
 
 func deriveMetadataRelaySessionHash(bodyBytes []byte) string {
@@ -1866,6 +1980,9 @@ func deriveCodexThreadSessionHashFromObject(obj gjson.Result) string {
 	if value := firstNonEmptyGJSON(obj, "thread_id", "threadId"); value != "" {
 		return shortSHA256Hex("codex.thread_id=" + value)
 	}
+	if value := firstNonEmptyGJSON(obj, "conversation_id", "conversationId"); value != "" {
+		return shortSHA256Hex("codex.conversation_id=" + value)
+	}
 	if id := strings.TrimSpace(obj.Get("id").String()); id != "" && codexObjectLooksLikeThreadContext(obj) {
 		return shortSHA256Hex("codex.thread_context.id=" + id)
 	}
@@ -1873,7 +1990,22 @@ func deriveCodexThreadSessionHashFromObject(obj gjson.Result) string {
 		return shortSHA256Hex("codex.session_id=" + value)
 	}
 	if value := firstNonEmptyGJSON(obj, "parent_thread_id", "parentThreadId"); value != "" {
-		return shortSHA256Hex("codex.parent_thread_id=" + value)
+		return hashRelaySessionField("codex", "parent_thread_id", value)
+	}
+	if value := firstNonEmptyGJSON(obj, "parent_conversation_id", "parentConversationId"); value != "" {
+		return shortSHA256Hex("codex.conversation_id=" + value)
+	}
+	if value := firstNonEmptyGJSON(obj, "parent_session_id", "parentSessionId"); value != "" {
+		return shortSHA256Hex("codex.session_id=" + value)
+	}
+	if value := firstNonEmptyGJSON(obj, "root_thread_id", "rootThreadId"); value != "" {
+		return shortSHA256Hex("codex.thread_id=" + value)
+	}
+	if value := firstNonEmptyGJSON(obj, "root_conversation_id", "rootConversationId"); value != "" {
+		return shortSHA256Hex("codex.conversation_id=" + value)
+	}
+	if value := firstNonEmptyGJSON(obj, "root_session_id", "rootSessionId"); value != "" {
+		return shortSHA256Hex("codex.session_id=" + value)
 	}
 	if value := strings.TrimSpace(obj.Get("cwd").String()); value != "" && codexObjectLooksLikeThreadContext(obj) {
 		return shortSHA256Hex("codex.cwd=" + value)
@@ -1888,10 +2020,10 @@ func codexObjectLooksLikeThreadContext(obj gjson.Result) bool {
 	for _, path := range []string{
 		"thread_id",
 		"threadId",
+		"conversation_id",
+		"conversationId",
 		"session_id",
 		"sessionId",
-		"parent_thread_id",
-		"parentThreadId",
 		"cwd",
 		"rollout_path",
 		"rolloutPath",
@@ -4584,7 +4716,7 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 		Endpoint:                   endpoint,
 		IsStream:                   isStream,
 	}
-	prs.decorateSessionConcurrencyMeta(kind, bodyBytes, clientHeaders, &requestMeta)
+	prs.decorateSessionConcurrencyMeta(kind, sessionIdentityBodyBytes(plan, bodyBytes), clientHeaders, &requestMeta)
 	updateProviderSlotParameters, releaseProviderSlot, acquiredProviderSlot := prs.acquireProviderConcurrencySlot(kind, providerRefFromProvider(provider), providerConcurrencyLimit(provider), providerConcurrencyLimitEnabled, requestMeta)
 	if !acquiredProviderSlot {
 		return false, errProviderConcurrencyLimit
@@ -4636,6 +4768,7 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 		SessionPreferredProviderID: strings.TrimSpace(plan.SessionPreferredProviderID),
 		SessionPreferredProvider:   strings.TrimSpace(plan.SessionPreferredProvider),
 		SessionProviderRoute:       strings.TrimSpace(plan.SessionProviderRoute),
+		SessionIdentitySource:      strings.TrimSpace(requestMeta.SessionIdentitySource),
 		ReasoningEffort:            plan.Reasoning.Effort,
 		ReasoningEffortSource:      plan.Reasoning.Source,
 		UserAgent:                  requestUserAgent,
@@ -4702,7 +4835,7 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 		err := GlobalDBQueueLogs.ExecBatchCtx(ctx, `
 				INSERT INTO request_log (
 						platform, model, requested_model, mapped_model, model_mapping_pattern, model_mapping_target, model_override, model_route_captured,
-						session_preferred_provider_id, session_preferred_provider, session_provider_route,
+						session_preferred_provider_id, session_preferred_provider, session_provider_route, session_identity_source,
 					response_model, provider_id, provider, http_code, request_outcome, outcome_reason, error_message, error_source,
 					reasoning_effort, user_agent,
 					input_tokens, output_tokens, cache_create_tokens, ephemeral_5m_tokens, ephemeral_1h_tokens, cache_read_tokens,
@@ -4716,7 +4849,7 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 					provider_per_call_unified_set, provider_per_call_input_set, provider_per_call_output_set,
 					request_body, response_body, request_body_truncated, response_body_truncated, payload_bytes, payload_captured,
 					reasoning_effort_source, data_source, dedup_core
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			`,
 			requestLog.Platform,
 			requestLog.Model,
@@ -4729,6 +4862,7 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 			requestLog.SessionPreferredProviderID,
 			requestLog.SessionPreferredProvider,
 			requestLog.SessionProviderRoute,
+			requestLog.SessionIdentitySource,
 			requestLog.ResponseModel,
 			requestLog.ProviderID,
 			requestLog.Provider,
@@ -6143,6 +6277,7 @@ func ensureRequestLogTableWithDB(db *sql.DB) error {
 		session_preferred_provider_id TEXT DEFAULT '',
 		session_preferred_provider TEXT DEFAULT '',
 		session_provider_route TEXT DEFAULT '',
+		session_identity_source TEXT DEFAULT '',
 		response_model TEXT DEFAULT '',
 		reasoning_effort TEXT DEFAULT '',
 		reasoning_effort_source TEXT DEFAULT '',
@@ -6325,6 +6460,9 @@ func ensureRequestLogTableWithDB(db *sql.DB) error {
 		return err
 	}
 	if err := ensureRequestLogColumn(db, "session_provider_route", "TEXT DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := ensureRequestLogColumn(db, "session_identity_source", "TEXT DEFAULT ''"); err != nil {
 		return err
 	}
 	if err := ensureRequestLogColumn(db, "response_model", "TEXT DEFAULT ''"); err != nil {
@@ -7100,6 +7238,7 @@ type ReqeustLog struct {
 	SessionPreferredProviderID string  `json:"session_preferred_provider_id,omitempty"`
 	SessionPreferredProvider   string  `json:"session_preferred_provider,omitempty"`
 	SessionProviderRoute       string  `json:"session_provider_route,omitempty"`
+	SessionIdentitySource      string  `json:"session_identity_source,omitempty"`
 	ResponseModel              string  `json:"response_model,omitempty"`
 	ReasoningEffort            string  `json:"reasoning_effort,omitempty"`
 	ReasoningEffortSource      string  `json:"reasoning_effort_source,omitempty"`
@@ -7638,6 +7777,13 @@ type providerRequestPlan struct {
 	PromptCacheKey              string
 	ContinuationSessionKey      string
 	PreviousResponseID          string
+}
+
+func sessionIdentityBodyBytes(plan providerRequestPlan, fallback []byte) []byte {
+	if len(plan.OriginalBodyBytes) > 0 {
+		return plan.OriginalBodyBytes
+	}
+	return fallback
 }
 
 type providerRequestReasoningMetadata struct {

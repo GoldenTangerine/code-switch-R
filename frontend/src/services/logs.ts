@@ -21,6 +21,7 @@ export type RequestLog = {
   session_preferred_provider_id?: string
   session_preferred_provider?: string
   session_provider_route?: SessionProviderRoute
+  session_identity_source?: 'cursor_conversation' | 'codex_explicit' | 'prompt_cache_key' | string
   response_model?: string
 	reasoning_effort?: string
 	reasoning_effort_source?: ReasoningEffortSource

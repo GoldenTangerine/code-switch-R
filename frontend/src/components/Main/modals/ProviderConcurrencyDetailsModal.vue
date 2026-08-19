@@ -116,8 +116,15 @@
           </div>
           <div class="provider-concurrency-row__meta">
             <template v-for="item in entry.meta" :key="item.key">
-              <time v-if="item.dateTime" :datetime="item.dateTime">{{ item.label }}</time>
-              <span v-else>{{ item.label }}</span>
+              <time
+                v-if="item.dateTime"
+                :datetime="item.dateTime"
+                :class="{ 'provider-concurrency-row__meta-item--identity': item.tone === 'identity' }"
+              >{{ item.label }}</time>
+              <span
+                v-else
+                :class="{ 'provider-concurrency-row__meta-item--identity': item.tone === 'identity' }"
+              >{{ item.label }}</span>
             </template>
           </div>
           <p class="provider-concurrency-row__ua">{{ entry.userAgent }}</p>
@@ -219,6 +226,7 @@ type ConnectionDisplayMetaItem = {
   key: string
   label: string
   dateTime?: string
+  tone?: 'identity'
 }
 type ConnectionDisplayEntry = {
   id: string | number
@@ -338,6 +346,7 @@ const displayEntries = computed<ConnectionDisplayEntry[]>(() => {
   if (activeTab.value === 'active') {
     return activeRequests.value.map((request) => {
       const parameters = activeConnectionParameters(request)
+      const identityMeta = identitySourceMeta(request.sessionIdentitySource)
       return {
         id: request.id,
         modelRows: buildConnectionModelRows({
@@ -349,6 +358,7 @@ const displayEntries = computed<ConnectionDisplayEntry[]>(() => {
         }, t),
         context: request.endpoint || '-',
         meta: [
+          ...(identityMeta ? [identityMeta] : []),
           {
             key: 'stream',
             label: request.isStream
@@ -368,6 +378,7 @@ const displayEntries = computed<ConnectionDisplayEntry[]>(() => {
 
   return historyLogs.value.map((log) => {
     const parameters = historyConnectionParameters(log)
+    const identityMeta = identitySourceMeta(log.session_identity_source)
     return {
       id: log.id,
       modelRows: buildConnectionModelRows({
@@ -379,6 +390,7 @@ const displayEntries = computed<ConnectionDisplayEntry[]>(() => {
       }, t),
       context: `HTTP ${log.http_code || 0}`,
       meta: [
+        ...(identityMeta ? [identityMeta] : []),
         {
           key: 'stream',
           label: log.is_stream
@@ -417,6 +429,24 @@ function closeSwitchPanel() {
 
 function displayModel(value?: string) {
   return `${value ?? ''}`.trim() || '-'
+}
+
+function identitySourceLabel(source?: string) {
+  switch (source) {
+    case 'cursor_conversation':
+      return t('components.main.concurrencyDetails.identitySourceCursor')
+    case 'codex_explicit':
+      return t('components.main.concurrencyDetails.identitySourceCodex')
+    case 'prompt_cache_key':
+      return t('components.main.concurrencyDetails.identitySourcePromptCache')
+    default:
+      return ''
+  }
+}
+
+function identitySourceMeta(source?: string): ConnectionDisplayMetaItem | null {
+  const label = identitySourceLabel(source)
+  return label ? { key: 'identity-source', label, tone: 'identity' } : null
 }
 
 function activeRequestedModel(request: ProviderConcurrencyRequestView) {
@@ -1262,6 +1292,24 @@ onBeforeUnmount(() => {
 .provider-concurrency-row__meta {
   color: #64748b;
   font-size: 12px;
+}
+
+.provider-concurrency-row__meta-item--identity {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 2px 7px;
+  border: 1px solid rgba(13, 148, 136, 0.3);
+  border-radius: 5px;
+  color: #0f766e;
+  background: rgba(20, 184, 166, 0.1);
+  font-weight: 700;
+}
+
+.provider-concurrency-modal--dark .provider-concurrency-row__meta-item--identity {
+  border-color: rgba(45, 212, 191, 0.34);
+  color: #5eead4;
+  background: rgba(20, 184, 166, 0.14);
 }
 
 .provider-concurrency-row__context {

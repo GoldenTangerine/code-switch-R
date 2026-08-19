@@ -92,6 +92,7 @@ func TestEnsureRequestLogTableWithDB_RepairsDanglingStatsTrigger(t *testing.T) {
 	assertRequestLogColumnExists(t, db, "session_preferred_provider_id")
 	assertRequestLogColumnExists(t, db, "session_preferred_provider")
 	assertRequestLogColumnExists(t, db, "session_provider_route")
+	assertRequestLogColumnExists(t, db, "session_identity_source")
 	assertRequestLogColumnExists(t, db, "reasoning_effort_source")
 	assertRequestLogColumnExists(t, db, "stream_last_event")
 	assertRequestLogColumnExists(t, db, "stream_terminal_event")

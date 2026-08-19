@@ -45,14 +45,15 @@ func TestRequestLogListSelectFieldsIncludePerformanceColumns(t *testing.T) {
 
 func TestRequestLogListSelectFieldsIncludeModelRouteColumns(t *testing.T) {
 	required := map[string]bool{
-		"mapped_model":          false,
-		"model_mapping_pattern": false,
-		"model_mapping_target":  false,
-		"model_override":        false,
-		"model_route_captured":  false,
+		"mapped_model":                  false,
+		"model_mapping_pattern":         false,
+		"model_mapping_target":          false,
+		"model_override":                false,
+		"model_route_captured":          false,
 		"session_preferred_provider_id": false,
 		"session_preferred_provider":    false,
 		"session_provider_route":        false,
+		"session_identity_source":       false,
 	}
 	for _, field := range requestLogListSelectFields {
 		if _, ok := required[field]; ok {
@@ -88,6 +89,16 @@ func TestBuildRequestLogListMapsSessionProviderRoute(t *testing.T) {
 	got := logs[0]
 	if got.SessionPreferredProviderID != "provider-b" || got.SessionPreferredProvider != "B" || got.SessionProviderRoute != sessionProviderRouteFallback {
 		t.Fatalf("会话供应商路由映射错误: %#v", got)
+	}
+}
+
+func TestBuildRequestLogListMapsSessionIdentitySource(t *testing.T) {
+	logs := buildRequestLogList([]xdb.Record{{
+		"id":                      int64(9),
+		"session_identity_source": "cursor_conversation",
+	}}, nil)
+	if len(logs) != 1 || logs[0].SessionIdentitySource != "cursor_conversation" {
+		t.Fatalf("会话识别来源映射错误: %#v", logs)
 	}
 }
 
