@@ -1936,6 +1936,8 @@ watch(
   white-space: pre-wrap;
   word-break: break-word;
   font-family: 'SFMono-Regular', Menlo, Consolas, monospace;
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 .provider-log-terminal__body--fallback {

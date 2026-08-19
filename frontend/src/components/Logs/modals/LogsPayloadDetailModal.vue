@@ -365,6 +365,8 @@ html.dark .payload-performance__connection {
   line-height: 1.45;
   color: #0f172a;
   background: rgba(15, 23, 42, 0.03);
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 .payload-detail-pre--json {

@@ -50,10 +50,10 @@ describe('clipboard', () => {
     expect(webWriteText).toHaveBeenCalledWith('provider error')
   })
 
-  it('浏览器环境不调用可能假成功的 Wails Runtime', async () => {
+  it('浏览器预览环境不调用可能假成功的 Wails Runtime', async () => {
     const webWriteText = vi.fn().mockResolvedValue(undefined)
     setTextMock.mockResolvedValue(undefined)
-    vi.stubGlobal('window', {})
+    vi.stubGlobal('window', { _wails: { environment: { OS: 'darwin', Arch: 'browser' } } })
     vi.stubGlobal('navigator', { clipboard: { writeText: webWriteText } })
 
     await writeTextToClipboard('provider error')
@@ -90,5 +90,32 @@ describe('clipboard', () => {
     expect(textarea.value).toBe('provider error')
     expect(execCommand).toHaveBeenCalledWith('copy')
     expect(removeChild).toHaveBeenCalledWith(textarea)
+  })
+
+  it('所有剪贴板方式失败时保留底层错误与降级错误', async () => {
+    const execCommand = vi.fn().mockReturnValue(false)
+    const textarea = {
+      value: '',
+      style: {},
+      setAttribute: vi.fn(),
+      focus: vi.fn(),
+      select: vi.fn(),
+    }
+    setTextMock.mockRejectedValue(new Error('runtime unavailable'))
+    vi.stubGlobal('window', { _wails: { environment: { OS: 'darwin', Arch: 'arm64' } } })
+    vi.stubGlobal('navigator', {
+      clipboard: {
+        writeText: vi.fn().mockRejectedValue(new Error('not allowed')),
+      },
+    })
+    vi.stubGlobal('document', {
+      createElement: vi.fn().mockReturnValue(textarea),
+      body: { appendChild: vi.fn(), removeChild: vi.fn() },
+      execCommand,
+    })
+
+    await expect(writeTextToClipboard('provider error')).rejects.toThrow(
+      'not allowed; fallback: execCommand copy failed',
+    )
   })
 })

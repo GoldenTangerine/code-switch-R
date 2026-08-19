@@ -920,6 +920,8 @@ html.dark .console-content {
   flex-direction: column;
   gap: 4px;
   min-width: 0;
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 .log-message {

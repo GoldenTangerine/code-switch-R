@@ -531,6 +531,7 @@ import { useI18n } from 'vue-i18n'
 import BaseInput from '../../common/BaseInput.vue'
 import InlineModal from '../../common/InlineModal.vue'
 import type { AutomationCard } from '../../../data/cards'
+import { writeTextToClipboard } from '../../../utils/clipboard'
 import { extractErrorMessage } from '../../../utils/error'
 import { showToast } from '../../../utils/toast'
 import {
@@ -798,22 +799,6 @@ const formatDebugDuration = (durationMs?: number) => {
   return `${Math.round(durationMs)} ms`
 }
 
-const copyTextFallback = (text: string) => {
-  if (typeof document === 'undefined') return false
-  const textarea = document.createElement('textarea')
-  textarea.value = text
-  textarea.setAttribute('readonly', 'true')
-  textarea.style.position = 'fixed'
-  textarea.style.opacity = '0'
-  textarea.style.pointerEvents = 'none'
-  document.body.appendChild(textarea)
-  textarea.select()
-  textarea.setSelectionRange(0, textarea.value.length)
-  const copied = document.execCommand('copy')
-  document.body.removeChild(textarea)
-  return copied
-}
-
 const buildDebugCopyPayload = () => {
   if (!debugInfo.value) return ''
 
@@ -872,11 +857,7 @@ const copyDebugDetails = async () => {
     return
   }
   try {
-    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(payload)
-    } else if (!copyTextFallback(payload)) {
-      throw new Error(t('components.main.modelList.debugCopyUnavailable'))
-    }
+    await writeTextToClipboard(payload)
     showToast(t('components.main.modelList.toast.debugCopied'))
   } catch (err) {
     showToast(
@@ -1584,6 +1565,13 @@ watch(
   flex-direction: column;
   gap: 16px;
   min-height: 0;
+}
+
+.debug-summary-grid,
+.debug-summary-note,
+.debug-attempt-card {
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 .debug-hint {

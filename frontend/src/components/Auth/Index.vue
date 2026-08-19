@@ -114,14 +114,6 @@ const startCodexOAuth = async () => {
   }
 }
 
-const copyText = async (payload: string) => {
-  try {
-    await Clipboard.SetText(payload)
-  } catch {
-    await writeTextToClipboard(payload)
-  }
-}
-
 const readTextFromClipboard = async () => {
   try {
     return await Clipboard.Text()
@@ -149,7 +141,7 @@ const copyCodexOAuthVerificationURL = async () => {
   if (!target) return
 
   try {
-    await copyText(target)
+    await writeTextToClipboard(target)
     showToast(t('components.general.codexOAuth.copyVerifySuccess'), 'success')
   } catch (error) {
     console.error('failed to copy Codex OAuth verification link', error)
@@ -427,6 +419,12 @@ onBeforeUnmount(() => {
   border: 1px solid color-mix(in srgb, var(--mac-accent) 20%, var(--mac-border));
   border-radius: 14px;
   background: color-mix(in srgb, var(--mac-accent) 8%, var(--mac-surface));
+}
+
+.codex-oauth-device > span,
+.codex-oauth-device a {
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 .codex-oauth-device strong {
