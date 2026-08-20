@@ -1427,6 +1427,10 @@ func newClaudeRoutingTestRouter(t *testing.T, providers []Provider) (*gin.Engine
 }
 
 func sendClaudeRoutingTestRequest(t *testing.T, router http.Handler, model string, sessionID string) {
+	sendClaudeRoutingTestRequestWithHeaders(t, router, model, sessionID, nil)
+}
+
+func sendClaudeRoutingTestRequestWithHeaders(t *testing.T, router http.Handler, model string, sessionID string, headers map[string]string) {
 	t.Helper()
 	metadata := ""
 	if sessionID != "" {
@@ -1435,10 +1439,80 @@ func sendClaudeRoutingTestRequest(t *testing.T, router http.Handler, model strin
 	body := fmt.Sprintf(`{"model":%q,"max_tokens":16,"messages":[{"role":"user","content":"hi"}]%s}`, model, metadata)
 	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	for key, value := range headers {
+		req.Header.Set(key, value)
+	}
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("Claude 测试请求状态码=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestClaudeSubagentFollowsOfficialSessionHeadersWhenMetadataChanges(t *testing.T) {
+	useIsolatedHomeDir(t)
+	gin.SetMode(gin.TestMode)
+	disableBlacklistForTest(t)
+
+	var callsMu sync.Mutex
+	calls := make([]string, 0, 3)
+	newUpstream := func(name string) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			body, _ := io.ReadAll(r.Body)
+			callsMu.Lock()
+			calls = append(calls, name+":"+gjson.GetBytes(body, "model").String())
+			callsMu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"msg_test","type":"message","role":"assistant","model":"vendor-model","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
+		}))
+	}
+	aUpstream := newUpstream("A")
+	bUpstream := newUpstream("B")
+	defer aUpstream.Close()
+	defer bUpstream.Close()
+
+	providers := []Provider{
+		{
+			ID:                     1,
+			Name:                   "A",
+			APIURL:                 aUpstream.URL,
+			APIKey:                 "a-key",
+			Enabled:                true,
+			Level:                  1,
+			ModelMapping:           map[string]string{claudeManagedSubagentModel: "a-subagent"},
+			ModelMappingMissPolicy: ModelMappingMissPolicyBlock,
+		},
+		{
+			ID:      2,
+			Name:    "B",
+			APIURL:  bUpstream.URL,
+			APIKey:  "b-key",
+			Enabled: true,
+			Level:   5,
+			ModelMapping: map[string]string{
+				"claude-main-test":         "b-main",
+				"claude-child-test":        "b-child",
+				claudeManagedSubagentModel: "b-subagent",
+			},
+			ModelMappingMissPolicy: ModelMappingMissPolicyBlock,
+		},
+	}
+	router, _, _ := newClaudeRoutingTestRouter(t, providers)
+	headers := map[string]string{
+		"x-claude-code-session-id": "sess-header-001",
+	}
+	sendClaudeRoutingTestRequestWithHeaders(t, router, "claude-main-test", "metadata-main", headers)
+	headers["x-claude-code-agent-id"] = "agent-a"
+	sendClaudeRoutingTestRequestWithHeaders(t, router, claudeManagedSubagentModel, "metadata-child", headers)
+	headers["x-claude-code-agent-id"] = "agent-b"
+	sendClaudeRoutingTestRequestWithHeaders(t, router, "claude-child-test", "metadata-child-2", headers)
+
+	callsMu.Lock()
+	got := append([]string(nil), calls...)
+	callsMu.Unlock()
+	want := []string{"B:b-main", "B:b-subagent", "B:b-child"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Claude Header 子代理供应商调用=%v，期望=%v", got, want)
 	}
 }
 
@@ -2308,6 +2382,165 @@ func TestRelaySessionIdentityCanonicalizesParentAndSubagentHashes(t *testing.T) 
 	anonymousSubagent := deriveRelaySessionIdentity("claude", []byte(`{"model":"code-switch-r-subagent","metadata":{"session_id":"root-session"}}`))
 	if anonymousSubagent.NodeHash == mainIdentity.NodeHash || anonymousSubagent.ParentHash != mainIdentity.NodeHash || anonymousSubagent.Role != "child" {
 		t.Fatalf("无独立 ID 的子代理应继承主会话: main=%#v subagent=%#v", mainIdentity, anonymousSubagent)
+	}
+}
+
+func TestClaudeHeaderSessionIdentityBuildsAgentTree(t *testing.T) {
+	headers := map[string]string{
+		"X-Claude-Code-Session-ID": "sess-header-tree",
+	}
+	root := deriveRelaySessionIdentityWithHeaders("claude", []byte(`{"model":"claude-main"}`), headers)
+	if root.NodeHash == "" || root.NodeHash != root.RootHash || root.Role != "root" || root.IdentitySource != sessionIdentitySourceClaudeHeaders {
+		t.Fatalf("Claude Header 主会话身份错误: %#v", root)
+	}
+
+	childHeaders := map[string]string{
+		"x-claude-code-session-id": "sess-header-tree",
+		"x-claude-code-agent-id":   "agent-a",
+	}
+	child := deriveRelaySessionIdentityWithHeaders("claude", []byte(`{"model":"code-switch-r-subagent","metadata":{"session_id":"different"}}`), childHeaders)
+	if child.NodeHash == root.NodeHash || child.ParentHash != root.NodeHash || child.RootHash != root.RootHash || child.Role != "child" {
+		t.Fatalf("Claude Header 一级子会话身份错误: root=%#v child=%#v", root, child)
+	}
+
+	nestedHeaders := map[string]string{
+		"x-claude-code-session-id":      "sess-header-tree",
+		"x-claude-code-agent-id":        "agent-b",
+		"x-claude-code-parent-agent-id": "agent-a",
+	}
+	nested := deriveRelaySessionIdentityWithHeaders("claude", []byte(`{"model":"code-switch-r-subagent"}`), nestedHeaders)
+	if nested.NodeHash == child.NodeHash || nested.ParentHash != child.NodeHash || nested.RootHash != root.RootHash || nested.Role != "child" {
+		t.Fatalf("Claude Header 嵌套子会话身份错误: root=%#v child=%#v nested=%#v", root, child, nested)
+	}
+}
+
+func TestClaudeSessionIdentityCanonicalizesLegacyMetadataAndHeaders(t *testing.T) {
+	relay := NewProviderRelayService(nil, nil, nil, nil, nil, nil, "")
+	mainBody := []byte(`{"model":"claude-main","metadata":{"user_id":"user_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_account_11111111-1111-1111-1111-111111111111_session_22222222-2222-2222-2222-222222222222"}}`)
+	main := deriveRelaySessionIdentity("claude", mainBody)
+	main = relay.canonicalizeClaudeSessionIdentity(mainBody, nil, main)
+
+	childHeaders := map[string]string{
+		"x-claude-code-session-id": "22222222-2222-2222-2222-222222222222",
+		"x-claude-code-agent-id":   "agent-header-child",
+	}
+	childBody := []byte(`{"model":"code-switch-r-subagent"}`)
+	child := deriveRelaySessionIdentityWithHeaders("claude", childBody, childHeaders)
+	child = relay.canonicalizeClaudeSessionIdentity(childBody, childHeaders, child)
+	if child.RootHash != main.RootHash || child.ParentHash != main.RootHash || child.NodeHash == main.NodeHash {
+		t.Fatalf("旧 metadata 与新 Header 应归一到同一根会话: main=%#v child=%#v", main, child)
+	}
+	relay.rememberSessionRelation("claude", main)
+	relay.rememberSessionRelation("claude", child)
+	relay.upsertConfirmedSessionBinding("claude", main.NodeHash, "provider-a", "Provider A", "", 5, 5)
+	relay.inheritSessionBinding("claude", child.NodeHash)
+	binding := relay.getSessionBindingSnapshot("claude", child.NodeHash)
+	if binding == nil || binding.ProviderID != "provider-a" || binding.RootHash != main.RootHash {
+		t.Fatalf("旧 metadata 主会话的 Sticky 绑定应被 Header 子会话继承: %#v", binding)
+	}
+}
+
+func TestClaudeSubagentFollowsOfficialHeadersAfterLegacyMainRequest(t *testing.T) {
+	useIsolatedHomeDir(t)
+	gin.SetMode(gin.TestMode)
+	disableBlacklistForTest(t)
+
+	var callsMu sync.Mutex
+	calls := make([]string, 0, 2)
+	newUpstream := func(name string) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			body, _ := io.ReadAll(r.Body)
+			callsMu.Lock()
+			calls = append(calls, name+":"+gjson.GetBytes(body, "model").String())
+			callsMu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"msg_test","type":"message","role":"assistant","model":"vendor-model","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
+		}))
+	}
+	aUpstream := newUpstream("A")
+	bUpstream := newUpstream("B")
+	defer aUpstream.Close()
+	defer bUpstream.Close()
+
+	providers := []Provider{
+		{
+			ID:                     1,
+			Name:                   "A",
+			APIURL:                 aUpstream.URL,
+			APIKey:                 "a-key",
+			Enabled:                true,
+			Level:                  1,
+			ModelMapping:           map[string]string{claudeManagedSubagentModel: "a-subagent"},
+			ModelMappingMissPolicy: ModelMappingMissPolicyBlock,
+		},
+		{
+			ID:      2,
+			Name:    "B",
+			APIURL:  bUpstream.URL,
+			APIKey:  "b-key",
+			Enabled: true,
+			Level:   5,
+			ModelMapping: map[string]string{
+				"claude-main-test":         "b-main",
+				claudeManagedSubagentModel: "b-subagent",
+			},
+			ModelMappingMissPolicy: ModelMappingMissPolicyBlock,
+		},
+	}
+	router, _, _ := newClaudeRoutingTestRouter(t, providers)
+	mainBody := `{"model":"claude-main-test","max_tokens":16,"metadata":{"user_id":"user_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_account_11111111-1111-1111-1111-111111111111_session_22222222-2222-2222-2222-222222222222"},"messages":[{"role":"user","content":"hi"}]}`
+	mainReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(mainBody))
+	mainReq.Header.Set("Content-Type", "application/json")
+	mainResp := httptest.NewRecorder()
+	router.ServeHTTP(mainResp, mainReq)
+	if mainResp.Code != http.StatusOK {
+		t.Fatalf("旧 metadata 主请求状态码=%d body=%s", mainResp.Code, mainResp.Body.String())
+	}
+
+	childReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"code-switch-r-subagent","max_tokens":16,"messages":[{"role":"user","content":"inspect"}]}`))
+	childReq.Header.Set("Content-Type", "application/json")
+	childReq.Header.Set("x-claude-code-session-id", "22222222-2222-2222-2222-222222222222")
+	childReq.Header.Set("x-claude-code-agent-id", "agent-header-child")
+	childResp := httptest.NewRecorder()
+	router.ServeHTTP(childResp, childReq)
+	if childResp.Code != http.StatusOK {
+		t.Fatalf("新 Header 子请求状态码=%d body=%s", childResp.Code, childResp.Body.String())
+	}
+
+	callsMu.Lock()
+	got := append([]string(nil), calls...)
+	callsMu.Unlock()
+	want := []string{"B:b-main", "B:b-subagent"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("混合身份 Claude 供应商调用=%v，期望=%v", got, want)
+	}
+}
+
+func TestClaudeHeaderNestedSessionCanInheritRootBinding(t *testing.T) {
+	appSettings := &AppSettingsService{path: t.TempDir() + "/settings.json"}
+	settings, err := appSettings.GetAppSettings()
+	if err != nil {
+		t.Fatalf("读取应用设置失败: %v", err)
+	}
+	settings.SessionAffinityEnabled["claude"] = true
+	if _, err := appSettings.SaveAppSettings(settings); err != nil {
+		t.Fatalf("保存应用设置失败: %v", err)
+	}
+	relay := NewProviderRelayService(nil, nil, nil, nil, appSettings, nil, "")
+	rootHeaders := map[string]string{"x-claude-code-session-id": "sess-header-binding"}
+	root := deriveRelaySessionIdentityWithHeaders("claude", nil, rootHeaders)
+	nested := deriveRelaySessionIdentityWithHeaders("claude", nil, map[string]string{
+		"x-claude-code-session-id":      "sess-header-binding",
+		"x-claude-code-agent-id":        "agent-b",
+		"x-claude-code-parent-agent-id": "agent-a",
+	})
+	relay.rememberSessionRelation("claude", root)
+	relay.rememberSessionRelation("claude", nested)
+	relay.upsertConfirmedSessionBinding("claude", root.NodeHash, "provider-a", "Provider A", "", 5, 5)
+	relay.inheritSessionBinding("claude", nested.NodeHash)
+	binding := relay.getSessionBindingSnapshot("claude", nested.NodeHash)
+	if binding == nil || binding.ProviderID != "provider-a" || binding.ParentHash != nested.ParentHash || binding.RootHash != root.NodeHash {
+		t.Fatalf("Claude Header 嵌套子会话应继承根绑定: %#v", binding)
 	}
 }
 

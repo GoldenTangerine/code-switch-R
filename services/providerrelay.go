@@ -66,6 +66,7 @@ type ProviderRelayService struct {
 	sessionAffinityMu               sync.Mutex
 	sessionAffinity                 map[string]*providerSessionBinding
 	sessionRelations                map[string]sessionRelation
+	claudeSessionRootAliases        map[string]claudeSessionRootAlias
 	nextSessionNumber               int64
 	nextSessionAttempt              int64
 	nextSessionAffinityRevision     uint64
@@ -373,6 +374,11 @@ type sessionRelation struct {
 	LastSeen   time.Time
 }
 
+type claudeSessionRootAlias struct {
+	RootHash string
+	LastSeen time.Time
+}
+
 type relaySessionIdentity struct {
 	NodeHash       string
 	ParentHash     string
@@ -385,6 +391,7 @@ const (
 	sessionIdentitySourceCursorConversation = "cursor_conversation"
 	sessionIdentitySourceCodexExplicit      = "codex_explicit"
 	sessionIdentitySourcePromptCacheKey     = "prompt_cache_key"
+	sessionIdentitySourceClaudeHeaders      = "claude_headers"
 )
 
 type providerSessionBinding struct {
@@ -543,6 +550,9 @@ func (prs *ProviderRelayService) decorateSessionConcurrencyMeta(platform string,
 		return
 	}
 	identity := deriveRelaySessionIdentityWithHeaders(platform, bodyBytes, headers)
+	if strings.TrimSpace(platform) == "claude" {
+		identity = prs.canonicalizeClaudeSessionIdentity(bodyBytes, headers, identity)
+	}
 	meta.SessionIdentitySource = strings.TrimSpace(identity.IdentitySource)
 	if !prs.isSessionAffinityEnabled(platform) {
 		return
@@ -736,6 +746,7 @@ func NewProviderRelayService(providerService *ProviderService, geminiService *Ge
 		sessionProviderPreferences:  make(map[string]*sessionProviderPreferenceState),
 		sessionAffinity:             make(map[string]*providerSessionBinding),
 		sessionRelations:            make(map[string]sessionRelation),
+		claudeSessionRootAliases:    make(map[string]claudeSessionRootAlias),
 		toolSessions:                make(map[string]toolSessionBinding),
 		providerConcurrency:         make(map[string]int),
 		providerConcurrencyRequests: make(map[string]map[string]ProviderConcurrencyRequestDetail),
@@ -1774,6 +1785,12 @@ func normalizeRelaySessionIdentity(platform string, identity relaySessionIdentit
 }
 
 func deriveRelaySessionIdentityWithHeaders(platform string, bodyBytes []byte, headers map[string]string) relaySessionIdentity {
+	if strings.TrimSpace(platform) == "claude" {
+		if identity, ok := deriveClaudeHeaderSessionIdentity(headers); ok {
+			return identity
+		}
+	}
+
 	identity := deriveRelaySessionIdentityFromBody(platform, bodyBytes)
 	if strings.TrimSpace(platform) != "codex" {
 		return identity
@@ -1860,6 +1877,147 @@ func deriveRelaySessionIdentityWithHeaders(platform string, bodyBytes []byte, he
 	return normalizeRelaySessionIdentity(platform, identity)
 }
 
+func deriveClaudeHeaderSessionIdentity(headers map[string]string) (relaySessionIdentity, bool) {
+	sessionID := getHeaderValueCaseInsensitive(headers, "x-claude-code-session-id")
+	if sessionID == "" {
+		return relaySessionIdentity{}, false
+	}
+
+	rootHash := claudeSessionRootHash(sessionID)
+	if rootHash == "" {
+		return relaySessionIdentity{}, false
+	}
+	identity := relaySessionIdentity{
+		NodeHash:       rootHash,
+		RootHash:       rootHash,
+		Role:           "root",
+		IdentitySource: sessionIdentitySourceClaudeHeaders,
+	}
+	agentID := getHeaderValueCaseInsensitive(headers, "x-claude-code-agent-id")
+	if agentID == "" {
+		return identity, true
+	}
+
+	identity.NodeHash = claudeAgentNodeHash(rootHash, agentID)
+	identity.Role = "child"
+	if parentAgentID := getHeaderValueCaseInsensitive(headers, "x-claude-code-parent-agent-id"); parentAgentID != "" {
+		identity.ParentHash = claudeAgentNodeHash(rootHash, parentAgentID)
+	} else {
+		identity.ParentHash = rootHash
+	}
+	return identity, true
+}
+
+func claudeSessionRootHash(sessionID string) string {
+	return hashRelaySessionField("claude", "session_id", sessionID)
+}
+
+func claudeAgentNodeHash(rootHash string, agentID string) string {
+	rootHash = strings.TrimSpace(rootHash)
+	agentID = strings.TrimSpace(agentID)
+	if rootHash == "" || agentID == "" {
+		return ""
+	}
+	return shortSHA256Hex(rootHash + "|claude.agent_id=" + agentID)
+}
+
+func claudeSessionIDFromRequest(bodyBytes []byte, headers map[string]string) string {
+	if sessionID := getHeaderValueCaseInsensitive(headers, "x-claude-code-session-id"); sessionID != "" {
+		return sessionID
+	}
+	if sessionID := relaySessionField(bodyBytes, "session_id", "sessionId"); sessionID != "" {
+		return sessionID
+	}
+	metadata := gjson.GetBytes(bodyBytes, "metadata")
+	if parsed := parseClaudeMetadataUserID(metadata.Get("user_id").String()); parsed != nil {
+		return strings.TrimSpace(parsed.SessionID)
+	}
+	return ""
+}
+
+func (prs *ProviderRelayService) canonicalizeClaudeSessionIdentity(bodyBytes []byte, headers map[string]string, identity relaySessionIdentity) relaySessionIdentity {
+	if prs == nil || strings.TrimSpace(identity.RootHash) == "" {
+		return identity
+	}
+	sessionID := claudeSessionIDFromRequest(bodyBytes, headers)
+	if sessionID == "" {
+		return identity
+	}
+	aliasKey := claudeSessionRootHash(sessionID)
+	if aliasKey == "" {
+		return identity
+	}
+
+	now := time.Now()
+	prs.sessionAffinityMu.Lock()
+	if prs.claudeSessionRootAliases == nil {
+		prs.claudeSessionRootAliases = make(map[string]claudeSessionRootAlias)
+	}
+	for key, alias := range prs.claudeSessionRootAliases {
+		if alias.RootHash == "" || now.Sub(alias.LastSeen) > time.Duration(defaultSessionAffinityTTLMinutes)*time.Minute {
+			delete(prs.claudeSessionRootAliases, key)
+		}
+	}
+	alias, exists := prs.claudeSessionRootAliases[aliasKey]
+	if !exists || alias.RootHash == "" {
+		alias = claudeSessionRootAlias{RootHash: strings.TrimSpace(identity.RootHash)}
+	}
+	alias.LastSeen = now
+	prs.claudeSessionRootAliases[aliasKey] = alias
+	for len(prs.claudeSessionRootAliases) > sessionAffinityMaxBindings {
+		oldestKey := ""
+		var oldestSeen time.Time
+		for key, item := range prs.claudeSessionRootAliases {
+			if oldestKey == "" || item.LastSeen.Before(oldestSeen) {
+				oldestKey = key
+				oldestSeen = item.LastSeen
+			}
+		}
+		if oldestKey == "" {
+			break
+		}
+		delete(prs.claudeSessionRootAliases, oldestKey)
+	}
+	canonicalRootHash := alias.RootHash
+	prs.sessionAffinityMu.Unlock()
+
+	if canonicalRootHash == identity.RootHash {
+		return identity
+	}
+	originalRootHash := identity.RootHash
+	identity.RootHash = canonicalRootHash
+	if headerIdentity, ok := deriveClaudeHeaderSessionIdentity(headers); ok {
+		if headerIdentity.Role == "root" {
+			identity.NodeHash = canonicalRootHash
+			identity.ParentHash = ""
+			identity.Role = "root"
+			return identity
+		}
+		if agentID := getHeaderValueCaseInsensitive(headers, "x-claude-code-agent-id"); agentID != "" {
+			identity.NodeHash = claudeAgentNodeHash(canonicalRootHash, agentID)
+			identity.Role = "child"
+			if parentAgentID := getHeaderValueCaseInsensitive(headers, "x-claude-code-parent-agent-id"); parentAgentID != "" {
+				identity.ParentHash = claudeAgentNodeHash(canonicalRootHash, parentAgentID)
+			} else {
+				identity.ParentHash = canonicalRootHash
+			}
+			return identity
+		}
+	}
+	if identity.Role == "root" {
+		identity.NodeHash = canonicalRootHash
+		identity.ParentHash = ""
+		return identity
+	}
+	if identity.ParentHash == originalRootHash {
+		identity.ParentHash = canonicalRootHash
+	}
+	if component := deriveClaudeStickySubagentComponent(bodyBytes); component != "" {
+		identity.NodeHash = shortSHA256Hex(canonicalRootHash + "|claude-subagent=" + component)
+	}
+	return identity
+}
+
 func codexHasExplicitSessionIdentity(bodyBytes []byte) bool {
 	root := gjson.ParseBytes(bodyBytes)
 	for _, candidate := range relayStructuredSessionRoots(root) {
@@ -1944,6 +2102,9 @@ func (prs *ProviderRelayService) deriveRelaySessionHash(platform string, bodyByt
 
 func (prs *ProviderRelayService) deriveRelaySessionHashWithHeaders(platform string, bodyBytes []byte, headers map[string]string) string {
 	identity := deriveRelaySessionIdentityWithHeaders(platform, bodyBytes, headers)
+	if strings.TrimSpace(platform) == "claude" {
+		identity = prs.canonicalizeClaudeSessionIdentity(bodyBytes, headers, identity)
+	}
 	if identity.NodeHash != "" {
 		return identity.NodeHash
 	}
@@ -2355,6 +2516,9 @@ func (prs *ProviderRelayService) inheritSessionBinding(platform string, sessionH
 		return
 	}
 	parent := prs.sessionAffinity[sessionAffinityStateKey(platform, relation.ParentHash)]
+	if (parent == nil || !parent.Confirmed || parent.ProviderID == "") && platform == "claude" && relation.RootHash != "" && relation.RootHash != relation.ParentHash {
+		parent = prs.sessionAffinity[sessionAffinityStateKey(platform, relation.RootHash)]
+	}
 	if parent == nil || !parent.Confirmed || parent.ProviderID == "" {
 		return
 	}
@@ -2384,6 +2548,9 @@ func (prs *ProviderRelayService) syncInheritedSessionBindingLocked(platform stri
 		return
 	}
 	parent := prs.sessionAffinity[sessionAffinityStateKey(platform, binding.ParentHash)]
+	if (parent == nil || !parent.Confirmed || parent.ProviderID == "") && platform == "claude" && binding.RootHash != "" && binding.RootHash != binding.ParentHash {
+		parent = prs.sessionAffinity[sessionAffinityStateKey(platform, binding.RootHash)]
+	}
 	if parent == nil || !parent.Confirmed || parent.ProviderID == "" {
 		return
 	}
@@ -4094,17 +4261,26 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 		}
 		fmt.Println()
 
+		query := flattenQuery(c.Request.URL.Query())
+		clientHeaders := cloneHeaders(c.Request.Header)
+		clientUserAgent := strings.TrimSpace(c.GetHeader("User-Agent"))
+		sessionIdentity := deriveRelaySessionIdentityWithHeaders(kind, bodyBytes, clientHeaders)
+		if kind == "claude" {
+			sessionIdentity = prs.canonicalizeClaudeSessionIdentity(bodyBytes, clientHeaders, sessionIdentity)
+		}
+		isClaudeSubagentRequest := kind == "claude" && (requestedModel == claudeManagedSubagentModel ||
+			(sessionIdentity.Role == "child" && sessionIdentity.IdentitySource == sessionIdentitySourceClaudeHeaders))
 		stableSessionHash := ""
 		preferredSessionProvider := sessionProviderPreference{}
 		if kind == "claude" && claudeModelRoutingEnabled {
-			stableSessionHash = deriveMetadataRelaySessionHash(bodyBytes)
-			if stableSessionHash != "" && requestedModel == claudeManagedSubagentModel {
+			stableSessionHash = strings.TrimSpace(sessionIdentity.RootHash)
+			if stableSessionHash != "" && isClaudeSubagentRequest {
 				preferredSessionProvider, _ = prs.sessionProviderPreference(kind, stableSessionHash)
 			}
 		}
 		mainSessionPreferenceGeneration := uint64(0)
 		mainSessionPreferenceSucceeded := false
-		if stableSessionHash != "" && requestedModel != claudeManagedSubagentModel {
+		if stableSessionHash != "" && !isClaudeSubagentRequest {
 			mainSessionPreferenceGeneration = prs.beginSessionProviderPreferenceRequest(kind, stableSessionHash)
 			if mainSessionPreferenceGeneration > 0 {
 				defer func() {
@@ -4118,7 +4294,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 				plan.SessionPreferenceHash = stableSessionHash
 				plan.SessionPreferenceGeneration = mainSessionPreferenceGeneration
 			}
-			if requestedModel == claudeManagedSubagentModel && preferredSessionProvider.ProviderID != "" {
+			if isClaudeSubagentRequest && preferredSessionProvider.ProviderID != "" {
 				plan.SessionPreferredProviderID = preferredSessionProvider.ProviderID
 				plan.SessionPreferredProvider = preferredSessionProvider.ProviderName
 				if providerID == preferredSessionProvider.ProviderID {
@@ -4149,15 +4325,10 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 
 		fmt.Printf("[INFO] 共 %d 个 Level 分组：%v\n", len(levels), levels)
 
-		query := flattenQuery(c.Request.URL.Query())
-		clientHeaders := cloneHeaders(c.Request.Header)
-		clientUserAgent := strings.TrimSpace(c.GetHeader("User-Agent"))
-
 		// 获取拉黑功能开关状态
 		blacklistEnabled := prs.blacklistService.ShouldUseFixedMode()
 		roundRobinEnabled := prs.isRoundRobinEnabled()
 		providerConcurrencyLimitEnabled := prs.isProviderConcurrencyLimitEnabled(kind)
-		sessionIdentity := deriveRelaySessionIdentityWithHeaders(kind, bodyBytes, clientHeaders)
 		sessionHash := sessionIdentity.NodeHash
 		if sessionHash == "" {
 			sessionHash = prs.deriveRelaySessionHashWithHeaders(kind, bodyBytes, clientHeaders)

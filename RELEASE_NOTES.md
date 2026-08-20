@@ -1,3 +1,20 @@
+# Code Switch v2.11.8
+
+## 修复
+- **修复 Claude Code 子进程供应商漂移**：优先使用 Claude Code 官方会话 Header 识别主 Agent、一级子 Agent 和嵌套子 Agent，`code-switch-r-subagent` 子进程继承主进程最近成功使用的供应商。
+- **兼容新旧会话标识混用**：旧版主请求的 `metadata.user_id` 与新版子请求的 `x-claude-code-session-id` 自动归一到同一根会话，避免子进程切换到新供应商。
+
+## 优化
+- **完善 Claude Sticky Session 继承**：子 Agent 优先继承直接父节点绑定，父节点尚未确认时回退到根会话绑定；官方 Header 缺失时保留原有请求体识别逻辑。
+- **限制会话别名缓存**：根会话别名按容量和空闲时间清理，不记录原始会话 ID、Agent ID 或父 Agent ID。
+- **补齐回归覆盖**：增加官方 Header 身份树、混合 metadata/Header、普通模型映射和嵌套 Sticky 继承测试。
+
+## 验证
+- 功能完成阶段已通过 Go 服务测试、竞态检查与 `git diff --check`；本次发布按要求不重复运行测试、构建或 lint。
+
+## 发布
+- **本次发版版本号推进到 `v2.11.8`**：同步应用常量、全平台构建元数据和发布说明，并推送 `v2.11.8` Tag 触发 GitHub Actions 全平台自动打包。
+
 # Code Switch v2.11.7
 
 ## 新增
