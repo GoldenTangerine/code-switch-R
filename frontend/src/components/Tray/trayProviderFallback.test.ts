@@ -7,6 +7,7 @@ import {
   listTrayFallbackProviders,
   normalizeTrayProviderLevel,
   selectTrayFallbackProvider,
+  shouldShowTrayProviderQuotaMeta,
 } from './trayProviderFallback'
 
 const createProvider = (
@@ -181,5 +182,42 @@ describe('trayProviderFallback', () => {
       displayKind: 'balance',
       unlimited: true,
     }))
+  })
+
+  it('hides provider quota error details from the tray', () => {
+    const invalidQuota = resolveTrayProviderQuotaDisplay({
+      key: 'weekly',
+      label: 'Weekly',
+      used: 45,
+      total: 120,
+      progressRatio: 0.375,
+      countdownLabel: '2d4h',
+      nextReset: new Date('2026-08-23T00:00:00.000Z'),
+      queriedAt: Date.now(),
+      trackedUsed: 45,
+      adjustment: 0,
+      remaining: 75,
+      isActive: false,
+      valueMode: 'currency',
+      invalidMessage: 'Subscription disabled',
+      extra: 'Upstream response details',
+    }, (key) => key)
+
+    expect(invalidQuota.displayKind).toBe('error')
+    expect(shouldShowTrayProviderQuotaMeta(invalidQuota)).toBe(false)
+
+    expect(shouldShowTrayProviderQuotaMeta({
+      displayKind: 'error',
+      countdownLabel: '',
+      extra: '',
+      invalidMessage: 'HTTP 403 response body',
+    })).toBe(false)
+
+    expect(shouldShowTrayProviderQuotaMeta({
+      displayKind: 'progress',
+      countdownLabel: '6d23h',
+      extra: '',
+      invalidMessage: '',
+    })).toBe(true)
   })
 })

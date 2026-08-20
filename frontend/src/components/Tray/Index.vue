@@ -57,6 +57,7 @@ import {
 import {
   hasTrayFallbackProviderQuotaConfig,
   resolveTrayProviderQuotaDisplay,
+  shouldShowTrayProviderQuotaMeta,
 } from './trayProviderFallback'
 import {
   getProviderDisplayIconSvg,
@@ -1296,7 +1297,13 @@ onUnmounted(() => {
                       </span>
                     </template>
                     <template v-else-if="quota.displayKind === 'error'">
-                      <span>{{ t('tray.queryFailed') }}</span>
+                      <span class="sr-only" role="status" aria-live="polite">
+                        {{ t('tray.queryFailed') }}
+                      </span>
+                      <svg class="tray-quota-error-icon" viewBox="0 0 24 24" aria-hidden="true">
+                        <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8" />
+                        <path d="M12 7.5v5.25M12 16.25v.25" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+                      </svg>
                     </template>
                     <template v-else>
                       <span>{{ t('tray.used', { amount: quota.usedLabel }) }}</span>
@@ -1321,7 +1328,10 @@ onUnmounted(() => {
               >
                 <div class="tray-progress__bar" :style="{ width: `${quota.progressRatio * 100}%` }"></div>
               </div>
-              <div v-if="quota.countdownLabel || quota.extra || quota.invalidMessage" class="tray-meta">
+              <div
+                v-if="shouldShowTrayProviderQuotaMeta(quota)"
+                class="tray-meta"
+              >
                 <span v-if="quota.countdownLabel">{{ quota.countdownLabel }}</span>
                 <span v-if="quota.invalidMessage">{{ quota.invalidMessage }}</span>
                 <span v-if="quota.extra">{{ quota.extra }}</span>
@@ -1867,9 +1877,20 @@ onUnmounted(() => {
   box-shadow: 0 0 0 2px rgba(255, 95, 87, 0.2);
 }
 
-.tray-item--error .tray-item__value,
-.tray-item--error .tray-meta {
+.tray-item--error .tray-item__value {
   color: #bf2b24;
+}
+
+.tray-quota-error-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: rgba(239, 68, 68, 0.12);
+  color: #dc2626;
 }
 
 :global(html.light) .tray-remaining__part--amount {
@@ -1991,8 +2012,12 @@ onUnmounted(() => {
   box-shadow: 0 0 0 2px rgba(255, 107, 99, 0.26);
 }
 
-:global(.dark) .tray-item--error .tray-item__value,
-:global(.dark) .tray-item--error .tray-meta {
+:global(.dark) .tray-item--error .tray-item__value {
   color: #ff8a82;
+}
+
+:global(.dark) .tray-quota-error-icon {
+  background: rgba(244, 63, 94, 0.18);
+  color: #fb7185;
 }
 </style>

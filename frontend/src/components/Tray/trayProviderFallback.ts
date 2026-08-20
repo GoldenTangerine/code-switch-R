@@ -5,7 +5,6 @@ import type { ProviderQuotaSnapshotItem } from '../Main/utils/providerQuotaSnaps
 import { providerQuotaLabelKeyMap } from '../Main/utils/providerQuotaSnapshot'
 import {
   isProviderQuotaBalanceItem,
-  isProviderQuotaErrorItem,
 } from '../Main/utils/providerQuotaCardDisplay'
 import type { TranslateFn } from '../Main/types'
 
@@ -33,7 +32,8 @@ export function resolveTrayProviderQuotaDisplay(
   const title = labelKey ? t(labelKey) : `${item.label ?? ''}`.trim() || normalizedKey
   const used = Number.isFinite(Number(item.used)) ? Math.max(Number(item.used), 0) : 0
   const total = Number.isFinite(Number(item.total)) ? Math.max(Number(item.total), 0) : 0
-  const displayKind = isProviderQuotaErrorItem(item)
+  const invalidMessage = `${item.invalidMessage ?? ''}`.trim()
+  const displayKind = invalidMessage
     ? 'error'
     : isProviderQuotaBalanceItem(item)
       ? 'balance'
@@ -48,11 +48,18 @@ export function resolveTrayProviderQuotaDisplay(
     valueMode: item.valueMode === 'count' ? 'count' : 'currency',
     unit: `${item.unit ?? ''}`.trim() || undefined,
     extra: `${item.extra ?? ''}`.trim(),
-    invalidMessage: `${item.invalidMessage ?? ''}`.trim(),
+    invalidMessage,
     displayKind,
     countdownLabel: `${item.countdownLabel ?? ''}`.trim(),
     nextReset: item.nextReset,
   }
+}
+
+export function shouldShowTrayProviderQuotaMeta(
+  quota: Pick<TrayProviderQuotaDisplay, 'displayKind' | 'countdownLabel' | 'extra' | 'invalidMessage'>,
+): boolean {
+  return quota.displayKind !== 'error'
+    && Boolean(quota.countdownLabel || quota.extra || quota.invalidMessage)
 }
 
 export function normalizeTrayProviderLevel(value: unknown): number {
