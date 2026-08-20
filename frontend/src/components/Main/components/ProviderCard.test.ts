@@ -62,7 +62,13 @@ const baseViewModel = (overrides: Partial<ProviderCardViewModel> = {}): Provider
   ...overrides,
 })
 
-const renderCard = async (viewModel: ProviderCardViewModel) => {
+const renderCard = async (
+  viewModel: ProviderCardViewModel,
+  props: Partial<{
+    activeProxyState: boolean
+    forcedPrioritySaving: boolean
+  }> = {},
+) => {
   const i18n = createI18n({
     legacy: false,
     locale: 'zh',
@@ -76,7 +82,8 @@ const renderCard = async (viewModel: ProviderCardViewModel) => {
     render: () => h(ProviderCard, {
       viewModel,
       activeTab: 'claude',
-      activeProxyState: false,
+      activeProxyState: props.activeProxyState ?? false,
+      forcedPrioritySaving: props.forcedPrioritySaving ?? false,
       resolvedTheme: 'light',
       formatBlacklistCountdown: (seconds: number) => `${Math.floor(seconds / 60)}分${seconds % 60}秒`,
     }),
@@ -333,5 +340,32 @@ describe('ProviderCard display states', () => {
     expect(html).toContain('0/∞')
     expect(html).not.toContain('provider-concurrency-pill--active')
     expect(html).not.toContain('provider-concurrency-pill--overflow')
+  })
+
+  it('renders a visibly active forced-priority button and badge', async () => {
+    const html = await renderCard(baseViewModel({
+      card: { ...card, forcedPriority: true },
+    }), { activeProxyState: true })
+
+    expect(html).toContain('forced-priority-badge')
+    expect(html).toContain('>强制</span>')
+    expect(html).toContain('is-active ghost-icon forced-priority-btn')
+    expect(html).toContain('aria-pressed="true"')
+    expect(html).toContain('aria-label="取消强制优先"')
+    expect(html).toContain('aria-busy="false"')
+  })
+
+  it('disables and labels the forced-priority button while saving', async () => {
+    const html = await renderCard(baseViewModel({
+      card: { ...card, forcedPriority: true },
+    }), {
+      activeProxyState: true,
+      forcedPrioritySaving: true,
+    })
+
+    expect(html).toContain('is-active ghost-icon forced-priority-btn')
+    expect(html).toContain('disabled')
+    expect(html).toContain('aria-label="保存中"')
+    expect(html).toContain('aria-busy="true"')
   })
 })

@@ -2358,6 +2358,11 @@ export class GeminiProvider {
     "enabled": boolean;
 
     /**
+     * 强制优先：可用且未满载时优先尝试该供应商。
+     */
+    "forcedPriority"?: boolean;
+
+    /**
      * 首页供应商日志图标是否隐藏未读红点
      */
     "hideLogBadge"?: boolean;
@@ -4142,6 +4147,11 @@ export class Provider {
     "tint": string;
     "accent": string;
     "enabled": boolean;
+
+    /**
+     * 强制优先：可用且未满载时优先尝试该供应商。
+     */
+    "forcedPriority"?: boolean;
 
     /**
      * 首页供应商日志图标是否隐藏未读红点；缺省为 false，兼容旧配置默认显示。

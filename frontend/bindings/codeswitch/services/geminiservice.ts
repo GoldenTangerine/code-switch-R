@@ -123,6 +123,13 @@ export function ReorderProviders(ids: string[]): $CancellablePromise<void> {
 }
 
 /**
+ * SetForcedPriority 原子设置或取消强制优先供应商
+ */
+export function SetForcedPriority(providerID: string, enabled: boolean): $CancellablePromise<void> {
+    return $Call.ByID(2275831346, providerID, enabled);
+}
+
+/**
  * Start Wails生命周期方法
  */
 export function Start(): $CancellablePromise<void> {

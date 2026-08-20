@@ -879,6 +879,17 @@
         "proxyEnabled": "请先关闭代理",
         "requiresHostedRouting": "当前配置仅支持托管路由，不能直接应用"
       },
+      "forcedPriority": {
+        "badge": "强制",
+        "enable": "设为强制优先",
+        "cancel": "取消强制优先",
+        "saving": "保存中",
+        "activeHint": "当前供应商为强制优先",
+        "proxyRequired": "请先开启代理",
+        "providerUnavailable": "请先启用供应商",
+        "enabled": "{name} 已设为强制优先",
+        "cancelled": "已取消强制优先"
+      },
       "form": {
         "createTitle": "新增供应商",
         "editTitle": "编辑供应商",

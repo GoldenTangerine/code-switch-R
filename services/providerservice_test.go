@@ -101,6 +101,32 @@ func TestProviderServiceSnapshotDoesNotShareMutableFields(t *testing.T) {
 	}
 }
 
+func TestProviderServiceSaveProvidersKeepsSingleForcedPriority(t *testing.T) {
+	resetProviderStoreForTest(t)
+	service := NewProviderService()
+	defer service.Stop()
+
+	providers := []Provider{
+		{ID: 1, Name: "Primary", APIURL: "https://primary.example.com", APIKey: "key", Enabled: true, ForcedPriority: true},
+		{ID: 2, Name: "Secondary", APIURL: "https://secondary.example.com", APIKey: "key", Enabled: true, ForcedPriority: true},
+	}
+	if err := service.SaveProviders("codex", providers); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := service.LoadProviders("codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded) != 2 || !loaded[0].ForcedPriority || loaded[1].ForcedPriority {
+		t.Fatalf("强制优先唯一性未保持: %#v", loaded)
+	}
+	stored, err := LoadProvidersFromStore("codex")
+	if err != nil || len(stored) != 2 || !stored[0].ForcedPriority || stored[1].ForcedPriority {
+		t.Fatalf("强制优先持久化回读异常: %#v, %v", stored, err)
+	}
+}
+
 func TestProviderServiceConcurrentSavesReconcileLatestClaudeSubagentModel(t *testing.T) {
 	homeDir := useIsolatedHomeDir(t)
 	writeClaudeSettingsForTest(t, homeDir, map[string]interface{}{"env": map[string]interface{}{}})
@@ -1302,6 +1328,29 @@ func TestDuplicateProviderPreservesConcurrencyLimit(t *testing.T) {
 				t.Fatalf("复制后的并发上限 = %v，期望 %d", duplicated.ProviderConcurrencyLimit, *tt.limit)
 			}
 		})
+	}
+}
+
+func TestDuplicateProviderDoesNotInheritForcedPriority(t *testing.T) {
+	useIsolatedHomeDir(t)
+	service := NewProviderService()
+	if err := service.SaveProviders("codex", []Provider{{
+		ID:             1,
+		Name:           "Source Provider",
+		APIURL:         "https://api.example.com",
+		APIKey:         "sk-test",
+		Enabled:        true,
+		ForcedPriority: true,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	duplicated, err := service.DuplicateProvider("codex", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if duplicated.ForcedPriority {
+		t.Fatal("复制供应商不应继承强制优先状态")
 	}
 }
 

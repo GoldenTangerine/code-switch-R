@@ -7,6 +7,7 @@ import {
   DeleteProvider as DeleteGeminiProvider,
   GetProviders as GetGeminiProviders,
   ReorderProviders as ReorderGeminiProviders,
+  SetForcedPriority as SetGeminiForcedPriority,
   UpdateProvider as UpdateGeminiProvider,
 } from '../../../../bindings/codeswitch/services/geminiservice'
 import { showToast } from '../../../utils/toast'
@@ -244,6 +245,7 @@ export function useProviderCards(options: UseProviderCardsOptions) {
   const cards = reactive(createCardRecord())
   const draggingId = ref<number | null>(null)
   const dragOverId = ref<number | null>(null)
+  const forcedPrioritySaving = ref(false)
   const directAppliedIds = reactive(createDirectAppliedIds())
   const geminiProvidersCache = ref<GeminiProvider[]>([])
   const opencodeProvidersCache = ref<OpenCodeProvider[]>([])
@@ -619,11 +621,11 @@ export function useProviderCards(options: UseProviderCardsOptions) {
     }
   }
 
-  const persistProviders = async (tabId: ProviderTab) => {
+  const persistProviders = async (tabId: ProviderTab): Promise<boolean> => {
     // additive 三平台逐条 Add/Update/Delete，同 tab 并发保存会基于同一缓存快照互相踩踏，加锁串行化
     if (persistingTabs.has(tabId)) {
       showToast(t('components.main.form.saveInProgress'), 'error')
-      return
+      return false
     }
     persistingTabs.add(tabId)
     try {
@@ -633,10 +635,10 @@ export function useProviderCards(options: UseProviderCardsOptions) {
         const selectedToolId = getSelectedToolId()
         if (!selectedToolId) {
           showToast(t('components.main.customCli.selectToolFirst'), 'error')
-          return
+          return false
         }
         await SaveProviders(getCustomProviderKind(selectedToolId), serializeProviders(cards.others, 'others'))
-        return
+        return true
       }
 
       if (tabId === 'gemini') {
@@ -681,12 +683,12 @@ export function useProviderCards(options: UseProviderCardsOptions) {
           await ReorderGeminiProviders(orderedIds)
           geminiProvidersCache.value = await GetGeminiProviders()
         }
-        return
+        return true
       }
 
       if (tabId === 'opencode') {
         if (isOpenCodeDevPreview.value) {
-          return
+          return true
         }
 
         const nextProviders: OpenCodeProvider[] = []
@@ -707,7 +709,7 @@ export function useProviderCards(options: UseProviderCardsOptions) {
 
         await saveOpenCodeProviders(nextProviders)
         opencodeProvidersCache.value = await getOpenCodeProviders()
-        return
+        return true
       }
 
       if (tabId === 'openclaw') {
@@ -735,7 +737,7 @@ export function useProviderCards(options: UseProviderCardsOptions) {
         const updatedProviders = await getOpenClawProviders()
         openclawProvidersCache.value = updatedProviders
         syncOpenClawCardRefs(updatedProviders, currentRefs)
-        return
+        return true
       }
 
       if (tabId === 'hermes') {
@@ -763,7 +765,7 @@ export function useProviderCards(options: UseProviderCardsOptions) {
         const updatedProviders = await getHermesProviders()
         hermesProvidersCache.value = updatedProviders
         syncHermesCardRefs(updatedProviders, currentRefs)
-        return
+        return true
       }
 
       if (tabId === 'pi') {
@@ -791,10 +793,11 @@ export function useProviderCards(options: UseProviderCardsOptions) {
         const updatedProviders = await getPiProviders()
         piProvidersCache.value = updatedProviders
         syncPiCardRefs(updatedProviders, currentRefs)
-        return
+        return true
       }
 
       await SaveProviders(tabId, serializeProviders(cards[tabId], tabId))
+      return true
     } catch (error) {
       console.error('Failed to save providers', error)
       showToast(t('components.main.form.saveFailed', { error: extractErrorMessage(error) }), 'error')
@@ -1057,10 +1060,81 @@ export function useProviderCards(options: UseProviderCardsOptions) {
     insertProviderToStatusGroup(list, card)
   }
 
+  const setForcedPriority = async (card: AutomationCard) => {
+    if (forcedPrioritySaving.value) {
+      return false
+    }
+    const tabId = getActiveTab()
+    if (!isActiveProxyEnabled()) {
+      showToast(t('components.main.forcedPriority.proxyRequired'), 'warning')
+      return false
+    }
+    if (!card.forcedPriority && (!card.enabled || card.quotaAutoDisabled)) {
+      showToast(t('components.main.forcedPriority.providerUnavailable'), 'warning')
+      return false
+    }
+
+    const list = cards[tabId]
+    if (!list) return false
+    const previous = cloneAutomationCards(list)
+    const nextForcedPriority = !card.forcedPriority
+    list.forEach((item) => {
+      item.forcedPriority = item.id === card.id ? nextForcedPriority : false
+    })
+    forcedPrioritySaving.value = true
+    try {
+      if (tabId === 'gemini') {
+        const providerRef = normalizeProviderRef(card.providerRef)
+        if (!providerRef) {
+          throw new Error('未找到 Gemini 供应商标识')
+        }
+        await SetGeminiForcedPriority(providerRef, nextForcedPriority)
+        geminiProvidersCache.value = geminiProvidersCache.value.map((provider) => ({
+          ...provider,
+          forcedPriority: nextForcedPriority && normalizeProviderRef(provider.id) === providerRef,
+        }))
+      } else if (!await persistProviders(tabId)) {
+        list.splice(0, list.length, ...previous)
+        return false
+      }
+      showToast(
+        nextForcedPriority
+          ? t('components.main.forcedPriority.enabled', { name: card.name })
+          : t('components.main.forcedPriority.cancelled'),
+        'success',
+      )
+      return true
+    } catch (error) {
+      if (tabId === 'gemini') {
+        try {
+          const providers = await GetGeminiProviders()
+          geminiProvidersCache.value = providers
+          const forcedPriorityByID = new Map(providers.map((provider) => [
+            normalizeProviderRef(provider.id),
+            provider.forcedPriority === true,
+          ]))
+          list.forEach((item) => {
+            item.forcedPriority = forcedPriorityByID.get(normalizeProviderRef(item.providerRef)) === true
+          })
+        } catch (reloadError) {
+          console.error('Failed to reload Gemini forced priority after save failure', reloadError)
+          list.splice(0, list.length, ...previous)
+        }
+        showToast(t('components.main.form.saveFailed', { error: extractErrorMessage(error) }), 'error')
+      } else {
+        list.splice(0, list.length, ...previous)
+      }
+      throw error
+    } finally {
+      forcedPrioritySaving.value = false
+    }
+  }
+
   return {
     cards,
     draggingId,
     dragOverId,
+    forcedPrioritySaving,
     directAppliedIds,
     normalizeLevel,
     refreshDirectAppliedStatus,
@@ -1079,5 +1153,6 @@ export function useProviderCards(options: UseProviderCardsOptions) {
     onDragEnd,
     moveCardToStatusGroup,
     appendCardToGroup,
+    setForcedPriority,
   }
 }

@@ -25,17 +25,19 @@ const (
 
 // GeminiProvider Gemini 供应商配置
 type GeminiProvider struct {
-	ID                       string            `json:"id"`
-	Name                     string            `json:"name"`
-	WebsiteURL               string            `json:"websiteUrl,omitempty"`
-	APIKeyURL                string            `json:"apiKeyUrl,omitempty"`
-	BaseURL                  string            `json:"baseUrl,omitempty"`
-	APIKey                   string            `json:"apiKey,omitempty"`
-	Model                    string            `json:"model,omitempty"`
-	Description              string            `json:"description,omitempty"`
-	Category                 string            `json:"category,omitempty"`            // official, third_party, custom
-	PartnerPromotionKey      string            `json:"partnerPromotionKey,omitempty"` // 用于识别供应商类型
-	Enabled                  bool              `json:"enabled"`
+	ID                  string `json:"id"`
+	Name                string `json:"name"`
+	WebsiteURL          string `json:"websiteUrl,omitempty"`
+	APIKeyURL           string `json:"apiKeyUrl,omitempty"`
+	BaseURL             string `json:"baseUrl,omitempty"`
+	APIKey              string `json:"apiKey,omitempty"`
+	Model               string `json:"model,omitempty"`
+	Description         string `json:"description,omitempty"`
+	Category            string `json:"category,omitempty"`            // official, third_party, custom
+	PartnerPromotionKey string `json:"partnerPromotionKey,omitempty"` // 用于识别供应商类型
+	Enabled             bool   `json:"enabled"`
+	// 强制优先：可用且未满载时优先尝试该供应商。
+	ForcedPriority           bool              `json:"forcedPriority,omitempty"`
 	HideLogBadge             bool              `json:"hideLogBadge,omitempty"`             // 首页供应商日志图标是否隐藏未读红点
 	SortOrder                int               `json:"sortOrder,omitempty"`                // 隐藏排序字段：仅控制启用 / 未启用组内顺序
 	EnabledSortOrder         int               `json:"enabledSortOrder,omitempty"`         // 持久化启用组内顺序
@@ -225,6 +227,33 @@ func (s *GeminiService) UpdateProvider(provider GeminiProvider) error {
 		}
 	}
 	return fmt.Errorf("未找到 ID 为 '%s' 的供应商", provider.ID)
+}
+
+// SetForcedPriority 原子设置或取消强制优先供应商
+func (s *GeminiService) SetForcedPriority(providerID string, enabled bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	targetExists := false
+	for _, provider := range s.providers {
+		if provider.ID == providerID {
+			targetExists = true
+			break
+		}
+	}
+	if !targetExists {
+		return fmt.Errorf("未找到 ID 为 '%s' 的供应商", providerID)
+	}
+
+	previousProviders := append([]GeminiProvider(nil), s.providers...)
+	for i := range s.providers {
+		s.providers[i].ForcedPriority = enabled && s.providers[i].ID == providerID
+	}
+	if err := s.saveProviders(); err != nil {
+		s.providers = previousProviders
+		return err
+	}
+	return nil
 }
 
 // DeleteProvider 删除供应商
@@ -676,6 +705,17 @@ func (s *GeminiService) loadProviders() error {
 
 // saveProviders 保存供应商配置（SQLite 统一存储，失败自动恢复原数据）
 func (s *GeminiService) saveProviders() error {
+	forcedPrioritySeen := false
+	for i := range s.providers {
+		if !s.providers[i].ForcedPriority {
+			continue
+		}
+		if forcedPrioritySeen {
+			s.providers[i].ForcedPriority = false
+			continue
+		}
+		forcedPrioritySeen = true
+	}
 	return SaveGeminiProvidersToStore(s.providers)
 }
 
@@ -1029,6 +1069,7 @@ func (s *GeminiService) DuplicateProvider(sourceID string) (*GeminiProvider, err
 		Category:                 source.Category,
 		PartnerPromotionKey:      source.PartnerPromotionKey,
 		Enabled:                  false, // 默认禁用，避免与源供应商冲突
+		ForcedPriority:           false, // 副本不继承强制优先状态
 		Level:                    source.Level,
 		ProviderConcurrencyLimit: cloneOptionalInt(source.ProviderConcurrencyLimit),
 	}

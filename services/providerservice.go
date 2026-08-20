@@ -38,6 +38,8 @@ type Provider struct {
 	Tint    string `json:"tint"`
 	Accent  string `json:"accent"`
 	Enabled bool   `json:"enabled"`
+	// 强制优先：可用且未满载时优先尝试该供应商。
+	ForcedPriority bool `json:"forcedPriority,omitempty"`
 	// 首页供应商日志图标是否隐藏未读红点；缺省为 false，兼容旧配置默认显示。
 	HideLogBadge bool `json:"hideLogBadge,omitempty"`
 	// 供应商分类：official / third_party / custom 等。
@@ -510,6 +512,18 @@ func providerConfigFileExists(path string) bool {
 }
 
 func (ps *ProviderService) SaveProviders(kind string, providers []Provider) error {
+	// 同一平台最多保留一个强制优先供应商；异常旧数据按保存顺序保留第一个。
+	forcedPrioritySeen := false
+	for i := range providers {
+		if !providers[i].ForcedPriority {
+			continue
+		}
+		if forcedPrioritySeen {
+			providers[i].ForcedPriority = false
+			continue
+		}
+		forcedPrioritySeen = true
+	}
 	for i := range providers {
 		normalizeProviderQuotaAutomationOnSave(
 			&providers[i].Enabled,
@@ -985,6 +999,7 @@ func (ps *ProviderService) DuplicateProvider(kind string, sourceID int64) (*Prov
 	cloned.ID = newID
 	cloned.Name = source.Name + " (副本)"
 	cloned.Enabled = false                   // 默认禁用，避免与源供应商冲突
+	cloned.ForcedPriority = false            // 副本不继承强制优先状态
 	cloned.ConnectivityAutoBlacklist = false // 副本默认关闭自动拉黑
 
 	// 6. 添加到列表并保存（使用内部方法避免死锁）

@@ -109,6 +109,88 @@ func TestDetectGeminiAuthType(t *testing.T) {
 	}
 }
 
+func TestGeminiSaveProvidersKeepsSingleForcedPriority(t *testing.T) {
+	resetProviderStoreForTest(t)
+	svc := &GeminiService{
+		providers: []GeminiProvider{
+			{ID: "primary", Name: "Primary", Enabled: true, ForcedPriority: true},
+			{ID: "secondary", Name: "Secondary", Enabled: true, ForcedPriority: true},
+		},
+		relayAddr: ":18100",
+	}
+
+	if err := svc.saveProviders(); err != nil {
+		t.Fatal(err)
+	}
+	if !svc.providers[0].ForcedPriority || svc.providers[1].ForcedPriority {
+		t.Fatalf("强制优先唯一性未保持: %#v", svc.providers)
+	}
+	stored, err := LoadGeminiProvidersFromStore()
+	if err != nil || len(stored) != 2 || !stored[0].ForcedPriority || stored[1].ForcedPriority {
+		t.Fatalf("强制优先持久化回读异常: %#v, %v", stored, err)
+	}
+}
+
+func TestGeminiSetForcedPrioritySwitchesProviderAtomically(t *testing.T) {
+	resetProviderStoreForTest(t)
+	svc := &GeminiService{
+		providers: []GeminiProvider{
+			{ID: "primary", Name: "Primary", Enabled: true, ForcedPriority: true},
+			{ID: "secondary", Name: "Secondary", Enabled: true},
+		},
+		relayAddr: ":18100",
+	}
+
+	if err := svc.SetForcedPriority("secondary", true); err != nil {
+		t.Fatal(err)
+	}
+	if svc.providers[0].ForcedPriority || !svc.providers[1].ForcedPriority {
+		t.Fatalf("强制优先切换异常: %#v", svc.providers)
+	}
+	stored, err := LoadGeminiProvidersFromStore()
+	if err != nil || len(stored) != 2 || stored[0].ForcedPriority || !stored[1].ForcedPriority {
+		t.Fatalf("强制优先原子持久化异常: %#v, %v", stored, err)
+	}
+}
+
+func TestGeminiSetForcedPriorityCanCancel(t *testing.T) {
+	resetProviderStoreForTest(t)
+	svc := &GeminiService{
+		providers: []GeminiProvider{
+			{ID: "primary", Name: "Primary", Enabled: true, ForcedPriority: true},
+			{ID: "secondary", Name: "Secondary", Enabled: true},
+		},
+		relayAddr: ":18100",
+	}
+
+	if err := svc.SetForcedPriority("primary", false); err != nil {
+		t.Fatal(err)
+	}
+	for _, provider := range svc.providers {
+		if provider.ForcedPriority {
+			t.Fatalf("取消后仍存在强制优先供应商: %#v", svc.providers)
+		}
+	}
+}
+
+func TestGeminiSetForcedPriorityRejectsUnknownProviderWithoutChanges(t *testing.T) {
+	resetProviderStoreForTest(t)
+	svc := &GeminiService{
+		providers: []GeminiProvider{
+			{ID: "primary", Name: "Primary", Enabled: true, ForcedPriority: true},
+			{ID: "secondary", Name: "Secondary", Enabled: true},
+		},
+		relayAddr: ":18100",
+	}
+
+	if err := svc.SetForcedPriority("missing", true); err == nil {
+		t.Fatal("未知供应商应返回错误")
+	}
+	if !svc.providers[0].ForcedPriority || svc.providers[1].ForcedPriority {
+		t.Fatalf("未知供应商不应改变现有状态: %#v", svc.providers)
+	}
+}
+
 func TestParseEnvFile(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -268,6 +350,26 @@ func TestGeminiDuplicateProviderPreservesConcurrencyLimit(t *testing.T) {
 				t.Fatalf("复制后的并发上限 = %v，期望 %d", duplicated.ProviderConcurrencyLimit, *tt.limit)
 			}
 		})
+	}
+}
+
+func TestGeminiDuplicateProviderDoesNotInheritForcedPriority(t *testing.T) {
+	useIsolatedHomeDir(t)
+	svc := &GeminiService{
+		providers: []GeminiProvider{{
+			ID:             "source",
+			Name:           "Source Provider",
+			ForcedPriority: true,
+		}},
+		relayAddr: ":18100",
+	}
+
+	duplicated, err := svc.DuplicateProvider("source")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if duplicated.ForcedPriority {
+		t.Fatal("复制 Gemini 供应商不应继承强制优先状态")
 	}
 }
 

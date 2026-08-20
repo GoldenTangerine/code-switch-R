@@ -67,6 +67,7 @@
           :cards="activeCardViewModels"
           :active-tab="activeTab"
           :active-proxy-state="activeProxyState"
+          :forced-priority-saving="forcedPrioritySaving"
           :resolved-theme="resolvedTheme"
           :is-sorting="draggingId !== null"
           :format-blacklist-countdown="formatBlacklistCountdown"
@@ -84,6 +85,7 @@
           @temporarily-enable-quota-provider="handleTemporarilyEnableQuotaProvider"
           @resume-quota-automation="handleResumeQuotaAutomation"
           @direct-apply="handleDirectApply"
+          @set-forced-priority="handleSetForcedPriority"
           @configure="configure"
           @open-provider-data="openProviderDataOverview"
           @open-model-list="openModelList"
@@ -322,6 +324,7 @@ const {
   cards,
   draggingId,
   dragOverId,
+  forcedPrioritySaving,
   normalizeLevel,
   refreshDirectAppliedStatus,
   handleDirectApply,
@@ -339,12 +342,17 @@ const {
   onDragEnd,
   moveCardToStatusGroup,
   appendCardToGroup,
+  setForcedPriority,
 } = useProviderCards({
   t,
   getActiveTab: () => activeTab.value,
   isActiveProxyEnabled: () => pageShell.activeProxyState.value,
   getSelectedToolId: () => selectedToolId.value,
 })
+
+const handleSetForcedPriority = async (card: AutomationCard) => {
+  await setForcedPriority(card)
+}
 
 const {
   customCliTools,

@@ -878,6 +878,17 @@
         "proxyEnabled": "Disable proxy first",
         "requiresHostedRouting": "This configuration only works through hosted routing and cannot be directly applied"
       },
+      "forcedPriority": {
+        "badge": "Forced",
+        "enable": "Set as forced priority",
+        "cancel": "Cancel forced priority",
+        "saving": "Saving",
+        "activeHint": "This provider has forced priority",
+        "proxyRequired": "Enable the proxy first",
+        "providerUnavailable": "Enable the provider first",
+        "enabled": "{name} is now forced priority",
+        "cancelled": "Forced priority cancelled"
+      },
       "form": {
         "createTitle": "Add vendor",
         "editTitle": "Edit vendor",

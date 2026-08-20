@@ -105,6 +105,13 @@
             L{{ viewModel.card.level }}
           </span>
           <span
+            v-if="viewModel.card.forcedPriority"
+            class="forced-priority-badge"
+            :title="t('components.main.forcedPriority.activeHint')"
+          >
+            {{ t('components.main.forcedPriority.badge') }}
+          </span>
+          <span
             v-if="anthropicCacheTTLBadge"
             class="anthropic-cache-ttl-badge"
             :class="`anthropic-cache-ttl-badge--${anthropicCacheTTLBadge.ttl}`"
@@ -840,6 +847,29 @@
         </button>
 
         <button
+          v-if="activeTab !== 'opencode' && activeTab !== 'claude-desktop' && activeTab !== 'openclaw' && activeTab !== 'hermes' && activeTab !== 'pi'"
+          class="ghost-icon forced-priority-btn"
+          :class="{ 'is-active': viewModel.card.forcedPriority }"
+          :disabled="forcedPriorityDisabled"
+          :data-tooltip="forcedPriorityTooltip"
+          :aria-label="forcedPriorityTooltip"
+          :aria-busy="forcedPrioritySaving"
+          :aria-pressed="viewModel.card.forcedPriority === true"
+          type="button"
+          @click.stop="!forcedPriorityDisabled && $emit('set-forced-priority')"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              d="M8.5 3.5h7l-1 5 3 3v1.5h-5v7l-1.5 1.5V13h-5v-1.5l3-3-1-5z"
+              fill="currentColor"
+              stroke="currentColor"
+              stroke-width="1.2"
+              stroke-linejoin="round"
+            />
+          </svg>
+        </button>
+
+        <button
           class="ghost-icon"
           :data-tooltip="t('components.main.form.editTitle')"
           type="button"
@@ -1023,6 +1053,7 @@ const props = defineProps<{
   viewModel: ProviderCardViewModel
   activeTab: ProviderTab
   activeProxyState: boolean
+  forcedPrioritySaving: boolean
   resolvedTheme: ResolvedTheme
   formatBlacklistCountdown: (remainingSeconds: number) => string
   bindCardRef?: (element: Element | ComponentPublicInstance | null) => void
@@ -1039,6 +1070,7 @@ const emit = defineEmits<{
   'temporarily-enable-quota-provider': []
   'resume-quota-automation': []
   'direct-apply': []
+  'set-forced-priority': []
   configure: []
   'open-provider-data': []
   'open-model-list': []
@@ -1549,6 +1581,28 @@ const directApplyBlockedByProvider = computed(() => (
 const directApplyDisabled = computed(() => (
   props.activeProxyState || directApplyBlockedByProvider.value
 ))
+
+const forcedPriorityDisabled = computed(() => (
+  props.forcedPrioritySaving
+  || !props.activeProxyState
+  || (!props.viewModel.card.forcedPriority && (!props.viewModel.card.enabled || props.viewModel.card.quotaAutoDisabled))
+))
+
+const forcedPriorityTooltip = computed(() => {
+  if (props.forcedPrioritySaving) {
+    return t('components.main.forcedPriority.saving')
+  }
+  if (props.viewModel.card.forcedPriority) {
+    return t('components.main.forcedPriority.cancel')
+  }
+  if (!props.activeProxyState) {
+    return t('components.main.forcedPriority.proxyRequired')
+  }
+  if (!props.viewModel.card.enabled || props.viewModel.card.quotaAutoDisabled) {
+    return t('components.main.forcedPriority.providerUnavailable')
+  }
+  return t('components.main.forcedPriority.enable')
+})
 
 const apiFormatBadge = computed<ApiFormatBadgeMeta | null>(() => {
   if (props.activeTab !== 'claude') return null

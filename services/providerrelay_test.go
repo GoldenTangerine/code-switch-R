@@ -3132,6 +3132,60 @@ func TestReorderProviderAttemptsForSessionKeepsExistingBindingFirst(t *testing.T
 	}
 }
 
+func TestBuildProviderAttemptGroupsKeepsBoundProviderBeforeForcedPriority(t *testing.T) {
+	providers := []Provider{
+		{ID: 1, Name: "Bound", Level: 3},
+		{ID: 2, Name: "Forced", Level: 5, ForcedPriority: true},
+		{ID: 3, Name: "Regular", Level: 1},
+	}
+
+	levels, groups := buildProviderAttemptGroups(providers, "1")
+	if len(levels) != 3 || levels[0] != sessionPreferredProviderLevel || levels[1] != -1 || levels[2] != 1 {
+		t.Fatalf("调度层级 = %v，期望已绑定、强制优先、普通供应商", levels)
+	}
+	if groups[levels[0]][0].ID != 1 || groups[levels[1]][0].ID != 2 {
+		t.Fatalf("调度分组异常: %#v", groups)
+	}
+}
+
+func TestOrderProvidersForNewSessionPrioritizesForcedProviderWithinCapacity(t *testing.T) {
+	providers := []Provider{
+		{ID: 1, Name: "Regular", Level: 1, SessionMaxSessions: 2},
+		{ID: 2, Name: "Forced", Level: 5, SessionMaxSessions: 2, ForcedPriority: true},
+	}
+	ordered, requireFirstProviderWithoutSession := orderProvidersForNewSession(providers, "1", map[string]providerSessionLoad{})
+	if providerRefFromProvider(ordered[0]) != "2" {
+		t.Fatalf("强制优先供应商未置顶: %#v", ordered)
+	}
+	if requireFirstProviderWithoutSession {
+		t.Fatal("强制优先排序不应启用首个零会话保护条件")
+	}
+}
+
+func TestOrderProvidersForNewSessionKeepsForcedProviderWithExistingCapacity(t *testing.T) {
+	providers := []Provider{
+		{ID: 1, Name: "Regular", Level: 1, SessionMaxSessions: 2},
+		{ID: 2, Name: "Forced", Level: 5, SessionMaxSessions: 3, ForcedPriority: true},
+	}
+	loads := map[string]providerSessionLoad{"2": {ProviderID: "2", BoundSessions: 1}}
+	ordered, requireFirstProviderWithoutSession := orderProvidersForNewSession(providers, "1", loads)
+	if providerRefFromProvider(ordered[0]) != "2" || requireFirstProviderWithoutSession {
+		t.Fatalf("已有会话但未满载的强制供应商排序异常: order=%v, requireFirst=%v", ordered, requireFirstProviderWithoutSession)
+	}
+}
+
+func TestOrderProvidersForNewSessionSkipsFullForcedProvider(t *testing.T) {
+	providers := []Provider{
+		{ID: 1, Name: "Regular", Level: 1, SessionMaxSessions: 2},
+		{ID: 2, Name: "Forced", Level: 5, SessionMaxSessions: 1, ForcedPriority: true},
+	}
+	loads := map[string]providerSessionLoad{"2": {ProviderID: "2", BoundSessions: 1}}
+	ordered, _ := orderProvidersForNewSession(providers, "1", loads)
+	if providerRefFromProvider(ordered[0]) != "1" {
+		t.Fatalf("满载强制优先供应商不应置顶: %#v", ordered)
+	}
+}
+
 func TestReorderProviderAttemptsForSessionFillsInProviderOrder(t *testing.T) {
 	relay := NewProviderRelayService(nil, nil, nil, nil, nil, nil, "")
 	platform := "claude"
@@ -3285,6 +3339,20 @@ func TestReorderGeminiProviderAttemptsForSessionPrioritizesFirstProviderWithoutS
 	ordered, _ := orderGeminiProvidersForNewSession(providers, "gemini-1", loads)
 	if providerRefFromGeminiProvider(ordered[0]) != "gemini-1" {
 		t.Fatalf("Gemini 首位零会话 provider 未跨 Level 优先，order=%v", []string{providerRefFromGeminiProvider(ordered[0]), providerRefFromGeminiProvider(ordered[1])})
+	}
+}
+
+func TestOrderGeminiProvidersForNewSessionPrioritizesForcedProviderWithinCapacity(t *testing.T) {
+	providers := []GeminiProvider{
+		{ID: "gemini-1", Name: "Regular", Level: 1, SessionMaxSessions: 2},
+		{ID: "gemini-2", Name: "Forced", Level: 5, SessionMaxSessions: 2, ForcedPriority: true},
+	}
+	ordered, requireFirstProviderWithoutSession := orderGeminiProvidersForNewSession(providers, "gemini-1", map[string]providerSessionLoad{})
+	if providerRefFromGeminiProvider(ordered[0]) != "gemini-2" {
+		t.Fatalf("Gemini 强制优先供应商未置顶: %#v", ordered)
+	}
+	if requireFirstProviderWithoutSession {
+		t.Fatal("Gemini 强制优先排序不应启用首个零会话保护条件")
 	}
 }
 

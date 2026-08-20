@@ -22,6 +22,8 @@ export type AutomationCard = {
   tint: string
   accent: string
   enabled: boolean
+  // 代理调度中优先尝试的供应商标记
+  forcedPriority?: boolean
   // 由远端额度耗尽触发的自动停用状态，与手动关闭区分。
   quotaAutoDisabled?: boolean
   // 临时启用额度耗尽供应商时暂停自动停用。

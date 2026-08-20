@@ -13,6 +13,7 @@ vi.mock('../../../../bindings/codeswitch/services/geminiservice', () => ({
   DeleteProvider: vi.fn(),
   GetProviders: vi.fn(),
   ReorderProviders: vi.fn(),
+  SetForcedPriority: vi.fn(),
   UpdateProvider: vi.fn(),
 }))
 
@@ -41,7 +42,12 @@ vi.mock('../../../utils/toast', () => ({
 import { Call } from '@wailsio/runtime'
 import { SaveProviders } from '../../../../bindings/codeswitch/services/providerservice'
 import { LoadProviders } from '../../../../bindings/codeswitch/services/providerservice'
-import { AddProvider as AddGeminiProvider, GetProviders as GetGeminiProviders } from '../../../../bindings/codeswitch/services/geminiservice'
+import {
+  AddProvider as AddGeminiProvider,
+  GetProviders as GetGeminiProviders,
+  SetForcedPriority as SetGeminiForcedPriority,
+  UpdateProvider as UpdateGeminiProvider,
+} from '../../../../bindings/codeswitch/services/geminiservice'
 import { GetProviders as GetOpenCodeProviders, SaveProviders as SaveOpenCodeProviders } from '../../../../bindings/codeswitch/services/opencodeservice'
 import { showToast } from '../../../utils/toast'
 import { providerToCard, type PersistedProvider } from '../adapters/providerCardMappers'
@@ -110,6 +116,7 @@ describe('useProviderCards drag sort', () => {
     vi.mocked(LoadProviders).mockResolvedValue([])
     vi.mocked(AddGeminiProvider).mockResolvedValue(undefined)
     vi.mocked(GetGeminiProviders).mockResolvedValue([])
+    vi.mocked(SetGeminiForcedPriority).mockResolvedValue(undefined)
     vi.mocked(GetOpenCodeProviders).mockResolvedValue([])
     vi.mocked(SaveOpenCodeProviders).mockResolvedValue(undefined)
   })
@@ -180,6 +187,156 @@ describe('useProviderCards drag sort', () => {
       'components.main.form.saveFailed: rename sync failed',
       'error',
     )
+  })
+
+  it('sets one forced-priority provider and clears the previous one', async () => {
+    const providerCards = useProviderCards({
+      t: (key: string) => key,
+      getActiveTab: () => 'codex',
+      isActiveProxyEnabled: () => true,
+      getSelectedToolId: () => null,
+    })
+    providerCards.cards.codex.splice(
+      0,
+      providerCards.cards.codex.length,
+      createCard(1, { forcedPriority: true }),
+      createCard(2),
+    )
+
+    await providerCards.setForcedPriority(providerCards.cards.codex[1])
+
+    expect(providerCards.cards.codex.map((item) => item.forcedPriority)).toEqual([false, true])
+    expect(vi.mocked(SaveProviders)).toHaveBeenCalledTimes(1)
+    expect((vi.mocked(SaveProviders).mock.calls[0]?.[1] as AutomationCard[]).map((item) => item.forcedPriority)).toEqual([false, true])
+  })
+
+  it('restores the forced-priority state when persistence fails', async () => {
+    const providerCards = useProviderCards({
+      t: (key: string) => key,
+      getActiveTab: () => 'codex',
+      isActiveProxyEnabled: () => true,
+      getSelectedToolId: () => null,
+    })
+    providerCards.cards.codex.splice(
+      0,
+      providerCards.cards.codex.length,
+      createCard(1),
+      createCard(2),
+    )
+    vi.mocked(SaveProviders).mockRejectedValueOnce(new Error('forced priority save failed'))
+
+    await expect(providerCards.setForcedPriority(providerCards.cards.codex[0])).rejects.toThrow('forced priority save failed')
+    expect(providerCards.cards.codex.map((item) => item.forcedPriority)).toEqual([undefined, undefined])
+  })
+
+  it('does not mutate or report success when another save is in progress', async () => {
+    let finishSave: (() => void) | undefined
+    vi.mocked(SaveProviders).mockImplementationOnce(() => new Promise<void>((resolve) => {
+      finishSave = resolve
+    }) as ReturnType<typeof SaveProviders>)
+    const providerCards = useProviderCards({
+      t: (key: string) => key,
+      getActiveTab: () => 'codex',
+      isActiveProxyEnabled: () => true,
+      getSelectedToolId: () => null,
+    })
+    providerCards.cards.codex.splice(0, providerCards.cards.codex.length, createCard(1))
+
+    const pendingSave = providerCards.persistProviders('codex')
+    const result = await providerCards.setForcedPriority(providerCards.cards.codex[0])
+
+    expect(result).toBe(false)
+    expect(providerCards.cards.codex[0].forcedPriority).toBeUndefined()
+    expect(vi.mocked(SaveProviders)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(showToast)).not.toHaveBeenCalledWith(
+      'components.main.forcedPriority.enabled',
+      'success',
+    )
+
+    finishSave?.()
+    await pendingSave
+  })
+
+  it('saves only once when forced priority is clicked repeatedly', async () => {
+    let finishSave: (() => void) | undefined
+    vi.mocked(SaveProviders).mockImplementationOnce(() => new Promise<void>((resolve) => {
+      finishSave = resolve
+    }) as ReturnType<typeof SaveProviders>)
+    const providerCards = useProviderCards({
+      t: (key: string) => key,
+      getActiveTab: () => 'codex',
+      isActiveProxyEnabled: () => true,
+      getSelectedToolId: () => null,
+    })
+    providerCards.cards.codex.splice(0, providerCards.cards.codex.length, createCard(1))
+
+    const firstClick = providerCards.setForcedPriority(providerCards.cards.codex[0])
+    const secondResult = await providerCards.setForcedPriority(providerCards.cards.codex[0])
+
+    expect(secondResult).toBe(false)
+    expect(providerCards.forcedPrioritySaving.value).toBe(true)
+    expect(providerCards.cards.codex[0].forcedPriority).toBe(true)
+    expect(vi.mocked(SaveProviders)).toHaveBeenCalledTimes(1)
+
+    finishSave?.()
+    await expect(firstClick).resolves.toBe(true)
+    expect(providerCards.forcedPrioritySaving.value).toBe(false)
+  })
+
+  it('uses the atomic Gemini forced-priority API', async () => {
+    const providerCards = useProviderCards({
+      t: (key: string) => key,
+      getActiveTab: () => 'gemini',
+      isActiveProxyEnabled: () => true,
+      getSelectedToolId: () => null,
+    })
+    providerCards.cards.gemini.splice(
+      0,
+      providerCards.cards.gemini.length,
+      createCard(1, { providerRef: 'gemini-primary', forcedPriority: true }),
+      createCard(2, { providerRef: 'gemini-secondary' }),
+    )
+
+    await providerCards.setForcedPriority(providerCards.cards.gemini[1])
+
+    expect(vi.mocked(SetGeminiForcedPriority)).toHaveBeenCalledWith('gemini-secondary', true)
+    expect(vi.mocked(UpdateGeminiProvider)).not.toHaveBeenCalled()
+    expect(providerCards.cards.gemini.map((item) => item.forcedPriority)).toEqual([false, true])
+  })
+
+  it('reloads Gemini forced priority from the backend after an atomic save failure', async () => {
+    vi.mocked(SetGeminiForcedPriority).mockRejectedValueOnce(new Error('atomic save failed'))
+    vi.mocked(GetGeminiProviders).mockResolvedValueOnce([
+      {
+        id: 'gemini-primary',
+        name: 'Primary',
+        enabled: true,
+        forcedPriority: true,
+      },
+      {
+        id: 'gemini-secondary',
+        name: 'Secondary',
+        enabled: true,
+      },
+    ])
+    const providerCards = useProviderCards({
+      t: (key: string) => key,
+      getActiveTab: () => 'gemini',
+      isActiveProxyEnabled: () => true,
+      getSelectedToolId: () => null,
+    })
+    providerCards.cards.gemini.splice(
+      0,
+      providerCards.cards.gemini.length,
+      createCard(1, { providerRef: 'gemini-primary', forcedPriority: true }),
+      createCard(2, { providerRef: 'gemini-secondary' }),
+    )
+
+    await expect(providerCards.setForcedPriority(providerCards.cards.gemini[1])).rejects.toThrow('atomic save failed')
+
+    expect(vi.mocked(GetGeminiProviders)).toHaveBeenCalledTimes(1)
+    expect(providerCards.cards.gemini.map((item) => item.forcedPriority)).toEqual([true, false])
+    expect(providerCards.forcedPrioritySaving.value).toBe(false)
   })
 
   it('persists dragged order when existing cards already have distinct sortOrder values', async () => {

@@ -305,7 +305,7 @@ const (
 const (
 	sessionProviderRoutePreferred = "preferred"
 	sessionProviderRouteFallback  = "fallback"
-	sessionPreferredProviderLevel = 0
+	sessionPreferredProviderLevel = -2
 )
 
 const (
@@ -1548,6 +1548,13 @@ func providerAttemptLevel(provider Provider) int {
 	return level
 }
 
+func providerRuntimeLabel(providerName string, forcedPriority bool) string {
+	if forcedPriority {
+		return providerName + " [强制优先]"
+	}
+	return providerName
+}
+
 func providersAtAttemptLevel(providers []Provider, level int) []Provider {
 	result := make([]Provider, 0, len(providers))
 	for _, provider := range providers {
@@ -1579,6 +1586,8 @@ func buildProviderAttemptGroups(providers []Provider, preferredProviderID string
 		level := providerAttemptLevel(provider)
 		if preferredProviderID != "" && providerRefFromProvider(provider) == preferredProviderID {
 			level = sessionPreferredProviderLevel
+		} else if provider.ForcedPriority {
+			level = -1
 		}
 		levelGroups[level] = append(levelGroups[level], provider)
 	}
@@ -3194,6 +3203,11 @@ func orderProvidersForSessionAffinity(
 		return providerRefFromProvider(provider), providerSessionMaxSessions(provider)
 	})
 	if len(underCapacity) > 0 {
+		for index, provider := range underCapacity {
+			if provider.ForcedPriority {
+				return append([]Provider{provider}, append(underCapacity[:index], underCapacity[index+1:]...)...)
+			}
+		}
 		return underCapacity
 	}
 	return full
@@ -3300,6 +3314,14 @@ func prioritizeFirstProviderWithoutSession[T any](
 }
 
 func orderProvidersForNewSession(providers []Provider, firstProviderID string, loads map[string]providerSessionLoad) ([]Provider, bool) {
+	for index, provider := range providers {
+		if provider.ForcedPriority {
+			load := providerSessionLoadFor(providerRefFromProvider(provider), providerSessionMaxSessions(provider), loads)
+			if load.BoundSessions < load.MaxSessions {
+				return append([]Provider{provider}, append(providers[:index], providers[index+1:]...)...), false
+			}
+		}
+	}
 	if ordered, prioritized := prioritizeFirstProviderWithoutSession(providers, firstProviderID, loads, providerRefFromProvider); prioritized {
 		return ordered, true
 	}
@@ -3355,6 +3377,11 @@ func orderGeminiProvidersForSessionAffinity(
 	}
 	sortGeminiProvidersBySessionLoad(full, loads)
 	if len(underCapacity) > 0 {
+		for index, provider := range underCapacity {
+			if provider.ForcedPriority {
+				return append([]GeminiProvider{provider}, append(underCapacity[:index], underCapacity[index+1:]...)...)
+			}
+		}
 		return underCapacity
 	}
 	return full
@@ -3425,6 +3452,14 @@ func reorderGeminiProvidersWithinHighestSessionLevel(providers []GeminiProvider,
 }
 
 func orderGeminiProvidersForNewSession(providers []GeminiProvider, firstProviderID string, loads map[string]providerSessionLoad) ([]GeminiProvider, bool) {
+	for index, provider := range providers {
+		if provider.ForcedPriority {
+			load := providerSessionLoadFor(providerRefFromGeminiProvider(provider), geminiProviderSessionMaxSessions(provider), loads)
+			if load.BoundSessions < load.MaxSessions {
+				return append([]GeminiProvider{provider}, append(providers[:index], providers[index+1:]...)...), false
+			}
+		}
+	}
 	if ordered, prioritized := prioritizeFirstProviderWithoutSession(providers, firstProviderID, loads, providerRefFromGeminiProvider); prioritized {
 		return ordered, true
 	}
@@ -3645,12 +3680,18 @@ func (prs *ProviderRelayService) previewNextGeminiProvider(providers []GeminiPro
 	}
 
 	highestLevel := available[0].Level
-	if highestLevel <= 0 {
+	if available[0].ForcedPriority {
+		highestLevel = -1
+	}
+	if highestLevel <= 0 && !available[0].ForcedPriority {
 		highestLevel = 1
 	}
 	for _, provider := range available[1:] {
 		level := provider.Level
-		if level <= 0 {
+		if provider.ForcedPriority {
+			level = -1
+		}
+		if level <= 0 && !provider.ForcedPriority {
 			level = 1
 		}
 		if level < highestLevel {
@@ -3660,7 +3701,10 @@ func (prs *ProviderRelayService) previewNextGeminiProvider(providers []GeminiPro
 	providersInLevel := make([]GeminiProvider, 0, len(available))
 	for _, provider := range available {
 		level := provider.Level
-		if level <= 0 {
+		if provider.ForcedPriority {
+			level = -1
+		}
+		if level <= 0 && !provider.ForcedPriority {
 			level = 1
 		}
 		if level == highestLevel {
@@ -4169,7 +4213,11 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 						continue
 					}
 
-					for retryCount := 0; retryCount < maxRetryPerProvider; retryCount++ {
+					providerRetryLimit := maxRetryPerProvider
+					if provider.ForcedPriority {
+						providerRetryLimit = max(1, retryConfig.FailureThreshold)
+					}
+					for retryCount := 0; retryCount < providerRetryLimit; retryCount++ {
 						totalAttempts++
 						if blacklisted, _ := prs.blacklistService.IsBlacklistedByID(kind, providerRefFromProvider(provider), provider.Name); blacklisted {
 							prs.releaseProviderSessions(kind, providerRefFromProvider(provider))
@@ -4178,10 +4226,11 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 						}
 
 						fmt.Printf("[INFO] [会话隔离/拉黑模式] Provider: %s | 重试 %d/%d | Model: %s\n",
-							provider.Name, retryCount+1, maxRetryPerProvider, plan.EffectiveModel)
+							providerRuntimeLabel(provider.Name, provider.ForcedPriority), retryCount+1, providerRetryLimit, plan.EffectiveModel)
 						sessionAttemptID = prs.beginSessionProviderRequest(kind, sessionHash, providerRefFromProvider(provider), provider.Name, clientUserAgent, providerSessionMaxSessions(provider), providerSessionTTLMinutes(provider), originalSessionBinding == nil, isProviderSessionOverflowAttempt(provider, sessionLoads), requireFirstProviderWithoutSession && providerIndex == 0)
 						if sessionAttemptID < 0 {
-							continue
+							fmt.Printf("[INFO] [会话隔离] Provider %s 会话容量不足，跳过并尝试下一个\n", providerRuntimeLabel(provider.Name, provider.ForcedPriority))
+							break
 						}
 						startTime := time.Now()
 						plan = prepareSessionProviderAttempt(provider, plan)
@@ -4242,7 +4291,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 						if isProviderConcurrencyLimitError(err) {
 							break
 						}
-						if retryCount < maxRetryPerProvider-1 {
+						if retryCount < providerRetryLimit-1 {
 							time.Sleep(time.Duration(retryWaitSeconds) * time.Second)
 						}
 					}
@@ -4292,7 +4341,11 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 					}
 
 					// 同 Provider 内重试循环
-					for retryCount := 0; retryCount < maxRetryPerProvider; retryCount++ {
+					providerRetryLimit := maxRetryPerProvider
+					if provider.ForcedPriority {
+						providerRetryLimit = max(1, retryConfig.FailureThreshold)
+					}
+					for retryCount := 0; retryCount < providerRetryLimit; retryCount++ {
 						totalAttempts++
 
 						// 再次检查是否已被拉黑（重试过程中可能被拉黑）
@@ -4302,7 +4355,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 						}
 
 						fmt.Printf("[INFO] [拉黑模式] Provider: %s (Level %d) | 重试 %d/%d | Model: %s\n",
-							provider.Name, level, retryCount+1, maxRetryPerProvider, plan.EffectiveModel)
+							provider.Name, level, retryCount+1, providerRetryLimit, plan.EffectiveModel)
 
 						startTime := time.Now()
 						plan = prepareSessionProviderAttempt(provider, plan)
@@ -4347,7 +4400,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 							return
 						}
 						fmt.Printf("[WARN] ✗ 失败: %s | 重试 %d/%d | 错误: %s | 耗时: %.2fs\n",
-							provider.Name, retryCount+1, maxRetryPerProvider, errorMsg, duration.Seconds())
+							provider.Name, retryCount+1, providerRetryLimit, errorMsg, duration.Seconds())
 
 						// 记录失败次数（可能触发拉黑）
 						if err := prs.recordProviderFailureIfNeeded(kind, providerRefFromProvider(provider), provider.Name, err); err != nil {
@@ -4366,7 +4419,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 						if isProviderConcurrencyLimitError(err) {
 							break
 						}
-						if retryCount < maxRetryPerProvider-1 {
+						if retryCount < providerRetryLimit-1 {
 							fmt.Printf("[INFO] ⏳ 等待 %d 秒后重试...\n", retryWaitSeconds)
 							time.Sleep(time.Duration(retryWaitSeconds) * time.Second)
 						}
@@ -4428,7 +4481,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 					continue
 				}
 
-				fmt.Printf("[INFO]   [会话隔离 %d/%d] Provider: %s | Model: %s\n", i+1, len(orderedProviders), provider.Name, plan.EffectiveModel)
+				fmt.Printf("[INFO]   [会话隔离 %d/%d] Provider: %s | Model: %s\n", i+1, len(orderedProviders), providerRuntimeLabel(provider.Name, provider.ForcedPriority), plan.EffectiveModel)
 				sessionAttemptID = prs.beginSessionProviderRequest(
 					kind,
 					sessionHash,
@@ -4442,6 +4495,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 					requireFirstProviderWithoutSession && i == 0,
 				)
 				if sessionAttemptID < 0 {
+					fmt.Printf("[INFO] [会话隔离] Provider %s 会话容量不足，跳过并尝试下一个\n", providerRuntimeLabel(provider.Name, provider.ForcedPriority))
 					continue
 				}
 
@@ -9502,7 +9556,14 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 		// 2. 按 Level 分组
 		levelGroups := make(map[int][]GeminiProvider)
 		for _, p := range activeProviders {
-			levelGroups[p.Level] = append(levelGroups[p.Level], p)
+			level := p.Level
+			if p.ForcedPriority {
+				level = -1
+			}
+			if level <= 0 && !p.ForcedPriority {
+				level = 1
+			}
+			levelGroups[level] = append(levelGroups[level], p)
 		}
 
 		// 获取排序后的 Level 列表
@@ -9611,7 +9672,11 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 					}
 					applyGeminiRequestLogReasoning(requestLog, bodyBytes, currentBodyBytes, provider.RequestBodyOverrides)
 
-					for retryCount := 0; retryCount < maxRetryPerProvider; retryCount++ {
+					providerRetryLimit := maxRetryPerProvider
+					if provider.ForcedPriority {
+						providerRetryLimit = max(1, retryConfig.FailureThreshold)
+					}
+					for retryCount := 0; retryCount < providerRetryLimit; retryCount++ {
 						totalAttempts++
 						if blacklisted, _ := prs.blacklistService.IsBlacklistedByID("gemini", providerRefFromGeminiProvider(provider), provider.Name); blacklisted {
 							prs.releaseProviderSessions("gemini", providerRefFromGeminiProvider(provider))
@@ -9620,10 +9685,11 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 						}
 
 						fmt.Printf("[Gemini] [会话隔离/拉黑模式] Provider: %s | 重试 %d/%d\n",
-							provider.Name, retryCount+1, maxRetryPerProvider)
+							providerRuntimeLabel(provider.Name, provider.ForcedPriority), retryCount+1, providerRetryLimit)
 						sessionAttemptID = prs.beginSessionProviderRequest("gemini", sessionHash, providerRefFromGeminiProvider(provider), provider.Name, clientUserAgent, geminiProviderSessionMaxSessions(provider), geminiProviderSessionTTLMinutes(provider), originalSessionBinding == nil, isGeminiProviderSessionOverflowAttempt(provider, sessionLoads), requireFirstProviderWithoutSession && providerIndex == 0)
 						if sessionAttemptID < 0 {
-							continue
+							fmt.Printf("[Gemini] [会话隔离] Provider %s 会话容量不足，跳过并尝试下一个\n", providerRuntimeLabel(provider.Name, provider.ForcedPriority))
+							break
 						}
 						geminiAttempts++
 						ok, err, responseWritten := prs.forwardGeminiRequest(c, &provider, endpoint, bodyBytes, currentBodyBytes, isStream, requestLog, pricingSnapshot, providerConcurrencyLimitEnabled)
@@ -9665,7 +9731,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 						if isProviderConcurrencyLimitError(err) {
 							break
 						}
-						if retryCount < maxRetryPerProvider-1 {
+						if retryCount < providerRetryLimit-1 {
 							time.Sleep(time.Duration(retryWaitSeconds) * time.Second)
 						}
 					}
@@ -9725,7 +9791,11 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 					applyGeminiRequestLogReasoning(requestLog, bodyBytes, currentBodyBytes, provider.RequestBodyOverrides)
 
 					// 同 Provider 内重试循环
-					for retryCount := 0; retryCount < maxRetryPerProvider; retryCount++ {
+					providerRetryLimit := maxRetryPerProvider
+					if provider.ForcedPriority {
+						providerRetryLimit = max(1, retryConfig.FailureThreshold)
+					}
+					for retryCount := 0; retryCount < providerRetryLimit; retryCount++ {
 						totalAttempts++
 
 						// 再次检查是否已被拉黑（重试过程中可能被拉黑）
@@ -9735,7 +9805,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 						}
 
 						fmt.Printf("[Gemini] [拉黑模式] Provider: %s (Level %d) | 重试 %d/%d\n",
-							provider.Name, level, retryCount+1, maxRetryPerProvider)
+							provider.Name, level, retryCount+1, providerRetryLimit)
 
 						geminiAttempts++
 						ok, err, responseWritten := prs.forwardGeminiRequest(c, &provider, endpoint, bodyBytes, currentBodyBytes, isStream, requestLog, pricingSnapshot, providerConcurrencyLimitEnabled)
@@ -9767,7 +9837,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 						lastProvider = provider.Name
 
 						fmt.Printf("[Gemini] ✗ 失败: %s | 重试 %d/%d | 错误: %s\n",
-							provider.Name, retryCount+1, maxRetryPerProvider, errorMsg)
+							provider.Name, retryCount+1, providerRetryLimit, errorMsg)
 
 						// 记录失败次数（可能触发拉黑）
 						_ = prs.recordProviderFailureIfNeeded("gemini", providerRefFromGeminiProvider(provider), provider.Name, err)
@@ -9784,7 +9854,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 						if isProviderConcurrencyLimitError(err) {
 							break
 						}
-						if retryCount < maxRetryPerProvider-1 {
+						if retryCount < providerRetryLimit-1 {
 							fmt.Printf("[Gemini] ⏳ 等待 %d 秒后重试...\n", retryWaitSeconds)
 							time.Sleep(time.Duration(retryWaitSeconds) * time.Second)
 						}
@@ -9839,7 +9909,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 
 			var lastError error
 			for idx, provider := range orderedProviders {
-				fmt.Printf("[Gemini] [会话隔离 %d/%d] Provider: %s\n", idx+1, len(orderedProviders), provider.Name)
+				fmt.Printf("[Gemini] [会话隔离 %d/%d] Provider: %s\n", idx+1, len(orderedProviders), providerRuntimeLabel(provider.Name, provider.ForcedPriority))
 				requestLog.ProviderID = providerRefFromGeminiProvider(provider)
 				requestLog.Provider = provider.Name
 				requestLog.Model = provider.Model
@@ -9864,6 +9934,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 					requireFirstProviderWithoutSession && idx == 0,
 				)
 				if sessionAttemptID < 0 {
+					fmt.Printf("[Gemini] [会话隔离] Provider %s 会话容量不足，跳过并尝试下一个\n", providerRuntimeLabel(provider.Name, provider.ForcedPriority))
 					continue
 				}
 				geminiAttempts++
@@ -10444,8 +10515,14 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 		levelGroups := make(map[int][]Provider)
 		for _, provider := range active {
 			level := provider.Level
+			if provider.ForcedPriority {
+				level = -1
+			}
 			if level <= 0 {
 				level = 1
+				if provider.ForcedPriority {
+					level = -1
+				}
 			}
 			levelGroups[level] = append(levelGroups[level], provider)
 		}
@@ -10516,7 +10593,11 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 						continue
 					}
 
-					for retryCount := 0; retryCount < maxRetryPerProvider; retryCount++ {
+					providerRetryLimit := maxRetryPerProvider
+					if provider.ForcedPriority {
+						providerRetryLimit = max(1, retryConfig.FailureThreshold)
+					}
+					for retryCount := 0; retryCount < providerRetryLimit; retryCount++ {
 						totalAttempts++
 						if blacklisted, _ := prs.blacklistService.IsBlacklistedByID(kind, providerRefFromProvider(provider), provider.Name); blacklisted {
 							prs.releaseProviderSessions(kind, providerRefFromProvider(provider))
@@ -10525,10 +10606,11 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 						}
 
 						fmt.Printf("[CustomCLI][INFO] [会话隔离/拉黑模式] Provider: %s | 重试 %d/%d | Model: %s\n",
-							provider.Name, retryCount+1, maxRetryPerProvider, plan.EffectiveModel)
+							providerRuntimeLabel(provider.Name, provider.ForcedPriority), retryCount+1, providerRetryLimit, plan.EffectiveModel)
 						sessionAttemptID = prs.beginSessionProviderRequest(kind, sessionHash, providerRefFromProvider(provider), provider.Name, clientUserAgent, providerSessionMaxSessions(provider), providerSessionTTLMinutes(provider), originalSessionBinding == nil, isProviderSessionOverflowAttempt(provider, sessionLoads), requireFirstProviderWithoutSession && providerIndex == 0)
 						if sessionAttemptID < 0 {
-							continue
+							fmt.Printf("[CustomCLI][INFO] [会话隔离] Provider %s 会话容量不足，跳过并尝试下一个\n", providerRuntimeLabel(provider.Name, provider.ForcedPriority))
+							break
 						}
 						startTime := time.Now()
 						ok, err := prs.forwardRequestWithPlan(c, kind, provider, plan.EffectiveEndpoint, query, clientHeaders, plan.BodyBytes, isStream, plan.EffectiveModel, requestedModel, plan, providerConcurrencyLimitEnabled)
@@ -10583,7 +10665,7 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 						if isProviderConcurrencyLimitError(err) {
 							break
 						}
-						if retryCount < maxRetryPerProvider-1 {
+						if retryCount < providerRetryLimit-1 {
 							time.Sleep(time.Duration(retryWaitSeconds) * time.Second)
 						}
 					}
@@ -10632,7 +10714,11 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 					}
 
 					// 同 Provider 内重试循环
-					for retryCount := 0; retryCount < maxRetryPerProvider; retryCount++ {
+					providerRetryLimit := maxRetryPerProvider
+					if provider.ForcedPriority {
+						providerRetryLimit = max(1, retryConfig.FailureThreshold)
+					}
+					for retryCount := 0; retryCount < providerRetryLimit; retryCount++ {
 						totalAttempts++
 
 						// 再次检查是否已被拉黑（重试过程中可能被拉黑）
@@ -10642,7 +10728,7 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 						}
 
 						fmt.Printf("[CustomCLI][INFO] [拉黑模式] Provider: %s (Level %d) | 重试 %d/%d | Model: %s\n",
-							provider.Name, level, retryCount+1, maxRetryPerProvider, plan.EffectiveModel)
+							provider.Name, level, retryCount+1, providerRetryLimit, plan.EffectiveModel)
 
 						startTime := time.Now()
 						ok, err := prs.forwardRequestWithPlan(c, kind, provider, plan.EffectiveEndpoint, query, clientHeaders, plan.BodyBytes, isStream, plan.EffectiveModel, requestedModel, plan, providerConcurrencyLimitEnabled)
@@ -10685,7 +10771,7 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 							return
 						}
 						fmt.Printf("[CustomCLI][WARN] ✗ 失败: %s | 重试 %d/%d | 错误: %s | 耗时: %.2fs\n",
-							provider.Name, retryCount+1, maxRetryPerProvider, errorMsg, duration.Seconds())
+							provider.Name, retryCount+1, providerRetryLimit, errorMsg, duration.Seconds())
 
 						// 记录失败次数（可能触发拉黑）
 						if err := prs.recordProviderFailureIfNeeded(kind, providerRefFromProvider(provider), provider.Name, err); err != nil {
@@ -10704,7 +10790,7 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 						if isProviderConcurrencyLimitError(err) {
 							break
 						}
-						if retryCount < maxRetryPerProvider-1 {
+						if retryCount < providerRetryLimit-1 {
 							fmt.Printf("[CustomCLI][INFO] ⏳ 等待 %d 秒后重试...\n", retryWaitSeconds)
 							time.Sleep(time.Duration(retryWaitSeconds) * time.Second)
 						}
@@ -10764,9 +10850,10 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 					fmt.Printf("[CustomCLI][ERROR] Provider %s 请求体预处理失败: %v\n", provider.Name, err)
 					continue
 				}
-				fmt.Printf("[CustomCLI][INFO]   [会话隔离 %d/%d] Provider: %s | Model: %s\n", i+1, len(orderedProviders), provider.Name, plan.EffectiveModel)
+				fmt.Printf("[CustomCLI][INFO]   [会话隔离 %d/%d] Provider: %s | Model: %s\n", i+1, len(orderedProviders), providerRuntimeLabel(provider.Name, provider.ForcedPriority), plan.EffectiveModel)
 				sessionAttemptID = prs.beginSessionProviderRequest(kind, sessionHash, providerRefFromProvider(provider), provider.Name, clientUserAgent, providerSessionMaxSessions(provider), providerSessionTTLMinutes(provider), originalSessionBinding == nil, isProviderSessionOverflowAttempt(provider, sessionLoads), requireFirstProviderWithoutSession && i == 0)
 				if sessionAttemptID < 0 {
+					fmt.Printf("[CustomCLI][INFO] [会话隔离] Provider %s 会话容量不足，跳过并尝试下一个\n", providerRuntimeLabel(provider.Name, provider.ForcedPriority))
 					continue
 				}
 				startTime := time.Now()
@@ -11011,8 +11098,14 @@ func (prs *ProviderRelayService) forwardModelsRequest(
 	levelGroups := make(map[int][]Provider)
 	for _, provider := range activeProviders {
 		level := provider.Level
+		if provider.ForcedPriority {
+			level = -1
+		}
 		if level <= 0 {
 			level = 1
+			if provider.ForcedPriority {
+				level = -1
+			}
 		}
 		levelGroups[level] = append(levelGroups[level], provider)
 	}

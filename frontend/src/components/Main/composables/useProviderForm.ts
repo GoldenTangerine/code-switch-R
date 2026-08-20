@@ -22,7 +22,7 @@ type UseProviderFormOptions = {
   getSelectedToolId?: () => string | null
   cards: Record<ProviderTab, AutomationCard[]>
   normalizeLevel: (level: number | string | undefined) => number
-  persistProviders: (tabId: ProviderTab) => Promise<void>
+  persistProviders: (tabId: ProviderTab) => Promise<boolean>
   refreshDirectAppliedStatus: (tabId: ProviderTab) => Promise<void>
   removeProvider: (id: number, tabId: ProviderTab) => Promise<void>
   duplicateProvider: (card: AutomationCard) => Promise<boolean>

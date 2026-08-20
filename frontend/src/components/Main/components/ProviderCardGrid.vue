@@ -15,6 +15,7 @@
       :view-model="viewModel"
       :active-tab="activeTab"
       :active-proxy-state="activeProxyState"
+      :forced-priority-saving="forcedPrioritySaving"
       :resolved-theme="resolvedTheme"
       :format-blacklist-countdown="formatBlacklistCountdown"
       :bind-card-ref="bindCardRef(viewModel.card)"
@@ -28,6 +29,7 @@
       @temporarily-enable-quota-provider="$emit('temporarily-enable-quota-provider', viewModel.card)"
       @resume-quota-automation="$emit('resume-quota-automation', viewModel.card)"
       @direct-apply="$emit('direct-apply', viewModel.card)"
+      @set-forced-priority="$emit('set-forced-priority', viewModel.card)"
       @configure="$emit('configure', viewModel.card)"
       @open-provider-data="$emit('open-provider-data', viewModel.card)"
       @open-model-list="$emit('open-model-list', viewModel.card)"
@@ -59,6 +61,7 @@ defineProps<{
   cards: ProviderCardViewModel[]
   activeTab: ProviderTab
   activeProxyState: boolean
+  forcedPrioritySaving: boolean
   resolvedTheme: ResolvedTheme
   isSorting: boolean
   formatBlacklistCountdown: (remainingSeconds: number) => string
@@ -79,6 +82,7 @@ const emit = defineEmits<{
   'temporarily-enable-quota-provider': [card: AutomationCard]
   'resume-quota-automation': [card: AutomationCard]
   'direct-apply': [card: AutomationCard]
+  'set-forced-priority': [card: AutomationCard]
   configure: [card: AutomationCard]
   'open-provider-data': [card: AutomationCard]
   'open-model-list': [card: AutomationCard]

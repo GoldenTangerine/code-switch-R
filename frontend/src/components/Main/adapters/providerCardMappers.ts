@@ -33,6 +33,7 @@ import { GetProviders as GetGeminiProviders } from '../../../../bindings/codeswi
 import type { OpenCodeProvider as OpenCodeProviderModel } from '../../../services/opencode'
 
 export type GeminiProvider = Awaited<ReturnType<typeof GetGeminiProviders>> extends (infer P)[] ? (P & {
+  forcedPriority?: boolean
   sortOrder?: number
   enabledSortOrder?: number
   disabledSortOrder?: number
@@ -59,6 +60,7 @@ export type OpenCodeProvider = OpenCodeProviderModel & {
 }
 
 export type PersistedProvider = PersistedProviderModel & {
+  forcedPriority?: boolean
   sortOrder?: number
   enabledSortOrder?: number
   disabledSortOrder?: number
@@ -266,6 +268,7 @@ export const providerToCard = (
   tint: provider.tint || '',
   accent: provider.accent || '',
   enabled: provider.enabled,
+  forcedPriority: provider.forcedPriority === true,
   quotaAutoDisabled: provider.quotaAutoDisabled === true,
   quotaAutoDisablePaused: provider.quotaAutoDisablePaused === true,
   hideLogBadge: provider.hideLogBadge === true,
@@ -350,6 +353,7 @@ export const geminiToCard = (provider: GeminiProvider, index: number): Automatio
   tint: 'rgba(251, 146, 60, 0.18)',
   accent: '#fb923c',
   enabled: provider.enabled,
+  forcedPriority: provider.forcedPriority === true,
   quotaAutoDisabled: provider.quotaAutoDisabled === true,
   quotaAutoDisablePaused: provider.quotaAutoDisablePaused === true,
   hideLogBadge: provider.hideLogBadge === true,
@@ -434,6 +438,7 @@ export const cardToGemini = (card: AutomationCard, original: GeminiProvider): Ge
   model: `${card.cliConfig?.GEMINI_MODEL ?? ''}`.trim() || original.model || '',
   websiteUrl: card.officialSite,
   enabled: card.enabled,
+  forcedPriority: card.forcedPriority === true,
   quotaAutoDisabled: card.quotaAutoDisabled === true,
   quotaAutoDisablePaused: card.quotaAutoDisablePaused === true,
   hideLogBadge: card.hideLogBadge === true,
@@ -466,6 +471,7 @@ export const createGeminiFromCard = (
   model: `${card.cliConfig?.GEMINI_MODEL ?? ''}`.trim(),
   websiteUrl: card.officialSite,
   enabled: card.enabled,
+  forcedPriority: card.forcedPriority === true,
   quotaAutoDisabled: card.quotaAutoDisabled === true,
   quotaAutoDisablePaused: card.quotaAutoDisablePaused === true,
   hideLogBadge: card.hideLogBadge === true,
@@ -561,6 +567,7 @@ export const serializeProviders = (
     const { providerRef, ...persistable } = provider
     return {
       ...persistable,
+      forcedPriority: provider.forcedPriority === true,
       ...(platform === 'claude'
         ? { apiFormat: provider.apiFormat || 'anthropic' }
         : {}),

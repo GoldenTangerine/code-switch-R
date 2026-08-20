@@ -1633,6 +1633,7 @@
 .level-badge,
 .blacklist-level-badge,
 .current-use-badge,
+.forced-priority-badge,
 .provider-concurrency-pill {
   display: inline-flex;
   align-items: center;
@@ -1787,6 +1788,19 @@
   background: linear-gradient(135deg, #10b981 0%, #0ea5a4 100%);
   border-color: rgba(16, 185, 129, 0.24);
   box-shadow: 0 12px 22px rgba(16, 185, 129, 0.18);
+}
+
+.forced-priority-badge {
+  color: #eff6ff;
+  background: #2563eb;
+  border-color: rgba(37, 99, 235, 0.28);
+  box-shadow: 0 8px 18px rgba(37, 99, 235, 0.22);
+}
+
+.automation-card.theme-dark .forced-priority-badge {
+  color: #eff6ff;
+  background: #1d4ed8;
+  border-color: rgba(96, 165, 250, 0.34);
 }
 
 .automation-card.theme-dark .current-use-badge {
@@ -2363,6 +2377,7 @@
   border-radius: 12px;
   background: var(--provider-btn-bg);
   color: var(--provider-btn-text);
+  cursor: pointer;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
@@ -2392,7 +2407,12 @@
 }
 
 .card-actions .ghost-icon:focus-visible {
-  outline: none;
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+.automation-card.theme-dark .card-actions .ghost-icon:focus-visible {
+  outline-color: #93c5fd;
 }
 
 .card-actions .ghost-icon:disabled {
@@ -2445,6 +2465,33 @@
 .automation-card.theme-dark .direct-apply-btn.is-active {
   background: linear-gradient(135deg, #047857 0%, #0f766e 100%);
   border-color: rgba(45, 212, 191, 0.22);
+}
+
+.forced-priority-btn {
+  --provider-btn-hover-bg: rgba(37, 99, 235, 0.12);
+  --provider-btn-hover-border: rgba(37, 99, 235, 0.24);
+  --provider-btn-hover-text: #2563eb;
+}
+
+.card-actions .forced-priority-btn.is-active,
+.card-actions .forced-priority-btn.is-active:hover:not(:disabled),
+.card-actions .forced-priority-btn.is-active:focus-visible:not(:disabled) {
+  color: #ffffff;
+  background: #2563eb;
+  border-color: #1d4ed8;
+  box-shadow: 0 10px 22px rgba(37, 99, 235, 0.3);
+}
+
+.automation-card.theme-dark .forced-priority-btn {
+  --provider-btn-hover-text: #bfdbfe;
+}
+
+.automation-card.theme-dark .card-actions .forced-priority-btn.is-active,
+.automation-card.theme-dark .card-actions .forced-priority-btn.is-active:hover:not(:disabled),
+.automation-card.theme-dark .card-actions .forced-priority-btn.is-active:focus-visible:not(:disabled) {
+  color: #ffffff;
+  background: #1d4ed8;
+  border-color: #60a5fa;
 }
 
 .provider-data-btn {
