@@ -1,6 +1,5 @@
 <template>
   <article
-    :ref="bindCardRef"
     :data-provider-id="viewModel.card.id"
     :class="[
       'automation-card',
@@ -1020,7 +1019,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onUnmounted, ref, watch, type ComponentPublicInstance, type CSSProperties } from 'vue'
+import { computed, nextTick, onUnmounted, ref, watch, type CSSProperties } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { ProviderCardViewModel, ProviderDragEndPayload, ProviderQuotaDisplayItem, ProviderTab, ResolvedTheme } from '../types'
 import { formatQuotaUsagePercent, getQuotaProgressClass, getQuotaProgressPercent } from '../utils/providerQuotaDisplay'
@@ -1056,7 +1055,6 @@ const props = defineProps<{
   forcedPrioritySaving: boolean
   resolvedTheme: ResolvedTheme
   formatBlacklistCountdown: (remainingSeconds: number) => string
-  bindCardRef?: (element: Element | ComponentPublicInstance | null) => void
 }>()
 
 const emit = defineEmits<{

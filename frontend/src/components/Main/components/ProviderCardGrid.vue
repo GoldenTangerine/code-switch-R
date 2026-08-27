@@ -18,7 +18,6 @@
       :forced-priority-saving="forcedPrioritySaving"
       :resolved-theme="resolvedTheme"
       :format-blacklist-countdown="formatBlacklistCountdown"
-      :bind-card-ref="bindCardRef(viewModel.card)"
       @card-click="$emit('card-click', viewModel.card)"
       @dragstart="handleItemDragStart(viewModel.card.id)"
       @dragend="handleItemDragEnd"
@@ -65,7 +64,6 @@ defineProps<{
   resolvedTheme: ResolvedTheme
   isSorting: boolean
   formatBlacklistCountdown: (remainingSeconds: number) => string
-  bindCardRef: (card: AutomationCard) => (element: Element | ComponentPublicInstance | null) => void
 }>()
 
 const emit = defineEmits<{

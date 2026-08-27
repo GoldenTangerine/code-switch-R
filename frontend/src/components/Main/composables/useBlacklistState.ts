@@ -18,7 +18,6 @@ type UseBlacklistStateOptions = {
   t: TranslateFn
   getActiveTab: () => ProviderTab
   getSelectedToolId: () => string | null
-  switchToPlatform: (platform: ProviderTab) => void
 }
 
 const BLACKLIST_THRESHOLD_CACHE_TTL_MS = 60_000
@@ -73,7 +72,7 @@ const isProviderTab = (value: string): value is ProviderTab =>
   PROVIDER_TAB_IDS.includes(value as ProviderTab)
 
 export function useBlacklistState(options: UseBlacklistStateOptions) {
-  const { t, getActiveTab, getSelectedToolId, switchToPlatform } = options
+  const { t, getActiveTab, getSelectedToolId } = options
 
   const blacklistStatusMap = reactive(createBlacklistMap())
   const lastUsedProviders = reactive(createLastUsedMap())
@@ -262,12 +261,13 @@ export function useBlacklistState(options: UseBlacklistStateOptions) {
     }
   }
 
-  const switchToTabAndHighlight = (provider: LastUsedProvider) => {
+  const updateProviderAndHighlightIfVisible = (provider: LastUsedProvider) => {
     if (!shouldUseLastUsedProviderForTool(provider, getSelectedToolId())) return
 
-    switchToPlatform(provider.platform as ProviderTab)
     lastUsedProviders[provider.platform as ProviderTab] = provider
-    applyHighlightedProvider(provider)
+    if (provider.platform === getActiveTab()) {
+      applyHighlightedProvider(provider)
+    }
 
     void loadBlacklistStatus(provider.platform as ProviderTab)
   }
@@ -281,7 +281,7 @@ export function useBlacklistState(options: UseBlacklistStateOptions) {
     })
     if (!normalized || !isProviderTab(normalized.platform)) return
     console.log('[Event] provider:switched', normalized.platform, normalized.provider_name, normalized.provider_id)
-    switchToTabAndHighlight(normalized)
+    updateProviderAndHighlightIfVisible(normalized)
   }
 
   const handleProviderBlacklisted = (event: { data: { platform: string; providerName: string; providerId?: string; timestamp?: number } }) => {
@@ -293,7 +293,7 @@ export function useBlacklistState(options: UseBlacklistStateOptions) {
     })
     if (!normalized || !isProviderTab(normalized.platform)) return
     console.log('[Event] provider:blacklisted', normalized.platform, normalized.provider_name, normalized.provider_id)
-    switchToTabAndHighlight(normalized)
+    updateProviderAndHighlightIfVisible(normalized)
   }
 
   const handleProviderRouted = (event: { data: { platform: string; providerName: string; providerId?: string; timestamp?: number } }) => {
@@ -326,12 +326,6 @@ export function useBlacklistState(options: UseBlacklistStateOptions) {
       return highlightedRef === cardRef
     }
     return highlightedProviderName.value === card.name
-  }
-
-  const scrollToCard = (element: HTMLElement | null) => {
-    if (element) {
-      element.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    }
   }
 
   const startStatusSync = () => {
@@ -411,7 +405,6 @@ export function useBlacklistState(options: UseBlacklistStateOptions) {
     loadLastUsedProviders,
     isLastUsedProvider,
     isHighlightedCard,
-    scrollToCard,
     startStatusSync,
     stopStatusSync,
   }

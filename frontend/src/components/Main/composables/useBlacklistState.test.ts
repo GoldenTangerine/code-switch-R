@@ -8,20 +8,31 @@
  * @FilePath: frontend/src/components/Main/composables/useBlacklistState.test.ts
  */
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BlacklistStatus } from '../../../services/blacklist'
 
-const { callByNameMock } = vi.hoisted(() => ({
+const { callByNameMock, eventCallbacks } = vi.hoisted(() => ({
   callByNameMock: vi.fn(),
+  eventCallbacks: new Map<string, (event: { data: Record<string, unknown> }) => void>(),
 }))
 
 vi.mock('@wailsio/runtime', () => ({
   Call: { ByName: callByNameMock },
-  Events: { On: vi.fn() },
+  Events: {
+    On: (name: string, callback: (event: { data: Record<string, unknown> }) => void) => {
+      eventCallbacks.set(name, callback)
+      return vi.fn()
+    },
+  },
 }))
 
 import { buildProviderSuccessRateTooltip } from '../utils/providerBlacklistDisplay'
 import { resolveProviderBlacklistCounters, useBlacklistState } from './useBlacklistState'
+
+beforeEach(() => {
+  callByNameMock.mockReset()
+  eventCallbacks.clear()
+})
 
 const buildStatus = (overrides: Partial<BlacklistStatus> = {}): BlacklistStatus => ({
   platform: 'claude',
@@ -108,10 +119,6 @@ describe('buildProviderSuccessRateTooltip', () => {
 })
 
 describe('useBlacklistState threshold loading', () => {
-  beforeEach(() => {
-    callByNameMock.mockReset()
-  })
-
   it('deduplicates concurrent threshold requests and reuses the short-lived cache', async () => {
     callByNameMock.mockImplementation((name: string) => {
       if (name.endsWith('.GetBlacklistStatus')) return Promise.resolve([])
@@ -126,7 +133,6 @@ describe('useBlacklistState threshold loading', () => {
       t: (key: string) => key,
       getActiveTab: () => 'claude',
       getSelectedToolId: () => null,
-      switchToPlatform: vi.fn(),
     })
 
     await Promise.all([
@@ -138,5 +144,72 @@ describe('useBlacklistState threshold loading', () => {
 
     expect(callByNameMock.mock.calls.filter(([name]) => name.endsWith('.GetBlacklistSettingsStruct'))).toHaveLength(1)
     expect(callByNameMock.mock.calls.filter(([name]) => name.endsWith('.GetHealthBlacklistThreshold'))).toHaveLength(1)
+  })
+})
+
+describe('useBlacklistState provider event visibility', () => {
+  const providerEvents = [
+    ['provider:switched', {
+      platform: 'claude',
+      toProvider: 'kimi',
+      toProviderId: '101',
+      timestamp: 1,
+    }],
+    ['provider:blacklisted', {
+      platform: 'claude',
+      providerName: 'kimi',
+      providerId: '101',
+      timestamp: 1,
+    }],
+  ] as const
+
+  beforeEach(() => {
+    callByNameMock.mockResolvedValue([])
+    vi.stubGlobal('window', {
+      setInterval: vi.fn(() => 1),
+      clearInterval: vi.fn(),
+      setTimeout: vi.fn(() => 2),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it.each(providerEvents)('keeps %s on a background tab without switching or highlighting', (eventName, data) => {
+    const state = useBlacklistState({
+      t: (key: string) => key,
+      getActiveTab: () => 'codex',
+      getSelectedToolId: () => null,
+    })
+    state.startStatusSync()
+
+    try {
+      eventCallbacks.get(eventName)?.({ data })
+
+      expect(state.lastUsedProviders.claude?.provider_name).toBe('kimi')
+      expect(state.highlightedProviderName.value).toBeNull()
+    } finally {
+      state.stopStatusSync()
+    }
+  })
+
+  it.each(providerEvents)('keeps %s highlighting on the active tab', (eventName, data) => {
+    const state = useBlacklistState({
+      t: (key: string) => key,
+      getActiveTab: () => 'claude',
+      getSelectedToolId: () => null,
+    })
+    state.startStatusSync()
+
+    try {
+      eventCallbacks.get(eventName)?.({ data })
+
+      expect(state.highlightedProviderName.value).toBe('kimi')
+    } finally {
+      state.stopStatusSync()
+    }
   })
 })

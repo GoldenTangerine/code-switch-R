@@ -1,6 +1,6 @@
 package main
 
-const AppVersion = "v2.11.9"
+const AppVersion = "v2.11.10"
 
 type VersionService struct {
 	version string

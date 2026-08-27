@@ -71,7 +71,6 @@
           :resolved-theme="resolvedTheme"
           :is-sorting="draggingId !== null"
           :format-blacklist-countdown="formatBlacklistCountdown"
-          :bind-card-ref="bindCardRef"
           @card-click="handleProviderCardClick"
           @dragstart="onDragStart"
           @dragover-card="onDragOverCard"
@@ -216,7 +215,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onUnmounted, reactive, ref, watch, type ComponentPublicInstance } from 'vue'
+import { computed, onUnmounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Browser, Call, Events } from '@wailsio/runtime'
 import { useRouter } from 'vue-router'
@@ -396,14 +395,12 @@ const {
   loadLastUsedProviders,
   isLastUsedProvider,
   isHighlightedCard,
-  scrollToCard,
   startStatusSync,
   stopStatusSync,
 } = useBlacklistState({
   t,
   getActiveTab: () => activeTab.value,
   getSelectedToolId: () => selectedToolId.value,
-  switchToPlatform,
 })
 
 const { loadAvailabilityResults, getConnectivityIndicatorClass, getConnectivityTooltip } =
@@ -1084,13 +1081,6 @@ onUnmounted(() => {
     concurrencyStatusTimer = undefined
   }
 })
-
-const bindCardRef = (card: AutomationCard) => (element: Element | ComponentPublicInstance | null) => {
-  const target = element instanceof HTMLElement ? element : null
-  if (isHighlightedCard(card)) {
-    scrollToCard(target)
-  }
-}
 
 const onTabChange = (index: number) => {
   const nextTab = tabs.value[index]?.id
