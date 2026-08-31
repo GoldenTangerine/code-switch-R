@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Call, Events, System } from '@wailsio/runtime'
 import ListItem from '../Setting/ListRow.vue'
@@ -81,6 +81,7 @@ import {
   type BudgetQuotaSetting,
   type BudgetQuotaSettings,
 } from '../../utils/budgetUsage'
+import { useGeneralPageData } from './composables/useGeneralPageData'
 
 const { t } = useI18n()
 
@@ -770,8 +771,6 @@ const webdavDownloadBackupPath = ref('')
 const webdavDownloadErrorFile = ref('')
 const webdavDownloadError = ref('')
 const webdavDownloadLogs = ref<WebDAVDownloadLog[]>([])
-
-let unsubscribeWebdavSync: (() => void) | null = null
 
 // 模型价格弹窗
 const modelPricingModalOpen = ref(false)
@@ -2065,41 +2064,33 @@ const downloadFromWebDAV = () => {
   openWebdavDownloadModal()
 }
 
-onMounted(async () => {
-  void preloadProviderDisplayIcons(HOME_PROVIDER_TAB_OPTIONS.map((tab) => tab.icon))
-
-  await loadAppSettings()
-  await loadClaudeModelRoutingStatus()
-
+const loadAppVersion = async () => {
   // 加载当前版本号
   try {
     appVersion.value = await fetchCurrentVersion()
   } catch (error) {
     console.error('failed to load app version', error)
   }
+}
 
+useGeneralPageData({
+  preloadProviderIcons: () => {
+    void preloadProviderDisplayIcons(HOME_PROVIDER_TAB_OPTIONS.map((tab) => tab.icon))
+  },
+  loadAppSettings,
+  loadClaudeModelRoutingStatus,
+  loadAppVersion,
   // 加载更新状态
-  await loadUpdateState()
-
+  loadUpdateState,
   // 加载拉黑配置
-  await loadBlacklistSettings()
-
+  loadBlacklistSettings,
   // 加载导入状态
-  await loadImportStatus()
-
+  loadImportStatus,
   // 加载 WebDAV 配置
-  await loadWebDAV()
-
+  loadWebDAV,
   // WebDAV 同步进度事件
-  unsubscribeWebdavSync = Events.On('webdav:sync', handleWebdavSyncEvent as Events.WailsEventCallback)
-})
-
-onBeforeUnmount(() => {
-  void flushPendingPersist()
-  if (unsubscribeWebdavSync) {
-    unsubscribeWebdavSync()
-    unsubscribeWebdavSync = null
-  }
+  subscribeWebDAVSync: () => Events.On('webdav:sync', handleWebdavSyncEvent as Events.WailsEventCallback),
+  flushPendingPersist,
 })
 </script>
 
