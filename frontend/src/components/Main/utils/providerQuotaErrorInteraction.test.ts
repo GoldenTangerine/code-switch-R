@@ -16,7 +16,10 @@ import {
   PROVIDER_QUOTA_ERROR_HOVER_DELAY_MS,
 } from './providerQuotaErrorInteraction'
 
-const createInteraction = () => {
+const createInteraction = (options: {
+  openDelayMs?: number
+  closeDelayMs?: number
+} = {}) => {
   const open = ref(false)
   const pinned = ref(false)
   const hovering = ref(false)
@@ -28,6 +31,7 @@ const createInteraction = () => {
     hovering,
     focusOnOpen,
     onClose,
+    ...options,
   })
   return { open, pinned, hovering, focusOnOpen, onClose, interaction }
 }
@@ -66,6 +70,43 @@ describe('provider quota error interaction', () => {
     vi.advanceTimersByTime(PROVIDER_QUOTA_ERROR_HOVER_DELAY_MS)
 
     expect(open.value).toBe(false)
+  })
+
+  it('uses independent delays and cancels a pending close when the pointer re-enters', () => {
+    const openDelayMs = 100
+    const closeDelayMs = 150
+    const { open, interaction } = createInteraction({ openDelayMs, closeDelayMs })
+
+    interaction.enter()
+    vi.advanceTimersByTime(openDelayMs - 1)
+    expect(open.value).toBe(false)
+    vi.advanceTimersByTime(1)
+    expect(open.value).toBe(true)
+
+    interaction.leave()
+    vi.advanceTimersByTime(closeDelayMs - 1)
+    expect(open.value).toBe(true)
+    interaction.enter()
+    vi.advanceTimersByTime(1)
+    expect(open.value).toBe(true)
+
+    interaction.leave()
+    vi.advanceTimersByTime(closeDelayMs)
+    expect(open.value).toBe(false)
+  })
+
+  it('supports click locking without moving focus', () => {
+    const open = ref(false)
+    const pinned = ref(false)
+    const interaction = createProviderQuotaErrorPopoverInteraction({
+      open,
+      pinned,
+      hovering: ref(false),
+    })
+
+    interaction.toggle()
+    expect(open.value).toBe(true)
+    expect(pinned.value).toBe(true)
   })
 
   it('keeps a clicked or touch-opened popover pinned until toggled closed', () => {

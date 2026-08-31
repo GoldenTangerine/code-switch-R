@@ -19,6 +19,7 @@ import type { ProviderCardViewModel } from '../types'
 import ProviderCard from './ProviderCard.vue'
 
 const providerCardStyleSource = readFileSync(new URL('../styles/provider-card.css', import.meta.url), 'utf8')
+const providerCardComponentSource = readFileSync(new URL('./ProviderCard.vue', import.meta.url), 'utf8')
 
 const card: AutomationCard = {
   id: 102,
@@ -178,6 +179,18 @@ describe('ProviderCard display states', () => {
     expect(html).toContain('card-blacklist-trigger')
     expect(html).toContain('已拉黑 1分5秒')
     expect(html).not.toContain('blacklist-banner')
+  })
+
+  it('keeps the blacklist popover open across its hover boundary and scrolls long reasons', () => {
+    const blacklistReasonRule = providerCardStyleSource.match(/\.card-blacklist-popover__reason\s*\{[^}]*\}/)?.[0] ?? ''
+
+    expect(providerCardComponentSource).toContain('@mouseenter="handleBlacklistPopoverPointerEnter"')
+    expect(providerCardComponentSource).toContain('@mouseleave="handleBlacklistPopoverPointerLeave"')
+    expect(providerCardComponentSource).toContain('BLACKLIST_POPOVER_HOVER_OPEN_DELAY_MS = 100')
+    expect(providerCardComponentSource).toContain('BLACKLIST_POPOVER_HOVER_CLOSE_DELAY_MS = 150')
+    expect(blacklistReasonRule).toContain('max-height: 160px')
+    expect(blacklistReasonRule).toContain('overflow-y: auto')
+    expect(blacklistReasonRule).toContain('overscroll-behavior: contain')
   })
 
   it('replaces the normal switch with quota exhaustion actions when auto-disabled', async () => {

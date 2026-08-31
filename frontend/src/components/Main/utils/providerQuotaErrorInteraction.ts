@@ -16,7 +16,9 @@ type ProviderQuotaErrorPopoverInteractionOptions = {
   open: Ref<boolean>
   pinned: Ref<boolean>
   hovering: Ref<boolean>
-  focusOnOpen: Ref<boolean>
+  focusOnOpen?: Ref<boolean>
+  openDelayMs?: number
+  closeDelayMs?: number
   onClose?: () => void
 }
 
@@ -34,6 +36,8 @@ export const createProviderQuotaErrorPopoverInteraction = (
 ): ProviderQuotaErrorPopoverInteraction => {
   let openTimer: ReturnType<typeof globalThis.setTimeout> | undefined
   let closeTimer: ReturnType<typeof globalThis.setTimeout> | undefined
+  const openDelayMs = options.openDelayMs ?? PROVIDER_QUOTA_ERROR_HOVER_DELAY_MS
+  const closeDelayMs = options.closeDelayMs ?? PROVIDER_QUOTA_ERROR_HOVER_DELAY_MS
 
   const clear = () => {
     if (openTimer !== undefined) {
@@ -49,7 +53,7 @@ export const createProviderQuotaErrorPopoverInteraction = (
   const close = () => {
     clear()
     options.pinned.value = false
-    options.focusOnOpen.value = false
+    if (options.focusOnOpen) options.focusOnOpen.value = false
     options.open.value = false
     options.onClose?.()
   }
@@ -62,9 +66,9 @@ export const createProviderQuotaErrorPopoverInteraction = (
     openTimer = globalThis.setTimeout(() => {
       openTimer = undefined
       if (!options.hovering.value) return
-      options.focusOnOpen.value = false
+      if (options.focusOnOpen) options.focusOnOpen.value = false
       options.open.value = true
-    }, PROVIDER_QUOTA_ERROR_HOVER_DELAY_MS)
+    }, openDelayMs)
   }
 
   const leave = () => {
@@ -75,7 +79,7 @@ export const createProviderQuotaErrorPopoverInteraction = (
     closeTimer = globalThis.setTimeout(() => {
       closeTimer = undefined
       if (!options.hovering.value) close()
-    }, PROVIDER_QUOTA_ERROR_HOVER_DELAY_MS)
+    }, closeDelayMs)
   }
 
   const toggle = () => {
@@ -86,7 +90,7 @@ export const createProviderQuotaErrorPopoverInteraction = (
     }
 
     options.pinned.value = true
-    options.focusOnOpen.value = true
+    if (options.focusOnOpen) options.focusOnOpen.value = true
     options.open.value = true
   }
 

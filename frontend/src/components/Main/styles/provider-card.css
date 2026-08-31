@@ -734,6 +734,9 @@
 
 .card-blacklist-popover__reason {
   margin-top: 8px;
+  max-height: 160px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding-top: 8px;
   border-top: 1px solid var(--provider-tooltip-border);
   color: var(--provider-muted-color);

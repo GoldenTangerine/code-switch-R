@@ -247,7 +247,12 @@
             </template>
             <template v-if="viewModel.blacklistStatus?.isBlacklisted">
               <span class="card-metric-separator" aria-hidden="true">·</span>
-              <span ref="blacklistPopoverRef" class="card-blacklist-inline">
+              <span
+                ref="blacklistPopoverRef"
+                class="card-blacklist-inline"
+                @mouseenter="handleBlacklistPopoverPointerEnter"
+                @mouseleave="handleBlacklistPopoverPointerLeave"
+              >
                 <button
                   type="button"
                   class="card-blacklist-trigger"
@@ -1125,6 +1130,8 @@ const successRateTooltip = computed(() => {
 })
 
 const blacklistPopoverOpen = ref(false)
+const blacklistPopoverPinned = ref(false)
+const blacklistPopoverHovering = ref(false)
 const blacklistPopoverRef = ref<HTMLElement | null>(null)
 const quotaErrorPopoverOpen = ref(false)
 const quotaErrorPopoverPinned = ref(false)
@@ -1138,6 +1145,16 @@ const quotaErrorPopoverPlacement = ref<ProviderQuotaErrorPopoverPlacement>('belo
 const quotaErrorPopoverStyle = ref<CSSProperties>({ visibility: 'hidden' })
 let quotaErrorCopiedTimer: ReturnType<typeof globalThis.setTimeout> | undefined
 const hasOpenCardPopover = computed(() => blacklistPopoverOpen.value || quotaErrorPopoverOpen.value)
+const BLACKLIST_POPOVER_HOVER_OPEN_DELAY_MS = 100
+const BLACKLIST_POPOVER_HOVER_CLOSE_DELAY_MS = 150
+
+const blacklistPopoverInteraction = createProviderQuotaErrorPopoverInteraction({
+  open: blacklistPopoverOpen,
+  pinned: blacklistPopoverPinned,
+  hovering: blacklistPopoverHovering,
+  openDelayMs: BLACKLIST_POPOVER_HOVER_OPEN_DELAY_MS,
+  closeDelayMs: BLACKLIST_POPOVER_HOVER_CLOSE_DELAY_MS,
+})
 
 const quotaErrorPopoverInteraction = createProviderQuotaErrorPopoverInteraction({
   open: quotaErrorPopoverOpen,
@@ -1159,7 +1176,7 @@ const quotaErrorDetailsAriaLabel = computed(() => t(
 ))
 
 const closeBlacklistPopover = () => {
-  blacklistPopoverOpen.value = false
+  blacklistPopoverInteraction.close()
 }
 
 const closeQuotaErrorPopover = (restoreFocus = false) => {
@@ -1172,7 +1189,7 @@ const closeQuotaErrorPopover = (restoreFocus = false) => {
 
 const toggleBlacklistPopover = () => {
   closeQuotaErrorPopover()
-  blacklistPopoverOpen.value = !blacklistPopoverOpen.value
+  blacklistPopoverInteraction.toggle()
 }
 
 const toggleQuotaErrorPopover = () => {
@@ -1186,6 +1203,14 @@ const handleQuotaErrorPointerEnter = () => {
 
 const handleQuotaErrorPointerLeave = () => {
   quotaErrorPopoverInteraction.leave()
+}
+
+const handleBlacklistPopoverPointerEnter = () => {
+  blacklistPopoverInteraction.enter()
+}
+
+const handleBlacklistPopoverPointerLeave = () => {
+  blacklistPopoverInteraction.leave()
 }
 
 const copyQuotaErrorDetails = async () => {
@@ -1509,6 +1534,7 @@ watch(hasQuotaStatusPanelItems, (enabled) => {
 onUnmounted(() => {
   stopBlacklistPopoverListeners()
   stopQuotaErrorPopoverListeners()
+  blacklistPopoverInteraction.dispose()
   quotaErrorPopoverInteraction.dispose()
   if (quotaErrorCopiedTimer !== undefined) {
     globalThis.clearTimeout(quotaErrorCopiedTimer)
