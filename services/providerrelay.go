@@ -714,6 +714,38 @@ func writeProviderConcurrencyLimitErrorIfAny(c *gin.Context, err error) bool {
 	return true
 }
 
+type providerAttemptState struct {
+	lastError     error
+	lastProvider  string
+	lastDuration  time.Duration
+	totalAttempts int
+}
+
+func (state *providerAttemptState) beginAttempt() {
+	state.totalAttempts++
+}
+
+func (state *providerAttemptState) recordFailure(provider Provider, duration time.Duration, err error) string {
+	state.lastError = err
+	state.lastProvider = provider.Name
+	state.lastDuration = duration
+	return providerAttemptErrorMessage(err)
+}
+
+func (state *providerAttemptState) writeTerminalError(c *gin.Context) bool {
+	if writeProviderConcurrencyLimitErrorIfAny(c, state.lastError) {
+		return true
+	}
+	return writeLastUpstreamErrorIfAny(c, state.lastError)
+}
+
+func providerAttemptErrorMessage(err error) string {
+	if err == nil {
+		return "未知错误"
+	}
+	return err.Error()
+}
+
 func NewProviderRelayService(providerService *ProviderService, geminiService *GeminiService, blacklistService *BlacklistService, notificationService *NotificationService, appSettings *AppSettingsService, modelPricing *ModelPricingService, addr string) *ProviderRelayService {
 	if addr == "" {
 		addr = "127.0.0.1:18100" // 【安全修复】仅监听本地回环地址，防止 API Key 暴露到局域网
@@ -1402,6 +1434,46 @@ func (prs *ProviderRelayService) recordProviderFailureIfNeeded(platform string, 
 		reason = err.Error()
 	}
 	return prs.blacklistService.RecordFailureWithReasonByID(platform, providerID, providerName, reason)
+}
+
+func (prs *ProviderRelayService) recordProviderAttemptSuccess(platform string, provider Provider) {
+	providerID := providerRefFromProvider(provider)
+	if err := prs.blacklistService.RecordSuccessByID(platform, providerID, provider.Name); err != nil {
+		fmt.Printf("[WARN] 清零失败计数失败: %v\n", err)
+	}
+	prs.setLastUsedProvider(platform, providerID, provider.Name)
+}
+
+func (prs *ProviderRelayService) recordProviderAttemptFailure(platform string, provider Provider, err error) {
+	if recordErr := prs.recordProviderFailureIfNeeded(platform, providerRefFromProvider(provider), provider.Name, err); recordErr != nil {
+		fmt.Printf("[ERROR] 记录失败到黑名单失败: %v\n", recordErr)
+	}
+}
+
+func (prs *ProviderRelayService) stopProviderAttemptIfNeeded(
+	platform string,
+	provider Provider,
+	err error,
+	duration time.Duration,
+	responseStartedLogFormat string,
+	restoreSessionBinding func(),
+) bool {
+	responseStarted := errors.Is(err, errResponseStarted)
+	clientAbort := errors.Is(err, errClientAbort)
+	if !responseStarted && !clientAbort {
+		return false
+	}
+	if restoreSessionBinding != nil {
+		restoreSessionBinding()
+	}
+	if clientAbort {
+		logRelayClientAbort("[WARN]", provider.Name, err)
+		return true
+	}
+	fmt.Printf(responseStartedLogFormat, provider.Name, providerAttemptErrorMessage(err), duration.Seconds())
+	prs.recordProviderAttemptFailure(platform, provider, err)
+	prs.releaseProviderSessionsIfBlacklisted(platform, providerRefFromProvider(provider), provider.Name)
+	return true
 }
 
 func sessionAffinityStateKey(platform string, sessionHash string) string {
@@ -4350,6 +4422,10 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 			levels, levelGroups = buildProviderAttemptGroups(active, "")
 		}
 		var sessionAttemptID int64
+		attemptState := providerAttemptState{}
+		restoreSessionAttempt := func() {
+			prs.restoreOrReleaseProviderSessionBinding(kind, sessionHash, originalSessionBinding, sessionAttemptID)
+		}
 
 		// 【拉黑模式】：同 Provider 重试直到被拉黑，然后切换到下一个 Provider
 		// 设计目标：Claude Code 单次请求最多重试 3 次，但拉黑阈值可能是 5
@@ -4364,9 +4440,6 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 			fmt.Printf("[INFO] 转发配置: 每 Provider 最多 %d 次尝试，失败后切换下一个 Provider\n",
 				maxRetryPerProvider)
 
-			var lastError error
-			var lastProvider string
-			totalAttempts := 0
 			if sessionCanBind {
 				orderedProviders := make([]Provider, 0, len(active))
 				for _, level := range levels {
@@ -4389,7 +4462,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 						providerRetryLimit = max(1, retryConfig.FailureThreshold)
 					}
 					for retryCount := 0; retryCount < providerRetryLimit; retryCount++ {
-						totalAttempts++
+						attemptState.beginAttempt()
 						if blacklisted, _ := prs.blacklistService.IsBlacklistedByID(kind, providerRefFromProvider(provider), provider.Name); blacklisted {
 							prs.releaseProviderSessions(kind, providerRefFromProvider(provider))
 							fmt.Printf("[INFO] 🚫 Provider %s 已被拉黑，切换到下一个\n", provider.Name)
@@ -4414,51 +4487,30 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 							prs.confirmSessionProviderBinding(kind, sessionHash, sessionAttemptID)
 							fmt.Printf("[INFO] ✓ 会话隔离成功: %s | 重试 %d 次 | 耗时: %.2fs\n",
 								provider.Name, retryCount+1, duration.Seconds())
-							if err := prs.blacklistService.RecordSuccessByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
-								fmt.Printf("[WARN] 清零失败计数失败: %v\n", err)
-							}
-							prs.setLastUsedProvider(kind, providerRefFromProvider(provider), provider.Name)
+							prs.recordProviderAttemptSuccess(kind, provider)
 							return
 						}
 
-						lastError = err
-						lastProvider = provider.Name
-						errorMsg := "未知错误"
-						if err != nil {
-							errorMsg = err.Error()
-						}
-						if errors.Is(err, errResponseStarted) {
-							prs.restoreOrReleaseProviderSessionBinding(kind, sessionHash, originalSessionBinding, sessionAttemptID)
-							if errors.Is(err, errClientAbort) {
-								logRelayClientAbort("[WARN]", provider.Name, err)
-								return
-							}
-							fmt.Printf("[WARN] ⚠️ 响应已部分写入，无法重试: %s | 错误: %s | 耗时: %.2fs\n",
-								provider.Name, errorMsg, duration.Seconds())
-							if err := prs.recordProviderFailureIfNeeded(kind, providerRefFromProvider(provider), provider.Name, err); err != nil {
-								fmt.Printf("[ERROR] 记录失败到黑名单失败: %v\n", err)
-							}
-							if blacklisted, _ := prs.blacklistService.IsBlacklistedByID(kind, providerRefFromProvider(provider), provider.Name); blacklisted {
-								prs.releaseProviderSessions(kind, providerRefFromProvider(provider))
-							}
+						errorMsg := attemptState.recordFailure(provider, duration, err)
+						if prs.stopProviderAttemptIfNeeded(
+							kind,
+							provider,
+							err,
+							duration,
+							"[WARN] ⚠️ 响应已部分写入，无法重试: %s | 错误: %s | 耗时: %.2fs\n",
+							restoreSessionAttempt,
+						) {
 							return
 						}
-						if errors.Is(err, errClientAbort) {
-							prs.restoreOrReleaseProviderSessionBinding(kind, sessionHash, originalSessionBinding, sessionAttemptID)
-							logRelayClientAbort("[WARN]", provider.Name, err)
-							return
-						}
-						if err := prs.recordProviderFailureIfNeeded(kind, providerRefFromProvider(provider), provider.Name, err); err != nil {
-							fmt.Printf("[ERROR] 记录失败到黑名单失败: %v\n", err)
-						}
+						prs.recordProviderAttemptFailure(kind, provider, err)
 						if blacklisted, _ := prs.blacklistService.IsBlacklistedByID(kind, providerRefFromProvider(provider), provider.Name); blacklisted {
 							prs.releaseProviderSessions(kind, providerRefFromProvider(provider))
 							fmt.Printf("[INFO] 🚫 Provider %s 达到失败阈值，已被拉黑，切换到下一个\n", provider.Name)
 							prs.notifyProviderSwitchAfterProvider(kind, providerRefFromProvider(provider), provider.Name, errorMsg, orderedSwitchTargets, providerIndex)
-							prs.restoreOrReleaseProviderSessionBinding(kind, sessionHash, originalSessionBinding, sessionAttemptID)
+							restoreSessionAttempt()
 							break
 						}
-						prs.restoreOrReleaseProviderSessionBinding(kind, sessionHash, originalSessionBinding, sessionAttemptID)
+						restoreSessionAttempt()
 						if isProviderConcurrencyLimitError(err) {
 							break
 						}
@@ -4468,21 +4520,15 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 					}
 				}
 
-				prs.restoreOrReleaseProviderSessionBinding(kind, sessionHash, originalSessionBinding, sessionAttemptID)
-				if writeProviderConcurrencyLimitErrorIfAny(c, lastError) {
+				restoreSessionAttempt()
+				if attemptState.writeTerminalError(c) {
 					return
 				}
-				if writeLastUpstreamErrorIfAny(c, lastError) {
-					return
-				}
-				errorMsg := "未知错误"
-				if lastError != nil {
-					errorMsg = lastError.Error()
-				}
+				errorMsg := providerAttemptErrorMessage(attemptState.lastError)
 				c.JSON(http.StatusBadGateway, gin.H{
-					"error":         fmt.Sprintf("所有 Provider 都失败或被拉黑，最后尝试: %s - %s", lastProvider, errorMsg),
-					"lastProvider":  lastProvider,
-					"totalAttempts": totalAttempts,
+					"error":         fmt.Sprintf("所有 Provider 都失败或被拉黑，最后尝试: %s - %s", attemptState.lastProvider, errorMsg),
+					"lastProvider":  attemptState.lastProvider,
+					"totalAttempts": attemptState.totalAttempts,
 					"mode":          "blacklist_retry_session_affinity",
 					"hint":          "拉黑模式已开启，每 Provider 单次尝试，失败后切换",
 				})
@@ -4517,7 +4563,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 						providerRetryLimit = max(1, retryConfig.FailureThreshold)
 					}
 					for retryCount := 0; retryCount < providerRetryLimit; retryCount++ {
-						totalAttempts++
+						attemptState.beginAttempt()
 
 						// 再次检查是否已被拉黑（重试过程中可能被拉黑）
 						if blacklisted, _ := prs.blacklistService.IsBlacklistedByID(kind, providerRefFromProvider(provider), provider.Name); blacklisted {
@@ -4537,46 +4583,28 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 							markSessionProviderAttemptSucceeded()
 							fmt.Printf("[INFO] ✓ 成功: %s | 重试 %d 次 | 耗时: %.2fs\n",
 								provider.Name, retryCount+1, duration.Seconds())
-							if err := prs.blacklistService.RecordSuccessByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
-								fmt.Printf("[WARN] 清零失败计数失败: %v\n", err)
-							}
-							prs.setLastUsedProvider(kind, providerRefFromProvider(provider), provider.Name)
+							prs.recordProviderAttemptSuccess(kind, provider)
 							return
 						}
 
 						// 失败处理
-						lastError = err
-						lastProvider = provider.Name
-
-						errorMsg := "未知错误"
-						if err != nil {
-							errorMsg = err.Error()
-						}
-						if errors.Is(err, errResponseStarted) {
-							if errors.Is(err, errClientAbort) {
-								logRelayClientAbort("[WARN]", provider.Name, err)
-								return
-							}
-							fmt.Printf("[WARN] ⚠️ 响应已部分写入，无法重试: %s | 错误: %s | 耗时: %.2fs\n",
-								provider.Name, errorMsg, duration.Seconds())
-							if err := prs.recordProviderFailureIfNeeded(kind, providerRefFromProvider(provider), provider.Name, err); err != nil {
-								fmt.Printf("[ERROR] 记录失败到黑名单失败: %v\n", err)
-							}
-							prs.releaseProviderSessionsIfBlacklisted(kind, providerRefFromProvider(provider), provider.Name)
-							return
-						}
+						errorMsg := attemptState.recordFailure(provider, duration, err)
 						// 客户端中断不计入失败次数，直接返回
-						if errors.Is(err, errClientAbort) {
-							logRelayClientAbort("[WARN]", provider.Name, err)
+						if prs.stopProviderAttemptIfNeeded(
+							kind,
+							provider,
+							err,
+							duration,
+							"[WARN] ⚠️ 响应已部分写入，无法重试: %s | 错误: %s | 耗时: %.2fs\n",
+							nil,
+						) {
 							return
 						}
 						fmt.Printf("[WARN] ✗ 失败: %s | 重试 %d/%d | 错误: %s | 耗时: %.2fs\n",
 							provider.Name, retryCount+1, providerRetryLimit, errorMsg, duration.Seconds())
 
 						// 记录失败次数（可能触发拉黑）
-						if err := prs.recordProviderFailureIfNeeded(kind, providerRefFromProvider(provider), provider.Name, err); err != nil {
-							fmt.Printf("[ERROR] 记录失败到黑名单失败: %v\n", err)
-						}
+						prs.recordProviderAttemptFailure(kind, provider, err)
 						prs.releaseProviderSessionsIfBlacklisted(kind, providerRefFromProvider(provider), provider.Name)
 
 						// 检查是否刚被拉黑
@@ -4599,24 +4627,18 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 			}
 
 			// 所有 Provider 都失败或被拉黑
-			fmt.Printf("[ERROR] 💥 拉黑模式：所有 Provider 都失败或被拉黑（共尝试 %d 次）\n", totalAttempts)
+			fmt.Printf("[ERROR] 💥 拉黑模式：所有 Provider 都失败或被拉黑（共尝试 %d 次）\n", attemptState.totalAttempts)
 
 			// 按用户要求：仅在所有重试/降级都失败后，透传最后一次上游错误
-			if writeProviderConcurrencyLimitErrorIfAny(c, lastError) {
-				return
-			}
-			if writeLastUpstreamErrorIfAny(c, lastError) {
+			if attemptState.writeTerminalError(c) {
 				return
 			}
 
-			errorMsg := "未知错误"
-			if lastError != nil {
-				errorMsg = lastError.Error()
-			}
+			errorMsg := providerAttemptErrorMessage(attemptState.lastError)
 			c.JSON(http.StatusBadGateway, gin.H{
-				"error":         fmt.Sprintf("所有 Provider 都失败或被拉黑，最后尝试: %s - %s", lastProvider, errorMsg),
-				"lastProvider":  lastProvider,
-				"totalAttempts": totalAttempts,
+				"error":         fmt.Sprintf("所有 Provider 都失败或被拉黑，最后尝试: %s - %s", attemptState.lastProvider, errorMsg),
+				"lastProvider":  attemptState.lastProvider,
+				"totalAttempts": attemptState.totalAttempts,
 				"mode":          "blacklist_retry",
 				"hint":          "拉黑模式已开启，每 Provider 单次尝试，失败后切换",
 			})
@@ -4639,13 +4661,8 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 			sessionLoads := prs.providerSessionLoads(kind)
 			orderedProviders, requireFirstProviderWithoutSession := prs.reorderProviderAttemptsForSession(kind, orderedProviders, sessionHash, originalSessionBinding == nil && sessionAffinityEnabled, providerRefFromProvider(active[0]), sessionLoads)
 
-			var lastError error
-			var lastProvider string
-			var lastDuration time.Duration
-			totalAttempts := 0
-
 			for i, provider := range orderedProviders {
-				totalAttempts++
+				attemptState.beginAttempt()
 				plan, err := prs.getProviderRequestPlan(requestPlans, provider, bodyBytes, endpoint, requestedModel)
 				if err != nil {
 					fmt.Printf("[ERROR] Provider %s 请求体预处理失败: %v\n", provider.Name, err)
@@ -4680,78 +4697,43 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 					markSessionProviderAttemptSucceeded()
 					fmt.Printf("[INFO]   ✓ 会话隔离成功: %s | 耗时: %.2fs\n", provider.Name, duration.Seconds())
 					prs.confirmSessionProviderBinding(kind, sessionHash, sessionAttemptID)
-					if err := prs.blacklistService.RecordSuccessByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
-						fmt.Printf("[WARN] 清零失败计数失败: %v\n", err)
-					}
-					prs.setLastUsedProvider(kind, providerRefFromProvider(provider), provider.Name)
+					prs.recordProviderAttemptSuccess(kind, provider)
 					return
 				}
 
-				lastError = err
-				lastProvider = provider.Name
-				lastDuration = duration
-				errorMsg := "未知错误"
-				if err != nil {
-					errorMsg = err.Error()
-				}
-				if errors.Is(err, errResponseStarted) {
-					prs.restoreOrReleaseProviderSessionBinding(kind, sessionHash, originalSessionBinding, sessionAttemptID)
-					if errors.Is(err, errClientAbort) {
-						logRelayClientAbort("[WARN]", provider.Name, err)
-						return
-					}
-					fmt.Printf("[WARN]   ⚠️ 响应已部分写入，会话隔离停止降级: %s | 错误: %s | 耗时: %.2fs\n",
-						provider.Name, errorMsg, duration.Seconds())
-					if err := prs.recordProviderFailureIfNeeded(kind, providerRefFromProvider(provider), provider.Name, err); err != nil {
-						fmt.Printf("[ERROR] 记录失败到黑名单失败: %v\n", err)
-					}
-					if blacklisted, _ := prs.blacklistService.IsBlacklistedByID(kind, providerRefFromProvider(provider), provider.Name); blacklisted {
-						prs.releaseProviderSessions(kind, providerRefFromProvider(provider))
-					}
-					return
-				}
-				if errors.Is(err, errClientAbort) {
-					prs.restoreOrReleaseProviderSessionBinding(kind, sessionHash, originalSessionBinding, sessionAttemptID)
-					logRelayClientAbort("[WARN]", provider.Name, err)
+				errorMsg := attemptState.recordFailure(provider, duration, err)
+				if prs.stopProviderAttemptIfNeeded(
+					kind,
+					provider,
+					err,
+					duration,
+					"[WARN]   ⚠️ 响应已部分写入，会话隔离停止降级: %s | 错误: %s | 耗时: %.2fs\n",
+					restoreSessionAttempt,
+				) {
 					return
 				}
 				fmt.Printf("[WARN]   ✗ 会话隔离失败: %s | 错误: %s | 耗时: %.2fs\n",
 					provider.Name, errorMsg, duration.Seconds())
-				if !errors.Is(err, errClientAbort) {
-					if err := prs.recordProviderFailureIfNeeded(kind, providerRefFromProvider(provider), provider.Name, err); err != nil {
-						fmt.Printf("[ERROR] 记录失败到黑名单失败: %v\n", err)
-					}
-					if blacklisted, _ := prs.blacklistService.IsBlacklistedByID(kind, providerRefFromProvider(provider), provider.Name); blacklisted {
-						prs.releaseProviderSessions(kind, providerRefFromProvider(provider))
-					}
+				prs.recordProviderAttemptFailure(kind, provider, err)
+				if blacklisted, _ := prs.blacklistService.IsBlacklistedByID(kind, providerRefFromProvider(provider), provider.Name); blacklisted {
+					prs.releaseProviderSessions(kind, providerRefFromProvider(provider))
 				}
-				prs.restoreOrReleaseProviderSessionBinding(kind, sessionHash, originalSessionBinding, sessionAttemptID)
+				restoreSessionAttempt()
 			}
 
-			prs.restoreOrReleaseProviderSessionBinding(kind, sessionHash, originalSessionBinding, sessionAttemptID)
-			if writeProviderConcurrencyLimitErrorIfAny(c, lastError) {
+			restoreSessionAttempt()
+			if attemptState.writeTerminalError(c) {
 				return
 			}
-			if writeLastUpstreamErrorIfAny(c, lastError) {
-				return
-			}
-			errorMsg := "未知错误"
-			if lastError != nil {
-				errorMsg = lastError.Error()
-			}
+			errorMsg := providerAttemptErrorMessage(attemptState.lastError)
 			c.JSON(http.StatusBadGateway, gin.H{
-				"error":          fmt.Sprintf("所有 %d 个 provider 均失败，最后错误: %s", totalAttempts, errorMsg),
-				"last_provider":  lastProvider,
-				"last_duration":  fmt.Sprintf("%.2fs", lastDuration.Seconds()),
-				"total_attempts": totalAttempts,
+				"error":          fmt.Sprintf("所有 %d 个 provider 均失败，最后错误: %s", attemptState.totalAttempts, errorMsg),
+				"last_provider":  attemptState.lastProvider,
+				"last_duration":  fmt.Sprintf("%.2fs", attemptState.lastDuration.Seconds()),
+				"total_attempts": attemptState.totalAttempts,
 			})
 			return
 		}
-
-		var lastError error
-		var lastProvider string
-		var lastDuration time.Duration
-		totalAttempts := 0
 
 		for _, level := range levels {
 			providersInLevel := levelGroups[level]
@@ -4772,7 +4754,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 			fmt.Printf("[INFO] === 尝试 Level %d（%d 个 provider）===\n", level, len(providersInLevel))
 
 			for i, provider := range providersInLevel {
-				totalAttempts++
+				attemptState.beginAttempt()
 
 				plan, err := prs.getProviderRequestPlan(requestPlans, provider, bodyBytes, endpoint, requestedModel)
 				if err != nil {
@@ -4793,50 +4775,29 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 					fmt.Printf("[INFO]   ✓ Level %d 成功: %s | 耗时: %.2fs\n", level, provider.Name, duration.Seconds())
 
 					// 成功：清零连续失败计数
-					if err := prs.blacklistService.RecordSuccessByID(kind, providerRefFromProvider(provider), provider.Name); err != nil {
-						fmt.Printf("[WARN] 清零失败计数失败: %v\n", err)
-					}
-
 					// 记录最后使用的供应商
-					prs.setLastUsedProvider(kind, providerRefFromProvider(provider), provider.Name)
+					prs.recordProviderAttemptSuccess(kind, provider)
 
 					return // 成功，立即返回
 				}
 
 				// 失败：记录错误并尝试下一个
-				lastError = err
-				lastProvider = provider.Name
-				lastDuration = duration
-
-				errorMsg := "未知错误"
-				if err != nil {
-					errorMsg = err.Error()
-				}
-				if errors.Is(err, errResponseStarted) {
-					if errors.Is(err, errClientAbort) {
-						logRelayClientAbort("[WARN]", provider.Name, err)
-						return
-					}
-					fmt.Printf("[WARN]   ⚠️ 响应已部分写入，无法降级: %s | 错误: %s | 耗时: %.2fs\n",
-						provider.Name, errorMsg, duration.Seconds())
-					if err := prs.recordProviderFailureIfNeeded(kind, providerRefFromProvider(provider), provider.Name, err); err != nil {
-						fmt.Printf("[ERROR] 记录失败到黑名单失败: %v\n", err)
-					}
-					prs.releaseProviderSessionsIfBlacklisted(kind, providerRefFromProvider(provider), provider.Name)
-					return
-				}
+				errorMsg := attemptState.recordFailure(provider, duration, err)
 				// 客户端中断不计入失败次数
-				if errors.Is(err, errClientAbort) {
-					logRelayClientAbort("[WARN]", provider.Name, err)
+				if prs.stopProviderAttemptIfNeeded(
+					kind,
+					provider,
+					err,
+					duration,
+					"[WARN]   ⚠️ 响应已部分写入，无法降级: %s | 错误: %s | 耗时: %.2fs\n",
+					nil,
+				) {
 					return
-				} else if err := prs.recordProviderFailureIfNeeded(kind, providerRefFromProvider(provider), provider.Name, err); err != nil {
-					fmt.Printf("[ERROR] 记录失败到黑名单失败: %v\n", err)
 				}
+				prs.recordProviderAttemptFailure(kind, provider, err)
 				fmt.Printf("[WARN]   ✗ Level %d 失败: %s | 错误: %s | 耗时: %.2fs\n",
 					level, provider.Name, errorMsg, duration.Seconds())
-				if !errors.Is(err, errClientAbort) {
-					prs.releaseProviderSessionsIfBlacklisted(kind, providerRefFromProvider(provider), provider.Name)
-				}
+				prs.releaseProviderSessionsIfBlacklisted(kind, providerRefFromProvider(provider), provider.Name)
 
 				// 发送切换通知：检查是否有下一个可用的 provider
 				if prs.notificationService != nil {
@@ -4875,25 +4836,19 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 		}
 
 		// 所有 provider 都失败：优先透传最后一次上游错误，否则返回 502 聚合信息
-		if writeProviderConcurrencyLimitErrorIfAny(c, lastError) {
-			return
-		}
-		if writeLastUpstreamErrorIfAny(c, lastError) {
+		if attemptState.writeTerminalError(c) {
 			return
 		}
 
-		errorMsg := "未知错误"
-		if lastError != nil {
-			errorMsg = lastError.Error()
-		}
+		errorMsg := providerAttemptErrorMessage(attemptState.lastError)
 		fmt.Printf("[ERROR] 所有 %d 个 provider 均失败，最后尝试: %s | 错误: %s\n",
-			totalAttempts, lastProvider, errorMsg)
+			attemptState.totalAttempts, attemptState.lastProvider, errorMsg)
 
 		c.JSON(http.StatusBadGateway, gin.H{
-			"error":          fmt.Sprintf("所有 %d 个 provider 均失败，最后错误: %s", totalAttempts, errorMsg),
-			"last_provider":  lastProvider,
-			"last_duration":  fmt.Sprintf("%.2fs", lastDuration.Seconds()),
-			"total_attempts": totalAttempts,
+			"error":          fmt.Sprintf("所有 %d 个 provider 均失败，最后错误: %s", attemptState.totalAttempts, errorMsg),
+			"last_provider":  attemptState.lastProvider,
+			"last_duration":  fmt.Sprintf("%.2fs", attemptState.lastDuration.Seconds()),
+			"total_attempts": attemptState.totalAttempts,
 		})
 	}
 }
