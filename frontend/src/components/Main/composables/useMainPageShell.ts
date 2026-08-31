@@ -1,5 +1,5 @@
 import { computed, onMounted, onUnmounted, reactive, ref, watch, type ComputedRef, type Ref } from 'vue'
-import { Call } from '@wailsio/runtime'
+import { Call, Events } from '@wailsio/runtime'
 import { fetchProxyStatus, enableProxy, disableProxy } from '../../../services/claudeSettings'
 import { fetchGeminiProxyStatus, enableGeminiProxy, disableGeminiProxy } from '../../../services/geminiSettings'
 import {
@@ -47,6 +47,7 @@ import { showToast } from '../../../utils/toast'
 import { disableCustomCliProxy, enableCustomCliProxy, type CustomCliTool } from '../../../services/customCliService'
 import { PROVIDER_TAB_IDS } from '../constants'
 import type { ProviderTab, ResolvedTheme, TranslateFn } from '../types'
+import { bindMainPollingVisibility, createMainPollingLifecycle } from './mainPollingLifecycle'
 
 type BrowserWindowWithWailsBridge = Window & {
   chrome?: {
@@ -78,6 +79,9 @@ type UseMainPageShellOptions = {
   loadAllProviderStats: () => Promise<void>
   loadBlacklistStatus: (tab: ProviderTab) => Promise<void>
   loadAvailabilityResults: () => Promise<void>
+  loadConcurrencyStatuses: () => Promise<void>
+  startConcurrencyStatusTimer: () => void
+  stopConcurrencyStatusTimer: () => void
   pollUpdateState: () => Promise<void>
   checkForUpdates: (force?: boolean) => Promise<void>
   startUpdateTimer: () => void
@@ -132,6 +136,9 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
     loadAllProviderStats,
     loadBlacklistStatus,
     loadAvailabilityResults,
+    loadConcurrencyStatuses,
+    startConcurrencyStatusTimer,
+    stopConcurrencyStatusTimer,
     pollUpdateState,
     checkForUpdates,
     startUpdateTimer,
@@ -568,6 +575,31 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
     }
   }
 
+  const pollingLifecycle = createMainPollingLifecycle({
+    initialVisible: typeof document === 'undefined' || !document.hidden,
+    startPolling: () => {
+      startProviderStatsTimer()
+      startQuotaTimers()
+      startUpdateTimer()
+      startStatusSync()
+      startConcurrencyStatusTimer()
+    },
+    stopPolling: () => {
+      stopProviderStatsTimer()
+      stopQuotaTimers()
+      stopUpdateTimer()
+      stopStatusSync()
+      stopConcurrencyStatusTimer()
+    },
+    refresh: async () => {
+      void checkForUpdates(false)
+      await Promise.all([
+        refreshAllData(),
+        loadConcurrencyStatuses(),
+      ])
+    },
+  })
+
   const currentProxyLabel = computed(() => {
     const tab = activeTab.value
     if (tab === 'claude') {
@@ -719,6 +751,7 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
 
   let handleProvidersUpdated: (() => void) | undefined
   let cleanupThemeListener: (() => void) | undefined
+  let unbindPollingVisibility: (() => void) | undefined
 
   watch(activeTab, (newTab) => {
     void loadBlacklistStatus(newTab)
@@ -726,6 +759,13 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
   })
 
   onMounted(async () => {
+    unbindPollingVisibility = bindMainPollingVisibility(pollingLifecycle, {
+      onWindowHide: (handler) => Events.On(Events.Types.Common.WindowHide, handler),
+      onWindowShow: (handler) => Events.On(Events.Types.Common.WindowShow, handler),
+      addVisibilityListener: (handler) => document.addEventListener('visibilitychange', handler),
+      removeVisibilityListener: (handler) => document.removeEventListener('visibilitychange', handler),
+      isDocumentHidden: () => document.hidden,
+    })
     window.addEventListener('app-settings-updated', handleAppSettingsUpdated)
     syncThemeState()
     await loadAppSettings()
@@ -738,13 +778,10 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
     await checkForUpdates(false)
     await refreshImportStatus()
     await checkFirstRun()
-    startProviderStatsTimer()
-    startQuotaTimers()
     void refreshProviderQuotas()
-    startUpdateTimer()
     await Promise.all(PROVIDER_TAB_IDS.map((tab) => loadBlacklistStatus(tab)))
     await loadAvailabilityResults()
-    startStatusSync()
+    pollingLifecycle.start()
 
     handleProvidersUpdated = () => {
       void (async () => {
@@ -766,10 +803,9 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
   })
 
   onUnmounted(() => {
-    stopProviderStatsTimer()
-    stopQuotaTimers()
-    stopUpdateTimer()
-    stopStatusSync()
+    pollingLifecycle.dispose()
+    unbindPollingVisibility?.()
+    unbindPollingVisibility = undefined
     window.removeEventListener('app-settings-updated', handleAppSettingsUpdated)
     if (handleProvidersUpdated) {
       window.removeEventListener('providers-updated', handleProvidersUpdated)

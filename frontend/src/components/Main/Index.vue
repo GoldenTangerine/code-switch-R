@@ -671,6 +671,9 @@ pageShell = useMainPageShell({
   loadAllProviderStats,
   loadBlacklistStatus,
   loadAvailabilityResults,
+  loadConcurrencyStatuses: () => loadConcurrencyStatuses(),
+  startConcurrencyStatusTimer: () => startConcurrencyStatusTimer(),
+  stopConcurrencyStatusTimer: () => stopConcurrencyStatusTimer(),
   pollUpdateState,
   checkForUpdates,
   startUpdateTimer,
@@ -1068,7 +1071,15 @@ watch(activeTab, () => {
 })
 
 let concurrencyStatusTimer: number | undefined
-if (typeof window !== 'undefined') {
+const stopConcurrencyStatusTimer = () => {
+  if (concurrencyStatusTimer === undefined) return
+  window.clearInterval(concurrencyStatusTimer)
+  concurrencyStatusTimer = undefined
+}
+
+const startConcurrencyStatusTimer = () => {
+  stopConcurrencyStatusTimer()
+  if (typeof window === 'undefined') return
   concurrencyStatusTimer = window.setInterval(() => {
     void loadConcurrencyStatuses()
   }, 2000)
@@ -1076,10 +1087,6 @@ if (typeof window !== 'undefined') {
 
 onUnmounted(() => {
   unsubscribeQuotaStateChanged()
-  if (concurrencyStatusTimer !== undefined) {
-    window.clearInterval(concurrencyStatusTimer)
-    concurrencyStatusTimer = undefined
-  }
 })
 
 const onTabChange = (index: number) => {

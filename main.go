@@ -585,6 +585,17 @@ func main() {
 	var fitWindowsMainWindowOnce sync.Once
 	var showStartupMainWindowOnce sync.Once
 	var showMainWindow func(withFocus bool)
+	// Wails beta.6 的 Linux 默认映射缺少 WindowHide，在应用唯一控制点补发同名 common 事件。
+	emitLinuxMainWindowVisibility := func(visible bool) {
+		if runtime.GOOS != "linux" {
+			return
+		}
+		eventType := events.Common.WindowHide
+		if visible {
+			eventType = events.Common.WindowShow
+		}
+		app.Event.Emit(events.JSEvent(uint(eventType)))
+	}
 	scheduleMainWindowDestroy := func(win application.Window) {
 		settings, err := appSettings.GetAppSettings()
 		delay := time.Duration(services.DefaultMainWindowDestroyDelaySeconds) * time.Second
@@ -700,6 +711,7 @@ func main() {
 				return
 			}
 
+			emitLinuxMainWindowVisibility(false)
 			win.Hide()
 			handleDockVisibility(dockService, false)
 			if runtime.GOOS == "darwin" {
@@ -744,6 +756,7 @@ func main() {
 			win.UnMinimise()
 		}
 		win.Show()
+		emitLinuxMainWindowVisibility(true)
 		if withFocus {
 			focusMainWindow()
 		}
