@@ -265,8 +265,8 @@ var (
 	requestLogAuthorizationValuePattern    = regexp.MustCompile(`(?i)((?:proxy-)?authorization\s*[:=]\s*)(?:(?:bearer|basic|digest)\s+)?(?:"[^"]*"|'[^']*'|[^\s,;&]+)`)
 	requestLogSensitivePlainValuePattern   = regexp.MustCompile(`(?i)((?:api[_-]?key|x-api-key|x-goog-api-key|auth[_-]?token|access[_-]?token|refresh[_-]?token|password|secret)\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;&]+)`)
 	requestLogSensitiveQueryValuePattern   = regexp.MustCompile(`(?i)((?:api[_-]?key|x-api-key|x-goog-api-key|auth[_-]?token|access[_-]?token)=)[^&\s]+`)
-	requestLogSensitiveKeywordQuickPattern = regexp.MustCompile(`(?i)(api[_-]?key|x-api-key|x-goog-api-key|authorization|auth[_-]?token|access[_-]?token|refresh[_-]?token|password|secret)`)
 	requestLogSessionIDJSONValuePattern    = regexp.MustCompile(`(?i)("(?:id|user_id|userId|session_id|sessionId|conversation_id|conversationId|thread_id|threadId|parent_thread_id|parentThreadId|rollout_path|rolloutPath|tool_call_id|toolCallId|call_id|callId|tool_use_id|toolUseId|previous_response_id|previousResponseId|response_id|responseId)"\s*:\s*)("[^"]*"|-?\d+|true|false|null)`)
+	requestLogSensitiveKeywordQuickPattern = regexp.MustCompile(`(?i)(api[_-]?key|x-api-key|x-goog-api-key|authorization|auth[_-]?token|access[_-]?token|refresh[_-]?token|password|secret)`)
 	requestLogSessionIDQuickPattern        = regexp.MustCompile(`(?i)(user_id|userId|session_id|sessionId|conversation_id|conversationId|thread_id|threadId|parent_thread_id|parentThreadId|rollout_path|rolloutPath|tool_call_id|toolCallId|call_id|callId|tool_use_id|toolUseId|previous_response_id|previousResponseId|response_id|responseId|"id"\s*:)`)
 )
 
@@ -6267,13 +6267,127 @@ func truncateRequestLogPayload(payload string, maxBytes int) (string, bool) {
 	return clipped, true
 }
 
+func requestLogASCIILower(value byte) byte {
+	if value >= 'A' && value <= 'Z' {
+		return value + ('a' - 'A')
+	}
+	return value
+}
+
+func requestLogPayloadHasASCIIFoldAt(payload string, offset int, keyword string) bool {
+	if len(payload)-offset < len(keyword) {
+		return false
+	}
+	for i := 0; i < len(keyword); i++ {
+		if requestLogASCIILower(payload[offset+i]) != keyword[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func requestLogPayloadMayContainSensitiveKeyword(payload string) bool {
+	for i := 0; i < len(payload); i++ {
+		if payload[i] >= utf8.RuneSelf {
+			// 非 ASCII 输入继续走现有正则，保留 Unicode SimpleFold 语义。
+			return requestLogSensitiveKeywordQuickPattern.MatchString(payload)
+		}
+		switch requestLogASCIILower(payload[i]) {
+		case 'a':
+			if requestLogPayloadHasASCIIFoldAt(payload, i, "apikey") ||
+				requestLogPayloadHasASCIIFoldAt(payload, i, "api_key") ||
+				requestLogPayloadHasASCIIFoldAt(payload, i, "api-key") ||
+				requestLogPayloadHasASCIIFoldAt(payload, i, "authorization") ||
+				requestLogPayloadHasASCIIFoldAt(payload, i, "authtoken") ||
+				requestLogPayloadHasASCIIFoldAt(payload, i, "auth_token") ||
+				requestLogPayloadHasASCIIFoldAt(payload, i, "auth-token") ||
+				requestLogPayloadHasASCIIFoldAt(payload, i, "accesstoken") ||
+				requestLogPayloadHasASCIIFoldAt(payload, i, "access_token") ||
+				requestLogPayloadHasASCIIFoldAt(payload, i, "access-token") {
+				return true
+			}
+		case 'p':
+			if requestLogPayloadHasASCIIFoldAt(payload, i, "password") {
+				return true
+			}
+		case 'r':
+			if requestLogPayloadHasASCIIFoldAt(payload, i, "refreshtoken") ||
+				requestLogPayloadHasASCIIFoldAt(payload, i, "refresh_token") ||
+				requestLogPayloadHasASCIIFoldAt(payload, i, "refresh-token") {
+				return true
+			}
+		case 's':
+			if requestLogPayloadHasASCIIFoldAt(payload, i, "secret") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func requestLogPayloadMayContainSessionIdentifier(payload string) bool {
+	for i := 0; i < len(payload); i++ {
+		if payload[i] >= utf8.RuneSelf {
+			// 非 ASCII 输入继续走现有正则，保留 Unicode SimpleFold 语义。
+			return requestLogSessionIDQuickPattern.MatchString(payload)
+		}
+		switch requestLogASCIILower(payload[i]) {
+		case '"':
+			if requestLogPayloadHasASCIIFoldAt(payload, i, `"id"`) {
+				return true
+			}
+		case 'c':
+			if requestLogPayloadHasASCIIFoldAt(payload, i, "conversation_id") ||
+				requestLogPayloadHasASCIIFoldAt(payload, i, "conversationid") ||
+				requestLogPayloadHasASCIIFoldAt(payload, i, "call_id") ||
+				requestLogPayloadHasASCIIFoldAt(payload, i, "callid") {
+				return true
+			}
+		case 'p':
+			if requestLogPayloadHasASCIIFoldAt(payload, i, "parent_thread_id") ||
+				requestLogPayloadHasASCIIFoldAt(payload, i, "parentthreadid") ||
+				requestLogPayloadHasASCIIFoldAt(payload, i, "previous_response_id") ||
+				requestLogPayloadHasASCIIFoldAt(payload, i, "previousresponseid") {
+				return true
+			}
+		case 'r':
+			if requestLogPayloadHasASCIIFoldAt(payload, i, "rollout_path") ||
+				requestLogPayloadHasASCIIFoldAt(payload, i, "rolloutpath") ||
+				requestLogPayloadHasASCIIFoldAt(payload, i, "response_id") ||
+				requestLogPayloadHasASCIIFoldAt(payload, i, "responseid") {
+				return true
+			}
+		case 's':
+			if requestLogPayloadHasASCIIFoldAt(payload, i, "session_id") ||
+				requestLogPayloadHasASCIIFoldAt(payload, i, "sessionid") {
+				return true
+			}
+		case 't':
+			if requestLogPayloadHasASCIIFoldAt(payload, i, "thread_id") ||
+				requestLogPayloadHasASCIIFoldAt(payload, i, "threadid") ||
+				requestLogPayloadHasASCIIFoldAt(payload, i, "tool_call_id") ||
+				requestLogPayloadHasASCIIFoldAt(payload, i, "toolcallid") ||
+				requestLogPayloadHasASCIIFoldAt(payload, i, "tool_use_id") ||
+				requestLogPayloadHasASCIIFoldAt(payload, i, "tooluseid") {
+				return true
+			}
+		case 'u':
+			if requestLogPayloadHasASCIIFoldAt(payload, i, "user_id") ||
+				requestLogPayloadHasASCIIFoldAt(payload, i, "userid") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func sanitizeRequestLogPayload(payload string) string {
 	if strings.TrimSpace(payload) == "" {
 		return payload
 	}
 	payload = redactRequestLogSessionIdentifiers(payload)
 	// 快速短路：多数 payload 不含敏感键，避免每次都跑重正则。
-	if !requestLogSensitiveKeywordQuickPattern.MatchString(payload) {
+	if !requestLogPayloadMayContainSensitiveKeyword(payload) {
 		return payload
 	}
 	sanitized := requestLogSensitiveJSONValuePattern.ReplaceAllString(payload, `${1}"`+requestLogPayloadRedactedValue+`"`)
@@ -6328,16 +6442,15 @@ func classifyRequestErrorSource(err error, reqLog *ReqeustLog) string {
 }
 
 func redactRequestLogSessionIdentifiers(payload string) string {
-	if strings.TrimSpace(payload) == "" || !requestLogSessionIDQuickPattern.MatchString(payload) {
+	if strings.TrimSpace(payload) == "" || !requestLogPayloadMayContainSessionIdentifier(payload) {
 		return payload
 	}
 	return requestLogSessionIDJSONValuePattern.ReplaceAllString(payload, `${1}"`+requestLogPayloadRedactedValue+`"`)
 }
 
 func maybeSanitizeRequestLogPayload(reqLog *ReqeustLog, payload string) string {
-	payload = redactRequestLogSessionIdentifiers(payload)
 	if reqLog == nil || !reqLog.SanitizePayload {
-		return payload
+		return redactRequestLogSessionIdentifiers(payload)
 	}
 	return sanitizeRequestLogPayload(payload)
 }
@@ -6436,11 +6549,14 @@ func prepareRequestLogPayloadForPersistence(reqLog *ReqeustLog) {
 		reqLog.requestBodyBytes = nil
 		return
 	}
-	if len(reqLog.requestBodyBytes) > 0 {
+	requestBodyCaptured := len(reqLog.requestBodyBytes) > 0
+	if requestBodyCaptured {
 		captureRequestLogRequestBody(reqLog, reqLog.requestBodyBytes)
 		reqLog.requestBodyBytes = nil
 	}
-	reqLog.RequestBody = maybeSanitizeRequestLogPayload(reqLog, reqLog.RequestBody)
+	if !requestBodyCaptured {
+		reqLog.RequestBody = maybeSanitizeRequestLogPayload(reqLog, reqLog.RequestBody)
+	}
 	materializeRequestLogResponseBody(reqLog)
 	reqLog.PayloadBytes = int64(len([]byte(reqLog.RequestBody)) + len([]byte(reqLog.ResponseBody)))
 	reqLog.PayloadCaptured = reqLog.RequestBody != "" || reqLog.ResponseBody != "" || reqLog.RequestBodyTruncated || reqLog.ResponseBodyTruncated
