@@ -492,6 +492,11 @@ func (q *DBWriteQueue) ExecTxGroup(tasks []WriteTask) error {
 		// 成功入队，等待首个任务的结果（事务组所有任务共享同一结果）
 		select {
 		case err := <-group[0].Result:
+			// 返回前等待全部结果通道关闭，确保 worker 不再访问调用方传入的任务
+			for _, task := range group {
+				for range task.Result {
+				}
+			}
 			return err
 		case <-timeout:
 			// 超时，但任务已入队，无法撤销，需等待结果以避免 goroutine 泄漏
