@@ -11,6 +11,7 @@
 package services
 
 import (
+	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -63,6 +64,23 @@ type providerStoreRow struct {
 	SortIndex int
 	Category  string
 	Payload   string
+}
+
+func providerStoreEmptySentinelRow(platform string) providerStoreRow {
+	return providerStoreRow{
+		Platform: platform,
+		ID:       providerStoreEmptySentinelID,
+		Level:    1,
+		Payload:  "[]",
+	}
+}
+
+func providerStoreRowsFingerprint(rows []providerStoreRow) ([sha256.Size]byte, error) {
+	data, err := json.Marshal(rows)
+	if err != nil {
+		return [sha256.Size]byte{}, err
+	}
+	return sha256.Sum256(data), nil
 }
 
 // loadProviderStoreRows 按平台读取全部行（按保存顺序 sort_index 排序，id 兜底稳定）
@@ -129,12 +147,16 @@ func replaceProviderStoreRowsNoRollback(platform string, rows []providerStoreRow
 	}}
 	if len(rows) == 0 {
 		// 保留「已初始化但为空」状态（哨兵行），Load 时返回空切片而非 nil
+		row := providerStoreEmptySentinelRow(platform)
 		tasks = append(tasks, WriteTask{
 			SQL: `
-			INSERT OR REPLACE INTO providers_store (platform, id, name, enabled, level, sort_index, category, payload, updated_at)
-			VALUES (?, ?, '', 0, 1, 0, '', '[]', ?)
-		`,
-			Args: []interface{}{platform, providerStoreEmptySentinelID, time.Now().Unix()},
+				INSERT OR REPLACE INTO providers_store (platform, id, name, enabled, level, sort_index, category, payload, updated_at)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+			`,
+			Args: []interface{}{
+				row.Platform, row.ID, row.Name, providerStoreBoolToInt(row.Enabled),
+				row.Level, row.SortIndex, row.Category, row.Payload, time.Now().Unix(),
+			},
 		})
 	} else {
 		now := time.Now().Unix()
@@ -213,6 +235,21 @@ func SaveProvidersToStore(kind string, providers []Provider) error {
 	if IsCustomPlatform(kind) {
 		return saveCustomCLIProvidersFallback(kind, providers)
 	}
+	_, _, err := saveProvidersToStoreWithFingerprint(kind, providers)
+	return err
+}
+
+func saveProvidersToStoreWithFingerprint(kind string, providers []Provider) ([sha256.Size]byte, bool, error) {
+	if IsCustomPlatform(kind) {
+		data, err := json.Marshal(providers)
+		if err != nil {
+			return [sha256.Size]byte{}, false, err
+		}
+		if err := saveCustomCLIProvidersFallback(kind, providers); err != nil {
+			return [sha256.Size]byte{}, false, err
+		}
+		return sha256.Sum256(data), true, nil
+	}
 	platform := NormalizePlatform(kind)
 	rows := make([]providerStoreRow, 0, len(providers))
 	seenIDs := make(map[string]bool, len(providers))
@@ -220,12 +257,12 @@ func SaveProvidersToStore(kind string, providers []Provider) error {
 		id := strconv.FormatInt(provider.ID, 10)
 		if seenIDs[id] {
 			// 同平台内重复 ID 会被 (platform, id) 主键吞掉后一行，静默丢数据，必须显式报错
-			return fmt.Errorf("平台 %s 内供应商 ID %s 重复（名称: %s）", platform, id, provider.Name)
+			return [sha256.Size]byte{}, false, fmt.Errorf("平台 %s 内供应商 ID %s 重复（名称: %s）", platform, id, provider.Name)
 		}
 		seenIDs[id] = true
 		payload, err := json.Marshal(provider)
 		if err != nil {
-			return fmt.Errorf("序列化供应商 %s 失败: %w", provider.Name, err)
+			return [sha256.Size]byte{}, false, fmt.Errorf("序列化供应商 %s 失败: %w", provider.Name, err)
 		}
 		rows = append(rows, providerStoreRow{
 			Platform:  platform,
@@ -238,7 +275,18 @@ func SaveProvidersToStore(kind string, providers []Provider) error {
 			Payload:   string(payload),
 		})
 	}
-	return replaceProviderStoreRows(platform, rows)
+	fingerprintRows := rows
+	if len(fingerprintRows) == 0 {
+		fingerprintRows = []providerStoreRow{providerStoreEmptySentinelRow(platform)}
+	}
+	fingerprint, err := providerStoreRowsFingerprint(fingerprintRows)
+	if err != nil {
+		return [sha256.Size]byte{}, false, err
+	}
+	if err := replaceProviderStoreRows(platform, rows); err != nil {
+		return [sha256.Size]byte{}, false, err
+	}
+	return fingerprint, true, nil
 }
 
 // loadCustomCLIProvidersFallback 自定义 CLI 平台继续使用 JSON 文件存储

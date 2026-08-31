@@ -603,15 +603,11 @@ func (ps *ProviderService) saveProvidersLocked(kind string, providers []Provider
 		return fmt.Errorf("配置验证失败：\n  - %s", strings.Join(validationErrors, "\n  - "))
 	}
 
-	if err := SaveProvidersToStore(kind, providers); err != nil {
-		return err
-	}
-
-	snapshotData, err := json.Marshal(providers)
+	fingerprint, exists, err := saveProvidersToStoreWithFingerprint(kind, providers)
 	if err != nil {
 		return err
 	}
-	ps.storeProviderSnapshot(kind, providers, sha256.Sum256(snapshotData), true)
+	ps.storeProviderSnapshot(kind, providers, fingerprint, exists)
 	if len(renames) > 0 {
 		syncProviderIdentityRenamesBestEffort(kind, renames)
 	}
@@ -763,18 +759,45 @@ func (ps *ProviderService) loadProvidersFromStore(kind string) ([]Provider, erro
 
 // providerStoreFingerprint 基于统一存储内容计算指纹（用于快照外部变更检测）
 func providerStoreFingerprint(kind string) ([sha256.Size]byte, bool, error) {
-	providers, err := LoadProvidersFromStore(kind)
+	if IsCustomPlatform(kind) {
+		providers, err := LoadProvidersFromStore(kind)
+		if err != nil {
+			return [sha256.Size]byte{}, false, err
+		}
+		if providers == nil {
+			return [sha256.Size]byte{}, false, nil
+		}
+		data, err := json.Marshal(providers)
+		if err != nil {
+			return [sha256.Size]byte{}, false, err
+		}
+		return sha256.Sum256(data), true, nil
+	}
+
+	rows, err := loadProviderStoreRows(NormalizePlatform(kind))
 	if err != nil {
 		return [sha256.Size]byte{}, false, err
 	}
-	if providers == nil {
+	if len(rows) == 0 {
 		return [sha256.Size]byte{}, false, nil
 	}
-	data, err := json.Marshal(providers)
+	fingerprint, err := providerStoreRowsFingerprint(rows)
 	if err != nil {
 		return [sha256.Size]byte{}, false, err
 	}
-	return sha256.Sum256(data), true, nil
+	return fingerprint, true, nil
+}
+
+func providerSnapshotsSemanticallyEqual(left, right []Provider) (bool, error) {
+	leftData, err := json.Marshal(left)
+	if err != nil {
+		return false, err
+	}
+	rightData, err := json.Marshal(right)
+	if err != nil {
+		return false, err
+	}
+	return sha256.Sum256(leftData) == sha256.Sum256(rightData), nil
 }
 
 func (ps *ProviderService) storeProviderSnapshot(kind string, providers []Provider, fingerprint [sha256.Size]byte, exists bool) {
@@ -829,6 +852,18 @@ func (ps *ProviderService) refreshProviderSnapshots() {
 		latestFingerprint, latestExists, latestErr := providerStoreFingerprint(kind)
 		if latestErr != nil || latestExists != exists || latestFingerprint != fingerprint {
 			continue
+		}
+		if ok {
+			semanticallyEqual, compareErr := providerSnapshotsSemanticallyEqual(current.providers, providers)
+			if compareErr != nil {
+				log.Printf("[ProviderService] 比较供应商快照失败 (kind=%s): %v", kind, compareErr)
+				continue
+			}
+			if semanticallyEqual {
+				ps.storeProviderSnapshot(kind, current.providers, fingerprint, exists)
+				// 原始格式或冗余公共列变化只更新指纹，不触发业务变更副作用。
+				continue
+			}
 		}
 		ps.storeProviderSnapshot(kind, providers, fingerprint, exists)
 		ps.mu.Lock()
