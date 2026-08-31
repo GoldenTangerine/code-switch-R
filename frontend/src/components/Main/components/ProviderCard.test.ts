@@ -8,6 +8,7 @@
  * @FilePath: frontend/src/components/Main/components/ProviderCard.test.ts
  */
 
+import { readFileSync } from 'node:fs'
 import { createSSRApp, h } from 'vue'
 import { createI18n } from 'vue-i18n'
 import { renderToString } from 'vue/server-renderer'
@@ -16,6 +17,8 @@ import type { AutomationCard } from '../../../data/cards'
 import zh from '../../../locales/zh.json'
 import type { ProviderCardViewModel } from '../types'
 import ProviderCard from './ProviderCard.vue'
+
+const providerCardStyleSource = readFileSync(new URL('../styles/provider-card.css', import.meta.url), 'utf8')
 
 const card: AutomationCard = {
   id: 102,
@@ -93,6 +96,35 @@ const renderCard = async (
 }
 
 describe('ProviderCard display states', () => {
+  it('preserves quota auto-disabled accents outside neutral disabled card styles', () => {
+    expect(providerCardStyleSource).toContain(
+      '.automation-card.is-disabled:not(.is-quota-auto-disabled):not(.drag-over):not(.is-highlighted)',
+    )
+    expect(providerCardStyleSource).toContain(
+      '.automation-card.is-disabled:not(.is-quota-auto-disabled):hover:not(.drag-over):not(.is-highlighted)',
+    )
+    expect(providerCardStyleSource).toContain(
+      '.automation-card.theme-dark.is-disabled:not(.is-quota-auto-disabled):hover:not(.drag-over):not(.is-highlighted)',
+    )
+  })
+
+  it('renders mutually exclusive enabled and disabled card classes', async () => {
+    const [enabledHtml, disabledHtml] = await Promise.all([
+      renderCard(baseViewModel()),
+      renderCard(baseViewModel({
+        card: {
+          ...card,
+          enabled: false,
+        },
+      })),
+    ])
+
+    expect(enabledHtml).toContain('is-enabled')
+    expect(enabledHtml).not.toContain('is-disabled')
+    expect(disabledHtml).toContain('is-disabled')
+    expect(disabledHtml).not.toContain('is-enabled')
+  })
+
   it('keeps a success-rate hover target when daily stats are empty', async () => {
     const html = await renderCard(baseViewModel())
 
@@ -159,6 +191,8 @@ describe('ProviderCard display states', () => {
 
     expect(html).toContain('额度用完')
     expect(html).toContain('临时启用')
+    expect(html).toContain('is-disabled')
+    expect(html).not.toContain('is-enabled')
     expect(html).not.toContain('mac-switch sm')
   })
 

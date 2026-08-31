@@ -8,6 +8,7 @@
       { dragging: viewModel.dragging },
       { 'drag-over': viewModel.dragOver },
       { 'is-enabled': viewModel.card.enabled },
+      { 'is-disabled': !viewModel.card.enabled },
       { 'is-quota-auto-disabled': viewModel.card.quotaAutoDisabled },
       { 'is-currently-active': isCurrentlyActive },
       { 'is-last-used': viewModel.isLastUsed },
