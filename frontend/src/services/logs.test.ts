@@ -19,6 +19,7 @@ vi.mock('@wailsio/runtime', () => ({
 import { Call } from '@wailsio/runtime'
 import {
   clearRequestLogs,
+  fetchLogDashboardAggregateV1,
   fetchLogStatsV2,
   fetchProviderPerformanceTrend15m,
   fetchRequestLogDailyHeatmapStatsByYear,
@@ -69,6 +70,30 @@ describe('logs service', () => {
     expect(Call.ByName).toHaveBeenCalledWith(
       'codeswitch/services.LogService.ClearRequestLogsV2',
       true,
+    )
+  })
+
+  it('passes one dashboard aggregation scope and provider inclusion flag', async () => {
+    vi.mocked(Call.ByName).mockResolvedValue({})
+
+    await fetchLogDashboardAggregateV1({
+      platform: 'codex',
+      provider: 'provider-id',
+      model: 'gpt-5',
+      sourceMode: 'all',
+      startAt: '2026-08-01 00:00:00',
+      endAt: '2026-08-02 00:00:00',
+    }, false)
+
+    expect(Call.ByName).toHaveBeenCalledWith(
+      'codeswitch/services.LogService.DashboardAggregateRangeV1',
+      'codex',
+      'provider-id',
+      'gpt-5',
+      'all',
+      '2026-08-01 00:00:00',
+      '2026-08-02 00:00:00',
+      false,
     )
   })
 

@@ -22,9 +22,11 @@ const providerPerformanceCacheTTL = 20 * time.Second
 const providerPerformanceCacheMaxEntries = 512
 const providerLatestPerformanceSampleLimit = 5
 const providerPerformanceTrendBucketSize = 15 * time.Minute
+
 // 兼容夏令时回拨产生的 25 小时自然日，同时限制异常范围的内存占用。
 const providerPerformanceTrendMaxBucketCount = 100
 const fiveHourQuotaWindowDuration = 5 * time.Hour
+const logSummaryActivityBucketCount = 12
 
 var requestLogListSelectFields = []string{
 	"id",
@@ -1572,6 +1574,19 @@ func (ls *LogService) StatsRangeV3(platform string, provider string, pricingMode
 		return stats, nil
 	}
 
+	logs, err := ls.loadRequestLogsForAggregationV3(platform, provider, pricingModel, start, end, normalizeLogDataSourceMode(sourceMode))
+	if err != nil {
+		return aggregateLogStatsRange(start, end, nil), err
+	}
+
+	return aggregateLogStatsRange(start, end, logs), nil
+}
+
+func aggregateLogStatsRange(start time.Time, end time.Time, logs []ReqeustLog) LogStats {
+	stats := LogStats{
+		Series: make([]LogStatsSeries, 0),
+	}
+
 	duration := end.Sub(start)
 	useDayBuckets := duration > 48*time.Hour
 	bucketSize := time.Hour
@@ -1606,11 +1621,6 @@ func (ls *LogService) StatsRangeV3(platform string, provider string, pricingMode
 		seriesBuckets[i] = &LogStatsSeries{
 			Day: bucketTime.Format(timeLayout),
 		}
-	}
-
-	logs, err := ls.loadRequestLogsForAggregationV3(platform, provider, pricingModel, start, end, normalizeLogDataSourceMode(sourceMode))
-	if err != nil {
-		return stats, err
 	}
 
 	for _, logEntry := range logs {
@@ -1675,7 +1685,7 @@ func (ls *LogService) StatsRangeV3(platform string, provider string, pricingMode
 		}
 	}
 
-	return stats, nil
+	return stats
 }
 
 // ProviderPerformanceTrend15m 返回指定时间范围内的供应商 15 分钟性能均值。
@@ -1800,11 +1810,7 @@ func (ls *LogService) SummaryRangeV2(platform string, provider string, pricingMo
 }
 
 func (ls *LogService) SummaryRangeV3(platform string, provider string, pricingModel string, sourceMode string, startAt string, endAt string) (LogSummary, error) {
-	const activityBucketCount = 12
-
-	summary := LogSummary{
-		ActivityPoints: make([]float64, activityBucketCount),
-	}
+	summary := newLogSummary()
 
 	start, end, err := resolveAggregationRange(startAt, endAt)
 	if err != nil {
@@ -1819,6 +1825,27 @@ func (ls *LogService) SummaryRangeV3(platform string, provider string, pricingMo
 	if err != nil {
 		return summary, err
 	}
+	summary, visibleEnd := aggregateLogSummaryRange(start, end, time.Now().In(time.Local), logs)
+
+	if compareStart, compareEnd, ok := buildSummaryComparisonRange(start, end, visibleEnd); ok && compareStart.Before(compareEnd) {
+		previousLogs, compareErr := ls.loadRequestLogsForAggregationV3(platform, provider, pricingModel, compareStart, compareEnd, normalizedSourceMode)
+		if compareErr != nil {
+			return summary, compareErr
+		}
+		applyLogSummaryComparison(&summary, previousLogs)
+	}
+
+	return summary, nil
+}
+
+func newLogSummary() LogSummary {
+	return LogSummary{
+		ActivityPoints: make([]float64, logSummaryActivityBucketCount),
+	}
+}
+
+func aggregateLogSummaryRange(start time.Time, end time.Time, now time.Time, logs []ReqeustLog) (LogSummary, time.Time) {
+	summary := newLogSummary()
 
 	for _, logEntry := range logs {
 		totalTokens := calculateLogTotalTokens(logEntry)
@@ -1862,7 +1889,6 @@ func (ls *LogService) SummaryRangeV3(platform string, provider string, pricingMo
 		}
 	}
 
-	now := time.Now().In(time.Local)
 	visibleEnd := resolveSummaryVisibleEnd(start, end, now)
 	if !visibleEnd.After(start) {
 		visibleEnd = end
@@ -1871,17 +1897,6 @@ func (ls *LogService) SummaryRangeV3(platform string, provider string, pricingMo
 		summary.ProjectedDailyCost = summary.CostTotal / visibleEnd.Sub(start).Hours() * 24
 		if math.IsNaN(summary.ProjectedDailyCost) || math.IsInf(summary.ProjectedDailyCost, 0) {
 			summary.ProjectedDailyCost = 0
-		}
-	}
-
-	if compareStart, compareEnd, ok := buildSummaryComparisonRange(start, end, visibleEnd); ok && compareStart.Before(compareEnd) {
-		previousLogs, compareErr := ls.loadRequestLogsForAggregationV3(platform, provider, pricingModel, compareStart, compareEnd, normalizedSourceMode)
-		if compareErr != nil {
-			return summary, compareErr
-		}
-		summary.ComparisonAvailable = true
-		for _, logEntry := range previousLogs {
-			summary.PreviousCostTotal += logEntry.TotalCost
 		}
 	}
 
@@ -1896,11 +1911,11 @@ func (ls *LogService) SummaryRangeV3(platform string, provider string, pricingMo
 
 	activityDuration := activityEnd.Sub(activityStart)
 	if activityDuration > 0 {
-		bucketCounts := make([]int64, activityBucketCount)
+		bucketCounts := make([]int64, logSummaryActivityBucketCount)
 		activityRequests := int64(0)
 		peakBucketCount := int64(0)
 		activityDurationSeconds := activityDuration.Seconds()
-		bucketDurationSeconds := activityDurationSeconds / float64(activityBucketCount)
+		bucketDurationSeconds := activityDurationSeconds / float64(logSummaryActivityBucketCount)
 		if bucketDurationSeconds <= 0 {
 			bucketDurationSeconds = 1
 		}
@@ -1912,12 +1927,12 @@ func (ls *LogService) SummaryRangeV3(platform string, provider string, pricingMo
 			}
 
 			offset := createdAt.Sub(activityStart)
-			bucketIndex := int((float64(offset) / float64(activityDuration)) * float64(activityBucketCount))
+			bucketIndex := int((float64(offset) / float64(activityDuration)) * float64(logSummaryActivityBucketCount))
 			if bucketIndex < 0 {
 				bucketIndex = 0
 			}
-			if bucketIndex >= activityBucketCount {
-				bucketIndex = activityBucketCount - 1
+			if bucketIndex >= logSummaryActivityBucketCount {
+				bucketIndex = logSummaryActivityBucketCount - 1
 			}
 
 			bucketCounts[bucketIndex]++
@@ -1936,7 +1951,17 @@ func (ls *LogService) SummaryRangeV3(platform string, provider string, pricingMo
 		summary.ActivityPeakQPS = float64(peakBucketCount) / bucketDurationSeconds
 	}
 
-	return summary, nil
+	return summary, visibleEnd
+}
+
+func applyLogSummaryComparison(summary *LogSummary, previousLogs []ReqeustLog) {
+	if summary == nil {
+		return
+	}
+	summary.ComparisonAvailable = true
+	for _, logEntry := range previousLogs {
+		summary.PreviousCostTotal += logEntry.TotalCost
+	}
 }
 
 func (ls *LogService) ProviderDailyStats(platform string) ([]ProviderDailyStat, error) {
@@ -2219,15 +2244,20 @@ func (ls *LogService) ProviderStatsRangeV3(platform string, provider string, pri
 		return []ProviderDailyStat{}, nil
 	}
 
-	duration := end.Sub(start)
-	startUTCKey := start.UTC().Format(timeLayout)
-	endUTCKey := end.UTC().Format(timeLayout)
-	platformKey := strings.TrimSpace(platform)
 	normalizedSourceMode := normalizeLogDataSourceMode(sourceMode)
 	logs, err := ls.loadRequestLogsForAggregationV3(platform, provider, pricingModel, start, end, normalizedSourceMode)
 	if err != nil {
 		return nil, err
 	}
+
+	return ls.aggregateProviderStatsRange(platform, provider, pricingModel, normalizedSourceMode, start, end, logs)
+}
+
+func (ls *LogService) aggregateProviderStatsRange(platform string, provider string, pricingModel string, normalizedSourceMode LogDataSourceMode, start time.Time, end time.Time, logs []ReqeustLog) ([]ProviderDailyStat, error) {
+	duration := end.Sub(start)
+	startUTCKey := start.UTC().Format(timeLayout)
+	endUTCKey := end.UTC().Format(timeLayout)
+	platformKey := strings.TrimSpace(platform)
 
 	statMap := map[string]*ProviderDailyStat{}
 	durationSums := map[string]float64{}
@@ -2473,6 +2503,10 @@ func (ls *LogService) ModelStatsRangeV3(platform string, provider string, pricin
 		return nil, err
 	}
 
+	return aggregateModelStatsRange(logs), nil
+}
+
+func aggregateModelStatsRange(logs []ReqeustLog) []ModelUsageStat {
 	grouped := make(map[string]*ModelUsageStat, 16)
 	for _, logEntry := range logs {
 		modelName := resolveLogPricingModel(logEntry)
@@ -2511,7 +2545,55 @@ func (ls *LogService) ModelStatsRangeV3(platform string, provider string, pricin
 		return stats[i].Model < stats[j].Model
 	})
 
-	return stats, nil
+	return stats
+}
+
+func (ls *LogService) DashboardAggregateRangeV1(platform string, provider string, pricingModel string, sourceMode string, startAt string, endAt string, includeProviderStats bool) (LogDashboardAggregateV1, error) {
+	result := newLogDashboardAggregateV1()
+	start, end, err := resolveAggregationRange(startAt, endAt)
+	if err != nil {
+		return result, err
+	}
+	if !start.Before(end) {
+		return result, nil
+	}
+
+	normalizedSourceMode := normalizeLogDataSourceMode(sourceMode)
+	logs, err := ls.loadRequestLogsForAggregationV3(platform, provider, pricingModel, start, end, normalizedSourceMode)
+	if err != nil {
+		return result, err
+	}
+	result.Stats = aggregateLogStatsRange(start, end, logs)
+	summary, visibleEnd := aggregateLogSummaryRange(start, end, time.Now().In(time.Local), logs)
+	result.Summary = summary
+	result.ModelStats = aggregateModelStatsRange(logs)
+
+	if compareStart, compareEnd, ok := buildSummaryComparisonRange(start, end, visibleEnd); ok && compareStart.Before(compareEnd) {
+		previousLogs, compareErr := ls.loadRequestLogsForAggregationV3(platform, provider, pricingModel, compareStart, compareEnd, normalizedSourceMode)
+		if compareErr != nil {
+			return result, compareErr
+		}
+		applyLogSummaryComparison(&result.Summary, previousLogs)
+	}
+
+	if includeProviderStats {
+		providerStats, err := ls.aggregateProviderStatsRange(platform, provider, pricingModel, normalizedSourceMode, start, end, logs)
+		if err != nil {
+			return result, err
+		}
+		result.ProviderStats = providerStats
+	}
+
+	return result, nil
+}
+
+func newLogDashboardAggregateV1() LogDashboardAggregateV1 {
+	return LogDashboardAggregateV1{
+		Stats:         LogStats{Series: make([]LogStatsSeries, 0)},
+		Summary:       newLogSummary(),
+		ModelStats:    make([]ModelUsageStat, 0),
+		ProviderStats: make([]ProviderDailyStat, 0),
+	}
 }
 
 func parseCreatedAt(record xdb.Record) (time.Time, bool) {
@@ -2737,6 +2819,13 @@ type ModelUsageStat struct {
 	CacheReadTokens int64   `json:"cache_read_tokens"`
 	TotalTokens     int64   `json:"total_tokens"`
 	CostTotal       float64 `json:"cost_total"`
+}
+
+type LogDashboardAggregateV1 struct {
+	Summary       LogSummary          `json:"summary"`
+	Stats         LogStats            `json:"stats"`
+	ModelStats    []ModelUsageStat    `json:"model_stats"`
+	ProviderStats []ProviderDailyStat `json:"provider_stats"`
 }
 
 type LogStatsSeries struct {

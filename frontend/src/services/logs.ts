@@ -272,6 +272,35 @@ export const fetchLogSummaryV2 = async (query: LogStatsQuery = {}): Promise<LogS
   return Call.ByName('codeswitch/services.LogService.SummaryRangeV3', platform, provider, model, sourceMode, startAt, endAt)
 }
 
+export type LogDashboardAggregateV1 = {
+  summary: LogSummary
+  stats: LogStats
+  model_stats: ModelUsageStat[]
+  provider_stats: ProviderDailyStat[]
+}
+
+export const fetchLogDashboardAggregateV1 = async (
+  query: LogStatsQuery = {},
+  includeProviderStats = true,
+): Promise<LogDashboardAggregateV1> => {
+  const platform = query.platform ?? ''
+  const provider = query.provider ?? ''
+  const model = query.model ?? ''
+  const startAt = query.startAt ?? ''
+  const endAt = query.endAt ?? ''
+  const sourceMode = query.sourceMode ?? 'proxy'
+  return Call.ByName(
+    'codeswitch/services.LogService.DashboardAggregateRangeV1',
+    platform,
+    provider,
+    model,
+    sourceMode,
+    startAt,
+    endAt,
+    includeProviderStats,
+  )
+}
+
 export const fetchCostSince = async (start: string, platform: RequestLogPlatform | '' = ''): Promise<number> => {
   return Call.ByName('codeswitch/services.LogService.CostSince', start, platform)
 }

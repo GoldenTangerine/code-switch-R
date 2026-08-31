@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { nextTick, reactive, ref } from 'vue'
-import type { LogSummary, ProviderDailyStat, RequestLog, RequestLogPageResult } from '../../../services/logs'
+import type { LogDashboardAggregateV1, LogStats, LogSummary, RequestLog, RequestLogPageResult } from '../../../services/logs'
 import type { LogsFiltersState } from '../types'
 
 vi.mock('../../../../bindings/codeswitch/services/providerservice', () => ({
@@ -14,6 +14,7 @@ vi.mock('../../../../bindings/codeswitch/services/geminiservice', () => ({
 vi.mock('../../../services/logs', () => ({
   fetchRequestLogsPage: vi.fn(),
   fetchLogProviderRefs: vi.fn(),
+  fetchLogDashboardAggregateV1: vi.fn(),
   fetchLogSummaryV2: vi.fn(),
   fetchLogStatsV2: vi.fn(),
   fetchModelStatsV2: vi.fn(),
@@ -25,6 +26,7 @@ import { GetProviders as GetGeminiProviders } from '../../../../bindings/codeswi
 import {
   fetchRequestLogsPage,
   fetchLogProviderRefs,
+  fetchLogDashboardAggregateV1,
   fetchLogSummaryV2,
   fetchLogStatsV2,
   fetchModelStatsV2,
@@ -94,6 +96,31 @@ const createSummary = (overrides: Partial<LogSummary> = {}): LogSummary => ({
   ...overrides,
 })
 
+const createStats = (): LogStats => ({
+  total_requests: 0,
+  input_tokens: 0,
+  output_tokens: 0,
+  reasoning_tokens: 0,
+  cache_create_tokens: 0,
+  cache_read_tokens: 0,
+  cost_total: 0,
+  cost_input: 0,
+  cost_output: 0,
+  cost_cache_create: 0,
+  cost_cache_read: 0,
+  series: [],
+})
+
+const createDashboardAggregate = (
+  overrides: Partial<LogDashboardAggregateV1> = {},
+): LogDashboardAggregateV1 => ({
+  summary: createSummary(),
+  stats: createStats(),
+  model_stats: [],
+  provider_stats: [],
+  ...overrides,
+})
+
 const createDeferred = <T>() => {
   let resolve!: (value: T) => void
   const promise = new Promise<T>((res, rej) => {
@@ -110,21 +137,9 @@ describe('useLogsPageData', () => {
     vi.mocked(GetGeminiProviders).mockResolvedValue([])
     vi.mocked(fetchLogProviderRefs).mockResolvedValue([])
     vi.mocked(fetchRequestLogsPage).mockResolvedValue(createPageResult([], 0, 15, 0))
+    vi.mocked(fetchLogDashboardAggregateV1).mockResolvedValue(createDashboardAggregate())
     vi.mocked(fetchLogSummaryV2).mockResolvedValue(createSummary())
-    vi.mocked(fetchLogStatsV2).mockResolvedValue({
-      total_requests: 0,
-      input_tokens: 0,
-      output_tokens: 0,
-      reasoning_tokens: 0,
-      cache_create_tokens: 0,
-      cache_read_tokens: 0,
-      cost_total: 0,
-      cost_input: 0,
-      cost_output: 0,
-      cost_cache_create: 0,
-      cost_cache_read: 0,
-      series: [],
-    })
+    vi.mocked(fetchLogStatsV2).mockResolvedValue(createStats())
     vi.mocked(fetchModelStatsV2).mockResolvedValue([])
     vi.mocked(fetchProviderStatsV2).mockResolvedValue([])
   })
@@ -167,14 +182,14 @@ describe('useLogsPageData', () => {
 
     await loadDashboard()
 
-    expect(fetchLogSummaryV2).toHaveBeenCalledWith({
+    expect(fetchLogDashboardAggregateV1).toHaveBeenCalledWith({
       platform: '',
       provider: '',
       model: '',
       sourceMode: 'proxy',
       startAt: '2026-03-01 00:00:00',
       endAt: '2026-03-31 23:59:59',
-    })
+    }, true)
     expect(summary.value).toEqual(createSummary())
   })
 
@@ -192,22 +207,22 @@ describe('useLogsPageData', () => {
     filters.provider = 'provider-draft'
     await loadDashboard()
 
-    expect(fetchLogSummaryV2).toHaveBeenNthCalledWith(1, {
+    expect(fetchLogDashboardAggregateV1).toHaveBeenNthCalledWith(1, {
       platform: '',
       provider: 'provider-applied',
       model: '',
       sourceMode: 'proxy',
       startAt: '2026-03-01 00:00:00',
       endAt: '2026-03-31 23:59:59',
-    })
-    expect(fetchLogSummaryV2).toHaveBeenNthCalledWith(2, {
+    }, true)
+    expect(fetchLogDashboardAggregateV1).toHaveBeenNthCalledWith(2, {
       platform: '',
       provider: 'provider-applied',
       model: '',
       sourceMode: 'proxy',
       startAt: '2026-03-01 00:00:00',
       endAt: '2026-03-31 23:59:59',
-    })
+    }, true)
     expect(fetchRequestLogsPage).toHaveBeenNthCalledWith(2, {
       platform: '',
       provider: 'provider-applied',
@@ -322,16 +337,16 @@ describe('useLogsPageData', () => {
   })
 
   it('ignores stale summary responses when a newer dashboard request finishes first', async () => {
-    const firstSummary = createDeferred<LogSummary>()
+    const firstAggregate = createDeferred<LogDashboardAggregateV1>()
     const latestSummary = createSummary({
       total_requests: 9,
       total_tokens: 900,
       previous_cost_total: 1.5,
     })
 
-    vi.mocked(fetchLogSummaryV2)
-      .mockImplementationOnce(() => firstSummary.promise)
-      .mockResolvedValueOnce(latestSummary)
+    vi.mocked(fetchLogDashboardAggregateV1)
+      .mockImplementationOnce(() => firstAggregate.promise)
+      .mockResolvedValueOnce(createDashboardAggregate({ summary: latestSummary }))
 
     const filters = createFilters()
     const { loadDashboard, applyDashboardFilters, summary } = useLogsPageData({
@@ -346,26 +361,28 @@ describe('useLogsPageData', () => {
     await secondLoad
     expect(summary.value).toEqual(latestSummary)
 
-    firstSummary.resolve(createSummary({ total_requests: 1, total_tokens: 100 }))
+    firstAggregate.resolve(createDashboardAggregate({
+      summary: createSummary({ total_requests: 1, total_tokens: 100 }),
+    }))
     await firstLoad
 
     expect(summary.value).toEqual(latestSummary)
-    expect(fetchLogSummaryV2).toHaveBeenNthCalledWith(1, {
+    expect(fetchLogDashboardAggregateV1).toHaveBeenNthCalledWith(1, {
       platform: '',
       provider: '',
       model: '',
       sourceMode: 'proxy',
       startAt: '2026-03-01 00:00:00',
       endAt: '2026-03-31 23:59:59',
-    })
-    expect(fetchLogSummaryV2).toHaveBeenNthCalledWith(2, {
+    }, true)
+    expect(fetchLogDashboardAggregateV1).toHaveBeenNthCalledWith(2, {
       platform: '',
       provider: 'provider-new',
       model: '',
       sourceMode: 'proxy',
       startAt: '2026-03-01 00:00:00',
       endAt: '2026-03-31 23:59:59',
-    })
+    }, true)
   })
 
   it('applies the pricing model filter while keeping model options unfiltered by that model', async () => {
@@ -385,9 +402,10 @@ describe('useLogsPageData', () => {
       total_tokens: 75,
       cost_total: 0.5,
     }
-    vi.mocked(fetchModelStatsV2)
-      .mockResolvedValueOnce([selectedModelStat])
-      .mockResolvedValueOnce([selectedModelStat, otherModelStat])
+    vi.mocked(fetchLogDashboardAggregateV1).mockResolvedValueOnce(createDashboardAggregate({
+      model_stats: [selectedModelStat],
+    }))
+    vi.mocked(fetchModelStatsV2).mockResolvedValueOnce([selectedModelStat, otherModelStat])
 
     const filters = createFilters()
     filters.model = selectedModelStat.model
@@ -406,11 +424,12 @@ describe('useLogsPageData', () => {
       startAt: '2026-03-01 00:00:00',
       endAt: '2026-03-31 23:59:59',
     }
-    expect(fetchLogSummaryV2).toHaveBeenCalledWith(filteredQuery)
-    expect(fetchLogStatsV2).toHaveBeenCalledWith(filteredQuery)
-    expect(fetchProviderStatsV2).toHaveBeenCalledWith(filteredQuery)
-    expect(fetchModelStatsV2).toHaveBeenNthCalledWith(1, filteredQuery)
-    expect(fetchModelStatsV2).toHaveBeenNthCalledWith(2, {
+    expect(fetchLogDashboardAggregateV1).toHaveBeenCalledWith(filteredQuery, true)
+    expect(fetchLogSummaryV2).not.toHaveBeenCalled()
+    expect(fetchLogStatsV2).not.toHaveBeenCalled()
+    expect(fetchProviderStatsV2).not.toHaveBeenCalled()
+    expect(fetchModelStatsV2).toHaveBeenCalledTimes(1)
+    expect(fetchModelStatsV2).toHaveBeenCalledWith({
       platform: '',
       provider: '',
       sourceMode: 'proxy',
@@ -426,11 +445,44 @@ describe('useLogsPageData', () => {
     expect(modelOptions.value).toEqual([selectedModelStat.model, otherModelStat.model])
   })
 
+  it('keeps selected-model refresh calls fixed and reuses the provider config cache', async () => {
+    const filters = createFilters()
+    filters.model = 'gpt-5'
+    const { applyDashboardFilters, loadDashboard } = useLogsPageData({
+      filters,
+      computeDateRange: () => ({ startAt: '2026-03-01 00:00:00', endAt: '2026-03-31 23:59:59' }),
+    })
+
+    await applyDashboardFilters()
+
+    expect(fetchRequestLogsPage).toHaveBeenCalledTimes(1)
+    expect(fetchLogDashboardAggregateV1).toHaveBeenCalledTimes(1)
+    expect(fetchModelStatsV2).toHaveBeenCalledTimes(1)
+    expect(fetchLogSummaryV2).not.toHaveBeenCalled()
+    expect(fetchLogStatsV2).not.toHaveBeenCalled()
+    expect(fetchProviderStatsV2).not.toHaveBeenCalled()
+    expect(fetchLogProviderRefs).toHaveBeenCalledTimes(1)
+    expect(LoadProviders).toHaveBeenCalledTimes(2)
+    expect(GetGeminiProviders).toHaveBeenCalledTimes(1)
+
+    await loadDashboard()
+
+    expect(fetchRequestLogsPage).toHaveBeenCalledTimes(2)
+    expect(fetchLogDashboardAggregateV1).toHaveBeenCalledTimes(2)
+    expect(fetchModelStatsV2).toHaveBeenCalledTimes(2)
+    expect(fetchLogSummaryV2).not.toHaveBeenCalled()
+    expect(fetchLogStatsV2).not.toHaveBeenCalled()
+    expect(fetchProviderStatsV2).not.toHaveBeenCalled()
+    expect(fetchLogProviderRefs).toHaveBeenCalledTimes(2)
+    expect(LoadProviders).toHaveBeenCalledTimes(2)
+    expect(GetGeminiProviders).toHaveBeenCalledTimes(1)
+  })
+
   it('keeps dashboard loading active until provider stats finish', async () => {
     const logsDeferred = createDeferred<RequestLogPageResult>()
-    const providerStatsDeferred = createDeferred<ProviderDailyStat[]>()
+    const aggregateDeferred = createDeferred<LogDashboardAggregateV1>()
     vi.mocked(fetchRequestLogsPage).mockReturnValueOnce(logsDeferred.promise)
-    vi.mocked(fetchProviderStatsV2).mockReturnValueOnce(providerStatsDeferred.promise)
+    vi.mocked(fetchLogDashboardAggregateV1).mockReturnValueOnce(aggregateDeferred.promise)
 
     const filters = createFilters()
     const { loadDashboard, loading } = useLogsPageData({
@@ -441,7 +493,7 @@ describe('useLogsPageData', () => {
     const pendingLoad = loadDashboard()
     await vi.waitFor(() => {
       expect(fetchRequestLogsPage).toHaveBeenCalledTimes(1)
-      expect(fetchProviderStatsV2).toHaveBeenCalledTimes(1)
+      expect(fetchLogDashboardAggregateV1).toHaveBeenCalledTimes(1)
     })
     logsDeferred.resolve(createPageResult([], 0, 15, 0))
     for (let index = 0; index < 10; index += 1) {
@@ -449,7 +501,7 @@ describe('useLogsPageData', () => {
     }
     expect(loading.value).toBe(true)
 
-    providerStatsDeferred.resolve([])
+    aggregateDeferred.resolve(createDashboardAggregate())
     await pendingLoad
     expect(loading.value).toBe(false)
   })
@@ -512,6 +564,7 @@ describe('useLogsPageData', () => {
     })
 
     await loadDashboard()
+    expect(fetchLogDashboardAggregateV1).toHaveBeenCalledWith(expect.any(Object), false)
     expect(fetchProviderStatsV2).not.toHaveBeenCalled()
 
     await loadAppliedProviderStats()
@@ -531,10 +584,10 @@ describe('useLogsPageData', () => {
 
     const query = expect.objectContaining({ sourceMode: 'session' })
     expect(fetchRequestLogsPage).toHaveBeenCalledWith(query)
-    expect(fetchLogSummaryV2).toHaveBeenCalledWith(query)
-    expect(fetchLogStatsV2).toHaveBeenCalledWith(query)
-    expect(fetchModelStatsV2).toHaveBeenCalledWith(query)
-    expect(fetchProviderStatsV2).toHaveBeenCalledWith(query)
+    expect(fetchLogDashboardAggregateV1).toHaveBeenCalledWith(query, true)
+    expect(fetchLogSummaryV2).not.toHaveBeenCalled()
+    expect(fetchLogStatsV2).not.toHaveBeenCalled()
+    expect(fetchProviderStatsV2).not.toHaveBeenCalled()
     expect(fetchLogProviderRefs).toHaveBeenCalledWith('', 'session')
   })
 

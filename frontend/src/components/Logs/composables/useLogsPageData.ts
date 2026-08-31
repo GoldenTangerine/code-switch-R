@@ -4,8 +4,7 @@ import { GetProviders as GetGeminiProviders } from '../../../../bindings/codeswi
 import {
   fetchRequestLogsPage,
   fetchLogProviderRefs,
-  fetchLogSummaryV2,
-  fetchLogStatsV2,
+  fetchLogDashboardAggregateV1,
   fetchModelStatsV2,
   fetchProviderStatsV2,
   type RequestLog,
@@ -345,71 +344,62 @@ export function useLogsPageData(options: UseLogsPageDataOptions) {
     }
   }
 
-  const loadStats = async (query: AppliedLogsQuery) => {
-    const requestId = ++statsRequestId.value
-    try {
-      const data = await fetchLogStatsV2({
-        platform: query.filters.platform,
-        provider: query.filters.provider,
-        model: query.filters.model,
-        startAt: query.range.startAt,
-        endAt: query.range.endAt,
-        sourceMode: query.sourceMode,
-      })
-      if (requestId !== statsRequestId.value) return
-      stats.value = data ?? null
-    } catch (error) {
-      if (requestId !== statsRequestId.value) return
-      console.error('failed to load log stats', error)
-      stats.value = null
-    }
-  }
-
-  const loadSummary = async (query: AppliedLogsQuery) => {
-    const requestId = ++summaryRequestId.value
-    try {
-      const data = await fetchLogSummaryV2({
-        platform: query.filters.platform,
-        provider: query.filters.provider,
-        model: query.filters.model,
-        startAt: query.range.startAt,
-        endAt: query.range.endAt,
-        sourceMode: query.sourceMode,
-      })
-      if (requestId !== summaryRequestId.value) return
-      summary.value = data ?? null
-    } catch (error) {
-      if (requestId !== summaryRequestId.value) return
-      console.error('failed to load log summary', error)
-      summary.value = null
-    }
-  }
-
-  const loadModelStats = async (query: AppliedLogsQuery) => {
-    const requestId = ++modelStatsRequestId.value
+  const loadDashboardAggregate = async (query: AppliedLogsQuery) => {
+    const statsRequest = ++statsRequestId.value
+    const summaryRequest = ++summaryRequestId.value
+    const modelRequest = ++modelStatsRequestId.value
+    const providerRequest = ++providerStatsRequestId.value
+    const includeProviderStats = shouldLoadProviderStats()
     const shouldSyncModelOptions = !query.filters.model && matchesCurrentModelOptionsScope(query)
-    const optionsRequestId = shouldSyncModelOptions ? ++modelOptionsRequestId.value : 0
+    const optionsRequest = shouldSyncModelOptions ? ++modelOptionsRequestId.value : 0
+
     try {
-      const data = await fetchModelStatsV2({
+      const data = await fetchLogDashboardAggregateV1({
         platform: query.filters.platform,
         provider: query.filters.provider,
         model: query.filters.model,
         startAt: query.range.startAt,
         endAt: query.range.endAt,
         sourceMode: query.sourceMode,
-      })
-      if (requestId !== modelStatsRequestId.value) return
-      modelStats.value = data ?? []
-      if (optionsRequestId > 0 && optionsRequestId === modelOptionsRequestId.value && matchesCurrentModelOptionsScope(query)) {
-        modelOptions.value = Array.from(new Set(modelStats.value.map((item) => item.model.trim()).filter(Boolean)))
+      }, includeProviderStats)
+      const nextModelStats = data?.model_stats ?? []
+      if (statsRequest === statsRequestId.value) {
+        stats.value = data?.stats ?? null
+      }
+      if (summaryRequest === summaryRequestId.value) {
+        summary.value = data?.summary ?? null
+      }
+      if (modelRequest === modelStatsRequestId.value) {
+        modelStats.value = nextModelStats
+      }
+      if (includeProviderStats && providerRequest === providerStatsRequestId.value) {
+        providerStats.value = data?.provider_stats ?? []
+      }
+      if (optionsRequest > 0 && optionsRequest === modelOptionsRequestId.value && matchesCurrentModelOptionsScope(query)) {
+        modelOptions.value = Array.from(new Set(nextModelStats.map((item) => item.model.trim()).filter(Boolean)))
       }
     } catch (error) {
-      if (requestId !== modelStatsRequestId.value) return
-      console.error('failed to load model stats', error)
-      modelStats.value = []
-      if (optionsRequestId > 0 && optionsRequestId === modelOptionsRequestId.value && matchesCurrentModelOptionsScope(query)) {
+      const isCurrent = statsRequest === statsRequestId.value
+        || summaryRequest === summaryRequestId.value
+        || modelRequest === modelStatsRequestId.value
+        || providerRequest === providerStatsRequestId.value
+      if (!isCurrent) return
+      if (statsRequest === statsRequestId.value) {
+        stats.value = null
+      }
+      if (summaryRequest === summaryRequestId.value) {
+        summary.value = null
+      }
+      if (modelRequest === modelStatsRequestId.value) {
+        modelStats.value = []
+      }
+      if (includeProviderStats && providerRequest === providerStatsRequestId.value) {
+        providerStats.value = []
+      }
+      if (optionsRequest > 0 && optionsRequest === modelOptionsRequestId.value && matchesCurrentModelOptionsScope(query)) {
         modelOptions.value = []
       }
+      console.error('failed to load dashboard aggregate', error)
     }
   }
 
@@ -456,10 +446,7 @@ export function useLogsPageData(options: UseLogsPageDataOptions) {
     await withLoading(async () => {
       await Promise.all([
         loadLogs(query),
-        loadSummary(query),
-        loadStats(query),
-        loadModelStats(query),
-        shouldLoadProviderStats() ? loadProviderStats(query) : Promise.resolve(),
+        loadDashboardAggregate(query),
         query.filters.model && matchesCurrentModelOptionsScope(query) ? loadModelOptions(query) : Promise.resolve(),
         loadProviderOptions(query),
       ])
