@@ -61,7 +61,7 @@ func TestMain(m *testing.M) {
 // 供那些"重绑临时库 + teardown 拆除全局"的测试在 Cleanup 末尾调用，避免污染后续测试
 func restoreGlobalTestDatabase(t *testing.T) {
 	t.Helper()
-	dsn := filepath.Join(testMainHomeDir, ".code-switch", "app.db?cache=shared&mode=rwc")
+	dsn := defaultSQLiteDSN(filepath.Join(testMainHomeDir, ".code-switch", "app.db"))
 	if err := xdb.Inits([]xdb.Config{{Name: "default", Driver: "sqlite", DSN: dsn}}); err != nil {
 		t.Fatalf("恢复测试全局数据库失败: %v", err)
 	}
@@ -114,7 +114,7 @@ func useIsolatedProviderTestDB(t *testing.T, homeDir string) *sql.DB {
 	if err := os.MkdirAll(filepath.Join(homeDir, ".code-switch"), 0o755); err != nil {
 		t.Fatalf("创建独立库目录失败: %v", err)
 	}
-	dbPath := filepath.Join(homeDir, ".code-switch", "app.db?cache=shared&mode=rwc")
+	dbPath := defaultSQLiteDSN(filepath.Join(homeDir, ".code-switch", "app.db"))
 	if err := xdb.Inits([]xdb.Config{{Name: "default", Driver: "sqlite", DSN: dbPath}}); err != nil {
 		t.Fatalf("重绑独立测试数据库失败: %v", err)
 	}

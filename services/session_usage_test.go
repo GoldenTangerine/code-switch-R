@@ -32,7 +32,7 @@ func prepareSessionUsageTest(t *testing.T) (*LogService, *sql.DB, string) {
 		GlobalDBQueue = nil
 		GlobalDBQueueLogs = nil
 	}
-	dbPath := filepath.Join(t.TempDir(), "app.db?cache=shared&mode=rwc")
+	dbPath := defaultSQLiteDSN(filepath.Join(t.TempDir(), "app.db"))
 	if err := xdb.Inits([]xdb.Config{{Name: "default", Driver: "sqlite", DSN: dbPath}}); err != nil {
 		t.Fatalf("initialize test database: %v", err)
 	}

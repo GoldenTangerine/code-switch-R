@@ -12,6 +12,11 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+// defaultSQLiteDSN 让连接池创建的每个连接都应用现有 busy_timeout 策略。
+func defaultSQLiteDSN(dbPath string) string {
+	return dbPath + "?cache=shared&mode=rwc&_pragma=busy_timeout%3d30000"
+}
+
 // InitDatabase 初始化数据库连接（必须在所有服务构造之前调用）
 // 【修复】解决数据库初始化时序问题：
 // 1. 确保配置目录存在
@@ -33,7 +38,8 @@ func InitDatabase() error {
 
 	// 2. 初始化 xdb 连接池
 	// 【修复】移除 DSN 中的 PRAGMA 参数，modernc.org/sqlite 需要显式执行 PRAGMA
-	dbPath := filepath.Join(configDir, "app.db?cache=shared&mode=rwc")
+	// 【B14】仅恢复 modernc 官方 _pragma 形式的 busy_timeout，确保连接池新连接继承；其他 PRAGMA 仍显式执行
+	dbPath := defaultSQLiteDSN(filepath.Join(configDir, "app.db"))
 	if err := xdb.Inits([]xdb.Config{
 		{
 			Name:   "default",
