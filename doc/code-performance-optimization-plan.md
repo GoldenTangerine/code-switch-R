@@ -13,13 +13,13 @@
 ## 1. 文档信息
 
 - 创建时间：2026-08-31 15:01:40 CST（Asia/Shanghai）
-- 最后更新时间：2026-08-31 22:07:28 CST（Asia/Shanghai）
-- 当前状态：首轮已规划批次全部完成，保留待分析项
-- 当前执行批次：无（B13 已完成）
-- 已完成批次数：14
+- 最后更新时间：2026-09-01 03:49:57 CST（Asia/Shanghai）
+- 当前状态：第二轮已完成
+- 当前执行批次：无（B24 已完成）
+- 已完成批次数：24
 - 待处理批次数：0
-- 分析基线：基于 2026-08-31 当前代码；`go test ./services/...`、`go test ./resources/model-pricing/...`、`pnpm test:unit` 均通过
-- 文档范围：首版可靠框架和第一批高价值任务，不代表完整仓库审计
+- 分析基线：基于 2026-09-01 当前代码；B23 已消除 ProviderDailyStats 测试的午夜时区失稳；B24 已隔离根包模拟日志测试数据库；根包、services、模型定价、前端 561 项、TypeScript 与 diff 检查全部通过
+- 文档范围：保留首轮执行历史并追加第二轮高价值任务，不代表完整仓库审计
 
 ## 2. 优化目标
 
@@ -66,19 +66,22 @@
 |---|---|---|---|
 | 应用初始化 | `main.go:main` 按顺序初始化数据库、双队列、业务服务、代理和后台任务 | `InitDatabase` → `InitGlobalDBQueue` → Service 构造/绑定 → `ProviderRelayService.Start`；关闭时停止服务并排空队列 | `main_test.go` 覆盖窗口生命周期；服务测试复用生产数据库初始化 |
 | 供应商存储 | `ProviderService.LoadProviders/SaveProviders`、`providerstore.go` | SQLite `providers_store` → 内存快照 → 代理、健康检查和 Wails；每秒检查外部变化 | 保存、迁移、完整可变字段隔离和外部刷新均有测试；B04 建立基线，B13 覆盖有序 raw 指纹、保存一致性、空哨兵、损坏 payload 和 custom 语义 |
+| Gemini 配置 | `GeminiService.GetProviders/AddProvider/UpdateProvider` | SQLite 统一存储 → `GeminiService.providers` → Wails、代理、托盘与健康检查；写操作由 `mu` 串行化 | 持久化、迁移和主要操作已有测试；B15 补齐完整可变字段、传入/返回/回退所有权和竞态保护 |
 | HTTP 代理 | `ProviderRelayService.registerRoutes`、`proxyHandler`、`forwardRequestWithPlan`、`geminiProxyHandler`、`customCliProxyHandler` | Gin 请求 → 读取请求体 → Provider 筛选/排序 → 上游转发/流处理 → 黑名单与请求日志 | 代理行为、错误透传、流转换和负载脱敏测试较完整；B03 新增热路径行为与性能基线 |
 | 调度与黑名单 | `buildProviderAttemptGroups`、轮询函数、会话亲和函数、`BlacklistService` | Provider 快照、AppSettings 和黑名单快照共同决定尝试顺序；失败/成功经写队列落库并刷新运行时快照 | 会话亲和、轮询预览、失败透传、黑名单计数与健康检查集成已有测试，但缺统一组合矩阵 |
 | SQLite 写入 | `DBWriteQueue.worker`、`batchWorker`、`ExecTxGroup` | `GlobalDBQueue` 串行处理异构写入；`GlobalDBQueueLogs` 以最多 50 条、10ms 窗口批量写入日志；部分运行时维护与改名同步仍直连写入；B14 通过 DSN `_pragma` 让每个池连接应用 30 秒 `busy_timeout` | `dbqueue_test.go` 覆盖队列语义与 3 个子基准；B07/B14 覆盖双队列、直写事务、5 连接属性和逐连接 timeout 竞争基线 |
 | 日志统计 | `LogService` 的分页、汇总、趋势、Provider/模型统计方法 | Wails 调用 → SQLite 读取 → Go 聚合/定价适配 → 前端图表和列表；B06 仪表盘聚合复用一次主范围日志 | 日志范围、来源、Provider、模型、定价、热力图和分页测试较多；B05/B06 覆盖筛选等价、查询计划、调用次数和 81 个子基准 |
-| 前端主页面 | `Main/Index.vue` 组合 cards、composables 和 modals | 多组 Wails 读取、Provider 事件和定时轮询驱动卡片状态 | Main composables、ProviderCard、配额、统计和事件有较多 Vitest |
-| 日志页面 | `Logs/Index.vue` + `useLogsPageData` 等 composables | 单次刷新并发拉取分页、摘要、趋势、模型、Provider 和筛选选项 | Logs composables、services 和工具函数已有较完整 Vitest |
+| 前端主页面 | `Main/Index.vue` 组合 cards、composables 和 modals | 多组 Wails 读取、Provider 事件和定时轮询驱动卡片状态；路由组件由根级 `KeepAlive` 缓存 | Main composables、ProviderCard、配额、统计和事件有较多 Vitest；B08 覆盖窗口隐藏/恢复，尚未覆盖路由离页/返回 |
+| 日志页面 | `Logs/Index.vue` + `useLogsPageData` 等 composables | 单次刷新并发拉取分页、摘要、趋势、模型、Provider 和筛选选项；路由组件由根级 `KeepAlive` 缓存 | Logs composables、services 和工具函数已有较完整 Vitest；自动刷新覆盖关闭、切换、重入和卸载，尚未覆盖路由离页/返回 |
 | 设置页面 | `General/Index.vue` | AppSettings、更新、黑名单、导入、WebDAV、预算和模型路由集中编排 | 共享工具和 service 有测试；页面初始化、保存编排及事件生命周期没有独立测试 |
 
 当前测试基线：
 
-- `go test ./services/...`：通过；仅出现本机 macOS 链接目标版本警告。
+- B15 目标测试连续 5 次及 `-race` 通过；Gemini、ProviderStore 和 Gemini 代理专项回归通过。
+- `go test ./services/... -count=1`：通过；B23 目标用例在 `TZ=UTC`、`TZ=Asia/Shanghai` 和 `TZ=Etc/GMT-5` 下各连续 5 次通过。
 - `go test ./resources/model-pricing/...`：通过。
-- `pnpm test:unit`：71 个测试文件、549 项测试全部通过。
+- `pnpm test:unit`：71 个测试文件、561 项测试全部通过。
+- `go test . -count=1`：通过；`TestSeedMockRequestLogs` 只使用 `t.TempDir()` 下的临时 SQLite。
 - 仓库已有 4 个代理相关 Go Benchmark；B02 新增 3 个 DBWriteQueue 子基准，B03 新增 32 个代理热路径子基准，B04 新增 15 个 Provider 快照子基准，B05/B06 共维护 81 个日志仪表盘前后对照子基准；B07 新增 3 个 SQLite 写竞争场景。
 
 ## 5. 优化问题总表
@@ -89,7 +92,7 @@
 | OPT-002 | 供应商调度 | `services/providerrelay.go` 的 `providerAttemptState`、`stopProviderAttemptIfNeeded`、`proxyHandler` | 代码质量 | 已优化：四条通用调度分支共享尝试状态、成功/失败记录、响应开始/客户端中断停止和最终错误透传 | 分支内不再重复维护 last error/provider/duration/attempts；429 优先、上游原始错误透传、拉黑计数、会话释放和停止条件由窄 helper 统一；分支特有顺序、重试、日志和通知保留 | 降低失败语义漂移风险，同时保持所有调度与协议结果不变 | P0 | 高 | B10 | 已完成 |
 | OPT-003 | 调度测试 | `services/providerrelay_scheduling_matrix_test.go`、`services/providerrelay_test.go`、`services/providerrelay_error_passthrough_test.go` | 测试 | 已建立统一的调度开关组合行为矩阵 | B01 建立 5 个场景；B10 补充“固定拉黑 + 已绑定会话”组合，共 6 个场景，固定调用顺序、失败计数、成功 Provider 和绑定迁移 | 为通用调度收敛和后续修改提供行为基线 | P0 | 中 | B01、B10 | 已完成 |
 | OPT-004 | 代理热路径 | `services/providerrelay.go:4166-4175`、`:5405-5486`、`:6398-6491`、`services/providerrelay_hotpath_benchmark_test.go` | 内存 | 已测量：请求读取、非流式 Hook 和可选负载捕获均随体积增加分配；是否影响真实请求吞吐仍待端到端负载确认 | 1 MiB 请求读取 0.272-0.286 ms/约 5.24 MB；非流式 Hook 且关闭捕获 2.696-2.802 ms/约 8.39 MB；8 MiB 附近分别为 1.750-2.516 ms/约 41.70 MB 和 19.663-21.276 ms/约 66.90 MB | 大负载下会增加单请求堆分配；当前数据未包含网络、调度和数据库写入，不能直接外推整机吞吐 | P1 | 高 | B03 | 待分析 |
-| OPT-005 | 供应商快照 | `services/providerservice.go:194-209`、`:248-317`、`:706-724`、`services/provider_snapshot_benchmark_test.go` | 内存 | 已测量：快照命中成本几乎全部来自完整深拷贝；是否影响真实代理吞吐仍待结合 Provider 数量和请求率判断 | 1/10/100 个 Provider 的 `cloneProviders` 分别为 3.806-3.974 µs/5.7 KB、38.181-38.996 µs/57.2 KB、385.745-435.149 µs/568.0 KB；`LoadProviders` 快照命中范围基本一致 | 高频请求会按 Provider 数量线性产生分配；当前样本约 1.6 KB/Provider，不代表用户实际配置复杂度 | P1 | 中 | B04 | 待分析 |
+| OPT-005 | 供应商快照 | `services/providerservice.go:194-209`、`:248-317`、`:702-720`、`services/providerrelay.go:4257`、`services/provider_snapshot_benchmark_test.go`、`services/provider_proxy_chain_benchmark_test.go` | 内存 | 已测量：深拷贝耗时和分配随 Provider 数量线性增长，但在固定成功代理链路中尚不足以支持高风险的共享只读快照改造，实施延期 | 1/10/100 个 Provider 的快照命中中位数为 3.746/38.166/383.610 µs，完整链路为 10.002/10.000/9.995 ms；耗时占比约 0.04%/0.38%/3.84%，分配字节占比约 0.53%/4.97%/29.75% | 100 Provider 夹具中克隆已是显著分配来源，但固定 10 ms 链路成本下不是主要延迟来源；缺少真实 Provider 数量、请求率和生产堆样本，当前不改变所有权边界 | P1 | 中 | B04、B18 | 待分析 |
 | OPT-006 | 供应商快照 | `services/providerservice.go` 的 `providerStoreFingerprint`、`refreshProviderSnapshots`，`services/providerstore.go` 的 `saveProvidersToStoreWithFingerprint`、`providerStoreRowsFingerprint` | I/O | 已优化：SQLite 平台直接哈希有序存储行；保存端返回本次事务对应指纹；raw 非语义变化只同步指纹，custom 保留 Provider 语义指纹 | 1/10/100 个 Provider 稳定刷新中位数从 30.325/226.384/2,077.316 µs 降至 12.345/61.383/446.699 µs；allocs/op 从 238/2,169/约 21,525 降至 38/178/约 1,624 | 固定夹具中耗时约降 59.3%/72.9%/78.5%；消除保存后查询竞态窗口，并保持 nil/空、排序、ID 回填、损坏 payload 和 custom 语义 | P1 | 中 | B04、B13 | 已完成 |
 | OPT-007 | SQLite 双队列 | `services/dbqueue_test.go`、`services/dbqueue.go:168-749` | 测试 | 已建立队列专属正确性、并发和性能基线 | B02 覆盖顺序、事务回滚、批量、取消、关闭排空及拒绝写入；3 个子基准记录端到端耗时、分配和现有 QueueStats | 后续队列修改已有可重复的行为和性能对照 | P0 | 中 | B02 | 已完成 |
 | OPT-008 | SQLite 写入 | `services/providerservice.go:626-676`、`services/geminiservice.go:729-763`、`services/healthcheckservice.go:1358-1381`、`services/logstorage_service.go` | 数据库 | 已审计并测量：运行时简单写入与复合事务会和双队列争用 SQLite writer；初始化、迁移、维护和独立数据库直写不能按同一规则处理 | B07 旧连接设置下加入直写出现 66-595/596 次 `SQLITE_BUSY`；B14 逐连接 timeout 后连续 5 轮均为 0/596，事务与最终数据一致 | 竞争根因已由 B14 修复；当前合成数据不支持继续把复合事务强行迁入队列，保留真实调用观察 | P1 | 高 | B07、B14 | 已完成 |
@@ -100,6 +103,14 @@
 | OPT-013 | SQLite 事务组 | `services/dbqueue.go` 的 `ExecTxGroup`、`services/dbqueue_test.go` | 并发 | 已修复：事务正常完成时等待全部任务结果通道关闭后再返回，worker 不再访问调用方任务对象 | 修改前 1000 次双任务切片顺序复用在 `-race` 下稳定报告 `ExecTxGroup` 写与 `commitTxGroup` 读竞态；修改后普通、20 次重复和竞态测试均通过，2000 条写入完整 | 消除正常返回后顺序复用切片的竞态和潜在 `send on closed channel`；30 秒超时后任务继续执行的既有语义不变 | P1 | 中 | B11 | 已完成 |
 | OPT-014 | 负载脱敏 | `services/providerrelay.go` 的 payload quick checks、`maybeSanitizeRequestLogPayload`、`prepareRequestLogPayloadForPersistence` | CPU | 已优化：ASCII payload 使用无分配折叠扫描，Unicode 回退原 quick regex；会话标识和已捕获请求体不再重复脱敏 | 1 MiB quick check 中位数：会话 131.527 ms → 0.949 ms，敏感词 71.852 ms → 0.678 ms；1 MiB raw 410.463 ms → 2.051 ms、sanitized 1.334 s → 334.701 ms；近 8 MiB raw 3.219 s → 16.699 ms、sanitized 10.498 s → 2.626 s | 固定夹具中 raw 约降 99.5%，sanitized 约降 75%；脱敏分配字节约降 30%，捕获关闭保持百纳秒级 | P1 | 中 | B12 | 已完成 |
 | OPT-015 | SQLite 连接池 | `services/database.go:15-47`、`services/sqlite_runtime_write_contention_test.go` | 数据库 | 已优化：默认 DSN 使用 modernc `_pragma`，使连接池每个新连接继承现有 30 秒 `busy_timeout` | 同时持有 5 个连接均返回 30000，20 次重复通过；默认配置压力组 5 轮均为 596/596 成功、0 次 `SQLITE_BUSY/LOCKED` | 消除夹具中的快速写失败；写竞争现在表现为有界等待，默认配置总耗时中位数 106.120 ms，日志成功 P50/P95 为 42.234/50.176 ms | P0 | 中 | B14 | 已完成 |
+| OPT-016 | 主页面轮询 | `frontend/src/App.vue:23-26`、`Main/composables/useMainPageShell.ts:578-601,761-824`、`mainPollingLifecycle.ts:55-156` | 前端 | 已优化：Main 轮询状态机同时要求窗口可见和路由激活，`KeepAlive` 停用时停止五组 Timer，返回时复用既有合并刷新后恢复 | 假 Timer 中激活态保持 41 轮/60 秒，离页 60 秒新增 0 轮；9 项测试覆盖首次激活去重、返回单次刷新、隐藏/停用组合和异步刷新期间再次离页 | 消除 Main 离页期间周期 Wails 调用；首次进入、激活态间隔、Wails 签名、刷新内容和页面缓存行为不变 | P1 | 低 | B16 | 已完成 |
+| OPT-017 | 日志自动刷新 | `frontend/src/App.vue:23-26`、`Logs/Index.vue:509-522,749-782`、`Logs/composables/useLogsAutoRefresh.ts:11-106` | 前端 | 已优化：Logs 自动刷新由页面激活状态统一启停，停用时停止倒计时，返回时受防重入保护刷新一次并从完整间隔继续 | 默认 30 秒假 Timer 中离页调用从 2 次/60 秒降为 0；8 项测试覆盖首次激活、0 秒关闭、返回、初始化中离页、重复激活和刷新中再次离页 | 消除 Logs 离页期间的分页、聚合与 ProviderRefs 周期 Wails 调用；手动刷新、设置格式、筛选、分页和返回数据不变 | P1 | 低 | B17 | 已完成 |
+| OPT-018 | Gemini Provider | `services/geminiservice.go:97-159,229-321,1105-1163`、`services/geminiservice_test.go:480-727` | 并发 | 已修复：统一完整字段克隆入口，并在读取、写入、回退和复制返回边界建立独立所有权 | 递归复制 Wails/JSON 的 `map[string]any`、`[]any`，复制 `EnvConfig` 和 4 个指针字段；完整字段、nil/空、Get/Add/Update、保存失败回退、Duplicate 返回值和并发副本测试均通过 | 调用方不能再通过传入或返回对象绕过 `mu` 修改内部 Provider；公共签名、JSON、顺序和复制字段选择保持不变 | P0 | 中 | B15 | 已完成 |
+| OPT-019 | 黑名单失败路径 | `services/blacklistservice.go:102-159,302-350,410-420,806-940`、`services/providerrelay.go:1422-1436`、`services/blacklist_failure_benchmark_test.go` | 并发 | 已测量：全局 `operationMu` 会让失败记录按调用顺序等待，但固定临时库中 32 路不同 Provider 突发的尾延迟尚不足以支持高风险缩锁，实施延期 | 32 路不同 Provider 的吞吐中位数 9,196 calls/s、P50 1.781 ms、P95 3.350 ms；同 Provider因去重仅发生 1 次队列写，吞吐 23,390 calls/s、P50 0.739 ms、P95 1.305 ms；1/8/32 路最终计数和写次数均正确 | 失败突发延迟随并发近似线性增长，但当前只覆盖最多 32 行的本地临时库，且位于异常路径；保持串行可继续保护计数、阈值、通知与快照一致性 | P1 | 中 | B19 | 待分析 |
+| OPT-020 | 日志 ProviderRefs | `services/logservice.go:1239-1304`、`services/providerrelay.go:6929-6950`、`services/log_provider_refs_benchmark_test.go` | 数据库 | 已优化：新增部分覆盖索引，并让有 platform 的查询稳定选择该索引；所有场景均消除临时分组 B-tree | 生产 100k 高基数 5 轮中位数：Proxy 全平台 58.52 → 11.66 ms、Proxy Codex 53.22 → 9.79 ms、Session 全平台 63.58 → 16.30 ms、Session Codex 55.37 → 11.30 ms、All 全平台 102.30 → 23.49 ms、All Codex 68.65 → 13.85 ms | 固定夹具查询约提升 3.9-5.4 倍；B20 已记录约 14.2% 的 10k 行写入代价和 71.39 B/行存储，返回结果与公共接口不变 | P1 | 中 | B20、B21 | 已完成 |
+| OPT-021 | Gemini 改名事务 | `services/geminiservice.go:795-829`、`services/provider_identity_sync.go:70-97`、`services/providerstore.go:119-190`、`services/dbqueue.go:88-93,262-290` | 并发 | 已修复：Gemini 改名关联同步与 ProviderStore 替换在同一 DBWriteQueue 事务中执行，不再持有直连 writer 后等待队列 | `WriteTask.TxFunc` 复用 worker 创建的 `sql.Tx`；成功用例更新存储与关联日志，注入必需关联更新失败时事务和内存整体回退；目标连续 20 次及 `-race` 通过 | 已观察的 20 秒循环等待路径消除；数据库写入仍由单队列串行，关联匹配、可选表和公共错误语义不变 | P0 | 高 | B22 | 已完成 |
+| OPT-022 | 日志统计测试 | `services/logservice_provider_stats_test.go:351-425`、`services/logservice.go:1967-1970` | 测试 | 已修复：跨天性能样本夹具改以本地当日零点为锚点，生产统计逻辑不变 | 旧夹具在 `TZ=Etc/GMT-5` 本地 00:31 稳定失败；新夹具在 UTC、Asia/Shanghai、Etc/GMT-5 下各连续 5 次通过，完整 services 无需排除用例即可通过 | 消除任意本地时区午夜窗口的测试误报，同时保留跨天样本、当日总数、失败和非流式排除覆盖 | P1 | 低 | B23 | 已完成 |
+| OPT-023 | 根包模拟日志测试 | `requestlog_mock_test.go:15-67` | 测试 | 已修复：移除绑定真实 HOME 的包级初始化，目标测试只连接 `t.TempDir()` 下的临时 SQLite | B24 前 `go test .` 在首个模拟 INSERT 报 `attempt to write a readonly database`；B24 后目标连续 3 次和根包完整测试通过，源码不再包含 HOME 数据库路径或包级数据库 `init()` | 消除测试向用户日志混入随机记录的风险，并解除对本机目录、schema 和权限的依赖 | P0 | 高 | B24 | 已完成 |
 
 说明：没有测量数据的性能类问题显式标记“待测量”；已测量项只按基准适用范围描述，不直接外推为整机瓶颈。
 
@@ -121,6 +132,16 @@
 | B12 | 优化负载脱敏快速检查与重复处理 | OPT-014 | B03 | 中 | payload 脱敏函数、测试和 B03 基准 | 已完成 |
 | B13 | 以稳定存储内容计算 Provider 指纹 | OPT-006 | B04 | 中 | ProviderStore 指纹、快照刷新与基准 | 已完成 |
 | B14 | 让 SQLite `busy_timeout` 对连接池逐连接生效 | OPT-015 | B07 | 中 | 默认数据库 DSN、连接池验证与 B07 复测 | 已完成 |
+| B15 | 建立 Gemini Provider 深拷贝所有权边界 | OPT-018 | 无 | 中 | GeminiService、可变字段隔离与竞态测试 | 已完成 |
+| B16 | 暂停 Main KeepAlive 离页轮询 | OPT-016 | B08 | 低 | Main 轮询生命周期、Vue 激活钩子与 Vitest | 已完成 |
+| B17 | 暂停 Logs KeepAlive 离页自动刷新 | OPT-017 | B06 | 低 | Logs 自动刷新生命周期与 Vitest | 已完成 |
+| B18 | 测量 Provider 深拷贝在完整代理链路中的占比 | OPT-005 | B04、B10 | 低 | 代理链路 Benchmark，不改生产行为 | 已完成 |
+| B19 | 测量黑名单失败记录并发竞争 | OPT-019 | B02、B07 | 低 | BlacklistService 临时库并发测试与 Benchmark | 已完成 |
+| B20 | 测量 ProviderRefs 查询增长成本与查询计划 | OPT-020 | B05、B06 | 低 | LogService 查询计划与独立 Benchmark | 已完成 |
+| B21 | 落地 ProviderRefs 部分覆盖索引 | OPT-020 | B20 | 中 | request_log 索引、ProviderRefs SQL 与回归测试 | 已完成 |
+| B22 | 消除 Gemini 改名事务循环等待 | OPT-021 | B11、B15 | 高 | DBWriteQueue 事务回调、ProviderStore 与 Gemini 改名测试 | 已完成 |
+| B23 | 固定 ProviderDailyStats 午夜时区夹具 | OPT-022 | 无 | 低 | 单个日志统计测试与多时区回归 | 已完成 |
+| B24 | 隔离根包模拟日志测试数据库 | OPT-023 | 无 | 低 | 单个根包测试与临时 SQLite | 已完成 |
 
 ## 7. 分批实施计划
 
@@ -1446,19 +1467,903 @@
 - 性能对比：修改前直写竞争组 busy 中位数 592/596、成功中位数 4/596；修改后默认配置 5 轮均为 busy 0/596、成功 596/596，总耗时中位数 106.120 ms，日志成功 P50/P95 中位数 42.234/50.176 ms。
 - 遗留问题：数据来自固定临时库合成压力，不能外推真实调用频率；其他连接级 PRAGMA 与 WebDAV 独立快照连接不在本批范围。
 
+### B15：Gemini Provider 深拷贝与并发所有权
+
+#### 目标
+
+只收紧 `GeminiService` 对 Provider 切片和嵌套可变字段的所有权，阻止调用方绕过服务锁修改内部状态。
+
+#### 对应问题
+
+- OPT-018
+
+#### 前置条件
+
+- 无前置批次。
+- 修改前先用失败测试固定传入值、返回值和回退快照当前存在的别名共享行为。
+- 逐字段核对 `GeminiProvider`，避免新增字段遗漏深拷贝。
+
+#### 涉及范围
+
+- `services/geminiservice.go`
+- `services/geminiservice_test.go`
+- 必要时新增同包 Gemini Provider 所有权测试文件
+- 不涉及 `ProviderService`、数据库 schema 或前端绑定
+
+#### 当前证据
+
+- `GeminiProvider` 包含 `EnvConfig`、`SettingsConfig`、`RequestBodyOverrides` 三个 map，以及并发上限、预算和额度查询等指针字段。
+- `GetProviders` 在 `mu` 内直接返回 `s.providers`，解锁后调用方仍持有内部切片及嵌套对象引用。
+- `AddProvider` 和 `UpdateProvider` 直接把调用方传入对象存入 `s.providers`；调用返回后修改原 map 也会修改服务内部状态。
+- `SetForcedPriority` 的 `append([]GeminiProvider(nil), s.providers...)` 只复制切片和 struct，嵌套可变字段仍共享。
+- `DuplicateProvider` 手工复制 `SettingsConfig` 顶层键但直接复用嵌套值，且返回的 `cloned` 与追加到内部切片的副本共享 map 和指针字段。
+- 现有 `geminiservice_test.go` 验证持久化字段反序列化，但没有验证 `GetProviders`、新增、更新和保存失败回退的深层隔离。
+
+#### 修改方案
+
+- 新增一个 Gemini Provider 全字段克隆入口，保留 nil 与空容器语义，并递归复制 JSON-like map。
+- 在读取边界返回克隆；在新增、更新及需要回退快照的写入边界保存克隆，确保服务独占内部可变对象。
+- 保持复制供应商现有字段选择和默认值，只修复其嵌套 map 及返回值与内部副本的别名共享。
+- 测试先覆盖 map、嵌套 map、可选指针和切片中 Provider struct，再执行最小实现。
+- 用并发测试让调用方反复修改已返回副本，同时服务读取、更新或序列化，确认不再共享内存。
+
+#### 明确不修改
+
+- 不改变 `GetProviders`、`AddProvider`、`UpdateProvider` 等公共方法签名、返回顺序或错误文案。
+- 不改变 JSON 字段、SQLite payload、默认值、认证或代理调度语义。
+- 不把 `mu` 更换为其他锁，不重构 Gemini 保存、改名事务或代理 Handler。
+- 不复用序列化往返作为克隆实现，不新增依赖。
+
+#### 验证方式
+
+- 单元测试：返回副本、传入对象和保存失败回退的完整可变字段隔离。
+- 最小回归测试：GeminiService、ProviderStore、Gemini 代理和 `go test ./services/... -count=1`。
+- 性能基准：本批属于并发正确性修复，不要求性能提升；记录新增克隆对现有 Gemini Provider 操作基准或目标测试耗时的影响。
+- 行为一致性检查：克隆前后 JSON 序列化结果、Provider 顺序、nil/空容器和持久化内容逐字段一致。
+- 竞态检测：目标所有权测试和 Gemini 相关服务测试以 `-race` 运行。
+
+#### 验收标准
+
+- 修改 `GetProviders` 返回值的任意嵌套可变字段不会改变后续读取结果：满足。
+- `AddProvider/UpdateProvider` 返回后修改调用方对象不会改变服务状态或持久化结果：满足。
+- 并发读取、更新和修改外部副本的目标测试在 `-race` 下通过：满足。
+- 公共签名、JSON、顺序和错误语义保持不变；完整 services 仅有独立登记的 OPT-022 时区用例失败：满足本批行为一致性要求。
+
+#### 风险与回退
+
+- 风险：遗漏某个当前或后续新增的可变字段，或错误改变 nil/空对象语义。
+- 控制：用完整字段夹具和逐字段等价断言覆盖克隆函数，并让所有边界复用同一入口。
+- 回退：恢复原边界赋值和浅拷贝并移除对应所有权测试；不涉及数据迁移或 Git 操作。
+
+#### 执行清单
+
+- [x] 修改前重新读取相关代码
+- [x] 确认现有行为
+- [x] 补充必要测试
+- [x] 完成最小修改
+- [x] 运行验证
+- [x] 记录前后对比
+- [x] 更新问题和批次状态
+- [x] 更新变更文档
+
+#### 执行记录
+
+- 开始时间：2026-09-01 00:34:32 CST
+- 完成时间：2026-09-01 01:12:26 CST
+- 实际修改：新增 Gemini JSON-like 容器、单 Provider 和 Provider 切片克隆入口；`GetProviders` 返回克隆，`AddProvider/UpdateProvider` 接收后取得所有权，`SetForcedPriority` 使用深层回退快照，`DuplicateProvider` 隔离嵌套配置及返回值；未改变公共签名、持久化格式或复制字段选择。
+- 验证结果：目标所有权测试连续 5 次通过，目标 `-race`、Gemini/ProviderStore/代理专项、模型定价资源和 root 包测试通过；跳过 OPT-022 后完整 services 通过，OPT-022 在 UTC 下单独通过；仅有既有 macOS 链接目标版本警告。
+- 性能对比：本批为并发正确性修复，没有修改前可比 Benchmark，不宣称性能提升；目标测试连续 5 次包内耗时 0.871 秒，目标 `-race` 包内耗时 2.432 秒。
+- 行为对比：修改前读取、传入、回退和复制返回边界共享可变对象；修改后完整字段、nil/空容器、持久化值和 Provider 顺序一致，外部修改不再影响服务状态。
+- 遗留问题：改名路径的直连事务与队列事务组等待登记为 OPT-021；午夜时区测试失稳登记为 OPT-022，均未在本批顺带修复。
+
+### B16：Main KeepAlive 离页轮询治理
+
+#### 目标
+
+只在 Main 路由被 `KeepAlive` 停用时暂停现有周期轮询，返回 Main 时刷新一次并按原周期恢复。
+
+#### 对应问题
+
+- OPT-016
+
+#### 前置条件
+
+- B08 已完成窗口隐藏/恢复生命周期和 60 秒调用轮次基线。
+- 修改前记录 Main 激活、离页和返回各 60 秒的高层轮询轮次。
+- 确认 Vue 首次挂载时 `onMounted` 与 `onActivated` 的调用顺序，避免重复初始化。
+
+#### 涉及范围
+
+- `frontend/src/components/Main/composables/mainPollingLifecycle.ts`
+- `frontend/src/components/Main/composables/mainPollingLifecycle.test.ts`
+- `frontend/src/components/Main/composables/useMainPageShell.ts`
+- `frontend/src/components/Main/Index.vue`（仅在生命周期接线确有需要时）
+- `frontend/src/App.vue` 仅作为 `KeepAlive` 行为证据，不预计修改
+
+#### 当前证据
+
+- `App.vue` 用根级 `<keep-alive>` 缓存所有普通路由组件，切换路由会停用 Main 而不是卸载。
+- `useMainPageShell` 只在 `onMounted` 绑定可见性并启动 `pollingLifecycle`，只在 `onUnmounted` dispose。
+- B08 生命周期统一管理 Provider 统计、额度、更新、状态同步和 2 秒并发状态五组 Timer，但状态输入只有窗口/文档可见性，没有页面激活状态。
+- 现有假 Timer 基线在可见 60 秒产生 41 个高层轮询轮次，窗口隐藏 60 秒新增 0 个；路由离页场景没有测试或数据。
+
+#### 修改方案
+
+- 为现有纯生命周期 helper 增加独立的页面 active 状态，不把路由停用伪装成窗口隐藏。
+- 在 `onActivated/onDeactivated` 接入该状态：离页立即停止五组 Timer，返回且窗口可见时执行一次既有合并刷新，再恢复原周期。
+- 首次挂载只执行现有初始化和一次启动，不因 `onActivated` 重复刷新或创建 Timer。
+- 扩展代次保护，确保返回刷新未完成时再次离页不会晚启动 Timer；窗口隐藏和页面停用任一成立时均不轮询。
+
+#### 明确不修改
+
+- 不移除或缩小根级 `KeepAlive`，不改变路由缓存与页面状态保留行为。
+- 不改变页面激活时的轮询间隔、Wails 方法、刷新内容和用户可见结果。
+- 不处理 Logs、Console、ProviderCard 子组件或全局更新通知的 Timer。
+- 不改 Wails 窗口事件、Go 后台任务或 B08 已验证的隐藏语义。
+
+#### 验证方式
+
+- 单元测试：假 Timer 覆盖首次挂载、离页、返回、隐藏后返回、返回刷新中再次离页及重复钩子。
+- 最小回归测试：Main 生命周期、Main 相关 Vitest 和完整 `pnpm test:unit`。
+- 性能基准：记录激活、离页和返回各 60 秒的高层轮询轮次前后对比。
+- 行为一致性检查：激活态仍为原 41 轮/60 秒；返回时各类数据最多立即刷新一次。
+
+#### 验收标准
+
+- Main 离页 60 秒期间新增周期轮询轮次为 0：满足。
+- 首次进入不增加刷新；返回 Main 时只执行一次恢复刷新且只创建一组 Timer：满足。
+- 窗口隐藏与路由停用任一状态均能暂停，恢复顺序不同也不会重复启动：满足。
+- Main 功能、可见态周期、Wails 签名及完整前端测试保持不变：满足。
+
+#### 风险与回退
+
+- 风险：挂载/激活钩子重复导致初始化重复，或恢复刷新完成后页面已再次离开。
+- 控制：在纯生命周期 helper 中统一 ready、visible、pageActive 和 generation，不在各 Timer 内分别判断。
+- 回退：移除页面 active 输入和激活钩子，恢复 B08 的仅窗口可见性状态；不涉及持久化数据。
+
+#### 执行清单
+
+- [x] 修改前重新读取相关代码
+- [x] 确认现有行为
+- [x] 补充必要测试
+- [x] 完成最小修改
+- [x] 运行验证
+- [x] 记录前后对比
+- [x] 更新问题和批次状态
+- [x] 更新变更文档
+
+#### 执行记录
+
+- 开始时间：2026-09-01 01:39:45 CST
+- 完成时间：2026-09-01 01:41:36 CST
+- 实际修改：为 Main 轮询状态机增加独立 `pageActive` 输入和代次保护；`useMainPageShell` 用 `onActivated/onDeactivated` 接入 `KeepAlive` 生命周期；未改变根级缓存、轮询间隔、刷新内容或 Wails 方法。
+- 验证结果：4 项新增失败测试先确认旧实现没有页面激活边界；实现后目标 9 项、`vue-tsc --noEmit` 和完整前端 556 项通过，`git diff --check` 通过。
+- 性能对比：激活态保持 41 轮/60 秒；离页态从 41 轮/60 秒降为 0；返回时合并刷新 1 次，随后恢复 41 轮/60 秒。
+- 行为对比：首次激活不增加刷新；窗口隐藏与路由停用任一成立均暂停，恢复顺序和刷新中再次离页不会重复启动 Timer。
+- 遗留问题：本批不处理 Logs 和其他页面 Timer；OPT-017 由 B17 单独处理。
+
+### B17：Logs KeepAlive 离页刷新治理
+
+#### 目标
+
+只在 Logs 路由被 `KeepAlive` 停用时暂停自动刷新，返回时补一次刷新并从完整间隔重新倒计时。
+
+#### 对应问题
+
+- OPT-017
+
+#### 前置条件
+
+- B06 已完成仪表盘兼容聚合，日志刷新输出和调用边界已有测试。
+- 修改前按 0 秒、默认 30 秒和一个非默认间隔记录离页期间的高层 `loadDashboard` 调用数。
+- 确认返回时立即刷新可保持当前后台刷新带来的数据新鲜度，且不改变手动刷新语义。
+
+#### 涉及范围
+
+- `frontend/src/components/Logs/Index.vue`
+- `frontend/src/components/Logs/composables/useLogsAutoRefresh.ts`
+- `frontend/src/components/Logs/composables/useLogsAutoRefresh.test.ts`
+- 必要时新增最小 Logs 页面激活生命周期测试
+- `frontend/src/App.vue` 仅作为 `KeepAlive` 行为证据，不预计修改
+
+#### 当前证据
+
+- `Logs/Index.vue` 在 `onMounted` 完成初始加载后调用 `startCountdown`，仅在 `onUnmounted` 调用 `stopCountdown`。
+- 根级 `KeepAlive` 使路由离开只触发停用；默认 30 秒倒计时因此仍每秒运行，并周期执行完整 `loadDashboard`。
+- `useLogsAutoRefresh` 已提供幂等的 `startCountdown/stopCountdown/restartCountdown` 和防重入保护，可作为最小修改边界。
+- 现有 4 项测试覆盖关闭、间隔切换、主动清理和刷新不重叠，没有页面停用、返回或首次激活去重场景。
+
+#### 修改方案
+
+- 在 Logs 页面接入 `onActivated/onDeactivated`，复用现有自动刷新 start/stop 能力。
+- 首次挂载沿用当前初始加载，不因首次 activated 再请求；后续返回先执行一次受防重入保护的刷新，再从当前配置间隔重新倒计时。
+- 页面停用时立即停止倒计时；停用期间尚未完成的既有请求允许自然结束，但结束后不得重启 Timer。
+- 用假 Timer 固定 0 秒、30 秒、间隔切换、快速往返和刷新中离页行为。
+
+#### 明确不修改
+
+- 不改变自动刷新配置取值、默认 30 秒、保存格式或 0 秒关闭语义。
+- 不改变 `loadDashboard` 的 Wails 方法、并发编排、筛选、分页和展示结果。
+- 不改变根级 `KeepAlive`，不处理其他页面 Timer。
+- 不取消已发出的 Wails 请求，不引入 AbortController、全局调度器或依赖。
+
+#### 验证方式
+
+- 单元测试：假 Timer 验证首次进入、停用、返回、0 秒关闭、刷新中停用和重复激活。
+- 最小回归测试：Logs auto refresh、page data、相关 service 测试和完整 `pnpm test:unit`。
+- 性能基准：记录默认 30 秒配置下离页 60 秒的 `loadDashboard` 次数前后对比。
+- 行为一致性检查：页面激活时刷新间隔、倒计时、手动刷新、筛选应用和返回数据不变。
+
+#### 验收标准
+
+- 默认间隔下 Logs 离页 60 秒新增 `loadDashboard` 调用数为 0：满足。
+- 返回 Logs 时最多立即刷新一次，之后按当前配置完整间隔继续；0 秒配置仍不自动刷新：满足。
+- 快速离页/返回和进行中请求不会创建重复 Timer 或重叠刷新：满足。
+- Wails 签名、设置格式、UI 结果及完整前端测试保持不变：满足。
+
+#### 风险与回退
+
+- 风险：首次 activated 与 mounted 重复刷新，或进行中请求完成后重置已停用页面的倒计时状态。
+- 控制：显式区分首次挂载和后续激活，并由自动刷新 composable 单点管理 active 与 generation。
+- 回退：移除 activated/deactivated 接线，恢复只在 mounted/unmounted 启停；不涉及数据迁移。
+
+#### 执行清单
+
+- [x] 修改前重新读取相关代码
+- [x] 确认现有行为
+- [x] 补充必要测试
+- [x] 完成最小修改
+- [x] 运行验证
+- [x] 记录前后对比
+- [x] 更新问题和批次状态
+- [x] 更新变更文档
+
+#### 执行记录
+
+- 开始时间：2026-09-01 01:45:38 CST
+- 完成时间：2026-09-01 01:47:08 CST
+- 实际修改：为 `useLogsAutoRefresh` 增加 ready、页面激活和 generation 状态；Logs 页面接入 `onActivated/onDeactivated`，停用时停止倒计时，返回时刷新一次后按当前完整间隔重启。
+- 验证结果：4 项新增失败测试先确认旧实现没有页面停用边界；实现后目标 8 项、`vue-tsc --noEmit` 和完整前端 560 项通过，`git diff --check` 通过。
+- 性能对比：默认 30 秒配置下，修改前离页仍调用 2 次/60 秒，修改后为 0；返回立即调用 1 次，随后 30 秒再调用 1 次；0 秒配置始终为 0。
+- 行为对比：首次 activated 不额外请求；进行中请求允许自然结束，停用后不会重启 Timer；手动刷新、配置、筛选和分页逻辑未改。
+- 遗留问题：本批不改变 `loadDashboard` 内部数据库工作；ProviderRefs 独立成本由 B20 测量。
+
+### B18：Provider 深拷贝完整代理链路测量
+
+#### 目标
+
+只测量 `LoadProviders` 深拷贝在一条成功代理请求完整本地链路中的耗时与分配占比，决定 OPT-005 是否值得进入实现批次。
+
+#### 对应问题
+
+- OPT-005
+
+#### 前置条件
+
+- B04 已建立 1/10/100 个 Provider 的克隆和快照命中微基准。
+- B10 已固定通用代理调度内核和代表性成功/失败行为。
+- 使用固定、富字段 Provider 夹具和本地 `httptest` 上游，不读取用户配置或依赖外网。
+
+#### 涉及范围
+
+- `services/providerrelay.go`、`services/providerservice.go`（仅重新读取和定位，不预计修改）
+- `services/provider_snapshot_benchmark_test.go`
+- 必要时新增独立的代理链路 Benchmark 测试文件
+- 不修改生产代码、配置、依赖或数据库 schema
+
+#### 当前证据
+
+- B04 证明快照命中时锁与 map 查找成本相对深拷贝不可见，1/10/100 个 Provider 的克隆约为 3.8/38/386-435 µs 和 5.7/57.2/568.0 KB。
+- 通用 `proxyHandler` 在请求体读取后调用 `LoadProviders`，随后还执行运行时过滤、模型路由、黑名单、计划构建、调度和上游转发。
+- `providerrelay.go` 另有多个托盘预览、会话校验和状态入口调用 `LoadProviders`，但 B18 只测代表性的代理请求，不混合后台调用频率。
+- 现有热路径与快照 Benchmark 相互独立，不能得出克隆占完整代理本地准备阶段的比例。
+
+#### 修改方案
+
+- 建立 1/10/100 个富字段 Provider 的固定快照，嵌套字段复杂度与 B04 保持一致。
+- 通过本地成功上游运行同一条非流式通用代理请求，固定请求体、路由、首个成功 Provider 和日志开关。
+- 同轮记录完整请求、仅 Provider 快照命中和必要的无 Provider 对照，统一报告 `ns/op`、`B/op`、`allocs/op`。
+- 每组运行 5 轮，记录范围和中位数；按 Provider 数量计算完整链路的增量斜率，不把网络回环耗时外推为生产延迟。
+- 根据数据明确记录：继续规划只读快照方案、继续测量真实规模，或维持深拷贝并延期；本批不直接实现候选。
+
+#### 明确不修改
+
+- 不减少克隆字段，不向代理暴露内部快照引用，不引入共享可变对象。
+- 不改变 Provider 筛选、模型路由、黑名单、轮询、会话亲和或上游协议。
+- 不改变日志捕获、序列化、数据库写入或 Wails API。
+- 不用用户 `app.db`、真实 API Key 或公网 Provider 运行基准。
+
+#### 验证方式
+
+- 单元测试：复用 B04 深拷贝隔离和 B10 代理成功行为断言。
+- 最小回归测试：目标代理/快照测试、`go test ./services/... -count=1`。
+- 性能基准：1/10/100 个 Provider 的完整链路与快照命中 Benchmark 各运行 5 轮并开启 `-benchmem`。
+- 行为一致性检查：每组状态码、响应体、命中 Provider、请求次数和日志结果一致。
+
+#### 验收标准
+
+- 三种 Provider 规模均有完整链路 `ns/op`、`B/op`、`allocs/op` 的 5 轮范围与中位数。
+- 同表列出 B04 克隆数据、完整链路数据及随 Provider 数量变化的增量，不用单次结果下结论。
+- 基准夹具在每轮确认代理输出和调度结果一致，完整 services 测试通过。
+- OPT-005 的继续实施、继续测量或延期结论及依据写入本文；没有数据时不得改为已完成优化。
+
+#### 风险与回退
+
+- 风险：本地 HTTP、日志队列或初始化成本掩盖 Provider 数量带来的差异。
+- 控制：固定环境并提供快照子基准和无 Provider 对照；分开报告冷启动与稳态，不选择性删除离群轮次。
+- 回退：删除新增 Benchmark 和夹具即可；不涉及生产代码、数据或 Git 操作。
+
+#### 执行清单
+
+- [x] 修改前重新读取相关代码
+- [x] 确认现有行为
+- [x] 补充必要测试
+- [x] 完成最小修改
+- [x] 运行验证
+- [x] 记录前后对比
+- [x] 更新问题和批次状态
+- [x] 更新变更文档
+
+#### 执行记录
+
+- 开始时间：2026-09-01 01:47:08 CST
+- 完成时间：2026-09-01 02:08:24 CST
+- 实际修改：新增独立代理链路 Benchmark，复用 B04 富字段 Provider，覆盖 0/1/10/100 Provider、真实 Gin 路由、本地成功上游、日志队列、状态码/响应体和上游调用次数；基准期间隔离 stdout 与 `xlog` 输出，不修改生产代码。
+- 验证结果：夹具测试、Provider 快照和通用调度目标测试通过；完整链路与快照对照完成 5 轮；排除独立登记的 OPT-022 后 `go test ./services/... -count=1` 通过，仅有既有 macOS 链接目标版本警告。
+- 性能对比：完整链路 5 轮中位数为 1 Provider 10.002 ms/1,068,280 B/19,773 allocs，10 Provider 10.000 ms/1,150,817 B/20,647 allocs，100 Provider 9.995 ms/1,909,461 B/29,382 allocs；对应快照中位数为 3.746/38.166/383.610 µs、5,682/57,212/567,989 B、96/951/9,502 allocs。
+- 占比与斜率：快照耗时占完整链路约 0.04%/0.38%/3.84%，分配字节占约 0.53%/4.97%/29.75%；从 1 增至 100 Provider，完整链路增加 841,181 B/op，其中快照增加 562,307 B/op，约解释 66.9% 的分配增量；耗时受固定约 10 ms 链路成本与噪声主导，不据此计算延迟斜率。
+- 行为对比：本批只新增测试和基准；Provider 深拷贝、筛选、调度、黑名单、协议、日志写入和公共接口均未改变。
+- 遗留问题：OPT-005 保持待分析并延期实现；只有真实 Provider 数量/请求率或生产 heap profile 证明其为主要成本时，才单独规划只读快照候选及竞态验证。
+
+### B19：黑名单失败路径并发竞争测量
+
+#### 目标
+
+只量化请求失败记录在同 Provider 和不同 Provider 并发下的锁等待、吞吐与数据库工作，不修改黑名单实现。
+
+#### 对应问题
+
+- OPT-019
+
+#### 前置条件
+
+- B02 已建立 DBWriteQueue 基线，B07/B14 已固定 SQLite 写竞争和逐连接 timeout 行为。
+- 使用临时数据库、真实队列和固定黑名单配置，禁止读取用户 `app.db`。
+- 先固定首次失败、去重窗口、达到阈值和已拉黑四类语义，避免测量夹具改变计数规则。
+
+#### 涉及范围
+
+- `services/blacklistservice.go`、`services/providerrelay.go`（仅重新读取和定位，不预计修改）
+- 现有 BlacklistService 测试与 DBWriteQueue 测试基础设施
+- 必要时新增独立的黑名单失败路径 Benchmark/测量测试文件
+- 不修改生产 Go、前端、配置、依赖或 schema
+
+#### 当前证据
+
+- `RecordFailureWithReasonByID` 全程持有进程级 `operationMu` 写锁，再执行身份绑定、失败记录、全表 `refreshRuntimeSnapshot` 和第二次身份绑定。
+- 首次绑定最多通过 `GlobalDBQueue` 执行两条 UPDATE；失败记录还会查询当前行并排队 INSERT/UPDATE。
+- `refreshRuntimeSnapshot` 读取整张 `provider_blacklist` 并重建多个 map；不同 Provider 的失败也使用同一把锁。
+- `recordProviderFailureIfNeeded` 位于代理失败返回路径，429、5xx、不完整流和上游网络错误会同步等待记录完成。
+- 当前没有按同/不同 Provider 和并发度拆分的等待分布或吞吐数据，因此不能认定全局锁已构成实际瓶颈。
+
+#### 修改方案
+
+- 构建固定临时库场景，分别覆盖首次失败、已有记录递增、阈值拉黑和去重命中。
+- 对同一 Provider 与不同 Provider 运行 1/8/32 并发请求，记录总吞吐、单调用 P50/P95、`B/op`、`allocs/op` 和最终数据库状态。
+- 分开记录身份已绑定与首次绑定，避免把迁移兼容写入误算为每次失败固定成本。
+- 如测试基础设施允许，以计数执行器记录每种场景的查询、队列写入和快照刷新次数；不能可靠记录时明确省略，不估算。
+- 测量结果只用于决定后续是保持全局串行、缩小临界区还是按 Provider 分片；任何实现另立批次。
+
+#### 明确不修改
+
+- 不改变失败来源、可配置去重窗口（当前默认 2 秒）、阈值、等级、时长、宽恕、通知或自动恢复语义。
+- 不缩小 `operationMu`、不增加 Provider 锁、不异步返回失败记录。
+- 不改变 DBWriteQueue、SQLite 连接配置、表结构或索引。
+- 不读取真实黑名单数据，不发送真实通知或上游请求。
+
+#### 验证方式
+
+- 单元测试：四类状态转换和并发后的最终失败计数、等级、拉黑时间与原因。
+- 最小回归测试：BlacklistService、代理失败矩阵、DBWriteQueue 和 `go test ./services/... -count=1`。
+- 性能基准：同/不同 Provider、1/8/32 并发的固定场景运行 5 轮，记录吞吐、P50/P95 和分配。
+- 行为一致性检查：测量前后数据库行、运行时快照、通知次数和去重结果与串行预期一致。
+- 竞态检测：并发测量的缩小夹具以 `-race` 运行。
+
+#### 验收标准
+
+- 同 Provider 与不同 Provider 至少三个并发度均有 5 轮可重复数据。
+- 每个场景记录最终状态断言；不得用错误计数换取更高吞吐。
+- 明确区分首次身份绑定、常规失败、去重命中和阈值拉黑的成本。
+- OPT-019 的后续实现或延期结论写入本文；没有测量数据时保持“待分析”。
+
+#### 风险与回退
+
+- 风险：去重窗口使并发调用提前返回，造成看似高吞吐但没有执行实际写入。
+- 控制：为不同成本场景使用独立 Provider/时间状态，并逐轮断言数据库计数和执行次数。
+- 回退：删除新增 Benchmark、临时夹具和测量辅助代码；不涉及生产数据或 Git 操作。
+
+#### 执行清单
+
+- [x] 修改前重新读取相关代码
+- [x] 确认现有行为
+- [x] 补充必要测试
+- [x] 完成最小修改
+- [x] 运行验证
+- [x] 记录前后对比
+- [x] 更新问题和批次状态
+- [x] 更新变更文档
+
+#### 执行记录
+
+- 开始时间：2026-09-01 02:08:24 CST
+- 完成时间：2026-09-01 02:24:42 CST
+- 实际修改：新增独立黑名单失败路径测试和 Benchmark；固定首次已绑定、首次未绑定、常规递增、阈值拉黑、去重命中和已拉黑六类语义，并测量同/不同 Provider 在 1/8/32 路并发下的等待、吞吐、分配和队列写次数；不修改生产代码。
+- 单调用基线：5 轮中位数为首次已绑定 110.394 µs、首次未绑定 117.740 µs、常规递增 82.077 µs、阈值拉黑 83.706 µs、去重命中 39.540 µs、已拉黑 41.563 µs；对应队列写次数为 1/3/1/1/0/0。
+- 并发数据：
+
+  | 模式 | 并发 | 吞吐中位数 | P50 中位数 | P95 中位数 | 队列写/批 |
+  |---|---:|---:|---:|---:|---:|
+  | 同 Provider | 1 | 11,078 calls/s | 85.917 µs | 94.209 µs | 1 |
+  | 同 Provider | 8 | 20,184 calls/s | 231.208 µs | 389.000 µs | 1 |
+  | 同 Provider | 32 | 23,390 calls/s | 738.583 µs | 1.305 ms | 1 |
+  | 不同 Provider | 1 | 10,898 calls/s | 88.333 µs | 95.084 µs | 1 |
+  | 不同 Provider | 8 | 10,392 calls/s | 440.625 µs | 761.625 µs | 8 |
+  | 不同 Provider | 32 | 9,196 calls/s | 1.781 ms | 3.350 ms | 32 |
+
+- 分配数据：32 路同 Provider 为 191,050-192,514 B/op、4,609-4,619 allocs/op；32 路不同 Provider 为 666,319-668,308 B/op、18,763-18,768 allocs/op；前者只有首次递增，后续调用按去重语义仍刷新运行时快照。
+- 验证结果：六类语义夹具、Blacklist/DBWriteQueue/调度目标回归、并发缩小基准 `-race` 和 5 轮正式基准通过；排除独立登记的 OPT-022 后完整 services 通过，仅有既有 macOS 链接目标版本警告。
+- 行为对比：每轮断言数据库行数、失败总数、拉黑状态、原因、运行时快照和队列写次数；未发送通知或上游请求，未改变锁、队列、配置或 schema。
+- 遗留问题：OPT-019 保持待分析并延期实现；只有真实失败突发、较大黑名单表或 trace/profile 证明该路径影响用户尾延迟时，才单独规划缩小临界区或按 Provider 分片，并先固定通知与恢复并发语义。
+
+### B20：ProviderRefs 查询性能测量
+
+#### 目标
+
+只测量 `ListProviderRefsV2` 随日志量增长的查询成本、扫描计划和输出语义，决定是否需要独立 SQL 或索引优化批次。
+
+#### 对应问题
+
+- OPT-020
+
+#### 前置条件
+
+- B05/B06 已提供 1k/10k/100k 固定日志夹具和完整仪表盘前后基准。
+- 复用生产 `request_log` schema 与索引，只在临时库评估候选，不修改正式迁移。
+- 先扩充输出等价测试，覆盖旧名称、同名多 ID、改名、空值和 Proxy/Session/All 来源。
+
+#### 涉及范围
+
+- `services/logservice.go`、`services/providerrelay.go`（仅重新读取和定位，不预计修改）
+- `services/logservice_provider_refs_test.go`
+- `services/log_dashboard_benchmark_test.go` 或独立 ProviderRefs Benchmark 文件
+- 不修改生产 SQL、索引、Wails 方法、前端或 schema
+
+#### 当前证据
+
+- `ListProviderRefsV2` 不带时间范围，对匹配日志执行 `TRIM/COALESCE` 过滤、来源表达式、`GROUP BY provider_id, provider` 和 `MAX(created_at)`。
+- 现有索引包括 `created_at`、`platform + created_at`、`platform + provider/provider_id + created_at`，没有针对表达式化 `data_source` 与 Provider 分组的独立测量结论。
+- B05/B06 仪表盘基准在完整刷新末尾调用 ProviderRefs，但未单独报告该 SQL 的耗时、扫描行数或查询计划。
+- 当前 ProviderRefs 单测只覆盖 Go 侧候选合并的三个场景，没有覆盖 SQL 来源过滤和规模增长。
+
+#### 修改方案
+
+- 在 1k/10k/100k 固定数据集上独立运行 Proxy、Session、All，并区分有/无 platform 过滤。
+- 记录冷/暖查询的 `ns/op`、`B/op`、`allocs/op`、返回候选数和最终 refs 数，运行 5 轮。
+- 对每个主要组合保存 `EXPLAIN QUERY PLAN`，明确全表扫描、索引扫描和临时 B-tree 使用情况。
+- 若基线显示稳定增长成本，仅在临时库比较最小候选 SQL/索引，并逐字段验证输出等价；候选不得进入生产 schema。
+- 根据数据另立实施批次或记录延期，不在 B20 顺带修改查询。
+
+#### 明确不修改
+
+- 不改变 `ListProviderRefs/ListProviderRefsV2` 签名、返回顺序、旧名称合并或同名多 ID 语义。
+- 不新增生产索引、生成列、缓存、统计表或迁移逻辑。
+- 不改变 Logs 刷新频率、Wails 调用次数、来源定义或日期过滤。
+- 不读取、复制或分析用户实际日志数据库。
+
+#### 验证方式
+
+- 单元测试：SQL 与 Go 合并层覆盖旧数据、改名、歧义名称、空值和三种来源。
+- 最小回归测试：ProviderRefs、日志来源、仪表盘聚合和 `go test ./services/... -count=1`。
+- 性能基准：1k/10k/100k × 来源 × platform 过滤组合运行 5 轮并开启 `-benchmem`。
+- 行为一致性检查：基线与任何临时候选的结果逐字段、逐顺序一致，查询计划完整记录。
+
+#### 验收标准
+
+- 三种规模、三种来源及有/无 platform 过滤均有 5 轮基准和查询计划。
+- 表格明确记录候选行数、最终 refs 数、耗时、分配及临时 B-tree/索引使用情况。
+- 任一临时候选必须与现有方法逐字段等价；不等价即放弃，不进入实现批次。
+- OPT-020 的实施或延期依据写入本文；本批完成不等于性能优化完成。
+
+#### 风险与回退
+
+- 风险：固定数据分布与真实日志中的 Provider 基数、改名频率或来源比例不同。
+- 控制：明确记录夹具分布，至少覆盖低/高基数和旧数据歧义，不把绝对耗时外推为用户环境。
+- 回退：删除新增测试、Benchmark 和临时索引候选；生产 schema 与数据始终不变。
+
+#### 执行清单
+
+- [x] 修改前重新读取相关代码
+- [x] 确认现有行为
+- [x] 补充必要测试
+- [x] 完成最小修改
+- [x] 运行验证
+- [x] 记录前后对比
+- [x] 更新问题和批次状态
+- [x] 更新变更文档
+
+#### 执行记录
+
+已完成。
+
+- 开始时间：2026-09-01 02:30:19 CST
+- 完成时间：2026-09-01 03:00:06 CST
+- 实际修改：新增 ProviderRefs 真实 SQL 来源/平台/改名/旧名称/歧义/空值测试，以及 1k/10k/100k、低/高 Provider 基数、Proxy/Session/All、有/无 platform、冷/暖查询矩阵；仅在测试库创建候选索引并补充写入、存储对照。
+- 查询计划：无 platform 的基线为 `SCAN request_log`，有 platform 使用 `idx_request_log_platform_provider_id_created_at`，全部组合使用临时分组 B-tree；候选无 platform 自动使用覆盖索引，有 platform 强制候选后同样消除临时分组 B-tree。
+- 100k 高基数 5 轮中位数：Proxy 全平台约 58.0 → 11.6 ms、Proxy Codex 51.4 → 9.7 ms、Session 全平台 62.7 → 16.3 ms、Session Codex 53.6 → 11.4 ms、All 全平台 102.0 → 23.9 ms、All Codex 67.1 → 13.7 ms，约提升 4.2-5.3 倍；分配基本不变。
+- 写入与存储：10k 行事务写入中位数 1.039 → 1.187 s，约增加 14.2%；100k 行候选索引增加 7,139,328 bytes，即 71.39 B/行。
+- 验证结果：输出逐字段等价、查询计划和存储测试通过；写入与查询候选均完成 5 轮；ProviderRefs 合并、来源过滤和查询计划在 `-race` 下通过；仅有既有 macOS 链接目标版本警告。
+- 行为对比：未修改生产 SQL、索引、Wails 签名、Logs 刷新、配置或用户数据库；测试候选清理后不保留 schema 变化。
+- 遗留问题：数据支持新增 B21；实施时必须保留旧名称合并、同名多 ID、来源和排序语义，并记录新增索引的写入与磁盘代价。
+
+### B21：ProviderRefs 部分覆盖索引
+
+#### 目标
+
+只落地 B20 已验证的部分覆盖索引，并让 `ListProviderRefsV2` 在有 platform 条件时稳定使用该索引。
+
+#### 对应问题
+
+- OPT-020
+
+#### 前置条件
+
+- B20 查询、查询计划、写入和存储基线已完成。
+- 候选索引与现有返回结果逐字段、逐顺序一致。
+- 接受固定夹具中约 14.2% 的 10k 行事务写入耗时和 71.39 B/行存储代价。
+
+#### 涉及范围
+
+- `services/providerrelay.go` 的 `request_log` 索引初始化
+- `services/logservice.go` 的 `ListProviderRefsV2`
+- `services/logservice_provider_refs_test.go`
+- `services/log_provider_refs_benchmark_test.go`
+
+#### 当前证据
+
+- B20 中现有查询全部使用临时分组 B-tree；无 platform 时还会全表扫描。
+- `(provider_id, provider, COALESCE(NULLIF(TRIM(data_source), ''), 'proxy'), platform, created_at)` 的部分覆盖索引可直接按分组顺序扫描，并过滤空 Provider 名称。
+- SQLite 对无 platform 查询自动选择候选；有 platform 查询需明确选择候选，才能避免既有平台索引和临时分组 B-tree。
+- 100k 高基数六类场景中位数约提升 4.2-5.3 倍，候选结果与基线逐字段一致。
+
+#### 修改方案
+
+- 在现有 `request_log` 幂等初始化中新增 `idx_request_log_provider_refs` 部分覆盖索引，不新增列或迁移数据。
+- `ListProviderRefsV2` 复用同一索引名；无 platform 保持优化器自动选择，有 platform 时使用明确索引提示。
+- 将 B20 测试候选切换为生产索引定义，保留结果等价、查询计划、写入和存储回归。
+- 不新增缓存、统计表或额外 Wails 调用。
+
+#### 明确不修改
+
+- 不改变 `ListProviderRefs/ListProviderRefsV2` 签名、返回顺序、JSON 或错误语义。
+- 不改变 Proxy/Session/All 来源判定、旧名称合并、同名多 ID 或空值规则。
+- 不改变请求日志写入队列、批量大小、刷新周期或历史数据。
+- 不删除或重排其他 `request_log` 索引。
+
+#### 验证方式
+
+- 单元测试：索引存在且初始化幂等，六类来源/平台和旧数据语义逐字段一致。
+- 最小回归测试：ProviderRefs、日志来源、仪表盘聚合和 request_log schema 兼容测试。
+- 性能基准：复跑 B20 100k 高基数查询与 10k 行写入对照。
+- 行为一致性检查：生产方法查询计划不再使用临时分组 B-tree，完整 services 回归通过。
+
+#### 验收标准
+
+- 所有 ProviderRefs 组合均使用 `idx_request_log_provider_refs`，且无 `USE TEMP B-TREE FOR GROUP BY`。
+- B20 固定夹具中的返回结果、候选数、最终 refs 数和顺序保持不变。
+- 100k 高基数六类查询的 5 轮中位数均优于 B20 基线，写入和存储代价与 B20 同一数量级。
+- 公共 API、Wails 绑定、配置和数据库数据格式不变。
+
+#### 风险与回退
+
+- 风险：新增索引增加 request_log 写入延迟和磁盘占用；明确索引提示依赖初始化先成功创建索引。
+- 控制：索引创建是幂等启动步骤；保留 schema 兼容、结果等价、查询计划和写入回归。
+- 回退：先移除查询索引提示以恢复旧计划；确认无需保留后再移除索引初始化，已有数据库可单独 `DROP INDEX` 回收空间，不触碰表数据。
+
+#### 执行清单
+
+- [x] 修改前重新读取相关代码
+- [x] 确认现有行为
+- [x] 补充必要测试
+- [x] 完成最小修改
+- [x] 运行验证
+- [x] 记录前后对比
+- [x] 更新问题和批次状态
+- [x] 更新变更文档
+
+#### 执行记录
+
+已完成。
+
+- 开始时间：2026-09-01 03:00:06 CST
+- 完成时间：2026-09-01 03:15:37 CST
+- 实际修改：新增 `idx_request_log_provider_refs` 幂等部分覆盖索引；有 platform 的 `ListProviderRefsV2` 使用明确索引提示；B20 候选测试切换为生产索引并保留旧计划对照。
+- 查询计划：Proxy/Session/All × 有/无 platform 六类生产查询均为覆盖索引扫描，不再出现 `USE TEMP B-TREE FOR GROUP BY`；All 模式保留既有 dedup 关联子查询。
+- 性能对比：100k 高基数 5 轮中位数分别为 58.52 → 11.66 ms、53.22 → 9.79 ms、63.58 → 16.30 ms、55.37 → 11.30 ms、102.30 → 23.49 ms、68.65 → 13.85 ms，约提升 3.9-5.4 倍；分配基本不变。
+- 验证结果：索引幂等、结果逐字段等价、查询计划、存储、ProviderRefs `-race`、request_log schema、仪表盘查询计划及排除 OPT-022 的完整 services 回归通过；仅有既有 macOS 链接目标版本警告。
+- 行为对比：公共方法、Wails 绑定、来源过滤、旧名称合并、同名多 ID、排序、写入队列和历史数据均保持不变。
+- 遗留问题：新增索引固定增加约 71.39 B/行，并使 B20 10k 行事务写入中位数增加约 14.2%；后续只有真实磁盘或写入压力证明不可接受时才回退。
+
+### B22：Gemini 改名事务单 writer 化
+
+#### 目标
+
+只消除 Gemini Provider 改名时直连写事务与 DBWriteQueue 互相等待的问题，并保持 Provider 配置与关联身份更新原子提交。
+
+#### 对应问题
+
+- OPT-021
+
+#### 前置条件
+
+- B11 已固定 `ExecTxGroup` 任务所有权与回滚语义。
+- B15 已固定 Gemini Provider 深拷贝、保存失败内存回退和并发所有权。
+- 先用有关联 `request_log` 的改名用例固定完成时限、成功结果和失败回滚。
+
+#### 涉及范围
+
+- `services/dbqueue.go`、`services/dbqueue_test.go`
+- `services/providerstore.go`、`services/providerstore_test.go`
+- `services/geminiservice.go`、`services/geminiservice_test.go`
+- `services/provider_identity_sync.go`（复用现有事务函数，不改变身份规则）
+
+#### 当前证据
+
+- `saveProvidersWithIdentitySync` 先通过直连 `sql.Tx` 更新关联表，首个有效 UPDATE 会占有 SQLite writer。
+- 同一函数随后调用 `saveProviders`，后者同步等待 `GlobalDBQueue.ExecTxGroup` 全量替换 `providers_store`。
+- 队列 worker 需要同一 writer 才能执行 DELETE/INSERT，而直连事务要等队列返回后才 Commit，形成循环等待。
+- B15 测试曾在 20 秒总超时内停在该调用链；这不是理论性能推断，而是已观察到的正确性风险。
+
+#### 修改方案
+
+- 允许 `ExecTxGroup` 的内部任务在 worker 已创建的 `sql.Tx` 上执行受控事务函数，保留现有 SQL 任务和结果通道语义。
+- 抽取 ProviderStore 全量替换任务构造，普通保存继续走原入口。
+- Gemini 有改名时，把现有 `syncProviderIdentityRenameTx` 与 ProviderStore DELETE/INSERT 放进同一个队列事务组；无改名路径保持不变。
+- 任一身份更新或 ProviderStore 写入失败时，由同一事务整体回滚，`UpdateProvider` 继续恢复内存旧值。
+
+#### 明确不修改
+
+- 不改变 Gemini Wails 方法、Provider JSON、ID、排序、API Key 保留或强制优先语义。
+- 不改变关联表匹配、旧名称补全、统计合并、配额周期或可选表错误策略。
+- 不改变普通 ProviderService 的改名 best-effort 语义。
+- 不改变 DBWriteQueue 的队列容量、30 秒超时、关闭、批量日志或统计字段。
+
+#### 验证方式
+
+- 单元测试：事务函数成功提交、失败整体回滚、任务切片复用和现有 SQL 事务组语义。
+- 最小回归测试：Gemini 有关联数据改名在短时限内完成；注入关联更新失败后配置、关联表和内存均保持旧值。
+- 性能基准：本批是正确性修复，不作吞吐提升结论；记录改名前后稳定完成时间。
+- 行为一致性检查：Gemini、ProviderStore、身份同步、DBWriteQueue 目标竞态及完整 services 回归通过。
+
+#### 验收标准
+
+- 有关联数据的 Gemini 改名连续执行不再等待到 busy/队列超时。
+- `providers_store`、request_log、黑名单、统计和配额身份在同一事务中成功或失败。
+- 注入任一必需关联更新失败时，数据库和 `GeminiService.providers` 均保持修改前状态。
+- 无改名保存、其他平台 Provider 和所有公共接口行为不变。
+
+#### 风险与回退
+
+- 风险：事务函数扩大 DBWriteQueue 事务组能力，若错误使用可能执行过长逻辑或重入队列。
+- 控制：只允许内部 `sql.Tx` 回调，本批唯一生产调用为既有身份同步；测试固定回滚、panic/错误和既有任务行为。
+- 回退：移除 Gemini 事务函数任务和 WriteTask 扩展，恢复原调用链；数据库 schema 与数据格式无需回退。
+
+#### 执行清单
+
+- [x] 修改前重新读取相关代码
+- [x] 确认现有行为
+- [x] 补充必要测试
+- [x] 完成最小修改
+- [x] 运行验证
+- [x] 记录前后对比
+- [x] 更新问题和批次状态
+- [x] 更新变更文档
+
+#### 执行记录
+
+已完成。
+
+- 开始时间：2026-09-01 03:15:37 CST
+- 完成时间：2026-09-01 03:27:19 CST
+- 实际修改：`WriteTask` 增加仅供事务组使用的 `TxFunc`；ProviderStore 抽取全量替换任务和 Gemini 行构造；Gemini 有改名时将既有身份同步函数与 ProviderStore DELETE/INSERT 放入同一队列事务。
+- 验证结果：事务函数成功/失败原子性、SQL 事务组回滚和任务复用通过；Gemini 有关联日志改名成功与注入失败整体回退通过；目标连续 20 次、目标 `-race`、Gemini/ProviderStore/DBWriteQueue 专项及排除 OPT-022 的完整 services 回归通过。
+- 性能对比：修改前同调用链曾超过 20 秒测试总超时；修改后目标测试单轮显示 0.00 s，连续 20 轮总测试 1.53 s，均未触发 5 秒保护阈值。本批为正确性修复，不外推吞吐提升。
+- 行为对比：无改名保存继续走原入口；身份匹配、统计合并、配额周期、可选表容错、队列容量、30 秒超时、日志批量队列及公共接口均不变。
+- 回退证据：注入 `request_log` 必需更新失败后，ProviderStore、关联日志和 `GeminiService.providers` 均保持旧名称。
+- 遗留问题：`TxFunc` 不得执行网络、阻塞 I/O 或重入同一队列；当前唯一生产调用只复用既有 SQLite 身份同步。
+
+### B23：ProviderDailyStats 午夜时区夹具
+
+#### 目标
+
+只让跨天性能样本测试在任意本地时区和午夜窗口稳定表达现有统计语义。
+
+#### 对应问题
+
+- OPT-022
+
+#### 前置条件
+
+- 生产 `ProviderDailyStats` 的本地日界线行为已由现有测试和 UI 语义确认，不修改生产方法。
+- 先用当前 UTC 时间对应本地 00:00-02:00 的时区稳定复现旧夹具失败。
+
+#### 涉及范围
+
+- `services/logservice_provider_stats_test.go`
+- `services/logservice.go`（仅重新读取，不修改）
+
+#### 当前证据
+
+- 测试以 `time.Now().UTC()` 为锚点，并用 `now.Add(-2h/-1h/-30m)` 生成声称属于“当日”的三条日志。
+- 生产查询用 `startOfDay(time.Now()).UTC()` 计算本地当日范围。
+- 本地时间 00:00-02:00 时，`now.Add(-2h)` 可落入本地前一日，导致 `pid-latest` 当日总数由预期 2 变为 1。
+- 同一用例在 UTC 通过，说明错误来自测试时区夹具，不是生产 SQL 的跨天性能样本逻辑。
+
+#### 修改方案
+
+- 以 `startOfDay(time.Now())` 获取本地当日零点，再选择当日中段作为夹具锚点。
+- 所有写入 SQLite 的时间继续转为 UTC `timeLayout` 字符串，保持真实存储格式。
+- 跨天成功流式样本继续放在前 1-6 日；当日失败、非流式和失败-only 样本使用明确的本地当日时间。
+- 不引入生产时钟接口或额外抽象。
+
+#### 明确不修改
+
+- 不修改 `ProviderDailyStats` SQL、日界线、最近五条样本、成功/失败或流式判定。
+- 不修改数据库时间格式、时区转换、返回结构或 UI 统计口径。
+- 不改其他测试夹具或全局 `time.Local`。
+
+#### 验证方式
+
+- 单元测试：目标用例在 UTC、Asia/Shanghai 和模拟午夜窗口时区分别通过。
+- 最小回归测试：全部 `logservice_provider_stats` 测试通过。
+- 性能基准：本批为测试稳定性修复，不需要性能基准。
+- 行为一致性检查：完整 services 不再需要 `-skip`，并与修复前 UTC 结果一致。
+
+#### 验收标准
+
+- 旧夹具可在模拟午夜时区稳定复现失败，新夹具在相同时区连续通过。
+- `TotalRequests=2`、最近五条 TTFT/TPS、失败和非流式排除断言均保持不变。
+- 完整 services 在本地默认时区无需排除用例即可通过。
+- 生产代码、接口和数据格式零修改。
+
+#### 风险与回退
+
+- 风险：夹具改动可能无意把跨天性能样本放回当日，降低原测试覆盖。
+- 控制：明确使用本地当日前 1-6 日，并保留当日请求数与最近五条性能样本的独立断言。
+- 回退：恢复该测试的时间构造；不涉及生产代码或数据。
+
+#### 执行清单
+
+- [x] 修改前重新读取相关代码
+- [x] 确认现有行为
+- [x] 补充必要测试
+- [x] 完成最小修改
+- [x] 运行验证
+- [x] 记录前后对比
+- [x] 更新问题和批次状态
+- [x] 更新变更文档
+
+#### 执行记录
+
+已完成。
+
+- 开始时间：2026-09-01 03:27:19 CST
+- 完成时间：2026-09-01 03:40:36 CST
+- 实际修改：测试夹具改以本地当日零点为锚点；历史成功流式样本放在前 1-6 日中段，当日失败、非流式和失败-only 样本放在本地 09:00-11:00；写库前继续转换为 UTC。
+- 验证结果：目标用例在 UTC、Asia/Shanghai、Etc/GMT-5 下各连续 5 次通过；完整 services 无需排除用例即可通过，仅有既有 macOS 链接目标版本警告。
+- 性能对比：不适用；本批只修复测试稳定性，没有生产性能改动。
+- 行为对比：`TotalRequests=2`、最近五条 TTFT/TPS、失败和非流式排除断言保持不变；生产代码、接口和数据格式零修改。
+- 回退证据：恢复单个测试的时间构造即可；不涉及生产数据或迁移。
+- 遗留问题：最终根包验证发现 `requestlog_mock_test.go` 连接真实用户数据库并写入随机日志，登记为 OPT-023/B24。
+
+### B24：根包模拟日志测试数据库隔离
+
+#### 目标
+
+只让 `TestSeedMockRequestLogs` 使用测试专属临时 SQLite，彻底切断根包测试与真实用户日志数据库的读写关系。
+
+#### 对应问题
+
+- OPT-023
+
+#### 前置条件
+
+- 确认 `SeedMockRequestLogs` 只存在于根包测试文件，生产代码不依赖该函数。
+- 不读取、备份、迁移或修改真实 `~/.code-switch/app.db`。
+
+#### 涉及范围
+
+- `requestlog_mock_test.go`
+
+#### 当前证据
+
+- 文件级 `init()` 通过 `os.UserHomeDir()` 将 xdb `default` 连接绑定到真实 `~/.code-switch/app.db`。
+- `TestSeedMockRequestLogs` 首先调用无条件 `Delete()`；xdb 以 `danger, delete query must with some condition` 拒绝该操作，但原测试忽略错误并继续执行。
+- `go test . -count=1` 在首个后续 INSERT 返回 `attempt to write a readonly database`；若运行环境允许写入，则会把随机日志直接混入用户数据。
+- `SeedMockRequestLogs` 仅由该测试调用，实际插入字段可以用最小测试表完整承载。
+
+#### 修改方案
+
+- 删除连接真实 HOME 的包级 `init()`。
+- 在测试内用 `t.TempDir()` 创建临时数据库，并将 xdb `default` 连接绑定到该文件。
+- 仅创建覆盖种数函数实际写入字段的 `request_log` 测试表。
+- 临时表首次创建即为空，删除原先无效且被忽略的无条件 `Delete()`；保留种数、数量和时间范围断言。
+- 不引入 TestMain、新 helper、生产数据库初始化或额外依赖。
+
+#### 明确不修改
+
+- 不修改 `SeedMockRequestLogs` 的日期范围、随机分布、Provider、模型、状态码、Token 或耗时生成规则。
+- 不修改生产 `services.InitDatabase`、request_log schema、双队列或真实用户数据。
+- 不把测试 seed 功能移入生产代码，不新增命令行入口。
+
+#### 验证方式
+
+- 单元测试：根包目标用例连续运行并成功写入临时库。
+- 最小回归测试：`go test . -count=1` 通过。
+- 性能基准：本批为测试隔离修复，不需要性能基准。
+- 行为一致性检查：种数后仍有记录且 `MIN/MAX(created_at)` 可读取；测试全程不解析真实 HOME 数据库路径。
+
+#### 验收标准
+
+- 根包测试源码不再包含 `~/.code-switch/app.db`、`os.UserHomeDir()` 或包级数据库 `init()`。
+- 测试数据库路径位于 `t.TempDir()`，表结构足以执行现有全部 INSERT 和查询。
+- `go test . -count=1` 可在无真实数据库写权限时通过。
+- 生产代码、公共接口、真实数据库 schema 和用户数据零修改。
+
+#### 风险与回退
+
+- 风险：最小测试表遗漏种数函数字段会造成 INSERT 失败。
+- 控制：表列逐项对应 `xdb.Record`，并由完整种数和查询断言覆盖。
+- 回退：恢复该测试文件；临时目录由测试框架清理，不执行任何 Git 或真实数据库操作。
+
+#### 执行清单
+
+- [x] 修改前重新读取相关代码
+- [x] 确认现有行为
+- [x] 补充必要测试
+- [x] 完成最小修改
+- [x] 运行验证
+- [x] 记录前后对比
+- [x] 更新问题和批次状态
+- [x] 更新变更文档
+
+#### 执行记录
+
+已完成。
+
+- 开始时间：2026-09-01 03:40:36 CST
+- 完成时间：2026-09-01 03:49:57 CST
+- 实际修改：删除测试文件连接真实 HOME 的包级 `init()`；目标测试在 `t.TempDir()` 创建临时 SQLite 和覆盖实际 INSERT 字段的最小 `request_log` 表；移除被 xdb 安全规则拒绝且在新表上无意义的无条件删除。
+- 验证结果：目标用例连续 3 次、根包、完整 services、模型定价、前端 71 文件/561 项、TypeScript 和 diff 检查全部通过；Go 仅有既有 macOS 链接目标版本警告。
+- 性能对比：不适用；本批只修复测试隔离，没有生产性能改动。
+- 行为对比：`SeedMockRequestLogs` 的生成范围、随机分布和写入字段未改；数量及时间范围断言保持不变；生产代码和真实数据库零修改。
+- 回退证据：恢复单个测试文件即可；测试 SQLite 位于临时目录并在连接关闭后由测试框架清理。
+- 遗留问题：无；不自动执行下一批次，后续分析仍按第 8 节逐项新增编号。
+
 ## 8. 待分析模块
 
-以下模块尚未完成足以形成 OPT 问题的深入分析，首版不得视为完整审计：
+以下模块仍需后续深入分析或独立分批，当前版本不得视为完整审计：
 
 | 模块 | 后续分析重点 | 当前处理 |
 |---|---|---|
-| Gemini 与自定义 CLI 代理 | 与通用 Handler 的可复用边界、流式转发和错误语义 | B10 明确排除，后续单独分析 |
-| BlacklistService | 全局 `operationMu`、失败路径读写次数、全表快照刷新和按 Provider 并发可能性 | 先保留现状，需独立并发测量 |
+| Gemini 与自定义 CLI 代理 | 与通用 Handler 的可复用边界、流式转发和错误语义 | B15 只处理 Gemini 配置对象所有权，代理路径仍需单独分析 |
+| BlacklistService 其余路径 | 成功清零、健康检查、手动恢复和定时恢复的锁范围与快照刷新 | B19 只测请求失败路径，其余入口保留后续分析 |
 | AppSettings 快照 | 每秒外部变化检查、克隆和保存回调成本 | 尚未测量 |
 | 健康检查与可用性 | goroutine 上限、探测并发、历史清理和后台轮询 | 仅分析了与黑名单和直写相关入口 |
 | 日志清理与 WebDAV 恢复 | 大事务、VACUUM、ATTACH/DETACH 和队列协作 | 视为显式维护路径，需独立恢复测试 |
+| 日志统计时区测试 | 本地日界线、UTC 夹具和午夜边界 | OPT-022/B23 已完成；生产日界线语义保持不变 |
 | 模型转换与 SSE | Claude/OpenAI/Gemini 转换状态机的 CPU、分配和缓冲策略 | 已有较多测试，尚无系统性能基准 |
-| 更新与下载服务 | 后台 Timer、下载内存、临时文件和退出清理 | 未深入分析 |
+| 更新与下载服务 | `UpdateNotification.vue` 全局 30 秒轮询、Main 更新 Timer、下载内存、临时文件和退出清理 | 尚未确认两条更新轮询是否产生重复后端工作，不据此认定问题 |
+| 其余 KeepAlive 页面与子组件 | `Console/Index.vue` 的 1 秒刷新、ProviderCard/数据弹窗计时器、其他路由的激活与停用清理 | B16/B17 只处理 Main 与 Logs，其他页面需逐条验证实际生命周期 |
 | 其余大型前端文件 | `ProviderEditModal.vue`、`Availability/Index.vue`、`Console/Index.vue`、`CLIConfigEditor.vue` 等 | 只记录体量，不据此认定性能问题 |
 | Wails 调用封装 | generated bindings 与 `Call.ByName` 混用、调用去重和类型保护 | 未确认有实际缺陷，后续按调用链分析 |
 | 主进程后台 goroutine | 更新、会话同步、路由刷新、健康检查的启动/关闭协作 | 当前均有主要停止路径，尚未发现可确认泄漏 |
@@ -1483,6 +2388,16 @@
 | B11 | OPT-013 | 2026-08-31 20:59:57 CST | 正常完成时等待事务组全部结果通道关闭后返回，新增双任务切片 1000 次复用回归 | 修改前竞态稳定复现；修改后目标重复/竞态、全部队列竞态、ProviderStore、services 与 root 测试通过 | `tx_group` 中位数 39,830 → 39,360 ns/op，32 allocs/op 不变；无可确认回退 |
 | B12 | OPT-014 | 2026-08-31 21:27:16 CST | 无分配 ASCII quick check、Unicode 正则回退，并移除会话标识和已捕获请求体的重复脱敏 | 逐字节/门控/Unicode/路径等价、竞态、矩阵、完整 services 与 root 测试通过 | 1 MiB raw 410.463 → 2.051 ms、sanitized 1.334 s → 334.701 ms；近 8 MiB raw 3.219 s → 16.699 ms、sanitized 10.498 s → 2.626 s |
 | B13 | OPT-006 | 2026-08-31 22:07:28 CST | SQLite 平台改用有序存储行指纹，保存端返回事务对应指纹；raw 非语义变化只同步指纹 | 决策矩阵、保存一致性、custom、外部刷新竞态、5 轮基准、完整 services 与 root 测试通过 | 100 个 Provider 稳定刷新中位数 2,077.316 → 446.699 µs，约降 78.5%；allocs/op 约 21,525 → 1,624 |
+| B15 | OPT-018 | 2026-09-01 01:12:26 CST | 统一 Gemini Provider 完整字段克隆，并接入读取、写入、回退和复制返回边界 | 目标重复、竞态、Gemini/ProviderStore/代理专项、排除 OPT-022 的完整 services、资源和 root 包测试通过 | 4 类浅共享边界 → 1 个统一克隆入口覆盖 5 个服务边界；本批不作性能提升结论 |
+| B16 | OPT-016 | 2026-09-01 01:41:36 CST | 为 Main 轮询状态机增加页面激活输入，并接入 Vue KeepAlive 激活/停用钩子 | 目标 9 项、类型检查、完整前端 556 项和 diff 检查通过 | Main 离页轮询 41 → 0 轮/60 秒；激活态保持 41 轮/60 秒，返回刷新 1 次 |
+| B17 | OPT-017 | 2026-09-01 01:47:08 CST | 为 Logs 自动刷新增加页面激活与代次状态，并接入 Vue KeepAlive 激活/停用钩子 | 目标 8 项、类型检查、完整前端 560 项和 diff 检查通过 | 默认 30 秒离页刷新 2 → 0 次/60 秒；返回刷新 1 次后按完整间隔继续 |
+| B18 | OPT-005 | 2026-09-01 02:08:24 CST | 新增固定成功代理完整链路 Benchmark，不改生产逻辑 | 夹具、快照、调度、5 轮基准及排除 OPT-022 的完整 services 回归通过 | 1/10/100 Provider 克隆耗时占链路约 0.04%/0.38%/3.84%，分配字节占约 0.53%/4.97%/29.75%；实现延期 |
+| B19 | OPT-019 | 2026-09-01 02:24:42 CST | 新增六类失败语义与同/不同 Provider 并发 Benchmark，不改生产逻辑 | 语义、写次数、竞态、5 轮基准、目标及排除 OPT-022 的完整 services 回归通过 | 32 路不同 Provider 中位 P95 3.350 ms、9,196 calls/s；当前保留全局串行 |
+| B20 | OPT-020 | 2026-09-01 03:00:06 CST | 新增 ProviderRefs SQL 语义、规模矩阵、查询计划及候选索引读写/存储测量，不改生产逻辑 | 结果等价、查询计划、存储、竞态和 5 轮读写基准通过 | 100k 查询约提升 4.2-5.3 倍；10k 行写入约增加 14.2%，索引占 71.39 B/行；确认 B21 |
+| B21 | OPT-020 | 2026-09-01 03:15:37 CST | 新增 ProviderRefs 部分覆盖索引并稳定选择，保留全部返回语义 | 索引幂等、等价、查询计划、竞态、schema、仪表盘和排除 OPT-022 的完整 services 回归通过 | 100k 六类查询中位数约提升 3.9-5.4 倍；写入与存储代价沿用 B20 实测 |
+| B22 | OPT-021 | 2026-09-01 03:27:19 CST | 将 Gemini 身份同步与 ProviderStore 替换合并到同一队列事务，扩展事务函数任务 | 原子成功/失败、20 次重复、竞态、专项及排除 OPT-022 的完整 services 回归通过 | 已观察的 >20 s 等待 → 目标单轮 0.00 s；失败时数据库与内存完整回退 |
+| B23 | OPT-022 | 2026-09-01 03:40:36 CST | 将 ProviderDailyStats 测试夹具锚定到本地当日中段，不改生产统计逻辑 | 三个时区各连续 5 次及完整 services 回归通过 | 午夜窗口稳定失败 → UTC、Asia/Shanghai、Etc/GMT-5 均稳定通过 |
+| B24 | OPT-023 | 2026-09-01 03:49:57 CST | 将根包模拟日志测试改为 `t.TempDir()` 临时 SQLite，并创建最小测试表 | 目标连续 3 次、根包、services、模型定价、前端 561 项、TypeScript 和 diff 检查通过 | 真实用户库写入风险 → 测试专属临时库，生产代码和用户数据零修改 |
 
 ## 10. 放弃或延期项
 
@@ -1493,6 +2408,8 @@
 | 新增数据库列或改变现有数据格式 | 放弃 | 违反本计划不可变行为 | 只能由独立产品需求重新授权，不属于优化任务 |
 | 无测量数据的缓存层 | 放弃 | 会引入失效和陈旧语义，收益不可验证 | 出现可重复性能数据并能定义严格失效规则 |
 | 将所有运行时直写统一迁入 DBWriteQueue | 延期 | B14 已消除合成压力中的 busy；复合事务、维护操作和外部数据库语义不同，继续统一没有明确收益且会扩大风险 | 真实调用仍出现 busy，或测量证明队列外事务等待不可接受 |
+| Provider 共享只读快照 | 延期 | B18 中 100 Provider 克隆虽占约 29.75% 分配字节，但只占约 3.84% 完整链路耗时；当前缺少真实规模和生产堆样本，改变所有权边界风险高于已证收益 | 真实 Provider 数量/请求率或 heap profile 证明克隆是主要成本，并能建立完整竞态与不可变性验证 |
+| 黑名单失败记录缩锁或分片 | 延期 | B19 的 32 路不同 Provider 突发 P95 中位数约 3.350 ms，且只发生在异常路径；全局串行当前保护计数、阈值、通知和快照一致性 | 真实 trace/profile 出现显著失败尾延迟，或更大黑名单表复测证明全表刷新成本不可接受 |
 
 ## 11. 后续执行规则
 
