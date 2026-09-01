@@ -6938,6 +6938,9 @@ func ensureRequestLogTableWithDB(db *sql.DB) error {
 	if err := ensureRequestLogIndex(db, "idx_request_log_platform_provider_id_created_at", "platform, provider_id, created_at"); err != nil {
 		return err
 	}
+	if _, err := db.Exec(requestLogProviderRefsIndexSQL); err != nil {
+		return err
+	}
 	if err := ensureRequestLogIndex(db, "idx_request_log_platform_provider_id_error_read_at", "platform, provider_id, error_read_at, created_at"); err != nil {
 		return err
 	}

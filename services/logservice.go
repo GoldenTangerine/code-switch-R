@@ -1236,6 +1236,20 @@ type logProviderRefCandidate struct {
 	LatestAt   string
 }
 
+const requestLogProviderRefsIndexName = "idx_request_log_provider_refs"
+
+const requestLogProviderRefsIndexSQL = `
+	CREATE INDEX IF NOT EXISTS idx_request_log_provider_refs
+	ON request_log(
+		provider_id,
+		provider,
+		COALESCE(NULLIF(TRIM(data_source), ''), 'proxy'),
+		platform,
+		created_at
+	)
+	WHERE TRIM(COALESCE(provider, '')) <> ''
+`
+
 func (ls *LogService) ListProviderRefs(platform string) ([]LogProviderRef, error) {
 	return ls.ListProviderRefsV2(platform, string(LogDataSourceModeProxy))
 }
@@ -1246,9 +1260,13 @@ func (ls *LogService) ListProviderRefsV2(platform string, sourceMode string) ([]
 		return nil, err
 	}
 
+	fromClause := "request_log"
+	if strings.TrimSpace(platform) != "" {
+		fromClause += " INDEXED BY " + requestLogProviderRefsIndexName
+	}
 	query := `
 		SELECT provider_id, provider, MAX(created_at) AS latest_at
-		FROM request_log
+		FROM ` + fromClause + `
 		WHERE TRIM(COALESCE(provider, '')) <> ''
 	`
 	args := make([]interface{}, 0, 1)

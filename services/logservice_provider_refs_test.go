@@ -1,6 +1,11 @@
 package services
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+
+	"github.com/daodao97/xgo/xdb"
+)
 
 func TestMergeProviderRefsFromCandidates_MergeLegacyNameToUniqueID(t *testing.T) {
 	refs := mergeProviderRefsFromCandidates([]logProviderRefCandidate{
@@ -52,6 +57,93 @@ func TestMergeProviderRefsFromCandidates_UseLatestNamePerRef(t *testing.T) {
 	}
 	if refs[0].Provider != "New Name" {
 		t.Fatalf("expected latest provider name, got %q", refs[0].Provider)
+	}
+}
+
+func TestListProviderRefsV2FiltersSourcesAndMergesLegacyRows(t *testing.T) {
+	useIsolatedHomeDir(t)
+	db, err := xdb.DB("default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`DELETE FROM request_log`); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.Exec(`DELETE FROM request_log`)
+	})
+
+	rows := []struct {
+		platform   string
+		providerID string
+		provider   string
+		source     string
+		createdAt  string
+	}{
+		{platform: "codex", providerID: "id-1", provider: "Old Name", source: requestLogDataSourceProxy, createdAt: "2026-09-01 00:00:01"},
+		{platform: "codex", providerID: "id-1", provider: "New Name", source: "", createdAt: "2026-09-01 00:00:02"},
+		{platform: "codex", provider: "New Name", source: requestLogDataSourceProxy, createdAt: "2026-09-01 00:00:03"},
+		{platform: "codex", providerID: "id-2", provider: "Shared", source: requestLogDataSourceClaudeSession, createdAt: "2026-09-01 00:00:04"},
+		{platform: "codex", providerID: "id-3", provider: "Shared", source: requestLogDataSourceCodexSession, createdAt: "2026-09-01 00:00:05"},
+		{platform: "codex", provider: "Shared", source: requestLogDataSourceGeminiSession, createdAt: "2026-09-01 00:00:06"},
+		{platform: "claude", providerID: "id-4", provider: "Other", source: requestLogDataSourceClaudeSession, createdAt: "2026-09-01 00:00:07"},
+		{platform: "codex", providerID: "ignored", provider: "   ", source: requestLogDataSourceProxy, createdAt: "2026-09-01 00:00:08"},
+	}
+	for _, row := range rows {
+		if _, err := db.Exec(`
+			INSERT INTO request_log (platform, provider_id, provider, data_source, created_at)
+			VALUES (?, ?, ?, ?, ?)
+		`, row.platform, row.providerID, row.provider, row.source, row.createdAt); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	testCases := []struct {
+		name       string
+		platform   string
+		sourceMode LogDataSourceMode
+		want       []LogProviderRef
+	}{
+		{
+			name:       "ProxyCodex",
+			platform:   "codex",
+			sourceMode: LogDataSourceModeProxy,
+			want:       []LogProviderRef{{ProviderID: "id-1", Provider: "New Name"}},
+		},
+		{
+			name:       "SessionCodex",
+			platform:   "codex",
+			sourceMode: LogDataSourceModeSession,
+			want: []LogProviderRef{
+				{Provider: "Shared"},
+				{ProviderID: "id-2", Provider: "Shared"},
+				{ProviderID: "id-3", Provider: "Shared"},
+			},
+		},
+		{
+			name:       "AllPlatforms",
+			sourceMode: LogDataSourceModeAll,
+			want: []LogProviderRef{
+				{ProviderID: "id-1", Provider: "New Name"},
+				{ProviderID: "id-4", Provider: "Other"},
+				{Provider: "Shared"},
+				{ProviderID: "id-2", Provider: "Shared"},
+				{ProviderID: "id-3", Provider: "Shared"},
+			},
+		},
+	}
+
+	service := NewLogService(nil)
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			refs, err := service.ListProviderRefsV2(testCase.platform, string(testCase.sourceMode))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(refs, testCase.want) {
+				t.Fatalf("ProviderRefs 不等价:\ngot=%#v\nwant=%#v", refs, testCase.want)
+			}
+		})
 	}
 }
 
