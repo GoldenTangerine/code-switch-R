@@ -1229,23 +1229,44 @@ const BLACKLIST_POPOVER_HOVER_CLOSE_DELAY_MS = 150
 const BLACKLIST_POPOVER_MAX_WIDTH = 340
 const BLACKLIST_POPOVER_MAX_HEIGHT = 360
 
-const blacklistPopoverInteraction = createProviderQuotaErrorPopoverInteraction({
+let blacklistPopoverInteraction: ReturnType<typeof createProviderQuotaErrorPopoverInteraction>
+let quotaErrorPopoverInteraction: ReturnType<typeof createProviderQuotaErrorPopoverInteraction>
+
+const closeBlacklistPopover = (restoreFocus = false) => {
+  const shouldRestoreFocus = restoreFocus && blacklistPopoverOpen.value && blacklistPopoverPinned.value
+  blacklistPopoverInteraction.close()
+  if (shouldRestoreFocus) {
+    void nextTick(() => blacklistTriggerRef.value?.focus({ preventScroll: true }))
+  }
+}
+
+const closeQuotaErrorPopover = (restoreFocus = false) => {
+  const wasOpen = quotaErrorPopoverOpen.value
+  quotaErrorPopoverInteraction.close()
+  if (restoreFocus && wasOpen) {
+    void nextTick(() => quotaErrorTriggerRef.value?.focus({ preventScroll: true }))
+  }
+}
+
+blacklistPopoverInteraction = createProviderQuotaErrorPopoverInteraction({
   open: blacklistPopoverOpen,
   pinned: blacklistPopoverPinned,
   hovering: blacklistPopoverHovering,
   focusOnOpen: blacklistPopoverFocusOnOpen,
   openDelayMs: BLACKLIST_POPOVER_HOVER_OPEN_DELAY_MS,
   closeDelayMs: BLACKLIST_POPOVER_HOVER_CLOSE_DELAY_MS,
+  onOpen: closeQuotaErrorPopover,
   onClose: () => {
     blacklistPopoverStyle.value = { visibility: 'hidden' }
   },
 })
 
-const quotaErrorPopoverInteraction = createProviderQuotaErrorPopoverInteraction({
+quotaErrorPopoverInteraction = createProviderQuotaErrorPopoverInteraction({
   open: quotaErrorPopoverOpen,
   pinned: quotaErrorPopoverPinned,
   hovering: quotaErrorPopoverHovering,
   focusOnOpen: quotaErrorFocusOnOpen,
+  onOpen: closeBlacklistPopover,
   onClose: () => {
     quotaErrorPopoverStyle.value = { visibility: 'hidden' }
   },
@@ -1264,29 +1285,11 @@ const quotaErrorDetailsAriaLabel = computed(() => t(
   { name: props.viewModel.card.name },
 ))
 
-const closeBlacklistPopover = (restoreFocus = false) => {
-  const shouldRestoreFocus = restoreFocus && blacklistPopoverOpen.value && blacklistPopoverPinned.value
-  blacklistPopoverInteraction.close()
-  if (shouldRestoreFocus) {
-    void nextTick(() => blacklistTriggerRef.value?.focus({ preventScroll: true }))
-  }
-}
-
-const closeQuotaErrorPopover = (restoreFocus = false) => {
-  const wasOpen = quotaErrorPopoverOpen.value
-  quotaErrorPopoverInteraction.close()
-  if (restoreFocus && wasOpen) {
-    void nextTick(() => quotaErrorTriggerRef.value?.focus({ preventScroll: true }))
-  }
-}
-
 const toggleBlacklistPopover = () => {
-  closeQuotaErrorPopover()
   blacklistPopoverInteraction.toggle()
 }
 
 const toggleQuotaErrorPopover = () => {
-  closeBlacklistPopover()
   quotaErrorPopoverInteraction.toggle()
 }
 

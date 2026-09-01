@@ -19,6 +19,7 @@ import {
 const createInteraction = (options: {
   openDelayMs?: number
   closeDelayMs?: number
+  onOpen?: () => void
 } = {}) => {
   const open = ref(false)
   const pinned = ref(false)
@@ -124,6 +125,33 @@ describe('provider quota error interaction', () => {
     interaction.toggle()
     expect(open.value).toBe(false)
     expect(pinned.value).toBe(false)
+  })
+
+  it('keeps peer popovers mutually exclusive for hover, click, and pending timers', () => {
+    let first: ReturnType<typeof createInteraction>
+    let second: ReturnType<typeof createInteraction>
+    first = createInteraction({ onOpen: () => second.interaction.close() })
+    second = createInteraction({ onOpen: () => first.interaction.close() })
+
+    first.interaction.enter()
+    vi.advanceTimersByTime(PROVIDER_QUOTA_ERROR_HOVER_DELAY_MS)
+    expect(first.open.value).toBe(true)
+
+    second.interaction.toggle()
+    expect(first.open.value).toBe(false)
+    expect(second.open.value).toBe(true)
+    expect(second.pinned.value).toBe(true)
+
+    first.interaction.enter()
+    vi.advanceTimersByTime(PROVIDER_QUOTA_ERROR_HOVER_DELAY_MS)
+    expect(first.open.value).toBe(true)
+    expect(second.open.value).toBe(false)
+
+    second.interaction.enter()
+    first.interaction.toggle()
+    vi.advanceTimersByTime(PROVIDER_QUOTA_ERROR_HOVER_DELAY_MS)
+    expect(first.open.value).toBe(true)
+    expect(second.open.value).toBe(false)
   })
 
   it('builds a complete newline-separated copy payload', () => {

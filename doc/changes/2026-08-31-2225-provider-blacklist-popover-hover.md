@@ -22,10 +22,12 @@
 - 详情展示供应商、拉黑等级、剩余时间、触发来源、原因、拉黑时间、解禁时间、请求失败计数和巡检失败计数，缺失值统一显示为 `—`。
 - 弹窗最大高度为 360px，正文独立滚动且支持文本选择复制，底部解除拉黑和清零等级按钮保持可见。
 - 现有额度错误弹窗保持原来的 100ms 打开和关闭延迟。
+- 弹窗高度按所选方向的实际可用空间收缩，视口空间不足时不覆盖拉黑标签。
+- 拉黑详情与额度错误详情在悬停和点击打开时保持互斥，并修正弹窗主文字主题变量。
 
 ## 验证结果
 
-- `cd frontend && pnpm exec vitest run src/components/Main/components/ProviderCard.test.ts src/components/Main/utils/providerQuotaErrorPopover.test.ts src/components/Main/utils/providerQuotaErrorInteraction.test.ts`：通过，3 个测试文件、26 个测试。
-- `cd frontend && pnpm test:unit`：通过，71 个测试文件、561 个测试。
+- `cd frontend && pnpm exec vitest run src/components/Main/components/ProviderCard.test.ts src/components/Main/utils/providerQuotaErrorPopover.test.ts src/components/Main/utils/providerQuotaErrorInteraction.test.ts`：通过，3 个测试文件、29 个测试。
+- `cd frontend && pnpm test:unit`：通过，71 个测试文件、564 个测试。
 - `cd frontend && pnpm exec vue-tsc --noEmit`：通过。
 - `git diff --check -- <本任务文件>`：通过。

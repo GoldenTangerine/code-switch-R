@@ -51,11 +51,41 @@ describe('calculateProviderQuotaErrorPopoverLayout', () => {
       top: 12,
       left: 12,
       width: 216,
-      maxHeight: 136,
+      maxHeight: 50,
       placement: 'above',
     })
     expect(layout.left + layout.width).toBeLessThanOrEqual(228)
     expect(layout.top + layout.maxHeight).toBeLessThanOrEqual(148)
+  })
+
+  it('does not overlap the trigger when neither side fits the measured popover', () => {
+    const anchor = { top: 70, bottom: 94, left: 80, width: 80, height: 24 }
+    const layout = calculateProviderQuotaErrorPopoverLayout(
+      anchor,
+      { width: 340, height: 500 },
+      { width: 360, height: 160 },
+      { maxWidth: 340, maxHeight: 360 },
+    )
+
+    expect(layout.placement).toBe('above')
+    expect(layout.top + layout.maxHeight).toBeLessThanOrEqual(anchor.top - 8)
+  })
+
+  it('uses only the available lower space when it is the larger constrained side', () => {
+    const anchor = { top: 30, bottom: 54, left: 80, width: 80, height: 24 }
+    const layout = calculateProviderQuotaErrorPopoverLayout(
+      anchor,
+      { width: 340, height: 500 },
+      { width: 360, height: 160 },
+      { maxWidth: 340, maxHeight: 360 },
+    )
+
+    expect(layout).toMatchObject({
+      top: 62,
+      maxHeight: 86,
+      placement: 'below',
+    })
+    expect(layout.top).toBeGreaterThanOrEqual(anchor.bottom + 8)
   })
 
   it('supports custom dimensions for the blacklist details popover', () => {

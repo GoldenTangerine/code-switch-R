@@ -19,6 +19,7 @@ type ProviderQuotaErrorPopoverInteractionOptions = {
   focusOnOpen?: Ref<boolean>
   openDelayMs?: number
   closeDelayMs?: number
+  onOpen?: () => void
   onClose?: () => void
 }
 
@@ -38,6 +39,12 @@ export const createProviderQuotaErrorPopoverInteraction = (
   let closeTimer: ReturnType<typeof globalThis.setTimeout> | undefined
   const openDelayMs = options.openDelayMs ?? PROVIDER_QUOTA_ERROR_HOVER_DELAY_MS
   const closeDelayMs = options.closeDelayMs ?? PROVIDER_QUOTA_ERROR_HOVER_DELAY_MS
+
+  const open = (focusOnOpen: boolean) => {
+    options.onOpen?.()
+    if (options.focusOnOpen) options.focusOnOpen.value = focusOnOpen
+    options.open.value = true
+  }
 
   const clear = () => {
     if (openTimer !== undefined) {
@@ -66,8 +73,7 @@ export const createProviderQuotaErrorPopoverInteraction = (
     openTimer = globalThis.setTimeout(() => {
       openTimer = undefined
       if (!options.hovering.value) return
-      if (options.focusOnOpen) options.focusOnOpen.value = false
-      options.open.value = true
+      open(false)
     }, openDelayMs)
   }
 
@@ -90,8 +96,7 @@ export const createProviderQuotaErrorPopoverInteraction = (
     }
 
     options.pinned.value = true
-    if (options.focusOnOpen) options.focusOnOpen.value = true
-    options.open.value = true
+    open(true)
   }
 
   return {

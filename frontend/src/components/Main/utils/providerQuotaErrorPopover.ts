@@ -52,19 +52,21 @@ export function calculateProviderQuotaErrorPopoverLayout(
   const requestedMaxWidth = constraints.maxWidth ?? POPOVER_MAX_WIDTH
   const requestedMaxHeight = constraints.maxHeight ?? POPOVER_MAX_HEIGHT
   const width = Math.min(requestedMaxWidth, viewportWidth - VIEWPORT_MARGIN * 2)
-  const maxHeight = Math.min(requestedMaxHeight, viewportHeight - VIEWPORT_MARGIN * 2)
-  const measuredHeight = Math.min(Math.max(popover.height, 0), maxHeight)
+  const viewportMaxHeight = Math.min(requestedMaxHeight, viewportHeight - VIEWPORT_MARGIN * 2)
+  const measuredHeight = Math.min(Math.max(popover.height, 0), viewportMaxHeight)
   const belowTop = anchor.bottom + POPOVER_GAP
-  const aboveTop = anchor.top - measuredHeight - POPOVER_GAP
-  const availableBelow = viewportHeight - VIEWPORT_MARGIN - belowTop
-  const availableAbove = anchor.top - POPOVER_GAP - VIEWPORT_MARGIN
+  const availableBelow = Math.max(0, viewportHeight - VIEWPORT_MARGIN - belowTop)
+  const availableAbove = Math.max(0, anchor.top - POPOVER_GAP - VIEWPORT_MARGIN)
   const canShowBelow = availableBelow >= measuredHeight
   const canShowAbove = availableAbove >= measuredHeight
   const placement: ProviderQuotaErrorPopoverPlacement = canShowBelow || (!canShowAbove && availableBelow >= availableAbove)
     ? 'below'
     : 'above'
-  const desiredTop = placement === 'below' ? belowTop : aboveTop
-  const maxTop = viewportHeight - measuredHeight - VIEWPORT_MARGIN
+  const availableHeight = placement === 'below' ? availableBelow : availableAbove
+  const maxHeight = Math.min(viewportMaxHeight, availableHeight)
+  const displayedHeight = Math.min(measuredHeight, maxHeight)
+  const desiredTop = placement === 'below' ? belowTop : anchor.top - displayedHeight - POPOVER_GAP
+  const maxTop = viewportHeight - displayedHeight - VIEWPORT_MARGIN
   const desiredLeft = anchor.left + anchor.width / 2 - width / 2
   const maxLeft = viewportWidth - width - VIEWPORT_MARGIN
 

@@ -206,6 +206,9 @@ describe('ProviderCard display states', () => {
     expect(blacklistBodyRule).toContain('user-select: text')
     expect(blacklistActionsRule).toContain('flex: 0 0 auto')
     expect(providerCardStyleSource).toContain('.card-blacklist-popover.theme-dark .unblock-btn.secondary')
+    expect(providerCardStyleSource).not.toContain('--mac-text-primary')
+    expect(providerCardComponentSource).toContain('onOpen: closeQuotaErrorPopover')
+    expect(providerCardComponentSource).toContain('onOpen: closeBlacklistPopover')
   })
 
   it('replaces the normal switch with quota exhaustion actions when auto-disabled', async () => {

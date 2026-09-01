@@ -708,7 +708,7 @@
   border: 1px solid var(--mac-border);
   border-radius: 10px;
   background: color-mix(in srgb, var(--mac-surface) 98%, transparent);
-  color: var(--mac-text-primary);
+  color: var(--mac-text);
   box-shadow: 0 18px 38px rgba(15, 23, 42, 0.18);
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
@@ -741,7 +741,7 @@
 .card-blacklist-popover.theme-dark {
   border-color: rgba(148, 163, 184, 0.22);
   background: color-mix(in srgb, var(--mac-surface) 98%, transparent);
-  color: var(--mac-text-primary);
+  color: var(--mac-text);
   box-shadow: 0 20px 42px rgba(0, 0, 0, 0.36);
 }
 
@@ -804,7 +804,7 @@
 
 .card-blacklist-popover__row strong {
   min-width: 0;
-  color: var(--mac-text-primary);
+  color: var(--mac-text);
   font-weight: 600;
   text-align: right;
   overflow-wrap: anywhere;
@@ -823,7 +823,7 @@
 }
 
 .card-blacklist-popover__reason strong {
-  color: var(--mac-text-primary);
+  color: var(--mac-text);
   font-weight: 500;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -2751,14 +2751,6 @@
 
   .card-blacklist-inline {
     position: static;
-  }
-
-  .card-blacklist-popover {
-    top: calc(100% + 8px);
-    right: 0;
-    left: 0;
-    width: auto;
-    max-width: 100%;
   }
 
   .card-performance-quotas {
