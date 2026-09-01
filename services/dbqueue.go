@@ -87,16 +87,17 @@ type WriteTask struct {
 	SQL    string        // SQL语句
 	Args   []interface{} // 参数
 	Result chan error    // 结果通道（同步等待）
+	TxFunc func(*sql.Tx) error
 }
 
 // DBWriteQueue 数据库写入队列
 type DBWriteQueue struct {
-	db            *sql.DB
-	queue         chan *WriteTask
-	txGroupQueue  chan []*WriteTask // 事务组队列（一组任务单事务内原子执行）
-	batchQueue    chan *WriteTask   // 批量提交队列
-	shutdownChan  chan struct{}
-	wg            sync.WaitGroup
+	db           *sql.DB
+	queue        chan *WriteTask
+	txGroupQueue chan []*WriteTask // 事务组队列（一组任务单事务内原子执行）
+	batchQueue   chan *WriteTask   // 批量提交队列
+	shutdownChan chan struct{}
+	wg           sync.WaitGroup
 
 	// 关闭状态标志（防止 Shutdown 后仍可入队）
 	closed atomic.Bool
@@ -132,10 +133,12 @@ type QueueStats struct {
 //   - ✅ 正确用法：所有 request_log 的 INSERT（同一表、同一操作、参数结构相同）
 //   - ❌ 错误用法：混入不同表的写入（request_log + provider_blacklist）
 //   - ❌ 错误用法：混入不同操作（INSERT + UPDATE + DELETE）
+//
 // - **为什么必须同构**：
 //   - 统计模型假设批次延迟在所有任务间均匀分布（perTaskLatencyMs = batchLatencyMs / count）
 //   - 如果批次内有慢 SQL（触发器、复杂索引），会稀释快 SQL 的延迟统计
 //   - P99 延迟会被低估，无法真实反映单请求 SLA
+//
 // - **代码审查检查点**：
 //   - 搜索所有 ExecBatch/ExecBatchCtx 调用
 //   - 确认每个调用点只写入同一个表的同一种操作
@@ -168,7 +171,7 @@ func NewDBWriteQueue(db *sql.DB, queueSize int, enableBatch bool) *DBWriteQueue 
 func (q *DBWriteQueue) worker() {
 	defer q.wg.Done()
 
-	var currentTask *WriteTask   // 命名变量，用于在 panic 时返回错误
+	var currentTask *WriteTask    // 命名变量，用于在 panic 时返回错误
 	var currentGroup []*WriteTask // panic 时正在执行的事务组
 
 	// panic 保护：确保 worker 不会因未捕获的 panic 而崩溃
@@ -270,8 +273,14 @@ func (q *DBWriteQueue) commitTxGroup(tasks []*WriteTask) {
 	defer tx.Rollback()
 
 	for _, task := range tasks {
-		if _, err := tx.Exec(task.SQL, task.Args...); err != nil {
-			sendResultToAll(fmt.Errorf("事务组执行失败: %w", err))
+		var taskErr error
+		if task.TxFunc != nil {
+			taskErr = task.TxFunc(tx)
+		} else {
+			_, taskErr = tx.Exec(task.SQL, task.Args...)
+		}
+		if taskErr != nil {
+			sendResultToAll(fmt.Errorf("事务组执行失败: %w", taskErr))
 			return
 		}
 	}
@@ -678,24 +687,24 @@ func (q *DBWriteQueue) GetStats() QueueStats {
 // 📌 统计假设与局限性说明：
 //
 // 1. **平均延迟计算假设**：
-//    - 批量提交时，假设批次延迟在所有任务间均匀分布
-//    - 计算公式：AvgLatencyMs = (旧总延迟 + 批次延迟) / 新总任务数
-//    - 局限性：如果批次内不同 SQL 耗时差异巨大（如含触发器、复杂索引），统计会失真
+//   - 批量提交时，假设批次延迟在所有任务间均匀分布
+//   - 计算公式：AvgLatencyMs = (旧总延迟 + 批次延迟) / 新总任务数
+//   - 局限性：如果批次内不同 SQL 耗时差异巨大（如含触发器、复杂索引），统计会失真
 //
 // 2. **P99 延迟计算假设**：
-//    - 批量提交时，将批次延迟平均分摊到每个任务（perTaskLatencyMs = latencyMs / count）
-//    - 每个任务记录相同的延迟样本，用于 P99 计算
-//    - 局限性：真实情况下，批次内首个任务可能耗时更长（事务开启开销），最后一个任务可能更快
+//   - 批量提交时，将批次延迟平均分摊到每个任务（perTaskLatencyMs = latencyMs / count）
+//   - 每个任务记录相同的延迟样本，用于 P99 计算
+//   - 局限性：真实情况下，批次内首个任务可能耗时更长（事务开启开销），最后一个任务可能更快
 //
 // 3. **适用场景**：
-//    - ✅ 批次内所有 SQL 耗时相近（如 request_log INSERT，相同表结构、无触发器）
-//    - ✅ 关注整体系统性能趋势，而非单条 SQL 精确耗时
-//    - ❌ 批次内混合不同类型操作（INSERT + UPDATE + DELETE）
-//    - ❌ 需要精确追踪每条 SQL 的实际耗时
+//   - ✅ 批次内所有 SQL 耗时相近（如 request_log INSERT，相同表结构、无触发器）
+//   - ✅ 关注整体系统性能趋势，而非单条 SQL 精确耗时
+//   - ❌ 批次内混合不同类型操作（INSERT + UPDATE + DELETE）
+//   - ❌ 需要精确追踪每条 SQL 的实际耗时
 //
 // 4. **改进方向**（如需精确统计）：
-//    - 在 WriteTask 中添加 startTime 字段，worker 执行时逐个记录真实耗时
-//    - 成本：每个任务额外 8 字节（time.Time）+ 逐个更新统计的锁竞争
+//   - 在 WriteTask 中添加 startTime 字段，worker 执行时逐个记录真实耗时
+//   - 成本：每个任务额外 8 字节（time.Time）+ 逐个更新统计的锁竞争
 func (q *DBWriteQueue) updateStats(count int, latency time.Duration, err error) {
 	q.statsMu.Lock()
 	defer q.statsMu.Unlock()

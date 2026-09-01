@@ -157,6 +157,39 @@ func TestDBWriteQueueTxGroupRollsBackAtomically(t *testing.T) {
 	}
 }
 
+func TestDBWriteQueueTxGroupRunsTransactionFunctionAtomically(t *testing.T) {
+	db, queue := newDBWriteQueueTestFixture(t, 16, false)
+
+	if err := queue.ExecTxGroup([]WriteTask{
+		{SQL: "INSERT INTO dbqueue_items (value) VALUES (?)", Args: []interface{}{"sql-task"}},
+		{TxFunc: func(tx *sql.Tx) error {
+			_, err := tx.Exec("INSERT INTO dbqueue_items (value) VALUES (?)", "tx-function")
+			return err
+		}},
+	}); err != nil {
+		t.Fatalf("事务函数提交失败: %v", err)
+	}
+	if got := readDBWriteQueueValues(t, db); !reflect.DeepEqual(got, []string{"sql-task", "tx-function"}) {
+		t.Fatalf("事务函数提交结果=%v", got)
+	}
+
+	err := queue.ExecTxGroup([]WriteTask{
+		{SQL: "INSERT INTO dbqueue_items (value) VALUES (?)", Args: []interface{}{"rolled-back-sql"}},
+		{TxFunc: func(tx *sql.Tx) error {
+			if _, err := tx.Exec("INSERT INTO dbqueue_items (value) VALUES (?)", "rolled-back-function"); err != nil {
+				return err
+			}
+			return errors.New("forced transaction function failure")
+		}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "forced transaction function failure") {
+		t.Fatalf("事务函数失败错误=%v", err)
+	}
+	if got := readDBWriteQueueValues(t, db); !reflect.DeepEqual(got, []string{"sql-task", "tx-function"}) {
+		t.Fatalf("事务函数失败后未整体回滚: %v", got)
+	}
+}
+
 func TestDBWriteQueueTxGroupCanReuseTaskSliceAfterReturn(t *testing.T) {
 	db, queue := newDBWriteQueueTestFixture(t, 16, false)
 	tasks := []WriteTask{

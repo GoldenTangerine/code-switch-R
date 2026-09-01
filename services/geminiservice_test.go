@@ -4,7 +4,11 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
+	"time"
+
+	"github.com/daodao97/xgo/xdb"
 )
 
 func TestGeminiService_GetPresets(t *testing.T) {
@@ -474,4 +478,371 @@ func TestGeminiService_LoadProvidersSupportsTotalQuotaFieldAfterInitDatabase(t *
 	if !providers[0].HideLogBadge {
 		t.Fatal("Gemini hideLogBadge 反序列化失败")
 	}
+}
+
+func TestCloneGeminiProvidersPreservesValuesAndIsolation(t *testing.T) {
+	original := geminiProviderOwnershipFixture("gemini-owned")
+	expected := geminiProviderOwnershipFixture("gemini-owned")
+	cloned := cloneGeminiProviders([]GeminiProvider{original})
+
+	if !reflect.DeepEqual(cloned, []GeminiProvider{expected}) {
+		t.Fatalf("克隆结果与原值不一致:\nactual: %#v\nexpected: %#v", cloned, []GeminiProvider{expected})
+	}
+	mutateGeminiProviderOwnedFields(&cloned[0])
+	if !reflect.DeepEqual(original, expected) {
+		t.Fatalf("修改克隆后原值发生变化:\nactual: %#v\nexpected: %#v", original, expected)
+	}
+
+	if cloneGeminiProviders(nil) != nil {
+		t.Fatal("nil Provider 切片应保持 nil")
+	}
+	empty := cloneGeminiProviders([]GeminiProvider{})
+	if empty == nil || len(empty) != 0 {
+		t.Fatalf("空 Provider 切片语义未保持: %#v", empty)
+	}
+	emptyFields := cloneGeminiProvider(GeminiProvider{
+		EnvConfig:            map[string]string{},
+		SettingsConfig:       map[string]any{},
+		RequestBodyOverrides: map[string]any{},
+	})
+	if emptyFields.EnvConfig == nil || emptyFields.SettingsConfig == nil || emptyFields.RequestBodyOverrides == nil {
+		t.Fatalf("空 map 不应被克隆为 nil: %#v", emptyFields)
+	}
+	nilFields := cloneGeminiProvider(GeminiProvider{})
+	if nilFields.EnvConfig != nil || nilFields.SettingsConfig != nil || nilFields.RequestBodyOverrides != nil {
+		t.Fatalf("nil map 不应被克隆为空 map: %#v", nilFields)
+	}
+}
+
+func TestGeminiServiceGetProvidersReturnsOwnedCopy(t *testing.T) {
+	expected := geminiProviderOwnershipFixture("gemini-read")
+	svc := &GeminiService{providers: []GeminiProvider{geminiProviderOwnershipFixture("gemini-read")}}
+
+	returned := svc.GetProviders()
+	mutateGeminiProviderOwnedFields(&returned[0])
+
+	actual := svc.GetProviders()
+	if !reflect.DeepEqual(actual, []GeminiProvider{expected}) {
+		t.Fatalf("修改 GetProviders 返回值影响了内部状态:\nactual: %#v\nexpected: %#v", actual, []GeminiProvider{expected})
+	}
+}
+
+func TestGeminiServiceAddAndUpdateTakeProviderOwnership(t *testing.T) {
+	t.Run("AddProvider", func(t *testing.T) {
+		resetProviderStoreForTest(t)
+		input := geminiProviderOwnershipFixture("gemini-add")
+		expected := geminiProviderOwnershipFixture("gemini-add")
+		svc := &GeminiService{relayAddr: ":18100"}
+
+		if err := svc.AddProvider(input); err != nil {
+			t.Fatal(err)
+		}
+		mutateGeminiProviderOwnedFields(&input)
+
+		actual := svc.GetProviders()
+		if !reflect.DeepEqual(actual, []GeminiProvider{expected}) {
+			t.Fatalf("修改 AddProvider 入参影响了内部状态:\nactual: %#v\nexpected: %#v", actual, []GeminiProvider{expected})
+		}
+	})
+
+	t.Run("UpdateProvider", func(t *testing.T) {
+		resetProviderStoreForTest(t)
+		svc := &GeminiService{
+			providers: []GeminiProvider{geminiProviderOwnershipFixture("gemini-update")},
+			relayAddr: ":18100",
+		}
+		input := geminiProviderOwnershipFixture("gemini-update")
+		input.Description = "updated ownership fixture"
+		expected := geminiProviderOwnershipFixture("gemini-update")
+		expected.Description = "updated ownership fixture"
+
+		if err := svc.UpdateProvider(input); err != nil {
+			t.Fatal(err)
+		}
+		mutateGeminiProviderOwnedFields(&input)
+
+		actual := svc.GetProviders()
+		if !reflect.DeepEqual(actual, []GeminiProvider{expected}) {
+			t.Fatalf("修改 UpdateProvider 入参影响了内部状态:\nactual: %#v\nexpected: %#v", actual, []GeminiProvider{expected})
+		}
+	})
+}
+
+func TestGeminiSetForcedPrioritySaveFailureRestoresOwnedSnapshot(t *testing.T) {
+	resetProviderStoreForTest(t)
+	primary := geminiProviderOwnershipFixture("gemini-primary")
+	secondary := geminiProviderOwnershipFixture("gemini-secondary")
+	secondary.ForcedPriority = false
+	expected := []GeminiProvider{geminiProviderOwnershipFixture("gemini-primary"), geminiProviderOwnershipFixture("gemini-secondary")}
+	expected[1].ForcedPriority = false
+	svc := &GeminiService{providers: []GeminiProvider{primary, secondary}}
+
+	previousQueue := GlobalDBQueue
+	failedQueue := &DBWriteQueue{}
+	failedQueue.closed.Store(true)
+	GlobalDBQueue = failedQueue
+	t.Cleanup(func() {
+		GlobalDBQueue = previousQueue
+	})
+
+	if err := svc.SetForcedPriority("gemini-secondary", true); err == nil {
+		t.Fatal("关闭的写入队列应使强制优先保存失败")
+	}
+	mutateGeminiProviderOwnedFields(&primary)
+	mutateGeminiProviderOwnedFields(&secondary)
+
+	actual := svc.GetProviders()
+	if !reflect.DeepEqual(actual, expected) {
+		t.Fatalf("保存失败回退快照仍与旧引用共享:\nactual: %#v\nexpected: %#v", actual, expected)
+	}
+}
+
+func TestGeminiDuplicateProviderReturnDoesNotAliasStoredProviders(t *testing.T) {
+	resetProviderStoreForTest(t)
+	svc := &GeminiService{
+		providers: []GeminiProvider{geminiProviderOwnershipFixture("gemini-source")},
+		relayAddr: ":18100",
+	}
+
+	duplicated, err := svc.DuplicateProvider("gemini-source")
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := json.Marshal(svc.GetProviders())
+	if err != nil {
+		t.Fatal(err)
+	}
+	mutateGeminiDuplicatedOwnedFields(duplicated)
+	actual, err := json.Marshal(svc.GetProviders())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(actual) != string(before) {
+		t.Fatalf("修改 DuplicateProvider 返回值影响了内部状态:\nactual: %s\nexpected: %s", actual, before)
+	}
+}
+
+func TestGeminiServiceProviderCopiesAreRaceFree(t *testing.T) {
+	resetProviderStoreForTest(t)
+	svc := &GeminiService{providers: []GeminiProvider{geminiProviderOwnershipFixture("gemini-race")}}
+	external := svc.GetProviders()
+	start := make(chan struct{})
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+		<-start
+		for i := 0; i < 10_000; i++ {
+			*external[0].ProviderConcurrencyLimit = i
+		}
+	}()
+	close(start)
+	for i := 0; i < 100; i++ {
+		updated := geminiProviderOwnershipFixture("gemini-race")
+		updated.SortOrder = i
+		if err := svc.UpdateProvider(updated); err != nil {
+			t.Fatal(err)
+		}
+		_ = *svc.GetProviders()[0].ProviderConcurrencyLimit
+	}
+	<-done
+}
+
+func TestGeminiUpdateProviderRenameCommitsStoreAndIdentityWithoutWriterWait(t *testing.T) {
+	resetProviderStoreForTest(t)
+	db, err := xdb.DB("default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`DELETE FROM request_log WHERE platform = 'gemini'`); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.Exec(`DELETE FROM request_log WHERE platform = 'gemini'`)
+	})
+
+	original := geminiProviderOwnershipFixture("gemini-rename-success")
+	original.Name = "Gemini Old Name"
+	if err := SaveGeminiProvidersToStore([]GeminiProvider{original}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO request_log (platform, provider_id, provider, data_source, created_at)
+		VALUES ('gemini', ?, ?, 'proxy', '2026-09-01 00:00:00')
+	`, original.ID, original.Name); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := &GeminiService{providers: []GeminiProvider{cloneGeminiProvider(original)}, relayAddr: ":18100"}
+	updated := cloneGeminiProvider(original)
+	updated.Name = "Gemini New Name"
+	startedAt := time.Now()
+	if err := svc.UpdateProvider(updated); err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(startedAt); elapsed > 5*time.Second {
+		t.Fatalf("Gemini 改名耗时过长: %s", elapsed)
+	}
+
+	stored, err := LoadGeminiProvidersFromStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored) != 1 || stored[0].Name != updated.Name {
+		t.Fatalf("Gemini 存储名称未提交: %#v", stored)
+	}
+	var logName string
+	if err := db.QueryRow(`SELECT provider FROM request_log WHERE platform = 'gemini' AND provider_id = ?`, original.ID).Scan(&logName); err != nil {
+		t.Fatal(err)
+	}
+	if logName != updated.Name {
+		t.Fatalf("关联日志名称=%q，期望=%q", logName, updated.Name)
+	}
+}
+
+func TestGeminiUpdateProviderRenameFailureRollsBackStoreIdentityAndMemory(t *testing.T) {
+	resetProviderStoreForTest(t)
+	db, err := xdb.DB("default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`DROP TRIGGER IF EXISTS test_block_gemini_provider_rename`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`DELETE FROM request_log WHERE platform = 'gemini'`); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.Exec(`DROP TRIGGER IF EXISTS test_block_gemini_provider_rename`)
+		_, _ = db.Exec(`DELETE FROM request_log WHERE platform = 'gemini'`)
+	})
+
+	original := geminiProviderOwnershipFixture("gemini-rename-rollback")
+	original.Name = "Gemini Rollback Old"
+	if err := SaveGeminiProvidersToStore([]GeminiProvider{original}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO request_log (platform, provider_id, provider, data_source, created_at)
+		VALUES ('gemini', ?, ?, 'proxy', '2026-09-01 00:00:00')
+	`, original.ID, original.Name); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+		CREATE TRIGGER test_block_gemini_provider_rename
+		BEFORE UPDATE OF provider ON request_log
+		WHEN OLD.platform = 'gemini' AND OLD.provider_id = 'gemini-rename-rollback'
+		BEGIN
+			SELECT RAISE(ABORT, 'forced gemini rename failure');
+		END
+	`); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := &GeminiService{providers: []GeminiProvider{cloneGeminiProvider(original)}, relayAddr: ":18100"}
+	updated := cloneGeminiProvider(original)
+	updated.Name = "Gemini Rollback New"
+	if err := svc.UpdateProvider(updated); err == nil {
+		t.Fatal("关联身份更新失败时 Gemini 改名应失败")
+	}
+
+	stored, err := LoadGeminiProvidersFromStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored) != 1 || stored[0].Name != original.Name {
+		t.Fatalf("失败后 Gemini 存储未回滚: %#v", stored)
+	}
+	var logName string
+	if err := db.QueryRow(`SELECT provider FROM request_log WHERE platform = 'gemini' AND provider_id = ?`, original.ID).Scan(&logName); err != nil {
+		t.Fatal(err)
+	}
+	if logName != original.Name {
+		t.Fatalf("失败后关联日志名称=%q，期望=%q", logName, original.Name)
+	}
+	providers := svc.GetProviders()
+	if len(providers) != 1 || providers[0].Name != original.Name {
+		t.Fatalf("失败后内存 Provider 未回滚: %#v", providers)
+	}
+}
+
+func geminiProviderOwnershipFixture(id string) GeminiProvider {
+	limit := 3
+	return GeminiProvider{
+		ID:                       id,
+		Name:                     "Owned Gemini",
+		WebsiteURL:               "https://example.com",
+		APIKeyURL:                "https://example.com/key",
+		BaseURL:                  "https://api.example.com",
+		APIKey:                   "test-key",
+		Model:                    "gemini-test",
+		Description:              "ownership fixture",
+		Category:                 "custom",
+		PartnerPromotionKey:      "ownership",
+		Enabled:                  true,
+		ForcedPriority:           true,
+		HideLogBadge:             true,
+		SortOrder:                7,
+		EnabledSortOrder:         8,
+		DisabledSortOrder:        9,
+		Level:                    4,
+		ProviderConcurrencyLimit: &limit,
+		SessionMaxSessions:       5,
+		SessionTTLMinutes:        6,
+		EnvConfig: map[string]string{
+			"GEMINI_API_KEY": "test-key",
+		},
+		SettingsConfig: map[string]any{
+			"security": map[string]any{
+				"auth": map[string]any{"selectedType": "gemini-api-key"},
+			},
+			"models": []any{map[string]any{"name": "gemini-test"}},
+		},
+		RequestBodyOverrides: map[string]any{
+			"generationConfig": map[string]any{"temperature": 0.5},
+			"stopSequences":    []any{"END"},
+		},
+		BudgetQuotaSettings: &BudgetQuotaSettings{
+			Daily: BudgetQuotaSetting{Total: 10, RefreshTime: "00:00", RefreshDay: 1, RefreshMonthDay: 2},
+		},
+		BudgetQuotaUsedAdjustments: &BudgetQuotaAdjustments{Daily: 2.5},
+		ProviderQuotaQueryType:     string(ProviderQuotaQueryTypeBalance),
+		ProviderQuotaQueryConfig: &ProviderQuotaQueryConfig{
+			Enabled:           true,
+			TemplateType:      string(ProviderQuotaTemplateTypeBalance),
+			Code:              "return result",
+			Timeout:           12,
+			APIKey:            "quota-key",
+			BaseURL:           "https://quota.example.com",
+			AccessToken:       "quota-token",
+			UserID:            "quota-user",
+			TokenPlanProvider: "quota-provider",
+			AutoQueryInterval: 3,
+			AutoIntervalMins:  4,
+		},
+		QuotaAutoDisabled:      true,
+		QuotaAutoDisablePaused: true,
+	}
+}
+
+func mutateGeminiProviderOwnedFields(provider *GeminiProvider) {
+	provider.Name = "Changed Gemini"
+	*provider.ProviderConcurrencyLimit = 99
+	provider.EnvConfig["GEMINI_API_KEY"] = "changed-key"
+	provider.SettingsConfig["security"].(map[string]any)["auth"].(map[string]any)["selectedType"] = "changed"
+	provider.SettingsConfig["models"].([]any)[0].(map[string]any)["name"] = "changed-model"
+	provider.RequestBodyOverrides["generationConfig"].(map[string]any)["temperature"] = 1.0
+	provider.RequestBodyOverrides["stopSequences"].([]any)[0] = "CHANGED"
+	provider.BudgetQuotaSettings.Daily.Total = 99
+	provider.BudgetQuotaUsedAdjustments.Daily = 99
+	provider.ProviderQuotaQueryConfig.BaseURL = "https://changed.example.com"
+}
+
+func mutateGeminiDuplicatedOwnedFields(provider *GeminiProvider) {
+	*provider.ProviderConcurrencyLimit = 99
+	provider.EnvConfig["GEMINI_API_KEY"] = "changed-key"
+	provider.SettingsConfig["security"].(map[string]any)["auth"].(map[string]any)["selectedType"] = "changed"
+	provider.SettingsConfig["models"].([]any)[0].(map[string]any)["name"] = "changed-model"
+	provider.RequestBodyOverrides["generationConfig"].(map[string]any)["temperature"] = 1.0
+	provider.RequestBodyOverrides["stopSequences"].([]any)[0] = "CHANGED"
 }

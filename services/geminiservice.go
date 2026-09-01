@@ -9,8 +9,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/daodao97/xgo/xdb"
 )
 
 // GeminiAuthType 认证类型
@@ -94,6 +92,70 @@ type GeminiService struct {
 	relayAddr string
 }
 
+func cloneGeminiJSONValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return cloneGeminiJSONMap(typed)
+	case []any:
+		// Wails 和 encoding/json 会将嵌套 JSON 数组解码为 []any。
+		cloned := make([]any, len(typed))
+		for index, item := range typed {
+			cloned[index] = cloneGeminiJSONValue(item)
+		}
+		return cloned
+	default:
+		return value
+	}
+}
+
+func cloneGeminiJSONMap(value map[string]any) map[string]any {
+	if value == nil {
+		return nil
+	}
+	cloned := make(map[string]any, len(value))
+	for key, item := range value {
+		cloned[key] = cloneGeminiJSONValue(item)
+	}
+	return cloned
+}
+
+func cloneGeminiProvider(provider GeminiProvider) GeminiProvider {
+	cloned := provider
+	cloned.ProviderConcurrencyLimit = cloneOptionalInt(provider.ProviderConcurrencyLimit)
+	if provider.EnvConfig != nil {
+		cloned.EnvConfig = make(map[string]string, len(provider.EnvConfig))
+		for key, value := range provider.EnvConfig {
+			cloned.EnvConfig[key] = value
+		}
+	}
+	cloned.SettingsConfig = cloneGeminiJSONMap(provider.SettingsConfig)
+	cloned.RequestBodyOverrides = cloneGeminiJSONMap(provider.RequestBodyOverrides)
+	if provider.BudgetQuotaSettings != nil {
+		value := *provider.BudgetQuotaSettings
+		cloned.BudgetQuotaSettings = &value
+	}
+	if provider.BudgetQuotaUsedAdjustments != nil {
+		value := *provider.BudgetQuotaUsedAdjustments
+		cloned.BudgetQuotaUsedAdjustments = &value
+	}
+	if provider.ProviderQuotaQueryConfig != nil {
+		value := *provider.ProviderQuotaQueryConfig
+		cloned.ProviderQuotaQueryConfig = &value
+	}
+	return cloned
+}
+
+func cloneGeminiProviders(providers []GeminiProvider) []GeminiProvider {
+	if providers == nil {
+		return nil
+	}
+	cloned := make([]GeminiProvider, len(providers))
+	for index, provider := range providers {
+		cloned[index] = cloneGeminiProvider(provider)
+	}
+	return cloned
+}
+
 // NewGeminiService 创建 Gemini 服务
 func NewGeminiService(relayAddr string) *GeminiService {
 	if relayAddr == "" {
@@ -166,7 +228,7 @@ func (s *GeminiService) GetPresets() []GeminiPreset {
 func (s *GeminiService) GetProviders() []GeminiProvider {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.providers
+	return cloneGeminiProviders(s.providers)
 }
 
 // AddProvider 添加供应商
@@ -174,6 +236,7 @@ func (s *GeminiService) AddProvider(provider GeminiProvider) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	normalizeProviderQuotaAutomationOnSave(&provider.Enabled, &provider.QuotaAutoDisabled, &provider.QuotaAutoDisablePaused, provider.ProviderQuotaQueryType, provider.ProviderQuotaQueryConfig)
+	provider = cloneGeminiProvider(provider)
 
 	// 检查 ID 是否重复
 	for _, p := range s.providers {
@@ -200,6 +263,7 @@ func (s *GeminiService) UpdateProvider(provider GeminiProvider) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	normalizeProviderQuotaAutomationOnSave(&provider.Enabled, &provider.QuotaAutoDisabled, &provider.QuotaAutoDisablePaused, provider.ProviderQuotaQueryType, provider.ProviderQuotaQueryConfig)
+	provider = cloneGeminiProvider(provider)
 
 	for i, p := range s.providers {
 		if p.ID == provider.ID {
@@ -245,7 +309,7 @@ func (s *GeminiService) SetForcedPriority(providerID string, enabled bool) error
 		return fmt.Errorf("未找到 ID 为 '%s' 的供应商", providerID)
 	}
 
-	previousProviders := append([]GeminiProvider(nil), s.providers...)
+	previousProviders := cloneGeminiProviders(s.providers)
 	for i := range s.providers {
 		s.providers[i].ForcedPriority = enabled && s.providers[i].ID == providerID
 	}
@@ -705,6 +769,11 @@ func (s *GeminiService) loadProviders() error {
 
 // saveProviders 保存供应商配置（SQLite 统一存储，失败自动恢复原数据）
 func (s *GeminiService) saveProviders() error {
+	s.normalizeForcedPriority()
+	return SaveGeminiProvidersToStore(s.providers)
+}
+
+func (s *GeminiService) normalizeForcedPriority() {
 	forcedPrioritySeen := false
 	for i := range s.providers {
 		if !s.providers[i].ForcedPriority {
@@ -716,7 +785,6 @@ func (s *GeminiService) saveProviders() error {
 		}
 		forcedPrioritySeen = true
 	}
-	return SaveGeminiProvidersToStore(s.providers)
 }
 
 type providerIdentityRename struct {
@@ -727,39 +795,33 @@ type providerIdentityRename struct {
 }
 
 func (s *GeminiService) saveProvidersWithIdentitySync(renames []providerIdentityRename) error {
-	var renameTx *sql.Tx
-	if len(renames) > 0 {
-		db, err := xdb.DB("default")
-		if err != nil {
-			return fmt.Errorf("获取数据库连接失败: %w", err)
-		}
-		tx, beginErr := db.Begin()
-		if beginErr != nil {
-			return beginErr
-		}
-		renameTx = tx
-		for _, rename := range renames {
-			if err := syncProviderIdentityRenameTx(renameTx, rename.Kind, rename.ProviderID, rename.OldName, rename.NewName); err != nil {
-				_ = renameTx.Rollback()
-				return fmt.Errorf("同步供应商改名关联数据失败 (kind=%s,id=%s,%q->%q): %w",
-					rename.Kind, rename.ProviderID, rename.OldName, rename.NewName, err)
-			}
-		}
+	if len(renames) == 0 {
+		return s.saveProviders()
+	}
+	if GlobalDBQueue == nil {
+		return fmt.Errorf("数据库写入队列未初始化")
 	}
 
-	if err := s.saveProviders(); err != nil {
-		if renameTx != nil {
-			_ = renameTx.Rollback()
-		}
+	s.normalizeForcedPriority()
+	rows, err := buildGeminiProviderStoreRows(s.providers)
+	if err != nil {
 		return err
 	}
-
-	if renameTx != nil {
-		if err := renameTx.Commit(); err != nil {
-			return fmt.Errorf("提交供应商改名事务失败: %w", err)
-		}
+	tasks := []WriteTask{{
+		TxFunc: func(tx *sql.Tx) error {
+			for _, rename := range renames {
+				if err := syncProviderIdentityRenameTx(tx, rename.Kind, rename.ProviderID, rename.OldName, rename.NewName); err != nil {
+					return fmt.Errorf("同步供应商改名关联数据失败 (kind=%s,id=%s,%q->%q): %w",
+						rename.Kind, rename.ProviderID, rename.OldName, rename.NewName, err)
+				}
+			}
+			return nil
+		},
+	}}
+	tasks = append(tasks, providerStoreReplaceTasks(string(PlatformGemini), rows)...)
+	if err := GlobalDBQueue.ExecTxGroup(tasks); err != nil {
+		return fmt.Errorf("替换平台 %s 供应商失败: %w", PlatformGemini, err)
 	}
-
 	return nil
 }
 
@@ -1082,17 +1144,10 @@ func (s *GeminiService) DuplicateProvider(sourceID string) (*GeminiProvider, err
 		}
 	}
 
-	if source.SettingsConfig != nil {
-		cloned.SettingsConfig = make(map[string]any, len(source.SettingsConfig))
-		for k, v := range source.SettingsConfig {
-			// 对于 map/slice 类型的值，需要深拷贝（简化处理，直接赋值）
-			cloned.SettingsConfig[k] = v
-		}
-	}
-
-	if source.RequestBodyOverrides != nil {
-		cloned.RequestBodyOverrides = cloneJSONLikeMap(source.RequestBodyOverrides)
-	}
+	// 对于 map/slice 类型的值，需要深拷贝（简化处理，直接赋值）
+	// B15 改为递归复制 JSON-like 容器，避免嵌套引用继续共享。
+	cloned.SettingsConfig = cloneGeminiJSONMap(source.SettingsConfig)
+	cloned.RequestBodyOverrides = cloneGeminiJSONMap(source.RequestBodyOverrides)
 
 	// 5. 添加到列表并保存
 	s.providers = append(s.providers, cloned)
@@ -1100,7 +1155,8 @@ func (s *GeminiService) DuplicateProvider(sourceID string) (*GeminiProvider, err
 		return nil, fmt.Errorf("保存副本失败: %w", err)
 	}
 
-	return &cloned, nil
+	result := cloneGeminiProvider(cloned)
+	return &result, nil
 }
 
 // ReorderProviders 重新排序供应商（按传入的 ID 顺序）

@@ -137,10 +137,7 @@ func replaceProviderStoreRows(platform string, rows []providerStoreRow) error {
 
 // replaceProviderStoreRowsNoRollback 将 DELETE + 全部 INSERT 打包成一组事务任务提交
 // 单事务内原子生效，进程崩溃/任一语句失败都不会出现「已清空但未写回」的截断中间态
-func replaceProviderStoreRowsNoRollback(platform string, rows []providerStoreRow) error {
-	if GlobalDBQueue == nil {
-		return fmt.Errorf("数据库写入队列未初始化")
-	}
+func providerStoreReplaceTasks(platform string, rows []providerStoreRow) []WriteTask {
 	tasks := []WriteTask{{
 		SQL:  "DELETE FROM providers_store WHERE platform = ?",
 		Args: []interface{}{platform},
@@ -173,6 +170,14 @@ func replaceProviderStoreRowsNoRollback(platform string, rows []providerStoreRow
 			})
 		}
 	}
+	return tasks
+}
+
+func replaceProviderStoreRowsNoRollback(platform string, rows []providerStoreRow) error {
+	if GlobalDBQueue == nil {
+		return fmt.Errorf("数据库写入队列未初始化")
+	}
+	tasks := providerStoreReplaceTasks(platform, rows)
 	if err := GlobalDBQueue.ExecTxGroup(tasks); err != nil {
 		return fmt.Errorf("替换平台 %s 供应商失败: %w", platform, err)
 	}
@@ -359,12 +364,12 @@ func LoadGeminiProvidersFromStore() ([]GeminiProvider, error) {
 }
 
 // SaveGeminiProvidersToStore 将 Gemini 供应商列表全量写入统一存储
-func SaveGeminiProvidersToStore(providers []GeminiProvider) error {
+func buildGeminiProviderStoreRows(providers []GeminiProvider) ([]providerStoreRow, error) {
 	rows := make([]providerStoreRow, 0, len(providers))
 	for index, provider := range providers {
 		payload, err := json.Marshal(provider)
 		if err != nil {
-			return fmt.Errorf("序列化 Gemini 供应商 %s 失败: %w", provider.Name, err)
+			return nil, fmt.Errorf("序列化 Gemini 供应商 %s 失败: %w", provider.Name, err)
 		}
 		id := provider.ID
 		if id == "" {
@@ -380,6 +385,14 @@ func SaveGeminiProvidersToStore(providers []GeminiProvider) error {
 			Category:  provider.Category,
 			Payload:   string(payload),
 		})
+	}
+	return rows, nil
+}
+
+func SaveGeminiProvidersToStore(providers []GeminiProvider) error {
+	rows, err := buildGeminiProviderStoreRows(providers)
+	if err != nil {
+		return err
 	}
 	return replaceProviderStoreRows(string(PlatformGemini), rows)
 }
