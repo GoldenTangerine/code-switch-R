@@ -359,7 +359,7 @@ func TestProviderDailyStats_UsesLatestFiveSuccessfulStreamingSamplesAcrossDays(t
 		t.Fatalf("获取数据库连接失败: %v", err)
 	}
 
-	now := time.Now().UTC()
+	todayStart := startOfDay(time.Now())
 	for index := 0; index < 6; index++ {
 		insertRequestLogForProviderStats(t, db, providerStatsLogEntry{
 			Platform:      "codex",
@@ -369,7 +369,7 @@ func TestProviderDailyStats_UsesLatestFiveSuccessfulStreamingSamplesAcrossDays(t
 			DurationSec:   float64(index + 1),
 			FirstTokenSec: float64(index+1) / 10,
 			OutputTokens:  100,
-			CreatedAt:     now.AddDate(0, 0, -(index + 1)).Format(timeLayout),
+			CreatedAt:     todayStart.AddDate(0, 0, -(index + 1)).Add(12 * time.Hour).UTC().Format(timeLayout),
 		})
 	}
 	insertRequestLogForProviderStats(t, db, providerStatsLogEntry{
@@ -381,7 +381,7 @@ func TestProviderDailyStats_UsesLatestFiveSuccessfulStreamingSamplesAcrossDays(t
 		DurationSec:   0.1,
 		FirstTokenSec: 0.01,
 		OutputTokens:  1000,
-		CreatedAt:     now.Add(-2 * time.Hour).Format(timeLayout),
+		CreatedAt:     todayStart.Add(9 * time.Hour).UTC().Format(timeLayout),
 	})
 	insertRequestLogForProviderStats(t, db, providerStatsLogEntry{
 		Platform:     "codex",
@@ -390,7 +390,7 @@ func TestProviderDailyStats_UsesLatestFiveSuccessfulStreamingSamplesAcrossDays(t
 		IsStream:     0,
 		DurationSec:  1,
 		OutputTokens: 25,
-		CreatedAt:    now.Add(-time.Hour).Format(timeLayout),
+		CreatedAt:    todayStart.Add(10 * time.Hour).UTC().Format(timeLayout),
 	})
 	insertRequestLogForProviderStats(t, db, providerStatsLogEntry{
 		Platform:      "codex",
@@ -401,7 +401,7 @@ func TestProviderDailyStats_UsesLatestFiveSuccessfulStreamingSamplesAcrossDays(t
 		DurationSec:   1,
 		FirstTokenSec: 0.2,
 		OutputTokens:  50,
-		CreatedAt:     now.Add(-30 * time.Minute).Format(timeLayout),
+		CreatedAt:     todayStart.Add(11 * time.Hour).UTC().Format(timeLayout),
 	})
 
 	ls := NewLogService(nil)
