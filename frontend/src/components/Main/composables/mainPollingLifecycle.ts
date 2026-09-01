@@ -18,6 +18,7 @@ export interface MainPollingLifecycleOptions {
 export interface MainPollingLifecycle {
   start: () => void
   setVisible: (visible: boolean) => void
+  setPageActive: (active: boolean) => void
   isActive: () => boolean
   dispose: () => void
 }
@@ -54,6 +55,7 @@ export function bindMainPollingVisibility(
 export function createMainPollingLifecycle(options: MainPollingLifecycleOptions): MainPollingLifecycle {
   let ready = false
   let visible = options.initialVisible
+  let pageActive = true
   let active = false
   let pollingStarted = false
   let disposed = false
@@ -64,6 +66,7 @@ export function createMainPollingLifecycle(options: MainPollingLifecycleOptions)
       disposed
       || !ready
       || !visible
+      || !pageActive
       || !active
       || pollingStarted
       || generation !== expectedGeneration
@@ -74,7 +77,7 @@ export function createMainPollingLifecycle(options: MainPollingLifecycleOptions)
   }
 
   function activate(refresh: boolean) {
-    if (disposed || !ready || !visible || active) return
+    if (disposed || !ready || !visible || !pageActive || active) return
 
     active = true
     const expectedGeneration = ++generation
@@ -119,6 +122,18 @@ export function createMainPollingLifecycle(options: MainPollingLifecycleOptions)
     deactivate()
   }
 
+  function setPageActive(nextActive: boolean) {
+    if (disposed || pageActive === nextActive) return
+
+    pageActive = nextActive
+    if (!ready) return
+    if (pageActive) {
+      activate(true)
+      return
+    }
+    deactivate()
+  }
+
   function dispose() {
     if (disposed) return
 
@@ -135,6 +150,7 @@ export function createMainPollingLifecycle(options: MainPollingLifecycleOptions)
   return {
     start,
     setVisible,
+    setPageActive,
     isActive: () => active && pollingStarted,
     dispose,
   }

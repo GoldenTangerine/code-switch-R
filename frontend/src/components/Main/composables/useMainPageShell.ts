@@ -1,4 +1,4 @@
-import { computed, onMounted, onUnmounted, reactive, ref, watch, type ComputedRef, type Ref } from 'vue'
+import { computed, onActivated, onDeactivated, onMounted, onUnmounted, reactive, ref, watch, type ComputedRef, type Ref } from 'vue'
 import { Call, Events } from '@wailsio/runtime'
 import { fetchProxyStatus, enableProxy, disableProxy } from '../../../services/claudeSettings'
 import { fetchGeminiProxyStatus, enableGeminiProxy, disableGeminiProxy } from '../../../services/geminiSettings'
@@ -756,6 +756,14 @@ export function useMainPageShell(options: UseMainPageShellOptions) {
   watch(activeTab, (newTab) => {
     void loadBlacklistStatus(newTab)
     void refreshProviderQuotas()
+  })
+
+  onActivated(() => {
+    pollingLifecycle.setPageActive(true)
+  })
+
+  onDeactivated(() => {
+    pollingLifecycle.setPageActive(false)
   })
 
   onMounted(async () => {

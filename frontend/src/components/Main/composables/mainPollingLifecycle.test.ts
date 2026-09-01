@@ -74,6 +74,85 @@ describe('createMainPollingLifecycle', () => {
     harness.lifecycle.dispose()
   })
 
+  it('adds no periodic rounds while deactivated and refreshes once when activated', async () => {
+    vi.useFakeTimers()
+    const harness = createPollingHarness()
+
+    harness.lifecycle.start()
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(harness.getPollingRounds()).toBe(41)
+
+    harness.lifecycle.setPageActive(false)
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(harness.getPollingRounds()).toBe(41)
+
+    harness.lifecycle.setPageActive(true)
+    harness.lifecycle.setPageActive(true)
+    await flushPromises()
+    expect(harness.refresh).toHaveBeenCalledTimes(1)
+    expect(harness.startPolling).toHaveBeenCalledTimes(2)
+
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(harness.getPollingRounds()).toBe(82)
+
+    harness.lifecycle.dispose()
+  })
+
+  it('does not refresh for the initial activation signal', async () => {
+    const harness = createPollingHarness()
+
+    harness.lifecycle.setPageActive(true)
+    harness.lifecycle.start()
+    harness.lifecycle.setPageActive(true)
+    await flushPromises()
+
+    expect(harness.refresh).not.toHaveBeenCalled()
+    expect(harness.startPolling).toHaveBeenCalledTimes(1)
+
+    harness.lifecycle.dispose()
+  })
+
+  it('does not restart after being deactivated during route activation refresh', async () => {
+    let resolveRefresh: (() => void) | undefined
+    const refresh = vi.fn(() => new Promise<void>((resolve) => {
+      resolveRefresh = resolve
+    }))
+    const harness = createPollingHarness(true, refresh)
+
+    harness.lifecycle.start()
+    harness.lifecycle.setPageActive(false)
+    harness.lifecycle.setPageActive(true)
+    expect(refresh).toHaveBeenCalledTimes(1)
+
+    harness.lifecycle.setPageActive(false)
+    resolveRefresh?.()
+    await flushPromises()
+
+    expect(harness.startPolling).toHaveBeenCalledTimes(1)
+    expect(harness.lifecycle.isActive()).toBe(false)
+
+    harness.lifecycle.dispose()
+  })
+
+  it('requires both visibility and route activation before resuming', async () => {
+    const harness = createPollingHarness()
+
+    harness.lifecycle.start()
+    harness.lifecycle.setPageActive(false)
+    harness.lifecycle.setVisible(false)
+    harness.lifecycle.setVisible(true)
+    await flushPromises()
+    expect(harness.refresh).not.toHaveBeenCalled()
+    expect(harness.startPolling).toHaveBeenCalledTimes(1)
+
+    harness.lifecycle.setPageActive(true)
+    await flushPromises()
+    expect(harness.refresh).toHaveBeenCalledTimes(1)
+    expect(harness.startPolling).toHaveBeenCalledTimes(2)
+
+    harness.lifecycle.dispose()
+  })
+
   it('deduplicates visibility signals and does not restart after being hidden during refresh', async () => {
     let resolveRefresh: (() => void) | undefined
     const refresh = vi.fn(() => new Promise<void>((resolve) => {
