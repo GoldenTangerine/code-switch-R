@@ -1,10 +1,8 @@
 package main
 
 import (
-	"fmt"
 	"math"
 	"math/rand"
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -15,23 +13,35 @@ import (
 
 const timeLayout = "2006-01-02 15:04:05"
 
-func init() {
-	home, _ := os.UserHomeDir()
-
-	if err := xdb.Inits([]xdb.Config{
-		{
-			Name:   "default",
-			Driver: "sqlite",
-			DSN:    filepath.Join(home, ".code-switch", "app.db?cache=shared&mode=rwc&_busy_timeout=10000&_journal_mode=WAL"),
-		},
-	}); err != nil {
-		fmt.Printf("初始化 request_log 表失败: %v\n", err)
-	}
-}
-
 func TestSeedMockRequestLogs(t *testing.T) {
-	db, _ := xdb.DB("default")
-	xdb.New("request_log").Delete()
+	dbPath := filepath.Join(t.TempDir(), "app.db")
+	if err := xdb.Inits([]xdb.Config{{Name: "default", Driver: "sqlite", DSN: dbPath}}); err != nil {
+		t.Fatalf("init test database: %v", err)
+	}
+	db, err := xdb.DB("default")
+	if err != nil {
+		t.Fatalf("get test database: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	const createTableSQL = `CREATE TABLE request_log (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		platform TEXT,
+		model TEXT,
+		provider TEXT,
+		http_code INTEGER,
+		input_tokens INTEGER,
+		output_tokens INTEGER,
+		cache_create_tokens INTEGER,
+		cache_read_tokens INTEGER,
+		reasoning_tokens INTEGER,
+		is_stream INTEGER,
+		duration_sec REAL,
+		created_at DATETIME
+	)`
+	if _, err := db.Exec(createTableSQL); err != nil {
+		t.Fatalf("create request_log table: %v", err)
+	}
 	if err := SeedMockRequestLogs(16); err != nil {
 		t.Fatalf("seed failed: %v", err)
 	}
