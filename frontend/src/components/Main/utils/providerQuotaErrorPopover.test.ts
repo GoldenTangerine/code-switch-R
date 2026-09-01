@@ -57,4 +57,20 @@ describe('calculateProviderQuotaErrorPopoverLayout', () => {
     expect(layout.left + layout.width).toBeLessThanOrEqual(228)
     expect(layout.top + layout.maxHeight).toBeLessThanOrEqual(148)
   })
+
+  it('supports custom dimensions for the blacklist details popover', () => {
+    const layout = calculateProviderQuotaErrorPopoverLayout(
+      { top: 100, bottom: 124, left: 260, width: 120, height: 24 },
+      { width: 340, height: 500 },
+      { width: 800, height: 700 },
+      { maxWidth: 340, maxHeight: 360 },
+    )
+
+    expect(layout).toMatchObject({
+      top: 132,
+      width: 340,
+      maxHeight: 360,
+      placement: 'below',
+    })
+  })
 })

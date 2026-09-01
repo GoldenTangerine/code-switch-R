@@ -16,15 +16,16 @@
 
 ## 变更内容
 
-- “已拉黑”入口悬停 100ms 后打开详情，同时离开入口和弹窗 150ms 后关闭。
-- 鼠标进入弹窗会取消待执行的关闭，点击打开后继续保持固定显示。
-- 保留点击外部、Esc、状态切换和操作完成后的关闭行为，并在组件卸载时清理定时器。
-- 拉黑原因区域最大高度限制为 160px，超出后在原因区域内滚动。
+- “已拉黑”状态改为完整红色标签命中区，悬停 100ms 后打开详情，离开标签和弹窗 150ms 后关闭。
+- 详情弹窗通过 Teleport 显示，自动选择标签上方或下方并限制在视口内；标签与弹窗之间增加透明命中区域，避免移入时闪退。
+- 点击标签后固定显示详情，保留再次点击、点击外部、Esc、状态切换和操作完成后的关闭行为，并在组件卸载时清理监听与定时器。
+- 详情展示供应商、拉黑等级、剩余时间、触发来源、原因、拉黑时间、解禁时间、请求失败计数和巡检失败计数，缺失值统一显示为 `—`。
+- 弹窗最大高度为 360px，正文独立滚动且支持文本选择复制，底部解除拉黑和清零等级按钮保持可见。
 - 现有额度错误弹窗保持原来的 100ms 打开和关闭延迟。
 
 ## 验证结果
 
-- `cd frontend && pnpm exec vitest run src/components/Main/components/ProviderCard.test.ts src/components/Main/utils/providerQuotaErrorInteraction.test.ts`：通过，2 个测试文件、22 个测试。
-- `cd frontend && pnpm test:unit`：通过，71 个测试文件、552 个测试。
+- `cd frontend && pnpm exec vitest run src/components/Main/components/ProviderCard.test.ts src/components/Main/utils/providerQuotaErrorPopover.test.ts src/components/Main/utils/providerQuotaErrorInteraction.test.ts`：通过，3 个测试文件、26 个测试。
+- `cd frontend && pnpm test:unit`：通过，71 个测试文件、561 个测试。
 - `cd frontend && pnpm exec vue-tsc --noEmit`：通过。
 - `git diff --check -- <本任务文件>`：通过。

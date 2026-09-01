@@ -26,6 +26,11 @@ export interface ProviderQuotaErrorPopoverLayout {
   placement: ProviderQuotaErrorPopoverPlacement
 }
 
+export interface ProviderQuotaErrorPopoverConstraints {
+  maxWidth?: number
+  maxHeight?: number
+}
+
 const POPOVER_MAX_WIDTH = 420
 const POPOVER_MAX_HEIGHT = 240
 const POPOVER_GAP = 8
@@ -40,11 +45,14 @@ export function calculateProviderQuotaErrorPopoverLayout(
   anchor: ProviderQuotaErrorPopoverRect,
   popover: Pick<ProviderQuotaErrorPopoverRect, 'width' | 'height'>,
   viewport: { width: number; height: number },
+  constraints: ProviderQuotaErrorPopoverConstraints = {},
 ): ProviderQuotaErrorPopoverLayout {
   const viewportWidth = Math.max(viewport.width, VIEWPORT_MARGIN * 2)
   const viewportHeight = Math.max(viewport.height, VIEWPORT_MARGIN * 2)
-  const width = Math.min(POPOVER_MAX_WIDTH, viewportWidth - VIEWPORT_MARGIN * 2)
-  const maxHeight = Math.min(POPOVER_MAX_HEIGHT, viewportHeight - VIEWPORT_MARGIN * 2)
+  const requestedMaxWidth = constraints.maxWidth ?? POPOVER_MAX_WIDTH
+  const requestedMaxHeight = constraints.maxHeight ?? POPOVER_MAX_HEIGHT
+  const width = Math.min(requestedMaxWidth, viewportWidth - VIEWPORT_MARGIN * 2)
+  const maxHeight = Math.min(requestedMaxHeight, viewportHeight - VIEWPORT_MARGIN * 2)
   const measuredHeight = Math.min(Math.max(popover.height, 0), maxHeight)
   const belowTop = anchor.bottom + POPOVER_GAP
   const aboveTop = anchor.top - measuredHeight - POPOVER_GAP

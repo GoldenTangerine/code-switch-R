@@ -658,22 +658,24 @@
 .card-blacklist-trigger {
   display: inline-flex;
   align-items: center;
-  padding: 0;
-  border: none;
+  min-height: 24px;
+  padding: 3px 7px;
+  border: 1px solid rgba(239, 68, 68, 0.22);
   border-radius: 5px;
-  background: transparent;
+  background: rgba(239, 68, 68, 0.07);
   color: #dc2626;
   font: inherit;
   font-weight: 700;
   line-height: 1;
   white-space: nowrap;
   cursor: pointer;
-  transition: color 180ms ease, background 180ms ease;
+  transition: color 180ms ease, background 180ms ease, border-color 180ms ease;
 }
 
 .card-blacklist-trigger:hover {
   color: #b91c1c;
-  background: rgba(239, 68, 68, 0.08);
+  border-color: rgba(220, 38, 38, 0.34);
+  background: rgba(239, 68, 68, 0.12);
 }
 
 .card-blacklist-trigger:focus-visible {
@@ -682,29 +684,107 @@
 }
 
 .automation-card.theme-dark .card-blacklist-trigger {
+  border-color: rgba(248, 113, 113, 0.3);
+  background: rgba(248, 113, 113, 0.1);
   color: #fca5a5;
 }
 
 .automation-card.theme-dark .card-blacklist-trigger:hover {
   color: #fecaca;
-  background: rgba(248, 113, 113, 0.12);
+  border-color: rgba(252, 165, 165, 0.42);
+  background: rgba(248, 113, 113, 0.16);
 }
 
 .card-blacklist-popover {
-  position: absolute;
-  z-index: 20;
-  top: calc(100% + 9px);
-  right: 0;
-  width: min(300px, calc(100vw - 36px));
+  position: fixed;
+  z-index: 4300;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  width: min(340px, calc(100vw - 24px));
+  max-height: 360px;
+  overflow: visible;
   padding: 12px;
-  border: 1px solid var(--provider-tooltip-border);
+  border: 1px solid var(--mac-border);
   border-radius: 10px;
-  background: var(--provider-tooltip-bg);
-  color: var(--provider-text-color);
-  box-shadow: var(--provider-tooltip-shadow);
+  background: color-mix(in srgb, var(--mac-surface) 98%, transparent);
+  color: var(--mac-text-primary);
+  box-shadow: 0 18px 38px rgba(15, 23, 42, 0.18);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   font-size: 0.75rem;
   line-height: 1.45;
+}
+
+.card-blacklist-popover::before {
+  content: '';
+  position: absolute;
+  right: 0;
+  left: 0;
+  height: 9px;
+}
+
+.card-blacklist-popover--below::before {
+  top: -9px;
+}
+
+.card-blacklist-popover--above::before {
+  bottom: -9px;
+}
+
+.card-blacklist-popover:focus-visible {
+  outline: 2px solid rgba(239, 68, 68, 0.32);
+  outline-offset: 2px;
+}
+
+.card-blacklist-popover.theme-dark {
+  border-color: rgba(148, 163, 184, 0.22);
+  background: color-mix(in srgb, var(--mac-surface) 98%, transparent);
+  color: var(--mac-text-primary);
+  box-shadow: 0 20px 42px rgba(0, 0, 0, 0.36);
+}
+
+.card-blacklist-popover__header {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 9px;
+  border-bottom: 1px solid var(--mac-border);
+}
+
+.card-blacklist-popover__header strong {
+  color: #b91c1c;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.card-blacklist-popover.theme-dark .card-blacklist-popover__header strong {
+  color: #fda4af;
+}
+
+.card-blacklist-popover__header span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--mac-text-secondary);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card-blacklist-popover__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  margin-right: -4px;
+  padding-top: 9px;
+  padding-right: 4px;
+  -webkit-user-select: text;
+  user-select: text;
+  cursor: text;
 }
 
 .card-blacklist-popover__row {
@@ -719,35 +799,44 @@
 }
 
 .card-blacklist-popover__row span {
-  color: var(--provider-muted-color);
+  color: var(--mac-text-secondary);
 }
 
 .card-blacklist-popover__row strong {
-  color: #dc2626;
-  font-weight: 700;
+  min-width: 0;
+  color: var(--mac-text-primary);
+  font-weight: 600;
   text-align: right;
-}
-
-.automation-card.theme-dark .card-blacklist-popover__row strong {
-  color: #fca5a5;
+  overflow-wrap: anywhere;
 }
 
 .card-blacklist-popover__reason {
-  margin-top: 8px;
-  max-height: 160px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
+  display: grid;
+  gap: 4px;
+  margin-top: 9px;
   padding-top: 8px;
-  border-top: 1px solid var(--provider-tooltip-border);
-  color: var(--provider-muted-color);
+  border-top: 1px solid var(--mac-border);
+}
+
+.card-blacklist-popover__reason span {
+  color: var(--mac-text-secondary);
+}
+
+.card-blacklist-popover__reason strong {
+  color: var(--mac-text-primary);
+  font-weight: 500;
+  white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
 .card-blacklist-popover__actions {
   display: flex;
+  flex: 0 0 auto;
   flex-wrap: wrap;
   gap: 7px;
   margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--mac-border);
 }
 
 .card-blacklist-popover .unblock-btn {
@@ -2077,13 +2166,15 @@
   color: #4338ca;
 }
 
-.automation-card.theme-dark .unblock-btn.secondary {
+.automation-card.theme-dark .unblock-btn.secondary,
+.card-blacklist-popover.theme-dark .unblock-btn.secondary {
   background: rgba(15, 23, 42, 0.52);
   border-color: rgba(71, 85, 105, 0.74);
   color: #cbd5e1;
 }
 
-.automation-card.theme-dark .unblock-btn.secondary:hover {
+.automation-card.theme-dark .unblock-btn.secondary:hover,
+.card-blacklist-popover.theme-dark .unblock-btn.secondary:hover {
   background: rgba(30, 41, 59, 0.82);
   border-color: rgba(129, 140, 248, 0.24);
   color: #e0e7ff;

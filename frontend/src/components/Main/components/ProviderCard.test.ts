@@ -181,16 +181,31 @@ describe('ProviderCard display states', () => {
     expect(html).not.toContain('blacklist-banner')
   })
 
-  it('keeps the blacklist popover open across its hover boundary and scrolls long reasons', () => {
-    const blacklistReasonRule = providerCardStyleSource.match(/\.card-blacklist-popover__reason\s*\{[^}]*\}/)?.[0] ?? ''
+  it('keeps the blacklist popover open across its full trigger and teleported panel boundary', () => {
+    const blacklistTriggerRule = providerCardStyleSource.match(/\.card-blacklist-trigger\s*\{[^}]*\}/)?.[0] ?? ''
+    const blacklistPopoverRule = providerCardStyleSource.match(/\.card-blacklist-popover\s*\{[^}]*\}/)?.[0] ?? ''
+    const blacklistBridgeRule = providerCardStyleSource.match(/\.card-blacklist-popover::before\s*\{[^}]*\}/)?.[0] ?? ''
+    const blacklistBodyRule = providerCardStyleSource.match(/\.card-blacklist-popover__body\s*\{[^}]*\}/)?.[0] ?? ''
+    const blacklistActionsRule = providerCardStyleSource.match(/\.card-blacklist-popover__actions\s*\{[^}]*\}/)?.[0] ?? ''
 
     expect(providerCardComponentSource).toContain('@mouseenter="handleBlacklistPopoverPointerEnter"')
     expect(providerCardComponentSource).toContain('@mouseleave="handleBlacklistPopoverPointerLeave"')
+    expect(providerCardComponentSource).toContain('<Teleport to="body">')
+    expect(providerCardComponentSource).toContain('ref="blacklistPopoverPanelRef"')
     expect(providerCardComponentSource).toContain('BLACKLIST_POPOVER_HOVER_OPEN_DELAY_MS = 100')
     expect(providerCardComponentSource).toContain('BLACKLIST_POPOVER_HOVER_CLOSE_DELAY_MS = 150')
-    expect(blacklistReasonRule).toContain('max-height: 160px')
-    expect(blacklistReasonRule).toContain('overflow-y: auto')
-    expect(blacklistReasonRule).toContain('overscroll-behavior: contain')
+    expect(providerCardComponentSource).toContain('BLACKLIST_POPOVER_MAX_HEIGHT = 360')
+    expect(providerCardComponentSource).toContain('viewModel.blacklistStatus.blacklistedAt')
+    expect(providerCardComponentSource).toContain('viewModel.blacklistStatus.blacklistedUntil')
+    expect(blacklistTriggerRule).toContain('padding: 3px 7px')
+    expect(blacklistTriggerRule).toContain('border: 1px solid')
+    expect(blacklistPopoverRule).toContain('max-height: 360px')
+    expect(blacklistPopoverRule).toContain('overflow: visible')
+    expect(blacklistBridgeRule).toContain('height: 9px')
+    expect(blacklistBodyRule).toContain('overflow-y: auto')
+    expect(blacklistBodyRule).toContain('user-select: text')
+    expect(blacklistActionsRule).toContain('flex: 0 0 auto')
+    expect(providerCardStyleSource).toContain('.card-blacklist-popover.theme-dark .unblock-btn.secondary')
   })
 
   it('replaces the normal switch with quota exhaustion actions when auto-disabled', async () => {

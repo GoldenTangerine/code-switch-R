@@ -254,57 +254,101 @@
                 @mouseleave="handleBlacklistPopoverPointerLeave"
               >
                 <button
+                  ref="blacklistTriggerRef"
                   type="button"
                   class="card-blacklist-trigger"
                   :aria-expanded="blacklistPopoverOpen"
-                  :aria-controls="`blacklist-actions-${viewModel.card.id}`"
+                  :aria-controls="blacklistDetailsId"
                   aria-haspopup="dialog"
                   @click.stop="toggleBlacklistPopover"
                 >
                   {{ t('components.main.blacklist.blocked') }}
                   {{ formatBlacklistCountdown(viewModel.blacklistStatus.remainingSeconds) }}
                 </button>
-                <div
-                  v-if="blacklistPopoverOpen"
-                  :id="`blacklist-actions-${viewModel.card.id}`"
-                  class="card-blacklist-popover"
-                  role="dialog"
-                  :aria-label="t('components.main.blacklist.detailsTitle')"
-                  @click.stop
-                >
-                  <div class="card-blacklist-popover__row">
-                    <span>{{ t('components.main.blacklist.remaining') }}</span>
-                    <strong>{{ formatBlacklistCountdown(viewModel.blacklistStatus.remainingSeconds) }}</strong>
-                  </div>
-                  <div class="card-blacklist-popover__row">
-                    <span>{{ t('components.main.blacklist.triggerLabel') }}</span>
-                    <strong>{{ blacklistTriggerLabel(viewModel.blacklistStatus.blacklistTriggerSource) }}</strong>
-                  </div>
+                <Teleport to="body">
                   <div
-                    v-if="viewModel.blacklistStatus.blacklistReason"
-                    class="card-blacklist-popover__reason"
+                    v-if="blacklistPopoverOpen"
+                    :id="blacklistDetailsId"
+                    ref="blacklistPopoverPanelRef"
+                    class="card-blacklist-popover"
+                    :class="[
+                      `card-blacklist-popover--${blacklistPopoverPlacement}`,
+                      { 'theme-dark': resolvedTheme === 'dark' },
+                    ]"
+                    :style="blacklistPopoverStyle"
+                    role="dialog"
+                    tabindex="-1"
+                    :aria-label="t('components.main.blacklist.detailsTitle')"
+                    @click.stop
+                    @pointerdown.stop
+                    @dragstart.stop.prevent
+                    @mouseenter="handleBlacklistPopoverPointerEnter"
+                    @mouseleave="handleBlacklistPopoverPointerLeave"
                   >
-                    {{ t('components.main.blacklist.reason', { reason: viewModel.blacklistStatus.blacklistReason }) }}
+                    <div class="card-blacklist-popover__header">
+                      <strong>{{ t('components.main.blacklist.detailsTitle') }}</strong>
+                      <span>{{ viewModel.card.name }}</span>
+                    </div>
+                    <div class="card-blacklist-popover__body">
+                      <div class="card-blacklist-popover__row">
+                        <span>{{ t('components.main.blacklist.levelLabel') }}</span>
+                        <strong>{{ formatBlacklistLevel(viewModel.blacklistStatus.blacklistLevel) }}</strong>
+                      </div>
+                      <div class="card-blacklist-popover__row">
+                        <span>{{ t('components.main.blacklist.remaining') }}</span>
+                        <strong>{{ formatBlacklistRemaining(viewModel.blacklistStatus.remainingSeconds) }}</strong>
+                      </div>
+                      <div class="card-blacklist-popover__row">
+                        <span>{{ t('components.main.blacklist.triggerLabel') }}</span>
+                        <strong>{{ blacklistTriggerLabel(viewModel.blacklistStatus.blacklistTriggerSource) }}</strong>
+                      </div>
+                      <div class="card-blacklist-popover__row">
+                        <span>{{ t('components.main.blacklist.blacklistedAt') }}</span>
+                        <strong>{{ formatBlacklistDateTime(viewModel.blacklistStatus.blacklistedAt) }}</strong>
+                      </div>
+                      <div class="card-blacklist-popover__row">
+                        <span>{{ t('components.main.blacklist.blacklistedUntil') }}</span>
+                        <strong>{{ formatBlacklistDateTime(viewModel.blacklistStatus.blacklistedUntil) }}</strong>
+                      </div>
+                      <div class="card-blacklist-popover__row">
+                        <span>{{ t('components.main.blacklist.requestFailures') }}</span>
+                        <strong>{{ formatBlacklistCounter(
+                          viewModel.blacklistStatus.failureCount,
+                          viewModel.blacklistStatus.failureThreshold,
+                        ) }}</strong>
+                      </div>
+                      <div class="card-blacklist-popover__row">
+                        <span>{{ t('components.main.blacklist.healthFailures') }}</span>
+                        <strong>{{ formatBlacklistCounter(
+                          viewModel.blacklistStatus.healthFailureCount,
+                          viewModel.blacklistStatus.healthFailureThreshold,
+                        ) }}</strong>
+                      </div>
+                      <div class="card-blacklist-popover__reason">
+                        <span>{{ t('components.main.blacklist.reasonLabel') }}</span>
+                        <strong>{{ viewModel.blacklistStatus.blacklistReason || '—' }}</strong>
+                      </div>
+                    </div>
+                    <div class="card-blacklist-popover__actions">
+                      <button
+                        type="button"
+                        class="unblock-btn primary"
+                        :title="t('components.main.blacklist.unblockAndResetHint')"
+                        @click.stop="handleUnblockAndReset"
+                      >
+                        {{ t('components.main.blacklist.unblockAndReset') }}
+                      </button>
+                      <button
+                        type="button"
+                        class="unblock-btn secondary"
+                        :title="t('components.main.blacklist.resetLevelHint')"
+                        @click.stop="handleResetLevel"
+                      >
+                        {{ t('components.main.blacklist.resetLevel') }}
+                      </button>
+                    </div>
                   </div>
-                  <div class="card-blacklist-popover__actions">
-                    <button
-                      type="button"
-                      class="unblock-btn primary"
-                      :title="t('components.main.blacklist.unblockAndResetHint')"
-                      @click.stop="handleUnblockAndReset"
-                    >
-                      {{ t('components.main.blacklist.unblockAndReset') }}
-                    </button>
-                    <button
-                      type="button"
-                      class="unblock-btn secondary"
-                      :title="t('components.main.blacklist.resetLevelHint')"
-                      @click.stop="handleResetLevel"
-                    >
-                      {{ t('components.main.blacklist.resetLevel') }}
-                    </button>
-                  </div>
-                </div>
+                </Teleport>
               </span>
             </template>
           </div>
@@ -1114,8 +1158,38 @@ const blacklistTriggerLabel = (source?: string) => {
   if (source === 'request' || source === 'health' || source === 'legacy') {
     return t(`components.main.blacklist.trigger.${source}`)
   }
+  if (!source) return '—'
   return t('components.main.blacklist.trigger.unknown')
 }
+
+const blacklistDateTimeFormatter = computed(() => new Intl.DateTimeFormat(locale.value || 'en', {
+  dateStyle: 'medium',
+  timeStyle: 'medium',
+}))
+
+const formatBlacklistDateTime = (value?: string) => {
+  if (!value) return '—'
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime())) return '—'
+  return blacklistDateTimeFormatter.value.format(date)
+}
+
+const formatBlacklistCounter = (current?: number, threshold?: number) => {
+  const formatValue = (value?: number) => (
+    typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.trunc(value)).toString() : '—'
+  )
+  return `${formatValue(current)}/${formatValue(threshold)}`
+}
+
+const formatBlacklistLevel = (level?: number) => (
+  typeof level === 'number' && Number.isFinite(level) ? `L${Math.max(0, Math.trunc(level))}` : '—'
+)
+
+const formatBlacklistRemaining = (remainingSeconds?: number) => (
+  typeof remainingSeconds === 'number' && Number.isFinite(remainingSeconds)
+    ? props.formatBlacklistCountdown(Math.max(0, Math.trunc(remainingSeconds)))
+    : '—'
+)
 
 const successRateTooltip = computed(() => {
   const stats = props.viewModel.stats
@@ -1132,7 +1206,12 @@ const successRateTooltip = computed(() => {
 const blacklistPopoverOpen = ref(false)
 const blacklistPopoverPinned = ref(false)
 const blacklistPopoverHovering = ref(false)
+const blacklistPopoverFocusOnOpen = ref(false)
 const blacklistPopoverRef = ref<HTMLElement | null>(null)
+const blacklistTriggerRef = ref<HTMLButtonElement | null>(null)
+const blacklistPopoverPanelRef = ref<HTMLElement | null>(null)
+const blacklistPopoverPlacement = ref<ProviderQuotaErrorPopoverPlacement>('below')
+const blacklistPopoverStyle = ref<CSSProperties>({ visibility: 'hidden' })
 const quotaErrorPopoverOpen = ref(false)
 const quotaErrorPopoverPinned = ref(false)
 const quotaErrorPopoverHovering = ref(false)
@@ -1147,13 +1226,19 @@ let quotaErrorCopiedTimer: ReturnType<typeof globalThis.setTimeout> | undefined
 const hasOpenCardPopover = computed(() => blacklistPopoverOpen.value || quotaErrorPopoverOpen.value)
 const BLACKLIST_POPOVER_HOVER_OPEN_DELAY_MS = 100
 const BLACKLIST_POPOVER_HOVER_CLOSE_DELAY_MS = 150
+const BLACKLIST_POPOVER_MAX_WIDTH = 340
+const BLACKLIST_POPOVER_MAX_HEIGHT = 360
 
 const blacklistPopoverInteraction = createProviderQuotaErrorPopoverInteraction({
   open: blacklistPopoverOpen,
   pinned: blacklistPopoverPinned,
   hovering: blacklistPopoverHovering,
+  focusOnOpen: blacklistPopoverFocusOnOpen,
   openDelayMs: BLACKLIST_POPOVER_HOVER_OPEN_DELAY_MS,
   closeDelayMs: BLACKLIST_POPOVER_HOVER_CLOSE_DELAY_MS,
+  onClose: () => {
+    blacklistPopoverStyle.value = { visibility: 'hidden' }
+  },
 })
 
 const quotaErrorPopoverInteraction = createProviderQuotaErrorPopoverInteraction({
@@ -1170,13 +1255,21 @@ const quotaErrorDetailsId = computed(() => (
   `provider-quota-error-${props.activeTab}-${props.viewModel.card.id}`
 ))
 
+const blacklistDetailsId = computed(() => (
+  `provider-blacklist-details-${props.activeTab}-${props.viewModel.card.id}`
+))
+
 const quotaErrorDetailsAriaLabel = computed(() => t(
   'components.main.providers.quotaErrorDetailsAriaLabel',
   { name: props.viewModel.card.name },
 ))
 
-const closeBlacklistPopover = () => {
+const closeBlacklistPopover = (restoreFocus = false) => {
+  const shouldRestoreFocus = restoreFocus && blacklistPopoverOpen.value && blacklistPopoverPinned.value
   blacklistPopoverInteraction.close()
+  if (shouldRestoreFocus) {
+    void nextTick(() => blacklistTriggerRef.value?.focus({ preventScroll: true }))
+  }
 }
 
 const closeQuotaErrorPopover = (restoreFocus = false) => {
@@ -1239,20 +1332,26 @@ const copyQuotaErrorDetails = async () => {
 }
 
 const handleBlacklistPopoverPointerDown = (event: PointerEvent) => {
-  if (!blacklistPopoverRef.value?.contains(event.target as Node)) {
+  const target = event.target as Node
+  if (
+    !blacklistPopoverRef.value?.contains(target)
+    && !blacklistPopoverPanelRef.value?.contains(target)
+  ) {
     closeBlacklistPopover()
   }
 }
 
 const handleBlacklistPopoverKeydown = (event: KeyboardEvent) => {
   if (event.key === 'Escape') {
-    closeBlacklistPopover()
+    closeBlacklistPopover(true)
   }
 }
 
 const stopBlacklistPopoverListeners = () => {
   document.removeEventListener('pointerdown', handleBlacklistPopoverPointerDown)
   document.removeEventListener('keydown', handleBlacklistPopoverKeydown)
+  window.removeEventListener('scroll', updateBlacklistPopoverPosition, true)
+  window.removeEventListener('resize', updateBlacklistPopoverPosition)
 }
 
 const handleQuotaErrorPopoverPointerDown = (event: PointerEvent) => {
@@ -1310,6 +1409,49 @@ const updateQuotaErrorPopoverPosition = () => {
   }
 }
 
+const updateBlacklistPopoverPosition = () => {
+  if (!blacklistPopoverOpen.value || typeof window === 'undefined') return
+  const anchor = blacklistTriggerRef.value
+  const panel = blacklistPopoverPanelRef.value
+  if (!anchor?.isConnected || !panel?.isConnected) {
+    closeBlacklistPopover()
+    return
+  }
+
+  const anchorRect = anchor.getBoundingClientRect()
+  const panelRect = panel.getBoundingClientRect()
+  const layout = calculateProviderQuotaErrorPopoverLayout(
+    {
+      top: anchorRect.top,
+      bottom: anchorRect.bottom,
+      left: anchorRect.left,
+      width: anchorRect.width,
+      height: anchorRect.height,
+    },
+    {
+      width: panelRect.width,
+      height: panelRect.height,
+    },
+    {
+      width: window.innerWidth,
+      height: window.innerHeight,
+    },
+    {
+      maxWidth: BLACKLIST_POPOVER_MAX_WIDTH,
+      maxHeight: BLACKLIST_POPOVER_MAX_HEIGHT,
+    },
+  )
+
+  blacklistPopoverPlacement.value = layout.placement
+  blacklistPopoverStyle.value = {
+    top: `${layout.top}px`,
+    left: `${layout.left}px`,
+    width: `${layout.width}px`,
+    maxHeight: `${layout.maxHeight}px`,
+    visibility: 'visible',
+  }
+}
+
 const stopQuotaErrorPopoverListeners = () => {
   document.removeEventListener('pointerdown', handleQuotaErrorPopoverPointerDown)
   document.removeEventListener('keydown', handleQuotaErrorPopoverKeydown)
@@ -1317,11 +1459,21 @@ const stopQuotaErrorPopoverListeners = () => {
   window.removeEventListener('resize', updateQuotaErrorPopoverPosition)
 }
 
-watch(blacklistPopoverOpen, (open) => {
+watch(blacklistPopoverOpen, async (open) => {
   stopBlacklistPopoverListeners()
   if (open) {
     document.addEventListener('pointerdown', handleBlacklistPopoverPointerDown)
     document.addEventListener('keydown', handleBlacklistPopoverKeydown)
+    window.addEventListener('scroll', updateBlacklistPopoverPosition, true)
+    window.addEventListener('resize', updateBlacklistPopoverPosition)
+    blacklistPopoverStyle.value = { visibility: 'hidden' }
+    await nextTick()
+    if (!blacklistPopoverOpen.value) return
+    updateBlacklistPopoverPosition()
+    if (blacklistPopoverFocusOnOpen.value) {
+      blacklistPopoverPanelRef.value?.focus({ preventScroll: true })
+      blacklistPopoverFocusOnOpen.value = false
+    }
   }
 })
 
