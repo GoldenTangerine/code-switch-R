@@ -19,6 +19,9 @@ export function useLogsAutoRefresh(
   const countdown = ref(resolveRefreshInterval())
   let timer: number | undefined
   let isRefreshing = false
+  let ready = false
+  let pageActive = true
+  let generation = 0
 
   const resetTimer = () => {
     countdown.value = resolveRefreshInterval()
@@ -37,8 +40,9 @@ export function useLogsAutoRefresh(
   }
 
   const startCountdown = () => {
+    ready = true
     stopCountdown()
-    if (typeof window === 'undefined') return
+    if (typeof window === 'undefined' || !pageActive) return
     if (resolveRefreshInterval() === 0) {
       resetTimer()
       return
@@ -60,6 +64,30 @@ export function useLogsAutoRefresh(
     }
   }
 
+  const startCountdownForGeneration = (expectedGeneration: number) => {
+    if (!pageActive || generation !== expectedGeneration) return
+    startCountdown()
+  }
+
+  const setPageActive = (nextActive: boolean) => {
+    if (pageActive === nextActive) return
+
+    pageActive = nextActive
+    const expectedGeneration = ++generation
+    if (!pageActive) {
+      stopCountdown()
+      return
+    }
+    if (!ready || typeof window === 'undefined' || resolveRefreshInterval() === 0) {
+      resetTimer()
+      return
+    }
+    void triggerRefresh().then(
+      () => startCountdownForGeneration(expectedGeneration),
+      () => startCountdownForGeneration(expectedGeneration),
+    )
+  }
+
   const manualRefresh = () => triggerRefresh()
 
   const restartCountdown = () => {
@@ -72,6 +100,7 @@ export function useLogsAutoRefresh(
     resetTimer,
     startCountdown,
     stopCountdown,
+    setPageActive,
     manualRefresh,
     restartCountdown,
   }

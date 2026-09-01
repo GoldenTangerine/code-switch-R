@@ -266,7 +266,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { Events, System } from '@wailsio/runtime'
@@ -516,6 +516,7 @@ const {
   resetTimer,
   startCountdown,
   stopCountdown,
+  setPageActive,
   manualRefresh: refreshDashboard,
   restartCountdown,
 } = useLogsAutoRefresh(loadDashboardIfIdle, { intervalSeconds: refreshIntervalSeconds })
@@ -745,6 +746,14 @@ watch(
   },
 )
 
+onActivated(() => {
+  setPageActive(true)
+})
+
+onDeactivated(() => {
+  setPageActive(false)
+})
+
 onMounted(async () => {
   startThemeObserver()
   window.addEventListener('scroll', handleViewportChange, true)
@@ -764,6 +773,7 @@ onUnmounted(() => {
   disposeStorageModalController()
   window.removeEventListener('scroll', handleViewportChange, true)
   window.removeEventListener('resize', handleViewportChange)
+  setPageActive(false)
   stopCountdown()
   unsubscribeModelPricingChanged?.()
   unsubscribeModelPricingChanged = null
