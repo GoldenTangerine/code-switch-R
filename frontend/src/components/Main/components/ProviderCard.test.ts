@@ -8,8 +8,11 @@
  * @FilePath: frontend/src/components/Main/components/ProviderCard.test.ts
  */
 
+// @vitest-environment happy-dom
+
 import { readFileSync } from 'node:fs'
-import { createSSRApp, h } from 'vue'
+import { resolve } from 'node:path'
+import { createApp, createSSRApp, h, nextTick } from 'vue'
 import { createI18n } from 'vue-i18n'
 import { renderToString } from 'vue/server-renderer'
 import { describe, expect, it } from 'vitest'
@@ -18,8 +21,18 @@ import zh from '../../../locales/zh.json'
 import type { ProviderCardViewModel } from '../types'
 import ProviderCard from './ProviderCard.vue'
 
-const providerCardStyleSource = readFileSync(new URL('../styles/provider-card.css', import.meta.url), 'utf8')
-const providerCardComponentSource = readFileSync(new URL('./ProviderCard.vue', import.meta.url), 'utf8')
+const providerCardStyleSource = readFileSync(resolve(process.cwd(), 'src/components/Main/styles/provider-card.css'), 'utf8')
+const providerCardComponentSource = readFileSync(resolve(process.cwd(), 'src/components/Main/components/ProviderCard.vue'), 'utf8')
+
+const createTestI18n = () => createI18n({
+  legacy: false,
+  locale: 'zh',
+  missingWarn: false,
+  fallbackWarn: false,
+  messages: {
+    zh,
+  },
+})
 
 const card: AutomationCard = {
   id: 102,
@@ -73,15 +86,6 @@ const renderCard = async (
     forcedPrioritySaving: boolean
   }> = {},
 ) => {
-  const i18n = createI18n({
-    legacy: false,
-    locale: 'zh',
-    missingWarn: false,
-    fallbackWarn: false,
-    messages: {
-      zh,
-    },
-  })
   const app = createSSRApp({
     render: () => h(ProviderCard, {
       viewModel,
@@ -92,7 +96,7 @@ const renderCard = async (
       formatBlacklistCountdown: (seconds: number) => `${Math.floor(seconds / 60)}分${seconds % 60}秒`,
     }),
   })
-  app.use(i18n)
+  app.use(createTestI18n())
   return renderToString(app)
 }
 
@@ -181,34 +185,106 @@ describe('ProviderCard display states', () => {
     expect(html).not.toContain('blacklist-banner')
   })
 
-  it('keeps the blacklist popover open across its full trigger and teleported panel boundary', () => {
+  it('uses click-only blacklist details with a pointer cursor', () => {
+    const blacklistInlineRule = providerCardStyleSource.match(/\.card-blacklist-inline\s*\{[^}]*\}/)?.[0] ?? ''
     const blacklistTriggerRule = providerCardStyleSource.match(/\.card-blacklist-trigger\s*\{[^}]*\}/)?.[0] ?? ''
     const blacklistPopoverRule = providerCardStyleSource.match(/\.card-blacklist-popover\s*\{[^}]*\}/)?.[0] ?? ''
-    const blacklistBridgeRule = providerCardStyleSource.match(/\.card-blacklist-popover::before\s*\{[^}]*\}/)?.[0] ?? ''
     const blacklistBodyRule = providerCardStyleSource.match(/\.card-blacklist-popover__body\s*\{[^}]*\}/)?.[0] ?? ''
     const blacklistActionsRule = providerCardStyleSource.match(/\.card-blacklist-popover__actions\s*\{[^}]*\}/)?.[0] ?? ''
 
-    expect(providerCardComponentSource).toContain('@mouseenter="handleBlacklistPopoverPointerEnter"')
-    expect(providerCardComponentSource).toContain('@mouseleave="handleBlacklistPopoverPointerLeave"')
+    expect(providerCardComponentSource).toContain('@click.stop="toggleBlacklistPopover"')
+    expect(providerCardComponentSource).not.toContain('handleBlacklistPopoverPointerEnter')
+    expect(providerCardComponentSource).not.toContain('handleBlacklistPopoverPointerLeave')
+    expect(providerCardComponentSource).not.toContain('blacklistPopoverInteraction')
     expect(providerCardComponentSource).toContain('<Teleport to="body">')
     expect(providerCardComponentSource).toContain('ref="blacklistPopoverPanelRef"')
-    expect(providerCardComponentSource).toContain('BLACKLIST_POPOVER_HOVER_OPEN_DELAY_MS = 100')
-    expect(providerCardComponentSource).toContain('BLACKLIST_POPOVER_HOVER_CLOSE_DELAY_MS = 150')
+    expect(providerCardComponentSource).toContain('blacklistPopoverOpen.value = true')
+    expect(providerCardComponentSource).toContain('closeQuotaErrorPopover()')
     expect(providerCardComponentSource).toContain('BLACKLIST_POPOVER_MAX_HEIGHT = 360')
     expect(providerCardComponentSource).toContain('viewModel.blacklistStatus.blacklistedAt')
     expect(providerCardComponentSource).toContain('viewModel.blacklistStatus.blacklistedUntil')
+    expect(blacklistInlineRule).not.toContain('position: relative')
     expect(blacklistTriggerRule).toContain('padding: 3px 7px')
     expect(blacklistTriggerRule).toContain('border: 1px solid')
+    expect(blacklistTriggerRule).toContain('cursor: pointer')
     expect(blacklistPopoverRule).toContain('max-height: 360px')
     expect(blacklistPopoverRule).toContain('overflow: visible')
-    expect(blacklistBridgeRule).toContain('height: 9px')
+    expect(providerCardStyleSource).not.toContain('.card-blacklist-popover::before')
     expect(blacklistBodyRule).toContain('overflow-y: auto')
     expect(blacklistBodyRule).toContain('user-select: text')
     expect(blacklistActionsRule).toContain('flex: 0 0 auto')
     expect(providerCardStyleSource).toContain('.card-blacklist-popover.theme-dark .unblock-btn.secondary')
     expect(providerCardStyleSource).not.toContain('--mac-text-primary')
-    expect(providerCardComponentSource).toContain('onOpen: closeQuotaErrorPopover')
     expect(providerCardComponentSource).toContain('onOpen: closeBlacklistPopover')
+  })
+
+  it('opens and closes the teleported blacklist details through real user events', async () => {
+    const root = document.createElement('div')
+    document.body.append(root)
+    const app = createApp(ProviderCard, {
+      viewModel: baseViewModel({
+        blacklistStatus: {
+          platform: 'claude',
+          providerName: 'kimi',
+          failureCount: 2,
+          failureThreshold: 5,
+          healthFailureCount: 1,
+          healthFailureThreshold: 4,
+          isBlacklisted: true,
+          remainingSeconds: 65,
+          blacklistLevel: 1,
+          blacklistTriggerSource: 'request',
+          blacklistReason: 'upstream timeout',
+          forgivenessRemaining: 0,
+        },
+      }),
+      activeTab: 'claude',
+      activeProxyState: false,
+      forcedPrioritySaving: false,
+      resolvedTheme: 'light',
+      formatBlacklistCountdown: (seconds: number) => `${Math.floor(seconds / 60)}分${seconds % 60}秒`,
+    })
+    app.use(createTestI18n())
+    app.mount(root)
+
+    const trigger = root.querySelector<HTMLButtonElement>('.card-blacklist-trigger')
+    const detailsSelector = '#provider-blacklist-details-claude-102'
+    const clickTrigger = async () => {
+      trigger?.click()
+      await nextTick()
+      await nextTick()
+    }
+
+    try {
+      expect(trigger).not.toBeNull()
+      expect(document.body.querySelector(detailsSelector)).toBeNull()
+
+      await clickTrigger()
+      const details = document.body.querySelector<HTMLElement>(detailsSelector)
+      expect(trigger?.getAttribute('aria-expanded')).toBe('true')
+      expect(details).not.toBeNull()
+      expect(root.contains(details)).toBe(false)
+      expect(details?.style.visibility).toBe('visible')
+
+      await clickTrigger()
+      expect(trigger?.getAttribute('aria-expanded')).toBe('false')
+      expect(document.body.querySelector(detailsSelector)).toBeNull()
+
+      await clickTrigger()
+      document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
+      await nextTick()
+      expect(document.body.querySelector(detailsSelector)).toBeNull()
+
+      await clickTrigger()
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+      await nextTick()
+      await nextTick()
+      expect(document.body.querySelector(detailsSelector)).toBeNull()
+      expect(document.activeElement).toBe(trigger)
+    } finally {
+      app.unmount()
+      root.remove()
+    }
   })
 
   it('replaces the normal switch with quota exhaustion actions when auto-disabled', async () => {
@@ -414,7 +490,7 @@ describe('ProviderCard display states', () => {
 
     expect(html).toContain('forced-priority-badge')
     expect(html).toContain('>强制</span>')
-    expect(html).toContain('is-active ghost-icon forced-priority-btn')
+    expect(html).toMatch(/class="(?=[^"]*\bis-active\b)(?=[^"]*\bghost-icon\b)(?=[^"]*\bforced-priority-btn\b)[^"]*"/)
     expect(html).toContain('aria-pressed="true"')
     expect(html).toContain('aria-label="取消强制优先"')
     expect(html).toContain('aria-busy="false"')
@@ -428,7 +504,7 @@ describe('ProviderCard display states', () => {
       forcedPrioritySaving: true,
     })
 
-    expect(html).toContain('is-active ghost-icon forced-priority-btn')
+    expect(html).toMatch(/class="(?=[^"]*\bis-active\b)(?=[^"]*\bghost-icon\b)(?=[^"]*\bforced-priority-btn\b)[^"]*"/)
     expect(html).toContain('disabled')
     expect(html).toContain('aria-label="保存中"')
     expect(html).toContain('aria-busy="true"')

@@ -649,7 +649,6 @@
 }
 
 .card-blacklist-inline {
-  position: relative;
   display: inline-flex;
   align-items: center;
   min-width: 0;
@@ -715,22 +714,6 @@
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   font-size: 0.75rem;
   line-height: 1.45;
-}
-
-.card-blacklist-popover::before {
-  content: '';
-  position: absolute;
-  right: 0;
-  left: 0;
-  height: 9px;
-}
-
-.card-blacklist-popover--below::before {
-  top: -9px;
-}
-
-.card-blacklist-popover--above::before {
-  bottom: -9px;
 }
 
 .card-blacklist-popover:focus-visible {
