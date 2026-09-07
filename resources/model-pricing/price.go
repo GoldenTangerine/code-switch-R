@@ -1,3 +1,12 @@
+/*
+@name: 模型价格计算
+@Descripttion: 加载模型价格并计算请求费用。
+@version: 1.0.0
+@Author: sm
+@Date: 2026-09-07 11:13:46
+@LastEditTime: 2026-09-07 11:13:46
+@FilePath: resources/model-pricing/price.go
+*/
 package modelpricing
 
 import (
@@ -31,32 +40,33 @@ type Service struct {
 
 // PricingEntry 映射 JSON 内的字段。
 type PricingEntry struct {
-	InputCostPerToken                   float64 `json:"input_cost_per_token"`
-	OutputCostPerToken                  float64 `json:"output_cost_per_token"`
-	OutputCostPerReasoningToken         float64 `json:"output_cost_per_reasoning_token"`
-	CacheCreationInputTokenCost         float64 `json:"cache_creation_input_token_cost"`
-	CacheCreationInputTokenCostAbove1Hr float64 `json:"cache_creation_input_token_cost_above_1hr"`
-	CacheCreationInputTokenCostAbove200 float64 `json:"cache_creation_input_token_cost_above_200k_tokens"`
-	CacheReadInputTokenCost             float64 `json:"cache_read_input_token_cost"`
-	InputCostPerTokenAbove200k          float64 `json:"input_cost_per_token_above_200k_tokens"`
-	InputCostPerTokenAbove128k          float64 `json:"input_cost_per_token_above_128k_tokens"`
-	OutputCostPerTokenAbove200k         float64 `json:"output_cost_per_token_above_200k_tokens"`
-	GroupMultiplier                     float64 `json:"group_multiplier,omitempty"`
-	HasGroupMultiplier                  bool    `json:"has_group_multiplier,omitempty"`
-	MaxInputTokens                      int64   `json:"-"`
-	MaxTokens                           int64   `json:"-"`
-	SupportsComputerUse                 bool    `json:"-"`
-	SupportsFunctionCalling             bool    `json:"-"`
-	SupportsPDFInput                    bool    `json:"-"`
-	SupportsPromptCaching               bool    `json:"-"`
-	SupportsReasoning                   bool    `json:"-"`
-	SupportsResponseSchema              bool    `json:"-"`
-	SupportsVision                      bool    `json:"-"`
-	HasInputCostPerToken                bool    `json:"-"`
-	HasOutputCostPerToken               bool    `json:"-"`
-	HasOutputCostPerReasoningToken      bool    `json:"-"`
-	HasCacheCreationInputTokenCost      bool    `json:"-"`
-	HasCacheReadInputTokenCost          bool    `json:"-"`
+	CloudPricing                        *CloudPricingRules `json:"cloud_pricing,omitempty"`
+	InputCostPerToken                   float64            `json:"input_cost_per_token"`
+	OutputCostPerToken                  float64            `json:"output_cost_per_token"`
+	OutputCostPerReasoningToken         float64            `json:"output_cost_per_reasoning_token"`
+	CacheCreationInputTokenCost         float64            `json:"cache_creation_input_token_cost"`
+	CacheCreationInputTokenCostAbove1Hr float64            `json:"cache_creation_input_token_cost_above_1hr"`
+	CacheCreationInputTokenCostAbove200 float64            `json:"cache_creation_input_token_cost_above_200k_tokens"`
+	CacheReadInputTokenCost             float64            `json:"cache_read_input_token_cost"`
+	InputCostPerTokenAbove200k          float64            `json:"input_cost_per_token_above_200k_tokens"`
+	InputCostPerTokenAbove128k          float64            `json:"input_cost_per_token_above_128k_tokens"`
+	OutputCostPerTokenAbove200k         float64            `json:"output_cost_per_token_above_200k_tokens"`
+	GroupMultiplier                     float64            `json:"group_multiplier,omitempty"`
+	HasGroupMultiplier                  bool               `json:"has_group_multiplier,omitempty"`
+	MaxInputTokens                      int64              `json:"max_input_tokens,omitempty"`
+	MaxTokens                           int64              `json:"max_tokens,omitempty"`
+	SupportsComputerUse                 bool               `json:"supports_computer_use,omitempty"`
+	SupportsFunctionCalling             bool               `json:"supports_function_calling,omitempty"`
+	SupportsPDFInput                    bool               `json:"supports_pdf_input,omitempty"`
+	SupportsPromptCaching               bool               `json:"supports_prompt_caching,omitempty"`
+	SupportsReasoning                   bool               `json:"supports_reasoning,omitempty"`
+	SupportsResponseSchema              bool               `json:"supports_response_schema,omitempty"`
+	SupportsVision                      bool               `json:"supports_vision,omitempty"`
+	HasInputCostPerToken                bool               `json:"-"`
+	HasOutputCostPerToken               bool               `json:"-"`
+	HasOutputCostPerReasoningToken      bool               `json:"-"`
+	HasCacheCreationInputTokenCost      bool               `json:"-"`
+	HasCacheReadInputTokenCost          bool               `json:"-"`
 }
 
 func (p *PricingEntry) UnmarshalJSON(data []byte) error {
@@ -123,6 +133,13 @@ func (p *PricingEntry) UnmarshalJSON(data []byte) error {
 	p.SupportsReasoning = parseFlexibleBool(raw.SupportsReasoning)
 	p.SupportsResponseSchema = parseFlexibleBool(raw.SupportsResponseSchema)
 	p.SupportsVision = parseFlexibleBool(raw.SupportsVision)
+	if p.CloudPricing != nil {
+		_, p.HasInputCostPerToken = p.CloudPricing.Charges["prompt"]
+		_, p.HasOutputCostPerToken = p.CloudPricing.Charges["completion"]
+		_, p.HasOutputCostPerReasoningToken = p.CloudPricing.Charges["reasoning"]
+		_, p.HasCacheCreationInputTokenCost = p.CloudPricing.Charges["cache_write"]
+		_, p.HasCacheReadInputTokenCost = p.CloudPricing.Charges["cache_read"]
+	}
 	return nil
 }
 
@@ -156,6 +173,7 @@ func parseFlexibleBool(raw json.RawMessage) bool {
 
 // UsageSnapshot 描述一次请求的 token 用量。
 type UsageSnapshot struct {
+	Context           *PricingContext
 	InputTokens       int
 	OutputTokens      int
 	ReasoningTokens   int
@@ -172,19 +190,20 @@ type CacheCreationDetail struct {
 
 // CostBreakdown 表示一次费用计算的结果。
 type CostBreakdown struct {
-	InputCost       float64 `json:"input_cost"`
-	OutputCost      float64 `json:"output_cost"`
-	ReasoningCost   float64 `json:"reasoning_cost"`
-	CacheCreateCost float64 `json:"cache_create_cost"`
-	CacheReadCost   float64 `json:"cache_read_cost"`
-	Ephemeral5mCost float64 `json:"ephemeral_5m_cost"`
-	Ephemeral1hCost float64 `json:"ephemeral_1h_cost"`
-	TotalCost       float64 `json:"total_cost"`
-	HasPricing      bool    `json:"has_pricing"`
-	IsLongContext   bool    `json:"is_long_context"`
-	PricingModel    string  `json:"pricing_model"`
-	FuzzyMatched    bool    `json:"fuzzy_matched"`
-	GroupMultiplier float64 `json:"group_multiplier"`
+	PricingSnapshot *PricingSnapshot `json:"pricing_snapshot,omitempty"`
+	InputCost       float64          `json:"input_cost"`
+	OutputCost      float64          `json:"output_cost"`
+	ReasoningCost   float64          `json:"reasoning_cost"`
+	CacheCreateCost float64          `json:"cache_create_cost"`
+	CacheReadCost   float64          `json:"cache_read_cost"`
+	Ephemeral5mCost float64          `json:"ephemeral_5m_cost"`
+	Ephemeral1hCost float64          `json:"ephemeral_1h_cost"`
+	TotalCost       float64          `json:"total_cost"`
+	HasPricing      bool             `json:"has_pricing"`
+	IsLongContext   bool             `json:"is_long_context"`
+	PricingModel    string           `json:"pricing_model"`
+	FuzzyMatched    bool             `json:"fuzzy_matched"`
+	GroupMultiplier float64          `json:"group_multiplier"`
 }
 
 // LongContextPricing 描述 1M 上下文模型的单价。
@@ -241,6 +260,9 @@ func (s *Service) CalculateCost(model string, usage UsageSnapshot) CostBreakdown
 	if entry == nil && !strings.Contains(strings.ToLower(model), "[1m]") {
 		return breakdown
 	}
+	if entry != nil && entry.CloudPricing != nil {
+		return calculateCloudCost(entry, usage, breakdown)
+	}
 	longTier, useLong := s.longContextTier(model, usage)
 	if entry == nil {
 		entry = &PricingEntry{}
@@ -253,14 +275,20 @@ func (s *Service) CalculateCost(model string, usage UsageSnapshot) CostBreakdown
 	if useLong {
 		breakdown.IsLongContext = true
 		breakdown.InputCost = float64(usage.InputTokens) * longTier.Input
-		breakdown.OutputCost = float64(usage.OutputTokens) * longTier.Output
+		breakdown.OutputCost = float64(usage.BillableOutputTokens()) * longTier.Output
 	} else {
 		breakdown.InputCost = float64(usage.InputTokens) * entry.InputCostPerToken
-		breakdown.OutputCost = float64(usage.OutputTokens) * entry.OutputCostPerToken
+		breakdown.OutputCost = float64(usage.BillableOutputTokens()) * entry.OutputCostPerToken
 	}
 	// Reasoning tokens cost (for Gemini thinking models, Codex o1/o3, etc.)
 	if usage.ReasoningTokens > 0 && entry.OutputCostPerReasoningToken > 0 {
 		breakdown.ReasoningCost = float64(usage.ReasoningTokens) * entry.OutputCostPerReasoningToken
+	} else if usage.HasReasoningTokenMode() && !entry.HasOutputCostPerReasoningToken {
+		price := entry.OutputCostPerToken
+		if useLong {
+			price = longTier.Output
+		}
+		breakdown.ReasoningCost = float64(usage.ReasoningTokens) * price
 	}
 	cacheCreateTokens, cache1hTokens := resolveCacheTokens(usage)
 	cachePricingModel := model
@@ -744,6 +772,7 @@ func (s *Service) Clone() *Service {
 			continue
 		}
 		copied := *entry
+		copied.CloudPricing = entry.CloudPricing.Clone()
 		pricing[key] = &copied
 	}
 
@@ -791,7 +820,9 @@ func (s *Service) PricingEntryExact(model string) (PricingEntry, bool) {
 	if !ok || entry == nil {
 		return PricingEntry{}, false
 	}
-	return *entry, true
+	copied := *entry
+	copied.CloudPricing = entry.CloudPricing.Clone()
+	return copied, true
 }
 
 // Ephemeral1hCostPerToken 返回 1h cache 创建的单价（美元/Token），包含 fallback 逻辑。
@@ -817,6 +848,7 @@ func (s *Service) ApplyOverrides(pricingOverrides map[string]PricingEntry, ephem
 
 	for model, entry := range pricingOverrides {
 		item := entry
+		item.CloudPricing = entry.CloudPricing.Clone()
 		// 兼容：用户只填了 input/output 时，自动补齐 cache 定价（与默认行为一致）。
 		ensurePricingEntryDefaults(&item)
 		s.pricingMap[model] = &item
@@ -837,7 +869,9 @@ func ensurePricingEntryDefaults(entry *PricingEntry) {
 	if entry == nil {
 		return
 	}
-	ensureCachePricing(entry)
+	if entry.CloudPricing == nil {
+		ensureCachePricing(entry)
+	}
 	if !entry.HasGroupMultiplier && entry.GroupMultiplier != 0 {
 		entry.HasGroupMultiplier = true
 	}

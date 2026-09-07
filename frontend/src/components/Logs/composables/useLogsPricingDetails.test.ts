@@ -1,8 +1,18 @@
+/**
+@name: 模型价格与费用展示
+@Descripttion: 维护模型价格规则及请求费用展示。
+@version: 1.0.0
+@Author: sm
+@Date: 2026-09-07 11:13:10
+@LastEditTime: 2026-09-07 11:13:10
+@FilePath: frontend/src/components/Logs/composables/useLogsPricingDetails.test.ts
+*/
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import type { RequestLog } from '../../../services/logs'
 import { useLogsPricingDetails } from './useLogsPricingDetails'
 
-vi.mock('../../../services/modelPricing', () => ({
+vi.mock('../../../services/modelPricing', async () => ({
+  ...await vi.importActual<typeof import('../../../services/modelPricing')>('../../../services/modelPricing'),
   listModelPricing: vi.fn(),
 }))
 
@@ -99,6 +109,43 @@ function createRequestLog(model: string, overrides: Partial<RequestLog> = {}): R
 }
 
 describe('useLogsPricingDetails', () => {
+  it('uses persisted mixed field prices including explicit zero without loading current prices', () => {
+    const { buildCostTooltipDetail, buildModelInfoTooltipDetail } = useLogsPricingDetails({ t: createTranslate() })
+    const item = createRequestLog('cloud-model', {
+      price_source: 'mixed',
+      pricing_snapshot: {
+        track_label: 'Priority > 128K',
+        unit_prices: { prompt: 0, completion: 0.000012 },
+        field_sources: { prompt: 'provider_api', completion: 'cloud' },
+        complete: true,
+      },
+    })
+    const detail = buildCostTooltipDetail(item)
+    expect(detail.hasPricing).toBe(true)
+    expect(detail.priceLines).toHaveLength(2)
+    expect(detail.priceLines[0].value).toContain('$0')
+    expect(detail.priceLines[0].value).toContain('providerApi')
+    expect(detail.priceLines[1].value).toContain('cloud')
+    expect(detail.note).toContain('pricingRules.track')
+    expect(buildModelInfoTooltipDetail(item).rows.some(row => row.value.includes('priceSourceValues.mixed'))).toBe(true)
+    expect(listModelPricing).not.toHaveBeenCalled()
+  })
+
+  it('keeps known field prices visible for incomplete snapshots', () => {
+    const { buildCostTooltipDetail } = useLogsPricingDetails({ t: createTranslate() })
+    const detail = buildCostTooltipDetail(createRequestLog('partial-model', {
+      pricing_snapshot: { unit_prices: { prompt: 0 }, field_sources: { prompt: 'cloud' }, complete: false },
+    }))
+    expect(detail.hasPricing).toBe(true)
+    expect(detail.priceLines).toHaveLength(1)
+    expect(detail.note).toContain('pricingRules.incomplete')
+    const emptyDetail = buildCostTooltipDetail(createRequestLog('missing-model', {
+      pricing_snapshot: { unit_prices: {}, field_sources: {}, complete: false },
+    }))
+    expect(emptyDetail.hasPricing).toBe(false)
+    expect(emptyDetail.priceLines).toEqual([])
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
   })

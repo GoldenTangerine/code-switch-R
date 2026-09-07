@@ -1548,9 +1548,29 @@
           "unknown": "未知"
         },
         "priceSourceValues": {
+          "mixed": "混合计价",
+          "cloud": "云端价格表",
           "providerApi": "接口模型价格",
           "builtin": "内置价格表",
           "none": "无可用价格"
+        },
+        "pricingRules": {
+          "input_tokens_above": "输入上下文 token",
+          "endpoint_matches": "操作",
+          "body_matches": "请求条件",
+          "header_matches": "请求头",
+          "serviceTier": "服务档位",
+          "title": "计费规则（{count}）",
+          "default": "默认",
+          "track": "命中规则：{label}",
+          "incomplete": "部分用量暂无可用价格",
+          "recorded": "已记录费用：{cost}",
+          "prompt": "输入",
+          "completion": "输出",
+          "reasoning": "推理",
+          "cache_read": "缓存读取",
+          "cache_write": "缓存创建（5 分钟）",
+          "cache_write_1h": "缓存创建（1 小时）"
         },
         "tooltipLabels": {
           "pricingSource": "计价来源",

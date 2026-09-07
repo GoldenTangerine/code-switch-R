@@ -1,3 +1,12 @@
+/*
+@name: 供应商模型价格
+@Descripttion: 获取供应商模型报价并保留价格字段存在性。
+@version: 1.0.0
+@Author: sm
+@Date: 2026-09-07 11:20:00
+@LastEditTime: 2026-09-07 11:20:00
+@FilePath: services/provider_model_pricing.go
+*/
 package services
 
 import (
@@ -5,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"sort"
 	"strings"
@@ -46,6 +56,12 @@ type ProviderModelPerCallPrice struct {
 }
 
 type ProviderModelPricingItem struct {
+	PriceFieldsKnown              bool                       `json:"priceFieldsKnown"`
+	HasInputPrice                 bool                       `json:"hasInputPrice"`
+	HasOutputPrice                bool                       `json:"hasOutputPrice"`
+	HasCacheCreatePrice           bool                       `json:"hasCacheCreatePrice"`
+	HasCacheReadPrice             bool                       `json:"hasCacheReadPrice"`
+	HasCacheCreate1hPrice         bool                       `json:"hasCacheCreate1hPrice"`
 	Model                         string                     `json:"model"`
 	DisplayName                   string                     `json:"displayName,omitempty"`
 	CreatedAt                     string                     `json:"createdAt,omitempty"`
@@ -121,6 +137,9 @@ type providerPricingResponse struct {
 }
 
 type providerModelPricing struct {
+	priceFields            map[string]bool
+	directInputUSDPerM     *float64
+	directOutputUSDPerM    *float64
 	ModelName              string                 `json:"model_name"`
 	ModelDescription       string                 `json:"model_description,omitempty"`
 	QuotaType              int                    `json:"quota_type"`
@@ -143,6 +162,47 @@ type providerModelPricing struct {
 	Capabilities           map[string]interface{} `json:"capabilities,omitempty"`
 }
 
+func (p *providerModelPricing) UnmarshalJSON(data []byte) error {
+	type alias providerModelPricing
+	var value alias
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	*p = providerModelPricing(value)
+	p.priceFields = make(map[string]bool)
+	for name, raw := range fields {
+		var number float64
+		if string(raw) != "null" && json.Unmarshal(raw, &number) == nil && validProviderPrice(number) {
+			p.priceFields[name] = true
+		}
+	}
+	return nil
+}
+
+func validProviderPrice(value float64) bool {
+	return value >= 0 && !math.IsNaN(value) && !math.IsInf(value, 0)
+}
+
+func (p providerModelPricing) hasPriceField(name string, value float64) bool {
+	if p.priceFields != nil {
+		return p.priceFields[name]
+	}
+	return value > 0 && validProviderPrice(value)
+}
+
+func (p providerModelPricing) cacheMultiplier(names []string, values []float64) (float64, bool) {
+	for i, name := range names {
+		if p.hasPriceField(name, values[i]) {
+			return values[i], true
+		}
+	}
+	return 0, false
+}
+
 type providerApiEnvelope[T any] struct {
 	Success bool   `json:"success"`
 	Data    T      `json:"data"`
@@ -153,9 +213,9 @@ type oneHubModelPricingItem struct {
 	Groups  []string `json:"groups"`
 	OwnedBy string   `json:"owned_by"`
 	Price   struct {
-		Type   string  `json:"type"` // tokens/times
-		Input  float64 `json:"input"`
-		Output float64 `json:"output"`
+		Type   string   `json:"type"` // tokens/times
+		Input  *float64 `json:"input"`
+		Output *float64 `json:"output"`
 	} `json:"price"`
 }
 
@@ -1332,17 +1392,21 @@ func transformOneHubPricing(models oneHubModelPricing, groupMap oneHubUserGroupM
 		if len(enableGroups) == 0 {
 			enableGroups = []string{"default"}
 		}
-		quotaType := 1
-		if strings.EqualFold(model.Price.Type, "tokens") {
-			quotaType = 0
+		quotaType := 0
+		if strings.EqualFold(model.Price.Type, "times") {
+			quotaType = 1
 		}
 
-		completionRatio := 1.0
-		if model.Price.Input > 0 {
-			completionRatio = model.Price.Output / model.Price.Input
+		completionRatio := 0.0
+		modelRatio := 0.0
+		if model.Price.Input != nil && validProviderPrice(*model.Price.Input) {
+			modelRatio = *model.Price.Input / 2
+			if *model.Price.Input > 0 && model.Price.Output != nil {
+				completionRatio = *model.Price.Output / *model.Price.Input
+			}
 		}
 
-		modelPriceRaw, _ := json.Marshal(map[string]float64{
+		modelPriceRaw, _ := json.Marshal(map[string]*float64{
 			"input":  model.Price.Input,
 			"output": model.Price.Output,
 		})
@@ -1350,7 +1414,9 @@ func transformOneHubPricing(models oneHubModelPricing, groupMap oneHubUserGroupM
 		data = append(data, providerModelPricing{
 			ModelName:              modelName,
 			QuotaType:              quotaType,
-			ModelRatio:             1,
+			ModelRatio:             modelRatio,
+			directInputUSDPerM:     model.Price.Input,
+			directOutputUSDPerM:    model.Price.Output,
 			ModelPrice:             modelPriceRaw,
 			OwnerBy:                model.OwnedBy,
 			CompletionRatio:        completionRatio,
@@ -1406,27 +1472,22 @@ func buildProviderModelPricingResponse(siteType SiteType, pricingSource string, 
 
 	items := make([]ProviderModelPricingItem, 0, len(pricing.Data))
 	for _, model := range pricing.Data {
+		cacheCreate, hasCacheCreate := model.cacheMultiplier([]string{"cache_create_multiplier", "cache_creation_ratio", "cache_create_ratio"}, []float64{model.CacheCreateMultiplier, model.CacheCreationRatio, model.CacheCreateRatio})
+		cacheRead, hasCacheRead := model.cacheMultiplier([]string{"cache_read_multiplier", "cache_read_ratio", "cache_ratio"}, []float64{model.CacheReadMultiplier, model.CacheReadRatio, model.CacheRatio})
 		item := ProviderModelPricingItem{
-			Model:           model.ModelName,
-			DisplayName:     model.DisplayName,
-			CreatedAt:       model.CreatedAt,
-			MaxInputTokens:  model.MaxInputTokens,
-			MaxTokens:       model.MaxTokens,
-			Capabilities:    model.Capabilities,
-			Description:     model.ModelDescription,
-			QuotaType:       model.QuotaType,
-			ModelRatio:      model.ModelRatio,
-			CompletionRatio: model.CompletionRatio,
-			CacheCreateMultiplier: firstPositiveFloat(
-				model.CacheCreateMultiplier,
-				model.CacheCreationRatio,
-				model.CacheCreateRatio,
-			),
-			CacheReadMultiplier: firstPositiveFloat(
-				model.CacheReadMultiplier,
-				model.CacheReadRatio,
-				model.CacheRatio,
-			),
+			PriceFieldsKnown:       true,
+			Model:                  model.ModelName,
+			DisplayName:            model.DisplayName,
+			CreatedAt:              model.CreatedAt,
+			MaxInputTokens:         model.MaxInputTokens,
+			MaxTokens:              model.MaxTokens,
+			Capabilities:           model.Capabilities,
+			Description:            model.ModelDescription,
+			QuotaType:              model.QuotaType,
+			ModelRatio:             model.ModelRatio,
+			CompletionRatio:        model.CompletionRatio,
+			CacheCreateMultiplier:  cacheCreate,
+			CacheReadMultiplier:    cacheRead,
 			OwnerBy:                model.OwnerBy,
 			EnableGroups:           model.EnableGroups,
 			SupportedEndpointTypes: model.SupportedEndpointTypes,
@@ -1435,8 +1496,24 @@ func buildProviderModelPricingResponse(siteType SiteType, pricingSource string, 
 		if model.QuotaType == 0 {
 			// 参考 all-api-hub：inputUSD(每 1M) = model_ratio × 2 × groupRatio
 			// outputUSD(每 1M) = model_ratio × completion_ratio × 2 × groupRatio
-			item.InputUSDPerM = model.ModelRatio * 2 * groupMultiplier
-			item.OutputUSDPerM = model.ModelRatio * model.CompletionRatio * 2 * groupMultiplier
+			item.HasInputPrice = model.hasPriceField("model_ratio", model.ModelRatio)
+			item.HasOutputPrice = item.HasInputPrice && model.hasPriceField("completion_ratio", model.CompletionRatio)
+			if item.HasInputPrice {
+				item.InputUSDPerM = model.ModelRatio * 2 * groupMultiplier
+			}
+			if item.HasOutputPrice {
+				item.OutputUSDPerM = model.ModelRatio * model.CompletionRatio * 2 * groupMultiplier
+			}
+			if model.directInputUSDPerM != nil && validProviderPrice(*model.directInputUSDPerM) {
+				item.InputUSDPerM = *model.directInputUSDPerM * groupMultiplier
+				item.HasInputPrice = true
+			}
+			if model.directOutputUSDPerM != nil && validProviderPrice(*model.directOutputUSDPerM) {
+				item.OutputUSDPerM = *model.directOutputUSDPerM * groupMultiplier
+				item.HasOutputPrice = true
+			}
+			item.HasCacheCreatePrice = item.HasInputPrice && hasCacheCreate
+			item.HasCacheReadPrice = item.HasInputPrice && hasCacheRead
 		} else {
 			item.PerCallPrice = parsePerCallPrice(model.ModelPrice, groupMultiplier)
 		}
@@ -1465,23 +1542,33 @@ func parsePerCallPrice(raw json.RawMessage, groupMultiplier float64) *ProviderMo
 
 	// number
 	var numberValue float64
-	if err := json.Unmarshal(raw, &numberValue); err == nil {
+	if err := json.Unmarshal(raw, &numberValue); err == nil && validProviderPrice(numberValue) {
 		unified := numberValue * groupMultiplier
 		return &ProviderModelPerCallPrice{Unified: &unified}
 	}
 
 	// { input, output }
 	var pair struct {
-		Input  float64 `json:"input"`
-		Output float64 `json:"output"`
+		Input  *float64 `json:"input"`
+		Output *float64 `json:"output"`
 	}
 	if err := json.Unmarshal(raw, &pair); err != nil {
 		return nil
 	}
 
-	input := pair.Input * groupMultiplier * doneHubTokenToCallRatio
-	output := pair.Output * groupMultiplier * doneHubTokenToCallRatio
-	return &ProviderModelPerCallPrice{Input: &input, Output: &output}
+	result := &ProviderModelPerCallPrice{}
+	if pair.Input != nil && validProviderPrice(*pair.Input) {
+		input := *pair.Input * groupMultiplier * doneHubTokenToCallRatio
+		result.Input = &input
+	}
+	if pair.Output != nil && validProviderPrice(*pair.Output) {
+		output := *pair.Output * groupMultiplier * doneHubTokenToCallRatio
+		result.Output = &output
+	}
+	if result.Input == nil && result.Output == nil {
+		return nil
+	}
+	return result
 }
 
 func fetchOpenAIModels(client *http.Client, apiURL, apiKey, authType string, debug *ProviderModelPricingDebug) ([]ProviderModelPricingItem, error) {
@@ -1563,13 +1650,14 @@ func fetchOpenAIModels(client *http.Client, apiURL, apiKey, authType string, deb
 			createdAt = time.Unix(item.Created, 0).UTC().Format(time.RFC3339)
 		}
 		models = append(models, ProviderModelPricingItem{
-			Model:          modelID,
-			DisplayName:    strings.TrimSpace(item.DisplayName),
-			CreatedAt:      createdAt,
-			MaxInputTokens: item.MaxInputTokens,
-			MaxTokens:      item.MaxTokens,
-			Capabilities:   item.Capabilities,
-			QuotaType:      -1,
+			PriceFieldsKnown: true,
+			Model:            modelID,
+			DisplayName:      strings.TrimSpace(item.DisplayName),
+			CreatedAt:        createdAt,
+			MaxInputTokens:   item.MaxInputTokens,
+			MaxTokens:        item.MaxTokens,
+			Capabilities:     item.Capabilities,
+			QuotaType:        -1,
 		})
 	}
 	appendProviderModelPricingDebugAttempt(debug, attempt)

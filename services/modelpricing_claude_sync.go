@@ -1,3 +1,12 @@
+/*
+@name: Claude 官方价格同步
+@Descripttion: 同步官方单价并隔离其他来源的计费规则。
+@version: 1.0.0
+@Author: sm
+@Date: 2026-09-07 11:45:00
+@LastEditTime: 2026-09-07 11:45:00
+@FilePath: services/modelpricing_claude_sync.go
+*/
 package services
 
 import (
@@ -202,6 +211,7 @@ func (mps *ModelPricingService) SyncClaudeOfficialPricing() (ModelPricingSyncRes
 			}
 		}
 
+		entry.CloudPricing = nil
 		entry.InputCostPerToken = pricing.InputPerToken
 		entry.HasInputCostPerToken = true
 		entry.OutputCostPerToken = pricing.OutputPerToken
@@ -219,7 +229,7 @@ func (mps *ModelPricingService) SyncClaudeOfficialPricing() (ModelPricingSyncRes
 			UpdatedAt: result.SyncedAt,
 		}
 
-		changed := !hadPriceOverride ||
+		changed := !hadPriceOverride || oldEntry.CloudPricing != nil ||
 			!pricingEntriesAlmostEqual(oldEntry, entry) ||
 			!hadEphemeralOverride ||
 			!floatAlmostEqual(oldEphemeral, pricing.CacheCreate1hPerToken) ||

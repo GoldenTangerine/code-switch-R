@@ -1,3 +1,12 @@
+/*
+@name: 供应商请求转发
+@Descripttion: 转发供应商请求并记录用量与实际计费快照。
+@version: 1.0.0
+@Author: sm
+@Date: 2026-09-07 11:25:11
+@LastEditTime: 2026-09-07 11:25:11
+@FilePath: services/providerrelay.go
+*/
 package services
 
 import (
@@ -5049,6 +5058,7 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 			requestLog.Ephemeral5mTokens,
 			requestLog.Ephemeral1hTokens,
 			requestLog.CacheReadTokens,
+			requestLog.PricingContext,
 		)
 		applyRequestLogCostResult(requestLog, costResult)
 		prepareRequestLogPayloadForPersistence(requestLog)
@@ -5079,8 +5089,8 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 					provider_per_call_unified, provider_per_call_input, provider_per_call_output,
 					provider_per_call_unified_set, provider_per_call_input_set, provider_per_call_output_set,
 					request_body, response_body, request_body_truncated, response_body_truncated, payload_bytes, payload_captured,
-					reasoning_effort_source, data_source, dedup_core
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+					reasoning_effort_source, data_source, dedup_core, pricing_snapshot
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			`,
 			requestLog.Platform,
 			requestLog.Model,
@@ -5159,6 +5169,7 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 			requestLog.ReasoningEffortSource,
 			requestLogDataSourceProxy,
 			buildRequestLogDedupCore(requestLog.Platform, requestLog.InputTokens, requestLog.OutputTokens, requestLog.CacheReadTokens),
+			encodeRequestLogPricingSnapshot(requestLog.PricingSnapshot),
 		)
 
 		if err != nil {
@@ -5184,6 +5195,7 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 			SetClient(client).
 			WithContext(requestContext).
 			AddReqHook(func(req *http.Request) error {
+				captureRequestLogPricingContext(requestLog, currentBody, req.Header, req.URL.Path)
 				tracedContext := httptrace.WithClientTrace(req.Context(), performanceTrace.clientTrace())
 				*req = *req.WithContext(tracedContext)
 				return nil
@@ -5628,6 +5640,7 @@ func buildClaudeProviderResponseHooks(
 	toolCollector *sessionAffinityToolResponseCollector,
 ) []xrequest.ResponseHook {
 	hooks := make([]xrequest.ResponseHook, 0, 4)
+	hooks = append(hooks, requestLogPricingResponseHook(requestLog))
 	if hook := toolCollector.hook(isStream); hook != nil {
 		hooks = append(hooks, hook)
 	}
@@ -6782,6 +6795,9 @@ func ensureRequestLogTableWithDB(db *sql.DB) error {
 	if err := ensureRequestLogColumn(db, "price_source", "TEXT DEFAULT ''"); err != nil {
 		return err
 	}
+	if err := ensureRequestLogColumn(db, "pricing_snapshot", "TEXT DEFAULT ''"); err != nil {
+		return err
+	}
 	if err := ensureRequestLogColumn(db, "requested_model", "TEXT DEFAULT ''"); err != nil {
 		return err
 	}
@@ -7552,6 +7568,7 @@ func applyRequestLogCostResult(reqLog *ReqeustLog, result requestLogCostResult) 
 		return
 	}
 	reqLog.InputCost = result.InputCost
+	reqLog.PricingSnapshot = result.PricingSnapshot
 	reqLog.OutputCost = result.OutputCost
 	reqLog.ReasoningCost = result.ReasoningCost
 	reqLog.CacheCreateCost = result.CacheCreateCost
@@ -7576,89 +7593,91 @@ func applyRequestLogCostResult(reqLog *ReqeustLog, result requestLogCostResult) 
 }
 
 type ReqeustLog struct {
-	ID                         int64   `json:"id"`
-	Platform                   string  `json:"platform"` // claude、codex 或 gemini
-	Model                      string  `json:"model"`
-	RequestedModel             string  `json:"requested_model,omitempty"`
-	MappedModel                string  `json:"mapped_model,omitempty"`
-	ModelMappingPattern        string  `json:"model_mapping_pattern,omitempty"`
-	ModelMappingTarget         string  `json:"model_mapping_target,omitempty"`
-	ModelOverride              string  `json:"model_override,omitempty"`
-	ModelRouteCaptured         bool    `json:"model_route_captured"`
-	SessionPreferredProviderID string  `json:"session_preferred_provider_id,omitempty"`
-	SessionPreferredProvider   string  `json:"session_preferred_provider,omitempty"`
-	SessionProviderRoute       string  `json:"session_provider_route,omitempty"`
-	SessionIdentitySource      string  `json:"session_identity_source,omitempty"`
-	ResponseModel              string  `json:"response_model,omitempty"`
-	ReasoningEffort            string  `json:"reasoning_effort,omitempty"`
-	ReasoningEffortSource      string  `json:"reasoning_effort_source,omitempty"`
-	UserAgent                  string  `json:"user_agent,omitempty"`
-	ProviderID                 string  `json:"provider_id,omitempty"`
-	Provider                   string  `json:"provider"` // provider name
-	PriceSource                string  `json:"price_source,omitempty"`
-	HttpCode                   int     `json:"http_code"`
-	RequestOutcome             string  `json:"request_outcome,omitempty"`
-	OutcomeReason              string  `json:"outcome_reason,omitempty"`
-	InputTokens                int     `json:"input_tokens"`
-	OutputTokens               int     `json:"output_tokens"`
-	CacheCreateTokens          int     `json:"cache_create_tokens"`
-	Ephemeral5mTokens          int     `json:"ephemeral_5m_tokens"`
-	Ephemeral1hTokens          int     `json:"ephemeral_1h_tokens"`
-	CacheReadTokens            int     `json:"cache_read_tokens"`
-	ReasoningTokens            int     `json:"reasoning_tokens"`
-	IsStream                   bool    `json:"is_stream"`
-	DurationSec                float64 `json:"duration_sec"`
-	FirstTokenSec              float64 `json:"first_token_sec"`
-	ProxyPrepareMs             float64 `json:"proxy_prepare_ms"`
-	DNSMs                      float64 `json:"dns_ms"`
-	ConnectMs                  float64 `json:"connect_ms"`
-	TLSMs                      float64 `json:"tls_ms"`
-	UpstreamTTFBMs             float64 `json:"upstream_ttfb_ms"`
-	ProxyStreamDelayMs         float64 `json:"proxy_stream_delay_ms"`
-	ConnectionReused           bool    `json:"connection_reused"`
-	StreamLastEvent            string  `json:"stream_last_event,omitempty"`
-	StreamTerminalEvent        string  `json:"stream_terminal_event,omitempty"`
-	StreamErrorKind            string  `json:"stream_error_kind,omitempty"`
-	ErrorMessage               string  `json:"error_message,omitempty"`
-	ErrorSource                string  `json:"error_source,omitempty"`
-	StreamCompactionRequested  bool    `json:"stream_compaction_requested"`
-	StreamCompactionObserved   bool    `json:"stream_compaction_observed"`
-	StreamBytes                int64   `json:"stream_bytes"`
-	UpstreamProtocol           string  `json:"upstream_protocol,omitempty"`
-	CreatedAt                  string  `json:"created_at"`
-	ErrorReadAt                string  `json:"error_read_at,omitempty"`
-	InputCost                  float64 `json:"input_cost"`
-	OutputCost                 float64 `json:"output_cost"`
-	ReasoningCost              float64 `json:"reasoning_cost"`
-	CacheCreateCost            float64 `json:"cache_create_cost"`
-	CacheReadCost              float64 `json:"cache_read_cost"`
-	Ephemeral5mCost            float64 `json:"ephemeral_5m_cost"`
-	Ephemeral1hCost            float64 `json:"ephemeral_1h_cost"`
-	TotalCost                  float64 `json:"total_cost"`
-	GroupMultiplier            float64 `json:"group_multiplier"`
-	HasPricing                 bool    `json:"has_pricing"`
-	MatchedPricingModel        string  `json:"matched_pricing_model,omitempty"`
-	EffectivePricingModel      string  `json:"effective_pricing_model,omitempty"`
-	ProviderPricingAvailable   bool    `json:"provider_pricing_available"`
-	ProviderQuotaType          int     `json:"provider_quota_type"`
-	ProviderInputUSDPerM       float64 `json:"provider_input_usd_per_m"`
-	ProviderOutputUSDPerM      float64 `json:"provider_output_usd_per_m"`
-	ProviderPerCallUnified     float64 `json:"provider_per_call_unified"`
-	ProviderPerCallInput       float64 `json:"provider_per_call_input"`
-	ProviderPerCallOutput      float64 `json:"provider_per_call_output"`
-	ProviderPerCallUnifiedSet  bool    `json:"provider_per_call_unified_set"`
-	ProviderPerCallInputSet    bool    `json:"provider_per_call_input_set"`
-	ProviderPerCallOutputSet   bool    `json:"provider_per_call_output_set"`
-	RequestBody                string  `json:"request_body,omitempty"`
-	ResponseBody               string  `json:"response_body,omitempty"`
-	RequestBodyTruncated       bool    `json:"request_body_truncated"`
-	ResponseBodyTruncated      bool    `json:"response_body_truncated"`
-	PayloadBytes               int64   `json:"payload_bytes"`
-	PayloadCaptured            bool    `json:"payload_captured"`
-	DataSource                 string  `json:"data_source,omitempty"`
-	SourceRecordID             string  `json:"source_record_id,omitempty"`
-	SessionID                  string  `json:"session_id,omitempty"`
-	DedupCore                  string  `json:"-"`
+	PricingSnapshot            *modelpricing.PricingSnapshot `json:"pricing_snapshot,omitempty"`
+	PricingContext             *modelpricing.PricingContext  `json:"-"`
+	ID                         int64                         `json:"id"`
+	Platform                   string                        `json:"platform"` // claude、codex 或 gemini
+	Model                      string                        `json:"model"`
+	RequestedModel             string                        `json:"requested_model,omitempty"`
+	MappedModel                string                        `json:"mapped_model,omitempty"`
+	ModelMappingPattern        string                        `json:"model_mapping_pattern,omitempty"`
+	ModelMappingTarget         string                        `json:"model_mapping_target,omitempty"`
+	ModelOverride              string                        `json:"model_override,omitempty"`
+	ModelRouteCaptured         bool                          `json:"model_route_captured"`
+	SessionPreferredProviderID string                        `json:"session_preferred_provider_id,omitempty"`
+	SessionPreferredProvider   string                        `json:"session_preferred_provider,omitempty"`
+	SessionProviderRoute       string                        `json:"session_provider_route,omitempty"`
+	SessionIdentitySource      string                        `json:"session_identity_source,omitempty"`
+	ResponseModel              string                        `json:"response_model,omitempty"`
+	ReasoningEffort            string                        `json:"reasoning_effort,omitempty"`
+	ReasoningEffortSource      string                        `json:"reasoning_effort_source,omitempty"`
+	UserAgent                  string                        `json:"user_agent,omitempty"`
+	ProviderID                 string                        `json:"provider_id,omitempty"`
+	Provider                   string                        `json:"provider"` // provider name
+	PriceSource                string                        `json:"price_source,omitempty"`
+	HttpCode                   int                           `json:"http_code"`
+	RequestOutcome             string                        `json:"request_outcome,omitempty"`
+	OutcomeReason              string                        `json:"outcome_reason,omitempty"`
+	InputTokens                int                           `json:"input_tokens"`
+	OutputTokens               int                           `json:"output_tokens"`
+	CacheCreateTokens          int                           `json:"cache_create_tokens"`
+	Ephemeral5mTokens          int                           `json:"ephemeral_5m_tokens"`
+	Ephemeral1hTokens          int                           `json:"ephemeral_1h_tokens"`
+	CacheReadTokens            int                           `json:"cache_read_tokens"`
+	ReasoningTokens            int                           `json:"reasoning_tokens"`
+	IsStream                   bool                          `json:"is_stream"`
+	DurationSec                float64                       `json:"duration_sec"`
+	FirstTokenSec              float64                       `json:"first_token_sec"`
+	ProxyPrepareMs             float64                       `json:"proxy_prepare_ms"`
+	DNSMs                      float64                       `json:"dns_ms"`
+	ConnectMs                  float64                       `json:"connect_ms"`
+	TLSMs                      float64                       `json:"tls_ms"`
+	UpstreamTTFBMs             float64                       `json:"upstream_ttfb_ms"`
+	ProxyStreamDelayMs         float64                       `json:"proxy_stream_delay_ms"`
+	ConnectionReused           bool                          `json:"connection_reused"`
+	StreamLastEvent            string                        `json:"stream_last_event,omitempty"`
+	StreamTerminalEvent        string                        `json:"stream_terminal_event,omitempty"`
+	StreamErrorKind            string                        `json:"stream_error_kind,omitempty"`
+	ErrorMessage               string                        `json:"error_message,omitempty"`
+	ErrorSource                string                        `json:"error_source,omitempty"`
+	StreamCompactionRequested  bool                          `json:"stream_compaction_requested"`
+	StreamCompactionObserved   bool                          `json:"stream_compaction_observed"`
+	StreamBytes                int64                         `json:"stream_bytes"`
+	UpstreamProtocol           string                        `json:"upstream_protocol,omitempty"`
+	CreatedAt                  string                        `json:"created_at"`
+	ErrorReadAt                string                        `json:"error_read_at,omitempty"`
+	InputCost                  float64                       `json:"input_cost"`
+	OutputCost                 float64                       `json:"output_cost"`
+	ReasoningCost              float64                       `json:"reasoning_cost"`
+	CacheCreateCost            float64                       `json:"cache_create_cost"`
+	CacheReadCost              float64                       `json:"cache_read_cost"`
+	Ephemeral5mCost            float64                       `json:"ephemeral_5m_cost"`
+	Ephemeral1hCost            float64                       `json:"ephemeral_1h_cost"`
+	TotalCost                  float64                       `json:"total_cost"`
+	GroupMultiplier            float64                       `json:"group_multiplier"`
+	HasPricing                 bool                          `json:"has_pricing"`
+	MatchedPricingModel        string                        `json:"matched_pricing_model,omitempty"`
+	EffectivePricingModel      string                        `json:"effective_pricing_model,omitempty"`
+	ProviderPricingAvailable   bool                          `json:"provider_pricing_available"`
+	ProviderQuotaType          int                           `json:"provider_quota_type"`
+	ProviderInputUSDPerM       float64                       `json:"provider_input_usd_per_m"`
+	ProviderOutputUSDPerM      float64                       `json:"provider_output_usd_per_m"`
+	ProviderPerCallUnified     float64                       `json:"provider_per_call_unified"`
+	ProviderPerCallInput       float64                       `json:"provider_per_call_input"`
+	ProviderPerCallOutput      float64                       `json:"provider_per_call_output"`
+	ProviderPerCallUnifiedSet  bool                          `json:"provider_per_call_unified_set"`
+	ProviderPerCallInputSet    bool                          `json:"provider_per_call_input_set"`
+	ProviderPerCallOutputSet   bool                          `json:"provider_per_call_output_set"`
+	RequestBody                string                        `json:"request_body,omitempty"`
+	ResponseBody               string                        `json:"response_body,omitempty"`
+	RequestBodyTruncated       bool                          `json:"request_body_truncated"`
+	ResponseBodyTruncated      bool                          `json:"response_body_truncated"`
+	PayloadBytes               int64                         `json:"payload_bytes"`
+	PayloadCaptured            bool                          `json:"payload_captured"`
+	DataSource                 string                        `json:"data_source,omitempty"`
+	SourceRecordID             string                        `json:"source_record_id,omitempty"`
+	SessionID                  string                        `json:"session_id,omitempty"`
+	DedupCore                  string                        `json:"-"`
 
 	CapturePayload  bool `json:"-"`
 	SanitizePayload bool `json:"-"`
@@ -7677,6 +7696,7 @@ type ReqeustLog struct {
 
 // claude code usage parser
 func ClaudeCodeParseTokenUsageFromResponse(data string, usage *ReqeustLog) {
+	captureResponsePricingContext(data, usage)
 	if usage == nil || strings.TrimSpace(data) == "" {
 		return
 	}
@@ -7819,6 +7839,7 @@ func firstPositiveIntFromPaths(data string, paths ...string) int {
 
 // codex usage parser
 func CodexParseTokenUsageFromResponse(data string, usage *ReqeustLog) {
+	captureResponsePricingContext(data, usage)
 	if usage == nil {
 		return
 	}
@@ -7861,6 +7882,7 @@ func CodexParseTokenUsageFromResponse(data string, usage *ReqeustLog) {
 // gemini usage parser (流式响应专用)
 // Gemini SSE 流中每个 chunk 都会携带完整的 usageMetadata，需取最大值而非累加
 func GeminiParseTokenUsageFromResponse(data string, usage *ReqeustLog) {
+	captureResponsePricingContext(data, usage)
 	usageResult := gjson.Get(data, "usageMetadata")
 	if !usageResult.Exists() {
 		return
@@ -7894,7 +7916,7 @@ func mergeGeminiUsageMetadata(usage gjson.Result, reqLog *ReqeustLog) {
 	// 若仅提供 totalTokenCount，按 total - input 估算输出 token
 	total := usage.Get("totalTokenCount").Int()
 	if total > 0 && reqLog.OutputTokens == 0 && reqLog.InputTokens > 0 && reqLog.InputTokens < int(total) {
-		reqLog.OutputTokens = int(total) - reqLog.InputTokens
+		reqLog.OutputTokens = max(0, int(total)-reqLog.InputTokens-reqLog.ReasoningTokens)
 	}
 }
 
@@ -10352,6 +10374,8 @@ func resetGeminiRequestLogAttempt(requestLog *ReqeustLog, startedAt time.Time) {
 		return
 	}
 	requestLog.ResponseModel = ""
+	requestLog.PricingContext = nil
+	requestLog.PricingSnapshot = nil
 	requestLog.HttpCode = 0
 	requestLog.InputTokens = 0
 	requestLog.OutputTokens = 0
@@ -10417,6 +10441,7 @@ func (prs *ProviderRelayService) persistGeminiRequestLog(requestLog *ReqeustLog,
 		requestLog.Ephemeral5mTokens,
 		requestLog.Ephemeral1hTokens,
 		requestLog.CacheReadTokens,
+		requestLog.PricingContext,
 	)
 	applyRequestLogCostResult(requestLog, costResult)
 	prepareRequestLogPayloadForPersistence(requestLog)
@@ -10437,8 +10462,8 @@ func (prs *ProviderRelayService) persistGeminiRequestLog(requestLog *ReqeustLog,
 			provider_per_call_unified, provider_per_call_input, provider_per_call_output,
 			provider_per_call_unified_set, provider_per_call_input_set, provider_per_call_output_set,
 			request_body, response_body, request_body_truncated, response_body_truncated, payload_bytes, payload_captured,
-			data_source, dedup_core
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			data_source, dedup_core, pricing_snapshot
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		requestLog.Platform, requestLog.Model, requestLog.RequestedModel, requestLog.ResponseModel, requestLog.ProviderID, requestLog.Provider, requestLog.HttpCode, requestLog.RequestOutcome, requestLog.OutcomeReason, requestLog.ErrorMessage, requestLog.ErrorSource,
 		requestLog.ReasoningEffort, requestLog.ReasoningEffortSource, requestLog.UserAgent,
@@ -10452,6 +10477,7 @@ func (prs *ProviderRelayService) persistGeminiRequestLog(requestLog *ReqeustLog,
 		boolToInt(requestLog.ProviderPerCallUnifiedSet), boolToInt(requestLog.ProviderPerCallInputSet), boolToInt(requestLog.ProviderPerCallOutputSet),
 		requestLog.RequestBody, requestLog.ResponseBody, boolToInt(requestLog.RequestBodyTruncated), boolToInt(requestLog.ResponseBodyTruncated), requestLog.PayloadBytes, boolToInt(requestLog.PayloadCaptured),
 		requestLogDataSourceProxy, buildRequestLogDedupCore(requestLog.Platform, requestLog.InputTokens, requestLog.OutputTokens, requestLog.CacheReadTokens),
+		encodeRequestLogPricingSnapshot(requestLog.PricingSnapshot),
 	)
 	if err != nil {
 		fmt.Printf("[Gemini] 写入 request_log 失败: %v\n", err)
@@ -10562,6 +10588,7 @@ func (prs *ProviderRelayService) forwardGeminiRequest(
 
 	// 发送请求
 	client := &http.Client{Timeout: 300 * time.Second}
+	captureRequestLogPricingContext(requestLog, bodyBytes, req.Header, req.URL.Path)
 	resp, err := client.Do(req)
 	providerDuration := time.Since(providerStart).Seconds()
 
@@ -10630,6 +10657,7 @@ func (prs *ProviderRelayService) forwardGeminiRequest(
 		}
 		setRequestLogResponseBody(requestLog, body)
 		// 解析 Gemini 用量数据
+		captureResponsePricingContext(string(body), requestLog)
 		parseGeminiUsageMetadata(body, requestLog)
 		// 读取成功后再写 header 和 body
 		for key, values := range resp.Header {
@@ -10646,6 +10674,7 @@ func (prs *ProviderRelayService) forwardGeminiRequest(
 // parseGeminiUsageMetadata 从 Gemini 非流式响应中提取用量，填充 request_log
 // 复用 mergeGeminiUsageMetadata 统一解析逻辑
 func parseGeminiUsageMetadata(body []byte, reqLog *ReqeustLog) {
+	captureResponsePricingContext(string(body), reqLog)
 	if len(body) == 0 || reqLog == nil {
 		return
 	}

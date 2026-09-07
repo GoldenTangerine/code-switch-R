@@ -1,7 +1,38 @@
 /**
+@name: 模型价格与费用展示
+@Descripttion: 维护模型价格规则及请求费用展示。
+@version: 1.0.0
+@Author: sm
+@Date: 2026-09-07 11:13:10
+@LastEditTime: 2026-09-07 11:13:10
+@FilePath: frontend/src/services/modelPricing.ts
+*/
+/**
  * 模型价格（input/output/cache）配置 API 封装
  */
 import { Call, Events } from '@wailsio/runtime'
+
+export const TOKEN_PRICING_CHARGES = ['prompt', 'completion', 'reasoning', 'cache_read', 'cache_write', 'cache_write_1h'] as const
+export type TokenPricingCharge = typeof TOKEN_PRICING_CHARGES[number]
+
+export interface CloudPricingTrigger {
+  kind: string
+  threshold?: number
+  inclusive?: boolean
+  field?: string
+  header?: string
+  pattern?: string
+}
+
+export interface CloudPricingRules {
+  charges: Record<string, number>
+  tracks: {
+    label: string
+    factor: number
+    charge_factors?: Record<string, number>
+    triggers: CloudPricingTrigger[]
+  }[]
+}
 
 const MODEL_PRICING_SERVICE = 'codeswitch/services.ModelPricingService'
 export const MODEL_PRICING_CHANGED_EVENT = 'model-pricing:changed'
@@ -16,6 +47,7 @@ export interface ModelPricingChangedEventPayload {
 }
 
 export interface ModelPricingRow {
+  cloud_pricing?: CloudPricingRules
   original_model?: string
   model: string
   input_cost_per_token: number
@@ -65,6 +97,7 @@ export interface ClaudeOfficialPricingPreviewResult {
 }
 
 export interface CloudPriceTableConflictPricing {
+  cloud_pricing?: CloudPricingRules
   input_cost_per_token: number
   output_cost_per_token: number
   output_cost_per_reasoning_token: number

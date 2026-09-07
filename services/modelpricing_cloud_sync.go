@@ -1,8 +1,18 @@
+/**
+ * @name: 云端价格同步
+ * @Descripttion: 下载云端价格表并处理分层覆盖与冲突预览。
+ * @version: 1.0.0
+ * @Author: sm
+ * @Date: 2026-09-07 11:10:24
+ * @LastEditTime: 2026-09-07 11:10:24
+ * @FilePath: services/modelpricing_cloud_sync.go
+ */
 package services
 
 import (
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"sort"
@@ -16,13 +26,13 @@ import (
 )
 
 const (
-	cloudPriceTableURL      = "https://" + "claude" + "-code" + "-hub" + ".app/config/prices-base.toml"
-	cloudPriceTableMaxBytes = 12 * 1024 * 1024
+	cloudPriceTableURL      = "https://cch-plus.com/pricing/v1/models.json"
+	cloudPriceTableMaxBytes = 64 * 1024 * 1024
 	cloudPreviewCacheTTL    = 30 * time.Minute
 )
 
 var (
-	loadCloudPriceTableTOMLFunc     = fetchCloudPriceTableTOML
+	loadCloudPriceTableJSONFunc     = fetchCloudPriceTableJSON
 	savePrimaryPricingOverridesFunc = saveModelPricingOverridesToDB
 	saveCloudPricingOverridesFunc   = saveCloudModelPricingOverridesToDB
 )
@@ -33,6 +43,7 @@ type cloudPriceTable struct {
 }
 
 type cloudSyncPricingEntry struct {
+	MetadataFields       map[string]bool
 	Model                string
 	DisplayName          string
 	Mode                 string
@@ -63,13 +74,14 @@ type CloudPriceTableSyncConflictRow struct {
 }
 
 type CloudPriceTableConflictPricing struct {
-	InputCostPerToken           float64 `json:"input_cost_per_token"`
-	OutputCostPerToken          float64 `json:"output_cost_per_token"`
-	OutputCostPerReasoningToken float64 `json:"output_cost_per_reasoning_token"`
-	CacheCreationInputTokenCost float64 `json:"cache_creation_input_token_cost"`
-	CacheReadInputTokenCost     float64 `json:"cache_read_input_token_cost"`
-	Ephemeral1hCostPerToken     float64 `json:"ephemeral_1h_cost_per_token"`
-	GroupMultiplier             float64 `json:"group_multiplier"`
+	CloudPricing                *modelpricing.CloudPricingRules `json:"cloud_pricing,omitempty"`
+	InputCostPerToken           float64                         `json:"input_cost_per_token"`
+	OutputCostPerToken          float64                         `json:"output_cost_per_token"`
+	OutputCostPerReasoningToken float64                         `json:"output_cost_per_reasoning_token"`
+	CacheCreationInputTokenCost float64                         `json:"cache_creation_input_token_cost"`
+	CacheReadInputTokenCost     float64                         `json:"cache_read_input_token_cost"`
+	Ephemeral1hCostPerToken     float64                         `json:"ephemeral_1h_cost_per_token"`
+	GroupMultiplier             float64                         `json:"group_multiplier"`
 }
 
 func (mps *ModelPricingService) PreviewCloudPriceTableSyncConflicts() (CloudPriceTableSyncConflictResult, error) {
@@ -243,21 +255,12 @@ func (mps *ModelPricingService) SyncCloudPriceTable(overwriteManualModels []stri
 }
 
 func loadCloudSyncPricingEntries() (map[string]cloudSyncPricingEntry, error) {
-	tomlText, err := loadCloudPriceTableTOMLFunc()
+	jsonText, err := loadCloudPriceTableJSONFunc()
 	if err != nil {
 		return nil, err
 	}
 
-	table, err := parseCloudPriceTableTOML(tomlText)
-	if err != nil {
-		return nil, err
-	}
-
-	entries := buildCloudSyncPricingMap(table.Models)
-	if len(entries) == 0 {
-		return nil, fmt.Errorf("云端价格表中没有可用的 token 定价模型")
-	}
-	return entries, nil
+	return parseCloudPriceTableJSON(jsonText)
 }
 
 func (mps *ModelPricingService) loadCloudSyncPricingEntriesForApply() (map[string]cloudSyncPricingEntry, error) {
@@ -300,9 +303,9 @@ func (mps *ModelPricingService) consumeCloudPricingPreviewCache(now time.Time) (
 	return cloneCloudSyncPricingEntries(cache.entries), true
 }
 
-func fetchCloudPriceTableTOML() (string, error) {
+func fetchCloudPriceTableJSON() (string, error) {
 	client := &http.Client{
-		Timeout: 20 * time.Second,
+		Timeout: 30 * time.Second,
 	}
 
 	req, err := http.NewRequest(http.MethodGet, cloudPriceTableURL, nil)
@@ -310,7 +313,7 @@ func fetchCloudPriceTableTOML() (string, error) {
 		return "", err
 	}
 	req.Header.Set("User-Agent", "code-switch-r/cloud-price-sync")
-	req.Header.Set("Accept", "text/plain")
+	req.Header.Set("Accept", "application/json")
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -318,9 +321,12 @@ func fetchCloudPriceTableTOML() (string, error) {
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, cloudPriceTableMaxBytes))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, cloudPriceTableMaxBytes+1))
 	if err != nil {
 		return "", fmt.Errorf("云端价格表拉取失败：读取响应失败: %w", err)
+	}
+	if len(body) > cloudPriceTableMaxBytes {
+		return "", fmt.Errorf("云端价格表拉取失败：内容超过 64 MiB 上限")
 	}
 
 	if err := validateCloudPriceTableFinalURL(resp.Request.URL, cloudPriceTableURL); err != nil {
@@ -587,6 +593,8 @@ func cloneCloudSyncPricingEntries(entries map[string]cloudSyncPricingEntry) map[
 	}
 	cloned := make(map[string]cloudSyncPricingEntry, len(entries))
 	for key, value := range entries {
+		value.MetadataFields = maps.Clone(value.MetadataFields)
+		value.Pricing.CloudPricing = cloneCloudPricingRules(value.Pricing.CloudPricing)
 		cloned[key] = value
 	}
 	return cloned
@@ -595,6 +603,7 @@ func cloneCloudSyncPricingEntries(entries map[string]cloudSyncPricingEntry) map[
 func buildCloudConflictPricing(entry modelpricing.PricingEntry, explicitEphemeral1h float64) CloudPriceTableConflictPricing {
 	normalized := normalizeComparableModelPricingEntry(entry)
 	return CloudPriceTableConflictPricing{
+		CloudPricing:                cloneCloudPricingRules(entry.CloudPricing),
 		InputCostPerToken:           normalized.InputCostPerToken,
 		OutputCostPerToken:          normalized.OutputCostPerToken,
 		OutputCostPerReasoningToken: normalized.OutputCostPerReasoningToken,
@@ -614,12 +623,12 @@ func resolveExplicitEphemeral1hValue(entry cloudSyncPricingEntry) float64 {
 
 func normalizeComparableModelPricingEntry(entry modelpricing.PricingEntry) modelpricing.PricingEntry {
 	normalized := entry
-	if !normalized.HasCacheCreationInputTokenCost &&
+	if normalized.CloudPricing == nil && !normalized.HasCacheCreationInputTokenCost &&
 		normalized.CacheCreationInputTokenCost == 0 &&
 		normalized.InputCostPerToken > 0 {
 		normalized.CacheCreationInputTokenCost = normalized.InputCostPerToken * 1.25
 	}
-	if !normalized.HasCacheReadInputTokenCost &&
+	if normalized.CloudPricing == nil && !normalized.HasCacheReadInputTokenCost &&
 		normalized.CacheReadInputTokenCost == 0 &&
 		normalized.InputCostPerToken > 0 {
 		normalized.CacheReadInputTokenCost = normalized.InputCostPerToken * 0.1
@@ -636,7 +645,12 @@ func normalizeComparableModelPricingEntry(entry modelpricing.PricingEntry) model
 func modelPricingEntriesEquivalent(a modelpricing.PricingEntry, b modelpricing.PricingEntry) bool {
 	left := normalizeComparableModelPricingEntry(a)
 	right := normalizeComparableModelPricingEntry(b)
-	return floatAlmostEqual(left.InputCostPerToken, right.InputCostPerToken) &&
+	return left.CloudPricing.Equal(right.CloudPricing) &&
+		left.MaxInputTokens == right.MaxInputTokens && left.MaxTokens == right.MaxTokens &&
+		left.SupportsComputerUse == right.SupportsComputerUse && left.SupportsFunctionCalling == right.SupportsFunctionCalling &&
+		left.SupportsPDFInput == right.SupportsPDFInput && left.SupportsPromptCaching == right.SupportsPromptCaching &&
+		left.SupportsReasoning == right.SupportsReasoning && left.SupportsResponseSchema == right.SupportsResponseSchema && left.SupportsVision == right.SupportsVision &&
+		floatAlmostEqual(left.InputCostPerToken, right.InputCostPerToken) &&
 		left.HasInputCostPerToken == right.HasInputCostPerToken &&
 		floatAlmostEqual(left.OutputCostPerToken, right.OutputCostPerToken) &&
 		left.HasOutputCostPerToken == right.HasOutputCostPerToken &&
@@ -652,6 +666,38 @@ func modelPricingEntriesEquivalent(a modelpricing.PricingEntry, b modelpricing.P
 }
 
 func mergeCloudPricingEntry(base modelpricing.PricingEntry, incoming cloudSyncPricingEntry) modelpricing.PricingEntry {
+	if incoming.Pricing.CloudPricing != nil {
+		merged := incoming.Pricing
+		merged.CloudPricing = cloneCloudPricingRules(incoming.Pricing.CloudPricing)
+		if !incoming.MetadataFields["max_input_tokens"] {
+			merged.MaxInputTokens = base.MaxInputTokens
+		}
+		if !incoming.MetadataFields["max_tokens"] {
+			merged.MaxTokens = base.MaxTokens
+		}
+		if !incoming.MetadataFields["computer_use"] {
+			merged.SupportsComputerUse = base.SupportsComputerUse
+		}
+		if !incoming.MetadataFields["function_calling"] {
+			merged.SupportsFunctionCalling = base.SupportsFunctionCalling
+		}
+		if !incoming.MetadataFields["pdf_input"] {
+			merged.SupportsPDFInput = base.SupportsPDFInput
+		}
+		if !incoming.MetadataFields["prompt_caching"] {
+			merged.SupportsPromptCaching = base.SupportsPromptCaching
+		}
+		if !incoming.MetadataFields["reasoning"] {
+			merged.SupportsReasoning = base.SupportsReasoning
+		}
+		if !incoming.MetadataFields["structured_output"] {
+			merged.SupportsResponseSchema = base.SupportsResponseSchema
+		}
+		if !incoming.MetadataFields["vision"] {
+			merged.SupportsVision = base.SupportsVision
+		}
+		return merged
+	}
 	merged := base
 	if incoming.Pricing.HasInputCostPerToken {
 		merged.InputCostPerToken = incoming.Pricing.InputCostPerToken
@@ -747,7 +793,9 @@ func applyCloudEntryToOverrides(overrides *modelPricingOverrides, entry cloudSyn
 		return false
 	}
 
-	overrides.Pricing[entry.Model] = entry.Pricing
+	pricing := entry.Pricing
+	pricing.CloudPricing = cloneCloudPricingRules(pricing.CloudPricing)
+	overrides.Pricing[entry.Model] = pricing
 	if entry.HasExplicitEphemeral {
 		overrides.Ephemeral1h[entry.Model] = entry.ExplicitEphemeral1h
 	} else {

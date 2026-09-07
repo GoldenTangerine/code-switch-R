@@ -1,5 +1,14 @@
+/**
+@name: 模型价格与费用展示
+@Descripttion: 维护模型价格规则及请求费用展示。
+@version: 1.0.0
+@Author: sm
+@Date: 2026-09-07 11:13:10
+@LastEditTime: 2026-09-07 11:13:10
+@FilePath: frontend/src/components/Logs/composables/useLogsPricingDetails.ts
+*/
 import { computed, ref } from 'vue'
-import { listModelPricing, type ModelPricingRow } from '../../../services/modelPricing'
+import { listModelPricing, TOKEN_PRICING_CHARGES, type ModelPricingRow } from '../../../services/modelPricing'
 import type { RequestLog } from '../../../services/logs'
 import type { CostTooltipDetail, LogInfoTooltipDetail } from '../types'
 import { COST_TOOLTIP_DIFF_EPSILON } from '../constants'
@@ -200,6 +209,26 @@ export function useLogsPricingDetails(options: UseLogsPricingDetailsOptions) {
   }
 
   const buildCostTooltipDetail = (item: RequestLog): CostTooltipDetail => {
+    if (item.pricing_snapshot) {
+      const snapshot = item.pricing_snapshot
+      const sourceLabels = buildInfoTooltipLabels().priceSourceLabels
+      const note = [
+        snapshot.track_label ? t('components.logs.table.pricingRules.track', { label: snapshot.track_label }) : '',
+        snapshot.complete ? '' : t('components.logs.table.pricingRules.incomplete'),
+      ].filter(Boolean).join(' · ')
+      return {
+        pricingModel: resolveLogPricingModelName(item),
+        hasPricing: Object.keys(snapshot.unit_prices ?? {}).length > 0,
+        priceLines: TOKEN_PRICING_CHARGES.flatMap((field) => snapshot.unit_prices?.[field] === undefined ? [] : [{
+          key: field,
+          label: t(`components.logs.table.pricingRules.${field}`),
+          value: `${formatUsdPrecise(snapshot.unit_prices[field] * 1_000_000)}/M · ${sourceLabels[snapshot.field_sources?.[field] as keyof typeof sourceLabels] || sourceLabels.none}`,
+        }]),
+        formula: t('components.logs.table.pricingRules.recorded', { cost: formatUsdPrecise(safeNumber(item.total_cost)) }),
+        note,
+        recordedCostHint: '',
+      }
+    }
     const source = resolvePriceSource(item)
     const fallbackModelName = resolveLogPricingModelName(item) || '—'
     const recordedCost = safeNumber(item.total_cost)

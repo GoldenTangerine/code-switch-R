@@ -1,3 +1,12 @@
+/*
+@name: 请求日志查询
+@Descripttion: 查询请求日志与统计并保留已记录计费结果。
+@version: 1.0.0
+@Author: sm
+@Date: 2026-09-07 11:25:11
+@LastEditTime: 2026-09-07 11:25:11
+@FilePath: services/logservice.go
+*/
 package services
 
 import (
@@ -49,6 +58,7 @@ var requestLogListSelectFields = []string{
 	"provider_id",
 	"provider",
 	"price_source",
+	"pricing_snapshot",
 	"http_code",
 	"request_outcome",
 	"outcome_reason",
@@ -591,6 +601,7 @@ func buildRequestLogList(records []xdb.Record, pricingSnapshot *modelpricing.Ser
 			ProviderID:                 record.GetString("provider_id"),
 			Provider:                   record.GetString("provider"),
 			PriceSource:                record.GetString("price_source"),
+			PricingSnapshot:            decodeRequestLogPricingSnapshot(record.GetString("pricing_snapshot")),
 			HttpCode:                   record.GetInt("http_code"),
 			RequestOutcome:             record.GetString("request_outcome"),
 			OutcomeReason:              record.GetString("outcome_reason"),
@@ -1053,6 +1064,8 @@ func normalizeRequestLogPriceSource(source string, totalCost float64) string {
 	switch strings.ToLower(strings.TrimSpace(source)) {
 	case requestLogPriceSourceProviderAPI:
 		return requestLogPriceSourceProviderAPI
+	case "mixed":
+		return "mixed"
 	case requestLogPriceSourceBuiltin:
 		return requestLogPriceSourceBuiltin
 	case requestLogPriceSourceNone:
@@ -1105,6 +1118,9 @@ func storedBreakdownTotalCost(logEntry *ReqeustLog) float64 {
 
 func applyLogPricing(pricing *modelpricing.Service, logEntry *ReqeustLog) {
 	if logEntry == nil {
+		return
+	}
+	if logEntry.PricingSnapshot != nil {
 		return
 	}
 

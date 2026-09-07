@@ -1,3 +1,12 @@
+/**
+@name: 模型价格与费用展示
+@Descripttion: 维护模型价格规则及请求费用展示。
+@version: 1.0.0
+@Author: sm
+@Date: 2026-09-07 11:13:10
+@LastEditTime: 2026-09-07 11:13:10
+@FilePath: frontend/src/services/logs.ts
+*/
 import { Call } from '@wailsio/runtime'
 
 export type LogPlatform = 'claude' | 'codex' | 'gemini' | 'grokbuild'
@@ -9,6 +18,12 @@ export type RequestOutcome = 'success' | 'failure' | 'excluded' | ''
 export type SessionProviderRoute = 'preferred' | 'fallback' | ''
 
 export type RequestLog = {
+  pricing_snapshot?: {
+    track_label?: string
+    unit_prices: Record<string, number>
+    field_sources: Record<string, string>
+    complete: boolean
+  }
   id: number
   platform: RequestLogPlatform | ''
   model: string

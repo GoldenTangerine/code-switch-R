@@ -1,3 +1,12 @@
+<!--
+@name: 模型价格与费用展示
+@Descripttion: 维护模型价格规则及请求费用展示。
+@version: 1.0.0
+@Author: sm
+@Date: 2026-09-07 11:13:10
+@LastEditTime: 2026-09-07 11:13:10
+@FilePath: frontend/src/components/Setting/ModelPricingModal.vue
+-->
 <script setup lang="ts">
 import { Events } from '@wailsio/runtime'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch, type ComponentPublicInstance } from 'vue'
@@ -6,6 +15,7 @@ import BaseInput from '../common/BaseInput.vue'
 import ModelPricingEditorModal from './ModelPricingEditorModal.vue'
 import ClaudePricingPreviewModal from './ClaudePricingPreviewModal.vue'
 import CloudPricingConflictModal from './CloudPricingConflictModal.vue'
+import CloudPricingRulesSummary from './CloudPricingRulesSummary.vue'
 import { useI18n } from 'vue-i18n'
 import {
   MODEL_PRICING_CHANGED_EVENT,
@@ -971,6 +981,7 @@ watch(
             >
               <div class="model-main">
                 <div class="model-name" :title="virtualRow.item.model">{{ virtualRow.item.model }}</div>
+                <CloudPricingRulesSummary :rules="virtualRow.item.raw.cloud_pricing" @resize="scheduleVisibleItemMeasurement" />
                 <div class="model-tags">
                   <span v-if="virtualRow.item.hasKnownProvider" class="tag tag-vendor">
                     <span

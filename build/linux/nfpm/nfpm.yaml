@@ -1,4 +1,11 @@
 # Feel free to remove those if you don't want/need to use them.
+# @name: 平台构建元数据
+# @Descripttion: 定义应用平台打包与版本信息
+# @version: 1.0.0
+# @Author: sm
+# @Date: 2026-09-07 12:43:38
+# @LastEditTime: 2026-09-07 12:43:38
+# @FilePath: build/linux/nfpm/nfpm.yaml
 # Make sure to check the documentation at https://nfpm.goreleaser.com
 #
 # The lines below are called `modelines`. See `:help modeline`
@@ -6,7 +13,7 @@
 name: "CodeSwitch"
 arch: ${GOARCH}
 platform: "linux"
-version: "2.11.14"
+version: "2.11.15"
 section: "default"
 priority: "extra"
 maintainer: ${GIT_COMMITTER_NAME} <${GIT_COMMITTER_EMAIL}>

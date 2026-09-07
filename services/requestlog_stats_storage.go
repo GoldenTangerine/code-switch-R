@@ -1,3 +1,12 @@
+/*
+@name: 请求日志统计存储
+@Descripttion: 维护统计聚合并在回填时保留已记录的计费结果。
+@version: 1.0.0
+@Author: sm
+@Date: 2026-09-07 11:30:00
+@LastEditTime: 2026-09-07 11:30:00
+@FilePath: services/requestlog_stats_storage.go
+*/
 package services
 
 import (
@@ -541,6 +550,8 @@ func backfillRequestLogStatsWithDB(db *sql.DB) error {
 				"cache_create_tokens",
 				"cache_read_tokens",
 				"total_cost",
+				"has_pricing",
+				"pricing_snapshot",
 				"created_at",
 			),
 		)
@@ -599,6 +610,7 @@ func backfillRequestLogStatsWithDB(db *sql.DB) error {
 				cacheCreate,
 				cacheRead,
 				totalCost,
+				record.GetBool("has_pricing") || strings.TrimSpace(record.GetString("pricing_snapshot")) != "",
 			)
 
 			httpCode := record.GetInt("http_code")
@@ -749,8 +761,9 @@ func estimateBackfillTotalCost(
 	cacheCreateTokens int,
 	cacheReadTokens int,
 	storedTotalCost float64,
+	recordedPricing ...bool,
 ) float64 {
-	if storedTotalCost > 0 || pricing == nil {
+	if storedTotalCost != 0 || pricing == nil || (len(recordedPricing) > 0 && recordedPricing[0]) {
 		return storedTotalCost
 	}
 

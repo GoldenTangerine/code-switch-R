@@ -1547,9 +1547,29 @@
           "unknown": "Unknown"
         },
         "priceSourceValues": {
+          "mixed": "Mixed pricing",
+          "cloud": "Cloud pricing table",
           "providerApi": "Provider API pricing",
           "builtin": "Built-in pricing table",
           "none": "No pricing available"
+        },
+        "pricingRules": {
+          "input_tokens_above": "Input context tokens",
+          "endpoint_matches": "Operation",
+          "body_matches": "Request condition",
+          "header_matches": "Request header",
+          "serviceTier": "Service tier",
+          "title": "Pricing rules ({count})",
+          "default": "Default",
+          "track": "Matched rule: {label}",
+          "incomplete": "Some usage has no available price",
+          "recorded": "Recorded cost: {cost}",
+          "prompt": "Input",
+          "completion": "Output",
+          "reasoning": "Reasoning",
+          "cache_read": "Cache read",
+          "cache_write": "Cache write (5m)",
+          "cache_write_1h": "Cache write (1h)"
         },
         "tooltipLabels": {
           "pricingSource": "Pricing source",

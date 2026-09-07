@@ -1,3 +1,12 @@
+/**
+ * @name: 云端同步回归测试
+ * @Descripttion: 验证云端同步冲突选择与持久化行为。
+ * @version: 1.0.0
+ * @Author: sm
+ * @Date: 2026-09-07 11:10:24
+ * @LastEditTime: 2026-09-07 11:10:24
+ * @FilePath: services/modelpricing_cloud_sync_test.go
+ */
 package services
 
 import (
@@ -123,8 +132,8 @@ func TestPreviewCloudPriceTableSyncConflicts_ReturnsManualConflicts(t *testing.T
 	mps.rebuildLocked()
 
 	restoreCloudSyncHooks(t)
-	loadCloudPriceTableTOMLFunc = func() (string, error) {
-		return testCloudPriceTableTOML(), nil
+	loadCloudPriceTableJSONFunc = func() (string, error) {
+		return testCloudPriceTableJSON(), nil
 	}
 
 	result, err := mps.PreviewCloudPriceTableSyncConflicts()
@@ -164,8 +173,8 @@ func TestSyncCloudPriceTable_SkipsManualOverrides(t *testing.T) {
 	mps.rebuildLocked()
 
 	restoreCloudSyncHooks(t)
-	loadCloudPriceTableTOMLFunc = func() (string, error) {
-		return testCloudPriceTableTOML(), nil
+	loadCloudPriceTableJSONFunc = func() (string, error) {
+		return testCloudPriceTableJSON(), nil
 	}
 
 	primarySaveCalls := 0
@@ -214,8 +223,8 @@ func TestSyncCloudPriceTable_SkipsManualOverrides(t *testing.T) {
 	if !floatAlmostEqual(cloudPricing.InputCostPerToken, 0.000003) {
 		t.Fatalf("cloud-model.InputCostPerToken = %f, 期望 %f", cloudPricing.InputCostPerToken, 0.000003)
 	}
-	if !floatAlmostEqual(cloudPricing.GroupMultiplier, 1.2) {
-		t.Fatalf("cloud-model.GroupMultiplier = %f, 期望 %f", cloudPricing.GroupMultiplier, 1.2)
+	if cloudPricing.CloudPricing == nil || len(cloudPricing.CloudPricing.Tracks) != 1 || cloudPricing.CloudPricing.Tracks[0].Factor != 1.2 {
+		t.Fatalf("cloud-model 未保存默认计费轨道: %+v", cloudPricing.CloudPricing)
 	}
 	if mps.cloudOverrides.Meta["cloud-model"].Source != modelPricingSourceCloudSync {
 		t.Fatalf("cloud-model.Source = %q, 期望 %q", mps.cloudOverrides.Meta["cloud-model"].Source, modelPricingSourceCloudSync)
@@ -234,8 +243,8 @@ func TestSyncCloudPriceTable_OverwritesSelectedManualOverrides(t *testing.T) {
 	mps.rebuildLocked()
 
 	restoreCloudSyncHooks(t)
-	loadCloudPriceTableTOMLFunc = func() (string, error) {
-		return testCloudPriceTableTOML(), nil
+	loadCloudPriceTableJSONFunc = func() (string, error) {
+		return testCloudPriceTableJSON(), nil
 	}
 
 	primarySaveCalls := 0
@@ -319,11 +328,11 @@ func buildTestPricingEntry(input, output, cacheCreate, cacheRead, group float64)
 
 func restoreCloudSyncHooks(t *testing.T) {
 	t.Helper()
-	originalLoad := loadCloudPriceTableTOMLFunc
+	originalLoad := loadCloudPriceTableJSONFunc
 	originalSavePrimary := savePrimaryPricingOverridesFunc
 	originalSaveCloud := saveCloudPricingOverridesFunc
 	t.Cleanup(func() {
-		loadCloudPriceTableTOMLFunc = originalLoad
+		loadCloudPriceTableJSONFunc = originalLoad
 		savePrimaryPricingOverridesFunc = originalSavePrimary
 		saveCloudPricingOverridesFunc = originalSaveCloud
 	})

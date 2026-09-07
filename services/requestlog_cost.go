@@ -1,3 +1,12 @@
+/*
+@name: 请求费用计算
+@Descripttion: 按供应商及项目报价计算请求费用与来源。
+@version: 1.0.0
+@Author: sm
+@Date: 2026-09-07 11:21:47
+@LastEditTime: 2026-09-07 11:21:47
+@FilePath: services/requestlog_cost.go
+*/
 package services
 
 import (
@@ -21,6 +30,7 @@ const (
 )
 
 type requestLogCostResult struct {
+	PricingSnapshot           *modelpricing.PricingSnapshot
 	InputCost                 float64
 	OutputCost                float64
 	ReasoningCost             float64
@@ -48,6 +58,7 @@ type requestLogCostResult struct {
 const (
 	requestLogPriceSourceProviderAPI = "provider_api"
 	requestLogPriceSourceBuiltin     = "builtin"
+	requestLogPriceSourceMixed       = "mixed"
 	requestLogPriceSourceNone        = "none"
 )
 
@@ -99,6 +110,7 @@ func calculateRequestLogCost(
 	ephemeral5mTokens int,
 	ephemeral1hTokens int,
 	cacheReadTokens int,
+	contexts ...*modelpricing.PricingContext,
 ) requestLogCostResult {
 	usage := buildRequestLogUsageSnapshot(
 		inputTokens,
@@ -109,6 +121,9 @@ func calculateRequestLogCost(
 		ephemeral1hTokens,
 		cacheReadTokens,
 	)
+	if len(contexts) > 0 {
+		usage.Context = contexts[0]
+	}
 
 	pricingModelCandidates := buildRequestLogPricingModelCandidates(responseModel, requestedModel)
 
@@ -132,8 +147,11 @@ func calculateRequestLogCost(
 				usage,
 				pricing,
 				pricingModelCandidate,
+				pricingModelCandidates...,
 			); hasPricing {
-				result.PriceSource = requestLogPriceSourceProviderAPI
+				if result.PriceSource == "" {
+					result.PriceSource = requestLogPriceSourceProviderAPI
+				}
 				result.HasPricing = true
 				return result
 			}
@@ -149,6 +167,7 @@ func calculateRequestLogCost(
 			matchedPricingModel := ""
 			matchedPricingModel = resolveRequestLogMatchedPricingModel(model, breakdown, pricingModelCandidate)
 			return requestLogCostResult{
+				PricingSnapshot:     requestLogLocalPricingSnapshot(pricing, pricingModelCandidate, usage, breakdown),
 				InputCost:           breakdown.InputCost,
 				OutputCost:          breakdown.OutputCost,
 				ReasoningCost:       breakdown.ReasoningCost,
@@ -168,6 +187,7 @@ func calculateRequestLogCost(
 
 	return requestLogCostResult{
 		TotalCost:         0,
+		PricingSnapshot:   &modelpricing.PricingSnapshot{UnitPrices: map[string]float64{}, FieldSources: map[string]string{}, Complete: false},
 		GroupMultiplier:   1,
 		PriceSource:       requestLogPriceSourceNone,
 		ProviderQuotaType: -1,
@@ -183,7 +203,11 @@ func calculateProviderAPICost(
 	usage modelpricing.UsageSnapshot,
 	pricing *modelpricing.Service,
 	model string,
+	localModels ...string,
 ) (requestLogCostResult, bool) {
+	if item.PriceFieldsKnown && item.QuotaType == 0 {
+		return calculateFieldwiseProviderCost(providerService, providerAPIURL, providerAPIKey, providerAuthType, item, usage, pricing, model, localModels...)
+	}
 	result := requestLogCostResult{
 		ProviderPricingAvailable: true,
 		ProviderQuotaType:        item.QuotaType,
@@ -231,7 +255,7 @@ func calculateProviderAPICost(
 		result.ProviderInputUSDPerM = item.InputUSDPerM
 		result.ProviderOutputUSDPerM = item.OutputUSDPerM
 		result.InputCost = float64(usage.InputTokens) * inputPerToken
-		result.OutputCost = float64(usage.OutputTokens) * outputPerToken
+		result.OutputCost = float64(usage.BillableOutputTokens()) * outputPerToken
 		result.ReasoningCost = float64(usage.ReasoningTokens) * outputPerToken
 		if cacheCreateTokens > 0 {
 			result.Ephemeral5mCost = float64(cacheCreate5mTokens) * cacheCreate5mPerToken
@@ -369,16 +393,16 @@ func resolveProviderCacheMultiplierDetails(
 		}
 	}
 
-	if cacheCreateSource == "" && item.CacheCreateMultiplier > 0 {
+	if cacheCreateSource == "" && (item.HasCacheCreatePrice || item.CacheCreateMultiplier > 0) {
 		cacheCreateMultiplier = item.CacheCreateMultiplier
 	}
-	if cacheReadSource == "" && item.CacheReadMultiplier > 0 {
+	if cacheReadSource == "" && (item.HasCacheReadPrice || item.CacheReadMultiplier > 0) {
 		cacheReadMultiplier = item.CacheReadMultiplier
 	}
-	if cacheCreateSource == "" && item.CacheCreateMultiplier > 0 {
+	if cacheCreateSource == "" && (item.HasCacheCreatePrice || item.CacheCreateMultiplier > 0) {
 		cacheCreateSource = providerCacheMultiplierSourceProvider
 	}
-	if cacheReadSource == "" && item.CacheReadMultiplier > 0 {
+	if cacheReadSource == "" && (item.HasCacheReadPrice || item.CacheReadMultiplier > 0) {
 		cacheReadSource = providerCacheMultiplierSourceProvider
 	}
 

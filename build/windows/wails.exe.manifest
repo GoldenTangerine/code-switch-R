@@ -1,6 +1,15 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+@name: 平台构建元数据
+@Descripttion: 定义应用平台打包与版本信息
+@version: 1.0.0
+@Author: sm
+@Date: 2026-09-07 12:43:38
+@LastEditTime: 2026-09-07 12:43:38
+@FilePath: build/windows/wails.exe.manifest
+-->
 <assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1" xmlns:asmv3="urn:schemas-microsoft-com:asm.v3">
-    <assemblyIdentity type="win32" name="com.codeswitch.app" version="2.11.14" processorArchitecture="*"/>
+    <assemblyIdentity type="win32" name="com.codeswitch.app" version="2.11.15" processorArchitecture="*"/>
     <dependency>
         <dependentAssembly>
             <assemblyIdentity type="win32" name="Microsoft.Windows.Common-Controls" version="6.0.0.0" processorArchitecture="*" publicKeyToken="6595b64144ccf1df" language="*"/>

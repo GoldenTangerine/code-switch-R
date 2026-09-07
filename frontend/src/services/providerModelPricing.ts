@@ -1,3 +1,12 @@
+/**
+ * @name: 供应商模型价格接口
+ * @Descripttion: 封装供应商价格和字段存在性信息。
+ * @version: 1.0.0
+ * @Author: sm
+ * @Date: 2026-09-07 11:23:00
+ * @LastEditTime: 2026-09-07 11:23:00
+ * @FilePath: frontend/src/services/providerModelPricing.ts
+ */
 import { Call } from '@wailsio/runtime'
 import type { AutomationCard } from '../data/cards'
 
@@ -12,6 +21,12 @@ export type ProviderModelPerCallPrice = {
 }
 
 export type ProviderModelPricingItem = {
+  priceFieldsKnown?: boolean
+  hasInputPrice?: boolean
+  hasOutputPrice?: boolean
+  hasCacheCreatePrice?: boolean
+  hasCacheReadPrice?: boolean
+  hasCacheCreate1hPrice?: boolean
   model: string
   displayName?: string
   createdAt?: string

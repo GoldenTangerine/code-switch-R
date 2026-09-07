@@ -1,3 +1,12 @@
+/**
+@name: 模型价格与费用展示
+@Descripttion: 维护模型价格规则及请求费用展示。
+@version: 1.0.0
+@Author: sm
+@Date: 2026-09-07 11:13:10
+@LastEditTime: 2026-09-07 11:13:10
+@FilePath: frontend/src/components/Logs/utils.ts
+*/
 import type { ModelUsageStat, RequestLog } from '../../services/logs'
 import type { ModelPricingRow } from '../../services/modelPricing'
 import type { Chart } from 'chart.js'
@@ -879,6 +888,8 @@ export const buildLogsInfoTooltipLabels = (translate: LogsTranslate): LogsInfoTo
   userAgentLabel: translate('components.logs.table.tooltipLabels.userAgent'),
   pricingUnavailableValue: translate('components.logs.table.tooltipValues.pricingUnavailable'),
   priceSourceLabels: {
+    mixed: translate('components.logs.table.priceSourceValues.mixed'),
+    cloud: translate('components.logs.table.priceSourceValues.cloud'),
     provider_api: translate('components.logs.table.priceSourceValues.providerApi'),
     builtin: translate('components.logs.table.priceSourceValues.builtin'),
     none: translate('components.logs.table.priceSourceValues.none'),
@@ -979,7 +990,7 @@ export const formatLogPriceSource = (
 
 export const resolveLogInfoTooltipSourceTone = (source: LogPriceSource): LogInfoTooltipTone => {
   if (source === 'provider_api') return 'source-provider-api'
-  if (source === 'builtin') return 'source-builtin'
+  if (source === 'builtin' || source === 'mixed' || source === 'cloud') return 'source-builtin'
   return 'source-none'
 }
 
@@ -1846,10 +1857,11 @@ export const resolveModelVerifyStatus = (item: RequestLog): ModelVerifyStatus =>
   return requestedModel === responseModel ? 'match' : 'mismatch'
 }
 
-export type LogPriceSource = 'provider_api' | 'builtin' | 'none'
+export type LogPriceSource = 'provider_api' | 'builtin' | 'none' | 'mixed' | 'cloud'
 
 export const resolvePriceSource = (item: RequestLog): LogPriceSource => {
   const source = String(item.price_source ?? '').trim().toLowerCase()
+  if (source === 'mixed' || source === 'cloud') return source
   if (source === 'provider_api') return 'provider_api'
   if (source === 'builtin') return 'builtin'
   if (source === 'none') return hasStoredCostSnapshot(item) ? 'builtin' : 'none'
@@ -1860,6 +1872,7 @@ export const resolvePriceSource = (item: RequestLog): LogPriceSource => {
 export const priceSourceClass = (item: RequestLog) => {
   const source = resolvePriceSource(item)
   if (source === 'provider_api') return 'provider-api'
+  if (source === 'mixed' || source === 'cloud') return 'builtin'
   return source
 }
 

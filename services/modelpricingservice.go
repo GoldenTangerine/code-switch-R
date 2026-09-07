@@ -1,3 +1,12 @@
+/**
+ * @name: 模型价格服务
+ * @Descripttion: 管理模型价格的分层持久化与前端接口。
+ * @version: 1.0.0
+ * @Author: sm
+ * @Date: 2026-09-07 11:10:24
+ * @LastEditTime: 2026-09-07 11:10:24
+ * @FilePath: services/modelpricingservice.go
+ */
 package services
 
 import (
@@ -40,21 +49,22 @@ type modelPricingMeta struct {
 }
 
 type ModelPricingRow struct {
-	OriginalModel                  string  `json:"original_model,omitempty"`
-	Model                          string  `json:"model"`
-	InputCostPerToken              float64 `json:"input_cost_per_token"`
-	OutputCostPerToken             float64 `json:"output_cost_per_token"`
-	OutputCostPerReasoningToken    float64 `json:"output_cost_per_reasoning_token"`
-	CacheCreationInputTokenCost    float64 `json:"cache_creation_input_token_cost"`
-	HasCacheCreationInputTokenCost bool    `json:"has_cache_creation_input_token_cost"`
-	CacheReadInputTokenCost        float64 `json:"cache_read_input_token_cost"`
-	HasCacheReadInputTokenCost     bool    `json:"has_cache_read_input_token_cost"`
-	Ephemeral1hCostPerToken        float64 `json:"ephemeral_1h_cost_per_token"`
-	GroupMultiplier                float64 `json:"group_multiplier"`
-	IsOverride                     bool    `json:"is_override"`
-	IsCustom                       bool    `json:"is_custom"`
-	Source                         string  `json:"source"`
-	SourceUpdatedAt                string  `json:"source_updated_at,omitempty"`
+	CloudPricing                   *modelpricing.CloudPricingRules `json:"cloud_pricing,omitempty"`
+	OriginalModel                  string                          `json:"original_model,omitempty"`
+	Model                          string                          `json:"model"`
+	InputCostPerToken              float64                         `json:"input_cost_per_token"`
+	OutputCostPerToken             float64                         `json:"output_cost_per_token"`
+	OutputCostPerReasoningToken    float64                         `json:"output_cost_per_reasoning_token"`
+	CacheCreationInputTokenCost    float64                         `json:"cache_creation_input_token_cost"`
+	HasCacheCreationInputTokenCost bool                            `json:"has_cache_creation_input_token_cost"`
+	CacheReadInputTokenCost        float64                         `json:"cache_read_input_token_cost"`
+	HasCacheReadInputTokenCost     bool                            `json:"has_cache_read_input_token_cost"`
+	Ephemeral1hCostPerToken        float64                         `json:"ephemeral_1h_cost_per_token"`
+	GroupMultiplier                float64                         `json:"group_multiplier"`
+	IsOverride                     bool                            `json:"is_override"`
+	IsCustom                       bool                            `json:"is_custom"`
+	Source                         string                          `json:"source"`
+	SourceUpdatedAt                string                          `json:"source_updated_at,omitempty"`
 }
 
 type ModelPricingService struct {
@@ -174,6 +184,7 @@ func (mps *ModelPricingService) ListModelPricing() ([]ModelPricingRow, error) {
 		ephemeral1hCostPerToken, _ := svc.ExplicitEphemeral1hCostPerToken(model)
 
 		rows = append(rows, ModelPricingRow{
+			CloudPricing:                   cloneCloudPricingRules(entry.CloudPricing),
 			Model:                          model,
 			InputCostPerToken:              entry.InputCostPerToken,
 			OutputCostPerToken:             entry.OutputCostPerToken,
@@ -366,6 +377,7 @@ func validateNonNegative(value float64, name string) error {
 }
 
 func applyModelPricingRowToEntry(existing modelpricing.PricingEntry, row ModelPricingRow) modelpricing.PricingEntry {
+	existing.CloudPricing = nil
 	existing.InputCostPerToken = row.InputCostPerToken
 	existing.HasInputCostPerToken = true
 	existing.OutputCostPerToken = row.OutputCostPerToken
@@ -404,6 +416,7 @@ func effectiveModelPricingGroupMultiplier(entry modelpricing.PricingEntry) float
 func cloneModelPricingOverrides(src modelPricingOverrides) modelPricingOverrides {
 	dst := newEmptyModelPricingOverridesWithCapacity(len(src.Pricing), len(src.Ephemeral1h), len(src.Meta))
 	for key, value := range src.Pricing {
+		value.CloudPricing = cloneCloudPricingRules(value.CloudPricing)
 		dst.Pricing[key] = value
 	}
 	for key, value := range src.Ephemeral1h {
@@ -525,6 +538,7 @@ func isModelPricingOverridesEmpty(overrides modelPricingOverrides) bool {
 func overlayModelPricingOverrides(base modelPricingOverrides, overlay modelPricingOverrides) modelPricingOverrides {
 	merged := cloneModelPricingOverrides(base)
 	for key, value := range overlay.Pricing {
+		value.CloudPricing = cloneCloudPricingRules(value.CloudPricing)
 		merged.Pricing[key] = value
 	}
 	for key, value := range overlay.Ephemeral1h {

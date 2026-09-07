@@ -1,3 +1,12 @@
+<!--
+@name: 模型价格与费用展示
+@Descripttion: 维护模型价格规则及请求费用展示。
+@version: 1.0.0
+@Author: sm
+@Date: 2026-09-07 11:13:10
+@LastEditTime: 2026-09-07 11:13:10
+@FilePath: frontend/src/components/Setting/CloudPricingConflictModal.vue
+-->
 <template>
   <InlineModal
     :open="open"
@@ -100,6 +109,7 @@
                     <span class="price-value" :class="block.className">{{ block.value }}</span>
                   </div>
                 </div>
+                <CloudPricingRulesSummary :rules="row.current.cloud_pricing" />
               </div>
 
               <div class="conflict-pricing-card conflict-pricing-card--incoming">
@@ -116,6 +126,7 @@
                     <span class="price-value" :class="block.className">{{ block.value }}</span>
                   </div>
                 </div>
+                <CloudPricingRulesSummary :rules="row.incoming.cloud_pricing" />
               </div>
             </div>
           </div>
@@ -149,6 +160,7 @@ import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import InlineModal from '../common/InlineModal.vue'
 import BaseInput from '../common/BaseInput.vue'
+import CloudPricingRulesSummary from './CloudPricingRulesSummary.vue'
 import type {
   CloudPriceTableConflictPricing,
   CloudPriceTableSyncConflictRow,

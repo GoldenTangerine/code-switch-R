@@ -1,3 +1,12 @@
+<!--
+@name: 供应商模型价格列表
+@Descripttion: 展示供应商模型报价并编辑倍率。
+@version: 1.0.0
+@Author: sm
+@Date: 2026-09-07 11:23:00
+@LastEditTime: 2026-09-07 11:23:00
+@FilePath: frontend/src/components/Main/modals/ProviderModelListModal.vue
+-->
 <template>
   <InlineModal
     :open="open"
@@ -545,6 +554,7 @@ import {
   type ProviderModelPricingSource,
   upsertProviderModelPricingOverride,
 } from '../../../services/providerModelPricing'
+import { normalizeProviderPricePresence } from './providerModelPricePresence'
 
 type ProviderVendorKey = 'all' | 'OpenAI' | 'Claude' | 'Gemini' | 'Moonshot' | 'Grok' | 'DeepSeek' | 'Qwen' | 'Mistral' | 'Unknown'
 
@@ -605,7 +615,7 @@ const modalTitle = computed(() => {
 
 const siteType = computed(() => response.value?.siteType ?? '')
 const pricingSource = computed<ProviderModelPricingSource | ''>(() => response.value?.pricingSource ?? '')
-const models = computed(() => response.value?.models ?? [])
+const models = computed(() => (response.value?.models ?? []).map(normalizeProviderPricePresence))
 const pricingAvailable = computed(() => response.value?.pricingSource !== 'v1/models')
 const challengeDetected = computed(() => Boolean(response.value?.challengeDetected))
 const challengeMessage = computed(() => response.value?.challengeMessage?.trim() || '')
@@ -961,7 +971,7 @@ const cacheHintClass = (source?: string) => ({
 })
 
 const hasExplicit1hCacheCreate = (model: ProviderModelPricingItem) =>
-  typeof model.cacheCreate1hUsdPerM === 'number' && Number.isFinite(model.cacheCreate1hUsdPerM) && model.cacheCreate1hUsdPerM > 0
+  typeof model.cacheCreate1hUsdPerM === 'number' && Number.isFinite(model.cacheCreate1hUsdPerM) && model.cacheCreate1hUsdPerM >= 0
 
 const resolveCacheCreateMultiplierLabel = (
   model: ProviderModelPricingItem,
@@ -984,8 +994,8 @@ const resolveCacheCreatePriceEntries = (model: ProviderModelPricingItem): CacheC
   const createHint = resolveCacheCreateHint(model)
   const createHintClass = cacheHintClass(model.cacheCreateMultiplierSource)
 
-  const has1hCache = typeof cacheCreate1hPrice === 'number' && cacheCreate1hPrice > 0
-  const shouldShowBaseCache = typeof cacheCreatePrice === 'number' && (cacheCreatePrice > 0 || !has1hCache)
+  const has1hCache = typeof cacheCreate1hPrice === 'number' && cacheCreate1hPrice >= 0
+  const shouldShowBaseCache = typeof cacheCreatePrice === 'number' && (cacheCreatePrice > 0 || model.hasCacheCreatePrice || !has1hCache)
 
   if (shouldShowBaseCache) {
     if (has1hCache) {

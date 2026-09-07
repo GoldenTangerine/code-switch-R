@@ -1,4 +1,11 @@
 # DO NOT EDIT - Generated automatically by `wails build`
+# @name: 平台构建元数据
+# @Descripttion: 定义应用平台打包与版本信息
+# @version: 1.0.0
+# @Author: sm
+# @Date: 2026-09-07 12:43:38
+# @LastEditTime: 2026-09-07 12:43:38
+# @FilePath: build/windows/nsis/wails_tools.nsh
 
 !include "x64.nsh"
 !include "WinVer.nsh"
@@ -14,7 +21,7 @@
     !define INFO_PRODUCTNAME "Code Switch"
 !endif
 !ifndef INFO_PRODUCTVERSION
-    !define INFO_PRODUCTVERSION "2.11.14"
+    !define INFO_PRODUCTVERSION "2.11.15"
 !endif
 !ifndef INFO_COPYRIGHT
     !define INFO_COPYRIGHT "(c) 2025, Code Switch"

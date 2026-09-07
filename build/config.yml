@@ -1,3 +1,10 @@
+# @name: 应用构建配置
+# @Descripttion: 定义应用版本与平台资源生成参数
+# @version: 1.0.0
+# @Author: sm
+# @Date: 2026-09-07 12:43:38
+# @LastEditTime: 2026-09-07 12:43:38
+# @FilePath: build/config.yml
 # This file contains the configuration for this project.
 # When you update `info` or `fileAssociations`, run `wails3 task common:update:build-assets` to update the assets.
 # Note that this will overwrite any changes you have made to the assets.
@@ -11,7 +18,7 @@ info:
   description: "Manage Claude & Codex relays, providers, and request logs." # The application description
   copyright: "(c) 2025, Code Switch" # Copyright text
   comments: "Code Switch desktop relay controller" # Comments
-  version: "2.11.14" # The application version
+  version: "2.11.15" # The application version
 
 # Dev mode configuration
 dev_mode:
