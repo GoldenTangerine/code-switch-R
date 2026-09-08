@@ -1,3 +1,12 @@
+/**
+ * @name: 应用入口
+ * @Descripttion: 初始化桌面窗口、代理与后台服务。
+ * @version: 1.0.0
+ * @Author: sm
+ * @Date: 2026-09-08 16:53:06
+ * @LastEditTime: 2026-09-08 16:53:06
+ * @FilePath: main.go
+ */
 package main
 
 import (
@@ -349,6 +358,11 @@ func main() {
 	}
 	cliConfigService := services.NewCliConfigService(providerRelay.Addr(), appSettings)
 	logService := services.NewLogService(modelPricingService)
+	traySnapshotService := services.NewTraySnapshotService(providerService, geminiService, appSettings,
+		customCliService, providerConcurrencyService, providerQuotaQueryService, logService)
+	if err := traySnapshotService.Start(); err != nil {
+		log.Printf("托盘共享快照服务启动失败: %v", err)
+	}
 	updateService := services.NewUpdateService(AppVersion)
 	mcpService := services.NewMCPService()
 	skillService := services.NewSkillService()
@@ -480,6 +494,7 @@ func main() {
 			application.NewService(settingsService),
 			application.NewService(blacklistService),
 			application.NewService(providerConcurrencyService),
+			application.NewService(traySnapshotService),
 			application.NewService(providerRelayStateService),
 			application.NewService(claudeSettings),
 			application.NewService(codexSettings),
@@ -537,6 +552,7 @@ func main() {
 
 	app.OnShutdown(func() {
 		mainWindowLifecycle.shutdown()
+		traySnapshotService.Stop()
 
 		log.Println("🛑 应用正在关闭，停止后台服务...")
 

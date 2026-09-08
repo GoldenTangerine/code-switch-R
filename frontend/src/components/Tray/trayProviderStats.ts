@@ -113,6 +113,13 @@ export function buildTrayProviderStatsDisplay(
   locale = 'en',
 ): TrayProviderStatsDisplay {
   const stat = resolveTrayProviderDailyStat(provider, stats)
+  return buildTrayProviderStatsFromStat(stat, locale)
+}
+
+export function buildTrayProviderStatsFromStat(
+  stat: ProviderDailyStat | null,
+  locale = 'en',
+): TrayProviderStatsDisplay {
   if (!stat) {
     return {
       successRate: EMPTY_VALUE,

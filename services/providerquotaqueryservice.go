@@ -1,7 +1,17 @@
+/**
+ * @name: 供应商额度查询
+ * @Descripttion: 执行供应商额度请求和脚本并支持调用取消。
+ * @version: 1.0.0
+ * @Author: sm
+ * @Date: 2026-09-08 19:00:00
+ * @LastEditTime: 2026-09-08 19:00:00
+ * @FilePath: services/providerquotaqueryservice.go
+ */
 package services
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -91,6 +101,20 @@ type ProviderQuotaScriptValidationResult struct {
 
 type ProviderQuotaQueryService struct {
 	client *http.Client
+	ctx    context.Context
+}
+
+func (s *ProviderQuotaQueryService) requestContext() context.Context {
+	if s.ctx != nil {
+		return s.ctx
+	}
+	return context.Background()
+}
+
+func (s *ProviderQuotaQueryService) queryQuotaContext(ctx context.Context, queryType, apiURL, apiKey string, config *ProviderQuotaQueryConfig) *ProviderQuotaQueryResult {
+	query := *s
+	query.ctx = ctx
+	return query.QueryQuota(queryType, apiURL, apiKey, config)
 }
 
 type providerQuotaBalanceTarget struct {
@@ -484,6 +508,10 @@ func (s *ProviderQuotaQueryService) executeScriptQuotaQuery(
 	}
 
 	vm := goja.New()
+	scriptContext, cancel := context.WithTimeout(s.requestContext(), 30*time.Second)
+	defer cancel()
+	stopInterrupt := context.AfterFunc(scriptContext, func() { vm.Interrupt("额度查询已取消或超时") })
+	defer stopInterrupt()
 	compiledValue, err := vm.RunString(scriptWithVars)
 	if err != nil {
 		return nil, fmt.Errorf("解析额度查询脚本失败: %w", err)
@@ -739,7 +767,7 @@ func (s *ProviderQuotaQueryService) sendScriptRequest(
 		method = http.MethodGet
 	}
 
-	req, err := http.NewRequest(method, config.URL, bodyReader)
+	req, err := http.NewRequestWithContext(s.requestContext(), method, config.URL, bodyReader)
 	if err != nil {
 		return nil, fmt.Errorf("创建额度查询请求失败: %w", err)
 	}
@@ -1679,7 +1707,7 @@ func (s *ProviderQuotaQueryService) sendJSONRequest(
 	body io.Reader,
 	headers map[string]string,
 ) ([]byte, int, error) {
-	req, err := http.NewRequest(method, targetURL, body)
+	req, err := http.NewRequestWithContext(s.requestContext(), method, targetURL, body)
 	if err != nil {
 		return nil, 0, fmt.Errorf("创建请求失败: %w", err)
 	}

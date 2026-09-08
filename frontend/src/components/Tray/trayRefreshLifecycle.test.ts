@@ -11,6 +11,30 @@ import { describe, expect, it, vi } from 'vitest'
 import { createTrayRefreshLifecycle } from './trayRefreshLifecycle'
 
 describe('trayRefreshLifecycle', () => {
+  it('does not starve budget refresh when activity polls every 500ms', () => {
+    vi.useFakeTimers()
+    const onTick = vi.fn()
+    const lifecycle = createTrayRefreshLifecycle({
+      onActivate: () => {}, onTick, getIntervalMs: () => 60_000,
+      scheduleInterval: (callback, delay) => globalThis.setInterval(callback, delay) as unknown as number,
+      cancelInterval: (id) => globalThis.clearInterval(id),
+    })
+    try {
+      lifecycle.activate()
+      lifecycle.restartTicker()
+      for (let i = 0; i < 360; i++) {
+        vi.advanceTimersByTime(500)
+        lifecycle.restartTicker()
+      }
+      expect(onTick).toHaveBeenCalledTimes(3)
+      lifecycle.deactivate()
+      vi.advanceTimersByTime(60_000)
+      expect(onTick).toHaveBeenCalledTimes(3)
+    } finally {
+      lifecycle.dispose()
+      vi.useRealTimers()
+    }
+  })
   it('refreshes on activation and owns no ticker while inactive', () => {
     const onActivate = vi.fn()
     const onTick = vi.fn()

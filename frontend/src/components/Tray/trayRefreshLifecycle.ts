@@ -31,6 +31,7 @@ export function createTrayRefreshLifecycle(options: TrayRefreshLifecycleOptions)
     ?? ((timerId) => window.clearInterval(timerId))
   let active = false
   let tickerId: number | undefined
+  let tickerIntervalMs: number | undefined
 
   function stopTicker() {
     if (tickerId === undefined) return
@@ -39,9 +40,11 @@ export function createTrayRefreshLifecycle(options: TrayRefreshLifecycleOptions)
   }
 
   function restartTicker() {
-    stopTicker()
     if (!active) return
     const intervalMs = Math.max(1_000, Math.floor(options.getIntervalMs()))
+    if (tickerId !== undefined && tickerIntervalMs === intervalMs) return
+    stopTicker()
+    tickerIntervalMs = intervalMs
     tickerId = scheduleInterval(() => {
       if (active) options.onTick()
     }, intervalMs)

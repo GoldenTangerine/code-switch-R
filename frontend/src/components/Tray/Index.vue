@@ -1,21 +1,25 @@
+<!--
+@name: 托盘弹窗
+@Descripttion: 展示平台预算与后台共享供应商快照。
+@version: 1.0.0
+@Author: sm
+@Date: 2026-09-08 16:53:06
+@LastEditTime: 2026-09-08 16:53:06
+@FilePath: frontend/src/components/Tray/Index.vue
+-->
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, proxyRefs, ref } from 'vue'
 import { Call } from '@wailsio/runtime'
 import { useI18n } from 'vue-i18n'
-import { LoadProviders } from '../../../bindings/codeswitch/services/providerservice'
-import { GetProviders as GetGeminiProviders } from '../../../bindings/codeswitch/services/geminiservice'
 import {
   fetchCostSince,
   fetchFiveHourQuotaStatus,
   fetchLogStats,
-  fetchProviderDailyStats,
   type RequestLogPlatform,
 } from '../../services/logs'
 import { fetchAppSettings, type AppSettings } from '../../services/appSettings'
 import { fetchProxyStatus } from '../../services/claudeSettings'
-import { getCustomCliProxyStatus, listCustomCliTools, type CustomCliTool } from '../../services/customCliService'
-import type { AutomationCard } from '../../data/cards'
-import { HOME_PROVIDER_TAB_OPTIONS } from '../../data/homeProviderTabs'
+import { getCustomCliProxyStatus } from '../../services/customCliService'
 import {
   getVisibleTrayQuotaKeys,
   resolveTrayBudgetDisplayMode,
@@ -40,22 +44,13 @@ import {
   type BudgetQuotaSetting,
   type BudgetQuotaSettings,
 } from '../../utils/budgetUsage'
-import { hasProviderQuotaQueryType } from '../../utils/providerQuotaQuery'
 import {
-  deserializeProviders,
-  geminiToCard,
-  type PersistedProvider,
-} from '../Main/adapters/providerCardMappers'
-import { resolveProviderQuotaQueryDisplay } from '../Main/utils/providerQuotaQueryDisplay'
-import {
-  resolveProviderQuotaSnapshot,
   type ProviderQuotaSnapshotItem,
 } from '../Main/utils/providerQuotaSnapshot'
 import {
   getProviderQuotaRemainingValue,
 } from '../Main/utils/providerQuotaCardDisplay'
 import {
-  hasTrayFallbackProviderQuotaConfig,
   resolveTrayProviderQuotaDisplay,
   shouldShowTrayProviderQuotaMeta,
 } from './trayProviderFallback'
@@ -72,17 +67,11 @@ import {
   type TrayAmountPart,
   type TrayQuotaValueMode,
 } from './trayAmountFormatter'
-import {
-  buildTrayProviderStatsDisplay,
-  type TrayProviderStatsDisplay,
-} from './trayProviderStats'
+import { buildTrayProviderStatsFromStat, type TrayProviderStatsDisplay } from './trayProviderStats'
 import { createTrayRefreshLifecycle } from './trayRefreshLifecycle'
+import { fetchSharedTraySnapshot, sharedTrayQuotaItem, type SharedTrayPlatform } from './traySharedSnapshot'
 import {
   buildTrayProviderActivityRefreshKey,
-  hasTrayProviderActivityChanged,
-  loadTrayProviderActivitySnapshot,
-  resolveTrayProviderActivity,
-  type TrayProviderActivity,
 } from './trayProviderActivity'
 
 type Platform = RequestLogPlatform
@@ -117,7 +106,6 @@ type TrayQuotaState = {
 }
 
 type TrayProviderBlock = {
-  provider: AutomationCard | null
   providerId: string
   providerName: string
   providerIconKey: string
@@ -276,10 +264,8 @@ const createCostSinceFetcher = (platform: Platform): CostSinceFetcher => {
 const createTrayCard = (platform: Platform, brandName: string, brandIcon: string) => {
   const quotas = ref<TrayQuotaState[]>(budgetQuotaOrder.map((key) => createQuotaState(key)))
   const providerBlocks = ref<TrayProviderBlock[]>([])
-  const providerActivities = ref<TrayProviderActivity[]>([])
   const providerActivityLoaded = ref(false)
   const providerActivityError = ref(false)
-  const providerByRef = new Map<string, AutomationCard>()
   const loading = ref(false)
   const showCountdown = ref(false)
   const showForecast = ref(false)
@@ -320,29 +306,6 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
   const providerActivityLabel = (block: TrayProviderBlock) => block.activityStatus === 'active'
     ? t('tray.calling', { count: block.activeRequests })
     : t('tray.defaultProvider')
-
-  const updateProviderBlocksFromActivity = (activities: readonly TrayProviderActivity[]) => {
-    const previous = providerBlocks.value
-    const previousByRef = new Map(previous.map((block) => [block.providerId, block]))
-    providerBlocks.value = activities.map((activity) => {
-      const provider = providerByRef.get(activity.providerId) ?? null
-      const previousBlock = previousByRef.get(activity.providerId)
-      const providerName = provider?.name || activity.providerName || previousBlock?.providerName || activity.providerId
-      const providerIconKey = provider?.icon || previousBlock?.providerIconKey || 'openai'
-      return {
-        provider,
-        providerId: activity.providerId,
-        providerName,
-        providerIconKey,
-        providerIconSvg: getProviderDisplayIconSvg(providerIconKey),
-        providerInitials: getTrayProviderInitials(providerName),
-        activeRequests: activity.activeRequests,
-        activityStatus: activity.status,
-        quotas: previousBlock?.quotas ?? [],
-        stats: previousBlock?.stats ?? null,
-      }
-    })
-  }
 
   const applyUsedAdjustment = (key: BudgetQuotaKey, rawUsed: number) => {
     const adjusted = rawUsed + usedAdjustments.value[key]
@@ -506,30 +469,6 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
     return createDefaultBudgetQuotaAdjustments()
   }
 
-  const loadProviders = async (): Promise<AutomationCard[]> => {
-    providerByRef.clear()
-    try {
-      let providers: AutomationCard[] = []
-      if (platform === 'gemini') {
-        providers = (await GetGeminiProviders()).map(geminiToCard)
-      } else {
-        const saved = await LoadProviders(platform)
-        providers = Array.isArray(saved)
-          ? deserializeProviders(saved as PersistedProvider[], platform)
-          : []
-      }
-      const enabledProviders = providers.filter((provider) => provider.enabled)
-      enabledProviders.forEach((provider) => {
-        const providerRef = String(provider.providerRef ?? provider.id).trim()
-        if (providerRef) providerByRef.set(providerRef, provider)
-      })
-      return enabledProviders
-    } catch (error) {
-      console.error(`failed to load ${platform} providers`, error)
-      return []
-    }
-  }
-
   const createProviderQuotaState = (item: ProviderQuotaSnapshotItem): TrayQuotaState => {
     const display = resolveTrayProviderQuotaDisplay(item, t)
     const nextQuota: TrayQuotaState = {
@@ -561,90 +500,6 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
     return nextQuota
   }
 
-  const loadProviderQuotas = async (provider: AutomationCard, now: Date): Promise<TrayQuotaState[]> => {
-    if (!hasTrayFallbackProviderQuotaConfig(provider)) return []
-    if (hasProviderQuotaQueryType(provider.providerQuotaQueryConfig ?? provider.providerQuotaQueryType, provider.providerQuotaQueryType)) {
-      const result = await resolveProviderQuotaQueryDisplay({
-        card: provider,
-        now,
-        t,
-      })
-      if (result.items.length > 0) {
-        return result.items.map(createProviderQuotaState)
-      }
-      if (result.failureMessage) {
-        return [{
-          key: 'provider_quota_error',
-          title: t('tray.providerQuotaQuery'),
-          rawUsed: 0,
-          used: 0,
-          total: 0,
-          unlimited: false,
-          usedLabel: formatQuotaValue(0),
-          totalLabel: '∞',
-          remainingParts: formatQuotaValueParts(0),
-          valueMode: 'currency',
-          unit: undefined,
-          extra: '',
-          invalidMessage: result.failureMessage,
-          source: 'provider',
-          displayKind: 'error',
-          hasBudget: false,
-          progressRatio: 0,
-          progressPercentLabel: '',
-          countdownLabel: '',
-          forecastLabel: '',
-          windowStart: null,
-          nextReset: null,
-          forecastRate: 0,
-        }]
-      }
-    }
-
-    const snapshots = await resolveProviderQuotaSnapshot({
-      card: provider,
-      platform,
-      now,
-      t,
-    })
-    return snapshots.map(createProviderQuotaState)
-  }
-
-  const loadProviderBlocks = async (
-    activities: readonly TrayProviderActivity[],
-    now: Date,
-    providers: readonly AutomationCard[],
-  ) => {
-    if (activities.length === 0) {
-      providerBlocks.value = []
-      return
-    }
-    const statsPromise = fetchProviderDailyStats(platform).catch((error) => {
-      console.error(`failed to load ${platform} tray provider stats`, error)
-      return []
-    })
-    const providerByName = new Map(providers.map((provider) => [provider.name, provider]))
-    const stats = await statsPromise
-    providerBlocks.value = await Promise.all(activities.map(async (activity) => {
-      const provider = providerByRef.get(activity.providerId) ?? providerByName.get(activity.providerName) ?? null
-      const providerName = provider?.name || activity.providerName || activity.providerId
-      const providerIconKey = provider?.icon || 'openai'
-      const quotas = provider ? await loadProviderQuotas(provider, now) : []
-      return {
-        provider,
-        providerId: activity.providerId || String(provider?.providerRef ?? provider?.id ?? '').trim(),
-        providerName,
-        providerIconKey,
-        providerIconSvg: getProviderDisplayIconSvg(providerIconKey),
-        providerInitials: getTrayProviderInitials(providerName),
-        activeRequests: activity.activeRequests,
-        activityStatus: activity.status,
-        quotas,
-        stats: provider ? buildTrayProviderStatsDisplay(provider, stats, currentLocale()) : null,
-      }
-    }))
-  }
-
   const loadTotalUsage = async () => {
     try {
       const stats = await fetchLogStats(platform)
@@ -656,11 +511,32 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
     }
   }
 
-  const setProviderActivities = (activities: readonly TrayProviderActivity[], error = false) => {
-    providerActivities.value = [...activities]
+  const setProviderActivityError = () => {
     providerActivityLoaded.value = true
-    providerActivityError.value = error
-    updateProviderBlocksFromActivity(activities)
+    providerActivityError.value = true
+    providerBlocks.value = []
+  }
+
+  const applySharedPlatform = (snapshot: SharedTrayPlatform) => {
+    providerActivityLoaded.value = true
+    providerActivityError.value = snapshot.error
+    providerBlocks.value = snapshot.providers.map((provider) => ({
+      providerId: provider.providerId,
+      providerName: provider.providerName,
+      providerIconKey: provider.icon,
+      providerIconSvg: getProviderDisplayIconSvg(provider.icon),
+      providerInitials: getTrayProviderInitials(provider.providerName),
+      activeRequests: provider.activeRequests,
+      activityStatus: provider.status,
+      quotas: provider.quotas.map((quota) => {
+        const state = createProviderQuotaState(sharedTrayQuotaItem(quota, t, new Date()))
+        state.displayKind = quota.displayKind
+        updateQuotaStaticLabels(state)
+        return state
+      }),
+      stats: provider.stats ? buildTrayProviderStatsFromStat(provider.stats, currentLocale()) : null,
+    }))
+    void preloadProviderDisplayIcons(snapshot.providers.map((provider) => provider.icon))
   }
 
   const applySettings = (settings: AppSettings) => {
@@ -695,9 +571,6 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
       const quotaSettings = getQuotaSettings(settings)
       usedAdjustments.value = getQuotaAdjustments(settings)
       await updateHostingState()
-      const providers = await loadProviders()
-      void preloadProviderDisplayIcons(providers.map((provider) => provider.icon))
-      await loadProviderBlocks(providerActivities.value, now, providers)
       const nextDisplayMode = resolveTrayBudgetDisplayMode(quotaSettings)
 
       if (nextDisplayMode === 'summary') {
@@ -773,6 +646,7 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
   }
 
   return proxyRefs({
+    applySharedPlatform,
     platform,
     brandName,
     brandIcon,
@@ -789,7 +663,7 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
     hostingLabel,
     loading,
     refresh,
-    setProviderActivities,
+    setProviderActivityError,
     hasSecondPrecisionCountdown,
     updateDerivedLabels,
   })
@@ -801,21 +675,18 @@ type TrayPlatformDescriptor = {
   brandIcon: string
 }
 
-const platformOptions = new Map(
-  HOME_PROVIDER_TAB_OPTIONS.map((option) => [option.id, option]),
-)
 const visiblePlatformDescriptors = ref<TrayPlatformDescriptor[]>([])
-const customCliTools = ref<CustomCliTool[]>([])
 const cardCache = new Map<string, ReturnType<typeof createTrayCard>>()
-const activityByPlatform = new Map<string, TrayProviderActivity[]>()
 let activityRefreshTask: { key: string; promise: Promise<void> } | null = null
 let activityRefreshGeneration = 0
 let activityRefreshTimer: number | undefined
 let activityNeedsFullRefresh = false
+let appliedSnapshotContent = ''
+let appliedSnapshotGeneration = -1
 
 const getOrCreateCard = (descriptor: TrayPlatformDescriptor) => {
   const cached = cardCache.get(descriptor.platform)
-  if (cached) return cached
+  if (cached && cached.brandName === descriptor.brandName && cached.brandIcon === descriptor.brandIcon) return cached
   const card = createTrayCard(descriptor.platform, descriptor.brandName, descriptor.brandIcon)
   cardCache.set(descriptor.platform, card)
   return card
@@ -823,68 +694,20 @@ const getOrCreateCard = (descriptor: TrayPlatformDescriptor) => {
 
 const cards = computed(() => visiblePlatformDescriptors.value.map(getOrCreateCard))
 
-const updateVisiblePlatformDescriptors = async (settings: AppSettings) => {
-  const descriptors: TrayPlatformDescriptor[] = []
-  for (const tabId of settings.home_provider_tabs) {
-    if (tabId === 'others') continue
-    if (tabId !== 'claude' && tabId !== 'codex' && tabId !== 'gemini' && tabId !== 'grokbuild') continue
-    const option = platformOptions.get(tabId)
-    if (!option) continue
-    descriptors.push({
-      platform: tabId,
-      brandName: option.label,
-      brandIcon: option.icon,
-    })
-  }
-
-  if (settings.home_provider_tabs.includes('others')) {
-    try {
-      customCliTools.value = await listCustomCliTools()
-    } catch (error) {
-      console.error('failed to load tray custom cli tools', error)
-      customCliTools.value = []
-    }
-    customCliTools.value.forEach((tool) => {
-      if (!tool.id) return
-      descriptors.push({
-        platform: `custom:${tool.id}`,
-        brandName: tool.name || tool.id,
-        brandIcon: 'others',
-      })
-    })
-  } else {
-    customCliTools.value = []
-  }
-
-  const nextPlatforms = new Set(descriptors.map((descriptor) => descriptor.platform))
-  visiblePlatformDescriptors.value.forEach((descriptor) => {
-    if (nextPlatforms.has(descriptor.platform)) return
-    activityByPlatform.delete(descriptor.platform)
-    cardCache.get(descriptor.platform)?.setProviderActivities([])
-  })
-  visiblePlatformDescriptors.value = descriptors
-  void preloadProviderDisplayIcons(descriptors.map((descriptor) => descriptor.brandIcon))
-}
-
 const refreshProviderActivity = (): Promise<void> => {
   if (!isTrayWindowActive() || !refreshLifecycle?.isActive()) return Promise.resolve()
 
   const targetCards = [...cards.value]
   const platforms = targetCards.map((card) => card.platform)
-  if (platforms.length === 0) return Promise.resolve()
-  const refreshKey = buildTrayProviderActivityRefreshKey(platforms, activityRefreshGeneration)
+  const generation = activityRefreshGeneration
+  const refreshKey = buildTrayProviderActivityRefreshKey(platforms, generation)
   if (activityRefreshTask) {
     if (activityRefreshTask.key === refreshKey) return activityRefreshTask.promise
     return activityRefreshTask.promise.then(refreshProviderActivity, refreshProviderActivity)
   }
 
   const nextRefresh = (async () => {
-    const snapshot = await loadTrayProviderActivitySnapshot(platforms, {
-      loadStates: () => Call.ByName(
-        'codeswitch/services.ProviderConcurrencyService.GetTrayProviderRuntimeStatesBatch',
-        platforms,
-      ),
-    })
+    const snapshot = await fetchSharedTraySnapshot()
 
     const currentPlatforms = cards.value.map((card) => card.platform)
     const currentRefreshKey = buildTrayProviderActivityRefreshKey(
@@ -897,36 +720,37 @@ const refreshProviderActivity = (): Promise<void> => {
       || !refreshLifecycle?.isActive()
     ) return
 
-    if (snapshot.error || !snapshot.statesByPlatform) {
-      console.error('failed to load tray provider activity', snapshot.error)
+    if (snapshot.version !== 1) throw new Error('Unsupported tray snapshot version')
+    const content = JSON.stringify(snapshot.platforms)
+    if (appliedSnapshotGeneration === generation && appliedSnapshotContent === content) {
+      updateAllDerivedLabels()
+      setupTicker()
+      return
     }
-
-    targetCards.forEach((card) => {
-      const state = snapshot.statesByPlatform?.[card.platform]
-      const activityError = Boolean(snapshot.error || !snapshot.statesByPlatform || state?.error)
-      if (state?.error) {
-        console.error(`failed to load ${card.platform} tray provider activity`)
-      }
-      const previous = activityByPlatform.get(card.platform) ?? []
-      const next = activityError
-        ? []
-        : resolveTrayProviderActivity(
-          state?.statuses ?? [],
-          state?.defaultProvider ?? null,
-        )
-      activityByPlatform.set(card.platform, next)
-      card.setProviderActivities(next, activityError)
-      if (activityError) return
-      if (!hasTrayProviderActivityChanged(previous, next)) return
-      if (refreshBusy) {
-        activityNeedsFullRefresh = true
-      } else {
-        scheduleRefreshAll()
-      }
+    const descriptors = snapshot.platforms.map((item) => ({
+      platform: item.platform as Platform, brandName: item.name, brandIcon: item.icon,
+    }))
+    const platformsChanged = JSON.stringify(descriptors) !== JSON.stringify(visiblePlatformDescriptors.value)
+    visiblePlatformDescriptors.value = descriptors
+    snapshot.platforms.forEach((item) => {
+      getOrCreateCard({ platform: item.platform as Platform, brandName: item.name, brandIcon: item.icon }).applySharedPlatform(item)
     })
+    appliedSnapshotContent = content
+    appliedSnapshotGeneration = generation
+    updateAllDerivedLabels()
+    setupTicker()
+    await resizeToContent()
+    if (platformsChanged) {
+      if (refreshBusy) activityNeedsFullRefresh = true
+      else scheduleRefreshAll()
+    }
   })()
 
-  const promise = nextRefresh.finally(() => {
+  const promise = nextRefresh.catch(() => {
+    if (activityRefreshGeneration !== generation || !isTrayWindowActive()) return
+    appliedSnapshotContent = ''
+    targetCards.forEach((card) => card.setProviderActivityError())
+  }).finally(() => {
     if (activityRefreshTask?.promise === promise) {
       activityRefreshTask = null
     }
@@ -996,7 +820,6 @@ const refreshAll = async () => {
   lastRefreshAttemptAt = Date.now()
   try {
     const settings = await fetchAppSettings()
-    await updateVisiblePlatformDescriptors(settings)
     await refreshProviderActivity()
     if (!isTrayWindowActive() || !refreshLifecycle?.isActive()) return
     activityNeedsFullRefresh = false
@@ -1026,14 +849,14 @@ const clearActivityRefreshTimer = () => {
 const startActivityRefreshTimer = () => {
   clearActivityRefreshTimer()
   if (!isTrayWindowActive()) return
-  if (cards.value.length > 0) void refreshProviderActivity()
+  void refreshProviderActivity()
   activityRefreshTimer = window.setInterval(() => {
     if (!isTrayWindowActive()) {
       clearActivityRefreshTimer()
       return
     }
     void refreshProviderActivity()
-  }, 1000)
+  }, 500)
 }
 
 refreshLifecycle = createTrayRefreshLifecycle({
