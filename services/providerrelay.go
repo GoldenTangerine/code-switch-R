@@ -51,6 +51,7 @@ type LastUsedProvider struct {
 }
 
 type ProviderRelayService struct {
+	trayRoutes                      traySessionRoutes
 	providerService                 *ProviderService
 	geminiService                   *GeminiService
 	blacklistService                *BlacklistService
@@ -4962,6 +4963,7 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 		return false, errProviderConcurrencyLimit
 	}
 	defer releaseProviderSlot()
+	prs.trayRoutes.record(kind, hookSessionKey(kind, hookSessionID(kind, sessionIdentityBodyBytes(plan, bodyBytes), clientHeaders)), provider, time.Now())
 	if plan.SessionPreferenceGeneration > 0 && strings.TrimSpace(plan.SessionPreferenceHash) != "" {
 		prs.updateSessionProviderPreferenceAttempt(
 			kind,

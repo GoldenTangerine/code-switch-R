@@ -34,11 +34,12 @@ type TraySnapshot struct {
 }
 
 type TraySnapshotPlatform struct {
-	Platform  string                 `json:"platform"`
-	Name      string                 `json:"name"`
-	Icon      string                 `json:"icon"`
-	Error     bool                   `json:"error"`
-	Providers []TraySnapshotProvider `json:"providers"`
+	SessionBindings []TraySessionBinding   `json:"sessionBindings,omitempty"`
+	Platform        string                 `json:"platform"`
+	Name            string                 `json:"name"`
+	Icon            string                 `json:"icon"`
+	Error           bool                   `json:"error"`
+	Providers       []TraySnapshotProvider `json:"providers"`
 }
 
 type TraySnapshotProvider struct {
@@ -387,6 +388,7 @@ func (s *TraySnapshotService) collect(ctx context.Context, now time.Time) []Tray
 			continue
 		}
 		platform.Providers = trayActivities(state)
+		platform.SessionBindings = s.concurrency.hookSessionBindings(platform.Platform, now)
 		for j := range platform.Providers {
 			item := &platform.Providers[j]
 			input := matchTrayProvider(inputs, *item)
