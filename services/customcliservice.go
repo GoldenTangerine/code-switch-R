@@ -1,3 +1,12 @@
+/**
+ * @name: 自定义 CLI 服务
+ * @Descripttion: 管理自定义工具配置与代理托管状态。
+ * @version: 1.0.0
+ * @Author: sm
+ * @Date: 2026-09-10 18:08:00
+ * @LastEditTime: 2026-09-10 18:08:00
+ * @FilePath: services/customcliservice.go
+ */
 package services
 
 import (
@@ -26,7 +35,7 @@ type ConfigFile struct {
 	ID        string `json:"id"`
 	Label     string `json:"label"`
 	Path      string `json:"path"`
-	Format    string `json:"format"`              // json | toml | env
+	Format    string `json:"format"` // json | toml | env
 	IsPrimary bool   `json:"isPrimary,omitempty"`
 }
 
@@ -220,6 +229,18 @@ func (s *CustomCliService) ProxyStatus(toolId string) (*CustomCliProxyStatus, er
 	if err != nil {
 		return &CustomCliProxyStatus{Enabled: false, BaseURL: s.baseURLWithToolPath(toolId)}, err
 	}
+	return s.proxyStatusForToolLocked(*tool), nil
+}
+
+// A collection shares one tool-list snapshot instead of reparsing it per tool.
+func (s *CustomCliService) proxyStatusForTool(tool CustomCliTool) *CustomCliProxyStatus {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.proxyStatusForToolLocked(tool)
+}
+
+func (s *CustomCliService) proxyStatusForToolLocked(tool CustomCliTool) *CustomCliProxyStatus {
+	toolId := tool.ID
 
 	status := &CustomCliProxyStatus{
 		Enabled: false,
@@ -228,7 +249,7 @@ func (s *CustomCliService) ProxyStatus(toolId string) (*CustomCliProxyStatus, er
 
 	// 检查所有代理注入配置
 	if len(tool.ProxyInjection) == 0 {
-		return status, nil
+		return status
 	}
 
 	allEnabled := true
@@ -279,7 +300,7 @@ func (s *CustomCliService) ProxyStatus(toolId string) (*CustomCliProxyStatus, er
 	}
 
 	status.Enabled = allEnabled
-	return status, nil
+	return status
 }
 
 // EnableProxy 启用代理

@@ -360,6 +360,27 @@ func main() {
 	logService := services.NewLogService(modelPricingService)
 	traySnapshotService := services.NewTraySnapshotService(providerService, geminiService, appSettings,
 		customCliService, providerConcurrencyService, providerQuotaQueryService, logService)
+	traySnapshotService.BindCodenotchProxyStatus(func(platform string) (bool, error) {
+		switch platform {
+		case "claude":
+			status, err := claudeSettings.ProxyStatus()
+			return status.Enabled, err
+		case "codex":
+			status, err := codexSettings.ProxyStatus()
+			return status.Enabled, err
+		case "gemini":
+			status, err := geminiService.ProxyStatus()
+			return status != nil && status.Enabled, err
+		case "grokbuild":
+			status, err := grokSettings.ProxyStatus()
+			return status != nil && status.Enabled, err
+		case "claude-desktop":
+			status, err := claudeDesktopSettings.ProxyStatus()
+			return status != nil && status.Enabled, err
+		default:
+			return false, nil
+		}
+	})
 	if err := traySnapshotService.Start(); err != nil {
 		log.Printf("托盘共享快照服务启动失败: %v", err)
 	}

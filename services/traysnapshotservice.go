@@ -13,11 +13,13 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"log"
 	"math"
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -26,6 +28,7 @@ import (
 )
 
 type TraySnapshot struct {
+	Codenotch   *CodenotchSnapshotInfo `json:"codenotch,omitempty"`
 	Version     int                    `json:"version"`
 	Session     string                 `json:"session"`
 	Sequence    uint64                 `json:"sequence"`
@@ -77,9 +80,12 @@ type trayStatsCache struct {
 	updated time.Time
 	stats   []ProviderDailyStat
 	err     error
+	byID    map[string]ProviderDailyStat
+	byName  map[string]ProviderDailyStat
 }
 
 type trayDetailResult struct {
+	requestID   uint64
 	key         string
 	fingerprint [32]byte
 	quotas      []TraySnapshotQuota
@@ -88,12 +94,19 @@ type trayDetailResult struct {
 }
 
 type trayDetailCache struct {
-	fingerprint [32]byte
-	inflight    bool
-	result      trayDetailResult
+	platform     string
+	lastTraySeen time.Time
+	cancel       context.CancelFunc
+	requestID    uint64
+	scheduled    uint64
+	fingerprint  [32]byte
+	inflight     bool
+	result       trayDetailResult
 }
 
 type TraySnapshotService struct {
+	integration codenotchIntegration
+	requestID   uint64
 	providers   *ProviderService
 	gemini      *GeminiService
 	settings    *AppSettingsService
@@ -158,6 +171,14 @@ func (s *TraySnapshotService) Stop() {
 		}
 	}
 	s.wg.Wait()
+	s.removeCodenotchData()
+	s.cache = make(map[string]*trayDetailCache)
+	s.inputsCache = make(map[string]trayInputCache)
+	s.statsMu.Lock()
+	s.statsCache = make(map[string]*trayStatsCache)
+	s.statsMu.Unlock()
+	s.integration.wanted, s.integration.platforms = nil, nil
+	s.results = make(chan trayDetailResult, 64)
 }
 
 func (s *TraySnapshotService) GetSnapshot() TraySnapshot {
@@ -179,12 +200,14 @@ func (s *TraySnapshotService) run(ctx context.Context, collect func(context.Cont
 		platforms := collect(ctx, now)
 		data, err := json.Marshal(platforms)
 		if err == nil {
-			fingerprint := sha256.Sum256(data)
+			metadata, _ := json.Marshal(s.integration.info)
+			fingerprint := sha256.Sum256(append(data, metadata...))
 			if fingerprint != previous || now.Sub(published) >= time.Second {
 				s.mu.Lock()
 				s.snapshot.Sequence++
 				s.snapshot.HeartbeatAt = now.UnixMilli()
 				s.snapshot.Platforms = platforms
+				s.snapshot.Codenotch = s.integration.info
 				next := s.snapshot
 				s.mu.Unlock()
 				if s.path != "" {
@@ -202,23 +225,39 @@ func (s *TraySnapshotService) run(ctx context.Context, collect func(context.Cont
 		case <-ctx.Done():
 			return
 		case result := <-s.results:
-			if entry := s.cache[result.key]; entry != nil && entry.fingerprint == result.fingerprint {
-				entry.inflight, entry.result = false, result
-			}
+			s.acceptTrayDetails(result)
 		case <-ticker.C:
 		}
 	}
 }
 
+func (s *TraySnapshotService) acceptTrayDetails(result trayDetailResult) {
+	if entry := s.cache[result.key]; entry != nil && entry.fingerprint == result.fingerprint && entry.requestID == result.requestID {
+		entry.inflight, entry.result = false, result
+		if entry.cancel != nil {
+			entry.cancel()
+			entry.cancel = nil
+		}
+	}
+}
+
 func writeTraySnapshot(path string, snapshot TraySnapshot) error {
+	return writeCodenotchJSON(path, snapshot)
+}
+
+func writeCodenotchJSON(path string, snapshot any) error {
+	data, err := json.Marshal(snapshot)
+	if err != nil {
+		return err
+	}
+	return writeCodenotchData(path, data)
+}
+
+func writeCodenotchData(path string, data []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return err
 	}
 	if err := os.Chmod(filepath.Dir(path), 0700); err != nil {
-		return err
-	}
-	data, err := json.Marshal(snapshot)
-	if err != nil {
 		return err
 	}
 	file, err := os.CreateTemp(filepath.Dir(path), ".tray-snapshot-*")
@@ -374,7 +413,7 @@ func (s *TraySnapshotService) collect(ctx context.Context, now time.Time) []Tray
 		ids[i] = platforms[i].Platform
 	}
 	states := s.concurrency.GetTrayProviderRuntimeStatesBatch(ids)
-	visible := map[string]bool{}
+	wanted := make(map[string]trayProviderInput)
 	for i := range platforms {
 		platform := &platforms[i]
 		state, exists := states[platform.Platform]
@@ -389,72 +428,163 @@ func (s *TraySnapshotService) collect(ctx context.Context, now time.Time) []Tray
 		}
 		platform.Providers = trayActivities(state)
 		platform.SessionBindings = s.concurrency.hookSessionBindings(platform.Platform, now)
+		byID, byName := make(map[string]trayProviderInput, len(inputs)), make(map[string]trayProviderInput)
+		for _, input := range inputs {
+			byID[input.ref] = input
+			if input.uniqueName {
+				byName[input.provider.Name] = input
+			}
+		}
 		for j := range platform.Providers {
 			item := &platform.Providers[j]
-			input := matchTrayProvider(inputs, *item)
-			if input == nil {
+			input, exists := byID[item.ProviderID]
+			if item.ProviderID == "" {
+				input, exists = byName[item.ProviderName]
+			}
+			if !exists {
 				item.Icon = "openai"
 				continue
 			}
-			item.ProviderID, item.ProviderName, item.Icon = input.ref, input.provider.Name, input.provider.Icon
-			if item.Icon == "" {
-				item.Icon = "openai"
-			}
-			key := platform.Platform + "/" + input.ref
-			visible[key] = true
-			fingerprint := input.fingerprint
-			entry := s.cache[key]
-			if entry == nil || entry.fingerprint != fingerprint {
-				entry = &trayDetailCache{fingerprint: fingerprint}
-				s.cache[key] = entry
-			}
-			if !entry.inflight && (entry.result.updated.IsZero() || now.Sub(entry.result.updated) >= time.Minute) {
-				select {
-				case s.workers <- struct{}{}:
-					entry.inflight = true
-					s.wg.Add(1)
-					go s.loadDetails(ctx, platform.Platform, *input, key, fingerprint)
-				default:
-				}
-			}
-			item.Loading = entry.result.updated.IsZero()
-			if !entry.result.updated.IsZero() {
-				item.UpdatedAt, item.Quotas, item.Stats = entry.result.updated.UnixMilli(), entry.result.quotas, entry.result.stats
-			}
+			s.decorateTrayProvider(platform.Platform, item, input, now, wanted)
+			s.cache[trayDetailKey(platform.Platform, input.ref)].lastTraySeen = now
 		}
 	}
-	for key, entry := range s.cache {
-		if !visible[key] && !entry.inflight && now.Sub(entry.result.updated) > time.Minute {
-			delete(s.cache, key)
+	s.collectCodenotch(ctx, now, platforms)
+	for key, input := range s.integration.wanted {
+		// A configuration edit can land between tray and full collection.
+		// Query the inputs matching the latest decorated cache generation.
+		if entry := s.cache[key]; entry != nil && entry.fingerprint == input.fingerprint {
+			wanted[key] = input
 		}
 	}
+	s.scheduleTrayDetails(ctx, now, wanted)
 	return platforms
 }
 
-func (s *TraySnapshotService) loadDetails(ctx context.Context, platform string, input trayProviderInput, key string, fingerprint [32]byte) {
+func trayDetailKey(platform, ref string) string {
+	return fmt.Sprintf("%d:%s:%s", len(platform), platform, ref)
+}
+
+func (s *TraySnapshotService) decorateTrayProvider(platform string, item *TraySnapshotProvider, input trayProviderInput, now time.Time, wanted map[string]trayProviderInput) {
+	item.ProviderID, item.ProviderName, item.Icon = input.ref, input.provider.Name, input.provider.Icon
+	if item.Icon == "" {
+		item.Icon = "openai"
+	}
+	key := trayDetailKey(platform, input.ref)
+	wanted[key] = input
+	entry := s.cache[key]
+	if entry == nil || entry.fingerprint != input.fingerprint {
+		if entry != nil && entry.cancel != nil {
+			entry.cancel()
+		}
+		entry = &trayDetailCache{platform: platform, fingerprint: input.fingerprint}
+		s.cache[key] = entry
+	}
+	item.Loading = entry.result.updated.IsZero()
+	if !item.Loading {
+		item.UpdatedAt, item.Quotas, item.Stats = entry.result.updated.UnixMilli(), entry.result.quotas, entry.result.stats
+	}
+}
+
+func (s *TraySnapshotService) scheduleTrayDetails(ctx context.Context, now time.Time, wanted map[string]trayProviderInput) {
+	usedPlatforms := make(map[string]bool)
+	for key := range wanted {
+		if entry := s.cache[key]; entry != nil {
+			usedPlatforms[entry.platform] = true
+		}
+	}
+	retained := make([]string, 0)
+	for key, entry := range s.cache {
+		if _, exists := wanted[key]; !exists {
+			if entry.cancel != nil {
+				entry.cancel()
+			}
+			// Cancelled workers may already have queued a result. Retain only
+			// recent tray results, never the inputs or full-mode-only demand.
+			entry.cancel, entry.inflight, entry.requestID = nil, false, 0
+			if now.Sub(entry.lastTraySeen) < time.Minute && !entry.result.updated.IsZero() && now.Sub(entry.result.updated) < time.Minute {
+				retained = append(retained, key)
+			} else {
+				delete(s.cache, key)
+			}
+		}
+	}
+	const maxInactiveTrayDetails = 128
+	if len(retained) > maxInactiveTrayDetails {
+		sort.Slice(retained, func(a, b int) bool {
+			x, y := s.cache[retained[a]].lastTraySeen, s.cache[retained[b]].lastTraySeen
+			if x.Equal(y) {
+				return retained[a] < retained[b]
+			}
+			return x.After(y)
+		})
+		for _, key := range retained[maxInactiveTrayDetails:] {
+			delete(s.cache, key)
+		}
+	}
+	for platform := range s.inputsCache {
+		if !usedPlatforms[platform] {
+			delete(s.inputsCache, platform)
+		}
+	}
+	s.statsMu.Lock()
+	for platform := range s.statsCache {
+		if !usedPlatforms[platform] {
+			delete(s.statsCache, platform)
+		}
+	}
+	s.statsMu.Unlock()
+	if len(s.workers) >= cap(s.workers) {
+		return
+	}
+	pending := make([]string, 0, len(wanted))
+	for key := range wanted {
+		entry := s.cache[key]
+		if entry != nil && !entry.inflight && (entry.result.updated.IsZero() || now.Sub(entry.result.updated) >= time.Minute) {
+			pending = append(pending, key)
+		}
+	}
+	// Oldest scheduled work goes first, including providers beyond the first
+	// worker batch. The queue holds identities, not copies of account secrets.
+	sort.Slice(pending, func(a, b int) bool {
+		x, y := s.cache[pending[a]].scheduled, s.cache[pending[b]].scheduled
+		if x == y {
+			return pending[a] < pending[b]
+		}
+		return x < y
+	})
+	for _, key := range pending {
+		select {
+		case s.workers <- struct{}{}:
+			entry := s.cache[key]
+			s.requestID++
+			entry.requestID, entry.scheduled, entry.inflight = s.requestID, s.requestID, true
+			requestCtx, cancel := context.WithCancel(ctx)
+			entry.cancel = cancel
+			s.wg.Add(1)
+			go s.loadDetails(requestCtx, entry.platform, wanted[key], key, entry.fingerprint, entry.requestID)
+		default:
+			return
+		}
+	}
+}
+
+func (s *TraySnapshotService) loadDetails(ctx context.Context, platform string, input trayProviderInput, key string, fingerprint [32]byte, requestIDs ...uint64) {
 	defer s.wg.Done()
 	defer func() { <-s.workers }()
 	if ctx.Err() != nil {
 		return
 	}
 	result := trayDetailResult{key: key, fingerprint: fingerprint, quotas: s.loadQuotas(ctx, platform, input, time.Now())}
+	if len(requestIDs) > 0 {
+		result.requestID = requestIDs[0]
+	}
 	if ctx.Err() != nil {
 		return
 	}
-	stats, err := s.dailyStats(ctx, platform)
+	stats, err := s.dailyStat(ctx, platform, input)
 	if err == nil {
-		result.stats = &ProviderDailyStat{ProviderID: input.ref, Provider: input.provider.Name}
-		for i := range stats {
-			if stats[i].ProviderID == input.ref {
-				stat := stats[i]
-				result.stats = &stat
-				break
-			}
-			if input.uniqueName && stats[i].ProviderID == "" && strings.EqualFold(strings.TrimSpace(stats[i].Provider), strings.TrimSpace(input.provider.Name)) {
-				stat := stats[i]
-				result.stats = &stat
-			}
-		}
+		result.stats = &stats
 	}
 	result.updated = time.Now()
 	select {
@@ -464,6 +594,9 @@ func (s *TraySnapshotService) loadDetails(ctx context.Context, platform string, 
 }
 
 func (s *TraySnapshotService) dailyStats(ctx context.Context, platform string) ([]ProviderDailyStat, error) {
+	if s.logs == nil {
+		return nil, fmt.Errorf("statistics unavailable")
+	}
 	s.statsMu.Lock()
 	cached := s.statsCache[platform]
 	if cached == nil {
@@ -483,7 +616,39 @@ func (s *TraySnapshotService) dailyStats(ctx context.Context, platform string) (
 	}
 	stats, err := s.logs.ProviderDailyStats(platform)
 	cached.updated, cached.stats, cached.err = now, stats, err
+	cached.byID, cached.byName = make(map[string]ProviderDailyStat, len(stats)), make(map[string]ProviderDailyStat)
+	for _, stat := range stats {
+		if stat.ProviderID != "" {
+			cached.byID[stat.ProviderID] = stat
+		} else {
+			cached.byName[strings.ToLower(strings.TrimSpace(stat.Provider))] = stat
+		}
+	}
 	return stats, err
+}
+
+func (s *TraySnapshotService) dailyStat(ctx context.Context, platform string, input trayProviderInput) (ProviderDailyStat, error) {
+	result := ProviderDailyStat{ProviderID: input.ref, Provider: input.provider.Name}
+	if _, err := s.dailyStats(ctx, platform); err != nil {
+		return result, err
+	}
+	s.statsMu.Lock()
+	cached := s.statsCache[platform]
+	s.statsMu.Unlock()
+	if cached == nil {
+		return result, nil
+	}
+	cached.mu.Lock()
+	defer cached.mu.Unlock()
+	if stat, ok := cached.byID[input.ref]; ok {
+		return stat, nil
+	}
+	if input.uniqueName {
+		if stat, ok := cached.byName[strings.ToLower(strings.TrimSpace(input.provider.Name))]; ok {
+			return stat, nil
+		}
+	}
+	return result, nil
 }
 
 func trayQuotaError(key string) TraySnapshotQuota {
