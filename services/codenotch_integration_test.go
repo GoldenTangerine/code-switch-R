@@ -39,7 +39,7 @@ func codenotchTestService(t testing.TB, count int) *TraySnapshotService {
 
 func codenotchLease(t testing.TB, s *TraySnapshotService, now time.Time) {
 	t.Helper()
-	if err := writeCodenotchJSON(filepath.Join(filepath.Dir(s.path), codenotchLeaseFile), codenotchSubscription{1, "consumer", "enabled", now.UnixMilli()}); err != nil {
+	if err := writeCodenotchJSON(filepath.Join(filepath.Dir(s.path), codenotchLeaseFile), codenotchSubscription{1, "consumer", "enabled", float64(now.UnixMilli())}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -48,7 +48,7 @@ func TestCodenotchSubscriptionBounds(t *testing.T) {
 	now := time.Now()
 	path := filepath.Join(t.TempDir(), "lease")
 	for _, age := range []time.Duration{-2 * time.Second, -time.Second, 0, 15 * time.Second, 16 * time.Second} {
-		if err := writeCodenotchJSON(path, codenotchSubscription{1, "consumer", "enabled", now.Add(-age).UnixMilli()}); err != nil {
+		if err := writeCodenotchJSON(path, codenotchSubscription{1, "consumer", "enabled", float64(now.Add(-age).UnixMilli())}); err != nil {
 			t.Fatal(err)
 		}
 		_, err := readCodenotchSubscription(path, time.UnixMilli(now.UnixMilli()))
@@ -63,6 +63,45 @@ func TestCodenotchSubscriptionBounds(t *testing.T) {
 		}
 		if _, err := readCodenotchSubscription(path, now); err == nil {
 			t.Fatal("invalid lease accepted")
+		}
+	}
+}
+
+func TestCodenotchSwiftTimestampCompatibilityPublishesAllEnabledProviders(t *testing.T) {
+	for _, stamp := range []string{"1800000000000", "1800000000000.125", "1.800000000000125e12"} {
+		t.Run(stamp, func(t *testing.T) {
+			s := codenotchTestService(t, 3)
+			now := time.UnixMilli(1800000000000)
+			// JSONEncoder emits the fractional form with Date's sub-millisecond precision.
+			data := []byte(`{"heartbeatAt":` + stamp + `,"mode":"enabled","session":"swift-consumer","version":1}`)
+			if err := os.WriteFile(filepath.Join(filepath.Dir(s.path), codenotchLeaseFile), data, 0600); err != nil {
+				t.Fatal(err)
+			}
+			tray := []TraySnapshotPlatform{{Platform: "codex", Providers: []TraySnapshotProvider{{ProviderID: "1"}}}}
+			s.collectCodenotch(context.Background(), now, tray)
+			if s.integration.info.Mode != "enabled" || s.integration.info.ConsumerSession != "swift-consumer" || s.integration.info.Error {
+				t.Fatalf("Swift subscription was not accepted: %+v", s.integration.info)
+			}
+			if len(s.integration.wanted) != 3 || len(s.integration.platforms[0].Providers) != 3 {
+				t.Fatal("full mode still follows the one-provider tray selection")
+			}
+			if _, err := os.Stat(filepath.Join(filepath.Dir(s.path), codenotchDataFile)); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestCodenotchRejectsInvalidOrExpiredFractionalTimestamps(t *testing.T) {
+	now := time.UnixMilli(1800000000000)
+	path := filepath.Join(t.TempDir(), "lease.json")
+	for _, stamp := range []string{"1799999984999.875", "1800000001000.125", "1e99", "-1e99", "null", `"1800000000000.125"`} {
+		data := []byte(`{"heartbeatAt":` + stamp + `,"mode":"enabled","session":"swift-consumer","version":1}`)
+		if err := os.WriteFile(path, data, 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := readCodenotchSubscription(path, now); err == nil {
+			t.Fatalf("invalid or expired timestamp accepted: %s", stamp)
 		}
 	}
 }

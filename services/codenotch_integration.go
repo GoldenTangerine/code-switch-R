@@ -41,10 +41,10 @@ type CodenotchProviderSnapshot struct {
 }
 
 type codenotchSubscription struct {
-	Version     int    `json:"version"`
-	Session     string `json:"session"`
-	Mode        string `json:"mode"`
-	HeartbeatAt int64  `json:"heartbeatAt"`
+	Version     int     `json:"version"`
+	Session     string  `json:"session"`
+	Mode        string  `json:"mode"`
+	HeartbeatAt float64 `json:"heartbeatAt"`
 }
 
 type codenotchIntegration struct {
@@ -76,8 +76,10 @@ func readCodenotchSubscription(path string, now time.Time) (codenotchSubscriptio
 	if err := json.Unmarshal(data, &result); err != nil {
 		return result, err
 	}
-	age := now.Sub(time.UnixMilli(result.HeartbeatAt))
-	if result.Version != 1 || result.Mode != "enabled" || len(result.Session) == 0 || len(result.Session) > 128 || age < -time.Second || age > 15*time.Second {
+	// Codenotch 1.6.12 encoded milliseconds as a fractional JSON number.
+	// Compare in milliseconds without narrowing untrusted numbers to int64.
+	ageMillis := float64(now.UnixMicro())/1000 - result.HeartbeatAt
+	if result.Version != 1 || result.Mode != "enabled" || len(result.Session) == 0 || len(result.Session) > 128 || !(ageMillis >= -1000 && ageMillis <= 15000) {
 		return result, fmt.Errorf("inactive subscription")
 	}
 	return result, nil
