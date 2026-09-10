@@ -109,7 +109,6 @@ type TrayProviderBlock = {
   providerId: string
   providerName: string
   providerIconKey: string
-  providerIconSvg: string
   providerInitials: string
   activeRequests: number
   activityStatus: 'active' | 'default'
@@ -120,6 +119,7 @@ type TrayProviderBlock = {
 const rootRef = ref<HTMLElement | null>(null)
 const FULL_REFRESH_INTERVAL_MS = 60_000
 const RESET_REFRESH_COOLDOWN_MS = 5_000
+const ICON_RETRY_INTERVAL_MS = 5_000
 let refreshBusy = false
 let storageRefreshTimer: number | undefined
 let lastWindowHeight = 0
@@ -524,7 +524,6 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
       providerId: provider.providerId,
       providerName: provider.providerName,
       providerIconKey: provider.icon,
-      providerIconSvg: getProviderDisplayIconSvg(provider.icon),
       providerInitials: getTrayProviderInitials(provider.providerName),
       activeRequests: provider.activeRequests,
       activityStatus: provider.status,
@@ -536,7 +535,6 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
       }),
       stats: provider.stats ? buildTrayProviderStatsFromStat(provider.stats, currentLocale()) : null,
     }))
-    void preloadProviderDisplayIcons(snapshot.providers.map((provider) => provider.icon))
   }
 
   const applySettings = (settings: AppSettings) => {
@@ -694,6 +692,30 @@ const getOrCreateCard = (descriptor: TrayPlatformDescriptor) => {
 
 const cards = computed(() => visiblePlatformDescriptors.value.map(getOrCreateCard))
 
+let lastIconLoadKey = ''
+let iconLoadPending = false
+let iconLoadFailed = false
+let nextIconRetryAt = 0
+
+const preloadTrayIcons = (platforms: SharedTrayPlatform[]) => {
+  const iconKeys = Array.from(new Set(platforms.flatMap((platform) => [
+    platform.icon, ...platform.providers.map((provider) => provider.icon),
+  ]))).sort()
+  const key = JSON.stringify(iconKeys)
+  if (iconLoadPending || (key === lastIconLoadKey && (!iconLoadFailed || Date.now() < nextIconRetryAt))) return
+
+  lastIconLoadKey = key
+  iconLoadPending = true
+  iconLoadFailed = false
+  void preloadProviderDisplayIcons(iconKeys).catch((error) => {
+    iconLoadFailed = true
+    nextIconRetryAt = Date.now() + ICON_RETRY_INTERVAL_MS
+    console.warn('failed to load tray icons', error)
+  }).finally(() => {
+    iconLoadPending = false
+  })
+}
+
 const refreshProviderActivity = (): Promise<void> => {
   if (!isTrayWindowActive() || !refreshLifecycle?.isActive()) return Promise.resolve()
 
@@ -721,6 +743,8 @@ const refreshProviderActivity = (): Promise<void> => {
     ) return
 
     if (snapshot.version !== 1) throw new Error('Unsupported tray snapshot version')
+    // 图标加载独立于快照内容变化，失败后复用可见窗口的轮询重试。
+    preloadTrayIcons(snapshot.platforms)
     const content = JSON.stringify(snapshot.platforms)
     if (appliedSnapshotGeneration === generation && appliedSnapshotContent === content) {
       updateAllDerivedLabels()
@@ -959,7 +983,7 @@ onUnmounted(() => {
                 class="tray-brand__icon-svg"
                 v-html="card.brandIconSvg"
               ></span>
-              <span v-else class="tray-brand__icon-fallback">{{ card.brandIcon }}</span>
+              <span v-else class="tray-brand__icon-fallback">{{ card.brandName.trim().slice(0, 1).toUpperCase() }}</span>
             </div>
             <span class="tray-brand__name">{{ card.brandName }}</span>
           </div>
@@ -1041,9 +1065,9 @@ onUnmounted(() => {
               <strong class="tray-provider-source__provider" :title="block.providerName">
                 <span class="tray-provider-source__icon" aria-hidden="true">
                   <span
-                    v-if="block.providerIconSvg"
+                    v-if="getProviderDisplayIconSvg(block.providerIconKey)"
                     class="tray-provider-source__icon-svg"
-                    v-html="block.providerIconSvg"
+                    v-html="getProviderDisplayIconSvg(block.providerIconKey)"
                   ></span>
                   <span v-else class="tray-provider-source__icon-fallback">{{ block.providerInitials }}</span>
                 </span>
@@ -1505,6 +1529,8 @@ onUnmounted(() => {
 .tray-brand__icon {
   width: 28px;
   height: 28px;
+  flex: 0 0 28px;
+  overflow: hidden;
   border-radius: 8px;
   background: var(--mac-surface-strong);
   border: 1px solid var(--mac-border);
@@ -1525,6 +1551,9 @@ onUnmounted(() => {
 }
 
 .tray-brand__icon-fallback {
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
   font-size: 13px;
   font-weight: 700;
   line-height: 1;
