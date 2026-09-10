@@ -43,6 +43,15 @@ func TestHookSessionIDExplicitIdentityOnly(t *testing.T) {
 		{"codex native header", "codex", `{}`, "s4", map[string]string{"Session_Id": "s4"}},
 		{"codex turn metadata", "codex", `{}`, "s5", map[string]string{"X-Codex-Turn-Metadata": `{"thread_id":"s5"}`}},
 		{"codex body", "codex", `{"thread_id":"s6"}`, "s6", nil},
+		{"codex packed metadata", "codex", `{"client_metadata":{"x-codex-turn-metadata":"{\"thread_id\":\"s7\"}"}}`, "s7", nil},
+		{"codex underscored metadata", "codex", `{"client_metadata":{"x_codex_turn_metadata":"{\"sessionId\":\"s8\"}"}}`, "s8", nil},
+		{"explicit header wins", "codex", `{"client_metadata":{"x-codex-turn-metadata":"{\"thread_id\":\"packed\"}"}}`, "header", map[string]string{"session_id": "header"}},
+		{"header metadata wins", "codex", `{"client_metadata":{"x-codex-turn-metadata":"{\"thread_id\":\"packed\"}"}}`, "header", map[string]string{"x-codex-turn-metadata": `{"thread_id":"header"}`}},
+		{"direct body wins", "codex", `{"thread_id":"direct","client_metadata":{"x-codex-turn-metadata":"{\"thread_id\":\"packed\"}"}}`, "direct", nil},
+		{"direct client metadata wins", "codex", `{"client_metadata":{"session_id":"direct","x-codex-turn-metadata":"{\"thread_id\":\"packed\"}"}}`, "direct", nil},
+		{"invalid packed metadata", "codex", `{"client_metadata":{"x-codex-turn-metadata":"{\"thread_id\":\"partial\""}}`, "", nil},
+		{"packed parent is not identity", "codex", `{"client_metadata":{"x-codex-turn-metadata":"{\"parent_thread_id\":\"parent\",\"prompt_cache_key\":\"cache\"}"}}`, "", nil},
+		{"cursor is not codex", "codex", `{"client_metadata":{"x-codex-turn-metadata":"{\"thread_id\":\"packed\"}"}}`, "", map[string]string{"x-cursor-conversation-id": "cursor"}},
 		{"cache key is not identity", "codex", `{"prompt_cache_key":"not-session"}`, "", nil},
 		{"parent alone is not identity", "codex", `{"parent_thread_id":"parent"}`, "", nil},
 	} {
@@ -101,4 +110,36 @@ func TestTrayHookRoutesConcurrentPublication(t *testing.T) {
 	if len(rows) != 1 || rows[0].Sequence != 20 {
 		t.Fatal(rows)
 	}
+}
+
+func TestTrayHookSnapshotOneSupplierManySessions(t *testing.T) {
+	var routes traySessionRoutes
+	now := time.Unix(1800000000, 0)
+	provider := Provider{ID: 42, Name: "Fixture supplier", Icon: "openai"}
+	for _, id := range []string{"session-1", "session-2", "session-3"} {
+		routes.record("codex", hookSessionKey("codex", id), provider, now)
+	}
+	providers := trayActivities(TrayProviderRuntimeState{Statuses: []TrayProviderActivityStatus{
+		{ProviderID: "42", ProviderName: provider.Name, ActiveRequests: 3},
+	}})
+	providers[0].Icon = provider.Icon
+	bindings := routes.snapshot("codex", now)
+	if len(providers) != 1 || len(bindings) != 3 {
+		t.Fatalf("session bindings must not create providers: providers=%d bindings=%d", len(providers), len(bindings))
+	}
+	seen := make(map[string]bool)
+	for _, binding := range bindings {
+		if seen[binding.SessionKey] || binding.ProviderID != providers[0].ProviderID {
+			t.Fatal("duplicate session or mismatched provider identity")
+		}
+		seen[binding.SessionKey] = true
+	}
+	fixture := TraySnapshot{Version: 1, Session: "routing-fixture", Sequence: 1, HeartbeatAt: now.UnixMilli(),
+		Platforms: []TraySnapshotPlatform{{Platform: "codex", Name: "Codex", Icon: "openai", Providers: providers, SessionBindings: bindings}}}
+	data, err := json.Marshal(fixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Codenotch consumes this generated, credential-free fixture in its routing regression.
+	t.Logf("CODENOTCH_ROUTING_FIXTURE=%s", data)
 }

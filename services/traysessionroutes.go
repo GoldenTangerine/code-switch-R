@@ -70,7 +70,20 @@ func hookSessionID(platform string, body []byte, headers map[string]string) stri
 	if value := firstNonEmptyGJSON(gjson.Parse(metadata), "thread_id", "threadId", "session_id", "sessionId"); value != "" {
 		return value
 	}
-	return relaySessionField(body, "thread_id", "threadId", "session_id", "sessionId", "client_metadata.thread_id", "client_metadata.session_id")
+	if value := relaySessionField(body, "thread_id", "threadId", "session_id", "sessionId", "client_metadata.thread_id", "client_metadata.session_id"); value != "" {
+		return value
+	}
+	clientMetadata := gjson.GetBytes(body, "client_metadata")
+	for _, field := range []string{"x-codex-turn-metadata", "x_codex_turn_metadata"} {
+		metadata := clientMetadata.Get(field)
+		if metadata.Type != gjson.String || !gjson.Valid(metadata.String()) {
+			continue
+		}
+		if value := firstNonEmptyGJSON(gjson.Parse(metadata.String()), "thread_id", "threadId", "session_id", "sessionId"); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func (r *traySessionRoutes) record(platform, sessionKey string, provider Provider, now time.Time) {
