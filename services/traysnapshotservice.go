@@ -46,15 +46,17 @@ type TraySnapshotPlatform struct {
 }
 
 type TraySnapshotProvider struct {
-	ProviderID     string              `json:"providerId"`
-	ProviderName   string              `json:"providerName"`
-	Icon           string              `json:"icon"`
-	ActiveRequests int                 `json:"activeRequests"`
-	Status         string              `json:"status"`
-	Loading        bool                `json:"loading"`
-	UpdatedAt      int64               `json:"updatedAt"`
-	Quotas         []TraySnapshotQuota `json:"quotas"`
-	Stats          *ProviderDailyStat  `json:"stats"`
+	ProviderID        string              `json:"providerId"`
+	ProviderName      string              `json:"providerName"`
+	Icon              string              `json:"icon"`
+	ActiveRequests    int                 `json:"activeRequests"`
+	Status            string              `json:"status"`
+	QuotaState        string              `json:"quotaState,omitempty"`
+	QuotaAutoDisabled bool                `json:"quotaAutoDisabled,omitempty"`
+	Loading           bool                `json:"loading"`
+	UpdatedAt         int64               `json:"updatedAt"`
+	Quotas            []TraySnapshotQuota `json:"quotas"`
+	Stats             *ProviderDailyStat  `json:"stats"`
 }
 
 type TraySnapshotQuota struct {
@@ -322,10 +324,13 @@ func (s *TraySnapshotService) platforms() []TraySnapshotPlatform {
 func (s *TraySnapshotService) inputs(platform string) ([]trayProviderInput, error) {
 	result := []trayProviderInput{}
 	if platform == "gemini" {
+		if s.gemini == nil {
+			return result, nil
+		}
 		s.gemini.mu.Lock()
 		for _, p := range s.gemini.providers {
 			result = append(result, trayProviderInput{ref: providerRefFromStringID(p.ID, p.Name), provider: cloneProvider(Provider{
-				Name: p.Name, Icon: "gemini", APIURL: p.BaseURL, APIKey: p.APIKey, Enabled: p.Enabled,
+				Name: p.Name, Icon: "gemini", APIURL: p.BaseURL, APIKey: p.APIKey, Enabled: p.Enabled, QuotaAutoDisabled: p.QuotaAutoDisabled,
 				BudgetQuotaSettings: p.BudgetQuotaSettings, BudgetQuotaUsedAdjustments: p.BudgetQuotaUsedAdjustments,
 				ProviderQuotaQueryType: p.ProviderQuotaQueryType, ProviderQuotaQueryConfig: p.ProviderQuotaQueryConfig})})
 		}
@@ -470,6 +475,7 @@ func (s *TraySnapshotService) decorateTrayProvider(platform string, item *TraySn
 	if item.Icon == "" {
 		item.Icon = "openai"
 	}
+	item.QuotaAutoDisabled = input.provider.QuotaAutoDisabled
 	key := trayDetailKey(platform, input.ref)
 	wanted[key] = input
 	entry := s.cache[key]
@@ -484,6 +490,7 @@ func (s *TraySnapshotService) decorateTrayProvider(platform string, item *TraySn
 	if !item.Loading {
 		item.UpdatedAt, item.Quotas, item.Stats = entry.result.updated.UnixMilli(), entry.result.quotas, entry.result.stats
 	}
+	item.QuotaState = codenotchQuotaState(item.QuotaAutoDisabled, item.Quotas)
 }
 
 func (s *TraySnapshotService) scheduleTrayDetails(ctx context.Context, now time.Time, wanted map[string]trayProviderInput) {
@@ -757,4 +764,28 @@ func trayBudgetWindow(key string, setting BudgetQuotaSetting, now time.Time) (ti
 		next = resolveBudgetMonthlyRefreshPoint(month.Year(), month.Month(), config.RefreshMonthDay, hour, minute, start.Location())
 	}
 	return start, next
+}
+
+func codenotchQuotaState(autoDisabled bool, quotas []TraySnapshotQuota) string {
+	if autoDisabled {
+		return "exhausted"
+	}
+	items := make([]ProviderQuotaQueryItem, 0, len(quotas))
+	for _, quota := range quotas {
+		if math.IsNaN(quota.Used) || math.IsInf(quota.Used, 0) || math.IsNaN(quota.Total) || math.IsInf(quota.Total, 0) || quota.Used < 0 || quota.Total < 0 {
+			continue
+		}
+		if quota.DisplayKind != "progress" && quota.DisplayKind != "balance" {
+			continue
+		}
+		items = append(items, quota.ProviderQuotaQueryItem)
+	}
+	exhausted, valid := quotaItemsExhausted(items)
+	if exhausted {
+		return "exhausted"
+	}
+	if valid {
+		return "available"
+	}
+	return "unknown"
 }

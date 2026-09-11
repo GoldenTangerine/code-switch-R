@@ -31,6 +31,7 @@ type CodenotchSnapshotInfo struct {
 	ConsumerSession string `json:"consumerSession"`
 	Revision        uint64 `json:"revision"`
 	Error           bool   `json:"error"`
+	ProviderScope   string `json:"providerScope,omitempty"`
 }
 
 type CodenotchProviderSnapshot struct {
@@ -134,10 +135,10 @@ func (s *TraySnapshotService) collectCodenotch(ctx context.Context, now time.Tim
 	i.next = now.Add(time.Second)
 	var lease codenotchSubscription
 	var err error
-	if s.path != "" && i.proxyStatus != nil {
+	if s.path != "" {
 		lease, err = readCodenotchSubscription(filepath.Join(filepath.Dir(s.path), codenotchLeaseFile), now)
 	}
-	if s.path == "" || i.proxyStatus == nil || err != nil {
+	if s.path == "" || err != nil {
 		if i.info == nil || i.info.Mode != "tray" {
 			if i.platforms != nil {
 				s.removeCodenotchData()
@@ -148,7 +149,7 @@ func (s *TraySnapshotService) collectCodenotch(ctx context.Context, now time.Tim
 		}
 		return
 	}
-	platforms, customTools := s.enabledPlatformOrder(tray)
+	platforms, _ := s.enabledPlatformOrder(tray)
 	wanted := make(map[string]trayProviderInput)
 	for index := range platforms {
 		p := &platforms[index]
@@ -156,27 +157,13 @@ func (s *TraySnapshotService) collectCodenotch(ctx context.Context, now time.Tim
 			continue
 		}
 		p.SessionBindings = s.concurrency.hookSessionBindings(p.Platform, now)
-		var enabled bool
-		var err error
-		if tool, ok := customTools[p.Platform]; ok {
-			enabled = s.custom.proxyStatusForTool(tool).Enabled
-		} else {
-			enabled, err = i.proxyStatus(p.Platform)
-		}
-		if err != nil {
-			p.Error = true
-			continue
-		}
-		if !enabled {
-			continue
-		}
 		inputs, err := s.inputs(p.Platform)
 		if err != nil {
 			p.Error = true
 			continue
 		}
 		for _, input := range inputs {
-			if !input.provider.Enabled {
+			if !input.provider.Enabled && !input.provider.QuotaAutoDisabled {
 				continue
 			}
 			item := TraySnapshotProvider{ProviderID: input.ref, ProviderName: input.provider.Name, Icon: input.provider.Icon, Status: "enabled", Quotas: []TraySnapshotQuota{}}
@@ -191,7 +178,7 @@ func (s *TraySnapshotService) collectCodenotch(ctx context.Context, now time.Tim
 		}
 	}
 	i.wanted = wanted
-	info := &CodenotchSnapshotInfo{Version: 1, Mode: "enabled", ConsumerSession: lease.Session, Revision: i.revision}
+	info := &CodenotchSnapshotInfo{Version: 1, Mode: "enabled", ConsumerSession: lease.Session, Revision: i.revision, ProviderScope: "enabled-or-quota-disabled"}
 	dataPath := filepath.Join(filepath.Dir(s.path), codenotchDataFile)
 	fileInfo, fileErr := os.Stat(dataPath)
 	fileChanged := fileErr != nil || i.fileInfo == nil || !os.SameFile(i.fileInfo, fileInfo) ||

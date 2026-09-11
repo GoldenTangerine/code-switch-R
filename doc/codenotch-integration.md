@@ -35,3 +35,13 @@ CodeNotch 监听目录并每 500 毫秒兜底检查，正常运行时供应商�
 - 前端：在 `frontend` 执行 `pnpm exec vue-tsc --noEmit` 和 `pnpm test:unit src/components/Tray`。
 - CodeNotch：完整 Xcode 环境执行 `make test`，包含 `CodeSwitchBridgeTests`。
 - 手动验收：交换两端启动顺序，切换及并发调用供应商，关闭托盘，退出并重启 Code Switch R，确认原有条目始终在前、联动自动隐藏和恢复。
+
+## 全量供应商与本地筛选
+
+新版 Codenotch 在联动开启期间持续订阅 `enabled` 全量快照，接收供应商开关开启或 `QuotaAutoDisabled=true` 的供应商。平台无需开启代理托管，隐藏平台和自定义 CLI 同样包含；手动关闭的供应商不包含。原托盘快照的活跃／默认选择规则不变。
+
+元信息增加可选 `providerScope: "enabled-or-quota-disabled"`，协议版本仍为 1。供应商增加可选 `quotaState`（`available`、`exhausted`、`unknown`）和 `quotaAutoDisabled`。自动额度停用直接标记耗尽；其他有效额度复用额度自动化判断，任一有限额度剩余不大于零即耗尽，零余额不因 `active=false` 被丢弃，无有效结果为未知。查询错误不作为零额度。
+
+Codenotch 管理列表保留全量，刘海可选跟随托盘、全部、仅未耗尽、仅已耗尽、仅活跃（`activeRequests > 0`）；未知额度在仅未耗尽中保留。活动或等待会话可临时显示，手动隐藏优先。切换范围只做本地筛选；关闭联动或退出时撤销租约，发送端沿用缓存、并发限额和额外任务回收。
+
+旧客户端忽略新增字段；新客户端遇到缺少范围标记的旧发送端时提示升级，仍使用可得的全量数据或原托盘回退。旧 `enabled` 偏好继续映射为全部供应商，不重置排序或隐藏记录。

@@ -31,6 +31,9 @@ func codenotchTestService(t testing.TB, count int) *TraySnapshotService {
 		providers[i] = Provider{ID: int64(i + 1), Name: fmt.Sprintf("Fixture %d", i), Enabled: true}
 	}
 	p.storeProviderSnapshot("codex", providers, [32]byte{1}, true)
+	for _, kind := range []string{"claude", "grokbuild", "claude-desktop"} {
+		p.storeProviderSnapshot(kind, nil, [32]byte{1}, true)
+	}
 	s := NewTraySnapshotService(p, nil, nil, nil, nil, nil, nil)
 	s.path = filepath.Join(t.TempDir(), "tray-snapshot-v1.json")
 	s.BindCodenotchProxyStatus(func(platform string) (bool, error) { return platform == "codex", nil })
@@ -169,8 +172,8 @@ func TestCodenotchHostingAndOversizeRecovery(t *testing.T) {
 	codenotchLease(t, s, now)
 	s.BindCodenotchProxyStatus(func(string) (bool, error) { return false, nil })
 	s.collectCodenotch(context.Background(), now, nil)
-	if len(s.integration.wanted) != 0 {
-		t.Fatal("nonhosted suppliers selected")
+	if len(s.integration.wanted) != 1 {
+		t.Fatal("nonhosted enabled supplier missing")
 	}
 	s.BindCodenotchProxyStatus(func(p string) (bool, error) { return p == "codex", nil })
 	s.providers.storeProviderSnapshot("codex", []Provider{{ID: 1, Name: strings.Repeat("x", codenotchMaxDataBytes), Enabled: true}}, [32]byte{2}, true)
@@ -501,10 +504,7 @@ func TestCodenotchCustomHostingSharesToolSnapshotAndReflectsEdits(t *testing.T) 
 		}
 		now = now.Add(time.Second)
 		s.collectCodenotch(context.Background(), now, nil)
-		want := 1
-		if token == "code-switch" {
-			want = 2
-		}
+		want := 2
 		if len(s.integration.wanted) != want {
 			t.Fatal("target configuration change not reflected")
 		}
@@ -514,8 +514,8 @@ func TestCodenotchCustomHostingSharesToolSnapshotAndReflectsEdits(t *testing.T) 
 		t.Fatal(err)
 	}
 	s.collectCodenotch(context.Background(), now.Add(time.Second), nil)
-	if len(s.integration.wanted) != 0 {
-		t.Fatal("tool-list change not reflected")
+	if len(s.integration.wanted) != 2 {
+		t.Fatal("proxy injection must not gate enabled suppliers")
 	}
 	if err := custom.saveStore(&customCliStore{}); err != nil {
 		t.Fatal(err)
@@ -597,5 +597,90 @@ func BenchmarkCodenotchDynamicCollection(b *testing.B) {
 			}
 			b.ReportMetric(float64(s.integration.revision-1)/float64(b.N), "writes/op")
 		})
+	}
+}
+
+func TestCodenotchIncludesQuotaDisabledWithoutProxy(t *testing.T) {
+	s := codenotchTestService(t, 0)
+	s.BindCodenotchProxyStatus(func(string) (bool, error) { t.Fatal("proxy must not gate subscription"); return false, nil })
+	s.providers.storeProviderSnapshot("codex", []Provider{
+		{ID: 1, Name: "Enabled", Enabled: true},
+		{ID: 2, Name: "Quota", QuotaAutoDisabled: true},
+		{ID: 3, Name: "Manual", Enabled: false},
+	}, [32]byte{2}, true)
+	now := time.Now()
+	codenotchLease(t, s, now)
+	s.collectCodenotch(context.Background(), now, nil)
+	if s.integration.info.ProviderScope != "enabled-or-quota-disabled" {
+		t.Fatal("missing capability")
+	}
+	if len(s.integration.wanted) != 2 {
+		t.Fatalf("wanted %d", len(s.integration.wanted))
+	}
+	for _, platform := range s.integration.platforms {
+		if platform.Platform != "codex" {
+			continue
+		}
+		if len(platform.Providers) != 2 {
+			t.Fatal("wrong eligibility")
+		}
+		if platform.Providers[1].QuotaState != "exhausted" || !platform.Providers[1].QuotaAutoDisabled {
+			t.Fatal("missing quota state")
+		}
+	}
+}
+
+func TestCodenotchQuotaStates(t *testing.T) {
+	cases := []struct {
+		name   string
+		auto   bool
+		quotas []TraySnapshotQuota
+		want   string
+	}{
+		{"unknown", false, nil, "unknown"},
+		{"automatic", true, nil, "exhausted"},
+		{"available", false, []TraySnapshotQuota{{ProviderQuotaQueryItem: ProviderQuotaQueryItem{Total: 10, Used: 2, Active: true}, DisplayKind: "progress"}}, "available"},
+		{"zero-inactive", false, []TraySnapshotQuota{{ProviderQuotaQueryItem: ProviderQuotaQueryItem{Total: 0, Used: 0, Active: false}, DisplayKind: "balance"}}, "exhausted"},
+		{"unlimited", false, []TraySnapshotQuota{{ProviderQuotaQueryItem: ProviderQuotaQueryItem{Unlimited: true}, DisplayKind: "progress"}}, "available"},
+		{"invalid", false, []TraySnapshotQuota{{ProviderQuotaQueryItem: ProviderQuotaQueryItem{InvalidMessage: "failed"}, DisplayKind: "balance"}}, "unknown"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := codenotchQuotaState(tc.auto, tc.quotas); got != tc.want {
+				t.Fatalf("got %s want %s", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCodenotchGeminiAutoDisabledAndRecovery(t *testing.T) {
+	s := codenotchTestService(t, 0)
+	s.gemini = &GeminiService{providers: []GeminiProvider{
+		{ID: "spent", Name: "Spent", QuotaAutoDisabled: true},
+		{ID: "off", Name: "Off", Enabled: false},
+	}}
+	now := time.Now()
+	codenotchLease(t, s, now)
+	s.collectCodenotch(context.Background(), now, nil)
+	check := func(want string) {
+		t.Helper()
+		for _, platform := range s.integration.platforms {
+			if platform.Platform != "gemini" {
+				continue
+			}
+			if len(platform.Providers) != 1 || platform.Providers[0].QuotaState != want {
+				t.Fatalf("Gemini: %+v", platform.Providers)
+			}
+			return
+		}
+		t.Fatal("Gemini missing")
+	}
+	check("exhausted")
+	s.gemini.providers[0].QuotaAutoDisabled = false
+	s.gemini.providers[0].Enabled = true
+	s.collectCodenotch(context.Background(), now.Add(time.Second), nil)
+	check("unknown")
+	if len(s.integration.wanted) != 1 {
+		t.Fatal("recovered provider disappeared")
 	}
 }
