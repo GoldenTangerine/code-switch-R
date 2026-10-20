@@ -1241,6 +1241,7 @@
         },
         "saveFailed": "保存供应商配置失败：{error}",
         "saveInProgress": "当前列表正在保存，请稍后再试",
+        "editingProviderMissing": "当前编辑的供应商已不存在，请关闭弹窗后重试",
         "toast": {
           "providerQuotaQueryTestSuccess": "额度查询成功：",
           "providerQuotaQueryTestFailed": "额度查询失败",

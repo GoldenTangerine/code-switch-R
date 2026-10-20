@@ -51,6 +51,21 @@ const restoreCards = (target: AutomationCard[], snapshot: AutomationCard[]) => {
   target.splice(0, target.length, ...snapshot)
 }
 
+/**
+ * 在当前列表中定位编辑中的卡片
+ * 编辑期间列表可能被重新加载（如窗口重新可见触发 refreshAllData），弹窗持有的旧对象会脱离列表，
+ * 直接改旧对象会导致保存时静默丢失修改；优先按 providerRef 匹配（gemini/opencode 的 id 随加载顺序生成），无 ref 时按 id 兜底
+ * @author sm
+ */
+const findCurrentCard = (list: AutomationCard[], card: AutomationCard): AutomationCard | null => {
+  if (list.includes(card)) return card
+  const providerRef = normalizeProviderRef(card.providerRef)
+  if (providerRef) {
+    return list.find((item) => normalizeProviderRef(item.providerRef) === providerRef) ?? null
+  }
+  return list.find((item) => item.id === card.id) ?? null
+}
+
 
 export function useProviderForm(options: UseProviderFormOptions) {
   const {
@@ -131,14 +146,27 @@ export function useProviderForm(options: UseProviderFormOptions) {
     const platform = providerLogsModalPlatform.value
     if (!card || !platform || providerLogBadgeSaving.value) return
 
+    const list = cards[platform]
+    const currentCard = list ? findCurrentCard(list, card) : null
+    if (!currentCard) {
+      showToast(t('components.main.form.editingProviderMissing'), 'error')
+      return
+    }
+    // 落盘以列表中的卡片为准，弹窗持有的对象同步更新以保持开关显示一致
+    const targets = currentCard === card ? [card] : [card, currentCard]
     const previousHideLogBadge = card.hideLogBadge
-    card.hideLogBadge = !enabled
+    const setHideLogBadge = (value: boolean | undefined) => {
+      targets.forEach((target) => { target.hideLogBadge = value })
+    }
+    setHideLogBadge(!enabled)
     providerLogBadgeSaving.value = true
 
     try {
-      await persistProviders(platform)
+      if (await persistProviders(platform) === false) {
+        setHideLogBadge(previousHideLogBadge)
+      }
     } catch {
-      card.hideLogBadge = previousHideLogBadge
+      setHideLogBadge(previousHideLogBadge)
     } finally {
       providerLogBadgeSaving.value = false
     }
@@ -247,11 +275,15 @@ export function useProviderForm(options: UseProviderFormOptions) {
     const list = cards[tabId]
     if (!list) return
 
-    const editingCard = providerModalState.card
     let savedCard: AutomationCard | null = null
     const providerFields = buildPersistedProviderFieldsFromForm(form, tabId, normalizeLevel)
 
-    if (editingCard) {
+    if (providerModalState.card) {
+      const editingCard = findCurrentCard(list, providerModalState.card)
+      if (!editingCard) {
+        showToast(t('components.main.form.editingProviderMissing'), 'error')
+        return
+      }
       const previousEnabled = editingCard.enabled
       const previousCards = cloneAutomationCards(list)
 
@@ -267,7 +299,11 @@ export function useProviderForm(options: UseProviderFormOptions) {
 
       savedCard = editingCard
       try {
-        await persistProviders(tabId)
+        // 返回 false 表示未落盘（如同列表正在保存），回滚内存修改并保留弹窗，避免关闭后修改静默丢失
+        if (await persistProviders(tabId) === false) {
+          restoreCards(list, previousCards)
+          return
+        }
       } catch (error) {
         restoreCards(list, previousCards)
         providerModalState.card = list.find((card) => card.id === editingCard.id) ?? null
@@ -291,13 +327,19 @@ export function useProviderForm(options: UseProviderFormOptions) {
       }
       appendCardToGroup(tabId, newCard)
       savedCard = newCard
-      try {
-        await persistProviders(tabId)
-      } catch (error) {
+      const removeInsertedCard = () => {
         const insertedIndex = list.findIndex((card) => card === newCard)
         if (insertedIndex >= 0) {
           list.splice(insertedIndex, 1)
         }
+      }
+      try {
+        if (await persistProviders(tabId) === false) {
+          removeInsertedCard()
+          return
+        }
+      } catch (error) {
+        removeInsertedCard()
         throw error
       }
     }
@@ -369,8 +411,15 @@ export function useProviderForm(options: UseProviderFormOptions) {
   }
 
   const persistModelMappingRuleEnabled = async (key: string, enabled: boolean) => {
-    const card = providerModalState.card
-    if (!card?.modelMapping || !Object.prototype.hasOwnProperty.call(card.modelMapping, key)) return
+    if (!providerModalState.card) return
+    const list = cards[providerModalState.tabId]
+    const card = list ? findCurrentCard(list, providerModalState.card) : null
+    if (!card) {
+      // 抛错交给调用方回滚开关状态
+      showToast(t('components.main.form.editingProviderMissing'), 'error')
+      throw new Error('editing provider missing')
+    }
+    if (!card.modelMapping || !Object.prototype.hasOwnProperty.call(card.modelMapping, key)) return
 
     const previousDisabled = { ...(card.modelMappingDisabled || {}) }
     const nextDisabled = { ...previousDisabled }
@@ -382,7 +431,9 @@ export function useProviderForm(options: UseProviderFormOptions) {
     card.modelMappingDisabled = nextDisabled
 
     try {
-      await persistProviders(providerModalState.tabId)
+      if (await persistProviders(providerModalState.tabId) === false) {
+        throw new Error('persist providers skipped')
+      }
     } catch (error) {
       card.modelMappingDisabled = previousDisabled
       throw error

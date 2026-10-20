@@ -867,3 +867,161 @@ describe('useProviderForm order preservation', () => {
     expect(providerForm.providerLogBadgeSaving.value).toBe(false)
   })
 })
+
+describe('useProviderForm stale editing card', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.stubGlobal('window', {
+      dispatchEvent: vi.fn(),
+    })
+    vi.stubGlobal('CustomEvent', class {
+      type: string
+
+      constructor(type: string) {
+        this.type = type
+      }
+    })
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+  })
+
+  const createProviderForm = (
+    cards: Record<ProviderTab, AutomationCard[]>,
+    tabId: ProviderTab,
+    persistProviders: (tabId: ProviderTab) => Promise<boolean>,
+    showToast = vi.fn(),
+  ) => useProviderForm({
+    initialTab: tabId,
+    t: (key: string) => key,
+    showToast,
+    getActiveTab: () => tabId,
+    cards,
+    normalizeLevel,
+    persistProviders,
+    refreshDirectAppliedStatus: vi.fn().mockResolvedValue(undefined),
+    removeProvider: vi.fn().mockResolvedValue(undefined),
+    duplicateProvider: vi.fn().mockResolvedValue(false),
+    reloadProviders: vi.fn().mockResolvedValue(undefined),
+    moveCardToStatusGroup: (tab, target, enabled) => moveProviderToStatusGroup(cards[tab], target, enabled),
+    appendCardToGroup: (tab, target) => insertProviderToStatusGroup(cards[tab], target),
+  })
+
+  // 模拟窗口重新可见触发的 loadProviders：整个列表被替换为新对象
+  const reloadCards = (list: AutomationCard[]) => {
+    list.splice(0, list.length, ...JSON.parse(JSON.stringify(list)))
+  }
+
+  it('saves quota query config onto the reloaded card instead of the detached one', async () => {
+    const cards = createCardRecord()
+    cards.claude.push(createCard(1, { name: 'L 站 200' }), createCard(2))
+    const persistProviders = vi.fn().mockResolvedValue(true)
+    const providerForm = createProviderForm(cards, 'claude', persistProviders)
+
+    providerForm.configure(cards.claude[0]!)
+    reloadCards(cards.claude)
+
+    const quotaConfig = {
+      enabled: true,
+      templateType: 'custom' as const,
+      code: '({ request: { url: "https://example.com" }, extractor: function (r) { return r } })',
+      timeout: 10,
+      autoQueryInterval: 5,
+    }
+    await providerForm.submitProviderModal(createForm({
+      name: 'L 站 200',
+      providerQuotaQueryType: 'custom',
+      providerQuotaQueryConfig: quotaConfig,
+    }))
+
+    expect(persistProviders).toHaveBeenCalledWith('claude')
+    expect(cards.claude).toHaveLength(2)
+    expect(cards.claude[0]?.providerQuotaQueryType).toBe('custom')
+    expect(cards.claude[0]?.providerQuotaQueryConfig).toMatchObject(quotaConfig)
+    expect(providerForm.providerModalState.open).toBe(false)
+  })
+
+  it('keeps the modal open when the editing card no longer exists', async () => {
+    const cards = createCardRecord()
+    cards.claude.push(createCard(1), createCard(2))
+    const persistProviders = vi.fn().mockResolvedValue(true)
+    const showToast = vi.fn()
+    const providerForm = createProviderForm(cards, 'claude', persistProviders, showToast)
+
+    providerForm.configure(cards.claude[0]!)
+    cards.claude.splice(0, cards.claude.length, JSON.parse(JSON.stringify(cards.claude[1])))
+
+    await providerForm.submitProviderModal(createForm({ name: 'Edited' }))
+
+    expect(persistProviders).not.toHaveBeenCalled()
+    expect(showToast).toHaveBeenCalledWith('components.main.form.editingProviderMissing', 'error')
+    expect(providerForm.providerModalState.open).toBe(true)
+    expect(cards.claude.map((card) => card.name)).toEqual(['Provider 2'])
+  })
+
+  it('rolls back and keeps the modal open when persistence is skipped', async () => {
+    const cards = createCardRecord()
+    cards.claude.push(createCard(1))
+    const persistProviders = vi.fn().mockResolvedValue(false)
+    const providerForm = createProviderForm(cards, 'claude', persistProviders)
+
+    providerForm.configure(cards.claude[0]!)
+    await providerForm.submitProviderModal(createForm({ name: 'Edited' }))
+
+    expect(providerForm.providerModalState.open).toBe(true)
+    expect(cards.claude[0]?.name).toBe('Provider 1')
+    expect(window.dispatchEvent).not.toHaveBeenCalled()
+  })
+
+  it('persists model mapping toggles onto the reloaded card', async () => {
+    const cards = createCardRecord()
+    cards.claude.push(createCard(1, { modelMapping: { 'claude-*': 'vendor-*' } }))
+    const persistProviders = vi.fn().mockResolvedValue(true)
+    const providerForm = createProviderForm(cards, 'claude', persistProviders)
+
+    providerForm.configure(cards.claude[0]!)
+    reloadCards(cards.claude)
+    await providerForm.persistModelMappingRuleEnabled('claude-*', false)
+
+    expect(persistProviders).toHaveBeenCalledWith('claude')
+    expect(cards.claude[0]?.modelMappingDisabled).toEqual({ 'claude-*': true })
+  })
+})
+
+describe('useProviderForm stale log badge card', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('persists the log badge preference onto the reloaded card', async () => {
+    const cards = createCardRecord()
+    cards.claude.push(createCard(1, { hideLogBadge: false }))
+    const persistProviders = vi.fn().mockResolvedValue(true)
+    const providerForm = useProviderForm({
+      initialTab: 'claude',
+      t: (key: string) => key,
+      showToast: vi.fn(),
+      getActiveTab: () => 'claude',
+      cards,
+      normalizeLevel,
+      persistProviders,
+      refreshDirectAppliedStatus: vi.fn().mockResolvedValue(undefined),
+      removeProvider: vi.fn().mockResolvedValue(undefined),
+      duplicateProvider: vi.fn().mockResolvedValue(false),
+      reloadProviders: vi.fn().mockResolvedValue(undefined),
+      moveCardToStatusGroup: (tabId, target, enabled) => moveProviderToStatusGroup(cards[tabId], target, enabled),
+      appendCardToGroup: (tabId, target) => insertProviderToStatusGroup(cards[tabId], target),
+    })
+
+    const modalCard = cards.claude[0]!
+    providerForm.openProviderLogs(modalCard)
+    cards.claude.splice(0, 1, JSON.parse(JSON.stringify(modalCard)))
+    await providerForm.updateProviderLogBadgeEnabled(false)
+
+    expect(persistProviders).toHaveBeenCalledWith('claude')
+    expect(cards.claude[0]?.hideLogBadge).toBe(true)
+    expect(modalCard.hideLogBadge).toBe(true)
+  })
+})

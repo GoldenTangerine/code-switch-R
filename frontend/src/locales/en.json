@@ -1240,6 +1240,7 @@
         },
         "saveFailed": "Failed to save provider configuration: {error}",
         "saveInProgress": "A save is already in progress for this list, please retry later",
+        "editingProviderMissing": "The provider being edited no longer exists. Please close the editor and try again.",
         "toast": {
           "providerQuotaQueryTestSuccess": "Quota query succeeded: ",
           "providerQuotaQueryTestFailed": "Quota query failed",
