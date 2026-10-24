@@ -892,6 +892,17 @@
       "form": {
         "createTitle": "Add vendor",
         "editTitle": "Edit vendor",
+        "toolCompatibility": {
+          "title": "Tool compatibility",
+          "description": "Disable tools this provider does not support. Leave blank to keep all tools.",
+          "advisorPreset": "Apply Advisor compatibility preset",
+          "names": "Disabled tool names",
+          "types": "Disabled tool types",
+          "matchHint": "One entry per line or separated by commas. Exact, case-sensitive matching; no wildcards.",
+          "dynamicLabel": "Adapt dynamic tool loading",
+          "dynamicHint": "Convert dynamic tools to a regular tool list, making all retained tools immediately available. For endpoints without dynamic loading support.",
+          "scopeHint": "Applies only to Claude requests routed through this app. Disabled tools' past calls and results are preserved as plain text."
+        },
         "labels": {
           "name": "Vendor name",
           "apiUrl": "API endpoint",

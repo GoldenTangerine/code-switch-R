@@ -1,4 +1,13 @@
-import type { AutomationCard, ClaudeDesktopModelRoute, ModelMappingMissPolicy } from '../../data/cards'
+/**
+ * @name: 供应商页面类型
+ * @Descripttion: 定义供应商编辑与列表状态。
+ * @version: 1.0.0
+ * @Author: sm
+ * @Date: 2026-10-24 23:20:14
+ * @LastEditTime: 2026-10-24 23:20:14
+ * @FilePath: frontend/src/components/Main/types.ts
+ */
+import type { AutomationCard, ClaudeDesktopModelRoute, ModelMappingMissPolicy, ProviderToolCompatibility } from '../../data/cards'
 import type { BlacklistStatus } from '../../services/blacklist'
 import type { ConfigFile, ProxyInjection } from '../../services/customCliService'
 import type { BudgetQuotaAdjustments, BudgetQuotaKey, BudgetQuotaSettings } from '../../utils/budgetUsage'
@@ -67,6 +76,7 @@ export type VendorForm = {
   modelMappingMissPolicy?: ModelMappingMissPolicy
   modelPassthroughPatterns?: string[]
   requestBodyOverrides?: Record<string, any>
+  toolCompatibility?: ProviderToolCompatibility
   level?: number
   providerConcurrencyLimit?: number
   sessionMaxSessions?: number

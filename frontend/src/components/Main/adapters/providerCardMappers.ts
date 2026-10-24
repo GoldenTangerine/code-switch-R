@@ -1,3 +1,12 @@
+/**
+ * @name: 供应商卡片转换
+ * @Descripttion: 在持久化供应商与界面卡片之间转换并保留供应商独立配置。
+ * @version: 1.0.0
+ * @Author: sm
+ * @Date: 2026-10-24 23:20:14
+ * @LastEditTime: 2026-10-24 23:20:14
+ * @FilePath: frontend/src/components/Main/adapters/providerCardMappers.ts
+ */
 import type { ProviderDailyStat } from '../../../services/logs'
 import type { BlacklistStatus } from '../../../services/blacklist'
 import type { AutomationCard, ClaudeDesktopModelRoute, ModelMappingMissPolicy } from '../../../data/cards'
@@ -60,6 +69,7 @@ export type OpenCodeProvider = OpenCodeProviderModel & {
 }
 
 export type PersistedProvider = PersistedProviderModel & {
+  toolCompatibility?: AutomationCard['toolCompatibility']
   forcedPriority?: boolean
   sortOrder?: number
   enabledSortOrder?: number
@@ -297,6 +307,7 @@ export const providerToCard = (
   ),
   modelMappingMissPolicy: normalizeModelMappingMissPolicy(provider.modelMappingMissPolicy),
   modelPassthroughPatterns: cloneCardValue(provider.modelPassthroughPatterns || []),
+  toolCompatibility: cloneCardValue(provider.toolCompatibility || {}),
   requestBodyOverrides: cloneCardValue(provider.requestBodyOverrides || {}),
   level: provider.level || 1,
   providerConcurrencyLimit: normalizeProviderConcurrencyLimit(provider.providerConcurrencyLimit),

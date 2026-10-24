@@ -24,9 +24,9 @@
 		<key>CFBundlePackageType</key>
 		<string>APPL</string>
 		<key>CFBundleShortVersionString</key>
-		<string>2.11.23-dev</string>
+		<string>2.11.24-dev</string>
 		<key>CFBundleVersion</key>
-		<string>2.11.23</string>
+		<string>2.11.24</string>
 		<key>LSRequiresIPhoneOS</key>
 		<true/>
 		<key>MinimumOSVersion</key>

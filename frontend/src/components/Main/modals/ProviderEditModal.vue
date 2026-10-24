@@ -1,3 +1,12 @@
+<!--
+@name: 供应商编辑弹窗
+@Descripttion: 编辑供应商接入、路由与工具兼容设置。
+@version: 1.0.0
+@Author: sm
+@Date: 2026-10-24 23:20:14
+@LastEditTime: 2026-10-24 23:20:14
+@FilePath: frontend/src/components/Main/modals/ProviderEditModal.vue
+-->
 <template>
   <InlineModal
     :open="open"
@@ -1237,6 +1246,11 @@
           <ModelWhitelistEditor v-model="form.supportedModels" />
         </div>
 
+        <ProviderToolCompatibilityEditor
+          v-if="tabId === 'claude'"
+          v-model="form.toolCompatibility"
+        />
+
         <div v-if="tabId !== 'opencode'" class="form-field">
           <span class="label-row">
             {{ t('components.main.form.labels.requestBodyOverrides') }}
@@ -1387,6 +1401,7 @@ import InlineModal from '../../common/InlineModal.vue'
 import JsonCodeEditor from '../../common/JsonCodeEditor.vue'
 import ModelMappingEditor from '../../common/ModelMappingEditor.vue'
 import ModelWhitelistEditor from '../../common/ModelWhitelistEditor.vue'
+import ProviderToolCompatibilityEditor from '../components/ProviderToolCompatibilityEditor.vue'
 import { AUTH_TYPE_OPTIONS, getDefaultAuthType } from '../constants'
 import { cardProviderRef } from '../adapters/providerCardMappers'
 import {

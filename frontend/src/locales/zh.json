@@ -893,6 +893,17 @@
       "form": {
         "createTitle": "新增供应商",
         "editTitle": "编辑供应商",
+        "toolCompatibility": {
+          "title": "工具兼容",
+          "description": "为当前供应商停用不支持的工具。留空则不禁用。",
+          "advisorPreset": "填入 Advisor 兼容预设",
+          "names": "禁用工具名称",
+          "types": "禁用工具类型",
+          "matchHint": "每行一项，也可用逗号分隔。区分大小写，精确匹配，不支持通配符。",
+          "dynamicLabel": "兼容动态工具加载",
+          "dynamicHint": "将动态工具转换为普通工具列表，所有保留的工具直接可用。适用于不支持动态加载的接口。",
+          "scopeHint": "仅对经本应用代理的 Claude 请求生效。被禁用工具的历史调用与结果保留为普通文本。"
+        },
         "labels": {
           "name": "供应商名称",
           "apiUrl": "API 地址",

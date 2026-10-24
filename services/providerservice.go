@@ -1,3 +1,12 @@
+/*
+@name: 供应商配置服务
+@Descripttion: 管理供应商配置与独立快照。
+@version: 1.0.0
+@Author: sm
+@Date: 2026-10-24 23:20:14
+@LastEditTime: 2026-10-24 23:20:14
+@FilePath: services/providerservice.go
+*/
 package services
 
 import (
@@ -110,7 +119,8 @@ type Provider struct {
 
 	// 请求体强制覆盖字段 - 仅在命中当前 Provider 转发时生效
 	// 同名字段会覆盖，不存在的字段会新增；嵌套对象按层级递归写入
-	RequestBodyOverrides map[string]interface{} `json:"requestBodyOverrides,omitempty"`
+	RequestBodyOverrides map[string]interface{}     `json:"requestBodyOverrides,omitempty"`
+	ToolCompatibility    *ProviderToolCompatibility `json:"toolCompatibility,omitempty"`
 
 	// 优先级分组 - 数字越小优先级越高（1-10，默认 1）
 	// 使用 omitempty 确保零值不序列化，向后兼容
@@ -282,6 +292,12 @@ func cloneProvider(provider Provider) Provider {
 		}
 	}
 	cloned.ModelPassthroughPatterns = append([]string(nil), provider.ModelPassthroughPatterns...)
+	if provider.ToolCompatibility != nil {
+		compatibility := *provider.ToolCompatibility
+		compatibility.DisabledNames = append([]string(nil), compatibility.DisabledNames...)
+		compatibility.DisabledTypes = append([]string(nil), compatibility.DisabledTypes...)
+		cloned.ToolCompatibility = &compatibility
+	}
 	cloned.ClaudeDesktopModelRoutes = append([]ClaudeDesktopModelRoute(nil), provider.ClaudeDesktopModelRoutes...)
 	if provider.RequestBodyOverrides != nil {
 		cloned.RequestBodyOverrides = cloneJSONLikeMap(provider.RequestBodyOverrides)

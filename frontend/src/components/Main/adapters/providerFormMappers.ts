@@ -1,3 +1,12 @@
+/**
+ * @name: 供应商表单转换
+ * @Descripttion: 在供应商卡片与可编辑表单之间复制并规范化配置。
+ * @version: 1.0.0
+ * @Author: sm
+ * @Date: 2026-10-24 23:20:14
+ * @LastEditTime: 2026-10-24 23:20:14
+ * @FilePath: frontend/src/components/Main/adapters/providerFormMappers.ts
+ */
 import type { AutomationCard, ClaudeDesktopModelRoute, ModelMappingMissPolicy } from '../../../data/cards'
 import { cloneBudgetQuotaAdjustments } from '../../../utils/budgetUsage'
 import {
@@ -206,6 +215,7 @@ export const createDefaultVendorForm = (
   modelMappingMissPolicy: 'block',
   modelPassthroughPatterns: [],
   requestBodyOverrides: {},
+  toolCompatibility: {},
   cliConfig: {},
   apiEndpoint: '',
   opencodeNpm: platform === 'opencode' ? '@ai-sdk/openai-compatible' : undefined,
@@ -278,6 +288,7 @@ export const createVendorFormFromCard = (
   modelMappingMissPolicy: normalizeModelMappingMissPolicy(card.modelMappingMissPolicy),
   modelPassthroughPatterns: cloneProviderValue(card.modelPassthroughPatterns || []),
   requestBodyOverrides: cloneProviderValue(card.requestBodyOverrides || {}),
+  toolCompatibility: cloneProviderValue(card.toolCompatibility || {}),
   cliConfig: cloneProviderValue(card.cliConfig || {}),
   apiEndpoint: card.apiEndpoint || '',
   opencodeNpm: card.opencodeNpm || '',
@@ -394,6 +405,7 @@ export const buildNormalizedVendorForm = ({
     modelMappingMissPolicy: normalizeModelMappingMissPolicy(form.modelMappingMissPolicy),
     modelPassthroughPatterns: cloneProviderValue(form.modelPassthroughPatterns || []),
     requestBodyOverrides: cloneProviderValue(form.requestBodyOverrides || {}),
+    toolCompatibility: cloneProviderValue(form.toolCompatibility || {}),
     cliConfig: cloneProviderValue(form.cliConfig || {}),
     apiEndpoint: form.apiEndpoint || '',
     providerRef: form.providerRef || '',
@@ -475,6 +487,7 @@ export const buildPersistedProviderFieldsFromForm = (
     modelMappingMissPolicy: normalizeModelMappingMissPolicy(form.modelMappingMissPolicy),
     modelPassthroughPatterns: cloneProviderValue(form.modelPassthroughPatterns || []),
     requestBodyOverrides: cloneProviderValue(form.requestBodyOverrides || {}),
+    toolCompatibility: cloneProviderValue(form.toolCompatibility || {}),
     cliConfig: cloneProviderValue(form.cliConfig || {}),
     apiEndpoint: form.apiEndpoint || '',
     providerRef: form.providerRef || '',

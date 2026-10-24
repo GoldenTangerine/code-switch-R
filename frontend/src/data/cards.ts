@@ -1,7 +1,22 @@
+/**
+ * @name: 供应商卡片类型
+ * @Descripttion: 定义供应商卡片与工具兼容配置的数据结构。
+ * @version: 1.0.0
+ * @Author: sm
+ * @Date: 2026-10-24 23:20:14
+ * @LastEditTime: 2026-10-24 23:20:14
+ * @FilePath: frontend/src/data/cards.ts
+ */
 import type { BudgetQuotaAdjustments, BudgetQuotaSettings } from '../utils/budgetUsage'
 import type { ProviderQuotaQueryConfig, ProviderQuotaQueryType } from '../utils/providerQuotaQuery'
 
 export type ModelMappingMissPolicy = 'block' | 'passthrough'
+
+export type ProviderToolCompatibility = {
+  disabledNames?: string[]
+  disabledTypes?: string[]
+  normalizeDynamicTools?: boolean
+}
 
 // Claude Desktop 模型路由条目：name 为模型 ID，labelOverride 覆盖展示名，supports1m 声明 1M 上下文
 export type ClaudeDesktopModelRoute = {
@@ -56,6 +71,7 @@ export type AutomationCard = {
   modelPassthroughPatterns?: string[]
   // 请求体强制字段：仅在命中当前供应商转发时应用
   requestBodyOverrides?: Record<string, any>
+  toolCompatibility?: ProviderToolCompatibility
   // 优先级分组：数字越小优先级越高（1-10，默认 1）
   level?: number
   // 实时并发：供应商最多同时处理的请求数

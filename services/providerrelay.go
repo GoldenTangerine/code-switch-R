@@ -4994,6 +4994,9 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 		setHeaderIfAbsentCaseInsensitive(headers, "openai-beta", "responses=experimental")
 	}
 	applyModelMappingOneMHeader(headers, kind, resolveClaudeAPIFormat(provider), plan.ModelMappingSupports1M)
+	if kind == "claude" {
+		applyProviderToolCompatibilityHeaders(provider, "/v1/messages", headers)
+	}
 
 	capturePayloadEnabled, sanitizePayloadEnabled := prs.resolveRequestLogPayloadCaptureAndSanitization()
 	requestLog := &ReqeustLog{
@@ -8513,6 +8516,14 @@ func (prs *ProviderRelayService) buildProviderRequestPlan(provider Provider, bod
 			return providerRequestPlan{}, err
 		}
 		currentBodyBytes = modifiedBody
+	}
+	compatibleBody, toolChanges, compatibilityErr := applyProviderToolCompatibility(provider, endpoint, currentBodyBytes)
+	if compatibilityErr != nil {
+		return providerRequestPlan{}, compatibilityErr
+	}
+	currentBodyBytes = compatibleBody
+	if len(toolChanges) > 0 {
+		fmt.Printf("[INFO] [工具兼容] Provider: %s | 已处理: %s\n", provider.Name, strings.Join(toolChanges, ", "))
 	}
 	hasRequestBodyReasoningOverride := requestBodyOverridesReasoningEffort(bodyBeforeOverrides, currentBodyBytes, provider.RequestBodyOverrides)
 	inputProtocol := providerRequestProtocolForInput(endpoint)
