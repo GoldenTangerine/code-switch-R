@@ -1,5 +1,6 @@
 <template>
-  <div>
+  <!-- 标题与首次引导都不展示时不渲染根节点，避免在 flex 布局中留下空白间距 -->
+  <div v-if="showFirstRunPrompt || showHomeTitle">
     <div v-if="showFirstRunPrompt" class="first-run-banner">
       <div class="banner-content">
         <span class="banner-icon">💡</span>
@@ -15,8 +16,8 @@
       </div>
     </div>
 
-    <section class="contrib-hero">
-      <h1 v-if="showHomeTitle">{{ t('components.main.hero.title') }}</h1>
+    <section v-if="showHomeTitle" class="contrib-hero">
+      <h1>{{ t('components.main.hero.title') }}</h1>
     </section>
   </div>
 </template>
@@ -43,7 +44,6 @@ const { t } = useI18n()
   align-items: center;
   justify-content: space-between;
   padding: 12px 16px;
-  margin-bottom: 16px;
   background: linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(147, 51, 234, 0.1) 100%);
   border: 1px solid rgba(59, 130, 246, 0.2);
   border-radius: 12px;
@@ -53,6 +53,10 @@ const { t } = useI18n()
 :global(.dark) .first-run-banner {
   background: linear-gradient(135deg, rgba(59, 130, 246, 0.15) 0%, rgba(147, 51, 234, 0.15) 100%);
   border-color: rgba(59, 130, 246, 0.3);
+}
+
+.first-run-banner:not(:last-child) {
+  margin-bottom: 16px;
 }
 
 .banner-content {
@@ -67,7 +71,7 @@ const { t } = useI18n()
 
 .banner-text {
   font-size: 13px;
-  color: var(--mac-text-primary);
+  color: var(--mac-text);
   line-height: 1.4;
 }
 
@@ -83,7 +87,7 @@ const { t } = useI18n()
   border-radius: 6px;
   border: 1px solid rgba(0, 0, 0, 0.1);
   background: rgba(255, 255, 255, 0.8);
-  color: var(--mac-text-primary);
+  color: var(--mac-text);
   cursor: pointer;
   transition: all 0.15s ease;
 }

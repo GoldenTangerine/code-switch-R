@@ -712,3 +712,14 @@ onUnmounted(() => {
   cleanup()
 })
 </script>
+
+<style scoped>
+/* 与首页 Tab 区、供应商卡片保持一致的圆角、描边与投影；内边距与 useAdaptiveHeatmap 的列数计算绑定，勿改 */
+.contrib-wall {
+  border-radius: 22px;
+  border-color: var(--main-home-shell-border);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    var(--main-home-shell-shadow);
+}
+</style>

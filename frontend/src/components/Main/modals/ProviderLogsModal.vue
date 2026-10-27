@@ -14,32 +14,19 @@
       }"
     >
       <section class="provider-logs-hero">
-        <div class="provider-logs-hero__glow" aria-hidden="true"></div>
         <div class="provider-logs-hero__copy">
           <span class="provider-logs-hero__eyebrow">{{ platformLabel }}</span>
-          <h3 class="provider-logs-hero__title">{{ providerName }}</h3>
+          <h3 class="provider-logs-hero__title">
+            {{ providerName }}
+            <span class="provider-logs-hero__count">
+              {{ t('components.main.providerLogs.loadedCount', { count: entries.length }) }}
+            </span>
+          </h3>
           <p class="provider-logs-hero__subtitle">
             {{ t('components.main.providerLogs.summary') }}
           </p>
         </div>
         <div class="provider-logs-hero__side">
-          <div class="provider-logs-hero__toolbar">
-            <span class="provider-logs-pill provider-logs-pill--count">
-              {{ t('components.main.providerLogs.loadedCount', { count: entries.length }) }}
-            </span>
-            <span class="provider-logs-pill provider-logs-pill--accent">
-              <svg viewBox="0 0 24 24" aria-hidden="true" class="provider-logs-pill__icon">
-                <path
-                  d="M4 6.75h16M7 11.75h10M10.5 16.75h3"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.7"
-                  stroke-linecap="round"
-                />
-              </svg>
-              {{ showUnreadOnly ? t('components.main.providerLogs.unreadFailures') : t('components.main.providerLogs.allFailures') }}
-            </span>
-          </div>
           <div class="provider-logs-hero__actions">
             <div class="provider-logs-badge-control">
               <span class="provider-logs-badge-control__copy">
@@ -126,26 +113,20 @@
           :class="entry.log.http_code >= 500 ? 'is-severe' : 'is-warning'"
         >
           <header class="provider-log-entry__header">
-            <div class="provider-log-entry__tags">
-              <span class="provider-log-entry__status">
-                HTTP {{ entry.log.http_code }}
-              </span>
-              <span class="provider-log-entry__tag">
-                {{ entry.errorType || (entry.log.http_code >= 500 ? 'HTTP 5xx' : 'HTTP 4xx') }}
-              </span>
-              <span v-if="entry.log.error_source" class="provider-log-entry__tag provider-log-entry__tag--source">
-                {{ errorSourceLabel(entry.log.error_source) }}
-              </span>
-              <span v-if="entry.semanticTag" class="provider-log-entry__tag provider-log-entry__tag--semantic">
-                {{ entry.semanticTag }}
-              </span>
-              <span v-if="entry.errorCode" class="provider-log-entry__tag">
-                {{ entry.errorCode }}
-              </span>
-              <span class="provider-log-entry__tag">
-                {{ entry.log.error_read_at?.trim() ? t('components.main.providerLogs.readStatus') : t('components.main.providerLogs.unreadStatus') }}
-              </span>
-            </div>
+            <h4 class="provider-log-entry__headline">
+              HTTP {{ entry.log.http_code }}
+              <svg viewBox="0 0 24 24" aria-hidden="true" class="provider-log-entry__headline-icon">
+                <circle cx="12" cy="12" r="8.25" fill="none" stroke="currentColor" stroke-width="1.8" />
+                <path
+                  d="M12 8.25v4.4"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                />
+                <circle cx="12" cy="16.55" r="0.95" fill="currentColor" />
+              </svg>
+            </h4>
             <time class="provider-log-entry__time" :datetime="entry.log.created_at">
               <svg viewBox="0 0 24 24" aria-hidden="true" class="provider-log-entry__time-icon">
                 <circle cx="12" cy="12" r="7.25" fill="none" stroke="currentColor" stroke-width="1.6" />
@@ -162,21 +143,25 @@
             </time>
           </header>
 
-          <div class="provider-log-entry__headline-row">
-            <h4 class="provider-log-entry__headline">
-              HTTP {{ entry.log.http_code }}
-              <svg viewBox="0 0 24 24" aria-hidden="true" class="provider-log-entry__headline-icon">
-                <circle cx="12" cy="12" r="8.25" fill="none" stroke="currentColor" stroke-width="1.8" />
-                <path
-                  d="M12 8.25v4.4"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.8"
-                  stroke-linecap="round"
-                />
-                <circle cx="12" cy="16.55" r="0.95" fill="currentColor" />
-              </svg>
-            </h4>
+          <div class="provider-log-entry__tags">
+            <span v-if="entry.errorType" class="provider-log-entry__tag">
+              {{ entry.errorType }}
+            </span>
+            <span v-if="entry.log.error_source" class="provider-log-entry__tag provider-log-entry__tag--source">
+              {{ errorSourceLabel(entry.log.error_source) }}
+            </span>
+            <span v-if="entry.semanticTag" class="provider-log-entry__tag provider-log-entry__tag--semantic">
+              {{ entry.semanticTag }}
+            </span>
+            <span v-if="entry.errorCode" class="provider-log-entry__tag">
+              {{ entry.errorCode }}
+            </span>
+            <span
+              class="provider-log-entry__tag"
+              :class="{ 'provider-log-entry__tag--unread': !entry.log.error_read_at?.trim() }"
+            >
+              {{ entry.log.error_read_at?.trim() ? t('components.main.providerLogs.readStatus') : t('components.main.providerLogs.unreadStatus') }}
+            </span>
           </div>
 
           <div class="provider-log-entry__meta">
@@ -214,11 +199,6 @@
           </div>
 
           <div class="provider-log-terminal">
-            <div class="provider-log-terminal__chrome" aria-hidden="true">
-              <span></span>
-              <span></span>
-              <span></span>
-            </div>
             <div class="provider-log-terminal__body-wrap">
               <div class="provider-log-terminal__toolbar">
                 <span class="provider-log-terminal__label">{{ entry.detailLabel }}</span>
@@ -250,6 +230,33 @@
                   <span v-if="entry.detailPreview.formatSkippedLarge" class="provider-log-terminal__badge">
                     {{ t('components.main.providerLogs.payloadLarge') }}
                   </span>
+                  <button
+                    v-if="entry.copyText"
+                    type="button"
+                    class="provider-log-entry__copy"
+                    :class="{ 'is-copied': isCopied(entry) }"
+                    @click="copyProviderDetail(entry)"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true" class="provider-log-entry__copy-icon">
+                      <path
+                        d="M8.5 8.5h8v10h-8a2 2 0 01-2-2v-6a2 2 0 012-2z"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.6"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      />
+                      <path
+                        d="M10.5 8.5V7a2 2 0 012-2h5a2 2 0 012 2v7a2 2 0 01-2 2h-1"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.6"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      />
+                    </svg>
+                    {{ copyButtonLabel(entry) }}
+                  </button>
                 </div>
               </div>
               <pre
@@ -264,52 +271,36 @@
             </div>
           </div>
 
-          <div class="provider-log-entry__footer">
-            <span
-              v-if="entry.detailSource === 'console'"
-              class="provider-log-entry__source-note"
-            >
+          <div v-if="entry.detailSource === 'console'" class="provider-log-entry__footer">
+            <span class="provider-log-entry__source-note">
               {{ t('components.main.providerLogs.consoleMatched') }}
             </span>
-            <button
-              type="button"
-              class="provider-log-entry__copy"
-              :class="{ 'is-disabled': !entry.copyText, 'is-copied': isCopied(entry) }"
-              :disabled="!entry.copyText"
-              @click="copyProviderDetail(entry)"
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true" class="provider-log-entry__copy-icon">
-                <path
-                  d="M8.5 8.5h8v10h-8a2 2 0 01-2-2v-6a2 2 0 012-2z"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.6"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                />
-                <path
-                  d="M10.5 8.5V7a2 2 0 012-2h5a2 2 0 012 2v7a2 2 0 01-2 2h-1"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.6"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                />
-              </svg>
-              {{ copyButtonLabel(entry) }}
-            </button>
           </div>
         </article>
 
-        <div v-if="hasMore" class="provider-logs-actions">
-          <button
-            type="button"
-            class="provider-logs-load-more"
-            :disabled="loadingMore"
-            @click="loadMore"
-          >
-            {{ loadingMore ? t('components.main.providerLogs.loadingMore') : t('components.main.providerLogs.loadMore') }}
-          </button>
+        <div ref="loadMoreSentinelRef" class="provider-logs-actions">
+          <template v-if="hasMore">
+            <span v-if="loadMoreError" class="provider-logs-actions__error">
+              {{ t('components.main.providerLogs.loadMoreFailed', { error: loadMoreError }) }}
+            </span>
+            <button
+              type="button"
+              class="provider-logs-load-more"
+              :class="{ 'is-loading': loadingMore }"
+              :disabled="loadingMore"
+              @click="loadMore"
+            >
+              <span v-if="loadingMore" class="provider-logs-load-more__spinner" aria-hidden="true"></span>
+              {{ loadingMore
+                ? t('components.main.providerLogs.loadingMore')
+                : loadMoreError
+                  ? t('components.main.providerLogs.retryLoadMore')
+                  : t('components.main.providerLogs.loadMore') }}
+            </button>
+          </template>
+          <span v-else class="provider-logs-actions__end">
+            {{ t('components.main.providerLogs.allLoaded', { count: entries.length }) }}
+          </span>
         </div>
       </div>
     </div>
@@ -338,7 +329,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { AutomationCard } from '../../../data/cards'
 import type { ResolvedTheme } from '../types'
@@ -414,6 +405,8 @@ type BrowserWindowWithWailsBridge = Window & {
 }
 
 const DISPLAY_CHUNK_SIZE = 12
+// 哨兵距离可视区底部多远时提前加载下一页
+const AUTO_LOAD_ROOT_MARGIN = '0px 0px 320px 0px'
 const RECENT_CONSOLE_LOG_COUNT = 400
 const CONSOLE_MATCH_MAX_WINDOW_MS = 15 * 60 * 1000
 const DEV_PROVIDER_LOGS_PLATFORM: LogPlatform = 'claude'
@@ -449,6 +442,39 @@ function createTodayMockTimestamp(hour: number, minute: number, second: number) 
   )
   const pad = (input: number) => String(input).padStart(2, '0')
   return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())} ${pad(value.getHours())}:${pad(value.getMinutes())}:${pad(value.getSeconds())}`
+}
+
+function createDevMockPagedLogs(): RequestLog[] {
+  const codes = [502, 429, 500, 401, 503, 400]
+  return Array.from({ length: 32 }, (_, index) => {
+    const httpCode = codes[index % codes.length]
+    const createdAt = createTodayMockTimestamp(10 - Math.floor(index / 4), 50 - (index % 4) * 12, (index * 7) % 60)
+    return {
+      id: 40500 - index * 9,
+      platform: DEV_PROVIDER_LOGS_PLATFORM,
+      provider_id: DEV_PROVIDER_LOGS_PROVIDER,
+      provider: DEV_PROVIDER_LOGS_PROVIDER,
+      model: 'claude-sonnet-4-5',
+      requested_model: 'claude-sonnet-4-5',
+      response_model: '',
+      http_code: httpCode,
+      input_tokens: 120 + index,
+      output_tokens: 0,
+      cache_create_tokens: 0,
+      cache_read_tokens: 0,
+      reasoning_tokens: 0,
+      created_at: createdAt,
+      response_body: JSON.stringify({
+        error: {
+          message: `Mock upstream failure #${index + 1} (HTTP ${httpCode}).`,
+          type: httpCode >= 500 ? 'api_error' : 'invalid_request_error',
+        },
+      }),
+      response_body_truncated: false,
+      // 每 3 条中有 1 条为已读，便于在「未读 / 全部」之间切换时看到差异
+      error_read_at: index % 3 === 2 ? createdAt : '',
+    }
+  })
 }
 
 function createDevMockRequestLogs(): RequestLog[] {
@@ -543,6 +569,7 @@ function createDevMockRequestLogs(): RequestLog[] {
       }),
       response_body_truncated: false,
     },
+    ...createDevMockPagedLogs(),
   ]
 }
 
@@ -565,6 +592,8 @@ const { t, locale } = useI18n()
 
 const loading = ref(false)
 const loadingMore = ref(false)
+const loadMoreError = ref('')
+const loadMoreSentinelRef = ref<HTMLElement | null>(null)
 const error = ref('')
 const entries = ref<RequestLog[]>([])
 const consoleCandidates = ref<ConsoleProviderErrorCandidate[]>([])
@@ -655,8 +684,22 @@ function countDevMockUnreadLogs() {
   return devMockLogs.value.filter(isUnreadLog).length
 }
 
+const payloadStateCache = new WeakMap<RequestLog, PayloadErrorState>()
+const payloadPreviewCache = new Map<string, PayloadPreview>()
+
+const getCachedPayloadPreview = (text: string) => {
+  let preview = payloadPreviewCache.get(text)
+  if (!preview) {
+    preview = buildPayloadPreview(text)
+    payloadPreviewCache.set(text, preview)
+  }
+  return preview
+}
+
 const resetState = () => {
   entries.value = []
+  loadMoreError.value = ''
+  payloadPreviewCache.clear()
   consoleCandidates.value = []
   total.value = 0
   unreadTotal.value = 0
@@ -705,16 +748,20 @@ const errorSourceLabel = (source: string) => {
 }
 
 const getPayloadErrorState = (log: RequestLog): PayloadErrorState => {
+  const cached = payloadStateCache.get(log)
+  if (cached) return cached
+
   const responseBody = log.response_body?.trim() || ''
   const parsedError = parseProviderErrorFromConsoleMessage(
     responseBody ? `status ${log.http_code}: ${responseBody}` : `status ${log.http_code}:`,
   )
-
-  return {
+  const state = {
     responseBody,
     parsedError,
     hasMeaningfulDetail: hasMeaningfulProviderErrorPayload(responseBody, parsedError),
   }
+  payloadStateCache.set(log, state)
+  return state
 }
 
 const matchConsoleCandidate = (log: RequestLog, candidates: ConsoleProviderErrorCandidate[]) => {
@@ -764,7 +811,7 @@ const buildLogEntry = (
 
   return {
     log,
-    detailPreview: buildPayloadPreview(detailText),
+    detailPreview: getCachedPayloadPreview(detailText),
     errorSummary: truncateText(summaryText),
     semanticTag: activeDetail?.semanticTag || payloadParsedError?.semanticTag || '',
     errorCode: activeDetail?.errorCode || payloadParsedError?.errorCode || '',
@@ -1127,11 +1174,13 @@ const reloadLogs = async () => {
 
 const loadMore = async () => {
   if (loading.value || loadingMore.value || !hasMore.value) return
+  loadMoreError.value = ''
 
   if (isDevMockProviderLogs.value) {
     const page = buildDevMockLogsPage(DISPLAY_CHUNK_SIZE, entries.value.length)
     entries.value = mergeLogsById(entries.value, page.items)
     total.value = page.total
+    void recheckAutoLoad()
     return
   }
 
@@ -1147,18 +1196,72 @@ const loadMore = async () => {
     })
     if (currentSeq !== requestSeq.value) return
     const mergedEntries = mergeLogsById(entries.value, page.items)
-    total.value = page.total
+    // 后端返回空页（例如期间有日志被标记已读导致总数变化）时以实际条数收敛，避免自动加载反复请求
+    total.value = page.items.length === 0 ? mergedEntries.length : page.total
     entries.value = mergedEntries
     await ensureConsoleCoverage(mergedEntries, currentSeq)
   } catch (err) {
     if (currentSeq !== requestSeq.value) return
-    error.value = extractErrorMessage(err)
+    loadMoreError.value = extractErrorMessage(err)
   } finally {
     if (currentSeq === requestSeq.value) {
       loadingMore.value = false
+      void recheckAutoLoad()
     }
   }
 }
+
+// 滚动到列表底部附近时自动加载下一页；滚动容器为 InlineModal 的 .modal-body
+let autoLoadObserver: IntersectionObserver | null = null
+
+const canAutoLoad = () => (
+  props.open
+  && hasMore.value
+  && !loading.value
+  && !loadingMore.value
+  && !loadMoreError.value
+)
+
+const disconnectAutoLoadObserver = () => {
+  autoLoadObserver?.disconnect()
+  autoLoadObserver = null
+}
+
+const connectAutoLoadObserver = (sentinel: HTMLElement) => {
+  disconnectAutoLoadObserver()
+  if (typeof IntersectionObserver === 'undefined') return
+  autoLoadObserver = new IntersectionObserver(
+    (observerEntries) => {
+      if (observerEntries.some((item) => item.isIntersecting) && canAutoLoad()) {
+        void loadMore()
+      }
+    },
+    {
+      root: sentinel.closest('.modal-body'),
+      rootMargin: AUTO_LOAD_ROOT_MARGIN,
+    },
+  )
+  autoLoadObserver.observe(sentinel)
+}
+
+// 一页内容不足以撑满可视区时哨兵会持续可见，观察器不会再次回调，需要重新观察以触发一次判定
+const recheckAutoLoad = async () => {
+  await nextTick()
+  const sentinel = loadMoreSentinelRef.value
+  if (!autoLoadObserver || !sentinel || !canAutoLoad()) return
+  autoLoadObserver.unobserve(sentinel)
+  autoLoadObserver.observe(sentinel)
+}
+
+watch(loadMoreSentinelRef, (sentinel) => {
+  if (sentinel) {
+    connectAutoLoadObserver(sentinel)
+  } else {
+    disconnectAutoLoadObserver()
+  }
+})
+
+onBeforeUnmount(disconnectAutoLoadObserver)
 
 const formatCreatedAt = (value: string) => {
   if (!value) return '-'
@@ -1308,12 +1411,6 @@ watch(
   --provider-log-terminal-toolbar-border: rgba(148, 163, 184, 0.12);
   --provider-log-terminal-text: #cbd5e1;
   --provider-log-terminal-muted: rgba(148, 163, 184, 0.58);
-  --provider-log-copy-bg: linear-gradient(135deg, rgba(255, 255, 255, 0.92), rgba(248, 250, 252, 0.94));
-  --provider-log-copy-bg-hover: linear-gradient(135deg, rgba(255, 247, 237, 0.96), rgba(255, 255, 255, 0.98));
-  --provider-log-copy-border: rgba(148, 163, 184, 0.26);
-  --provider-log-copy-border-hover: rgba(249, 115, 22, 0.3);
-  --provider-log-copy-text: rgba(51, 65, 85, 0.82);
-  --provider-log-copy-glow: rgba(249, 115, 22, 0.18);
   display: flex;
   flex-direction: column;
   gap: 18px;
@@ -1352,12 +1449,6 @@ watch(
   --provider-log-terminal-toolbar-border: rgba(255, 255, 255, 0.05);
   --provider-log-terminal-text: rgba(203, 213, 225, 0.9);
   --provider-log-terminal-muted: rgba(100, 116, 139, 0.58);
-  --provider-log-copy-bg: rgba(255, 255, 255, 0.04);
-  --provider-log-copy-bg-hover: rgba(249, 115, 22, 0.12);
-  --provider-log-copy-border: rgba(255, 255, 255, 0.08);
-  --provider-log-copy-border-hover: rgba(249, 115, 22, 0.24);
-  --provider-log-copy-text: rgba(226, 232, 240, 0.9);
-  --provider-log-copy-glow: rgba(249, 115, 22, 0.18);
   color: #f3f4f6;
 }
 
@@ -1365,7 +1456,7 @@ watch(
   position: relative;
   overflow: hidden;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 28px;
   padding: 20px 22px;
@@ -1375,24 +1466,12 @@ watch(
   box-shadow: 0 22px 44px rgba(15, 23, 42, 0.08);
 }
 
-.provider-logs-hero__glow {
-  position: absolute;
-  inset: -40px auto auto 55%;
-  width: 320px;
-  height: 220px;
-  border-radius: 999px;
-  pointer-events: none;
-  background: radial-gradient(circle, color-mix(in srgb, var(--provider-log-accent) 22%, rgba(99, 102, 241, 0.18)) 0%, transparent 72%);
-  filter: blur(28px);
-  opacity: 0.9;
-}
-
 .provider-logs-hero__copy {
   position: relative;
   z-index: 1;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
 }
 
@@ -1405,12 +1484,31 @@ watch(
 }
 
 .provider-logs-hero__title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
   margin: 0;
   font-size: clamp(1.7rem, 2vw, 2rem);
   font-weight: 700;
   line-height: 1.08;
   letter-spacing: -0.02em;
   color: var(--provider-log-heading);
+}
+
+.provider-logs-hero__count {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 9px;
+  border-radius: 999px;
+  border: 1px solid var(--provider-log-pill-border);
+  background: var(--provider-log-pill-bg);
+  color: var(--provider-log-pill-text);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
 }
 
 .provider-logs-hero__subtitle {
@@ -1427,20 +1525,7 @@ watch(
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 10px;
   flex-shrink: 0;
-}
-
-.provider-logs-hero__toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  padding: 4px;
-  border-radius: 14px;
-  border: 1px solid var(--provider-log-toolbar-border);
-  background: var(--provider-log-toolbar-bg);
-  backdrop-filter: blur(12px);
 }
 
 .provider-logs-hero__actions {
@@ -1524,37 +1609,6 @@ watch(
 .provider-logs-badge-toggle:disabled {
   cursor: wait;
   opacity: 0.58;
-}
-
-.provider-logs-pill {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  min-height: 34px;
-  padding: 0 13px;
-  border-radius: 10px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--provider-log-pill-text);
-  background: var(--provider-log-pill-bg);
-  border: 1px solid var(--provider-log-pill-border);
-  font-variant-numeric: tabular-nums;
-}
-
-.provider-logs-pill--count {
-  min-width: 110px;
-}
-
-.provider-logs-pill__icon {
-  width: 13px;
-  height: 13px;
-}
-
-.provider-logs-pill--accent {
-  color: color-mix(in srgb, var(--provider-log-accent) 76%, #6366f1);
-  background: color-mix(in srgb, var(--provider-log-accent) 11%, rgba(255, 255, 255, 0.72));
-  border-color: color-mix(in srgb, var(--provider-log-accent) 24%, transparent);
 }
 
 .provider-logs-scope {
@@ -1667,51 +1721,66 @@ watch(
 }
 
 .provider-log-entry {
+  --provider-log-entry-tint: rgba(249, 115, 22, 0.08);
   position: relative;
+  isolation: isolate;
   overflow: hidden;
-  padding: 16px 18px 16px 22px;
+  padding: 16px 18px;
+  /* 长列表中跳过视口外卡片的布局与绘制，intrinsic-size 为未渲染时的占位估算高度 */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 320px;
   border-radius: 16px;
   border: 1px solid var(--provider-log-card-border);
   background: var(--provider-log-card-bg);
   box-shadow: var(--provider-log-card-shadow);
   transition:
-    transform 0.18s ease,
     border-color 0.18s ease,
     box-shadow 0.18s ease;
 }
 
 .provider-log-entry:hover {
-  transform: translateY(-1px);
   border-color: var(--provider-log-card-hover-border);
 }
 
+/* 严重程度以淡渐变铺在卡片底部（左上着色、向右下渐隐），位于内容之下 */
 .provider-log-entry::before {
   content: '';
   position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 4px;
-  border-radius: 16px 0 0 16px;
-  box-shadow:
-    0 0 16px currentColor,
-    1px 0 0 rgba(255, 255, 255, 0.04);
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: linear-gradient(
+    135deg,
+    var(--provider-log-entry-tint) 0%,
+    color-mix(in srgb, var(--provider-log-entry-tint) 45%, transparent) 40%,
+    transparent 75%
+  );
   pointer-events: none;
 }
 
-.provider-log-entry.is-severe::before {
-  color: rgba(244, 63, 94, 0.52);
-  background: linear-gradient(180deg, #ef4444, #f97316);
+.provider-log-entry.is-warning {
+  --provider-log-entry-tint: rgba(249, 115, 22, 0.08);
+  border-color: rgba(249, 115, 22, 0.18);
 }
 
-.provider-log-entry.is-warning::before {
-  color: rgba(249, 115, 22, 0.46);
-  background: linear-gradient(180deg, #f59e0b, #fb923c);
+.provider-log-entry.is-severe {
+  --provider-log-entry-tint: rgba(244, 63, 94, 0.08);
+  border-color: rgba(244, 63, 94, 0.2);
+}
+
+.provider-logs-modal--dark .provider-log-entry.is-warning {
+  --provider-log-entry-tint: rgba(249, 115, 22, 0.14);
+  border-color: rgba(249, 115, 22, 0.16);
+}
+
+.provider-logs-modal--dark .provider-log-entry.is-severe {
+  --provider-log-entry-tint: rgba(244, 63, 94, 0.15);
+  border-color: rgba(244, 63, 94, 0.18);
 }
 
 .provider-log-entry__header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
 }
@@ -1719,10 +1788,10 @@ watch(
 .provider-log-entry__tags {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
+  margin: 10px 0 8px;
 }
 
-.provider-log-entry__status,
 .provider-log-entry__tag {
   display: inline-flex;
   align-items: center;
@@ -1734,24 +1803,25 @@ watch(
   line-height: 1;
 }
 
-.provider-log-entry.is-warning .provider-log-entry__status {
-  color: #fdba74;
-  background: rgba(249, 115, 22, 0.12);
-  border: 1px solid rgba(249, 115, 22, 0.28);
-  box-shadow: 0 0 12px rgba(249, 115, 22, 0.1);
-}
-
-.provider-log-entry.is-severe .provider-log-entry__status {
-  color: #fda4af;
-  background: rgba(244, 63, 94, 0.12);
-  border: 1px solid rgba(244, 63, 94, 0.26);
-  box-shadow: 0 0 12px rgba(244, 63, 94, 0.1);
-}
-
 .provider-log-entry__tag {
   color: var(--provider-log-card-tag-text);
   background: var(--provider-log-card-tag-bg);
   border: 1px solid var(--provider-log-card-tag-border);
+}
+
+.provider-log-entry__tag--unread {
+  gap: 5px;
+  color: var(--provider-log-source-text);
+  background: rgba(59, 130, 246, 0.1);
+  border-color: rgba(59, 130, 246, 0.2);
+}
+
+.provider-log-entry__tag--unread::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: currentColor;
 }
 
 .provider-log-entry__tag--semantic {
@@ -1774,10 +1844,6 @@ watch(
 .provider-log-entry__time-icon {
   width: 13px;
   height: 13px;
-}
-
-.provider-log-entry__headline-row {
-  margin: 12px 0 8px;
 }
 
 .provider-log-entry__headline {
@@ -1810,8 +1876,8 @@ watch(
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
-  margin-bottom: 12px;
-  font-size: 13px;
+  margin-bottom: 14px;
+  font-size: 12px;
   color: var(--provider-log-meta-text);
 }
 
@@ -1843,23 +1909,6 @@ watch(
   background: var(--provider-log-terminal-bg);
 }
 
-.provider-log-terminal__chrome {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  height: 22px;
-  padding: 0 12px;
-  background: var(--provider-log-terminal-toolbar-bg);
-  border-bottom: 1px solid var(--provider-log-terminal-toolbar-border);
-}
-
-.provider-log-terminal__chrome span {
-  width: 6px;
-  height: 6px;
-  border-radius: 999px;
-  background: var(--provider-log-terminal-muted);
-}
-
 .provider-log-terminal__body-wrap {
   padding: 0;
 }
@@ -1869,7 +1918,11 @@ watch(
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 12px 14px 0;
+  min-height: 40px;
+  padding: 8px 10px 8px 14px;
+  border-bottom: 1px solid var(--provider-log-terminal-toolbar-border);
+  background: var(--provider-log-terminal-toolbar-bg);
+  box-sizing: border-box;
 }
 
 .provider-log-terminal__label {
@@ -1883,6 +1936,7 @@ watch(
 .provider-log-terminal__badges {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   justify-content: flex-end;
   gap: 8px;
 }
@@ -1927,7 +1981,7 @@ watch(
 
 .provider-log-terminal__body {
   margin: 0;
-  padding: 14px 14px 16px;
+  padding: 12px 14px 14px;
   max-height: 280px;
   overflow: auto;
   font-size: 12px;
@@ -1976,89 +2030,130 @@ watch(
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 10px;
-  margin-top: 14px;
+  margin-top: 12px;
 }
 
 .provider-log-entry__copy {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  min-height: 34px;
-  padding: 0 12px;
-  border-radius: 10px;
-  border: 1px solid var(--provider-log-copy-border);
-  background: var(--provider-log-copy-bg);
-  color: var(--provider-log-copy-text);
-  font-size: 12px;
+  gap: 5px;
+  min-height: 26px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(226, 232, 240, 0.86);
+  font-size: 11px;
   font-weight: 600;
   cursor: pointer;
   transition:
-    transform 0.18s ease,
     border-color 0.18s ease,
     background 0.18s ease,
-    color 0.18s ease,
-    box-shadow 0.18s ease;
+    color 0.18s ease;
 }
 
 .provider-log-entry__copy-icon {
-  width: 14px;
-  height: 14px;
+  width: 13px;
+  height: 13px;
 }
 
-.provider-log-entry__copy:hover:not(:disabled) {
-  transform: translateY(-1px);
-  border-color: var(--provider-log-copy-border-hover);
-  background: var(--provider-log-copy-bg-hover);
-  box-shadow: 0 10px 18px var(--provider-log-copy-glow);
+.provider-log-entry__copy:hover {
+  border-color: rgba(249, 115, 22, 0.3);
+  background: rgba(249, 115, 22, 0.14);
+  color: #fed7aa;
 }
 
 .provider-log-entry__copy.is-copied {
-  color: #22c55e;
-  border-color: rgba(34, 197, 94, 0.26);
-  background: rgba(34, 197, 94, 0.1);
-}
-
-.provider-log-entry__copy.is-disabled,
-.provider-log-entry__copy:disabled {
-  cursor: not-allowed;
-  opacity: 0.42;
-  transform: none;
-  box-shadow: none;
+  color: #bbf7d0;
+  border-color: rgba(34, 197, 94, 0.28);
+  background: rgba(34, 197, 94, 0.14);
 }
 
 .provider-logs-actions {
   display: flex;
-  justify-content: center;
-  padding: 4px 0 0;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 4px 0 2px;
+}
+
+.provider-logs-actions__error {
+  font-size: 12px;
+  color: #e11d48;
+}
+
+.provider-logs-modal--dark .provider-logs-actions__error {
+  color: #fda4af;
+}
+
+.provider-logs-actions__end {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--provider-log-meta-text);
+}
+
+.provider-logs-actions__end::before,
+.provider-logs-actions__end::after {
+  content: '';
+  width: 40px;
+  height: 1px;
+  background: var(--provider-log-pill-border);
 }
 
 .provider-logs-load-more {
-  min-width: 160px;
-  min-height: 40px;
-  padding: 0 18px;
-  border: none;
-  border-radius: 12px;
-  font-size: 13px;
-  font-weight: 700;
-  color: #eef2ff;
-  background: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%);
-  box-shadow: 0 14px 28px rgba(79, 70, 229, 0.28);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 148px;
+  min-height: 34px;
+  padding: 0 16px;
+  border-radius: 10px;
+  border: 1px solid var(--provider-log-pill-border);
+  background: var(--provider-log-pill-bg);
+  color: var(--provider-log-pill-text);
+  font-size: 12px;
+  font-weight: 600;
   cursor: pointer;
   transition:
-    transform 0.2s ease,
-    box-shadow 0.2s ease,
-    opacity 0.2s ease;
+    border-color 0.18s ease,
+    background 0.18s ease,
+    color 0.18s ease;
 }
 
 .provider-logs-load-more:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: 0 18px 32px rgba(79, 70, 229, 0.32);
+  border-color: color-mix(in srgb, var(--provider-log-accent) 36%, transparent);
+  background: color-mix(in srgb, var(--provider-log-accent) 10%, transparent);
+  color: var(--provider-log-heading);
 }
 
 .provider-logs-load-more:disabled {
   cursor: wait;
-  opacity: 0.72;
+}
+
+.provider-logs-load-more__spinner {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  border: 2px solid color-mix(in srgb, var(--provider-log-pill-text) 24%, transparent);
+  border-top-color: var(--provider-log-pill-text);
+  animation: provider-logs-spin 0.8s linear infinite;
+}
+
+@keyframes provider-logs-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .provider-logs-load-more__spinner {
+    animation: none;
+  }
 }
 
 :global(.provider-logs-inline-modal .modal-body::-webkit-scrollbar),
@@ -2090,35 +2185,23 @@ watch(
     flex-direction: column;
   }
 
+  .provider-logs-hero,
   .provider-logs-hero__side,
-  .provider-logs-hero__toolbar,
   .provider-logs-hero__actions {
     justify-content: flex-start;
     align-items: flex-start;
   }
 
-  .provider-log-entry__footer {
-    align-items: stretch;
-  }
-
-  .provider-log-entry__copy {
-    width: 100%;
-  }
 }
 
 .provider-logs-modal--dark .provider-logs-hero {
   background:
+    linear-gradient(135deg, color-mix(in srgb, var(--provider-log-accent) 14%, transparent) 0%, transparent 60%),
     linear-gradient(145deg, rgba(20, 22, 32, 0.96), rgba(15, 16, 24, 0.95));
   border-color: rgba(99, 102, 241, 0.18);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.04),
     0 24px 56px rgba(0, 0, 0, 0.34);
-}
-
-.provider-logs-modal--dark .provider-logs-pill--accent {
-  color: #c7d2fe;
-  background: rgba(99, 102, 241, 0.14);
-  border-color: rgba(129, 140, 248, 0.22);
 }
 
 .provider-logs-modal--dark .provider-logs-scope__button.is-active {
@@ -2144,9 +2227,4 @@ watch(
   border-color: rgba(248, 113, 113, 0.18);
 }
 
-.provider-logs-modal--dark .provider-log-entry__copy.is-copied {
-  color: #bbf7d0;
-  border-color: rgba(34, 197, 94, 0.22);
-  background: rgba(20, 83, 45, 0.18);
-}
 </style>

@@ -1822,35 +1822,44 @@ onUnmounted(() => {
   padding: 16px 18px;
   border-radius: 20px;
   box-shadow: 0 14px 30px rgba(2, 6, 23, 0.16);
+  isolation: isolate;
 }
 
+/* 状态色以淡渐变铺在卡片底部（左上着色、向右下渐隐），位于内容之下 */
 .availability-summary-card::before,
 .availability-provider-card::before {
   content: '';
   position: absolute;
-  inset: 0 auto 0 0;
-  width: 3px;
-  border-radius: 999px;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: linear-gradient(
+    135deg,
+    var(--availability-card-tint, transparent) 0%,
+    color-mix(in srgb, var(--availability-card-tint, transparent) 55%, transparent) 50%,
+    transparent 90%
+  );
+  pointer-events: none;
 }
 
-.availability-summary-card--operational::before,
-.availability-provider-card--operational::before {
-  background: #22c55e;
+.availability-summary-card--operational,
+.availability-provider-card--operational {
+  --availability-card-tint: rgba(34, 197, 94, 0.24);
 }
 
-.availability-summary-card--degraded::before,
-.availability-provider-card--degraded::before {
-  background: #f59e0b;
+.availability-summary-card--degraded,
+.availability-provider-card--degraded {
+  --availability-card-tint: rgba(245, 158, 11, 0.24);
 }
 
-.availability-summary-card--failed::before,
-.availability-provider-card--failed::before {
-  background: #ef4444;
+.availability-summary-card--failed,
+.availability-provider-card--failed {
+  --availability-card-tint: rgba(239, 68, 68, 0.26);
 }
 
-.availability-summary-card--disabled::before,
-.availability-provider-card--disabled::before {
-  background: #64748b;
+.availability-summary-card--disabled,
+.availability-provider-card--disabled {
+  --availability-card-tint: rgba(100, 116, 139, 0.2);
 }
 
 .availability-summary-card--operational {
@@ -1960,15 +1969,6 @@ onUnmounted(() => {
   opacity: 0.76;
 }
 
-.availability-provider-card::before {
-  inset: 0;
-  width: auto;
-  border-radius: inherit;
-  background: linear-gradient(90deg, var(--availability-card-edge) 0 3px, transparent 3px 100%);
-  pointer-events: none;
-  transition: filter 0.2s ease;
-}
-
 .availability-provider-card::after {
   content: '';
   position: absolute;
@@ -1992,10 +1992,6 @@ onUnmounted(() => {
 
 .availability-provider-card:focus-within {
   z-index: 10;
-}
-
-.availability-provider-card:hover::before {
-  filter: drop-shadow(0 0 8px var(--availability-card-glow));
 }
 
 .availability-provider-card:hover::after {
@@ -2763,22 +2759,18 @@ onUnmounted(() => {
 
 .availability-page--light .availability-summary-card--operational {
   border-color: rgba(34, 197, 94, 0.2);
-  box-shadow: 0 14px 28px rgba(15, 23, 42, 0.08), inset 0 -4px 0 rgba(34, 197, 94, 0.68);
 }
 
 .availability-page--light .availability-summary-card--degraded {
   border-color: rgba(245, 158, 11, 0.24);
-  box-shadow: 0 14px 28px rgba(15, 23, 42, 0.08), inset 0 -4px 0 rgba(245, 158, 11, 0.72);
 }
 
 .availability-page--light .availability-summary-card--failed {
   border-color: rgba(239, 68, 68, 0.24);
-  box-shadow: 0 14px 28px rgba(15, 23, 42, 0.08), inset 0 -4px 0 rgba(239, 68, 68, 0.68);
 }
 
 .availability-page--light .availability-summary-card--disabled {
   border-color: rgba(148, 163, 184, 0.36);
-  box-shadow: 0 14px 28px rgba(15, 23, 42, 0.08), inset 0 -4px 0 rgba(148, 163, 184, 0.56);
 }
 
 .availability-page--light .availability-summary-card--operational .availability-summary-card__value {
@@ -2818,6 +2810,26 @@ onUnmounted(() => {
   box-shadow:
     0 18px 40px rgba(15, 23, 42, 0.09),
     0 0 24px var(--availability-card-glow);
+}
+
+.availability-page--light .availability-summary-card--operational,
+.availability-page--light .availability-provider-card--operational {
+  --availability-card-tint: rgba(34, 197, 94, 0.16);
+}
+
+.availability-page--light .availability-summary-card--degraded,
+.availability-page--light .availability-provider-card--degraded {
+  --availability-card-tint: rgba(245, 158, 11, 0.18);
+}
+
+.availability-page--light .availability-summary-card--failed,
+.availability-page--light .availability-provider-card--failed {
+  --availability-card-tint: rgba(239, 68, 68, 0.16);
+}
+
+.availability-page--light .availability-summary-card--disabled,
+.availability-page--light .availability-provider-card--disabled {
+  --availability-card-tint: rgba(100, 116, 139, 0.12);
 }
 
 .availability-page--light .availability-provider-card--operational {

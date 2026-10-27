@@ -1,5 +1,5 @@
 <template>
-  <div class="main-shell">
+  <div class="main-shell main-shell--home">
     <MainToolbar
       :has-update-available="hasUpdateAvailable"
       :update-ready="updateReady"

@@ -408,6 +408,20 @@ onBeforeUnmount(() => {
   padding-right: 13px;
 }
 
+/* 未激活 Tab 悬停时给出轻量底色，强度低于激活态，避免两者混淆 */
+.main-platform-tabs .tab-pill:not(.active):hover {
+  color: var(--main-home-tab-text-active);
+}
+
+.main-platform-tabs .tab-pill:not(.active):hover::before {
+  background: color-mix(in srgb, var(--main-home-action-hover-bg) 60%, transparent);
+}
+
+.main-platform-tabs .tab-pill:focus-visible {
+  outline: 2px solid var(--main-home-relay-focus-ring);
+  outline-offset: 2px;
+}
+
 .tab-pill__icon {
   display: inline-flex;
   align-items: center;
