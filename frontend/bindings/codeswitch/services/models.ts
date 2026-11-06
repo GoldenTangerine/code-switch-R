@@ -5,6 +5,10 @@
 // @ts-ignore: Unused imports
 import { Create as $Create } from "@wailsio/runtime";
 
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
+import * as modelpricing$0 from "../resources/model-pricing/models.js";
+
 export class AppSettings {
     "show_heatmap": boolean;
     "heatmap_granularity": string;
@@ -70,6 +74,7 @@ export class AppSettings {
     "unify_codex_session_history": boolean;
     "unify_codex_migrate_existing": boolean;
     "provider_concurrency_limits": { [_ in string]?: boolean };
+    "session_affinity_enabled": { [_ in string]?: boolean };
     "provider_quota_query_preset_codes"?: { [_ in string]?: string };
     "provider_quota_query_presets"?: { [_ in string]?: ProviderQuotaQueryPresetGroup };
     "provider_quota_auto_disable_enabled": boolean;
@@ -236,6 +241,9 @@ export class AppSettings {
         if (!("provider_concurrency_limits" in $$source)) {
             this["provider_concurrency_limits"] = {};
         }
+        if (!("session_affinity_enabled" in $$source)) {
+            this["session_affinity_enabled"] = {};
+        }
         if (!("provider_quota_auto_disable_enabled" in $$source)) {
             this["provider_quota_auto_disable_enabled"] = false;
         }
@@ -265,8 +273,9 @@ export class AppSettings {
         const $$createField30_0 = $$createType1;
         const $$createField31_0 = $$createType2;
         const $$createField51_0 = $$createType3;
-        const $$createField52_0 = $$createType4;
-        const $$createField53_0 = $$createType6;
+        const $$createField52_0 = $$createType3;
+        const $$createField53_0 = $$createType4;
+        const $$createField54_0 = $$createType6;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("home_provider_tabs" in $$parsedSource) {
             $$parsedSource["home_provider_tabs"] = $$createField9_0($$parsedSource["home_provider_tabs"]);
@@ -286,11 +295,14 @@ export class AppSettings {
         if ("provider_concurrency_limits" in $$parsedSource) {
             $$parsedSource["provider_concurrency_limits"] = $$createField51_0($$parsedSource["provider_concurrency_limits"]);
         }
+        if ("session_affinity_enabled" in $$parsedSource) {
+            $$parsedSource["session_affinity_enabled"] = $$createField52_0($$parsedSource["session_affinity_enabled"]);
+        }
         if ("provider_quota_query_preset_codes" in $$parsedSource) {
-            $$parsedSource["provider_quota_query_preset_codes"] = $$createField52_0($$parsedSource["provider_quota_query_preset_codes"]);
+            $$parsedSource["provider_quota_query_preset_codes"] = $$createField53_0($$parsedSource["provider_quota_query_preset_codes"]);
         }
         if ("provider_quota_query_presets" in $$parsedSource) {
-            $$parsedSource["provider_quota_query_presets"] = $$createField53_0($$parsedSource["provider_quota_query_presets"]);
+            $$parsedSource["provider_quota_query_presets"] = $$createField54_0($$parsedSource["provider_quota_query_presets"]);
         }
         return new AppSettings($$parsedSource as Partial<AppSettings>);
     }
@@ -992,10 +1004,6 @@ export enum CLIPlatform {
      */
     $zero = "",
 
-    PlatformClaude = "claude",
-    PlatformCodex = "codex",
-    PlatformGemini = "gemini",
-
     /**
      * 受管应用 platform 标识（贯穿 SQLite providers_store 表、request_log.platform、前端 tabId）
      * claude / codex / gemini 三个常量已在 cliconfigservice.go 中定义（CLIPlatform 类型），此处仅新增应用
@@ -1006,6 +1014,10 @@ export enum CLIPlatform {
     PlatformOpenClaw = "openclaw",
     PlatformHermes = "hermes",
     PlatformPi = "pi",
+
+    PlatformClaude = "claude",
+    PlatformCodex = "codex",
+    PlatformGemini = "gemini",
 };
 
 /**
@@ -1405,6 +1417,7 @@ export class ClaudeSettingsService {
 }
 
 export class CloudPriceTableConflictPricing {
+    "cloud_pricing"?: modelpricing$0.CloudPricingRules | null;
     "input_cost_per_token": number;
     "output_cost_per_token": number;
     "output_cost_per_reasoning_token": number;
@@ -1444,7 +1457,11 @@ export class CloudPriceTableConflictPricing {
      * Creates a new CloudPriceTableConflictPricing instance from a string or object.
      */
     static createFrom($$source: any = {}): CloudPriceTableConflictPricing {
+        const $$createField0_0 = $$createType18;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("cloud_pricing" in $$parsedSource) {
+            $$parsedSource["cloud_pricing"] = $$createField0_0($$parsedSource["cloud_pricing"]);
+        }
         return new CloudPriceTableConflictPricing($$parsedSource as Partial<CloudPriceTableConflictPricing>);
     }
 }
@@ -1473,7 +1490,7 @@ export class CloudPriceTableSyncConflictResult {
      * Creates a new CloudPriceTableSyncConflictResult instance from a string or object.
      */
     static createFrom($$source: any = {}): CloudPriceTableSyncConflictResult {
-        const $$createField2_0 = $$createType18;
+        const $$createField2_0 = $$createType20;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("conflicts" in $$parsedSource) {
             $$parsedSource["conflicts"] = $$createField2_0($$parsedSource["conflicts"]);
@@ -1509,8 +1526,8 @@ export class CloudPriceTableSyncConflictRow {
      * Creates a new CloudPriceTableSyncConflictRow instance from a string or object.
      */
     static createFrom($$source: any = {}): CloudPriceTableSyncConflictRow {
-        const $$createField4_0 = $$createType19;
-        const $$createField5_0 = $$createType19;
+        const $$createField4_0 = $$createType21;
+        const $$createField5_0 = $$createType21;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("current" in $$parsedSource) {
             $$parsedSource["current"] = $$createField4_0($$parsedSource["current"]);
@@ -1519,6 +1536,44 @@ export class CloudPriceTableSyncConflictRow {
             $$parsedSource["incoming"] = $$createField5_0($$parsedSource["incoming"]);
         }
         return new CloudPriceTableSyncConflictRow($$parsedSource as Partial<CloudPriceTableSyncConflictRow>);
+    }
+}
+
+export class CodenotchSnapshotInfo {
+    "version": number;
+    "mode": string;
+    "consumerSession": string;
+    "revision": number;
+    "error": boolean;
+    "providerScope"?: string;
+
+    /** Creates a new CodenotchSnapshotInfo instance. */
+    constructor($$source: Partial<CodenotchSnapshotInfo> = {}) {
+        if (!("version" in $$source)) {
+            this["version"] = 0;
+        }
+        if (!("mode" in $$source)) {
+            this["mode"] = "";
+        }
+        if (!("consumerSession" in $$source)) {
+            this["consumerSession"] = "";
+        }
+        if (!("revision" in $$source)) {
+            this["revision"] = 0;
+        }
+        if (!("error" in $$source)) {
+            this["error"] = false;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new CodenotchSnapshotInfo instance from a string or object.
+     */
+    static createFrom($$source: any = {}): CodenotchSnapshotInfo {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new CodenotchSnapshotInfo($$parsedSource as Partial<CodenotchSnapshotInfo>);
     }
 }
 
@@ -1661,8 +1716,8 @@ export class CodexOAuthStatus {
      * Creates a new CodexOAuthStatus instance from a string or object.
      */
     static createFrom($$source: any = {}): CodexOAuthStatus {
-        const $$createField3_0 = $$createType21;
-        const $$createField4_0 = $$createType23;
+        const $$createField3_0 = $$createType23;
+        const $$createField4_0 = $$createType25;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("accounts" in $$parsedSource) {
             $$parsedSource["accounts"] = $$createField3_0($$parsedSource["accounts"]);
@@ -1756,7 +1811,7 @@ export class ConfigImportResult {
      * Creates a new ConfigImportResult instance from a string or object.
      */
     static createFrom($$source: any = {}): ConfigImportResult {
-        const $$createField0_0 = $$createType24;
+        const $$createField0_0 = $$createType26;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("status" in $$parsedSource) {
             $$parsedSource["status"] = $$createField0_0($$parsedSource["status"]);
@@ -1970,8 +2025,8 @@ export class CustomCliTool {
      * Creates a new CustomCliTool instance from a string or object.
      */
     static createFrom($$source: any = {}): CustomCliTool {
-        const $$createField2_0 = $$createType26;
-        const $$createField3_0 = $$createType28;
+        const $$createField2_0 = $$createType28;
+        const $$createField3_0 = $$createType30;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("configFiles" in $$parsedSource) {
             $$parsedSource["configFiles"] = $$createField2_0($$parsedSource["configFiles"]);
@@ -2462,30 +2517,30 @@ export class GeminiProvider {
      * Creates a new GeminiProvider instance from a string or object.
      */
     static createFrom($$source: any = {}): GeminiProvider {
-        const $$createField19_0 = $$createType4;
-        const $$createField20_0 = $$createType12;
+        const $$createField20_0 = $$createType4;
         const $$createField21_0 = $$createType12;
-        const $$createField22_0 = $$createType29;
-        const $$createField23_0 = $$createType30;
-        const $$createField25_0 = $$createType32;
+        const $$createField22_0 = $$createType12;
+        const $$createField23_0 = $$createType31;
+        const $$createField24_0 = $$createType32;
+        const $$createField26_0 = $$createType34;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("envConfig" in $$parsedSource) {
-            $$parsedSource["envConfig"] = $$createField19_0($$parsedSource["envConfig"]);
+            $$parsedSource["envConfig"] = $$createField20_0($$parsedSource["envConfig"]);
         }
         if ("settingsConfig" in $$parsedSource) {
-            $$parsedSource["settingsConfig"] = $$createField20_0($$parsedSource["settingsConfig"]);
+            $$parsedSource["settingsConfig"] = $$createField21_0($$parsedSource["settingsConfig"]);
         }
         if ("requestBodyOverrides" in $$parsedSource) {
-            $$parsedSource["requestBodyOverrides"] = $$createField21_0($$parsedSource["requestBodyOverrides"]);
+            $$parsedSource["requestBodyOverrides"] = $$createField22_0($$parsedSource["requestBodyOverrides"]);
         }
         if ("budgetQuotaSettings" in $$parsedSource) {
-            $$parsedSource["budgetQuotaSettings"] = $$createField22_0($$parsedSource["budgetQuotaSettings"]);
+            $$parsedSource["budgetQuotaSettings"] = $$createField23_0($$parsedSource["budgetQuotaSettings"]);
         }
         if ("budgetQuotaUsedAdjustments" in $$parsedSource) {
-            $$parsedSource["budgetQuotaUsedAdjustments"] = $$createField23_0($$parsedSource["budgetQuotaUsedAdjustments"]);
+            $$parsedSource["budgetQuotaUsedAdjustments"] = $$createField24_0($$parsedSource["budgetQuotaUsedAdjustments"]);
         }
         if ("providerQuotaQueryConfig" in $$parsedSource) {
-            $$parsedSource["providerQuotaQueryConfig"] = $$createField25_0($$parsedSource["providerQuotaQueryConfig"]);
+            $$parsedSource["providerQuotaQueryConfig"] = $$createField26_0($$parsedSource["providerQuotaQueryConfig"]);
         }
         return new GeminiProvider($$parsedSource as Partial<GeminiProvider>);
     }
@@ -2644,8 +2699,8 @@ export class HealthCheckHistory {
      * Creates a new HealthCheckHistory instance from a string or object.
      */
     static createFrom($$source: any = {}): HealthCheckHistory {
-        const $$createField3_0 = $$createType34;
-        const $$createField4_0 = $$createType35;
+        const $$createField3_0 = $$createType36;
+        const $$createField4_0 = $$createType37;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("items" in $$parsedSource) {
             $$parsedSource["items"] = $$createField3_0($$parsedSource["items"]);
@@ -3012,6 +3067,55 @@ export enum ListenMode {
     ListenModeCustom = "custom",
 };
 
+export class LogDashboardAggregateV1 {
+    "summary": LogSummary;
+    "stats": LogStats;
+    "model_stats": ModelUsageStat[];
+    "provider_stats": ProviderDailyStat[];
+
+    /** Creates a new LogDashboardAggregateV1 instance. */
+    constructor($$source: Partial<LogDashboardAggregateV1> = {}) {
+        if (!("summary" in $$source)) {
+            this["summary"] = (new LogSummary());
+        }
+        if (!("stats" in $$source)) {
+            this["stats"] = (new LogStats());
+        }
+        if (!("model_stats" in $$source)) {
+            this["model_stats"] = [];
+        }
+        if (!("provider_stats" in $$source)) {
+            this["provider_stats"] = [];
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new LogDashboardAggregateV1 instance from a string or object.
+     */
+    static createFrom($$source: any = {}): LogDashboardAggregateV1 {
+        const $$createField0_0 = $$createType38;
+        const $$createField1_0 = $$createType39;
+        const $$createField2_0 = $$createType41;
+        const $$createField3_0 = $$createType43;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("summary" in $$parsedSource) {
+            $$parsedSource["summary"] = $$createField0_0($$parsedSource["summary"]);
+        }
+        if ("stats" in $$parsedSource) {
+            $$parsedSource["stats"] = $$createField1_0($$parsedSource["stats"]);
+        }
+        if ("model_stats" in $$parsedSource) {
+            $$parsedSource["model_stats"] = $$createField2_0($$parsedSource["model_stats"]);
+        }
+        if ("provider_stats" in $$parsedSource) {
+            $$parsedSource["provider_stats"] = $$createField3_0($$parsedSource["provider_stats"]);
+        }
+        return new LogDashboardAggregateV1($$parsedSource as Partial<LogDashboardAggregateV1>);
+    }
+}
+
 export class LogDatabaseStorageStat {
     "file_bytes": number;
     "wal_bytes": number;
@@ -3135,7 +3239,7 @@ export class LogStats {
      * Creates a new LogStats instance from a string or object.
      */
     static createFrom($$source: any = {}): LogStats {
-        const $$createField11_0 = $$createType37;
+        const $$createField11_0 = $$createType45;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("series" in $$parsedSource) {
             $$parsedSource["series"] = $$createField11_0($$parsedSource["series"]);
@@ -3221,10 +3325,10 @@ export class LogStorageStats {
      * Creates a new LogStorageStats instance from a string or object.
      */
     static createFrom($$source: any = {}): LogStorageStats {
-        const $$createField0_0 = $$createType38;
-        const $$createField1_0 = $$createType39;
-        const $$createField2_0 = $$createType39;
-        const $$createField3_0 = $$createType39;
+        const $$createField0_0 = $$createType46;
+        const $$createField1_0 = $$createType47;
+        const $$createField2_0 = $$createType47;
+        const $$createField3_0 = $$createType47;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("database" in $$parsedSource) {
             $$parsedSource["database"] = $$createField0_0($$parsedSource["database"]);
@@ -3338,7 +3442,7 @@ export class LogSummary {
      * Creates a new LogSummary instance from a string or object.
      */
     static createFrom($$source: any = {}): LogSummary {
-        const $$createField20_0 = $$createType40;
+        const $$createField20_0 = $$createType48;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("activity_points" in $$parsedSource) {
             $$parsedSource["activity_points"] = $$createField20_0($$parsedSource["activity_points"]);
@@ -3403,7 +3507,7 @@ export class MCPParseResult {
      * Creates a new MCPParseResult instance from a string or object.
      */
     static createFrom($$source: any = {}): MCPParseResult {
-        const $$createField0_0 = $$createType42;
+        const $$createField0_0 = $$createType50;
         const $$createField1_0 = $$createType0;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("servers" in $$parsedSource) {
@@ -3553,6 +3657,7 @@ export class MarkRequestLogsReadResult {
 }
 
 export class ModelPricingRow {
+    "cloud_pricing"?: modelpricing$0.CloudPricingRules | null;
     "original_model"?: string;
     "model": string;
     "input_cost_per_token": number;
@@ -3618,7 +3723,11 @@ export class ModelPricingRow {
      * Creates a new ModelPricingRow instance from a string or object.
      */
     static createFrom($$source: any = {}): ModelPricingRow {
+        const $$createField0_0 = $$createType18;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("cloud_pricing" in $$parsedSource) {
+            $$parsedSource["cloud_pricing"] = $$createField0_0($$parsedSource["cloud_pricing"]);
+        }
         return new ModelPricingRow($$parsedSource as Partial<ModelPricingRow>);
     }
 }
@@ -3769,7 +3878,7 @@ export class NetworkSettings {
      * Creates a new NetworkSettings instance from a string or object.
      */
     static createFrom($$source: any = {}): NetworkSettings {
-        const $$createField4_0 = $$createType43;
+        const $$createField4_0 = $$createType51;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("targetCli" in $$parsedSource) {
             $$parsedSource["targetCli"] = $$createField4_0($$parsedSource["targetCli"]);
@@ -3974,9 +4083,9 @@ export class OpenCodeProvider {
     static createFrom($$source: any = {}): OpenCodeProvider {
         const $$createField18_0 = $$createType12;
         const $$createField19_0 = $$createType12;
-        const $$createField20_0 = $$createType29;
-        const $$createField21_0 = $$createType30;
-        const $$createField23_0 = $$createType32;
+        const $$createField20_0 = $$createType31;
+        const $$createField21_0 = $$createType32;
+        const $$createField23_0 = $$createType34;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("settingsConfig" in $$parsedSource) {
             $$parsedSource["settingsConfig"] = $$createField18_0($$parsedSource["settingsConfig"]);
@@ -4277,6 +4386,7 @@ export class Provider {
      * 同名字段会覆盖，不存在的字段会新增；嵌套对象按层级递归写入
      */
     "requestBodyOverrides"?: { [_ in string]?: any };
+    "toolCompatibility"?: ProviderToolCompatibility | null;
 
     /**
      * 优先级分组 - 数字越小优先级越高（1-10，默认 1）
@@ -4295,7 +4405,7 @@ export class Provider {
     "sessionMaxSessions"?: number;
 
     /**
-     * 会话隔离：会话空闲释放时间，单位分钟（默认 5，范围 1-1440）
+     * 会话隔离：会话空闲释放时间，单位分钟（默认 30，范围 1-1440）
      */
     "sessionTTLMinutes"?: number;
 
@@ -4407,58 +4517,62 @@ export class Provider {
      * Creates a new Provider instance from a string or object.
      */
     static createFrom($$source: any = {}): Provider {
-        const $$createField18_0 = $$createType12;
-        const $$createField22_0 = $$createType45;
-        const $$createField23_0 = $$createType3;
-        const $$createField24_0 = $$createType4;
-        const $$createField25_0 = $$createType3;
-        const $$createField26_0 = $$createType4;
-        const $$createField27_0 = $$createType3;
-        const $$createField29_0 = $$createType0;
-        const $$createField30_0 = $$createType12;
-        const $$createField37_0 = $$createType47;
-        const $$createField39_0 = $$createType29;
-        const $$createField40_0 = $$createType30;
+        const $$createField19_0 = $$createType12;
+        const $$createField23_0 = $$createType53;
+        const $$createField24_0 = $$createType3;
+        const $$createField25_0 = $$createType4;
+        const $$createField26_0 = $$createType3;
+        const $$createField27_0 = $$createType4;
+        const $$createField28_0 = $$createType3;
+        const $$createField30_0 = $$createType0;
+        const $$createField31_0 = $$createType12;
+        const $$createField32_0 = $$createType55;
+        const $$createField39_0 = $$createType57;
+        const $$createField41_0 = $$createType31;
         const $$createField42_0 = $$createType32;
+        const $$createField44_0 = $$createType34;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("cliConfig" in $$parsedSource) {
-            $$parsedSource["cliConfig"] = $$createField18_0($$parsedSource["cliConfig"]);
+            $$parsedSource["cliConfig"] = $$createField19_0($$parsedSource["cliConfig"]);
         }
         if ("claudeDesktopModelRoutes" in $$parsedSource) {
-            $$parsedSource["claudeDesktopModelRoutes"] = $$createField22_0($$parsedSource["claudeDesktopModelRoutes"]);
+            $$parsedSource["claudeDesktopModelRoutes"] = $$createField23_0($$parsedSource["claudeDesktopModelRoutes"]);
         }
         if ("supportedModels" in $$parsedSource) {
-            $$parsedSource["supportedModels"] = $$createField23_0($$parsedSource["supportedModels"]);
+            $$parsedSource["supportedModels"] = $$createField24_0($$parsedSource["supportedModels"]);
         }
         if ("modelMapping" in $$parsedSource) {
-            $$parsedSource["modelMapping"] = $$createField24_0($$parsedSource["modelMapping"]);
+            $$parsedSource["modelMapping"] = $$createField25_0($$parsedSource["modelMapping"]);
         }
         if ("modelMappingDisabled" in $$parsedSource) {
-            $$parsedSource["modelMappingDisabled"] = $$createField25_0($$parsedSource["modelMappingDisabled"]);
+            $$parsedSource["modelMappingDisabled"] = $$createField26_0($$parsedSource["modelMappingDisabled"]);
         }
         if ("modelMappingReasoningEfforts" in $$parsedSource) {
-            $$parsedSource["modelMappingReasoningEfforts"] = $$createField26_0($$parsedSource["modelMappingReasoningEfforts"]);
+            $$parsedSource["modelMappingReasoningEfforts"] = $$createField27_0($$parsedSource["modelMappingReasoningEfforts"]);
         }
         if ("modelMappingSupports1M" in $$parsedSource) {
-            $$parsedSource["modelMappingSupports1M"] = $$createField27_0($$parsedSource["modelMappingSupports1M"]);
+            $$parsedSource["modelMappingSupports1M"] = $$createField28_0($$parsedSource["modelMappingSupports1M"]);
         }
         if ("modelPassthroughPatterns" in $$parsedSource) {
-            $$parsedSource["modelPassthroughPatterns"] = $$createField29_0($$parsedSource["modelPassthroughPatterns"]);
+            $$parsedSource["modelPassthroughPatterns"] = $$createField30_0($$parsedSource["modelPassthroughPatterns"]);
         }
         if ("requestBodyOverrides" in $$parsedSource) {
-            $$parsedSource["requestBodyOverrides"] = $$createField30_0($$parsedSource["requestBodyOverrides"]);
+            $$parsedSource["requestBodyOverrides"] = $$createField31_0($$parsedSource["requestBodyOverrides"]);
+        }
+        if ("toolCompatibility" in $$parsedSource) {
+            $$parsedSource["toolCompatibility"] = $$createField32_0($$parsedSource["toolCompatibility"]);
         }
         if ("availabilityConfig" in $$parsedSource) {
-            $$parsedSource["availabilityConfig"] = $$createField37_0($$parsedSource["availabilityConfig"]);
+            $$parsedSource["availabilityConfig"] = $$createField39_0($$parsedSource["availabilityConfig"]);
         }
         if ("budgetQuotaSettings" in $$parsedSource) {
-            $$parsedSource["budgetQuotaSettings"] = $$createField39_0($$parsedSource["budgetQuotaSettings"]);
+            $$parsedSource["budgetQuotaSettings"] = $$createField41_0($$parsedSource["budgetQuotaSettings"]);
         }
         if ("budgetQuotaUsedAdjustments" in $$parsedSource) {
-            $$parsedSource["budgetQuotaUsedAdjustments"] = $$createField40_0($$parsedSource["budgetQuotaUsedAdjustments"]);
+            $$parsedSource["budgetQuotaUsedAdjustments"] = $$createField42_0($$parsedSource["budgetQuotaUsedAdjustments"]);
         }
         if ("providerQuotaQueryConfig" in $$parsedSource) {
-            $$parsedSource["providerQuotaQueryConfig"] = $$createField42_0($$parsedSource["providerQuotaQueryConfig"]);
+            $$parsedSource["providerQuotaQueryConfig"] = $$createField44_0($$parsedSource["providerQuotaQueryConfig"]);
         }
         return new Provider($$parsedSource as Partial<Provider>);
     }
@@ -4480,6 +4594,13 @@ export class ProviderConcurrencyRequestDetail {
     "sessionPreferredProviderId"?: string;
     "sessionPreferredProvider"?: string;
     "sessionProviderRoute"?: string;
+    "sessionNumber"?: number;
+    "rootSessionNumber"?: number;
+    "parentSessionNumber"?: number;
+    "sessionRole"?: string;
+    "sessionIdentitySource"?: string;
+    "sessionSwitchable": boolean;
+    "sessionManualOverride": boolean;
     "parameters": ProviderConcurrencyRequestParameter[];
     "endpoint"?: string;
     "isStream": boolean;
@@ -4503,6 +4624,12 @@ export class ProviderConcurrencyRequestDetail {
         if (!("modelRouteCaptured" in $$source)) {
             this["modelRouteCaptured"] = false;
         }
+        if (!("sessionSwitchable" in $$source)) {
+            this["sessionSwitchable"] = false;
+        }
+        if (!("sessionManualOverride" in $$source)) {
+            this["sessionManualOverride"] = false;
+        }
         if (!("parameters" in $$source)) {
             this["parameters"] = [];
         }
@@ -4523,10 +4650,10 @@ export class ProviderConcurrencyRequestDetail {
      * Creates a new ProviderConcurrencyRequestDetail instance from a string or object.
      */
     static createFrom($$source: any = {}): ProviderConcurrencyRequestDetail {
-        const $$createField15_0 = $$createType49;
+        const $$createField22_0 = $$createType59;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("parameters" in $$parsedSource) {
-            $$parsedSource["parameters"] = $$createField15_0($$parsedSource["parameters"]);
+            $$parsedSource["parameters"] = $$createField22_0($$parsedSource["parameters"]);
         }
         return new ProviderConcurrencyRequestDetail($$parsedSource as Partial<ProviderConcurrencyRequestDetail>);
     }
@@ -4598,7 +4725,7 @@ export class ProviderConcurrencyStatus {
      * Creates a new ProviderConcurrencyStatus instance from a string or object.
      */
     static createFrom($$source: any = {}): ProviderConcurrencyStatus {
-        const $$createField5_0 = $$createType51;
+        const $$createField5_0 = $$createType61;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("requests" in $$parsedSource) {
             $$parsedSource["requests"] = $$createField5_0($$parsedSource["requests"]);
@@ -4800,7 +4927,7 @@ export class ProviderModelPricingDebug {
      */
     static createFrom($$source: any = {}): ProviderModelPricingDebug {
         const $$createField5_0 = $$createType0;
-        const $$createField6_0 = $$createType53;
+        const $$createField6_0 = $$createType63;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("authCandidates" in $$parsedSource) {
             $$parsedSource["authCandidates"] = $$createField5_0($$parsedSource["authCandidates"]);
@@ -4867,6 +4994,12 @@ export class ProviderModelPricingDebugAttempt {
 }
 
 export class ProviderModelPricingItem {
+    "priceFieldsKnown": boolean;
+    "hasInputPrice": boolean;
+    "hasOutputPrice": boolean;
+    "hasCacheCreatePrice": boolean;
+    "hasCacheReadPrice": boolean;
+    "hasCacheCreate1hPrice": boolean;
     "model": string;
     "displayName"?: string;
     "createdAt"?: string;
@@ -4899,6 +5032,24 @@ export class ProviderModelPricingItem {
 
     /** Creates a new ProviderModelPricingItem instance. */
     constructor($$source: Partial<ProviderModelPricingItem> = {}) {
+        if (!("priceFieldsKnown" in $$source)) {
+            this["priceFieldsKnown"] = false;
+        }
+        if (!("hasInputPrice" in $$source)) {
+            this["hasInputPrice"] = false;
+        }
+        if (!("hasOutputPrice" in $$source)) {
+            this["hasOutputPrice"] = false;
+        }
+        if (!("hasCacheCreatePrice" in $$source)) {
+            this["hasCacheCreatePrice"] = false;
+        }
+        if (!("hasCacheReadPrice" in $$source)) {
+            this["hasCacheReadPrice"] = false;
+        }
+        if (!("hasCacheCreate1hPrice" in $$source)) {
+            this["hasCacheCreate1hPrice"] = false;
+        }
         if (!("model" in $$source)) {
             this["model"] = "";
         }
@@ -4919,22 +5070,22 @@ export class ProviderModelPricingItem {
      * Creates a new ProviderModelPricingItem instance from a string or object.
      */
     static createFrom($$source: any = {}): ProviderModelPricingItem {
-        const $$createField5_0 = $$createType12;
-        const $$createField19_0 = $$createType0;
-        const $$createField20_0 = $$createType0;
-        const $$createField24_0 = $$createType55;
+        const $$createField11_0 = $$createType12;
+        const $$createField25_0 = $$createType0;
+        const $$createField26_0 = $$createType0;
+        const $$createField30_0 = $$createType65;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("capabilities" in $$parsedSource) {
-            $$parsedSource["capabilities"] = $$createField5_0($$parsedSource["capabilities"]);
+            $$parsedSource["capabilities"] = $$createField11_0($$parsedSource["capabilities"]);
         }
         if ("enableGroups" in $$parsedSource) {
-            $$parsedSource["enableGroups"] = $$createField19_0($$parsedSource["enableGroups"]);
+            $$parsedSource["enableGroups"] = $$createField25_0($$parsedSource["enableGroups"]);
         }
         if ("supportedEndpointTypes" in $$parsedSource) {
-            $$parsedSource["supportedEndpointTypes"] = $$createField20_0($$parsedSource["supportedEndpointTypes"]);
+            $$parsedSource["supportedEndpointTypes"] = $$createField26_0($$parsedSource["supportedEndpointTypes"]);
         }
         if ("perCallPrice" in $$parsedSource) {
-            $$parsedSource["perCallPrice"] = $$createField24_0($$parsedSource["perCallPrice"]);
+            $$parsedSource["perCallPrice"] = $$createField30_0($$parsedSource["perCallPrice"]);
         }
         return new ProviderModelPricingItem($$parsedSource as Partial<ProviderModelPricingItem>);
     }
@@ -4971,10 +5122,10 @@ export class ProviderModelPricingResponse {
      * Creates a new ProviderModelPricingResponse instance from a string or object.
      */
     static createFrom($$source: any = {}): ProviderModelPricingResponse {
-        const $$createField2_0 = $$createType56;
+        const $$createField2_0 = $$createType66;
         const $$createField3_0 = $$createType4;
-        const $$createField4_0 = $$createType58;
-        const $$createField9_0 = $$createType60;
+        const $$createField4_0 = $$createType68;
+        const $$createField9_0 = $$createType70;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("groupRatio" in $$parsedSource) {
             $$parsedSource["groupRatio"] = $$createField2_0($$parsedSource["groupRatio"]);
@@ -5071,7 +5222,7 @@ export class ProviderQuotaAutomationResult {
      * Creates a new ProviderQuotaAutomationResult instance from a string or object.
      */
     static createFrom($$source: any = {}): ProviderQuotaAutomationResult {
-        const $$createField2_0 = $$createType62;
+        const $$createField2_0 = $$createType72;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("items" in $$parsedSource) {
             $$parsedSource["items"] = $$createField2_0($$parsedSource["items"]);
@@ -5133,6 +5284,7 @@ export class ProviderQuotaQueryItem {
     "label"?: string;
     "used": number;
     "total": number;
+    "unlimited"?: boolean;
     "nextReset"?: string;
     "active": boolean;
     "valueMode"?: string;
@@ -5214,7 +5366,7 @@ export class ProviderQuotaQueryPresetGroup {
      * Creates a new ProviderQuotaQueryPresetGroup instance from a string or object.
      */
     static createFrom($$source: any = {}): ProviderQuotaQueryPresetGroup {
-        const $$createField1_0 = $$createType64;
+        const $$createField1_0 = $$createType74;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("items" in $$parsedSource) {
             $$parsedSource["items"] = $$createField1_0($$parsedSource["items"]);
@@ -5249,7 +5401,7 @@ export class ProviderQuotaQueryResult {
      * Creates a new ProviderQuotaQueryResult instance from a string or object.
      */
     static createFrom($$source: any = {}): ProviderQuotaQueryResult {
-        const $$createField2_0 = $$createType62;
+        const $$createField2_0 = $$createType72;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("items" in $$parsedSource) {
             $$parsedSource["items"] = $$createField2_0($$parsedSource["items"]);
@@ -5277,6 +5429,73 @@ export class ProviderQuotaScriptValidationResult {
     static createFrom($$source: any = {}): ProviderQuotaScriptValidationResult {
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         return new ProviderQuotaScriptValidationResult($$parsedSource as Partial<ProviderQuotaScriptValidationResult>);
+    }
+}
+
+export class ProviderSessionSwitchCandidate {
+    "providerId": string;
+    "providerName": string;
+    "level": number;
+    "current": boolean;
+    "available": boolean;
+    "switchable": boolean;
+    "boundSessions": number;
+    "activeRequests": number;
+    "maxSessions": number;
+    "ttlMinutes": number;
+    "loadRate": number;
+    "requestedModel"?: string;
+    "modelCompatible": boolean;
+    "reason"?: string;
+
+    /** Creates a new ProviderSessionSwitchCandidate instance. */
+    constructor($$source: Partial<ProviderSessionSwitchCandidate> = {}) {
+        if (!("providerId" in $$source)) {
+            this["providerId"] = "";
+        }
+        if (!("providerName" in $$source)) {
+            this["providerName"] = "";
+        }
+        if (!("level" in $$source)) {
+            this["level"] = 0;
+        }
+        if (!("current" in $$source)) {
+            this["current"] = false;
+        }
+        if (!("available" in $$source)) {
+            this["available"] = false;
+        }
+        if (!("switchable" in $$source)) {
+            this["switchable"] = false;
+        }
+        if (!("boundSessions" in $$source)) {
+            this["boundSessions"] = 0;
+        }
+        if (!("activeRequests" in $$source)) {
+            this["activeRequests"] = 0;
+        }
+        if (!("maxSessions" in $$source)) {
+            this["maxSessions"] = 0;
+        }
+        if (!("ttlMinutes" in $$source)) {
+            this["ttlMinutes"] = 0;
+        }
+        if (!("loadRate" in $$source)) {
+            this["loadRate"] = 0;
+        }
+        if (!("modelCompatible" in $$source)) {
+            this["modelCompatible"] = false;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ProviderSessionSwitchCandidate instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ProviderSessionSwitchCandidate {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new ProviderSessionSwitchCandidate($$parsedSource as Partial<ProviderSessionSwitchCandidate>);
     }
 }
 
@@ -5352,9 +5571,9 @@ export class ProviderTimeline {
      * Creates a new ProviderTimeline instance from a string or object.
      */
     static createFrom($$source: any = {}): ProviderTimeline {
-        const $$createField5_0 = $$createType47;
-        const $$createField6_0 = $$createType34;
-        const $$createField7_0 = $$createType35;
+        const $$createField5_0 = $$createType57;
+        const $$createField6_0 = $$createType36;
+        const $$createField7_0 = $$createType37;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("availabilityConfig" in $$parsedSource) {
             $$parsedSource["availabilityConfig"] = $$createField5_0($$parsedSource["availabilityConfig"]);
@@ -5366,6 +5585,34 @@ export class ProviderTimeline {
             $$parsedSource["latest"] = $$createField7_0($$parsedSource["latest"]);
         }
         return new ProviderTimeline($$parsedSource as Partial<ProviderTimeline>);
+    }
+}
+
+export class ProviderToolCompatibility {
+    "disabledNames"?: string[];
+    "disabledTypes"?: string[];
+    "normalizeDynamicTools"?: boolean;
+
+    /** Creates a new ProviderToolCompatibility instance. */
+    constructor($$source: Partial<ProviderToolCompatibility> = {}) {
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ProviderToolCompatibility instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ProviderToolCompatibility {
+        const $$createField0_0 = $$createType0;
+        const $$createField1_0 = $$createType0;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("disabledNames" in $$parsedSource) {
+            $$parsedSource["disabledNames"] = $$createField0_0($$parsedSource["disabledNames"]);
+        }
+        if ("disabledTypes" in $$parsedSource) {
+            $$parsedSource["disabledTypes"] = $$createField1_0($$parsedSource["disabledTypes"]);
+        }
+        return new ProviderToolCompatibility($$parsedSource as Partial<ProviderToolCompatibility>);
     }
 }
 
@@ -5446,6 +5693,7 @@ export class ProxyInjection {
 }
 
 export class ReqeustLog {
+    "pricing_snapshot"?: modelpricing$0.PricingSnapshot | null;
     "id": number;
 
     /**
@@ -5462,6 +5710,7 @@ export class ReqeustLog {
     "session_preferred_provider_id"?: string;
     "session_preferred_provider"?: string;
     "session_provider_route"?: string;
+    "session_identity_source"?: string;
     "response_model"?: string;
     "reasoning_effort"?: string;
     "reasoning_effort_source"?: string;
@@ -5699,7 +5948,11 @@ export class ReqeustLog {
      * Creates a new ReqeustLog instance from a string or object.
      */
     static createFrom($$source: any = {}): ReqeustLog {
+        const $$createField0_0 = $$createType76;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("pricing_snapshot" in $$parsedSource) {
+            $$parsedSource["pricing_snapshot"] = $$createField0_0($$parsedSource["pricing_snapshot"]);
+        }
         return new ReqeustLog($$parsedSource as Partial<ReqeustLog>);
     }
 }
@@ -5732,7 +5985,7 @@ export class RequestLogPageResult {
      * Creates a new RequestLogPageResult instance from a string or object.
      */
     static createFrom($$source: any = {}): RequestLogPageResult {
-        const $$createField0_0 = $$createType66;
+        const $$createField0_0 = $$createType78;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("items" in $$parsedSource) {
             $$parsedSource["items"] = $$createField0_0($$parsedSource["items"]);
@@ -5821,6 +6074,43 @@ export class RetryConfig {
     }
 }
 
+export class SessionSwitchResult {
+    "platform": string;
+    "sessionNumber": number;
+    "providerId": string;
+    "providerName": string;
+    "affectedSessionCount": number;
+
+    /** Creates a new SessionSwitchResult instance. */
+    constructor($$source: Partial<SessionSwitchResult> = {}) {
+        if (!("platform" in $$source)) {
+            this["platform"] = "";
+        }
+        if (!("sessionNumber" in $$source)) {
+            this["sessionNumber"] = 0;
+        }
+        if (!("providerId" in $$source)) {
+            this["providerId"] = "";
+        }
+        if (!("providerName" in $$source)) {
+            this["providerName"] = "";
+        }
+        if (!("affectedSessionCount" in $$source)) {
+            this["affectedSessionCount"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new SessionSwitchResult instance from a string or object.
+     */
+    static createFrom($$source: any = {}): SessionSwitchResult {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new SessionSwitchResult($$parsedSource as Partial<SessionSwitchResult>);
+    }
+}
+
 export class SessionSyncResult {
     "imported": number;
     "skipped": number;
@@ -5857,7 +6147,7 @@ export class SessionSyncResult {
      * Creates a new SessionSyncResult instance from a string or object.
      */
     static createFrom($$source: any = {}): SessionSyncResult {
-        const $$createField4_0 = $$createType68;
+        const $$createField4_0 = $$createType80;
         const $$createField5_0 = $$createType0;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("sources" in $$parsedSource) {
@@ -6030,6 +6320,338 @@ export class TargetCli {
     static createFrom($$source: any = {}): TargetCli {
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         return new TargetCli($$parsedSource as Partial<TargetCli>);
+    }
+}
+
+export class TrayDefaultProvider {
+    "providerId": string;
+    "providerName": string;
+
+    /** Creates a new TrayDefaultProvider instance. */
+    constructor($$source: Partial<TrayDefaultProvider> = {}) {
+        if (!("providerId" in $$source)) {
+            this["providerId"] = "";
+        }
+        if (!("providerName" in $$source)) {
+            this["providerName"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new TrayDefaultProvider instance from a string or object.
+     */
+    static createFrom($$source: any = {}): TrayDefaultProvider {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new TrayDefaultProvider($$parsedSource as Partial<TrayDefaultProvider>);
+    }
+}
+
+export class TrayProviderActivityStatus {
+    "platform": string;
+    "providerId": string;
+    "providerName": string;
+    "activeRequests": number;
+
+    /** Creates a new TrayProviderActivityStatus instance. */
+    constructor($$source: Partial<TrayProviderActivityStatus> = {}) {
+        if (!("platform" in $$source)) {
+            this["platform"] = "";
+        }
+        if (!("providerId" in $$source)) {
+            this["providerId"] = "";
+        }
+        if (!("providerName" in $$source)) {
+            this["providerName"] = "";
+        }
+        if (!("activeRequests" in $$source)) {
+            this["activeRequests"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new TrayProviderActivityStatus instance from a string or object.
+     */
+    static createFrom($$source: any = {}): TrayProviderActivityStatus {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new TrayProviderActivityStatus($$parsedSource as Partial<TrayProviderActivityStatus>);
+    }
+}
+
+export class TrayProviderRuntimeState {
+    "statuses": TrayProviderActivityStatus[];
+    "defaultProvider": TrayDefaultProvider | null;
+    "error"?: boolean;
+
+    /** Creates a new TrayProviderRuntimeState instance. */
+    constructor($$source: Partial<TrayProviderRuntimeState> = {}) {
+        if (!("statuses" in $$source)) {
+            this["statuses"] = [];
+        }
+        if (!("defaultProvider" in $$source)) {
+            this["defaultProvider"] = null;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new TrayProviderRuntimeState instance from a string or object.
+     */
+    static createFrom($$source: any = {}): TrayProviderRuntimeState {
+        const $$createField0_0 = $$createType82;
+        const $$createField1_0 = $$createType84;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("statuses" in $$parsedSource) {
+            $$parsedSource["statuses"] = $$createField0_0($$parsedSource["statuses"]);
+        }
+        if ("defaultProvider" in $$parsedSource) {
+            $$parsedSource["defaultProvider"] = $$createField1_0($$parsedSource["defaultProvider"]);
+        }
+        return new TrayProviderRuntimeState($$parsedSource as Partial<TrayProviderRuntimeState>);
+    }
+}
+
+export class TraySessionBinding {
+    "sessionKey": string;
+    "providerId": string;
+    "providerName": string;
+    "icon": string;
+    "sequence": number;
+    "updatedAt": number;
+
+    /** Creates a new TraySessionBinding instance. */
+    constructor($$source: Partial<TraySessionBinding> = {}) {
+        if (!("sessionKey" in $$source)) {
+            this["sessionKey"] = "";
+        }
+        if (!("providerId" in $$source)) {
+            this["providerId"] = "";
+        }
+        if (!("providerName" in $$source)) {
+            this["providerName"] = "";
+        }
+        if (!("icon" in $$source)) {
+            this["icon"] = "";
+        }
+        if (!("sequence" in $$source)) {
+            this["sequence"] = 0;
+        }
+        if (!("updatedAt" in $$source)) {
+            this["updatedAt"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new TraySessionBinding instance from a string or object.
+     */
+    static createFrom($$source: any = {}): TraySessionBinding {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new TraySessionBinding($$parsedSource as Partial<TraySessionBinding>);
+    }
+}
+
+export class TraySnapshot {
+    "codenotch"?: CodenotchSnapshotInfo | null;
+    "version": number;
+    "session": string;
+    "sequence": number;
+    "heartbeatAt": number;
+    "platforms": TraySnapshotPlatform[];
+
+    /** Creates a new TraySnapshot instance. */
+    constructor($$source: Partial<TraySnapshot> = {}) {
+        if (!("version" in $$source)) {
+            this["version"] = 0;
+        }
+        if (!("session" in $$source)) {
+            this["session"] = "";
+        }
+        if (!("sequence" in $$source)) {
+            this["sequence"] = 0;
+        }
+        if (!("heartbeatAt" in $$source)) {
+            this["heartbeatAt"] = 0;
+        }
+        if (!("platforms" in $$source)) {
+            this["platforms"] = [];
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new TraySnapshot instance from a string or object.
+     */
+    static createFrom($$source: any = {}): TraySnapshot {
+        const $$createField0_0 = $$createType86;
+        const $$createField5_0 = $$createType88;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("codenotch" in $$parsedSource) {
+            $$parsedSource["codenotch"] = $$createField0_0($$parsedSource["codenotch"]);
+        }
+        if ("platforms" in $$parsedSource) {
+            $$parsedSource["platforms"] = $$createField5_0($$parsedSource["platforms"]);
+        }
+        return new TraySnapshot($$parsedSource as Partial<TraySnapshot>);
+    }
+}
+
+export class TraySnapshotPlatform {
+    "sessionBindings"?: TraySessionBinding[];
+    "platform": string;
+    "name": string;
+    "icon": string;
+    "error": boolean;
+    "providers": TraySnapshotProvider[];
+
+    /** Creates a new TraySnapshotPlatform instance. */
+    constructor($$source: Partial<TraySnapshotPlatform> = {}) {
+        if (!("platform" in $$source)) {
+            this["platform"] = "";
+        }
+        if (!("name" in $$source)) {
+            this["name"] = "";
+        }
+        if (!("icon" in $$source)) {
+            this["icon"] = "";
+        }
+        if (!("error" in $$source)) {
+            this["error"] = false;
+        }
+        if (!("providers" in $$source)) {
+            this["providers"] = [];
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new TraySnapshotPlatform instance from a string or object.
+     */
+    static createFrom($$source: any = {}): TraySnapshotPlatform {
+        const $$createField0_0 = $$createType90;
+        const $$createField5_0 = $$createType92;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("sessionBindings" in $$parsedSource) {
+            $$parsedSource["sessionBindings"] = $$createField0_0($$parsedSource["sessionBindings"]);
+        }
+        if ("providers" in $$parsedSource) {
+            $$parsedSource["providers"] = $$createField5_0($$parsedSource["providers"]);
+        }
+        return new TraySnapshotPlatform($$parsedSource as Partial<TraySnapshotPlatform>);
+    }
+}
+
+export class TraySnapshotProvider {
+    "providerId": string;
+    "providerName": string;
+    "icon": string;
+    "activeRequests": number;
+    "status": string;
+    "quotaState"?: string;
+    "quotaAutoDisabled"?: boolean;
+    "loading": boolean;
+    "updatedAt": number;
+    "quotas": TraySnapshotQuota[];
+    "stats": ProviderDailyStat | null;
+
+    /** Creates a new TraySnapshotProvider instance. */
+    constructor($$source: Partial<TraySnapshotProvider> = {}) {
+        if (!("providerId" in $$source)) {
+            this["providerId"] = "";
+        }
+        if (!("providerName" in $$source)) {
+            this["providerName"] = "";
+        }
+        if (!("icon" in $$source)) {
+            this["icon"] = "";
+        }
+        if (!("activeRequests" in $$source)) {
+            this["activeRequests"] = 0;
+        }
+        if (!("status" in $$source)) {
+            this["status"] = "";
+        }
+        if (!("loading" in $$source)) {
+            this["loading"] = false;
+        }
+        if (!("updatedAt" in $$source)) {
+            this["updatedAt"] = 0;
+        }
+        if (!("quotas" in $$source)) {
+            this["quotas"] = [];
+        }
+        if (!("stats" in $$source)) {
+            this["stats"] = null;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new TraySnapshotProvider instance from a string or object.
+     */
+    static createFrom($$source: any = {}): TraySnapshotProvider {
+        const $$createField9_0 = $$createType94;
+        const $$createField10_0 = $$createType95;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("quotas" in $$parsedSource) {
+            $$parsedSource["quotas"] = $$createField9_0($$parsedSource["quotas"]);
+        }
+        if ("stats" in $$parsedSource) {
+            $$parsedSource["stats"] = $$createField10_0($$parsedSource["stats"]);
+        }
+        return new TraySnapshotProvider($$parsedSource as Partial<TraySnapshotProvider>);
+    }
+}
+
+export class TraySnapshotQuota {
+    "key": string;
+    "label"?: string;
+    "used": number;
+    "total": number;
+    "unlimited"?: boolean;
+    "nextReset"?: string;
+    "active": boolean;
+    "valueMode"?: string;
+    "unit"?: string;
+    "extra"?: string;
+    "invalidMessage"?: string;
+    "displayKind": string;
+
+    /** Creates a new TraySnapshotQuota instance. */
+    constructor($$source: Partial<TraySnapshotQuota> = {}) {
+        if (!("key" in $$source)) {
+            this["key"] = "";
+        }
+        if (!("used" in $$source)) {
+            this["used"] = 0;
+        }
+        if (!("total" in $$source)) {
+            this["total"] = 0;
+        }
+        if (!("active" in $$source)) {
+            this["active"] = false;
+        }
+        if (!("displayKind" in $$source)) {
+            this["displayKind"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new TraySnapshotQuota instance from a string or object.
+     */
+    static createFrom($$source: any = {}): TraySnapshotQuota {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new TraySnapshotQuota($$parsedSource as Partial<TraySnapshotQuota>);
     }
 }
 
@@ -6381,7 +7003,7 @@ export class XaiOAuthStatus {
      * Creates a new XaiOAuthStatus instance from a string or object.
      */
     static createFrom($$source: any = {}): XaiOAuthStatus {
-        const $$createField3_0 = $$createType70;
+        const $$createField3_0 = $$createType97;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("accounts" in $$parsedSource) {
             $$parsedSource["accounts"] = $$createField3_0($$parsedSource["accounts"]);
@@ -6490,57 +7112,84 @@ const $$createType13 = ClaudeAggregatedModel.createFrom;
 const $$createType14 = $Create.Array($$createType13);
 const $$createType15 = ClaudeOfficialPricingPreviewRow.createFrom;
 const $$createType16 = $Create.Array($$createType15);
-const $$createType17 = CloudPriceTableSyncConflictRow.createFrom;
-const $$createType18 = $Create.Array($$createType17);
-const $$createType19 = CloudPriceTableConflictPricing.createFrom;
-const $$createType20 = CodexOAuthAccount.createFrom;
-const $$createType21 = $Create.Array($$createType20);
-const $$createType22 = Provider.createFrom;
-const $$createType23 = $Create.Nullable($$createType22);
-const $$createType24 = ConfigImportStatus.createFrom;
-const $$createType25 = ConfigFile.createFrom;
-const $$createType26 = $Create.Array($$createType25);
-const $$createType27 = ProxyInjection.createFrom;
+const $$createType17 = modelpricing$0.CloudPricingRules.createFrom;
+const $$createType18 = $Create.Nullable($$createType17);
+const $$createType19 = CloudPriceTableSyncConflictRow.createFrom;
+const $$createType20 = $Create.Array($$createType19);
+const $$createType21 = CloudPriceTableConflictPricing.createFrom;
+const $$createType22 = CodexOAuthAccount.createFrom;
+const $$createType23 = $Create.Array($$createType22);
+const $$createType24 = Provider.createFrom;
+const $$createType25 = $Create.Nullable($$createType24);
+const $$createType26 = ConfigImportStatus.createFrom;
+const $$createType27 = ConfigFile.createFrom;
 const $$createType28 = $Create.Array($$createType27);
-const $$createType29 = $Create.Nullable($$createType2);
-const $$createType30 = $Create.Nullable($$createType1);
-const $$createType31 = ProviderQuotaQueryConfig.createFrom;
-const $$createType32 = $Create.Nullable($$createType31);
-const $$createType33 = HealthCheckResult.createFrom;
-const $$createType34 = $Create.Array($$createType33);
-const $$createType35 = $Create.Nullable($$createType33);
-const $$createType36 = LogStatsSeries.createFrom;
-const $$createType37 = $Create.Array($$createType36);
-const $$createType38 = LogDatabaseStorageStat.createFrom;
-const $$createType39 = LogTableStorageStat.createFrom;
-const $$createType40 = $Create.Array($Create.Any);
-const $$createType41 = MCPServer.createFrom;
-const $$createType42 = $Create.Array($$createType41);
-const $$createType43 = TargetCli.createFrom;
-const $$createType44 = ClaudeDesktopModelRoute.createFrom;
+const $$createType29 = ProxyInjection.createFrom;
+const $$createType30 = $Create.Array($$createType29);
+const $$createType31 = $Create.Nullable($$createType2);
+const $$createType32 = $Create.Nullable($$createType1);
+const $$createType33 = ProviderQuotaQueryConfig.createFrom;
+const $$createType34 = $Create.Nullable($$createType33);
+const $$createType35 = HealthCheckResult.createFrom;
+const $$createType36 = $Create.Array($$createType35);
+const $$createType37 = $Create.Nullable($$createType35);
+const $$createType38 = LogSummary.createFrom;
+const $$createType39 = LogStats.createFrom;
+const $$createType40 = ModelUsageStat.createFrom;
+const $$createType41 = $Create.Array($$createType40);
+const $$createType42 = ProviderDailyStat.createFrom;
+const $$createType43 = $Create.Array($$createType42);
+const $$createType44 = LogStatsSeries.createFrom;
 const $$createType45 = $Create.Array($$createType44);
-const $$createType46 = AvailabilityConfig.createFrom;
-const $$createType47 = $Create.Nullable($$createType46);
-const $$createType48 = ProviderConcurrencyRequestParameter.createFrom;
-const $$createType49 = $Create.Array($$createType48);
-const $$createType50 = ProviderConcurrencyRequestDetail.createFrom;
-const $$createType51 = $Create.Array($$createType50);
-const $$createType52 = ProviderModelPricingDebugAttempt.createFrom;
+const $$createType46 = LogDatabaseStorageStat.createFrom;
+const $$createType47 = LogTableStorageStat.createFrom;
+const $$createType48 = $Create.Array($Create.Any);
+const $$createType49 = MCPServer.createFrom;
+const $$createType50 = $Create.Array($$createType49);
+const $$createType51 = TargetCli.createFrom;
+const $$createType52 = ClaudeDesktopModelRoute.createFrom;
 const $$createType53 = $Create.Array($$createType52);
-const $$createType54 = ProviderModelPerCallPrice.createFrom;
+const $$createType54 = ProviderToolCompatibility.createFrom;
 const $$createType55 = $Create.Nullable($$createType54);
-const $$createType56 = $Create.Map($Create.Any, $Create.Any);
-const $$createType57 = ProviderModelPricingItem.createFrom;
-const $$createType58 = $Create.Array($$createType57);
-const $$createType59 = ProviderModelPricingDebug.createFrom;
-const $$createType60 = $Create.Nullable($$createType59);
-const $$createType61 = ProviderQuotaQueryItem.createFrom;
-const $$createType62 = $Create.Array($$createType61);
-const $$createType63 = ProviderQuotaQueryPresetEntry.createFrom;
-const $$createType64 = $Create.Array($$createType63);
-const $$createType65 = ReqeustLog.createFrom;
-const $$createType66 = $Create.Array($$createType65);
-const $$createType67 = SessionSyncSourceResult.createFrom;
+const $$createType56 = AvailabilityConfig.createFrom;
+const $$createType57 = $Create.Nullable($$createType56);
+const $$createType58 = ProviderConcurrencyRequestParameter.createFrom;
+const $$createType59 = $Create.Array($$createType58);
+const $$createType60 = ProviderConcurrencyRequestDetail.createFrom;
+const $$createType61 = $Create.Array($$createType60);
+const $$createType62 = ProviderModelPricingDebugAttempt.createFrom;
+const $$createType63 = $Create.Array($$createType62);
+const $$createType64 = ProviderModelPerCallPrice.createFrom;
+const $$createType65 = $Create.Nullable($$createType64);
+const $$createType66 = $Create.Map($Create.Any, $Create.Any);
+const $$createType67 = ProviderModelPricingItem.createFrom;
 const $$createType68 = $Create.Array($$createType67);
-const $$createType69 = XaiOAuthAccount.createFrom;
-const $$createType70 = $Create.Array($$createType69);
+const $$createType69 = ProviderModelPricingDebug.createFrom;
+const $$createType70 = $Create.Nullable($$createType69);
+const $$createType71 = ProviderQuotaQueryItem.createFrom;
+const $$createType72 = $Create.Array($$createType71);
+const $$createType73 = ProviderQuotaQueryPresetEntry.createFrom;
+const $$createType74 = $Create.Array($$createType73);
+const $$createType75 = modelpricing$0.PricingSnapshot.createFrom;
+const $$createType76 = $Create.Nullable($$createType75);
+const $$createType77 = ReqeustLog.createFrom;
+const $$createType78 = $Create.Array($$createType77);
+const $$createType79 = SessionSyncSourceResult.createFrom;
+const $$createType80 = $Create.Array($$createType79);
+const $$createType81 = TrayProviderActivityStatus.createFrom;
+const $$createType82 = $Create.Array($$createType81);
+const $$createType83 = TrayDefaultProvider.createFrom;
+const $$createType84 = $Create.Nullable($$createType83);
+const $$createType85 = CodenotchSnapshotInfo.createFrom;
+const $$createType86 = $Create.Nullable($$createType85);
+const $$createType87 = TraySnapshotPlatform.createFrom;
+const $$createType88 = $Create.Array($$createType87);
+const $$createType89 = TraySessionBinding.createFrom;
+const $$createType90 = $Create.Array($$createType89);
+const $$createType91 = TraySnapshotProvider.createFrom;
+const $$createType92 = $Create.Array($$createType91);
+const $$createType93 = TraySnapshotQuota.createFrom;
+const $$createType94 = $Create.Array($$createType93);
+const $$createType95 = $Create.Nullable($$createType42);
+const $$createType96 = XaiOAuthAccount.createFrom;
+const $$createType97 = $Create.Array($$createType96);

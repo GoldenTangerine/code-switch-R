@@ -5210,6 +5210,9 @@ func (prs *ProviderRelayService) forwardRequestWithPlan(
 		req = req.SetBody(reqBody)
 
 		resp, err := req.Post(targetURL)
+		if kind == "claude" && resp != nil && resp.RawResponse != nil {
+			prs.sampleClaudePassiveQuota(provider, resp.RawResponse.Header)
+		}
 		if err != nil && requestContext.Err() != nil {
 			return false, fmt.Errorf("%w: %v", errClientAbort, requestContext.Err()), claudeCompatibilityRetry{}
 		}

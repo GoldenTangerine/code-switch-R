@@ -5,6 +5,141 @@
 // @ts-ignore: Unused imports
 import { Create as $Create } from "@wailsio/runtime";
 
+export class CloudPricingRules {
+    "charges": { [_ in string]?: number };
+    "tracks": PricingTrack[];
+
+    /** Creates a new CloudPricingRules instance. */
+    constructor($$source: Partial<CloudPricingRules> = {}) {
+        if (!("charges" in $$source)) {
+            this["charges"] = {};
+        }
+        if (!("tracks" in $$source)) {
+            this["tracks"] = [];
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new CloudPricingRules instance from a string or object.
+     */
+    static createFrom($$source: any = {}): CloudPricingRules {
+        const $$createField0_0 = $$createType0;
+        const $$createField1_0 = $$createType2;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("charges" in $$parsedSource) {
+            $$parsedSource["charges"] = $$createField0_0($$parsedSource["charges"]);
+        }
+        if ("tracks" in $$parsedSource) {
+            $$parsedSource["tracks"] = $$createField1_0($$parsedSource["tracks"]);
+        }
+        return new CloudPricingRules($$parsedSource as Partial<CloudPricingRules>);
+    }
+}
+
+export class PricingSnapshot {
+    "track_label"?: string;
+    "unit_prices": { [_ in string]?: number };
+    "field_sources": { [_ in string]?: string };
+    "complete": boolean;
+
+    /** Creates a new PricingSnapshot instance. */
+    constructor($$source: Partial<PricingSnapshot> = {}) {
+        if (!("unit_prices" in $$source)) {
+            this["unit_prices"] = {};
+        }
+        if (!("field_sources" in $$source)) {
+            this["field_sources"] = {};
+        }
+        if (!("complete" in $$source)) {
+            this["complete"] = false;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new PricingSnapshot instance from a string or object.
+     */
+    static createFrom($$source: any = {}): PricingSnapshot {
+        const $$createField1_0 = $$createType0;
+        const $$createField2_0 = $$createType3;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("unit_prices" in $$parsedSource) {
+            $$parsedSource["unit_prices"] = $$createField1_0($$parsedSource["unit_prices"]);
+        }
+        if ("field_sources" in $$parsedSource) {
+            $$parsedSource["field_sources"] = $$createField2_0($$parsedSource["field_sources"]);
+        }
+        return new PricingSnapshot($$parsedSource as Partial<PricingSnapshot>);
+    }
+}
+
+export class PricingTrack {
+    "label": string;
+    "factor": number;
+    "charge_factors"?: { [_ in string]?: number };
+    "triggers": PricingTrigger[];
+
+    /** Creates a new PricingTrack instance. */
+    constructor($$source: Partial<PricingTrack> = {}) {
+        if (!("label" in $$source)) {
+            this["label"] = "";
+        }
+        if (!("factor" in $$source)) {
+            this["factor"] = 0;
+        }
+        if (!("triggers" in $$source)) {
+            this["triggers"] = [];
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new PricingTrack instance from a string or object.
+     */
+    static createFrom($$source: any = {}): PricingTrack {
+        const $$createField2_0 = $$createType0;
+        const $$createField3_0 = $$createType5;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("charge_factors" in $$parsedSource) {
+            $$parsedSource["charge_factors"] = $$createField2_0($$parsedSource["charge_factors"]);
+        }
+        if ("triggers" in $$parsedSource) {
+            $$parsedSource["triggers"] = $$createField3_0($$parsedSource["triggers"]);
+        }
+        return new PricingTrack($$parsedSource as Partial<PricingTrack>);
+    }
+}
+
+export class PricingTrigger {
+    "kind": string;
+    "threshold"?: number;
+    "inclusive"?: boolean;
+    "field"?: string;
+    "header"?: string;
+    "pattern"?: string;
+
+    /** Creates a new PricingTrigger instance. */
+    constructor($$source: Partial<PricingTrigger> = {}) {
+        if (!("kind" in $$source)) {
+            this["kind"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new PricingTrigger instance from a string or object.
+     */
+    static createFrom($$source: any = {}): PricingTrigger {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new PricingTrigger($$parsedSource as Partial<PricingTrigger>);
+    }
+}
+
 /**
  * Service 提供模型价格相关的计算能力。
  */
@@ -24,3 +159,11 @@ export class Service {
         return new Service($$parsedSource as Partial<Service>);
     }
 }
+
+// Private type creation functions
+const $$createType0 = $Create.Map($Create.Any, $Create.Any);
+const $$createType1 = PricingTrack.createFrom;
+const $$createType2 = $Create.Array($$createType1);
+const $$createType3 = $Create.Map($Create.Any, $Create.Any);
+const $$createType4 = PricingTrigger.createFrom;
+const $$createType5 = $Create.Array($$createType4);

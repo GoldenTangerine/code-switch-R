@@ -36,6 +36,7 @@ import * as SettingsService from "./settingsservice.js";
 import * as SkillService from "./skillservice.js";
 import * as SpeedTestService from "./speedtestservice.js";
 import * as SuiStore from "./suistore.js";
+import * as TraySnapshotService from "./traysnapshotservice.js";
 import * as UpdateService from "./updateservice.js";
 import * as WebDAVSyncService from "./webdavsyncservice.js";
 import * as XaiOAuthService from "./xaioauthservice.js";
@@ -75,6 +76,7 @@ export {
     SkillService,
     SpeedTestService,
     SuiStore,
+    TraySnapshotService,
     UpdateService,
     WebDAVSyncService,
     XaiOAuthService
@@ -111,6 +113,7 @@ export {
     CloudPriceTableConflictPricing,
     CloudPriceTableSyncConflictResult,
     CloudPriceTableSyncConflictRow,
+    CodenotchSnapshotInfo,
     CodexHistoryRestoreResult,
     CodexOAuthAccount,
     CodexOAuthDeviceCodeResponse,
@@ -143,6 +146,7 @@ export {
     Hotkey,
     LastUsedProvider,
     ListenMode,
+    LogDashboardAggregateV1,
     LogDatabaseStorageStat,
     LogProviderRef,
     LogStats,
@@ -186,7 +190,9 @@ export {
     ProviderQuotaQueryPresetGroup,
     ProviderQuotaQueryResult,
     ProviderQuotaScriptValidationResult,
+    ProviderSessionSwitchCandidate,
     ProviderTimeline,
+    ProviderToolCompatibility,
     ProviderUnreadFailedCountResult,
     ProviderUnreadFailedStat,
     ProxyInjection,
@@ -194,11 +200,20 @@ export {
     RequestLogPageResult,
     RequestLogPayloadDetail,
     RetryConfig,
+    SessionSwitchResult,
     SessionSyncResult,
     SessionSyncSourceResult,
     SiteType,
     Skill,
     TargetCli,
+    TrayDefaultProvider,
+    TrayProviderActivityStatus,
+    TrayProviderRuntimeState,
+    TraySessionBinding,
+    TraySnapshot,
+    TraySnapshotPlatform,
+    TraySnapshotProvider,
+    TraySnapshotQuota,
     UpdateInfo,
     UpdateState,
     WSLDetection,

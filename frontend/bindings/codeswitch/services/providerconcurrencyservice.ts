@@ -9,12 +9,46 @@ import { Call as $Call, CancellablePromise as $CancellablePromise, Create as $Cr
 // @ts-ignore: Unused imports
 import * as $models from "./models.js";
 
+export function ClearSessionAffinity(platform: string): $CancellablePromise<void> {
+    return $Call.ByID(4273963107, platform);
+}
+
 export function GetProviderConcurrencyStatuses(platform: string): $CancellablePromise<$models.ProviderConcurrencyStatus[]> {
     return $Call.ByID(3139415802, platform).then(($result: any) => {
         return $$createType1($result);
     });
 }
 
+export function GetProviderConcurrencyStatusesBatch(platforms: string[]): $CancellablePromise<{ [_ in string]?: $models.ProviderConcurrencyStatus[] }> {
+    return $Call.ByID(1133022886, platforms).then(($result: any) => {
+        return $$createType2($result);
+    });
+}
+
+export function GetSessionSwitchCandidates(platform: string, sessionNumber: number): $CancellablePromise<$models.ProviderSessionSwitchCandidate[]> {
+    return $Call.ByID(3560616378, platform, sessionNumber).then(($result: any) => {
+        return $$createType4($result);
+    });
+}
+
+export function GetTrayProviderRuntimeStatesBatch(platforms: string[]): $CancellablePromise<{ [_ in string]?: $models.TrayProviderRuntimeState }> {
+    return $Call.ByID(1730278955, platforms).then(($result: any) => {
+        return $$createType6($result);
+    });
+}
+
+export function SwitchSessionProvider(platform: string, sessionNumber: number, targetProviderID: string): $CancellablePromise<$models.SessionSwitchResult> {
+    return $Call.ByID(3277967777, platform, sessionNumber, targetProviderID).then(($result: any) => {
+        return $$createType7($result);
+    });
+}
+
 // Private type creation functions
 const $$createType0 = $models.ProviderConcurrencyStatus.createFrom;
 const $$createType1 = $Create.Array($$createType0);
+const $$createType2 = $Create.Map($Create.Any, $$createType1);
+const $$createType3 = $models.ProviderSessionSwitchCandidate.createFrom;
+const $$createType4 = $Create.Array($$createType3);
+const $$createType5 = $models.TrayProviderRuntimeState.createFrom;
+const $$createType6 = $Create.Map($Create.Any, $$createType5);
+const $$createType7 = $models.SessionSwitchResult.createFrom;

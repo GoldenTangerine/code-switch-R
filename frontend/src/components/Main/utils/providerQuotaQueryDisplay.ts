@@ -1,9 +1,19 @@
+/**
+ * @name: 供应商额度展示转换
+ * @Descripttion: 将额度查询结果转换为卡片快照并翻译采样状态。
+ * @version: 1.0.0
+ * @Author: sm
+ * @Date: 2026-11-06 16:35:58
+ * @LastEditTime: 2026-11-06 16:35:58
+ * @FilePath: frontend/src/components/Main/utils/providerQuotaQueryDisplay.ts
+ */
 import type { AutomationCard } from '../../../data/cards'
 import { checkProviderQuota, queryProviderQuota } from '../../../services/providerQuotaQuery'
 import { roundBudgetValue } from '../../../utils/budgetUsage'
 import {
   hasProviderQuotaQueryType,
   normalizeProviderQuotaQueryConfig,
+  localizeProviderQuotaMessage,
   resolveProviderQuotaQueryType,
 } from '../../../utils/providerQuotaQuery'
 import type { TranslateFn } from '../types'
@@ -81,7 +91,7 @@ export async function resolveProviderQuotaQueryDisplay({
         const isActive = item.active !== false && item.isValid !== false
         const normalizedKey = `${item.key}`.trim()
         const defaultLabelKey = providerQuotaLabelKeyMap[normalizedKey]
-        const invalidMessage = `${item.invalidMessage ?? ''}`.trim() || undefined
+        const invalidMessage = localizeProviderQuotaMessage(item.invalidMessage, t) || undefined
         const extra = `${item.extra ?? ''}`.trim() || undefined
         return {
           key: normalizedKey,

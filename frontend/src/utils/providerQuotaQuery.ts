@@ -1,4 +1,13 @@
-export type ProviderQuotaTokenPlanProvider = 'glm' | 'kimi' | 'minimax'
+/**
+ * @name: 供应商额度配置
+ * @Descripttion: 规范化额度查询配置、供应商选项与查询状态文案。
+ * @version: 1.0.0
+ * @Author: sm
+ * @Date: 2026-11-06 16:35:58
+ * @LastEditTime: 2026-11-06 16:35:58
+ * @FilePath: frontend/src/utils/providerQuotaQuery.ts
+ */
+export type ProviderQuotaTokenPlanProvider = 'glm' | 'kimi' | 'minimax' | 'claude_passive'
 
 export type ProviderQuotaTemplateType =
   | 'balance'
@@ -18,6 +27,7 @@ export type ProviderQuotaQueryType =
   | 'token_plan_glm'
   | 'token_plan_kimi'
   | 'token_plan_minimax'
+  | 'token_plan_claude_passive'
 
 export type ProviderQuotaBalanceProvider =
   | 'deepseek'
@@ -56,6 +66,7 @@ export const providerQuotaQueryTypes: ProviderQuotaQueryType[] = [
   'token_plan_glm',
   'token_plan_kimi',
   'token_plan_minimax',
+  'token_plan_claude_passive',
 ]
 
 export const providerQuotaTemplateTypes: ProviderQuotaTemplateType[] = [
@@ -77,6 +88,7 @@ export const providerQuotaQueryTypeLabelKeyMap: Record<ProviderQuotaQueryType, s
   token_plan_glm: 'components.main.form.options.providerQuotaQueryTokenPlanGLM',
   token_plan_kimi: 'components.main.form.options.providerQuotaQueryTokenPlanKimi',
   token_plan_minimax: 'components.main.form.options.providerQuotaQueryTokenPlanMiniMax',
+  token_plan_claude_passive: 'components.main.form.options.providerQuotaQueryTokenPlanClaudePassive',
 }
 
 export const providerQuotaTemplateLabelKeyMap: Record<ProviderQuotaTemplateType, string> = {
@@ -89,6 +101,7 @@ export const providerQuotaTemplateLabelKeyMap: Record<ProviderQuotaTemplateType,
 }
 
 export const providerQuotaTokenPlanProviderLabelKeyMap: Record<ProviderQuotaTokenPlanProvider, string> = {
+  claude_passive: 'components.main.form.options.providerQuotaQueryTokenPlanClaudePassive',
   glm: 'components.main.form.options.providerQuotaQueryTokenPlanGLM',
   kimi: 'components.main.form.options.providerQuotaQueryTokenPlanKimi',
   minimax: 'components.main.form.options.providerQuotaQueryTokenPlanMiniMax',
@@ -313,7 +326,19 @@ const providerQuotaTokenPlanProviderSet = new Set<ProviderQuotaTokenPlanProvider
   'glm',
   'kimi',
   'minimax',
+  'claude_passive',
 ])
+
+export function localizeProviderQuotaMessage(value: unknown, t: (key: string) => string): string {
+  const message = String(value ?? '').trim()
+  if (message === 'claude_passive_pending') {
+    return t('components.main.providers.quotaClaudePassivePending')
+  }
+  if (message === 'claude_passive_stale') {
+    return t('components.main.providers.quotaClaudePassiveStale')
+  }
+  return message
+}
 
 export function normalizeProviderQuotaQueryType(value: unknown): ProviderQuotaQueryType {
   const normalized = String(value ?? '').trim().toLowerCase()
@@ -344,6 +369,8 @@ export function queryTypeToTokenPlanProvider(queryType: unknown): ProviderQuotaT
       return 'kimi'
     case 'token_plan_minimax':
       return 'minimax'
+    case 'token_plan_claude_passive':
+      return 'claude_passive'
     default:
       return undefined
   }
@@ -351,12 +378,14 @@ export function queryTypeToTokenPlanProvider(queryType: unknown): ProviderQuotaT
 
 export function tokenPlanProviderToQueryType(
   provider: unknown,
-): Extract<ProviderQuotaQueryType, 'token_plan_glm' | 'token_plan_kimi' | 'token_plan_minimax'> {
+): Extract<ProviderQuotaQueryType, `token_plan_${string}`> {
   switch (normalizeProviderQuotaTokenPlanProvider(provider)) {
     case 'glm':
       return 'token_plan_glm'
     case 'minimax':
       return 'token_plan_minimax'
+    case 'claude_passive':
+      return 'token_plan_claude_passive'
     case 'kimi':
     default:
       return 'token_plan_kimi'
@@ -379,6 +408,7 @@ export function queryTypeToTemplateType(queryType: unknown): ProviderQuotaTempla
     case 'token_plan_glm':
     case 'token_plan_kimi':
     case 'token_plan_minimax':
+    case 'token_plan_claude_passive':
       return 'token_plan'
     default:
       return undefined

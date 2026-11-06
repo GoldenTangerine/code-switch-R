@@ -1,3 +1,12 @@
+/**
+ * @name: 供应商额度配置测试
+ * @Descripttion: 验证额度配置兼容、保存校验与被动采样状态文案。
+ * @version: 1.0.0
+ * @Author: sm
+ * @Date: 2026-11-06 16:35:58
+ * @LastEditTime: 2026-11-06 16:35:58
+ * @FilePath: frontend/src/utils/providerQuotaQuery.test.ts
+ */
 import { describe, expect, it } from 'vitest'
 import {
   buildProviderQuotaPresetCode,
@@ -5,6 +14,8 @@ import {
   detectProviderQuotaTokenPlanProvider,
   hasProviderQuotaQueryMissingCredentials,
   normalizeProviderQuotaQueryConfig,
+  localizeProviderQuotaMessage,
+  providerQuotaTokenPlanProviderLabelKeyMap,
   providerQuotaTemplateTypes,
   resetProviderQuotaQueryConfigFieldsOnTemplateSwitch,
   resolveProviderQuotaQueryType,
@@ -14,6 +25,42 @@ import {
 } from './providerQuotaQuery'
 
 describe('providerQuotaQuery utils', () => {
+  it('round-trips Claude passive sampling through Token Plan configuration', () => {
+    const config = sanitizeProviderQuotaQueryConfigForSave({
+      enabled: true,
+      templateType: 'token_plan',
+      tokenPlanProvider: 'claude_passive',
+      code: 'hidden-script',
+      apiKey: 'hidden-key',
+      baseUrl: 'https://hidden.example.com',
+    })
+    expect(config).toEqual({
+      enabled: true,
+      templateType: 'token_plan',
+      tokenPlanProvider: 'claude_passive',
+      code: '',
+      timeout: 10,
+      autoQueryInterval: 5,
+    })
+    expect(resolveProviderQuotaQueryType(config)).toBe('token_plan_claude_passive')
+    expect(normalizeProviderQuotaQueryConfig('token_plan_claude_passive')?.tokenPlanProvider).toBe('claude_passive')
+    expect(normalizeProviderQuotaQueryConfig(serializeProviderQuotaQueryConfig(config))?.tokenPlanProvider).toBe('claude_passive')
+    expect(providerQuotaTokenPlanProviderLabelKeyMap.claude_passive).toBe('components.main.form.options.providerQuotaQueryTokenPlanClaudePassive')
+    expect(validateProviderQuotaQueryConfigForSave(config, {
+      fallbackBaseUrl: 'https://example.com',
+      fallbackApiKey: 'sample-key',
+    })).toBeNull()
+    expect(validateProviderQuotaQueryConfigForSave(config)).toBe('missing_provider_credentials')
+  })
+
+  it('localizes pending and stale samples while preserving other quota errors', () => {
+    const t = (key: string) => `translated:${key}`
+    expect(localizeProviderQuotaMessage('claude_passive_pending', t)).toBe('translated:components.main.providers.quotaClaudePassivePending')
+    expect(localizeProviderQuotaMessage('claude_passive_stale', t)).toBe('translated:components.main.providers.quotaClaudePassiveStale')
+    expect(localizeProviderQuotaMessage(' Other error ', t)).toBe('Other error')
+    expect(localizeProviderQuotaMessage(undefined, t)).toBe('')
+  })
+
   it('normalizes legacy token plan type to config object', () => {
     expect(normalizeProviderQuotaQueryConfig('token_plan_glm')).toEqual({
       enabled: true,

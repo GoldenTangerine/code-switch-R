@@ -1,3 +1,12 @@
+/**
+ * @name: 供应商额度状态测试
+ * @Descripttion: 验证额度显示、刷新调度与 Claude 被动样本更新。
+ * @version: 1.0.0
+ * @Author: sm
+ * @Date: 2026-11-06 16:35:58
+ * @LastEditTime: 2026-11-06 16:35:58
+ * @FilePath: frontend/src/components/Main/composables/useProviderQuotas.test.ts
+ */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AutomationCard } from '../../../data/cards'
 import { createDefaultBudgetQuotaSettings } from '../../../utils/budgetUsage'
@@ -91,6 +100,50 @@ describe('useProviderQuotas', () => {
   afterEach(() => {
     vi.useRealTimers()
     vi.restoreAllMocks()
+  })
+
+  it('refreshes passive samples even for idle cards without waiting for the remote cache TTL', async () => {
+    const cards = createCardRecord()
+    const card = createCard(71, { providerQuotaQueryType: 'token_plan_claude_passive' })
+    cards.claude.push(card)
+    vi.mocked(queryProviderQuota).mockResolvedValueOnce({
+      success: true,
+      queryType: 'token_plan_claude_passive',
+      items: [{ key: 'five_hour', used: 10, total: 100, valueMode: 'count', unit: '%' }],
+    }).mockResolvedValueOnce({
+      success: true,
+      queryType: 'token_plan_claude_passive',
+      items: [{ key: 'five_hour', used: 55, total: 100, valueMode: 'count', unit: '%' }],
+    })
+    const quotas = useProviderQuotas({
+      t: (key) => key,
+      getActiveTab: () => 'claude',
+      cards,
+      resolveAutoRefreshRemoteQuotaRefs: () => new Set(),
+    })
+    await quotas.refreshProviderQuotas()
+    expect(quotas.getQuotaDisplay(card)[0]).toMatchObject({ used: 10, total: 100, unit: '%', progressRatio: 0.1 })
+    quotas.startTimers()
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(quotas.getQuotaDisplay(card)[0]).toMatchObject({ used: 55, progressRatio: 0.55 })
+    quotas.stopTimers()
+  })
+
+  it('shows a localized waiting state until a Claude sample arrives', async () => {
+    const cards = createCardRecord()
+    const card = createCard(72, { providerQuotaQueryType: 'token_plan_claude_passive' })
+    cards.claude.push(card)
+    vi.mocked(queryProviderQuota).mockResolvedValue({
+      success: true,
+      queryType: 'token_plan_claude_passive',
+      items: [{ key: 'claude_passive_pending', used: 0, total: 0, active: false, invalidMessage: 'claude_passive_pending' }],
+    })
+    const quotas = useProviderQuotas({ t: (key) => key, getActiveTab: () => 'claude', cards })
+    await quotas.refreshProviderQuotas()
+    expect(quotas.getQuotaDisplay(card)[0]).toMatchObject({
+      isActive: false,
+      invalidMessage: 'components.main.providers.quotaClaudePassivePending',
+    })
   })
 
   it('keeps quota display isolated by tab even when provider refs overlap', async () => {

@@ -33,15 +33,16 @@ type ProviderQuotaTemplateType string
 type ProviderQuotaValueMode string
 
 const (
-	ProviderQuotaQueryTypeNone             ProviderQuotaQueryType = "none"
-	ProviderQuotaQueryTypeBalance          ProviderQuotaQueryType = "balance"
-	ProviderQuotaQueryTypeCustom           ProviderQuotaQueryType = "custom"
-	ProviderQuotaQueryTypeGeneral          ProviderQuotaQueryType = "general"
-	ProviderQuotaQueryTypeNewAPI           ProviderQuotaQueryType = "newapi"
-	ProviderQuotaQueryTypeSub2API          ProviderQuotaQueryType = "sub2api"
-	ProviderQuotaQueryTypeTokenPlanGLM     ProviderQuotaQueryType = "token_plan_glm"
-	ProviderQuotaQueryTypeTokenPlanKimi    ProviderQuotaQueryType = "token_plan_kimi"
-	ProviderQuotaQueryTypeTokenPlanMiniMax ProviderQuotaQueryType = "token_plan_minimax"
+	ProviderQuotaQueryTypeNone                   ProviderQuotaQueryType = "none"
+	ProviderQuotaQueryTypeBalance                ProviderQuotaQueryType = "balance"
+	ProviderQuotaQueryTypeCustom                 ProviderQuotaQueryType = "custom"
+	ProviderQuotaQueryTypeGeneral                ProviderQuotaQueryType = "general"
+	ProviderQuotaQueryTypeNewAPI                 ProviderQuotaQueryType = "newapi"
+	ProviderQuotaQueryTypeSub2API                ProviderQuotaQueryType = "sub2api"
+	ProviderQuotaQueryTypeTokenPlanGLM           ProviderQuotaQueryType = "token_plan_glm"
+	ProviderQuotaQueryTypeTokenPlanKimi          ProviderQuotaQueryType = "token_plan_kimi"
+	ProviderQuotaQueryTypeTokenPlanMiniMax       ProviderQuotaQueryType = "token_plan_minimax"
+	ProviderQuotaQueryTypeTokenPlanClaudePassive ProviderQuotaQueryType = "token_plan_claude_passive"
 )
 
 const (
@@ -100,8 +101,9 @@ type ProviderQuotaScriptValidationResult struct {
 }
 
 type ProviderQuotaQueryService struct {
-	client *http.Client
-	ctx    context.Context
+	client        *http.Client
+	ctx           context.Context
+	claudePassive *claudePassiveQuotaStore
 }
 
 func (s *ProviderQuotaQueryService) requestContext() context.Context {
@@ -130,9 +132,14 @@ type providerQuotaScriptRequestConfig struct {
 }
 
 func NewProviderQuotaQueryService() *ProviderQuotaQueryService {
-	return &ProviderQuotaQueryService{
-		client: &http.Client{Timeout: 10 * time.Second},
+	service := &ProviderQuotaQueryService{
+		client:        &http.Client{Timeout: 10 * time.Second},
+		claudePassive: &claudePassiveQuotaStore{snapshots: make(map[string]claudePassiveQuotaSnapshot)},
 	}
+	if err := service.initDB(); err != nil {
+		fmt.Printf("Claude 被动额度缓存初始化失败: %v\n", err)
+	}
+	return service
 }
 
 func (s *ProviderQuotaQueryService) ValidateScriptPreset(
@@ -212,6 +219,8 @@ func normalizeProviderQuotaQueryType(value string) ProviderQuotaQueryType {
 		return ProviderQuotaQueryTypeTokenPlanKimi
 	case ProviderQuotaQueryTypeTokenPlanMiniMax:
 		return ProviderQuotaQueryTypeTokenPlanMiniMax
+	case ProviderQuotaQueryTypeTokenPlanClaudePassive:
+		return ProviderQuotaQueryTypeTokenPlanClaudePassive
 	default:
 		return ProviderQuotaQueryTypeNone
 	}
@@ -301,7 +310,7 @@ func queryTypeToProviderQuotaTemplateType(queryType ProviderQuotaQueryType) Prov
 		return ProviderQuotaTemplateTypeNewAPI
 	case ProviderQuotaQueryTypeSub2API:
 		return ProviderQuotaTemplateTypeSub2API
-	case ProviderQuotaQueryTypeTokenPlanGLM, ProviderQuotaQueryTypeTokenPlanKimi, ProviderQuotaQueryTypeTokenPlanMiniMax:
+	case ProviderQuotaQueryTypeTokenPlanGLM, ProviderQuotaQueryTypeTokenPlanKimi, ProviderQuotaQueryTypeTokenPlanMiniMax, ProviderQuotaQueryTypeTokenPlanClaudePassive:
 		return ProviderQuotaTemplateTypeTokenPlan
 	default:
 		return ""
@@ -314,6 +323,8 @@ func tokenPlanProviderFromQueryType(queryType ProviderQuotaQueryType) string {
 		return "glm"
 	case ProviderQuotaQueryTypeTokenPlanMiniMax:
 		return "minimax"
+	case ProviderQuotaQueryTypeTokenPlanClaudePassive:
+		return "claude_passive"
 	case ProviderQuotaQueryTypeTokenPlanKimi:
 		fallthrough
 	default:
@@ -433,6 +444,8 @@ func (s *ProviderQuotaQueryService) queryQuotaByType(
 		return s.queryKimiQuota(resolveProviderQuotaQueryTargetBaseURL(queryType, baseURL), apiKey)
 	case ProviderQuotaQueryTypeTokenPlanMiniMax:
 		return s.queryMiniMaxQuota(resolveProviderQuotaQueryTargetBaseURL(queryType, baseURL), apiKey)
+	case ProviderQuotaQueryTypeTokenPlanClaudePassive:
+		return s.queryClaudePassiveQuota(baseURL, apiKey, time.Now())
 	default:
 		return nil, fmt.Errorf("不支持的供应商查询类型：%s", queryType)
 	}

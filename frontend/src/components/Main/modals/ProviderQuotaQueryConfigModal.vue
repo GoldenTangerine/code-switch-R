@@ -1,3 +1,12 @@
+<!--
+@name: 供应商额度查询配置弹窗
+@Descripttion: 配置额度查询模版、Token Plan 供应商与脚本预设。
+@version: 1.0.0
+@Author: sm
+@Date: 2026-11-06 16:35:58
+@LastEditTime: 2026-11-06 16:35:58
+@FilePath: frontend/src/components/Main/modals/ProviderQuotaQueryConfigModal.vue
+-->
 <template>
   <InlineModal
     :open="open"
@@ -85,7 +94,7 @@
           </div>
         </section>
 
-        <section class="provider-quota-query-config-modal__section">
+        <section v-if="!isClaudePassive" class="provider-quota-query-config-modal__section">
           <div class="provider-quota-query-config-modal__section-header">
             <div>
               <p class="provider-quota-query-config-modal__title">
@@ -138,7 +147,9 @@
                 {{ t('components.main.form.labels.providerQuotaQueryTokenPlanProvider') }}
               </p>
               <p class="provider-quota-query-config-modal__hint">
-                {{ t('components.main.form.hints.providerQuotaQueryTemplateTokenPlan') }}
+                {{ t(isClaudePassive
+                  ? 'components.main.form.hints.providerQuotaQueryClaudePassive'
+                  : 'components.main.form.hints.providerQuotaQueryTemplateTokenPlan') }}
               </p>
             </div>
           </div>
@@ -431,6 +442,7 @@ import {
   detectProviderQuotaBalanceProvider,
   detectProviderQuotaTokenPlanProvider,
   normalizeProviderQuotaQueryConfig,
+  localizeProviderQuotaMessage,
   providerQuotaBalanceProviderOptions,
   providerQuotaTemplateLabelKeyMap,
   providerQuotaTemplateTypes,
@@ -505,7 +517,7 @@ const templateOptions = computed(() => providerQuotaTemplateTypes.map((value) =>
   label: t(providerQuotaTemplateLabelKeyMap[value]),
   description: t(templateDescriptionKeyMap[value]),
 })))
-const tokenPlanProviders = computed(() => (['glm', 'kimi', 'minimax'] as ProviderQuotaTokenPlanProvider[]).map((value) => ({
+const tokenPlanProviders = computed(() => (['glm', 'kimi', 'minimax', 'claude_passive'] as ProviderQuotaTokenPlanProvider[]).map((value) => ({
   value,
   label: t(providerQuotaTokenPlanProviderLabelKeyMap[value]),
 })))
@@ -515,6 +527,7 @@ const detectedBalanceProviderOption = computed(() => (
 const selectedTemplate = computed<ProviderQuotaTemplateType>(() => (
   draft.templateType ?? 'general'
 ))
+const isClaudePassive = computed(() => selectedTemplate.value === 'token_plan' && draft.tokenPlanProvider === 'claude_passive')
 const selectedTemplateLabel = computed(() => t(providerQuotaTemplateLabelKeyMap[selectedTemplate.value]))
 const currentPresetGroup = computed<ProviderQuotaQueryPresetGroup>(() => (
   presetGroups.value[selectedTemplate.value] ?? { items: [] }
@@ -728,7 +741,7 @@ function formatTestItemSummary(item: {
   invalidMessage?: string
 }) {
   const label = formatTestItemLabel(item)
-  const invalidMessage = `${item.invalidMessage ?? ''}`.trim()
+  const invalidMessage = localizeProviderQuotaMessage(item.invalidMessage, t)
   const extra = `${item.extra ?? ''}`.trim()
   const summaryParts = [
     item.active === false || item.isValid === false || invalidMessage

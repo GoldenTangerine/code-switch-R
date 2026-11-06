@@ -1,3 +1,12 @@
+/**
+ * @name: 供应商额度状态
+ * @Descripttion: 管理供应商额度刷新、缓存和重置倒计时。
+ * @version: 1.0.0
+ * @Author: sm
+ * @Date: 2026-11-06 16:35:58
+ * @LastEditTime: 2026-11-06 16:35:58
+ * @FilePath: frontend/src/components/Main/composables/useProviderQuotas.ts
+ */
 import { reactive, onUnmounted } from 'vue'
 import type { AutomationCard } from '../../../data/cards'
 import type { LogPlatform } from '../../../services/logs'
@@ -97,6 +106,9 @@ function buildRemoteQuotaCacheIdentity(card: AutomationCard): string {
 }
 
 function resolveRemoteQuotaCacheTTL(card: AutomationCard): number {
+  if (resolveProviderQuotaQueryType(card.providerQuotaQueryConfig ?? card.providerQuotaQueryType, card.providerQuotaQueryType) === 'token_plan_claude_passive') {
+    return 0
+  }
   const normalizedConfig = normalizeProviderQuotaQueryConfig(
     card.providerQuotaQueryConfig,
     card.providerQuotaQueryType,
@@ -309,6 +321,7 @@ export function useProviderQuotas(options: UseProviderQuotasOptions) {
 
         if (
           hasRemoteQuota
+          && resolveProviderQuotaQueryType(card.providerQuotaQueryConfig ?? card.providerQuotaQueryType, card.providerQuotaQueryType) !== 'token_plan_claude_passive'
           && autoRefreshRemoteRefs
           && !forceRemoteRefs.has(ref)
           && !autoRefreshRemoteRefs.has(ref)

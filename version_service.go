@@ -7,7 +7,7 @@
 // @FilePath: version_service.go
 package main
 
-const AppVersion = "v2.11.26"
+const AppVersion = "v2.11.27"
 
 type VersionService struct {
 	version string

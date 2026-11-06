@@ -53,6 +53,12 @@ export function CountProviderUnreadFailedRequestLogs(platform: string, providerI
     });
 }
 
+export function DashboardAggregateRangeV1(platform: string, provider: string, pricingModel: string, sourceMode: string, startAt: string, endAt: string, includeProviderStats: boolean): $CancellablePromise<$models.LogDashboardAggregateV1> {
+    return $Call.ByID(832187575, platform, provider, pricingModel, sourceMode, startAt, endAt, includeProviderStats).then(($result: any) => {
+        return $$createType2($result);
+    });
+}
+
 export function DeleteRequestLogsByDate(day: string): $CancellablePromise<$models.DeleteRequestLogsByDateResult> {
     return $Call.ByID(4129435984, day).then(($result: any) => {
         return $$createType0($result);
@@ -61,115 +67,115 @@ export function DeleteRequestLogsByDate(day: string): $CancellablePromise<$model
 
 export function GetLogStorageStats(): $CancellablePromise<$models.LogStorageStats> {
     return $Call.ByID(4172380032).then(($result: any) => {
-        return $$createType2($result);
+        return $$createType3($result);
     });
 }
 
 export function GetRequestLogPayload(id: number): $CancellablePromise<$models.RequestLogPayloadDetail> {
     return $Call.ByID(2916939591, id).then(($result: any) => {
-        return $$createType3($result);
+        return $$createType4($result);
     });
 }
 
 export function HeatmapStats(days: number): $CancellablePromise<$models.HeatmapStat[]> {
     return $Call.ByID(1056815029, days).then(($result: any) => {
-        return $$createType5($result);
+        return $$createType6($result);
     });
 }
 
 export function ListFailedRequestLogsPageV2(platform: string, provider: string, limit: number, offset: number, startAt: string, endAt: string): $CancellablePromise<$models.RequestLogPageResult> {
     return $Call.ByID(2089216796, platform, provider, limit, offset, startAt, endAt).then(($result: any) => {
-        return $$createType6($result);
+        return $$createType7($result);
     });
 }
 
 export function ListProviderLogStorageStats(): $CancellablePromise<$models.ProviderLogStorageStat[]> {
     return $Call.ByID(3227068711).then(($result: any) => {
-        return $$createType8($result);
+        return $$createType9($result);
     });
 }
 
 export function ListProviderRefs(platform: string): $CancellablePromise<$models.LogProviderRef[]> {
     return $Call.ByID(1745670769, platform).then(($result: any) => {
-        return $$createType10($result);
+        return $$createType11($result);
     });
 }
 
 export function ListProviderRefsV2(platform: string, sourceMode: string): $CancellablePromise<$models.LogProviderRef[]> {
     return $Call.ByID(699838965, platform, sourceMode).then(($result: any) => {
-        return $$createType10($result);
+        return $$createType11($result);
     });
 }
 
 export function ListProviders(platform: string): $CancellablePromise<string[]> {
     return $Call.ByID(790916236, platform).then(($result: any) => {
-        return $$createType11($result);
+        return $$createType12($result);
     });
 }
 
 export function ListRequestLogHeatmapYears(): $CancellablePromise<number[]> {
     return $Call.ByID(2498693249).then(($result: any) => {
-        return $$createType12($result);
+        return $$createType13($result);
     });
 }
 
 export function ListRequestLogHeatmapYearsV2(sourceMode: string): $CancellablePromise<number[]> {
     return $Call.ByID(3454979525, sourceMode).then(($result: any) => {
-        return $$createType12($result);
+        return $$createType13($result);
     });
 }
 
 export function ListRequestLogs(platform: string, provider: string, limit: number): $CancellablePromise<$models.ReqeustLog[]> {
     return $Call.ByID(1199056012, platform, provider, limit).then(($result: any) => {
-        return $$createType14($result);
+        return $$createType15($result);
     });
 }
 
 export function ListRequestLogsPageV2(platform: string, provider: string, pricingModel: string, limit: number, offset: number, startAt: string, endAt: string): $CancellablePromise<$models.RequestLogPageResult> {
     return $Call.ByID(1726496867, platform, provider, pricingModel, limit, offset, startAt, endAt).then(($result: any) => {
-        return $$createType6($result);
+        return $$createType7($result);
     });
 }
 
 export function ListRequestLogsPageV3(platform: string, provider: string, pricingModel: string, sourceMode: string, limit: number, offset: number, startAt: string, endAt: string): $CancellablePromise<$models.RequestLogPageResult> {
     return $Call.ByID(1709719248, platform, provider, pricingModel, sourceMode, limit, offset, startAt, endAt).then(($result: any) => {
-        return $$createType6($result);
+        return $$createType7($result);
     });
 }
 
 export function ListRequestLogsV2(platform: string, provider: string, limit: number, startAt: string, endAt: string): $CancellablePromise<$models.ReqeustLog[]> {
     return $Call.ByID(629859604, platform, provider, limit, startAt, endAt).then(($result: any) => {
-        return $$createType14($result);
+        return $$createType15($result);
     });
 }
 
 export function ListUnreadFailedRequestLogsPageV2(platform: string, provider: string, limit: number, offset: number, startAt: string, endAt: string): $CancellablePromise<$models.RequestLogPageResult> {
     return $Call.ByID(1896556653, platform, provider, limit, offset, startAt, endAt).then(($result: any) => {
-        return $$createType6($result);
+        return $$createType7($result);
     });
 }
 
 export function MarkProviderFailedRequestLogsRead(platform: string, providerID: string, provider: string): $CancellablePromise<$models.MarkRequestLogsReadResult> {
     return $Call.ByID(2721783239, platform, providerID, provider).then(($result: any) => {
-        return $$createType15($result);
+        return $$createType16($result);
     });
 }
 
 export function ModelStatsRangeV2(platform: string, provider: string, pricingModel: string, startAt: string, endAt: string): $CancellablePromise<$models.ModelUsageStat[]> {
     return $Call.ByID(1109920951, platform, provider, pricingModel, startAt, endAt).then(($result: any) => {
-        return $$createType17($result);
+        return $$createType18($result);
     });
 }
 
 export function ModelStatsRangeV3(platform: string, provider: string, pricingModel: string, sourceMode: string, startAt: string, endAt: string): $CancellablePromise<$models.ModelUsageStat[]> {
     return $Call.ByID(1093143332, platform, provider, pricingModel, sourceMode, startAt, endAt).then(($result: any) => {
-        return $$createType17($result);
+        return $$createType18($result);
     });
 }
 
 export function ProviderDailyStats(platform: string): $CancellablePromise<$models.ProviderDailyStat[]> {
     return $Call.ByID(974013659, platform).then(($result: any) => {
-        return $$createType19($result);
+        return $$createType20($result);
     });
 }
 
@@ -178,49 +184,49 @@ export function ProviderDailyStats(platform: string): $CancellablePromise<$model
  */
 export function ProviderPerformanceTrend15m(platform: string, provider: string, startAt: string, endAt: string): $CancellablePromise<$models.ProviderPerformanceTrendPoint[]> {
     return $Call.ByID(3929088423, platform, provider, startAt, endAt).then(($result: any) => {
-        return $$createType21($result);
+        return $$createType22($result);
     });
 }
 
 export function ProviderStatsRangeV2(platform: string, provider: string, pricingModel: string, startAt: string, endAt: string): $CancellablePromise<$models.ProviderDailyStat[]> {
     return $Call.ByID(967888103, platform, provider, pricingModel, startAt, endAt).then(($result: any) => {
-        return $$createType19($result);
+        return $$createType20($result);
     });
 }
 
 export function ProviderStatsRangeV3(platform: string, provider: string, pricingModel: string, sourceMode: string, startAt: string, endAt: string): $CancellablePromise<$models.ProviderDailyStat[]> {
     return $Call.ByID(951110484, platform, provider, pricingModel, sourceMode, startAt, endAt).then(($result: any) => {
-        return $$createType19($result);
+        return $$createType20($result);
     });
 }
 
 export function ProviderUnreadFailedStats(platform: string): $CancellablePromise<$models.ProviderUnreadFailedStat[]> {
     return $Call.ByID(4138664716, platform).then(($result: any) => {
-        return $$createType23($result);
+        return $$createType24($result);
     });
 }
 
 export function RequestLogDailyHeatmapStats(days: number): $CancellablePromise<$models.HeatmapStat[]> {
     return $Call.ByID(720832391, days).then(($result: any) => {
-        return $$createType5($result);
+        return $$createType6($result);
     });
 }
 
 export function RequestLogDailyHeatmapStatsByYear(year: number): $CancellablePromise<$models.HeatmapStat[]> {
     return $Call.ByID(3180670703, year).then(($result: any) => {
-        return $$createType5($result);
+        return $$createType6($result);
     });
 }
 
 export function RequestLogDailyHeatmapStatsByYearV2(year: number, sourceMode: string): $CancellablePromise<$models.HeatmapStat[]> {
     return $Call.ByID(2078672171, year, sourceMode).then(($result: any) => {
-        return $$createType5($result);
+        return $$createType6($result);
     });
 }
 
 export function ResolveFiveHourQuotaStatus(platform: string): $CancellablePromise<$models.FiveHourQuotaStatus> {
     return $Call.ByID(3986952558, platform).then(($result: any) => {
-        return $$createType24($result);
+        return $$createType25($result);
     });
 }
 
@@ -230,78 +236,79 @@ export function ResolveFiveHourQuotaStatus(platform: string): $CancellablePromis
  */
 export function ResolveFiveHourQuotaStatusByProvider(platform: string, providerID: string, providerName: string): $CancellablePromise<$models.FiveHourQuotaStatus> {
     return $Call.ByID(3743512182, platform, providerID, providerName).then(($result: any) => {
-        return $$createType24($result);
+        return $$createType25($result);
     });
 }
 
 export function StatsRangeV2(platform: string, provider: string, pricingModel: string, startAt: string, endAt: string): $CancellablePromise<$models.LogStats> {
     return $Call.ByID(1931405930, platform, provider, pricingModel, startAt, endAt).then(($result: any) => {
-        return $$createType25($result);
+        return $$createType26($result);
     });
 }
 
 export function StatsRangeV3(platform: string, provider: string, pricingModel: string, sourceMode: string, startAt: string, endAt: string): $CancellablePromise<$models.LogStats> {
     return $Call.ByID(1948183549, platform, provider, pricingModel, sourceMode, startAt, endAt).then(($result: any) => {
-        return $$createType25($result);
+        return $$createType26($result);
     });
 }
 
 export function StatsSince(platform: string): $CancellablePromise<$models.LogStats> {
     return $Call.ByID(2831143405, platform).then(($result: any) => {
-        return $$createType25($result);
+        return $$createType26($result);
     });
 }
 
 export function SummaryRangeV2(platform: string, provider: string, pricingModel: string, startAt: string, endAt: string): $CancellablePromise<$models.LogSummary> {
     return $Call.ByID(3282932339, platform, provider, pricingModel, startAt, endAt).then(($result: any) => {
-        return $$createType26($result);
+        return $$createType27($result);
     });
 }
 
 export function SummaryRangeV3(platform: string, provider: string, pricingModel: string, sourceMode: string, startAt: string, endAt: string): $CancellablePromise<$models.LogSummary> {
     return $Call.ByID(3266154720, platform, provider, pricingModel, sourceMode, startAt, endAt).then(($result: any) => {
-        return $$createType26($result);
+        return $$createType27($result);
     });
 }
 
 export function SyncLocalSessionUsage(): $CancellablePromise<$models.SessionSyncResult> {
     return $Call.ByID(2581779891).then(($result: any) => {
-        return $$createType27($result);
+        return $$createType28($result);
     });
 }
 
 export function SyncWSLSessionUsage(): $CancellablePromise<$models.SessionSyncResult> {
     return $Call.ByID(2272505106).then(($result: any) => {
-        return $$createType27($result);
+        return $$createType28($result);
     });
 }
 
 // Private type creation functions
 const $$createType0 = $models.DeleteRequestLogsByDateResult.createFrom;
 const $$createType1 = $models.ProviderUnreadFailedCountResult.createFrom;
-const $$createType2 = $models.LogStorageStats.createFrom;
-const $$createType3 = $models.RequestLogPayloadDetail.createFrom;
-const $$createType4 = $models.HeatmapStat.createFrom;
-const $$createType5 = $Create.Array($$createType4);
-const $$createType6 = $models.RequestLogPageResult.createFrom;
-const $$createType7 = $models.ProviderLogStorageStat.createFrom;
-const $$createType8 = $Create.Array($$createType7);
-const $$createType9 = $models.LogProviderRef.createFrom;
-const $$createType10 = $Create.Array($$createType9);
-const $$createType11 = $Create.Array($Create.Any);
+const $$createType2 = $models.LogDashboardAggregateV1.createFrom;
+const $$createType3 = $models.LogStorageStats.createFrom;
+const $$createType4 = $models.RequestLogPayloadDetail.createFrom;
+const $$createType5 = $models.HeatmapStat.createFrom;
+const $$createType6 = $Create.Array($$createType5);
+const $$createType7 = $models.RequestLogPageResult.createFrom;
+const $$createType8 = $models.ProviderLogStorageStat.createFrom;
+const $$createType9 = $Create.Array($$createType8);
+const $$createType10 = $models.LogProviderRef.createFrom;
+const $$createType11 = $Create.Array($$createType10);
 const $$createType12 = $Create.Array($Create.Any);
-const $$createType13 = $models.ReqeustLog.createFrom;
-const $$createType14 = $Create.Array($$createType13);
-const $$createType15 = $models.MarkRequestLogsReadResult.createFrom;
-const $$createType16 = $models.ModelUsageStat.createFrom;
-const $$createType17 = $Create.Array($$createType16);
-const $$createType18 = $models.ProviderDailyStat.createFrom;
-const $$createType19 = $Create.Array($$createType18);
-const $$createType20 = $models.ProviderPerformanceTrendPoint.createFrom;
-const $$createType21 = $Create.Array($$createType20);
-const $$createType22 = $models.ProviderUnreadFailedStat.createFrom;
-const $$createType23 = $Create.Array($$createType22);
-const $$createType24 = $models.FiveHourQuotaStatus.createFrom;
-const $$createType25 = $models.LogStats.createFrom;
-const $$createType26 = $models.LogSummary.createFrom;
-const $$createType27 = $models.SessionSyncResult.createFrom;
+const $$createType13 = $Create.Array($Create.Any);
+const $$createType14 = $models.ReqeustLog.createFrom;
+const $$createType15 = $Create.Array($$createType14);
+const $$createType16 = $models.MarkRequestLogsReadResult.createFrom;
+const $$createType17 = $models.ModelUsageStat.createFrom;
+const $$createType18 = $Create.Array($$createType17);
+const $$createType19 = $models.ProviderDailyStat.createFrom;
+const $$createType20 = $Create.Array($$createType19);
+const $$createType21 = $models.ProviderPerformanceTrendPoint.createFrom;
+const $$createType22 = $Create.Array($$createType21);
+const $$createType23 = $models.ProviderUnreadFailedStat.createFrom;
+const $$createType24 = $Create.Array($$createType23);
+const $$createType25 = $models.FiveHourQuotaStatus.createFrom;
+const $$createType26 = $models.LogStats.createFrom;
+const $$createType27 = $models.LogSummary.createFrom;
+const $$createType28 = $models.SessionSyncResult.createFrom;

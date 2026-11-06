@@ -377,6 +377,10 @@ func (s *ProviderQuotaAutomationService) checkProviderQuota(kind string, provide
 	if !queryResult.Success {
 		return result
 	}
+	// 被动采样依赖后续真实请求更新，自动停用会让该供应商失去采样和恢复机会。
+	if queryResult.QueryType == string(ProviderQuotaQueryTypeTokenPlanClaudePassive) {
+		return result
+	}
 
 	exhausted, valid := quotaItemsExhausted(queryResult.Items)
 	if !valid {
