@@ -102,22 +102,23 @@ describe('useProviderQuotas', () => {
     vi.restoreAllMocks()
   })
 
-  it('refreshes passive samples even for idle cards without waiting for the remote cache TTL', async () => {
+  it.each(['claude', 'codex'] as const)('refreshes %s passive samples even for idle cards without waiting for the remote cache TTL', async (provider) => {
+    const queryType = `token_plan_${provider}_passive` as const
     const cards = createCardRecord()
-    const card = createCard(71, { providerQuotaQueryType: 'token_plan_claude_passive' })
-    cards.claude.push(card)
+    const card = createCard(71, { providerQuotaQueryType: queryType })
+    cards[provider].push(card)
     vi.mocked(queryProviderQuota).mockResolvedValueOnce({
       success: true,
-      queryType: 'token_plan_claude_passive',
+      queryType,
       items: [{ key: 'five_hour', used: 10, total: 100, valueMode: 'count', unit: '%' }],
     }).mockResolvedValueOnce({
       success: true,
-      queryType: 'token_plan_claude_passive',
+      queryType,
       items: [{ key: 'five_hour', used: 55, total: 100, valueMode: 'count', unit: '%' }],
     })
     const quotas = useProviderQuotas({
       t: (key) => key,
-      getActiveTab: () => 'claude',
+      getActiveTab: () => provider,
       cards,
       resolveAutoRefreshRemoteQuotaRefs: () => new Set(),
     })
@@ -129,21 +130,59 @@ describe('useProviderQuotas', () => {
     quotas.stopTimers()
   })
 
-  it('shows a localized waiting state until a Claude sample arrives', async () => {
+  it.each(['claude', 'codex'] as const)('shows a localized waiting state until a %s sample arrives', async (provider) => {
+    const queryType = `token_plan_${provider}_passive` as const
+    const pending = `${provider}_passive_pending`
     const cards = createCardRecord()
-    const card = createCard(72, { providerQuotaQueryType: 'token_plan_claude_passive' })
-    cards.claude.push(card)
+    const card = createCard(72, { providerQuotaQueryType: queryType })
+    cards[provider].push(card)
     vi.mocked(queryProviderQuota).mockResolvedValue({
       success: true,
-      queryType: 'token_plan_claude_passive',
-      items: [{ key: 'claude_passive_pending', used: 0, total: 0, active: false, invalidMessage: 'claude_passive_pending' }],
+      queryType,
+      items: [{ key: pending, used: 0, total: 0, active: false, invalidMessage: pending }],
     })
-    const quotas = useProviderQuotas({ t: (key) => key, getActiveTab: () => 'claude', cards })
+    const quotas = useProviderQuotas({ t: (key) => key, getActiveTab: () => provider, cards })
     await quotas.refreshProviderQuotas()
     expect(quotas.getQuotaDisplay(card)[0]).toMatchObject({
       isActive: false,
-      invalidMessage: 'components.main.providers.quotaClaudePassivePending',
+      invalidMessage: provider === 'claude'
+        ? 'components.main.providers.quotaClaudePassivePending'
+        : 'components.main.providers.quotaCodexPassivePending',
     })
+  })
+
+  it('uses sampled Codex window lengths and localizes missing window labels and stale samples', async () => {
+    const cards = createCardRecord()
+    const card = createCard(73, { providerQuotaQueryType: 'token_plan_codex_passive' })
+    cards.codex.push(card)
+    vi.mocked(queryProviderQuota).mockResolvedValueOnce({
+      success: true,
+      queryType: 'token_plan_codex_passive',
+      items: [
+        { key: 'codex_primary', label: '7d', used: 37.5, total: 100, valueMode: 'count', unit: '%' },
+        { key: 'codex_secondary', label: '5h', used: 25, total: 100, valueMode: 'count', unit: '%' },
+      ],
+    }).mockResolvedValueOnce({
+      success: true,
+      queryType: 'token_plan_codex_passive',
+      items: [
+        { key: 'codex_primary', used: 37.5, total: 100, active: false, invalidMessage: 'codex_passive_stale' },
+        { key: 'codex_secondary', used: 25, total: 100 },
+      ],
+    })
+    const quotas = useProviderQuotas({ t: (key) => key, getActiveTab: () => 'codex', cards })
+    await quotas.refreshProviderQuotas()
+    expect(quotas.getQuotaDisplay(card).map(({ label, progressRatio }) => ({ label, progressRatio }))).toEqual([
+      { label: '7d', progressRatio: 0.375 },
+      { label: '5h', progressRatio: 0.25 },
+    ])
+    await quotas.refreshProviderQuotas()
+    expect(quotas.getQuotaDisplay(card)[0]).toMatchObject({
+      label: 'components.main.providers.quotaCodexPrimary',
+      isActive: false,
+      invalidMessage: 'components.main.providers.quotaCodexPassiveStale',
+    })
+    expect(quotas.getQuotaDisplay(card)[1].label).toBe('components.main.providers.quotaCodexSecondary')
   })
 
   it('keeps quota display isolated by tab even when provider refs overlap', async () => {

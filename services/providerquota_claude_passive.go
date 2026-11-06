@@ -89,10 +89,10 @@ func (s *ProviderQuotaQueryService) initDB() error {
 		return err
 	}
 	s.claudePassive.queue = GlobalDBQueue
-	return nil
+	return s.initCodexPassiveQuotaDB()
 }
 
-func claudePassiveQuotaCacheKey(baseURL, apiKey string) string {
+func passiveQuotaCacheKey(baseURL, apiKey string) string {
 	// 只保存摘要，避免把供应商地址中的私有路径或认证内容写入采样表。
 	identity, _ := json.Marshal([]string{strings.TrimRight(strings.TrimSpace(baseURL), "/"), strings.TrimSpace(apiKey)})
 	digest := sha256.Sum256(identity)
@@ -121,7 +121,7 @@ func (s *ProviderQuotaQueryService) sampleClaudePassiveQuota(baseURL, apiKey str
 	store := s.claudePassive
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	key := claudePassiveQuotaCacheKey(baseURL, apiKey)
+	key := passiveQuotaCacheKey(baseURL, apiKey)
 	snapshot := store.snapshots[key]
 	if snapshot == nil {
 		snapshot = make(claudePassiveQuotaSnapshot)
@@ -173,7 +173,7 @@ func (s *ProviderQuotaQueryService) queryClaudePassiveQuota(baseURL, apiKey stri
 		store := s.claudePassive
 		store.mu.RLock()
 		defer store.mu.RUnlock()
-		snapshot := store.snapshots[claudePassiveQuotaCacheKey(baseURL, apiKey)]
+		snapshot := store.snapshots[passiveQuotaCacheKey(baseURL, apiKey)]
 		for _, spec := range claudePassiveQuotaWindows {
 			window, ok := snapshot[spec.key]
 			if !ok || !window.HasUsage {

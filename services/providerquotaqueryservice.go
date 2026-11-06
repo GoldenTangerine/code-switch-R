@@ -43,6 +43,7 @@ const (
 	ProviderQuotaQueryTypeTokenPlanKimi          ProviderQuotaQueryType = "token_plan_kimi"
 	ProviderQuotaQueryTypeTokenPlanMiniMax       ProviderQuotaQueryType = "token_plan_minimax"
 	ProviderQuotaQueryTypeTokenPlanClaudePassive ProviderQuotaQueryType = "token_plan_claude_passive"
+	ProviderQuotaQueryTypeTokenPlanCodexPassive  ProviderQuotaQueryType = "token_plan_codex_passive"
 )
 
 const (
@@ -104,6 +105,7 @@ type ProviderQuotaQueryService struct {
 	client        *http.Client
 	ctx           context.Context
 	claudePassive *claudePassiveQuotaStore
+	codexPassive  *codexPassiveQuotaStore
 }
 
 func (s *ProviderQuotaQueryService) requestContext() context.Context {
@@ -135,9 +137,10 @@ func NewProviderQuotaQueryService() *ProviderQuotaQueryService {
 	service := &ProviderQuotaQueryService{
 		client:        &http.Client{Timeout: 10 * time.Second},
 		claudePassive: &claudePassiveQuotaStore{snapshots: make(map[string]claudePassiveQuotaSnapshot)},
+		codexPassive:  &codexPassiveQuotaStore{snapshots: make(map[string]codexPassiveQuotaSnapshot)},
 	}
 	if err := service.initDB(); err != nil {
-		fmt.Printf("Claude 被动额度缓存初始化失败: %v\n", err)
+		fmt.Printf("被动额度缓存初始化失败: %v\n", err)
 	}
 	return service
 }
@@ -221,6 +224,8 @@ func normalizeProviderQuotaQueryType(value string) ProviderQuotaQueryType {
 		return ProviderQuotaQueryTypeTokenPlanMiniMax
 	case ProviderQuotaQueryTypeTokenPlanClaudePassive:
 		return ProviderQuotaQueryTypeTokenPlanClaudePassive
+	case ProviderQuotaQueryTypeTokenPlanCodexPassive:
+		return ProviderQuotaQueryTypeTokenPlanCodexPassive
 	default:
 		return ProviderQuotaQueryTypeNone
 	}
@@ -310,7 +315,7 @@ func queryTypeToProviderQuotaTemplateType(queryType ProviderQuotaQueryType) Prov
 		return ProviderQuotaTemplateTypeNewAPI
 	case ProviderQuotaQueryTypeSub2API:
 		return ProviderQuotaTemplateTypeSub2API
-	case ProviderQuotaQueryTypeTokenPlanGLM, ProviderQuotaQueryTypeTokenPlanKimi, ProviderQuotaQueryTypeTokenPlanMiniMax, ProviderQuotaQueryTypeTokenPlanClaudePassive:
+	case ProviderQuotaQueryTypeTokenPlanGLM, ProviderQuotaQueryTypeTokenPlanKimi, ProviderQuotaQueryTypeTokenPlanMiniMax, ProviderQuotaQueryTypeTokenPlanClaudePassive, ProviderQuotaQueryTypeTokenPlanCodexPassive:
 		return ProviderQuotaTemplateTypeTokenPlan
 	default:
 		return ""
@@ -325,6 +330,8 @@ func tokenPlanProviderFromQueryType(queryType ProviderQuotaQueryType) string {
 		return "minimax"
 	case ProviderQuotaQueryTypeTokenPlanClaudePassive:
 		return "claude_passive"
+	case ProviderQuotaQueryTypeTokenPlanCodexPassive:
+		return "codex_passive"
 	case ProviderQuotaQueryTypeTokenPlanKimi:
 		fallthrough
 	default:
@@ -446,6 +453,8 @@ func (s *ProviderQuotaQueryService) queryQuotaByType(
 		return s.queryMiniMaxQuota(resolveProviderQuotaQueryTargetBaseURL(queryType, baseURL), apiKey)
 	case ProviderQuotaQueryTypeTokenPlanClaudePassive:
 		return s.queryClaudePassiveQuota(baseURL, apiKey, time.Now())
+	case ProviderQuotaQueryTypeTokenPlanCodexPassive:
+		return s.queryCodexPassiveQuota(baseURL, apiKey, time.Now())
 	default:
 		return nil, fmt.Errorf("不支持的供应商查询类型：%s", queryType)
 	}

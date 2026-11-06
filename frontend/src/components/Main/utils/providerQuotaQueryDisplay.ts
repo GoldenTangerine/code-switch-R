@@ -34,6 +34,11 @@ function normalizeDisplayValue(value: number) {
   return Math.max(value, 0)
 }
 
+const codexWindowLabelKeyMap: Record<string, string> = {
+  codex_primary: 'components.main.providers.quotaCodexPrimary',
+  codex_secondary: 'components.main.providers.quotaCodexSecondary',
+}
+
 export type ProviderQuotaQueryDisplayResult = {
   items: ProviderQuotaSnapshotItem[]
   failureMessage?: string
@@ -91,11 +96,15 @@ export async function resolveProviderQuotaQueryDisplay({
         const isActive = item.active !== false && item.isValid !== false
         const normalizedKey = `${item.key}`.trim()
         const defaultLabelKey = providerQuotaLabelKeyMap[normalizedKey]
+        const codexWindowLabelKey = queryType === 'token_plan_codex_passive'
+          ? codexWindowLabelKeyMap[normalizedKey]
+          : undefined
         const invalidMessage = localizeProviderQuotaMessage(item.invalidMessage, t) || undefined
         const extra = `${item.extra ?? ''}`.trim() || undefined
         return {
           key: normalizedKey,
-          label: defaultLabelKey ? t(defaultLabelKey) : `${item.label ?? ''}`.trim() || normalizedKey,
+          label: defaultLabelKey ? t(defaultLabelKey) : `${item.label ?? ''}`.trim()
+            || (codexWindowLabelKey ? t(codexWindowLabelKey) : normalizedKey),
           used,
           total,
           unlimited: queryType === 'sub2api' && item.unlimited === true,

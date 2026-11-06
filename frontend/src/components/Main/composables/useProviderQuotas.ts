@@ -16,6 +16,7 @@ import {
 } from '../../../utils/budgetUsage'
 import {
   hasProviderQuotaQueryType,
+  isPassiveProviderQuotaQueryType,
   normalizeProviderQuotaQueryConfig,
   resolveProviderQuotaAutoQueryIntervalMinutes,
   resolveProviderQuotaQueryType,
@@ -106,7 +107,7 @@ function buildRemoteQuotaCacheIdentity(card: AutomationCard): string {
 }
 
 function resolveRemoteQuotaCacheTTL(card: AutomationCard): number {
-  if (resolveProviderQuotaQueryType(card.providerQuotaQueryConfig ?? card.providerQuotaQueryType, card.providerQuotaQueryType) === 'token_plan_claude_passive') {
+  if (isPassiveProviderQuotaQueryType(resolveProviderQuotaQueryType(card.providerQuotaQueryConfig ?? card.providerQuotaQueryType, card.providerQuotaQueryType))) {
     return 0
   }
   const normalizedConfig = normalizeProviderQuotaQueryConfig(
@@ -321,7 +322,7 @@ export function useProviderQuotas(options: UseProviderQuotasOptions) {
 
         if (
           hasRemoteQuota
-          && resolveProviderQuotaQueryType(card.providerQuotaQueryConfig ?? card.providerQuotaQueryType, card.providerQuotaQueryType) !== 'token_plan_claude_passive'
+          && !isPassiveProviderQuotaQueryType(resolveProviderQuotaQueryType(card.providerQuotaQueryConfig ?? card.providerQuotaQueryType, card.providerQuotaQueryType))
           && autoRefreshRemoteRefs
           && !forceRemoteRefs.has(ref)
           && !autoRefreshRemoteRefs.has(ref)

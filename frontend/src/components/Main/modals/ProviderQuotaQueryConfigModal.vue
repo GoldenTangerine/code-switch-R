@@ -94,7 +94,7 @@
           </div>
         </section>
 
-        <section v-if="!isClaudePassive" class="provider-quota-query-config-modal__section">
+        <section v-if="!isPassiveTokenPlan" class="provider-quota-query-config-modal__section">
           <div class="provider-quota-query-config-modal__section-header">
             <div>
               <p class="provider-quota-query-config-modal__title">
@@ -147,9 +147,7 @@
                 {{ t('components.main.form.labels.providerQuotaQueryTokenPlanProvider') }}
               </p>
               <p class="provider-quota-query-config-modal__hint">
-                {{ t(isClaudePassive
-                  ? 'components.main.form.hints.providerQuotaQueryClaudePassive'
-                  : 'components.main.form.hints.providerQuotaQueryTemplateTokenPlan') }}
+                {{ t(tokenPlanHintKey) }}
               </p>
             </div>
           </div>
@@ -441,6 +439,7 @@ import {
   buildProviderQuotaPresetCode,
   detectProviderQuotaBalanceProvider,
   detectProviderQuotaTokenPlanProvider,
+  isPassiveProviderQuotaQueryType,
   normalizeProviderQuotaQueryConfig,
   localizeProviderQuotaMessage,
   providerQuotaBalanceProviderOptions,
@@ -449,6 +448,7 @@ import {
   providerQuotaTokenPlanProviderLabelKeyMap,
   resetProviderQuotaQueryConfigFieldsOnTemplateSwitch,
   sanitizeProviderQuotaQueryConfigForSave,
+  tokenPlanProviderToQueryType,
   validateProviderQuotaQueryConfigForSave,
   type ProviderQuotaQueryConfig,
   type ProviderQuotaQuerySaveValidationIssue,
@@ -517,7 +517,7 @@ const templateOptions = computed(() => providerQuotaTemplateTypes.map((value) =>
   label: t(providerQuotaTemplateLabelKeyMap[value]),
   description: t(templateDescriptionKeyMap[value]),
 })))
-const tokenPlanProviders = computed(() => (['glm', 'kimi', 'minimax', 'claude_passive'] as ProviderQuotaTokenPlanProvider[]).map((value) => ({
+const tokenPlanProviders = computed(() => (['glm', 'kimi', 'minimax', 'claude_passive', 'codex_passive'] as ProviderQuotaTokenPlanProvider[]).map((value) => ({
   value,
   label: t(providerQuotaTokenPlanProviderLabelKeyMap[value]),
 })))
@@ -527,7 +527,13 @@ const detectedBalanceProviderOption = computed(() => (
 const selectedTemplate = computed<ProviderQuotaTemplateType>(() => (
   draft.templateType ?? 'general'
 ))
-const isClaudePassive = computed(() => selectedTemplate.value === 'token_plan' && draft.tokenPlanProvider === 'claude_passive')
+const isPassiveTokenPlan = computed(() => selectedTemplate.value === 'token_plan'
+  && isPassiveProviderQuotaQueryType(tokenPlanProviderToQueryType(draft.tokenPlanProvider)))
+const tokenPlanHintKey = computed(() => {
+  if (draft.tokenPlanProvider === 'claude_passive') return 'components.main.form.hints.providerQuotaQueryClaudePassive'
+  if (draft.tokenPlanProvider === 'codex_passive') return 'components.main.form.hints.providerQuotaQueryCodexPassive'
+  return 'components.main.form.hints.providerQuotaQueryTemplateTokenPlan'
+})
 const selectedTemplateLabel = computed(() => t(providerQuotaTemplateLabelKeyMap[selectedTemplate.value]))
 const currentPresetGroup = computed<ProviderQuotaQueryPresetGroup>(() => (
   presetGroups.value[selectedTemplate.value] ?? { items: [] }

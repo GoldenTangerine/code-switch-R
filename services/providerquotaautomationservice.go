@@ -378,7 +378,8 @@ func (s *ProviderQuotaAutomationService) checkProviderQuota(kind string, provide
 		return result
 	}
 	// 被动采样依赖后续真实请求更新，自动停用会让该供应商失去采样和恢复机会。
-	if queryResult.QueryType == string(ProviderQuotaQueryTypeTokenPlanClaudePassive) {
+	if queryResult.QueryType == string(ProviderQuotaQueryTypeTokenPlanClaudePassive) ||
+		queryResult.QueryType == string(ProviderQuotaQueryTypeTokenPlanCodexPassive) {
 		return result
 	}
 

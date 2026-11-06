@@ -13,6 +13,7 @@ import {
   detectProviderQuotaBalanceProvider,
   detectProviderQuotaTokenPlanProvider,
   hasProviderQuotaQueryMissingCredentials,
+  isPassiveProviderQuotaQueryType,
   normalizeProviderQuotaQueryConfig,
   localizeProviderQuotaMessage,
   providerQuotaTokenPlanProviderLabelKeyMap,
@@ -25,11 +26,16 @@ import {
 } from './providerQuotaQuery'
 
 describe('providerQuotaQuery utils', () => {
-  it('round-trips Claude passive sampling through Token Plan configuration', () => {
+  it.each(['claude', 'codex'] as const)('round-trips %s passive sampling through Token Plan configuration', (provider) => {
+    const tokenPlanProvider = `${provider}_passive` as const
+    const queryType = `token_plan_${provider}_passive` as const
+    const labelKey = provider === 'claude'
+      ? 'components.main.form.options.providerQuotaQueryTokenPlanClaudePassive'
+      : 'components.main.form.options.providerQuotaQueryTokenPlanCodexPassive'
     const config = sanitizeProviderQuotaQueryConfigForSave({
       enabled: true,
       templateType: 'token_plan',
-      tokenPlanProvider: 'claude_passive',
+      tokenPlanProvider,
       code: 'hidden-script',
       apiKey: 'hidden-key',
       baseUrl: 'https://hidden.example.com',
@@ -37,15 +43,16 @@ describe('providerQuotaQuery utils', () => {
     expect(config).toEqual({
       enabled: true,
       templateType: 'token_plan',
-      tokenPlanProvider: 'claude_passive',
+      tokenPlanProvider,
       code: '',
       timeout: 10,
       autoQueryInterval: 5,
     })
-    expect(resolveProviderQuotaQueryType(config)).toBe('token_plan_claude_passive')
-    expect(normalizeProviderQuotaQueryConfig('token_plan_claude_passive')?.tokenPlanProvider).toBe('claude_passive')
-    expect(normalizeProviderQuotaQueryConfig(serializeProviderQuotaQueryConfig(config))?.tokenPlanProvider).toBe('claude_passive')
-    expect(providerQuotaTokenPlanProviderLabelKeyMap.claude_passive).toBe('components.main.form.options.providerQuotaQueryTokenPlanClaudePassive')
+    expect(resolveProviderQuotaQueryType(config)).toBe(queryType)
+    expect(normalizeProviderQuotaQueryConfig(queryType)?.tokenPlanProvider).toBe(tokenPlanProvider)
+    expect(normalizeProviderQuotaQueryConfig(serializeProviderQuotaQueryConfig(config))?.tokenPlanProvider).toBe(tokenPlanProvider)
+    expect(providerQuotaTokenPlanProviderLabelKeyMap[tokenPlanProvider]).toBe(labelKey)
+    expect(isPassiveProviderQuotaQueryType(queryType)).toBe(true)
     expect(validateProviderQuotaQueryConfigForSave(config, {
       fallbackBaseUrl: 'https://example.com',
       fallbackApiKey: 'sample-key',
@@ -57,8 +64,16 @@ describe('providerQuotaQuery utils', () => {
     const t = (key: string) => `translated:${key}`
     expect(localizeProviderQuotaMessage('claude_passive_pending', t)).toBe('translated:components.main.providers.quotaClaudePassivePending')
     expect(localizeProviderQuotaMessage('claude_passive_stale', t)).toBe('translated:components.main.providers.quotaClaudePassiveStale')
+    expect(localizeProviderQuotaMessage('codex_passive_pending', t)).toBe('translated:components.main.providers.quotaCodexPassivePending')
+    expect(localizeProviderQuotaMessage('codex_passive_stale', t)).toBe('translated:components.main.providers.quotaCodexPassiveStale')
     expect(localizeProviderQuotaMessage(' Other error ', t)).toBe('Other error')
     expect(localizeProviderQuotaMessage(undefined, t)).toBe('')
+  })
+
+  it('keeps active quota queries on the remote refresh path', () => {
+    expect(isPassiveProviderQuotaQueryType('token_plan_glm')).toBe(false)
+    expect(isPassiveProviderQuotaQueryType('sub2api')).toBe(false)
+    expect(isPassiveProviderQuotaQueryType('none')).toBe(false)
   })
 
   it('normalizes legacy token plan type to config object', () => {
