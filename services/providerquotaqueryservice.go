@@ -379,7 +379,11 @@ func resolveProviderQuotaQueryTargetBaseURL(queryType ProviderQuotaQueryType, ap
 
 	switch queryType {
 	case ProviderQuotaQueryTypeTokenPlanGLM:
-		return "https://api.z.ai"
+		// 国内站与国际站账号体系独立，key 只能在签发站点查询额度
+		if resolveGLMOfficialSite(apiURL) == glmQuotaHostCN {
+			return glmQuotaHostCN
+		}
+		return glmQuotaHostIntl
 	case ProviderQuotaQueryTypeTokenPlanKimi:
 		return "https://api.kimi.com"
 	case ProviderQuotaQueryTypeTokenPlanMiniMax:
@@ -424,7 +428,7 @@ func (s *ProviderQuotaQueryService) queryQuotaByType(
 	case ProviderQuotaQueryTypeCustom, ProviderQuotaQueryTypeGeneral, ProviderQuotaQueryTypeNewAPI, ProviderQuotaQueryTypeSub2API:
 		return s.queryScriptQuota(queryType, baseURL, apiKey, queryConfig)
 	case ProviderQuotaQueryTypeTokenPlanGLM:
-		return s.queryGLMQuota(resolveProviderQuotaQueryTargetBaseURL(queryType, baseURL), apiKey)
+		return s.queryGLMQuotaWithFallback(baseURL, apiKey)
 	case ProviderQuotaQueryTypeTokenPlanKimi:
 		return s.queryKimiQuota(resolveProviderQuotaQueryTargetBaseURL(queryType, baseURL), apiKey)
 	case ProviderQuotaQueryTypeTokenPlanMiniMax:
@@ -1273,6 +1277,57 @@ func (s *ProviderQuotaQueryService) queryNovitaBalance(apiKey string) ([]Provide
 	}}, nil
 }
 
+const (
+	glmQuotaHostCN   = "https://open.bigmodel.cn"
+	glmQuotaHostIntl = "https://api.z.ai"
+)
+
+// resolveGLMQuotaHostCandidates 返回 GLM 额度查询的候选主机。
+// 优先查询 Base URL 对应的站点（中转等未知域名默认国际站），失败后回退另一站点，兼容跨站签发的 key。
+func resolveGLMQuotaHostCandidates(apiURL string) []string {
+	primary := resolveProviderQuotaQueryTargetBaseURL(ProviderQuotaQueryTypeTokenPlanGLM, apiURL)
+	if isLocalProviderQuotaQueryOrigin(apiURL) {
+		return []string{primary}
+	}
+	if primary == glmQuotaHostCN {
+		return []string{glmQuotaHostCN, glmQuotaHostIntl}
+	}
+	return []string{glmQuotaHostIntl, glmQuotaHostCN}
+}
+
+// resolveGLMOfficialSite 按 hostname 识别智谱官方站点，非官方域名返回空字符串。
+func resolveGLMOfficialSite(apiURL string) string {
+	parsed, ok := extractProviderQuotaQueryURL(apiURL)
+	if !ok {
+		return ""
+	}
+	host := strings.ToLower(parsed.Hostname())
+	switch {
+	case host == "bigmodel.cn" || strings.HasSuffix(host, ".bigmodel.cn"):
+		return glmQuotaHostCN
+	case host == "z.ai" || strings.HasSuffix(host, ".z.ai"):
+		return glmQuotaHostIntl
+	default:
+		return ""
+	}
+}
+
+func (s *ProviderQuotaQueryService) queryGLMQuotaWithFallback(apiURL string, apiKey string) ([]ProviderQuotaQueryItem, error) {
+	candidates := resolveGLMQuotaHostCandidates(apiURL)
+	failures := make([]string, 0, len(candidates))
+	for _, host := range candidates {
+		items, err := s.queryGLMQuota(host, apiKey)
+		if err == nil {
+			return items, nil
+		}
+		if len(candidates) == 1 {
+			return nil, err
+		}
+		failures = append(failures, fmt.Sprintf("%s: %s", strings.TrimPrefix(host, "https://"), err.Error()))
+	}
+	return nil, fmt.Errorf("%s", strings.Join(failures, "；"))
+}
+
 func (s *ProviderQuotaQueryService) queryGLMQuota(baseURL string, apiKey string) ([]ProviderQuotaQueryItem, error) {
 	if strings.TrimSpace(apiKey) == "" {
 		return nil, fmt.Errorf("缺少 API Key")
@@ -1286,6 +1341,7 @@ func (s *ProviderQuotaQueryService) queryGLMQuota(baseURL string, apiKey string)
 		joinURL(baseURL, "/api/monitor/usage/quota/limit"),
 		nil,
 		map[string]string{
+			// 智谱额度接口直接使用原始 key，不加 Bearer 前缀
 			"Authorization":   apiKey,
 			"Content-Type":    "application/json",
 			"Accept":          "application/json",
@@ -1310,7 +1366,11 @@ func (s *ProviderQuotaQueryService) queryGLMQuota(baseURL string, apiKey string)
 	}
 
 	if success, ok := payload["success"].(bool); ok && !success {
-		return nil, fmt.Errorf("GLM Token Plan 查询失败: %s", stringFromAny(payload["msg"]))
+		message := strings.TrimSpace(stringFromAny(payload["msg"]))
+		if message == "" {
+			message = "未知错误"
+		}
+		return nil, fmt.Errorf("GLM Token Plan 查询失败: %s", message)
 	}
 
 	data, ok := payload["data"].(map[string]any)
@@ -1323,50 +1383,109 @@ func (s *ProviderQuotaQueryService) queryGLMQuota(baseURL string, apiKey string)
 		return nil, fmt.Errorf("GLM Token Plan 响应缺少 limits 数据")
 	}
 
-	items := make([]ProviderQuotaQueryItem, 0, len(limits))
-	for _, rawLimit := range limits {
-		limitItem, ok := rawLimit.(map[string]any)
-		if !ok {
-			continue
-		}
-
-		if !strings.EqualFold(stringFromAny(limitItem["type"]), "TOKENS_LIMIT") {
-			continue
-		}
-
-		total := floatFromAny(limitItem["usage"])
-		used := floatFromAny(limitItem["currentValue"])
-		if total <= 0 {
-			percentage := floatFromAny(limitItem["percentage"])
-			if percentage > 0 {
-				total = 100
-				used = percentage
-			}
-		}
-		if total <= 0 {
-			continue
-		}
-
-		key := resolveGLMTokenPlanQuotaKey(limitItem)
-		if key == "" {
-			continue
-		}
-
-		items = append(items, ProviderQuotaQueryItem{
-			Key:       key,
-			Used:      clampNonNegativeFloat(used),
-			Total:     clampNonNegativeFloat(total),
-			NextReset: isoTimeFromAny(limitItem["nextResetTime"]),
-			Active:    true,
-			ValueMode: string(ProviderQuotaValueModeCount),
-		})
-	}
-
+	items := parseGLMTokenPlanLimits(limits)
 	if len(items) == 0 {
 		return nil, fmt.Errorf("GLM Token Plan 未返回可展示的额度窗口")
 	}
 
 	return items, nil
+}
+
+type glmQuotaWindowEntry struct {
+	item     ProviderQuotaQueryItem
+	resetAt  time.Time
+	hasReset bool
+}
+
+// parseGLMTokenPlanLimits 将 limits 解析为 5 小时 / 每周两个窗口。
+// 存在 TOKENS_LIMIT 时只用它；新套餐只返回 CREDIT_LIMIT 时才降级使用，避免两种度量互相覆盖。
+// 窗口判定顺序：unit 字段 → 名称标签 → 按重置时间兜底（无重置时间的优先归入 5 小时）。
+func parseGLMTokenPlanLimits(limits []any) []ProviderQuotaQueryItem {
+	tokenLimits := make([]map[string]any, 0, len(limits))
+	creditLimits := make([]map[string]any, 0, len(limits))
+	for _, rawLimit := range limits {
+		limitItem, ok := rawLimit.(map[string]any)
+		if !ok {
+			continue
+		}
+		switch strings.ToUpper(strings.TrimSpace(stringFromAny(limitItem["type"]))) {
+		case "TOKENS_LIMIT":
+			tokenLimits = append(tokenLimits, limitItem)
+		case "CREDIT_LIMIT":
+			creditLimits = append(creditLimits, limitItem)
+		}
+	}
+
+	candidates := tokenLimits
+	if len(candidates) == 0 {
+		candidates = creditLimits
+	}
+
+	items := make([]ProviderQuotaQueryItem, 0, len(candidates))
+	filledKeys := map[string]bool{}
+	unclassified := make([]glmQuotaWindowEntry, 0)
+	for _, limitItem := range candidates {
+		used, total, ok := resolveGLMQuotaUsage(limitItem)
+		if !ok {
+			continue
+		}
+
+		item := ProviderQuotaQueryItem{
+			Used:      clampNonNegativeFloat(used),
+			Total:     clampNonNegativeFloat(total),
+			NextReset: isoTimeFromAny(limitItem["nextResetTime"]),
+			Active:    true,
+			ValueMode: string(ProviderQuotaValueModeCount),
+		}
+
+		if key := resolveGLMTokenPlanQuotaKey(limitItem); key != "" {
+			item.Key = key
+			filledKeys[key] = true
+			items = append(items, item)
+			continue
+		}
+
+		entry := glmQuotaWindowEntry{item: item}
+		if resetAt, err := time.Parse(time.RFC3339, item.NextReset); err == nil {
+			entry.resetAt = resetAt
+			entry.hasReset = true
+		}
+		unclassified = append(unclassified, entry)
+	}
+
+	sort.SliceStable(unclassified, func(left, right int) bool {
+		if unclassified[left].hasReset != unclassified[right].hasReset {
+			return !unclassified[left].hasReset
+		}
+		return unclassified[left].resetAt.Before(unclassified[right].resetAt)
+	})
+	for _, entry := range unclassified {
+		for _, key := range []string{"five_hour", "weekly"} {
+			if filledKeys[key] {
+				continue
+			}
+			entry.item.Key = key
+			filledKeys[key] = true
+			items = append(items, entry.item)
+			break
+		}
+	}
+
+	return items
+}
+
+// resolveGLMQuotaUsage 计算单个额度窗口的已用 / 总量。
+// 有完整的 currentValue / usage 时按实际数值；否则按百分比折算，0% 也视为有效窗口（新 key 尚未使用）。
+func resolveGLMQuotaUsage(limitItem map[string]any) (float64, float64, bool) {
+	if total, ok := floatFromAnyOk(limitItem["usage"]); ok && total > 0 {
+		if used, ok := floatFromAnyOk(limitItem["currentValue"]); ok {
+			return used, total, true
+		}
+	}
+	if percentage, ok := floatFromAnyOk(limitItem["percentage"]); ok {
+		return percentage, 100, true
+	}
+	return 0, 0, false
 }
 
 func resolveGLMTokenPlanQuotaKey(limitItem map[string]any) string {

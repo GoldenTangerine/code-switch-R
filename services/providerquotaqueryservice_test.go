@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/dop251/goja"
@@ -34,9 +35,21 @@ func TestResolveProviderQuotaQueryTargetBaseURL(t *testing.T) {
 		expected  string
 	}{
 		{
-			name:      "glm routes to official international endpoint",
+			name:      "glm bigmodel routes to domestic endpoint",
 			queryType: ProviderQuotaQueryTypeTokenPlanGLM,
 			apiURL:    "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+			expected:  "https://open.bigmodel.cn",
+		},
+		{
+			name:      "glm z.ai routes to international endpoint",
+			queryType: ProviderQuotaQueryTypeTokenPlanGLM,
+			apiURL:    "https://api.z.ai/api/anthropic",
+			expected:  "https://api.z.ai",
+		},
+		{
+			name:      "glm unknown proxy keeps international endpoint first",
+			queryType: ProviderQuotaQueryTypeTokenPlanGLM,
+			apiURL:    "https://proxy.example.com/glm/v1",
 			expected:  "https://api.z.ai",
 		},
 		{
@@ -1132,5 +1145,136 @@ func TestNormalizeProviderQuotaAutomationOnSaveClearsStateWhenConfigRemoved(t *t
 	normalizeProviderQuotaAutomationOnSave(&enabled, &autoDisabled, &paused, "none", nil)
 	if enabled {
 		t.Fatal("手动关闭的供应商不应因移除额度配置而自动启用")
+	}
+}
+
+func TestParseGLMTokenPlanLimits(t *testing.T) {
+	tests := []struct {
+		name     string
+		limits   []any
+		expected map[string][2]float64
+	}{
+		{
+			name: "zero percentage on fresh key is still a valid window",
+			limits: []any{
+				map[string]any{"type": "TOKENS_LIMIT", "unit": 3, "number": 5, "percentage": 0},
+				map[string]any{"type": "TOKENS_LIMIT", "unit": 6, "number": 7, "percentage": 0, "nextResetTime": 1760600000000},
+			},
+			expected: map[string][2]float64{"five_hour": {0, 100}, "weekly": {0, 100}},
+		},
+		{
+			name: "credit limit only plan falls back to credit windows by unit",
+			limits: []any{
+				map[string]any{"type": "CREDIT_LIMIT", "unit": 6, "percentage": 40, "nextResetTime": 1760000000000},
+				map[string]any{"type": "CREDIT_LIMIT", "unit": 3, "percentage": 12, "nextResetTime": 1760600000000},
+				map[string]any{"type": "TIME_LIMIT", "unit": 5, "usage": 100, "currentValue": 3},
+			},
+			expected: map[string][2]float64{"five_hour": {12, 100}, "weekly": {40, 100}},
+		},
+		{
+			name: "credit limit is ignored when tokens limit exists",
+			limits: []any{
+				map[string]any{"type": "TOKENS_LIMIT", "unit": 3, "percentage": 20},
+				map[string]any{"type": "CREDIT_LIMIT", "unit": 6, "percentage": 90},
+			},
+			expected: map[string][2]float64{"five_hour": {20, 100}},
+		},
+		{
+			name: "usage without current value falls back to percentage",
+			limits: []any{
+				map[string]any{"type": "TOKENS_LIMIT", "unit": 3, "usage": 800, "percentage": 30},
+			},
+			expected: map[string][2]float64{"five_hour": {30, 100}},
+		},
+		{
+			name: "missing unit uses reset heuristic with no-reset entry as five hour",
+			limits: []any{
+				map[string]any{"type": "TOKENS_LIMIT", "percentage": 5, "nextResetTime": 1760600000000},
+				map[string]any{"type": "TOKENS_LIMIT", "percentage": 0},
+			},
+			expected: map[string][2]float64{"five_hour": {0, 100}, "weekly": {5, 100}},
+		},
+	}
+
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			items := normalizeProviderQuotaQueryItems(parseGLMTokenPlanLimits(testCase.limits))
+			if len(items) != len(testCase.expected) {
+				t.Fatalf("期望 %d 个额度窗口，实际为 %d：%+v", len(testCase.expected), len(items), items)
+			}
+			for _, item := range items {
+				expected, ok := testCase.expected[item.Key]
+				if !ok {
+					t.Fatalf("出现未预期的额度窗口 %s", item.Key)
+				}
+				if item.Used != expected[0] || item.Total != expected[1] {
+					t.Fatalf("期望 %s 已用 / 总量为 %v / %v，实际为 %v / %v", item.Key, expected[0], expected[1], item.Used, item.Total)
+				}
+			}
+		})
+	}
+}
+
+type recordingHostTransport struct {
+	target *url.URL
+	hosts  *[]string
+}
+
+func (t recordingHostTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	*t.hosts = append(*t.hosts, req.URL.Host)
+	return rewriteHostTransport{target: t.target}.RoundTrip(req)
+}
+
+func TestProviderQuotaQueryService_GLMFallsBackToDomesticHostForUnknownProxy(t *testing.T) {
+	requestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		w.Header().Set("Content-Type", "application/json")
+		if requestCount == 1 {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"success":false,"msg":"invalid key"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"success":true,"data":{"limits":[{"type":"TOKENS_LIMIT","unit":3,"percentage":0}]}}`))
+	}))
+	defer server.Close()
+
+	target, _ := url.Parse(server.URL)
+	hosts := []string{}
+	service := NewProviderQuotaQueryService()
+	service.client.Transport = recordingHostTransport{target: target, hosts: &hosts}
+
+	result := service.QueryQuota(string(ProviderQuotaQueryTypeTokenPlanGLM), "https://proxy.example.com/glm/v1", "cn-key", nil)
+	if !result.Success {
+		t.Fatalf("期望回退国内站后查询成功，实际失败：%s", result.Error)
+	}
+	if len(hosts) != 2 || hosts[0] != "api.z.ai" || hosts[1] != "open.bigmodel.cn" {
+		t.Fatalf("期望依次请求 api.z.ai 与 open.bigmodel.cn，实际为 %v", hosts)
+	}
+	if len(result.Items) != 1 || result.Items[0].Key != "five_hour" || result.Items[0].Total != 100 {
+		t.Fatalf("期望返回 0%% 的 5 小时窗口，实际为 %+v", result.Items)
+	}
+}
+
+func TestProviderQuotaQueryService_GLMDomesticHostTriedFirst(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer server.Close()
+
+	target, _ := url.Parse(server.URL)
+	hosts := []string{}
+	service := NewProviderQuotaQueryService()
+	service.client.Transport = recordingHostTransport{target: target, hosts: &hosts}
+
+	result := service.QueryQuota(string(ProviderQuotaQueryTypeTokenPlanGLM), "https://open.bigmodel.cn/api/anthropic", "bad-key", nil)
+	if result.Success {
+		t.Fatal("期望认证失败")
+	}
+	if len(hosts) != 2 || hosts[0] != "open.bigmodel.cn" || hosts[1] != "api.z.ai" {
+		t.Fatalf("期望先请求 open.bigmodel.cn 再回退 api.z.ai，实际为 %v", hosts)
+	}
+	if !strings.Contains(result.Error, "open.bigmodel.cn") || !strings.Contains(result.Error, "api.z.ai") {
+		t.Fatalf("期望错误信息同时包含两个站点，实际为 %s", result.Error)
 	}
 }
