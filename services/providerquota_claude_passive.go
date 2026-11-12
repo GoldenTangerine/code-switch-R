@@ -31,6 +31,9 @@ const (
 
 	passiveQuotaEstimateAged      = "aged"
 	passiveQuotaEstimateProjected = "projected"
+	passiveQuotaEstimateReset     = "reset"
+	// 短于该周期的会话窗口（如 5 小时）在下一次请求时才开始计时，越过重置时间后不推算下一次重置。
+	passiveQuotaSessionWindowLimit = 24 * time.Hour
 	// 超过该时长没有新样本时，上游可能已被其他客户端继续消耗，用量只能作为参考。
 	passiveQuotaAgedAfter = 5 * time.Minute
 )
@@ -97,8 +100,9 @@ func (s *ProviderQuotaQueryService) initDB() error {
 	return s.initCodexPassiveQuotaDB()
 }
 
-// applyPassiveQuotaWindowEstimate 基于最后一次样本补全读数：越过重置时间后按周期顺延并视为新窗口，样本超过 5 分钟时标记为可能不准确。
-// period 为已知的窗口周期（未知传 0，此时不做顺延）；staleAfter 用于缺少重置时间的样本判断过期。
+// applyPassiveQuotaWindowEstimate 基于最后一次样本补全读数，样本超过 5 分钟时标记为可能不准确。
+// 越过重置时间后：会话窗口只归零并清空倒计时，等待下一次请求开始计时；固定周期窗口（如 7 天）按周期顺延。
+// period 为已知的窗口周期（未知传 0，此时不做推算）；staleAfter 用于缺少重置时间的样本判断过期。
 // 仅在读取时推算，不回写样本，避免影响采样时的新旧窗口判断。返回 false 表示样本已无法继续使用，应视为过期。
 func applyPassiveQuotaWindowEstimate(item *ProviderQuotaQueryItem, resetAt, sampledAt int64, period, staleAfter time.Duration, now time.Time) bool {
 	periodSeconds, nowSeconds := int64(period/time.Second), now.Unix()
@@ -114,6 +118,8 @@ func applyPassiveQuotaWindowEstimate(item *ProviderQuotaQueryItem, resetAt, samp
 			return false
 		}
 	case resetAt > nowSeconds:
+	case periodSeconds > 0 && period < passiveQuotaSessionWindowLimit:
+		item.NextReset, item.Used, item.Estimate = "", 0, passiveQuotaEstimateReset
 	case periodSeconds > 0:
 		resetAt += ((nowSeconds-resetAt)/periodSeconds + 1) * periodSeconds
 		item.NextReset = time.Unix(resetAt, 0).UTC().Format(time.RFC3339)

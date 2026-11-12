@@ -797,6 +797,8 @@
         "quotaPassiveAged": "{age} 前采样，用量可能不准确",
         "quotaPassiveAgedUnknown": "采样已超过 5 分钟，用量可能不准确",
         "quotaPassiveProjected": "已过重置时间，按周期本地推算，等待新请求校准",
+        "quotaPassiveWindowReset": "窗口已重置，下次请求后开始计时",
+        "quotaPassiveWindowIdle": "待开始",
         "quotaCodexPrimary": "主窗口",
         "quotaCodexSecondary": "次窗口",
         "quotaQueryStatusLabel": "额度查询",

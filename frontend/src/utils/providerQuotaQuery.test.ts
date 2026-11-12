@@ -76,6 +76,8 @@ describe('providerQuotaQuery utils', () => {
     const now = new Date('2026-11-12T12:00:00Z')
     const minutesAgo = (minutes: number) => now.getTime() - minutes * 60_000
     expect(formatPassiveQuotaEstimateNote({}, t, now)).toBe('')
+    expect(formatPassiveQuotaEstimateNote({ estimate: 'reset', sampledAt: minutesAgo(400) }, t, now))
+      .toBe('components.main.providers.quotaPassiveWindowReset')
     expect(formatPassiveQuotaEstimateNote({ estimate: 'projected', sampledAt: minutesAgo(400) }, t, now))
       .toBe('components.main.providers.quotaPassiveProjected')
     expect(formatPassiveQuotaEstimateNote({ estimate: 'aged', sampledAt: minutesAgo(6) }, t, now))

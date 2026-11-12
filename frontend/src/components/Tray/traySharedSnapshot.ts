@@ -61,6 +61,7 @@ export function sharedTrayQuotaItem(item: SharedTrayQuota, t: TranslateFn, now: 
     queriedAt: item.displayKind === 'balance' || item.displayKind === 'error' ? now.getTime() : undefined,
     invalidMessage: item.invalidMessage ? t('tray.queryFailed') : '',
     extra: [formatPassiveQuotaEstimateNote(item, t, now), `${item.extra ?? ''}`.trim()].filter(Boolean).join(' · '),
+    estimate: `${item.estimate ?? ''}`.trim() || undefined,
     countdownLabel: item.active === false ? t('components.main.providers.quotaInactive') : formatProviderQuotaCountdownLabel(validReset, now),
     progressRatio: item.total > 0 ? item.used / item.total : 0,
     trackedUsed: item.used,

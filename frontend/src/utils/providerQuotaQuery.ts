@@ -343,7 +343,7 @@ const formatPassiveQuotaSampleAge = (ageMs: number) => {
 
 /**
  * @author sm
- * 生成被动采样推算读数的提示：越过重置时间显示本地推算，样本过旧显示采样时长并提示可能不准确。
+ * 生成被动采样推算读数的提示：会话窗口重置后提示等待下一次请求，固定周期窗口显示本地推算，样本过旧显示采样时长并提示可能不准确。
  */
 export function formatPassiveQuotaEstimateNote(
   item: { estimate?: unknown, sampledAt?: unknown },
@@ -351,6 +351,9 @@ export function formatPassiveQuotaEstimateNote(
   now: Date,
 ): string {
   const estimate = String(item.estimate ?? '').trim()
+  if (estimate === 'reset') {
+    return t('components.main.providers.quotaPassiveWindowReset')
+  }
   if (estimate === 'projected') {
     return t('components.main.providers.quotaPassiveProjected')
   }

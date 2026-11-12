@@ -131,6 +131,8 @@ export type ProviderQuotaDisplayItem = {
   extra?: string
   invalidMessage?: string
   refreshErrorMessage?: string
+  /** 被动采样推算标记：aged / projected / reset，空表示最新读数 */
+  estimate?: string
 }
 
 export type ProviderStatDisplay =

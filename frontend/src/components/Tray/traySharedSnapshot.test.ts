@@ -47,4 +47,15 @@ describe('shared tray snapshot', () => {
     expect(display.extra).toBe('components.main.providers.quotaPassiveProjected')
     expect(sharedTrayQuotaItem({ ...base, extra: 'note' }, t, now).extra).toBe('note')
   })
+  it('shows reset session windows without a countdown', () => {
+    const passive: SharedTrayQuota = { ...base, key: 'five_hour', used: 0, total: 100, valueMode: 'count', unit: '%',
+      estimate: 'reset', sampledAt: now.getTime() - 6 * 3600_000 }
+    const item = sharedTrayQuotaItem(passive, t, now)
+    const display = resolveTrayProviderQuotaDisplay(item, t)
+    expect(item.estimate).toBe('reset')
+    expect(item.nextReset).toBeNull()
+    expect(display.displayKind).toBe('progress')
+    expect(display.countdownLabel).toBe('')
+    expect(display.extra).toBe('components.main.providers.quotaPassiveWindowReset')
+  })
 })

@@ -550,7 +550,7 @@
                 <span
                   v-for="item in progressQuotaItems"
                   :key="item.key"
-                  :class="['card-quota-item', `card-quota-item--${item.key}`, quotaProgressClass(item)]"
+                  :class="['card-quota-item', `card-quota-item--${item.key}`, quotaProgressClass(item), { 'card-quota-item--estimated': isQuotaEstimated(item) }]"
                   :title="quotaTooltip(item)"
                 >
                   <span class="quota-badge" :class="`quota-badge--${item.key}`">{{ item.label }}</span>
@@ -570,7 +570,7 @@
                     ></span>
                   </span>
                   <span class="quota-usage-percent">{{ quotaUsagePercent(item) }}</span>
-                  <span v-if="showQuotaCountdown(item)" class="quota-countdown">{{ item.countdownLabel }}</span>
+                  <span v-if="quotaCountdownText(item)" class="quota-countdown">{{ quotaCountdownText(item) }}</span>
                 </span>
               </div>
             </div>
@@ -777,7 +777,7 @@
               <span
                 v-for="item in progressQuotaItems"
                 :key="item.key"
-                :class="['card-quota-item', `card-quota-item--${item.key}`, quotaProgressClass(item)]"
+                :class="['card-quota-item', `card-quota-item--${item.key}`, quotaProgressClass(item), { 'card-quota-item--estimated': isQuotaEstimated(item) }]"
                 :title="quotaTooltip(item)"
               >
                 <span class="quota-badge" :class="`quota-badge--${item.key}`">{{ item.label }}</span>
@@ -797,7 +797,7 @@
                   ></span>
                 </span>
                 <span class="quota-usage-percent">{{ quotaUsagePercent(item) }}</span>
-                <span v-if="showQuotaCountdown(item)" class="quota-countdown">{{ item.countdownLabel }}</span>
+                <span v-if="quotaCountdownText(item)" class="quota-countdown">{{ quotaCountdownText(item) }}</span>
               </span>
             </div>
           </div>
@@ -1142,7 +1142,12 @@ const quotaProgressWidth = (item: ProviderQuotaDisplayItem) => getQuotaProgressP
 
 const quotaUsagePercent = (item: ProviderQuotaDisplayItem) => formatQuotaUsagePercent(item)
 
-const showQuotaCountdown = (item: ProviderQuotaDisplayItem) => Boolean(item.countdownLabel)
+// 会话窗口重置后没有倒计时，显示“待开始”，避免空白被误解为数据缺失
+const quotaCountdownText = (item: ProviderQuotaDisplayItem) => (
+  item.countdownLabel || (item.estimate === 'reset' ? t('components.main.providers.quotaPassiveWindowIdle') : '')
+)
+
+const isQuotaEstimated = (item: ProviderQuotaDisplayItem) => Boolean(item.estimate)
 
 const blacklistTriggerLabel = (source?: string) => {
   if (source === 'request' || source === 'health' || source === 'legacy') {

@@ -564,7 +564,7 @@ const quotaCards = computed(() => quotaItems.value.map((item) => ({
   countdownLabel: item.key === 'total'
     ? t('components.main.providerDataOverview.quotaNoResetLabel')
     : item.isActive
-      ? item.countdownLabel
+      ? item.countdownLabel || (item.estimate === 'reset' ? t('components.main.providers.quotaPassiveWindowIdle') : '')
       : t('components.main.providers.quotaInactive'),
   remainingLabel: !item.isActive
     ? `${item.invalidMessage ?? ''}`.trim() || t('components.main.providerDataOverview.quotaInactiveLabel')

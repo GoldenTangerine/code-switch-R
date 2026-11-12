@@ -125,6 +125,7 @@ export async function resolveProviderQuotaQueryDisplay({
           unit: `${item.unit ?? ''}`.trim() || undefined,
           extra,
           invalidMessage,
+          estimate: `${item.estimate ?? ''}`.trim() || undefined,
         }
       }),
     }

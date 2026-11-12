@@ -95,16 +95,25 @@ func TestClaudePassiveQuotaDoesNotInventUsageAfterReset(t *testing.T) {
 	now := time.Now().Truncate(time.Second)
 	service.sampleClaudePassiveQuota("https://example.com", "key", claudePassiveTestHeaders(now), now)
 	items, _ := service.queryClaudePassiveQuota("https://example.com", "key", now.Add(2*time.Hour))
-	if !items[0].Active || items[0].InvalidMessage != "" || items[0].Used != 0 || items[0].Estimate != passiveQuotaEstimateProjected ||
-		items[0].NextReset != now.Add(6*time.Hour).UTC().Format(time.RFC3339) || items[0].SampledAt != now.UnixMilli() {
-		t.Fatalf("越过重置时间后应按周期顺延并从零推算: %+v", items[0])
+	if !items[0].Active || items[0].InvalidMessage != "" || items[0].Used != 0 || items[0].Estimate != passiveQuotaEstimateReset ||
+		items[0].NextReset != "" || items[0].SampledAt != now.UnixMilli() {
+		t.Fatalf("5 小时窗口越过重置时间后应归零并等待下一次请求开始计时: %+v", items[0])
 	}
 	if !items[1].Active || items[1].Used != 42 || items[1].Estimate != passiveQuotaEstimateAged {
 		t.Fatalf("未到重置时间的窗口应保留旧样本并标记可能不准确: %+v", items[1])
 	}
 	items, _ = service.queryClaudePassiveQuota("https://example.com", "key", now.Add(13*time.Hour))
-	if items[0].NextReset != now.Add(16*time.Hour).UTC().Format(time.RFC3339) || items[0].Estimate != passiveQuotaEstimateProjected {
-		t.Fatalf("跨越多个周期时应顺延到下一次重置: %+v", items[0])
+	if items[0].NextReset != "" || items[0].Estimate != passiveQuotaEstimateReset {
+		t.Fatalf("会话窗口跨越多个周期也不能臆造倒计时: %+v", items[0])
+	}
+	items, _ = service.queryClaudePassiveQuota("https://example.com", "key", now.Add(4*24*time.Hour))
+	if !items[1].Active || items[1].Used != 0 || items[1].Estimate != passiveQuotaEstimateProjected ||
+		items[1].NextReset != now.Add(10*24*time.Hour).UTC().Format(time.RFC3339) {
+		t.Fatalf("7 天窗口越过重置时间后应按周期顺延并从零推算: %+v", items[1])
+	}
+	items, _ = service.queryClaudePassiveQuota("https://example.com", "key", now.Add(18*24*time.Hour))
+	if items[2].NextReset != now.Add(24*24*time.Hour).UTC().Format(time.RFC3339) || items[2].Estimate != passiveQuotaEstimateProjected {
+		t.Fatalf("跨越多个周期时应顺延到下一次重置: %+v", items[2])
 	}
 	headers := make(http.Header)
 	headers.Set("anthropic-ratelimit-unified-5h-reset", fmt.Sprint(now.Add(6*time.Hour).Unix()))

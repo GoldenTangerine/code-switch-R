@@ -1081,6 +1081,12 @@
   animation: quota-breathe 2.4s ease-in-out infinite;
 }
 
+/* 被动采样推算读数：进度条变淡并停止呼吸动画，提示不是最新的权威数据 */
+.card-quota-item--estimated .quota-progress-fill {
+  opacity: 0.5;
+  animation: none;
+}
+
 .quota-progress-fill::after {
   content: '';
   position: absolute;

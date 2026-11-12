@@ -796,6 +796,8 @@
         "quotaPassiveAged": "Sampled {age} ago, usage may be inaccurate",
         "quotaPassiveAgedUnknown": "Sampled over 5 minutes ago, usage may be inaccurate",
         "quotaPassiveProjected": "Reset time passed; estimated locally until a new request recalibrates it",
+        "quotaPassiveWindowReset": "Window reset; the countdown starts with the next request",
+        "quotaPassiveWindowIdle": "Idle",
         "quotaCodexPrimary": "Primary window",
         "quotaCodexSecondary": "Secondary window",
         "quotaQueryStatusLabel": "Quota query",
