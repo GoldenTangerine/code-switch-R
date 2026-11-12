@@ -126,6 +126,9 @@ export async function resolveProviderQuotaQueryDisplay({
           extra,
           invalidMessage,
           estimate: `${item.estimate ?? ''}`.trim() || undefined,
+          sampledAt: Number.isFinite(Number(item.sampledAt)) && Number(item.sampledAt) > 0
+            ? Number(item.sampledAt)
+            : undefined,
         }
       }),
     }

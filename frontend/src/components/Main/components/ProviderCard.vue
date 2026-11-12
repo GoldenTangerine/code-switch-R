@@ -1652,7 +1652,8 @@ const errorQuotaUpdatedAtLabel = computed(() => formatProviderQuotaRelativeUpdat
   t,
 ))
 
-watch(hasQuotaStatusPanelItems, (enabled) => {
+// 余额/错误面板的更新时间与额度项悬浮提示的“多久前获取”共用同一个计时器
+watch(() => hasQuotaStatusPanelItems.value || progressQuotaItems.value.length > 0, (enabled) => {
   if (enabled) {
     startBalanceQuotaTimeTicker()
     return
@@ -1696,8 +1697,13 @@ const quotaTooltip = (item: ProviderQuotaDisplayItem) => {
     : item.nextReset && item.countdownLabel
       ? t('components.main.providers.quotaTooltip', { label: item.label, used, total, countdown: item.countdownLabel })
       : t('components.main.providers.quotaTooltipNoCountdown', { label: item.label, used, total })
+  // 被动采样以采样时间为准，其余以查询时间为准；读 balanceQuotaNow 让提示随计时器刷新
+  const fetchedAt = item.sampledAt ?? item.queriedAt
+  const fetchedAtLabel = Number.isFinite(fetchedAt)
+    ? formatProviderQuotaRelativeUpdatedAt(fetchedAt, balanceQuotaNow.value, t)
+    : ''
 
-  return [baseTooltip, refreshErrorMessage, invalidMessage, extra].filter(Boolean).join('\n')
+  return [baseTooltip, fetchedAtLabel, refreshErrorMessage, invalidMessage, extra].filter(Boolean).join('\n')
 }
 
 type ApiFormatBadgeMeta = {

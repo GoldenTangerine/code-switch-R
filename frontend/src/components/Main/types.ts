@@ -133,6 +133,8 @@ export type ProviderQuotaDisplayItem = {
   refreshErrorMessage?: string
   /** 被动采样推算标记：aged / projected / reset，空表示最新读数 */
   estimate?: string
+  /** 被动采样时间（毫秒），仅被动采样项携带，比 queriedAt 更接近数据实际获取时间 */
+  sampledAt?: number
 }
 
 export type ProviderStatDisplay =
