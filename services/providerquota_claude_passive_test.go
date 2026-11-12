@@ -259,3 +259,51 @@ func TestClaudePassiveQuotaMarksAgedSamples(t *testing.T) {
 		t.Fatalf("新样本应清除推算标记: %+v", items[1])
 	}
 }
+
+func TestClaudePassiveQuotaHidesWindowsNotResampledInCurrentSession(t *testing.T) {
+	service := newMemoryClaudePassiveQuotaService(t)
+	now := time.Now().Truncate(time.Second)
+	service.sampleClaudePassiveQuota("https://example.com", "key", claudePassiveTestHeaders(now), now)
+	keys := func(at time.Time) []string {
+		items, _ := service.queryClaudePassiveQuota("https://example.com", "key", at)
+		result := make([]string, 0, len(items))
+		for _, item := range items {
+			result = append(result, item.Key)
+		}
+		return result
+	}
+	withoutFable := func(at time.Time, sessionReset time.Time) http.Header {
+		headers := make(http.Header)
+		headers.Set("anthropic-ratelimit-unified-5h-utilization", "0.05")
+		headers.Set("anthropic-ratelimit-unified-5h-reset", fmt.Sprint(sessionReset.Unix()))
+		headers.Set("anthropic-ratelimit-unified-7d-utilization", "0.43")
+		headers.Set("anthropic-ratelimit-unified-7d-reset", fmt.Sprint(now.Add(3*24*time.Hour).Unix()))
+		return headers
+	}
+
+	// 同一个 5 小时窗口内，非 Fable 请求不带 7d_oi 响应头，Fable 周窗口仍然保留。
+	service.sampleClaudePassiveQuota("https://example.com", "key", withoutFable(now.Add(30*time.Minute), now.Add(time.Hour)), now.Add(30*time.Minute))
+	if got := keys(now.Add(30 * time.Minute)); fmt.Sprint(got) != "[five_hour weekly weekly_fable]" {
+		t.Fatalf("同一会话窗口内不应隐藏未更新的窗口: %v", got)
+	}
+
+	// 新的 5 小时窗口开始后，未重新采样的 Fable 周窗口不再展示。
+	service.sampleClaudePassiveQuota("https://example.com", "key", withoutFable(now.Add(2*time.Hour), now.Add(7*time.Hour)), now.Add(2*time.Hour))
+	if got := keys(now.Add(2 * time.Hour)); fmt.Sprint(got) != "[five_hour weekly]" {
+		t.Fatalf("新会话窗口内未重新采样的窗口应隐藏: %v", got)
+	}
+	// 新窗口到期后仍没有请求时，沿用最近一次会话的判断，不恢复旧样本。
+	if got := keys(now.Add(8 * time.Hour)); fmt.Sprint(got) != "[five_hour weekly]" {
+		t.Fatalf("会话窗口过期后不应恢复上上个窗口的旧样本: %v", got)
+	}
+
+	// Fable 请求重新带回 7d_oi 后恢复展示。
+	fable := withoutFable(now.Add(3*time.Hour), now.Add(7*time.Hour))
+	fable.Set("anthropic-ratelimit-unified-7d_oi-utilization", "0.2")
+	fable.Set("anthropic-ratelimit-unified-7d_oi-reset", fmt.Sprint(now.Add(3*24*time.Hour).Unix()))
+	service.sampleClaudePassiveQuota("https://example.com", "key", fable, now.Add(3*time.Hour))
+	items, _ := service.queryClaudePassiveQuota("https://example.com", "key", now.Add(3*time.Hour))
+	if len(items) != 3 || items[2].Key != "weekly_fable" || items[2].Used != 20 || items[2].Estimate != "" {
+		t.Fatalf("新会话窗口内重新采样后应恢复展示: %+v", items)
+	}
+}

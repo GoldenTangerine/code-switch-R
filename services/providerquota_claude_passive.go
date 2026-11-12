@@ -216,9 +216,19 @@ func (s *ProviderQuotaQueryService) queryClaudePassiveQuota(baseURL, apiKey stri
 		store.mu.RLock()
 		defer store.mu.RUnlock()
 		snapshot := store.snapshots[passiveQuotaCacheKey(baseURL, apiKey)]
+		// 与 sub2api 一致：新的 5 小时窗口开始后只展示在该窗口内重新采样到的数据。
+		// 例如 7d_oi 仅随 Fable 请求返回，新窗口内没有出现时不再展示上个窗口留下的旧值。
+		sessionSpec := claudePassiveQuotaWindows[0]
+		sessionStart := int64(0)
+		if session := snapshot[sessionSpec.key]; session.ResetAt > 0 {
+			sessionStart = session.ResetAt - int64(sessionSpec.period/time.Second)
+		}
 		for _, spec := range claudePassiveQuotaWindows {
 			window, ok := snapshot[spec.key]
 			if !ok || !window.HasUsage {
+				continue
+			}
+			if spec.key != sessionSpec.key && sessionStart > 0 && window.SampledAt < sessionStart {
 				continue
 			}
 			item := ProviderQuotaQueryItem{Key: spec.key, Label: spec.label, Used: window.Utilization * 100,
