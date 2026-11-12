@@ -28,6 +28,11 @@ import (
 const (
 	claudePassiveQuotaPending = "claude_passive_pending"
 	claudePassiveQuotaStale   = "claude_passive_stale"
+
+	passiveQuotaEstimateAged      = "aged"
+	passiveQuotaEstimateProjected = "projected"
+	// 超过该时长没有新样本时，上游可能已被其他客户端继续消耗，用量只能作为参考。
+	passiveQuotaAgedAfter = 5 * time.Minute
 )
 
 var claudePassiveQuotaWindows = []struct {
@@ -90,6 +95,37 @@ func (s *ProviderQuotaQueryService) initDB() error {
 	}
 	s.claudePassive.queue = GlobalDBQueue
 	return s.initCodexPassiveQuotaDB()
+}
+
+// applyPassiveQuotaWindowEstimate 基于最后一次样本补全读数：越过重置时间后按周期顺延并视为新窗口，样本超过 5 分钟时标记为可能不准确。
+// period 为已知的窗口周期（未知传 0，此时不做顺延）；staleAfter 用于缺少重置时间的样本判断过期。
+// 仅在读取时推算，不回写样本，避免影响采样时的新旧窗口判断。返回 false 表示样本已无法继续使用，应视为过期。
+func applyPassiveQuotaWindowEstimate(item *ProviderQuotaQueryItem, resetAt, sampledAt int64, period, staleAfter time.Duration, now time.Time) bool {
+	periodSeconds, nowSeconds := int64(period/time.Second), now.Unix()
+	if sampledAt > 0 {
+		item.SampledAt = sampledAt * 1000
+	}
+	if resetAt > 0 {
+		item.NextReset = time.Unix(resetAt, 0).UTC().Format(time.RFC3339)
+	}
+	switch {
+	case resetAt <= 0:
+		if nowSeconds >= sampledAt+int64(staleAfter/time.Second) {
+			return false
+		}
+	case resetAt > nowSeconds:
+	case periodSeconds > 0:
+		resetAt += ((nowSeconds-resetAt)/periodSeconds + 1) * periodSeconds
+		item.NextReset = time.Unix(resetAt, 0).UTC().Format(time.RFC3339)
+		item.Used, item.Estimate = 0, passiveQuotaEstimateProjected
+	default:
+		// 已越过重置时间但不知道窗口周期，无法推算下一次重置。
+		return false
+	}
+	if item.Estimate == "" && sampledAt > 0 && now.Sub(time.Unix(sampledAt, 0)) > passiveQuotaAgedAfter {
+		item.Estimate = passiveQuotaEstimateAged
+	}
+	return true
 }
 
 func passiveQuotaCacheKey(baseURL, apiKey string) string {
@@ -181,10 +217,7 @@ func (s *ProviderQuotaQueryService) queryClaudePassiveQuota(baseURL, apiKey stri
 			}
 			item := ProviderQuotaQueryItem{Key: spec.key, Label: spec.label, Used: window.Utilization * 100,
 				Total: 100, Active: true, ValueMode: "count", Unit: "%"}
-			if window.ResetAt > 0 {
-				item.NextReset = time.Unix(window.ResetAt, 0).UTC().Format(time.RFC3339)
-			}
-			if (window.ResetAt > 0 && window.ResetAt <= now.Unix()) || now.Unix() >= window.SampledAt+int64(spec.period/time.Second) {
+			if !applyPassiveQuotaWindowEstimate(&item, window.ResetAt, window.SampledAt, spec.period, spec.period, now) {
 				item.Active, item.InvalidMessage = false, claudePassiveQuotaStale
 			}
 			items = append(items, item)

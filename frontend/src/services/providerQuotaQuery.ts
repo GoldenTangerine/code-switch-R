@@ -22,6 +22,10 @@ export type ProviderQuotaQueryItem = {
   unit?: string
   extra?: string
   invalidMessage?: string
+  /** 被动采样时间（毫秒） */
+  sampledAt?: number
+  /** 推算标记：aged 为样本超过 5 分钟，projected 为越过重置时间后本地顺延 */
+  estimate?: 'aged' | 'projected' | string
 }
 
 export type ProviderQuotaQueryResult = {

@@ -643,6 +643,12 @@ func TestCodenotchQuotaStates(t *testing.T) {
 		{"zero-inactive", false, []TraySnapshotQuota{{ProviderQuotaQueryItem: ProviderQuotaQueryItem{Total: 0, Used: 0, Active: false}, DisplayKind: "balance"}}, "exhausted"},
 		{"unlimited", false, []TraySnapshotQuota{{ProviderQuotaQueryItem: ProviderQuotaQueryItem{Unlimited: true}, DisplayKind: "progress"}}, "available"},
 		{"invalid", false, []TraySnapshotQuota{{ProviderQuotaQueryItem: ProviderQuotaQueryItem{InvalidMessage: "failed"}, DisplayKind: "balance"}}, "unknown"},
+		{"estimated-only", false, []TraySnapshotQuota{{ProviderQuotaQueryItem: ProviderQuotaQueryItem{Total: 100, Used: 100, Active: true, Estimate: passiveQuotaEstimateAged}, DisplayKind: "progress"}}, "unknown"},
+		{"estimated-mixed", false, []TraySnapshotQuota{
+			{ProviderQuotaQueryItem: ProviderQuotaQueryItem{Total: 100, Used: 100, Active: true, Estimate: passiveQuotaEstimateAged}, DisplayKind: "progress"},
+			{ProviderQuotaQueryItem: ProviderQuotaQueryItem{Total: 100, Used: 0, Active: true, Estimate: passiveQuotaEstimateProjected}, DisplayKind: "progress"},
+			{ProviderQuotaQueryItem: ProviderQuotaQueryItem{Total: 100, Used: 30, Active: true}, DisplayKind: "progress"},
+		}, "available"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

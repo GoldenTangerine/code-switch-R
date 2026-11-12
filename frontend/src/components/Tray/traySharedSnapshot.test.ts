@@ -38,4 +38,13 @@ describe('shared tray snapshot', () => {
     expect(item.nextReset?.toISOString()).toBe('2026-09-08T15:00:00.000Z')
     expect(sharedTrayQuotaItem({ ...base, active: false }, t, now).countdownLabel).toBe('components.main.providers.quotaInactive')
   })
+  it('keeps estimated passive samples as progress with an accuracy note', () => {
+    const passive: SharedTrayQuota = { ...base, key: 'five_hour', used: 0, total: 100, valueMode: 'count', unit: '%',
+      nextReset: '2026-09-08T15:00:00Z', estimate: 'projected', sampledAt: now.getTime() - 6 * 3600_000 }
+    const display = resolveTrayProviderQuotaDisplay(sharedTrayQuotaItem(passive, t, now), t)
+    expect(display.displayKind).toBe('progress')
+    expect(display.invalidMessage).toBe('')
+    expect(display.extra).toBe('components.main.providers.quotaPassiveProjected')
+    expect(sharedTrayQuotaItem({ ...base, extra: 'note' }, t, now).extra).toBe('note')
+  })
 })

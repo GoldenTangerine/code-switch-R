@@ -334,6 +334,36 @@ const providerQuotaTokenPlanProviderSet = new Set<ProviderQuotaTokenPlanProvider
   'codex_passive',
 ])
 
+const formatPassiveQuotaSampleAge = (ageMs: number) => {
+  const minutes = Math.max(Math.floor(ageMs / 60_000), 1)
+  if (minutes < 60) return `${minutes}m`
+  const hours = Math.floor(minutes / 60)
+  return hours < 24 ? `${hours}h` : `${Math.floor(hours / 24)}d`
+}
+
+/**
+ * @author sm
+ * 生成被动采样推算读数的提示：越过重置时间显示本地推算，样本过旧显示采样时长并提示可能不准确。
+ */
+export function formatPassiveQuotaEstimateNote(
+  item: { estimate?: unknown, sampledAt?: unknown },
+  t: (key: string, ...args: any[]) => string,
+  now: Date,
+): string {
+  const estimate = String(item.estimate ?? '').trim()
+  if (estimate === 'projected') {
+    return t('components.main.providers.quotaPassiveProjected')
+  }
+  if (estimate !== 'aged') return ''
+  const sampledAt = Number(item.sampledAt)
+  if (!Number.isFinite(sampledAt) || sampledAt <= 0) {
+    return t('components.main.providers.quotaPassiveAgedUnknown')
+  }
+  return t('components.main.providers.quotaPassiveAged', {
+    age: formatPassiveQuotaSampleAge(now.getTime() - sampledAt),
+  })
+}
+
 export function localizeProviderQuotaMessage(value: unknown, t: (key: string) => string): string {
   const message = String(value ?? '').trim()
   if (message === 'claude_passive_pending') {

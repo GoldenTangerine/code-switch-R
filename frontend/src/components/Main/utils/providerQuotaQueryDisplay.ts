@@ -11,6 +11,7 @@ import type { AutomationCard } from '../../../data/cards'
 import { checkProviderQuota, queryProviderQuota } from '../../../services/providerQuotaQuery'
 import { roundBudgetValue } from '../../../utils/budgetUsage'
 import {
+  formatPassiveQuotaEstimateNote,
   hasProviderQuotaQueryType,
   normalizeProviderQuotaQueryConfig,
   localizeProviderQuotaMessage,
@@ -100,7 +101,9 @@ export async function resolveProviderQuotaQueryDisplay({
           ? codexWindowLabelKeyMap[normalizedKey]
           : undefined
         const invalidMessage = localizeProviderQuotaMessage(item.invalidMessage, t) || undefined
-        const extra = `${item.extra ?? ''}`.trim() || undefined
+        const extra = [formatPassiveQuotaEstimateNote(item, t, now), `${item.extra ?? ''}`.trim()]
+          .filter(Boolean)
+          .join(' · ') || undefined
         return {
           key: normalizedKey,
           label: defaultLabelKey ? t(defaultLabelKey) : `${item.label ?? ''}`.trim()

@@ -86,6 +86,9 @@ type ProviderQuotaQueryItem struct {
 	Unit           string  `json:"unit,omitempty"`
 	Extra          string  `json:"extra,omitempty"`
 	InvalidMessage string  `json:"invalidMessage,omitempty"`
+	// SampledAt 为被动采样时间（毫秒），Estimate 标记读数是否为推算值：aged 表示样本已超过 5 分钟，projected 表示已越过重置时间并在本地顺延窗口。
+	SampledAt int64  `json:"sampledAt,omitempty"`
+	Estimate  string `json:"estimate,omitempty"`
 }
 
 type ProviderQuotaQueryResult struct {

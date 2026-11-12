@@ -173,14 +173,13 @@ func (s *ProviderQuotaQueryService) queryCodexPassiveQuota(baseURL, apiKey strin
 			}
 			item := ProviderQuotaQueryItem{Key: "codex_" + slot, Label: codexPassiveQuotaWindowLabel(window.WindowMinutes),
 				Used: window.UsedPercent, Total: 100, Active: true, ValueMode: "count", Unit: "%"}
-			if window.ResetAt > 0 {
-				item.NextReset = time.Unix(window.ResetAt, 0).UTC().Format(time.RFC3339)
-			}
-			period := 5 * time.Hour
+			// 未返回窗口长度时只按 5 小时判断缺少重置时间的样本是否过期，不据此顺延重置时间。
+			period, staleAfter := time.Duration(0), 5*time.Hour
 			if window.WindowMinutes > 0 {
 				period = time.Duration(window.WindowMinutes) * time.Minute
+				staleAfter = period
 			}
-			if (window.ResetAt > 0 && window.ResetAt <= now.Unix()) || now.Unix() >= window.SampledAt+int64(period/time.Second) {
+			if !applyPassiveQuotaWindowEstimate(&item, window.ResetAt, window.SampledAt, period, staleAfter, now) {
 				item.Active, item.InvalidMessage = false, codexPassiveQuotaStale
 			}
 			items = append(items, item)

@@ -95,8 +95,16 @@ func TestClaudePassiveQuotaDoesNotInventUsageAfterReset(t *testing.T) {
 	now := time.Now().Truncate(time.Second)
 	service.sampleClaudePassiveQuota("https://example.com", "key", claudePassiveTestHeaders(now), now)
 	items, _ := service.queryClaudePassiveQuota("https://example.com", "key", now.Add(2*time.Hour))
-	if items[0].Active || items[0].InvalidMessage != claudePassiveQuotaStale || !items[1].Active {
-		t.Fatalf("过期窗口应等待新样本，其他窗口应继续有效: %+v", items)
+	if !items[0].Active || items[0].InvalidMessage != "" || items[0].Used != 0 || items[0].Estimate != passiveQuotaEstimateProjected ||
+		items[0].NextReset != now.Add(6*time.Hour).UTC().Format(time.RFC3339) || items[0].SampledAt != now.UnixMilli() {
+		t.Fatalf("越过重置时间后应按周期顺延并从零推算: %+v", items[0])
+	}
+	if !items[1].Active || items[1].Used != 42 || items[1].Estimate != passiveQuotaEstimateAged {
+		t.Fatalf("未到重置时间的窗口应保留旧样本并标记可能不准确: %+v", items[1])
+	}
+	items, _ = service.queryClaudePassiveQuota("https://example.com", "key", now.Add(13*time.Hour))
+	if items[0].NextReset != now.Add(16*time.Hour).UTC().Format(time.RFC3339) || items[0].Estimate != passiveQuotaEstimateProjected {
+		t.Fatalf("跨越多个周期时应顺延到下一次重置: %+v", items[0])
 	}
 	headers := make(http.Header)
 	headers.Set("anthropic-ratelimit-unified-5h-reset", fmt.Sprint(now.Add(6*time.Hour).Unix()))
@@ -218,5 +226,27 @@ func TestClaudePassiveQuotaDoesNotAutoDisableProvider(t *testing.T) {
 	result := automation.checkProviderQuota("claude", "1")
 	if !result.Success || !result.ProviderEnabled || result.QuotaAutoDisabled || result.StateChanged {
 		t.Fatalf("被动模式不应自动停用供应商: %+v", result)
+	}
+}
+
+func TestClaudePassiveQuotaMarksAgedSamples(t *testing.T) {
+	service := newMemoryClaudePassiveQuotaService(t)
+	now := time.Now().Truncate(time.Second)
+	service.sampleClaudePassiveQuota("https://example.com", "key", claudePassiveTestHeaders(now), now)
+	items, _ := service.queryClaudePassiveQuota("https://example.com", "key", now.Add(passiveQuotaAgedAfter))
+	for _, item := range items {
+		if item.Estimate != "" || !item.Active {
+			t.Fatalf("5 分钟内的样本应视为准确: %+v", item)
+		}
+	}
+	items, _ = service.queryClaudePassiveQuota("https://example.com", "key", now.Add(passiveQuotaAgedAfter+time.Second))
+	if items[1].Estimate != passiveQuotaEstimateAged || items[1].Used != 42 || !items[1].Active ||
+		items[1].NextReset != now.Add(3*24*time.Hour).UTC().Format(time.RFC3339) {
+		t.Fatalf("超过 5 分钟的样本应保留旧值并标记可能不准确: %+v", items[1])
+	}
+	service.sampleClaudePassiveQuota("https://example.com", "key", claudePassiveTestHeaders(now.Add(10*time.Minute)), now.Add(10*time.Minute))
+	items, _ = service.queryClaudePassiveQuota("https://example.com", "key", now.Add(10*time.Minute))
+	if items[1].Estimate != "" {
+		t.Fatalf("新样本应清除推算标记: %+v", items[1])
 	}
 }

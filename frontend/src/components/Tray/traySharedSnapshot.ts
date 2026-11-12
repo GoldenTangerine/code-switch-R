@@ -10,6 +10,7 @@
 import { Call } from '@wailsio/runtime'
 import type { ProviderDailyStat } from '../../services/logs'
 import type { ProviderQuotaQueryItem } from '../../services/providerQuotaQuery'
+import { formatPassiveQuotaEstimateNote } from '../../utils/providerQuotaQuery'
 import type { ProviderQuotaSnapshotItem } from '../Main/utils/providerQuotaSnapshot'
 import { formatProviderQuotaCountdownLabel, providerQuotaLabelKeyMap } from '../Main/utils/providerQuotaSnapshot'
 import type { TranslateFn } from '../Main/types'
@@ -59,7 +60,7 @@ export function sharedTrayQuotaItem(item: SharedTrayQuota, t: TranslateFn, now: 
     nextReset: validReset,
     queriedAt: item.displayKind === 'balance' || item.displayKind === 'error' ? now.getTime() : undefined,
     invalidMessage: item.invalidMessage ? t('tray.queryFailed') : '',
-    extra: item.extra,
+    extra: [formatPassiveQuotaEstimateNote(item, t, now), `${item.extra ?? ''}`.trim()].filter(Boolean).join(' · '),
     countdownLabel: item.active === false ? t('components.main.providers.quotaInactive') : formatProviderQuotaCountdownLabel(validReset, now),
     progressRatio: item.total > 0 ? item.used / item.total : 0,
     trackedUsed: item.used,

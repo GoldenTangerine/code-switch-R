@@ -117,8 +117,13 @@ func TestCodexPassiveQuotaDoesNotInventUsageAfterResetOrWindowChange(t *testing.
 		t.Fatalf("同一窗口的倒计时取整不应丢失有效使用率: %+v", items)
 	}
 	items, _ = service.queryCodexPassiveQuota("https://example.com", "key", now.Add(2*time.Hour))
-	if items[0].Active || items[0].InvalidMessage != codexPassiveQuotaStale || !items[1].Active {
-		t.Fatalf("过期窗口应等待新样本，其他窗口应继续有效: %+v", items)
+	projectedReset, _ := time.Parse(time.RFC3339, items[0].NextReset)
+	if !items[0].Active || items[0].Used != 0 || items[0].Estimate != passiveQuotaEstimateProjected ||
+		!projectedReset.After(now.Add(2*time.Hour)) || projectedReset.After(now.Add(7*time.Hour)) {
+		t.Fatalf("越过重置时间后应按窗口周期顺延并从零推算: %+v", items[0])
+	}
+	if !items[1].Active || items[1].Used != 42 || items[1].Estimate != passiveQuotaEstimateAged {
+		t.Fatalf("其他窗口应保留旧样本并标记可能不准确: %+v", items[1])
 	}
 	headers.Set("x-codex-primary-reset-after-seconds", "18000")
 	service.sampleCodexPassiveQuota("https://example.com", "key", headers, now.Add(2*time.Hour))
@@ -160,6 +165,16 @@ func TestCodexPassiveQuotaUnknownWindowAndMissingResetExpire(t *testing.T) {
 	items, _ = service.queryCodexPassiveQuota("https://example.com", "key", now.Add(5*time.Hour))
 	if items[0].Active || items[0].InvalidMessage != codexPassiveQuotaStale {
 		t.Fatalf("缺少重置信息的旧样本不能永久有效: %+v", items)
+	}
+	headers.Set("x-codex-primary-reset-after-seconds", "600")
+	service.sampleCodexPassiveQuota("https://example.com", "key", headers, now)
+	items, _ = service.queryCodexPassiveQuota("https://example.com", "key", now.Add(5*time.Minute))
+	if !items[0].Active || items[0].Estimate != "" {
+		t.Fatalf("未知窗口长度但未到重置时间时应正常展示: %+v", items)
+	}
+	items, _ = service.queryCodexPassiveQuota("https://example.com", "key", now.Add(11*time.Minute))
+	if items[0].Active || items[0].InvalidMessage != codexPassiveQuotaStale || items[0].Estimate != "" {
+		t.Fatalf("未知窗口长度时越过重置时间不能臆造下一次重置: %+v", items)
 	}
 }
 

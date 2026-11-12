@@ -12,6 +12,7 @@ import {
   buildProviderQuotaPresetCode,
   detectProviderQuotaBalanceProvider,
   detectProviderQuotaTokenPlanProvider,
+  formatPassiveQuotaEstimateNote,
   hasProviderQuotaQueryMissingCredentials,
   isPassiveProviderQuotaQueryType,
   normalizeProviderQuotaQueryConfig,
@@ -68,6 +69,23 @@ describe('providerQuotaQuery utils', () => {
     expect(localizeProviderQuotaMessage('codex_passive_stale', t)).toBe('translated:components.main.providers.quotaCodexPassiveStale')
     expect(localizeProviderQuotaMessage(' Other error ', t)).toBe('Other error')
     expect(localizeProviderQuotaMessage(undefined, t)).toBe('')
+  })
+
+  it('describes aged and projected passive samples', () => {
+    const t = (key: string, params?: Record<string, unknown>) => `${key}${params ? JSON.stringify(params) : ''}`
+    const now = new Date('2026-11-12T12:00:00Z')
+    const minutesAgo = (minutes: number) => now.getTime() - minutes * 60_000
+    expect(formatPassiveQuotaEstimateNote({}, t, now)).toBe('')
+    expect(formatPassiveQuotaEstimateNote({ estimate: 'projected', sampledAt: minutesAgo(400) }, t, now))
+      .toBe('components.main.providers.quotaPassiveProjected')
+    expect(formatPassiveQuotaEstimateNote({ estimate: 'aged', sampledAt: minutesAgo(6) }, t, now))
+      .toBe('components.main.providers.quotaPassiveAged{"age":"6m"}')
+    expect(formatPassiveQuotaEstimateNote({ estimate: 'aged', sampledAt: minutesAgo(150) }, t, now))
+      .toBe('components.main.providers.quotaPassiveAged{"age":"2h"}')
+    expect(formatPassiveQuotaEstimateNote({ estimate: 'aged', sampledAt: minutesAgo(3 * 24 * 60) }, t, now))
+      .toBe('components.main.providers.quotaPassiveAged{"age":"3d"}')
+    expect(formatPassiveQuotaEstimateNote({ estimate: 'aged' }, t, now))
+      .toBe('components.main.providers.quotaPassiveAgedUnknown')
   })
 
   it('keeps active quota queries on the remote refresh path', () => {

@@ -778,6 +778,10 @@ func codenotchQuotaState(autoDisabled bool, quotas []TraySnapshotQuota) string {
 		if quota.DisplayKind != "progress" && quota.DisplayKind != "balance" {
 			continue
 		}
+		// 被动采样的推算读数只用于展示，不作为额度可用或耗尽的依据。
+		if quota.Estimate != "" {
+			continue
+		}
 		items = append(items, quota.ProviderQuotaQueryItem)
 	}
 	exhausted, valid := quotaItemsExhausted(items)
