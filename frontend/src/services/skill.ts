@@ -1,6 +1,16 @@
+/**
+ * @name: 技能服务接口
+ * @Descripttion: 封装技能库、各应用技能和仓库管理的 Wails 调用。
+ * @version: 1.0.0
+ * @Author: sm
+ * @Date: 2026-11-20 15:31:00
+ * @LastEditTime: 2026-11-20 15:31:00
+ * @FilePath: frontend/src/services/skill.ts
+ */
 import { Call } from '@wailsio/runtime'
 
-export type SkillPlatform = 'claude' | 'codex' | 'opencode' | 'grokbuild'
+export const skillPlatforms = ['claude', 'codex', 'gemini', 'opencode', 'grokbuild', 'openclaw', 'hermes', 'pi'] as const
+export type SkillPlatform = typeof skillPlatforms[number]
 
 export type SkillSummary = {
   key: string
@@ -9,17 +19,34 @@ export type SkillSummary = {
   directory: string
   readme_url: string
   installed: boolean
+  read_only?: boolean
 
   // 新增字段
   enabled: boolean
   license_file?: string
   platform: SkillPlatform | ''
-  install_location: 'user' | 'project' | ''
+  install_location?: 'user' | 'project' | 'opencode-legacy-project' | 'pi-legacy-project' | 'openclaw-legacy-project' | 'library'
 
   // 仓库字段
   repo_owner?: string
   repo_name?: string
   repo_branch?: string
+  repo_path?: string
+}
+
+export type ManagedSkill = SkillSummary & {
+  apps: Record<SkillPlatform, boolean>
+  conflicts: SkillPlatform[]
+  app_statuses: Record<SkillPlatform, SkillAppStatus>
+  master_status: '' | 'missing' | 'unregistered'
+}
+
+export type SkillAppStatus = 'synced' | 'disabled' | 'inherited' | 'blocked' | 'broken' | 'conflict' | 'unavailable'
+
+export type SkillLibrary = {
+  managed: ManagedSkill[]
+  local: SkillSummary[]
+  warnings: string[]
 }
 
 export type SkillRepoConfig = {
@@ -34,8 +61,39 @@ export type InstallSkillPayload = {
   repo_owner?: string
   repo_name?: string
   repo_branch?: string
+  repo_path?: string
   platform?: SkillPlatform
   location?: 'user' | 'project'
+  apps?: SkillPlatform[]
+}
+
+export const fetchSkillLibrary = async (): Promise<SkillLibrary> => {
+  return await Call.ByName('codeswitch/services.SkillService.ListSkillLibrary') as SkillLibrary
+}
+
+export const discoverSkills = async (): Promise<SkillSummary[]> => {
+  const response = await Call.ByName('codeswitch/services.SkillService.DiscoverSkills')
+  return (response as SkillSummary[]) ?? []
+}
+
+export const importLocalSkill = async (directory: string, app: SkillPlatform): Promise<void> => {
+  await Call.ByName('codeswitch/services.SkillService.ImportLocalSkill', directory, app)
+}
+
+export const setManagedSkillEnabled = async (
+  directory: string,
+  app: SkillPlatform,
+  enabled: boolean
+): Promise<void> => {
+  await Call.ByName('codeswitch/services.SkillService.SetManagedSkillEnabled', directory, app, enabled)
+}
+
+export const uninstallManagedSkill = async (directory: string): Promise<void> => {
+  await Call.ByName('codeswitch/services.SkillService.UninstallManagedSkill', directory)
+}
+
+export const recoverManagedSkill = async (directory: string): Promise<void> => {
+  await Call.ByName('codeswitch/services.SkillService.RecoverManagedSkill', directory)
 }
 
 // 获取所有技能列表（原有方法，向后兼容）

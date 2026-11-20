@@ -1,3 +1,12 @@
+<!--
+@name: 英文项目说明
+@Descripttion: 以英文介绍 Code Switch 的功能、使用方式与开发流程。
+@version: 1.0.0
+@Author: sm
+@Date: 2026-11-20 15:49:00
+@LastEditTime: 2026-11-20 15:49:00
+@FilePath: README_EN.md
+-->
 # Code Switch
 
 > Manage all your AI coding assistants in one place
@@ -173,12 +182,12 @@ A complete pipeline to keep provider quotas from running over:
 - Visual environment variable editing
 - Batch import supported
 
-### Skill Marketplace
+### Skill Management
 
-- One-click install of Claude Skills from Skill repositories
-- Project-level / user-level grouping and management
-- Add custom Skill repository sources
-- Open local Skill folders or jump to the GitHub source directly
+- Install a skill from a GitHub repository in Discover and select multiple apps at once.
+- Enable or disable skills per app in Installed. The library keeps a master copy in `~/.code-switch/skills`.
+- Add existing user skills to the library from Unmanaged Local Skills. Project skills are grouped by the current working directory.
+- The switches manage user-level skills. OpenCode and Grok Build can disable inherited skills through their own settings. The list shows shared sources for other apps.
 
 ### Prompt Management
 

@@ -1,3 +1,11 @@
+// @name: 技能服务
+// @Descripttion: 扫描本地技能目录并从配置的仓库发现和下载技能。
+// @version: 1.0.0
+// @Author: sm
+// @Date: 2026-11-20 15:31:00
+// @LastEditTime: 2026-11-20 15:31:00
+// @FilePath: services/skillservice.go
+
 package services
 
 import (
@@ -9,6 +17,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -26,6 +35,7 @@ const (
 	// 平台常量
 	skillPlatformClaude    = "claude"
 	skillPlatformCodex     = "codex"
+	skillPlatformGemini    = "gemini"
 	skillPlatformOpenCode  = "opencode"
 	skillPlatformGrokBuild = "grokbuild"
 	skillPlatformOpenClaw  = "openclaw"
@@ -33,8 +43,11 @@ const (
 	skillPlatformPi        = "pi"
 
 	// 安装位置常量
-	skillLocationUser    = "user"
-	skillLocationProject = "project"
+	skillLocationUser           = "user"
+	skillLocationProject        = "project"
+	skillLocationLegacyOpenCode = "opencode-legacy-project"
+	skillLocationLegacyPi       = "pi-legacy-project"
+	skillLocationLegacyOpenClaw = "openclaw-legacy-project"
 )
 
 var (
@@ -52,6 +65,7 @@ type Skill struct {
 	Directory   string `json:"directory"`
 	ReadmeURL   string `json:"readme_url"`
 	Installed   bool   `json:"installed"`
+	ReadOnly    bool   `json:"read_only,omitempty"`
 
 	// 新增字段
 	Enabled         bool   `json:"enabled"`                    // 是否启用（从 SKILL.md 读取）
@@ -63,6 +77,7 @@ type Skill struct {
 	RepoOwner  string `json:"repo_owner,omitempty"`
 	RepoName   string `json:"repo_name,omitempty"`
 	RepoBranch string `json:"repo_branch,omitempty"`
+	RepoPath   string `json:"repo_path,omitempty"`
 }
 
 type skillMetadata struct {
@@ -79,8 +94,9 @@ type skillMetadataExtended struct {
 }
 
 type skillStore struct {
-	Skills map[string]skillState `json:"skills"`
-	Repos  []skillRepoConfig     `json:"repos"`
+	Skills  map[string]skillState        `json:"skills"`
+	Repos   []skillRepoConfig            `json:"repos"`
+	Managed map[string]managedSkillState `json:"managed,omitempty"`
 }
 
 type skillState struct {
@@ -96,18 +112,21 @@ type skillRepoConfig struct {
 }
 
 type installRequest struct {
-	Directory string `json:"directory"`
-	RepoOwner string `json:"repo_owner"`
-	RepoName  string `json:"repo_name"`
-	Branch    string `json:"repo_branch"`
-	Platform  string `json:"platform"` // "claude" | "codex"
-	Location  string `json:"location"` // "user" | "project"
+	Directory string   `json:"directory"`
+	RepoOwner string   `json:"repo_owner"`
+	RepoName  string   `json:"repo_name"`
+	Branch    string   `json:"repo_branch"`
+	RepoPath  string   `json:"repo_path"`
+	Platform  string   `json:"platform"` // "claude" | "codex"
+	Location  string   `json:"location"` // "user" | "project"
+	Apps      []string `json:"apps"`
 }
 
 type SkillService struct {
 	httpClient *http.Client
 	storePath  string
 	installDir string
+	lookupEnv  func(string) string
 	mu         sync.Mutex
 }
 
@@ -120,17 +139,29 @@ func NewSkillService() *SkillService {
 		httpClient: &http.Client{Timeout: 60 * time.Second},
 		storePath:  filepath.Join(home, skillStoreDir, skillStoreFile),
 		installDir: filepath.Join(home, ".claude", "skills"),
+		lookupEnv:  os.Getenv,
 	}
 }
 
+func (ss *SkillService) skillHome() string {
+	return filepath.Dir(filepath.Dir(ss.storePath))
+}
+
+func (ss *SkillService) skillEnv(key string) string {
+	if ss.lookupEnv == nil {
+		return ""
+	}
+	return strings.TrimSpace(ss.lookupEnv(key))
+}
+
 // getInstallPath 根据平台和位置返回 skills 目录路径
-// platform: "claude" | "codex" | "opencode" | "grokbuild" | "openclaw" | "hermes" | "pi"
+// platform: "claude" | "codex" | "gemini" | "opencode" | "grokbuild" | "openclaw" | "hermes" | "pi"
 // location: "user" | "project"
 func (ss *SkillService) getInstallPath(platform, location string) (string, error) {
 	var basePath string
 
 	switch location {
-	case skillLocationProject:
+	case skillLocationProject, skillLocationLegacyOpenCode, skillLocationLegacyPi, skillLocationLegacyOpenClaw:
 		// 项目级: 使用当前工作目录
 		cwd, err := os.Getwd()
 		if err != nil {
@@ -138,42 +169,77 @@ func (ss *SkillService) getInstallPath(platform, location string) (string, error
 		}
 		basePath = cwd
 	case skillLocationUser:
-		fallthrough
+	case "":
 	default:
+		return "", fmt.Errorf("未知的技能安装位置 %q", location)
+	}
+	if basePath == "" {
 		// 用户级: 使用 home 目录
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("获取用户目录失败: %w", err)
-		}
-		basePath = home
+		basePath = ss.skillHome()
 	}
 
-	var configDir string
+	var configDir, overrideEnv string
 	switch platform {
 	case skillPlatformCodex:
-		configDir = ".codex"
+		configDir, overrideEnv = ".codex", "CODEX_HOME"
+	case skillPlatformGemini:
+		configDir = ".gemini"
+		if value := ss.skillEnv("GEMINI_CLI_HOME"); filepath.IsAbs(value) && (location == skillLocationUser || location == "") {
+			basePath = value
+		}
 	case skillPlatformOpenCode:
 		// OpenCode 的 skills 位于 XDG 配置目录（~/.config/opencode/skills）
 		configDir = filepath.Join(".config", "opencode")
+		if location == skillLocationProject {
+			configDir = ".opencode"
+		}
+		if value := ss.skillEnv("XDG_CONFIG_HOME"); filepath.IsAbs(value) && (location == skillLocationUser || location == "") {
+			basePath, configDir = value, "opencode"
+		}
 	case skillPlatformGrokBuild:
 		// Grok Build 的 skills 位于 ~/.grok/skills
-		configDir = ".grok"
+		configDir, overrideEnv = ".grok", "GROK_HOME"
 	case skillPlatformOpenClaw:
 		// OpenClaw 的 skills 位于 ~/.openclaw/skills
-		configDir = ".openclaw"
+		configDir, overrideEnv = ".openclaw", "OPENCLAW_STATE_DIR"
+		if location == skillLocationProject {
+			configDir = ""
+		}
 	case skillPlatformHermes:
 		// Hermes 的 skills 位于 ~/.hermes/skills
-		configDir = ".hermes"
+		configDir, overrideEnv = ".hermes", "HERMES_HOME"
 	case skillPlatformPi:
 		// Pi 的 skills 位于 ~/.pi/agent/skills
-		configDir = filepath.Join(".pi", "agent")
-	case skillPlatformClaude:
-		fallthrough
+		configDir, overrideEnv = filepath.Join(".pi", "agent"), "PI_CODING_AGENT_DIR"
+		if location == skillLocationProject {
+			configDir = ".pi"
+		}
+	case skillPlatformClaude, "":
+		configDir, overrideEnv = ".claude", "CLAUDE_CONFIG_DIR"
 	default:
-		configDir = ".claude"
+		return "", fmt.Errorf("未知的技能应用 %q", platform)
 	}
 
+	if overrideEnv != "" && (location == skillLocationUser || location == "") {
+		if value := ss.skillEnv(overrideEnv); filepath.IsAbs(value) {
+			return filepath.Join(value, "skills"), nil
+		}
+	}
 	return filepath.Join(basePath, configDir, "skills"), nil
+}
+
+func skillLocations(platform string) []string {
+	locations := []string{skillLocationUser, skillLocationProject}
+	switch platform {
+	case skillPlatformOpenCode:
+		return append(locations, skillLocationLegacyOpenCode)
+	case skillPlatformPi:
+		return append(locations, skillLocationLegacyPi)
+	case skillPlatformOpenClaw:
+		return append(locations, skillLocationLegacyOpenClaw)
+	default:
+		return locations
+	}
 }
 
 // ListSkillsForPlatform 列出指定平台的技能（用户级 + 项目级）
@@ -187,15 +253,22 @@ func (ss *SkillService) ListSkillsForPlatform(platform string) ([]Skill, error) 
 	// 扫描用户级目录
 	userPath, err := ss.getInstallPath(platform, skillLocationUser)
 	if err == nil {
-		userSkills := ss.scanSkillsDirectory(userPath, platform, skillLocationUser)
+		userSkills, _ := ss.scanSkillsDirectory(userPath, platform, skillLocationUser)
 		allSkills = append(allSkills, userSkills...)
 	}
 
 	// 扫描项目级目录
 	projectPath, err := ss.getInstallPath(platform, skillLocationProject)
-	if err == nil {
-		projectSkills := ss.scanSkillsDirectory(projectPath, platform, skillLocationProject)
+	if err == nil && !sameSkillRoot(projectPath, userPath) {
+		projectSkills, _ := ss.scanSkillsDirectory(projectPath, platform, skillLocationProject)
 		allSkills = append(allSkills, projectSkills...)
+	}
+	for _, location := range skillLocations(platform)[2:] {
+		legacyPath, err := ss.getInstallPath(platform, location)
+		if err == nil && !sameSkillRoot(legacyPath, userPath) {
+			legacySkills, _ := ss.scanSkillsDirectory(legacyPath, platform, location)
+			allSkills = append(allSkills, legacySkills...)
+		}
 	}
 
 	// 按名称排序
@@ -207,63 +280,84 @@ func (ss *SkillService) ListSkillsForPlatform(platform string) ([]Skill, error) 
 }
 
 // scanSkillsDirectory 扫描目录中的技能
-func (ss *SkillService) scanSkillsDirectory(dir, platform, location string) []Skill {
-	var skills []Skill
+func (ss *SkillService) scanSkillsDirectory(dir, platform, location string) ([]Skill, error) {
+	depth := 1
+	switch platform {
+	case skillPlatformPi, skillPlatformOpenCode, skillPlatformOpenClaw, skillPlatformHermes:
+		depth = 6
+	}
+	return ss.scanSkillTree(dir, "", platform, location, depth)
+}
 
+func (ss *SkillService) scanSkillTree(root, relative, platform, location string, depth int) ([]Skill, error) {
+	dir := filepath.Join(root, relative)
 	entries, err := os.ReadDir(dir)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
 	if err != nil {
-		return skills
+		return nil, err
 	}
 
+	var skills []Skill
+	var problems []error
 	for _, entry := range entries {
-		if !entry.IsDir() {
+		if !validSkillDirectory(entry.Name()) || entry.Name() == "node_modules" ||
+			(!entry.IsDir() && entry.Type()&os.ModeSymlink == 0) {
 			continue
 		}
 
-		skillPath := filepath.Join(dir, entry.Name())
-		skillMDPath := filepath.Join(skillPath, "SKILL.md")
+		skillDir := filepath.Join(relative, entry.Name())
+		skillPath := filepath.Join(root, skillDir)
 
 		// 检查 SKILL.md 是否存在
-		if _, err := os.Stat(skillMDPath); err != nil {
+		if !hasSkillMarkdown(skillPath) {
+			if entry.IsDir() && depth > 1 {
+				nested, err := ss.scanSkillTree(root, skillDir, platform, location, depth-1)
+				if err != nil {
+					problems = append(problems, fmt.Errorf("%s: %w", skillPath, err))
+				}
+				skills = append(skills, nested...)
+			}
 			continue
 		}
 
 		// 读取元数据
-		meta, enabled, err := ss.readSkillMetadataExtended(skillPath)
-		if err != nil {
-			continue
-		}
-
-		name := strings.TrimSpace(meta.Name)
-		if name == "" {
-			name = entry.Name()
-		}
-
-		// 检查 LICENSE 文件
-		licenseFile := ""
-		for _, lf := range []string{"LICENSE", "LICENSE.txt", "LICENSE.md"} {
-			if _, err := os.Stat(filepath.Join(skillPath, lf)); err == nil {
-				licenseFile = lf
-				break
-			}
-		}
-
-		skill := Skill{
-			Key:             fmt.Sprintf("%s:%s:%s", platform, location, entry.Name()),
-			Name:            name,
-			Description:     strings.TrimSpace(meta.Description),
-			Directory:       entry.Name(),
-			Installed:       true,
-			Enabled:         enabled,
-			LicenseFile:     licenseFile,
-			Platform:        platform,
-			InstallLocation: location,
-		}
-
-		skills = append(skills, skill)
+		skills = append(skills, ss.localSkillSummary(skillPath, filepath.ToSlash(skillDir), platform, location))
 	}
 
-	return skills
+	return skills, errors.Join(problems...)
+}
+
+func (ss *SkillService) localSkillSummary(skillPath, directory, platform, location string) Skill {
+	meta, enabled, err := ss.readSkillMetadataExtended(skillPath)
+
+	name := strings.TrimSpace(meta.Name)
+	if name == "" {
+		name = filepath.Base(directory)
+	}
+
+	// 检查 LICENSE 文件
+	licenseFile := ""
+	for _, lf := range []string{"LICENSE", "LICENSE.txt", "LICENSE.md"} {
+		if _, err := os.Stat(filepath.Join(skillPath, lf)); err == nil {
+			licenseFile = lf
+			break
+		}
+	}
+
+	return Skill{
+		Key:             fmt.Sprintf("%s:%s:%s", platform, location, directory),
+		Name:            name,
+		Description:     strings.TrimSpace(meta.Description),
+		Directory:       directory,
+		Installed:       true,
+		Enabled:         err != nil || enabled,
+		LicenseFile:     licenseFile,
+		Platform:        platform,
+		InstallLocation: location,
+	}
+
 }
 
 // readSkillMetadataExtended 读取技能元数据（包括 enabled 状态）
@@ -304,12 +398,36 @@ func parseSkillMetadataExtended(content string) (skillMetadataExtended, error) {
 
 // ListSkills aggregates skills from configured repositories and the local install directory.
 func (ss *SkillService) ListSkills() ([]Skill, error) {
+	discovered, err := ss.DiscoverSkills()
+	if err != nil {
+		return nil, err
+	}
+	skillMap := make(map[string]Skill, len(discovered))
+	for _, skill := range discovered {
+		dirKey := normalizeDirectoryKey(skill.Directory)
+		if _, exists := skillMap[dirKey]; !exists {
+			skill.Installed = ss.isInstalled(skill.Directory)
+			skillMap[dirKey] = skill
+		}
+	}
+	ss.mergeLocalSkills(skillMap)
+	skills := make([]Skill, 0, len(skillMap))
+	for _, skill := range skillMap {
+		skills = append(skills, skill)
+	}
+	sortSkills(skills)
+	return skills, nil
+}
+
+func (ss *SkillService) DiscoverSkills() ([]Skill, error) {
 	store, err := ss.loadStore()
 	if err != nil {
 		return nil, err
 	}
 
-	skillMap := make(map[string]Skill)
+	var skills []Skill
+	var repoErrors []error
+	var successfulRepos int
 	for _, repo := range store.Repos {
 		if !repo.Enabled {
 			continue
@@ -317,69 +435,92 @@ func (ss *SkillService) ListSkills() ([]Skill, error) {
 		repoDir, branch, cleanup, err := ss.prepareRepoSnapshot(repo)
 		if err != nil {
 			log.Printf("skill repo fetch failed for %s/%s: %v", repo.Owner, repo.Name, err)
+			repoErrors = append(repoErrors, fmt.Errorf("%s/%s: %w", repo.Owner, repo.Name, err))
 			continue
 		}
-		entries, err := os.ReadDir(repoDir)
-		if err != nil {
-			cleanup()
-			log.Printf("skill repo read failed for %s/%s: %v", repo.Owner, repo.Name, err)
-			continue
-		}
-		for _, entry := range entries {
+		err = filepath.WalkDir(repoDir, func(path string, entry fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
 			if !entry.IsDir() {
-				continue
+				return nil
 			}
-			dirKey := normalizeDirectoryKey(entry.Name())
-			if _, exists := skillMap[dirKey]; exists {
-				continue
+			if path != repoDir && strings.HasPrefix(entry.Name(), ".") {
+				return filepath.SkipDir
 			}
-			skillPath := filepath.Join(repoDir, entry.Name())
-			meta, err := readSkillMetadata(skillPath)
+			meta, err := readSkillMetadata(path)
 			if err != nil {
-				continue
+				return nil
+			}
+			repoPath, err := filepath.Rel(repoDir, path)
+			if err != nil {
+				return err
+			}
+			repoPath = filepath.ToSlash(repoPath)
+			directory := entry.Name()
+			if repoPath == "." {
+				directory = repo.Name
+			}
+			if !validSkillDirectory(directory) || !validSkillRepoPath(repoPath) {
+				return filepath.SkipDir
 			}
 			name := strings.TrimSpace(meta.Name)
 			if name == "" {
-				name = entry.Name()
+				name = directory
 			}
-			key := buildSkillKey(repo.Owner, repo.Name, entry.Name())
-			skillMap[dirKey] = Skill{
-				Key:         key,
+			skills = append(skills, Skill{
+				Key:         buildSkillKey(repo.Owner, repo.Name, repoPath) + ":" + repoPath,
 				Name:        name,
 				Description: strings.TrimSpace(meta.Description),
-				Directory:   entry.Name(),
-				ReadmeURL:   buildRepoURL(repo, branch, entry.Name()),
-				Installed:   ss.isInstalled(entry.Name()),
+				Directory:   directory,
+				ReadmeURL:   buildRepoURL(repo, branch, repoPath),
 				RepoOwner:   repo.Owner,
 				RepoName:    repo.Name,
 				RepoBranch:  branch,
-			}
-		}
+				RepoPath:    repoPath,
+			})
+			return filepath.SkipDir
+		})
 		cleanup()
-	}
-
-	ss.mergeLocalSkills(skillMap)
-	skills := make([]Skill, 0, len(skillMap))
-	for _, skill := range skillMap {
-		skills = append(skills, skill)
-	}
-	sort.SliceStable(skills, func(i, j int) bool {
-		li := strings.ToLower(skills[i].Name)
-		lj := strings.ToLower(skills[j].Name)
-		if li == lj {
-			return strings.ToLower(skills[i].Directory) < strings.ToLower(skills[j].Directory)
+		if err != nil {
+			repoErrors = append(repoErrors, fmt.Errorf("%s/%s: %w", repo.Owner, repo.Name, err))
+		} else {
+			successfulRepos++
 		}
-		return li < lj
-	})
+	}
+	if successfulRepos == 0 && len(repoErrors) > 0 {
+		return nil, errors.Join(repoErrors...)
+	}
+	sortSkills(skills)
 	return skills, nil
+}
+
+func sortSkills(skills []Skill) {
+	sort.SliceStable(skills, func(i, j int) bool {
+		return skillLess(skills[i], skills[j])
+	})
+}
+
+func skillLess(a, b Skill) bool {
+	left, right := strings.ToLower(a.Name), strings.ToLower(b.Name)
+	if left != right {
+		return left < right
+	}
+	return a.Key < b.Key
 }
 
 // InstallSkill installs a skill directory from the configured repositories.
 // 支持 platform 和 location 参数，用于指定安装的平台和位置
 func (ss *SkillService) InstallSkill(req installRequest) error {
 	req.Directory = strings.TrimSpace(req.Directory)
-	if req.Directory == "" {
-		return errors.New("skill directory 不能为空")
+	if !validSkillDirectory(req.Directory) {
+		return fmt.Errorf("无效的技能目录 %q", req.Directory)
+	}
+	if req.RepoPath == "" {
+		req.RepoPath = req.Directory
+	}
+	if !validSkillRepoPath(req.RepoPath) {
+		return fmt.Errorf("无效的仓库技能路径 %q", req.RepoPath)
 	}
 
 	// 设置默认值
@@ -389,7 +530,22 @@ func (ss *SkillService) InstallSkill(req installRequest) error {
 	if req.Location == "" {
 		req.Location = skillLocationUser
 	}
+	if req.Apps != nil && req.Location != skillLocationUser {
+		return errors.New("多应用安装仅支持用户级技能")
+	}
+	if err := validateSkillApps(req.Apps); err != nil {
+		return err
+	}
 
+	return ss.withSkillRepoSource(req, func(source string, state managedSkillState) error {
+		if req.Apps != nil {
+			return ss.installManagedSkill(req.Directory, source, req.Apps, state)
+		}
+		return ss.installFromPathEx(req.Directory, source, req.Platform, req.Location)
+	})
+}
+
+func (ss *SkillService) withSkillRepoSource(req installRequest, useSource func(string, managedSkillState) error) error {
 	store, err := ss.loadStore()
 	if err != nil {
 		return err
@@ -401,25 +557,26 @@ func (ss *SkillService) InstallSkill(req installRequest) error {
 
 	var lastErr error
 	for _, repo := range repos {
-		repoDir, _, cleanup, err := ss.prepareRepoSnapshot(repo)
+		if req.Branch != "" {
+			repo.Branch = req.Branch
+		}
+		repoDir, branch, cleanup, err := ss.prepareRepoSnapshot(repo)
 		if err != nil {
 			lastErr = err
 			continue
 		}
-		skillPath := filepath.Join(repoDir, req.Directory)
+		skillPath := filepath.Join(repoDir, filepath.FromSlash(req.RepoPath))
 		info, err := os.Stat(skillPath)
 		if err != nil || !info.IsDir() {
 			cleanup()
 			lastErr = fmt.Errorf("仓库 %s/%s 中未找到 %s", repo.Owner, repo.Name, req.Directory)
 			continue
 		}
-		if err := ss.installFromPathEx(req.Directory, skillPath, req.Platform, req.Location); err != nil {
-			cleanup()
-			lastErr = err
-			continue
-		}
+		err = useSource(skillPath, managedSkillState{
+			RepoOwner: repo.Owner, RepoName: repo.Name, RepoBranch: branch, RepoPath: req.RepoPath,
+		})
 		cleanup()
-		return nil
+		return err
 	}
 	if lastErr == nil {
 		lastErr = fmt.Errorf("skill %s 未找到", req.Directory)
@@ -433,7 +590,10 @@ func (ss *SkillService) installFromPath(directory, source string) error {
 
 // installFromPathEx 安装技能到指定平台和位置
 func (ss *SkillService) installFromPathEx(directory, source, platform, location string) error {
-	if _, err := os.Stat(filepath.Join(source, "SKILL.md")); err != nil {
+	if !validSkillDirectory(directory) {
+		return fmt.Errorf("无效的技能目录 %q", directory)
+	}
+	if !hasSkillMarkdown(source) {
 		return fmt.Errorf("%s 缺少 SKILL.md", directory)
 	}
 
@@ -442,57 +602,46 @@ func (ss *SkillService) installFromPathEx(directory, source, platform, location 
 	if err != nil {
 		return err
 	}
+	if location == skillLocationProject {
+		userPath, err := ss.getInstallPath(platform, skillLocationUser)
+		if err != nil {
+			return err
+		}
+		if sameSkillRoot(installPath, userPath) {
+			return errors.New("当前项目与用户的技能目录相同，请选择用户级安装")
+		}
+	}
 
-	if err := os.MkdirAll(installPath, 0o755); err != nil {
-		return err
-	}
-	target := filepath.Join(installPath, directory)
-	if err := os.RemoveAll(target); err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	if err := copyDirectory(source, target); err != nil {
-		return err
-	}
 	ss.mu.Lock()
 	defer ss.mu.Unlock()
 	store, err := ss.loadStoreLocked()
 	if err != nil {
 		return err
 	}
-	if store.Skills == nil {
-		store.Skills = make(map[string]skillState)
+	var changes skillFileChanges
+	defer changes.finish()
+	target := filepath.Join(installPath, directory)
+	if err := ss.checkLocalSkillMutation(platform, installPath, target, false); err != nil {
+		return err
+	}
+	if err := changes.publish(target, func(staged string) error {
+		return copyDirectory(source, staged)
+	}); err != nil {
+		return err
 	}
 	store.Skills[directory] = skillState{Installed: true, InstalledAt: time.Now()}
-	return ss.saveStoreLocked(store)
+	return ss.commitSkillChanges(store, &changes)
 }
 
 func (ss *SkillService) UninstallSkill(directory string) error {
-	directory = strings.TrimSpace(directory)
-	if directory == "" {
-		return errors.New("skill directory 不能为空")
-	}
-	target := filepath.Join(ss.installDir, directory)
-	if err := os.RemoveAll(target); err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	ss.mu.Lock()
-	defer ss.mu.Unlock()
-	store, err := ss.loadStoreLocked()
-	if err != nil {
-		return err
-	}
-	if store.Skills == nil {
-		store.Skills = make(map[string]skillState)
-	}
-	delete(store.Skills, directory)
-	return ss.saveStoreLocked(store)
+	return ss.UninstallSkillEx(directory, skillPlatformClaude, skillLocationUser)
 }
 
 // UninstallSkillEx 卸载技能（支持多平台多位置）
 func (ss *SkillService) UninstallSkillEx(directory, platform, location string) error {
 	directory = strings.TrimSpace(directory)
-	if directory == "" {
-		return errors.New("skill directory 不能为空")
+	if !validLocalSkillPath(directory) {
+		return fmt.Errorf("无效的技能目录 %q", directory)
 	}
 
 	// 默认值
@@ -508,11 +657,6 @@ func (ss *SkillService) UninstallSkillEx(directory, platform, location string) e
 		return err
 	}
 
-	target := filepath.Join(installPath, directory)
-	if err := os.RemoveAll(target); err != nil && !os.IsNotExist(err) {
-		return err
-	}
-
 	// 更新 store
 	ss.mu.Lock()
 	defer ss.mu.Unlock()
@@ -520,22 +664,40 @@ func (ss *SkillService) UninstallSkillEx(directory, platform, location string) e
 	if err != nil {
 		return err
 	}
-	if store.Skills == nil {
-		store.Skills = make(map[string]skillState)
+	target := filepath.Join(installPath, directory)
+	userPath, err := ss.getInstallPath(platform, skillLocationUser)
+	if err != nil {
+		return err
+	}
+	if sameSkillRoot(installPath, userPath) && ss.isManagedDeployment(store, platform, directory, target) {
+		return errors.New("请在技能库中管理此技能")
+	}
+	if err := ss.checkLocalSkillMutation(platform, installPath, target, false); err != nil {
+		return err
+	}
+	var changes skillFileChanges
+	defer changes.finish()
+	if err := changes.remove(target); err != nil {
+		return err
 	}
 	delete(store.Skills, directory)
-	return ss.saveStoreLocked(store)
+	return ss.commitSkillChanges(store, &changes)
 }
 
 // ToggleSkill 切换技能的启用状态
 // 通过修改 SKILL.md 的 disable-model-invocation 字段实现
 func (ss *SkillService) ToggleSkill(directory, platform, location string, enabled bool) error {
-	if directory == "" {
-		return errors.New("skill directory 不能为空")
+	if !validLocalSkillPath(directory) {
+		return fmt.Errorf("无效的技能目录 %q", directory)
 	}
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
 
 	installPath, err := ss.getInstallPath(platform, location)
 	if err != nil {
+		return err
+	}
+	if err := ss.checkLocalSkillMutation(platform, installPath, filepath.Join(installPath, directory), true); err != nil {
 		return err
 	}
 
@@ -723,8 +885,14 @@ func patchSkillFrontMatterBool(markdown, key string, desired bool) (string, bool
 
 // GetSkillContent 获取技能的 SKILL.md 内容
 func (ss *SkillService) GetSkillContent(directory, platform, location string) (string, error) {
-	if directory == "" {
-		return "", errors.New("skill directory 不能为空")
+	if !validLocalSkillPath(directory) {
+		return "", fmt.Errorf("无效的技能目录 %q", directory)
+	}
+	if location == skillLocationLibrary {
+		if !validSkillDirectory(directory) {
+			return "", fmt.Errorf("无效的技能目录 %q", directory)
+		}
+		return ss.getManagedSkillContent(directory)
 	}
 
 	installPath, err := ss.getInstallPath(platform, location)
@@ -743,12 +911,17 @@ func (ss *SkillService) GetSkillContent(directory, platform, location string) (s
 
 // SaveSkillContent 保存技能的 SKILL.md 内容
 func (ss *SkillService) SaveSkillContent(directory, platform, location, content string) error {
-	if directory == "" {
-		return errors.New("skill directory 不能为空")
+	if !validLocalSkillPath(directory) {
+		return fmt.Errorf("无效的技能目录 %q", directory)
 	}
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
 
 	installPath, err := ss.getInstallPath(platform, location)
 	if err != nil {
+		return err
+	}
+	if err := ss.checkLocalSkillMutation(platform, installPath, filepath.Join(installPath, directory), true); err != nil {
 		return err
 	}
 
@@ -760,9 +933,13 @@ func (ss *SkillService) SaveSkillContent(directory, platform, location, content 
 
 // OpenSkillFolder 打开技能目录
 func (ss *SkillService) OpenSkillFolder(platform, location string) error {
-	installPath, err := ss.getInstallPath(platform, location)
-	if err != nil {
-		return err
+	installPath := ss.managedSkillRoot()
+	if location != skillLocationLibrary {
+		var err error
+		installPath, err = ss.getInstallPath(platform, location)
+		if err != nil {
+			return err
+		}
 	}
 
 	// 确保目录存在
@@ -852,7 +1029,7 @@ func (ss *SkillService) loadStoreLocked() (skillStore, error) {
 	data, err := os.ReadFile(ss.storePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			store := skillStore{Skills: make(map[string]skillState)}
+			store := skillStore{Skills: make(map[string]skillState), Managed: make(map[string]managedSkillState)}
 			store.ensureRepos()
 			return store, nil
 		}
@@ -866,6 +1043,9 @@ func (ss *SkillService) loadStoreLocked() (skillStore, error) {
 	}
 	if store.Skills == nil {
 		store.Skills = make(map[string]skillState)
+	}
+	if store.Managed == nil {
+		store.Managed = make(map[string]managedSkillState)
 	}
 	store.ensureRepos()
 	return store, nil
@@ -932,7 +1112,7 @@ func (ss *SkillService) saveStoreLocked(store skillStore) error {
 	if err := os.WriteFile(tmp, data, 0o644); err != nil {
 		return err
 	}
-	return os.Rename(tmp, ss.storePath)
+	return atomicRename(tmp, ss.storePath)
 }
 
 func (ss *SkillService) prepareRepoSnapshot(repo skillRepoConfig) (string, string, func(), error) {
@@ -947,14 +1127,21 @@ func (ss *SkillService) prepareRepoSnapshot(repo skillRepoConfig) (string, strin
 	branches := buildBranchCandidates(repo.Branch)
 	var lastErr error
 	for _, branch := range branches {
-		archiveURL := fmt.Sprintf("https://github.com/%s/%s/archive/refs/heads/%s.zip", repo.Owner, repo.Name, branch)
+		archiveURL := fmt.Sprintf("https://github.com/%s/%s/archive/refs/heads/%s.zip",
+			url.PathEscape(repo.Owner), url.PathEscape(repo.Name), url.PathEscape(branch))
 		if err := ss.downloadFile(archiveURL, archivePath); err != nil {
 			lastErr = err
 			continue
 		}
-		rootDir, err := unzipArchive(archivePath, tmpDir)
+		extractDir, err := os.MkdirTemp(tmpDir, "snapshot-")
 		if err != nil {
 			lastErr = err
+			break
+		}
+		rootDir, err := unzipArchive(archivePath, extractDir)
+		if err != nil {
+			lastErr = err
+			_ = os.RemoveAll(extractDir)
 			continue
 		}
 		return rootDir, branch, cleanup, nil
@@ -1021,14 +1208,25 @@ func unzipArchive(zipPath, dest string) (string, error) {
 		if name == "" {
 			continue
 		}
-		if root == "" {
-			root = strings.Split(name, "/")[0]
+		name = strings.TrimSuffix(name, "/")
+		if name == "." || !validSkillRepoPath(name) {
+			return "", fmt.Errorf("压缩包包含无效路径 %q", name)
 		}
-		targetPath := filepath.Join(dest, name)
+		entryRoot, _, _ := strings.Cut(name, "/")
+		if root == "" {
+			root = entryRoot
+		}
+		if root != entryRoot {
+			return "", errors.New("仓库压缩包包含多个根目录")
+		}
+		targetPath := filepath.Join(dest, filepath.FromSlash(name))
 		if file.FileInfo().IsDir() {
 			if err := os.MkdirAll(targetPath, 0o755); err != nil {
 				return "", err
 			}
+			continue
+		}
+		if !file.Mode().IsRegular() {
 			continue
 		}
 		if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
@@ -1049,7 +1247,9 @@ func unzipArchive(zipPath, dest string) (string, error) {
 			return "", err
 		}
 		src.Close()
-		dst.Close()
+		if err := dst.Close(); err != nil {
+			return "", err
+		}
 	}
 	if root == "" {
 		return "", errors.New("压缩包内容为空")
@@ -1115,10 +1315,11 @@ func (ss *SkillService) resolveReposForInstall(req installRequest, repos []skill
 
 func buildRepoURL(repo skillRepoConfig, branch, directory string) string {
 	dir := strings.Trim(directory, "/")
-	if dir == "" {
+	if dir == "" || dir == "." {
 		return fmt.Sprintf("https://github.com/%s/%s", repo.Owner, repo.Name)
 	}
-	return fmt.Sprintf("https://github.com/%s/%s/tree/%s/%s", repo.Owner, repo.Name, branch, dir)
+	link := url.URL{Scheme: "https", Host: "github.com", Path: fmt.Sprintf("/%s/%s/tree/%s/%s", repo.Owner, repo.Name, branch, dir)}
+	return link.String()
 }
 
 func buildSkillKey(owner, name, directory string) string {
@@ -1181,27 +1382,28 @@ func copyDirectory(src, dst string) error {
 			}
 			return os.MkdirAll(target, 0o755)
 		}
-		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		info, err := d.Info()
+		if err != nil {
 			return err
 		}
-		return copyFile(path, target)
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("技能包含不支持的文件类型 %s", rel)
+		}
+		return copyFile(path, target, info.Mode().Perm())
 	})
 }
 
-func copyFile(src, dst string) error {
+func copyFile(src, dst string, mode fs.FileMode) error {
 	in, err := os.Open(src)
 	if err != nil {
 		return err
 	}
 	defer in.Close()
 
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode)
 	if err != nil {
 		return err
 	}
-	defer out.Close()
-	if _, err := io.Copy(out, in); err != nil {
-		return err
-	}
-	return nil
+	_, err = io.Copy(out, in)
+	return errors.Join(err, out.Close())
 }

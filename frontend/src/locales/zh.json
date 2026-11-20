@@ -2618,19 +2618,27 @@
     },
     "skill": {
       "hero": {
-        "eyebrow": "Skill 仓库",
-        "title": "Claude Skill",
-        "lead": "从 Skill 仓库中获取 Claude Skill，点击右上角按钮可添加更多 Skill 仓库。"
+        "eyebrow": "Skills",
+        "title": "技能管理",
+        "lead": "集中安装技能，按应用单独启用或停用。"
+      },
+      "views": {
+        "installed": "已安装",
+        "discover": "发现"
       },
       "platform": {
         "claude": "Claude Code",
         "codex": "Codex",
+        "gemini": "Gemini CLI",
         "opencode": "OpenCode",
-        "grokbuild": "Grok Build"
+        "grokbuild": "Grok Build",
+        "openclaw": "OpenClaw",
+        "hermes": "Hermes",
+        "pi": "Pi"
       },
       "groups": {
         "project": "项目级技能",
-        "user": "用户级技能",
+        "user": "待纳入管理的本地技能",
         "available": "可用技能"
       },
       "actions": {
@@ -2643,11 +2651,36 @@
         "installError": "安装 {name} 失败，请重试",
         "uninstallError": "卸载 {name} 失败，请重试",
         "toggle": "启用/禁用",
+        "autoInvoke": "允许 Claude 自动调用",
         "viewContent": "查看内容",
         "hideContent": "收起内容",
         "openFolder": "打开文件夹",
+        "openLibrary": "打开技能库文件夹",
+        "folderError": "无法打开技能文件夹。",
+        "label": "操作",
+        "import": "纳入管理",
+        "importError": "无法纳入管理。",
+        "conflict": "同名",
+        "conflictDetail": "此应用已有同名技能。若内容相同，可在本地技能中将它纳入管理。",
+        "appSwitch": "{name} · 在 {app} 中启停",
+        "readOnly": "共享目录，只读",
+        "register": "纳入管理",
+        "recover": "恢复",
+        "recoverError": "无法恢复技能。",
+        "uninstallManagedPrompt": "从技能库和已启用的应用中卸载 {name}？",
+        "uninstallLocalPrompt": "从此应用的技能目录中卸载 {name}？",
         "loadFailed": "加载内容失败",
         "toggleError": "切换技能状态失败"
+      },
+      "appStatus": {
+        "inherited": "通过其他目录加载",
+        "blocked": "应用内已停用",
+        "broken": "链接已失效",
+        "unavailable": "目录不可用"
+      },
+      "masterStatus": {
+        "missing": "缺少主副本",
+        "unregistered": "主副本未登记"
       },
       "list": {
         "title": "可用技能",
@@ -2657,12 +2690,20 @@
         "error": "技能列表加载失败，请检查网络后重试。",
         "noDescription": "SKILL.md 未提供描述",
         "missingRepo": "缺少对应的仓库信息，无法安装",
-        "noInstalled": "当前没有已安装的技能"
+        "noInstalled": "当前没有已安装的技能",
+        "column": "技能",
+        "search": "搜索技能或仓库",
+        "noResults": "没有匹配的技能。",
+        "libraryError": "无法读取本地技能。",
+        "partial": "部分技能目录或应用配置无法读取"
       },
       "install": {
         "title": "选择安装位置",
         "desc": "将 {name} 安装到：",
         "locationLabel": "安装位置",
+        "apps": "启用到这些应用",
+        "app": "应用",
+        "projectAction": "安装到项目",
         "userLevel": "用户级（全局）",
         "userLevelDesc": "~/.{platform}/skills/",
         "projectLevel": "项目级（当前目录）",

@@ -1,15 +1,27 @@
+<!--
+@name: 本地技能卡片
+@Descripttion: 展示本地用户级和项目级技能及其操作。
+@version: 1.0.0
+@Author: sm
+@Date: 2026-11-20 15:31:00
+@LastEditTime: 2026-11-20 15:31:00
+@FilePath: frontend/src/components/Skill/SkillCard.vue
+-->
 <template>
   <article class="skill-card-installed">
     <div class="skill-card-header">
-      <div class="skill-card-toggle">
+      <div v-if="skill.platform === 'claude' && !skill.read_only" class="skill-card-toggle">
         <button
           type="button"
           :class="['toggle-switch', { enabled: skill.enabled }]"
-          :disabled="toggling"
-          :title="t('components.skill.actions.toggle')"
+          :disabled="busy"
+          role="switch"
+          :aria-checked="skill.enabled"
+          :aria-label="`${skill.name} · ${t('components.skill.actions.autoInvoke')}`"
+          :title="t('components.skill.actions.autoInvoke')"
           @click="$emit('toggle', skill, !skill.enabled)"
         >
-          <span class="toggle-slider" :class="{ toggling: toggling }"></span>
+          <span class="toggle-slider"></span>
         </button>
       </div>
 
@@ -25,13 +37,33 @@
           <span v-if="skill.license_file" class="skill-badge license">
             {{ t('components.skill.license.complete', { file: skill.license_file }) }}
           </span>
-          <span v-if="skill.install_location === 'project'" class="skill-badge project">
-            {{ t('components.skill.groups.project') }}
+          <span v-if="skill.platform" class="skill-badge project">
+            {{ t(`components.skill.platform.${skill.platform}`) }}
           </span>
+          <span v-if="skill.read_only" class="skill-badge">{{ t('components.skill.actions.readOnly') }}</span>
         </div>
       </div>
 
       <div class="skill-card-actions">
+        <button
+          v-if="skill.install_location === 'user' && !skill.read_only"
+          type="button"
+          class="btn-secondary"
+          :disabled="busy"
+          @click="$emit('import', skill)"
+        >{{ t('components.skill.actions.import') }}</button>
+        <button
+          type="button"
+          class="ghost-icon sm"
+          :title="t('components.skill.actions.openFolder')"
+          :aria-label="t('components.skill.actions.openFolder')"
+          @click="$emit('folder', skill)"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" fill="none"
+              stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </button>
         <button
           type="button"
           class="ghost-icon sm"
@@ -60,20 +92,20 @@
           </svg>
         </button>
         <button
+          v-if="!skill.read_only"
           type="button"
           class="ghost-icon sm danger"
           :title="t('components.skill.actions.uninstall')"
           :data-tooltip="t('components.skill.actions.uninstall')"
-          :disabled="uninstalling"
+          :disabled="busy"
           @click="$emit('uninstall', skill)"
         >
-          <svg v-if="!uninstalling" viewBox="0 0 24 24" aria-hidden="true">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M5 7h14M10 11v6M14 11v6M9 7V5h6v2" fill="none" stroke="currentColor" stroke-width="1.6"
               stroke-linecap="round" stroke-linejoin="round" />
             <path d="M6.5 7l-.5 12a2 2 0 002 2h8a2 2 0 002-2L17.5 7" fill="none" stroke="currentColor"
               stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
           </svg>
-          <span v-else class="skill-action-spinner" aria-hidden="true"></span>
         </button>
       </div>
     </div>
@@ -97,8 +129,7 @@ import { getSkillContent, type SkillSummary } from '../../services/skill'
 const props = defineProps<{
   skill: SkillSummary
   expanded: boolean
-  toggling: boolean
-  uninstalling: boolean
+  busy: boolean
 }>()
 
 defineEmits<{
@@ -106,6 +137,8 @@ defineEmits<{
   expand: [skill: SkillSummary]
   uninstall: [skill: SkillSummary]
   view: [url: string]
+  import: [skill: SkillSummary]
+  folder: [skill: SkillSummary]
 }>()
 
 const { t } = useI18n()
@@ -144,6 +177,7 @@ watch(() => props.expanded, async (isExpanded) => {
 
 .skill-card-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   gap: 16px;
   padding: 16px 20px;
@@ -188,10 +222,6 @@ watch(() => props.expanded, async (isExpanded) => {
 
 .toggle-switch.enabled .toggle-slider {
   transform: translateX(20px);
-}
-
-.toggle-slider.toggling {
-  opacity: 0.7;
 }
 
 .skill-card-info {
@@ -256,6 +286,24 @@ watch(() => props.expanded, async (isExpanded) => {
   flex-shrink: 0;
 }
 
+.skill-card-actions .btn-secondary {
+  padding: 4px 9px;
+  color: var(--mac-text);
+  font-size: 0.85rem;
+  border: 1px solid var(--mac-border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.skill-card-actions .btn-secondary:hover {
+  background: var(--mac-surface-strong);
+}
+
+.skill-card-actions .btn-secondary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .skill-card-actions .ghost-icon {
   width: 32px;
   height: 32px;
@@ -278,16 +326,6 @@ watch(() => props.expanded, async (isExpanded) => {
 .skill-card-actions .ghost-icon:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-}
-
-.skill-action-spinner {
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  border: 2px solid currentColor;
-  border-top-color: transparent;
-  animation: skill-spin 0.8s linear infinite;
-  display: inline-block;
 }
 
 /* Content Panel */
@@ -340,12 +378,4 @@ html.dark .skill-card-content {
   background: color-mix(in srgb, var(--mac-surface) 30%, transparent);
 }
 
-@keyframes skill-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
 </style>

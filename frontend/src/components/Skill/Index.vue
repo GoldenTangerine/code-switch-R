@@ -1,3 +1,12 @@
+<!--
+@name: 技能管理页面
+@Descripttion: 展示已安装技能的应用开关、仓库发现和本地技能。
+@version: 1.0.0
+@Author: sm
+@Date: 2026-11-20 15:31:00
+@LastEditTime: 2026-11-20 15:31:00
+@FilePath: frontend/src/components/Skill/Index.vue
+-->
 <template>
   <div class="main-shell">
     <div class="global-actions">
@@ -10,7 +19,7 @@
         </svg>
       </button>
       <button class="ghost-icon" :title="t('components.skill.actions.refresh')"
-        :data-tooltip="t('components.skill.actions.refresh')" :disabled="refreshing" @click="refresh">
+        :data-tooltip="t('components.skill.actions.refresh')" :disabled="refreshing || mutationBusy" @click="refresh">
         <svg viewBox="0 0 24 24" aria-hidden="true" :class="{ spin: refreshing }">
           <path d="M20.5 8a8.5 8.5 0 10-2.38 7.41" fill="none" stroke="currentColor" stroke-width="1.5"
             stroke-linecap="round" stroke-linejoin="round" />
@@ -18,8 +27,8 @@
             stroke-linejoin="round" />
         </svg>
       </button>
-      <button class="ghost-icon" :title="t('components.skill.actions.openFolder')"
-        :data-tooltip="t('components.skill.actions.openFolder')" @click="handleOpenFolder">
+      <button class="ghost-icon" :title="t('components.skill.actions.openLibrary')"
+        :data-tooltip="t('components.skill.actions.openLibrary')" @click="handleOpenFolder()">
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" fill="none"
             stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
@@ -43,196 +52,207 @@
         </div>
       </header>
 
-      <!-- Platform Tabs -->
-      <div class="skill-platform-tabs">
+
+      <nav class="skill-platform-tabs" :aria-label="t('components.skill.hero.title')">
         <button
-          v-for="platform in platforms"
-          :key="platform.value"
-          :class="['skill-platform-tab', { active: activePlatform === platform.value }]"
-          @click="switchPlatform(platform.value)"
-        >
-          {{ platform.label }}
-        </button>
+          v-for="view in views"
+          :key="view"
+          type="button"
+          :class="['skill-platform-tab', { active: activeView === view }]"
+          :aria-current="activeView === view ? 'page' : undefined"
+          @click="switchView(view)"
+        >{{ t(`components.skill.views.${view}`) }}</button>
+      </nav>
+
+      <div class="skill-toolbar">
+        <input
+          v-model="search"
+          type="search"
+          :aria-label="t('components.skill.list.search')"
+          :placeholder="t('components.skill.list.search')"
+        />
       </div>
+      <p v-if="skillsError" class="skill-error" role="alert">{{ skillsError }}</p>
 
-      <section class="skill-list-section">
-        <div v-if="loading" class="skill-empty">{{ t('components.skill.list.loading') }}</div>
-
-        <template v-else>
-          <!-- Project Skills Group -->
-          <div v-if="projectSkills.length > 0" class="skill-group">
-            <div class="skill-group-header">
-              <h2 class="skill-group-title">
-                {{ t('components.skill.groups.project') }} ({{ projectSkills.length }})
-              </h2>
-              <button
-                type="button"
-                class="ghost-icon sm"
-                :title="t('components.skill.actions.openFolder')"
-                @click="handleOpenFolderForLocation('project')"
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" fill="none"
-                    stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
-                </svg>
-              </button>
-            </div>
-            <div class="skill-list installed-skills">
-              <SkillCard
-                v-for="skill in projectSkills"
-                :key="skill.key"
-                :skill="skill"
-                :expanded="expandedSkills.has(skill.key)"
-                :toggling="togglingSkill === skill.key"
-                :uninstalling="processingSkill === uninstallProcessingKey(skill)"
-                @toggle="handleToggle"
-                @expand="toggleExpand"
-                @uninstall="handleUninstall"
-                @view="openGithub"
-              />
-            </div>
-          </div>
-
-          <!-- User Skills Group -->
-          <div v-if="userSkills.length > 0" class="skill-group">
-            <div class="skill-group-header">
-              <h2 class="skill-group-title">
-                {{ t('components.skill.groups.user') }} ({{ userSkills.length }})
-              </h2>
-              <button
-                type="button"
-                class="ghost-icon sm"
-                :title="t('components.skill.actions.openFolder')"
-                @click="handleOpenFolderForLocation('user')"
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" fill="none"
-                    stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
-                </svg>
-              </button>
-            </div>
-            <div class="skill-list installed-skills">
-              <SkillCard
-                v-for="skill in userSkills"
-                :key="skill.key"
-                :skill="skill"
-                :expanded="expandedSkills.has(skill.key)"
-                :toggling="togglingSkill === skill.key"
-                :uninstalling="processingSkill === uninstallProcessingKey(skill)"
-                @toggle="handleToggle"
-                @expand="toggleExpand"
-                @uninstall="handleUninstall"
-                @view="openGithub"
-              />
-            </div>
-          </div>
-
-          <!-- No Installed Skills Message -->
-          <div v-if="projectSkills.length === 0 && userSkills.length === 0 && installedSkills.length === 0" class="skill-empty-installed">
-            {{ t('components.skill.list.noInstalled') }}
-          </div>
-
-          <!-- Available Skills Group -->
-          <div v-if="availableSkills.length > 0" class="skill-group">
-            <div class="skill-group-header">
-              <h2 class="skill-group-title">
-                {{ t('components.skill.groups.available') }} ({{ availableSkills.length }})
-              </h2>
-            </div>
-            <div class="skill-list">
-              <article v-for="skill in availableSkills" :key="skill.key || skill.directory" class="skill-card available-card">
-                <div class="skill-card-head">
-                  <div>
-                    <p class="skill-card-eyebrow">{{ skill.directory }}</p>
-                    <h3>{{ skill.name }}</h3>
-                  </div>
-                  <div class="skill-card-actions">
-                    <button type="button" class="ghost-icon sm" :title="t('components.skill.actions.view')"
-                      :data-tooltip="t('components.skill.actions.view')" @click="openGithub(skill.readme_url)">
+      <section v-if="activeView === 'installed'" class="skill-list-section">
+        <div v-if="libraryLoading && !libraryLoaded" class="skill-empty">{{ t('components.skill.list.loading') }}</div>
+        <template v-else-if="libraryLoaded">
+          <details v-if="library.warnings.length" class="skill-warnings">
+            <summary>{{ t('components.skill.list.partial') }}</summary>
+            <ul>
+              <li v-for="warning in library.warnings" :key="warning">{{ warning }}</li>
+            </ul>
+          </details>
+          <div
+            v-if="managedSkills.length"
+            class="skill-matrix"
+            tabindex="0"
+            role="region"
+            :aria-label="t('components.skill.views.installed')"
+          >
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">{{ t('components.skill.list.column') }}</th>
+                  <th v-for="app in platforms" :key="app" scope="col">{{ appLabel(app) }}</th>
+                  <th scope="col"><span class="sr-only">{{ t('components.skill.actions.label') }}</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="skill in managedSkills" :key="skill.key">
+                  <th scope="row">
+                    <button type="button" class="skill-name" @click="viewManagedSkill(skill)">{{ skill.name }}</button>
+                    <p class="skill-source">
+                      {{ skill.repo_owner && skill.repo_name ? `${skill.repo_owner}/${skill.repo_name}` : skill.directory }}
+                    </p>
+                    <p v-if="skill.description" class="skill-card-desc">{{ skill.description }}</p>
+                    <div v-if="skill.master_status" class="skill-recovery">
+                      <span>{{ t(`components.skill.masterStatus.${skill.master_status}`) }}</span>
+                      <button type="button" class="skill-link" :disabled="libraryBusy" @click="handleRecover(skill)">
+                        {{ t(skill.master_status === 'unregistered' ? 'components.skill.actions.register' : 'components.skill.actions.recover') }}
+                      </button>
+                    </div>
+                  </th>
+                  <td v-for="app in platforms" :key="app">
+                    <span v-if="skill.app_statuses[app] === 'conflict'" class="skill-conflict" :title="t('components.skill.actions.conflictDetail')">
+                      {{ t('components.skill.actions.conflict') }}
+                    </span>
+                    <button
+                      v-else-if="skill.app_statuses[app] !== 'unavailable' && skill.app_statuses[app] !== 'broken'"
+                      type="button"
+                      role="switch"
+                      class="app-switch"
+                      :aria-checked="isAppActive(skill, app)"
+                      :aria-label="t('components.skill.actions.appSwitch', { name: skill.name, app: appLabel(app) })"
+                      :disabled="libraryBusy || !!skill.master_status || hasReadOnlyInheritance(skill, app)"
+                      @click="toggleApp(skill, app)"
+                    ><span></span></button>
+                    <span v-if="visibleAppStatus(skill, app)" class="skill-inherited">
+                      {{ t(`components.skill.appStatus.${skill.app_statuses[app]}`) }}
+                    </span>
+                  </td>
+                  <td>
+                    <button
+                      type="button"
+                      class="ghost-icon sm danger"
+                      :aria-label="t('components.skill.actions.uninstall')"
+                      :title="t('components.skill.actions.uninstall')"
+                      :disabled="libraryBusy || skill.master_status === 'unregistered'"
+                      @click="uninstallTarget = { skill, managed: true }"
+                    >
                       <svg viewBox="0 0 24 24" aria-hidden="true">
-                        <path d="M12 5h7v7M19 5l-9 9" fill="none" stroke="currentColor" stroke-width="1.6"
-                          stroke-linecap="round" stroke-linejoin="round" />
-                        <path d="M11 6H7a2 2 0 00-2 2v9a2 2 0 002 2h9a2 2 0 002-2v-4" fill="none" stroke="currentColor"
-                          stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+                        <path d="M5 7h14m-13 0 1 13h10l1-13M9 7V4h6v3" fill="none"
+                          stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
                       </svg>
                     </button>
-                    <button type="button" class="ghost-icon sm"
-                      :title="canInstallSkill(skill) ? t('components.skill.actions.install') : t('components.skill.list.missingRepo')"
-                      :data-tooltip="canInstallSkill(skill) ? t('components.skill.actions.install') : t('components.skill.list.missingRepo')"
-                      :disabled="isInstallingSkill(skill) || !canInstallSkill(skill)"
-                      @click="openInstallModal(skill)">
-                      <svg v-if="!isInstallingSkill(skill)" viewBox="0 0 24 24" aria-hidden="true">
-                        <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"
-                          stroke-linejoin="round" fill="none" />
-                      </svg>
-                      <span v-else class="skill-action-spinner" aria-hidden="true"></span>
-                    </button>
-                  </div>
-                </div>
-                <p class="skill-card-desc">
-                  {{ skill.description || t('components.skill.list.noDescription') }}
-                </p>
-              </article>
-            </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
           </div>
 
-          <!-- Empty State -->
-          <div v-if="skills.length === 0" class="skill-empty">
-            {{ t('components.skill.list.empty') }}
+          <!-- Project Skills Group and User Skills Group -->
+          <section v-for="group in localGroups" :key="group.location" class="skill-group">
+            <h2 class="skill-group-title">{{ t(`components.skill.groups.${group.location}`) }}</h2>
+            <div class="skill-list installed-skills">
+              <SkillCard
+                v-for="skill in group.skills"
+                :key="skill.key"
+                :skill="skill"
+                :expanded="expandedSkills.has(skill.key)"
+                :busy="libraryBusy"
+                @toggle="handleLocalToggle"
+                @expand="toggleExpand"
+                @uninstall="uninstallTarget = { skill: $event, managed: false }"
+                @view="openExternal"
+                @folder="handleLocalFolder"
+                @import="handleImport"
+              />
+            </div>
+          </section>
+
+          <div v-if="!managedSkills.length && !localGroups.length" class="skill-empty">
+            {{ t(search.trim() ? 'components.skill.list.noResults' : 'components.skill.list.noInstalled') }}
+            <button v-if="!search.trim()" class="btn-secondary" type="button" @click="switchView('discover')">
+              {{ t('components.skill.views.discover') }}
+            </button>
           </div>
         </template>
+      </section>
 
-        <p v-if="skillsError" class="skill-error">{{ skillsError }}</p>
+      <section v-else class="skill-list-section">
+        <div v-if="discoverLoading" class="skill-empty">{{ t('components.skill.list.loading') }}</div>
+        <div v-else-if="availableSkills.length" class="skill-list">
+          <article v-for="skill in availableSkills" :key="skill.key" class="skill-card available-card">
+            <div class="skill-card-head">
+              <div>
+                <p class="skill-card-eyebrow">{{ skill.repo_owner }}/{{ skill.repo_name }}</p>
+                <h3>{{ skill.name }}</h3>
+              </div>
+              <button type="button" class="btn-secondary" :disabled="libraryBusy || !libraryLoaded" @click="openInstallModal(skill)">
+                {{ t(isInLibrary(skill) ? 'components.skill.install.projectAction' : 'components.skill.actions.install') }}
+              </button>
+            </div>
+            <p class="skill-card-desc">{{ skill.description || t('components.skill.list.noDescription') }}</p>
+            <button type="button" class="skill-link" @click="openExternal(skill.readme_url)">
+              {{ t('components.skill.actions.view') }}
+            </button>
+          </article>
+        </div>
+        <div v-else-if="!discoverError" class="skill-empty">
+          {{ t(search.trim() ? 'components.skill.list.noResults' : 'components.skill.list.empty') }}
+        </div>
+        <p v-if="discoverError" class="skill-error" role="alert">{{ discoverError }}</p>
       </section>
     </div>
 
     <!-- Install Location Modal -->
-    <BaseModal :open="installModalOpen" :title="t('components.skill.install.title')" @close="closeInstallModal">
+    <BaseModal :open="installTarget !== null" :title="t('components.skill.install.title')" @close="closeInstallModal">
       <div class="install-modal-content">
-        <p class="install-modal-desc">
-          {{ t('components.skill.install.desc', { name: installTarget?.name }) }}
-        </p>
-
-        <div class="install-location-options">
-          <label class="install-option" :class="{ selected: installLocation === 'user' }">
-            <input type="radio" v-model="installLocation" value="user" class="sr-only" />
-            <div class="install-option-content">
-              <svg viewBox="0 0 24 24" class="install-option-icon" aria-hidden="true">
-                <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2M12 11a4 4 0 100-8 4 4 0 000 8z" fill="none"
-                  stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
-              </svg>
-              <div>
-                <p class="install-option-title">{{ t('components.skill.install.userLevel') }}</p>
-                <p class="install-option-desc">~/.{{ activePlatform }}/skills/</p>
-              </div>
-            </div>
-          </label>
-
-          <label class="install-option" :class="{ selected: installLocation === 'project' }">
-            <input type="radio" v-model="installLocation" value="project" class="sr-only" />
-            <div class="install-option-content">
-              <svg viewBox="0 0 24 24" class="install-option-icon" aria-hidden="true">
-                <path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" fill="none"
-                  stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
-              </svg>
-              <div>
-                <p class="install-option-title">{{ t('components.skill.install.projectLevel') }}</p>
-                <p class="install-option-desc">./.{{ activePlatform }}/skills/</p>
-                <p class="install-option-warning">{{ t('components.skill.install.gitWarning') }}</p>
-              </div>
-            </div>
-          </label>
+        <p class="install-modal-desc">{{ t('components.skill.install.desc', { name: installTarget?.name }) }}</p>
+        <div v-if="installTarget && !isInLibrary(installTarget)" class="install-location-options">
+          <label><input v-model="installLocation" type="radio" value="user" :disabled="mutationBusy" /> {{ t('components.skill.install.userLevel') }}</label>
+          <label><input v-model="installLocation" type="radio" value="project" :disabled="mutationBusy" /> {{ t('components.skill.install.projectLevel') }}</label>
         </div>
-
+        <fieldset v-if="installLocation === 'user'" class="install-location-options" :disabled="mutationBusy">
+          <legend>{{ t('components.skill.install.apps') }}</legend>
+          <label v-for="app in platforms" :key="app">
+            <input v-model="installApps" type="checkbox" :value="app" /> {{ appLabel(app) }}
+          </label>
+        </fieldset>
+        <div v-else class="install-project">
+          <label>
+            {{ t('components.skill.install.app') }}
+            <select v-model="projectApp" :disabled="mutationBusy">
+              <option v-for="app in platforms" :key="app" :value="app">{{ appLabel(app) }}</option>
+            </select>
+          </label>
+          <p class="install-option-warning">{{ t('components.skill.install.gitWarning') }}</p>
+        </div>
+        <p v-if="installError" class="skill-error" role="alert">{{ installError }}</p>
         <div class="install-modal-actions">
-          <button class="btn-secondary" @click="closeInstallModal">
-            {{ t('common.cancel') }}
-          </button>
-          <button class="btn-primary" @click="confirmInstall" :disabled="installing">
-            {{ installing ? t('components.skill.install.installing') : t('components.skill.install.confirm') }}
+          <button class="btn-secondary" type="button" :disabled="mutationBusy" @click="closeInstallModal">{{ t('common.cancel') }}</button>
+          <button class="btn-primary" type="button" :disabled="mutationBusy" @click="confirmInstall">
+            {{ t(mutationBusy ? 'components.skill.install.installing' : 'components.skill.install.confirm') }}
           </button>
         </div>
       </div>
+    </BaseModal>
+
+    <BaseModal :open="uninstallTarget !== null" :title="t('components.skill.actions.uninstall')" variant="confirm" @close="closeUninstallModal">
+      <p>{{ t(uninstallTarget?.managed ? 'components.skill.actions.uninstallManagedPrompt' : 'components.skill.actions.uninstallLocalPrompt', { name: uninstallTarget?.skill.name }) }}</p>
+      <p v-if="uninstallError" class="skill-error" role="alert">{{ uninstallError }}</p>
+      <div class="install-modal-actions">
+        <button class="btn-secondary" type="button" :disabled="mutationBusy" @click="closeUninstallModal">{{ t('common.cancel') }}</button>
+        <button class="btn-primary" type="button" :disabled="mutationBusy" @click="confirmUninstall">{{ t('components.skill.actions.uninstall') }}</button>
+      </div>
+    </BaseModal>
+
+    <BaseModal :open="detailTarget !== null" :title="detailTarget?.name ?? ''" panel-width="min(720px, 92vw)" @close="detailTarget = null">
+      <button v-if="detailTarget?.readme_url" type="button" class="skill-link" @click="openExternal(detailTarget.readme_url)">
+        {{ t('components.skill.actions.view') }}
+      </button>
+      <pre class="skill-detail">{{ detailContent }}</pre>
     </BaseModal>
 
     <!-- Repository Modal -->
@@ -301,8 +321,13 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { Browser } from '@wailsio/runtime'
 import {
-  fetchSkills,
-  fetchSkillsForPlatform,
+  skillPlatforms as platforms,
+  fetchSkillLibrary,
+  discoverSkills,
+  importLocalSkill,
+  setManagedSkillEnabled,
+  uninstallManagedSkill,
+  recoverManagedSkill,
   installSkill,
   uninstallSkillEx,
   toggleSkill,
@@ -311,114 +336,254 @@ import {
   fetchSkillRepos,
   addSkillRepo,
   removeSkillRepo,
-  type SkillSummary,
-  type SkillRepoConfig
+  type ManagedSkill,
+  type SkillLibrary,
+  type SkillPlatform,
+  type SkillRepoConfig,
+  type SkillSummary
 } from '../../services/skill'
 import BaseModal from '../common/BaseModal.vue'
 import SkillCard from './SkillCard.vue'
 
 const router = useRouter()
 const { t } = useI18n()
+const appLabel = (app: SkillPlatform) => t(`components.skill.platform.${app}`)
 
-// Platform definitions (use computed for i18n reactivity)
-const platforms = computed(() => [
-  { value: 'claude' as const, label: t('components.skill.platform.claude') },
-  { value: 'codex' as const, label: t('components.skill.platform.codex') },
-  { value: 'opencode' as const, label: t('components.skill.platform.opencode') },
-  { value: 'grokbuild' as const, label: t('components.skill.platform.grokbuild') }
-])
-
-// State
-const activePlatform = ref<'claude' | 'codex' | 'opencode' | 'grokbuild'>('claude')
-const skills = ref<SkillSummary[]>([])
-const repoList = ref<SkillRepoConfig[]>([])
-const loading = ref(false)
-const repoLoading = ref(false)
+const views = ['installed', 'discover'] as const
+const activeView = ref<typeof views[number]>('installed')
+const search = ref('')
+const library = ref<SkillLibrary>({ managed: [], local: [], warnings: [] })
+const discovered = ref<SkillSummary[]>([])
+const libraryLoaded = ref(false)
+const libraryLoading = ref(false)
+const discoverLoaded = ref(false)
+const discoverLoading = ref(false)
 const skillsError = ref('')
+const discoverError = ref('')
+const mutationBusy = ref(false)
+const libraryBusy = computed(() => mutationBusy.value || libraryLoading.value)
+
+const repoList = ref<SkillRepoConfig[]>([])
+const repoLoading = ref(false)
 const repoError = ref('')
-const processingSkill = ref('')
-const togglingSkill = ref('')
 const repoBusy = ref(false)
 const repoForm = reactive({ url: '', branch: 'main' })
 const repoModalOpen = ref(false)
 
 // Install modal state
-const installModalOpen = ref(false)
 const installTarget = ref<SkillSummary | null>(null)
 const installLocation = ref<'user' | 'project'>('user')
-const installing = ref(false)
+const installApps = ref<SkillPlatform[]>(['claude'])
+const projectApp = ref<SkillPlatform>('claude')
+const installError = ref('')
+const uninstallTarget = ref<{ skill: SkillSummary; managed: boolean } | null>(null)
+const uninstallError = ref('')
+const detailTarget = ref<ManagedSkill | null>(null)
+const detailContent = ref('')
+let detailRequest = 0
 
 // Expanded skills
-const expandedSkills = ref<Set<string>>(new Set())
+const expandedSkills = ref(new Set<string>())
 
-const refreshing = computed(() => loading.value || repoLoading.value)
-
-// Computed: Split skills by location
-const installedSkills = computed(() =>
-  skills.value.filter(s => s.installed)
+const refreshing = computed(() => libraryLoading.value || (activeView.value === 'discover' && discoverLoading.value))
+const libraryDirectories = computed(() => new Set(library.value.managed.map(skill => skill.directory.toLowerCase())))
+const isInLibrary = (skill: SkillSummary) => libraryDirectories.value.has(skill.directory.toLowerCase())
+const searchText = computed(() => search.value.trim().toLowerCase())
+const matchesSearch = (skill: SkillSummary) =>
+  [skill.name, skill.directory, skill.description, `${skill.repo_owner ?? ''}/${skill.repo_name ?? ''}`]
+    .some(value => value.toLowerCase().includes(searchText.value))
+const managedSkills = computed(() => library.value.managed.filter(matchesSearch))
+const isAppActive = (skill: ManagedSkill, app: SkillPlatform) =>
+  ['synced', 'inherited'].includes(skill.app_statuses[app])
+const hasReadOnlyInheritance = (skill: ManagedSkill, app: SkillPlatform) =>
+  skill.app_statuses[app] === 'inherited' && app !== 'opencode' && app !== 'grokbuild'
+const visibleAppStatus = (skill: ManagedSkill, app: SkillPlatform) =>
+  ['inherited', 'blocked', 'broken', 'unavailable'].includes(skill.app_statuses[app])
+const availableSkills = computed(() => discovered.value.filter(matchesSearch))
+const localGroups = computed(() =>
+  (['user', 'project'] as const).map(location => ({
+    location,
+    skills: library.value.local.filter(skill =>
+      (location === 'user' ? skill.install_location === 'user' : skill.install_location !== 'user') && matchesSearch(skill))
+  })).filter(group => group.skills.length)
 )
 
-const projectSkills = computed(() =>
-  skills.value.filter(s => s.install_location === 'project' && s.installed)
-)
-
-const userSkills = computed(() =>
-  skills.value.filter(s => s.install_location === 'user' && s.installed)
-)
-
-const availableSkills = computed(() =>
-  skills.value.filter(s => !s.installed)
-)
-
-// Skill identity helpers
-const skillIdentity = (skill: SkillSummary) =>
-  skill.key || `${(skill.repo_owner ?? 'local').toLowerCase()}:${skill.directory.toLowerCase()}`
-
-const installProcessingKey = (skill: SkillSummary) => `install:${skillIdentity(skill)}`
-const uninstallProcessingKey = (skill: SkillSummary) => `uninstall:${skillIdentity(skill)}`
-
-const isInstallingSkill = (skill: SkillSummary) => processingSkill.value === installProcessingKey(skill)
-const canInstallSkill = (skill: SkillSummary) => Boolean(skill.repo_owner && skill.repo_name)
-
-// Platform switching
-const switchPlatform = async (platform: 'claude' | 'codex' | 'opencode' | 'grokbuild') => {
-  activePlatform.value = platform
-  await loadSkillsForPlatform()
+const errorDetail = (message: string, error: unknown) => {
+  const detail = typeof error === 'string' ? error : error instanceof Error ? error.message : ''
+  return detail ? `${message} ${detail}` : message
 }
 
-// Load skills for current platform
-const loadSkillsForPlatform = async () => {
-  loading.value = true
+const loadLibrary = async () => {
+  libraryLoading.value = true
+  try {
+    library.value = await fetchSkillLibrary()
+    libraryLoaded.value = true
+  } catch (error) {
+    skillsError.value = errorDetail(t('components.skill.list.libraryError'), error)
+  } finally {
+    libraryLoading.value = false
+  }
+}
+
+let discoverRequest = 0
+const loadDiscovery = async () => {
+  const request = ++discoverRequest
+  discoverLoading.value = true
+  discoverError.value = ''
+  try {
+    const skills = await discoverSkills()
+    if (request !== discoverRequest) return
+    discovered.value = skills
+    discoverLoaded.value = true
+  } catch (error) {
+    if (request !== discoverRequest) return
+    discoverError.value = errorDetail(t('components.skill.list.error'), error)
+  } finally {
+    if (request === discoverRequest) discoverLoading.value = false
+  }
+}
+
+const switchView = (view: typeof views[number]) => {
+  activeView.value = view
+  search.value = ''
+  if (view === 'discover' && !discoverLoaded.value && !discoverLoading.value) void loadDiscovery()
+}
+
+const refresh = () => {
+  skillsError.value = ''
+  void loadLibrary()
+  if (activeView.value === 'discover') void loadDiscovery()
+}
+
+const mutateLibrary = async (action: () => Promise<void>, message: string) => {
+  if (libraryBusy.value) return
+  mutationBusy.value = true
   skillsError.value = ''
   try {
-    // Load installed skills for this platform (has correct install_location)
-    const installed = await fetchSkillsForPlatform(activePlatform.value)
-    // Also load available skills from repos
-    const available = await fetchSkills()
-
-    // FIX: Only keep repo skills that can be installed (have repo info)
-    // Force installed=false to avoid "gap" where skills fall into neither group
-    const availableClean = available
-      .filter(s => s.repo_owner && s.repo_name)  // Only installable repo skills
-      .map(s => ({
-        ...s,
-        installed: false,  // Force to false - actual status from fetchSkillsForPlatform
-        install_location: '' as const,
-        platform: '' as const
-      }))
-
-    // Merge: installed skills take precedence by directory name
-    const installedDirs = new Set(installed.map(s => s.directory.toLowerCase()))
-    const filtered = availableClean.filter(s => !installedDirs.has(s.directory.toLowerCase()))
-
-    skills.value = [...installed, ...filtered]
+    await action()
+    await loadLibrary()
   } catch (error) {
-    console.error('failed to load skills', error)
-    skillsError.value = t('components.skill.list.error')
+    skillsError.value = errorDetail(message, error)
+    await loadLibrary()
   } finally {
-    loading.value = false
-    processingSkill.value = ''
+    mutationBusy.value = false
   }
+}
+
+const toggleApp = (skill: ManagedSkill, app: SkillPlatform) =>
+  mutateLibrary(
+    () => setManagedSkillEnabled(skill.directory, app, !isAppActive(skill, app)),
+    t('components.skill.actions.toggleError')
+  )
+
+const handleRecover = (skill: ManagedSkill) =>
+  mutateLibrary(() => recoverManagedSkill(skill.directory), t('components.skill.actions.recoverError'))
+
+const handleLocalToggle = (skill: SkillSummary, enabled: boolean) =>
+  mutateLibrary(
+    () => toggleSkill(skill.directory, skill.platform, skill.install_location ?? 'user', enabled),
+    t('components.skill.actions.toggleError')
+  )
+
+const handleImport = (skill: SkillSummary) => {
+  if (!skill.platform) return
+  const app = skill.platform
+  return mutateLibrary(() => importLocalSkill(skill.directory, app), t('components.skill.actions.importError'))
+}
+
+// Toggle content expansion
+const toggleExpand = (skill: SkillSummary) => {
+  if (expandedSkills.value.has(skill.key)) expandedSkills.value.delete(skill.key)
+  else expandedSkills.value.add(skill.key)
+}
+
+const viewManagedSkill = async (skill: ManagedSkill) => {
+  const request = ++detailRequest
+  detailTarget.value = skill
+  detailContent.value = t('components.skill.actions.loading')
+  try {
+    const content = await getSkillContent(skill.directory, '', 'library')
+    if (request === detailRequest) detailContent.value = content
+  } catch {
+    if (request === detailRequest) detailContent.value = t('components.skill.actions.loadFailed')
+  }
+}
+
+const handleOpenFolder = async (platform = '', location = 'library') => {
+  try {
+    await openSkillFolder(platform, location)
+  } catch (error) {
+    skillsError.value = errorDetail(t('components.skill.actions.folderError'), error)
+  }
+}
+const handleLocalFolder = (skill: SkillSummary) => handleOpenFolder(skill.platform, skill.install_location)
+
+// Install modal
+const openInstallModal = (skill: SkillSummary) => {
+  installTarget.value = skill
+  installLocation.value = isInLibrary(skill) ? 'project' : 'user'
+  installError.value = ''
+}
+
+const closeInstallModal = () => {
+  if (!mutationBusy.value) installTarget.value = null
+}
+
+const confirmInstall = async () => {
+  const skill = installTarget.value
+  if (!skill || mutationBusy.value) return
+  mutationBusy.value = true
+  installError.value = ''
+  try {
+    await installSkill({
+      directory: skill.directory,
+      repo_owner: skill.repo_owner,
+      repo_name: skill.repo_name,
+      repo_branch: skill.repo_branch,
+      repo_path: skill.repo_path,
+      location: installLocation.value,
+      ...(installLocation.value === 'user' ? { apps: installApps.value } : { platform: projectApp.value })
+    })
+    installTarget.value = null
+    await loadLibrary()
+    switchView('installed')
+  } catch (error) {
+    installError.value = errorDetail(t('components.skill.actions.installError', { name: skill.name }), error)
+  } finally {
+    mutationBusy.value = false
+  }
+}
+
+// Uninstall
+const closeUninstallModal = () => {
+  if (mutationBusy.value) return
+  uninstallError.value = ''
+  uninstallTarget.value = null
+}
+
+const confirmUninstall = async () => {
+  const target = uninstallTarget.value
+  if (!target || mutationBusy.value) return
+  mutationBusy.value = true
+  uninstallError.value = ''
+  try {
+    const { skill } = target
+    if (target.managed) await uninstallManagedSkill(skill.directory)
+    else await uninstallSkillEx(skill.directory, skill.platform, skill.install_location ?? 'user')
+    uninstallTarget.value = null
+    await loadLibrary()
+  } catch (error) {
+    uninstallError.value = errorDetail(t('components.skill.actions.uninstallError', { name: target.skill.name }), error)
+  } finally {
+    mutationBusy.value = false
+  }
+}
+
+// Navigation
+const goHome = () => router.push('/')
+const openExternal = (target: string) => {
+  if (!target) return
+  Browser.OpenURL(target).catch(error => console.error('failed to open link', error))
 }
 
 const loadRepos = async () => {
@@ -432,136 +597,6 @@ const loadRepos = async () => {
   } finally {
     repoLoading.value = false
   }
-}
-
-const refresh = () => {
-  void Promise.all([loadRepos(), loadSkillsForPlatform()])
-}
-
-// Toggle skill enabled status
-const handleToggle = async (skill: SkillSummary, enabled: boolean) => {
-  togglingSkill.value = skill.key
-  try {
-    await toggleSkill(
-      skill.directory,
-      skill.platform || activePlatform.value,
-      skill.install_location || 'user',
-      enabled
-    )
-    // Update local state
-    const target = skills.value.find(s => s.key === skill.key)
-    if (target) {
-      target.enabled = enabled
-    }
-  } catch (error) {
-    console.error('failed to toggle skill', error)
-    skillsError.value = t('components.skill.actions.toggleError')
-  } finally {
-    togglingSkill.value = ''
-  }
-}
-
-// Toggle content expansion
-const toggleExpand = async (skill: SkillSummary) => {
-  const key = skill.key
-  if (expandedSkills.value.has(key)) {
-    expandedSkills.value.delete(key)
-  } else {
-    expandedSkills.value.add(key)
-  }
-}
-
-// Open skill folder (default: user location)
-const handleOpenFolder = async () => {
-  try {
-    await openSkillFolder(activePlatform.value, 'user')
-  } catch (error) {
-    console.error('failed to open folder', error)
-  }
-}
-
-// Open skill folder for specific location
-const handleOpenFolderForLocation = async (location: 'user' | 'project') => {
-  try {
-    await openSkillFolder(activePlatform.value, location)
-  } catch (error) {
-    console.error('failed to open folder', error)
-  }
-}
-
-// Install modal
-const openInstallModal = (skill: SkillSummary) => {
-  installTarget.value = skill
-  installLocation.value = 'user'
-  installModalOpen.value = true
-}
-
-const closeInstallModal = () => {
-  installModalOpen.value = false
-  installTarget.value = null
-}
-
-const confirmInstall = async () => {
-  if (!installTarget.value || !canInstallSkill(installTarget.value)) return
-
-  installing.value = true
-  processingSkill.value = installProcessingKey(installTarget.value)
-
-  try {
-    await installSkill({
-      directory: installTarget.value.directory,
-      repo_owner: installTarget.value.repo_owner,
-      repo_name: installTarget.value.repo_name,
-      repo_branch: installTarget.value.repo_branch,
-      platform: activePlatform.value,
-      location: installLocation.value
-    })
-    skillsError.value = ''
-    closeInstallModal()
-    await loadSkillsForPlatform()
-  } catch (error) {
-    console.error('failed to install skill', error)
-    skillsError.value = t('components.skill.actions.installError', { name: installTarget.value.name })
-  } finally {
-    installing.value = false
-    processingSkill.value = ''
-  }
-}
-
-// Uninstall
-const handleUninstall = async (skill: SkillSummary) => {
-  processingSkill.value = uninstallProcessingKey(skill)
-  try {
-    await uninstallSkillEx(
-      skill.directory,
-      skill.platform || activePlatform.value,
-      skill.install_location || 'user'
-    )
-    skillsError.value = ''
-    await loadSkillsForPlatform()
-  } catch (error) {
-    console.error('failed to uninstall skill', error)
-    skillsError.value = t('components.skill.actions.uninstallError', { name: skill.name })
-  } finally {
-    processingSkill.value = ''
-  }
-}
-
-// Navigation
-const goHome = () => {
-  router.push('/')
-}
-
-const openExternal = (target: string) => {
-  if (!target) return
-  Browser.OpenURL(target).catch(() => {
-    console.error('failed to open link', target)
-  })
-}
-
-const openGithub = (url: string) => {
-  if (!url) return
-  openExternal(url)
 }
 
 // Repository modal
@@ -608,7 +643,8 @@ const submitRepo = async () => {
     })
     repoForm.url = ''
     repoForm.branch = 'main'
-    await loadSkillsForPlatform()
+    discoverLoaded.value = false
+    if (activeView.value === 'discover') void loadDiscovery()
   } catch (error) {
     console.error('failed to add skill repo', error)
     repoError.value = t('components.skill.repos.addError')
@@ -622,7 +658,8 @@ const removeRepo = async (repo: SkillRepoConfig) => {
   repoError.value = ''
   try {
     repoList.value = await removeSkillRepo(repo.owner, repo.name)
-    await loadSkillsForPlatform()
+    discoverLoaded.value = false
+    if (activeView.value === 'discover') void loadDiscovery()
   } catch (error) {
     console.error('failed to remove skill repo', error)
     repoError.value = t('components.skill.repos.removeError')
@@ -636,14 +673,13 @@ const openRepoGithub = (repo: SkillRepoConfig) => {
   openExternal(`https://github.com/${repo.owner}/${repo.name}`)
 }
 
-onMounted(() => {
-  void Promise.all([loadRepos(), loadSkillsForPlatform()])
-})
+onMounted(loadLibrary)
 </script>
 
 <style scoped>
 .skill-page {
-  gap: 32px;
+  min-width: 0;
+  gap: 16px;
   color: var(--mac-text);
 }
 
@@ -651,241 +687,253 @@ onMounted(() => {
 .skill-platform-tabs {
   display: flex;
   gap: 8px;
-  margin-bottom: 24px;
   border-bottom: 1px solid var(--mac-border);
   padding-bottom: 12px;
 }
 
-.skill-platform-tab {
-  padding: 8px 16px;
+.skill-platform-tab, .btn-primary, .btn-secondary {
+  padding: 8px 14px;
   border: 1px solid var(--mac-border);
   border-radius: 8px;
   background: transparent;
-  color: var(--mac-text-secondary);
+  color: var(--mac-text);
   font-size: 0.9rem;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.2s ease;
 }
 
-.skill-platform-tab:hover {
+.skill-platform-tab:hover, .btn-secondary:hover {
+  background: var(--mac-surface);
+}
+
+.skill-platform-tab.active, .btn-primary {
+  background: var(--mac-accent);
+  border-color: var(--mac-accent);
+  color: white;
+}
+
+.skill-toolbar input, .install-project select {
+  width: min(100%, 320px);
+  padding: 8px 12px;
+  border: 1px solid var(--mac-border);
+  border-radius: 8px;
   background: var(--mac-surface);
   color: var(--mac-text);
 }
 
-.skill-platform-tab.active {
+.skill-matrix {
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--mac-border);
+  border-radius: 14px;
+  background: var(--mac-surface);
+}
+
+.skill-matrix table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.skill-matrix th, .skill-matrix td {
+  padding: 11px 9px;
+  text-align: center;
+  border-bottom: 1px solid var(--mac-border);
+}
+
+.skill-matrix tbody tr:last-child > * {
+  border-bottom: none;
+}
+
+.skill-matrix thead {
+  background: var(--mac-surface-strong);
+  color: var(--mac-text-secondary);
+  font-size: 0.8rem;
+}
+
+.skill-matrix th:first-child {
+  position: sticky;
+  left: 0;
+  width: 100%;
+  min-width: 190px;
+  text-align: left;
+  padding-inline: 14px;
+  background: var(--mac-surface-strong);
+}
+
+.skill-name, .skill-link {
+  text-align: left;
+  color: var(--mac-accent);
+  font-weight: 600;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.skill-name:hover, .skill-link:hover {
+  text-decoration: underline;
+}
+
+.skill-source, .skill-conflict {
+  color: var(--mac-text-secondary);
+  font-size: 0.75rem;
+}
+
+.skill-inherited {
+  display: block;
+  color: var(--mac-text-secondary);
+  font-size: 0.7rem;
+}
+
+.skill-warnings {
+  margin-bottom: 12px;
+  color: var(--mac-text-secondary);
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+
+.skill-warnings summary {
+  cursor: pointer;
+}
+
+.skill-warnings ul {
+  padding-inline-start: 20px;
+}
+
+.skill-recovery {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  font-size: 0.8rem;
+}
+
+.skill-matrix tbody th .skill-card-desc {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-weight: 400;
+}
+
+.app-switch {
+  display: inline-flex;
+  align-items: center;
+  width: 34px;
+  height: 20px;
+  padding: 2px;
+  border-radius: 999px;
+  background: var(--mac-surface-strong);
+  border: 1px solid var(--mac-text-secondary);
+  cursor: pointer;
+}
+
+.app-switch span {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--mac-text-secondary);
+}
+
+.app-switch[aria-checked="true"] {
+  justify-content: flex-end;
   background: var(--mac-accent);
-  color: white;
   border-color: var(--mac-accent);
+}
+
+.app-switch[aria-checked="true"] span {
+  background: white;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* Skill Groups */
 .skill-group {
-  margin-bottom: 32px;
-}
-
-.skill-group-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 16px;
+  margin-top: 24px;
 }
 
 .skill-group-title {
   font-size: 1rem;
-  font-weight: 600;
-  margin: 0;
-  color: var(--mac-text-secondary);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.skill-group-title::before {
-  content: '';
-  display: inline-block;
-  width: 4px;
-  height: 16px;
-  background: var(--mac-accent);
-  border-radius: 2px;
-}
-
-.skill-empty-installed {
-  text-align: center;
-  color: var(--mac-text-secondary);
-  padding: 24px;
-  margin-bottom: 24px;
+  margin-bottom: 10px;
 }
 
 /* Skill List */
 .skill-list {
-  display: flex;
-  flex-direction: column;
+  display: grid;
   gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
 }
 
 .installed-skills {
-  gap: 16px;
+  grid-template-columns: 1fr;
 }
 
 /* Available Skill Card */
 .skill-card.available-card {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid var(--mac-border);
   background: var(--mac-surface-strong); /* fallback for old WebKit */
   background: color-mix(in srgb, var(--mac-surface) 90%, transparent);
-  border: 1px solid var(--mac-border);
-  border-radius: 16px;
-  padding: 16px 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
 }
 
 .skill-card-head {
   display: flex;
+  align-items: start;
   justify-content: space-between;
-  align-items: flex-start;
-  gap: 12px;
+  gap: 8px;
 }
 
-.skill-card-eyebrow {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.15em;
-  color: var(--mac-text-secondary);
-  margin-bottom: 4px;
-}
-
-.skill-card h3 {
-  font-size: 0.95rem;
-  margin: 0;
-}
-
-.skill-card-desc {
-  color: var(--mac-text-secondary);
-  font-size: 0.85rem;
-  line-height: 1.4;
-}
-
-.skill-card-actions {
-  display: flex;
-  gap: 6px;
+.skill-card-head button {
   flex-shrink: 0;
 }
 
-/* Install Modal */
-.install-modal-content {
-  min-width: min(400px, 80vw);
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
+.skill-card-eyebrow, .skill-card-desc {
+  color: var(--mac-text-secondary);
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
 }
 
-.install-modal-desc {
-  color: var(--mac-text-secondary);
-  font-size: 0.95rem;
+.skill-card h3 {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Install Modal */
+.install-modal-content, .install-project {
+  display: grid;
+  gap: 12px;
 }
 
 .install-location-options {
   display: flex;
-  flex-direction: column;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 8px 16px;
 }
 
-.install-option {
-  display: block;
-  cursor: pointer;
-}
-
-.install-option-content {
-  display: flex;
-  align-items: flex-start;
-  gap: 16px;
-  padding: 16px;
-  border: 2px solid var(--mac-border);
-  border-radius: 12px;
-  transition: all 0.2s ease;
-}
-
-.install-option:hover .install-option-content {
-  border-color: var(--mac-accent);
-}
-
-.install-option.selected .install-option-content {
-  border-color: var(--mac-accent);
-  background: rgba(10, 132, 255, 0.1); /* fallback for old WebKit */
-  background: color-mix(in srgb, var(--mac-accent) 10%, transparent);
-}
-
-.install-option-icon {
-  width: 24px;
-  height: 24px;
-  flex-shrink: 0;
-  color: var(--mac-text-secondary);
-}
-
-.install-option.selected .install-option-icon {
-  color: var(--mac-accent);
-}
-
-.install-option-title {
-  font-weight: 600;
-  margin: 0 0 4px;
-}
-
-.install-option-desc {
-  font-size: 0.85rem;
-  color: var(--mac-text-secondary);
-  margin: 0;
-  font-family: monospace;
+.install-location-options legend {
+  margin-bottom: 6px;
 }
 
 .install-option-warning {
-  font-size: 0.8rem;
-  color: #f59e0b;
-  margin: 8px 0 0;
+  color: var(--mac-text-secondary);
+  font-size: 0.85rem;
 }
 
 .install-modal-actions {
   display: flex;
   justify-content: flex-end;
   gap: 12px;
-  padding-top: 8px;
-  border-top: 1px solid var(--mac-border);
+  padding-top: 14px;
 }
 
-.btn-primary,
-.btn-secondary {
-  padding: 8px 20px;
-  border-radius: 8px;
-  font-weight: 500;
-  font-size: 0.9rem;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.btn-primary {
-  background: var(--mac-accent);
-  color: white;
-  border: none;
-}
-
-.btn-primary:hover {
-  opacity: 0.9;
-}
-
-.btn-primary:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.btn-secondary {
-  background: transparent;
-  color: var(--mac-text);
-  border: 1px solid var(--mac-border);
-}
-
-.btn-secondary:hover {
-  background: var(--mac-surface);
+.skill-detail {
+  padding: 12px 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 /* Repository Section (reused from original) */
@@ -1013,7 +1061,7 @@ onMounted(() => {
 }
 
 .skill-list-section {
-  margin-top: 16px;
+  min-width: 0;
 }
 
 .skill-empty {
@@ -1033,16 +1081,6 @@ onMounted(() => {
 
 .ghost-icon svg.spin {
   animation: skill-spin 1s linear infinite;
-}
-
-.skill-action-spinner {
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  border: 2px solid currentColor;
-  border-top-color: transparent;
-  animation: skill-spin 0.8s linear infinite;
-  display: inline-block;
 }
 
 .ghost-icon:disabled {
@@ -1071,13 +1109,13 @@ html.dark .skill-card.available-card {
   background: color-mix(in srgb, var(--mac-surface) 70%, transparent);
 }
 
-@media (max-width: 768px) {
-  .skill-hero {
-    flex-direction: column;
+@media (max-width: 600px) {
+  .skill-page {
+    padding-inline: 18px;
   }
 
-  .skill-platform-tabs {
-    flex-wrap: wrap;
+  .skill-matrix th:first-child {
+    min-width: 130px;
   }
 }
 

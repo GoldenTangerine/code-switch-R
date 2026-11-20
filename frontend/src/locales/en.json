@@ -2617,19 +2617,27 @@
     },
     "skill": {
       "hero": {
-        "eyebrow": "Skill Library",
-        "title": "Claude Skill",
-        "lead": "Fetch Claude skills from the managed repositories. Click the top-right button to add more sources."
+        "eyebrow": "Skills",
+        "title": "Manage Skills",
+        "lead": "Install skills in one place and enable them per app."
+      },
+      "views": {
+        "installed": "Installed",
+        "discover": "Discover"
       },
       "platform": {
         "claude": "Claude Code",
         "codex": "Codex",
+        "gemini": "Gemini CLI",
         "opencode": "OpenCode",
-        "grokbuild": "Grok Build"
+        "grokbuild": "Grok Build",
+        "openclaw": "OpenClaw",
+        "hermes": "Hermes",
+        "pi": "Pi"
       },
       "groups": {
         "project": "Project Skills",
-        "user": "User Skills",
+        "user": "Unmanaged Local Skills",
         "available": "Available Skills"
       },
       "actions": {
@@ -2642,11 +2650,36 @@
         "installError": "Failed to install {name}. Please retry",
         "uninstallError": "Failed to uninstall {name}. Please retry",
         "toggle": "Enable/Disable",
+        "autoInvoke": "Allow Claude to invoke automatically",
         "viewContent": "View Content",
         "hideContent": "Hide Content",
         "openFolder": "Open Folder",
+        "openLibrary": "Open Skill Library Folder",
+        "folderError": "Could not open the skill folder.",
+        "label": "Actions",
+        "import": "Add to Library",
+        "importError": "Could not add this skill to the library.",
+        "conflict": "Name in use",
+        "conflictDetail": "This app already has a skill with this folder name. Add it to the library from the local skills list if the files match.",
+        "appSwitch": "{name} · Toggle in {app}",
+        "readOnly": "Shared folder · Read only",
+        "register": "Add to Library",
+        "recover": "Restore",
+        "recoverError": "Could not restore this skill.",
+        "uninstallManagedPrompt": "Uninstall {name} from the library and all enabled apps?",
+        "uninstallLocalPrompt": "Uninstall {name} from this app's skills folder?",
         "loadFailed": "Failed to load content",
         "toggleError": "Failed to toggle skill status"
+      },
+      "appStatus": {
+        "inherited": "Loaded from another folder",
+        "blocked": "Disabled in app",
+        "broken": "Broken link",
+        "unavailable": "Folder unavailable"
+      },
+      "masterStatus": {
+        "missing": "Master copy missing",
+        "unregistered": "Master copy unregistered"
       },
       "list": {
         "title": "Available skills",
@@ -2656,12 +2689,20 @@
         "error": "Failed to load skills. Please check your network and retry.",
         "noDescription": "SKILL.md does not include a description",
         "missingRepo": "Missing repository information for this skill",
-        "noInstalled": "No installed skills"
+        "noInstalled": "No installed skills",
+        "column": "Skill",
+        "search": "Search skills or repositories",
+        "noResults": "No matching skills.",
+        "libraryError": "Could not read local skills.",
+        "partial": "Some skill folders or app settings could not be read"
       },
       "install": {
         "title": "Choose Install Location",
         "desc": "Install {name} to:",
         "locationLabel": "Install Location",
+        "apps": "Enable in these apps",
+        "app": "App",
+        "projectAction": "Install to Project",
         "userLevel": "User Level (Global)",
         "userLevelDesc": "~/.{platform}/skills/",
         "projectLevel": "Project Level (Current Directory)",

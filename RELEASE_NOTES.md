@@ -8,6 +8,13 @@
 @FilePath: RELEASE_NOTES.md
 -->
 
+# Code Switch v2.12.3
+
+- 技能页分为「已安装」和「发现」。安装时可一次选择多个应用，之后在「已安装」逐个启停。停用全部应用后，技能仍保留在技能库。
+- 支持纳入已有用户级技能，并保留项目级安装入口。OpenCode 和 Grok Build 可单独停用从其他目录加载的技能，其他应用的共享来源会在列表中标明。
+- 增加同名技能和共享目录保护。个别应用的目录异常时，其他技能仍可管理。技能库也会标出失效链接和未登记的主副本，并提供恢复入口。
+- 修正 Pi 和 OpenClaw 的项目级安装路径，支持查看 Pi、OpenCode、OpenClaw 和 Hermes 的嵌套技能。
+
 # Code Switch v2.12.2
 
 - 在「系统控制 → 应用更新」查看 Claude Code、Codex、Antigravity CLI、Gemini CLI、OpenCode、Grok Build、OpenClaw、Hermes 和 Pi 的本机版本、最新版本和更新状态。
