@@ -1,3 +1,12 @@
+/*
+@name: 日志存储管理
+@Descripttion: 查询日志占用并清理请求明细和统计汇总。
+@version: 1.0.0
+@Author: sm
+@Date: 2026-11-20 14:19:00
+@LastEditTime: 2026-11-20 14:19:00
+@FilePath: services/logstorage_service.go
+*/
 package services
 
 import (
@@ -100,7 +109,7 @@ func (ls *LogService) GetLogStorageStats() (LogStorageStats, error) {
 	}
 
 	stats.RequestLog.Rows = countTableRows(db, "request_log")
-	stats.StatsHour.Rows = countTableRows(db, requestLogStatsHourlyTable)
+	stats.StatsHour.Rows = countTableRows(db, requestLogStatsHourlyTable) + countTableRows(db, requestLogHistoryTable)
 	stats.StatsDay.Rows = countTableRows(db, requestLogStatsDailyTable)
 
 	tableBytes, err := querySQLiteDbstatBytes(db)
@@ -114,7 +123,7 @@ func (ls *LogService) GetLogStorageStats() (LogStorageStats, error) {
 			"idx_request_log_platform_provider_id_error_read_at",
 			"idx_request_log_platform_provider_error_read_at",
 		)
-		stats.StatsHour.Bytes = tableBytes[requestLogStatsHourlyTable]
+		stats.StatsHour.Bytes = tableBytes[requestLogStatsHourlyTable] + tableBytes[requestLogHistoryTable]
 		stats.StatsDay.Bytes = tableBytes[requestLogStatsDailyTable]
 	}
 
@@ -126,6 +135,9 @@ func (ls *LogService) ClearRequestLogs() error {
 }
 
 func (ls *LogService) ClearRequestLogsV2(reimportSessions bool) error {
+	if GlobalDBQueue == nil {
+		return fmt.Errorf("database write queue is not initialized")
+	}
 	db, err := xdb.DB("default")
 	if err != nil {
 		return err
@@ -144,30 +156,41 @@ func (ls *LogService) ClearRequestLogsV2(reimportSessions bool) error {
 		return err
 	}
 	triggersCleaned = true
-	if GlobalDBQueue == nil {
-		return fmt.Errorf("database write queue is not initialized")
-	}
-	if err := GlobalDBQueue.Exec("DELETE FROM request_log"); err != nil {
-		return err
+	pricing := ls.resolvePricingSnapshot()
+	tasks := []WriteTask{
+		{TxFunc: func(tx *sql.Tx) error { return archiveRequestLogs(tx, pricing) }},
+		{SQL: "DELETE FROM request_log"},
 	}
 	if reimportSessions {
-		if err := resetSessionUsageSyncState(); err != nil {
-			return err
-		}
+		tasks = append(tasks, resetSessionUsageSyncTasks()...)
+	} else {
+		tasks = append(tasks, WriteTask{SQL: "DELETE FROM session_usage_dedup"})
+	}
+	if err := GlobalDBQueue.ExecTxGroup(tasks); err != nil {
+		return err
 	}
 	_, _ = db.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
 	return nil
 }
 
 func (ls *LogService) ClearLogStats() error {
+	if GlobalDBQueue == nil {
+		return fmt.Errorf("database write queue is not initialized")
+	}
 	db, err := xdb.DB("default")
 	if err != nil {
 		return err
 	}
-	if _, err := db.Exec(fmt.Sprintf("DELETE FROM %s", requestLogStatsHourlyTable)); err != nil {
-		return err
-	}
-	if _, err := db.Exec(fmt.Sprintf("DELETE FROM %s", requestLogStatsDailyTable)); err != nil {
+	if err := GlobalDBQueue.ExecTxGroup([]WriteTask{
+		{SQL: "DELETE FROM " + requestLogStatsHourlyTable},
+		{SQL: "DELETE FROM " + requestLogStatsDailyTable},
+		{SQL: "DELETE FROM " + requestLogHistoryTable},
+		{SQL: `INSERT INTO schema_migrations (key, value)
+			VALUES (?, COALESCE((SELECT seq FROM sqlite_sequence WHERE name = 'request_log'), 0))
+			ON CONFLICT(key) DO UPDATE SET value = excluded.value`, Args: []any{requestLogHistoryResetKey}},
+		{SQL: "UPDATE session_usage_receipt SET archive_state = 0 WHERE archive_state = 1"},
+		{SQL: "DELETE FROM session_usage_receipt WHERE archive_state = 2"},
+	}); err != nil {
 		return err
 	}
 	_, _ = db.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
@@ -193,26 +216,17 @@ func (ls *LogService) ListProviderLogStorageStats() ([]ProviderLogStorageStat, e
 		entry.TotalBytes = entry.RequestLogBytes + entry.StatsBytes
 	}
 
-	statsHourlyRows, err := queryProviderStatsStorageRows(db, requestLogStatsHourlyTable)
-	if err != nil {
-		return nil, err
-	}
-	for _, row := range statsHourlyRows {
-		entry := mergeProviderLogStorageRow(merged, row)
-		entry.StatsRows += row.Rows
-		entry.StatsBytes += row.Bytes
-		entry.TotalBytes = entry.RequestLogBytes + entry.StatsBytes
-	}
-
-	statsDailyRows, err := queryProviderStatsStorageRows(db, requestLogStatsDailyTable)
-	if err != nil {
-		return nil, err
-	}
-	for _, row := range statsDailyRows {
-		entry := mergeProviderLogStorageRow(merged, row)
-		entry.StatsRows += row.Rows
-		entry.StatsBytes += row.Bytes
-		entry.TotalBytes = entry.RequestLogBytes + entry.StatsBytes
+	for _, table := range []string{requestLogStatsHourlyTable, requestLogStatsDailyTable, requestLogHistoryTable} {
+		rows, err := queryProviderStatsStorageRows(db, table)
+		if err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			entry := mergeProviderLogStorageRow(merged, row)
+			entry.StatsRows += row.Rows
+			entry.StatsBytes += row.Bytes
+			entry.TotalBytes = entry.RequestLogBytes + entry.StatsBytes
+		}
 	}
 
 	items := make([]ProviderLogStorageStat, 0, len(merged))
@@ -297,6 +311,11 @@ func (ls *LogService) ClearProviderLogStorage(platform string, providerID string
 		return result, err
 	}
 	result.DeletedStatsHour = deletedHourly
+	deletedHistory, err := deleteRequestLogStatsByProviderTx(tx, requestLogHistoryTable, target)
+	if err != nil {
+		return result, err
+	}
+	result.DeletedStatsHour += deletedHistory
 
 	deletedDaily, err := deleteRequestLogStatsByProviderTx(tx, requestLogStatsDailyTable, target)
 	if err != nil {
@@ -553,6 +572,11 @@ func (ls *LogService) DeleteRequestLogsByDate(day string) (DeleteRequestLogsByDa
 		return result, err
 	}
 	result.DeletedStatsHour = deletedHourly
+	deletedHistory, err := deleteRequestLogStatsRangeTx(tx, requestLogHistoryTable, dayStartKey, dayEndKey)
+	if err != nil {
+		return result, err
+	}
+	result.DeletedStatsHour += deletedHistory
 
 	deletedDaily, err := deleteRequestLogStatsRangeTx(tx, requestLogStatsDailyTable, dayStartKey, dayEndKey)
 	if err != nil {

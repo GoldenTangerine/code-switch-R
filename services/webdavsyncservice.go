@@ -1,3 +1,12 @@
+/*
+@name: WebDAV 同步
+@Descripttion: 通过 WebDAV 备份和恢复应用配置及数据库。
+@version: 1.0.0
+@Author: sm
+@Date: 2026-11-20 14:21:00
+@LastEditTime: 2026-11-20 14:21:00
+@FilePath: services/webdavsyncservice.go
+*/
 package services
 
 import (
@@ -2016,26 +2025,23 @@ func importSQLiteFromSnapshot(snapshotPath string) error {
 		_ = ensureRequestLogTableWithDB(db)
 	}()
 
-	tx, err := db.Begin()
+	ctx := context.Background()
+	conn, err := db.Conn(ctx)
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if err != nil {
-			_ = tx.Rollback()
-		}
-	}()
-
-	escaped := strings.ReplaceAll(snapshotPath, "'", "''")
-	if _, err = tx.Exec(fmt.Sprintf("ATTACH DATABASE '%s' AS remote", escaped)); err != nil {
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, "ATTACH DATABASE ? AS remote", snapshotPath); err != nil {
 		return err
 	}
-	attached := true
 	defer func() {
-		if attached {
-			_, _ = tx.Exec("DETACH DATABASE remote")
-		}
+		_, _ = conn.ExecContext(ctx, "DETACH DATABASE remote")
 	}()
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 
 	tables, err := listSQLiteTables(tx, "remote")
 	if err != nil {
@@ -2044,6 +2050,7 @@ func importSQLiteFromSnapshot(snapshotPath string) error {
 
 	remoteHasHourly := false
 	remoteHasDaily := false
+	remoteHasLogHistory := false
 	for _, table := range tables {
 		if strings.HasPrefix(table, "sqlite_") {
 			continue
@@ -2053,6 +2060,9 @@ func importSQLiteFromSnapshot(snapshotPath string) error {
 		}
 		if table == requestLogStatsDailyTable {
 			remoteHasDaily = true
+		}
+		if table == requestLogHistoryTable {
+			remoteHasLogHistory = true
 		}
 		exists, err := sqliteTableExists(tx, "main", table)
 		if err != nil {
@@ -2092,11 +2102,17 @@ func importSQLiteFromSnapshot(snapshotPath string) error {
 		}
 	}
 
-	if attached {
-		if _, err := tx.Exec("DETACH DATABASE remote"); err != nil {
+	if !remoteHasLogHistory {
+		// 旧快照由其中的小时汇总恢复历史，避免混入本机已归档的用量。
+		if _, err := tx.Exec("DELETE FROM " + requestLogHistoryTable); err != nil {
 			return err
 		}
-		attached = false
+		if _, err := tx.Exec("DELETE FROM schema_migrations WHERE key IN (?, ?)", requestLogHistoryMigrationKey, requestLogHistoryResetKey); err != nil {
+			return err
+		}
+		if _, err := tx.Exec("UPDATE session_usage_receipt SET archive_state = 0 WHERE archive_state <> 0"); err != nil {
+			return err
+		}
 	}
 
 	if err := tx.Commit(); err != nil {

@@ -261,19 +261,18 @@ func resetSessionUsageSyncState() error {
 	if GlobalDBQueue == nil {
 		return fmt.Errorf("database write queue is not initialized")
 	}
-	if err := GlobalDBQueue.Exec("DELETE FROM session_log_sync"); err != nil {
-		return err
+	return GlobalDBQueue.ExecTxGroup(resetSessionUsageSyncTasks())
+}
+
+func resetSessionUsageSyncTasks() []WriteTask {
+	// 选择重新导入会话时，允许按会话文件恢复明细，并保留已纳入历史汇总的标记。
+	return []WriteTask{
+		{SQL: "DELETE FROM session_log_sync"},
+		{SQL: "DELETE FROM session_usage_dedup"},
+		{SQL: "DELETE FROM session_usage_receipt WHERE archive_state = 0"},
+		{SQL: "UPDATE session_usage_receipt SET archive_state = 2 WHERE archive_state = 1"},
+		{SQL: `UPDATE session_usage_dedup_state
+			SET last_proxy_log_id = 0, last_session_log_id = 0, updated_at = ? WHERE id = 1`,
+			Args: []any{time.Now().UTC().Format(timeLayout)}},
 	}
-	if err := GlobalDBQueue.Exec("DELETE FROM session_usage_dedup"); err != nil {
-		return err
-	}
-	// 选择重新导入会话时清空回执，允许按会话文件完整重建
-	if err := GlobalDBQueue.Exec("DELETE FROM session_usage_receipt"); err != nil {
-		return err
-	}
-	return GlobalDBQueue.Exec(`
-		UPDATE session_usage_dedup_state
-		SET last_proxy_log_id = 0, last_session_log_id = 0, updated_at = ?
-		WHERE id = 1
-	`, time.Now().UTC().Format(timeLayout))
 }

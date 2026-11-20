@@ -8,6 +8,12 @@
 @FilePath: RELEASE_NOTES.md
 -->
 
+# Code Switch v2.12.1
+
+- 修复「日志 → 日志存储 → 清除明细」后统计卡片归零的问题。按月、按年仍可查询调用次数、成功率、Token、缓存命中和费用，新请求会继续累加。
+- 升级后可从仍保留的旧汇总恢复调用次数、Token 和总费用。模型分布和单次请求峰值取决于原始明细是否仍在。
+- 重新导入会话明细时，已保留的用量只统计一次。
+
 # Code Switch v2.12.0
 
 - 日志页新增 8 个本地会话用量来源：Antigravity、Kimi Code、Copilot CLI、WorkBuddy、DeepSeek Harness、MiniMax Code、Oh My Pi、Pi。启动后自动扫描本机会话记录，切换“数据来源”为“会话”或“全部”即可查看，不经过代理也能统计用量与成本。

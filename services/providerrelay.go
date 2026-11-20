@@ -7606,6 +7606,7 @@ func applyRequestLogCostResult(reqLog *ReqeustLog, result requestLogCostResult) 
 }
 
 type ReqeustLog struct {
+	archivedUsage              *archivedLogUsage
 	PricingSnapshot            *modelpricing.PricingSnapshot `json:"pricing_snapshot,omitempty"`
 	PricingContext             *modelpricing.PricingContext  `json:"-"`
 	ID                         int64                         `json:"id"`

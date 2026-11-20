@@ -694,27 +694,62 @@ func (ls *LogService) loadRequestLogsForAggregationV3(
 	end time.Time,
 	sourceMode LogDataSourceMode,
 ) ([]ReqeustLog, error) {
-	model := xdb.New("request_log")
+	db, err := xdb.DB("default")
+	if err != nil {
+		return nil, err
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	model := xdb.New("request_log").Tx(tx)
 	options := []xdb.Option{
 		xdb.Field(requestLogListSelectFields...),
 		xdb.WhereGte("created_at", start.UTC().Format(timeLayout)),
 		xdb.WhereLt("created_at", end.UTC().Format(timeLayout)),
 		requestLogSourceFilterOption(sourceMode),
+		xdb.WhereRaw(requestLogUnarchivedWhereClause),
+	}
+	historyOptions := []xdb.Option{
+		xdb.WhereGte("bucket_start", start.Format(timeLayout)),
+		xdb.WhereLt("bucket_start", startOfHour(end).Format(timeLayout)),
+		xdb.WhereRaw(requestLogHistorySourceWhereClause(sourceMode)),
 	}
 	if strings.TrimSpace(platform) != "" {
 		options = append(options, xdb.WhereEq("platform", strings.TrimSpace(platform)))
+		historyOptions = append(historyOptions, xdb.WhereEq("platform", strings.TrimSpace(platform)))
 	}
 	if strings.TrimSpace(pricingModel) != "" {
 		options = append(options, buildPricingModelFilterOption(pricingModel))
+		historyOptions = append(historyOptions, xdb.WhereEq("pricing_model", strings.TrimSpace(pricingModel)))
 	}
 	records, err := selectRecordsByProviderRef(model, options, provider)
-	if err != nil {
-		if errors.Is(err, xdb.ErrNotFound) || isNoSuchTableErr(err) {
-			return []ReqeustLog{}, nil
-		}
+	if err != nil && !isNoSuchTableErr(err) {
 		return nil, err
 	}
-	return buildRequestLogList(records, ls.resolvePricingSnapshot()), nil
+	history, err := archivedRequestLogs(tx, historyOptions, provider)
+	if err != nil && !isNoSuchTableErr(err) {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	logs := append(buildRequestLogList(records, ls.resolvePricingSnapshot()), history...)
+	provider = strings.TrimSpace(provider)
+	if provider != "" {
+		matchingID := logs[:0]
+		for _, entry := range logs {
+			if entry.ProviderID == provider {
+				matchingID = append(matchingID, entry)
+			}
+		}
+		if len(matchingID) > 0 {
+			return matchingID, nil
+		}
+	}
+	return logs, nil
 }
 
 func normalizedProviderDisplayName(providerName string) string {
@@ -1281,19 +1316,30 @@ func (ls *LogService) ListProviderRefsV2(platform string, sourceMode string) ([]
 		fromClause += " INDEXED BY " + requestLogProviderRefsIndexName
 	}
 	query := `
-		SELECT provider_id, provider, MAX(created_at) AS latest_at
+		SELECT provider_id, provider, datetime(MAX(created_at), 'localtime') AS latest_at
 		FROM ` + fromClause + `
 		WHERE TRIM(COALESCE(provider, '')) <> ''
 	`
 	args := make([]interface{}, 0, 1)
-	query += " AND " + requestLogSourceWhereClause(normalizeLogDataSourceMode(sourceMode), "request_log")
+	mode := normalizeLogDataSourceMode(sourceMode)
+	query += " AND " + requestLogSourceWhereClause(mode, "request_log")
 	if strings.TrimSpace(platform) != "" {
 		query += " AND platform = ?"
 		args = append(args, platform)
 	}
 	query += " GROUP BY provider_id, provider"
+	historyQuery := `
+		SELECT provider_id, provider, MAX(bucket_start) AS latest_at
+		FROM ` + requestLogHistoryTable + `
+		WHERE TRIM(COALESCE(provider, '')) <> '' AND ` + requestLogHistorySourceWhereClause(mode)
+	historyArgs := append([]any{}, args...)
+	if strings.TrimSpace(platform) != "" {
+		historyQuery += " AND platform = ?"
+		historyArgs = append(historyArgs, platform)
+	}
+	historyQuery += " GROUP BY provider_id, provider"
 
-	rows, err := db.Query(query, args...)
+	rows, err := db.Query(query+" UNION ALL "+historyQuery, historyArgs...)
 	if err != nil {
 		if isNoSuchTableErr(err) {
 			return []LogProviderRef{}, nil
@@ -1651,9 +1697,13 @@ func aggregateLogStatsRange(start time.Time, end time.Time, logs []ReqeustLog) L
 
 	bucketCount := len(bucketStarts)
 	seriesBuckets := make([]*LogStatsSeries, bucketCount)
+	dailyBucketIndexes := make(map[time.Time]int)
 	for i, bucketTime := range bucketStarts {
 		seriesBuckets[i] = &LogStatsSeries{
 			Day: bucketTime.Format(timeLayout),
+		}
+		if useDayBuckets {
+			dailyBucketIndexes[bucketTime] = i
 		}
 	}
 
@@ -1665,7 +1715,7 @@ func aggregateLogStatsRange(start time.Time, end time.Time, logs []ReqeustLog) L
 
 		bucketIndex := -1
 		if useDayBuckets {
-			bucketIndex = int(startOfDay(createdAt).Sub(startOfDay(start)) / (24 * time.Hour))
+			bucketIndex = dailyBucketIndexes[startOfDay(createdAt)]
 		} else {
 			bucketIndex = int(createdAt.Sub(start) / bucketSize)
 		}
@@ -1678,7 +1728,7 @@ func aggregateLogStatsRange(start time.Time, end time.Time, logs []ReqeustLog) L
 			continue
 		}
 
-		total := int64(1)
+		total := logRequestCount(logEntry)
 		input := int64(logEntry.InputTokens)
 		output := int64(logEntry.OutputTokens)
 		reasoning := int64(logEntry.ReasoningTokens)
@@ -1694,17 +1744,7 @@ func aggregateLogStatsRange(start time.Time, end time.Time, logs []ReqeustLog) L
 		bucket.CacheReadTokens += cacheRead
 		bucket.TotalCost += costTotal
 
-		stats.TotalRequests += total
-		stats.InputTokens += input
-		stats.OutputTokens += output
-		stats.ReasoningTokens += reasoning
-		stats.CacheCreateTokens += cacheCreate
-		stats.CacheReadTokens += cacheRead
-		stats.CostTotal += costTotal
-		stats.CostInput += logEntry.InputCost
-		stats.CostOutput += logEntry.OutputCost + logEntry.ReasoningCost
-		stats.CostCacheCreate += logEntry.CacheCreateCost
-		stats.CostCacheRead += logEntry.CacheReadCost
+		addLogUsage(&stats, logEntry, total)
 	}
 
 	stats.Series = make([]LogStatsSeries, 0, bucketCount)
@@ -1720,6 +1760,20 @@ func aggregateLogStatsRange(start time.Time, end time.Time, logs []ReqeustLog) L
 	}
 
 	return stats
+}
+
+func addLogUsage(stats *LogStats, entry ReqeustLog, count int64) {
+	stats.TotalRequests += count
+	stats.InputTokens += int64(entry.InputTokens)
+	stats.OutputTokens += int64(entry.OutputTokens)
+	stats.ReasoningTokens += int64(entry.ReasoningTokens)
+	stats.CacheCreateTokens += int64(entry.CacheCreateTokens)
+	stats.CacheReadTokens += int64(entry.CacheReadTokens)
+	stats.CostTotal += entry.TotalCost
+	stats.CostInput += entry.InputCost
+	stats.CostOutput += entry.OutputCost + entry.ReasoningCost
+	stats.CostCacheCreate += entry.CacheCreateCost
+	stats.CostCacheRead += entry.CacheReadCost
 }
 
 // ProviderPerformanceTrend15m 返回指定时间范围内的供应商 15 分钟性能均值。
@@ -1883,8 +1937,9 @@ func aggregateLogSummaryRange(start time.Time, end time.Time, now time.Time, log
 
 	for _, logEntry := range logs {
 		totalTokens := calculateLogTotalTokens(logEntry)
+		usage := logUsage(logEntry)
 
-		summary.TotalRequests++
+		summary.TotalRequests += usage.total
 		summary.InputTokens += int64(logEntry.InputTokens)
 		summary.OutputTokens += int64(logEntry.OutputTokens)
 		summary.CacheReadTokens += int64(logEntry.CacheReadTokens)
@@ -1893,18 +1948,10 @@ func aggregateLogSummaryRange(start time.Time, end time.Time, now time.Time, log
 		summary.CostInput += logEntry.InputCost
 		summary.CostCacheRead += logEntry.CacheReadCost
 
-		switch resolvedRequestLogOutcome(logEntry) {
-		case requestOutcomeFailure:
-			summary.FailedRequests++
-		case requestOutcomeExcluded:
-			summary.ExcludedRequests++
-		default:
-			summary.SuccessfulRequests++
-		}
-
-		if totalTokens > summary.PeakTokens {
-			summary.PeakTokens = totalTokens
-		}
+		summary.SuccessfulRequests += usage.successful
+		summary.FailedRequests += usage.failed
+		summary.ExcludedRequests += usage.excluded
+		summary.PeakTokens = max(summary.PeakTokens, usage.peakTokens)
 	}
 
 	evaluatedRequests := summary.SuccessfulRequests + summary.FailedRequests
@@ -1955,6 +2002,9 @@ func aggregateLogSummaryRange(start time.Time, end time.Time, now time.Time, log
 		}
 
 		for _, logEntry := range logs {
+			if logEntry.archivedUsage != nil {
+				continue
+			}
 			createdAt, ok := parseRequestLogLocalTime(logEntry.CreatedAt)
 			if !ok || createdAt.Before(activityStart) || !createdAt.Before(activityEnd) {
 				continue
@@ -2316,17 +2366,13 @@ func (ls *LogService) aggregateProviderStatsRange(platform string, provider stri
 			stat.Provider = providerName
 		}
 
-		stat.TotalRequests++
-		switch resolvedRequestLogOutcome(logEntry) {
-		case requestOutcomeFailure:
-			stat.FailedRequests++
-			if strings.TrimSpace(logEntry.ErrorReadAt) == "" {
-				stat.UnreadFailedRequests++
-			}
-		case requestOutcomeExcluded:
-			stat.ExcludedRequests++
-		default:
-			stat.SuccessfulRequests++
+		usage := logUsage(logEntry)
+		stat.TotalRequests += usage.total
+		stat.SuccessfulRequests += usage.successful
+		stat.FailedRequests += usage.failed
+		stat.ExcludedRequests += usage.excluded
+		if logEntry.archivedUsage == nil && usage.failed > 0 && strings.TrimSpace(logEntry.ErrorReadAt) == "" {
+			stat.UnreadFailedRequests++
 		}
 		stat.InputTokens += int64(logEntry.InputTokens)
 		stat.OutputTokens += int64(logEntry.OutputTokens)
@@ -2554,7 +2600,7 @@ func aggregateModelStatsRange(logs []ReqeustLog) []ModelUsageStat {
 		outputTokens := int64(logEntry.OutputTokens)
 		cacheReadTokens := int64(logEntry.CacheReadTokens)
 
-		stat.TotalRequests++
+		stat.TotalRequests += logRequestCount(logEntry)
 		stat.InputTokens += inputTokens
 		stat.OutputTokens += outputTokens
 		stat.CacheReadTokens += cacheReadTokens

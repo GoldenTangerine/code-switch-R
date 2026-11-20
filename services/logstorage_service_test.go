@@ -1,7 +1,17 @@
+/*
+@name: 日志存储管理测试
+@Descripttion: 验证日志清理与统计保留行为。
+@version: 1.0.0
+@Author: sm
+@Date: 2026-11-20 14:22:00
+@LastEditTime: 2026-11-20 14:22:00
+@FilePath: services/logstorage_service_test.go
+*/
 package services
 
 import (
 	"database/sql"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -78,6 +88,226 @@ func TestDeleteRequestLogsByDate_RemovesRequestLogsAndStatsBuckets(t *testing.T)
 		otherDay.Format(timeLayout),
 		otherDay.AddDate(0, 0, 1).Format(timeLayout),
 	)
+}
+
+func TestClearRequestLogs_KeepsMonthAndYearDashboardTotals(t *testing.T) {
+	useIsolatedHomeDir(t)
+	db, err := xdb.DB("default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const insertLog = `INSERT INTO request_log (
+		platform, provider_id, provider, model, matched_pricing_model, request_outcome,
+		input_tokens, output_tokens, cache_read_tokens, total_cost, input_cost, cache_read_cost,
+		request_body, response_body, created_at
+	) VALUES ('codex', 'provider-1', 'Provider 1', 'gpt-5', 'gpt-5', ?,
+		?, 20, 10, ?, 0.1, 0.01, 'request body', 'response body', ?)`
+	monthStart := time.Date(2025, 11, 1, 0, 0, 0, 0, time.Local)
+	monthEnd := monthStart.AddDate(0, 1, 0)
+	yearStart := time.Date(2025, 1, 1, 0, 0, 0, 0, time.Local)
+	yearEnd := yearStart.AddDate(1, 0, 0)
+	requestTime := monthStart.AddDate(0, 0, 4).Add(10*time.Hour + 30*time.Minute)
+	insert := func(outcome string, input int, cost float64, instant time.Time) {
+		t.Helper()
+		if _, err := db.Exec(insertLog, outcome, input, cost, instant.UTC().Format(timeLayout)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	insert(requestOutcomeSuccess, 100, 0.2, requestTime)
+	insert(requestOutcomeFailure, 60, 0.3, requestTime.Add(time.Minute))
+	insert(requestOutcomeExcluded, 40, 0.4, monthStart.AddDate(0, 0, -5))
+
+	ls := NewLogService(nil)
+	aggregate := func(start, end time.Time) LogDashboardAggregateV1 {
+		t.Helper()
+		result, err := ls.DashboardAggregateRangeV1("codex", "provider-1", "gpt-5", "proxy",
+			start.Format(timeLayout), end.Format(timeLayout), true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	beforeMonth := aggregate(monthStart, monthEnd)
+	if err := ls.ClearRequestLogsV2(false); err != nil {
+		t.Fatal(err)
+	}
+	assertTableCount(t, db, "SELECT COUNT(*) FROM request_log", 0)
+	assertTableCount(t, db, "SELECT COUNT(*) FROM request_log_history", 2)
+	month := aggregate(monthStart, monthEnd)
+	if month.Summary.TotalRequests != 2 || month.Summary.SuccessRate != 0.5 ||
+		month.Summary.TotalTokens != 220 || month.Summary.PeakTokens != 130 ||
+		!almostEqualFloat(month.Summary.CostTotal, 0.5) ||
+		!almostEqualFloat(month.Summary.PreviousCostTotal, 0.4) ||
+		!almostEqualFloat(month.Summary.SavedCostEstimate, beforeMonth.Summary.SavedCostEstimate) {
+		t.Fatalf("monthly summary after clear = %+v", month.Summary)
+	}
+	if month.Stats.TotalRequests != 2 || month.Stats.Series[4].TotalRequests != 2 ||
+		len(month.ModelStats) != 1 || month.ModelStats[0].TotalRequests != 2 ||
+		len(month.ProviderStats) != 1 || month.ProviderStats[0].FailedRequests != 1 ||
+		month.ProviderStats[0].UnreadFailedRequests != 0 {
+		t.Fatalf("monthly charts after clear = %+v", month)
+	}
+	year := aggregate(yearStart, yearEnd)
+	if year.Summary.TotalRequests != 3 || year.Summary.ExcludedRequests != 1 || !almostEqualFloat(year.Summary.CostTotal, 0.9) {
+		t.Fatalf("yearly summary after clear = %+v", year.Summary)
+	}
+	refs, err := ls.ListProviderRefsV2("codex", "proxy")
+	if err != nil || !hasRef(refs, "provider-1", "Provider 1") {
+		t.Fatalf("archived provider filter: refs=%+v err=%v", refs, err)
+	}
+
+	// 同一小时的新请求与已清理的请求都计入汇总。
+	insert(requestOutcomeSuccess, 120, 0.5, requestTime.Add(2*time.Minute))
+	month = aggregate(monthStart, monthEnd)
+	if month.Summary.TotalRequests != 3 || !almostEqualFloat(month.Summary.CostTotal, 1) {
+		t.Fatalf("monthly summary with new logs = %+v", month.Summary)
+	}
+	if err := ls.ClearRequestLogs(); err != nil {
+		t.Fatal(err)
+	}
+	if month = aggregate(monthStart, monthEnd); month.Summary.TotalRequests != 3 || !almostEqualFloat(month.Summary.CostTotal, 1) {
+		t.Fatalf("monthly summary after another clear = %+v", month.Summary)
+	}
+	if err := ls.ClearLogStats(); err != nil {
+		t.Fatal(err)
+	}
+	if year = aggregate(yearStart, yearEnd); year.Summary.TotalRequests != 0 {
+		t.Fatalf("stats remain after explicit reset: %+v", year.Summary)
+	}
+
+	insert(requestOutcomeSuccess, 10, 0.2, requestTime)
+	if err := ls.ClearLogStats(); err != nil {
+		t.Fatal(err)
+	}
+	assertTableCount(t, db, "SELECT COUNT(*) FROM request_log", 1)
+	insert(requestOutcomeSuccess, 30, 0.3, requestTime)
+	if err := ls.ClearRequestLogs(); err != nil {
+		t.Fatal(err)
+	}
+	if month = aggregate(monthStart, monthEnd); month.Summary.TotalRequests != 1 || !almostEqualFloat(month.Summary.CostTotal, 0.3) {
+		t.Fatalf("archiving restored cleared stats: %+v", month.Summary)
+	}
+	if _, err := ls.DeleteRequestLogsByDate(requestTime.Format(time.DateOnly)); err != nil {
+		t.Fatal(err)
+	}
+	if month = aggregate(monthStart, monthEnd); month.Summary.TotalRequests != 0 {
+		t.Fatalf("stats remain after deleting the day: %+v", month.Summary)
+	}
+}
+
+func TestRequestLogHistory_RecoversLegacyTotalsWithoutCountingLiveRowsTwice(t *testing.T) {
+	useIsolatedHomeDir(t)
+	db, err := xdb.DB("default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	monthStart := time.Date(2025, 11, 1, 0, 0, 0, 0, time.Local)
+	createdAt := monthStart.AddDate(0, 0, 4).Add(10 * time.Hour).UTC().Format(timeLayout)
+	insertRequestLogForHeatmap(t, db, createdAt, 10, 20, 3, 1, 0.2)
+	if _, err := db.Exec("DELETE FROM request_log"); err != nil {
+		t.Fatal(err)
+	}
+	insertRequestLogForHeatmap(t, db, createdAt, 12, 24, 5, 2, 0.4)
+	if _, err := db.Exec("DELETE FROM schema_migrations WHERE key = ?", requestLogHistoryMigrationKey); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := ensureRequestLogHistoryWithDB(db); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ls := NewLogService(nil)
+	summary, err := ls.SummaryRangeV3("codex", "", "", "proxy",
+		monthStart.Format(timeLayout), monthStart.AddDate(0, 1, 0).Format(timeLayout))
+	if err != nil || summary.TotalRequests != 2 || summary.TotalTokens != 74 || !almostEqualFloat(summary.CostTotal, 0.6) {
+		t.Fatalf("legacy and live totals: summary=%+v err=%v", summary, err)
+	}
+	assertTableCount(t, db, "SELECT COUNT(*) FROM request_log_history", 1)
+}
+
+func TestRequestLogHistory_RecoversOnlyRestoredSnapshotHistory(t *testing.T) {
+	useIsolatedHomeDir(t)
+	db, err := xdb.DB("default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	monthStart := time.Date(2025, 11, 1, 0, 0, 0, 0, time.Local)
+	createdAt := monthStart.Add(10 * time.Hour).UTC().Format(timeLayout)
+	insertRequestLogForHeatmap(t, db, createdAt, 10, 20, 3, 1, 0.2)
+	ls := NewLogService(nil)
+	if err := ls.ClearRequestLogs(); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "snapshot.db")
+	if err := vacuumSQLiteIntoPath(db, path); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := snapshot.Exec("DROP TABLE " + requestLogHistoryTable); err != nil {
+		t.Fatal(err)
+	}
+	if err := snapshot.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	insertRequestLogForHeatmap(t, db, createdAt, 10, 20, 3, 1, 0.5)
+	if err := ls.ClearRequestLogs(); err != nil {
+		t.Fatal(err)
+	}
+	if err := importSQLiteFromSnapshot(path); err != nil {
+		t.Fatal(err)
+	}
+	summary, err := ls.SummaryRangeV3("codex", "", "", "proxy",
+		monthStart.Format(timeLayout), monthStart.AddDate(0, 1, 0).Format(timeLayout))
+	if err != nil || summary.TotalRequests != 1 || !almostEqualFloat(summary.CostTotal, 0.2) {
+		t.Fatalf("restored totals: summary=%+v err=%v", summary, err)
+	}
+}
+
+func TestClearRequestLogs_ReimportedSessionDetailsDoNotDuplicateStats(t *testing.T) {
+	useIsolatedHomeDir(t)
+	db, err := xdb.DB("default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := time.Date(2025, 11, 1, 0, 0, 0, 0, time.Local)
+	record := newSessionUsageRecordForSource(requestLogDataSourceCodexSession)
+	record.SourceRecordID = "archived-session-record"
+	record.Model = "gpt-5"
+	record.InputTokens = 100
+	record.CreatedAt = start.Add(2 * time.Hour)
+	ls := NewLogService(nil)
+	importRecord := func() {
+		t.Helper()
+		if imported, _, err := persistSessionUsageRecords(ls, []sessionUsageRecord{record}); err != nil || imported != 1 {
+			t.Fatalf("imported=%d err=%v", imported, err)
+		}
+	}
+	assertSessionTotals := func(want int64) {
+		t.Helper()
+		for _, mode := range []string{"session", "all"} {
+			summary, err := ls.SummaryRangeV3("codex", "", "", mode, start.Format(timeLayout), start.AddDate(0, 1, 0).Format(timeLayout))
+			if err != nil || summary.TotalRequests != want || summary.InputTokens != want*100 {
+				t.Fatalf("%s summary=%+v err=%v", mode, summary, err)
+			}
+		}
+	}
+	importRecord()
+	if err := ls.ClearRequestLogsV2(true); err != nil {
+		t.Fatal(err)
+	}
+	assertTableCount(t, db, "SELECT COUNT(*) FROM request_log", 0)
+	assertSessionTotals(1)
+	importRecord()
+	assertTableCount(t, db, "SELECT COUNT(*) FROM request_log", 1)
+	assertSessionTotals(1)
+	if err := ls.ClearRequestLogs(); err != nil {
+		t.Fatal(err)
+	}
+	assertSessionTotals(1)
 }
 
 func TestDeleteRequestLogsByDate_InvalidDate(t *testing.T) {

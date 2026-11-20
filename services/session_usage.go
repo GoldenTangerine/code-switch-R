@@ -1111,7 +1111,7 @@ func existingSessionUsageReceipts(records []sessionUsageRecord, existing map[str
 	for start := 0; start < len(missing); start += 200 {
 		end := min(start+200, len(missing))
 		placeholders := strings.TrimSuffix(strings.Repeat("?,", end-start), ",")
-		rows, err := db.Query("SELECT source_record_id FROM session_usage_receipt WHERE source_record_id IN ("+placeholders+")", missing[start:end]...)
+		rows, err := db.Query("SELECT source_record_id FROM session_usage_receipt WHERE archive_state <> 2 AND source_record_id IN ("+placeholders+")", missing[start:end]...)
 		if err != nil {
 			return nil, err
 		}
@@ -1139,7 +1139,8 @@ func insertSessionUsageReceipts(logs []ReqeustLog) error {
 	for _, logEntry := range logs {
 		args = append(args, logEntry.SourceRecordID)
 	}
-	query := "INSERT OR IGNORE INTO session_usage_receipt (source_record_id) VALUES " + strings.Join(repeatString("(?)", len(logs)), ",")
+	query := "INSERT INTO session_usage_receipt (source_record_id) VALUES " + strings.Join(repeatString("(?)", len(logs)), ",") +
+		" ON CONFLICT(source_record_id) DO UPDATE SET archive_state = 1 WHERE archive_state = 2"
 	return GlobalDBQueue.Exec(query, args...)
 }
 

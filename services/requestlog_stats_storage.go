@@ -65,18 +65,16 @@ func ensureRequestLogStatsStorageWithDB(db *sql.DB) error {
 	if err != nil {
 		return err
 	}
-	if applied {
-		return nil
+	if !applied {
+		if err := backfillRequestLogStatsWithDB(db); err != nil {
+			return err
+		}
+		if err := markSchemaMigrationApplied(db, requestLogStatsMigrationKey, time.Now().Format(timeLayout)); err != nil {
+			return err
+		}
 	}
 
-	if err := backfillRequestLogStatsWithDB(db); err != nil {
-		return err
-	}
-	if err := markSchemaMigrationApplied(db, requestLogStatsMigrationKey, time.Now().Format(timeLayout)); err != nil {
-		return err
-	}
-
-	return nil
+	return ensureRequestLogHistoryWithDB(db)
 }
 
 func ensureRequestLogStatsTablesWithDB(db *sql.DB) error {
