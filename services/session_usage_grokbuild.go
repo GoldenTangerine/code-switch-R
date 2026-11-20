@@ -54,15 +54,18 @@ func syncGrokSessionUsage(ls *LogService, scope string, root string) (SessionSyn
 	result := SessionSyncSourceResult{Scope: scope, Platform: "grokbuild"}
 	files := collectGrokSessionFiles(root)
 	result.FilesScanned = len(files)
+	var fileErrors sessionFileErrors
 	for _, path := range files {
 		imported, skipped, err := syncGrokSessionFile(ls, scope, root, path)
 		if err != nil {
-			return result, err
+			// 单个文件失败不影响同一来源的其他文件，错误汇总后返回
+			fileErrors.add(path, err)
+			continue
 		}
 		result.Imported += imported
 		result.Skipped += skipped
 	}
-	return result, nil
+	return result, fileErrors.err()
 }
 
 // collectGrokSessionFiles 递归收集会话根中的 updates.jsonl（限制单文件 ≤50MiB、目录深度 ≤16，跳过符号链接）
@@ -344,10 +347,16 @@ func deleteGrokSessionFileRecords(scope string, relPath string) error {
 		return fmt.Errorf("database write queue is not initialized")
 	}
 	pattern := escapeGrokLikePattern("grok_session:"+scope+":"+relPath+":") + "%"
-	return GlobalDBQueue.Exec(`
+	if err := GlobalDBQueue.Exec(`
 		DELETE FROM request_log
 		WHERE data_source = ? AND source_record_id LIKE ? ESCAPE '\'
-	`, requestLogDataSourceGrokSession, pattern)
+	`, requestLogDataSourceGrokSession, pattern); err != nil {
+		return err
+	}
+	// Grok 按文件全量覆盖，回执随明细一并清理，保证覆盖后能重新写入
+	return GlobalDBQueue.Exec(`
+		DELETE FROM session_usage_receipt WHERE source_record_id LIKE ? ESCAPE '\'
+	`, pattern)
 }
 
 // escapeGrokLikePattern 转义 LIKE 通配符（\、%、_），配合 ESCAPE '\' 使用

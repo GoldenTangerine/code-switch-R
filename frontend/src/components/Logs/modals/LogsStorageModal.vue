@@ -99,7 +99,7 @@
               <div class="logs-storage-provider-item__identity">
                 <div class="logs-storage-provider-item__name">{{ item.provider || item.provider_id || 'unknown' }}</div>
                 <div class="logs-storage-provider-item__meta">
-                  <span class="logs-storage-provider-item__platform">{{ item.platform || '—' }}</span>
+                  <span class="logs-storage-provider-item__platform">{{ formatLogPlatformLabel(item.platform) }}</span>
                   <span class="logs-storage-provider-item__latest">
                     {{ t('components.logs.storage.providerLastSeen') }}：{{ formatters.formatStorageTimestamp(item.latest_at) }}
                   </span>
@@ -295,7 +295,7 @@
 
                   <div class="logs-storage-day-item__meta">
                     <span class="logs-storage-day-item__badge logs-storage-day-item__badge--platform">
-                      {{ item.platform || '—' }}
+                      {{ formatLogPlatformLabel(item.platform) }}
                     </span>
                     <span
                       :class="[
@@ -310,7 +310,7 @@
                       {{ formatters.formatStream(item.is_stream) }}
                     </span>
                     <span :class="['duration-tag', formatters.durationColor(item.duration_sec)]">
-                      {{ formatters.formatDuration(item.duration_sec) }}
+                      {{ formatters.formatLogDuration(item) }}
                     </span>
                   </div>
 
@@ -404,6 +404,7 @@ import BaseModal from '../../common/BaseModal.vue'
 import BasePagination from '../../common/BasePagination.vue'
 import type { RequestLog, LogStorageStats, ProviderLogStorageStat } from '../../../services/logs'
 import type { UsageHeatmapDay } from '../../../data/usageHeatmap'
+import { formatLogPlatformLabel } from '../constants'
 
 type StorageHeatmapTooltipPlacement = 'above' | 'below'
 type StorageHeatmapTooltipState = {
@@ -436,6 +437,7 @@ type StorageModalFormatters = {
   formatStream: (value?: boolean | number) => string
   durationColor: (value?: number) => string
   formatDuration: (value?: number) => string
+  formatLogDuration: (item: RequestLog) => string
   formatStorageHeatmapPayloadValue: (bytes?: number, capturedRequests?: number, requests?: number) => string
 }
 

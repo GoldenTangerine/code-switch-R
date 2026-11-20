@@ -282,9 +282,26 @@ export const toPositiveFinite = (value?: number) => {
   return numeric
 }
 
+/** 会话日志的耗时/首字/速度由本地记录推算，统一加该前缀与代理实测值区分 */
+export const SESSION_ESTIMATE_PREFIX = '≈'
+/** 会话日志估算速度的最小输出 Token 数：输出过短时时间戳误差占比过大 */
+export const SESSION_SPEED_MIN_OUTPUT_TOKENS = 200
+/** 会话日志估算速度的最小耗时（秒） */
+export const SESSION_SPEED_MIN_DURATION_SEC = 1
+
+const withSessionEstimatePrefix = (item: Pick<RequestLog, 'data_source'>, text: string) =>
+  text !== '—' && isSessionRequestLog(item) ? `${SESSION_ESTIMATE_PREFIX}${text}` : text
+
+/**
+ * 请求日志行的耗时展示，会话日志行加估算前缀
+ * @author sm
+ */
+export const formatLogDuration = (item: RequestLog) =>
+  withSessionEstimatePrefix(item, formatDuration(item.duration_sec))
+
 export const formatFirstTokenDuration = (item: RequestLog) => {
   if (!isStreamingLog(item.is_stream)) return '—'
-  return formatAdaptiveDurationSeconds(item.first_token_sec)
+  return withSessionEstimatePrefix(item, formatAdaptiveDurationSeconds(item.first_token_sec))
 }
 
 export const formatTokensPerSecond = (item: RequestLog) => {
@@ -293,10 +310,14 @@ export const formatTokensPerSecond = (item: RequestLog) => {
   if (!Number.isFinite(outputTokens) || outputTokens <= 0) return '—'
   const totalDuration = toPositiveFinite(item.duration_sec)
   if (totalDuration <= 0) return '—'
+  // 会话日志的耗时由时间戳推算，输出过短或耗时过短时误差过大，不展示速度
+  if (isSessionRequestLog(item) && (outputTokens < SESSION_SPEED_MIN_OUTPUT_TOKENS || totalDuration < SESSION_SPEED_MIN_DURATION_SEC)) {
+    return '—'
+  }
   const tokensPerSecond = outputTokens / totalDuration
   if (!Number.isFinite(tokensPerSecond) || tokensPerSecond <= 0) return '—'
   const precision = tokensPerSecond >= 100 ? 1 : 2
-  return `${tokensPerSecond.toFixed(precision)} tokens/s`
+  return withSessionEstimatePrefix(item, `${tokensPerSecond.toFixed(precision)} tokens/s`)
 }
 
 export const normalizeReasoningEffortDisplay = (value?: string) => {

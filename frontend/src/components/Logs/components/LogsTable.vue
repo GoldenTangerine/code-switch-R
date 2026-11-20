@@ -20,7 +20,7 @@
       <tbody>
         <tr v-for="item in items" :key="item.id">
           <td>{{ formatters.formatTime(item.created_at) }}</td>
-          <td>{{ item.platform || '—' }}</td>
+          <td>{{ formatLogPlatformLabel(item.platform) }}</td>
           <td><span class="source-tag">{{ sourceLabel(item) }}</span></td>
           <td>{{ item.provider || '—' }}</td>
           <td class="model-cell">
@@ -89,8 +89,8 @@
             <template v-else>{{ item.http_code }}</template>
           </td>
           <td><span :class="['stream-tag', item.is_stream ? 'on' : 'off']">{{ formatters.formatStream(item.is_stream) }}</span></td>
-          <td><span :class="['duration-tag', formatters.durationColor(item.duration_sec)]">{{ formatters.formatDuration(item.duration_sec) }}</span></td>
-          <td class="performance-cell">
+          <td><span :class="['duration-tag', formatters.durationColor(item.duration_sec)]" :title="estimatedTimingTitle(item)">{{ formatters.formatLogDuration(item) }}</span></td>
+          <td class="performance-cell" :title="estimatedTimingTitle(item)">
             <div>
               <span class="performance-badge performance-badge--ttft">首</span>
               <span class="token-value">{{ formatters.formatFirstTokenDuration(item) }}</span>
@@ -172,6 +172,7 @@
 import { useI18n } from 'vue-i18n'
 import type { RequestLog } from '../../../services/logs'
 import { isSessionRequestLog } from '../utils'
+import { formatLogPlatformLabel } from '../constants'
 
 type TooltipPointerEvent = MouseEvent | FocusEvent
 
@@ -189,6 +190,7 @@ type LogsTableFormatters = {
   formatStream: (value?: boolean | number) => string
   durationColor: (value?: number) => string
   formatDuration: (value?: number) => string
+  formatLogDuration: (item: RequestLog) => string
   formatFirstTokenDuration: (item: RequestLog) => string
   formatPayloadDetailAriaLabel: (item: RequestLog) => string
   formatTokensPerSecond: (item: RequestLog) => string
@@ -242,12 +244,12 @@ const resolveModelTrail = (item: RequestLog) => {
 
 const isSessionLog = isSessionRequestLog
 
-const sourceLabel = (item: RequestLog) => {
-  if (item.data_source === 'session_log') return t('components.logs.source.claudeSession')
-  if (item.data_source === 'codex_session') return t('components.logs.source.codexSession')
-  if (item.data_source === 'gemini_session') return t('components.logs.source.geminiSession')
-  return t('components.logs.source.proxy')
-}
+/** 会话日志行的耗时、首字、速度为推算值，悬停说明口径 */
+const estimatedTimingTitle = (item: RequestLog) =>
+  isSessionLog(item) ? t('components.logs.source.estimatedTimingTip') : undefined
+
+const sourceLabel = (item: RequestLog) =>
+  isSessionLog(item) ? t('components.logs.source.session') : t('components.logs.source.proxy')
 </script>
 
 <style scoped>

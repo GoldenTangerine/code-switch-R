@@ -8,6 +8,16 @@
 @FilePath: RELEASE_NOTES.md
 -->
 
+# Code Switch v2.12.0
+
+- 日志页新增 8 个本地会话用量来源：Antigravity、Kimi Code、Copilot CLI、WorkBuddy、DeepSeek Harness、MiniMax Code、Oh My Pi、Pi。启动后自动扫描本机会话记录，切换“数据来源”为“会话”或“全部”即可查看，不经过代理也能统计用量与成本。
+- 会话行新增速度与首字时间，以“≈”标注为估算值，悬停可查看说明：Antigravity、Kimi、Copilot、Oh My Pi 等使用会话记录自带的计时；Claude Code / Codex 按会话时间戳估算，工具调用或输出过短的轮次仍显示“—”；速度只在输出不少于 200 Token 且耗时不少于 1 秒时显示。
+- 升级后首次启动会重新扫描一次 Claude / Codex 历史会话，为已有记录补上耗时与首字，不会改动历史成本，也不会重新导入已删除的记录。
+- Gemini CLI 支持新版 `.jsonl` 会话格式；平台筛选新增 OpenCode、Grok Build 及上述新来源，表格与存储弹窗统一显示应用名称。
+- 在日志页删除的会话记录不会因为会话继续进行而重新出现；选择“清空并重新导入会话”时会按会话文件完整重建。
+- 已知限制：DeepSeek Harness 默认的压缩会话日志（`.jsonl.zstd`）暂不支持导入；Gemini 4、Kimi 等新模型暂无内置价格，成本显示为 $0。
+- 后端全量测试、前端 605 项单元测试与 TypeScript 类型检查通过；安装包由 GitHub Actions 构建。
+
 # Code Switch v2.11.32
 
 - 首页供应商卡片的额度进度条（如 5h、7d）在鼠标悬停时，提示里新增“X 分钟前更新”，说明这份数据是多久前获取的，提示内容约每 30 秒刷新一次。

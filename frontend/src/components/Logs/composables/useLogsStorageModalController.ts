@@ -28,6 +28,7 @@ import {
   formatBytes,
   formatCurrency,
   formatDuration,
+  formatLogDuration,
   formatNumber,
   formatStorageHeatmapPayloadValue as formatStorageHeatmapPayloadValueText,
   formatTime,
@@ -482,6 +483,7 @@ export function useLogsStorageModalController(options: UseLogsStorageModalContro
     formatStream: logsTableTextFormatters.formatStream,
     durationColor,
     formatDuration,
+    formatLogDuration,
     formatStorageHeatmapPayloadValue,
   }
 

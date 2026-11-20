@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ModelUsageStat, RequestLog } from '../../services/logs'
 import {
+  formatLogDuration,
   buildModelShareRows,
   buildLogsInfoTooltipLabels,
   buildStreamDiagnosticTooltipDetailData,
@@ -227,5 +228,36 @@ describe('buildStreamDiagnosticTooltipDetailData', () => {
 
   it('returns null for legacy rows without stream diagnostics', () => {
     expect(buildStreamDiagnosticTooltipDetailData({} as RequestLog, labels)).toBeNull()
+  })
+})
+
+describe('session log estimated performance', () => {
+  const sessionRow = (overrides: Partial<RequestLog>) => ({
+    data_source: 'agy_session',
+    is_stream: true,
+    output_tokens: 5395,
+    duration_sec: 72,
+    first_token_sec: 7.2,
+    ...overrides,
+  }) as RequestLog
+
+  it('prefixes session speed, first token and duration with an estimate marker', () => {
+    const row = sessionRow({})
+    expect(formatTokensPerSecond(row)).toBe('≈74.93 tokens/s')
+    expect(formatFirstTokenDuration(row).startsWith('≈')).toBe(true)
+    expect(formatLogDuration(row)).toBe('≈72.00s')
+  })
+
+  it('hides session speed when output or duration is too small', () => {
+    expect(formatTokensPerSecond(sessionRow({ output_tokens: 150 }))).toBe('—')
+    expect(formatTokensPerSecond(sessionRow({ duration_sec: 0.5 }))).toBe('—')
+    expect(formatFirstTokenDuration(sessionRow({ first_token_sec: 0 }))).toBe('—')
+    expect(formatLogDuration(sessionRow({ duration_sec: 0 }))).toBe('—')
+  })
+
+  it('keeps proxy rows without the estimate marker', () => {
+    const row = sessionRow({ data_source: 'proxy', output_tokens: 100, duration_sec: 2 })
+    expect(formatTokensPerSecond(row)).toBe('50.00 tokens/s')
+    expect(formatLogDuration(row)).toBe('2.00s')
   })
 })

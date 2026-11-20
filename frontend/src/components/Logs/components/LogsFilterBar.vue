@@ -78,7 +78,7 @@
             </button>
 
             <Transition name="logs-select-pop">
-              <div v-if="activeSelect === 'platform'" class="logs-select-options" role="listbox">
+              <div v-if="activeSelect === 'platform'" class="logs-select-options logs-select-options--platform" role="listbox">
                 <button
                   v-for="option in platformOptions"
                   :key="option.value || option.label"
@@ -532,6 +532,7 @@ import type { LogDataSourceMode } from '../../../services/logs'
 import type { LogDateFilterType, LogProviderOption, LogsFiltersState } from '../types'
 import { scoreStringOption } from '../../../utils/fuzzyOptionSearch'
 import { getLogsYearPickerRange } from '../utils'
+import { LOG_PLATFORM_LABELS } from '../constants'
 
 type FilterOption<T extends string = string> = {
   value: T
@@ -608,9 +609,10 @@ const sourceOptions = computed<Array<{ value: LogDataSourceMode; label: string }
 
 const platformOptions = computed<Array<FilterOption<LogsFiltersState['platform']>>>(() => [
   { value: '', label: t('components.logs.filters.allPlatforms') },
-  { value: 'claude', label: 'Claude' },
-  { value: 'codex', label: 'Codex' },
-  { value: 'gemini', label: 'Gemini' },
+  ...(Object.keys(LOG_PLATFORM_LABELS) as Array<Exclude<LogsFiltersState['platform'], ''>>).map((value) => ({
+    value,
+    label: LOG_PLATFORM_LABELS[value],
+  })),
 ])
 
 const providerAllOption = computed<ProviderFilterOption>(() => ({
@@ -1715,6 +1717,12 @@ html.dark .logs-filter-date-picker-menu {
 
 .logs-select-options--model {
   max-height: 280px;
+  overflow-y: auto;
+}
+
+/* 平台选项较多，限制高度避免超出视口 */
+.logs-select-options--platform {
+  max-height: min(320px, 48vh);
   overflow-y: auto;
 }
 

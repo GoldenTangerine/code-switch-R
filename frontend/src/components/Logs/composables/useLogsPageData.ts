@@ -10,7 +10,7 @@ import {
   type RequestLog,
   type LogSummary,
   type LogStats,
-  type LogPlatform,
+  type LogFilterPlatform,
   type ModelUsageStat,
   type ProviderDailyStat,
   type LogProviderRef,
@@ -206,7 +206,7 @@ export function useLogsPageData(options: UseLogsPageDataOptions) {
       && current.range.endAt === query.range.endAt
   }
 
-  const loadProviderNamesFromConfig = async (platform: LogPlatform | ''): Promise<LogProviderOption[]> => {
+  const loadProviderNamesFromConfig = async (platform: LogFilterPlatform | ''): Promise<LogProviderOption[]> => {
     const cacheKey = platform
     const now = Date.now()
     const cached = providerConfigCache.get(cacheKey)

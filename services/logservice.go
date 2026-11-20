@@ -2082,6 +2082,7 @@ func (ls *LogService) latestProviderPerformance(platform string) (map[string]pro
 			FROM request_log
 			WHERE COALESCE(is_stream, 0) = 1
 				AND ` + requestLogSuccessWhereClause("", 200) + `
+				AND ` + requestLogSourceWhereClause(LogDataSourceModeProxy, "request_log") + `
 				AND first_token_sec > 0
 				AND output_tokens > 0
 				AND duration_sec > 0

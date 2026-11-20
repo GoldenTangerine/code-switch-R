@@ -1,9 +1,9 @@
-import type { LogPlatform } from '../../services/logs'
+import type { LogFilterPlatform } from '../../services/logs'
 
 export type LogDateFilterType = 'all' | 'today' | 'year' | 'month' | 'day' | 'range'
 
 export type LogsFiltersState = {
-  platform: LogPlatform | ''
+  platform: LogFilterPlatform | ''
   provider: string
   model: string
   dateType: LogDateFilterType

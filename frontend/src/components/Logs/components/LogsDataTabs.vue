@@ -117,7 +117,7 @@ import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { ModelUsageStat, ProviderDailyStat } from '../../../services/logs'
 import type { LogsDataTab } from '../types'
-import { formatPreciseCurrency } from '../utils'
+import { formatPreciseCurrency, SESSION_ESTIMATE_PREFIX } from '../utils'
 
 type SortDirection = 'asc' | 'desc'
 type ProviderSortKey = 'requests' | 'excluded' | 'tokens' | 'cost' | 'success' | 'duration'
@@ -236,8 +236,14 @@ const formatSuccessRate = (item: ProviderDailyStat) => {
   return `${Math.max(0, Math.min(100, Number(item.success_rate || 0) * 100)).toFixed(1)}%`
 }
 
-const formatAverageDuration = (item: ProviderDailyStat) =>
-  Number(item.duration_sample_count || 0) > 0 ? props.formatDuration(item.avg_duration_sec) : '—'
+/** 会话来源的虚拟供应商 ID 形如 _agy_session，其耗时为本地记录推算值 */
+const isSessionProviderStat = (item: ProviderDailyStat) => /^_.*session$/.test(String(item.provider_id || '').trim())
+
+const formatAverageDuration = (item: ProviderDailyStat) => {
+  if (Number(item.duration_sample_count || 0) <= 0) return '—'
+  const text = props.formatDuration(item.avg_duration_sec)
+  return text !== '—' && isSessionProviderStat(item) ? `${SESSION_ESTIMATE_PREFIX}${text}` : text
+}
 </script>
 
 <style scoped>

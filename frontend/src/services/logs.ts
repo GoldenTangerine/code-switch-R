@@ -10,7 +10,19 @@
 import { Call } from '@wailsio/runtime'
 
 export type LogPlatform = 'claude' | 'codex' | 'gemini' | 'grokbuild'
-export type RequestLogPlatform = LogPlatform | `custom:${string}`
+/** 日志页平台筛选可选值：除代理平台外，还包含仅有会话用量的本地来源 */
+export type LogFilterPlatform =
+  | LogPlatform
+  | 'opencode'
+  | 'antigravity'
+  | 'kimi'
+  | 'copilot'
+  | 'workbuddy'
+  | 'deepseek-harness'
+  | 'minimax-code'
+  | 'omp'
+  | 'pi'
+export type RequestLogPlatform = LogFilterPlatform | `custom:${string}`
 export type LogDataSourceMode = 'proxy' | 'session' | 'all'
 export type ReasoningEffortSource = 'request' | 'request_body_override' | 'model_mapping' | ''
 export type RequestErrorSource = 'provider_response' | 'upstream_network' | 'upstream_stream' | 'proxy' | 'client_abort' | ''
@@ -99,7 +111,7 @@ export type RequestLog = {
   provider_per_call_output_set?: boolean
   response_body?: string
   response_body_truncated?: boolean
-  data_source?: 'proxy' | 'session_log' | 'codex_session' | 'gemini_session' | string
+  data_source?: 'proxy' | 'session_log' | 'codex_session' | 'gemini_session' | 'opencode_session' | 'grok_session' | 'agy_session' | 'kimi_session' | 'copilot_session' | 'workbuddy_session' | 'dsh_session' | 'mcode_session' | 'omp_session' | 'pi_session' | string
   source_record_id?: string
   session_id?: string
 }
@@ -176,13 +188,13 @@ export type LogProviderRef = {
 }
 
 export const fetchLogProviderRefs = async (
-  platform: LogPlatform | '' = '',
+  platform: LogFilterPlatform | '' = '',
   sourceMode: LogDataSourceMode = 'proxy',
 ): Promise<LogProviderRef[]> => {
   return Call.ByName('codeswitch/services.LogService.ListProviderRefsV2', platform, sourceMode)
 }
 
-export const fetchLogProviders = async (platform: LogPlatform | '' = ''): Promise<string[]> => {
+export const fetchLogProviders = async (platform: LogFilterPlatform | '' = ''): Promise<string[]> => {
   return Call.ByName('codeswitch/services.LogService.ListProviders', platform)
 }
 
@@ -249,7 +261,7 @@ export const fetchLogStats = async (platform: RequestLogPlatform | '' = ''): Pro
 }
 
 type LogStatsQuery = {
-  platform?: LogPlatform | ''
+  platform?: LogFilterPlatform | ''
   provider?: string
   model?: string
   startAt?: string
@@ -394,7 +406,7 @@ export const fetchLogStorageStats = async (): Promise<LogStorageStats> => {
 }
 
 export type ProviderLogStorageStat = {
-  platform: LogPlatform | ''
+  platform: RequestLogPlatform | ''
   provider_id?: string
   provider: string
   request_log_rows: number
@@ -415,7 +427,7 @@ export const clearRequestLogs = async (reimportSessions = false): Promise<void> 
 
 export type SessionSyncSourceResult = {
   scope: string
-  platform: LogPlatform
+  platform: LogFilterPlatform
   imported: number
   skipped: number
   files_scanned: number
@@ -465,7 +477,7 @@ export const deleteRequestLogsByDate = async (date: string): Promise<DeleteReque
 }
 
 export const clearProviderLogStorage = async (
-  platform: LogPlatform | '',
+  platform: RequestLogPlatform | '',
   providerId: string,
   provider: string,
 ): Promise<DeleteRequestLogsByDateResult> => {
@@ -543,7 +555,7 @@ export const fetchProviderDailyStats = async (
 }
 
 type ProviderStatsQuery = {
-  platform?: LogPlatform | ''
+  platform?: LogFilterPlatform | ''
   provider?: string
   model?: string
   startAt?: string
@@ -574,7 +586,7 @@ export type ModelUsageStat = {
 }
 
 type ModelStatsQuery = {
-  platform?: LogPlatform | ''
+  platform?: LogFilterPlatform | ''
   provider?: string
   model?: string
   startAt?: string

@@ -267,6 +267,10 @@ func resetSessionUsageSyncState() error {
 	if err := GlobalDBQueue.Exec("DELETE FROM session_usage_dedup"); err != nil {
 		return err
 	}
+	// 选择重新导入会话时清空回执，允许按会话文件完整重建
+	if err := GlobalDBQueue.Exec("DELETE FROM session_usage_receipt"); err != nil {
+		return err
+	}
 	return GlobalDBQueue.Exec(`
 		UPDATE session_usage_dedup_state
 		SET last_proxy_log_id = 0, last_session_log_id = 0, updated_at = ?
