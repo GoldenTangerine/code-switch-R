@@ -1,3 +1,11 @@
+// @name: Go 模块依赖
+// @Descripttion: 声明桌面应用后端使用的 Go 工具链和依赖版本。
+// @version: 1.0.0
+// @Author: sm
+// @Date: 2026-11-20 14:40:19
+// @LastEditTime: 2026-11-20 14:40:19
+// @FilePath: go.mod
+
 module codeswitch
 
 go 1.25.0
@@ -13,6 +21,7 @@ require (
 	github.com/tidwall/gjson v1.18.0
 	github.com/tidwall/sjson v1.2.5
 	github.com/wailsapp/wails/v3 v3.0.0-beta.6
+	golang.org/x/mod v0.37.0
 	golang.org/x/net v0.56.0
 	golang.org/x/sys v0.46.0
 	gopkg.in/yaml.v3 v3.0.1
@@ -77,7 +86,6 @@ require (
 	golang.org/x/crypto v0.53.0 // indirect
 	golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f // indirect
 	golang.org/x/image v0.41.0 // indirect
-	golang.org/x/mod v0.37.0 // indirect
 	golang.org/x/sync v0.21.0 // indirect
 	golang.org/x/text v0.39.0 // indirect
 	golang.org/x/tools v0.47.0 // indirect

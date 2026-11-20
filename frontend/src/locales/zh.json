@@ -90,6 +90,7 @@
     "env": "环境",
     "logs": "日志",
     "console": "控制台",
+    "cliUpdates": "应用更新",
     "settings": "设置",
     "sections": {
       "workspace": "核心工作台",
@@ -284,6 +285,25 @@
       "content": "提示词内容",
       "cancel": "取消",
       "save": "保存"
+    }
+  },
+  "cliUpdates": {
+    "refresh": "重新检查",
+    "checking": "正在检查 CLI 版本…",
+    "refreshing": "正在重新检查，当前显示上次结果…",
+    "failed": "检查失败，请重试。",
+    "refreshFailed": "检查失败，当前显示上次结果。请重试。",
+    "app": "应用",
+    "installed": "本机版本",
+    "latest": "最新版本",
+    "statusLabel": "状态",
+    "status": {
+      "updateAvailable": "有更新",
+      "upToDate": "无需更新",
+      "notDetected": "未检测到",
+      "localUnavailable": "无法读取本机版本",
+      "latestUnavailable": "无法获取最新版本",
+      "uncomparable": "无法比较版本"
     }
   },
   "speedtest": {

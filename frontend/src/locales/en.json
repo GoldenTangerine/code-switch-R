@@ -90,6 +90,7 @@
     "env": "Env Check",
     "logs": "Logs",
     "console": "Console",
+    "cliUpdates": "App Updates",
     "settings": "Settings",
     "sections": {
       "workspace": "Workspace",
@@ -284,6 +285,25 @@
       "content": "Prompt Content",
       "cancel": "Cancel",
       "save": "Save"
+    }
+  },
+  "cliUpdates": {
+    "refresh": "Check Again",
+    "checking": "Checking CLI versions…",
+    "refreshing": "Checking again. Showing previous results…",
+    "failed": "Check failed. Please try again.",
+    "refreshFailed": "Check failed. Showing previous results. Please try again.",
+    "app": "App",
+    "installed": "Installed",
+    "latest": "Latest",
+    "statusLabel": "Status",
+    "status": {
+      "updateAvailable": "Update available",
+      "upToDate": "No update needed",
+      "notDetected": "Not detected",
+      "localUnavailable": "Installed version unavailable",
+      "latestUnavailable": "Latest version unavailable",
+      "uncomparable": "Unable to compare versions"
     }
   },
   "speedtest": {

@@ -530,6 +530,7 @@ func main() {
 			application.NewService(providerQuotaQueryService),
 			application.NewService(providerQuotaAutomationService),
 			application.NewService(updateService),
+			application.NewService(&services.CLIUpdateService{}),
 			application.NewService(mcpService),
 			application.NewService(skillService),
 			application.NewService(promptService),

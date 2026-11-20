@@ -8,6 +8,12 @@
 @FilePath: RELEASE_NOTES.md
 -->
 
+# Code Switch v2.12.2
+
+- 在「系统控制 → 应用更新」查看 Claude Code、Codex、Antigravity CLI、Gemini CLI、OpenCode、Grok Build、OpenClaw、Hermes 和 Pi 的本机版本、最新版本和更新状态。
+- 每次进入页面自动检查，也可以手动刷新。刷新期间保留上次结果，检查失败时显示提示。
+- 支持识别 pnpm 全局安装和 Grok 原生安装。更新查询会遵循 Claude Code 的用户级稳定渠道设置，并识别 Codex、Gemini CLI 和 OpenCode 的预发布渠道。
+
 # Code Switch v2.12.1
 
 - 修复「日志 → 日志存储 → 清除明细」后统计卡片归零的问题。按月、按年仍可查询调用次数、成功率、Token、缓存命中和费用，新请求会继续累加。

@@ -1,3 +1,12 @@
+<!--
+@name: 应用侧栏
+@Descripttion: 提供分组页面导航与应用状态。
+@version: 1.0.0
+@Author: sm
+@Date: 2026-11-20 14:40:19
+@LastEditTime: 2026-11-20 14:40:19
+@FilePath: frontend/src/components/Sidebar.vue
+-->
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
@@ -32,6 +41,7 @@ const speedtestItem: NavItem = { path: '/speedtest', icon: 'zap', labelKey: 'sid
 const envItem: NavItem = { path: '/env', icon: 'compass', labelKey: 'sidebar.env', isNew: true }
 const logsItem: NavItem = { path: '/logs', icon: 'history', labelKey: 'sidebar.logs' }
 const consoleItem: NavItem = { path: '/console', icon: 'terminal', labelKey: 'sidebar.console' }
+const cliUpdatesItem: NavItem = { path: '/cli-updates', icon: 'update', labelKey: 'sidebar.cliUpdates' }
 const settingsItem: NavItem = { path: '/settings', icon: 'settings', labelKey: 'sidebar.settings' }
 
 const navSections: NavSection[] = [
@@ -45,7 +55,7 @@ const navSections: NavSection[] = [
   },
   {
     labelKey: 'sidebar.sections.system',
-    items: [consoleItem, settingsItem],
+    items: [consoleItem, cliUpdatesItem, settingsItem],
   },
 ]
 
@@ -334,6 +344,18 @@ function navigate(path: string) {
                 >
                   <polyline points="4 7 9 12 4 17" />
                   <line x1="12" y1="18" x2="20" y2="18" />
+                </svg>
+
+                <svg
+                  v-else-if="item.icon === 'update'"
+                  class="nav-icon"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M12 4v10m-4-4 4 4 4-4M5 15v4a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-4" />
                 </svg>
 
                 <svg

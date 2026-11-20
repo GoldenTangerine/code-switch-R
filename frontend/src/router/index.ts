@@ -1,3 +1,12 @@
+/**
+ * @name: 应用路由
+ * @Descripttion: 注册桌面应用和托盘页面的 Hash 路由。
+ * @version: 1.0.0
+ * @Author: sm
+ * @Date: 2026-11-20 14:40:19
+ * @LastEditTime: 2026-11-20 14:40:19
+ * @FilePath: frontend/src/router/index.ts
+ */
 import { createRouter, createWebHashHistory } from 'vue-router'
 
 const MainPage = () => import('../components/Main/Index.vue')
@@ -12,6 +21,7 @@ const HermesMemoryPage = () => import('../components/Hermes/MemoryPanel.vue')
 const SpeedTestPage = () => import('../components/SpeedTest/Index.vue')
 const EnvCheckPage = () => import('../components/EnvCheck/Index.vue')
 const ConsolePage = () => import('../components/Console/Index.vue')
+const CLIUpdatesPage = () => import('../components/CLIUpdates/Index.vue')
 const AvailabilityPage = () => import('../components/Availability/Index.vue')
 const TrayPage = () => import('../components/Tray/Index.vue')
 
@@ -28,6 +38,7 @@ const routes = [
   { path: '/env', component: EnvCheckPage },
   { path: '/logs', component: LogsPage },
   { path: '/console', component: ConsolePage },
+  { path: '/cli-updates', component: CLIUpdatesPage },
   { path: '/settings', component: GeneralPage },
   { path: '/tray', component: TrayPage },
 ]
