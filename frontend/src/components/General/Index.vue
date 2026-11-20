@@ -8,6 +8,7 @@ import ThemeSetting from '../Setting/ThemeSetting.vue'
 import NetworkWslSettings from '../Setting/NetworkWslSettings.vue'
 import ModelPricingModal from '../Setting/ModelPricingModal.vue'
 import InlineModal from '../common/InlineModal.vue'
+import UpdateCheckModal from '../common/UpdateCheckModal.vue'
 import {
   fetchAppSettings,
   saveAppSettings,
@@ -51,7 +52,7 @@ import {
   getProviderDisplayIconSvg,
   preloadProviderDisplayIcons,
 } from '../../utils/providerIconAssets'
-import { checkUpdate, downloadUpdate, restartApp, getUpdateState, setAutoCheckEnabled, type UpdateInfo, type UpdateState } from '../../services/update'
+import { getUpdateState, setAutoCheckEnabled, type UpdateState } from '../../services/update'
 import { fetchCurrentVersion } from '../../services/version'
 import { getBlacklistSettings, updateBlacklistSettingsWithHealthThreshold, getHealthBlacklistThreshold, getLevelBlacklistEnabled, setLevelBlacklistEnabled, getBlacklistEnabled, setBlacklistEnabled, type BlacklistSettings } from '../../services/settings'
 import { fetchConfigImportStatus, importFromPath, type ConfigImportStatus } from '../../services/configImport'
@@ -646,44 +647,9 @@ const syncAppSettingsCache = () => {
 
 // 更新相关状态
 const updateState = ref<UpdateState | null>(null)
-const checking = ref(false)
-const downloading = ref(false)
-const installing = ref(false)
-const downloadProgress = ref<number | null>(null)
 const appVersion = ref('')
+// 更新弹窗：检查、下载、安装流程由 UpdateCheckModal 自行管理
 const updateModalOpen = ref(false)
-const updateCheckInfo = ref<UpdateInfo | null>(null)
-const updateModalMessage = ref('')
-const updateModalError = ref('')
-
-const updateModalLatestVersion = computed(() => {
-  if (updateCheckInfo.value?.version) return updateCheckInfo.value.version
-  if (updateState.value?.latest_known_version) return updateState.value.latest_known_version
-  return appVersion.value || '—'
-})
-
-const updateModalReleaseNotes = computed(() => {
-  const notes = updateCheckInfo.value?.release_notes?.trim()
-  if (notes) return notes
-  const cachedNotes = updateState.value?.latest_release_notes?.trim()
-  if (cachedNotes) return cachedNotes
-  return t('components.general.update.releaseNotesEmpty')
-})
-
-const canTriggerUpdateFromModal = computed(() => {
-  if (updateState.value?.update_ready) return true
-  return Boolean(updateCheckInfo.value?.available)
-})
-
-const updateModalActionText = computed(() => {
-  if (installing.value) return t('components.general.update.installing')
-  if (updateState.value?.update_ready) return t('components.general.update.installAndRestart')
-  if (downloading.value) {
-    const progress = Math.round(downloadProgress.value ?? updateState.value?.download_progress ?? 0)
-    return t('components.general.update.downloading', { progress })
-  }
-  return t('components.general.update.updateNow')
-})
 
 // 拉黑配置相关状态
 const blacklistEnabled = ref(true)  // 拉黑功能总开关
@@ -1687,131 +1653,6 @@ const loadUpdateState = async () => {
     updateState.value = await getUpdateState()
   } catch (error) {
     console.error('failed to load update state', error)
-  }
-}
-
-const updateLocalDownloadProgress = (progress: number) => {
-  if (!Number.isFinite(progress)) return
-  const normalized = Math.max(0, Math.min(100, progress))
-  downloadProgress.value = normalized
-  if (updateState.value) {
-    updateState.value = {
-      ...updateState.value,
-      download_progress: normalized,
-    }
-  }
-}
-
-const updateErrorLogPath = '.code-switch/updates/update-errors.log'
-
-const isUacCancelledError = (message: string) => {
-  const normalized = message.toLowerCase()
-  return normalized.includes('err_uac_denied') ||
-    normalized.includes('uac') && (normalized.includes('cancel') || normalized.includes('deny')) ||
-    message.includes('用户取消') ||
-    message.includes('取消 UAC') ||
-    message.includes('拒绝 UAC')
-}
-
-const buildRestartInstallErrorMessage = (error: unknown) => {
-  const message = extractErrorMessage(error)
-
-  if (isUacCancelledError(message)) {
-    return `你刚才把管理员权限确认（UAC）取消了，本次更新没安装。\n想更新的话，再点一次“安装并重启”就行。`
-  }
-
-  if (message.includes('应用更新失败') || message.includes('更新') || message.includes('安装')) {
-    return `安装更新失败：${message}\n详细日志在 ${updateErrorLogPath}`
-  }
-
-  return `重启失败：${message}\n详细日志在 ${updateErrorLogPath}`
-}
-
-const alertRestartInstallError = (error: unknown) => {
-  console.error('restart/install update failed', error)
-  updateModalError.value = buildRestartInstallErrorMessage(error)
-}
-
-const checkUpdateManually = async () => {
-  if (checking.value || downloading.value || installing.value) return
-
-  updateModalOpen.value = true
-  updateModalError.value = ''
-  updateModalMessage.value = t('components.general.update.checking')
-  updateCheckInfo.value = null
-
-  checking.value = true
-  try {
-    const info = await checkUpdate()
-    await loadUpdateState()
-
-    if (!info) {
-      updateModalError.value = t('components.general.update.checkEmptyResponse')
-      return
-    }
-
-    updateCheckInfo.value = info
-
-    if (!info.available) {
-      updateModalMessage.value = t('components.general.update.alreadyLatest', {
-        version: info.version || appVersion.value || '—',
-      })
-    } else {
-      updateModalMessage.value = t('components.general.update.updateFound', { version: info.version })
-    }
-  } catch (error) {
-    console.error('check update failed', error)
-    updateModalError.value = t('components.general.update.checkFailedWithError', {
-      error: extractErrorMessage(error),
-    })
-    await loadUpdateState()
-  } finally {
-    checking.value = false
-  }
-}
-
-const downloadAndInstall = async () => {
-  if (downloading.value || installing.value || checking.value) return
-
-  updateModalError.value = ''
-  updateModalMessage.value = ''
-
-  if (updateState.value?.update_ready) {
-    installing.value = true
-    try {
-      await restartApp()
-    } catch (restartError) {
-      alertRestartInstallError(restartError)
-    } finally {
-      installing.value = false
-    }
-    return
-  }
-
-  if (!updateCheckInfo.value?.available) {
-    updateModalMessage.value = t('components.general.update.noUpdateToInstall')
-    return
-  }
-
-  downloading.value = true
-  downloadProgress.value = 0
-  updateLocalDownloadProgress(0)
-  try {
-    await downloadUpdate((progress: number) => {
-      updateLocalDownloadProgress(progress)
-    })
-    await loadUpdateState()
-    updateLocalDownloadProgress(100)
-    updateModalMessage.value = t('components.general.update.downloadReady')
-  } catch (error) {
-    console.error('download failed', error)
-    updateModalError.value = t('components.general.update.downloadFailedWithError', {
-      error: extractErrorMessage(error),
-    })
-    return
-  } finally {
-    downloading.value = false
-    downloadProgress.value = null
   }
 }
 
@@ -3015,10 +2856,9 @@ useGeneralPageData({
 
           <ListItem :label="$t('components.general.label.checkNow')">
             <button
-              @click="checkUpdateManually"
-              :disabled="checking || downloading || installing"
+              @click="updateModalOpen = true"
               class="action-btn">
-              {{ checking ? $t('components.general.update.checking') : $t('components.general.update.checkNow') }}
+              {{ $t('components.general.update.checkNow') }}
             </button>
           </ListItem>
         </div>
@@ -3211,61 +3051,11 @@ useGeneralPageData({
         </div>
       </InlineModal>
 
-      <InlineModal
+      <UpdateCheckModal
         :open="updateModalOpen"
-        :title="$t('components.general.update.modalTitle')"
         @close="updateModalOpen = false"
-      >
-        <div class="update-modal">
-          <div class="update-modal-row">
-            <span class="update-modal-label">{{ $t('components.general.label.currentVersion') }}</span>
-            <span class="version-text">{{ appVersion || '—' }}</span>
-          </div>
-          <div class="update-modal-row">
-            <span class="update-modal-label">{{ $t('components.general.label.latestVersion') }}</span>
-            <span class="version-text highlight">{{ updateModalLatestVersion }}</span>
-          </div>
-
-          <div v-if="updateModalMessage" class="info-text update-modal-message">
-            {{ updateModalMessage }}
-          </div>
-          <div v-if="updateModalError" class="alert-error">
-            {{ updateModalError }}
-          </div>
-
-          <div class="update-modal-block">
-            <div class="update-modal-block-title">{{ $t('components.general.update.releaseNotes') }}</div>
-            <pre class="update-modal-release-notes">{{ updateModalReleaseNotes }}</pre>
-          </div>
-
-          <footer class="update-modal-actions">
-            <button
-              class="action-btn"
-              type="button"
-              :disabled="downloading || checking || installing"
-              @click="checkUpdateManually"
-            >
-              {{ $t('components.general.update.recheck') }}
-            </button>
-            <button
-              class="action-btn"
-              type="button"
-              :disabled="downloading || checking || installing"
-              @click="updateModalOpen = false"
-            >
-              {{ $t('common.cancel') }}
-            </button>
-            <button
-              class="primary-btn"
-              type="button"
-              :disabled="checking || downloading || installing || !canTriggerUpdateFromModal"
-              @click="downloadAndInstall"
-            >
-              {{ updateModalActionText }}
-            </button>
-          </footer>
-        </div>
-      </InlineModal>
+        @updated="updateState = $event"
+      />
 
       <InlineModal
         :open="webdavManageModalOpen"
@@ -4155,65 +3945,6 @@ useGeneralPageData({
 }
 
 .heatmap-display-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  flex-wrap: wrap;
-  padding-top: 12px;
-  border-top: 1px solid var(--mac-divider);
-}
-
-.update-modal {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.update-modal-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.update-modal-label {
-  font-size: 12px;
-  color: var(--mac-text-secondary);
-}
-
-.update-modal-message {
-  margin: 2px 0 0;
-}
-
-.update-modal-block {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.update-modal-block-title {
-  font-size: 0.9rem;
-  font-weight: 600;
-  color: var(--mac-text);
-}
-
-.update-modal-release-notes {
-  margin: 0;
-  max-height: 220px;
-  overflow: auto;
-  border-radius: 12px;
-  border: 1px solid var(--mac-border);
-  background: var(--mac-surface-strong);
-  color: var(--mac-text-secondary);
-  padding: 10px 12px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-  font-size: 12px;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.update-modal-actions {
   display: flex;
   justify-content: flex-end;
   gap: 10px;

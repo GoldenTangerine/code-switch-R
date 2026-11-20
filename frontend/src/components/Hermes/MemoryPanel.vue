@@ -54,126 +54,106 @@
       />
     </div>
 
-    <div class="contrib-page">
-      <section class="contrib-hero">
-        <h1>{{ t('components.hermesMemory.hero.title') }}</h1>
-        <p class="lead">{{ t('components.hermesMemory.hero.lead') }}</p>
-      </section>
+    <div class="contrib-page hermes-page">
+      <PageHero
+        :title="t('components.hermesMemory.hero.title')"
+        :lead="t('components.hermesMemory.hero.lead')"
+      />
 
-      <section class="automation-section">
-        <div class="section-header">
-          <div class="tab-group" role="tablist" :aria-label="t('components.hermesMemory.tabs.ariaLabel')">
-            <button
-              v-for="option in subTabs"
-              :key="option.id"
-              class="tab-pill"
-              :class="{ active: activeKind === option.id }"
-              role="tab"
-              type="button"
-              :aria-selected="activeKind === option.id"
-              @click="switchKind(option.id)"
-            >
-              <span class="tab-pill__label">{{ option.label }}</span>
-            </button>
-          </div>
-        </div>
-
-        <div class="hermes-status-card">
-          <span class="hermes-status-card__dot" :class="{ 'is-disabled': !activeSettings.enabled }" aria-hidden="true"></span>
-          <span>
+      <div class="hermes-toolbar">
+        <SegmentedTabs
+          :options="subTabs"
+          :active="activeKind"
+          :aria-label="t('components.hermesMemory.tabs.ariaLabel')"
+          @select="switchKind($event as HermesMemoryKind)"
+        />
+        <div class="hermes-meta">
+          <span class="hermes-meta__item">
+            <span class="hermes-meta__dot" :class="{ 'is-disabled': !activeSettings.enabled }" aria-hidden="true"></span>
             {{ t('components.hermesMemory.status.entries', { count: entryCount }) }}
-            · {{ t('components.hermesMemory.status.usage', { current: charCount, limit: activeSettings.charLimit }) }}
           </span>
-          <span v-if="overLimit" class="hermes-status-card__warn">
-            {{ t('components.hermesMemory.status.overLimit') }}
+          <span class="hermes-meta__item" :class="{ 'is-warn': overLimit }">
+            {{ t('components.hermesMemory.status.usage', { current: charCount, limit: activeSettings.charLimit }) }}
+            <template v-if="overLimit"> · {{ t('components.hermesMemory.status.overLimit') }}</template>
           </span>
         </div>
+      </div>
 
-        <div class="hermes-panel">
-          <header class="hermes-panel__header">
+      <div
+        class="hermes-usage"
+        role="progressbar"
+        :aria-valuenow="charCount"
+        aria-valuemin="0"
+        :aria-valuemax="activeSettings.charLimit"
+      >
+        <span class="hermes-usage__bar" :class="{ 'is-warn': overLimit }" :style="{ width: `${usagePercent}%` }"></span>
+      </div>
+
+      <div class="hermes-panel">
+        <header class="hermes-panel__header">
+          <div>
+            <h2 class="hermes-panel__title">{{ activeTitle }}</h2>
+            <p class="hermes-panel__hint">{{ t('components.hermesMemory.editor.hint') }}</p>
+          </div>
+          <BaseButton :disabled="loading || saving" type="button" variant="outline" @click="loadAll">
+            {{ t('components.hermesMemory.common.reload') }}
+          </BaseButton>
+        </header>
+
+        <div v-if="errorMessage" class="alert-error">{{ errorMessage }}</div>
+        <div v-if="loading" class="hermes-empty">{{ t('components.hermesMemory.common.loading') }}</div>
+
+        <template v-else>
+          <textarea
+            v-model="memoryContents[activeKind]"
+            class="hermes-memory-editor"
+            :placeholder="t('components.hermesMemory.editor.placeholder')"
+            :disabled="saving"
+            spellcheck="false"
+          ></textarea>
+
+          <section class="hermes-panel__group">
             <div>
-              <h2 class="hermes-panel__title">{{ activeTitle }}</h2>
-              <p class="hermes-panel__hint">{{ t('components.hermesMemory.editor.hint') }}</p>
-            </div>
-            <BaseButton :disabled="loading || saving" type="button" variant="outline" @click="loadAll">
-              {{ t('components.hermesMemory.common.reload') }}
-            </BaseButton>
-          </header>
-
-          <div v-if="errorMessage" class="alert-error">{{ errorMessage }}</div>
-          <div v-if="loading" class="hermes-empty">{{ t('components.hermesMemory.common.loading') }}</div>
-
-          <template v-else>
-            <textarea
-              v-model="memoryContents[activeKind]"
-              class="hermes-memory-editor"
-              :placeholder="t('components.hermesMemory.editor.placeholder')"
-              :disabled="saving"
-              spellcheck="false"
-            ></textarea>
-
-            <section class="hermes-panel__group">
               <h3 class="hermes-panel__group-title">{{ t('components.hermesMemory.settings.title') }}</h3>
               <p class="hermes-panel__group-hint">{{ t('components.hermesMemory.settings.hint') }}</p>
+            </div>
 
-              <div class="hermes-settings-row">
-                <div class="hermes-settings-row__main">
-                  <span class="hermes-settings-row__label">{{ t('components.hermesMemory.settings.memoryEnabled') }}</span>
+            <div class="hermes-settings-grid">
+              <div v-for="item in settingItems" :key="item.kind" class="hermes-setting-card" :class="{ 'is-current': item.kind === activeKind }">
+                <div class="hermes-setting-card__head">
+                  <span class="hermes-setting-card__label">{{ item.enabledLabel }}</span>
                   <label class="mac-switch">
                     <input
                       type="checkbox"
-                      :checked="memoryEnabled"
+                      :checked="item.enabled.value"
                       :disabled="saving"
-                      @change="memoryEnabled = ($event.target as HTMLInputElement).checked"
+                      :aria-label="item.enabledLabel"
+                      @change="item.enabled.value = ($event.target as HTMLInputElement).checked"
                     />
                     <span></span>
                   </label>
                 </div>
-                <label class="hermes-settings-row__budget">
-                  <span>{{ t('components.hermesMemory.settings.memoryCharLimit') }}</span>
+                <label class="hermes-setting-card__budget">
+                  <span>{{ item.limitLabel }}</span>
                   <BaseInput
-                    :model-value="memoryCharLimit"
+                    :model-value="item.limit.value"
                     type="number"
                     :disabled="saving"
-                    @update:model-value="memoryCharLimit = $event"
+                    @update:model-value="item.limit.value = $event"
                   />
                 </label>
               </div>
+            </div>
+          </section>
 
-              <div class="hermes-settings-row">
-                <div class="hermes-settings-row__main">
-                  <span class="hermes-settings-row__label">{{ t('components.hermesMemory.settings.userEnabled') }}</span>
-                  <label class="mac-switch">
-                    <input
-                      type="checkbox"
-                      :checked="userEnabled"
-                      :disabled="saving"
-                      @change="userEnabled = ($event.target as HTMLInputElement).checked"
-                    />
-                    <span></span>
-                  </label>
-                </div>
-                <label class="hermes-settings-row__budget">
-                  <span>{{ t('components.hermesMemory.settings.userCharLimit') }}</span>
-                  <BaseInput
-                    :model-value="userCharLimit"
-                    type="number"
-                    :disabled="saving"
-                    @update:model-value="userCharLimit = $event"
-                  />
-                </label>
-              </div>
-            </section>
-
-            <footer class="hermes-panel__actions">
-              <span class="hermes-panel__note">{{ t('components.hermesMemory.settings.runtimeNote') }}</span>
-              <BaseButton type="button" :disabled="saving" @click="saveAll">
-                {{ saving ? t('components.hermesMemory.common.saving') : t('components.hermesMemory.common.save') }}
-              </BaseButton>
-            </footer>
-          </template>
-        </div>
-      </section>
+          <footer class="hermes-panel__actions">
+            <span class="hermes-panel__note">{{ t('components.hermesMemory.settings.runtimeNote') }}</span>
+            <BaseButton type="button" :disabled="saving" @click="saveAll">
+              {{ saving ? t('components.hermesMemory.common.saving') : t('components.hermesMemory.common.save') }}
+            </BaseButton>
+          </footer>
+        </template>
+      </div>
     </div>
   </div>
 </template>
@@ -185,6 +165,8 @@ import { useI18n } from 'vue-i18n'
 import BaseButton from '../common/BaseButton.vue'
 import BaseInput from '../common/BaseInput.vue'
 import UnsavedConfirmModal from '../common/UnsavedConfirmModal.vue'
+import PageHero from '../common/PageHero.vue'
+import SegmentedTabs from '../common/SegmentedTabs.vue'
 import {
   getHermesMemoryContent,
   getHermesMemoryEntries,
@@ -248,6 +230,24 @@ const subTabs = computed(() => [
   { id: 'user' as HermesMemoryKind, label: t('components.hermesMemory.tabs.user') },
 ])
 
+// 两组记忆设置共用同一卡片结构，ref 直接下发以便模板内双向写回
+const settingItems = computed(() => [
+  {
+    kind: 'memory' as HermesMemoryKind,
+    enabled: memoryEnabled,
+    limit: memoryCharLimit,
+    enabledLabel: t('components.hermesMemory.settings.memoryEnabled'),
+    limitLabel: t('components.hermesMemory.settings.memoryCharLimit'),
+  },
+  {
+    kind: 'user' as HermesMemoryKind,
+    enabled: userEnabled,
+    limit: userCharLimit,
+    enabledLabel: t('components.hermesMemory.settings.userEnabled'),
+    limitLabel: t('components.hermesMemory.settings.userCharLimit'),
+  },
+])
+
 const activeTitle = computed(() => (
   activeKind.value === 'memory'
     ? t('components.hermesMemory.tabs.memoryTitle')
@@ -263,6 +263,12 @@ const activeSettings = computed(() => ({
 
 const charCount = computed(() => Array.from(memoryContents[activeKind.value] ?? '').length)
 const overLimit = computed(() => charCount.value > activeSettings.value.charLimit)
+// 字符预算占用比例，用于状态条下方的进度细线（预算为 0 时视为未设置，不显示进度）
+const usagePercent = computed(() => {
+  const limit = activeSettings.value.charLimit
+  if (!limit) return 0
+  return Math.min(100, Math.round((charCount.value / limit) * 1000) / 10)
+})
 
 const applySettings = (settings: HermesMemorySettings) => {
   memoryEnabled.value = settings.memoryEnabled
@@ -375,88 +381,152 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.hermes-status-card {
+.hermes-page {
+  gap: 16px;
+}
+
+.hermes-toolbar {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
-  border-radius: 16px;
-  border: 1px solid var(--mac-border);
-  background: color-mix(in srgb, var(--mac-surface) 72%, transparent);
-  color: var(--mac-text-secondary);
-  font-size: 13px;
-  line-height: 1.5;
+  justify-content: space-between;
+  gap: 12px 16px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.hermes-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   flex-wrap: wrap;
 }
 
-.hermes-status-card__dot {
-  width: 8px;
-  height: 8px;
+.hermes-meta__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--mac-border);
+  background: color-mix(in srgb, var(--mac-surface) 60%, transparent);
+  color: var(--mac-text-secondary);
+  font-size: 12px;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.hermes-meta__item.is-warn {
+  border-color: rgba(245, 158, 11, 0.4);
+  background: rgba(245, 158, 11, 0.1);
+  color: #d97706;
+  font-weight: 600;
+}
+
+html.dark .hermes-meta__item.is-warn {
+  color: #fbbf24;
+}
+
+.hermes-meta__dot {
+  width: 7px;
+  height: 7px;
   border-radius: 999px;
   background: #10b981;
-  box-shadow: 0 0 10px rgba(16, 185, 129, 0.45);
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.45);
   flex-shrink: 0;
 }
 
-.hermes-status-card__dot.is-disabled {
+.hermes-meta__dot.is-disabled {
   background: #9ca3af;
   box-shadow: none;
 }
 
-.hermes-status-card__warn {
-  color: #f59e0b;
-  font-weight: 600;
+/* 字符预算细进度条：紧贴工具栏下方，直观提示占用情况 */
+.hermes-usage {
+  height: 3px;
+  margin-top: -6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--mac-text) 8%, transparent);
+  overflow: hidden;
+}
+
+.hermes-usage__bar {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--mac-accent);
+  transition: width 0.25s ease, background 0.2s ease;
+}
+
+.hermes-usage__bar.is-warn {
+  background: #f59e0b;
 }
 
 .hermes-panel {
   display: flex;
   flex-direction: column;
-  gap: 20px;
-  padding: 20px;
-  border-radius: 22px;
+  gap: 18px;
+  padding: 20px 22px 22px;
+  border-radius: 18px;
   border: 1px solid var(--mac-border);
   background: color-mix(in srgb, var(--mac-surface) 82%, transparent);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset;
 }
 
 .hermes-panel__header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
 }
 
+.hermes-panel__header :deep(.btn) {
+  min-width: 0;
+  height: 30px;
+  padding: 0 14px;
+  line-height: 1;
+  font-size: 13px;
+}
+
 .hermes-panel__title {
   margin: 0;
-  font-size: 17px;
+  font-size: 16px;
   font-weight: 700;
   color: var(--mac-text);
 }
 
 .hermes-panel__hint {
-  margin: 6px 0 0;
-  font-size: 13px;
+  margin: 4px 0 0;
+  font-size: 12.5px;
   color: var(--mac-text-secondary);
   line-height: 1.5;
 }
 
 .hermes-memory-editor {
+  display: block;
   width: 100%;
   min-height: 320px;
   padding: 14px 16px;
-  border-radius: 16px;
+  border-radius: 12px;
   border: 1px solid var(--mac-border);
-  background: color-mix(in srgb, var(--mac-surface) 92%, transparent);
+  background: color-mix(in srgb, var(--mac-surface-strong) 70%, transparent);
   color: var(--mac-text);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 13px;
   line-height: 1.7;
   resize: vertical;
   outline: none;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.hermes-memory-editor::placeholder {
+  color: color-mix(in srgb, var(--mac-text-secondary) 70%, transparent);
 }
 
 .hermes-memory-editor:focus {
-  border-color: #0a84ff;
+  border-color: var(--mac-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--mac-accent) 22%, transparent);
 }
 
 .hermes-memory-editor:disabled {
@@ -467,7 +537,7 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding-top: 16px;
+  padding-top: 18px;
   border-top: 1px solid var(--mac-divider);
 }
 
@@ -479,34 +549,53 @@ onMounted(() => {
 }
 
 .hermes-panel__group-hint {
-  margin: 0;
+  margin: 4px 0 0;
   font-size: 12px;
   color: var(--mac-text-secondary);
   line-height: 1.5;
 }
 
-.hermes-settings-row {
+.hermes-settings-grid {
   display: grid;
-  grid-template-columns: 1fr 220px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
   gap: 12px;
-  align-items: center;
-  padding: 10px 14px;
+}
+
+.hermes-setting-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px 16px;
   border-radius: 14px;
   border: 1px solid var(--mac-border);
+  background: color-mix(in srgb, var(--mac-surface-strong) 45%, transparent);
+  transition: border-color 0.18s ease;
 }
 
-.hermes-settings-row__main {
+/* 当前所编辑文件对应的设置卡片高亮，帮助对应上方 Tab */
+.hermes-setting-card.is-current {
+  border-color: color-mix(in srgb, var(--mac-accent) 45%, var(--mac-border));
+}
+
+.hermes-setting-card__head {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 12px;
 }
 
-.hermes-settings-row__label {
+.hermes-setting-card__label {
   font-size: 13px;
+  font-weight: 600;
   color: var(--mac-text);
+  line-height: 1.4;
 }
 
-.hermes-settings-row__budget {
+.hermes-setting-card__head .mac-switch {
+  flex-shrink: 0;
+}
+
+.hermes-setting-card__budget {
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -533,7 +622,7 @@ onMounted(() => {
   text-align: center;
   padding: 24px;
   border: 1px dashed var(--mac-border);
-  border-radius: 16px;
+  border-radius: 14px;
   color: var(--mac-text-secondary);
 }
 
@@ -545,11 +634,5 @@ onMounted(() => {
   background: rgba(244, 67, 54, 0.12);
   color: #ef4444;
   font-size: 13px;
-}
-
-@media (max-width: 720px) {
-  .hermes-settings-row {
-    grid-template-columns: 1fr;
-  }
 }
 </style>

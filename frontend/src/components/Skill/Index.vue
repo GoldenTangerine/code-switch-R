@@ -45,32 +45,24 @@
     </div>
 
     <div class="contrib-page skill-page">
-      <header class="skill-hero">
-        <div class="skill-hero-text">
-          <h1>{{ t('components.skill.hero.title') }}</h1>
-          <p class="skill-lead">{{ t('components.skill.hero.lead') }}</p>
-        </div>
-      </header>
-
-
-      <nav class="skill-platform-tabs" :aria-label="t('components.skill.hero.title')">
-        <button
-          v-for="view in views"
-          :key="view"
-          type="button"
-          :class="['skill-platform-tab', { active: activeView === view }]"
-          :aria-current="activeView === view ? 'page' : undefined"
-          @click="switchView(view)"
-        >{{ t(`components.skill.views.${view}`) }}</button>
-      </nav>
+      <PageHero :title="t('components.skill.hero.title')" :lead="t('components.skill.hero.lead')" />
 
       <div class="skill-toolbar">
-        <input
-          v-model="search"
-          type="search"
-          :aria-label="t('components.skill.list.search')"
-          :placeholder="t('components.skill.list.search')"
-        />
+        <nav class="skill-view-nav" :aria-label="t('components.skill.hero.title')">
+          <SegmentedTabs :options="viewOptions" :active="activeView" @select="selectView" />
+        </nav>
+        <label class="skill-search">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="1.6" />
+            <path d="M16 16l4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+          </svg>
+          <input
+            v-model="search"
+            type="search"
+            :aria-label="t('components.skill.list.search')"
+            :placeholder="t('components.skill.list.search')"
+          />
+        </label>
       </div>
       <p v-if="skillsError" class="skill-error" role="alert">{{ skillsError }}</p>
 
@@ -153,7 +145,10 @@
 
           <!-- Project Skills Group and User Skills Group -->
           <section v-for="group in localGroups" :key="group.location" class="skill-group">
-            <h2 class="skill-group-title">{{ t(`components.skill.groups.${group.location}`) }}</h2>
+            <h2 class="skill-group-title">
+              {{ t(`components.skill.groups.${group.location}`) }}
+              <span class="skill-group-count">{{ group.skills.length }}</span>
+            </h2>
             <div class="skill-list installed-skills">
               <SkillCard
                 v-for="skill in group.skills"
@@ -344,6 +339,8 @@ import {
 } from '../../services/skill'
 import BaseModal from '../common/BaseModal.vue'
 import SkillCard from './SkillCard.vue'
+import PageHero from '../common/PageHero.vue'
+import SegmentedTabs from '../common/SegmentedTabs.vue'
 
 const router = useRouter()
 const { t } = useI18n()
@@ -351,6 +348,8 @@ const appLabel = (app: SkillPlatform) => t(`components.skill.platform.${app}`)
 
 const views = ['installed', 'discover'] as const
 const activeView = ref<typeof views[number]>('installed')
+type SkillView = typeof views[number]
+const viewOptions = computed(() => views.map(view => ({ id: view, label: t(`components.skill.views.${view}`) })))
 const search = ref('')
 const library = ref<SkillLibrary>({ managed: [], local: [], warnings: [] })
 const discovered = ref<SkillSummary[]>([])
@@ -448,6 +447,8 @@ const switchView = (view: typeof views[number]) => {
   search.value = ''
   if (view === 'discover' && !discoverLoaded.value && !discoverLoading.value) void loadDiscovery()
 }
+
+const selectView = (id: string) => switchView(id as SkillView)
 
 const refresh = () => {
   skillsError.value = ''
@@ -683,40 +684,86 @@ onMounted(loadLibrary)
   color: var(--mac-text);
 }
 
-/* Platform Tabs */
-.skill-platform-tabs {
+/* Toolbar：视图切换与搜索同行，窄窗口自动换行 */
+.skill-toolbar {
   display: flex;
-  gap: 8px;
-  border-bottom: 1px solid var(--mac-border);
-  padding-bottom: 12px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 16px;
+  flex-wrap: wrap;
+  margin-top: 8px;
 }
 
-.skill-platform-tab, .btn-primary, .btn-secondary {
-  padding: 8px 14px;
+.skill-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: min(100%, 300px);
+  color: var(--mac-text-secondary);
+}
+
+.skill-search svg {
+  position: absolute;
+  left: 11px;
+  width: 15px;
+  height: 15px;
+  pointer-events: none;
+}
+
+.skill-search input {
+  width: 100%;
+  height: 36px;
+  padding: 0 12px 0 34px;
   border: 1px solid var(--mac-border);
-  border-radius: 8px;
-  background: transparent;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--mac-surface) 72%, transparent);
   color: var(--mac-text);
-  font-size: 0.9rem;
-  font-weight: 500;
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.skill-search input::placeholder {
+  color: color-mix(in srgb, var(--mac-text-secondary) 80%, transparent);
+}
+
+.skill-search input:focus {
+  border-color: var(--mac-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--mac-accent) 22%, transparent);
+}
+
+/* 显式声明背景与 appearance，避免 WebKit 以原生白底样式渲染按钮 */
+.btn-primary, .btn-secondary {
+  appearance: none;
+  border: 1px solid var(--mac-border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--mac-surface) 80%, transparent);
+  color: var(--mac-text);
+  font-size: 13px;
+  font-weight: 600;
   cursor: pointer;
+  transition: background 0.18s ease, border-color 0.18s ease;
 }
 
-.skill-platform-tab:hover, .btn-secondary:hover {
-  background: var(--mac-surface);
+.btn-secondary:hover:not(:disabled) {
+  background: var(--mac-surface-hover);
 }
 
-.skill-platform-tab.active, .btn-primary {
+.btn-primary {
   background: var(--mac-accent);
   border-color: var(--mac-accent);
-  color: white;
+  color: #fff;
 }
 
-.skill-toolbar input, .install-project select {
+.btn-primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--mac-accent) 88%, #000);
+}
+
+.install-project select {
   width: min(100%, 320px);
   padding: 8px 12px;
   border: 1px solid var(--mac-border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--mac-surface);
   color: var(--mac-text);
 }
@@ -725,8 +772,8 @@ onMounted(loadLibrary)
   max-width: 100%;
   overflow-x: auto;
   border: 1px solid var(--mac-border);
-  border-radius: 14px;
-  background: var(--mac-surface);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--mac-surface) 82%, transparent);
 }
 
 .skill-matrix table {
@@ -747,7 +794,22 @@ onMounted(loadLibrary)
 .skill-matrix thead {
   background: var(--mac-surface-strong);
   color: var(--mac-text-secondary);
-  font-size: 0.8rem;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.skill-matrix tbody tr {
+  transition: background 0.15s ease;
+}
+
+.skill-matrix tbody tr:hover {
+  background: color-mix(in srgb, var(--mac-text) 3%, transparent);
+}
+
+/* 首列为 sticky 不透明底色，需单独叠加悬停色才能与整行一致 */
+.skill-matrix tbody tr:hover > th:first-child {
+  background: color-mix(in srgb, var(--mac-text) 3%, var(--mac-surface-strong));
 }
 
 .skill-matrix th:first-child {
@@ -761,6 +823,13 @@ onMounted(loadLibrary)
 }
 
 .skill-name, .skill-link {
+  appearance: none;
+  width: auto;
+  height: auto;
+  line-height: 1.4;
+  padding: 0;
+  border: 0;
+  background: none;
   text-align: left;
   color: var(--mac-accent);
   font-weight: 600;
@@ -814,32 +883,42 @@ onMounted(loadLibrary)
 }
 
 .app-switch {
+  appearance: none;
   display: inline-flex;
   align-items: center;
+  justify-content: flex-start;
+  box-sizing: border-box;
   width: 34px;
   height: 20px;
+  line-height: 0;
   padding: 2px;
   border-radius: 999px;
-  background: var(--mac-surface-strong);
-  border: 1px solid var(--mac-text-secondary);
+  background: color-mix(in srgb, var(--mac-text) 14%, transparent);
+  border: 0;
   cursor: pointer;
+  transition: background 0.18s ease;
 }
 
 .app-switch span {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
-  background: var(--mac-text-secondary);
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.3);
+  transition: transform 0.18s ease;
 }
 
 .app-switch[aria-checked="true"] {
-  justify-content: flex-end;
   background: var(--mac-accent);
-  border-color: var(--mac-accent);
 }
 
 .app-switch[aria-checked="true"] span {
-  background: white;
+  transform: translateX(14px);
+}
+
+.app-switch:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--mac-accent) 60%, transparent);
+  outline-offset: 2px;
 }
 
 button:disabled {
@@ -852,9 +931,30 @@ button:disabled {
   margin-top: 24px;
 }
 
+.skill-group:first-child {
+  margin-top: 4px;
+}
+
 .skill-group-title {
-  font-size: 1rem;
-  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--mac-text);
+}
+
+.skill-group-count {
+  min-width: 20px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--mac-text) 8%, transparent);
+  color: var(--mac-text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Skill List */
@@ -873,8 +973,9 @@ button:disabled {
   display: grid;
   gap: 8px;
   align-content: start;
-  padding: 14px 16px;
-  border-radius: 14px;
+  padding: 16px 18px;
+  border-radius: 16px;
+  transition: border-color 0.18s ease;
   border: 1px solid var(--mac-border);
   background: var(--mac-surface-strong); /* fallback for old WebKit */
   background: color-mix(in srgb, var(--mac-surface) 90%, transparent);
@@ -1045,33 +1146,28 @@ button:disabled {
 }
 
 /* Common */
-.skill-hero {
-  margin: 12px 0 12px;
-}
-
-.skill-lead {
-  color: var(--mac-text-secondary);
-  font-size: 0.95rem;
-  line-height: 1.5;
-}
-
-.skill-hero h1 {
-  font-size: clamp(26px, 3vw, 34px);
-  margin-bottom: 8px;
-}
 
 .skill-list-section {
   min-width: 0;
 }
 
 .skill-empty {
-  margin-top: 32px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  margin-top: 24px;
+  padding: 40px 20px;
+  border: 1px dashed var(--mac-border);
+  border-radius: 16px;
   color: var(--mac-text-secondary);
   text-align: center;
+  font-size: 13px;
 }
 
 .skill-repo-list .skill-empty {
   margin-top: 0;
+  padding: 20px;
 }
 
 .skill-error {

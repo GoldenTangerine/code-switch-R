@@ -12,6 +12,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { fetchCurrentVersion } from '../services/version'
+import UpdateCheckModal from './common/UpdateCheckModal.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -39,8 +40,8 @@ const authItem: NavItem = { path: '/auth', icon: 'lock', labelKey: 'sidebar.auth
 const availabilityItem: NavItem = { path: '/availability', icon: 'activity', labelKey: 'sidebar.availability', isNew: true }
 const speedtestItem: NavItem = { path: '/speedtest', icon: 'zap', labelKey: 'sidebar.speedtest', isNew: true }
 const envItem: NavItem = { path: '/env', icon: 'compass', labelKey: 'sidebar.env', isNew: true }
-const logsItem: NavItem = { path: '/logs', icon: 'history', labelKey: 'sidebar.logs' }
-const consoleItem: NavItem = { path: '/console', icon: 'terminal', labelKey: 'sidebar.console' }
+const logsItem: NavItem = { path: '/logs', icon: 'chart', labelKey: 'sidebar.logs' }
+const consoleItem: NavItem = { path: '/console', icon: 'logs', labelKey: 'sidebar.console' }
 const cliUpdatesItem: NavItem = { path: '/cli-updates', icon: 'update', labelKey: 'sidebar.cliUpdates' }
 const settingsItem: NavItem = { path: '/settings', icon: 'settings', labelKey: 'sidebar.settings' }
 
@@ -65,6 +66,7 @@ const VISITED_PAGES_KEY = 'visited-pages'
 const appVersion = ref('...')
 const isCollapsed = ref(false)
 const isOnline = ref(true)
+const updateModalOpen = ref(false)
 const visitedPages = ref<Set<string>>(new Set())
 
 const currentPath = computed(() => route.path)
@@ -320,7 +322,7 @@ function navigate(path: string) {
                 </svg>
 
                 <svg
-                  v-else-if="item.icon === 'history'"
+                  v-else-if="item.icon === 'chart'"
                   class="nav-icon"
                   viewBox="0 0 24 24"
                   fill="none"
@@ -328,13 +330,14 @@ function navigate(path: string) {
                   stroke-linecap="round"
                   stroke-linejoin="round"
                 >
-                  <path d="M4.5 12A7.5 7.5 0 1 0 7 6.4" />
-                  <polyline points="4 4 4 9 9 9" />
-                  <path d="M12 8v4l2.5 1.5" />
+                  <path d="M4 4v15a1 1 0 0 0 1 1h15" />
+                  <path d="M8.5 16v-4" />
+                  <path d="M12.5 16V8" />
+                  <path d="M16.5 16v-6" />
                 </svg>
 
                 <svg
-                  v-else-if="item.icon === 'terminal'"
+                  v-else-if="item.icon === 'logs'"
                   class="nav-icon"
                   viewBox="0 0 24 24"
                   fill="none"
@@ -342,8 +345,10 @@ function navigate(path: string) {
                   stroke-linecap="round"
                   stroke-linejoin="round"
                 >
-                  <polyline points="4 7 9 12 4 17" />
-                  <line x1="12" y1="18" x2="20" y2="18" />
+                  <path d="M14 3.5H7a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8.5Z" />
+                  <path d="M14 3.5v5h5" />
+                  <path d="M8.5 12.5h7" />
+                  <path d="M8.5 16h5" />
                 </svg>
 
                 <svg
@@ -383,10 +388,21 @@ function navigate(path: string) {
 
       <footer v-if="!isCollapsed" class="sidebar-footer">
         <div class="status-card">
-          <div class="status-card__block">
-            <span class="status-card__label">{{ t('sidebar.meta.version') }}</span>
+          <button
+            type="button"
+            class="status-card__block status-card__version"
+            :title="t('sidebar.meta.checkUpdate')"
+            :aria-label="`${t('sidebar.meta.version')} ${appVersionDisplay} · ${t('sidebar.meta.checkUpdate')}`"
+            @click="updateModalOpen = true"
+          >
+            <span class="status-card__label">
+              {{ t('sidebar.meta.version') }}
+              <svg class="status-card__hint" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 19V6m-5 5 5-5 5 5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+            </span>
             <span class="status-card__value">{{ appVersionDisplay }}</span>
-          </div>
+          </button>
 
           <div class="status-pill" :class="{ offline: !isOnline }">
             <span class="status-pill__dot"></span>
@@ -395,6 +411,9 @@ function navigate(path: string) {
         </div>
       </footer>
     </div>
+
+    <!-- 点击版本号与设置页「立即检查」共用同一更新弹窗 -->
+    <UpdateCheckModal :open="updateModalOpen" @close="updateModalOpen = false" />
   </nav>
 </template>
 
@@ -835,6 +854,49 @@ function navigate(path: string) {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+/* 版本号可点击检查更新：显式重置按钮尺寸，覆盖 public/style.css 的 button 固定宽高 */
+.status-card__version {
+  appearance: none;
+  width: auto;
+  height: auto;
+  margin: -6px 0 -6px -7px;
+  padding: 6px 7px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: normal;
+  text-align: left;
+  align-items: flex-start;
+  cursor: pointer;
+  transition: background 0.18s ease;
+}
+
+.status-card__version:hover {
+  background: color-mix(in srgb, var(--sidebar-text) 8%, transparent);
+}
+
+.status-card__version:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--mac-accent) 60%, transparent);
+  outline-offset: 1px;
+}
+
+/* 全局 button svg 规则带 !important 固定 16px，此处需同级覆盖 */
+.status-card__hint {
+  width: 10px !important;
+  height: 10px !important;
+  margin-left: 4px;
+  vertical-align: -1px;
+  opacity: 0;
+  transition: opacity 0.18s ease;
+}
+
+.status-card__version:hover .status-card__hint,
+.status-card__version:focus-visible .status-card__hint {
+  opacity: 1;
 }
 
 .status-card__label {

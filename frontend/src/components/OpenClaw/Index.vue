@@ -54,39 +54,35 @@
       />
     </div>
 
-    <div class="contrib-page">
-      <section class="contrib-hero">
-        <h1>{{ t('components.openclawConfig.hero.title') }}</h1>
-        <p class="lead">{{ t('components.openclawConfig.hero.lead') }}</p>
-      </section>
+    <div class="contrib-page claw-page">
+      <PageHero
+        :title="t('components.openclawConfig.hero.title')"
+        :lead="t('components.openclawConfig.hero.lead')"
+      />
 
-      <section class="automation-section">
-        <div class="section-header">
-          <div class="tab-group" role="tablist" :aria-label="t('components.openclawConfig.tabs.ariaLabel')">
-            <button
-              v-for="option in subTabs"
-              :key="option.id"
-              class="tab-pill"
-              :class="{ active: activeSubTab === option.id }"
-              role="tab"
-              type="button"
-              :aria-selected="activeSubTab === option.id"
-              @click="switchSubTab(option.id)"
-            >
-              <span class="tab-pill__label">{{ option.label }}</span>
-            </button>
-          </div>
+      <div class="claw-toolbar">
+        <SegmentedTabs
+          :options="subTabs"
+          :active="activeSubTab"
+          :aria-label="t('components.openclawConfig.tabs.ariaLabel')"
+          @select="switchSubTab($event as OpenClawSubTab)"
+        />
+        <div v-if="status" class="claw-meta">
+          <span class="claw-meta__item">
+            <span class="claw-meta__dot" :class="{ 'is-idle': !status.currentProviderName }" aria-hidden="true"></span>
+            {{ currentProviderText }}
+          </span>
+          <span class="claw-meta__item">{{ t('components.openclawConfig.status.managedProviders', { count: status.managedProviderCount }) }}</span>
         </div>
+      </div>
 
-        <div v-if="statusText" class="claw-status-card">
-          <span class="claw-status-card__dot" aria-hidden="true"></span>
-          <span>{{ statusText }}</span>
-        </div>
+      <p v-if="status?.settingsPath" class="claw-path" :title="status.settingsPath">
+        {{ t('components.openclawConfig.status.settingsPath', { path: status.settingsPath }) }}
+      </p>
 
-        <EnvPanel v-if="activeSubTab === 'env'" />
-        <ToolsPanel v-else-if="activeSubTab === 'tools'" />
-        <AgentsPanel v-else />
-      </section>
+      <EnvPanel v-if="activeSubTab === 'env'" />
+      <ToolsPanel v-else-if="activeSubTab === 'tools'" />
+      <AgentsPanel v-else />
     </div>
   </div>
 </template>
@@ -99,6 +95,8 @@ import EnvPanel from './EnvPanel.vue'
 import ToolsPanel from './ToolsPanel.vue'
 import AgentsPanel from './AgentsPanel.vue'
 import UnsavedConfirmModal from '../common/UnsavedConfirmModal.vue'
+import PageHero from '../common/PageHero.vue'
+import SegmentedTabs from '../common/SegmentedTabs.vue'
 import { hasOpenClawDirtyPanel, resetOpenClawPanelDirty } from './panelDirty'
 import { getOpenClawStatus, type OpenClawStatus } from '../../services/openClaw'
 
@@ -121,21 +119,12 @@ const subTabs = computed(() => [
   { id: 'agents' as OpenClawSubTab, label: t('components.openclawConfig.tabs.agents') },
 ])
 
-// 原生 settings 落盘状态：展示路径、当前生效供应商与受管条目数
-const statusText = computed(() => {
-  const current = status.value
-  if (!current) return ''
-  const parts: string[] = []
-  if (current.currentProviderName) {
-    parts.push(t('components.openclawConfig.status.currentProvider', { name: current.currentProviderName }))
-  } else {
-    parts.push(t('components.openclawConfig.status.noCurrentProvider'))
-  }
-  parts.push(t('components.openclawConfig.status.managedProviders', { count: current.managedProviderCount }))
-  if (current.settingsPath) {
-    parts.push(t('components.openclawConfig.status.settingsPath', { path: current.settingsPath }))
-  }
-  return parts.join(' · ')
+// 原生 settings 落盘状态：当前生效供应商单独成项，路径另起一行展示，避免长路径挤压
+const currentProviderText = computed(() => {
+  const name = status.value?.currentProviderName
+  return name
+    ? t('components.openclawConfig.status.currentProvider', { name })
+    : t('components.openclawConfig.status.noCurrentProvider')
 })
 
 const loadStatus = async () => {
@@ -197,26 +186,61 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.claw-status-card {
+.claw-page {
+  gap: 16px;
+}
+
+.claw-toolbar {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
-  border-radius: 16px;
-  border: 1px solid var(--mac-border);
-  background: color-mix(in srgb, var(--mac-surface) 72%, transparent);
-  color: var(--mac-text-secondary);
-  font-size: 13px;
-  line-height: 1.5;
+  justify-content: space-between;
+  gap: 12px 16px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.claw-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   flex-wrap: wrap;
 }
 
-.claw-status-card__dot {
-  width: 8px;
-  height: 8px;
+.claw-meta__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--mac-border);
+  background: color-mix(in srgb, var(--mac-surface) 60%, transparent);
+  color: var(--mac-text-secondary);
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.claw-meta__dot {
+  width: 7px;
+  height: 7px;
   border-radius: 999px;
   background: #10b981;
-  box-shadow: 0 0 10px rgba(16, 185, 129, 0.45);
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.45);
   flex-shrink: 0;
+}
+
+.claw-meta__dot.is-idle {
+  background: #9ca3af;
+  box-shadow: none;
+}
+
+.claw-path {
+  margin: -4px 0 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--mac-text-secondary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
 }
 </style>

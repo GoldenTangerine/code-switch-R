@@ -154,6 +154,7 @@ A complete pipeline to keep provider quotas from running over:
 
 ### Usage Statistics & Cost Accounting
 
+- Open the sidebar "Stats" page to view request details and usage by provider and model
 - **Dual data sources**: proxy logs + local CLI session scanning (one scan at startup, then incremental sync every minute; WSL scanning supported on Windows). Even requests that bypass the proxy are counted as long as the CLI keeps local session records; in "All" mode the two sources are deduplicated one-to-one
 - **Three data views**: request details / provider statistics / model statistics, sortable by key metrics
 - **Billing model chain**: global billing-model filter showing the full "billing model → routed model" chain
@@ -207,9 +208,9 @@ A complete pipeline to keep provider quotas from running over:
 - Finds variable conflicts that may break your AI coding tools (e.g. leftover proxy addresses or auth keys)
 - Labels the source of each variable: system environment or a specific config file path
 
-### Console
+### Logs
 
-- Live view of the app's runtime logs for diagnosing proxy behavior
+- Live view of the app's runtime logs in the sidebar "Logs" page for diagnosing proxy behavior
 - Level filtering (error/warning/info/debug) + keyword search
 - Smart parsing of provider errors, extracting diagnostic tags and matching error links
 

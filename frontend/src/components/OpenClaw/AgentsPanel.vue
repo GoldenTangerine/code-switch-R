@@ -158,30 +158,38 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 18px;
-  padding: 20px;
-  border-radius: 22px;
+  padding: 20px 22px 22px;
+  border-radius: 18px;
   border: 1px solid var(--mac-border);
   background: color-mix(in srgb, var(--mac-surface) 82%, transparent);
 }
 
 .claw-panel__header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
 }
 
+.claw-panel__header :deep(.btn) {
+  min-width: 0;
+  height: 30px;
+  padding: 0 14px;
+  line-height: 1;
+  font-size: 13px;
+}
+
 .claw-panel__title {
   margin: 0;
-  font-size: 17px;
+  font-size: 16px;
   font-weight: 700;
   color: var(--mac-text);
 }
 
 .claw-panel__hint {
-  margin: 6px 0 0;
-  font-size: 13px;
+  margin: 4px 0 0;
+  font-size: 12.5px;
   color: var(--mac-text-secondary);
   line-height: 1.5;
 }

@@ -88,8 +88,8 @@
     "availability": "Availability",
     "speedtest": "Speed Test",
     "env": "Env Check",
-    "logs": "Logs",
-    "console": "Console",
+    "logs": "Stats",
+    "console": "Logs",
     "cliUpdates": "App Updates",
     "settings": "Settings",
     "sections": {
@@ -99,6 +99,7 @@
     },
     "meta": {
       "version": "Version",
+      "checkUpdate": "Click to check for updates",
       "online": "ONLINE",
       "offline": "OFFLINE"
     }

@@ -27,8 +27,9 @@
 
       <div class="skill-card-info">
         <div class="skill-card-meta">
-          <p class="skill-card-eyebrow">{{ skill.directory }}</p>
           <h3 class="skill-card-title">{{ skill.name }}</h3>
+          <!-- 目录名与技能名一致时不再重复展示 -->
+          <span v-if="showDirectory" class="skill-card-dir" :title="skill.directory">{{ skill.directory }}</span>
         </div>
         <p class="skill-card-desc">
           {{ skill.description || t('components.skill.list.noDescription') }}
@@ -48,7 +49,7 @@
         <button
           v-if="skill.install_location === 'user' && !skill.read_only"
           type="button"
-          class="btn-secondary"
+          class="skill-action-btn"
           :disabled="busy"
           @click="$emit('import', skill)"
         >{{ t('components.skill.actions.import') }}</button>
@@ -122,7 +123,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { getSkillContent, type SkillSummary } from '../../services/skill'
 
@@ -142,6 +143,8 @@ defineEmits<{
 }>()
 
 const { t } = useI18n()
+
+const showDirectory = computed(() => props.skill.directory.toLowerCase() !== props.skill.name.toLowerCase())
 
 const content = ref('')
 const loadingContent = ref(false)
@@ -173,34 +176,46 @@ watch(() => props.expanded, async (isExpanded) => {
   border: 1px solid var(--mac-border);
   border-radius: 16px;
   overflow: hidden;
+  transition: border-color 0.18s ease;
+}
+
+.skill-card-installed:hover {
+  border-color: color-mix(in srgb, var(--mac-accent) 30%, var(--mac-border));
 }
 
 .skill-card-header {
   display: flex;
-  flex-wrap: wrap;
   align-items: flex-start;
   gap: 16px;
-  padding: 16px 20px;
+  padding: 16px 18px 16px 20px;
 }
 
 .skill-card-toggle {
   flex-shrink: 0;
-  padding-top: 4px;
+  padding-top: 1px;
 }
 
 .toggle-switch {
   position: relative;
-  width: 44px;
-  height: 24px;
-  border-radius: 12px;
+  appearance: none;
+  line-height: 0;
+  width: 40px;
+  height: 22px;
+  padding: 0;
+  border-radius: 999px;
   border: none;
-  background: var(--mac-border);
+  background: color-mix(in srgb, var(--mac-text) 16%, transparent);
   cursor: pointer;
   transition: background 0.2s ease;
 }
 
 .toggle-switch.enabled {
-  background: #22c55e;
+  background: var(--mac-accent);
+}
+
+.toggle-switch:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--mac-accent) 60%, transparent);
+  outline-offset: 2px;
 }
 
 .toggle-switch:disabled {
@@ -212,8 +227,8 @@ watch(() => props.expanded, async (isExpanded) => {
   position: absolute;
   top: 2px;
   left: 2px;
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
   background: white;
   border-radius: 50%;
   transition: transform 0.2s ease;
@@ -221,7 +236,7 @@ watch(() => props.expanded, async (isExpanded) => {
 }
 
 .toggle-switch.enabled .toggle-slider {
-  transform: translateX(20px);
+  transform: translateX(18px);
 }
 
 .skill-card-info {
@@ -230,88 +245,127 @@ watch(() => props.expanded, async (isExpanded) => {
 }
 
 .skill-card-meta {
-  margin-bottom: 8px;
-}
-
-.skill-card-eyebrow {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.15em;
-  color: var(--mac-text-secondary);
-  margin: 0 0 4px;
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-bottom: 6px;
+  min-height: 24px;
 }
 
 .skill-card-title {
-  font-size: 1rem;
-  font-weight: 600;
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 24px;
   margin: 0;
+  color: var(--mac-text);
+  overflow-wrap: anywhere;
+}
+
+.skill-card-dir {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11.5px;
+  color: var(--mac-text-secondary);
 }
 
 .skill-card-desc {
-  font-size: 0.85rem;
+  max-width: 88ch;
+  font-size: 13px;
   color: var(--mac-text-secondary);
-  line-height: 1.4;
-  margin: 0 0 8px;
+  line-height: 1.6;
+  margin: 0 0 10px;
 }
 
 .skill-card-badges {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
+}
+
+.skill-card-badges:empty {
+  display: none;
 }
 
 .skill-badge {
-  font-size: 0.75rem;
-  padding: 2px 8px;
-  border-radius: 4px;
-  background: var(--mac-surface);
+  font-size: 11.5px;
+  line-height: 1.5;
+  padding: 1px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--mac-border);
+  background: color-mix(in srgb, var(--mac-text) 5%, transparent);
   color: var(--mac-text-secondary);
 }
 
 .skill-badge.license {
-  background: rgba(245, 158, 11, 0.15); /* fallback for old WebKit */
-  background: color-mix(in srgb, #f59e0b 15%, transparent);
-  color: #f59e0b;
+  border-color: rgba(245, 158, 11, 0.28);
+  background: rgba(245, 158, 11, 0.12);
+  color: #d97706;
 }
 
 .skill-badge.project {
-  background: rgba(59, 130, 246, 0.15); /* fallback for old WebKit */
-  background: color-mix(in srgb, #3b82f6 15%, transparent);
-  color: #3b82f6;
+  border-color: rgba(59, 130, 246, 0.28);
+  background: rgba(59, 130, 246, 0.12);
+  color: #2563eb;
+}
+
+html.dark .skill-badge.license {
+  color: #fbbf24;
+}
+
+html.dark .skill-badge.project {
+  color: #60a5fa;
 }
 
 .skill-card-actions {
   display: flex;
+  align-items: center;
   gap: 6px;
   flex-shrink: 0;
 }
 
-.skill-card-actions .btn-secondary {
-  padding: 4px 9px;
-  color: var(--mac-text);
-  font-size: 0.85rem;
-  border: 1px solid var(--mac-border);
+/* 主操作按钮：显式背景 + appearance:none，修复 WebKit 原生白底导致文字不可见 */
+.skill-action-btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  width: auto;
+  height: 30px;
+  line-height: 1;
+  padding: 0 12px;
+  border: 1px solid color-mix(in srgb, var(--mac-accent) 40%, transparent);
   border-radius: 8px;
+  background: color-mix(in srgb, var(--mac-accent) 12%, transparent);
+  color: var(--mac-accent);
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
   cursor: pointer;
+  transition: background 0.18s ease, color 0.18s ease;
 }
 
-.skill-card-actions .btn-secondary:hover {
-  background: var(--mac-surface-strong);
+.skill-action-btn:hover:not(:disabled) {
+  background: var(--mac-accent);
+  color: #fff;
 }
 
-.skill-card-actions .btn-secondary:disabled {
+.skill-action-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
 .skill-card-actions .ghost-icon {
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
 }
 
 .skill-card-actions .ghost-icon svg {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   transition: transform 0.2s ease;
 }
 
@@ -321,6 +375,10 @@ watch(() => props.expanded, async (isExpanded) => {
 
 .skill-card-actions .ghost-icon.danger {
   color: #ef4444;
+}
+
+.skill-card-actions .ghost-icon.danger:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.14);
 }
 
 .skill-card-actions .ghost-icon:disabled {
@@ -365,6 +423,17 @@ watch(() => props.expanded, async (isExpanded) => {
 .expand-leave-to {
   max-height: 0;
   opacity: 0;
+}
+
+@media (max-width: 640px) {
+  .skill-card-header {
+    flex-wrap: wrap;
+  }
+
+  .skill-card-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
 }
 
 /* Dark Mode */

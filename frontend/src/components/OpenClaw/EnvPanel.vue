@@ -41,13 +41,15 @@
               :disabled="saving"
             />
             <button
-              class="ghost-icon"
+              class="ghost-icon env-remove"
               type="button"
               :aria-label="t('components.openclawConfig.env.remove')"
               :disabled="saving"
               @click="removeEntry(varsEntries, entry.id)"
             >
-              ✕
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M7 7l10 10M17 7L7 17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+              </svg>
             </button>
           </div>
         </div>
@@ -74,13 +76,15 @@
               :disabled="saving"
             />
             <button
-              class="ghost-icon"
+              class="ghost-icon env-remove"
               type="button"
               :aria-label="t('components.openclawConfig.env.remove')"
               :disabled="saving"
               @click="removeEntry(shellEnvEntries, entry.id)"
             >
-              ✕
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M7 7l10 10M17 7L7 17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+              </svg>
             </button>
           </div>
         </div>
@@ -118,6 +122,8 @@ const { t } = useI18n()
 const loading = ref(false)
 const saving = ref(false)
 const errorMessage = ref('')
+// 行 id 计数器必须先于 createEnvEntry 的首次调用声明，否则触发 TDZ 导致面板 setup 失败
+let envEntryId = 0
 const varsEntries = ref<EnvEntry[]>([createEnvEntry()])
 const shellEnvEntries = ref<EnvEntry[]>([createEnvEntry()])
 
@@ -131,8 +137,6 @@ const isDirty = computed(() => (
 watch(isDirty, (dirty) => {
   openClawPanelDirty.env = dirty
 })
-
-let envEntryId = 0
 
 function createEnvEntry(key = '', value = ''): EnvEntry {
   return {
@@ -222,30 +226,38 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 20px;
-  padding: 20px;
-  border-radius: 22px;
+  padding: 20px 22px 22px;
+  border-radius: 18px;
   border: 1px solid var(--mac-border);
   background: color-mix(in srgb, var(--mac-surface) 82%, transparent);
 }
 
 .claw-panel__header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
 }
 
+.claw-panel__header :deep(.btn) {
+  min-width: 0;
+  height: 30px;
+  padding: 0 14px;
+  line-height: 1;
+  font-size: 13px;
+}
+
 .claw-panel__title {
   margin: 0;
-  font-size: 17px;
+  font-size: 16px;
   font-weight: 700;
   color: var(--mac-text);
 }
 
 .claw-panel__hint {
-  margin: 6px 0 0;
-  font-size: 13px;
+  margin: 4px 0 0;
+  font-size: 12.5px;
   color: var(--mac-text-secondary);
   line-height: 1.5;
 }
@@ -285,8 +297,24 @@ onMounted(() => {
   align-items: center;
 }
 
+.env-remove {
+  width: 32px;
+  height: 32px;
+  color: var(--mac-text-secondary);
+}
+
+.env-remove:hover:not(:disabled) {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.12);
+}
+
 .env-add {
   align-self: flex-start;
+  min-width: 0;
+  height: 30px;
+  padding: 0 14px;
+  line-height: 1;
+  font-size: 13px;
 }
 
 .claw-panel__actions {

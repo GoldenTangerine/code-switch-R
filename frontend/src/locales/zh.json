@@ -80,7 +80,7 @@
     "home": "首页",
     "prompts": "提示词",
     "mcp": "MCP",
-    "skill": "技能",
+    "skill": "Skills",
     "openclawConfig": "OpenClaw",
     "hermesMemory": "Hermes 记忆",
     "auth": "认证",
@@ -88,8 +88,8 @@
     "availability": "可用性",
     "speedtest": "测速",
     "env": "环境",
-    "logs": "日志",
-    "console": "控制台",
+    "logs": "统计",
+    "console": "日志",
     "cliUpdates": "应用更新",
     "settings": "设置",
     "sections": {
@@ -99,6 +99,7 @@
     },
     "meta": {
       "version": "Version",
+      "checkUpdate": "点击检查更新",
       "online": "ONLINE",
       "offline": "OFFLINE"
     }
